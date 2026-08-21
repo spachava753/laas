@@ -1,0 +1,16 @@
+# Ignore everything unless explicitly allowed below.
+*
+
+# Keep traversing directories so nested allowlisted files can be discovered.
+!*/
+
+# Repository metadata and documentation.
+!/.gitignore
+!/AGENTS.md
+!/LICENSE
+!/README.md
+
+# Go source and module metadata.
+!*.go
+!/go.mod
+!/go.sum
