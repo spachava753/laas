@@ -19,7 +19,7 @@ func atLimit(values []int, input <-chan int, left, right, ready bool) {
 	}
 }
 
-func aboveLimit(values []int, input <-chan int, left, right, ready bool) /* want `function aboveLimit has cyclomatic complexity 11 \(limit 10\); add a leading comment explaining its logic` */ {
+func aboveLimit(values []int, input <-chan int, left, right, ready bool) /* want `function aboveLimit has cyclomatic complexity 11 \(limit 10\); add a leading comment starting with "aboveLimit" that explains its logic` */ {
 	if left && right || ready {
 	}
 	for false {

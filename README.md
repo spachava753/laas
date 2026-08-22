@@ -23,9 +23,9 @@ The project will contain:
 `funcdoc` reports a function or method when both of these conditions hold:
 
 - Its cyclomatic complexity is greater than the configured limit, which defaults to 10.
-- Its body does not begin with a substantive comment explaining the implementation's plan.
+- Its body does not begin with a substantive comment whose first word exactly matches the function or method name and explains the implementation's plan.
 
-The score follows [`gocyclo`](https://github.com/fzipp/gocyclo): every function starts at 1, then each `if`, `for`, `range`, non-default `case`, `&&`, and `||` adds 1. A declaration comment describing the API or a local comment later in the body does not replace the leading implementation overview.
+The score follows [`gocyclo`](https://github.com/fzipp/gocyclo): every function starts at 1, then each `if`, `for`, `range`, non-default `case`, `&&`, and `||` adds 1. Following Go's documentation convention, an overview for `reconcile` must begin with `reconcile`. A declaration comment describing the API or a local comment later in the body does not replace the leading implementation overview.
 
 Files ending in `_test.go` are excluded by default.
 

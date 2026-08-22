@@ -12,8 +12,8 @@ import (
 const defaultLimit = 10
 
 // Analyzer reports functions and methods whose cyclomatic complexity exceeds
-// the configured limit and whose body does not begin with a substantive
-// comment.
+// the configured limit unless their body begins with a substantive comment
+// whose first word matches the declaration name.
 var Analyzer = newAnalyzer()
 
 func newAnalyzer() *analysis.Analyzer {
@@ -24,9 +24,10 @@ func newAnalyzer() *analysis.Analyzer {
 		Doc: `reports complex functions without implementation overviews
 
 funcdoc requires a leading comment in the body of each function or method whose
-cyclomatic complexity exceeds the configured limit. The comment should give the
-reader a mental model of the implementation before they read its logic. Test
-files are excluded unless include-tests is enabled.`,
+cyclomatic complexity exceeds the configured limit. The comment must start with
+the function or method name and give the reader a mental model of the
+implementation before they read its logic. Test files are excluded unless
+include-tests is enabled.`,
 		URL: "https://github.com/spachava753/laas#funcdoc",
 	}
 	analyzer.Flags.BoolVar(
@@ -48,6 +49,7 @@ files are excluded unless include-tests is enabled.`,
 }
 
 func run(pass *analysis.Pass, limit int, includeTests bool) (any, error) {
+	// run skips excluded test files, scores each function, then validates any required overview.
 	for _, file := range pass.Files {
 		if !includeTests && strings.HasSuffix(pass.Fset.Position(file.Pos()).Filename, "_test.go") {
 			continue
@@ -60,7 +62,7 @@ func run(pass *analysis.Pass, limit int, includeTests bool) (any, error) {
 			}
 
 			complexity := gocyclo.Complexity(function)
-			if complexity <= limit || hasOverviewComment(file, function.Body) {
+			if complexity <= limit {
 				continue
 			}
 
@@ -68,20 +70,38 @@ func run(pass *analysis.Pass, limit int, includeTests bool) (any, error) {
 			if function.Recv != nil {
 				kind = "method"
 			}
-			pass.ReportRangef(
-				function.Name,
-				"%s %s has cyclomatic complexity %d (limit %d); add a leading comment explaining its logic",
-				kind,
-				function.Name.Name,
-				complexity,
-				limit,
-			)
+
+			comment, firstWord := overviewComment(file, function.Body)
+			if comment == nil {
+				pass.ReportRangef(
+					function.Name,
+					"%s %s has cyclomatic complexity %d (limit %d); add a leading comment starting with %q that explains its logic",
+					kind,
+					function.Name.Name,
+					complexity,
+					limit,
+					function.Name.Name,
+				)
+				continue
+			}
+
+			if firstWord != function.Name.Name {
+				pass.ReportRangef(
+					comment,
+					"%s %s has cyclomatic complexity %d (limit %d); its leading comment should start with %q",
+					kind,
+					function.Name.Name,
+					complexity,
+					limit,
+					function.Name.Name,
+				)
+			}
 		}
 	}
 	return nil, nil
 }
 
-func hasOverviewComment(file *ast.File, body *ast.BlockStmt) bool {
+func overviewComment(file *ast.File, body *ast.BlockStmt) (*ast.CommentGroup, string) {
 	firstStatement := body.Rbrace
 	if len(body.List) > 0 {
 		firstStatement = body.List[0].Pos()
@@ -91,9 +111,10 @@ func hasOverviewComment(file *ast.File, body *ast.BlockStmt) bool {
 		if group.Pos() <= body.Lbrace || group.End() > firstStatement {
 			continue
 		}
-		if strings.TrimSpace(group.Text()) != "" {
-			return true
+		words := strings.Fields(group.Text())
+		if len(words) > 0 {
+			return group, words[0]
 		}
 	}
-	return false
+	return nil, ""
 }
