@@ -27,6 +27,8 @@ The project will contain:
 
 The score follows [`gocyclo`](https://github.com/fzipp/gocyclo): every function starts at 1, then each `if`, `for`, `range`, non-default `case`, `&&`, and `||` adds 1. A declaration comment describing the API or a local comment later in the body does not replace the leading implementation overview.
 
+Files ending in `_test.go` are excluded by default.
+
 Install and run the analyzer across a module:
 
 ```sh
@@ -38,6 +40,12 @@ Set a different limit with the analyzer-specific flag:
 
 ```sh
 laas -funcdoc.limit=15 ./...
+```
+
+Include test files explicitly when they should be checked too:
+
+```sh
+laas -funcdoc.include-tests ./...
 ```
 
 ## License

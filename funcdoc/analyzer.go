@@ -18,15 +18,23 @@ var Analyzer = newAnalyzer()
 
 func newAnalyzer() *analysis.Analyzer {
 	limit := defaultLimit
+	includeTests := false
 	analyzer := &analysis.Analyzer{
 		Name: "funcdoc",
 		Doc: `reports complex functions without implementation overviews
 
 funcdoc requires a leading comment in the body of each function or method whose
 cyclomatic complexity exceeds the configured limit. The comment should give the
-reader a mental model of the implementation before they read its logic.`,
+reader a mental model of the implementation before they read its logic. Test
+files are excluded unless include-tests is enabled.`,
 		URL: "https://github.com/spachava753/laas#funcdoc",
 	}
+	analyzer.Flags.BoolVar(
+		&includeTests,
+		"include-tests",
+		false,
+		"include functions and methods declared in test files",
+	)
 	analyzer.Flags.IntVar(
 		&limit,
 		"limit",
@@ -34,13 +42,17 @@ reader a mental model of the implementation before they read its logic.`,
 		"maximum cyclomatic complexity allowed without an overview comment",
 	)
 	analyzer.Run = func(pass *analysis.Pass) (any, error) {
-		return run(pass, limit)
+		return run(pass, limit, includeTests)
 	}
 	return analyzer
 }
 
-func run(pass *analysis.Pass, limit int) (any, error) {
+func run(pass *analysis.Pass, limit int, includeTests bool) (any, error) {
 	for _, file := range pass.Files {
+		if !includeTests && strings.HasSuffix(pass.Fset.Position(file.Pos()).Filename, "_test.go") {
+			continue
+		}
+
 		for _, declaration := range file.Decls {
 			function, ok := declaration.(*ast.FuncDecl)
 			if !ok || function.Body == nil {
