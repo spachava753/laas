@@ -18,6 +18,28 @@ The project will contain:
 - Helpers that make code-quality constraints easier for agents to apply.
 - Agent skills that capture reusable guidance for writing and reviewing Go.
 
+## funcdoc
+
+`funcdoc` reports a function or method when both of these conditions hold:
+
+- Its cyclomatic complexity is greater than the configured limit, which defaults to 10.
+- Its body does not begin with a substantive comment explaining the implementation's plan.
+
+The score follows [`gocyclo`](https://github.com/fzipp/gocyclo): every function starts at 1, then each `if`, `for`, `range`, non-default `case`, `&&`, and `||` adds 1. A declaration comment describing the API or a local comment later in the body does not replace the leading implementation overview.
+
+Install and run the analyzer across a module:
+
+```sh
+go install github.com/spachava753/laas/cmd/laas@latest
+laas ./...
+```
+
+Set a different limit with the analyzer-specific flag:
+
+```sh
+laas -funcdoc.limit=15 ./...
+```
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
