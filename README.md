@@ -60,6 +60,18 @@ The analyzer runs as part of the standard command:
 laas ./...
 ```
 
+## inlinehelper
+
+`inlinehelper` reports an unexported function or method when it has at most four statements and exactly one reference, which is also a direct call. The diagnostic recommends considering whether the helper should be folded into its only call site; it does not provide an autofix.
+
+Statement count is based on the Go syntax tree rather than physical lines. Exported declarations are excluded because calls from other packages are not visible. Unused functions, recursive functions, function values, and helpers with multiple references are also excluded.
+
+Change the size threshold with:
+
+```sh
+laas -inlinehelper.max-statements=3 ./...
+```
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
