@@ -1,9 +1,10 @@
-// Package teststructure requires Go tests to use subtests or table-driven structure.
+// Package teststructure finds scenario tests that should be consolidated.
 package teststructure
 
 import (
 	"go/ast"
 	"go/types"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -11,21 +12,27 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-// Analyzer reports tests that use neither t.Run subtests nor a local table of
-// test cases.
+// Analyzer reports groups of tests whose names share an identifier-word
+// prefix, suggesting that they represent scenarios for one subject.
 var Analyzer = &analysis.Analyzer{
 	Name: "teststructure",
-	Doc: `requires subtests or table-driven tests
+	Doc: `finds scenario tests that should be consolidated
 
-teststructure reports Test functions that neither call Run on their own
-*testing.T parameter nor range over a locally initialized slice, array, or map.
-Only declarations in test files with the standard Go test signature are
-checked.`,
+teststructure groups standard Test functions by shared name prefixes at Go
+identifier-word boundaries. Multiple tests in a group should become one outer
+test using either a table of cases or t.Run subtests. Test bodies are not
+inspected.`,
 	URL: "https://github.com/spachava753/laas#teststructure",
 	Run: run,
 }
 
+type testDeclaration struct {
+	function *ast.FuncDecl
+	words    []string
+}
+
 func run(pass *analysis.Pass) (any, error) {
+	var tests []testDeclaration
 	for _, file := range pass.Files {
 		if !strings.HasSuffix(pass.Fset.Position(file.Pos()).Filename, "_test.go") {
 			continue
@@ -36,16 +43,30 @@ func run(pass *analysis.Pass) (any, error) {
 			if !ok || !isTestFunction(pass, function) {
 				continue
 			}
-			if hasSubtest(pass, function) || hasTable(pass, function) {
-				continue
-			}
-
-			pass.ReportRangef(
-				function.Name,
-				"test %s should use t.Run subtests or range over a local table of test cases",
-				function.Name.Name,
-			)
+			tests = append(tests, testDeclaration{
+				function: function,
+				words:    identifierWords(function.Name.Name),
+			})
 		}
+	}
+
+	groups := prefixGroups(tests)
+	prefixes := make([]string, 0, len(groups))
+	for prefix, group := range groups {
+		if len(group) >= 2 {
+			prefixes = append(prefixes, prefix)
+		}
+	}
+	sort.Strings(prefixes)
+
+	for _, prefix := range prefixes {
+		group := groups[prefix]
+		pass.ReportRangef(
+			group[0].function.Name,
+			"tests %s share prefix %s; consolidate scenarios into one test using a table or t.Run subtests",
+			testNames(group),
+			prefix,
+		)
 	}
 	return nil, nil
 }
@@ -91,128 +112,90 @@ func isTestName(name string) bool {
 	return !unicode.IsLower(firstRune)
 }
 
-func hasSubtest(pass *analysis.Pass, function *ast.FuncDecl) bool {
-	parameterField := function.Type.Params.List[0]
-	if len(parameterField.Names) != 1 {
-		return false
+func identifierWords(name string) []string {
+	var words []string
+	var word []rune
+	runes := []rune(strings.TrimPrefix(name, "Test"))
+	for index, current := range runes {
+		if current == '_' {
+			if len(word) > 0 {
+				words = append(words, string(word))
+				word = nil
+			}
+			continue
+		}
+		if startsNewWord(runes, index) {
+			words = append(words, string(word))
+			word = nil
+		}
+		word = append(word, current)
 	}
-	parameter := pass.TypesInfo.Defs[parameterField.Names[0]]
-	found := false
-
-	ast.Inspect(function.Body, func(node ast.Node) bool {
-		if found {
-			return false
-		}
-		if _, ok := node.(*ast.FuncLit); ok {
-			return false
-		}
-		call, ok := node.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		selector, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || selector.Sel.Name != "Run" {
-			return true
-		}
-		identifier, ok := ast.Unparen(selector.X).(*ast.Ident)
-		if !ok {
-			return true
-		}
-		if pass.TypesInfo.Uses[identifier] == parameter {
-			found = true
-		}
-		return !found
-	})
-	return found
+	if len(word) > 0 {
+		words = append(words, string(word))
+	}
+	return words
 }
 
-func hasTable(pass *analysis.Pass, function *ast.FuncDecl) bool {
-	// hasTable records local collection literals, then finds a range over one.
-	tables := make(map[types.Object]struct{})
-	ast.Inspect(function.Body, func(node ast.Node) bool {
-		if _, ok := node.(*ast.FuncLit); ok {
-			return false
-		}
-
-		switch node := node.(type) {
-		case *ast.AssignStmt:
-			if len(node.Lhs) != len(node.Rhs) {
-				return true
-			}
-			for index, value := range node.Rhs {
-				if !isTableLiteral(pass, value) {
-					continue
-				}
-				identifier, ok := ast.Unparen(node.Lhs[index]).(*ast.Ident)
-				if ok {
-					recordLocalVariable(pass, tables, identifier)
-				}
-			}
-		case *ast.ValueSpec:
-			if len(node.Names) != len(node.Values) {
-				return true
-			}
-			for index, value := range node.Values {
-				if isTableLiteral(pass, value) {
-					recordLocalVariable(pass, tables, node.Names[index])
-				}
-			}
-		}
+func startsNewWord(runes []rune, index int) bool {
+	if index == 0 {
+		return false
+	}
+	current := runes[index]
+	previous := runes[index-1]
+	if unicode.IsDigit(current) != unicode.IsDigit(previous) {
 		return true
-	})
-
-	found := false
-	ast.Inspect(function.Body, func(node ast.Node) bool {
-		if found {
-			return false
-		}
-		if _, ok := node.(*ast.FuncLit); ok {
-			return false
-		}
-		rangeStatement, ok := node.(*ast.RangeStmt)
-		if !ok {
-			return true
-		}
-		if isTableLiteral(pass, rangeStatement.X) {
-			found = true
-			return false
-		}
-		identifier, ok := ast.Unparen(rangeStatement.X).(*ast.Ident)
-		if !ok {
-			return true
-		}
-		_, found = tables[pass.TypesInfo.Uses[identifier]]
-		return !found
-	})
-	return found
-}
-
-func recordLocalVariable(pass *analysis.Pass, tables map[types.Object]struct{}, identifier *ast.Ident) {
-	object := pass.TypesInfo.Defs[identifier]
-	if object == nil {
-		object = pass.TypesInfo.Uses[identifier]
 	}
-	variable, ok := object.(*types.Var)
-	if !ok || variable.Parent() == pass.Pkg.Scope() {
-		return
-	}
-	tables[variable] = struct{}{}
-}
-
-func isTableLiteral(pass *analysis.Pass, expression ast.Expr) bool {
-	literal, ok := ast.Unparen(expression).(*ast.CompositeLit)
-	if !ok {
-		return false
-	}
-	typeOfLiteral := pass.TypesInfo.TypeOf(literal)
-	if typeOfLiteral == nil {
-		return false
-	}
-
-	switch typeOfLiteral.Underlying().(type) {
-	case *types.Array, *types.Slice, *types.Map:
+	if unicode.IsUpper(current) && (unicode.IsLower(previous) || unicode.IsDigit(previous)) {
 		return true
-	default:
-		return false
 	}
+	return unicode.IsUpper(current) &&
+		unicode.IsUpper(previous) &&
+		index+1 < len(runes) &&
+		unicode.IsLower(runes[index+1])
+}
+
+func prefixGroups(tests []testDeclaration) map[string][]testDeclaration {
+	bestPrefixLengths := make([]int, len(tests))
+	for index := range tests {
+		for otherIndex := range tests {
+			if index == otherIndex {
+				continue
+			}
+			length := commonPrefixLength(tests[index].words, tests[otherIndex].words)
+			if length > bestPrefixLengths[index] {
+				bestPrefixLengths[index] = length
+			}
+		}
+	}
+
+	groups := make(map[string][]testDeclaration)
+	for index, length := range bestPrefixLengths {
+		if length == 0 {
+			continue
+		}
+		prefix := "Test" + strings.Join(tests[index].words[:length], "")
+		groups[prefix] = append(groups[prefix], tests[index])
+	}
+	return groups
+}
+
+func commonPrefixLength(left, right []string) int {
+	length := min(len(left), len(right))
+	for index := range length {
+		if left[index] != right[index] {
+			return index
+		}
+	}
+	return length
+}
+
+func testNames(tests []testDeclaration) string {
+	names := make([]string, len(tests))
+	for index, test := range tests {
+		names[index] = test.function.Name.Name
+	}
+	if len(names) == 2 {
+		return names[0] + " and " + names[1]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + ", and " + names[len(names)-1]
 }

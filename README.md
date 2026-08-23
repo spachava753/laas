@@ -50,12 +50,9 @@ laas -funcdoc.include-tests ./...
 
 ## teststructure
 
-`teststructure` reports standard `TestXxx(*testing.T)` functions in `_test.go` unless they use one of these forms:
+`teststructure` reports groups of standard `TestXxx(*testing.T)` functions whose names share a prefix at Go identifier-word boundaries. For example, `TestParseValidInput` and `TestParseInvalidInput` share `TestParse` and should be consolidated into one `TestParse` using either a table or `t.Run` subtests.
 
-- Nested subtests invoked through `Run` on the test function's own `*testing.T` parameter.
-- A range loop over a locally initialized slice, array, or map of test cases.
-
-This encourages related scenarios to live under one outer test, such as `TestParse` with `t.Run("valid input", ...)` and `t.Run("invalid input", ...)`, instead of separate functions such as `TestParseValidInput` and `TestParseInvalidInput`. Benchmarks, fuzz targets, examples, test helpers, and `TestMain` are not checked.
+The analyzer does not inspect test bodies or attempt to recognize tables and subtests. Unique flat tests are allowed; only same-prefix groups produce a diagnostic. CamelCase, initialisms, digits, and underscores are recognized when comparing names. Benchmarks, fuzz targets, examples, test helpers, and `TestMain` are not checked.
 
 The analyzer runs as part of the standard command:
 

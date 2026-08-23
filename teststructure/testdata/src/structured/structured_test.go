@@ -6,10 +6,6 @@ func TestNested(t *stdtesting.T) {
 	t.Run("scenario", func(t *stdtesting.T) {})
 }
 
-func TestRenamedParameter(test *stdtesting.T) {
-	test.Run("scenario", func(t *stdtesting.T) {})
-}
-
 func TestTable(t *stdtesting.T) {
 	cases := []struct {
 		name string
@@ -21,41 +17,41 @@ func TestTable(t *stdtesting.T) {
 	}
 }
 
-func TestDeclaredTable(t *stdtesting.T) {
-	var cases = map[string]int{
-		"first":  1,
-		"second": 2,
-	}
+func TestFlat(t *stdtesting.T) {
+	Subject()
+}
+
+func TestExampleSuccess(t *stdtesting.T) /* want `tests TestExampleSuccess and TestExampleFailure share prefix TestExample; consolidate scenarios into one test using a table or t\.Run subtests` */ {
+	t.Run("success", func(t *stdtesting.T) {
+		Subject()
+	})
+}
+
+func TestExampleFailure(t *stdtesting.T) {
+	cases := []int{1, 2}
 	for range cases {
+		Subject()
 	}
 }
 
-func TestDirectTable(t *stdtesting.T) {
-	for range [...]int{1, 2} {
-	}
-}
-
-func TestFlat(t *stdtesting.T) /* want `test TestFlat should use t\.Run subtests or range over a local table of test cases` */ {
+func TestParser_valid(t *stdtesting.T) /* want `tests TestParser_valid and TestParser_invalid share prefix TestParser; consolidate scenarios into one test using a table or t\.Run subtests` */ {
 	Subject()
 }
 
-func TestExampleSuccess(t *stdtesting.T) /* want `test TestExampleSuccess should use t\.Run subtests or range over a local table of test cases` */ {
+func TestParser_invalid(t *stdtesting.T) {
 	Subject()
 }
 
-func TestExampleFailure(t *stdtesting.T) /* want `test TestExampleFailure should use t\.Run subtests or range over a local table of test cases` */ {
+func TestAlphaFirst(t *stdtesting.T) /* want `tests TestAlphaFirst, TestAlphaSecond, and TestAlphaThird share prefix TestAlpha; consolidate scenarios into one test using a table or t\.Run subtests` */ {
 	Subject()
 }
 
-type runner struct{}
-
-func (runner) Run(name string, test func()) {
-	test()
+func TestAlphaSecond(t *stdtesting.T) {
+	Subject()
 }
 
-func TestUnrelatedRun(t *stdtesting.T) /* want `test TestUnrelatedRun should use t\.Run subtests or range over a local table of test cases` */ {
-	var other runner
-	other.Run("scenario", func() {})
+func TestAlphaThird(t *stdtesting.T) {
+	Subject()
 }
 
 func Testhelper(t *stdtesting.T) {
