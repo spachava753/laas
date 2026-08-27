@@ -18,6 +18,20 @@ The project will contain:
 - Helpers that make code-quality constraints easier for agents to apply.
 - Agent skills that capture reusable guidance for writing and reviewing Go.
 
+## Skills
+
+### setup-laas-pre-commit
+
+[`setup-laas-pre-commit`](skills/setup-laas-pre-commit/SKILL.md) teaches an agent to pin `laas` as a Go tool and integrate `go tool laas ./...` into a repository's existing pre-commit workflow. When no hook system exists, it creates a tracked `.githooks/pre-commit` hook without silently replacing local hooks.
+
+Install the skill with a GitHub CLI version that supports Agent Skills:
+
+```sh
+gh skill install spachava753/laas setup-laas-pre-commit --scope user
+```
+
+Pass `--agent` when installing it for a specific agent.
+
 ## funcdoc
 
 `funcdoc` reports a function or method when both of these conditions hold:
