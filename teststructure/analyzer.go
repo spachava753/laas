@@ -1,4 +1,4 @@
-// Package teststructure finds scenario tests that should be consolidated.
+// Package teststructure enforces focused, locally readable Go test structure.
 package teststructure
 
 import (
@@ -12,16 +12,17 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-// Analyzer reports groups of tests whose names share an identifier-word
-// prefix, suggesting that they represent scenarios for one subject.
+// Analyzer reports groups of tests whose names share an identifier-word prefix
+// and testing.T.Run calls whose callback is not an inline function literal.
 var Analyzer = &analysis.Analyzer{
 	Name: "teststructure",
-	Doc: `finds scenario tests that should be consolidated
+	Doc: `enforces focused, locally readable Go tests
 
 teststructure groups standard Test functions by shared name prefixes at Go
 identifier-word boundaries. Multiple tests in a group should become one outer
-test using either a table of cases or t.Run subtests. Test bodies are not
-inspected.`,
+test using either a table of cases or t.Run subtests. Calls to testing.T.Run
+must define their callback as an inline function literal so each subtest's logic
+remains next to its name.`,
 	URL: "https://github.com/spachava753/laas#teststructure",
 	Run: run,
 }
@@ -31,12 +32,14 @@ type testDeclaration struct {
 	words    []string
 }
 
+// run checks subtest callbacks and groups test declarations by name prefix.
 func run(pass *analysis.Pass) (any, error) {
 	var tests []testDeclaration
 	for _, file := range pass.Files {
 		if !strings.HasSuffix(pass.Fset.Position(file.Pos()).Filename, "_test.go") {
 			continue
 		}
+		reportDelegatedSubtests(pass, file)
 
 		for _, declaration := range file.Decls {
 			function, ok := declaration.(*ast.FuncDecl)
@@ -71,6 +74,46 @@ func run(pass *analysis.Pass) (any, error) {
 	return nil, nil
 }
 
+// reportDelegatedSubtests keeps each subtest's implementation next to its name.
+func reportDelegatedSubtests(pass *analysis.Pass, file *ast.File) {
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || len(call.Args) == 0 {
+			return true
+		}
+		selector, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+		if !ok || !isTestingTRun(pass, selector) {
+			return true
+		}
+
+		callback := call.Args[len(call.Args)-1]
+		if _, ok := ast.Unparen(callback).(*ast.FuncLit); ok {
+			return true
+		}
+		pass.ReportRangef(
+			callback,
+			"testing.T.Run callback must be an inline function literal; move the subtest body into the Run call",
+		)
+		return true
+	})
+}
+
+func isTestingTRun(pass *analysis.Pass, selector *ast.SelectorExpr) bool {
+	selection := pass.TypesInfo.Selections[selector]
+	if selection == nil {
+		return false
+	}
+	method, ok := selection.Obj().(*types.Func)
+	if !ok || method.Name() != "Run" {
+		return false
+	}
+	signature, ok := method.Type().(*types.Signature)
+	if !ok || signature.Recv() == nil {
+		return false
+	}
+	return isTestingT(signature.Recv().Type())
+}
+
 // isTestFunction matches Go's naming rule, then verifies the testing.T
 // signature.
 func isTestFunction(pass *analysis.Pass, function *ast.FuncDecl) bool {
@@ -87,8 +130,11 @@ func isTestFunction(pass *analysis.Pass, function *ast.FuncDecl) bool {
 		return false
 	}
 
-	parameterType := types.Unalias(signature.Params().At(0).Type())
-	pointer, ok := parameterType.(*types.Pointer)
+	return isTestingT(signature.Params().At(0).Type())
+}
+
+func isTestingT(value types.Type) bool {
+	pointer, ok := types.Unalias(value).(*types.Pointer)
 	if !ok {
 		return false
 	}
@@ -96,7 +142,6 @@ func isTestFunction(pass *analysis.Pass, function *ast.FuncDecl) bool {
 	if !ok {
 		return false
 	}
-
 	packageObject := named.Obj().Pkg()
 	return packageObject != nil && packageObject.Path() == "testing" && named.Obj().Name() == "T"
 }

@@ -6,6 +6,42 @@ func TestNested(t *stdtesting.T) {
 	t.Run("scenario", func(t *stdtesting.T) {})
 }
 
+func delegatedSubtest(t *stdtesting.T) {
+	Subject()
+}
+
+type callbackSuite struct{}
+
+func (callbackSuite) delegated(t *stdtesting.T) {
+	Subject()
+}
+
+type unrelatedRunner struct{}
+
+func (unrelatedRunner) Run(name string, callback func(*stdtesting.T)) {
+	callback(nil)
+}
+
+func TestCallbacks(t *stdtesting.T) {
+	t.Run("inline", func(t *stdtesting.T) {
+		t.Run("nested", func(t *stdtesting.T) {
+			Subject()
+		})
+	})
+	t.Run("named", delegatedSubtest) // want `testing\.T\.Run callback must be an inline function literal; move the subtest body into the Run call`
+
+	callback := func(t *stdtesting.T) {
+		Subject()
+	}
+	t.Run("variable", callback) // want `testing\.T\.Run callback must be an inline function literal; move the subtest body into the Run call`
+
+	var callbacks callbackSuite
+	t.Run("method", callbacks.delegated) // want `testing\.T\.Run callback must be an inline function literal; move the subtest body into the Run call`
+
+	var unrelated unrelatedRunner
+	unrelated.Run("unrelated", delegatedSubtest)
+}
+
 func TestTable(t *stdtesting.T) {
 	cases := []struct {
 		name string
@@ -51,10 +87,6 @@ func TestAlphaSecond(t *stdtesting.T) {
 }
 
 func TestAlphaThird(t *stdtesting.T) {
-	Subject()
-}
-
-func Testhelper(t *stdtesting.T) {
 	Subject()
 }
 

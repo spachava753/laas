@@ -8,8 +8,28 @@ import (
 )
 
 func TestAnalyzer(t *testing.T) {
-	t.Run("reports shared test prefixes", func(t *testing.T) {
+	t.Run("reports structural violations", func(t *testing.T) {
 		analysistest.Run(t, analysistest.TestData(), Analyzer, "structured")
+	})
+
+	t.Run("follows Go test naming rules", func(t *testing.T) {
+		tests := []struct {
+			name string
+			want bool
+		}{
+			{name: "Test", want: true},
+			{name: "TestParser", want: true},
+			{name: "Test_parser", want: true},
+			{name: "Testhelper", want: false},
+			{name: "testHelper", want: false},
+		}
+		for _, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				if got := isTestName(test.name); got != test.want {
+					t.Fatalf("isTestName(%q) = %t, want %t", test.name, got, test.want)
+				}
+			})
+		}
 	})
 }
 
