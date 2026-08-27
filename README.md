@@ -72,6 +72,16 @@ Change the size threshold with:
 laas -inlinehelper.max-statements=3 ./...
 ```
 
+## Package filtering
+
+Skip packages for every analyzer with `-exclude-packages`. The value is a Go regular expression matched against the package import path:
+
+```sh
+laas -exclude-packages='(^|/)(generated|mocks)($|/)' ./...
+```
+
+Regular expressions use substring matching unless anchored. An invalid expression causes argument parsing to fail before analysis starts.
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
