@@ -1,6 +1,6 @@
 package customlimit
 
-func undocumented(value int) /* want `function undocumented has cyclomatic complexity 3 \(limit 2\); add a leading comment starting with "undocumented" that explains its logic` */ {
+func undocumented(value int) /* want `function undocumented has cyclomatic complexity 3 \(limit 2\); add a doc comment immediately above it starting with "undocumented" that explains its logic` */ {
 	if value > 0 {
 	}
 	if value > 1 {
@@ -9,47 +9,56 @@ func undocumented(value int) /* want `function undocumented has cyclomatic compl
 
 type worker struct{}
 
-func (worker) run(value int) /* want `method run has cyclomatic complexity 3 \(limit 2\); add a leading comment starting with "run" that explains its logic` */ {
+func (worker) run(value int) /* want `method run has cyclomatic complexity 3 \(limit 2\); add a doc comment immediately above it starting with "run" that explains its logic` */ {
 	if value > 0 {
 	}
 	if value > 1 {
 	}
 }
 
+// documented rejects negative values, then handles values that need special processing.
 func documented(value int) {
-	// documented rejects negative values, then handles values that need special processing.
 	if value > 0 {
 	}
 	if value > 1 {
 	}
 }
 
-// apiDocumented is documented for callers but lacks an implementation overview.
-func apiDocumented(value int) /* want `function apiDocumented has cyclomatic complexity 3 \(limit 2\); add a leading comment starting with "apiDocumented" that explains its logic` */ {
+// apiDocumented checks the first threshold before handling the second.
+func apiDocumented(value int) {
 	if value > 0 {
 	}
 	if value > 1 {
 	}
 }
 
-func lateComment(value int) /* want `function lateComment has cyclomatic complexity 3 \(limit 2\); add a leading comment starting with "lateComment" that explains its logic` */ {
+func bodyComment(value int) /* want `function bodyComment has cyclomatic complexity 3 \(limit 2\); add a doc comment immediately above it starting with "bodyComment" that explains its logic` */ {
+	// bodyComment handles two special cases.
 	if value > 0 {
 	}
-	// Handle the remaining special case.
 	if value > 1 {
 	}
 }
 
+// Explain the two special cases. // want `function misnamedComment has cyclomatic complexity 3 \(limit 2\); its doc comment should start with "misnamedComment"`
 func misnamedComment(value int) {
-	// Explain the two special cases. // want `function misnamedComment has cyclomatic complexity 3 \(limit 2\); its leading comment should start with "misnamedComment"`
 	if value > 0 {
 	}
 	if value > 1 {
 	}
 }
 
+// Run the two special cases. // want `method commentedRun has cyclomatic complexity 3 \(limit 2\); its doc comment should start with "commentedRun"`
 func (worker) commentedRun(value int) {
-	// Run the two special cases. // want `method commentedRun has cyclomatic complexity 3 \(limit 2\); its leading comment should start with "commentedRun"`
+	if value > 0 {
+	}
+	if value > 1 {
+	}
+}
+
+// detachedComment handles two special cases.
+
+func detachedComment(value int) /* want `function detachedComment has cyclomatic complexity 3 \(limit 2\); add a doc comment immediately above it starting with "detachedComment" that explains its logic` */ {
 	if value > 0 {
 	}
 	if value > 1 {

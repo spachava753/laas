@@ -46,9 +46,9 @@ useful abstraction.`,
 	return analyzer
 }
 
+// run collects small declarations, counts their references and calls, then
+// reports single-use helpers.
 func run(pass *analysis.Pass, maxStatements int) (any, error) {
-	// run collects small declarations, counts their references and calls, then
-	// reports single-use helpers.
 	candidatesByObject := make(map[types.Object]*candidate)
 	var candidates []*candidate
 	for _, file := range pass.Files {

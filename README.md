@@ -37,9 +37,9 @@ Pass `--agent` when installing it for a specific agent.
 `funcdoc` reports a function or method when both of these conditions hold:
 
 - Its cyclomatic complexity is greater than the configured limit, which defaults to 10.
-- Its body does not begin with a substantive comment whose first word exactly matches the function or method name and explains the implementation's plan.
+- It does not have a doc comment immediately above its declaration whose first word exactly matches the function or method name and explains the implementation's plan.
 
-The score follows [`gocyclo`](https://github.com/fzipp/gocyclo): every function starts at 1, then each `if`, `for`, `range`, non-default `case`, `&&`, and `||` adds 1. Following Go's documentation convention, an overview for `reconcile` must begin with `reconcile`. A declaration comment describing the API or a local comment later in the body does not replace the leading implementation overview.
+The score follows [`gocyclo`](https://github.com/fzipp/gocyclo): every function starts at 1, then each `if`, `for`, `range`, non-default `case`, `&&`, and `||` adds 1. Following Go's documentation convention, a comment for `reconcile` must begin with `reconcile`. `funcdoc` reads the declaration's `Doc` field, the same association used by Go's parser and documentation tooling. A detached comment or a comment inside the function body does not satisfy the rule.
 
 Files ending in `_test.go` are excluded by default.
 

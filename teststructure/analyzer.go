@@ -71,8 +71,9 @@ func run(pass *analysis.Pass) (any, error) {
 	return nil, nil
 }
 
+// isTestFunction matches Go's naming rule, then verifies the testing.T
+// signature.
 func isTestFunction(pass *analysis.Pass, function *ast.FuncDecl) bool {
-	// isTestFunction matches Go's naming rule, then verifies the testing.T signature.
 	if function.Recv != nil || function.Body == nil || !isTestName(function.Name.Name) {
 		return false
 	}
