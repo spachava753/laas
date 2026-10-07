@@ -102,6 +102,19 @@ repository race tests, `go vet`, and `laas` pass. A newly generated standalone
 verifier module also builds successfully. No commits were pushed and no jobs or
 results were uploaded.
 
+## GPT 6.1 Sol follow-up
+
+At the user's request, repeat the no-skill versus frozen-v1 comparison with
+`openai/gpt-6.1-sol` at `high` reasoning. Change only the agent model and effort
+relative to the Luna experiment; the Decisions judge remains `gpt-6-luna`.
+Use the same Codex version, two attempts per task, timeouts, and source snapshots.
+Run all 12 tasks in each condition and report development and original holdout
+separately. The skill is not revised or selected again. The original holdout has
+already been opened, so this is a fixed-skill replication, not a new unseen test.
+
+The two jobs may run concurrently, each with concurrency two. Settings and job
+names are in `experiment-sol.json`. Results are pending.
+
 ## Reproduce
 
 From the repository root, with the authorized key in the ignored `.env`:
