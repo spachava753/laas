@@ -32,6 +32,10 @@ gh skill install spachava753/laas setup-laas-pre-commit --scope user
 
 Pass `--agent` when installing it for a specific agent.
 
+## Documentation evals
+
+[`evals/golang-docs`](evals/golang-docs/README.md) builds a 12-task Harbor pilot from pinned `jsonschema-go` and MCP Go SDK sources. Agents restore removed function, method, type, and struct-field comments. An isolated verifier checks that only the requested docs changed, then scores semantic coverage using OpenAI's Decisions API. The generator, verifier, runner, and tests use Go's standard library; Harbor remains an external CLI dependency. These evals come before the planned `golang-docs` skill.
+
 ## funcdoc
 
 `funcdoc` reports a function or method when both of these conditions hold:

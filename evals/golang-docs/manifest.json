@@ -1,0 +1,33 @@
+{
+  "version": "0.1.0",
+  "sources": {
+    "jsonschema": {
+      "repo": "google/jsonschema-go",
+      "commit": "794ce5e429b22f05aee47a62f9151c1e7b54fd22",
+      "archive_sha256": "9e7b093d04be69f180e1041dbc8b22d09a9a6a480d2298ec26d9f174cdf7107b",
+      "split": "dev",
+      "license": "MIT"
+    },
+    "mcp": {
+      "repo": "modelcontextprotocol/go-sdk",
+      "commit": "6737e73d2da2251423eabc3c2e1fb77f25186360",
+      "archive_sha256": "e88ad2f1f9a07bd0a384db8f497b87f3d4996138b29c46ebb93eef9ad2c87440",
+      "split": "holdout",
+      "license": "MIT"
+    }
+  },
+  "targets": [
+    {"id": "jsonschema-equal", "source": "jsonschema", "file": "jsonschema/util.go", "symbol": "Equal", "kind": "function"},
+    {"id": "jsonschema-resolve", "source": "jsonschema", "file": "jsonschema/resolve.go", "symbol": "Schema.Resolve", "kind": "method"},
+    {"id": "jsonschema-validate", "source": "jsonschema", "file": "jsonschema/validate.go", "symbol": "Resolved.Validate", "kind": "method"},
+    {"id": "jsonschema-for-options", "source": "jsonschema", "file": "jsonschema/infer.go", "symbol": "ForOptions", "kind": "struct"},
+    {"id": "jsonschema-resolve-options", "source": "jsonschema", "file": "jsonschema/resolve.go", "symbol": "ResolveOptions", "kind": "struct"},
+    {"id": "jsonschema-loader", "source": "jsonschema", "file": "jsonschema/resolve.go", "symbol": "Loader", "kind": "type"},
+    {"id": "mcp-in-memory-transports", "source": "mcp", "file": "mcp/transport.go", "symbol": "NewInMemoryTransports", "kind": "function"},
+    {"id": "mcp-new-server", "source": "mcp", "file": "mcp/server.go", "symbol": "NewServer", "kind": "function"},
+    {"id": "mcp-client-connect", "source": "mcp", "file": "mcp/client.go", "symbol": "Client.Connect", "kind": "method"},
+    {"id": "mcp-streamable-options", "source": "mcp", "file": "mcp/streamable.go", "symbol": "StreamableHTTPOptions", "kind": "struct"},
+    {"id": "mcp-transport", "source": "mcp", "file": "mcp/transport.go", "symbol": "Transport", "kind": "type"},
+    {"id": "mcp-icon-theme", "source": "mcp", "file": "mcp/protocol.go", "symbol": "IconTheme", "kind": "type"}
+  ]
+}

@@ -17,3 +17,18 @@
 
 # Agent skills.
 !/skills/*/SKILL.md
+!/.agents/skills/create-task/SKILL.md
+!/skills-lock.json
+
+# Go documentation eval tooling. Generated tasks, caches, jobs, and secrets stay ignored.
+!/evals/golang-docs/README.md
+!/evals/golang-docs/AGENTS.md
+!/evals/golang-docs/manifest.json
+/evals/golang-docs/tasks/
+/evals/golang-docs/.cache/
+/evals/golang-docs/.venv/
+/evals/golang-docs/jobs/
+/jobs/
+.env
+.env.*
+!/evals/golang-docs/.env.example
