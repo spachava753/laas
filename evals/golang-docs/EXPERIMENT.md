@@ -113,7 +113,31 @@ separately. The skill is not revised or selected again. The original holdout has
 already been opened, so this is a fixed-skill replication, not a new unseen test.
 
 The two jobs may run concurrently, each with concurrency two. Settings and job
-names are in `experiment-sol.json`. Results are pending.
+names are in `experiment-sol.json`. Both jobs completed all 24 trials, with zero
+exceptions. Native rollouts confirm `gpt-6.1-sol` at `high`; all 24 skill-assisted
+traces explicitly read the frozen skill.
+
+| Sol/high split | No skill | Frozen skill v1 | Change |
+| --- | ---: | ---: | ---: |
+| Development | 0.6471 | 0.6339 | −0.0132 |
+| Original holdout | 0.6016 | 0.6128 | +0.0112 |
+| All 12 tasks | 0.6244 | 0.6233 | −0.0010 |
+
+The aggregate automated score is essentially unchanged. These small, mixed
+changes do not establish a general skill benefit. The Luna judge was not changed,
+so the results remain comparable, but their quality interpretation is uncertain.
+
+The user then requested independent reflection: one Sol/high reviewer per trace,
+up to ten concurrently, and small learning batches with three repetitions. A
+six-reviewer pilot on three development tasks found mostly accurate, source-backed
+comments, some real omissions, and reference restrictions not established by the
+code. All reviewers declined to recommend a skill perturbation from this evidence.
+The parent checked the cited source branches and tests. See
+[REFLECTION.md](REFLECTION.md) for buckets, evidence, and the revised workflow.
+
+Do not force a prompt change from a low judge score. Reconcile the reference and
+context limitations first, then test one general hypothesis on a focused repeated
+development batch. No skill or rubric changes were made during this Sol replication.
 
 ## Reproduce
 

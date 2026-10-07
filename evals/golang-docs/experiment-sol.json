@@ -24,5 +24,14 @@
   "skill_job": "codex-sol-high-skill-v1-20261007",
   "planned_trials": 48,
   "skill_tuning": false,
-  "status": "ready"
+  "completed_trials": 48,
+  "exceptions": 0,
+  "explicit_skill_reads": 24,
+  "model_effort_verified_in_native_rollouts": true,
+  "baseline": {"overall": 0.624375, "development": 0.6471180555555556, "original_holdout": 0.6016319444444445},
+  "skill": {"overall": 0.6233420138888888, "development": 0.633888888888889, "original_holdout": 0.6127951388888887},
+  "reflection_pilot": "results/reflection-sol-pilot.json",
+  "reflection_protocol": "REFLECTION.md",
+  "conclusion": "automated aggregate scores are nearly unchanged; independent trace reviews found several reference and evaluator concerns",
+  "status": "complete; skill and judge unchanged"
 }

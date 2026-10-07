@@ -1,0 +1,422 @@
+[
+  {
+    "job": "codex-sol-high-baseline-20261007",
+    "scored": 24,
+    "exceptions": 0,
+    "statistics": {
+      "count": 24,
+      "mean": 0.624375,
+      "minimum": 0.3925,
+      "maximum": 0.8225,
+      "standard_deviation": 0.11480557676862185
+    },
+    "tasks": {
+      "laas/jsonschema-equal": {
+        "count": 2,
+        "mean": 0.4525,
+        "minimum": 0.445,
+        "maximum": 0.46,
+        "standard_deviation": 0.007500000000000007
+      },
+      "laas/jsonschema-for-options": {
+        "count": 2,
+        "mean": 0.6133333333333333,
+        "minimum": 0.6000000000000001,
+        "maximum": 0.6266666666666666,
+        "standard_deviation": 0.013333333333333253
+      },
+      "laas/jsonschema-loader": {
+        "count": 2,
+        "mean": 0.7675000000000001,
+        "minimum": 0.7425,
+        "maximum": 0.7925,
+        "standard_deviation": 0.024999999999999967
+      },
+      "laas/jsonschema-resolve": {
+        "count": 2,
+        "mean": 0.7,
+        "minimum": 0.6725,
+        "maximum": 0.7275,
+        "standard_deviation": 0.027500000000000024
+      },
+      "laas/jsonschema-resolve-options": {
+        "count": 2,
+        "mean": 0.618125,
+        "minimum": 0.605625,
+        "maximum": 0.630625,
+        "standard_deviation": 0.012500000000000011
+      },
+      "laas/jsonschema-validate": {
+        "count": 2,
+        "mean": 0.73125,
+        "minimum": 0.725,
+        "maximum": 0.7375,
+        "standard_deviation": 0.006250000000000033
+      },
+      "laas/mcp-client-connect": {
+        "count": 2,
+        "mean": 0.6525,
+        "minimum": 0.6375,
+        "maximum": 0.6675,
+        "standard_deviation": 0.015000000000000013
+      },
+      "laas/mcp-icon-theme": {
+        "count": 2,
+        "mean": 0.68875,
+        "minimum": 0.555,
+        "maximum": 0.8225,
+        "standard_deviation": 0.13374999999999998
+      },
+      "laas/mcp-in-memory-transports": {
+        "count": 2,
+        "mean": 0.45625000000000004,
+        "minimum": 0.3925,
+        "maximum": 0.52,
+        "standard_deviation": 0.06375
+      },
+      "laas/mcp-new-server": {
+        "count": 2,
+        "mean": 0.6950000000000001,
+        "minimum": 0.6525,
+        "maximum": 0.7375,
+        "standard_deviation": 0.04250000000000004
+      },
+      "laas/mcp-streamable-options": {
+        "count": 2,
+        "mean": 0.4960416666666666,
+        "minimum": 0.45625,
+        "maximum": 0.5358333333333333,
+        "standard_deviation": 0.03979166666666664
+      },
+      "laas/mcp-transport": {
+        "count": 2,
+        "mean": 0.62125,
+        "minimum": 0.5275,
+        "maximum": 0.715,
+        "standard_deviation": 0.09375
+      }
+    },
+    "trials": [
+      {
+        "task": "laas/jsonschema-equal",
+        "trial": "jsonschema-equal__ckrJHoU",
+        "score": 0.445,
+        "members": {
+          "$doc": 0.445
+        },
+        "input_tokens": 99488,
+        "output_tokens": 2175,
+        "cached_tokens": 79791,
+        "reported_cost_usd": 0.07896109999999999
+      },
+      {
+        "task": "laas/jsonschema-equal",
+        "trial": "jsonschema-equal__ojHo7SX",
+        "score": 0.46,
+        "members": {
+          "$doc": 0.46
+        },
+        "input_tokens": 114421,
+        "output_tokens": 1693,
+        "cached_tokens": 95571,
+        "reported_cost_usd": 0.07360010000000002
+      },
+      {
+        "task": "laas/jsonschema-for-options",
+        "trial": "jsonschema-for-options__Hf4MizH",
+        "score": 0.6000000000000001,
+        "members": {
+          "$doc": 0.515,
+          "IgnoreInvalidTypes": 0.7275,
+          "TypeSchemas": 0.5575
+        },
+        "input_tokens": 116706,
+        "output_tokens": 2377,
+        "cached_tokens": 97058,
+        "reported_cost_usd": 0.0825838
+      },
+      {
+        "task": "laas/jsonschema-for-options",
+        "trial": "jsonschema-for-options__vZeFtjP",
+        "score": 0.6266666666666666,
+        "members": {
+          "$doc": 0.5175,
+          "IgnoreInvalidTypes": 0.7625,
+          "TypeSchemas": 0.6
+        },
+        "input_tokens": 253694,
+        "output_tokens": 4559,
+        "cached_tokens": 229897,
+        "reported_cost_usd": 0.1280512
+      },
+      {
+        "task": "laas/jsonschema-loader",
+        "trial": "jsonschema-loader__6hc2ULx",
+        "score": 0.7925,
+        "members": {
+          "$doc": 0.7925
+        },
+        "input_tokens": 223194,
+        "output_tokens": 2569,
+        "cached_tokens": 201696,
+        "reported_cost_usd": 0.09958509999999998
+      },
+      {
+        "task": "laas/jsonschema-loader",
+        "trial": "jsonschema-loader__vcdiNig",
+        "score": 0.7425,
+        "members": {
+          "$doc": 0.7425
+        },
+        "input_tokens": 105565,
+        "output_tokens": 1596,
+        "cached_tokens": 87495,
+        "reported_cost_usd": 0.06987249999999999
+      },
+      {
+        "task": "laas/jsonschema-resolve-options",
+        "trial": "jsonschema-resolve-options__5gLZvMw",
+        "score": 0.630625,
+        "members": {
+          "$doc": 0.6875,
+          "BaseURI": 0.46,
+          "Loader": 0.6475,
+          "ValidateDefaults": 0.7275
+        },
+        "input_tokens": 130298,
+        "output_tokens": 2557,
+        "cached_tokens": 109734,
+        "reported_cost_usd": 0.08793989999999999
+      },
+      {
+        "task": "laas/jsonschema-resolve-options",
+        "trial": "jsonschema-resolve-options__dQS5YLu",
+        "score": 0.605625,
+        "members": {
+          "$doc": 0.5675,
+          "BaseURI": 0.48,
+          "Loader": 0.7725,
+          "ValidateDefaults": 0.6025
+        },
+        "input_tokens": 141521,
+        "output_tokens": 2445,
+        "cached_tokens": 120922,
+        "reported_cost_usd": 0.0880262
+      },
+      {
+        "task": "laas/jsonschema-resolve",
+        "trial": "jsonschema-resolve__9yn4nWb",
+        "score": 0.7275,
+        "members": {
+          "$doc": 0.7275
+        },
+        "input_tokens": 165195,
+        "output_tokens": 2477,
+        "cached_tokens": 141266,
+        "reported_cost_usd": 0.09870410000000002
+      },
+      {
+        "task": "laas/jsonschema-resolve",
+        "trial": "jsonschema-resolve__JvssNsF",
+        "score": 0.6725,
+        "members": {
+          "$doc": 0.6725
+        },
+        "input_tokens": 254102,
+        "output_tokens": 2716,
+        "cached_tokens": 228343,
+        "reported_cost_usd": 0.11437080000000001
+      },
+      {
+        "task": "laas/jsonschema-validate",
+        "trial": "jsonschema-validate__FpNvkun",
+        "score": 0.725,
+        "members": {
+          "$doc": 0.725
+        },
+        "input_tokens": 244734,
+        "output_tokens": 2787,
+        "cached_tokens": 217809,
+        "reported_cost_usd": 0.11694390000000002
+      },
+      {
+        "task": "laas/jsonschema-validate",
+        "trial": "jsonschema-validate__Z8Leq73",
+        "score": 0.7375,
+        "members": {
+          "$doc": 0.7375
+        },
+        "input_tokens": 229465,
+        "output_tokens": 2727,
+        "cached_tokens": 203689,
+        "reported_cost_usd": 0.1120609
+      },
+      {
+        "task": "laas/mcp-client-connect",
+        "trial": "mcp-client-connect__8BMdgAc",
+        "score": 0.6375,
+        "members": {
+          "$doc": 0.6375
+        },
+        "input_tokens": 246682,
+        "output_tokens": 2934,
+        "cached_tokens": 221157,
+        "reported_cost_usd": 0.11524870000000002
+      },
+      {
+        "task": "laas/mcp-client-connect",
+        "trial": "mcp-client-connect__bTHbjYH",
+        "score": 0.6675,
+        "members": {
+          "$doc": 0.6675
+        },
+        "input_tokens": 171265,
+        "output_tokens": 2371,
+        "cached_tokens": 147478,
+        "reported_cost_usd": 0.09791029999999999
+      },
+      {
+        "task": "laas/mcp-icon-theme",
+        "trial": "mcp-icon-theme__HPqYTi2",
+        "score": 0.8225,
+        "members": {
+          "$doc": 0.8225
+        },
+        "input_tokens": 79883,
+        "output_tokens": 1367,
+        "cached_tokens": 65433,
+        "reported_cost_usd": 0.056327800000000004
+      },
+      {
+        "task": "laas/mcp-icon-theme",
+        "trial": "mcp-icon-theme__iMKpWch",
+        "score": 0.555,
+        "members": {
+          "$doc": 0.555
+        },
+        "input_tokens": 143419,
+        "output_tokens": 2251,
+        "cached_tokens": 126842,
+        "reported_cost_usd": 0.07662020000000001
+      },
+      {
+        "task": "laas/mcp-in-memory-transports",
+        "trial": "mcp-in-memory-transports__ixHSdTG",
+        "score": 0.3925,
+        "members": {
+          "$doc": 0.3925
+        },
+        "input_tokens": 112331,
+        "output_tokens": 1713,
+        "cached_tokens": 94768,
+        "reported_cost_usd": 0.07050229999999999
+      },
+      {
+        "task": "laas/mcp-in-memory-transports",
+        "trial": "mcp-in-memory-transports__uYXWoFs",
+        "score": 0.52,
+        "members": {
+          "$doc": 0.52
+        },
+        "input_tokens": 69861,
+        "output_tokens": 1314,
+        "cached_tokens": 53752,
+        "reported_cost_usd": 0.05877870000000001
+      },
+      {
+        "task": "laas/mcp-new-server",
+        "trial": "mcp-new-server__YmVTJeQ",
+        "score": 0.7375,
+        "members": {
+          "$doc": 0.7375
+        },
+        "input_tokens": 148828,
+        "output_tokens": 2511,
+        "cached_tokens": 129968,
+        "reported_cost_usd": 0.08524179999999999
+      },
+      {
+        "task": "laas/mcp-new-server",
+        "trial": "mcp-new-server__naabAG5",
+        "score": 0.6525,
+        "members": {
+          "$doc": 0.6525
+        },
+        "input_tokens": 119493,
+        "output_tokens": 1898,
+        "cached_tokens": 99570,
+        "reported_cost_usd": 0.07873250000000001
+      },
+      {
+        "task": "laas/mcp-streamable-options",
+        "trial": "mcp-streamable-options__8XqN3eV",
+        "score": 0.5358333333333333,
+        "members": {
+          "$doc": 0.645,
+          "CrossOriginProtection": 0.3375,
+          "DisableLocalhostProtection": 0.7075,
+          "EventStore": 0.53,
+          "JSONResponse": 0.5725,
+          "Logger": 0.4775,
+          "MaxRequestBodyBytes": 0.455,
+          "OnRequestSummary": 0.495,
+          "PropagateRequestCancellation": 0.6825,
+          "SessionTimeout": 0.5575,
+          "Stateless": 0.515,
+          "StreamKeepAlive": 0.455
+        },
+        "input_tokens": 372628,
+        "output_tokens": 4600,
+        "cached_tokens": 336049,
+        "reported_cost_usd": 0.17102840000000002
+      },
+      {
+        "task": "laas/mcp-streamable-options",
+        "trial": "mcp-streamable-options__GdNnMzh",
+        "score": 0.45625,
+        "members": {
+          "$doc": 0.375,
+          "CrossOriginProtection": 0.385,
+          "DisableLocalhostProtection": 0.815,
+          "EventStore": 0.45,
+          "JSONResponse": 0.4325,
+          "Logger": 0.3175,
+          "MaxRequestBodyBytes": 0.425,
+          "OnRequestSummary": 0.6425,
+          "PropagateRequestCancellation": 0.3975,
+          "SessionTimeout": 0.475,
+          "Stateless": 0.3275,
+          "StreamKeepAlive": 0.4325
+        },
+        "input_tokens": 410583,
+        "output_tokens": 5793,
+        "cached_tokens": 372502,
+        "reported_cost_usd": 0.1903572
+      },
+      {
+        "task": "laas/mcp-transport",
+        "trial": "mcp-transport__CWZGbAe",
+        "score": 0.715,
+        "members": {
+          "$doc": 0.715
+        },
+        "input_tokens": 140546,
+        "output_tokens": 2423,
+        "cached_tokens": 120079,
+        "reported_cost_usd": 0.08739190000000001
+      },
+      {
+        "task": "laas/mcp-transport",
+        "trial": "mcp-transport__szxSENY",
+        "score": 0.5275,
+        "members": {
+          "$doc": 0.5275
+        },
+        "input_tokens": 174865,
+        "output_tokens": 2262,
+        "cached_tokens": 152492,
+        "reported_cost_usd": 0.0937852
+      }
+    ]
+  }
+]
