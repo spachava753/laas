@@ -29,10 +29,15 @@
   ],
   "selected_skill_revision": "v1",
   "selected_skill_source_commit": "931a47e",
+  "freeze_commit": "7803362",
+  "selected_skill_sha256": "c707d231842ec86b91282579b1ab51f6d8d0f617db1f911c16aa9d095b605f9d",
   "stop_reason": "two successive revisions failed to improve the development best by 0.01",
   "holdout_jobs": [
-    {"condition": "baseline", "job": "codex-luna-xhigh-holdout-baseline-20261007", "status": "sealed until skill selection"},
-    {"condition": "selected-v1", "job": "codex-luna-xhigh-holdout-skill-v1-20261007", "status": "ready"}
+    {"condition": "baseline", "job": "codex-luna-xhigh-holdout-baseline-20261007", "mean": 0.5561111111111111, "status": "complete"},
+    {"condition": "selected-v1", "job": "codex-luna-xhigh-holdout-skill-v1-20261007", "mean": 0.5124652777777777, "status": "complete"}
   ],
-  "status": "development plateau; v1 frozen before holdout inspection"
+  "trial_count_excluding_smoke": 72,
+  "exceptions": 0,
+  "conclusion": "no demonstrated general improvement; selected skill regressed on holdout",
+  "status": "complete at development plateau; no holdout-based tuning"
 }

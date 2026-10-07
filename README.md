@@ -34,7 +34,7 @@ Pass `--agent` when installing it for a specific agent.
 
 ### golang-docs
 
-[`golang-docs`](skills/golang-docs/SKILL.md) guides agents to write evidence-backed Go API contracts, including preconditions, zero values, ownership, errors, and field interactions. Its instructions are general; no benchmark repositories, declarations, or answer text are included. The [Harbor experiment](evals/golang-docs/EXPERIMENT.md) records its baseline and skill-assisted comparisons.
+[`golang-docs`](skills/golang-docs/SKILL.md) guides agents to write evidence-backed Go API contracts, including preconditions, zero values, ownership, errors, and field interactions. Its instructions are general; no benchmark repositories, declarations, or answer text are included. The [Harbor experiment](evals/golang-docs/EXPERIMENT.md) records its baseline and skill-assisted comparisons. This is experimental guidance: the selected revision's small development gain did not transfer to holdout.
 
 ## Documentation evals
 

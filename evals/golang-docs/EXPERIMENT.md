@@ -63,22 +63,44 @@ These are general practices, not answers or examples from the dataset.
 Version 2 was read in all 12 trials but regressed to **0.5816**. More guidance
 and a broader investigation checklist did not produce better scores. Version 3
 cuts the skill to a compact evidence checklist, minimal-contract drafting, and
-completeness review. A no-skill holdout job runs independently, but its output
-remains sealed until development-only skill selection is complete.
+completeness review. A no-skill holdout job ran independently, with its output
+sealed until development-only skill selection was complete.
 
 Version 3 scored **0.5680**, below versions 1 and 2. The native command audit
 found an explicit skill-file read in 11 of its 12 trials; skill availability was
 consistent, but discovery does not guarantee that every agent reads the body.
 Versions 1 and 2 each had an explicit read in all trials.
 
-Stop development tuning at this plateau: two successive revisions failed to
-improve the development best by 0.01. Restore and freeze **v1** from commit
-`931a47e` before inspecting holdout output. Its **0.0103** development gain is
+Development tuning stopped at this plateau: two successive revisions failed to
+improve the development best by 0.01. **v1** from commit `931a47e` was restored
+and frozen in commit `7803362` before inspecting holdout output. Its **0.0103** development gain is
 small and selected from three variants, so it is not evidence of a reliable
 improvement. The Oracle level was not reached.
 
-The matched holdout comparison is in progress. Configuration and job names are
-recorded in `experiment.json`; sanitized aggregates are saved in `results/`.
+| Holdout condition | Trials | Exceptions | Mean |
+| --- | ---: | ---: | ---: |
+| No skill | 12 | 0 | 0.5561 |
+| Frozen skill v1 | 12 | 0 | 0.5125 |
+
+Codex explicitly read the frozen skill in all 12 holdout trials. The holdout
+change was **−0.0436**, not an improvement. No skill revisions were made after
+opening holdout results. Across the six comparison jobs, **72 trials** completed
+with zero exceptions; the separate configuration smoke adds one more trial.
+
+**Conclusion: this skill has not demonstrated a general score improvement.**
+Its best development gain did not transfer to the holdout. Keep the selected
+revision as an experimental, general guidance artifact, not a proven upgrade.
+Further work should use new development examples and human-reviewed comment
+quality/calibration rather than repeatedly tuning against the now-open holdout.
+In particular, investigate the judge's treatment of correct paraphrases and
+code-supported additions before reading small score differences as quality gains.
+
+Configuration, revision commits, skill hash, and job names are recorded in
+`experiment.json`; sanitized aggregates are saved in `results/`. Raw rollouts,
+candidates, references, and responses remain ignored. The skill leakage checks,
+repository race tests, `go vet`, and `laas` pass. A newly generated standalone
+verifier module also builds successfully. No commits were pushed and no jobs or
+results were uploaded.
 
 ## Reproduce
 

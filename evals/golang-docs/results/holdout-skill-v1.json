@@ -1,0 +1,226 @@
+[
+  {
+    "job": "codex-luna-xhigh-holdout-skill-v1-20261007",
+    "scored": 12,
+    "exceptions": 0,
+    "statistics": {
+      "count": 12,
+      "mean": 0.5124652777777777,
+      "minimum": 0.3125,
+      "maximum": 0.7875,
+      "standard_deviation": 0.12380148320372159
+    },
+    "tasks": {
+      "laas/mcp-client-connect": {
+        "count": 2,
+        "mean": 0.5337500000000001,
+        "minimum": 0.465,
+        "maximum": 0.6025,
+        "standard_deviation": 0.06875
+      },
+      "laas/mcp-icon-theme": {
+        "count": 2,
+        "mean": 0.5825,
+        "minimum": 0.49,
+        "maximum": 0.675,
+        "standard_deviation": 0.09250000000000003
+      },
+      "laas/mcp-in-memory-transports": {
+        "count": 2,
+        "mean": 0.32999999999999996,
+        "minimum": 0.3125,
+        "maximum": 0.3475,
+        "standard_deviation": 0.017499999999999988
+      },
+      "laas/mcp-new-server": {
+        "count": 2,
+        "mean": 0.4925,
+        "minimum": 0.475,
+        "maximum": 0.51,
+        "standard_deviation": 0.017500000000000016
+      },
+      "laas/mcp-streamable-options": {
+        "count": 2,
+        "mean": 0.47979166666666667,
+        "minimum": 0.4729166666666667,
+        "maximum": 0.48666666666666664,
+        "standard_deviation": 0.0068749999999999645
+      },
+      "laas/mcp-transport": {
+        "count": 2,
+        "mean": 0.65625,
+        "minimum": 0.525,
+        "maximum": 0.7875,
+        "standard_deviation": 0.13124999999999998
+      }
+    },
+    "trials": [
+      {
+        "task": "laas/mcp-client-connect",
+        "trial": "mcp-client-connect__bQ4mCPo",
+        "score": 0.6025,
+        "members": {
+          "$doc": 0.6025
+        },
+        "input_tokens": 261899,
+        "output_tokens": 7366,
+        "cached_tokens": 226469,
+        "reported_cost_usd": 0.010375689999999998
+      },
+      {
+        "task": "laas/mcp-client-connect",
+        "trial": "mcp-client-connect__es7JkUZ",
+        "score": 0.465,
+        "members": {
+          "$doc": 0.465
+        },
+        "input_tokens": 166462,
+        "output_tokens": 4039,
+        "cached_tokens": 137654,
+        "reported_cost_usd": 0.0069964400000000005
+      },
+      {
+        "task": "laas/mcp-icon-theme",
+        "trial": "mcp-icon-theme__2vWEsYN",
+        "score": 0.675,
+        "members": {
+          "$doc": 0.675
+        },
+        "input_tokens": 124299,
+        "output_tokens": 1673,
+        "cached_tokens": 97676,
+        "reported_cost_usd": 0.005140685
+      },
+      {
+        "task": "laas/mcp-icon-theme",
+        "trial": "mcp-icon-theme__Bf8BMJV",
+        "score": 0.49,
+        "members": {
+          "$doc": 0.49
+        },
+        "input_tokens": 87251,
+        "output_tokens": 1267,
+        "cached_tokens": 69784,
+        "reported_cost_usd": 0.003514265
+      },
+      {
+        "task": "laas/mcp-in-memory-transports",
+        "trial": "mcp-in-memory-transports__4rTvga5",
+        "score": 0.3475,
+        "members": {
+          "$doc": 0.3475
+        },
+        "input_tokens": 91810,
+        "output_tokens": 1589,
+        "cached_tokens": 73635,
+        "reported_cost_usd": 0.003802275
+      },
+      {
+        "task": "laas/mcp-in-memory-transports",
+        "trial": "mcp-in-memory-transports__JfjN8kE",
+        "score": 0.3125,
+        "members": {
+          "$doc": 0.3125
+        },
+        "input_tokens": 110633,
+        "output_tokens": 2073,
+        "cached_tokens": 87424,
+        "reported_cost_usd": 0.0048114149999999994
+      },
+      {
+        "task": "laas/mcp-new-server",
+        "trial": "mcp-new-server__3kMb2wk",
+        "score": 0.475,
+        "members": {
+          "$doc": 0.475
+        },
+        "input_tokens": 188376,
+        "output_tokens": 2472,
+        "cached_tokens": 157728,
+        "reported_cost_usd": 0.006643679999999999
+      },
+      {
+        "task": "laas/mcp-new-server",
+        "trial": "mcp-new-server__bypuzra",
+        "score": 0.51,
+        "members": {
+          "$doc": 0.51
+        },
+        "input_tokens": 216474,
+        "output_tokens": 2995,
+        "cached_tokens": 188753,
+        "reported_cost_usd": 0.006849405
+      },
+      {
+        "task": "laas/mcp-streamable-options",
+        "trial": "mcp-streamable-options__95Z88iD",
+        "score": 0.48666666666666664,
+        "members": {
+          "$doc": 0.775,
+          "CrossOriginProtection": 0.3125,
+          "DisableLocalhostProtection": 0.6775,
+          "EventStore": 0.455,
+          "JSONResponse": 0.495,
+          "Logger": 0.5025,
+          "MaxRequestBodyBytes": 0.5075,
+          "OnRequestSummary": 0.43,
+          "PropagateRequestCancellation": 0.4225,
+          "SessionTimeout": 0.4275,
+          "Stateless": 0.315,
+          "StreamKeepAlive": 0.52
+        },
+        "input_tokens": 718646,
+        "output_tokens": 15349,
+        "cached_tokens": 657510,
+        "reported_cost_usd": 0.021890399999999997
+      },
+      {
+        "task": "laas/mcp-streamable-options",
+        "trial": "mcp-streamable-options__jGJwxkH",
+        "score": 0.4729166666666667,
+        "members": {
+          "$doc": 0.5925,
+          "CrossOriginProtection": 0.415,
+          "DisableLocalhostProtection": 0.6225,
+          "EventStore": 0.445,
+          "JSONResponse": 0.42,
+          "Logger": 0.44,
+          "MaxRequestBodyBytes": 0.4775,
+          "OnRequestSummary": 0.4925,
+          "PropagateRequestCancellation": 0.48,
+          "SessionTimeout": 0.4,
+          "Stateless": 0.365,
+          "StreamKeepAlive": 0.525
+        },
+        "input_tokens": 545675,
+        "output_tokens": 12271,
+        "cached_tokens": 486423,
+        "reported_cost_usd": 0.018405255
+      },
+      {
+        "task": "laas/mcp-transport",
+        "trial": "mcp-transport__wSriQ4S",
+        "score": 0.525,
+        "members": {
+          "$doc": 0.525
+        },
+        "input_tokens": 131854,
+        "output_tokens": 3098,
+        "cached_tokens": 96166,
+        "reported_cost_usd": 0.006971285
+      },
+      {
+        "task": "laas/mcp-transport",
+        "trial": "mcp-transport__yLThSaY",
+        "score": 0.7875,
+        "members": {
+          "$doc": 0.7875
+        },
+        "input_tokens": 109853,
+        "output_tokens": 2288,
+        "cached_tokens": 86930,
+        "reported_cost_usd": 0.004878225
+      }
+    ]
+  }
+]
