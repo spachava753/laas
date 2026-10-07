@@ -51,6 +51,7 @@ below their restored references, a reason not to treat this judge as infallible.
 | No skill | 12 | 0 | 0.5964 |
 | Skill v1 | 12 | 0 | 0.6067 |
 | Skill v2 | 12 | 0 | 0.5816 |
+| Skill v3 | 12 | 0 | 0.5680 |
 
 Version 1 was read by Codex in all 12 trials. Its aggregate gain of **0.0103**
 is small relative to between-attempt variation, and task-level changes were mixed.
@@ -65,8 +66,19 @@ cuts the skill to a compact evidence checklist, minimal-contract drafting, and
 completeness review. A no-skill holdout job runs independently, but its output
 remains sealed until development-only skill selection is complete.
 
-Further comparisons are in progress. Configuration and job names are recorded in
-`experiment.json`; sanitized aggregates are saved in `results/`.
+Version 3 scored **0.5680**, below versions 1 and 2. The native command audit
+found an explicit skill-file read in 11 of its 12 trials; skill availability was
+consistent, but discovery does not guarantee that every agent reads the body.
+Versions 1 and 2 each had an explicit read in all trials.
+
+Stop development tuning at this plateau: two successive revisions failed to
+improve the development best by 0.01. Restore and freeze **v1** from commit
+`931a47e` before inspecting holdout output. Its **0.0103** development gain is
+small and selected from three variants, so it is not evidence of a reliable
+improvement. The Oracle level was not reached.
+
+The matched holdout comparison is in progress. Configuration and job names are
+recorded in `experiment.json`; sanitized aggregates are saved in `results/`.
 
 ## Reproduce
 

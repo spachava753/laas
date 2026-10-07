@@ -1,0 +1,214 @@
+[
+  {
+    "job": "codex-luna-xhigh-dev-skill-v3-20261007",
+    "scored": 12,
+    "exceptions": 0,
+    "statistics": {
+      "count": 12,
+      "mean": 0.5680381944444445,
+      "minimum": 0.34,
+      "maximum": 0.845,
+      "standard_deviation": 0.14008565445472454
+    },
+    "tasks": {
+      "laas/jsonschema-equal": {
+        "count": 2,
+        "mean": 0.39625,
+        "minimum": 0.34,
+        "maximum": 0.4525,
+        "standard_deviation": 0.056249999999999994
+      },
+      "laas/jsonschema-for-options": {
+        "count": 2,
+        "mean": 0.5529166666666667,
+        "minimum": 0.5066666666666667,
+        "maximum": 0.5991666666666667,
+        "standard_deviation": 0.04625000000000001
+      },
+      "laas/jsonschema-loader": {
+        "count": 2,
+        "mean": 0.51125,
+        "minimum": 0.355,
+        "maximum": 0.6675,
+        "standard_deviation": 0.15625
+      },
+      "laas/jsonschema-resolve": {
+        "count": 2,
+        "mean": 0.5675,
+        "minimum": 0.5,
+        "maximum": 0.635,
+        "standard_deviation": 0.0675
+      },
+      "laas/jsonschema-resolve-options": {
+        "count": 2,
+        "mean": 0.6053125,
+        "minimum": 0.568125,
+        "maximum": 0.6425000000000001,
+        "standard_deviation": 0.03718750000000004
+      },
+      "laas/jsonschema-validate": {
+        "count": 2,
+        "mean": 0.7749999999999999,
+        "minimum": 0.705,
+        "maximum": 0.845,
+        "standard_deviation": 0.07
+      }
+    },
+    "trials": [
+      {
+        "task": "laas/jsonschema-equal",
+        "trial": "jsonschema-equal__HHZtnGG",
+        "score": 0.34,
+        "members": {
+          "$doc": 0.34
+        },
+        "input_tokens": 181411,
+        "output_tokens": 7662,
+        "cached_tokens": 153837,
+        "reported_cost_usd": 0.008815445
+      },
+      {
+        "task": "laas/jsonschema-equal",
+        "trial": "jsonschema-equal__P5B6red",
+        "score": 0.4525,
+        "members": {
+          "$doc": 0.4525
+        },
+        "input_tokens": 118405,
+        "output_tokens": 3905,
+        "cached_tokens": 96247,
+        "reported_cost_usd": 0.0056841949999999995
+      },
+      {
+        "task": "laas/jsonschema-for-options",
+        "trial": "jsonschema-for-options__E3jJuQV",
+        "score": 0.5991666666666667,
+        "members": {
+          "$doc": 0.7775,
+          "IgnoreInvalidTypes": 0.6775,
+          "TypeSchemas": 0.3425
+        },
+        "input_tokens": 297561,
+        "output_tokens": 7330,
+        "cached_tokens": 268487,
+        "reported_cost_usd": 0.009983144999999999
+      },
+      {
+        "task": "laas/jsonschema-for-options",
+        "trial": "jsonschema-for-options__EJPiFRY",
+        "score": 0.5066666666666667,
+        "members": {
+          "$doc": 0.785,
+          "IgnoreInvalidTypes": 0.4425,
+          "TypeSchemas": 0.2925
+        },
+        "input_tokens": 211312,
+        "output_tokens": 6851,
+        "cached_tokens": 180730,
+        "reported_cost_usd": 0.009054874999999999
+      },
+      {
+        "task": "laas/jsonschema-loader",
+        "trial": "jsonschema-loader__dS8qc3M",
+        "score": 0.6675,
+        "members": {
+          "$doc": 0.6675
+        },
+        "input_tokens": 162410,
+        "output_tokens": 3706,
+        "cached_tokens": 139545,
+        "reported_cost_usd": 0.0061059
+      },
+      {
+        "task": "laas/jsonschema-loader",
+        "trial": "jsonschema-loader__e5ct86u",
+        "score": 0.355,
+        "members": {
+          "$doc": 0.355
+        },
+        "input_tokens": 100206,
+        "output_tokens": 2636,
+        "cached_tokens": 78478,
+        "reported_cost_usd": 0.00481833
+      },
+      {
+        "task": "laas/jsonschema-resolve-options",
+        "trial": "jsonschema-resolve-options__5nYd8ny",
+        "score": 0.6425000000000001,
+        "members": {
+          "$doc": 0.6625,
+          "BaseURI": 0.6025,
+          "Loader": 0.76,
+          "ValidateDefaults": 0.545
+        },
+        "input_tokens": 189391,
+        "output_tokens": 5353,
+        "cached_tokens": 161965,
+        "reported_cost_usd": 0.007723725000000001
+      },
+      {
+        "task": "laas/jsonschema-resolve-options",
+        "trial": "jsonschema-resolve-options__EjZ8U89",
+        "score": 0.568125,
+        "members": {
+          "$doc": 0.54,
+          "BaseURI": 0.3775,
+          "Loader": 0.9225,
+          "ValidateDefaults": 0.4325
+        },
+        "input_tokens": 160301,
+        "output_tokens": 3696,
+        "cached_tokens": 134566,
+        "reported_cost_usd": 0.006409935
+      },
+      {
+        "task": "laas/jsonschema-resolve",
+        "trial": "jsonschema-resolve__J6wuuzw",
+        "score": 0.5,
+        "members": {
+          "$doc": 0.5
+        },
+        "input_tokens": 121442,
+        "output_tokens": 2719,
+        "cached_tokens": 93381,
+        "reported_cost_usd": 0.005800485000000001
+      },
+      {
+        "task": "laas/jsonschema-resolve",
+        "trial": "jsonschema-resolve__tkTakhh",
+        "score": 0.635,
+        "members": {
+          "$doc": 0.635
+        },
+        "input_tokens": 238227,
+        "output_tokens": 4279,
+        "cached_tokens": 203701,
+        "reported_cost_usd": 0.00849151
+      },
+      {
+        "task": "laas/jsonschema-validate",
+        "trial": "jsonschema-validate__gzEhFE3",
+        "score": 0.845,
+        "members": {
+          "$doc": 0.845
+        },
+        "input_tokens": 192158,
+        "output_tokens": 2361,
+        "cached_tokens": 163633,
+        "reported_cost_usd": 0.00638178
+      },
+      {
+        "task": "laas/jsonschema-validate",
+        "trial": "jsonschema-validate__utKCSvM",
+        "score": 0.705,
+        "members": {
+          "$doc": 0.705
+        },
+        "input_tokens": 251730,
+        "output_tokens": 5584,
+        "cached_tokens": 217968,
+        "reported_cost_usd": 0.009191105
+      }
+    ]
+  }
+]

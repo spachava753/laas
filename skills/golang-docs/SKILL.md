@@ -5,55 +5,64 @@ description: Write, review, or improve idiomatic Go doc comments for functions, 
 
 # Go doc comments
 
-Write the smallest complete caller-facing contract, not a tour of the code.
-Keep edits within the requested scope.
+Document the contract a caller needs to use the API correctly. Explain purpose and
+observable behavior, not just the signature or a narration of implementation steps.
+Stay within the requested editing scope.
 
-## Find the facts before drafting
+## Establish the contract
 
-Read the declaration, relevant implementation, helpers, callers, tests, and nearby
-documentation. Identify the essential purpose and result, then collect the
-conditions a caller must know. Distinguish established guarantees from incidental
-implementation behavior. A name, a branch, or a single example is not a contract.
+Read the declaration and implementation before drafting. Follow relevant helpers
+and types when their behavior affects callers. Use callers, tests, nearby comments,
+and existing package conventions to resolve uncertainty. Do not infer a promise
+from a name or from one successful example.
 
-Make a short working checklist of applicable facts and their evidence:
+For each requested declaration, identify the applicable facts:
 
-- What the operation does, what inputs mean, and what success and failure return.
-- Preconditions and supported input representations.
-- Defaults and the meaning of zero or omitted values.
-- Whether inputs are copied, retained, mutated, or required to remain unchanged.
-- How long results and resources remain valid, and who performs cleanup.
-- Interactions and precedence between related options or operations.
-- Established concurrency, cancellation, and repeat-call guarantees.
+- Purpose, result meaning, and how inputs affect the operation.
+- Preconditions, supported input shapes, and restrictions callers must respect.
+- Defaults, zero values, and distinctions between absent and explicitly supplied values.
+- Failure conditions, returned errors, and documented panic conditions.
+- Mutations, side effects, ownership, resource lifetime, and cleanup responsibilities.
+- Concurrency guarantees and cancellation behavior, if the API establishes them.
+- Relationships to other operations, precedence rules, and compatibility constraints.
 
-Trace beyond the immediate declaration when a fact depends on another operation.
-Do not write speculative promises. If evidence conflicts, resolve it before
-presenting an unconditional rule.
+These are questions to investigate, not headings to fill mechanically. Omit
+inapplicable items. If evidence is incomplete, investigate further or leave out an
+unsupported claim; do not manufacture guarantees to make the comment look complete.
 
-## Turn facts into comments
+## Write for the reader
 
-Start with a complete sentence naming the declaration and stating its essential
-job. For methods, use the method name. A natural article before a type name is
-fine. Attach the comment directly to the declaration, with no blank line between.
+- Begin a declaration comment with the declared name, or a natural article followed
+  by that name. Use the method name for a method. Attach the comment directly to
+  its declaration without an intervening blank line.
+- Lead with one clear sentence explaining purpose and behavior. Add material
+  qualifications in short paragraphs. Do not bury a restriction after incidental
+  implementation details.
+- Prefer precise behavior over adjectives such as safe, efficient, or flexible.
+  State what happens and under which conditions. Avoid promises broader than the
+  implementation and its established contract support.
+- For a type, explain what it represents and how it is used. For an interface,
+  describe the obligations shared by its implementations without assuming the
+  behavior of one concrete implementation.
+- For each requested field, explain its meaning and relevant units, defaults,
+  omission behavior, interactions, and constraints. A field description should be
+  useful where that field is declared; do not hide its contract only in the type's
+  comment. Explain the type's overall purpose separately.
+- Use Go documentation links for relevant identifiers. Add a reference to an
+  external contract only when the code or existing documentation establishes it;
+  do not invent specification citations or look up an answer outside the task's
+  permitted sources.
+- Match the package's terminology and tone. Keep examples only when they clarify
+  a meaningful distinction. Prefer a concise complete comment to a long list of
+  implementation details.
 
-Follow with only the qualifications needed to use it correctly. Prefer a few
-precise sentences to an exhaustive list of implementation cases. Do not let an
-interesting detail crowd out a precondition, ownership rule, or default.
+## Review the change
 
-For a type, explain what its instances represent. For a function type or interface,
-state the work implementations must perform and the meaning of inputs and outputs;
-do not merely describe the behavior of one consumer. For requested struct fields,
-explain each field's meaning, defaults, constraints, and interactions beside that
-field. Keep the type's overview separate from those details.
+Compare the draft against the evidence, fact by fact. Check for omitted conditions
+as well as contradictions. Pay particular attention to zero-value behavior,
+restrictions, errors, and interactions that are easy to miss in a summary.
 
-Use the package's terminology and valid Go doc links. Cite an external contract
-only when the available evidence establishes it. Preserve relevant qualifications
-rather than inventing a stronger guarantee. Add examples only when they clarify a
-material distinction.
-
-## Check completeness and scope
-
-Compare each draft with the working checklist. Every material fact needs a clear
-statement, and every assertion needs evidence. Remove incidental explanations
-that do not help a caller; check for missing restrictions as carefully as false
-claims. Confirm comment attachment, format as appropriate, and review the diff
-for unrelated code or comment changes.
+Remove redundant or unsupported claims. Check that each requested declaration and
+field has an attached comment and that unrelated code and comments stayed intact.
+Use the relevant Go formatting and checks available in the project, then review
+the diff for accidental changes.
