@@ -24,6 +24,9 @@
 !/evals/golang-docs/README.md
 !/evals/golang-docs/AGENTS.md
 !/evals/golang-docs/manifest.json
+!/evals/golang-docs/EXPERIMENT.md
+!/evals/golang-docs/experiment.json
+!/evals/golang-docs/results/*.json
 /evals/golang-docs/tasks/
 /evals/golang-docs/.cache/
 /evals/golang-docs/.venv/

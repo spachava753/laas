@@ -36,7 +36,7 @@ func main() {
 // to external Harbor. Grading and validation need no Harbor/Python dependency.
 func commandMain(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: golang-docs {generate|validate|grade|inspect|run} [options]")
+		return fmt.Errorf("usage: golang-docs {generate|validate|grade|inspect|run|summarize} [options]")
 	}
 	if args[0] == "run" {
 		return runHarbor(ctx, defaultRoot, args[1:])
@@ -62,6 +62,15 @@ func commandMain(ctx context.Context, args []string, out io.Writer) error {
 	fs.SetOutput(out)
 	root := fs.String("root", defaultRoot, "eval tooling and manifest directory")
 	switch args[0] {
+	case "summarize":
+		output := fs.String("output", "", "sanitized JSON report path")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() == 0 {
+			return fmt.Errorf("summarize requires one or more job directories")
+		}
+		return summarize(fs.Args(), *output, out)
 	case "generate":
 		output := fs.String("output", "", "fresh task output directory (default ROOT/tasks)")
 		split := fs.String("split", "all", "all, dev, or holdout")

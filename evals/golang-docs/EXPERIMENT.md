@@ -1,0 +1,75 @@
+# Codex documentation skill experiment
+
+## Fixed protocol
+
+Use Harbor 0.24.0 and Codex 0.156.1 with `openai/gpt-6-luna`, reasoning effort
+`xhigh`, and web search disabled. A native Codex rollout confirmed the model,
+effort, and CLI version. Each trial starts in a fresh container/session. No host
+Codex configuration, other skills, reference answers, or past rollouts are loaded.
+
+Run two attempts on each of the six development tasks, concurrency two, agent
+timeout 900 seconds, verifier timeout 300 seconds. Keep source snapshots,
+instructions, judge rubric/model, and network restrictions unchanged. Skill
+availability is the only intended difference. Report exceptions separately; do
+not turn infrastructure failures into documentation scores.
+
+The development Oracle mean is **0.92875** from one restoration per task. It is a
+probabilistic reference control, not an exact ceiling. The initial stopping rule
+is within 0.02 of that mean, or two successive revisions gaining less than 0.01.
+Start with at most three skill revisions; do not keep searching merely for a lucky
+high judge draw. Prefer an earlier, simpler version when changes lack evidence.
+Two attempts on six tasks are a small pilot, not a significance claim.
+
+Inspect per-member scores, omissions, unsupported claims, and native transcripts.
+Generalize lessons into documentation practice, never into repository-specific
+answers. The skill must contain no dataset repositories, declaration identifiers,
+literal task paths, upstream comment text, grading instructions, or target scores.
+Its conventions are checked against the official [Go doc-comment guide](https://go.dev/doc/comment).
+
+Freeze the selected skill before comparing baseline and skill-assisted holdout
+runs. Do not tune from holdout output. Store raw jobs locally, and commit only
+sanitized summaries, general observations, settings, and skill revisions.
+
+## Runs
+
+The connectivity/configuration smoke trial scored **0.51**. It is excluded from
+the paired development baseline. It omitted public-contract qualifications and
+added incidental implementation claims. The first completed development examples
+show the same pattern: useful purpose statements, but incomplete restrictions,
+ownership and option interactions. The initial skill emphasizes evidence-backed
+contracts and a fact-by-fact review rather than signature narration.
+
+The completed no-skill development baseline scored **0.5964** across 12 trials,
+with zero exceptions. Task means ranged from **0.5775** to **0.6438**. Failures
+included omitted preconditions and mutation/lifetime restrictions, missed copying
+and option interactions, and extended descriptions that did not replace missing
+core facts. Some semantically equivalent short purpose statements also scored
+below their restored references, a reason not to treat this judge as infallible.
+
+Skill comparisons are in progress. Configuration and job names are recorded in
+`experiment.json`; sanitized aggregates are saved in `results/`.
+
+## Reproduce
+
+From the repository root, with the authorized key in the ignored `.env`:
+
+```sh
+go run ./evals/golang-docs run \
+  -p evals/golang-docs/tasks -i 'jsonschema-*' \
+  -a codex -m openai/gpt-6-luna \
+  --ak version=0.156.1 --ak reasoning_effort=xhigh --ak web_search=disabled \
+  --agent-timeout-multiplier 3 --env-file .env -k 2 -n 2 -y
+```
+
+For a skill-assisted run, add `--skills skills/golang-docs` and use a distinct
+job name. Snapshot the skill before launching; never edit a revision while its
+job may still be uploading it. The same refreshed-group launcher described in
+the dataset README applies when the current IDE process cannot access Docker.
+
+```sh
+go run ./evals/golang-docs summarize --output <report.json> <job-directory>
+```
+
+Reported token/cost fields come from Harbor's native Codex trajectory conversion;
+price estimates may not match the bill. Confidence and probability distributions
+remain in ignored verifier responses. No results are uploaded.
