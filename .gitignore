@@ -25,6 +25,7 @@
 !/evals/golang-docs/AGENTS.md
 !/evals/golang-docs/manifest.json
 !/evals/golang-docs/EXPERIMENT.md
+!/evals/golang-docs/REFLECTION.md
 !/evals/golang-docs/experiment.json
 !/evals/golang-docs/experiment-sol.json
 !/evals/golang-docs/results/*.json

@@ -2,7 +2,8 @@
 
 A 12-task Harbor pilot for writing Go doc comments. The evals were built before
 the general-purpose [`golang-docs` skill](../../skills/golang-docs/SKILL.md).
-See [EXPERIMENT.md](EXPERIMENT.md) for the Codex baseline and refinement protocol.
+See [EXPERIMENT.md](EXPERIMENT.md) for the Codex comparisons and
+[REFLECTION.md](REFLECTION.md) for independent trace review and small-batch tuning.
 
 Each task removes the associated doc comment from one function, method, or type.
 For structs, it also removes all field comments. The agent edits the comments in
@@ -66,6 +67,7 @@ evals/golang-docs/
 ├── run.go               # External Harbor runner and scoped Docker DNS shim
 ├── validate.go          # Local task checks and optional live calibration
 ├── results.go           # Credential-safe scoring/usage summaries
+├── reflection.go        # Isolated development-only trace review packets
 ├── EXPERIMENT.md        # Fixed comparison protocol and observed results
 ├── experiment.json      # Harness settings and revision/job provenance
 ├── results/             # Sanitized aggregates, not candidate or reference text

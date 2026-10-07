@@ -36,7 +36,7 @@ func main() {
 // to external Harbor. Grading and validation need no Harbor/Python dependency.
 func commandMain(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: golang-docs {generate|validate|grade|inspect|run|summarize} [options]")
+		return fmt.Errorf("usage: golang-docs {generate|validate|grade|inspect|run|summarize|review-packet} [options]")
 	}
 	if args[0] == "run" {
 		return runHarbor(ctx, defaultRoot, args[1:])
@@ -62,6 +62,17 @@ func commandMain(ctx context.Context, args []string, out io.Writer) error {
 	fs.SetOutput(out)
 	root := fs.String("root", defaultRoot, "eval tooling and manifest directory")
 	switch args[0] {
+	case "review-packet":
+		task := fs.String("task", "", "development task directory")
+		trial := fs.String("trial", "", "one completed Harbor trial directory")
+		output := fs.String("output", "", "fresh isolated review packet directory")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *task == "" || *trial == "" || *output == "" {
+			return fmt.Errorf("review-packet requires --task, --trial, and --output")
+		}
+		return prepareReviewPacket(*task, *trial, *output)
 	case "summarize":
 		output := fs.String("output", "", "sanitized JSON report path")
 		if err := fs.Parse(args[1:]); err != nil {

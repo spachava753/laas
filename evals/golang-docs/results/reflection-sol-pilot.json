@@ -1,0 +1,40 @@
+{
+  "reviewer_model": "openai-codex/gpt-6.1-sol",
+  "reasoning_effort": "high",
+  "independent_reviewers": 6,
+  "traces_per_reviewer": 1,
+  "distinct_development_tasks": 3,
+  "conditions_per_task": 2,
+  "scores_and_explicit_condition_labels_withheld": true,
+  "blinding_limit": "trace actions may reveal skill availability",
+  "concurrent_reviewer_limit": 10,
+  "traces_with_bucket": {
+    "contract_omission": 2,
+    "unsupported_claim": 1,
+    "evidence_gathering": 0,
+    "scope_or_tool_failure": 1,
+    "presentation": 0,
+    "reference_or_grader_issue": 3
+  },
+  "additional_shared_reference_edge_case": 1,
+  "skill_change_recommended_by_reviewers": 0,
+  "reviewers": [
+    {"packet": "review-1", "thread": "thr_t5f3y6m3kv", "disposition": "mostly correct; narrow overstatement shared with reference"},
+    {"packet": "review-2", "thread": "thr_xzivkn4nbq", "disposition": "correct comment; reference issue and recovered verification failure"},
+    {"packet": "review-3", "thread": "thr_mdwe24gqau", "disposition": "no material failure"},
+    {"packet": "review-4", "thread": "thr_dnwkq4ia85", "disposition": "no material failure"},
+    {"packet": "review-5", "thread": "thr_6z57z58avb", "disposition": "one contract omission and reference issue"},
+    {"packet": "review-6", "thread": "thr_yb4izdq6h6", "disposition": "two contract omissions and reference issue"}
+  ],
+  "vetted_general_findings": [
+    "Source-supported additions and correct paraphrases were often useful despite low automated scores.",
+    "Some reference restrictions were stronger than those established by implementation and tests.",
+    "One narrow numeric guarantee was overstated by both candidate and reference.",
+    "Two traces of one task omitted a condition on the result of combining dependent inputs.",
+    "One trace omitted a caller-visible mutation of a callback's returned object.",
+    "One edit verification accepted an unchanged file after a failed patch, then recovered."
+  ],
+  "decision": "Do not perturb the skill yet. Separate reference/grader calibration from real omissions, then use a focused three-repetition development experiment for one evidenced hypothesis.",
+  "skill_modified": false,
+  "workers_archived_and_stopped": true
+}
