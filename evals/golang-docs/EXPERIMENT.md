@@ -50,6 +50,7 @@ below their restored references, a reason not to treat this judge as infallible.
 | --- | ---: | ---: | ---: |
 | No skill | 12 | 0 | 0.5964 |
 | Skill v1 | 12 | 0 | 0.6067 |
+| Skill v2 | 12 | 0 | 0.5816 |
 
 Version 1 was read by Codex in all 12 trials. Its aggregate gain of **0.0103**
 is small relative to between-attempt variation, and task-level changes were mixed.
@@ -57,6 +58,12 @@ It helped some field/operation descriptions, but still encouraged long incidenta
 claims and missed essential callback responsibilities. Version 2 strengthens
 input/result data-flow tracing and a minimal-complete-contract drafting pass.
 These are general practices, not answers or examples from the dataset.
+
+Version 2 was read in all 12 trials but regressed to **0.5816**. More guidance
+and a broader investigation checklist did not produce better scores. Version 3
+cuts the skill to a compact evidence checklist, minimal-contract drafting, and
+completeness review. A no-skill holdout job runs independently, but its output
+remains sealed until development-only skill selection is complete.
 
 Further comparisons are in progress. Configuration and job names are recorded in
 `experiment.json`; sanitized aggregates are saved in `results/`.

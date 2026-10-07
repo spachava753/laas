@@ -24,8 +24,9 @@
   "baseline_job": "codex-luna-xhigh-dev-baseline-20261007",
   "skill_revisions": [
     {"name": "v1", "commit": "931a47e", "job": "codex-luna-xhigh-dev-skill-v1-20261007", "skill_snapshot": ".cache/skills-v1/golang-docs", "mean": 0.6067013888888888, "status": "complete"},
-    {"name": "v2", "job": "codex-luna-xhigh-dev-skill-v2-20261007", "skill_snapshot": ".cache/skills-v2/golang-docs", "status": "ready"}
+    {"name": "v2", "commit": "98c39ba", "job": "codex-luna-xhigh-dev-skill-v2-20261007", "skill_snapshot": ".cache/skills-v2/golang-docs", "mean": 0.5815972222222223, "status": "complete"},
+    {"name": "v3", "job": "codex-luna-xhigh-dev-skill-v3-20261007", "skill_snapshot": ".cache/skills-v3/golang-docs", "status": "ready"}
   ],
-  "holdout_jobs": [],
-  "status": "first skill comparison complete; second revision ready"
+  "holdout_jobs": [{"condition": "baseline", "job": "codex-luna-xhigh-holdout-baseline-20261007", "status": "sealed until skill selection"}],
+  "status": "second revision regressed; testing a shorter third revision"
 }
