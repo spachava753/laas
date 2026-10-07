@@ -12,9 +12,11 @@ Stay within the requested editing scope.
 ## Establish the contract
 
 Read the declaration and implementation before drafting. Follow relevant helpers
-and types when their behavior affects callers. Use callers, tests, nearby comments,
-and existing package conventions to resolve uncertainty. Do not infer a promise
-from a name or from one successful example.
+and types when their behavior affects callers. Trace how inputs are checked,
+transformed, retained, copied, or ignored, and how returned values remain related
+to their inputs. Use callers, tests, nearby comments, and existing package
+conventions to resolve uncertainty. Do not infer a promise from a name or from
+one successful example.
 
 For each requested declaration, identify the applicable facts:
 
@@ -35,15 +37,19 @@ unsupported claim; do not manufacture guarantees to make the comment look comple
 - Begin a declaration comment with the declared name, or a natural article followed
   by that name. Use the method name for a method. Attach the comment directly to
   its declaration without an intervening blank line.
-- Lead with one clear sentence explaining purpose and behavior. Add material
-  qualifications in short paragraphs. Do not bury a restriction after incidental
-  implementation details.
+- Lead with one clear sentence stating the operation's own purpose, effects, and
+  result meaning. Follow with the conditions needed to use it correctly. First
+  write a minimal complete contract; add detail only if it helps a caller make
+  a decision. Avoid enumerating implementation branches or supported kinds when
+  that obscures the essential contract.
 - Prefer precise behavior over adjectives such as safe, efficient, or flexible.
   State what happens and under which conditions. Avoid promises broader than the
   implementation and its established contract support.
-- For a type, explain what it represents and how it is used. For an interface,
-  describe the obligations shared by its implementations without assuming the
-  behavior of one concrete implementation.
+- For a type, explain what it represents and how it is used. For a function type
+  or callback, document the work an implementation must perform, its inputs, its
+  results, and failure expectations; describing how one consumer invokes it is
+  not a substitute. For an interface, describe shared obligations without assuming
+  the behavior of one concrete implementation.
 - For each requested field, explain its meaning and relevant units, defaults,
   omission behavior, interactions, and constraints. A field description should be
   useful where that field is declared; do not hide its contract only in the type's
@@ -62,7 +68,11 @@ Compare the draft against the evidence, fact by fact. Check for omitted conditio
 as well as contradictions. Pay particular attention to zero-value behavior,
 restrictions, errors, and interactions that are easy to miss in a summary.
 
-Remove redundant or unsupported claims. Check that each requested declaration and
-field has an attached comment and that unrelated code and comments stayed intact.
+Check the opening sentence alone: does it state the essential job rather than
+merely naming a consumer or restating the signature? Check qualifications against
+the relevant evidence, including ownership and validity after the call. Then
+remove details that are redundant, unsupported, or distract from these facts.
+Check that each requested declaration and field has an attached comment and that
+unrelated code and comments stayed intact.
 Use the relevant Go formatting and checks available in the project, then review
 the diff for accidental changes.

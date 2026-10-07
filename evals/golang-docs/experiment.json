@@ -22,7 +22,10 @@
   "maximum_initial_skill_revisions": 3,
   "smoke_job": "codex-luna-xhigh-smoke-20261007",
   "baseline_job": "codex-luna-xhigh-dev-baseline-20261007",
-  "skill_revisions": [{"name": "v1", "job": "codex-luna-xhigh-dev-skill-v1-20261007", "skill_snapshot": ".cache/skills-v1/golang-docs", "status": "ready"}],
+  "skill_revisions": [
+    {"name": "v1", "commit": "931a47e", "job": "codex-luna-xhigh-dev-skill-v1-20261007", "skill_snapshot": ".cache/skills-v1/golang-docs", "mean": 0.6067013888888888, "status": "complete"},
+    {"name": "v2", "job": "codex-luna-xhigh-dev-skill-v2-20261007", "skill_snapshot": ".cache/skills-v2/golang-docs", "status": "ready"}
+  ],
   "holdout_jobs": [],
-  "status": "development baseline complete; first skill revision ready"
+  "status": "first skill comparison complete; second revision ready"
 }

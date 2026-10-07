@@ -1,7 +1,8 @@
 # golang-docs evals
 
-A 12-task Harbor pilot for writing Go doc comments. This builds the evals first;
-the `golang-docs` skill itself is intentionally not written yet.
+A 12-task Harbor pilot for writing Go doc comments. The evals were built before
+the general-purpose [`golang-docs` skill](../../skills/golang-docs/SKILL.md).
+See [EXPERIMENT.md](EXPERIMENT.md) for the Codex baseline and refinement protocol.
 
 Each task removes the associated doc comment from one function, method, or type.
 For structs, it also removes all field comments. The agent edits the comments in
@@ -64,6 +65,10 @@ evals/golang-docs/
 ├── grade.go             # Deterministic gates and Decisions API grader
 ├── run.go               # External Harbor runner and scoped Docker DNS shim
 ├── validate.go          # Local task checks and optional live calibration
+├── results.go           # Credential-safe scoring/usage summaries
+├── EXPERIMENT.md        # Fixed comparison protocol and observed results
+├── experiment.json      # Harness settings and revision/job provenance
+├── results/             # Sanitized aggregates, not candidate or reference text
 ├── *_test.go            # Offline regression tests
 └── tasks/               # Generated, self-contained Harbor tasks (ignored)
     └── <task>/
@@ -196,9 +201,10 @@ go run ./evals/golang-docs run \
 
 The `-y` flag confirms forwarding the verifier key. Do not add `--upload`,
 `--launch`, or sharing flags without authorization. Agent-provider credentials
-are separate from the verifier configuration. Future skill comparisons can add
-`--skills skills/golang-docs` once that skill exists; use the same model, attempts,
-timeouts, and task set in both conditions.
+are separate from the verifier configuration. Skill comparisons add
+`--skills skills/golang-docs`; use the same model, attempts, timeouts, and task
+set in both conditions. Snapshot the skill before each job so later edits cannot
+change a running experiment.
 
 ## End-to-end validation
 
@@ -237,8 +243,9 @@ Local reports are under `jobs/oracle-controls-20261007-0052/` and
   confidence, particularly for security, ownership, and concurrency claims.
 - Keep the MCP holdout out of skill/rubric tuning. Expand to more repositories
   and packages before drawing conclusions from this 12-task pilot.
-- Container Oracle/no-op controls now pass. Run real model-generated development
-  baselines before writing the skill; those have not been run yet.
+- Container Oracle/no-op controls pass. The Codex/GPT 6 Luna `xhigh` development
+  baseline scored 0.5964 over 12 trials with no exceptions. Skill-assisted results
+  and the refinement history are recorded in [EXPERIMENT.md](EXPERIMENT.md).
 
 References: [Harbor task format](https://docs.harborframework.com/core-concepts/tasks/overview),
 [separate verifier](https://docs.harborframework.com/core-concepts/tasks/separate-verifier),

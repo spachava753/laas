@@ -46,7 +46,19 @@ and option interactions, and extended descriptions that did not replace missing
 core facts. Some semantically equivalent short purpose statements also scored
 below their restored references, a reason not to treat this judge as infallible.
 
-Skill comparisons are in progress. Configuration and job names are recorded in
+| Development condition | Trials | Exceptions | Mean |
+| --- | ---: | ---: | ---: |
+| No skill | 12 | 0 | 0.5964 |
+| Skill v1 | 12 | 0 | 0.6067 |
+
+Version 1 was read by Codex in all 12 trials. Its aggregate gain of **0.0103**
+is small relative to between-attempt variation, and task-level changes were mixed.
+It helped some field/operation descriptions, but still encouraged long incidental
+claims and missed essential callback responsibilities. Version 2 strengthens
+input/result data-flow tracing and a minimal-complete-contract drafting pass.
+These are general practices, not answers or examples from the dataset.
+
+Further comparisons are in progress. Configuration and job names are recorded in
 `experiment.json`; sanitized aggregates are saved in `results/`.
 
 ## Reproduce
