@@ -104,3 +104,14 @@ func (a *Account) Reset() {
 }
 
 //@ Ensures a.Balance' = 0
+
+// MaxInt8 has the name of a built-in limit and another value.
+const MaxInt8 = 0
+
+// Touch names what it modifies with a constant of this package.
+//
+// @ Requires |as| = 128 And as[0] != nil
+// @ Modifies as[MaxInt8].Balance
+func Touch(as []*Account) {
+	as[MaxInt8].Balance = 1
+}

@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"go/types"
 	"strings"
+	"sync"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"golang.org/x/tools/go/types/typeutil"
 )
 
 // The parts a leaf can be: an ordinary value, or one of the four numbers that
@@ -31,42 +33,26 @@ type leaf struct {
 // value is a Go value in the logic: one term for each leaf of its type.
 type value []*logic.Term
 
-// typeKey names a type in the keys of memory regions. Identical types must
-// get the same key however they are spelled, so aliases are replaced by what
-// they stand for, at every depth.
+// typeKeys gives every type a key of its own. It decides by Go's notion of
+// identical types and not by how a type is spelled, which differs for an
+// alias, for byte and uint8, and for the parameter names of a function type.
+var typeKeys = struct {
+	sync.Mutex
+	known typeutil.Map
+}{}
+
+// typeKey names a type in the keys of memory regions. Identical types get
+// the same key, so that a write through one spelling of a type is seen
+// through every other.
 func typeKey(t types.Type) string {
-	switch t := types.Unalias(t).(type) {
-	case *types.Basic:
-		// byte is uint8 and rune is int32 under another name.
-		return types.Typ[t.Kind()].Name()
-	case *types.Pointer:
-		return "*" + typeKey(t.Elem())
-	case *types.Slice:
-		return "[]" + typeKey(t.Elem())
-	case *types.Struct:
-		key := "struct{"
-		for i := range t.NumFields() {
-			field := t.Field(i)
-			// Unexported names of different packages are different fields.
-			name := field.Name()
-			if !field.Exported() && field.Pkg() != nil {
-				name = field.Pkg().Path() + "." + name
-			}
-			// Tags are left out: a slice converts between struct types
-			// that differ only in their tags, and keeps its array.
-			key += fmt.Sprintf("%s %s %t;", name, typeKey(field.Type()), field.Embedded())
-		}
-		return key + "}"
-	case *types.Named:
-		// A named type is its own type, whatever it is made of; an
-		// instantiated one is told apart by its arguments.
-		key := types.TypeString(t.Origin(), nil)
-		for i := range t.TypeArgs().Len() {
-			key += "[" + typeKey(t.TypeArgs().At(i)) + "]"
-		}
+	typeKeys.Lock()
+	defer typeKeys.Unlock()
+	if key, ok := typeKeys.known.At(t).(string); ok {
 		return key
 	}
-	return types.TypeString(types.Unalias(t), nil)
+	key := fmt.Sprintf("%s#%d", types.TypeString(t, nil), typeKeys.known.Len())
+	typeKeys.known.Set(t, key)
+	return key
 }
 
 func isError(t types.Type) bool {

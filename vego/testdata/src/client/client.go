@@ -127,3 +127,16 @@ func DepositsElsewhere(a *lib.Account) {
 func UsesReset(a *lib.Account) {
 	a.Reset() // want `the contract of \(\*lib.Account\).Reset cannot be used: its verification failed in package lib` `cannot verify UsesReset: Reset has a contract that could not be understood`
 }
+
+// TouchesFirst calls a function whose Modifies clause uses a constant of its
+// own package, which must keep its value here.
+//
+// @ Requires |as| = 128 And as[0] != nil And as[127] != nil
+// @ Requires as[0] != as[127] And as[0].Balance = 0
+// @ Modifies as[127].Balance
+func TouchesFirst(as []*lib.Account) int {
+	lib.Touch(as) // want `Touch may modify what it calls as\[MaxInt8\].Balance, which TouchesFirst may not modify`
+	return as[0].Balance
+}
+
+//@ Ensures result = 0

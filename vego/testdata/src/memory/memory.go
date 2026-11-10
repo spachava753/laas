@@ -1086,19 +1086,62 @@ func (u *Users) FindX(x int) (index int, err error) {
 //@ Ensures err = nil <-> Exists k in [0, |u.list|) : u.list[k].X = x
 
 // TagsShare converts a slice between struct types that differ in a tag,
-// which keeps the array.
+// which keeps the array. The two types have memory of their own in the
+// model, so the conversion is not accepted.
 func TagsShare() int {
 	a := []struct {
 		X int `a:"1"`
 	}{{X: 0}}
-	b := []struct {
+	b := []struct { // want `vego: cannot verify TagsShare: converting a .* is not supported`
 		X int `b:"1"`
+	}(a)
+	b[0].X = 1
+	return a[0].X
+}
+
+//@ Ensures result = 0
+
+// Number is int under another name.
+type Number = int
+
+// SpellingsShare converts between two spellings of one struct type, which
+// differ inside a field that is not modelled.
+func SpellingsShare() int {
+	a := []struct {
+		X int
+		C [1]Number
+	}{{X: 0}}
+	b := []struct {
+		X int
+		C [1]int
 	}(a)
 	b[0].X = 1
 	return a[0].X // want `vego: postcondition may not hold: result = 0`
 }
 
 //@ Ensures result = 0
+
+// Small is a struct whose field has a narrow type.
+type Small struct{ X byte }
+
+func readySmall(a []Small) error { return nil }
+
+// makeSmall returns a slice too long for a sample.
+func makeSmall() []Small {
+	return make([]Small, 65)
+}
+
+//@ Ensures |result| = 65
+
+// AlwaysFailsAfterReadySmall calls a function that succeeds whenever every
+// field holds a value of its type, which is always.
+func AlwaysFailsAfterReadySmall() error { // want `vego: the contract of AlwaysFailsAfterReadySmall would also be met by a function that always returns an error`
+	a := makeSmall()
+	_ = readySmall(a)
+	return errEmptyQueue
+}
+
+//@ Ensures True
 
 // One is a struct with a single field, which is still not a single value.
 type One struct{ X int }

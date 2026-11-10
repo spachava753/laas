@@ -236,16 +236,22 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 }
 
 // deepFacts states everything the type of a value guarantees, including,
-// for a string or a slice of single values, that every element is a value of
-// the element type.
+// for a string or a slice, that every element is a value of the element
+// type, field by field where the elements are structs.
 func (v *fnVerifier) deepFacts(mem memory, val value, t types.Type, brk *logic.Term) *logic.Term {
 	fact := v.wellFormed(val, t, brk)
 	switch {
 	case isString(t):
 		return logic.And(fact, v.elementFacts(val[0], types.Typ[types.Uint8]))
 	case isSlice(t):
-		if seq, ok := v.view(nil, mem, val, t); ok {
-			return logic.And(fact, v.elementFacts(seq, elemType(t)))
+		elem := elemType(t)
+		leaves, _ := layoutOf(elem)
+		for _, lf := range leaves {
+			if lf.part != partValue || (lf.sort != logic.Int && !lf.sort.IsSeq()) {
+				continue
+			}
+			row := v.row(nil, mem, "[]"+typeKey(elem)+lf.path, lf, val[0])
+			fact = logic.And(fact, v.elementFacts(logic.Subseq(row, val[1], logic.Add(val[1], val[2])), lf.typ))
 		}
 	}
 	return fact

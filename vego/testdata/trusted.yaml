@@ -201,3 +201,10 @@ trusted:
   memory.grab:
     reason: Test helper whose modifies names something that is not there.
     modifies: [l.missing]
+
+  memory.readySmall:
+    reason: Test helper that succeeds when every field holds a value of its type, which is always.
+    requires:
+      - "|a| = 65"
+    ensures:
+      - "(Forall k in [0, |a|) : a[k].X >= 0) -> result = nil"

@@ -71,18 +71,19 @@ func (pv *pkgVerifier) exportContracts(excused map[*funcInfo]bool) {
 			continue
 		}
 		fact := &contractFact{Excused: excused[fn], Verified: !unverified[fn], Consts: map[string]string{}}
-		capture := func(c *clause) string {
-			var visit func(n *logic.Node)
-			visit = func(n *logic.Node) {
-				if constant, ok := pv.pass.Pkg.Scope().Lookup(n.Name).(*types.Const); ok && n.Kind == logic.NIdent {
-					if literal, ok := literalOf(constant.Val()); ok {
-						fact.Consts[n.Name] = literal.String()
-					}
-				}
-				for _, kid := range n.Kids {
-					visit(kid)
+		// The constants a contract mentions are recorded with their values.
+		var visit func(n *logic.Node)
+		visit = func(n *logic.Node) {
+			if constant, ok := pv.pass.Pkg.Scope().Lookup(n.Name).(*types.Const); ok && n.Kind == logic.NIdent {
+				if literal, ok := literalOf(constant.Val()); ok {
+					fact.Consts[n.Name] = literal.String()
 				}
 			}
+			for _, kid := range n.Kids {
+				visit(kid)
+			}
+		}
+		capture := func(c *clause) string {
 			if c.node != nil {
 				visit(c.node)
 			}
@@ -96,6 +97,12 @@ func (pv *pkgVerifier) exportContracts(excused map[*funcInfo]bool) {
 		}
 		for _, m := range fn.modifies {
 			fact.Modifies = append(fact.Modifies, m.text)
+			// The indices of a path may mention constants too.
+			for _, step := range m.steps {
+				if step.index != nil {
+					visit(step.index)
+				}
+			}
 		}
 		pv.pass.ExportObjectFact(fn.obj, fact)
 	}
