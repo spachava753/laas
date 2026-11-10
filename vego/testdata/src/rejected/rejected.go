@@ -172,3 +172,22 @@ func malformed() int { return 0 }
 
 // @ Ensures result = 0
 func CallsMalformed() int { return malformed() } // want `vego:\ cannot\ verify\ CallsMalformed:\ malformed\ has\ an\ annotation\ that\ could\ not\ be\ understood,\ so\ its\ contract\ is\ unknown`
+
+//@ Predicate negate(b) ::= ~b
+//@ Predicate hiddenLiar(n) ::= negate(hiddenLiar(n)) // want `vego:\ recursive\ use\ of\ predicate\ hiddenLiar\ must\ not\ occur\ under\ negation,\ on\ the\ left\ of\ \->,\ or\ under\ <\->`
+
+func MultipleVariants() int {
+	i := 0
+	//@ Invariant 0 <= i <= 1
+	//@ Variant 0
+	//@ Variant 1 - i // want `vego:\ loop\ already\ has\ a\ Variant;\ give\ it\ exactly\ one`
+	for i < 1 { // want `vego:\ loop\ variant\ may\ not\ decrease:\ 0`
+		i++
+	}
+	return i
+}
+
+//@ Ensures result = 1
+
+// @ Ensures result = ١ // want `vego:\ syntax\ error\ in\ Ensures\ annotation:\ unexpected\ character\ '١'`
+func ArabicDigit() int { return 1 }

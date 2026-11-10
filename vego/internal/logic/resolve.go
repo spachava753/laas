@@ -415,7 +415,10 @@ func (r *Resolver) negativeCycle(name string) bool {
 func walkPreds(t *Term, positive bool, visit func(name string, positive bool)) {
 	switch t.Op {
 	case OpPred:
+		// The applied predicate may negate a boolean argument, so nothing
+		// inside the arguments counts as positive.
 		visit(t.Name, positive)
+		positive = false
 	case OpNot:
 		walkPreds(t.Args[0], false, visit)
 		return

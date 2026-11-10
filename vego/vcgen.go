@@ -320,6 +320,10 @@ func (v *fnVerifier) seq(list []ast.Stmt, from, to token.Pos, st *state, c ctrl,
 		case "Invariant":
 			spec.invariants = append(spec.invariants, clause)
 		default:
+			if spec.variant != nil {
+				v.report(clause.pos, "loop already has a Variant; give it exactly one")
+				continue
+			}
 			spec.variant = clause
 		}
 	}

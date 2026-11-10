@@ -63,6 +63,7 @@ func TestResolve(t *testing.T) {
 		{"n >", "error: expected an expression"},
 		{"n > 0 )", "error: unexpected \")\""},
 		{"n $ 0", "error: unexpected character"},
+		{"n = \u0661", "error: unexpected character"},
 		{"Forall k : k > 0", "error: expected \"in\""},
 		{"A > 0", "error: cannot compare"},
 		{"found + 1 = 2", "error: expected an integer"},
@@ -113,6 +114,8 @@ func TestDefine(t *testing.T) {
 		{"rejects recursion under negation", []string{"liar(n) ::= ~liar(n)"}, "must not occur under negation"},
 		{"rejects recursion left of an implication", []string{"p(n) ::= p(n) -> n > 0"}, "must not occur under negation"},
 		{"rejects mutual recursion through negation", []string{"p(n) ::= ~q(n)", "q(n) ::= p(n)"}, "must not occur under negation"},
+		{"rejects recursion through an argument that the callee negates",
+			[]string{"negate(b) ::= ~b", "liar(n) ::= negate(liar(n))"}, "must not occur under negation"},
 		{"rejects duplicate names", []string{"p(n) ::= n > 0", "p(n) ::= n < 0"}, "already defined"},
 		{"rejects free names", []string{"p(n) ::= n > m"}, "may only mention their parameters"},
 	}

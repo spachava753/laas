@@ -98,7 +98,7 @@ func lex(src string) ([]token, error) {
 				i += size
 			}
 			toks = append(toks, token{'i', src[start:i], start})
-		case unicode.IsDigit(r):
+		case r >= '0' && r <= '9':
 			start := i
 			for i < len(src) && src[i] >= '0' && src[i] <= '9' {
 				i++
