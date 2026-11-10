@@ -68,6 +68,14 @@ func (v *fnVerifier) constant(value constant.Value, sort logic.Sort, e ast.Expr,
 // exprAs evaluates an expression that is assigned to something of type want.
 // It differs from expr only for nil, which has no type of its own.
 func (v *fnVerifier) exprAs(e ast.Expr, want types.Type, st *state, guard []*logic.Term) *logic.Term {
+	// An error value is only ever an error, nil, or the result of a call.
+	// Converting anything else to an error would hide a value, possibly a
+	// slice, behind an interface whose methods are not verified.
+	if wantSort, ok := sortOf(want); ok && wantSort == logic.Err && !v.isNil(e) {
+		if have, ok := sortOf(v.info.TypeOf(e)); !ok || have != logic.Err {
+			v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to an error is not supported", v.info.TypeOf(e)))
+		}
+	}
 	if !v.isNil(e) {
 		return v.expr(e, st, guard)
 	}
@@ -91,25 +99,25 @@ func (v *fnVerifier) opaque(op token.Token, operand *logic.Term) *logic.Term {
 
 // text evaluates the string forms that have no slice counterpart:
 // concatenation, substrings, and conversions to and from []byte.
-func (v *fnVerifier) text(e ast.Expr, st *state) *logic.Term {
+func (v *fnVerifier) text(e ast.Expr, st *state, guard []*logic.Term) *logic.Term {
 	switch e := ast.Unparen(e).(type) {
 	case *ast.BinaryExpr:
-		left := v.expr(e.X, st, nil)
-		return v.binary(e.Op, left, v.expr(e.Y, st, nil), v.info.TypeOf(e), e.OpPos, st, nil)
+		left := v.expr(e.X, st, guard)
+		return v.binary(e.Op, left, v.expr(e.Y, st, guard), v.info.TypeOf(e), e.OpPos, st, guard)
 	case *ast.SliceExpr:
 		if !isString(v.info.TypeOf(e.X)) || e.Slice3 {
 			break
 		}
-		whole := v.expr(e.X, st, nil)
+		whole := v.expr(e.X, st, guard)
 		lo, hi := logic.IntLit(0), logic.Len(whole)
 		if e.Low != nil {
-			lo = v.expr(e.Low, st, nil)
+			lo = v.expr(e.Low, st, guard)
 		}
 		if e.High != nil {
-			hi = v.expr(e.High, st, nil)
+			hi = v.expr(e.High, st, guard)
 		}
 		within := logic.And(logic.Le(logic.IntLit(0), lo), logic.Le(lo, hi), logic.Le(hi, logic.Len(whole)))
-		v.check(st, nil, within, e.Pos(), "substring bounds may be out of range")
+		v.check(st, guard, within, e.Pos(), "substring bounds may be out of range")
 		return logic.Subseq(whole, lo, hi)
 	case *ast.CallExpr:
 		if !v.info.Types[e.Fun].IsType() {
@@ -122,7 +130,7 @@ func (v *fnVerifier) text(e ast.Expr, st *state) *logic.Term {
 			return isString(t) || (isSlice(t) && types.Identical(t.Underlying().(*types.Slice).Elem().Underlying(), types.Typ[types.Uint8]))
 		}
 		if bytes(from) && bytes(to) && (isString(from) || isString(to)) {
-			return v.expr(e.Args[0], st, nil)
+			return v.expr(e.Args[0], st, guard)
 		}
 	}
 	return nil

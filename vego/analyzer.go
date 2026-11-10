@@ -77,6 +77,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 				pv.run(fn, (*fnVerifier).audit)
 			}
 		}
+		pv.reportAlwaysFailing()
 		return nil, nil
 	}
 	return analyzer

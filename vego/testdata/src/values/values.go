@@ -67,7 +67,7 @@ func Propagates(A []int, i int) (double int, err error) {
 
 // OnlySaysWhatSuccessMeans never says that it succeeds, so an implementation
 // that always fails would meet its contract.
-func OnlySaysWhatSuccessMeans(A []int, i int) (value int, err error) { // want `vego:\ the\ contract\ of\ OnlySaysWhatSuccessMeans\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds,\ for\ example\ with\ "condition\ \->\ err\ =\ nil"`
+func OnlySaysWhatSuccessMeans(A []int, i int) (value int, err error) { // want `vego:\ the\ contract\ of\ OnlySaysWhatSuccessMeans\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ some\ input\ satisfies\ it`
 	if i < 0 || i >= len(A) {
 		return 0, errOutOfRange
 	}
@@ -79,7 +79,7 @@ func OnlySaysWhatSuccessMeans(A []int, i int) (value int, err error) { // want `
 // NoPostcondition has the same problem with no postcondition at all.
 //
 // @ Requires i >= 0
-func NoPostcondition(A []int, i int) (int, error) { // want `vego:\ the\ contract\ of\ NoPostcondition\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds,\ for\ example\ with\ "condition\ \->\ err\ =\ nil"`
+func NoPostcondition(A []int, i int) (int, error) { // want `vego:\ the\ contract\ of\ NoPostcondition\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ some\ input\ satisfies\ it`
 	if i >= len(A) {
 		return 0, errOutOfRange
 	}
@@ -374,7 +374,7 @@ func Identity(nil string) string {
 //@ Ensures result = ""
 
 // UnreachableSource never reaches the call that would excuse it.
-func UnreachableSource() error { // want `vego:\ the\ contract\ of\ UnreachableSource\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds,\ for\ example\ with\ "condition\ \->\ err\ =\ nil"`
+func UnreachableSource() error { // want `vego:\ the\ contract\ of\ UnreachableSource\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ some\ input\ satisfies\ it`
 	if false {
 		_ = external()
 	}
@@ -402,7 +402,7 @@ func Wrap() error {
 //@ Ensures True
 
 // ConstrainsOtherResult pins the number down but never promises success.
-func ConstrainsOtherResult() (int, error) { // want `vego:\ the\ contract\ of\ ConstrainsOtherResult\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds,\ for\ example\ with\ "condition\ \->\ err\ =\ nil"`
+func ConstrainsOtherResult() (int, error) { // want `vego:\ the\ contract\ of\ ConstrainsOtherResult\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ some\ input\ satisfies\ it`
 	return 1, errors.New("always")
 }
 
@@ -411,15 +411,118 @@ func ConstrainsOtherResult() (int, error) { // want `vego:\ the\ contract\ of\ C
 // ImpossibleCondition promises success only when something impossible holds.
 //
 // @ Requires i >= 0
-func ImpossibleCondition(i int) (err error) { // want `vego:\ the\ contract\ of\ ImpossibleCondition\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds,\ for\ example\ with\ "condition\ \->\ err\ =\ nil"`
+func ImpossibleCondition(i int) (err error) { // want `vego:\ the\ contract\ of\ ImpossibleCondition\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ some\ input\ satisfies\ it`
 	return errOutOfRange
 }
 
 //@ Ensures i < 0 -> err = nil
 
 // DependsOnOutput makes success depend on what the function itself returns.
-func DependsOnOutput(i int) (n int, err error) { // want `vego:\ the\ contract\ of\ DependsOnOutput\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds,\ for\ example\ with\ "condition\ \->\ err\ =\ nil"`
+func DependsOnOutput(i int) (n int, err error) { // want `vego:\ the\ contract\ of\ DependsOnOutput\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ some\ input\ satisfies\ it`
 	return 1, errOutOfRange
 }
 
 //@ Ensures n = 0 -> err = nil
+
+type failing []int
+
+func (f failing) Error() string {
+	f[0] = 1
+	return "f"
+}
+
+func consume(e error) { _ = e.Error() }
+
+// BoxedExplicitly hides a slice behind an error and formats it, which runs
+// its Error method.
+//
+// @ Requires |a| = 1 And a[0] = 0
+func BoxedExplicitly(a failing) int {
+	_ = fmt.Errorf("%s", error(a)) // want `vego:\ cannot\ verify\ BoxedExplicitly:\ converting\ a\ values\.failing\ to\ an\ error\ is\ not\ supported`
+	return a[0]
+}
+
+//@ Ensures result = 0
+
+// BoxedImplicitly does the same by passing the slice where an error is
+// expected.
+//
+// @ Requires |a| = 1 And a[0] = 0
+func BoxedImplicitly(a failing) int {
+	consume(a) // want `vego:\ cannot\ verify\ BoxedImplicitly:\ converting\ a\ values\.failing\ to\ an\ error\ is\ not\ supported`
+	return a[0]
+}
+
+//@ Ensures result = 0
+
+func describe(error) string { return "" }
+
+// GuardedSource never evaluates the call that would excuse it.
+func GuardedSource() error { // want `vego:\ the\ contract\ of\ GuardedSource\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ some\ input\ satisfies\ it`
+	if false && len(describe(external())) > 0 {
+		return nil
+	}
+	return errors.New("always")
+}
+
+//@ Ensures True
+
+// NoSuchByte promises success for a byte value that does not exist.
+//
+// @ Requires |s| = 1
+func NoSuchByte(s string) error { // want `vego:\ the\ contract\ of\ NoSuchByte\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ some\ input\ satisfies\ it`
+	_ = s[0]
+	return errors.New("always")
+}
+
+//@ Ensures s[0] = 256 -> result = nil
+
+// NoSuchSquare promises success for a number that is not a square.
+func NoSuchSquare(x int) error { // want `vego:\ the\ contract\ of\ NoSuchSquare\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ some\ input\ satisfies\ it`
+	return errors.New("always") // want `vego:\ postcondition\ may\ not\ hold:\ x\*x\ =\ 2\ \->\ result\ =\ nil`
+}
+
+//@ Ensures x*x = 2 -> result = nil
+
+// Alternating and its partner call each other and reach an unpredictable
+// call; both are excused whichever is declared first.
+//
+// @ Requires 0 <= n <= 1
+// @ Measure 2*n
+func Alternating(n int) error {
+	if n > 0 {
+		return partner(n - 1)
+	}
+	return external()
+}
+
+//@ Ensures True
+
+// @ Requires 0 <= n <= 1
+// @ Measure 2*n+1
+func partner(n int) error {
+	return Alternating(n)
+}
+
+//@ Ensures True
+
+// Circular and its partner only call each other, which excuses neither.
+//
+// @ Requires 0 <= n <= 1
+// @ Measure 2*n
+func Circular(n int) error { // want `vego:\ the\ contract\ of\ Circular\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ some\ input\ satisfies\ it`
+	if n > 0 {
+		return circularPartner(n - 1)
+	}
+	return errOutOfRange
+}
+
+//@ Ensures True
+
+// @ Requires 0 <= n <= 1
+// @ Measure 2*n+1
+func circularPartner(n int) error { // want `vego:\ the\ contract\ of\ circularPartner\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ some\ input\ satisfies\ it`
+	return Circular(n)
+}
+
+//@ Ensures True

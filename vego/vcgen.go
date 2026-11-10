@@ -72,8 +72,10 @@ type fnVerifier struct {
 	// operands, whose order the symbolic execution does not model.
 	effectful *ast.CallExpr
 	// outside records that execution reached a call whose failure no
-	// contract predicts.
+	// contract predicts; reached holds the verified callees returning an
+	// error that execution reached, which may turn out to be excused.
 	outside bool
+	reached map[*funcInfo]bool
 }
 
 // allowEffects marks e, when it is a call, as the call of the current
@@ -85,7 +87,10 @@ func (v *fnVerifier) allowEffects(e ast.Expr) {
 // run executes one task on a function, turning the panics that abandon a
 // verification into diagnostics.
 func (pv *pkgVerifier) run(fn *funcInfo, task func(v *fnVerifier)) {
-	v := &fnVerifier{pkgVerifier: pv, fn: fn, entry: map[*types.Var]*logic.Term{}, names: map[string]int{}}
+	v := &fnVerifier{
+		pkgVerifier: pv, fn: fn, entry: map[*types.Var]*logic.Term{}, names: map[string]int{},
+		reached: map[*funcInfo]bool{},
+	}
 	defer func() {
 		switch r := recover().(type) {
 		case nil, abort:
@@ -637,15 +642,15 @@ func (v *fnVerifier) rhs(target lvalue, e ast.Expr, st *state) *logic.Term {
 		v.unsupported(e.Pos(), fmt.Sprintf(
 			"assigning slice %s to another variable would make two variables share one backing array", id.Name))
 	}
-	return v.slice(target.variable, sort, e, st)
+	return v.slice(target.variable, sort, e, st, nil)
 }
 
 // slice evaluates a sequence-valued expression: a string expression, or a
 // slice expression that produces fresh storage, which is nil, make, a
 // composite literal, a call, or x = append(x, ...) on a local x.
-func (v *fnVerifier) slice(target *types.Var, sort logic.Sort, e ast.Expr, st *state) *logic.Term {
+func (v *fnVerifier) slice(target *types.Var, sort logic.Sort, e ast.Expr, st *state, guard []*logic.Term) *logic.Term {
 	empty := zero(sort)
-	if text := v.text(e, st); text != nil {
+	if text := v.text(e, st, guard); text != nil {
 		return text
 	}
 	switch e := ast.Unparen(e).(type) {
@@ -660,7 +665,7 @@ func (v *fnVerifier) slice(target *types.Var, sort logic.Sort, e ast.Expr, st *s
 			if _, keyed := element.(*ast.KeyValueExpr); keyed {
 				v.unsupported(element.Pos(), "keyed slice literals are not supported")
 			}
-			result = logic.Push(result, v.expr(element, st, nil))
+			result = logic.Push(result, v.expr(element, st, guard))
 		}
 		return result
 	case *ast.CallExpr:
@@ -669,13 +674,13 @@ func (v *fnVerifier) slice(target *types.Var, sort logic.Sort, e ast.Expr, st *s
 			if len(e.Args) < 2 {
 				v.unsupported(e.Pos(), "make needs a length")
 			}
-			length := v.expr(e.Args[1], st, nil)
-			v.check(st, nil, logic.Le(logic.IntLit(0), length), e.Args[1].Pos(), "make length may be negative")
-			v.checkFits(st, nil, length, types.Typ[types.Int], e.Args[1].Pos(), "make length")
+			length := v.expr(e.Args[1], st, guard)
+			v.check(st, guard, logic.Le(logic.IntLit(0), length), e.Args[1].Pos(), "make length may be negative")
+			v.checkFits(st, guard, length, types.Typ[types.Int], e.Args[1].Pos(), "make length")
 			if len(e.Args) == 3 {
-				capacity := v.expr(e.Args[2], st, nil)
-				v.check(st, nil, logic.Le(length, capacity), e.Args[2].Pos(), "make capacity may be less than the length")
-				v.checkFits(st, nil, capacity, types.Typ[types.Int], e.Args[2].Pos(), "make capacity")
+				capacity := v.expr(e.Args[2], st, guard)
+				v.check(st, guard, logic.Le(length, capacity), e.Args[2].Pos(), "make capacity may be less than the length")
+				v.checkFits(st, guard, capacity, types.Typ[types.Int], e.Args[2].Pos(), "make capacity")
 			}
 			return logic.Fill(length, zero(sort.Elem()))
 		case isBuiltin(v.info, e, "append"):
@@ -686,15 +691,15 @@ func (v *fnVerifier) slice(target *types.Var, sort logic.Sort, e ast.Expr, st *s
 			}
 			result := v.value(base, st)
 			for _, element := range e.Args[1:] {
-				result = logic.Push(result, v.expr(element, st, nil))
+				result = logic.Push(result, v.expr(element, st, guard))
 			}
 			// The grown length must be proved to fit. Assuming it, as for
 			// other slices, would contradict a length already at the limit
 			// and make everything after the append provable.
-			v.checkFits(st, nil, logic.Len(result), types.Typ[types.Int], e.Pos(), "append length")
+			v.checkFits(st, guard, logic.Len(result), types.Typ[types.Int], e.Pos(), "append length")
 			return result
 		}
-		results := v.call(e, st, nil)
+		results := v.call(e, st, guard)
 		if len(results) == 1 && results[0] != nil {
 			return results[0]
 		}
@@ -1079,7 +1084,7 @@ func (v *fnVerifier) expr(e ast.Expr, st *state, guard []*logic.Term) *logic.Ter
 		return v.constant(tv.Value, sort, e, st)
 	}
 	if sort.IsSeq() {
-		return v.slice(nil, sort, e, st)
+		return v.slice(nil, sort, e, st, guard)
 	}
 	switch e := e.(type) {
 	case *ast.ParenExpr:
@@ -1141,6 +1146,11 @@ func (v *fnVerifier) expr(e ast.Expr, st *state, guard []*logic.Term) *logic.Ter
 	return nil
 }
 
+// callExpr evaluates a call used as a value: the built-ins len, min, and
+// max, a conversion, or a call to a function with a single result.
+// Conversions between integers must fit the target type, a conversion that
+// involves a float yields an unknown value, and only an error converts to
+// an error.
 func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) *logic.Term {
 	switch {
 	case isBuiltin(v.info, e, "len"):
@@ -1157,8 +1167,11 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) *
 		}
 		return result
 	case v.info.Types[e.Fun].IsType():
-		value, target := v.expr(e.Args[0], st, guard), v.info.TypeOf(e)
+		value, target := v.exprAs(e.Args[0], v.info.TypeOf(e), st, guard), v.info.TypeOf(e)
 		sort, _ := sortOf(target)
+		if sort == logic.Err {
+			return value
+		}
 		if value.Sort == logic.Float || sort == logic.Float {
 			// Nothing is known about a float, so nothing is known about
 			// what it converts to or from, beyond the type of the result.
@@ -1319,11 +1332,16 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		}
 		// A callee that returns an error without saying when it succeeds
 		// makes this function's own success unpredictable, provided the
-		// call can be reached at all.
-		if sort == logic.Err && !v.outside && (fn == nil || !fn.annotated() || v.verified(fn).excused) {
+		// call can be reached at all. A callee without a contract is such
+		// a source outright; a verified one may turn out to be excused.
+		source := fn == nil || !fn.annotated()
+		if sort == logic.Err && ((source && !v.outside) || (!source && !v.reached[fn])) {
 			reachable := append(slices.Clip(st.hyps), guard...)
 			opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
-			v.outside = solver.Prove(reachable, logic.False(), opts) != solver.Proved
+			if solver.Prove(reachable, logic.False(), opts) != solver.Proved {
+				v.outside = v.outside || source
+				v.reached[fn] = !source
+			}
 		}
 		if isSlice(sig.Results().At(i).Type()) && (fn == nil || !fn.annotated()) {
 			v.unsupported(call.Pos(), fmt.Sprintf(

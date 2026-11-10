@@ -4,6 +4,8 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"maps"
+	"math/big"
 	"slices"
 
 	"github.com/spachava753/laas/vego/internal/logic"
@@ -69,28 +71,75 @@ func (pv *pkgVerifier) findSentinels() {
 	}
 }
 
-// outcome is what verifying a function established about it, beyond the
-// diagnostics it produced.
+// outcome is what verifying a function established about its failure,
+// beyond the diagnostics it produced.
 type outcome struct {
-	// excused is set when the function may legitimately fail on every call:
-	// it reaches a call whose failure no contract predicts, and its own
-	// contract never says that it succeeds.
-	excused bool
+	// complete is set when verification ran to the end; the rest is only
+	// meaningful then, and only for functions that return an error.
+	complete bool
+	// forces is set when the contract makes the function succeed for some
+	// input.
+	forces bool
+	// outside is set when execution reached a call without a contract that
+	// returns an error; reached holds the verified callees returning an
+	// error that it reached.
+	outside bool
+	reached map[*funcInfo]bool
 }
 
-// verified verifies a function once and returns the outcome. A function that
-// is still being verified, which happens on recursion, is not excused.
-func (pv *pkgVerifier) verified(fn *funcInfo) *outcome {
-	if result, ok := pv.outcomes[fn]; ok {
-		return result
+// verified verifies a function once and records the outcome.
+func (pv *pkgVerifier) verified(fn *funcInfo) {
+	if _, done := pv.outcomes[fn]; done {
+		return
 	}
 	result := &outcome{}
 	pv.outcomes[fn] = result
 	pv.run(fn, func(v *fnVerifier) {
 		v.verify()
-		v.checkAlwaysFails(result)
+		if len(errorResults(fn)) > 0 {
+			result.forces = v.forcesSuccess()
+		}
+		result.outside, result.reached, result.complete = v.outside, v.reached, true
 	})
-	return result
+}
+
+// reportAlwaysFailing rejects every contract that its function could meet
+// by failing on every call. A postcondition of the form "err = nil -> ..."
+// alone says what success looks like but never that success happens.
+//
+// A function is excused when it cannot promise success: its contract forces
+// none, and it reaches a call whose failure no contract predicts, either
+// directly or through a verified callee that is itself excused. The excused
+// functions are the least fixed point of that rule, so a cycle of functions
+// that only call each other excuses nobody, and the order of declarations
+// does not matter.
+func (pv *pkgVerifier) reportAlwaysFailing() {
+	excused := map[*funcInfo]bool{}
+	candidate := func(fn *funcInfo) bool {
+		result := pv.outcomes[fn]
+		return result != nil && result.complete && len(errorResults(fn)) > 0 && !result.forces
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, fn := range pv.order {
+			if !candidate(fn) || excused[fn] {
+				continue
+			}
+			through := slices.ContainsFunc(slices.Collect(maps.Keys(pv.outcomes[fn].reached)), func(callee *funcInfo) bool {
+				return pv.outcomes[fn].reached[callee] && excused[callee]
+			})
+			if pv.outcomes[fn].outside || through {
+				excused[fn], changed = true, true
+			}
+		}
+	}
+	for _, fn := range pv.order {
+		if candidate(fn) && !excused[fn] {
+			pv.report(fn.decl.Name.Pos(), "the contract of %s would also be met by a function that always returns an error; "+
+				"state when it succeeds with a clause such as \"condition -> err = nil\", "+
+				"where the condition is about the inputs and some input satisfies it", fn.obj.Name())
+		}
+	}
 }
 
 // errorResults returns the indices of the results of type error.
@@ -155,14 +204,12 @@ func mentions(t *logic.Term, constants map[*logic.Term]bool) bool {
 	return false
 }
 
-// forcesSuccess reports whether the contract makes the function succeed for
-// some input: for every error result it has a clause "C -> err = nil" whose
-// condition C speaks only about the inputs and is not provably impossible.
-// Without such a clause an implementation that fails on every call may well
-// satisfy the contract, whatever else the contract demands.
-func (v *fnVerifier) forcesSuccess() bool {
-	fn, st := v.fn, v.enter()
-	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
+// successClauses resolves the contract for the given argument values. It
+// returns the facts the precondition and the parameter types give about
+// them and, for each error result, the conditions over the inputs alone
+// under which the postcondition forces that error to be nil.
+func (v *fnVerifier) successClauses(args map[*types.Var]*logic.Term) (pre []*logic.Term, conditions [][]*logic.Term) {
+	fn := v.fn
 	outputs := map[*logic.Term]bool{}
 	results := make([]*logic.Term, len(fn.results))
 	for i, result := range fn.results {
@@ -172,47 +219,136 @@ func (v *fnVerifier) forcesSuccess() bool {
 	}
 	post := map[*types.Var]*logic.Term{}
 	for _, param := range fn.params {
-		post[param] = v.entry[param]
+		pre = append(pre, v.typeFact(args[param], param.Type()))
+		post[param] = args[param]
 		if isSlice(param.Type()) {
 			post[param] = v.fresh("out", post[param].Sort)
 			outputs[post[param]] = true
 		}
 	}
-	env := &contractEnv{pv: v.pkgVerifier, fn: fn, args: v.entry, post: post, results: results}
-	var conditions [][]*logic.Term
-	for range errorResults(fn) {
-		conditions = append(conditions, nil)
+	for _, c := range fn.requires {
+		pre = append(pre, v.formula(c, c.node, &contractEnv{pv: v.pkgVerifier, fn: fn, args: args}))
 	}
+	env := &contractEnv{pv: v.pkgVerifier, fn: fn, args: args, post: post, results: results}
+	conditions = make([][]*logic.Term, len(errorResults(fn)))
 	for _, c := range fn.ensures {
 		clause := v.formula(c, c.node, env)
 		for n, index := range errorResults(fn) {
-			conditions[n] = append(conditions[n], successConditions(clause, results[index])...)
+			for _, condition := range successConditions(clause, results[index]) {
+				if !mentions(condition, outputs) {
+					conditions[n] = append(conditions[n], condition)
+				}
+			}
 		}
 	}
-	for _, candidates := range conditions {
-		usable := slices.ContainsFunc(candidates, func(condition *logic.Term) bool {
-			return !mentions(condition, outputs) && solver.Prove(st.hyps, logic.Not(condition), opts) != solver.Proved
-		})
-		if !usable {
-			return false
-		}
-	}
-	return true
+	return pre, conditions
 }
 
-// checkAlwaysFails rejects a contract that a function could meet by failing
-// on every call. A postcondition of the form "err = nil -> ..." alone says
-// what success looks like but never that success happens. A function that
-// reached a call whose failure no contract predicts cannot promise success;
-// it is excused, and its callers inherit the excuse.
-func (v *fnVerifier) checkAlwaysFails(result *outcome) {
-	if len(errorResults(v.fn)) == 0 || v.forcesSuccess() {
-		return
+// maxWitnesses bounds the inputs tried when looking for one on which a
+// contract forces success.
+const maxWitnesses = 3000
+
+// forcesSuccess reports whether the contract makes the function succeed for
+// some input: for every error result there is a clause "C -> err = nil"
+// whose condition C speaks only about the inputs, and a concrete input that
+// provably satisfies the precondition and C. Without such a clause and
+// witness, an implementation that fails on every call may well satisfy the
+// contract, whatever else the contract demands.
+//
+// The witness is searched among small inputs built from 0, 1, -1 and the
+// numbers the contract mentions. Finding none is reported, even though a
+// witness outside that search may exist: the contract must then be stated so
+// that its success condition is plainly satisfiable.
+func (v *fnVerifier) forcesSuccess() bool {
+	fn := v.fn
+	v.enter()
+	pre, conditions := v.successClauses(v.entry)
+	numbers := []*big.Int{big.NewInt(0), big.NewInt(1), big.NewInt(-1), big.NewInt(2), big.NewInt(3)}
+	var harvest func(t *logic.Term)
+	harvest = func(t *logic.Term) {
+		if t.Op == logic.OpIntLit && t.Value().IsInt64() && len(numbers) < 12 {
+			for _, delta := range []int64{0, 1, -1} {
+				numbers = append(numbers, new(big.Int).Add(t.Value(), big.NewInt(delta)))
+			}
+		}
+		for _, arg := range t.Args {
+			harvest(arg)
+		}
 	}
-	if v.outside {
-		result.excused = true
-		return
+	for _, group := range append(conditions, pre) {
+		if len(group) == 0 {
+			return false
+		}
+		for _, t := range group {
+			harvest(t)
+		}
 	}
-	v.report(v.fn.decl.Name.Pos(), "the contract of %s would also be met by a function that always returns an error; "+
-		"state when it succeeds, for example with \"condition -> err = nil\"", v.fn.obj.Name())
+	choices := make([][]*logic.Term, len(fn.params))
+	total := 1
+	for i, param := range fn.params {
+		choices[i] = v.sampleValues(param, numbers)
+		total = min(total*len(choices[i]), maxWitnesses)
+	}
+	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
+	forced := make([]bool, len(conditions))
+	for n := 0; n < total && slices.Contains(forced, false); n++ {
+		args := map[*types.Var]*logic.Term{}
+		rest := n
+		for i, param := range fn.params {
+			args[param] = choices[i][rest%len(choices[i])]
+			rest /= len(choices[i])
+		}
+		facts, candidates := v.successClauses(args)
+		for result, group := range candidates {
+			forced[result] = forced[result] || slices.ContainsFunc(group, func(condition *logic.Term) bool {
+				return solver.Prove(nil, logic.And(append(facts, condition)...), opts) == solver.Proved
+			})
+		}
+	}
+	return !slices.Contains(forced, false)
+}
+
+// sampleValues lists concrete values of a parameter's type to try as part of
+// a witness: the given numbers that fit an integer type, both booleans, and
+// short sequences holding one repeated value. A float or an error has no
+// concrete values in the logic and stays symbolic.
+func (v *fnVerifier) sampleValues(param *types.Var, numbers []*big.Int) []*logic.Term {
+	fitting := func(t types.Type) []*logic.Term {
+		var values []*logic.Term
+		lo, hi, _ := v.intRange(t)
+		for _, number := range numbers {
+			if lo != nil && number.Cmp(lo) >= 0 && number.Cmp(hi) <= 0 {
+				values = append(values, logic.BigLit(number))
+			}
+		}
+		return values
+	}
+	entry := v.entry[param]
+	switch {
+	case entry.Sort == logic.Int:
+		return fitting(param.Type())
+	case entry.Sort == logic.Bool:
+		return []*logic.Term{logic.False(), logic.True()}
+	case !entry.Sort.IsSeq():
+		return []*logic.Term{entry}
+	}
+	elements := []*logic.Term{zero(entry.Sort.Elem())}
+	switch {
+	case entry.Sort == logic.BoolSeq:
+		elements = append(elements, logic.True())
+	case isString(param.Type()):
+		elements = fitting(types.Typ[types.Uint8])
+	case entry.Sort == logic.IntSeq:
+		elements = fitting(param.Type().Underlying().(*types.Slice).Elem())
+	}
+	var values []*logic.Term
+	for _, length := range fitting(types.Typ[types.Int]) {
+		if length.Value().Sign() < 0 || length.Value().Cmp(big.NewInt(64)) > 0 {
+			continue
+		}
+		for _, element := range elements[:min(len(elements), 3)] {
+			values = append(values, logic.Fill(length, element))
+		}
+	}
+	return values
 }
