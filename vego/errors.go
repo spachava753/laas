@@ -213,6 +213,19 @@ func (v *fnVerifier) contractInstance(entry *state) (pre, post, failures []*logi
 		// nothing here.
 		st.assume(v.calleeFormula(c, env))
 	}
+	// A verified function also keeps the invariants of what it hands back.
+	if fn.trust == nil {
+		for _, param := range fn.params {
+			if _, viaPointer := pointee(param.Type()); viaPointer && v.entry[param] != nil {
+				v.assumeInvariants(st, nil, st.mem, v.entry[param], param.Type())
+			}
+		}
+		for i, result := range fn.results {
+			if results[i] != nil {
+				v.assumeInvariants(st, nil, st.mem, results[i], result.Type())
+			}
+		}
+	}
 	for _, index := range errorResults(fn) {
 		failures = append(failures, results[index][0])
 	}

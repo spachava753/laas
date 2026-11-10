@@ -434,6 +434,26 @@ func (v *fnVerifier) atReturn(st *state, results []value, pos token.Pos) {
 	for _, c := range v.fn.ensures {
 		v.checkClause(c, env, st, nil, pos, "postcondition may not hold")
 	}
+	// The caller gets back what it passed by pointer, and the results,
+	// with their invariants intact.
+	for _, param := range v.fn.params {
+		if _, viaPointer := pointee(param.Type()); viaPointer && v.entry[param] != nil {
+			v.checkInvariants(st, nil, st.mem, v.entry[param], param.Type(), pos, describe(param)+" on return")
+		}
+	}
+	for i, result := range v.fn.results {
+		if results[i] == nil {
+			continue
+		}
+		// A result is described by the name annotations use for it.
+		what := "the result"
+		for name, index := range v.fn.resultNames {
+			if index == i && name != "result" {
+				what = "the result " + name
+			}
+		}
+		v.checkInvariants(st, nil, st.mem, results[i], result.Type(), pos, what)
+	}
 }
 
 // bodyEnv gives meaning to the names in an annotation inside the function

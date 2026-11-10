@@ -81,7 +81,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		"file of trusted contracts to use instead of "+TrustFileName+" next to go.mod",
 	)
 	analyzer.ResultType = reflect.TypeFor[*Usage]()
-	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact)}
+	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact)}
 	analyzer.Run = func(pass *analysis.Pass) (any, error) {
 		pv := &pkgVerifier{
 			pass:         pass,
@@ -94,6 +94,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			origins:      map[*ast.BlockStmt]*origins{},
 			knownReturns: map[*funcInfo]bool{},
 			isParameter:  map[*types.Var]bool{},
+			invariants:   map[*types.TypeName]*invariantSet{},
 			imported:     map[*types.Func]*funcInfo{},
 			foreign:      map[*types.Package]*logic.Resolver{},
 			plain:        logic.NewResolver(),
@@ -116,6 +117,8 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		}
 		pv.loadTrust(trustPath)
 		pv.collect()
+		pv.checkInvariantsDeclared()
+		pv.exportInvariants()
 		for _, fn := range pv.order {
 			if !fn.annotated() || fn.broken {
 				continue
@@ -223,6 +226,9 @@ type pkgVerifier struct {
 	origins      map[*ast.BlockStmt]*origins
 	knownReturns map[*funcInfo]bool
 	isParameter  map[*types.Var]bool
+	// invariants holds the invariants of struct types, nil for a type known
+	// to have none.
+	invariants map[*types.TypeName]*invariantSet
 }
 
 // report emits a diagnostic once per position and message. Symbolic execution
@@ -310,6 +316,10 @@ func (pv *pkgVerifier) collect() {
 				}
 				if plannedKinds[c.kind] {
 					pv.report(c.pos, "%s annotations are not supported yet", c.kind)
+					continue
+				}
+				if name, ok := pv.typeDocumented(file, group); ok {
+					pv.addInvariant(name, c)
 					continue
 				}
 				owner := pv.place(file, group, c)

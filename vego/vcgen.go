@@ -146,6 +146,12 @@ func (v *fnVerifier) enter() *state {
 			st.assume(separate(v.entry[pair[0]], v.entry[pair[1]]))
 		}
 	}
+	// Every caller has proved the invariants of what it passes.
+	for _, param := range fn.params {
+		if v.entry[param] != nil {
+			v.assumeInvariants(st, nil, memory{}, v.entry[param], param.Type())
+		}
+	}
 	for _, result := range fn.results {
 		_, ok := layoutOf(result.Type())
 		if !ok && v.lenient {

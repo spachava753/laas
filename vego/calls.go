@@ -146,6 +146,11 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	}
 	// The contract speaks about memory as it is now, before the call.
 	before, existed := maps.Clone(st.mem), st.brk
+	for _, param := range fn.params {
+		if args[param] != nil {
+			v.checkInvariants(st, guard, before, args[param], param.Type(), call.Pos(), "what is passed to "+name+" as "+describe(param))
+		}
+	}
 	pre := &specEnv{v: v, sink: st, fn: fn, args: args, now: before}
 	for _, c := range fn.requires {
 		v.checkClause(c, pre, st, guard, call.Pos(), "precondition of "+name+" may not hold")
@@ -179,6 +184,20 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	post := &specEnv{v: v, sink: st, fn: fn, args: args, results: results, now: before, post: st.mem, before: existed}
 	for _, c := range fn.ensures {
 		st.assume(logic.Implies(logic.And(guard...), v.calleeFormula(c, post)))
+	}
+	// A verified function has proved the invariants of what it hands back.
+	// A trusted one has proved nothing, so nothing is assumed of it.
+	if fn.trust == nil {
+		for _, param := range fn.params {
+			if _, viaPointer := pointee(param.Type()); viaPointer && args[param] != nil {
+				v.assumeInvariants(st, guard, st.mem, args[param], param.Type())
+			}
+		}
+		for i, result := range results {
+			if result != nil {
+				v.assumeInvariants(st, guard, st.mem, result, sig.Results().At(i).Type())
+			}
+		}
 	}
 	// What the types guarantee of everything the call took and produced,
 	// which a proof that this call succeeds may need: the state only holds

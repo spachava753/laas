@@ -229,3 +229,7 @@ trusted:
       - "|a| = 65"
     ensures:
       - "(Forall k in [0, |a|) : |a[k]| >= 0) -> result = nil"
+
+  (*invariants.Log).write:
+    reason: Test helper standing for an unverified method that changes its receiver.
+    modifies: [l]

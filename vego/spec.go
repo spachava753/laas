@@ -35,6 +35,10 @@ type specEnv struct {
 	// before is the number below which everything that existed before the
 	// call lies, for fresh.
 	before *logic.Term
+	// self and selfType are set for an invariant: names are the fields of
+	// the struct self is, or points to.
+	self     value
+	selfType types.Type
 	// st and pos are set inside a body: names are looked up in the scope at
 	// pos and denote their values in st.
 	st  *state
@@ -102,6 +106,9 @@ func (e *specEnv) locate(name string, steps []logic.Step, when logic.When) (reac
 		}
 		return entry.locate(name, steps, logic.Now)
 	}
+	if e.selfType != nil {
+		return e.locateField(name, steps, when)
+	}
 	val, t, isResult, constant, err := e.root(name)
 	switch {
 	case err != nil:
@@ -137,6 +144,34 @@ func (e *specEnv) locate(name string, steps []logic.Step, when logic.When) (reac
 	}
 	cur, ground := e.v.follow(e.sink, mem, val, hops)
 	found := reached{val: cur, typ: final, mem: mem, isResult: isResult, hops: len(hops)}
+	if ground {
+		found.sink = e.sink
+	}
+	return found, nil
+}
+
+// locateField follows a path of an invariant, which starts at a field of
+// the value the invariant is stated of, or is a constant.
+func (e *specEnv) locateField(name string, steps []logic.Step, when logic.When) (reached, error) {
+	if when != logic.Now {
+		return reached{}, fmt.Errorf("an invariant describes one state, so %s cannot be primed or put in old()", name)
+	}
+	hops, final, err := plan(e.selfType, append([]logic.Step{{Field: name}}, steps...))
+	if err != nil {
+		if _, _, noField := plan(e.selfType, []logic.Step{{Field: name}}); noField == nil {
+			return reached{}, fmt.Errorf("%s%v", name, err)
+		}
+		constant, constErr := e.v.contractConstant(e.fn, name)
+		switch {
+		case constErr != nil:
+			return reached{}, fmt.Errorf("%s is neither a field of the type nor a constant", name)
+		case len(steps) > 0:
+			return reached{}, fmt.Errorf("%s is a constant and has no fields or elements", name)
+		}
+		return reached{constant: constant}, nil
+	}
+	cur, ground := e.v.follow(e.sink, e.now, e.self, hops)
+	found := reached{val: cur, typ: final, mem: e.now, hops: len(hops)}
 	if ground {
 		found.sink = e.sink
 	}

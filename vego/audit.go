@@ -85,6 +85,16 @@ func (v *fnVerifier) audit() {
 				wellTyped = wellTyped && v.prove(st, nil, typed)
 			}
 		}
+		// An implementation also has to keep the invariants of what it
+		// hands back.
+		for i, result := range fn.results {
+			wellTyped = wellTyped && v.invariantsHold(st, st.mem, results[i], result.Type())
+		}
+		for _, param := range fn.params {
+			if _, viaPointer := pointee(param.Type()); viaPointer && v.entry[param] != nil {
+				wellTyped = wellTyped && v.invariantsHold(st, st.mem, v.entry[param], param.Type())
+			}
+		}
 		if !wellTyped {
 			continue
 		}

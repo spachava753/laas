@@ -39,8 +39,12 @@ Not built yet:
 
 ### Struct invariants
 
+Built as decided below, including invariants of types of other packages, which travel as analysis facts with the constants they mention. A declaration is checked once: an invariant that cannot be read, or a set of invariants no value satisfies, is an error even if nothing uses the type.
+
 Decisions:
 
+- **Not assumed after trusted code.** A verified function proves the invariants of what it hands back, so its callers may assume them. A trusted function proves nothing, so after it the invariant of a result, or of a struct it may have modified, has to be proved again before it is relied on.
+- **Only at boundaries, only for what is passed directly.** The invariant is applied to parameters, receivers, and results whose type is the struct or a pointer to it. A struct inside another struct, in a slice, or behind a pointer field is not covered.
 - **Declared on the type.** `// @ Invariant 0 <= Count And Count <= |Items|` in the doc comment of a struct type, naming its fields directly.
 - **Shorthand for contract clauses at every boundary.** The invariant is assumed on entry for every parameter and receiver of the type, proved on return for those and for every result of the type, and proved at each call for every argument. Between those points it may be broken. It is only ever assumed where a caller has proved it, so it adds no trust.
 - **Always enforced, for every function, with no opt-out.** An opt-out would let the invariant be switched off function by function while the type still advertises it. A helper that must run while the invariant is broken takes the fields it needs instead of the struct, or the caller restores the invariant before calling it. Revisit only if real code cannot be restructured that way.
