@@ -321,8 +321,8 @@ func Describe(err error) (code int) {
 	switch err {
 	case nil:
 		return 0
-	case errOutOfRange:
-		return 1 // want `vego:\ postcondition\ may\ not\ hold:\ code\ !=\ 1`
+	case errOutOfRange: // want `vego:\ cannot\ verify\ Describe:\ comparing\ two\ errors\ can\ panic\ when\ they\ hold\ an\ uncomparable\ type;\ compare\ with\ nil,\ or\ use\ errors\.Is`
+		return 1
 	}
 	return 2
 }
@@ -340,3 +340,86 @@ func Lookup(A []int, i int) (int, error) {
 
 //@ Ensures result2 = nil <-> (0 <= i And i < |A|)
 //@ Ensures result2 = nil -> result1 = A[i]
+
+// Equal compares two errors, which panics when both hold the same
+// uncomparable type.
+func Equal(a, b error) (same bool) {
+	return a == b // want `vego:\ cannot\ verify\ Equal:\ comparing\ two\ errors\ can\ panic\ when\ they\ hold\ an\ uncomparable\ type;\ compare\ with\ nil,\ or\ use\ errors\.Is`
+}
+
+//@ Ensures True
+
+type numbers []int
+
+func (n numbers) String() string {
+	n[0] = 1
+	return "n"
+}
+
+// Stale formats a value whose String method changes it.
+//
+// @ Requires |a| = 1 And a[0] = 0
+func Stale(a numbers) int {
+	_ = fmt.Errorf("%s", a) // want `vego:\ cannot\ verify\ Stale:\ formatting\ a\ value\ of\ type\ values\.numbers\ would\ call\ its\ methods,\ which\ are\ not\ verified`
+	return a[0]
+}
+
+//@ Ensures result = 0
+
+// Identity returns its parameter, which happens to be called nil.
+func Identity(nil string) string {
+	return nil // want `vego:\ postcondition\ may\ not\ hold:\ result\ =\ ""`
+}
+
+//@ Ensures result = ""
+
+// UnreachableSource never reaches the call that would excuse it.
+func UnreachableSource() error { // want `vego:\ the\ contract\ of\ UnreachableSource\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds,\ for\ example\ with\ "condition\ \->\ err\ =\ nil"`
+	if false {
+		_ = external()
+	}
+	return errors.New("always")
+}
+
+//@ Ensures True
+
+func external() error { return nil }
+
+// Pair is excused: nothing says when external succeeds.
+func Pair() (error, error) {
+	e := external()
+	return e, e
+}
+
+//@ Ensures True
+
+// Wrap inherits the excuse from Pair.
+func Wrap() error {
+	e, _ := Pair()
+	return e
+}
+
+//@ Ensures True
+
+// ConstrainsOtherResult pins the number down but never promises success.
+func ConstrainsOtherResult() (int, error) { // want `vego:\ the\ contract\ of\ ConstrainsOtherResult\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds,\ for\ example\ with\ "condition\ \->\ err\ =\ nil"`
+	return 1, errors.New("always")
+}
+
+//@ Ensures result1 = 1
+
+// ImpossibleCondition promises success only when something impossible holds.
+//
+// @ Requires i >= 0
+func ImpossibleCondition(i int) (err error) { // want `vego:\ the\ contract\ of\ ImpossibleCondition\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds,\ for\ example\ with\ "condition\ \->\ err\ =\ nil"`
+	return errOutOfRange
+}
+
+//@ Ensures i < 0 -> err = nil
+
+// DependsOnOutput makes success depend on what the function itself returns.
+func DependsOnOutput(i int) (n int, err error) { // want `vego:\ the\ contract\ of\ DependsOnOutput\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds,\ for\ example\ with\ "condition\ \->\ err\ =\ nil"`
+	return 1, errOutOfRange
+}
+
+//@ Ensures n = 0 -> err = nil

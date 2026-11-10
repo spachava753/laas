@@ -79,8 +79,7 @@ func (v *fnVerifier) exprAs(e ast.Expr, want types.Type, st *state, guard []*log
 }
 
 // opaque evaluates an operator whose result the logic knows nothing about:
-// arithmetic and comparison of floats, comparison of two errors, and ordering
-// of strings. The operands have already been evaluated, so any panic inside
+// arithmetic and comparison of floats, and ordering of strings. The operands have already been evaluated, so any panic inside
 // them is accounted for; the result is an arbitrary value of the right sort.
 func (v *fnVerifier) opaque(op token.Token, operand *logic.Term) *logic.Term {
 	switch op {
@@ -141,8 +140,18 @@ func errorConstructor(callee *types.Func) bool {
 
 // newError evaluates a call to an error constructor: its arguments are
 // evaluated for the checks they carry, and the result is some non-nil error.
+//
+// Formatting calls the String, Error, and Format methods of its operands,
+// which is code the verifier does not see. An argument of a type with methods
+// is therefore rejected, except an error, whose methods cannot reach the
+// slices of this function under the rule that unverified code keeps none.
 func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term) *logic.Term {
 	for _, arg := range call.Args {
+		t := v.info.TypeOf(arg)
+		if sort, ok := sortOf(t); (!ok || sort != logic.Err) && types.NewMethodSet(t).Len() > 0 {
+			v.unsupported(arg.Pos(), fmt.Sprintf(
+				"formatting a value of type %s would call its methods, which are not verified", t))
+		}
 		v.expr(arg, st, guard)
 	}
 	created := v.fresh("error", logic.Err)

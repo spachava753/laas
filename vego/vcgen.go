@@ -71,6 +71,9 @@ type fnVerifier struct {
 	// Anywhere else such a call would run between the evaluation of other
 	// operands, whose order the symbolic execution does not model.
 	effectful *ast.CallExpr
+	// outside records that execution reached a call whose failure no
+	// contract predicts.
+	outside bool
 }
 
 // allowEffects marks e, when it is a call, as the call of the current
@@ -630,7 +633,7 @@ func (v *fnVerifier) rhs(target lvalue, e ast.Expr, st *state) *logic.Term {
 	if !ok || !isSlice(want) {
 		return v.exprAs(e, want, st, nil)
 	}
-	if id, ok := ast.Unparen(e).(*ast.Ident); ok && id.Name != "nil" {
+	if id, ok := ast.Unparen(e).(*ast.Ident); ok && !v.isNil(id) {
 		v.unsupported(e.Pos(), fmt.Sprintf(
 			"assigning slice %s to another variable would make two variables share one backing array", id.Name))
 	}
@@ -647,7 +650,7 @@ func (v *fnVerifier) slice(target *types.Var, sort logic.Sort, e ast.Expr, st *s
 	}
 	switch e := ast.Unparen(e).(type) {
 	case *ast.Ident:
-		if e.Name == "nil" {
+		if v.isNil(e) {
 			return empty
 		}
 		return v.value(e, st)
@@ -1178,7 +1181,12 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) *
 // operands. Division and remainder first have to show a non-zero divisor.
 func (v *fnVerifier) binary(op token.Token, x, y *logic.Term, t types.Type, pos token.Pos, st *state, guard []*logic.Term) *logic.Term {
 	switch {
-	case x.Sort == logic.Float || x.Sort == logic.Err:
+	case x.Sort == logic.Err:
+		// Two interface values holding the same uncomparable dynamic type,
+		// such as a slice type with an Error method, panic when compared.
+		v.unsupported(pos, "comparing two errors can panic when they hold an uncomparable type; "+
+			"compare with nil, or use errors.Is")
+	case x.Sort == logic.Float:
 		return v.opaque(op, x)
 	case x.Sort.IsSeq() && op == token.ADD:
 		joined := logic.Concat(x, y)
@@ -1308,6 +1316,14 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		sort, ok := sortOf(sig.Results().At(i).Type())
 		if !ok {
 			continue
+		}
+		// A callee that returns an error without saying when it succeeds
+		// makes this function's own success unpredictable, provided the
+		// call can be reached at all.
+		if sort == logic.Err && !v.outside && (fn == nil || !fn.annotated() || v.verified(fn).excused) {
+			reachable := append(slices.Clip(st.hyps), guard...)
+			opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
+			v.outside = solver.Prove(reachable, logic.False(), opts) != solver.Proved
 		}
 		if isSlice(sig.Results().At(i).Type()) && (fn == nil || !fn.annotated()) {
 			v.unsupported(call.Pos(), fmt.Sprintf(

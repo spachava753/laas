@@ -63,6 +63,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			res:      logic.NewResolver(),
 			funcs:    map[*types.Func]*funcInfo{},
 			reported: map[string]bool{},
+			outcomes: map[*funcInfo]*outcome{},
 			mutated:  map[*types.Var]bool{},
 			maxSteps: maxSteps,
 		}
@@ -71,8 +72,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			if !fn.annotated() || fn.broken {
 				continue
 			}
-			pv.run(fn, (*fnVerifier).verify)
-			pv.run(fn, (*fnVerifier).checkAlwaysFails)
+			pv.verified(fn)
 			if audit {
 				pv.run(fn, (*fnVerifier).audit)
 			}
@@ -120,6 +120,7 @@ type pkgVerifier struct {
 	reported map[string]bool
 	mutated  map[*types.Var]bool
 	maxSteps int
+	outcomes map[*funcInfo]*outcome
 	// sentinels are the package-level error variables known to be non-nil.
 	sentinels map[*types.Var]bool
 }

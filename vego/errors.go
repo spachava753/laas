@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"slices"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
@@ -68,88 +69,148 @@ func (pv *pkgVerifier) findSentinels() {
 	}
 }
 
-// returnsError reports whether a function has a result of type error.
-func returnsError(fn *funcInfo) bool {
-	for _, result := range fn.results {
+// outcome is what verifying a function established about it, beyond the
+// diagnostics it produced.
+type outcome struct {
+	// excused is set when the function may legitimately fail on every call:
+	// it reaches a call whose failure no contract predicts, and its own
+	// contract never says that it succeeds.
+	excused bool
+}
+
+// verified verifies a function once and returns the outcome. A function that
+// is still being verified, which happens on recursion, is not excused.
+func (pv *pkgVerifier) verified(fn *funcInfo) *outcome {
+	if result, ok := pv.outcomes[fn]; ok {
+		return result
+	}
+	result := &outcome{}
+	pv.outcomes[fn] = result
+	pv.run(fn, func(v *fnVerifier) {
+		v.verify()
+		v.checkAlwaysFails(result)
+	})
+	return result
+}
+
+// errorResults returns the indices of the results of type error.
+func errorResults(fn *funcInfo) []int {
+	var indices []int
+	for i, result := range fn.results {
 		if sort, ok := sortOf(result.Type()); ok && sort == logic.Err {
+			indices = append(indices, i)
+		}
+	}
+	return indices
+}
+
+// successConditions collects the conditions under which a postcondition
+// forces the given error to be nil. It understands the shapes such clauses
+// take: "err = nil" itself, a conjunction containing it, "C -> ...",
+// "... <-> C", and a disjunction containing it.
+func successConditions(post, forced *logic.Term) []*logic.Term {
+	if post.Op == logic.OpIsNil && post.Args[0] == forced {
+		return []*logic.Term{logic.True()}
+	}
+	var conditions []*logic.Term
+	under := func(premise, rest *logic.Term) {
+		for _, condition := range successConditions(rest, forced) {
+			conditions = append(conditions, logic.And(premise, condition))
+		}
+	}
+	switch post.Op {
+	case logic.OpAnd:
+		for _, arg := range post.Args {
+			conditions = append(conditions, successConditions(arg, forced)...)
+		}
+	case logic.OpImplies:
+		under(post.Args[0], post.Args[1])
+	case logic.OpIff:
+		under(post.Args[1], post.Args[0])
+		under(post.Args[0], post.Args[1])
+	case logic.OpOr:
+		for i, arg := range post.Args {
+			var others []*logic.Term
+			for j, other := range post.Args {
+				if i != j {
+					others = append(others, logic.Not(other))
+				}
+			}
+			under(logic.And(others...), arg)
+		}
+	}
+	return conditions
+}
+
+// mentions reports whether a term contains one of the given constants.
+func mentions(t *logic.Term, constants map[*logic.Term]bool) bool {
+	if constants[t] {
+		return true
+	}
+	for _, arg := range t.Args {
+		if mentions(arg, constants) {
 			return true
 		}
 	}
 	return false
 }
 
-// admitsAlwaysFailing reports whether the contract of the function would also
-// be satisfied by an implementation that returns a non-nil error, zero values
-// for everything else, and changes nothing.
-func (v *fnVerifier) admitsAlwaysFailing() bool {
+// forcesSuccess reports whether the contract makes the function succeed for
+// some input: for every error result it has a clause "C -> err = nil" whose
+// condition C speaks only about the inputs and is not provably impossible.
+// Without such a clause an implementation that fails on every call may well
+// satisfy the contract, whatever else the contract demands.
+func (v *fnVerifier) forcesSuccess() bool {
 	fn, st := v.fn, v.enter()
 	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
-	if solver.Prove(st.hyps, logic.False(), opts) == solver.Proved {
-		return false
-	}
+	outputs := map[*logic.Term]bool{}
 	results := make([]*logic.Term, len(fn.results))
 	for i, result := range fn.results {
 		sort, _ := sortOf(result.Type())
-		results[i] = zero(sort)
-		if sort == logic.Err {
-			results[i] = v.fresh("failure", logic.Err)
-			st.assume(logic.Not(logic.IsNil(results[i])))
+		results[i] = v.fresh("out", sort)
+		outputs[results[i]] = true
+	}
+	post := map[*types.Var]*logic.Term{}
+	for _, param := range fn.params {
+		post[param] = v.entry[param]
+		if isSlice(param.Type()) {
+			post[param] = v.fresh("out", post[param].Sort)
+			outputs[post[param]] = true
 		}
 	}
-	env := &contractEnv{pv: v.pkgVerifier, fn: fn, args: v.entry, post: v.entry, results: results}
+	env := &contractEnv{pv: v.pkgVerifier, fn: fn, args: v.entry, post: post, results: results}
+	var conditions [][]*logic.Term
+	for range errorResults(fn) {
+		conditions = append(conditions, nil)
+	}
 	for _, c := range fn.ensures {
-		if solver.Prove(st.hyps, v.formula(c, c.node, env), opts) != solver.Proved {
+		clause := v.formula(c, c.node, env)
+		for n, index := range errorResults(fn) {
+			conditions[n] = append(conditions[n], successConditions(clause, results[index])...)
+		}
+	}
+	for _, candidates := range conditions {
+		usable := slices.ContainsFunc(candidates, func(condition *logic.Term) bool {
+			return !mentions(condition, outputs) && solver.Prove(st.hyps, logic.Not(condition), opts) != solver.Proved
+		})
+		if !usable {
 			return false
 		}
 	}
 	return true
 }
 
-// failsFromOutside reports whether a function can fail for reasons no
-// contract can predict: it calls something whose own failure is not tied to
-// its inputs. Such a function cannot promise success, so its contract may
-// leave "always fails" open. A callee without a contract counts, since
-// nothing says when it succeeds; so does a verified callee that is itself
-// excused. Error constructors do not: they fail by design, not by chance.
-func (pv *pkgVerifier) failsFromOutside(fn *funcInfo, visiting map[*funcInfo]bool) bool {
-	if visiting[fn] || fn.decl.Body == nil {
-		return false
-	}
-	visiting[fn] = true
-	found := false
-	ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok || found {
-			return !found
-		}
-		callee, _ := typeutil.Callee(pv.info, call).(*types.Func)
-		if callee == nil || errorConstructor(callee) {
-			return true
-		}
-		results := callee.Type().(*types.Signature).Results()
-		for i := range results.Len() {
-			if sort, ok := sortOf(results.At(i).Type()); !ok || sort != logic.Err {
-				continue
-			}
-			target := pv.funcs[callee]
-			if target == nil || !target.annotated() {
-				found = true
-			} else {
-				excused := false
-				pv.run(target, func(v *fnVerifier) { excused = v.admitsAlwaysFailing() })
-				found = excused && pv.failsFromOutside(target, visiting)
-			}
-		}
-		return true
-	})
-	return found
-}
-
 // checkAlwaysFails rejects a contract that a function could meet by failing
 // on every call. A postcondition of the form "err = nil -> ..." alone says
-// what success looks like but never that success happens.
-func (v *fnVerifier) checkAlwaysFails() {
-	if !returnsError(v.fn) || !v.admitsAlwaysFailing() || v.failsFromOutside(v.fn, map[*funcInfo]bool{}) {
+// what success looks like but never that success happens. A function that
+// reached a call whose failure no contract predicts cannot promise success;
+// it is excused, and its callers inherit the excuse.
+func (v *fnVerifier) checkAlwaysFails(result *outcome) {
+	if len(errorResults(v.fn)) == 0 || v.forcesSuccess() {
+		return
+	}
+	if v.outside {
+		result.excused = true
 		return
 	}
 	v.report(v.fn.decl.Name.Pos(), "the contract of %s would also be met by a function that always returns an error; "+
