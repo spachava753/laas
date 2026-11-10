@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"go/types"
 	"maps"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -107,12 +108,6 @@ func (pv *pkgVerifier) run(fn *funcInfo, task func(v *fnVerifier)) {
 // that satisfy the precondition and results hold their zero values.
 func (v *fnVerifier) enter() *state {
 	fn := v.fn
-	if fn.decl.Body == nil {
-		v.unsupported(fn.decl.Pos(), "the function has no body")
-	}
-	if fn.decl.Recv != nil || fn.decl.Type.TypeParams != nil {
-		v.unsupported(fn.decl.Pos(), "methods and generic functions are not supported yet")
-	}
 	st := &state{vals: map[*types.Var]*logic.Term{}}
 	for i, param := range fn.params {
 		sort, ok := sortOf(param.Type())
@@ -132,7 +127,7 @@ func (v *fnVerifier) enter() *state {
 	for _, result := range fn.results {
 		sort, ok := sortOf(result.Type())
 		if !ok {
-			v.unsupported(fn.decl.Pos(), fmt.Sprintf("result type %s is not supported", result.Type()))
+			v.unsupported(fn.obj.Pos(), fmt.Sprintf("result type %s is not supported", result.Type()))
 		}
 		st.vals[result] = zero(sort)
 	}
@@ -146,7 +141,14 @@ func (v *fnVerifier) enter() *state {
 // verify symbolically executes one annotated function from a state that
 // satisfies its precondition and checks every obligation met on the way.
 func (v *fnVerifier) verify() {
-	fn, st := v.fn, v.enter()
+	fn := v.fn
+	if fn.decl.Body == nil {
+		v.unsupported(fn.decl.Pos(), "the function has no body")
+	}
+	if fn.decl.Recv != nil || fn.decl.Type.TypeParams != nil {
+		v.unsupported(fn.decl.Pos(), "methods and generic functions are not supported yet")
+	}
+	st := v.enter()
 	if fn.measure != nil {
 		v.measure = v.intTerm(fn.measure, &contractEnv{pv: v.pkgVerifier, fn: fn, args: v.entry})
 		v.check(st, nil, logic.Le(logic.IntLit(0), v.measure), fn.decl.Name.Pos(),
@@ -263,7 +265,7 @@ func (e *bodyEnv) Old(name string) (*logic.Term, error) {
 // formula resolves a parsed annotation against an environment. Errors are
 // reported at the annotation and abandon the verification of the function.
 func (v *fnVerifier) formula(c *clause, node *logic.Node, env logic.Env) *logic.Term {
-	t, err := v.res.Formula(node, env)
+	t, err := v.resolverOf(c).Formula(node, env)
 	if err != nil {
 		v.report(c.pos, "in %s annotation: %v", c.kind, err)
 		panic(abort{})
@@ -272,7 +274,7 @@ func (v *fnVerifier) formula(c *clause, node *logic.Node, env logic.Env) *logic.
 }
 
 func (v *fnVerifier) intTerm(c *clause, env logic.Env) *logic.Term {
-	t, err := v.res.IntTerm(c.node, env)
+	t, err := v.resolverOf(c).IntTerm(c.node, env)
 	if err != nil {
 		v.report(c.pos, "in %s annotation: %v", c.kind, err)
 		panic(abort{})
@@ -794,7 +796,10 @@ func (v *fnVerifier) modified(nodes ...ast.Node) (whole, elements map[*types.Var
 				if _, builtin := v.info.Uses[calleeIdent(n)].(*types.Builtin); builtin {
 					break
 				}
-				callee := v.funcs[typeutil.StaticCallee(v.info, n)]
+				var callee *funcInfo
+				if static := typeutil.StaticCallee(v.info, n); static != nil {
+					callee = v.contractOf(static)
+				}
 				for i, arg := range n.Args {
 					if callee != nil && i < len(callee.params) && !v.mutates(callee, callee.params[i]) {
 						continue
@@ -1275,9 +1280,27 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	if sig.Recv() != nil || sig.Variadic() || sig.TypeParams() != nil {
 		v.unsupported(call.Pos(), "calls to methods, variadic functions, and generic functions are not supported yet")
 	}
-	fn := v.funcs[callee]
-	if fn != nil && fn.broken {
-		v.unsupported(call.Pos(), callee.Name()+" has an annotation that could not be understood, so its contract is unknown")
+	// Nothing may be called on trust that is not written down: the callee
+	// is either verified against its annotations or has a trusted contract.
+	fn := v.contractOf(callee)
+	if fn == nil {
+		v.unsupported(call.Pos(), fmt.Sprintf(
+			"it calls %s, which has no contract; annotate %s with //@ so that it is verified, "+
+				"or add a trusted contract for %s to %s", callee.Name(), callee.Name(), callee.FullName(), TrustFileName))
+	}
+	for _, defect := range fn.defects {
+		if fn.trust == nil {
+			v.report(call.Pos(), "the contract of %s cannot be used: %s", callee.FullName(), defect)
+			continue
+		}
+		v.report(call.Pos(), "the trusted contract of %s (%s:%d) cannot be used: %s",
+			fn.trust.key, filepath.Base(fn.trust.file.path), fn.trust.line, defect)
+	}
+	if fn.broken {
+		v.unsupported(call.Pos(), callee.Name()+" has a contract that could not be understood")
+	}
+	if fn.trust != nil {
+		v.noteUse(fn, call.Pos())
 	}
 	args := map[*types.Var]*logic.Term{}
 	post := map[*types.Var]*logic.Term{}
@@ -1336,20 +1359,23 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		if !ok {
 			continue
 		}
-		// A callee that returns an error without saying when it succeeds
-		// makes this function's own success unpredictable, provided the
-		// call can be reached at all. A callee without a contract is such
-		// a source outright; a verified one may turn out to be excused.
-		source := fn == nil || !fn.annotated()
-		if sort == logic.Err && ((source && !v.outside) || (!source && !v.reached[fn])) {
+		// A trusted callee that returns an error without saying when it
+		// succeeds makes this function's own success unpredictable,
+		// provided the call can be reached. A verified callee may turn out
+		// to be excused for the same reason.
+		// A callee verified in another package says in its published
+		// contract whether it is excused.
+		source := (fn.trust != nil && !v.trustForces(fn)) || (fn.imported != nil && fn.imported.Excused)
+		local := fn.decl != nil
+		if sort == logic.Err && ((source && !v.outside) || (local && !v.reached[fn])) {
 			if v.canReach(append(slices.Clip(st.hyps), guard...)) {
 				v.outside = v.outside || source
-				v.reached[fn] = !source
+				v.reached[fn] = local
 			}
 		}
-		if isSlice(sig.Results().At(i).Type()) && (fn == nil || !fn.annotated()) {
+		if isSlice(sig.Results().At(i).Type()) && fn.trust != nil {
 			v.unsupported(call.Pos(), fmt.Sprintf(
-				"%s returns a slice but is not verified, so the slice might share storage with another one",
+				"%s returns a slice; a trusted contract cannot yet say that the slice shares no storage",
 				callee.Name()))
 		}
 		results[i] = v.fresh(callee.Name(), sort)
@@ -1367,7 +1393,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 // calleeFormula resolves a callee's postcondition at a call site. A result of
 // an unsupported type has no term, so a clause that mentions it is skipped.
 func (v *fnVerifier) calleeFormula(c *clause, env *contractEnv) *logic.Term {
-	t, err := v.res.Formula(c.node, &partialEnv{env})
+	t, err := v.resolverOf(c).Formula(c.node, &partialEnv{env})
 	switch {
 	case errors.Is(err, errNoValue):
 		return logic.True()

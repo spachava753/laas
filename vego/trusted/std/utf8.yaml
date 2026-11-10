@@ -1,0 +1,7 @@
+version: 1
+
+trusted:
+  unicode/utf8.RuneCountInString:
+    reason: Documented to return the number of runes in s; every rune occupies at least one byte.
+    ensures:
+      - "0 <= n And n <= |s|"

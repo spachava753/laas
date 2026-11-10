@@ -1,0 +1,24 @@
+version: 1
+
+trusted:
+  sort.Ints:
+    reason: Documented to sort a slice of ints in increasing order.
+    modifies: [x]
+    ensures:
+      - "Forall i in [0, |x|) : Forall j in [i, |x|) : x'[i] <= x'[j]"
+
+  sort.IntsAreSorted:
+    reason: Documented to report whether the slice is sorted in increasing order.
+    ensures:
+      - "result <-> Forall i in [0, |x|) : Forall j in [i, |x|) : x[i] <= x[j]"
+
+  sort.SearchInts:
+    reason: >-
+      Documented to return the smallest index at which x could be inserted
+      into a sorted slice so that it stays sorted.
+    requires:
+      - "Forall i in [0, |a|) : Forall j in [i, |a|) : a[i] <= a[j]"
+    ensures:
+      - "0 <= result And result <= |a|"
+      - "a[0:result) < x"
+      - "x <= a[result:|a|)"

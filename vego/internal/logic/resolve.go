@@ -24,8 +24,13 @@ type PredDef struct {
 
 // Resolver type-checks parsed annotations and turns them into terms.
 type Resolver struct {
+	// Preds holds the defined predicates by the name their applications
+	// carry in terms, which is Prefix followed by the name in annotations.
 	Preds map[string]*PredDef
-	fresh int
+	// Prefix keeps the predicates of different packages apart when their
+	// terms meet in one proof.
+	Prefix string
+	fresh  int
 }
 
 // NewResolver returns a resolver with no predicates defined.
@@ -176,7 +181,7 @@ func (s *scope) call(n *Node) *Term {
 		}
 		return t
 	}
-	def, ok := s.r.Preds[n.Name]
+	def, ok := s.r.Preds[s.r.Prefix+n.Name]
 	if !ok {
 		fail("unknown predicate %s", n.Name)
 	}
@@ -190,7 +195,7 @@ func (s *scope) call(n *Node) *Term {
 			fail("argument %d of %s has type %s, want %s", i+1, n.Name, args[i].Sort, want)
 		}
 	}
-	return Pred(n.Name, args...)
+	return Pred(def.Name, args...)
 }
 
 func (s *scope) binary(n *Node) *Term {
@@ -349,11 +354,11 @@ func (r *Resolver) Define(decls []*PredDecl) []DefineError {
 	}
 	sorts := inferSorts(byName)
 	for name, decl := range byName {
-		def := &PredDef{Name: name}
+		def := &PredDef{Name: r.Prefix + name}
 		for i, param := range decl.Params {
 			def.Params = append(def.Params, r.newBound(param, sorts[name][i]))
 		}
-		r.Preds[name] = def
+		r.Preds[def.Name] = def
 	}
 	names := make([]string, 0, len(byName))
 	for name := range byName {
@@ -361,7 +366,7 @@ func (r *Resolver) Define(decls []*PredDecl) []DefineError {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		decl, def := byName[name], r.Preds[name]
+		decl, def := byName[name], r.Preds[r.Prefix+name]
 		bound := map[string]*Term{}
 		for i, param := range decl.Params {
 			bound[param] = def.Params[i]
@@ -374,11 +379,11 @@ func (r *Resolver) Define(decls []*PredDecl) []DefineError {
 		def.Body = body
 	}
 	for _, name := range names {
-		if r.negativeCycle(name) {
+		if r.negativeCycle(r.Prefix + name) {
 			err := errors.New("recursive use of predicate " + name + " must not occur under negation, " +
 				"on the left of ->, or under <->")
 			errs = append(errs, DefineError{byName[name], err})
-			r.Preds[name].Body = True()
+			r.Preds[r.Prefix+name].Body = True()
 		}
 	}
 	return errs

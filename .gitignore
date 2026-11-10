@@ -16,6 +16,10 @@
 !/go.mod
 !/go.sum
 
+# Trusted contracts shipped with vego, and those used by its tests.
+!/vego/trusted/std/*.yaml
+!/vego/testdata/*.yaml
+
 # Design notes.
 !/vego/ROADMAP.md
 

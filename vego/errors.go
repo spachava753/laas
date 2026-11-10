@@ -94,6 +94,8 @@ func (pv *pkgVerifier) verified(fn *funcInfo) {
 	}
 	result := &outcome{}
 	pv.outcomes[fn] = result
+	pv.current = fn
+	defer func() { pv.current = nil }()
 	pv.run(fn, func(v *fnVerifier) {
 		v.verify()
 		if len(errorResults(fn)) > 0 {
@@ -113,7 +115,7 @@ func (pv *pkgVerifier) verified(fn *funcInfo) {
 // functions are the least fixed point of that rule, so a cycle of functions
 // that only call each other excuses nobody, and the order of declarations
 // does not matter.
-func (pv *pkgVerifier) reportAlwaysFailing() {
+func (pv *pkgVerifier) reportAlwaysFailing() map[*funcInfo]bool {
 	excused := map[*funcInfo]bool{}
 	candidate := func(fn *funcInfo) bool {
 		result := pv.outcomes[fn]
@@ -135,11 +137,37 @@ func (pv *pkgVerifier) reportAlwaysFailing() {
 	}
 	for _, fn := range pv.order {
 		if candidate(fn) && !excused[fn] {
+			fn.failed = true
 			pv.report(fn.decl.Name.Pos(), "the contract of %s would also be met by a function that always returns an error; "+
 				"state when it succeeds with a clause such as \"condition -> err = nil\", "+
 				"where the condition is about the inputs and some input satisfies it", fn.obj.Name())
 		}
 	}
+	return excused
+}
+
+// trustForces reports whether a trusted contract forces success for some
+// input. One that does not is a source of unpredictable failure: nothing
+// says when the function succeeds.
+func (pv *pkgVerifier) trustForces(fn *funcInfo) bool {
+	if fn.forces != nil {
+		return *fn.forces
+	}
+	forces := false
+	fn.forces = &forces
+	supported := func(t types.Type) bool {
+		_, ok := sortOf(t)
+		return ok
+	}
+	if slices.ContainsFunc(fn.params, func(p *types.Var) bool { return !supported(p.Type()) }) ||
+		slices.ContainsFunc(fn.results, func(r *types.Var) bool { return !supported(r.Type()) }) {
+		return false
+	}
+	pv.run(fn, func(v *fnVerifier) { forces = v.forcesSuccess() })
+	if use := pv.usage.Entries[fn.trust.key]; use != nil {
+		use.Unpredictable = !forces
+	}
+	return forces
 }
 
 // errorResults returns the indices of the results of type error.

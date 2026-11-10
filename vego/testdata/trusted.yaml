@@ -1,0 +1,86 @@
+# Trusted contracts for the helper functions of the test corpora. The keys
+# use the import paths the packages have under testdata/src.
+version: 1
+
+trusted:
+  defects.touch:
+    reason: Test helper that writes the first element.
+    modifies: [A]
+
+  effects.unknown:
+    reason: Test helper whose result is deliberately unknown.
+
+  effects.indirectWrite:
+    reason: Test helper that writes through a pointer.
+    modifies: [a]
+
+  effects.rangeWrite:
+    reason: Test helper that writes in a range clause.
+    modifies: [a]
+
+  semantics.scramble:
+    reason: Test helper that overwrites every element.
+    modifies: [A]
+
+  values.stat:
+    reason: Test helper that asks the file system.
+
+  values.external:
+    reason: Test helper standing for a call whose failure cannot be predicted.
+
+  values.describe:
+    reason: Test helper that reads an error.
+
+  values.consume:
+    reason: Test helper that reads an error.
+
+  trust.readConfig:
+    reason: Stands for reading a file; the contract only says what success means.
+    ensures:
+      - "err = nil -> size >= 0"
+
+  trust.parsePort:
+    reason: Stands for a parser whose success is determined by its input.
+    ensures:
+      - "0 <= n <= 65535 -> err = nil"
+      - "err = nil -> port = n"
+
+  trust.fill:
+    reason: Stands for an unverifiable function that overwrites its slice.
+    modifies: [dst]
+    ensures:
+      - "Forall k in [0, |dst|) : dst'[k] = value"
+
+  trust.readOnly:
+    reason: Stands for an unverifiable function that only reads its slice.
+    ensures:
+      - "result >= 0"
+
+  trust.contradictory:
+    reason: A contract nobody can satisfy.
+    ensures:
+      - "result > 0"
+      - "result < 0"
+
+  trust.wrongModifies:
+    reason: Lists something that is not a slice parameter.
+    modifies: [count]
+
+  trust.wrongName:
+    reason: Mentions a name the function does not have.
+    ensures:
+      - "total >= 0"
+
+  trust.makesSlice:
+    reason: Returns a slice.
+
+  trust.Verified:
+    reason: This function is also annotated in source.
+    ensures:
+      - "result = 0"
+
+  sort.IntsAreSorted:
+    reason: Project override of a shipped contract, deliberately saying nothing.
+
+  rejected.unverified:
+    reason: Test helper that hands its argument back.

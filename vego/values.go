@@ -6,6 +6,7 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"slices"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 )
@@ -161,6 +162,9 @@ func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term
 				"formatting a value of type %s would call its methods, which are not verified", t))
 		}
 		v.expr(arg, st, guard)
+	}
+	if position := v.pass.Fset.Position(call.Pos()); !slices.Contains(v.usage.Constructors, position) {
+		v.usage.Constructors = append(v.usage.Constructors, position)
 	}
 	created := v.fresh("error", logic.Err)
 	st.assume(logic.Not(logic.IsNil(created)))

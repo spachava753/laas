@@ -1,0 +1,8 @@
+version: 1
+
+trusted:
+  errors.Is:
+    reason: Documented to report whether any error in the chain of err matches target; it changes nothing.
+
+  errors.Unwrap:
+    reason: Documented to return the wrapped error, or nil when there is none.

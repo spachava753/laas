@@ -39,6 +39,12 @@ Decisions:
 
 ### Trusted contracts for unproved code
 
+Built: the trust file and its checks, the rule that a call needs a contract, the shipped contracts with their tests, and the trust report (`laas -vego.trust`). Not built yet: checking a trusted `modifies` against the function's source, contracts for methods and for functions that return slices (both wait for the memory model), contracts for variables such as `io.EOF`, and running the shipped-contract tests on several Go versions.
+
+Contracts of verified functions cross package boundaries as analysis facts, together with the predicates of their package; the predicates of different packages are kept apart by a prefix.
+
+Formulas in the file have to be quoted, because YAML gives its own meaning to `: `, `|`, `!`, `[`, and `#`.
+
 Verified code has to call code that cannot be verified: the standard library, third-party modules, and functions of the project itself that use unsupported Go. A trusted contract states what such a function requires and ensures. Callers must still prove the `Requires`; the `Ensures` is assumed rather than proved.
 
 Decisions:

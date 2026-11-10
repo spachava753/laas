@@ -16,6 +16,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"reflect"
 	"regexp"
 	"slices"
 	"sort"
@@ -32,7 +33,7 @@ import (
 var Analyzer = newAnalyzer()
 
 func newAnalyzer() *analysis.Analyzer {
-	maxSteps, audit := 0, false
+	maxSteps, audit, trustPath := 0, false, ""
 	analyzer := &analysis.Analyzer{
 		Name: "vego",
 		Doc: `verifies functions against their //@ specifications
@@ -56,17 +57,30 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		false,
 		"also report postconditions that degenerate implementations satisfy",
 	)
+	analyzer.Flags.StringVar(
+		&trustPath,
+		"trusted",
+		"",
+		"file of trusted contracts to use instead of "+TrustFileName+" next to go.mod",
+	)
+	analyzer.ResultType = reflect.TypeFor[*Usage]()
+	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact)}
 	analyzer.Run = func(pass *analysis.Pass) (any, error) {
 		pv := &pkgVerifier{
-			pass:     pass,
-			info:     pass.TypesInfo,
-			res:      logic.NewResolver(),
-			funcs:    map[*types.Func]*funcInfo{},
-			reported: map[string]bool{},
-			outcomes: map[*funcInfo]*outcome{},
-			mutated:  map[*types.Var]bool{},
-			maxSteps: maxSteps,
+			pass:         pass,
+			info:         pass.TypesInfo,
+			res:          logic.NewResolver(),
+			funcs:        map[*types.Func]*funcInfo{},
+			reported:     map[string]bool{},
+			outcomes:     map[*funcInfo]*outcome{},
+			mutated:      map[*types.Var]bool{},
+			trusted:      map[*types.Func]*funcInfo{},
+			imported:     map[*types.Func]*funcInfo{},
+			foreign:      map[*types.Package]*logic.Resolver{},
+			trustSources: map[*trustFile]*token.File{},
+			maxSteps:     maxSteps,
 		}
+		pv.loadTrust(trustPath)
 		pv.collect()
 		for _, fn := range pv.order {
 			if !fn.annotated() || fn.broken {
@@ -77,8 +91,8 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 				pv.run(fn, (*fnVerifier).audit)
 			}
 		}
-		pv.reportAlwaysFailing()
-		return nil, nil
+		pv.exportContracts(pv.reportAlwaysFailing())
+		return pv.usage, nil
 	}
 	return analyzer
 }
@@ -90,6 +104,9 @@ type clause struct {
 	text string
 	pos  token.Pos
 	node *logic.Node
+	// res is set for a clause written in another package, which has its
+	// own predicates.
+	res *logic.Resolver
 }
 
 // funcInfo is a function declaration together with its bound annotations.
@@ -106,6 +123,20 @@ type funcInfo struct {
 	resultNames map[string]int
 	broken      bool // an annotation failed to parse; verification is skipped
 	callees     []*funcInfo
+	// trust is set for a function whose contract comes from a trust file
+	// instead of annotations; such a function is not verified. modifies
+	// holds the slice parameters that contract says it writes.
+	trust    *trustEntry
+	modifies map[*types.Var]bool
+	defects  []string // what is wrong with a trusted or imported contract
+	// imported is set for a function verified in another package, whose
+	// contract was published by that package.
+	imported *contractFact
+	// failed is set when verifying the function reported a problem.
+	failed bool
+	// forces caches whether a trusted contract forces success for some
+	// input; see forcesSuccess.
+	forces *bool
 }
 
 func (f *funcInfo) annotated() bool {
@@ -122,6 +153,22 @@ type pkgVerifier struct {
 	mutated  map[*types.Var]bool
 	maxSteps int
 	outcomes map[*funcInfo]*outcome
+	// projectTrust is the project's file of trusted contracts, trusted the
+	// contracts built from it and from the shipped ones, and usage what the
+	// proofs of this package rely on.
+	projectTrust *trustFile
+	trusted      map[*types.Func]*funcInfo
+	trustSources map[*trustFile]*token.File
+	usage        *Usage
+	// imported holds the contracts of functions verified in other
+	// packages, and foreign the predicates of those packages.
+	imported map[*types.Func]*funcInfo
+	foreign  map[*types.Package]*logic.Resolver
+	// predicateTexts are the predicate definitions of this package.
+	predicateTexts []string
+	// current is the function being verified, which a diagnostic counts
+	// against.
+	current *funcInfo
 	// sentinels are the package-level error variables known to be non-nil.
 	sentinels map[*types.Var]bool
 }
@@ -129,6 +176,9 @@ type pkgVerifier struct {
 // report emits a diagnostic once per position and message. Symbolic execution
 // visits a statement once per path, so the same failure can be found often.
 func (pv *pkgVerifier) report(pos token.Pos, format string, args ...any) {
+	if pv.current != nil {
+		pv.current.failed = true
+	}
 	msg := "vego: " + fmt.Sprintf(format, args...)
 	key := fmt.Sprintf("%d %s", pos, msg)
 	if pv.reported[key] {
@@ -219,6 +269,7 @@ func (pv *pkgVerifier) collect() {
 					}
 					predicates = append(predicates, decl)
 					predicateClauses[decl] = c
+					pv.predicateTexts = append(pv.predicateTexts, c.text)
 					continue
 				}
 				node, err := logic.ParseFormula(c.text)
@@ -238,6 +289,12 @@ func (pv *pkgVerifier) collect() {
 	}
 	pv.analyzeMutation()
 	pv.findSentinels()
+	for _, fn := range pv.order {
+		if fn.annotated() && pv.trustedContract(fn.obj) != nil {
+			pv.report(fn.decl.Name.Pos(), "%s has //@ annotations and a trusted contract; "+
+				"a function is either verified or trusted, not both", fn.obj.Name())
+		}
+	}
 	for _, fn := range pv.order {
 		sort.Slice(fn.body, func(i, j int) bool { return fn.body[i].pos < fn.body[j].pos })
 		if fn.decl.Body == nil {
@@ -264,7 +321,16 @@ func (pv *pkgVerifier) addFunc(decl *ast.FuncDecl) {
 	if !ok {
 		return
 	}
-	fn := &funcInfo{decl: decl, obj: obj, paramNames: map[string]*types.Var{}, resultNames: map[string]int{}}
+	fn := newFuncInfo(obj)
+	fn.decl = decl
+	pv.funcs[obj] = fn
+	pv.order = append(pv.order, fn)
+}
+
+// newFuncInfo describes a function by its signature, with the names
+// annotations and trusted contracts may use for its parameters and results.
+func newFuncInfo(obj *types.Func) *funcInfo {
+	fn := &funcInfo{obj: obj, paramNames: map[string]*types.Var{}, resultNames: map[string]int{}}
 	sig := obj.Type().(*types.Signature)
 	for i := range sig.Params().Len() {
 		param := sig.Params().At(i)
@@ -294,8 +360,23 @@ func (pv *pkgVerifier) addFunc(decl *ast.FuncDecl) {
 			fn.resultNames[name] = i
 		}
 	}
-	pv.funcs[obj] = fn
-	pv.order = append(pv.order, fn)
+	return fn
+}
+
+// contractOf returns the contract that calls to a function are checked
+// against: its annotations when it is verified, otherwise its trusted
+// contract. It returns nil for a function that has neither.
+func (pv *pkgVerifier) contractOf(callee *types.Func) *funcInfo {
+	if own := pv.funcs[callee]; own != nil && own.annotated() {
+		return own
+	}
+	if imported := pv.importedContract(callee); imported != nil {
+		if pv.trustedContract(callee) != nil {
+			imported.defect("it is verified in its own package and also has a trusted contract")
+		}
+		return imported
+	}
+	return pv.trustedContract(callee)
 }
 
 // place binds a clause to a function and returns that function. Clauses inside
@@ -518,6 +599,13 @@ func readOnlyUse(element *ast.IndexExpr, ancestors []ast.Node) bool {
 // parameter. Only functions that are themselves verified can be known to
 // leave a slice alone; every other callee is assumed to write it.
 func (pv *pkgVerifier) mutates(fn *funcInfo, param *types.Var) bool {
+	if fn != nil && fn.trust != nil {
+		return fn.modifies[param]
+	}
+	if fn != nil && fn.imported != nil {
+		index := slices.Index(fn.params, param)
+		return index < 0 || index >= len(fn.imported.Mutated) || fn.imported.Mutated[index]
+	}
 	return fn == nil || !fn.annotated() || fn.broken || pv.mutated[param]
 }
 

@@ -34,6 +34,8 @@ func write(A, B []int) {
 	}
 }
 
+//@ Ensures |A'| = |A|
+
 // @ Requires |A| > 0
 func PassesTwice(A []int) {
 	write(A, A) // want `vego:\ cannot\ verify\ PassesTwice:\ slice\ A\ is\ passed\ more\ than\ once\ to\ a\ function\ that\ may\ modify\ it`
@@ -43,7 +45,7 @@ func unverified(A []int) []int { return A }
 
 // @ Requires |A| > 0
 func UsesUnverifiedSlice(A []int) int {
-	B := unverified(A) // want `vego:\ cannot\ verify\ UsesUnverifiedSlice:\ unverified\ returns\ a\ slice\ but\ is\ not\ verified,\ so\ the\ slice\ might\ share\ storage\ with\ another\ one`
+	B := unverified(A) // want `vego:\ cannot\ verify\ UsesUnverifiedSlice:\ unverified\ returns\ a\ slice;\ a\ trusted\ contract\ cannot\ yet\ say\ that\ the\ slice\ shares\ no\ storage`
 	return B[0]
 }
 
@@ -171,7 +173,7 @@ func OtherTool() int { return 0 }
 func malformed() int { return 0 }
 
 // @ Ensures result = 0
-func CallsMalformed() int { return malformed() } // want `vego:\ cannot\ verify\ CallsMalformed:\ malformed\ has\ an\ annotation\ that\ could\ not\ be\ understood,\ so\ its\ contract\ is\ unknown`
+func CallsMalformed() int { return malformed() } // want `vego:\ cannot\ verify\ CallsMalformed:\ malformed\ has\ a\ contract\ that\ could\ not\ be\ understood`
 
 //@ Predicate negate(b) ::= ~b
 //@ Predicate hiddenLiar(n) ::= negate(hiddenLiar(n)) // want `vego:\ recursive\ use\ of\ predicate\ hiddenLiar\ must\ not\ occur\ under\ negation,\ on\ the\ left\ of\ \->,\ or\ under\ <\->`
