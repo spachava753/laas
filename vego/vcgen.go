@@ -66,6 +66,17 @@ type fnVerifier struct {
 	names    map[string]int
 	branches int
 	measure  *logic.Term
+	// effectful is the one call of the current statement that may modify a
+	// slice: a call that is a statement of its own or the whole right-hand
+	// side. Anywhere else such a call would run between the evaluation of
+	// other operands, whose order the symbolic execution does not model.
+	effectful *ast.CallExpr
+}
+
+// allowEffects marks e, when it is a call, as the call of the current
+// statement that may modify slices.
+func (v *fnVerifier) allowEffects(e ast.Expr) {
+	v.effectful, _ = ast.Unparen(e).(*ast.CallExpr)
 }
 
 // run executes one task on a function, turning the panics that abandon a
@@ -359,6 +370,7 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 			v.check(st, nil, logic.False(), s.Pos(), "panic may be reachable")
 			return
 		}
+		v.allowEffects(call)
 		v.call(call, st, nil)
 	case *ast.AssignStmt:
 		v.assign(s, st)
@@ -368,7 +380,7 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 			delta = logic.IntLit(-1)
 		}
 		target := v.lvalue(s.X, st)
-		v.set(target, logic.Add(v.expr(s.X, st, nil), delta), st)
+		v.set(target, logic.Add(v.read(target, st), delta), st)
 	case *ast.DeclStmt:
 		v.declare(s, st)
 	case *ast.IfStmt:
@@ -500,6 +512,19 @@ func (v *fnVerifier) lvalue(e ast.Expr, st *state) lvalue {
 	return target
 }
 
+// read returns the current value of an assignment target without evaluating
+// its index expression a second time.
+func (v *fnVerifier) read(target lvalue, st *state) *logic.Term {
+	current := st.vals[target.variable]
+	if current == nil {
+		v.unsupported(target.pos, "this operand cannot be read and updated in place")
+	}
+	if target.index != nil {
+		return logic.Select(current, target.index)
+	}
+	return current
+}
+
 // set performs an assignment in the symbolic state.
 func (v *fnVerifier) set(target lvalue, value *logic.Term, st *state) {
 	variable := target.variable
@@ -526,8 +551,24 @@ func (v *fnVerifier) set(target lvalue, value *logic.Term, st *state) {
 // order, as the Go specification prescribes.
 func (v *fnVerifier) assign(s *ast.AssignStmt, st *state) {
 	targets := make([]lvalue, len(s.Lhs))
+	replaced, indexed := map[*types.Var]bool{}, map[*types.Var]bool{}
 	for i, lhs := range s.Lhs {
 		targets[i] = v.lvalue(lhs, st)
+		if targets[i].index != nil {
+			indexed[targets[i].variable] = true
+		} else if targets[i].variable != nil {
+			replaced[targets[i].variable] = true
+		}
+	}
+	for variable := range replaced {
+		if indexed[variable] {
+			v.unsupported(s.Pos(), fmt.Sprintf(
+				"%s is replaced and indexed in one assignment; the element would be written to the old backing array",
+				variable.Name()))
+		}
+	}
+	if len(s.Rhs) == 1 && (s.Tok == token.ASSIGN || s.Tok == token.DEFINE) {
+		v.allowEffects(s.Rhs[0])
 	}
 	var values []*logic.Term
 	switch {
@@ -536,7 +577,7 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state) {
 			token.ADD_ASSIGN: token.ADD, token.SUB_ASSIGN: token.SUB, token.MUL_ASSIGN: token.MUL,
 			token.QUO_ASSIGN: token.QUO, token.REM_ASSIGN: token.REM,
 		}[s.Tok]
-		current, operand := v.expr(s.Lhs[0], st, nil), v.expr(s.Rhs[0], st, nil)
+		current, operand := v.read(targets[0], st), v.expr(s.Rhs[0], st, nil)
 		values = []*logic.Term{v.binary(op, current, operand, s.TokPos, st, nil)}
 	case len(s.Rhs) == 1 && len(s.Lhs) > 1:
 		values = v.callResults(s.Rhs[0], st)
@@ -657,8 +698,12 @@ func (v *fnVerifier) declare(s *ast.DeclStmt, st *state) {
 				values = append(values, zero(sort))
 			}
 		case len(spec.Values) == 1 && len(spec.Names) > 1:
+			v.allowEffects(spec.Values[0])
 			values = v.callResults(spec.Values[0], st)
 		default:
+			if len(spec.Values) == 1 {
+				v.allowEffects(spec.Values[0])
+			}
 			for i, value := range spec.Values {
 				values = append(values, v.rhs(targets[i], value, st))
 			}
@@ -890,8 +935,15 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 	v.loop(shape, st, k)
 }
 
+// returnStmt evaluates the returned values and checks the postcondition. A
+// slice may be returned only when the caller gets the sole reference to its
+// backing array, so parameters and repeated variables are rejected.
 func (v *fnVerifier) returnStmt(s *ast.ReturnStmt, st *state) {
 	results := make([]*logic.Term, len(v.fn.results))
+	if len(s.Results) == 1 {
+		v.allowEffects(s.Results[0])
+	}
+	returned := map[*types.Var]bool{}
 	switch {
 	case len(s.Results) == 0:
 		for i, result := range v.fn.results {
@@ -901,13 +953,21 @@ func (v *fnVerifier) returnStmt(s *ast.ReturnStmt, st *state) {
 		results = v.callResults(s.Results[0], st)
 	default:
 		for i, e := range s.Results {
-			if id, ok := ast.Unparen(e).(*ast.Ident); ok {
-				if param, _ := v.info.ObjectOf(id).(*types.Var); param != nil && v.entry[param] != nil && v.entry[param].Sort.IsSeq() {
-					v.unsupported(e.Pos(), fmt.Sprintf(
-						"returning slice parameter %s would give the caller two names for one backing array", id.Name))
-				}
-			}
 			results[i] = v.expr(e, st, nil)
+			id, ok := ast.Unparen(e).(*ast.Ident)
+			variable, _ := v.info.ObjectOf(id).(*types.Var)
+			if !ok || variable == nil || !results[i].Sort.IsSeq() {
+				continue
+			}
+			if v.entry[variable] != nil {
+				v.unsupported(e.Pos(), fmt.Sprintf(
+					"returning slice parameter %s would give the caller two names for one backing array", id.Name))
+			}
+			if returned[variable] {
+				v.unsupported(e.Pos(), fmt.Sprintf(
+					"slice %s is returned twice, which would give the caller two names for one backing array", id.Name))
+			}
+			returned[variable] = true
 		}
 	}
 	v.atReturn(st, results, s.Pos())
@@ -1090,8 +1150,10 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 			continue
 		}
 		passed[variable] += len(call.Args)
-		if len(guard) > 0 {
-			v.unsupported(arg.Pos(), "calls that modify a slice are not supported on the right of && or ||")
+		if call != v.effectful || len(guard) > 0 {
+			v.unsupported(call.Pos(), fmt.Sprintf(
+				"%s may modify slice %s, so the call must be a statement of its own or the whole right-hand side of an assignment",
+				callee.Name(), id.Name))
 		}
 		written = append(written, func() {
 			st.vals[variable] = v.fresh(variable.Name(), value.Sort)

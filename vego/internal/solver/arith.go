@@ -112,25 +112,14 @@ func (a poly) key() string {
 	return b.String()
 }
 
-func gcd(a, b int64) int64 {
-	if a < 0 {
-		a = -a
-	}
-	if b < 0 {
-		b = -b
-	}
-	for b != 0 {
-		a, b = b, a%b
-	}
-	return a
-}
-
 // rowGCD returns the greatest common divisor of the coefficients of a dense
 // row, ignoring its trailing constant.
 func rowGCD(row []int64) int64 {
 	var g int64
 	for _, coef := range row[:len(row)-1] {
-		g = gcd(g, coef)
+		for coef = abs(coef); coef != 0; {
+			g, coef = coef, g%coef
+		}
 	}
 	return g
 }
@@ -205,9 +194,17 @@ func (p *prover) infeasible(eqs, les []poly) (unsat bool) {
 	return fourierMotzkin(rows, width)
 }
 
+// negChecked returns -a. The smallest int64 has no negation.
+func negChecked(a int64) int64 {
+	if a == math.MinInt64 {
+		panic(overflow{})
+	}
+	return -a
+}
+
 func abs(a int64) int64 {
 	if a < 0 {
-		return -a
+		return negChecked(a)
 	}
 	return a
 }
@@ -221,10 +218,10 @@ func substitute(row, eq []int64, pivot int) {
 	}
 	scaleRow, scaleEq := abs(eq[pivot]), coef
 	if eq[pivot] < 0 {
-		scaleEq = -coef
+		scaleEq = negChecked(coef)
 	}
 	for k := range row {
-		row[k] = addChecked(mulChecked(scaleRow, row[k]), -mulChecked(scaleEq, eq[k]))
+		row[k] = addChecked(mulChecked(scaleRow, row[k]), negChecked(mulChecked(scaleEq, eq[k])))
 	}
 }
 
@@ -253,10 +250,12 @@ func fourierMotzkin(rows [][]int64, width int) bool {
 				keyBuf = strconv.AppendInt(keyBuf, row[j], 10)
 				keyBuf = append(keyBuf, ',')
 			}
+			// Round the constant up: for a negative constant Go's
+			// truncating division already rounds toward zero, which is up.
 			if c := row[width]; c >= 0 {
-				row[width] = (c + g - 1) / g
+				row[width] = addChecked(c, g-1) / g
 			} else {
-				row[width] = -(-c / g)
+				row[width] = c / g
 			}
 			if i, dup := index[string(keyBuf)]; dup {
 				if row[width] > kept[i][width] {
@@ -303,7 +302,7 @@ func fourierMotzkin(rows [][]int64, width int) bool {
 			for _, low := range lower {
 				combined := make([]int64, width+1)
 				for k := range combined {
-					combined[k] = addChecked(mulChecked(-low[best], up[k]), mulChecked(up[best], low[k]))
+					combined[k] = addChecked(mulChecked(negChecked(low[best]), up[k]), mulChecked(up[best], low[k]))
 				}
 				next = append(next, combined)
 			}

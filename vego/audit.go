@@ -15,9 +15,11 @@ type degenerate struct {
 	tag  string
 	what string
 	// result yields the value returned for result i; slice yields the final
-	// contents of a slice parameter the function is allowed to write.
+	// contents of a slice parameter the function is allowed to write, which
+	// must keep the parameter's own length, together with the facts that
+	// define those contents.
 	result func(i int, sort logic.Sort) *logic.Term
-	slice  func(entry *logic.Term) *logic.Term
+	slice  func(entry *logic.Term) (*logic.Term, []*logic.Term)
 	facts  []*logic.Term
 }
 
@@ -34,10 +36,13 @@ func (v *fnVerifier) audit() {
 	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
 	for _, candidate := range v.degenerates() {
 		post := map[*types.Var]*logic.Term{}
+		hyps := append(append([]*logic.Term(nil), st.hyps...), candidate.facts...)
 		for _, param := range fn.params {
 			post[param] = v.entry[param]
 			if post[param].Sort.IsSeq() && v.mutates(fn, param) {
-				post[param] = candidate.slice(v.entry[param])
+				var facts []*logic.Term
+				post[param], facts = candidate.slice(v.entry[param])
+				hyps = append(hyps, facts...)
 			}
 		}
 		results := make([]*logic.Term, len(fn.results))
@@ -46,7 +51,6 @@ func (v *fnVerifier) audit() {
 			results[i] = candidate.result(i, sort)
 		}
 		env := &contractEnv{pv: v.pkgVerifier, fn: fn, args: v.entry, post: post, results: results}
-		hyps := append(append([]*logic.Term(nil), st.hyps...), candidate.facts...)
 		satisfied := true
 		for _, c := range fn.ensures {
 			satisfied = satisfied && solver.Prove(hyps, v.formula(c, c.node, env), opts) == solver.Proved
@@ -63,7 +67,7 @@ func (v *fnVerifier) audit() {
 // overwritten with zeros or with the sequence 0, 1, 2, ...
 func (v *fnVerifier) degenerates() []degenerate {
 	fn := v.fn
-	keep := func(entry *logic.Term) *logic.Term { return entry }
+	keep := func(entry *logic.Term) (*logic.Term, []*logic.Term) { return entry, nil }
 	hasInt, hasBool, writesSlices := false, false, false
 	var length *logic.Term = logic.IntLit(0)
 	for _, result := range fn.results {
@@ -112,29 +116,42 @@ func (v *fnVerifier) degenerates() []degenerate {
 		}
 	}
 	if writesSlices {
-		zeros := func(sort logic.Sort) *logic.Term { return logic.Fill(length, zero(sort.Elem())) }
-		list = append(list, degenerate{
-			tag: "CONSTANT", what: "fills its slices with zero values",
-			result: constant(0, false, zeros),
-			slice:  func(entry *logic.Term) *logic.Term { return zeros(entry.Sort) },
-		})
-		index := logic.Bound("k#audit", logic.Int)
-		counting := v.fresh("counting", logic.IntSeq)
-		inRange := logic.And(logic.Le(logic.IntLit(0), index), logic.Lt(index, length))
-		oblivious := func(sort logic.Sort) *logic.Term {
-			if sort == logic.IntSeq {
-				return counting
-			}
-			return zeros(sort)
+		zeros := func(length *logic.Term, sort logic.Sort) *logic.Term {
+			return logic.Fill(length, zero(sort.Elem()))
 		}
 		list = append(list, degenerate{
-			tag: "OBLIVIOUS", what: "fills its slices with 0, 1, 2, ... whatever the input",
-			result: constant(0, false, oblivious),
-			slice:  func(entry *logic.Term) *logic.Term { return oblivious(entry.Sort) },
-			facts: []*logic.Term{
-				logic.Eq(logic.Len(counting), length),
-				logic.Forall(index, logic.Implies(inRange, logic.Eq(logic.Select(counting, index), index))),
+			tag: "CONSTANT", what: "fills its slices with zero values",
+			result: constant(0, false, func(sort logic.Sort) *logic.Term { return zeros(length, sort) }),
+			slice: func(entry *logic.Term) (*logic.Term, []*logic.Term) {
+				return zeros(logic.Len(entry), entry.Sort), nil
 			},
+		})
+		// counting returns a sequence of the given length holding 0, 1, 2, ...
+		counting := func(length *logic.Term, sort logic.Sort) (*logic.Term, []*logic.Term) {
+			if sort != logic.IntSeq {
+				return zeros(length, sort), nil
+			}
+			index := logic.Bound("k#audit", logic.Int)
+			sequence := v.fresh("counting", logic.IntSeq)
+			inRange := logic.And(logic.Le(logic.IntLit(0), index), logic.Lt(index, length))
+			return sequence, []*logic.Term{
+				logic.Eq(logic.Len(sequence), length),
+				logic.Forall(index, logic.Implies(inRange, logic.Eq(logic.Select(sequence, index), index))),
+			}
+		}
+		returned, facts := counting(length, logic.IntSeq)
+		list = append(list, degenerate{
+			tag: "OBLIVIOUS", what: "fills its slices with 0, 1, 2, ... whatever the input",
+			result: constant(0, false, func(sort logic.Sort) *logic.Term {
+				if sort == logic.IntSeq {
+					return returned
+				}
+				return zeros(length, sort)
+			}),
+			slice: func(entry *logic.Term) (*logic.Term, []*logic.Term) {
+				return counting(logic.Len(entry), entry.Sort)
+			},
+			facts: facts,
 		})
 	}
 	for _, param := range fn.params {

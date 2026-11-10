@@ -1,6 +1,7 @@
 package solver
 
 import (
+	"math"
 	"math/rand/v2"
 	"testing"
 
@@ -321,4 +322,32 @@ func TestProveIsSound(t *testing.T) {
 		t.Fatalf("only %d random problems were proved; the test has lost its power", proved)
 	}
 	t.Logf("proved %d random problems, all confirmed by exhaustive evaluation", proved)
+}
+
+// TestExtremeCoefficients checks goals that are false but whose
+// refutation search passes through values at the edge of the 64-bit range,
+// where a wrapped negation or rounding step once reversed an inequality.
+func TestExtremeCoefficients(t *testing.T) {
+	x := logic.Const("x", logic.Int)
+	zero := logic.IntLit(0)
+	least := logic.IntLit(math.MinInt64)
+	most := logic.IntLit(math.MaxInt64)
+	tests := []struct {
+		name string
+		hyp  *logic.Term
+	}{
+		{"smallest coefficient", logic.Le(logic.Mul(least, x), zero)},
+		{"smallest constant", logic.Le(logic.Add(logic.Mul(logic.IntLit(2), x), least), zero)},
+		{"largest constant", logic.Le(logic.Mul(logic.IntLit(2), x), most)},
+		{"largest coefficient", logic.Le(zero, logic.Mul(most, x))},
+		{"equality with smallest coefficient", logic.Eq(logic.Mul(least, x), logic.Mul(least, logic.IntLit(1)))},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Every hypothesis holds for x = 1, so x <= 0 does not follow.
+			if Prove([]*logic.Term{test.hyp}, logic.Le(x, zero), Options{}) == Proved {
+				t.Fatalf("proved x <= 0 from %v, which x = 1 satisfies", test.hyp)
+			}
+		})
+	}
 }

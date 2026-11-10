@@ -99,3 +99,13 @@ func Tail(A []int) (R []int) { // want `vego:\ specification\ of\ Tail\ has\ a\ 
 }
 
 //@ Ensures |R| <= |A|
+
+// SetSecond has a contract that only bites because b keeps its own length;
+// a candidate that gave b the length of a would report a false hole.
+//
+// @ Requires |a| = 1 And |b| = 2
+func SetSecond(a, b []int) {
+	b[0] = 1
+}
+
+//@ Ensures |b'| != |a| -> b'[0] = 1

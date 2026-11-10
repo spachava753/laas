@@ -353,7 +353,6 @@ func (pv *pkgVerifier) analyzeMutation() {
 			}
 			continue
 		}
-		written := map[ast.Expr]bool{}
 		harmless := map[*ast.Ident]bool{}
 		read := func(e ast.Expr) *types.Var {
 			id, ok := ast.Unparen(e).(*ast.Ident)
@@ -364,16 +363,15 @@ func (pv *pkgVerifier) analyzeMutation() {
 			variable, _ := pv.info.Uses[id].(*types.Var)
 			return variable
 		}
+		var stack []ast.Node
 		ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
+			if n == nil {
+				stack = stack[:len(stack)-1]
+				return true
+			}
 			switch n := n.(type) {
-			case *ast.AssignStmt:
-				for _, lhs := range n.Lhs {
-					written[ast.Unparen(lhs)] = true
-				}
-			case *ast.IncDecStmt:
-				written[ast.Unparen(n.X)] = true
 			case *ast.IndexExpr:
-				if !written[n] {
+				if readOnlyUse(n, stack) {
 					read(n.X)
 				}
 			case *ast.RangeStmt:
@@ -392,6 +390,7 @@ func (pv *pkgVerifier) analyzeMutation() {
 					}
 				}
 			}
+			stack = append(stack, n)
 			return true
 		})
 		ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
@@ -413,10 +412,39 @@ func (pv *pkgVerifier) analyzeMutation() {
 	}
 }
 
+// readOnlyUse reports whether an element expression is only read. Every
+// context that can write through it, or hand out its address, counts as a
+// write: assignment and range targets, increments, the address operator, and
+// selectors, which may call a pointer method on the element.
+func readOnlyUse(element *ast.IndexExpr, ancestors []ast.Node) bool {
+	var use ast.Node = element
+	for i := len(ancestors) - 1; i >= 0; i-- {
+		parent := ancestors[i]
+		switch parent := parent.(type) {
+		case *ast.ParenExpr:
+			use = parent
+			continue
+		case *ast.AssignStmt:
+			return !slices.Contains(parent.Lhs, use.(ast.Expr))
+		case *ast.RangeStmt:
+			return parent.Key != use && parent.Value != use
+		case *ast.IncDecStmt, *ast.SelectorExpr, *ast.SliceExpr:
+			return false
+		case *ast.IndexExpr:
+			return parent.X != use
+		case *ast.UnaryExpr:
+			return parent.Op != token.AND
+		}
+		return true
+	}
+	return true
+}
+
 // mutates reports whether a function may write to the elements of a slice
-// parameter. Functions outside the package are assumed to.
+// parameter. Only functions that are themselves verified can be known to
+// leave a slice alone; every other callee is assumed to write it.
 func (pv *pkgVerifier) mutates(fn *funcInfo, param *types.Var) bool {
-	return fn == nil || pv.mutated[param]
+	return fn == nil || !fn.annotated() || fn.broken || pv.mutated[param]
 }
 
 func isBuiltin(info *types.Info, call *ast.CallExpr, name string) bool {
