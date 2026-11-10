@@ -1,0 +1,141 @@
+// Package rejected holds annotations and programs outside the supported
+// fragment, which must be reported rather than silently accepted.
+package rejected
+
+type point struct{ x, y int }
+
+// @ Requires p.x > 0 // want `vego:\ syntax\ error\ in\ Requires\ annotation:\ unexpected\ character\ '\.'`
+func StructParameter(p point) int {
+	return p.x
+}
+
+// @ Requires |A| > 0
+func Aliases(A []int) int {
+	B := A // want `vego:\ cannot\ verify\ Aliases:\ assigning\ slice\ A\ to\ another\ variable\ would\ make\ two\ variables\ share\ one\ backing\ array`
+	B[0] = 1
+	return A[0]
+}
+
+// @ Requires |A| > 0
+func ReturnsParameter(A []int) []int {
+	A[0] = 1
+	return A // want `vego:\ cannot\ verify\ ReturnsParameter:\ returning\ slice\ parameter\ A\ would\ give\ the\ caller\ two\ names\ for\ one\ backing\ array`
+}
+
+// @ Requires |A| > 1
+func SubSlices(A []int) int {
+	B := A[1:] // want `vego:\ cannot\ verify\ SubSlices:\ this\ slice\ expression\ is\ not\ supported\ \(sub\-slicing\ and\ aliasing\ are\ not\ modelled\ yet\)`
+	return B[0]
+}
+
+func write(A, B []int) {
+	if len(A) > 0 && len(B) > 0 {
+		A[0] = B[0]
+	}
+}
+
+// @ Requires |A| > 0
+func PassesTwice(A []int) {
+	write(A, A) // want `vego:\ cannot\ verify\ PassesTwice:\ slice\ A\ is\ passed\ more\ than\ once\ to\ a\ function\ that\ may\ modify\ it`
+}
+
+func unverified(A []int) []int { return A }
+
+// @ Requires |A| > 0
+func UsesUnverifiedSlice(A []int) int {
+	B := unverified(A) // want `vego:\ cannot\ verify\ UsesUnverifiedSlice:\ unverified\ returns\ a\ slice\ but\ is\ not\ verified,\ so\ the\ slice\ might\ share\ storage\ with\ another\ one`
+	return B[0]
+}
+
+// @ Requires x > // want `vego:\ syntax\ error\ in\ Requires\ annotation:\ expected\ an\ expression,\ found\ "end\ of\ annotation"`
+func SyntaxError(x int) int {
+	return x
+}
+
+// @ Requires y > 0 // want `vego:\ in\ Requires\ annotation:\ unknown\ name\ y`
+func UnknownName(x int) int {
+	return x
+}
+
+// @ Requires x' > 0 // want `vego:\ in\ Requires\ annotation:\ x'\ describes\ the\ state\ on\ return\ and\ is\ only\ allowed\ in\ Ensures`
+func PrimeInRequires(x int) int {
+	return x
+}
+
+func PrimeOnValue(x int) (y int) {
+	return x
+}
+
+//@ Ensures x' = y // want `vego:\ in\ Ensures\ annotation:\ x\ is\ passed\ by\ value,\ so\ only\ its\ entry\ value\ x\ is\ visible\ to\ callers`
+
+// @ Requires A > 0 // want `vego:\ in\ Requires\ annotation:\ cannot\ compare\ A\ \(\[\]int\)\ with\ 0\ \(int\)`
+func SliceAsInteger(A []int) int {
+	return 0
+}
+
+//@ Predicate liar(x) ::= ~liar(x) // want `vego:\ recursive\ use\ of\ predicate\ liar\ must\ not\ occur\ under\ negation,\ on\ the\ left\ of\ \->,\ or\ under\ <\->`
+
+//@ Predicate twice(x) ::= x > 0
+//@ Predicate twice(x) ::= x < 0 // want `vego:\ predicate\ twice\ is\ already\ defined`
+
+// @ Requires undefined(x) // want `vego:\ in\ Requires\ annotation:\ unknown\ predicate\ undefined`
+func UnknownPredicate(x int) int {
+	return x
+}
+
+func Floats(x float64) (y float64) { // want `vego:\ cannot\ verify\ Floats:\ parameter\ x\ has\ unsupported\ type\ float64`
+	return x
+}
+
+//@ Ensures y = x
+
+func MisplacedInvariant(x int) int {
+	//@ Invariant x > 0 // want `vego:\ Invariant\ annotation\ must\ be\ directly\ above\ a\ for\ loop`
+	return x
+}
+
+func InvariantInsideBody(n int) (s int) {
+	//@ Variant n - i
+	for i := 0; i < n; i++ {
+		//@ Requires i >= 0 // want `vego:\ Requires\ annotations\ belong\ outside\ the\ function\ body`
+		s++
+	}
+	return s
+}
+
+//@ Requires x > 0 // want `vego:\ Requires\ annotation\ is\ not\ attached\ to\ a\ function;\ put\ it\ in\ the\ comment\ directly\ above\ the\ function`
+
+var global int
+
+// @ Requires x > 0
+func ReadsGlobal(x int) int {
+	return x + global // want `vego:\ cannot\ verify\ ReadsGlobal:\ global\ is\ not\ a\ local\ variable\ of\ a\ supported\ type\ \(int,\ bool,\ \[\]int,\ \[\]bool\)`
+}
+
+// @ Requires x > 0
+func Closure(x int) int {
+	f := func() int { return x } // want `vego:\ cannot\ verify\ Closure:\ expressions\ of\ type\ func\(\)\ int\ are\ not\ supported`
+	return f()
+}
+
+//@ Preserves |A| // want `vego:\ Preserves\ annotations\ are\ not\ supported\ yet`
+
+type counter struct{ n int }
+
+// @ Requires c.n >= 0 // want `vego:\ syntax\ error\ in\ Requires\ annotation:\ unexpected\ character\ '\.'`
+func (c *counter) Method() int {
+	return c.n
+}
+
+// @ Requires x > 0
+func Goes(x int) {
+	go Goes(x) // want `vego:\ cannot\ verify\ Goes:\ go\ statements\ are\ not\ supported\ yet`
+}
+
+// @ Requires n >= 0
+func Labeled(n int) {
+outer: // want `vego:\ cannot\ verify\ Labeled:\ labeled\ statements\ are\ not\ supported\ yet`
+	for i := 0; i < n; i++ {
+		continue outer
+	}
+}

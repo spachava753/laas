@@ -7,6 +7,7 @@ import (
 	"github.com/spachava753/laas/funcdoc"
 	"github.com/spachava753/laas/inlinehelper"
 	"github.com/spachava753/laas/teststructure"
+	"github.com/spachava753/laas/vego"
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/multichecker"
 )
@@ -47,6 +48,7 @@ func main() {
 		funcdoc.Analyzer,
 		inlinehelper.Analyzer,
 		teststructure.Analyzer,
+		vego.Analyzer,
 	}
 	for _, analyzer := range analyzers {
 		run := analyzer.Run
