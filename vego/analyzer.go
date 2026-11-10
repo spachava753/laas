@@ -20,6 +20,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"golang.org/x/tools/go/analysis"
@@ -133,7 +134,7 @@ func (pv *pkgVerifier) report(pos token.Pos, format string, args ...any) {
 }
 
 var (
-	annotationLine = regexp.MustCompile(`^//\s?@\s*(.*)$`)
+	annotationLine = regexp.MustCompile(`^//\s?@(\s*)(.*)$`)
 	clauseKinds    = map[string]bool{
 		"Requires": true, "Ensures": true, "Invariant": true, "Variant": true,
 		"Measure": true, "Predicate": true, "Assert": true,
@@ -148,6 +149,12 @@ var (
 // not start with a keyword continue it. Both the //@ form and the // @ form
 // that gofmt produces inside doc comments are accepted, and a // inside an
 // annotation line starts an ordinary comment.
+//
+// An @ followed by whitespace always marks an annotation, so an unknown word
+// there is returned as a clause without a kind, to be reported, instead of
+// being skipped: a misspelt keyword must not switch verification off. An @
+// directly followed by an unknown word, as in "// @Summary", belongs to
+// some other tool and is ignored.
 func extractClauses(group *ast.CommentGroup) []*clause {
 	var clauses []*clause
 	var current *clause
@@ -157,14 +164,20 @@ func extractClauses(group *ast.CommentGroup) []*clause {
 			current = nil
 			continue
 		}
-		line, _, _ := strings.Cut(match[1], "//")
-		keyword, rest, _ := strings.Cut(strings.TrimSpace(line), " ")
+		line, _, _ := strings.Cut(match[2], "//")
+		line = strings.TrimSpace(line)
+		keyword := line
+		if end := strings.IndexFunc(line, unicode.IsSpace); end >= 0 {
+			keyword = line[:end]
+		}
 		switch {
 		case clauseKinds[keyword] || plannedKinds[keyword]:
-			current = &clause{kind: keyword, text: strings.TrimSpace(rest), pos: comment.Pos()}
+			current = &clause{kind: keyword, text: strings.TrimSpace(line[len(keyword):]), pos: comment.Pos()}
 			clauses = append(clauses, current)
 		case current != nil:
-			current.text += " " + strings.TrimSpace(line)
+			current.text += " " + line
+		case match[1] != "":
+			clauses = append(clauses, &clause{text: keyword, pos: comment.Pos()})
 		}
 	}
 	return clauses
@@ -183,6 +196,11 @@ func (pv *pkgVerifier) collect() {
 		}
 		for _, group := range file.Comments {
 			for _, c := range extractClauses(group) {
+				if c.kind == "" {
+					pv.report(c.pos, "unknown annotation %q; an annotation starts with one of "+
+						"Requires, Ensures, Invariant, Variant, Measure, Assert, Predicate", c.text)
+					continue
+				}
 				if plannedKinds[c.kind] {
 					pv.report(c.pos, "%s annotations are not supported yet", c.kind)
 					continue
@@ -219,6 +237,7 @@ func (pv *pkgVerifier) collect() {
 		if fn.decl.Body == nil {
 			continue
 		}
+		pv.checkPlacement(fn)
 		ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
 			if call, ok := n.(*ast.CallExpr); ok {
 				if callee := pv.funcs[typeutil.StaticCallee(pv.info, call)]; callee != nil {
@@ -315,6 +334,38 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 		fn.broken = true
 	}
 	return fn
+}
+
+// checkPlacement rejects body annotations that are not written between
+// statements. Symbolic execution only meets annotations at statement
+// boundaries, so one inside an expression or between the cases of a switch
+// would otherwise never be checked.
+func (pv *pkgVerifier) checkPlacement(fn *funcInfo) {
+	for _, c := range fn.body {
+		var innermost, parent ast.Node
+		ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
+			if n == nil || c.pos < n.Pos() || c.pos >= n.End() {
+				return false
+			}
+			innermost, parent = n, innermost
+			return true
+		})
+		between := false
+		switch n := innermost.(type) {
+		case *ast.BlockStmt:
+			switch parent.(type) {
+			case *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+			default:
+				between = true
+			}
+		case *ast.CaseClause:
+			between = c.pos > n.Colon
+		}
+		if !between {
+			pv.report(c.pos, "%s annotation must stand between statements, on a line of its own", c.kind)
+			fn.broken = true
+		}
+	}
 }
 
 // reaches reports whether a call chain leads from one function to another.

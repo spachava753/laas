@@ -1132,6 +1132,9 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		v.unsupported(call.Pos(), "calls to methods, variadic functions, and generic functions are not supported yet")
 	}
 	fn := v.funcs[callee]
+	if fn != nil && fn.broken {
+		v.unsupported(call.Pos(), callee.Name()+" has an annotation that could not be understood, so its contract is unknown")
+	}
 	args := map[*types.Var]*logic.Term{}
 	post := map[*types.Var]*logic.Term{}
 	passed := map[*types.Var]int{}
@@ -1140,29 +1143,35 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		param := sig.Params().At(i)
 		value := v.expr(arg, st, guard)
 		args[param], post[param] = value, value
-		id, isVariable := ast.Unparen(arg).(*ast.Ident)
-		if !value.Sort.IsSeq() || !isVariable {
+		if !value.Sort.IsSeq() {
 			continue
 		}
-		variable := v.info.ObjectOf(id).(*types.Var)
-		passed[variable]++
+		// A slice argument is either a variable, whose contents the call may
+		// change, or an expression that builds a temporary slice.
+		var variable *types.Var
+		if id, ok := ast.Unparen(arg).(*ast.Ident); ok {
+			variable, _ = v.info.ObjectOf(id).(*types.Var)
+			passed[variable]++
+		}
 		if !v.mutates(fn, param) {
 			continue
 		}
 		passed[variable] += len(call.Args)
 		if call != v.effectful || len(guard) > 0 {
 			v.unsupported(call.Pos(), fmt.Sprintf(
-				"%s may modify slice %s, so the call must be a statement of its own or the whole right-hand side of an assignment",
-				callee.Name(), id.Name))
+				"%s may modify the slice passed as %s, so the call must be a statement of its own "+
+					"or the whole right-hand side of an assignment", callee.Name(), param.Name()))
 		}
 		written = append(written, func() {
-			st.vals[variable] = v.fresh(variable.Name(), value.Sort)
-			st.assume(logic.Eq(logic.Len(st.vals[variable]), logic.Len(value)))
-			post[param] = st.vals[variable]
+			post[param] = v.fresh(param.Name(), value.Sort)
+			st.assume(logic.Eq(logic.Len(post[param]), logic.Len(value)))
+			if variable != nil {
+				st.vals[variable] = post[param]
+			}
 		})
 	}
 	for variable, uses := range passed {
-		if uses > len(call.Args)+1 {
+		if variable != nil && uses > len(call.Args)+1 {
 			v.unsupported(call.Pos(), fmt.Sprintf(
 				"slice %s is passed more than once to a function that may modify it", variable.Name()))
 		}

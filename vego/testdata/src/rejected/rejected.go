@@ -139,3 +139,36 @@ outer: // want `vego:\ cannot\ verify\ Labeled:\ labeled\ statements\ are\ not\ 
 		continue outer
 	}
 }
+
+func InsideInitializer() int {
+	x := (
+	// @ Assert False // want `vego:\ Assert\ annotation\ must\ stand\ between\ statements,\ on\ a\ line\ of\ its\ own`
+	0)
+	return x
+}
+
+func InsideSwitch(n int) int {
+	switch n {
+	// @ Assert False // want `vego:\ Assert\ annotation\ must\ stand\ between\ statements,\ on\ a\ line\ of\ its\ own`
+	case 0:
+		return 0
+	default:
+		//@ Assert n != 0
+		return 1
+	}
+}
+
+// @ Ensures	False
+func TabSeparator() int { return 0 } // want `vego:\ postcondition\ may\ not\ hold:\ False`
+
+// @ Ensure result = 1 // want `vego:\ unknown\ annotation\ "Ensure";\ an\ annotation\ starts\ with\ one\ of\ Requires,\ Ensures,\ Invariant,\ Variant,\ Measure,\ Assert,\ Predicate`
+func MisspeltKeyword() int { return 0 }
+
+// @Summary comments of other tools are not annotations.
+func OtherTool() int { return 0 }
+
+// @ Ensures result = // want `vego:\ syntax\ error\ in\ Ensures\ annotation:\ expected\ an\ expression,\ found\ "end\ of\ annotation"`
+func malformed() int { return 0 }
+
+// @ Ensures result = 0
+func CallsMalformed() int { return malformed() } // want `vego:\ cannot\ verify\ CallsMalformed:\ malformed\ has\ an\ annotation\ that\ could\ not\ be\ understood,\ so\ its\ contract\ is\ unknown`
