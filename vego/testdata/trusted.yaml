@@ -160,3 +160,14 @@ trusted:
     ensures:
       - "value = 0"
       - "value = 0 -> err = nil"
+
+  trust.external:
+    reason: Stands for a call whose failure cannot be predicted.
+
+  trust.writesSixtyFive:
+    reason: Writes the first byte and always succeeds.
+    modifies: [a]
+    requires:
+      - "|a| = 65"
+    ensures:
+      - "a'[0] >= 0 -> err = nil"

@@ -247,7 +247,7 @@ func (v *fnVerifier) forcesSuccess() bool {
 		// that is known of it is that it is not nil.
 		known := []*logic.Term{logic.Not(logic.IsNil(someError))}
 		pre, post, failures := v.contractInstance(args)
-		if solver.Prove(known, logic.And(pre...), opts) != solver.Proved {
+		if !v.inhabits(args) || solver.Prove(known, logic.And(pre...), opts) != solver.Proved {
 			return false
 		}
 		for i, failure := range failures {
@@ -256,6 +256,20 @@ func (v *fnVerifier) forcesSuccess() bool {
 		return !slices.Contains(forced, false)
 	})
 	return !slices.Contains(forced, false)
+}
+
+// inhabits reports whether every sample value is a value of its parameter's
+// Go type, including the elements of a sequence: the bytes of a string
+// literal are not all values of an int8.
+func (v *fnVerifier) inhabits(args map[*types.Var]*logic.Term) bool {
+	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
+	for param, value := range args {
+		if value != nil && value != v.entry[param] && value.Sort != logic.Err &&
+			solver.Prove(nil, v.valueFacts(value, param.Type()), opts) != solver.Proved {
+			return false
+		}
+	}
+	return true
 }
 
 // someError is the sample value for an error that is not nil.
@@ -315,7 +329,7 @@ func (v *fnVerifier) canReach(path []*logic.Term) bool {
 				chosen = append(chosen, logic.Eq(entry, value))
 			}
 		}
-		return solver.Prove(chosen, logic.And(required...), opts) == solver.Proved &&
+		return v.inhabits(args) && solver.Prove(chosen, logic.And(required...), opts) == solver.Proved &&
 			solver.Prove(append(chosen, path...), logic.False(), opts) != solver.Proved
 	})
 }

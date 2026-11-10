@@ -1387,20 +1387,34 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	for _, c := range fn.ensures {
 		st.assume(logic.Implies(logic.And(guard...), v.calleeFormula(c, env)))
 	}
-	v.noteFailureSource(fn, results, st, guard)
+	// What the types guarantee of everything the call produced, which a
+	// proof that this call succeeds may need.
+	produced := slices.Clip(guard)
+	for i, result := range results {
+		if result != nil {
+			produced = append(produced, v.valueFacts(result, sig.Results().At(i).Type()))
+		}
+	}
+	for i := range sig.Params().Len() {
+		if param := sig.Params().At(i); post[param] != nil && post[param] != args[param] {
+			produced = append(produced, v.valueFacts(post[param], param.Type()))
+		}
+	}
+	v.noteFailureSource(fn, results, st, produced)
 	return results
 }
 
 // noteFailureSource records whether a call makes the success of the function
-// under verification unpredictable. A trusted callee does when it returns
-// an error, its contract never forces success, and nothing here shows that
-// this particular call succeeds; a callee verified in another package says
-// in its published contract whether it is excused for that reason. A callee
-// verified in this package is only noted: whether it is excused is decided
-// once every function has been verified. In each case the call must be
-// reachable.
-func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []*logic.Term, st *state, guard []*logic.Term) {
-	path := append(slices.Clip(st.hyps), guard...)
+// under verification unpredictable. A call that provably succeeds never
+// does. Otherwise a trusted callee does when it returns an error and its
+// contract never forces success; a callee verified in another package says
+// in its published contract whether it is excused for that reason; and a
+// callee verified in this package is only noted, since whether it is excused
+// is decided once every function has been verified. In each case the call
+// must be reachable. facts holds the guard of the call and what the types
+// guarantee of its outputs.
+func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []*logic.Term, st *state, facts []*logic.Term) {
+	path := append(slices.Clip(st.hyps), facts...)
 	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
 	local := fn.decl != nil
 	for _, index := range errorResults(fn) {
@@ -1408,7 +1422,7 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []*logic.Term, st *
 			continue
 		}
 		source := (fn.trust != nil && !v.trustForces(fn)) || (fn.imported != nil && fn.imported.Excused)
-		if !local && (!source || solver.Prove(path, logic.IsNil(results[index]), opts) == solver.Proved) {
+		if (!local && !source) || solver.Prove(path, logic.IsNil(results[index]), opts) == solver.Proved {
 			continue
 		}
 		if v.canReach(path) {

@@ -378,3 +378,59 @@ func Contrapositive(n int) (err error) {
 }
 
 //@ Ensures err != nil -> n < 0
+
+// readySixtyFive is excused: it reaches an unpredictable call, and the
+// search for a witness does not try strings of 65 bytes.
+func readySixtyFive(s string) error {
+	_ = external()
+	return nil
+}
+
+//@ Ensures |s| = 65 -> result = nil
+
+func external() error { return nil }
+
+// AlwaysFailsAfterSixtyFive calls it with a string for which its contract
+// does guarantee success.
+func AlwaysFailsAfterSixtyFive() error { // want `the contract of AlwaysFailsAfterSixtyFive would also be met by a function that always returns an error`
+	_ = readySixtyFive("01234567890123456789012345678901234567890123456789012345678901234")
+	return errAlways
+}
+
+//@ Ensures True
+
+func writesSixtyFive(a []byte) (err error) {
+	a[0] = 255
+	return nil
+}
+
+// AlwaysFailsAfterWriting calls a trusted function whose success follows
+// from the type of an element it writes.
+func AlwaysFailsAfterWriting() error { // want `the contract of AlwaysFailsAfterWriting would also be met by a function that always returns an error`
+	a := make([]byte, 65)
+	_ = writesSixtyFive(a)
+	return errAlways
+}
+
+//@ Ensures True
+
+// ImpossibleLiteral promises success for a slice that cannot exist: an int8
+// cannot hold the byte 128.
+func ImpossibleLiteral(a []int8) error { // want `the contract of ImpossibleLiteral would also be met by a function that always returns an error`
+	if len(a) == 1 {
+		_ = a[0]
+	}
+	return errAlways
+}
+
+//@ Ensures a = "\x80" -> result = nil
+
+// PossibleLiteral promises it for one that can.
+func PossibleLiteral(a []int8) error {
+	if len(a) == 1 && a[0] == 127 {
+		return nil
+	}
+	return errAlways
+}
+
+//@ Ensures a = "\x7f" -> result = nil
