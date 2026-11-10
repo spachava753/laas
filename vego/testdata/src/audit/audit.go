@@ -133,3 +133,21 @@ func Shrink(x int) (y int8) { // want `vego:\ specification\ of\ Shrink\ has\ a\
 }
 
 //@ Ensures y != 0
+
+// SetLast cannot be imitated by counting 0, 1, 2, ...: a byte cannot hold 299.
+//
+// @ Requires |a| = 300
+func SetLast(a []byte, x byte) {
+	a[299] = x
+}
+
+//@ Ensures a'[299] = x Or a'[299] = 299
+
+// SetLastShort can: every index of a slice of 100 bytes fits a byte.
+//
+// @ Requires |a| = 100
+func SetLastShort(a []byte, x byte) { // want `vego:\ specification\ of\ SetLastShort\ has\ a\ hole\ \[OBLIVIOUS\]:\ it\ also\ accepts\ an\ implementation\ that\ fills\ its\ slices\ with\ 0,\ 1,\ 2,\ \.\.\.\ whatever\ the\ input`
+	a[99] = x
+}
+
+//@ Ensures a'[99] = x Or a'[99] = 99

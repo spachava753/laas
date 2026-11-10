@@ -651,6 +651,7 @@ func (v *fnVerifier) slice(target *types.Var, sort logic.Sort, e ast.Expr, st *s
 			if len(e.Args) == 3 {
 				capacity := v.expr(e.Args[2], st, nil)
 				v.check(st, nil, logic.Le(length, capacity), e.Args[2].Pos(), "make capacity may be less than the length")
+				v.checkFits(st, nil, capacity, types.Typ[types.Int], e.Args[2].Pos(), "make capacity")
 			}
 			return logic.Fill(length, zero(sort.Elem()))
 		case isBuiltin(v.info, e, "append"):
@@ -663,6 +664,10 @@ func (v *fnVerifier) slice(target *types.Var, sort logic.Sort, e ast.Expr, st *s
 			for _, element := range e.Args[1:] {
 				result = logic.Push(result, v.expr(element, st, nil))
 			}
+			// The grown length must be proved to fit. Assuming it, as for
+			// other slices, would contradict a length already at the limit
+			// and make everything after the append provable.
+			v.checkFits(st, nil, logic.Len(result), types.Typ[types.Int], e.Pos(), "append length")
 			return result
 		}
 		results := v.call(e, st, nil)

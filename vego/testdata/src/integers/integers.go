@@ -222,3 +222,24 @@ func CountdownOffByOne(n uint) {
 		n-- // want `vego:\ subtraction\ may\ overflow\ uint`
 	}
 }
+
+// TooMuchCapacity asks for a capacity that does not fit an int.
+//
+// @ Requires n > MaxInt
+func TooMuchCapacity(n uint64) int {
+	s := make([]byte, 0, n) // want `vego:\ make\ capacity\ may\ overflow\ int`
+	return len(s)
+}
+
+//@ Ensures result = 0
+
+// Oversize appends to a slice that is already as long as a slice can be.
+//
+// @ Requires n = MaxInt
+func Oversize(n int) []byte {
+	s := make([]byte, n)
+	s = append(s, 0) // want `vego:\ append\ length\ may\ overflow\ int`
+	return s
+}
+
+//@ Ensures False

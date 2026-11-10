@@ -3,6 +3,8 @@ package vego
 import (
 	"fmt"
 	"go/types"
+	"maps"
+	"slices"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
@@ -45,15 +47,29 @@ func (v *fnVerifier) audit() {
 				hyps = append(hyps, facts...)
 			}
 		}
-		// A candidate is only an implementation if what it returns is a
-		// value of the result's type: -1 is not a uint, and an int argument
-		// is not an int8 unless the precondition makes it small enough.
+		// A candidate is only an implementation if everything it produces
+		// is a value of the right type: -1 is not a uint, an int argument is
+		// not an int8 unless the precondition makes it small enough, and a
+		// []byte cannot hold 0, 1, 2, ... beyond 255.
 		results := make([]*logic.Term, len(fn.results))
 		wellTyped := true
+		typed := func(value *logic.Term, t types.Type) {
+			fact := v.typeFact(value, t)
+			if value.Sort.IsSeq() && !slices.Contains(slices.Collect(maps.Values(v.entry)), value) {
+				index := logic.Bound("k#typed", logic.Int)
+				inRange := logic.And(logic.Le(logic.IntLit(0), index), logic.Lt(index, logic.Len(value)))
+				element := v.typeFact(logic.Select(value, index), t.Underlying().(*types.Slice).Elem())
+				fact = logic.And(fact, logic.Forall(index, logic.Implies(inRange, element)))
+			}
+			wellTyped = wellTyped && solver.Prove(hyps, fact, opts) == solver.Proved
+		}
+		for _, param := range fn.params {
+			typed(post[param], param.Type())
+		}
 		for i, result := range fn.results {
 			sort, _ := sortOf(result.Type())
 			results[i] = candidate.result(i, sort)
-			wellTyped = wellTyped && solver.Prove(hyps, v.typeFact(results[i], result.Type()), opts) == solver.Proved
+			typed(results[i], result.Type())
 		}
 		if !wellTyped {
 			continue
@@ -166,16 +182,15 @@ func (v *fnVerifier) degenerates() []degenerate {
 		entry := v.entry[param]
 		matches := false
 		for _, result := range fn.results {
-			sort, _ := sortOf(result.Type())
-			matches = matches || sort == entry.Sort
+			matches = matches || types.Identical(result.Type(), param.Type())
 		}
 		if !matches {
 			continue
 		}
 		list = append(list, degenerate{
 			tag: "MINIMAL CONSTRUCTOR", what: "returns its argument " + param.Name() + " unchanged",
-			result: func(_ int, sort logic.Sort) *logic.Term {
-				if sort == entry.Sort {
+			result: func(i int, sort logic.Sort) *logic.Term {
+				if types.Identical(fn.results[i].Type(), param.Type()) {
 					return entry
 				}
 				return zero(sort)
