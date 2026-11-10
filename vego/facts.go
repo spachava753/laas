@@ -24,6 +24,9 @@ type contractFact struct {
 	// function of its package that its proof relies on, reported a problem.
 	// Its contract is then not established and must not be used.
 	Verified bool
+	// KnownErrors is set when every error the function returns was made by
+	// errors.New or fmt.Errorf, so that formatting it runs no unknown code.
+	KnownErrors bool
 	// Consts holds the values of the package constants the contract
 	// mentions, so that it means the same in every package that reads it.
 	Consts map[string]string
@@ -70,7 +73,7 @@ func (pv *pkgVerifier) exportContracts(excused map[*funcInfo]bool) {
 		if !fn.annotated() || !fn.obj.Exported() {
 			continue
 		}
-		fact := &contractFact{Excused: excused[fn], Verified: !unverified[fn], Consts: map[string]string{}}
+		fact := &contractFact{Excused: excused[fn], Verified: !unverified[fn], KnownErrors: pv.knownReturns[fn], Consts: map[string]string{}}
 		// The constants a contract mentions are recorded with their values.
 		var visit func(n *logic.Node)
 		visit = func(n *logic.Node) {

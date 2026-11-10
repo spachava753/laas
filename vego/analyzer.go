@@ -91,6 +91,9 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			reported:     map[string]bool{},
 			outcomes:     map[*funcInfo]*outcome{},
 			trusted:      map[*types.Func]*funcInfo{},
+			origins:      map[*ast.BlockStmt]*origins{},
+			knownReturns: map[*funcInfo]bool{},
+			isParameter:  map[*types.Var]bool{},
 			imported:     map[*types.Func]*funcInfo{},
 			foreign:      map[*types.Package]*logic.Resolver{},
 			plain:        logic.NewResolver(),
@@ -214,6 +217,12 @@ type pkgVerifier struct {
 	current *funcInfo
 	// sentinels are the package-level error variables known to be non-nil.
 	sentinels map[*types.Var]bool
+	// origins caches what the variables of each function body are assigned,
+	// knownReturns holds the functions that only return errors of known
+	// origin, and isParameter the parameters of all functions.
+	origins      map[*ast.BlockStmt]*origins
+	knownReturns map[*funcInfo]bool
+	isParameter  map[*types.Var]bool
 }
 
 // report emits a diagnostic once per position and message. Symbolic execution
@@ -344,6 +353,7 @@ func (pv *pkgVerifier) collect() {
 		pv.report(predicateClauses[defineErr.Decl].pos, "%v", defineErr.Err)
 	}
 	pv.findSentinels()
+	pv.findKnownReturns()
 	for _, fn := range pv.order {
 		if fn.annotated() && pv.trustedContract(fn.obj) != nil {
 			pv.report(fn.decl.Name.Pos(), "%s has //@ annotations and a trusted contract; "+

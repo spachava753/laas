@@ -115,3 +115,20 @@ const MaxInt8 = 0
 func Touch(as []*Account) {
 	as[MaxInt8].Balance = 1
 }
+
+// Check returns an error it made itself, which callers may format.
+func Check(x int) (err error) {
+	if x < 0 {
+		return errEmpty
+	}
+	return nil
+}
+
+//@ Ensures err = nil <-> x >= 0
+
+// Relay returns the error it was given, which nobody may format.
+func Relay(e error) (err error) {
+	return e
+}
+
+//@ Ensures (err = nil) <-> (e = nil)

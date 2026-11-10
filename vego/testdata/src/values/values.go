@@ -440,7 +440,7 @@ func consume(e error) { _ = e.Error() }
 //
 // @ Requires |a| = 1 And a[0] = 0
 func BoxedExplicitly(a failing) int {
-	_ = fmt.Errorf("%s", error(a)) // want `vego:\ cannot\ verify\ BoxedExplicitly:\ converting\ a\ values\.failing\ to\ an\ error\ is\ not\ supported`
+	_ = fmt.Errorf("%s", error(a)) // want `vego: cannot verify BoxedExplicitly: formatting error\(a\) would run the methods of an error whose origin is not known`
 	return a[0]
 }
 
@@ -643,3 +643,95 @@ func ImpossibleString(s string) error { // want `the contract of ImpossibleStrin
 }
 
 //@ Ensures True
+
+// WrapsOwn wraps an error it made itself.
+//
+// @ Requires x <= 1000
+func WrapsOwn(x int) (err error) {
+	if x < 0 {
+		err = errors.New("negative")
+		return fmt.Errorf("checking %d: %w", x, err)
+	}
+	return nil
+}
+
+//@ Ensures err = nil <-> x >= 0
+
+// WrapsVerified wraps the error of a verified function, which only returns
+// errors it made.
+//
+// @ Requires x <= 1000
+func WrapsVerified(x int) (err error) {
+	if err := WrapsOwn(x); err != nil {
+		return fmt.Errorf("outer: %w", err)
+	}
+	return nil
+}
+
+//@ Ensures err = nil <-> x >= 0
+
+// WrapsSentinel wraps an error variable of this package.
+func WrapsSentinel(fail bool) error {
+	if fail {
+		return fmt.Errorf("wrapped: %w", errOutOfRange)
+	}
+	return nil
+}
+
+//@ Ensures result = nil <-> ~fail
+
+// WrapsParameter formats an error from its caller, whose methods could do
+// anything.
+func WrapsParameter(e error) error {
+	return fmt.Errorf("wrapped: %w", e) // want `vego: cannot verify WrapsParameter: formatting e would run the methods of an error whose origin is not known`
+}
+
+//@ Ensures result != nil
+
+// WrapsTrusted formats the error of a function that is not verified.
+func WrapsTrusted() error {
+	err := external()
+	if err != nil {
+		return fmt.Errorf("external: %w", err) // want `vego: cannot verify WrapsTrusted: formatting err would run the methods of an error whose origin is not known`
+	}
+	return nil
+}
+
+//@ Ensures True
+
+// passes hands its argument on, so what it returns is not of known origin.
+func passes(e error) (err error) {
+	return e
+}
+
+//@ Ensures (err = nil) <-> (e = nil)
+
+// WrapsPassed formats an error that went through such a function.
+func WrapsPassed() error {
+	err := passes(errOutOfRange)
+	return fmt.Errorf("passed: %w", err) // want `vego: cannot verify WrapsPassed: formatting err would run the methods of an error whose origin is not known`
+}
+
+//@ Ensures result != nil
+
+// WrapsMixed assigns the variable it formats from a parameter on one path.
+func WrapsMixed(e error, flag bool) error {
+	err := errors.New("own")
+	if flag {
+		err = e
+	}
+	return fmt.Errorf("mixed: %v", err) // want `vego: cannot verify WrapsMixed: formatting err would run the methods of an error whose origin is not known`
+}
+
+//@ Ensures result != nil
+
+// ReturnsParameter may hand back an error from outside without formatting
+// it, and compare it with nil.
+func ReturnsParameter(e error) (err error) {
+	if e != nil {
+		return e
+	}
+	return nil
+}
+
+//@ Ensures (err = nil) <-> (e = nil)

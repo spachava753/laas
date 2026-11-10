@@ -125,13 +125,16 @@ func formatsPlainly(t types.Type) bool {
 //
 // Formatting calls the String, Error, and Format methods of its operands and
 // of what they contain, which is code the verifier does not see. Only values
-// that are formatted without such calls are therefore accepted, and errors,
-// whose methods cannot reach the memory of this function under the rule that
-// unverified code keeps no reference to it.
+// that are formatted without such calls are therefore accepted, and errors
+// whose origin is known; see knownError.
 func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term) *logic.Term {
 	for _, arg := range call.Args {
 		t := v.info.TypeOf(arg)
-		if !isError(t) && !formatsPlainly(t) {
+		switch {
+		case isError(t) && !v.knownError(v.originsOf(v.fn.decl.Body), arg, -1, map[*types.Var]bool{}):
+			v.unsupported(arg.Pos(), fmt.Sprintf("formatting %s would run the methods of an error whose origin is not known; "+
+				"only an error made by errors.New or fmt.Errorf, here or in a verified function, can be formatted", types.ExprString(arg)))
+		case !isError(t) && !formatsPlainly(t):
 			v.unsupported(arg.Pos(), fmt.Sprintf(
 				"formatting a value of type %s may call methods, which are not verified, or follow pointers", t))
 		}

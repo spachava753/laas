@@ -2,6 +2,7 @@
 // contracts that package published.
 package client
 
+import "fmt"
 import "lib"
 
 // The predicate of the same name here is a different one.
@@ -140,3 +141,23 @@ func TouchesFirst(as []*lib.Account) int {
 }
 
 //@ Ensures result = 0
+
+// WrapsLib formats the error of a verified function of another package.
+func WrapsLib(x int) (err error) {
+	if err := lib.Check(x); err != nil {
+		return fmt.Errorf("lib: %w", err)
+	}
+	return nil
+}
+
+//@ Ensures err = nil <-> x >= 0
+
+// WrapsRelay formats an error that another package only passed on.
+func WrapsRelay(e error) (err error) {
+	if err := lib.Relay(e); err != nil {
+		return fmt.Errorf("lib: %w", err) // want `cannot verify WrapsRelay: formatting err would run the methods of an error whose origin is not known`
+	}
+	return nil
+}
+
+//@ Ensures True
