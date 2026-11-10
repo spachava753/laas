@@ -283,11 +283,12 @@ func (v *fnVerifier) forcesSuccess() bool {
 
 // canReach reports whether there is evidence that execution can arrive at
 // the current point, given the facts that hold on the path to it. A path
-// that is provably impossible cannot. For a path whose facts speak about the
-// inputs alone, failing to refute it is not enough: some concrete input must
-// provably take it. A path that also depends on values the verifier treats
-// as unknown, such as the result of an earlier call or the state after a
-// loop, has no such witness and is taken as reachable unless refuted.
+// that is provably impossible cannot. Beyond that, the facts that speak
+// about the inputs alone must be satisfied together by some concrete input;
+// failing to refute them is not enough. Facts that depend on values the
+// verifier treats as unknown, such as the result of an earlier call or the
+// state after a loop, have no such witness and are taken as possible unless
+// refuted, so this is an over-approximation for such paths.
 func (v *fnVerifier) canReach(path []*logic.Term) bool {
 	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
 	if solver.Prove(path, logic.False(), opts) == solver.Proved {
@@ -304,9 +305,9 @@ func (v *fnVerifier) canReach(path []*logic.Term) bool {
 		}
 		return !slices.ContainsFunc(t.Args, func(arg *logic.Term) bool { return !inputsOnly(arg) })
 	}
-	if slices.ContainsFunc(path, func(fact *logic.Term) bool { return !inputsOnly(fact) }) {
-		return true
-	}
+	// The facts about the inputs alone must have a witness whatever else
+	// the path depends on; an unrelated unknown does not make them possible.
+	path = slices.DeleteFunc(slices.Clone(path), func(fact *logic.Term) bool { return !inputsOnly(fact) })
 	return v.someInput(path, func(args map[*types.Var]*logic.Term) bool {
 		var chosen []*logic.Term
 		for param, value := range args {

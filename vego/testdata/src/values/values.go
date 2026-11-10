@@ -566,3 +566,24 @@ func LiveSquareSource(x int) error {
 }
 
 //@ Ensures True
+
+// ExplicitResultName names its first result result2, which must not be
+// taken for the second result.
+func ExplicitResultName() (result2 int, _ int) {
+	return 1, 0 // want `vego:\ postcondition\ may\ not\ hold:\ result2\ =\ 0`
+}
+
+//@ Ensures result2 = 0
+
+// DiscardedValue hides an unreachable source behind an unrelated unknown.
+//
+// @ Requires -2 <= x <= 2
+func DiscardedValue(x int) error { // want `vego:\ the\ contract\ of\ DiscardedValue\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ some\ input\ satisfies\ it`
+	_ = errors.New("discarded")
+	if x*x == 2 {
+		_ = external()
+	}
+	return errors.New("always")
+}
+
+//@ Ensures True

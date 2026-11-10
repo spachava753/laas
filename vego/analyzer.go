@@ -284,12 +284,14 @@ func (pv *pkgVerifier) addFunc(decl *ast.FuncDecl) {
 	// Unnamed results are called result, or result1, result2, ... when
 	// there are several.
 	for i := range sig.Results().Len() {
-		switch {
-		case sig.Results().At(i).Name() != "" && sig.Results().At(i).Name() != "_":
-		case sig.Results().Len() == 1:
-			fn.resultNames["result"] = 0
-		default:
-			fn.resultNames[fmt.Sprintf("result%d", i+1)] = i
+		name := fmt.Sprintf("result%d", i+1)
+		if sig.Results().Len() == 1 {
+			name = "result"
+		}
+		// A name the function itself gives to a result always wins.
+		_, taken := fn.resultNames[name]
+		if declared := sig.Results().At(i).Name(); (declared == "" || declared == "_") && !taken {
+			fn.resultNames[name] = i
 		}
 	}
 	pv.funcs[obj] = fn
