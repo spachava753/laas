@@ -124,3 +124,13 @@ trusted:
     modifies: [a]
     ensures:
       - "|a'| = 1 -> err = nil"
+
+  trust.readyByte:
+    reason: Succeeds whenever its byte result is not negative, which is always.
+    ensures:
+      - "value >= 0 -> err = nil"
+
+  trust.maybeSigned:
+    reason: Succeeds only when its result is not negative.
+    ensures:
+      - "value >= 0 -> err = nil"

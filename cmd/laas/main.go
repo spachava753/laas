@@ -94,6 +94,11 @@ func main() {
 	if slices.ContainsFunc(os.Args[1:], func(arg string) bool { return strings.TrimLeft(arg, "-") == "vego.trust" }) {
 		os.Exit(trustReport(os.Args[1:]))
 	}
+	// go vet -vettool passes a single configuration file per package and
+	// caches what comes back; the verifier must not be cached that way.
+	if len(os.Args) > 1 && strings.HasSuffix(os.Args[len(os.Args)-1], ".cfg") {
+		vego.RefuseCachedRuns()
+	}
 	flag.Var(
 		&excludedPackages,
 		"exclude-packages",

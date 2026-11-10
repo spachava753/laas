@@ -389,7 +389,11 @@ func (pv *pkgVerifier) loadTrust(explicit string) {
 	visit(pv.pass.Pkg)
 	for _, key := range keys {
 		entry := pv.projectTrust.entries[key]
-		if pkg, name, ok := splitFuncName(key); ok && visible[pkg] != nil && !declares(visible[pkg], name) {
+		pkg, name, ok := splitFuncName(key)
+		// Unexported names of another package may be missing from what
+		// is known about it here; they are checked when it is analysed.
+		checkable := ok && visible[pkg] != nil && (visible[pkg] == pv.pass.Pkg || token.IsExported(name[strings.LastIndex(name, ".")+1:]))
+		if checkable && !declares(visible[pkg], name) {
 			pv.report(pv.trustPos(pv.projectTrust, entry.line, 1),
 				"the trusted contract names %s, but package %s has no such function", key, pkg)
 		}

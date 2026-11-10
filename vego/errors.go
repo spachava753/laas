@@ -280,6 +280,21 @@ func (v *fnVerifier) successClauses(args map[*types.Var]*logic.Term) (pre []*log
 		pre = append(pre, v.formula(c, c.node, &contractEnv{pv: v.pkgVerifier, fn: fn, args: args}))
 	}
 	env := &contractEnv{pv: v.pkgVerifier, fn: fn, args: args, post: post, results: results}
+	// What the types guarantee about the outputs. A condition that follows
+	// from the precondition and these alone holds whatever the function
+	// returns, so it does not depend on the outputs although it names them.
+	typed := slices.Clone(pre)
+	for i, result := range fn.results {
+		if results[i] != nil {
+			typed = append(typed, v.valueFacts(results[i], result.Type()))
+		}
+	}
+	for _, param := range fn.params {
+		if outputs[post[param]] {
+			typed = append(typed, v.valueFacts(post[param], param.Type()))
+		}
+	}
+	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
 	conditions = make([][]*logic.Term, len(errorResults(fn)))
 	for _, c := range fn.ensures {
 		// A clause about a result that has no value in the logic says
@@ -288,8 +303,11 @@ func (v *fnVerifier) successClauses(args map[*types.Var]*logic.Term) (pre []*log
 		for n, index := range errorResults(fn) {
 			for _, condition := range successConditions(clause, results[index]) {
 				condition = withLengths(condition, lengths)
-				if !mentions(condition, outputs) {
+				switch {
+				case !mentions(condition, outputs):
 					conditions[n] = append(conditions[n], condition)
+				case solver.Prove(typed, condition, opts) == solver.Proved:
+					conditions[n] = append(conditions[n], logic.True())
 				}
 			}
 		}

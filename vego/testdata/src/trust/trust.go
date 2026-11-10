@@ -281,3 +281,26 @@ func AlwaysFailsAfterReadyWriting(a []int) error { // want `the contract of Alwa
 }
 
 //@ Ensures True
+
+func readyByte() (value uint8, err error) { return 0, nil }
+
+// AlwaysFailsAfterReadyByte calls a trusted function whose success is
+// guarded by a condition on its own result that the result's type makes
+// true.
+func AlwaysFailsAfterReadyByte() error { // want `the contract of AlwaysFailsAfterReadyByte would also be met by a function that always returns an error`
+	_, _ = readyByte()
+	return errAlways
+}
+
+//@ Ensures True
+
+func maybeSigned() (value int8, err error) { return -1, errAlways }
+
+// MayFailAfterSigned calls one whose guard really depends on its result, so
+// nothing says when it succeeds.
+func MayFailAfterSigned() error {
+	_, err := maybeSigned()
+	return err
+}
+
+//@ Ensures True

@@ -208,6 +208,8 @@ trusted:
 
 `vego` ships contracts for a small part of the standard library, such as `sort.Ints`, `sort.SearchInts`, `rand.Intn`, `strings.HasPrefix`, `strings.Index`, and `strconv.Itoa`. They state documented behaviour only, and each is tested against the real function. An entry in your file for the same function replaces the shipped one.
 
+Run `laas` directly, as above. Under `go vet -vettool`, results are cached by a mechanism that does not know about trust files, so a proof could outlive the contract it rests on; `laas` therefore refuses to verify in that mode and says so.
+
 To see everything the proofs of a project take on trust, with reasons and call sites:
 
 ```sh

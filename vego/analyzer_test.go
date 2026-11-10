@@ -146,6 +146,13 @@ func TestAnalyzer(t *testing.T) {
 		runCorpus(t, analyzer, "badtrust")
 	})
 
+	t.Run("refuses to verify for a caching driver", func(t *testing.T) {
+		RefuseCachedRuns()
+		defer func() { refuseCache = false }()
+
+		runCorpus(t, newAnalyzer(), "refused")
+	})
+
 	t.Run("audits specifications on request", func(t *testing.T) {
 		analyzer := newAnalyzer()
 		if err := analyzer.Flags.Set("audit", "true"); err != nil {

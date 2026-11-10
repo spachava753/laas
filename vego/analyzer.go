@@ -32,6 +32,22 @@ import (
 // cannot discharge.
 var Analyzer = newAnalyzer()
 
+// refuseCache makes the analyzer decline to verify; see RefuseCachedRuns.
+var refuseCache bool
+
+// RefuseCachedRuns must be called by a driver whose results are cached by
+// something that does not know about trust files, as go vet does with its
+// -vettool. Such a cache would keep a proof, and the contract a package
+// published from it, after the trusted contracts it rests on have changed.
+// The analyzer then verifies nothing and reports every package that has
+// annotations instead.
+func RefuseCachedRuns() { refuseCache = true }
+
+// newAnalyzer builds the analyzer with its flags. A run loads the trusted
+// contracts, collects the annotations of the package, verifies every
+// annotated function, applies the always-fails rule, and publishes the
+// verified contracts and the trust the proofs rest on. For a caching driver
+// it only reports that nothing was verified.
 func newAnalyzer() *analysis.Analyzer {
 	maxSteps, audit, trustPath := 0, false, ""
 	analyzer := &analysis.Analyzer{
@@ -80,6 +96,20 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			plain:        logic.NewResolver(),
 			trustSources: map[*trustFile]*token.File{},
 			maxSteps:     maxSteps,
+		}
+		if refuseCache {
+			pv.usage = &Usage{}
+			pv.collect()
+			// A package without annotations has nothing to verify and
+			// draws no report.
+			for _, fn := range pv.order {
+				if fn.annotated() {
+					pv.report(fn.decl.Name.Pos(), "verification does not run under go vet, whose cache would keep "+
+						"proofs after the trusted contracts they rest on have changed; run laas directly")
+					break
+				}
+			}
+			return pv.usage, nil
 		}
 		pv.loadTrust(trustPath)
 		pv.collect()
