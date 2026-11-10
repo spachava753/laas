@@ -114,10 +114,16 @@ func (pv *pkgVerifier) knownError(o *origins, e ast.Expr, index int, visiting ma
 		if errorConstructor(callee) {
 			return true
 		}
-		return callee != nil && pv.returnsKnownErrors(callee)
+		// What a function is known for is the errors it returns, not
+		// whatever else it returns that happens to be assigned to an error.
+		result := pv.info.TypeOf(e)
+		if tuple, ok := result.(*types.Tuple); ok && index >= 0 && index < tuple.Len() {
+			result = tuple.At(index).Type()
+		}
+		return callee != nil && isError(result) && pv.returnsKnownErrors(callee)
 	case *ast.Ident:
 		variable, ok := pv.info.ObjectOf(e).(*types.Var)
-		return ok && index < 0 && pv.knownVariable(o, variable, visiting)
+		return ok && index < 0 && isError(variable.Type()) && pv.knownVariable(o, variable, visiting)
 	}
 	return false
 }

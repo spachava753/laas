@@ -225,7 +225,7 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
 		})
 		return
 	case len(s.Rhs) == 1 && len(s.Lhs) > 1:
-		values = v.callResults(s.Rhs[0], st)
+		values = v.callResults(s.Rhs[0], st, wanted(targets))
 	default:
 		for i, rhs := range s.Rhs {
 			values = append(values, v.evalAs(rhs, v.targetType(targets[i], rhs), st, nil))
@@ -251,12 +251,35 @@ func (v *fnVerifier) isAppend(e ast.Expr) bool {
 	return ok && isBuiltin(v.info, call, "append")
 }
 
-func (v *fnVerifier) callResults(e ast.Expr, st *state) []value {
+// callResults evaluates a call whose results are assigned one by one to
+// things of the given types, nil for the blank identifier. Each result must
+// have the type it is assigned to: Go would convert it otherwise, and a
+// pointer or struct that becomes an error is a value the verifier does not
+// follow.
+func (v *fnVerifier) callResults(e ast.Expr, st *state, wants []types.Type) []value {
 	call, ok := ast.Unparen(e).(*ast.CallExpr)
 	if !ok {
 		v.unsupported(e.Pos(), "multi-value expressions other than function calls are not supported")
 	}
+	if tuple, isTuple := v.info.TypeOf(call).(*types.Tuple); isTuple {
+		for i := range min(tuple.Len(), len(wants)) {
+			if have := tuple.At(i).Type(); wants[i] != nil && !types.Identical(have, wants[i]) {
+				v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to a %s is not supported here; assign the result to a variable of its own type first", have, wants[i]))
+			}
+		}
+	}
 	return v.call(call, st, nil)
+}
+
+// wanted lists the types of assignment targets, nil for the blank identifier.
+func wanted(targets []lvalue) []types.Type {
+	wants := make([]types.Type, len(targets))
+	for i, target := range targets {
+		if target.kind != placeBlank {
+			wants[i] = target.typ
+		}
+	}
+	return wants
 }
 
 // appendTo evaluates append(s, values...). Go writes the new elements into
@@ -359,7 +382,7 @@ func (v *fnVerifier) declare(s *ast.DeclStmt, st *state) {
 			}
 		case len(spec.Values) == 1 && len(spec.Names) > 1:
 			v.allowEffects(spec.Values[0])
-			values = v.callResults(spec.Values[0], st)
+			values = v.callResults(spec.Values[0], st, wanted(targets))
 		default:
 			if len(spec.Values) == 1 {
 				v.allowEffects(spec.Values[0])
@@ -387,7 +410,11 @@ func (v *fnVerifier) returnStmt(s *ast.ReturnStmt, st *state) {
 			results[i] = st.vals[result]
 		}
 	case len(s.Results) == 1 && len(results) > 1:
-		results = v.callResults(s.Results[0], st)
+		wants := make([]types.Type, len(v.fn.results))
+		for i, result := range v.fn.results {
+			wants[i] = result.Type()
+		}
+		results = v.callResults(s.Results[0], st, wants)
 	case len(s.Results) == 1 && v.isAppend(s.Results[0]):
 		v.appendTo(ast.Unparen(s.Results[0]).(*ast.CallExpr), st, func(next *state, result value) {
 			v.atReturn(next, []value{result}, s.Pos())

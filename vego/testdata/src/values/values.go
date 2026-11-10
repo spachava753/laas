@@ -735,3 +735,44 @@ func ReturnsParameter(e error) (err error) {
 }
 
 //@ Ensures (err = nil) <-> (e = nil)
+
+type boxed struct{ x int }
+
+func (b *boxed) Error() string { return "boxed" }
+
+// pair returns a pointer that is also an error, and a number.
+func pair(p *boxed) (b *boxed, tag int) {
+	return p, 0
+}
+
+//@ Ensures b = p And tag = 0
+
+// TupleToError lets a call result become an error on the way out.
+func TupleToError() (err error, tag int) {
+	return pair(nil) // want `vego: cannot verify TupleToError: converting a \*values.boxed to a error is not supported here`
+}
+
+//@ Ensures err = nil And tag = 0
+
+// TupleAssigned does the same in an assignment and then formats the error.
+func TupleAssigned(p *boxed) int {
+	var e error
+	e, _ = pair(p) // want `vego: cannot verify TupleAssigned: converting a \*values.boxed to a error is not supported here`
+	_ = fmt.Errorf("%s", e)
+	return 0
+}
+
+//@ Ensures result = 0
+
+// TupleDeclared does it in a declaration.
+func TupleDeclared(p *boxed) int {
+	var e, tag error = nil, nil
+	_, _ = e, tag
+	var f error
+	var n int
+	f, n = pair(p) // want `vego: cannot verify TupleDeclared: converting a \*values.boxed to a error is not supported here`
+	_ = f
+	return n
+}
+
+//@ Ensures result = 0
