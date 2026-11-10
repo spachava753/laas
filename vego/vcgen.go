@@ -1387,20 +1387,24 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	for _, c := range fn.ensures {
 		st.assume(logic.Implies(logic.And(guard...), v.calleeFormula(c, env)))
 	}
-	// What the types guarantee of everything the call produced, which a
-	// proof that this call succeeds may need.
-	produced := slices.Clip(guard)
+	// What the types guarantee of everything the call took and produced,
+	// which a proof that this call succeeds may need: the state only holds
+	// such facts for the elements that were actually read.
+	involved := slices.Clip(guard)
 	for i, result := range results {
 		if result != nil {
-			produced = append(produced, v.valueFacts(result, sig.Results().At(i).Type()))
+			involved = append(involved, v.valueFacts(result, sig.Results().At(i).Type()))
 		}
 	}
 	for i := range sig.Params().Len() {
-		if param := sig.Params().At(i); post[param] != nil && post[param] != args[param] {
-			produced = append(produced, v.valueFacts(post[param], param.Type()))
+		param := sig.Params().At(i)
+		for _, value := range []*logic.Term{args[param], post[param]} {
+			if value != nil {
+				involved = append(involved, v.valueFacts(value, param.Type()))
+			}
 		}
 	}
-	v.noteFailureSource(fn, results, st, produced)
+	v.noteFailureSource(fn, results, st, involved)
 	return results
 }
 

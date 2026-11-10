@@ -434,3 +434,23 @@ func PossibleLiteral(a []int8) error {
 }
 
 //@ Ensures a = "\x7f" -> result = nil
+
+func readsSixtyFive(a []byte) (err error) { return nil }
+
+// SixtyFive returns a slice of 65 bytes.
+func SixtyFive() []byte {
+	return make([]byte, 65)
+}
+
+//@ Ensures |result| = 65
+
+// AlwaysFailsAfterReading calls a trusted function whose success follows
+// from the type of an element of a slice it only reads, which nothing here
+// has read before.
+func AlwaysFailsAfterReading() error { // want `the contract of AlwaysFailsAfterReading would also be met by a function that always returns an error`
+	a := SixtyFive()
+	_ = readsSixtyFive(a)
+	return errAlways
+}
+
+//@ Ensures True

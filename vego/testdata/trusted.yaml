@@ -171,3 +171,10 @@ trusted:
       - "|a| = 65"
     ensures:
       - "a'[0] >= 0 -> err = nil"
+
+  trust.readsSixtyFive:
+    reason: Reads its slice and always succeeds.
+    requires:
+      - "|a| = 65"
+    ensures:
+      - "a[0] >= 0 -> err = nil"
