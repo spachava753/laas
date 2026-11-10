@@ -18,7 +18,7 @@ func ConditionMutation(a []int) {
 	i := 0
 	//@ Invariant 0 <= i <= 2
 	//@ Variant 2-i
-	for step(a, i) { // want `vego:\ cannot\ verify\ ConditionMutation:\ step\ may\ modify\ the\ slice\ passed\ as\ a,\ so\ the\ call\ must\ be\ a\ statement\ of\ its\ own\ or\ the\ whole\ right\-hand\ side\ of\ an\ assignment`
+	for step(a, i) { // want `vego:\ cannot\ verify\ ConditionMutation:\ step\ may\ modify\ the\ slice\ passed\ as\ a,\ so\ the\ call\ must\ be\ a\ statement\ of\ its\ own\ or\ the\ whole\ right\-hand\ side\ of\ an\ assignment\ to\ variables`
 		i++
 	}
 }
@@ -39,7 +39,7 @@ func again(a []int) bool {
 func Forever(a []int) {
 	//@ Invariant a[0] >= 0
 	//@ Variant a[0]
-	for again(a) { // want `vego:\ cannot\ verify\ Forever:\ again\ may\ modify\ the\ slice\ passed\ as\ a,\ so\ the\ call\ must\ be\ a\ statement\ of\ its\ own\ or\ the\ whole\ right\-hand\ side\ of\ an\ assignment`
+	for again(a) { // want `vego:\ cannot\ verify\ Forever:\ again\ may\ modify\ the\ slice\ passed\ as\ a,\ so\ the\ call\ must\ be\ a\ statement\ of\ its\ own\ or\ the\ whole\ right\-hand\ side\ of\ an\ assignment\ to\ variables`
 		a[0]--
 	}
 }
@@ -78,7 +78,7 @@ func read(a []int, ignored int) int { return a[0] }
 // ArgumentMutation returns 1: reset runs before read starts.
 func ArgumentMutation() int {
 	a := []int{0}
-	return read(a, reset(a)) // want `vego:\ cannot\ verify\ ArgumentMutation:\ reset\ may\ modify\ the\ slice\ passed\ as\ a,\ so\ the\ call\ must\ be\ a\ statement\ of\ its\ own\ or\ the\ whole\ right\-hand\ side\ of\ an\ assignment`
+	return read(a, reset(a)) // want `vego:\ cannot\ verify\ ArgumentMutation:\ reset\ may\ modify\ the\ slice\ passed\ as\ a,\ so\ the\ call\ must\ be\ a\ statement\ of\ its\ own\ or\ the\ whole\ right\-hand\ side\ of\ an\ assignment\ to\ variables`
 }
 
 //@ Ensures result = 0
@@ -95,7 +95,7 @@ func tick(a []int) int {
 //
 // @ Requires |a| = 2 And a[0] = 0 And a[1] = 0
 func IndexTwice(a []int) int {
-	a[tick(a)]++ // want `vego:\ cannot\ verify\ IndexTwice:\ tick\ may\ modify\ the\ slice\ passed\ as\ a,\ so\ the\ call\ must\ be\ a\ statement\ of\ its\ own\ or\ the\ whole\ right\-hand\ side\ of\ an\ assignment`
+	a[tick(a)]++ // want `vego:\ cannot\ verify\ IndexTwice:\ tick\ may\ modify\ the\ slice\ passed\ as\ a,\ so\ the\ call\ must\ be\ a\ statement\ of\ its\ own\ or\ the\ whole\ right\-hand\ side\ of\ an\ assignment\ to\ variables`
 	return a[1]
 }
 
@@ -207,7 +207,7 @@ func TemporaryMake() int {
 
 // TemporaryOperand hides a modifying call inside an operand.
 func TemporaryOperand() int {
-	return change([]int{0}) + 1 // want `vego:\ cannot\ verify\ TemporaryOperand:\ change\ may\ modify\ the\ slice\ passed\ as\ a,\ so\ the\ call\ must\ be\ a\ statement\ of\ its\ own\ or\ the\ whole\ right\-hand\ side\ of\ an\ assignment`
+	return change([]int{0}) + 1 // want `vego:\ cannot\ verify\ TemporaryOperand:\ change\ may\ modify\ the\ slice\ passed\ as\ a,\ so\ the\ call\ must\ be\ a\ statement\ of\ its\ own\ or\ the\ whole\ right\-hand\ side\ of\ an\ assignment\ to\ variables`
 }
 
 //@ Ensures result = 42
@@ -218,3 +218,29 @@ func TemporaryAccepted() int {
 }
 
 //@ Ensures result = 1
+
+// @ Requires |a| = 1
+func setIndex(a []int) int {
+	a[0] = 1
+	return 0
+}
+
+//@ Ensures a'[0] = 1 And result = 0
+
+// AssignmentPanics indexes with a[0] after the call has changed it.
+//
+// @ Requires |a| = 1 And a[0] = 0
+func AssignmentPanics(a []int) {
+	a[a[0]] = setIndex(a) // want `vego:\ cannot\ verify\ AssignmentPanics:\ setIndex\ may\ modify\ the\ slice\ passed\ as\ a,\ so\ the\ call\ must\ be\ a\ statement\ of\ its\ own\ or\ the\ whole\ right\-hand\ side\ of\ an\ assignment\ to\ variables`
+}
+
+// SavedIndex states the intended order explicitly.
+//
+// @ Requires |a| = 1 And a[0] = 0
+func SavedIndex(a []int) {
+	i := a[0]
+	v := setIndex(a)
+	a[i] = v
+}
+
+//@ Ensures a'[0] = 0

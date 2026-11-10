@@ -67,9 +67,10 @@ type fnVerifier struct {
 	branches int
 	measure  *logic.Term
 	// effectful is the one call of the current statement that may modify a
-	// slice: a call that is a statement of its own or the whole right-hand
-	// side. Anywhere else such a call would run between the evaluation of
-	// other operands, whose order the symbolic execution does not model.
+	// slice: a call that is a statement of its own, the whole right-hand side
+	// of an assignment to plain variables, or the only returned expression.
+	// Anywhere else such a call would run between the evaluation of other
+	// operands, whose order the symbolic execution does not model.
 	effectful *ast.CallExpr
 }
 
@@ -550,9 +551,10 @@ func (v *fnVerifier) set(target lvalue, value *logic.Term, st *state) {
 	}
 }
 
-// assign executes an assignment. Index operands on the left are evaluated
-// first, then the right-hand sides, and only then are the targets updated, in
-// order, as the Go specification prescribes.
+// assign executes an assignment. Index operands on the left and the
+// right-hand sides are evaluated first, and only then are the targets updated,
+// in order. The relative order of those evaluations only matters when one of
+// them modifies a slice, which is ruled out below.
 func (v *fnVerifier) assign(s *ast.AssignStmt, st *state) {
 	targets := make([]lvalue, len(s.Lhs))
 	replaced, indexed := map[*types.Var]bool{}, map[*types.Var]bool{}
@@ -571,7 +573,11 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state) {
 				variable.Name()))
 		}
 	}
-	if len(s.Rhs) == 1 && (s.Tok == token.ASSIGN || s.Tok == token.DEFINE) {
+	// Go does not fix the order between reading the operands of a target
+	// such as a[a[0]] and calling a function on the right, so a call that
+	// modifies a slice is allowed only when every target is a plain variable.
+	v.effectful = nil
+	if len(s.Rhs) == 1 && len(indexed) == 0 && (s.Tok == token.ASSIGN || s.Tok == token.DEFINE) {
 		v.allowEffects(s.Rhs[0])
 	}
 	var values []*logic.Term
@@ -1164,7 +1170,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		if call != v.effectful || len(guard) > 0 {
 			v.unsupported(call.Pos(), fmt.Sprintf(
 				"%s may modify the slice passed as %s, so the call must be a statement of its own "+
-					"or the whole right-hand side of an assignment", callee.Name(), param.Name()))
+					"or the whole right-hand side of an assignment to variables", callee.Name(), param.Name()))
 		}
 		written = append(written, func() {
 			post[param] = v.fresh(param.Name(), value.Sort)

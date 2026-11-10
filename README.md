@@ -176,7 +176,7 @@ Proofs hold under these assumptions, which mirror the paper's trusted base:
 
 - **Integers are mathematical.** Arithmetic never overflows in the logic, so a proof says nothing about wrap-around; write `lo + (hi-lo)/2` rather than `(lo+hi)/2`.
 - **Slices are values.** Operations that would make two variables share a backing array are rejected: assigning one slice variable to another, sub-slicing, returning a slice parameter, or passing one slice twice to a function that writes it. Callers outside the verified code must likewise pass slices that do not overlap.
-- **Calls that modify a slice stand alone.** Such a call must be a statement of its own or the whole right-hand side of an assignment, so that it cannot run between the evaluation of other operands. It is rejected inside a larger expression, as an argument, or in a loop condition.
+- **Calls that modify a slice stand alone.** Such a call must be a statement of its own or the whole right-hand side of an assignment to plain variables, so that it cannot run between the evaluation of other operands. It is rejected inside a larger expression, as an argument, in a loop condition, or when the assignment's target is a slice element.
 - **Unannotated callees are trusted** to return without panicking and not to keep the slices they receive. Nothing is known about their results, and the slices they are passed are assumed to have changed.
 
 Not implemented yet from the paper: residual runtime checks for unproved obligations (gradual mode), structs and pointer structures, multiset reasoning, the `Preserves`, `Immutable`, `Cost`, and `Library` annotations, and mutation-based audit candidates.
