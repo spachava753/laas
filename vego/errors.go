@@ -216,52 +216,17 @@ func successConditions(post, forced *logic.Term) []*logic.Term {
 	return conditions
 }
 
-// withLengths replaces the length of each given sequence by the term that
-// equals it.
-func withLengths(t *logic.Term, lengths map[*logic.Term]*logic.Term) *logic.Term {
-	if t.Op == logic.OpLen && lengths[t.Args[0]] != nil {
-		return lengths[t.Args[0]]
-	}
-	if len(t.Args) == 0 {
-		return t
-	}
-	rewritten := *t
-	rewritten.Args = make([]*logic.Term, len(t.Args))
-	for i, arg := range t.Args {
-		rewritten.Args[i] = withLengths(arg, lengths)
-	}
-	return &rewritten
-}
-
-// mentions reports whether a term contains one of the given constants.
-func mentions(t *logic.Term, constants map[*logic.Term]bool) bool {
-	if constants[t] {
-		return true
-	}
-	for _, arg := range t.Args {
-		if mentions(arg, constants) {
-			return true
-		}
-	}
-	return false
-}
-
 // successClauses resolves the contract for the given argument values. It
-// returns the facts the precondition and the parameter types give about
-// them and, for each error result, the conditions over the inputs alone
-// under which the postcondition forces that error to be nil.
-func (v *fnVerifier) successClauses(args map[*types.Var]*logic.Term) (pre []*logic.Term, conditions [][]*logic.Term) {
+// returns the facts that the precondition and the parameter types give
+// about them; those facts together with everything the types and the call
+// guarantee about the outputs, which are arbitrary otherwise; and, for each
+// error result, the conditions under which the postcondition forces that
+// error to be nil.
+func (v *fnVerifier) successClauses(args map[*types.Var]*logic.Term) (pre, typed []*logic.Term, conditions [][]*logic.Term) {
 	fn := v.fn
-	outputs := map[*logic.Term]bool{}
-	lengths := map[*logic.Term]*logic.Term{} // final slice -> its unchanged length
 	results := make([]*logic.Term, len(fn.results))
-	for i, result := range fn.results {
-		if sort, ok := sortOf(result.Type()); ok {
-			results[i] = v.fresh("out", sort)
-			outputs[results[i]] = true
-		}
-	}
 	post := map[*types.Var]*logic.Term{}
+	var outputs []*logic.Term
 	for _, param := range fn.params {
 		if args[param] == nil {
 			continue
@@ -272,47 +237,30 @@ func (v *fnVerifier) successClauses(args map[*types.Var]*logic.Term) (pre []*log
 		// afterwards, and even then its length is the caller's.
 		if isSlice(param.Type()) && v.mutates(fn, param) {
 			post[param] = v.fresh("out", post[param].Sort)
-			outputs[post[param]] = true
-			lengths[post[param]] = logic.Len(args[param])
+			outputs = append(outputs, v.valueFacts(post[param], param.Type()),
+				logic.Eq(logic.Len(post[param]), logic.Len(args[param])))
+		}
+	}
+	for i, result := range fn.results {
+		if sort, ok := sortOf(result.Type()); ok {
+			results[i] = v.fresh("out", sort)
+			outputs = append(outputs, v.valueFacts(results[i], result.Type()))
 		}
 	}
 	for _, c := range fn.requires {
 		pre = append(pre, v.formula(c, c.node, &contractEnv{pv: v.pkgVerifier, fn: fn, args: args}))
 	}
 	env := &contractEnv{pv: v.pkgVerifier, fn: fn, args: args, post: post, results: results}
-	// What the types guarantee about the outputs. A condition that follows
-	// from the precondition and these alone holds whatever the function
-	// returns, so it does not depend on the outputs although it names them.
-	typed := slices.Clone(pre)
-	for i, result := range fn.results {
-		if results[i] != nil {
-			typed = append(typed, v.valueFacts(results[i], result.Type()))
-		}
-	}
-	for _, param := range fn.params {
-		if outputs[post[param]] {
-			typed = append(typed, v.valueFacts(post[param], param.Type()))
-		}
-	}
-	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
 	conditions = make([][]*logic.Term, len(errorResults(fn)))
 	for _, c := range fn.ensures {
 		// A clause about a result that has no value in the logic says
 		// nothing here.
 		clause := v.calleeFormula(c, env)
 		for n, index := range errorResults(fn) {
-			for _, condition := range successConditions(clause, results[index]) {
-				condition = withLengths(condition, lengths)
-				switch {
-				case !mentions(condition, outputs):
-					conditions[n] = append(conditions[n], condition)
-				case solver.Prove(typed, condition, opts) == solver.Proved:
-					conditions[n] = append(conditions[n], logic.True())
-				}
-			}
+			conditions[n] = append(conditions[n], successConditions(clause, results[index])...)
 		}
 	}
-	return pre, conditions
+	return pre, slices.Concat(pre, outputs), conditions
 }
 
 // maxWitnesses bounds the inputs tried when looking for one on which a
@@ -320,9 +268,9 @@ func (v *fnVerifier) successClauses(args map[*types.Var]*logic.Term) (pre []*log
 const maxWitnesses = 3000
 
 // forcesSuccess reports whether the contract makes the function succeed for
-// some input: for every error result there is a clause "C -> err = nil"
-// whose condition C speaks only about the inputs, and a concrete input that
-// provably satisfies the precondition and C. Without such a clause and
+// some input: for every error result there is a clause "C -> err = nil" and
+// a concrete input that provably satisfies the precondition and for which C
+// holds whatever the function returns. Without such a clause and
 // witness, an implementation that fails on every call may well satisfy the
 // contract, whatever else the contract demands.
 //
@@ -332,7 +280,7 @@ const maxWitnesses = 3000
 // that its success condition is plainly satisfiable.
 func (v *fnVerifier) forcesSuccess() bool {
 	v.enter()
-	pre, conditions := v.successClauses(v.entry)
+	pre, _, conditions := v.successClauses(v.entry)
 	for _, group := range conditions {
 		if len(group) == 0 {
 			return false
@@ -341,10 +289,16 @@ func (v *fnVerifier) forcesSuccess() bool {
 	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
 	forced := make([]bool, len(conditions))
 	v.someInput(slices.Concat(append(conditions, pre)...), func(args map[*types.Var]*logic.Term) bool {
-		facts, candidates := v.successClauses(args)
+		facts, typed, candidates := v.successClauses(args)
+		if solver.Prove(nil, logic.And(facts...), opts) != solver.Proved {
+			return false
+		}
+		// The condition must hold for this input whatever the function
+		// returns, as long as what it returns is well typed; then nothing
+		// the function does can avoid the forced success.
 		for result, group := range candidates {
 			forced[result] = forced[result] || slices.ContainsFunc(group, func(condition *logic.Term) bool {
-				return solver.Prove(nil, logic.And(append(facts, condition)...), opts) == solver.Proved
+				return solver.Prove(typed, condition, opts) == solver.Proved
 			})
 		}
 		return !slices.Contains(forced, false)

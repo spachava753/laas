@@ -94,10 +94,20 @@ func main() {
 	if slices.ContainsFunc(os.Args[1:], func(arg string) bool { return strings.TrimLeft(arg, "-") == "vego.trust" }) {
 		os.Exit(trustReport(os.Args[1:]))
 	}
-	// go vet -vettool passes a single configuration file per package and
-	// caches what comes back; the verifier must not be cached that way.
-	if len(os.Args) > 1 && strings.HasSuffix(os.Args[len(os.Args)-1], ".cfg") {
-		vego.RefuseCachedRuns()
+	// go vet -vettool passes one configuration file per package, as the
+	// only argument that is not a flag, and caches what comes back; the
+	// verifier must not be cached that way. A package directory whose name
+	// happens to end in .cfg is not such a file.
+	var operands []string
+	for _, arg := range os.Args[1:] {
+		if !strings.HasPrefix(arg, "-") {
+			operands = append(operands, arg)
+		}
+	}
+	if len(operands) == 1 && strings.HasSuffix(operands[0], ".cfg") {
+		if info, err := os.Stat(operands[0]); err == nil && info.Mode().IsRegular() {
+			vego.RefuseCachedRuns()
+		}
 	}
 	flag.Var(
 		&excludedPackages,

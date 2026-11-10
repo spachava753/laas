@@ -304,3 +304,27 @@ func MayFailAfterSigned() error {
 }
 
 //@ Ensures True
+
+func readyAtLeast(n int) (value uint8, err error) { return 0, nil }
+
+// AlwaysFailsAfterReadyAtLeast calls a trusted function whose guard holds
+// for every byte once the argument is zero.
+func AlwaysFailsAfterReadyAtLeast() error { // want `the contract of AlwaysFailsAfterReadyAtLeast would also be met by a function that always returns an error`
+	_, _ = readyAtLeast(0)
+	return errAlways
+}
+
+//@ Ensures True
+
+func readyBytes(a []byte) (err error) { return nil }
+
+// AlwaysFailsAfterReadyBytes calls one whose guard is about an element of a
+// slice it may write; the element is a byte whatever it writes.
+//
+// @ Requires |a| = 1
+func AlwaysFailsAfterReadyBytes(a []byte) error { // want `the contract of AlwaysFailsAfterReadyBytes would also be met by a function that always returns an error`
+	_ = readyBytes(a)
+	return errAlways
+}
+
+//@ Ensures True

@@ -134,3 +134,16 @@ trusted:
     reason: Succeeds only when its result is not negative.
     ensures:
       - "value >= 0 -> err = nil"
+
+  trust.readyAtLeast:
+    reason: Succeeds when its byte result is at least n, which it always is for n = 0.
+    ensures:
+      - "value >= n -> err = nil"
+
+  trust.readyBytes:
+    reason: Succeeds when the first byte it leaves is not negative, which is always.
+    modifies: [a]
+    requires:
+      - "|a| = 1"
+    ensures:
+      - "a'[0] >= 0 -> err = nil"
