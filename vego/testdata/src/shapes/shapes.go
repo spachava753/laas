@@ -41,3 +41,9 @@ func Unchecked(w int) *Rect {
 //
 // @ Invariant X > // want `syntax error in Invariant annotation: expected an expression, found "end of annotation"`
 type Broken struct{ X int }
+
+// Never has invariants no value can meet. A function of another package
+// that takes one must not be verified from that contradiction.
+//
+// @ Invariant X = 0 And X = 1 // want `the invariants of Never contradict each other, so no value of the type could exist`
+type Never struct{ X int }

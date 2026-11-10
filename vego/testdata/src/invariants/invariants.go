@@ -238,3 +238,10 @@ func MakesBroken() shapes.Broken { // want `vego: cannot verify MakesBroken: the
 }
 
 //@ Ensures True
+
+// TakesNever takes a value of a type whose invariants contradict each other.
+func TakesNever(n shapes.Never) int { // want `vego: cannot verify TakesNever: the invariants of Never could not be understood`
+	return 1
+}
+
+//@ Ensures result = 0

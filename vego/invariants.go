@@ -174,6 +174,7 @@ func (pv *pkgVerifier) checkInvariantsDeclared() {
 			v.assumeInvariants(st, nil, st.mem, self, name.Type())
 			opts := solver.Options{Preds: pv.res.Preds, MaxSteps: pv.maxSteps}
 			if solver.Prove(st.hyps, logic.False(), opts) == solver.Proved {
+				set.broken = true
 				pv.report(set.clauses[0].pos, "the invariants of %s contradict each other, so no value of the type could exist", name.Name())
 			}
 		})
