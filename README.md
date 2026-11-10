@@ -233,6 +233,25 @@ func (s *Stack) Top() int {
 
 Inside a function the invariant may be broken and restored. There is no way to switch it off for a function: a helper that has to run while the invariant is broken takes the fields it needs instead of the struct. After a call to a trusted function that may modify a struct, its invariant is not assumed, since nobody proved it. The invariant is not applied to structs reached in other ways, such as the elements of a slice or the target of a pointer field.
 
+### Maps
+
+A map is a reference, like a pointer: two map variables may be the same map, and `Modifies m` allows writing it. In annotations `m[k]` is the value of a key, which is the zero value when the key is absent, as in Go; `has(m, k)` says whether the key is present; and `|m|` is the number of keys.
+
+```go
+func Get(m map[string]int, k string) (v int, err error) {
+	v, ok := m[k]
+	if !ok {
+		return 0, errMissing
+	}
+	return v, nil
+}
+
+//@ Ensures err = nil <-> has(m, k)
+//@ Ensures err = nil -> v = m[k]
+```
+
+Keys are integers or strings; values are any supported type. Writing to a map needs a proof that it is not nil, and so does `delete`, although Go lets a nil map through there. A `range` over a map visits some key the map has in each iteration, as many times as the map has keys; that the keys differ from one iteration to the next is not known to the verifier, an invariant has no name for how many iterations have run, and the loop must not change a map of that type. A loop can therefore check each value of a map, but cannot yet add the values up.
+
 ### Auditing specifications
 
 A function can verify against a contract that says almost nothing. With `-vego.audit`, `vego` also probes each postcondition with degenerate implementations, the adversarial archetypes of the paper's Anti-VeGo: return zero values, return constants, return an argument unchanged, fill slices with zeros or with `0, 1, 2, ...`. Each one that provably satisfies the contract is reported as a hole:
@@ -297,7 +316,7 @@ The report lists the project contracts in use, the shipped contracts in use, pro
 
 ### Supported Go and trusted assumptions
 
-The verified fragment covers functions and methods over the integer types (`int`, `int8` to `int64`, `uint`, `uint8` to `uint64`, with `byte` and `rune`), `bool`, `string`, `error`, the float types, structs, pointers to structs, and slices of any of these: assignments, `if`, `switch`, `for` and `range` loops with `break` and `continue`, `return`, calls to named functions and methods, recursion, `len`, `cap`, `min`, `max`, `new`, `make`, struct and slice literals, slicing, and `append`. A struct field of a type outside this list is ignored until it is used. A function that uses anything else (maps, arrays, interfaces other than `error`, closures, goroutines, `defer`, generics, variadic calls, `append(s, t...)`) is reported as `cannot verify` rather than verified wrongly.
+The verified fragment covers functions and methods over the integer types (`int`, `int8` to `int64`, `uint`, `uint8` to `uint64`, with `byte` and `rune`), `bool`, `string`, `error`, the float types, structs, pointers to structs, maps with integer or string keys, and slices of any of these: assignments, `if`, `switch`, `for` and `range` loops with `break` and `continue`, `return`, calls to named functions and methods, recursion, `len`, `cap`, `min`, `max`, `new`, `make`, `delete`, struct, slice, and map literals, slicing, and `append`. A struct field of a type outside this list is ignored until it is used. A function that uses anything else (arrays, channels, interfaces other than `error`, closures, goroutines, `defer`, generics, variadic calls, `append(s, t...)`) is reported as `cannot verify` rather than verified wrongly.
 
 Three kinds of value are followed without being fully understood:
 
@@ -317,7 +336,7 @@ Proofs hold under these assumptions, which mirror the paper's trusted base:
 - **String length stays representable.** Concatenation must be proved not to exceed the largest `int`, which usually means bounding the lengths of the operands.
 - **Trusted contracts are true.** A function that is not verified can only be called through a contract in a trust file, and every proof that uses it holds only if that contract does. Such a function is also trusted to return without panicking when its `requires` hold, to write nothing a caller can see beyond its `modifies`, not to keep the pointers and slices it is given, and not to return a pointer into the middle of a struct or array.
 
-Not implemented yet from the paper: residual runtime checks for unproved obligations (gradual mode), maps, multiset reasoning, the `Preserves`, `Immutable`, `Cost`, and `Library` annotations, and mutation-based audit candidates.
+Not implemented yet from the paper: residual runtime checks for unproved obligations (gradual mode), multiset reasoning, the `Preserves`, `Immutable`, `Cost`, and `Library` annotations, and mutation-based audit candidates.
 
 Raise the solver's effort for a hard obligation with `-vego.max-steps`.
 

@@ -197,6 +197,25 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 	if measured {
 		steps = steps[:len(steps)-1]
 	}
+	if asked := len(steps) > 0 && steps[len(steps)-1].Has; asked {
+		// has(m, k): the path leads to the map, and the key is looked up.
+		key := steps[len(steps)-1].Index
+		found, err := e.locate(name, steps[:len(steps)-1], when)
+		switch {
+		case err != nil:
+			return nil, err
+		case found.constant != nil || !isMap(found.typ):
+			return nil, fmt.Errorf("has(%s, ...): %s is not a map", spell(name, steps[:len(steps)-1]), spell(name, steps[:len(steps)-1]))
+		case key.Sort != map[bool]logic.Sort{true: logic.IntSeq}[isString(found.typ.Underlying().(*types.Map).Key())]:
+			return nil, fmt.Errorf("has(%s, ...): the key has type %s, which is not what the map is indexed by", name, key.Sort)
+		}
+		sink := found.sink
+		if hasBound(key) {
+			sink = nil
+		}
+		e.v.noteMap(sink, found.mem, found.typ, found.val[0], key)
+		return e.v.mapHas(found.sink, found.mem, found.typ, found.val[0], key), nil
+	}
 	if base, ok := e.readyMade(name, when); ok {
 		// A ready-made term stands for the parameter; it can only be indexed.
 		for _, step := range steps {
@@ -218,6 +237,8 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 		return found.val[2], nil
 	case measured && found.constant == nil && isString(found.typ):
 		return logic.Len(found.val[0]), nil
+	case measured && found.constant == nil && isMap(found.typ):
+		return e.v.mapLen(found.sink, found.mem, found.typ, found.val[0]), nil
 	case measured:
 		return nil, fmt.Errorf("%s is not a slice or a string and has no length", spell(name, steps))
 	case found.constant != nil:
@@ -258,11 +279,11 @@ func (e *specEnv) readyMade(name string, when logic.When) (*logic.Term, bool) {
 // the only thing that can differ between entry and return for a parameter.
 func reachesMemory(hops []hop, final types.Type) bool {
 	for _, h := range hops {
-		if _, viaPointer := pointee(h.from); viaPointer || (h.field < 0 && isSlice(h.from)) {
+		if _, viaPointer := pointee(h.from); viaPointer || (h.field < 0 && (isSlice(h.from) || isMap(h.from))) {
 			return true
 		}
 	}
-	return isSlice(final)
+	return isSlice(final) || isMap(final)
 }
 
 // Relation resolves fresh(x) and within(a, b); see logic.Env.
@@ -279,8 +300,8 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		spelled := spell(path.Root, path.Steps)
 		_, isPointer := pointee(found[i].typ)
 		switch {
-		case found[i].constant != nil || (!isPointer && !isSlice(found[i].typ)):
-			return nil, fmt.Errorf("%s(%s): %s is not a pointer or a slice", name, spelled, spelled)
+		case found[i].constant != nil || (!isPointer && !isSlice(found[i].typ) && !isMap(found[i].typ)):
+			return nil, fmt.Errorf("%s(%s): %s is not a pointer, a slice, or a map", name, spelled, spelled)
 		case name == "within" && !isSlice(found[i].typ):
 			return nil, fmt.Errorf("within(%s): %s is not a slice", spelled, spelled)
 		}
@@ -341,7 +362,14 @@ func plan(t types.Type, steps []logic.Step) ([]hop, types.Type, error) {
 	spelled := ""
 	for _, step := range steps {
 		if step.Field == "" {
+			keyed := isMap(t) && mapModelled(t)
+			if want := map[bool]logic.Sort{true: logic.IntSeq}[keyed && isString(t.Underlying().(*types.Map).Key())]; step.Index != nil && step.Index.Sort != want {
+				return nil, nil, fmt.Errorf("%s: the index has type %s, which is not what a %s is indexed by", spelled, step.Index.Sort, t)
+			}
 			switch {
+			case keyed:
+				hops = append(hops, hop{from: t, field: -1, index: step.Index})
+				_, t = mapParts(t)
 			case isSlice(t):
 				hops = append(hops, hop{from: t, field: -1, index: step.Index})
 				t = elemType(t)
@@ -402,6 +430,12 @@ func (v *fnVerifier) follow(sink *state, mem memory, cur value, hops []hop) (val
 		switch {
 		case h.field >= 0:
 			cur, _, _ = v.member(reads, mem, cur, h.from, h.field)
+		case isMap(h.from):
+			if !ground {
+				reads = nil
+			}
+			cur = v.mapValue(reads, mem, h.from, cur[0], h.index)
+			ground = ground && !hasBound(h.index)
 		case isSlice(h.from):
 			// The array is known as long as the slice is, whatever the
 			// index.
@@ -470,6 +504,7 @@ func newModTargets(nodes []*logic.Node, c *clause) []*modTarget {
 type shape struct {
 	typ    types.Type
 	elems  bool
+	mapped bool
 	prefix string
 	param  *types.Var
 	direct bool
@@ -510,6 +545,9 @@ func (fn *funcInfo) shapeOf(m *modTarget, indices []*logic.Term) (shape, error) 
 	}
 	if isSlice(final) {
 		return shape{typ: elemType(final), elems: true, param: param, direct: len(hops) == 0, hops: hops}, nil
+	}
+	if isMap(final) {
+		return shape{typ: final, mapped: true, param: param, direct: len(hops) == 0, hops: hops}, nil
 	}
 	// The last hop through a pointer decides which object the field is in.
 	last := -1
@@ -560,7 +598,7 @@ func (v *fnVerifier) targets(fn *funcInfo, args map[*types.Var]value, sink *stat
 			v.misread(m.clause, err)
 		}
 		cur, _ := v.follow(sink, mem, args[form.param], form.hops)
-		t := target{typ: form.typ, elems: form.elems, prefix: form.prefix, ref: cur[0], text: m.text, clause: m.clause}
+		t := target{typ: form.typ, elems: form.elems, mapped: form.mapped, prefix: form.prefix, ref: cur[0], text: m.text, clause: m.clause}
 		if form.direct && len(m.steps) == 0 {
 			t.param = form.param
 		}

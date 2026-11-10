@@ -496,7 +496,7 @@ func (p *prover) constraint(f *logic.Term) (pl poly, equality bool) {
 func (p *prover) scan(b *branch, t *logic.Term, gen int) {
 	if !p.hasBound(t) {
 		switch t.Op {
-		case logic.OpConst, logic.OpSelect, logic.OpLen, logic.OpDiv, logic.OpMod, logic.OpIte, logic.OpPred, logic.OpIsNil:
+		case logic.OpConst, logic.OpSelect, logic.OpLen, logic.OpDiv, logic.OpMod, logic.OpIte, logic.OpPred, logic.OpIsNil, logic.OpKey:
 			if t.Sort.IsSeq() {
 				// A sequence read out of a sequence of sequences has no
 				// axioms of its own, but its index is one at which a fact
@@ -1044,13 +1044,17 @@ func (p *prover) instantiate(b *branch, index int, atoms []int) {
 	q := b.foralls[index]
 	variable, body := q.fact.Args[0], q.fact.Args[1]
 	triggers := p.triggersOf(q.fact)
-	if len(triggers) == 0 {
+	// The ends of the interval a fact ranges over are tried when nothing
+	// in the body says where the fact matters, and in any case when they
+	// are plain numbers, as for a fact about the elements of a literal.
+	undirected := len(triggers) == 0
+	if undirected {
 		triggers = []trigger{{head: "select", arg: 1, sign: 1, rest: constPoly(0)}}
-		// Nothing in the body says where the fact matters, so the ends of
-		// the interval it ranges over are tried as well.
+	}
+	{
 		for _, value := range p.ends(variable, body) {
 			key := strconv.Itoa(index) + "|" + value.key()
-			if b.inst[key] || b.instances >= maxInstances || q.gen+1 > maxInstanceGen {
+			if b.inst[key] || b.instances >= maxInstances || q.gen+1 > maxInstanceGen || (!undirected && !value.isConst()) {
 				continue
 			}
 			b.inst[key] = true
@@ -1124,6 +1128,26 @@ func (p *prover) ackermann(b *branch, atoms []int) {
 		}
 		group, _ := p.indices(t)
 		groups[group] = append(groups[group], id)
+	}
+	// The keys of two sequences are equal exactly when the sequences are.
+	var keyed []int
+	for _, id := range atoms {
+		if p.atomTerms[id].Op == logic.OpKey {
+			keyed = append(keyed, id)
+		}
+	}
+	for i, first := range keyed {
+		for _, second := range keyed[i+1:] {
+			pair := [2]int{first, second}
+			if b.acked[pair] || len(b.acked) >= maxAckermann {
+				continue
+			}
+			b.acked[pair] = true
+			x, y := p.atomTerms[first], p.atomTerms[second]
+			p.fresh++
+			index := logic.Bound(fmt.Sprintf("key!%d", p.fresh), logic.Int)
+			p.add(b, logic.Iff(logic.Eq(x, y), logic.SeqEq(x.Args[0], y.Args[0], index)), max(b.seen[first], b.seen[second]))
+		}
 	}
 	names := slices.Sorted(maps.Keys(groups))
 	for _, name := range names {

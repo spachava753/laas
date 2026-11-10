@@ -78,6 +78,7 @@ const (
 	OpConcat // Concat(a, b): the elements of a followed by those of b
 	OpSub    // Sub(seq, lo, hi): the elements of seq from lo up to hi
 	OpIsNil  // IsNil(err): whether an error value is nil
+	OpKey    // Key(seq): a number that identifies a sequence by its contents
 	OpIte
 	OpEq
 	OpLe
@@ -204,6 +205,10 @@ func IsNil(err *Term) *Term {
 	}
 	return node(OpIsNil, Bool, err)
 }
+
+// Key returns a number that two sequences share exactly when they have the
+// same length and the same elements. It lets a string serve as an index.
+func Key(seq *Term) *Term { return node(OpKey, Int, seq) }
 
 // SeqEq returns the formula stating that two sequences have the same length
 // and the same elements. The bound variable must be fresh.
@@ -401,6 +406,8 @@ func (t *Term) write(b *strings.Builder) {
 		list("sub(", t.Args, ", ", ")")
 	case OpIsNil:
 		list("(", t.Args, "", " = nil)")
+	case OpKey:
+		list("key(", t.Args, "", ")")
 	case OpIte:
 		list("ite(", t.Args, ", ", ")")
 	case OpForall:

@@ -495,6 +495,8 @@ func (b *sampler) add(t types.Type, to binding, nested bool) {
 		}, true)
 	case isSlice(t):
 		b.addSlice(t, to)
+	case isMap(t):
+		b.addMap(t, to)
 	case isString(t):
 		scalar(b.texts())
 	case single && sort == logic.Int:
@@ -598,6 +600,47 @@ func (b *sampler) addSlice(t types.Type, to binding) {
 		}
 		b.choose(fills, entryRegion+region(lf))
 	}
+}
+
+// addMap creates the slot for a map: the nil map, or a map of its own with
+// a single key. Values that are not a single number, boolean, or string get
+// no sample beyond the nil map.
+func (b *sampler) addMap(t types.Type, to binding) {
+	keyType, elem := mapParts(t)
+	b.refs++
+	ref := logic.RefLit(b.refs)
+	region := func(lf leaf) (string, logic.Sort) { return mapOwner(t) + lf.path, logic.SeqOf(logic.SeqOf(lf.sort)) }
+	alternatives := slot{func(s *witness) { to.set(s, 0, logic.RefLit(0)) }}
+	choices := func(of types.Type) []*logic.Term {
+		sort, single := sortOf(of)
+		switch {
+		case isString(of):
+			return b.texts()
+		case single && sort == logic.Int:
+			return b.fitting(of)
+		case single && sort == logic.Bool:
+			return []*logic.Term{logic.False(), logic.True()}
+		}
+		return nil
+	}
+	keys, held := choices(keyType), choices(elem)
+	for _, key := range keys[:min(len(keys), 4)] {
+		for _, val := range held[:min(len(held), 3)] {
+			alternatives = append(alternatives, func(s *witness) {
+				to.set(s, 0, ref)
+				leaves, _ := layoutOf(elem)
+				inMap := leaves[0]
+				inMap.path = "#val"
+				hasKey, hasSort := region(hasLeaf)
+				valKey, valSort := region(inMap)
+				s.store(mapOwner(t)+countLeaf.path, logic.SeqOf(logic.Int), ref, logic.IntLit(1))
+				s.store(hasKey, hasSort, ref, logic.Store(logic.Fill(logic.IntLit(0), logic.False()), mapKey(key), logic.True()))
+				s.store(valKey, valSort, ref, logic.Store(logic.Fill(logic.IntLit(0), zeroLeaf(leaves[0])), mapKey(key), val))
+			})
+		}
+	}
+	names := []string{to.name(0), entryRegion + mapOwner(t) + countLeaf.path, entryRegion + mapOwner(t) + hasLeaf.path}
+	b.choose(alternatives, names...)
 }
 
 // someInput tries small concrete inputs until one is accepted, and reports

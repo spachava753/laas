@@ -16,10 +16,14 @@ func (e testEnv) Path(root string, steps []Step, when When) (*Term, error) {
 	measured := false
 	for _, step := range steps {
 		switch {
+		case step.Has:
+			name = "has " + name
 		case step.Len:
 			measured = true
 		case step.Field != "":
 			name += "." + step.Field
+		case step.Index.Sort != Int:
+			return nil, fmt.Errorf("expected an integer but the index has type %s", step.Index.Sort)
 		default:
 			indices = append(indices, step.Index)
 		}
@@ -62,7 +66,7 @@ func TestResolve(t *testing.T) {
 		"i": Const("i", Int), "j": Const("j", Int), "n": Const("n", Int),
 		"found": Const("found", Bool), "flags": Const("flags", BoolSeq),
 		"s.count": Const("count0", Int), "s.count'": Const("count1", Int), "old s.count": Const("count0", Int),
-		"s.items'": Const("items1", IntSeq), "p": Const("p", Ref), "q": Const("q", Ref),
+		"s.items'": Const("items1", IntSeq), "p": Const("p", Ref), "q": Const("q", Ref), "has A": Const("has A", Bool),
 	}
 	resolver := NewResolver()
 	sumTo, err := ParsePredicate("sumTo(A, i, s) ::= ((i <= 0 -> s = 0) And " +
@@ -89,6 +93,8 @@ func TestResolve(t *testing.T) {
 		{"nil = q -> fresh(p)", "((0 = q) -> fresh p())"},
 		{"within(p', q)", "within p' q()"},
 		{"within(p)", "error: within takes 2 argument(s)"},
+		{"has(A, i) -> A[i] = 0", "(has A -> (A[i] = 0))"},
+		{"has(A)", "error: has takes a map and a key"},
 		{"fresh(p')", "error: fresh takes a parameter"},
 		{"p < q", "error: operator < cannot be applied to pointer values"},
 		{"old(s.count')", "error: old takes a parameter"},

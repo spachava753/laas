@@ -1,6 +1,7 @@
 package solver
 
 import (
+	"fmt"
 	"math"
 	"math/rand/v2"
 	"testing"
@@ -29,6 +30,21 @@ type model struct {
 	seqs map[string]seqValue
 	// maps holds the sequences of sequences, as total functions of the index.
 	maps map[string]func(index int64) seqValue
+	// keys numbers the sequences met so far by their contents, which is a
+	// function that tells exactly the equal sequences apart from the rest.
+	keys map[string]int64
+}
+
+// key returns the number of a sequence.
+func (m model) key(s seqValue) int64 {
+	contents := fmt.Sprint(s.length)
+	for i := int64(0); i < s.length; i++ {
+		contents += fmt.Sprint(",", s.at(i))
+	}
+	if _, known := m.keys[contents]; !known {
+		m.keys[contents] = int64(len(m.keys))
+	}
+	return m.keys[contents]
 }
 
 // table evaluates a sequence of sequences.
@@ -94,6 +110,8 @@ func (m model) eval(t *logic.Term) (int64, bool) {
 		return arg(0) % arg(1), true
 	case logic.OpLen:
 		return m.seq(t.Args[0]).length, true
+	case logic.OpKey:
+		return m.key(m.seq(t.Args[0])), true
 	case logic.OpSelect:
 		return m.seq(t.Args[0]).at(arg(1)), true
 	case logic.OpIte:
@@ -233,7 +251,7 @@ func (g *generator) intTerm(depth int) *logic.Term {
 func (g *generator) formula(depth int) *logic.Term {
 	if depth <= 0 || g.rng.IntN(3) == 0 {
 		a, b := g.intTerm(depth), g.intTerm(depth)
-		switch g.rng.IntN(13) {
+		switch g.rng.IntN(14) {
 		case 0, 1:
 			return logic.Le(a, b)
 		case 2, 3:
@@ -248,6 +266,8 @@ func (g *generator) formula(depth int) *logic.Term {
 			return g.joinedOrCut()
 		case 9, 10:
 			return g.nestedRead()
+		case 11:
+			return g.keyed()
 		}
 		return logic.Const("p", logic.Bool)
 	}
@@ -334,6 +354,38 @@ func (g *generator) nestedRead() *logic.Term {
 	return guarded(logic.Eq(i, j), logic.Eq(logic.Select(row, k), logic.Select(expected, k)))
 }
 
+// keyed states a fact about the keys of two short sequences: that they are
+// equal, or what follows if they are. Equal keys mean equal lengths and equal
+// elements inside the length, and nothing about elements outside it.
+func (g *generator) keyed() *logic.Term {
+	short := func() *logic.Term {
+		base := logic.Const("A", logic.IntSeq)
+		switch g.rng.IntN(4) {
+		case 0:
+			return logic.Store(base, g.intTerm(0), g.intTerm(0))
+		case 1:
+			return logic.Push(base, g.intTerm(0))
+		case 2:
+			return logic.Subseq(base, logic.IntLit(int64(g.rng.IntN(2))), logic.IntLit(int64(g.rng.IntN(4))))
+		}
+		return base
+	}
+	s, t, j := short(), short(), g.intTerm(0)
+	same := logic.Eq(logic.Key(s), logic.Key(t))
+	switch g.rng.IntN(5) {
+	case 0:
+		return same
+	case 1:
+		return logic.Implies(same, logic.Eq(logic.Len(s), logic.Len(t)))
+	case 2:
+		return logic.Implies(same, logic.Eq(logic.Select(s, j), logic.Select(t, j)))
+	case 3:
+		inside := logic.And(logic.Le(logic.IntLit(0), j), logic.Lt(j, logic.Len(s)))
+		return logic.Implies(logic.And(same, inside), logic.Eq(logic.Select(s, j), logic.Select(t, j)))
+	}
+	return logic.Implies(logic.Eq(logic.Len(s), logic.Len(t)), same)
+}
+
 // joinedOrCut states a fact about the length or an element of a
 // concatenation or a subsequence. About half of the generated facts are the
 // true law and the rest are off by one or read the wrong half.
@@ -412,6 +464,7 @@ func counterexample(hyps []*logic.Term, goal *logic.Term) (found bool, descripti
 					m := model{
 						ints: map[string]int64{"x": x, "y": y, "z": z, "p": shape % 2},
 						seqs: map[string]seqValue{"A": {shape % 4, func(i int64) int64 { return (shape%3 + i*i) % 3 }}},
+						keys: map[string]int64{},
 						maps: map[string]func(int64) seqValue{"M": func(r int64) seqValue {
 							// Rows differ in length and content, and some
 							// rows coincide.

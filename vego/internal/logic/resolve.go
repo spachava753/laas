@@ -3,6 +3,7 @@ package logic
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 )
 
@@ -17,11 +18,13 @@ const (
 )
 
 // Step is one step of a path: the selection of a field, of the element at
-// Index, or, as the last step, of the length.
+// Index, or, as the last step, of the length or, with Has, of whether a map
+// has the key Index.
 type Step struct {
 	Field string
 	Index *Term
 	Len   bool
+	Has   bool
 }
 
 // Env supplies the meaning of program names that occur in an annotation.
@@ -193,7 +196,9 @@ func (s *scope) path(n *Node) (root *Node, steps []Step, primed bool) {
 		return root, append(steps, Step{Field: n.Name}), primed || n.Primed
 	case NIndex:
 		root, steps, primed = s.path(n.Kids[0])
-		return root, append(steps, Step{Index: s.expect(n.Kids[1], Int)}), primed
+		// What may index depends on what is indexed: a number for a slice,
+		// and for a map whatever its keys are.
+		return root, append(steps, Step{Index: s.term(n.Kids[1])}), primed
 	}
 	return n, nil, n.Kind == NIdent && n.Primed
 }
@@ -221,6 +226,9 @@ func (s *scope) access(n *Node, when When) *Term {
 			}
 			if !base.Sort.IsSeq() {
 				fail("%s has type %s and cannot be indexed", root, base.Sort)
+			}
+			if step.Index.Sort != Int {
+				fail("%s is indexed by a %s, not by an integer", root, step.Index.Sort)
 			}
 			base = Select(base, step.Index)
 		}
@@ -251,6 +259,21 @@ func (s *scope) call(n *Node) *Term {
 			fail("len takes exactly one argument")
 		}
 		return s.length(n.Kids[0])
+	case "has":
+		// has(m, k): whether map m has key k.
+		if s.env == nil || len(n.Kids) != 2 {
+			fail("has takes a map and a key, as in has(m, k), and cannot be used in a predicate definition")
+		}
+		root, steps, primed := s.path(n.Kids[0])
+		if _, bound := s.bound[root.Name]; root.Kind != NIdent || bound {
+			fail("has takes a map reached from a variable, as in has(m, k) or has(s.index, k)")
+		}
+		steps = append(steps, Step{Index: s.term(n.Kids[1]), Has: true})
+		t, err := s.env.Path(root.Name, steps, map[bool]When{true: Primed}[primed])
+		if err != nil {
+			panic(resolveError{err})
+		}
+		return t
 	case "old", "fresh", "within":
 		if s.env == nil {
 			fail("%s cannot be used in a predicate definition", n.Name)
@@ -459,7 +482,7 @@ func (r *Resolver) Define(decls []*PredDecl) []DefineError {
 	var errs []DefineError
 	byName := map[string]*PredDecl{}
 	for _, decl := range decls {
-		if _, dup := byName[decl.Name]; dup || decl.Name == "len" || decl.Name == "old" || decl.Name == "fresh" || decl.Name == "within" {
+		if _, dup := byName[decl.Name]; dup || slices.Contains([]string{"len", "old", "fresh", "within", "has"}, decl.Name) {
 			errs = append(errs, DefineError{decl, fmt.Errorf("predicate %s is already defined", decl.Name)})
 			continue
 		}

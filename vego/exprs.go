@@ -107,7 +107,7 @@ func (v *fnVerifier) evalAs(e ast.Expr, want types.Type, st *state, guard []*log
 		return v.eval(e, st, guard)
 	}
 	_, isPointer := pointee(want)
-	if !isError(want) && !isSlice(want) && !isPointer {
+	if !isError(want) && !isSlice(want) && !isPointer && !isMap(want) {
 		v.unsupported(e.Pos(), fmt.Sprintf("nil of type %s is not supported", want))
 	}
 	return zeroValue(want)
@@ -181,7 +181,7 @@ func (v *fnVerifier) binaryExpr(e *ast.BinaryExpr, st *state, guard []*logic.Ter
 		switch {
 		case isError(t):
 			isNil = logic.IsNil(val[0])
-		case isPointer, isSlice(t):
+		case isPointer, isSlice(t), isMap(t):
 			isNil = logic.Eq(val[0], logic.RefLit(0))
 		default:
 			v.unsupported(e.Pos(), fmt.Sprintf("comparing a %s with nil is not supported", t))
@@ -208,6 +208,12 @@ func (v *fnVerifier) binaryExpr(e *ast.BinaryExpr, st *state, guard []*logic.Ter
 func (v *fnVerifier) indexExpr(e *ast.IndexExpr, st *state, guard []*logic.Term) value {
 	t := v.info.TypeOf(e.X)
 	switch {
+	case isMap(t) && mapModelled(t):
+		// Reading a key that is absent, or any key of a nil map, gives the
+		// zero value.
+		keyType, _ := mapParts(t)
+		ref, key := v.expr(e.X, st, guard), v.evalAs(e.Index, keyType, st, guard)[0]
+		return v.mapValue(st, st.mem, t, ref, key)
 	case isString(t):
 		text, index := v.expr(e.X, st, guard), v.expr(e.Index, st, guard)
 		v.checkIndex(st, guard, logic.Len(text), index, e.Pos())
@@ -273,6 +279,9 @@ func (v *fnVerifier) literal(e *ast.CompositeLit, t types.Type, st *state, guard
 	if object, ok := pointee(t); ok {
 		return v.newObject(st, object, v.literal(e, object, st, guard))
 	}
+	if isMap(t) {
+		return v.mapLiteral(e, t, st, guard)
+	}
 	switch u := t.Underlying().(type) {
 	case *types.Struct:
 		val := zeroValue(t)
@@ -323,6 +332,10 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) v
 	case builtin("len"), builtin("cap"):
 		operand := v.eval(e.Args[0], st, guard)
 		switch {
+		case isMap(v.info.TypeOf(e.Args[0])) && builtin("len"):
+			return value{v.mapLen(st, st.mem, v.info.TypeOf(e.Args[0]), operand[0])}
+		case isMap(v.info.TypeOf(e.Args[0])):
+			v.unsupported(e.Pos(), "cap of a map is not supported")
 		case isString(v.info.TypeOf(e.Args[0])):
 			return value{logic.Len(operand[0])}
 		case builtin("len"):
@@ -368,6 +381,13 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) v
 // makeSlice evaluates make([]T, length) and make([]T, length, capacity).
 func (v *fnVerifier) makeSlice(e *ast.CallExpr, st *state, guard []*logic.Term) value {
 	t := v.info.TypeOf(e)
+	if isMap(t) && mapModelled(t) {
+		// A size is only a hint, but it is evaluated.
+		for _, hint := range e.Args[1:] {
+			v.check(st, guard, logic.Le(logic.IntLit(0), v.expr(hint, st, guard)), hint.Pos(), "make size may be negative")
+		}
+		return v.newMap(st, t)
+	}
 	if !isSlice(t) || len(e.Args) < 2 {
 		v.unsupported(e.Pos(), "make is only supported for slices with a length")
 	}
@@ -401,6 +421,8 @@ func sameMemory(from, to types.Type) bool {
 	case *types.Pointer:
 		b, ok := to.Underlying().(*types.Pointer)
 		return ok && typeKey(a.Elem()) == typeKey(b.Elem())
+	case *types.Map:
+		return typeKey(from.Underlying()) == typeKey(to.Underlying())
 	case *types.Slice:
 		b, ok := to.Underlying().(*types.Slice)
 		return ok && typeKey(a.Elem()) == typeKey(b.Elem())

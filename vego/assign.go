@@ -16,6 +16,7 @@ const (
 	placeLocal        // a local variable, or a field of one that holds a struct
 	placeField        // fields of the object a pointer refers to
 	placeElem         // an element of a slice, or fields of one
+	placeMap          // the value a map has for a key
 )
 
 // lvalue is an assignment target.
@@ -63,6 +64,11 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 		lv.kind, lv.base, lv.owner, lv.typ = placeField, e.X, object, object
 	case *ast.IndexExpr:
 		t := v.info.TypeOf(e.X)
+		if isMap(t) && mapModelled(t) {
+			_, elem := mapParts(t)
+			lv.kind, lv.base, lv.index, lv.owner, lv.typ = placeMap, e.X, e.Index, t, elem
+			break
+		}
 		if !isSlice(t) {
 			v.unsupported(e.Pos(), fmt.Sprintf("only elements of slices can be assigned, not those of a %s", t))
 		}
@@ -93,6 +99,9 @@ func (v *fnVerifier) fieldPlace(e *ast.SelectorExpr) lvalue {
 		lv = v.place(e.X)
 	}
 	lv.pos, lv.text = e.Pos(), types.ExprString(e)
+	if lv.kind == placeMap {
+		v.unsupported(e.Pos(), "a field of a map value cannot be assigned; assign the whole value")
+	}
 	for _, index := range selection.Index() {
 		if _, viaPointer := pointee(lv.typ); viaPointer {
 			v.unsupported(e.Pos(), "assigning through an embedded pointer is not supported; name the pointer")
@@ -120,6 +129,9 @@ func (v *fnVerifier) lvalue(e ast.Expr, st *state) lvalue {
 		header, index := v.eval(lv.base, st, nil), v.expr(lv.index, st, nil)
 		v.checkIndex(st, nil, header[2], index, lv.pos)
 		lv.ref, lv.at = header[0], logic.Add(header[1], index)
+	case placeMap:
+		keyType, _ := mapParts(lv.owner)
+		lv.ref, lv.at = v.expr(lv.base, st, nil), v.evalAs(lv.index, keyType, st, nil)[0]
 	}
 	return lv
 }
@@ -151,6 +163,8 @@ func (v *fnVerifier) load(lv lvalue, st *state) value {
 		for _, lf := range lv.leaves {
 			val = append(val, logic.Select(v.row(st, st.mem, lv.key(lf), lf, lv.ref), lv.at))
 		}
+	case placeMap:
+		return v.mapValue(st, st.mem, lv.owner, lv.ref, lv.at)
 	default:
 		v.unsupported(lv.pos, "this operand cannot be read and updated in place")
 	}
@@ -184,6 +198,8 @@ func (v *fnVerifier) store(lv lvalue, val value, st *state) {
 			row := logic.Select(st.mem.region(lv.key(lf), logic.SeqOf(logic.SeqOf(lf.sort))), lv.ref)
 			st.storeRow(lv.key(lf), lf, lv.ref, logic.Store(row, lv.at, val[i]))
 		}
+	case placeMap:
+		v.mapStore(st, lv.owner, lv.ref, lv.at, val, true, lv.pos, lv.text+" is assigned")
 	}
 }
 
@@ -224,6 +240,13 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
 			k(next)
 		})
 		return
+	case len(s.Rhs) == 1 && len(s.Lhs) == 2 && v.isMapRead(s.Rhs[0]):
+		// v, ok := m[k]
+		read := ast.Unparen(s.Rhs[0]).(*ast.IndexExpr)
+		t := v.info.TypeOf(read.X)
+		keyType, _ := mapParts(t)
+		ref, key := v.expr(read.X, st, nil), v.evalAs(read.Index, keyType, st, nil)[0]
+		values = []value{v.mapValue(st, st.mem, t, ref, key), {v.mapHas(st, st.mem, t, ref, key)}}
 	case len(s.Rhs) == 1 && len(s.Lhs) > 1:
 		values = v.callResults(s.Rhs[0], st, wanted(targets))
 	default:
@@ -244,6 +267,16 @@ func (v *fnVerifier) targetType(target lvalue, rhs ast.Expr) types.Type {
 		return v.info.TypeOf(rhs)
 	}
 	return target.typ
+}
+
+// isMapRead reports whether an expression reads a map of a modelled type.
+func (v *fnVerifier) isMapRead(e ast.Expr) bool {
+	read, ok := ast.Unparen(e).(*ast.IndexExpr)
+	if !ok {
+		return false
+	}
+	t := v.info.TypeOf(read.X)
+	return isMap(t) && mapModelled(t)
 }
 
 func (v *fnVerifier) isAppend(e ast.Expr) bool {

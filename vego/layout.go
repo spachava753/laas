@@ -104,6 +104,10 @@ func layoutOf(t types.Type) ([]leaf, bool) {
 		if _, ok := pointee(t); ok {
 			return one(logic.Ref)
 		}
+	case *types.Map:
+		if mapModelled(t) {
+			return one(logic.Ref)
+		}
 	case *types.Slice:
 		return []leaf{
 			{"#ref", logic.Ref, t, partRef}, {"#off", logic.Int, t, partOff},

@@ -37,6 +37,23 @@ Not built yet:
 - **Letting a function accept overlapping slices.**
 - **Runs of elements in `Modifies`**, such as all the structs a slice of pointers refers to.
 
+### Maps
+
+Built: maps with integer or string keys and values of any modelled type; reading, the two-result read, writing, `delete`, `len`, `make`, literals, nil, `range`, `Modifies`, and `m[k]`, `has(m, k)`, and `|m|` in annotations.
+
+Decisions:
+
+- **A map is a reference into memory of its own.** For each map type there is a region saying which keys each map has, one for each leaf of the values, and one for the number of keys. Two maps may be the same map, like two pointers.
+- **A string key becomes a number.** The logic has a function that gives every sequence a number, the same for two sequences exactly when they have the same length and elements. That is all the solver knows about it.
+- **An absent key has the zero value**, so `m[k]` needs no case distinction. This, that the count is not negative, that a present key makes it positive, and that the nil map is empty are stated for each map and key that is read.
+- **The count is only tracked through writes.** A write adds one if the key was absent and a delete takes one off if it was present. Nothing ties the count to the set of keys beyond that, so a fact such as "two distinct present keys mean at least two keys" cannot be proved.
+- **`delete` needs a map that is not nil**, stricter than Go, so that the nil map never has to be written in the model.
+- **`range` over a map is a counted loop over unknown keys.** Each iteration gets some key that is present. That the keys of different iterations differ is not modelled, so a loop cannot prove that it saw every key. A loop that writes a map of the ranged type is rejected, since Go's rules for that are involved.
+
+- **Samples of maps have one key.** The search for an input on which a contract forces success tries the nil map and maps with a single key, when the values are numbers, booleans, or strings.
+
+Not built yet: keys of other types (booleans, pointers, structs); a way for an invariant to count the iterations of a `range` over a map, without which a loop cannot add up the values of a map and prove that the sum does not overflow; elements of a map in `Modifies` paths with string keys; and maps of maps beyond what the value model gives for free.
+
 ### Struct invariants
 
 Built as decided below, including invariants of types of other packages, which travel as analysis facts with the constants they mention. A declaration is checked once: an invariant that cannot be read, or a set of invariants no value satisfies, is an error even if nothing uses the type.

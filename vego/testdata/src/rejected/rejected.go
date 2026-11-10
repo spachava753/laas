@@ -201,8 +201,8 @@ func PointerToNumber(p *int) int { // want `vego: cannot verify PointerToNumber:
 
 // @ Requires c != nil
 func Embedded(c *cell) int {
-	m := map[string]int{} // want `vego: cannot verify Embedded: m has unsupported type map\[string\]int`
-	return m["a"] + c.value
+	m := make(chan int, 1) // want `vego: cannot verify Embedded: m has unsupported type chan int`
+	return len(m) + c.value
 }
 
 // @ Requires c != nil

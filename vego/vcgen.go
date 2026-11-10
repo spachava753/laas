@@ -358,6 +358,10 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 			v.check(st, nil, logic.False(), s.Pos(), "panic may be reachable")
 			return
 		}
+		if isBuiltin(v.info, call, "delete") {
+			v.deleteKey(call, st)
+			break
+		}
 		v.allowEffects(call)
 		v.call(call, st, nil)
 	case *ast.AssignStmt:

@@ -64,14 +64,17 @@ type layer struct {
 	prev    *logic.Term
 	bound   *logic.Term
 	targets []target
-	elems   bool
+	// rows is set for a region that holds a sequence for each reference:
+	// the elements of an array, or what a map has for each key.
+	rows bool
 }
 
 // target is a piece of memory that may be written: some fields of one
-// object, or a stretch of one backing array.
+// object, a stretch of one backing array, or one map.
 type target struct {
-	typ    types.Type // the struct type of the object, or the element type of the array
+	typ    types.Type // the struct type of the object, the element type of the array, or the map type
 	elems  bool
+	mapped bool
 	prefix string // the fields of the object that are meant; empty for all
 	ref    *logic.Term
 	lo, hi *logic.Term // the stretch of the array, for elems
@@ -85,19 +88,33 @@ type target struct {
 // owner returns the prefix shared by the keys of all regions of the target's
 // type.
 func (t target) owner() string {
-	if t.elems {
+	switch {
+	case t.mapped:
+		return mapOwner(t.typ)
+	case t.elems:
 		return "[]" + typeKey(t.typ)
 	}
 	return typeKey(t.typ)
 }
 
 // regions calls visit for the key and the leaf of every region the target
-// reaches into.
-func (t target) regions(visit func(key string, lf leaf)) {
+// reaches into, and tells whether the region holds a sequence for each
+// reference or a single value.
+func (t target) regions(visit func(key string, lf leaf, rows bool)) {
+	if t.mapped {
+		_, elem := mapParts(t.typ)
+		leaves, _ := layoutOf(elem)
+		visit(t.owner()+countLeaf.path, countLeaf, false)
+		visit(t.owner()+hasLeaf.path, hasLeaf, true)
+		for _, lf := range leaves {
+			visit(t.owner()+"#val"+lf.path, lf, true)
+		}
+		return
+	}
 	leaves, _ := layoutOf(t.typ)
 	for _, lf := range leaves {
 		if under(lf.path, t.prefix) {
-			visit(t.owner()+lf.path, lf)
+			visit(t.owner()+lf.path, lf, t.elems)
 		}
 	}
 }
@@ -145,7 +162,7 @@ func (v *fnVerifier) table(sink *state, mem memory, key string, sort logic.Sort,
 // unchanged states what a layer preserves at one reference.
 func (v *fnVerifier) unchanged(now *logic.Term, known *layer, ref *logic.Term) *logic.Term {
 	existed := logic.Lt(ref, known.bound)
-	if !known.elems {
+	if !known.rows {
 		conditions := []*logic.Term{existed}
 		for _, t := range known.targets {
 			conditions = append(conditions, logic.Ne(ref, t.ref))
@@ -155,6 +172,11 @@ func (v *fnVerifier) unchanged(now *logic.Term, known *layer, ref *logic.Term) *
 	index := v.bound("k")
 	var untouched []*logic.Term
 	for _, t := range known.targets {
+		if t.lo == nil {
+			// A map is written as a whole.
+			untouched = append(untouched, logic.Ne(ref, t.ref))
+			continue
+		}
 		untouched = append(untouched, logic.Not(logic.And(logic.Eq(ref, t.ref), logic.Le(t.lo, index), logic.Lt(index, t.hi))))
 	}
 	kept := v.same(logic.Select(logic.Select(now, ref), index), logic.Select(logic.Select(known.prev, ref), index))
@@ -341,20 +363,33 @@ func (v *fnVerifier) checkWrite(st *state, guard []*logic.Term, key string, ref,
 // Everything else stays as it was, which is what makes a Modifies clause
 // useful to the caller.
 func (v *fnVerifier) havoc(st *state, t target) {
-	t.regions(func(key string, lf leaf) {
-		if !t.elems {
+	t.regions(func(key string, lf leaf, rows bool) {
+		switch {
+		case !rows:
 			// What the type guarantees of the new value is noted where
 			// the value is read.
 			st.storeCell(key, lf, t.ref, v.fresh("written", lf.sort))
-			return
+		case t.lo == nil:
+			st.storeRow(key, lf, t.ref, v.fresh("written", logic.SeqOf(lf.sort)))
+		default:
+			before := logic.Select(st.mem.region(key, logic.SeqOf(logic.SeqOf(lf.sort))), t.ref)
+			unknown := v.fresh("written", logic.SeqOf(lf.sort))
+			index := v.bound("k")
+			outside := logic.Or(logic.Lt(index, t.lo), logic.Le(t.hi, index))
+			st.assume(logic.Forall(index, logic.Implies(outside, v.same(logic.Select(unknown, index), logic.Select(before, index)))))
+			st.storeRow(key, lf, t.ref, unknown)
 		}
-		before := logic.Select(st.mem.region(key, logic.SeqOf(logic.SeqOf(lf.sort))), t.ref)
-		unknown := v.fresh("written", logic.SeqOf(lf.sort))
-		index := v.bound("k")
-		outside := logic.Or(logic.Lt(index, t.lo), logic.Le(t.hi, index))
-		st.assume(logic.Forall(index, logic.Implies(outside, v.same(logic.Select(unknown, index), logic.Select(before, index)))))
-		st.storeRow(key, lf, t.ref, unknown)
 	})
+	if !t.mapped {
+		return
+	}
+	// Nothing can be put into the nil map, so if that is what the target
+	// is, it is as empty afterwards as it was.
+	index := v.bound("k")
+	has := logic.Select(st.mem.region(t.owner()+hasLeaf.path, logic.SeqOf(logic.SeqOf(logic.Bool))), t.ref)
+	count := logic.Select(st.mem.region(t.owner()+countLeaf.path, logic.SeqOf(logic.Int)), t.ref)
+	empty := logic.And(logic.Eq(count, logic.IntLit(0)), logic.Forall(index, logic.Not(logic.Select(has, index))))
+	st.assume(logic.Implies(logic.Eq(t.ref, logic.RefLit(0)), empty))
 }
 
 // separate states that two slices share no element, counting the capacity
