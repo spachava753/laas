@@ -273,21 +273,23 @@ func (v *fnVerifier) contentFacts(mem memory, val value, t types.Type, brk *logi
 		}
 		return logic.And(facts...)
 	case *types.Slice:
-		leaves, _ := layoutOf(u.Elem())
-		var facts []*logic.Term
-		for _, lf := range leaves {
-			if lf.part != partValue || (lf.sort != logic.Int && !lf.sort.IsSeq()) {
-				continue
-			}
-			row := v.row(nil, mem, "[]"+typeKey(u.Elem())+lf.path, lf, val[0])
-			elements := logic.Subseq(row, val[1], logic.Add(val[1], val[2]))
-			facts = append(facts, v.elementFacts(elements, lf.typ))
-			if lf.sort.IsSeq() {
-				// The elements are strings, whose bytes are bytes.
-				index := v.bound("k")
-				inRange := logic.And(logic.Le(logic.IntLit(0), index), logic.Lt(index, val[2]))
-				bytes := v.elementFacts(logic.Select(elements, index), types.Typ[types.Uint8])
-				facts = append(facts, logic.Forall(index, logic.Implies(inRange, bytes)))
+		// Every element is a complete value of the element type: numbers in
+		// range, pointers to something that exists, slices that are slices.
+		leaves, ok := layoutOf(u.Elem())
+		if !ok {
+			break
+		}
+		index := v.bound("k")
+		inRange := logic.And(logic.Le(logic.IntLit(0), index), logic.Lt(index, val[2]))
+		element, _ := v.element(nil, mem, val, t, index)
+		facts := []*logic.Term{logic.Forall(index, logic.Implies(inRange, v.wellFormed(element, u.Elem(), brk)))}
+		for i, lf := range leaves {
+			if lf.part == partValue && lf.sort.IsSeq() {
+				// The elements hold strings, whose bytes are bytes.
+				at := v.bound("k")
+				within := logic.And(logic.Le(logic.IntLit(0), at), logic.Lt(at, val[2]))
+				text, _ := v.element(nil, mem, val, t, at)
+				facts = append(facts, logic.Forall(at, logic.Implies(within, v.elementFacts(text[i], types.Typ[types.Uint8]))))
 			}
 		}
 		return logic.And(facts...)

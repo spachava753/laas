@@ -1219,3 +1219,21 @@ func AlwaysFailsAfterReadyNamed() error { // want `vego: the contract of AlwaysF
 }
 
 //@ Ensures True
+
+func readyRows(a [][]byte) error { return nil }
+
+func makeRows() [][]byte {
+	return make([][]byte, 65)
+}
+
+//@ Ensures |result| = 65
+
+// AlwaysFailsAfterReadyRows calls a function that succeeds whenever the
+// slices in its slice have lengths that are not negative.
+func AlwaysFailsAfterReadyRows() error { // want `vego: the contract of AlwaysFailsAfterReadyRows would also be met by a function that always returns an error`
+	a := makeRows()
+	_ = readyRows(a)
+	return errEmptyQueue
+}
+
+//@ Ensures True

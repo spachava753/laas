@@ -222,3 +222,10 @@ trusted:
       - "|a| = 65"
     ensures:
       - "(Forall k in [0, |a|) : Forall j in [0, |a[k].S|) : a[k].S[j] >= 0) -> result = nil"
+
+  memory.readyRows:
+    reason: Test helper that succeeds when the slices in its slice have lengths that are not negative, which is always.
+    requires:
+      - "|a| = 65"
+    ensures:
+      - "(Forall k in [0, |a|) : |a[k]| >= 0) -> result = nil"
