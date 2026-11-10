@@ -293,9 +293,15 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 		v.check(head, nil, logic.Le(logic.IntLit(0), before), shape.pos,
 			"loop variant may be negative: %s", spec.variant.text)
 	}
-	after := func(end *state) {
+	var after func(end *state)
+	after = func(end *state) {
 		if shape.post != nil {
-			v.stmt(shape.post, end, ctrl{}, func(*state) {})
+			// The post statement may continue in more than one state.
+			post := shape.post
+			shape.post = nil
+			v.stmt(post, end, ctrl{}, after)
+			shape.post = post
+			return
 		}
 		if shape.limit != nil {
 			next := logic.Add(counter, logic.IntLit(1))
@@ -315,7 +321,13 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 
 func (v *fnVerifier) forStmt(s *ast.ForStmt, spec *loopSpec, st *state, k func(*state)) {
 	if s.Init != nil {
-		v.stmt(s.Init, st, ctrl{}, func(*state) {})
+		// The initializer may continue in more than one state.
+		v.stmt(s.Init, st, ctrl{}, func(next *state) {
+			without := *s
+			without.Init = nil
+			v.forStmt(&without, spec, next, k)
+		})
+		return
 	}
 	if spec.variant == nil {
 		v.report(s.Pos(), "loop needs a //@ Variant annotation to prove that it terminates")

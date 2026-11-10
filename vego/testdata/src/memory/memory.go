@@ -944,3 +944,143 @@ func (r *Ring) PutFull(x int) {
 	r.buf[r.head+r.size] = x // want `vego: index may be out of range`
 	r.size++
 }
+
+// Renamed is Counter under another name: the same type, and the same memory.
+type Renamed = Counter
+
+// AliasedType writes through one spelling of a type and reads through the
+// other.
+//
+// @ Requires p != nil And q = p And p.n = 0
+// @ Modifies q.n
+func AliasedType(p *Counter, q *Renamed) int {
+	q.n = 1
+	return p.n // want `vego: postcondition may not hold: result = 0`
+}
+
+//@ Ensures result = 0
+
+// ByteIsUint8 converts between two spellings of one slice type, which shares
+// the array.
+func ByteIsUint8() byte {
+	a := []byte{0}
+	b := []uint8(a)
+	b[0] = 1
+	return a[0] // want `vego: postcondition may not hold: result = 0`
+}
+
+//@ Ensures result = 0
+
+// Partly has a field that is not modelled.
+type Partly struct {
+	X int
+	C chan int
+}
+
+// ComparesPartly compares structs whose unmodelled fields may differ.
+//
+// @ Requires a.X = b.X
+func ComparesPartly(a, b Partly) bool {
+	return a == b // want `vego: cannot verify ComparesPartly: a value of type memory.Partly cannot be used here`
+}
+
+//@ Ensures result = True
+
+// ReadsPartly uses the modelled field of such a struct.
+func ReadsPartly(a Partly) int {
+	return a.X
+}
+
+//@ Ensures result = a.X
+
+// AppendInInit appends in the initializer of an if statement.
+func AppendInInit() int {
+	s := []int{}
+	if s = append(s, 1); len(s) == 0 {
+		return 0
+	}
+	return 1 // want `vego: postcondition may not hold: result = 0`
+}
+
+//@ Ensures result = 0
+
+// AppendInPost appends in the post statement of a loop.
+func AppendInPost() int {
+	var s []int
+	//@ Invariant |s| = i And 0 <= i <= 3
+	//@ Variant 3 - i
+	for i := 0; i < 3; s = append(s, i) {
+		i++
+	}
+	return len(s)
+}
+
+//@ Ensures result = 3
+
+// NamedBrk has a parameter with the name the verifier uses for the bound of
+// memory.
+func NamedBrk(brk *Counter) int {
+	return brk.n // want `vego: pointer may be nil`
+}
+
+//@ Ensures True
+
+// NewFromValue uses new with a value to start from.
+func NewFromValue() int {
+	p := new(Counter{n: 1})
+	return p.n // want `vego: postcondition may not hold: result = 0`
+}
+
+//@ Ensures result = 0
+
+// NewFromNil evaluates the value it starts from.
+func NewFromNil(p *Counter) *Counter {
+	return new(*p) // want `vego: pointer may be nil`
+}
+
+//@ Ensures True
+
+// MovedCapacity looks into the capacity of an array that append created.
+// Nothing is known about it; in particular it does not hold what followed
+// the old elements in the old array.
+func MovedCapacity() byte {
+	a := []byte{0, 0, 7}
+	b := append(a[:1:1], 1)
+	if cap(b) > 2 {
+		c := b[:cap(b)]
+		return c[2] // want `vego: postcondition may not hold: result = 7`
+	}
+	return 7
+}
+
+//@ Ensures result = 7
+
+// MovedElements keeps the elements that were copied.
+func MovedElements() int {
+	a := []int{4, 5, 6}
+	b := append(a[:2:2], 9)
+	return b[0] + b[1] + b[2]
+}
+
+//@ Ensures result = 18
+
+// Users is a slice of structs whose contract says when a search succeeds.
+type Users struct {
+	list []Point
+}
+
+// FindX succeeds exactly when some element has the X asked for, which is a
+// condition a sample slice of structs has to meet.
+//
+// @ Requires u != nil
+func (u *Users) FindX(x int) (index int, err error) {
+	//@ Invariant Forall k in [0, i) : u.list[k].X != x
+	for i := range u.list {
+		if u.list[i].X == x {
+			return i, nil
+		}
+	}
+	return -1, errEmptyQueue
+}
+
+//@ Ensures err = nil <-> Exists k in [0, |u.list|) : u.list[k].X = x

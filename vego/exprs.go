@@ -38,7 +38,7 @@ func (v *fnVerifier) checkNil(st *state, guard []*logic.Term, ref *logic.Term, p
 // expr evaluates an expression whose value is a single leaf.
 func (v *fnVerifier) expr(e ast.Expr, st *state, guard []*logic.Term) *logic.Term {
 	val := v.eval(e, st, guard)
-	if len(val) != 1 {
+	if _, single := sortOf(v.info.TypeOf(e)); !single {
 		v.unsupported(e.Pos(), fmt.Sprintf("a value of type %s cannot be used here", v.info.TypeOf(e)))
 	}
 	return val[0]
@@ -323,7 +323,7 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) v
 	case builtin("len"), builtin("cap"):
 		operand := v.eval(e.Args[0], st, guard)
 		switch {
-		case len(operand) == 1:
+		case isString(v.info.TypeOf(e.Args[0])):
 			return value{logic.Len(operand[0])}
 		case builtin("len"):
 			return value{operand[2]}
@@ -345,7 +345,12 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) v
 		if _, isStruct := t.Underlying().(*types.Struct); !isStruct {
 			v.unsupported(e.Pos(), fmt.Sprintf("new(%s) is not supported; only structs can be pointed to", t))
 		}
-		return v.newObject(st, t, zeroValue(t))
+		// new takes a type, or a value to start from.
+		initial := zeroValue(t)
+		if !v.info.Types[e.Args[0]].IsType() {
+			initial = v.eval(e.Args[0], st, guard)
+		}
+		return v.newObject(st, t, initial)
 	case builtin("make"):
 		return v.makeSlice(e, st, guard)
 	case builtin("append"):

@@ -996,6 +996,39 @@ func (p *prover) baseKey(id int) string {
 	return key
 }
 
+// ends returns the first and the last value of the interval a quantified
+// body is guarded by, as far as the guard states them: for a body of the
+// form "lo <= x And x < hi -> ..." or "~(lo <= x And x < hi And ...)", lo
+// and hi - 1.
+func (p *prover) ends(variable, body *logic.Term) []poly {
+	// A refuted "Exists x : lo <= x And x < hi And ..." is kept as the
+	// negation of that conjunction.
+	var guards []*logic.Term
+	switch {
+	case body.Op == logic.OpImplies:
+		guards = logic.Conjuncts(body.Args[0])
+	case body.Op == logic.OpNot:
+		guards = logic.Conjuncts(body.Args[0])
+	}
+	var values []poly
+	for _, guard := range guards {
+		if guard.Op != logic.OpLe && guard.Op != logic.OpLt {
+			continue
+		}
+		strict := int64(0)
+		if guard.Op == logic.OpLt {
+			strict = 1
+		}
+		switch low, high := guard.Args[0], guard.Args[1]; {
+		case high == variable && !p.hasBound(low):
+			values = append(values, p.lin(low).add(constPoly(strict), 1))
+		case low == variable && !p.hasBound(high):
+			values = append(values, p.lin(high).add(constPoly(strict), -1))
+		}
+	}
+	return values
+}
+
 // instantiate adds instances of one quantified fact for the ground atoms that
 // match its triggers. A fact without triggers is instantiated at every index
 // that some sequence is read at.
@@ -1005,6 +1038,17 @@ func (p *prover) instantiate(b *branch, index int, atoms []int) {
 	triggers := p.triggersOf(q.fact)
 	if len(triggers) == 0 {
 		triggers = []trigger{{head: "select", arg: 1, sign: 1, rest: constPoly(0)}}
+		// Nothing in the body says where the fact matters, so the ends of
+		// the interval it ranges over are tried as well.
+		for _, value := range p.ends(variable, body) {
+			key := strconv.Itoa(index) + "|" + value.key()
+			if b.inst[key] || b.instances >= maxInstances || q.gen+1 > maxInstanceGen {
+				continue
+			}
+			b.inst[key] = true
+			b.instances++
+			p.add(b, logic.Subst(body, map[string]*logic.Term{variable.Name: p.polyTerm(value)}), q.gen+1)
+		}
 	}
 	for _, id := range atoms {
 		t := p.atomTerms[id]

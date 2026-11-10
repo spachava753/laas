@@ -214,7 +214,7 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
 			token.QUO_ASSIGN: token.QUO, token.REM_ASSIGN: token.REM,
 		}[s.Tok]
 		current, operand := v.load(targets[0], st), v.expr(s.Rhs[0], st, nil)
-		if len(current) != 1 {
+		if _, single := sortOf(targets[0].typ); !single {
 			v.unsupported(s.Pos(), fmt.Sprintf("operator %s is not supported here", s.Tok))
 		}
 		values = []value{{v.binary(op, current[0], operand, v.info.TypeOf(s.Lhs[0]), s.TokPos, st, nil)}}
@@ -312,12 +312,18 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		v.branch(call.Pos())
 		next := st.clone()
 		next.assume(logic.Lt(capacity, grown))
+		// The new array holds the old elements and the added ones. What
+		// lies in its capacity beyond them is not said: it is certainly not
+		// what followed the old elements in their array.
 		rows := make([]*logic.Term, len(leaves))
 		for i, lf := range leaves {
 			old := logic.Select(next.mem.region(owner+lf.path, logic.SeqOf(logic.SeqOf(lf.sort))), ref)
-			rows[i] = logic.Subseq(old, off, logic.Add(off, length))
-			for _, element := range added {
-				rows[i] = logic.Push(rows[i], element[i])
+			rows[i] = v.fresh("moved", logic.SeqOf(lf.sort))
+			index := v.bound("k")
+			copied := logic.And(logic.Le(logic.IntLit(0), index), logic.Lt(index, length))
+			next.assume(logic.Forall(index, logic.Implies(copied, v.same(logic.Select(rows[i], index), logic.Select(old, logic.Add(off, index))))))
+			for j, element := range added {
+				next.assume(v.same(logic.Select(rows[i], logic.Add(length, logic.IntLit(int64(j)))), element[i]))
 			}
 		}
 		roomy := v.fresh("cap", logic.Int)

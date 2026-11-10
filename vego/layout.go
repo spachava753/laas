@@ -1,6 +1,7 @@
 package vego
 
 import (
+	"fmt"
 	"go/types"
 	"strings"
 
@@ -30,8 +31,41 @@ type leaf struct {
 // value is a Go value in the logic: one term for each leaf of its type.
 type value []*logic.Term
 
-// typeKey names a type in the keys of memory regions.
-func typeKey(t types.Type) string { return types.TypeString(t, nil) }
+// typeKey names a type in the keys of memory regions. Identical types must
+// get the same key however they are spelled, so aliases are replaced by what
+// they stand for, at every depth.
+func typeKey(t types.Type) string {
+	switch t := types.Unalias(t).(type) {
+	case *types.Basic:
+		// byte is uint8 and rune is int32 under another name.
+		return types.Typ[t.Kind()].Name()
+	case *types.Pointer:
+		return "*" + typeKey(t.Elem())
+	case *types.Slice:
+		return "[]" + typeKey(t.Elem())
+	case *types.Struct:
+		key := "struct{"
+		for i := range t.NumFields() {
+			field := t.Field(i)
+			// Unexported names of different packages are different fields.
+			name := field.Name()
+			if !field.Exported() && field.Pkg() != nil {
+				name = field.Pkg().Path() + "." + name
+			}
+			key += fmt.Sprintf("%s %s %t %q;", name, typeKey(field.Type()), field.Embedded(), t.Tag(i))
+		}
+		return key + "}"
+	case *types.Named:
+		// A named type is its own type, whatever it is made of; an
+		// instantiated one is told apart by its arguments.
+		key := types.TypeString(t.Origin(), nil)
+		for i := range t.TypeArgs().Len() {
+			key += "[" + typeKey(t.TypeArgs().At(i)) + "]"
+		}
+		return key
+	}
+	return types.TypeString(types.Unalias(t), nil)
+}
 
 func isError(t types.Type) bool {
 	return types.Identical(t, types.Universe.Lookup("error").Type())
@@ -108,6 +142,11 @@ func layoutOf(t types.Type) ([]leaf, bool) {
 // sortOf maps a Go type whose values are a single leaf to the sort of that
 // leaf: numbers, booleans, strings, errors, and pointers.
 func sortOf(t types.Type) (logic.Sort, bool) {
+	// A struct is never a single leaf, even when only one of its fields is
+	// modelled: the fields left out are part of its value too.
+	if _, isStruct := t.Underlying().(*types.Struct); isStruct {
+		return 0, false
+	}
 	leaves, ok := layoutOf(t)
 	if !ok || len(leaves) != 1 || leaves[0].part != partValue {
 		return 0, false

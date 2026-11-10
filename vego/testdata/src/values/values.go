@@ -630,3 +630,16 @@ func MixedGuardLive(x int) error {
 }
 
 //@ Ensures True
+
+// ImpossibleString requires a string no program can pass, since a byte is
+// never 256. The slice literal in its body must not be taken for such a
+// string, so the call behind it does not excuse the contract.
+//
+// @ Requires |s| = 1 And s[0] = 256
+func ImpossibleString(s string) error { // want `the contract of ImpossibleString would also be met by a function that always returns an error`
+	_ = []int{256}
+	_ = external()
+	return errors.New("always")
+}
+
+//@ Ensures True

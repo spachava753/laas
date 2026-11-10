@@ -128,6 +128,9 @@ func (v *fnVerifier) enter() *state {
 		if name == "" || name == "_" {
 			name = fmt.Sprintf("_@%d", i)
 		}
+		// The $ keeps the names of parameters apart from the names the
+		// verifier uses itself, such as that of the bound of memory.
+		name = "$" + name
 		val := make(value, len(leaves))
 		for j, lf := range leaves {
 			val[j] = logic.Const(name+lf.path, lf.sort)
@@ -409,7 +412,14 @@ func (v *fnVerifier) branch(pos token.Pos) {
 // ones failed, and the default clause runs when none matches.
 func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*state)) {
 	if s.Init != nil {
-		v.stmt(s.Init, st, c, func(*state) {})
+		// The initializer may continue in more than one state.
+		init := s.Init
+		v.stmt(init, st, c, func(next *state) {
+			without := *s
+			without.Init = nil
+			v.switchStmt(&without, next, c, k)
+		})
+		return
 	}
 	var tag *logic.Term
 	if s.Tag != nil {
@@ -458,10 +468,16 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 }
 
 func (v *fnVerifier) ifStmt(s *ast.IfStmt, st *state, c ctrl, k func(*state)) {
-	v.branch(s.Pos())
 	if s.Init != nil {
-		v.stmt(s.Init, st, c, func(*state) {})
+		// The initializer may continue in more than one state.
+		v.stmt(s.Init, st, c, func(next *state) {
+			without := *s
+			without.Init = nil
+			v.ifStmt(&without, next, c, k)
+		})
+		return
 	}
+	v.branch(s.Pos())
 	cond := v.expr(s.Cond, st, nil)
 	taken, skipped := st.clone(), st.clone()
 	taken.assume(cond)

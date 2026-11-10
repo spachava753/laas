@@ -324,6 +324,9 @@ func necessary(t *logic.Term) []*logic.Term {
 type witness struct {
 	consts map[string]*logic.Term
 	memo   map[*logic.Term]*logic.Term
+	// fixed holds the arrays whose sampled contents are a literal, which
+	// the sample for single elements must then leave alone.
+	fixed map[string]bool
 }
 
 // store sets one cell of a region of the sampled memory.
@@ -407,30 +410,24 @@ func (b *sampler) fitting(t types.Type) []*logic.Term {
 	return values
 }
 
-// sequences returns sample contents for a string or a slice of the given
-// element type: short runs of one repeated value, and the literals the
-// contract mentions whose elements are values of the element type.
-func (b *sampler) sequences(elem types.Type, text bool) []*logic.Term {
-	sort, _ := sortOf(elem)
-	elements := []*logic.Term{zeroLeaf(leaf{sort: sort})}
-	switch {
-	case sort == logic.Bool:
-		elements = append(elements, logic.True())
-	case sort == logic.Int:
-		elements = b.fitting(elem)
-	}
+// texts returns sample strings: short runs of one repeated byte, and the
+// string literals the formulas mention.
+func (b *sampler) texts() []*logic.Term {
 	var values []*logic.Term
+	bytes := b.fitting(types.Typ[types.Uint8])
 	for _, length := range b.fitting(types.Typ[types.Int]) {
 		if length.Value().Sign() < 0 || length.Value().Cmp(big.NewInt(64)) > 0 {
 			continue
 		}
-		for _, element := range elements[:min(len(elements), 3)] {
+		for _, element := range bytes[:min(len(bytes), 3)] {
 			values = append(values, logic.Fill(length, element))
 		}
 	}
+	// A literal the formulas mention may be a slice literal, whose elements
+	// need not be bytes.
 	opts := solver.Options{MaxSteps: b.v.maxSteps}
 	for _, literal := range b.literals {
-		if literal.Sort == logic.SeqOf(sort) && (text || solver.Prove(nil, b.v.elementFacts(literal, elem), opts) == solver.Proved) {
+		if literal.Sort == logic.IntSeq && solver.Prove(nil, b.v.elementFacts(literal, types.Typ[types.Uint8]), opts) == solver.Proved {
 			values = append(values, literal)
 		}
 	}
@@ -484,28 +481,9 @@ func (b *sampler) add(t types.Type, to binding, nested bool) {
 			name: func(i int) string { return entryRegion + typeKey(object) + fields[i].path },
 		}, true)
 	case isSlice(t):
-		elem := elemType(t)
-		if _, ok := sortOf(elem); !ok {
-			return
-		}
-		b.refs++
-		ref := logic.RefLit(b.refs)
-		var alternatives slot
-		for _, content := range b.sequences(elem, false) {
-			alternatives = append(alternatives, func(s *witness) {
-				length := logic.Len(content)
-				if content.Op == logic.OpFill {
-					length = content.Args[0]
-				}
-				for i, part := range []*logic.Term{ref, logic.IntLit(0), length, length} {
-					to.set(s, i, part)
-				}
-				s.store("[]"+typeKey(elem), logic.SeqOf(content.Sort), ref, content)
-			})
-		}
-		b.choose(alternatives, to.name(0), to.name(1), to.name(2), to.name(3), entryRegion+"[]"+typeKey(elem))
+		b.addSlice(t, to)
 	case isString(t):
-		scalar(b.sequences(types.Typ[types.Uint8], true))
+		scalar(b.texts())
 	case single && sort == logic.Int:
 		scalar(b.fitting(t))
 	case single && sort == logic.Bool:
@@ -528,6 +506,84 @@ func (b *sampler) add(t types.Type, to binding, nested bool) {
 				}, nested)
 			}
 		}
+	}
+}
+
+// addSlice creates the slots for a slice: one for its length, and one for
+// each leaf of its elements, which every element of a sample shares. The
+// slice gets an array of its own. For a slice of single values the literals
+// the formulas mention are offered as contents too.
+func (b *sampler) addSlice(t types.Type, to binding) {
+	elem := elemType(t)
+	leaves, ok := layoutOf(elem)
+	if !ok {
+		return
+	}
+	b.refs++
+	ref := logic.RefLit(b.refs)
+	region := func(lf leaf) string { return "[]" + typeKey(elem) + lf.path }
+	// Slices of one element type share their regions, so what a literal
+	// fixes is one array in a region.
+	array := func(lf leaf) string { return region(lf) + "@" + ref.String() }
+	names := []string{to.name(0), to.name(1), to.name(2), to.name(3)}
+	for _, lf := range leaves {
+		names = append(names, entryRegion+region(lf))
+	}
+	sized := func(length *logic.Term, also func(s *witness)) func(s *witness) {
+		return func(s *witness) {
+			for i, part := range []*logic.Term{ref, logic.IntLit(0), length, length} {
+				to.set(s, i, part)
+			}
+			also(s)
+		}
+	}
+	var lengths slot
+	for _, length := range b.fitting(types.Typ[types.Int]) {
+		if length.Value().Sign() >= 0 && length.Value().Cmp(big.NewInt(64)) <= 0 {
+			lengths = append(lengths, sized(length, func(*witness) {}))
+		}
+	}
+	if sort, single := sortOf(elem); single {
+		opts := solver.Options{MaxSteps: b.v.maxSteps}
+		for _, literal := range b.literals {
+			if literal.Sort == logic.SeqOf(sort) && solver.Prove(nil, b.v.elementFacts(literal, elem), opts) == solver.Proved {
+				lengths = append(lengths, sized(logic.Len(literal), func(s *witness) {
+					s.store(region(leaves[0]), logic.SeqOf(literal.Sort), ref, literal)
+					s.fixed[array(leaves[0])] = true
+				}))
+			}
+		}
+	}
+	b.choose(lengths, names...)
+	for _, lf := range leaves {
+		var elements []*logic.Term
+		switch {
+		case lf.part != partValue:
+			// A slice inside an element has no sample.
+			continue
+		case lf.sort == logic.Int:
+			elements = b.fitting(lf.typ)
+		case lf.sort == logic.Bool:
+			elements = []*logic.Term{logic.False(), logic.True()}
+		case lf.sort == logic.Err:
+			elements = []*logic.Term{logic.NilErr(), someError}
+		case lf.sort == logic.Ref:
+			elements = []*logic.Term{logic.RefLit(0)}
+		case lf.sort.IsSeq():
+			elements = b.texts()
+		}
+		var fills slot
+		for _, element := range elements[:min(len(elements), 3)] {
+			fills = append(fills, func(s *witness) {
+				if !s.fixed[array(lf)] {
+					// Every position holds the element, so the row serves
+					// whatever length the slice has.
+					row := logic.Fill(logic.IntLit(64), element)
+					s.store(region(lf), logic.SeqOf(row.Sort), ref, row)
+				}
+			})
+		}
+		b.choose(fills, entryRegion+region(lf))
 	}
 }
 
@@ -583,7 +639,7 @@ func (v *fnVerifier) someInput(terms []*logic.Term, accept func(input *witness) 
 		total = min(total*max(len(alternatives), 1), maxWitnesses)
 	}
 	for n := range total {
-		input := &witness{consts: map[string]*logic.Term{}, memo: map[*logic.Term]*logic.Term{}}
+		input := &witness{consts: map[string]*logic.Term{}, memo: map[*logic.Term]*logic.Term{}, fixed: map[string]bool{}}
 		// Everything a sample contains exists.
 		input.consts[v.entryBrk.Name] = logic.RefLit(b.refs + 1)
 		rest := n
