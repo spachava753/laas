@@ -229,12 +229,14 @@ func (v *fnVerifier) noteTyped(sink *state, val value, t types.Type) {
 // view returns the elements of a slice as a sequence, which is how an
 // annotation sees a slice whose elements are single values.
 func (v *fnVerifier) view(sink *state, mem memory, header value, t types.Type) (*logic.Term, bool) {
+	// A struct with one field is not a single value: its field has a
+	// region of its own.
 	elem := elemType(t)
-	leaves, ok := layoutOf(elem)
-	if !ok || len(leaves) != 1 || leaves[0].part != partValue {
+	sort, single := sortOf(elem)
+	if !single {
 		return nil, false
 	}
-	row := v.row(sink, mem, "[]"+typeKey(elem), leaves[0], header[0])
+	row := v.row(sink, mem, "[]"+typeKey(elem), leaf{sort: sort, typ: elem}, header[0])
 	return logic.Subseq(row, header[1], logic.Add(header[1], header[2])), true
 }
 

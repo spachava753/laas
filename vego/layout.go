@@ -52,7 +52,9 @@ func typeKey(t types.Type) string {
 			if !field.Exported() && field.Pkg() != nil {
 				name = field.Pkg().Path() + "." + name
 			}
-			key += fmt.Sprintf("%s %s %t %q;", name, typeKey(field.Type()), field.Embedded(), t.Tag(i))
+			// Tags are left out: a slice converts between struct types
+			// that differ only in their tags, and keeps its array.
+			key += fmt.Sprintf("%s %s %t;", name, typeKey(field.Type()), field.Embedded())
 		}
 		return key + "}"
 	case *types.Named:

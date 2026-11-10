@@ -430,7 +430,12 @@ func (v *fnVerifier) conversion(e *ast.CallExpr, st *state, guard []*logic.Term)
 	case types.Identical(from, to), isError(to):
 		return val
 	}
-	if _, isPointer := from.Underlying().(*types.Pointer); !isPointer && types.IdenticalIgnoreTags(from.Underlying(), to.Underlying()) {
+	// A conversion that leaves the value as it is must also leave it in
+	// the same memory, which pointers and slices of differently named
+	// types would not be.
+	_, isPointer := from.Underlying().(*types.Pointer)
+	sameMemory := !isSlice(from) || typeKey(elemType(from)) == typeKey(elemType(to))
+	if !isPointer && sameMemory && types.IdenticalIgnoreTags(from.Underlying(), to.Underlying()) {
 		return val
 	}
 	v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to a %s is not supported", from, to))

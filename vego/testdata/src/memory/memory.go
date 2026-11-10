@@ -1084,3 +1084,32 @@ func (u *Users) FindX(x int) (index int, err error) {
 }
 
 //@ Ensures err = nil <-> Exists k in [0, |u.list|) : u.list[k].X = x
+
+// TagsShare converts a slice between struct types that differ in a tag,
+// which keeps the array.
+func TagsShare() int {
+	a := []struct {
+		X int `a:"1"`
+	}{{X: 0}}
+	b := []struct {
+		X int `b:"1"`
+	}(a)
+	b[0].X = 1
+	return a[0].X // want `vego: postcondition may not hold: result = 0`
+}
+
+//@ Ensures result = 0
+
+// One is a struct with a single field, which is still not a single value.
+type One struct{ X int }
+
+// WholeSlice compares slices of structs as wholes, which has no meaning in
+// an annotation.
+//
+// @ Requires |a| = 1 And a[0].X = 0
+// @ Modifies a
+func WholeSlice(a []One) {
+	a[0].X = 1
+}
+
+//@ Ensures a' = a // want `vego: in Ensures annotation: a is a slice of memory.One; index it and name a field`
