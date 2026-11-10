@@ -216,6 +216,23 @@ func successConditions(post, forced *logic.Term) []*logic.Term {
 	return conditions
 }
 
+// withLengths replaces the length of each given sequence by the term that
+// equals it.
+func withLengths(t *logic.Term, lengths map[*logic.Term]*logic.Term) *logic.Term {
+	if t.Op == logic.OpLen && lengths[t.Args[0]] != nil {
+		return lengths[t.Args[0]]
+	}
+	if len(t.Args) == 0 {
+		return t
+	}
+	rewritten := *t
+	rewritten.Args = make([]*logic.Term, len(t.Args))
+	for i, arg := range t.Args {
+		rewritten.Args[i] = withLengths(arg, lengths)
+	}
+	return &rewritten
+}
+
 // mentions reports whether a term contains one of the given constants.
 func mentions(t *logic.Term, constants map[*logic.Term]bool) bool {
 	if constants[t] {
@@ -236,6 +253,7 @@ func mentions(t *logic.Term, constants map[*logic.Term]bool) bool {
 func (v *fnVerifier) successClauses(args map[*types.Var]*logic.Term) (pre []*logic.Term, conditions [][]*logic.Term) {
 	fn := v.fn
 	outputs := map[*logic.Term]bool{}
+	lengths := map[*logic.Term]*logic.Term{} // final slice -> its unchanged length
 	results := make([]*logic.Term, len(fn.results))
 	for i, result := range fn.results {
 		if sort, ok := sortOf(result.Type()); ok {
@@ -250,9 +268,12 @@ func (v *fnVerifier) successClauses(args map[*types.Var]*logic.Term) (pre []*log
 		}
 		pre = append(pre, v.typeFact(args[param], param.Type()))
 		post[param] = args[param]
-		if isSlice(param.Type()) {
+		// Only a slice the function may write has contents of its own
+		// afterwards, and even then its length is the caller's.
+		if isSlice(param.Type()) && v.mutates(fn, param) {
 			post[param] = v.fresh("out", post[param].Sort)
 			outputs[post[param]] = true
+			lengths[post[param]] = logic.Len(args[param])
 		}
 	}
 	for _, c := range fn.requires {
@@ -266,6 +287,7 @@ func (v *fnVerifier) successClauses(args map[*types.Var]*logic.Term) (pre []*log
 		clause := v.calleeFormula(c, env)
 		for n, index := range errorResults(fn) {
 			for _, condition := range successConditions(clause, results[index]) {
+				condition = withLengths(condition, lengths)
 				if !mentions(condition, outputs) {
 					conditions[n] = append(conditions[n], condition)
 				}

@@ -105,3 +105,22 @@ trusted:
     reason: Always succeeds; its first result has a type vego does not model.
     ensures:
       - "err = nil"
+
+  trust.takeAny:
+    reason: Takes old of a parameter of a type vego does not model.
+    ensures:
+      - "result = old(x)"
+
+  trust.readyWith:
+    reason: Succeeds whenever the slice it only reads starts with zero.
+    requires:
+      - "|a| = 1"
+      - "a[0] = 0"
+    ensures:
+      - "a'[0] = 0 -> err = nil"
+
+  trust.readyWriting:
+    reason: Succeeds for a slice of one element, which it may overwrite.
+    modifies: [a]
+    ensures:
+      - "|a'| = 1 -> err = nil"

@@ -237,6 +237,9 @@ func (e *contractEnv) Var(name string, primed bool) (*logic.Term, error) {
 
 func (e *contractEnv) Old(name string) (*logic.Term, error) {
 	if param, ok := e.fn.paramNames[name]; ok {
+		if e.args[param] == nil {
+			return nil, fmt.Errorf("parameter %s has type %s, which cannot be used in a contract", name, param.Type())
+		}
 		return e.args[param], nil
 	}
 	return nil, fmt.Errorf("old(%s): %s is not a parameter", name, name)
@@ -269,7 +272,7 @@ func (e *bodyEnv) Var(name string, primed bool) (*logic.Term, error) {
 }
 
 func (e *bodyEnv) Old(name string) (*logic.Term, error) {
-	if param, ok := e.v.fn.paramNames[name]; ok {
+	if param, ok := e.v.fn.paramNames[name]; ok && e.v.entry[param] != nil {
 		return e.v.entry[param], nil
 	}
 	return nil, fmt.Errorf("old(%s): %s is not a parameter", name, name)

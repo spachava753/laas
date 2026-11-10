@@ -245,3 +245,39 @@ func AlwaysFailsAfterReady() error { // want `the contract of AlwaysFailsAfterRe
 }
 
 //@ Ensures True
+
+func takeAny(x any) int { return 0 }
+
+// UsesOldOfBlockedName relies on a contract that takes old of a parameter
+// vego does not model.
+func UsesOldOfBlockedName() (n int) {
+	return takeAny(nil) // want `cannot verify UsesOldOfBlockedName: ` `the trusted contract of trust.takeAny \(trusted.yaml:\d+\) cannot be used: in its ensures "result = old\(x\)": parameter x has type any, which cannot be used in a contract`
+}
+
+//@ Ensures n = 0
+
+func readyWith(a []int) (err error) { return nil }
+
+func readyWriting(a []int) (err error) { return nil }
+
+// AlwaysFailsAfterReadyWith calls a trusted function whose success follows
+// from the slice it leaves unchanged.
+//
+// @ Requires |a| = 1 And a[0] = 0
+func AlwaysFailsAfterReadyWith(a []int) error { // want `the contract of AlwaysFailsAfterReadyWith would also be met by a function that always returns an error`
+	_ = readyWith(a)
+	return errAlways
+}
+
+//@ Ensures True
+
+// AlwaysFailsAfterReadyWriting calls one whose success follows from the
+// length of a slice it may write, which a call cannot change.
+//
+// @ Requires |a| = 1
+func AlwaysFailsAfterReadyWriting(a []int) error { // want `the contract of AlwaysFailsAfterReadyWriting would also be met by a function that always returns an error`
+	_ = readyWriting(a)
+	return errAlways
+}
+
+//@ Ensures True
