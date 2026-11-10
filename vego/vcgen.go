@@ -1375,20 +1375,6 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		if !ok {
 			continue
 		}
-		// A trusted callee that returns an error without saying when it
-		// succeeds makes this function's own success unpredictable,
-		// provided the call can be reached. A verified callee may turn out
-		// to be excused for the same reason.
-		// A callee verified in another package says in its published
-		// contract whether it is excused.
-		source := (fn.trust != nil && !v.trustForces(fn)) || (fn.imported != nil && fn.imported.Excused)
-		local := fn.decl != nil
-		if sort == logic.Err && ((source && !v.outside) || (local && !v.reached[fn])) {
-			if v.canReach(append(slices.Clip(st.hyps), guard...)) {
-				v.outside = v.outside || source
-				v.reached[fn] = local
-			}
-		}
 		if isSlice(sig.Results().At(i).Type()) && fn.trust != nil {
 			v.unsupported(call.Pos(), fmt.Sprintf(
 				"%s returns a slice; a trusted contract cannot yet say that the slice shares no storage",
@@ -1397,13 +1383,39 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		results[i] = v.fresh(callee.Name(), sort)
 		st.assume(v.typeFact(results[i], sig.Results().At(i).Type()))
 	}
-	if fn != nil {
-		env := &contractEnv{pv: v.pkgVerifier, fn: fn, args: args, post: post, results: results}
-		for _, c := range fn.ensures {
-			st.assume(logic.Implies(logic.And(guard...), v.calleeFormula(c, env)))
+	env := &contractEnv{pv: v.pkgVerifier, fn: fn, args: args, post: post, results: results}
+	for _, c := range fn.ensures {
+		st.assume(logic.Implies(logic.And(guard...), v.calleeFormula(c, env)))
+	}
+	v.noteFailureSource(fn, results, st, guard)
+	return results
+}
+
+// noteFailureSource records whether a call makes the success of the function
+// under verification unpredictable. A trusted callee does when it returns
+// an error, its contract never forces success, and nothing here shows that
+// this particular call succeeds; a callee verified in another package says
+// in its published contract whether it is excused for that reason. A callee
+// verified in this package is only noted: whether it is excused is decided
+// once every function has been verified. In each case the call must be
+// reachable.
+func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []*logic.Term, st *state, guard []*logic.Term) {
+	path := append(slices.Clip(st.hyps), guard...)
+	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
+	local := fn.decl != nil
+	for _, index := range errorResults(fn) {
+		if results[index] == nil || (!local && v.outside) || (local && v.reached[fn]) {
+			continue
+		}
+		source := (fn.trust != nil && !v.trustForces(fn)) || (fn.imported != nil && fn.imported.Excused)
+		if !local && (!source || solver.Prove(path, logic.IsNil(results[index]), opts) == solver.Proved) {
+			continue
+		}
+		if v.canReach(path) {
+			v.outside = v.outside || !local
+			v.reached[fn] = local
 		}
 	}
-	return results
 }
 
 // calleeFormula resolves a callee's postcondition at a call site. A result of

@@ -178,89 +178,48 @@ func errorResults(fn *funcInfo) []int {
 	return indices
 }
 
-// successConditions collects the conditions under which a postcondition
-// forces the given error to be nil. It understands the shapes such clauses
-// take: "err = nil" itself, a conjunction containing it, "C -> ...",
-// "... <-> C", and a disjunction containing it.
-func successConditions(post, forced *logic.Term) []*logic.Term {
-	if post.Op == logic.OpIsNil && post.Args[0] == forced {
-		return []*logic.Term{logic.True()}
-	}
-	var conditions []*logic.Term
-	under := func(premise, rest *logic.Term) {
-		for _, condition := range successConditions(rest, forced) {
-			conditions = append(conditions, logic.And(premise, condition))
-		}
-	}
-	switch post.Op {
-	case logic.OpAnd:
-		for _, arg := range post.Args {
-			conditions = append(conditions, successConditions(arg, forced)...)
-		}
-	case logic.OpImplies:
-		under(post.Args[0], post.Args[1])
-	case logic.OpIff:
-		under(post.Args[1], post.Args[0])
-		under(post.Args[0], post.Args[1])
-	case logic.OpOr:
-		for i, arg := range post.Args {
-			var others []*logic.Term
-			for j, other := range post.Args {
-				if i != j {
-					others = append(others, logic.Not(other))
-				}
-			}
-			under(logic.And(others...), arg)
-		}
-	}
-	return conditions
-}
-
-// successClauses resolves the contract for the given argument values. It
+// contractInstance resolves the contract for the given argument values. It
 // returns the facts that the precondition and the parameter types give
-// about them; those facts together with everything the types and the call
-// guarantee about the outputs, which are arbitrary otherwise; and, for each
-// error result, the conditions under which the postcondition forces that
-// error to be nil.
-func (v *fnVerifier) successClauses(args map[*types.Var]*logic.Term) (pre, typed []*logic.Term, conditions [][]*logic.Term) {
+// about them; everything that then holds of the outputs of any function
+// meeting the contract, namely what their types and the call guarantee and
+// the postcondition; and the terms standing for the error results.
+func (v *fnVerifier) contractInstance(args map[*types.Var]*logic.Term) (pre, post, failures []*logic.Term) {
 	fn := v.fn
 	results := make([]*logic.Term, len(fn.results))
-	post := map[*types.Var]*logic.Term{}
-	var outputs []*logic.Term
+	final := map[*types.Var]*logic.Term{}
 	for _, param := range fn.params {
 		if args[param] == nil {
 			continue
 		}
 		pre = append(pre, v.typeFact(args[param], param.Type()))
-		post[param] = args[param]
+		final[param] = args[param]
 		// Only a slice the function may write has contents of its own
 		// afterwards, and even then its length is the caller's.
 		if isSlice(param.Type()) && v.mutates(fn, param) {
-			post[param] = v.fresh("out", post[param].Sort)
-			outputs = append(outputs, v.valueFacts(post[param], param.Type()),
-				logic.Eq(logic.Len(post[param]), logic.Len(args[param])))
+			final[param] = v.fresh("out", final[param].Sort)
+			post = append(post, v.valueFacts(final[param], param.Type()),
+				logic.Eq(logic.Len(final[param]), logic.Len(args[param])))
 		}
 	}
 	for i, result := range fn.results {
 		if sort, ok := sortOf(result.Type()); ok {
 			results[i] = v.fresh("out", sort)
-			outputs = append(outputs, v.valueFacts(results[i], result.Type()))
+			post = append(post, v.valueFacts(results[i], result.Type()))
 		}
 	}
 	for _, c := range fn.requires {
 		pre = append(pre, v.formula(c, c.node, &contractEnv{pv: v.pkgVerifier, fn: fn, args: args}))
 	}
-	env := &contractEnv{pv: v.pkgVerifier, fn: fn, args: args, post: post, results: results}
-	conditions = make([][]*logic.Term, len(errorResults(fn)))
+	env := &contractEnv{pv: v.pkgVerifier, fn: fn, args: args, post: final, results: results}
 	for _, c := range fn.ensures {
 		// A clause about a result that has no value in the logic says
 		// nothing here.
-		clause := v.calleeFormula(c, env)
-		for n, index := range errorResults(fn) {
-			conditions[n] = append(conditions[n], successConditions(clause, results[index])...)
-		}
+		post = append(post, v.calleeFormula(c, env))
 	}
-	return pre, slices.Concat(pre, outputs), conditions
+	for _, index := range errorResults(fn) {
+		failures = append(failures, results[index])
+	}
+	return pre, slices.Concat(pre, post), failures
 }
 
 // maxWitnesses bounds the inputs tried when looking for one on which a
@@ -268,43 +227,39 @@ func (v *fnVerifier) successClauses(args map[*types.Var]*logic.Term) (pre, typed
 const maxWitnesses = 3000
 
 // forcesSuccess reports whether the contract makes the function succeed for
-// some input: for every error result there is a clause "C -> err = nil" and
-// a concrete input that provably satisfies the precondition and for which C
-// holds whatever the function returns. Without such a clause and
-// witness, an implementation that fails on every call may well satisfy the
-// contract, whatever else the contract demands.
+// some input: there is a concrete input that provably satisfies the
+// precondition and for which every well-typed outcome that meets the
+// postcondition has a nil error. Without such an input, an implementation
+// that fails on every call may well satisfy the contract, whatever else the
+// contract demands.
 //
 // The witness is searched among small inputs built from 0, 1, -1 and the
-// numbers the contract mentions. Finding none is reported, even though a
-// witness outside that search may exist: the contract must then be stated so
-// that its success condition is plainly satisfiable.
+// numbers and strings the contract mentions. Finding none is reported, even
+// though a witness outside that search may exist: the contract must then be
+// stated so that its success condition is plainly satisfiable.
 func (v *fnVerifier) forcesSuccess() bool {
 	v.enter()
-	pre, _, conditions := v.successClauses(v.entry)
-	for _, group := range conditions {
-		if len(group) == 0 {
-			return false
-		}
-	}
+	_, mentioned, failures := v.contractInstance(v.entry)
 	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
-	forced := make([]bool, len(conditions))
-	v.someInput(slices.Concat(append(conditions, pre)...), func(args map[*types.Var]*logic.Term) bool {
-		facts, typed, candidates := v.successClauses(args)
-		if solver.Prove(nil, logic.And(facts...), opts) != solver.Proved {
+	forced := make([]bool, len(failures))
+	v.someInput(mentioned, func(args map[*types.Var]*logic.Term) bool {
+		// The sample error is the one sample that is not a literal; all
+		// that is known of it is that it is not nil.
+		known := []*logic.Term{logic.Not(logic.IsNil(someError))}
+		pre, post, failures := v.contractInstance(args)
+		if solver.Prove(known, logic.And(pre...), opts) != solver.Proved {
 			return false
 		}
-		// The condition must hold for this input whatever the function
-		// returns, as long as what it returns is well typed; then nothing
-		// the function does can avoid the forced success.
-		for result, group := range candidates {
-			forced[result] = forced[result] || slices.ContainsFunc(group, func(condition *logic.Term) bool {
-				return solver.Prove(typed, condition, opts) == solver.Proved
-			})
+		for i, failure := range failures {
+			forced[i] = forced[i] || solver.Prove(append(known, post...), logic.IsNil(failure), opts) == solver.Proved
 		}
 		return !slices.Contains(forced, false)
 	})
 	return !slices.Contains(forced, false)
 }
+
+// someError is the sample value for an error that is not nil.
+var someError = logic.Const("some error", logic.Err)
 
 // canReach reports whether there is evidence that execution can arrive at
 // the current point, given the facts that hold on the path to it. A path
@@ -349,6 +304,13 @@ func (v *fnVerifier) canReach(path []*logic.Term) bool {
 			case value == entry || entry == nil:
 			case entry.Sort.IsSeq():
 				chosen = append(chosen, logic.SeqEq(entry, value, logic.Bound(v.fresh("k#", logic.Int).Name, logic.Int)))
+			case entry.Sort == logic.Err:
+				// All that is known of an error is whether it is nil.
+				nilness := logic.IsNil(entry)
+				if value == someError {
+					nilness = logic.Not(nilness)
+				}
+				chosen = append(chosen, nilness)
 			default:
 				chosen = append(chosen, logic.Eq(entry, value))
 			}
@@ -397,14 +359,32 @@ func (v *fnVerifier) someInput(terms []*logic.Term, accept func(args map[*types.
 			harvest(arg)
 		}
 	}
+	// A string or slice literal is a chain of appended elements.
+	var literals []*logic.Term
+	var collect func(t *logic.Term)
+	collect = func(t *logic.Term) {
+		if t.Op == logic.OpPush && len(literals) < 8 {
+			literals = append(literals, t)
+			return
+		}
+		for _, arg := range t.Args {
+			collect(arg)
+		}
+	}
 	for _, t := range terms {
 		harvest(t)
+		collect(t)
 	}
 	params := v.fn.params
 	choices := make([][]*logic.Term, len(params))
 	total := 1
 	for i, param := range params {
 		choices[i] = v.sampleValues(param, numbers)
+		for _, literal := range literals {
+			if entry := v.entry[param]; entry != nil && entry.Sort == literal.Sort {
+				choices[i] = append(choices[i], literal)
+			}
+		}
 		total = min(total*len(choices[i]), maxWitnesses)
 	}
 	for n := range total {
@@ -422,9 +402,9 @@ func (v *fnVerifier) someInput(terms []*logic.Term, accept func(args map[*types.
 }
 
 // sampleValues lists concrete values of a parameter's type to try as part of
-// a witness: the given numbers that fit an integer type, both booleans, and
-// short sequences holding one repeated value. A float or an error has no
-// concrete values in the logic and stays symbolic.
+// a witness: the given numbers that fit an integer type, both booleans, a
+// nil and a non-nil error, and short sequences holding one repeated value.
+// A float has no concrete values in the logic and stays symbolic.
 func (v *fnVerifier) sampleValues(param *types.Var, numbers []*big.Int) []*logic.Term {
 	fitting := func(t types.Type) []*logic.Term {
 		var values []*logic.Term
@@ -444,6 +424,8 @@ func (v *fnVerifier) sampleValues(param *types.Var, numbers []*big.Int) []*logic
 		return fitting(param.Type())
 	case entry.Sort == logic.Bool:
 		return []*logic.Term{logic.False(), logic.True()}
+	case entry.Sort == logic.Err:
+		return []*logic.Term{logic.NilErr(), someError}
 	case !entry.Sort.IsSeq():
 		return []*logic.Term{entry}
 	}

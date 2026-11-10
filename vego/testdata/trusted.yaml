@@ -147,3 +147,16 @@ trusted:
       - "|a| = 1"
     ensures:
       - "a'[0] >= 0 -> err = nil"
+
+  trust.readyNil:
+    reason: Succeeds for the nil error it requires.
+    requires:
+      - "e = nil"
+    ensures:
+      - "err = nil"
+
+  trust.readyLinked:
+    reason: Returns zero, and succeeds whenever it returns zero.
+    ensures:
+      - "value = 0"
+      - "value = 0 -> err = nil"

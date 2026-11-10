@@ -328,3 +328,53 @@ func AlwaysFailsAfterReadyBytes(a []byte) error { // want `the contract of Alway
 }
 
 //@ Ensures True
+
+func readyNil(e error) (err error) { return nil }
+
+// AlwaysFailsAfterReadyNil calls a trusted function that succeeds on every
+// call its contract admits.
+func AlwaysFailsAfterReadyNil() error { // want `the contract of AlwaysFailsAfterReadyNil would also be met by a function that always returns an error`
+	_ = readyNil(nil)
+	return errAlways
+}
+
+//@ Ensures True
+
+func readyLinked() (value uint8, err error) { return 0, nil }
+
+// AlwaysFailsAfterReadyLinked calls one whose success follows from two
+// postconditions together.
+func AlwaysFailsAfterReadyLinked() error { // want `the contract of AlwaysFailsAfterReadyLinked would also be met by a function that always returns an error`
+	_, _ = readyLinked()
+	return errAlways
+}
+
+//@ Ensures True
+
+// PassThrough succeeds for the nil error it requires.
+//
+// @ Requires e = nil
+func PassThrough(e error) (err error) {
+	return e
+}
+
+//@ Ensures err = nil
+
+// OnlyA succeeds for the one string it requires.
+//
+// @ Requires s = "a"
+func OnlyA(s string) (err error) {
+	return nil
+}
+
+//@ Ensures err = nil
+
+// Contrapositive states its success condition the other way round.
+func Contrapositive(n int) (err error) {
+	if n < 0 {
+		return errAlways
+	}
+	return nil
+}
+
+//@ Ensures err != nil -> n < 0
