@@ -29,6 +29,7 @@ func AfterLoop(n int) (i int) {
 // AssignmentOrder uses the old value of i as the index.
 //
 // @ Requires |A| > 1
+// @ Modifies A
 func AssignmentOrder(A []int) {
 	i := 0
 	i, A[i] = 1, 5
@@ -41,6 +42,7 @@ func AssignmentOrder(A []int) {
 // Increment reads each element through the range value.
 //
 // @ Requires Forall k in [0, |A|) : A[k] < MaxInt
+// @ Modifies A
 func Increment(A []int) {
 	//@ Invariant Forall k in [0, i) : A[k] = old(A)[k] + 1
 	//@ Invariant Forall k in [i, |A|) : A[k] = old(A)[k]
@@ -144,6 +146,7 @@ func InfiniteLoop(n int) (i int) {
 // CallerSeesMutation relies on the callee's contract for the new contents.
 //
 // @ Requires |A| > 2 And 0 <= A[2] <= 1000
+// @ Modifies A
 func CallerSeesMutation(A []int) (x int) {
 	before := A[2]
 	setFirst(A, 9)
@@ -153,6 +156,7 @@ func CallerSeesMutation(A []int) (x int) {
 //@ Ensures x = 9
 
 // @ Requires |A| > 0
+// @ Modifies A
 func setFirst(A []int, value int) {
 	A[0] = value
 }
@@ -160,6 +164,8 @@ func setFirst(A []int, value int) {
 //@ Ensures A'[0] = value And Forall k in [1, |A|) : A'[k] = A[k]
 
 // LengthSurvivesCalls knows that no callee can change a caller's length.
+//
+// @ Modifies A
 func LengthSurvivesCalls(A []int) (n int) {
 	n = len(A)
 	scramble(A)

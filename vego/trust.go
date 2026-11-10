@@ -46,7 +46,7 @@ type trustEntry struct {
 	reason   string
 	requires []trustFormula
 	ensures  []trustFormula
-	modifies []string
+	modifies []trustFormula
 	file     *trustFile
 	line     int
 }
@@ -199,7 +199,7 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			entry.ensures = formulas("ensures", value)
 		case "modifies":
 			for _, item := range scalars("modifies", value) {
-				entry.modifies = append(entry.modifies, item.Value)
+				entry.modifies = append(entry.modifies, trustFormula{text: item.Value, line: item.Line, col: item.Column})
 			}
 		default:
 			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, requires, ensures, or modifies",
@@ -440,8 +440,8 @@ func declares(pkg *types.Package, name string) bool {
 // trustedContract returns the trusted contract of a function as a funcInfo,
 // or nil when it has none. A project entry replaces a shipped one. The
 // contract is checked against the real signature on first use: its names
-// must be parameters and results of the right types, modifies may only list
-// slice parameters, and the contract must not contradict itself.
+// must be parameters and results of the right types, modifies must list
+// what a caller can see change, and the contract must not contradict itself.
 func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 	if fn, done := pv.trusted[callee]; done {
 		return fn
@@ -485,14 +485,14 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 	for _, c := range slices.Concat(fn.requires, fn.ensures) {
 		c.res = pv.plain
 	}
-	fn.modifies = map[*types.Var]bool{}
-	for _, name := range entry.modifies {
-		param, ok := fn.paramNames[name]
-		if !ok || !isSlice(param.Type()) {
-			fn.defect("its modifies lists %s, which is not a slice parameter of the function", name)
+	for _, item := range entry.modifies {
+		targets, err := logic.ParseTargets(item.text)
+		if err != nil {
+			fn.defect("its modifies %q cannot be read: %v", item.text, err)
 			continue
 		}
-		fn.modifies[param] = true
+		c := &clause{kind: "modifies", text: item.text, pos: pv.trustPos(entry.file, item.line, item.col), res: pv.plain}
+		fn.modifies = append(fn.modifies, newModTargets(targets, c)...)
 	}
 	pv.checkTrusted(fn)
 	return fn
@@ -509,65 +509,15 @@ func (fn *funcInfo) defect(format string, args ...any) {
 // checkTrusted resolves a trusted contract against the function's signature
 // and rejects one that contradicts itself, from which anything would follow.
 func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
-	args := map[*types.Var]*logic.Term{}
-	post := map[*types.Var]*logic.Term{}
-	var facts []*logic.Term
-	for i, param := range fn.params {
-		sort, ok := sortOf(param.Type())
-		if !ok {
-			// A parameter of a type vego does not model has no value in
-			// the logic; a contract that mentions it is rejected.
-			continue
+	pv.run(fn, func(v *fnVerifier) {
+		v.lenient = true
+		v.misreadAs = func(c *clause, err error) { fn.defect("in its %s %q: %v", c.kind, c.text, err) }
+		_, outcome, _ := v.contractInstance(v.enter())
+		opts := solver.Options{Preds: pv.res.Preds, MaxSteps: pv.maxSteps}
+		if solver.Prove(outcome, logic.False(), opts) == solver.Proved {
+			fn.defect("it contradicts itself, so anything could be proved from it")
 		}
-		args[param] = logic.Const(fmt.Sprintf("in@%d", i), sort)
-		post[param] = args[param]
-		if fn.modifies[param] {
-			post[param] = logic.Const(fmt.Sprintf("out@%d", i), sort)
-			facts = append(facts, logic.Eq(logic.Len(post[param]), logic.Len(args[param])))
-		}
-		facts = append(facts, pv.valueFacts(args[param], param.Type()), pv.valueFacts(post[param], param.Type()))
-	}
-	results := make([]*logic.Term, len(fn.results))
-	for i, result := range fn.results {
-		if sort, ok := sortOf(result.Type()); ok {
-			results[i] = logic.Const(fmt.Sprintf("result@%d", i), sort)
-			facts = append(facts, pv.valueFacts(results[i], result.Type()))
-		}
-	}
-	resolve := func(c *clause, env *contractEnv) {
-		formula, err := pv.resolverOf(c).Formula(c.node, &partialEnv{env})
-		if err != nil {
-			fn.defect("in its %s %q: %v", c.kind, c.text, err)
-			return
-		}
-		facts = append(facts, formula)
-	}
-	for _, c := range fn.requires {
-		resolve(c, &contractEnv{pv: pv, fn: fn, args: args})
-	}
-	for _, c := range fn.ensures {
-		resolve(c, &contractEnv{pv: pv, fn: fn, args: args, post: post, results: results})
-	}
-	opts := solver.Options{Preds: pv.res.Preds, MaxSteps: pv.maxSteps}
-	if !fn.broken && solver.Prove(facts, logic.False(), opts) == solver.Proved {
-		fn.defect("it contradicts itself, so anything could be proved from it")
-	}
-}
-
-// valueFacts states everything a value's Go type guarantees, including, for
-// a slice or string, that every element is a value of the element type.
-func (pv *pkgVerifier) valueFacts(value *logic.Term, t types.Type) *logic.Term {
-	fact := pv.typeFact(value, t)
-	if !value.Sort.IsSeq() {
-		return fact
-	}
-	var elementType types.Type = types.Typ[types.Uint8]
-	if isSlice(t) {
-		elementType = t.Underlying().(*types.Slice).Elem()
-	}
-	index := logic.Bound("k#"+value.Name, logic.Int)
-	inRange := logic.And(logic.Le(logic.IntLit(0), index), logic.Lt(index, logic.Len(value)))
-	return logic.And(fact, logic.Forall(index, logic.Implies(inRange, pv.typeFact(logic.Select(value, index), elementType))))
+	})
 }
 
 // noteUse records that a proof relies on a trusted contract.

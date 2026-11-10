@@ -27,6 +27,29 @@ func (s seqValue) with(i, v int64) seqValue {
 type model struct {
 	ints map[string]int64
 	seqs map[string]seqValue
+	// maps holds the sequences of sequences, as total functions of the index.
+	maps map[string]func(index int64) seqValue
+}
+
+// table evaluates a sequence of sequences.
+func (m model) table(t *logic.Term) func(index int64) seqValue {
+	if t.Op == logic.OpConst {
+		return m.maps[t.Name]
+	}
+	if t.Op != logic.OpStore {
+		panic("unexpected sequence of sequences " + t.String())
+	}
+	base, written := m.table(t.Args[0]), m.seq(t.Args[2])
+	at, ok := m.eval(t.Args[1])
+	if !ok {
+		panic(divisionByZero{})
+	}
+	return func(index int64) seqValue {
+		if index == at {
+			return written
+		}
+		return base(index)
+	}
 }
 
 // eval computes the value of a ground term in a model. Booleans are 0 and 1.
@@ -122,6 +145,8 @@ func (m model) seq(t *logic.Term) seqValue {
 	switch t.Op {
 	case logic.OpConst:
 		return m.seqs[t.Name]
+	case logic.OpSelect:
+		return m.table(t.Args[0])(value(1))
 	case logic.OpStore:
 		return m.seq(t.Args[0]).with(value(1), value(2))
 	case logic.OpPush:
@@ -152,9 +177,20 @@ type generator struct {
 	vars  []*logic.Term
 }
 
+// table builds a sequence of sequences: a base, possibly with some of its
+// sequences replaced, which is the shape memory has in the verifier.
+func (g *generator) table(depth int) *logic.Term {
+	if depth > 0 && g.rng.IntN(2) == 0 {
+		return logic.Store(g.table(depth-1), g.intTerm(0), g.seq(depth-1))
+	}
+	return logic.Const("M", logic.SeqOf(logic.IntSeq))
+}
+
 func (g *generator) seq(depth int) *logic.Term {
 	base := logic.Const("A", logic.IntSeq)
 	switch {
+	case g.rng.IntN(6) == 0:
+		return logic.Select(g.table(depth), g.intTerm(0))
 	case depth > 0 && g.rng.IntN(4) == 0:
 		return logic.Store(g.seq(depth-1), g.intTerm(depth-1), g.intTerm(depth-1))
 	case depth > 0 && g.rng.IntN(8) == 0:
@@ -197,7 +233,7 @@ func (g *generator) intTerm(depth int) *logic.Term {
 func (g *generator) formula(depth int) *logic.Term {
 	if depth <= 0 || g.rng.IntN(3) == 0 {
 		a, b := g.intTerm(depth), g.intTerm(depth)
-		switch g.rng.IntN(11) {
+		switch g.rng.IntN(13) {
 		case 0, 1:
 			return logic.Le(a, b)
 		case 2, 3:
@@ -210,6 +246,8 @@ func (g *generator) formula(depth int) *logic.Term {
 			return g.boundedProduct()
 		case 8:
 			return g.joinedOrCut()
+		case 9, 10:
+			return g.nestedRead()
 		}
 		return logic.Const("p", logic.Bool)
 	}
@@ -263,6 +301,37 @@ func (g *generator) readOverWrite() *logic.Term {
 		return logic.Implies(logic.Ne(written, j), fact)
 	}
 	return fact
+}
+
+// nestedRead states a fact about a sequence read out of a sequence of
+// sequences: that a read of an updated table sees the written sequence or the
+// old one, or that two reads agree. Each is valid only for the right relation
+// between the indices, and the guard is sometimes missing or reversed.
+func (g *generator) nestedRead() *logic.Term {
+	table := g.table(1)
+	i, j, k, l := g.intTerm(0), g.intTerm(0), g.intTerm(0), g.intTerm(0)
+	guarded := func(same, fact *logic.Term) *logic.Term {
+		switch g.rng.IntN(4) {
+		case 0:
+			return logic.Implies(same, fact)
+		case 1:
+			return logic.Implies(logic.Not(same), fact)
+		}
+		return fact
+	}
+	if g.rng.IntN(3) == 0 {
+		// Two reads of one table agree when both indices do.
+		same := []*logic.Term{logic.Eq(i, j), logic.Eq(k, l), logic.And(logic.Eq(i, j), logic.Eq(k, l))}[g.rng.IntN(3)]
+		return guarded(same, logic.Eq(logic.Select(logic.Select(table, i), k), logic.Select(logic.Select(table, j), l)))
+	}
+	written := g.seq(1)
+	row := logic.Select(logic.Store(table, i, written), j)
+	old := logic.Select(table, j)
+	expected := []*logic.Term{written, old}[g.rng.IntN(2)]
+	if g.rng.IntN(3) == 0 {
+		return guarded(logic.Eq(i, j), logic.Eq(logic.Len(row), logic.Len(expected)))
+	}
+	return guarded(logic.Eq(i, j), logic.Eq(logic.Select(row, k), logic.Select(expected, k)))
 }
 
 // joinedOrCut states a fact about the length or an element of a
@@ -343,6 +412,12 @@ func counterexample(hyps []*logic.Term, goal *logic.Term) (found bool, descripti
 					m := model{
 						ints: map[string]int64{"x": x, "y": y, "z": z, "p": shape % 2},
 						seqs: map[string]seqValue{"A": {shape % 4, func(i int64) int64 { return (shape%3 + i*i) % 3 }}},
+						maps: map[string]func(int64) seqValue{"M": func(r int64) seqValue {
+							// Rows differ in length and content, and some
+							// rows coincide.
+							row := (r*r + shape) % 3
+							return seqValue{(row + shape/4) % 3, func(i int64) int64 { return (row*i + shape/6) % 3 }}
+						}},
 					}
 					refutes := true
 					for _, hyp := range hyps {
@@ -423,6 +498,42 @@ func TestExtremeCoefficients(t *testing.T) {
 			// Every hypothesis holds for x = 1, so x <= 0 does not follow.
 			if Prove([]*logic.Term{test.hyp}, logic.Le(x, zero), Options{}) == Proved {
 				t.Fatalf("proved x <= 0 from %v, which x = 1 satisfies", test.hyp)
+			}
+		})
+	}
+}
+
+// TestNilThroughMemory checks that whether an error read from memory is nil
+// follows the write it was read after: the same reference sees the written
+// error, and another reference sees what was there before.
+func TestNilThroughMemory(t *testing.T) {
+	memory := logic.Const("M", logic.SeqOf(logic.Err))
+	p, q := logic.Const("p", logic.Ref), logic.Const("q", logic.Ref)
+	failed := logic.Const("failed", logic.Err)
+	written := logic.Store(memory, p, logic.NilErr())
+	read := logic.IsNil(logic.Select(written, q))
+	tests := []struct {
+		name string
+		hyps []*logic.Term
+		goal *logic.Term
+		want Result
+	}{
+		{"same reference sees the nil written", []*logic.Term{logic.Eq(p, q)}, read, Proved},
+		{"other reference sees the old error", []*logic.Term{logic.Ne(p, q), logic.Not(logic.IsNil(logic.Select(memory, q)))}, logic.Not(read), Proved},
+		{"unknown reference may see either", []*logic.Term{logic.Not(logic.IsNil(logic.Select(memory, q)))}, read, Unknown},
+		{"unknown reference may see the old error", []*logic.Term{logic.Not(logic.IsNil(logic.Select(memory, q)))}, logic.Not(read), Unknown},
+		{
+			"a written error that is not nil is not nil when read back",
+			[]*logic.Term{logic.Not(logic.IsNil(failed))},
+			logic.Not(logic.IsNil(logic.Select(logic.Store(memory, p, failed), p))), Proved,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := Prove(test.hyps, test.goal, Options{})
+
+			if got != test.want {
+				t.Fatalf("Prove(%v, %v) = %v, want %v", test.hyps, test.goal, got, test.want)
 			}
 		})
 	}

@@ -55,9 +55,10 @@ func newAnalyzer() *analysis.Analyzer {
 		Doc: `verifies functions against their //@ specifications
 
 vego proves that functions annotated with //@ Requires, //@ Ensures,
-//@ Invariant, //@ Variant, //@ Measure, and //@ Assert comments meet their
-contracts, terminate, and cannot index out of bounds, divide by zero, or reach
-a panic. Functions without annotations are not analyzed. With the audit flag
+//@ Modifies, //@ Invariant, //@ Variant, //@ Measure, and //@ Assert comments
+meet their contracts, terminate, write only what they say they write, and
+cannot index out of bounds, follow a nil pointer, divide by zero, or reach a
+panic. Functions without annotations are not analyzed. With the audit flag
 it also reports postconditions weak enough for a degenerate implementation.`,
 		URL: "https://github.com/spachava753/laas#vego",
 	}
@@ -89,7 +90,6 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			funcs:        map[*types.Func]*funcInfo{},
 			reported:     map[string]bool{},
 			outcomes:     map[*funcInfo]*outcome{},
-			mutated:      map[*types.Var]bool{},
 			trusted:      map[*types.Func]*funcInfo{},
 			imported:     map[*types.Func]*funcInfo{},
 			foreign:      map[*types.Package]*logic.Resolver{},
@@ -164,13 +164,13 @@ type funcInfo struct {
 	resultNames map[string]int
 	broken      bool // an annotation failed to parse; verification is skipped
 	callees     []*funcInfo
+	// modifies lists what the function may write, from its Modifies clauses.
+	modifies []*modTarget
 	// trust is set for a function whose contract comes from a trust file
-	// instead of annotations; such a function is not verified. modifies
-	// holds the slice parameters that contract says it writes.
-	trust    *trustEntry
-	modifies map[*types.Var]bool
-	defects  []string  // what is wrong with a trusted or imported contract
-	use      *EntryUse // the report entry of a trusted contract in use
+	// instead of annotations; such a function is not verified.
+	trust   *trustEntry
+	defects []string  // what is wrong with a trusted or imported contract
+	use     *EntryUse // the report entry of a trusted contract in use
 	// imported is set for a function verified in another package, whose
 	// contract was published by that package.
 	imported *contractFact
@@ -182,7 +182,7 @@ type funcInfo struct {
 }
 
 func (f *funcInfo) annotated() bool {
-	return len(f.requires)+len(f.ensures)+len(f.body) > 0 || f.measure != nil
+	return len(f.requires)+len(f.ensures)+len(f.body)+len(f.modifies) > 0 || f.measure != nil
 }
 
 type pkgVerifier struct {
@@ -192,7 +192,6 @@ type pkgVerifier struct {
 	funcs    map[*types.Func]*funcInfo
 	order    []*funcInfo
 	reported map[string]bool
-	mutated  map[*types.Var]bool
 	maxSteps int
 	outcomes map[*funcInfo]*outcome
 	// projectTrust is the project's file of trusted contracts, trusted the
@@ -236,7 +235,7 @@ var (
 	annotationLine = regexp.MustCompile(`^//\s?@(\s*)(.*)$`)
 	clauseKinds    = map[string]bool{
 		"Requires": true, "Ensures": true, "Invariant": true, "Variant": true,
-		"Measure": true, "Predicate": true, "Assert": true,
+		"Measure": true, "Predicate": true, "Assert": true, "Modifies": true,
 	}
 	// plannedKinds are annotations of the VeGo paper that this implementation
 	// does not support yet.
@@ -297,7 +296,7 @@ func (pv *pkgVerifier) collect() {
 			for _, c := range extractClauses(group) {
 				if c.kind == "" {
 					pv.report(c.pos, "unknown annotation %q; an annotation starts with one of "+
-						"Requires, Ensures, Invariant, Variant, Measure, Assert, Predicate", c.text)
+						"Requires, Ensures, Modifies, Invariant, Variant, Measure, Assert, Predicate", c.text)
 					continue
 				}
 				if plannedKinds[c.kind] {
@@ -316,6 +315,19 @@ func (pv *pkgVerifier) collect() {
 					pv.predicateTexts = append(pv.predicateTexts, c.text)
 					continue
 				}
+				if c.kind == "Modifies" {
+					targets, err := logic.ParseTargets(c.text)
+					switch {
+					case err != nil:
+						pv.report(c.pos, "syntax error in Modifies annotation: %v", err)
+						if owner != nil {
+							owner.broken = true
+						}
+					case owner != nil:
+						owner.modifies = append(owner.modifies, newModTargets(targets, c)...)
+					}
+					continue
+				}
 				node, err := logic.ParseFormula(c.text)
 				if err != nil {
 					pv.report(c.pos, "syntax error in %s annotation: %v", c.kind, err)
@@ -331,7 +343,6 @@ func (pv *pkgVerifier) collect() {
 	for _, defineErr := range pv.res.Define(predicates) {
 		pv.report(predicateClauses[defineErr.Decl].pos, "%v", defineErr.Err)
 	}
-	pv.analyzeMutation()
 	pv.findSentinels()
 	for _, fn := range pv.order {
 		if fn.annotated() && pv.trustedContract(fn.obj) != nil {
@@ -373,11 +384,15 @@ func (pv *pkgVerifier) addFunc(decl *ast.FuncDecl) {
 
 // newFuncInfo describes a function by its signature, with the names
 // annotations and trusted contracts may use for its parameters and results.
+// The receiver of a method is its first parameter.
 func newFuncInfo(obj *types.Func) *funcInfo {
 	fn := &funcInfo{obj: obj, paramNames: map[string]*types.Var{}, resultNames: map[string]int{}}
 	sig := obj.Type().(*types.Signature)
-	for i := range sig.Params().Len() {
-		param := sig.Params().At(i)
+	inputs := slices.Collect(sig.Params().Variables())
+	if sig.Recv() != nil {
+		inputs = append([]*types.Var{sig.Recv()}, inputs...)
+	}
+	for _, param := range inputs {
 		fn.params = append(fn.params, param)
 		// A blank or unnamed parameter cannot be referred to.
 		if param.Name() != "" && param.Name() != "_" {
@@ -468,6 +483,7 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 		return nil
 	}
 	switch c.kind {
+	case "Modifies":
 	case "Requires":
 		fn.requires = append(fn.requires, c)
 	case "Ensures":
@@ -538,121 +554,6 @@ func (pv *pkgVerifier) reaches(from, to *funcInfo) bool {
 	return visit(from)
 }
 
-// analyzeMutation decides for every parameter whether its function may write
-// through it. A parameter is read-only when it only occurs as the operand of
-// len, as the sequence of a range loop, indexed for reading, or passed to a
-// function of this package that treats the matching parameter as read-only.
-// The last rule is a least fixed point over the call graph.
-func (pv *pkgVerifier) analyzeMutation() {
-	passedTo := map[*types.Var][]*types.Var{}
-	for _, fn := range pv.order {
-		if fn.decl.Body == nil {
-			for _, param := range fn.params {
-				pv.mutated[param] = true
-			}
-			continue
-		}
-		harmless := map[*ast.Ident]bool{}
-		read := func(e ast.Expr) *types.Var {
-			id, ok := ast.Unparen(e).(*ast.Ident)
-			if !ok {
-				return nil
-			}
-			harmless[id] = true
-			variable, _ := pv.info.Uses[id].(*types.Var)
-			return variable
-		}
-		var stack []ast.Node
-		ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
-			if n == nil {
-				stack = stack[:len(stack)-1]
-				return true
-			}
-			switch n := n.(type) {
-			case *ast.IndexExpr:
-				if readOnlyUse(n, stack) {
-					read(n.X)
-				}
-			case *ast.RangeStmt:
-				read(n.X)
-			case *ast.CallExpr:
-				if isBuiltin(pv.info, n, "len") {
-					read(n.Args[0])
-				}
-				callee := pv.funcs[typeutil.StaticCallee(pv.info, n)]
-				for i, arg := range n.Args {
-					if callee == nil || i >= len(callee.params) {
-						break
-					}
-					if variable := read(arg); variable != nil {
-						passedTo[variable] = append(passedTo[variable], callee.params[i])
-					}
-				}
-			}
-			stack = append(stack, n)
-			return true
-		})
-		ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
-			if id, ok := n.(*ast.Ident); ok && !harmless[id] {
-				if variable, ok := pv.info.Uses[id].(*types.Var); ok {
-					pv.mutated[variable] = true
-				}
-			}
-			return true
-		})
-	}
-	for changed := true; changed; {
-		changed = false
-		for variable, targets := range passedTo {
-			if !pv.mutated[variable] && slices.ContainsFunc(targets, func(t *types.Var) bool { return pv.mutated[t] }) {
-				pv.mutated[variable], changed = true, true
-			}
-		}
-	}
-}
-
-// readOnlyUse reports whether an element expression is only read. Every
-// context that can write through it, or hand out its address, counts as a
-// write: assignment and range targets, increments, the address operator, and
-// selectors, which may call a pointer method on the element.
-func readOnlyUse(element *ast.IndexExpr, ancestors []ast.Node) bool {
-	var use ast.Node = element
-	for i := len(ancestors) - 1; i >= 0; i-- {
-		parent := ancestors[i]
-		switch parent := parent.(type) {
-		case *ast.ParenExpr:
-			use = parent
-			continue
-		case *ast.AssignStmt:
-			return !slices.Contains(parent.Lhs, use.(ast.Expr))
-		case *ast.RangeStmt:
-			return parent.Key != use && parent.Value != use
-		case *ast.IncDecStmt, *ast.SelectorExpr, *ast.SliceExpr:
-			return false
-		case *ast.IndexExpr:
-			return parent.X != use
-		case *ast.UnaryExpr:
-			return parent.Op != token.AND
-		}
-		return true
-	}
-	return true
-}
-
-// mutates reports whether a function may write to the elements of a slice
-// parameter. Only functions that are themselves verified can be known to
-// leave a slice alone; every other callee is assumed to write it.
-func (pv *pkgVerifier) mutates(fn *funcInfo, param *types.Var) bool {
-	if fn != nil && fn.trust != nil {
-		return fn.modifies[param]
-	}
-	if fn != nil && fn.imported != nil {
-		index := slices.Index(fn.params, param)
-		return index < 0 || index >= len(fn.imported.Mutated) || fn.imported.Mutated[index]
-	}
-	return fn == nil || !fn.annotated() || fn.broken || pv.mutated[param]
-}
-
 func isBuiltin(info *types.Info, call *ast.CallExpr, name string) bool {
 	id, ok := ast.Unparen(call.Fun).(*ast.Ident)
 	if !ok {
@@ -660,33 +561,4 @@ func isBuiltin(info *types.Info, call *ast.CallExpr, name string) bool {
 	}
 	builtin, ok := info.Uses[id].(*types.Builtin)
 	return ok && builtin.Name() == name
-}
-
-// sortOf maps a Go type to the logical sort that models it.
-func sortOf(t types.Type) (logic.Sort, bool) {
-	if t == nil {
-		return 0, false
-	}
-	basic := func(t types.Type) (logic.Sort, bool) {
-		b, ok := t.Underlying().(*types.Basic)
-		switch {
-		case ok && b.Info()&types.IsInteger != 0 && b.Kind() != types.Uintptr:
-			return logic.Int, true
-		case ok && b.Info()&types.IsBoolean != 0:
-			return logic.Bool, true
-		case ok && b.Info()&types.IsFloat != 0:
-			return logic.Float, true
-		}
-		return 0, false
-	}
-	switch {
-	case types.Identical(t, types.Universe.Lookup("error").Type()):
-		return logic.Err, true
-	case isSlice(t):
-		elem, ok := basic(t.Underlying().(*types.Slice).Elem())
-		return logic.SeqOf(elem), ok
-	case isString(t):
-		return logic.IntSeq, true
-	}
-	return basic(t)
 }

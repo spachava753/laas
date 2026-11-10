@@ -14,19 +14,28 @@ Design choices should be judged against the first group. A feature that only hel
 
 ### Structs and pointers
 
-Needed before vego is usable on real code. The open design question is aliasing: two pointers may refer to the same struct, so a write through one can change what the other reads. The paper assumes pointer structures are unshared trees; vego so far rejects aliasing instead of assuming it away, and the same choice has to be made here.
+Built: the memory model, structs as values, pointers to structs, methods, `Modifies` clauses checked in both directions, nil checks, slices that share arrays (assignment, slicing, `append` in place or moving), `fresh` and `within`, trusted contracts for methods and for functions returning pointers and slices, and contracts with `Modifies` across packages.
 
-Decided so far:
-
-- **`Modifies` is declared, and checked in both directions.** A function lists what it may write. A write in the body to anything unlisted is an error, and so is a listed target the body can never write, so the declaration cannot drift from the body. Callers know that everything unlisted is unchanged.
-- **Trusted `modifies` is checked against source where possible.** For a trusted function whose source is available, vego analyses the body and reports an error when it finds a write the entry does not declare. This catches some wrong entries; it cannot certify an entry, because the analysis stops at assembly, `unsafe`, and calls through interfaces or function values. The trust report says for each entry whether the check ran to completion.
+Decisions:
 
 - **Sharing is reasoned about, not forbidden.** The verifier models memory as a whole. Where two pointers may refer to the same struct it considers both cases, so a contract must hold when they are equal or require that they differ.
-- **Slices move to the same model.** This lifts the current restrictions on assigning one slice to another, sub-slicing, and returning a slice parameter, and means reworking the slice handling already built. To keep simple array code simple, distinct slice parameters are required not to overlap unless the function says otherwise, and the verifier proves that at every call.
-- **Order of work.** First plain structs, pointer receivers and methods, nested structs, and structs holding slices. Then maps, which fit the same model. Linked structures such as lists and trees, where a function may modify an unbounded chain of nodes, are deferred.
-- **Nil.** Every dereference carries a proof obligation that the pointer is not nil. The verifier generates and discharges it; the user writes nothing at the dereference.
-- **Rejected at first.** Pointers into the middle of a value (`&A[i]`, `&p.Field`).
-- **Deferred.** Interfaces other than `error`.
+- **Memory is split by type and field.** There is one region for each field of each struct type, holding that field for every object of the type, and one for each element type of a slice. Regions cannot overlap, which is sound because no pointer into the middle of an object can be made: the only address that can be taken is that of a new struct.
+- **`Modifies` is declared, and checked in both directions.** A function lists what it may write, as paths from its parameters read on entry. A write to anything else that existed on entry is an error, and so is a listed entry that no write needs, so the declaration cannot drift from the body. Callers know that everything unlisted is unchanged. Whether an entry is needed is decided by a quick proof attempt for each write; when that attempt is inconclusive the entry counts as needed.
+- **A slice entry covers the capacity.** `Modifies A` allows writing every element up to the capacity of `A`, because an `append` to `A` may write there. Callers lose what they knew about that stretch, and cut the capacity with `A[:n:n]` to keep the rest. A finer entry that stops at the length, for functions that never append, is possible later.
+- **Slice parameters of one element type do not overlap**, capacities included: assumed on entry, proved at every call. There is no way yet for a function to say that it tolerates overlap.
+- **Nil.** Every dereference carries a proof obligation that the pointer is not nil. The verifier generates and discharges it; the user writes `Requires p != nil` for parameters and nothing at the dereference.
+- **`append` forks.** Whether an append writes in place or moves the slice is decided by the capacity, which is often unknown, so execution continues once for each outcome. That is why an append has to be a whole right-hand side or a returned value.
+- **Loops forget memory by region.** A region the loop writes gets a new unknown value. If every write to it goes through a variable the loop does not assign, or through a slice the loop only appends to, everything else that existed before the loop is known to be unchanged. Otherwise only what existed on entry and is not listed in `Modifies` is known to be unchanged.
+- **Where a pointer or slice comes from is stated with `fresh` and `within`.** A function that returns something new says `fresh(result)`; one that appends to a slice it holds says `fresh(s.items) Or within(s.items', s.items)`. Without such a clause the caller knows nothing about what the value may share.
+
+Not built yet:
+
+- **Checking a trusted `modifies` against source.** For a trusted function whose source is available, analyse the body and report a write the entry does not declare. This catches some wrong entries; it cannot certify one, because the analysis stops at assembly, `unsafe`, and calls through interfaces or function values. The trust report should say for each entry whether the check ran to completion.
+- **The address of a local variable or of a field** (`&x`, `&p.Field`, `&A[i]`), and pointers to anything but a struct. Methods with a pointer receiver can therefore only be called on a pointer.
+- **Linked structures** such as lists and trees. They can be built and read, but a loop that walks one forgets every node the function may modify, and there is no way to state an invariant over all nodes.
+- **Interfaces** other than `error`, function values, arrays, `append(s, t...)`, `copy`, and comparing structs.
+- **Letting a function accept overlapping slices.**
+- **Runs of elements in `Modifies`**, such as all the structs a slice of pointers refers to.
 
 ### Struct invariants
 
@@ -36,10 +45,11 @@ Decisions:
 - **Shorthand for contract clauses at every boundary.** The invariant is assumed on entry for every parameter and receiver of the type, proved on return for those and for every result of the type, and proved at each call for every argument. Between those points it may be broken. It is only ever assumed where a caller has proved it, so it adds no trust.
 - **Always enforced, for every function, with no opt-out.** An opt-out would let the invariant be switched off function by function while the type still advertises it. A helper that must run while the invariant is broken takes the fields it needs instead of the struct, or the caller restores the invariant before calling it. Revisit only if real code cannot be restructured that way.
 - **Best on a struct's own fields.** An invariant may mention what a pointer field points to, but any call that might modify that target makes the verifier forget the invariant. Ownership between structs is deferred with linked structures.
+- **Likely to absorb the boilerplate about slices a struct holds.** With the memory model as built, a method that appends to `s.items` has to promise `fresh(s.items) Or within(s.items', s.items)` so that the next call may write the slice again. An invariant that says a struct owns the array of its slice would state that once.
 
 ### Trusted contracts for unproved code
 
-Built: the trust file and its checks, the rule that a call needs a contract, the shipped contracts with their tests, and the trust report (`laas -vego.trust`). Not built yet: checking a trusted `modifies` against the function's source, contracts for methods and for functions that return slices (both wait for the memory model), contracts for variables such as `io.EOF`, and running the shipped-contract tests on several Go versions.
+Built: the trust file and its checks, the rule that a call needs a contract, contracts for functions and methods, the shipped contracts with their tests, and the trust report (`laas -vego.trust`). Not built yet: checking a trusted `modifies` against the function's source, contracts for variables such as `io.EOF`, and running the shipped-contract tests on several Go versions.
 
 Contracts of verified functions cross package boundaries as analysis facts, together with the predicates of their package; the predicates of different packages are kept apart by a prefix.
 
@@ -50,10 +60,11 @@ Verified code has to call code that cannot be verified: the standard library, th
 Decisions:
 
 - **One file, no in-source trust.** Contracts for unproved code live in `vego-trusted.yaml` next to `go.mod`. There is no in-source `Trusted` marker and no `Assume`, so every assumption is a diff in one conspicuous file. A function with both `//@` annotations and an entry is an error.
-- **Entry format.** The key is the function's full name as Go prints it (`sort.Ints`, `(*bytes.Buffer).Len`). Fields: `reason` (mandatory free text saying why the contract is believed), `requires`, `ensures`, and `modifies` (slice parameters the function writes; anything unlisted is assumed untouched). Formulas use the `//@` language. Parameter names come from the real signature; there is no override.
+- **Entry format.** The key is the function's full name as Go prints it (`sort.Ints`, `(*bytes.Buffer).Len`). Fields: `reason` (mandatory free text saying why the contract is believed), `requires`, `ensures`, and `modifies` (what the function may write, in the form of a `Modifies` clause; anything unlisted is assumed untouched). Formulas use the `//@` language. Parameter names come from the real signature; there is no override.
 - **Result names.** Named results keep their names. A single unnamed result is `result`; several are `result1`, `result2`, ...
 - **No contract, no call.** Verified code that calls a function with neither annotations nor an entry is an error, never silent trust. When in doubt, vego takes the loudest path: agents loop on its output, so anything quiet gets exploited.
-- **Checks on the file.** The function exists, every name is a parameter or result of the right type, `modifies` names slice parameters, and no contract contradicts itself.
+- **Checks on the file.** The function exists, every name is a parameter or result of the right type, `modifies` names memory a caller can see, and no contract contradicts itself.
+- **What a trusted function is trusted with besides its contract.** It returns without panicking when its `requires` hold, writes nothing a caller can see beyond its `modifies`, keeps no pointer or slice it was given, and returns no pointer into the middle of a struct or array. The last one is what keeps the split of memory by type and field sound.
 - **Shipped contracts.** Standard-library contracts are YAML files in this repository, one per package, embedded in the binary. A project entry replaces a shipped one. They state documented behaviour only, written from the documentation of the oldest supported Go version; the Go 1 compatibility promise then keeps them true on every later version, so there are no per-version variants. Each is tested against the real function on random inputs, on every supported toolchain once CI exists.
 - **Not shipped.** Contracts for third-party modules, which carry no such promise.
 - **Trust report.** `laas -vego.trust ./...` prints the project entries, the shipped entries in use, and unused entries.
@@ -146,4 +157,4 @@ A further step, deliberately not planned, is modelling the world's state as an i
 - The `Preserves`, `Immutable`, and `Cost` annotations.
 - Mutation-based candidates for the specification audit.
 - Counterexamples in diagnostics.
-- Strings and maps.
+- Maps.

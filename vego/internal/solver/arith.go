@@ -147,18 +147,130 @@ func (a poly) key() string {
 	return b.String()
 }
 
-// infeasible reports whether the constraints eq = 0 and le <= 0 have no
-// integer solution. It eliminates equalities by substitution and inequalities
-// by Fourier–Motzkin elimination, tightening every derived inequality to the
-// integers. The answer true is always correct; false means "not refuted".
-//
-// The elimination runs on 64-bit numbers when the constraints fit and nothing
-// overflows, and is repeated with arbitrary precision otherwise.
-func (p *prover) infeasible(eqs, les []poly) bool {
+// system is a set of arithmetic constraints: each eq = 0 and each le <= 0.
+type system struct{ eqs, les []poly }
+
+// partition is the arithmetic facts of a branch, split into systems that
+// share no unknown. Constraints in different systems cannot contradict each
+// other, so each system is decided on its own, which keeps the eliminations
+// small however many unrelated facts a proof carries.
+type partition struct {
+	find    func(mono string) string
+	systems map[string]*system
+	order   []string
+}
+
+// parts returns the partition of the arithmetic facts of a branch. It is
+// kept until a fact is added.
+func (p *prover) parts(b *branch) *partition {
+	if b.parts != nil {
+		return b.parts
+	}
+	part := &partition{find: groups(b.eqs, b.les), systems: map[string]*system{}}
+	for i, group := range [][]poly{b.eqs, b.les} {
+		for _, pl := range group {
+			root := ""
+			for mono := range pl.m {
+				root = part.find(mono)
+				break
+			}
+			if part.systems[root] == nil {
+				part.systems[root] = &system{}
+				part.order = append(part.order, root)
+			}
+			if i == 0 {
+				part.systems[root].eqs = append(part.systems[root].eqs, pl)
+			} else {
+				part.systems[root].les = append(part.systems[root].les, pl)
+			}
+		}
+	}
+	b.parts = part
+	return part
+}
+
+// infeasible reports whether the arithmetic facts of a branch have no
+// integer solution. The answer true is always correct; false means "not
+// refuted".
+func (p *prover) infeasible(b *branch) bool {
+	p.step()
+	part := p.parts(b)
+	for _, root := range part.order {
+		if p.eliminate(part.systems[root].eqs, part.systems[root].les) {
+			return true
+		}
+	}
+	return false
+}
+
+// contradicts reports whether one more constraint, pl = 0 or pl <= 0, has no
+// integer solution together with the arithmetic facts of a branch. Only the
+// facts connected to the constraint are consulted: the others were found
+// feasible when the branch was last examined, and the constraint cannot
+// change that.
+func (p *prover) contradicts(b *branch, pl poly, equality bool) bool {
+	p.step()
+	part := p.parts(b)
+	var eqs, les []poly
+	joined := map[string]bool{}
+	for mono := range pl.m {
+		root := part.find(mono)
+		if sys := part.systems[root]; sys != nil && !joined[root] {
+			eqs, les = append(eqs, sys.eqs...), append(les, sys.les...)
+		}
+		joined[root] = true
+	}
+	if equality {
+		eqs = append(eqs, pl)
+	} else {
+		les = append(les, pl)
+	}
+	return p.eliminate(eqs, les)
+}
+
+// step counts one arithmetic check against the budget of the proof.
+func (p *prover) step() {
 	p.steps++
 	if p.steps > p.maxSteps {
 		panic(giveUp{})
 	}
+}
+
+// groups joins the unknowns that occur together in a constraint, directly
+// or through other constraints, and returns the function that maps an
+// unknown to the representative of its group.
+func groups(eqs, les []poly) (find func(mono string) string) {
+	parent := map[string]string{}
+	find = func(mono string) string {
+		up, ok := parent[mono]
+		if !ok || up == mono {
+			parent[mono] = mono
+			return mono
+		}
+		root := find(up)
+		parent[mono] = root
+		return root
+	}
+	for _, group := range [][]poly{eqs, les} {
+		for _, pl := range group {
+			anchor := ""
+			for mono := range pl.m {
+				if anchor == "" {
+					anchor = mono
+				}
+				parent[find(mono)] = find(anchor)
+			}
+		}
+	}
+	return find
+}
+
+// eliminate decides whether constraints have no integer solution. It
+// eliminates equalities by substitution and inequalities by Fourier–Motzkin
+// elimination, tightening every derived inequality to the integers. The
+// elimination runs on 64-bit numbers when the constraints fit and nothing
+// overflows, and is repeated with arbitrary precision otherwise.
+func (p *prover) eliminate(eqs, les []poly) bool {
 	columns := map[string]int{}
 	for _, group := range [][]poly{eqs, les} {
 		for _, pl := range group {

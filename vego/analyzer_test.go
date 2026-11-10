@@ -134,7 +134,7 @@ func TestAnalyzer(t *testing.T) {
 
 		runCorpus(t, analyzer,
 			"paper", "algorithms", "defects", "rejected", "leetcode", "semantics", "effects", "integers", "values", "trust",
-			"lib", "client")
+			"lib", "client", "memory")
 	})
 
 	t.Run("refuses a trust file with a defect", func(t *testing.T) {

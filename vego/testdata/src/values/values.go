@@ -163,6 +163,8 @@ func CheckedBucket(counts []int, ratio float64) int {
 }
 
 // Scale stores floats in a slice; only its length is tracked.
+//
+// @ Modifies xs
 func Scale(xs []float64, factor float64) {
 	for i := range xs {
 		xs[i] *= factor
@@ -360,7 +362,7 @@ func (n numbers) String() string {
 //
 // @ Requires |a| = 1 And a[0] = 0
 func Stale(a numbers) int {
-	_ = fmt.Errorf("%s", a) // want `vego:\ cannot\ verify\ Stale:\ formatting\ a\ value\ of\ type\ values\.numbers\ would\ call\ its\ methods,\ which\ are\ not\ verified`
+	_ = fmt.Errorf("%s", a) // want `vego:\ cannot\ verify\ Stale:\ formatting\ a\ value\ of\ type\ values\.numbers\ may\ call\ methods,\ which\ are\ not\ verified,\ or\ follow\ pointers`
 	return a[0]
 }
 

@@ -280,10 +280,13 @@ func TestShippedContracts(t *testing.T) {
 					if call.after == nil {
 						call.after = call.before
 					}
-					env := &contractEnv{pv: pv, fn: fn, args: map[*types.Var]*logic.Term{}, post: map[*types.Var]*logic.Term{}}
+					env := &specEnv{
+						v: &fnVerifier{pkgVerifier: pv, fn: fn}, fn: fn,
+						given: map[*types.Var]*logic.Term{}, givenPost: map[*types.Var]*logic.Term{},
+					}
 					eval := &evaluator{bindings: map[string]*big.Int{}}
 					for i, param := range fn.params {
-						env.args[param], env.post[param] = groundTerm(call.before[i]), groundTerm(call.after[i])
+						env.given[param], env.givenPost[param] = groundTerm(call.before[i]), groundTerm(call.after[i])
 						if text, ok := call.before[i].(string); ok {
 							eval.bound = max(eval.bound, int64(len(text))+2)
 						}
@@ -293,7 +296,7 @@ func TestShippedContracts(t *testing.T) {
 					}
 					satisfied := true
 					for _, c := range fn.requires {
-						formula, err := pv.res.Formula(c.node, &contractEnv{pv: pv, fn: fn, args: env.args})
+						formula, err := pv.res.Formula(c.node, env)
 						if err != nil {
 							t.Fatalf("requires %q: %v", c.text, err)
 						}
@@ -304,7 +307,7 @@ func TestShippedContracts(t *testing.T) {
 					}
 					checked++
 					for _, result := range call.results {
-						env.results = append(env.results, groundTerm(result))
+						env.givenResults = append(env.givenResults, groundTerm(result))
 						if text, ok := result.(string); ok {
 							eval.bound = max(eval.bound, int64(len(text))+2)
 						}

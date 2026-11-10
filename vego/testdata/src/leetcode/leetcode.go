@@ -52,6 +52,7 @@ func TwoSumSameIndex(A []int, target int) (i, j int, found bool) {
 // number of distinct values, which end up strictly increasing at the front.
 //
 // @ Requires ascending(A)
+// @ Modifies A
 func RemoveDuplicates(A []int) (k int) {
 	if len(A) == 0 {
 		return 0
@@ -77,6 +78,7 @@ func RemoveDuplicates(A []int) (k int) {
 // RemoveDuplicatesOffByOne writes one slot too far.
 //
 // @ Requires ascending(A)
+// @ Modifies A
 func RemoveDuplicatesOffByOne(A []int) (k int) {
 	if len(A) == 0 {
 		return 0
@@ -184,6 +186,8 @@ func SearchStagnates(A []int, target int) (index int) {
 }
 
 // SelectionSort sorts in place by repeatedly selecting the minimum.
+//
+// @ Modifies A
 func SelectionSort(A []int) {
 	//@ Invariant 0 <= i <= |A|
 	//@ Invariant Forall p in [0, i) : Forall q in [p, |A|) : A[p] <= A[q]
@@ -206,6 +210,8 @@ func SelectionSort(A []int) {
 
 // Partition moves the elements below pivot to the front (Dutch flag, two
 // colours) and returns the boundary.
+//
+// @ Modifies A
 func Partition(A []int, pivot int) (boundary int) {
 	//@ Invariant 0 <= boundary <= i <= |A|
 	//@ Invariant A[0:boundary) < pivot And A[boundary:i) >= pivot

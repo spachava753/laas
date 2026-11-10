@@ -178,3 +178,26 @@ trusted:
       - "|a| = 65"
     ensures:
       - "a[0] >= 0 -> err = nil"
+
+  (*memory.Log).Write:
+    reason: Test helper standing for a method that appends to its receiver and may fail.
+    modifies: [l]
+    ensures:
+      - "err = nil -> l.count' = l.count + 1"
+      - "err != nil -> l.count' = l.count"
+
+  (*memory.Log).Count:
+    reason: Test helper standing for a method that only reads its receiver.
+    requires:
+      - "l != nil"
+    ensures:
+      - "result = l.count"
+
+  memory.newLog:
+    reason: Test helper standing for a constructor.
+    ensures:
+      - "fresh(result) And result.count = 0"
+
+  memory.grab:
+    reason: Test helper whose modifies names something that is not there.
+    modifies: [l.missing]

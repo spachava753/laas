@@ -148,6 +148,7 @@ func touch(A []int) {
 }
 
 // @ Requires |A| > 0 And A[0] = 1
+// @ Modifies A
 func ForgetsAfterCall(A []int) (x int) {
 	touch(A)
 	return A[0] // want `vego:\ postcondition\ may\ not\ hold:\ x\ =\ 1`
@@ -156,6 +157,7 @@ func ForgetsAfterCall(A []int) (x int) {
 //@ Ensures x = 1
 
 // @ Requires |A| > 0
+// @ Modifies A
 func EntryVersusExit(A []int) {
 	A[0] = 5
 } // want `vego:\ postcondition\ may\ not\ hold:\ A\[0\]\ =\ 5`
@@ -188,6 +190,7 @@ func NoVariant(n int) (i int) {
 	return i
 }
 
+// @ Modifies A
 func SortWrongWay(A []int) {
 	//@ Invariant 1 <= i
 	//@ Invariant Forall a in [0, i) : Forall b in [a, i) : b < |A| -> A[a] <= A[b]
@@ -205,6 +208,7 @@ func SortWrongWay(A []int) {
 	}
 }
 
+// @ Modifies A
 func FrameTooStrong(A []int, i int) {
 	if 0 <= i && i < len(A) {
 		A[i] = 0

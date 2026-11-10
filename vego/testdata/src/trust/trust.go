@@ -82,6 +82,7 @@ func readOnly(src []int) int { return len(src) }
 // Filled uses what the trusted contract says about the slice afterwards.
 //
 // @ Requires |A| > 0
+// @ Modifies A
 func Filled(A []int) (first int) {
 	fill(A, 7)
 	return A[0]
@@ -117,7 +118,7 @@ func wrongModifies(count int) {}
 // UsesWrongModifies relies on a contract whose modifies makes no sense.
 func UsesWrongModifies() {
 	//@ Assert True
-	wrongModifies(1) // want `vego:\ cannot\ verify\ UsesWrongModifies:\ wrongModifies\ has\ a\ contract\ that\ could\ not\ be\ understood` `vego:\ the\ trusted\ contract\ of\ trust\.wrongModifies\ \(trusted\.yaml:65\)\ cannot\ be\ used:\ its\ modifies\ lists\ count,\ which\ is\ not\ a\ slice\ parameter\ of\ the\ function`
+	wrongModifies(1) // want `vego:\ cannot\ verify\ UsesWrongModifies:\ wrongModifies\ has\ a\ contract\ that\ could\ not\ be\ understood` `vego:\ the\ trusted\ contract\ of\ trust\.wrongModifies\ \(trusted\.yaml:65\)\ cannot\ be\ used:\ in\ its\ modifies\ \"count\":\ count\ is\ passed\ by\ value,\ so\ the\ caller\ cannot\ see\ a\ change\ to\ it`
 }
 
 func wrongName(count int) int { return count }
@@ -131,10 +132,19 @@ func UsesWrongName() (n int) {
 
 func makesSlice() []int { return nil }
 
-// UsesTrustedSlice gets a slice from a trusted function.
+// UsesTrustedSlice gets a slice from a trusted function. Nothing is known of
+// the slice but what every slice guarantees.
 func UsesTrustedSlice() (n int) {
-	s := makesSlice() // want `vego:\ cannot\ verify\ UsesTrustedSlice:\ makesSlice\ returns\ a\ slice;\ a\ trusted\ contract\ cannot\ yet\ say\ that\ the\ slice\ shares\ no\ storage`
+	s := makesSlice()
 	return len(s)
+}
+
+//@ Ensures n >= 0
+
+// ReadsTrustedSlice assumes the slice has an element.
+func ReadsTrustedSlice() (n int) {
+	s := makesSlice()
+	return s[0] // want `vego: index may be out of range` `vego: postcondition may not hold: n >= 0`
 }
 
 //@ Ensures n >= 0
@@ -149,6 +159,7 @@ func Verified() int { // want `vego:\ Verified\ has\ //@\ annotations\ and\ a\ t
 // Sorted relies on the shipped contract of sort.Ints.
 //
 // @ Requires |A| >= 2
+// @ Modifies A
 func Sorted(A []int) (ordered bool) {
 	sort.Ints(A)
 	return A[0] <= A[1]
@@ -275,6 +286,7 @@ func AlwaysFailsAfterReadyWith(a []int) error { // want `the contract of AlwaysF
 // length of a slice it may write, which a call cannot change.
 //
 // @ Requires |a| = 1
+// @ Modifies a
 func AlwaysFailsAfterReadyWriting(a []int) error { // want `the contract of AlwaysFailsAfterReadyWriting would also be met by a function that always returns an error`
 	_ = readyWriting(a)
 	return errAlways
@@ -322,6 +334,7 @@ func readyBytes(a []byte) (err error) { return nil }
 // slice it may write; the element is a byte whatever it writes.
 //
 // @ Requires |a| = 1
+// @ Modifies a
 func AlwaysFailsAfterReadyBytes(a []byte) error { // want `the contract of AlwaysFailsAfterReadyBytes would also be met by a function that always returns an error`
 	_ = readyBytes(a)
 	return errAlways

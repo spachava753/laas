@@ -62,6 +62,8 @@ func ContainsExactly(A []int, target int) (found bool) {
 //@ Predicate ascending(A) ::= Forall i in [0, |A|) : Forall j in [i, |A|) : A[i] <= A[j]
 
 // Sort promises a sorted slice but not that it holds the input's elements.
+//
+// @ Modifies A
 func Sort(A []int) { // want `vego:\ specification\ of\ Sort\ has\ a\ hole\ \[CONSTANT\]:\ it\ also\ accepts\ an\ implementation\ that\ fills\ its\ slices\ with\ zero\ values` `vego:\ specification\ of\ Sort\ has\ a\ hole\ \[OBLIVIOUS\]:\ it\ also\ accepts\ an\ implementation\ that\ fills\ its\ slices\ with\ 0,\ 1,\ 2,\ \.\.\.\ whatever\ the\ input`
 	//@ Invariant 0 <= i <= |A|
 	//@ Invariant Forall p in [0, i) : Forall q in [p, |A|) : A[p] <= A[q]
@@ -109,6 +111,7 @@ func Tail(A []int) (R []int) { // want `vego:\ specification\ of\ Tail\ has\ a\ 
 // a candidate that gave b the length of a would report a false hole.
 //
 // @ Requires |a| = 1 And |b| = 2
+// @ Modifies b
 func SetSecond(a, b []int) {
 	b[0] = 1
 }
@@ -137,6 +140,7 @@ func Shrink(x int) (y int8) { // want `vego:\ specification\ of\ Shrink\ has\ a\
 // SetLast cannot be imitated by counting 0, 1, 2, ...: a byte cannot hold 299.
 //
 // @ Requires |a| = 300
+// @ Modifies a
 func SetLast(a []byte, x byte) {
 	a[299] = x
 }
@@ -146,6 +150,7 @@ func SetLast(a []byte, x byte) {
 // SetLastShort can: every index of a slice of 100 bytes fits a byte.
 //
 // @ Requires |a| = 100
+// @ Modifies a
 func SetLastShort(a []byte, x byte) { // want `vego:\ specification\ of\ SetLastShort\ has\ a\ hole\ \[OBLIVIOUS\]:\ it\ also\ accepts\ an\ implementation\ that\ fills\ its\ slices\ with\ 0,\ 1,\ 2,\ \.\.\.\ whatever\ the\ input`
 	a[99] = x
 }
@@ -156,6 +161,7 @@ func SetLastShort(a []byte, x byte) { // want `vego:\ specification\ of\ SetLast
 // so the counting candidate must not be reported.
 //
 // @ Requires |a| = 300 And a[0] = 1
+// @ Modifies a
 func Update(a []int, x string) string {
 	a[0] = 0
 	return x

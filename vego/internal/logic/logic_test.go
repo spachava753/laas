@@ -8,23 +8,61 @@ import (
 
 type testEnv map[string]*Term
 
-func (e testEnv) Var(name string, primed bool) (*Term, error) {
-	if primed {
+// Path looks a path up by its spelling: fields are part of the name, and
+// elements are read from whatever the name denotes.
+func (e testEnv) Path(root string, steps []Step, when When) (*Term, error) {
+	name := root
+	var indices []*Term
+	measured := false
+	for _, step := range steps {
+		switch {
+		case step.Len:
+			measured = true
+		case step.Field != "":
+			name += "." + step.Field
+		default:
+			indices = append(indices, step.Index)
+		}
+	}
+	switch when {
+	case Primed:
 		name += "'"
+	case Old:
+		name = "old " + name
 	}
-	if t, ok := e[name]; ok {
-		return t, nil
+	t, ok := e[name]
+	if !ok {
+		return nil, fmt.Errorf("unknown name %s", name)
 	}
-	return nil, fmt.Errorf("unknown name %s", name)
+	for _, index := range indices {
+		if !t.Sort.IsSeq() {
+			return nil, fmt.Errorf("%s has type %s, not a slice", t, t.Sort)
+		}
+		t = Select(t, index)
+	}
+	if measured {
+		if !t.Sort.IsSeq() {
+			return nil, fmt.Errorf("%s has type %s, not a slice", t, t.Sort)
+		}
+		return Len(t), nil
+	}
+	return t, nil
 }
 
-func (e testEnv) Old(name string) (*Term, error) { return e.Var("old "+name, false) }
+func (e testEnv) Relation(name string, paths []Path) (*Term, error) {
+	for _, path := range paths {
+		name += " " + path.Root + map[When]string{Primed: "'"}[path.When]
+	}
+	return Pred(name), nil
+}
 
 func TestResolve(t *testing.T) {
 	env := testEnv{
 		"A": Const("A", IntSeq), "A'": Const("A1", IntSeq), "old A": Const("A0", IntSeq),
 		"i": Const("i", Int), "j": Const("j", Int), "n": Const("n", Int),
 		"found": Const("found", Bool), "flags": Const("flags", BoolSeq),
+		"s.count": Const("count0", Int), "s.count'": Const("count1", Int), "old s.count": Const("count0", Int),
+		"s.items'": Const("items1", IntSeq), "p": Const("p", Ref), "q": Const("q", Ref),
 	}
 	resolver := NewResolver()
 	sumTo, err := ParsePredicate("sumTo(A, i, s) ::= ((i <= 0 -> s = 0) And " +
@@ -45,6 +83,16 @@ func TestResolve(t *testing.T) {
 		want string // rendered term, or an error message fragment prefixed with "error: "
 	}{
 		{"n >= 0 And i > 0", "((0 <= n) And (0 < i))"},
+		{"s.count' = old(s.count) + 1", "(count1 = (count0 + 1))"},
+		{"s.items'[i] = s.count", "(items1[i] = count0)"},
+		{"p != nil And p != q", "(~(p = 0) And ~(p = q))"},
+		{"nil = q -> fresh(p)", "((0 = q) -> fresh p())"},
+		{"within(p', q)", "within p' q()"},
+		{"within(p)", "error: within takes 2 argument(s)"},
+		{"fresh(p')", "error: fresh takes a parameter"},
+		{"p < q", "error: operator < cannot be applied to pointer values"},
+		{"old(s.count')", "error: old takes a parameter"},
+		{"A.size", "error: unknown name A.size"},
 		{"0 <= i <= j < |A|", "((0 <= i) And (i <= j) And (j < |A|))"},
 		{"n = i*j + 1", "(n = ((i * j) + 1))"},
 		{"n == i / 2 % 3 - -j", "(n = (((i / 2) % 3) + --j))"},
@@ -137,6 +185,40 @@ func TestDefine(t *testing.T) {
 				t.Fatalf("definitions were accepted, want an error containing %q", test.want)
 			case test.want != "" && !strings.Contains(errs[0].Err.Error(), test.want):
 				t.Fatalf("got error %q, want one containing %q", errs[0].Err, test.want)
+			}
+		})
+	}
+}
+
+func TestParseTargets(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string // the targets as written, or an error message fragment prefixed with "error: "
+	}{
+		{"accepts one variable", "A", "A"},
+		{"accepts fields and elements", "s.items, cs[i + 1].n, p", "s.items | cs[i + 1].n | p"},
+		{"rejects a primed path", "A'", "error: a Modifies clause lists"},
+		{"rejects an expression", "A + 1", "error: unexpected"},
+		{"rejects a call", "old(A)", "error: a Modifies clause lists"},
+		{"rejects an empty list", "", "error: expected an expression"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			targets, err := ParseTargets(test.src)
+
+			got := ""
+			for i, target := range targets {
+				if i > 0 {
+					got += " | "
+				}
+				got += target.String()
+			}
+			if err != nil {
+				got = "error: " + err.Error()
+			}
+			if !strings.HasPrefix(got, test.want) || (err == nil && got != test.want) {
+				t.Fatalf("ParseTargets(%q) = %q, want %q", test.src, got, test.want)
 			}
 		})
 	}

@@ -66,27 +66,6 @@ func (v *fnVerifier) constant(value constant.Value, sort logic.Sort, e ast.Expr,
 	return nil
 }
 
-// exprAs evaluates an expression that is assigned to something of type want.
-// It differs from expr only for nil, which has no type of its own.
-func (v *fnVerifier) exprAs(e ast.Expr, want types.Type, st *state, guard []*logic.Term) *logic.Term {
-	// An error value is only ever an error, nil, or the result of a call.
-	// Converting anything else to an error would hide a value, possibly a
-	// slice, behind an interface whose methods are not verified.
-	if wantSort, ok := sortOf(want); ok && wantSort == logic.Err && !v.isNil(e) {
-		if have, ok := sortOf(v.info.TypeOf(e)); !ok || have != logic.Err {
-			v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to an error is not supported", v.info.TypeOf(e)))
-		}
-	}
-	if !v.isNil(e) {
-		return v.expr(e, st, guard)
-	}
-	sort, ok := sortOf(want)
-	if !ok || (sort != logic.Err && !isSlice(want)) {
-		v.unsupported(e.Pos(), fmt.Sprintf("nil of type %s is not supported", want))
-	}
-	return zero(sort)
-}
-
 // opaque evaluates an operator whose result the logic knows nothing about:
 // arithmetic and comparison of floats, and ordering of strings. The operands have already been evaluated, so any panic inside
 // them is accounted for; the result is an arbitrary value of the right sort.
@@ -98,43 +77,23 @@ func (v *fnVerifier) opaque(op token.Token, operand *logic.Term) *logic.Term {
 	return v.fresh("unknown", operand.Sort)
 }
 
-// text evaluates the string forms that have no slice counterpart:
-// concatenation, substrings, and conversions to and from []byte.
-func (v *fnVerifier) text(e ast.Expr, st *state, guard []*logic.Term) *logic.Term {
-	switch e := ast.Unparen(e).(type) {
-	case *ast.BinaryExpr:
-		left := v.expr(e.X, st, guard)
-		return v.binary(e.Op, left, v.expr(e.Y, st, guard), v.info.TypeOf(e), e.OpPos, st, guard)
-	case *ast.SliceExpr:
-		if !isString(v.info.TypeOf(e.X)) || e.Slice3 {
-			break
-		}
-		whole := v.expr(e.X, st, guard)
-		lo, hi := logic.IntLit(0), logic.Len(whole)
-		if e.Low != nil {
-			lo = v.expr(e.Low, st, guard)
-		}
-		if e.High != nil {
-			hi = v.expr(e.High, st, guard)
-		}
-		within := logic.And(logic.Le(logic.IntLit(0), lo), logic.Le(lo, hi), logic.Le(hi, logic.Len(whole)))
-		v.check(st, guard, within, e.Pos(), "substring bounds may be out of range")
-		return logic.Subseq(whole, lo, hi)
-	case *ast.CallExpr:
-		if !v.info.Types[e.Fun].IsType() {
-			break
-		}
-		// string(b) and []byte(s) copy, so the result is the same sequence
-		// of bytes and shares nothing with the operand.
-		from, to := v.info.TypeOf(e.Args[0]), v.info.TypeOf(e)
-		bytes := func(t types.Type) bool {
-			return isString(t) || (isSlice(t) && types.Identical(t.Underlying().(*types.Slice).Elem().Underlying(), types.Typ[types.Uint8]))
-		}
-		if bytes(from) && bytes(to) && (isString(from) || isString(to)) {
-			return v.expr(e.Args[0], st, guard)
-		}
+// substring evaluates s[i:j] on a string. Unlike a slice of a slice it
+// shares nothing that could be written, so it is simply a shorter sequence.
+func (v *fnVerifier) substring(e *ast.SliceExpr, st *state, guard []*logic.Term) *logic.Term {
+	if e.Slice3 {
+		v.unsupported(e.Pos(), "a string cannot be sliced with a capacity")
 	}
-	return nil
+	whole := v.expr(e.X, st, guard)
+	lo, hi := logic.IntLit(0), logic.Len(whole)
+	if e.Low != nil {
+		lo = v.expr(e.Low, st, guard)
+	}
+	if e.High != nil {
+		hi = v.expr(e.High, st, guard)
+	}
+	within := logic.And(logic.Le(logic.IntLit(0), lo), logic.Le(lo, hi), logic.Le(hi, logic.Len(whole)))
+	v.check(st, guard, within, e.Pos(), "substring bounds may be out of range")
+	return logic.Subseq(whole, lo, hi)
 }
 
 // errorConstructor recognises errors.New and fmt.Errorf, which always return
@@ -147,21 +106,36 @@ func errorConstructor(callee *types.Func) bool {
 	return name == "errors.New" || name == "fmt.Errorf"
 }
 
+// formatsPlainly reports whether formatting a value of the type runs no
+// code but the formatter's own: a number, boolean, or string without methods,
+// or a slice of such values.
+func formatsPlainly(t types.Type) bool {
+	if types.NewMethodSet(t).Len() > 0 {
+		return false
+	}
+	if isSlice(t) {
+		return formatsPlainly(elemType(t))
+	}
+	_, basic := t.Underlying().(*types.Basic)
+	return basic
+}
+
 // newError evaluates a call to an error constructor: its arguments are
 // evaluated for the checks they carry, and the result is some non-nil error.
 //
-// Formatting calls the String, Error, and Format methods of its operands,
-// which is code the verifier does not see. An argument of a type with methods
-// is therefore rejected, except an error, whose methods cannot reach the
-// slices of this function under the rule that unverified code keeps none.
+// Formatting calls the String, Error, and Format methods of its operands and
+// of what they contain, which is code the verifier does not see. Only values
+// that are formatted without such calls are therefore accepted, and errors,
+// whose methods cannot reach the memory of this function under the rule that
+// unverified code keeps no reference to it.
 func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term) *logic.Term {
 	for _, arg := range call.Args {
 		t := v.info.TypeOf(arg)
-		if sort, ok := sortOf(t); (!ok || sort != logic.Err) && types.NewMethodSet(t).Len() > 0 {
+		if !isError(t) && !formatsPlainly(t) {
 			v.unsupported(arg.Pos(), fmt.Sprintf(
-				"formatting a value of type %s would call its methods, which are not verified", t))
+				"formatting a value of type %s may call methods, which are not verified, or follow pointers", t))
 		}
-		v.expr(arg, st, guard)
+		v.eval(arg, st, guard)
 	}
 	if position := v.pass.Fset.Position(call.Pos()); !slices.Contains(v.usage.Constructors, position) {
 		v.usage.Constructors = append(v.usage.Constructors, position)

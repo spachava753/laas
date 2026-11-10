@@ -2,32 +2,7 @@
 // fragment, which must be reported rather than silently accepted.
 package rejected
 
-type point struct{ x, y int }
-
-// @ Requires p.x > 0 // want `vego:\ syntax\ error\ in\ Requires\ annotation:\ unexpected\ character\ '\.'`
-func StructParameter(p point) int {
-	return p.x
-}
-
-// @ Requires |A| > 0
-func Aliases(A []int) int {
-	B := A // want `vego:\ cannot\ verify\ Aliases:\ assigning\ slice\ A\ to\ another\ variable\ would\ make\ two\ variables\ share\ one\ backing\ array`
-	B[0] = 1
-	return A[0]
-}
-
-// @ Requires |A| > 0
-func ReturnsParameter(A []int) []int {
-	A[0] = 1
-	return A // want `vego:\ cannot\ verify\ ReturnsParameter:\ returning\ slice\ parameter\ A\ would\ give\ the\ caller\ two\ names\ for\ one\ backing\ array`
-}
-
-// @ Requires |A| > 1
-func SubSlices(A []int) int {
-	B := A[1:] // want `vego:\ cannot\ verify\ SubSlices:\ this\ slice\ expression\ is\ not\ supported\ \(sub\-slicing\ and\ aliasing\ are\ not\ modelled\ yet\)`
-	return B[0]
-}
-
+// @ Modifies A
 func write(A, B []int) {
 	if len(A) > 0 && len(B) > 0 {
 		A[0] = B[0]
@@ -37,16 +12,17 @@ func write(A, B []int) {
 //@ Ensures |A'| = |A|
 
 // @ Requires |A| > 0
+// @ Modifies A
 func PassesTwice(A []int) {
-	write(A, A) // want `vego:\ cannot\ verify\ PassesTwice:\ slice\ A\ is\ passed\ more\ than\ once\ to\ a\ function\ that\ may\ modify\ it`
+	write(A, A) // want `vego: the slices passed to write as A and B may overlap`
 }
 
 func unverified(A []int) []int { return A }
 
 // @ Requires |A| > 0
 func UsesUnverifiedSlice(A []int) int {
-	B := unverified(A) // want `vego:\ cannot\ verify\ UsesUnverifiedSlice:\ unverified\ returns\ a\ slice;\ a\ trusted\ contract\ cannot\ yet\ say\ that\ the\ slice\ shares\ no\ storage`
-	return B[0]
+	B := unverified(A)
+	return B[0] // want `vego: index may be out of range`
 }
 
 // @ Requires x > // want `vego:\ syntax\ error\ in\ Requires\ annotation:\ expected\ an\ expression,\ found\ "end\ of\ annotation"`
@@ -68,7 +44,7 @@ func PrimeOnValue(x int) (y int) {
 	return x
 }
 
-//@ Ensures x' = y // want `vego:\ in\ Ensures\ annotation:\ x\ is\ passed\ by\ value,\ so\ only\ its\ entry\ value\ x\ is\ visible\ to\ callers`
+//@ Ensures x' = y // want `vego: in Ensures annotation: x is passed by value, so only its value on entry is visible to callers; drop the prime`
 
 // @ Requires A > 0 // want `vego:\ in\ Requires\ annotation:\ cannot\ compare\ A\ \(\[\]int\)\ with\ 0\ \(int\)`
 func SliceAsInteger(A []int) int {
@@ -116,18 +92,11 @@ func ReadsGlobal(x int) int {
 
 // @ Requires x > 0
 func Closure(x int) int {
-	f := func() int { return x } // want `vego:\ cannot\ verify\ Closure:\ expressions\ of\ type\ func\(\)\ int\ are\ not\ supported`
+	f := func() int { return x } // want `vego: cannot verify Closure: f has unsupported type func\(\) int`
 	return f()
 }
 
 //@ Preserves |A| // want `vego:\ Preserves\ annotations\ are\ not\ supported\ yet`
-
-type counter struct{ n int }
-
-// @ Requires c.n >= 0 // want `vego:\ syntax\ error\ in\ Requires\ annotation:\ unexpected\ character\ '\.'`
-func (c *counter) Method() int {
-	return c.n
-}
 
 // @ Requires x > 0
 func Goes(x int) {
@@ -163,7 +132,7 @@ func InsideSwitch(n int) int {
 // @ Ensures	False
 func TabSeparator() int { return 0 } // want `vego:\ postcondition\ may\ not\ hold:\ False`
 
-// @ Ensure result = 1 // want `vego:\ unknown\ annotation\ "Ensure";\ an\ annotation\ starts\ with\ one\ of\ Requires,\ Ensures,\ Invariant,\ Variant,\ Measure,\ Assert,\ Predicate`
+// @ Ensure result = 1 // want `vego:\ unknown\ annotation\ "Ensure";\ an\ annotation\ starts\ with\ one\ of\ Requires,\ Ensures,\ Modifies,\ Invariant,\ Variant,\ Measure,\ Assert,\ Predicate`
 func MisspeltKeyword() int { return 0 }
 
 // @Summary comments of other tools are not annotations.
@@ -193,3 +162,57 @@ func MultipleVariants() int {
 
 // @ Ensures result = ١ // want `vego:\ syntax\ error\ in\ Ensures\ annotation:\ unexpected\ character\ '١'`
 func ArabicDigit() int { return 1 }
+
+type shape interface{ Area() int }
+
+// @ Requires s != nil
+func Interfaces(s shape) int { // want `vego: cannot verify Interfaces: parameter s has unsupported type rejected.shape`
+	return s.Area()
+}
+
+type cell struct{ value int }
+
+// @ Requires c != nil
+// @ Modifies c.missing // want `vego: in Modifies annotation: c\.missing: rejected.cell has no field missing`
+func MissingField(c *cell) {
+	c.value = 1
+}
+
+// @ Requires c != nil
+// @ Modifies c[0] // want `vego: in Modifies annotation: c: a \*rejected.cell cannot be indexed`
+func BadTarget(c *cell) {
+	c.value = 1
+}
+
+// @ Requires c.value.size > 0 // want `vego: in Requires annotation: c\.value\.size: a int has no fields`
+func FieldOfNumber(c *cell) int {
+	return 0
+}
+
+// @ Requires c > 0 // want `vego: in Requires annotation: cannot compare c \(pointer\) with 0 \(int\)`
+func PointerAsNumber(c *cell) int {
+	return 0
+}
+
+// @ Requires p != nil
+func PointerToNumber(p *int) int { // want `vego: cannot verify PointerToNumber: parameter p has unsupported type \*int`
+	return *p
+}
+
+// @ Requires c != nil
+func Embedded(c *cell) int {
+	m := map[string]int{} // want `vego: cannot verify Embedded: m has unsupported type map\[string\]int`
+	return m["a"] + c.value
+}
+
+// @ Requires c != nil
+// @ Modifies c.value + 1 // want `vego: syntax error in Modifies annotation: unexpected "\+"`
+func BadSyntax(c *cell) {
+	c.value = 1
+}
+
+// @ Requires c != nil
+// @ Modifies old(c) // want `vego: syntax error in Modifies annotation: a Modifies clause lists what is reached from the parameters, as in "A, s\.items, cs\[0\]"`
+func BadKind(c *cell) {
+	c.value = 1
+}

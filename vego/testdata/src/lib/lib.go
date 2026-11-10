@@ -17,6 +17,8 @@ func Smallest(A []int) (least int) {
 //@ Ensures A[0:|A|) >= least And least = A[0]
 
 // Clear overwrites the slice with zeros.
+//
+// @ Modifies A
 func Clear(A []int) {
 	//@ Invariant A[0:i) = 0
 	for i := range A {
@@ -65,3 +67,40 @@ func SafeDivide(n, d int) (q int) {
 }
 
 //@ Ensures q <= n
+
+// Account is a struct that other packages use through its methods.
+type Account struct {
+	Balance int
+	Limit   int
+	history []int
+}
+
+// Open returns a new account.
+//
+// @ Requires limit >= 0
+func Open(limit int) *Account {
+	return &Account{Limit: limit}
+}
+
+//@ Ensures fresh(result) And result.Balance = 0 And result.Limit = limit
+
+// Deposit adds to the balance and to nothing else.
+//
+// @ Requires a != nil And 0 <= amount <= 1000 And 0 <= a.Balance <= 1000000
+// @ Modifies a.Balance
+func (a *Account) Deposit(amount int) {
+	a.Balance += amount
+}
+
+//@ Ensures a.Balance' = a.Balance + amount
+
+// Reset claims to modify only the balance but also clears the limit.
+//
+// @ Requires a != nil
+// @ Modifies a.Balance
+func (a *Account) Reset() {
+	a.Balance = 0
+	a.Limit = 0 // want `a\.Limit is assigned, which Reset may not modify; list it in a //@ Modifies clause`
+}
+
+//@ Ensures a.Balance' = 0

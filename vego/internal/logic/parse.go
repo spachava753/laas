@@ -25,7 +25,8 @@ const (
 	NBinary           // Op is an arithmetic or logical connective
 	NCompare          // Kids[0] Ops[0] Kids[1] Ops[1] Kids[2] ...
 	NQuant            // Op is "Forall" or "Exists"; Kids is [body] or [lo, hi, body]
-	NNil              // the nil error
+	NNil              // nil: the nil error or the nil pointer
+	NField            // Kids[0].Name, possibly Primed
 	NStr              // a string literal; Name holds its value
 )
 
@@ -57,6 +58,61 @@ func (n *Node) Conjuncts() []*Node {
 	return []*Node{n}
 }
 
+// String writes the node the way an annotation spells it, for diagnostics.
+func (n *Node) String() string {
+	kid := func(i int) string {
+		if n.Kids[i].Kind == NBinary || n.Kids[i].Kind == NCompare || n.Kids[i].Kind == NQuant {
+			return "(" + n.Kids[i].String() + ")"
+		}
+		return n.Kids[i].String()
+	}
+	prime := ""
+	if n.Primed {
+		prime = "'"
+	}
+	switch n.Kind {
+	case NInt:
+		return n.Big.String()
+	case NBool:
+		return map[int64]string{0: "False", 1: "True"}[n.Val]
+	case NIdent:
+		return n.Name + prime
+	case NField:
+		return kid(0) + "." + n.Name + prime
+	case NCall:
+		args := make([]string, len(n.Kids))
+		for i, arg := range n.Kids {
+			args[i] = arg.String()
+		}
+		return n.Name + "(" + strings.Join(args, ", ") + ")"
+	case NIndex:
+		return kid(0) + "[" + n.Kids[1].String() + "]"
+	case NRange:
+		closing := ")"
+		if n.Closed {
+			closing = "]"
+		}
+		return kid(0) + "[" + n.Kids[1].String() + ":" + n.Kids[2].String() + closing
+	case NLen:
+		return "|" + n.Kids[0].String() + "|"
+	case NUnary:
+		return n.Op + kid(0)
+	case NBinary:
+		return kid(0) + " " + n.Op + " " + kid(1)
+	case NCompare:
+		text := kid(0)
+		for i, op := range n.Ops {
+			text += " " + op + " " + kid(i+1)
+		}
+		return text
+	case NQuant:
+		return n.Op + " " + strings.Join(n.Vars, ", ") + " : " + n.Kids[len(n.Kids)-1].String()
+	case NNil:
+		return "nil"
+	}
+	return strconv.Quote(n.Name)
+}
+
 // PredDecl is a parsed "name(params) ::= body" predicate definition.
 type PredDecl struct {
 	Name   string
@@ -81,7 +137,7 @@ func (e *SyntaxError) Error() string { return e.Msg }
 
 var operators = []string{
 	"<->", "::=", "->", "<=", ">=", "!=", "==", "&&", "||",
-	"=", "<", ">", "+", "-", "*", "/", "%", "~", "!", "(", ")", "[", "]", ",", ":", "|", "'",
+	"=", "<", ">", "+", "-", "*", "/", "%", "~", "!", "(", ")", "[", "]", ",", ":", "|", "'", ".",
 }
 
 // lex splits clause text into tokens. Identifiers follow Go's rules, numbers
@@ -150,6 +206,30 @@ type parser struct {
 // ParseFormula parses a formula or integer expression clause.
 func ParseFormula(src string) (*Node, error) {
 	return parse(src, func(p *parser) *Node { return p.formula() })
+}
+
+// ParseTargets parses the list of a Modifies clause: paths such as A, p,
+// s.items, and cs[0], separated by commas.
+func ParseTargets(src string) ([]*Node, error) {
+	var targets []*Node
+	_, err := parse(src, func(p *parser) *Node {
+		for {
+			target := p.postfix()
+			for n := target; ; n = n.Kids[0] {
+				if (n.Kind != NIdent && n.Kind != NField && n.Kind != NIndex) || n.Primed {
+					panic(&SyntaxError{target.Start, "a Modifies clause lists what is reached from the parameters, as in \"A, s.items, cs[0]\""})
+				}
+				if n.Kind == NIdent {
+					break
+				}
+			}
+			targets = append(targets, target)
+			if !p.accept(",") {
+				return target
+			}
+		}
+	})
+	return targets, err
 }
 
 // ParsePredicate parses a predicate definition clause.
@@ -383,11 +463,21 @@ func (p *parser) unary() *Node {
 	return p.postfix()
 }
 
-// postfix parses indexing A[i] and the slice-range shorthands A[lo:hi) and
-// A[lo:hi] after a primary expression.
+// postfix parses what may follow a primary expression: a field selection
+// x.f, which may be primed, indexing A[i], and the slice-range shorthands
+// A[lo:hi) and A[lo:hi].
 func (p *parser) postfix() *Node {
 	n := p.primary()
-	for p.accept("[") {
+	for {
+		if p.accept(".") {
+			n = &Node{Kind: NField, Name: p.ident(), Kids: []*Node{n}, Start: n.Start}
+			n.Primed = p.accept("'")
+			n.End = p.end()
+			continue
+		}
+		if !p.accept("[") {
+			return n
+		}
 		index := p.arith()
 		if !p.accept(":") {
 			p.expect("]")
@@ -404,7 +494,6 @@ func (p *parser) postfix() *Node {
 			Start: n.Start, End: p.end(),
 		}
 	}
-	return n
 }
 
 // primary parses literals, names, predicate applications, parenthesised

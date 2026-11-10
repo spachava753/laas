@@ -7,6 +7,7 @@ import (
 	"maps"
 	"math/big"
 	"slices"
+	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
@@ -178,48 +179,44 @@ func errorResults(fn *funcInfo) []int {
 	return indices
 }
 
-// contractInstance resolves the contract for the given argument values. It
-// returns the facts that the precondition and the parameter types give
-// about them; everything that then holds of the outputs of any function
-// meeting the contract, namely what their types and the call guarantee and
-// the postcondition; and the terms standing for the error results.
-func (v *fnVerifier) contractInstance(args map[*types.Var]*logic.Term) (pre, post, failures []*logic.Term) {
+// contractInstance resolves the contract on the state a function is entered
+// in. It returns the facts of that state, which are what the precondition
+// and the types of the parameters give; everything that then holds after
+// any function meeting the contract has run, namely what the types of its
+// outputs guarantee and the postcondition; and the terms standing for the
+// error results.
+func (v *fnVerifier) contractInstance(entry *state) (pre, post, failures []*logic.Term) {
 	fn := v.fn
-	results := make([]*logic.Term, len(fn.results))
-	final := map[*types.Var]*logic.Term{}
-	for _, param := range fn.params {
-		if args[param] == nil {
-			continue
-		}
-		pre = append(pre, v.typeFact(args[param], param.Type()))
-		final[param] = args[param]
-		// Only a slice the function may write has contents of its own
-		// afterwards, and even then its length is the caller's.
-		if isSlice(param.Type()) && v.mutates(fn, param) {
-			final[param] = v.fresh("out", final[param].Sort)
-			post = append(post, v.valueFacts(final[param], param.Type()),
-				logic.Eq(logic.Len(final[param]), logic.Len(args[param])))
-		}
+	st := entry.clone()
+	for _, t := range v.frame {
+		v.havoc(st, t)
 	}
+	st.brk = v.fresh("brk", logic.Ref)
+	st.assume(logic.Le(entry.brk, st.brk))
+	results := make([]value, len(fn.results))
 	for i, result := range fn.results {
-		if sort, ok := sortOf(result.Type()); ok {
-			results[i] = v.fresh("out", sort)
-			post = append(post, v.valueFacts(results[i], result.Type()))
+		if _, ok := layoutOf(result.Type()); ok {
+			results[i] = v.unknown("out", result.Type(), st)
+			st.assume(v.deepFacts(st.mem, results[i], result.Type(), st.brk))
 		}
 	}
-	for _, c := range fn.requires {
-		pre = append(pre, v.formula(c, c.node, &contractEnv{pv: v.pkgVerifier, fn: fn, args: args}))
+	for _, param := range fn.params {
+		if v.entry[param] != nil {
+			typed := v.deepFacts(st.mem, v.entry[param], param.Type(), st.brk)
+			v.typing[typed] = true
+			st.assume(typed)
+		}
 	}
-	env := &contractEnv{pv: v.pkgVerifier, fn: fn, args: args, post: final, results: results}
+	env := &specEnv{v: v, sink: st, fn: fn, args: v.entry, results: results, now: memory{}, post: st.mem, before: entry.brk}
 	for _, c := range fn.ensures {
 		// A clause about a result that has no value in the logic says
 		// nothing here.
-		post = append(post, v.calleeFormula(c, env))
+		st.assume(v.calleeFormula(c, env))
 	}
 	for _, index := range errorResults(fn) {
-		failures = append(failures, results[index])
+		failures = append(failures, results[index][0])
 	}
-	return pre, slices.Concat(pre, post), failures
+	return entry.hyps, st.hyps, failures
 }
 
 // maxWitnesses bounds the inputs tried when looking for one on which a
@@ -238,38 +235,23 @@ const maxWitnesses = 3000
 // though a witness outside that search may exist: the contract must then be
 // stated so that its success condition is plainly satisfiable.
 func (v *fnVerifier) forcesSuccess() bool {
-	v.enter()
-	_, mentioned, failures := v.contractInstance(v.entry)
+	pre, post, failures := v.contractInstance(v.enter())
 	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
+	// The sample error is the one sample that is not a literal; all that
+	// is known of it is that it is not nil.
+	known := []*logic.Term{logic.Not(logic.IsNil(someError))}
 	forced := make([]bool, len(failures))
-	v.someInput(mentioned, func(args map[*types.Var]*logic.Term) bool {
-		// The sample error is the one sample that is not a literal; all
-		// that is known of it is that it is not nil.
-		known := []*logic.Term{logic.Not(logic.IsNil(someError))}
-		pre, post, failures := v.contractInstance(args)
-		if !v.inhabits(args) || solver.Prove(known, logic.And(pre...), opts) != solver.Proved {
+	v.someInput(post, func(input *witness) bool {
+		if solver.Prove(known, logic.And(input.apply(pre)...), opts) != solver.Proved {
 			return false
 		}
+		outcome := append(slices.Clip(known), input.apply(post)...)
 		for i, failure := range failures {
-			forced[i] = forced[i] || solver.Prove(append(known, post...), logic.IsNil(failure), opts) == solver.Proved
+			forced[i] = forced[i] || solver.Prove(outcome, logic.IsNil(input.apply([]*logic.Term{failure})[0]), opts) == solver.Proved
 		}
 		return !slices.Contains(forced, false)
 	})
 	return !slices.Contains(forced, false)
-}
-
-// inhabits reports whether every sample value is a value of its parameter's
-// Go type, including the elements of a sequence: the bytes of a string
-// literal are not all values of an int8.
-func (v *fnVerifier) inhabits(args map[*types.Var]*logic.Term) bool {
-	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
-	for param, value := range args {
-		if value != nil && value != v.entry[param] && value.Sort != logic.Err &&
-			solver.Prove(nil, v.valueFacts(value, param.Type()), opts) != solver.Proved {
-			return false
-		}
-	}
-	return true
 }
 
 // someError is the sample value for an error that is not nil.
@@ -288,13 +270,9 @@ func (v *fnVerifier) canReach(path []*logic.Term) bool {
 	if solver.Prove(path, logic.False(), opts) == solver.Proved {
 		return false
 	}
-	inputs := map[*logic.Term]bool{logic.NilErr(): true}
-	for _, entry := range v.entry {
-		inputs[entry] = true
-	}
 	var inputsOnly func(t *logic.Term) bool
 	inputsOnly = func(t *logic.Term) bool {
-		if t.Op == logic.OpConst && !inputs[t] {
+		if t.Op == logic.OpConst && t != logic.NilErr() && !v.inputs[t.Name] && !strings.HasPrefix(t.Name, entryRegion) {
 			return false
 		}
 		return !slices.ContainsFunc(t.Args, func(arg *logic.Term) bool { return !inputsOnly(arg) })
@@ -311,26 +289,10 @@ func (v *fnVerifier) canReach(path []*logic.Term) bool {
 			}
 		}
 	}
-	return v.someInput(path, func(args map[*types.Var]*logic.Term) bool {
-		var chosen []*logic.Term
-		for param, value := range args {
-			switch entry := v.entry[param]; {
-			case value == entry || entry == nil:
-			case entry.Sort.IsSeq():
-				chosen = append(chosen, logic.SeqEq(entry, value, logic.Bound(v.fresh("k#", logic.Int).Name, logic.Int)))
-			case entry.Sort == logic.Err:
-				// All that is known of an error is whether it is nil.
-				nilness := logic.IsNil(entry)
-				if value == someError {
-					nilness = logic.Not(nilness)
-				}
-				chosen = append(chosen, nilness)
-			default:
-				chosen = append(chosen, logic.Eq(entry, value))
-			}
-		}
-		return v.inhabits(args) && solver.Prove(chosen, logic.And(required...), opts) == solver.Proved &&
-			solver.Prove(append(chosen, path...), logic.False(), opts) != solver.Proved
+	known := []*logic.Term{logic.Not(logic.IsNil(someError))}
+	return v.someInput(path, func(input *witness) bool {
+		return solver.Prove(known, logic.And(input.apply(required)...), opts) == solver.Proved &&
+			solver.Prove(append(slices.Clip(known), input.apply(path)...), logic.False(), opts) != solver.Proved
 	})
 }
 
@@ -356,104 +318,109 @@ func necessary(t *logic.Term) []*logic.Term {
 	return parts
 }
 
-// someInput tries small concrete inputs until one is accepted, and reports
-// whether one was. The inputs are built from 0, 1, -1, 2, 3 and the numbers
-// that occur in the given terms, which is where a witness for a condition
-// over those terms is most likely to be found.
-func (v *fnVerifier) someInput(terms []*logic.Term, accept func(args map[*types.Var]*logic.Term) bool) bool {
-	numbers := []*big.Int{big.NewInt(0), big.NewInt(1), big.NewInt(-1), big.NewInt(2), big.NewInt(3)}
-	var harvest func(t *logic.Term)
-	harvest = func(t *logic.Term) {
-		if t.Op == logic.OpIntLit && t.Value().IsInt64() && len(numbers) < 12 {
-			for _, delta := range []int64{0, 1, -1} {
-				numbers = append(numbers, new(big.Int).Add(t.Value(), big.NewInt(delta)))
-			}
-		}
-		for _, arg := range t.Args {
-			harvest(arg)
-		}
-	}
-	// A string or slice literal is a chain of appended elements.
-	var literals []*logic.Term
-	var collect func(t *logic.Term)
-	collect = func(t *logic.Term) {
-		if t.Op == logic.OpPush && len(literals) < 8 {
-			literals = append(literals, t)
-			return
-		}
-		for _, arg := range t.Args {
-			collect(arg)
-		}
-	}
-	for _, t := range terms {
-		harvest(t)
-		collect(t)
-	}
-	params := v.fn.params
-	choices := make([][]*logic.Term, len(params))
-	total := 1
-	for i, param := range params {
-		choices[i] = v.sampleValues(param, numbers)
-		for _, literal := range literals {
-			if entry := v.entry[param]; entry != nil && entry.Sort == literal.Sort {
-				choices[i] = append(choices[i], literal)
-			}
-		}
-		total = min(total*len(choices[i]), maxWitnesses)
-	}
-	for n := range total {
-		args := map[*types.Var]*logic.Term{}
-		rest := n
-		for i, param := range params {
-			args[param] = choices[i][rest%len(choices[i])]
-			rest /= len(choices[i])
-		}
-		if accept(args) {
-			return true
-		}
-	}
-	return false
+// witness is a concrete input: values for the constants that stand for the
+// parameters, and contents for the memory they refer to. Applying it to a
+// formula about the state on entry gives the formula for that one input.
+type witness struct {
+	consts map[string]*logic.Term
+	memo   map[*logic.Term]*logic.Term
 }
 
-// sampleValues lists concrete values of a parameter's type to try as part of
-// a witness: the given numbers that fit an integer type, both booleans, a
-// nil and a non-nil error, and short sequences holding one repeated value.
-// A float has no concrete values in the logic and stays symbolic.
-func (v *fnVerifier) sampleValues(param *types.Var, numbers []*big.Int) []*logic.Term {
-	fitting := func(t types.Type) []*logic.Term {
-		var values []*logic.Term
-		lo, hi, _ := v.intRange(t)
-		for _, number := range numbers {
-			if lo != nil && number.Cmp(lo) >= 0 && number.Cmp(hi) <= 0 {
-				values = append(values, logic.BigLit(number))
+// store sets one cell of a region of the sampled memory.
+func (s *witness) store(key string, sort logic.Sort, ref, written *logic.Term) {
+	name := entryRegion + key
+	region, ok := s.consts[name]
+	if !ok {
+		region = logic.Const(name, sort)
+	}
+	s.consts[name] = logic.Store(region, ref, written)
+}
+
+// apply replaces the constants of the entry state by their sampled values.
+func (s *witness) apply(terms []*logic.Term) []*logic.Term {
+	var replace func(t *logic.Term) *logic.Term
+	replace = func(t *logic.Term) *logic.Term {
+		if t.Op == logic.OpConst {
+			if replacement, ok := s.consts[t.Name]; ok {
+				return replacement
 			}
+			return t
 		}
-		return values
+		if len(t.Args) == 0 {
+			return t
+		}
+		if done, ok := s.memo[t]; ok {
+			return done
+		}
+		args := make([]*logic.Term, len(t.Args))
+		changed := false
+		for i, arg := range t.Args {
+			args[i] = replace(arg)
+			changed = changed || args[i] != arg
+		}
+		result := t
+		switch {
+		case changed && t.Op == logic.OpIsNil:
+			// Whether the nil error is nil is decided where the term is
+			// built.
+			result = logic.IsNil(args[0])
+		case changed:
+			result = &logic.Term{Op: t.Op, Sort: t.Sort, Name: t.Name, Val: t.Val, Big: t.Big, Args: args}
+		}
+		s.memo[t] = result
+		return result
 	}
-	entry := v.entry[param]
-	switch {
-	case entry == nil:
-		return []*logic.Term{nil}
-	case entry.Sort == logic.Int:
-		return fitting(param.Type())
-	case entry.Sort == logic.Bool:
-		return []*logic.Term{logic.False(), logic.True()}
-	case entry.Sort == logic.Err:
-		return []*logic.Term{logic.NilErr(), someError}
-	case !entry.Sort.IsSeq():
-		return []*logic.Term{entry}
+	replaced := make([]*logic.Term, len(terms))
+	for i, t := range terms {
+		replaced[i] = replace(t)
 	}
-	elements := []*logic.Term{zero(entry.Sort.Elem())}
+	return replaced
+}
+
+// slot is one independent choice in a sample: each of its alternatives
+// fills in part of the sample.
+type slot []func(s *witness)
+
+// sampler lists the slots for the inputs of a function.
+type sampler struct {
+	v        *fnVerifier
+	slots    []slot
+	numbers  []*big.Int
+	literals []*logic.Term
+	// mentioned holds the names of the constants that occur in the formulas
+	// the samples are for, other than in what the types alone guarantee.
+	mentioned map[string]bool
+	// refs counts the objects and arrays the samples contain, each of which
+	// gets a reference of its own.
+	refs int64
+}
+
+// fitting returns the sample numbers that are values of an integer type.
+func (b *sampler) fitting(t types.Type) []*logic.Term {
+	var values []*logic.Term
+	lo, hi, _ := b.v.intRange(t)
+	for _, number := range b.numbers {
+		if lo != nil && number.Cmp(lo) >= 0 && number.Cmp(hi) <= 0 {
+			values = append(values, logic.BigLit(number))
+		}
+	}
+	return values
+}
+
+// sequences returns sample contents for a string or a slice of the given
+// element type: short runs of one repeated value, and the literals the
+// contract mentions whose elements are values of the element type.
+func (b *sampler) sequences(elem types.Type, text bool) []*logic.Term {
+	sort, _ := sortOf(elem)
+	elements := []*logic.Term{zeroLeaf(leaf{sort: sort})}
 	switch {
-	case entry.Sort == logic.BoolSeq:
+	case sort == logic.Bool:
 		elements = append(elements, logic.True())
-	case isString(param.Type()):
-		elements = fitting(types.Typ[types.Uint8])
-	case entry.Sort == logic.IntSeq:
-		elements = fitting(param.Type().Underlying().(*types.Slice).Elem())
+	case sort == logic.Int:
+		elements = b.fitting(elem)
 	}
 	var values []*logic.Term
-	for _, length := range fitting(types.Typ[types.Int]) {
+	for _, length := range b.fitting(types.Typ[types.Int]) {
 		if length.Value().Sign() < 0 || length.Value().Cmp(big.NewInt(64)) > 0 {
 			continue
 		}
@@ -461,5 +428,175 @@ func (v *fnVerifier) sampleValues(param *types.Var, numbers []*big.Int) []*logic
 			values = append(values, logic.Fill(length, element))
 		}
 	}
+	opts := solver.Options{MaxSteps: b.v.maxSteps}
+	for _, literal := range b.literals {
+		if literal.Sort == logic.SeqOf(sort) && (text || solver.Prove(nil, b.v.elementFacts(literal, elem), opts) == solver.Proved) {
+			values = append(values, literal)
+		}
+	}
 	return values
+}
+
+// binding says how the leaves of a sampled value are filled in, and under
+// which name each is known to the formulas: the constant of a parameter, or
+// the region of memory a field lives in.
+type binding struct {
+	set  func(s *witness, leaf int, term *logic.Term)
+	name func(leaf int) string
+}
+
+// choose adds a slot. A slot for something the formulas never mention would
+// multiply the samples without changing what any of them proves, so it keeps
+// its first alternative only.
+func (b *sampler) choose(alternatives slot, names ...string) {
+	if !slices.ContainsFunc(names, func(name string) bool { return b.mentioned[name] }) {
+		alternatives = alternatives[:min(len(alternatives), 1)]
+	}
+	b.slots = append(b.slots, alternatives)
+}
+
+// add creates the slots for a value of type t. A pointer is nil or refers to
+// an object of its own, whose fields are sampled in turn; pointers inside
+// that object stay nil, so that samples stay small. A value no sample exists
+// for stays symbolic.
+func (b *sampler) add(t types.Type, to binding, nested bool) {
+	scalar := func(choices []*logic.Term) {
+		var alternatives slot
+		for _, choice := range choices {
+			alternatives = append(alternatives, func(s *witness) { to.set(s, 0, choice) })
+		}
+		b.choose(alternatives, to.name(0))
+	}
+	object, isPointer := pointee(t)
+	sort, single := sortOf(t)
+	switch {
+	case isPointer && nested:
+		b.slots = append(b.slots, slot{func(s *witness) { to.set(s, 0, logic.RefLit(0)) }})
+	case isPointer:
+		b.refs++
+		ref := logic.RefLit(b.refs)
+		b.choose(slot{func(s *witness) { to.set(s, 0, ref) }, func(s *witness) { to.set(s, 0, logic.RefLit(0)) }}, to.name(0))
+		fields, _ := layoutOf(object)
+		b.add(object, binding{
+			set: func(s *witness, i int, term *logic.Term) {
+				s.store(typeKey(object)+fields[i].path, logic.SeqOf(fields[i].sort), ref, term)
+			},
+			name: func(i int) string { return entryRegion + typeKey(object) + fields[i].path },
+		}, true)
+	case isSlice(t):
+		elem := elemType(t)
+		if _, ok := sortOf(elem); !ok {
+			return
+		}
+		b.refs++
+		ref := logic.RefLit(b.refs)
+		var alternatives slot
+		for _, content := range b.sequences(elem, false) {
+			alternatives = append(alternatives, func(s *witness) {
+				length := logic.Len(content)
+				if content.Op == logic.OpFill {
+					length = content.Args[0]
+				}
+				for i, part := range []*logic.Term{ref, logic.IntLit(0), length, length} {
+					to.set(s, i, part)
+				}
+				s.store("[]"+typeKey(elem), logic.SeqOf(content.Sort), ref, content)
+			})
+		}
+		b.choose(alternatives, to.name(0), to.name(1), to.name(2), to.name(3), entryRegion+"[]"+typeKey(elem))
+	case isString(t):
+		scalar(b.sequences(types.Typ[types.Uint8], true))
+	case single && sort == logic.Int:
+		scalar(b.fitting(t))
+	case single && sort == logic.Bool:
+		scalar([]*logic.Term{logic.False(), logic.True()})
+	case single && sort == logic.Err:
+		scalar([]*logic.Term{logic.NilErr(), someError})
+	case single:
+		// A float has no concrete values in the logic.
+	default:
+		u, isStruct := t.Underlying().(*types.Struct)
+		if !isStruct {
+			return
+		}
+		for i := range u.NumFields() {
+			lo, _, ok := fieldLeaves(t, i)
+			if ok {
+				b.add(u.Field(i).Type(), binding{
+					set:  func(s *witness, j int, term *logic.Term) { to.set(s, lo+j, term) },
+					name: func(j int) string { return to.name(lo + j) },
+				}, nested)
+			}
+		}
+	}
+}
+
+// someInput tries small concrete inputs until one is accepted, and reports
+// whether one was. The inputs are built from 0, 1, -1, 2, 3 and the numbers
+// and literals that occur in the given terms, which is where a witness for
+// a condition over those terms is most likely to be found. A pointer is nil
+// or refers to an object of its own, and a slice has an array of its own.
+func (v *fnVerifier) someInput(terms []*logic.Term, accept func(input *witness) bool) bool {
+	b := &sampler{
+		v: v, mentioned: map[string]bool{},
+		numbers: []*big.Int{big.NewInt(0), big.NewInt(1), big.NewInt(-1), big.NewInt(2), big.NewInt(3)},
+	}
+	seen := map[*logic.Term]bool{}
+	var harvest func(t *logic.Term)
+	harvest = func(t *logic.Term) {
+		if seen[t] {
+			return
+		}
+		seen[t] = true
+		switch {
+		case t.Op == logic.OpConst:
+			b.mentioned[t.Name] = true
+		case t.Op == logic.OpIntLit && t.Sort == logic.Int && t.Value().IsInt64() && len(b.numbers) < 12:
+			for _, delta := range []int64{0, 1, -1} {
+				b.numbers = append(b.numbers, new(big.Int).Add(t.Value(), big.NewInt(delta)))
+			}
+		case t.Op == logic.OpPush && len(b.literals) < 8:
+			// A string or slice literal is a chain of appended elements.
+			b.literals = append(b.literals, t)
+			return
+		}
+		for _, arg := range t.Args {
+			harvest(arg)
+		}
+	}
+	for _, t := range terms {
+		if !v.typing[t] {
+			harvest(t)
+		}
+	}
+	for _, param := range v.fn.params {
+		entry := v.entry[param]
+		if entry != nil {
+			b.add(param.Type(), binding{
+				set:  func(s *witness, i int, term *logic.Term) { s.consts[entry[i].Name] = term },
+				name: func(i int) string { return entry[i].Name },
+			}, false)
+		}
+	}
+	total := 1
+	for _, alternatives := range b.slots {
+		total = min(total*max(len(alternatives), 1), maxWitnesses)
+	}
+	for n := range total {
+		input := &witness{consts: map[string]*logic.Term{}, memo: map[*logic.Term]*logic.Term{}}
+		// Everything a sample contains exists.
+		input.consts[v.entryBrk.Name] = logic.RefLit(b.refs + 1)
+		rest := n
+		for _, alternatives := range b.slots {
+			if len(alternatives) == 0 {
+				continue
+			}
+			alternatives[rest%len(alternatives)](input)
+			rest /= len(alternatives)
+		}
+		if accept(input) {
+			return true
+		}
+	}
+	return false
 }

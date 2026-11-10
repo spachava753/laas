@@ -27,6 +27,7 @@ func LocalSorted(A []int) int {
 // Cleared knows that lib.Clear writes its argument and what it leaves.
 //
 // @ Requires |A| > 0 And A[0] = 5
+// @ Modifies A
 func Cleared(A []int) (first int) {
 	lib.Clear(A)
 	return A[0]
@@ -37,6 +38,7 @@ func Cleared(A []int) (first int) {
 // StillFive wrongly expects the slice to be unchanged.
 //
 // @ Requires |A| > 0 And A[0] = 5
+// @ Modifies A
 func StillFive(A []int) (first int) {
 	lib.Clear(A)
 	return A[0] // want `postcondition may not hold: first = 5`
@@ -91,3 +93,37 @@ func DividesByOne(n int) (q int) {
 }
 
 //@ Ensures q <= n
+
+// Saves uses a struct of another package through its verified methods.
+func Saves() int {
+	a := lib.Open(50)
+	a.Deposit(20)
+	a.Deposit(5)
+	return a.Balance + a.Limit
+}
+
+//@ Ensures result = 75
+
+// SavesTooMuch claims the wrong balance.
+func SavesTooMuch() int {
+	a := lib.Open(50)
+	a.Deposit(20)
+	return a.Balance // want `postcondition may not hold: result = 21`
+}
+
+//@ Ensures result = 21
+
+// DepositsElsewhere must say that it modifies the account.
+//
+// @ Requires a != nil And a.Balance = 0
+func DepositsElsewhere(a *lib.Account) {
+	a.Deposit(1) // want `Deposit may modify what it calls a\.Balance, which DepositsElsewhere may not modify; list it in a //@ Modifies clause`
+}
+
+// UsesReset relies on a method whose own verification failed.
+//
+// @ Requires a != nil
+// @ Modifies a.Balance
+func UsesReset(a *lib.Account) {
+	a.Reset() // want `the contract of \(\*lib.Account\).Reset cannot be used: its verification failed in package lib` `cannot verify UsesReset: Reset has a contract that could not be understood`
+}

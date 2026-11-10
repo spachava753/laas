@@ -80,6 +80,8 @@ func MaxIndex(A []int) (best int) {
 //@ Ensures 0 <= best < |A| And A[0:|A|) <= A[best]
 
 // Fill overwrites every element of A with value.
+//
+// @ Modifies A
 func Fill(A []int, value int) {
 	//@ Invariant A[0:i) = value
 	for i := range A {
@@ -118,6 +120,7 @@ func Copy(A []int) (R []int) {
 // Swap exchanges two elements and leaves the rest alone.
 //
 // @ Requires 0 <= i < |A| And 0 <= j < |A|
+// @ Modifies A
 func Swap(A []int, i, j int) {
 	A[i], A[j] = A[j], A[i]
 }
@@ -126,6 +129,8 @@ func Swap(A []int, i, j int) {
 //@ Ensures Forall k in [0, |A|) : (k != i And k != j) -> A'[k] = A[k]
 
 // InsertionSort sorts A in place.
+//
+// @ Modifies A
 func InsertionSort(A []int) {
 	//@ Invariant 1 <= i
 	//@ Invariant Forall a in [0, i) : Forall b in [a, i) : b < |A| -> A[a] <= A[b]

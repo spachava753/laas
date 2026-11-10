@@ -14,9 +14,9 @@ import (
 type contractFact struct {
 	Requires []string
 	Ensures  []string
-	// Mutated tells, per parameter, whether the function may write the
-	// elements of the slice passed for it.
-	Mutated []bool
+	// Modifies lists what the function may write, as its Modifies clauses
+	// spell it.
+	Modifies []string
 	// Excused is set when the function may fail unpredictably; see
 	// reportAlwaysFailing.
 	Excused bool
@@ -67,7 +67,7 @@ func (pv *pkgVerifier) exportContracts(excused map[*funcInfo]bool) {
 		}
 	}
 	for _, fn := range pv.order {
-		if !fn.annotated() || !fn.obj.Exported() || fn.decl.Recv != nil {
+		if !fn.annotated() || !fn.obj.Exported() {
 			continue
 		}
 		fact := &contractFact{Excused: excused[fn], Verified: !unverified[fn], Consts: map[string]string{}}
@@ -94,8 +94,8 @@ func (pv *pkgVerifier) exportContracts(excused map[*funcInfo]bool) {
 		for _, c := range fn.ensures {
 			fact.Ensures = append(fact.Ensures, capture(c))
 		}
-		for _, param := range fn.params {
-			fact.Mutated = append(fact.Mutated, pv.mutates(fn, param))
+		for _, m := range fn.modifies {
+			fact.Modifies = append(fact.Modifies, m.text)
 		}
 		pv.pass.ExportObjectFact(fn.obj, fact)
 	}
@@ -133,6 +133,14 @@ func (pv *pkgVerifier) importedContract(callee *types.Func) *funcInfo {
 		return list
 	}
 	fn.requires, fn.ensures = clauses("Requires", fact.Requires), clauses("Ensures", fact.Ensures)
+	for _, text := range fact.Modifies {
+		targets, err := logic.ParseTargets(text)
+		if err != nil {
+			fn.defect("its Modifies %q cannot be read: %v", text, err)
+			continue
+		}
+		fn.modifies = append(fn.modifies, newModTargets(targets, &clause{kind: "Modifies", text: text, pos: callee.Pos(), res: resolver})...)
+	}
 	return fn
 }
 

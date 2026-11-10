@@ -6,13 +6,41 @@ import (
 	"sort"
 )
 
+// When says in which state of the program a path is read.
+type When int
+
+// The states an annotation can speak about.
+const (
+	Now    When = iota // the state the annotation describes
+	Primed             // the state on return, written x' in the annotation
+	Old                // the state on function entry, written old(x)
+)
+
+// Step is one step of a path: the selection of a field, of the element at
+// Index, or, as the last step, of the length.
+type Step struct {
+	Field string
+	Index *Term
+	Len   bool
+}
+
 // Env supplies the meaning of program names that occur in an annotation.
 type Env interface {
-	// Var returns the value of a program variable; primed asks for the
-	// post-state value written x' in the annotation.
-	Var(name string, primed bool) (*Term, error)
-	// Old returns the value a parameter had on function entry.
-	Old(name string) (*Term, error)
+	// Path returns the value reached from a program variable by selecting
+	// fields and elements.
+	Path(root string, steps []Step, when When) (*Term, error)
+	// Relation returns a formula about the identity of the pointers or
+	// slices that paths lead to: "fresh" states that what one path refers to
+	// was created during the call, and "within" that the first of two slices
+	// lies inside the second.
+	Relation(name string, paths []Path) (*Term, error)
+}
+
+// Path is a path together with the state it is read in.
+type Path struct {
+	Root  string
+	Steps []Step
+	When  When
 }
 
 // PredDef is a resolved user-defined predicate.
@@ -80,7 +108,7 @@ func fail(format string, args ...any) {
 func (s *scope) expect(n *Node, want Sort) *Term {
 	t := s.term(n)
 	if t.Sort != want {
-		fail("expected %s but %s has type %s", describe(want), t, t.Sort)
+		fail("expected %s but %s has type %s", describe(want), n, t.Sort)
 	}
 	return t
 }
@@ -106,14 +134,12 @@ func (s *scope) term(n *Node) *Term {
 		return Bytes(n.Name)
 	case NBool:
 		return BoolLit(n.Val == 1)
-	case NIdent:
-		return s.name(n)
+	case NIdent, NField, NIndex:
+		return s.access(n, Now)
 	case NCall:
 		return s.call(n)
-	case NIndex:
-		return Select(s.seq(n.Kids[0]), s.expect(n.Kids[1], Int))
 	case NLen:
-		return Len(s.seq(n.Kids[0]))
+		return s.length(n.Kids[0])
 	case NUnary:
 		if n.Op == "-" {
 			return Neg(s.expect(n.Kids[0], Int))
@@ -137,22 +163,79 @@ func (s *scope) term(n *Node) *Term {
 func (s *scope) seq(n *Node) *Term {
 	t := s.term(n)
 	if !t.Sort.IsSeq() {
-		fail("%s has type %s, not a slice", t, t.Sort)
+		fail("%s has type %s, not a slice", n, t.Sort)
 	}
 	return t
 }
 
-func (s *scope) name(n *Node) *Term {
-	if t, ok := s.bound[n.Name]; ok {
-		if n.Primed {
-			fail("%s' is not a program variable and cannot be primed", n.Name)
+// length resolves |x|. The length of something reached from a program
+// variable is asked of the environment, which also knows the length of a
+// slice whose elements have no value in the logic.
+func (s *scope) length(n *Node) *Term {
+	root, steps, primed := s.path(n)
+	_, bound := s.bound[root.Name]
+	if (n.Kind != NIdent && n.Kind != NField && n.Kind != NIndex) || root.Kind != NIdent || bound || s.env == nil {
+		return Len(s.seq(n))
+	}
+	t, err := s.env.Path(root.Name, append(steps, Step{Len: true}), map[bool]When{true: Primed}[primed])
+	if err != nil {
+		panic(resolveError{err})
+	}
+	return t
+}
+
+// path splits a chain of field selections and indexing into the node it
+// starts from and its steps, and reports whether any part of it is primed.
+func (s *scope) path(n *Node) (root *Node, steps []Step, primed bool) {
+	switch n.Kind {
+	case NField:
+		root, steps, primed = s.path(n.Kids[0])
+		return root, append(steps, Step{Field: n.Name}), primed || n.Primed
+	case NIndex:
+		root, steps, primed = s.path(n.Kids[0])
+		return root, append(steps, Step{Index: s.expect(n.Kids[1], Int)}), primed
+	}
+	return n, nil, n.Kind == NIdent && n.Primed
+}
+
+// access resolves a name, possibly followed by field selections and
+// indexing. A path that starts at a program variable is handed to the
+// environment as a whole, since only the program knows its fields; anything
+// else can only be indexed.
+func (s *scope) access(n *Node, when When) *Term {
+	root, steps, primed := s.path(n)
+	_, bound := s.bound[root.Name]
+	if root.Kind != NIdent || bound {
+		var base *Term
+		switch {
+		case root.Kind != NIdent:
+			base = s.term(root)
+		case primed:
+			fail("%s' is not a program variable and cannot be primed", root.Name)
+		default:
+			base = s.bound[root.Name]
 		}
-		return t
+		for _, step := range steps {
+			if step.Field != "" {
+				fail("%s has no field %s", root, step.Field)
+			}
+			if !base.Sort.IsSeq() {
+				fail("%s has type %s and cannot be indexed", root, base.Sort)
+			}
+			base = Select(base, step.Index)
+		}
+		return base
 	}
 	if s.env == nil {
-		fail("unknown name %s in predicate definition; predicates may only mention their parameters", n.Name)
+		fail("unknown name %s in predicate definition; predicates may only mention their parameters", root.Name)
 	}
-	t, err := s.env.Var(n.Name, n.Primed)
+	if primed {
+		if when == Old {
+			fail("old(%s) is the value on entry and cannot be primed", root.Name)
+		}
+		when = Primed
+	}
+	t, err := s.env.Path(root.Name, steps, when)
 	if err != nil {
 		panic(resolveError{err})
 	}
@@ -167,15 +250,27 @@ func (s *scope) call(n *Node) *Term {
 		if len(n.Kids) != 1 {
 			fail("len takes exactly one argument")
 		}
-		return Len(s.seq(n.Kids[0]))
-	case "old":
-		if len(n.Kids) != 1 || n.Kids[0].Kind != NIdent || n.Kids[0].Primed {
-			fail("old takes exactly one parameter name, as in old(A)")
-		}
+		return s.length(n.Kids[0])
+	case "old", "fresh", "within":
 		if s.env == nil {
-			fail("old cannot be used in a predicate definition")
+			fail("%s cannot be used in a predicate definition", n.Name)
 		}
-		t, err := s.env.Old(n.Kids[0].Name)
+		if want := map[string]int{"within": 2}[n.Name]; len(n.Kids) != max(want, 1) {
+			fail("%s takes %d argument(s), as in %s", n.Name, max(want, 1),
+				map[string]string{"old": "old(A)", "fresh": "fresh(result)", "within": "within(s.items', s.items)"}[n.Name])
+		}
+		var paths []Path
+		for _, kid := range n.Kids {
+			root, steps, primed := s.path(kid)
+			if _, bound := s.bound[root.Name]; root.Kind != NIdent || bound || (primed && n.Name != "within") {
+				fail("%s takes a parameter or something reached from one, as in %s(A) or %s(s.items)", n.Name, n.Name, n.Name)
+			}
+			paths = append(paths, Path{root.Name, steps, map[bool]When{true: Primed}[primed]})
+		}
+		if n.Name == "old" {
+			return s.access(n.Kids[0], Old)
+		}
+		t, err := s.env.Relation(n.Name, paths)
 		if err != nil {
 			panic(resolveError{err})
 		}
@@ -246,8 +341,15 @@ func (s *scope) compare(op string, left, right *Node) *Term {
 		return Select(s.seq(n.Kids[0]), index)
 	}
 	a, b := operand(left), operand(right)
+	// nil is written the same for an error and for a pointer.
+	switch {
+	case a == NilErr() && b.Sort == Ref:
+		a = RefLit(0)
+	case b == NilErr() && a.Sort == Ref:
+		b = RefLit(0)
+	}
 	if a.Sort != b.Sort {
-		fail("cannot compare %s (%s) with %s (%s)", a, a.Sort, b, b.Sort)
+		fail("cannot compare %s (%s) with %s (%s)", plain(left), a.Sort, plain(right), b.Sort)
 	}
 	result := s.relation(op, a, b)
 	if len(vars) == 0 {
@@ -258,6 +360,15 @@ func (s *scope) compare(op string, left, right *Node) *Term {
 		result = Forall(vars[i], result)
 	}
 	return result
+}
+
+// plain spells an operand of a comparison; of a slice range it names the
+// slice, whose elements are what is compared.
+func plain(n *Node) string {
+	if n.Kind == NRange {
+		return "the elements of " + n.Kids[0].String()
+	}
+	return n.String()
 }
 
 // relation builds a comparison between two terms of the same sort. Slices
@@ -275,6 +386,8 @@ func (s *scope) relation(op string, a, b *Term) *Term {
 		fail("an error can only be compared with nil")
 	case a.Sort == Bool && equality:
 		result = Iff(a, b)
+	case a.Sort == Ref && equality:
+		result = Eq(a, b)
 	case a.Sort != Int:
 		fail("operator %s cannot be applied to %s values", op, a.Sort)
 	case equality:
@@ -346,7 +459,7 @@ func (r *Resolver) Define(decls []*PredDecl) []DefineError {
 	var errs []DefineError
 	byName := map[string]*PredDecl{}
 	for _, decl := range decls {
-		if _, dup := byName[decl.Name]; dup || decl.Name == "len" || decl.Name == "old" {
+		if _, dup := byName[decl.Name]; dup || decl.Name == "len" || decl.Name == "old" || decl.Name == "fresh" || decl.Name == "within" {
 			errs = append(errs, DefineError{decl, fmt.Errorf("predicate %s is already defined", decl.Name)})
 			continue
 		}

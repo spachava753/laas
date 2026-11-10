@@ -11,48 +11,47 @@ import (
 // Sort is the type of a logical term.
 type Sort int
 
-// The sorts of the logic. Integers are mathematical (unbounded) integers and
-// sequences are the value model of Go slices and strings. Float and Err are
-// opaque: a float has no known properties at all, and an error has exactly
-// one, whether it is nil.
+// The sorts of the logic. Integers are mathematical (unbounded) integers.
+// Float and Err are opaque: a float has no known properties at all, and an
+// error has exactly one, whether it is nil. A Ref is the identity of an
+// object in memory; the logic treats it as a number, and nil is zero.
+//
+// A sequence sort is its element sort plus seqStep for each level, so
+// sequences nest to any depth: a sequence of integers models a slice or a
+// string, and a sequence indexed by Ref models the part of memory that holds
+// one field of every object of a type.
 const (
 	Int Sort = iota
 	Bool
-	IntSeq
-	BoolSeq
 	Float
 	Err
-	FloatSeq
+	Ref
+	seqStep
+
+	IntSeq   = Int + seqStep
+	BoolSeq  = Bool + seqStep
+	FloatSeq = Float + seqStep
 )
 
 // IsSeq reports whether the sort is a sequence sort.
-func (s Sort) IsSeq() bool { return s == IntSeq || s == BoolSeq || s == FloatSeq }
+func (s Sort) IsSeq() bool { return s >= seqStep }
 
 // Elem returns the element sort of a sequence sort.
-func (s Sort) Elem() Sort {
-	switch s {
-	case BoolSeq:
-		return Bool
-	case FloatSeq:
-		return Float
-	}
-	return Int
-}
+func (s Sort) Elem() Sort { return s - seqStep }
 
 // SeqOf returns the sequence sort with the given element sort.
-func SeqOf(elem Sort) Sort {
-	switch elem {
-	case Bool:
-		return BoolSeq
-	case Float:
-		return FloatSeq
-	}
-	return IntSeq
-}
+func SeqOf(elem Sort) Sort { return elem + seqStep }
+
+// Numeric reports whether terms of the sort are numbers to the solver:
+// integers and references.
+func (s Sort) Numeric() bool { return s == Int || s == Ref }
 
 // String returns the Go-flavoured name of the sort.
 func (s Sort) String() string {
-	return [...]string{"int", "bool", "[]int", "[]bool", "float", "error", "[]float"}[s]
+	if s.IsSeq() {
+		return "[]" + s.Elem().String()
+	}
+	return [...]string{"int", "bool", "float", "error", "pointer"}[s]
 }
 
 // Op identifies the head symbol of a term.
@@ -191,6 +190,9 @@ func Concat(a, b *Term) *Term { return node(OpConcat, a.Sort, a, b) }
 func Subseq(seq, lo, hi *Term) *Term { return node(OpSub, seq.Sort, seq, lo, hi) }
 
 var nilErr = &Term{Op: OpConst, Sort: Err, Name: "nil"}
+
+// RefLit returns the reference with the given number. Number zero is nil.
+func RefLit(v int64) *Term { return &Term{Op: OpIntLit, Sort: Ref, Val: v} }
 
 // NilErr returns the nil error.
 func NilErr() *Term { return nilErr }

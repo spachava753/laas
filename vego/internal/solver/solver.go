@@ -63,6 +63,7 @@ func Prove(hyps []*logic.Term, goal *logic.Term, opts Options) (result Result) {
 		linCache: map[*logic.Term]poly{},
 		bound:    map[*logic.Term]bool{},
 		triggers: map[*logic.Term][]trigger{},
+		bases:    map[int]string{},
 	}
 	if p.maxSteps == 0 {
 		p.maxSteps = defaultMaxSteps
@@ -83,6 +84,7 @@ func Prove(hyps []*logic.Term, goal *logic.Term, opts Options) (result Result) {
 		inst:     map[string]bool{},
 		unfolded: map[int]bool{},
 		acked:    map[[2]int]bool{},
+		dirty:    map[string]bool{},
 	}
 	for _, hyp := range hyps {
 		p.add(b, hyp, 0)
@@ -106,11 +108,14 @@ type prover struct {
 	linCache  map[*logic.Term]poly
 	bound     map[*logic.Term]bool
 	triggers  map[*logic.Term][]trigger
+	bases     map[int]string
 }
 
 type clause struct {
 	disj []*logic.Term
 	gen  int
+	// seen is set once every disjunct has been tested against the branch.
+	seen bool
 }
 
 type quantified struct {
@@ -134,6 +139,19 @@ type branch struct {
 	acked     map[[2]int]bool
 	instances int
 	products  int
+	// dirty holds the unknowns of the arithmetic facts added since the
+	// clauses were last tested against the branch.
+	dirty map[string]bool
+	// parts is the partition of the arithmetic facts, until one is added.
+	parts *partition
+}
+
+// touch records that an arithmetic fact about the unknowns of pl was added.
+func (b *branch) touch(pl poly) {
+	b.parts = nil
+	for mono := range pl.m {
+		b.dirty[mono] = true
+	}
 }
 
 func (b *branch) clone() *branch {
@@ -142,6 +160,7 @@ func (b *branch) clone() *branch {
 	c.clauses, c.foralls = slices.Clone(b.clauses), slices.Clone(b.foralls)
 	c.bools, c.seen, c.monos = maps.Clone(b.bools), maps.Clone(b.seen), maps.Clone(b.monos)
 	c.inst, c.unfolded, c.acked = maps.Clone(b.inst), maps.Clone(b.unfolded), maps.Clone(b.acked)
+	c.dirty = maps.Clone(b.dirty)
 	return &c
 }
 
@@ -169,6 +188,14 @@ func (p *prover) reduce(t *logic.Term) *logic.Term {
 	case logic.OpSelect:
 		seq, index := t.Args[0], t.Args[1]
 		switch seq.Op {
+		case logic.OpSelect:
+			// The sequence is itself read out of a sequence of sequences.
+			if inner := p.reduce(seq); inner != seq {
+				return p.reduce(logic.Select(inner, index))
+			}
+			if hit, written, missed, ok := split(seq); ok {
+				return logic.Ite(hit, p.reduce(logic.Select(written, index)), p.reduce(logic.Select(missed, index)))
+			}
 		case logic.OpFill:
 			return seq.Args[1]
 		case logic.OpSub:
@@ -199,8 +226,30 @@ func (p *prover) reduce(t *logic.Term) *logic.Term {
 			}
 			return p.reduce(logic.Select(seq.Args[0], index))
 		}
+	case logic.OpIsNil:
+		inner := p.reduce(t.Args[0])
+		if inner.Op == logic.OpIte {
+			return logic.Ite(inner.Args[0], p.reduce(logic.IsNil(inner.Args[1])), p.reduce(logic.IsNil(inner.Args[2])))
+		}
+		if inner != t.Args[0] {
+			return p.reduce(logic.IsNil(inner))
+		}
+		// An error read after a write is the written error or the one that
+		// was there, and is nil accordingly.
+		if inner.Op == logic.OpSelect {
+			if hit, written, missed, ok := split(inner); ok {
+				return logic.Ite(hit, p.reduce(logic.IsNil(written)), p.reduce(logic.IsNil(missed)))
+			}
+		}
 	case logic.OpLen:
 		switch seq := t.Args[0]; seq.Op {
+		case logic.OpSelect:
+			if inner := p.reduce(seq); inner != seq {
+				return p.reduce(logic.Len(inner))
+			}
+			if hit, written, missed, ok := split(seq); ok {
+				return logic.Ite(hit, p.reduce(logic.Len(written)), p.reduce(logic.Len(missed)))
+			}
 		case logic.OpStore:
 			return p.reduce(logic.Len(seq.Args[0]))
 		case logic.OpFill:
@@ -223,6 +272,19 @@ func (p *prover) reduce(t *logic.Term) *logic.Term {
 		}
 	}
 	return t
+}
+
+// split takes a read of an updated sequence whose index is not known to hit
+// or miss the update, and returns the condition under which it hits, the
+// value written, and the read of the sequence before the update. It is used
+// for reads that yield a sequence, which cannot be given a name and an axiom
+// the way a read of a number can.
+func split(read *logic.Term) (hit, written, missed *logic.Term, ok bool) {
+	seq, index := read.Args[0], read.Args[1]
+	if seq.Op != logic.OpStore {
+		return nil, nil, nil, false
+	}
+	return logic.Eq(index, seq.Args[1]), seq.Args[2], logic.Select(seq.Args[0], index), true
 }
 
 // lin converts an integer term into a polynomial over atoms. Arithmetic is
@@ -280,7 +342,7 @@ func (p *prover) key(t *logic.Term) string {
 	b.WriteString(t.Name)
 	b.WriteByte('(')
 	for _, arg := range t.Args {
-		if arg.Sort == logic.Int {
+		if arg.Sort.Numeric() {
 			b.WriteString(p.lin(arg).key())
 		} else {
 			b.WriteString(p.key(arg))
@@ -391,7 +453,7 @@ func (p *prover) assert(b *branch, f *logic.Term, gen int) {
 			p.assert(b, arg, gen)
 		}
 	case logic.OpOr:
-		b.clauses = append(b.clauses, clause{f.Args, gen})
+		b.clauses = append(b.clauses, clause{disj: f.Args, gen: gen})
 	case logic.OpForall:
 		b.foralls = append(b.foralls, quantified{f, gen})
 	case logic.OpEq, logic.OpLe, logic.OpLt:
@@ -399,8 +461,10 @@ func (p *prover) assert(b *branch, f *logic.Term, gen int) {
 		switch {
 		case !pl.isConst() && equality:
 			b.eqs = append(b.eqs, pl)
+			b.touch(pl)
 		case !pl.isConst():
 			b.les = append(b.les, pl)
+			b.touch(pl)
 		case pl.c.Sign() > 0 || (equality && pl.c.Sign() != 0):
 			b.conflict = true
 		}
@@ -485,7 +549,9 @@ func (p *prover) axioms(b *branch, t *logic.Term, gen int) {
 		p.add(b, logic.Implies(hit, logic.Eq(t, seq.Args[len(seq.Args)-1])), gen)
 		p.add(b, logic.Or(hit, logic.Eq(t, logic.Select(seq.Args[0], index))), gen)
 	case logic.OpIte:
-		if t.Sort != logic.Int {
+		// A conditional formula is taken apart where it is asserted, and one
+		// that yields a sequence never survives reduction.
+		if t.Sort == logic.Bool || t.Sort.IsSeq() {
 			return
 		}
 		p.add(b, logic.Implies(t.Args[0], logic.Eq(t, t.Args[1])), gen)
@@ -552,10 +618,8 @@ func (p *prover) falsified(b *branch, f *logic.Term) bool {
 		switch {
 		case pl.isConst():
 			return pl.c.Sign() > 0 || (equality && pl.c.Sign() != 0)
-		case equality:
-			return p.infeasible(append(slices.Clip(b.eqs), pl), b.les)
 		}
-		return p.infeasible(b.eqs, append(slices.Clip(b.les), pl))
+		return p.contradicts(b, pl, equality)
 	case logic.OpNot:
 		positive, known := b.bools[p.atom(f.Args[0])]
 		return known && positive
@@ -590,12 +654,38 @@ func (p *prover) entailed(b *branch, f *logic.Term) bool {
 // propagate removes the disjuncts that the branch contradicts from every
 // clause. A clause left with one disjunct is asserted, and a clause left with
 // none closes the branch. It reports whether the branch learned anything.
+//
+// An arithmetic disjunct that was not contradicted before can only be
+// contradicted now if a fact was added about its unknowns or about unknowns
+// connected to them, so only those disjuncts are tested again.
 func (p *prover) propagate(b *branch) bool {
+	find := p.parts(b).find
+	changed := map[string]bool{}
+	for mono := range b.dirty {
+		changed[find(mono)] = true
+	}
+	b.dirty = map[string]bool{}
+	var stale func(d *logic.Term) bool
+	stale = func(d *logic.Term) bool {
+		switch d.Op {
+		case logic.OpEq, logic.OpLe, logic.OpLt:
+			pl, _ := p.constraint(d)
+			for mono := range pl.m {
+				if changed[find(mono)] {
+					return true
+				}
+			}
+			return pl.isConst()
+		case logic.OpAnd, logic.OpOr:
+			return slices.ContainsFunc(d.Args, stale)
+		}
+		return true
+	}
 	var kept, units []clause
 	for _, c := range b.clauses {
 		var live []*logic.Term
 		for _, d := range c.disj {
-			if !p.falsified(b, d) {
+			if (c.seen && !stale(d)) || !p.falsified(b, d) {
 				live = append(live, d)
 			}
 		}
@@ -604,9 +694,9 @@ func (p *prover) propagate(b *branch) bool {
 			b.conflict = true
 			return true
 		case 1:
-			units = append(units, clause{live, c.gen})
+			units = append(units, clause{disj: live, gen: c.gen})
 		default:
-			kept = append(kept, clause{live, c.gen})
+			kept = append(kept, clause{disj: live, gen: c.gen, seen: true})
 		}
 	}
 	b.clauses = kept
@@ -621,7 +711,7 @@ func (p *prover) propagate(b *branch) bool {
 // remaining clause and requires every case to be refuted.
 func (p *prover) refute(b *branch) bool {
 	for {
-		if b.conflict || p.infeasible(b.eqs, b.les) {
+		if b.conflict || p.infeasible(b) {
 			return true
 		}
 		if !p.propagate(b) && !p.expand(b) {
@@ -754,9 +844,10 @@ func (p *prover) products(b *branch) {
 			key := "sign|" + atom + "|" + strconv.FormatInt(sign, 10)
 			// sign*x >= 0 holds when sign*x <= -1 is infeasible.
 			opposite := constPoly(1).add(monomialPoly(atom), sign)
-			if !b.inst[key] && p.infeasible(b.eqs, append(slices.Clip(b.les), opposite)) {
+			if !b.inst[key] && p.contradicts(b, opposite, false) {
 				b.inst[key] = true
 				b.les = append(b.les, constPoly(0).add(monomialPoly(atom), -sign))
+				b.touch(monomialPoly(atom))
 			}
 		}
 	}
@@ -794,6 +885,7 @@ func (p *prover) products(b *branch) {
 			if relevant(product) && record("product|"+first.key()+"|"+second.key()) {
 				b.products++
 				b.les = append(b.les, constPoly(0).add(product, -1))
+				b.touch(product)
 			}
 		}
 	}
@@ -806,6 +898,7 @@ func (p *prover) products(b *branch) {
 			if relevant(product) && record("product|"+b.eqs[i].key()+"|="+atom) {
 				b.products++
 				b.eqs = append(b.eqs, product)
+				b.touch(product)
 			}
 		}
 	}
@@ -814,16 +907,27 @@ func (p *prover) products(b *branch) {
 // trigger describes an argument position inside a quantified body where the
 // bound variable x occurs as sign*x + rest. A ground atom with the same head
 // and argument value g suggests the instance x = sign*(g - rest).
+//
+// base is set for a read of a sequence that does not itself depend on the
+// bound variable; the trigger then matches reads of that sequence only. A
+// fact about one slice is not instantiated at the indices of every other.
 type trigger struct {
 	head string
+	base string
 	arg  int
 	sign int64
 	rest poly
 }
 
+// head names the kind of atom a trigger matches. Reads indexed by a reference
+// are kept apart from reads indexed by an integer, so that an address is never
+// tried as a slice index.
 func head(t *logic.Term) string {
-	if t.Op == logic.OpPred {
+	switch {
+	case t.Op == logic.OpPred:
 		return "pred " + t.Name
+	case t.Args[1].Sort == logic.Ref:
+		return "deref"
 	}
 	return "select"
 }
@@ -838,6 +942,13 @@ func (p *prover) triggersOf(fact *logic.Term) []trigger {
 	var found []trigger
 	var walk func(t *logic.Term)
 	walk = func(t *logic.Term) {
+		// Ground atoms are recorded in reduced form, so a trigger has to
+		// be read off the reduced form too: a read of a subsequence is a
+		// read of the whole sequence at a shifted index.
+		if reduced := p.reduce(t); reduced != t {
+			walk(reduced)
+			return
+		}
 		for _, arg := range t.Args {
 			walk(arg)
 		}
@@ -862,13 +973,27 @@ func (p *prover) triggersOf(fact *logic.Term) []trigger {
 				}
 			}
 			if usable {
-				found = append(found, trigger{head(t), i, sign, rest})
+				trig := trigger{head: head(t), arg: i, sign: sign, rest: rest}
+				if t.Op == logic.OpSelect && !p.hasBound(t.Args[0]) {
+					trig.base = p.key(t.Args[0])
+				}
+				found = append(found, trig)
 			}
 		}
 	}
 	walk(fact.Args[1])
 	p.triggers[fact] = found
 	return found
+}
+
+// baseKey returns the key of the sequence that a read atom reads.
+func (p *prover) baseKey(id int) string {
+	if key, ok := p.bases[id]; ok {
+		return key
+	}
+	key := p.key(p.atomTerms[id].Args[0])
+	p.bases[id] = key
+	return key
 }
 
 // instantiate adds instances of one quantified fact for the ground atoms that
@@ -888,7 +1013,7 @@ func (p *prover) instantiate(b *branch, index int, atoms []int) {
 			continue
 		}
 		for _, trig := range triggers {
-			if trig.head != head(t) || b.instances >= maxInstances {
+			if trig.head != head(t) || b.instances >= maxInstances || (trig.base != "" && trig.base != p.baseKey(id)) {
 				continue
 			}
 			value := p.lin(t.Args[trig.arg]).add(trig.rest, -1)
@@ -906,8 +1031,37 @@ func (p *prover) instantiate(b *branch, index int, atoms []int) {
 	}
 }
 
+// indices flattens an atom into the group of atoms it must be consistent
+// with and the numeric arguments that tell the atoms of a group apart. A read
+// of a sequence that was itself read out of a sequence of sequences has both
+// indices as arguments.
+func (p *prover) indices(t *logic.Term) (group string, args []*logic.Term) {
+	var b strings.Builder
+	if t.Op == logic.OpPred {
+		b.WriteString(head(t))
+		for _, arg := range t.Args {
+			if arg.Sort.Numeric() {
+				args = append(args, arg)
+			} else {
+				b.WriteString(p.key(arg))
+			}
+			b.WriteByte(',')
+		}
+		return b.String(), args
+	}
+	base := t
+	for base.Op == logic.OpSelect {
+		args = append(args, base.Args[1])
+		base = base.Args[0]
+	}
+	b.WriteString("select ")
+	b.WriteString(strconv.Itoa(len(args)))
+	b.WriteString(p.key(base))
+	return b.String(), args
+}
+
 // ackermann adds functional consistency: two reads of the same sequence, or
-// two applications of the same predicate, agree whenever their integer
+// two applications of the same predicate, agree whenever their numeric
 // arguments are equal.
 func (p *prover) ackermann(b *branch, atoms []int) {
 	groups := map[string][]int{}
@@ -916,15 +1070,8 @@ func (p *prover) ackermann(b *branch, atoms []int) {
 		if t.Op != logic.OpSelect && t.Op != logic.OpPred {
 			continue
 		}
-		var group strings.Builder
-		group.WriteString(head(t))
-		for _, arg := range t.Args {
-			if arg.Sort != logic.Int {
-				group.WriteString(p.key(arg))
-			}
-			group.WriteByte(',')
-		}
-		groups[group.String()] = append(groups[group.String()], id)
+		group, _ := p.indices(t)
+		groups[group] = append(groups[group], id)
 	}
 	names := slices.Sorted(maps.Keys(groups))
 	for _, name := range names {
@@ -942,15 +1089,14 @@ func (p *prover) ackermann(b *branch, atoms []int) {
 	}
 }
 
-// consistency asserts that x and y agree unless some integer argument differs.
+// consistency asserts that x and y agree unless some numeric argument differs.
 // Nothing is added when two arguments differ by a non-zero constant.
 func (p *prover) consistency(b *branch, x, y *logic.Term, gen int) {
+	_, xs := p.indices(x)
+	_, ys := p.indices(y)
 	var disjuncts []*logic.Term
-	for i, arg := range x.Args {
-		if arg.Sort != logic.Int {
-			continue
-		}
-		other := y.Args[i]
+	for i, arg := range xs {
+		other := ys[i]
 		distance := p.lin(arg).add(p.lin(other), -1)
 		if distance.isConst() {
 			if distance.c.Sign() != 0 {
