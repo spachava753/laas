@@ -113,6 +113,22 @@ func (v *fnVerifier) evalAs(e ast.Expr, want types.Type, st *state, guard []*log
 	return zeroValue(want)
 }
 
+// settled returns a value fit to be put into memory. Everything in memory is
+// taken to be a value of its type, but a value computed on the right of &&
+// or || was only checked on condition that it is evaluated at all. Such a
+// value is replaced by an unknown one of the type that equals it under that
+// condition.
+func (v *fnVerifier) settled(st *state, guard []*logic.Term, val value, t types.Type) value {
+	if len(guard) == 0 {
+		return val
+	}
+	stored := v.unknown("stored", t, st)
+	for i := range stored {
+		st.assume(logic.Implies(logic.And(guard...), v.same(stored[i], val[i])))
+	}
+	return stored
+}
+
 // object reads every field of the object a pointer refers to.
 func (v *fnVerifier) object(st *state, t types.Type, ref *logic.Term) value {
 	leaves, _ := layoutOf(t)
@@ -296,7 +312,7 @@ func (v *fnVerifier) literal(e *ast.CompositeLit, t types.Type, st *state, guard
 			if !ok {
 				v.unsupported(element.Pos(), fmt.Sprintf("field %s has unsupported type %s", u.Field(index).Name(), u.Field(index).Type()))
 			}
-			copy(val[lo:], v.evalAs(initial, u.Field(index).Type(), st, guard))
+			copy(val[lo:], v.settled(st, guard, v.evalAs(initial, u.Field(index).Type(), st, guard), u.Field(index).Type()))
 		}
 		return val
 	case *types.Slice:
@@ -312,7 +328,7 @@ func (v *fnVerifier) literal(e *ast.CompositeLit, t types.Type, st *state, guard
 			if _, keyed := element.(*ast.KeyValueExpr); keyed {
 				v.unsupported(element.Pos(), "keyed slice literals are not supported")
 			}
-			val := v.evalAs(element, u.Elem(), st, guard)
+			val := v.settled(st, guard, v.evalAs(element, u.Elem(), st, guard), u.Elem())
 			for i := range leaves {
 				rows[i] = logic.Push(rows[i], val[i])
 			}
@@ -361,7 +377,7 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) v
 		// new takes a type, or a value to start from.
 		initial := zeroValue(t)
 		if !v.info.Types[e.Args[0]].IsType() {
-			initial = v.eval(e.Args[0], st, guard)
+			initial = v.settled(st, guard, v.eval(e.Args[0], st, guard), t)
 		}
 		return v.newObject(st, t, initial)
 	case builtin("make"):
@@ -422,7 +438,7 @@ func sameMemory(from, to types.Type) bool {
 		b, ok := to.Underlying().(*types.Pointer)
 		return ok && typeKey(a.Elem()) == typeKey(b.Elem())
 	case *types.Map:
-		return typeKey(from.Underlying()) == typeKey(to.Underlying())
+		return mapOwner(from) == mapOwner(to)
 	case *types.Slice:
 		b, ok := to.Underlying().(*types.Slice)
 		return ok && typeKey(a.Elem()) == typeKey(b.Elem())

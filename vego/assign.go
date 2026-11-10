@@ -244,7 +244,12 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
 		// v, ok := m[k]
 		read := ast.Unparen(s.Rhs[0]).(*ast.IndexExpr)
 		t := v.info.TypeOf(read.X)
-		keyType, _ := mapParts(t)
+		keyType, elem := mapParts(t)
+		// As for the results of a call, the value must have the type of
+		// what it is assigned to.
+		if want := wanted(targets)[0]; want != nil && !types.Identical(want, elem) {
+			v.unsupported(s.Pos(), fmt.Sprintf("converting a %s to a %s is not supported here; assign the value to a variable of its own type first", elem, want))
+		}
 		ref, key := v.expr(read.X, st, nil), v.evalAs(read.Index, keyType, st, nil)[0]
 		values = []value{v.mapValue(st, st.mem, t, ref, key), {v.mapHas(st, st.mem, t, ref, key)}}
 	case len(s.Rhs) == 1 && len(s.Lhs) > 1:

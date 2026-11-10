@@ -246,3 +246,93 @@ func WrongStringKeys(a, b string) int {
 }
 
 //@ Ensures result = 1
+
+// Named is a map type with a name, which converts to the plain map type
+// and stays the same map.
+type Named map[int]int
+
+// NamedShares writes through one type and reads through the other.
+func NamedShares() int {
+	a := Named{0: 0}
+	b := map[int]int(a)
+	b[0] = 1
+	return a[0] // want `vego: postcondition may not hold: result = 0`
+}
+
+//@ Ensures result = 0
+
+// NamedAssigned does the same without writing the conversion.
+func NamedAssigned() int {
+	a := Named{0: 0}
+	var b map[int]int = a
+	b[0] = 1
+	return a[0]
+}
+
+//@ Ensures result = 1
+
+type wrapped struct{ e error }
+
+func (wrapped) Error() string { return "wrapped" }
+
+// BoxesValue lets a struct read from a map become an error.
+func BoxesValue() bool {
+	var m map[int]wrapped
+	var e error
+	e, _ = m[0] // want `vego: cannot verify BoxesValue: converting a mapping.wrapped to a error is not supported here`
+	return e == nil
+}
+
+//@ Ensures result = True
+
+// SkippedLiteral builds a map on the right of &&, where the value it stores
+// was only checked on condition that it is evaluated.
+//
+// @ Requires x = MaxInt
+func SkippedLiteral(x int) int {
+	_ = false && map[int]int{0: x + 1}[0] == 0
+	return 1 // want `vego: postcondition may not hold: result = 0`
+}
+
+//@ Ensures result = 0
+
+// SkippedSlice does the same with a slice.
+//
+// @ Requires x = MaxInt
+func SkippedSlice(x int) int {
+	_ = false && []int{x + 1}[0] == 0
+	return 1 // want `vego: postcondition may not hold: result = 0`
+}
+
+//@ Ensures result = 0
+
+// Tree is a map type that has itself as its value type.
+type Tree map[int]Tree
+
+// Depth reads such a map.
+func Depth(t Tree) int {
+	if len(t[0]) > 0 {
+		return 2
+	}
+	return 1
+}
+
+//@ Ensures 1 <= result <= 2
+
+func readyBytes(m map[int]byte) error { return nil }
+
+func twoBytes() map[int]byte {
+	return map[int]byte{0: 0, 1: 0}
+}
+
+//@ Ensures result != nil And |result| = 2
+
+// AlwaysFailsAfterReadyBytes calls a function that succeeds whenever every
+// value of its map is a byte, which is always.
+func AlwaysFailsAfterReadyBytes() error { // want `vego: the contract of AlwaysFailsAfterReadyBytes would also be met by a function that always returns an error`
+	m := twoBytes()
+	_ = readyBytes(m)
+	return errMissing
+}
+
+//@ Ensures True

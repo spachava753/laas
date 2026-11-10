@@ -233,3 +233,10 @@ trusted:
   (*invariants.Log).write:
     reason: Test helper standing for an unverified method that changes its receiver.
     modifies: [l]
+
+  mapping.readyBytes:
+    reason: Test helper that succeeds when every value of its map is a byte, which is always.
+    requires:
+      - "|m| = 2"
+    ensures:
+      - "(Forall k in Z : m[k] >= 0) -> result = nil"

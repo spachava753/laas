@@ -291,6 +291,19 @@ func (v *fnVerifier) contentFacts(mem memory, val value, t types.Type, brk *logi
 			}
 		}
 		return logic.And(facts...)
+	case *types.Map:
+		// Whatever a map has for a key, present or not, is a complete value
+		// of the value type.
+		if !mapModelled(t) {
+			break
+		}
+		leaves, _ := layoutOf(u.Elem())
+		index := v.bound("k")
+		held := make(value, len(leaves))
+		for i, lf := range leaves {
+			held[i] = logic.Select(v.row(nil, mem, mapOwner(t)+"#val"+lf.path, lf, val[0]), index)
+		}
+		return logic.Forall(index, v.wellFormed(held, u.Elem(), brk))
 	case *types.Slice:
 		// Every element is a complete value of the element type: numbers in
 		// range, pointers to something that exists, slices that are slices.

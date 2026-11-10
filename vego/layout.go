@@ -105,7 +105,7 @@ func layoutOf(t types.Type) ([]leaf, bool) {
 			return one(logic.Ref)
 		}
 	case *types.Map:
-		if mapModelled(t) {
+		if mapKeyed(t) {
 			return one(logic.Ref)
 		}
 	case *types.Slice:

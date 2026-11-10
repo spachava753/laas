@@ -30,16 +30,23 @@ func mapParts(t types.Type) (key, elem types.Type) {
 	return m.Key(), m.Elem()
 }
 
-// mapModelled reports whether maps of the type are modelled: the keys must
-// be integers or strings, and the values of a modelled type.
-func mapModelled(t types.Type) bool {
-	key, elem := mapParts(t)
+// mapKeyed reports whether the keys of a map type are modelled: integers or
+// strings. A map with such keys is a value the verifier can hold, whatever
+// its values are.
+func mapKeyed(t types.Type) bool {
+	key, _ := mapParts(t)
 	basic, ok := key.Underlying().(*types.Basic)
-	if !ok || basic.Info()&(types.IsInteger|types.IsString) == 0 || basic.Kind() == types.Uintptr {
-		return false
-	}
-	_, ok = layoutOf(elem)
-	return ok
+	return ok && basic.Info()&(types.IsInteger|types.IsString) != 0 && basic.Kind() != types.Uintptr
+}
+
+// mapModelled reports whether the contents of maps of the type are
+// modelled, which also takes values of a modelled type. It is asked where a
+// map is used, not where its type is laid out, since a map type may have
+// itself as its value type.
+func mapModelled(t types.Type) bool {
+	_, elem := mapParts(t)
+	_, ok := layoutOf(elem)
+	return ok && mapKeyed(t)
 }
 
 // The leaves of the regions that say which keys a map has and how many.
@@ -48,7 +55,10 @@ var (
 	countLeaf = leaf{path: "#len", sort: logic.Int}
 )
 
-func mapOwner(t types.Type) string { return "map " + typeKey(t) }
+// mapOwner names the regions of a map type. A named map type shares them
+// with the map type it is made of, since a map converts between the two and
+// stays the same map.
+func mapOwner(t types.Type) string { return "map " + typeKey(t.Underlying()) }
 
 // mapKey turns a key into the number a map is indexed by.
 func mapKey(key *logic.Term) *logic.Term {
@@ -189,8 +199,9 @@ func (v *fnVerifier) mapLiteral(e *ast.CompositeLit, t types.Type, st *state, gu
 	keyType, elem := mapParts(t)
 	for _, element := range e.Elts {
 		pair := element.(*ast.KeyValueExpr)
-		key := v.evalAs(pair.Key, keyType, st, guard)[0]
-		v.mapStore(st, t, m[0], key, v.evalAs(pair.Value, elem, st, guard), true, pair.Pos(), "a new map is filled")
+		key := v.settled(st, guard, v.evalAs(pair.Key, keyType, st, guard), keyType)[0]
+		held := v.settled(st, guard, v.evalAs(pair.Value, elem, st, guard), elem)
+		v.mapStore(st, t, m[0], key, held, true, pair.Pos(), "a new map is filled")
 	}
 	return m
 }
