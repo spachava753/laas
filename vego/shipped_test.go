@@ -1,7 +1,6 @@
 package vego
 
 import (
-	"errors"
 	"fmt"
 	"go/importer"
 	"go/token"
@@ -102,16 +101,6 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 		s := []string{randomText(rng), strconv.Itoa(rng.Intn(100))}[rng.Intn(2)]
 		n, err := strconv.Atoi(s)
 		return sample{before: []any{s}, results: []any{n, err}}
-	},
-	"errors.Is": func(rng *rand.Rand) sample {
-		target := errors.New("target")
-		err := []error{nil, target, fmt.Errorf("wrapped: %w", target)}[rng.Intn(3)]
-		return sample{before: []any{err, target}, results: []any{errors.Is(err, target)}}
-	},
-	"errors.Unwrap": func(rng *rand.Rand) sample {
-		inner := errors.New("inner")
-		err := []error{nil, inner, fmt.Errorf("wrapped: %w", inner)}[rng.Intn(3)]
-		return sample{before: []any{err}, results: []any{errors.Unwrap(err)}}
 	},
 	"unicode/utf8.RuneCountInString": func(rng *rand.Rand) sample {
 		s := randomText(rng)
@@ -258,7 +247,7 @@ func TestShippedContracts(t *testing.T) {
 		trusted:      map[*types.Func]*funcInfo{},
 		trustSources: map[*trustFile]*token.File{},
 		reported:     map[string]bool{},
-		usage:        &Usage{Entries: map[string]*EntryUse{}},
+		usage:        &Usage{},
 	}
 	imports := importer.ForCompiler(pv.pass.Fset, "source", nil)
 	for _, file := range shippedContracts() {

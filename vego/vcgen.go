@@ -219,7 +219,7 @@ func (e *contractEnv) Var(name string, primed bool) (*logic.Term, error) {
 		}
 		return e.results[index], nil
 	}
-	return e.pv.constantNamed(e.pv.pass.Pkg.Scope().Lookup(name), name)
+	return e.pv.contractConstant(e.fn, name)
 }
 
 func (e *contractEnv) Old(name string) (*logic.Term, error) {

@@ -184,3 +184,40 @@ func Overridden(A []int) (ok bool) {
 }
 
 //@ Ensures ok = True
+
+// MaxInt here must not replace the limit that the shipped contract of
+// strings.Repeat speaks of.
+const MaxInt = 1 << 100
+
+const realMax = int(^uint(0) >> 1)
+
+// HugeRepeat asks for a string longer than any string can be.
+//
+// @ Requires n > realMax/2
+func HugeRepeat(n int) string {
+	return strings.Repeat("xx", n) // want `precondition of Repeat may not hold: \|s\| \* count <= MaxInt`
+}
+
+//@ Ensures False
+
+//@ Predicate good(n) ::= n = 1
+
+func usesPredicate() int { return 0 }
+
+// UsesPredicate relies on a trusted contract that mentions a predicate,
+// which would mean something different in every package.
+func UsesPredicate() (n int) {
+	return usesPredicate() // want `the trusted contract of trust.usesPredicate \(trusted.yaml:\d+\) cannot be used: in its ensures "good\(result\)": unknown predicate good` `cannot verify UsesPredicate: usesPredicate has a contract that could not be understood`
+}
+
+//@ Ensures n = 1
+
+func impossibleString() string { return "a" }
+
+// UsesImpossibleString relies on a contract no string can satisfy.
+func UsesImpossibleString() (b byte) {
+	s := impossibleString() // want `the trusted contract of trust.impossibleString \(trusted.yaml:\d+\) cannot be used: it contradicts itself` `cannot verify UsesImpossibleString: impossibleString has a contract that could not be understood`
+	return s[0]
+}
+
+//@ Ensures False

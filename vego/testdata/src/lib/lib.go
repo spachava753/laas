@@ -46,3 +46,22 @@ func Broken(x int) (y int) {
 
 // Unannotated is exported but not verified.
 func Unannotated(x int) int { return x }
+
+// Wrap relies on Broken, whose proof failed, so its own contract is not
+// established either, although nothing is wrong inside it.
+func Wrap(x int) (y int) {
+	return Broken(x)
+}
+
+//@ Ensures y > x
+
+const limit = 1
+
+// SafeDivide uses a constant of this package in its contract.
+//
+// @ Requires d >= limit And n >= 0
+func SafeDivide(n, d int) (q int) {
+	return n / d
+}
+
+//@ Ensures q <= n

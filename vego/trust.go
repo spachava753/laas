@@ -1,10 +1,15 @@
 package vego
 
 import (
+	"bytes"
 	"embed"
+	"errors"
 	"fmt"
 	"go/token"
 	"go/types"
+	"io"
+	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -70,15 +75,22 @@ func (f *trustFile) problem(line int, format string, args ...any) {
 // misspelt field cannot silently drop part of a contract.
 func parseTrustFile(path string, content []byte, shipped bool) *trustFile {
 	file := &trustFile{path: path, content: content, shipped: shipped, entries: map[string]*trustEntry{}}
-	var document yaml.Node
-	if err := yaml.Unmarshal(content, &document); err != nil {
+	var document, second yaml.Node
+	decoder := yaml.NewDecoder(bytes.NewReader(content))
+	if err := decoder.Decode(&document); err != nil && !errors.Is(err, io.EOF) {
 		file.problem(1, "not valid YAML: %v (a formula containing \": \", or starting with | or !, must be quoted)", err)
+		return file
+	}
+	// A second document would be ignored, and with it whatever it says.
+	if err := decoder.Decode(&second); !errors.Is(err, io.EOF) {
+		file.problem(max(second.Line, 1), "the file must hold exactly one YAML document")
 		return file
 	}
 	if len(document.Content) == 0 {
 		return file
 	}
 	root := document.Content[0]
+	file.rejectDuplicates(root)
 	if root.Kind != yaml.MappingNode {
 		file.problem(root.Line, "expected a mapping with the keys version and trusted")
 		return file
@@ -110,12 +122,30 @@ func parseTrustFile(path string, content []byte, shipped bool) *trustFile {
 	return file
 }
 
+// rejectDuplicates records every mapping key that occurs twice, anywhere in
+// the document. YAML libraries keep the last one, which would silently drop
+// the clauses of the first.
+func (f *trustFile) rejectDuplicates(node *yaml.Node) {
+	if node.Kind == yaml.MappingNode {
+		seen := map[string]bool{}
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key := node.Content[i]
+			if seen[key.Value] {
+				f.problem(key.Line, "%q occurs more than once in the same mapping", key.Value)
+			}
+			seen[key.Value] = true
+		}
+	}
+	for _, child := range node.Content {
+		f.rejectDuplicates(child)
+	}
+}
+
 // addEntry reads one contract. The reason is mandatory: it is what lets a
 // reviewer tell a checked claim from one written to silence an error.
 func (f *trustFile) addEntry(name, body *yaml.Node) {
 	entry := &trustEntry{key: name.Value, file: f, line: name.Line}
 	if _, duplicate := f.entries[entry.key]; duplicate {
-		f.problem(name.Line, "%s has more than one entry", entry.key)
 		return
 	}
 	f.entries[entry.key] = entry
@@ -179,8 +209,9 @@ var (
 	shippedTrust []*trustFile
 )
 
-// loadTrustFile reads and caches a trust file. It returns nil when the file
-// does not exist.
+// loadTrustFile reads and caches a trust file. A file that does not exist is
+// no file; one that exists but cannot be read is a problem, since falling
+// back to the shipped contracts would change what is trusted without notice.
 func loadTrustFile(path string) *trustFile {
 	trustFilesMu.Lock()
 	defer trustFilesMu.Unlock()
@@ -188,8 +219,13 @@ func loadTrustFile(path string) *trustFile {
 		return file
 	}
 	var file *trustFile
-	if content, err := os.ReadFile(path); err == nil {
+	content, err := os.ReadFile(path)
+	switch {
+	case err == nil:
 		file = parseTrustFile(path, content, false)
+	case !errors.Is(err, fs.ErrNotExist):
+		file = &trustFile{path: path, entries: map[string]*trustEntry{}}
+		file.problem(1, "cannot read the trust file: %v", err)
 	}
 	trustFiles[path] = file
 	return file
@@ -221,21 +257,23 @@ func projectTrustPath(sourceFile string) string {
 	}
 }
 
-// Usage is the result of analysing one package: which trusted contracts its
-// proofs rest on. The trust report is built from the usages of all packages.
+// Usage is the result of analysing one package: which trusted contracts
+// its proofs, and the proofs of the packages it depends on, rest on. The
+// trust report is built from the usages of the analysed packages.
 type Usage struct {
-	// ProjectFile is the project's trust file, empty when there is none.
-	ProjectFile string
-	// ProjectKeys lists every entry of the project file, used or not.
-	ProjectKeys []string
-	// Entries holds the contracts used, by function name.
-	Entries map[string]*EntryUse
+	// ProjectKeys lists, for each project trust file seen, all its entries,
+	// used or not.
+	ProjectKeys map[string][]string
+	// Entries holds the contracts used.
+	Entries []*EntryUse
 	// Constructors holds the calls to errors.New and fmt.Errorf, whose
 	// non-nil result vego knows without a contract.
 	Constructors []token.Position
 }
 
-// EntryUse describes one trusted contract and where it is relied on.
+// EntryUse describes one trusted contract and where it is relied on. Two
+// trust files may each have a contract for the same function; the file is
+// part of what identifies a contract.
 type EntryUse struct {
 	Key     string
 	Reason  string
@@ -247,6 +285,49 @@ type EntryUse struct {
 	Unpredictable bool
 	Calls         []token.Position
 }
+
+// add merges another usage into u.
+func (u *Usage) add(other *Usage) {
+	for file, keys := range other.ProjectKeys {
+		if u.ProjectKeys == nil {
+			u.ProjectKeys = map[string][]string{}
+		}
+		u.ProjectKeys[file] = keys
+	}
+	for _, position := range other.Constructors {
+		if !slices.Contains(u.Constructors, position) {
+			u.Constructors = append(u.Constructors, position)
+		}
+	}
+	for _, use := range other.Entries {
+		index := slices.IndexFunc(u.Entries, func(known *EntryUse) bool {
+			return known.Key == use.Key && known.File == use.File
+		})
+		if index < 0 {
+			copied := *use
+			copied.Calls = nil
+			u.Entries = append(u.Entries, &copied)
+			index = len(u.Entries) - 1
+		}
+		merged := u.Entries[index]
+		merged.Unpredictable = merged.Unpredictable || use.Unpredictable
+		for _, call := range use.Calls {
+			if !slices.Contains(merged.Calls, call) {
+				merged.Calls = append(merged.Calls, call)
+			}
+		}
+	}
+}
+
+// usageFact publishes the usage of a package to the packages that import
+// it, whose proofs rest on the same contracts through it.
+type usageFact struct {
+	Usage Usage
+}
+
+func (*usageFact) AFact() {}
+
+func (f *usageFact) String() string { return fmt.Sprintf("usage(%d contracts)", len(f.Usage.Entries)) }
 
 // trustPos converts a line and column of a trust file to a position, adding
 // the file to the file set on first use so that diagnostics can point at it.
@@ -270,7 +351,7 @@ func (pv *pkgVerifier) loadTrust(explicit string) {
 	if path == "" && len(pv.pass.Files) > 0 {
 		path = projectTrustPath(pv.pass.Fset.Position(pv.pass.Files[0].Pos()).Filename)
 	}
-	pv.usage = &Usage{Entries: map[string]*EntryUse{}}
+	pv.usage = &Usage{}
 	if path != "" {
 		pv.projectTrust = loadTrustFile(path)
 	}
@@ -280,14 +361,8 @@ func (pv *pkgVerifier) loadTrust(explicit string) {
 		}
 		return
 	}
-	pv.usage.ProjectFile = path
-	pv.usage.ProjectKeys = slices.Sorted(func(yield func(string) bool) {
-		for key := range pv.projectTrust.entries {
-			if !yield(key) {
-				return
-			}
-		}
-	})
+	keys := slices.Sorted(maps.Keys(pv.projectTrust.entries))
+	pv.usage.ProjectKeys = map[string][]string{path: keys}
 	for _, problem := range pv.projectTrust.problems {
 		pv.report(pv.trustPos(pv.projectTrust, problem.line, 1), "%s", problem.msg)
 	}
@@ -303,7 +378,7 @@ func (pv *pkgVerifier) loadTrust(explicit string) {
 		}
 	}
 	visit(pv.pass.Pkg)
-	for _, key := range pv.usage.ProjectKeys {
+	for _, key := range keys {
 		entry := pv.projectTrust.entries[key]
 		if pkg, name, ok := splitFuncName(key); ok && visible[pkg] != nil && !declares(visible[pkg], name) {
 			pv.report(pv.trustPos(pv.projectTrust, entry.line, 1),
@@ -392,6 +467,11 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 		return list
 	}
 	fn.requires, fn.ensures = clauses("requires", entry.requires), clauses("ensures", entry.ensures)
+	// A trusted contract means the same wherever it is used, so it may not
+	// mention the predicates or constants of whichever package calls it.
+	for _, c := range slices.Concat(fn.requires, fn.ensures) {
+		c.res = pv.plain
+	}
 	fn.modifies = map[*types.Var]bool{}
 	for _, name := range entry.modifies {
 		param, ok := fn.paramNames[name]
@@ -432,13 +512,13 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 			post[param] = logic.Const(fmt.Sprintf("out@%d", i), sort)
 			facts = append(facts, logic.Eq(logic.Len(post[param]), logic.Len(args[param])))
 		}
-		facts = append(facts, pv.typeFact(args[param], param.Type()), pv.typeFact(post[param], param.Type()))
+		facts = append(facts, pv.valueFacts(args[param], param.Type()), pv.valueFacts(post[param], param.Type()))
 	}
 	results := make([]*logic.Term, len(fn.results))
 	for i, result := range fn.results {
 		if sort, ok := sortOf(result.Type()); ok {
 			results[i] = logic.Const(fmt.Sprintf("result@%d", i), sort)
-			facts = append(facts, pv.typeFact(results[i], result.Type()))
+			facts = append(facts, pv.valueFacts(results[i], result.Type()))
 		}
 	}
 	resolve := func(c *clause, env *contractEnv) {
@@ -461,20 +541,40 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 	}
 }
 
+// valueFacts states everything a value's Go type guarantees, including, for
+// a slice or string, that every element is a value of the element type.
+func (pv *pkgVerifier) valueFacts(value *logic.Term, t types.Type) *logic.Term {
+	fact := pv.typeFact(value, t)
+	if !value.Sort.IsSeq() {
+		return fact
+	}
+	var elementType types.Type = types.Typ[types.Uint8]
+	if isSlice(t) {
+		elementType = t.Underlying().(*types.Slice).Elem()
+	}
+	index := logic.Bound("k#"+value.Name, logic.Int)
+	inRange := logic.And(logic.Le(logic.IntLit(0), index), logic.Lt(index, logic.Len(value)))
+	return logic.And(fact, logic.Forall(index, logic.Implies(inRange, pv.typeFact(logic.Select(value, index), elementType))))
+}
+
 // noteUse records that a proof relies on a trusted contract.
 func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 	entry := fn.trust
-	use := pv.usage.Entries[entry.key]
-	if use == nil {
-		use = &EntryUse{
+	index := slices.IndexFunc(pv.usage.Entries, func(use *EntryUse) bool {
+		return use.Key == entry.key && use.File == entry.file.path
+	})
+	if index < 0 {
+		pv.usage.Entries = append(pv.usage.Entries, &EntryUse{
 			Key: entry.key, Reason: entry.reason, Shipped: entry.file.shipped,
 			File: entry.file.path, Line: entry.line,
-		}
-		pv.usage.Entries[entry.key] = use
+		})
+		index = len(pv.usage.Entries) - 1
 	}
+	use := pv.usage.Entries[index]
 	position := pv.pass.Fset.Position(at)
 	if !slices.Contains(use.Calls, position) {
 		use.Calls = append(use.Calls, position)
 		sort.Slice(use.Calls, func(i, j int) bool { return use.Calls[i].String() < use.Calls[j].String() })
 	}
+	fn.use = use
 }

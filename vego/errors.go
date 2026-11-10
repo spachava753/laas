@@ -159,13 +159,14 @@ func (pv *pkgVerifier) trustForces(fn *funcInfo) bool {
 		_, ok := sortOf(t)
 		return ok
 	}
-	if slices.ContainsFunc(fn.params, func(p *types.Var) bool { return !supported(p.Type()) }) ||
-		slices.ContainsFunc(fn.results, func(r *types.Var) bool { return !supported(r.Type()) }) {
-		return false
+	// A signature with a type vego does not model cannot be shown to force
+	// success, so it counts as unpredictable like any other.
+	if !slices.ContainsFunc(fn.params, func(p *types.Var) bool { return !supported(p.Type()) }) &&
+		!slices.ContainsFunc(fn.results, func(r *types.Var) bool { return !supported(r.Type()) }) {
+		pv.run(fn, func(v *fnVerifier) { forces = v.forcesSuccess() })
 	}
-	pv.run(fn, func(v *fnVerifier) { forces = v.forcesSuccess() })
-	if use := pv.usage.Entries[fn.trust.key]; use != nil {
-		use.Unpredictable = !forces
+	if fn.use != nil && len(errorResults(fn)) > 0 {
+		fn.use.Unpredictable = !forces
 	}
 	return forces
 }

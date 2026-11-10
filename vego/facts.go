@@ -3,6 +3,8 @@ package vego
 import (
 	"fmt"
 	"go/types"
+	"math/big"
+	"slices"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 )
@@ -18,9 +20,13 @@ type contractFact struct {
 	// Excused is set when the function may fail unpredictably; see
 	// reportAlwaysFailing.
 	Excused bool
-	// Verified is cleared when verification of the function reported a
-	// problem. Its contract is then not established and must not be used.
+	// Verified is cleared when verification of the function, or of a
+	// function of its package that its proof relies on, reported a problem.
+	// Its contract is then not established and must not be used.
 	Verified bool
+	// Consts holds the values of the package constants the contract
+	// mentions, so that it means the same in every package that reads it.
+	Consts map[string]string
 }
 
 func (*contractFact) AFact() {}
@@ -45,20 +51,48 @@ func (pv *pkgVerifier) exportContracts(excused map[*funcInfo]bool) {
 	if len(pv.predicateTexts) > 0 {
 		pv.pass.ExportPackageFact(&predicatesFact{Decls: pv.predicateTexts})
 	}
+	// A proof that used the contract of a function whose own proof failed
+	// establishes nothing, so failure spreads from callee to caller until
+	// nothing changes; that covers recursion and any order of declaration.
+	unverified := map[*funcInfo]bool{}
+	for changed := true; changed; {
+		changed = false
+		for _, fn := range pv.order {
+			result := pv.outcomes[fn]
+			failed := result == nil || !result.complete || fn.failed || fn.broken ||
+				slices.ContainsFunc(fn.callees, func(callee *funcInfo) bool { return unverified[callee] })
+			if fn.annotated() && failed && !unverified[fn] {
+				unverified[fn], changed = true, true
+			}
+		}
+	}
 	for _, fn := range pv.order {
 		if !fn.annotated() || !fn.obj.Exported() || fn.decl.Recv != nil {
 			continue
 		}
-		result := pv.outcomes[fn]
-		fact := &contractFact{
-			Excused:  excused[fn],
-			Verified: result != nil && result.complete && !fn.failed && !fn.broken,
+		fact := &contractFact{Excused: excused[fn], Verified: !unverified[fn], Consts: map[string]string{}}
+		capture := func(c *clause) string {
+			var visit func(n *logic.Node)
+			visit = func(n *logic.Node) {
+				if constant, ok := pv.pass.Pkg.Scope().Lookup(n.Name).(*types.Const); ok && n.Kind == logic.NIdent {
+					if literal, ok := literalOf(constant.Val()); ok {
+						fact.Consts[n.Name] = literal.String()
+					}
+				}
+				for _, kid := range n.Kids {
+					visit(kid)
+				}
+			}
+			if c.node != nil {
+				visit(c.node)
+			}
+			return c.text
 		}
 		for _, c := range fn.requires {
-			fact.Requires = append(fact.Requires, c.text)
+			fact.Requires = append(fact.Requires, capture(c))
 		}
 		for _, c := range fn.ensures {
-			fact.Ensures = append(fact.Ensures, c.text)
+			fact.Ensures = append(fact.Ensures, capture(c))
 		}
 		for _, param := range fn.params {
 			fact.Mutated = append(fact.Mutated, pv.mutates(fn, param))
@@ -134,4 +168,27 @@ func (pv *pkgVerifier) resolverOf(c *clause) *logic.Resolver {
 		return c.res
 	}
 	return pv.res
+}
+
+// contractConstant resolves a name in a contract that is neither a parameter
+// nor a result. A contract keeps the meaning it had where it was written: an
+// annotation of this package sees this package's constants, an imported one
+// the constants its own package recorded, and a trusted one no constants at
+// all. All of them see the limits of the integer types unless a constant of
+// that name was in scope where they were written.
+func (pv *pkgVerifier) contractConstant(fn *funcInfo, name string) (*logic.Term, error) {
+	switch {
+	case fn.trust != nil:
+		return pv.constantNamed(nil, name)
+	case fn.imported == nil:
+		return pv.constantNamed(pv.pass.Pkg.Scope().Lookup(name), name)
+	}
+	text, recorded := fn.imported.Consts[name]
+	if !recorded {
+		return pv.constantNamed(nil, name)
+	}
+	if number, ok := new(big.Int).SetString(text, 10); ok {
+		return logic.BigLit(number), nil
+	}
+	return logic.BoolLit(text == "True"), nil
 }

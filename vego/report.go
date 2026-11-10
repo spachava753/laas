@@ -15,33 +15,14 @@ import (
 // whose behaviour vego knows without a contract. Paths are shown relative to
 // dir.
 func TrustReport(usages []*Usage, dir string) string {
-	entries := map[string]*EntryUse{}
-	projectKeys := map[string]string{} // entry -> the project file it is in
-	var constructors []token.Position
+	total := &Usage{}
 	for _, usage := range usages {
-		if usage == nil {
-			continue
-		}
-		for _, key := range usage.ProjectKeys {
-			projectKeys[key] = usage.ProjectFile
-		}
-		constructors = append(constructors, usage.Constructors...)
-		for key, use := range usage.Entries {
-			merged := entries[key]
-			if merged == nil {
-				copied := *use
-				copied.Calls = nil
-				merged = &copied
-				entries[key] = merged
-			}
-			merged.Unpredictable = merged.Unpredictable || use.Unpredictable
-			for _, call := range use.Calls {
-				if !slices.Contains(merged.Calls, call) {
-					merged.Calls = append(merged.Calls, call)
-				}
-			}
+		if usage != nil {
+			total.add(usage)
 		}
 	}
+	entries, constructors := total.Entries, total.Constructors
+	slices.SortFunc(entries, func(a, b *EntryUse) int { return strings.Compare(a.Key+"\x00"+a.File, b.Key+"\x00"+b.File) })
 	relative := func(path string) string {
 		if rel, err := filepath.Rel(dir, path); err == nil && !strings.HasPrefix(rel, "..") {
 			return rel
@@ -58,20 +39,19 @@ func TrustReport(usages []*Usage, dir string) string {
 	}
 	var b strings.Builder
 	section := func(title string, shipped bool) {
-		var keys []string
-		for _, key := range slices.Sorted(maps.Keys(entries)) {
-			if entries[key].Shipped == shipped {
-				keys = append(keys, key)
+		var listed []*EntryUse
+		for _, use := range entries {
+			if use.Shipped == shipped {
+				listed = append(listed, use)
 			}
 		}
-		fmt.Fprintf(&b, "%s: %d\n", title, len(keys))
-		for _, key := range keys {
-			use := entries[key]
+		fmt.Fprintf(&b, "%s: %d\n", title, len(listed))
+		for _, use := range listed {
 			note := ""
 			if use.Unpredictable {
 				note = "  [may fail unpredictably]"
 			}
-			fmt.Fprintf(&b, "  %s%s\n", key, note)
+			fmt.Fprintf(&b, "  %s%s\n", use.Key, note)
 			fmt.Fprintf(&b, "    reason:  %s\n", use.Reason)
 			fmt.Fprintf(&b, "    defined: %s:%d\n", relative(use.File), use.Line)
 			fmt.Fprintf(&b, "    used at: %s\n", places(use.Calls))
@@ -84,9 +64,11 @@ func TrustReport(usages []*Usage, dir string) string {
 	section("Project contracts in use", false)
 	section("Shipped contracts in use", true)
 	var unused []string
-	for _, key := range slices.Sorted(maps.Keys(projectKeys)) {
-		if use := entries[key]; use == nil || use.Shipped {
-			unused = append(unused, fmt.Sprintf("  %s  (%s)", key, relative(projectKeys[key])))
+	for _, file := range slices.Sorted(maps.Keys(total.ProjectKeys)) {
+		for _, key := range total.ProjectKeys[file] {
+			if !slices.ContainsFunc(entries, func(use *EntryUse) bool { return use.Key == key && use.File == file }) {
+				unused = append(unused, fmt.Sprintf("  %s  (%s)", key, relative(file)))
+			}
 		}
 	}
 	fmt.Fprintf(&b, "Project contracts no proof uses: %d\n%s", len(unused), strings.Join(unused, "\n"))

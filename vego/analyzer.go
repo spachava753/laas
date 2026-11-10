@@ -64,7 +64,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		"file of trusted contracts to use instead of "+TrustFileName+" next to go.mod",
 	)
 	analyzer.ResultType = reflect.TypeFor[*Usage]()
-	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact)}
+	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact)}
 	analyzer.Run = func(pass *analysis.Pass) (any, error) {
 		pv := &pkgVerifier{
 			pass:         pass,
@@ -77,6 +77,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			trusted:      map[*types.Func]*funcInfo{},
 			imported:     map[*types.Func]*funcInfo{},
 			foreign:      map[*types.Package]*logic.Resolver{},
+			plain:        logic.NewResolver(),
 			trustSources: map[*trustFile]*token.File{},
 			maxSteps:     maxSteps,
 		}
@@ -92,7 +93,17 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			}
 		}
 		pv.exportContracts(pv.reportAlwaysFailing())
-		return pv.usage, nil
+		// The proofs of this package also rest on whatever the packages it
+		// depends on took on trust.
+		pass.ExportPackageFact(&usageFact{Usage: *pv.usage})
+		total := &Usage{}
+		total.add(pv.usage)
+		for _, published := range pass.AllPackageFacts() {
+			if dependency, ok := published.Fact.(*usageFact); ok && published.Package != pass.Pkg {
+				total.add(&dependency.Usage)
+			}
+		}
+		return total, nil
 	}
 	return analyzer
 }
@@ -128,7 +139,8 @@ type funcInfo struct {
 	// holds the slice parameters that contract says it writes.
 	trust    *trustEntry
 	modifies map[*types.Var]bool
-	defects  []string // what is wrong with a trusted or imported contract
+	defects  []string  // what is wrong with a trusted or imported contract
+	use      *EntryUse // the report entry of a trusted contract in use
 	// imported is set for a function verified in another package, whose
 	// contract was published by that package.
 	imported *contractFact
@@ -164,6 +176,8 @@ type pkgVerifier struct {
 	// packages, and foreign the predicates of those packages.
 	imported map[*types.Func]*funcInfo
 	foreign  map[*types.Package]*logic.Resolver
+	// plain resolves trusted contracts, which may use no predicates.
+	plain *logic.Resolver
 	// predicateTexts are the predicate definitions of this package.
 	predicateTexts []string
 	// current is the function being verified, which a diagnostic counts

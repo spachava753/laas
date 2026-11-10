@@ -65,3 +65,29 @@ func UsesUnannotated(x int) (y int) {
 }
 
 //@ Ensures y = x
+
+// UsesWrap calls a function whose proof rests on a failed one.
+func UsesWrap(x int) (y int) {
+	return lib.Wrap(x) // want `the contract of lib.Wrap cannot be used: its verification failed in package lib` `cannot verify UsesWrap: Wrap has a contract that could not be understood`
+}
+
+//@ Ensures y > x
+
+// limit here is not the limit lib's contract speaks of.
+const limit = 0
+
+// DividesByLocalLimit satisfies this package's limit, not lib's.
+//
+// @ Requires n >= 0
+func DividesByLocalLimit(n int) (q int) {
+	return lib.SafeDivide(n, limit) // want `precondition of SafeDivide may not hold: d >= limit`
+}
+
+// DividesByOne satisfies lib's.
+//
+// @ Requires n >= 0
+func DividesByOne(n int) (q int) {
+	return lib.SafeDivide(n, 1)
+}
+
+//@ Ensures q <= n

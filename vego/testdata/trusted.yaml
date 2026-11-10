@@ -84,3 +84,14 @@ trusted:
 
   rejected.unverified:
     reason: Test helper that hands its argument back.
+
+  trust.usesPredicate:
+    reason: Mentions a predicate, which a trusted contract may not.
+    ensures:
+      - "good(result)"
+
+  trust.impossibleString:
+    reason: Promises a byte value that does not exist.
+    ensures:
+      - "|result| = 1"
+      - "result[0] = 256"
