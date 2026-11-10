@@ -260,9 +260,73 @@ const maxWitnesses = 3000
 // witness outside that search may exist: the contract must then be stated so
 // that its success condition is plainly satisfiable.
 func (v *fnVerifier) forcesSuccess() bool {
-	fn := v.fn
 	v.enter()
 	pre, conditions := v.successClauses(v.entry)
+	for _, group := range conditions {
+		if len(group) == 0 {
+			return false
+		}
+	}
+	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
+	forced := make([]bool, len(conditions))
+	v.someInput(slices.Concat(append(conditions, pre)...), func(args map[*types.Var]*logic.Term) bool {
+		facts, candidates := v.successClauses(args)
+		for result, group := range candidates {
+			forced[result] = forced[result] || slices.ContainsFunc(group, func(condition *logic.Term) bool {
+				return solver.Prove(nil, logic.And(append(facts, condition)...), opts) == solver.Proved
+			})
+		}
+		return !slices.Contains(forced, false)
+	})
+	return !slices.Contains(forced, false)
+}
+
+// canReach reports whether there is evidence that execution can arrive at
+// the current point, given the facts that hold on the path to it. A path
+// that is provably impossible cannot. For a path whose facts speak about the
+// inputs alone, failing to refute it is not enough: some concrete input must
+// provably take it. A path that also depends on values the verifier treats
+// as unknown, such as the result of an earlier call or the state after a
+// loop, has no such witness and is taken as reachable unless refuted.
+func (v *fnVerifier) canReach(path []*logic.Term) bool {
+	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
+	if solver.Prove(path, logic.False(), opts) == solver.Proved {
+		return false
+	}
+	inputs := map[*logic.Term]bool{logic.NilErr(): true}
+	for _, entry := range v.entry {
+		inputs[entry] = true
+	}
+	var inputsOnly func(t *logic.Term) bool
+	inputsOnly = func(t *logic.Term) bool {
+		if t.Op == logic.OpConst && !inputs[t] {
+			return false
+		}
+		return !slices.ContainsFunc(t.Args, func(arg *logic.Term) bool { return !inputsOnly(arg) })
+	}
+	if slices.ContainsFunc(path, func(fact *logic.Term) bool { return !inputsOnly(fact) }) {
+		return true
+	}
+	return v.someInput(path, func(args map[*types.Var]*logic.Term) bool {
+		var chosen []*logic.Term
+		for param, value := range args {
+			switch entry := v.entry[param]; {
+			case value == entry:
+			case entry.Sort.IsSeq():
+				chosen = append(chosen, logic.SeqEq(entry, value, logic.Bound(v.fresh("k#", logic.Int).Name, logic.Int)))
+			default:
+				chosen = append(chosen, logic.Eq(entry, value))
+			}
+		}
+		return solver.Prove(chosen, logic.And(path...), opts) == solver.Proved
+	})
+}
+
+// someInput tries small concrete inputs until one is accepted, and reports
+// whether one was. The inputs are built from 0, 1, -1, 2, 3 and the numbers
+// that occur in the given terms, which is where a witness for a condition
+// over those terms is most likely to be found.
+func (v *fnVerifier) someInput(terms []*logic.Term, accept func(args map[*types.Var]*logic.Term) bool) bool {
 	numbers := []*big.Int{big.NewInt(0), big.NewInt(1), big.NewInt(-1), big.NewInt(2), big.NewInt(3)}
 	var harvest func(t *logic.Term)
 	harvest = func(t *logic.Term) {
@@ -275,37 +339,28 @@ func (v *fnVerifier) forcesSuccess() bool {
 			harvest(arg)
 		}
 	}
-	for _, group := range append(conditions, pre) {
-		if len(group) == 0 {
-			return false
-		}
-		for _, t := range group {
-			harvest(t)
-		}
+	for _, t := range terms {
+		harvest(t)
 	}
-	choices := make([][]*logic.Term, len(fn.params))
+	params := v.fn.params
+	choices := make([][]*logic.Term, len(params))
 	total := 1
-	for i, param := range fn.params {
+	for i, param := range params {
 		choices[i] = v.sampleValues(param, numbers)
 		total = min(total*len(choices[i]), maxWitnesses)
 	}
-	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
-	forced := make([]bool, len(conditions))
-	for n := 0; n < total && slices.Contains(forced, false); n++ {
+	for n := range total {
 		args := map[*types.Var]*logic.Term{}
 		rest := n
-		for i, param := range fn.params {
+		for i, param := range params {
 			args[param] = choices[i][rest%len(choices[i])]
 			rest /= len(choices[i])
 		}
-		facts, candidates := v.successClauses(args)
-		for result, group := range candidates {
-			forced[result] = forced[result] || slices.ContainsFunc(group, func(condition *logic.Term) bool {
-				return solver.Prove(nil, logic.And(append(facts, condition)...), opts) == solver.Proved
-			})
+		if accept(args) {
+			return true
 		}
 	}
-	return !slices.Contains(forced, false)
+	return false
 }
 
 // sampleValues lists concrete values of a parameter's type to try as part of

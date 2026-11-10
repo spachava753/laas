@@ -151,3 +151,14 @@ func SetLastShort(a []byte, x byte) { // want `vego:\ specification\ of\ SetLast
 }
 
 //@ Ensures a'[99] = x Or a'[99] = 99
+
+// Update returns a string. A string of 300 bytes cannot hold 299 at its end,
+// so the counting candidate must not be reported.
+//
+// @ Requires |a| = 300 And a[0] = 1
+func Update(a []int, x string) string {
+	a[0] = 0
+	return x
+}
+
+//@ Ensures a'[0] = 0 And (result = x Or (|result| = 300 And result[299] = 299))

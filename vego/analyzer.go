@@ -265,12 +265,15 @@ func (pv *pkgVerifier) addFunc(decl *ast.FuncDecl) {
 	for i := range sig.Params().Len() {
 		param := sig.Params().At(i)
 		fn.params = append(fn.params, param)
-		fn.paramNames[param.Name()] = param
+		// A blank or unnamed parameter cannot be referred to.
+		if param.Name() != "" && param.Name() != "_" {
+			fn.paramNames[param.Name()] = param
+		}
 	}
 	for i := range sig.Results().Len() {
 		result := sig.Results().At(i)
 		fn.results = append(fn.results, result)
-		if result.Name() != "" {
+		if result.Name() != "" && result.Name() != "_" {
 			fn.resultNames[result.Name()] = i
 		}
 	}
@@ -278,7 +281,7 @@ func (pv *pkgVerifier) addFunc(decl *ast.FuncDecl) {
 	// there are several.
 	for i := range sig.Results().Len() {
 		switch {
-		case sig.Results().At(i).Name() != "":
+		case sig.Results().At(i).Name() != "" && sig.Results().At(i).Name() != "_":
 		case sig.Results().Len() == 1:
 			fn.resultNames["result"] = 0
 		default:

@@ -526,3 +526,43 @@ func circularPartner(n int) error { // want `vego:\ the\ contract\ of\ circularP
 }
 
 //@ Ensures True
+
+// BlankParameters cannot name its parameters in an annotation, and its two
+// blank parameters are different unknowns.
+func BlankParameters(_ int8, _ int) error {
+	return errors.New("always")
+}
+
+//@ Ensures _ > 127 -> result = nil // want `vego:\ in\ Ensures\ annotation:\ unknown\ name\ _`
+
+// DistinctBlanks would verify if both blank parameters were one unknown.
+func DistinctBlanks(_ int8, _ int) (n int) {
+	return 0
+}
+
+//@ Ensures n = 0
+
+// DeadSquareSource never reaches its unpredictable call: no input in range
+// squares to two.
+//
+// @ Requires -2 <= x <= 2
+func DeadSquareSource(x int) error { // want `vego:\ the\ contract\ of\ DeadSquareSource\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ some\ input\ satisfies\ it`
+	if x*x == 2 {
+		_ = external()
+	}
+	return errors.New("always")
+}
+
+//@ Ensures True
+
+// LiveSquareSource does reach it, for x = 2.
+//
+// @ Requires -2 <= x <= 2
+func LiveSquareSource(x int) error {
+	if x*x == 4 {
+		return external()
+	}
+	return errors.New("not a root")
+}
+
+//@ Ensures True

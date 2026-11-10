@@ -55,10 +55,15 @@ func (v *fnVerifier) audit() {
 		wellTyped := true
 		typed := func(value *logic.Term, t types.Type) {
 			fact := v.typeFact(value, t)
-			if isSlice(t) && !slices.Contains(slices.Collect(maps.Values(v.entry)), value) {
+			if value.Sort.IsSeq() && !slices.Contains(slices.Collect(maps.Values(v.entry)), value) {
+				// The elements of a string are bytes.
+				var elementType types.Type = types.Typ[types.Uint8]
+				if isSlice(t) {
+					elementType = t.Underlying().(*types.Slice).Elem()
+				}
 				index := logic.Bound("k#typed", logic.Int)
 				inRange := logic.And(logic.Le(logic.IntLit(0), index), logic.Lt(index, logic.Len(value)))
-				element := v.typeFact(logic.Select(value, index), t.Underlying().(*types.Slice).Elem())
+				element := v.typeFact(logic.Select(value, index), elementType)
 				fact = logic.And(fact, logic.Forall(index, logic.Implies(inRange, element)))
 			}
 			wellTyped = wellTyped && solver.Prove(hyps, fact, opts) == solver.Proved

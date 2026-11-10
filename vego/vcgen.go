@@ -114,12 +114,18 @@ func (v *fnVerifier) enter() *state {
 		v.unsupported(fn.decl.Pos(), "methods and generic functions are not supported yet")
 	}
 	st := &state{vals: map[*types.Var]*logic.Term{}}
-	for _, param := range fn.params {
+	for i, param := range fn.params {
 		sort, ok := sortOf(param.Type())
 		if !ok {
 			v.unsupported(param.Pos(), fmt.Sprintf("parameter %s has unsupported type %s", param.Name(), param.Type()))
 		}
-		st.vals[param] = logic.Const(param.Name(), sort)
+		// Every parameter is its own unknown, including blank ones, which
+		// all share the name "_".
+		name := param.Name()
+		if name == "" || name == "_" {
+			name = fmt.Sprintf("_@%d", i)
+		}
+		st.vals[param] = logic.Const(name, sort)
 		v.entry[param] = st.vals[param]
 		st.assume(v.typeFact(st.vals[param], param.Type()))
 	}
@@ -1336,9 +1342,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		// a source outright; a verified one may turn out to be excused.
 		source := fn == nil || !fn.annotated()
 		if sort == logic.Err && ((source && !v.outside) || (!source && !v.reached[fn])) {
-			reachable := append(slices.Clip(st.hyps), guard...)
-			opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
-			if solver.Prove(reachable, logic.False(), opts) != solver.Proved {
+			if v.canReach(append(slices.Clip(st.hyps), guard...)) {
 				v.outside = v.outside || source
 				v.reached[fn] = !source
 			}
