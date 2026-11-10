@@ -305,9 +305,18 @@ func (v *fnVerifier) canReach(path []*logic.Term) bool {
 		}
 		return !slices.ContainsFunc(t.Args, func(arg *logic.Term) bool { return !inputsOnly(arg) })
 	}
-	// The facts about the inputs alone must have a witness whatever else
-	// the path depends on; an unrelated unknown does not make them possible.
-	path = slices.DeleteFunc(slices.Clone(path), func(fact *logic.Term) bool { return !inputsOnly(fact) })
+	// What must hold on the path is split into its necessary parts, so that
+	// a condition on the inputs is found even inside a conjunction with
+	// something unknown. Those parts must be proved for a concrete input,
+	// and under the same input the path as a whole must not be refutable.
+	var required []*logic.Term
+	for _, fact := range path {
+		for _, part := range necessary(fact) {
+			if inputsOnly(part) {
+				required = append(required, part)
+			}
+		}
+	}
 	return v.someInput(path, func(args map[*types.Var]*logic.Term) bool {
 		var chosen []*logic.Term
 		for param, value := range args {
@@ -319,8 +328,31 @@ func (v *fnVerifier) canReach(path []*logic.Term) bool {
 				chosen = append(chosen, logic.Eq(entry, value))
 			}
 		}
-		return solver.Prove(chosen, logic.And(path...), opts) == solver.Proved
+		return solver.Prove(chosen, logic.And(required...), opts) == solver.Proved &&
+			solver.Prove(append(chosen, path...), logic.False(), opts) != solver.Proved
 	})
+}
+
+// necessary splits a formula into formulas that must each hold whenever it
+// does: the conjuncts of a conjunction, and what the negation of a
+// disjunction or of an implication entails.
+func necessary(t *logic.Term) []*logic.Term {
+	var parts []*logic.Term
+	switch {
+	case t.Op == logic.OpAnd:
+		for _, arg := range t.Args {
+			parts = append(parts, necessary(arg)...)
+		}
+	case t.Op == logic.OpNot && t.Args[0].Op == logic.OpOr:
+		for _, arg := range t.Args[0].Args {
+			parts = append(parts, necessary(logic.Not(arg))...)
+		}
+	case t.Op == logic.OpNot && t.Args[0].Op == logic.OpImplies:
+		parts = append(necessary(t.Args[0].Args[0]), necessary(logic.Not(t.Args[0].Args[1]))...)
+	default:
+		parts = []*logic.Term{t}
+	}
+	return parts
 }
 
 // someInput tries small concrete inputs until one is accepted, and reports

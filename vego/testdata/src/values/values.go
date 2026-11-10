@@ -587,3 +587,44 @@ func DiscardedValue(x int) error { // want `vego:\ the\ contract\ of\ DiscardedV
 }
 
 //@ Ensures True
+
+// MixedGuard joins the impossible condition on its input with a fact about
+// an unknown value; the condition on the input is still necessary.
+//
+// @ Requires -2 <= x <= 2
+func MixedGuard(x int) error { // want `vego:\ the\ contract\ of\ MixedGuard\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ some\ input\ satisfies\ it`
+	e := errors.New("known non-nil")
+	if x*x == 2 && e != nil {
+		_ = external()
+	}
+	return errors.New("always")
+}
+
+//@ Ensures True
+
+// MixedGuardElse reaches the dead call through the negation of a
+// disjunction.
+//
+// @ Requires -2 <= x <= 2
+func MixedGuardElse(x int) error { // want `vego:\ the\ contract\ of\ MixedGuardElse\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ some\ input\ satisfies\ it`
+	e := errors.New("known non-nil")
+	if x*x != 2 || e == nil {
+		return errors.New("usual")
+	}
+	return external()
+}
+
+//@ Ensures True
+
+// MixedGuardLive has a reachable call behind the same kind of guard.
+//
+// @ Requires -2 <= x <= 2
+func MixedGuardLive(x int) error {
+	e := errors.New("known non-nil")
+	if x*x == 4 && e != nil {
+		return external()
+	}
+	return e
+}
+
+//@ Ensures True
