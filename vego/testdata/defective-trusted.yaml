@@ -1,0 +1,12 @@
+# A trust file with a defect: one entry states requires twice. No entry of
+# such a file may be relied on, including the ones that look fine.
+version: 1
+
+trusted:
+  badtrust.divide:
+    reason: Safe with a non-zero divisor.
+    requires: ["x != 0"]
+    requires: [] # // want `"requires" occurs more than once in the same mapping`
+
+  badtrust.fine:
+    reason: Nothing wrong with this entry itself.

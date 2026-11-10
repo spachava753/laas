@@ -4,6 +4,7 @@
 package trust
 
 import (
+	"errors"
 	"math/rand"
 	"os"
 	"sort"
@@ -221,3 +222,26 @@ func UsesImpossibleString() (b byte) {
 }
 
 //@ Ensures False
+
+func take(MaxInt any) int { return 0 }
+
+// UsesBlockedName relies on a contract that mentions a parameter of a type
+// vego does not model; the name must not turn into the integer limit.
+func UsesBlockedName() (n int) {
+	return take(nil) // want `cannot verify UsesBlockedName: ` `the trusted contract of trust.take \(trusted.yaml:\d+\) cannot be used: in its ensures "result = MaxInt": parameter MaxInt has type any, which cannot be used in a contract`
+}
+
+//@ Ensures n = MaxInt
+
+var errAlways = errors.New("always")
+
+func ready() (value *int, err error) { return nil, nil }
+
+// AlwaysFailsAfterReady calls a trusted function that is guaranteed to
+// succeed, so it has no excuse for failing every time.
+func AlwaysFailsAfterReady() error { // want `the contract of AlwaysFailsAfterReady would also be met by a function that always returns an error`
+	_, _ = ready()
+	return errAlways
+}
+
+//@ Ensures True

@@ -77,6 +77,10 @@ type fnVerifier struct {
 	// error that execution reached, which may turn out to be excused.
 	outside bool
 	reached map[*funcInfo]bool
+	// lenient is set when only the contract of a function is examined, not
+	// its body: parameters and results of types vego does not model are
+	// then left without a value instead of being an error.
+	lenient bool
 }
 
 // allowEffects marks e, when it is a call, as the call of the current
@@ -111,6 +115,9 @@ func (v *fnVerifier) enter() *state {
 	st := &state{vals: map[*types.Var]*logic.Term{}}
 	for i, param := range fn.params {
 		sort, ok := sortOf(param.Type())
+		if !ok && v.lenient {
+			continue
+		}
 		if !ok {
 			v.unsupported(param.Pos(), fmt.Sprintf("parameter %s has unsupported type %s", param.Name(), param.Type()))
 		}
@@ -126,6 +133,9 @@ func (v *fnVerifier) enter() *state {
 	}
 	for _, result := range fn.results {
 		sort, ok := sortOf(result.Type())
+		if !ok && v.lenient {
+			continue
+		}
 		if !ok {
 			v.unsupported(fn.obj.Pos(), fmt.Sprintf("result type %s is not supported", result.Type()))
 		}
@@ -202,6 +212,9 @@ type contractEnv struct {
 
 func (e *contractEnv) Var(name string, primed bool) (*logic.Term, error) {
 	if param, ok := e.fn.paramNames[name]; ok {
+		if e.args[param] == nil {
+			return nil, fmt.Errorf("parameter %s has type %s, which cannot be used in a contract", name, param.Type())
+		}
 		if !primed {
 			return e.args[param], nil
 		}

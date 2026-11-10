@@ -124,8 +124,13 @@ func parseTrustFile(path string, content []byte, shipped bool) *trustFile {
 
 // rejectDuplicates records every mapping key that occurs twice, anywhere in
 // the document. YAML libraries keep the last one, which would silently drop
-// the clauses of the first.
+// the clauses of the first. It also rejects aliases, whose node carries the
+// name of the anchor instead of the value it stands for.
 func (f *trustFile) rejectDuplicates(node *yaml.Node) {
+	if node.Kind == yaml.AliasNode {
+		f.problem(node.Line, "YAML aliases are not supported; write the value out")
+		return
+	}
 	if node.Kind == yaml.MappingNode {
 		seen := map[string]bool{}
 		for i := 0; i+1 < len(node.Content); i += 2 {
@@ -183,6 +188,10 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 		field, value := body.Content[i], body.Content[i+1]
 		switch field.Value {
 		case "reason":
+			if value.Kind != yaml.ScalarNode {
+				f.problem(value.Line, "the reason of %s must be text", entry.key)
+				continue
+			}
 			entry.reason = strings.TrimSpace(value.Value)
 		case "requires":
 			entry.requires = formulas("requires", value)
@@ -450,11 +459,11 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 	fn := newFuncInfo(callee)
 	fn.trust = entry
 	pv.trusted[callee] = fn
-	if entry.file.shipped {
-		// A shipped file with a defect is a bug in vego; surface it.
-		for _, problem := range entry.file.problems {
-			fn.defect("%s", problem.msg)
-		}
+	// A file with any problem is not a source of trust at all: which of
+	// its entries the problem touched cannot be told apart reliably, and a
+	// proof must not rest on a contract that was read wrongly.
+	for _, problem := range entry.file.problems {
+		fn.defect("%s:%d: %s", filepath.Base(entry.file.path), problem.line, problem.msg)
 	}
 	clauses := func(kind string, formulas []trustFormula) []*clause {
 		var list []*clause
@@ -502,8 +511,8 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 	for i, param := range fn.params {
 		sort, ok := sortOf(param.Type())
 		if !ok {
-			// A parameter of a type vego does not model cannot be named.
-			delete(fn.paramNames, param.Name())
+			// A parameter of a type vego does not model has no value in
+			// the logic; a contract that mentions it is rejected.
 			continue
 		}
 		args[param] = logic.Const(fmt.Sprintf("in@%d", i), sort)

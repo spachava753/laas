@@ -95,3 +95,13 @@ trusted:
     ensures:
       - "|result| = 1"
       - "result[0] = 256"
+
+  trust.take:
+    reason: Mentions a parameter of a type vego does not model.
+    ensures:
+      - "result = MaxInt"
+
+  trust.ready:
+    reason: Always succeeds; its first result has a type vego does not model.
+    ensures:
+      - "err = nil"

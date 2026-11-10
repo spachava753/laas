@@ -33,6 +33,8 @@ trusted:
 		{"rejects a formula that is not a list", "version: 1\ntrusted:\n  os.Getpid:\n    reason: r\n    ensures: \"result >= 0\"\n", "must be a list"},
 		{"rejects duplicate entries", "version: 1\ntrusted:\n  os.Getpid:\n    reason: r\n  os.Getpid:\n    reason: r\n", "occurs more than once"},
 		{"rejects a repeated field", "version: 1\ntrusted:\n  os.Getpid:\n    reason: r\n    requires: [\"x != 0\"]\n    requires: []\n", "occurs more than once"},
+		{"rejects an alias as a reason", "version: 1\ntrusted:\n  os.Getpid:\n    requires: &empty []\n    reason: *empty\n", "aliases are not supported"},
+		{"rejects a reason that is not text", "version: 1\ntrusted:\n  os.Getpid:\n    reason: [a, b]\n", "must be text"},
 		{"rejects a second document", "version: 1\ntrusted: {}\n---\nversion: 1\ntrusted: {}\n", "exactly one YAML document"},
 		{"explains an unquoted formula", "version: 1\ntrusted:\n  sort.Ints:\n    reason: r\n    ensures:\n      - Forall i in [0, |x|) : x'[i] >= 0\n", "must be quoted"},
 	}

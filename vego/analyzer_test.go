@@ -81,9 +81,29 @@ func runCorpus(t *testing.T, analyzer *analysis.Analyzer, patterns ...string) {
 			source.Close()
 		}
 	}
+	scanned := map[string]bool{}
+	for _, action := range graph.Roots {
+		for _, file := range action.Package.CompiledGoFiles {
+			scanned[file] = true
+		}
+	}
 	for _, action := range graph.Roots {
 		for _, diagnostic := range action.Diagnostics {
 			position := action.Package.Fset.Position(diagnostic.Pos)
+			// A diagnostic may point into a trust file, which states its
+			// expectations in the same way inside a YAML comment.
+			if !scanned[position.Filename] {
+				scanned[position.Filename] = true
+				content, _ := os.ReadFile(position.Filename)
+				for number, line := range strings.Split(string(content), "\n") {
+					if _, expectations, found := strings.Cut(line, "// want "); found {
+						for _, match := range wantPattern.FindAllStringSubmatch(expectations, -1) {
+							at := place{position.Filename, number + 1}
+							wants[at] = append(wants[at], regexp.MustCompile(match[1]))
+						}
+					}
+				}
+			}
 			at := place{position.Filename, position.Line}
 			index := slices.IndexFunc(wants[at], func(want *regexp.Regexp) bool { return want.MatchString(diagnostic.Message) })
 			if index < 0 {
@@ -115,6 +135,15 @@ func TestAnalyzer(t *testing.T) {
 		runCorpus(t, analyzer,
 			"paper", "algorithms", "defects", "rejected", "leetcode", "semantics", "effects", "integers", "values", "trust",
 			"lib", "client")
+	})
+
+	t.Run("refuses a trust file with a defect", func(t *testing.T) {
+		analyzer := newAnalyzer()
+		if err := analyzer.Flags.Set("trusted", filepath.Join("testdata", "defective-trusted.yaml")); err != nil {
+			t.Fatalf("set trusted: %v", err)
+		}
+
+		runCorpus(t, analyzer, "badtrust")
 	})
 
 	t.Run("audits specifications on request", func(t *testing.T) {

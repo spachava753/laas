@@ -155,16 +155,12 @@ func (pv *pkgVerifier) trustForces(fn *funcInfo) bool {
 	}
 	forces := false
 	fn.forces = &forces
-	supported := func(t types.Type) bool {
-		_, ok := sortOf(t)
-		return ok
-	}
-	// A signature with a type vego does not model cannot be shown to force
-	// success, so it counts as unpredictable like any other.
-	if !slices.ContainsFunc(fn.params, func(p *types.Var) bool { return !supported(p.Type()) }) &&
-		!slices.ContainsFunc(fn.results, func(r *types.Var) bool { return !supported(r.Type()) }) {
-		pv.run(fn, func(v *fnVerifier) { forces = v.forcesSuccess() })
-	}
+	// The contract is examined on its own; parts of the signature of types
+	// vego does not model take no part in it.
+	pv.run(fn, func(v *fnVerifier) {
+		v.lenient = true
+		forces = v.forcesSuccess()
+	})
 	if fn.use != nil && len(errorResults(fn)) > 0 {
 		fn.use.Unpredictable = !forces
 	}
@@ -242,12 +238,16 @@ func (v *fnVerifier) successClauses(args map[*types.Var]*logic.Term) (pre []*log
 	outputs := map[*logic.Term]bool{}
 	results := make([]*logic.Term, len(fn.results))
 	for i, result := range fn.results {
-		sort, _ := sortOf(result.Type())
-		results[i] = v.fresh("out", sort)
-		outputs[results[i]] = true
+		if sort, ok := sortOf(result.Type()); ok {
+			results[i] = v.fresh("out", sort)
+			outputs[results[i]] = true
+		}
 	}
 	post := map[*types.Var]*logic.Term{}
 	for _, param := range fn.params {
+		if args[param] == nil {
+			continue
+		}
 		pre = append(pre, v.typeFact(args[param], param.Type()))
 		post[param] = args[param]
 		if isSlice(param.Type()) {
@@ -261,7 +261,9 @@ func (v *fnVerifier) successClauses(args map[*types.Var]*logic.Term) (pre []*log
 	env := &contractEnv{pv: v.pkgVerifier, fn: fn, args: args, post: post, results: results}
 	conditions = make([][]*logic.Term, len(errorResults(fn)))
 	for _, c := range fn.ensures {
-		clause := v.formula(c, c.node, env)
+		// A clause about a result that has no value in the logic says
+		// nothing here.
+		clause := v.calleeFormula(c, env)
 		for n, index := range errorResults(fn) {
 			for _, condition := range successConditions(clause, results[index]) {
 				if !mentions(condition, outputs) {
@@ -350,7 +352,7 @@ func (v *fnVerifier) canReach(path []*logic.Term) bool {
 		var chosen []*logic.Term
 		for param, value := range args {
 			switch entry := v.entry[param]; {
-			case value == entry:
+			case value == entry || entry == nil:
 			case entry.Sort.IsSeq():
 				chosen = append(chosen, logic.SeqEq(entry, value, logic.Bound(v.fresh("k#", logic.Int).Name, logic.Int)))
 			default:
@@ -442,6 +444,8 @@ func (v *fnVerifier) sampleValues(param *types.Var, numbers []*big.Int) []*logic
 	}
 	entry := v.entry[param]
 	switch {
+	case entry == nil:
+		return []*logic.Term{nil}
 	case entry.Sort == logic.Int:
 		return fitting(param.Type())
 	case entry.Sort == logic.Bool:
