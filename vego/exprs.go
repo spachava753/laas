@@ -391,6 +391,37 @@ func (v *fnVerifier) makeSlice(e *ast.CallExpr, st *state, guard []*logic.Term) 
 	return v.allocSlice(st, elemType(t), rows, length, capacity)
 }
 
+// sameMemory reports whether a value of one type, taken as a value of the
+// other, still refers to the same regions of memory: every pointer and slice
+// in it, at any depth of struct fields, must have the same target type in
+// both. Struct types that differ only in tags convert into each other, and
+// their memory is kept apart.
+func sameMemory(from, to types.Type) bool {
+	switch a := from.Underlying().(type) {
+	case *types.Pointer:
+		b, ok := to.Underlying().(*types.Pointer)
+		return ok && typeKey(a.Elem()) == typeKey(b.Elem())
+	case *types.Slice:
+		b, ok := to.Underlying().(*types.Slice)
+		return ok && typeKey(a.Elem()) == typeKey(b.Elem())
+	case *types.Struct:
+		b, ok := to.Underlying().(*types.Struct)
+		if !ok || a.NumFields() != b.NumFields() {
+			return false
+		}
+		for i := range a.NumFields() {
+			if !sameMemory(a.Field(i).Type(), b.Field(i).Type()) {
+				return false
+			}
+		}
+		return true
+	}
+	// Anything else that the verifier lets through holds no reference, or
+	// is rejected where it is used.
+	_, modelled := layoutOf(from)
+	return modelled
+}
+
 // conversion evaluates T(x). Conversions between integers must fit the
 // target type, and one that involves a float yields an unknown value.
 // string(b) and []byte(s) copy, so the result holds the same bytes and
@@ -433,9 +464,7 @@ func (v *fnVerifier) conversion(e *ast.CallExpr, st *state, guard []*logic.Term)
 	// A conversion that leaves the value as it is must also leave it in
 	// the same memory, which pointers and slices of differently named
 	// types would not be.
-	_, isPointer := from.Underlying().(*types.Pointer)
-	sameMemory := !isSlice(from) || typeKey(elemType(from)) == typeKey(elemType(to))
-	if !isPointer && sameMemory && types.IdenticalIgnoreTags(from.Underlying(), to.Underlying()) {
+	if sameMemory(from, to) && types.IdenticalIgnoreTags(from.Underlying(), to.Underlying()) {
 		return val
 	}
 	v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to a %s is not supported", from, to))

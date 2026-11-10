@@ -498,6 +498,14 @@ func (p *prover) scan(b *branch, t *logic.Term, gen int) {
 		switch t.Op {
 		case logic.OpConst, logic.OpSelect, logic.OpLen, logic.OpDiv, logic.OpMod, logic.OpIte, logic.OpPred, logic.OpIsNil:
 			if t.Sort.IsSeq() {
+				// A sequence read out of a sequence of sequences has no
+				// axioms of its own, but its index is one at which a fact
+				// about the outer sequence matters.
+				if t.Op == logic.OpSelect && p.reduce(t) == t {
+					if _, known := b.seen[p.atom(t)]; !known {
+						b.seen[p.atom(t)] = gen
+					}
+				}
 				break
 			}
 			if reduced := p.reduce(t); reduced != t {
@@ -1111,7 +1119,7 @@ func (p *prover) ackermann(b *branch, atoms []int) {
 	groups := map[string][]int{}
 	for _, id := range atoms {
 		t := p.atomTerms[id]
-		if t.Op != logic.OpSelect && t.Op != logic.OpPred {
+		if (t.Op != logic.OpSelect && t.Op != logic.OpPred) || t.Sort.IsSeq() {
 			continue
 		}
 		group, _ := p.indices(t)

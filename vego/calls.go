@@ -235,26 +235,64 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 	return v.object(st, object, cur[0])
 }
 
-// deepFacts states everything the type of a value guarantees, including,
-// for a string or a slice, that every element is a value of the element
-// type, field by field where the elements are structs.
+// deepFacts states what the type of a value guarantees beyond the value
+// itself: that the bytes of a string are bytes, that the elements of a slice
+// are values of the element type, field by field and down to the bytes of
+// their strings, and the same for the fields of the object a pointer refers
+// to. It stops at the pointers found there, since what can be reached has
+// no end.
 func (v *fnVerifier) deepFacts(mem memory, val value, t types.Type, brk *logic.Term) *logic.Term {
-	fact := v.wellFormed(val, t, brk)
-	switch {
-	case isString(t):
-		return logic.And(fact, v.elementFacts(val[0], types.Typ[types.Uint8]))
-	case isSlice(t):
-		elem := elemType(t)
-		leaves, _ := layoutOf(elem)
+	return logic.And(v.wellFormed(val, t, brk), v.contentFacts(mem, val, t, brk, true))
+}
+
+// contentFacts states what the types guarantee of what a value contains or
+// refers to.
+func (v *fnVerifier) contentFacts(mem memory, val value, t types.Type, brk *logic.Term, follow bool) *logic.Term {
+	object, isPointer := pointee(t)
+	switch u := t.Underlying().(type) {
+	case *types.Basic:
+		if isString(t) {
+			return v.elementFacts(val[0], types.Typ[types.Uint8])
+		}
+	case *types.Pointer:
+		if !isPointer || !follow {
+			break
+		}
+		leaves, _ := layoutOf(object)
+		target := make(value, len(leaves))
+		for i, lf := range leaves {
+			target[i] = v.cell(nil, mem, typeKey(object)+lf.path, lf, val[0])
+		}
+		return logic.And(v.wellFormed(target, object, brk), v.contentFacts(mem, target, object, brk, false))
+	case *types.Struct:
+		var facts []*logic.Term
+		for i := range u.NumFields() {
+			if lo, hi, ok := fieldLeaves(t, i); ok {
+				facts = append(facts, v.contentFacts(mem, val[lo:hi], u.Field(i).Type(), brk, follow))
+			}
+		}
+		return logic.And(facts...)
+	case *types.Slice:
+		leaves, _ := layoutOf(u.Elem())
+		var facts []*logic.Term
 		for _, lf := range leaves {
 			if lf.part != partValue || (lf.sort != logic.Int && !lf.sort.IsSeq()) {
 				continue
 			}
-			row := v.row(nil, mem, "[]"+typeKey(elem)+lf.path, lf, val[0])
-			fact = logic.And(fact, v.elementFacts(logic.Subseq(row, val[1], logic.Add(val[1], val[2])), lf.typ))
+			row := v.row(nil, mem, "[]"+typeKey(u.Elem())+lf.path, lf, val[0])
+			elements := logic.Subseq(row, val[1], logic.Add(val[1], val[2]))
+			facts = append(facts, v.elementFacts(elements, lf.typ))
+			if lf.sort.IsSeq() {
+				// The elements are strings, whose bytes are bytes.
+				index := v.bound("k")
+				inRange := logic.And(logic.Le(logic.IntLit(0), index), logic.Lt(index, val[2]))
+				bytes := v.elementFacts(logic.Select(elements, index), types.Typ[types.Uint8])
+				facts = append(facts, logic.Forall(index, logic.Implies(inRange, bytes)))
+			}
 		}
+		return logic.And(facts...)
 	}
-	return fact
+	return logic.True()
 }
 
 // elementFacts states that every element of a sequence is a value of the

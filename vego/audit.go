@@ -79,7 +79,10 @@ func (v *fnVerifier) audit() {
 			results[i] = v.degenerateResult(candidate, result.Type(), st)
 			// An argument handed back is a value of its type already.
 			if candidate.same == nil || !types.Identical(result.Type(), candidate.same.Type()) {
-				wellTyped = wellTyped && v.prove(st, nil, v.deepFacts(st.mem, results[i], result.Type(), st.brk))
+				// What a returned pointer refers to is not the candidate's
+				// doing and is not asked about.
+				typed := logic.And(v.wellFormed(results[i], result.Type(), st.brk), v.contentFacts(st.mem, results[i], result.Type(), st.brk, false))
+				wellTyped = wellTyped && v.prove(st, nil, typed)
 			}
 		}
 		if !wellTyped {

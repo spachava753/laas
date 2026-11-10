@@ -1156,3 +1156,66 @@ func WholeSlice(a []One) {
 }
 
 //@ Ensures a' = a // want `vego: in Ensures annotation: a is a slice of memory.One; index it and name a field`
+
+// TaggedA and TaggedB differ only in the tag of what their slices hold.
+type TaggedA struct {
+	Items []struct {
+		X int `a:"1"`
+	}
+}
+
+// TaggedB is TaggedA with another tag.
+type TaggedB struct {
+	Items []struct {
+		X int `b:"1"`
+	}
+}
+
+// StructTagsShare converts a struct whose slice would change its memory.
+func StructTagsShare(a TaggedA) int {
+	b := TaggedB(a) // want `vego: cannot verify StructTagsShare: converting a memory.TaggedA to a memory.TaggedB is not supported`
+	return len(b.Items)
+}
+
+//@ Ensures result >= 0
+
+// Blob holds bytes behind a pointer, and Named a string in each element.
+type Blob struct{ B []byte }
+
+// Named holds a string.
+type Named struct{ S string }
+
+func readyBlob(p *Blob) error    { return nil }
+func readyNamed(a []Named) error { return nil }
+
+func makeBlob() *Blob {
+	return &Blob{B: make([]byte, 65)}
+}
+
+//@ Ensures fresh(result) And |result.B| = 65
+
+func makeNamed() []Named {
+	return make([]Named, 65)
+}
+
+//@ Ensures |result| = 65
+
+// AlwaysFailsAfterReadyBlob calls a function that succeeds whenever the
+// bytes behind its pointer are bytes.
+func AlwaysFailsAfterReadyBlob() error { // want `vego: the contract of AlwaysFailsAfterReadyBlob would also be met by a function that always returns an error`
+	p := makeBlob()
+	_ = readyBlob(p)
+	return errEmptyQueue
+}
+
+//@ Ensures True
+
+// AlwaysFailsAfterReadyNamed calls one that succeeds whenever the bytes of
+// the strings in its elements are bytes.
+func AlwaysFailsAfterReadyNamed() error { // want `vego: the contract of AlwaysFailsAfterReadyNamed would also be met by a function that always returns an error`
+	a := makeNamed()
+	_ = readyNamed(a)
+	return errEmptyQueue
+}
+
+//@ Ensures True

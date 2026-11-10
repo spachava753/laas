@@ -208,3 +208,17 @@ trusted:
       - "|a| = 65"
     ensures:
       - "(Forall k in [0, |a|) : a[k].X >= 0) -> result = nil"
+
+  memory.readyBlob:
+    reason: Test helper that succeeds when the bytes behind its pointer are bytes, which is always.
+    requires:
+      - "p != nil And |p.B| = 65"
+    ensures:
+      - "(Forall k in [0, |p.B|) : p.B[k] >= 0) -> result = nil"
+
+  memory.readyNamed:
+    reason: Test helper that succeeds when the bytes of the strings in its elements are bytes, which is always.
+    requires:
+      - "|a| = 65"
+    ensures:
+      - "(Forall k in [0, |a|) : Forall j in [0, |a[k].S|) : a[k].S[j] >= 0) -> result = nil"
