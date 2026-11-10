@@ -64,6 +64,8 @@ Decisions:
 
 ### Integers
 
+Built: every integer type, overflow obligations for arithmetic, negation, division, and conversion, the named limits (`MaxInt` and friends) in annotations, arbitrary-precision arithmetic in the solver, and product reasoning. Not built yet: shifts and bitwise operators, and automatic range facts for slice elements inside quantified annotations.
+
 Decisions:
 
 - **Overflow is an error for every integer type, including `int`.** Go wraps silently; verified code may not. Each arithmetic operation carries a proof obligation that its result fits the type, so program values always equal their mathematical values. The same goes for conversions to a narrower type, negation of the minimum value, and `MinInt / -1`. Code that wraps on purpose (hashes, checksums) cannot be verified and belongs in the trusted file.

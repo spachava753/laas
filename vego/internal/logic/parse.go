@@ -2,7 +2,7 @@ package logic
 
 import (
 	"fmt"
-	"strconv"
+	"math/big"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -35,6 +35,7 @@ type Node struct {
 	Name   string
 	Primed bool
 	Val    int64
+	Big    *big.Int // NInt
 	Vars   []string
 	LoOpen bool
 	HiOpen bool
@@ -395,11 +396,8 @@ func (p *parser) primary() *Node {
 	switch {
 	case tok.kind == 'n':
 		p.pos++
-		value, err := strconv.ParseInt(tok.text, 10, 64)
-		if err != nil {
-			p.fail("integer literal %s is out of range", tok.text)
-		}
-		n.Kind, n.Val = NInt, value
+		value, _ := new(big.Int).SetString(tok.text, 10)
+		n.Kind, n.Big = NInt, value
 	case p.accept("True"):
 		n.Kind, n.Val = NBool, 1
 	case p.accept("False"):

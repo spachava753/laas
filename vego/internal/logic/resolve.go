@@ -94,7 +94,7 @@ func describe(sort Sort) string {
 func (s *scope) term(n *Node) *Term {
 	switch n.Kind {
 	case NInt:
-		return IntLit(n.Val)
+		return BigLit(n.Big)
 	case NBool:
 		return BoolLit(n.Val == 1)
 	case NIdent:

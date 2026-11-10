@@ -19,10 +19,17 @@ func Divide(n, d int) (q, r int) {
 //@ Predicate sumTo(A, i, s) ::= ((i <= 0 -> s = 0) And
 //@ (i > 0 -> Exists t in Z : (sumTo(A, i-1, t) And s = t + A[i-1])))
 
-// SumLoop adds up a slice from left to right.
+//@ Predicate bounded(A) ::= |A| <= 1000000 And
+//@   Forall k in [0, |A|) : (-1000000 <= A[k] And A[k] <= 1000000)
+
+// SumLoop adds up a slice from left to right. The bound on the elements is
+// not in the paper: without it the sum can overflow.
+//
+// @ Requires bounded(A)
 func SumLoop(A []int) (s int) {
 	s = 0
 	//@ Invariant 0 <= i And i <= |A| And sumTo(A, i, s)
+	//@ Invariant -1000000*i <= s And s <= 1000000*i
 	//@ Variant |A| - i
 	for i := 0; i < len(A); i++ {
 		s = s + A[i]
@@ -38,6 +45,7 @@ func SumLoop(A []int) (s int) {
 // SumRec adds up a slice recursively.
 //
 // @ Requires 0 <= i And i <= |A|
+// @ Requires bounded(A)
 // @ Measure |A| - i
 func SumRec(A []int, i int) (s int) {
 	if i >= len(A) {
@@ -48,3 +56,4 @@ func SumRec(A []int, i int) (s int) {
 }
 
 //@ Ensures sumRecPred(A, i, s)
+//@ Ensures -1000000*(|A|-i) <= s And s <= 1000000*(|A|-i)

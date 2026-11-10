@@ -512,9 +512,9 @@ func sortOf(t types.Type) (logic.Sort, bool) {
 	basic := func(t types.Type) (logic.Sort, bool) {
 		b, ok := t.Underlying().(*types.Basic)
 		switch {
-		case ok && (b.Kind() == types.Int || b.Kind() == types.UntypedInt):
+		case ok && b.Info()&types.IsInteger != 0 && b.Kind() != types.Uintptr:
 			return logic.Int, true
-		case ok && (b.Kind() == types.Bool || b.Kind() == types.UntypedBool):
+		case ok && b.Info()&types.IsBoolean != 0:
 			return logic.Bool, true
 		}
 		return 0, false

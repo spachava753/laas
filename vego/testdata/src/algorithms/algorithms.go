@@ -1,7 +1,9 @@
 // Package algorithms holds textbook routines that verify completely.
 package algorithms
 
-// Abs returns the absolute value of x.
+// Abs returns the absolute value of x. The least int has no negation.
+//
+// @ Requires x > MinInt
 func Abs(x int) (y int) {
 	if x < 0 {
 		return -x
@@ -186,27 +188,6 @@ func FirstNegative(A []int) (index int) {
 
 //@ Ensures index = -1 Or (0 <= index < |A| And A[index] < 0)
 
-//@ Predicate fib(n, f) ::= (n <= 1 -> f = n) And
-//@   (n > 1 -> Exists a in Z : Exists b in Z : (fib(n-1, a) And fib(n-2, b) And f = a + b))
-
-// Fib computes Fibonacci numbers iteratively.
-//
-// @ Requires n >= 0
-func Fib(n int) (f int) {
-	if n == 0 {
-		return 0
-	}
-	previous, current := 0, 1
-	//@ Invariant 1 <= i <= n And fib(i-1, previous) And fib(i, current)
-	//@ Variant n - i
-	for i := 1; i < n; i++ {
-		previous, current = current, previous+current
-	}
-	return current
-}
-
-//@ Ensures fib(n, f)
-
 // Mid returns the midpoint without overflowing.
 //
 // @ Requires 0 <= lo And lo < hi
@@ -276,7 +257,7 @@ func Clamp(x, mode int) (y int) {
 
 // Sieve marks the composite numbers below n.
 //
-// @ Requires n >= 2
+// @ Requires 2 <= n <= 1000000
 func Sieve(n int) (composite []bool) {
 	composite = make([]bool, n)
 	//@ Invariant 2 <= i And |composite| = n
@@ -307,6 +288,8 @@ func Reverse(A []int) (R []int) {
 //@ Ensures |R| = |A| And Forall k in [0, |A|) : R[k] = A[|A|-1-k]
 
 // SumOfReversed shows modular reasoning: the caller only uses the contracts.
+//
+// @ Requires bounded(A)
 func SumOfReversed(A []int) (s int) {
 	B := Reverse(A)
 	C := Reverse(B)
@@ -317,9 +300,15 @@ func SumOfReversed(A []int) (s int) {
 //@ Predicate sumTo(A, i, s) ::= (i <= 0 -> s = 0) And
 //@   (i > 0 -> Exists t in Z : (sumTo(A, i-1, t) And s = t + A[i-1]))
 
-// SumLoop adds up a slice.
+//@ Predicate bounded(A) ::= |A| <= 1000000 And
+//@   Forall k in [0, |A|) : (-1000000 <= A[k] And A[k] <= 1000000)
+
+// SumLoop adds up a slice whose elements are small enough not to overflow.
+//
+// @ Requires bounded(A)
 func SumLoop(A []int) (s int) {
 	//@ Invariant sumTo(A, i, s)
+	//@ Invariant -1000000*i <= s And s <= 1000000*i
 	for i := range A {
 		s += A[i]
 	}

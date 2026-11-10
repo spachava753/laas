@@ -4,6 +4,9 @@ package audit
 
 // Manhattan has the contract the VeGo paper criticises: non-negativity alone
 // does not tie the result to the coordinates.
+//
+// @ Requires -1000000 <= x1 <= 1000000 And -1000000 <= x2 <= 1000000
+// @ Requires -1000000 <= y1 <= 1000000 And -1000000 <= y2 <= 1000000
 func Manhattan(x1, y1, x2, y2 int) (d int) { // want `vego:\ specification\ of\ Manhattan\ has\ a\ hole\ \[CONSTANT\]:\ it\ also\ accepts\ an\ implementation\ that\ returns\ the\ constant\ 1\ and\ changes\ nothing` `vego:\ specification\ of\ Manhattan\ has\ a\ hole\ \[VACUOUS\]:\ it\ also\ accepts\ an\ implementation\ that\ returns\ zero\ values\ and\ changes\ nothing`
 	dx, dy := x1-x2, y1-y2
 	if dx < 0 {
@@ -18,6 +21,8 @@ func Manhattan(x1, y1, x2, y2 int) (d int) { // want `vego:\ specification\ of\ 
 //@ Ensures d >= 0
 
 // Distance pins the result down completely.
+//
+// @ Requires -1000000 <= a <= 1000000 And -1000000 <= b <= 1000000
 func Distance(a, b int) (d int) {
 	if a < b {
 		return b - a
@@ -109,3 +114,22 @@ func SetSecond(a, b []int) {
 }
 
 //@ Ensures |b'| != |a| -> b'[0] = 1
+
+// Halve has a weak contract, but not one that -1 could satisfy: an unsigned
+// result has no negative values, so that candidate must not be reported.
+func Halve(x uint) (y uint) { // want `vego:\ specification\ of\ Halve\ has\ a\ hole\ \[CONSTANT\]:\ it\ also\ accepts\ an\ implementation\ that\ returns\ the\ constant\ 1\ and\ changes\ nothing` `vego:\ specification\ of\ Halve\ has\ a\ hole\ \[MINIMAL\ CONSTRUCTOR\]:\ it\ also\ accepts\ an\ implementation\ that\ returns\ its\ argument\ x\ unchanged`
+	return x / 2
+}
+
+//@ Ensures y != 0 Or x < 2
+
+// Shrink returns an int8. Returning the int argument unchanged is not an
+// implementation, because it does not fit.
+func Shrink(x int) (y int8) { // want `vego:\ specification\ of\ Shrink\ has\ a\ hole\ \[CONSTANT\]:\ it\ also\ accepts\ an\ implementation\ that\ returns\ the\ constant\ \-1\ and\ changes\ nothing` `vego:\ specification\ of\ Shrink\ has\ a\ hole\ \[CONSTANT\]:\ it\ also\ accepts\ an\ implementation\ that\ returns\ the\ constant\ 1\ and\ changes\ nothing`
+	if x < 0 {
+		return -1
+	}
+	return 1
+}
+
+//@ Ensures y != 0

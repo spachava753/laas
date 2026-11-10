@@ -13,6 +13,7 @@ package solver
 import (
 	"fmt"
 	"maps"
+	"math/big"
 	"slices"
 	"strconv"
 	"strings"
@@ -36,6 +37,8 @@ type Options struct {
 	// MaxSteps bounds the number of arithmetic feasibility checks, which
 	// makes the outcome deterministic. Zero selects the default.
 	MaxSteps int
+
+	bigOnly bool // skip the 64-bit fast path of the arithmetic; for tests
 }
 
 const (
@@ -44,6 +47,7 @@ const (
 	maxUnfoldGen    = 2   // predicate applications this deep are still unfolded
 	maxInstances    = 500 // per branch
 	maxAckermann    = 300 // per branch
+	maxProducts     = 200 // per branch
 )
 
 // giveUp is panicked when the step budget is exhausted.
@@ -52,6 +56,7 @@ type giveUp struct{}
 // Prove reports whether goal follows from the hypotheses.
 func Prove(hyps []*logic.Term, goal *logic.Term, opts Options) (result Result) {
 	p := &prover{
+		bigOnly:  opts.bigOnly,
 		preds:    opts.Preds,
 		maxSteps: opts.MaxSteps,
 		atomIDs:  map[string]int{},
@@ -90,6 +95,7 @@ func Prove(hyps []*logic.Term, goal *logic.Term, opts Options) (result Result) {
 }
 
 type prover struct {
+	bigOnly   bool // skip the 64-bit fast path; set by tests
 	preds     map[string]*logic.PredDef
 	steps     int
 	maxSteps  int
@@ -127,6 +133,7 @@ type branch struct {
 	unfolded  map[int]bool
 	acked     map[[2]int]bool
 	instances int
+	products  int
 }
 
 func (b *branch) clone() *branch {
@@ -173,7 +180,7 @@ func (p *prover) reduce(t *logic.Term) *logic.Term {
 			if !distance.isConst() {
 				return t
 			}
-			if distance.c == 0 {
+			if distance.c.Sign() == 0 {
 				return p.reduce(seq.Args[len(seq.Args)-1])
 			}
 			return p.reduce(logic.Select(seq.Args[0], index))
@@ -189,11 +196,12 @@ func (p *prover) reduce(t *logic.Term) *logic.Term {
 		}
 	case logic.OpDiv, logic.OpMod:
 		a, b := p.lin(t.Args[0]), p.lin(t.Args[1])
-		if a.isConst() && b.isConst() && b.c != 0 && (a.c != -a.c || b.c != -1) {
+		// Quo and Rem truncate toward zero, as Go's / and % do.
+		if a.isConst() && b.isConst() && b.c.Sign() != 0 {
 			if t.Op == logic.OpDiv {
-				return logic.IntLit(a.c / b.c)
+				return logic.BigLit(new(big.Int).Quo(a.c, b.c))
 			}
-			return logic.IntLit(a.c % b.c)
+			return logic.BigLit(new(big.Int).Rem(a.c, b.c))
 		}
 	}
 	return t
@@ -208,7 +216,7 @@ func (p *prover) lin(t *logic.Term) poly {
 	var result poly
 	switch t.Op {
 	case logic.OpIntLit:
-		result = constPoly(t.Val)
+		result = poly{c: t.Value()}
 	case logic.OpAdd:
 		result = p.lin(t.Args[0]).add(p.lin(t.Args[1]), 1)
 	case logic.OpNeg:
@@ -219,7 +227,7 @@ func (p *prover) lin(t *logic.Term) poly {
 		if reduced := p.reduce(t); reduced != t {
 			result = p.lin(reduced)
 		} else {
-			result = poly{m: map[string]int64{strconv.Itoa(p.atom(t)): 1}}
+			result = monomialPoly(strconv.Itoa(p.atom(t)))
 		}
 	}
 	p.linCache[t] = result
@@ -267,9 +275,9 @@ func (p *prover) key(t *logic.Term) string {
 
 // polyTerm converts a polynomial back into a term.
 func (p *prover) polyTerm(pl poly) *logic.Term {
-	result := logic.IntLit(pl.c)
+	result := logic.BigLit(pl.c)
 	for _, mono := range pl.monomials() {
-		term := logic.IntLit(pl.m[mono])
+		term := logic.BigLit(pl.m[mono])
 		for _, id := range monomialAtoms(mono) {
 			term = logic.Mul(term, p.atomTerms[id])
 		}
@@ -375,7 +383,7 @@ func (p *prover) assert(b *branch, f *logic.Term, gen int) {
 			b.eqs = append(b.eqs, pl)
 		case !pl.isConst():
 			b.les = append(b.les, pl)
-		case pl.c > 0 || (equality && pl.c != 0):
+		case pl.c.Sign() > 0 || (equality && pl.c.Sign() != 0):
 			b.conflict = true
 		}
 	default:
@@ -518,7 +526,7 @@ func (p *prover) falsified(b *branch, f *logic.Term) bool {
 		pl, equality := p.constraint(f)
 		switch {
 		case pl.isConst():
-			return pl.c > 0 || (equality && pl.c != 0)
+			return pl.c.Sign() > 0 || (equality && pl.c.Sign() != 0)
 		case equality:
 			return p.infeasible(append(slices.Clip(b.eqs), pl), b.les)
 		}
@@ -664,7 +672,118 @@ func (p *prover) expand(b *branch) bool {
 		p.instantiate(b, i, atoms)
 	}
 	p.ackermann(b, atoms)
+	p.products(b)
 	return len(b.unfolded)+len(b.inst)+len(b.acked) != before
+}
+
+// products derives facts about products of two atoms, such as i*w, which the
+// linear arithmetic treats as opaque. Two known inequalities f <= 0 and
+// g <= 0 give f*g >= 0, and a known equality e = 0 gives e*y = 0 for any atom
+// y. Expanding such a product yields a constraint that is linear in the
+// products, so the ordinary elimination can use it. Only linear facts are
+// multiplied, and a product is kept only when every product of atoms in it
+// already occurs in the problem, which keeps the search goal-directed.
+func (p *prover) products(b *branch) {
+	if len(b.monos) == 0 {
+		return
+	}
+	relevant := func(pl poly) bool {
+		found := false
+		for mono := range pl.m {
+			if strings.Contains(mono, "*") {
+				if !b.monos[mono] {
+					return false
+				}
+				found = true
+			}
+		}
+		return found
+	}
+	// A simple fact is linear and mentions at most three atoms.
+	simple := func(pl poly) bool {
+		for mono := range pl.m {
+			if strings.Contains(mono, "*") {
+				return false
+			}
+		}
+		return len(pl.m) >= 1 && len(pl.m) <= 3
+	}
+	record := func(key string) bool {
+		if b.inst[key] || b.products >= maxProducts {
+			return false
+		}
+		b.inst[key] = true
+		return true
+	}
+	// A factor of a product often has no sign fact of its own: from
+	// 0 <= col < cols nothing says cols >= 0 directly. Such implied signs are
+	// derived first and recorded as facts, so that they can be multiplied.
+	atoms := map[string]bool{}
+	for mono := range b.monos {
+		for _, id := range monomialAtoms(mono) {
+			atoms[strconv.Itoa(id)] = true
+		}
+	}
+	for _, atom := range slices.Sorted(maps.Keys(atoms)) {
+		for _, sign := range []int64{1, -1} {
+			key := "sign|" + atom + "|" + strconv.FormatInt(sign, 10)
+			// sign*x >= 0 holds when sign*x <= -1 is infeasible.
+			opposite := constPoly(1).add(monomialPoly(atom), sign)
+			if !b.inst[key] && p.infeasible(b.eqs, append(slices.Clip(b.les), opposite)) {
+				b.inst[key] = true
+				b.les = append(b.les, constPoly(0).add(monomialPoly(atom), -sign))
+			}
+		}
+	}
+	// Of several constant bounds on one atom in one direction only the
+	// tightest is multiplied; the others would add nothing but rows.
+	tightest := map[string]poly{}
+	var factors []poly
+	for _, pl := range b.les {
+		if !simple(pl) {
+			continue
+		}
+		if len(pl.m) > 1 {
+			factors = append(factors, pl)
+			continue
+		}
+		for mono, coef := range pl.m {
+			// pl is coef*x + c <= 0, which bounds x by -c/coef; with
+			// coef = ±1 a larger constant is the tighter bound.
+			side := mono + "|" + strconv.Itoa(coef.Sign())
+			best, seen := tightest[side]
+			if !coef.IsInt64() || abs(coef.Int64()) != 1 {
+				factors = append(factors, pl)
+			} else if !seen || pl.c.Cmp(best.c) > 0 {
+				tightest[side] = pl
+			}
+		}
+	}
+	for _, side := range slices.Sorted(maps.Keys(tightest)) {
+		factors = append(factors, tightest[side])
+	}
+	eqs := len(b.eqs)
+	for i, first := range factors {
+		for _, second := range factors[i:] {
+			product := first.mul(second)
+			if relevant(product) && record("product|"+first.key()+"|"+second.key()) {
+				b.products++
+				b.les = append(b.les, constPoly(0).add(product, -1))
+			}
+		}
+	}
+	for i := 0; i < eqs; i++ {
+		for _, atom := range slices.Sorted(maps.Keys(atoms)) {
+			if !simple(b.eqs[i]) {
+				break
+			}
+			product := b.eqs[i].mul(monomialPoly(atom))
+			if relevant(product) && record("product|"+b.eqs[i].key()+"|="+atom) {
+				b.products++
+				b.eqs = append(b.eqs, product)
+			}
+		}
+	}
 }
 
 // trigger describes an argument position inside a quantified body where the
@@ -705,11 +824,12 @@ func (p *prover) triggersOf(fact *logic.Term) []trigger {
 				continue
 			}
 			pl := p.lin(arg)
-			sign := pl.m[variable]
-			if sign != 1 && sign != -1 {
+			coef := pl.coef(variable)
+			if !coef.IsInt64() || (coef.Int64() != 1 && coef.Int64() != -1) {
 				continue
 			}
-			rest := pl.add(poly{m: map[string]int64{variable: 1}}, -sign)
+			sign := coef.Int64()
+			rest := pl.add(monomialPoly(variable), -sign)
 			usable := true
 			for mono := range rest.m {
 				for _, id := range monomialAtoms(mono) {
@@ -734,7 +854,7 @@ func (p *prover) instantiate(b *branch, index int, atoms []int) {
 	variable, body := q.fact.Args[0], q.fact.Args[1]
 	triggers := p.triggersOf(q.fact)
 	if len(triggers) == 0 {
-		triggers = []trigger{{head: "select", arg: 1, sign: 1}}
+		triggers = []trigger{{head: "select", arg: 1, sign: 1, rest: constPoly(0)}}
 	}
 	for _, id := range atoms {
 		t := p.atomTerms[id]
@@ -808,7 +928,7 @@ func (p *prover) consistency(b *branch, x, y *logic.Term, gen int) {
 		other := y.Args[i]
 		distance := p.lin(arg).add(p.lin(other), -1)
 		if distance.isConst() {
-			if distance.c != 0 {
+			if distance.c.Sign() != 0 {
 				return
 			}
 			continue

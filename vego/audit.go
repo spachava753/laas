@@ -45,10 +45,18 @@ func (v *fnVerifier) audit() {
 				hyps = append(hyps, facts...)
 			}
 		}
+		// A candidate is only an implementation if what it returns is a
+		// value of the result's type: -1 is not a uint, and an int argument
+		// is not an int8 unless the precondition makes it small enough.
 		results := make([]*logic.Term, len(fn.results))
+		wellTyped := true
 		for i, result := range fn.results {
 			sort, _ := sortOf(result.Type())
 			results[i] = candidate.result(i, sort)
+			wellTyped = wellTyped && solver.Prove(hyps, v.typeFact(results[i], result.Type()), opts) == solver.Proved
+		}
+		if !wellTyped {
+			continue
 		}
 		env := &contractEnv{pv: v.pkgVerifier, fn: fn, args: v.entry, post: post, results: results}
 		satisfied := true

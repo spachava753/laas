@@ -3,7 +3,7 @@
 // surroundings. Each was once verified although it is wrong.
 package effects
 
-// @ Requires |a| > 0
+// @ Requires |a| > 0 And a[0] < 1000
 func step(a []int, i int) bool {
 	a[0]++
 	return i < 2
@@ -25,7 +25,7 @@ func ConditionMutation(a []int) {
 
 //@ Ensures a'[0] = 1
 
-// @ Requires |a| = 1
+// @ Requires |a| = 1 And a[0] < 1000
 func again(a []int) bool {
 	a[0]++
 	return true
@@ -83,7 +83,7 @@ func ArgumentMutation() int {
 
 //@ Ensures result = 0
 
-// @ Requires |a| = 2
+// @ Requires |a| = 2 And a[1] < 1000
 func tick(a []int) int {
 	a[1]++
 	return 0
@@ -106,7 +106,7 @@ func unknown() int { return 0 }
 // IndexOnce reads and writes the same element even though nothing is known
 // about the index.
 //
-// @ Requires |a| = 1
+// @ Requires |a| = 1 And a[0] < 1000
 func IndexOnce(a []int) {
 	i := unknown()
 	if i == 0 {

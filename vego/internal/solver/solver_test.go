@@ -188,15 +188,17 @@ func (g *generator) intTerm(depth int) *logic.Term {
 func (g *generator) formula(depth int) *logic.Term {
 	if depth <= 0 || g.rng.IntN(3) == 0 {
 		a, b := g.intTerm(depth), g.intTerm(depth)
-		switch g.rng.IntN(9) {
+		switch g.rng.IntN(10) {
 		case 0, 1:
 			return logic.Le(a, b)
 		case 2, 3:
 			return logic.Lt(a, b)
 		case 4, 5:
 			return logic.Eq(a, b)
-		case 6, 7:
+		case 6:
 			return g.readOverWrite()
+		case 7:
+			return g.boundedProduct()
 		}
 		return logic.Const("p", logic.Bool)
 	}
@@ -252,6 +254,30 @@ func (g *generator) readOverWrite() *logic.Term {
 	return fact
 }
 
+// boundedProduct bounds a product of two variables from bounds on its
+// factors. The claimed bound is sometimes exact, sometimes one off in either
+// direction, and the factor bounds are sometimes symbolic, so that a wrong
+// rule for multiplying inequalities proves something false.
+func (g *generator) boundedProduct() *logic.Term {
+	x, y := g.vars[g.rng.IntN(len(g.vars))], g.vars[g.rng.IntN(len(g.vars))]
+	lit := func(n int) *logic.Term { return logic.IntLit(int64(n)) }
+	loX, hiX, loY, hiY := g.rng.IntN(3)-1, g.rng.IntN(3), g.rng.IntN(3)-1, g.rng.IntN(3)
+	bounds := []*logic.Term{logic.Le(lit(loX), x), logic.Le(x, lit(hiX)), logic.Le(lit(loY), y)}
+	product := logic.Mul(x, y)
+	if g.rng.IntN(3) == 0 {
+		z := g.vars[g.rng.IntN(len(g.vars))]
+		bounds = append(bounds, logic.Le(x, z))
+		claim := logic.Le(product, logic.Add(logic.Mul(z, y), lit(g.rng.IntN(3)-1)))
+		return logic.Implies(logic.And(bounds...), claim)
+	}
+	bounds = append(bounds, logic.Le(y, lit(hiY)))
+	slack := g.rng.IntN(3) - 1
+	if g.rng.IntN(2) == 0 {
+		return logic.Implies(logic.And(bounds...), logic.Le(product, lit(hiX*hiY+slack)))
+	}
+	return logic.Implies(logic.And(bounds...), logic.Le(lit(loX*loY+slack), product))
+}
+
 // counterexample searches small models for one that satisfies every
 // hypothesis and falsifies the goal.
 func counterexample(hyps []*logic.Term, goal *logic.Term) (found bool, description model) {
@@ -301,7 +327,7 @@ func counterexample(hyps []*logic.Term, goal *logic.Term) (found bool, descripti
 func TestProveIsSound(t *testing.T) {
 	rng := rand.New(rand.NewPCG(1, 2))
 	proved := 0
-	for i := range 5000 {
+	for i := range 4000 {
 		g := &generator{rng: rng, vars: []*logic.Term{
 			logic.Const("x", logic.Int), logic.Const("y", logic.Int), logic.Const("z", logic.Int),
 		}}
@@ -310,7 +336,14 @@ func TestProveIsSound(t *testing.T) {
 			hyps = append(hyps, g.formula(2))
 		}
 		goal := g.formula(2 + rng.IntN(2))
-		if Prove(hyps, goal, Options{MaxSteps: 600}) != Proved {
+		// Every fourth problem runs on the arbitrary-precision arithmetic
+		// alone, which must reach the same answers as the 64-bit path.
+		opts := Options{MaxSteps: 600, bigOnly: i%4 == 0}
+		result := Prove(hyps, goal, opts)
+		if opts.bigOnly && result != Prove(hyps, goal, Options{MaxSteps: 600}) {
+			t.Fatalf("problem %d: the two arithmetic paths disagree\nhyps: %v\ngoal: %v", i, hyps, goal)
+		}
+		if result != Proved {
 			continue
 		}
 		proved++

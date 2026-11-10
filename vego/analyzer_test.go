@@ -8,7 +8,7 @@ import (
 
 func TestAnalyzer(t *testing.T) {
 	t.Run("verifies annotated functions", func(t *testing.T) {
-		analysistest.Run(t, analysistest.TestData(), Analyzer, "paper", "algorithms", "defects", "rejected", "leetcode", "semantics", "effects")
+		analysistest.Run(t, analysistest.TestData(), Analyzer, "paper", "algorithms", "defects", "rejected", "leetcode", "semantics", "effects", "integers")
 	})
 
 	t.Run("audits specifications on request", func(t *testing.T) {

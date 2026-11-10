@@ -20,7 +20,7 @@ func DivideMayNotTerminate(n, d int) (q, r int) {
 	//@ Invariant n = d*q + r And 0 <= r
 	//@ Variant r
 	for d <= r { // want `vego:\ loop\ variant\ may\ not\ decrease:\ r`
-		q, r = q+1, r-d
+		q, r = q+1, r-d // want `vego:\ addition\ may\ overflow\ int` `vego:\ subtraction\ may\ overflow\ int`
 	}
 	return q, r
 }
@@ -66,7 +66,7 @@ func BinarySearchStuck(A []int, target, lo, hi int) (index int) {
 }
 
 func DivisionByZero(a, b int) (q int) {
-	return a / b // want `vego:\ possible\ division\ by\ zero` `vego:\ postcondition\ may\ not\ hold:\ q\*b\ <=\ a`
+	return a / b // want `vego:\ possible\ division\ by\ zero` `vego:\ postcondition\ may\ not\ hold:\ q\*b\ <=\ a` `vego:\ division\ may\ overflow\ int`
 }
 
 //@ Ensures q*b <= a
@@ -75,7 +75,7 @@ func InvariantNotPreserved(n int) (s int) {
 	//@ Invariant s <= 10
 	//@ Variant n - i
 	for i := 0; i < n; i++ { // want `vego:\ loop\ invariant\ may\ not\ be\ preserved:\ s\ <=\ 10`
-		s += i
+		s += i // want `vego:\ addition\ may\ overflow\ int`
 	}
 	return s
 }
@@ -101,7 +101,7 @@ func positive(x int) (y int) {
 
 func CallBreaksPrecondition(x int) int {
 	//@ Assert True
-	return positive(x - 1) // want `vego:\ precondition\ of\ positive\ may\ not\ hold:\ x\ >\ 0`
+	return positive(x - 1) // want `vego:\ precondition\ of\ positive\ may\ not\ hold:\ x\ >\ 0` `vego:\ subtraction\ may\ overflow\ int`
 }
 
 // @ Requires n >= 0
@@ -118,7 +118,7 @@ func RecursionGrows(n int) (r int) {
 	if n == 0 {
 		return 0
 	}
-	return RecursionGrows(n + 1) // want `vego:\ measure\ may\ not\ decrease\ in\ recursive\ call:\ n`
+	return RecursionGrows(n + 1) // want `vego:\ measure\ may\ not\ decrease\ in\ recursive\ call:\ n` `vego:\ addition\ may\ overflow\ int`
 }
 
 // @ Requires n >= 0
@@ -130,13 +130,13 @@ func ReachablePanic(n int) int {
 }
 
 func AssertFails(x int) int {
-	y := x * x
+	y := x * x // want `vego:\ multiplication\ may\ overflow\ int`
 	//@ Assert y > 0 // want `vego:\ assertion\ may\ not\ hold:\ y\ >\ 0`
 	return y
 }
 
 func EnsuresFalse(x int) (y int) {
-	return x + 1 // want `vego:\ postcondition\ may\ not\ hold:\ False`
+	return x + 1 // want `vego:\ postcondition\ may\ not\ hold:\ False` `vego:\ addition\ may\ overflow\ int`
 }
 
 //@ Ensures False
@@ -220,7 +220,7 @@ func ModSign(a int) (r int) {
 //@ Ensures 0 <= r And r < 3
 
 func NonlinearGap(x, y int) (z int) {
-	return x * y // want `vego:\ postcondition\ may\ not\ hold:\ z\ >=\ 0`
+	return x * y // want `vego:\ postcondition\ may\ not\ hold:\ z\ >=\ 0` `vego:\ multiplication\ may\ overflow\ int`
 }
 
 //@ Ensures z >= 0

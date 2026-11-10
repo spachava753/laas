@@ -3,6 +3,9 @@
 package leetcode
 
 // TwoSum (LC 1) finds two distinct positions whose values add up to target.
+// The element bound is the one the problem statement gives.
+//
+// @ Requires Forall k in [0, |A|) : (-1000000000 <= A[k] And A[k] <= 1000000000)
 func TwoSum(A []int, target int) (i, j int, found bool) {
 	//@ Invariant 0 <= a <= |A|
 	//@ Invariant Forall p in [0, a) : Forall q in (p, |A|) : A[p] + A[q] != target
@@ -24,6 +27,8 @@ func TwoSum(A []int, target int) (i, j int, found bool) {
 //@ Ensures found = False -> Forall p in [0, |A|) : Forall q in (p, |A|) : A[p] + A[q] != target
 
 // TwoSumSameIndex reuses one index, a classic defect.
+//
+// @ Requires Forall k in [0, |A|) : (-1000000000 <= A[k] And A[k] <= 1000000000)
 func TwoSumSameIndex(A []int, target int) (i, j int, found bool) {
 	//@ Invariant 0 <= a <= |A|
 	//@ Variant |A| - a
@@ -90,6 +95,8 @@ func RemoveDuplicatesOffByOne(A []int) (k int) {
 
 // MaxProfit (LC 121) returns the best profit from one purchase followed by
 // one sale.
+//
+// @ Requires Forall k in [0, |prices|) : (0 <= prices[k] And prices[k] <= 10000)
 func MaxProfit(prices []int) (profit int) {
 	if len(prices) == 0 {
 		return 0
@@ -97,6 +104,7 @@ func MaxProfit(prices []int) (profit int) {
 	lowest := prices[0]
 	//@ Invariant 1 <= i <= |prices| And profit >= 0
 	//@ Invariant Forall p in [0, i) : lowest <= prices[p]
+	//@ Invariant 0 <= lowest <= 10000
 	//@ Invariant Forall p in [0, i) : Forall q in [p, i) : prices[q] - prices[p] <= profit
 	//@ Variant |prices| - i
 	for i := 1; i < len(prices); i++ {
@@ -110,12 +118,14 @@ func MaxProfit(prices []int) (profit int) {
 //@ Ensures Forall p in [0, |prices|) : Forall q in [p, |prices|) : prices[q] - prices[p] <= profit
 
 // MaxProfitInverted sells before it buys.
+//
+// @ Requires Forall k in [0, |prices|) : (0 <= prices[k] And prices[k] <= 10000)
 func MaxProfitInverted(prices []int) (profit int) {
 	if len(prices) == 0 {
 		return 0
 	}
 	highest := prices[0]
-	//@ Invariant 1 <= i <= |prices| And profit >= 0
+	//@ Invariant 1 <= i <= |prices| And profit >= 0 And 0 <= highest <= 10000
 	//@ Invariant Forall p in [0, i) : Forall q in [p, i) : prices[q] - prices[p] <= profit
 	//@ Variant |prices| - i
 	for i := 1; i < len(prices); i++ { // want `vego:\ loop\ invariant\ may\ not\ be\ preserved:\ Forall\ p\ in\ \[0,\ i\)\ :\ Forall\ q\ in\ \[p,\ i\)\ :\ prices\[q\]\ \-\ prices\[p\]\ <=\ profit`

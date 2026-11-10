@@ -4,7 +4,7 @@
 package logic
 
 import (
-	"strconv"
+	"math/big"
 	"strings"
 )
 
@@ -84,8 +84,9 @@ const (
 type Term struct {
 	Op   Op
 	Sort Sort
-	Name string // OpConst, OpBound, OpPred
-	Val  int64  // OpIntLit
+	Name string   // OpConst, OpBound, OpPred
+	Val  int64    // OpIntLit
+	Big  *big.Int // OpIntLit whose value does not fit Val
 	Args []*Term
 }
 
@@ -110,6 +111,22 @@ func BoolLit(v bool) *Term {
 
 // IntLit returns an integer literal.
 func IntLit(v int64) *Term { return &Term{Op: OpIntLit, Sort: Int, Val: v} }
+
+// BigLit returns an integer literal of any size.
+func BigLit(v *big.Int) *Term {
+	if v.IsInt64() {
+		return IntLit(v.Int64())
+	}
+	return &Term{Op: OpIntLit, Sort: Int, Big: v}
+}
+
+// Value returns the value of an integer literal.
+func (t *Term) Value() *big.Int {
+	if t.Big != nil {
+		return t.Big
+	}
+	return big.NewInt(t.Val)
+}
 
 // Const returns a free symbolic constant.
 func Const(name string, sort Sort) *Term { return &Term{Op: OpConst, Sort: sort, Name: name} }
@@ -272,7 +289,7 @@ func Subst(t *Term, bindings map[string]*Term) *Term {
 	if args == nil {
 		return t
 	}
-	return &Term{Op: t.Op, Sort: t.Sort, Name: t.Name, Val: t.Val, Args: args}
+	return &Term{Op: t.Op, Sort: t.Sort, Name: t.Name, Val: t.Val, Big: t.Big, Args: args}
 }
 
 var infix = map[Op]string{
@@ -303,7 +320,7 @@ func (t *Term) write(b *strings.Builder) {
 	}
 	switch t.Op {
 	case OpIntLit:
-		b.WriteString(strconv.FormatInt(t.Val, 10))
+		b.WriteString(t.Value().String())
 	case OpTrue:
 		b.WriteString("True")
 	case OpFalse:

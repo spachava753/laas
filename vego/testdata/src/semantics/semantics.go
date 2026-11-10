@@ -39,6 +39,8 @@ func AssignmentOrder(A []int) {
 //@ Ensures A'[1] = 5
 
 // Increment reads each element through the range value.
+//
+// @ Requires Forall k in [0, |A|) : A[k] < MaxInt
 func Increment(A []int) {
 	//@ Invariant Forall k in [0, i) : A[k] = old(A)[k] + 1
 	//@ Invariant Forall k in [i, |A|) : A[k] = old(A)[k]
@@ -100,6 +102,8 @@ func NamedResults(a, b int) (lo, hi int) {
 //@ Ensures lo <= hi And ((lo = a And hi = b) Or (lo = b And hi = a))
 
 // Appends grows a local slice and reads it back.
+//
+// @ Requires -1000 <= a <= 1000 And -1000 <= b <= 1000
 func Appends(a, b int) (R []int) {
 	R = append(R, a)
 	R = append(R, b, a+b)
@@ -110,6 +114,8 @@ func Appends(a, b int) (R []int) {
 //@ Ensures |R| = 3 And R[0] = a + 1 And R[1] = b And R[2] = a + b
 
 // Literal builds a slice from a composite literal.
+//
+// @ Requires a <= 1000
 func Literal(a int) (s int) {
 	values := []int{a, 2, 3}
 	return values[0] + values[2] // want `vego:\ postcondition\ may\ not\ hold:\ s\ =\ a\ \+\ 2`
@@ -137,7 +143,7 @@ func InfiniteLoop(n int) (i int) {
 
 // CallerSeesMutation relies on the callee's contract for the new contents.
 //
-// @ Requires |A| > 2
+// @ Requires |A| > 2 And 0 <= A[2] <= 1000
 func CallerSeesMutation(A []int) (x int) {
 	before := A[2]
 	setFirst(A, 9)

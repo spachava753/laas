@@ -2,13 +2,14 @@ package solver
 
 import (
 	"math"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
 )
 
-// overflow is panicked when exact 64-bit arithmetic would overflow. The prover
-// treats it as "unknown", never as a proof.
+// overflow is panicked when the 64-bit fast path of the arithmetic would
+// overflow. The check is then repeated with arbitrary precision.
 type overflow struct{}
 
 func addChecked(a, b int64) int64 {
@@ -29,27 +30,62 @@ func mulChecked(a, b int64) int64 {
 	return c
 }
 
-// poly is a polynomial with integer coefficients over atoms. Each key of m is
-// a monomial: the identifiers of its atoms in ascending order joined by "*".
-// A poly is immutable once built.
-type poly struct {
-	c int64
-	m map[string]int64
+// negChecked returns -a. The smallest int64 has no negation.
+func negChecked(a int64) int64 {
+	if a == math.MinInt64 {
+		panic(overflow{})
+	}
+	return -a
 }
 
-func constPoly(c int64) poly { return poly{c: c} }
+func abs(a int64) int64 {
+	if a < 0 {
+		return negChecked(a)
+	}
+	return a
+}
+
+// poly is a polynomial with integer coefficients over atoms. Each key of m is
+// a monomial: the identifiers of its atoms in ascending order joined by "*".
+// Coefficients have arbitrary precision. A poly and the numbers in it are
+// immutable once built.
+type poly struct {
+	c *big.Int
+	m map[string]*big.Int
+}
+
+var bigZero, bigOne = big.NewInt(0), big.NewInt(1)
+
+func constPoly(c int64) poly { return poly{c: big.NewInt(c)} }
+
+// monomialPoly returns the polynomial consisting of one monomial.
+func monomialPoly(mono string) poly {
+	return poly{c: bigZero, m: map[string]*big.Int{mono: bigOne}}
+}
 
 func (a poly) isConst() bool { return len(a.m) == 0 }
 
+// coef returns the coefficient of a monomial, zero when it does not occur.
+func (a poly) coef(mono string) *big.Int {
+	if c, ok := a.m[mono]; ok {
+		return c
+	}
+	return bigZero
+}
+
 // add returns a + scale*b.
-func (a poly) add(b poly, scale int64) poly {
-	result := poly{c: addChecked(a.c, mulChecked(scale, b.c)), m: make(map[string]int64, len(a.m)+len(b.m))}
+func (a poly) add(b poly, scale int64) poly { return a.addScaled(b, big.NewInt(scale)) }
+
+func (a poly) addScaled(b poly, scale *big.Int) poly {
+	result := poly{c: new(big.Int).Mul(scale, b.c), m: make(map[string]*big.Int, len(a.m)+len(b.m))}
+	result.c.Add(result.c, a.c)
 	for mono, coef := range a.m {
 		result.m[mono] = coef
 	}
 	for mono, coef := range b.m {
-		sum := addChecked(result.m[mono], mulChecked(scale, coef))
-		if sum == 0 {
+		sum := new(big.Int).Mul(scale, coef)
+		sum.Add(sum, result.coef(mono))
+		if sum.Sign() == 0 {
 			delete(result.m, mono)
 			continue
 		}
@@ -60,12 +96,11 @@ func (a poly) add(b poly, scale int64) poly {
 
 // mul returns the product a*b, expanding products of sums into monomials.
 func (a poly) mul(b poly) poly {
-	result := constPoly(mulChecked(a.c, b.c))
-	result = result.add(poly{m: a.m}, b.c).add(poly{m: b.m}, a.c)
+	result := poly{c: new(big.Int).Mul(a.c, b.c)}
+	result = result.addScaled(poly{c: bigZero, m: a.m}, b.c).addScaled(poly{c: bigZero, m: b.m}, a.c)
 	for monoA, coefA := range a.m {
 		for monoB, coefB := range b.m {
-			product := poly{m: map[string]int64{joinMonomials(monoA, monoB): mulChecked(coefA, coefB)}}
-			result = result.add(product, 1)
+			result = result.addScaled(monomialPoly(joinMonomials(monoA, monoB)), new(big.Int).Mul(coefA, coefB))
 		}
 	}
 	return result
@@ -102,45 +137,28 @@ func (a poly) monomials() []string {
 // key returns a canonical string, equal for equal polynomials.
 func (a poly) key() string {
 	var b strings.Builder
-	b.WriteString(strconv.FormatInt(a.c, 10))
+	b.WriteString(a.c.String())
 	for _, mono := range a.monomials() {
 		b.WriteByte(';')
 		b.WriteString(mono)
 		b.WriteByte(':')
-		b.WriteString(strconv.FormatInt(a.m[mono], 10))
+		b.WriteString(a.m[mono].String())
 	}
 	return b.String()
-}
-
-// rowGCD returns the greatest common divisor of the coefficients of a dense
-// row, ignoring its trailing constant.
-func rowGCD(row []int64) int64 {
-	var g int64
-	for _, coef := range row[:len(row)-1] {
-		for coef = abs(coef); coef != 0; {
-			g, coef = coef, g%coef
-		}
-	}
-	return g
 }
 
 // infeasible reports whether the constraints eq = 0 and le <= 0 have no
 // integer solution. It eliminates equalities by substitution and inequalities
 // by Fourier–Motzkin elimination, tightening every derived inequality to the
 // integers. The answer true is always correct; false means "not refuted".
-func (p *prover) infeasible(eqs, les []poly) (unsat bool) {
+//
+// The elimination runs on 64-bit numbers when the constraints fit and nothing
+// overflows, and is repeated with arbitrary precision otherwise.
+func (p *prover) infeasible(eqs, les []poly) bool {
 	p.steps++
 	if p.steps > p.maxSteps {
 		panic(giveUp{})
 	}
-	defer func() {
-		if r := recover(); r != nil {
-			if _, ok := r.(overflow); !ok {
-				panic(r)
-			}
-			unsat = false
-		}
-	}()
 	columns := map[string]int{}
 	for _, group := range [][]poly{eqs, les} {
 		for _, pl := range group {
@@ -152,10 +170,13 @@ func (p *prover) infeasible(eqs, les []poly) (unsat bool) {
 		}
 	}
 	width := len(columns)
-	dense := func(group []poly) [][]int64 {
-		rows := make([][]int64, len(group))
+	dense := func(group []poly) [][]*big.Int {
+		rows := make([][]*big.Int, len(group))
 		for i, pl := range group {
-			rows[i] = make([]int64, width+1)
+			rows[i] = make([]*big.Int, width+1)
+			for j := range rows[i] {
+				rows[i][j] = bigZero
+			}
 			for mono, coef := range pl.m {
 				rows[i][columns[mono]] = coef
 			}
@@ -163,19 +184,52 @@ func (p *prover) infeasible(eqs, les []poly) (unsat bool) {
 		}
 		return rows
 	}
-	eqRows, rows := dense(eqs), dense(les)
+	eqRows, leRows := dense(eqs), dense(les)
+	if !p.bigOnly {
+		if unsat, ok := infeasibleSmall(eqRows, leRows, width); ok {
+			return unsat
+		}
+	}
+	return infeasibleBig(eqRows, leRows, width)
+}
+
+// infeasibleSmall runs the elimination on 64-bit numbers. Its second result
+// is false when a number did not fit, in which case the first is meaningless.
+func infeasibleSmall(eqs, les [][]*big.Int, width int) (unsat, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			if _, isOverflow := r.(overflow); !isOverflow {
+				panic(r)
+			}
+			unsat, ok = false, false
+		}
+	}()
+	narrow := func(rows [][]*big.Int) [][]int64 {
+		small := make([][]int64, len(rows))
+		for i, row := range rows {
+			small[i] = make([]int64, len(row))
+			for j, value := range row {
+				if !value.IsInt64() {
+					panic(overflow{})
+				}
+				small[i][j] = value.Int64()
+			}
+		}
+		return small
+	}
+	eqRows, rows := narrow(eqs), narrow(les)
 	for len(eqRows) > 0 {
 		eq := eqRows[len(eqRows)-1]
 		eqRows = eqRows[:len(eqRows)-1]
 		g := rowGCD(eq)
 		if g == 0 {
 			if eq[width] != 0 {
-				return true
+				return true, true
 			}
 			continue
 		}
 		if eq[width]%g != 0 {
-			return true
+			return true, true
 		}
 		pivot := -1
 		for j := range width {
@@ -191,22 +245,19 @@ func (p *prover) infeasible(eqs, les []poly) (unsat bool) {
 			}
 		}
 	}
-	return fourierMotzkin(rows, width)
+	return fourierMotzkin(rows, width), true
 }
 
-// negChecked returns -a. The smallest int64 has no negation.
-func negChecked(a int64) int64 {
-	if a == math.MinInt64 {
-		panic(overflow{})
+// rowGCD returns the greatest common divisor of the coefficients of a dense
+// row, ignoring its trailing constant.
+func rowGCD(row []int64) int64 {
+	var g int64
+	for _, coef := range row[:len(row)-1] {
+		for coef = abs(coef); coef != 0; {
+			g, coef = coef, g%coef
+		}
 	}
-	return -a
-}
-
-func abs(a int64) int64 {
-	if a < 0 {
-		return negChecked(a)
-	}
-	return a
+	return g
 }
 
 // substitute eliminates the pivot column from row using the equality eq. The
@@ -270,9 +321,7 @@ func fourierMotzkin(rows [][]int64, width int) bool {
 		if len(rows) == 0 {
 			return false
 		}
-		best, bestCost := -1, 0
-		for j := range width {
-			pos, neg := 0, 0
+		best := cheapestColumn(width, func(j int) (pos, neg int) {
 			for _, row := range rows {
 				if row[j] > 0 {
 					pos++
@@ -280,10 +329,8 @@ func fourierMotzkin(rows [][]int64, width int) bool {
 					neg++
 				}
 			}
-			if cost := pos*neg - pos - neg; pos+neg > 0 && (best < 0 || cost < bestCost) {
-				best, bestCost = j, cost
-			}
-		}
+			return pos, neg
+		})
 		var next, lower, upper [][]int64
 		for _, row := range rows {
 			switch {
@@ -309,4 +356,151 @@ func fourierMotzkin(rows [][]int64, width int) bool {
 		}
 		rows = next
 	}
+}
+
+// cheapestColumn picks the column whose elimination creates the fewest rows.
+// count reports how many rows have a positive and a negative coefficient in a
+// column; at least one column must occur in some row.
+func cheapestColumn(width int, count func(column int) (pos, neg int)) int {
+	best, bestCost := -1, 0
+	for j := range width {
+		pos, neg := count(j)
+		if cost := pos*neg - pos - neg; pos+neg > 0 && (best < 0 || cost < bestCost) {
+			best, bestCost = j, cost
+		}
+	}
+	return best
+}
+
+// maxBits bounds the size of the numbers the arbitrary-precision elimination
+// will carry before it gives up.
+const maxBits = 4096
+
+// infeasibleBig is the arbitrary-precision twin of infeasibleSmall. It follows
+// the same steps, so the two must be kept in line with each other.
+func infeasibleBig(eqRows, rows [][]*big.Int, width int) bool {
+	gcdOf := func(row []*big.Int) *big.Int {
+		g := new(big.Int)
+		for _, coef := range row[:width] {
+			g.GCD(nil, nil, g, new(big.Int).Abs(coef))
+		}
+		return g
+	}
+	for len(eqRows) > 0 {
+		eq := eqRows[len(eqRows)-1]
+		eqRows = eqRows[:len(eqRows)-1]
+		g := gcdOf(eq)
+		if g.Sign() == 0 {
+			if eq[width].Sign() != 0 {
+				return true
+			}
+			continue
+		}
+		if new(big.Int).Rem(eq[width], g).Sign() != 0 {
+			return true
+		}
+		pivot := -1
+		reduced := make([]*big.Int, width+1)
+		for j := range reduced {
+			reduced[j] = new(big.Int).Quo(eq[j], g)
+			if j < width && reduced[j].Sign() != 0 && (pivot < 0 || reduced[j].CmpAbs(reduced[pivot]) < 0) {
+				pivot = j
+			}
+		}
+		scaleRow := new(big.Int).Abs(reduced[pivot])
+		for _, group := range [][][]*big.Int{eqRows, rows} {
+			for i, row := range group {
+				if row[pivot].Sign() == 0 {
+					continue
+				}
+				scaleEq := new(big.Int).Set(row[pivot])
+				if reduced[pivot].Sign() < 0 {
+					scaleEq.Neg(scaleEq)
+				}
+				group[i] = combine(scaleRow, row, new(big.Int).Neg(scaleEq), reduced)
+			}
+		}
+	}
+	for {
+		index := map[string]int{}
+		kept := rows[:0]
+		for _, row := range rows {
+			g := gcdOf(row)
+			if g.Sign() == 0 {
+				if row[width].Sign() > 0 {
+					return true
+				}
+				continue
+			}
+			tightened := make([]*big.Int, width+1)
+			var key strings.Builder
+			for j := range width {
+				tightened[j] = new(big.Int).Quo(row[j], g)
+				key.WriteString(tightened[j].String())
+				key.WriteByte(',')
+			}
+			// Round the constant up; Quo truncates toward zero.
+			constant := new(big.Int).Set(row[width])
+			if constant.Sign() >= 0 {
+				constant.Add(constant, g).Sub(constant, bigOne)
+			}
+			tightened[width] = constant.Quo(constant, g)
+			if tightened[width].BitLen() > maxBits {
+				return false
+			}
+			if i, dup := index[key.String()]; dup {
+				if tightened[width].Cmp(kept[i][width]) > 0 {
+					kept[i] = tightened
+				}
+				continue
+			}
+			index[key.String()] = len(kept)
+			kept = append(kept, tightened)
+		}
+		rows = kept
+		if len(rows) == 0 {
+			return false
+		}
+		best := cheapestColumn(width, func(j int) (pos, neg int) {
+			for _, row := range rows {
+				if sign := row[j].Sign(); sign > 0 {
+					pos++
+				} else if sign < 0 {
+					neg++
+				}
+			}
+			return pos, neg
+		})
+		var next, lower, upper [][]*big.Int
+		for _, row := range rows {
+			switch row[best].Sign() {
+			case 1:
+				upper = append(upper, row)
+			case -1:
+				lower = append(lower, row)
+			default:
+				next = append(next, row)
+			}
+		}
+		if len(next)+len(upper)*len(lower) > maxFMRows {
+			return false
+		}
+		for _, up := range upper {
+			for _, low := range lower {
+				next = append(next, combine(new(big.Int).Neg(low[best]), up, up[best], low))
+			}
+		}
+		rows = next
+	}
+}
+
+// combine returns a*x + b*y for two rows.
+func combine(a *big.Int, x []*big.Int, b *big.Int, y []*big.Int) []*big.Int {
+	result := make([]*big.Int, len(x))
+	scratch := new(big.Int)
+	for k := range result {
+		result[k] = new(big.Int).Mul(a, x[k])
+		result[k].Add(result[k], scratch.Mul(b, y[k]))
+	}
+	return result
 }

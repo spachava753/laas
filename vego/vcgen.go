@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
-	"go/constant"
 	"go/token"
 	"go/types"
 	"maps"
@@ -114,6 +113,7 @@ func (v *fnVerifier) enter() *state {
 		}
 		st.vals[param] = logic.Const(param.Name(), sort)
 		v.entry[param] = st.vals[param]
+		st.assume(v.typeFact(st.vals[param], param.Type()))
 	}
 	for _, result := range fn.results {
 		sort, ok := sortOf(result.Type())
@@ -199,7 +199,7 @@ func (e *contractEnv) Var(name string, primed bool) (*logic.Term, error) {
 		}
 		return e.results[index], nil
 	}
-	return constantNamed(e.pv.pass.Pkg.Scope().Lookup(name), name)
+	return e.pv.constantNamed(e.pv.pass.Pkg.Scope().Lookup(name), name)
 }
 
 func (e *contractEnv) Old(name string) (*logic.Term, error) {
@@ -207,20 +207,6 @@ func (e *contractEnv) Old(name string) (*logic.Term, error) {
 		return e.args[param], nil
 	}
 	return nil, fmt.Errorf("old(%s): %s is not a parameter", name, name)
-}
-
-func constantNamed(obj types.Object, name string) (*logic.Term, error) {
-	if c, ok := obj.(*types.Const); ok {
-		switch c.Val().Kind() {
-		case constant.Int:
-			if value, exact := constant.Int64Val(c.Val()); exact {
-				return logic.IntLit(value), nil
-			}
-		case constant.Bool:
-			return logic.BoolLit(constant.BoolVal(c.Val())), nil
-		}
-	}
-	return nil, fmt.Errorf("unknown name %s", name)
 }
 
 // bodyEnv gives meaning to the names in an annotation inside a function body:
@@ -246,7 +232,7 @@ func (e *bodyEnv) Var(name string, primed bool) (*logic.Term, error) {
 		}
 		return nil, fmt.Errorf("%s cannot be used in annotations: its type %s is not supported", name, variable.Type())
 	}
-	return constantNamed(obj, name)
+	return e.v.constantNamed(obj, name)
 }
 
 func (e *bodyEnv) Old(name string) (*logic.Term, error) {
@@ -385,7 +371,9 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 			delta = logic.IntLit(-1)
 		}
 		target := v.lvalue(s.X, st)
-		v.set(target, logic.Add(v.read(target, st), delta), st)
+		value := logic.Add(v.read(target, st), delta)
+		v.checkFits(st, nil, value, v.info.TypeOf(s.X), s.Pos(), operation(s.Tok))
+		v.set(target, value, st)
 	case *ast.DeclStmt:
 		v.declare(s, st)
 	case *ast.IfStmt:
@@ -524,10 +512,12 @@ func (v *fnVerifier) read(target lvalue, st *state) *logic.Term {
 	if current == nil {
 		v.unsupported(target.pos, "this operand cannot be read and updated in place")
 	}
-	if target.index != nil {
-		return logic.Select(current, target.index)
+	if target.index == nil {
+		return current
 	}
-	return current
+	element := logic.Select(current, target.index)
+	st.assume(v.typeFact(element, target.variable.Type().Underlying().(*types.Slice).Elem()))
+	return element
 }
 
 // set performs an assignment in the symbolic state.
@@ -548,6 +538,9 @@ func (v *fnVerifier) set(target lvalue, value *logic.Term, st *state) {
 				variable.Name()))
 		}
 		st.vals[variable] = value
+		if sort.IsSeq() {
+			st.assume(v.typeFact(value, variable.Type()))
+		}
 	}
 }
 
@@ -588,7 +581,7 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state) {
 			token.QUO_ASSIGN: token.QUO, token.REM_ASSIGN: token.REM,
 		}[s.Tok]
 		current, operand := v.read(targets[0], st), v.expr(s.Rhs[0], st, nil)
-		values = []*logic.Term{v.binary(op, current, operand, s.TokPos, st, nil)}
+		values = []*logic.Term{v.binary(op, current, operand, v.info.TypeOf(s.Lhs[0]), s.TokPos, st, nil)}
 	case len(s.Rhs) == 1 && len(s.Lhs) > 1:
 		values = v.callResults(s.Rhs[0], st)
 	default:
@@ -654,6 +647,7 @@ func (v *fnVerifier) slice(target *types.Var, sort logic.Sort, e ast.Expr, st *s
 			}
 			length := v.expr(e.Args[1], st, nil)
 			v.check(st, nil, logic.Le(logic.IntLit(0), length), e.Args[1].Pos(), "make length may be negative")
+			v.checkFits(st, nil, length, types.Typ[types.Int], e.Args[1].Pos(), "make length")
 			if len(e.Args) == 3 {
 				capacity := v.expr(e.Args[2], st, nil)
 				v.check(st, nil, logic.Le(length, capacity), e.Args[2].Pos(), "make capacity may be less than the length")
@@ -796,6 +790,7 @@ func (v *fnVerifier) havoc(st *state, whole, elements map[*types.Var]bool) {
 	for _, variable := range variables {
 		previous := st.vals[variable]
 		st.vals[variable] = v.fresh(variable.Name(), previous.Sort)
+		st.assume(v.typeFact(st.vals[variable], variable.Type()))
 		if previous.Sort.IsSeq() && !whole[variable] {
 			st.assume(logic.Eq(logic.Len(st.vals[variable]), logic.Len(previous)))
 		}
@@ -940,6 +935,7 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 		}
 		if value != nil {
 			st.vals[value] = logic.Select(st.vals[sequence], counter)
+			st.assume(v.typeFact(st.vals[value], value.Type()))
 		}
 	}
 	v.loop(shape, st, k)
@@ -1015,7 +1011,7 @@ func (v *fnVerifier) checkIndex(st *state, guard []*logic.Term, seq, index *logi
 // at all, which matters on the right of && and ||.
 func (v *fnVerifier) expr(e ast.Expr, st *state, guard []*logic.Term) *logic.Term {
 	if tv, ok := v.info.Types[e]; ok && tv.Value != nil {
-		if literal, err := constantNamed(types.NewConst(e.Pos(), nil, "", tv.Type, tv.Value), "constant"); err == nil {
+		if literal, ok := literalOf(tv.Value); ok {
 			return literal
 		}
 		v.unsupported(e.Pos(), "only int and bool constants are supported")
@@ -1036,6 +1032,7 @@ func (v *fnVerifier) expr(e ast.Expr, st *state, guard []*logic.Term) *logic.Ter
 		operand := v.expr(e.X, st, guard)
 		switch e.Op {
 		case token.SUB:
+			v.checkFits(st, guard, logic.Neg(operand), v.info.TypeOf(e), e.Pos(), "negation")
 			return logic.Neg(operand)
 		case token.ADD:
 			return operand
@@ -1050,7 +1047,7 @@ func (v *fnVerifier) expr(e ast.Expr, st *state, guard []*logic.Term) *logic.Ter
 		case token.LOR:
 			return logic.Or(left, v.expr(e.Y, st, append(slices.Clip(guard), logic.Not(left))))
 		}
-		return v.binary(e.Op, left, v.expr(e.Y, st, guard), e.OpPos, st, guard)
+		return v.binary(e.Op, left, v.expr(e.Y, st, guard), v.info.TypeOf(e), e.OpPos, st, guard)
 	case *ast.IndexExpr:
 		id, ok := ast.Unparen(e.X).(*ast.Ident)
 		if !ok {
@@ -1058,7 +1055,9 @@ func (v *fnVerifier) expr(e ast.Expr, st *state, guard []*logic.Term) *logic.Ter
 		}
 		seq, index := v.value(id, st), v.expr(e.Index, st, guard)
 		v.checkIndex(st, guard, seq, index, e.Pos())
-		return logic.Select(seq, index)
+		element := logic.Select(seq, index)
+		st.assume(logic.Implies(logic.And(guard...), v.typeFact(element, v.info.TypeOf(e))))
+		return element
 	case *ast.CallExpr:
 		return v.callExpr(e, st, guard)
 	}
@@ -1086,7 +1085,10 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) *
 		}
 		return result
 	case v.info.Types[e.Fun].IsType():
-		return v.expr(e.Args[0], st, guard)
+		value, target := v.expr(e.Args[0], st, guard), v.info.TypeOf(e)
+		v.check(st, guard, v.typeFact(value, target), e.Pos(),
+			"conversion may not fit %s", types.TypeString(target, nil))
+		return value
 	}
 	results := v.call(e, st, guard)
 	if len(results) != 1 || results[0] == nil {
@@ -1097,20 +1099,29 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) *
 
 // binary builds the term for a binary operator applied to two evaluated
 // operands. Division and remainder first have to show a non-zero divisor.
-func (v *fnVerifier) binary(op token.Token, x, y *logic.Term, pos token.Pos, st *state, guard []*logic.Term) *logic.Term {
+func (v *fnVerifier) binary(op token.Token, x, y *logic.Term, t types.Type, pos token.Pos, st *state, guard []*logic.Term) *logic.Term {
 	switch op {
-	case token.ADD:
-		return logic.Add(x, y)
-	case token.SUB:
-		return logic.Sub(x, y)
-	case token.MUL:
-		return logic.Mul(x, y)
+	case token.ADD, token.SUB, token.MUL:
+		result := logic.Add(x, y)
+		switch op {
+		case token.SUB:
+			result = logic.Sub(x, y)
+		case token.MUL:
+			result = logic.Mul(x, y)
+		}
+		v.checkFits(st, guard, result, t, pos, operation(op))
+		return result
 	case token.QUO, token.REM:
 		v.check(st, guard, logic.Ne(y, logic.IntLit(0)), pos, "possible division by zero")
-		if op == token.QUO {
-			return logic.Div(x, y)
+		if op == token.REM {
+			return logic.Mod(x, y)
 		}
-		return logic.Mod(x, y)
+		// The only quotient that does not fit is the least value over -1.
+		if least, _, ok := v.intRange(t); ok && least.Sign() < 0 {
+			wraps := logic.And(logic.Eq(x, logic.BigLit(least)), logic.Eq(y, logic.IntLit(-1)))
+			v.check(st, guard, logic.Not(wraps), pos, "division may overflow %s", types.TypeString(t, nil))
+		}
+		return logic.Div(x, y)
 	case token.EQL:
 		return logic.Eq(x, y)
 	case token.NEQ:
@@ -1208,6 +1219,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 				callee.Name()))
 		}
 		results[i] = v.fresh(callee.Name(), sort)
+		st.assume(v.typeFact(results[i], sig.Results().At(i).Type()))
 	}
 	if fn != nil {
 		env := &contractEnv{pv: v.pkgVerifier, fn: fn, args: args, post: post, results: results}
