@@ -255,6 +255,10 @@ func (pv *pkgVerifier) collect() {
 	}
 }
 
+// addFunc records a function declaration with the names annotations may use
+// for its parameters and results. Blank and unnamed parameters get no name;
+// unnamed results are called result, or result1, result2, ... when there are
+// several.
 func (pv *pkgVerifier) addFunc(decl *ast.FuncDecl) {
 	obj, ok := pv.info.Defs[decl.Name].(*types.Func)
 	if !ok {
