@@ -228,7 +228,7 @@ func (s *Stack) Top() int {
 `Top` may index with `s.n-1` because the invariant bounds `n`. An invariant is short for clauses at every boundary of every verified function:
 
 - it is assumed on entry for each parameter and receiver of the type, or of a pointer to it that is not nil;
-- it must be proved on return for each such pointer and for each result of the type;
+- it must be proved on return for each of them and for each result of the type. A struct passed by value is checked too, as it was on entry against memory as it is on return, because what it points to is shared with the caller;
 - it must be proved at a call for each argument, and is known again afterwards for what a verified function hands back.
 
 Inside a function the invariant may be broken and restored. There is no way to switch it off for a function: a helper that has to run while the invariant is broken takes the fields it needs instead of the struct. After a call to a trusted function that may modify a struct, its invariant is not assumed, since nobody proved it. The invariant is not applied to structs reached in other ways, such as the elements of a slice or the target of a pointer field.

@@ -436,8 +436,11 @@ func (v *fnVerifier) atReturn(st *state, results []value, pos token.Pos) {
 	}
 	// The caller gets back what it passed by pointer, and the results,
 	// with their invariants intact.
+	// A struct passed by value is the caller's own again too: what it
+	// refers to is shared, so its invariant is checked for the value it had
+	// on entry against memory as it is now.
 	for _, param := range v.fn.params {
-		if _, viaPointer := pointee(param.Type()); viaPointer && v.entry[param] != nil {
+		if v.entry[param] != nil {
 			v.checkInvariants(st, nil, st.mem, v.entry[param], param.Type(), pos, describe(param)+" on return")
 		}
 	}

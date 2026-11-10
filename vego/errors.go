@@ -216,7 +216,7 @@ func (v *fnVerifier) contractInstance(entry *state) (pre, post, failures []*logi
 	// A verified function also keeps the invariants of what it hands back.
 	if fn.trust == nil {
 		for _, param := range fn.params {
-			if _, viaPointer := pointee(param.Type()); viaPointer && v.entry[param] != nil {
+			if v.entry[param] != nil {
 				v.assumeInvariants(st, nil, st.mem, v.entry[param], param.Type())
 			}
 		}

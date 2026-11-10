@@ -35,3 +35,9 @@ func Unchecked(w int) *Rect {
 }
 
 //@ Ensures fresh(result)
+
+// Broken has an invariant that cannot be read, which importing packages
+// must not take for no invariant.
+//
+// @ Invariant X > // want `syntax error in Invariant annotation: expected an expression, found "end of annotation"`
+type Broken struct{ X int }

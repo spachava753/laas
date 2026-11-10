@@ -23,12 +23,16 @@ type invariantSet struct {
 	// owner gives the clauses their constants: those of this package, or
 	// the ones recorded for a type of another package.
 	owner *funcInfo
+	// broken is set when a declaration could not be read. Nothing can then
+	// be verified about the type, here or in a package that imports it.
+	broken bool
 }
 
 // invariantFact carries the invariants of a type to importing packages.
 type invariantFact struct {
 	Texts  []string
 	Consts map[string]string
+	Broken bool
 }
 
 func (*invariantFact) AFact() {}
@@ -67,17 +71,18 @@ func (pv *pkgVerifier) addInvariant(name *types.TypeName, c *clause) {
 		pv.report(c.pos, "an Invariant can only be declared on a struct type without type parameters")
 		return
 	}
-	node, err := logic.ParseFormula(c.text)
-	if err != nil {
-		pv.report(c.pos, "syntax error in Invariant annotation: %v", err)
-		return
-	}
-	c.node = node
 	set := pv.invariants[name]
 	if set == nil {
 		set = &invariantSet{name: name, owner: &funcInfo{}}
 		pv.invariants[name] = set
 	}
+	node, err := logic.ParseFormula(c.text)
+	if err != nil {
+		pv.report(c.pos, "syntax error in Invariant annotation: %v", err)
+		set.broken = true
+		return
+	}
+	c.node = node
 	set.clauses = append(set.clauses, c)
 }
 
@@ -102,11 +107,12 @@ func (pv *pkgVerifier) invariantsOf(t types.Type) (set *invariantSet, viaPointer
 	if name.Pkg() == nil || name.Pkg() == pv.pass.Pkg || !pv.pass.ImportObjectFact(name, published) {
 		return nil, false
 	}
-	set = &invariantSet{name: name, owner: &funcInfo{imported: &contractFact{Consts: published.Consts}}}
+	set = &invariantSet{name: name, owner: &funcInfo{imported: &contractFact{Consts: published.Consts}}, broken: published.Broken}
 	resolver := pv.foreignResolver(name.Pkg())
 	for _, text := range published.Texts {
 		node, err := logic.ParseFormula(text)
 		if err != nil {
+			set.broken = true
 			continue
 		}
 		set.clauses = append(set.clauses, &clause{kind: "Invariant", text: text, node: node, pos: name.Pos(), res: resolver})
@@ -122,7 +128,7 @@ func (pv *pkgVerifier) exportInvariants() {
 		if set == nil || name.Pkg() != pv.pass.Pkg || name.Parent() != pv.pass.Pkg.Scope() {
 			continue
 		}
-		fact := &invariantFact{Consts: map[string]string{}}
+		fact := &invariantFact{Consts: map[string]string{}, Broken: set.broken}
 		var visit func(n *logic.Node)
 		visit = func(n *logic.Node) {
 			if constant, ok := pv.pass.Pkg.Scope().Lookup(n.Name).(*types.Const); ok && n.Kind == logic.NIdent {
@@ -155,7 +161,14 @@ func (pv *pkgVerifier) checkInvariantsDeclared() {
 	slices.SortFunc(names, func(a, b *types.TypeName) int { return int(a.Pos() - b.Pos()) })
 	for _, name := range names {
 		set := pv.invariants[name]
+		if set.broken {
+			continue
+		}
 		pv.run(&funcInfo{obj: types.NewFunc(name.Pos(), pv.pass.Pkg, name.Name(), types.NewSignatureType(nil, nil, nil, nil, nil, false))}, func(v *fnVerifier) {
+			v.misreadAs = func(c *clause, err error) {
+				set.broken = true
+				pv.report(c.pos, "in %s annotation: %v", c.kind, err)
+			}
 			st := &state{vals: map[*types.Var]value{}, mem: memory{}, brk: logic.Const("brk", logic.Ref), noted: map[string]bool{}}
 			self := v.unknown("self", name.Type(), st)
 			v.assumeInvariants(st, nil, st.mem, self, name.Type())
@@ -169,8 +182,12 @@ func (pv *pkgVerifier) checkInvariantsDeclared() {
 
 // invariantEnv gives meaning to the names in an invariant: the fields of the
 // value it is stated of, which is self when the value is a struct and what
-// self points to when it is a pointer.
+// self points to when it is a pointer. A type whose invariants could not be
+// read cannot be used at a boundary at all.
 func (v *fnVerifier) invariantEnv(set *invariantSet, sink *state, mem memory, self value, t types.Type) *specEnv {
+	if set.broken {
+		v.unsupported(v.fn.obj.Pos(), fmt.Sprintf("the invariants of %s could not be understood", set.name.Name()))
+	}
 	return &specEnv{v: v, sink: sink, fn: set.owner, now: mem, self: self, selfType: t}
 }
 

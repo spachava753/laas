@@ -190,3 +190,51 @@ func (l *Log) write() {}
 func AfterTrusted(l *Log) {
 	l.write()
 } // want `vego: invariant of Log may not hold for l on return: count >= 0`
+
+// Cell is a struct another struct points to.
+type Cell struct{ x int }
+
+// Holder says something about what it points to.
+//
+// @ Invariant p != nil And p.x = 0
+type Holder struct{ p *Cell }
+
+// BreaksThroughCopy gets its struct by value, but what the struct points to
+// is the caller's.
+//
+// @ Modifies h.p.x
+func BreaksThroughCopy(h Holder) {
+	h.p.x = 1
+} // want `vego: invariant of Holder may not hold for h on return: p.x = 0`
+
+// KeepsThroughCopy changes its copy only.
+func KeepsThroughCopy(h Holder) int {
+	h.p = nil
+	return 0
+}
+
+//@ Ensures result = 0
+
+// Tagged has a field of a type the verifier does not model, with the name
+// of a built-in limit.
+//
+// @ Invariant MaxInt8 = 127 // want `vego: in Invariant annotation: MaxInt8 has type uintptr, which is not supported`
+type Tagged struct {
+	MaxInt8 uintptr
+	X       int
+}
+
+// MakesTagged cannot be verified, since the invariant of its result cannot
+// be read.
+func MakesTagged() Tagged { // want `vego: cannot verify MakesTagged: the invariants of Tagged could not be understood`
+	return Tagged{}
+}
+
+//@ Ensures True
+
+// MakesBroken uses a type of another package whose invariant cannot be read.
+func MakesBroken() shapes.Broken { // want `vego: cannot verify MakesBroken: the invariants of Broken could not be understood`
+	return shapes.Broken{X: 99}
+}
+
+//@ Ensures True

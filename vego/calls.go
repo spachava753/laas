@@ -189,7 +189,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	// A trusted one has proved nothing, so nothing is assumed of it.
 	if fn.trust == nil {
 		for _, param := range fn.params {
-			if _, viaPointer := pointee(param.Type()); viaPointer && args[param] != nil {
+			if args[param] != nil {
 				v.assumeInvariants(st, guard, st.mem, args[param], param.Type())
 			}
 		}

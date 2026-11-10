@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"go/types"
 	"slices"
+	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 )
@@ -158,8 +159,18 @@ func (e *specEnv) locateField(name string, steps []logic.Step, when logic.When) 
 	}
 	hops, final, err := plan(e.selfType, append([]logic.Step{{Field: name}}, steps...))
 	if err != nil {
-		if _, _, noField := plan(e.selfType, []logic.Step{{Field: name}}); noField == nil {
-			return reached{}, fmt.Errorf("%s%v", name, err)
+		// A name that is a field stays a field, also when the field cannot
+		// be used; only a name that is no field can be a constant.
+		object := e.selfType
+		if target, ok := pointee(object); ok {
+			object = target
+		}
+		var home *types.Package
+		if named, ok := types.Unalias(object).(*types.Named); ok {
+			home = named.Obj().Pkg()
+		}
+		if found, _, _ := types.LookupFieldOrMethod(e.selfType, true, home, name); found != nil {
+			return reached{}, errors.New(strings.TrimPrefix(err.Error(), "."))
 		}
 		constant, constErr := e.v.contractConstant(e.fn, name)
 		switch {
