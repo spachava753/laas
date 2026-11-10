@@ -3,6 +3,7 @@ package logic
 import (
 	"fmt"
 	"math/big"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -24,6 +25,8 @@ const (
 	NBinary           // Op is an arithmetic or logical connective
 	NCompare          // Kids[0] Ops[0] Kids[1] Ops[1] Kids[2] ...
 	NQuant            // Op is "Forall" or "Exists"; Kids is [body] or [lo, hi, body]
+	NNil              // the nil error
+	NStr              // a string literal; Name holds its value
 )
 
 // Node is an untyped syntax tree node of an annotation clause. Start and End
@@ -62,7 +65,8 @@ type PredDecl struct {
 }
 
 type token struct {
-	kind byte // 'i' identifier, 'n' number, 'o' operator, 'e' end of input
+	size int  // length of the token in the source
+	kind byte // 'i' identifier, 'n' number, 's' string, 'o' operator, 'e' end of input
 	text string
 	pos  int
 }
@@ -98,18 +102,33 @@ func lex(src string) ([]token, error) {
 				}
 				i += size
 			}
-			toks = append(toks, token{'i', src[start:i], start})
+			toks = append(toks, token{i - start, 'i', src[start:i], start})
+		case r == '"':
+			// A string literal uses Go's syntax for interpreted strings.
+			end := i + 1
+			for end < len(src) && src[end] != '"' {
+				if src[end] == '\\' {
+					end++
+				}
+				end++
+			}
+			text, err := strconv.Unquote(src[i:min(end+1, len(src))])
+			if err != nil {
+				return nil, &SyntaxError{i, "malformed string literal"}
+			}
+			toks = append(toks, token{end + 1 - i, 's', text, i})
+			i = end + 1
 		case r >= '0' && r <= '9':
 			start := i
 			for i < len(src) && src[i] >= '0' && src[i] <= '9' {
 				i++
 			}
-			toks = append(toks, token{'n', src[start:i], start})
+			toks = append(toks, token{i - start, 'n', src[start:i], start})
 		default:
 			matched := false
 			for _, op := range operators {
 				if strings.HasPrefix(src[i:], op) {
-					toks = append(toks, token{'o', op, i})
+					toks = append(toks, token{len(op), 'o', op, i})
 					i += len(op)
 					matched = true
 					break
@@ -120,7 +139,7 @@ func lex(src string) ([]token, error) {
 			}
 		}
 	}
-	return append(toks, token{'e', "", len(src)}), nil
+	return append(toks, token{0, 'e', "", len(src)}), nil
 }
 
 type parser struct {
@@ -186,7 +205,7 @@ func (p *parser) fail(format string, args ...any) {
 // is reports whether the next token is the given operator or keyword.
 func (p *parser) is(text string) bool {
 	tok := p.peek()
-	return tok.kind != 'e' && tok.kind != 'n' && tok.text == text
+	return tok.kind != 'e' && tok.kind != 'n' && tok.kind != 's' && tok.text == text
 }
 
 func (p *parser) accept(text string) bool {
@@ -228,7 +247,7 @@ func (p *parser) ident() string {
 // end returns the offset just past the most recently consumed token.
 func (p *parser) end() int {
 	last := p.toks[p.pos-1]
-	return last.pos + len(last.text)
+	return last.pos + last.size
 }
 
 func (p *parser) binary(op string, left, right *Node) *Node {
@@ -398,6 +417,11 @@ func (p *parser) primary() *Node {
 		p.pos++
 		value, _ := new(big.Int).SetString(tok.text, 10)
 		n.Kind, n.Big = NInt, value
+	case tok.kind == 's':
+		p.pos++
+		n.Kind, n.Name = NStr, tok.text
+	case p.accept("nil"):
+		n.Kind = NNil
 	case p.accept("True"):
 		n.Kind, n.Val = NBool, 1
 	case p.accept("False"):

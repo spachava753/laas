@@ -83,11 +83,11 @@ func UnknownPredicate(x int) int {
 	return x
 }
 
-func Floats(x float64) (y float64) { // want `vego:\ cannot\ verify\ Floats:\ parameter\ x\ has\ unsupported\ type\ float64`
+func Floats(x float64) (y float64) {
 	return x
 }
 
-//@ Ensures y = x
+//@ Ensures y = x // want `vego:\ in\ Ensures\ annotation:\ operator\ =\ cannot\ be\ applied\ to\ float\ values`
 
 func MisplacedInvariant(x int) int {
 	//@ Invariant x > 0 // want `vego:\ Invariant\ annotation\ must\ be\ directly\ above\ a\ for\ loop`
@@ -109,7 +109,7 @@ var global int
 
 // @ Requires x > 0
 func ReadsGlobal(x int) int {
-	return x + global // want `vego:\ cannot\ verify\ ReadsGlobal:\ global\ is\ not\ a\ local\ variable\ of\ a\ supported\ type\ \(int,\ bool,\ \[\]int,\ \[\]bool\)`
+	return x + global // want `vego:\ cannot\ verify\ ReadsGlobal:\ global\ is\ not\ a\ local\ variable\ of\ a\ supported\ type`
 }
 
 // @ Requires x > 0

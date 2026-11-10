@@ -12,36 +12,47 @@ import (
 type Sort int
 
 // The sorts of the logic. Integers are mathematical (unbounded) integers and
-// sequences are the value model of Go slices.
+// sequences are the value model of Go slices and strings. Float and Err are
+// opaque: a float has no known properties at all, and an error has exactly
+// one, whether it is nil.
 const (
 	Int Sort = iota
 	Bool
 	IntSeq
 	BoolSeq
+	Float
+	Err
+	FloatSeq
 )
 
 // IsSeq reports whether the sort is a sequence sort.
-func (s Sort) IsSeq() bool { return s == IntSeq || s == BoolSeq }
+func (s Sort) IsSeq() bool { return s == IntSeq || s == BoolSeq || s == FloatSeq }
 
 // Elem returns the element sort of a sequence sort.
 func (s Sort) Elem() Sort {
-	if s == BoolSeq {
+	switch s {
+	case BoolSeq:
 		return Bool
+	case FloatSeq:
+		return Float
 	}
 	return Int
 }
 
 // SeqOf returns the sequence sort with the given element sort.
 func SeqOf(elem Sort) Sort {
-	if elem == Bool {
+	switch elem {
+	case Bool:
 		return BoolSeq
+	case Float:
+		return FloatSeq
 	}
 	return IntSeq
 }
 
 // String returns the Go-flavoured name of the sort.
 func (s Sort) String() string {
-	return [...]string{"int", "bool", "[]int", "[]bool"}[s]
+	return [...]string{"int", "bool", "[]int", "[]bool", "float", "error", "[]float"}[s]
 }
 
 // Op identifies the head symbol of a term.
@@ -65,6 +76,9 @@ const (
 	OpStore  // Store(seq, index, value)
 	OpFill   // Fill(length, value): a sequence holding one value everywhere
 	OpPush   // Push(seq, value): seq with value appended
+	OpConcat // Concat(a, b): the elements of a followed by those of b
+	OpSub    // Sub(seq, lo, hi): the elements of seq from lo up to hi
+	OpIsNil  // IsNil(err): whether an error value is nil
 	OpIte
 	OpEq
 	OpLe
@@ -169,6 +183,42 @@ func Fill(length, value *Term) *Term { return node(OpFill, SeqOf(value.Sort), le
 
 // Push returns seq with value appended.
 func Push(seq, value *Term) *Term { return node(OpPush, seq.Sort, seq, value) }
+
+// Concat returns the concatenation of two sequences.
+func Concat(a, b *Term) *Term { return node(OpConcat, a.Sort, a, b) }
+
+// Subseq returns the part of seq from index lo up to, not including, hi.
+func Subseq(seq, lo, hi *Term) *Term { return node(OpSub, seq.Sort, seq, lo, hi) }
+
+var nilErr = &Term{Op: OpConst, Sort: Err, Name: "nil"}
+
+// NilErr returns the nil error.
+func NilErr() *Term { return nilErr }
+
+// IsNil returns the formula stating that an error value is nil.
+func IsNil(err *Term) *Term {
+	if err == nilErr {
+		return trueTerm
+	}
+	return node(OpIsNil, Bool, err)
+}
+
+// SeqEq returns the formula stating that two sequences have the same length
+// and the same elements. The bound variable must be fresh.
+func SeqEq(a, b, index *Term) *Term {
+	inRange := And(Le(IntLit(0), index), Lt(index, Len(a)))
+	same := Eq(Select(a, index), Select(b, index))
+	return And(Eq(Len(a), Len(b)), Forall(index, Implies(inRange, same)))
+}
+
+// Bytes returns the sequence of the bytes of a string.
+func Bytes(text string) *Term {
+	seq := Fill(IntLit(0), IntLit(0))
+	for i := range len(text) {
+		seq = Push(seq, IntLit(int64(text[i])))
+	}
+	return seq
+}
 
 // Ite returns the conditional term "if cond then a else b".
 func Ite(cond, a, b *Term) *Term { return node(OpIte, a.Sort, cond, a, b) }
@@ -343,6 +393,12 @@ func (t *Term) write(b *strings.Builder) {
 		list("fill(", t.Args, ", ", ")")
 	case OpPush:
 		list("push(", t.Args, ", ", ")")
+	case OpConcat:
+		list("concat(", t.Args, ", ", ")")
+	case OpSub:
+		list("sub(", t.Args, ", ", ")")
+	case OpIsNil:
+		list("(", t.Args, "", " = nil)")
 	case OpIte:
 		list("ite(", t.Args, ", ", ")")
 	case OpForall:

@@ -72,6 +72,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 				continue
 			}
 			pv.run(fn, (*fnVerifier).verify)
+			pv.run(fn, (*fnVerifier).checkAlwaysFails)
 			if audit {
 				pv.run(fn, (*fnVerifier).audit)
 			}
@@ -119,6 +120,8 @@ type pkgVerifier struct {
 	reported map[string]bool
 	mutated  map[*types.Var]bool
 	maxSteps int
+	// sentinels are the package-level error variables known to be non-nil.
+	sentinels map[*types.Var]bool
 }
 
 // report emits a diagnostic once per position and message. Symbolic execution
@@ -232,6 +235,7 @@ func (pv *pkgVerifier) collect() {
 		pv.report(predicateClauses[defineErr.Decl].pos, "%v", defineErr.Err)
 	}
 	pv.analyzeMutation()
+	pv.findSentinels()
 	for _, fn := range pv.order {
 		sort.Slice(fn.body, func(i, j int) bool { return fn.body[i].pos < fn.body[j].pos })
 		if fn.decl.Body == nil {
@@ -268,8 +272,16 @@ func (pv *pkgVerifier) addFunc(decl *ast.FuncDecl) {
 			fn.resultNames[result.Name()] = i
 		}
 	}
-	if sig.Results().Len() == 1 && sig.Results().At(0).Name() == "" {
-		fn.resultNames["result"] = 0
+	// Unnamed results are called result, or result1, result2, ... when
+	// there are several.
+	for i := range sig.Results().Len() {
+		switch {
+		case sig.Results().At(i).Name() != "":
+		case sig.Results().Len() == 1:
+			fn.resultNames["result"] = 0
+		default:
+			fn.resultNames[fmt.Sprintf("result%d", i+1)] = i
+		}
 	}
 	pv.funcs[obj] = fn
 	pv.order = append(pv.order, fn)
@@ -509,6 +521,9 @@ func isBuiltin(info *types.Info, call *ast.CallExpr, name string) bool {
 
 // sortOf maps a Go type to the logical sort that models it.
 func sortOf(t types.Type) (logic.Sort, bool) {
+	if t == nil {
+		return 0, false
+	}
 	basic := func(t types.Type) (logic.Sort, bool) {
 		b, ok := t.Underlying().(*types.Basic)
 		switch {
@@ -516,12 +531,19 @@ func sortOf(t types.Type) (logic.Sort, bool) {
 			return logic.Int, true
 		case ok && b.Info()&types.IsBoolean != 0:
 			return logic.Bool, true
+		case ok && b.Info()&types.IsFloat != 0:
+			return logic.Float, true
 		}
 		return 0, false
 	}
-	if slice, ok := t.Underlying().(*types.Slice); ok {
-		elem, ok := basic(slice.Elem())
+	switch {
+	case types.Identical(t, types.Universe.Lookup("error").Type()):
+		return logic.Err, true
+	case isSlice(t):
+		elem, ok := basic(t.Underlying().(*types.Slice).Elem())
 		return logic.SeqOf(elem), ok
+	case isString(t):
+		return logic.IntSeq, true
 	}
 	return basic(t)
 }

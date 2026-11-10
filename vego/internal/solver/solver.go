@@ -171,6 +171,20 @@ func (p *prover) reduce(t *logic.Term) *logic.Term {
 		switch seq.Op {
 		case logic.OpFill:
 			return seq.Args[1]
+		case logic.OpSub:
+			return p.reduce(logic.Select(seq.Args[0], logic.Add(seq.Args[1], index)))
+		case logic.OpConcat:
+			// Decide which half is read when the index is a constant
+			// distance from the end of the first half.
+			first := logic.Len(seq.Args[0])
+			distance := p.lin(index).add(p.lin(first), -1)
+			switch {
+			case !distance.isConst():
+				return t
+			case distance.c.Sign() < 0:
+				return p.reduce(logic.Select(seq.Args[0], index))
+			}
+			return p.reduce(logic.Select(seq.Args[1], logic.Sub(index, first)))
 		case logic.OpStore, logic.OpPush:
 			written := seq.Args[1]
 			if seq.Op == logic.OpPush {
@@ -193,6 +207,10 @@ func (p *prover) reduce(t *logic.Term) *logic.Term {
 			return seq.Args[0]
 		case logic.OpPush:
 			return logic.Add(logic.Len(seq.Args[0]), logic.IntLit(1))
+		case logic.OpConcat:
+			return logic.Add(logic.Len(seq.Args[0]), logic.Len(seq.Args[1]))
+		case logic.OpSub:
+			return logic.Sub(seq.Args[2], seq.Args[1])
 		}
 	case logic.OpDiv, logic.OpMod:
 		a, b := p.lin(t.Args[0]), p.lin(t.Args[1])
@@ -414,7 +432,7 @@ func (p *prover) constraint(f *logic.Term) (pl poly, equality bool) {
 func (p *prover) scan(b *branch, t *logic.Term, gen int) {
 	if !p.hasBound(t) {
 		switch t.Op {
-		case logic.OpConst, logic.OpSelect, logic.OpLen, logic.OpDiv, logic.OpMod, logic.OpIte, logic.OpPred:
+		case logic.OpConst, logic.OpSelect, logic.OpLen, logic.OpDiv, logic.OpMod, logic.OpIte, logic.OpPred, logic.OpIsNil:
 			if t.Sort.IsSeq() {
 				break
 			}
@@ -449,6 +467,13 @@ func (p *prover) axioms(b *branch, t *logic.Term, gen int) {
 		p.add(b, logic.Le(zero, t), gen)
 	case logic.OpSelect:
 		seq, index := t.Args[0], t.Args[1]
+		if seq.Op == logic.OpConcat {
+			first := logic.Len(seq.Args[0])
+			inFirst := logic.Lt(index, first)
+			p.add(b, logic.Implies(inFirst, logic.Eq(t, logic.Select(seq.Args[0], index))), gen)
+			p.add(b, logic.Or(inFirst, logic.Eq(t, logic.Select(seq.Args[1], logic.Sub(index, first)))), gen)
+			return
+		}
 		if seq.Op != logic.OpStore && seq.Op != logic.OpPush {
 			return
 		}

@@ -158,6 +158,10 @@ func zero(sort logic.Sort) *logic.Term {
 		return logic.IntLit(0)
 	case logic.Bool:
 		return logic.False()
+	case logic.Float:
+		return logic.Const("float 0", logic.Float)
+	case logic.Err:
+		return logic.NilErr()
 	}
 	return logic.Fill(logic.IntLit(0), zero(sort.Elem()))
 }
@@ -188,7 +192,7 @@ func (e *contractEnv) Var(name string, primed bool) (*logic.Term, error) {
 		if e.post == nil {
 			return nil, fmt.Errorf("%s' describes the state on return and is only allowed in Ensures", name)
 		}
-		if !e.args[param].Sort.IsSeq() {
+		if !isSlice(param.Type()) {
 			return nil, fmt.Errorf("%s is passed by value, so only its entry value %s is visible to callers", name, name)
 		}
 		return e.post[param], nil
@@ -371,8 +375,13 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 			delta = logic.IntLit(-1)
 		}
 		target := v.lvalue(s.X, st)
-		value := logic.Add(v.read(target, st), delta)
-		v.checkFits(st, nil, value, v.info.TypeOf(s.X), s.Pos(), operation(s.Tok))
+		value := v.read(target, st)
+		if value.Sort == logic.Float {
+			value = v.opaque(s.Tok, value)
+		} else {
+			value = logic.Add(value, delta)
+			v.checkFits(st, nil, value, v.info.TypeOf(s.X), s.Pos(), operation(s.Tok))
+		}
 		v.set(target, value, st)
 	case *ast.DeclStmt:
 		v.declare(s, st)
@@ -433,9 +442,16 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 		var alternatives []*logic.Term
 		for _, e := range clause.List {
 			guard := append(slices.Clip(failed), logic.Not(logic.Or(alternatives...)))
-			value := v.expr(e, st, guard)
-			if tag != nil {
-				value = logic.Eq(tag, value)
+			var value *logic.Term
+			switch {
+			case tag == nil:
+				value = v.expr(e, st, guard)
+			case v.isNil(e) && tag.Sort == logic.Err:
+				value = logic.IsNil(tag)
+			default:
+				// A case matches when Go's == holds, which for floats,
+				// strings, and errors is not plain equality of terms.
+				value = v.binary(token.EQL, tag, v.expr(e, st, guard), v.info.TypeOf(s.Tag), e.Pos(), st, guard)
 			}
 			alternatives = append(alternatives, value)
 		}
@@ -532,7 +548,7 @@ func (v *fnVerifier) set(target lvalue, value *logic.Term, st *state) {
 		if !ok || value == nil || sort != value.Sort {
 			v.unsupported(target.pos, fmt.Sprintf("variable %s has unsupported type %s", variable.Name(), variable.Type()))
 		}
-		if _, isParam := v.entry[variable]; isParam && sort.IsSeq() {
+		if _, isParam := v.entry[variable]; isParam && isSlice(variable.Type()) {
 			v.unsupported(target.pos, fmt.Sprintf(
 				"slice parameter %s is reassigned; callers could no longer be told what happened to their slice",
 				variable.Name()))
@@ -606,12 +622,13 @@ func (v *fnVerifier) callResults(e ast.Expr, st *state) []*logic.Term {
 // modelled as values, so an assignment that would make two variables share
 // one backing array is rejected instead of being modelled wrongly.
 func (v *fnVerifier) rhs(target lvalue, e ast.Expr, st *state) *logic.Term {
-	sort, ok := sortOf(v.info.TypeOf(e))
+	want := v.info.TypeOf(e)
 	if target.variable != nil && target.index == nil {
-		sort, ok = sortOf(target.variable.Type())
+		want = target.variable.Type()
 	}
-	if !ok || !sort.IsSeq() {
-		return v.expr(e, st, nil)
+	sort, ok := sortOf(want)
+	if !ok || !isSlice(want) {
+		return v.exprAs(e, want, st, nil)
 	}
 	if id, ok := ast.Unparen(e).(*ast.Ident); ok && id.Name != "nil" {
 		v.unsupported(e.Pos(), fmt.Sprintf(
@@ -620,10 +637,14 @@ func (v *fnVerifier) rhs(target lvalue, e ast.Expr, st *state) *logic.Term {
 	return v.slice(target.variable, sort, e, st)
 }
 
-// slice evaluates a slice-typed expression that produces fresh storage: nil,
-// make, a composite literal, a call, or x = append(x, ...) on a local x.
+// slice evaluates a sequence-valued expression: a string expression, or a
+// slice expression that produces fresh storage, which is nil, make, a
+// composite literal, a call, or x = append(x, ...) on a local x.
 func (v *fnVerifier) slice(target *types.Var, sort logic.Sort, e ast.Expr, st *state) *logic.Term {
 	empty := zero(sort)
+	if text := v.text(e, st); text != nil {
+		return text
+	}
 	switch e := ast.Unparen(e).(type) {
 	case *ast.Ident:
 		if e.Name == "nil" {
@@ -764,7 +785,7 @@ func (v *fnVerifier) modified(nodes ...ast.Node) (whole, elements map[*types.Var
 					if callee != nil && i < len(callee.params) && !v.mutates(callee, callee.params[i]) {
 						continue
 					}
-					if sort, ok := sortOf(v.info.TypeOf(arg)); ok && sort.IsSeq() {
+					if isSlice(v.info.TypeOf(arg)) {
 						mark(arg, elements)
 					}
 				}
@@ -804,12 +825,15 @@ func (v *fnVerifier) havoc(st *state, whole, elements map[*types.Var]bool) {
 
 // loopShape describes a for or range loop to the shared loop rule.
 type loopShape struct {
-	pos    token.Pos
-	body   *ast.BlockStmt
-	post   ast.Stmt
-	spec   *loopSpec
-	whole  map[*types.Var]bool
-	elems  map[*types.Var]bool
+	pos   token.Pos
+	body  *ast.BlockStmt
+	post  ast.Stmt
+	spec  *loopSpec
+	whole map[*types.Var]bool
+	elems map[*types.Var]bool
+	// step yields the counter of the next iteration when it is not simply
+	// one more, as when ranging over the characters of a string.
+	step   func(st *state, counter *logic.Term) *logic.Term
 	cond   func(st *state) *logic.Term // for loops: evaluates the condition
 	always bool                        // the loop has no condition and is only left by break
 	// Range loops run a fixed number of iterations; bind stores the iteration
@@ -873,7 +897,11 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 			v.stmt(shape.post, end, ctrl{}, func(*state) {})
 		}
 		if shape.limit != nil {
-			shape.bind(end, logic.Add(counter, logic.IntLit(1)))
+			next := logic.Add(counter, logic.IntLit(1))
+			if shape.step != nil {
+				next = shape.step(end, counter)
+			}
+			shape.bind(end, next)
 		}
 		checkInvariants(end, "loop invariant may not be preserved")
 		if before != nil {
@@ -943,6 +971,26 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 			st.assume(v.typeFact(st.vals[value], value.Type()))
 		}
 	}
+	if isString(v.info.TypeOf(s.X)) {
+		// Ranging over a string decodes UTF-8: each iteration yields some
+		// character and moves on by the one to four bytes it occupies,
+		// never past the end. Which character, and how many bytes, is not
+		// modelled.
+		shape.step = func(st *state, counter *logic.Term) *logic.Term {
+			next := v.fresh("offset", logic.Int)
+			st.assume(logic.And(logic.Lt(counter, next), logic.Le(next, logic.Add(counter, logic.IntLit(4))), logic.Le(next, shape.limit)))
+			return next
+		}
+		shape.bind = func(st *state, counter *logic.Term) {
+			if key != nil {
+				st.vals[key] = counter
+			}
+			if value != nil {
+				st.vals[value] = v.fresh("char", logic.Int)
+				st.assume(v.typeFact(st.vals[value], value.Type()))
+			}
+		}
+	}
 	v.loop(shape, st, k)
 }
 
@@ -964,10 +1012,10 @@ func (v *fnVerifier) returnStmt(s *ast.ReturnStmt, st *state) {
 		results = v.callResults(s.Results[0], st)
 	default:
 		for i, e := range s.Results {
-			results[i] = v.expr(e, st, nil)
+			results[i] = v.exprAs(e, v.fn.results[i].Type(), st, nil)
 			id, ok := ast.Unparen(e).(*ast.Ident)
 			variable, _ := v.info.ObjectOf(id).(*types.Var)
-			if !ok || variable == nil || !results[i].Sort.IsSeq() {
+			if !ok || variable == nil || !isSlice(v.fn.results[i].Type()) {
 				continue
 			}
 			if v.entry[variable] != nil {
@@ -1002,7 +1050,12 @@ func (v *fnVerifier) value(id *ast.Ident, st *state) *logic.Term {
 	if value := st.vals[variable]; value != nil {
 		return value
 	}
-	v.unsupported(id.Pos(), fmt.Sprintf("%s is not a local variable of a supported type (int, bool, []int, []bool)", id.Name))
+	if v.sentinels[variable] {
+		sentinel := logic.Const("var "+variable.Name(), logic.Err)
+		st.assume(logic.Not(logic.IsNil(sentinel)))
+		return sentinel
+	}
+	v.unsupported(id.Pos(), id.Name+" is not a local variable of a supported type")
 	return nil
 }
 
@@ -1015,15 +1068,12 @@ func (v *fnVerifier) checkIndex(st *state, guard []*logic.Term, seq, index *logi
 // panic. guard holds the conditions under which the expression is evaluated
 // at all, which matters on the right of && and ||.
 func (v *fnVerifier) expr(e ast.Expr, st *state, guard []*logic.Term) *logic.Term {
-	if tv, ok := v.info.Types[e]; ok && tv.Value != nil {
-		if literal, ok := literalOf(tv.Value); ok {
-			return literal
-		}
-		v.unsupported(e.Pos(), "only int and bool constants are supported")
-	}
 	sort, ok := sortOf(v.info.TypeOf(e))
 	if !ok {
 		v.unsupported(e.Pos(), fmt.Sprintf("expressions of type %s are not supported", v.info.TypeOf(e)))
+	}
+	if tv := v.info.Types[e]; tv.Value != nil {
+		return v.constant(tv.Value, sort, e, st)
 	}
 	if sort.IsSeq() {
 		return v.slice(nil, sort, e, st)
@@ -1037,6 +1087,9 @@ func (v *fnVerifier) expr(e ast.Expr, st *state, guard []*logic.Term) *logic.Ter
 		operand := v.expr(e.X, st, guard)
 		switch e.Op {
 		case token.SUB:
+			if operand.Sort == logic.Float {
+				return v.opaque(e.Op, operand)
+			}
 			v.checkFits(st, guard, logic.Neg(operand), v.info.TypeOf(e), e.Pos(), "negation")
 			return logic.Neg(operand)
 		case token.ADD:
@@ -1045,6 +1098,21 @@ func (v *fnVerifier) expr(e ast.Expr, st *state, guard []*logic.Term) *logic.Ter
 			return logic.Not(operand)
 		}
 	case *ast.BinaryExpr:
+		// Whether an error is nil is the one thing known about it.
+		if nilX, nilY := v.isNil(e.X), v.isNil(e.Y); (nilX || nilY) && (e.Op == token.EQL || e.Op == token.NEQ) {
+			other := e.X
+			if nilX {
+				other = e.Y
+			}
+			value := v.expr(other, st, guard)
+			if value.Sort != logic.Err {
+				v.unsupported(e.Pos(), "only errors can be compared with nil")
+			}
+			if e.Op == token.NEQ {
+				return logic.Not(logic.IsNil(value))
+			}
+			return logic.IsNil(value)
+		}
 		left := v.expr(e.X, st, guard)
 		switch e.Op {
 		case token.LAND:
@@ -1073,11 +1141,7 @@ func (v *fnVerifier) expr(e ast.Expr, st *state, guard []*logic.Term) *logic.Ter
 func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) *logic.Term {
 	switch {
 	case isBuiltin(v.info, e, "len"):
-		id, ok := ast.Unparen(e.Args[0]).(*ast.Ident)
-		if !ok {
-			v.unsupported(e.Pos(), "len is only supported on slice variables")
-		}
-		return logic.Len(v.value(id, st))
+		return logic.Len(v.expr(e.Args[0], st, guard))
 	case isBuiltin(v.info, e, "min"), isBuiltin(v.info, e, "max"):
 		result := v.expr(e.Args[0], st, guard)
 		for _, arg := range e.Args[1:] {
@@ -1091,6 +1155,14 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) *
 		return result
 	case v.info.Types[e.Fun].IsType():
 		value, target := v.expr(e.Args[0], st, guard), v.info.TypeOf(e)
+		sort, _ := sortOf(target)
+		if value.Sort == logic.Float || sort == logic.Float {
+			// Nothing is known about a float, so nothing is known about
+			// what it converts to or from, beyond the type of the result.
+			converted := v.fresh("converted", sort)
+			st.assume(v.typeFact(converted, target))
+			return converted
+		}
 		v.check(st, guard, v.typeFact(value, target), e.Pos(),
 			"conversion may not fit %s", types.TypeString(target, nil))
 		return value
@@ -1105,6 +1177,22 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) *
 // binary builds the term for a binary operator applied to two evaluated
 // operands. Division and remainder first have to show a non-zero divisor.
 func (v *fnVerifier) binary(op token.Token, x, y *logic.Term, t types.Type, pos token.Pos, st *state, guard []*logic.Term) *logic.Term {
+	switch {
+	case x.Sort == logic.Float || x.Sort == logic.Err:
+		return v.opaque(op, x)
+	case x.Sort.IsSeq() && op == token.ADD:
+		joined := logic.Concat(x, y)
+		v.checkFits(st, guard, logic.Len(joined), types.Typ[types.Int], pos, "string length")
+		return joined
+	case x.Sort.IsSeq() && (op == token.EQL || op == token.NEQ):
+		same := logic.SeqEq(x, y, logic.Bound(v.fresh("k#", logic.Int).Name, logic.Int))
+		if op == token.NEQ {
+			return logic.Not(same)
+		}
+		return same
+	case x.Sort.IsSeq():
+		return v.opaque(op, x)
+	}
 	switch op {
 	case token.ADD, token.SUB, token.MUL:
 		result := logic.Add(x, y)
@@ -1153,6 +1241,9 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	if callee == nil {
 		v.unsupported(call.Pos(), "only calls to named functions are supported")
 	}
+	if errorConstructor(callee) {
+		return []*logic.Term{v.newError(call, st, guard)}
+	}
 	sig := callee.Type().(*types.Signature)
 	if sig.Recv() != nil || sig.Variadic() || sig.TypeParams() != nil {
 		v.unsupported(call.Pos(), "calls to methods, variadic functions, and generic functions are not supported yet")
@@ -1167,9 +1258,9 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	var written []func()
 	for i, arg := range call.Args {
 		param := sig.Params().At(i)
-		value := v.expr(arg, st, guard)
+		value := v.exprAs(arg, param.Type(), st, guard)
 		args[param], post[param] = value, value
-		if !value.Sort.IsSeq() {
+		if !isSlice(param.Type()) {
 			continue
 		}
 		// A slice argument is either a variable, whose contents the call may
@@ -1218,7 +1309,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		if !ok {
 			continue
 		}
-		if sort.IsSeq() && (fn == nil || !fn.annotated()) {
+		if isSlice(sig.Results().At(i).Type()) && (fn == nil || !fn.annotated()) {
 			v.unsupported(call.Pos(), fmt.Sprintf(
 				"%s returns a slice but is not verified, so the slice might share storage with another one",
 				callee.Name()))

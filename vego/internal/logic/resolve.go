@@ -95,6 +95,10 @@ func (s *scope) term(n *Node) *Term {
 	switch n.Kind {
 	case NInt:
 		return BigLit(n.Big)
+	case NNil:
+		return NilErr()
+	case NStr:
+		return Bytes(n.Name)
 	case NBool:
 		return BoolLit(n.Val == 1)
 	case NIdent:
@@ -258,10 +262,12 @@ func (s *scope) relation(op string, a, b *Term) *Term {
 	var result *Term
 	switch {
 	case a.Sort.IsSeq() && equality:
-		index := s.r.newBound("k", Int)
-		inRange := And(Le(IntLit(0), index), Lt(index, Len(a)))
-		same := Eq(Select(a, index), Select(b, index))
-		result = And(Eq(Len(a), Len(b)), Forall(index, Implies(inRange, same)))
+		result = SeqEq(a, b, s.r.newBound("k", Int))
+	case a.Sort == Err && equality && (a == NilErr() || b == NilErr()):
+		// Whether an error is nil is all that is known about it.
+		result = And(IsNil(a), IsNil(b))
+	case a.Sort == Err:
+		fail("an error can only be compared with nil")
 	case a.Sort == Bool && equality:
 		result = Iff(a, b)
 	case a.Sort != Int:

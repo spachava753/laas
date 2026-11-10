@@ -41,7 +41,7 @@ func (v *fnVerifier) audit() {
 		hyps := append(append([]*logic.Term(nil), st.hyps...), candidate.facts...)
 		for _, param := range fn.params {
 			post[param] = v.entry[param]
-			if post[param].Sort.IsSeq() && v.mutates(fn, param) {
+			if isSlice(param.Type()) && v.mutates(fn, param) {
 				var facts []*logic.Term
 				post[param], facts = candidate.slice(v.entry[param])
 				hyps = append(hyps, facts...)
@@ -55,7 +55,7 @@ func (v *fnVerifier) audit() {
 		wellTyped := true
 		typed := func(value *logic.Term, t types.Type) {
 			fact := v.typeFact(value, t)
-			if value.Sort.IsSeq() && !slices.Contains(slices.Collect(maps.Values(v.entry)), value) {
+			if isSlice(t) && !slices.Contains(slices.Collect(maps.Values(v.entry)), value) {
 				index := logic.Bound("k#typed", logic.Int)
 				inRange := logic.And(logic.Le(logic.IntLit(0), index), logic.Lt(index, logic.Len(value)))
 				element := v.typeFact(logic.Select(value, index), t.Underlying().(*types.Slice).Elem())
@@ -98,21 +98,23 @@ func (v *fnVerifier) degenerates() []degenerate {
 		sort, _ := sortOf(result.Type())
 		hasInt = hasInt || sort == logic.Int
 		hasBool = hasBool || sort == logic.Bool
-		writesSlices = writesSlices || sort.IsSeq()
+		writesSlices = writesSlices || isSlice(result.Type())
 	}
 	for i := len(fn.params) - 1; i >= 0; i-- {
-		if entry := v.entry[fn.params[i]]; entry.Sort.IsSeq() {
+		if entry := v.entry[fn.params[i]]; isSlice(fn.params[i].Type()) {
 			length = logic.Len(entry)
 			writesSlices = writesSlices || v.mutates(fn, fn.params[i])
 		}
 	}
 	constant := func(number int64, flag bool, fill func(sort logic.Sort) *logic.Term) func(int, logic.Sort) *logic.Term {
 		return func(_ int, sort logic.Sort) *logic.Term {
-			switch sort {
-			case logic.Int:
+			switch {
+			case sort == logic.Int:
 				return logic.IntLit(number)
-			case logic.Bool:
+			case sort == logic.Bool:
 				return logic.BoolLit(flag)
+			case !sort.IsSeq():
+				return zero(sort)
 			}
 			return fill(sort)
 		}

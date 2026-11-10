@@ -54,6 +54,8 @@ Decisions:
 
 ### Errors
 
+Built: opaque errors with nil tests, non-nil results for `errors.New`, `fmt.Errorf`, and package-level sentinels, and the always-fails check with its exception. Reading an error variable of another package, such as `io.EOF`, is not supported yet; it needs the trusted file.
+
 Decisions:
 
 - **Opaque errors.** An `error` is a value about which the verifier knows only whether it is `nil`. Contracts write `err = nil` and `err != nil`. Which error it is (sentinels, `errors.Is`) comes after structs and pointers; typed errors and their contents need interfaces and come much later; message text is never modelled.
@@ -80,6 +82,8 @@ Solver work this requires:
 
 ### Floats
 
+Built as decided.
+
 Decision: floats are opaque. The verifier tracks a `float32` or `float64` through the code but knows nothing about its value: arithmetic yields an unknown float, a comparison an unknown boolean, and a conversion to an integer an unknown integer of that type. Modelling floats as real numbers is ruled out as unsound, and exact IEEE reasoning is out of reach for a native engine.
 
 Consequences, accepted because the first target is services, CLIs, infrastructure, and data structures, where floats are incidental:
@@ -91,6 +95,8 @@ Consequences, accepted because the first target is services, CLIs, infrastructur
 Possible later: facts that are true of real floats, such as small integers converting exactly, added when a concrete need appears.
 
 ### Strings
+
+Built: the basic tier and approximate ranging. A concatenation must be proved not to exceed the largest `int`, for the same reason as an `append`.
 
 Decision: build the basic tier together with sized integers.
 

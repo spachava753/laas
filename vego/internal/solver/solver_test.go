@@ -12,18 +12,16 @@ import (
 // total function from indices to elements, as the sequence axioms assume.
 type seqValue struct {
 	length int64
-	base   int64
-	writes map[int64]int64
+	at     func(index int64) int64
 }
 
 func (s seqValue) with(i, v int64) seqValue {
-	writes := map[int64]int64{i: v}
-	for k, old := range s.writes {
-		if k != i {
-			writes[k] = old
+	return seqValue{s.length, func(index int64) int64 {
+		if index == i {
+			return v
 		}
-	}
-	return seqValue{s.length, s.base, writes}
+		return s.at(index)
+	}}
 }
 
 type model struct {
@@ -74,11 +72,7 @@ func (m model) eval(t *logic.Term) (int64, bool) {
 	case logic.OpLen:
 		return m.seq(t.Args[0]).length, true
 	case logic.OpSelect:
-		s, i := m.seq(t.Args[0]), arg(1)
-		if v, ok := s.writes[i]; ok {
-			return v, true
-		}
-		return (s.base + i*i) % 3, true
+		return m.seq(t.Args[0]).at(arg(1)), true
 	case logic.OpIte:
 		if arg(0) == 1 {
 			return arg(1), true
@@ -135,6 +129,17 @@ func (m model) seq(t *logic.Term) seqValue {
 		pushed := base.with(base.length, value(1))
 		pushed.length++
 		return pushed
+	case logic.OpConcat:
+		first, second := m.seq(t.Args[0]), m.seq(t.Args[1])
+		return seqValue{first.length + second.length, func(index int64) int64 {
+			if index < first.length {
+				return first.at(index)
+			}
+			return second.at(index - first.length)
+		}}
+	case logic.OpSub:
+		whole, lo := m.seq(t.Args[0]), value(1)
+		return seqValue{value(2) - lo, func(index int64) int64 { return whole.at(lo + index) }}
 	}
 	panic("unexpected sequence " + t.String())
 }
@@ -154,6 +159,10 @@ func (g *generator) seq(depth int) *logic.Term {
 		return logic.Store(g.seq(depth-1), g.intTerm(depth-1), g.intTerm(depth-1))
 	case depth > 0 && g.rng.IntN(8) == 0:
 		return logic.Push(g.seq(depth-1), g.intTerm(depth-1))
+	case depth > 0 && g.rng.IntN(8) == 0:
+		return logic.Concat(g.seq(depth-1), g.seq(depth-1))
+	case depth > 0 && g.rng.IntN(8) == 0:
+		return logic.Subseq(g.seq(depth-1), g.intTerm(0), g.intTerm(0))
 	}
 	return base
 }
@@ -188,7 +197,7 @@ func (g *generator) intTerm(depth int) *logic.Term {
 func (g *generator) formula(depth int) *logic.Term {
 	if depth <= 0 || g.rng.IntN(3) == 0 {
 		a, b := g.intTerm(depth), g.intTerm(depth)
-		switch g.rng.IntN(10) {
+		switch g.rng.IntN(11) {
 		case 0, 1:
 			return logic.Le(a, b)
 		case 2, 3:
@@ -199,6 +208,8 @@ func (g *generator) formula(depth int) *logic.Term {
 			return g.readOverWrite()
 		case 7:
 			return g.boundedProduct()
+		case 8:
+			return g.joinedOrCut()
 		}
 		return logic.Const("p", logic.Bool)
 	}
@@ -254,6 +265,38 @@ func (g *generator) readOverWrite() *logic.Term {
 	return fact
 }
 
+// joinedOrCut states a fact about the length or an element of a
+// concatenation or a subsequence. About half of the generated facts are the
+// true law and the rest are off by one or read the wrong half.
+func (g *generator) joinedOrCut() *logic.Term {
+	s, t := g.seq(1), g.seq(1)
+	j, lo, hi := g.intTerm(0), g.intTerm(0), g.intTerm(0)
+	slack := logic.IntLit(int64(g.rng.IntN(3) / 2))
+	joined, cut := logic.Concat(s, t), logic.Subseq(s, lo, hi)
+	inFirst := logic.Lt(j, logic.Len(s))
+	switch g.rng.IntN(8) {
+	case 6:
+		// Reads at a fixed distance from the seam between the halves.
+		at := logic.Add(logic.Len(s), logic.IntLit(int64(g.rng.IntN(3)-1)))
+		half := []*logic.Term{logic.Select(s, at), logic.Select(t, logic.Sub(at, logic.Len(s)))}[g.rng.IntN(2)]
+		return logic.Eq(logic.Select(joined, at), half)
+	case 7:
+		return logic.Eq(logic.Select(cut, j), logic.Select(s, j))
+	case 0:
+		return logic.Eq(logic.Len(joined), logic.Add(logic.Add(logic.Len(s), logic.Len(t)), slack))
+	case 1:
+		return logic.Implies(inFirst, logic.Eq(logic.Select(joined, j), logic.Select(s, logic.Add(j, slack))))
+	case 2:
+		second := logic.Select(t, logic.Add(logic.Sub(j, logic.Len(s)), slack))
+		return logic.Implies(logic.Not(inFirst), logic.Eq(logic.Select(joined, j), second))
+	case 3:
+		return logic.Eq(logic.Select(joined, j), logic.Select([]*logic.Term{s, t}[g.rng.IntN(2)], j))
+	case 4:
+		return logic.Eq(logic.Len(cut), logic.Add(logic.Sub(hi, lo), slack))
+	}
+	return logic.Eq(logic.Select(cut, j), logic.Select(s, logic.Add(logic.Add(lo, j), slack)))
+}
+
 // boundedProduct bounds a product of two variables from bounds on its
 // factors. The claimed bound is sometimes exact, sometimes one off in either
 // direction, and the factor bounds are sometimes symbolic, so that a wrong
@@ -299,7 +342,7 @@ func counterexample(hyps []*logic.Term, goal *logic.Term) (found bool, descripti
 				for shape := int64(0); shape < 12; shape++ {
 					m := model{
 						ints: map[string]int64{"x": x, "y": y, "z": z, "p": shape % 2},
-						seqs: map[string]seqValue{"A": {length: shape % 4, base: shape % 3}},
+						seqs: map[string]seqValue{"A": {shape % 4, func(i int64) int64 { return (shape%3 + i*i) % 3 }}},
 					}
 					refutes := true
 					for _, hyp := range hyps {
