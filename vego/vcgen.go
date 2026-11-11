@@ -75,8 +75,8 @@ type fnVerifier struct {
 	// predicts, and failures the returns of an error. A source only counts
 	// if the function fails because of it; see tieFailures. made lists the
 	// names of the constants made so far, in order, and forgotten holds, by
-	// the name of the unknown that stands for it, each error variable a
-	// loop made unknown.
+	// the name of the unknown that stands for it, each error variable the
+	// loop entered last made unknown.
 	made      []string
 	sources   []failureSource
 	failures  []failure

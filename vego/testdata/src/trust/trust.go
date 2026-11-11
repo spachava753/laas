@@ -813,3 +813,26 @@ func ForwardsThroughLoops(n, m int) error {
 }
 
 //@ Ensures True
+
+// SavesBeforeSecondLoop keeps an error of its own that one loop leaves in a
+// variable, before a second loop puts the error of a call into the same
+// variable.
+//
+// @ Requires 1 <= n <= 3 And 1 <= m <= 3
+func SavesBeforeSecondLoop(n, m int) error { // want `the contract of SavesBeforeSecondLoop would also be met by a function that always returns an error`
+	err := errAlways
+	//@ Invariant 0 <= i <= n And err != nil
+	//@ Variant n - i
+	for i := 0; i < n; i++ {
+		err = errAlways
+	}
+	saved := err
+	//@ Invariant 0 <= j <= m
+	//@ Variant m - j
+	for j := 0; j < m; j++ {
+		err = external()
+	}
+	return saved
+}
+
+//@ Ensures True

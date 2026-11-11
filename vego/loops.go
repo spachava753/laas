@@ -213,6 +213,7 @@ func (pv *pkgVerifier) freshEachIteration(pos token.Pos) bool {
 // Modifies clause is unchanged, since no write may touch it.
 func (v *fnVerifier) forget(st *state, eff *effects) *state {
 	head := st.clone()
+	v.forgotten = map[string]forgottenError{}
 	head.brk = v.fresh("brk", logic.Ref)
 	head.assume(logic.Le(st.brk, head.brk))
 	var variables []*types.Var
@@ -355,6 +356,7 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 	checkInvariants(entry, "loop invariant may not hold on entry")
 
 	head := v.forget(st, shape.effects)
+	forgotten := v.forgotten
 	if shape.limit != nil {
 		counter = v.fresh("iteration", logic.Int)
 		head.assume(logic.Le(logic.IntLit(0), counter))
@@ -393,8 +395,8 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 		// An error variable the loop forgot stands, at the head, for what
 		// an earlier iteration left in it, which is recorded here; see
 		// tieFailures.
-		for name, lost := range v.forgotten {
-			if held := end.vals[lost.variable]; shape.effects.whole[lost.variable] && held != nil {
+		for name, lost := range forgotten {
+			if held := end.vals[lost.variable]; held != nil {
 				v.left = append(v.left, leftover{name: name, err: held[lost.index], facts: slices.Clip(end.hyps)})
 			}
 		}
