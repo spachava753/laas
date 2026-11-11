@@ -252,7 +252,7 @@ func Get(m map[string]int, k string) (v int, err error) {
 //@ Ensures err = nil -> v = m[k]
 ```
 
-Keys are integers or strings; values are any supported type. Writing to a map needs a proof that it is not nil, and so does `delete`, although Go lets a nil map through there. A `range` over a map visits some key the map has in each iteration, as many times as the map has keys; that the keys differ from one iteration to the next is not known to the verifier, an invariant has no name for how many iterations have run, and the loop must not change a map of that type. A loop can therefore check each value of a map, but cannot yet add the values up.
+Keys are integers or strings; values are any supported type. Writing to a map needs a proof that it is not nil; `delete` does not, since removing a key from a nil map does nothing. A `range` over a map visits some key the map has in each iteration, as many times as the map has keys; that the keys differ from one iteration to the next is not known to the verifier, an invariant has no name for how many iterations have run, and the loop must not change a map of that type. A loop can therefore check each value of a map, but cannot yet add the values up.
 
 ### Auditing specifications
 

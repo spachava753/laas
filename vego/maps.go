@@ -152,10 +152,21 @@ func (v *fnVerifier) newMap(st *state, t types.Type) value {
 }
 
 // mapStore sets the value of a key, or with present false removes the key.
-// The map must not be nil and must be one the function may modify.
+// The map must be one the function may modify. Setting a key needs a map
+// that is not nil. Removing one from the nil map does nothing, in Go and
+// here: the nil map has no keys, every key it lacks has the zero value, and
+// that is all the removal writes.
 func (v *fnVerifier) mapStore(st *state, t types.Type, ref, key *logic.Term, val value, present bool, pos token.Pos, what string) {
-	v.check(st, nil, logic.Lt(logic.IntLit(0), ref), pos, "map may be nil")
-	v.checkWrite(st, nil, target{mapType: t, ref: ref}.reach(), pos, what)
+	var exists []*logic.Term
+	if present {
+		v.check(st, nil, logic.Lt(logic.IntLit(0), ref), pos, "map may be nil")
+	} else {
+		exists = []*logic.Term{logic.Not(logic.Eq(ref, logic.RefLit(0)))}
+	}
+	v.checkWrite(st, exists, target{mapType: t, ref: ref}.reach(), pos, what)
+	// What holds of every map is put on record for this key before the
+	// write, so that the write to the nil map is known to change nothing.
+	v.noteMap(st, st.mem, t, ref, key)
 	had := v.mapHas(st, st.mem, t, ref, key)
 	count := v.mapLen(st, st.mem, t, ref)
 	_, elem := mapParts(t)
@@ -177,8 +188,8 @@ func (v *fnVerifier) mapStore(st *state, t types.Type, ref, key *logic.Term, val
 	}
 }
 
-// deleteKey executes delete(m, k). Go lets a nil map through as a no-op;
-// here the map must be known not to be nil.
+// deleteKey executes delete(m, k), which does nothing when the key is absent
+// or the map is nil.
 func (v *fnVerifier) deleteKey(call *ast.CallExpr, st *state) {
 	t := v.info.TypeOf(call.Args[0])
 	if !isMap(t) || !mapModelled(t) {

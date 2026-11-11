@@ -358,3 +358,41 @@ func GrowsWhileRanging(m map[int]int) int {
 }
 
 //@ Ensures 0 <= result <= 10
+
+// NilDelete removes a key from a map that may be nil, which does nothing
+// then.
+//
+// @ Modifies m
+func NilDelete(m map[int]int) int {
+	delete(m, 1)
+	return len(m)
+}
+
+//@ Ensures result = |m'| And ~has(m', 1) And (m = nil -> result = 0)
+
+// NilDeleteOnly removes a key from the nil map and needs no permission.
+func NilDeleteOnly() int {
+	var m map[string]int
+	delete(m, "a")
+	return len(m)
+}
+
+//@ Ensures result = 0
+
+// NilDeleteWrong claims the nil map lost a key.
+//
+// @ Requires m = nil
+// @ Modifies m
+func NilDeleteWrong(m map[int]int) int {
+	delete(m, 1)
+	return len(m) // want `vego: postcondition may not hold: result = -1`
+}
+
+//@ Ensures result = -1
+
+// DeleteUnlisted removes a key from a map it may not change.
+func DeleteUnlisted(m map[int]int) {
+	delete(m, 1) // want `vego: m is modified, which DeleteUnlisted may not modify; list it in a //@ Modifies clause`
+}
+
+//@ Ensures True
