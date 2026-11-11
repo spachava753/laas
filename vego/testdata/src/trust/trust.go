@@ -705,3 +705,28 @@ func BranchesOnKeptError() error {
 }
 
 //@ Ensures True
+
+func bytePair() (byte, error) { return 0, nil }
+
+// BranchesOnAnyByte branches on something every byte satisfies, so the
+// call decides nothing.
+func BranchesOnAnyByte() error { // want `the contract of BranchesOnAnyByte would also be met by a function that always returns an error`
+	b, _ := bytePair()
+	if b >= 0 {
+		return errAlways
+	}
+	return nil
+}
+
+//@ Ensures True
+
+// BranchesOnSomeBytes branches on something the call decides.
+func BranchesOnSomeBytes() error {
+	b, _ := bytePair()
+	if b >= 7 {
+		return errAlways
+	}
+	return nil
+}
+
+//@ Ensures True

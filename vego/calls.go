@@ -405,6 +405,13 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state,
 					source.outputs[part.Name] = true
 				}
 			}
+			// What is known of the results, they being new, is what their
+			// types and the contract say of anything the call may return.
+			for _, fact := range st.hyps {
+				if other, mentioned := estranged(fact, source.outputs); mentioned {
+					source.otherwise = append(source.otherwise, other)
+				}
+			}
 			v.sources = append(v.sources, source)
 		}
 	}
@@ -420,10 +427,13 @@ type failureSource struct {
 	inLoop  bool
 	outputs map[string]bool
 	known   int
+	// otherwise states of other values, named by estranged, what is known
+	// of the results: that they are something the call may return.
+	otherwise []*logic.Term
 }
 
 // estranged returns a term with every constant of the given names replaced
-// by a constant nothing is known about, and reports whether there was one.
+// by another constant, and reports whether there was one.
 func estranged(t *logic.Term, names map[string]bool) (*logic.Term, bool) {
 	if t.Op == logic.OpConst && names[t.Name] {
 		return logic.Const(t.Name+" otherwise", t.Sort), true
@@ -446,7 +456,7 @@ func estranged(t *logic.Term, names map[string]bool) (*logic.Term, bool) {
 // of the branches taken on the way to it.
 type failure struct {
 	err  *logic.Term
-	path []*logic.Term
+	path []choice
 	// facts is everything known at the return.
 	facts []*logic.Term
 }
@@ -460,10 +470,12 @@ type failure struct {
 // call's error, which is proved, so that it also holds for an error that
 // was kept in memory in between; or when it returns an error on a path that
 // was chosen by what the call returned: the condition of some branch taken
-// since the call depends on one of its results. It depends on them when it
-// can no longer be proved once they are replaced by values nothing is known
-// about; a condition that merely reads memory next to where a result lies
-// still can. What a check or a type adds to the state is no such condition. Inside a loop neither can be seen once
+// since the call depends on one of its results. A branch that was certain
+// to be taken is none. One depends on the results when its condition can no
+// longer be proved once they are replaced by other values the call could
+// have returned; a condition that merely reads memory next to where a
+// result lies still can. What a check or a type adds to the state is no
+// such condition. Inside a loop neither can be seen once
 // the loop has forgotten the variable that held the error, so an error
 // forgotten by a loop counts for the calls made in loops.
 func (v *fnVerifier) tieFailures() {
@@ -473,9 +485,10 @@ func (v *fnVerifier) tieFailures() {
 			if (source.inLoop && v.forgotten[f.err.Name]) || solver.Prove(f.facts, logic.Eq(f.err, source.err), opts) == solver.Proved {
 				return true
 			}
-			return source.known <= len(f.path) && slices.ContainsFunc(f.path[source.known:], func(cond *logic.Term) bool {
-				other, mentioned := estranged(cond, source.outputs)
-				return mentioned && solver.Prove(f.facts, other, opts) != solver.Proved
+			return source.known <= len(f.path) && slices.ContainsFunc(f.path[source.known:], func(taken choice) bool {
+				other, mentioned := estranged(taken.cond, source.outputs)
+				return mentioned && solver.Prove(f.facts[:taken.before], taken.cond, opts) != solver.Proved &&
+					solver.Prove(slices.Concat(f.facts, source.otherwise), other, opts) != solver.Proved
 			})
 		})
 		switch {

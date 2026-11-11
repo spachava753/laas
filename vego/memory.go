@@ -46,9 +46,9 @@ type state struct {
 	// here on is at or above it.
 	brk  *logic.Term
 	hyps []*logic.Term
-	// chosen holds the conditions of the branches taken to get here, which
-	// are among hyps too.
-	chosen []*logic.Term
+	// chosen holds the branches taken to get here, whose conditions are
+	// among hyps too.
+	chosen []choice
 	// noted holds the facts about unchanged memory already added to hyps.
 	noted map[string]bool
 }
@@ -60,9 +60,16 @@ func (st *state) clone() *state {
 	}
 }
 
+// choice is a branch that execution took: its condition, and how many facts
+// were known before it was taken.
+type choice struct {
+	cond   *logic.Term
+	before int
+}
+
 // decide records that execution took the branch with the given condition.
 func (st *state) decide(cond *logic.Term) {
-	st.chosen = append(st.chosen, cond)
+	st.chosen = append(st.chosen, choice{cond, len(st.hyps)})
 	st.assume(cond)
 }
 

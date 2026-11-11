@@ -330,3 +330,7 @@ trusted:
   trust.pair:
     reason: Test helper that returns a number and may fail.
     modifies: []
+
+  trust.bytePair:
+    reason: Test helper that returns a byte and may fail.
+    modifies: []
