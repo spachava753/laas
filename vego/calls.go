@@ -230,6 +230,33 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 			}
 		}
 	}
+	// What this call returns depends on what an earlier call returned if it
+	// was given any of that; see tieFailures.
+	for i := range v.sources {
+		source := &v.sources[i]
+		given := false
+		for _, arg := range args {
+			for _, part := range arg {
+				_, mentioned := estranged(part, source.outputs)
+				given = given || mentioned
+			}
+		}
+		if !given {
+			continue
+		}
+		derived := map[string]bool{}
+		for _, result := range results {
+			for _, part := range result {
+				derived[part.Name], source.outputs[part.Name] = true, true
+			}
+		}
+		for _, fact := range st.hyps {
+			if _, mentioned := estranged(fact, derived); mentioned {
+				other, _ := estranged(fact, source.outputs)
+				source.otherwise = append(source.otherwise, other)
+			}
+		}
+	}
 	v.noteFailureSource(fn, results, st, involved)
 	return results
 }
@@ -422,9 +449,11 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state,
 // was made inside a loop, the names of everything it returned, and how many
 // branches had been taken when it returned.
 type failureSource struct {
-	err     *logic.Term
-	callee  *funcInfo
-	inLoop  bool
+	err    *logic.Term
+	callee *funcInfo
+	inLoop bool
+	// outputs also names what later calls returned that were given any of
+	// the results.
 	outputs map[string]bool
 	known   int
 	// otherwise states of other values, named by estranged, what is known
@@ -470,8 +499,10 @@ type failure struct {
 // call's error, which is proved, so that it also holds for an error that
 // was kept in memory in between; or when it returns an error on a path that
 // was chosen by what the call returned: the condition of some branch taken
-// since the call depends on one of its results. A branch that was certain
-// to be taken is none. One depends on the results when its condition can no
+// since the call depends on one of its results, or on what a later call
+// that was handed them returned. What a later call reads of them out of
+// memory is not followed; a function that depends on the call only in that
+// way is not excused. A branch that was certain to be taken is none. One depends on the results when its condition can no
 // longer be proved once they are replaced by other values the call could
 // have returned; a condition that merely reads memory next to where a
 // result lies still can. What a check or a type adds to the state is no

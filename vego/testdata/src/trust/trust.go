@@ -730,3 +730,30 @@ func BranchesOnSomeBytes() error {
 }
 
 //@ Ensures True
+
+// hasFailed says whether an error is one.
+func hasFailed(e error) bool { return e != nil }
+
+//@ Ensures result <-> e != nil
+
+// AsksHelper lets a verified function say whether the call failed.
+func AsksHelper() error {
+	err := external()
+	if hasFailed(err) {
+		return errAlways
+	}
+	return nil
+}
+
+//@ Ensures True
+
+// AsksHelperAboutOwn asks it about an error of its own.
+func AsksHelperAboutOwn() error { // want `the contract of AsksHelperAboutOwn would also be met by a function that always returns an error`
+	_ = external()
+	if hasFailed(errAlways) {
+		return errAlways
+	}
+	return nil
+}
+
+//@ Ensures True
