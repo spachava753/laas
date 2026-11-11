@@ -79,6 +79,7 @@ const (
 	OpSub    // Sub(seq, lo, hi): the elements of seq from lo up to hi
 	OpIsNil  // IsNil(err): whether an error value is nil
 	OpKey    // Key(seq): a number that identifies a sequence by its contents
+	OpPair   // Pair(ref, at): a pointer, which only ever occurs as an operand of RefEq
 	OpIte
 	OpEq
 	OpLe
@@ -204,6 +205,25 @@ func IsNil(err *Term) *Term {
 		return trueTerm
 	}
 	return node(OpIsNil, Bool, err)
+}
+
+// Pair returns a pointer into an allocation at a position. It is not a term
+// the solver knows; RefEq takes it apart.
+func Pair(ref, at *Term) *Term { return node(OpPair, Ref, ref, at) }
+
+// RefEq returns the formula stating that two pointers, or a pointer and
+// nil, are equal: both nil, or into the same allocation at the same
+// position.
+func RefEq(a, b *Term) *Term {
+	switch {
+	case a.Op == OpPair && b.Op == OpPair:
+		return And(Eq(a.Args[0], b.Args[0]), Or(Eq(a.Args[0], RefLit(0)), Eq(a.Args[1], b.Args[1])))
+	case a.Op == OpPair:
+		return Eq(a.Args[0], b)
+	case b.Op == OpPair:
+		return Eq(a, b.Args[0])
+	}
+	return Eq(a, b)
 }
 
 // Key returns a number that two sequences share exactly when they have the
@@ -408,6 +428,8 @@ func (t *Term) write(b *strings.Builder) {
 		list("(", t.Args, "", " = nil)")
 	case OpKey:
 		list("key(", t.Args, "", ")")
+	case OpPair:
+		list("pointer(", t.Args, ", ", ")")
 	case OpIte:
 		list("ite(", t.Args, ", ", ")")
 	case OpForall:

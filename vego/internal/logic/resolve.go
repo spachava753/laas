@@ -34,8 +34,8 @@ type Env interface {
 	Path(root string, steps []Step, when When) (*Term, error)
 	// Relation returns a formula about the identity of the pointers or
 	// slices that paths lead to: "fresh" states that what one path refers to
-	// was created during the call, and "within" that the first of two slices
-	// lies inside the second.
+	// was created during the call, and "within" that the memory the first
+	// of two paths refers to lies inside that of the second.
 	Relation(name string, paths []Path) (*Term, error)
 }
 
@@ -280,7 +280,7 @@ func (s *scope) call(n *Node) *Term {
 		}
 		if want := map[string]int{"within": 2}[n.Name]; len(n.Kids) != max(want, 1) {
 			fail("%s takes %d argument(s), as in %s", n.Name, max(want, 1),
-				map[string]string{"old": "old(A)", "fresh": "fresh(result)", "within": "within(s.items', s.items)"}[n.Name])
+				map[string]string{"old": "old(A)", "fresh": "fresh(result)", "within": "within(s.items', s.items) or within(p, s.items)"}[n.Name])
 		}
 		var paths []Path
 		for _, kid := range n.Kids {
@@ -410,7 +410,7 @@ func (s *scope) relation(op string, a, b *Term) *Term {
 	case a.Sort == Bool && equality:
 		result = Iff(a, b)
 	case a.Sort == Ref && equality:
-		result = Eq(a, b)
+		result = RefEq(a, b)
 	case a.Sort != Int:
 		fail("operator %s cannot be applied to %s values", op, a.Sort)
 	case equality:

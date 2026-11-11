@@ -53,12 +53,15 @@ func (v *fnVerifier) audit() {
 		st := entry.clone()
 		wellTyped := true
 		for _, t := range v.frame {
-			sort, single := sortOf(t.typ)
-			if !t.elems || !single || candidate.fill == nil {
+			if t.elem == nil || candidate.fill == nil {
 				continue
 			}
-			lf := leaf{sort: sort, typ: t.typ}
-			before := logic.Select(st.mem.region(t.owner(), logic.SeqOf(logic.SeqOf(sort))), t.ref)
+			sort, single := sortOf(t.elem)
+			if !single {
+				continue
+			}
+			key := t.cells[0].key
+			before := logic.Select(st.mem.region(key, logic.SeqOf(logic.SeqOf(sort))), t.ref)
 			// A slice passed in is filled up to its length; what lies in
 			// its capacity beyond that is left alone.
 			hi := t.hi
@@ -70,9 +73,9 @@ func (v *fnVerifier) audit() {
 			outside := logic.Or(logic.Lt(index, t.lo), logic.Le(hi, index))
 			st.assume(content)
 			st.assume(logic.Forall(index, logic.Implies(outside, v.same(logic.Select(seq, index), logic.Select(before, index)))))
-			st.storeRow(t.owner(), lf, t.ref, seq)
+			st.storeRow(key, sort, t.ref, seq)
 			inRange := logic.And(logic.Le(t.lo, index), logic.Lt(index, hi))
-			wellTyped = wellTyped && v.prove(st, nil, logic.Forall(index, logic.Implies(inRange, v.typeFact(logic.Select(seq, index), t.typ))))
+			wellTyped = wellTyped && v.prove(st, nil, logic.Forall(index, logic.Implies(inRange, v.typeFact(logic.Select(seq, index), t.elem))))
 		}
 		results := make([]value, len(fn.results))
 		for i, result := range fn.results {
@@ -138,7 +141,10 @@ func (v *fnVerifier) degenerateResult(candidate degenerate, t types.Type, st *st
 		st.assume(logic.Eq(logic.Len(seq), length))
 		return value{seq}
 	}
-	return v.allocSlice(st, elem, []*logic.Term{seq}, length, length)
+	made := v.allocSlice(st, elem, nil, length, length)
+	only := v.cellsOf(elem)[0]
+	st.storeRow(only.key, only.sort, made[0], seq)
+	return made
 }
 
 // lastLength returns the length of the last slice parameter, which is the
@@ -165,7 +171,7 @@ func (v *fnVerifier) degenerates() []degenerate {
 		writesSlices = writesSlices || isSlice(result.Type())
 	}
 	for _, t := range v.frame {
-		writesSlices = writesSlices || t.elems
+		writesSlices = writesSlices || t.elem != nil
 	}
 	var list []degenerate
 	for _, number := range []int64{0, 1, -1} {

@@ -352,6 +352,18 @@ func (s *witness) store(key string, sort logic.Sort, ref, written *logic.Term) {
 	s.consts[name] = logic.Store(region, ref, written)
 }
 
+// storeAt sets one position of one allocation in a region of the sampled
+// memory.
+func (s *witness) storeAt(c cell, ref, written *logic.Term) {
+	name := entryRegion + c.key
+	region, ok := s.consts[name]
+	if !ok {
+		region = logic.Const(name, logic.SeqOf(logic.SeqOf(c.sort)))
+	}
+	row := logic.Store(logic.Select(region, ref), logic.IntLit(c.off), written)
+	s.consts[name] = logic.Store(region, ref, row)
+}
+
 // apply replaces the constants of the entry state by their sampled values.
 func (s *witness) apply(terms []*logic.Term) []*logic.Term {
 	var replace func(t *logic.Term) *logic.Term
@@ -480,18 +492,26 @@ func (b *sampler) add(t types.Type, to binding, nested bool) {
 	object, isPointer := pointee(t)
 	sort, single := sortOf(t)
 	switch {
-	case isPointer && nested:
-		b.slots = append(b.slots, slot{func(s *witness) { to.set(s, 0, logic.RefLit(0)) }})
 	case isPointer:
+		// A pointer is nil or points to a struct in an allocation of its
+		// own.
+		pointTo := func(ref *logic.Term) func(s *witness) {
+			return func(s *witness) {
+				to.set(s, 0, ref)
+				to.set(s, 1, logic.IntLit(0))
+			}
+		}
+		if nested {
+			b.slots = append(b.slots, slot{pointTo(logic.RefLit(0))})
+			break
+		}
 		b.refs++
 		ref := logic.RefLit(b.refs)
-		b.choose(slot{func(s *witness) { to.set(s, 0, ref) }, func(s *witness) { to.set(s, 0, logic.RefLit(0)) }}, to.name(0))
-		fields, _ := layoutOf(object)
+		b.choose(slot{pointTo(ref), pointTo(logic.RefLit(0))}, to.name(0))
+		cells := b.v.cellsOf(object)
 		b.add(object, binding{
-			set: func(s *witness, i int, term *logic.Term) {
-				s.store(typeKey(object)+fields[i].path, logic.SeqOf(fields[i].sort), ref, term)
-			},
-			name: func(i int) string { return entryRegion + typeKey(object) + fields[i].path },
+			set:  func(s *witness, i int, term *logic.Term) { s.storeAt(cells[i], ref, term) },
+			name: func(i int) string { return entryRegion + cells[i].key },
 		}, true)
 	case isSlice(t):
 		b.addSlice(t, to)
@@ -536,13 +556,13 @@ func (b *sampler) addSlice(t types.Type, to binding) {
 	}
 	b.refs++
 	ref := logic.RefLit(b.refs)
-	region := func(lf leaf) string { return "[]" + typeKey(elem) + lf.path }
+	cells := b.v.cellsOf(elem)
 	// Slices of one element type share their regions, so what a literal
 	// fixes is one array in a region.
-	array := func(lf leaf) string { return region(lf) + "@" + ref.String() }
+	array := func(i int) string { return cells[i].key + "@" + ref.String() }
 	names := []string{to.name(0), to.name(1), to.name(2), to.name(3)}
-	for _, lf := range leaves {
-		names = append(names, entryRegion+region(lf))
+	for _, c := range cells {
+		names = append(names, entryRegion+c.key)
 	}
 	sized := func(length *logic.Term, also func(s *witness)) func(s *witness) {
 		return func(s *witness) {
@@ -563,18 +583,18 @@ func (b *sampler) addSlice(t types.Type, to binding) {
 		for _, literal := range b.literals {
 			if literal.Sort == logic.SeqOf(sort) && solver.Prove(nil, b.v.elementFacts(literal, elem), opts) == solver.Proved {
 				lengths = append(lengths, sized(logic.Len(literal), func(s *witness) {
-					s.store(region(leaves[0]), logic.SeqOf(literal.Sort), ref, literal)
-					s.fixed[array(leaves[0])] = true
+					s.store(cells[0].key, logic.SeqOf(literal.Sort), ref, literal)
+					s.fixed[array(0)] = true
 				}))
 			}
 		}
 	}
 	b.choose(lengths, names...)
-	for _, lf := range leaves {
+	for i, lf := range leaves {
 		var elements []*logic.Term
 		switch {
 		case lf.part != partValue:
-			// A slice inside an element has no sample.
+			// A slice or a pointer inside an element has no sample.
 			continue
 		case lf.sort == logic.Int:
 			elements = b.fitting(lf.typ)
@@ -590,15 +610,15 @@ func (b *sampler) addSlice(t types.Type, to binding) {
 		var fills slot
 		for _, element := range elements[:min(len(elements), 3)] {
 			fills = append(fills, func(s *witness) {
-				if !s.fixed[array(lf)] {
+				if !s.fixed[array(i)] {
 					// Every position holds the element, so the row serves
 					// whatever length the slice has.
 					row := logic.Fill(logic.IntLit(64), element)
-					s.store(region(lf), logic.SeqOf(row.Sort), ref, row)
+					s.store(cells[i].key, logic.SeqOf(row.Sort), ref, row)
 				}
 			})
 		}
-		b.choose(fills, entryRegion+region(lf))
+		b.choose(fills, entryRegion+cells[i].key)
 	}
 }
 

@@ -13,7 +13,7 @@ import (
 // variable returns the current value of a variable.
 func (v *fnVerifier) variable(id *ast.Ident, st *state) value {
 	variable, _ := v.info.ObjectOf(id).(*types.Var)
-	if val := st.vals[variable]; val != nil {
+	if val := v.current(st, variable); val != nil {
 		return val
 	}
 	if v.sentinels[variable] {
@@ -66,9 +66,9 @@ func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 		if !ok {
 			break
 		}
-		ref := v.expr(e.X, st, guard)
-		v.checkNil(st, guard, ref, e.Pos())
-		return v.object(st, object, ref)
+		pointer := v.eval(e.X, st, guard)
+		v.checkNil(st, guard, pointer[0], e.Pos())
+		return v.pointed(st, object, pointer)
 	case *ast.UnaryExpr:
 		return v.unary(e, st, guard)
 	case *ast.BinaryExpr:
@@ -129,40 +129,47 @@ func (v *fnVerifier) settled(st *state, guard []*logic.Term, val value, t types.
 	return stored
 }
 
-// object reads every field of the object a pointer refers to.
-func (v *fnVerifier) object(st *state, t types.Type, ref *logic.Term) value {
-	leaves, _ := layoutOf(t)
-	val := make(value, len(leaves))
-	for i, lf := range leaves {
-		val[i] = v.cell(st, st.mem, typeKey(t)+lf.path, lf, ref)
-	}
+// pointed reads the struct a pointer points to.
+func (v *fnVerifier) pointed(st *state, t types.Type, pointer value) value {
+	val := v.fetch(st, st.mem, v.cellsOf(t), pointer[0], pointer[1])
 	v.noteTyped(st, val, t)
 	return val
 }
 
-// newObject creates an object holding the given value and returns the
-// pointer to it.
+// newObject creates a struct holding the given value in an allocation of its
+// own and returns the pointer to it.
 func (v *fnVerifier) newObject(st *state, t types.Type, val value) value {
 	ref := v.alloc(st, v.pass.TypesSizes.Sizeof(t) > 0)
-	leaves, _ := layoutOf(t)
-	for i, lf := range leaves {
-		st.storeCell(typeKey(t)+lf.path, lf, ref, val[i])
-	}
-	return value{ref}
+	v.put(st, v.cellsOf(t), ref, logic.IntLit(0), val)
+	return value{ref, logic.IntLit(0)}
 }
 
-// unary evaluates a unary operator. The only address that can be taken is
-// that of a new struct, &T{...}: a pointer to a local variable or into the
-// middle of an object would be a second name for storage that already has
-// one.
+// addressOf evaluates &x for a struct x: a variable, a struct another
+// pointer points to, an element of a slice, or a field of one of these. The
+// pointer it yields points into the allocation x is part of; a variable
+// whose address is taken has one of its own, see findBoxed.
+func (v *fnVerifier) addressOf(e ast.Expr, st *state, guard []*logic.Term) value {
+	_, isStruct := v.info.TypeOf(e).Underlying().(*types.Struct)
+	switch lv := v.place(e); {
+	case !isStruct:
+		v.unsupported(e.Pos(), fmt.Sprintf("taking the address of %s is not supported: it is a %s, and only pointers to structs are supported",
+			types.ExprString(e), v.info.TypeOf(e)))
+	case lv.kind != placeMem:
+		v.unsupported(e.Pos(), fmt.Sprintf("taking the address of %s is not supported", types.ExprString(e)))
+	}
+	lv := v.lvalue(e, st, guard)
+	return value{lv.ref, logic.Add(lv.at, logic.IntLit(lv.offset))}
+}
+
+// unary evaluates a unary operator.
 func (v *fnVerifier) unary(e *ast.UnaryExpr, st *state, guard []*logic.Term) value {
 	if e.Op == token.AND {
-		lit, ok := ast.Unparen(e.X).(*ast.CompositeLit)
 		t := v.info.TypeOf(e.X)
-		if _, isStruct := t.Underlying().(*types.Struct); !ok || !isStruct {
-			v.unsupported(e.Pos(), fmt.Sprintf("taking the address of %s is not supported; only &T{...} creates a pointer", types.ExprString(e.X)))
+		_, isStruct := t.Underlying().(*types.Struct)
+		if lit, ok := ast.Unparen(e.X).(*ast.CompositeLit); ok && isStruct {
+			return v.newObject(st, t, v.literal(lit, t, st, guard))
 		}
-		return v.newObject(st, t, v.literal(lit, t, st, guard))
+		return v.addressOf(e.X, st, guard)
 	}
 	operand := v.expr(e.X, st, guard)
 	switch e.Op {
@@ -207,8 +214,21 @@ func (v *fnVerifier) binaryExpr(e *ast.BinaryExpr, st *state, guard []*logic.Ter
 		}
 		return isNil
 	}
-	if object, isPointer := pointee(v.info.TypeOf(e.X)); isPointer && v.pass.TypesSizes.Sizeof(object) == 0 {
-		v.unsupported(e.Pos(), "pointers to values of size zero may or may not be equal, so comparing them is not supported")
+	if object, isPointer := pointee(v.info.TypeOf(e.X)); isPointer {
+		if v.pass.TypesSizes.Sizeof(object) == 0 {
+			v.unsupported(e.Pos(), "pointers to values of size zero may or may not be equal, so comparing them is not supported")
+		}
+		// Two pointers are equal when both are nil, or when they point to
+		// the same position of the same allocation.
+		a, b := v.eval(e.X, st, guard), v.eval(e.Y, st, guard)
+		same := logic.And(logic.Eq(a[0], b[0]), logic.Or(logic.Eq(a[0], logic.RefLit(0)), logic.Eq(a[1], b[1])))
+		switch e.Op {
+		case token.EQL:
+			return same
+		case token.NEQ:
+			return logic.Not(same)
+		}
+		v.unsupported(e.Pos(), fmt.Sprintf("operator %s is not supported for pointers", e.Op))
 	}
 	left := v.expr(e.X, st, guard)
 	switch e.Op {
@@ -270,7 +290,7 @@ func (v *fnVerifier) sliceExpr(e *ast.SliceExpr, st *state, guard []*logic.Term)
 	lo, hi, limit := bound(e.Low, logic.IntLit(0)), bound(e.High, header[2]), bound(e.Max, header[3])
 	within := logic.And(logic.Le(logic.IntLit(0), lo), logic.Le(lo, hi), logic.Le(hi, limit), logic.Le(limit, header[3]))
 	v.check(st, guard, within, e.Pos(), "slice bounds may be out of range")
-	return value{header[0], logic.Add(header[1], lo), logic.Sub(hi, lo), logic.Sub(limit, lo)}
+	return value{header[0], v.elementAt(header, t, lo), logic.Sub(hi, lo), logic.Sub(limit, lo)}
 }
 
 // fields follows a path of field indices from a value.
@@ -316,25 +336,18 @@ func (v *fnVerifier) literal(e *ast.CompositeLit, t types.Type, st *state, guard
 		}
 		return val
 	case *types.Slice:
-		leaves, ok := layoutOf(u.Elem())
-		if !ok {
+		if _, ok := layoutOf(u.Elem()); !ok {
 			v.unsupported(e.Pos(), fmt.Sprintf("slices of %s are not supported", u.Elem()))
 		}
-		rows := make([]*logic.Term, len(leaves))
-		for i, lf := range leaves {
-			rows[i] = logic.Fill(logic.IntLit(0), zeroLeaf(lf))
-		}
+		var elements []value
 		for _, element := range e.Elts {
 			if _, keyed := element.(*ast.KeyValueExpr); keyed {
 				v.unsupported(element.Pos(), "keyed slice literals are not supported")
 			}
-			val := v.settled(st, guard, v.evalAs(element, u.Elem(), st, guard), u.Elem())
-			for i := range leaves {
-				rows[i] = logic.Push(rows[i], val[i])
-			}
+			elements = append(elements, v.settled(st, guard, v.evalAs(element, u.Elem(), st, guard), u.Elem()))
 		}
 		length := logic.IntLit(int64(len(e.Elts)))
-		return v.allocSlice(st, u.Elem(), rows, length, length)
+		return v.allocSlice(st, u.Elem(), elements, length, length)
 	}
 	v.unsupported(e.Pos(), fmt.Sprintf("literals of type %s are not supported", t))
 	return nil
@@ -407,8 +420,7 @@ func (v *fnVerifier) makeSlice(e *ast.CallExpr, st *state, guard []*logic.Term) 
 	if !isSlice(t) || len(e.Args) < 2 {
 		v.unsupported(e.Pos(), "make is only supported for slices with a length")
 	}
-	leaves, ok := layoutOf(elemType(t))
-	if !ok {
+	if _, ok := layoutOf(elemType(t)); !ok {
 		v.unsupported(e.Pos(), fmt.Sprintf("slices of %s are not supported", elemType(t)))
 	}
 	length := v.expr(e.Args[1], st, guard)
@@ -421,44 +433,21 @@ func (v *fnVerifier) makeSlice(e *ast.CallExpr, st *state, guard []*logic.Term) 
 		v.checkFits(st, guard, capacity, types.Typ[types.Int], e.Args[2].Pos(), "make capacity")
 	}
 	v.checkAlloc(st, guard, capacity, elemType(t), e.Pos(), "the slice made")
-	rows := make([]*logic.Term, len(leaves))
-	for i, lf := range leaves {
-		rows[i] = logic.Fill(capacity, zeroLeaf(lf))
-	}
-	return v.allocSlice(st, elemType(t), rows, length, capacity)
+	return v.allocSlice(st, elemType(t), nil, length, capacity)
 }
 
-// sameMemory reports whether a value of one type, taken as a value of the
-// other, still refers to the same regions of memory: every pointer and slice
-// in it, at any depth of struct fields, must have the same target type in
-// both. Struct types that differ only in tags convert into each other, and
-// their memory is kept apart.
-func sameMemory(from, to types.Type) bool {
-	switch a := from.Underlying().(type) {
-	case *types.Pointer:
-		b, ok := to.Underlying().(*types.Pointer)
-		return ok && typeKey(a.Elem()) == typeKey(b.Elem())
-	case *types.Map:
-		return mapOwner(from) == mapOwner(to)
-	case *types.Slice:
-		b, ok := to.Underlying().(*types.Slice)
-		return ok && typeKey(a.Elem()) == typeKey(b.Elem())
-	case *types.Struct:
-		b, ok := to.Underlying().(*types.Struct)
-		if !ok || a.NumFields() != b.NumFields() {
-			return false
-		}
-		for i := range a.NumFields() {
-			if !sameMemory(a.Field(i).Type(), b.Field(i).Type()) {
-				return false
-			}
-		}
-		return true
+// sameValue reports whether Go converts between two types without changing
+// the value: the types are made the same way, struct tags aside, or are
+// pointers to structs that are. What such a value refers to stays where it
+// is, in the same regions of memory, since those do not depend on the names
+// of types or on tags.
+func sameValue(from, to types.Type) bool {
+	a, fromPointer := from.Underlying().(*types.Pointer)
+	b, toPointer := to.Underlying().(*types.Pointer)
+	if fromPointer && toPointer {
+		return types.IdenticalIgnoreTags(a.Elem().Underlying(), b.Elem().Underlying())
 	}
-	// Anything else that the verifier lets through holds no reference, or
-	// is rejected where it is used.
-	_, modelled := layoutOf(from)
-	return modelled
+	return types.IdenticalIgnoreTags(from.Underlying(), to.Underlying())
 }
 
 // conversion evaluates T(x). Conversions between integers must fit the
@@ -480,10 +469,11 @@ func (v *fnVerifier) conversion(e *ast.CallExpr, st *state, guard []*logic.Term)
 	case isString(from) && bytes(to):
 		// Go does not say how much capacity the new array has.
 		text := v.expr(e.Args[0], st, guard)
-		roomy := v.fresh("cap", logic.Int)
-		_, most, _ := v.intRange(types.Typ[types.Int])
-		st.assume(logic.And(logic.Le(logic.Len(text), roomy), logic.Le(roomy, logic.BigLit(most))))
-		return v.allocSlice(st, elemType(to), []*logic.Term{text}, logic.Len(text), roomy)
+		only := v.cellsOf(elemType(to))[0]
+		copied := value{v.alloc(st, true), logic.IntLit(0), logic.Len(text), v.fresh("cap", logic.Int)}
+		st.storeRow(only.key, only.sort, copied[0], text)
+		st.assume(v.wellFormed(copied, to, st.brk))
+		return copied
 	}
 	val := v.evalAs(e.Args[0], to, st, guard)
 	source, isScalar := sortOf(from)
@@ -503,7 +493,7 @@ func (v *fnVerifier) conversion(e *ast.CallExpr, st *state, guard []*logic.Term)
 	// A conversion that leaves the value as it is must also leave it in
 	// the same memory, which pointers and slices of differently named
 	// types would not be.
-	if sameMemory(from, to) && types.IdenticalIgnoreTags(from.Underlying(), to.Underlying()) {
+	if sameValue(from, to) {
 		return val
 	}
 	v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to a %s is not supported", from, to))

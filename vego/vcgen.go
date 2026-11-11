@@ -46,6 +46,10 @@ type fnVerifier struct {
 	entry    map[*types.Var]value
 	entryBrk *logic.Term
 	inputs   map[string]bool
+	// boxed holds the variables of the function that live in memory because
+	// their address is taken. Such a variable holds a pointer to the struct
+	// that is its value.
+	boxed map[*types.Var]bool
 	// frame is what the Modifies clauses allow the function to write, and
 	// used marks the entries some write could not do without.
 	frame []target
@@ -143,7 +147,7 @@ func (v *fnVerifier) enter() *state {
 	}
 	for _, pair := range overlapping(fn) {
 		if v.entry[pair[0]] != nil && v.entry[pair[1]] != nil {
-			st.assume(separate(v.entry[pair[0]], v.entry[pair[1]]))
+			st.assume(v.separate(v.entry[pair[0]], v.entry[pair[1]], pair[0].Type()))
 		}
 	}
 	// Every caller has proved the invariants of what it passes.
@@ -171,6 +175,107 @@ func (v *fnVerifier) enter() *state {
 	return st
 }
 
+// findBoxed returns the variables whose address a function body takes: with
+// &x or &x.f, or by calling a method with a pointer receiver on x or x.f.
+// Such a variable is kept in memory, in an allocation of its own that is
+// created where the variable is declared, so that a pointer to it is like
+// any other pointer: a write through the pointer changes the variable, and
+// a write to the variable is seen through the pointer.
+func (v *fnVerifier) findBoxed(body *ast.BlockStmt) map[*types.Var]bool {
+	boxed := map[*types.Var]bool{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.UnaryExpr:
+			if root := v.localRoot(n.X); n.Op == token.AND && root != nil {
+				boxed[root] = true
+			}
+		case *ast.CallExpr:
+			sel, ok := ast.Unparen(n.Fun).(*ast.SelectorExpr)
+			selection := v.info.Selections[sel]
+			if !ok || selection == nil || selection.Kind() != types.MethodVal {
+				break
+			}
+			recv := selection.Obj().Type().(*types.Signature).Recv()
+			if _, wantPointer := recv.Type().Underlying().(*types.Pointer); !wantPointer {
+				break
+			}
+			// The method may be promoted from an embedded struct, whose
+			// address is then the one taken; a pointer on the way there
+			// means that it is not part of the variable.
+			t, path := v.info.TypeOf(sel.X), selection.Index()
+			for _, index := range path[:len(path)-1] {
+				object, isStruct := t.Underlying().(*types.Struct)
+				if !isStruct {
+					return true
+				}
+				t = object.Field(index).Type()
+			}
+			if _, isStruct := t.Underlying().(*types.Struct); !isStruct {
+				break
+			}
+			if root := v.localRoot(sel.X); root != nil {
+				boxed[root] = true
+			}
+		}
+		return true
+	})
+	return boxed
+}
+
+// localRoot returns the local variable of a modelled struct type that an
+// expression is, or is a field of, without a pointer in between.
+func (v *fnVerifier) localRoot(e ast.Expr) *types.Var {
+	for {
+		switch x := ast.Unparen(e).(type) {
+		case *ast.Ident:
+			variable, ok := v.info.ObjectOf(x).(*types.Var)
+			if !ok || variable.IsField() || variable.Parent() == v.pass.Pkg.Scope() || variable.Pkg() != v.pass.Pkg {
+				return nil
+			}
+			_, isStruct := variable.Type().Underlying().(*types.Struct)
+			if _, modelled := layoutOf(variable.Type()); !isStruct || !modelled {
+				return nil
+			}
+			return variable
+		case *ast.SelectorExpr:
+			selection := v.info.Selections[x]
+			if selection == nil || selection.Kind() != types.FieldVal {
+				return nil
+			}
+			t := v.info.TypeOf(x.X)
+			for _, index := range selection.Index() {
+				object, isStruct := t.Underlying().(*types.Struct)
+				if !isStruct {
+					return nil
+				}
+				t = object.Field(index).Type()
+			}
+			e = x.X
+		default:
+			return nil
+		}
+	}
+}
+
+// bind gives a variable that is being created its first value. One that
+// lives in memory gets a new allocation, so each execution of a declaration
+// creates a variable of its own.
+func (v *fnVerifier) bind(st *state, variable *types.Var, val value) {
+	if v.boxed[variable] {
+		val = v.newObject(st, variable.Type(), val)
+	}
+	st.vals[variable] = val
+}
+
+// current returns the value a variable has, or nil if it has none.
+func (v *fnVerifier) current(st *state, variable *types.Var) value {
+	val := st.vals[variable]
+	if val != nil && v.boxed[variable] {
+		return v.pointed(st, variable.Type(), val)
+	}
+	return val
+}
+
 // verify symbolically executes one annotated function from a state that
 // satisfies its precondition and checks every obligation met on the way.
 // Afterwards every entry of its Modifies clauses must have been needed, so
@@ -184,7 +289,13 @@ func (v *fnVerifier) verify() {
 	if sig.TypeParams() != nil || sig.RecvTypeParams() != nil {
 		v.unsupported(fn.decl.Pos(), "generic functions are not supported yet")
 	}
+	v.boxed = v.findBoxed(fn.decl.Body)
 	st := v.enter()
+	for _, variable := range slices.Concat(fn.params, fn.results) {
+		if v.boxed[variable] && st.vals[variable] != nil {
+			v.bind(st, variable, st.vals[variable])
+		}
+	}
 	if fn.measure != nil {
 		v.measure = v.intTerm(fn.measure, &specEnv{v: v, sink: st, fn: fn, args: v.entry, now: memory{}})
 		v.check(st, nil, logic.Le(logic.IntLit(0), v.measure), fn.decl.Name.Pos(),
@@ -194,7 +305,7 @@ func (v *fnVerifier) verify() {
 	v.seq(body.List, body.Lbrace, body.Rbrace, st, ctrl{}, func(end *state) {
 		results := make([]value, len(fn.results))
 		for i, result := range fn.results {
-			results[i] = end.vals[result]
+			results[i] = v.current(end, result)
 		}
 		v.atReturn(end, results, body.Rbrace)
 	})
@@ -372,7 +483,7 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 		if s.Tok == token.DEC {
 			delta = logic.IntLit(-1)
 		}
-		target := v.lvalue(s.X, st)
+		target := v.lvalue(s.X, st, nil)
 		current := v.load(target, st)[0]
 		if current.Sort == logic.Float {
 			current = v.opaque(s.Tok, current)

@@ -458,22 +458,104 @@ func SetAll(ps []Point) {
 
 //@ Ensures Forall k in [0, |ps|) : ps'[k].X = 1 And ps'[k].Y = ps[k].Y
 
-// AddressOfLocal is outside the fragment.
+// AddressOfLocal takes the address of a variable.
 func AddressOfLocal() int {
 	x := Point{}
-	p := &x // want `vego: cannot verify AddressOfLocal: taking the address of x is not supported; only &T\{\.\.\.\} creates a pointer`
+	p := &x
 	return p.X
 }
 
 //@ Ensures result = 0
 
-// Interior is outside the fragment too.
+// Interior points into a struct that is reached through a pointer.
 //
 // @ Requires s != nil
 func Interior(s *Segment) int {
-	p := &s.From // want `vego: cannot verify Interior: taking the address of s\.From is not supported; only &T\{\.\.\.\} creates a pointer`
+	p := &s.From
 	return p.X
 }
+
+//@ Ensures result = s.From.X
+
+// InteriorWrite writes through a pointer into a struct, which changes the
+// struct.
+//
+// @ Requires s != nil
+// @ Modifies s
+func InteriorWrite(s *Segment) int {
+	p := &s.From
+	p.X = 7
+	return s.From.X
+}
+
+//@ Ensures result = 7 And s'.From.X = 7 And s'.From.Y = s.From.Y And s'.To.X = s.To.X
+
+// InteriorWriteWrong claims the struct kept its old value.
+//
+// @ Requires s != nil
+// @ Modifies s
+func InteriorWriteWrong(s *Segment) {
+	p := &s.From
+	p.X = 7
+} // want `vego: postcondition may not hold: s'\.From\.X = s\.From\.X`
+
+//@ Ensures s'.From.X = s.From.X
+
+// InteriorUnlisted writes through a pointer into a struct it did not list.
+//
+// @ Requires s != nil
+func InteriorUnlisted(s *Segment) {
+	p := &s.From
+	p.X = 7 // want `vego: p\.X is assigned, which InteriorUnlisted may not modify; list it in a //@ Modifies clause`
+}
+
+// ElementPointer points at one element of a slice of structs.
+//
+// @ Requires |ps| > 1 And ps[0].X = 2
+// @ Modifies ps
+func ElementPointer(ps []Point) int {
+	p := &ps[1]
+	p.X = 5
+	return ps[1].X + ps[0].X
+}
+
+//@ Ensures result = 7 And ps'[0].X = ps[0].X And ps'[0].Y = ps[0].Y And ps'[1].Y = ps[1].Y
+
+// ElementPointerWrong claims the other element changed.
+//
+// @ Requires |ps| > 1
+// @ Modifies ps
+func ElementPointerWrong(ps []Point) {
+	p := &ps[1]
+	p.X = 5
+} // want `vego: postcondition may not hold: ps'\[0\]\.X = 5`
+
+//@ Ensures ps'[0].X = 5
+
+// PointerIntoSlice takes a pointer that may point at an element of the
+// slice it also takes, so a write through one may change the other.
+//
+// @ Requires p != nil And |ps| > 0 And ps[0].X = 0
+// @ Modifies p
+func PointerIntoSlice(p *Point, ps []Point) int {
+	before := ps[0].X
+	p.X = 1 - before
+	return ps[0].X - before // want `vego: postcondition may not hold: result = 0`
+}
+
+//@ Ensures result = 0
+
+// PointerApartFromSlice says the pointer is not inside the slice.
+//
+// @ Requires p != nil And |ps| > 0 And ps[0].X = 0 And ~within(p, ps)
+// @ Modifies p
+func PointerApartFromSlice(p *Point, ps []Point) int {
+	before := ps[0].X
+	p.X = 1 - before
+	return ps[0].X - before
+}
+
+//@ Ensures result = 0
 
 // ModifiesValue lists something the caller cannot see.
 //
@@ -810,10 +892,33 @@ func FreshParameter(c *Counter) {}
 // OneElement lists a single element of a slice of structs.
 //
 // @ Requires |ps| > 0
-// @ Modifies ps[0] // want `vego: in Modifies annotation: ps\[0\] is a single element or part of one; list the slice instead`
+// @ Modifies ps[0]
 func OneElement(ps []Point) {
 	ps[0].X = 1
 }
+
+//@ Ensures ps'[0].X = 1 And ps'[0].Y = ps[0].Y
+
+// OneElementOnly writes an element other than the one it listed.
+//
+// @ Requires |ps| > 1
+// @ Modifies ps[0]
+func OneElementOnly(ps []Point) {
+	ps[1].X = 1 // want `vego: ps\[1\]\.X is assigned, which OneElementOnly may not modify; list it in a //@ Modifies clause`
+}
+
+// OneElementKept calls a function that changes one element and relies on
+// the others being kept.
+//
+// @ Requires |ps| > 1
+// @ Modifies ps
+func OneElementKept(ps []Point) int {
+	before := ps[1].X
+	OneElement(ps)
+	return ps[1].X - before
+}
+
+//@ Ensures result = 0
 
 // OtherPointer writes through a pointer it did not list.
 //
@@ -1086,17 +1191,30 @@ func (u *Users) FindX(x int) (index int, err error) {
 //@ Ensures err = nil <-> Exists k in [0, |u.list|) : u.list[k].X = x
 
 // TagsShare converts a slice between struct types that differ in a tag,
-// which keeps the array. The two types have memory of their own in the
-// model, so the conversion is not accepted.
+// which keeps the array, so a write through one is seen through the other.
 func TagsShare() int {
 	a := []struct {
 		X int `a:"1"`
 	}{{X: 0}}
-	b := []struct { // want `vego: cannot verify TagsShare: converting a .* is not supported`
+	b := []struct {
 		X int `b:"1"`
 	}(a)
 	b[0].X = 1
 	return a[0].X
+}
+
+//@ Ensures result = 1
+
+// TagsShareWrong claims the write is not seen.
+func TagsShareWrong() int {
+	a := []struct {
+		X int `a:"1"`
+	}{{X: 0}}
+	b := []struct {
+		X int `b:"1"`
+	}(a)
+	b[0].X = 1
+	return a[0].X // want `vego: postcondition may not hold: result = 0`
 }
 
 //@ Ensures result = 0
@@ -1171,13 +1289,30 @@ type TaggedB struct {
 	}
 }
 
-// StructTagsShare converts a struct whose slice would change its memory.
+// StructTagsShare converts a struct that holds a slice, which keeps the
+// array the slice points at.
+//
+// @ Requires |a.Items| > 0
+// @ Modifies a.Items
 func StructTagsShare(a TaggedA) int {
-	b := TaggedB(a) // want `vego: cannot verify StructTagsShare: converting a memory.TaggedA to a memory.TaggedB is not supported`
-	return len(b.Items)
+	b := TaggedB(a)
+	b.Items[0].X = 4
+	return a.Items[0].X
 }
 
-//@ Ensures result >= 0
+//@ Ensures result = 4
+
+// StructTagsShareWrong claims the array was copied.
+//
+// @ Requires |a.Items| > 0 And a.Items[0].X = 0
+// @ Modifies a.Items
+func StructTagsShareWrong(a TaggedA) int {
+	b := TaggedB(a)
+	b.Items[0].X = 4
+	return a.Items[0].X // want `vego: postcondition may not hold: result = 0`
+}
+
+//@ Ensures result = 0
 
 // Blob holds bytes behind a pointer, and Named a string in each element.
 type Blob struct{ B []byte }

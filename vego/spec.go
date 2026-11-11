@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"go/token"
 	"go/types"
-	"slices"
 	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
@@ -59,6 +58,11 @@ func (e *specEnv) root(name string) (val value, t types.Type, isResult bool, con
 		_, obj := scope.LookupParent(name, e.pos)
 		if variable, ok := obj.(*types.Var); ok {
 			if val := e.st.vals[variable]; val != nil {
+				if e.v.boxed[variable] {
+					// The variable lives in memory and holds a pointer to
+					// its value.
+					val = e.v.fetch(e.sink, e.now, e.v.cellsOf(variable.Type()), val[0], val[1])
+				}
 				return val, variable.Type(), false, nil, nil
 			}
 			return nil, nil, false, nil, fmt.Errorf("%s cannot be used in annotations: its type %s is not supported", name, variable.Type())
@@ -247,6 +251,9 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 	if _, single := sortOf(found.typ); single {
 		return found.val[0], nil
 	}
+	if _, isPointer := pointee(found.typ); isPointer {
+		return logic.Pair(found.val[0], found.val[1]), nil
+	}
 	if isSlice(found.typ) {
 		if seq, ok := e.v.view(found.sink, found.mem, found.val, found.typ); ok {
 			return seq, nil
@@ -302,19 +309,24 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		switch {
 		case found[i].constant != nil || (!isPointer && !isSlice(found[i].typ) && !isMap(found[i].typ)):
 			return nil, fmt.Errorf("%s(%s): %s is not a pointer, a slice, or a map", name, spelled, spelled)
-		case name == "within" && !isSlice(found[i].typ):
-			return nil, fmt.Errorf("within(%s): %s is not a slice", spelled, spelled)
+		case name == "within" && isMap(found[i].typ):
+			return nil, fmt.Errorf("within(%s): %s is a map, and nothing lies within a map or holds one", spelled, spelled)
 		}
 	}
 	first := found[0].val
 	if name == "within" {
 		// Inside means inside the capacity, which is what a write through
-		// the slice, or an append to it, can reach. A slice without
-		// capacity reaches nothing.
+		// a slice, or an append to it, can reach. A slice without capacity
+		// reaches nothing, and so lies within anything; a nil pointer
+		// points nowhere, and so lies within nothing.
 		outer := found[1].val
-		inside := logic.And(logic.Eq(first[0], outer[0]), logic.Le(outer[1], first[1]),
-			logic.Le(logic.Add(first[1], first[3]), logic.Add(outer[1], outer[3])))
-		return logic.Or(logic.Le(first[3], logic.IntLit(0)), inside), nil
+		firstStart, firstEnd := e.v.extent(first, found[0].typ)
+		outerStart, outerEnd := e.v.extent(outer, found[1].typ)
+		inside := logic.And(logic.Eq(first[0], outer[0]), logic.Le(outerStart, firstStart), logic.Le(firstEnd, outerEnd))
+		if isSlice(found[0].typ) {
+			return logic.Or(logic.Le(first[3], logic.IntLit(0)), inside), nil
+		}
+		return logic.And(logic.Not(logic.Eq(first[0], logic.RefLit(0))), inside), nil
 	}
 	if e.before == nil || e.post == nil {
 		return nil, errors.New("fresh says what a call created and is only allowed in Ensures")
@@ -498,79 +510,150 @@ func newModTargets(nodes []*logic.Node, c *clause) []*modTarget {
 	return list
 }
 
-// shape describes a Modifies entry without evaluating it: the type and
-// fields it covers, and whether the object or array it names is the very
-// one a parameter holds, as opposed to something read out of memory.
+// shape describes a Modifies entry without evaluating it: which regions it
+// reaches into, and how its positions follow from the value of a parameter
+// when the entry names what that parameter itself points to or holds.
 type shape struct {
-	typ    types.Type
-	elems  bool
-	mapped bool
-	prefix string
-	param  *types.Var
+	param *types.Var
+	cells []cell
+	// elem is set for the elements of a slice and mapType for a map; else
+	// the entry is a struct or a part of one.
+	elem    types.Type
+	mapType types.Type
+	// direct is set when the allocation is the one the parameter itself
+	// points into or holds, and not one read out of memory. For a pointer,
+	// lo and hi then bound the positions from where the pointer points.
 	direct bool
-	// hops lead from the parameter to the pointer or slice that is the
-	// target, or whose object holds the fields that are.
-	hops []hop
+	lo, hi int64
 }
 
-// shapeOf type-checks a Modifies entry against the function's signature. A
-// path that ends in a pointer means the whole object it points to; one that
-// ends in a slice means the elements of the slice, up to its capacity; any
-// other path must name a field of an object reached through a pointer, and
-// means that field.
-//
-// indices holds the values of the indices the entry mentions, in order; it
-// may be nil when only the kind of memory matters and not which.
-func (fn *funcInfo) shapeOf(m *modTarget, indices []*logic.Term) (shape, error) {
+// located is where a path has led: a value, and, while the value lies in
+// memory, the allocation, the position of the struct or element it is part
+// of, and its cells counted from there.
+type located struct {
+	val   value
+	typ   types.Type
+	ref   *logic.Term
+	at    *logic.Term
+	cells []cell
+}
+
+// locateTarget follows the path of a Modifies entry. With mem nil it only
+// follows the types, which is enough to tell what kind of memory the entry
+// covers. A path that ends in a pointer means the whole struct it points to;
+// one that ends in a slice means the elements of the slice, up to its
+// capacity; one that ends in a map means the map; any other path must lead
+// to something that lies in memory, and means that.
+func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Var]value, sink *state, mem memory) (shape, target, error) {
 	param, ok := fn.paramNames[m.name]
 	if !ok {
-		return shape{}, fmt.Errorf("%s is not a parameter", m.name)
+		return shape{}, target{}, fmt.Errorf("%s is not a parameter", m.name)
+	}
+	symbolic := mem == nil
+	if !symbolic && args[param] == nil {
+		return shape{}, target{}, fmt.Errorf("parameter %s has type %s, which is not supported", m.name, param.Type())
 	}
 	steps := make([]logic.Step, len(m.steps))
 	for i, step := range m.steps {
 		steps[i] = logic.Step{Field: step.field}
-		if step.index != nil {
-			steps[i].Index = logic.IntLit(0)
-			if len(indices) > 0 {
-				steps[i].Index, indices = indices[0], indices[1:]
+		if step.index == nil {
+			continue
+		}
+		steps[i].Index = logic.IntLit(0)
+		if !symbolic {
+			index, err := v.resolverOf(m.clause).IntTerm(step.index, &specEnv{v: v, sink: sink, fn: fn, args: args, now: mem})
+			if err != nil {
+				return shape{}, target{}, err
 			}
+			steps[i].Index = index
 		}
 	}
 	hops, final, err := plan(param.Type(), steps)
 	if err != nil {
-		return shape{}, fmt.Errorf("%s%v", m.name, err)
+		return shape{}, target{}, fmt.Errorf("%s%v", m.name, err)
 	}
-	if object, ok := pointee(final); ok {
-		return shape{typ: object, param: param, direct: len(hops) == 0, hops: hops}, nil
-	}
-	if isSlice(final) {
-		return shape{typ: elemType(final), elems: true, param: param, direct: len(hops) == 0, hops: hops}, nil
-	}
-	if isMap(final) {
-		return shape{typ: final, mapped: true, param: param, direct: len(hops) == 0, hops: hops}, nil
-	}
-	// The last hop through a pointer decides which object the field is in.
-	last := -1
+	// Follow the hops, keeping track of where the value lies. first is set
+	// while the allocation is still the one the parameter points into.
+	cur := located{val: args[param], typ: param.Type()}
+	first, inMemory := true, false
 	for i, h := range hops {
-		if _, viaPointer := pointee(h.from); viaPointer {
-			last = i
+		object, viaPointer := pointee(h.from)
+		switch {
+		case h.field >= 0 && viaPointer:
+			lo, hi, _ := fieldLeaves(object, h.field)
+			first, inMemory = i == 0, true
+			if !symbolic {
+				cur.ref, cur.at = cur.val[0], cur.val[1]
+				cur.val, _, _ = v.member(sink, mem, cur.val, h.from, h.field)
+			}
+			cur.cells = v.cellsOf(object)[lo:hi]
+		case h.field >= 0:
+			lo, hi, _ := fieldLeaves(h.from, h.field)
+			if !symbolic {
+				cur.val = cur.val[lo:hi]
+			}
+			if inMemory {
+				cur.cells = cur.cells[lo:hi]
+			}
+		case isSlice(h.from):
+			first, inMemory = false, true
+			if !symbolic {
+				cur.ref, cur.at = cur.val[0], v.elementAt(cur.val, h.from, h.index)
+				cur.val, _ = v.element(sink, mem, cur.val, h.from, h.index)
+			}
+			cur.cells = v.cellsOf(elemType(h.from))
+		default:
+			// What a map has for a key, or a byte of a string, is no place
+			// that can be written through this path.
+			inMemory = false
+			if !symbolic && isMap(h.from) {
+				cur.val = v.mapValue(sink, mem, h.from, cur.val[0], h.index)
+			}
 		}
 	}
-	single := slices.ContainsFunc(hops[max(last, 0):], func(h hop) bool { return h.field < 0 })
+	form := shape{param: param}
+	t := target{text: m.text, clause: m.clause}
+	object, isPointer := pointee(final)
 	switch {
-	case single:
-		return shape{}, fmt.Errorf("%s is a single element or part of one; list the slice instead", m.text)
-	case last < 0:
-		return shape{}, fmt.Errorf("%s is passed by value, so the caller cannot see a change to it", m.text)
+	case isPointer:
+		form.cells, form.direct, form.hi = v.cellsOf(object), len(hops) == 0, v.pass.TypesSizes.Sizeof(object)
+		if !symbolic {
+			t.ref, t.lo, t.hi = cur.val[0], cur.val[1], logic.Add(cur.val[1], logic.IntLit(form.hi))
+		}
+		t.single = true
+	case isSlice(final):
+		form.cells, form.elem, form.direct = v.cellsOf(elemType(final)), elemType(final), len(hops) == 0
+		if !symbolic {
+			t.ref = cur.val[0]
+			t.lo, t.hi = v.extent(cur.val, final)
+		}
+	case isMap(final):
+		form.mapType, form.direct = final, len(hops) == 0
+		if !symbolic {
+			t.ref = cur.val[0]
+		}
+	case !inMemory:
+		return shape{}, target{}, fmt.Errorf("%s is passed by value, so the caller cannot see a change to it", m.text)
+	default:
+		form.cells, form.direct = cur.cells, first
+		form.lo, form.hi = stretch(cur.cells)
+		if !symbolic {
+			t.ref, t.lo, t.hi = cur.ref, logic.Add(cur.at, logic.IntLit(form.lo)), logic.Add(cur.at, logic.IntLit(form.hi))
+			// The cells are counted from the struct, the target from its
+			// first position.
+			shifted := make([]cell, len(cur.cells))
+			for i, c := range cur.cells {
+				shifted[i] = cell{key: c.key, sort: c.sort, off: c.off - form.lo}
+			}
+			form.cells = shifted
+		}
+		t.single = true
 	}
-	object, _ := pointee(hops[last].from)
-	prefix, t := "", object
-	for _, h := range hops[last:] {
-		field := t.Underlying().(*types.Struct).Field(h.field)
-		prefix += "." + field.Name()
-		t = field.Type()
+	t.cells, t.elem, t.mapType = form.cells, form.elem, form.mapType
+	if form.direct && len(m.steps) == 0 {
+		t.param = param
 	}
-	return shape{typ: object, prefix: prefix, param: param, direct: last == 0, hops: hops[:last]}, nil
+	return form, t, nil
 }
 
 // targets evaluates the Modifies clauses of a function for the given
@@ -578,32 +661,9 @@ func (fn *funcInfo) shapeOf(m *modTarget, indices []*logic.Term) (shape, error) 
 func (v *fnVerifier) targets(fn *funcInfo, args map[*types.Var]value, sink *state, mem memory) []target {
 	var list []target
 	for _, m := range fn.modifies {
-		env := &specEnv{v: v, sink: sink, fn: fn, args: args, now: mem}
-		var indices []*logic.Term
-		for _, step := range m.steps {
-			if step.index == nil {
-				continue
-			}
-			index, err := v.resolverOf(m.clause).IntTerm(step.index, env)
-			if err != nil {
-				v.misread(m.clause, err)
-			}
-			indices = append(indices, index)
-		}
-		form, err := fn.shapeOf(m, indices)
-		if err == nil && args[form.param] == nil {
-			err = fmt.Errorf("parameter %s has type %s, which is not supported", m.name, form.param.Type())
-		}
+		_, t, err := v.locateTarget(fn, m, args, sink, mem)
 		if err != nil {
 			v.misread(m.clause, err)
-		}
-		cur, _ := v.follow(sink, mem, args[form.param], form.hops)
-		t := target{typ: form.typ, elems: form.elems, mapped: form.mapped, prefix: form.prefix, ref: cur[0], text: m.text, clause: m.clause}
-		if form.direct && len(m.steps) == 0 {
-			t.param = form.param
-		}
-		if form.elems {
-			t.lo, t.hi = cur[1], logic.Add(cur[1], cur[3])
 		}
 		list = append(list, t)
 	}

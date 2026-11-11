@@ -141,7 +141,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	}
 	name := callee.Name()
 	for _, pair := range overlapping(fn) {
-		v.check(st, guard, separate(args[pair[0]], args[pair[1]]), call.Pos(),
+		v.check(st, guard, v.separate(args[pair[0]], args[pair[1]], pair[0].Type()), call.Pos(),
 			"the slices passed to %s as %s and %s may overlap", name, describe(pair[0]), describe(pair[1]))
 	}
 	// The contract speaks about memory as it is now, before the call.
@@ -167,7 +167,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		if t.param != nil {
 			what = passed[t.param]
 		}
-		v.checkWrite(st, guard, t.owner()+t.prefix, t.ref, t.lo, t.hi, call.Pos(), fmt.Sprintf("%s may modify %s", name, what))
+		v.checkWrite(st, guard, t.reach(), call.Pos(), fmt.Sprintf("%s may modify %s", name, what))
 	}
 	for _, t := range written {
 		v.havoc(st, t)
@@ -220,8 +220,9 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 
 // receiver evaluates the receiver of a method call as the method takes it.
 // A method with a value receiver called on a pointer gets a copy of the
-// object; a method with a pointer receiver called on a variable would need
-// the variable's address, which is not supported.
+// struct. A method with a pointer receiver called on a struct gets a pointer
+// to it: the struct is a variable, one that another pointer points to, an
+// element of a slice, or a field of one of these.
 func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, guard []*logic.Term) value {
 	sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
 	selection := v.info.Selections[sel]
@@ -231,27 +232,46 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 	if _, ok := layoutOf(recv.Type()); !ok {
 		v.unsupported(call.Pos(), fmt.Sprintf("receivers of type %s are not supported", recv.Type()))
 	}
-	path := selection.Index()
-	cur := v.fields(v.eval(sel.X, st, guard), v.info.TypeOf(sel.X), path[:len(path)-1], st, guard, sel.Sel.Pos())
+	// The operand is followed through the embedded structs the method is
+	// promoted from. where is the position of the current struct while it
+	// is known to lie in memory.
 	t := v.info.TypeOf(sel.X)
+	cur := v.eval(sel.X, st, guard)
+	var where value
+	if _, isStruct := t.Underlying().(*types.Struct); isStruct && v.place(sel.X).kind == placeMem {
+		where = v.addressOf(sel.X, st, guard)
+	}
+	path := selection.Index()
 	for _, index := range path[:len(path)-1] {
-		object := t
-		if target, ok := pointee(t); ok {
-			object = target
+		object, viaPointer := pointee(t)
+		if viaPointer {
+			v.checkNil(st, guard, cur[0], sel.Sel.Pos())
+			where = cur
+		} else {
+			object = t
 		}
-		t = object.Underlying().(*types.Struct).Field(index).Type()
+		next, fieldType, ok := v.member(st, st.mem, cur, t, index)
+		if !ok {
+			v.unsupported(sel.Sel.Pos(), fmt.Sprintf("this field has type %s, which is not supported", fieldType))
+		}
+		if where != nil {
+			where = value{where[0], logic.Add(where[1], logic.IntLit(v.fieldOffset(object, index)))}
+		}
+		cur, t = next, fieldType
 	}
 	_, wantPointer := recv.Type().Underlying().(*types.Pointer)
 	object, havePointer := pointee(t)
 	switch {
 	case wantPointer == havePointer:
 		return cur
+	case wantPointer && where != nil:
+		return where
 	case wantPointer:
 		v.unsupported(call.Pos(), fmt.Sprintf(
-			"calling %s takes the address of %s, which is not supported; call it on a pointer", sel.Sel.Name, types.ExprString(sel.X)))
+			"calling %s takes the address of %s, which is not supported", sel.Sel.Name, types.ExprString(sel.X)))
 	}
 	v.checkNil(st, guard, cur[0], sel.Pos())
-	return v.object(st, object, cur[0])
+	return v.pointed(st, object, cur)
 }
 
 // deepFacts states what the type of a value guarantees beyond the value
@@ -277,11 +297,7 @@ func (v *fnVerifier) contentFacts(mem memory, val value, t types.Type, brk *logi
 		if !isPointer || !follow {
 			break
 		}
-		leaves, _ := layoutOf(object)
-		target := make(value, len(leaves))
-		for i, lf := range leaves {
-			target[i] = v.cell(nil, mem, typeKey(object)+lf.path, lf, val[0])
-		}
+		target := v.fetch(nil, mem, v.cellsOf(object), val[0], val[1])
 		return logic.And(v.wellFormed(target, object, brk), v.contentFacts(mem, target, object, brk, false))
 	case *types.Struct:
 		var facts []*logic.Term
@@ -301,7 +317,7 @@ func (v *fnVerifier) contentFacts(mem memory, val value, t types.Type, brk *logi
 		index := v.bound("k")
 		held := make(value, len(leaves))
 		for i, lf := range leaves {
-			held[i] = logic.Select(v.row(nil, mem, mapOwner(t)+"#val"+lf.path, lf, val[0]), index)
+			held[i] = logic.Select(v.row(nil, mem, mapOwner(t)+"#val"+lf.path, lf.sort, val[0]), index)
 		}
 		return logic.Forall(index, v.wellFormed(held, u.Elem(), brk))
 	case *types.Slice:

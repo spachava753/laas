@@ -913,18 +913,19 @@ func (p *prover) products(b *branch) {
 }
 
 // trigger describes an argument position inside a quantified body where the
-// bound variable x occurs as sign*x + rest. A ground atom with the same head
-// and argument value g suggests the instance x = sign*(g - rest).
+// bound variable x occurs as scale*x + rest, for a scale that is not zero. A
+// ground atom with the same head and argument value g suggests the instance
+// x = (g - rest)/scale, when that division leaves no remainder.
 //
 // base is set for a read of a sequence that does not itself depend on the
 // bound variable; the trigger then matches reads of that sequence only. A
 // fact about one slice is not instantiated at the indices of every other.
 type trigger struct {
-	head string
-	base string
-	arg  int
-	sign int64
-	rest poly
+	head  string
+	base  string
+	arg   int
+	scale int64
+	rest  poly
 }
 
 // head names the kind of atom a trigger matches. Reads indexed by a reference
@@ -969,11 +970,13 @@ func (p *prover) triggersOf(fact *logic.Term) []trigger {
 			}
 			pl := p.lin(arg)
 			coef := pl.coef(variable)
-			if !coef.IsInt64() || (coef.Int64() != 1 && coef.Int64() != -1) {
+			// The variable may be scaled, as the index of an element is
+			// when elements are more than one position apart.
+			if !coef.IsInt64() || coef.Sign() == 0 {
 				continue
 			}
-			sign := coef.Int64()
-			rest := pl.add(monomialPoly(variable), -sign)
+			scale := coef.Int64()
+			rest := pl.add(monomialPoly(variable), -scale)
 			usable := true
 			for mono := range rest.m {
 				for _, id := range monomialAtoms(mono) {
@@ -981,7 +984,7 @@ func (p *prover) triggersOf(fact *logic.Term) []trigger {
 				}
 			}
 			if usable {
-				trig := trigger{head: head(t), arg: i, sign: sign, rest: rest}
+				trig := trigger{head: head(t), arg: i, scale: scale, rest: rest}
 				if t.Op == logic.OpSelect && !p.hasBound(t.Args[0]) {
 					trig.base = p.key(t.Args[0])
 				}
@@ -1049,7 +1052,7 @@ func (p *prover) instantiate(b *branch, index int, atoms []int) {
 	// are plain numbers, as for a fact about the elements of a literal.
 	undirected := len(triggers) == 0
 	if undirected {
-		triggers = []trigger{{head: "select", arg: 1, sign: 1, rest: constPoly(0)}}
+		triggers = []trigger{{head: "select", arg: 1, scale: 1, rest: constPoly(0)}}
 	}
 	{
 		for _, value := range p.ends(variable, body) {
@@ -1072,9 +1075,9 @@ func (p *prover) instantiate(b *branch, index int, atoms []int) {
 			if trig.head != head(t) || b.instances >= maxInstances || (trig.base != "" && trig.base != p.baseKey(id)) {
 				continue
 			}
-			value := p.lin(t.Args[trig.arg]).add(trig.rest, -1)
-			if trig.sign < 0 {
-				value = constPoly(0).add(value, -1)
+			value, whole := p.lin(t.Args[trig.arg]).add(trig.rest, -1).quo(trig.scale)
+			if !whole {
+				continue
 			}
 			key := strconv.Itoa(index) + "|" + value.key()
 			if b.inst[key] {

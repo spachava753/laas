@@ -65,6 +65,25 @@ func monomialPoly(mono string) poly {
 
 func (a poly) isConst() bool { return len(a.m) == 0 }
 
+// quo divides a polynomial by a number, and reports whether that leaves
+// every coefficient whole.
+func (a poly) quo(by int64) (poly, bool) {
+	divisor := big.NewInt(by)
+	result := poly{c: new(big.Int), m: map[string]*big.Int{}}
+	rem := new(big.Int)
+	if result.c.QuoRem(a.c, divisor, rem); rem.Sign() != 0 {
+		return poly{}, false
+	}
+	for mono, coef := range a.m {
+		part := new(big.Int)
+		if part.QuoRem(coef, divisor, rem); rem.Sign() != 0 {
+			return poly{}, false
+		}
+		result.m[mono] = part
+	}
+	return result, true
+}
+
 // coef returns the coefficient of a monomial, zero when it does not occur.
 func (a poly) coef(mono string) *big.Int {
 	if c, ok := a.m[mono]; ok {

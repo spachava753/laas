@@ -70,7 +70,7 @@ func mapKey(key *logic.Term) *logic.Term {
 
 // mapHas reads whether a map has a key.
 func (v *fnVerifier) mapHas(sink *state, mem memory, t types.Type, ref, key *logic.Term) *logic.Term {
-	return logic.Select(v.row(sink, mem, mapOwner(t)+hasLeaf.path, hasLeaf, ref), mapKey(key))
+	return logic.Select(v.row(sink, mem, mapOwner(t)+hasLeaf.path, hasLeaf.sort, ref), mapKey(key))
 }
 
 // mapLen reads the number of keys of a map.
@@ -87,7 +87,7 @@ func (v *fnVerifier) mapValue(sink *state, mem memory, t types.Type, ref, key *l
 	leaves, _ := layoutOf(elem)
 	val := make(value, len(leaves))
 	for i, lf := range leaves {
-		val[i] = logic.Select(v.row(sink, mem, mapOwner(t)+"#val"+lf.path, lf, ref), mapKey(key))
+		val[i] = logic.Select(v.row(sink, mem, mapOwner(t)+"#val"+lf.path, lf.sort, ref), mapKey(key))
 	}
 	v.noteMap(sink, mem, t, ref, key)
 	if !hasBound(key) {
@@ -109,12 +109,12 @@ func (v *fnVerifier) noteMap(sink *state, mem memory, t types.Type, ref, key *lo
 	isNil := logic.Eq(ref, logic.RefLit(0))
 	facts := []*logic.Term{logic.Le(logic.IntLit(0), count), logic.Implies(isNil, logic.Eq(count, logic.IntLit(0)))}
 	if key != nil {
-		present := logic.Select(v.row(nil, mem, mapOwner(t)+hasLeaf.path, hasLeaf, ref), mapKey(key))
+		present := logic.Select(v.row(nil, mem, mapOwner(t)+hasLeaf.path, hasLeaf.sort, ref), mapKey(key))
 		facts = append(facts, logic.Implies(present, logic.Le(logic.IntLit(1), count)), logic.Implies(isNil, logic.Not(present)))
 		_, elem := mapParts(t)
 		leaves, _ := layoutOf(elem)
 		for _, lf := range leaves {
-			held := logic.Select(v.row(nil, mem, mapOwner(t)+"#val"+lf.path, lf, ref), mapKey(key))
+			held := logic.Select(v.row(nil, mem, mapOwner(t)+"#val"+lf.path, lf.sort, ref), mapKey(key))
 			facts = append(facts, logic.Implies(logic.Not(present), isZero(held, lf)))
 		}
 	}
@@ -144,9 +144,9 @@ func (v *fnVerifier) newMap(st *state, t types.Type) value {
 	_, elem := mapParts(t)
 	leaves, _ := layoutOf(elem)
 	st.storeCell(mapOwner(t)+countLeaf.path, countLeaf, ref, logic.IntLit(0))
-	st.storeRow(mapOwner(t)+hasLeaf.path, hasLeaf, ref, logic.Fill(logic.IntLit(0), logic.False()))
+	st.storeRow(mapOwner(t)+hasLeaf.path, hasLeaf.sort, ref, logic.Fill(logic.IntLit(0), logic.False()))
 	for _, lf := range leaves {
-		st.storeRow(mapOwner(t)+"#val"+lf.path, lf, ref, logic.Fill(logic.IntLit(0), zeroLeaf(lf)))
+		st.storeRow(mapOwner(t)+"#val"+lf.path, lf.sort, ref, logic.Fill(logic.IntLit(0), zeroLeaf(lf)))
 	}
 	return value{ref}
 }
@@ -155,7 +155,7 @@ func (v *fnVerifier) newMap(st *state, t types.Type) value {
 // The map must not be nil and must be one the function may modify.
 func (v *fnVerifier) mapStore(st *state, t types.Type, ref, key *logic.Term, val value, present bool, pos token.Pos, what string) {
 	v.check(st, nil, logic.Lt(logic.IntLit(0), ref), pos, "map may be nil")
-	v.checkWrite(st, nil, mapOwner(t), ref, nil, nil, pos, what)
+	v.checkWrite(st, nil, target{mapType: t, ref: ref}.reach(), pos, what)
 	had := v.mapHas(st, st.mem, t, ref, key)
 	count := v.mapLen(st, st.mem, t, ref)
 	_, elem := mapParts(t)
@@ -169,11 +169,11 @@ func (v *fnVerifier) mapStore(st *state, t types.Type, ref, key *logic.Term, val
 	rows := func(lf leaf) *logic.Term {
 		return logic.Select(st.mem.region(mapOwner(t)+lf.path, logic.SeqOf(logic.SeqOf(lf.sort))), ref)
 	}
-	st.storeRow(mapOwner(t)+hasLeaf.path, hasLeaf, ref, logic.Store(rows(hasLeaf), mapKey(key), logic.BoolLit(present)))
+	st.storeRow(mapOwner(t)+hasLeaf.path, hasLeaf.sort, ref, logic.Store(rows(hasLeaf), mapKey(key), logic.BoolLit(present)))
 	for i, lf := range leaves {
 		inMap := lf
 		inMap.path = "#val" + lf.path
-		st.storeRow(mapOwner(t)+inMap.path, lf, ref, logic.Store(rows(inMap), mapKey(key), val[i]))
+		st.storeRow(mapOwner(t)+inMap.path, lf.sort, ref, logic.Store(rows(inMap), mapKey(key), val[i]))
 	}
 }
 

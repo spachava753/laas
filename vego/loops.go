@@ -7,22 +7,26 @@ import (
 	"go/types"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"golang.org/x/tools/go/types/typeutil"
 )
 
-// site is a place in a loop that may write memory: fields of an object, or
-// elements of a backing array.
+// site is a place in a loop that may write memory: positions of an
+// allocation in some regions, or a map.
 type site struct {
-	typ    types.Type
-	elems  bool
-	mapped bool
-	prefix string
-	// root is the variable that holds the pointer to the object, or the
-	// slice of the array, when the site is that simple. A site without one
-	// may write any object or array of its type.
-	root *types.Var
+	cells []cell
+	// elem is set when the site may write any element of a slice, and
+	// mapType when it may write a map.
+	elem    types.Type
+	mapType types.Type
+	// root is the variable that holds the pointer, the slice, or the map,
+	// when the site is that simple. A site without one may write any
+	// allocation its regions have. For a pointer, lo and hi bound the
+	// positions written from where the pointer points.
+	root   *types.Var
+	lo, hi int64
 }
 
 // effects describes what a loop may change.
@@ -47,6 +51,28 @@ func (v *fnVerifier) localVar(e ast.Expr) *types.Var {
 	return variable
 }
 
+// holder returns the variable that holds the pointer, slice, or map an
+// argument passes for a parameter of the given type, if there is one: the
+// argument is the variable, or the address of a variable that lives in
+// memory, written out or taken by a method call.
+func (v *fnVerifier) holder(arg ast.Expr, want types.Type) *types.Var {
+	arg = ast.Unparen(arg)
+	t := v.info.TypeOf(arg)
+	if address, ok := arg.(*ast.UnaryExpr); ok && address.Op == token.AND {
+		arg, t = ast.Unparen(address.X), types.NewPointer(v.info.TypeOf(address.X))
+	} else if variable := v.localVar(arg); variable != nil && v.boxed[variable] {
+		t = types.NewPointer(t)
+	} else if variable != nil && types.Identical(t, want) {
+		return variable
+	} else {
+		return nil
+	}
+	if variable := v.localVar(arg); variable != nil && v.boxed[variable] && types.Identical(t, want) {
+		return variable
+	}
+	return nil
+}
+
 // effects computes what a loop may change: the variables it assigns and the
 // memory it may write, directly or through a call.
 func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
@@ -57,18 +83,26 @@ func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
 			return
 		}
 		lv := v.place(e)
-		switch lv.kind {
-		case placeLocal:
+		switch {
+		case lv.box != nil:
+			// Creating the variable writes nothing that existed before.
+			if id, ok := ast.Unparen(e).(*ast.Ident); ok && v.info.Defs[id] != nil {
+				break
+			}
+			lo, hi := stretch(lv.cells)
+			eff.sites = append(eff.sites, site{cells: lv.cells, root: lv.box, lo: lo, hi: hi})
+		case lv.kind == placeLocal:
 			eff.whole[lv.local] = true
-			if appendedTo != lv.local || len(lv.prefix) > 0 {
+			if appendedTo != lv.local || len(lv.leaves) != len(mustLayout(lv.local.Type())) {
 				otherwise[lv.local] = true
 			}
-		case placeField:
-			eff.sites = append(eff.sites, site{typ: lv.owner, prefix: lv.prefix, root: v.localVar(lv.base)})
-		case placeElem:
-			eff.sites = append(eff.sites, site{typ: lv.owner, elems: true, prefix: lv.prefix, root: v.localVar(lv.base)})
-		case placeMap:
-			eff.sites = append(eff.sites, site{typ: lv.owner, mapped: true, root: v.localVar(lv.base)})
+		case lv.kind == placeMem && lv.pointer != nil:
+			lo, hi := stretch(lv.cells)
+			eff.sites = append(eff.sites, site{cells: lv.cells, root: v.localVar(lv.pointer), lo: lo, hi: hi})
+		case lv.kind == placeMem:
+			eff.sites = append(eff.sites, site{cells: lv.cells, elem: elemType(v.info.TypeOf(lv.slice)), root: v.localVar(lv.slice)})
+		case lv.kind == placeMap:
+			eff.sites = append(eff.sites, site{mapType: lv.mapType, root: v.localVar(lv.slice)})
 		}
 	}
 	visit := func(n ast.Node) bool {
@@ -80,7 +114,7 @@ func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
 				appendedTo = v.localVar(call.Args[0])
 				// Appending may write into the capacity of the slice.
 				if t := v.info.TypeOf(call.Args[0]); isSlice(t) {
-					eff.sites = append(eff.sites, site{typ: elemType(t), elems: true, root: appendedTo})
+					eff.sites = append(eff.sites, site{cells: v.cellsOf(elemType(t)), elem: elemType(t), root: appendedTo})
 				}
 			}
 			for _, lhs := range n.Lhs {
@@ -93,7 +127,7 @@ func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
 			assigned(n.Value, nil)
 		case *ast.CallExpr:
 			if isBuiltin(v.info, n, "delete") && isMap(v.info.TypeOf(n.Args[0])) {
-				eff.sites = append(eff.sites, site{typ: v.info.TypeOf(n.Args[0]), mapped: true, root: v.localVar(n.Args[0])})
+				eff.sites = append(eff.sites, site{mapType: v.info.TypeOf(n.Args[0]), root: v.localVar(n.Args[0])})
 			}
 			v.callSites(n, eff)
 		}
@@ -138,15 +172,15 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 		return nil
 	}
 	for _, m := range fn.modifies {
-		form, err := fn.shapeOf(m, nil)
+		form, _, err := v.locateTarget(fn, m, nil, nil, nil)
 		if err != nil {
 			v.misread(m.clause, err)
 		}
-		at := site{typ: form.typ, elems: form.elems, mapped: form.mapped, prefix: form.prefix}
+		at := site{cells: form.cells, elem: form.elem, mapType: form.mapType, lo: form.lo, hi: form.hi}
 		// Only a pointer or slice passed as it is names the same object
 		// before and inside the call.
-		if arg := argument(form.param); form.direct && arg != nil && types.Identical(v.info.TypeOf(arg), form.param.Type()) {
-			at.root = v.localVar(arg)
+		if arg := argument(form.param); form.direct && arg != nil {
+			at.root = v.holder(arg, form.param.Type())
 		}
 		eff.sites = append(eff.sites, at)
 	}
@@ -187,25 +221,28 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 		}
 	}
 	type writes struct {
-		lf      leaf
-		rows    bool
+		sort    logic.Sort
 		precise bool
 		targets []target
 	}
 	regions := map[string]*writes{}
 	for _, at := range eff.sites {
 		val := st.vals[at.root]
-		precise := at.root != nil && val != nil && (!eff.whole[at.root] || (at.elems && eff.grown[at.root]))
-		t := target{typ: at.typ, elems: at.elems, mapped: at.mapped, prefix: at.prefix}
-		if precise {
+		precise := at.root != nil && val != nil && (!eff.whole[at.root] || (at.elem != nil && eff.grown[at.root]))
+		t := target{cells: at.cells, elem: at.elem, mapType: at.mapType}
+		switch {
+		case !precise:
+		case at.mapType != nil:
 			t.ref = val[0]
-			if at.elems {
-				t.lo, t.hi = val[1], logic.Add(val[1], val[3])
-			}
+		case at.elem != nil:
+			t.ref, t.lo = val[0], val[1]
+			t.hi = logic.Add(val[1], logic.Mul(val[3], logic.IntLit(v.span(at.elem))))
+		default:
+			t.ref, t.lo, t.hi = val[0], logic.Add(val[1], logic.IntLit(at.lo)), logic.Add(val[1], logic.IntLit(at.hi))
 		}
-		t.regions(func(key string, lf leaf, rows bool) {
+		t.regions(func(key string, sort logic.Sort) {
 			if regions[key] == nil {
-				regions[key] = &writes{lf: lf, rows: rows, precise: true}
+				regions[key] = &writes{sort: sort, precise: true}
 			}
 			regions[key].precise = regions[key].precise && precise
 			regions[key].targets = append(regions[key].targets, t)
@@ -213,19 +250,20 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 	}
 	for _, key := range slices.Sorted(maps.Keys(regions)) {
 		written := regions[key]
-		sort := logic.SeqOf(written.lf.sort)
-		if written.rows {
-			sort = logic.SeqOf(sort)
+		// The count of a map is one number for each map; every other
+		// region has a sequence for each allocation.
+		flat := strings.HasSuffix(key, countLeaf.path) && strings.HasPrefix(key, "map ")
+		sort := logic.SeqOf(logic.SeqOf(written.sort))
+		if flat {
+			sort = logic.SeqOf(written.sort)
 		}
-		known := &layer{prev: st.mem.region(key, sort), bound: st.brk, targets: written.targets, rows: written.rows}
+		known := &layer{prev: st.mem.region(key, sort), bound: st.brk, targets: written.targets, flat: flat}
 		if !written.precise {
 			known.bound, known.targets = v.entryBrk, nil
 			for _, t := range v.frame {
-				t.regions(func(region string, _ leaf, _ bool) {
-					if region == key {
-						known.targets = append(known.targets, t)
-					}
-				})
+				if t.reaches([]string{key}) {
+					known.targets = append(known.targets, t)
+				}
 			}
 		}
 		forgotten := v.fresh("mem'"+key, sort)
@@ -377,7 +415,7 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 		shape.limit = logic.Ite(logic.Le(logic.IntLit(0), count), count, logic.IntLit(0))
 		shape.bind = func(st *state, counter *logic.Term) {
 			if key != nil {
-				st.vals[key] = value{counter}
+				v.bind(st, key, value{counter})
 			}
 		}
 	case isString(ranged):
@@ -393,10 +431,10 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 		}
 		shape.bind = func(st *state, counter *logic.Term) {
 			if key != nil {
-				st.vals[key] = value{counter}
+				v.bind(st, key, value{counter})
 			}
 			if element != nil {
-				st.vals[element] = v.unknown("char", element.Type(), st)
+				v.bind(st, element, v.unknown("char", element.Type(), st))
 			}
 		}
 	case isMap(ranged) && mapModelled(ranged):
@@ -405,7 +443,7 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 		// different iterations differ is not modelled. A loop that changes
 		// a map of the type while ranging over one is not supported.
 		for _, at := range shape.effects.sites {
-			if at.mapped && mapOwner(at.typ) == mapOwner(ranged) {
+			if at.mapType != nil && mapOwner(at.mapType) == mapOwner(ranged) {
 				v.unsupported(s.Pos(), "the loop modifies a map of the type it ranges over, which is not supported")
 			}
 		}
@@ -416,10 +454,10 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 			at := v.unknown("key", keyType, st)[0]
 			st.assume(logic.Implies(logic.Lt(counter, shape.limit), v.mapHas(st, st.mem, ranged, ref, at)))
 			if key != nil {
-				st.vals[key] = value{at}
+				v.bind(st, key, value{at})
 			}
 			if element != nil {
-				st.vals[element] = v.mapValue(st, st.mem, ranged, ref, at)
+				v.bind(st, element, v.mapValue(st, st.mem, ranged, ref, at))
 			}
 		}
 	case isSlice(ranged):
@@ -427,7 +465,7 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 		shape.limit = header[2]
 		shape.bind = func(st *state, counter *logic.Term) {
 			if key != nil {
-				st.vals[key] = value{counter}
+				v.bind(st, key, value{counter})
 			}
 			if element == nil {
 				return
@@ -436,7 +474,7 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 			if !ok {
 				v.unsupported(s.X.Pos(), fmt.Sprintf("slices of %s are not supported", elemType(ranged)))
 			}
-			st.vals[element] = current
+			v.bind(st, element, current)
 		}
 	default:
 		v.unsupported(s.X.Pos(), fmt.Sprintf("range over %s is not supported", ranged))

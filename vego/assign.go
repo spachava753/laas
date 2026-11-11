@@ -14,8 +14,7 @@ import (
 const (
 	placeBlank = iota // the blank identifier
 	placeLocal        // a local variable, or a field of one that holds a struct
-	placeField        // fields of the object a pointer refers to
-	placeElem         // an element of a slice, or fields of one
+	placeMem          // a struct a pointer points to, an element of a slice, or fields of one of these
 	placeMap          // the value a map has for a key
 )
 
@@ -29,15 +28,22 @@ type lvalue struct {
 	// local and lo locate the leaves of a placeLocal inside its variable.
 	local *types.Var
 	lo    int
-	// owner is the struct type of the object, or the element type of the
-	// slice, and prefix the path of the assigned part inside it. base is the
-	// expression for the pointer or the slice, and index for the element.
-	owner  types.Type
-	prefix string
-	base   ast.Expr
-	index  ast.Expr
-	// ref is the object or backing array, and at the position in the array,
-	// once the target has been evaluated.
+	// A placeMem starts from a pointer, from a slice and an index, or from
+	// a variable that lives in memory. cells are the cells of what is
+	// assigned and offset is where it starts, both counted from the start of
+	// the struct pointed to, of the element, or of the variable. declares is
+	// set when the assignment creates the variable.
+	box          *types.Var
+	declares     bool
+	pointer      ast.Expr
+	slice, index ast.Expr
+	cells        []cell
+	offset       int64
+	// mapType is the type of the map of a placeMap, with slice and index
+	// holding the map and the key.
+	mapType types.Type
+	// ref is the allocation or the map, and at the position of the struct
+	// or element, or the key, once the target has been evaluated.
 	ref, at *logic.Term
 }
 
@@ -55,24 +61,28 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 		if !ok || variable.Parent() == v.pass.Pkg.Scope() || variable.Pkg() != v.pass.Pkg {
 			v.unsupported(e.Pos(), fmt.Sprintf("%s is not a local variable", e.Name))
 		}
+		if v.boxed[variable] {
+			lv.kind, lv.box, lv.typ, lv.cells = placeMem, variable, variable.Type(), v.cellsOf(variable.Type())
+			break
+		}
 		lv.kind, lv.local, lv.typ = placeLocal, variable, variable.Type()
 	case *ast.StarExpr:
 		object, ok := pointee(v.info.TypeOf(e.X))
 		if !ok {
 			v.unsupported(e.Pos(), fmt.Sprintf("pointers of type %s are not supported", v.info.TypeOf(e.X)))
 		}
-		lv.kind, lv.base, lv.owner, lv.typ = placeField, e.X, object, object
+		lv.kind, lv.pointer, lv.typ, lv.cells = placeMem, e.X, object, v.cellsOf(object)
 	case *ast.IndexExpr:
 		t := v.info.TypeOf(e.X)
 		if isMap(t) && mapModelled(t) {
 			_, elem := mapParts(t)
-			lv.kind, lv.base, lv.index, lv.owner, lv.typ = placeMap, e.X, e.Index, t, elem
+			lv.kind, lv.slice, lv.index, lv.mapType, lv.typ = placeMap, e.X, e.Index, t, elem
 			break
 		}
 		if !isSlice(t) {
 			v.unsupported(e.Pos(), fmt.Sprintf("only elements of slices can be assigned, not those of a %s", t))
 		}
-		lv.kind, lv.base, lv.index, lv.owner, lv.typ = placeElem, e.X, e.Index, elemType(t), elemType(t)
+		lv.kind, lv.slice, lv.index, lv.typ, lv.cells = placeMem, e.X, e.Index, elemType(t), v.cellsOf(elemType(t))
 	case *ast.SelectorExpr:
 		lv = v.fieldPlace(e)
 	default:
@@ -86,7 +96,7 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 }
 
 // fieldPlace determines the storage of a field selection x.f: part of the
-// object x points to, or part of wherever the struct x itself is stored.
+// struct x points to, or part of wherever the struct x itself is stored.
 func (v *fnVerifier) fieldPlace(e *ast.SelectorExpr) lvalue {
 	selection := v.info.Selections[e]
 	if selection == nil || selection.Kind() != types.FieldVal {
@@ -94,7 +104,7 @@ func (v *fnVerifier) fieldPlace(e *ast.SelectorExpr) lvalue {
 	}
 	var lv lvalue
 	if object, viaPointer := pointee(v.info.TypeOf(e.X)); viaPointer {
-		lv = lvalue{kind: placeField, base: e.X, owner: object, typ: object}
+		lv = lvalue{kind: placeMem, pointer: e.X, typ: object, cells: v.cellsOf(object)}
 	} else {
 		lv = v.place(e.X)
 	}
@@ -107,47 +117,81 @@ func (v *fnVerifier) fieldPlace(e *ast.SelectorExpr) lvalue {
 			v.unsupported(e.Pos(), "assigning through an embedded pointer is not supported; name the pointer")
 		}
 		field := lv.typ.Underlying().(*types.Struct).Field(index)
-		lo, _, ok := fieldLeaves(lv.typ, index)
+		lo, hi, ok := fieldLeaves(lv.typ, index)
 		if !ok {
 			v.unsupported(e.Pos(), fmt.Sprintf("field %s has unsupported type %s", field.Name(), field.Type()))
 		}
-		lv.lo, lv.prefix, lv.typ = lv.lo+lo, lv.prefix+"."+field.Name(), field.Type()
+		if lv.kind == placeMem {
+			lv.cells, lv.offset = lv.cells[lo:hi], lv.offset+v.fieldOffset(lv.typ, index)
+		}
+		lv.lo, lv.typ = lv.lo+lo, field.Type()
 	}
 	return lv
 }
 
-// lvalue resolves an assignment target: the pointer or the slice and the
-// index it mentions are evaluated, and a nil pointer or an index out of
-// range is ruled out.
-func (v *fnVerifier) lvalue(e ast.Expr, st *state) lvalue {
+// lvalue resolves an assignment target: the pointer, or the slice and the
+// index, it mentions are evaluated, and a nil pointer or an index out of
+// range is ruled out. guard holds the conditions under which the target is
+// evaluated at all.
+func (v *fnVerifier) lvalue(e ast.Expr, st *state, guard []*logic.Term) lvalue {
 	lv := v.place(e)
-	switch lv.kind {
-	case placeField:
-		lv.ref = v.expr(lv.base, st, nil)
-		v.checkNil(st, nil, lv.ref, lv.pos)
-	case placeElem:
-		header, index := v.eval(lv.base, st, nil), v.expr(lv.index, st, nil)
-		v.checkIndex(st, nil, header[2], index, lv.pos)
-		lv.ref, lv.at = header[0], logic.Add(header[1], index)
-	case placeMap:
-		keyType, _ := mapParts(lv.owner)
-		lv.ref, lv.at = v.expr(lv.base, st, nil), v.evalAs(lv.index, keyType, st, nil)[0]
+	switch {
+	case lv.box != nil:
+		// A variable that an assignment creates has no place yet.
+		if id, ok := ast.Unparen(e).(*ast.Ident); ok && v.info.Defs[id] != nil {
+			lv.declares = true
+			break
+		}
+		held := st.vals[lv.box]
+		if held == nil {
+			v.unsupported(lv.pos, fmt.Sprintf("%s is used before it is declared", lv.box.Name()))
+		}
+		lv.ref, lv.at = held[0], held[1]
+	case lv.kind == placeMem && lv.pointer != nil:
+		pointer := v.eval(lv.pointer, st, guard)
+		v.checkNil(st, guard, pointer[0], lv.pos)
+		lv.ref, lv.at = pointer[0], pointer[1]
+	case lv.kind == placeMem:
+		header, index := v.eval(lv.slice, st, guard), v.expr(lv.index, st, guard)
+		v.checkIndex(st, guard, header[2], index, lv.pos)
+		// A slice that has an element has an array.
+		st.assume(logic.Implies(logic.And(guard...), logic.Not(logic.Eq(header[0], logic.RefLit(0)))))
+		lv.ref, lv.at = header[0], v.elementAt(header, v.info.TypeOf(lv.slice), index)
+	case lv.kind == placeMap:
+		keyType, _ := mapParts(lv.mapType)
+		lv.ref, lv.at = v.expr(lv.slice, st, guard), v.evalAs(lv.index, keyType, st, guard)[0]
 	}
 	return lv
 }
 
-// key returns the key of the region that holds one leaf of the target.
-func (lv lvalue) key(lf leaf) string {
-	if lv.kind == placeElem {
-		return "[]" + typeKey(lv.owner) + lv.prefix + lf.path
+// stretch returns the positions the cells of a place cover, counted like the
+// cells themselves.
+func stretch(cells []cell) (lo, hi int64) {
+	for i, c := range cells {
+		if i == 0 || c.off < lo {
+			lo = c.off
+		}
+		hi = max(hi, c.off+1)
 	}
-	return typeKey(lv.owner) + lv.prefix + lf.path
+	return lo, hi
+}
+
+// reach describes a placeMem as a write.
+func (lv lvalue) reach() written {
+	w := written{ref: lv.ref}
+	for _, c := range lv.cells {
+		if !slices.Contains(w.keys, c.key) {
+			w.keys = append(w.keys, c.key)
+		}
+	}
+	lo, hi := stretch(lv.cells)
+	w.lo, w.hi = logic.Add(lv.at, logic.IntLit(lo)), logic.Add(lv.at, logic.IntLit(hi))
+	return w
 }
 
 // load returns the current value of an assignment target without evaluating
 // its operands a second time.
 func (v *fnVerifier) load(lv lvalue, st *state) value {
-	var val value
 	switch lv.kind {
 	case placeLocal:
 		whole := st.vals[lv.local]
@@ -155,21 +199,15 @@ func (v *fnVerifier) load(lv lvalue, st *state) value {
 			v.unsupported(lv.pos, "this operand cannot be read and updated in place")
 		}
 		return whole[lv.lo : lv.lo+len(lv.leaves)]
-	case placeField:
-		for _, lf := range lv.leaves {
-			val = append(val, v.cell(st, st.mem, lv.key(lf), lf, lv.ref))
-		}
-	case placeElem:
-		for _, lf := range lv.leaves {
-			val = append(val, logic.Select(v.row(st, st.mem, lv.key(lf), lf, lv.ref), lv.at))
-		}
+	case placeMem:
+		val := v.fetch(st, st.mem, lv.cells, lv.ref, lv.at)
+		v.noteTyped(st, val, lv.typ)
+		return val
 	case placeMap:
-		return v.mapValue(st, st.mem, lv.owner, lv.ref, lv.at)
-	default:
-		v.unsupported(lv.pos, "this operand cannot be read and updated in place")
+		return v.mapValue(st, st.mem, lv.mapType, lv.ref, lv.at)
 	}
-	v.noteTyped(st, val, lv.typ)
-	return val
+	v.unsupported(lv.pos, "this operand cannot be read and updated in place")
+	return nil
 }
 
 // store performs an assignment in the symbolic state. A write to memory must
@@ -187,19 +225,19 @@ func (v *fnVerifier) store(lv lvalue, val value, st *state) {
 		}
 		copy(whole[lv.lo:], val)
 		st.vals[lv.local] = whole
-	case placeField:
-		v.checkWrite(st, nil, typeKey(lv.owner)+lv.prefix, lv.ref, nil, nil, lv.pos, lv.text+" is assigned")
-		for i, lf := range lv.leaves {
-			st.storeCell(lv.key(lf), lf, lv.ref, val[i])
+	case placeMem:
+		if lv.declares {
+			v.bind(st, lv.box, val)
+			break
 		}
-	case placeElem:
-		v.checkWrite(st, nil, "[]"+typeKey(lv.owner)+lv.prefix, lv.ref, lv.at, logic.Add(lv.at, logic.IntLit(1)), lv.pos, lv.text+" is assigned")
-		for i, lf := range lv.leaves {
-			row := logic.Select(st.mem.region(lv.key(lf), logic.SeqOf(logic.SeqOf(lf.sort))), lv.ref)
-			st.storeRow(lv.key(lf), lf, lv.ref, logic.Store(row, lv.at, val[i]))
+		// A variable that lives in memory was created by this function,
+		// which may therefore write it.
+		if lv.box == nil {
+			v.checkWrite(st, nil, lv.reach(), lv.pos, lv.text+" is assigned")
 		}
+		v.put(st, lv.cells, lv.ref, lv.at, val)
 	case placeMap:
-		v.mapStore(st, lv.owner, lv.ref, lv.at, val, true, lv.pos, lv.text+" is assigned")
+		v.mapStore(st, lv.mapType, lv.ref, lv.at, val, true, lv.pos, lv.text+" is assigned")
 	}
 }
 
@@ -214,8 +252,10 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
 	targets := make([]lvalue, len(s.Lhs))
 	plain := true
 	for i, lhs := range s.Lhs {
-		targets[i] = v.lvalue(lhs, st)
-		plain = plain && targets[i].kind <= placeLocal
+		targets[i] = v.lvalue(lhs, st, nil)
+		// Where a variable is does not depend on what a call does, whether
+		// it is held by the verifier or lives in memory.
+		plain = plain && (targets[i].kind <= placeLocal || targets[i].box != nil)
 	}
 	simple := s.Tok == token.ASSIGN || s.Tok == token.DEFINE
 	v.effectful = nil
@@ -332,8 +372,7 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 	}
 	t := v.info.TypeOf(call)
 	elem := elemType(t)
-	leaves, ok := layoutOf(elem)
-	if !ok {
+	if _, ok := layoutOf(elem); !ok {
 		v.unsupported(call.Pos(), fmt.Sprintf("slices of %s are not supported", elem))
 	}
 	base := v.evalAs(call.Args[0], t, st, nil)
@@ -345,25 +384,29 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		k(st, base)
 		return
 	}
-	ref, off, length, capacity := base[0], base[1], base[2], base[3]
+	ref, length, capacity := base[0], base[2], base[3]
 	grown := logic.Add(length, logic.IntLit(int64(len(added))))
-	owner := "[]" + typeKey(elem)
+	cells, step := v.cellsOf(elem), v.span(elem)
+	var keys []string
+	sorts := map[string]logic.Sort{}
+	for _, c := range cells {
+		if _, seen := sorts[c.key]; !seen {
+			keys = append(keys, c.key)
+			sorts[c.key] = c.sort
+		}
+	}
 	inPlace := logic.Le(grown, capacity)
 	if !v.quickly(st, nil, logic.Not(inPlace)) {
 		v.branch(call.Pos())
 		next := st.clone()
 		next.assume(inPlace)
-		start := logic.Add(off, length)
-		v.checkWrite(next, nil, owner, ref, start, logic.Add(off, grown), call.Pos(),
+		start, end := v.elementAt(base, t, length), v.elementAt(base, t, grown)
+		v.checkWrite(next, nil, written{keys: keys, ref: ref, lo: start, hi: end}, call.Pos(),
 			fmt.Sprintf("append may write into the capacity of %s", types.ExprString(call.Args[0])))
-		for i, lf := range leaves {
-			row := logic.Select(next.mem.region(owner+lf.path, logic.SeqOf(logic.SeqOf(lf.sort))), ref)
-			for j, element := range added {
-				row = logic.Store(row, logic.Add(start, logic.IntLit(int64(j))), element[i])
-			}
-			next.storeRow(owner+lf.path, lf, ref, row)
+		for j, element := range added {
+			v.put(next, cells, ref, logic.Add(start, logic.IntLit(int64(j)*step)), element)
 		}
-		k(next, value{ref, off, grown, capacity})
+		k(next, value{ref, base[1], grown, capacity})
 	}
 	if !v.quickly(st, nil, inPlace) {
 		v.branch(call.Pos())
@@ -377,21 +420,21 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		// The new array holds the old elements and the added ones. What
 		// lies in its capacity beyond them is not said: it is certainly not
 		// what followed the old elements in their array.
-		rows := make([]*logic.Term, len(leaves))
-		for i, lf := range leaves {
-			old := logic.Select(next.mem.region(owner+lf.path, logic.SeqOf(logic.SeqOf(lf.sort))), ref)
-			rows[i] = v.fresh("moved", logic.SeqOf(lf.sort))
+		moved := v.alloc(next, true)
+		for _, key := range keys {
+			old := logic.Select(next.mem.region(key, logic.SeqOf(logic.SeqOf(sorts[key]))), ref)
+			row := v.fresh("moved", logic.SeqOf(sorts[key]))
 			index := v.bound("k")
-			copied := logic.And(logic.Le(logic.IntLit(0), index), logic.Lt(index, length))
-			next.assume(logic.Forall(index, logic.Implies(copied, v.same(logic.Select(rows[i], index), logic.Select(old, logic.Add(off, index))))))
-			for j, element := range added {
-				next.assume(v.same(logic.Select(rows[i], logic.Add(length, logic.IntLit(int64(j)))), element[i]))
-			}
+			copied := logic.And(logic.Le(logic.IntLit(0), index), logic.Lt(index, logic.Mul(length, logic.IntLit(step))))
+			next.assume(logic.Forall(index, logic.Implies(copied, v.same(logic.Select(row, index), logic.Select(old, logic.Add(base[1], index))))))
+			next.storeRow(key, sorts[key], moved, row)
 		}
-		roomy := v.fresh("cap", logic.Int)
-		_, most, _ := v.intRange(types.Typ[types.Int])
-		next.assume(logic.And(logic.Le(grown, roomy), logic.Le(roomy, logic.BigLit(most))))
-		k(next, v.allocSlice(next, elem, rows, grown, roomy))
+		for j, element := range added {
+			v.put(next, cells, moved, logic.Mul(logic.Add(length, logic.IntLit(int64(j))), logic.IntLit(step)), element)
+		}
+		result := value{moved, logic.IntLit(0), grown, v.fresh("cap", logic.Int)}
+		next.assume(v.wellFormed(result, t, next.brk))
+		k(next, result)
 	}
 }
 
@@ -410,7 +453,7 @@ func (v *fnVerifier) declare(s *ast.DeclStmt, st *state) {
 		spec := spec.(*ast.ValueSpec)
 		targets := make([]lvalue, len(spec.Names))
 		for i, name := range spec.Names {
-			targets[i] = v.lvalue(name, st)
+			targets[i] = v.lvalue(name, st, nil)
 		}
 		var values []value
 		v.effectful = nil
@@ -446,7 +489,7 @@ func (v *fnVerifier) returnStmt(s *ast.ReturnStmt, st *state) {
 	switch {
 	case len(s.Results) == 0:
 		for i, result := range v.fn.results {
-			results[i] = st.vals[result]
+			results[i] = v.current(st, result)
 		}
 	case len(s.Results) == 1 && len(results) > 1:
 		wants := make([]types.Type, len(v.fn.results))

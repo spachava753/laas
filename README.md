@@ -177,16 +177,18 @@ func Different(a, b *Counter) int {
 
 Without `a != b` the postcondition is rejected, because the second assignment may overwrite the first.
 
+The same holds for memory that lies inside other memory. A `*Point` may point at an element of a `[]Point`, or at a `Point` that is a field of a larger struct, and a `*A` may point at the same struct as a `*B` when the two types have the same fields. A write through one is then a write to the other, and a proof has to hold in either case unless the contract rules the overlap out with `~within(p, s)`.
+
 A `Modifies` clause lists what a function may write, starting from its parameters:
 
 - a pointer, as in `Modifies c`, means every field of the struct it points to;
 - a slice, as in `Modifies A` or `Modifies s.items`, means its elements, including the capacity beyond its length, which an `append` may write;
-- any other path, as in `Modifies c.count`, must be a field reached through a pointer, and means that field;
+- any other path must lead into memory, through a pointer or a slice, and means what it names: `Modifies c.count` is one field, `Modifies ps[0]` one element of a slice of structs, `Modifies s.From` a struct inside the struct `s` points to;
 - an element can be selected on the way, as in `Modifies cs[0]` for the struct the first pointer of a slice points to.
 
-The paths are read when the function is entered. A write to anything else that existed at that moment is an error, and so is an entry that no write needs, so the clause says neither less nor more than the body does. What the function creates itself, with `&T{...}`, `new`, `make`, a slice literal, or an `append` that had to move the slice, it may write freely.
+The paths are read when the function is entered. A write to anything else that existed at that moment is an error, and so is an entry that no write needs, so the clause says neither less nor more than the body does. What the function creates itself, with `&T{...}`, `new`, `make`, a slice literal, an `append` that had to move the slice, or as a variable of its own, it may write freely.
 
-Two further forms say where a pointer or slice comes from. `fresh(x)` in an `Ensures` states that the call created what `x` refers to, so it cannot be anything the caller already had. `within(a, b)` states that slice `a` lies inside slice `b`, capacities included. A method that appends to a slice in a struct typically promises both possibilities:
+Two further forms say where a pointer or slice comes from. `fresh(x)` in an `Ensures` states that the call created what `x` refers to, so it cannot be anything the caller already had. `within(a, b)` states that `a` lies inside `b`, where each is a slice, taken with its capacity, or a pointer, taken as the struct it points to. A slice without capacity lies within anything, and a nil pointer within nothing. A method that appends to a slice in a struct typically promises both possibilities:
 
 ```go
 // @ Requires s != nil And |s.items| < 1000
@@ -204,7 +206,7 @@ Rules that follow from sharing:
 - **A pointer must be known not to be nil where it is followed.** For a parameter or receiver that means `Requires p != nil`; `vego` proves the rest.
 - **Slice parameters of one element type must not overlap**, capacities included. A function may assume it, and every call must prove it. `zero(A[:2])` may therefore write all of `A`'s capacity; cut the capacity with `A[:2:2]` to keep the rest.
 - **`append` is the whole right-hand side of an assignment or the returned value.** It either writes into the capacity, where other slices of the array see it, or moves the slice to a new array; both outcomes are verified unless one can be ruled out.
-- **The only address that can be taken is that of a new struct**, `&T{...}`. A pointer to a local variable, to a field, or to a slice element is rejected, and so is a pointer to anything but a struct.
+- **A pointer points to a struct.** `&T{...}`, `&x`, `&p.field`, and `&s[i]` are all supported when what they point to is a struct, and so is calling a method with a pointer receiver on a variable, a field, or an element. A pointer to anything else, such as `*int`, is rejected.
 
 ### Invariants of structs
 
@@ -331,11 +333,11 @@ Proofs hold under these assumptions, which mirror the paper's trusted base:
 - **There is memory.** An allocation larger than the runtime permits is an error the verifier reports: `make([]T, n)`, an `append` that has to move its slice, and a string concatenation must be proved to stay under the limit of the platform. That the machine actually has the memory, and that the stack is deep enough for the recursion, is assumed.
 - **Overflow is an error, not a behaviour.** Every `+`, `-`, `*`, `/`, negation, and conversion must be proved to stay within its type, so `(lo+hi)/2` is rejected and `lo + (hi-lo)/2` verifies. This usually means stating bounds on inputs, for example on the elements a loop adds up. Code that wraps on purpose, such as a hash function, cannot be verified. Shifts and bitwise operators are not supported yet.
 - **Callers outside the verified code keep the contract.** A verified function may assume its `Requires`, and that slice parameters of one element type do not overlap. Verified callers prove both; code that is not verified is trusted to respect them.
-- **Calls that modify memory stand alone.** A call to a function with a `Modifies` clause must be a statement of its own or the whole right-hand side of an assignment to plain variables, so that it cannot run between the evaluation of other operands. It is rejected inside a larger expression, as an argument, in a loop condition, or when the assignment's target is a field or a slice element.
+- **Calls that modify memory stand alone.** A call to a function with a `Modifies` clause must be a statement of its own or the whole right-hand side of an assignment to variables or their fields, so that it cannot run between the evaluation of other operands. It is rejected inside a larger expression, as an argument, in a loop condition, or when the assignment's target is reached through a pointer, a slice, or a map.
 - **Memory a loop writes is forgotten at the loop.** What a loop changes through a variable it does not reassign, or through a slice it only appends to, is forgotten precisely: everything else stays known. A loop that writes through anything more involved, such as `s.items[i]` or a pointer it advances, forgets every object of that type that the function may modify, and an invariant has to restate what is needed.
 - **Exported error variables are not reassigned.** A sentinel such as `var ErrNotFound = errors.New(...)` is taken to be non-nil when its own package never assigns to it; another package assigning `nil` to it would break that.
 - **String length stays representable.** Concatenation must be proved not to exceed the largest `int`, which usually means bounding the lengths of the operands.
-- **Trusted contracts are true.** A function that is not verified can only be called through a contract in a trust file, and every proof that uses it holds only if that contract does. Such a function is also trusted to return without panicking when its `requires` hold, to write nothing a caller can see beyond its `modifies`, not to keep the pointers and slices it is given, and not to return a pointer into the middle of a struct or array.
+- **Trusted contracts are true.** A function that is not verified can only be called through a contract in a trust file, and every proof that uses it holds only if that contract does. Such a function is also trusted to return without panicking when its `requires` hold, to write nothing a caller can see beyond its `modifies`, and not to keep the pointers and slices it is given.
 
 Not implemented yet from the paper: residual runtime checks for unproved obligations (gradual mode), multiset reasoning, the `Preserves`, `Immutable`, `Cost`, and `Library` annotations, and mutation-based audit candidates.
 
