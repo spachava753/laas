@@ -81,7 +81,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		"file of trusted contracts to use instead of "+TrustFileName+" next to go.mod",
 	)
 	analyzer.ResultType = reflect.TypeFor[*Usage]()
-	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact)}
+	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact), new(sentinelFact)}
 	analyzer.Run = func(pass *analysis.Pass) (any, error) {
 		pv := &pkgVerifier{
 			pass:          pass,
@@ -130,6 +130,9 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			}
 		}
 		pv.exportContracts(pv.reportAlwaysFailing())
+		for variable := range pv.relied {
+			pass.ExportObjectFact(variable, new(sentinelFact))
+		}
 		// The proofs of this package also rest on whatever the packages it
 		// depends on took on trust.
 		pass.ExportPackageFact(&usageFact{Usage: *pv.usage})
@@ -223,8 +226,13 @@ type pkgVerifier struct {
 	// current is the function being verified, which a diagnostic counts
 	// against.
 	current *funcInfo
-	// sentinels are the package-level error variables known to be non-nil.
+	// sentinels are the package-level error variables known to be non-nil,
+	// and relied those among them a proof has used. unsettled holds the
+	// ones that would be sentinels if no code of the package could run
+	// before they are initialised, with what stands in the way.
 	sentinels map[*types.Var]bool
+	relied    map[*types.Var]bool
+	unsettled map[*types.Var]string
 	// origins caches what the variables of each function body are assigned,
 	// knownReturns holds the functions that only return errors of known
 	// origin, and isParameter the parameters of all functions.

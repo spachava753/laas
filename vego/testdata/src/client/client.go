@@ -161,3 +161,8 @@ func WrapsRelay(e error) (err error) {
 }
 
 //@ Ensures True
+
+// Forgets assigns to a variable that proofs in lib take to be an error.
+func Forgets() {
+	lib.ErrGone = nil // want `vego: lib\.ErrGone may be changed here, but proofs in package lib rely on it being the error it was declared with`
+}

@@ -16,7 +16,12 @@ func (v *fnVerifier) variable(id *ast.Ident, st *state) value {
 	if val := v.current(st, variable); val != nil {
 		return val
 	}
+	if hidden := v.unsettled[variable]; hidden != "" {
+		v.unsupported(id.Pos(), fmt.Sprintf("%s is not known to have its value yet when this runs: %s while the variables of the package are "+
+			"initialised, which may run this function first", id.Name, hidden))
+	}
 	if v.sentinels[variable] {
+		v.relied[variable] = true
 		sentinel := logic.Const("var "+variable.Name(), logic.Err)
 		st.assume(logic.Not(logic.IsNil(sentinel)))
 		return value{sentinel}

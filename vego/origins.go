@@ -132,7 +132,10 @@ func (pv *pkgVerifier) knownError(o *origins, e ast.Expr, index int, visiting ma
 // known origin.
 func (pv *pkgVerifier) knownVariable(o *origins, variable *types.Var, visiting map[*types.Var]bool) bool {
 	switch {
-	case pv.sentinels[variable], visiting[variable]:
+	case pv.sentinels[variable]:
+		pv.relied[variable] = true
+		return true
+	case visiting[variable]:
 		return true
 	case o.unknown[variable] || variable.Parent() == pv.pass.Pkg.Scope() || pv.isParameter[variable]:
 		return false

@@ -132,3 +132,13 @@ func Relay(e error) (err error) {
 }
 
 //@ Ensures (err = nil) <-> (e = nil)
+
+// ErrGone is an error other packages can see.
+var ErrGone = errors.New("gone")
+
+// IsGone reports that it is set.
+func IsGone() bool {
+	return ErrGone != nil
+}
+
+//@ Ensures result

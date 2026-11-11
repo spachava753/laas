@@ -1,11 +1,13 @@
 package vego
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
 	"maps"
 	"math/big"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -14,12 +16,25 @@ import (
 	"golang.org/x/tools/go/types/typeutil"
 )
 
+// sentinelFact marks a package-level error variable that a proof of its
+// package took to be non-nil, so that a package that assigns to it can be
+// told.
+type sentinelFact struct{}
+
+func (*sentinelFact) AFact() {}
+
+func (*sentinelFact) String() string { return "sentinel" }
+
 // findSentinels records the package-level error variables that are known to
 // be non-nil: those initialised with errors.New or fmt.Errorf and never
-// assigned or addressed anywhere in the package. For an exported variable
-// this relies on other packages not assigning to it.
+// assigned or addressed anywhere in the package, provided that no code of
+// the package can run before they are initialised. For an exported variable
+// this relies on other packages not assigning to it; one that is analysed
+// and does is reported.
 func (pv *pkgVerifier) findSentinels() {
 	pv.sentinels = map[*types.Var]bool{}
+	pv.unsettled = map[*types.Var]string{}
+	pv.relied = map[*types.Var]bool{}
 	for _, file := range pv.pass.Files {
 		for _, decl := range file.Decls {
 			gen, ok := decl.(*ast.GenDecl)
@@ -42,10 +57,23 @@ func (pv *pkgVerifier) findSentinels() {
 		}
 	}
 	changed := func(e ast.Expr) {
-		if id, ok := ast.Unparen(e).(*ast.Ident); ok {
-			if variable, ok := pv.info.Uses[id].(*types.Var); ok {
-				delete(pv.sentinels, variable)
-			}
+		e = ast.Unparen(e)
+		if sel, ok := e.(*ast.SelectorExpr); ok {
+			e = sel.Sel
+		}
+		id, ok := e.(*ast.Ident)
+		if !ok {
+			return
+		}
+		variable, ok := pv.info.Uses[id].(*types.Var)
+		if !ok {
+			return
+		}
+		delete(pv.sentinels, variable)
+		// A proof in the variable's own package may rest on its value.
+		if variable.Pkg() != nil && variable.Pkg() != pv.pass.Pkg && pv.pass.ImportObjectFact(variable, new(sentinelFact)) {
+			pv.report(e.Pos(), "%s.%s may be changed here, but proofs in package %s rely on it being the error it was declared with",
+				variable.Pkg().Name(), variable.Name(), variable.Pkg().Path())
 		}
 	}
 	for _, file := range pv.pass.Files {
@@ -70,6 +98,113 @@ func (pv *pkgVerifier) findSentinels() {
 			return true
 		})
 	}
+	if len(pv.sentinels) == 0 {
+		return
+	}
+	if hidden := pv.hiddenInitCode(); hidden != "" {
+		for variable := range pv.sentinels {
+			pv.unsettled[variable] = hidden
+		}
+		clear(pv.sentinels)
+	}
+}
+
+// hiddenInitCode looks for code that runs while the package-level variables
+// are being initialised and that Go's ordering of initialisers does not see.
+// Go initialises a variable after everything its initialiser refers to,
+// following calls of named functions. A call of a function value or of an
+// interface method, a goroutine, and a function of another package that is
+// handed something of this package to call back are not followed, so through
+// them a function of this package may run before a variable it reads has
+// its value. It returns a description of the first such place, or "".
+func (pv *pkgVerifier) hiddenInitCode() string {
+	bodies := map[*types.Func]*ast.FuncDecl{}
+	var initialisers []ast.Expr
+	for _, file := range pv.pass.Files {
+		for _, decl := range file.Decls {
+			switch decl := decl.(type) {
+			case *ast.FuncDecl:
+				if fn, ok := pv.info.Defs[decl.Name].(*types.Func); ok {
+					bodies[fn] = decl
+				}
+			case *ast.GenDecl:
+				for _, spec := range decl.Specs {
+					if spec, ok := spec.(*ast.ValueSpec); ok && decl.Tok == token.VAR {
+						initialisers = append(initialisers, spec.Values...)
+					}
+				}
+			}
+		}
+	}
+	at := func(pos token.Pos, what string) string {
+		position := pv.pass.Fset.Position(pos)
+		return fmt.Sprintf("%s at %s:%d", what, filepath.Base(position.Filename), position.Line)
+	}
+	// Something of a basic type, or made by another package from such
+	// things, holds no code of this package.
+	inert := func(e ast.Expr) bool {
+		if _, basic := types.Unalias(pv.info.TypeOf(e)).(*types.Basic); basic {
+			return true
+		}
+		call, ok := ast.Unparen(e).(*ast.CallExpr)
+		if !ok {
+			return false
+		}
+		callee := typeutil.StaticCallee(pv.info, call)
+		return callee != nil && callee.Pkg() != pv.pass.Pkg
+	}
+	seen := map[*types.Func]bool{}
+	var scan func(root ast.Node) string
+	scan = func(root ast.Node) string {
+		found := ""
+		ast.Inspect(root, func(n ast.Node) bool {
+			if found != "" {
+				return false
+			}
+			switch n := n.(type) {
+			case *ast.GoStmt:
+				found = at(n.Pos(), "a goroutine is started")
+			case *ast.CallExpr:
+				if tv := pv.info.Types[n.Fun]; tv.IsType() || tv.IsBuiltin() {
+					break
+				}
+				callee := typeutil.StaticCallee(pv.info, n)
+				switch {
+				case callee == nil:
+					found = at(n.Pos(), "a function value or an interface method is called")
+				case callee.Pkg() == pv.pass.Pkg:
+					decl := bodies[callee.Origin()]
+					switch {
+					case decl == nil || decl.Body == nil:
+						found = at(n.Pos(), callee.Name()+", whose body is not available, is called")
+					case !seen[callee.Origin()]:
+						seen[callee.Origin()] = true
+						found = scan(decl.Body)
+					}
+				default:
+					operands := slices.Clone(n.Args)
+					if sel, ok := ast.Unparen(n.Fun).(*ast.SelectorExpr); ok && pv.info.Selections[sel] != nil {
+						operands = append(operands, sel.X)
+					}
+					for _, operand := range operands {
+						if !inert(operand) {
+							found = at(operand.Pos(), fmt.Sprintf("%s is handed to %s.%s, which may call back into this package",
+								types.ExprString(operand), callee.Pkg().Name(), callee.Name()))
+							break
+						}
+					}
+				}
+			}
+			return true
+		})
+		return found
+	}
+	for _, initialiser := range initialisers {
+		if found := scan(initialiser); found != "" {
+			return found
+		}
+	}
+	return ""
 }
 
 // outcome is what verifying a function established about its failure,
