@@ -238,6 +238,11 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 			continue
 		}
 		now := v.unknown(variable.Name(), variable.Type(), head)
+		for _, part := range now {
+			if part.Sort == logic.Err {
+				v.forgotten[part.Name] = true
+			}
+		}
 		head.vals[variable] = now
 		if eff.grown[variable] && isSlice(variable.Type()) {
 			// A slice that is only appended to is still in its old array,
@@ -402,7 +407,9 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 		}
 		finish(end)
 	}
+	v.looping++
 	v.seq(shape.body.List, shape.body.Lbrace, shape.body.Rbrace, head, ctrl{brk: k, cont: after}, after)
+	v.looping--
 }
 
 // forStmt verifies a for statement. renewed lists the variables its

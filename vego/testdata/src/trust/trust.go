@@ -395,7 +395,9 @@ func Contrapositive(n int) (err error) {
 // readySixtyFive is excused: it reaches an unpredictable call, and the
 // search for a witness does not try strings of 65 bytes.
 func readySixtyFive(s string) error {
-	_ = external()
+	if err := external(); err != nil && len(s) != 65 {
+		return err
+	}
 	return nil
 }
 
@@ -528,3 +530,51 @@ func UsesClaimsChange(xs []int) {
 }
 
 //@ Ensures xs'[0] = 99
+
+// Bounced calls a trusted function of this package that calls it back, so
+// the two never return.
+//
+// @ Requires n >= 0
+func Bounced(n int) int {
+	return bounce(n) // want `vego: bounce is trusted and calls back into Bounced, so that this call ends cannot be proved; verify bounce instead of trusting it`
+}
+
+//@ Ensures result = 0
+
+func bounce(n int) int { return Bounced(n) }
+
+// IgnoresFailure calls a function that may fail, ignores whether it did,
+// and then fails for a reason of its own. The call does not excuse it.
+func IgnoresFailure(x int) (result int, err error) { // want `the contract of IgnoresFailure would also be met by a function that always returns an error`
+	_ = external()
+	return 0, errAlways
+}
+
+//@ Ensures err = nil -> result = x + 1
+
+// PassesFailure fails when the call does, and is excused.
+func PassesFailure(x int) (result int, err error) {
+	if err := external(); err != nil {
+		return 0, errAlways
+	}
+	return x, nil
+}
+
+//@ Ensures err = nil -> result = x
+
+// LoopsOverFailures keeps the first failure of several calls.
+//
+// @ Requires 0 <= n <= 10
+func LoopsOverFailures(n int) (err error) {
+	var first error
+	//@ Invariant 0 <= i <= n
+	//@ Variant n - i
+	for i := 0; i < n; i++ {
+		if failed := external(); failed != nil && first == nil {
+			first = failed
+		}
+	}
+	return first
+}
+
+//@ Ensures True

@@ -365,8 +365,9 @@ func (v *fnVerifier) elementFacts(seq *logic.Term, elem types.Type) *logic.Term 
 	return logic.Forall(index, logic.Implies(inRange, v.typeFact(logic.Select(seq, index), elem)))
 }
 
-// noteFailureSource records whether a call makes the success of the function
-// under verification unpredictable. A call that provably succeeds never
+// noteFailureSource records a call that may make the success of the function
+// under verification unpredictable; whether it does is decided once the
+// function has been executed, by tieFailures. A call that provably succeeds never
 // does. Otherwise a trusted callee does when it returns an error and its
 // contract never forces success; a callee verified in another package says
 // in its published contract whether it is excused for that reason; and a
@@ -379,7 +380,7 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state,
 	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
 	local := fn.decl != nil
 	for _, index := range errorResults(fn) {
-		if results[index] == nil || (!local && v.outside) || (local && v.reached[fn]) {
+		if results[index] == nil {
 			continue
 		}
 		source := (fn.trust != nil && !v.trustForces(fn)) || (fn.imported != nil && fn.imported.Excused)
@@ -387,8 +388,73 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state,
 			continue
 		}
 		if v.canReach(path) {
-			v.outside = v.outside || !local
-			v.reached[fn] = local
+			source := failureSource{err: results[index][0], inLoop: v.looping > 0, known: len(st.hyps), outputs: map[string]bool{}}
+			if local {
+				source.callee = fn
+			}
+			for _, result := range results {
+				for _, part := range result {
+					source.outputs[part.Name] = true
+				}
+			}
+			v.sources = append(v.sources, source)
+		}
+	}
+}
+
+// failureSource is a call whose failure nothing predicts: the error it
+// returned, the callee if it is verified in this package, whether the call
+// was made inside a loop, the names of everything it returned, and how many
+// facts the state held when it returned.
+type failureSource struct {
+	err     *logic.Term
+	callee  *funcInfo
+	inLoop  bool
+	outputs map[string]bool
+	known   int
+}
+
+// mentions reports whether a term contains a constant with one of the names.
+func mentions(t *logic.Term, names map[string]bool) bool {
+	if t.Op == logic.OpConst && names[t.Name] {
+		return true
+	}
+	return slices.ContainsFunc(t.Args, func(arg *logic.Term) bool { return mentions(arg, names) })
+}
+
+// failure is a return of an error that may not be nil, with the facts of
+// the path that led to it.
+type failure struct {
+	err  *logic.Term
+	path []*logic.Term
+}
+
+// tieFailures decides, once the function has been executed, which of the
+// calls whose failure nothing predicts make the function itself
+// unpredictable: those it fails because of. A call whose error is ignored
+// does not excuse a function that then fails for a reason of its own.
+//
+// The function fails because of a call when it returns that call's error,
+// or returns an error on a path that was chosen by what the call returned:
+// some condition met since the call mentions one of its results. Inside a
+// loop neither can be seen once the loop has forgotten the variable that
+// held the error, so an error forgotten by a loop counts for the calls made
+// in loops.
+func (v *fnVerifier) tieFailures() {
+	for _, source := range v.sources {
+		tied := slices.ContainsFunc(v.failures, func(f failure) bool {
+			if f.err.String() == source.err.String() || (source.inLoop && v.forgotten[f.err.Name]) {
+				return true
+			}
+			return source.known <= len(f.path) &&
+				slices.ContainsFunc(f.path[source.known:], func(fact *logic.Term) bool { return mentions(fact, source.outputs) })
+		})
+		switch {
+		case !tied:
+		case source.callee != nil:
+			v.reached[source.callee] = true
+		default:
+			v.outside = true
 		}
 	}
 }
@@ -409,7 +475,18 @@ func (v *fnVerifier) calleeFormula(c *clause, env *specEnv) *logic.Term {
 // checkRecursion requires a decreasing measure for every call that can lead
 // back to the function under verification.
 func (v *fnVerifier) checkRecursion(callee *funcInfo, pre *specEnv, st *state, guard []*logic.Term, call *ast.CallExpr) {
-	if !v.reaches(callee, v.fn) {
+	// A trusted function of this package has a body all the same, and what
+	// it calls is known.
+	from := callee
+	if own := v.funcs[callee.obj]; own != nil {
+		from = own
+	}
+	if !v.reaches(from, v.fn) {
+		return
+	}
+	if callee.trust != nil {
+		v.report(call.Pos(), "%s is trusted and calls back into %s, so that this call ends cannot be proved; verify %s instead of trusting it",
+			callee.obj.Name(), v.fn.obj.Name(), callee.obj.Name())
 		return
 	}
 	for _, fn := range []*funcInfo{v.fn, callee} {

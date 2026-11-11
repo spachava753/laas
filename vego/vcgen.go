@@ -71,6 +71,15 @@ type fnVerifier struct {
 	// error that execution reached, which may turn out to be excused.
 	outside bool
 	reached map[*funcInfo]bool
+	// sources holds the calls reached so far whose failure nothing
+	// predicts, and failures the returns of an error. A source only counts
+	// if the function fails because of it; see tieFailures. forgotten names
+	// the errors a loop made unknown, and looping counts the loop bodies
+	// being executed.
+	sources   []failureSource
+	failures  []failure
+	forgotten map[string]bool
+	looping   int
 	// lenient is set when only the contract of a function is examined, not
 	// its body: parameters and results of types vego does not model are
 	// then left without a value instead of being an error.
@@ -95,7 +104,7 @@ func (v *fnVerifier) allowEffects(e ast.Expr) {
 func (pv *pkgVerifier) run(fn *funcInfo, task func(v *fnVerifier)) {
 	v := &fnVerifier{
 		pkgVerifier: pv, fn: fn, entry: map[*types.Var]value{}, names: map[string]int{},
-		reached: map[*funcInfo]bool{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{},
+		reached: map[*funcInfo]bool{}, forgotten: map[string]bool{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{},
 	}
 	defer func() {
 		switch r := recover().(type) {
@@ -325,6 +334,7 @@ func (v *fnVerifier) verify() {
 		}
 		v.atReturn(end, results, body.Rbrace)
 	})
+	v.tieFailures()
 	for i, t := range v.frame {
 		// After a failure the state may hold a false assumption, under
 		// which nothing is needed.
