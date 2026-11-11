@@ -502,6 +502,11 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 		c := &clause{kind: "modifies", text: item.text, pos: pv.trustPos(entry.file, item.line, item.col), res: pv.plain}
 		fn.modifies = append(fn.modifies, newModTargets(targets, c)...)
 	}
+	for name := range fn.paramNames {
+		if fn.ambiguous(name) {
+			fn.defect("its parameter %s has a name that means something else in a contract", name)
+		}
+	}
 	// A primed path describes memory after the call. If modifies lists
 	// nothing reached from the same parameter, that memory is as it was,
 	// and a clause saying otherwise could only contradict the caller.

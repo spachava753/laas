@@ -154,7 +154,10 @@ type clause struct {
 	kind string
 	text string
 	pos  token.Pos
-	node *logic.Node
+	// misplaced is set, in place of a kind, for something that looks like
+	// an annotation but is written where annotations are not read.
+	misplaced string
+	node      *logic.Node
 	// res is set for a clause written in another package, which has its
 	// own predicates.
 	res *logic.Resolver
@@ -260,8 +263,9 @@ func (pv *pkgVerifier) report(pos token.Pos, format string, args ...any) {
 }
 
 var (
-	annotationLine = regexp.MustCompile(`^//\s?@(\s*)(.*)$`)
-	clauseKinds    = map[string]bool{
+	annotationLine  = regexp.MustCompile(`^//\s*@(\s*)(.*)$`)
+	blockAnnotation = regexp.MustCompile(`^/\*\s*@\s*(\w*)`)
+	clauseKinds     = map[string]bool{
 		"Requires": true, "Ensures": true, "Invariant": true, "Variant": true,
 		"Measure": true, "Predicate": true, "Assert": true, "Modifies": true,
 	}
@@ -280,11 +284,17 @@ var (
 // there is returned as a clause without a kind, to be reported, instead of
 // being skipped: a misspelt keyword must not switch verification off. An @
 // directly followed by an unknown word, as in "// @Summary", belongs to
-// some other tool and is ignored.
+// some other tool and is ignored, unless the word is a keyword but for its
+// case or a letter or two. A keyword in a /* */ comment is reported too,
+// since annotations are only read from // comments.
 func extractClauses(group *ast.CommentGroup) []*clause {
 	var clauses []*clause
 	var current *clause
 	for _, comment := range group.List {
+		if block := blockAnnotation.FindStringSubmatch(comment.Text); block != nil && nearKeyword(block[1]) {
+			clauses = append(clauses, &clause{text: block[1], pos: comment.Pos(),
+				misplaced: "annotations are only read from // comments, not from /* */ comments"})
+		}
 		match := annotationLine.FindStringSubmatch(comment.Text)
 		if match == nil {
 			current = nil
@@ -302,11 +312,45 @@ func extractClauses(group *ast.CommentGroup) []*clause {
 			clauses = append(clauses, current)
 		case current != nil:
 			current.text += " " + line
-		case match[1] != "":
+		case match[1] != "" || nearKeyword(keyword):
 			clauses = append(clauses, &clause{text: keyword, pos: comment.Pos()})
 		}
 	}
 	return clauses
+}
+
+// nearKeyword reports whether a word is an annotation keyword, or so close
+// to one that it was most likely meant as one: the same but for case, or one
+// or two letters away.
+func nearKeyword(word string) bool {
+	for keyword := range clauseKinds {
+		if strings.EqualFold(word, keyword) || distance(word, keyword) <= 2 {
+			return true
+		}
+	}
+	return false
+}
+
+// distance returns how many letters have to be added, dropped, or replaced
+// to turn one word into the other.
+func distance(a, b string) int {
+	row := make([]int, len(b)+1)
+	for j := range row {
+		row[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		diagonal := row[0]
+		row[0] = i
+		for j := 1; j <= len(b); j++ {
+			above := row[j]
+			if a[i-1] != b[j-1] {
+				diagonal++
+			}
+			row[j] = min(diagonal, above+1, row[j-1]+1)
+			diagonal = above
+		}
+	}
+	return row[len(b)]
 }
 
 // collect records every function of the package, parses all annotations, and
@@ -322,6 +366,10 @@ func (pv *pkgVerifier) collect() {
 		}
 		for _, group := range file.Comments {
 			for _, c := range extractClauses(group) {
+				if c.misplaced != "" {
+					pv.report(c.pos, "%s", c.misplaced)
+					continue
+				}
 				if c.kind == "" {
 					pv.report(c.pos, "unknown annotation %q; an annotation starts with one of "+
 						"Requires, Ensures, Modifies, Invariant, Variant, Measure, Assert, Predicate", c.text)
@@ -457,6 +505,37 @@ func newFuncInfo(obj *types.Func) *funcInfo {
 		}
 	}
 	return fn
+}
+
+// ambiguous reports whether an annotation of the function would read the
+// name of a Go variable as something else: True, False, and nil are words of
+// the annotation language, and result, or result1, result2, ..., is how an
+// unnamed result is referred to.
+//
+// Only a name that an annotation of the function actually uses is in doubt.
+func (fn *funcInfo) ambiguous(name string) bool {
+	index, isResult := fn.resultNames[name]
+	if name != "True" && name != "False" && name != "nil" && (!isResult || fn.results[index].Name() == name) {
+		return false
+	}
+	used := slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.name == name })
+	clauses := slices.Concat(fn.requires, fn.ensures, fn.body)
+	if fn.measure != nil {
+		clauses = append(clauses, fn.measure)
+	}
+	for _, c := range clauses {
+		c.node.Walk(func(n *logic.Node) {
+			switch {
+			case n.Kind == logic.NBool:
+				used = used || name == map[int64]string{0: "False", 1: "True"}[n.Val]
+			case n.Kind == logic.NNil:
+				used = used || name == "nil"
+			case n.Kind == logic.NIdent:
+				used = used || name == n.Name
+			}
+		})
+	}
+	return used
 }
 
 // contractOf returns the contract that calls to a function are checked

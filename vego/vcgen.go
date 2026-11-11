@@ -289,6 +289,16 @@ func (v *fnVerifier) verify() {
 	if sig.TypeParams() != nil || sig.RecvTypeParams() != nil {
 		v.unsupported(fn.decl.Pos(), "generic functions are not supported yet")
 	}
+	// A variable whose name means something else in annotations would be
+	// read as that other thing, silently.
+	ast.Inspect(fn.decl, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok {
+			if _, isVar := v.info.Defs[id].(*types.Var); isVar && fn.ambiguous(id.Name) {
+				v.unsupported(id.Pos(), fmt.Sprintf("the variable %s has a name that means something else in annotations; rename it", id.Name))
+			}
+		}
+		return true
+	})
 	v.boxed = v.findBoxed(fn.decl.Body)
 	st := v.enter()
 	for _, variable := range slices.Concat(fn.params, fn.results) {

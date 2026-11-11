@@ -226,3 +226,49 @@ func Impossible(A []int) int { // want `vego: nothing can satisfy the Requires c
 }
 
 //@ Ensures result = 42 And result = 43
+
+// ResultParameter has a parameter with the name annotations give to the
+// unnamed result.
+//
+// @ Requires result = 7
+func ResultParameter(result int) int { // want `vego: cannot verify ResultParameter: the variable result has a name that means something else in annotations; rename it`
+	return 5
+}
+
+//@ Ensures result = 7
+
+// FalseParameter has a parameter with the name of a word of the language.
+func FalseParameter(False bool) (r bool) { // want `vego: cannot verify FalseParameter: the variable False has a name that means something else in annotations; rename it`
+	return false
+}
+
+//@ Ensures r = False
+
+// NamedResult names its result itself, which is no clash.
+func NamedResult() (result int) {
+	return 3
+}
+
+//@ Ensures result = 3
+
+// SpacedOut has annotations with more space than usual, which are read.
+//
+// @ Requires x >= 0
+func SpacedOut(x int) int {
+	//    @ Assert x >= 1 // want `vego: assertion may not hold: x >= 1`
+	return x // want `vego: postcondition may not hold: result <= 0`
+}
+
+//   @ Ensures result <= 0
+
+// Misspelt has keywords that are almost right.
+//
+// @ Requires x >= 0
+func Misspelt(x int) int {
+	//@assert False // want `vego: unknown annotation "assert"; an annotation starts with one of .*`
+	return x
+}
+
+//@Ensure result > 100 // want `vego: unknown annotation "Ensure"; an annotation starts with one of .*`
+
+/*@ Ensures result > 100 */ // want `vego: annotations are only read from // comments, not from /\* \*/ comments`
