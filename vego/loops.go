@@ -89,7 +89,7 @@ func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
 			if id, ok := ast.Unparen(e).(*ast.Ident); ok && v.info.Defs[id] != nil {
 				break
 			}
-			lo, hi := stretch(lv.cells)
+			lo, hi := bounds(lv.cells)
 			eff.sites = append(eff.sites, site{cells: lv.cells, root: lv.box, lo: lo, hi: hi})
 		case lv.kind == placeLocal:
 			eff.whole[lv.local] = true
@@ -97,7 +97,7 @@ func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
 				otherwise[lv.local] = true
 			}
 		case lv.kind == placeMem && lv.pointer != nil:
-			lo, hi := stretch(lv.cells)
+			lo, hi := bounds(lv.cells)
 			eff.sites = append(eff.sites, site{cells: lv.cells, root: v.localVar(lv.pointer), lo: lo, hi: hi})
 		case lv.kind == placeMem:
 			eff.sites = append(eff.sites, site{cells: lv.cells, elem: elemType(v.info.TypeOf(lv.slice)), root: v.localVar(lv.slice)})

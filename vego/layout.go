@@ -20,6 +20,10 @@ const (
 	partCap
 	partPtr // which allocation the pointer points into; zero for nil
 	partAt  // where in that allocation the struct it points to starts
+	// partHidden is a struct field of a type that is not modelled. Nothing
+	// is known of its value and nothing can be done with it alone, but it
+	// is copied, overwritten, and forgotten with the struct it is part of.
+	partHidden
 )
 
 // leaf is one indivisible component of a Go value. A number, a boolean, a
@@ -122,9 +126,10 @@ func elemType(t types.Type) types.Type {
 }
 
 // layoutOf lists the leaves of a type, and reports whether the type is
-// modelled at all. A struct field of a type that is not modelled is left
-// out, so the rest of the struct can still be used; reading or writing that
-// field is rejected where it happens.
+// modelled at all. A struct field of a type that is not modelled is one
+// hidden leaf, so the rest of the struct can still be used; reading or
+// writing that field alone is rejected where it happens. A blank field is
+// left out, since no program can tell what it holds.
 func layoutOf(t types.Type) ([]leaf, bool) {
 	if t == nil {
 		return nil, false
@@ -164,8 +169,11 @@ func layoutOf(t types.Type) ([]leaf, bool) {
 		for i := range u.NumFields() {
 			field := u.Field(i)
 			inner, ok := layoutOf(field.Type())
-			if !ok || field.Name() == "_" {
+			if field.Name() == "_" {
 				continue
+			}
+			if !ok {
+				inner = []leaf{{sort: logic.Int, typ: field.Type(), part: partHidden}}
 			}
 			for _, part := range inner {
 				part.path = "." + field.Name() + part.path
@@ -199,10 +207,15 @@ func fieldLeaves(t types.Type, index int) (lo, hi int, ok bool) {
 	u := t.Underlying().(*types.Struct)
 	for i := range u.NumFields() {
 		inner, modelled := layoutOf(u.Field(i).Type())
-		if !modelled || u.Field(i).Name() == "_" {
-			if i == index {
-				return 0, 0, false
-			}
+		switch {
+		case u.Field(i).Name() == "_" && i == index:
+			return 0, 0, false
+		case u.Field(i).Name() == "_":
+			continue
+		case !modelled && i == index:
+			return lo, lo + 1, false
+		case !modelled:
+			lo++
 			continue
 		}
 		if i == index {
@@ -246,7 +259,11 @@ func (pv *pkgVerifier) cellsOf(t types.Type) []cell {
 	var cells []cell
 	for i, field := range fields {
 		inner, ok := layoutOf(field.Type())
-		if !ok || field.Name() == "_" {
+		if field.Name() == "_" {
+			continue
+		}
+		if !ok {
+			cells = append(cells, cell{key: typeKey(u) + "." + field.Name(), sort: logic.Int, off: offsets[i]})
 			continue
 		}
 		if _, nested := field.Type().Underlying().(*types.Struct); nested {

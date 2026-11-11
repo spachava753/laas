@@ -636,7 +636,7 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 		return shape{}, target{}, fmt.Errorf("%s is passed by value, so the caller cannot see a change to it", m.text)
 	default:
 		form.cells, form.direct = cur.cells, first
-		form.lo, form.hi = stretch(cur.cells)
+		form.lo, form.hi = bounds(cur.cells)
 		if !symbolic {
 			t.ref, t.lo, t.hi = cur.ref, logic.Add(cur.at, logic.IntLit(form.lo)), logic.Add(cur.at, logic.IntLit(form.hi))
 			// The cells are counted from the struct, the target from its

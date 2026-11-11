@@ -353,13 +353,49 @@ func (v *fnVerifier) prove(st *state, guard []*logic.Term, goal *logic.Term) boo
 	return solver.Prove(append(slices.Clip(st.hyps), guard...), goal, opts) == solver.Proved
 }
 
-// written describes a write for the check against the frame: the regions it
-// goes to, the allocation, and the positions from lo up to hi; for a map the
-// positions are nil.
-type written struct {
-	keys   []string
-	ref    *logic.Term
+// stretch is the part of a write, or of a target, that lies in one region:
+// the positions from lo up to hi, which are nil for a map.
+type stretch struct {
+	key    string
 	lo, hi *logic.Term
+}
+
+// written describes a write for the check against the frame: the allocation
+// or the map, and what it writes in each region.
+type written struct {
+	ref   *logic.Term
+	parts []stretch
+}
+
+// stretches returns what a target covers in each region it reaches into.
+// For a single struct value that is exactly the positions of its leaves.
+func (t target) stretches() []stretch {
+	if !t.single {
+		var parts []stretch
+		t.regions(func(key string, _ logic.Sort) { parts = append(parts, stretch{key, t.lo, t.hi}) })
+		return parts
+	}
+	return stretchesOf(t.cells, t.lo)
+}
+
+// stretchesOf returns what the cells of a value stored at a position cover
+// in each region.
+func stretchesOf(cells []cell, at *logic.Term) []stretch {
+	var keys []string
+	bounds := map[string][2]int64{}
+	for _, c := range cells {
+		b, seen := bounds[c.key]
+		if !seen {
+			keys = append(keys, c.key)
+			b = [2]int64{c.off, c.off + 1}
+		}
+		bounds[c.key] = [2]int64{min(b[0], c.off), max(b[1], c.off+1)}
+	}
+	parts := make([]stretch, len(keys))
+	for i, key := range keys {
+		parts[i] = stretch{key, logic.Add(at, logic.IntLit(bounds[key][0])), logic.Add(at, logic.IntLit(bounds[key][1]))}
+	}
+	return parts
 }
 
 // checkWrite requires that a write is one the function may make: to an
@@ -367,25 +403,46 @@ type written struct {
 // something a Modifies clause lists. A listed target that no write ever
 // needs is reported when the function has been verified, so each write
 // records the targets it could not do without.
+//
+// What a write does in each region must be covered by some listed target,
+// which need not be the same for every region: a write of a whole struct is
+// allowed when each of its fields is listed.
 func (v *fnVerifier) checkWrite(st *state, guard []*logic.Term, w written, pos token.Pos, what string) {
-	if len(w.keys) == 0 {
+	if len(w.parts) == 0 {
 		return
 	}
 	created := logic.Le(v.entryBrk, w.ref)
+	covers := make([][]stretch, len(v.frame))
 	var candidates []int
-	var allowed []*logic.Term
 	for i, t := range v.frame {
-		if !t.reaches(w.keys) || (t.lo == nil) != (w.lo == nil) {
-			continue
-		}
-		candidates = append(candidates, i)
-		if t.lo == nil {
-			allowed = append(allowed, logic.Eq(w.ref, t.ref))
-		} else {
-			allowed = append(allowed, logic.And(logic.Eq(w.ref, t.ref), logic.Le(t.lo, w.lo), logic.Le(w.hi, t.hi)))
+		covers[i] = t.stretches()
+		if slices.ContainsFunc(covers[i], func(c stretch) bool {
+			return slices.ContainsFunc(w.parts, func(part stretch) bool { return part.key == c.key })
+		}) {
+			candidates = append(candidates, i)
 		}
 	}
-	goal := logic.Or(append([]*logic.Term{created}, allowed...)...)
+	// allowed states that the write is covered without the target left out.
+	allowed := func(without int) *logic.Term {
+		whole := []*logic.Term{}
+		for _, part := range w.parts {
+			var by []*logic.Term
+			for _, i := range candidates {
+				for _, c := range covers[i] {
+					switch {
+					case i == without || c.key != part.key || (c.lo == nil) != (part.lo == nil):
+					case c.lo == nil:
+						by = append(by, logic.Eq(w.ref, v.frame[i].ref))
+					default:
+						by = append(by, logic.And(logic.Eq(w.ref, v.frame[i].ref), logic.Le(c.lo, part.lo), logic.Le(part.hi, c.hi)))
+					}
+				}
+			}
+			whole = append(whole, logic.Or(by...))
+		}
+		return logic.Or(created, logic.And(whole...))
+	}
+	goal := allowed(-1)
 	if !v.prove(st, guard, goal) {
 		for _, i := range candidates {
 			v.used[i] = true
@@ -399,9 +456,8 @@ func (v *fnVerifier) checkWrite(st *state, guard []*logic.Term, w written, pos t
 	if len(candidates) == 0 || v.quickly(st, guard, created) {
 		return
 	}
-	for n, i := range candidates {
-		others := slices.Delete(slices.Clone(allowed), n, n+1)
-		if len(candidates) == 1 || !v.quickly(st, guard, logic.Or(append([]*logic.Term{created}, others...)...)) {
+	for _, i := range candidates {
+		if !v.quickly(st, guard, allowed(i)) {
 			v.used[i] = true
 		}
 	}
@@ -409,9 +465,7 @@ func (v *fnVerifier) checkWrite(st *state, guard []*logic.Term, w written, pos t
 
 // reach describes a target as a write of everything it covers.
 func (t target) reach() written {
-	w := written{ref: t.ref, lo: t.lo, hi: t.hi}
-	t.regions(func(key string, _ logic.Sort) { w.keys = append(w.keys, key) })
-	return w
+	return written{ref: t.ref, parts: t.stretches()}
 }
 
 // havoc forgets what a target holds: a call that may write it has run.

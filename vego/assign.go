@@ -164,9 +164,9 @@ func (v *fnVerifier) lvalue(e ast.Expr, st *state, guard []*logic.Term) lvalue {
 	return lv
 }
 
-// stretch returns the positions the cells of a place cover, counted like the
+// bounds returns the positions the cells of a place cover, counted like the
 // cells themselves.
-func stretch(cells []cell) (lo, hi int64) {
+func bounds(cells []cell) (lo, hi int64) {
 	for i, c := range cells {
 		if i == 0 || c.off < lo {
 			lo = c.off
@@ -174,19 +174,6 @@ func stretch(cells []cell) (lo, hi int64) {
 		hi = max(hi, c.off+1)
 	}
 	return lo, hi
-}
-
-// reach describes a placeMem as a write.
-func (lv lvalue) reach() written {
-	w := written{ref: lv.ref}
-	for _, c := range lv.cells {
-		if !slices.Contains(w.keys, c.key) {
-			w.keys = append(w.keys, c.key)
-		}
-	}
-	lo, hi := stretch(lv.cells)
-	w.lo, w.hi = logic.Add(lv.at, logic.IntLit(lo)), logic.Add(lv.at, logic.IntLit(hi))
-	return w
 }
 
 // load returns the current value of an assignment target without evaluating
@@ -233,7 +220,7 @@ func (v *fnVerifier) store(lv lvalue, val value, st *state) {
 		// A variable that lives in memory was created by this function,
 		// which may therefore write it.
 		if lv.box == nil {
-			v.checkWrite(st, nil, lv.reach(), lv.pos, lv.text+" is assigned")
+			v.checkWrite(st, nil, written{ref: lv.ref, parts: stretchesOf(lv.cells, lv.at)}, lv.pos, lv.text+" is assigned")
 		}
 		v.put(st, lv.cells, lv.ref, lv.at, val)
 	case placeMap:
@@ -401,7 +388,11 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		next := st.clone()
 		next.assume(inPlace)
 		start, end := v.elementAt(base, t, length), v.elementAt(base, t, grown)
-		v.checkWrite(next, nil, written{keys: keys, ref: ref, lo: start, hi: end}, call.Pos(),
+		into := written{ref: ref}
+		for _, key := range keys {
+			into.parts = append(into.parts, stretch{key, start, end})
+		}
+		v.checkWrite(next, nil, into, call.Pos(),
 			fmt.Sprintf("append may write into the capacity of %s", types.ExprString(call.Args[0])))
 		for j, element := range added {
 			v.put(next, cells, ref, logic.Add(start, logic.IntLit(int64(j)*step)), element)

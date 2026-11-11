@@ -681,3 +681,79 @@ func MakeNothings(n int) int {
 }
 
 //@ Ensures result = n
+
+// Wired has a field of a type that is not modelled. The field cannot be
+// used, but it is part of the struct all the same.
+type Wired struct {
+	X int
+	C chan int
+}
+
+// OverwriteWired replaces the whole struct, and with it the field that is
+// not modelled, which the clause does not list.
+//
+// @ Requires p != nil
+// @ Modifies p.X
+func OverwriteWired(p *Wired) {
+	*p = Wired{X: 1} // want `vego: \*p is assigned, which OverwriteWired may not modify; list it in a //@ Modifies clause`
+}
+
+//@ Ensures p.X' = 1
+
+// OverwriteWiredListed lists the struct.
+//
+// @ Requires p != nil
+// @ Modifies p
+func OverwriteWiredListed(p *Wired) {
+	*p = Wired{X: 1}
+}
+
+//@ Ensures p.X' = 1
+
+// SetWiredX writes the one field it lists.
+//
+// @ Requires p != nil
+// @ Modifies p.X
+func SetWiredX(p *Wired) {
+	p.X = 1
+}
+
+//@ Ensures p.X' = 1
+
+// CopyWired copies a struct with such a field through a call that may
+// write all of it, which the caller did not list.
+//
+// @ Requires p != nil
+// @ Modifies p.X
+func CopyWired(p *Wired) {
+	OverwriteWiredListed(p) // want `vego: OverwriteWiredListed may modify p, which CopyWired may not modify; list it in a //@ Modifies clause`
+}
+
+// EachField lists the fields of a struct one by one and then writes the
+// struct as a whole.
+//
+// @ Requires p != nil
+// @ Modifies p.X, p.Y
+func EachField(p *Point) {
+	*p = Point{X: 1, Y: 2}
+}
+
+//@ Ensures p.X' = 1 And p.Y' = 2
+
+// OneOfTwoFields lists only one of them.
+//
+// @ Requires p != nil
+// @ Modifies p.X
+func OneOfTwoFields(p *Point) {
+	*p = Point{X: 1, Y: 2} // want `vego: \*p is assigned, which OneOfTwoFields may not modify; list it in a //@ Modifies clause`
+}
+
+// SpareField lists a field that the function never writes.
+//
+// @ Requires p != nil
+// @ Modifies p.X, p.Y // want `vego: Modifies lists p\.Y, but SpareField never needs to modify it.*`
+func SpareField(p *Point) {
+	p.X = 1
+}
+
+//@ Ensures p.X' = 1
