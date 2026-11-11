@@ -422,12 +422,24 @@ type failureSource struct {
 	known   int
 }
 
-// mentions reports whether a term contains a constant with one of the names.
-func mentions(t *logic.Term, names map[string]bool) bool {
+// estranged returns a term with every constant of the given names replaced
+// by a constant nothing is known about, and reports whether there was one.
+func estranged(t *logic.Term, names map[string]bool) (*logic.Term, bool) {
 	if t.Op == logic.OpConst && names[t.Name] {
-		return true
+		return logic.Const(t.Name+" otherwise", t.Sort), true
 	}
-	return slices.ContainsFunc(t.Args, func(arg *logic.Term) bool { return mentions(arg, names) })
+	changed := false
+	args := make([]*logic.Term, len(t.Args))
+	for i, arg := range t.Args {
+		replaced, did := estranged(arg, names)
+		args[i], changed = replaced, changed || did
+	}
+	if !changed {
+		return t, false
+	}
+	copied := *t
+	copied.Args = args
+	return &copied, true
 }
 
 // failure is a return of an error that may not be nil, with the conditions
@@ -448,8 +460,10 @@ type failure struct {
 // call's error, which is proved, so that it also holds for an error that
 // was kept in memory in between; or when it returns an error on a path that
 // was chosen by what the call returned: the condition of some branch taken
-// since the call mentions one of its results. What a check or a type adds
-// to the state is no such condition. Inside a loop neither can be seen once
+// since the call depends on one of its results. It depends on them when it
+// can no longer be proved once they are replaced by values nothing is known
+// about; a condition that merely reads memory next to where a result lies
+// still can. What a check or a type adds to the state is no such condition. Inside a loop neither can be seen once
 // the loop has forgotten the variable that held the error, so an error
 // forgotten by a loop counts for the calls made in loops.
 func (v *fnVerifier) tieFailures() {
@@ -459,8 +473,10 @@ func (v *fnVerifier) tieFailures() {
 			if (source.inLoop && v.forgotten[f.err.Name]) || solver.Prove(f.facts, logic.Eq(f.err, source.err), opts) == solver.Proved {
 				return true
 			}
-			return source.known <= len(f.path) &&
-				slices.ContainsFunc(f.path[source.known:], func(fact *logic.Term) bool { return mentions(fact, source.outputs) })
+			return source.known <= len(f.path) && slices.ContainsFunc(f.path[source.known:], func(cond *logic.Term) bool {
+				other, mentioned := estranged(cond, source.outputs)
+				return mentioned && solver.Prove(f.facts, other, opts) != solver.Proved
+			})
 		})
 		switch {
 		case !tied:

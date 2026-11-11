@@ -679,3 +679,29 @@ func KeepsOtherFailure() error { // want `the contract of KeepsOtherFailure woul
 }
 
 //@ Ensures True
+
+// BranchesOnOwnError keeps the error of a call in memory next to an error
+// of its own, and decides by its own.
+func BranchesOnOwnError() error { // want `the contract of BranchesOnOwnError would also be met by a function that always returns an error`
+	err := external()
+	saved := []error{err, errAlways}
+	if saved[1] != nil {
+		return errAlways
+	}
+	return nil
+}
+
+//@ Ensures True
+
+// BranchesOnKeptError decides by the error of the call, read back from
+// memory.
+func BranchesOnKeptError() error {
+	err := external()
+	saved := []error{err, errAlways}
+	if saved[0] != nil {
+		return errAlways
+	}
+	return nil
+}
+
+//@ Ensures True
