@@ -235,11 +235,15 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 	// The operand is followed through the embedded structs the method is
 	// promoted from. where is the position of the current struct while it
 	// is known to lie in memory.
+	// The operand is evaluated once, as Go does: a struct that lies in
+	// memory is located, and its value read from there.
 	t := v.info.TypeOf(sel.X)
-	cur := v.eval(sel.X, st, guard)
-	var where value
+	var cur, where value
 	if _, isStruct := t.Underlying().(*types.Struct); isStruct && v.place(sel.X).kind == placeMem {
-		where = v.addressOf(sel.X, st, guard)
+		lv := v.lvalue(sel.X, st, guard)
+		where, cur = value{lv.ref, logic.Add(lv.at, logic.IntLit(lv.offset))}, v.load(lv, st)
+	} else {
+		cur = v.eval(sel.X, st, guard)
 	}
 	path := selection.Index()
 	for _, index := range path[:len(path)-1] {

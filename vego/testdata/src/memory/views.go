@@ -774,3 +774,31 @@ func ReturnAssignsWrong() (r Point, p *Point) {
 }
 
 //@ Ensures r.X = 1 And p.X = 0
+
+// pick returns some index below two; which one is not said.
+func pick() int { return 1 }
+
+//@ Ensures 0 <= result < 2
+
+// IncPicked calls a method on an element chosen by a call. The call is
+// evaluated once, so exactly one counter advances.
+//
+// @ Requires |cs| = 2 And cs[0].n = 0 And cs[0].limit = 5 And cs[1].n = 0 And cs[1].limit = 5
+// @ Modifies cs
+func IncPicked(cs []Counter) int {
+	cs[pick()].Inc()
+	return cs[0].n + cs[1].n
+}
+
+//@ Ensures result = 1
+
+// IncPickedWrong claims to know which one.
+//
+// @ Requires |cs| = 2 And cs[0].n = 0 And cs[0].limit = 5 And cs[1].n = 0 And cs[1].limit = 5
+// @ Modifies cs
+func IncPickedWrong(cs []Counter) int {
+	cs[pick()].Inc()
+	return cs[1].n // want `vego: postcondition may not hold: result = 1`
+}
+
+//@ Ensures result = 1
