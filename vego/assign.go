@@ -411,7 +411,7 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		// The new array holds the old elements and the added ones. What
 		// lies in its capacity beyond them is not said: it is certainly not
 		// what followed the old elements in their array.
-		moved := v.alloc(next, true)
+		moved := v.alloc(next, v.pass.TypesSizes.Sizeof(elem) > 0)
 		for _, key := range keys {
 			old := logic.Select(next.mem.region(key, logic.SeqOf(logic.SeqOf(sorts[key]))), ref)
 			row := v.fresh("moved", logic.SeqOf(sorts[key]))

@@ -932,3 +932,54 @@ func PassMaybeNil(p *Point) {
 }
 
 //@ Ensures True
+
+// Boxed holds an array, which a slice can be a second view of. A struct
+// like that is not modelled.
+type Boxed struct{ A [1]int }
+
+// ResetBoxed overwrites the struct, and with it the array that the slice
+// may be a view of.
+//
+// @ Requires p != nil And |s| = 1 And s[0] = 7
+// @ Modifies p
+func ResetBoxed(p *Boxed, s []int) int { // want `vego: cannot verify ResetBoxed: parameter p has unsupported type \*memory\.Boxed`
+	*p = Boxed{}
+	return s[0]
+}
+
+//@ Ensures result = 7
+
+// Padded has an array nobody can name, which is no obstacle.
+type Padded struct {
+	X int
+	_ [4]int
+}
+
+// SetPadded uses such a struct.
+//
+// @ Requires p != nil
+// @ Modifies p
+func SetPadded(p *Padded) {
+	*p = Padded{X: 1}
+}
+
+//@ Ensures p.X' = 1
+
+// Nothings returns pointers into two arrays of elements without size,
+// which may be at one address.
+func Nothings() (p, q *struct{}) {
+	a := make([]struct{}, 1)
+	b := make([]struct{}, 1)
+	return &a[0], &b[0]
+}
+
+//@ Ensures p != q // want `vego: in Ensures annotation: pointers to values of size zero may or may not be equal, so they can only be compared with nil`
+
+// NothingsNotNil compares such pointers with nil only.
+func NothingsNotNil() (p, q *struct{}) {
+	a := make([]struct{}, 1)
+	b := make([]struct{}, 1)
+	return &a[0], &b[0]
+}
+
+//@ Ensures p != nil And q != nil

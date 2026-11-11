@@ -208,8 +208,19 @@ func IsNil(err *Term) *Term {
 }
 
 // Pair returns a pointer into an allocation at a position. It is not a term
-// the solver knows; RefEq takes it apart.
-func Pair(ref, at *Term) *Term { return node(OpPair, Ref, ref, at) }
+// the solver knows; RefEq takes it apart. A nil position marks a pointer
+// that can be compared with nil but not with another pointer.
+func Pair(ref, at *Term) *Term {
+	if at == nil {
+		return node(OpPair, Ref, ref)
+	}
+	return node(OpPair, Ref, ref, at)
+}
+
+// Comparable reports whether RefEq can compare the two.
+func Comparable(a, b *Term) bool {
+	return a.Op != OpPair || b.Op != OpPair || (len(a.Args) == 2 && len(b.Args) == 2)
+}
 
 // RefEq returns the formula stating that two pointers, or a pointer and
 // nil, are equal: both nil, or into the same allocation at the same

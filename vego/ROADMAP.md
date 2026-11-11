@@ -33,9 +33,10 @@ Decisions:
 Not built yet:
 
 - **Checking a trusted `modifies` against source.** For a trusted function whose source is available, analyse the body and report a write the entry does not declare. This catches some wrong entries; it cannot certify one, because the analysis stops at assembly, `unsafe`, and calls through interfaces or function values. The trust report should say for each entry whether the check ran to completion.
+- **Arrays.** Until they are built, a struct that holds an array is not modelled at all, because `s.arr[:]` is a slice into the struct and a hidden field would not show that writing the struct changes the slice. The plan: an array field of `N` elements of a single value occupies `N` positions in the region of its element type, starting at the field's byte offset, which cannot collide with a neighbour since every element takes at least a byte; an array of structs lies at byte offsets like a slice of structs. A cell then covers a run of positions, and an array value is a sequence, as a string is.
 - **Pointers to anything but a struct**, such as `*int` or `*string`. A field of type `int` lives in the region of its struct and field, and an element of a `[]int` in the region of `int` elements, so an `*int` could point into either and would have to say which. The way to build it is to key the regions of single values by their type alone, at byte offsets, for all structs and slices; fields of different structs then share a region and are told apart by position, which costs the solver the separation it now gets for free. Worth doing once it is measured.
 - **Linked structures** such as lists and trees. They can be built and read, but a loop that walks one forgets every node the function may modify, and there is no way to state an invariant over all nodes.
-- **Interfaces** other than `error`, function values, arrays, `append(s, t...)`, `copy`, and comparing structs.
+- **Interfaces** other than `error`, function values, `append(s, t...)`, `copy`, and comparing structs.
 - **Letting a function accept overlapping slices.**
 - **Runs of elements in `Modifies`**, such as all the structs a slice of pointers refers to.
 

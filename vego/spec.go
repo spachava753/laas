@@ -251,7 +251,12 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 	if _, single := sortOf(found.typ); single {
 		return found.val[0], nil
 	}
-	if _, isPointer := pointee(found.typ); isPointer {
+	if object, isPointer := pointee(found.typ); isPointer {
+		// Two pointers to values without size may or may not be equal, so
+		// such a pointer can only be compared with nil.
+		if e.v.pass.TypesSizes.Sizeof(object) == 0 {
+			return logic.Pair(found.val[0], nil), nil
+		}
 		return logic.Pair(found.val[0], found.val[1]), nil
 	}
 	if isSlice(found.typ) {

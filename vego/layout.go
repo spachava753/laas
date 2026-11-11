@@ -110,14 +110,14 @@ func isError(t types.Type) bool {
 }
 
 // pointee returns the struct type a pointer refers to. Pointers to anything
-// else are not modelled.
+// else, and to a struct that is not modelled, are not modelled.
 func pointee(t types.Type) (types.Type, bool) {
 	pointer, ok := t.Underlying().(*types.Pointer)
 	if !ok {
 		return nil, false
 	}
 	_, ok = pointer.Elem().Underlying().(*types.Struct)
-	return pointer.Elem(), ok
+	return pointer.Elem(), ok && !holdsArray(pointer.Elem())
 }
 
 // elemType returns the element type of a slice type.
@@ -165,6 +165,9 @@ func layoutOf(t types.Type) ([]leaf, bool) {
 			{"#len", logic.Int, t, partLen}, {"#cap", logic.Int, t, partCap},
 		}, true
 	case *types.Struct:
+		if holdsArray(t) {
+			return nil, false
+		}
 		var leaves []leaf
 		for i := range u.NumFields() {
 			field := u.Field(i)
@@ -183,6 +186,24 @@ func layoutOf(t types.Type) ([]leaf, bool) {
 		return leaves, true
 	}
 	return nil, false
+}
+
+// holdsArray reports whether a value of the type has an array with elements
+// inside it: it is one, or a struct with such a field. A slice of the array
+// is a second view of that memory, which a hidden leaf would not show, so
+// such a struct is not modelled at all. A blank field cannot be sliced.
+func holdsArray(t types.Type) bool {
+	switch u := t.Underlying().(type) {
+	case *types.Array:
+		return u.Len() != 0
+	case *types.Struct:
+		for field := range u.Fields() {
+			if field.Name() != "_" && holdsArray(field.Type()) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // sortOf maps a Go type whose values are a single leaf to the sort of that

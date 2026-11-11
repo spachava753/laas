@@ -315,7 +315,9 @@ func (v *fnVerifier) alloc(st *state, sized bool) *logic.Term {
 // holds zero values, puts the given elements at its start, and returns a
 // slice of the array with the given length and capacity.
 func (v *fnVerifier) allocSlice(st *state, elem types.Type, elements []value, length, capacity *logic.Term) value {
-	ref := v.alloc(st, true)
+	// An array of elements without size takes no memory and need not be
+	// apart from any other.
+	ref := v.alloc(st, v.pass.TypesSizes.Sizeof(elem) > 0)
 	cells, leaves := v.cellsOf(elem), mustLayout(elem)
 	zeroed := map[string]bool{}
 	for i, c := range cells {

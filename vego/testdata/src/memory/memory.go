@@ -1227,11 +1227,11 @@ type Number = int
 func SpellingsShare() int {
 	a := []struct {
 		X int
-		C [1]Number
+		C chan Number
 	}{{X: 0}}
 	b := []struct {
 		X int
-		C [1]int
+		C chan int
 	}(a)
 	b[0].X = 1
 	return a[0].X // want `vego: postcondition may not hold: result = 0`

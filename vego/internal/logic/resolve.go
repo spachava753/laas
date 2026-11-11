@@ -409,6 +409,8 @@ func (s *scope) relation(op string, a, b *Term) *Term {
 		fail("an error can only be compared with nil")
 	case a.Sort == Bool && equality:
 		result = Iff(a, b)
+	case a.Sort == Ref && equality && !Comparable(a, b):
+		fail("pointers to values of size zero may or may not be equal, so they can only be compared with nil")
 	case a.Sort == Ref && equality:
 		result = RefEq(a, b)
 	case a.Sort != Int:
