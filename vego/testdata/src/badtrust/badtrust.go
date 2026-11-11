@@ -16,7 +16,7 @@ func Wrap() int {
 
 // UsesFine relies on an entry of the same file.
 func UsesFine() int {
-	return fine() // want `the trusted contract of badtrust.fine \(defective-trusted.yaml:11\) cannot be used: defective-trusted.yaml:9: "requires" occurs more than once` `cannot verify UsesFine: fine has a contract that could not be understood`
+	return fine() // want `the trusted contract of badtrust.fine \(defective-trusted.yaml:\d+\) cannot be used: defective-trusted.yaml:9: "requires" occurs more than once` `cannot verify UsesFine: fine has a contract that could not be understood`
 }
 
 //@ Ensures True

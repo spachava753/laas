@@ -5,8 +5,10 @@ trusted:
     reason: Documented to return the decimal representation of i, which has at least one digit.
     ensures:
       - "|result| >= 1"
+    modifies: []
 
   strconv.Atoi:
     reason: >-
       Documented to parse a decimal integer and to report a syntax or range
       error otherwise. Which strings it accepts is not modelled.
+    modifies: []

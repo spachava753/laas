@@ -184,8 +184,10 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 		}
 		return list
 	}
+	listed := false
 	for i := 0; i+1 < len(body.Content); i += 2 {
 		field, value := body.Content[i], body.Content[i+1]
+		listed = listed || field.Value == "modifies"
 		switch field.Value {
 		case "reason":
 			if value.Kind != yaml.ScalarNode {
@@ -208,6 +210,12 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 	}
 	if entry.reason == "" {
 		f.problem(name.Line, "the entry for %s needs a reason saying why the contract is believed", entry.key)
+	}
+	// That a function writes nothing is a claim like any other, and has to
+	// be made rather than left out.
+	if !listed {
+		f.problem(name.Line, "the entry for %s needs a modifies list saying what the function may write; "+
+			"write \"modifies: []\" if it writes nothing a caller can see", entry.key)
 	}
 }
 
@@ -493,6 +501,24 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 		}
 		c := &clause{kind: "modifies", text: item.text, pos: pv.trustPos(entry.file, item.line, item.col), res: pv.plain}
 		fn.modifies = append(fn.modifies, newModTargets(targets, c)...)
+	}
+	// A primed path describes memory after the call. If modifies lists
+	// nothing reached from the same parameter, that memory is as it was,
+	// and a clause saying otherwise could only contradict the caller.
+	for _, c := range fn.ensures {
+		c.node.Walk(func(n *logic.Node) {
+			root := n
+			for root.Kind == logic.NField || root.Kind == logic.NIndex {
+				root = root.Kids[0]
+			}
+			if !n.Primed || root.Kind != logic.NIdent {
+				return
+			}
+			if !slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.name == root.Name }) {
+				fn.defect("its ensures %q describes %s after the call, but its modifies lists nothing reached from %s, so the call cannot have changed it",
+					c.text, root.Name, root.Name)
+			}
+		})
 	}
 	pv.checkTrusted(fn)
 	return fn

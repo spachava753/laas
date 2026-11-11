@@ -5,3 +5,4 @@ trusted:
     reason: Documented to return the number of runes in s; every rune occupies at least one byte.
     ensures:
       - "0 <= n And n <= |s|"
+    modifies: []

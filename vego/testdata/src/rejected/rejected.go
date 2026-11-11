@@ -216,3 +216,13 @@ func BadSyntax(c *cell) {
 func BadKind(c *cell) {
 	c.value = 1
 }
+
+// Impossible has a precondition nothing satisfies, from which anything
+// would follow.
+//
+// @ Requires |A| < 0
+func Impossible(A []int) int { // want `vego: nothing can satisfy the Requires clauses of Impossible together with what the types of its parameters guarantee, so verifying it would prove nothing`
+	return A[7]
+}
+
+//@ Ensures result = 42 And result = 43

@@ -296,6 +296,12 @@ func (v *fnVerifier) verify() {
 			v.bind(st, variable, st.vals[variable])
 		}
 	}
+	// A precondition that nothing satisfies would make every claim about
+	// the function provable.
+	if v.quickly(st, nil, logic.False()) {
+		v.report(fn.decl.Name.Pos(), "nothing can satisfy the Requires clauses of %s together with what the types of its parameters guarantee, "+
+			"so verifying it would prove nothing", fn.obj.Name())
+	}
 	if fn.measure != nil {
 		v.measure = v.intTerm(fn.measure, &specEnv{v: v, sink: st, fn: fn, args: v.entry, now: memory{}})
 		v.check(st, nil, logic.Le(logic.IntLit(0), v.measure), fn.decl.Name.Pos(),

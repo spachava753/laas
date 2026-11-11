@@ -108,7 +108,7 @@ func contradictory() int { return 0 }
 
 // UsesContradiction would prove anything from a contract that cannot hold.
 func UsesContradiction() (n int) {
-	return contradictory() // want `vego:\ cannot\ verify\ UsesContradiction:\ contradictory\ has\ a\ contract\ that\ could\ not\ be\ understood` `vego:\ the\ trusted\ contract\ of\ trust\.contradictory\ \(trusted\.yaml:59\)\ cannot\ be\ used:\ it\ contradicts\ itself,\ so\ anything\ could\ be\ proved\ from\ it`
+	return contradictory() // want `vego:\ cannot\ verify\ UsesContradiction:\ contradictory\ has\ a\ contract\ that\ could\ not\ be\ understood` `vego:\ the\ trusted\ contract\ of\ trust\.contradictory\ \(trusted\.yaml:\d+\)\ cannot\ be\ used:\ it\ contradicts\ itself,\ so\ anything\ could\ be\ proved\ from\ it`
 }
 
 //@ Ensures n = 42
@@ -118,14 +118,14 @@ func wrongModifies(count int) {}
 // UsesWrongModifies relies on a contract whose modifies makes no sense.
 func UsesWrongModifies() {
 	//@ Assert True
-	wrongModifies(1) // want `vego:\ cannot\ verify\ UsesWrongModifies:\ wrongModifies\ has\ a\ contract\ that\ could\ not\ be\ understood` `vego:\ the\ trusted\ contract\ of\ trust\.wrongModifies\ \(trusted\.yaml:65\)\ cannot\ be\ used:\ in\ its\ modifies\ \"count\":\ count\ is\ passed\ by\ value,\ so\ the\ caller\ cannot\ see\ a\ change\ to\ it`
+	wrongModifies(1) // want `vego:\ cannot\ verify\ UsesWrongModifies:\ wrongModifies\ has\ a\ contract\ that\ could\ not\ be\ understood` `vego:\ the\ trusted\ contract\ of\ trust\.wrongModifies\ \(trusted\.yaml:\d+\)\ cannot\ be\ used:\ in\ its\ modifies\ \"count\":\ count\ is\ passed\ by\ value,\ so\ the\ caller\ cannot\ see\ a\ change\ to\ it`
 }
 
 func wrongName(count int) int { return count }
 
 // UsesWrongName relies on a contract that names something that is not there.
 func UsesWrongName() (n int) {
-	return wrongName(1) // want `vego:\ cannot\ verify\ UsesWrongName:\ wrongName\ has\ a\ contract\ that\ could\ not\ be\ understood` `vego:\ the\ trusted\ contract\ of\ trust\.wrongName\ \(trusted\.yaml:69\)\ cannot\ be\ used:\ in\ its\ ensures\ "total\ >=\ 0":\ unknown\ name\ total`
+	return wrongName(1) // want `vego:\ cannot\ verify\ UsesWrongName:\ wrongName\ has\ a\ contract\ that\ could\ not\ be\ understood` `vego:\ the\ trusted\ contract\ of\ trust\.wrongName\ \(trusted\.yaml:\d+\)\ cannot\ be\ used:\ in\ its\ ensures\ "total\ >=\ 0":\ unknown\ name\ total`
 }
 
 //@ Ensures n >= 0
@@ -207,7 +207,7 @@ const realMax = int(^uint(0) >> 1)
 //
 // @ Requires n > realMax/2
 func HugeRepeat(n int) string {
-	return strings.Repeat("xx", n) // want `precondition of Repeat may not hold: \|s\| \* count <= MaxInt`
+	return strings.Repeat("xx", n) // want `precondition of Repeat may not hold: \|s\| \* count <= MaxAlloc`
 }
 
 //@ Ensures False
@@ -467,3 +467,64 @@ func AlwaysFailsAfterReading() error { // want `the contract of AlwaysFailsAfter
 }
 
 //@ Ensures True
+
+// HugeRepeat asks for a string longer than any allocation, which panics.
+func RepeatBeyondMemory() int {
+	s := strings.Repeat("ab", 1<<50) // want `vego: precondition of Repeat may not hold: \|s\| \* count <= MaxAlloc`
+	return len(s)
+}
+
+//@ Ensures result = 42
+
+// SmallRepeat stays under the limit.
+//
+// @ Requires 0 <= n <= 1000
+func SmallRepeat(n int) int {
+	s := strings.Repeat("ab", n)
+	return len(s)
+}
+
+//@ Ensures result = 2*n
+
+func claimsNegative(n int) {}
+
+// ContradictedHere calls a function whose contract cannot be true of the
+// argument it passes.
+func ContradictedHere() int {
+	claimsNegative(5) // want `vego: the trusted contract of claimsNegative cannot be true of this call: what it promises contradicts what is known here`
+	return 0
+}
+
+//@ Ensures result = 42
+
+// NotContradicted passes an argument the contract can be true of.
+func NotContradicted() int {
+	claimsNegative(-5)
+	return 0
+}
+
+//@ Ensures result = 0
+
+// DeadContradiction calls it on a path that is never taken.
+//
+// @ Requires n < 0
+func DeadContradiction(n int) int {
+	if n > 0 {
+		claimsNegative(5)
+	}
+	return 0
+}
+
+//@ Ensures result = 0
+
+func claimsChange(xs []int) {}
+
+// UsesClaimsChange relies on a contract that says memory changed which it
+// does not list.
+//
+// @ Requires |xs| > 0 And xs[0] = 1
+func UsesClaimsChange(xs []int) {
+	claimsChange(xs) // want `vego: cannot verify UsesClaimsChange: claimsChange has a contract that could not be understood` `vego: the trusted contract of trust.claimsChange \(trusted.yaml:\d+\) cannot be used: its ensures "xs'\[0\] = 7" describes xs after the call, but its modifies lists nothing reached from xs, so the call cannot have changed it`
+}
+
+//@ Ensures xs'[0] = 99

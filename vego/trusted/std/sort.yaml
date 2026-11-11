@@ -11,6 +11,7 @@ trusted:
     reason: Documented to report whether the slice is sorted in increasing order.
     ensures:
       - "result <-> Forall i in [0, |x|) : Forall j in [i, |x|) : x[i] <= x[j]"
+    modifies: []
 
   sort.SearchInts:
     reason: >-
@@ -22,3 +23,4 @@ trusted:
       - "0 <= result And result <= |a|"
       - "a[0:result) < x"
       - "x <= a[result:|a|)"
+    modifies: []

@@ -30,6 +30,17 @@ const (
 	NStr              // a string literal; Name holds its value
 )
 
+// Walk calls visit for the node and everything below it.
+func (n *Node) Walk(visit func(*Node)) {
+	if n == nil {
+		return
+	}
+	visit(n)
+	for _, kid := range n.Kids {
+		kid.Walk(visit)
+	}
+}
+
 // Node is an untyped syntax tree node of an annotation clause. Start and End
 // are byte offsets into the clause text.
 type Node struct {

@@ -7,6 +7,8 @@ trusted:
     reason: Safe with a non-zero divisor.
     requires: ["x != 0"]
     requires: [] # // want `"requires" occurs more than once in the same mapping`
+    modifies: []
 
   badtrust.fine:
     reason: Nothing wrong with this entry itself.
+    modifies: []

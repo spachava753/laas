@@ -9,6 +9,7 @@ trusted:
 
   effects.unknown:
     reason: Test helper whose result is deliberately unknown.
+    modifies: []
 
   effects.indirectWrite:
     reason: Test helper that writes through a pointer.
@@ -24,26 +25,32 @@ trusted:
 
   values.stat:
     reason: Test helper that asks the file system.
+    modifies: []
 
   values.external:
     reason: Test helper standing for a call whose failure cannot be predicted.
+    modifies: []
 
   values.describe:
     reason: Test helper that reads an error.
+    modifies: []
 
   values.consume:
     reason: Test helper that reads an error.
+    modifies: []
 
   trust.readConfig:
     reason: Stands for reading a file; the contract only says what success means.
     ensures:
       - "err = nil -> size >= 0"
+    modifies: []
 
   trust.parsePort:
     reason: Stands for a parser whose success is determined by its input.
     ensures:
       - "0 <= n <= 65535 -> err = nil"
       - "err = nil -> port = n"
+    modifies: []
 
   trust.fill:
     reason: Stands for an unverifiable function that overwrites its slice.
@@ -55,12 +62,14 @@ trusted:
     reason: Stands for an unverifiable function that only reads its slice.
     ensures:
       - "result >= 0"
+    modifies: []
 
   trust.contradictory:
     reason: A contract nobody can satisfy.
     ensures:
       - "result > 0"
       - "result < 0"
+    modifies: []
 
   trust.wrongModifies:
     reason: Lists something that is not a slice parameter.
@@ -70,46 +79,56 @@ trusted:
     reason: Mentions a name the function does not have.
     ensures:
       - "total >= 0"
+    modifies: []
 
   trust.makesSlice:
     reason: Returns a slice.
+    modifies: []
 
   trust.Verified:
     reason: This function is also annotated in source.
     ensures:
       - "result = 0"
+    modifies: []
 
   sort.IntsAreSorted:
     reason: Project override of a shipped contract, deliberately saying nothing.
+    modifies: []
 
   rejected.unverified:
     reason: Test helper that hands its argument back.
+    modifies: []
 
   trust.usesPredicate:
     reason: Mentions a predicate, which a trusted contract may not.
     ensures:
       - "good(result)"
+    modifies: []
 
   trust.impossibleString:
     reason: Promises a byte value that does not exist.
     ensures:
       - "|result| = 1"
       - "result[0] = 256"
+    modifies: []
 
   trust.take:
     reason: Mentions a parameter of a type vego does not model.
     ensures:
       - "result = MaxInt"
+    modifies: []
 
   trust.ready:
     reason: Always succeeds; its first result has a type vego does not model.
     ensures:
       - "err = nil"
+    modifies: []
 
   trust.takeAny:
     reason: Takes old of a parameter of a type vego does not model.
     ensures:
       - "result = old(x)"
+    modifies: []
 
   trust.readyWith:
     reason: Succeeds whenever the slice it only reads starts with zero.
@@ -117,7 +136,8 @@ trusted:
       - "|a| = 1"
       - "a[0] = 0"
     ensures:
-      - "a'[0] = 0 -> err = nil"
+      - "a[0] = 0 -> err = nil"
+    modifies: []
 
   trust.readyWriting:
     reason: Succeeds for a slice of one element, which it may overwrite.
@@ -129,16 +149,19 @@ trusted:
     reason: Succeeds whenever its byte result is not negative, which is always.
     ensures:
       - "value >= 0 -> err = nil"
+    modifies: []
 
   trust.maybeSigned:
     reason: Succeeds only when its result is not negative.
     ensures:
       - "value >= 0 -> err = nil"
+    modifies: []
 
   trust.readyAtLeast:
     reason: Succeeds when its byte result is at least n, which it always is for n = 0.
     ensures:
       - "value >= n -> err = nil"
+    modifies: []
 
   trust.readyBytes:
     reason: Succeeds when the first byte it leaves is not negative, which is always.
@@ -154,15 +177,18 @@ trusted:
       - "e = nil"
     ensures:
       - "err = nil"
+    modifies: []
 
   trust.readyLinked:
     reason: Returns zero, and succeeds whenever it returns zero.
     ensures:
       - "value = 0"
       - "value = 0 -> err = nil"
+    modifies: []
 
   trust.external:
     reason: Stands for a call whose failure cannot be predicted.
+    modifies: []
 
   trust.writesSixtyFive:
     reason: Writes the first byte and always succeeds.
@@ -178,6 +204,7 @@ trusted:
       - "|a| = 65"
     ensures:
       - "a[0] >= 0 -> err = nil"
+    modifies: []
 
   (*memory.Log).Write:
     reason: Test helper standing for a method that appends to its receiver and may fail.
@@ -192,11 +219,13 @@ trusted:
       - "l != nil"
     ensures:
       - "result = l.count"
+    modifies: []
 
   memory.newLog:
     reason: Test helper standing for a constructor.
     ensures:
       - "fresh(result) And result.count = 0"
+    modifies: []
 
   memory.grab:
     reason: Test helper whose modifies names something that is not there.
@@ -208,6 +237,7 @@ trusted:
       - "|a| = 65"
     ensures:
       - "(Forall k in [0, |a|) : a[k].X >= 0) -> result = nil"
+    modifies: []
 
   memory.readyBlob:
     reason: Test helper that succeeds when the bytes behind its pointer are bytes, which is always.
@@ -215,6 +245,7 @@ trusted:
       - "p != nil And |p.B| = 65"
     ensures:
       - "(Forall k in [0, |p.B|) : p.B[k] >= 0) -> result = nil"
+    modifies: []
 
   memory.readyNamed:
     reason: Test helper that succeeds when the bytes of the strings in its elements are bytes, which is always.
@@ -222,6 +253,7 @@ trusted:
       - "|a| = 65"
     ensures:
       - "(Forall k in [0, |a|) : Forall j in [0, |a[k].S|) : a[k].S[j] >= 0) -> result = nil"
+    modifies: []
 
   memory.readyRows:
     reason: Test helper that succeeds when the slices in its slice have lengths that are not negative, which is always.
@@ -229,6 +261,7 @@ trusted:
       - "|a| = 65"
     ensures:
       - "(Forall k in [0, |a|) : |a[k]| >= 0) -> result = nil"
+    modifies: []
 
   (*invariants.Log).write:
     reason: Test helper standing for an unverified method that changes its receiver.
@@ -240,3 +273,18 @@ trusted:
       - "|m| = 2"
     ensures:
       - "(Forall k in Z : m[k] >= 0) -> result = nil"
+    modifies: []
+
+  trust.claimsNegative:
+    reason: Test helper whose promise cannot be true of a positive argument.
+    ensures:
+      - "n < 0"
+    modifies: []
+
+  trust.claimsChange:
+    reason: Test helper that describes memory after the call without listing it.
+    requires:
+      - "|xs| > 0"
+    ensures:
+      - "xs'[0] = 7"
+    modifies: []

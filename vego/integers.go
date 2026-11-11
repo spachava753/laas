@@ -84,8 +84,13 @@ func (v *fnVerifier) checkFits(st *state, guard []*logic.Term, value *logic.Term
 
 // namedLimit resolves the names annotations may use for the limits of the
 // integer types, following package math: MaxInt, MinInt, MaxInt8 ... MaxInt64,
-// MinInt8 ... MinInt64, MaxUint, MaxUint8 ... MaxUint64.
+// MinInt8 ... MinInt64, MaxUint, MaxUint8 ... MaxUint64. MaxAlloc is the
+// largest number of bytes one allocation can have, which is what limits the
+// length of a string or of a slice of bytes.
 func (pv *pkgVerifier) namedLimit(name string) (*logic.Term, bool) {
+	if name == "MaxAlloc" {
+		return logic.BigLit(pv.maxAlloc()), true
+	}
 	kinds := map[string]types.BasicKind{
 		"Int": types.Int, "Int8": types.Int8, "Int16": types.Int16, "Int32": types.Int32, "Int64": types.Int64,
 		"Uint": types.Uint, "Uint8": types.Uint8, "Uint16": types.Uint16, "Uint32": types.Uint32, "Uint64": types.Uint64,

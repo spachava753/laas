@@ -7,8 +7,10 @@ trusted:
       - "n > 0"
     ensures:
       - "0 <= result And result < n"
+    modifies: []
 
   math/rand.Int:
     reason: Documented to return a non-negative number.
     ensures:
       - "result >= 0"
+    modifies: []

@@ -22,7 +22,8 @@ trusted:
     requires: ["|x| >= 0"]
     ensures: ["|x'| = |x|"]
 `, ""},
-		{"accepts an entry with only a reason", "version: 1\ntrusted:\n  os.Getpid:\n    reason: Documented.\n", ""},
+		{"accepts an entry that writes nothing", "version: 1\ntrusted:\n  os.Getpid:\n    reason: Documented.\n    modifies: []\n", ""},
+		{"requires a modifies list", "version: 1\ntrusted:\n  os.Getpid:\n    reason: Documented.\n", "needs a modifies list"},
 		{"requires a version", "trusted: {}\n", `missing "version: 1"`},
 		{"rejects another version", "version: 2\ntrusted: {}\n", "unsupported version"},
 		{"requires a reason", "version: 1\ntrusted:\n  os.Getpid:\n    ensures: [\"result >= 0\"]\n", "needs a reason"},

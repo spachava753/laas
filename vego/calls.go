@@ -182,8 +182,16 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		}
 	}
 	post := &specEnv{v: v, sink: st, fn: fn, args: args, results: results, now: before, post: st.mem, before: existed}
+	// Nobody has proved what a trusted contract promises. If the promise
+	// contradicts what is known at this call, everything after the call
+	// would be provable, so that is looked for and reported. A state that
+	// was contradictory already belongs to a path that is never taken.
+	dead := fn.trust == nil || v.quickly(st, guard, logic.False())
 	for _, c := range fn.ensures {
 		st.assume(logic.Implies(logic.And(guard...), v.calleeFormula(c, post)))
+	}
+	if !dead && v.quickly(st, guard, logic.False()) {
+		v.report(call.Pos(), "the trusted contract of %s cannot be true of this call: what it promises contradicts what is known here", name)
 	}
 	// A verified function has proved the invariants of what it hands back.
 	// A trusted one has proved nothing, so nothing is assumed of it.
