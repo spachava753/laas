@@ -1015,3 +1015,24 @@ func GrowPoints(q *Point) *Point {
 }
 
 //@ Ensures ~within(result, q)
+
+// TooManyNothings appends to a slice that already has as many elements as
+// an int can count, which panics.
+func TooManyNothings() int {
+	s := make([]struct{}, 9223372036854775807)
+	s = append(s, struct{}{}) // want `vego: .*may be more than can be allocated`
+	return 0
+}
+
+//@ Ensures result = 1
+
+// OneMoreNothing appends where there is room to count.
+//
+// @ Requires 0 <= n < 1000
+func OneMoreNothing(n int) int {
+	s := make([]struct{}, n)
+	s = append(s, struct{}{})
+	return len(s)
+}
+
+//@ Ensures result = n + 1
