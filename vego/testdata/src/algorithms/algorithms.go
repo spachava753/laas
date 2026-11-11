@@ -93,7 +93,7 @@ func Fill(A []int, value int) {
 
 // Zeros returns a slice of n zeros built with append.
 //
-// @ Requires n >= 0
+// @ Requires 0 <= n <= 1000000
 func Zeros(n int) (R []int) {
 	//@ Invariant 0 <= i <= n And |R| = i And R[0:i) = 0
 	//@ Variant n - i

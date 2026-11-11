@@ -34,7 +34,7 @@ func (v *fnVerifier) binary(op token.Token, x, y *logic.Term, t types.Type, pos 
 		v.unsupported(pos, fmt.Sprintf("operator %s is not supported here", op))
 	case x.Sort.IsSeq() && op == token.ADD:
 		joined := logic.Concat(x, y)
-		v.checkFits(st, guard, logic.Len(joined), types.Typ[types.Int], pos, "string length")
+		v.checkAlloc(st, guard, logic.Len(joined), types.Typ[types.Uint8], pos, "the joined string")
 		return joined
 	case x.Sort.IsSeq() && (op == token.EQL || op == token.NEQ):
 		same := logic.SeqEq(x, y, v.bound("k"))

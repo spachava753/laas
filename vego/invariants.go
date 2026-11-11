@@ -109,6 +109,7 @@ func (pv *pkgVerifier) invariantsOf(t types.Type) (set *invariantSet, viaPointer
 	}
 	set = &invariantSet{name: name, owner: &funcInfo{imported: &contractFact{Consts: published.Consts}}, broken: published.Broken}
 	resolver := pv.foreignResolver(name.Pkg())
+	set.broken = set.broken || pv.foreignBroken[name.Pkg()]
 	for _, text := range published.Texts {
 		node, err := logic.ParseFormula(text)
 		if err != nil {
@@ -128,7 +129,7 @@ func (pv *pkgVerifier) exportInvariants() {
 		if set == nil || name.Pkg() != pv.pass.Pkg || name.Parent() != pv.pass.Pkg.Scope() {
 			continue
 		}
-		fact := &invariantFact{Consts: map[string]string{}, Broken: set.broken}
+		fact := &invariantFact{Consts: map[string]string{}, Broken: set.broken || pv.predicatesBroken}
 		var visit func(n *logic.Node)
 		visit = func(n *logic.Node) {
 			if constant, ok := pv.pass.Pkg.Scope().Lookup(n.Name).(*types.Const); ok && n.Kind == logic.NIdent {

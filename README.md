@@ -328,6 +328,7 @@ A function that returns an error must say when it succeeds. A contract such as `
 
 Proofs hold under these assumptions, which mirror the paper's trusted base:
 
+- **There is memory.** An allocation larger than the runtime permits is an error the verifier reports: `make([]T, n)`, an `append` that has to move its slice, and a string concatenation must be proved to stay under the limit of the platform. That the machine actually has the memory, and that the stack is deep enough for the recursion, is assumed.
 - **Overflow is an error, not a behaviour.** Every `+`, `-`, `*`, `/`, negation, and conversion must be proved to stay within its type, so `(lo+hi)/2` is rejected and `lo + (hi-lo)/2` verifies. This usually means stating bounds on inputs, for example on the elements a loop adds up. Code that wraps on purpose, such as a hash function, cannot be verified. Shifts and bitwise operators are not supported yet.
 - **Callers outside the verified code keep the contract.** A verified function may assume its `Requires`, and that slice parameters of one element type do not overlap. Verified callers prove both; code that is not verified is trusted to respect them.
 - **Calls that modify memory stand alone.** A call to a function with a `Modifies` clause must be a statement of its own or the whole right-hand side of an assignment to plain variables, so that it cannot run between the evaluation of other operands. It is rejected inside a larger expression, as an argument, in a loop condition, or when the assignment's target is a field or a slice element.

@@ -336,3 +336,25 @@ func AlwaysFailsAfterReadyBytes() error { // want `vego: the contract of AlwaysF
 }
 
 //@ Ensures True
+
+// GrowsWhileRanging changes the map it ranges over through another name for
+// its type.
+//
+// @ Requires m != nil
+// @ Modifies m
+func GrowsWhileRanging(m map[int]int) int {
+	alias := Named(m)
+	n := 0
+	//@ Invariant 0 <= n <= 10
+	for k := range m { // want `vego: cannot verify GrowsWhileRanging: the loop modifies a map of the type it ranges over, which is not supported`
+		if 0 <= k && k < 2 {
+			alias[k+1] = 0
+		}
+		if n < 10 {
+			n++
+		}
+	}
+	return n
+}
+
+//@ Ensures 0 <= result <= 10

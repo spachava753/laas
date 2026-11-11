@@ -84,22 +84,23 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact)}
 	analyzer.Run = func(pass *analysis.Pass) (any, error) {
 		pv := &pkgVerifier{
-			pass:         pass,
-			info:         pass.TypesInfo,
-			res:          logic.NewResolver(),
-			funcs:        map[*types.Func]*funcInfo{},
-			reported:     map[string]bool{},
-			outcomes:     map[*funcInfo]*outcome{},
-			trusted:      map[*types.Func]*funcInfo{},
-			origins:      map[*ast.BlockStmt]*origins{},
-			knownReturns: map[*funcInfo]bool{},
-			isParameter:  map[*types.Var]bool{},
-			invariants:   map[*types.TypeName]*invariantSet{},
-			imported:     map[*types.Func]*funcInfo{},
-			foreign:      map[*types.Package]*logic.Resolver{},
-			plain:        logic.NewResolver(),
-			trustSources: map[*trustFile]*token.File{},
-			maxSteps:     maxSteps,
+			pass:          pass,
+			info:          pass.TypesInfo,
+			res:           logic.NewResolver(),
+			funcs:         map[*types.Func]*funcInfo{},
+			reported:      map[string]bool{},
+			outcomes:      map[*funcInfo]*outcome{},
+			trusted:       map[*types.Func]*funcInfo{},
+			origins:       map[*ast.BlockStmt]*origins{},
+			knownReturns:  map[*funcInfo]bool{},
+			isParameter:   map[*types.Var]bool{},
+			invariants:    map[*types.TypeName]*invariantSet{},
+			foreignBroken: map[*types.Package]bool{},
+			imported:      map[*types.Func]*funcInfo{},
+			foreign:       map[*types.Package]*logic.Resolver{},
+			plain:         logic.NewResolver(),
+			trustSources:  map[*trustFile]*token.File{},
+			maxSteps:      maxSteps,
 		}
 		if refuseCache {
 			pv.usage = &Usage{}
@@ -213,8 +214,12 @@ type pkgVerifier struct {
 	foreign  map[*types.Package]*logic.Resolver
 	// plain resolves trusted contracts, which may use no predicates.
 	plain *logic.Resolver
-	// predicateTexts are the predicate definitions of this package.
-	predicateTexts []string
+	// predicateTexts are the predicate definitions of this package, and
+	// predicatesBroken is set when one of them could not be accepted.
+	// foreignBroken holds the packages whose predicates could not be read.
+	predicateTexts   []string
+	predicatesBroken bool
+	foreignBroken    map[*types.Package]bool
 	// current is the function being verified, which a diagnostic counts
 	// against.
 	current *funcInfo
@@ -327,6 +332,7 @@ func (pv *pkgVerifier) collect() {
 					decl, err := logic.ParsePredicate(c.text)
 					if err != nil {
 						pv.report(c.pos, "syntax error in Predicate annotation: %v", err)
+						pv.predicatesBroken = true
 						continue
 					}
 					predicates = append(predicates, decl)
@@ -361,6 +367,9 @@ func (pv *pkgVerifier) collect() {
 	}
 	for _, defineErr := range pv.res.Define(predicates) {
 		pv.report(predicateClauses[defineErr.Decl].pos, "%v", defineErr.Err)
+		// A predicate that could not be defined stands for nothing, so no
+		// proof of this package that may have used it counts.
+		pv.predicatesBroken = true
 	}
 	pv.findSentinels()
 	pv.findKnownReturns()

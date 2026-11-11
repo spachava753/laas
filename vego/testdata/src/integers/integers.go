@@ -190,7 +190,7 @@ func Fib(n int) (f int) {
 // Allocate needs a length that fits an int.
 func Allocate(n uint64) []int {
 	//@ Assert n >= 0
-	return make([]int, n) // want `vego:\ make\ length\ may\ overflow\ int`
+	return make([]int, n) // want `vego:\ make\ length\ may\ overflow\ int` `vego: the slice made may be more than can be allocated`
 }
 
 // Limits uses the named limits in annotations.
@@ -233,13 +233,29 @@ func TooMuchCapacity(n uint64) int {
 
 //@ Ensures result = 0
 
-// Oversize appends to a slice that is already as long as a slice can be.
+// Oversize makes a slice longer than any allocation can be.
 //
 // @ Requires n = MaxInt
 func Oversize(n int) []byte {
-	s := make([]byte, n)
-	s = append(s, 0) // want `vego:\ append\ length\ may\ overflow\ int`
+	s := make([]byte, n) // want `vego: the slice made may be more than can be allocated`
+	s = append(s, 0)
 	return s
 }
 
 //@ Ensures False
+
+// Huge asks for more memory than the runtime hands out in one piece, with a
+// length that fits an int.
+func Huge() []uint64 {
+	return make([]uint64, 2305843009213693952) // want `vego: the slice made may be more than can be allocated`
+}
+
+//@ Ensures |result| = 2305843009213693952
+
+// GrowsUnbounded appends to a slice that may already be as large as an
+// allocation can be.
+func GrowsUnbounded(s []byte) []byte {
+	return append(s, 0) // want `vego: append may write into the capacity of s, which GrowsUnbounded may not modify` `vego: the slice append grows may be more than can be allocated`
+}
+
+//@ Ensures |result| = |s| + 1

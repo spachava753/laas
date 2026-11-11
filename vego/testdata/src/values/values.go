@@ -219,7 +219,7 @@ func Greeting(name string) (text string) {
 // Unbounded concatenates strings whose total length is not known to fit.
 func Unbounded(a, b string) string {
 	//@ Assert True
-	return a + b // want `vego:\ string\ length\ may\ overflow\ int`
+	return a + b // want `vego: the joined string may be more than can be allocated`
 }
 
 // Extension returns the last three bytes.

@@ -42,6 +42,8 @@ func (f *contractFact) String() string {
 // contracts of its functions may use.
 type predicatesFact struct {
 	Decls []string
+	// Broken is set when a definition of the package was not accepted.
+	Broken bool
 }
 
 func (*predicatesFact) AFact() {}
@@ -51,8 +53,8 @@ func (f *predicatesFact) String() string { return fmt.Sprintf("predicates(%d)", 
 // exportContracts publishes the contracts of the exported functions that
 // were verified, and the package's predicates.
 func (pv *pkgVerifier) exportContracts(excused map[*funcInfo]bool) {
-	if len(pv.predicateTexts) > 0 {
-		pv.pass.ExportPackageFact(&predicatesFact{Decls: pv.predicateTexts})
+	if len(pv.predicateTexts) > 0 || pv.predicatesBroken {
+		pv.pass.ExportPackageFact(&predicatesFact{Decls: pv.predicateTexts, Broken: pv.predicatesBroken})
 	}
 	// A proof that used the contract of a function whose own proof failed
 	// establishes nothing, so failure spreads from callee to caller until
@@ -62,7 +64,7 @@ func (pv *pkgVerifier) exportContracts(excused map[*funcInfo]bool) {
 		changed = false
 		for _, fn := range pv.order {
 			result := pv.outcomes[fn]
-			failed := result == nil || !result.complete || fn.failed || fn.broken ||
+			failed := result == nil || !result.complete || fn.failed || fn.broken || pv.predicatesBroken ||
 				slices.ContainsFunc(fn.callees, func(callee *funcInfo) bool { return unverified[callee] })
 			if fn.annotated() && failed && !unverified[fn] {
 				unverified[fn], changed = true, true
@@ -130,6 +132,10 @@ func (pv *pkgVerifier) importedContract(callee *types.Func) *funcInfo {
 		return fn
 	}
 	resolver := pv.foreignResolver(callee.Pkg())
+	if pv.foreignBroken[callee.Pkg()] {
+		fn.defect("the predicates of package %s could not be understood", callee.Pkg().Path())
+		return fn
+	}
 	clauses := func(kind string, texts []string) []*clause {
 		var list []*clause
 		for _, text := range texts {
@@ -166,13 +172,19 @@ func (pv *pkgVerifier) foreignResolver(pkg *types.Package) *logic.Resolver {
 	pv.foreign[pkg] = resolver
 	published := &predicatesFact{}
 	pv.pass.ImportPackageFact(pkg, published)
+	pv.foreignBroken[pkg] = published.Broken
 	var decls []*logic.PredDecl
 	for _, text := range published.Decls {
-		if decl, err := logic.ParsePredicate(text); err == nil {
-			decls = append(decls, decl)
+		decl, err := logic.ParsePredicate(text)
+		if err != nil {
+			pv.foreignBroken[pkg] = true
+			continue
 		}
+		decls = append(decls, decl)
 	}
-	resolver.Define(decls)
+	if len(resolver.Define(decls)) > 0 {
+		pv.foreignBroken[pkg] = true
+	}
 	for name, def := range resolver.Preds {
 		pv.res.Preds[name] = def
 	}

@@ -2,6 +2,7 @@ package vego
 
 import (
 	"fmt"
+	"go/build"
 	"go/constant"
 	"go/token"
 	"go/types"
@@ -33,14 +34,43 @@ func (pv *pkgVerifier) intRange(t types.Type) (lo, hi *big.Int, ok bool) {
 // range of its type, and a slice is no longer than the largest int.
 func (pv *pkgVerifier) typeFact(value *logic.Term, t types.Type) *logic.Term {
 	if value.Sort.IsSeq() {
-		_, most, _ := pv.intRange(types.Typ[types.Int])
-		return logic.Le(logic.Len(value), logic.BigLit(most))
+		return logic.Le(logic.Len(value), logic.BigLit(pv.maxAlloc()))
 	}
 	lo, hi, ok := pv.intRange(t)
 	if !ok || value.Sort != logic.Int {
 		return logic.True()
 	}
 	return logic.And(logic.Le(logic.BigLit(lo), value), logic.Le(value, logic.BigLit(hi)))
+}
+
+// maxAlloc returns the most bytes one allocation may have on the platform
+// being analysed, which is the runtime's own limit: it panics when asked for
+// more. Every array and string that exists is therefore no larger.
+func (pv *pkgVerifier) maxAlloc() *big.Int {
+	goos, goarch := build.Default.GOOS, build.Default.GOARCH
+	wide := pv.pass.TypesSizes.Sizeof(types.Typ[types.Uintptr]) >= 8
+	bits := uint(32)
+	switch {
+	case goarch == "mips" || goarch == "mipsle":
+		bits = 31
+	case goos == "ios" && goarch == "arm64":
+		bits = 40
+	case wide && goarch != "wasm":
+		bits = 48
+	}
+	limit := new(big.Int).Lsh(big.NewInt(1), bits)
+	if !wide {
+		limit.Sub(limit, big.NewInt(1))
+	}
+	return limit
+}
+
+// checkAlloc requires an array of count elements of the given type to be
+// one the runtime will allocate.
+func (v *fnVerifier) checkAlloc(st *state, guard []*logic.Term, count *logic.Term, elem types.Type, pos token.Pos, what string) {
+	size := max(v.pass.TypesSizes.Sizeof(elem), 1)
+	bytes := logic.Mul(count, logic.IntLit(size))
+	v.check(st, guard, logic.Le(bytes, logic.BigLit(v.maxAlloc())), pos, "%s may be more than can be allocated", what)
 }
 
 // checkFits requires the mathematical result of an operation to be a value of

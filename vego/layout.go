@@ -208,7 +208,6 @@ func zeroValue(t types.Type) value {
 // which every existing object lies; it may be nil when that is not known.
 func (pv *pkgVerifier) wellFormed(val value, t types.Type, brk *logic.Term) *logic.Term {
 	leaves, _ := layoutOf(t)
-	_, most, _ := pv.intRange(types.Typ[types.Int])
 	zero := logic.IntLit(0)
 	exists := func(ref *logic.Term) *logic.Term {
 		if brk == nil {
@@ -221,8 +220,11 @@ func (pv *pkgVerifier) wellFormed(val value, t types.Type, brk *logic.Term) *log
 		switch {
 		case lf.part == partRef:
 			ref, off, length, capacity := val[i], val[i+1], val[i+2], val[i+3]
+			// The array the slice lies in was allocated, so it is no larger
+			// than an allocation can be.
+			size := max(pv.pass.TypesSizes.Sizeof(elemType(lf.typ)), 1)
 			facts = append(facts, exists(ref), logic.Le(zero, off), logic.Le(zero, length), logic.Le(length, capacity),
-				logic.Le(logic.Add(off, capacity), logic.BigLit(most)))
+				logic.Le(logic.Mul(logic.Add(off, capacity), logic.IntLit(size)), logic.BigLit(pv.maxAlloc())))
 		case lf.part != partValue:
 		case lf.sort == logic.Ref:
 			facts = append(facts, exists(val[i]))

@@ -347,10 +347,6 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 	}
 	ref, off, length, capacity := base[0], base[1], base[2], base[3]
 	grown := logic.Add(length, logic.IntLit(int64(len(added))))
-	// The grown length must be proved to fit. Assuming it would contradict a
-	// length already at the limit and make everything after the append
-	// provable.
-	v.checkFits(st, nil, grown, types.Typ[types.Int], call.Pos(), "append length")
 	owner := "[]" + typeKey(elem)
 	inPlace := logic.Le(grown, capacity)
 	if !v.quickly(st, nil, logic.Not(inPlace)) {
@@ -373,6 +369,11 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		v.branch(call.Pos())
 		next := st.clone()
 		next.assume(logic.Lt(capacity, grown))
+		// The array to move to must be one that can be allocated. That is
+		// proved and not assumed: assuming it would contradict a slice
+		// already at the limit and make everything after the append
+		// provable.
+		v.checkAlloc(next, nil, grown, elem, call.Pos(), "the slice append grows")
 		// The new array holds the old elements and the added ones. What
 		// lies in its capacity beyond them is not said: it is certainly not
 		// what followed the old elements in their array.

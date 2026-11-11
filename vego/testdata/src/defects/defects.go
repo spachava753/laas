@@ -166,7 +166,7 @@ func EntryVersusExit(A []int) {
 //@ Ensures A[0] = 5
 
 func NegativeMake(n int) (R []int) {
-	R = make([]int, n) // want `vego:\ make\ length\ may\ be\ negative`
+	R = make([]int, n) // want `vego:\ make\ length\ may\ be\ negative` `vego: the slice made may be more than can be allocated`
 	return R
 }
 

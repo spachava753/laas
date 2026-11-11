@@ -405,7 +405,7 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 		// different iterations differ is not modelled. A loop that changes
 		// a map of the type while ranging over one is not supported.
 		for _, at := range shape.effects.sites {
-			if at.mapped && typeKey(at.typ) == typeKey(ranged) {
+			if at.mapped && mapOwner(at.typ) == mapOwner(ranged) {
 				v.unsupported(s.Pos(), "the loop modifies a map of the type it ranges over, which is not supported")
 			}
 		}

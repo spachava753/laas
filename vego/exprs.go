@@ -420,6 +420,7 @@ func (v *fnVerifier) makeSlice(e *ast.CallExpr, st *state, guard []*logic.Term) 
 		v.check(st, guard, logic.Le(length, capacity), e.Args[2].Pos(), "make capacity may be less than the length")
 		v.checkFits(st, guard, capacity, types.Typ[types.Int], e.Args[2].Pos(), "make capacity")
 	}
+	v.checkAlloc(st, guard, capacity, elemType(t), e.Pos(), "the slice made")
 	rows := make([]*logic.Term, len(leaves))
 	for i, lf := range leaves {
 		rows[i] = logic.Fill(capacity, zeroLeaf(lf))
