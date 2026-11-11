@@ -68,7 +68,7 @@ func (pv *pkgVerifier) maxAlloc() *big.Int {
 // checkAlloc requires an array of count elements of the given type to be
 // one the runtime will allocate.
 func (v *fnVerifier) checkAlloc(st *state, guard []*logic.Term, count *logic.Term, elem types.Type, pos token.Pos, what string) {
-	size := max(v.pass.TypesSizes.Sizeof(elem), 1)
+	size := v.pass.TypesSizes.Sizeof(elem)
 	bytes := logic.Mul(count, logic.IntLit(size))
 	v.check(st, guard, logic.Le(bytes, logic.BigLit(v.maxAlloc())), pos, "%s may be more than can be allocated", what)
 }

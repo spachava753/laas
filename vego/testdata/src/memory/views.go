@@ -655,3 +655,29 @@ func WrongGuardField(s *Segment) bool {
 }
 
 //@ Ensures ~result
+
+// ManyNothings takes a slice whose elements have no size, which can be
+// longer than any allocation.
+func ManyNothings(s []struct{}) bool {
+	return len(s) <= 281474976710656 // want `vego: postcondition may not hold: result`
+}
+
+//@ Ensures result
+
+// CountNothings relies on what is known of such a slice: its length is an
+// int that is not negative.
+func CountNothings(s []struct{}) bool {
+	return len(s) >= 0 && len(s)/2 <= len(s)
+}
+
+//@ Ensures result
+
+// MakeNothings makes a slice that needs no memory.
+//
+// @ Requires 0 <= n
+func MakeNothings(n int) int {
+	s := make([]struct{}, n)
+	return len(s)
+}
+
+//@ Ensures result = n

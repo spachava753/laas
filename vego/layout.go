@@ -328,14 +328,16 @@ func (pv *pkgVerifier) wellFormed(val value, t types.Type, brk *logic.Term) *log
 			// The array the slice lies in was allocated, so it is no larger
 			// than an allocation can be. The offset counts positions, which
 			// are bytes for structs and elements for anything else.
+			// Elements of size zero take no room, so any number of them
+			// that an int can count fits.
 			elem := elemType(lf.typ)
-			size, unit := max(pv.pass.TypesSizes.Sizeof(elem), 1), int64(1)
+			size, unit := pv.pass.TypesSizes.Sizeof(elem), int64(1)
 			if pv.span(elem) == 1 {
 				unit = size
 			}
 			end := logic.Add(logic.Mul(off, logic.IntLit(unit)), logic.Mul(capacity, logic.IntLit(size)))
 			facts = append(facts, exists(ref), logic.Le(zero, off), logic.Le(zero, length), logic.Le(length, capacity),
-				logic.Le(end, logic.BigLit(pv.maxAlloc())))
+				logic.Le(end, logic.BigLit(pv.maxAlloc())), pv.typeFact(capacity, types.Typ[types.Int]))
 		case lf.part == partPtr:
 			facts = append(facts, exists(val[i]), logic.Le(zero, val[i+1]), logic.Le(val[i+1], logic.BigLit(pv.maxAlloc())))
 		case lf.part != partValue:
