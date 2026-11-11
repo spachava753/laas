@@ -157,13 +157,10 @@ func (v *fnVerifier) newMap(st *state, t types.Type) value {
 // here: the nil map has no keys, every key it lacks has the zero value, and
 // that is all the removal writes.
 func (v *fnVerifier) mapStore(st *state, t types.Type, ref, key *logic.Term, val value, present bool, pos token.Pos, what string) {
-	var exists []*logic.Term
 	if present {
 		v.check(st, nil, logic.Lt(logic.IntLit(0), ref), pos, "map may be nil")
-	} else {
-		exists = []*logic.Term{logic.Not(logic.Eq(ref, logic.RefLit(0)))}
 	}
-	v.checkWrite(st, exists, target{mapType: t, ref: ref}.reach(), pos, what)
+	v.checkWrite(st, nil, target{mapType: t, ref: ref}.reach(), pos, what)
 	// What holds of every map is put on record for this key before the
 	// write, so that the write to the nil map is known to change nothing.
 	v.noteMap(st, st.mem, t, ref, key)

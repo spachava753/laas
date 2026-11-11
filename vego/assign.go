@@ -390,7 +390,7 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		start, end := v.elementAt(base, t, length), v.elementAt(base, t, grown)
 		into := written{ref: ref}
 		for _, key := range keys {
-			into.parts = append(into.parts, stretch{key, start, end})
+			into.parts = append(into.parts, stretch{key: key, lo: start, hi: end})
 		}
 		v.checkWrite(next, nil, into, call.Pos(),
 			fmt.Sprintf("append may write into the capacity of %s", types.ExprString(call.Args[0])))

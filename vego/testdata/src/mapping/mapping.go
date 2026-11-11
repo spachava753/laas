@@ -396,3 +396,29 @@ func DeleteUnlisted(m map[int]int) {
 }
 
 //@ Ensures True
+
+// removeZero removes a key.
+//
+// @ Modifies m
+func removeZero(m map[int]int) {
+	delete(m, 0)
+}
+
+//@ Ensures ~has(m', 0)
+
+// RemoveFromNil passes the nil map, which cannot change, to a function
+// that modifies its map.
+func RemoveFromNil() int {
+	var m map[int]int
+	removeZero(m)
+	return len(m)
+}
+
+//@ Ensures result = 0
+
+// RemoveFromOther passes a map it may not change.
+func RemoveFromOther(m map[int]int) {
+	removeZero(m) // want `vego: removeZero may modify m, which RemoveFromOther may not modify; list it in a //@ Modifies clause`
+}
+
+//@ Ensures True

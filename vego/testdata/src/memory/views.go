@@ -847,3 +847,38 @@ func LoopVariableCounts(n int) int {
 }
 
 //@ Ensures result = n
+
+// Cell and Cells put the same field of two structs side by side.
+type Cell struct{ X byte }
+
+// Cells holds two cells.
+type Cells struct{ A, B Cell }
+
+// BothCells lists the same field of two structs that lie side by side and
+// then writes the struct that holds them.
+//
+// @ Requires p != nil
+// @ Modifies p.A.X, p.B.X
+func BothCells(p *Cells) {
+	*p = Cells{A: Cell{X: 1}, B: Cell{X: 2}}
+}
+
+//@ Ensures p.A.X' = 1 And p.B.X' = 2
+
+// OneCell lists only one of them.
+//
+// @ Requires p != nil
+// @ Modifies p.A.X
+func OneCell(p *Cells) {
+	*p = Cells{A: Cell{X: 1}, B: Cell{X: 2}} // want `vego: \*p is assigned, which OneCell may not modify; list it in a //@ Modifies clause`
+}
+
+// EndsOnly lists two elements and writes the one between them.
+//
+// @ Requires |ps| = 3
+// @ Modifies ps[0], ps[2]
+func EndsOnly(ps []Point) {
+	ps[0].X = 1
+	ps[2].X = 1
+	ps[1].X = 1 // want `vego: ps\[1\]\.X is assigned, which EndsOnly may not modify; list it in a //@ Modifies clause`
+}

@@ -358,6 +358,8 @@ func (v *fnVerifier) prove(st *state, guard []*logic.Term, goal *logic.Term) boo
 type stretch struct {
 	key    string
 	lo, hi *logic.Term
+	// one is set when the stretch is the single position lo.
+	one bool
 }
 
 // written describes a write for the check against the frame: the allocation
@@ -368,32 +370,25 @@ type written struct {
 }
 
 // stretches returns what a target covers in each region it reaches into.
-// For a single struct value that is exactly the positions of its leaves.
+// For a single struct value that is exactly the positions of its leaves,
+// one stretch for each.
 func (t target) stretches() []stretch {
 	if !t.single {
 		var parts []stretch
-		t.regions(func(key string, _ logic.Sort) { parts = append(parts, stretch{key, t.lo, t.hi}) })
+		t.regions(func(key string, _ logic.Sort) { parts = append(parts, stretch{key: key, lo: t.lo, hi: t.hi}) })
 		return parts
 	}
 	return stretchesOf(t.cells, t.lo)
 }
 
-// stretchesOf returns what the cells of a value stored at a position cover
-// in each region.
+// stretchesOf returns what the cells of a value stored at a position cover:
+// one position for each cell. Two cells in one region, such as the same
+// field of two structs that lie side by side, stay two stretches, since
+// what lies between them is not part of the value.
 func stretchesOf(cells []cell, at *logic.Term) []stretch {
-	var keys []string
-	bounds := map[string][2]int64{}
-	for _, c := range cells {
-		b, seen := bounds[c.key]
-		if !seen {
-			keys = append(keys, c.key)
-			b = [2]int64{c.off, c.off + 1}
-		}
-		bounds[c.key] = [2]int64{min(b[0], c.off), max(b[1], c.off+1)}
-	}
-	parts := make([]stretch, len(keys))
-	for i, key := range keys {
-		parts[i] = stretch{key, logic.Add(at, logic.IntLit(bounds[key][0])), logic.Add(at, logic.IntLit(bounds[key][1]))}
+	parts := make([]stretch, len(cells))
+	for i, c := range cells {
+		parts[i] = stretch{c.key, logic.Add(at, logic.IntLit(c.off)), logic.Add(at, logic.IntLit(c.off+1)), true}
 	}
 	return parts
 }
@@ -404,14 +399,19 @@ func stretchesOf(cells []cell, at *logic.Term) []stretch {
 // needs is reported when the function has been verified, so each write
 // records the targets it could not do without.
 //
-// What a write does in each region must be covered by some listed target,
-// which need not be the same for every region: a write of a whole struct is
-// allowed when each of its fields is listed.
+// Every position a write reaches must be covered by some listed target,
+// which need not be the same for all of them: a write of a whole struct is
+// allowed when each of its fields is listed, and a write of a run of
+// elements when each element is. The nil map cannot be written at all, so
+// what would write it changes nothing and needs no permission.
 func (v *fnVerifier) checkWrite(st *state, guard []*logic.Term, w written, pos token.Pos, what string) {
 	if len(w.parts) == 0 {
 		return
 	}
 	created := logic.Le(v.entryBrk, w.ref)
+	if w.parts[0].lo == nil {
+		created = logic.Or(created, logic.Eq(w.ref, logic.RefLit(0)))
+	}
 	covers := make([][]stretch, len(v.frame))
 	var candidates []int
 	for i, t := range v.frame {
@@ -426,6 +426,12 @@ func (v *fnVerifier) checkWrite(st *state, guard []*logic.Term, w written, pos t
 	allowed := func(without int) *logic.Term {
 		whole := []*logic.Term{}
 		for _, part := range w.parts {
+			// A part of one position is covered when that position is; a
+			// longer one when every position in it is.
+			position, ranged := part.lo, part.lo != nil && !part.one
+			if ranged {
+				position = v.bound("k")
+			}
 			var by []*logic.Term
 			for _, i := range candidates {
 				for _, c := range covers[i] {
@@ -434,11 +440,16 @@ func (v *fnVerifier) checkWrite(st *state, guard []*logic.Term, w written, pos t
 					case c.lo == nil:
 						by = append(by, logic.Eq(w.ref, v.frame[i].ref))
 					default:
-						by = append(by, logic.And(logic.Eq(w.ref, v.frame[i].ref), logic.Le(c.lo, part.lo), logic.Le(part.hi, c.hi)))
+						by = append(by, logic.And(logic.Eq(w.ref, v.frame[i].ref), logic.Le(c.lo, position), logic.Lt(position, c.hi)))
 					}
 				}
 			}
-			whole = append(whole, logic.Or(by...))
+			covered := logic.Or(by...)
+			if ranged {
+				inside := logic.And(logic.Le(part.lo, position), logic.Lt(position, part.hi))
+				covered = logic.Forall(position, logic.Implies(inside, covered))
+			}
+			whole = append(whole, covered)
 		}
 		return logic.Or(created, logic.And(whole...))
 	}
