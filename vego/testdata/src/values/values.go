@@ -796,3 +796,18 @@ func GuardedBytes(n int) bool {
 }
 
 //@ Ensures result <-> n = 0
+
+// SameFloats claims two slices of floats are equal, which no annotation can
+// say: nothing is known of a float.
+func SameFloats(A []float64) []float64 {
+	return A
+}
+
+//@ Ensures result = A // want `vego: in Ensures annotation: operator = cannot be applied to .* values`
+
+// SameFloatCount says what can be said of them.
+func SameFloatCount(A []float64) []float64 {
+	return A
+}
+
+//@ Ensures |result| = |A|

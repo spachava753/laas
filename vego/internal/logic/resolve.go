@@ -400,6 +400,10 @@ func (s *scope) relation(op string, a, b *Term) *Term {
 	equality := op == "=" || op == "==" || op == "!="
 	var result *Term
 	switch {
+	case a.Sort.IsSeq() && a.Sort.Elem() == Float:
+		// Nothing can be said of a float, so nothing of a sequence of them
+		// beyond its length either.
+		fail("operator %s cannot be applied to %s values", op, a.Sort)
 	case a.Sort.IsSeq() && equality:
 		result = SeqEq(a, b, s.r.newBound("k", Int))
 	case a.Sort == Err && equality && (a == NilErr() || b == NilErr()):
