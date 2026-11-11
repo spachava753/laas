@@ -245,6 +245,11 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 			// or in one created since.
 			inOld := logic.And(logic.Eq(now[0], before[0]), logic.Eq(now[1], before[1]), logic.Eq(now[3], before[3]), logic.Le(before[2], now[2]))
 			inNew := logic.And(logic.Le(st.brk, now[0]), logic.Eq(now[1], logic.IntLit(0)))
+			if v.pass.TypesSizes.Sizeof(elemType(variable.Type())) == 0 {
+				// An array of elements without size has no identity:
+				// it may be where anything else is.
+				inNew = logic.Eq(now[1], logic.IntLit(0))
+			}
 			head.assume(logic.Or(inOld, inNew))
 		}
 	}

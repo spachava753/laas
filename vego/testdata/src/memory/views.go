@@ -983,3 +983,35 @@ func NothingsNotNil() (p, q *struct{}) {
 }
 
 //@ Ensures p != nil And q != nil
+
+// GrowNothings grows a slice of elements without size in a loop. Where
+// its array is says nothing, so it may be where q points.
+//
+// @ Requires q != nil
+func GrowNothings(q *struct{}) *struct{} {
+	var s []struct{}
+	//@ Invariant 0 <= i <= 1 And |s| = i
+	//@ Variant 1 - i
+	for i := 0; i < 1; i++ {
+		s = append(s, struct{}{})
+	}
+	return &s[0] // want `vego: postcondition may not hold: ~within\(result, q\)`
+}
+
+//@ Ensures ~within(result, q)
+
+// GrowPoints does the same with elements that have a size, whose new
+// array is apart from everything that was there before.
+//
+// @ Requires q != nil
+func GrowPoints(q *Point) *Point {
+	var s []Point
+	//@ Invariant 0 <= i <= 1 And |s| = i
+	//@ Variant 1 - i
+	for i := 0; i < 1; i++ {
+		s = append(s, Point{})
+	}
+	return &s[0]
+}
+
+//@ Ensures ~within(result, q)
