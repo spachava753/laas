@@ -914,3 +914,22 @@ func ReportsBothWays() error {
 }
 
 //@ Ensures True
+
+func alwaysError(b byte) error { return errAlways }
+
+// CopiesByteInLoop passes on, through a loop, a byte that a call returned,
+// to a function that fails for every byte.
+//
+// @ Requires 1 <= n <= 3
+func CopiesByteInLoop(n int) error { // want `the contract of CopiesByteInLoop would also be met by a function that always returns an error`
+	b, _ := bytePair()
+	var saved byte
+	//@ Invariant 0 <= i <= n
+	//@ Variant n - i
+	for i := 0; i < n; i++ {
+		saved = b
+	}
+	return alwaysError(saved)
+}
+
+//@ Ensures True

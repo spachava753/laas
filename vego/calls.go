@@ -442,7 +442,8 @@ type failureSource struct {
 // otherwise states of other values, named by estranged, what is known of
 // the outputs: that they are something the calls could have produced. That
 // is what each call added to the state, which is what the types and its
-// contract guarantee. A later call was made on some path, and with another
+// contract guarantee, and for the unknowns of a loop what holds at its
+// head: their types and the invariants. A later call was made on some path, and with another
 // outcome of the first call execution might not have come that way, so what
 // a call guarantees is stated on condition of the branches that led to it,
 // with the outputs replaced in those too.
@@ -533,11 +534,16 @@ func (v *fnVerifier) tieFailures() {
 	// added.
 	for i := range v.sources {
 		source := &v.sources[i]
+		summarised := map[*forward]bool{}
 		for changed := true; changed; {
 			changed = false
 			for _, l := range v.left {
 				if !source.outputs[l.name] && v.dependsOn(source, l.facts, l.val) {
 					source.outputs[l.name], changed = true, true
+					if !summarised[l.loop] {
+						summarised[l.loop] = true
+						source.origins = append(source.origins, *l.loop)
+					}
 				}
 			}
 			for _, call := range v.forwards {
@@ -610,6 +616,8 @@ type leftover struct {
 	name  string
 	val   *logic.Term
 	facts []*logic.Term
+	// loop says what is known of the unknowns of the loop at its head.
+	loop *forward
 }
 
 // calleeFormula resolves a callee's postcondition at a call site. A result of

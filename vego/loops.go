@@ -364,6 +364,12 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 	for _, c := range spec.invariants {
 		head.assume(v.formula(c, c.node, v.bodyEnv(head, at)))
 	}
+	// What is known of the unknowns at the head: their types, and the
+	// invariants, on every path that comes to the loop; see tieFailures.
+	summary := &forward{facts: slices.Clip(head.hyps[len(st.hyps):])}
+	for _, taken := range st.chosen {
+		summary.path = append(summary.path, taken.cond)
+	}
 	var cond *logic.Term
 	if shape.limit != nil {
 		cond = logic.Lt(counter, shape.limit)
@@ -395,7 +401,7 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 		// tieFailures.
 		for name, lost := range forgotten {
 			if held := end.vals[lost.variable]; held != nil {
-				v.left = append(v.left, leftover{name: name, val: held[lost.index], facts: slices.Clip(end.hyps)})
+				v.left = append(v.left, leftover{name: name, val: held[lost.index], facts: slices.Clip(end.hyps), loop: summary})
 			}
 		}
 		checkInvariants(end, "loop invariant may not be preserved")

@@ -334,3 +334,9 @@ trusted:
   trust.bytePair:
     reason: Test helper that returns a byte and may fail.
     modifies: []
+
+  trust.alwaysError:
+    reason: Test helper that fails for every byte.
+    ensures:
+      - "b >= 0 -> result != nil"
+    modifies: []
