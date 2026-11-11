@@ -872,3 +872,17 @@ func AsksHelperInLoop(n int) error {
 }
 
 //@ Ensures True
+
+// AsksOnBothPaths asks a verified function about the error on both sides of
+// a test of it, and passes the error on.
+func AsksOnBothPaths() error {
+	err := external()
+	if err != nil {
+		_ = hasFailed(err)
+		return err
+	}
+	_ = hasFailed(err)
+	return nil
+}
+
+//@ Ensures True

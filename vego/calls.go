@@ -148,7 +148,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	before, existed := maps.Clone(st.mem), st.brk
 	// Every constant made from here on stands for something the call
 	// produced: a result, or memory it may have written.
-	mark := len(v.made)
+	mark, known := len(v.made), len(st.hyps)
 	for _, param := range fn.params {
 		if args[param] != nil {
 			v.checkInvariants(st, guard, before, args[param], param.Type(), call.Pos(), "what is passed to "+name+" as "+describe(param))
@@ -235,12 +235,12 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	}
 	// What this call produced depends on whatever it was given; that is
 	// recorded for tieFailures.
-	handed := forward{produced: slices.Clip(v.made[mark:]), facts: slices.Clip(st.hyps)}
+	handed := forward{produced: slices.Clip(v.made[mark:]), facts: slices.Clip(st.hyps[known:])}
 	for _, param := range fn.params {
 		handed.given = append(handed.given, args[param]...)
 	}
 	v.forwards = append(v.forwards, handed)
-	v.noteFailureSource(fn, results, st, involved, v.made[mark:])
+	v.noteFailureSource(fn, results, st, involved, handed)
 	return results
 }
 
@@ -392,9 +392,9 @@ func (v *fnVerifier) elementFacts(seq *logic.Term, elem types.Type) *logic.Term 
 // callee verified in this package is only noted, since whether it is excused
 // is decided once every function has been verified. In each case the call
 // must be reachable. facts holds the guard of the call and what the types
-// guarantee of its outputs, and produced the names of everything the call
-// produced: its results and the memory it may have written.
-func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state, facts []*logic.Term, produced []string) {
+// guarantee of its outputs, and made what the call produced: its results
+// and the memory it may have written.
+func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state, facts []*logic.Term, made forward) {
 	path := append(slices.Clip(st.hyps), facts...)
 	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
 	local := fn.decl != nil
@@ -411,10 +411,10 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state,
 			if local {
 				source.callee = fn
 			}
-			for _, name := range produced {
+			for _, name := range made.produced {
 				source.outputs[name] = true
 			}
-			source.origins = [][]*logic.Term{slices.Clip(st.hyps)}
+			source.origins = [][]*logic.Term{made.facts}
 			v.sources = append(v.sources, source)
 		}
 	}
@@ -432,9 +432,10 @@ type failureSource struct {
 	// it, and the unknowns loops put in place of variables that held it.
 	outputs map[string]bool
 	known   int
-	// origins holds the facts known where each of the outputs came to be.
-	// Those among them that mention an output say what the types and the
-	// contracts guarantee of it, the outputs being new at that point.
+	// origins holds the facts that the calls which produced the outputs
+	// added: what the types and the contracts guarantee of what they
+	// produced. The conditions of the branches taken are not among them;
+	// another outcome of a call need not have taken the same branches.
 	origins [][]*logic.Term
 }
 
@@ -455,7 +456,7 @@ func (source *failureSource) otherwise() []*logic.Term {
 }
 
 // forward is a call as tieFailures needs it: what the call was given, the
-// names of what it produced, and the facts known when it returned.
+// names of what it produced, and the facts it added.
 type forward struct {
 	given    []*logic.Term
 	produced []string
