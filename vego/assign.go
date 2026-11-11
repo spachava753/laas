@@ -507,7 +507,7 @@ func (v *fnVerifier) atReturn(st *state, results []value, pos token.Pos) {
 	// branches taken to get here; see tieFailures.
 	for _, index := range errorResults(v.fn) {
 		if results[index] != nil && !v.quickly(st, nil, logic.IsNil(results[index][0])) {
-			v.failures = append(v.failures, failure{err: results[index][0], path: slices.Clip(st.chosen)})
+			v.failures = append(v.failures, failure{err: results[index][0], path: slices.Clip(st.chosen), facts: slices.Clip(st.hyps)})
 		}
 	}
 	// Returning assigns the results to the result variables. Only one that

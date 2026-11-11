@@ -435,6 +435,8 @@ func mentions(t *logic.Term, names map[string]bool) bool {
 type failure struct {
 	err  *logic.Term
 	path []*logic.Term
+	// facts is everything known at the return.
+	facts []*logic.Term
 }
 
 // tieFailures decides, once the function has been executed, which of the
@@ -442,8 +444,8 @@ type failure struct {
 // unpredictable: those it fails because of. A call whose error is ignored
 // does not excuse a function that then fails for a reason of its own.
 //
-// The function fails because of a call when the error it returns is made
-// from something the call returned, as the call's error is, also when it
+// The function fails because of a call when the error it returns is the
+// call's error, which is proved, so that it also holds for an error that
 // was kept in memory in between; or when it returns an error on a path that
 // was chosen by what the call returned: the condition of some branch taken
 // since the call mentions one of its results. What a check or a type adds
@@ -453,7 +455,8 @@ type failure struct {
 func (v *fnVerifier) tieFailures() {
 	for _, source := range v.sources {
 		tied := slices.ContainsFunc(v.failures, func(f failure) bool {
-			if mentions(f.err, source.outputs) || (source.inLoop && v.forgotten[f.err.Name]) {
+			opts := solver.Options{Preds: v.res.Preds, MaxSteps: quickSteps}
+			if (source.inLoop && v.forgotten[f.err.Name]) || solver.Prove(f.facts, logic.Eq(f.err, source.err), opts) == solver.Proved {
 				return true
 			}
 			return source.known <= len(f.path) &&

@@ -669,3 +669,13 @@ func KeepsFailure() error {
 }
 
 //@ Ensures True
+
+// KeepsOtherFailure puts the error of a call into memory next to an error
+// of its own, and returns its own.
+func KeepsOtherFailure() error { // want `the contract of KeepsOtherFailure would also be met by a function that always returns an error`
+	err := external()
+	saved := []error{err, errAlways}
+	return saved[1]
+}
+
+//@ Ensures True
