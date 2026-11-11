@@ -146,6 +146,9 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	}
 	// The contract speaks about memory as it is now, before the call.
 	before, existed := maps.Clone(st.mem), st.brk
+	// Every constant made from here on stands for something the call
+	// produced: a result, or memory it may have written.
+	mark := len(v.made)
 	for _, param := range fn.params {
 		if args[param] != nil {
 			v.checkInvariants(st, guard, before, args[param], param.Type(), call.Pos(), "what is passed to "+name+" as "+describe(param))
@@ -245,10 +248,8 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 			continue
 		}
 		derived := map[string]bool{}
-		for _, result := range results {
-			for _, part := range result {
-				derived[part.Name], source.outputs[part.Name] = true, true
-			}
+		for _, name := range v.made[mark:] {
+			derived[name], source.outputs[name] = true, true
 		}
 		for _, fact := range st.hyps {
 			if _, mentioned := estranged(fact, derived); mentioned {
@@ -257,7 +258,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 			}
 		}
 	}
-	v.noteFailureSource(fn, results, st, involved)
+	v.noteFailureSource(fn, results, st, involved, v.made[mark:])
 	return results
 }
 
@@ -409,8 +410,9 @@ func (v *fnVerifier) elementFacts(seq *logic.Term, elem types.Type) *logic.Term 
 // callee verified in this package is only noted, since whether it is excused
 // is decided once every function has been verified. In each case the call
 // must be reachable. facts holds the guard of the call and what the types
-// guarantee of its outputs.
-func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state, facts []*logic.Term) {
+// guarantee of its outputs, and produced the names of everything the call
+// produced: its results and the memory it may have written.
+func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state, facts []*logic.Term, produced []string) {
 	path := append(slices.Clip(st.hyps), facts...)
 	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
 	local := fn.decl != nil
@@ -427,13 +429,12 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state,
 			if local {
 				source.callee = fn
 			}
-			for _, result := range results {
-				for _, part := range result {
-					source.outputs[part.Name] = true
-				}
+			for _, name := range produced {
+				source.outputs[name] = true
 			}
-			// What is known of the results, they being new, is what their
-			// types and the contract say of anything the call may return.
+			// What is known of what the call produced, it being new, is
+			// what the types and the contract say of anything the call may
+			// produce.
 			for _, fact := range st.hyps {
 				if other, mentioned := estranged(fact, source.outputs); mentioned {
 					source.otherwise = append(source.otherwise, other)
@@ -446,7 +447,7 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state,
 
 // failureSource is a call whose failure nothing predicts: the error it
 // returned, the callee if it is verified in this package, whether the call
-// was made inside a loop, the names of everything it returned, and how many
+// was made inside a loop, the names of everything it produced, and how many
 // branches had been taken when it returned.
 type failureSource struct {
 	err    *logic.Term
@@ -495,31 +496,37 @@ type failure struct {
 // unpredictable: those it fails because of. A call whose error is ignored
 // does not excuse a function that then fails for a reason of its own.
 //
-// The function fails because of a call when the error it returns is the
-// call's error, which is proved, so that it also holds for an error that
-// was kept in memory in between; or when it returns an error on a path that
-// was chosen by what the call returned: the condition of some branch taken
-// since the call depends on one of its results, or on what a later call
-// that was handed them returned. What a later call reads of them out of
-// memory is not followed; a function that depends on the call only in that
-// way is not excused. A branch that was certain to be taken is none. One depends on the results when its condition can no
-// longer be proved once they are replaced by other values the call could
-// have returned; a condition that merely reads memory next to where a
-// result lies still can. What a check or a type adds to the state is no
-// such condition. Inside a loop neither can be seen once
-// the loop has forgotten the variable that held the error, so an error
-// forgotten by a loop counts for the calls made in loops.
+// The function fails because of a call when whether it fails depends on
+// what the call returned, or on what a later call that was handed that
+// returned. Two things can depend on it: whether the error the function
+// returns is nil, and the condition of a branch taken since the call on the
+// way to a return of an error. A branch that was certain to be taken is not
+// looked at.
+//
+// Something depends on the results when it cannot be proved to stay as it
+// is once they are replaced by other values the call could have returned.
+// A read of memory next to where a result lies stays as it is; so does
+// anything every value of the result's type satisfies. What a later call
+// reads of the results out of memory is not followed, and a function that
+// depends on the call only in that way is not excused.
+//
+// Inside a loop none of this can be seen once the loop has forgotten the
+// variable that held the error, so an error forgotten by a loop counts for
+// the calls made in loops.
 func (v *fnVerifier) tieFailures() {
 	for _, source := range v.sources {
 		tied := slices.ContainsFunc(v.failures, func(f failure) bool {
 			opts := solver.Options{Preds: v.res.Preds, MaxSteps: quickSteps}
-			if (source.inLoop && v.forgotten[f.err.Name]) || solver.Prove(f.facts, logic.Eq(f.err, source.err), opts) == solver.Proved {
+			known := slices.Concat(f.facts, source.otherwise)
+			depends := func(formula *logic.Term) bool {
+				other, mentioned := estranged(formula, source.outputs)
+				return mentioned && solver.Prove(known, logic.Iff(formula, other), opts) != solver.Proved
+			}
+			if (source.inLoop && v.forgotten[f.err.Name]) || depends(logic.IsNil(f.err)) {
 				return true
 			}
 			return source.known <= len(f.path) && slices.ContainsFunc(f.path[source.known:], func(taken choice) bool {
-				other, mentioned := estranged(taken.cond, source.outputs)
-				return mentioned && solver.Prove(f.facts[:taken.before], taken.cond, opts) != solver.Proved &&
-					solver.Prove(slices.Concat(f.facts, source.otherwise), other, opts) != solver.Proved
+				return solver.Prove(f.facts[:taken.before], taken.cond, opts) != solver.Proved && depends(taken.cond)
 			})
 		})
 		switch {

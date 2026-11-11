@@ -76,6 +76,8 @@ type fnVerifier struct {
 	// if the function fails because of it; see tieFailures. forgotten names
 	// the errors a loop made unknown, and looping counts the loop bodies
 	// being executed.
+	// made lists the names of the constants made so far, in order.
+	made      []string
 	sources   []failureSource
 	failures  []failure
 	forgotten map[string]bool
@@ -364,7 +366,9 @@ func (v *fnVerifier) misread(c *clause, err error) {
 // from Go identifiers.
 func (v *fnVerifier) fresh(base string, sort logic.Sort) *logic.Term {
 	v.names[base]++
-	return logic.Const(fmt.Sprintf("%s@%d", base, v.names[base]), sort)
+	name := fmt.Sprintf("%s@%d", base, v.names[base])
+	v.made = append(v.made, name)
+	return logic.Const(name, sort)
 }
 
 // unknown returns a value of the given type about which nothing is known

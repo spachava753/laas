@@ -757,3 +757,20 @@ func AsksHelperAboutOwn() error { // want `the contract of AsksHelperAboutOwn wo
 }
 
 //@ Ensures True
+
+// translate makes an error of its own of any error.
+func translate(e error) error {
+	if e != nil {
+		return errAlways
+	}
+	return nil
+}
+
+//@ Ensures result = nil <-> e = nil
+
+// Translates returns what a verified function makes of the call's error.
+func Translates() error {
+	return translate(external())
+}
+
+//@ Ensures True
