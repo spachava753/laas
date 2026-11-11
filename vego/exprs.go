@@ -467,8 +467,11 @@ func (v *fnVerifier) conversion(e *ast.CallExpr, st *state, guard []*logic.Term)
 		text, _ := v.view(st, st.mem, v.eval(e.Args[0], st, guard), from)
 		return value{text}
 	case isString(from) && bytes(to):
-		// Go does not say how much capacity the new array has.
-		text := v.expr(e.Args[0], st, guard)
+		// Go does not say how much capacity the new array has. The bytes go
+		// into memory and the new slice is described by facts that hold
+		// unconditionally, so on the right of && or || the string is first
+		// replaced by one that is a string whether or not it is evaluated.
+		text := v.settled(st, guard, value{v.expr(e.Args[0], st, guard)}, from)[0]
 		only := v.cellsOf(elemType(to))[0]
 		copied := value{v.alloc(st, true), logic.IntLit(0), logic.Len(text), v.fresh("cap", logic.Int)}
 		st.storeRow(only.key, only.sort, copied[0], text)

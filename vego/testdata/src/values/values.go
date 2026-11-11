@@ -776,3 +776,23 @@ func TupleDeclared(p *boxed) int {
 }
 
 //@ Ensures result = 0
+
+// SkippedBytes has a conversion that is never evaluated, of a string that
+// could not exist. Nothing follows from it.
+//
+// @ Requires n = -1
+func SkippedBytes(n int) int {
+	_ = false && len([]byte(""[:n])) == 0
+	return 1 // want `vego: postcondition may not hold: result = 0`
+}
+
+//@ Ensures result = 0
+
+// GuardedBytes converts only when the string exists.
+//
+// @ Requires -1 <= n <= 0
+func GuardedBytes(n int) bool {
+	return n >= 0 && len([]byte(""[:n])) == 0
+}
+
+//@ Ensures result <-> n = 0
