@@ -80,9 +80,11 @@ type fnVerifier struct {
 	made      []string
 	sources   []failureSource
 	failures  []failure
-	forgotten map[string]forgottenError
+	forgotten map[string]forgottenPart
 	// left holds what the iterations of loops left in such variables.
 	left []leftover
+	// forwards holds every call made, for tieFailures.
+	forwards []forward
 	// lenient is set when only the contract of a function is examined, not
 	// its body: parameters and results of types vego does not model are
 	// then left without a value instead of being an error.
@@ -107,7 +109,7 @@ func (v *fnVerifier) allowEffects(e ast.Expr) {
 func (pv *pkgVerifier) run(fn *funcInfo, task func(v *fnVerifier)) {
 	v := &fnVerifier{
 		pkgVerifier: pv, fn: fn, entry: map[*types.Var]value{}, names: map[string]int{},
-		reached: map[*funcInfo]bool{}, forgotten: map[string]forgottenError{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{},
+		reached: map[*funcInfo]bool{}, forgotten: map[string]forgottenPart{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{},
 	}
 	defer func() {
 		switch r := recover().(type) {

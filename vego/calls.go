@@ -233,31 +233,13 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 			}
 		}
 	}
-	// What this call returns depends on what an earlier call returned if it
-	// was given any of that; see tieFailures.
-	for i := range v.sources {
-		source := &v.sources[i]
-		given := false
-		for _, arg := range args {
-			for _, part := range arg {
-				_, mentioned := estranged(part, source.outputs)
-				given = given || mentioned
-			}
-		}
-		if !given {
-			continue
-		}
-		derived := map[string]bool{}
-		for _, name := range v.made[mark:] {
-			derived[name], source.outputs[name] = true, true
-		}
-		for _, fact := range st.hyps {
-			if _, mentioned := estranged(fact, derived); mentioned {
-				other, _ := estranged(fact, source.outputs)
-				source.otherwise = append(source.otherwise, other)
-			}
-		}
+	// What this call produced depends on whatever it was given; that is
+	// recorded for tieFailures.
+	handed := forward{produced: slices.Clip(v.made[mark:]), facts: slices.Clip(st.hyps)}
+	for _, param := range fn.params {
+		handed.given = append(handed.given, args[param]...)
 	}
+	v.forwards = append(v.forwards, handed)
 	v.noteFailureSource(fn, results, st, involved, v.made[mark:])
 	return results
 }
@@ -432,14 +414,7 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state,
 			for _, name := range produced {
 				source.outputs[name] = true
 			}
-			// What is known of what the call produced, it being new, is
-			// what the types and the contract say of anything the call may
-			// produce.
-			for _, fact := range st.hyps {
-				if other, mentioned := estranged(fact, source.outputs); mentioned {
-					source.otherwise = append(source.otherwise, other)
-				}
-			}
+			source.origins = [][]*logic.Term{slices.Clip(st.hyps)}
 			v.sources = append(v.sources, source)
 		}
 	}
@@ -452,13 +427,39 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state,
 type failureSource struct {
 	err    *logic.Term
 	callee *funcInfo
-	// outputs also names what later calls returned that were given any of
-	// the results.
+	// outputs names what the call produced, and whatever tieFailures finds
+	// to depend on that: what later calls produced that were given any of
+	// it, and the unknowns loops put in place of variables that held it.
 	outputs map[string]bool
 	known   int
-	// otherwise states of other values, named by estranged, what is known
-	// of the results: that they are something the call may return.
-	otherwise []*logic.Term
+	// origins holds the facts known where each of the outputs came to be.
+	// Those among them that mention an output say what the types and the
+	// contracts guarantee of it, the outputs being new at that point.
+	origins [][]*logic.Term
+}
+
+// otherwise states of other values, named by estranged, what is known of
+// the outputs: that they are something the calls could have produced.
+func (source *failureSource) otherwise() []*logic.Term {
+	var facts []*logic.Term
+	seen := map[*logic.Term]bool{}
+	for _, known := range source.origins {
+		for _, fact := range known {
+			if other, mentioned := estranged(fact, source.outputs); mentioned && !seen[fact] {
+				seen[fact] = true
+				facts = append(facts, other)
+			}
+		}
+	}
+	return facts
+}
+
+// forward is a call as tieFailures needs it: what the call was given, the
+// names of what it produced, and the facts known when it returned.
+type forward struct {
+	given    []*logic.Term
+	produced []string
+	facts    []*logic.Term
 }
 
 // estranged returns a term with every constant of the given names replaced
@@ -496,8 +497,8 @@ type failure struct {
 // does not excuse a function that then fails for a reason of its own.
 //
 // The function fails because of a call when whether it fails depends on
-// what the call returned, or on what a later call that was handed that
-// returned. Two things can depend on it: whether the error the function
+// what the call produced, or on what a later call that was given any of
+// that produced. Two things can depend on it: whether the error the function
 // returns is nil, and the condition of a branch taken since the call on the
 // way to a return of an error. A branch that was certain to be taken is not
 // looked at.
@@ -509,21 +510,36 @@ type failure struct {
 // reads of the results out of memory is not followed, and a function that
 // depends on the call only in that way is not excused.
 //
-// A loop forgets the variables it assigns. For an error among them, the end
-// of the body is where it is seen what an iteration leaves in the variable;
-// if that depends on a call, the unknown that stands for the variable
-// afterwards does too.
+// A loop forgets the variables it assigns. The end of the body is where it
+// is seen what an iteration leaves in such a variable; if that depends on a
+// call, the unknown that stands for the variable afterwards does too. What
+// a loop forgets of memory is not followed in this way.
 func (v *fnVerifier) tieFailures() {
-	// An unknown that stands for a variable a loop forgot depends on a call
-	// if what an iteration leaves in the variable does. It then counts as
-	// something the call produced, which may make a further unknown depend
-	// on the call, in whatever order the loops were executed.
-	for changed := true; changed; {
-		changed = false
-		for i := range v.sources {
+	// What a call produced spreads: to the unknown that stands for a
+	// variable a loop forgot, if what an iteration leaves in the variable
+	// depends on it, and to what a later call produced, if that call was
+	// given any of it. Each can enable the other, and loops are not
+	// executed in the order they run, so this is repeated until nothing is
+	// added.
+	for i := range v.sources {
+		source := &v.sources[i]
+		for changed := true; changed; {
+			changed = false
 			for _, l := range v.left {
-				if !v.sources[i].outputs[l.name] && v.dependsOn(&v.sources[i], l.facts, logic.IsNil(l.err)) {
-					v.sources[i].outputs[l.name], changed = true, true
+				if !source.outputs[l.name] && v.dependsOn(source, l.facts, l.val) {
+					source.outputs[l.name], changed = true, true
+				}
+			}
+			for _, call := range v.forwards {
+				fed := slices.ContainsFunc(call.given, func(part *logic.Term) bool {
+					_, mentioned := estranged(part, source.outputs)
+					return mentioned
+				})
+				if fed && len(call.produced) > 0 && !source.outputs[call.produced[0]] {
+					for _, name := range call.produced {
+						source.outputs[name] = true
+					}
+					source.origins, changed = append(source.origins, call.facts), true
 				}
 			}
 		}
@@ -531,7 +547,7 @@ func (v *fnVerifier) tieFailures() {
 	for index := range v.sources {
 		source := &v.sources[index]
 		tied := slices.ContainsFunc(v.failures, func(f failure) bool {
-			if v.dependsOn(source, f.facts, logic.IsNil(f.err)) {
+			if v.dependsOn(source, f.facts, f.err) {
 				return true
 			}
 			opts := solver.Options{Preds: v.res.Preds, MaxSteps: quickSteps}
@@ -549,30 +565,40 @@ func (v *fnVerifier) tieFailures() {
 	}
 }
 
-// dependsOn reports whether a formula depends on what a call produced: it
+// dependsOn reports whether a value depends on what a call produced: it
 // mentions some of it, and cannot be proved, from the facts given, to stay
 // as it is when all of it is replaced by other values the call could have
-// produced.
-func (v *fnVerifier) dependsOn(source *failureSource, facts []*logic.Term, formula *logic.Term) bool {
-	other, mentioned := estranged(formula, source.outputs)
+// produced. Of an error only whether it is nil is compared.
+func (v *fnVerifier) dependsOn(source *failureSource, facts []*logic.Term, val *logic.Term) bool {
+	if val.Sort == logic.Err {
+		val = logic.IsNil(val)
+	}
+	other, mentioned := estranged(val, source.outputs)
+	if !mentioned {
+		return false
+	}
+	stays := v.same(val, other)
+	if val.Sort == logic.Bool {
+		stays = logic.Iff(val, other)
+	}
 	opts := solver.Options{Preds: v.res.Preds, MaxSteps: quickSteps}
-	return mentioned && solver.Prove(slices.Concat(facts, source.otherwise), logic.Iff(formula, other), opts) != solver.Proved
+	return solver.Prove(slices.Concat(facts, source.otherwise()), stays, opts) != solver.Proved
 }
 
-// forgottenError is an error variable that a loop made unknown: the
-// variable, and which part of its value the error is.
-type forgottenError struct {
+// forgottenPart is one part of the value of a variable that a loop made
+// unknown: the variable, and which part.
+type forgottenPart struct {
 	variable *types.Var
 	index    int
 }
 
-// leftover is what an iteration of a loop left in an error variable that
-// the loop forgot: the name of the unknown that stands for the variable at
-// the head and after the loop, the error at the end of the body, and what
-// was known there.
+// leftover is what an iteration of a loop left in a variable that the loop
+// forgot, for one part of its value: the name of the unknown that stands
+// for that part at the head and after the loop, the part at the end of the
+// body, and what was known there.
 type leftover struct {
 	name  string
-	err   *logic.Term
+	val   *logic.Term
 	facts []*logic.Term
 }
 

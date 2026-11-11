@@ -836,3 +836,39 @@ func SavesBeforeSecondLoop(n, m int) error { // want `the contract of SavesBefor
 }
 
 //@ Ensures True
+
+// AsksHelperAfterLoop asks a verified function about the error a loop left.
+//
+// @ Requires 1 <= n <= 3
+func AsksHelperAfterLoop(n int) error {
+	var err error
+	//@ Invariant 0 <= i <= n
+	//@ Variant n - i
+	for i := 0; i < n; i++ {
+		err = external()
+	}
+	if hasFailed(err) {
+		return errAlways
+	}
+	return nil
+}
+
+//@ Ensures True
+
+// AsksHelperInLoop keeps the answer of the verified function instead.
+//
+// @ Requires 1 <= n <= 3
+func AsksHelperInLoop(n int) error {
+	var failed bool
+	//@ Invariant 0 <= i <= n
+	//@ Variant n - i
+	for i := 0; i < n; i++ {
+		failed = hasFailed(external())
+	}
+	if failed {
+		return errAlways
+	}
+	return nil
+}
+
+//@ Ensures True

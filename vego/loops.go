@@ -213,7 +213,7 @@ func (pv *pkgVerifier) freshEachIteration(pos token.Pos) bool {
 // Modifies clause is unchanged, since no write may touch it.
 func (v *fnVerifier) forget(st *state, eff *effects) *state {
 	head := st.clone()
-	v.forgotten = map[string]forgottenError{}
+	v.forgotten = map[string]forgottenPart{}
 	head.brk = v.fresh("brk", logic.Ref)
 	head.assume(logic.Le(st.brk, head.brk))
 	var variables []*types.Var
@@ -240,9 +240,7 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 		}
 		now := v.unknown(variable.Name(), variable.Type(), head)
 		for index, part := range now {
-			if part.Sort == logic.Err {
-				v.forgotten[part.Name] = forgottenError{variable: variable, index: index}
-			}
+			v.forgotten[part.Name] = forgottenPart{variable: variable, index: index}
 		}
 		head.vals[variable] = now
 		if eff.grown[variable] && isSlice(variable.Type()) {
@@ -392,12 +390,12 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 			}
 			shape.bind(end, next)
 		}
-		// An error variable the loop forgot stands, at the head, for what
-		// an earlier iteration left in it, which is recorded here; see
+		// A variable the loop forgot stands, at the head, for what an
+		// earlier iteration left in it, which is recorded here; see
 		// tieFailures.
 		for name, lost := range forgotten {
 			if held := end.vals[lost.variable]; held != nil {
-				v.left = append(v.left, leftover{name: name, err: held[lost.index], facts: slices.Clip(end.hyps)})
+				v.left = append(v.left, leftover{name: name, val: held[lost.index], facts: slices.Clip(end.hyps)})
 			}
 		}
 		checkInvariants(end, "loop invariant may not be preserved")
