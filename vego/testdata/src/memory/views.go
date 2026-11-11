@@ -757,3 +757,20 @@ func SpareField(p *Point) {
 }
 
 //@ Ensures p.X' = 1
+
+// ReturnAssigns returns a value for a named result that a pointer points
+// to. Returning assigns the result, so the pointer sees the value.
+func ReturnAssigns() (r Point, p *Point) {
+	p = &r
+	return Point{X: 1}, p
+}
+
+//@ Ensures r.X = 1 And p.X = 1
+
+// ReturnAssignsWrong claims the pointer still sees the old value.
+func ReturnAssignsWrong() (r Point, p *Point) {
+	p = &r
+	return Point{X: 1}, p // want `vego: postcondition may not hold: p\.X = 0`
+}
+
+//@ Ensures r.X = 1 And p.X = 0

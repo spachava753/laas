@@ -503,6 +503,13 @@ func (v *fnVerifier) returnStmt(s *ast.ReturnStmt, st *state) {
 
 // atReturn checks the postcondition in a final state.
 func (v *fnVerifier) atReturn(st *state, results []value, pos token.Pos) {
+	// Returning assigns the results to the result variables. Only one that
+	// lives in memory can be seen afterwards, through a pointer to it.
+	for i, result := range v.fn.results {
+		if held := st.vals[result]; v.boxed[result] && held != nil && results[i] != nil {
+			v.put(st, v.cellsOf(result.Type()), held[0], held[1], results[i])
+		}
+	}
 	env := &specEnv{v: v, sink: st, fn: v.fn, args: v.entry, results: results, now: memory{}, post: st.mem, before: v.entryBrk}
 	for _, c := range v.fn.ensures {
 		v.checkClause(c, env, st, nil, pos, "postcondition may not hold")
