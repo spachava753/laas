@@ -1036,3 +1036,22 @@ func OneMoreNothing(n int) int {
 }
 
 //@ Ensures result = n + 1
+
+// PointerOrMap compares a pointer with a map, which are different things.
+//
+// @ Requires p = m // want `vego: in Requires annotation: a pointer can only be compared with a pointer or with nil`
+func PointerOrMap(p *Point, m map[int]int) {}
+
+// NothingOrMap does so with a pointer to a value without size.
+//
+// @ Requires p = m // want `vego: in Requires annotation: a pointer can only be compared with a pointer or with nil`
+func NothingOrMap(p *struct{}, m map[int]int) {}
+
+// SameMap compares two maps, which is fine.
+//
+// @ Requires m = n
+func SameMap(m, n map[int]int) bool {
+	return len(m) == len(n)
+}
+
+//@ Ensures result

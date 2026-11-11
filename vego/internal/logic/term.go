@@ -217,9 +217,23 @@ func Pair(ref, at *Term) *Term {
 	return node(OpPair, Ref, ref, at)
 }
 
-// Comparable reports whether RefEq can compare the two.
-func Comparable(a, b *Term) bool {
-	return a.Op != OpPair || b.Op != OpPair || (len(a.Args) == 2 && len(b.Args) == 2)
+// Incomparable says why two references cannot be compared, or returns ""
+// if they can: a pointer with a pointer or with nil, and anything that is
+// not a pointer, such as a map, with its like.
+func Incomparable(a, b *Term) string {
+	isNil := func(t *Term) bool { return t.Op == OpIntLit && t.Val == 0 }
+	switch {
+	case a.Op != OpPair && b.Op != OpPair:
+		return ""
+	case a.Op != OpPair || b.Op != OpPair:
+		if isNil(a) || isNil(b) {
+			return ""
+		}
+		return "a pointer can only be compared with a pointer or with nil"
+	case len(a.Args) != 2 || len(b.Args) != 2:
+		return "pointers to values of size zero may or may not be equal, so they can only be compared with nil"
+	}
+	return ""
 }
 
 // RefEq returns the formula stating that two pointers, or a pointer and
