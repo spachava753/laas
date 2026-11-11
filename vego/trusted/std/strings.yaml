@@ -37,6 +37,7 @@ trusted:
     requires:
       - "count >= 0"
       - "|s| * count <= MaxAlloc"
+      - "|s| * count <= MaxInt"
     ensures:
       - "|result| = |s| * count"
     modifies: []

@@ -526,7 +526,7 @@ func claimsChange(xs []int) {}
 //
 // @ Requires |xs| > 0 And xs[0] = 1
 func UsesClaimsChange(xs []int) {
-	claimsChange(xs) // want `vego: cannot verify UsesClaimsChange: claimsChange has a contract that could not be understood` `vego: the trusted contract of trust.claimsChange \(trusted.yaml:\d+\) cannot be used: its ensures "xs'\[0\] = 7" describes xs after the call, but its modifies lists nothing reached from xs, so the call cannot have changed it`
+	claimsChange(xs) // want `vego: cannot verify UsesClaimsChange: claimsChange has a contract that could not be understood` `vego: the trusted contract of trust.claimsChange \(trusted.yaml:\d+\) cannot be used: its ensures "xs'\[0\] = 7" describes xs after the call, but nothing its modifies lists is memory of that kind, so the call cannot have changed it`
 }
 
 //@ Ensures xs'[0] = 99
@@ -578,3 +578,41 @@ func LoopsOverFailures(n int) (err error) {
 }
 
 //@ Ensures True
+
+// box holds a number.
+type box struct{ X int }
+
+func setThrough(p, q *box) { p.X = 1 }
+
+// SeenThroughOther relies on a contract that describes, through one
+// parameter, what the function writes through another that is the same.
+//
+// @ Requires p != nil
+// @ Modifies p
+func SeenThroughOther(p *box) int {
+	setThrough(p, p)
+	return p.X
+}
+
+//@ Ensures result = 1
+
+// never returns false; its contract says less.
+func never(s []byte) bool { return false }
+
+//@ Ensures result -> (Forall k in [0, |s|) : s[k] < 0)
+
+func nonnegative(s []byte) {}
+
+// NeverTaken calls a trusted function on a path that cannot be taken,
+// which only shows once the types of the bytes are taken into account. The
+// contract of the function is not to blame for that.
+//
+// @ Requires |s| = 1
+func NeverTaken(s []byte) int {
+	if never(s) {
+		nonnegative(s)
+	}
+	return 0
+}
+
+//@ Ensures result = 0

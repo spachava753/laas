@@ -31,10 +31,15 @@ func (pv *pkgVerifier) intRange(t types.Type) (lo, hi *big.Int, ok bool) {
 }
 
 // typeFact states what a value's Go type guarantees: an integer lies in the
-// range of its type, and a slice is no longer than the largest int.
+// range of its type, and a string is no longer than an allocation can be
+// and than an int can count, whichever is less on the platform.
 func (pv *pkgVerifier) typeFact(value *logic.Term, t types.Type) *logic.Term {
 	if value.Sort.IsSeq() {
-		return logic.Le(logic.Len(value), logic.BigLit(pv.maxAlloc()))
+		longest := pv.maxAlloc()
+		if _, most, _ := pv.intRange(types.Typ[types.Int]); most.Cmp(longest) < 0 {
+			longest = most
+		}
+		return logic.Le(logic.Len(value), logic.BigLit(longest))
 	}
 	lo, hi, ok := pv.intRange(t)
 	if !ok || value.Sort != logic.Int {

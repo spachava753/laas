@@ -507,24 +507,6 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 			fn.defect("its parameter %s has a name that means something else in a contract", name)
 		}
 	}
-	// A primed path describes memory after the call. If modifies lists
-	// nothing reached from the same parameter, that memory is as it was,
-	// and a clause saying otherwise could only contradict the caller.
-	for _, c := range fn.ensures {
-		c.node.Walk(func(n *logic.Node) {
-			root := n
-			for root.Kind == logic.NField || root.Kind == logic.NIndex {
-				root = root.Kids[0]
-			}
-			if !n.Primed || root.Kind != logic.NIdent {
-				return
-			}
-			if !slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.name == root.Name }) {
-				fn.defect("its ensures %q describes %s after the call, but its modifies lists nothing reached from %s, so the call cannot have changed it",
-					c.text, root.Name, root.Name)
-			}
-		})
-	}
 	pv.checkTrusted(fn)
 	return fn
 }
@@ -543,6 +525,41 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 	pv.run(fn, func(v *fnVerifier) {
 		v.lenient = true
 		v.misreadAs = func(c *clause, err error) { fn.defect("in its %s %q: %v", c.kind, c.text, err) }
+		// A primed path describes memory after the call. Memory lies in
+		// tables, and a call changes a table only if modifies lists
+		// something in it; the same table is needed even when two
+		// parameters are the same object. A primed path into a table that
+		// no entry reaches describes memory that is as it was, and a clause
+		// saying otherwise could only contradict the caller.
+		reached := map[string]bool{}
+		for _, m := range fn.modifies {
+			if form, _, err := v.locateTarget(fn, m, nil, nil, nil); err == nil {
+				target{cells: form.cells, mapType: form.mapType}.regions(func(key string, _ logic.Sort) { reached[key] = true })
+			}
+		}
+		for _, c := range fn.ensures {
+			c.node.Walk(func(n *logic.Node) {
+				if !n.Primed {
+					return
+				}
+				// What the path leads to is read like a modifies entry.
+				nodes, err := logic.ParseTargets(strings.TrimSuffix(c.text[n.Start:n.End], "'"))
+				if err != nil || len(nodes) != 1 {
+					return
+				}
+				path := newModTargets(nodes, &clause{kind: c.kind, text: strings.TrimSuffix(c.text[n.Start:n.End], "'"), pos: c.pos})[0]
+				form, _, err := v.locateTarget(fn, path, nil, nil, nil)
+				if err != nil {
+					return
+				}
+				changes := false
+				target{cells: form.cells, mapType: form.mapType}.regions(func(key string, _ logic.Sort) { changes = changes || reached[key] })
+				if !changes {
+					fn.defect("its ensures %q describes %s after the call, but nothing its modifies lists is memory of that kind, so the call cannot have changed it",
+						c.text, path.text)
+				}
+			})
+		}
 		_, outcome, _ := v.contractInstance(v.enter())
 		opts := solver.Options{Preds: pv.res.Preds, MaxSteps: pv.maxSteps}
 		if solver.Prove(outcome, logic.False(), opts) == solver.Proved {

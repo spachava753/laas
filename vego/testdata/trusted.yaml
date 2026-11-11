@@ -294,3 +294,19 @@ trusted:
     ensures:
       - "result = 0"
     modifies: []
+
+  trust.setThrough:
+    reason: Test helper that writes through its first parameter.
+    requires:
+      - "p != nil And p = q"
+    ensures:
+      - "q.X' = 1"
+    modifies: [p.X]
+
+  trust.nonnegative:
+    reason: Test helper whose promise is what the type of a byte guarantees.
+    requires:
+      - "|s| = 1"
+    ensures:
+      - "s[0] >= 0"
+    modifies: []

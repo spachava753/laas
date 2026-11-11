@@ -186,9 +186,16 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	// contradicts what is known at this call, everything after the call
 	// would be provable, so that is looked for and reported. A state that
 	// was contradictory already belongs to a path that is never taken.
+	// Resolving the promise notes what the types guarantee of the memory it
+	// reads, so that is done before the state is looked at for the first
+	// time; a contradiction among those facts is not the contract's.
+	promised := make([]*logic.Term, len(fn.ensures))
+	for i, c := range fn.ensures {
+		promised[i] = v.calleeFormula(c, post)
+	}
 	dead := fn.trust == nil || v.quickly(st, guard, logic.False())
-	for _, c := range fn.ensures {
-		st.assume(logic.Implies(logic.And(guard...), v.calleeFormula(c, post)))
+	for _, promise := range promised {
+		st.assume(logic.Implies(logic.And(guard...), promise))
 	}
 	if !dead && v.quickly(st, guard, logic.False()) {
 		v.report(call.Pos(), "the trusted contract of %s cannot be true of this call: what it promises contradicts what is known here", name)
