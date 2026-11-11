@@ -402,16 +402,14 @@ func stretchesOf(cells []cell, at *logic.Term) []stretch {
 // Every position a write reaches must be covered by some listed target,
 // which need not be the same for all of them: a write of a whole struct is
 // allowed when each of its fields is listed, and a write of a run of
-// elements when each element is. The nil map cannot be written at all, so
-// what would write it changes nothing and needs no permission.
+// elements when each element is. Nothing can be written through a nil
+// pointer, a nil slice, or a nil map, so a call that may modify what one of
+// them refers to changes nothing there and needs no permission for it.
 func (v *fnVerifier) checkWrite(st *state, guard []*logic.Term, w written, pos token.Pos, what string) {
 	if len(w.parts) == 0 {
 		return
 	}
-	created := logic.Le(v.entryBrk, w.ref)
-	if w.parts[0].lo == nil {
-		created = logic.Or(created, logic.Eq(w.ref, logic.RefLit(0)))
-	}
+	created := logic.Or(logic.Le(v.entryBrk, w.ref), logic.Eq(w.ref, logic.RefLit(0)))
 	covers := make([][]stretch, len(v.frame))
 	var candidates []int
 	for i, t := range v.frame {

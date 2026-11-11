@@ -387,10 +387,10 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		v.branch(call.Pos())
 		next := st.clone()
 		next.assume(inPlace)
-		start, end := v.elementAt(base, t, length), v.elementAt(base, t, grown)
+		start := v.elementAt(base, t, length)
 		into := written{ref: ref}
-		for _, key := range keys {
-			into.parts = append(into.parts, stretch{key: key, lo: start, hi: end})
+		for j := range added {
+			into.parts = append(into.parts, stretchesOf(cells, logic.Add(start, logic.IntLit(int64(j)*step)))...)
 		}
 		v.checkWrite(next, nil, into, call.Pos(),
 			fmt.Sprintf("append may write into the capacity of %s", types.ExprString(call.Args[0])))

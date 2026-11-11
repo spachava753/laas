@@ -882,3 +882,53 @@ func EndsOnly(ps []Point) {
 	ps[2].X = 1
 	ps[1].X = 1 // want `vego: ps\[1\]\.X is assigned, which EndsOnly may not modify; list it in a //@ Modifies clause`
 }
+
+// ReplaceFirst appends into the capacity of a slice it emptied, which
+// writes the one element it listed.
+//
+// @ Requires |ps| = 1
+// @ Modifies ps[0]
+func ReplaceFirst(ps []Point) []Point {
+	ps = ps[:0]
+	return append(ps, Point{X: 1})
+}
+
+//@ Ensures |result| = 1 And result[0].X = 1
+
+// ReplaceSecond appends to the slice as it is, which writes past the one
+// element it listed when there is room.
+//
+// @ Requires |ps| = 1
+// @ Modifies ps[0]
+func ReplaceSecond(ps []Point) []Point {
+	return append(ps, Point{X: 1}) // want `vego: append may write into the capacity of ps, which ReplaceSecond may not modify; list it in a //@ Modifies clause`
+}
+
+//@ Ensures |result| = 2
+
+// setIfPresent writes through its pointer unless it is nil.
+//
+// @ Modifies p.X
+func setIfPresent(p *Point) {
+	if p != nil {
+		p.X = 1
+	}
+}
+
+//@ Ensures p != nil -> p.X' = 1
+
+// PassNil passes nil, through which nothing can be written.
+func PassNil() int {
+	setIfPresent(nil)
+	return 0
+}
+
+//@ Ensures result = 0
+
+// PassMaybeNil passes a pointer that may or may not be nil and that it may
+// not write through.
+func PassMaybeNil(p *Point) {
+	setIfPresent(p) // want `vego: setIfPresent may modify what it calls p\.X, which PassMaybeNil may not modify; list it in a //@ Modifies clause`
+}
+
+//@ Ensures True
