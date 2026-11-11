@@ -73,15 +73,14 @@ type fnVerifier struct {
 	reached map[*funcInfo]bool
 	// sources holds the calls reached so far whose failure nothing
 	// predicts, and failures the returns of an error. A source only counts
-	// if the function fails because of it; see tieFailures. forgotten names
-	// the errors a loop made unknown, and looping counts the loop bodies
-	// being executed.
-	// made lists the names of the constants made so far, in order.
+	// if the function fails because of it; see tieFailures. made lists the
+	// names of the constants made so far, in order, and forgotten holds, by
+	// the name of the unknown that stands for it, each error variable a
+	// loop made unknown.
 	made      []string
 	sources   []failureSource
 	failures  []failure
-	forgotten map[string]bool
-	looping   int
+	forgotten map[string]forgottenError
 	// lenient is set when only the contract of a function is examined, not
 	// its body: parameters and results of types vego does not model are
 	// then left without a value instead of being an error.
@@ -106,7 +105,7 @@ func (v *fnVerifier) allowEffects(e ast.Expr) {
 func (pv *pkgVerifier) run(fn *funcInfo, task func(v *fnVerifier)) {
 	v := &fnVerifier{
 		pkgVerifier: pv, fn: fn, entry: map[*types.Var]value{}, names: map[string]int{},
-		reached: map[*funcInfo]bool{}, forgotten: map[string]bool{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{},
+		reached: map[*funcInfo]bool{}, forgotten: map[string]forgottenError{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{},
 	}
 	defer func() {
 		switch r := recover().(type) {

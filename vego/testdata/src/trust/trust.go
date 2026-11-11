@@ -774,3 +774,21 @@ func Translates() error {
 }
 
 //@ Ensures True
+
+// LoopsWithOwnError calls a function that may fail inside a loop that also
+// assigns an error of its own, which is what it returns.
+//
+// @ Requires 0 <= n <= 10
+func LoopsWithOwnError(n int) error { // want `the contract of LoopsWithOwnError would also be met by a function that always returns an error`
+	err := errAlways
+	//@ Invariant 0 <= i <= n
+	//@ Invariant err != nil
+	//@ Variant n - i
+	for i := 0; i < n; i++ {
+		_ = external()
+		err = errAlways
+	}
+	return err
+}
+
+//@ Ensures True

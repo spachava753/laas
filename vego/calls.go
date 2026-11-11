@@ -425,7 +425,7 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state,
 			continue
 		}
 		if v.canReach(path) {
-			source := failureSource{err: results[index][0], inLoop: v.looping > 0, known: len(st.chosen), outputs: map[string]bool{}}
+			source := failureSource{err: results[index][0], known: len(st.chosen), outputs: map[string]bool{}}
 			if local {
 				source.callee = fn
 			}
@@ -446,13 +446,12 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state,
 }
 
 // failureSource is a call whose failure nothing predicts: the error it
-// returned, the callee if it is verified in this package, whether the call
-// was made inside a loop, the names of everything it produced, and how many
-// branches had been taken when it returned.
+// returned, the callee if it is verified in this package, the names of
+// everything it produced, and how many branches had been taken when it
+// returned.
 type failureSource struct {
 	err    *logic.Term
 	callee *funcInfo
-	inLoop bool
 	// outputs also names what later calls returned that were given any of
 	// the results.
 	outputs map[string]bool
@@ -510,23 +509,20 @@ type failure struct {
 // reads of the results out of memory is not followed, and a function that
 // depends on the call only in that way is not excused.
 //
-// Inside a loop none of this can be seen once the loop has forgotten the
-// variable that held the error, so an error forgotten by a loop counts for
-// the calls made in loops.
+// A loop forgets the variables it assigns. For an error among them, the end
+// of the body is where it is seen whether what an iteration leaves in the
+// variable depends on a call made in the body; the unknown that stands for
+// the variable afterwards then depends on that call too.
 func (v *fnVerifier) tieFailures() {
-	for _, source := range v.sources {
+	for index := range v.sources {
+		source := &v.sources[index]
 		tied := slices.ContainsFunc(v.failures, func(f failure) bool {
-			opts := solver.Options{Preds: v.res.Preds, MaxSteps: quickSteps}
-			known := slices.Concat(f.facts, source.otherwise)
-			depends := func(formula *logic.Term) bool {
-				other, mentioned := estranged(formula, source.outputs)
-				return mentioned && solver.Prove(known, logic.Iff(formula, other), opts) != solver.Proved
-			}
-			if (source.inLoop && v.forgotten[f.err.Name]) || depends(logic.IsNil(f.err)) {
+			if slices.Contains(v.forgotten[f.err.Name].from, index) || v.dependsOn(source, f.facts, logic.IsNil(f.err)) {
 				return true
 			}
+			opts := solver.Options{Preds: v.res.Preds, MaxSteps: quickSteps}
 			return source.known <= len(f.path) && slices.ContainsFunc(f.path[source.known:], func(taken choice) bool {
-				return solver.Prove(f.facts[:taken.before], taken.cond, opts) != solver.Proved && depends(taken.cond)
+				return solver.Prove(f.facts[:taken.before], taken.cond, opts) != solver.Proved && v.dependsOn(source, f.facts, taken.cond)
 			})
 		})
 		switch {
@@ -537,6 +533,26 @@ func (v *fnVerifier) tieFailures() {
 			v.outside = true
 		}
 	}
+}
+
+// dependsOn reports whether a formula depends on what a call produced: it
+// mentions some of it, and cannot be proved, from the facts given, to stay
+// as it is when all of it is replaced by other values the call could have
+// produced.
+func (v *fnVerifier) dependsOn(source *failureSource, facts []*logic.Term, formula *logic.Term) bool {
+	other, mentioned := estranged(formula, source.outputs)
+	opts := solver.Options{Preds: v.res.Preds, MaxSteps: quickSteps}
+	return mentioned && solver.Prove(slices.Concat(facts, source.otherwise), logic.Iff(formula, other), opts) != solver.Proved
+}
+
+// forgottenError is an error variable that a loop made unknown: the
+// variable, which part of its value the error is, and the calls, by their
+// place in the list of sources, that what an iteration leaves in it depends
+// on.
+type forgottenError struct {
+	variable *types.Var
+	index    int
+	from     []int
 }
 
 // calleeFormula resolves a callee's postcondition at a call site. A result of
