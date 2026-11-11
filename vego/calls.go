@@ -182,22 +182,38 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		}
 	}
 	post := &specEnv{v: v, sink: st, fn: fn, args: args, results: results, now: before, post: st.mem, before: existed}
+	// What the types guarantee of everything the call took and produced.
+	// The state only holds such facts for the elements that were actually
+	// read, and both the check of a trusted promise below and the proof
+	// that this call succeeds may need the rest.
+	involved := slices.Clip(guard)
+	for i, result := range results {
+		if result != nil {
+			involved = append(involved, v.deepFacts(st.mem, result, sig.Results().At(i).Type(), st.brk))
+		}
+	}
+	for _, param := range fn.params {
+		if args[param] != nil {
+			involved = append(involved, v.deepFacts(before, args[param], param.Type(), st.brk),
+				v.deepFacts(st.mem, args[param], param.Type(), st.brk))
+		}
+	}
 	// Nobody has proved what a trusted contract promises. If the promise
 	// contradicts what is known at this call, everything after the call
 	// would be provable, so that is looked for and reported. A state that
-	// was contradictory already belongs to a path that is never taken.
-	// Resolving the promise notes what the types guarantee of the memory it
-	// reads, so that is done before the state is looked at for the first
-	// time; a contradiction among those facts is not the contract's.
+	// was contradictory already, given what the types guarantee, belongs to
+	// a path that is never taken, and the contract is not to blame for it.
+	// Resolving the promise notes more of what the types guarantee, so that
+	// is done before the state is looked at for the first time.
 	promised := make([]*logic.Term, len(fn.ensures))
 	for i, c := range fn.ensures {
 		promised[i] = v.calleeFormula(c, post)
 	}
-	dead := fn.trust == nil || v.quickly(st, guard, logic.False())
+	dead := fn.trust == nil || v.quickly(st, involved, logic.False())
 	for _, promise := range promised {
 		st.assume(logic.Implies(logic.And(guard...), promise))
 	}
-	if !dead && v.quickly(st, guard, logic.False()) {
+	if !dead && v.quickly(st, involved, logic.False()) {
 		v.report(call.Pos(), "the trusted contract of %s cannot be true of this call: what it promises contradicts what is known here", name)
 	}
 	// A verified function has proved the invariants of what it hands back.
@@ -212,21 +228,6 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 			if result != nil {
 				v.assumeInvariants(st, guard, st.mem, result, sig.Results().At(i).Type())
 			}
-		}
-	}
-	// What the types guarantee of everything the call took and produced,
-	// which a proof that this call succeeds may need: the state only holds
-	// such facts for the elements that were actually read.
-	involved := slices.Clip(guard)
-	for i, result := range results {
-		if result != nil {
-			involved = append(involved, v.deepFacts(st.mem, result, sig.Results().At(i).Type(), st.brk))
-		}
-	}
-	for _, param := range fn.params {
-		if args[param] != nil {
-			involved = append(involved, v.deepFacts(before, args[param], param.Type(), st.brk),
-				v.deepFacts(st.mem, args[param], param.Type(), st.brk))
 		}
 	}
 	v.noteFailureSource(fn, results, st, involved)

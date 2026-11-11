@@ -162,6 +162,11 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 				return false
 			}
 			switch n := n.(type) {
+			case *ast.FuncLit:
+				// Writing a function down does not run it. Calling it, or
+				// handing it to another package, is seen where that
+				// happens.
+				return false
 			case *ast.GoStmt:
 				found = at(n.Pos(), "a goroutine is started")
 			case *ast.CallExpr:
@@ -182,6 +187,14 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 						found = scan(decl.Body)
 					}
 				default:
+					// A type argument can carry code too: the methods of a
+					// type of this package.
+					for _, argument := range pv.typeArguments(n) {
+						if _, basic := types.Unalias(argument).(*types.Basic); !basic {
+							found = at(n.Pos(), fmt.Sprintf("the type %s is handed to %s.%s, which may call its methods",
+								argument, callee.Pkg().Name(), callee.Name()))
+						}
+					}
 					operands := slices.Clone(n.Args)
 					if sel, ok := ast.Unparen(n.Fun).(*ast.SelectorExpr); ok && pv.info.Selections[sel] != nil {
 						operands = append(operands, sel.X)
@@ -205,6 +218,30 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 		}
 	}
 	return ""
+}
+
+// typeArguments returns the type arguments a call instantiates its callee
+// with, written out or inferred.
+func (pv *pkgVerifier) typeArguments(call *ast.CallExpr) []types.Type {
+	fun := ast.Unparen(call.Fun)
+	switch indexed := fun.(type) {
+	case *ast.IndexExpr:
+		fun = indexed.X
+	case *ast.IndexListExpr:
+		fun = indexed.X
+	}
+	if sel, ok := fun.(*ast.SelectorExpr); ok {
+		fun = sel.Sel
+	}
+	id, ok := fun.(*ast.Ident)
+	if !ok {
+		return nil
+	}
+	var arguments []types.Type
+	for argument := range pv.info.Instances[id].TypeArgs.Types() {
+		arguments = append(arguments, argument)
+	}
+	return arguments
 }
 
 // outcome is what verifying a function established about its failure,

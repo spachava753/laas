@@ -526,7 +526,7 @@ func claimsChange(xs []int) {}
 //
 // @ Requires |xs| > 0 And xs[0] = 1
 func UsesClaimsChange(xs []int) {
-	claimsChange(xs) // want `vego: cannot verify UsesClaimsChange: claimsChange has a contract that could not be understood` `vego: the trusted contract of trust.claimsChange \(trusted.yaml:\d+\) cannot be used: its ensures "xs'\[0\] = 7" describes xs after the call, but nothing its modifies lists is memory of that kind, so the call cannot have changed it`
+	claimsChange(xs) // want `vego: cannot verify UsesClaimsChange: claimsChange has a contract that could not be understood` `vego: the trusted contract of trust.claimsChange \(trusted.yaml:\d+\) cannot be used: its ensures "xs'\[0\] = 7" describes memory after the call with xs', but its modifies lists nothing, so the call changes no memory; drop the prime or list what the function writes`
 }
 
 //@ Ensures xs'[0] = 99
@@ -611,6 +611,37 @@ func nonnegative(s []byte) {}
 func NeverTaken(s []byte) int {
 	if never(s) {
 		nonnegative(s)
+	}
+	return 0
+}
+
+//@ Ensures result = 0
+
+// parent points to a child.
+type parent struct{ Child *box }
+
+func orphan(p *parent) { p.Child = nil }
+
+// Orphans relies on a contract that says what a pointer field is after the
+// call.
+//
+// @ Requires p != nil
+// @ Modifies p
+func Orphans(p *parent) bool {
+	orphan(p)
+	return p.Child == nil
+}
+
+//@ Ensures result
+
+func allNonnegative(s []byte) {}
+
+// NeverTakenAll is NeverTaken with a promise about every byte.
+//
+// @ Requires |s| = 1
+func NeverTakenAll(s []byte) int {
+	if never(s) {
+		allNonnegative(s)
 	}
 	return 0
 }

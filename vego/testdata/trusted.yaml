@@ -310,3 +310,19 @@ trusted:
     ensures:
       - "s[0] >= 0"
     modifies: []
+
+  trust.orphan:
+    reason: Test helper that clears a pointer field.
+    requires:
+      - "p != nil"
+    ensures:
+      - "p.Child' = nil"
+    modifies: [p]
+
+  trust.allNonnegative:
+    reason: Test helper whose promise is what the type of every byte guarantees.
+    requires:
+      - "|s| = 1"
+    ensures:
+      - "Forall k in [0, |s|) : s[k] >= 0"
+    modifies: []
