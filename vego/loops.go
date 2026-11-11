@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"go/version"
 	"maps"
 	"slices"
 	"strings"
@@ -186,6 +187,20 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 	}
 }
 
+// freshEachIteration reports whether the loop at a position gives each
+// iteration variables of its own, as Go does from version 1.22 on. The
+// version is that of the file, set by go.mod or a build constraint; a file
+// without one is compiled as the newest Go.
+func (pv *pkgVerifier) freshEachIteration(pos token.Pos) bool {
+	for _, file := range pv.pass.Files {
+		if file.FileStart <= pos && pos < file.FileEnd {
+			language := pv.info.FileVersions[file]
+			return language == "" || version.Compare(language, "go1.22") >= 0
+		}
+	}
+	return true
+}
+
 // forget gives fresh values to everything a loop may change, which then
 // stand for the state at the start of an arbitrary iteration. st is the
 // state before the loop, which the result is a copy of.
@@ -210,6 +225,19 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 	slices.SortFunc(variables, func(a, b *types.Var) int { return int(a.Pos() - b.Pos()) })
 	for _, variable := range variables {
 		before := st.vals[variable]
+		if v.boxed[variable] {
+			// A variable of the loop that lives in memory is a new one in
+			// each iteration: the one the loop started with, or one made
+			// since.
+			ref := v.fresh(variable.Name(), logic.Ref)
+			head.vals[variable] = value{ref, logic.IntLit(0)}
+			made := logic.And(logic.Lt(logic.IntLit(0), ref), logic.Lt(ref, head.brk))
+			if v.pass.TypesSizes.Sizeof(variable.Type()) > 0 {
+				made = logic.And(logic.Le(st.brk, ref), logic.Lt(ref, head.brk))
+			}
+			head.assume(logic.Or(logic.Eq(ref, before[0]), made))
+			continue
+		}
 		now := v.unknown(variable.Name(), variable.Type(), head)
 		head.vals[variable] = now
 		if eff.grown[variable] && isSlice(variable.Type()) {
@@ -289,6 +317,11 @@ type loopShape struct {
 	// counter and the current element in the loop variables.
 	limit *logic.Term
 	bind  func(st *state, counter *logic.Term)
+	// renewed holds the variables a for statement declares that live in
+	// memory. Each iteration has its own: at the end of an iteration, before
+	// the post statement, the next one is created with the value of the
+	// current one, and pointers to the current one keep pointing to it.
+	renewed []*types.Var
 }
 
 // loop verifies a loop by induction. The invariants are checked on entry.
@@ -339,16 +372,7 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 		v.check(head, nil, logic.Le(logic.IntLit(0), before), shape.pos,
 			"loop variant may be negative: %s", spec.variant.text)
 	}
-	var after func(end *state)
-	after = func(end *state) {
-		if shape.post != nil {
-			// The post statement may continue in more than one state.
-			post := shape.post
-			shape.post = nil
-			v.stmt(post, end, ctrl{}, after)
-			shape.post = post
-			return
-		}
+	finish := func(end *state) {
 		if shape.limit != nil {
 			next := logic.Add(counter, logic.IntLit(1))
 			if shape.step != nil {
@@ -362,24 +386,50 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 				"loop variant may not decrease: %s", spec.variant.text)
 		}
 	}
+	after := func(end *state) {
+		for _, variable := range shape.renewed {
+			v.bind(end, variable, v.current(end, variable))
+		}
+		if shape.post != nil {
+			// The post statement may continue in more than one state.
+			v.stmt(shape.post, end, ctrl{}, finish)
+			return
+		}
+		finish(end)
+	}
 	v.seq(shape.body.List, shape.body.Lbrace, shape.body.Rbrace, head, ctrl{brk: k, cont: after}, after)
 }
 
-func (v *fnVerifier) forStmt(s *ast.ForStmt, spec *loopSpec, st *state, k func(*state)) {
+// forStmt verifies a for statement. renewed lists the variables its
+// initializer declared that live in memory, once the initializer has run.
+func (v *fnVerifier) forStmt(s *ast.ForStmt, spec *loopSpec, renewed []*types.Var, st *state, k func(*state)) {
 	if s.Init != nil {
+		// Since Go 1.22 each iteration has variables of its own. Before
+		// that the loop had one set, which needs nothing special.
+		if init, ok := s.Init.(*ast.AssignStmt); ok && init.Tok == token.DEFINE && v.freshEachIteration(s.Pos()) {
+			for _, lhs := range init.Lhs {
+				id, _ := lhs.(*ast.Ident)
+				if variable, ok := v.info.Defs[id].(*types.Var); ok && v.boxed[variable] {
+					renewed = append(renewed, variable)
+				}
+			}
+		}
 		// The initializer may continue in more than one state.
 		v.stmt(s.Init, st, ctrl{}, func(next *state) {
 			without := *s
 			without.Init = nil
-			v.forStmt(&without, spec, next, k)
+			v.forStmt(&without, spec, renewed, next, k)
 		})
 		return
 	}
 	if spec.variant == nil {
 		v.report(s.Pos(), "loop needs a //@ Variant annotation to prove that it terminates")
 	}
-	shape := loopShape{pos: s.Pos(), body: s.Body, post: s.Post, spec: spec, always: s.Cond == nil}
+	shape := loopShape{pos: s.Pos(), body: s.Body, post: s.Post, spec: spec, always: s.Cond == nil, renewed: renewed}
 	shape.effects = v.effects(s.Body, s.Post)
+	for _, variable := range renewed {
+		shape.effects.whole[variable] = true
+	}
 	shape.cond = func(st *state) *logic.Term {
 		if s.Cond == nil {
 			return logic.True()
@@ -407,6 +457,10 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 		return nil
 	}
 	key, element := variable(s.Key), variable(s.Value)
+	if (v.boxed[key] || v.boxed[element]) && !v.freshEachIteration(s.Pos()) {
+		v.unsupported(s.Pos(), "before Go 1.22 the iterations of a range loop share their variables, "+
+			"which is not supported when the address of one is taken")
+	}
 	ranged := v.info.TypeOf(s.X)
 	sort, single := sortOf(ranged)
 	switch {

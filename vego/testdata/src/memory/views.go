@@ -802,3 +802,48 @@ func IncPickedWrong(cs []Counter) int {
 }
 
 //@ Ensures result = 1
+
+// LoopVariableKept keeps a pointer to the variable of a for loop. Every
+// iteration has a variable of its own, so the pointer stays at the one of
+// the last iteration that ran, which the post statement did not advance.
+func LoopVariableKept() int {
+	var p *Point
+	//@ Invariant 0 <= x.X <= 2
+	//@ Invariant x.X > 0 -> (p != nil And p.X = x.X - 1)
+	//@ Variant 2 - x.X
+	for x := (Point{}); x.X < 2; x.X++ {
+		p = &x
+	}
+	return p.X
+}
+
+//@ Ensures result = 1
+
+// LoopVariableShared claims that the iterations share one variable.
+func LoopVariableShared() int {
+	var p *Point
+	//@ Invariant 0 <= x.X <= 2
+	//@ Invariant x.X > 0 -> (p != nil And p.X = x.X)
+	//@ Variant 2 - x.X
+	for x := (Point{}); x.X < 2; x.X++ { // want `vego: loop invariant may not be preserved: x\.X > 0 -> \(p != nil And p\.X = x\.X\)`
+		p = &x
+	}
+	return p.X
+}
+
+//@ Ensures result = 2
+
+// LoopVariableCounts uses such a variable only inside the loop.
+//
+// @ Requires 0 <= n <= 100
+func LoopVariableCounts(n int) int {
+	total := 0
+	//@ Invariant 0 <= c.n <= n And c.limit = n And total = c.n
+	//@ Variant n - c.n
+	for c := (Counter{limit: n}); c.n < n; c.Inc() {
+		total++
+	}
+	return total
+}
+
+//@ Ensures result = n

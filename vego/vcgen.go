@@ -443,7 +443,7 @@ func (v *fnVerifier) seq(list []ast.Stmt, from, to token.Pos, st *state, c ctrl,
 	rest := func(next *state) { v.seq(list[1:], list[0].End(), to, next, c, k) }
 	switch s := list[0].(type) {
 	case *ast.ForStmt:
-		v.forStmt(s, spec, st, rest)
+		v.forStmt(s, spec, nil, st, rest)
 	case *ast.RangeStmt:
 		v.rangeStmt(s, spec, st, rest)
 	default:
