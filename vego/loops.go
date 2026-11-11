@@ -8,7 +8,6 @@ import (
 	"go/version"
 	"maps"
 	"slices"
-	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"golang.org/x/tools/go/types/typeutil"
@@ -256,6 +255,7 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 	type writes struct {
 		sort    logic.Sort
 		precise bool
+		flat    bool
 		targets []target
 	}
 	regions := map[string]*writes{}
@@ -275,7 +275,10 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 		}
 		t.regions(func(key string, sort logic.Sort) {
 			if regions[key] == nil {
-				regions[key] = &writes{sort: sort, precise: true}
+				// The count of a map is one number for each map; every
+				// other region has a sequence for each allocation.
+				flat := t.mapType != nil && key == mapOwner(t.mapType)+countLeaf.path
+				regions[key] = &writes{sort: sort, precise: true, flat: flat}
 			}
 			regions[key].precise = regions[key].precise && precise
 			regions[key].targets = append(regions[key].targets, t)
@@ -283,14 +286,11 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 	}
 	for _, key := range slices.Sorted(maps.Keys(regions)) {
 		written := regions[key]
-		// The count of a map is one number for each map; every other
-		// region has a sequence for each allocation.
-		flat := strings.HasSuffix(key, countLeaf.path) && strings.HasPrefix(key, "map ")
 		sort := logic.SeqOf(logic.SeqOf(written.sort))
-		if flat {
+		if written.flat {
 			sort = logic.SeqOf(written.sort)
 		}
-		known := &layer{prev: st.mem.region(key, sort), bound: st.brk, targets: written.targets, flat: flat}
+		known := &layer{prev: st.mem.region(key, sort), bound: st.brk, targets: written.targets, flat: written.flat}
 		if !written.precise {
 			known.bound, known.targets = v.entryBrk, nil
 			for _, t := range v.frame {

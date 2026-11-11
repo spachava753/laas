@@ -422,3 +422,36 @@ func RemoveFromOther(m map[int]int) {
 }
 
 //@ Ensures True
+
+// ClearsSlices writes a map whose values are slices in a loop.
+//
+// @ Requires m != nil And n >= 0
+// @ Modifies m
+func ClearsSlices(m map[int][]int, n int) int {
+	//@ Invariant 0 <= i <= n And (i > 0 -> has(m, 0) And |m[0]| = 0)
+	//@ Variant n - i
+	for i := 0; i < n; i++ {
+		m[0] = nil
+	}
+	if n > 0 {
+		return len(m[0])
+	}
+	return 0
+}
+
+//@ Ensures result = 0
+
+// ClearsSlicesWrong claims the loop left a value in place.
+//
+// @ Requires m != nil And n > 0 And has(m, 0) And |m[0]| = 3
+// @ Modifies m
+func ClearsSlicesWrong(m map[int][]int, n int) int {
+	//@ Invariant 0 <= i <= n
+	//@ Variant n - i
+	for i := 0; i < n; i++ {
+		m[0] = nil
+	}
+	return len(m[0]) // want `vego: postcondition may not hold: result = 3`
+}
+
+//@ Ensures result = 3

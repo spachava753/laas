@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -119,6 +120,10 @@ func main() {
 		run := analyzer.Run
 		analyzer.Run = func(pass *analysis.Pass) (any, error) {
 			if excludedPackages.Match(pass.Pkg.Path()) {
+				// The driver insists on a result of the declared type.
+				if analyzer.ResultType != nil {
+					return reflect.Zero(analyzer.ResultType).Interface(), nil
+				}
 				return nil, nil
 			}
 			return run(pass)
