@@ -3,7 +3,9 @@ package solver
 import (
 	"fmt"
 	"math"
+	"math/big"
 	"math/rand/v2"
+	"strings"
 	"testing"
 
 	"github.com/spachava753/laas/vego/internal/logic"
@@ -25,7 +27,33 @@ func (s seqValue) with(i, v int64) seqValue {
 	}}
 }
 
+// undefined is panicked when a model gives a term no value that the test can
+// compare with the logic: a number outside 64 bits, a sequence too long to
+// number, or a quantifier over all integers that a finite search leaves open.
+// Such a model says nothing about the problem and is passed over.
+type undefined struct{}
+
+// plus adds two numbers of a model, which are mathematical integers.
+func plus(a, b int64) int64 {
+	c := a + b
+	if b != 0 && (c > a) != (b > 0) {
+		panic(undefined{})
+	}
+	return c
+}
+
+// times multiplies two numbers of a model, which are mathematical integers.
+func times(a, b int64) int64 {
+	product := new(big.Int).Mul(big.NewInt(a), big.NewInt(b))
+	if !product.IsInt64() {
+		panic(undefined{})
+	}
+	return product.Int64()
+}
+
 type model struct {
+	// ints holds the integers, the booleans, the references, and the
+	// errors, each error as a number that is zero exactly for nil.
 	ints map[string]int64
 	seqs map[string]seqValue
 	// maps holds the sequences of sequences, as total functions of the index.
@@ -33,10 +61,19 @@ type model struct {
 	// keys numbers the sequences met so far by their contents, which is a
 	// function that tells exactly the equal sequences apart from the rest.
 	keys map[string]int64
+	// preds holds the definitions of the predicates.
+	preds map[string]*logic.PredDef
+	// wild selects one of a few unrelated meanings for division by zero,
+	// which the logic leaves open, and divided records that one was used.
+	wild    int64
+	divided *bool
 }
 
 // key returns the number of a sequence.
 func (m model) key(s seqValue) int64 {
+	if s.length > 16 {
+		panic(undefined{})
+	}
 	contents := fmt.Sprint(s.length)
 	for i := int64(0); i < s.length; i++ {
 		contents += fmt.Sprint(",", s.at(i))
@@ -55,11 +92,7 @@ func (m model) table(t *logic.Term) func(index int64) seqValue {
 	if t.Op != logic.OpStore {
 		panic("unexpected sequence of sequences " + t.String())
 	}
-	base, written := m.table(t.Args[0]), m.seq(t.Args[2])
-	at, ok := m.eval(t.Args[1])
-	if !ok {
-		panic(divisionByZero{})
-	}
+	base, written, at := m.table(t.Args[0]), m.seq(t.Args[2]), m.eval(t.Args[1])
 	return func(index int64) seqValue {
 		if index == at {
 			return written
@@ -69,56 +102,89 @@ func (m model) table(t *logic.Term) func(index int64) seqValue {
 }
 
 // eval computes the value of a ground term in a model. Booleans are 0 and 1.
-// The second result is false when the term divides by zero, in which case the
-// assignment says nothing about the logic.
-func (m model) eval(t *logic.Term) (int64, bool) {
-	arg := func(i int) int64 {
-		v, ok := m.eval(t.Args[i])
-		if !ok {
-			panic(divisionByZero{})
-		}
-		return v
-	}
-	truth := func(b bool) (int64, bool) {
+// Division by zero has the value the model picks for it, and a term the model
+// cannot evaluate panics with undefined.
+func (m model) eval(t *logic.Term) int64 {
+	arg := func(i int) int64 { return m.eval(t.Args[i]) }
+	truth := func(b bool) int64 {
 		if b {
-			return 1, true
+			return 1
 		}
-		return 0, true
+		return 0
 	}
 	switch t.Op {
 	case logic.OpIntLit:
-		return t.Val, true
+		if t.Big != nil {
+			panic(undefined{})
+		}
+		return t.Val
 	case logic.OpTrue:
-		return 1, true
+		return 1
 	case logic.OpFalse:
-		return 0, true
+		return 0
 	case logic.OpConst, logic.OpBound:
-		return m.ints[t.Name], true
+		return m.ints[t.Name]
 	case logic.OpAdd:
-		return arg(0) + arg(1), true
+		return plus(arg(0), arg(1))
 	case logic.OpMul:
-		return arg(0) * arg(1), true
+		return times(arg(0), arg(1))
 	case logic.OpNeg:
-		return -arg(0), true
+		return times(-1, arg(0))
 	case logic.OpDiv, logic.OpMod:
-		if arg(1) == 0 {
-			return 0, false
+		a, b, sign := arg(0), arg(1), int64(1)
+		if t.Op == logic.OpMod {
+			sign = -1
 		}
-		if t.Op == logic.OpDiv {
-			return arg(0) / arg(1), true
+		switch {
+		case b == 0:
+			// The logic says nothing about x/0 and x%0 beyond their being
+			// functions of x, so a proof has to survive each of these.
+			*m.divided = true
+			switch m.wild {
+			case 0:
+				return 5 * sign
+			case 1:
+				return plus(a, sign)
+			}
+			return plus(times(-2, a), 3*sign)
+		case b == -1 && t.Op == logic.OpDiv:
+			return times(-1, a)
+		case b == -1:
+			return 0
+		case t.Op == logic.OpDiv:
+			return a / b
 		}
-		return arg(0) % arg(1), true
+		return a % b
 	case logic.OpLen:
-		return m.seq(t.Args[0]).length, true
+		return m.seq(t.Args[0]).length
 	case logic.OpKey:
-		return m.key(m.seq(t.Args[0])), true
+		return m.key(m.seq(t.Args[0]))
 	case logic.OpSelect:
-		return m.seq(t.Args[0]).at(arg(1)), true
+		return m.seq(t.Args[0]).at(arg(1))
+	case logic.OpIsNil:
+		return truth(arg(0) == 0)
+	case logic.OpPred:
+		def := m.preds[t.Name]
+		saved := make([]int64, len(t.Args))
+		for i := range t.Args {
+			saved[i] = arg(i)
+		}
+		// The parameters take the values of the arguments while the body
+		// is evaluated, and get back the values an enclosing application
+		// of the same predicate gave them.
+		for i, param := range def.Params {
+			saved[i], m.ints[param.Name] = m.ints[param.Name], saved[i]
+		}
+		result := m.eval(def.Body)
+		for i, param := range def.Params {
+			m.ints[param.Name] = saved[i]
+		}
+		return result
 	case logic.OpIte:
 		if arg(0) == 1 {
-			return arg(1), true
+			return arg(1)
 		}
-		return arg(2), true
+		return arg(2)
 	case logic.OpEq, logic.OpIff:
 		return truth(arg(0) == arg(1))
 	case logic.OpLe:
@@ -137,32 +203,38 @@ func (m model) eval(t *logic.Term) (int64, bool) {
 		}
 		return truth(t.Op == logic.OpAnd)
 	case logic.OpForall, logic.OpExists:
-		// Generated quantifiers range over [-2, 4], which covers every
-		// index the generator can produce a bound for.
-		for x := int64(-2); x <= 4; x++ {
-			m.ints[t.Args[0].Name] = x
+		// Generated quantifiers with a guard range over [-2, 4], which
+		// covers every index the generator can produce a bound for.
+		name := t.Args[0].Name
+		tried := []int64{-2, -1, 0, 1, 2, 3, 4}
+		if strings.HasPrefix(name, "u#") {
+			tried = append(tried, m.ints["x"], m.ints["y"], m.ints["z"])
+		}
+		for _, x := range tried {
+			m.ints[name] = x
 			if (arg(1) == 1) == (t.Op == logic.OpExists) {
 				return truth(t.Op == logic.OpExists)
 			}
+		}
+		// A quantifier over all integers is settled only by an instance:
+		// one that fails a Forall or one that satisfies an Exists. Without
+		// one the truth lies outside the values tried.
+		if strings.HasPrefix(name, "u#") {
+			panic(undefined{})
 		}
 		return truth(t.Op == logic.OpForall)
 	}
 	panic("unexpected term " + t.String())
 }
 
-type divisionByZero struct{}
-
 func (m model) seq(t *logic.Term) seqValue {
-	value := func(i int) int64 {
-		v, ok := m.eval(t.Args[i])
-		if !ok {
-			panic(divisionByZero{})
-		}
-		return v
-	}
+	value := func(i int) int64 { return m.eval(t.Args[i]) }
 	switch t.Op {
 	case logic.OpConst:
 		return m.seqs[t.Name]
+	case logic.OpFill:
+		filler := value(1)
+		return seqValue{value(0), func(int64) int64 { return filler }}
 	case logic.OpSelect:
 		return m.table(t.Args[0])(value(1))
 	case logic.OpStore:
@@ -170,19 +242,19 @@ func (m model) seq(t *logic.Term) seqValue {
 	case logic.OpPush:
 		base := m.seq(t.Args[0])
 		pushed := base.with(base.length, value(1))
-		pushed.length++
+		pushed.length = plus(base.length, 1)
 		return pushed
 	case logic.OpConcat:
 		first, second := m.seq(t.Args[0]), m.seq(t.Args[1])
-		return seqValue{first.length + second.length, func(index int64) int64 {
+		return seqValue{plus(first.length, second.length), func(index int64) int64 {
 			if index < first.length {
 				return first.at(index)
 			}
-			return second.at(index - first.length)
+			return second.at(plus(index, times(-1, first.length)))
 		}}
 	case logic.OpSub:
 		whole, lo := m.seq(t.Args[0]), value(1)
-		return seqValue{value(2) - lo, func(index int64) int64 { return whole.at(lo + index) }}
+		return seqValue{plus(value(2), times(-1, lo)), func(index int64) int64 { return whole.at(plus(lo, index)) }}
 	}
 	panic("unexpected sequence " + t.String())
 }
@@ -193,6 +265,74 @@ type generator struct {
 	rng   *rand.Rand
 	bound int
 	vars  []*logic.Term
+	// wide adds what the plain problems leave out: a second sequence,
+	// filled sequences, numbers near the edge of 64 bits, predicates, errors
+	// and the memory that holds them, conditional formulas, and quantifiers
+	// over all integers. Bound variables are then named by how deeply they
+	// are nested, so that quantifiers side by side share a name.
+	wide   bool
+	nested int
+}
+
+// extremes are the numbers a wide problem and its models draw on to reach
+// the places where 64-bit arithmetic overflows.
+var extremes = []int64{
+	1 << 31, 1<<32 - 1, 1 << 32, 1<<32 + 1, 3037000500, 1 << 62, math.MaxInt64,
+	-(1 << 31), -(1<<32 + 1), -(1 << 62), math.MinInt64, 1_000_000_007,
+}
+
+// definitions returns the predicates that wide problems apply: a plain
+// property, a relation between two numbers, and a recursive one that holds
+// of the powers of two.
+func definitions() map[string]*logic.PredDef {
+	n, lo, hi := logic.Bound("n", logic.Int), logic.Bound("lo", logic.Int), logic.Bound("hi", logic.Int)
+	zero, one, two := logic.IntLit(0), logic.IntLit(1), logic.IntLit(2)
+	halved := logic.And(logic.Lt(one, n), logic.Eq(logic.Mod(n, two), zero), logic.Pred("pow", logic.Div(n, two)))
+	return map[string]*logic.PredDef{
+		"pos":  {Name: "pos", Params: []*logic.Term{n}, Body: logic.Lt(zero, n)},
+		"near": {Name: "near", Params: []*logic.Term{lo, hi}, Body: logic.And(logic.Le(lo, hi), logic.Le(hi, logic.Add(lo, two)))},
+		"pow":  {Name: "pow", Params: []*logic.Term{n}, Body: logic.Or(logic.Eq(n, one), halved)},
+	}
+}
+
+// failure builds an error: a named one, nil, one chosen by a condition, or
+// one read from memory, possibly after a write.
+func (g *generator) failure(depth int) *logic.Term {
+	memory := logic.Const("E", logic.SeqOf(logic.Err))
+	switch choice := g.rng.IntN(8); {
+	case choice == 0:
+		return logic.NilErr()
+	case choice == 1:
+		return logic.Select(memory, g.ref())
+	case choice <= 3 && depth > 0:
+		return logic.Ite(g.formula(depth-1), g.failure(depth-1), g.failure(depth-1))
+	case choice <= 5 && depth > 0:
+		return logic.Select(logic.Store(memory, g.ref(), g.failure(depth-1)), g.ref())
+	}
+	return logic.Const([]string{"e", "f"}[g.rng.IntN(2)], logic.Err)
+}
+
+// errorOverWrite says whether an error read from memory after a write is nil:
+// as the written error is, or as the one that was there. Either is right only
+// for the right relation between the two references, and the guard is
+// sometimes missing or reversed.
+func (g *generator) errorOverWrite() *logic.Term {
+	memory := logic.Const("E", logic.SeqOf(logic.Err))
+	at, read, written := g.ref(), g.ref(), g.failure(0)
+	expected := []*logic.Term{written, logic.Select(memory, read)}[g.rng.IntN(2)]
+	fact := logic.Iff(logic.IsNil(logic.Select(logic.Store(memory, at, written), read)), logic.IsNil(expected))
+	switch g.rng.IntN(4) {
+	case 0:
+		return logic.Implies(logic.Eq(at, read), fact)
+	case 1:
+		return logic.Implies(logic.Ne(at, read), fact)
+	}
+	return fact
+}
+
+// ref picks a reference: one of two named ones or nil.
+func (g *generator) ref() *logic.Term {
+	return []*logic.Term{logic.Const("r", logic.Ref), logic.Const("s", logic.Ref), logic.RefLit(0)}[g.rng.IntN(3)]
 }
 
 // table builds a sequence of sequences: a base, possibly with some of its
@@ -206,7 +346,12 @@ func (g *generator) table(depth int) *logic.Term {
 
 func (g *generator) seq(depth int) *logic.Term {
 	base := logic.Const("A", logic.IntSeq)
+	if g.wide && g.rng.IntN(3) == 0 {
+		base = logic.Const("B", logic.IntSeq)
+	}
 	switch {
+	case g.wide && g.rng.IntN(8) == 0:
+		return logic.Fill(g.intTerm(0), g.intTerm(0))
 	case g.rng.IntN(6) == 0:
 		return logic.Select(g.table(depth), g.intTerm(0))
 	case depth > 0 && g.rng.IntN(4) == 0:
@@ -223,6 +368,9 @@ func (g *generator) seq(depth int) *logic.Term {
 
 func (g *generator) intTerm(depth int) *logic.Term {
 	if depth <= 0 || g.rng.IntN(3) == 0 {
+		if g.wide && g.rng.IntN(10) == 0 {
+			return logic.IntLit(extremes[g.rng.IntN(len(extremes))])
+		}
 		if g.rng.IntN(3) == 0 {
 			return logic.IntLit(int64(g.rng.IntN(5) - 1))
 		}
@@ -250,6 +398,42 @@ func (g *generator) intTerm(depth int) *logic.Term {
 
 func (g *generator) formula(depth int) *logic.Term {
 	if depth <= 0 || g.rng.IntN(3) == 0 {
+		if g.wide {
+			switch g.rng.IntN(12) {
+			case 0:
+				return logic.Pred("pos", g.intTerm(depth))
+			case 1:
+				return logic.Pred("near", g.intTerm(0), g.intTerm(0))
+			case 2:
+				return logic.Pred("pow", g.intTerm(0))
+			case 3, 4:
+				return logic.IsNil(g.failure(depth))
+			case 5:
+				return logic.Eq(g.ref(), g.ref())
+			case 6:
+				return g.errorOverWrite()
+			case 7:
+				// A quantifier side by side with others of the same name.
+				u := logic.Bound(fmt.Sprintf("u#%d", g.nested), logic.Int)
+				found := []*logic.Term{logic.Eq(u, g.intTerm(0)), logic.Lt(u, g.intTerm(0)), logic.Lt(g.intTerm(0), u)}[g.rng.IntN(3)]
+				if g.rng.IntN(3) == 0 {
+					found = logic.Eq(logic.Select(g.seq(0), u), g.intTerm(0))
+				}
+				return logic.Exists(u, found)
+			case 8:
+				// A division of two numbers, with a claim about the
+				// result that is right about one time in three.
+				a, b := int64(g.rng.IntN(19)-9), int64(g.rng.IntN(9)-4)
+				claimed := int64(g.rng.IntN(7) - 3)
+				if b != 0 && g.rng.IntN(3) == 0 {
+					claimed = []int64{a / b, a % b}[g.rng.IntN(2)]
+				}
+				if g.rng.IntN(2) == 0 {
+					return logic.Eq(logic.Div(logic.IntLit(a), logic.IntLit(b)), logic.IntLit(claimed))
+				}
+				return logic.Eq(logic.Mod(logic.IntLit(a), logic.IntLit(b)), logic.IntLit(claimed))
+			}
+		}
 		a, b := g.intTerm(depth), g.intTerm(depth)
 		switch g.rng.IntN(14) {
 		case 0, 1:
@@ -271,6 +455,9 @@ func (g *generator) formula(depth int) *logic.Term {
 		}
 		return logic.Const("p", logic.Bool)
 	}
+	if g.wide && g.rng.IntN(8) == 0 {
+		return logic.Ite(g.formula(depth-1), g.formula(depth-1), g.formula(depth-1))
+	}
 	a, b := g.formula(depth-1), g.formula(depth-1)
 	switch g.rng.IntN(8) {
 	case 0, 1:
@@ -286,6 +473,15 @@ func (g *generator) formula(depth int) *logic.Term {
 	}
 	g.bound++
 	x := logic.Bound("x#"+string(rune('a'+g.bound%26))+string(rune('a'+g.bound/26%26)), logic.Int)
+	// A wide problem sometimes drops the guard, which leaves a quantifier
+	// over all integers; the name tells the model which kind it is.
+	unguarded := g.wide && g.rng.IntN(3) == 0
+	if g.wide {
+		x = logic.Bound(fmt.Sprintf("x#%d", g.nested), logic.Int)
+	}
+	if unguarded {
+		x = logic.Bound(fmt.Sprintf("u#%d", g.nested), logic.Int)
+	}
 	saved := g.vars
 	g.vars = append(append([]*logic.Term(nil), g.vars...), x)
 	// The upper bound never exceeds 4 in any generated model.
@@ -293,8 +489,19 @@ func (g *generator) formula(depth int) *logic.Term {
 	if g.rng.IntN(2) == 0 {
 		hi = logic.Len(logic.Const("A", logic.IntSeq))
 	}
+	if g.wide && g.rng.IntN(4) == 0 {
+		hi = logic.Len(logic.Const("B", logic.IntSeq))
+	}
+	g.nested++
 	body := g.formula(depth - 1)
+	g.nested--
 	g.vars = saved
+	if unguarded {
+		if g.rng.IntN(2) == 0 {
+			return logic.Forall(x, body)
+		}
+		return logic.Exists(x, body)
+	}
 	guard := logic.And(logic.Le(lo, x), logic.Lt(x, hi))
 	if g.rng.IntN(2) == 0 {
 		return logic.Forall(x, logic.Implies(guard, body))
@@ -360,6 +567,9 @@ func (g *generator) nestedRead() *logic.Term {
 func (g *generator) keyed() *logic.Term {
 	short := func() *logic.Term {
 		base := logic.Const("A", logic.IntSeq)
+		if g.wide && g.rng.IntN(2) == 0 {
+			base = logic.Const("B", logic.IntSeq)
+		}
 		switch g.rng.IntN(4) {
 		case 0:
 			return logic.Store(base, g.intTerm(0), g.intTerm(0))
@@ -442,90 +652,153 @@ func (g *generator) boundedProduct() *logic.Term {
 	return logic.Implies(logic.And(bounds...), logic.Le(lit(loX*loY+slack), product))
 }
 
-// counterexample searches small models for one that satisfies every
-// hypothesis and falsifies the goal.
-func counterexample(hyps []*logic.Term, goal *logic.Term) (found bool, description model) {
-	holds := func(m model, t *logic.Term) (result, defined bool) {
-		defer func() {
-			if r := recover(); r != nil {
-				if _, ok := r.(divisionByZero); !ok {
-					panic(r)
-				}
-				defined = false
-			}
-		}()
-		v, ok := m.eval(t)
-		return v == 1, ok
+// models returns the models that proved goals are checked against. The small
+// ones take every combination of a few values for the integers and a few
+// shapes for the sequences. The large ones are drawn at random and put some
+// of the integers near the edge of 64 bits. Everything a plain problem never
+// mentions is drawn at random in both.
+func models() (small, large []model) {
+	rng := rand.New(rand.NewPCG(5, 6))
+	build := func(x, y, z, shape int64) model {
+		second, errs := int64(rng.IntN(12)), int64(rng.IntN(3))
+		return model{
+			ints: map[string]int64{
+				"x": x, "y": y, "z": z, "p": shape % 2,
+				"e": int64(rng.IntN(3)), "f": int64(rng.IntN(3)), "r": int64(rng.IntN(3)), "s": int64(rng.IntN(3)),
+			},
+			seqs: map[string]seqValue{
+				"A": {shape % 4, func(i int64) int64 { return (shape%3 + i*i) % 3 }},
+				"B": {second % 4, func(i int64) int64 { return (second/4 + i*i*(second%2+1)) % 3 }},
+				// The errors in memory, of which those numbered zero are nil.
+				"E": {3, func(i int64) int64 { return (errs + i*i) % 3 }},
+			},
+			keys: map[string]int64{},
+			maps: map[string]func(int64) seqValue{"M": func(r int64) seqValue {
+				// Rows differ in length and content, and some
+				// rows coincide.
+				row := (r*r + shape) % 3
+				return seqValue{(row + shape/4) % 3, func(i int64) int64 { return (row*i + shape/6) % 3 }}
+			}},
+			preds: definitions(),
+		}
 	}
 	for x := int64(-2); x <= 2; x++ {
 		for y := int64(-2); y <= 2; y++ {
 			for z := int64(-1); z <= 1; z++ {
 				for shape := int64(0); shape < 12; shape++ {
-					m := model{
-						ints: map[string]int64{"x": x, "y": y, "z": z, "p": shape % 2},
-						seqs: map[string]seqValue{"A": {shape % 4, func(i int64) int64 { return (shape%3 + i*i) % 3 }}},
-						keys: map[string]int64{},
-						maps: map[string]func(int64) seqValue{"M": func(r int64) seqValue {
-							// Rows differ in length and content, and some
-							// rows coincide.
-							row := (r*r + shape) % 3
-							return seqValue{(row + shape/4) % 3, func(i int64) int64 { return (row*i + shape/6) % 3 }}
-						}},
-					}
-					refutes := true
-					for _, hyp := range hyps {
-						if ok, defined := holds(m, hyp); !defined || !ok {
-							refutes = false
-							break
-						}
-					}
-					if !refutes {
-						continue
-					}
-					if ok, defined := holds(m, goal); defined && !ok {
-						return true, m
-					}
+					small = append(small, build(x, y, z, shape))
 				}
 			}
 		}
 	}
-	return false, model{}
+	for range 600 {
+		var values [3]int64
+		for i := range values {
+			values[i] = int64(rng.IntN(7) - 3)
+			if rng.IntN(2) == 0 {
+				// An extreme itself, or a number right next to one.
+				values[i] = extremes[rng.IntN(len(extremes))]
+				if values[i] > math.MinInt64+1 && values[i] < math.MaxInt64-1 {
+					values[i] += int64(rng.IntN(3) - 1)
+				}
+			}
+		}
+		large = append(large, build(values[0], values[1], values[2], int64(rng.IntN(12))))
+	}
+	return small, large
+}
+
+// counterexample searches the given models for one that satisfies every
+// hypothesis and falsifies the goal. A model in which something divides by
+// zero is tried once for each meaning it can give to such a division.
+func counterexample(hyps []*logic.Term, goal *logic.Term, models []model) (found bool, description string) {
+	holds := func(m model, t *logic.Term) (result, defined bool) {
+		defer func() {
+			if r := recover(); r != nil {
+				if _, ok := r.(undefined); !ok {
+					panic(r)
+				}
+				defined = false
+			}
+		}()
+		return m.eval(t) == 1, true
+	}
+	for _, m := range models {
+		divided := true
+		m.divided = &divided
+		for m.wild = 0; m.wild < 3 && divided; m.wild++ {
+			divided = false
+			clear(m.keys)
+			refutes := true
+			for _, hyp := range hyps {
+				if ok, defined := holds(m, hyp); !defined || !ok {
+					refutes = false
+					break
+				}
+			}
+			if !refutes {
+				continue
+			}
+			if ok, defined := holds(m, goal); defined && !ok {
+				return true, fmt.Sprintf("%v, division by zero number %d", m.ints, m.wild)
+			}
+		}
+	}
+	return false, ""
 }
 
 // TestProveIsSound checks the one property the engine must never violate: a
 // proved goal holds in every model of the hypotheses. Random problems are
-// proved and then evaluated exhaustively over small models.
+// proved and then evaluated over many models. The plain problems are about
+// integers, one boolean, and the sequences built from one; the wide ones add
+// every other kind of term the engine knows.
 func TestProveIsSound(t *testing.T) {
-	rng := rand.New(rand.NewPCG(1, 2))
-	proved := 0
-	for i := range 4000 {
-		g := &generator{rng: rng, vars: []*logic.Term{
-			logic.Const("x", logic.Int), logic.Const("y", logic.Int), logic.Const("z", logic.Int),
-		}}
-		var hyps []*logic.Term
-		for range rng.IntN(4) {
-			hyps = append(hyps, g.formula(2))
-		}
-		goal := g.formula(2 + rng.IntN(2))
-		// Every fourth problem runs on the arbitrary-precision arithmetic
-		// alone, which must reach the same answers as the 64-bit path.
-		opts := Options{MaxSteps: 600, bigOnly: i%4 == 0}
-		result := Prove(hyps, goal, opts)
-		if opts.bigOnly && result != Prove(hyps, goal, Options{MaxSteps: 600}) {
-			t.Fatalf("problem %d: the two arithmetic paths disagree\nhyps: %v\ngoal: %v", i, hyps, goal)
-		}
-		if result != Proved {
-			continue
-		}
-		proved++
-		if found, m := counterexample(hyps, goal); found {
-			t.Fatalf("problem %d: proved a goal that fails\nhyps: %v\ngoal: %v\nmodel: %v", i, hyps, goal, m)
-		}
+	small, large := models()
+	tests := []struct {
+		name     string
+		wide     bool
+		seed     uint64
+		problems int
+		least    int
+		models   []model
+	}{
+		{"plain problems", false, 1, 4000, 300, small},
+		{"wide problems", true, 3, 4000, 300, append(small, large...)},
 	}
-	if proved < 300 {
-		t.Fatalf("only %d random problems were proved; the test has lost its power", proved)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			rng := rand.New(rand.NewPCG(test.seed, test.seed+1))
+			proved := 0
+			for i := range test.problems {
+				g := &generator{rng: rng, wide: test.wide, vars: []*logic.Term{
+					logic.Const("x", logic.Int), logic.Const("y", logic.Int), logic.Const("z", logic.Int),
+				}}
+				var hyps []*logic.Term
+				for range rng.IntN(4) {
+					hyps = append(hyps, g.formula(2))
+				}
+				goal := g.formula(2 + rng.IntN(2))
+				// Every fourth problem runs on the arbitrary-precision arithmetic
+				// alone, which must reach the same answers as the 64-bit path.
+				opts := Options{Preds: definitions(), MaxSteps: 600, bigOnly: i%4 == 0}
+				result := Prove(hyps, goal, opts)
+				if opts.bigOnly && result != Prove(hyps, goal, Options{Preds: definitions(), MaxSteps: 600}) {
+					t.Fatalf("problem %d: the two arithmetic paths disagree\nhyps: %v\ngoal: %v", i, hyps, goal)
+				}
+				if result != Proved {
+					continue
+				}
+				proved++
+				if found, m := counterexample(hyps, goal, test.models); found {
+					t.Fatalf("problem %d: proved a goal that fails\nhyps: %v\ngoal: %v\nmodel: %v", i, hyps, goal, m)
+				}
+			}
+			if proved < test.least {
+				t.Fatalf("only %d random problems were proved; the test has lost its power", proved)
+			}
+			t.Logf("proved %d random problems, all confirmed by evaluation over %d models", proved, len(test.models))
+		})
 	}
-	t.Logf("proved %d random problems, all confirmed by exhaustive evaluation", proved)
 }
 
 // TestExtremeCoefficients checks goals that are false but whose
@@ -584,6 +857,148 @@ func TestNilThroughMemory(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			got := Prove(test.hyps, test.goal, Options{})
+
+			if got != test.want {
+				t.Fatalf("Prove(%v, %v) = %v, want %v", test.hyps, test.goal, got, test.want)
+			}
+		})
+	}
+}
+
+// TestRules checks single rules of the engine on problems small enough to
+// decide by hand. Each problem is one that a particular wrong version of a
+// rule gets wrong, and the random problems of TestProveIsSound reach too
+// rarely to be relied on for it.
+func TestRules(t *testing.T) {
+	x, y, z := logic.Const("x", logic.Int), logic.Const("y", logic.Int), logic.Const("z", logic.Int)
+	c := logic.Const("c", logic.Bool)
+	e, f := logic.Const("e", logic.Err), logic.Const("f", logic.Err)
+	lit := logic.IntLit
+	scaled := func(k int64, v *logic.Term) *logic.Term { return logic.Mul(lit(k), v) }
+	atMost := func(v *logic.Term) *logic.Term { return logic.Le(v, lit(0)) }
+	n := logic.Bound("n", logic.Int)
+	pos := Options{Preds: map[string]*logic.PredDef{"pos": {Name: "pos", Params: []*logic.Term{n}, Body: logic.Lt(lit(0), n)}}}
+	bound := logic.Bound("w", logic.Int)
+	chosen := logic.Ite(c, e, f)
+	// Every row of dense holds when the unknowns are all zero, and each
+	// unknown has far more upper and lower bounds than the elimination will
+	// multiply out.
+	var dense []*logic.Term
+	for i := range 6 * 6 * 6 {
+		coef := func(digit int) int64 { return []int64{-3, -2, -1, 1, 2, 3}[i/digit%6] }
+		row := logic.Add(logic.Add(scaled(coef(1), x), scaled(coef(6), y)), scaled(coef(36), z))
+		dense = append(dense, logic.Lt(row, lit(0)))
+	}
+	// Every row of ring holds when the unknowns are all zero. Each
+	// elimination joins two neighbours, and the numbers grow by about 61
+	// bits each time, which passes the limit on their size before the ring
+	// is used up.
+	var ring []*logic.Term
+	for i := range 90 {
+		here, next := logic.Const(fmt.Sprint("v", i), logic.Int), logic.Const(fmt.Sprint("v", (i+1)%90), logic.Int)
+		row := logic.Add(scaled(1<<61, here), logic.Neg(scaled(1350851717672992089, next)))
+		ring = append(ring, logic.Lt(row, lit(1<<61)))
+	}
+	tests := []struct {
+		name string
+		opts Options
+		hyps []*logic.Term
+		goal *logic.Term
+		want Result
+	}{
+		// Guards against a 64-bit multiplication that wraps instead of
+		// handing over to the arbitrary-precision path. The hypotheses hold
+		// for x = 0, y = -1, z = 0, and a wrapped product closes them.
+		{
+			"a product past 64 bits", Options{},
+			[]*logic.Term{
+				atMost(logic.Add(scaled(1<<32+1, x), scaled(1<<32, y))),
+				atMost(logic.Add(logic.Add(scaled(-(1<<32-1), x), scaled(1<<32, y)), lit(1))),
+				logic.Le(lit(-10), y),
+				logic.Le(logic.Sub(z, lit(10)), y),
+			},
+			logic.False(), Unknown,
+		},
+		// Guards against a 64-bit addition that wraps. The hypotheses hold
+		// for x = 0, y = -1, z = 0; eliminating x adds the two coefficients
+		// of y, and the wrapped sum turns an upper bound on y into a lower.
+		{
+			"a sum past 64 bits", Options{},
+			[]*logic.Term{
+				atMost(logic.Add(x, scaled(1<<62+1, y))),
+				atMost(logic.Add(logic.Neg(x), scaled(1<<62+1, y))),
+				logic.Le(lit(-10), y),
+				logic.Le(logic.Sub(z, lit(10)), y),
+				logic.Lt(y, lit(0)),
+			},
+			logic.False(), Unknown,
+		},
+		// Guards against a filled sequence of the wrong length.
+		{"the length of a filled sequence", Options{}, nil, logic.Eq(logic.Len(logic.Fill(x, y)), x), Proved},
+		{"a filled sequence is not empty", Options{}, nil, logic.Eq(logic.Len(logic.Fill(lit(3), y)), lit(0)), Unknown},
+		// Guards against a filled sequence holding something other than
+		// the value it was filled with.
+		{"an element of a filled sequence", Options{}, nil, logic.Eq(logic.Select(logic.Fill(x, y), z), y), Proved},
+		{"a filled sequence does not hold zero", Options{}, nil, logic.Eq(logic.Select(logic.Fill(x, y), z), lit(0)), Unknown},
+		// Guards against a predicate known to be false being unfolded as
+		// if it were true.
+		{"a false predicate denies its body", pos, []*logic.Term{logic.Not(logic.Pred("pos", x))}, atMost(x), Proved},
+		{"a false predicate does not give its body", pos, []*logic.Term{logic.Not(logic.Pred("pos", x))}, logic.Lt(lit(0), x), Unknown},
+		{"a true predicate gives its body", pos, []*logic.Term{logic.Pred("pos", x)}, logic.Lt(lit(0), x), Proved},
+		// Guards against the branches of a conditional error being
+		// swapped when asking whether it is nil.
+		{"a chosen error is the first when the condition holds", Options{}, []*logic.Term{c, logic.IsNil(e), logic.Not(logic.IsNil(f))}, logic.IsNil(chosen), Proved},
+		{"a chosen error is not the second when the condition holds", Options{}, []*logic.Term{c, logic.IsNil(e), logic.Not(logic.IsNil(f))}, logic.Not(logic.IsNil(chosen)), Unknown},
+		{"a chosen error is the second when the condition fails", Options{}, []*logic.Term{logic.Not(c), logic.IsNil(e), logic.Not(logic.IsNil(f))}, logic.Not(logic.IsNil(chosen)), Proved},
+		// Guards against the branches of a conditional formula being
+		// swapped.
+		{"a conditional formula gives its first branch", Options{}, []*logic.Term{c, logic.Ite(c, atMost(x), logic.Lt(lit(0), x))}, atMost(x), Proved},
+		{"a conditional formula does not give its second branch", Options{}, []*logic.Term{c, logic.Ite(c, atMost(x), logic.Lt(lit(0), x))}, logic.Lt(lit(0), x), Unknown},
+		{"a refuted conditional formula refutes its first branch", Options{}, []*logic.Term{c, logic.Not(logic.Ite(c, atMost(x), atMost(y)))}, logic.Lt(lit(0), x), Proved},
+		{"a refuted conditional formula leaves its second branch", Options{}, []*logic.Term{c, logic.Not(logic.Ite(c, atMost(x), atMost(y)))}, logic.Lt(lit(0), y), Unknown},
+		// Guards against the remainder of two numbers being computed the
+		// Euclidean way, which never yields a negative remainder, and the
+		// quotient being rounded down. Go truncates: -7 / 2 is -3 and
+		// -7 % 2 is -1.
+		{"a remainder takes the sign of the dividend", Options{}, nil, logic.Eq(logic.Mod(lit(-7), lit(2)), lit(-1)), Proved},
+		{"a remainder is not Euclidean", Options{}, nil, logic.Eq(logic.Mod(lit(-7), lit(2)), lit(1)), Unknown},
+		{"a remainder by a negative number", Options{}, nil, logic.Eq(logic.Mod(lit(-7), lit(-2)), lit(-1)), Proved},
+		{"a quotient truncates toward zero", Options{}, nil, logic.Eq(logic.Div(lit(-7), lit(2)), lit(-3)), Proved},
+		{"a quotient is not rounded down", Options{}, nil, logic.Eq(logic.Div(lit(-7), lit(2)), lit(-4)), Unknown},
+		// Guards against the law x = y*(x/y) + x%y being assumed when y is
+		// zero, where it would make x%0 equal to x. Nothing is known about
+		// a division by zero.
+		{"a remainder by zero is not the dividend", Options{}, nil, logic.Eq(logic.Mod(x, lit(0)), x), Unknown},
+		{"a remainder by an unknown that is zero", Options{}, []*logic.Term{logic.Eq(y, lit(0))}, logic.Eq(logic.Mod(x, y), x), Unknown},
+		{"a quotient by an unknown that is zero", Options{}, []*logic.Term{logic.Eq(y, lit(0)), logic.Eq(logic.Div(x, y), lit(1))}, logic.Eq(logic.Mod(x, y), x), Unknown},
+		{"the law of division holds for other divisors", Options{}, []*logic.Term{logic.Ne(y, lit(0))}, logic.Eq(logic.Add(logic.Mul(y, logic.Div(x, y)), logic.Mod(x, y)), x), Proved},
+		// Guards against two quantifiers with the same variable name
+		// being given the same witness. One number need not be both.
+		{
+			"two witnesses of one name are two numbers", Options{},
+			[]*logic.Term{logic.Exists(bound, logic.Eq(bound, lit(1))), logic.Exists(bound, logic.Eq(bound, lit(2)))},
+			logic.False(), Unknown,
+		},
+		{
+			"two witnesses of one name in one formula", Options{},
+			[]*logic.Term{logic.And(logic.Exists(bound, logic.Lt(bound, x)), logic.Exists(bound, logic.Lt(x, bound)))},
+			logic.False(), Unknown,
+		},
+		// Guards against the elimination reporting a contradiction when it
+		// stops because there are too many rows, on either arithmetic path.
+		{"too many rows for the 64-bit elimination", Options{}, dense, logic.False(), Unknown},
+		{"too many rows for the arbitrary-precision elimination", Options{bigOnly: true}, dense, logic.False(), Unknown},
+		// Guards against the elimination reporting a contradiction when it
+		// stops because its numbers have grown too large.
+		{"numbers too large for the elimination", Options{}, ring, logic.False(), Unknown},
+		// Guards against a proof being claimed when the budget of steps
+		// runs out: the goal is true and needs more than one step.
+		{"no steps left", Options{MaxSteps: 1}, []*logic.Term{logic.Or(atMost(x), atMost(y)), logic.Lt(lit(0), x)}, atMost(y), Unknown},
+		{"steps enough", Options{}, []*logic.Term{logic.Or(atMost(x), atMost(y)), logic.Lt(lit(0), x)}, atMost(y), Proved},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := Prove(test.hyps, test.goal, test.opts)
 
 			if got != test.want {
 				t.Fatalf("Prove(%v, %v) = %v, want %v", test.hyps, test.goal, got, test.want)
