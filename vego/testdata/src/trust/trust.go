@@ -792,3 +792,24 @@ func LoopsWithOwnError(n int) error { // want `the contract of LoopsWithOwnError
 }
 
 //@ Ensures True
+
+// ForwardsThroughLoops keeps the error of a call made in one loop in a
+// variable that a second loop copies.
+//
+// @ Requires 1 <= n <= 3 And 1 <= m <= 3
+func ForwardsThroughLoops(n, m int) error {
+	var a, b error
+	//@ Invariant 0 <= i <= n
+	//@ Variant n - i
+	for i := 0; i < n; i++ {
+		a = external()
+	}
+	//@ Invariant 0 <= j <= m
+	//@ Variant m - j
+	for j := 0; j < m; j++ {
+		b = a
+	}
+	return b
+}
+
+//@ Ensures True

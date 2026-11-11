@@ -382,7 +382,6 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 		v.check(head, nil, logic.Le(logic.IntLit(0), before), shape.pos,
 			"loop variant may be negative: %s", spec.variant.text)
 	}
-	made := len(v.sources)
 	finish := func(end *state) {
 		if shape.limit != nil {
 			next := logic.Add(counter, logic.IntLit(1))
@@ -392,18 +391,11 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 			shape.bind(end, next)
 		}
 		// An error variable the loop forgot stands, at the head, for what
-		// an earlier iteration left in it. If that depends on a call made
-		// in the body, the unknown at the head does too; see tieFailures.
+		// an earlier iteration left in it, which is recorded here; see
+		// tieFailures.
 		for name, lost := range v.forgotten {
-			held := end.vals[lost.variable]
-			if !shape.effects.whole[lost.variable] || held == nil {
-				continue
-			}
-			for i := range v.sources {
-				if i >= made && v.dependsOn(&v.sources[i], end.hyps, logic.IsNil(held[lost.index])) {
-					lost.from = append(lost.from, i)
-					v.forgotten[name] = lost
-				}
+			if held := end.vals[lost.variable]; shape.effects.whole[lost.variable] && held != nil {
+				v.left = append(v.left, leftover{name: name, err: held[lost.index], facts: slices.Clip(end.hyps)})
 			}
 		}
 		checkInvariants(end, "loop invariant may not be preserved")

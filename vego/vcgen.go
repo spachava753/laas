@@ -81,6 +81,8 @@ type fnVerifier struct {
 	sources   []failureSource
 	failures  []failure
 	forgotten map[string]forgottenError
+	// left holds what the iterations of loops left in such variables.
+	left []leftover
 	// lenient is set when only the contract of a function is examined, not
 	// its body: parameters and results of types vego does not model are
 	// then left without a value instead of being an error.

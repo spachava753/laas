@@ -510,14 +510,28 @@ type failure struct {
 // depends on the call only in that way is not excused.
 //
 // A loop forgets the variables it assigns. For an error among them, the end
-// of the body is where it is seen whether what an iteration leaves in the
-// variable depends on a call made in the body; the unknown that stands for
-// the variable afterwards then depends on that call too.
+// of the body is where it is seen what an iteration leaves in the variable;
+// if that depends on a call, the unknown that stands for the variable
+// afterwards does too.
 func (v *fnVerifier) tieFailures() {
+	// An unknown that stands for a variable a loop forgot depends on a call
+	// if what an iteration leaves in the variable does. It then counts as
+	// something the call produced, which may make a further unknown depend
+	// on the call, in whatever order the loops were executed.
+	for changed := true; changed; {
+		changed = false
+		for i := range v.sources {
+			for _, l := range v.left {
+				if !v.sources[i].outputs[l.name] && v.dependsOn(&v.sources[i], l.facts, logic.IsNil(l.err)) {
+					v.sources[i].outputs[l.name], changed = true, true
+				}
+			}
+		}
+	}
 	for index := range v.sources {
 		source := &v.sources[index]
 		tied := slices.ContainsFunc(v.failures, func(f failure) bool {
-			if slices.Contains(v.forgotten[f.err.Name].from, index) || v.dependsOn(source, f.facts, logic.IsNil(f.err)) {
+			if v.dependsOn(source, f.facts, logic.IsNil(f.err)) {
 				return true
 			}
 			opts := solver.Options{Preds: v.res.Preds, MaxSteps: quickSteps}
@@ -546,13 +560,20 @@ func (v *fnVerifier) dependsOn(source *failureSource, facts []*logic.Term, formu
 }
 
 // forgottenError is an error variable that a loop made unknown: the
-// variable, which part of its value the error is, and the calls, by their
-// place in the list of sources, that what an iteration leaves in it depends
-// on.
+// variable, and which part of its value the error is.
 type forgottenError struct {
 	variable *types.Var
 	index    int
-	from     []int
+}
+
+// leftover is what an iteration of a loop left in an error variable that
+// the loop forgot: the name of the unknown that stands for the variable at
+// the head and after the loop, the error at the end of the body, and what
+// was known there.
+type leftover struct {
+	name  string
+	err   *logic.Term
+	facts []*logic.Term
 }
 
 // calleeFormula resolves a callee's postcondition at a call site. A result of
