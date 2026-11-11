@@ -236,6 +236,9 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	// What this call produced depends on whatever it was given; that is
 	// recorded for tieFailures.
 	handed := forward{produced: slices.Clip(v.made[mark:]), facts: slices.Clip(st.hyps[known:])}
+	for _, taken := range st.chosen {
+		handed.path = append(handed.path, taken.cond)
+	}
 	for _, param := range fn.params {
 		handed.given = append(handed.given, args[param]...)
 	}
@@ -414,7 +417,7 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state,
 			for _, name := range made.produced {
 				source.outputs[name] = true
 			}
-			source.origins = [][]*logic.Term{made.facts}
+			source.origins = []forward{made}
 			v.sources = append(v.sources, source)
 		}
 	}
@@ -432,23 +435,27 @@ type failureSource struct {
 	// it, and the unknowns loops put in place of variables that held it.
 	outputs map[string]bool
 	known   int
-	// origins holds the facts that the calls which produced the outputs
-	// added: what the types and the contracts guarantee of what they
-	// produced. The conditions of the branches taken are not among them;
-	// another outcome of a call need not have taken the same branches.
-	origins [][]*logic.Term
+	// origins holds the calls that produced the outputs.
+	origins []forward
 }
 
 // otherwise states of other values, named by estranged, what is known of
-// the outputs: that they are something the calls could have produced.
+// the outputs: that they are something the calls could have produced. That
+// is what each call added to the state, which is what the types and its
+// contract guarantee. A later call was made on some path, and with another
+// outcome of the first call execution might not have come that way, so what
+// a call guarantees is stated on condition of the branches that led to it,
+// with the outputs replaced in those too.
 func (source *failureSource) otherwise() []*logic.Term {
 	var facts []*logic.Term
-	seen := map[*logic.Term]bool{}
-	for _, known := range source.origins {
-		for _, fact := range known {
-			if other, mentioned := estranged(fact, source.outputs); mentioned && !seen[fact] {
-				seen[fact] = true
-				facts = append(facts, other)
+	for _, call := range source.origins {
+		reached := make([]*logic.Term, len(call.path))
+		for i, cond := range call.path {
+			reached[i], _ = estranged(cond, source.outputs)
+		}
+		for _, fact := range call.facts {
+			if other, mentioned := estranged(fact, source.outputs); mentioned {
+				facts = append(facts, logic.Implies(logic.And(reached...), other))
 			}
 		}
 	}
@@ -456,11 +463,13 @@ func (source *failureSource) otherwise() []*logic.Term {
 }
 
 // forward is a call as tieFailures needs it: what the call was given, the
-// names of what it produced, and the facts it added.
+// names of what it produced, the facts it added, and the conditions of the
+// branches taken on the way to it.
 type forward struct {
 	given    []*logic.Term
 	produced []string
 	facts    []*logic.Term
+	path     []*logic.Term
 }
 
 // estranged returns a term with every constant of the given names replaced
@@ -540,7 +549,7 @@ func (v *fnVerifier) tieFailures() {
 					for _, name := range call.produced {
 						source.outputs[name] = true
 					}
-					source.origins, changed = append(source.origins, call.facts), true
+					source.origins, changed = append(source.origins, call), true
 				}
 			}
 		}

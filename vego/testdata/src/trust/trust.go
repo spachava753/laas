@@ -886,3 +886,31 @@ func AsksOnBothPaths() error {
 }
 
 //@ Ensures True
+
+// onFailure is called with an error that is one.
+//
+// @ Requires e != nil
+func onFailure(e error) {}
+
+//@ Ensures e != nil
+
+// onSuccess is called with no error.
+//
+// @ Requires e = nil
+func onSuccess(e error) {}
+
+//@ Ensures e = nil
+
+// ReportsBothWays calls a different verified function on each side of a
+// test of the error, each of which says which side it is on.
+func ReportsBothWays() error {
+	err := external()
+	if err != nil {
+		onFailure(err)
+		return err
+	}
+	onSuccess(err)
+	return nil
+}
+
+//@ Ensures True
