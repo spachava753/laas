@@ -46,6 +46,9 @@ type state struct {
 	// here on is at or above it.
 	brk  *logic.Term
 	hyps []*logic.Term
+	// chosen holds the conditions of the branches taken to get here, which
+	// are among hyps too.
+	chosen []*logic.Term
 	// noted holds the facts about unchanged memory already added to hyps.
 	noted map[string]bool
 }
@@ -53,8 +56,14 @@ type state struct {
 func (st *state) clone() *state {
 	return &state{
 		vals: maps.Clone(st.vals), mem: maps.Clone(st.mem), brk: st.brk,
-		hyps: slices.Clone(st.hyps), noted: maps.Clone(st.noted),
+		hyps: slices.Clone(st.hyps), chosen: slices.Clone(st.chosen), noted: maps.Clone(st.noted),
 	}
+}
+
+// decide records that execution took the branch with the given condition.
+func (st *state) decide(cond *logic.Term) {
+	st.chosen = append(st.chosen, cond)
+	st.assume(cond)
 }
 
 func (st *state) assume(fact *logic.Term) {

@@ -264,7 +264,7 @@ func (pv *pkgVerifier) report(pos token.Pos, format string, args ...any) {
 
 var (
 	annotationLine  = regexp.MustCompile(`^//\s*@(\s*)(.*)$`)
-	blockAnnotation = regexp.MustCompile(`^/\*\s*@\s*(\w*)`)
+	blockAnnotation = regexp.MustCompile(`(?m)^(?:/\*)?[\s*]*@\s*(\w*)`)
 	clauseKinds     = map[string]bool{
 		"Requires": true, "Ensures": true, "Invariant": true, "Variant": true,
 		"Measure": true, "Predicate": true, "Assert": true, "Modifies": true,
@@ -291,9 +291,14 @@ func extractClauses(group *ast.CommentGroup) []*clause {
 	var clauses []*clause
 	var current *clause
 	for _, comment := range group.List {
-		if block := blockAnnotation.FindStringSubmatch(comment.Text); block != nil && nearKeyword(block[1]) {
-			clauses = append(clauses, &clause{text: block[1], pos: comment.Pos(),
-				misplaced: "annotations are only read from // comments, not from /* */ comments"})
+		if strings.HasPrefix(comment.Text, "/*") {
+			for _, block := range blockAnnotation.FindAllStringSubmatch(comment.Text, -1) {
+				if nearKeyword(block[1]) {
+					clauses = append(clauses, &clause{text: block[1], pos: comment.Pos(),
+						misplaced: "annotations are only read from // comments, not from /* */ comments"})
+					break
+				}
+			}
 		}
 		match := annotationLine.FindStringSubmatch(comment.Text)
 		if match == nil {

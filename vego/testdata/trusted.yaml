@@ -326,3 +326,7 @@ trusted:
     ensures:
       - "Forall k in [0, |s|) : s[k] >= 0"
     modifies: []
+
+  trust.pair:
+    reason: Test helper that returns a number and may fail.
+    modifies: []

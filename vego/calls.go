@@ -396,7 +396,7 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state,
 			continue
 		}
 		if v.canReach(path) {
-			source := failureSource{err: results[index][0], inLoop: v.looping > 0, known: len(st.hyps), outputs: map[string]bool{}}
+			source := failureSource{err: results[index][0], inLoop: v.looping > 0, known: len(st.chosen), outputs: map[string]bool{}}
 			if local {
 				source.callee = fn
 			}
@@ -413,7 +413,7 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state,
 // failureSource is a call whose failure nothing predicts: the error it
 // returned, the callee if it is verified in this package, whether the call
 // was made inside a loop, the names of everything it returned, and how many
-// facts the state held when it returned.
+// branches had been taken when it returned.
 type failureSource struct {
 	err     *logic.Term
 	callee  *funcInfo
@@ -430,8 +430,8 @@ func mentions(t *logic.Term, names map[string]bool) bool {
 	return slices.ContainsFunc(t.Args, func(arg *logic.Term) bool { return mentions(arg, names) })
 }
 
-// failure is a return of an error that may not be nil, with the facts of
-// the path that led to it.
+// failure is a return of an error that may not be nil, with the conditions
+// of the branches taken on the way to it.
 type failure struct {
 	err  *logic.Term
 	path []*logic.Term
@@ -442,16 +442,18 @@ type failure struct {
 // unpredictable: those it fails because of. A call whose error is ignored
 // does not excuse a function that then fails for a reason of its own.
 //
-// The function fails because of a call when it returns that call's error,
-// or returns an error on a path that was chosen by what the call returned:
-// some condition met since the call mentions one of its results. Inside a
-// loop neither can be seen once the loop has forgotten the variable that
-// held the error, so an error forgotten by a loop counts for the calls made
-// in loops.
+// The function fails because of a call when the error it returns is made
+// from something the call returned, as the call's error is, also when it
+// was kept in memory in between; or when it returns an error on a path that
+// was chosen by what the call returned: the condition of some branch taken
+// since the call mentions one of its results. What a check or a type adds
+// to the state is no such condition. Inside a loop neither can be seen once
+// the loop has forgotten the variable that held the error, so an error
+// forgotten by a loop counts for the calls made in loops.
 func (v *fnVerifier) tieFailures() {
 	for _, source := range v.sources {
 		tied := slices.ContainsFunc(v.failures, func(f failure) bool {
-			if f.err.String() == source.err.String() || (source.inLoop && v.forgotten[f.err.Name]) {
+			if mentions(f.err, source.outputs) || (source.inLoop && v.forgotten[f.err.Name]) {
 				return true
 			}
 			return source.known <= len(f.path) &&

@@ -647,3 +647,25 @@ func NeverTakenAll(s []byte) int {
 }
 
 //@ Ensures result = 0
+
+func pair() (int, error) { return 0, nil }
+
+// UsesNumberOnly uses the number a call returned in arithmetic, which adds
+// facts about it but chooses no path, and then fails on its own.
+func UsesNumberOnly() error { // want `the contract of UsesNumberOnly would also be met by a function that always returns an error`
+	n, _ := pair()
+	_ = n / 2
+	return errAlways
+}
+
+//@ Ensures True
+
+// KeepsFailure puts the error of a call into memory and returns it from
+// there.
+func KeepsFailure() error {
+	err := external()
+	saved := []error{err}
+	return saved[0]
+}
+
+//@ Ensures True

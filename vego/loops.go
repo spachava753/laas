@@ -372,10 +372,10 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 	}
 	if !shape.always {
 		exit := head.clone()
-		exit.assume(logic.Not(cond))
+		exit.decide(logic.Not(cond))
 		k(exit)
 	}
-	head.assume(cond)
+	head.decide(cond)
 	var before *logic.Term
 	if spec.variant != nil {
 		before = v.intTerm(spec.variant, v.bodyEnv(head, at))

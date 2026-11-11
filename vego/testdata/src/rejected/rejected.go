@@ -272,3 +272,18 @@ func Misspelt(x int) int {
 //@Ensure result > 100 // want `vego: unknown annotation "Ensure"; an annotation starts with one of .*`
 
 /*@ Ensures result > 100 */ // want `vego: annotations are only read from // comments, not from /\* \*/ comments`
+
+// ResultField takes a struct with a field named like the result, which is
+// no clash: a field is always written with what it is a field of.
+func ResultField(x struct{ result int }) int {
+	return 0
+}
+
+//@ Ensures result = 0
+
+// @ Requires True
+/* // want `vego: annotations are only read from // comments, not from /\* \*. comments`
+InBlock has an annotation inside a block comment, after other text.
+@Ensures result = 0
+*/
+func InBlock() int { return 1 }

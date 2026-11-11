@@ -302,7 +302,7 @@ func (v *fnVerifier) verify() {
 	// read as that other thing, silently.
 	ast.Inspect(fn.decl, func(n ast.Node) bool {
 		if id, ok := n.(*ast.Ident); ok {
-			if _, isVar := v.info.Defs[id].(*types.Var); isVar && fn.ambiguous(id.Name) {
+			if variable, isVar := v.info.Defs[id].(*types.Var); isVar && !variable.IsField() && fn.ambiguous(id.Name) {
 				v.unsupported(id.Pos(), fmt.Sprintf("the variable %s has a name that means something else in annotations; rename it", id.Name))
 			}
 		}
@@ -602,11 +602,11 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 		matched := logic.Or(alternatives...)
 		v.branch(clause.Pos())
 		taken := st.clone()
-		taken.assume(logic.And(append(slices.Clip(failed), matched)...))
+		taken.decide(logic.And(append(slices.Clip(failed), matched)...))
 		v.seq(clause.Body, clause.Colon, clause.End(), taken, inner, k)
 		failed = append(failed, logic.Not(matched))
 	}
-	st.assume(logic.And(failed...))
+	st.decide(logic.And(failed...))
 	if fallback == nil {
 		k(st)
 		return
@@ -627,8 +627,8 @@ func (v *fnVerifier) ifStmt(s *ast.IfStmt, st *state, c ctrl, k func(*state)) {
 	v.branch(s.Pos())
 	cond := v.expr(s.Cond, st, nil)
 	taken, skipped := st.clone(), st.clone()
-	taken.assume(cond)
-	skipped.assume(logic.Not(cond))
+	taken.decide(cond)
+	skipped.decide(logic.Not(cond))
 	v.seq(s.Body.List, s.Body.Lbrace, s.Body.Rbrace, taken, c, k)
 	if s.Else == nil {
 		k(skipped)
