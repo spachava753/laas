@@ -1190,3 +1190,58 @@ func UsesSetsFirst(xs []int) int {
 }
 
 //@ Ensures result = 7
+
+var literal func() int
+
+func init() { literal = func() int { return BouncedByClosure() } }
+
+// BouncedByClosure calls a trusted function of this package that calls it
+// back through a function literal kept in a variable.
+func BouncedByClosure() int {
+	return bounceByClosure() // want `vego: bounceByClosure is trusted and calls back into BouncedByClosure, so that this call ends cannot be proved; verify bounceByClosure instead of trusting it`
+}
+
+//@ Ensures result = 0
+
+func bounceByClosure() int { return literal() }
+
+// measured is something with a size.
+type measured interface{ Size() int }
+
+// sized has a size that a trusted function works out.
+type sized struct{ X int }
+
+// Size calls a trusted function of this package that calls it back through
+// a method taken from an interface.
+func (s sized) Size() int {
+	return bounceByMethodValue(s) // want `vego: bounceByMethodValue is trusted and calls back into Size, so that this call ends cannot be proved; verify bounceByMethodValue instead of trusting it`
+}
+
+//@ Ensures result = 0
+
+func bounceByMethodValue(s sized) int {
+	var m measured = s
+	f := m.Size
+	return f()
+}
+
+// node holds a value and more nodes.
+type node struct {
+	Children []node
+	Value    int
+}
+
+func setsChild(xs, ys []node) { ys[0].Value = 7 }
+
+// UsesSetsChild relies on a contract that describes, through a slice
+// inside one parameter, what the function writes through the other. The
+// two parameters do not overlap, but the inner slice may be the other one.
+//
+// @ Requires |xs| = 1 And |ys| = 1 And |xs[0].Children| = 1
+// @ Modifies ys
+func UsesSetsChild(xs, ys []node) int {
+	setsChild(xs, ys)
+	return ys[0].Value
+}
+
+//@ Ensures result = 7

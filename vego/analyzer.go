@@ -468,14 +468,35 @@ func (pv *pkgVerifier) collect() {
 			}
 			return true
 		})
-		ast.Inspect(file, func(n ast.Node) bool {
-			if id, ok := n.(*ast.Ident); ok && !called[id] {
-				if named, ok := pv.info.Uses[id].(*types.Func); ok && pv.funcs[named.Origin()] != nil {
-					escaped = append(escaped, pv.funcs[named.Origin()])
+		// Inside a function literal every function counts, called or
+		// not: the literal is itself a value that may be called from
+		// anywhere. A method of an interface that is named as a value
+		// stands for every method of that name.
+		var visit func(n ast.Node, inLiteral bool)
+		visit = func(root ast.Node, inLiteral bool) {
+			ast.Inspect(root, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.FuncLit:
+					if !inLiteral {
+						visit(n.Body, true)
+						return false
+					}
+				case *ast.Ident:
+					named, ok := pv.info.Uses[n].(*types.Func)
+					if !ok || (called[n] && !inLiteral) {
+						break
+					}
+					if pv.funcs[named.Origin()] != nil {
+						escaped = append(escaped, pv.funcs[named.Origin()])
+					}
+					if recv := named.Type().(*types.Signature).Recv(); recv != nil && types.IsInterface(recv.Type()) {
+						escaped = append(escaped, pv.methodsNamed(named.Name())...)
+					}
 				}
-			}
-			return true
-		})
+				return true
+			})
+		}
+		visit(file, false)
 	}
 	for _, fn := range pv.order {
 		sort.Slice(fn.body, func(i, j int) bool { return fn.body[i].pos < fn.body[j].pos })
@@ -497,16 +518,24 @@ func (pv *pkgVerifier) collect() {
 				}
 				fn.callees = append(fn.callees, escaped...)
 				if sel, ok := ast.Unparen(n.Fun).(*ast.SelectorExpr); ok {
-					for _, method := range pv.order {
-						if method.obj.Name() == sel.Sel.Name && method.obj.Type().(*types.Signature).Recv() != nil {
-							fn.callees = append(fn.callees, method)
-						}
-					}
+					fn.callees = append(fn.callees, pv.methodsNamed(sel.Sel.Name)...)
 				}
 			}
 			return true
 		})
 	}
+}
+
+// methodsNamed returns the methods of the package with the given name, any
+// of which a call of an interface method of that name may reach.
+func (pv *pkgVerifier) methodsNamed(name string) []*funcInfo {
+	var methods []*funcInfo
+	for _, method := range pv.order {
+		if method.obj.Name() == name && method.obj.Type().(*types.Signature).Recv() != nil {
+			methods = append(methods, method)
+		}
+	}
+	return methods
 }
 
 // addFunc records a function declaration with the names annotations may use

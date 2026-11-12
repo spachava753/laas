@@ -396,3 +396,24 @@ trusted:
     ensures:
       - "xs'[0] = 7"
     modifies: [xs]
+
+  trust.bounceByClosure:
+    reason: Test helper that calls back into its caller through a function literal kept in a variable.
+    ensures:
+      - "result = 0"
+    modifies: []
+
+  trust.bounceByMethodValue:
+    reason: Test helper that calls back into its caller through a method taken from an interface.
+    ensures:
+      - "result = 0"
+    modifies: []
+
+  trust.setsChild:
+    reason: Test helper that sets the first element of the slice it lists, which may be a slice inside the other.
+    requires:
+      - "|xs| = 1 And |ys| = 1 And |xs[0].Children| = 1"
+    ensures:
+      - "ys'[0].Value = 7"
+      - "(|xs[0].Children'| = 1 And xs[0].Children'[0].Value = 7) Or xs[0].Children'[0].Value = xs[0].Children[0].Value"
+    modifies: [ys]

@@ -593,19 +593,20 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 	// element of a slice taken; a field of a struct that was passed by
 	// value, or read out of a map, does not.
 	t, inMemory := param.Type(), false
+	// read holds the cells the path reads, and own, for each, whether it
+	// is an element of the slice parameter itself.
 	var read []cell
-	own := map[string]bool{}
+	var own []bool
 	elements := func(elem types.Type, first bool) {
 		for _, c := range v.cellsOf(elem) {
-			read = append(read, c)
-			own[c.key] = own[c.key] || first
+			read, own = append(read, c), append(own, first)
 		}
 	}
 	for i, step := range steps.steps {
 		if step.field == "" {
 			switch {
 			case isMap(t) && mapModelled(t):
-				target{mapType: t}.regions(func(key string, _ logic.Sort) { read = append(read, cell{key: key}) })
+				target{mapType: t}.regions(func(key string, _ logic.Sort) { read, own = append(read, cell{key: key}), append(own, false) })
 				_, t = mapParts(t)
 				inMemory = false
 			case isSlice(t):
@@ -636,7 +637,7 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 				return
 			}
 			if lo, hi, _ := fieldLeaves(object, index); inMemory && hi > lo {
-				read = append(read, v.cellsOf(object)[lo:hi]...)
+				read, own = append(read, v.cellsOf(object)[lo:hi]...), append(own, make([]bool, hi-lo)...)
 			}
 			t = fields.Field(index).Type()
 		}
@@ -645,16 +646,17 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 	// keys and values of a map.
 	switch {
 	case isMap(t) && mapModelled(t):
-		target{mapType: t}.regions(func(key string, _ logic.Sort) { read = append(read, cell{key: key}) })
+		target{mapType: t}.regions(func(key string, _ logic.Sort) { read, own = append(read, cell{key: key}), append(own, false) })
 	case isSlice(t):
 		if _, modelled := layoutOf(elemType(t)); modelled {
 			elements(elemType(t), len(steps.steps) == 0)
 		}
 	}
-	reached := func(c cell) bool {
-		return slices.ContainsFunc(changed[c.key], func(whose *types.Var) bool { return !own[c.key] || whose == nil || whose == param })
+	reached := false
+	for i, c := range read {
+		reached = reached || slices.ContainsFunc(changed[c.key], func(whose *types.Var) bool { return !own[i] || whose == nil || whose == param })
 	}
-	if !slices.ContainsFunc(read, reached) {
+	if !reached {
 		fn.defect("its ensures %q describes %s after the call, but nothing its modifies lists is memory that %s reads, so the call cannot have changed it; "+
 			"drop the prime or list what the function writes", c.text, c.text[path.Start:path.End], c.text[path.Start:path.End])
 	}
