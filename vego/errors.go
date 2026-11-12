@@ -215,6 +215,17 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 					found = at(n.Pos(), "something of this package is sent on a channel")
 				}
 			case *ast.RangeStmt:
+				// A range clause assigns too.
+				for _, target := range []ast.Expr{n.Key, n.Value} {
+					if target == nil || n.Tok != token.ASSIGN {
+						continue
+					}
+					_, plain := ast.Unparen(target).(*ast.Ident)
+					variable, isVariable := named(target).(*types.Var)
+					if (isVariable && variable.Pkg() != pv.pass.Pkg) || (!plain && !pv.codeless(pv.info.TypeOf(target), map[types.Type]bool{})) {
+						found = at(target.Pos(), fmt.Sprintf("%s is assigned, which another package may read", types.ExprString(target)))
+					}
+				}
 				// Ranging over a function calls it.
 				if _, isFunc := pv.info.TypeOf(n.X).Underlying().(*types.Signature); !isFunc {
 					break
