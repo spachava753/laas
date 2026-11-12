@@ -1063,3 +1063,19 @@ func BouncedByVariable(n int) int {
 //@ Ensures result = 0
 
 func bounceByVariable(n int) int { return callback(n) }
+
+// SucceedsNowhere has a return without an error that no input reaches,
+// although ruling that out takes more than the solver does.
+//
+// @ Requires -2 <= x <= 2 And -2 <= y <= 2
+func SucceedsNowhere(x, y int) error { // want `the contract of SucceedsNowhere would also be met by a function that always returns an error`
+	err := external()
+	if err == nil {
+		if x*x+y*y == 6 {
+			return nil
+		}
+	}
+	return errAlways
+}
+
+//@ Ensures True
