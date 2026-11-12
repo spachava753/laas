@@ -240,11 +240,16 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 					found = scan(decl.Body)
 				}
 			case *ast.CallExpr:
+				// Some built-in functions pass on what they are given:
 				// append and copy may write into an array that another
-				// package holds.
-				if isBuiltin(pv.info, n, "append") || isBuiltin(pv.info, n, "copy") {
-					if slices.ContainsFunc(n.Args[1:], func(arg ast.Expr) bool { return !inert(arg) }) {
-						found = at(n.Pos(), "something of this package is put into a slice, which another package may hold")
+				// package holds, and panic hands its value to the runtime,
+				// which asks it for a text. Those that only measure, make,
+				// or remove things do not.
+				id, _ := ast.Unparen(n.Fun).(*ast.Ident)
+				if builtin, ok := pv.info.Uses[id].(*types.Builtin); ok && id != nil {
+					keeps := []string{"len", "cap", "new", "make", "delete", "clear", "min", "max", "real", "imag", "complex", "print", "println", "recover"}
+					if !slices.Contains(keeps, builtin.Name()) && slices.ContainsFunc(n.Args, func(arg ast.Expr) bool { return !inert(arg) }) {
+						found = at(n.Pos(), fmt.Sprintf("something of this package is handed to %s", builtin.Name()))
 					}
 				}
 				if tv := pv.info.Types[n.Fun]; tv.IsType() || tv.IsBuiltin() {
