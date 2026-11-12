@@ -1047,3 +1047,19 @@ func FailsInSecondResult() (first, second error) { // want `the contract of Fail
 }
 
 //@ Ensures True
+
+var callback func(int) int
+
+func init() { callback = BouncedByVariable }
+
+// BouncedByVariable calls a trusted function of this package that calls it
+// back through a variable of the package that holds it.
+//
+// @ Requires n >= 0
+func BouncedByVariable(n int) int {
+	return bounceByVariable(n) // want `vego: bounceByVariable is trusted and calls back into BouncedByVariable, so that this call ends cannot be proved; verify bounceByVariable instead of trusting it`
+}
+
+//@ Ensures result = 0
+
+func bounceByVariable(n int) int { return callback(n) }

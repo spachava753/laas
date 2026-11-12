@@ -444,6 +444,43 @@ func (pv *pkgVerifier) collect() {
 				"a function is either verified or trusted, not both", fn.obj.Name())
 		}
 	}
+	// A package-level variable may hold any function that is named where
+	// the variable is given a value, anywhere in the package.
+	kept := map[*types.Var][]*funcInfo{}
+	keep := func(target, value ast.Expr) {
+		id, _ := ast.Unparen(target).(*ast.Ident)
+		variable, ok := pv.info.ObjectOf(id).(*types.Var)
+		if id == nil || !ok || variable.Parent() != pv.pass.Pkg.Scope() {
+			return
+		}
+		ast.Inspect(value, func(n ast.Node) bool {
+			if used, ok := n.(*ast.Ident); ok {
+				if named, ok := pv.info.Uses[used].(*types.Func); ok && pv.funcs[named.Origin()] != nil {
+					kept[variable] = append(kept[variable], pv.funcs[named.Origin()])
+				}
+			}
+			return true
+		})
+	}
+	for _, file := range pv.pass.Files {
+		ast.Inspect(file, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.ValueSpec:
+				for i, name := range n.Names {
+					if len(n.Values) == len(n.Names) {
+						keep(name, n.Values[i])
+					}
+				}
+			case *ast.AssignStmt:
+				for i, lhs := range n.Lhs {
+					if len(n.Rhs) == len(n.Lhs) {
+						keep(lhs, n.Rhs[i])
+					}
+				}
+			}
+			return true
+		})
+	}
 	for _, fn := range pv.order {
 		sort.Slice(fn.body, func(i, j int) bool { return fn.body[i].pos < fn.body[j].pos })
 		if fn.decl.Body == nil {
@@ -451,12 +488,20 @@ func (pv *pkgVerifier) collect() {
 		}
 		pv.checkPlacement(fn)
 		// A function that is named may be called, also when it is only
-		// kept as a value here and called through that.
+		// kept as a value here and called through that, and so may one
+		// that a variable used here may hold.
 		ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
-			if id, ok := n.(*ast.Ident); ok {
-				if named, ok := pv.info.Uses[id].(*types.Func); ok && pv.funcs[named.Origin()] != nil {
-					fn.callees = append(fn.callees, pv.funcs[named.Origin()])
+			id, ok := n.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			switch used := pv.info.Uses[id].(type) {
+			case *types.Func:
+				if pv.funcs[used.Origin()] != nil {
+					fn.callees = append(fn.callees, pv.funcs[used.Origin()])
 				}
+			case *types.Var:
+				fn.callees = append(fn.callees, kept[used]...)
 			}
 			return true
 		})

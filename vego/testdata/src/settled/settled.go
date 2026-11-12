@@ -4,6 +4,7 @@
 package settled
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"os"
@@ -25,6 +26,10 @@ var ErrWrapped = fmt.Errorf("%w: wrapped", ErrY)
 
 // Joined is the command line.
 var Joined = strings.Join(os.Args, " ")
+
+// Out is made from a variable of another package, which nothing of this
+// package was put into.
+var Out = bufio.NewWriter(os.Stderr)
 
 // ErrY is set before anything else of the package runs.
 var ErrY = errors.New("y")

@@ -161,18 +161,19 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 		}
 		return nil
 	}
-	// These hold no code of this package: something of a basic type;
-	// something another package made from such things; a variable of
-	// another package whose type has no room for code, whatever was written
-	// into it; and an error variable of this package that is a sentinel
-	// but for this very question, whose value errors.New or fmt.Errorf made
-	// from such things.
+	// These hold no code of this package: something whose type has no
+	// room for any; a variable of another package and what a function of
+	// another package returns, since code of this package gets into the
+	// hands of another package only by being handed over, which is itself
+	// looked for below; and an error variable of this package that is a
+	// sentinel but for this very question, whose value errors.New or
+	// fmt.Errorf made from such things.
 	inert := func(e ast.Expr) bool {
-		if _, basic := types.Unalias(pv.info.TypeOf(e)).(*types.Basic); basic {
+		if pv.codeless(pv.info.TypeOf(e), map[types.Type]bool{}) {
 			return true
 		}
 		if variable, ok := named(e).(*types.Var); ok {
-			return (variable.Pkg() != pv.pass.Pkg && codeless(variable.Type(), map[types.Type]bool{})) || pv.sentinels[variable]
+			return variable.Pkg() != pv.pass.Pkg || pv.sentinels[variable]
 		}
 		call, ok := ast.Unparen(e).(*ast.CallExpr)
 		if !ok {
@@ -198,12 +199,20 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 			case *ast.GoStmt:
 				found = at(n.Pos(), "a goroutine is started")
 			case *ast.AssignStmt:
-				// What is put into a variable of another package may be
-				// called from there.
-				for _, lhs := range n.Lhs {
-					if variable, ok := named(lhs).(*types.Var); ok && variable.Pkg() != pv.pass.Pkg {
-						found = at(lhs.Pos(), fmt.Sprintf("%s is assigned", types.ExprString(lhs)))
+				// What is put into a variable of another package, or into
+				// anything but a plain variable, which may be memory that
+				// another package can reach, may be called from there.
+				for i, lhs := range n.Lhs {
+					value := n.Rhs[min(i, len(n.Rhs)-1)]
+					_, plain := ast.Unparen(lhs).(*ast.Ident)
+					variable, isVariable := named(lhs).(*types.Var)
+					if (isVariable && variable.Pkg() != pv.pass.Pkg) || (!plain && !inert(value)) {
+						found = at(lhs.Pos(), fmt.Sprintf("%s is assigned, which another package may read", types.ExprString(lhs)))
 					}
+				}
+			case *ast.SendStmt:
+				if !inert(n.Value) {
+					found = at(n.Pos(), "something of this package is sent on a channel")
 				}
 			case *ast.RangeStmt:
 				// Ranging over a function calls it.
@@ -220,6 +229,13 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 					found = scan(decl.Body)
 				}
 			case *ast.CallExpr:
+				// append and copy may write into an array that another
+				// package holds.
+				if isBuiltin(pv.info, n, "append") || isBuiltin(pv.info, n, "copy") {
+					if slices.ContainsFunc(n.Args[1:], func(arg ast.Expr) bool { return !inert(arg) }) {
+						found = at(n.Pos(), "something of this package is put into a slice, which another package may hold")
+					}
+				}
 				if tv := pv.info.Types[n.Fun]; tv.IsType() || tv.IsBuiltin() {
 					break
 				}
@@ -270,28 +286,35 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 	return ""
 }
 
-// codeless reports whether no value of a type can hold code: the type has
-// no interface, function, or channel in it, however deep, through which a
-// method or a function of some package could be reached or handed over.
-func codeless(t types.Type, seen map[types.Type]bool) bool {
+// codeless reports whether no value of a type can hold code of this
+// package: the type has no interface, function, or channel in it, however
+// deep, and no type declared in this package, whose methods a value brings
+// with it.
+func (pv *pkgVerifier) codeless(t types.Type, seen map[types.Type]bool) bool {
+	if t == nil {
+		return false
+	}
 	if seen[t] {
 		return true
 	}
 	seen[t] = true
+	if named, ok := types.Unalias(t).(*types.Named); ok && named.Obj().Pkg() == pv.pass.Pkg {
+		return false
+	}
 	switch u := t.Underlying().(type) {
 	case *types.Basic:
 		return u.Kind() != types.UnsafePointer
 	case *types.Pointer:
-		return codeless(u.Elem(), seen)
+		return pv.codeless(u.Elem(), seen)
 	case *types.Slice:
-		return codeless(u.Elem(), seen)
+		return pv.codeless(u.Elem(), seen)
 	case *types.Array:
-		return codeless(u.Elem(), seen)
+		return pv.codeless(u.Elem(), seen)
 	case *types.Map:
-		return codeless(u.Key(), seen) && codeless(u.Elem(), seen)
+		return pv.codeless(u.Key(), seen) && pv.codeless(u.Elem(), seen)
 	case *types.Struct:
 		for field := range u.Fields() {
-			if !codeless(field.Type(), seen) {
+			if !pv.codeless(field.Type(), seen) {
 				return false
 			}
 		}
