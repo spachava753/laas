@@ -533,10 +533,18 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 		// contradict the caller. Tables are compared, not objects, so that
 		// a path through one parameter may describe what the function
 		// writes through another that is the same object.
-		changed := map[string]bool{}
+		// For each table, the slice parameters whose own elements an entry
+		// lists, or nil for an entry that may reach anything in the table.
+		changed := map[string][]*types.Var{}
 		for _, m := range fn.modifies {
 			if form, _, err := v.locateTarget(fn, m, nil, nil, nil); err == nil {
-				target{cells: form.cells, mapType: form.mapType}.regions(func(key string, _ logic.Sort) { changed[key] = true })
+				var whose *types.Var
+				if form.direct && form.elem != nil {
+					whose = form.param
+				}
+				target{cells: form.cells, mapType: form.mapType}.regions(func(key string, _ logic.Sort) {
+					changed[key] = append(changed[key], whose)
+				})
 			}
 		}
 		for _, c := range fn.ensures {
@@ -561,9 +569,11 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 }
 
 // checkPrimed rejects a path of a trusted ensures that is primed somewhere
-// although no table it reads is one the function may change. A path it
-// cannot follow is left to the checks that read the clause.
-func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, changed map[string]bool) {
+// although no table it reads is one the function may change. The elements
+// of a slice parameter are a special case: slice parameters of one element
+// type do not overlap, so listing another one changes nothing in this one.
+// A path it cannot follow is left to the checks that read the clause.
+func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, changed map[string][]*types.Var) {
 	primed := false
 	for n := path; ; n = n.Kids[0] {
 		primed = primed || n.Primed
@@ -584,7 +594,14 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 	// value, or read out of a map, does not.
 	t, inMemory := param.Type(), false
 	var read []cell
-	for _, step := range steps.steps {
+	own := map[string]bool{}
+	elements := func(elem types.Type, first bool) {
+		for _, c := range v.cellsOf(elem) {
+			read = append(read, c)
+			own[c.key] = own[c.key] || first
+		}
+	}
+	for i, step := range steps.steps {
 		if step.field == "" {
 			switch {
 			case isMap(t) && mapModelled(t):
@@ -596,7 +613,8 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 				if _, modelled := layoutOf(t); !modelled {
 					return
 				}
-				read, inMemory = append(read, v.cellsOf(t)...), true
+				elements(t, i == 0)
+				inMemory = true
 			case isString(t):
 				t = types.Typ[types.Uint8]
 			default:
@@ -630,10 +648,13 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 		target{mapType: t}.regions(func(key string, _ logic.Sort) { read = append(read, cell{key: key}) })
 	case isSlice(t):
 		if _, modelled := layoutOf(elemType(t)); modelled {
-			read = append(read, v.cellsOf(elemType(t))...)
+			elements(elemType(t), len(steps.steps) == 0)
 		}
 	}
-	if !slices.ContainsFunc(read, func(c cell) bool { return changed[c.key] }) {
+	reached := func(c cell) bool {
+		return slices.ContainsFunc(changed[c.key], func(whose *types.Var) bool { return !own[c.key] || whose == nil || whose == param })
+	}
+	if !slices.ContainsFunc(read, reached) {
 		fn.defect("its ensures %q describes %s after the call, but nothing its modifies lists is memory that %s reads, so the call cannot have changed it; "+
 			"drop the prime or list what the function writes", c.text, c.text[path.Start:path.End], c.text[path.Start:path.End])
 	}

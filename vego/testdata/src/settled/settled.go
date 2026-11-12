@@ -5,9 +5,11 @@ package settled
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -30,6 +32,28 @@ var Joined = strings.Join(os.Args, " ")
 // Out is made from a variable of another package, which nothing of this
 // package was put into.
 var Out = bufio.NewWriter(os.Stderr)
+
+// Names is sorted by a generic function of another package, given a type
+// with no methods.
+var Names = sortedNames()
+
+func sortedNames() []string {
+	out := []string{"b", "a"}
+	slices.Sort(out)
+	return out
+}
+
+// Limit is computed by a function written out and called on the spot.
+var Limit = func() int {
+	n := 3
+	return n * 2
+}()
+
+// Root is what another package returned, and Sub is made from it.
+var Root = context.Background()
+
+// Sub and Stop come from Root.
+var Sub, Stop = context.WithCancel(Root)
 
 // ErrY is set before anything else of the package runs.
 var ErrY = errors.New("y")

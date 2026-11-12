@@ -1107,3 +1107,86 @@ func FailsNowhere(x, y int) error { // want `the contract of FailsNowhere would 
 }
 
 //@ Ensures True
+
+// FirstErrorOfRange returns the first error of a call made for each
+// element.
+//
+// @ Requires |xs| >= 1
+func FirstErrorOfRange(xs []int) (err error) {
+	for _, x := range xs {
+		if e := step(x); e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
+//@ Ensures True
+
+// FirstSuccessOfRange gives up when the call failed for every element.
+//
+// @ Requires |xs| >= 1
+func FirstSuccessOfRange(xs []int) (err error) {
+	for _, x := range xs {
+		if step(x) == nil {
+			return nil
+		}
+	}
+	return errAlways
+}
+
+//@ Ensures True
+
+// IgnoresRange calls for each element, ignores what comes back, and fails.
+//
+// @ Requires |xs| >= 1
+func IgnoresRange(xs []int) (err error) { // want `the contract of IgnoresRange would also be met by a function that always returns an error`
+	for _, x := range xs {
+		_ = step(x)
+	}
+	return errAlways
+}
+
+//@ Ensures True
+
+var hooks struct{ fn func(int) int }
+
+func init() { hooks.fn = BouncedByField }
+
+// BouncedByField calls a trusted function of this package that calls it
+// back through a field of a variable.
+//
+// @ Requires n >= 0
+func BouncedByField(n int) int {
+	return bounceByField(n) // want `vego: bounceByField is trusted and calls back into BouncedByField, so that this call ends cannot be proved; verify bounceByField instead of trusting it`
+}
+
+//@ Ensures result = 0
+
+func bounceByField(n int) int { return hooks.fn(n) }
+
+func claimsOtherSlice(xs, ys []int) {}
+
+// UsesClaimsOtherSlice relies on a contract that lists one slice and
+// describes another after the call; the two do not overlap.
+//
+// @ Requires |xs| > 0 And |ys| > 0
+// @ Modifies ys
+func UsesClaimsOtherSlice(xs, ys []int) {
+	claimsOtherSlice(xs, ys) // want `vego: cannot verify UsesClaimsOtherSlice: claimsOtherSlice has a contract that could not be understood` `vego: the trusted contract of trust.claimsOtherSlice \(trusted.yaml:\d+\) cannot be used: its ensures "xs'\[0\] = 7" describes xs'\[0\] after the call, .*`
+}
+
+//@ Ensures xs'[0] = xs[0]
+
+func setsFirst(xs []int) { xs[0] = 7 }
+
+// UsesSetsFirst relies on a contract that describes the slice it lists.
+//
+// @ Requires |xs| > 0
+// @ Modifies xs
+func UsesSetsFirst(xs []int) int {
+	setsFirst(xs)
+	return xs[0]
+}
+
+//@ Ensures result = 7

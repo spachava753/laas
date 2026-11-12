@@ -395,6 +395,11 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 				next = shape.step(end, counter)
 			}
 			shape.bind(end, next)
+			// The counter of the loop is forgotten like a variable: how
+			// far the loop has come depends on whatever let the iterations
+			// before this one run to their end.
+			v.left = append(v.left, leftover{name: counter.Name, val: next, facts: slices.Clip(end.hyps), loop: summary,
+				path: slices.Clip(end.chosen[len(summary.path):])})
 		}
 		// A variable the loop forgot stands, at the head, for what an
 		// earlier iteration left in it, which is recorded here; see

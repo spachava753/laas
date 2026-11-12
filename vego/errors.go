@@ -34,6 +34,7 @@ func (*sentinelFact) String() string { return "sentinel" }
 func (pv *pkgVerifier) findSentinels() {
 	pv.sentinels = map[*types.Var]bool{}
 	pv.unsettled = map[*types.Var]string{}
+	pv.reassigned = map[*types.Var]bool{}
 	pv.relied = map[*types.Var]bool{}
 	for _, file := range pv.pass.Files {
 		for _, decl := range file.Decls {
@@ -70,6 +71,7 @@ func (pv *pkgVerifier) findSentinels() {
 			return
 		}
 		delete(pv.sentinels, variable)
+		pv.reassigned[variable] = true
 		// A proof in the variable's own package may rest on its value.
 		if variable.Pkg() != nil && variable.Pkg() != pv.pass.Pkg && pv.pass.ImportObjectFact(variable, new(sentinelFact)) {
 			pv.report(e.Pos(), "%s.%s may be changed here, but proofs in package %s rely on it being the error it was declared with",
@@ -119,6 +121,7 @@ func (pv *pkgVerifier) findSentinels() {
 // its value. It returns a description of the first such place, or "".
 func (pv *pkgVerifier) hiddenInitCode() string {
 	bodies := map[*types.Func]*ast.FuncDecl{}
+	values := map[*types.Var]ast.Expr{}
 	var initialisers []ast.Expr
 	for _, file := range pv.pass.Files {
 		for _, decl := range file.Decls {
@@ -131,6 +134,11 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 				for _, spec := range decl.Specs {
 					if spec, ok := spec.(*ast.ValueSpec); ok && decl.Tok == token.VAR {
 						initialisers = append(initialisers, spec.Values...)
+						for i, name := range spec.Names {
+							if variable, ok := pv.info.Defs[name].(*types.Var); ok && len(spec.Values) > 0 {
+								values[variable] = spec.Values[min(i, len(spec.Values)-1)]
+							}
+						}
 					}
 				}
 			}
@@ -165,15 +173,24 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 	// room for any; a variable of another package and what a function of
 	// another package returns, since code of this package gets into the
 	// hands of another package only by being handed over, which is itself
-	// looked for below; and an error variable of this package that is a
-	// sentinel but for this very question, whose value errors.New or
-	// fmt.Errorf made from such things.
-	inert := func(e ast.Expr) bool {
+	// looked for below; and a variable of this package that is never
+	// assigned and was declared with such a value, as a sentinel is.
+	visiting := map[*types.Var]bool{}
+	var inert func(e ast.Expr) bool
+	inert = func(e ast.Expr) bool {
 		if pv.codeless(pv.info.TypeOf(e), map[types.Type]bool{}) {
 			return true
 		}
 		if variable, ok := named(e).(*types.Var); ok {
-			return variable.Pkg() != pv.pass.Pkg || pv.sentinels[variable]
+			if variable.Pkg() != pv.pass.Pkg || pv.sentinels[variable] {
+				return true
+			}
+			if values[variable] == nil || pv.reassigned[variable] || visiting[variable] {
+				return false
+			}
+			visiting[variable] = true
+			defer delete(visiting, variable)
+			return inert(values[variable])
 		}
 		call, ok := ast.Unparen(e).(*ast.CallExpr)
 		if !ok {
@@ -258,6 +275,12 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 				callee := typeutil.StaticCallee(pv.info, n)
 				switch {
 				case callee == nil:
+					// A function written out and called on the spot is
+					// read like one that has a name.
+					if literal, ok := ast.Unparen(n.Fun).(*ast.FuncLit); ok {
+						found = scan(literal.Body)
+						break
+					}
 					found = at(n.Pos(), "a function value or an interface method is called")
 				case callee.Pkg() == pv.pass.Pkg:
 					decl := bodies[callee.Origin()]
@@ -272,7 +295,7 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 					// A type argument can carry code too: the methods of a
 					// type of this package.
 					for _, argument := range pv.typeArguments(n) {
-						if _, basic := types.Unalias(argument).(*types.Basic); !basic {
+						if !pv.codeless(argument, map[types.Type]bool{}) {
 							found = at(n.Pos(), fmt.Sprintf("the type %s is handed to %s.%s, which may call its methods",
 								argument, callee.Pkg().Name(), callee.Name()))
 						}

@@ -374,3 +374,25 @@ trusted:
     ensures:
       - "result = nil <-> (e = nil And x*x + y*y = 6)"
     modifies: []
+
+  trust.bounceByField:
+    reason: Test helper that calls back into its caller through a field of a variable.
+    ensures:
+      - "result = 0"
+    modifies: []
+
+  trust.claimsOtherSlice:
+    reason: Test helper that lists one slice and describes another of the same kind after the call.
+    requires:
+      - "|xs| > 0 And |ys| > 0"
+    ensures:
+      - "xs'[0] = 7"
+    modifies: [ys]
+
+  trust.setsFirst:
+    reason: Test helper that sets the first element of the slice it lists.
+    requires:
+      - "|xs| > 0"
+    ensures:
+      - "xs'[0] = 7"
+    modifies: [xs]

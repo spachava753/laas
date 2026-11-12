@@ -25,6 +25,7 @@ import (
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/types/typeutil"
 )
 
 // Analyzer verifies annotated functions and reports every proof obligation it
@@ -235,6 +236,9 @@ type pkgVerifier struct {
 	sentinels map[*types.Var]bool
 	relied    map[*types.Var]bool
 	unsettled map[*types.Var]string
+	// reassigned holds the variables that are assigned, addressed, or
+	// ranged into somewhere in the package.
+	reassigned map[*types.Var]bool
 	// origins caches what the variables of each function body are assigned,
 	// knownReturns holds the functions that only return errors of known
 	// origin, and isParameter the parameters of all functions.
@@ -444,38 +448,30 @@ func (pv *pkgVerifier) collect() {
 				"a function is either verified or trusted, not both", fn.obj.Name())
 		}
 	}
-	// A package-level variable may hold any function that is named where
-	// the variable is given a value, anywhere in the package.
-	kept := map[*types.Var][]*funcInfo{}
-	keep := func(target, value ast.Expr) {
-		id, _ := ast.Unparen(target).(*ast.Ident)
-		variable, ok := pv.info.ObjectOf(id).(*types.Var)
-		if id == nil || !ok || variable.Parent() != pv.pass.Pkg.Scope() {
-			return
-		}
-		ast.Inspect(value, func(n ast.Node) bool {
-			if used, ok := n.(*ast.Ident); ok {
-				if named, ok := pv.info.Uses[used].(*types.Func); ok && pv.funcs[named.Origin()] != nil {
-					kept[variable] = append(kept[variable], pv.funcs[named.Origin()])
+	// A call of a function value or of an interface method may go to any
+	// function of the package that some code has got hold of: one that is
+	// named anywhere but as the function of a call, and for a method called
+	// through an interface, any method of that name. Where such a value
+	// ends up is not followed; any call that cannot be resolved may reach
+	// any of them.
+	called := map[*ast.Ident]bool{}
+	var escaped []*funcInfo
+	for _, file := range pv.pass.Files {
+		ast.Inspect(file, func(n ast.Node) bool {
+			if call, ok := n.(*ast.CallExpr); ok {
+				switch fun := ast.Unparen(call.Fun).(type) {
+				case *ast.Ident:
+					called[fun] = true
+				case *ast.SelectorExpr:
+					called[fun.Sel] = true
 				}
 			}
 			return true
 		})
-	}
-	for _, file := range pv.pass.Files {
 		ast.Inspect(file, func(n ast.Node) bool {
-			switch n := n.(type) {
-			case *ast.ValueSpec:
-				for i, name := range n.Names {
-					if len(n.Values) == len(n.Names) {
-						keep(name, n.Values[i])
-					}
-				}
-			case *ast.AssignStmt:
-				for i, lhs := range n.Lhs {
-					if len(n.Rhs) == len(n.Lhs) {
-						keep(lhs, n.Rhs[i])
-					}
+			if id, ok := n.(*ast.Ident); ok && !called[id] {
+				if named, ok := pv.info.Uses[id].(*types.Func); ok && pv.funcs[named.Origin()] != nil {
+					escaped = append(escaped, pv.funcs[named.Origin()])
 				}
 			}
 			return true
@@ -487,21 +483,26 @@ func (pv *pkgVerifier) collect() {
 			continue
 		}
 		pv.checkPlacement(fn)
-		// A function that is named may be called, also when it is only
-		// kept as a value here and called through that, and so may one
-		// that a variable used here may hold.
 		ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
-			id, ok := n.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			switch used := pv.info.Uses[id].(type) {
-			case *types.Func:
-				if pv.funcs[used.Origin()] != nil {
-					fn.callees = append(fn.callees, pv.funcs[used.Origin()])
+			switch n := n.(type) {
+			case *ast.Ident:
+				// A function that is named here may be called from here.
+				if named, ok := pv.info.Uses[n].(*types.Func); ok && pv.funcs[named.Origin()] != nil {
+					fn.callees = append(fn.callees, pv.funcs[named.Origin()])
 				}
-			case *types.Var:
-				fn.callees = append(fn.callees, kept[used]...)
+			case *ast.CallExpr:
+				tv := pv.info.Types[n.Fun]
+				if tv.IsType() || tv.IsBuiltin() || typeutil.StaticCallee(pv.info, n) != nil {
+					break
+				}
+				fn.callees = append(fn.callees, escaped...)
+				if sel, ok := ast.Unparen(n.Fun).(*ast.SelectorExpr); ok {
+					for _, method := range pv.order {
+						if method.obj.Name() == sel.Sel.Name && method.obj.Type().(*types.Signature).Recv() != nil {
+							fn.callees = append(fn.callees, method)
+						}
+					}
+				}
 			}
 			return true
 		})
