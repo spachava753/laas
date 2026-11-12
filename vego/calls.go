@@ -583,10 +583,15 @@ func (v *fnVerifier) tieFailures() {
 			return v.chosenBy(source, outcome.facts, outcome.path) ||
 				slices.ContainsFunc(outcome.errs, func(err *logic.Term) bool { return v.dependsOn(source, outcome.facts, err) })
 		}
-		// A success must also be one that some input reaches; that the
-		// solver could not rule it out is not enough.
+		// A success must also be one that some input reaches, with every
+		// error it returns nil; that the solver could not rule it out is
+		// not enough.
 		tied := slices.ContainsFunc(v.failures, decides) && slices.ContainsFunc(v.successes, func(outcome failure) bool {
-			return decides(outcome) && v.canReach(outcome.facts)
+			succeeded := slices.Clone(outcome.facts)
+			for _, err := range outcome.errs {
+				succeeded = append(succeeded, logic.IsNil(err))
+			}
+			return decides(outcome) && v.canReach(succeeded)
 		})
 		switch {
 		case !tied:

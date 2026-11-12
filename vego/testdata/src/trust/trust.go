@@ -1079,3 +1079,15 @@ func SucceedsNowhere(x, y int) error { // want `the contract of SucceedsNowhere 
 }
 
 //@ Ensures True
+
+func finish(e error, x, y int) error { return errAlways }
+
+// FinishesNowhere returns what a function makes of the call's error that
+// never succeeds.
+//
+// @ Requires -2 <= x <= 2 And -2 <= y <= 2
+func FinishesNowhere(x, y int) error { // want `the contract of FinishesNowhere would also be met by a function that always returns an error`
+	return finish(external(), x, y)
+}
+
+//@ Ensures True

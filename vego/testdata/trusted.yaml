@@ -368,3 +368,9 @@ trusted:
     ensures:
       - "result = 0"
     modifies: []
+
+  trust.finish:
+    reason: Test helper that succeeds only where two squares add up to six, which is nowhere.
+    ensures:
+      - "result = nil <-> (e = nil And x*x + y*y = 6)"
+    modifies: []
