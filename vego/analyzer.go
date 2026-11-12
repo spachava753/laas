@@ -536,6 +536,11 @@ func (pv *pkgVerifier) collect() {
 // a function: the type is a function type, or a type parameter whose
 // constraint lets it stand for one. Everything else that can be ranged over
 // is data.
+//
+// For a constraint this errs towards yes. It does not work out which types
+// meet all the elements of a constraint at once, so a constraint whose
+// elements each allow some function type, but no function type in common,
+// is taken to allow one. The cost is that such a range counts as a call.
 func rangesByCalling(t types.Type) bool {
 	if param, ok := types.Unalias(t).(*types.TypeParam); ok {
 		t = param.Constraint()
