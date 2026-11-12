@@ -551,14 +551,15 @@ func rangesByCalling(t types.Type) bool {
 		}
 		return false
 	case *types.Interface:
-		// A constraint says what the type may be by the types it embeds;
-		// one that embeds none says nothing.
+		// A type must meet everything a constraint embeds, so one embedded
+		// element that only lets data through is enough. A constraint that
+		// embeds nothing of the kind says nothing.
 		for embedded := range u.EmbeddedTypes() {
-			if rangesByCalling(embedded) {
-				return true
+			if !rangesByCalling(embedded) {
+				return false
 			}
 		}
-		return u.NumEmbeddeds() == 0
+		return true
 	}
 	return true
 }

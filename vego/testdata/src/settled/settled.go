@@ -59,7 +59,10 @@ var Sub, Stop = context.WithCancel(Root)
 // parameter says is a slice.
 var Count = count([]int{1})
 
-func count[S ~[]int](xs S) int {
+func count[S interface {
+	~[]int
+	any
+}](xs S) int {
 	n := 0
 	for range xs {
 		n++
