@@ -417,3 +417,11 @@ trusted:
       - "ys'[0].Value = 7"
       - "(|xs[0].Children'| = 1 And xs[0].Children'[0].Value = 7) Or xs[0].Children'[0].Value = xs[0].Children[0].Value"
     modifies: [ys]
+
+  trust.claimsOtherCell:
+    reason: Test helper that lists one slice of structs and describes a field in another after the call.
+    requires:
+      - "|xs| > 0 And |ys| > 0"
+    ensures:
+      - "xs'[0].X = 7"
+    modifies: [ys]

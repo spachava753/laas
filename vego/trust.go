@@ -602,19 +602,24 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 			read, own = append(read, c), append(own, first)
 		}
 	}
+	// owned is set while the path is inside an element of the slice
+	// parameter itself: from the first index on, through fields, until a
+	// pointer is followed or another slice or a map is entered.
+	owned := false
 	for i, step := range steps.steps {
 		if step.field == "" {
 			switch {
 			case isMap(t) && mapModelled(t):
 				target{mapType: t}.regions(func(key string, _ logic.Sort) { read, own = append(read, cell{key: key}), append(own, false) })
 				_, t = mapParts(t)
-				inMemory = false
+				inMemory, owned = false, false
 			case isSlice(t):
 				t = elemType(t)
 				if _, modelled := layoutOf(t); !modelled {
 					return
 				}
-				elements(t, i == 0)
+				owned = i == 0
+				elements(t, owned)
 				inMemory = true
 			case isString(t):
 				t = types.Typ[types.Uint8]
@@ -630,14 +635,14 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 		for _, index := range indices {
 			object := t
 			if target, viaPointer := pointee(t); viaPointer {
-				object, inMemory = target, true
+				object, inMemory, owned = target, true, false
 			}
 			fields, isStruct := object.Underlying().(*types.Struct)
 			if _, modelled := layoutOf(object); !isStruct || !modelled {
 				return
 			}
 			if lo, hi, _ := fieldLeaves(object, index); inMemory && hi > lo {
-				read, own = append(read, v.cellsOf(object)[lo:hi]...), append(own, make([]bool, hi-lo)...)
+				read, own = append(read, v.cellsOf(object)[lo:hi]...), append(own, slices.Repeat([]bool{owned}, hi-lo)...)
 			}
 			t = fields.Field(index).Type()
 		}

@@ -1245,3 +1245,16 @@ func UsesSetsChild(xs, ys []node) int {
 }
 
 //@ Ensures result = 7
+
+func claimsOtherCell(xs, ys []box) {}
+
+// UsesClaimsOtherCell relies on a contract that lists one slice of structs
+// and describes a field in another after the call.
+//
+// @ Requires |xs| > 0 And |ys| > 0
+// @ Modifies ys
+func UsesClaimsOtherCell(xs, ys []box) {
+	claimsOtherCell(xs, ys) // want `vego: cannot verify UsesClaimsOtherCell: claimsOtherCell has a contract that could not be understood` `vego: the trusted contract of trust.claimsOtherCell \(trusted.yaml:\d+\) cannot be used: its ensures "xs'\[0\]\.X = 7" describes xs'\[0\]\.X after the call, .*`
+}
+
+//@ Ensures xs'[0].X = xs[0].X
