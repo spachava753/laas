@@ -426,7 +426,7 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state,
 	// function whose success hangs on that cannot promise success either.
 	// Where the contract does determine the results, nothing will be found
 	// to depend on them.
-	if fn.trust != nil && len(errorResults(fn)) == 0 && len(made.produced) > 0 {
+	if fn.trust != nil && len(errorResults(fn)) == 0 && len(made.produced) > 0 && v.canReach(path) {
 		source := failureSource{outputs: map[string]bool{}, origins: []forward{made}}
 		for _, name := range made.produced {
 			source.outputs[name] = true
@@ -501,10 +501,11 @@ func estranged(t *logic.Term, names map[string]bool) (*logic.Term, bool) {
 	return &copied, true
 }
 
-// failure is a return of an error that may not be nil, with the conditions
-// of the branches taken on the way to it.
+// failure is a return, with the errors it returns and the conditions of the
+// branches taken on the way to it. It serves for a return that may succeed
+// as well as for one that may fail.
 type failure struct {
-	err  *logic.Term
+	errs []*logic.Term
 	path []choice
 	// facts is everything known at the return.
 	facts []*logic.Term
@@ -579,7 +580,8 @@ func (v *fnVerifier) tieFailures() {
 		// The call must make the difference: some return of an error and
 		// some return without one both depend on it.
 		decides := func(outcome failure) bool {
-			return v.dependsOn(source, outcome.facts, outcome.err) || v.chosenBy(source, outcome.facts, outcome.path)
+			return v.chosenBy(source, outcome.facts, outcome.path) ||
+				slices.ContainsFunc(outcome.errs, func(err *logic.Term) bool { return v.dependsOn(source, outcome.facts, err) })
 		}
 		tied := slices.ContainsFunc(v.failures, decides) && slices.ContainsFunc(v.successes, decides)
 		switch {

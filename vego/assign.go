@@ -503,20 +503,22 @@ func (v *fnVerifier) returnStmt(s *ast.ReturnStmt, st *state) {
 
 // atReturn checks the postcondition in a final state.
 func (v *fnVerifier) atReturn(st *state, results []value, pos token.Pos) {
-	// Each error the function is returning is recorded with the branches
-	// taken to get here, as a possible failure if it may be an error and as
-	// a possible success if it may be nil; see tieFailures.
+	// The return is recorded with the branches taken to get here, as a
+	// possible failure, a possible success, or both; see tieFailures.
+	// A return fails if any of its errors is one and succeeds if none is.
+	outcome := failure{path: slices.Clip(st.chosen), facts: slices.Clip(st.hyps)}
+	var none []*logic.Term
 	for _, index := range errorResults(v.fn) {
-		if results[index] == nil {
-			continue
+		if results[index] != nil {
+			outcome.errs = append(outcome.errs, results[index][0])
+			none = append(none, logic.IsNil(results[index][0]))
 		}
-		outcome := failure{err: results[index][0], path: slices.Clip(st.chosen), facts: slices.Clip(st.hyps)}
-		if !v.quickly(st, nil, logic.IsNil(outcome.err)) {
-			v.failures = append(v.failures, outcome)
-		}
-		if !v.quickly(st, nil, logic.Not(logic.IsNil(outcome.err))) {
-			v.successes = append(v.successes, outcome)
-		}
+	}
+	if len(none) > 0 && !v.quickly(st, nil, logic.And(none...)) {
+		v.failures = append(v.failures, outcome)
+	}
+	if len(none) > 0 && !v.quickly(st, nil, logic.Not(logic.And(none...))) {
+		v.successes = append(v.successes, outcome)
 	}
 	// Returning assigns the results to the result variables. Only one that
 	// lives in memory can be seen afterwards, through a pointer to it.

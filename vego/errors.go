@@ -163,16 +163,16 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 	}
 	// These hold no code of this package: something of a basic type;
 	// something another package made from such things; a variable of
-	// another package, which nothing of this package has been put into,
-	// since doing that is itself looked for below; and an error variable of
-	// this package that is a sentinel but for this very question, whose
-	// value errors.New or fmt.Errorf made from such things.
+	// another package whose type has no room for code, whatever was written
+	// into it; and an error variable of this package that is a sentinel
+	// but for this very question, whose value errors.New or fmt.Errorf made
+	// from such things.
 	inert := func(e ast.Expr) bool {
 		if _, basic := types.Unalias(pv.info.TypeOf(e)).(*types.Basic); basic {
 			return true
 		}
 		if variable, ok := named(e).(*types.Var); ok {
-			return variable.Pkg() != pv.pass.Pkg || pv.sentinels[variable]
+			return (variable.Pkg() != pv.pass.Pkg && codeless(variable.Type(), map[types.Type]bool{})) || pv.sentinels[variable]
 		}
 		call, ok := ast.Unparen(e).(*ast.CallExpr)
 		if !ok {
@@ -268,6 +268,36 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 		}
 	}
 	return ""
+}
+
+// codeless reports whether no value of a type can hold code: the type has
+// no interface, function, or channel in it, however deep, through which a
+// method or a function of some package could be reached or handed over.
+func codeless(t types.Type, seen map[types.Type]bool) bool {
+	if seen[t] {
+		return true
+	}
+	seen[t] = true
+	switch u := t.Underlying().(type) {
+	case *types.Basic:
+		return u.Kind() != types.UnsafePointer
+	case *types.Pointer:
+		return codeless(u.Elem(), seen)
+	case *types.Slice:
+		return codeless(u.Elem(), seen)
+	case *types.Array:
+		return codeless(u.Elem(), seen)
+	case *types.Map:
+		return codeless(u.Key(), seen) && codeless(u.Elem(), seen)
+	case *types.Struct:
+		for field := range u.Fields() {
+			if !codeless(field.Type(), seen) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // typeArguments returns the type arguments a call instantiates its callee

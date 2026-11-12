@@ -1039,3 +1039,11 @@ func UsesClaimsOtherChange(xs []int, p *box) {
 }
 
 //@ Ensures xs'[0] = xs[0]
+
+// FailsInSecondResult returns the error of a call and, next to it, an
+// error of its own every time.
+func FailsInSecondResult() (first, second error) { // want `the contract of FailsInSecondResult would also be met by a function that always returns an error`
+	return external(), errAlways
+}
+
+//@ Ensures True

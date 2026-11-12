@@ -4,7 +4,6 @@
 package settled
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"os"
@@ -19,12 +18,13 @@ var Name = twice(strings.ToUpper("x"))
 // Later is a function kept for later; writing it down runs nothing.
 var Later = func(f func()) { f() }
 
-// ErrWrapped is made from another error variable of the package, and Out
-// from a variable of another package; neither holds code of this package.
+// ErrWrapped is made from another error variable of the package, and
+// Joined from a variable of another package that has no room for code;
+// neither holds code of this package.
 var ErrWrapped = fmt.Errorf("%w: wrapped", ErrY)
 
-// Out writes somewhere.
-var Out = bufio.NewWriter(os.Stderr)
+// Joined is the command line.
+var Joined = strings.Join(os.Args, " ")
 
 // ErrY is set before anything else of the package runs.
 var ErrY = errors.New("y")
