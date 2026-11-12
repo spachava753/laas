@@ -308,7 +308,9 @@ func (v *fnVerifier) verify() {
 	// read as that other thing, silently.
 	ast.Inspect(fn.decl, func(n ast.Node) bool {
 		if id, ok := n.(*ast.Ident); ok {
-			if variable, isVar := v.info.Defs[id].(*types.Var); isVar && !variable.IsField() && fn.ambiguous(id.Name) {
+			variable, isVar := v.info.Defs[id].(*types.Var)
+			local := !slices.Contains(fn.params, variable) && !slices.Contains(fn.results, variable)
+			if isVar && !variable.IsField() && fn.ambiguous(id.Name, local) {
 				v.unsupported(id.Pos(), fmt.Sprintf("the variable %s has a name that means something else in annotations; rename it", id.Name))
 			}
 		}

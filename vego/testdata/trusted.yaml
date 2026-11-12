@@ -348,3 +348,17 @@ trusted:
   trust.step:
     reason: Test helper that may fail for any argument.
     modifies: []
+
+  trust.bounceByValue:
+    reason: Test helper that calls back into its caller through a function value.
+    ensures:
+      - "result = 0"
+    modifies: []
+
+  trust.claimsOtherChange:
+    reason: Test helper that lists a struct and describes a slice after the call.
+    requires:
+      - "|xs| > 0 And p != nil"
+    ensures:
+      - "xs'[0] = 7"
+    modifies: [p]

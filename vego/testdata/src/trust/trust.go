@@ -526,7 +526,7 @@ func claimsChange(xs []int) {}
 //
 // @ Requires |xs| > 0 And xs[0] = 1
 func UsesClaimsChange(xs []int) {
-	claimsChange(xs) // want `vego: cannot verify UsesClaimsChange: claimsChange has a contract that could not be understood` `vego: the trusted contract of trust.claimsChange \(trusted.yaml:\d+\) cannot be used: its ensures "xs'\[0\] = 7" describes memory after the call with xs', but its modifies lists nothing, so the call changes no memory; drop the prime or list what the function writes`
+	claimsChange(xs) // want `vego: cannot verify UsesClaimsChange: claimsChange has a contract that could not be understood` `vego: the trusted contract of trust.claimsChange \(trusted.yaml:\d+\) cannot be used: its ensures "xs'\[0\] = 7" describes xs'\[0\] after the call, but nothing its modifies lists is memory that xs'\[0\] reads, so the call cannot have changed it; drop the prime or list what the function writes`
 }
 
 //@ Ensures xs'[0] = 99
@@ -1011,3 +1011,31 @@ func NeedsSetting() (value string, err error) {
 }
 
 //@ Ensures err = nil -> |value| > 0
+
+// BouncedByValue calls a trusted function of this package that calls it
+// back through a function value.
+//
+// @ Requires n >= 0
+func BouncedByValue(n int) int {
+	return bounceByValue(n) // want `vego: bounceByValue is trusted and calls back into BouncedByValue, so that this call ends cannot be proved; verify bounceByValue instead of trusting it`
+}
+
+//@ Ensures result = 0
+
+func bounceByValue(n int) int {
+	f := BouncedByValue
+	return f(n)
+}
+
+func claimsOtherChange(xs []int, p *box) {}
+
+// UsesClaimsOtherChange relies on a contract that lists one thing and
+// describes another after the call.
+//
+// @ Requires |xs| > 0 And p != nil
+// @ Modifies p
+func UsesClaimsOtherChange(xs []int, p *box) {
+	claimsOtherChange(xs, p) // want `vego: cannot verify UsesClaimsOtherChange: claimsOtherChange has a contract that could not be understood` `vego: the trusted contract of trust.claimsOtherChange \(trusted.yaml:\d+\) cannot be used: its ensures "xs'\[0\] = 7" describes xs'\[0\] after the call, but nothing its modifies lists is memory that xs'\[0\] reads, so the call cannot have changed it; drop the prime or list what the function writes`
+}
+
+//@ Ensures xs'[0] = xs[0]

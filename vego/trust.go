@@ -503,7 +503,7 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 		fn.modifies = append(fn.modifies, newModTargets(targets, c)...)
 	}
 	for name := range fn.paramNames {
-		if fn.ambiguous(name) {
+		if fn.ambiguous(name, false) {
 			fn.defect("its parameter %s has a name that means something else in a contract", name)
 		}
 	}
@@ -525,21 +525,32 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 	pv.run(fn, func(v *fnVerifier) {
 		v.lenient = true
 		v.misreadAs = func(c *clause, err error) { fn.defect("in its %s %q: %v", c.kind, c.text, err) }
-		// A primed path describes memory after the call. A function that
-		// writes nothing leaves all memory as it was, so there a prime says
-		// nothing, and a clause that needs it could only contradict the
-		// caller. With anything listed, what a primed path reads may have
-		// changed, also through another parameter that is the same object;
-		// a clause that is wrong then shows where a call contradicts it.
-		if len(fn.modifies) == 0 {
-			for _, c := range fn.ensures {
-				c.node.Walk(func(n *logic.Node) {
-					if n.Primed {
-						fn.defect("its ensures %q describes memory after the call with %s, but its modifies lists nothing, so the call changes no memory; "+
-							"drop the prime or list what the function writes", c.text, c.text[n.Start:n.End])
-					}
-				})
+		// A primed path describes memory after the call. A call changes
+		// a table only if modifies lists something in it, and a path reads
+		// a table at each step that goes through memory. If none of the
+		// tables a primed path reads can have changed, what it describes is
+		// as it was, and a clause that needs the prime could only
+		// contradict the caller. Tables are compared, not objects, so that
+		// a path through one parameter may describe what the function
+		// writes through another that is the same object.
+		changed := map[string]bool{}
+		for _, m := range fn.modifies {
+			if form, _, err := v.locateTarget(fn, m, nil, nil, nil); err == nil {
+				target{cells: form.cells, mapType: form.mapType}.regions(func(key string, _ logic.Sort) { changed[key] = true })
 			}
+		}
+		for _, c := range fn.ensures {
+			var visit func(n *logic.Node, whole bool)
+			visit = func(n *logic.Node, whole bool) {
+				isPath := n.Kind == logic.NIdent || n.Kind == logic.NField || n.Kind == logic.NIndex
+				if isPath && whole {
+					v.checkPrimed(fn, c, n, changed)
+				}
+				for i, kid := range n.Kids {
+					visit(kid, !isPath || i > 0)
+				}
+			}
+			visit(c.node, true)
 		}
 		_, outcome, _ := v.contractInstance(v.enter())
 		opts := solver.Options{Preds: pv.res.Preds, MaxSteps: pv.maxSteps}
@@ -547,6 +558,85 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 			fn.defect("it contradicts itself, so anything could be proved from it")
 		}
 	})
+}
+
+// checkPrimed rejects a path of a trusted ensures that is primed somewhere
+// although no table it reads is one the function may change. A path it
+// cannot follow is left to the checks that read the clause.
+func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, changed map[string]bool) {
+	primed := false
+	for n := path; ; n = n.Kids[0] {
+		primed = primed || n.Primed
+		if n.Kind == logic.NIdent {
+			break
+		}
+	}
+	steps := newModTargets([]*logic.Node{path}, c)[0]
+	param, isParam := fn.paramNames[steps.name]
+	if !primed || !isParam {
+		return
+	}
+	if _, modelled := layoutOf(param.Type()); !modelled {
+		return
+	}
+	// A struct lies in memory once a pointer has been followed or an
+	// element of a slice taken; a field of a struct that was passed by
+	// value, or read out of a map, does not.
+	t, inMemory := param.Type(), false
+	var read []cell
+	for _, step := range steps.steps {
+		if step.field == "" {
+			switch {
+			case isMap(t) && mapModelled(t):
+				target{mapType: t}.regions(func(key string, _ logic.Sort) { read = append(read, cell{key: key}) })
+				_, t = mapParts(t)
+				inMemory = false
+			case isSlice(t):
+				t = elemType(t)
+				if _, modelled := layoutOf(t); !modelled {
+					return
+				}
+				read, inMemory = append(read, v.cellsOf(t)...), true
+			case isString(t):
+				t = types.Typ[types.Uint8]
+			default:
+				return
+			}
+			continue
+		}
+		found, indices, _ := types.LookupFieldOrMethod(t, true, fn.obj.Pkg(), step.field)
+		if _, isField := found.(*types.Var); !isField {
+			return
+		}
+		for _, index := range indices {
+			object := t
+			if target, viaPointer := pointee(t); viaPointer {
+				object, inMemory = target, true
+			}
+			fields, isStruct := object.Underlying().(*types.Struct)
+			if _, modelled := layoutOf(object); !isStruct || !modelled {
+				return
+			}
+			if lo, hi, _ := fieldLeaves(object, index); inMemory && hi > lo {
+				read = append(read, v.cellsOf(object)[lo:hi]...)
+			}
+			t = fields.Field(index).Type()
+		}
+	}
+	// What the path leads to is read as well: the elements of a slice, the
+	// keys and values of a map.
+	switch {
+	case isMap(t) && mapModelled(t):
+		target{mapType: t}.regions(func(key string, _ logic.Sort) { read = append(read, cell{key: key}) })
+	case isSlice(t):
+		if _, modelled := layoutOf(elemType(t)); modelled {
+			read = append(read, v.cellsOf(elemType(t))...)
+		}
+	}
+	if !slices.ContainsFunc(read, func(c cell) bool { return changed[c.key] }) {
+		fn.defect("its ensures %q describes %s after the call, but nothing its modifies lists is memory that %s reads, so the call cannot have changed it; "+
+			"drop the prime or list what the function writes", c.text, c.text[path.Start:path.End], c.text[path.Start:path.End])
+	}
 }
 
 // noteUse records that a proof relies on a trusted contract.

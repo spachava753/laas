@@ -287,3 +287,36 @@ InBlock has an annotation inside a block comment, after other text.
 @Ensures result = 0
 */
 func InBlock() int { return 1 }
+
+// LocalResult has a local variable named like the unnamed result. Only the
+// contract uses the name, and a contract cannot see local variables.
+func LocalResult(a, b int8) int {
+	result := int(a) + int(b)
+	return result
+}
+
+//@ Ensures result = a + b
+
+// LocalResultInBody has an annotation inside the body that uses the name,
+// where it can only mean the variable.
+func LocalResultInBody(a int8) int {
+	result := int(a)
+	//@ Assert result = a
+	return result
+}
+
+// LocalTrue has a local variable named like a word of the language, which
+// an annotation inside the body uses.
+func LocalTrue(a int8) bool {
+	True := a > 0 // want `vego: cannot verify LocalTrue: the variable True has a name that means something else in annotations; rename it`
+	//@ Assert True
+	return True
+}
+
+//@ Ensures result <-> a > 0
+
+//@ Ensures result = a
+
+// @ Requires True
+/* InBlockLater has a note @ Ensures result = 0 that comes after other text on its line. */ // want `vego: annotations are only read from // comments, not from /\* \*. comments`
+func InBlockLater() int { return 1 }

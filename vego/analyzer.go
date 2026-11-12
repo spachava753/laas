@@ -25,7 +25,6 @@ import (
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"golang.org/x/tools/go/analysis"
-	"golang.org/x/tools/go/types/typeutil"
 )
 
 // Analyzer verifies annotated functions and reports every proof obligation it
@@ -264,6 +263,7 @@ func (pv *pkgVerifier) report(pos token.Pos, format string, args ...any) {
 
 var (
 	annotationLine  = regexp.MustCompile(`^//\s*@(\s*)(.*)$`)
+	anyAnnotation   = regexp.MustCompile(`@\s*(\w+)`)
 	blockAnnotation = regexp.MustCompile(`(?m)^(?:/\*)?[\s*]*@\s*(\w*)`)
 	clauseKinds     = map[string]bool{
 		"Requires": true, "Ensures": true, "Invariant": true, "Variant": true,
@@ -292,12 +292,16 @@ func extractClauses(group *ast.CommentGroup) []*clause {
 	var current *clause
 	for _, comment := range group.List {
 		if strings.HasPrefix(comment.Text, "/*") {
-			for _, block := range blockAnnotation.FindAllStringSubmatch(comment.Text, -1) {
-				if nearKeyword(block[1]) {
-					clauses = append(clauses, &clause{text: block[1], pos: comment.Pos(),
-						misplaced: "annotations are only read from // comments, not from /* */ comments"})
-					break
-				}
+			// A keyword after an @ anywhere in the comment, or something
+			// close to one at the start of a line.
+			found := slices.ContainsFunc(blockAnnotation.FindAllStringSubmatch(comment.Text, -1), func(block []string) bool {
+				return nearKeyword(block[1])
+			}) || slices.ContainsFunc(anyAnnotation.FindAllStringSubmatch(comment.Text, -1), func(block []string) bool {
+				return clauseKinds[block[1]]
+			})
+			if found {
+				clauses = append(clauses, &clause{pos: comment.Pos(),
+					misplaced: "annotations are only read from // comments, not from /* */ comments"})
 			}
 		}
 		match := annotationLine.FindStringSubmatch(comment.Text)
@@ -446,10 +450,12 @@ func (pv *pkgVerifier) collect() {
 			continue
 		}
 		pv.checkPlacement(fn)
+		// A function that is named may be called, also when it is only
+		// kept as a value here and called through that.
 		ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
-			if call, ok := n.(*ast.CallExpr); ok {
-				if callee := pv.funcs[typeutil.StaticCallee(pv.info, call)]; callee != nil {
-					fn.callees = append(fn.callees, callee)
+			if id, ok := n.(*ast.Ident); ok {
+				if named, ok := pv.info.Uses[id].(*types.Func); ok && pv.funcs[named.Origin()] != nil {
+					fn.callees = append(fn.callees, pv.funcs[named.Origin()])
 				}
 			}
 			return true
@@ -517,16 +523,23 @@ func newFuncInfo(obj *types.Func) *funcInfo {
 // the annotation language, and result, or result1, result2, ..., is how an
 // unnamed result is referred to.
 //
-// Only a name that an annotation of the function actually uses is in doubt.
-func (fn *funcInfo) ambiguous(name string) bool {
+// Only a name that an annotation actually uses is in doubt, and only an
+// annotation that can see the variable: the contract sees the parameters
+// and results, the annotations inside the body see the local variables too.
+func (fn *funcInfo) ambiguous(name string, local bool) bool {
+	// Inside a body result is not a name for anything, so a local variable
+	// of that name is simply the variable.
 	index, isResult := fn.resultNames[name]
-	if name != "True" && name != "False" && name != "nil" && (!isResult || fn.results[index].Name() == name) {
+	if name != "True" && name != "False" && name != "nil" && (local || !isResult || fn.results[index].Name() == name) {
 		return false
 	}
-	used := slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.name == name })
-	clauses := slices.Concat(fn.requires, fn.ensures, fn.body)
-	if fn.measure != nil {
-		clauses = append(clauses, fn.measure)
+	used, clauses := false, fn.body
+	if !local {
+		used = slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.name == name })
+		clauses = slices.Concat(fn.requires, fn.ensures, fn.body)
+		if fn.measure != nil {
+			clauses = append(clauses, fn.measure)
+		}
 	}
 	for _, c := range clauses {
 		c.node.Walk(func(n *logic.Node) {

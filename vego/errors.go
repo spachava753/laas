@@ -140,11 +140,39 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 		position := pv.pass.Fset.Position(pos)
 		return fmt.Sprintf("%s at %s:%d", what, filepath.Base(position.Filename), position.Line)
 	}
-	// Something of a basic type, or made by another package from such
-	// things, holds no code of this package.
+	// named returns the package-level variable or the function that an
+	// expression names, if it names one.
+	named := func(e ast.Expr) types.Object {
+		e = ast.Unparen(e)
+		if sel, ok := e.(*ast.SelectorExpr); ok && pv.info.Selections[sel] == nil {
+			e = sel.Sel
+		}
+		id, ok := e.(*ast.Ident)
+		if !ok {
+			return nil
+		}
+		switch obj := pv.info.Uses[id].(type) {
+		case *types.Func:
+			return obj
+		case *types.Var:
+			if obj.Pkg() != nil && obj.Parent() == obj.Pkg().Scope() {
+				return obj
+			}
+		}
+		return nil
+	}
+	// These hold no code of this package: something of a basic type;
+	// something another package made from such things; a variable of
+	// another package, which nothing of this package has been put into,
+	// since doing that is itself looked for below; and an error variable of
+	// this package that is a sentinel but for this very question, whose
+	// value errors.New or fmt.Errorf made from such things.
 	inert := func(e ast.Expr) bool {
 		if _, basic := types.Unalias(pv.info.TypeOf(e)).(*types.Basic); basic {
 			return true
+		}
+		if variable, ok := named(e).(*types.Var); ok {
+			return variable.Pkg() != pv.pass.Pkg || pv.sentinels[variable]
 		}
 		call, ok := ast.Unparen(e).(*ast.CallExpr)
 		if !ok {
@@ -169,6 +197,28 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 				return false
 			case *ast.GoStmt:
 				found = at(n.Pos(), "a goroutine is started")
+			case *ast.AssignStmt:
+				// What is put into a variable of another package may be
+				// called from there.
+				for _, lhs := range n.Lhs {
+					if variable, ok := named(lhs).(*types.Var); ok && variable.Pkg() != pv.pass.Pkg {
+						found = at(lhs.Pos(), fmt.Sprintf("%s is assigned", types.ExprString(lhs)))
+					}
+				}
+			case *ast.RangeStmt:
+				// Ranging over a function calls it.
+				if _, isFunc := pv.info.TypeOf(n.X).Underlying().(*types.Signature); !isFunc {
+					break
+				}
+				ranged, _ := named(n.X).(*types.Func)
+				decl := bodies[ranged]
+				switch {
+				case ranged == nil || decl == nil || decl.Body == nil:
+					found = at(n.X.Pos(), "a function that is not a named function of this package is ranged over")
+				case !seen[ranged]:
+					seen[ranged] = true
+					found = scan(decl.Body)
+				}
 			case *ast.CallExpr:
 				if tv := pv.info.Types[n.Fun]; tv.IsType() || tv.IsBuiltin() {
 					break
