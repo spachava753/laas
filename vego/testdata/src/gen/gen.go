@@ -18,3 +18,12 @@ func GetBox() Checker { return Box.Value }
 
 // Run asks a Checker.
 func Run(c Checker) bool { return c != nil && c.Check() }
+
+// Carrier asks the zero value of the type it is instantiated with.
+type Carrier[T interface{ Check() bool }] struct{}
+
+// Check asks it.
+func (Carrier[T]) Check() bool {
+	var t T
+	return t.Check()
+}

@@ -300,7 +300,7 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 // codeless reports whether no value of a type can hold code of this
 // package: the type has no interface, function, or channel in it, however
 // deep, and no type declared in this package, whose methods a value brings
-// with it.
+// with it, also not as a type argument.
 func (pv *pkgVerifier) codeless(t types.Type, seen map[types.Type]bool) bool {
 	if t == nil {
 		return false
@@ -309,8 +309,17 @@ func (pv *pkgVerifier) codeless(t types.Type, seen map[types.Type]bool) bool {
 		return true
 	}
 	seen[t] = true
-	if named, ok := types.Unalias(t).(*types.Named); ok && named.Obj().Pkg() == pv.pass.Pkg {
-		return false
+	// A type declared here brings its methods, and a generic type of
+	// another package those of the types it is instantiated with.
+	if named, ok := types.Unalias(t).(*types.Named); ok {
+		if named.Obj().Pkg() == pv.pass.Pkg {
+			return false
+		}
+		for argument := range named.TypeArgs().Types() {
+			if !pv.codeless(argument, seen) {
+				return false
+			}
+		}
 	}
 	switch u := t.Underlying().(type) {
 	case *types.Basic:
