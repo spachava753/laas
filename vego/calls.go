@@ -583,16 +583,22 @@ func (v *fnVerifier) tieFailures() {
 			return v.chosenBy(source, outcome.facts, outcome.path) ||
 				slices.ContainsFunc(outcome.errs, func(err *logic.Term) bool { return v.dependsOn(source, outcome.facts, err) })
 		}
-		// A success must also be one that some input reaches, with every
-		// error it returns nil; that the solver could not rule it out is
-		// not enough.
-		tied := slices.ContainsFunc(v.failures, decides) && slices.ContainsFunc(v.successes, func(outcome failure) bool {
-			succeeded := slices.Clone(outcome.facts)
-			for _, err := range outcome.errs {
-				succeeded = append(succeeded, logic.IsNil(err))
+		// Each must also be an outcome that some input reaches, the
+		// failure with an error that is one and the success with none;
+		// that the solver could not rule it out is not enough.
+		reached := func(outcome failure, succeeds bool) bool {
+			none := make([]*logic.Term, len(outcome.errs))
+			for i, err := range outcome.errs {
+				none[i] = logic.IsNil(err)
 			}
-			return decides(outcome) && v.canReach(succeeded)
-		})
+			how := logic.And(none...)
+			if !succeeds {
+				how = logic.Not(how)
+			}
+			return decides(outcome) && v.canReach(append(slices.Clone(outcome.facts), how))
+		}
+		tied := slices.ContainsFunc(v.failures, func(outcome failure) bool { return reached(outcome, false) }) &&
+			slices.ContainsFunc(v.successes, func(outcome failure) bool { return reached(outcome, true) })
 		switch {
 		case !tied:
 		case source.callee != nil:

@@ -1091,3 +1091,19 @@ func FinishesNowhere(x, y int) error { // want `the contract of FinishesNowhere 
 }
 
 //@ Ensures True
+
+// FailsNowhere has a return of an error that no input reaches, so the call
+// decides nothing: the function always succeeds.
+//
+// @ Requires -2 <= x <= 2 And -2 <= y <= 2
+func FailsNowhere(x, y int) error { // want `the contract of FailsNowhere would also be met by a function that always returns an error`
+	err := external()
+	if err != nil {
+		if x*x+y*y == 6 {
+			return errAlways
+		}
+	}
+	return nil
+}
+
+//@ Ensures True
