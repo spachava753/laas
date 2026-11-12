@@ -533,12 +533,32 @@ func (pv *pkgVerifier) collect() {
 }
 
 // rangesByCalling reports whether a range over a value of the type may call
-// a function: the type is a function type, or a type parameter, which may
-// stand for one. Everything else that can be ranged over is data.
+// a function: the type is a function type, or a type parameter whose
+// constraint lets it stand for one. Everything else that can be ranged over
+// is data.
 func rangesByCalling(t types.Type) bool {
-	switch t.Underlying().(type) {
+	if param, ok := types.Unalias(t).(*types.TypeParam); ok {
+		t = param.Constraint()
+	}
+	switch u := t.Underlying().(type) {
 	case *types.Basic, *types.Slice, *types.Array, *types.Pointer, *types.Map, *types.Chan:
 		return false
+	case *types.Union:
+		for term := range u.Terms() {
+			if rangesByCalling(term.Type()) {
+				return true
+			}
+		}
+		return false
+	case *types.Interface:
+		// A constraint says what the type may be by the types it embeds;
+		// one that embeds none says nothing.
+		for embedded := range u.EmbeddedTypes() {
+			if rangesByCalling(embedded) {
+				return true
+			}
+		}
+		return u.NumEmbeddeds() == 0
 	}
 	return true
 }

@@ -55,6 +55,18 @@ var Root = context.Background()
 // Sub and Stop come from Root.
 var Sub, Stop = context.WithCancel(Root)
 
+// Count is computed by a generic function that ranges over what its type
+// parameter says is a slice.
+var Count = count([]int{1})
+
+func count[S ~[]int](xs S) int {
+	n := 0
+	for range xs {
+		n++
+	}
+	return n
+}
+
 // ErrY is set before anything else of the package runs.
 var ErrY = errors.New("y")
 
