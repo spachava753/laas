@@ -244,7 +244,7 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 					}
 				}
 				// Ranging over a function calls it.
-				if _, isFunc := pv.info.TypeOf(n.X).Underlying().(*types.Signature); !isFunc {
+				if !rangesByCalling(pv.info.TypeOf(n.X)) {
 					break
 				}
 				ranged, _ := named(n.X).(*types.Func)

@@ -1278,3 +1278,27 @@ func bounceByRange() int {
 	}
 	return 0
 }
+
+var generic func(func() bool)
+
+func init() { generic = stepBack }
+
+func stepBack(_ func() bool) { _ = BouncedByGeneric() }
+
+func consume[S ~func(func() bool)](s S) {
+	for range s {
+	}
+}
+
+// BouncedByGeneric calls a trusted function of this package that calls it
+// back through a generic function that ranges over what it is given.
+func BouncedByGeneric() int {
+	return bounceByGeneric() // want `vego: bounceByGeneric is trusted and calls back into BouncedByGeneric, so that this call ends cannot be proved; verify bounceByGeneric instead of trusting it`
+}
+
+//@ Ensures result = 0
+
+func bounceByGeneric() int {
+	consume(generic)
+	return 0
+}

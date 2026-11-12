@@ -514,7 +514,7 @@ func (pv *pkgVerifier) collect() {
 			case *ast.RangeStmt:
 				// Ranging over a function calls it; which one is not
 				// followed here either.
-				if _, isFunc := pv.info.TypeOf(n.X).Underlying().(*types.Signature); isFunc {
+				if rangesByCalling(pv.info.TypeOf(n.X)) {
 					fn.callees = append(fn.callees, escaped...)
 				}
 			case *ast.CallExpr:
@@ -530,6 +530,17 @@ func (pv *pkgVerifier) collect() {
 			return true
 		})
 	}
+}
+
+// rangesByCalling reports whether a range over a value of the type may call
+// a function: the type is a function type, or a type parameter, which may
+// stand for one. Everything else that can be ranged over is data.
+func rangesByCalling(t types.Type) bool {
+	switch t.Underlying().(type) {
+	case *types.Basic, *types.Slice, *types.Array, *types.Pointer, *types.Map, *types.Chan:
+		return false
+	}
+	return true
 }
 
 // methodsNamed returns the methods of the package with the given name, any

@@ -431,3 +431,9 @@ trusted:
     ensures:
       - "result = 0"
     modifies: []
+
+  trust.bounceByGeneric:
+    reason: Test helper that calls back into its caller through a generic function that ranges over its argument.
+    ensures:
+      - "result = 0"
+    modifies: []
