@@ -933,3 +933,24 @@ func CopiesByteInLoop(n int) error { // want `the contract of CopiesByteInLoop w
 }
 
 //@ Ensures True
+
+// NotesFailureInLoop remembers, in a number, that a call in a loop failed.
+// The number it stores does not depend on the call; that it is stored does.
+//
+// @ Requires 1 <= n <= 3
+func NotesFailureInLoop(n int) error {
+	last := -1
+	//@ Invariant 0 <= i <= n And -1 <= last < n
+	//@ Variant n - i
+	for i := 0; i < n; i++ {
+		if failed := external(); failed != nil {
+			last = i
+		}
+	}
+	if last >= 0 {
+		return errAlways
+	}
+	return nil
+}
+
+//@ Ensures True

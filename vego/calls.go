@@ -538,7 +538,11 @@ func (v *fnVerifier) tieFailures() {
 		for changed := true; changed; {
 			changed = false
 			for _, l := range v.left {
-				if !source.outputs[l.name] && v.dependsOn(source, l.facts, l.val) {
+				// What the iteration leaves depends on the call if the
+				// value does, or if the variable was given a value on a
+				// way through the body that the call chose.
+				depends := v.dependsOn(source, l.facts, l.val) || (l.val.Name != l.name && v.chosenBy(source, l.facts, l.path))
+				if !source.outputs[l.name] && depends {
 					source.outputs[l.name], changed = true, true
 					if !summarised[l.loop] {
 						summarised[l.loop] = true
@@ -566,10 +570,7 @@ func (v *fnVerifier) tieFailures() {
 			if v.dependsOn(source, f.facts, f.err) {
 				return true
 			}
-			opts := solver.Options{Preds: v.res.Preds, MaxSteps: quickSteps}
-			return source.known <= len(f.path) && slices.ContainsFunc(f.path[source.known:], func(taken choice) bool {
-				return solver.Prove(f.facts[:taken.before], taken.cond, opts) != solver.Proved && v.dependsOn(source, f.facts, taken.cond)
-			})
+			return source.known <= len(f.path) && v.chosenBy(source, f.facts, f.path[source.known:])
 		})
 		switch {
 		case !tied:
@@ -601,6 +602,16 @@ func (v *fnVerifier) dependsOn(source *failureSource, facts []*logic.Term, val *
 	return solver.Prove(slices.Concat(facts, source.otherwise()), stays, opts) != solver.Proved
 }
 
+// chosenBy reports whether one of the branches taken was chosen by what a
+// call produced: it was not certain to be taken, given the facts known
+// before it, and its condition depends on what the call produced.
+func (v *fnVerifier) chosenBy(source *failureSource, facts []*logic.Term, path []choice) bool {
+	opts := solver.Options{Preds: v.res.Preds, MaxSteps: quickSteps}
+	return slices.ContainsFunc(path, func(taken choice) bool {
+		return solver.Prove(facts[:taken.before], taken.cond, opts) != solver.Proved && v.dependsOn(source, facts, taken.cond)
+	})
+}
+
 // forgottenPart is one part of the value of a variable that a loop made
 // unknown: the variable, and which part.
 type forgottenPart struct {
@@ -618,6 +629,8 @@ type leftover struct {
 	facts []*logic.Term
 	// loop says what is known of the unknowns of the loop at its head.
 	loop *forward
+	// path holds the branches taken in the body on the way to its end.
+	path []choice
 }
 
 // calleeFormula resolves a callee's postcondition at a call site. A result of

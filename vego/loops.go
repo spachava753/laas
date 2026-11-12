@@ -401,7 +401,8 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 		// tieFailures.
 		for name, lost := range forgotten {
 			if held := end.vals[lost.variable]; held != nil {
-				v.left = append(v.left, leftover{name: name, val: held[lost.index], facts: slices.Clip(end.hyps), loop: summary})
+				v.left = append(v.left, leftover{name: name, val: held[lost.index], facts: slices.Clip(end.hyps), loop: summary,
+					path: slices.Clip(end.chosen[len(summary.path):])})
 			}
 		}
 		checkInvariants(end, "loop invariant may not be preserved")
