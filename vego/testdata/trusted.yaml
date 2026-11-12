@@ -425,3 +425,9 @@ trusted:
     ensures:
       - "xs'[0].X = 7"
     modifies: [ys]
+
+  trust.bounceByRange:
+    reason: Test helper that calls back into its caller by ranging over a function kept in a variable.
+    ensures:
+      - "result = 0"
+    modifies: []

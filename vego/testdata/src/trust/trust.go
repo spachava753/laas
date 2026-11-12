@@ -1258,3 +1258,23 @@ func UsesClaimsOtherCell(xs, ys []box) {
 }
 
 //@ Ensures xs'[0].X = xs[0].X
+
+var sequence func(func() bool)
+
+func init() { sequence = iterate }
+
+func iterate(_ func() bool) { _ = BouncedByRange() }
+
+// BouncedByRange calls a trusted function of this package that calls it
+// back by ranging over a function kept in a variable.
+func BouncedByRange() int {
+	return bounceByRange() // want `vego: bounceByRange is trusted and calls back into BouncedByRange, so that this call ends cannot be proved; verify bounceByRange instead of trusting it`
+}
+
+//@ Ensures result = 0
+
+func bounceByRange() int {
+	for range sequence {
+	}
+	return 0
+}

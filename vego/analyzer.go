@@ -511,6 +511,12 @@ func (pv *pkgVerifier) collect() {
 				if named, ok := pv.info.Uses[n].(*types.Func); ok && pv.funcs[named.Origin()] != nil {
 					fn.callees = append(fn.callees, pv.funcs[named.Origin()])
 				}
+			case *ast.RangeStmt:
+				// Ranging over a function calls it; which one is not
+				// followed here either.
+				if _, isFunc := pv.info.TypeOf(n.X).Underlying().(*types.Signature); isFunc {
+					fn.callees = append(fn.callees, escaped...)
+				}
 			case *ast.CallExpr:
 				tv := pv.info.Types[n.Fun]
 				if tv.IsType() || tv.IsBuiltin() || typeutil.StaticCallee(pv.info, n) != nil {
