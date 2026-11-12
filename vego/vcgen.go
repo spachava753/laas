@@ -80,6 +80,7 @@ type fnVerifier struct {
 	made      []string
 	sources   []failureSource
 	failures  []failure
+	successes []failure
 	forgotten map[string]forgottenPart
 	// left holds what the iterations of loops left in such variables.
 	left []leftover

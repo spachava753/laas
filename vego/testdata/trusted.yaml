@@ -340,3 +340,11 @@ trusted:
     ensures:
       - "b >= 0 -> result != nil"
     modifies: []
+
+  trust.setting:
+    reason: Test helper that returns a string from outside, which may be empty.
+    modifies: []
+
+  trust.step:
+    reason: Test helper that may fail for any argument.
+    modifies: []

@@ -954,3 +954,60 @@ func NotesFailureInLoop(n int) error {
 }
 
 //@ Ensures True
+
+// FailsEitherWay branches on what a call returned and fails on both sides.
+func FailsEitherWay(x int) (result int, err error) { // want `the contract of FailsEitherWay would also be met by a function that always returns an error`
+	n, _ := pair()
+	if n > 5 {
+		return 0, errAlways
+	}
+	return 0, errOther
+}
+
+//@ Ensures err = nil -> result = x + 1
+
+var errOther = errors.New("other")
+
+// FailsAfterPassingOn passes the error of a call on, and fails on its own
+// when there is none.
+func FailsAfterPassingOn(x int) (result int, err error) { // want `the contract of FailsAfterPassingOn would also be met by a function that always returns an error`
+	_, err = pair()
+	if err != nil {
+		return 0, err
+	}
+	return 0, errAlways
+}
+
+//@ Ensures err = nil -> result = x + 1
+
+func step(i int) error { return nil }
+
+// FirstSuccessWins tries several times and gives up when every try failed.
+//
+// @ Requires 1 <= n
+func FirstSuccessWins(n int) (err error) {
+	//@ Invariant 0 <= i <= n
+	//@ Variant n - i
+	for i := 0; i < n; i++ {
+		if step(i) == nil {
+			return nil
+		}
+	}
+	return errAlways
+}
+
+//@ Ensures True
+
+func setting() string { return "" }
+
+// NeedsSetting fails when something from outside that is not an error is
+// missing.
+func NeedsSetting() (value string, err error) {
+	v := setting()
+	if len(v) == 0 {
+		return "", errAlways
+	}
+	return v, nil
+}
+
+//@ Ensures err = nil -> |value| > 0

@@ -410,7 +410,7 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state,
 			continue
 		}
 		if v.canReach(path) {
-			source := failureSource{err: results[index][0], known: len(st.chosen), outputs: map[string]bool{}}
+			source := failureSource{outputs: map[string]bool{}}
 			if local {
 				source.callee = fn
 			}
@@ -421,20 +421,28 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state,
 			v.sources = append(v.sources, source)
 		}
 	}
+	// What a trusted function returns is just as unpredictable when it is
+	// not an error: nothing but its contract says what comes back. A
+	// function whose success hangs on that cannot promise success either.
+	// Where the contract does determine the results, nothing will be found
+	// to depend on them.
+	if fn.trust != nil && len(errorResults(fn)) == 0 && len(made.produced) > 0 {
+		source := failureSource{outputs: map[string]bool{}, origins: []forward{made}}
+		for _, name := range made.produced {
+			source.outputs[name] = true
+		}
+		v.sources = append(v.sources, source)
+	}
 }
 
-// failureSource is a call whose failure nothing predicts: the error it
-// returned, the callee if it is verified in this package, the names of
-// everything it produced, and how many branches had been taken when it
-// returned.
+// failureSource is a call whose outcome nothing predicts: the callee if it
+// is verified in this package, and the names of everything it produced.
 type failureSource struct {
-	err    *logic.Term
 	callee *funcInfo
 	// outputs names what the call produced, and whatever tieFailures finds
 	// to depend on that: what later calls produced that were given any of
 	// it, and the unknowns loops put in place of variables that held it.
 	outputs map[string]bool
-	known   int
 	// origins holds the calls that produced the outputs.
 	origins []forward
 }
@@ -507,12 +515,14 @@ type failure struct {
 // unpredictable: those it fails because of. A call whose error is ignored
 // does not excuse a function that then fails for a reason of its own.
 //
-// The function fails because of a call when whether it fails depends on
-// what the call produced, or on what a later call that was given any of
-// that produced. Two things can depend on it: whether the error the function
-// returns is nil, and the condition of a branch taken since the call on the
-// way to a return of an error. A branch that was certain to be taken is not
-// looked at.
+// A call makes the function unpredictable when it decides between failure
+// and success: some return of an error that may not be nil, and some return
+// of one that may be nil, each depend on what the call produced, or on what
+// a later call that was given any of that produced. A function that fails
+// whatever the call does has nothing to be excused for. A return depends on
+// the call in one of two ways: whether the error it returns is nil does, or
+// the condition of a branch taken on the way to it does. A branch that was
+// certain to be taken is not looked at.
 //
 // Something depends on the results when it cannot be proved to stay as it
 // is once they are replaced by other values the call could have returned.
@@ -566,12 +576,12 @@ func (v *fnVerifier) tieFailures() {
 	}
 	for index := range v.sources {
 		source := &v.sources[index]
-		tied := slices.ContainsFunc(v.failures, func(f failure) bool {
-			if v.dependsOn(source, f.facts, f.err) {
-				return true
-			}
-			return source.known <= len(f.path) && v.chosenBy(source, f.facts, f.path[source.known:])
-		})
+		// The call must make the difference: some return of an error and
+		// some return without one both depend on it.
+		decides := func(outcome failure) bool {
+			return v.dependsOn(source, outcome.facts, outcome.err) || v.chosenBy(source, outcome.facts, outcome.path)
+		}
+		tied := slices.ContainsFunc(v.failures, decides) && slices.ContainsFunc(v.successes, decides)
 		switch {
 		case !tied:
 		case source.callee != nil:

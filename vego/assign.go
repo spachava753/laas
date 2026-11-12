@@ -503,11 +503,19 @@ func (v *fnVerifier) returnStmt(s *ast.ReturnStmt, st *state) {
 
 // atReturn checks the postcondition in a final state.
 func (v *fnVerifier) atReturn(st *state, results []value, pos token.Pos) {
-	// Each error the function may be returning is recorded with the
-	// branches taken to get here; see tieFailures.
+	// Each error the function is returning is recorded with the branches
+	// taken to get here, as a possible failure if it may be an error and as
+	// a possible success if it may be nil; see tieFailures.
 	for _, index := range errorResults(v.fn) {
-		if results[index] != nil && !v.quickly(st, nil, logic.IsNil(results[index][0])) {
-			v.failures = append(v.failures, failure{err: results[index][0], path: slices.Clip(st.chosen), facts: slices.Clip(st.hyps)})
+		if results[index] == nil {
+			continue
+		}
+		outcome := failure{err: results[index][0], path: slices.Clip(st.chosen), facts: slices.Clip(st.hyps)}
+		if !v.quickly(st, nil, logic.IsNil(outcome.err)) {
+			v.failures = append(v.failures, outcome)
+		}
+		if !v.quickly(st, nil, logic.Not(logic.IsNil(outcome.err))) {
+			v.successes = append(v.successes, outcome)
 		}
 	}
 	// Returning assigns the results to the result variables. Only one that
