@@ -15,6 +15,23 @@ GOTOOLCHAIN=go1.26.6 go run ./cmd/laas ./...
 
 The pinned `golang.org/x/tools` cannot read packages built by Go 1.27 or newer, so the second command needs the toolchain named in `go.mod`.
 
+## Heavy work must not take the machine down
+
+Every agent on this machine, and everything any agent starts, runs inside one systemd scope together with the app that hosts the agents. When memory and swap run out, `systemd-oomd` kills that whole scope: every agent thread of every project stops at once and loses whatever it had not saved. This has happened several times, each time during fuzzing or mutation runs that an agent had started without a limit.
+
+So, for anything heavier than the two commands above:
+
+- **At most four processes at a time.** That covers fuzz workers, mutation runs, parallel test suites on copies of the repository, and `xargs -P` or `make -j` of anything that compiles Go or runs the verifier. The machine has 24 cores and 31 GB of memory; it is the memory that runs out, not the cores.
+- **Run it in its own memory-limited scope**, so that if it grows, it alone is killed:
+
+  ```sh
+  systemd-run --user --scope --quiet -p MemoryMax=12G -p MemorySwapMax=4G -- <command>
+  ```
+
+  Start a driver script this way and its workers inherit the limit. Do not start several such scopes side by side to get around the limit.
+- **Give long runs a bound**: a number of cases or a time limit, not "until stopped".
+- **When you hand work to another agent**, in a brief or a review request, repeat these limits in the brief. An agent that was only told to "fuzz for as long as practical" will start twenty workers.
+
 ## vego
 
 The kind of code vego targets, planned work, and settled design decisions are in `vego/ROADMAP.md`. Read it before changing the verifier, and record new decisions there.
