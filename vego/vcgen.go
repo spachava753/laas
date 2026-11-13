@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"golang.org/x/tools/go/types/typeutil"
 )
 
 // maxBranches bounds the number of conditional branches explored in one
@@ -46,6 +47,8 @@ type fnVerifier struct {
 	entry    map[*types.Var]value
 	entryBrk *logic.Term
 	inputs   map[string]bool
+	// looped holds the defer statements that lie inside a loop.
+	looped map[*ast.DeferStmt]bool
 	// boxed holds the variables of the function that live in memory because
 	// their address is taken. Such a variable holds a pointer to the struct
 	// that is its value.
@@ -316,6 +319,19 @@ func (v *fnVerifier) verify() {
 		}
 		return true
 	})
+	v.looped = map[*ast.DeferStmt]bool{}
+	ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
+		switch n.(type) {
+		case *ast.ForStmt, *ast.RangeStmt:
+			ast.Inspect(n, func(inner ast.Node) bool {
+				if deferred, ok := inner.(*ast.DeferStmt); ok {
+					v.looped[deferred] = true
+				}
+				return true
+			})
+		}
+		return true
+	})
 	v.boxed = v.findBoxed(fn.decl.Body)
 	st := v.enter()
 	for _, variable := range slices.Concat(fn.params, fn.results) {
@@ -549,11 +565,33 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 			v.unsupported(s.Pos(), "goto, fallthrough, and labeled branches are not supported")
 		}
 		return
+	case *ast.DeferStmt:
+		v.deferStmt(s, st)
 	default:
 		kind := strings.TrimSuffix(strings.TrimPrefix(fmt.Sprintf("%T", s), "*ast."), "Stmt")
 		v.unsupported(s.Pos(), strings.ToLower(kind)+" statements are not supported yet")
 	}
 	k(st)
+}
+
+// deferStmt executes a defer statement: the function, the receiver, and the
+// arguments are settled now, and the call is put off until the function
+// returns; see atReturn. Only a call of a named function or method can be
+// deferred, and not inside a loop, where the number of calls put off would
+// not be known.
+func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
+	callee, _ := typeutil.Callee(v.info, s.Call).(*types.Func)
+	switch {
+	case v.looped[s]:
+		v.unsupported(s.Pos(), "defer inside a loop is not supported: how many calls it puts off is not known")
+	case callee == nil:
+		v.unsupported(s.Pos(), "only a call of a named function or method can be deferred; "+
+			"function literals, function values, and built-in functions are not supported here")
+	case errorConstructor(callee):
+		v.unsupported(s.Pos(), "deferring a call that only makes an error is not supported")
+	}
+	fn := v.contractFor(s.Call, callee)
+	st.deferred = append(slices.Clip(st.deferred), deferredCall{s.Call, fn, v.arguments(s.Call, callee, st, nil)})
 }
 
 // branch counts one more fork in the path exploration.

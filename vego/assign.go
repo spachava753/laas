@@ -503,6 +503,32 @@ func (v *fnVerifier) returnStmt(s *ast.ReturnStmt, st *state) {
 
 // atReturn checks the postcondition in a final state.
 func (v *fnVerifier) atReturn(st *state, results []value, pos token.Pos) {
+	// Returning assigns the results to the result variables, then runs the
+	// calls that were put off, last one first. Such a call can see and
+	// change a result only through a pointer to a result variable, which
+	// then lives in memory, so those results are stored before the calls
+	// and read back after them.
+	stored := func(read bool) {
+		for i, result := range v.fn.results {
+			held := st.vals[result]
+			switch {
+			case !v.boxed[result] || held == nil || results[i] == nil:
+			case read:
+				results[i] = v.pointed(st, result.Type(), held)
+			default:
+				v.put(st, v.cellsOf(result.Type()), held[0], held[1], results[i])
+			}
+		}
+	}
+	stored(false)
+	for _, put := range slices.Backward(st.deferred) {
+		// A deferred call is a statement of its own, so it may modify
+		// memory; what it returns is dropped.
+		v.effectful = put.call
+		v.invoke(put.call, put.fn, put.args, st, nil)
+	}
+	st.deferred = nil
+	stored(true)
 	// The return is recorded with the branches taken to get here, as a
 	// possible failure, a possible success, or both; see tieFailures.
 	// A return fails if any of its errors is one and succeeds if none is.
@@ -519,13 +545,6 @@ func (v *fnVerifier) atReturn(st *state, results []value, pos token.Pos) {
 	}
 	if len(none) > 0 && !v.quickly(st, nil, logic.Not(logic.And(none...))) {
 		v.successes = append(v.successes, outcome)
-	}
-	// Returning assigns the results to the result variables. Only one that
-	// lives in memory can be seen afterwards, through a pointer to it.
-	for i, result := range v.fn.results {
-		if held := st.vals[result]; v.boxed[result] && held != nil && results[i] != nil {
-			v.put(st, v.cellsOf(result.Type()), held[0], held[1], results[i])
-		}
 	}
 	env := &specEnv{v: v, sink: st, fn: v.fn, args: v.entry, results: results, now: memory{}, post: st.mem, before: v.entryBrk}
 	for _, c := range v.fn.ensures {

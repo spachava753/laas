@@ -14,7 +14,7 @@ Design choices should be judged against the first group. A feature that only hel
 
 Each of these makes vego report the function that uses it as `cannot verify`. They are listed here in one place, in the order they are meant to be built, which is roughly how often ordinary code runs into them. The sections under "Next" say more about some of them.
 
-1. **`defer`.** `defer mu.Unlock()` and `defer f.Close()` are in most functions that hold a resource.
+1. **`defer` inside a loop, and of a function literal.** A deferred call of a named function or method outside a loop is supported.
 2. **Shifts and bitwise operators**: `<<`, `>>`, `&`, `|`, `^`, `&^`.
 3. **Which error it is.** `errors.Is`, `errors.As`, comparing with a sentinel, and reading a sentinel of another package such as `io.EOF`. Today an error is only nil or not.
 4. **A call that modifies memory inside a condition or a larger expression**: `if !s.Push(x)`, `for it.Next()`, `p.x = f(p)`. Such a call has to be a statement of its own today.

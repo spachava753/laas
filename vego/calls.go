@@ -96,6 +96,13 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	if errorConstructor(callee) {
 		return []value{{v.newError(call, st, guard)}}
 	}
+	fn := v.contractFor(call, callee)
+	return v.invoke(call, fn, v.arguments(call, callee, st, guard), st, guard)
+}
+
+// contractFor returns the contract a call is checked against, after making
+// sure that the callee is one vego can call and that its contract is usable.
+func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func) *funcInfo {
 	sig := callee.Type().(*types.Signature)
 	switch {
 	case sig.Variadic() || sig.TypeParams() != nil || sig.RecvTypeParams() != nil:
@@ -125,19 +132,40 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	if fn.trust != nil {
 		v.noteUse(fn, call.Pos())
 	}
+	return fn
+}
+
+// arguments evaluates the receiver and the arguments of a call, in the
+// state in which the call is written.
+func (v *fnVerifier) arguments(call *ast.CallExpr, callee *types.Func, st *state, guard []*logic.Term) map[*types.Var]value {
+	sig := callee.Type().(*types.Signature)
 	args := map[*types.Var]value{}
-	passed := map[*types.Var]string{}
 	if sig.Recv() != nil {
 		args[sig.Recv()] = v.receiver(call, sig.Recv(), st, guard)
-		passed[sig.Recv()] = types.ExprString(ast.Unparen(call.Fun).(*ast.SelectorExpr).X)
 	}
 	for i, arg := range call.Args {
-		passed[sig.Params().At(i)] = types.ExprString(arg)
 		param := sig.Params().At(i)
 		if _, ok := layoutOf(param.Type()); !ok {
 			v.unsupported(arg.Pos(), fmt.Sprintf("arguments of type %s are not supported", param.Type()))
 		}
 		args[param] = v.evalAs(arg, param.Type(), st, guard)
+	}
+	return args
+}
+
+// invoke applies the contract of a callee to arguments that have been
+// evaluated: at the call itself, or earlier for a deferred call, which runs
+// when the function returns with the arguments it was given at the defer
+// statement.
+func (v *fnVerifier) invoke(call *ast.CallExpr, fn *funcInfo, args map[*types.Var]value, st *state, guard []*logic.Term) []value {
+	callee := fn.obj
+	sig := callee.Type().(*types.Signature)
+	passed := map[*types.Var]string{}
+	if sig.Recv() != nil {
+		passed[sig.Recv()] = types.ExprString(ast.Unparen(call.Fun).(*ast.SelectorExpr).X)
+	}
+	for i, arg := range call.Args {
+		passed[sig.Params().At(i)] = types.ExprString(arg)
 	}
 	name := callee.Name()
 	for _, pair := range overlapping(fn) {

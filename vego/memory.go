@@ -2,6 +2,7 @@ package vego
 
 import (
 	"fmt"
+	"go/ast"
 	"go/token"
 	"go/types"
 	"maps"
@@ -51,12 +52,25 @@ type state struct {
 	chosen []choice
 	// noted holds the facts about unchanged memory already added to hyps.
 	noted map[string]bool
+	// deferred holds the calls that defer statements have put off until the
+	// function returns, in the order the statements ran.
+	deferred []deferredCall
+}
+
+// deferredCall is a call that a defer statement put off: the call, the
+// contract of what it calls, and the receiver and arguments as they were
+// when the defer statement ran.
+type deferredCall struct {
+	call *ast.CallExpr
+	fn   *funcInfo
+	args map[*types.Var]value
 }
 
 func (st *state) clone() *state {
 	return &state{
 		vals: maps.Clone(st.vals), mem: maps.Clone(st.mem), brk: st.brk,
 		hyps: slices.Clone(st.hyps), chosen: slices.Clone(st.chosen), noted: maps.Clone(st.noted),
+		deferred: slices.Clone(st.deferred),
 	}
 }
 
