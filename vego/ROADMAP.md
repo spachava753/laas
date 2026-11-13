@@ -10,6 +10,22 @@ Not a target: numerical, scientific, graphics, and machine-learning code, where 
 
 Design choices should be judged against the first group. A feature that only helps the second can wait.
 
+## Go that stops a function from being verified
+
+Each of these makes vego report the function that uses it as `cannot verify`. They are listed here in one place, in the order they are meant to be built, which is roughly how often ordinary code runs into them. The sections under "Next" say more about some of them.
+
+1. **`defer`.** `defer mu.Unlock()` and `defer f.Close()` are in most functions that hold a resource.
+2. **Shifts and bitwise operators**: `<<`, `>>`, `&`, `|`, `^`, `&^`.
+3. **Which error it is.** `errors.Is`, `errors.As`, comparing with a sentinel, and reading a sentinel of another package such as `io.EOF`. Today an error is only nil or not.
+4. **A call that modifies memory inside a condition or a larger expression**: `if !s.Push(x)`, `for it.Next()`, `p.x = f(p)`. Such a call has to be a statement of its own today.
+5. **Arrays**, and with them every struct that holds one.
+6. **`copy`, `append(s, t...)`, calls to variadic functions, comparing structs with `==`, labelled `break` and `continue`, `goto`, `select`.**
+7. **Pointers to anything but a struct**, such as `*int`.
+8. **Interfaces other than `error`**, and calls through them.
+9. **Function values and closures**, including `defer func() { ... }()`.
+10. **Generic functions and types.**
+11. **Goroutines and channels.** A proof is about one goroutine; nothing is said about what runs beside it.
+
 ## Next
 
 ### Structs and pointers
