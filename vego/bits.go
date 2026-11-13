@@ -121,16 +121,37 @@ func (v *fnVerifier) shift(op token.Token, x, k *logic.Term, t types.Type, pos t
 	return logic.Ite(logic.Le(zero, x), down, logic.Sub(logic.Neg(logic.Div(logic.Sub(logic.Neg(x), one), power)), one))
 }
 
+// bitOrigin says how a term was made from two operands by a bitwise
+// operator, for the identities that bitAnd applies.
+type bitOrigin struct {
+	op   token.Token
+	x, y string
+}
+
 // bitAnd returns x & y: an unknown number, the same one for the same two
 // operands in either order, of which the state is told what follows from
-// the operands.
-func (v *fnVerifier) bitAnd(x, y *logic.Term, st *state) *logic.Term {
+// the operands. bits is the width of the type.
+func (v *fnVerifier) bitAnd(x, y *logic.Term, bits uint, st *state) *logic.Term {
 	if y.String() < x.String() {
 		x, y = y, x
 	}
 	zero := logic.IntLit(0)
 	if x.String() == y.String() {
 		return x
+	}
+	// An operand that was itself made with the other one: the bits of m
+	// are all set in x | m, all clear in x &^ m, and x & m has none but
+	// bits of m.
+	for _, pair := range [][2]*logic.Term{{x, y}, {y, x}} {
+		made, mask := v.bitOrigins[pair[0].String()], pair[1].String()
+		switch {
+		case made.op == token.OR && (made.x == mask || made.y == mask):
+			return pair[1]
+		case made.op == token.AND_NOT && made.y == mask:
+			return zero
+		case made.op == token.AND && (made.x == mask || made.y == mask):
+			return pair[0]
+		}
 	}
 	for _, pair := range [][2]*logic.Term{{x, y}, {y, x}} {
 		if mask, ok := literal(pair[0]); ok && mask.Sign() == 0 {
@@ -161,6 +182,13 @@ func (v *fnVerifier) bitAnd(x, y *logic.Term, st *state) *logic.Term {
 		logic.Implies(logic.Le(zero, y), logic.And(logic.Le(zero, and), logic.Le(and, y))),
 		logic.Implies(logic.And(negative(x), negative(y)),
 			logic.And(negative(and), logic.Le(and, x), logic.Le(and, y), logic.Le(logic.Add(logic.Add(x, y), logic.IntLit(1)), and))),
+	}
+	// Two numbers that fit in so many bits have an x | y that fits in as
+	// many, and x | y is x + y - (x & y).
+	for n := uint(1); n < bits; n++ {
+		limit := logic.BigLit(new(big.Int).Lsh(big.NewInt(1), n))
+		small := logic.And(logic.Le(zero, x), logic.Lt(x, limit), logic.Le(zero, y), logic.Lt(y, limit))
+		facts = append(facts, logic.Implies(small, logic.Lt(logic.Sub(logic.Add(x, y), and), limit)))
 	}
 	for _, pair := range [][2]*logic.Term{{x, y}, {y, x}} {
 		// An operand whose low bits are zero wipes out one that has only
@@ -196,8 +224,12 @@ func (v *fnVerifier) bitAnd(x, y *logic.Term, st *state) *logic.Term {
 
 // bitwise evaluates x & y, x | y, x ^ y, and x &^ y. The result of any of
 // them on two values of a type is a value of the type.
-func (v *fnVerifier) bitwise(op token.Token, x, y *logic.Term, t types.Type, st *state) *logic.Term {
-	and := v.bitAnd(x, y, st)
+func (v *fnVerifier) bitwise(op token.Token, x, y *logic.Term, t types.Type, pos token.Pos, st *state) *logic.Term {
+	_, greatest, ok := v.intRange(t)
+	if !ok {
+		v.unsupported(pos, fmt.Sprintf("operator %s is not supported for %s", op, t))
+	}
+	and := v.bitAnd(x, y, uint(greatest.BitLen())+1, st)
 	result := and
 	switch op {
 	case token.OR:
@@ -208,6 +240,7 @@ func (v *fnVerifier) bitwise(op token.Token, x, y *logic.Term, t types.Type, st 
 		result = logic.Sub(x, and)
 	}
 	st.assume(logic.Implies(logic.And(v.typeFact(x, t), v.typeFact(y, t)), v.typeFact(result, t)))
+	v.bitOrigins[result.String()] = bitOrigin{op, x.String(), y.String()}
 	return result
 }
 

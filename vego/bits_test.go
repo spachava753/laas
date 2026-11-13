@@ -19,7 +19,7 @@ func TestBitFacts(t *testing.T) {
 		return solver.Prove(hyps, logic.False(), solver.Options{MaxSteps: 2000}) != solver.Proved
 	}
 	fresh := func() (*fnVerifier, *state) {
-		v := &fnVerifier{names: map[string]int{}, bitTerms: map[string]*logic.Term{}, lowZeros: map[string]uint{}}
+		v := &fnVerifier{names: map[string]int{}, bitTerms: map[string]*logic.Term{}, lowZeros: map[string]uint{}, bitOrigins: map[string]bitOrigin{}}
 		return v, &state{noted: map[string]bool{}}
 	}
 	x, y := logic.Const("x", logic.Int), logic.Const("y", logic.Int)
@@ -27,7 +27,7 @@ func TestBitFacts(t *testing.T) {
 
 	t.Run("and of two unknown numbers", func(t *testing.T) {
 		v, st := fresh()
-		and := v.bitAnd(x, y, st)
+		and := v.bitAnd(x, y, 8, st)
 		for a := int64(-9); a <= 9; a++ {
 			for b := int64(-9); b <= 9; b++ {
 				if !consistent(st, is(x, a), is(y, b), is(and, a&b)) {
@@ -40,7 +40,7 @@ func TestBitFacts(t *testing.T) {
 	t.Run("and with a constant", func(t *testing.T) {
 		for _, mask := range []int64{1, 2, 3, 4, 5, 6, 7, 8, 12, 15, 16, 255, 256, -2, -8} {
 			v, st := fresh()
-			and := v.bitAnd(x, logic.IntLit(mask), st)
+			and := v.bitAnd(x, logic.IntLit(mask), 8, st)
 			for a := int64(-40); a <= 40; a++ {
 				if !consistent(st, is(x, a), is(and, a&mask)) {
 					t.Fatalf("the facts about x & %d rule out %d & %d = %d", mask, a, mask, a&mask)
@@ -53,7 +53,7 @@ func TestBitFacts(t *testing.T) {
 		for _, scale := range []int64{2, 4, 8, 12} {
 			v, st := fresh()
 			scaled := logic.Mul(x, logic.IntLit(scale))
-			and := v.bitAnd(scaled, y, st)
+			and := v.bitAnd(scaled, y, 8, st)
 			for a := int64(-6); a <= 6; a++ {
 				for b := int64(-9); b <= 9; b++ {
 					if !consistent(st, is(x, a), is(y, b), is(and, (a*scale)&b)) {
@@ -88,7 +88,7 @@ func TestBitFacts(t *testing.T) {
 
 	t.Run("the same operands give the same unknown", func(t *testing.T) {
 		v, st := fresh()
-		if first, second := v.bitAnd(x, y, st), v.bitAnd(y, x, st); first != second {
+		if first, second := v.bitAnd(x, y, 8, st), v.bitAnd(y, x, 8, st); first != second {
 			t.Fatalf("x & y is %s and y & x is %s", fmt.Sprint(first), fmt.Sprint(second))
 		}
 	})

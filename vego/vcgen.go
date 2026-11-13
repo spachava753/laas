@@ -52,6 +52,9 @@ type fnVerifier struct {
 	// many low bits of such an unknown are known to be zero; see bits.go.
 	bitTerms map[string]*logic.Term
 	lowZeros map[string]uint
+	// bitOrigins holds, by the term, how the result of a bitwise operator
+	// was made.
+	bitOrigins map[string]bitOrigin
 	// looped holds the defer statements that lie inside a loop.
 	looped map[*ast.DeferStmt]bool
 	// boxed holds the variables of the function that live in memory because
@@ -118,7 +121,7 @@ func (v *fnVerifier) allowEffects(e ast.Expr) {
 func (pv *pkgVerifier) run(fn *funcInfo, task func(v *fnVerifier)) {
 	v := &fnVerifier{
 		pkgVerifier: pv, fn: fn, entry: map[*types.Var]value{}, names: map[string]int{},
-		reached: map[*funcInfo]bool{}, bitTerms: map[string]*logic.Term{}, lowZeros: map[string]uint{}, forgotten: map[string]forgottenPart{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{},
+		reached: map[*funcInfo]bool{}, bitTerms: map[string]*logic.Term{}, lowZeros: map[string]uint{}, bitOrigins: map[string]bitOrigin{}, forgotten: map[string]forgottenPart{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{},
 	}
 	defer func() {
 		switch r := recover().(type) {

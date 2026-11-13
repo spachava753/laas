@@ -91,7 +91,7 @@ Decisions:
 
 ### Trusted contracts for unproved code
 
-Built: the trust file and its checks, the rule that a call needs a contract, contracts for functions and methods, the shipped contracts with their tests, and the trust report (`laas -vego.trust`). Not built yet: checking a trusted `modifies` against the function's source, contracts for variables such as `io.EOF`, and running the shipped-contract tests on several Go versions.
+Built: the trust file and its checks, the rule that a call needs a contract, contracts for functions and methods, the shipped contracts with their tests, and the trust report (`laas -vego.trust`). Not built yet: shipped contracts for methods, starting with `sync.Mutex` and `sync.RWMutex`, which every `defer mu.Unlock()` needs (the test of shipped contracts only calls functions so far); checking a trusted `modifies` against the function's source, contracts for variables such as `io.EOF`, and running the shipped-contract tests on several Go versions.
 
 Contracts of verified functions cross package boundaries as analysis facts, together with the predicates of their package; the predicates of different packages are kept apart by a prefix.
 

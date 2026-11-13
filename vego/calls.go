@@ -70,7 +70,7 @@ func (v *fnVerifier) binary(op token.Token, x, y *logic.Term, t types.Type, pos 
 	case token.SHL, token.SHR:
 		return v.shift(op, x, y, t, pos, st, guard)
 	case token.AND, token.OR, token.XOR, token.AND_NOT:
-		return v.bitwise(op, x, y, t, st)
+		return v.bitwise(op, x, y, t, pos, st)
 	case token.EQL:
 		return logic.Eq(x, y)
 	case token.NEQ:

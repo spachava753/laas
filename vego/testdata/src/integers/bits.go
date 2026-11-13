@@ -197,3 +197,69 @@ func NarrowThenWide(k uint) uint64 {
 }
 
 //@ Ensures result = 1
+
+// SmallOr combines two numbers of four bits, which gives one of four bits.
+//
+// @ Requires x <= 15 And y <= 15
+func SmallOr(x, y uint8) uint8 {
+	return x | y
+}
+
+//@ Ensures result <= 15
+
+// SmallXor does the same with the other operator.
+//
+// @ Requires x <= 15 And y <= 15
+func SmallXor(x, y uint8) uint8 {
+	return x ^ y
+}
+
+//@ Ensures result <= 15
+
+// SmallOrWrong claims three bits.
+//
+// @ Requires x <= 15 And y <= 15
+func SmallOrWrong(x, y uint8) uint8 {
+	return x | y // want `vego: postcondition may not hold: result <= 7`
+}
+
+//@ Ensures result <= 7
+
+const flagB = 2
+
+// SetsFlag sets a bit and then tests it.
+func SetsFlag(f uint8) bool {
+	f |= flagB
+	return f&flagB != 0
+}
+
+//@ Ensures result
+
+// ClearsFlag clears a bit and then tests it.
+func ClearsFlag(f uint8) bool {
+	f &^= flagB
+	return f&flagB == 0
+}
+
+//@ Ensures result
+
+// SetsOtherFlag sets one bit and tests another, of which nothing is known.
+func SetsOtherFlag(f uint8) bool {
+	f |= flagB
+	return f&4 != 0 // want `vego: postcondition may not hold: result`
+}
+
+//@ Ensures result
+
+// BuildsMask sets one bit after another and stays within four bits.
+func BuildsMask() uint8 {
+	var m uint8
+	//@ Invariant 0 <= k <= 4 And m <= 15
+	//@ Variant 4 - k
+	for k := 0; k < 4; k++ {
+		m |= 1 << k
+	}
+	return m
+}
+
+//@ Ensures result <= 15
