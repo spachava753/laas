@@ -47,6 +47,11 @@ type fnVerifier struct {
 	entry    map[*types.Var]value
 	entryBrk *logic.Term
 	inputs   map[string]bool
+	// bitTerms holds the unknowns that stand for powers of two and for the
+	// bitwise and of two operands, by what they stand for, and lowZeros how
+	// many low bits of such an unknown are known to be zero; see bits.go.
+	bitTerms map[string]*logic.Term
+	lowZeros map[string]uint
 	// looped holds the defer statements that lie inside a loop.
 	looped map[*ast.DeferStmt]bool
 	// boxed holds the variables of the function that live in memory because
@@ -113,7 +118,7 @@ func (v *fnVerifier) allowEffects(e ast.Expr) {
 func (pv *pkgVerifier) run(fn *funcInfo, task func(v *fnVerifier)) {
 	v := &fnVerifier{
 		pkgVerifier: pv, fn: fn, entry: map[*types.Var]value{}, names: map[string]int{},
-		reached: map[*funcInfo]bool{}, forgotten: map[string]forgottenPart{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{},
+		reached: map[*funcInfo]bool{}, bitTerms: map[string]*logic.Term{}, lowZeros: map[string]uint{}, forgotten: map[string]forgottenPart{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{},
 	}
 	defer func() {
 		switch r := recover().(type) {

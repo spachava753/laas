@@ -67,6 +67,10 @@ func (v *fnVerifier) binary(op token.Token, x, y *logic.Term, t types.Type, pos 
 			v.check(st, guard, logic.Not(wraps), pos, "division may overflow %s", types.TypeString(t, nil))
 		}
 		return logic.Div(x, y)
+	case token.SHL, token.SHR:
+		return v.shift(op, x, y, t, pos, st, guard)
+	case token.AND, token.OR, token.XOR, token.AND_NOT:
+		return v.bitwise(op, x, y, t, st)
 	case token.EQL:
 		return logic.Eq(x, y)
 	case token.NEQ:

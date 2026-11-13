@@ -332,7 +332,13 @@ A function that returns an error must say when it succeeds. A contract such as `
 Proofs hold under these assumptions, which mirror the paper's trusted base:
 
 - **There is memory.** An allocation larger than the runtime permits is an error the verifier reports: `make([]T, n)`, an `append` that has to move its slice, and a string concatenation must be proved to stay under the limit of the platform. That the machine actually has the memory, and that the stack is deep enough for the recursion, is assumed.
-- **Overflow is an error, not a behaviour.** Every `+`, `-`, `*`, `/`, negation, and conversion must be proved to stay within its type, so `(lo+hi)/2` is rejected and `lo + (hi-lo)/2` verifies. This usually means stating bounds on inputs, for example on the elements a loop adds up. Code that wraps on purpose, such as a hash function, cannot be verified. Shifts and bitwise operators are not supported yet.
+- **Bits are numbers.** The verifier computes with whole numbers, not with bits, so shifts and bitwise operators are understood through arithmetic.
+  - `x << k` is `x * 2^k` and must not lose bits, like any arithmetic that would leave its type. `x >> k` is `x / 2^k` rounded towards minus infinity, which differs from `/` for a negative `x`. A count that may be negative is an error, since Go panics on one.
+  - `x & m` is known exactly when `m` is a constant mask of low bits (`x & 0xFF` is `x % 256`) or of a single bit. Of any other `x & y` only what always holds is known: it is at most either operand when they are not negative, and so on.
+  - `x | y`, `x ^ y`, and `x &^ y` are computed from `x & y`, so they are known exactly whenever it is. `hi<<8 | lo` is `256*hi + lo` when `lo` is below 256.
+  - `^x` is `-x - 1`, or for an unsigned type the largest value minus `x`.
+  - Annotations have no bit operators; say what you mean with `*`, `/`, and `%`.
+- **Overflow is an error, not a behaviour.** Every `+`, `-`, `*`, `/`, negation, and conversion must be proved to stay within its type, so `(lo+hi)/2` is rejected and `lo + (hi-lo)/2` verifies. This usually means stating bounds on inputs, for example on the elements a loop adds up. Code that wraps on purpose, such as a hash function, cannot be verified.
 - **Callers outside the verified code keep the contract.** A verified function may assume its `Requires`, the invariants of the structs it is handed, and that slice parameters of one element type do not overlap. Verified callers prove all three; code that is not verified is trusted to respect them.
 - **Nothing else runs at the same time.** A proof is about one goroutine. No other goroutine writes memory that a verified function reads or writes while it runs.
 - **Code that is not verified keeps Go's types.** It does not use `unsafe`, `reflect`, or cgo to make one piece of memory two different types, or to change a string. The memory model relies on what Go's types guarantee.

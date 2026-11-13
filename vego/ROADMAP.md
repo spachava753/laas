@@ -15,7 +15,7 @@ Design choices should be judged against the first group. A feature that only hel
 Each of these makes vego report the function that uses it as `cannot verify`. They are listed here in one place, in the order they are meant to be built, which is roughly how often ordinary code runs into them. The sections under "Next" say more about some of them.
 
 1. **`defer` inside a loop, and of a function literal.** A deferred call of a named function or method outside a loop is supported.
-2. **Shifts and bitwise operators**: `<<`, `>>`, `&`, `|`, `^`, `&^`.
+2. **Bit operators in annotations**, and knowing more of `x & y` than its bounds when neither operand is a constant mask. Shifts and bitwise operators in code are supported.
 3. **Which error it is.** `errors.Is`, `errors.As`, comparing with a sentinel, and reading a sentinel of another package such as `io.EOF`. Today an error is only nil or not.
 4. **A call that modifies memory inside a condition or a larger expression**: `if !s.Push(x)`, `for it.Next()`, `p.x = f(p)`. Such a call has to be a statement of its own today.
 5. **Arrays**, and with them every struct that holds one.
@@ -126,7 +126,7 @@ Decisions:
 
 ### Integers
 
-Built: every integer type, overflow obligations for arithmetic, negation, division, and conversion, the named limits (`MaxInt` and friends) in annotations, arbitrary-precision arithmetic in the solver, and product reasoning. Not built yet: shifts and bitwise operators, and automatic range facts for slice elements inside quantified annotations.
+Built: every integer type, overflow obligations for arithmetic, negation, division, and conversion, the named limits (`MaxInt` and friends) in annotations, arbitrary-precision arithmetic in the solver, and product reasoning. Shifts and bitwise operators are expressed by arithmetic (`vego/bits.go`): a shift is a multiplication or division by a power of two, `x & y` is an unknown with the facts that hold of any two integers in two's complement plus exact ones for constant masks, and the other operators follow from it by identities such as `x | y = x + y - (x & y)`. This needed no new solver rule. Not built yet: bit operators in annotations, and automatic range facts for slice elements inside quantified annotations.
 
 Decisions:
 

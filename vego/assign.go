@@ -255,6 +255,8 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
 		op := map[token.Token]token.Token{
 			token.ADD_ASSIGN: token.ADD, token.SUB_ASSIGN: token.SUB, token.MUL_ASSIGN: token.MUL,
 			token.QUO_ASSIGN: token.QUO, token.REM_ASSIGN: token.REM,
+			token.SHL_ASSIGN: token.SHL, token.SHR_ASSIGN: token.SHR, token.AND_ASSIGN: token.AND,
+			token.OR_ASSIGN: token.OR, token.XOR_ASSIGN: token.XOR, token.AND_NOT_ASSIGN: token.AND_NOT,
 		}[s.Tok]
 		current, operand := v.load(targets[0], st), v.expr(s.Rhs[0], st, nil)
 		if _, single := sortOf(targets[0].typ); !single {

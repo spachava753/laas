@@ -188,6 +188,8 @@ func (v *fnVerifier) unary(e *ast.UnaryExpr, st *state, guard []*logic.Term) val
 		return value{operand}
 	case token.NOT:
 		return value{logic.Not(operand)}
+	case token.XOR:
+		return value{v.complement(operand, v.info.TypeOf(e), e.Pos())}
 	}
 	v.unsupported(e.Pos(), fmt.Sprintf("operator %s is not supported", e.Op))
 	return nil
