@@ -263,3 +263,14 @@ func BuildsMask() uint8 {
 }
 
 //@ Ensures result <= 15
+
+// NarrowThenWideOr combines two numbers as bytes, in an expression that is
+// skipped, and then as they are.
+//
+// @ Requires x <= 511 And y <= 511
+func NarrowThenWideOr(x, y uint16) uint16 {
+	_ = false && (uint8(x)&uint8(y) == 0)
+	return x | y
+}
+
+//@ Ensures result <= 511

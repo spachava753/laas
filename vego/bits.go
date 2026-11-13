@@ -218,7 +218,8 @@ func (v *fnVerifier) bitAnd(x, y *logic.Term, bits uint, st *state) *logic.Term 
 				logic.Implies(logic.Le(zero, other), logic.Eq(and, logic.Mul(logic.Mod(logic.Div(other, bit), logic.IntLit(2)), bit))))
 		}
 	}
-	v.noteOnce(st, key, facts...)
+	// As for a power of two, a wider type has more to say.
+	v.noteOnce(st, fmt.Sprintf("%s up to %d", key, bits), facts...)
 	return and
 }
 
