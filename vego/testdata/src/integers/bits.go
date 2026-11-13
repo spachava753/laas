@@ -186,3 +186,14 @@ func CountBits(x uint8) int {
 }
 
 //@ Ensures 0 <= result <= 8
+
+// NarrowThenWide shifts a narrow number and then a wide one by the same
+// count, which is more than the narrow one has bits.
+//
+// @ Requires k = 16
+func NarrowThenWide(k uint) uint64 {
+	_ = uint8(1) >> k
+	return uint64(65536) >> k
+}
+
+//@ Ensures result = 1

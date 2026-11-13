@@ -89,7 +89,9 @@ func (v *fnVerifier) pow2(k *logic.Term, bits uint, st *state) *logic.Term {
 			logic.Implies(logic.Le(k, at), logic.Le(power, exact)),
 			logic.Implies(logic.Le(at, k), logic.Le(exact, power)))
 	}
-	v.noteOnce(st, key, facts...)
+	// A wider type needs bounds for more counts than a narrower one that
+	// shifted by the same count before.
+	v.noteOnce(st, fmt.Sprintf("%s up to %d", key, bits), facts...)
 	return power
 }
 
