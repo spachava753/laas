@@ -135,8 +135,79 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func) *funcIn
 	}
 	if fn.trust != nil {
 		v.noteUse(fn, call.Pos())
+		v.checkHandedOver(call, fn)
 	}
 	return fn
+}
+
+// checkHandedOver looks at what a call gives to a trusted function. Such a
+// function is believed to write nothing but what its contract lists, and
+// its author can vouch for that only as far as its own code goes. An error,
+// or anything else that carries code chosen elsewhere, would let it run
+// methods nobody has seen, which could write memory the caller reasons
+// about. So such a value is passed only to a parameter that the contract
+// lists under runs, which says in the open that the contract is claimed to
+// hold whatever code arrives there. An error whose origin is known needs no
+// such claim, as for formatting: its methods are those of the standard
+// library.
+func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
+	sig := fn.obj.Type().(*types.Signature)
+	type passed struct {
+		param *types.Var
+		arg   ast.Expr
+	}
+	var handed []passed
+	if selector, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok && sig.Recv() != nil {
+		handed = append(handed, passed{sig.Recv(), selector.X})
+	}
+	for i, arg := range call.Args {
+		handed = append(handed, passed{sig.Params().At(i), arg})
+	}
+	for _, h := range handed {
+		param, arg := h.param, h.arg
+		if fn.runs[param] || !holdsCode(param.Type(), map[types.Type]bool{}) {
+			continue
+		}
+		if isError(param.Type()) && v.knownError(v.originsOf(v.fn.decl.Body), arg, -1, map[*types.Var]bool{}) {
+			continue
+		}
+		what := "an error whose origin is not known"
+		if !isError(param.Type()) {
+			what = fmt.Sprintf("a value of type %s, which can hold an error, an interface, or a function", param.Type())
+		}
+		v.unsupported(arg.Pos(), fmt.Sprintf("%s is passed to %s, which is trusted, and is %s; "+
+			"%s could run code through it that nobody has seen. If its contract holds whatever that code does, "+
+			"list %s under runs in the contract", types.ExprString(arg), fn.obj.Name(), what, fn.obj.Name(), param.Name()))
+	}
+}
+
+// holdsCode reports whether a value of a type can hold, however deep, a
+// value whose methods or body are chosen where the value is made: an
+// interface, a function, or a channel through which one may arrive.
+func holdsCode(t types.Type, seen map[types.Type]bool) bool {
+	if t == nil || seen[t] {
+		return false
+	}
+	seen[t] = true
+	switch u := t.Underlying().(type) {
+	case *types.Interface, *types.Signature, *types.Chan:
+		return true
+	case *types.Pointer:
+		return holdsCode(u.Elem(), seen)
+	case *types.Slice:
+		return holdsCode(u.Elem(), seen)
+	case *types.Array:
+		return holdsCode(u.Elem(), seen)
+	case *types.Map:
+		return holdsCode(u.Key(), seen) || holdsCode(u.Elem(), seen)
+	case *types.Struct:
+		for field := range u.Fields() {
+			if holdsCode(field.Type(), seen) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // arguments evaluates the receiver and the arguments of a call, in the

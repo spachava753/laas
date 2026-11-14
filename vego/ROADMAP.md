@@ -104,6 +104,8 @@ Decisions:
 
 ### Trusted contracts for unproved code
 
+Decision: a trusted contract covers the function's own code only. A value that can hold an error, an interface, or a function brings code that the author of the contract has not seen, so it is passed to a trusted function only when the contract lists the parameter under `runs`, which makes the wider claim explicit and puts it in the trust report; an error of known origin is exempt. An outside audit produced a wrong proof with an honest-looking `modifies: []` entry for a function that called `err.Error()`. A parameter without a name cannot be listed, so such a function needs a wrapper.
+
 Built: the trust file and its checks, the rule that a call needs a contract, contracts for functions and methods, the shipped contracts with their tests, and the trust report (`laas -vego.trust`). Not built yet: shipped contracts for methods, starting with `sync.Mutex` and `sync.RWMutex`, which every `defer mu.Unlock()` needs (the test of shipped contracts only calls functions so far); checking a trusted `modifies` against the function's source, contracts for variables such as `io.EOF`, and running the shipped-contract tests on several Go versions.
 
 Contracts of verified functions cross package boundaries as analysis facts, together with the predicates of their package; the predicates of different packages are kept apart by a prefix.

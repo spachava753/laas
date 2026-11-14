@@ -1302,3 +1302,82 @@ func bounceByGeneric() int {
 	consume(generic)
 	return 0
 }
+
+// The functions below hand values that carry code to trusted functions. A
+// trusted function is believed as far as its own code goes; what it runs
+// through an error, an interface, or a function it was given is somebody
+// else's code, and its contract covers that only when it says so with runs.
+
+func tell(e error)    {}
+func tellAny(e error) {}
+
+type sinkHolder struct {
+	n   int
+	out func(string)
+}
+
+func (s *sinkHolder) flush()     {}
+func (s *sinkHolder) flushRuns() {}
+func runsNothing(x int)          {}
+func runsNobody(x int)           {}
+
+// TellsUnknown passes on an error that could be anything.
+func TellsUnknown(e error) {
+	tell(e) // want `cannot verify TellsUnknown: e is passed to tell, which is trusted, and is an error whose origin is not known; tell could run code through it that nobody has seen. If its contract holds whatever that code does, list e under runs in the contract`
+}
+
+//@ Ensures True
+
+// TellsKnown passes an error whose methods are those of the standard
+// library.
+func TellsKnown(x int) {
+	if x > 0 {
+		tell(errAlways)
+	}
+	tell(errors.New("x"))
+	tell(nil)
+}
+
+//@ Ensures True
+
+// TellsDeclared passes an unknown error to a function whose contract
+// vouches for what it runs.
+func TellsDeclared(e error) {
+	tellAny(e)
+}
+
+//@ Ensures True
+
+// Flushes calls a trusted method on a struct that holds a function.
+//
+// @ Requires s != nil And s.n = 1
+func Flushes(s *sinkHolder) int {
+	s.flush() // want `cannot verify Flushes: s is passed to flush, which is trusted, and is a value of type \*trust.sinkHolder, which can hold an error, an interface, or a function; flush could run code through it that nobody has seen. If its contract holds whatever that code does, list s under runs in the contract`
+	return s.n
+}
+
+//@ Ensures result = 1
+
+// FlushesDeclared calls one whose contract says that it runs it.
+//
+// @ Requires s != nil And s.n = 1
+func FlushesDeclared(s *sinkHolder) int {
+	s.flushRuns()
+	return s.n
+}
+
+//@ Ensures result = 1
+
+// UsesRunsNothing calls a function whose contract lists a number as code.
+func UsesRunsNothing() {
+	runsNothing(1) // want `the trusted contract of trust.runsNothing \(trusted.yaml:\d+\) cannot be used: its runs lists x, whose type int can hold no error, interface, or function to run` `cannot verify UsesRunsNothing: `
+}
+
+//@ Ensures True
+
+// UsesRunsNobody calls one whose contract lists a name that is no parameter.
+func UsesRunsNobody() {
+	runsNobody(1) // want `the trusted contract of trust.runsNobody \(trusted.yaml:\d+\) cannot be used: its runs "y": y is not a parameter` `cannot verify UsesRunsNobody: `
+}
+
+//@ Ensures True

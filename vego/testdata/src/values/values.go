@@ -457,7 +457,7 @@ func BoxedImplicitly(a failing) int {
 
 //@ Ensures result = 0
 
-func describe(error) string { return "" }
+func describe(e error) string { return "" }
 
 // GuardedSource never evaluates the call that would excuse it.
 func GuardedSource() error { // want `vego:\ the\ contract\ of\ GuardedSource\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ no\ simple\ input\ was\ found\ for\ which\ it\ forces\ success;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ a\ small\ input\ satisfies\ it`

@@ -53,6 +53,9 @@ func TrustReport(usages []*Usage, dir string) string {
 			}
 			fmt.Fprintf(&b, "  %s%s\n", use.Key, note)
 			fmt.Fprintf(&b, "    reason:  %s\n", use.Reason)
+			if len(use.Runs) > 0 {
+				fmt.Fprintf(&b, "    runs code held by: %s\n", strings.Join(use.Runs, ", "))
+			}
 			fmt.Fprintf(&b, "    defined: %s:%d\n", relative(use.File), use.Line)
 			fmt.Fprintf(&b, "    used at: %s\n", places(use.Calls))
 		}

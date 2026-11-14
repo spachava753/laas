@@ -248,6 +248,9 @@ type funcInfo struct {
 	results     []*types.Var
 	paramNames  map[string]*types.Var
 	resultNames map[string]int
+	// runs holds the parameters of a trusted function whose code its
+	// contract says it may run.
+	runs map[*types.Var]bool
 	broken      bool // an annotation failed to parse; verification is skipped
 	callees     []*funcInfo
 	// modifies lists what the function may write, from its Modifies clauses.
@@ -673,7 +676,7 @@ func (pv *pkgVerifier) addFunc(decl *ast.FuncDecl) {
 // annotations and trusted contracts may use for its parameters and results.
 // The receiver of a method is its first parameter.
 func newFuncInfo(obj *types.Func) *funcInfo {
-	fn := &funcInfo{obj: obj, paramNames: map[string]*types.Var{}, resultNames: map[string]int{}}
+	fn := &funcInfo{obj: obj, paramNames: map[string]*types.Var{}, resultNames: map[string]int{}, runs: map[*types.Var]bool{}}
 	sig := obj.Type().(*types.Signature)
 	inputs := slices.Collect(sig.Params().Variables())
 	if sig.Recv() != nil {

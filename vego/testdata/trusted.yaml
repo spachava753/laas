@@ -33,10 +33,12 @@ trusted:
 
   values.describe:
     reason: Test helper that reads an error.
+    runs: [e]
     modifies: []
 
   values.consume:
     reason: Test helper that reads an error.
+    runs: [e]
     modifies: []
 
   trust.readConfig:
@@ -208,6 +210,7 @@ trusted:
 
   (*memory.Log).Write:
     reason: Test helper standing for a method that appends to its receiver and may fail.
+    runs: [l]
     modifies: [l]
     ensures:
       - "err = nil -> l.count' = l.count + 1"
@@ -215,6 +218,7 @@ trusted:
 
   (*memory.Log).Count:
     reason: Test helper standing for a method that only reads its receiver.
+    runs: [l]
     requires:
       - "l != nil"
     ensures:
@@ -371,6 +375,7 @@ trusted:
 
   trust.finish:
     reason: Test helper that succeeds only where two squares add up to six, which is nowhere.
+    runs: [e]
     ensures:
       - "result = nil <-> (e = nil And x*x + y*y = 6)"
     modifies: []
@@ -436,4 +441,32 @@ trusted:
     reason: Test helper that calls back into its caller through a generic function that ranges over its argument.
     ensures:
       - "result = 0"
+    modifies: []
+
+  trust.tell:
+    reason: Test helper that is given an error and does not say that it runs its methods.
+    modifies: []
+
+  trust.tellAny:
+    reason: Test helper that vouches for the methods of the error it is given.
+    runs: [e]
+    modifies: []
+
+  (*trust.sinkHolder).flush:
+    reason: Test helper on a struct that holds a function, which it does not say it runs.
+    modifies: []
+
+  (*trust.sinkHolder).flushRuns:
+    reason: Test helper that vouches for the function its receiver holds.
+    runs: [s]
+    modifies: []
+
+  trust.runsNothing:
+    reason: Test helper whose runs lists something that can hold no code.
+    runs: [x]
+    modifies: []
+
+  trust.runsNobody:
+    reason: Test helper whose runs lists a name that is no parameter.
+    runs: [y]
     modifies: []

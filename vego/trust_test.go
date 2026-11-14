@@ -99,6 +99,7 @@ func TestReport(t *testing.T) {
 				},
 				{
 					Key: "sort.Ints", Reason: "Another module's override.", File: "/work/other/vego-trusted.yaml", Line: 4,
+					Runs: []string{"x", "less"},
 					Calls: []token.Position{at("other/c.go", 3)},
 				},
 				{
@@ -121,6 +122,7 @@ Project contracts in use: 3
     used at: a.go:10, b/b.go:7
   sort.Ints
     reason:  Another module's override.
+    runs code held by: x, less
     defined: other/vego-trusted.yaml:4
     used at: other/c.go:3
   sort.Ints

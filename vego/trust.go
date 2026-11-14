@@ -47,7 +47,10 @@ type trustEntry struct {
 	requires []trustFormula
 	ensures  []trustFormula
 	modifies []trustFormula
-	file     *trustFile
+	// runs names the parameters whose code the function may run: methods
+	// of an error or an interface, or a function, held in them.
+	runs []trustFormula
+	file *trustFile
 	line     int
 }
 
@@ -203,8 +206,12 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			for _, item := range scalars("modifies", value) {
 				entry.modifies = append(entry.modifies, trustFormula{text: item.Value, line: item.Line, col: item.Column})
 			}
+		case "runs":
+			for _, item := range scalars("runs", value) {
+				entry.runs = append(entry.runs, trustFormula{text: item.Value, line: item.Line, col: item.Column})
+			}
 		default:
-			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, requires, ensures, or modifies",
+			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, requires, ensures, modifies, or runs",
 				field.Value, entry.key)
 		}
 	}
@@ -300,7 +307,9 @@ type EntryUse struct {
 	// Unpredictable is set when the function returns an error and its
 	// contract never says that it succeeds.
 	Unpredictable bool
-	Calls         []token.Position
+	// Runs names the parameters whose code the function may run.
+	Runs  []string
+	Calls []token.Position
 }
 
 // add merges another usage into u.
@@ -502,6 +511,19 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 		c := &clause{kind: "modifies", text: item.text, pos: pv.trustPos(entry.file, item.line, item.col), res: pv.plain}
 		fn.modifies = append(fn.modifies, newModTargets(targets, c)...)
 	}
+	// The parameters whose code the function is said to run. Listing one
+	// that can hold no code would be a claim about nothing.
+	for _, item := range entry.runs {
+		param, ok := fn.paramNames[item.text]
+		switch {
+		case !ok:
+			fn.defect("its runs %q: %s is not a parameter", item.text, item.text)
+		case !holdsCode(param.Type(), map[types.Type]bool{}):
+			fn.defect("its runs lists %s, whose type %s can hold no error, interface, or function to run", item.text, param.Type())
+		default:
+			fn.runs[param] = true
+		}
+	}
 	for name := range fn.paramNames {
 		if fn.ambiguous(name, false) {
 			fn.defect("its parameter %s has a name that means something else in a contract", name)
@@ -674,9 +696,13 @@ func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 		return use.Key == entry.key && use.File == entry.file.path
 	})
 	if index < 0 {
+		var runs []string
+		for _, item := range entry.runs {
+			runs = append(runs, item.text)
+		}
 		pv.usage.Entries = append(pv.usage.Entries, &EntryUse{
 			Key: entry.key, Reason: entry.reason, Shipped: entry.file.shipped,
-			File: entry.file.path, Line: entry.line,
+			File: entry.file.path, Line: entry.line, Runs: runs,
 		})
 		index = len(pv.usage.Entries) - 1
 	}

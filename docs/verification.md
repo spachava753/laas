@@ -799,7 +799,7 @@ func ParsePort(s string) (port int, err error) {
 
 The contract of `strconv.Atoi` does not say which strings it accepts, so `ParsePort` cannot promise success for any input, and is not asked to. The same goes for anything that reads a file or the network.
 
-**Wrapping.** `fmt.Errorf` may format numbers, booleans, strings, and errors that were made by `errors.New` or `fmt.Errorf` in verified code. It may not format an error that came from a trusted function or in as a parameter, because formatting runs that error's methods, which `vego` cannot see. So the commonest line in Go error handling is rejected:
+**Wrapping.** `fmt.Errorf` may format numbers, booleans, strings, and errors that were made by `errors.New` or `fmt.Errorf` in verified code. It may not format an error that came from a trusted function or in as a parameter, because formatting runs that error's methods, which `vego` cannot see. An error like that cannot be passed to a trusted function either, unless its contract says so. So the commonest line in Go error handling is rejected:
 
 ```go
 return 0, fmt.Errorf("bad quantity %q: %w", line, err)
@@ -817,7 +817,7 @@ Return the error as it is, or wrap an error of your own:
 return 0, fmt.Errorf("bad quantity %q: %w", line, ErrRange)
 ```
 
-**Which error it is** is not known. Comparing two errors with `==` is rejected. `errors.Is` and `errors.As` are not supported, so no contract can say "returns `ErrEmpty` when the slice is empty". Do not give them a trusted contract: they call the `Is` and `Unwrap` methods of whatever error they are handed, which can do anything, so an entry that says they change nothing would be false. Another package's error variable, such as `io.EOF`, cannot be read.
+**Which error it is** is not known. Comparing two errors with `==` is rejected. `errors.Is` and `errors.As` are not supported, so no contract can say "returns `ErrEmpty` when the slice is empty". They call the `Is` and `Unwrap` methods of whatever error they are handed, so a trusted contract for them can be given errors from outside only if it lists its parameters under `runs`, and then claims something nobody can check; see [Values that carry code](#values-that-carry-code). Even then nothing is known about the answer. Another package's error variable, such as `io.EOF`, cannot be read.
 
 **A package-level error can lose its standing.** It is known not to be nil only if nothing in its package assigns to it or takes its address, and no code of the package can run before it is set. A package whose variable initialisers call function values or hand things to other packages gives that up, and `vego` says so where the variable is read.
 
@@ -890,7 +890,7 @@ func (a *Account) deposit(n int) {
 //@ Ensures a.balance' = a.balance + n
 ```
 
-A struct may hold a mutex, or any other field of a type `vego` does not model. Verified code cannot read or assign such a field, and it stays part of the struct. What the proof of `deposit` says is that it is correct for one goroutine. That the lock keeps other goroutines out is what `Deposit` is for, and nobody proves it.
+A struct that verified code works on may hold a mutex. Verified code cannot call `Lock` or `Unlock` and should leave the field alone. What the proof of `deposit` says is that it is correct for one goroutine. That the lock keeps other goroutines out is what `Deposit` is for, and nobody proves it.
 
 ## Bits
 
@@ -932,11 +932,35 @@ trusted:
 - **`reason`** is required and says why you believe the contract.
 - **`requires` and `ensures`** are lists of formulas. Callers must prove every `requires` and may assume every `ensures`. Quote the formulas, because YAML gives its own meaning to several characters they use.
 - **`modifies`** is required, even when it is empty. It lists what the function may write, as a `Modifies` clause would: `[x]` for the elements of slice `x`, `[b]` for the struct that `b` points to, `[b.count]` for one field. Anything not listed is taken to be unchanged.
-- **The names** in all three are the parameter and result names in the function's own source, the receiver included. For the standard library, `go doc -src bytes.Buffer.Len` shows that the receiver is `b`. Unnamed results are `result`, or `result1`, `result2`.
+- **`runs`** is optional. It lists the parameters whose code the function may run: the methods of an error or an interface, or a function, held in them however deep. See [Values that carry code](#values-that-carry-code) below.
+- **The names** in all of these are the parameter and result names in the function's own source, the receiver included. For the standard library, `go doc -src bytes.Buffer.Len` shows that the receiver is `b`. Unnamed results are `result`, or `result1`, `result2`.
 
 `vego` ships contracts for a few functions of the standard library: `sort.Ints`, `sort.IntsAreSorted`, `sort.SearchInts`, `strings.Contains`, `strings.HasPrefix`, `strings.HasSuffix`, `strings.Index`, `strings.TrimSpace`, `strings.Repeat`, `strings.ToUpper`, `strings.ToLower`, `unicode/utf8.RuneCountInString`, `strconv.Itoa`, `strconv.Atoi`, `math/rand.Intn`, and `math/rand.Int`. These are the keys to use when you replace one. The contracts themselves are in `vego/trusted/std` in the source of `laas`. An entry of your own for the same function replaces the shipped one.
 
-Three things a trusted contract cannot do:
+### Values that carry code
+
+A trusted contract is a claim about the function's own code. An `error`, or a struct with a field that is an interface or a function, brings code of its own: the function may call `err.Error()` or `l.sink(text)`, and that code could write memory your proof reasons about. So `vego` refuses to pass such a value to a trusted function:
+
+```text
+vego: cannot verify TellsUnknown: e is passed to tell, which is trusted, and is an error
+whose origin is not known; tell could run code through it that nobody has seen. If its
+contract holds whatever that code does, list e under runs in the contract
+```
+
+There are two ways on. An error that verified code made itself, with `errors.New` or `fmt.Errorf`, can be passed anywhere: its methods are the standard library's. For anything else, the entry has to say that it takes responsibility:
+
+```yaml
+  example.com/shop/internal/audit.Record:
+    reason: Writes the error to the audit log; reviewed 2026-11-14.
+    runs: [err]
+    modifies: []
+```
+
+`runs: [err]` widens the claim. The contract is now said to hold whatever the methods of `err` do, which nobody can check for errors that come from elsewhere. It is in the trust file and in the trust report for that reason. Use it for values whose makers you know, such as a logger your program sets up once.
+
+### What a trusted contract cannot do
+
+There are three such things:
 
 - **It cannot make a signature acceptable.** A function with a parameter or result of a type `vego` does not support, such as an interface or a function value, cannot be called from verified code even with an entry: `cannot verify Sync: parameter s has unsupported type example.com/shop.Store`. Write a small function of your own around it whose signature uses supported types, and trust that.
 - **It cannot sit beside annotations.** A function is verified or trusted, not both. When you get round to verifying a function you trusted, delete its entry.
@@ -1072,6 +1096,7 @@ The messages you will meet most, with what they mean and what usually fixes them
 | `nothing can satisfy the Requires clauses of F` | The `Requires` contradict each other or the types, so every proof about `F` would be empty. | Fix the `Requires`. |
 | `the slices passed to F as a and b may overlap` | Two slice arguments of one element type are not shown to be different memory. | Pass two slice parameters of your own function, which your callers then have to keep apart, or a slice the function made itself. There is no formula yet for "these two slices share no memory", so a slice held in a struct cannot be shown to be apart from a parameter. |
 | `the trusted contract of F cannot be true of this call` | What the entry promises contradicts what is known at the call. | The entry is wrong, or needs a `requires`. |
+| `x is passed to F, which is trusted, and is an error whose origin is not known`, or `a value of type T, which can hold an error, an interface, or a function` | `F` could run code that came with `x`. | Pass an error made in verified code, or list the parameter under `runs` in the entry for `F`. |
 | `the trusted contract ... cannot be used` | An entry of the trust file is wrong; the text says how. | Fix the entry; check the parameter names. |
 | `analysis skipped due to errors in package` | The package does not compile, or the toolchain does not match. | See [Running it](#running-it). |
 
@@ -1098,7 +1123,7 @@ Floats are allowed but opaque: they can be passed around and computed with, and 
 
 A proof by `vego` is a proof under these assumptions. They are about things it cannot see.
 
-- **Trusted contracts are true**, the shipped ones and your own. The functions behind them return without panicking when their `requires` hold, write nothing a caller can see beyond their `modifies`, do not keep the pointers and slices they are given, and do not call back into the verified function that called them by way of another package.
+- **Trusted contracts are true**, the shipped ones and your own, and for a parameter listed under `runs` they are true whatever code arrives in it. The functions behind them return without panicking when their `requires` hold, write nothing a caller can see beyond their `modifies`, do not keep the pointers and slices they are given, and do not call back into the verified function that called them by way of another package.
 - **Callers that are not verified keep the contract**: they establish the `Requires`, hand over structs whose invariants hold, and do not pass overlapping slices where two slice parameters have one element type.
 - **Code that is not verified keeps Go's types**: no `unsafe`, `reflect`, or cgo that makes one piece of memory two types or changes a string.
 - **No other goroutine writes the memory a verified function reads or writes while it runs.** A proof is about one goroutine.
