@@ -20,10 +20,11 @@ Each of these makes vego report the function that uses it as `cannot verify`. Th
 4. **Interfaces other than `error`**, and calls through them: `defer resp.Body.Close()`, `io.Writer`, `sort.Interface`.
 5. **Calls to variadic functions**, which `log.Printf` and `fmt.Println` are, and `append(s, t...)`.
 6. **Arrays**, and with them every struct that holds one.
-7. **`copy`, comparing structs with `==`, labelled `break` and `continue`, `goto`, `select`, `defer` inside a loop.**
-8. **Pointers to anything but a struct**, such as `*int`.
-9. **Generic functions and types.**
-10. **Goroutines and channels.** A proof is about one goroutine; nothing is said about what runs beside it.
+7. **Package-level variables** other than error sentinels. Existing code is full of them, and a function that reads one cannot be verified at all today.
+8. **`copy`, comparing structs with `==`, labelled `break` and `continue`, `goto`, `fallthrough`, `select`, `defer` inside a loop, a `range` over a map that changes a map of that type.**
+9. **Pointers to anything but a struct**, such as `*int`.
+10. **Generic functions and types.**
+11. **Goroutines and channels.** A proof is about one goroutine; nothing is said about what runs beside it.
 
 Two things do not stop a function from being verified but come up as often:
 
@@ -34,6 +35,8 @@ Two things do not stop a function from being verified but come up as often:
 
 - **Use it on a real package.** vego has only been run on its own test programs and on programs written to break it. Nobody has annotated existing code with it, so how much friction there is in practice is not known. The first trial should rank everything in this file.
 - **Speed.** Generated packages of 40 to 100 short functions with pointer parameters that may be the same have taken around ten minutes. Nothing has been profiled.
+- **Newer toolchains.** The pinned `golang.org/x/tools` cannot read packages built by Go 1.27 or newer, so `laas` has to be run with `GOTOOLCHAIN=go1.26.6`, and a module that needs a newer Go cannot be analysed at all. A newer `x/tools` exists; moving to it changes the Go version the whole module needs.
+- **What the first readers of the guide could not do.** Two reviewers tried to verify small realistic programs with only `docs/verification.md`. A new module went well; a service with a mutex, a map of structs, wrapped errors, an interface, and a global did not. What stopped them, beyond the list above: formulas have no character literals, no `cap`, and no way to compare a slice with `nil`; `fresh(s.items)` is written without the prime although it speaks of the state on return; a sum or count over a slice that is being written cannot be carried through a loop; an invariant of a struct type is not known of the elements of a slice.
 - **Continuous integration.** The tests, including those of the shipped contracts, run by hand and on one toolchain. 32-bit targets have only been tried in a few spots.
 
 ## By area: what is built, why, and what is missing

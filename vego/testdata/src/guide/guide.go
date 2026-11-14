@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 )
 
 // Max returns the larger of two numbers.
@@ -300,16 +301,13 @@ func (s *Stack) Top() int {
 //@ Ensures result = s.items[s.n-1]
 
 // Get reads a key that may be absent.
-func Get(m map[string]int, k string) (v int, err error) {
-	v, ok := m[k]
-	if !ok {
-		return 0, ErrMissing
-	}
-	return v, nil
+func Get(m map[string]int, k string) (v int, ok bool) {
+	v, ok = m[k]
+	return v, ok
 }
 
-//@ Ensures err = nil <-> has(m, k)
-//@ Ensures err = nil -> v = m[k]
+//@ Ensures ok <-> has(m, k)
+//@ Ensures v = m[k]
 
 // Bump counts one more for a key.
 //
@@ -434,3 +432,237 @@ func IsAdmin(role string) bool {
 }
 
 //@ Ensures result <-> role = "admin"
+
+// SafeOnly has no contract to speak of; the annotation only asks for the
+// checks every verified function gets.
+func SafeOnly(A []int, i int) int {
+	if 0 <= i && i < len(A) {
+		return A[i]
+	}
+	return 0
+}
+
+//@ Ensures True
+
+// CountPositive needs no name for the position, since its invariant does
+// not speak of it.
+//
+// @ Requires |A| <= 1000
+func CountPositive(A []int) int {
+	n := 0
+	//@ Invariant 0 <= n
+	for _, x := range A {
+		if x > 0 && n < 1000 {
+			n++
+		}
+	}
+	return n
+}
+
+//@ Ensures 0 <= result
+
+//@ Predicate digits(s) ::= Forall k in [0, |s|) : 48 <= s[k] <= 57
+
+// FirstDigit reads a digit from a string of digits.
+//
+// @ Requires digits(s) And |s| > 0
+func FirstDigit(s string) int {
+	return int(s[0]) - 48
+}
+
+//@ Ensures 0 <= result <= 9
+
+//@ Predicate zeros(A, n) ::= n <= 0 Or (zeros(A, n-1) And A[n-1] = 0)
+
+// LastZero unfolds a recursive predicate once.
+//
+// @ Requires 0 < n <= |A| And zeros(A, n)
+func LastZero(A []int, n int) int {
+	return A[n-1]
+}
+
+//@ Ensures result = 0
+
+// Push grows the slice the stack holds, so it lists both the struct, whose
+// field it assigns, and the elements, which append may write. Its last
+// clause tells a caller where the new slice lies.
+//
+// @ Requires s != nil And s.n = |s.items| And s.n < 1000
+// @ Modifies s, s.items
+func (s *Stack) Push(x int) {
+	s.items = append(s.items, x)
+	s.n++
+}
+
+//@ Ensures s.n' = s.n + 1 And |s.items'| = s.n' And s.items'[s.n] = x
+//@ Ensures fresh(s.items) Or within(s.items', s.items)
+
+// PushTwo can push again because it knows where the slice went.
+//
+// @ Requires s != nil And s.n = |s.items| And s.n < 100
+// @ Modifies s, s.items
+func PushTwo(s *Stack) {
+	s.Push(1)
+	s.Push(2)
+}
+
+//@ Ensures s.n' = s.n + 2
+
+// Pop changes the stack and returns a value.
+//
+// @ Requires s != nil And s.n > 0
+// @ Modifies s.n
+func (s *Stack) Pop() int {
+	s.n--
+	return s.items[s.n]
+}
+
+//@ Ensures s.n' = s.n - 1 And result = s.items[s.n-1]
+
+// PopTwice calls Pop in the two places a call that changes memory may
+// stand besides a statement of its own.
+//
+// @ Requires s != nil And s.n > 1
+// @ Modifies s.n
+func PopTwice(s *Stack) int {
+	x := s.Pop()
+	if x > 0 {
+		return x
+	}
+	return s.Pop()
+}
+
+// PopInCondition calls it where it may not stand.
+//
+// @ Requires s != nil And s.n > 0
+// @ Modifies s.n
+func PopInCondition(s *Stack) bool {
+	if s.Pop() > 0 { // want `vego: cannot verify PopInCondition: Pop may modify s.n, so the call must be a statement of its own or the whole right-hand side of an assignment to variables`
+		return true
+	}
+	return false
+}
+
+// DrainForgets changes the stack in a loop, which forgets the invariant of
+// the type along with everything else about what the loop changes.
+//
+// @ Requires s != nil
+// @ Modifies s.n
+func DrainForgets(s *Stack) {
+	//@ Variant s.n
+	for s.n > 0 {
+		s.Pop() // want `vego: invariant of Stack may not hold for what is passed to Pop as s: 0 <= n <= \|items\|`
+	}
+} // want `vego: invariant of Stack may not hold for s on return: 0 <= n <= \|items\|`
+
+// Drain says it again in the invariant of the loop.
+//
+// @ Requires s != nil
+// @ Modifies s.n
+func Drain(s *Stack) {
+	//@ Invariant 0 <= s.n <= |s.items|
+	//@ Variant s.n
+	for s.n > 0 {
+		s.Pop()
+	}
+}
+
+//@ Ensures s.n' = 0
+
+// Account holds money within a limit.
+//
+// @ Invariant 0 <= balance <= 1000000
+type Account struct {
+	mu      sync.Mutex
+	balance int
+}
+
+// TotalUnsaid adds up accounts reached through a slice, of which the
+// invariant of the type is not known.
+//
+// @ Requires |as| <= 100
+// @ Requires Forall k in [0, |as|) : as[k] != nil
+func TotalUnsaid(as []*Account) int {
+	total := 0
+	//@ Invariant 0 <= total <= 1000000 * i
+	for i := range as { // want `vego: loop invariant may not be preserved: 0 <= total <= 1000000 \* i`
+		total += as[i].balance // want `vego: addition may overflow int`
+	}
+	return total
+}
+
+// Total states the bound for each element.
+//
+// @ Requires |as| <= 100
+// @ Requires Forall k in [0, |as|) : as[k] != nil And 0 <= as[k].balance <= 1000000
+func Total(as []*Account) int {
+	total := 0
+	//@ Invariant 0 <= total <= 1000000 * i
+	for i := range as {
+		total += as[i].balance
+	}
+	return total
+}
+
+//@ Ensures 0 <= result <= 100000000
+
+// Deposit holds the lock of the account while it changes the balance. The
+// trust file says what Lock and Unlock may write.
+//
+// @ Requires a != nil And 0 <= n And a.balance + n <= 1000000
+// @ Modifies a.mu, a.balance
+func (a *Account) Deposit(n int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.balance += n
+}
+
+//@ Ensures a.balance' = a.balance + n
+
+// QuantityWrapped formats an error that came from a trusted function.
+func QuantityWrapped(line string) (n int, err error) {
+	n, err = strconv.Atoi(line)
+	if err != nil {
+		return 0, fmt.Errorf("bad quantity %q: %w", line, err) // want `vego: cannot verify QuantityWrapped: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, can be formatted`
+	}
+	return n, nil
+}
+
+//@ Ensures err = nil -> True
+
+// Quantity wraps an error of its own instead.
+func Quantity(line string) (n int, err error) {
+	n, err = strconv.Atoi(line)
+	if err != nil {
+		return 0, fmt.Errorf("bad quantity %q: %w", line, ErrRange)
+	}
+	return n, nil
+}
+
+//@ Ensures err = nil -> True
+
+// IsEmpty asks which error it is. The call is allowed by an entry in the
+// trust file, and nothing is known of its answer.
+func IsEmpty(err error) bool {
+	return errors.Is(err, ErrEmpty)
+}
+
+//@ Ensures True
+
+var calls int
+
+// Counted reads a package-level variable.
+func Counted() int {
+	return calls // want `vego: cannot verify Counted: calls is not a local variable`
+}
+
+//@ Ensures True
+
+// Clear removes the keys of the map it ranges over.
+//
+// @ Modifies m
+func Clear(m map[string]int) {
+	for k := range m { // want `vego: cannot verify Clear: the loop modifies a map of the type it ranges over, which is not supported`
+		delete(m, k)
+	}
+}

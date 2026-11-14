@@ -2,9 +2,9 @@
 
 ## Introduction
 
-`vego` proves things about Go functions. You say what a function must do in comments that start with `//@`, and `vego` either proves that the function does it for every input, or tells you the first thing it could not prove. The code stays ordinary Go: it builds, runs, and formats as before, and a program that does not use `vego` never notices the comments.
+`vego` proves things about Go functions. You say what a function must do in comments that start with `//@`, and `vego` either proves that the function does it for every input, or tells you what it could not prove. The code stays ordinary Go: it builds, runs, and formats as before, and a program that does not use `vego` never notices the comments.
 
-This guide shows how to write Go that `vego` can verify. It is meant to be read from the top once, and then used as a reference; the last section is a summary of every annotation and every piece of the formula language. Every program in it is checked: they all live in `vego/testdata/src/guide`, where the tests of `vego` run them.
+This guide shows how to write Go that `vego` can verify. It is meant to be read from the top once, and then used as a reference: [Messages](#messages) explains what the tool prints, and the [Summary](#summary) lists every annotation and every piece of the formula language. The programs in it are checked: they live in `vego/testdata/src/guide`, where the tests of `vego` run them.
 
 Three things are worth knowing before you start.
 
@@ -12,20 +12,30 @@ Three things are worth knowing before you start.
 
 **What it never does.** It never says a function is correct when it is not. When it cannot follow a piece of Go, it says `cannot verify` and names the construct. When it cannot find a proof, it says `may not hold`. That message means "not proved", which is not the same as "false": sometimes the code is wrong, sometimes the contract is, and sometimes both are right and the prover needs a hint. Most of this guide is about telling those apart.
 
-**What it does not cover yet.** A good deal of everyday Go: interfaces other than `error`, closures, generics, goroutines, arrays, and more. [What is not supported](#what-is-not-supported) has the list. `vego` is experimental, and you will meet these limits quickly in code that talks to the outside world.
+**What it does not cover yet.** A good deal of everyday Go: interfaces other than `error`, closures, generics, goroutines, arrays, package-level variables, and more. [What is not supported](#what-is-not-supported) has the list. `vego` is experimental, and you will meet these limits quickly in code that talks to the outside world. The usual answer is to keep such code at the edge and verify the logic it calls; [Adopting it](#adopting-it) says how.
 
 ## Running it
 
-`vego` is one of the analyzers of the `laas` command:
+`vego` is one of the analyzers of the `laas` command.
 
 ```sh
 go install github.com/spachava753/laas/cmd/laas@latest
-laas ./...
+laas -vego ./...
 ```
 
-A function is verified when it has at least one `//@` annotation. Every other function is left alone, so you can start with one function in a large package.
+`laas -vego` runs the verifier alone. Plain `laas` runs it together with the other analyzers of the command, which have opinions about code that has nothing to do with verification. The arguments are package patterns, as for `go vet`: `./...`, or `./internal/core` for one package.
 
-Run `laas` directly. It refuses to verify under `go vet -vettool`, whose cache could keep a proof alive after the assumptions it rests on have changed.
+**A function is verified when it has at least one `//@` annotation.** Every other function is left alone, so you can start with one function in a large package. The smallest annotation is `//@ Ensures True`, which promises nothing and turns on [the checks every verified function gets](#safety-comes-free).
+
+**Silence is success.** When everything annotated is proved, `laas` prints nothing and exits with status 0. With anything to report it exits with status 3. It does not list what it verified.
+
+A few more things about running it:
+
+- **Toolchain.** `laas` is built with Go 1.26 and cannot yet read packages compiled by a newer Go. If your `go` command is newer, run it as `GOTOOLCHAIN=go1.26.6 laas -vego ./...`. Otherwise you get errors about the standard library and `analysis skipped`, which are not failed proofs. A module that needs a newer Go than 1.26 cannot be verified yet.
+- **A package that does not compile is skipped**, with `vego: analysis skipped due to errors in package`.
+- **Test files are included.** `-test=false` leaves them out.
+- **`-exclude-packages`** takes a regular expression of import paths to skip.
+- **Run `laas` directly.** It refuses to verify under `go vet -vettool`, whose cache could keep a proof alive after the assumptions it rests on have changed.
 
 ## A first proof
 
@@ -44,7 +54,7 @@ func Max(a, b int) int {
 //@ Ensures result = a Or result = b
 ```
 
-`Ensures` says what holds when the function returns. `result` is the name of the value it returns. Running `laas` on this prints nothing: both clauses are proved for every `a` and `b`.
+`Ensures` says what holds when the function returns. `result` is the name of the value it returns. Running `laas -vego` on this prints nothing: both clauses are proved for every `a` and `b`.
 
 Now break it, by returning `b` on both branches:
 
@@ -119,9 +129,11 @@ Logic is written with words: `And`, `Or`, `->` for "implies", `<->` for "exactly
 //@ Ensures result = -1 Or (0 <= result < |A| And A[result] = x)
 ```
 
+`~` binds tightest, then `And`, then `Or`, then `->`, then `<->`. `a -> b -> c` means `a -> (b -> c)`. When in doubt, use parentheses.
+
 Numbers are mathematical integers. `x + 1` in a formula is one more than `x` and never wraps, whatever the type of `x`. The limits of the Go types have names: `MaxInt`, `MinInt`, `MaxInt8` to `MaxInt64`, `MinInt8` to `MinInt64`, and `MaxUint` to `MaxUint64`. `/` and `%` round as they do in Go.
 
-`|A|` is the length of a slice or a string, and the number of keys of a map. `A[i]` is an element. Fields are reached with a dot, through pointers as well: `c.count`, `s.items[i]`, `|s.items|`.
+`|A|` is the length of a slice or a string, and the number of keys of a map; `len(A)` means the same. `A[i]` is an element. Fields are reached with a dot, through pointers as well: `c.count`, `s.items[i]`, `|s.items|`.
 
 `Forall` and `Exists` range over an interval:
 
@@ -130,37 +142,19 @@ Numbers are mathematical integers. `x + 1` in a formula is one more than `x` and
 //@ Ensures Exists k in [0, |A|) : A[k] = result
 ```
 
-The interval is written as in mathematics: `[0, n)` includes `0` and leaves out `n`, `[0, n]` includes both. Several variables can share one interval, as in `Forall i, j in [0, n) : ...`, and `in Z` ranges over all integers.
+The interval is written as in mathematics: `[0, n)` includes `0` and leaves out `n`, `[0, n]` includes both. Several variables can share one interval, as in `Forall i, j in [0, n) : ...`, and `in Z` ranges over all integers. The body of a quantifier runs to the end of the clause, or to the closing parenthesis around the quantifier. `A[lo:hi) <= x` is short for "every element from `lo` up to `hi` is at most `x`", with any comparison.
 
 A formula talks about values, so it can use strings and `nil` too: `role = "admin"`, `p != nil`, `err = nil`.
 
-There are no bit operators, no function calls except to predicates, and no floating-point facts.
+**Names.** In a contract, the names are the parameters and the results of the function, and the constants of the package. An unnamed single result is `result`; several unnamed results are `result1`, `result2`, and so on. Named results keep their names.
 
-## Names, before and after
+**What a formula cannot say.** There are no bit operators, no function calls except to predicates, no character literals (write `48` for `'0'`), no `cap`, and no floating-point facts. A slice cannot be compared with `nil`; say `|A| = 0`. Two structs cannot be compared; compare their fields.
 
-In a contract, the names are the parameters and the results of the function. An unnamed single result is `result`; several unnamed results are `result1`, `result2`, and so on. Named results keep their names.
-
-A parameter in an `Ensures` clause means its value when the function was called. That needs care only for memory the function may change: the contents of a slice, the fields behind a pointer, a map. For those, a prime means the state on return.
-
-```go
-// @ Modifies A
-func Fill(A []int, v int) {
-	//@ Invariant Forall k in [0, i) : A[k] = v
-	for i := range A {
-		A[i] = v
-	}
-}
-
-//@ Ensures Forall k in [0, |A|) : A'[k] = v
-```
-
-`A'[k]` is element `k` when `Fill` returns; `A[k]` would be the element it had on entry. For a field it is `c.n'` and `c.n`.
-
-Inside a body the convention is the other way round. A name in an `Invariant` or an `Assert` means the value now, and `old(x)` means what a parameter was on entry.
+**A formula is not checked for meaning.** `A[i]` in a formula is not required to be in range, and `x / y` may have a divisor of zero. Such a term has some value nobody knows. A clause that depends on it can usually not be proved, but it can also be trivially true, as `A[999] = A[999]` is, and it is not reported. Guard what you write, as you would in code: `0 <= i < |A| And A[i] = x`.
 
 ## Safety comes free
 
-You do not ask for the checks in this section. Every verified function gets them.
+You do not ask for the checks in this section. Every verified function gets them, whatever its contract says.
 
 **Indexing.** An index must be proved to be in range.
 
@@ -168,6 +162,8 @@ You do not ask for the checks in this section. Every verified function gets them
 func First(A []int) int {
 	return A[0]
 }
+
+//@ Ensures result = A[0]
 ```
 
 ```text
@@ -210,6 +206,23 @@ Code that wraps on purpose, such as a hash function, cannot be verified, and nei
 **Allocation.** `make`, an `append` that has to grow, and a string concatenation must be proved not to ask for more than can be allocated, which again means bounding sizes.
 
 **Panics.** A reachable `panic` is an error.
+
+**Termination.** Every loop and every recursion must be shown to end; the next two sections say how.
+
+To get these checks and nothing else for a function, give it a contract that promises nothing:
+
+```go
+func SafeOnly(A []int, i int) int {
+	if 0 <= i && i < len(A) {
+		return A[i]
+	}
+	return 0
+}
+
+//@ Ensures True
+```
+
+This is a good first step for existing code.
 
 ## Loops
 
@@ -255,6 +268,8 @@ func Sum(A []int) int {
 
 The invariant says how large `total` can be after `i` elements. That is what lets `total += A[i]` pass the overflow check, and with `i = |A|` at the end it gives the postcondition.
 
+An invariant like this one speaks of the position, so the loop has to name it. `for _, x := range A` gives the invariant nothing to call it; write `for i := range A` and use `A[i]`.
+
 When a loop builds something up element by element, the invariant usually says "the part done so far is right":
 
 ```go
@@ -275,6 +290,8 @@ func Index(A []int, x int) int {
 A good way to find an invariant is to take the postcondition and replace the end of the range by the loop counter.
 
 `break`, `continue`, and `return` inside a loop all work. A `return` inside a loop has to establish the postcondition from the invariant and whatever the path to it adds.
+
+Two messages belong to loops. `loop invariant may not hold on entry` means it is false before the first iteration. `loop invariant may not be preserved` means that one iteration can break it, or that the invariant does not say enough for `vego` to see that it cannot: an invariant often needs a second clause to hold up the first.
 
 ## Recursion
 
@@ -334,7 +351,7 @@ to vego-trusted.yaml
 
 Either verify the helper too, or see [Code that is not verified](#code-that-is-not-verified).
 
-An exported function's contract is visible to other packages, so verified code can call verified code across package boundaries.
+An exported function's contract is visible to other packages, so verified code can call verified code across package boundaries. A function whose own verification failed cannot be relied on from another package.
 
 ## Predicates
 
@@ -351,7 +368,23 @@ func Smallest(A []int) int {
 //@ Ensures Forall k in [0, |A|) : result <= A[k]
 ```
 
-A predicate takes numbers and slices of numbers. It may be recursive, as long as the recursion does not pass through a negation.
+A predicate takes numbers, slices of numbers, and strings.
+
+```go
+//@ Predicate digits(s) ::= Forall k in [0, |s|) : 48 <= s[k] <= 57
+```
+
+Its body may mention only its parameters, not constants or variables of the package: pass what it needs.
+
+A predicate may be defined in terms of itself:
+
+```go
+//@ Predicate zeros(A, n) ::= n <= 0 Or (zeros(A, n-1) And A[n-1] = 0)
+```
+
+In such a definition the predicate may appear under `And`, `Or`, and the quantifiers, and on the right of `->`. It may not appear under `~`, on the left of `->`, or in a `<->`.
+
+Recursive predicates are for facts that a `Forall` cannot state. The prover unfolds them a step at a time and does no induction of its own, so they carry less far than they promise. In particular, a sum or a count over a slice, defined this way, cannot yet be kept as the invariant of a loop that writes the slice. Prefer a `Forall` where one will do.
 
 ## Helping the prover
 
@@ -376,24 +409,41 @@ func Cell(i, j, w, h int) int {
 //@ Ensures 0 <= result < h*w
 ```
 
-If a proof is true and still does not go through, `-vego.max-steps` raises the effort the prover spends on each obligation.
+`-vego.max-steps` raises the effort the prover spends on one obligation. It is the last thing to try, not the first: a proof that needs it is slow for everyone who runs the tool after you, and most failures are a missing fact that no amount of effort supplies.
 
-## Slices
+## Changing memory
 
-A slice parameter is a view of an array that the caller may also see, so a function has to say whether it writes it.
+Everything so far computed values. A function that writes memory its caller can see, such as the elements of a slice, the fields behind a pointer, or a map, has two more things to say: what it may write, and what is there afterwards.
 
 ```go
 // @ Modifies A
 func Fill(A []int, v int) {
+	//@ Invariant Forall k in [0, i) : A[k] = v
+	for i := range A {
+		A[i] = v
+	}
+}
+
+//@ Ensures Forall k in [0, |A|) : A'[k] = v
 ```
 
-`Modifies A` allows writing the elements of `A`. Without it, the write is an error:
+**`Modifies` is a permission.** It lists what the function may write. A write to anything else is an error:
 
 ```text
 vego: A[i] is assigned, which FillUnlisted may not modify; list it in a //@ Modifies clause
 ```
 
-The clause works in both directions. A function may write only what it lists, and it must need everything it lists, so `Modifies` never claims more than the body does. A caller then knows that anything not listed is unchanged.
+A caller knows that whatever is not listed is unchanged, and knows nothing about what is listed beyond what the `Ensures` say. So list as little as will do: `Modifies c.n` leaves a caller's knowledge of the other fields of `c` alone, and `Modifies c` does not. An entry that the body does not need is reported, so that a contract does not claim a permission out of caution.
+
+**The prime means "on return".** In an `Ensures` clause, a plain name means the value when the function was called. That matters only for memory the function may change, and for that memory a prime means the state on return: `A'[k]` is element `k` when `Fill` returns, and `A[k]` is the element it had on entry. For a field it is `c.n'` and `c.n`. The prime goes after the name or the field, before any index: `s.items'[0]`.
+
+**Inside a body it is the other way round.** A name in an `Invariant` or an `Assert` means the value now, and `old(x)` means what a parameter was on entry.
+
+A path in `Modifies` is read when the function is called. `Modifies s.items` means the elements of the slice that `s.items` was on entry, also if the function later puts another slice there.
+
+## Slices
+
+A slice parameter is a view of an array that the caller may also see, so a function that writes its elements needs `Modifies A`.
 
 Two rules about slices save a great deal of annotation, and are worth knowing.
 
@@ -436,6 +486,8 @@ func IsAdmin(role string) bool {
 //@ Ensures result <-> role = "admin"
 ```
 
+A byte of a string is a number in a formula, so a parser's contract speaks of `48 <= s[i] <= 57` where the code says `'0' <= s[i] && s[i] <= '9'`.
+
 Ordering with `<` is not known. Ranging over a string yields some character and moves on by one to four bytes; which character is not modelled.
 
 ## Structs and pointers
@@ -470,7 +522,15 @@ func Twice(c *Counter) {
 //@ Ensures c.n' = 2 And c.limit' = 10
 ```
 
-Other forms: `Modifies ps[0]` for one element of a slice of structs, `Modifies s.items` for the elements of a slice in a struct, `Modifies m` for a map.
+What an entry covers depends on where its path ends:
+
+- at a pointer, as in `Modifies c`: the fields of the struct it points to;
+- at a field that holds a number, a string, or the like, as in `Modifies c.n`: that field;
+- at a slice, as in `Modifies A` or `Modifies s.items`: the elements, up to the capacity. It does not cover the field `items` itself;
+- at an element, as in `Modifies ps[0]`: that element;
+- at a map, as in `Modifies m`: the map. `Modifies m[k]` is the struct that the pointer stored under `k` points to.
+
+The fields of a struct do not include the elements of a slice it holds. A method that assigns `s.n` and writes `s.items[i]` needs `Modifies s.n, s.items`.
 
 ### Two names for one thing
 
@@ -510,7 +570,64 @@ func NewCounter(limit int) *Counter {
 
 Without `fresh(result)`, a caller must allow that the result is some counter it already holds.
 
+`fresh(x)` says that what `x` refers to on return was created during the call. `within(a, b)` says that `a` lies inside the memory of `b`, where each is a pointer or a slice, and a slice counts with its whole capacity. Two edge cases follow from "memory": a slice with no capacity has no memory, so it is `fresh` and lies `within` anything, and a nil pointer lies within nothing.
+
 `&x`, `&p.field`, and `&s[i]` are supported when they point to a struct, and so are methods with pointer receivers on variables, fields, and elements. A pointer to anything but a struct, such as `*int`, is not supported.
+
+### A slice that grows inside a struct
+
+A stack that appends to its own slice shows all of this at once.
+
+```go
+// @ Requires s != nil And s.n = |s.items| And s.n < 1000
+// @ Modifies s, s.items
+func (s *Stack) Push(x int) {
+	s.items = append(s.items, x)
+	s.n++
+}
+
+//@ Ensures s.n' = s.n + 1 And |s.items'| = s.n' And s.items'[s.n] = x
+//@ Ensures fresh(s.items) Or within(s.items', s.items)
+```
+
+`Push` assigns the fields `items` and `n`, so it lists `s`. The `append` may write into the capacity of the old slice, so it lists `s.items` too.
+
+The last clause is the one that is easy to miss. After `Push`, `s.items` may be a different slice from the one the caller's `Modifies s.items` named. Without that clause a caller that pushes twice is told that the second `Push` may write memory the caller has no permission for. The clause says where the new slice is: either newly created, which anyone may write, or inside the old one, which the caller had listed.
+
+```go
+// @ Requires s != nil And s.n = |s.items| And s.n < 100
+// @ Modifies s, s.items
+func PushTwo(s *Stack) {
+	s.Push(1)
+	s.Push(2)
+}
+
+//@ Ensures s.n' = s.n + 2
+```
+
+Write that clause on every function that may replace a slice its callers can reach. In `fresh`, the path is written without a prime and means the slice on return.
+
+### Calls that change memory stand alone
+
+A call to a function with a `Modifies` clause must be a statement of its own, the only returned expression, or the whole right-hand side of an assignment to plain variables or their fields.
+
+```go
+x := s.Pop()
+return s.Pop()
+```
+
+It is rejected inside a larger expression, as an argument, and in a condition:
+
+```go
+if s.Pop() > 0 {
+```
+
+```text
+vego: cannot verify PopInCondition: Pop may modify s.n, so the call must be a statement
+of its own or the whole right-hand side of an assignment to variables
+```
+
+Assign the result to a variable first.
 
 ## Invariants of structs
 
@@ -533,25 +650,56 @@ func (s *Stack) Top() int {
 //@ Ensures result = s.items[s.n-1]
 ```
 
-`Top` may index with `s.n-1` because the invariant bounds `n`. An invariant works like a clause that is added to every contract: it may be assumed of every parameter and receiver of the type on entry, and must be proved of them, and of every result of the type, on return and at every call. In between, a function may break it and put it right again.
+`Top` may index with `s.n-1` because the invariant bounds `n`. An invariant works like a clause that is added to every contract:
 
-There is no way to switch an invariant off for one function.
+- it may be assumed, on entry, of every parameter and receiver of the type or of a pointer to it;
+- it must be proved of them, and of every result of the type, on return;
+- it must be proved of every argument at a call, and is known again of what a verified function hands back.
+
+In between, a function may break it and put it right again. There is no way to switch an invariant off for one function; a helper that has to run while the invariant is broken takes the fields it needs instead of the struct.
+
+The invariant reaches less far than "every value of the type" suggests, in three ways.
+
+**It applies to what is passed and returned directly.** It is not assumed, and not checked, of a struct inside a slice, inside a map, inside another struct, or behind a pointer field. Say it yourself where you need it:
+
+```go
+// @ Requires |as| <= 100
+// @ Requires Forall k in [0, |as|) : as[k] != nil And 0 <= as[k].balance <= 1000000
+func Total(as []*Account) int {
+```
+
+**A loop forgets it** along with everything else about what the loop changes. A loop that calls a method on a struct must restate the invariant of the type as its own:
+
+```go
+// @ Requires s != nil
+// @ Modifies s.n
+func Drain(s *Stack) {
+	//@ Invariant 0 <= s.n <= |s.items|
+	//@ Variant s.n
+	for s.n > 0 {
+		s.Pop()
+	}
+}
+
+//@ Ensures s.n' = 0
+```
+
+Without that line the report is `invariant of Stack may not hold for what is passed to Pop as s`.
+
+**A trusted function does not restore it.** After a call to a trusted function that may modify a struct, the invariant of the struct is not assumed, since nobody proved it.
 
 ## Maps
 
 A map is a reference, like a pointer: two map variables may be the same map, and writing one needs `Modifies`. In a formula, `m[k]` is the value of a key, which is the zero value when the key is absent, as in Go. `has(m, k)` says whether the key is present, and `|m|` is the number of keys.
 
 ```go
-func Get(m map[string]int, k string) (v int, err error) {
-	v, ok := m[k]
-	if !ok {
-		return 0, ErrMissing
-	}
-	return v, nil
+func Get(m map[string]int, k string) (v int, ok bool) {
+	v, ok = m[k]
+	return v, ok
 }
 
-//@ Ensures err = nil <-> has(m, k)
-//@ Ensures err = nil -> v = m[k]
+//@ Ensures ok <-> has(m, k)
+//@ Ensures v = m[k]
 
 // @ Requires m != nil And m[k] < 1000
 // @ Modifies m
@@ -562,11 +710,25 @@ func Bump(m map[string]int, k string) {
 //@ Ensures has(m', k) And m'[k] = m[k] + 1
 ```
 
-Keys are integers or strings. Writing to a map needs a proof that it is not nil; reading and `delete` do not. A `range` over a map can check each value but cannot add them up: the verifier does not know that each key is visited once.
+Keys are integers or strings. Writing to a map needs a proof that it is not nil; reading and `delete` do not.
+
+A `range` over a map is limited in two ways. It can check each value but cannot add them up, because the verifier does not know that each key is visited once. And its body must not change a map of the type it ranges over, so the usual loop that deletes some keys is not supported:
+
+```go
+for k := range m {
+	delete(m, k)
+}
+```
+
+```text
+vego: cannot verify Clear: the loop modifies a map of the type it ranges over, which is not supported
+```
+
+Quantifiers range over integers, so a formula can speak of every value of a map with integer keys in a range, and not of every value of a map with string keys.
 
 ## Errors
 
-About an error, `vego` knows one thing: whether it is `nil`. `errors.New` and `fmt.Errorf` return an error that is not nil, and so does a package-level variable declared with one of them.
+About an error, `vego` knows one thing: whether it is `nil`. `errors.New` and `fmt.Errorf` return an error that is not nil. So does a package-level variable that is declared with one of them and never assigned, the usual `var ErrEmpty = errors.New("empty")`.
 
 A function that returns an error has to say when it succeeds.
 
@@ -587,15 +749,17 @@ func Head(A []int) (first int, err error) {
 The second clause alone would not do:
 
 ```text
-vego: the contract of HeadWeak would also be met by a function that always
-returns an error; state when it succeeds with a clause such as
-"condition -> err = nil", where the condition is about the inputs and some
-input satisfies it
+vego: the contract of HeadWeak may also be met by a function that always returns an
+error: no simple input was found for which it forces success; state when it succeeds
+with a clause such as "condition -> err = nil", where the condition is about the
+inputs and a small input satisfies it
 ```
 
 A contract of the form "if it succeeds, then..." is met by a function that never succeeds. `vego` rejects such a contract, because it is the easiest way to write a specification that says nothing.
 
-The exception is a function whose success truly depends on something outside the program:
+**How it decides.** `vego` looks for one small example input that meets the `Requires` and for which the `Ensures` leave no way to return an error. The examples it tries are built from the numbers and strings your contract mentions and a few small ones, slices whose elements are all the same, pointers to structs up to two steps deep, and maps with one key. That covers most contracts. If yours says when it succeeds and you still get this message, success needs an input outside that range: a slice with two different elements, say. Add a clause that a simpler input satisfies, such as `|A| = 0 -> err = nil`. Neither `Assert` nor `-vego.max-steps` helps here.
+
+**The exception** is a function whose success depends on a call whose contract does not say what comes back:
 
 ```go
 func ParsePort(s string) (port int, err error) {
@@ -612,15 +776,53 @@ func ParsePort(s string) (port int, err error) {
 //@ Ensures err = nil -> 1 <= port <= 65535
 ```
 
-Nothing says which strings `strconv.Atoi` accepts, so `ParsePort` cannot promise success for any input, and is not asked to.
+The contract of `strconv.Atoi` does not say which strings it accepts, so `ParsePort` cannot promise success for any input, and is not asked to. The same goes for anything that reads a file or the network.
 
-`fmt.Errorf` may format numbers, booleans, strings, and errors that the function made itself. Which error it is, as in `errors.Is` or a comparison with `io.EOF`, is not supported yet.
+**Wrapping.** `fmt.Errorf` may format numbers, booleans, strings, and errors that were made by `errors.New` or `fmt.Errorf` in verified code. It may not format an error that came from a trusted function or in as a parameter, because formatting runs that error's methods, which `vego` cannot see. So the commonest line in Go error handling is rejected:
+
+```go
+return 0, fmt.Errorf("bad quantity %q: %w", line, err)
+```
+
+```text
+vego: cannot verify QuantityWrapped: formatting err would run the methods of an error
+whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in
+a verified function, can be formatted
+```
+
+Return the error as it is, or wrap an error of your own:
+
+```go
+return 0, fmt.Errorf("bad quantity %q: %w", line, ErrRange)
+```
+
+**Which error it is** is not known. Comparing two errors with `==` is rejected. `errors.Is` can be called once it has an entry in the trust file, but nothing is known about its answer, so no contract can say "returns `ErrEmpty` when the slice is empty". Another package's error variable, such as `io.EOF`, cannot be read.
+
+**A package-level error can lose its standing.** It is known not to be nil only if nothing in its package assigns to it or takes its address, and no code of the package can run before it is set. A package whose variable initialisers call function values or hand things to other packages gives that up, and `vego` says so where the variable is read.
 
 ## Defer
 
 A deferred call is verified where it runs: at every return of the function, after the results have their values, last one first.
 
 ```go
+type Lock struct{ held bool }
+
+// @ Requires l != nil And ~l.held
+// @ Modifies l
+func (l *Lock) Acquire() {
+	l.held = true
+}
+
+//@ Ensures l.held'
+
+// @ Requires l != nil And l.held
+// @ Modifies l
+func (l *Lock) Release() {
+	l.held = false
+}
+
+//@ Ensures ~l.held'
+
 // @ Requires l != nil And ~l.held And c != nil And c.n < c.limit
 // @ Modifies l, c.n
 func Guarded(l *Lock, c *Counter, skip bool) {
@@ -639,6 +841,31 @@ Both ways out of `Guarded` release the lock, and the `Requires` of `Release` is 
 
 Only a call of a named function or method can be deferred, and not inside a loop. `defer func() { ... }()` is not supported yet.
 
+A `sync.Mutex` works the same way, with two entries in the trust file, because `vego` does not ship contracts for it yet:
+
+```yaml
+  (*sync.Mutex).Lock:
+    reason: Standard library; returns when the lock is held.
+    modifies: [m]
+  (*sync.Mutex).Unlock:
+    reason: Standard library; the caller holds the lock.
+    modifies: [m]
+```
+
+```go
+// @ Requires a != nil And 0 <= n And a.balance + n <= 1000000
+// @ Modifies a.mu, a.balance
+func (a *Account) Deposit(n int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.balance += n
+}
+
+//@ Ensures a.balance' = a.balance + n
+```
+
+The function lists `a.mu`, because locking writes the mutex. Remember what this proves: `Deposit` is correct for one goroutine. That the lock keeps other goroutines out is not something `vego` knows.
+
 ## Bits
 
 `vego` computes with whole numbers, so it understands shifts and bitwise operators through arithmetic.
@@ -651,13 +878,18 @@ func Pack(hi, lo byte) uint16 {
 //@ Ensures result = 256 * hi + lo
 ```
 
-`x << k` is `x * 2^k` and must not lose bits. `x >> k` is a division by `2^k` that rounds down. `x & 0xFF` is `x % 256`, and any mask of low bits or of a single bit is understood exactly. Of `x & y` in general only the bounds are known. Formulas have no bit operators; write what you mean with `*`, `/`, and `%`.
+- `x << k` is `x * 2^k` and must not lose bits. `x >> k` is a division by `2^k` that rounds down, also for a negative `x`. A count that may be negative is an error.
+- `x & m` with a constant mask of low bits is the remainder: `x & 0xFF` is `x % 256` when `x` is not negative. For a negative `x` it is the remainder counted upwards, so `-1 & 0xFF` is 255 where `-1 % 256` is -1. With a mask of a single bit, `x & m` is that bit of `x`.
+- Of `x & y` in general only bounds are known.
+- `x | y`, `x ^ y`, and `x &^ y` are computed from `x & y`, and are known as well as it is. A flag that was just set is known to be set: after `f |= m`, `f & m` is `m`.
+
+These facts are what the prover is given; it does not always get from them to everything that follows. Formulas have no bit operators; write what you mean with `*`, `/`, and `%`.
 
 ## Code that is not verified
 
 Verified code has to call code that is not: the standard library, other modules, and functions of your own that use Go `vego` cannot follow. Such a function gets a **trusted contract**, a claim that `vego` uses and does not check.
 
-Trusted contracts live in one file, `vego-trusted.yaml`, next to `go.mod`. There is no way to declare trust in source, so that file holds every assumption your proofs rest on.
+Trusted contracts live in one file, `vego-trusted.yaml`, next to `go.mod`. There is no way to declare trust in source, so that file holds every contract your project takes on faith.
 
 ```yaml
 version: 1
@@ -670,9 +902,19 @@ trusted:
       - "err = nil -> count >= 0"
 ```
 
-The key is the function's full name as Go prints it, such as `sort.Ints` or `(*bytes.Buffer).Len`. `reason` is required and says why you believe the contract. `modifies` is required too, even when it is empty. `requires` and `ensures` are lists of formulas over the function's parameter and result names. Quote the formulas, because YAML gives its own meaning to several characters they use.
+- **The key** is the function's full name as Go prints it: `sort.Ints`, `example.com/pkg.Func`, `(*bytes.Buffer).Len`.
+- **`reason`** is required and says why you believe the contract.
+- **`requires` and `ensures`** are lists of formulas. Callers must prove every `requires` and may assume every `ensures`. Quote the formulas, because YAML gives its own meaning to several characters they use.
+- **`modifies`** is required, even when it is empty. It lists what the function may write, as a `Modifies` clause would: `[x]` for the elements of slice `x`, `[b]` for the struct that `b` points to, `[b.count]` for one field. Anything not listed is taken to be unchanged.
+- **The names** in all three are the parameter and result names in the function's own source, the receiver included. For the standard library, `go doc -src sync.Mutex.Lock` shows that the receiver is `m`. Unnamed results are `result`, or `result1`, `result2`.
 
-`vego` ships contracts for a few functions of the standard library, among them `sort.Ints`, `strings.HasPrefix`, `strings.Index`, `strconv.Itoa`, and `strconv.Atoi`. An entry of your own for the same function replaces the shipped one.
+`vego` ships contracts for a few functions of the standard library: `sort.Ints`, `sort.IntsAreSorted`, `sort.SearchInts`, `strings.Contains`, `strings.HasPrefix`, `strings.HasSuffix`, `strings.Index`, `strings.TrimSpace`, `strings.Repeat`, `strings.ToUpper`, `strings.ToLower`, `utf8.RuneCountInString`, `strconv.Itoa`, `strconv.Atoi`, `rand.Intn`, and `rand.Int`. The contracts themselves are in `vego/trusted/std` in the source of `laas`. An entry of your own for the same function replaces the shipped one.
+
+Three things a trusted contract cannot do:
+
+- **It cannot make a signature acceptable.** A function with a parameter or result of a type `vego` does not support, such as an interface or a function value, cannot be called from verified code even with an entry: `cannot verify Sync: parameter s has unsupported type example.com/shop.Store`. Write a small function of your own around it whose signature uses supported types, and trust that.
+- **It cannot sit beside annotations.** A function is verified or trusted, not both. When you get round to verifying a function you trusted, delete its entry.
+- **It says nothing it does not say.** Nothing is known about a pointer or slice that a trusted function returns unless the contract says so, for example with `fresh(result)`.
 
 To see everything a project takes on trust, with reasons and the places that rely on it:
 
@@ -687,7 +929,7 @@ A trusted contract that is wrong makes every proof that uses it worthless. Keep 
 A function can be verified against a contract that says almost nothing. `-vego.audit` looks for that. It tries degenerate implementations against each contract, such as "return zero" or "leave the slice alone", and reports the ones the contract would accept.
 
 ```sh
-laas -vego.audit ./...
+laas -vego -vego.audit ./...
 ```
 
 ```text
@@ -695,7 +937,65 @@ vego: specification of Sort has a hole [OBLIVIOUS]: it also accepts an implement
 that fills its slices with 0, 1, 2, ... whatever the input
 ```
 
-A sort whose contract only says that the output is sorted gets this report, and rightly.
+A sort whose contract only says that the output is sorted gets this report, and rightly. A function annotated with `Ensures True` for its safety checks gets one too, which is the reminder that its contract is still to be written.
+
+## Adopting it
+
+### In an existing package
+
+A verified function can call only functions that have contracts, so start where nothing is called and work upwards.
+
+1. **Pick a leaf.** A function that calls nothing, or only functions that `vego` ships contracts for. Pure functions over numbers, slices, and strings are the easiest.
+2. **Opt in with `//@ Ensures True`** and run `laas -vego` on the package. What comes back is the safety of the function as it stands: indexes, overflow, nil, termination. Expect to add `Requires` clauses with bounds, loop invariants, and `Variant`s, and expect to find a bug or two.
+3. **Write the real contract**, and run `-vego.audit` to see whether it says enough.
+4. **Move to the callers.** Each needs the contracts of what it calls. Where a callee is not ready, give it a trusted contract with a reason such as "not verified yet", and delete the entry when it is.
+5. **Leave what does not fit.** A function that uses Go outside the subset can often be split: the logic goes into a function over plain data that is verified, and the part with the interface, the closure, or the goroutine stays outside and calls it.
+
+Two things to keep in mind while the package is half verified.
+
+**Nobody checks a `Requires` at run time.** Verified callers prove it; code that is not verified is simply trusted to keep it, and `go build` and `go test` insert no checks. Where data comes in from outside, do the checking in code: a verified function with no `Requires` that tests its input and returns an error, in front of the functions that require it.
+
+```go
+func At(A []int, i int) (x int, err error) {
+	if i < 0 || i >= len(A) {
+		return 0, fmt.Errorf("index %d out of range", i)
+	}
+	return A[i], nil
+}
+
+//@ Ensures err = nil <-> 0 <= i < |A|
+//@ Ensures err = nil -> x = A[i]
+```
+
+**Package-level variables are not supported**, apart from error sentinels. A function that reads a global has to be handed the value instead.
+
+### For one core component
+
+The steps are the same, with a little design first, because the component has to stay inside the supported Go.
+
+- Keep its data plain: structs, slices, integers, strings, maps with integer or string keys, pointers to structs. Keep interfaces, function values, and arrays out of its types.
+- Write the struct invariant first. It is the sentence you would put in the doc comment anyway: "`n` never exceeds the length", "`head` is a valid position".
+- Give the constructor `fresh(result)`.
+- Give each method the narrowest `Modifies` that works, and, if it may replace a slice, the `fresh ... Or within ...` clause of [A slice that grows inside a struct](#a-slice-that-grows-inside-a-struct).
+- State error behaviour with `<->` where you can.
+
+Then run the audit, and write the callers that sit at the boundary so that they establish the preconditions in code.
+
+### In a new module
+
+Put the logic in packages of its own, away from I/O, and write the contract before the body. Gate CI on the verifier from the first commit, so that nothing unverified is ever merged, and keep `vego-trusted.yaml` under review like code: every line in it is something the proofs do not cover.
+
+### In CI
+
+```sh
+go install github.com/spachava753/laas/cmd/laas@<commit>
+GOTOOLCHAIN=go1.26.6 laas -vego ./...
+```
+
+- **Pin the version.** `laas` has no tagged releases yet, so install a commit, not `@latest`.
+- **The exit status is the gate:** 0 when everything annotated is proved, 3 when anything is reported.
+- **`-vego.trust` is a report, not a gate.** It exits with 3 when verification had problems, and its use is in review: a change to it is a change to what the proofs assume.
+- **Give the job a time limit.** Small functions take well under a second each. Functions with many pointer parameters that may be the same take much longer, and the speed of the tool has not been worked on yet. `-vego.max-steps` bounds the effort on one obligation, not the time of the run.
 
 ## When a proof fails
 
@@ -703,41 +1003,79 @@ Work through these in order.
 
 1. **Read the message as "not proved".** It names an obligation and a place. Ask first whether the obligation is true there for every input the `Requires` allows. Try the extremes: zero, negative numbers, the largest `int`, an empty slice, `nil`, two arguments that are the same object.
 2. **If it is false, you have found a bug**, in the code or in the contract. Fix whichever is wrong. A missing `Requires` is the commonest case.
-3. **If it is true and comes after a loop**, the invariant does not say enough. Everything the loop changes is forgotten except what the invariant states.
+3. **If it is true and comes after a loop**, the invariant does not say enough. Everything the loop changes is forgotten except what the invariant states, the invariants of struct types included.
 4. **If it is true and comes after a call**, the callee's `Ensures` does not say enough. Strengthen it there.
 5. **If it is an overflow**, some input needs a bound, or the expression can be rearranged, as with the midpoint.
 6. **If it involves two pointers or two slices**, ask whether they may be the same, and say so if they may not.
 7. **Otherwise, help the prover.** Put the fact in an `Assert` just before the failure. If the `Assert` is proved and the failure remains, add a smaller step. If the `Assert` is not proved, move it up until it is.
 
-A message that says `cannot verify` is different: the function uses Go that is not supported. The choices are to rewrite that part, or to move it into a function of its own with a trusted contract.
+One run often prints several messages for one cause. Fix the first and run again.
+
+A message that starts with `cannot verify` is a different kind. Nothing was attempted, and the text after the function's name says why. There are three sorts:
+
+- **Go that is not supported**, such as `parameter x has unsupported type any`. Rewrite that part, or move it out of the verified function.
+- **A missing contract**, as in `it calls helper, which has no contract`. Verify the callee or trust it.
+- **A rule about where something may stand**, as in `the call must be a statement of its own`. The message says what to do.
+
+## Messages
+
+The messages you will meet most, with what they mean and what usually fixes them.
+
+| Message | Meaning | Usual fix |
+| --- | --- | --- |
+| `postcondition may not hold: P` | At this `return`, `P` is not proved. | Steps 1 to 7 above. |
+| `precondition of F may not hold: P` | At this call, a `Requires` of `F` is not proved. | Establish it before the call, or require it of your own callers. |
+| `index may be out of range` | | A `Requires` or an invariant that bounds the index. |
+| `addition may overflow int`, and the like | | Bound the inputs, or rearrange. |
+| `loop invariant may not hold on entry` | False before the first iteration. | Fix the invariant or what comes before the loop. |
+| `loop invariant may not be preserved` | One iteration may break it, or it is too weak to hold itself up. | Add the clause it depends on. |
+| `loop variant may not decrease`, `loop variant may be negative` | The `Variant` is not shown to get smaller, or to stay at zero or above. | A different `Variant`, or an invariant that bounds it. |
+| `measure may not decrease in recursive call`, `measure may be negative` | The same for a `Measure`. | |
+| `x is assigned, which F may not modify; list it in a //@ Modifies clause` | Nothing of that kind is listed. | Add it to `Modifies`. |
+| `Modifies lists x, but F never needs to modify it` | The permission is wider than the body. | Remove the entry, or narrow it. |
+| `... which F may not modify: nothing its //@ Modifies clauses list is known to cover it` | Something of that kind is listed, but this may be other memory: another element, another struct, or a slice that was replaced since `F` was called. | Say which it is; for a replaced slice, the callee needs `fresh ... Or within ...`. |
+| `invariant of T may not hold for what is passed to F as x` | The struct invariant is not proved at the call. | Restore it before the call; in a loop, restate it as a loop invariant. |
+| `invariant of T may not hold for x on return` | The same, at the end of the function. | |
+| `the contract of F may also be met by a function that always returns an error` | No example input was found on which the contract forces success. | A clause `condition -> err = nil`; see [Errors](#errors). |
+| `specification of F has a hole` | From `-vego.audit`: a trivial implementation meets the contract. | Tie the result to the input. |
+| `cannot verify F: it calls G, which has no contract` | | Annotate `G`, or add it to the trust file. |
+| `cannot verify F: parameter x has unsupported type T` | | Keep `T` out of verified signatures. |
+| `cannot verify F: x is not a local variable` | A package-level variable is used. | Pass the value in. |
+| `cannot verify F: formatting err would run the methods of an error whose origin is not known` | `fmt.Errorf` is given a foreign error. | Return it as it is, or wrap your own. |
+| `the trusted contract ... cannot be used` | An entry of the trust file is wrong; the text says how. | Fix the entry; check the parameter names. |
+| `analysis skipped due to errors in package` | The package does not compile, or the toolchain does not match. | See [Running it](#running-it). |
 
 ## What is not supported
 
 A function that uses any of these is reported as `cannot verify`:
 
-- interfaces other than `error`, and calls through them;
-- function values and closures, including `defer func() { ... }()`;
+- interfaces other than `error`, calls through them, type switches, and type assertions;
+- function values, method values, and closures, including `defer func() { ... }()`;
 - generic functions and types;
 - goroutines, channels, and `select`;
 - arrays, and any struct that holds one;
 - pointers to anything but a struct;
-- calls to variadic functions, `append(s, t...)`, and `copy`;
-- a call that modifies memory inside a condition or a larger expression, as in `if !s.Push(x)`: such a call has to be a statement of its own;
-- comparing structs or errors with `==`, `errors.Is`, and reading another package's error variable such as `io.EOF`;
-- `goto`, labelled `break` and `continue`, and `defer` inside a loop.
+- package-level variables, other than error sentinels;
+- calls to variadic functions other than `fmt.Errorf`, `append(s, t...)`, and `copy`;
+- a call that modifies memory inside a condition or a larger expression, as in `if !s.Push(x)`; see [Calls that change memory stand alone](#calls-that-change-memory-stand-alone);
+- comparing structs or errors with `==`, and reading another package's error variable such as `io.EOF`;
+- a `range` over a map whose body changes a map of that type;
+- `goto`, `fallthrough`, labelled `break` and `continue`, and `defer` inside a loop.
 
-Floats are allowed but opaque: they can be passed around and computed with, and nothing can be said or proved about their values.
+Two things are allowed but opaque. Floats can be passed around and computed with, and nothing can be said or proved about their values. `errors.Is` can be called with a trust entry, and nothing is known about its answer.
 
 ## What a proof assumes
 
 A proof by `vego` is a proof under these assumptions. They are about things it cannot see.
 
-- **Trusted contracts are true**, and the functions behind them do not panic, write nothing beyond their `modifies`, and do not keep the pointers and slices they are given.
+- **Trusted contracts are true**, the shipped ones and your own. The functions behind them return without panicking when their `requires` hold, write nothing a caller can see beyond their `modifies`, do not keep the pointers and slices they are given, and do not call back into the verified function that called them by way of another package.
 - **Callers that are not verified keep the contract**: they establish the `Requires`, hand over structs whose invariants hold, and do not pass overlapping slices where two slice parameters have one element type.
 - **Code that is not verified keeps Go's types**: no `unsafe`, `reflect`, or cgo that makes one piece of memory two types or changes a string.
-- **Nothing else runs at the same time.** A proof is about one goroutine.
+- **No other goroutine writes the memory a verified function reads or writes while it runs.** A proof is about one goroutine.
+- **Exported error variables are not reassigned** by packages `laas` does not see.
 - **The platform is the one `laas` ran for.** A proof for a 64-bit target is not a proof for a 32-bit one.
 - **The machine has the memory and the stack.**
+- **Annotations mean what you think.** A formula is not checked for an index out of range or a division by zero inside it; see [Formulas](#formulas).
 
 ## Summary
 
@@ -752,21 +1090,21 @@ A proof by `vego` is a proof under these assumptions. They are about things it c
 | `Invariant P` | directly above a loop | Holds each time the loop tests its condition. |
 | `Variant e` | directly above a `for` loop | Never negative, smaller each iteration. |
 | `Assert P` | in a body | Must hold there; usable afterwards. |
-| `Invariant P` | doc comment of a struct type | Holds of every value of the type at function boundaries. |
-| `Predicate name(x, y) ::= P` | top level | Names a formula. |
+| `Invariant P` | doc comment of a struct type | Holds of every parameter, receiver, and result of the type at function boundaries. |
+| `Predicate name(x, y) ::= P` | top level | Names a formula over its parameters. |
 
 ### Formulas
 
 | Form | Meaning |
 | --- | --- |
-| `P And Q`, `P Or Q`, `~P` | and, or, not |
-| `P -> Q`, `P <-> Q` | implies, exactly when |
+| `~P`, `P And Q`, `P Or Q` | not, and, or; tightest first |
+| `P -> Q`, `P <-> Q` | implies, exactly when; loosest |
 | `True`, `False` | |
 | `=`, `!=`, `<`, `<=`, `>`, `>=` | comparisons; they chain: `0 <= i < n` |
 | `+`, `-`, `*`, `/`, `%` | on mathematical integers; `/` and `%` round as in Go |
 | `MaxInt`, `MinInt`, `MaxInt8` ... `MaxUint64` | limits of the Go types |
 | `MaxAlloc` | most bytes one allocation can have |
-| <code>&#124;A&#124;</code> | length of a slice or string, number of keys of a map |
+| <code>&#124;A&#124;</code>, `len(A)` | length of a slice or string, number of keys of a map |
 | `A[i]`, `m[k]`, `p.f` | element, map value, field |
 | `A[lo:hi) <= x` | every element of that part of `A` compares so |
 | `Forall k in [a, b) : P`, `Exists k in [a, b] : P` | over an interval |
@@ -780,7 +1118,7 @@ A proof by `vego` is a proof under these assumptions. They are about things it c
 | Where | Plain name | Marked |
 | --- | --- | --- |
 | `Requires` | value on entry | |
-| `Ensures` | value on entry | `A'`, `c.f'`: on return |
+| `Ensures` | value on entry | `A'`, `c.f'`, `s.items'[0]`: on return |
 | `Invariant`, `Assert` in a body | value now | `old(x)`: on entry |
 | results | `result`, or `result1`, `result2`, or their own names | |
 
@@ -789,18 +1127,22 @@ A proof by `vego` is a proof under these assumptions. They are about things it c
 | Form | Meaning |
 | --- | --- |
 | `Modifies p` | every field of the struct `p` points to |
-| `Modifies p.f` | one field |
+| `Modifies p.f` | the field `f`; if `f` is a slice, its elements instead |
 | `Modifies A`, `Modifies s.items` | the elements of a slice, up to its capacity |
 | `Modifies ps[0]` | one element |
 | `Modifies m` | a map |
-| `fresh(x)` | the call created what `x` refers to |
-| `within(a, b)` | `a` lies inside `b`; each is a slice or a pointer |
+| `Modifies m[k]` | the struct that the pointer under key `k` points to |
+| `fresh(x)` | what `x` refers to on return was created by the call; true of a slice with no capacity |
+| `within(a, b)` | `a` lies inside the memory of `b`; each is a slice, with its capacity, or a pointer |
 
 ### Flags
 
 | Flag | Effect |
 | --- | --- |
+| `-vego` | run only the verifier |
 | `-vego.audit` | also report contracts that degenerate implementations satisfy |
 | `-vego.max-steps=n` | effort the prover spends on one obligation |
 | `-vego.trusted=path` | the trust file, instead of the one next to `go.mod` |
 | `-vego.trust` | print what the proofs take on trust |
+| `-test=false` | leave out test files |
+| `-exclude-packages=regexp` | skip packages by import path |

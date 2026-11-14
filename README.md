@@ -51,6 +51,8 @@ go install github.com/spachava753/laas/cmd/laas@latest
 laas ./...
 ```
 
+`laas` is built with Go 1.26 and cannot yet read packages compiled by a newer Go. If your `go` command is newer, run it as `GOTOOLCHAIN=go1.26.6 laas ./...`; a module that needs a newer Go cannot be analysed yet.
+
 Set a different limit with the analyzer-specific flag:
 
 ```sh
@@ -336,7 +338,7 @@ These are rules of the verifier, not assumptions: each is checked, and a functio
 - **Overflow is an error, not a behaviour.** Every `+`, `-`, `*`, `/`, negation, and conversion must be proved to stay within its type, so `(lo+hi)/2` is rejected and `lo + (hi-lo)/2` verifies. This usually means stating bounds on inputs, for example on the elements a loop adds up. Code that wraps on purpose, such as a hash function, cannot be verified.
 - **Bits are numbers.** The verifier computes with whole numbers, not with bits, so shifts and bitwise operators are understood through arithmetic.
   - `x << k` is `x * 2^k` and must not lose bits, like any arithmetic that would leave its type. `x >> k` is `x / 2^k` rounded towards minus infinity, which differs from `/` for a negative `x`. A count that may be negative is an error, since Go panics on one.
-  - `x & m` is known exactly when `m` is a constant mask of low bits (`x & 0xFF` is `x % 256`) or of a single bit. Of any other `x & y` only what always holds is known: it is at most either operand when they are not negative, and so on.
+  - `x & m` is known exactly when `m` is a constant mask of low bits (`x & 0xFF` is `x % 256` for an `x` that is not negative, and the remainder counted upwards for a negative one, so `-1 & 0xFF` is 255) or of a single bit. Of any other `x & y` only what always holds is known: it is at most either operand when they are not negative, and so on.
   - `x | y`, `x ^ y`, and `x &^ y` are computed from `x & y`, so they are known exactly whenever it is. `hi<<8 | lo` is `256*hi + lo` when `lo` is below 256. Two numbers that fit in so many bits give a result that fits in as many, and a flag that was just set or cleared is known to be set or clear: after `f |= m`, `f & m` is `m`.
   - `^x` is `-x - 1`, or for an unsigned type the largest value minus `x`.
   - Annotations have no bit operators; say what you mean with `*`, `/`, and `%`.
