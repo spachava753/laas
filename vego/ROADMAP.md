@@ -1,6 +1,6 @@
 # vego roadmap
 
-Design notes for work that is planned but not built. The README describes what exists today.
+What is planned and not built, and the decisions behind what is built. The README describes what exists today for someone using it; this file is for someone changing it.
 
 ## Target
 
@@ -12,21 +12,31 @@ Design choices should be judged against the first group. A feature that only hel
 
 ## Go that stops a function from being verified
 
-Each of these makes vego report the function that uses it as `cannot verify`. They are listed here in one place, in the order they are meant to be built, which is roughly how often ordinary code runs into them. The sections under "Next" say more about some of them.
+Each of these makes vego report the function that uses it as `cannot verify`. They are listed here in one place, in the order they are meant to be built, which is roughly how often ordinary code runs into them. The sections by area further down say more about some of them.
 
-1. **`defer` inside a loop, and of a function literal.** A deferred call of a named function or method outside a loop is supported.
-2. **Bit operators in annotations**, and knowing more of `x & y` than its bounds when neither operand is a constant mask. Shifts and bitwise operators in code are supported.
-3. **Which error it is.** `errors.Is`, `errors.As`, comparing with a sentinel, and reading a sentinel of another package such as `io.EOF`. Today an error is only nil or not.
-4. **A call that modifies memory inside a condition or a larger expression**: `if !s.Push(x)`, `for it.Next()`, `p.x = f(p)`. Such a call has to be a statement of its own today.
-5. **Arrays**, and with them every struct that holds one.
-6. **`copy`, `append(s, t...)`, calls to variadic functions, comparing structs with `==`, labelled `break` and `continue`, `goto`, `select`.**
-7. **Pointers to anything but a struct**, such as `*int`.
-8. **Interfaces other than `error`**, and calls through them.
-9. **Function values and closures**, including `defer func() { ... }()`.
-10. **Generic functions and types.**
-11. **Goroutines and channels.** A proof is about one goroutine; nothing is said about what runs beside it.
+1. **Which error it is.** `errors.Is`, `errors.As`, comparing with a sentinel, and reading a sentinel of another package such as `io.EOF`. Today an error is only nil or not.
+2. **A call that modifies memory inside a condition or a larger expression**: `if !s.Push(x)`, `for it.Next()`, `p.x = f(p)`. Such a call has to be a statement of its own today.
+3. **Function values and closures.** This is what `defer cancel()` and `defer func() { ... }()` wait for, the two most common deferred calls that are not supported.
+4. **Interfaces other than `error`**, and calls through them: `defer resp.Body.Close()`, `io.Writer`, `sort.Interface`.
+5. **Calls to variadic functions**, which `log.Printf` and `fmt.Println` are, and `append(s, t...)`.
+6. **Arrays**, and with them every struct that holds one.
+7. **`copy`, comparing structs with `==`, labelled `break` and `continue`, `goto`, `select`, `defer` inside a loop.**
+8. **Pointers to anything but a struct**, such as `*int`.
+9. **Generic functions and types.**
+10. **Goroutines and channels.** A proof is about one goroutine; nothing is said about what runs beside it.
 
-## Next
+Two things do not stop a function from being verified but come up as often:
+
+- **Conversions that drop bits and arithmetic that wraps**, as in `byte(x)` and a hash, are errors by design. `byte(x & 0xFF)` verifies. A way to say "this wraps on purpose" at one operation is not planned yet and would have to be loud.
+- **Contracts for the standard library.** Only a handful of functions have shipped contracts, and none of the methods: `sync.Mutex` first.
+
+## Before it is called ready
+
+- **Use it on a real package.** vego has only been run on its own test programs and on programs written to break it. Nobody has annotated existing code with it, so how much friction there is in practice is not known. The first trial should rank everything in this file.
+- **Speed.** Generated packages of 40 to 100 short functions with pointer parameters that may be the same have taken around ten minutes. Nothing has been profiled.
+- **Continuous integration.** The tests, including those of the shipped contracts, run by hand and on one toolchain. 32-bit targets have only been tried in a few spots.
+
+## By area: what is built, why, and what is missing
 
 ### Structs and pointers
 
@@ -41,6 +51,9 @@ Decisions:
 - **`Modifies` is declared, and checked in both directions.** A function lists what it may write, as paths from its parameters read on entry. A write to anything else that existed on entry is an error, and so is a listed entry that no write needs, so the declaration cannot drift from the body. Callers know that everything unlisted is unchanged. Whether an entry is needed is decided by a quick proof attempt for each write; when that attempt is inconclusive the entry counts as needed.
 - **A slice entry covers the capacity.** `Modifies A` allows writing every element up to the capacity of `A`, because an `append` to `A` may write there. Callers lose what they knew about that stretch, and cut the capacity with `A[:n:n]` to keep the rest. A finer entry that stops at the length, for functions that never append, is possible later.
 - **Slice parameters of one element type do not overlap**, capacities included: assumed on entry, proved at every call. There is no way yet for a function to say that it tolerates overlap.
+- **A field of a type that is not modelled is still part of its struct.** It is a hidden part that is copied, overwritten, and forgotten with the struct, so that assigning the whole struct counts as writing it. A struct that holds an array is the exception and is not modelled at all, since a slice of the array is a second view of the struct's memory.
+- **A value without size has no identity.** Two pointers to such values may or may not be equal in Go, so nothing is assumed about where they are, and annotations may compare them only with nil.
+- **`defer` is a call at every return.** The function, receiver, and arguments are settled where the statement is written; at each return the results are assigned, the calls that were put off are verified last one first like calls written there, and results that live in memory are read back. Inside a loop the number of calls is not known, so that is not supported.
 - **Nil.** Every dereference carries a proof obligation that the pointer is not nil. The verifier generates and discharges it; the user writes `Requires p != nil` for parameters and nothing at the dereference.
 - **`append` forks.** Whether an append writes in place or moves the slice is decided by the capacity, which is often unknown, so execution continues once for each outcome. That is why an append has to be a whole right-hand side or a returned value.
 - **Loops forget memory by region.** A region the loop writes gets a new unknown value. If every write to it goes through a variable the loop does not assign, or through a slice the loop only appends to, everything else that existed before the loop is known to be unchanged. Otherwise only what existed on entry and is not listed in `Modifies` is known to be unchanged.
@@ -54,7 +67,6 @@ Not built yet:
 - **Arrays.** Until they are built, a struct that holds an array is not modelled at all, because `s.arr[:]` is a slice into the struct and a hidden field would not show that writing the struct changes the slice. The plan: an array field of `N` elements of a single value occupies `N` positions in the region of its element type, starting at the field's byte offset, which cannot collide with a neighbour since every element takes at least a byte; an array of structs lies at byte offsets like a slice of structs. A cell then covers a run of positions, and an array value is a sequence, as a string is.
 - **Pointers to anything but a struct**, such as `*int` or `*string`. A field of type `int` lives in the region of its struct and field, and an element of a `[]int` in the region of `int` elements, so an `*int` could point into either and would have to say which. The way to build it is to key the regions of single values by their type alone, at byte offsets, for all structs and slices; fields of different structs then share a region and are told apart by position, which costs the solver the separation it now gets for free. Worth doing once it is measured.
 - **Linked structures** such as lists and trees. They can be built and read, but a loop that walks one forgets every node the function may modify, and there is no way to state an invariant over all nodes.
-- **Interfaces** other than `error`, function values, `append(s, t...)`, `copy`, and comparing structs.
 - **Letting a function accept overlapping slices.**
 - **Runs of elements in `Modifies`**, such as all the structs a slice of pointers refers to.
 
@@ -70,7 +82,6 @@ Decisions:
 - **The count is only tracked through writes.** A write adds one if the key was absent and a delete takes one off if it was present. Nothing ties the count to the set of keys beyond that, so a fact such as "two distinct present keys mean at least two keys" cannot be proved.
 - **`delete` on the nil map does nothing**, as in Go. In the model the removal writes that the key is absent and has the zero value, which is already true of every key of the nil map, so no rule about the nil map is ever broken.
 - **`range` over a map is a counted loop over unknown keys.** Each iteration gets some key that is present. That the keys of different iterations differ is not modelled, so a loop cannot prove that it saw every key. A loop that writes a map of the ranged type is rejected, since Go's rules for that are involved.
-
 - **Samples of maps have one key.** The search for an input on which a contract forces success tries the nil map and maps with a single key, when the values are numbers, booleans, or strings.
 
 Not built yet: keys of other types (booleans, pointers, structs); a way for an invariant to count the iterations of a `range` over a map, without which a loop cannot add up the values of a map and prove that the sum does not overflow; elements of a map in `Modifies` paths with string keys; and maps of maps beyond what the value model gives for free.
@@ -105,40 +116,41 @@ Decisions:
 - **Entry format.** The key is the function's full name as Go prints it (`sort.Ints`, `(*bytes.Buffer).Len`). Fields: `reason` (mandatory free text saying why the contract is believed), `requires`, `ensures`, and `modifies` (what the function may write, in the form of a `Modifies` clause; anything unlisted is assumed untouched). Formulas use the `//@` language. Parameter names come from the real signature; there is no override.
 - **Result names.** Named results keep their names. A single unnamed result is `result`; several are `result1`, `result2`, ...
 - **No contract, no call.** Verified code that calls a function with neither annotations nor an entry is an error, never silent trust. When in doubt, vego takes the loudest path: agents loop on its output, so anything quiet gets exploited.
-- **Checks on the file.** The function exists, every name is a parameter or result of the right type, `modifies` names memory a caller can see, and no contract contradicts itself.
-- **What a trusted function is trusted with besides its contract.** It returns without panicking when its `requires` hold, writes nothing a caller can see beyond its `modifies`, and keeps no pointer or slice it was given. Nothing is assumed about where a pointer it returns points.
+- **Checks on the file.** The function exists, every name is a parameter or result of the right type, `modifies` is present, even if empty, and names memory a caller can see, a primed path in an `ensures` reads memory of a kind that `modifies` lists, and no contract contradicts itself.
+- **Checks at each call.** After the promises of a trusted contract are assumed, a quick attempt is made to prove a contradiction; if it succeeds on a path that was not contradictory before, the call is reported. The attempt is bounded, so a contradiction that is hard to find gets through.
+- **Recursion through a trusted function of the same package is found.** Its body is there to read: a function it names, or that a call it cannot resolve may reach because the package names it somewhere other than to call it, counts as called. A call back by way of another package is not seen and is part of what is trusted.
+- **What a trusted function is trusted with besides its contract.** It returns without panicking when its `requires` hold, which includes not calling back into its verified caller by way of another package, writes nothing a caller can see beyond its `modifies`, and keeps no pointer or slice it was given. Nothing is assumed about where a pointer it returns points.
 - **Shipped contracts.** Standard-library contracts are YAML files in this repository, one per package, embedded in the binary. A project entry replaces a shipped one. They state documented behaviour only, written from the documentation of the oldest supported Go version; the Go 1 compatibility promise then keeps them true on every later version, so there are no per-version variants. Each is tested against the real function on random inputs, on every supported toolchain once CI exists.
 - **Not shipped.** Contracts for third-party modules, which carry no such promise.
 - **Trust report.** `laas -vego.trust ./...` prints the project entries, the shipped entries in use, and unused entries.
 
 ### Errors
 
-Built: opaque errors with nil tests, non-nil results for `errors.New`, `fmt.Errorf`, and package-level sentinels, and the always-fails check with its exception. Reading an error variable of another package, such as `io.EOF`, is not supported yet; it needs the trusted file.
+Built: opaque errors with nil tests, non-nil results for `errors.New`, `fmt.Errorf`, and package-level sentinels, and the always-fails check with its exception. Reading an error variable of another package, such as `io.EOF`, is not supported yet; it needs the trusted file. An error inside a struct result is not looked at by the always-fails check.
 
 Decisions:
 
-- **Opaque errors.** An `error` is a value about which the verifier knows only whether it is `nil`. Contracts write `err = nil` and `err != nil`. Which error it is (sentinels, `errors.Is`) comes after structs and pointers; typed errors and their contents need interfaces and come much later; message text is never modelled.
+- **Opaque errors.** An `error` is a value about which the verifier knows only whether it is `nil`. Contracts write `err = nil` and `err != nil`. Which error it is (sentinels, `errors.Is`) is the first item of the list above; typed errors and their contents need interfaces and come later; message text is never modelled.
 - **Only an error of known origin can be formatted.** `fmt.Errorf` runs the `Error` method of an error it formats and, with verbs such as `%#v`, methods of the values the error contains. An error passed in from outside could use them to write memory the function reasons about. An error may therefore be formatted only if it was made by `errors.New` or `fmt.Errorf`, here or in a verified function that returns nothing else, or is a package-level variable holding such an error. That is decided from the text of each function, without regard to the path taken: a variable qualifies when every assignment to it does. Errors from parameters and from trusted functions can be returned and compared with `nil` but not formatted. Not built: letting a trusted contract vouch for the errors of its function, which wrapping the error of a standard-library call needs.
 - **A contract must not allow a function to always fail.** For every verified function that returns an error, vego checks whether an implementation that always returns a non-nil error and zero values would satisfy the postcondition. If it provably would, that is an error, not an opt-in audit finding. The fix is to state when the function succeeds, as in `err = nil <-> 0 <= i < |A|`.
-- **Exception: failure that comes from outside.** A function whose failure is not determined by its inputs, such as one that reads a file, cannot promise success. Its contract may allow always failing only if it calls a function whose contract also allows it. Trusted entries are where such failure originates, and the trust report marks them.
+- **Exception: success that hangs on the outside.** A function cannot promise success when a call nothing predicts decides it: a trusted function whose contract leaves open what comes back, or a verified function that is itself excused. The call must decide between failure and success: some return of an error and some return without one must each depend on what the call produced, and each must be reachable by some input. Reaching the call is not enough, and a function that fails whatever the call does is not excused.
+- **Depending on a call is decided by proof.** Whether a returned error is nil, or the condition of a branch that was a real choice, depends on a call when it cannot be proved to stay as it is once everything the call produced is replaced by other values the call could have produced. What a call produced spreads to what a later call returns that was handed any of it, and to the unknowns that loops put in place of variables. It is not followed through memory that a later call reads or that a loop writes; a function that depends on the call only in that way is reported and has to be restructured.
+- **A sentinel is trusted only when nothing can run before it is set.** `var ErrX = errors.New("x")` is non-nil for a verified function unless code of the package can run during the initialisation of its variables in a way Go's ordering does not see. Code of a package reaches another package only by being handed over, so every hand-over in code that runs during initialisation costs the package its sentinels: an argument, receiver, or type argument of another package's function, an assignment to another package's variable or to anything but a plain variable, a send, a built-in that passes its argument on, and a call or range that cannot be resolved. A value whose type has no room for code is not a hand-over.
 
 - **The outside world is unknown, not modelled.** A call whose outcome depends on something that is not an argument (a file, the network, the clock) returns some value satisfying its contract, fresh on every call. Proofs must hold for every such value. vego does not model the state of the world.
 
 ### Integers
 
-Built: every integer type, overflow obligations for arithmetic, negation, division, and conversion, the named limits (`MaxInt` and friends) in annotations, arbitrary-precision arithmetic in the solver, and product reasoning. Shifts and bitwise operators are expressed by arithmetic (`vego/bits.go`): a shift is a multiplication or division by a power of two, `x & y` is an unknown with the facts that hold of any two integers in two's complement plus exact ones for constant masks, and the other operators follow from it by identities such as `x | y = x + y - (x & y)`. This needed no new solver rule. Not built yet: bit operators in annotations, and automatic range facts for slice elements inside quantified annotations.
+Built: every integer type, overflow obligations for arithmetic, negation, division, and conversion, the named limits (`MaxInt` and friends) in annotations, arbitrary-precision arithmetic in the solver, and product reasoning. Shifts and bitwise operators are expressed by arithmetic (`vego/bits.go`): a shift is a multiplication or division by a power of two, `x & y` is an unknown with the facts that hold of any two integers in two's complement plus exact ones for constant masks, and the other operators follow from it by identities such as `x | y = x + y - (x & y)`. This needed no new solver rule. Not built yet: bit operators in annotations, so that a function can say which bit it set; more about `x & y` than its bounds when neither operand is a constant mask (the XOR swap and `x&(x-1) == 0` are not proved); and automatic range facts for slice elements inside quantified annotations.
 
 Decisions:
 
 - **Overflow is an error for every integer type, including `int`.** Go wraps silently; verified code may not. Each arithmetic operation carries a proof obligation that its result fits the type, so program values always equal their mathematical values. The same goes for conversions to a narrower type, negation of the minimum value, and `MinInt / -1`. Code that wraps on purpose (hashes, checksums) cannot be verified and belongs in the trusted file.
 - **Annotations keep mathematical integers.** `|A| + 1` in a contract never overflows.
-- **Existing examples will need stronger contracts**, for example bounds on the elements a loop sums. That is accepted.
+- **A shift to the left must not lose bits**, for the same reason, and a shift count that may be negative is an error since Go panics on one.
+- **No new solver rule for bits.** Everything about `&`, `|`, `^` and shifts is told to the solver as facts about unknown numbers, each of which is true of all integers in two's complement and tested against Go's operators in `bits_test.go`.
 
-Solver work this requires:
-
-- Arbitrary-precision coefficients. Bounds like 2^63 - 1 overflow the 64-bit arithmetic the solver uses today.
-- Reasoning about products, by multiplying known inequalities: if `p >= 0` and `q >= 0` are known then `p*q >= 0` holds, and expanding it gives a linear fact about the products that occur in the goal. This covers bounds from constant ranges and symbolic ones such as `i*w + j < h*w` from `i < h` and `j < w`. Only pairs whose product mentions a term already in the problem are tried. Deeper facts need an `//@ Assert` step.
-- Built-in facts that discharge the common cases without annotations, such as `|A| <= MaxInt`.
+How the solver supports this: coefficients of arbitrary precision, since bounds like 2^63 - 1 do not fit 64 bits; products bounded by multiplying known inequalities, which covers `i*w + j < h*w` from `i < h` and `j < w` and leaves deeper facts to an `//@ Assert`; and built-in facts such as `|A| <= MaxInt`.
 
 ### Floats
 
@@ -158,7 +170,7 @@ Possible later: facts that are true of real floats, such as small integers conve
 
 Built: the basic tier and approximate ranging. A concatenation must be proved not to exceed the largest `int`, for the same reason as an `append`.
 
-Decision: build the basic tier together with sized integers.
+Decisions:
 
 - **Basic tier.** A string is an immutable sequence of bytes: length, indexing, equality, literals, concatenation, substrings `s[i:j]`, and the copying conversions `[]byte(s)` and `string(b)`. Substrings are safe here, unlike sub-slices, because strings cannot be written to.
 - **Unicode, approximately.** In `for i, r := range s`, `r` is some valid character and the next index is one to four bytes further. Exact UTF-8 decoding is not modelled.
@@ -200,4 +212,3 @@ A further step, deliberately not planned, is modelling the world's state as an i
 - The `Preserves`, `Immutable`, and `Cost` annotations.
 - Mutation-based candidates for the specification audit.
 - Counterexamples in diagnostics.
-- Maps.
