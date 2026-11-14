@@ -142,3 +142,6 @@ func IsGone() bool {
 }
 
 //@ Ensures result
+
+// Nest is a slice type that is its own element type.
+type Nest []Nest

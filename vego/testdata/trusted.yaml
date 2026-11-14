@@ -474,3 +474,7 @@ trusted:
   wrapped.tell:
     reason: Test helper that is given an error and does not say that it runs its methods.
     modifies: []
+
+  (*trust.pinged).ping:
+    reason: Test helper that does nothing.
+    modifies: []

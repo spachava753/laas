@@ -1381,3 +1381,29 @@ func UsesRunsNobody() {
 }
 
 //@ Ensures True
+
+type pinged struct{ n int }
+
+func (b *pinged) ping() {}
+
+// PingsByExpression calls a trusted method by a method expression, whose
+// receiver is its first argument.
+func PingsByExpression(b *pinged) {
+	(*pinged).ping(b) // want `cannot verify PingsByExpression: this method call is not supported`
+}
+
+//@ Ensures True
+
+// PingsLater defers such a call.
+func PingsLater(b *pinged) {
+	defer (*pinged).ping(b) // want `cannot verify PingsLater: this method call is not supported`
+}
+
+//@ Ensures True
+
+// Pings calls it on a value.
+func Pings(b *pinged) {
+	b.ping()
+}
+
+//@ Ensures True

@@ -110,14 +110,18 @@ func errorConstructor(callee *types.Func) bool {
 // code but the formatter's own: a number, boolean, or string without methods,
 // or a slice of such values.
 func formatsPlainly(t types.Type) bool {
-	if types.NewMethodSet(t).Len() > 0 {
-		return false
-	}
-	if isSlice(t) {
-		return formatsPlainly(elemType(t))
+	// A slice type can be its own element type, as in type S []S; following
+	// it would never end, and it holds no number, boolean, or string.
+	seen := map[types.Type]bool{}
+	for isSlice(t) && types.NewMethodSet(t).Len() == 0 {
+		if seen[t] {
+			return false
+		}
+		seen[t] = true
+		t = elemType(t)
 	}
 	_, basic := t.Underlying().(*types.Basic)
-	return basic
+	return basic && types.NewMethodSet(t).Len() == 0
 }
 
 // newError evaluates a call to an error constructor: its arguments are

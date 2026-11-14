@@ -157,7 +157,13 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 		arg   ast.Expr
 	}
 	var handed []passed
-	if selector, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok && sig.Recv() != nil {
+	if sig.Recv() != nil {
+		// A method expression, T.Method(x), takes its receiver as an
+		// argument; only a call on a value is supported.
+		selector, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+		if selection := v.info.Selections[selector]; !ok || selection == nil || selection.Kind() != types.MethodVal {
+			v.unsupported(call.Pos(), "this method call is not supported")
+		}
 		handed = append(handed, passed{sig.Recv(), selector.X})
 	}
 	for i, arg := range call.Args {

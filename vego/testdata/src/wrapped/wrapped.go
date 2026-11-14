@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"lib"
 )
 
 var (
@@ -16,6 +18,8 @@ var (
 	errCounted = fmt.Errorf("%d over: %w", 3, errOver)
 	errForeign = fmt.Errorf("foreign: %w", io.EOF)
 	errOnTop   = fmt.Errorf("on top: %w", errForeign)
+	errNumbers = fmt.Errorf("numbers: %v", [][]int{{1}, {2}})
+	errNested  = fmt.Errorf("nested: %v", lib.Nest(nil))
 )
 
 func tell(e error) {}
@@ -69,6 +73,31 @@ func ReturnsForeign(fine bool) error {
 		return nil
 	}
 	return errForeign
+}
+
+//@ Ensures result = nil <-> fine
+
+// TellsNumbers passes an error into which slices of slices of numbers went.
+func TellsNumbers() {
+	tell(errNumbers)
+}
+
+//@ Ensures True
+
+// TellsNested passes one made from a slice type that is its own element
+// type, which holds nothing plain however far it is followed.
+func TellsNested() {
+	tell(errNested) // want `cannot verify TellsNested: errNested is passed to tell, which is trusted, and is an error whose origin is not known`
+}
+
+//@ Ensures True
+
+// FormatsNested formats such a value in verified code.
+func FormatsNested(fine bool) error {
+	if fine {
+		return nil
+	}
+	return fmt.Errorf("nested: %v", lib.Nest(nil)) // want `cannot verify FormatsNested: `
 }
 
 //@ Ensures result = nil <-> fine

@@ -947,16 +947,23 @@ whose origin is not known; tell could run code through it that nobody has seen. 
 contract holds whatever that code does, list e under runs in the contract
 ```
 
-There are two ways on. An error that verified code made itself, with `errors.New` or `fmt.Errorf`, can be passed anywhere: its methods are the standard library's, and nothing from outside is wrapped in it. A package-level error counts as one of these when only plain values and other such errors went into it; `var ErrRead = fmt.Errorf("read: %w", io.EOF)` holds a foreign error and does not. For anything else, the entry has to say that it takes responsibility:
+There are three ways on.
+
+**Pass an error that verified code made itself**, with `errors.New` or `fmt.Errorf`. Its methods are the standard library's, and nothing from outside is wrapped in it. A package-level error counts as one of these when only plain values and other such errors went into it; `var ErrRead = fmt.Errorf("read: %w", io.EOF)` holds a foreign error and does not.
+
+**Keep the call outside the verified code.** This is the answer for the ordinary case of logging an error that came from somewhere else: the function that is not verified logs it, and the verified function returns it.
+
+**Say in the entry that the function runs what it is given**, with `runs`:
 
 ```yaml
-  example.com/shop/internal/audit.Record:
-    reason: Writes the error to the audit log; reviewed 2026-11-14.
-    runs: [err]
-    modifies: []
+  (*example.com/shop/internal/journal.Journal).Append:
+    reason: Appends a line through the writer the journal holds. A Journal is
+      built only by journal.Open, which gives it an *os.File; reviewed 2026-11-14.
+    runs: [j]
+    modifies: [j]
 ```
 
-`runs: [err]` widens the claim. The contract is now said to hold whatever the methods of `err` do, which nobody can check for errors that come from elsewhere. It is in the trust file and in the trust report for that reason. Use it for values whose makers you know, such as a logger your program sets up once.
+`runs: [j]` does not check anything, and it does not make the call safe. It widens the claim: the contract is now said to hold whatever code arrives in `j`, including that this code writes nothing beyond `modifies`, returns, and does not panic. That can be true only when you know every value that can arrive there and have read its code, as with a struct that one function of your own builds. It is not true of an `error` parameter that callers you have not verified can fill with anything, so do not add `runs` to make the message go away: a contract that lists such a parameter is false, and every proof that uses it is worthless. The trust report prints `runs` so that a reviewer of the trust file sees the wider claim.
 
 ### What a trusted contract cannot do
 
