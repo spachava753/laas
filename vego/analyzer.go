@@ -250,9 +250,9 @@ type funcInfo struct {
 	resultNames map[string]int
 	// runs holds the parameters of a trusted function whose code its
 	// contract says it may run.
-	runs map[*types.Var]bool
-	broken      bool // an annotation failed to parse; verification is skipped
-	callees     []*funcInfo
+	runs    map[*types.Var]bool
+	broken  bool // an annotation failed to parse; verification is skipped
+	callees []*funcInfo
 	// modifies lists what the function may write, from its Modifies clauses.
 	modifies []*modTarget
 	// trust is set for a function whose contract comes from a trust file
@@ -311,6 +311,9 @@ type pkgVerifier struct {
 	// before they are initialised, with what stands in the way.
 	sentinels map[*types.Var]bool
 	relied    map[*types.Var]bool
+	// homemade holds the sentinels whose origin is known: nothing but plain
+	// values and other such sentinels went into the error.
+	homemade  map[*types.Var]bool
 	unsettled map[*types.Var]string
 	// reassigned holds the variables that are assigned, addressed, or
 	// ranged into somewhere in the package.

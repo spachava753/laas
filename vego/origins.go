@@ -99,7 +99,7 @@ func (pv *pkgVerifier) originsOf(body *ast.BlockStmt) *origins {
 
 // knownError reports whether an error expression in a function body has a
 // known origin: nil, a new error, an error variable of this package that
-// always holds a new error, the result of a function that only returns such
+// always holds a new error into which nothing of unknown origin went, the result of a function that only returns such
 // errors, or a local variable that is only ever assigned such errors.
 // visiting holds the variables being decided, which settles a variable that
 // is assigned from itself.
@@ -132,7 +132,7 @@ func (pv *pkgVerifier) knownError(o *origins, e ast.Expr, index int, visiting ma
 // known origin.
 func (pv *pkgVerifier) knownVariable(o *origins, variable *types.Var, visiting map[*types.Var]bool) bool {
 	switch {
-	case pv.sentinels[variable]:
+	case pv.sentinels[variable] && pv.homemade[variable]:
 		pv.relied[variable] = true
 		return true
 	case visiting[variable]:

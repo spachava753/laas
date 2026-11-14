@@ -947,7 +947,7 @@ whose origin is not known; tell could run code through it that nobody has seen. 
 contract holds whatever that code does, list e under runs in the contract
 ```
 
-There are two ways on. An error that verified code made itself, with `errors.New` or `fmt.Errorf`, can be passed anywhere: its methods are the standard library's. For anything else, the entry has to say that it takes responsibility:
+There are two ways on. An error that verified code made itself, with `errors.New` or `fmt.Errorf`, can be passed anywhere: its methods are the standard library's, and nothing from outside is wrapped in it. A package-level error counts as one of these when only plain values and other such errors went into it; `var ErrRead = fmt.Errorf("read: %w", io.EOF)` holds a foreign error and does not. For anything else, the entry has to say that it takes responsibility:
 
 ```yaml
   example.com/shop/internal/audit.Record:

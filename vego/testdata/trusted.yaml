@@ -470,3 +470,7 @@ trusted:
     reason: Test helper whose runs lists a name that is no parameter.
     runs: [y]
     modifies: []
+
+  wrapped.tell:
+    reason: Test helper that is given an error and does not say that it runs its methods.
+    modifies: []

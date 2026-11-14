@@ -36,6 +36,8 @@ func (pv *pkgVerifier) findSentinels() {
 	pv.unsettled = map[*types.Var]string{}
 	pv.reassigned = map[*types.Var]bool{}
 	pv.relied = map[*types.Var]bool{}
+	pv.homemade = map[*types.Var]bool{}
+	made := map[*types.Var]*ast.CallExpr{}
 	for _, file := range pv.pass.Files {
 		for _, decl := range file.Decls {
 			gen, ok := decl.(*ast.GenDecl)
@@ -52,6 +54,7 @@ func (pv *pkgVerifier) findSentinels() {
 					variable, _ := pv.info.Defs[name].(*types.Var)
 					if isCall && variable != nil && errorConstructor(typeutil.StaticCallee(pv.info, call)) {
 						pv.sentinels[variable] = true
+						made[variable] = call
 					}
 				}
 			}
@@ -108,6 +111,33 @@ func (pv *pkgVerifier) findSentinels() {
 			pv.unsettled[variable] = hidden
 		}
 		clear(pv.sentinels)
+	}
+	// An initialiser is not verified code, so nobody has checked what went
+	// into the error it makes. The error is not nil whatever went in; its
+	// origin is known only if nothing went in that brings code: plain values,
+	// and other such variables. With %w anything else stays inside the
+	// error, where Unwrap finds it.
+	for changed := true; changed; {
+		changed = false
+		for variable := range pv.sentinels {
+			if pv.homemade[variable] {
+				continue
+			}
+			plain := !slices.ContainsFunc(made[variable].Args, func(arg ast.Expr) bool {
+				if pv.info.Types[arg].IsNil() {
+					return false
+				}
+				id, _ := ast.Unparen(arg).(*ast.Ident)
+				other, _ := pv.info.Uses[id].(*types.Var)
+				if id != nil && other != nil && isError(other.Type()) {
+					return !pv.homemade[other]
+				}
+				return !formatsPlainly(pv.info.TypeOf(arg))
+			})
+			if plain {
+				pv.homemade[variable], changed = true, true
+			}
+		}
 	}
 }
 

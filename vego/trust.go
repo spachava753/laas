@@ -51,7 +51,7 @@ type trustEntry struct {
 	// of an error or an interface, or a function, held in them.
 	runs []trustFormula
 	file *trustFile
-	line     int
+	line int
 }
 
 // trustFile is a parsed file of trusted contracts.
