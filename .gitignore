@@ -20,8 +20,9 @@
 !/vego/trusted/std/*.yaml
 !/vego/testdata/*.yaml
 
-# Design notes.
+# Design notes and guides.
 !/vego/ROADMAP.md
+!/docs/*.md
 
 # Agent skills.
 !/skills/*/SKILL.md

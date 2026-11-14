@@ -61,7 +61,8 @@
 // a loop: Invariant and Variant. Anywhere in a body: Assert. In the doc
 // comment of a struct type: Invariant. At the top level: Predicate, which
 // names a formula. The README of the module describes the language of the
-// formulas and each annotation in full.
+// formulas and each annotation in full, and docs/verification.md in the
+// module is a guide to writing verified Go.
 //
 // # Calling code that is not verified
 //

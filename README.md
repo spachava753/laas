@@ -118,6 +118,8 @@ func Divide(n, d int) (q, r int) {
 //@ Ensures n = d*q + r And 0 <= r And r < d
 ```
 
+**New to it? Read [Writing verified Go](docs/verification.md)**, a walkthrough that doubles as a reference. The sections below are a shorter description.
+
 **Status: experimental.** `vego` has been reviewed and tested hard for accepting only what is true, but it has not yet been used on a large existing codebase, and much ordinary Go is outside what it supports; see [Supported Go](#supported-go).
 
 A function opts in by carrying at least one annotation; everything else is left alone. The analyzer runs as part of the standard command:
