@@ -963,7 +963,11 @@ There are three ways on.
     modifies: [j]
 ```
 
-`runs: [j]` does not check anything, and it does not make the call safe. It widens the claim: the contract is now said to hold whatever code arrives in `j`, including that this code writes nothing beyond `modifies`, returns, and does not panic. That can be true only when you know every value that can arrive there and have read its code, as with a struct that one function of your own builds. It is not true of an `error` parameter that callers you have not verified can fill with anything, so do not add `runs` to make the message go away: a contract that lists such a parameter is false, and every proof that uses it is worthless. The trust report prints `runs` so that a reviewer of the trust file sees the wider claim.
+`runs: [j]` does not check anything, and it does not make the call safe. It widens the claim: the contract is now said to hold for the whole call, whatever value arrives in `j`. That includes that the call writes nothing beyond `modifies`, returns, and does not panic.
+
+`vego` asks for `runs` by the type of the parameter, without knowing what the function does with it. So there are two cases in which the claim can be true. If the function never calls the code it is handed, as a function that only stores an error or reads a number from the struct, the contract does not depend on that code and `runs` costs nothing. If the function does call it, the claim is true only when you know every value that can arrive there and have read its code, as with a struct that one function of your own builds.
+
+It is not true of a function that calls the methods of an `error` which callers you have not verified can fill with anything. Do not add `runs` to make the message go away there: the contract would be false, and every proof that uses it worthless. The trust report prints `runs` so that a reviewer of the trust file sees the wider claim.
 
 ### What a trusted contract cannot do
 
