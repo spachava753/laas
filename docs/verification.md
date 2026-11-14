@@ -864,7 +864,7 @@ Only a call of a named function or method can be deferred, and not inside a loop
 
 ### Locks
 
-`sync.Mutex` has no contract, and no true one can be written yet. `Lock` blocks for ever on a mutex the goroutine already holds, and `Unlock` crashes on one that is not locked. A trusted entry cannot express "when the lock is free", because nothing in a formula stands for the state of a mutex, and an entry without that condition would claim that both always return. `vego` would then accept a double `Lock` and a stray `Unlock`.
+`vego` ships no contract for `sync.Mutex`, and you should not write the obvious one. `Lock` blocks for ever on a mutex the goroutine already holds, and `Unlock` crashes on one that is not locked. An entry with no condition on the state of the lock would claim that both always return, and `vego` would then accept a double `Lock` and a stray `Unlock`. There is no portable way to state the condition: a formula could only name the private fields of the mutex, which would tie the contract to one version of Go's implementation.
 
 So keep the locking outside the verified code. The function that locks is ordinary Go, and the work it protects is a verified function:
 

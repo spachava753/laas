@@ -29,7 +29,7 @@ Each of these makes vego report the function that uses it as `cannot verify`. Th
 Two things do not stop a function from being verified but come up as often:
 
 - **Conversions that drop bits and arithmetic that wraps**, as in `byte(x)` and a hash, are errors by design. `byte(x & 0xFF)` verifies. A way to say "this wraps on purpose" at one operation is not planned yet and would have to be loud.
-- **Contracts for the standard library.** Only a handful of functions have shipped contracts, and none of the methods. `sync.Mutex` is the one most asked for, and needs more than an entry: a contract that is true has to say that the lock is free or held, which no formula can name today. Until then locking stays in code that is not verified.
+- **Contracts for the standard library.** Only a handful of functions have shipped contracts, and none of the methods. `sync.Mutex` is the one most asked for, and needs more than an entry: a contract that is true has to say that the lock is free or held, and today a formula can say that only through the private fields of the mutex, which differ between versions of Go; a name for the state of a lock that does not depend on them is missing. Until then locking stays in code that is not verified.
 
 ## Before it is called ready
 
