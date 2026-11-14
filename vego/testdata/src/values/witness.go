@@ -111,3 +111,53 @@ func StockedNever(m map[string]stocked, k string) (err error) { // want `the con
 }
 
 //@ Ensures (has(m, k) And m[k].qty = 5 And m[k].qty = 6) -> err = nil
+
+// EitherFails has two error results and returns an error on every call.
+// One input makes the first nil and another the second, which is not a
+// success.
+func EitherFails(x int) (err1, err2 error) { // want `the contract of EitherFails may also be met by a function that always returns an error`
+	if x == 0 {
+		return nil, errOutOfRange
+	}
+	return errOutOfRange, nil
+}
+
+//@ Ensures x = 0 -> err1 = nil
+//@ Ensures x = 1 -> err2 = nil
+
+// BothSucceed has one input that makes both nil.
+func BothSucceed(x int) (err1, err2 error) {
+	if x == 0 {
+		return nil, nil
+	}
+	return errOutOfRange, errOutOfRange
+}
+
+//@ Ensures x = 0 -> (err1 = nil And err2 = nil)
+
+type shelf struct{ items map[string]*quantity }
+
+// Reserve succeeds when a map holds a pointer to a struct with enough in
+// it, which takes a sample of a map with an object behind its key.
+//
+// @ Requires w != nil And n >= 0
+// @ Requires has(w.items, sku) -> w.items[sku] != nil
+func Reserve(w *shelf, sku string, n int) error {
+	it, ok := w.items[sku]
+	if !ok || it.qty < n {
+		return errOutOfRange
+	}
+	return nil
+}
+
+//@ Ensures result = nil <-> (has(w.items, sku) And w.items[sku].qty >= n)
+
+// ReserveUnsaid has the same inputs and never says that it succeeds.
+//
+// @ Requires w != nil And n >= 0
+// @ Requires has(w.items, sku) -> w.items[sku] != nil
+func ReserveUnsaid(w *shelf, sku string, n int) error { // want `the contract of ReserveUnsaid may also be met by a function that always returns an error`
+	return errOutOfRange
+}
+
+//@ Ensures result = nil -> (has(w.items, sku) And w.items[sku].qty >= n)

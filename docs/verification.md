@@ -27,11 +27,11 @@ laas -vego ./...
 
 **A function is verified when it has at least one `//@` annotation.** Every other function is left alone, so you can start with one function in a large package. The smallest annotation is `//@ Ensures True`, which promises nothing and turns on [the checks every verified function gets](#safety-comes-free).
 
-**Silence is success.** When everything annotated is proved, `laas` prints nothing and exits with status 0. With anything to report it exits with status 3. It does not list what it verified.
+**Silence is success.** When everything annotated is proved, `laas` prints nothing and exits with status 0. With anything to report it exits with status 3, and with status 1 when it could not load the packages at all. It does not list what it verified.
 
 A few more things about running it:
 
-- **Toolchain.** `laas` is built with Go 1.26 and cannot yet read packages compiled by a newer Go. If your `go` command is newer, run it as `GOTOOLCHAIN=go1.26.6 laas -vego ./...`. Otherwise you get errors about the standard library and `analysis skipped`, which are not failed proofs. A module that needs a newer Go than 1.26 cannot be verified yet.
+- **Toolchain.** The `go` command that `laas` finds when it runs must not be newer than the Go that built `laas`. Installing with the `go` you use every day, as above, takes care of that. If `laas` was built by an older Go, as a pinned build in CI may be, you get errors about the standard library and `analysis skipped`, which are not failed proofs; run it with `GOTOOLCHAIN` set to the version that built it, or rebuild it.
 - **A package that does not compile is skipped**, with `vego: analysis skipped due to errors in package`.
 - **Test files are included.** `-test=false` leaves them out.
 - **`-exclude-packages`** takes a regular expression of import paths to skip.
@@ -146,7 +146,7 @@ The interval is written as in mathematics: `[0, n)` includes `0` and leaves out 
 
 A formula talks about values, so it can use strings and `nil` too: `role = "admin"`, `p != nil`, `err = nil`.
 
-**Names.** In a contract, the names are the parameters and the results of the function, and the constants of the package. An unnamed single result is `result`; several unnamed results are `result1`, `result2`, and so on. Named results keep their names.
+**Names.** In a contract, the names are the parameters and the results of the function, and the integer and boolean constants of the package. A string constant cannot be named; write the string. An unnamed single result is `result`; several unnamed results are `result1`, `result2`, and so on. Named results keep their names.
 
 **What a formula cannot say.** There are no bit operators, no function calls except to predicates, no character literals (write `48` for `'0'`), no `cap`, and no floating-point facts. A slice cannot be compared with `nil`; say `|A| = 0`. Two structs cannot be compared; compare their fields.
 
@@ -609,7 +609,20 @@ Write that clause on every function that may replace a slice its callers can rea
 
 ### Calls that change memory stand alone
 
-A call to a function with a `Modifies` clause must be a statement of its own, the only returned expression, or the whole right-hand side of an assignment to plain variables or their fields.
+A call to a function with a `Modifies` clause must be a statement of its own, the only returned expression, or the whole right-hand side of an assignment to plain variables or their fields. Take a method that changes the stack and returns a value:
+
+```go
+// @ Requires s != nil And s.n > 0
+// @ Modifies s.n
+func (s *Stack) Pop() int {
+	s.n--
+	return s.items[s.n]
+}
+
+//@ Ensures s.n' = s.n - 1 And result = s.items[s.n-1]
+```
+
+These two calls are accepted:
 
 ```go
 x := s.Pop()
@@ -663,6 +676,14 @@ The invariant reaches less far than "every value of the type" suggests, in three
 **It applies to what is passed and returned directly.** It is not assumed, and not checked, of a struct inside a slice, inside a map, inside another struct, or behind a pointer field. Say it yourself where you need it:
 
 ```go
+// @ Invariant 0 <= balance <= 1000000
+type Account struct {
+	mu      sync.Mutex
+	balance int
+}
+```
+
+```go
 // @ Requires |as| <= 100
 // @ Requires Forall k in [0, |as|) : as[k] != nil And 0 <= as[k].balance <= 1000000
 func Total(as []*Account) int {
@@ -684,7 +705,7 @@ func Drain(s *Stack) {
 //@ Ensures s.n' = 0
 ```
 
-Without that line the report is `invariant of Stack may not hold for what is passed to Pop as s`.
+Without that line the report is `invariant of Stack may not hold for what is passed to Pop as s`: `Pop` requires `s.n > 0`, which the loop condition gives, and a stack whose invariant holds, which after one iteration nothing gives any more.
 
 **A trusted function does not restore it.** After a call to a trusted function that may modify a struct, the invariant of the struct is not assumed, since nobody proved it.
 
@@ -757,7 +778,7 @@ inputs and a small input satisfies it
 
 A contract of the form "if it succeeds, then..." is met by a function that never succeeds. `vego` rejects such a contract, because it is the easiest way to write a specification that says nothing.
 
-**How it decides.** `vego` looks for one small example input that meets the `Requires` and for which the `Ensures` leave no way to return an error. The examples it tries are built from the numbers and strings your contract mentions and a few small ones, slices whose elements are all the same, pointers to structs up to two steps deep, and maps with one key. That covers most contracts. If yours says when it succeeds and you still get this message, success needs an input outside that range: a slice with two different elements, say. Add a clause that a simpler input satisfies, such as `|A| = 0 -> err = nil`. Neither `Assert` nor `-vego.max-steps` helps here.
+**How it decides.** `vego` looks for one small example input that meets the `Requires` and for which the `Ensures` leave no way to return an error. A function with two error results has to return `nil` for both on that one input. The examples it tries are built from the numbers and strings your contract mentions and a few small ones, slices whose elements are all the same, pointers to structs up to two steps deep, and maps with one key, whose value may be a pointer to a struct. That covers most contracts. If yours says when it succeeds and you still get this message, success needs an input outside that range: a slice with two different elements, say. Add a clause that a simpler input satisfies, such as `|A| = 0 -> err = nil`. Neither `Assert` nor `-vego.max-steps` helps here.
 
 **The exception** is a function whose success depends on a call whose contract does not say what comes back:
 
@@ -908,7 +929,7 @@ trusted:
 - **`modifies`** is required, even when it is empty. It lists what the function may write, as a `Modifies` clause would: `[x]` for the elements of slice `x`, `[b]` for the struct that `b` points to, `[b.count]` for one field. Anything not listed is taken to be unchanged.
 - **The names** in all three are the parameter and result names in the function's own source, the receiver included. For the standard library, `go doc -src sync.Mutex.Lock` shows that the receiver is `m`. Unnamed results are `result`, or `result1`, `result2`.
 
-`vego` ships contracts for a few functions of the standard library: `sort.Ints`, `sort.IntsAreSorted`, `sort.SearchInts`, `strings.Contains`, `strings.HasPrefix`, `strings.HasSuffix`, `strings.Index`, `strings.TrimSpace`, `strings.Repeat`, `strings.ToUpper`, `strings.ToLower`, `utf8.RuneCountInString`, `strconv.Itoa`, `strconv.Atoi`, `rand.Intn`, and `rand.Int`. The contracts themselves are in `vego/trusted/std` in the source of `laas`. An entry of your own for the same function replaces the shipped one.
+`vego` ships contracts for a few functions of the standard library: `sort.Ints`, `sort.IntsAreSorted`, `sort.SearchInts`, `strings.Contains`, `strings.HasPrefix`, `strings.HasSuffix`, `strings.Index`, `strings.TrimSpace`, `strings.Repeat`, `strings.ToUpper`, `strings.ToLower`, `unicode/utf8.RuneCountInString`, `strconv.Itoa`, `strconv.Atoi`, `math/rand.Intn`, and `math/rand.Int`. These are the keys to use when you replace one. The contracts themselves are in `vego/trusted/std` in the source of `laas`. An entry of your own for the same function replaces the shipped one.
 
 Three things a trusted contract cannot do:
 
@@ -989,11 +1010,12 @@ Put the logic in packages of its own, away from I/O, and write the contract befo
 
 ```sh
 go install github.com/spachava753/laas/cmd/laas@<commit>
-GOTOOLCHAIN=go1.26.6 laas -vego ./...
+laas -vego ./...
 ```
 
 - **Pin the version.** `laas` has no tagged releases yet, so install a commit, not `@latest`.
-- **The exit status is the gate:** 0 when everything annotated is proved, 3 when anything is reported.
+- **The exit status is the gate:** 0 when everything annotated is proved, 3 when anything is reported, 1 when the packages could not be loaded.
+- **Build `laas` with the Go that the job uses**, as the line above does; see the note on the toolchain in [Running it](#running-it).
 - **`-vego.trust` is a report, not a gate.** It exits with 3 when verification had problems, and its use is in review: a change to it is a change to what the proofs assume.
 - **Give the job a time limit.** Small functions take well under a second each. Functions with many pointer parameters that may be the same take much longer, and the speed of the tool has not been worked on yet. `-vego.max-steps` bounds the effort on one obligation, not the time of the run.
 
@@ -1042,6 +1064,9 @@ The messages you will meet most, with what they mean and what usually fixes them
 | `cannot verify F: parameter x has unsupported type T` | | Keep `T` out of verified signatures. |
 | `cannot verify F: x is not a local variable` | A package-level variable is used. | Pass the value in. |
 | `cannot verify F: formatting err would run the methods of an error whose origin is not known` | `fmt.Errorf` is given a foreign error. | Return it as it is, or wrap your own. |
+| `nothing can satisfy the Requires clauses of F` | The `Requires` contradict each other or the types, so every proof about `F` would be empty. | Fix the `Requires`. |
+| `the slices passed to F as a and b may overlap` | Two slice arguments of one element type are not shown to be different memory. | Pass slices that are apart, or say in your own contract that they are. |
+| `the trusted contract of F cannot be true of this call` | What the entry promises contradicts what is known at the call. | The entry is wrong, or needs a `requires`. |
 | `the trusted contract ... cannot be used` | An entry of the trust file is wrong; the text says how. | Fix the entry; check the parameter names. |
 | `analysis skipped due to errors in package` | The package does not compile, or the toolchain does not match. | See [Running it](#running-it). |
 

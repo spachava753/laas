@@ -51,7 +51,7 @@ go install github.com/spachava753/laas/cmd/laas@latest
 laas ./...
 ```
 
-`laas` is built with Go 1.26 and cannot yet read packages compiled by a newer Go. If your `go` command is newer, run it as `GOTOOLCHAIN=go1.26.6 laas ./...`; a module that needs a newer Go cannot be analysed yet.
+The `go` command that `laas` finds when it runs must not be newer than the Go that built `laas`; installing with the `go` you use, as above, takes care of that. A `laas` built by an older Go reports errors about the standard library, and is run with `GOTOOLCHAIN` set to the version that built it, or rebuilt.
 
 Set a different limit with the analyzer-specific flag:
 

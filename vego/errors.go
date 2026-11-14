@@ -588,18 +588,18 @@ func (v *fnVerifier) forcesSuccess() bool {
 	// The sample error is the one sample that is not a literal; all that
 	// is known of it is that it is not nil.
 	known := []*logic.Term{logic.Not(logic.IsNil(someError))}
-	forced := make([]bool, len(failures))
-	v.someInput(post, func(input *witness) bool {
+	// One input has to force every error result to be nil: a function with
+	// two of them succeeds only when both are, and inputs that each force
+	// one of them say nothing about that.
+	return v.someInput(post, func(input *witness) bool {
 		if solver.Prove(known, logic.And(input.apply(pre)...), opts) != solver.Proved {
 			return false
 		}
 		outcome := append(slices.Clip(known), input.apply(post)...)
-		for i, failure := range failures {
-			forced[i] = forced[i] || solver.Prove(outcome, logic.IsNil(input.apply([]*logic.Term{failure})[0]), opts) == solver.Proved
-		}
-		return !slices.Contains(forced, false)
+		return !slices.ContainsFunc(failures, func(failure *logic.Term) bool {
+			return solver.Prove(outcome, logic.IsNil(input.apply([]*logic.Term{failure})[0]), opts) != solver.Proved
+		})
 	})
-	return !slices.Contains(forced, false)
 }
 
 // someError is the sample value for an error that is not nil.
@@ -959,7 +959,8 @@ func (b *sampler) addSlice(t types.Type, to binding) {
 }
 
 // addMap creates the slot for a map: the nil map, or a map of its own with
-// a single key.
+// a single key. A value that is a pointer points to an object of its own,
+// which counts as one pointer followed.
 func (b *sampler) addMap(t types.Type, to binding) {
 	keyType, elem := mapParts(t)
 	b.refs++
@@ -989,6 +990,20 @@ func (b *sampler) addMap(t types.Type, to binding) {
 	if !single {
 		variants = len(whole)
 	}
+	// A pointer in a map points to an object of its own, whose fields are
+	// sampled like those of any other, or is nil.
+	object, isPointer := pointee(elem)
+	var pointed *logic.Term
+	if isPointer {
+		b.refs++
+		pointed = logic.RefLit(b.refs)
+		variants = 2
+		cells := b.v.cellsOf(object)
+		b.add(object, binding{
+			set:  func(s *witness, i int, term *logic.Term) { s.storeAt(cells[i], pointed, term) },
+			name: func(i int) string { return entryRegion + cells[i].key },
+		}, 1)
+	}
 	for _, key := range keys[:min(len(keys), 4)] {
 		for variant := range min(variants, 3) {
 			alternatives = append(alternatives, func(s *witness) {
@@ -1001,6 +1016,9 @@ func (b *sampler) addMap(t types.Type, to binding) {
 					switch lo, hi, isInt := b.v.intRange(lf.typ); {
 					case single:
 						val = held[variant]
+					case isPointer && variant == 0 && lf.part == partPtr:
+						val = pointed
+					case isPointer:
 					case lf.part == partValue && lf.sort == logic.Int && isInt && whole[variant].Value().Cmp(lo) >= 0 && whole[variant].Value().Cmp(hi) <= 0:
 						val = whole[variant]
 					}
