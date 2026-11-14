@@ -606,18 +606,39 @@ func Total(as []*Account) int {
 
 //@ Ensures 0 <= result <= 100000000
 
-// Deposit holds the lock of the account while it changes the balance. The
-// trust file says what Lock and Unlock may write.
-//
-// @ Requires a != nil And 0 <= n And a.balance + n <= 1000000
-// @ Modifies a.mu, a.balance
-func (a *Account) Deposit(n int) {
+// Deposit is not verified. It takes the lock, checks what the verified
+// part requires, and leaves the arithmetic to it.
+func (a *Account) Deposit(n int) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if n < 0 || n > 1000000-a.balance {
+		return false
+	}
+	a.deposit(n)
+	return true
+}
+
+// deposit is the verified part: it changes the balance and nothing else,
+// and keeps the invariant of the account.
+//
+// @ Requires a != nil And 0 <= n And a.balance + n <= 1000000
+// @ Modifies a.balance
+func (a *Account) deposit(n int) {
 	a.balance += n
 }
 
 //@ Ensures a.balance' = a.balance + n
+
+// DepositLocked tries to take the lock in verified code. Lock has no
+// contract, and no true one can be written for it.
+//
+// @ Requires a != nil And 0 <= n And a.balance + n <= 1000000
+// @ Modifies a
+func (a *Account) DepositLocked(n int) {
+	a.mu.Lock() // want `vego: cannot verify DepositLocked: it calls Lock, which has no contract`
+	a.balance += n
+	a.mu.Unlock()
+}
 
 // QuantityWrapped formats an error that came from a trusted function.
 func QuantityWrapped(line string) (n int, err error) {
@@ -641,10 +662,10 @@ func Quantity(line string) (n int, err error) {
 
 //@ Ensures err = nil -> True
 
-// IsEmpty asks which error it is. The call is allowed by an entry in the
-// trust file, and nothing is known of its answer.
+// IsEmpty asks which error it is, which runs methods of the error that
+// nobody has seen.
 func IsEmpty(err error) bool {
-	return errors.Is(err, ErrEmpty)
+	return errors.Is(err, ErrEmpty) // want `vego: cannot verify IsEmpty: it calls Is, which has no contract`
 }
 
 //@ Ensures True

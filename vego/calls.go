@@ -23,7 +23,7 @@ func (v *fnVerifier) binary(op token.Token, x, y *logic.Term, t types.Type, pos 
 		// Two interface values holding the same uncomparable dynamic type,
 		// such as a slice type with an Error method, panic when compared.
 		v.unsupported(pos, "comparing two errors can panic when they hold an uncomparable type; "+
-			"compare with nil, or use errors.Is")
+			"compare with nil")
 	case x.Sort == logic.Float:
 		return v.opaque(op, x)
 	case x.Sort == logic.Ref && op == token.EQL:

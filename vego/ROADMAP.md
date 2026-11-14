@@ -29,13 +29,13 @@ Each of these makes vego report the function that uses it as `cannot verify`. Th
 Two things do not stop a function from being verified but come up as often:
 
 - **Conversions that drop bits and arithmetic that wraps**, as in `byte(x)` and a hash, are errors by design. `byte(x & 0xFF)` verifies. A way to say "this wraps on purpose" at one operation is not planned yet and would have to be loud.
-- **Contracts for the standard library.** Only a handful of functions have shipped contracts, and none of the methods: `sync.Mutex` first.
+- **Contracts for the standard library.** Only a handful of functions have shipped contracts, and none of the methods. `sync.Mutex` is the one most asked for, and needs more than an entry: a contract that is true has to say that the lock is free or held, which no formula can name today. Until then locking stays in code that is not verified.
 
 ## Before it is called ready
 
 - **Use it on a real package.** vego has only been run on its own test programs and on programs written to break it. Nobody has annotated existing code with it, so how much friction there is in practice is not known. The first trial should rank everything in this file.
 - **Speed.** Generated packages of 40 to 100 short functions with pointer parameters that may be the same have taken around ten minutes. Nothing has been profiled.
-- **What the first readers of the guide could not do.** Two reviewers tried to verify small realistic programs with only `docs/verification.md`. A new module went well; a service with a mutex, a map of structs, wrapped errors, an interface, and a global did not. What stopped them, beyond the list above: formulas have no character literals, no `cap`, and no way to compare a slice with `nil`; `fresh(s.items)` is written without the prime although it speaks of the state on return; a sum or count over a slice that is being written cannot be carried through a loop; an invariant of a struct type is not known of the elements of a slice.
+- **What the first readers of the guide could not do.** Two reviewers tried to verify small realistic programs with only `docs/verification.md`. A new module went well; a service with a mutex, a map of structs, wrapped errors, an interface, and a global did not. What stopped them, beyond the list above: formulas have no character literals, no `cap`, no way to compare a slice with `nil`, and no way to say that two slices share no memory (`within` rules out only that one lies inside the other); `fresh(s.items)` is written without the prime although it speaks of the state on return; a sum or count over a slice that is being written cannot be carried through a loop; an invariant of a struct type is not known of the elements of a slice.
 - **Continuous integration.** The tests, including those of the shipped contracts, run by hand and on one toolchain. 32-bit targets have only been tried in a few spots.
 
 ## By area: what is built, why, and what is missing

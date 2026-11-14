@@ -437,15 +437,3 @@ trusted:
     ensures:
       - "result = 0"
     modifies: []
-
-  (*sync.Mutex).Lock:
-    reason: Standard library; returns when the lock is held.
-    modifies: [m]
-
-  (*sync.Mutex).Unlock:
-    reason: Standard library; the caller holds the lock.
-    modifies: [m]
-
-  errors.Is:
-    reason: Standard library; reads the two errors and reports whether one is the other.
-    modifies: []

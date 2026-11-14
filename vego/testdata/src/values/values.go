@@ -323,7 +323,7 @@ func Describe(err error) (code int) {
 	switch err {
 	case nil:
 		return 0
-	case errOutOfRange: // want `vego:\ cannot\ verify\ Describe:\ comparing\ two\ errors\ can\ panic\ when\ they\ hold\ an\ uncomparable\ type;\ compare\ with\ nil,\ or\ use\ errors\.Is`
+	case errOutOfRange: // want `vego:\ cannot\ verify\ Describe:\ comparing\ two\ errors\ can\ panic\ when\ they\ hold\ an\ uncomparable\ type;\ compare\ with\ nil`
 		return 1
 	}
 	return 2
@@ -346,7 +346,7 @@ func Lookup(A []int, i int) (int, error) {
 // Equal compares two errors, which panics when both hold the same
 // uncomparable type.
 func Equal(a, b error) (same bool) {
-	return a == b // want `vego:\ cannot\ verify\ Equal:\ comparing\ two\ errors\ can\ panic\ when\ they\ hold\ an\ uncomparable\ type;\ compare\ with\ nil,\ or\ use\ errors\.Is`
+	return a == b // want `vego:\ cannot\ verify\ Equal:\ comparing\ two\ errors\ can\ panic\ when\ they\ hold\ an\ uncomparable\ type;\ compare\ with\ nil`
 }
 
 //@ Ensures True

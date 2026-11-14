@@ -852,7 +852,7 @@ func (b *sampler) add(t types.Type, to binding, depth int) {
 	case isSlice(t):
 		b.addSlice(t, to)
 	case isMap(t):
-		b.addMap(t, to)
+		b.addMap(t, to, depth)
 	case isString(t):
 		scalar(b.texts())
 	case single && sort == logic.Int:
@@ -960,8 +960,9 @@ func (b *sampler) addSlice(t types.Type, to binding) {
 
 // addMap creates the slot for a map: the nil map, or a map of its own with
 // a single key. A value that is a pointer points to an object of its own,
-// which counts as one pointer followed.
-func (b *sampler) addMap(t types.Type, to binding) {
+// which counts as one more pointer followed, or is nil; beyond
+// maxSampleDepth it is nil.
+func (b *sampler) addMap(t types.Type, to binding, depth int) {
 	keyType, elem := mapParts(t)
 	b.refs++
 	ref := logic.RefLit(b.refs)
@@ -994,6 +995,11 @@ func (b *sampler) addMap(t types.Type, to binding) {
 	// sampled like those of any other, or is nil.
 	object, isPointer := pointee(elem)
 	var pointed *logic.Term
+	if isPointer && depth >= maxSampleDepth {
+		// Only the nil pointer: the variant that would point somewhere is
+		// left out.
+		isPointer, variants = false, 1
+	}
 	if isPointer {
 		b.refs++
 		pointed = logic.RefLit(b.refs)
@@ -1002,7 +1008,7 @@ func (b *sampler) addMap(t types.Type, to binding) {
 		b.add(object, binding{
 			set:  func(s *witness, i int, term *logic.Term) { s.storeAt(cells[i], pointed, term) },
 			name: func(i int) string { return entryRegion + cells[i].key },
-		}, 1)
+		}, depth+1)
 	}
 	for _, key := range keys[:min(len(keys), 4)] {
 		for variant := range min(variants, 3) {

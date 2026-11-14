@@ -161,3 +161,47 @@ func ReserveUnsaid(w *shelf, sku string, n int) error { // want `the contract of
 }
 
 //@ Ensures result = nil -> (has(w.items, sku) And w.items[sku].qty >= n)
+
+type looped struct {
+	next map[int]*looped
+	v    int
+}
+
+// LoopedMap takes a map of pointers to structs that hold such a map again.
+// The samples follow it two pointers deep and stop.
+func LoopedMap(m map[int]*looped) error { return nil }
+
+//@ Ensures result = nil
+
+type ping struct{ to map[string]*pong }
+
+type pong struct {
+	back *ping
+	v    int
+}
+
+// PingPong takes two types that reach each other through a map and a
+// pointer.
+func PingPong(p *ping) error { return nil }
+
+//@ Ensures result = nil
+
+// TwoMapsDeep succeeds for a value two pointers into such a map.
+//
+// @ Requires has(m, 1) And m[1] != nil And has(m[1].next, 1) And m[1].next[1] != nil
+func TwoMapsDeep(m map[int]*looped) (err error) {
+	if m[1].next[1].v != 9 {
+		return errOutOfRange
+	}
+	return nil
+}
+
+//@ Ensures err = nil <-> m[1].next[1].v = 9
+
+// ThreeMapsDeep needs a third pointer, which no sample has.
+//
+// @ Requires has(m, 1) And m[1] != nil And has(m[1].next, 1) And m[1].next[1] != nil
+// @ Requires has(m[1].next[1].next, 1) And m[1].next[1].next[1] != nil
+func ThreeMapsDeep(m map[int]*looped) error { return nil } // want `the contract of ThreeMapsDeep may also be met by a function that always returns an error: no simple input was found`
+
+//@ Ensures result = nil
