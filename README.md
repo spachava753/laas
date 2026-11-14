@@ -118,6 +118,8 @@ func Divide(n, d int) (q, r int) {
 //@ Ensures n = d*q + r And 0 <= r And r < d
 ```
 
+**Status: experimental.** `vego` has been reviewed and tested hard for accepting only what is true, but it has not yet been used on a large existing codebase, and much ordinary Go is outside what it supports; see [Supported Go](#supported-go).
+
 A function opts in by carrying at least one annotation; everything else is left alone. The analyzer runs as part of the standard command:
 
 ```sh
@@ -317,9 +319,29 @@ laas -vego.trust ./...
 
 The report lists the project contracts in use, the shipped contracts in use, project entries that no proof uses, and which trusted functions may fail unpredictably.
 
-### Supported Go and trusted assumptions
+The trust file is found next to `go.mod`; `-vego.trusted=path` names another one.
 
-The verified fragment covers functions and methods over the integer types (`int`, `int8` to `int64`, `uint`, `uint8` to `uint64`, with `byte` and `rune`), `bool`, `string`, `error`, the float types, structs, pointers to structs, maps with integer or string keys, and slices of any of these: assignments, `if`, `switch`, `for` and `range` loops with `break` and `continue`, `return`, `defer`, calls to named functions and methods, recursion, `len`, `cap`, `min`, `max`, `new`, `make`, `delete`, struct, slice, and map literals, slicing, and `append`. A struct field of a type outside this list cannot be read or assigned, but it remains part of its struct: assigning the whole struct writes it, so `Modifies` must then list the struct and not only the other fields. The exception is a field that is an array, or a struct holding one: a slice of the array would be a second view of the struct's memory, so a struct with such a field is not supported at all until arrays are. A function that uses anything else (arrays, channels, interfaces other than `error`, closures, goroutines, generics, variadic calls, `append(s, t...)`) is reported as `cannot verify` rather than verified wrongly.
+### Supported Go
+
+The verified fragment covers functions and methods over the integer types (`int`, `int8` to `int64`, `uint`, `uint8` to `uint64`, with `byte` and `rune`), `bool`, `string`, `error`, the float types, structs, pointers to structs, maps with integer or string keys, and slices of any of these: assignments, `if`, `switch`, `for` and `range` loops with `break` and `continue`, `return`, `defer`, calls to named functions and methods, recursion, `len`, `cap`, `min`, `max`, `new`, `make`, `delete`, struct, slice, and map literals, slicing, `append`, and the arithmetic, comparison, shift, and bitwise operators. A struct field of a type outside this list cannot be read or assigned, but it remains part of its struct: assigning the whole struct writes it, so `Modifies` must then list the struct and not only the other fields. The exception is a field that is an array, or a struct holding one: a slice of the array would be a second view of the struct's memory, so a struct with such a field is not supported at all until arrays are.
+
+Anything else makes `vego` report the function as `cannot verify`; it is never verified wrongly or in part. That covers arrays, channels, interfaces other than `error`, closures, goroutines, generics, variadic calls, `append(s, t...)`. [`vego/ROADMAP.md`](vego/ROADMAP.md) lists them in the order they are planned.
+
+### How Go is understood
+
+These are rules of the verifier, not assumptions: each is checked, and a function that breaks one is reported.
+
+- **Overflow is an error, not a behaviour.** Every `+`, `-`, `*`, `/`, negation, and conversion must be proved to stay within its type, so `(lo+hi)/2` is rejected and `lo + (hi-lo)/2` verifies. This usually means stating bounds on inputs, for example on the elements a loop adds up. Code that wraps on purpose, such as a hash function, cannot be verified.
+- **Bits are numbers.** The verifier computes with whole numbers, not with bits, so shifts and bitwise operators are understood through arithmetic.
+  - `x << k` is `x * 2^k` and must not lose bits, like any arithmetic that would leave its type. `x >> k` is `x / 2^k` rounded towards minus infinity, which differs from `/` for a negative `x`. A count that may be negative is an error, since Go panics on one.
+  - `x & m` is known exactly when `m` is a constant mask of low bits (`x & 0xFF` is `x % 256`) or of a single bit. Of any other `x & y` only what always holds is known: it is at most either operand when they are not negative, and so on.
+  - `x | y`, `x ^ y`, and `x &^ y` are computed from `x & y`, so they are known exactly whenever it is. `hi<<8 | lo` is `256*hi + lo` when `lo` is below 256. Two numbers that fit in so many bits give a result that fits in as many, and a flag that was just set or cleared is known to be set or clear: after `f |= m`, `f & m` is `m`.
+  - `^x` is `-x - 1`, or for an unsigned type the largest value minus `x`.
+  - Annotations have no bit operators; say what you mean with `*`, `/`, and `%`.
+- **String length stays representable.** Concatenation must be proved not to exceed the largest `int`, which usually means bounding the lengths of the operands.
+- **A deferred call runs at every return.** `defer mu.Unlock()` settles the function, the receiver, and the arguments where it is written, and the call is then verified at each way out of the function, last one first: its `Requires` must hold there, and what it changes is part of what the function's `Ensures` describe. It can change a result through a pointer to a named result, as Go allows. Only a call of a named function or method can be deferred, and not inside a loop. A `sync.Mutex` needs two entries in the trust file, for `(*sync.Mutex).Lock` and `(*sync.Mutex).Unlock`, each with `modifies: [m]`; they are not shipped yet.
+- **Calls that modify memory stand alone.** A call to a function with a `Modifies` clause must be a statement of its own, the only returned expression, or the whole right-hand side of an assignment to variables or their fields, so that it cannot run between the evaluation of other operands. It is rejected inside a larger expression, as an argument, in a loop condition, or when the assignment's target is reached through a pointer, a slice, or a map.
+- **Memory a loop writes is forgotten at the loop.** What a loop changes through a variable it does not reassign, or through a slice it only appends to, is forgotten precisely: everything else stays known. A loop that writes through anything more involved, such as `s.items[i]` or a pointer it advances, forgets every object of that type that the function may modify, and an invariant has to restate what is needed.
 
 Three kinds of value are followed without being fully understood:
 
@@ -327,33 +349,28 @@ Three kinds of value are followed without being fully understood:
 - **Floats are opaque.** Arithmetic on floats yields an unknown float and a comparison an unknown boolean, so no fact about a float value can be stated or proved. An integer converted from a float can be anything in its type's range and needs a range check before it is used as an index.
 - **Strings are sequences of bytes**: length, indexing, `==`, literals, concatenation, substrings, and conversion to and from `[]byte`. Ordering with `<` is unknown. Ranging over a string yields some character and advances by one to four bytes; which character is not modelled.
 
+### Functions that return an error
+
 A function that returns an error must say when it succeeds. A contract such as `err = nil -> value = A[i]` alone is rejected, because a function that always fails would satisfy it. The contract has to force success for some input, as `0 <= i < |A| -> err = nil` or `err = nil <-> 0 <= i < |A|` does. The verifier looks for a small concrete input that satisfies the precondition and for which the postcondition leaves no outcome with a non-nil error, and rejects the contract if it finds none. The exception is a function whose success hangs on a call to a trusted function whose contract does not say what comes back, such as one that reads a file: it cannot promise success and is not asked to. Its success hangs on the call when the call decides between failure and success: some return of an error and some return without one each depend on what the call returned, by returning the call's error or by a branch on something it returned. A function that ignores what the call returned, or that fails whatever it returned, is not excused. What the call returned is followed through variables, also across loops, through memory the function itself reads, and through later calls it is passed to, but not through memory that a later call reads or that a loop writes. Whether the call is reached is judged generously when the path to it depends on values the verifier does not know, such as the result of an earlier call; only the conditions on the function's own inputs must be satisfiable by a concrete input. A dead call behind such an unknown can therefore keep a weak contract from being reported. The same holds for a call that in fact always succeeds, when seeing that takes facts about memory more than one pointer away from its arguments: what the types guarantee is supplied for the arguments, for the elements of their slices, and for the objects their pointers refer to, but not further.
 
-Proofs hold under these assumptions, which mirror the paper's trusted base:
+### What a proof assumes
 
-- **There is memory.** An allocation larger than the runtime permits is an error the verifier reports: `make([]T, n)`, an `append` that has to move its slice, and a string concatenation must be proved to stay under the limit of the platform. That the machine actually has the memory, and that the stack is deep enough for the recursion, is assumed.
-- **Bits are numbers.** The verifier computes with whole numbers, not with bits, so shifts and bitwise operators are understood through arithmetic.
-  - `x << k` is `x * 2^k` and must not lose bits, like any arithmetic that would leave its type. `x >> k` is `x / 2^k` rounded towards minus infinity, which differs from `/` for a negative `x`. A count that may be negative is an error, since Go panics on one.
-  - `x & m` is known exactly when `m` is a constant mask of low bits (`x & 0xFF` is `x % 256`) or of a single bit. Of any other `x & y` only what always holds is known: it is at most either operand when they are not negative, and so on.
-  - `x | y`, `x ^ y`, and `x &^ y` are computed from `x & y`, so they are known exactly whenever it is. `hi<<8 | lo` is `256*hi + lo` when `lo` is below 256. Two numbers that fit in so many bits give a result that fits in as many, and a flag that was just set or cleared is known to be set or clear: after `f |= m`, `f & m` is `m`.
-  - `^x` is `-x - 1`, or for an unsigned type the largest value minus `x`.
-  - Annotations have no bit operators; say what you mean with `*`, `/`, and `%`.
-- **Overflow is an error, not a behaviour.** Every `+`, `-`, `*`, `/`, negation, and conversion must be proved to stay within its type, so `(lo+hi)/2` is rejected and `lo + (hi-lo)/2` verifies. This usually means stating bounds on inputs, for example on the elements a loop adds up. Code that wraps on purpose, such as a hash function, cannot be verified.
+A proof holds under these assumptions. They are about things the verifier cannot see; everything it can see, it checks.
+
+- **Trusted contracts are true.** A function that is not verified can only be called through a contract in a trust file, and every proof that uses it holds only if that contract does. Such a function is also trusted to return without panicking when its `requires` hold, to write nothing a caller can see beyond its `modifies`, and not to keep the pointers and slices it is given. Returning includes not calling back into the verified function that called it by way of another package; a call back that stays inside the package is seen and reported, whether by name or through a function value or an interface method.
 - **Callers outside the verified code keep the contract.** A verified function may assume its `Requires`, the invariants of the structs it is handed, and that slice parameters of one element type do not overlap. Verified callers prove all three; code that is not verified is trusted to respect them.
-- **Nothing else runs at the same time.** A proof is about one goroutine. No other goroutine writes memory that a verified function reads or writes while it runs.
 - **Code that is not verified keeps Go's types.** It does not use `unsafe`, `reflect`, or cgo to make one piece of memory two different types, or to change a string. The memory model relies on what Go's types guarantee.
-- **The proof is for the platform it was run for.** The sizes of `int`, `uint`, and pointers, the layout of structs, and the largest allocation are those of the `GOOS` and `GOARCH` that `laas` was run with. A function verified for a 64-bit target is not thereby verified for a 32-bit one.
-- **Annotations are not checked for meaning.** `A[i]` in an annotation is not required to be in range and `x / y` not to have a divisor other than zero. Such a term has some value nobody knows, so a clause that depends on it can usually not be proved, but it is not reported either.
-- **A deferred call runs at every return.** `defer mu.Unlock()` settles the function, the receiver, and the arguments where it is written, and the call is then verified at each way out of the function, last one first: its `Requires` must hold there, and what it changes is part of what the function's `Ensures` describe. It can change a result through a pointer to a named result, as Go allows. Only a call of a named function or method can be deferred, and not inside a loop. A `sync.Mutex` needs two entries in the trust file, for `(*sync.Mutex).Lock` and `(*sync.Mutex).Unlock`, each with `modifies: [m]`; they are not shipped yet.
-- **Calls that modify memory stand alone.** A call to a function with a `Modifies` clause must be a statement of its own, the only returned expression, or the whole right-hand side of an assignment to variables or their fields, so that it cannot run between the evaluation of other operands. It is rejected inside a larger expression, as an argument, in a loop condition, or when the assignment's target is reached through a pointer, a slice, or a map.
-- **Memory a loop writes is forgotten at the loop.** What a loop changes through a variable it does not reassign, or through a slice it only appends to, is forgotten precisely: everything else stays known. A loop that writes through anything more involved, such as `s.items[i]` or a pointer it advances, forgets every object of that type that the function may modify, and an invariant has to restate what is needed.
+- **Nothing else runs at the same time.** A proof is about one goroutine. No other goroutine writes memory that a verified function reads or writes while it runs.
 - **Exported error variables are not reassigned.** A sentinel such as `var ErrNotFound = errors.New(...)` is taken to be non-nil when its own package never assigns to it. Another package assigning to it would break that; one that `laas` analyses in the same run is reported, one that it does not see is trusted not to.
-- **String length stays representable.** Concatenation must be proved not to exceed the largest `int`, which usually means bounding the lengths of the operands.
-- **Trusted contracts are true.** A function that is not verified can only be called through a contract in a trust file, and every proof that uses it holds only if that contract does. Such a function is also trusted to return without panicking when its `requires` hold, which includes that it does not call back into the verified function that called it by way of another package. A call back that stays inside the package is seen and reported: by name, or through a function value or an interface method, which are taken to reach any function the package names anywhere other than to call it, to write nothing a caller can see beyond its `modifies`, and not to keep the pointers and slices it is given.
+- **The proof is for the platform it was run for.** The sizes of `int`, `uint`, and pointers, the layout of structs, and the largest allocation are those of the `GOOS` and `GOARCH` that `laas` was run with. A function verified for a 64-bit target is not thereby verified for a 32-bit one.
+- **There is memory.** An allocation larger than the runtime permits is an error the verifier reports: `make([]T, n)`, an `append` that has to move its slice, and a string concatenation must be proved to stay under the limit of the platform. That the machine actually has the memory, and that the stack is deep enough for the recursion, is assumed.
+- **Annotations are not checked for meaning.** `A[i]` in an annotation is not required to be in range and `x / y` not to have a divisor other than zero. Such a term has some value nobody knows, so a clause that depends on it can usually not be proved, but it is not reported either.
+
+### Limits of the prover
+
+The engine is sound and deliberately incomplete: it may fail to prove something true. When that happens, add an `//@ Assert` with an intermediate step, strengthen an invariant, or raise the solver's effort with `-vego.max-steps`.
 
 Not implemented yet from the paper: residual runtime checks for unproved obligations (gradual mode), multiset reasoning, the `Preserves`, `Immutable`, `Cost`, and `Library` annotations, and mutation-based audit candidates.
-
-Raise the solver's effort for a hard obligation with `-vego.max-steps`.
 
 ## Package filtering
 

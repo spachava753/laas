@@ -1,14 +1,86 @@
-// Package vego is a deductive verifier for Go functions whose specifications
-// are written in //@ comment annotations, following the VeGo paper (Masoudi
-// and Dutchyn, "VeGo: A Lightweight Deductive Verification System for Go",
-// arXiv:2608.22630).
+// Package vego is a deductive verifier for Go. A function states what it
+// must do in //@ comments, and vego proves that it does so for every input,
+// or reports the obligation it could not prove. It follows the VeGo paper
+// (Masoudi and Dutchyn, "VeGo: A Lightweight Deductive Verification System
+// for Go", arXiv:2608.22630): specifications live in comments, so an
+// annotated file stays ordinary Go.
 //
-// A function opts in by carrying at least one annotation. The verifier then
-// executes the function symbolically, generates verification conditions for
-// its contract, for loop invariants and termination, and for runtime safety
-// (slice bounds, division by zero, reachable panics), and discharges them with
-// the native deduction engine in the internal solver package. Every condition
-// that cannot be proved is reported as a diagnostic.
+//	// Divide computes quotient and remainder by repeated subtraction.
+//	//
+//	// @ Requires n >= 0 And d > 0
+//	func Divide(n, d int) (q, r int) {
+//		q, r = 0, n
+//		//@ Invariant n = d*q + r And 0 <= r
+//		//@ Variant r
+//		for d <= r {
+//			q, r = q+1, r-d
+//		}
+//		return q, r
+//	}
+//
+//	//@ Ensures n = d*q + r And 0 <= r And r < d
+//
+// vego is experimental. It is built to accept only what is true, and much
+// ordinary Go is still outside what it supports.
+//
+// # Running it
+//
+// The package provides [Analyzer], a go/analysis analyzer. The command
+// github.com/spachava753/laas/cmd/laas runs it together with the other
+// analyzers of the module:
+//
+//	laas ./...
+//
+// A function is verified when it carries at least one annotation; every
+// other function is left alone. vego does not run under go vet -vettool,
+// whose cache does not know about trust files; see [RefuseCachedRuns].
+//
+// # What is proved
+//
+// For an annotated function, from any state that satisfies its Requires
+// clauses: every return establishes the Ensures clauses; every Assert
+// holds; every loop keeps its Invariant and terminates by its Variant, and
+// every recursive call decreases the Measure; no index is out of range, no
+// nil pointer is followed, no divisor is zero, no integer operation
+// overflows, and no panic is reachable; nothing a caller can see is written
+// except what the Modifies clauses list; and every call goes to a function
+// with a contract, whose Requires the caller proves and whose Ensures it
+// may then rely on.
+//
+// There is no external solver. The function is executed symbolically, and
+// the obligations are discharged by a deduction engine written in Go, in
+// the internal solver package. The engine is sound and deliberately
+// incomplete: when it cannot prove something true, an Assert with an
+// intermediate step or a stronger invariant usually helps.
+//
+// # Annotations
+//
+// An annotation is a // comment that starts with @ and a keyword. In the
+// doc comment of a function: Requires, Ensures, Modifies, and Measure.
+// Ensures may also follow the closing brace of the function. Directly above
+// a loop: Invariant and Variant. Anywhere in a body: Assert. In the doc
+// comment of a struct type: Invariant. At the top level: Predicate, which
+// names a formula. The README of the module describes the language of the
+// formulas and each annotation in full.
+//
+// # Calling code that is not verified
+//
+// Verified code may only call a function that has a contract: one that is
+// itself verified, or one with a trusted contract in the file named by
+// [TrustFileName], next to go.mod. A trusted contract is used and not
+// checked, so that file holds every assumption a proof rests on.
+// [TrustReport] lists what the proofs of a set of packages take on trust.
+//
+// # Flags
+//
+// The analyzer has these flags, prefixed with the analyzer name when it is
+// run by a multichecker:
+//
+//	-vego.audit       also probe each contract with degenerate implementations
+//	-vego.max-steps   how much effort the solver spends on one obligation
+//	-vego.trusted     path of the trust file, instead of the one next to go.mod
+//
+// The laas command adds -vego.trust, which prints the trust report.
 package vego
 
 import (

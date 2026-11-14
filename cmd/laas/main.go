@@ -1,3 +1,27 @@
+// Command laas runs the analyzers of this module over Go packages:
+//
+//   - funcdoc reports complex functions without a doc comment that explains
+//     their plan;
+//   - inlinehelper reports small helper functions that are called once;
+//   - teststructure reports tests that belong together by name and are
+//     not grouped as subtests of one test;
+//   - vego proves functions that carry //@ annotations correct.
+//
+// Usage:
+//
+//	laas [flags] [packages]
+//
+// It is a go/analysis multichecker, so it takes package patterns as go vet
+// does and every analyzer's flags under the analyzer's name, for example
+// -funcdoc.limit=15. Two flags are its own:
+//
+//	-exclude-packages regexp   skip packages whose import path matches
+//	-vego.trust                print what the proofs of the packages take
+//	                           on trust, instead of the diagnostics
+//
+// Run it directly. Under go vet -vettool, results are cached by a mechanism
+// that does not know about vego's trust files, so vego refuses to verify
+// there and says so.
 package main
 
 import (
