@@ -547,7 +547,7 @@ func FromOnly(s *Segment) {
 // @ Modifies s.From
 func FromOnlyWrong(s *Segment) {
 	p := &s.To
-	p.X = 1 // want `vego: p\.X is assigned, which FromOnlyWrong may not modify; list it in a //@ Modifies clause`
+	p.X = 1 // want `vego: p\.X is assigned, which FromOnlyWrong may not modify: nothing its //@ Modifies clauses list is known to cover it; a clause covers what its path referred to when FromOnlyWrong was called`
 }
 
 // BumpEach changes each element through a pointer to it.
@@ -695,7 +695,7 @@ type Wired struct {
 // @ Requires p != nil
 // @ Modifies p.X
 func OverwriteWired(p *Wired) {
-	*p = Wired{X: 1} // want `vego: \*p is assigned, which OverwriteWired may not modify; list it in a //@ Modifies clause`
+	*p = Wired{X: 1} // want `vego: \*p is assigned, which OverwriteWired may not modify: nothing its //@ Modifies clauses list is known to cover it; a clause covers what its path referred to when OverwriteWired was called`
 }
 
 //@ Ensures p.X' = 1
@@ -726,7 +726,7 @@ func SetWiredX(p *Wired) {
 // @ Requires p != nil
 // @ Modifies p.X
 func CopyWired(p *Wired) {
-	OverwriteWiredListed(p) // want `vego: OverwriteWiredListed may modify p, which CopyWired may not modify; list it in a //@ Modifies clause`
+	OverwriteWiredListed(p) // want `vego: OverwriteWiredListed may modify p, which CopyWired may not modify: nothing its //@ Modifies clauses list is known to cover it; a clause covers what its path referred to when CopyWired was called`
 }
 
 // EachField lists the fields of a struct one by one and then writes the
@@ -745,7 +745,7 @@ func EachField(p *Point) {
 // @ Requires p != nil
 // @ Modifies p.X
 func OneOfTwoFields(p *Point) {
-	*p = Point{X: 1, Y: 2} // want `vego: \*p is assigned, which OneOfTwoFields may not modify; list it in a //@ Modifies clause`
+	*p = Point{X: 1, Y: 2} // want `vego: \*p is assigned, which OneOfTwoFields may not modify: nothing its //@ Modifies clauses list is known to cover it; a clause covers what its path referred to when OneOfTwoFields was called`
 }
 
 // SpareField lists a field that the function never writes.
@@ -870,7 +870,7 @@ func BothCells(p *Cells) {
 // @ Requires p != nil
 // @ Modifies p.A.X
 func OneCell(p *Cells) {
-	*p = Cells{A: Cell{X: 1}, B: Cell{X: 2}} // want `vego: \*p is assigned, which OneCell may not modify; list it in a //@ Modifies clause`
+	*p = Cells{A: Cell{X: 1}, B: Cell{X: 2}} // want `vego: \*p is assigned, which OneCell may not modify: nothing its //@ Modifies clauses list is known to cover it; a clause covers what its path referred to when OneCell was called`
 }
 
 // EndsOnly lists two elements and writes the one between them.
@@ -880,7 +880,7 @@ func OneCell(p *Cells) {
 func EndsOnly(ps []Point) {
 	ps[0].X = 1
 	ps[2].X = 1
-	ps[1].X = 1 // want `vego: ps\[1\]\.X is assigned, which EndsOnly may not modify; list it in a //@ Modifies clause`
+	ps[1].X = 1 // want `vego: ps\[1\]\.X is assigned, which EndsOnly may not modify: nothing its //@ Modifies clauses list is known to cover it; a clause covers what its path referred to when EndsOnly was called`
 }
 
 // ReplaceFirst appends into the capacity of a slice it emptied, which
@@ -901,7 +901,7 @@ func ReplaceFirst(ps []Point) []Point {
 // @ Requires |ps| = 1
 // @ Modifies ps[0]
 func ReplaceSecond(ps []Point) []Point {
-	return append(ps, Point{X: 1}) // want `vego: append may write into the capacity of ps, which ReplaceSecond may not modify; list it in a //@ Modifies clause`
+	return append(ps, Point{X: 1}) // want `vego: append may write into the capacity of ps, which ReplaceSecond may not modify: nothing its //@ Modifies clauses list is known to cover it; a clause covers what its path referred to when ReplaceSecond was called`
 }
 
 //@ Ensures |result| = 2

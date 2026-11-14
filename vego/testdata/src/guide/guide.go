@@ -340,7 +340,7 @@ func Head(A []int) (first int, err error) {
 //@ Ensures err = nil -> first = A[0]
 
 // HeadWeak only says what success looks like.
-func HeadWeak(A []int) (first int, err error) { // want `vego: the contract of HeadWeak would also be met by a function that always returns an error.*`
+func HeadWeak(A []int) (first int, err error) { // want `vego: the contract of HeadWeak may also be met by a function that always returns an error.*`
 	if len(A) == 0 {
 		return 0, ErrEmpty
 	}

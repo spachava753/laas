@@ -679,7 +679,7 @@ func (q *Queue) Pop() (x int, err error) {
 // PopAlwaysFails never says when it succeeds.
 //
 // @ Requires q != nil
-func (q *Queue) PopAlwaysFails() (x int, err error) { // want `vego: the contract of PopAlwaysFails would also be met by a function that always returns an error`
+func (q *Queue) PopAlwaysFails() (x int, err error) { // want `vego: the contract of PopAlwaysFails may also be met by a function that always returns an error`
 	if len(q.items) == 0 {
 		return 0, errEmptyQueue
 	}
@@ -904,7 +904,7 @@ func OneElement(ps []Point) {
 // @ Requires |ps| > 1
 // @ Modifies ps[0]
 func OneElementOnly(ps []Point) {
-	ps[1].X = 1 // want `vego: ps\[1\]\.X is assigned, which OneElementOnly may not modify; list it in a //@ Modifies clause`
+	ps[1].X = 1 // want `vego: ps\[1\]\.X is assigned, which OneElementOnly may not modify: nothing its //@ Modifies clauses list is known to cover it; a clause covers what its path referred to when OneElementOnly was called`
 }
 
 // OneElementKept calls a function that changes one element and relies on
@@ -926,7 +926,7 @@ func OneElementKept(ps []Point) int {
 // @ Modifies cs[0]
 func OtherPointer(cs []*Counter) {
 	cs[0].n = 1
-	cs[1].n = 1 // want `vego: cs\[1\]\.n is assigned, which OtherPointer may not modify; list it in a //@ Modifies clause`
+	cs[1].n = 1 // want `vego: cs\[1\]\.n is assigned, which OtherPointer may not modify: nothing its //@ Modifies clauses list is known to cover it; a clause covers what its path referred to when OtherPointer was called`
 }
 
 // Lexer reads a string byte by byte.
@@ -1253,7 +1253,7 @@ func makeSmall() []Small {
 
 // AlwaysFailsAfterReadySmall calls a function that succeeds whenever every
 // field holds a value of its type, which is always.
-func AlwaysFailsAfterReadySmall() error { // want `vego: the contract of AlwaysFailsAfterReadySmall would also be met by a function that always returns an error`
+func AlwaysFailsAfterReadySmall() error { // want `vego: the contract of AlwaysFailsAfterReadySmall may also be met by a function that always returns an error`
 	a := makeSmall()
 	_ = readySmall(a)
 	return errEmptyQueue
@@ -1337,7 +1337,7 @@ func makeNamed() []Named {
 
 // AlwaysFailsAfterReadyBlob calls a function that succeeds whenever the
 // bytes behind its pointer are bytes.
-func AlwaysFailsAfterReadyBlob() error { // want `vego: the contract of AlwaysFailsAfterReadyBlob would also be met by a function that always returns an error`
+func AlwaysFailsAfterReadyBlob() error { // want `vego: the contract of AlwaysFailsAfterReadyBlob may also be met by a function that always returns an error`
 	p := makeBlob()
 	_ = readyBlob(p)
 	return errEmptyQueue
@@ -1347,7 +1347,7 @@ func AlwaysFailsAfterReadyBlob() error { // want `vego: the contract of AlwaysFa
 
 // AlwaysFailsAfterReadyNamed calls one that succeeds whenever the bytes of
 // the strings in its elements are bytes.
-func AlwaysFailsAfterReadyNamed() error { // want `vego: the contract of AlwaysFailsAfterReadyNamed would also be met by a function that always returns an error`
+func AlwaysFailsAfterReadyNamed() error { // want `vego: the contract of AlwaysFailsAfterReadyNamed may also be met by a function that always returns an error`
 	a := makeNamed()
 	_ = readyNamed(a)
 	return errEmptyQueue
@@ -1365,7 +1365,7 @@ func makeRows() [][]byte {
 
 // AlwaysFailsAfterReadyRows calls a function that succeeds whenever the
 // slices in its slice have lengths that are not negative.
-func AlwaysFailsAfterReadyRows() error { // want `vego: the contract of AlwaysFailsAfterReadyRows would also be met by a function that always returns an error`
+func AlwaysFailsAfterReadyRows() error { // want `vego: the contract of AlwaysFailsAfterReadyRows may also be met by a function that always returns an error`
 	a := makeRows()
 	_ = readyRows(a)
 	return errEmptyQueue

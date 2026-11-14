@@ -329,7 +329,7 @@ func twoBytes() map[int]byte {
 
 // AlwaysFailsAfterReadyBytes calls a function that succeeds whenever every
 // value of its map is a byte, which is always.
-func AlwaysFailsAfterReadyBytes() error { // want `vego: the contract of AlwaysFailsAfterReadyBytes would also be met by a function that always returns an error`
+func AlwaysFailsAfterReadyBytes() error { // want `vego: the contract of AlwaysFailsAfterReadyBytes may also be met by a function that always returns an error`
 	m := twoBytes()
 	_ = readyBytes(m)
 	return errMissing
@@ -455,3 +455,31 @@ func ClearsSlicesWrong(m map[int][]int, n int) int {
 }
 
 //@ Ensures result = 3
+
+type entry struct{ qty int }
+
+// ClearsOne writes the struct that one string key leads to.
+//
+// @ Requires m[sku] != nil
+// @ Modifies m[sku]
+func ClearsOne(m map[string]*entry, sku string) {
+	m[sku].qty = 0
+}
+
+//@ Ensures m[sku].qty' = 0
+
+// ClearsAnother may write only what its own key leads to.
+//
+// @ Requires m[sku] != nil And m[other] != nil
+// @ Modifies m[sku]
+func ClearsAnother(m map[string]*entry, sku, other string) {
+	m[other].qty = 0 // want `m\[other\].qty is assigned, which ClearsAnother may not modify: nothing its //@ Modifies clauses list is known to cover it`
+}
+
+// KeyOfWrongKind indexes a map of strings with a number.
+//
+// @ Requires m[sku] != nil
+// @ Modifies m[0] // want `a map\[string\]\*mapping.entry is indexed by a string: expected a slice or a string but 0 has type int`
+func KeyOfWrongKind(m map[string]*entry, sku string) {
+	m[sku].qty = 0
+}

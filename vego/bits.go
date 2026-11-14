@@ -215,7 +215,10 @@ func (v *fnVerifier) bitAnd(x, y *logic.Term, bits uint, st *state) *logic.Term 
 			bit := logic.BigLit(mask)
 			facts = append(facts,
 				logic.Or(logic.Eq(and, zero), logic.Eq(and, bit)),
-				logic.Implies(logic.Le(zero, other), logic.Eq(and, logic.Mul(logic.Mod(logic.Div(other, bit), logic.IntLit(2)), bit))))
+				logic.Implies(logic.Le(zero, other), logic.Eq(and, logic.Mul(logic.Mod(logic.Div(other, bit), logic.IntLit(2)), bit))),
+				// A negative number has the bits that -x - 1 lacks.
+				logic.Implies(negative(other), logic.Eq(and, logic.Mul(logic.Sub(logic.IntLit(1),
+					logic.Mod(logic.Div(logic.Sub(logic.Neg(other), logic.IntLit(1)), bit), logic.IntLit(2))), bit))))
 		}
 	}
 	// As for a power of two, a wider type has more to say.

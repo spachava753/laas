@@ -255,7 +255,7 @@ func Huge() []uint64 {
 // GrowsUnbounded appends to a slice that may already be as large as an
 // allocation can be.
 func GrowsUnbounded(s []byte) []byte {
-	return append(s, 0) // want `vego: append may write into the capacity of s, which GrowsUnbounded may not modify` `vego: the slice append grows may be more than can be allocated`
+	return append(s, 0) // want `vego: append may write into the capacity of s, which GrowsUnbounded may not modify` `vego: the slice that append grows may be more than can be allocated`
 }
 
 //@ Ensures |result| = |s| + 1

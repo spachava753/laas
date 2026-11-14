@@ -48,6 +48,10 @@ func (s Sort) Numeric() bool { return s == Int || s == Ref }
 
 // String returns the Go-flavoured name of the sort.
 func (s Sort) String() string {
+	if s == IntSeq {
+		// A string and a slice of integers are the same to the logic.
+		return "string or []int"
+	}
 	if s.IsSeq() {
 		return "[]" + s.Elem().String()
 	}

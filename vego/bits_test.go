@@ -49,6 +49,18 @@ func TestBitFacts(t *testing.T) {
 		}
 	})
 
+	t.Run("a mask of low bits or of one bit is exact", func(t *testing.T) {
+		for _, mask := range []int64{1, 2, 3, 4, 7, 8, 15, 16, 255, 256} {
+			v, st := fresh()
+			and := v.bitAnd(x, logic.IntLit(mask), 8, st)
+			for a := int64(-40); a <= 40; a++ {
+				if consistent(st, is(x, a), logic.Not(is(and, a&mask))) {
+					t.Fatalf("the facts about x & %d allow %d & %d to differ from %d", mask, a, mask, a&mask)
+				}
+			}
+		}
+	})
+
 	t.Run("and with a multiple of a power of two", func(t *testing.T) {
 		for _, scale := range []int64{2, 4, 8, 12} {
 			v, st := fresh()

@@ -462,9 +462,10 @@ func (pv *pkgVerifier) reportAlwaysFailing() map[*funcInfo]bool {
 	for _, fn := range pv.order {
 		if candidate(fn) && !excused[fn] {
 			fn.failed = true
-			pv.report(fn.decl.Name.Pos(), "the contract of %s would also be met by a function that always returns an error; "+
+			pv.report(fn.decl.Name.Pos(), "the contract of %s may also be met by a function that always returns an error: "+
+				"no simple input was found for which it forces success; "+
 				"state when it succeeds with a clause such as \"condition -> err = nil\", "+
-				"where the condition is about the inputs and some input satisfies it", fn.obj.Name())
+				"where the condition is about the inputs and a small input satisfies it", fn.obj.Name())
 		}
 	}
 	return excused
@@ -559,6 +560,16 @@ func (v *fnVerifier) contractInstance(entry *state) (pre, post, failures []*logi
 // contract forces success.
 const maxWitnesses = 3000
 
+// maxSampleDepth is how many pointers a sample follows from a parameter,
+// maxSampleLen the greatest length of a sampled slice or string, and
+// maxChoices bounds the contents tried for one part of a sample where the
+// parts multiply.
+const (
+	maxSampleDepth = 2
+	maxSampleLen   = 4096
+	maxChoices     = 12
+)
+
 // forcesSuccess reports whether the contract makes the function succeed for
 // some input: there is a concrete input that provably satisfies the
 // precondition and for which every well-typed outcome that meets the
@@ -566,10 +577,11 @@ const maxWitnesses = 3000
 // that fails on every call may well satisfy the contract, whatever else the
 // contract demands.
 //
-// The witness is searched among small inputs built from 0, 1, -1 and the
-// numbers and strings the contract mentions. Finding none is reported, even
-// though a witness outside that search may exist: the contract must then be
-// stated so that its success condition is plainly satisfiable.
+// The witness is searched among the small inputs that someInput builds.
+// Finding none is reported, even though a witness outside that search may
+// exist: the contract must then be stated so that its success condition is
+// plainly satisfiable, and the message says that it is the search that
+// failed.
 func (v *fnVerifier) forcesSuccess() bool {
 	pre, post, failures := v.contractInstance(v.enter())
 	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
@@ -764,10 +776,10 @@ func (b *sampler) texts() []*logic.Term {
 	var values []*logic.Term
 	bytes := b.fitting(types.Typ[types.Uint8])
 	for _, length := range b.fitting(types.Typ[types.Int]) {
-		if length.Value().Sign() < 0 || length.Value().Cmp(big.NewInt(64)) > 0 {
+		if length.Value().Sign() < 0 || length.Value().Cmp(big.NewInt(maxSampleLen)) > 0 {
 			continue
 		}
-		for _, element := range bytes[:min(len(bytes), 3)] {
+		for _, element := range bytes[:min(len(bytes), maxChoices)] {
 			values = append(values, logic.Fill(length, element))
 		}
 	}
@@ -801,10 +813,11 @@ func (b *sampler) choose(alternatives slot, names ...string) {
 }
 
 // add creates the slots for a value of type t. A pointer is nil or refers to
-// an object of its own, whose fields are sampled in turn; pointers inside
-// that object stay nil, so that samples stay small. A value no sample exists
-// for stays symbolic.
-func (b *sampler) add(t types.Type, to binding, nested bool) {
+// an object of its own, whose fields are sampled in turn. depth counts the
+// pointers followed to reach the value; beyond maxSampleDepth of them a
+// pointer stays nil, so that samples stay small and a type that refers to
+// itself has an end. A value no sample exists for stays symbolic.
+func (b *sampler) add(t types.Type, to binding, depth int) {
 	scalar := func(choices []*logic.Term) {
 		var alternatives slot
 		for _, choice := range choices {
@@ -824,7 +837,7 @@ func (b *sampler) add(t types.Type, to binding, nested bool) {
 				to.set(s, 1, logic.IntLit(0))
 			}
 		}
-		if nested {
+		if depth >= maxSampleDepth {
 			b.slots = append(b.slots, slot{pointTo(logic.RefLit(0))})
 			break
 		}
@@ -835,7 +848,7 @@ func (b *sampler) add(t types.Type, to binding, nested bool) {
 		b.add(object, binding{
 			set:  func(s *witness, i int, term *logic.Term) { s.storeAt(cells[i], ref, term) },
 			name: func(i int) string { return entryRegion + cells[i].key },
-		}, true)
+		}, depth+1)
 	case isSlice(t):
 		b.addSlice(t, to)
 	case isMap(t):
@@ -861,7 +874,7 @@ func (b *sampler) add(t types.Type, to binding, nested bool) {
 				b.add(u.Field(i).Type(), binding{
 					set:  func(s *witness, j int, term *logic.Term) { to.set(s, lo+j, term) },
 					name: func(j int) string { return to.name(lo + j) },
-				}, nested)
+				}, depth)
 			}
 		}
 	}
@@ -897,7 +910,7 @@ func (b *sampler) addSlice(t types.Type, to binding) {
 	}
 	var lengths slot
 	for _, length := range b.fitting(types.Typ[types.Int]) {
-		if length.Value().Sign() >= 0 && length.Value().Cmp(big.NewInt(64)) <= 0 {
+		if length.Value().Sign() >= 0 && length.Value().Cmp(big.NewInt(maxSampleLen)) <= 0 {
 			lengths = append(lengths, sized(length, func(*witness) {}))
 		}
 	}
@@ -931,12 +944,12 @@ func (b *sampler) addSlice(t types.Type, to binding) {
 			elements = b.texts()
 		}
 		var fills slot
-		for _, element := range elements[:min(len(elements), 3)] {
+		for _, element := range elements[:min(len(elements), maxChoices)] {
 			fills = append(fills, func(s *witness) {
 				if !s.fixed[array(i)] {
 					// Every position holds the element, so the row serves
 					// whatever length the slice has.
-					row := logic.Fill(logic.IntLit(64), element)
+					row := logic.Fill(logic.IntLit(maxSampleLen), element)
 					s.store(cells[i].key, logic.SeqOf(row.Sort), ref, row)
 				}
 			})
@@ -946,8 +959,7 @@ func (b *sampler) addSlice(t types.Type, to binding) {
 }
 
 // addMap creates the slot for a map: the nil map, or a map of its own with
-// a single key. Values that are not a single number, boolean, or string get
-// no sample beyond the nil map.
+// a single key.
 func (b *sampler) addMap(t types.Type, to binding) {
 	keyType, elem := mapParts(t)
 	b.refs++
@@ -967,18 +979,36 @@ func (b *sampler) addMap(t types.Type, to binding) {
 		return nil
 	}
 	keys, held := choices(keyType), choices(elem)
+	leaves, _ := layoutOf(elem)
+	// A value of several parts is sampled as a whole: each of its numbers
+	// takes the same sample number where that fits its type, and everything
+	// else in it is zero.
+	whole := b.fitting(types.Typ[types.Int])
+	variants := len(held)
+	_, single := sortOf(elem)
+	if !single {
+		variants = len(whole)
+	}
 	for _, key := range keys[:min(len(keys), 4)] {
-		for _, val := range held[:min(len(held), 3)] {
+		for variant := range min(variants, 3) {
 			alternatives = append(alternatives, func(s *witness) {
 				to.set(s, 0, ref)
-				leaves, _ := layoutOf(elem)
-				inMap := leaves[0]
-				inMap.path = "#val"
 				hasKey, hasSort := region(hasLeaf)
-				valKey, valSort := region(inMap)
 				s.store(mapOwner(t)+countLeaf.path, logic.SeqOf(logic.Int), ref, logic.IntLit(1))
 				s.store(hasKey, hasSort, ref, logic.Store(logic.Fill(logic.IntLit(0), logic.False()), mapKey(key), logic.True()))
-				s.store(valKey, valSort, ref, logic.Store(logic.Fill(logic.IntLit(0), zeroLeaf(leaves[0])), mapKey(key), val))
+				for _, lf := range leaves {
+					val := zeroLeaf(lf)
+					switch lo, hi, isInt := b.v.intRange(lf.typ); {
+					case single:
+						val = held[variant]
+					case lf.part == partValue && lf.sort == logic.Int && isInt && whole[variant].Value().Cmp(lo) >= 0 && whole[variant].Value().Cmp(hi) <= 0:
+						val = whole[variant]
+					}
+					inMap := lf
+					inMap.path = "#val" + lf.path
+					valKey, valSort := region(inMap)
+					s.store(valKey, valSort, ref, logic.Store(logic.Fill(logic.IntLit(0), zeroLeaf(lf)), mapKey(key), val))
+				}
 			})
 		}
 	}
@@ -992,9 +1022,12 @@ func (b *sampler) addMap(t types.Type, to binding) {
 // a condition over those terms is most likely to be found. A pointer is nil
 // or refers to an object of its own, and a slice has an array of its own.
 func (v *fnVerifier) someInput(terms []*logic.Term, accept func(input *witness) bool) bool {
-	b := &sampler{
-		v: v, mentioned: map[string]bool{},
-		numbers: []*big.Int{big.NewInt(0), big.NewInt(1), big.NewInt(-1), big.NewInt(2), big.NewInt(3)},
+	b := &sampler{v: v, mentioned: map[string]bool{}}
+	usual := []*big.Int{big.NewInt(0), big.NewInt(1), big.NewInt(-1), big.NewInt(2), big.NewInt(3)}
+	var found []*big.Int
+	known := func(number *big.Int) bool {
+		same := func(other *big.Int) bool { return other.Cmp(number) == 0 }
+		return slices.ContainsFunc(usual, same) || slices.ContainsFunc(found, same)
 	}
 	seen := map[*logic.Term]bool{}
 	var harvest func(t *logic.Term)
@@ -1006,9 +1039,11 @@ func (v *fnVerifier) someInput(terms []*logic.Term, accept func(input *witness) 
 		switch {
 		case t.Op == logic.OpConst:
 			b.mentioned[t.Name] = true
-		case t.Op == logic.OpIntLit && t.Sort == logic.Int && t.Value().IsInt64() && len(b.numbers) < 12:
+		case t.Op == logic.OpIntLit && t.Sort == logic.Int && t.Value().IsInt64() && len(found) < 24:
 			for _, delta := range []int64{0, 1, -1} {
-				b.numbers = append(b.numbers, new(big.Int).Add(t.Value(), big.NewInt(delta)))
+				if number := new(big.Int).Add(t.Value(), big.NewInt(delta)); !known(number) {
+					found = append(found, number)
+				}
 			}
 		case t.Op == logic.OpPush && len(b.literals) < 8:
 			// A string or slice literal is a chain of appended elements.
@@ -1019,9 +1054,22 @@ func (v *fnVerifier) someInput(terms []*logic.Term, accept func(input *witness) 
 			harvest(arg)
 		}
 	}
-	for _, t := range terms {
+	// The clauses of a contract and the conditions of a path come after the
+	// facts about types and memory that hold anyway, and their numbers are
+	// the likelier witnesses, so they are collected first.
+	for _, t := range slices.Backward(terms) {
 		if !v.typing[t] {
 			harvest(t)
+		}
+	}
+	// The numbers the formulas mention and the usual ones take turns, so
+	// that a part of a sample that tries only a few gets some of each.
+	for i := range max(len(found), len(usual)) {
+		if i < len(found) {
+			b.numbers = append(b.numbers, found[i])
+		}
+		if i < len(usual) {
+			b.numbers = append(b.numbers, usual[i])
 		}
 	}
 	for _, param := range v.fn.params {
@@ -1030,28 +1078,52 @@ func (v *fnVerifier) someInput(terms []*logic.Term, accept func(input *witness) 
 			b.add(param.Type(), binding{
 				set:  func(s *witness, i int, term *logic.Term) { s.consts[entry[i].Name] = term },
 				name: func(i int) string { return entry[i].Name },
-			}, false)
+			}, 0)
 		}
 	}
+	// All combinations are tried when there are few enough. Otherwise the
+	// combinations are drawn evenly from all of them by a fixed sequence, so
+	// that no slot is stuck at its first alternative.
 	total := 1
 	for _, alternatives := range b.slots {
-		total = min(total*max(len(alternatives), 1), maxWitnesses)
+		total = min(total*max(len(alternatives), 1), maxWitnesses+1)
 	}
-	for n := range total {
+	exhaustive := total <= maxWitnesses
+	for n := range min(total, maxWitnesses) {
 		input := &witness{consts: map[string]*logic.Term{}, memo: map[*logic.Term]*logic.Term{}, fixed: map[string]bool{}}
 		// Everything a sample contains exists.
 		input.consts[v.entryBrk.Name] = logic.RefLit(b.refs + 1)
-		rest := n
-		for _, alternatives := range b.slots {
+		rest := uint64(n)
+		for i, alternatives := range b.slots {
 			if len(alternatives) == 0 {
 				continue
 			}
-			alternatives[rest%len(alternatives)](input)
-			rest /= len(alternatives)
+			count := uint64(len(alternatives))
+			if exhaustive {
+				alternatives[rest%count](input)
+				rest /= count
+				continue
+			}
+			alternatives[scramble(uint64(n), uint64(i))%count](input)
 		}
 		if accept(input) {
 			return true
 		}
 	}
 	return false
+}
+
+// scramble returns a number that depends on both arguments in no simple
+// way, and is zero for the first sample, which so takes the first
+// alternative of every slot.
+func scramble(sample, slot uint64) uint64 {
+	if sample == 0 {
+		return 0
+	}
+	x := sample*0x9E3779B97F4A7C15 + slot*0xBF58476D1CE4E5B9
+	x ^= x >> 30
+	x *= 0xBF58476D1CE4E5B9
+	x ^= x >> 27
+	x *= 0x94D049BB133111EB
+	return x ^ x>>31
 }

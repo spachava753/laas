@@ -274,3 +274,22 @@ func NarrowThenWideOr(x, y uint16) uint16 {
 }
 
 //@ Ensures result <= 511
+
+// BitOfNegative reads one bit of a negative number, which has the bits
+// that -x - 1 lacks.
+//
+// @ Requires x = -1
+func BitOfNegative(x int) int {
+	return x & 8
+}
+
+//@ Ensures result = 8
+
+// BitOfNegativeClear expects a bit that -9 does not have.
+//
+// @ Requires x = -9
+func BitOfNegativeClear(x int) int {
+	return x & 8 // want `vego: postcondition may not hold: result = 8`
+}
+
+//@ Ensures result = 8

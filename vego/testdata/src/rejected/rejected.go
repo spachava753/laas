@@ -46,7 +46,7 @@ func PrimeOnValue(x int) (y int) {
 
 //@ Ensures x' = y // want `vego: in Ensures annotation: x is passed by value, so only its value on entry is visible to callers; drop the prime`
 
-// @ Requires A > 0 // want `vego:\ in\ Requires\ annotation:\ cannot\ compare\ A\ \(\[\]int\)\ with\ 0\ \(int\)`
+// @ Requires A > 0 // want `vego:\ in\ Requires\ annotation:\ cannot\ compare\ A\ \(string\ or\ \[\]int\)\ with\ 0\ \(int\)`
 func SliceAsInteger(A []int) int {
 	return 0
 }

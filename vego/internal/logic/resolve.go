@@ -88,6 +88,11 @@ func (r *Resolver) IntTerm(n *Node, env Env) (*Term, error) {
 	return r.resolve(n, env, nil, Int)
 }
 
+// Term resolves a parsed expression that must have the given sort.
+func (r *Resolver) Term(n *Node, env Env, want Sort) (*Term, error) {
+	return r.resolve(n, env, nil, want)
+}
+
 func (r *Resolver) resolve(n *Node, env Env, bound map[string]*Term, want Sort) (t *Term, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -123,7 +128,7 @@ func describe(sort Sort) string {
 	case Int:
 		return "an integer"
 	}
-	return "a slice"
+	return "a slice or a string"
 }
 
 // term resolves one syntax node, checking operand sorts along the way.

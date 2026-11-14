@@ -564,9 +564,22 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 		if step.index == nil {
 			continue
 		}
-		steps[i].Index = logic.IntLit(0)
+		// What is indexed decides what the index is: a map with strings for
+		// keys takes a string, everything else a number.
+		_, indexed, err := plan(param.Type(), steps[:i])
+		if err != nil {
+			return shape{}, target{}, fmt.Errorf("%s%v", m.name, err)
+		}
+		want, placeholder := logic.Int, logic.IntLit(0)
+		if isMap(indexed) && isString(indexed.Underlying().(*types.Map).Key()) {
+			want, placeholder = logic.IntSeq, logic.Fill(logic.IntLit(0), logic.IntLit(0))
+		}
+		steps[i].Index = placeholder
 		if !symbolic {
-			index, err := v.resolverOf(m.clause).IntTerm(step.index, &specEnv{v: v, sink: sink, fn: fn, args: args, now: mem})
+			index, err := v.resolverOf(m.clause).Term(step.index, &specEnv{v: v, sink: sink, fn: fn, args: args, now: mem}, want)
+			if err != nil && want == logic.IntSeq {
+				return shape{}, target{}, fmt.Errorf("a %s is indexed by a string: %w", indexed, err)
+			}
 			if err != nil {
 				return shape{}, target{}, err
 			}

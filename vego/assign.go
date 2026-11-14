@@ -409,7 +409,7 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		// proved and not assumed: assuming it would contradict a slice
 		// already at the limit and make everything after the append
 		// provable.
-		v.checkAlloc(next, nil, grown, elem, call.Pos(), "the slice append grows")
+		v.checkAlloc(next, nil, grown, elem, call.Pos(), "the slice that append grows")
 		// The new array holds the old elements and the added ones. What
 		// lies in its capacity beyond them is not said: it is certainly not
 		// what followed the old elements in their array.

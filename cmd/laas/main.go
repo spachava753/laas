@@ -70,7 +70,8 @@ func (filter *packageFilter) Match(packagePath string) bool {
 
 // trustReport prints what the proofs of the given packages take on trust,
 // instead of running the linters. It is selected by -vego.trust; any other
-// -vego. flags are passed on to the verifier.
+// -vego. flags are passed on to the verifier. The status is 3, as for
+// findings, when verification reported problems.
 func trustReport(args []string) int {
 	var patterns []string
 	for _, arg := range args {
@@ -111,6 +112,9 @@ func trustReport(args []string) int {
 	fmt.Print(vego.TrustReport(usages, dir))
 	if failures > 0 {
 		fmt.Printf("\nNote: verification reported %d problems; run laas without -vego.trust to see them.\n", failures)
+		// The report is of proofs that do not all stand, which a script
+		// that reads only the status must be able to tell.
+		return 3
 	}
 	return 0
 }

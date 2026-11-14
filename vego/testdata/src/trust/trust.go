@@ -57,7 +57,7 @@ func parsePort(n int) (port int, err error) {
 
 // Port relies on a trusted contract that does say when the callee succeeds,
 // so it has to say when it succeeds itself.
-func Port(n int) (port int, err error) { // want `vego:\ the\ contract\ of\ Port\ would\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ some\ input\ satisfies\ it`
+func Port(n int) (port int, err error) { // want `vego:\ the\ contract\ of\ Port\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ no\ simple\ input\ was\ found\ for\ which\ it\ forces\ success;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ a\ small\ input\ satisfies\ it`
 	return parsePort(n)
 }
 
@@ -250,7 +250,7 @@ func ready() (value *int, err error) { return nil, nil }
 
 // AlwaysFailsAfterReady calls a trusted function that is guaranteed to
 // succeed, so it has no excuse for failing every time.
-func AlwaysFailsAfterReady() error { // want `the contract of AlwaysFailsAfterReady would also be met by a function that always returns an error`
+func AlwaysFailsAfterReady() error { // want `the contract of AlwaysFailsAfterReady may also be met by a function that always returns an error`
 	_, _ = ready()
 	return errAlways
 }
@@ -275,7 +275,7 @@ func readyWriting(a []int) (err error) { return nil }
 // from the slice it leaves unchanged.
 //
 // @ Requires |a| = 1 And a[0] = 0
-func AlwaysFailsAfterReadyWith(a []int) error { // want `the contract of AlwaysFailsAfterReadyWith would also be met by a function that always returns an error`
+func AlwaysFailsAfterReadyWith(a []int) error { // want `the contract of AlwaysFailsAfterReadyWith may also be met by a function that always returns an error`
 	_ = readyWith(a)
 	return errAlways
 }
@@ -287,7 +287,7 @@ func AlwaysFailsAfterReadyWith(a []int) error { // want `the contract of AlwaysF
 //
 // @ Requires |a| = 1
 // @ Modifies a
-func AlwaysFailsAfterReadyWriting(a []int) error { // want `the contract of AlwaysFailsAfterReadyWriting would also be met by a function that always returns an error`
+func AlwaysFailsAfterReadyWriting(a []int) error { // want `the contract of AlwaysFailsAfterReadyWriting may also be met by a function that always returns an error`
 	_ = readyWriting(a)
 	return errAlways
 }
@@ -299,7 +299,7 @@ func readyByte() (value uint8, err error) { return 0, nil }
 // AlwaysFailsAfterReadyByte calls a trusted function whose success is
 // guarded by a condition on its own result that the result's type makes
 // true.
-func AlwaysFailsAfterReadyByte() error { // want `the contract of AlwaysFailsAfterReadyByte would also be met by a function that always returns an error`
+func AlwaysFailsAfterReadyByte() error { // want `the contract of AlwaysFailsAfterReadyByte may also be met by a function that always returns an error`
 	_, _ = readyByte()
 	return errAlways
 }
@@ -321,7 +321,7 @@ func readyAtLeast(n int) (value uint8, err error) { return 0, nil }
 
 // AlwaysFailsAfterReadyAtLeast calls a trusted function whose guard holds
 // for every byte once the argument is zero.
-func AlwaysFailsAfterReadyAtLeast() error { // want `the contract of AlwaysFailsAfterReadyAtLeast would also be met by a function that always returns an error`
+func AlwaysFailsAfterReadyAtLeast() error { // want `the contract of AlwaysFailsAfterReadyAtLeast may also be met by a function that always returns an error`
 	_, _ = readyAtLeast(0)
 	return errAlways
 }
@@ -335,7 +335,7 @@ func readyBytes(a []byte) (err error) { return nil }
 //
 // @ Requires |a| = 1
 // @ Modifies a
-func AlwaysFailsAfterReadyBytes(a []byte) error { // want `the contract of AlwaysFailsAfterReadyBytes would also be met by a function that always returns an error`
+func AlwaysFailsAfterReadyBytes(a []byte) error { // want `the contract of AlwaysFailsAfterReadyBytes may also be met by a function that always returns an error`
 	_ = readyBytes(a)
 	return errAlways
 }
@@ -346,7 +346,7 @@ func readyNil(e error) (err error) { return nil }
 
 // AlwaysFailsAfterReadyNil calls a trusted function that succeeds on every
 // call its contract admits.
-func AlwaysFailsAfterReadyNil() error { // want `the contract of AlwaysFailsAfterReadyNil would also be met by a function that always returns an error`
+func AlwaysFailsAfterReadyNil() error { // want `the contract of AlwaysFailsAfterReadyNil may also be met by a function that always returns an error`
 	_ = readyNil(nil)
 	return errAlways
 }
@@ -357,7 +357,7 @@ func readyLinked() (value uint8, err error) { return 0, nil }
 
 // AlwaysFailsAfterReadyLinked calls one whose success follows from two
 // postconditions together.
-func AlwaysFailsAfterReadyLinked() error { // want `the contract of AlwaysFailsAfterReadyLinked would also be met by a function that always returns an error`
+func AlwaysFailsAfterReadyLinked() error { // want `the contract of AlwaysFailsAfterReadyLinked may also be met by a function that always returns an error`
 	_, _ = readyLinked()
 	return errAlways
 }
@@ -407,7 +407,7 @@ func external() error { return nil }
 
 // AlwaysFailsAfterSixtyFive calls it with a string for which its contract
 // does guarantee success.
-func AlwaysFailsAfterSixtyFive() error { // want `the contract of AlwaysFailsAfterSixtyFive would also be met by a function that always returns an error`
+func AlwaysFailsAfterSixtyFive() error { // want `the contract of AlwaysFailsAfterSixtyFive may also be met by a function that always returns an error`
 	_ = readySixtyFive("01234567890123456789012345678901234567890123456789012345678901234")
 	return errAlways
 }
@@ -421,7 +421,7 @@ func writesSixtyFive(a []byte) (err error) {
 
 // AlwaysFailsAfterWriting calls a trusted function whose success follows
 // from the type of an element it writes.
-func AlwaysFailsAfterWriting() error { // want `the contract of AlwaysFailsAfterWriting would also be met by a function that always returns an error`
+func AlwaysFailsAfterWriting() error { // want `the contract of AlwaysFailsAfterWriting may also be met by a function that always returns an error`
 	a := make([]byte, 65)
 	_ = writesSixtyFive(a)
 	return errAlways
@@ -431,7 +431,7 @@ func AlwaysFailsAfterWriting() error { // want `the contract of AlwaysFailsAfter
 
 // ImpossibleLiteral promises success for a slice that cannot exist: an int8
 // cannot hold the byte 128.
-func ImpossibleLiteral(a []int8) error { // want `the contract of ImpossibleLiteral would also be met by a function that always returns an error`
+func ImpossibleLiteral(a []int8) error { // want `the contract of ImpossibleLiteral may also be met by a function that always returns an error`
 	if len(a) == 1 {
 		_ = a[0]
 	}
@@ -462,7 +462,7 @@ func SixtyFive() []byte {
 // AlwaysFailsAfterReading calls a trusted function whose success follows
 // from the type of an element of a slice it only reads, which nothing here
 // has read before.
-func AlwaysFailsAfterReading() error { // want `the contract of AlwaysFailsAfterReading would also be met by a function that always returns an error`
+func AlwaysFailsAfterReading() error { // want `the contract of AlwaysFailsAfterReading may also be met by a function that always returns an error`
 	a := SixtyFive()
 	_ = readsSixtyFive(a)
 	return errAlways
@@ -545,7 +545,7 @@ func bounce(n int) int { return Bounced(n) }
 
 // IgnoresFailure calls a function that may fail, ignores whether it did,
 // and then fails for a reason of its own. The call does not excuse it.
-func IgnoresFailure(x int) (result int, err error) { // want `the contract of IgnoresFailure would also be met by a function that always returns an error`
+func IgnoresFailure(x int) (result int, err error) { // want `the contract of IgnoresFailure may also be met by a function that always returns an error`
 	_ = external()
 	return 0, errAlways
 }
@@ -652,7 +652,7 @@ func pair() (int, error) { return 0, nil }
 
 // UsesNumberOnly uses the number a call returned in arithmetic, which adds
 // facts about it but chooses no path, and then fails on its own.
-func UsesNumberOnly() error { // want `the contract of UsesNumberOnly would also be met by a function that always returns an error`
+func UsesNumberOnly() error { // want `the contract of UsesNumberOnly may also be met by a function that always returns an error`
 	n, _ := pair()
 	_ = n / 2
 	return errAlways
@@ -672,7 +672,7 @@ func KeepsFailure() error {
 
 // KeepsOtherFailure puts the error of a call into memory next to an error
 // of its own, and returns its own.
-func KeepsOtherFailure() error { // want `the contract of KeepsOtherFailure would also be met by a function that always returns an error`
+func KeepsOtherFailure() error { // want `the contract of KeepsOtherFailure may also be met by a function that always returns an error`
 	err := external()
 	saved := []error{err, errAlways}
 	return saved[1]
@@ -682,7 +682,7 @@ func KeepsOtherFailure() error { // want `the contract of KeepsOtherFailure woul
 
 // BranchesOnOwnError keeps the error of a call in memory next to an error
 // of its own, and decides by its own.
-func BranchesOnOwnError() error { // want `the contract of BranchesOnOwnError would also be met by a function that always returns an error`
+func BranchesOnOwnError() error { // want `the contract of BranchesOnOwnError may also be met by a function that always returns an error`
 	err := external()
 	saved := []error{err, errAlways}
 	if saved[1] != nil {
@@ -710,7 +710,7 @@ func bytePair() (byte, error) { return 0, nil }
 
 // BranchesOnAnyByte branches on something every byte satisfies, so the
 // call decides nothing.
-func BranchesOnAnyByte() error { // want `the contract of BranchesOnAnyByte would also be met by a function that always returns an error`
+func BranchesOnAnyByte() error { // want `the contract of BranchesOnAnyByte may also be met by a function that always returns an error`
 	b, _ := bytePair()
 	if b >= 0 {
 		return errAlways
@@ -748,7 +748,7 @@ func AsksHelper() error {
 //@ Ensures True
 
 // AsksHelperAboutOwn asks it about an error of its own.
-func AsksHelperAboutOwn() error { // want `the contract of AsksHelperAboutOwn would also be met by a function that always returns an error`
+func AsksHelperAboutOwn() error { // want `the contract of AsksHelperAboutOwn may also be met by a function that always returns an error`
 	_ = external()
 	if hasFailed(errAlways) {
 		return errAlways
@@ -779,7 +779,7 @@ func Translates() error {
 // assigns an error of its own, which is what it returns.
 //
 // @ Requires 0 <= n <= 10
-func LoopsWithOwnError(n int) error { // want `the contract of LoopsWithOwnError would also be met by a function that always returns an error`
+func LoopsWithOwnError(n int) error { // want `the contract of LoopsWithOwnError may also be met by a function that always returns an error`
 	err := errAlways
 	//@ Invariant 0 <= i <= n
 	//@ Invariant err != nil
@@ -819,7 +819,7 @@ func ForwardsThroughLoops(n, m int) error {
 // variable.
 //
 // @ Requires 1 <= n <= 3 And 1 <= m <= 3
-func SavesBeforeSecondLoop(n, m int) error { // want `the contract of SavesBeforeSecondLoop would also be met by a function that always returns an error`
+func SavesBeforeSecondLoop(n, m int) error { // want `the contract of SavesBeforeSecondLoop may also be met by a function that always returns an error`
 	err := errAlways
 	//@ Invariant 0 <= i <= n And err != nil
 	//@ Variant n - i
@@ -921,7 +921,7 @@ func alwaysError(b byte) error { return errAlways }
 // to a function that fails for every byte.
 //
 // @ Requires 1 <= n <= 3
-func CopiesByteInLoop(n int) error { // want `the contract of CopiesByteInLoop would also be met by a function that always returns an error`
+func CopiesByteInLoop(n int) error { // want `the contract of CopiesByteInLoop may also be met by a function that always returns an error`
 	b, _ := bytePair()
 	var saved byte
 	//@ Invariant 0 <= i <= n
@@ -956,7 +956,7 @@ func NotesFailureInLoop(n int) error {
 //@ Ensures True
 
 // FailsEitherWay branches on what a call returned and fails on both sides.
-func FailsEitherWay(x int) (result int, err error) { // want `the contract of FailsEitherWay would also be met by a function that always returns an error`
+func FailsEitherWay(x int) (result int, err error) { // want `the contract of FailsEitherWay may also be met by a function that always returns an error`
 	n, _ := pair()
 	if n > 5 {
 		return 0, errAlways
@@ -970,7 +970,7 @@ var errOther = errors.New("other")
 
 // FailsAfterPassingOn passes the error of a call on, and fails on its own
 // when there is none.
-func FailsAfterPassingOn(x int) (result int, err error) { // want `the contract of FailsAfterPassingOn would also be met by a function that always returns an error`
+func FailsAfterPassingOn(x int) (result int, err error) { // want `the contract of FailsAfterPassingOn may also be met by a function that always returns an error`
 	_, err = pair()
 	if err != nil {
 		return 0, err
@@ -1042,7 +1042,7 @@ func UsesClaimsOtherChange(xs []int, p *box) {
 
 // FailsInSecondResult returns the error of a call and, next to it, an
 // error of its own every time.
-func FailsInSecondResult() (first, second error) { // want `the contract of FailsInSecondResult would also be met by a function that always returns an error`
+func FailsInSecondResult() (first, second error) { // want `the contract of FailsInSecondResult may also be met by a function that always returns an error`
 	return external(), errAlways
 }
 
@@ -1068,7 +1068,7 @@ func bounceByVariable(n int) int { return callback(n) }
 // although ruling that out takes more than the solver does.
 //
 // @ Requires -2 <= x <= 2 And -2 <= y <= 2
-func SucceedsNowhere(x, y int) error { // want `the contract of SucceedsNowhere would also be met by a function that always returns an error`
+func SucceedsNowhere(x, y int) error { // want `the contract of SucceedsNowhere may also be met by a function that always returns an error`
 	err := external()
 	if err == nil {
 		if x*x+y*y == 6 {
@@ -1086,7 +1086,7 @@ func finish(e error, x, y int) error { return errAlways }
 // never succeeds.
 //
 // @ Requires -2 <= x <= 2 And -2 <= y <= 2
-func FinishesNowhere(x, y int) error { // want `the contract of FinishesNowhere would also be met by a function that always returns an error`
+func FinishesNowhere(x, y int) error { // want `the contract of FinishesNowhere may also be met by a function that always returns an error`
 	return finish(external(), x, y)
 }
 
@@ -1096,7 +1096,7 @@ func FinishesNowhere(x, y int) error { // want `the contract of FinishesNowhere 
 // decides nothing: the function always succeeds.
 //
 // @ Requires -2 <= x <= 2 And -2 <= y <= 2
-func FailsNowhere(x, y int) error { // want `the contract of FailsNowhere would also be met by a function that always returns an error`
+func FailsNowhere(x, y int) error { // want `the contract of FailsNowhere may also be met by a function that always returns an error`
 	err := external()
 	if err != nil {
 		if x*x+y*y == 6 {
@@ -1140,7 +1140,7 @@ func FirstSuccessOfRange(xs []int) (err error) {
 // IgnoresRange calls for each element, ignores what comes back, and fails.
 //
 // @ Requires |xs| >= 1
-func IgnoresRange(xs []int) (err error) { // want `the contract of IgnoresRange would also be met by a function that always returns an error`
+func IgnoresRange(xs []int) (err error) { // want `the contract of IgnoresRange may also be met by a function that always returns an error`
 	for _, x := range xs {
 		_ = step(x)
 	}
