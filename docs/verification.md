@@ -16,7 +16,7 @@ This guide shows how to write Go that `vego` can verify. Read it from top to bot
 
 `vego` never reports a function as correct when it is not. If it cannot handle a piece of Go, it reports `cannot verify` and names the construct. If it cannot find a proof, it reports `may not hold`. That means "not proved". The code may be wrong, the contract may be wrong, or both may be right and the prover needs a hint. Much of this guide is about working out which.
 
-`vego` is experimental and supports only part of Go. It does not yet support interfaces other than `error`, closures, generics, goroutines, arrays, or package-level variables. [What is not supported](#what-is-not-supported) has the full list. Code that does I/O usually runs into these limits. The usual approach is to verify the logic and leave the code around it unverified. [Adopting it](#adopting-it) describes how.
+`vego` is experimental and supports only part of Go. It does not yet support interfaces other than `error`, closures, generics, goroutines, arrays, or package-level variables. [What is not supported](#what-is-not-supported) lists the main gaps. Code that does I/O usually runs into these limits. The usual approach is to verify the logic and leave the code around it unverified. [Adopting it](#adopting-it) describes how.
 
 ## Running it
 
@@ -274,7 +274,7 @@ func Divide(n, d int) (q, r int) {
 
 After the loop, `vego` knows the invariant and that the loop condition is false. Here that gives `n = d*q + r`, `0 <= r`, and `r < d`, which is the postcondition.
 
-**After a loop, `vego` knows nothing about the variables the loop changed except what the invariant states.** If a proof fails in the code after a loop, the invariant is usually missing a fact.
+**After a loop, `vego` knows nothing about the variables the loop changed except what the invariant states.** If a proof fails in the code after a loop and the fact is true, the invariant is too weak: it is missing something you know about the loop variables.
 
 A `Variant` proves that a `for` loop terminates. It is an integer expression that is never negative while the loop runs and that decreases on every iteration. Every `for` loop needs one.
 
@@ -441,7 +441,7 @@ func Cell(i, j, w, h int) int {
 //@ Ensures 0 <= result < h*w
 ```
 
-`-vego.max-steps` raises the limit on how much work the prover does for one proof obligation. Try it last. Most failures are caused by a missing fact, which more effort cannot supply, and a higher limit makes every later run slower.
+`-vego.max-steps` raises the limit on how much work the prover does for one proof obligation. Try it last. Most failures are caused by a missing fact, which more effort cannot supply. A proof that needs the higher limit is also slow every time the tool runs.
 
 ## Changing memory
 
@@ -660,7 +660,7 @@ A call to a function that has a `Modifies` clause is allowed in three places:
 
 - as a statement on its own;
 - as the only expression in a `return`;
-- as the entire right-hand side of an assignment to variables or their fields.
+- as the entire right-hand side of an assignment to local variables or their fields. An assignment through a pointer, to a slice element, or to a map entry does not qualify.
 
 Consider a method that changes the stack and also returns a value:
 
@@ -903,7 +903,7 @@ return 0, fmt.Errorf("bad quantity %q: %w", line, ErrRange)
 
 ### Other limits
 
-`vego` does not know which error a value is. Two errors cannot be compared with `==`. `errors.Is` and `errors.As` are not supported, so a contract cannot say "returns `ErrEmpty` when the slice is empty". An error variable from another package, such as `io.EOF`, cannot be read.
+`vego` does not know which error a value is. Two errors cannot be compared with `==`. `errors.Is` and `errors.As` are not supported, so a contract cannot say "returns `ErrEmpty` when the slice is empty". Both call the `Is` and `Unwrap` methods of the error they receive. A trusted contract for them could therefore accept errors from outside only by listing its parameters under `runs`, as described in [Arguments that carry code](#arguments-that-carry-code). Even then, nothing would be known about the result. An error variable from another package, such as `io.EOF`, cannot be read.
 
 A package-level error is known to be non-nil only under these conditions. Nothing in its package assigns to it or takes its address. And no code in the package can run before the variable is initialised. A package loses this knowledge if its variable initialisers call function values or pass values of the package to other packages. `vego` then reports an error where the variable is read.
 
@@ -950,7 +950,7 @@ Only a call to a named function or method can be deferred. `defer` inside a loop
 
 ### Locks
 
-`vego` has no contract for `sync.Mutex`, and you should not write a trusted one. `Lock` blocks forever if the goroutine already holds the mutex. `Unlock` crashes the program if the mutex is not locked. A contract without a condition on the lock's state would claim that both calls always return, and `vego` would then accept a double `Lock` or an `Unlock` without a `Lock`. The condition cannot be stated in a portable way. A formula could only refer to the private fields of the mutex, which would tie the contract to one version of Go.
+`vego` has no contract for `sync.Mutex`, and you should not write the obvious trusted one, with no conditions. `Lock` blocks forever if the goroutine already holds the mutex. `Unlock` crashes the program if the mutex is not locked. A contract without a condition on the lock's state would claim that both calls always return, and `vego` would then accept a double `Lock` or an `Unlock` without a `Lock`. The condition cannot be stated in a portable way. A formula could only refer to the private fields of the mutex, which would tie the contract to one version of Go.
 
 Keep locking outside the verified code instead. An unverified function takes the lock and calls a verified function to do the work:
 
@@ -999,7 +999,7 @@ The translation works as follows.
 - A shift count that may be negative is an error.
 - `x & m`, where `m` is a constant mask of low bits, is a remainder. For non-negative `x`, `x & 0xFF` equals `x % 256`. For negative `x` the result is still non-negative, so `-1 & 0xFF` is 255, while `-1 % 256` is -1.
 - `x & m`, where `m` is a single bit, is that bit of `x`.
-- For any other `x & y`, only bounds are known.
+- For `x & y` in general, only bounds are known. A few simple cases are exact, such as `x & x` and `x & 0`.
 - `x | y`, `x ^ y`, and `x &^ y` are computed from `x & y`. They are known exactly when `x & y` is.
 - After `f |= m`, `vego` knows that `f & m` equals `m`.
 
@@ -1011,7 +1011,7 @@ Formulas have no bit operators. Use `*`, `/`, and `%` in contracts.
 
 Verified code often has to call code that is not verified. This includes the standard library, other modules, and your own functions that use Go `vego` does not support. To make such a function callable, give it a trusted contract. `vego` uses a trusted contract without checking it.
 
-All trusted contracts for a module are in one file, `vego-trusted.yaml`, next to `go.mod`. Trust cannot be declared in source code, so this file contains every unchecked contract your proofs depend on.
+All trusted contracts for a module are in one file, `vego-trusted.yaml`, next to `go.mod`. Trust cannot be declared in source code, so this file contains every trusted contract that your module adds.
 
 ```yaml
 version: 1
@@ -1033,7 +1033,7 @@ Each entry has these fields:
 | `modifies` | yes | What the function may write, in the form of a `Modifies` clause. `[x]` is the elements of slice `x`, `[b]` is the struct `b` points to, and `[b.count]` is one field. Write `modifies: []` if it writes nothing a caller can see. |
 | `requires` | no | A list of formulas. Callers must prove each one. |
 | `ensures` | no | A list of formulas. Callers can assume each one. |
-| `runs` | no | Parameters that carry code the function may call. See [Arguments that carry code](#arguments-that-carry-code). |
+| `runs` | no | Parameters that carry code the function may call, at any depth inside the value. See [Arguments that carry code](#arguments-that-carry-code). |
 
 Put the formulas in quotes. Several characters that formulas use have a special meaning in YAML.
 
@@ -1053,7 +1053,7 @@ The contracts are in `vego/trusted/std` in the source of `laas`. An entry in you
 
 ### Arguments that carry code
 
-A trusted contract describes what the function's own code does. Some arguments bring code with them. An `error` has methods. So does any interface value, and a struct can have a field that holds a function. A trusted function could call that code, for example `err.Error()` or `l.sink(text)`, and the code could write memory that your proof depends on.
+A trusted contract describes what the function's own code does. Some arguments bring code with them. An `error` has methods, and their code is chosen by whoever created the error. The same is true of other interface values. A struct can have a field that holds a function, and the value can be nested at any depth inside a struct, slice, or map. A trusted function could call that code, for example `err.Error()` or `l.sink(text)`, and the code could write memory that your proof depends on.
 
 For this reason `vego` refuses to pass such a value to a trusted function:
 
@@ -1096,7 +1096,7 @@ A trusted contract does not make an unsupported signature callable. If a functio
 
 A function cannot have both annotations and a trusted contract. When you verify a function that you previously trusted, delete its entry.
 
-`vego` assumes nothing about a trusted function beyond its contract. For example, a returned pointer or slice could be anything unless the contract says `fresh(result)`.
+`vego` knows nothing about the results of a trusted function beyond what the contract states. For example, a returned pointer or slice could refer to any memory unless the contract says `fresh(result)`.
 
 ### The trust report
 
@@ -1151,7 +1151,7 @@ func At(A []int, i int) (x int, err error) {
 //@ Ensures err = nil -> x = A[i]
 ```
 
-The second is that package-level variables are not supported, except for error variables. A function that reads a global variable must receive the value as a parameter instead.
+The second is that package-level variables are not supported. The only exception is an error variable that is initialised with `errors.New` or `fmt.Errorf` and never assigned, as described in [Errors](#errors). A function that reads a global variable must receive the value as a parameter instead.
 
 ### For one core component
 
@@ -1163,7 +1163,7 @@ The steps are the same, but design the component first so that it stays within t
 - Give each method the smallest `Modifies` list that works. If a method can replace a slice, add the clause described in [A slice that grows inside a struct](#a-slice-that-grows-inside-a-struct).
 - Use `<->` to state when a function returns an error, where possible.
 
-Then run the audit. Finally, write the unverified callers at the boundary so that they check the preconditions in code.
+Then run the audit. Finally, write the callers at the boundary so that they check the preconditions in code.
 
 ### In a new module
 
@@ -1232,7 +1232,7 @@ This table lists the most common messages.
 | `cannot verify F: it calls G, which has no contract` | `G` is neither verified nor trusted. | Annotate `G`, or add it to the trust file. |
 | `cannot verify F: parameter x has unsupported type T` | `T` is outside the supported subset. | Keep `T` out of the signatures of verified functions. |
 | `cannot verify F: x is not a local variable` | `F` uses a package-level variable. | Pass the value as a parameter. |
-| `cannot verify F: formatting err would run the methods of an error whose origin is not known` | `fmt.Errorf` is given an error that verified code did not create. | Return the error unchanged, or wrap your own error. |
+| `cannot verify F: formatting err would run the methods of an error whose origin is not known` | `fmt.Errorf` is given an error whose origin is not known, such as one from a trusted function or a parameter. | Return the error unchanged, or wrap your own error. |
 | `x is passed to F, which is trusted, and is an error whose origin is not known` (or `a value of type T, which can hold an error, an interface, or a function`) | The trusted function `F` could call code that `x` carries. | See [Arguments that carry code](#arguments-that-carry-code). |
 | `the trusted contract of F cannot be true of this call` | The contract contradicts what is known at the call. | The entry is wrong, or it needs a `requires` clause. |
 | `the trusted contract ... cannot be used` | The entry in the trust file is invalid. The message says why. | Fix the entry. Check the parameter names. |
@@ -1248,7 +1248,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - goroutines, channels, and `select`;
 - arrays, and structs that contain an array;
 - pointers to anything other than a struct;
-- package-level variables, except error variables;
+- package-level variables, except error variables initialised with `errors.New` or `fmt.Errorf` and never assigned;
 - calls to variadic functions other than `fmt.Errorf`;
 - `append(s, t...)` and `copy`;
 - a modifying call inside a condition or a larger expression, as in `if !s.Push(x)` (see [Where a modifying call can appear](#where-a-modifying-call-can-appear));
@@ -1271,7 +1271,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - Packages that `laas` does not analyse do not reassign exported error variables.
 - The program runs on the platform `laas` was run for. A proof for a 64-bit target does not hold for a 32-bit target.
 - The machine has enough memory and stack.
-- Formulas are well defined. `vego` does not check formulas for out-of-range indexes or division by zero. See [Formulas](#formulas).
+- Your formulas say what you intend. `vego` does not check a formula for out-of-range indexes or division by zero, so a formula that contains one may mean something other than you expect. See [Formulas](#formulas).
 
 ## Summary
 
