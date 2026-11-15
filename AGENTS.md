@@ -15,6 +15,10 @@ GOTOOLCHAIN=go1.26.6 go run ./cmd/laas ./...
 
 The pinned `golang.org/x/tools` cannot read packages built by Go 1.27 or newer, so the second command needs the toolchain named in `go.mod`.
 
+## Documentation
+
+`docs/AGENTS.md` has the rules for writing documentation: how the text should read, and how its claims are checked. Follow it for anything in `docs/` and for the user-facing sections of the README.
+
 ## Heavy work must not take the machine down
 
 Every agent on this machine, and everything any agent starts, runs inside one systemd scope together with the app that hosts the agents. When memory and swap run out, `systemd-oomd` kills that whole scope: every agent thread of every project stops at once and loses whatever it had not saved. This has happened several times, each time during fuzzing or mutation runs that an agent had started without a limit.
