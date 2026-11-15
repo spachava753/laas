@@ -903,7 +903,7 @@ return 0, fmt.Errorf("bad quantity %q: %w", line, ErrRange)
 
 ### Other limits
 
-`vego` does not know which error a value is. Two errors cannot be compared with `==`. `errors.Is` and `errors.As` are not supported, so a contract cannot say "returns `ErrEmpty` when the slice is empty". Both call the `Is` and `Unwrap` methods of the error they receive. A trusted contract for them could therefore accept errors from outside only by listing its parameters under `runs`, as described in [Arguments that carry code](#arguments-that-carry-code). Even then, nothing would be known about the result. An error variable from another package, such as `io.EOF`, cannot be read.
+`vego` does not know which error a value is. Two errors cannot be compared with `==`. `errors.Is` and `errors.As` are not supported, so a contract cannot say "returns `ErrEmpty` when the slice is empty". `errors.Is` can call the `Is` and `Unwrap` methods of the error it receives, and `errors.As` can call its `As` and `Unwrap` methods. A trusted contract for them could therefore accept errors from outside only by listing its parameters under `runs`, as described in [Arguments that carry code](#arguments-that-carry-code). Even then, nothing would be known about the result. An error variable from another package, such as `io.EOF`, cannot be read.
 
 A package-level error is known to be non-nil only under these conditions. Nothing in its package assigns to it or takes its address. And no code in the package can run before the variable is initialised. A package loses this knowledge if its variable initialisers call function values or pass values of the package to other packages. `vego` then reports an error where the variable is read.
 
@@ -1096,7 +1096,7 @@ A trusted contract does not make an unsupported signature callable. If a functio
 
 A function cannot have both annotations and a trusted contract. When you verify a function that you previously trusted, delete its entry.
 
-`vego` knows nothing about the results of a trusted function beyond what the contract states. For example, a returned pointer or slice could refer to any memory unless the contract says `fresh(result)`.
+`vego` knows nothing about the results of a trusted function beyond what the contract states. For example, a returned pointer or slice could refer to any memory unless the contract restricts it, for example with `fresh(result)`.
 
 ### The trust report
 
