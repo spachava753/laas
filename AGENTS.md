@@ -10,10 +10,10 @@ Before finishing a change, run the tests and run `laas` on itself:
 
 ```sh
 go test ./...
-GOTOOLCHAIN=go1.26.6 go run ./cmd/laas ./...
+go run ./cmd/laas ./...
 ```
 
-The pinned `golang.org/x/tools` cannot read packages built by Go 1.27 or newer, so the second command needs the toolchain named in `go.mod`.
+`laas` must be built by a Go that is at least as new as the `go` command it finds when it runs. `go run` builds it with that same `go`, so the command above works on any toolchain. A `laas` binary built earlier by an older Go fails with errors about the standard library; rebuild it, or set `GOTOOLCHAIN` to the version that built it.
 
 ## Documentation
 
