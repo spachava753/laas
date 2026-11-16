@@ -423,6 +423,17 @@ func extractClauses(group *ast.CommentGroup, otherTags map[string]bool) []*claus
 			}
 			return r
 		}, comment.Text)
+		// Some characters end a line on the screen and not for Go. Behind
+		// one, an annotation looks as if it stood on a line of its own
+		// while it is read as the rest of the line before it.
+		// (Go itself takes the carriage returns of Windows line ends out of a
+		// comment, so one that is left stands alone.)
+		if strings.Contains(written, "@") && strings.ContainsAny(written, "\u2028\u2029\u0085\v\f\r") {
+			clauses = append(clauses, &clause{pos: comment.Pos(),
+				misplaced: "this comment has an @ and a character that ends a line on the screen but not for Go, such as U+2028; remove the character, so that what is read is what is seen"})
+			current = nil
+			continue
+		}
 		if strings.HasPrefix(written, "/*") {
 			// A keyword after an @ anywhere in the comment, or any word
 			// after one that starts a line.

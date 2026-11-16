@@ -663,3 +663,23 @@ func TagQuotes(x int) (r int) {
  @Ensures r = 1
 */
 func BlockSlashes() (r int) { return 0 }
+
+// LineSeparator has a character in its doc comment that ends a line on the
+// screen and not for Go, so that the annotation after it looks like a line
+// of its own.
+//
+// note // @Ensures r > 100 // want `vego: this comment has an @ and a character that ends a line on the screen but not for Go, such as U\+2028; remove the character, so that what is read is what is seen`
+func LineSeparator(x int) (r int) {
+	return 50
+}
+
+// SeparatedContinuation has one before what looks like a continuation.
+//
+// @Ensures r >= 0 // @ And r > 100 // want `vego: this comment has an @ and a character that ends a line on the screen but not for Go, such as U\+2028; remove the character, so that what is read is what is seen`
+func SeparatedContinuation(x int) (r int) {
+	return 50
+}
+
+// SeparatorInBlock has one in a block comment.
+/* note // @Ensures r > 100 */ // want `vego: this comment has an @ and a character that ends a line on the screen but not for Go, such as U\+2028; remove the character, so that what is read is what is seen`
+func SeparatorInBlock(x int) (r int) { return 50 }
