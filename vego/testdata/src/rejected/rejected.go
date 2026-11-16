@@ -276,7 +276,7 @@ func ResultField(x struct{ result int }) (result int) {
 }
 
 // @ Requires True
-/* // want `vego: annotations are only read from // comments, not from /\* \*. comments`
+/* // want `vego: annotations are only read from // comments, not from /\* \*. comments` `vego: a comment directly after an annotation is not read as part of it; continue an annotation with "// @ ...", or put an empty // line before a comment`
 InBlock has an annotation inside a block comment, after other text.
 @Ensures result = 0
 */
@@ -294,7 +294,7 @@ func LocalTrue(a int8) (result bool) {
 }
 
 // @ Requires True
-/* InBlockLater has a note @ Ensures result = 0 that comes after other text on its line. */ // want `vego: annotations are only read from // comments, not from /\* \*. comments`
+/* InBlockLater has a note @ Ensures result = 0 that comes after other text on its line. */ // want `vego: annotations are only read from // comments, not from /\* \*. comments` `vego: a comment directly after an annotation is not read as part of it; continue an annotation with "// @ ...", or put an empty // line before a comment`
 func InBlockLater() (result int) { return 1 }
 
 // OldPrefix writes an annotation without the space after the slashes.
@@ -371,7 +371,7 @@ func OtherTools(x int) (r int) {
 // comment, which would be left out of it.
 //
 // @ Ensures r >= 0
-//   And r > 100 // want `vego: a comment line directly after an annotation is not read as part of it; continue an annotation with "// @ ...", or leave a line empty before a comment`
+//   And r > 100 // want `vego: a comment directly after an annotation is not read as part of it; continue an annotation with "// @ ...", or put an empty // line before a comment`
 func Wrapped(x int) (r int) {
 	return 0
 }
@@ -434,4 +434,60 @@ func InSignature(
 	x int,
 ) (r int) {
 	return x
+}
+
+// DoubledAt writes the @ twice.
+//
+// @@ Ensures r > 100 // want `vego: an annotation is written "// @ ...", with nothing but one space between // and @`
+func DoubledAt(x int) (r int) {
+	return 0
+}
+
+// DoubledAtAfter does so after another clause, which the line is then
+// taken to continue.
+//
+// @ Requires x >= 0 // want `vego: syntax error in Requires annotation: unexpected character '@'`
+// @@ Ensures r > 100
+func DoubledAtAfter(x int) (r int) {
+	return 0
+}
+
+// InFrontMisspelt has other text before an @ with a keyword that is almost
+// right.
+//
+// @ Requires x >= 0
+// post: @ ensures r > 100 // want `vego: an annotation is written "// @ ...", with nothing but one space between // and @`
+func InFrontMisspelt(x int) (r int) {
+	return 0
+}
+
+// InAside writes a second annotation in the comment that ends the first.
+//
+// @ Requires x >= 0 // post: @ Ensures r > 100 // want `vego: an annotation is written "// @ ...", with nothing but one space between // and @`
+func InAside(x int) (r int) {
+	return 0
+}
+
+// ZeroWidth has a character after the @ that takes no room. The keyword is
+// read as if it were not there.
+//
+// @​Ensures r > 100
+func ZeroWidth(x int) (r int) {
+	return 0 // want `vego: postcondition may not hold: r > 100`
+}
+
+// BlockAfter continues its postcondition in a block comment.
+//
+// @ Ensures r >= 0
+/* And r > 100 */ // want `vego: a comment directly after an annotation is not read as part of it; continue an annotation with "// @ ...", or put an empty // line before a comment`
+func BlockAfter(x int) (r int) {
+	return 0
+}
+
+// CommentedOut has an annotation behind slashes of its own, which is how a
+// line is taken out, and is not read.
+//
+// // @ Ensures r > 100
+func CommentedOut(x int) (r int) {
+	return 0
 }

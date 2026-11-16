@@ -350,8 +350,10 @@ var (
 	annotationLine = regexp.MustCompile(`^//([\s\p{Z}]*)@([\s\p{Z}]*)(.*)$`)
 	// quotedComment matches an annotation shown with its own //, inside
 	// a comment.
-	quotedComment   = regexp.MustCompile(`//[\s\p{Z}]*@[\s\p{Z}]*\w+`)
-	anyAnnotation   = regexp.MustCompile(`@\s*(\w+)`)
+	quotedComment = regexp.MustCompile(`//[^\pL@]*@[^\pL]*\pL+`)
+	// anyAnnotation finds the word after an @ wherever it stands, with
+	// whatever is not a letter in between.
+	anyAnnotation   = regexp.MustCompile(`@[^\pL]*(\pL+)`)
 	blockAnnotation = regexp.MustCompile(`(?m)^(?:/\*)?[\s*]*@\s*(\w*)`)
 	clauseKinds     = map[string]bool{
 		"Requires": true, "Ensures": true, "Invariant": true, "Variant": true,
@@ -399,33 +401,39 @@ func extractClauses(group *ast.CommentGroup) []*clause {
 					misplaced: "annotations are only read from // comments, not from /* */ comments"})
 			}
 		}
-		match := annotationLine.FindStringSubmatch(comment.Text)
+		// A character that takes no room, such as a zero-width space, is
+		// not there for a reader, so it is not there for the scanner.
+		written := strings.Map(func(r rune) rune {
+			if unicode.Is(unicode.Cf, r) {
+				return -1
+			}
+			return r
+		}, comment.Text)
+		match := annotationLine.FindStringSubmatch(written)
 		if match == nil {
-			text := strings.TrimPrefix(comment.Text, "//")
-			// An @ with a keyword further along the line is an annotation
-			// that something was put in front of. One that follows its own
-			// // is an annotation being shown, as in an example in a doc
-			// comment or a message of this tool that a comment quotes.
-			shown := quotedComment.ReplaceAllString(text, "")
-			stray := slices.ContainsFunc(anyAnnotation.FindAllStringSubmatch(shown, -1), func(found []string) bool {
-				return clauseKinds[found[1]] || retiredKinds[found[1]] != ""
-			})
+			text := strings.TrimPrefix(written, "//")
+			block := strings.HasPrefix(written, "/*")
 			switch {
-			case strings.HasPrefix(comment.Text, "/*"):
-			case stray:
+			case !block && stray(text):
 				clauses = append(clauses, &clause{pos: comment.Pos(),
 					misplaced: `an annotation is written "// @ ...", with nothing but one space between // and @`})
-			case current != nil && strings.TrimSpace(text) != "":
+			case current != nil && (block || strings.TrimSpace(text) != ""):
 				// A clause is continued with "// @", so this line would be
 				// left out of it without a word.
 				clauses = append(clauses, &clause{pos: comment.Pos(),
-					misplaced: `a comment line directly after an annotation is not read as part of it; continue an annotation with "// @ ...", or leave a line empty before a comment`})
+					misplaced: `a comment directly after an annotation is not read as part of it; continue an annotation with "// @ ...", or put an empty // line before a comment`})
 			}
 			current = nil
 			continue
 		}
-		line, _, _ := strings.Cut(match[3], "//")
+		line, aside, _ := strings.Cut(match[3], "//")
 		line = strings.TrimSpace(line)
+		// The comment an annotation line ends in is not read, so an
+		// annotation written there would go unnoticed.
+		if stray(aside) {
+			clauses = append(clauses, &clause{pos: comment.Pos(),
+				misplaced: `an annotation is written "// @ ...", with nothing but one space between // and @`})
+		}
 		// The keyword is the run of letters the line starts with, so that
 		// one written without a space before its formula is still one.
 		keyword := line
@@ -455,11 +463,28 @@ func extractClauses(group *ast.CommentGroup) []*clause {
 		case isAnnotation:
 			current = nil
 			clauses = append(clauses, &clause{text: word, pos: comment.Pos()})
+		case stray(line):
+			// A second @, or other signs, before a keyword.
+			current = nil
+			clauses = append(clauses, &clause{pos: comment.Pos(),
+				misplaced: `an annotation is written "// @ ...", with nothing but one space between // and @`})
 		default:
 			current = nil
 		}
 	}
 	return clauses
+}
+
+// stray reports whether a piece of comment text has an @ followed by a
+// keyword, or by something close to one, where no annotation is read. An
+// annotation that follows its own //, as in an example in a doc comment, a
+// message of this tool that a comment quotes, or a line that was commented
+// out, is one being shown and does not count.
+func stray(text string) bool {
+	shown := quotedComment.ReplaceAllString(text, "")
+	return slices.ContainsFunc(anyAnnotation.FindAllStringSubmatch(shown, -1), func(found []string) bool {
+		return plannedKinds[found[1]] || retiredKinds[found[1]] != "" || nearKeyword(found[1])
+	})
 }
 
 // nearKeyword reports whether a word is an annotation keyword, or so close
