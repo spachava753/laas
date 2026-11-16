@@ -506,3 +506,25 @@ func SpaceAfterAt(x int) (r int) {
 func GluedContinuation(x int) (r int) {
 	return 0
 }
+
+// BlockRetired has a keyword of an earlier version in a block comment.
+/* @Measure n */ // want `vego: annotations are only read from // comments, not from /\* \*/ comments`
+func BlockRetired(n int) (r int) { return n }
+
+// BlockMisspelt has a keyword that is almost right after other text there.
+/* note: @ensures r > 100 */ // want `vego: annotations are only read from // comments, not from /\* \*/ comments`
+func BlockMisspelt(n int) (r int) { return n }
+
+// SignsAfterAt has signs between the @ and the keyword.
+//
+// @- Ensures r > 100 // want `vego: an annotation is written "// @Keyword ...", with nothing but one space between // and @`
+func SignsAfterAt(x int) (r int) {
+	return 0
+}
+
+// StarsAfterAt writes the keyword in bold.
+//
+// @**Ensures** r > 100 // want `vego: an annotation is written "// @Keyword ...", with nothing but one space between // and @`
+func StarsAfterAt(x int) (r int) {
+	return 0
+}

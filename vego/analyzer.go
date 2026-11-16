@@ -392,10 +392,8 @@ func extractClauses(group *ast.CommentGroup) []*clause {
 		if strings.HasPrefix(comment.Text, "/*") {
 			// A keyword after an @ anywhere in the comment, or something
 			// close to one at the start of a line.
-			found := slices.ContainsFunc(blockAnnotation.FindAllStringSubmatch(comment.Text, -1), func(block []string) bool {
+			found := stray(comment.Text) || slices.ContainsFunc(blockAnnotation.FindAllStringSubmatch(comment.Text, -1), func(block []string) bool {
 				return nearKeyword(block[1])
-			}) || slices.ContainsFunc(anyAnnotation.FindAllStringSubmatch(comment.Text, -1), func(block []string) bool {
-				return clauseKinds[block[1]]
 			})
 			if found {
 				clauses = append(clauses, &clause{pos: comment.Pos(),
@@ -467,8 +465,8 @@ func extractClauses(group *ast.CommentGroup) []*clause {
 		case isAnnotation:
 			current = nil
 			clauses = append(clauses, &clause{text: word, pos: comment.Pos()})
-		case stray(line):
-			// A second @, or other signs, before a keyword.
+		case stray("@" + match[3]):
+			// Signs, or a second @, between the @ and a keyword.
 			current = nil
 			clauses = append(clauses, &clause{pos: comment.Pos(),
 				misplaced: `an annotation is written "// @Keyword ...", with nothing but one space between // and @`})
