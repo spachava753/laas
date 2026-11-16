@@ -645,3 +645,13 @@ func BlockDeclared(x int) (r int) { return 50 }
 func TagHides(x int) (r int) {
 	return 0
 }
+
+// TagQuotes has a declared tag whose line shows an annotation behind
+// slashes of its own, as an ordinary comment may.
+//
+// @Summary once written // @Ensures r > 100
+//
+// @Ensures r = 0
+func TagQuotes(x int) (r int) {
+	return 0
+}

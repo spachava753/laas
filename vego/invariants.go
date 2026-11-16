@@ -129,7 +129,7 @@ func (pv *pkgVerifier) exportInvariants() {
 		if set == nil || name.Pkg() != pv.pass.Pkg || name.Parent() != pv.pass.Pkg.Scope() {
 			continue
 		}
-		fact := &invariantFact{Consts: map[string]string{}, Broken: set.broken || pv.predicatesBroken}
+		fact := &invariantFact{Consts: map[string]string{}, Broken: set.broken || pv.predicatesBroken || pv.unread}
 		var visit func(n *logic.Node)
 		visit = func(n *logic.Node) {
 			if constant, ok := pv.pass.Pkg.Scope().Lookup(n.Name).(*types.Const); ok && n.Kind == logic.NIdent {

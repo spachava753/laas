@@ -89,6 +89,8 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"iter"
+	"maps"
 	"reflect"
 	"regexp"
 	"slices"
@@ -316,7 +318,10 @@ type pkgVerifier struct {
 	// foreignBroken holds the packages whose predicates could not be read.
 	predicateTexts   []string
 	predicatesBroken bool
-	foreignBroken    map[*types.Package]bool
+	// unread is set when a comment of the package looked like an annotation
+	// and was not read as one.
+	unread        bool
+	foreignBroken map[*types.Package]bool
 	// current is the function being verified, which a diagnostic counts
 	// against.
 	current *funcInfo
@@ -444,6 +449,22 @@ func extractClauses(group *ast.CommentGroup, otherTags map[string]bool) []*claus
 		}
 		line, aside, _ := strings.Cut(match[3], "//")
 		line = strings.TrimSpace(line)
+		// A tag that was declared to be another tool's makes the line an
+		// ordinary comment, with all that holds for one: an annotation
+		// further along it is out of place unless it is shown behind
+		// slashes of its own, and the line may not follow an annotation
+		// directly. A keyword of this language is never such a tag.
+		if tag, letters := leadingWord(line); match[2] == "" && !protected(letters) && (otherTags[tag] || otherTags[letters]) {
+			switch text := strings.TrimPrefix(written, "//"); {
+			case stray(strings.Replace(text, "@", " ", 1)):
+				clauses = append(clauses, &clause{pos: comment.Pos(),
+					misplaced: `an annotation is written "// @Keyword ...", with nothing but one space between // and @`})
+			case current != nil:
+				clauses = append(clauses, &clause{pos: comment.Pos(), misplaced: afterAnnotation})
+			}
+			current = nil
+			continue
+		}
 		// The comment an annotation line ends in is not read, so an
 		// annotation written there would go unnoticed.
 		if stray(aside) {
@@ -452,31 +473,12 @@ func extractClauses(group *ast.CommentGroup, otherTags map[string]bool) []*claus
 		}
 		// The keyword is the run of letters the line starts with, so that
 		// one written without a space before its formula is still one.
-		keyword := line
-		if end := strings.IndexFunc(line, func(r rune) bool { return !unicode.IsLetter(r) }); end >= 0 {
-			keyword = line[:end]
-		}
-		word := line
-		if end := strings.IndexFunc(line, unicode.IsSpace); end >= 0 {
-			word = line[:end]
-		}
+		word, keyword := leadingWord(line)
 		known := clauseKinds[keyword] || plannedKinds[keyword] || retiredKinds[keyword] != ""
 		// The same line as it is written, from where the @ and the space
 		// after it end.
 		payload, _, _ := strings.Cut(comment.Text[unhidden(comment.Text, len(written)-len(match[3])):], "//")
 		switch {
-		case match[2] == "" && (otherTags[word] || otherTags[keyword]):
-			// A tag that was declared to be another tool's is an ordinary
-			// comment line, and like one it may not follow an annotation
-			// directly.
-			switch {
-			case stray(line):
-				clauses = append(clauses, &clause{pos: comment.Pos(),
-					misplaced: `an annotation is written "// @Keyword ...", with nothing but one space between // and @`})
-			case current != nil:
-				clauses = append(clauses, &clause{pos: comment.Pos(), misplaced: afterAnnotation})
-			}
-			current = nil
 		case match[1] != " ", known && match[2] != "":
 			// One spelling: a space before the @, and the keyword directly
 			// after it.
@@ -540,7 +542,7 @@ func parseOtherTags(list string) (map[string]bool, error) {
 		case tag == "":
 		case strings.ContainsFunc(tag, unicode.IsSpace) || strings.Contains(tag, "@"):
 			return nil, fmt.Errorf("-vego.other-tags: %q is not a single word", tag)
-		case plannedKinds[tag] || retiredKinds[tag] != "" || nearKeyword(tag):
+		case protected(tag) || protected(lettersOf(tag)):
 			return nil, fmt.Errorf("-vego.other-tags: %q is a keyword of vego's annotations or too close to one to be declared as another tool's", tag)
 		default:
 			tags[tag] = true
@@ -558,11 +560,8 @@ func parseOtherTags(list string) (map[string]bool, error) {
 func leading(text string, otherTags map[string]bool) bool {
 	shown := quotedComment.ReplaceAllString(text, "")
 	return slices.ContainsFunc(leadingAt.FindAllStringSubmatch(shown, -1), func(found []string) bool {
-		letters := found[1]
-		if end := strings.IndexFunc(letters, func(r rune) bool { return !unicode.IsLetter(r) }); end >= 0 {
-			letters = letters[:end]
-		}
-		return !otherTags[found[1]] && !otherTags[letters]
+		letters := lettersOf(found[1])
+		return protected(letters) || (!otherTags[found[1]] && !otherTags[letters])
 	})
 }
 
@@ -588,6 +587,43 @@ func nearKeyword(word string) bool {
 		}
 	}
 	return false
+}
+
+// protected reports whether a word belongs to this language beyond doubt,
+// so that it cannot be declared as another tool's: a keyword or something
+// near one, or a planned or retired keyword in any case.
+func protected(word string) bool {
+	if nearKeyword(word) {
+		return true
+	}
+	for _, kinds := range []iter.Seq[string]{maps.Keys(plannedKinds), maps.Keys(retiredKinds)} {
+		for keyword := range kinds {
+			if strings.EqualFold(word, keyword) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// lettersOf returns the run of letters a word starts with.
+func lettersOf(word string) string {
+	_, letters := leadingWord(word)
+	return letters
+}
+
+// leadingWord returns what a line starts with up to the first space, and
+// the run of letters it starts with, which is where a keyword would be: one
+// written without a space before its formula is still one.
+func leadingWord(line string) (word, letters string) {
+	word, letters = line, line
+	if end := strings.IndexFunc(line, unicode.IsSpace); end >= 0 {
+		word = line[:end]
+	}
+	if end := strings.IndexFunc(line, func(r rune) bool { return !unicode.IsLetter(r) }); end >= 0 {
+		letters = line[:end]
+	}
+	return word, letters
 }
 
 // distance returns how many letters have to be added, dropped, or replaced
@@ -627,6 +663,12 @@ func (pv *pkgVerifier) collect() {
 		}
 		for _, group := range file.Comments {
 			for _, c := range extractClauses(group, pv.otherTags) {
+				// An annotation that was not read may have been meant for
+				// any function of the package, so none of them is handed
+				// to other packages as verified.
+				if c.misplaced != "" || c.kind == "" || plannedKinds[c.kind] {
+					pv.unread = true
+				}
 				if c.misplaced != "" {
 					pv.report(c.pos, "%s", c.misplaced)
 					continue
@@ -991,10 +1033,12 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 	case next != nil && next.Doc == group:
 		fn = pv.funcs[pv.info.Defs[next.Name].(*types.Func)]
 	case c.kind == "Invariant" || c.kind == "Assert":
+		pv.unread = true
 		pv.report(c.pos, "%s annotation is not attached to anything; "+
 			"it stands inside a function body, or, for an Invariant, in the doc comment of a struct type", c.kind)
 		return nil
 	default:
+		pv.unread = true
 		pv.report(c.pos, "%s annotation is not attached to a function; "+
 			"put it in the comment directly above the function", c.kind)
 		return nil
