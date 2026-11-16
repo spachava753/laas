@@ -1279,6 +1279,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - No other goroutine writes memory that a verified function reads or writes while it runs. A proof covers one goroutine.
 - Packages that `laas` does not analyse do not reassign exported error variables.
 - The program runs on the platform `laas` was run for. A proof for a 64-bit target does not hold for a 32-bit target.
+- The program is built from the files `laas` read. Files left out by a build constraint or a file name such as `_windows.go` are not read, so their annotations are not checked. Run `laas` once for each configuration you ship.
 - The machine has enough memory and stack.
 - Your formulas say what you intend. `vego` does not check a formula for out-of-range indexes or division by zero, so a formula that contains one may mean something other than you expect. See [Formulas](#formulas).
 
