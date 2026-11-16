@@ -423,9 +423,9 @@ func extractClauses(group *ast.CommentGroup, otherTags map[string]bool) []*claus
 		// Some characters end a line on the screen and not for Go. Behind
 		// one, an annotation looks as if it stood on a line of its own
 		// while it is read as the rest of the line before it.
-		// (Go itself takes the carriage returns of Windows line ends out of a
-		// comment, so one that is left stands alone.)
-		if strings.Contains(written, "@") && strings.ContainsAny(written, "\u2028\u2029\u0085\v\f\r") {
+		// A carriage return is one of them, but Go takes every one of those
+		// out of a comment before it gets here; see checkCarriageReturns.
+		if strings.Contains(written, "@") && strings.ContainsAny(written, "\u2028\u2029\u0085\v\f") {
 			clauses = append(clauses, &clause{pos: comment.Pos(),
 				misplaced: "this comment has an @ and a character that ends a line on the screen but not for Go, such as U+2028; remove the character, so that what is read is what is seen"})
 			current = nil
@@ -604,6 +604,34 @@ func leading(text string, otherTags map[string]bool) bool {
 	})
 }
 
+// checkCarriageReturns reports a carriage return that does not end a line
+// together with a newline, in a file whose comments have an @. An editor
+// may show what follows one as a line of its own, while Go reads on in the
+// same line, so that an annotation behind it would look right and not be
+// read. Go removes carriage returns from the text of a comment, so they
+// are looked for in the file itself.
+func (pv *pkgVerifier) checkCarriageReturns(file *ast.File) {
+	if !slices.ContainsFunc(file.Comments, func(group *ast.CommentGroup) bool {
+		return slices.ContainsFunc(group.List, func(c *ast.Comment) bool { return strings.Contains(c.Text, "@") })
+	}) {
+		return
+	}
+	position := pv.pass.Fset.File(file.Pos())
+	content, err := pv.pass.ReadFile(position.Name())
+	if err != nil {
+		// What cannot be read again cannot be vouched for.
+		pv.report(file.Pos(), "cannot read %s to look for line ends that are not shown as such: %v", position.Name(), err)
+		return
+	}
+	for i, b := range content {
+		if b == '\r' && (i+1 == len(content) || content[i+1] != '\n') && i < position.Size() {
+			pv.report(position.Pos(i), "this file has annotations and a carriage return that does not end a line; "+
+				"remove it, so that what is read is what is seen")
+			return
+		}
+	}
+}
+
 // stray reports whether a piece of comment text has an @ followed by a
 // keyword, or by something close to one, where no annotation is read. An
 // annotation that follows its own //, as in an example in a doc comment, a
@@ -705,6 +733,7 @@ func (pv *pkgVerifier) collect() {
 				pv.addFunc(fd)
 			}
 		}
+		pv.checkCarriageReturns(file)
 		for _, group := range file.Comments {
 			for _, c := range extractClauses(group, pv.otherTags) {
 				// An annotation that was not read may have been meant for
