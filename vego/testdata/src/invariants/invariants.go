@@ -2,7 +2,10 @@
 // keep or break them.
 package invariants
 
-import "shapes"
+import (
+	"badshapes"
+	"shapes"
+)
 
 // Stack keeps a count that never exceeds what it holds.
 //
@@ -230,13 +233,13 @@ func MakesTagged() (result Tagged) { // want `vego: cannot verify MakesTagged: t
 // MakesBroken uses a type of another package whose invariant cannot be read.
 //
 // @Ensures True
-func MakesBroken() (result shapes.Broken) { // want `vego: cannot verify MakesBroken: the invariants of Broken could not be understood`
-	return shapes.Broken{X: 99}
+func MakesBroken() (result badshapes.Broken) { // want `vego: cannot verify MakesBroken: the invariants of Broken could not be understood`
+	return badshapes.Broken{X: 99}
 }
 
 // TakesNever takes a value of a type whose invariants contradict each other.
 //
 // @Ensures result = 0
-func TakesNever(n shapes.Never) (result int) { // want `vego: cannot verify TakesNever: the invariants of Never could not be understood`
+func TakesNever(n badshapes.Never) (result int) { // want `vego: cannot verify TakesNever: the invariants of Never could not be understood`
 	return 1
 }

@@ -655,3 +655,11 @@ func TagHides(x int) (r int) {
 func TagQuotes(x int) (r int) {
 	return 0
 }
+
+// BlockSlashes has an annotation in a block comment, with slashes on the
+// line before it. Slashes show an annotation only on its own line.
+/* // want `vego: annotations are only read from // comments, not from /\* \*. comments`
+ //
+ @Ensures r = 1
+*/
+func BlockSlashes() (r int) { return 0 }

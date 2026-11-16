@@ -33,15 +33,3 @@ func (r *Rect) Area() (result int) {
 func Unchecked(w int) (result *Rect) {
 	return &Rect{W: w} // want `invariant of Rect may not hold for the result: 0 <= W <= Limit`
 }
-
-// Broken has an invariant that cannot be read, which importing packages
-// must not take for no invariant.
-//
-// @Invariant X > // want `syntax error in Invariant annotation: expected an expression, found "end of annotation"`
-type Broken struct{ X int }
-
-// Never has invariants no value can meet. A function of another package
-// that takes one must not be verified from that contradiction.
-//
-// @Invariant X = 0 And X = 1 // want `the invariants of Never contradict each other, so no value of the type could exist`
-type Never struct{ X int }

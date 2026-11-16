@@ -150,7 +150,7 @@ laas -vego -vego.other-tags=Summary,Param,Router ./...
 
 `vego` then treats those lines as ordinary comments. A word that is a keyword, or within two letters of one, cannot be declared.
 
-While a package has a comment that looks like an annotation and is not read as one, other packages cannot rely on any of its contracts. The comment could have been meant for any of its functions.
+While a package has an annotation that `vego` could not read or place, other packages cannot rely on any of its contracts. This covers every error in this section, and also a clause that is dropped, such as a second `Variant` on one function or a `Requires` in the doc comment of a type. The annotation could have been meant for any function of the package.
 
 The same rule applies where an `@` starts a line with only signs in front of it, as in `/// @Post` or a line of a `/* */` comment. An `@` after other words, as in `// note: @Post r > 100`, is reported only if the word is a keyword or within two letters of one, because `vego` cannot tell it from an address or a user name.
 

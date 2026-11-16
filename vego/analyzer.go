@@ -318,8 +318,9 @@ type pkgVerifier struct {
 	// foreignBroken holds the packages whose predicates could not be read.
 	predicateTexts   []string
 	predicatesBroken bool
-	// unread is set when a comment of the package looked like an annotation
-	// and was not read as one.
+	// unread is set when collecting the annotations of the package drew a
+	// report: a comment looked like an annotation and was not read as one,
+	// or a clause was dropped or stood where it has no effect.
 	unread        bool
 	foreignBroken map[*types.Package]bool
 	// current is the function being verified, which a diagnostic counts
@@ -370,7 +371,7 @@ var (
 	annotationLine = regexp.MustCompile(`^//([\s\p{Z}]*)@([\s\p{Z}]*)(.*)$`)
 	// quotedComment matches an annotation shown with its own //, inside
 	// a comment.
-	quotedComment = regexp.MustCompile(`//[^\pL@]*@[^\pL]*\pL+`)
+	quotedComment = regexp.MustCompile(`//[^\pL@\n]*@[^\pL\n]*\pL+`)
 	// anyAnnotation finds the word after an @ wherever it stands, with
 	// whatever is not a letter in between.
 	anyAnnotation = regexp.MustCompile(`@[^\pL]*(\pL+)`)
@@ -649,6 +650,17 @@ func distance(first, second string) int {
 // collect records every function of the package, parses all annotations, and
 // binds each clause to the function it specifies.
 func (pv *pkgVerifier) collect() {
+	// Whatever is reported while the annotations are collected is about an
+	// annotation that was dropped, misread, or put where it has no effect.
+	// The package is then not what its author wrote, so none of its
+	// contracts is handed to other packages as verified; this holds for
+	// every such report, also one that a later change adds here.
+	before := len(pv.reported)
+	defer func() {
+		if len(pv.reported) > before {
+			pv.unread = true
+		}
+	}()
 	var predicates []*logic.PredDecl
 	predicateClauses := map[*logic.PredDecl]*clause{}
 	for _, file := range pv.pass.Files {
