@@ -761,3 +761,12 @@ func EscapeAfterMarker(x int) (r int) {
 func ShownContinuation() (r int) {
 	return 0
 }
+
+// StringJoins has an annotation that is not shown, with an empty string
+// directly after its keyword and a word after that. Leaving the string out
+// must not make one word of the two.
+//
+// see // @Requires x > 0 @Ensures""Extra // want `vego: an annotation is written "// @Keyword ...", with nothing but one space between // and @`
+func StringJoins(x int) (r int) {
+	return 0
+}

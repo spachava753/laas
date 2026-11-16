@@ -218,7 +218,9 @@ func TestShownAnnotationsScan(t *testing.T) {
 		name, text, want string
 	}{
 		{name: "a run of slashes", text: " " + slashes, want: " " + slashes},
-		{name: "a run of slashes in a string after a shown annotation", text: ` // @Ensures s = "` + slashes + `" and more`, want: "  s =  and more"},
+		{name: "a run of slashes in a string after a shown annotation", text: ` // @Ensures s = "` + slashes + `" and more`, want: "   s =   and more"},
+		{name: "an empty string between two words after a shown annotation", text: ` // @Requires x @Ensures""Extra`, want: "   x @Ensures Extra"},
+		{name: "a string inside a word after a shown annotation", text: ` // @Requires x @En"text"sures`, want: "   x @En sures"},
 		{name: "a run of slashes in a string with nothing shown", text: ` see "` + slashes + `"`, want: ` see "` + slashes + `"`},
 	}
 	for _, test := range tests {

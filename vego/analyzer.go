@@ -548,6 +548,9 @@ func withoutShown(text string) string {
 			if i >= none && !(shown && inString) && strings.HasPrefix(line[i:], "//") {
 				end, found := shownAt(line, i)
 				if found {
+					// A space stands for what is left out, so that the
+					// words on its two sides stay two words.
+					kept.WriteByte(' ')
 					shown = true
 					i = end
 					continue
@@ -563,6 +566,9 @@ func withoutShown(text string) string {
 			case inString || c == '"':
 				// A string before any shown annotation is ordinary text,
 				// and is kept; one after it is left out.
+				if shown && !inString {
+					kept.WriteByte(' ')
+				}
 				inString = !inString || c != '"'
 				if !shown {
 					kept.WriteByte(c)
