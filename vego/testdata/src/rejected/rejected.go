@@ -621,3 +621,27 @@ func Accented() (r int) { return 0 }
 // AccentedInBlock does so in a block comment.
 /* @Enšurés r = 1 */ // want `vego: annotations are only read from // comments, not from /\* \*/ comments`
 func AccentedInBlock() (r int) { return 0 }
+
+// ThirdSlashFar has a wrong keyword that is far from every real one,
+// behind a third slash.
+//
+/// @Post r > 100 // want `vego: an annotation is written "// @Keyword ...", with nothing but one space between // and @`
+func ThirdSlashFar(x int) (r int) {
+	return 50
+}
+
+// BlockFar has one in a block comment.
+/* @Post r > 100 */ // want `vego: annotations are only read from // comments, not from /\* \*/ comments`
+func BlockFar(x int) (r int) { return 50 }
+
+// BlockDeclared has a declared tag of another tool in a block comment,
+// which is ordinary comment.
+/* @Summary returns fifty */
+func BlockDeclared(x int) (r int) { return 50 }
+
+// TagHides has an annotation further along the line of a declared tag.
+//
+// @Summary returns zero @Ensures r > 100 // want `vego: an annotation is written "// @Keyword ...", with nothing but one space between // and @`
+func TagHides(x int) (r int) {
+	return 0
+}

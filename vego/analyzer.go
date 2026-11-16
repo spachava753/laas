@@ -368,9 +368,11 @@ var (
 	quotedComment = regexp.MustCompile(`//[^\pL@]*@[^\pL]*\pL+`)
 	// anyAnnotation finds the word after an @ wherever it stands, with
 	// whatever is not a letter in between.
-	anyAnnotation   = regexp.MustCompile(`@[^\pL]*(\pL+)`)
-	blockAnnotation = regexp.MustCompile(`(?m)^(?:/\*)?[\s*]*@\s*(\w*)`)
-	clauseKinds     = map[string]bool{
+	anyAnnotation = regexp.MustCompile(`@[^\pL]*(\pL+)`)
+	// leadingAt finds an @ that is the first thing on a line but for signs,
+	// with the word that follows it.
+	leadingAt   = regexp.MustCompile(`(?m)^[^\pL\pN@\n]*@[^\pL\pN\s]*(\S*)`)
+	clauseKinds = map[string]bool{
 		"Requires": true, "Ensures": true, "Invariant": true, "Variant": true,
 		"Predicate": true, "Assert": true, "Modifies": true,
 	}
@@ -416,12 +418,9 @@ func extractClauses(group *ast.CommentGroup, otherTags map[string]bool) []*claus
 			return r
 		}, comment.Text)
 		if strings.HasPrefix(written, "/*") {
-			// A keyword after an @ anywhere in the comment, or something
-			// close to one at the start of a line.
-			found := stray(written) || slices.ContainsFunc(blockAnnotation.FindAllStringSubmatch(written, -1), func(block []string) bool {
-				return nearKeyword(block[1])
-			})
-			if found {
+			// A keyword after an @ anywhere in the comment, or any word
+			// after one that starts a line.
+			if stray(written) || leading(written, otherTags) {
 				clauses = append(clauses, &clause{pos: comment.Pos(),
 					misplaced: "annotations are only read from // comments, not from /* */ comments"})
 			}
@@ -431,7 +430,7 @@ func extractClauses(group *ast.CommentGroup, otherTags map[string]bool) []*claus
 			text := strings.TrimPrefix(written, "//")
 			block := strings.HasPrefix(written, "/*")
 			switch {
-			case !block && stray(text):
+			case !block && (stray(text) || leading(text, otherTags)):
 				clauses = append(clauses, &clause{pos: comment.Pos(),
 					misplaced: `an annotation is written "// @Keyword ...", with nothing but one space between // and @`})
 			case current != nil && (block || strings.TrimSpace(text) != ""):
@@ -470,7 +469,11 @@ func extractClauses(group *ast.CommentGroup, otherTags map[string]bool) []*claus
 			// A tag that was declared to be another tool's is an ordinary
 			// comment line, and like one it may not follow an annotation
 			// directly.
-			if current != nil {
+			switch {
+			case stray(line):
+				clauses = append(clauses, &clause{pos: comment.Pos(),
+					misplaced: `an annotation is written "// @Keyword ...", with nothing but one space between // and @`})
+			case current != nil:
 				clauses = append(clauses, &clause{pos: comment.Pos(), misplaced: afterAnnotation})
 			}
 			current = nil
@@ -544,6 +547,23 @@ func parseOtherTags(list string) (map[string]bool, error) {
 		}
 	}
 	return tags, nil
+}
+
+// leading reports whether a piece of comment text has a line that starts,
+// but for signs, with an @ and a word that was not declared as another
+// tool's. That is the place of an annotation with something small in the
+// way, a third slash or the star of a block comment, so the word is judged
+// as it would be after "// @": whatever it is, it is taken to be meant for
+// this tool. An annotation that follows its own // is one being shown.
+func leading(text string, otherTags map[string]bool) bool {
+	shown := quotedComment.ReplaceAllString(text, "")
+	return slices.ContainsFunc(leadingAt.FindAllStringSubmatch(shown, -1), func(found []string) bool {
+		letters := found[1]
+		if end := strings.IndexFunc(letters, func(r rune) bool { return !unicode.IsLetter(r) }); end >= 0 {
+			letters = letters[:end]
+		}
+		return !otherTags[found[1]] && !otherTags[letters]
+	})
 }
 
 // stray reports whether a piece of comment text has an @ followed by a
