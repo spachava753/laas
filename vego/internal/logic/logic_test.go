@@ -106,7 +106,7 @@ func TestResolve(t *testing.T) {
 		{"~found Or i != j", "(~found Or ~(i = j))"},
 		{"!found && flags[i] || found", "((~found And flags[i]) Or found)"},
 		{"found <-> i < j -> j > i", "(found <-> ((i < j) -> (i < j)))"},
-		{"len(A) = |A'| And old(A)[0] = 1", "((|A| = |A1|) And (A0[0] = 1))"},
+		{"|A| = |A'| And old(A)[0] = 1", "((|A| = |A1|) And (A0[0] = 1))"},
 		{"Forall k in Z : A[k] >= 0", "(Forall k#1 : (True -> (0 <= A[k#1])))"},
 		{"Forall k in [0, n) : A[k] = 0", "(Forall k#1 : (((0 <= k#1) And (k#1 < n)) -> (A[k#1] = 0)))"},
 		{"Exists k in (i, j] : A[k] = 0", "(Exists k#1 : ((i < k#1) And (k#1 <= j) And (A[k#1] = 0)))"},

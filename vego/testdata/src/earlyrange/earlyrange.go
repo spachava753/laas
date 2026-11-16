@@ -8,11 +8,11 @@ import "errors"
 type T struct{}
 
 // Ok is called, through All, before ErrX has its value.
-func (T) Ok() bool {
+//
+// @ Ensures result
+func (T) Ok() (result bool) {
 	return ErrX != nil // want `vego: cannot verify Ok: ErrX is not known to have its value yet when this runs: a function that is not a named function of this package is ranged over at earlyrange.go:\d+ while the variables of the package are initialised, which may run this function first`
 }
-
-//@ Ensures result
 
 // All yields what Ok says.
 func (t T) All(yield func(bool) bool) { yield(t.Ok()) }

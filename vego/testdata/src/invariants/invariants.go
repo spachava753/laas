@@ -15,21 +15,19 @@ type Stack struct {
 // Top relies on the invariant to index safely.
 //
 // @ Requires s != nil And s.n > 0
-func (s *Stack) Top() int {
+// @ Ensures result = s.items[s.n - 1]
+func (s *Stack) Top() (result int) {
 	return s.items[s.n-1]
 }
-
-//@ Ensures result = s.items[s.n - 1]
 
 // Drop keeps the invariant.
 //
 // @ Requires s != nil And s.n > 0
 // @ Modifies s.n
+// @ Ensures s.n' = s.n - 1
 func (s *Stack) Drop() {
 	s.n--
 }
-
-//@ Ensures s.n' = s.n - 1
 
 // Grow breaks the invariant: the count may run past the items.
 //
@@ -43,12 +41,11 @@ func (s *Stack) Grow() {
 //
 // @ Requires s != nil And s.n > 1
 // @ Modifies s.n
+// @ Ensures s.n' = s.n - 2
 func DropTwice(s *Stack) {
 	s.Drop()
 	s.Drop()
 }
-
-//@ Ensures s.n' = s.n - 2
 
 // BreaksBeforeCall passes a stack whose invariant it has broken.
 //
@@ -64,64 +61,63 @@ func BreaksBeforeCall(s *Stack) {
 //
 // @ Requires s != nil
 // @ Modifies s.n
+// @ Ensures s.n' = s.n
 func RestoresBeforeReturn(s *Stack) {
 	saved := s.n
 	s.n = -5
 	s.n = saved
 }
 
-//@ Ensures s.n' = s.n
-
 // NewStack has to establish the invariant of its result.
-func NewStack() *Stack {
+//
+// @ Ensures fresh(result) And result.n = 0
+func NewStack() (result *Stack) {
 	return &Stack{}
 }
 
-//@ Ensures fresh(result) And result.n = 0
-
 // BadStack returns a stack that claims an element it does not have.
-func BadStack() *Stack {
+//
+// @ Ensures fresh(result)
+func BadStack() (result *Stack) {
 	return &Stack{n: 1} // want `vego: invariant of Stack may not hold for the result: 0 <= n <= \|items\|`
 }
 
-//@ Ensures fresh(result)
-
 // ByValue takes a stack by value; the invariant holds of the copy.
-func ByValue(s Stack) int {
+//
+// @ Ensures True
+func ByValue(s Stack) (result int) {
 	if s.n > 0 {
 		return s.items[s.n-1]
 	}
 	return 0
 }
 
-//@ Ensures True
-
 // ReturnsValue returns a struct value, which must meet the invariant too.
-func ReturnsValue() Stack {
+//
+// @ Ensures True
+func ReturnsValue() (result Stack) {
 	return Stack{n: 3} // want `vego: invariant of Stack may not hold for the result: 0 <= n <= \|items\|`
 }
 
-//@ Ensures True
-
 // Nil may be passed where a pointer is expected: there is nothing the
 // invariant could be about.
-func Nil() int {
+//
+// @ Ensures result = 0
+func Nil() (result int) {
 	var s *Stack
 	return count(s)
 }
 
-//@ Ensures result = 0
-
 // count tolerates nil.
-func count(s *Stack) int {
+//
+// @ Ensures s = nil -> result = 0
+// @ Ensures s != nil -> 0 <= result <= |s.items|
+func count(s *Stack) (result int) {
 	if s == nil {
 		return 0
 	}
 	return s.n
 }
-
-//@ Ensures s = nil -> result = 0
-//@ Ensures s != nil -> 0 <= result <= |s.items|
 
 // Impossible has invariants no value can meet.
 //
@@ -153,11 +149,10 @@ type Wrong struct{ x int }
 // package's constant.
 //
 // @ Requires r != nil
-func Square(r *shapes.Rect) int {
+// @ Ensures 0 <= result <= 10000
+func Square(r *shapes.Rect) (result int) {
 	return r.W * r.W
 }
-
-//@ Ensures 0 <= result <= 10000
 
 // Widen breaks the invariant of a type of another package.
 //
@@ -168,12 +163,12 @@ func Widen(r *shapes.Rect) {
 } // want `vego: invariant of Rect may not hold for r on return: 0 <= W <= Limit`
 
 // UsesNew gets a rectangle whose invariant its maker proved.
-func UsesNew() int {
+//
+// @ Ensures 0 <= result <= 10000
+func UsesNew() (result int) {
 	r := shapes.New(3, 4)
 	return r.Area()
 }
-
-//@ Ensures 0 <= result <= 10000
 
 // Log stands for a type whose method is trusted.
 //
@@ -208,12 +203,12 @@ func BreaksThroughCopy(h Holder) {
 } // want `vego: invariant of Holder may not hold for h on return: p.x = 0`
 
 // KeepsThroughCopy changes its copy only.
-func KeepsThroughCopy(h Holder) int {
+//
+// @ Ensures result = 0
+func KeepsThroughCopy(h Holder) (result int) {
 	h.p = nil
 	return 0
 }
-
-//@ Ensures result = 0
 
 // Tagged has a field of a type the verifier does not model, with the name
 // of a built-in limit.
@@ -226,22 +221,22 @@ type Tagged struct {
 
 // MakesTagged cannot be verified, since the invariant of its result cannot
 // be read.
-func MakesTagged() Tagged { // want `vego: cannot verify MakesTagged: the invariants of Tagged could not be understood`
+//
+// @ Ensures True
+func MakesTagged() (result Tagged) { // want `vego: cannot verify MakesTagged: the invariants of Tagged could not be understood`
 	return Tagged{}
 }
 
-//@ Ensures True
-
 // MakesBroken uses a type of another package whose invariant cannot be read.
-func MakesBroken() shapes.Broken { // want `vego: cannot verify MakesBroken: the invariants of Broken could not be understood`
+//
+// @ Ensures True
+func MakesBroken() (result shapes.Broken) { // want `vego: cannot verify MakesBroken: the invariants of Broken could not be understood`
 	return shapes.Broken{X: 99}
 }
 
-//@ Ensures True
-
 // TakesNever takes a value of a type whose invariants contradict each other.
-func TakesNever(n shapes.Never) int { // want `vego: cannot verify TakesNever: the invariants of Never could not be understood`
+//
+// @ Ensures result = 0
+func TakesNever(n shapes.Never) (result int) { // want `vego: cannot verify TakesNever: the invariants of Never could not be understood`
 	return 1
 }
-
-//@ Ensures result = 0

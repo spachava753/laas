@@ -3,13 +3,12 @@
 package rejected
 
 // @ Modifies A
+// @ Ensures |A'| = |A|
 func write(A, B []int) {
 	if len(A) > 0 && len(B) > 0 {
 		A[0] = B[0]
 	}
 }
-
-//@ Ensures |A'| = |A|
 
 // @ Requires |A| > 0
 // @ Modifies A
@@ -20,83 +19,81 @@ func PassesTwice(A []int) {
 func unverified(A []int) []int { return A }
 
 // @ Requires |A| > 0
-func UsesUnverifiedSlice(A []int) int {
+func UsesUnverifiedSlice(A []int) (result int) {
 	B := unverified(A)
 	return B[0] // want `vego: index may be out of range`
 }
 
 // @ Requires x > // want `vego:\ syntax\ error\ in\ Requires\ annotation:\ expected\ an\ expression,\ found\ "end\ of\ annotation"`
-func SyntaxError(x int) int {
+func SyntaxError(x int) (result int) {
 	return x
 }
 
 // @ Requires y > 0 // want `vego:\ in\ Requires\ annotation:\ unknown\ name\ y`
-func UnknownName(x int) int {
+func UnknownName(x int) (result int) {
 	return x
 }
 
 // @ Requires x' > 0 // want `vego:\ in\ Requires\ annotation:\ x'\ describes\ the\ state\ on\ return\ and\ is\ only\ allowed\ in\ Ensures`
-func PrimeInRequires(x int) int {
+func PrimeInRequires(x int) (result int) {
 	return x
 }
 
+// @ Ensures x' = y // want `vego: in Ensures annotation: x is passed by value, so only its value on entry is visible to callers; drop the prime`
 func PrimeOnValue(x int) (y int) {
 	return x
 }
 
-//@ Ensures x' = y // want `vego: in Ensures annotation: x is passed by value, so only its value on entry is visible to callers; drop the prime`
-
 // @ Requires A > 0 // want `vego:\ in\ Requires\ annotation:\ cannot\ compare\ A\ \(string\ or\ \[\]int\)\ with\ 0\ \(int\)`
-func SliceAsInteger(A []int) int {
+func SliceAsInteger(A []int) (result int) {
 	return 0
 }
 
-//@ Predicate liar(x) ::= ~liar(x) // want `vego:\ recursive\ use\ of\ predicate\ liar\ must\ not\ occur\ under\ negation,\ on\ the\ left\ of\ \->,\ or\ under\ <\->`
+// @ Predicate liar(x) ::= ~liar(x) // want `vego:\ recursive\ use\ of\ predicate\ liar\ must\ not\ occur\ under\ negation,\ on\ the\ left\ of\ \->,\ or\ under\ <\->`
 
-//@ Predicate twice(x) ::= x > 0
-//@ Predicate twice(x) ::= x < 0 // want `vego:\ predicate\ twice\ is\ already\ defined`
+// @ Predicate twice(x) ::= x > 0
+// @ Predicate twice(x) ::= x < 0 // want `vego:\ predicate\ twice\ is\ already\ defined`
 
 // @ Requires undefined(x) // want `vego:\ in\ Requires\ annotation:\ unknown\ predicate\ undefined`
-func UnknownPredicate(x int) int {
+func UnknownPredicate(x int) (result int) {
 	return x
 }
 
+// @ Ensures y = x // want `vego:\ in\ Ensures\ annotation:\ operator\ =\ cannot\ be\ applied\ to\ float\ values`
 func Floats(x float64) (y float64) {
 	return x
 }
 
-//@ Ensures y = x // want `vego:\ in\ Ensures\ annotation:\ operator\ =\ cannot\ be\ applied\ to\ float\ values`
-
-func MisplacedInvariant(x int) int {
-	//@ Invariant x > 0 // want `vego:\ Invariant\ annotation\ must\ be\ directly\ above\ a\ for\ loop`
+func MisplacedInvariant(x int) (result int) {
+	// @ Invariant x > 0 // want `vego:\ Invariant\ annotation\ must\ be\ directly\ above\ a\ for\ loop`
 	return x
 }
 
 func InvariantInsideBody(n int) (s int) {
-	//@ Variant n - i
+	// @ Variant n - i
 	for i := 0; i < n; i++ {
-		//@ Requires i >= 0 // want `vego:\ Requires\ annotations\ belong\ outside\ the\ function\ body`
+		// @ Requires i >= 0 // want `vego:\ Requires\ annotations\ belong\ outside\ the\ function\ body`
 		s++
 	}
 	return s
 }
 
-//@ Requires x > 0 // want `vego:\ Requires\ annotation\ is\ not\ attached\ to\ a\ function;\ put\ it\ in\ the\ comment\ directly\ above\ the\ function`
+// @ Requires x > 0 // want `vego:\ Requires\ annotation\ is\ not\ attached\ to\ a\ function;\ put\ it\ in\ the\ comment\ directly\ above\ the\ function`
 
 var global int
 
 // @ Requires x > 0
-func ReadsGlobal(x int) int {
+func ReadsGlobal(x int) (result int) {
 	return x + global // want `vego:\ cannot\ verify\ ReadsGlobal:\ global\ is\ not\ a\ local\ variable\ of\ a\ supported\ type`
 }
 
 // @ Requires x > 0
-func Closure(x int) int {
+func Closure(x int) (result int) {
 	f := func() int { return x } // want `vego: cannot verify Closure: f has unsupported type func\(\) int`
 	return f()
 }
 
-//@ Preserves |A| // want `vego:\ Preserves\ annotations\ are\ not\ supported\ yet`
+// @ Preserves |A| // want `vego:\ Preserves\ annotations\ are\ not\ supported\ yet`
 
 // @ Requires x > 0
 func Goes(x int) {
@@ -111,62 +108,61 @@ outer: // want `vego:\ cannot\ verify\ Labeled:\ labeled\ statements\ are\ not\ 
 	}
 }
 
-func InsideInitializer() int {
+func InsideInitializer() (result int) {
 	x := (
 	// @ Assert False // want `vego:\ Assert\ annotation\ must\ stand\ between\ statements,\ on\ a\ line\ of\ its\ own`
 	0)
 	return x
 }
 
-func InsideSwitch(n int) int {
+func InsideSwitch(n int) (result int) {
 	switch n {
 	// @ Assert False // want `vego:\ Assert\ annotation\ must\ stand\ between\ statements,\ on\ a\ line\ of\ its\ own`
 	case 0:
 		return 0
 	default:
-		//@ Assert n != 0
+		// @ Assert n != 0
 		return 1
 	}
 }
 
 // @ Ensures	False
-func TabSeparator() int { return 0 } // want `vego:\ postcondition\ may\ not\ hold:\ False`
+func TabSeparator() (result int) { return 0 } // want `vego:\ postcondition\ may\ not\ hold:\ False`
 
-// @ Ensure result = 1 // want `vego:\ unknown\ annotation\ "Ensure";\ an\ annotation\ starts\ with\ one\ of\ Requires,\ Ensures,\ Modifies,\ Invariant,\ Variant,\ Measure,\ Assert,\ Predicate`
+// @ Ensure result = 1 // want `vego:\ unknown\ annotation\ "Ensure";\ an\ annotation\ starts\ with\ one\ of\ Requires,\ Ensures,\ Modifies,\ Invariant,\ Variant,\ Assert,\ Predicate`
 func MisspeltKeyword() int { return 0 }
 
 // @Summary comments of other tools are not annotations.
 func OtherTool() int { return 0 }
 
 // @ Ensures result = // want `vego:\ syntax\ error\ in\ Ensures\ annotation:\ expected\ an\ expression,\ found\ "end\ of\ annotation"`
-func malformed() int { return 0 }
+func malformed() (result int) { return 0 }
 
 // @ Ensures result = 0
-func CallsMalformed() int { return malformed() } // want `vego:\ cannot\ verify\ CallsMalformed:\ malformed\ has\ a\ contract\ that\ could\ not\ be\ understood`
+func CallsMalformed() (result int) { return malformed() } // want `vego:\ cannot\ verify\ CallsMalformed:\ malformed\ has\ a\ contract\ that\ could\ not\ be\ understood`
 
-//@ Predicate negate(b) ::= ~b
-//@ Predicate hiddenLiar(n) ::= negate(hiddenLiar(n)) // want `vego:\ recursive\ use\ of\ predicate\ hiddenLiar\ must\ not\ occur\ under\ negation,\ on\ the\ left\ of\ \->,\ or\ under\ <\->`
+// @ Predicate negate(b) ::= ~b
+// @ Predicate hiddenLiar(n) ::= negate(hiddenLiar(n)) // want `vego:\ recursive\ use\ of\ predicate\ hiddenLiar\ must\ not\ occur\ under\ negation,\ on\ the\ left\ of\ \->,\ or\ under\ <\->`
 
-func MultipleVariants() int {
+// @ Ensures result = 1
+func MultipleVariants() (result int) {
 	i := 0
-	//@ Invariant 0 <= i <= 1
-	//@ Variant 0
-	//@ Variant 1 - i // want `vego:\ loop\ already\ has\ a\ Variant;\ give\ it\ exactly\ one`
+	// @ Invariant 0 <= i <= 1
+	// @ Variant 0
+	// @ Variant 1 - i // want `vego:\ loop\ already\ has\ a\ Variant;\ give\ it\ exactly\ one`
 	for i < 1 { // want `vego:\ loop\ variant\ may\ not\ decrease:\ 0`
 		i++
 	}
 	return i
 }
 
-//@ Ensures result = 1
-
 // @ Ensures result = ١ // want `vego:\ syntax\ error\ in\ Ensures\ annotation:\ unexpected\ character\ '١'`
-func ArabicDigit() int { return 1 }
+func ArabicDigit() (result int) { return 1 }
 
 type shape interface{ Area() int }
 
 // @ Requires s != nil
-func Interfaces(s shape) int { // want `vego: cannot verify Interfaces: parameter s has unsupported type rejected.shape`
+func Interfaces(s shape) (result int) { // want `vego: cannot verify Interfaces: parameter s has unsupported type rejected.shape`
 	return s.Area()
 }
 
@@ -185,22 +181,22 @@ func BadTarget(c *cell) {
 }
 
 // @ Requires c.value.size > 0 // want `vego: in Requires annotation: c\.value\.size: a int has no fields`
-func FieldOfNumber(c *cell) int {
+func FieldOfNumber(c *cell) (result int) {
 	return 0
 }
 
 // @ Requires c > 0 // want `vego: in Requires annotation: cannot compare c \(pointer\) with 0 \(int\)`
-func PointerAsNumber(c *cell) int {
+func PointerAsNumber(c *cell) (result int) {
 	return 0
 }
 
 // @ Requires p != nil
-func PointerToNumber(p *int) int { // want `vego: cannot verify PointerToNumber: parameter p has unsupported type \*int`
+func PointerToNumber(p *int) (result int) { // want `vego: cannot verify PointerToNumber: parameter p has unsupported type \*int`
 	return *p
 }
 
 // @ Requires c != nil
-func Embedded(c *cell) int {
+func Embedded(c *cell) (result int) {
 	m := make(chan int, 1) // want `vego: cannot verify Embedded: m has unsupported type chan int`
 	return len(m) + c.value
 }
@@ -221,102 +217,133 @@ func BadKind(c *cell) {
 // would follow.
 //
 // @ Requires |A| < 0
-func Impossible(A []int) int { // want `vego: nothing can satisfy the Requires clauses of Impossible together with what the types of its parameters guarantee, so verifying it would prove nothing`
+// @ Ensures result = 42 And result = 43
+func Impossible(A []int) (result int) { // want `vego: nothing can satisfy the Requires clauses of Impossible together with what the types of its parameters guarantee, so verifying it would prove nothing`
 	return A[7]
 }
 
-//@ Ensures result = 42 And result = 43
-
-// ResultParameter has a parameter with the name annotations give to the
-// unnamed result.
+// ResultParameter has a result without a name, which a contract cannot
+// speak of.
 //
 // @ Requires result = 7
-func ResultParameter(result int) int { // want `vego: cannot verify ResultParameter: the variable result has a name that means something else in annotations; rename it`
+// @ Ensures result = 7
+func ResultParameter(result int) int { // want `vego: ResultParameter has annotations, so each of its results needs a name, as in func ResultParameter\(...\) \(n int, err error\)`
 	return 5
 }
 
-//@ Ensures result = 7
-
 // FalseParameter has a parameter with the name of a word of the language.
+//
+// @ Ensures r = False
 func FalseParameter(False bool) (r bool) { // want `vego: cannot verify FalseParameter: the variable False has a name that means something else in annotations; rename it`
 	return false
 }
 
-//@ Ensures r = False
-
 // NamedResult names its result itself, which is no clash.
+//
+// @ Ensures result = 3
 func NamedResult() (result int) {
 	return 3
 }
 
-//@ Ensures result = 3
-
 // SpacedOut has annotations with more space than usual, which are read.
 //
 // @ Requires x >= 0
-func SpacedOut(x int) int {
-	//    @ Assert x >= 1 // want `vego: assertion may not hold: x >= 1`
+// @ Ensures result <= 0
+func SpacedOut(x int) (result int) {
+	// @ Assert x >= 1 // want `vego: assertion may not hold: x >= 1`
 	return x // want `vego: postcondition may not hold: result <= 0`
 }
-
-//   @ Ensures result <= 0
 
 // Misspelt has keywords that are almost right.
 //
 // @ Requires x >= 0
-func Misspelt(x int) int {
-	//@assert False // want `vego: unknown annotation "assert"; an annotation starts with one of .*`
+func Misspelt(x int) (result int) {
+	//@assert False // want `vego: an annotation is written "// @ ...", with one space between // and @`
+	// @ assert False // want `vego: unknown annotation "assert"; an annotation starts with one of .*`
 	return x
 }
 
-//@Ensure result > 100 // want `vego: unknown annotation "Ensure"; an annotation starts with one of .*`
+//@Ensure result > 100 // want `vego: an annotation is written "// @ ...", with one space between // and @`
 
 /*@ Ensures result > 100 */ // want `vego: annotations are only read from // comments, not from /\* \*/ comments`
 
 // ResultField takes a struct with a field named like the result, which is
 // no clash: a field is always written with what it is a field of.
-func ResultField(x struct{ result int }) int {
+//
+// @ Ensures result = 0
+func ResultField(x struct{ result int }) (result int) {
 	return 0
 }
-
-//@ Ensures result = 0
 
 // @ Requires True
 /* // want `vego: annotations are only read from // comments, not from /\* \*. comments`
 InBlock has an annotation inside a block comment, after other text.
 @Ensures result = 0
 */
-func InBlock() int { return 1 }
-
-// LocalResult has a local variable named like the unnamed result. Only the
-// contract uses the name, and a contract cannot see local variables.
-func LocalResult(a, b int8) int {
-	result := int(a) + int(b)
-	return result
-}
-
-//@ Ensures result = a + b
-
-// LocalResultInBody has an annotation inside the body that uses the name,
-// where it can only mean the variable.
-func LocalResultInBody(a int8) int {
-	result := int(a)
-	//@ Assert result = a
-	return result
-}
+func InBlock() (result int) { return 1 }
 
 // LocalTrue has a local variable named like a word of the language, which
 // an annotation inside the body uses.
-func LocalTrue(a int8) bool {
+//
+// @ Ensures result <-> a > 0
+// @ Ensures result = a
+func LocalTrue(a int8) (result bool) {
 	True := a > 0 // want `vego: cannot verify LocalTrue: the variable True has a name that means something else in annotations; rename it`
-	//@ Assert True
+	// @ Assert True
 	return True
 }
 
-//@ Ensures result <-> a > 0
-
-//@ Ensures result = a
-
 // @ Requires True
 /* InBlockLater has a note @ Ensures result = 0 that comes after other text on its line. */ // want `vego: annotations are only read from // comments, not from /\* \*. comments`
-func InBlockLater() int { return 1 }
+func InBlockLater() (result int) { return 1 }
+
+// OldPrefix writes an annotation without the space after the slashes.
+//
+//@ Requires x > 0 // want `vego: an annotation is written "// @ ...", with one space between // and @`
+func OldPrefix(x int) (r int) {
+	return x
+}
+
+// WidePrefix writes one with two spaces.
+//
+//  @ Requires x > 0 // want `vego: an annotation is written "// @ ...", with one space between // and @`
+func WidePrefix(x int) (r int) {
+	return x
+}
+
+// AfterBrace has its postcondition behind it, where annotations are no
+// longer read from.
+//
+// @ Requires x > 0
+func AfterBrace(x int) (r int) {
+	return x
+}
+
+// @ Ensures r > 0 // want `vego: Ensures annotation is not attached to a function; put it in the comment directly above the function`
+
+// OldMeasure uses the keyword that Variant replaced.
+//
+// @ Requires n >= 0
+// @ Measure n // want `vego: there is no Measure annotation; write Variant`
+func OldMeasure(n int) (r int) {
+	return n
+}
+
+// TwoVariants gives two reasons for its recursion to end.
+//
+// @ Requires n >= 0
+// @ Variant n
+// @ Variant n + 1 // want `vego: function TwoVariants already has a Variant`
+func TwoVariants(n int) (r int) {
+	if n == 0 {
+		return 0
+	}
+	return TwoVariants(n - 1)
+}
+
+// LenCall writes the length the way Go does.
+//
+// @ Requires len(A) > 0 // want `vego: in Requires annotation: there is no len in annotations; write \|x\| for the length of x`
+func LenCall(A []int) (r int) {
+	return A[0]
+}

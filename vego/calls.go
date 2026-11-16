@@ -119,7 +119,7 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func) *funcIn
 	fn := v.contractOf(callee)
 	if fn == nil {
 		v.unsupported(call.Pos(), fmt.Sprintf(
-			"it calls %s, which has no contract; annotate %s with //@ so that it is verified, "+
+			"it calls %s, which has no contract; annotate %s with // @ so that it is verified, "+
 				"or add a trusted contract for %s to %s", callee.Name(), callee.Name(), callee.FullName(), TrustFileName))
 	}
 	for _, defect := range fn.defects {
@@ -801,11 +801,11 @@ func (v *fnVerifier) checkRecursion(callee *funcInfo, pre *specEnv, st *state, g
 	}
 	for _, fn := range []*funcInfo{v.fn, callee} {
 		if fn.measure == nil {
-			v.report(call.Pos(), "recursive call needs a //@ Measure annotation on %s to prove termination", fn.obj.Name())
+			v.report(call.Pos(), "recursive call needs a // @ Variant annotation in the doc comment of %s to prove termination", fn.obj.Name())
 			return
 		}
 	}
 	measure := v.intTerm(callee.measure, pre)
 	v.check(st, guard, logic.Lt(measure, v.measure), call.Pos(),
-		"measure may not decrease in recursive call: %s", callee.measure.text)
+		"variant may not decrease in recursive call: %s", callee.measure.text)
 }

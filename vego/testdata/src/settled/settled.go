@@ -74,8 +74,8 @@ func count[S interface {
 var ErrY = errors.New("y")
 
 // Ok reports that it is.
-func Ok() bool {
+//
+// @ Ensures result
+func Ok() (result bool) {
 	return ErrY != nil && ErrWrapped != nil
 }
-
-//@ Ensures result

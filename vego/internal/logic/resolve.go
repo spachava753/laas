@@ -255,15 +255,13 @@ func (s *scope) access(n *Node, when When) *Term {
 	return t
 }
 
-// call resolves the built-in forms len(A) and old(x) and applications of
-// user-defined predicates, checking arity and argument sorts.
+// call resolves the built-in form old(x) and applications of user-defined
+// predicates, checking arity and argument sorts.
 func (s *scope) call(n *Node) *Term {
 	switch n.Name {
 	case "len":
-		if len(n.Kids) != 1 {
-			fail("len takes exactly one argument")
-		}
-		return s.length(n.Kids[0])
+		// One spelling for one thing: the length is written with bars.
+		fail("there is no len in annotations; write |x| for the length of x")
 	case "has":
 		// has(m, k): whether map m has key k.
 		if s.env == nil || len(n.Kids) != 2 {

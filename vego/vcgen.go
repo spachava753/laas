@@ -356,7 +356,7 @@ func (v *fnVerifier) verify() {
 	if fn.measure != nil {
 		v.measure = v.intTerm(fn.measure, &specEnv{v: v, sink: st, fn: fn, args: v.entry, now: memory{}})
 		v.check(st, nil, logic.Le(logic.IntLit(0), v.measure), fn.decl.Name.Pos(),
-			"measure may be negative: %s", fn.measure.text)
+			"variant of the function may be negative: %s", fn.measure.text)
 	}
 	body := fn.decl.Body
 	v.seq(body.List, body.Lbrace, body.Rbrace, st, ctrl{}, func(end *state) {

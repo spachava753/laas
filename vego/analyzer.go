@@ -1,5 +1,5 @@
 // Package vego is a deductive verifier for Go. A function states what it
-// must do in //@ comments, and vego proves that it does so for every input,
+// must do in // @ comments, and vego proves that it does so for every input,
 // or reports the obligation it could not prove. It follows the VeGo paper
 // (Masoudi and Dutchyn, "VeGo: A Lightweight Deductive Verification System
 // for Go", arXiv:2608.22630): specifications live in comments, so an
@@ -8,17 +8,16 @@
 //	// Divide computes quotient and remainder by repeated subtraction.
 //	//
 //	// @ Requires n >= 0 And d > 0
+//	// @ Ensures n = d*q + r And 0 <= r And r < d
 //	func Divide(n, d int) (q, r int) {
 //		q, r = 0, n
-//		//@ Invariant n = d*q + r And 0 <= r
-//		//@ Variant r
+//		// @ Invariant n = d*q + r And 0 <= r
+//		// @ Variant r
 //		for d <= r {
 //			q, r = q+1, r-d
 //		}
 //		return q, r
 //	}
-//
-//	//@ Ensures n = d*q + r And 0 <= r And r < d
 //
 // vego is experimental. It is built to accept only what is true, and much
 // ordinary Go is still outside what it supports.
@@ -40,7 +39,7 @@
 // For an annotated function, from any state that satisfies its Requires
 // clauses: every return establishes the Ensures clauses; every Assert
 // holds; every loop keeps its Invariant and terminates by its Variant, and
-// every recursive call decreases the Measure; no index is out of range, no
+// every recursive call decreases the function's Variant; no index is out of range, no
 // nil pointer is followed, no divisor is zero, no integer operation
 // overflows, and no panic is reachable; nothing a caller can see is written
 // except what the Modifies clauses list; and every call goes to a function
@@ -55,12 +54,13 @@
 //
 // # Annotations
 //
-// An annotation is a // comment that starts with @ and a keyword. In the
-// doc comment of a function: Requires, Ensures, Modifies, and Measure.
-// Ensures may also follow the closing brace of the function. Directly above
-// a loop: Invariant and Variant. Anywhere in a body: Assert. In the doc
-// comment of a struct type: Invariant. At the top level: Predicate, which
-// names a formula. The README of the module describes the language of the
+// An annotation is a comment line of the form "// @ Keyword ...", with one
+// space between the slashes and the @. In the doc comment of a function:
+// Requires, Ensures, Modifies, and, for a recursive function, Variant.
+// Directly above a loop: Invariant and Variant. Anywhere in a body: Assert.
+// In the doc comment of a struct type: Invariant. At the top level:
+// Predicate, which names a formula. A contract refers to the results of a
+// function by their names, so a verified function names all of them. The README of the module describes the language of the
 // formulas and each annotation in full, and docs/verification.md in the
 // module is a guide to writing verified Go.
 //
@@ -125,10 +125,10 @@ func newAnalyzer() *analysis.Analyzer {
 	maxSteps, audit, trustPath := 0, false, ""
 	analyzer := &analysis.Analyzer{
 		Name: "vego",
-		Doc: `verifies functions against their //@ specifications
+		Doc: `verifies functions against their // @ specifications
 
-vego proves that functions annotated with //@ Requires, //@ Ensures,
-//@ Modifies, //@ Invariant, //@ Variant, //@ Measure, and //@ Assert comments
+vego proves that functions annotated with // @ Requires, // @ Ensures,
+// @ Modifies, // @ Invariant, // @ Variant, and // @ Assert comments
 meet their contracts, terminate, write only what they say they write, and
 cannot index out of bounds, follow a nil pointer, divide by zero, or reach a
 panic. Functions without annotations are not analyzed. With the audit flag
@@ -345,13 +345,16 @@ func (pv *pkgVerifier) report(pos token.Pos, format string, args ...any) {
 }
 
 var (
-	annotationLine  = regexp.MustCompile(`^//\s*@(\s*)(.*)$`)
+	annotationLine  = regexp.MustCompile(`^//(\s*)@(\s*)(.*)$`)
 	anyAnnotation   = regexp.MustCompile(`@\s*(\w+)`)
 	blockAnnotation = regexp.MustCompile(`(?m)^(?:/\*)?[\s*]*@\s*(\w*)`)
 	clauseKinds     = map[string]bool{
 		"Requires": true, "Ensures": true, "Invariant": true, "Variant": true,
-		"Measure": true, "Predicate": true, "Assert": true, "Modifies": true,
+		"Predicate": true, "Assert": true, "Modifies": true,
 	}
+	// retiredKinds are keywords that earlier versions read, with what to
+	// write now.
+	retiredKinds = map[string]string{"Measure": "Variant"}
 	// plannedKinds are annotations of the VeGo paper that this implementation
 	// does not support yet.
 	plannedKinds = map[string]bool{"Preserves": true, "Immutable": true, "Cost": true, "Library": true}
@@ -359,9 +362,10 @@ var (
 
 // extractClauses splits a comment group into annotation clauses. A line that
 // starts with a keyword opens a clause, and following annotation lines that do
-// not start with a keyword continue it. Both the //@ form and the // @ form
-// that gofmt produces inside doc comments are accepted, and a // inside an
-// annotation line starts an ordinary comment.
+// not start with a keyword continue it. An annotation is written "// @ ...",
+// which is what gofmt makes of every other spacing inside a doc comment; any
+// other spacing is reported, so that there is one form to look for. A //
+// inside an annotation line starts an ordinary comment.
 //
 // An @ followed by whitespace always marks an annotation, so an unknown word
 // there is returned as a clause without a kind, to be reported, instead of
@@ -392,19 +396,29 @@ func extractClauses(group *ast.CommentGroup) []*clause {
 			current = nil
 			continue
 		}
-		line, _, _ := strings.Cut(match[2], "//")
+		line, _, _ := strings.Cut(match[3], "//")
 		line = strings.TrimSpace(line)
 		keyword := line
 		if end := strings.IndexFunc(line, unicode.IsSpace); end >= 0 {
 			keyword = line[:end]
 		}
+		isAnnotation := clauseKinds[keyword] || plannedKinds[keyword] || retiredKinds[keyword] != "" ||
+			current != nil || match[2] != "" || nearKeyword(keyword)
 		switch {
+		case isAnnotation && match[1] != " ":
+			current = nil
+			clauses = append(clauses, &clause{pos: comment.Pos(),
+				misplaced: `an annotation is written "// @ ...", with one space between // and @`})
+		case retiredKinds[keyword] != "":
+			current = nil
+			clauses = append(clauses, &clause{pos: comment.Pos(),
+				misplaced: fmt.Sprintf("there is no %s annotation; write %s", keyword, retiredKinds[keyword])})
 		case clauseKinds[keyword] || plannedKinds[keyword]:
 			current = &clause{kind: keyword, text: strings.TrimSpace(line[len(keyword):]), pos: comment.Pos()}
 			clauses = append(clauses, current)
 		case current != nil:
 			current.text += " " + line
-		case match[1] != "" || nearKeyword(keyword):
+		case match[2] != "" || nearKeyword(keyword):
 			clauses = append(clauses, &clause{text: keyword, pos: comment.Pos()})
 		}
 	}
@@ -464,7 +478,7 @@ func (pv *pkgVerifier) collect() {
 				}
 				if c.kind == "" {
 					pv.report(c.pos, "unknown annotation %q; an annotation starts with one of "+
-						"Requires, Ensures, Modifies, Invariant, Variant, Measure, Assert, Predicate", c.text)
+						"Requires, Ensures, Modifies, Invariant, Variant, Assert, Predicate", c.text)
 					continue
 				}
 				if plannedKinds[c.kind] {
@@ -521,9 +535,24 @@ func (pv *pkgVerifier) collect() {
 	}
 	pv.findSentinels()
 	pv.findKnownReturns()
+	// A contract speaks of the results by the names the function gives
+	// them, so a verified function has to give each of them one.
+	for _, fn := range pv.order {
+		if !fn.annotated() {
+			continue
+		}
+		for _, result := range fn.results {
+			if result.Name() == "" || result.Name() == "_" {
+				pv.report(fn.decl.Name.Pos(), "%s has annotations, so each of its results needs a name, as in func %s(...) (n int, err error)",
+					fn.obj.Name(), fn.obj.Name())
+				fn.broken = true
+				break
+			}
+		}
+	}
 	for _, fn := range pv.order {
 		if fn.annotated() && pv.trustedContract(fn.obj) != nil {
-			pv.report(fn.decl.Name.Pos(), "%s has //@ annotations and a trusted contract; "+
+			pv.report(fn.decl.Name.Pos(), "%s has annotations and a trusted contract; "+
 				"a function is either verified or trusted, not both", fn.obj.Name())
 		}
 	}
@@ -662,8 +691,8 @@ func (pv *pkgVerifier) methodsNamed(name string) []*funcInfo {
 
 // addFunc records a function declaration with the names annotations may use
 // for its parameters and results. Blank and unnamed parameters get no name;
-// unnamed results are called result, or result1, result2, ... when there are
-// several.
+// unnamed results, which only a trusted function can have, are called
+// result, or result1, result2, ... when there are several.
 func (pv *pkgVerifier) addFunc(decl *ast.FuncDecl) {
 	obj, ok := pv.info.Defs[decl.Name].(*types.Func)
 	if !ok {
@@ -770,15 +799,14 @@ func (pv *pkgVerifier) contractOf(callee *types.Func) *funcInfo {
 }
 
 // place binds a clause to a function and returns that function. Clauses inside
-// a body annotate statements. Outside, a clause in a function's doc comment
-// belongs to that function, and a detached Ensures clause belongs to the
-// function that ends just before it.
+// a body annotate statements. Outside, a clause belongs to the function in
+// whose doc comment it stands. A Variant in a doc comment is the measure by
+// which the function's recursion ends; one inside the body is a loop's.
 func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause) *funcInfo {
-	var previous, next *ast.FuncDecl
+	var next *ast.FuncDecl
 	for _, decl := range file.Decls {
 		fd, _ := decl.(*ast.FuncDecl)
 		if decl.End() <= c.pos {
-			previous = fd
 			continue
 		}
 		if decl.Pos() > c.pos {
@@ -806,8 +834,6 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 	switch {
 	case next != nil && next.Doc == group:
 		fn = pv.funcs[pv.info.Defs[next.Name].(*types.Func)]
-	case c.kind == "Ensures" && previous != nil:
-		fn = pv.funcs[pv.info.Defs[previous.Name].(*types.Func)]
 	default:
 		pv.report(c.pos, "%s annotation is not attached to a function; "+
 			"put it in the comment directly above the function", c.kind)
@@ -819,9 +845,9 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 		fn.requires = append(fn.requires, c)
 	case "Ensures":
 		fn.ensures = append(fn.ensures, c)
-	case "Measure":
+	case "Variant":
 		if fn.measure != nil {
-			pv.report(c.pos, "function %s already has a Measure", fn.obj.Name())
+			pv.report(c.pos, "function %s already has a Variant", fn.obj.Name())
 		}
 		fn.measure = c
 	default:

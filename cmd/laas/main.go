@@ -5,7 +5,7 @@
 //   - inlinehelper reports small helper functions that are called once;
 //   - teststructure reports tests that belong together by name and are
 //     not grouped as subtests of one test;
-//   - vego proves functions that carry //@ annotations correct.
+//   - vego proves functions that carry // @ annotations correct.
 //
 // Usage:
 //

@@ -9,6 +9,7 @@ type quantity struct{ qty int }
 // NeedsSeven succeeds for one value of a field behind a pointer.
 //
 // @ Requires p != nil
+// @ Ensures err = nil <-> p.qty = 7
 func NeedsSeven(p *quantity) (err error) {
 	if p.qty != 7 {
 		return errOutOfRange
@@ -16,12 +17,11 @@ func NeedsSeven(p *quantity) (err error) {
 	return nil
 }
 
-//@ Ensures err = nil <-> p.qty = 7
-
 // StartsWithSeven succeeds for one value of an element, among other numbers
 // that the contract mentions.
 //
 // @ Requires |xs| < 100
+// @ Ensures err = nil <-> (|xs| > 0 And xs[0] = 7)
 func StartsWithSeven(xs []int) (err error) {
 	if len(xs) > 0 && xs[0] == 7 {
 		return nil
@@ -29,9 +29,9 @@ func StartsWithSeven(xs []int) (err error) {
 	return errOutOfRange
 }
 
-//@ Ensures err = nil <-> (|xs| > 0 And xs[0] = 7)
-
 // OneDigit succeeds for a string of one byte in a range.
+//
+// @ Ensures (|s| = 1 And 48 <= s[0] <= 57) -> err = nil
 func OneDigit(s string) (err error) {
 	if len(s) == 1 && 48 <= s[0] && s[0] <= 57 {
 		return nil
@@ -39,11 +39,11 @@ func OneDigit(s string) (err error) {
 	return errOutOfRange
 }
 
-//@ Ensures (|s| = 1 And 48 <= s[0] <= 57) -> err = nil
-
 type stocked struct{ qty, price int }
 
 // Stocked succeeds when a map of structs has the key.
+//
+// @ Ensures err = nil <-> has(m, k)
 func Stocked(m map[string]stocked, k string) (err error) {
 	if _, ok := m[k]; !ok {
 		return errOutOfRange
@@ -51,9 +51,9 @@ func Stocked(m map[string]stocked, k string) (err error) {
 	return nil
 }
 
-//@ Ensures err = nil <-> has(m, k)
-
 // StockedFive succeeds for one value of a field of a struct in a map.
+//
+// @ Ensures err = nil <-> (has(m, k) And m[k].qty = 5)
 func StockedFive(m map[string]stocked, k string) (err error) {
 	if it, ok := m[k]; !ok || it.qty != 5 {
 		return errOutOfRange
@@ -61,15 +61,12 @@ func StockedFive(m map[string]stocked, k string) (err error) {
 	return nil
 }
 
-//@ Ensures err = nil <-> (has(m, k) And m[k].qty = 5)
-
 // LongInput always succeeds, and takes only slices longer than the usual
 // samples.
 //
 // @ Requires |A| = 65
-func LongInput(A []int) error { return nil }
-
-//@ Ensures result = nil
+// @ Ensures result = nil
+func LongInput(A []int) (result error) { return nil }
 
 type chain struct {
 	next *chain
@@ -79,23 +76,22 @@ type chain struct {
 // TwoLinks always succeeds, and takes only a chain of two.
 //
 // @ Requires n != nil And n.next != nil And n.next.v = 4
-func TwoLinks(n *chain) error { return nil }
-
-//@ Ensures result = nil
+// @ Ensures result = nil
+func TwoLinks(n *chain) (result error) { return nil }
 
 // ThreeLinks always succeeds too, but its inputs lie outside the search,
 // which follows two pointers and no more. That is reported, in words that
 // say that it is the search that found nothing.
 //
 // @ Requires n != nil And n.next != nil And n.next.next != nil
-func ThreeLinks(n *chain) error { return nil } // want `the contract of ThreeLinks may also be met by a function that always returns an error: no simple input was found for which it forces success`
-
-//@ Ensures result = nil
+// @ Ensures result = nil
+func ThreeLinks(n *chain) (result error) { return nil } // want `the contract of ThreeLinks may also be met by a function that always returns an error: no simple input was found for which it forces success`
 
 // SevenUnsaid says what success means and never that it happens; the wider
 // search must not excuse it.
 //
 // @ Requires p != nil
+// @ Ensures err = nil -> p.qty = 7
 func SevenUnsaid(p *quantity) (err error) { // want `the contract of SevenUnsaid may also be met by a function that always returns an error`
 	if p.qty != 7 {
 		return errOutOfRange
@@ -103,18 +99,19 @@ func SevenUnsaid(p *quantity) (err error) { // want `the contract of SevenUnsaid
 	return nil
 }
 
-//@ Ensures err = nil -> p.qty = 7
-
 // StockedNever demands a success that no map can give.
+//
+// @ Ensures (has(m, k) And m[k].qty = 5 And m[k].qty = 6) -> err = nil
 func StockedNever(m map[string]stocked, k string) (err error) { // want `the contract of StockedNever may also be met by a function that always returns an error`
 	return errOutOfRange
 }
 
-//@ Ensures (has(m, k) And m[k].qty = 5 And m[k].qty = 6) -> err = nil
-
 // EitherFails has two error results and returns an error on every call.
 // One input makes the first nil and another the second, which is not a
 // success.
+//
+// @ Ensures x = 0 -> err1 = nil
+// @ Ensures x = 1 -> err2 = nil
 func EitherFails(x int) (err1, err2 error) { // want `the contract of EitherFails may also be met by a function that always returns an error`
 	if x == 0 {
 		return nil, errOutOfRange
@@ -122,18 +119,15 @@ func EitherFails(x int) (err1, err2 error) { // want `the contract of EitherFail
 	return errOutOfRange, nil
 }
 
-//@ Ensures x = 0 -> err1 = nil
-//@ Ensures x = 1 -> err2 = nil
-
 // BothSucceed has one input that makes both nil.
+//
+// @ Ensures x = 0 -> (err1 = nil And err2 = nil)
 func BothSucceed(x int) (err1, err2 error) {
 	if x == 0 {
 		return nil, nil
 	}
 	return errOutOfRange, errOutOfRange
 }
-
-//@ Ensures x = 0 -> (err1 = nil And err2 = nil)
 
 type shelf struct{ items map[string]*quantity }
 
@@ -142,7 +136,8 @@ type shelf struct{ items map[string]*quantity }
 //
 // @ Requires w != nil And n >= 0
 // @ Requires has(w.items, sku) -> w.items[sku] != nil
-func Reserve(w *shelf, sku string, n int) error {
+// @ Ensures result = nil <-> (has(w.items, sku) And w.items[sku].qty >= n)
+func Reserve(w *shelf, sku string, n int) (result error) {
 	it, ok := w.items[sku]
 	if !ok || it.qty < n {
 		return errOutOfRange
@@ -150,17 +145,14 @@ func Reserve(w *shelf, sku string, n int) error {
 	return nil
 }
 
-//@ Ensures result = nil <-> (has(w.items, sku) And w.items[sku].qty >= n)
-
 // ReserveUnsaid has the same inputs and never says that it succeeds.
 //
 // @ Requires w != nil And n >= 0
 // @ Requires has(w.items, sku) -> w.items[sku] != nil
-func ReserveUnsaid(w *shelf, sku string, n int) error { // want `the contract of ReserveUnsaid may also be met by a function that always returns an error`
+// @ Ensures result = nil -> (has(w.items, sku) And w.items[sku].qty >= n)
+func ReserveUnsaid(w *shelf, sku string, n int) (result error) { // want `the contract of ReserveUnsaid may also be met by a function that always returns an error`
 	return errOutOfRange
 }
-
-//@ Ensures result = nil -> (has(w.items, sku) And w.items[sku].qty >= n)
 
 type looped struct {
 	next map[int]*looped
@@ -169,9 +161,9 @@ type looped struct {
 
 // LoopedMap takes a map of pointers to structs that hold such a map again.
 // The samples follow it two pointers deep and stop.
-func LoopedMap(m map[int]*looped) error { return nil }
-
-//@ Ensures result = nil
+//
+// @ Ensures result = nil
+func LoopedMap(m map[int]*looped) (result error) { return nil }
 
 type ping struct{ to map[string]*pong }
 
@@ -182,13 +174,14 @@ type pong struct {
 
 // PingPong takes two types that reach each other through a map and a
 // pointer.
-func PingPong(p *ping) error { return nil }
-
-//@ Ensures result = nil
+//
+// @ Ensures result = nil
+func PingPong(p *ping) (result error) { return nil }
 
 // TwoMapsDeep succeeds for a value two pointers into such a map.
 //
 // @ Requires has(m, 1) And m[1] != nil And has(m[1].next, 1) And m[1].next[1] != nil
+// @ Ensures err = nil <-> m[1].next[1].v = 9
 func TwoMapsDeep(m map[int]*looped) (err error) {
 	if m[1].next[1].v != 9 {
 		return errOutOfRange
@@ -196,12 +189,9 @@ func TwoMapsDeep(m map[int]*looped) (err error) {
 	return nil
 }
 
-//@ Ensures err = nil <-> m[1].next[1].v = 9
-
 // ThreeMapsDeep needs a third pointer, which no sample has.
 //
 // @ Requires has(m, 1) And m[1] != nil And has(m[1].next, 1) And m[1].next[1] != nil
 // @ Requires has(m[1].next[1].next, 1) And m[1].next[1].next[1] != nil
-func ThreeMapsDeep(m map[int]*looped) error { return nil } // want `the contract of ThreeMapsDeep may also be met by a function that always returns an error: no simple input was found`
-
-//@ Ensures result = nil
+// @ Ensures result = nil
+func ThreeMapsDeep(m map[int]*looped) (result error) { return nil } // want `the contract of ThreeMapsDeep may also be met by a function that always returns an error: no simple input was found`

@@ -14,27 +14,25 @@ type Rect struct {
 // New returns a rectangle, which has to meet the invariant.
 //
 // @ Requires 0 <= w <= Limit And 0 <= h <= Limit
-func New(w, h int) *Rect {
+// @ Ensures fresh(result) And result.W = w And result.H = h
+func New(w, h int) (result *Rect) {
 	return &Rect{W: w, H: h}
 }
-
-//@ Ensures fresh(result) And result.W = w And result.H = h
 
 // Area relies on the invariant for its arithmetic.
 //
 // @ Requires r != nil
-func (r *Rect) Area() int {
+// @ Ensures 0 <= result <= Limit * Limit
+func (r *Rect) Area() (result int) {
 	return r.W * r.H
 }
 
-//@ Ensures 0 <= result <= Limit * Limit
-
 // Unchecked returns a rectangle without establishing its invariant.
-func Unchecked(w int) *Rect {
+//
+// @ Ensures fresh(result)
+func Unchecked(w int) (result *Rect) {
 	return &Rect{W: w} // want `invariant of Rect may not hold for the result: 0 <= W <= Limit`
 }
-
-//@ Ensures fresh(result)
 
 // Broken has an invariant that cannot be read, which importing packages
 // must not take for no invariant.

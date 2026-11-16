@@ -31,6 +31,15 @@ Two things do not stop a function from being verified but come up as often:
 - **Conversions that drop bits and arithmetic that wraps**, as in `byte(x)` and a hash, are errors by design. `byte(x & 0xFF)` verifies. A way to say "this wraps on purpose" at one operation is not planned yet and would have to be loud.
 - **Contracts for the standard library.** Only a handful of functions have shipped contracts, and none of the methods. `sync.Mutex` is the one most asked for, and needs more than an entry: a contract that is true has to say that the lock is free or held, and today a formula can say that only through the private fields of the mutex, which differ between versions of Go; a name for the state of a lock that does not depend on them is missing. Until then locking stays in code that is not verified.
 
+## The annotation language
+
+Settled on 2026-11-16, after trying whether formulas could be Go expressions parsed by `go/parser`. They could, for the most part, but implication and quantifiers have no Go spelling and came out worse, and `go/types` rejects formulas that mix integer types, which mathematical integers allow. The language stays its own, which also leaves room for forms that Go syntax would make awkward.
+
+- **One spelling for each thing.** An annotation is `// @ Keyword ...` with one space after the slashes, the form `gofmt` produces in doc comments; any other spacing is an error. Length is `|A|`; there is no `len`. `Ensures` stands in the doc comment and nowhere else. `Variant` serves loops and, in a doc comment, recursion; `Measure` is gone.
+- **A verified function names its results.** A contract refers to results by name, and Go does not let a result share a name with a parameter, so no name in a contract is ambiguous. `result` and `result1`, `result2` remain only for trusted functions that leave their results unnamed.
+- **Unchanged:** `And`, `Or`, `~`, `->`, `<->`; `=` for equality; the prime for the state on return and `old` inside bodies; intervals such as `[0, n)`.
+- **Missing, from the first readers of the guide:** character literals, `cap`, comparing a slice with `nil`, a way to say that two slices share no memory, and `fresh(s.items)` being written without the prime although it speaks of the state on return.
+
 ## Before it is called ready
 
 - **Use it on a real package.** vego has only been run on its own test programs and on programs written to break it. Nobody has annotated existing code with it, so how much friction there is in practice is not known. The first trial should rank everything in this file.
@@ -118,7 +127,7 @@ Decisions:
 
 - **One file, no in-source trust.** Contracts for unproved code live in `vego-trusted.yaml` next to `go.mod`. There is no in-source `Trusted` marker and no `Assume`, so every assumption is a diff in one conspicuous file. A function with both `//@` annotations and an entry is an error.
 - **Entry format.** The key is the function's full name as Go prints it (`sort.Ints`, `(*bytes.Buffer).Len`). Fields: `reason` (mandatory free text saying why the contract is believed), `requires`, `ensures`, and `modifies` (what the function may write, in the form of a `Modifies` clause; anything unlisted is assumed untouched). Formulas use the `//@` language. Parameter names come from the real signature; there is no override.
-- **Result names.** Named results keep their names. A single unnamed result is `result`; several are `result1`, `result2`, ...
+- **Result names.** Named results keep their names. A trusted function may have unnamed results, since its signature is not ours to change: a single one is `result`; several are `result1`, `result2`, ...
 - **No contract, no call.** Verified code that calls a function with neither annotations nor an entry is an error, never silent trust. When in doubt, vego takes the loudest path: agents loop on its output, so anything quiet gets exploited.
 - **Checks on the file.** The function exists, every name is a parameter or result of the right type, `modifies` is present, even if empty, and names memory a caller can see, a primed path in an `ensures` reads memory of a kind that `modifies` lists, and no contract contradicts itself.
 - **Checks at each call.** After the promises of a trusted contract are assumed, a quick attempt is made to prove a contradiction; if it succeeds on a path that was not contradictory before, the call is reported. The attempt is bounded, so a contradiction that is hard to find gets through.

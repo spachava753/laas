@@ -11,11 +11,11 @@ import (
 type T struct{}
 
 // Ready is called by gen.Call before ErrX has its value.
-func (T) Ready() bool {
+//
+// @ Ensures result
+func (T) Ready() (result bool) {
 	return ErrX != nil // want `vego: cannot verify Ready: ErrX is not known to have its value yet when this runs: the type earlytype.T is handed to gen.Call, which may call its methods at earlytype.go:\d+ while the variables of the package are initialised, which may run this function first`
 }
-
-//@ Ensures result
 
 // First is computed before ErrX is set.
 var First = gen.Call[T]()
