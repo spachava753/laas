@@ -140,7 +140,7 @@ func TestAnalyzer(t *testing.T) {
 
 		runCorpus(t, analyzer,
 			"paper", "algorithms", "defects", "rejected", "leetcode", "semantics", "effects", "integers", "values", "trust",
-			"lib", "client", "memory", "shapes", "invariants", "mapping", "badpred", "usesbadpred", "early", "settled", "gen", "earlytype", "earlyrange", "earlybox", "earlyloop", "earlycarrier", "earlypanic", "guide", "wrapped", "unread", "usesunread")
+			"lib", "client", "memory", "shapes", "invariants", "mapping", "badpred", "usesbadpred", "early", "settled", "gen", "earlytype", "earlyrange", "earlybox", "earlyloop", "earlycarrier", "earlypanic", "guide", "wrapped", "unread", "usesunread", "twovariants", "usestwovariants")
 	})
 
 	t.Run("refuses a trust file with a defect", func(t *testing.T) {
@@ -186,6 +186,8 @@ func TestOtherTagsFlag(t *testing.T) {
 		{name: "a keyword with its formula glued to it", list: "Ensures(1=2)", wantErr: "too close"},
 		{name: "an assertion with its formula glued to it", list: "Assert(False)", wantErr: "too close"},
 		{name: "a retired keyword with signs after it", list: "Measure(0)", wantErr: "too close"},
+		{name: "a keyword behind signs", list: "(((Ensures", wantErr: "does not start with a letter"},
+		{name: "a keyword after other letters and a sign", list: "x-Ensures", wantErr: "too close"},
 		{name: "two words in one", list: "Summary Param", wantErr: "not a single word"},
 	}
 	for _, test := range tests {

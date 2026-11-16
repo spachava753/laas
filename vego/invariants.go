@@ -65,9 +65,13 @@ func (pv *pkgVerifier) addInvariant(name *types.TypeName, c *clause) {
 	named, isNamed := name.Type().(*types.Named)
 	switch {
 	case c.kind != "Invariant":
+		// The clause is read by nobody; it may have been meant for the
+		// function below the type.
+		pv.unread = true
 		pv.report(c.pos, "%s annotations do not belong on a type; a type can only have Invariant annotations", c.kind)
 		return
 	case !isStruct || !isNamed || named.TypeParams() != nil:
+		pv.unread = true
 		pv.report(c.pos, "an Invariant can only be declared on a struct type without type parameters")
 		return
 	}

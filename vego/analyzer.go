@@ -542,7 +542,9 @@ func parseOtherTags(list string) (map[string]bool, error) {
 		case tag == "":
 		case strings.ContainsFunc(tag, unicode.IsSpace) || strings.Contains(tag, "@"):
 			return nil, fmt.Errorf("-vego.other-tags: %q is not a single word", tag)
-		case protected(tag) || protected(lettersOf(tag)):
+		case !unicode.IsLetter([]rune(tag)[0]):
+			return nil, fmt.Errorf("-vego.other-tags: %q does not start with a letter", tag)
+		case protected(tag) || slices.ContainsFunc(strings.FieldsFunc(tag, func(r rune) bool { return !unicode.IsLetter(r) }), protected):
 			return nil, fmt.Errorf("-vego.other-tags: %q is a keyword of vego's annotations or too close to one to be declared as another tool's", tag)
 		default:
 			tags[tag] = true
@@ -560,7 +562,7 @@ func parseOtherTags(list string) (map[string]bool, error) {
 func leading(text string, otherTags map[string]bool) bool {
 	shown := quotedComment.ReplaceAllString(text, "")
 	return slices.ContainsFunc(leadingAt.FindAllStringSubmatch(shown, -1), func(found []string) bool {
-		letters := lettersOf(found[1])
+		_, letters := leadingWord(found[1])
 		return protected(letters) || (!otherTags[found[1]] && !otherTags[letters])
 	})
 }
@@ -604,12 +606,6 @@ func protected(word string) bool {
 		}
 	}
 	return false
-}
-
-// lettersOf returns the run of letters a word starts with.
-func lettersOf(word string) string {
-	_, letters := leadingWord(word)
-	return letters
 }
 
 // leadingWord returns what a line starts with up to the first space, and
@@ -1051,7 +1047,10 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 		fn.ensures = append(fn.ensures, c)
 	case "Variant":
 		if fn.measure != nil {
+			// One of the two is dropped, so the function is not what its
+			// author wrote.
 			pv.report(c.pos, "function %s already has a Variant", fn.obj.Name())
+			fn.broken = true
 		}
 		fn.measure = c
 	default:
