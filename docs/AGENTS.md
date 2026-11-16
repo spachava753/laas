@@ -34,7 +34,7 @@ A trailing "which" clause that carries a second idea:
 
 > ✗ The smallest annotation is `//@ Ensures True`, which promises nothing and turns on the checks every verified function gets.
 >
-> ✓ To turn on the built-in checks without writing a contract, add `// @ Ensures True`.
+> ✓ To turn on the built-in checks without writing a contract, add `// @Ensures True`.
 
 A list of items packed into one sentence:
 

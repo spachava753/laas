@@ -489,11 +489,11 @@ func (v *fnVerifier) checkWrite(st *state, guard []*logic.Term, w written, pos t
 			v.used[i] = true
 		}
 		if len(candidates) == 0 {
-			v.report(pos, "%s, which %s may not modify; list it in a // @ Modifies clause", what, v.fn.obj.Name())
+			v.report(pos, "%s, which %s may not modify; list it in a // @Modifies clause", what, v.fn.obj.Name())
 		} else {
 			// Something of the kind is listed, so telling the reader to
 			// list it would send them in a circle.
-			v.report(pos, "%s, which %s may not modify: nothing its // @ Modifies clauses list is known to cover it; "+
+			v.report(pos, "%s, which %s may not modify: nothing its // @Modifies clauses list is known to cover it; "+
 				"a clause covers what its path referred to when %s was called", what, v.fn.obj.Name(), v.fn.obj.Name())
 		}
 		st.assume(logic.Implies(logic.And(guard...), goal))

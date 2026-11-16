@@ -9,7 +9,7 @@ type T struct{}
 
 // Error is called by the runtime before ErrX has its value.
 //
-// @ Ensures result = "ready"
+// @Ensures result = "ready"
 func (T) Error() (result string) {
 	if ErrX != nil { // want `vego: cannot verify Error: ErrX is not known to have its value yet when this runs: something of this package is handed to panic at earlypanic.go:\d+ while the variables of the package are initialised, which may run this function first`
 		return "ready"

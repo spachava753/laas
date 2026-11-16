@@ -7,12 +7,12 @@
 //
 //	// Divide computes quotient and remainder by repeated subtraction.
 //	//
-//	// @ Requires n >= 0 And d > 0
-//	// @ Ensures n = d*q + r And 0 <= r And r < d
+//	// @Requires n >= 0 And d > 0
+//	// @Ensures n = d*q + r And 0 <= r And r < d
 //	func Divide(n, d int) (q, r int) {
 //		q, r = 0, n
-//		// @ Invariant n = d*q + r And 0 <= r
-//		// @ Variant r
+//		// @Invariant n = d*q + r And 0 <= r
+//		// @Variant r
 //		for d <= r {
 //			q, r = q+1, r-d
 //		}
@@ -54,8 +54,8 @@
 //
 // # Annotations
 //
-// An annotation is a comment line of the form "// @ Keyword ...", with one
-// space between the slashes and the @. In the doc comment of a function:
+// An annotation is a comment line of the form "// @Keyword ...", with one
+// space between the slashes and the @ and none after it. In the doc comment of a function:
 // Requires, Ensures, Modifies, and, for a recursive function, Variant.
 // Directly above a loop: Invariant and Variant. Anywhere in a body: Assert.
 // In the doc comment of a struct type: Invariant. At the top level:
@@ -127,8 +127,8 @@ func newAnalyzer() *analysis.Analyzer {
 		Name: "vego",
 		Doc: `verifies functions against their // @ specifications
 
-vego proves that functions annotated with // @ Requires, // @ Ensures,
-// @ Modifies, // @ Invariant, // @ Variant, and // @ Assert comments
+vego proves that functions annotated with // @Requires, // @Ensures,
+// @Modifies, // @Invariant, // @Variant, and // @Assert comments
 meet their contracts, terminate, write only what they say they write, and
 cannot index out of bounds, follow a nil pointer, divide by zero, or reach a
 panic. Functions without annotations are not analyzed. With the audit flag
@@ -369,9 +369,10 @@ var (
 
 // extractClauses splits a comment group into annotation clauses. A line that
 // starts with a keyword opens a clause, and following annotation lines that do
-// not start with a keyword continue it. An annotation is written "// @ ...",
-// which is what gofmt makes of every other spacing inside a doc comment; any
-// other spacing is reported, so that there is one form to look for. A //
+// not start with a keyword continue it. An annotation is written
+// "// @Keyword ...", a form gofmt leaves alone, and a line that continues one
+// "// @ ...". Any other spacing is reported, so that there is one form to look
+// for. A //
 // inside an annotation line starts an ordinary comment.
 //
 // An @ followed by whitespace always marks an annotation, so an unknown word
@@ -416,7 +417,7 @@ func extractClauses(group *ast.CommentGroup) []*clause {
 			switch {
 			case !block && stray(text):
 				clauses = append(clauses, &clause{pos: comment.Pos(),
-					misplaced: `an annotation is written "// @ ...", with nothing but one space between // and @`})
+					misplaced: `an annotation is written "// @Keyword ...", with nothing but one space between // and @`})
 			case current != nil && (block || strings.TrimSpace(text) != ""):
 				// A clause is continued with "// @", so this line would be
 				// left out of it without a word.
@@ -432,7 +433,7 @@ func extractClauses(group *ast.CommentGroup) []*clause {
 		// annotation written there would go unnoticed.
 		if stray(aside) {
 			clauses = append(clauses, &clause{pos: comment.Pos(),
-				misplaced: `an annotation is written "// @ ...", with nothing but one space between // and @`})
+				misplaced: `an annotation is written "// @Keyword ...", with nothing but one space between // and @`})
 		}
 		// The keyword is the run of letters the line starts with, so that
 		// one written without a space before its formula is still one.
@@ -447,10 +448,12 @@ func extractClauses(group *ast.CommentGroup) []*clause {
 		known := clauseKinds[keyword] || plannedKinds[keyword] || retiredKinds[keyword] != ""
 		isAnnotation := known || current != nil || match[2] != "" || nearKeyword(keyword) || nearKeyword(word)
 		switch {
-		case isAnnotation && match[1] != " ":
+		case isAnnotation && match[1] != " ", known && match[2] != "":
+			// One spelling: a space before the @, and the keyword directly
+			// after it.
 			current = nil
 			clauses = append(clauses, &clause{pos: comment.Pos(),
-				misplaced: `an annotation is written "// @ ...", with one space between // and @`})
+				misplaced: `an annotation is written "// @Keyword ...", with one space before the @ and none after it`})
 		case retiredKinds[keyword] != "":
 			current = nil
 			clauses = append(clauses, &clause{pos: comment.Pos(),
@@ -458,7 +461,8 @@ func extractClauses(group *ast.CommentGroup) []*clause {
 		case known:
 			current = &clause{kind: keyword, text: strings.TrimSpace(line[len(keyword):]), pos: comment.Pos()}
 			clauses = append(clauses, current)
-		case current != nil:
+		case current != nil && match[2] != "":
+			// "// @ ..." continues the clause above it.
 			current.text += " " + line
 		case isAnnotation:
 			current = nil
@@ -467,7 +471,7 @@ func extractClauses(group *ast.CommentGroup) []*clause {
 			// A second @, or other signs, before a keyword.
 			current = nil
 			clauses = append(clauses, &clause{pos: comment.Pos(),
-				misplaced: `an annotation is written "// @ ...", with nothing but one space between // and @`})
+				misplaced: `an annotation is written "// @Keyword ...", with nothing but one space between // and @`})
 		default:
 			current = nil
 		}

@@ -13,7 +13,7 @@ type T struct{}
 
 // Check is called through gen.Carrier before ErrX has its value.
 //
-// @ Ensures result
+// @Ensures result
 func (T) Check() (result bool) {
 	return ErrX != nil // want `vego: cannot verify Check: ErrX is not known to have its value yet when this runs: gen.Carrier\[T\]\{\} is handed to gen.Run, which may call back into this package at earlycarrier.go:\d+ while the variables of the package are initialised, which may run this function first`
 }

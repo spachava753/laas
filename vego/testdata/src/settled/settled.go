@@ -75,7 +75,7 @@ var ErrY = errors.New("y")
 
 // Ok reports that it is.
 //
-// @ Ensures result
+// @Ensures result
 func Ok() (result bool) {
 	return ErrY != nil && ErrWrapped != nil
 }

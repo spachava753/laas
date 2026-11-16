@@ -2,9 +2,9 @@
 // function whose contract uses it.
 package badpred
 
-// @ Predicate Valid(n) ::= DoesNotExist(n) // want `unknown predicate DoesNotExist`
+// @Predicate Valid(n) ::= DoesNotExist(n) // want `unknown predicate DoesNotExist`
 
 // Value has a contract that means nothing, since Valid does.
 //
-// @ Ensures Valid(result)
+// @Ensures Valid(result)
 func Value() (result int) { return -1 }

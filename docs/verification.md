@@ -29,7 +29,7 @@ laas -vego ./...
 
 `laas -vego` runs only the verifier. Plain `laas` also runs the other analyzers, which report on things unrelated to verification. The arguments are package patterns, as for `go vet`. Use `./...` for everything or `./internal/core` for one package.
 
-`vego` verifies a function only if it has at least one `// @` annotation. It ignores every other function, so you can start with a single function in a large package. To turn on [the built-in checks](#built-in-checks) without writing a contract, add `// @ Ensures True`.
+`vego` verifies a function only if it has at least one `// @` annotation. It ignores every other function, so you can start with a single function in a large package. To turn on [the built-in checks](#built-in-checks) without writing a contract, add `// @Ensures True`.
 
 When every annotated function is proved, `laas` prints nothing and exits with status 0. It does not list what it verified. It exits with status 3 if it has anything to report, and with status 1 if it could not load the packages.
 
@@ -48,8 +48,8 @@ Here is a function with a contract.
 ```go
 // Max returns the larger of two numbers.
 //
-// @ Ensures result >= a And result >= b
-// @ Ensures result = a Or result = b
+// @Ensures result >= a And result >= b
+// @Ensures result = a Or result = b
 func Max(a, b int) (result int) {
 	if a > b {
 		return a
@@ -71,7 +71,7 @@ The message points at the `return` statement and names the part of the contract 
 The next function looks correct but is not.
 
 ```go
-// @ Ensures result >= 0
+// @Ensures result >= 0
 func Abs(x int) (result int) {
 	if x < 0 {
 		return -x
@@ -89,8 +89,8 @@ The smallest `int` has no positive counterpart. Negating it overflows, and `Abs`
 The fix is to exclude that input:
 
 ```go
-// @ Requires x > MinInt
-// @ Ensures result >= 0 And (result = x Or result = -x)
+// @Requires x > MinInt
+// @Ensures result >= 0 And (result = x Or result = -x)
 func Abs(x int) (result int) {
 	if x < 0 {
 		return -x
@@ -105,7 +105,7 @@ Together, `Requires` and `Ensures` are the function's contract. Working with `ve
 
 ## Annotations
 
-An annotation is a comment line of the form `// @ Keyword ...`. There are seven keywords. Each is allowed only in certain places.
+An annotation is a comment line of the form `// @Keyword ...`. There are seven keywords. Each is allowed only in certain places.
 
 | Keyword | Where it goes |
 | --- | --- |
@@ -116,12 +116,12 @@ An annotation is a comment line of the form `// @ Keyword ...`. There are seven 
 | `Invariant` | the doc comment of a struct type |
 | `Predicate` | the top level of a file |
 
-Write exactly one space between `//` and `@`. This is the form `gofmt` produces in doc comments. Any other spacing, such as `//@ Requires`, is reported as an error.
+Write one space between `//` and `@`, and no space between `@` and the keyword. `gofmt` leaves this form unchanged. Any other spacing, such as `//@Requires` or `// @ Requires`, is reported as an error.
 
-To continue a long annotation, start the next line with `// @` and no keyword. A `//` inside an annotation starts an ordinary comment.
+To continue a long annotation, start the next line with `// @`, a space, and the rest of the formula. A `//` inside an annotation starts an ordinary comment.
 
 ```go
-// @ Ensures result = -1 Or
+// @Ensures result = -1 Or
 // @   (0 <= result < |A| And A[result] = x)
 ```
 
@@ -129,15 +129,15 @@ An ordinary comment directly after an annotation is an error, because it would n
 
 `vego` reports an annotation it cannot read instead of skipping it. These are all errors:
 
-- a misspelt keyword, such as `// @ Ensure` or `// @ensures`;
+- a misspelt keyword, such as `// @Ensure` or `// @ensures`;
 - an annotation inside `/* */`;
 - an `Ensures` clause after the function body;
 - an annotation with something in front of the `@`, such as `// post: @ Ensures ...`.
 
 Two kinds of comment are deliberately ignored:
 
-- A word directly after `@`, with no space, is treated as an annotation only if it is a keyword or within two letters of one. `// @Summary` and `// @Postcondition` are taken to belong to another tool.
-- An annotation behind a second `//`, as in `// // @ Ensures r > 0`, is treated as commented out or quoted. This is also how an example in a doc comment can show an annotation.
+- A word directly after `@` is treated as an annotation only if it is a keyword or within two letters of one. `// @Summary` and `// @Postcondition` are taken to belong to another tool.
+- An annotation behind a second `//`, as in `// // @Ensures r > 0`, is treated as commented out or quoted. This is also how an example in a doc comment can show an annotation.
 
 ## Formulas
 
@@ -146,7 +146,7 @@ The text after a keyword is a formula. Formulas look like Go conditions, with th
 The logical operators are `And`, `Or`, `~` (not), `->` (implies), and `<->` (if and only if). Equality is a single `=`. Comparisons can be chained, so `0 <= i < n` is valid.
 
 ```go
-// @ Ensures result = -1 Or (0 <= result < |A| And A[result] = x)
+// @Ensures result = -1 Or (0 <= result < |A| And A[result] = x)
 ```
 
 `~` binds tightest, followed by `And`, `Or`, `->`, and `<->`. `a -> b -> c` means `a -> (b -> c)`. Use parentheses if you are unsure.
@@ -162,8 +162,8 @@ Formulas can also use strings and `nil`: `role = "admin"`, `p != nil`, `err = ni
 `Forall` and `Exists` range over an interval of integers.
 
 ```go
-// @ Requires Forall k in [0, |A|) : 0 <= A[k] <= 1000
-// @ Ensures Exists k in [0, |A|) : A[k] = result
+// @Requires Forall k in [0, |A|) : 0 <= A[k] <= 1000
+// @Ensures Exists k in [0, |A|) : A[k] = result
 ```
 
 Intervals use mathematical notation. `[0, n)` includes 0 and excludes `n`. `[0, n]` includes both. Several variables can share an interval, as in `Forall i, j in [0, n) : ...`. `in Z` ranges over all integers.
@@ -197,7 +197,7 @@ Every verified function gets the checks in this section. They do not depend on t
 Every index must be proved to be in range.
 
 ```go
-// @ Ensures result = A[0]
+// @Ensures result = A[0]
 func First(A []int) (result int) {
 	return A[0]
 }
@@ -207,7 +207,7 @@ func First(A []int) (result int) {
 vego: index may be out of range
 ```
 
-Adding `// @ Requires |A| > 0` fixes it. Every verified caller of `First` must then prove that its slice is not empty.
+Adding `// @Requires |A| > 0` fixes it. Every verified caller of `First` must then prove that its slice is not empty.
 
 ### Nil pointers and division
 
@@ -220,7 +220,7 @@ A divisor must be proved non-zero.
 Every `+`, `-`, `*`, `/`, negation, conversion, and left shift must be proved to stay within its type.
 
 ```go
-// @ Requires 0 <= lo <= hi
+// @Requires 0 <= lo <= hi
 func Mid(lo, hi int) (result int) {
 	return (lo + hi) / 2
 }
@@ -235,8 +235,8 @@ vego: addition may overflow int
 Overflow is the check you will see most often. Code that adds up values can only be proved if the values are bounded, so contracts often need bounds on their inputs:
 
 ```go
-// @ Requires |A| <= 1000
-// @ Requires Forall k in [0, |A|) : 0 <= A[k] <= 1000
+// @Requires |A| <= 1000
+// @Requires Forall k in [0, |A|) : 0 <= A[k] <= 1000
 func Sum(A []int) (result int) {
 ```
 
@@ -257,7 +257,7 @@ Every loop and every recursive function must be proved to terminate. The next tw
 To get these checks without stating anything else, use a contract that is always true:
 
 ```go
-// @ Ensures True
+// @Ensures True
 func SafeOnly(A []int, i int) (result int) {
 	if 0 <= i && i < len(A) {
 		return A[i]
@@ -273,12 +273,12 @@ This is a good first step when you add `vego` to existing code.
 `vego` does not execute a loop. It reasons about a single, arbitrary iteration. To do that it needs a loop invariant: a formula that is true every time the loop is about to test its condition.
 
 ```go
-// @ Requires n >= 0 And d > 0
-// @ Ensures n = d*q + r And 0 <= r < d
+// @Requires n >= 0 And d > 0
+// @Ensures n = d*q + r And 0 <= r < d
 func Divide(n, d int) (q, r int) {
 	q, r = 0, n
-	// @ Invariant n = d*q + r And 0 <= r
-	// @ Variant r
+	// @Invariant n = d*q + r And 0 <= r
+	// @Variant r
 	for d <= r {
 		q, r = q+1, r-d
 	}
@@ -297,12 +297,12 @@ A `Variant` proves that a `for` loop terminates. It is an integer expression tha
 A `range` loop needs no `Variant`. `vego` also knows the bounds of its index variable.
 
 ```go
-// @ Requires |A| <= 1000
-// @ Requires Forall k in [0, |A|) : 0 <= A[k] <= 1000
-// @ Ensures 0 <= result <= 1000 * |A|
+// @Requires |A| <= 1000
+// @Requires Forall k in [0, |A|) : 0 <= A[k] <= 1000
+// @Ensures 0 <= result <= 1000 * |A|
 func Sum(A []int) (result int) {
 	total := 0
-	// @ Invariant 0 <= total <= 1000 * i
+	// @Invariant 0 <= total <= 1000 * i
 	for i := range A {
 		total += A[i]
 	}
@@ -317,10 +317,10 @@ This invariant refers to the index, so the loop must name it. With `for _, x := 
 When a loop processes a slice one element at a time, the invariant usually states that the part processed so far is correct:
 
 ```go
-// @ Ensures result = -1 Or (0 <= result < |A| And A[result] = x)
-// @ Ensures result = -1 -> Forall k in [0, |A|) : A[k] != x
+// @Ensures result = -1 Or (0 <= result < |A| And A[result] = x)
+// @Ensures result = -1 -> Forall k in [0, |A|) : A[k] != x
 func Index(A []int, x int) (result int) {
-	// @ Invariant Forall k in [0, i) : A[k] != x
+	// @Invariant Forall k in [0, i) : A[k] != x
 	for i := range A {
 		if A[i] == x {
 			return i
@@ -344,9 +344,9 @@ There are two messages about invariants:
 A recursive function needs a `Variant` in its doc comment to prove that it terminates. Here the variant is an integer expression over the parameters. It must never be negative, and it must be smaller at every recursive call. Functions that call each other each need one.
 
 ```go
-// @ Requires n >= 0
-// @ Variant n
-// @ Ensures result = n
+// @Requires n >= 0
+// @Variant n
+// @Ensures result = n
 func Steps(n int) (result int) {
 	if n == 0 {
 		return 0
@@ -362,8 +362,8 @@ At the recursive call, `vego` uses the contract of `Steps` with `n-1` as the arg
 `vego` verifies a call using only the contract of the called function. It never looks at the callee's body.
 
 ```go
-// @ Requires lo <= hi
-// @ Ensures lo <= result <= hi
+// @Requires lo <= hi
+// @Ensures lo <= result <= hi
 func Clamp(x, lo, hi int) (result int) {
 	if x < lo {
 		return lo
@@ -374,7 +374,7 @@ func Clamp(x, lo, hi int) (result int) {
 	return x
 }
 
-// @ Ensures 0 <= result <= 100
+// @Ensures 0 <= result <= 100
 func Percent(x int) (result int) {
 	return Clamp(x, 0, 100)
 }
@@ -388,7 +388,7 @@ A function without a contract cannot be called from verified code:
 
 ```text
 vego: cannot verify CallsHelper: it calls helper, which has no contract; annotate
-helper with // @ so that it is verified, or add a trusted contract for guide.helper
+helper with // @ annotations so that it is verified, or add a trusted contract for guide.helper
 to vego-trusted.yaml
 ```
 
@@ -401,10 +401,10 @@ The contract of an exported function is available to other packages, so verified
 A predicate gives a name to a formula so that you can reuse it.
 
 ```go
-// @ Predicate sorted(A) ::= Forall i, j in [0, |A|) : i <= j -> A[i] <= A[j]
+// @Predicate sorted(A) ::= Forall i, j in [0, |A|) : i <= j -> A[i] <= A[j]
 
-// @ Requires sorted(A) And |A| > 0
-// @ Ensures Forall k in [0, |A|) : result <= A[k]
+// @Requires sorted(A) And |A| > 0
+// @Ensures Forall k in [0, |A|) : result <= A[k]
 func Smallest(A []int) (result int) {
 	return A[0]
 }
@@ -413,7 +413,7 @@ func Smallest(A []int) (result int) {
 The parameters of a predicate can be numbers, slices of numbers, or strings.
 
 ```go
-// @ Predicate digits(s) ::= Forall k in [0, |s|) : 48 <= s[k] <= 57
+// @Predicate digits(s) ::= Forall k in [0, |s|) : 48 <= s[k] <= 57
 ```
 
 The body of a predicate can refer only to its parameters. It cannot use the constants or variables of the package, so pass them as arguments.
@@ -421,7 +421,7 @@ The body of a predicate can refer only to its parameters. It cannot use the cons
 A predicate can be recursive:
 
 ```go
-// @ Predicate zeros(A, n) ::= n <= 0 Or (zeros(A, n-1) And A[n-1] = 0)
+// @Predicate zeros(A, n) ::= n <= 0 Or (zeros(A, n-1) And A[n-1] = 0)
 ```
 
 In its own definition, a predicate may appear under `And`, `Or`, and quantifiers, and on the right side of `->`. It may not appear under `~`, on the left side of `->`, or inside `<->`.
@@ -435,7 +435,7 @@ The prover is sound but limited. It handles linear arithmetic, reads and writes 
 `Assert` states such a fact. `vego` must prove the assertion at that point, and can use it in everything that follows.
 
 ```go
-// @ Assert lo < |A|
+// @Assert lo < |A|
 ```
 
 `Assert` is also the way to find out what `vego` knows at a given point. Assert the fact you believe, and if it fails, move the assertion earlier in the function until it is proved. The fact is lost between the last place where it is proved and the first place where it is not. Often that is a loop whose invariant does not mention it.
@@ -443,8 +443,8 @@ The prover is sound but limited. It handles linear arithmetic, reads and writes 
 This example needs no help, although it multiplies two variables:
 
 ```go
-// @ Requires 0 <= i < h And 0 <= j < w And h <= 1000 And w <= 1000
-// @ Ensures 0 <= result < h*w
+// @Requires 0 <= i < h And 0 <= j < w And h <= 1000 And w <= 1000
+// @Ensures 0 <= result < h*w
 func Cell(i, j, w, h int) (result int) {
 	return i*w + j
 }
@@ -457,10 +457,10 @@ func Cell(i, j, w, h int) (result int) {
 The functions so far only computed values. A function can also write memory that its caller can see: the elements of a slice, the fields of a struct behind a pointer, or a map. Such a function must declare what it writes and describe the result.
 
 ```go
-// @ Modifies A
-// @ Ensures Forall k in [0, |A|) : A'[k] = v
+// @Modifies A
+// @Ensures Forall k in [0, |A|) : A'[k] = v
 func Fill(A []int, v int) {
-	// @ Invariant Forall k in [0, i) : A[k] = v
+	// @Invariant Forall k in [0, i) : A[k] = v
 	for i := range A {
 		A[i] = v
 	}
@@ -472,7 +472,7 @@ func Fill(A []int, v int) {
 `Modifies` lists the memory a function is allowed to write. Writing anything else is an error:
 
 ```text
-vego: A[i] is assigned, which FillUnlisted may not modify; list it in a // @ Modifies clause
+vego: A[i] is assigned, which FillUnlisted may not modify; list it in a // @Modifies clause
 ```
 
 A caller can rely on everything outside the list being unchanged. About the memory in the list, it knows only what the `Ensures` clauses state. So keep the list as small as possible. With `Modifies c.n`, callers keep what they know about the other fields of `c`. With `Modifies c`, they lose it.
@@ -502,9 +502,9 @@ Second, `Modifies A` covers the whole capacity of `A`, not just its length. This
 `append` is supported as the entire right-hand side of an assignment, or as the returned expression.
 
 ```go
-// @ Requires |A| < 1000
-// @ Modifies A
-// @ Ensures |result| = |A| + 1 And result[|A|] = x
+// @Requires |A| < 1000
+// @Modifies A
+// @Ensures |result| = |A| + 1 And result[|A|] = x
 func Push(A []int, x int) (result []int) {
 	return append(A, x)
 }
@@ -519,13 +519,13 @@ Slice expressions `A[i:j]` and `A[i:j:k]`, `len`, `cap`, `make`, and slice liter
 A string is an immutable sequence of bytes. `vego` supports `|s|`, `s[i]`, `==`, string literals, concatenation, substrings, and conversion to and from `[]byte`.
 
 ```go
-// @ Requires |a| <= 1000 And |b| <= 1000
-// @ Ensures |result| = |a| + |b|
+// @Requires |a| <= 1000 And |b| <= 1000
+// @Ensures |result| = |a| + |b|
 func Join(a, b string) (result string) {
 	return a + b
 }
 
-// @ Ensures result <-> role = "admin"
+// @Ensures result <-> role = "admin"
 func IsAdmin(role string) (result bool) {
 	return role == "admin"
 }
@@ -545,9 +545,9 @@ type Counter struct {
 	limit int
 }
 
-// @ Requires c != nil And c.n < c.limit
-// @ Modifies c.n
-// @ Ensures c.n' = c.n + 1
+// @Requires c != nil And c.n < c.limit
+// @Modifies c.n
+// @Ensures c.n' = c.n + 1
 func (c *Counter) Inc() {
 	c.n++
 }
@@ -556,9 +556,9 @@ func (c *Counter) Inc() {
 A `Modifies` path starts at a parameter. `Modifies c` covers every field of the struct that `c` points to. `Modifies c.n` covers one field, so callers know that `c.limit` is unchanged:
 
 ```go
-// @ Requires c != nil And c.n = 0 And c.limit = 10
-// @ Modifies c.n
-// @ Ensures c.n' = 2 And c.limit' = 10
+// @Requires c != nil And c.n = 0 And c.limit = 10
+// @Modifies c.n
+// @Ensures c.n' = 2 And c.limit' = 10
 func Twice(c *Counter) {
 	c.Inc()
 	c.Inc()
@@ -583,9 +583,9 @@ To assign a field that holds a slice, pointer, or map, list the struct that cont
 Two pointers can point to the same struct. `vego` does not assume that they are different, so a proof must hold in both cases.
 
 ```go
-// @ Requires a != nil And b != nil
-// @ Modifies a.n, b.n
-// @ Ensures result = 1
+// @Requires a != nil And b != nil
+// @Modifies a.n, b.n
+// @Ensures result = 1
 func SameOrNot(a, b *Counter) (result int) {
 	a.n = 1
 	b.n = 2
@@ -608,7 +608,7 @@ A function can freely write memory that it allocated itself with `&T{...}`, `new
 To tell callers that a result is newly allocated, use `fresh`:
 
 ```go
-// @ Ensures fresh(result) And result.n = 0 And result.limit = limit
+// @Ensures fresh(result) And result.n = 0 And result.limit = limit
 func NewCounter(limit int) (result *Counter) {
 	return &Counter{limit: limit}
 }
@@ -625,10 +625,10 @@ Without `fresh(result)`, a caller must assume that the result could be a counter
 A stack that appends to its own slice needs most of the features above.
 
 ```go
-// @ Requires s != nil And s.n = |s.items| And s.n < 1000
-// @ Modifies s, s.items
-// @ Ensures s.n' = s.n + 1 And |s.items'| = s.n' And s.items'[s.n] = x
-// @ Ensures fresh(s.items) Or within(s.items', s.items)
+// @Requires s != nil And s.n = |s.items| And s.n < 1000
+// @Modifies s, s.items
+// @Ensures s.n' = s.n + 1 And |s.items'| = s.n' And s.items'[s.n] = x
+// @Ensures fresh(s.items) Or within(s.items', s.items)
 func (s *Stack) Push(x int) {
 	s.items = append(s.items, x)
 	s.n++
@@ -640,9 +640,9 @@ func (s *Stack) Push(x int) {
 The last clause is easy to forget. After `Push` returns, `s.items` can be a different slice from the one the caller listed in its own `Modifies s.items`. Without the clause, a caller that calls `Push` twice gets an error at the second call, because that call may write memory the caller is not allowed to modify. The clause tells the caller where the new slice is. Either it is newly allocated, and anyone may write it, or it lies inside the old slice, which the caller listed.
 
 ```go
-// @ Requires s != nil And s.n = |s.items| And s.n < 100
-// @ Modifies s, s.items
-// @ Ensures s.n' = s.n + 2
+// @Requires s != nil And s.n = |s.items| And s.n < 100
+// @Modifies s, s.items
+// @Ensures s.n' = s.n + 2
 func PushTwo(s *Stack) {
 	s.Push(1)
 	s.Push(2)
@@ -664,9 +664,9 @@ A call to a function that has a `Modifies` clause is allowed in three places:
 Consider a method that changes the stack and also returns a value:
 
 ```go
-// @ Requires s != nil And s.n > 0
-// @ Modifies s.n
-// @ Ensures s.n' = s.n - 1 And result = s.items[s.n-1]
+// @Requires s != nil And s.n > 0
+// @Modifies s.n
+// @Ensures s.n' = s.n - 1 And result = s.items[s.n-1]
 func (s *Stack) Pop() (result int) {
 	s.n--
 	return s.items[s.n]
@@ -700,14 +700,14 @@ A struct type can have an invariant: a formula that every value of the type shou
 ```go
 // Stack keeps a count that never exceeds what it holds.
 //
-// @ Invariant 0 <= n <= |items|
+// @Invariant 0 <= n <= |items|
 type Stack struct {
 	items []int
 	n     int
 }
 
-// @ Requires s != nil And s.n > 0
-// @ Ensures result = s.items[s.n-1]
+// @Requires s != nil And s.n > 0
+// @Ensures result = s.items[s.n-1]
 func (s *Stack) Top() (result int) {
 	return s.items[s.n-1]
 }
@@ -730,7 +730,7 @@ The invariant applies in fewer places than you might expect. There are three lim
 `vego` does not assume or check the invariant for a struct inside a slice, a map, or another struct, or for one behind a pointer field. State it explicitly where you need it. For example, take this type:
 
 ```go
-// @ Invariant 0 <= balance <= 1000000
+// @Invariant 0 <= balance <= 1000000
 type Account struct {
 	mu      sync.Mutex
 	balance int
@@ -740,8 +740,8 @@ type Account struct {
 A function that takes a slice of accounts must state the bound for each element:
 
 ```go
-// @ Requires |as| <= 100
-// @ Requires Forall k in [0, |as|) : as[k] != nil And 0 <= as[k].balance <= 1000000
+// @Requires |as| <= 100
+// @Requires Forall k in [0, |as|) : as[k] != nil And 0 <= as[k].balance <= 1000000
 func Total(as []*Account) (result int) {
 ```
 
@@ -750,12 +750,12 @@ func Total(as []*Account) (result int) {
 A loop forgets the struct invariant along with everything else about the memory it changes. If a loop calls a method on a struct, repeat the struct invariant as a loop invariant:
 
 ```go
-// @ Requires s != nil
-// @ Modifies s.n
-// @ Ensures s.n' = 0
+// @Requires s != nil
+// @Modifies s.n
+// @Ensures s.n' = 0
 func Drain(s *Stack) {
-	// @ Invariant 0 <= s.n <= |s.items|
-	// @ Variant s.n
+	// @Invariant 0 <= s.n <= |s.items|
+	// @Variant s.n
 	for s.n > 0 {
 		s.Pop()
 	}
@@ -775,16 +775,16 @@ A map is a reference, like a pointer. Two map variables can refer to the same ma
 In a formula, `m[k]` is the value stored under `k`, or the zero value if the key is absent, as in Go. `has(m, k)` is true if the key is present. `|m|` is the number of keys.
 
 ```go
-// @ Ensures ok <-> has(m, k)
-// @ Ensures v = m[k]
+// @Ensures ok <-> has(m, k)
+// @Ensures v = m[k]
 func Get(m map[string]int, k string) (v int, ok bool) {
 	v, ok = m[k]
 	return v, ok
 }
 
-// @ Requires m != nil And m[k] < 1000
-// @ Modifies m
-// @ Ensures has(m', k) And m'[k] = m[k] + 1
+// @Requires m != nil And m[k] < 1000
+// @Modifies m
+// @Ensures has(m', k) And m'[k] = m[k] + 1
 func Bump(m map[string]int, k string) {
 	m[k] = m[k] + 1
 }
@@ -817,8 +817,8 @@ A function that returns an error must state when it succeeds.
 ```go
 var ErrEmpty = errors.New("empty")
 
-// @ Ensures err = nil <-> |A| > 0
-// @ Ensures err = nil -> first = A[0]
+// @Ensures err = nil <-> |A| > 0
+// @Ensures err = nil -> first = A[0]
 func Head(A []int) (first int, err error) {
 	if len(A) == 0 {
 		return 0, ErrEmpty
@@ -854,7 +854,7 @@ In both cases, add a clause that some simple input clearly satisfies, such as `|
 Some functions cannot say when they succeed, because their success depends on a call whose contract does not say what it returns.
 
 ```go
-// @ Ensures err = nil -> 1 <= port <= 65535
+// @Ensures err = nil -> 1 <= port <= 65535
 func ParsePort(s string) (port int, err error) {
 	n, err := strconv.Atoi(s)
 	if err != nil {
@@ -906,23 +906,23 @@ A package-level error is known to be non-nil only under these conditions. Nothin
 ```go
 type Lock struct{ held bool }
 
-// @ Requires l != nil And ~l.held
-// @ Modifies l
-// @ Ensures l.held'
+// @Requires l != nil And ~l.held
+// @Modifies l
+// @Ensures l.held'
 func (l *Lock) Acquire() {
 	l.held = true
 }
 
-// @ Requires l != nil And l.held
-// @ Modifies l
-// @ Ensures ~l.held'
+// @Requires l != nil And l.held
+// @Modifies l
+// @Ensures ~l.held'
 func (l *Lock) Release() {
 	l.held = false
 }
 
-// @ Requires l != nil And ~l.held And c != nil And c.n < c.limit
-// @ Modifies l, c.n
-// @ Ensures ~l.held'
+// @Requires l != nil And ~l.held And c != nil And c.n < c.limit
+// @Modifies l, c.n
+// @Ensures ~l.held'
 func Guarded(l *Lock, c *Counter, skip bool) {
 	l.Acquire()
 	defer l.Release()
@@ -956,9 +956,9 @@ func (a *Account) Deposit(n int) bool {
 	return true
 }
 
-// @ Requires a != nil And 0 <= n And a.balance + n <= 1000000
-// @ Modifies a.balance
-// @ Ensures a.balance' = a.balance + n
+// @Requires a != nil And 0 <= n And a.balance + n <= 1000000
+// @Modifies a.balance
+// @Ensures a.balance' = a.balance + n
 func (a *Account) deposit(n int) {
 	a.balance += n
 }
@@ -973,7 +973,7 @@ The proof of `deposit` shows that it is correct when one goroutine runs it. Keep
 `vego` computes with integers, not bits. It handles shifts and bitwise operators by translating them to arithmetic.
 
 ```go
-// @ Ensures result = 256 * hi + lo
+// @Ensures result = 256 * hi + lo
 func Pack(hi, lo byte) (result uint16) {
 	return uint16(hi)<<8 | uint16(lo)
 }
@@ -1117,7 +1117,7 @@ A sort function gets this report if its contract only says that the output is so
 A verified function can only call functions that have contracts. Start with functions that call nothing and work upwards.
 
 1. Pick a leaf function. It should call nothing, or only functions with shipped contracts. Pure functions over numbers, slices, and strings are the easiest.
-2. Add `// @ Ensures True` and run `laas -vego` on the package. This checks the function for index errors, overflow, nil dereferences, and termination. You will usually need to add `Requires` clauses with bounds, loop invariants, and variants. You may also find bugs.
+2. Add `// @Ensures True` and run `laas -vego` on the package. This checks the function for index errors, overflow, nil dereferences, and termination. You will usually need to add `Requires` clauses with bounds, loop invariants, and variants. You may also find bugs.
 3. Replace `Ensures True` with the real contract. Run `-vego.audit` to check that the contract says enough.
 4. Move on to the callers. Each caller needs contracts for everything it calls. If a callee is not ready, give it a trusted contract with a reason such as "not verified yet". Delete the entry once the callee is verified.
 5. Split functions that use unsupported Go. Move the logic into a verified function that works on plain data. Leave the part that uses an interface, a closure, or a goroutine unverified, and have it call the verified function.
@@ -1127,8 +1127,8 @@ Keep two things in mind while a package is partly verified.
 The first is that nothing checks a `Requires` clause at run time. Verified callers prove it. Unverified callers are simply trusted to satisfy it, and `go build` and `go test` add no checks. Where data enters from outside, check it in code. Write a verified function with no `Requires` clause that tests its input and returns an error, and call it before the functions that need the precondition:
 
 ```go
-// @ Ensures err = nil <-> 0 <= i < |A|
-// @ Ensures err = nil -> x = A[i]
+// @Ensures err = nil <-> 0 <= i < |A|
+// @Ensures err = nil -> x = A[i]
 func At(A []int, i int) (x int, err error) {
 	if i < 0 || i >= len(A) {
 		return 0, fmt.Errorf("index %d out of range", i)
@@ -1207,11 +1207,11 @@ This table lists the most common messages.
 | `loop variant may not decrease`, `loop variant may be negative` | The `Variant` is not proved to decrease, or to stay non-negative. | Use a different `Variant`, or add an invariant that bounds it. |
 | `variant may not decrease in recursive call`, `variant of the function may be negative` | The same, for the `Variant` of a recursive function. | Use a different `Variant`, or strengthen the `Requires`. |
 | `F has annotations, so each of its results needs a name` | A verified function has an unnamed or blank result. | Name every result in the signature. |
-| `an annotation is written "// @ ...", with one space between // and @` (or `with nothing but one space`) | The comment looks like an annotation but has different spacing, or something stands before the `@`. | Write `// @ Keyword ...`. |
+| `an annotation is written "// @Keyword ...", with one space before the @ and none after it` (or `with nothing but one space`) | The comment looks like an annotation but has different spacing, or something stands before the `@`. | Write `// @ Keyword ...`. |
 | `a comment directly after an annotation is not read as part of it` | An ordinary comment follows an annotation in the same comment group. | Start the line with `// @` to continue the annotation, or put an empty `//` line before the comment. |
 | `Ensures annotation is not attached to a function` | The clause is not in the doc comment of a function. | Move it into the doc comment. |
-| `x is assigned, which F may not modify; list it in a // @ Modifies clause` | No `Modifies` entry covers memory of this kind. | Add it to `Modifies`. |
-| `... which F may not modify: nothing its // @ Modifies clauses list is known to cover it` | An entry covers memory of this kind, but `vego` cannot prove it is this memory. It may be another element, another struct, or a slice that was replaced after `F` was called. | Make the entry match. For a replaced slice, the callee needs a `fresh ... Or within ...` clause. |
+| `x is assigned, which F may not modify; list it in a // @Modifies clause` | No `Modifies` entry covers memory of this kind. | Add it to `Modifies`. |
+| `... which F may not modify: nothing its // @Modifies clauses list is known to cover it` | An entry covers memory of this kind, but `vego` cannot prove it is this memory. It may be another element, another struct, or a slice that was replaced after `F` was called. | Make the entry match. For a replaced slice, the callee needs a `fresh ... Or within ...` clause. |
 | `Modifies lists x, but F never needs to modify it` | The `Modifies` list allows more than the body needs. | Remove or narrow the entry. |
 | `invariant of T may not hold for what is passed to F as x` | The struct invariant is not proved at the call. | Restore it before the call. In a loop, repeat it as a loop invariant. |
 | `invariant of T may not hold for x on return` | The struct invariant is not proved at the end of the function. | Restore it before returning. |

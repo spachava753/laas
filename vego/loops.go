@@ -453,7 +453,7 @@ func (v *fnVerifier) forStmt(s *ast.ForStmt, spec *loopSpec, renewed []*types.Va
 		return
 	}
 	if spec.variant == nil {
-		v.report(s.Pos(), "loop needs a // @ Variant annotation to prove that it terminates")
+		v.report(s.Pos(), "loop needs a // @Variant annotation to prove that it terminates")
 	}
 	shape := loopShape{pos: s.Pos(), body: s.Body, post: s.Post, spec: spec, always: s.Cond == nil, renewed: renewed}
 	shape.effects = v.effects(s.Body, s.Post)

@@ -3,7 +3,7 @@ package refused
 
 // Double would verify, but nothing is verified in this mode.
 //
-// @ Ensures y = 2 * x
+// @Ensures y = 2 * x
 func Double(x int) (y int) { // want `verification does not run under go vet`
 	return x
 }

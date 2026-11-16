@@ -10,7 +10,7 @@ type T struct{}
 // Ok reports whether the variable is set. Called through the interface
 // below it runs before the variable has its value, and returns false.
 //
-// @ Ensures result
+// @Ensures result
 func (T) Ok() (result bool) {
 	return ErrX != nil // want `vego: cannot verify Ok: ErrX is not known to have its value yet when this runs: a function value or an interface method is called at early.go:\d+ while the variables of the package are initialised, which may run this function first`
 }

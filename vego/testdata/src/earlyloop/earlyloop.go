@@ -13,7 +13,7 @@ type T struct{}
 
 // Check is called by gen.Run before ErrX has its value.
 //
-// @ Ensures result
+// @Ensures result
 func (T) Check() (result bool) {
 	return ErrX != nil // want `vego: cannot verify Check: ErrX is not known to have its value yet when this runs: gen.Box.Value is assigned, which another package may read at earlyloop.go:\d+ while the variables of the package are initialised, which may run this function first`
 }
