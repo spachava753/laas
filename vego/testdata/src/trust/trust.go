@@ -1362,3 +1362,43 @@ func PingsLater(b *pinged) {
 func Pings(b *pinged) {
 	b.ping()
 }
+
+// Trusted functions keep the signatures they have, so their unnamed
+// results are called result, or result1, result2, and so on.
+
+func twoPlain() (int, error)                { return 0, nil }
+func secondNamed() (result2 int, _ int) { return 0, 1 }
+func clash(result int) int              { return 7 }
+
+// UsesPair relies on a contract that speaks of two unnamed results.
+//
+// @ Ensures err = nil -> n >= 0
+func UsesPair() (n int, err error) {
+	n, err = twoPlain()
+	return n, err
+}
+
+// UsesPairWrongly expects more than the contract says.
+//
+// @ Ensures n >= 0
+func UsesPairWrongly() (n int, err error) {
+	n, err = twoPlain()
+	return n, err // want `vego: postcondition may not hold: n >= 0`
+}
+
+// UsesSecondNamed calls a function that itself names its first result
+// result2: the name the function gives wins over the generated one.
+//
+// @ Ensures a = 0
+func UsesSecondNamed() (a int) {
+	a, _ = secondNamed()
+	return a
+}
+
+// UsesClash calls a function whose parameter has the name its unnamed
+// result would get.
+//
+// @ Ensures r = 7
+func UsesClash() (r int) {
+	return clash(1) // want `the trusted contract of trust.clash \(trusted.yaml:\d+\) cannot be used: its parameter result has a name that means something else in a contract` `cannot verify UsesClash: `
+}

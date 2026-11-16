@@ -478,3 +478,21 @@ trusted:
   (*trust.pinged).ping:
     reason: Test helper that does nothing.
     modifies: []
+
+  trust.twoPlain:
+    reason: Test helper with two unnamed results.
+    modifies: []
+    ensures:
+      - "result2 = nil -> result1 >= 0"
+
+  trust.secondNamed:
+    reason: Test helper that names its first result result2 and leaves the second blank.
+    modifies: []
+    ensures:
+      - "result2 = 0"
+
+  trust.clash:
+    reason: Test helper whose parameter is called like its unnamed result.
+    modifies: []
+    ensures:
+      - "result = 7"

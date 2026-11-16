@@ -120,7 +120,21 @@ Write exactly one space between `//` and `@`. This is the form `gofmt` produces 
 
 To continue a long annotation, start the next line with `// @` and no keyword. A `//` inside an annotation starts an ordinary comment.
 
-A misspelt or misplaced annotation is an error. `// @ Ensure`, `// @ensures`, an annotation inside `/* */`, and an `Ensures` clause after the function body are all reported, not skipped.
+```go
+// @ Ensures result = -1 Or
+// @   (0 <= result < |A| And A[result] = x)
+```
+
+An ordinary comment line directly after an annotation is an error, because it would not be read as part of the annotation. Leave an empty line between an annotation and a comment that follows it.
+
+`vego` reports an annotation it cannot read instead of skipping it. These are all errors:
+
+- a misspelt keyword, such as `// @ Ensure` or `// @ensures`;
+- an annotation inside `/* */`;
+- an `Ensures` clause after the function body;
+- an annotation with something in front of the `@`, such as `// post: @ Ensures ...`.
+
+There is one limit. A word directly after `@`, with no space, is treated as an annotation only if it is a keyword or within two letters of one. `// @Summary` and `// @Postcondition` are taken to belong to another tool and are ignored.
 
 ## Formulas
 
@@ -1190,7 +1204,8 @@ This table lists the most common messages.
 | `loop variant may not decrease`, `loop variant may be negative` | The `Variant` is not proved to decrease, or to stay non-negative. | Use a different `Variant`, or add an invariant that bounds it. |
 | `variant may not decrease in recursive call`, `variant of the function may be negative` | The same, for the `Variant` of a recursive function. | Use a different `Variant`, or strengthen the `Requires`. |
 | `F has annotations, so each of its results needs a name` | A verified function has an unnamed or blank result. | Name every result in the signature. |
-| `an annotation is written "// @ ...", with one space between // and @` | The comment looks like an annotation but has different spacing. | Write `// @ Keyword ...`. |
+| `an annotation is written "// @ ...", with one space between // and @` (or `with nothing but one space`) | The comment looks like an annotation but has different spacing, or something stands before the `@`. | Write `// @ Keyword ...`. |
+| `a comment line directly after an annotation is not read as part of it` | An ordinary comment line follows an annotation in the same comment. | Start the line with `// @` to continue the annotation, or leave an empty line before the comment. |
 | `Ensures annotation is not attached to a function` | The clause is not in the doc comment of a function. | Move it into the doc comment. |
 | `x is assigned, which F may not modify; list it in a // @ Modifies clause` | No `Modifies` entry covers memory of this kind. | Add it to `Modifies`. |
 | `... which F may not modify: nothing its // @ Modifies clauses list is known to cover it` | An entry covers memory of this kind, but `vego` cannot prove it is this memory. It may be another element, another struct, or a slice that was replaced after `F` was called. | Make the entry match. For a replaced slice, the callee needs a `fresh ... Or within ...` clause. |

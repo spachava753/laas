@@ -1,5 +1,5 @@
 // Package logic defines the first-order specification language used by vego:
-// its terms, the parser for //@ annotation clauses, and the resolver that
+// its terms, the parser for annotation clauses, and the resolver that
 // turns parsed clauses into typed terms.
 package logic
 

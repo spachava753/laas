@@ -72,7 +72,7 @@ func MisplacedInvariant(x int) (result int) {
 func InvariantInsideBody(n int) (s int) {
 	// @ Variant n - i
 	for i := 0; i < n; i++ {
-		// @ Requires i >= 0 // want `vego:\ Requires\ annotations\ belong\ outside\ the\ function\ body`
+		// @ Requires i >= 0 // want `vego:\ Requires\ annotation\ stands\ inside\ InvariantInsideBody;\ put\ it\ in\ the\ doc\ comment\ of\ the\ function`
 		s++
 	}
 	return s
@@ -238,14 +238,14 @@ func FalseParameter(False bool) (r bool) { // want `vego: cannot verify FalsePar
 	return false
 }
 
-// NamedResult names its result itself, which is no clash.
+// NamedResult calls its result result, which is a name like any other.
 //
 // @ Ensures result = 3
 func NamedResult() (result int) {
 	return 3
 }
 
-// SpacedOut has annotations with more space than usual, which are read.
+// SpacedOut has a contract and an assertion that both fail.
 //
 // @ Requires x >= 0
 // @ Ensures result <= 0
@@ -346,4 +346,92 @@ func TwoVariants(n int) (r int) {
 // @ Requires len(A) > 0 // want `vego: in Requires annotation: there is no len in annotations; write \|x\| for the length of x`
 func LenCall(A []int) (r int) {
 	return A[0]
+}
+
+// CloseKeywords has keywords that are almost right, written with the right
+// prefix and no space after the @.
+//
+// @ensures r > 100 // want `vego: unknown annotation "ensures"; an annotation starts with one of .*`
+// @Ensure r > 100 // want `vego: unknown annotation "Ensure"; an annotation starts with one of .*`
+func CloseKeywords(x int) (r int) {
+	return x
+}
+
+// OtherTools has words after an @ that are no keywords of this language
+// and stand for another tool's.
+//
+// @Summary returns its argument
+// @Postcondition r > 100
+// @ Ensures r = x
+func OtherTools(x int) (r int) {
+	return x
+}
+
+// Wrapped continues its postcondition on a line that is an ordinary
+// comment, which would be left out of it.
+//
+// @ Ensures r >= 0
+//   And r > 100 // want `vego: a comment line directly after an annotation is not read as part of it; continue an annotation with "// @ ...", or leave a line empty before a comment`
+func Wrapped(x int) (r int) {
+	return 0
+}
+
+// Continued continues it with the prefix, and the whole clause is checked.
+//
+// @ Ensures r >= 0
+// @   And r > 100
+func Continued(x int) (r int) {
+	return 0 // want `vego: postcondition may not hold: r > 100`
+}
+
+// Glued writes its keywords without a space before the formula.
+//
+// @ Requires(x > 0)
+// @ Ensures(r > 100)
+func Glued(x int) (r int) {
+	return 100 / x // want `vego: postcondition may not hold: \(r > 100\)`
+}
+
+// GluedToAt leaves out the space after the @ as well, which is a keyword
+// all the same.
+//
+// @Ensures(r > 100)
+func GluedToAt(x int) (r int) {
+	return 0 // want `vego: postcondition may not hold: \(r > 100\)`
+}
+
+// InFront has something between the slashes and the @.
+//
+// @ Requires x >= 0
+// post: @ Ensures r > 100 // want `vego: an annotation is written "// @ ...", with nothing but one space between // and @`
+func InFront(x int) (r int) {
+	return 0
+}
+
+// TripleSlash has a third slash there.
+//
+// @ Requires x >= 0
+/// @ Ensures r > 100 // want `vego: an annotation is written "// @ ...", with nothing but one space between // and @`
+func TripleSlash(x int) (r int) {
+	return 0
+}
+
+// NoBreakSpace has a space there that only looks like one.
+//
+// @ Requires x >= 0
+// @ Ensures r > 100 // want `vego: an annotation is written "// @ ...", with one space between // and @`
+func NoBreakSpace(x int) (r int) {
+	return 0
+}
+
+// Stray has an assertion between two functions.
+
+// @ Assert True // want `vego: Assert annotation is not attached to anything; it stands inside a function body, or, for an Invariant, in the doc comment of a struct type`
+
+// InSignature has an annotation among its parameters.
+func InSignature(
+	// @ Requires x > 0 // want `vego: Requires annotation stands inside InSignature; put it in the doc comment of the function`
+	x int,
+) (r int) {
+	return x
 }

@@ -345,7 +345,12 @@ func (pv *pkgVerifier) report(pos token.Pos, format string, args ...any) {
 }
 
 var (
-	annotationLine  = regexp.MustCompile(`^//(\s*)@(\s*)(.*)$`)
+	// Space is any character that looks like one, so that an annotation
+	// behind a no-break space is not taken for an ordinary comment.
+	annotationLine = regexp.MustCompile(`^//([\s\p{Z}]*)@([\s\p{Z}]*)(.*)$`)
+	// quotedComment matches an annotation shown with its own //, inside
+	// a comment.
+	quotedComment   = regexp.MustCompile(`//[\s\p{Z}]*@[\s\p{Z}]*\w+`)
 	anyAnnotation   = regexp.MustCompile(`@\s*(\w+)`)
 	blockAnnotation = regexp.MustCompile(`(?m)^(?:/\*)?[\s*]*@\s*(\w*)`)
 	clauseKinds     = map[string]bool{
@@ -373,7 +378,10 @@ var (
 // directly followed by an unknown word, as in "// @Summary", belongs to
 // some other tool and is ignored, unless the word is a keyword but for its
 // case or a letter or two. A keyword in a /* */ comment is reported too,
-// since annotations are only read from // comments.
+// since annotations are only read from // comments, and so is an @ with a
+// keyword that is not at the start of its line, and an ordinary comment
+// line directly after an annotation, which its author may have meant as
+// the rest of it.
 func extractClauses(group *ast.CommentGroup) []*clause {
 	var clauses []*clause
 	var current *clause
@@ -393,17 +401,43 @@ func extractClauses(group *ast.CommentGroup) []*clause {
 		}
 		match := annotationLine.FindStringSubmatch(comment.Text)
 		if match == nil {
+			text := strings.TrimPrefix(comment.Text, "//")
+			// An @ with a keyword further along the line is an annotation
+			// that something was put in front of. One that follows its own
+			// // is an annotation being shown, as in an example in a doc
+			// comment or a message of this tool that a comment quotes.
+			shown := quotedComment.ReplaceAllString(text, "")
+			stray := slices.ContainsFunc(anyAnnotation.FindAllStringSubmatch(shown, -1), func(found []string) bool {
+				return clauseKinds[found[1]] || retiredKinds[found[1]] != ""
+			})
+			switch {
+			case strings.HasPrefix(comment.Text, "/*"):
+			case stray:
+				clauses = append(clauses, &clause{pos: comment.Pos(),
+					misplaced: `an annotation is written "// @ ...", with nothing but one space between // and @`})
+			case current != nil && strings.TrimSpace(text) != "":
+				// A clause is continued with "// @", so this line would be
+				// left out of it without a word.
+				clauses = append(clauses, &clause{pos: comment.Pos(),
+					misplaced: `a comment line directly after an annotation is not read as part of it; continue an annotation with "// @ ...", or leave a line empty before a comment`})
+			}
 			current = nil
 			continue
 		}
 		line, _, _ := strings.Cut(match[3], "//")
 		line = strings.TrimSpace(line)
+		// The keyword is the run of letters the line starts with, so that
+		// one written without a space before its formula is still one.
 		keyword := line
-		if end := strings.IndexFunc(line, unicode.IsSpace); end >= 0 {
+		if end := strings.IndexFunc(line, func(r rune) bool { return !unicode.IsLetter(r) }); end >= 0 {
 			keyword = line[:end]
 		}
-		isAnnotation := clauseKinds[keyword] || plannedKinds[keyword] || retiredKinds[keyword] != "" ||
-			current != nil || match[2] != "" || nearKeyword(keyword)
+		word := line
+		if end := strings.IndexFunc(line, unicode.IsSpace); end >= 0 {
+			word = line[:end]
+		}
+		known := clauseKinds[keyword] || plannedKinds[keyword] || retiredKinds[keyword] != ""
+		isAnnotation := known || current != nil || match[2] != "" || nearKeyword(keyword) || nearKeyword(word)
 		switch {
 		case isAnnotation && match[1] != " ":
 			current = nil
@@ -413,13 +447,16 @@ func extractClauses(group *ast.CommentGroup) []*clause {
 			current = nil
 			clauses = append(clauses, &clause{pos: comment.Pos(),
 				misplaced: fmt.Sprintf("there is no %s annotation; write %s", keyword, retiredKinds[keyword])})
-		case clauseKinds[keyword] || plannedKinds[keyword]:
+		case known:
 			current = &clause{kind: keyword, text: strings.TrimSpace(line[len(keyword):]), pos: comment.Pos()}
 			clauses = append(clauses, current)
 		case current != nil:
 			current.text += " " + line
-		case match[2] != "" || nearKeyword(keyword):
-			clauses = append(clauses, &clause{text: keyword, pos: comment.Pos()})
+		case isAnnotation:
+			current = nil
+			clauses = append(clauses, &clause{text: word, pos: comment.Pos()})
+		default:
+			current = nil
 		}
 	}
 	return clauses
@@ -822,7 +859,7 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 			fn.body = append(fn.body, c)
 		case "Predicate":
 		default:
-			pv.report(c.pos, "%s annotations belong outside the function body", c.kind)
+			pv.report(c.pos, "%s annotation stands inside %s; put it in the doc comment of the function", c.kind, fn.obj.Name())
 			fn.broken = true
 		}
 		return fn
@@ -834,6 +871,10 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 	switch {
 	case next != nil && next.Doc == group:
 		fn = pv.funcs[pv.info.Defs[next.Name].(*types.Func)]
+	case c.kind == "Invariant" || c.kind == "Assert":
+		pv.report(c.pos, "%s annotation is not attached to anything; "+
+			"it stands inside a function body, or, for an Invariant, in the doc comment of a struct type", c.kind)
+		return nil
 	default:
 		pv.report(c.pos, "%s annotation is not attached to a function; "+
 			"put it in the comment directly above the function", c.kind)

@@ -326,7 +326,7 @@ func Describe(err error) (code int) {
 	return 2
 }
 
-// Lookup has two unnamed results, called result1 and result2.
+// Lookup has two results.
 //
 // @ Ensures result2 = nil <-> (0 <= i And i < |A|)
 // @ Ensures result2 = nil -> result1 = A[i]
