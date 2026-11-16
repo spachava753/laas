@@ -375,6 +375,8 @@ var (
 	// anyAnnotation finds the word after an @ wherever it stands, with
 	// whatever is not a letter in between.
 	anyAnnotation = regexp.MustCompile(`@[^\pL]*(\pL+)`)
+	// quotedString matches a string in a formula.
+	quotedString = regexp.MustCompile(`"[^"\n]*"`)
 	// leadingAt finds an @ that is the first thing on a line but for signs,
 	// with the word that follows it.
 	leadingAt   = regexp.MustCompile(`(?m)^[^\pL\pN@\n]*@[^\pL\pN\s]*(\S*)`)
@@ -417,12 +419,7 @@ func extractClauses(group *ast.CommentGroup, otherTags map[string]bool) []*claus
 		// for annotations. What a clause says is taken from the comment as
 		// it is written, since such a character may be part of a string in
 		// a formula.
-		written := strings.Map(func(r rune) rune {
-			if unicode.Is(unicode.Cf, r) {
-				return -1
-			}
-			return r
-		}, comment.Text)
+		written := visible(comment.Text)
 		// Some characters end a line on the screen and not for Go. Behind
 		// one, an annotation looks as if it stood on a line of its own
 		// while it is read as the rest of the line before it.
@@ -459,8 +456,12 @@ func extractClauses(group *ast.CommentGroup, otherTags map[string]bool) []*claus
 			current = nil
 			continue
 		}
-		line, aside, _ := strings.Cut(match[3], "//")
-		line = strings.TrimSpace(line)
+		// The line as it is written, from where the @ and the space after
+		// it end. Where the comment that ends the line begins is decided
+		// there, so that a character that takes no room cannot make two
+		// slashes out of what is written as something else.
+		payload, trailing, _ := strings.Cut(comment.Text[unhidden(comment.Text, len(written)-len(match[3])):], "//")
+		line, aside := strings.TrimSpace(visible(payload)), visible(trailing)
 		// A tag that was declared to be another tool's makes the line an
 		// ordinary comment, with all that holds for one: an annotation
 		// further along it is out of place unless it is shown behind
@@ -487,9 +488,6 @@ func extractClauses(group *ast.CommentGroup, otherTags map[string]bool) []*claus
 		// one written without a space before its formula is still one.
 		word, keyword := leadingWord(line)
 		known := clauseKinds[keyword] || plannedKinds[keyword] || retiredKinds[keyword] != ""
-		// The same line as it is written, from where the @ and the space
-		// after it end.
-		payload, _, _ := strings.Cut(comment.Text[unhidden(comment.Text, len(written)-len(match[3])):], "//")
 		switch {
 		case match[1] != " ", known && match[2] != "":
 			// One spelling: a space before the @, and the keyword directly
@@ -521,6 +519,33 @@ func extractClauses(group *ast.CommentGroup, otherTags map[string]bool) []*claus
 		}
 	}
 	return clauses
+}
+
+// visible returns a text without the characters that take no room.
+func visible(text string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, text)
+}
+
+// withoutShown returns a comment text without the annotations it shows
+// behind slashes of their own, and without the strings in what follows such
+// an annotation on its line: they are part of the formula being shown, and
+// an @ in one of them is no annotation.
+func withoutShown(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		at := quotedComment.FindStringIndex(line)
+		if at == nil {
+			continue
+		}
+		rest := quotedComment.ReplaceAllString(line[at[1]:], "")
+		lines[i] = line[:at[0]] + quotedString.ReplaceAllString(rest, "")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // unhidden returns how far into a text one gets by passing n bytes of it
@@ -572,7 +597,7 @@ func parseOtherTags(list string) (map[string]bool, error) {
 // as it would be after "// @": whatever it is, it is taken to be meant for
 // this tool. An annotation that follows its own // is one being shown.
 func leading(text string, otherTags map[string]bool) bool {
-	shown := quotedComment.ReplaceAllString(text, "")
+	shown := withoutShown(text)
 	return slices.ContainsFunc(leadingAt.FindAllStringSubmatch(shown, -1), func(found []string) bool {
 		_, letters := leadingWord(found[1])
 		return protected(letters) || (!otherTags[found[1]] && !otherTags[letters])
@@ -585,7 +610,7 @@ func leading(text string, otherTags map[string]bool) bool {
 // message of this tool that a comment quotes, or a line that was commented
 // out, is one being shown and does not count.
 func stray(text string) bool {
-	shown := quotedComment.ReplaceAllString(text, "")
+	shown := withoutShown(text)
 	return slices.ContainsFunc(anyAnnotation.FindAllStringSubmatch(shown, -1), func(found []string) bool {
 		return plannedKinds[found[1]] || retiredKinds[found[1]] != "" || nearKeyword(found[1])
 	})

@@ -683,3 +683,29 @@ func SeparatedContinuation(x int) (r int) {
 // SeparatorInBlock has one in a block comment.
 /* note // @Ensures r > 100 */ // want `vego: this comment has an @ and a character that ends a line on the screen but not for Go, such as U\+2028; remove the character, so that what is read is what is seen`
 func SeparatorInBlock(x int) (r int) { return 50 }
+
+// HiddenSlashes has a string in its contract with a character that takes
+// no room between two slashes, and an @ after them. The slashes are not
+// the start of a comment, and the function meets its contract.
+//
+// @Ensures s = "a/​/@Ensures"
+func HiddenSlashes() (s string) {
+	return "a/\u200b/@Ensures"
+}
+
+// ShownWithString shows an annotation behind slashes of its own whose
+// formula has a string with an @ in it.
+//
+// // @Ensures s = "@Ensures"
+//
+// @Ensures r = 0
+func ShownWithString() (r int) {
+	return 0
+}
+
+// ShownThenStray shows one and then has another that is not shown.
+//
+// see // @Requires x > 0 and also @Ensures r > 100 // want `vego: an annotation is written "// @Keyword ...", with nothing but one space between // and @`
+func ShownThenStray(x int) (r int) {
+	return 0
+}
