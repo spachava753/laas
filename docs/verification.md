@@ -134,10 +134,23 @@ An ordinary comment directly after an annotation is an error, because it would n
 - an `Ensures` clause after the function body;
 - an annotation with something in front of the `@`, such as `// post: @ Ensures ...`.
 
-Two kinds of comment are deliberately ignored:
+Any other word after `// @` is also an error. `vego` cannot tell a wrong keyword such as `// @Post` from a tag that another tool reads, so it reports both:
 
-- A word directly after `@` is treated as an annotation only if it is a keyword or within two letters of one. `// @Summary` and `// @Postcondition` are taken to belong to another tool.
-- An annotation behind a second `//`, as in `// // @Ensures r > 0`, is treated as commented out or quoted. This is also how an example in a doc comment can show an annotation.
+```text
+vego: unknown annotation "Post"; an annotation starts with one of Requires, Ensures, Modifies,
+Invariant, Variant, Assert, Predicate. If another tool reads this comment, declare the word
+with -vego.other-tags
+```
+
+If your code has comments such as `// @Summary` for another tool, list those words once:
+
+```sh
+laas -vego -vego.other-tags=Summary,Param,Router ./...
+```
+
+`vego` then treats those lines as ordinary comments. A word that is a keyword, or within two letters of one, cannot be declared.
+
+One kind of comment is ignored without a declaration. An annotation behind a second `//`, as in `// // @Ensures r > 0`, is treated as commented out or quoted. This is also how an example in a doc comment can show an annotation.
 
 ## Formulas
 
@@ -1209,6 +1222,7 @@ This table lists the most common messages.
 | `F has annotations, so each of its results needs a name` | A verified function has an unnamed or blank result. | Name every result in the signature. |
 | `an annotation is written "// @Keyword ...", with one space before the @ and none after it` (or `with nothing but one space`) | The comment looks like an annotation but has different spacing, or something stands before the `@`. | Write `// @ Keyword ...`. |
 | `a comment directly after an annotation is not read as part of it` | An ordinary comment follows an annotation in the same comment group. | Start the line with `// @` to continue the annotation, or put an empty `//` line before the comment. |
+| `unknown annotation "W"` | The word after `// @` is not a keyword. | Correct the keyword. If another tool reads the comment, declare the word with `-vego.other-tags`. |
 | `Ensures annotation is not attached to a function` | The clause is not in the doc comment of a function. | Move it into the doc comment. |
 | `x is assigned, which F may not modify; list it in a // @Modifies clause` | No `Modifies` entry covers memory of this kind. | Add it to `Modifies`. |
 | `... which F may not modify: nothing its // @Modifies clauses list is known to cover it` | An entry covers memory of this kind, but `vego` cannot prove it is this memory. It may be another element, another struct, or a slice that was replaced after `F` was called. | Make the entry match. For a replaced slice, the callee needs a `fresh ... Or within ...` clause. |
@@ -1331,6 +1345,7 @@ Results are referred to by the names in the function's signature.
 | `-vego.audit` | also report contracts that trivial implementations satisfy |
 | `-vego.max-steps=n` | limit on the prover's work for one proof obligation |
 | `-vego.trusted=path` | use this trust file instead of the one next to `go.mod` |
+| `-vego.other-tags=A,B` | words that another tool reads after `// @`; any other unknown word there is an error |
 | `-vego.trust` | print the trust report |
 | `-test=false` | leave out test files |
 | `-exclude-packages=regexp` | skip packages whose import path matches |

@@ -13,7 +13,8 @@
 //
 // It is a go/analysis multichecker, so it takes package patterns as go vet
 // does and every analyzer's flags under the analyzer's name, for example
-// -funcdoc.limit=15. Two flags are its own:
+// -funcdoc.limit=15, or -vego.other-tags=Summary,Param to declare the words
+// that another tool reads after "// @". Two flags are its own:
 //
 //	-exclude-packages regexp   skip packages whose import path matches
 //	-vego.trust                print what the proofs of the packages take

@@ -122,7 +122,7 @@ func RefuseCachedRuns() { refuseCache = true }
 // verified contracts and the trust the proofs rest on. For a caching driver
 // it only reports that nothing was verified.
 func newAnalyzer() *analysis.Analyzer {
-	maxSteps, audit, trustPath := 0, false, ""
+	maxSteps, audit, trustPath, otherTags := 0, false, "", ""
 	analyzer := &analysis.Analyzer{
 		Name: "vego",
 		Doc: `verifies functions against their // @ specifications
@@ -153,10 +153,21 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		"",
 		"file of trusted contracts to use instead of "+TrustFileName+" next to go.mod",
 	)
+	analyzer.Flags.StringVar(
+		&otherTags,
+		"other-tags",
+		"",
+		"comma-separated words that other tools read after \"// @\", as in Summary,Param; any other unknown word there is an error",
+	)
 	analyzer.ResultType = reflect.TypeFor[*Usage]()
 	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact), new(sentinelFact)}
 	analyzer.Run = func(pass *analysis.Pass) (any, error) {
+		foreignTags, err := parseOtherTags(otherTags)
+		if err != nil {
+			return nil, err
+		}
 		pv := &pkgVerifier{
+			otherTags:     foreignTags,
 			pass:          pass,
 			info:          pass.TypesInfo,
 			res:           logic.NewResolver(),
@@ -282,7 +293,10 @@ type pkgVerifier struct {
 	order    []*funcInfo
 	reported map[string]bool
 	maxSteps int
-	outcomes map[*funcInfo]*outcome
+	// otherTags holds the words that the user declared to be read by other
+	// tools when they follow "// @".
+	otherTags map[string]bool
+	outcomes  map[*funcInfo]*outcome
 	// projectTrust is the project's file of trusted contracts, trusted the
 	// contracts built from it and from the shipped ones, and usage what the
 	// proofs of this package rely on.
@@ -375,17 +389,17 @@ var (
 // for. A //
 // inside an annotation line starts an ordinary comment.
 //
-// An @ followed by whitespace always marks an annotation, so an unknown word
-// there is returned as a clause without a kind, to be reported, instead of
-// being skipped: a misspelt keyword must not switch verification off. An @
-// directly followed by an unknown word, as in "// @Summary", belongs to
-// some other tool and is ignored, unless the word is a keyword but for its
-// case or a letter or two. A keyword in a /* */ comment is reported too,
-// since annotations are only read from // comments, and so is an @ with a
-// keyword that is not at the start of its line, and an ordinary comment
-// line directly after an annotation, which its author may have meant as
-// the rest of it.
-func extractClauses(group *ast.CommentGroup) []*clause {
+// Whatever follows "// @" is taken to be meant for this tool, so an unknown
+// word there is returned as a clause without a kind, to be reported,
+// instead of being skipped: a keyword that is wrong must not switch
+// verification off by passing for the tag of another tool. The words that
+// other tools do read there, as in "// @Summary", have to be declared with
+// the other-tags flag, and are then ordinary comment. A keyword in a /* */
+// comment is reported too, since annotations are only read from //
+// comments, and so is an @ with a keyword that is not at the start of its
+// line, and an ordinary comment line directly after an annotation, which
+// its author may have meant as the rest of it.
+func extractClauses(group *ast.CommentGroup, otherTags map[string]bool) []*clause {
 	var clauses []*clause
 	var current *clause
 	for _, comment := range group.List {
@@ -420,7 +434,7 @@ func extractClauses(group *ast.CommentGroup) []*clause {
 				// A clause is continued with "// @", so this line would be
 				// left out of it without a word.
 				clauses = append(clauses, &clause{pos: comment.Pos(),
-					misplaced: `a comment directly after an annotation is not read as part of it; continue an annotation with "// @ ...", or put an empty // line before a comment`})
+					misplaced: afterAnnotation})
 			}
 			current = nil
 			continue
@@ -444,9 +458,16 @@ func extractClauses(group *ast.CommentGroup) []*clause {
 			word = line[:end]
 		}
 		known := clauseKinds[keyword] || plannedKinds[keyword] || retiredKinds[keyword] != ""
-		isAnnotation := known || current != nil || match[2] != "" || nearKeyword(keyword) || nearKeyword(word)
 		switch {
-		case isAnnotation && match[1] != " ", known && match[2] != "":
+		case match[2] == "" && (otherTags[word] || otherTags[keyword]):
+			// A tag that was declared to be another tool's is an ordinary
+			// comment line, and like one it may not follow an annotation
+			// directly.
+			if current != nil {
+				clauses = append(clauses, &clause{pos: comment.Pos(), misplaced: afterAnnotation})
+			}
+			current = nil
+		case match[1] != " ", known && match[2] != "":
 			// One spelling: a space before the @, and the keyword directly
 			// after it.
 			current = nil
@@ -462,19 +483,45 @@ func extractClauses(group *ast.CommentGroup) []*clause {
 		case current != nil && match[2] != "":
 			// "// @ ..." continues the clause above it.
 			current.text += " " + line
-		case isAnnotation:
-			current = nil
-			clauses = append(clauses, &clause{text: word, pos: comment.Pos()})
-		case stray("@" + match[3]):
+		case keyword == "" && stray("@"+match[3]):
 			// Signs, or a second @, between the @ and a keyword.
 			current = nil
 			clauses = append(clauses, &clause{pos: comment.Pos(),
 				misplaced: `an annotation is written "// @Keyword ...", with nothing but one space between // and @`})
 		default:
+			// Whatever else follows "// @" is taken to be meant for this
+			// tool: a keyword that is wrong must not pass for the tag of
+			// another tool and switch a check off.
 			current = nil
+			clauses = append(clauses, &clause{text: word, pos: comment.Pos()})
 		}
 	}
 	return clauses
+}
+
+// afterAnnotation is the report for a comment that follows an annotation
+// directly.
+const afterAnnotation = `a comment directly after an annotation is not read as part of it; continue an annotation with "// @ ...", or put an empty // line before a comment`
+
+// parseOtherTags reads the words that other tools read after "// @". A
+// word that is a keyword of this language, or close enough to one to be a
+// misspelling of it, cannot be declared: that would switch the report of
+// the misspelling off.
+func parseOtherTags(list string) (map[string]bool, error) {
+	tags := map[string]bool{}
+	for tag := range strings.SplitSeq(list, ",") {
+		tag = strings.TrimSpace(tag)
+		switch {
+		case tag == "":
+		case strings.ContainsFunc(tag, unicode.IsSpace) || strings.Contains(tag, "@"):
+			return nil, fmt.Errorf("-vego.other-tags: %q is not a single word", tag)
+		case plannedKinds[tag] || retiredKinds[tag] != "" || nearKeyword(tag):
+			return nil, fmt.Errorf("-vego.other-tags: %q is a keyword of vego's annotations or too close to one to be declared as another tool's", tag)
+		default:
+			tags[tag] = true
+		}
+	}
+	return tags, nil
 }
 
 // stray reports whether a piece of comment text has an @ followed by a
@@ -535,14 +582,15 @@ func (pv *pkgVerifier) collect() {
 			}
 		}
 		for _, group := range file.Comments {
-			for _, c := range extractClauses(group) {
+			for _, c := range extractClauses(group, pv.otherTags) {
 				if c.misplaced != "" {
 					pv.report(c.pos, "%s", c.misplaced)
 					continue
 				}
 				if c.kind == "" {
 					pv.report(c.pos, "unknown annotation %q; an annotation starts with one of "+
-						"Requires, Ensures, Modifies, Invariant, Variant, Assert, Predicate", c.text)
+						"Requires, Ensures, Modifies, Invariant, Variant, Assert, Predicate. "+
+						"If another tool reads this comment, declare the word with -vego.other-tags", c.text)
 					continue
 				}
 				if plannedKinds[c.kind] {

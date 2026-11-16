@@ -357,11 +357,12 @@ func CloseKeywords(x int) (r int) {
 	return x
 }
 
-// OtherTools has words after an @ that are no keywords of this language
-// and stand for another tool's.
+// OtherTools has words after an @ that are no keywords of this language.
+// The test declares Summary as another tool's; Postcondition it does not,
+// and a word that nobody declared is taken to be a keyword gone wrong.
 //
 // @Summary returns its argument
-// @Postcondition r > 100
+// @Postcondition r > 100 // want `vego: unknown annotation "Postcondition"; an annotation starts with one of .* declare the word with -vego.other-tags`
 // @Ensures r = x
 func OtherTools(x int) (r int) {
 	return x
@@ -446,7 +447,7 @@ func DoubledAt(x int) (r int) {
 // DoubledAtAfter does so after another clause.
 //
 // @Requires x >= 0
-// @@ Ensures r > 100 // want `vego: unknown annotation "@"; an annotation starts with one of .*`
+// @@ Ensures r > 100 // want `vego: an annotation is written "// @Keyword ...", with nothing but one space between // and @`
 func DoubledAtAfter(x int) (r int) {
 	return 0
 }
@@ -527,4 +528,58 @@ func SignsAfterAt(x int) (r int) {
 // @**Ensures** r > 100 // want `vego: an annotation is written "// @Keyword ...", with nothing but one space between // and @`
 func StarsAfterAt(x int) (r int) {
 	return 0
+}
+
+// WrongKeyword uses the word another specification language has for a
+// postcondition. It must not pass for another tool's tag.
+//
+// @Post r > 100 // want `vego: unknown annotation "Post"; an annotation starts with one of .*`
+func WrongKeyword(x int) (r int) {
+	return 0
+}
+
+// WrongKeywordInBody does the same inside a body.
+//
+// @Ensures r = 0
+func WrongKeywordInBody(x int) (r int) {
+	// @Check x > 5 // want `vego: unknown annotation "Check"; an annotation starts with one of .*`
+	return 0
+}
+
+// GluedAfterGap continues a clause after an empty line, with no space
+// after the @.
+//
+// @Ensures r >= 0
+//
+// @And r > 100 // want `vego: unknown annotation "And"; an annotation starts with one of .*`
+func GluedAfterGap(x int) (r int) {
+	return 0
+}
+
+// ArrowFirst starts with a sign of the formula language.
+//
+// @-> r > 100 // want `vego: unknown annotation "->"; an annotation starts with one of .*`
+func ArrowFirst(x int) (r int) {
+	return 0
+}
+
+// Declared has tags that the test declares as another tool's, one of them
+// with a hyphen. They are ordinary comment.
+//
+// @Summary returns its argument
+// @Param x query int true "the argument"
+// @x-order 3
+//
+// @Ensures r = x
+func Declared(x int) (r int) {
+	return x
+}
+
+// DeclaredAfter has such a tag directly under an annotation, where a
+// comment may not stand.
+//
+// @Ensures r = x
+// @Summary returns its argument // want `vego: a comment directly after an annotation is not read as part of it; continue an annotation with "// @ ...", or put an empty // line before a comment`
+func DeclaredAfter(x int) (r int) {
+	return x
 }

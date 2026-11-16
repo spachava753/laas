@@ -3,6 +3,7 @@ package vego
 import (
 	"bufio"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -131,6 +132,11 @@ func TestAnalyzer(t *testing.T) {
 		if err := analyzer.Flags.Set("trusted", filepath.Join("testdata", "trusted.yaml")); err != nil {
 			t.Fatalf("set trusted: %v", err)
 		}
+		// The rejected corpus has tags of another tool, some declared here
+		// and some not.
+		if err := analyzer.Flags.Set("other-tags", "Summary, Param,x-order"); err != nil {
+			t.Fatalf("set other-tags: %v", err)
+		}
 
 		runCorpus(t, analyzer,
 			"paper", "algorithms", "defects", "rejected", "leetcode", "semantics", "effects", "integers", "values", "trust",
@@ -161,4 +167,34 @@ func TestAnalyzer(t *testing.T) {
 
 		runCorpus(t, analyzer, "audit")
 	})
+}
+
+func TestOtherTagsFlag(t *testing.T) {
+	tests := []struct {
+		name, list string
+		want       []string
+		wantErr    string
+	}{
+		{name: "nothing declared", list: ""},
+		{name: "several words with spaces around them", list: "Summary, Param ,x-order", want: []string{"Param", "Summary", "x-order"}},
+		{name: "a keyword", list: "Summary,Ensures", wantErr: "too close"},
+		{name: "a keyword but for a letter", list: "Ensure", wantErr: "too close"},
+		{name: "a keyword but for its case", list: "requires", wantErr: "too close"},
+		{name: "a retired keyword", list: "Measure", wantErr: "too close"},
+		{name: "two words in one", list: "Summary Param", wantErr: "not a single word"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := parseOtherTags(test.list)
+			switch {
+			case test.wantErr != "" && (err == nil || !strings.Contains(err.Error(), test.wantErr)):
+				t.Fatalf("got error %v, want one containing %q", err, test.wantErr)
+			case test.wantErr == "" && err != nil:
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tags := slices.Sorted(maps.Keys(got)); test.wantErr == "" && !slices.Equal(tags, test.want) {
+				t.Fatalf("got %v, want %v", tags, test.want)
+			}
+		})
+	}
 }
