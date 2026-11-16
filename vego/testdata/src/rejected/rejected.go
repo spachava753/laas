@@ -583,3 +583,41 @@ func Declared(x int) (r int) {
 func DeclaredAfter(x int) (r int) {
 	return x
 }
+
+// HiddenInString has a character that takes no room inside a string of its
+// contract. The string is the one that is written, so a function that
+// returns the visible letter alone does not meet it.
+//
+// @Ensures s = "a​"
+func HiddenInString() (s string) {
+	return "a" // want `vego: postcondition may not hold: s = "a​"`
+}
+
+// HiddenInStringKept returns the string as it is written.
+//
+// @Ensures s = "a​"
+func HiddenInStringKept() (s string) {
+	return "a\u200b"
+}
+
+// HiddenInFormula has such a character between the words of a formula,
+// where it is no part of the language.
+//
+// @Ensures r​ = 0 // want `vego: syntax error in Ensures annotation: .*`
+func HiddenInFormula() (r int) {
+	return 0
+}
+
+// HiddenInBlock has one inside a keyword in a block comment.
+/* @Ensu​res r = 1 */ // want `vego: annotations are only read from // comments, not from /\* \*/ comments`
+func HiddenInBlock() (r int) { return 0 }
+
+// Accented misspells a keyword by two letters that take more than one byte
+// each.
+//
+// @Enšurés r = 1 // want `vego: unknown annotation "Enšurés"; an annotation starts with one of .*`
+func Accented() (r int) { return 0 }
+
+// AccentedInBlock does so in a block comment.
+/* @Enšurés r = 1 */ // want `vego: annotations are only read from // comments, not from /\* \*/ comments`
+func AccentedInBlock() (r int) { return 0 }

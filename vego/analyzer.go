@@ -95,6 +95,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"golang.org/x/tools/go/analysis"
@@ -403,10 +404,21 @@ func extractClauses(group *ast.CommentGroup, otherTags map[string]bool) []*claus
 	var clauses []*clause
 	var current *clause
 	for _, comment := range group.List {
-		if strings.HasPrefix(comment.Text, "/*") {
+		// A character that takes no room, such as a zero-width space, is
+		// not there for a reader, so it is not there when the scanner looks
+		// for annotations. What a clause says is taken from the comment as
+		// it is written, since such a character may be part of a string in
+		// a formula.
+		written := strings.Map(func(r rune) rune {
+			if unicode.Is(unicode.Cf, r) {
+				return -1
+			}
+			return r
+		}, comment.Text)
+		if strings.HasPrefix(written, "/*") {
 			// A keyword after an @ anywhere in the comment, or something
 			// close to one at the start of a line.
-			found := stray(comment.Text) || slices.ContainsFunc(blockAnnotation.FindAllStringSubmatch(comment.Text, -1), func(block []string) bool {
+			found := stray(written) || slices.ContainsFunc(blockAnnotation.FindAllStringSubmatch(written, -1), func(block []string) bool {
 				return nearKeyword(block[1])
 			})
 			if found {
@@ -414,14 +426,6 @@ func extractClauses(group *ast.CommentGroup, otherTags map[string]bool) []*claus
 					misplaced: "annotations are only read from // comments, not from /* */ comments"})
 			}
 		}
-		// A character that takes no room, such as a zero-width space, is
-		// not there for a reader, so it is not there for the scanner.
-		written := strings.Map(func(r rune) rune {
-			if unicode.Is(unicode.Cf, r) {
-				return -1
-			}
-			return r
-		}, comment.Text)
 		match := annotationLine.FindStringSubmatch(written)
 		if match == nil {
 			text := strings.TrimPrefix(written, "//")
@@ -458,6 +462,9 @@ func extractClauses(group *ast.CommentGroup, otherTags map[string]bool) []*claus
 			word = line[:end]
 		}
 		known := clauseKinds[keyword] || plannedKinds[keyword] || retiredKinds[keyword] != ""
+		// The same line as it is written, from where the @ and the space
+		// after it end.
+		payload, _, _ := strings.Cut(comment.Text[unhidden(comment.Text, len(written)-len(match[3])):], "//")
 		switch {
 		case match[2] == "" && (otherTags[word] || otherTags[keyword]):
 			// A tag that was declared to be another tool's is an ordinary
@@ -478,11 +485,11 @@ func extractClauses(group *ast.CommentGroup, otherTags map[string]bool) []*claus
 			clauses = append(clauses, &clause{pos: comment.Pos(),
 				misplaced: fmt.Sprintf("there is no %s annotation; write %s", keyword, retiredKinds[keyword])})
 		case known:
-			current = &clause{kind: keyword, text: strings.TrimSpace(line[len(keyword):]), pos: comment.Pos()}
+			current = &clause{kind: keyword, text: strings.TrimSpace(payload[unhidden(payload, len(keyword)):]), pos: comment.Pos()}
 			clauses = append(clauses, current)
 		case current != nil && match[2] != "":
 			// "// @ ..." continues the clause above it.
-			current.text += " " + line
+			current.text += " " + strings.TrimSpace(payload)
 		case keyword == "" && stray("@"+match[3]):
 			// Signs, or a second @, between the @ and a keyword.
 			current = nil
@@ -497,6 +504,21 @@ func extractClauses(group *ast.CommentGroup, otherTags map[string]bool) []*claus
 		}
 	}
 	return clauses
+}
+
+// unhidden returns how far into a text one gets by passing n bytes of it
+// that are not of a character that takes no room: the place in the text as
+// written that corresponds to place n in the text without such characters.
+func unhidden(text string, n int) int {
+	for i, r := range text {
+		if n <= 0 {
+			return i
+		}
+		if !unicode.Is(unicode.Cf, r) {
+			n -= utf8.RuneLen(r)
+		}
+	}
+	return len(text)
 }
 
 // afterAnnotation is the report for a comment that follows an annotation
@@ -550,7 +572,9 @@ func nearKeyword(word string) bool {
 
 // distance returns how many letters have to be added, dropped, or replaced
 // to turn one word into the other.
-func distance(a, b string) int {
+func distance(first, second string) int {
+	// Letters, not bytes: a letter with an accent is one letter.
+	a, b := []rune(first), []rune(second)
 	row := make([]int, len(b)+1)
 	for j := range row {
 		row[j] = j
