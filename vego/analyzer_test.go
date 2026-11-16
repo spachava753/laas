@@ -208,3 +208,24 @@ func TestOtherTagsFlag(t *testing.T) {
 		})
 	}
 }
+
+// TestShownAnnotationsScan checks the pass that takes shown annotations out
+// of a comment on inputs that would take minutes if it looked again from
+// every slash of a long run of them.
+func TestShownAnnotationsScan(t *testing.T) {
+	slashes := strings.Repeat("/", 1<<20)
+	tests := []struct {
+		name, text, want string
+	}{
+		{name: "a run of slashes", text: " " + slashes, want: " " + slashes},
+		{name: "a run of slashes in a string after a shown annotation", text: ` // @Ensures s = "` + slashes + `" and more`, want: "  s =  and more"},
+		{name: "a run of slashes in a string with nothing shown", text: ` see "` + slashes + `"`, want: ` see "` + slashes + `"`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := withoutShown(test.text); got != test.want {
+				t.Fatalf("got %d bytes starting %.40q, want %d bytes starting %.40q", len(got), got, len(test.want), test.want)
+			}
+		})
+	}
+}

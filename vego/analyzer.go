@@ -369,9 +369,6 @@ var (
 	// Space is any character that looks like one, so that an annotation
 	// behind a no-break space is not taken for an ordinary comment.
 	annotationLine = regexp.MustCompile(`^//([\s\p{Z}]*)@([\s\p{Z}]*)(.*)$`)
-	// quotedComment matches an annotation shown with its own //, inside
-	// a comment.
-	quotedComment = regexp.MustCompile(`^//[^\pL@\n"]*@[^\pL@\n"]*\pL*`)
 	// anyAnnotation finds the word after an @ wherever it stands, with
 	// whatever is not a letter in between.
 	anyAnnotation = regexp.MustCompile(`@[^\pL]*(\pL+)`)
@@ -542,13 +539,20 @@ func withoutShown(text string) string {
 			kept.WriteByte('\n')
 		}
 		shown, inString := false, false
+		// No shown annotation starts before this place; it saves looking
+		// again from every slash of a long run of them.
+		none := 0
 		for i := 0; i < len(line); {
 			// An annotation may be shown inside a string, as in a sentence
 			// that quotes the form; the string goes on after it.
-			if at := quotedComment.FindStringIndex(line[i:]); at != nil && !(shown && inString) {
-				shown = true
-				i += at[1]
-				continue
+			if i >= none && !(shown && inString) && strings.HasPrefix(line[i:], "//") {
+				end, found := shownAt(line, i)
+				if found {
+					shown = true
+					i = end
+					continue
+				}
+				none = end
 			}
 			switch c := line[i]; {
 			case inString && c == '\\' && i+1 < len(line):
@@ -571,6 +575,40 @@ func withoutShown(text string) string {
 		}
 	}
 	return kept.String()
+}
+
+// shownAt looks for an annotation shown behind the two slashes at place i
+// of a line: the slashes, then anything but letters, an @, and the word
+// after it, if there is one. A quote or a backslash ends the search, so
+// that a shown annotation never reaches out of a string or takes half of
+// an escaped character with it. It returns where the shown annotation
+// ends, or else how far it looked.
+func shownAt(line string, i int) (end int, found bool) {
+	j := i + 2
+	for j < len(line) {
+		r, size := utf8.DecodeRuneInString(line[j:])
+		if r == '@' {
+			break
+		}
+		if unicode.IsLetter(r) || r == '"' || r == '\\' {
+			return j, false
+		}
+		j += size
+	}
+	if j >= len(line) {
+		return j, false
+	}
+	j++
+	letters := false
+	for j < len(line) {
+		r, size := utf8.DecodeRuneInString(line[j:])
+		if r == '"' || r == '\\' || r == '@' || (letters && !unicode.IsLetter(r)) {
+			break
+		}
+		letters = letters || unicode.IsLetter(r)
+		j += size
+	}
+	return j, true
 }
 
 // unhidden returns how far into a text one gets by passing n bytes of it

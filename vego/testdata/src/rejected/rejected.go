@@ -743,3 +743,21 @@ func EscapedThenStray(x int) (r int) {
 func MarkerFirstInString(x int) (r int) {
 	return 0
 }
+
+// EscapeAfterMarker has a string with slashes, an @, and a quote behind a
+// backslash, and after the string an annotation that is not shown.
+//
+// see "// @\"" @Ensures r = 1 // want `vego: an annotation is written "// @Keyword ...", with nothing but one space between // and @`
+func EscapeAfterMarker(x int) (r int) {
+	return 0
+}
+
+// ShownContinuation quotes the form of a continuation, with a string in
+// it that has quotes behind backslashes.
+//
+// a continuation may look like "// @ \"@Ensures\""
+//
+// @Ensures r = 0
+func ShownContinuation() (r int) {
+	return 0
+}
