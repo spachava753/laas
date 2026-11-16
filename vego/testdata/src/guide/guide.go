@@ -664,3 +664,17 @@ func Clear(m map[string]int) {
 func Unnamed(x int) int { // want `vego: Unnamed has annotations, so each of its results needs a name, as in func Unnamed\(...\) \(n int, err error\)`
 	return x
 }
+
+// Find has a postcondition that runs over two lines.
+//
+// @Ensures result = -1 Or
+// @   (0 <= result < |A| And A[result] = x)
+func Find(A []int, x int) (result int) {
+	// @Invariant Forall k in [0, i) : A[k] != x
+	for i := range A {
+		if A[i] == x {
+			return i
+		}
+	}
+	return -1
+}
