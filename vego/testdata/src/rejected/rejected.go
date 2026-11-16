@@ -709,3 +709,37 @@ func ShownWithString() (r int) {
 func ShownThenStray(x int) (r int) {
 	return 0
 }
+
+// ShownWithEscapes shows an annotation whose string has quotes behind
+// backslashes, and an @ between them.
+//
+// // @Ensures s = "\"@Ensures\""
+//
+// @Ensures r = 0
+func ShownWithEscapes() (r int) {
+	return 0
+}
+
+// MarkerInString shows an annotation, then has a string with slashes and
+// an @ in it, and after the string an annotation that is not shown.
+//
+// see // @Requires x > 0 "// @" @Ensures r = 1 // want `vego: an annotation is written "// @Keyword ...", with nothing but one space between // and @`
+func MarkerInString(x int) (r int) {
+	return 0
+}
+
+// EscapedThenStray has a string that is a single quote behind a backslash,
+// and after it an annotation that is not shown.
+//
+// see // @Requires x > 0 "\"" and also @Ensures r = 1 "tail" // want `vego: an annotation is written "// @Keyword ...", with nothing but one space between // and @`
+func EscapedThenStray(x int) (r int) {
+	return 0
+}
+
+// MarkerFirstInString has the slashes and the @ in a string, with no
+// annotation shown before it.
+//
+// see "// @" @Ensures r = 1 // want `vego: an annotation is written "// @Keyword ...", with nothing but one space between // and @`
+func MarkerFirstInString(x int) (r int) {
+	return 0
+}

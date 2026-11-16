@@ -371,12 +371,10 @@ var (
 	annotationLine = regexp.MustCompile(`^//([\s\p{Z}]*)@([\s\p{Z}]*)(.*)$`)
 	// quotedComment matches an annotation shown with its own //, inside
 	// a comment.
-	quotedComment = regexp.MustCompile(`//[^\pL@\n]*@[^\pL\n]*\pL+`)
+	quotedComment = regexp.MustCompile(`^//[^\pL@\n"]*@[^\pL@\n"]*\pL*`)
 	// anyAnnotation finds the word after an @ wherever it stands, with
 	// whatever is not a letter in between.
 	anyAnnotation = regexp.MustCompile(`@[^\pL]*(\pL+)`)
-	// quotedString matches a string in a formula.
-	quotedString = regexp.MustCompile(`"[^"\n]*"`)
 	// leadingAt finds an @ that is the first thing on a line but for signs,
 	// with the word that follows it.
 	leadingAt   = regexp.MustCompile(`(?m)^[^\pL\pN@\n]*@[^\pL\pN\s]*(\S*)`)
@@ -532,20 +530,47 @@ func visible(text string) string {
 }
 
 // withoutShown returns a comment text without the annotations it shows
-// behind slashes of their own, and without the strings in what follows such
-// an annotation on its line: they are part of the formula being shown, and
-// an @ in one of them is no annotation.
+// behind slashes of their own, and without the strings that follow such an
+// annotation on its line: they belong to the formula being shown, and an @
+// in one of them is no annotation. It goes through each line once, from the
+// left, so that what is a string and what is not is decided as a reader
+// decides it, a quote behind a backslash being part of its string.
 func withoutShown(text string) string {
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		at := quotedComment.FindStringIndex(line)
-		if at == nil {
-			continue
+	var kept strings.Builder
+	for n, line := range strings.Split(text, "\n") {
+		if n > 0 {
+			kept.WriteByte('\n')
 		}
-		rest := quotedComment.ReplaceAllString(line[at[1]:], "")
-		lines[i] = line[:at[0]] + quotedString.ReplaceAllString(rest, "")
+		shown, inString := false, false
+		for i := 0; i < len(line); {
+			// An annotation may be shown inside a string, as in a sentence
+			// that quotes the form; the string goes on after it.
+			if at := quotedComment.FindStringIndex(line[i:]); at != nil && !(shown && inString) {
+				shown = true
+				i += at[1]
+				continue
+			}
+			switch c := line[i]; {
+			case inString && c == '\\' && i+1 < len(line):
+				if !shown {
+					kept.WriteString(line[i : i+2])
+				}
+				i += 2
+			case inString || c == '"':
+				// A string before any shown annotation is ordinary text,
+				// and is kept; one after it is left out.
+				inString = !inString || c != '"'
+				if !shown {
+					kept.WriteByte(c)
+				}
+				i++
+			default:
+				kept.WriteByte(c)
+				i++
+			}
+		}
 	}
-	return strings.Join(lines, "\n")
+	return kept.String()
 }
 
 // unhidden returns how far into a text one gets by passing n bytes of it
