@@ -68,9 +68,9 @@
 // Directly above a loop: Invariant and Variant. Anywhere in a body: Assert.
 // In the doc comment of a struct type: Invariant. At the top level:
 // Predicate, which names a formula. A contract refers to the results of a
-// function by their names, so a verified function names all of them. The README of the module describes the language of the
-// formulas and each annotation in full, and docs/verification.md in the
-// module is a guide to writing verified Go.
+// function by their names, so a verified function names all of them.
+// docs/verification.md in the module is a guide to writing verified Go. It
+// describes the language of the formulas and each annotation in full.
 //
 // # Calling code that is not verified
 //

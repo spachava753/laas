@@ -679,6 +679,21 @@ func Find(A []int, x int) (result int) {
 	return -1
 }
 
+// DivideWrong is Divide with the loop condition that the README shows
+// broken: the loop stops one step early when r = d.
+//
+// @Requires n >= 0 And d > 0
+// @Ensures n = d*q + r And 0 <= r < d
+func DivideWrong(n, d int) (q, r int) {
+	q, r = 0, n
+	// @Invariant n = d*q + r And 0 <= r
+	// @Variant r
+	for d < r {
+		q, r = q+1, r-d
+	}
+	return q, r // want `vego: postcondition may not hold: 0 <= r < d`
+}
+
 // zero sets every element of A to zero.
 //
 // @Modifies A

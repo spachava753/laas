@@ -1480,6 +1480,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - The program runs on the platform `laas` was run for. The sizes of `int`, `uint`, and pointers, the layout of structs, and `MaxAlloc` are those of the `GOOS` and `GOARCH` that `laas` runs with. A proof for a 64-bit target does not hold for a 32-bit target.
 - The program is built from the files `laas` read. Files left out by a build constraint or a file name such as `_windows.go` are not read, so their annotations are not checked. Run `laas` once for each configuration you ship.
 - The machine has enough memory and stack.
+- Z3 is correct. Every proof rests on Z3 5.4.1 answering correctly that a problem has no solution.
 - Your formulas say what you intend. `vego` does not check a formula for out-of-range indexes or division by zero, so a formula that contains one may mean something other than you expect. See [Formulas](#formulas).
 
 ## Summary
