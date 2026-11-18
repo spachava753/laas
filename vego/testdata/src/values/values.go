@@ -78,7 +78,7 @@ func OnlySaysWhatSuccessMeans(A []int, i int) (value int, err error) { // want `
 // NoPostcondition has the same problem with no postcondition at all.
 //
 // @Requires i >= 0
-func NoPostcondition(A []int, i int) (result1 int, result2 error) { // want `vego:\ the\ contract\ of\ NoPostcondition\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ no\ simple\ input\ was\ found\ for\ which\ it\ forces\ success;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ a\ small\ input\ satisfies\ it`
+func NoPostcondition(A []int, i int) (result1 int, result2 error) { // want `vego:\ the\ contract\ of\ NoPostcondition\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ it\ requires\ success\ for\ no\ input;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs`
 	if i >= len(A) {
 		return 0, errOutOfRange
 	}
@@ -371,7 +371,7 @@ func Identity(nil string) (result string) {
 // UnreachableSource never reaches the call that would excuse it.
 //
 // @Ensures True
-func UnreachableSource() (result error) { // want `vego:\ the\ contract\ of\ UnreachableSource\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ no\ simple\ input\ was\ found\ for\ which\ it\ forces\ success;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ a\ small\ input\ satisfies\ it`
+func UnreachableSource() (result error) { // want `vego:\ the\ contract\ of\ UnreachableSource\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ it\ requires\ success\ for\ no\ input;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs`
 	if false {
 		_ = external()
 	}
@@ -399,7 +399,7 @@ func Wrap() (result error) {
 // ConstrainsOtherResult pins the number down but never promises success.
 //
 // @Ensures result1 = 1
-func ConstrainsOtherResult() (result1 int, result2 error) { // want `vego:\ the\ contract\ of\ ConstrainsOtherResult\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ no\ simple\ input\ was\ found\ for\ which\ it\ forces\ success;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ a\ small\ input\ satisfies\ it`
+func ConstrainsOtherResult() (result1 int, result2 error) { // want `vego:\ the\ contract\ of\ ConstrainsOtherResult\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ it\ requires\ success\ for\ no\ input;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs`
 	return 1, errors.New("always")
 }
 
@@ -407,14 +407,14 @@ func ConstrainsOtherResult() (result1 int, result2 error) { // want `vego:\ the\
 //
 // @Requires i >= 0
 // @Ensures i < 0 -> err = nil
-func ImpossibleCondition(i int) (err error) { // want `vego:\ the\ contract\ of\ ImpossibleCondition\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ no\ simple\ input\ was\ found\ for\ which\ it\ forces\ success;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ a\ small\ input\ satisfies\ it`
+func ImpossibleCondition(i int) (err error) { // want `vego:\ the\ contract\ of\ ImpossibleCondition\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ it\ requires\ success\ for\ no\ input;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs`
 	return errOutOfRange
 }
 
 // DependsOnOutput makes success depend on what the function itself returns.
 //
 // @Ensures n = 0 -> err = nil
-func DependsOnOutput(i int) (n int, err error) { // want `vego:\ the\ contract\ of\ DependsOnOutput\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ no\ simple\ input\ was\ found\ for\ which\ it\ forces\ success;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ a\ small\ input\ satisfies\ it`
+func DependsOnOutput(i int) (n int, err error) { // want `vego:\ the\ contract\ of\ DependsOnOutput\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ it\ requires\ success\ for\ no\ input;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs`
 	return 1, errOutOfRange
 }
 
@@ -452,7 +452,7 @@ func describe(e error) string { return "" }
 // GuardedSource never evaluates the call that would excuse it.
 //
 // @Ensures True
-func GuardedSource() (result error) { // want `vego:\ the\ contract\ of\ GuardedSource\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ no\ simple\ input\ was\ found\ for\ which\ it\ forces\ success;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ a\ small\ input\ satisfies\ it`
+func GuardedSource() (result error) { // want `vego:\ the\ contract\ of\ GuardedSource\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ it\ requires\ success\ for\ no\ input;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs`
 	if false && len(describe(external())) > 0 {
 		return nil
 	}
@@ -463,7 +463,7 @@ func GuardedSource() (result error) { // want `vego:\ the\ contract\ of\ Guarded
 //
 // @Requires |s| = 1
 // @Ensures s[0] = 256 -> result = nil
-func NoSuchByte(s string) (result error) { // want `vego:\ the\ contract\ of\ NoSuchByte\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ no\ simple\ input\ was\ found\ for\ which\ it\ forces\ success;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ a\ small\ input\ satisfies\ it`
+func NoSuchByte(s string) (result error) { // want `vego:\ the\ contract\ of\ NoSuchByte\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ it\ requires\ success\ for\ no\ input;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs`
 	_ = s[0]
 	return errors.New("always")
 }
@@ -471,8 +471,8 @@ func NoSuchByte(s string) (result error) { // want `vego:\ the\ contract\ of\ No
 // NoSuchSquare promises success for a number that is not a square.
 //
 // @Ensures x*x = 2 -> result = nil
-func NoSuchSquare(x int) (result error) { // want `vego:\ the\ contract\ of\ NoSuchSquare\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ no\ simple\ input\ was\ found\ for\ which\ it\ forces\ success;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ a\ small\ input\ satisfies\ it`
-	return errors.New("always") // want `vego:\ postcondition\ may\ not\ hold:\ x\*x\ =\ 2\ \->\ result\ =\ nil`
+func NoSuchSquare(x int) (result error) { // want `vego:\ the\ contract\ of\ NoSuchSquare\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ it\ requires\ success\ for\ no\ input;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs`
+	return errors.New("always")
 }
 
 // Alternating and its partner call each other and reach an unpredictable
@@ -500,7 +500,7 @@ func partner(n int) (result error) {
 // @Requires 0 <= n <= 1
 // @Variant 2*n
 // @Ensures True
-func Circular(n int) (result error) { // want `vego:\ the\ contract\ of\ Circular\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ no\ simple\ input\ was\ found\ for\ which\ it\ forces\ success;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ a\ small\ input\ satisfies\ it`
+func Circular(n int) (result error) { // want `vego:\ the\ contract\ of\ Circular\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ it\ requires\ success\ for\ no\ input;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs`
 	if n > 0 {
 		return circularPartner(n - 1)
 	}
@@ -510,7 +510,7 @@ func Circular(n int) (result error) { // want `vego:\ the\ contract\ of\ Circula
 // @Requires 0 <= n <= 1
 // @Variant 2*n+1
 // @Ensures True
-func circularPartner(n int) (result error) { // want `vego:\ the\ contract\ of\ circularPartner\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ no\ simple\ input\ was\ found\ for\ which\ it\ forces\ success;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ a\ small\ input\ satisfies\ it`
+func circularPartner(n int) (result error) { // want `vego:\ the\ contract\ of\ circularPartner\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ it\ requires\ success\ for\ no\ input;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs`
 	return Circular(n)
 }
 
@@ -534,7 +534,7 @@ func DistinctBlanks(_ int8, _ int) (n int) {
 //
 // @Requires -2 <= x <= 2
 // @Ensures True
-func DeadSquareSource(x int) (result error) { // want `vego:\ the\ contract\ of\ DeadSquareSource\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ no\ simple\ input\ was\ found\ for\ which\ it\ forces\ success;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ a\ small\ input\ satisfies\ it`
+func DeadSquareSource(x int) (result error) { // want `vego:\ the\ contract\ of\ DeadSquareSource\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ it\ requires\ success\ for\ no\ input;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs`
 	if x*x == 2 {
 		_ = external()
 	}
@@ -564,7 +564,7 @@ func BlankResult() (first int, _ int) { // want `vego: BlankResult has annotatio
 //
 // @Requires -2 <= x <= 2
 // @Ensures True
-func DiscardedValue(x int) (result error) { // want `vego:\ the\ contract\ of\ DiscardedValue\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ no\ simple\ input\ was\ found\ for\ which\ it\ forces\ success;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ a\ small\ input\ satisfies\ it`
+func DiscardedValue(x int) (result error) { // want `vego:\ the\ contract\ of\ DiscardedValue\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ it\ requires\ success\ for\ no\ input;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs`
 	_ = errors.New("discarded")
 	if x*x == 2 {
 		_ = external()
@@ -577,7 +577,7 @@ func DiscardedValue(x int) (result error) { // want `vego:\ the\ contract\ of\ D
 //
 // @Requires -2 <= x <= 2
 // @Ensures True
-func MixedGuard(x int) (result error) { // want `vego:\ the\ contract\ of\ MixedGuard\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ no\ simple\ input\ was\ found\ for\ which\ it\ forces\ success;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ a\ small\ input\ satisfies\ it`
+func MixedGuard(x int) (result error) { // want `vego:\ the\ contract\ of\ MixedGuard\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ it\ requires\ success\ for\ no\ input;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs`
 	e := errors.New("known non-nil")
 	if x*x == 2 && e != nil {
 		_ = external()
@@ -590,7 +590,7 @@ func MixedGuard(x int) (result error) { // want `vego:\ the\ contract\ of\ Mixed
 //
 // @Requires -2 <= x <= 2
 // @Ensures True
-func MixedGuardElse(x int) (result error) { // want `vego:\ the\ contract\ of\ MixedGuardElse\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ no\ simple\ input\ was\ found\ for\ which\ it\ forces\ success;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ a\ small\ input\ satisfies\ it`
+func MixedGuardElse(x int) (result error) { // want `vego:\ the\ contract\ of\ MixedGuardElse\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ it\ requires\ success\ for\ no\ input;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs`
 	e := errors.New("known non-nil")
 	if x*x != 2 || e == nil {
 		return errors.New("usual")

@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"math/rand/v2"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/spachava753/laas/vego/internal/logic"
@@ -13,6 +14,7 @@ import (
 
 // seqValue is the model of a sequence used to evaluate terms: a length and a
 // total function from indices to elements, as the sequence axioms assume.
+// A sequence built with a negative length is empty.
 type seqValue struct {
 	length int64
 	at     func(index int64) int64
@@ -234,7 +236,7 @@ func (m model) seq(t *logic.Term) seqValue {
 		return m.seqs[t.Name]
 	case logic.OpFill:
 		filler := value(1)
-		return seqValue{value(0), func(int64) int64 { return filler }}
+		return seqValue{max(value(0), 0), func(int64) int64 { return filler }}
 	case logic.OpSelect:
 		return m.table(t.Args[0])(value(1))
 	case logic.OpStore:
@@ -254,7 +256,7 @@ func (m model) seq(t *logic.Term) seqValue {
 		}}
 	case logic.OpSub:
 		whole, lo := m.seq(t.Args[0]), value(1)
-		return seqValue{plus(value(2), times(-1, lo)), func(index int64) int64 { return whole.at(plus(lo, index)) }}
+		return seqValue{max(plus(value(2), times(-1, lo)), 0), func(index int64) int64 { return whole.at(plus(lo, index)) }}
 	}
 	panic("unexpected sequence " + t.String())
 }
@@ -747,12 +749,14 @@ func counterexample(hyps []*logic.Term, goal *logic.Term, models []model) (found
 	return false, ""
 }
 
-// TestProveIsSound checks the one property the engine must never violate: a
-// proved goal holds in every model of the hypotheses. Random problems are
+// TestProveIsSound checks the one property the translation and Z3 together
+// must never violate: a proved goal holds in every model of the
+// hypotheses. Random problems are
 // proved and then evaluated over many models. The plain problems are about
 // integers, one boolean, and the sequences built from one; the wide ones add
-// every other kind of term the engine knows.
+// every other kind of term the logic has.
 func TestProveIsSound(t *testing.T) {
+	z3 := solverFor(t)
 	small, large := models()
 	tests := []struct {
 		name     string
@@ -762,14 +766,18 @@ func TestProveIsSound(t *testing.T) {
 		least    int
 		models   []model
 	}{
-		{"plain problems", false, 1, 4000, 300, small},
-		{"wide problems", true, 3, 4000, 300, append(small, large...)},
+		{"plain problems", false, 1, 4000, 1000, small},
+		{"wide problems", true, 3, 4000, 1100, append(small, large...)},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			rng := rand.New(rand.NewPCG(test.seed, test.seed+1))
-			proved := 0
-			for i := range test.problems {
+			type problem struct {
+				hyps []*logic.Term
+				goal *logic.Term
+			}
+			problems := make([]problem, test.problems)
+			for i := range problems {
 				g := &generator{rng: rng, wide: test.wide, vars: []*logic.Term{
 					logic.Const("x", logic.Int), logic.Const("y", logic.Int), logic.Const("z", logic.Int),
 				}}
@@ -777,20 +785,33 @@ func TestProveIsSound(t *testing.T) {
 				for range rng.IntN(4) {
 					hyps = append(hyps, g.formula(2))
 				}
-				goal := g.formula(2 + rng.IntN(2))
-				// Every fourth problem runs on the arbitrary-precision arithmetic
-				// alone, which must reach the same answers as the 64-bit path.
-				opts := Options{Preds: definitions(), MaxSteps: 600, bigOnly: i%4 == 0}
-				result := Prove(hyps, goal, opts)
-				if opts.bigOnly && result != Prove(hyps, goal, Options{Preds: definitions(), MaxSteps: 600}) {
-					t.Fatalf("problem %d: the two arithmetic paths disagree\nhyps: %v\ngoal: %v", i, hyps, goal)
-				}
-				if result != Proved {
+				problems[i] = problem{hyps, g.formula(2 + rng.IntN(2))}
+			}
+			// The problems are solved by as many workers as the solver
+			// keeps processes, and checked in order.
+			results := make([]Result, len(problems))
+			var wg sync.WaitGroup
+			next := make(chan int)
+			for range maxProcesses {
+				wg.Go(func() {
+					for i := range next {
+						results[i] = z3.Prove(problems[i].hyps, problems[i].goal, Options{Preds: definitions(), Effort: 200_000})
+					}
+				})
+			}
+			for i := range problems {
+				next <- i
+			}
+			close(next)
+			wg.Wait()
+			proved := 0
+			for i, p := range problems {
+				if results[i] != Proved {
 					continue
 				}
 				proved++
-				if found, m := counterexample(hyps, goal, test.models); found {
-					t.Fatalf("problem %d: proved a goal that fails\nhyps: %v\ngoal: %v\nmodel: %v", i, hyps, goal, m)
+				if found, m := counterexample(p.hyps, p.goal, test.models); found {
+					t.Fatalf("problem %d: proved a goal that fails\nhyps: %v\ngoal: %v\nmodel: %v", i, p.hyps, p.goal, m)
 				}
 			}
 			if proved < test.least {
@@ -801,10 +822,11 @@ func TestProveIsSound(t *testing.T) {
 	}
 }
 
-// TestExtremeCoefficients checks goals that are false but whose
-// refutation search passes through values at the edge of the 64-bit range,
-// where a wrapped negation or rounding step once reversed an inequality.
+// TestExtremeCoefficients checks goals that are false and whose numbers lie
+// at the edge of the 64-bit range: a literal written with the wrong sign or
+// cut to 64 bits on its way to Z3 would make some of them provable.
 func TestExtremeCoefficients(t *testing.T) {
+	z3 := solverFor(t)
 	x := logic.Const("x", logic.Int)
 	zero := logic.IntLit(0)
 	least := logic.IntLit(math.MinInt64)
@@ -822,7 +844,7 @@ func TestExtremeCoefficients(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			// Every hypothesis holds for x = 1, so x <= 0 does not follow.
-			if Prove([]*logic.Term{test.hyp}, logic.Le(x, zero), Options{}) == Proved {
+			if z3.Prove([]*logic.Term{test.hyp}, logic.Le(x, zero), Options{}) == Proved {
 				t.Fatalf("proved x <= 0 from %v, which x = 1 satisfies", test.hyp)
 			}
 		})
@@ -833,6 +855,7 @@ func TestExtremeCoefficients(t *testing.T) {
 // follows the write it was read after: the same reference sees the written
 // error, and another reference sees what was there before.
 func TestNilThroughMemory(t *testing.T) {
+	z3 := solverFor(t)
 	memory := logic.Const("M", logic.SeqOf(logic.Err))
 	p, q := logic.Const("p", logic.Ref), logic.Const("q", logic.Ref)
 	failed := logic.Const("failed", logic.Err)
@@ -846,8 +869,8 @@ func TestNilThroughMemory(t *testing.T) {
 	}{
 		{"same reference sees the nil written", []*logic.Term{logic.Eq(p, q)}, read, Proved},
 		{"other reference sees the old error", []*logic.Term{logic.Ne(p, q), logic.Not(logic.IsNil(logic.Select(memory, q)))}, logic.Not(read), Proved},
-		{"unknown reference may see either", []*logic.Term{logic.Not(logic.IsNil(logic.Select(memory, q)))}, read, Unknown},
-		{"unknown reference may see the old error", []*logic.Term{logic.Not(logic.IsNil(logic.Select(memory, q)))}, logic.Not(read), Unknown},
+		{"unknown reference may see either", []*logic.Term{logic.Not(logic.IsNil(logic.Select(memory, q)))}, read, Refuted},
+		{"unknown reference may see the old error", []*logic.Term{logic.Not(logic.IsNil(logic.Select(memory, q)))}, logic.Not(read), Refuted},
 		{
 			"a written error that is not nil is not nil when read back",
 			[]*logic.Term{logic.Not(logic.IsNil(failed))},
@@ -856,7 +879,7 @@ func TestNilThroughMemory(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := Prove(test.hyps, test.goal, Options{})
+			got := z3.Prove(test.hyps, test.goal, Options{})
 
 			if got != test.want {
 				t.Fatalf("Prove(%v, %v) = %v, want %v", test.hyps, test.goal, got, test.want)
@@ -865,40 +888,21 @@ func TestNilThroughMemory(t *testing.T) {
 	}
 }
 
-// TestRules checks single rules of the engine on problems small enough to
-// decide by hand. Each problem is one that a particular wrong version of a
-// rule gets wrong, and the random problems of TestProveIsSound reach too
-// rarely to be relied on for it.
+// TestRules checks the meaning of single operators of the logic on problems
+// small enough to decide by hand. Each problem is one that a particular
+// wrong translation gets wrong, and the random problems of TestProveIsSound
+// reach too rarely to be relied on for it.
 func TestRules(t *testing.T) {
+	z3 := solverFor(t)
 	x, y, z := logic.Const("x", logic.Int), logic.Const("y", logic.Int), logic.Const("z", logic.Int)
 	c := logic.Const("c", logic.Bool)
 	e, f := logic.Const("e", logic.Err), logic.Const("f", logic.Err)
 	lit := logic.IntLit
-	scaled := func(k int64, v *logic.Term) *logic.Term { return logic.Mul(lit(k), v) }
 	atMost := func(v *logic.Term) *logic.Term { return logic.Le(v, lit(0)) }
 	n := logic.Bound("n", logic.Int)
 	pos := Options{Preds: map[string]*logic.PredDef{"pos": {Name: "pos", Params: []*logic.Term{n}, Body: logic.Lt(lit(0), n)}}}
 	bound := logic.Bound("w", logic.Int)
 	chosen := logic.Ite(c, e, f)
-	// Every row of dense holds when the unknowns are all zero, and each
-	// unknown has far more upper and lower bounds than the elimination will
-	// multiply out.
-	var dense []*logic.Term
-	for i := range 6 * 6 * 6 {
-		coef := func(digit int) int64 { return []int64{-3, -2, -1, 1, 2, 3}[i/digit%6] }
-		row := logic.Add(logic.Add(scaled(coef(1), x), scaled(coef(6), y)), scaled(coef(36), z))
-		dense = append(dense, logic.Lt(row, lit(0)))
-	}
-	// Every row of ring holds when the unknowns are all zero. Each
-	// elimination joins two neighbours, and the numbers grow by about 61
-	// bits each time, which passes the limit on their size before the ring
-	// is used up.
-	var ring []*logic.Term
-	for i := range 90 {
-		here, next := logic.Const(fmt.Sprint("v", i), logic.Int), logic.Const(fmt.Sprint("v", (i+1)%90), logic.Int)
-		row := logic.Add(scaled(1<<61, here), logic.Neg(scaled(1350851717672992089, next)))
-		ring = append(ring, logic.Lt(row, lit(1<<61)))
-	}
 	tests := []struct {
 		name string
 		opts Options
@@ -906,101 +910,183 @@ func TestRules(t *testing.T) {
 		goal *logic.Term
 		want Result
 	}{
-		// Guards against a 64-bit multiplication that wraps instead of
-		// handing over to the arbitrary-precision path. The hypotheses hold
-		// for x = 0, y = -1, z = 0, and a wrapped product closes them.
-		{
-			"a product past 64 bits", Options{},
-			[]*logic.Term{
-				atMost(logic.Add(scaled(1<<32+1, x), scaled(1<<32, y))),
-				atMost(logic.Add(logic.Add(scaled(-(1<<32-1), x), scaled(1<<32, y)), lit(1))),
-				logic.Le(lit(-10), y),
-				logic.Le(logic.Sub(z, lit(10)), y),
-			},
-			logic.False(), Unknown,
-		},
-		// Guards against a 64-bit addition that wraps. The hypotheses hold
-		// for x = 0, y = -1, z = 0; eliminating x adds the two coefficients
-		// of y, and the wrapped sum turns an upper bound on y into a lower.
-		{
-			"a sum past 64 bits", Options{},
-			[]*logic.Term{
-				atMost(logic.Add(x, scaled(1<<62+1, y))),
-				atMost(logic.Add(logic.Neg(x), scaled(1<<62+1, y))),
-				logic.Le(lit(-10), y),
-				logic.Le(logic.Sub(z, lit(10)), y),
-				logic.Lt(y, lit(0)),
-			},
-			logic.False(), Unknown,
-		},
 		// Guards against a filled sequence of the wrong length.
-		{"the length of a filled sequence", Options{}, nil, logic.Eq(logic.Len(logic.Fill(x, y)), x), Proved},
-		{"a filled sequence is not empty", Options{}, nil, logic.Eq(logic.Len(logic.Fill(lit(3), y)), lit(0)), Unknown},
+		{"the length of a filled sequence", Options{}, []*logic.Term{logic.Le(lit(0), x)}, logic.Eq(logic.Len(logic.Fill(x, y)), x), Proved},
+		// Guards against a sequence built with a negative length keeping
+		// that length, and against a named sequence having one.
+		{"a sequence built with a negative length is empty", Options{}, []*logic.Term{logic.Lt(x, lit(0))}, logic.Eq(logic.Len(logic.Fill(x, y)), lit(0)), Proved},
+		{"a sequence built with a negative length has no other length", Options{}, []*logic.Term{logic.Lt(x, lit(0))}, logic.Eq(logic.Len(logic.Fill(x, y)), x), Refuted},
+		{"a cut with its ends reversed is empty", Options{}, []*logic.Term{logic.Lt(y, x)}, logic.Eq(logic.Len(logic.Subseq(logic.Const("A", logic.IntSeq), x, y)), lit(0)), Proved},
+		{"a named sequence has no negative length", Options{}, nil, logic.Le(lit(0), logic.Len(logic.Const("A", logic.IntSeq))), Proved},
+		{"a sequence held in another has no negative length", Options{}, nil, logic.Le(lit(0), logic.Len(logic.Select(logic.Const("M", logic.SeqOf(logic.IntSeq)), x))), Proved},
+		{"a filled sequence is not empty", Options{}, nil, logic.Eq(logic.Len(logic.Fill(lit(3), y)), lit(0)), Refuted},
 		// Guards against a filled sequence holding something other than
 		// the value it was filled with.
 		{"an element of a filled sequence", Options{}, nil, logic.Eq(logic.Select(logic.Fill(x, y), z), y), Proved},
-		{"a filled sequence does not hold zero", Options{}, nil, logic.Eq(logic.Select(logic.Fill(x, y), z), lit(0)), Unknown},
+		{"a filled sequence does not hold zero", Options{}, nil, logic.Eq(logic.Select(logic.Fill(x, y), z), lit(0)), Refuted},
 		// Guards against a predicate known to be false being unfolded as
 		// if it were true.
 		{"a false predicate denies its body", pos, []*logic.Term{logic.Not(logic.Pred("pos", x))}, atMost(x), Proved},
-		{"a false predicate does not give its body", pos, []*logic.Term{logic.Not(logic.Pred("pos", x))}, logic.Lt(lit(0), x), Unknown},
+		{"a false predicate does not give its body", pos, []*logic.Term{logic.Not(logic.Pred("pos", x))}, logic.Lt(lit(0), x), Refuted},
 		{"a true predicate gives its body", pos, []*logic.Term{logic.Pred("pos", x)}, logic.Lt(lit(0), x), Proved},
 		// Guards against the branches of a conditional error being
 		// swapped when asking whether it is nil.
 		{"a chosen error is the first when the condition holds", Options{}, []*logic.Term{c, logic.IsNil(e), logic.Not(logic.IsNil(f))}, logic.IsNil(chosen), Proved},
-		{"a chosen error is not the second when the condition holds", Options{}, []*logic.Term{c, logic.IsNil(e), logic.Not(logic.IsNil(f))}, logic.Not(logic.IsNil(chosen)), Unknown},
+		{"a chosen error is not the second when the condition holds", Options{}, []*logic.Term{c, logic.IsNil(e), logic.Not(logic.IsNil(f))}, logic.Not(logic.IsNil(chosen)), Refuted},
 		{"a chosen error is the second when the condition fails", Options{}, []*logic.Term{logic.Not(c), logic.IsNil(e), logic.Not(logic.IsNil(f))}, logic.Not(logic.IsNil(chosen)), Proved},
 		// Guards against the branches of a conditional formula being
 		// swapped.
 		{"a conditional formula gives its first branch", Options{}, []*logic.Term{c, logic.Ite(c, atMost(x), logic.Lt(lit(0), x))}, atMost(x), Proved},
-		{"a conditional formula does not give its second branch", Options{}, []*logic.Term{c, logic.Ite(c, atMost(x), logic.Lt(lit(0), x))}, logic.Lt(lit(0), x), Unknown},
+		{"a conditional formula does not give its second branch", Options{}, []*logic.Term{c, logic.Ite(c, atMost(x), logic.Lt(lit(0), x))}, logic.Lt(lit(0), x), Refuted},
 		{"a refuted conditional formula refutes its first branch", Options{}, []*logic.Term{c, logic.Not(logic.Ite(c, atMost(x), atMost(y)))}, logic.Lt(lit(0), x), Proved},
-		{"a refuted conditional formula leaves its second branch", Options{}, []*logic.Term{c, logic.Not(logic.Ite(c, atMost(x), atMost(y)))}, logic.Lt(lit(0), y), Unknown},
+		{"a refuted conditional formula leaves its second branch", Options{}, []*logic.Term{c, logic.Not(logic.Ite(c, atMost(x), atMost(y)))}, logic.Lt(lit(0), y), Refuted},
 		// Guards against the remainder of two numbers being computed the
 		// Euclidean way, which never yields a negative remainder, and the
 		// quotient being rounded down. Go truncates: -7 / 2 is -3 and
 		// -7 % 2 is -1.
 		{"a remainder takes the sign of the dividend", Options{}, nil, logic.Eq(logic.Mod(lit(-7), lit(2)), lit(-1)), Proved},
-		{"a remainder is not Euclidean", Options{}, nil, logic.Eq(logic.Mod(lit(-7), lit(2)), lit(1)), Unknown},
+		{"a remainder is not Euclidean", Options{}, nil, logic.Eq(logic.Mod(lit(-7), lit(2)), lit(1)), Refuted},
 		{"a remainder by a negative number", Options{}, nil, logic.Eq(logic.Mod(lit(-7), lit(-2)), lit(-1)), Proved},
 		{"a quotient truncates toward zero", Options{}, nil, logic.Eq(logic.Div(lit(-7), lit(2)), lit(-3)), Proved},
-		{"a quotient is not rounded down", Options{}, nil, logic.Eq(logic.Div(lit(-7), lit(2)), lit(-4)), Unknown},
+		{"a quotient is not rounded down", Options{}, nil, logic.Eq(logic.Div(lit(-7), lit(2)), lit(-4)), Refuted},
 		// Guards against the law x = y*(x/y) + x%y being assumed when y is
 		// zero, where it would make x%0 equal to x. Nothing is known about
 		// a division by zero.
-		{"a remainder by zero is not the dividend", Options{}, nil, logic.Eq(logic.Mod(x, lit(0)), x), Unknown},
-		{"a remainder by an unknown that is zero", Options{}, []*logic.Term{logic.Eq(y, lit(0))}, logic.Eq(logic.Mod(x, y), x), Unknown},
-		{"a quotient by an unknown that is zero", Options{}, []*logic.Term{logic.Eq(y, lit(0)), logic.Eq(logic.Div(x, y), lit(1))}, logic.Eq(logic.Mod(x, y), x), Unknown},
+		{"a remainder by zero is not the dividend", Options{}, nil, logic.Eq(logic.Mod(x, lit(0)), x), Refuted},
+		{"a remainder by an unknown that is zero", Options{}, []*logic.Term{logic.Eq(y, lit(0))}, logic.Eq(logic.Mod(x, y), x), Refuted},
+		{"a quotient by an unknown that is zero", Options{}, []*logic.Term{logic.Eq(y, lit(0)), logic.Eq(logic.Div(x, y), lit(1))}, logic.Eq(logic.Mod(x, y), x), Refuted},
 		{"the law of division holds for other divisors", Options{}, []*logic.Term{logic.Ne(y, lit(0))}, logic.Eq(logic.Add(logic.Mul(y, logic.Div(x, y)), logic.Mod(x, y)), x), Proved},
 		// Guards against two quantifiers with the same variable name
 		// being given the same witness. One number need not be both.
 		{
 			"two witnesses of one name are two numbers", Options{},
 			[]*logic.Term{logic.Exists(bound, logic.Eq(bound, lit(1))), logic.Exists(bound, logic.Eq(bound, lit(2)))},
-			logic.False(), Unknown,
+			logic.False(), Refuted,
 		},
 		{
 			"two witnesses of one name in one formula", Options{},
 			[]*logic.Term{logic.And(logic.Exists(bound, logic.Lt(bound, x)), logic.Exists(bound, logic.Lt(x, bound)))},
-			logic.False(), Unknown,
+			logic.False(), Refuted,
 		},
-		// Guards against the elimination reporting a contradiction when it
-		// stops because there are too many rows, on either arithmetic path.
-		{"too many rows for the 64-bit elimination", Options{}, dense, logic.False(), Unknown},
-		{"too many rows for the arbitrary-precision elimination", Options{bigOnly: true}, dense, logic.False(), Unknown},
-		// Guards against the elimination reporting a contradiction when it
-		// stops because its numbers have grown too large.
-		{"numbers too large for the elimination", Options{}, ring, logic.False(), Unknown},
-		// Guards against a proof being claimed when the budget of steps
-		// runs out: the goal is true and needs more than one step.
-		{"no steps left", Options{MaxSteps: 1}, []*logic.Term{logic.Or(atMost(x), atMost(y)), logic.Lt(lit(0), x)}, atMost(y), Unknown},
-		{"steps enough", Options{}, []*logic.Term{logic.Or(atMost(x), atMost(y)), logic.Lt(lit(0), x)}, atMost(y), Proved},
+		// Guards against a proof being claimed when the resource limit is
+		// reached: the goal is true and needs more than the limit allows.
+		{"no effort left", Options{Effort: 1}, []*logic.Term{logic.Or(atMost(x), atMost(y)), logic.Lt(lit(0), x)}, atMost(y), Exhausted},
+		{"effort enough", Options{}, []*logic.Term{logic.Or(atMost(x), atMost(y)), logic.Lt(lit(0), x)}, atMost(y), Proved},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := Prove(test.hyps, test.goal, test.opts)
+			got := z3.Prove(test.hyps, test.goal, test.opts)
 
 			if got != test.want {
+				t.Fatalf("Prove(%v, %v) = %v, want %v", test.hyps, test.goal, got, test.want)
+			}
+		})
+	}
+}
+
+// solverFor returns the solver the tests use, which is Z3 of the pinned
+// version on PATH. Without it the tests fail rather than skip: a test that
+// is skipped where Z3 is missing would let a broken encoding pass.
+func solverFor(t *testing.T) *Solver {
+	t.Helper()
+	s, err := New("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// TestTranslation checks rules of the translation that the random problems
+// of TestProveIsSound reach too rarely: each problem is one that a
+// particular wrong version of a rule gets wrong, in one direction or the
+// other.
+func TestTranslation(t *testing.T) {
+	z3 := solverFor(t)
+	lit := logic.IntLit
+	A := logic.Const("A", logic.IntSeq)
+	lo, n, j, m := logic.Const("lo", logic.Int), logic.Const("n", logic.Int), logic.Const("j", logic.Int), logic.Const("m", logic.Int)
+	k := logic.Bound("k", logic.Int)
+	inRange := func(v, from, to *logic.Term) *logic.Term { return logic.And(logic.Le(from, v), logic.Lt(v, to)) }
+	// A fact about the elements from lo on, and the same through a cut.
+	shifted := logic.Forall(k, logic.Implies(inRange(k, lit(0), n), logic.Le(lit(0), logic.Select(A, logic.Add(k, lo)))))
+	cut := logic.Subseq(A, lo, logic.Add(lo, n))
+	throughCut := logic.Forall(k, logic.Implies(inRange(k, lit(0), logic.Len(cut)), logic.Le(lit(0), logic.Select(cut, k))))
+	scaled := logic.Forall(k, logic.Implies(inRange(k, lit(0), n), logic.Eq(logic.Select(A, logic.Add(logic.Mul(lit(2), k), lo)), lit(0))))
+	one, two := logic.Add(k, lit(1)), logic.Add(k, lit(2))
+	twoShifts := logic.Forall(k, logic.Implies(inRange(k, lit(0), n), logic.Eq(logic.Select(A, one), logic.Sub(logic.Select(A, two), lit(5)))))
+	backwards := logic.Forall(k, logic.Implies(inRange(k, lit(0), n), logic.Le(lit(0), logic.Select(A, logic.Sub(n, logic.Add(k, lit(1)))))))
+	factored := logic.Forall(k, logic.Implies(inRange(k, lit(0), n), logic.Eq(logic.Select(A, logic.Mul(lit(2), logic.Add(k, lo))), lit(0))))
+	doubled := logic.Forall(k, logic.Implies(inRange(k, lit(0), n), logic.Eq(logic.Select(A, logic.Mul(lit(2), k)), lit(0))))
+	text := func(s string) *logic.Term { return logic.Bytes(s) }
+	s, u := logic.Const("s", logic.IntSeq), logic.Const("u", logic.IntSeq)
+	n2 := logic.Bound("n", logic.Int)
+	halved := logic.And(logic.Lt(lit(1), n2), logic.Eq(logic.Mod(n2, lit(2)), lit(0)), logic.Pred("pow", logic.Div(n2, lit(2))))
+	pow := Options{Preds: map[string]*logic.PredDef{"pow": {Name: "pow", Params: []*logic.Term{n2}, Body: logic.Or(logic.Eq(n2, lit(1)), halved)}}}
+	x := logic.Const("x", logic.Int)
+	e := logic.Bound("e", logic.Err)
+	tests := []struct {
+		name string
+		opts Options
+		hyps []*logic.Term
+		goal *logic.Term
+		want Result
+	}{
+		// Guards against facts whose index is moved never being used.
+		{"a fact about moved indices", Options{}, []*logic.Term{shifted, inRange(j, lo, logic.Add(lo, n))}, logic.Le(lit(0), logic.Select(A, j)), Proved},
+		{"a fact about moved indices stops at its end", Options{}, []*logic.Term{shifted, logic.Le(lit(0), n)}, logic.Le(lit(0), logic.Select(A, logic.Add(lo, n))), Refuted},
+		{"a fact about a cut holds of the whole", Options{}, []*logic.Term{throughCut, logic.Le(lit(0), n), inRange(j, lo, logic.Add(lo, n))}, logic.Le(lit(0), logic.Select(A, j)), Proved},
+		{"a fact about scaled indices", Options{}, []*logic.Term{scaled, inRange(j, lit(0), n), logic.Eq(m, logic.Add(logic.Mul(lit(2), j), lo))}, logic.Eq(logic.Select(A, m), lit(0)), Proved},
+		{"a fact about scaled indices says nothing between them", Options{}, []*logic.Term{scaled, inRange(j, lit(0), n), logic.Eq(m, logic.Add(logic.Add(logic.Mul(lit(2), j), lo), lit(1)))}, logic.Eq(logic.Select(A, m), lit(0)), Refuted},
+		// Guards against the copies of a fact with two moved reads of one
+		// sequence, an offset under a negation, and an offset under a
+		// factor getting their indices wrong.
+		{"two moved reads of one sequence", Options{}, []*logic.Term{twoShifts, logic.Eq(n, lit(3)), logic.Eq(logic.Select(A, lit(2)), lit(5))}, logic.Eq(logic.Select(A, lit(3)), lit(10)), Proved},
+		{"two moved reads of one sequence are consistent", Options{}, []*logic.Term{twoShifts, logic.Eq(n, lit(3)), logic.Eq(logic.Select(A, lit(2)), lit(5))}, logic.False(), Refuted},
+		{"an offset under a negation", Options{}, []*logic.Term{backwards, inRange(j, lit(0), n)}, logic.Le(lit(0), logic.Select(A, j)), Proved},
+		{"an offset under a negation stops at its end", Options{}, []*logic.Term{backwards, logic.Le(lit(0), n)}, logic.Le(lit(0), logic.Select(A, n)), Refuted},
+		{"an offset under a factor", Options{}, []*logic.Term{factored, inRange(j, lit(0), n), logic.Eq(m, logic.Mul(lit(2), logic.Add(j, lo)))}, logic.Eq(logic.Select(A, m), lit(0)), Proved},
+		{"an offset under a factor stops at its end", Options{}, []*logic.Term{factored, logic.Le(lit(0), n), logic.Eq(m, logic.Mul(lit(2), logic.Add(n, lo)))}, logic.Eq(logic.Select(A, m), lit(0)), Refuted},
+		{"an offset under a factor is scaled", Options{}, []*logic.Term{factored, logic.Lt(lit(0), n), logic.Eq(m, logic.Add(logic.Mul(lit(2), lo), lit(1)))}, logic.Eq(logic.Select(A, m), lit(0)), Refuted},
+		{"an offset under a factor is scaled with it", Options{}, []*logic.Term{factored, logic.Eq(lo, lit(1)), logic.Eq(n, lit(2))}, logic.Eq(logic.Select(A, lit(3)), lit(0)), Refuted},
+		{"an offset under a factor reaches the last element", Options{}, []*logic.Term{factored, logic.Eq(lo, lit(1)), logic.Eq(n, lit(2)), logic.Eq(m, lit(4))}, logic.Eq(logic.Select(A, m), lit(0)), Proved},
+		{"a scaled read without an offset", Options{}, []*logic.Term{doubled, inRange(j, lit(0), n), logic.Eq(m, logic.Mul(lit(2), j))}, logic.Eq(logic.Select(A, m), lit(0)), Proved},
+		{"a scaled read without an offset says nothing between", Options{}, []*logic.Term{doubled, inRange(j, lit(0), n), logic.Eq(m, logic.Add(logic.Mul(lit(2), j), lit(1)))}, logic.Eq(logic.Select(A, m), lit(0)), Refuted},
+		// Guards against a concatenation kept as a whole, such as one
+		// stored in memory, holding the wrong element at the seam.
+		{"the first element after the seam", Options{}, nil, logic.Eq(logic.Select(logic.Select(logic.Store(logic.Const("M", logic.SeqOf(logic.IntSeq)), lit(0), logic.Concat(text("ab"), text("c"))), lit(0)), lit(2)), lit('c')), Proved},
+		{"the last element before the seam", Options{}, nil, logic.Eq(logic.Select(logic.Select(logic.Store(logic.Const("M", logic.SeqOf(logic.IntSeq)), lit(0), logic.Concat(text("ab"), text("c"))), lit(0)), lit(1)), lit('b')), Proved},
+		// Guards against a division by zero and a remainder by zero being
+		// tied to each other; the logic says nothing about either.
+		{"a quotient by zero is not the remainder", Options{}, nil, logic.Eq(logic.Div(x, lit(0)), logic.Mod(x, lit(0))), Refuted},
+		// Guards against keys that confuse sequences or tell equal ones
+		// apart.
+		{"equal texts have equal keys", Options{}, nil, logic.Eq(logic.Key(text("ab")), logic.Key(text("ab"))), Proved},
+		{"different texts have different keys", Options{}, nil, logic.Ne(logic.Key(text("ab")), logic.Key(text("abc"))), Proved},
+		{"texts of one length with other bytes have different keys", Options{}, nil, logic.Ne(logic.Key(text("ab")), logic.Key(text("ac"))), Proved},
+		{"keys look only below the length", Options{}, nil, logic.Eq(logic.Key(logic.Store(logic.Fill(lit(1), lit(5)), lit(3), lit(9))), logic.Key(logic.Fill(lit(1), lit(5)))), Proved},
+		{"sequences with the same elements have the same key", Options{}, []*logic.Term{logic.Eq(logic.Len(s), lit(1)), logic.Eq(logic.Len(u), lit(1)), logic.Eq(logic.Select(s, lit(0)), logic.Select(u, lit(0)))}, logic.Eq(logic.Key(s), logic.Key(u)), Proved},
+		{"sequences of one length may have different keys", Options{}, []*logic.Term{logic.Eq(logic.Len(s), lit(1)), logic.Eq(logic.Len(u), lit(1))}, logic.Eq(logic.Key(s), logic.Key(u)), Refuted},
+		// Guards against a number past 64 bits being cut on its way to Z3.
+		{"a number past 64 bits", Options{}, nil, logic.Lt(lit(0), logic.BigLit(new(big.Int).Lsh(big.NewInt(1), 64))), Proved},
+		{"a number past 64 bits is not zero", Options{}, nil, logic.Eq(logic.BigLit(new(big.Int).Lsh(big.NewInt(1), 64)), lit(0)), Refuted},
+		// Guards against a recursive predicate that is not unfolded, or
+		// unfolded wrongly.
+		{"a recursive predicate holds where its body does", pow, nil, logic.Pred("pow", lit(8)), Proved},
+		{"a recursive predicate fails where its body does", pow, nil, logic.Not(logic.Pred("pow", lit(6))), Proved},
+		{"a recursive predicate does not hold of everything", pow, nil, logic.Pred("pow", lit(6)), Refuted},
+		{"an odd power of two is one", pow, []*logic.Term{logic.Pred("pow", x), logic.Eq(logic.Mod(x, lit(2)), lit(1))}, logic.Eq(x, lit(1)), Proved},
+		// Guards against a model in which every error is nil.
+		{"some error is not nil", Options{}, nil, logic.Not(logic.Forall(e, logic.IsNil(e))), Proved},
+		// Guards against a predicate written out in place capturing a
+		// variable bound around its application.
+		{"an inlined predicate does not capture", Options{Preds: map[string]*logic.PredDef{"some": {Name: "some", Params: []*logic.Term{n2}, Body: logic.Exists(k, logic.Lt(n2, k))}}},
+			nil, logic.Forall(k, logic.Pred("some", k)), Proved},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Only whether the goal is proved matters; a goal that is not
+			// may be refuted or left open.
+			if got := z3.Prove(test.hyps, test.goal, test.opts); (got == Proved) != (test.want == Proved) {
 				t.Fatalf("Prove(%v, %v) = %v, want %v", test.hyps, test.goal, got, test.want)
 			}
 		})

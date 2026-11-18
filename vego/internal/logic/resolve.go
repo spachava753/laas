@@ -485,8 +485,8 @@ type DefineError struct {
 
 // Define registers a group of possibly mutually recursive predicates. It
 // infers parameter sorts from how each parameter is used, resolves the bodies,
-// and rejects recursion through negation, which would make unfolding a
-// predicate unsound.
+// and rejects recursion through negation, under which a definition taken as
+// an axiom could contradict itself.
 func (r *Resolver) Define(decls []*PredDecl) []DefineError {
 	var errs []DefineError
 	byName := map[string]*PredDecl{}
@@ -536,7 +536,8 @@ func (r *Resolver) Define(decls []*PredDecl) []DefineError {
 
 // negativeCycle reports whether the predicate can reach itself through an
 // occurrence that is not in positive position. Positive recursion guarantees
-// that a least fixed point exists, so unfolding a definition is consistent.
+// that a least fixed point exists, so a definition taken as an axiom is
+// consistent.
 func (r *Resolver) negativeCycle(name string) bool {
 	reaches := func(from string) bool {
 		seen := map[string]bool{}

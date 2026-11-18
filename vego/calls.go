@@ -11,7 +11,6 @@ import (
 	"slices"
 
 	"github.com/spachava753/laas/vego/internal/logic"
-	"github.com/spachava753/laas/vego/internal/solver"
 	"golang.org/x/tools/go/types/typeutil"
 )
 
@@ -508,14 +507,13 @@ func (v *fnVerifier) elementFacts(seq *logic.Term, elem types.Type) *logic.Term 
 // and the memory it may have written.
 func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state, facts []*logic.Term, made forward) {
 	path := append(slices.Clip(st.hyps), facts...)
-	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
 	local := fn.decl != nil
 	for _, index := range errorResults(fn) {
 		if results[index] == nil {
 			continue
 		}
 		source := (fn.trust != nil && !v.trustForces(fn)) || (fn.imported != nil && fn.imported.Excused)
-		if (!local && !source) || solver.Prove(path, logic.IsNil(results[index][0]), opts) == solver.Proved {
+		if (!local && !source) || v.proves(path, logic.IsNil(results[index][0]), 0) {
 			continue
 		}
 		if v.canReach(path) {
@@ -734,17 +732,15 @@ func (v *fnVerifier) dependsOn(source *failureSource, facts []*logic.Term, val *
 	if val.Sort == logic.Bool {
 		stays = logic.Iff(val, other)
 	}
-	opts := solver.Options{Preds: v.res.Preds, MaxSteps: quickSteps}
-	return solver.Prove(slices.Concat(facts, source.otherwise()), stays, opts) != solver.Proved
+	return !v.proves(slices.Concat(facts, source.otherwise()), stays, quickEffort)
 }
 
 // chosenBy reports whether one of the branches taken was chosen by what a
 // call produced: it was not certain to be taken, given the facts known
 // before it, and its condition depends on what the call produced.
 func (v *fnVerifier) chosenBy(source *failureSource, facts []*logic.Term, path []choice) bool {
-	opts := solver.Options{Preds: v.res.Preds, MaxSteps: quickSteps}
 	return slices.ContainsFunc(path, func(taken choice) bool {
-		return solver.Prove(facts[:taken.before], taken.cond, opts) != solver.Proved && v.dependsOn(source, facts, taken.cond)
+		return !v.proves(facts[:taken.before], taken.cond, quickEffort) && v.dependsOn(source, facts, taken.cond)
 	})
 }
 

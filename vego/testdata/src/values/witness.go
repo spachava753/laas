@@ -195,3 +195,22 @@ func TwoMapsDeep(m map[int]*looped) (err error) {
 // @Requires has(m[1].next[1].next, 1) And m[1].next[1].next[1] != nil
 // @Ensures result = nil
 func ThreeMapsDeep(m map[int]*looped) (result error) { return nil } // want `the contract of ThreeMapsDeep may also be met by a function that always returns an error: no simple input was found`
+
+// CountHole can only fail: a map with five keys has a key, so the loop
+// returns an error. Its contract forces success only for a map that has
+// five keys and none of them, which no map is, although the logic, which
+// does not tie the count of a map to its keys, has such a state. A model of
+// the logic must not count as an input.
+//
+// @Ensures (Forall k in Z : ~has(m, k)) And |m| = 5 -> err = nil
+func CountHole(m map[int]int) (err error) { // want `the contract of CountHole may also be met by a function that always returns an error: no simple input was found`
+	if len(m) == 5 {
+		for k := range m {
+			_ = k
+			// @Assert has(m, k)
+			return errOutOfRange
+		}
+		return nil
+	}
+	return errOutOfRange
+}

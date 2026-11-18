@@ -27,6 +27,14 @@ go install github.com/spachava753/laas/cmd/laas@latest
 laas -vego ./...
 ```
 
+`vego` proves obligations with Z3 5.4.1, which runs as a separate program. Install that release from <https://github.com/Z3Prover/z3/releases/tag/z3-5.4.1> and put its `bin/z3` on `PATH`. To use a binary elsewhere, pass `-vego.z3=path`. `laas` refuses any other version of Z3, because another version may prove different things. A package without annotations does not need Z3. Without Z3, a package with annotations fails with this message:
+
+```text
+vego: proving obligations needs Z3 5.4.1, and no z3 was found on PATH; install Z3 5.4.1
+from https://github.com/Z3Prover/z3/releases/tag/z3-5.4.1 and put its bin/z3 on PATH, or
+name it with -vego.z3
+```
+
 `laas -vego` runs only the verifier. Plain `laas` also runs the other analyzers, which report on things unrelated to verification. The arguments are package patterns, as for `go vet`. Use `./...` for everything or `./internal/core` for one package.
 
 `vego` verifies a function only if it has at least one `// @` annotation. It ignores every other function, so you can start with a single function in a large package. To turn on [the built-in checks](#built-in-checks) without writing a contract, add `// @Ensures True`.
@@ -443,11 +451,11 @@ A predicate can be recursive:
 
 In its own definition, a predicate may appear under `And`, `Or`, and quantifiers, and on the right side of `->`. It may not appear under `~`, on the left side of `->`, or inside `<->`.
 
-Use a recursive predicate only for a property that `Forall` cannot express. The prover expands the definition one step at a time and does not do induction, so recursive predicates are hard to prove things with. For example, a sum or count over a slice cannot currently be kept as the invariant of a loop that writes to that slice.
+Use a recursive predicate only for a property that `Forall` cannot express. The prover expands the definition where the predicate is applied and does not do induction, so recursive predicates are hard to prove things with. For example, a sum or count over a slice cannot currently be kept as the invariant of a loop that writes to that slice.
 
 ## Helping the prover
 
-The prover is sound but limited. It handles linear arithmetic, reads and writes of slices, and `Forall` facts that apply to a term in the proof. It has some support for products of two variables. When it fails to prove something true, the fix is usually to state an intermediate fact.
+The prover is Z3. It decides linear integer arithmetic and reads and writes of slices. It uses a `Forall` fact where the proof contains a term that matches it, and it handles products of variables only in part. When it fails to prove something true, the fix is usually to state an intermediate fact.
 
 `Assert` states such a fact. `vego` must prove the assertion at that point, and can use it in everything that follows.
 
@@ -467,7 +475,17 @@ func Cell(i, j, w, h int) (result int) {
 }
 ```
 
-`-vego.max-steps` raises the limit on how much work the prover does for one proof obligation. Try it last. Most failures are caused by a missing fact, which more effort cannot supply. A proof that needs the higher limit is also slow every time the tool runs.
+`-vego.rlimit` raises the limit on how much work Z3 does for one proof obligation. The default is 4000000. Z3 counts its work deterministically, so the same binary gives the same answers on every run. Most failures are caused by a missing fact, which more effort cannot supply. A proof that needs the higher limit is also slow every time the tool runs.
+
+When Z3 stopped at a limit, the message ends with a note that says which one:
+
+| Note | What to do |
+| --- | --- |
+| `(Z3 reached its resource limit; -vego.rlimit raises it)` | Add the missing fact first. If the obligation still fails, try a higher `-vego.rlimit`. |
+| `(Z3 ran past its time limit, which depends on the machine)` | Z3 ran for five minutes. Split the function or add facts. This limit depends on the speed of the machine, so the result may differ elsewhere. |
+| `(Z3 ran out of memory)` | Z3 used the 1 GB a process may have. `-vego.rlimit` does not help. Split the function or add facts. |
+
+A message without a note means that Z3 gave its answer within the limits.
 
 ## Changing memory
 
@@ -855,16 +873,20 @@ inputs and a small input satisfies it
 
 A contract that only says "if the function succeeds, then ..." is also satisfied by a function that always fails. `vego` rejects such contracts because they are easy to write by accident and guarantee nothing.
 
-To decide, `vego` searches for one small example input. The input must satisfy the `Requires` clauses, and the `Ensures` clauses must then force every error result to be `nil`. `vego` builds the examples from:
+To decide, `vego` searches for one example input. The input must satisfy the `Requires` clauses, and the `Ensures` clauses must then force every error result to be `nil`. The examples have a simple shape:
 
-- the numbers and strings in the contract, plus a few small values;
-- slices in which every element is the same;
+- slices in which every element is the same, or the slice literals in the contract;
+- strings of one repeated byte, or the string literals in the contract;
 - pointers to structs, followed at most two levels deep;
 - maps with a single key, whose value can be a pointer to a struct.
 
-This is enough for most contracts. If your contract does state when the function succeeds and you still get the message, there are two possible causes. Either every succeeding input lies outside what the search builds, for example because success needs a slice with two different elements. Or the search tried a suitable input, and the prover could not show that it satisfies the `Requires` clauses or that the `Ensures` clauses force success. That can happen when the clauses involve non-trivial arithmetic.
+Z3 picks the numbers in an example: lengths, elements, fields, keys, and whether an error is `nil`. `vego` then proves both facts about the example before it accepts it.
 
-In both cases, add a clause that some simple input clearly satisfies, such as `|A| = 0 -> err = nil`. An `Assert` cannot help, because this check does not involve the function body. `-vego.max-steps` does not widen the search. It only affects the proofs about each example.
+When Z3 shows that no input at all can force success, the message says `it requires success for no input` instead. The contract then needs a clause that says when the function succeeds.
+
+The search is enough for most contracts. If your contract does state when the function succeeds and you still get `no simple input was found`, there are two possible causes. Either every succeeding input lies outside the shapes above, for example because success needs a slice with two different elements. Or the prover could not show that a suitable example satisfies the `Requires` clauses or that the `Ensures` clauses force success. That can happen when the clauses involve non-trivial arithmetic.
+
+In both cases, add a clause that some simple input clearly satisfies, such as `|A| = 0 -> err = nil`. An `Assert` cannot help, because this check does not involve the function body.
 
 ### Functions that cannot promise success
 
@@ -1187,7 +1209,8 @@ laas -vego ./...
 - Use the exit status. It is 0 when every annotated function is proved, 3 when anything is reported, and 1 when the packages could not be loaded.
 - Build `laas` with the same Go that the job uses, as the commands above do. See the toolchain note in [Running it](#running-it).
 - Do not use `-vego.trust` as the check. It prints a report for reviewers. It also exits with status 3 if verification reported problems.
-- Set a time limit on the job. Small functions take well under a second each. Functions with many pointer parameters that may alias take much longer, and the tool has not been optimised yet. `-vego.max-steps` limits the work per proof obligation, not the total run time.
+- Install Z3 5.4.1 on the machine that runs the job, as in [Running it](#running-it).
+- Set a time limit on the job. Small functions take well under a second each. Functions with many pointer parameters that may alias take much longer, and the tool has not been optimised yet. `-vego.rlimit` limits the work per proof obligation, not the total run time.
 
 ## When a proof fails
 
@@ -1349,7 +1372,8 @@ Results are referred to by the names in the function's signature.
 | --- | --- |
 | `-vego` | run only the verifier |
 | `-vego.audit` | also report contracts that trivial implementations satisfy |
-| `-vego.max-steps=n` | limit on the prover's work for one proof obligation |
+| `-vego.rlimit=n` | Z3's resource limit for one proof obligation, 4000000 by default |
+| `-vego.z3=path` | the Z3 5.4.1 binary to use, instead of the `z3` on `PATH` |
 | `-vego.trusted=path` | use this trust file instead of the one next to `go.mod` |
 | `-vego.other-tags=A,B` | words that another tool reads after `// @`; any other unknown word there is an error |
 | `-vego.trust` | print the trust report |

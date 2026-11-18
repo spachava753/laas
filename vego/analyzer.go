@@ -46,11 +46,19 @@
 // with a contract, whose Requires the caller proves and whose Ensures it
 // may then rely on.
 //
-// There is no external solver. The function is executed symbolically, and
-// the obligations are discharged by a deduction engine written in Go, in
-// the internal solver package. The engine is sound and deliberately
-// incomplete: when it cannot prove something true, an Assert with an
-// intermediate step or a stronger invariant usually helps.
+// The function is executed symbolically, and each obligation is written as
+// an SMT-LIB problem and handed to Z3, which runs as a separate program; see
+// the internal solver package. An obligation is proved only when Z3 shows
+// that its negation has no model. Z3 may fail to prove something true; an
+// Assert with an intermediate step or a stronger invariant usually helps.
+//
+// # Z3
+//
+// vego uses exactly the version of Z3 named by the internal solver
+// package, 5.4.1, and refuses any other, since another version may prove
+// different things. It is looked up only for a package that has something
+// to prove, as z3 on PATH or at the path -vego.z3 names. Without it such a
+// package fails with an error that says how to install it.
 //
 // # Annotations
 //
@@ -78,8 +86,9 @@
 // run by a multichecker:
 //
 //	-vego.audit       also probe each contract with degenerate implementations
-//	-vego.max-steps   how much effort the solver spends on one obligation
+//	-vego.rlimit      Z3's resource limit for one obligation
 //	-vego.trusted     path of the trust file, instead of the one next to go.mod
+//	-vego.z3          path of the Z3 binary, instead of the z3 on PATH
 //
 // The laas command adds -vego.trust, which prints the trust report.
 package vego
@@ -100,6 +109,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/solver"
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/types/typeutil"
 )
@@ -125,7 +135,7 @@ func RefuseCachedRuns() { refuseCache = true }
 // verified contracts and the trust the proofs rest on. For a caching driver
 // it only reports that nothing was verified.
 func newAnalyzer() *analysis.Analyzer {
-	maxSteps, audit, trustPath, otherTags := 0, false, "", ""
+	effort, audit, trustPath, otherTags, z3Path := 0, false, "", "", ""
 	analyzer := &analysis.Analyzer{
 		Name: "vego",
 		Doc: `verifies functions against their // @ specifications
@@ -139,10 +149,16 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		URL: "https://github.com/spachava753/laas#vego",
 	}
 	analyzer.Flags.IntVar(
-		&maxSteps,
-		"max-steps",
-		0,
-		"arithmetic checks the solver may spend on one proof obligation (0 selects the default)",
+		&effort,
+		"rlimit",
+		solver.DefaultEffort,
+		"Z3 resource limit (rlimit) for one proof obligation",
+	)
+	analyzer.Flags.StringVar(
+		&z3Path,
+		"z3",
+		"",
+		"path of the Z3 "+solver.Version+" binary, instead of the z3 found on PATH",
 	)
 	analyzer.Flags.BoolVar(
 		&audit,
@@ -164,11 +180,27 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 	)
 	analyzer.ResultType = reflect.TypeFor[*Usage]()
 	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact), new(sentinelFact)}
-	analyzer.Run = func(pass *analysis.Pass) (any, error) {
+	analyzer.Run = func(pass *analysis.Pass) (result any, err error) {
 		foreignTags, err := parseOtherTags(otherTags)
 		if err != nil {
 			return nil, err
 		}
+		if effort <= 0 || effort > solver.MaxEffort {
+			return nil, fmt.Errorf("-vego.rlimit must be from 1 to %d, not %d", solver.MaxEffort, effort)
+		}
+		// A package that has something to prove and no Z3 to prove it with
+		// fails as a whole, and so does one for which Z3 failed.
+		defer func() {
+			switch r := recover().(type) {
+			case nil:
+			case solverUnavailable:
+				result, err = nil, r.err
+			case *solver.Fault:
+				result, err = nil, fmt.Errorf("Z3 failed: %v", r)
+			default:
+				panic(r)
+			}
+		}()
 		pv := &pkgVerifier{
 			otherTags:     foreignTags,
 			pass:          pass,
@@ -187,7 +219,8 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			foreign:       map[*types.Package]*logic.Resolver{},
 			plain:         logic.NewResolver(),
 			trustSources:  map[*trustFile]*token.File{},
-			maxSteps:      maxSteps,
+			z3Path:        z3Path,
+			effort:        effort,
 		}
 		if refuseCache {
 			pv.usage = &Usage{}
@@ -295,7 +328,16 @@ type pkgVerifier struct {
 	funcs    map[*types.Func]*funcInfo
 	order    []*funcInfo
 	reported map[string]bool
-	maxSteps int
+	// z3Path names the Z3 binary, z3 the solver once started, and effort
+	// the resource limit of a proof.
+	z3Path string
+	z3     *solver.Solver
+	effort int
+	// searchLimit is the last limit a question of a search for an input
+	// stopped at while the current function was verified, and searching
+	// counts the searches under way.
+	searchLimit solver.Result
+	searching   int
 	// otherTags holds the words that the user declared to be read by other
 	// tools when they follow "// @".
 	otherTags map[string]bool

@@ -8,7 +8,6 @@ import (
 	"slices"
 
 	"github.com/spachava753/laas/vego/internal/logic"
-	"github.com/spachava753/laas/vego/internal/solver"
 )
 
 // invariantSet holds the invariants declared on a struct type. An invariant
@@ -177,8 +176,7 @@ func (pv *pkgVerifier) checkInvariantsDeclared() {
 			st := &state{vals: map[*types.Var]value{}, mem: memory{}, brk: logic.Const("brk", logic.Ref), noted: map[string]bool{}}
 			self := v.unknown("self", name.Type(), st)
 			v.assumeInvariants(st, nil, st.mem, self, name.Type())
-			opts := solver.Options{Preds: pv.res.Preds, MaxSteps: pv.maxSteps}
-			if solver.Prove(st.hyps, logic.False(), opts) == solver.Proved {
+			if pv.contradictory(st.hyps) {
 				set.broken = true
 				pv.report(set.clauses[0].pos, "the invariants of %s contradict each other, so no value of the type could exist", name.Name())
 			}

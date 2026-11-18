@@ -11,12 +11,18 @@ import (
 
 // TestBitFacts checks what bits.go tells the solver about x & y and about
 // powers of two against the real operations: for each pair of small values,
-// the facts together with the true result must not be contradictory. A fact
-// that is false for some pair shows as a contradiction there.
+// the facts together with the true result must have a model. A fact that is
+// false for some pair shows as a contradiction there.
 func TestBitFacts(t *testing.T) {
+	z3, err := solver.New("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The facts are consistent with the true result when Z3 finds a model
+	// of them, which for facts about known numbers it always can.
 	consistent := func(st *state, known ...*logic.Term) bool {
 		hyps := append(append([]*logic.Term{}, st.hyps...), known...)
-		return solver.Prove(hyps, logic.False(), solver.Options{MaxSteps: 2000}) != solver.Proved
+		return z3.Check(hyps, solver.Options{}) == solver.Refuted
 	}
 	fresh := func() (*fnVerifier, *state) {
 		v := &fnVerifier{names: map[string]int{}, bitTerms: map[string]*logic.Term{}, lowZeros: map[string]uint{}, bitOrigins: map[string]bitOrigin{}}

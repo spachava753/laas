@@ -42,10 +42,6 @@ func (s Sort) Elem() Sort { return s - seqStep }
 // SeqOf returns the sequence sort with the given element sort.
 func SeqOf(elem Sort) Sort { return elem + seqStep }
 
-// Numeric reports whether terms of the sort are numbers to the solver:
-// integers and references.
-func (s Sort) Numeric() bool { return s == Int || s == Ref }
-
 // String returns the Go-flavoured name of the sort.
 func (s Sort) String() string {
 	if s == IntSeq {

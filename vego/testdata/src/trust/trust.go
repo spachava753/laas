@@ -59,7 +59,7 @@ func parsePort(n int) (port int, err error) {
 // so it has to say when it succeeds itself.
 //
 // @Ensures err = nil -> port = n
-func Port(n int) (port int, err error) { // want `vego:\ the\ contract\ of\ Port\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ no\ simple\ input\ was\ found\ for\ which\ it\ forces\ success;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs\ and\ a\ small\ input\ satisfies\ it`
+func Port(n int) (port int, err error) { // want `vego:\ the\ contract\ of\ Port\ may\ also\ be\ met\ by\ a\ function\ that\ always\ returns\ an\ error:\ it\ requires\ success\ for\ no\ input;\ state\ when\ it\ succeeds\ with\ a\ clause\ such\ as\ "condition\ \->\ err\ =\ nil",\ where\ the\ condition\ is\ about\ the\ inputs`
 	return parsePort(n)
 }
 
@@ -1033,7 +1033,7 @@ func BouncedByVariable(n int) (result int) {
 func bounceByVariable(n int) int { return callback(n) }
 
 // SucceedsNowhere has a return without an error that no input reaches,
-// although ruling that out takes more than the solver does.
+// since no x and y in range have squares that add up to 6.
 //
 // @Requires -2 <= x <= 2 And -2 <= y <= 2
 // @Ensures True

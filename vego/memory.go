@@ -172,8 +172,10 @@ func (v *fnVerifier) bound(base string) *logic.Term {
 
 // table returns the contents of a region for reading at ref. On the way it
 // tells the state what is known to be unchanged about ref in every layer the
-// region has; that is only stated for the references actually read, since a
-// fact about all references at once is beyond the solver.
+// region has; that is only stated for the references actually read. A fact
+// about all references at once would be a quantifier in every problem that
+// reads memory, which Z3 decides less often and slows Z3 down, while facts
+// about the references read keep such problems free of quantifiers.
 func (v *fnVerifier) table(sink *state, mem memory, key string, sort logic.Sort, ref *logic.Term) *logic.Term {
 	current := mem.region(key, sort)
 	if sink == nil {
@@ -368,23 +370,6 @@ func mustLayout(t types.Type) []leaf {
 	return leaves
 }
 
-// quickSteps bounds a proof whose failure is an ordinary outcome and decides
-// nothing by itself, such as whether an append can happen in place.
-const quickSteps = 400
-
-// quickly is prove with a small budget.
-func (v *fnVerifier) quickly(st *state, guard []*logic.Term, goal *logic.Term) bool {
-	opts := solver.Options{Preds: v.res.Preds, MaxSteps: quickSteps}
-	return solver.Prove(append(slices.Clip(st.hyps), guard...), goal, opts) == solver.Proved
-}
-
-// prove reports whether a goal follows from the facts of a state together
-// with the conditions under which the current expression is evaluated.
-func (v *fnVerifier) prove(st *state, guard []*logic.Term, goal *logic.Term) bool {
-	opts := solver.Options{Preds: v.res.Preds, MaxSteps: v.maxSteps}
-	return solver.Prove(append(slices.Clip(st.hyps), guard...), goal, opts) == solver.Proved
-}
-
 // stretch is the part of a write, or of a target, that lies in one region:
 // the positions from lo up to hi, which are nil for a map.
 type stretch struct {
@@ -484,17 +469,17 @@ func (v *fnVerifier) checkWrite(st *state, guard []*logic.Term, w written, pos t
 		return logic.Or(created, logic.And(whole...))
 	}
 	goal := allowed(-1)
-	if !v.prove(st, guard, goal) {
+	if result := v.attempt(st, guard, goal); result != solver.Proved {
 		for _, i := range candidates {
 			v.used[i] = true
 		}
 		if len(candidates) == 0 {
-			v.report(pos, "%s, which %s may not modify; list it in a // @Modifies clause", what, v.fn.obj.Name())
+			v.report(pos, "%s, which %s may not modify; list it in a // @Modifies clause%s", what, v.fn.obj.Name(), limitNote(result))
 		} else {
 			// Something of the kind is listed, so telling the reader to
 			// list it would send them in a circle.
 			v.report(pos, "%s, which %s may not modify: nothing its // @Modifies clauses list is known to cover it; "+
-				"a clause covers what its path referred to when %s was called", what, v.fn.obj.Name(), v.fn.obj.Name())
+				"a clause covers what its path referred to when %s was called%s", what, v.fn.obj.Name(), v.fn.obj.Name(), limitNote(result))
 		}
 		st.assume(logic.Implies(logic.And(guard...), goal))
 		return

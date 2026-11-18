@@ -18,7 +18,6 @@ import (
 	"sync"
 
 	"github.com/spachava753/laas/vego/internal/logic"
-	"github.com/spachava753/laas/vego/internal/solver"
 	"gopkg.in/yaml.v3"
 )
 
@@ -583,8 +582,7 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 			visit(c.node, true)
 		}
 		_, outcome, _ := v.contractInstance(v.enter())
-		opts := solver.Options{Preds: pv.res.Preds, MaxSteps: pv.maxSteps}
-		if solver.Prove(outcome, logic.False(), opts) == solver.Proved {
+		if pv.contradictory(outcome) {
 			fn.defect("it contradicts itself, so anything could be proved from it")
 		}
 	})

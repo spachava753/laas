@@ -72,7 +72,8 @@ func (filter *packageFilter) Match(packagePath string) bool {
 // trustReport prints what the proofs of the given packages take on trust,
 // instead of running the linters. It is selected by -vego.trust; any other
 // -vego. flags are passed on to the verifier. The status is 3, as for
-// findings, when verification reported problems.
+// findings, when verification reported problems, and 1 without a report
+// when an analysis failed.
 func trustReport(args []string) int {
 	var patterns []string
 	for _, arg := range args {
@@ -99,6 +100,18 @@ func trustReport(args []string) int {
 	graph, err := checker.Analyze([]*analysis.Analyzer{vego.Analyzer}, packagesLoaded, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "laas: %v\n", err)
+		return 1
+	}
+	// An analysis that failed, as one does when Z3 is missing, verified
+	// nothing, so there is no report to print.
+	failed := false
+	for action := range graph.All() {
+		if action.Err != nil {
+			fmt.Fprintf(os.Stderr, "laas: %s: %v\n", action.Package.PkgPath, action.Err)
+			failed = true
+		}
+	}
+	if failed {
 		return 1
 	}
 	var usages []*vego.Usage

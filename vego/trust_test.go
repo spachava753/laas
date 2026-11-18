@@ -2,9 +2,14 @@ package vego
 
 import (
 	"go/token"
+	"go/types"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/solver"
+	"golang.org/x/tools/go/analysis"
 )
 
 func TestParseTrustFile(t *testing.T) {
@@ -145,4 +150,45 @@ Built-in: errors.New and fmt.Errorf return a non-nil error.
 	if got != want {
 		t.Fatalf("report differs\ngot:\n%s\nwant:\n%s", got, want)
 	}
+}
+
+// TestSampleRanges checks that a value Z3 proposes for a sample outside the
+// range of its type is refused, so that a model is never taken for an input.
+func TestSampleRanges(t *testing.T) {
+	pass := &analysis.Pass{TypesSizes: types.SizesFor("gc", "amd64")}
+	v := &fnVerifier{pkgVerifier: &pkgVerifier{pass: pass}}
+	b := &sampler{v: v}
+	c := b.number(types.Typ[types.Uint8])
+	for value, want := range map[int64]bool{0: true, 255: true, 300: false, -1: false} {
+		if got := rangesHold(b.facts, map[string]*logic.Term{c.Name: logic.IntLit(value)}); got != want {
+			t.Errorf("rangesHold for a byte of %d = %t, want %t", value, got, want)
+		}
+	}
+}
+
+// TestOfferChecksRanges checks that a sample whose values Z3 proposed out
+// of the range of their type never reaches accept, and that one in range
+// does.
+func TestOfferChecksRanges(t *testing.T) {
+	pass := &analysis.Pass{TypesSizes: types.SizesFor("gc", "amd64")}
+	v := &fnVerifier{pkgVerifier: &pkgVerifier{pass: pass}}
+	b := &sampler{v: v}
+	c := b.number(types.Typ[types.Uint8])
+	input := &witness{consts: map[string]*logic.Term{"$x": c}, memo: map[*logic.Term]*logic.Term{}}
+	for value, want := range map[int64]bool{7: true, 300: false} {
+		called := false
+		offer(b, input, solver.Unknown, map[string]*logic.Term{c.Name: logic.IntLit(value)}, func(*witness) bool {
+			called = true
+			return true
+		})
+		if called != want {
+			t.Errorf("accept called for a byte of %d: %t, want %t", value, called, want)
+		}
+	}
+	defer func() {
+		if _, ok := recover().(*solver.Fault); !ok {
+			t.Error("a value out of range after sat is not a fault")
+		}
+	}()
+	offer(b, input, solver.Refuted, map[string]*logic.Term{c.Name: logic.IntLit(300)}, func(*witness) bool { return true })
 }

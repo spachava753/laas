@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/solver"
 	"golang.org/x/tools/go/types/typeutil"
 )
 
@@ -440,8 +441,8 @@ func (v *fnVerifier) check(st *state, guard []*logic.Term, goal *logic.Term, pos
 		if conjunct.Op == logic.OpTrue {
 			continue
 		}
-		if !v.prove(st, guard, conjunct) {
-			v.report(pos, format, args...)
+		if result := v.attempt(st, guard, conjunct); result != solver.Proved {
+			v.report(pos, "%s%s", fmt.Sprintf(format, args...), limitNote(result))
 		}
 		st.assume(logic.Implies(logic.And(guard...), conjunct))
 	}
