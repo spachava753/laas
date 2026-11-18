@@ -1,0 +1,141 @@
+// Package lib holds verified functions that another package calls.
+package lib
+
+import "errors"
+
+// @Predicate sorted(A) ::= Forall i in [0, |A|) : Forall j in [i, |A|) : A[i] <= A[j]
+
+var errEmpty = errors.New("empty")
+
+// Smallest returns the first element of a sorted slice, which is its least.
+//
+// @Requires sorted(A) And |A| > 0
+// @Ensures A[0:|A|) >= least And least = A[0]
+func Smallest(A []int) (least int) {
+	return A[0]
+}
+
+// Clear overwrites the slice with zeros.
+//
+// @Modifies A
+// @Ensures A'[0:|A|) = 0
+func Clear(A []int) {
+	// @Invariant A[0:i) = 0
+	for i := range A {
+		A[i] = 0
+	}
+}
+
+// Head returns the first element, or an error for an empty slice.
+//
+// @Ensures err = nil <-> |A| > 0
+// @Ensures err = nil -> first = A[0]
+func Head(A []int) (first int, err error) {
+	if len(A) == 0 {
+		return 0, errEmpty
+	}
+	return A[0], nil
+}
+
+// Broken has a contract its body does not meet.
+//
+// @Ensures y > x
+func Broken(x int) (y int) {
+	return x // want `postcondition may not hold: y > x`
+}
+
+// Unannotated is exported but not verified.
+func Unannotated(x int) int { return x }
+
+// Wrap relies on Broken, whose proof failed, so its own contract is not
+// established either, although nothing is wrong inside it.
+//
+// @Ensures y > x
+func Wrap(x int) (y int) {
+	return Broken(x)
+}
+
+const limit = 1
+
+// SafeDivide uses a constant of this package in its contract.
+//
+// @Requires d >= limit And n >= 0
+// @Ensures q <= n
+func SafeDivide(n, d int) (q int) {
+	return n / d
+}
+
+// Account is a struct that other packages use through its methods.
+type Account struct {
+	Balance int
+	Limit   int
+	history []int
+}
+
+// Open returns a new account.
+//
+// @Requires limit >= 0
+// @Ensures fresh(result) And result.Balance = 0 And result.Limit = limit
+func Open(limit int) (result *Account) {
+	return &Account{Limit: limit}
+}
+
+// Deposit adds to the balance and to nothing else.
+//
+// @Requires a != nil And 0 <= amount <= 1000 And 0 <= a.Balance <= 1000000
+// @Modifies a.Balance
+// @Ensures a.Balance' = a.Balance + amount
+func (a *Account) Deposit(amount int) {
+	a.Balance += amount
+}
+
+// Reset claims to modify only the balance but also clears the limit.
+//
+// @Requires a != nil
+// @Modifies a.Balance
+// @Ensures a.Balance' = 0
+func (a *Account) Reset() {
+	a.Balance = 0
+	a.Limit = 0 // want `a\.Limit is assigned, which Reset may not modify; list it in a // @Modifies clause`
+}
+
+// MaxInt8 has the name of a built-in limit and another value.
+const MaxInt8 = 0
+
+// Touch names what it modifies with a constant of this package.
+//
+// @Requires |as| = 128 And as[0] != nil
+// @Modifies as[MaxInt8].Balance
+func Touch(as []*Account) {
+	as[MaxInt8].Balance = 1
+}
+
+// Check returns an error it made itself, which callers may format.
+//
+// @Ensures err = nil <-> x >= 0
+func Check(x int) (err error) {
+	if x < 0 {
+		return errEmpty
+	}
+	return nil
+}
+
+// Relay returns the error it was given, which nobody may format.
+//
+// @Ensures (err = nil) <-> (e = nil)
+func Relay(e error) (err error) {
+	return e
+}
+
+// ErrGone is an error other packages can see.
+var ErrGone = errors.New("gone")
+
+// IsGone reports that it is set.
+//
+// @Ensures result
+func IsGone() (result bool) {
+	return ErrGone != nil
+}
+
+// Nest is a slice type that is its own element type.
+type Nest []Nest

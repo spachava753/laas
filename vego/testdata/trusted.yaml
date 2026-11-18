@@ -1,0 +1,498 @@
+# Trusted contracts for the helper functions of the test corpora. The keys
+# use the import paths the packages have under testdata/src.
+version: 1
+
+trusted:
+  defects.touch:
+    reason: Test helper that writes the first element.
+    modifies: [A]
+
+  effects.unknown:
+    reason: Test helper whose result is deliberately unknown.
+    modifies: []
+
+  effects.indirectWrite:
+    reason: Test helper that writes through a pointer.
+    modifies: [a]
+
+  effects.rangeWrite:
+    reason: Test helper that writes in a range clause.
+    modifies: [a]
+
+  semantics.scramble:
+    reason: Test helper that overwrites every element.
+    modifies: [A]
+
+  values.stat:
+    reason: Test helper that asks the file system.
+    modifies: []
+
+  values.external:
+    reason: Test helper standing for a call whose failure cannot be predicted.
+    modifies: []
+
+  values.describe:
+    reason: Test helper that reads an error.
+    runs: [e]
+    modifies: []
+
+  values.consume:
+    reason: Test helper that reads an error.
+    runs: [e]
+    modifies: []
+
+  trust.readConfig:
+    reason: Stands for reading a file; the contract only says what success means.
+    ensures:
+      - "err = nil -> size >= 0"
+    modifies: []
+
+  trust.parsePort:
+    reason: Stands for a parser whose success is determined by its input.
+    ensures:
+      - "0 <= n <= 65535 -> err = nil"
+      - "err = nil -> port = n"
+    modifies: []
+
+  trust.fill:
+    reason: Stands for an unverifiable function that overwrites its slice.
+    modifies: [dst]
+    ensures:
+      - "Forall k in [0, |dst|) : dst'[k] = value"
+
+  trust.readOnly:
+    reason: Stands for an unverifiable function that only reads its slice.
+    ensures:
+      - "result >= 0"
+    modifies: []
+
+  trust.contradictory:
+    reason: A contract nobody can satisfy.
+    ensures:
+      - "result > 0"
+      - "result < 0"
+    modifies: []
+
+  trust.wrongModifies:
+    reason: Lists something that is not a slice parameter.
+    modifies: [count]
+
+  trust.wrongName:
+    reason: Mentions a name the function does not have.
+    ensures:
+      - "total >= 0"
+    modifies: []
+
+  trust.makesSlice:
+    reason: Returns a slice.
+    modifies: []
+
+  trust.Verified:
+    reason: This function is also annotated in source.
+    ensures:
+      - "result = 0"
+    modifies: []
+
+  sort.IntsAreSorted:
+    reason: Project override of a shipped contract, deliberately saying nothing.
+    modifies: []
+
+  rejected.unverified:
+    reason: Test helper that hands its argument back.
+    modifies: []
+
+  trust.usesPredicate:
+    reason: Mentions a predicate, which a trusted contract may not.
+    ensures:
+      - "good(result)"
+    modifies: []
+
+  trust.impossibleString:
+    reason: Promises a byte value that does not exist.
+    ensures:
+      - "|result| = 1"
+      - "result[0] = 256"
+    modifies: []
+
+  trust.take:
+    reason: Mentions a parameter of a type vego does not model.
+    ensures:
+      - "result = MaxInt"
+    modifies: []
+
+  trust.ready:
+    reason: Always succeeds; its first result has a type vego does not model.
+    ensures:
+      - "err = nil"
+    modifies: []
+
+  trust.takeAny:
+    reason: Takes old of a parameter of a type vego does not model.
+    ensures:
+      - "result = old(x)"
+    modifies: []
+
+  trust.readyWith:
+    reason: Succeeds whenever the slice it only reads starts with zero.
+    requires:
+      - "|a| = 1"
+      - "a[0] = 0"
+    ensures:
+      - "a[0] = 0 -> err = nil"
+    modifies: []
+
+  trust.readyWriting:
+    reason: Succeeds for a slice of one element, which it may overwrite.
+    modifies: [a]
+    ensures:
+      - "|a'| = 1 -> err = nil"
+
+  trust.readyByte:
+    reason: Succeeds whenever its byte result is not negative, which is always.
+    ensures:
+      - "value >= 0 -> err = nil"
+    modifies: []
+
+  trust.maybeSigned:
+    reason: Succeeds only when its result is not negative.
+    ensures:
+      - "value >= 0 -> err = nil"
+    modifies: []
+
+  trust.readyAtLeast:
+    reason: Succeeds when its byte result is at least n, which it always is for n = 0.
+    ensures:
+      - "value >= n -> err = nil"
+    modifies: []
+
+  trust.readyBytes:
+    reason: Succeeds when the first byte it leaves is not negative, which is always.
+    modifies: [a]
+    requires:
+      - "|a| = 1"
+    ensures:
+      - "a'[0] >= 0 -> err = nil"
+
+  trust.readyNil:
+    reason: Succeeds for the nil error it requires.
+    requires:
+      - "e = nil"
+    ensures:
+      - "err = nil"
+    modifies: []
+
+  trust.readyLinked:
+    reason: Returns zero, and succeeds whenever it returns zero.
+    ensures:
+      - "value = 0"
+      - "value = 0 -> err = nil"
+    modifies: []
+
+  trust.external:
+    reason: Stands for a call whose failure cannot be predicted.
+    modifies: []
+
+  trust.writesSixtyFive:
+    reason: Writes the first byte and always succeeds.
+    modifies: [a]
+    requires:
+      - "|a| = 65"
+    ensures:
+      - "a'[0] >= 0 -> err = nil"
+
+  trust.readsSixtyFive:
+    reason: Reads its slice and always succeeds.
+    requires:
+      - "|a| = 65"
+    ensures:
+      - "a[0] >= 0 -> err = nil"
+    modifies: []
+
+  (*memory.Log).Write:
+    reason: Test helper standing for a method that appends to its receiver and may fail.
+    runs: [l]
+    modifies: [l]
+    ensures:
+      - "err = nil -> l.count' = l.count + 1"
+      - "err != nil -> l.count' = l.count"
+
+  (*memory.Log).Count:
+    reason: Test helper standing for a method that only reads its receiver.
+    runs: [l]
+    requires:
+      - "l != nil"
+    ensures:
+      - "result = l.count"
+    modifies: []
+
+  memory.newLog:
+    reason: Test helper standing for a constructor.
+    ensures:
+      - "fresh(result) And result.count = 0"
+    modifies: []
+
+  memory.grab:
+    reason: Test helper whose modifies names something that is not there.
+    modifies: [l.missing]
+
+  memory.readySmall:
+    reason: Test helper that succeeds when every field holds a value of its type, which is always.
+    requires:
+      - "|a| = 65"
+    ensures:
+      - "(Forall k in [0, |a|) : a[k].X >= 0) -> result = nil"
+    modifies: []
+
+  memory.readyBlob:
+    reason: Test helper that succeeds when the bytes behind its pointer are bytes, which is always.
+    requires:
+      - "p != nil And |p.B| = 65"
+    ensures:
+      - "(Forall k in [0, |p.B|) : p.B[k] >= 0) -> result = nil"
+    modifies: []
+
+  memory.readyNamed:
+    reason: Test helper that succeeds when the bytes of the strings in its elements are bytes, which is always.
+    requires:
+      - "|a| = 65"
+    ensures:
+      - "(Forall k in [0, |a|) : Forall j in [0, |a[k].S|) : a[k].S[j] >= 0) -> result = nil"
+    modifies: []
+
+  memory.readyRows:
+    reason: Test helper that succeeds when the slices in its slice have lengths that are not negative, which is always.
+    requires:
+      - "|a| = 65"
+    ensures:
+      - "(Forall k in [0, |a|) : |a[k]| >= 0) -> result = nil"
+    modifies: []
+
+  (*invariants.Log).write:
+    reason: Test helper standing for an unverified method that changes its receiver.
+    modifies: [l]
+
+  mapping.readyBytes:
+    reason: Test helper that succeeds when every value of its map is a byte, which is always.
+    requires:
+      - "|m| = 2"
+    ensures:
+      - "(Forall k in Z : m[k] >= 0) -> result = nil"
+    modifies: []
+
+  trust.claimsNegative:
+    reason: Test helper whose promise cannot be true of a positive argument.
+    ensures:
+      - "n < 0"
+    modifies: []
+
+  trust.claimsChange:
+    reason: Test helper that describes memory after the call without listing it.
+    requires:
+      - "|xs| > 0"
+    ensures:
+      - "xs'[0] = 7"
+    modifies: []
+
+  trust.bounce:
+    reason: Test helper that calls back into its caller.
+    ensures:
+      - "result = 0"
+    modifies: []
+
+  trust.setThrough:
+    reason: Test helper that writes through its first parameter.
+    requires:
+      - "p != nil And p = q"
+    ensures:
+      - "q.X' = 1"
+    modifies: [p.X]
+
+  trust.nonnegative:
+    reason: Test helper whose promise is what the type of a byte guarantees.
+    requires:
+      - "|s| = 1"
+    ensures:
+      - "s[0] >= 0"
+    modifies: []
+
+  trust.orphan:
+    reason: Test helper that clears a pointer field.
+    requires:
+      - "p != nil"
+    ensures:
+      - "p.Child' = nil"
+    modifies: [p]
+
+  trust.allNonnegative:
+    reason: Test helper whose promise is what the type of every byte guarantees.
+    requires:
+      - "|s| = 1"
+    ensures:
+      - "Forall k in [0, |s|) : s[k] >= 0"
+    modifies: []
+
+  trust.pair:
+    reason: Test helper that returns a number and may fail.
+    modifies: []
+
+  trust.bytePair:
+    reason: Test helper that returns a byte and may fail.
+    modifies: []
+
+  trust.alwaysError:
+    reason: Test helper that fails for every byte.
+    ensures:
+      - "b >= 0 -> result != nil"
+    modifies: []
+
+  trust.setting:
+    reason: Test helper that returns a string from outside, which may be empty.
+    modifies: []
+
+  trust.step:
+    reason: Test helper that may fail for any argument.
+    modifies: []
+
+  trust.bounceByValue:
+    reason: Test helper that calls back into its caller through a function value.
+    ensures:
+      - "result = 0"
+    modifies: []
+
+  trust.claimsOtherChange:
+    reason: Test helper that lists a struct and describes a slice after the call.
+    requires:
+      - "|xs| > 0 And p != nil"
+    ensures:
+      - "xs'[0] = 7"
+    modifies: [p]
+
+  trust.bounceByVariable:
+    reason: Test helper that calls back into its caller through a variable.
+    ensures:
+      - "result = 0"
+    modifies: []
+
+  trust.finish:
+    reason: Test helper that succeeds only where two squares add up to six, which is nowhere.
+    runs: [e]
+    ensures:
+      - "result = nil <-> (e = nil And x*x + y*y = 6)"
+    modifies: []
+
+  trust.bounceByField:
+    reason: Test helper that calls back into its caller through a field of a variable.
+    ensures:
+      - "result = 0"
+    modifies: []
+
+  trust.claimsOtherSlice:
+    reason: Test helper that lists one slice and describes another of the same kind after the call.
+    requires:
+      - "|xs| > 0 And |ys| > 0"
+    ensures:
+      - "xs'[0] = 7"
+    modifies: [ys]
+
+  trust.setsFirst:
+    reason: Test helper that sets the first element of the slice it lists.
+    requires:
+      - "|xs| > 0"
+    ensures:
+      - "xs'[0] = 7"
+    modifies: [xs]
+
+  trust.bounceByClosure:
+    reason: Test helper that calls back into its caller through a function literal kept in a variable.
+    ensures:
+      - "result = 0"
+    modifies: []
+
+  trust.bounceByMethodValue:
+    reason: Test helper that calls back into its caller through a method taken from an interface.
+    ensures:
+      - "result = 0"
+    modifies: []
+
+  trust.setsChild:
+    reason: Test helper that sets the first element of the slice it lists, which may be a slice inside the other.
+    requires:
+      - "|xs| = 1 And |ys| = 1 And |xs[0].Children| = 1"
+    ensures:
+      - "ys'[0].Value = 7"
+      - "(|xs[0].Children'| = 1 And xs[0].Children'[0].Value = 7) Or xs[0].Children'[0].Value = xs[0].Children[0].Value"
+    modifies: [ys]
+
+  trust.claimsOtherCell:
+    reason: Test helper that lists one slice of structs and describes a field in another after the call.
+    requires:
+      - "|xs| > 0 And |ys| > 0"
+    ensures:
+      - "xs'[0].X = 7"
+    modifies: [ys]
+
+  trust.bounceByRange:
+    reason: Test helper that calls back into its caller by ranging over a function kept in a variable.
+    ensures:
+      - "result = 0"
+    modifies: []
+
+  trust.bounceByGeneric:
+    reason: Test helper that calls back into its caller through a generic function that ranges over its argument.
+    ensures:
+      - "result = 0"
+    modifies: []
+
+  trust.tell:
+    reason: Test helper that is given an error and does not say that it runs its methods.
+    modifies: []
+
+  trust.tellAny:
+    reason: Test helper that vouches for the methods of the error it is given.
+    runs: [e]
+    modifies: []
+
+  (*trust.sinkHolder).flush:
+    reason: Test helper on a struct that holds a function, which it does not say it runs.
+    modifies: []
+
+  (*trust.sinkHolder).flushRuns:
+    reason: Test helper that vouches for the function its receiver holds.
+    runs: [s]
+    modifies: []
+
+  trust.runsNothing:
+    reason: Test helper whose runs lists something that can hold no code.
+    runs: [x]
+    modifies: []
+
+  trust.runsNobody:
+    reason: Test helper whose runs lists a name that is no parameter.
+    runs: [y]
+    modifies: []
+
+  wrapped.tell:
+    reason: Test helper that is given an error and does not say that it runs its methods.
+    modifies: []
+
+  (*trust.pinged).ping:
+    reason: Test helper that does nothing.
+    modifies: []
+
+  trust.twoPlain:
+    reason: Test helper with two unnamed results.
+    modifies: []
+    ensures:
+      - "result2 = nil -> result1 >= 0"
+
+  trust.secondNamed:
+    reason: Test helper that names its first result result2 and leaves the second blank.
+    modifies: []
+    ensures:
+      - "result2 = 0"
+
+  trust.clash:
+    reason: Test helper whose parameter is called like its unnamed result.
+    modifies: []
+    ensures:
+      - "result = 7"

@@ -1,0 +1,680 @@
+// Package guide holds the programs of docs/verification.md, so that what the
+// guide says verifies does, and what it says is reported is.
+package guide
+
+import (
+	"errors"
+	"fmt"
+	"strconv"
+	"sync"
+)
+
+// Max returns the larger of two numbers.
+//
+// @Ensures result >= a And result >= b
+// @Ensures result = a Or result = b
+func Max(a, b int) (result int) {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// MaxWrong has a contract its body does not meet.
+//
+// @Ensures result >= a And result >= b
+func MaxWrong(a, b int) (result int) {
+	if a > b {
+		return b // want `vego: postcondition may not hold: result >= a`
+	}
+	return b
+}
+
+// AbsWrong forgets the one number that has no positive counterpart.
+//
+// @Ensures result >= 0
+func AbsWrong(x int) (result int) {
+	if x < 0 {
+		return -x // want `vego: negation may overflow int`
+	}
+	return x
+}
+
+// Abs rules that number out.
+//
+// @Requires x > MinInt
+// @Ensures result >= 0 And (result = x Or result = -x)
+func Abs(x int) (result int) {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// MidWrong adds two numbers that may not fit together.
+//
+// @Requires 0 <= lo <= hi
+// @Ensures lo <= result <= hi
+func MidWrong(lo, hi int) (result int) {
+	return (lo + hi) / 2 // want `vego: addition may overflow int`
+}
+
+// Mid computes the same without leaving the type.
+//
+// @Requires 0 <= lo <= hi
+// @Ensures lo <= result <= hi
+func Mid(lo, hi int) (result int) {
+	return lo + (hi-lo)/2
+}
+
+// FirstWrong reads an element that may not be there.
+//
+// @Ensures result = A[0]
+func FirstWrong(A []int) (result int) {
+	return A[0] // want `vego: index may be out of range`
+}
+
+// First asks its callers for a slice that has one.
+//
+// @Requires |A| > 0
+// @Ensures result = A[0]
+func First(A []int) (result int) {
+	return A[0]
+}
+
+// Divide computes quotient and remainder by repeated subtraction.
+//
+// @Requires n >= 0 And d > 0
+// @Ensures n = d*q + r And 0 <= r < d
+func Divide(n, d int) (q, r int) {
+	q, r = 0, n
+	// @Invariant n = d*q + r And 0 <= r
+	// @Variant r
+	for d <= r {
+		q, r = q+1, r-d
+	}
+	return q, r
+}
+
+// Sum adds up numbers that are known to be small.
+//
+// @Requires |A| <= 1000
+// @Requires Forall k in [0, |A|) : 0 <= A[k] <= 1000
+// @Ensures 0 <= result <= 1000 * |A|
+func Sum(A []int) (result int) {
+	total := 0
+	// @Invariant 0 <= total <= 1000 * i
+	for i := range A {
+		total += A[i]
+	}
+	return total
+}
+
+// Index returns where x first occurs, or -1.
+//
+// @Ensures result = -1 Or (0 <= result < |A| And A[result] = x)
+// @Ensures result = -1 -> Forall k in [0, |A|) : A[k] != x
+func Index(A []int, x int) (result int) {
+	// @Invariant Forall k in [0, i) : A[k] != x
+	for i := range A {
+		if A[i] == x {
+			return i
+		}
+	}
+	return -1
+}
+
+// Steps counts down to zero by calling itself.
+//
+// @Requires n >= 0
+// @Variant n
+// @Ensures result = n
+func Steps(n int) (result int) {
+	if n == 0 {
+		return 0
+	}
+	return 1 + Steps(n-1)
+}
+
+// Cell numbers the cells of a grid row by row.
+//
+// @Requires 0 <= i < h And 0 <= j < w And h <= 1000 And w <= 1000
+// @Ensures 0 <= result < h*w
+func Cell(i, j, w, h int) (result int) {
+	return i*w + j
+}
+
+// Clamp brings x into a range.
+//
+// @Requires lo <= hi
+// @Ensures lo <= result <= hi
+func Clamp(x, lo, hi int) (result int) {
+	if x < lo {
+		return lo
+	}
+	if x > hi {
+		return hi
+	}
+	return x
+}
+
+// Percent relies on what Clamp promises and on nothing else about it.
+//
+// @Ensures 0 <= result <= 100
+func Percent(x int) (result int) {
+	return Clamp(x, 0, 100)
+}
+
+func helper(x int) int { return x }
+
+// CallsHelper calls a function that has no contract.
+//
+// @Ensures result = x
+func CallsHelper(x int) (result int) {
+	return helper(x) // want `vego: cannot verify CallsHelper: it calls helper, which has no contract; annotate helper with // @ annotations so that it is verified, or add a trusted contract for guide.helper to vego-trusted.yaml`
+}
+
+// @Predicate sorted(A) ::= Forall i, j in [0, |A|) : i <= j -> A[i] <= A[j]
+
+// Smallest returns the least element of a sorted slice.
+//
+// @Requires sorted(A) And |A| > 0
+// @Ensures Forall k in [0, |A|) : result <= A[k]
+func Smallest(A []int) (result int) {
+	return A[0]
+}
+
+// Fill sets every element.
+//
+// @Modifies A
+// @Ensures Forall k in [0, |A|) : A'[k] = v
+func Fill(A []int, v int) {
+	// @Invariant Forall k in [0, i) : A[k] = v
+	for i := range A {
+		A[i] = v
+	}
+}
+
+// FillUnlisted writes a slice without saying so.
+//
+// @Ensures True
+func FillUnlisted(A []int, v int) {
+	for i := range A {
+		A[i] = v // want `vego: A\[i\] is assigned, which FillUnlisted may not modify; list it in a // @Modifies clause`
+	}
+}
+
+// Push appends, which writes into the capacity of A or moves to a new array.
+//
+// @Requires |A| < 1000
+// @Modifies A
+// @Ensures |result| = |A| + 1 And result[|A|] = x
+func Push(A []int, x int) (result []int) {
+	return append(A, x)
+}
+
+// Counter counts up to a limit.
+type Counter struct {
+	n     int
+	limit int
+}
+
+// NewCounter returns a counter nobody else has.
+//
+// @Ensures fresh(result) And result.n = 0 And result.limit = limit
+func NewCounter(limit int) (result *Counter) {
+	return &Counter{limit: limit}
+}
+
+// Inc advances the counter and leaves its limit alone.
+//
+// @Requires c != nil And c.n < c.limit
+// @Modifies c.n
+// @Ensures c.n' = c.n + 1
+func (c *Counter) Inc() {
+	c.n++
+}
+
+// Twice works on a counter through its methods' contracts.
+//
+// @Requires c != nil And c.n = 0 And c.limit = 10
+// @Modifies c.n
+// @Ensures c.n' = 2 And c.limit' = 10
+func Twice(c *Counter) {
+	c.Inc()
+	c.Inc()
+}
+
+// SameOrNot writes through two pointers that may be one.
+//
+// @Requires a != nil And b != nil
+// @Modifies a.n, b.n
+// @Ensures result = 1
+func SameOrNot(a, b *Counter) (result int) {
+	a.n = 1
+	b.n = 2
+	return a.n // want `vego: postcondition may not hold: result = 1`
+}
+
+// Different says that they are not.
+//
+// @Requires a != nil And b != nil And a != b
+// @Modifies a.n, b.n
+// @Ensures result = 1
+func Different(a, b *Counter) (result int) {
+	a.n = 1
+	b.n = 2
+	return a.n
+}
+
+// Stack keeps a count that never exceeds what it holds.
+//
+// @Invariant 0 <= n <= |items|
+type Stack struct {
+	items []int
+	n     int
+}
+
+// Top may index with n-1 because the invariant bounds n.
+//
+// @Requires s != nil And s.n > 0
+// @Ensures result = s.items[s.n-1]
+func (s *Stack) Top() (result int) {
+	return s.items[s.n-1]
+}
+
+// Get reads a key that may be absent.
+//
+// @Ensures ok <-> has(m, k)
+// @Ensures v = m[k]
+func Get(m map[string]int, k string) (v int, ok bool) {
+	v, ok = m[k]
+	return v, ok
+}
+
+// Bump counts one more for a key.
+//
+// @Requires m != nil And m[k] < 1000
+// @Modifies m
+// @Ensures has(m', k) And m'[k] = m[k] + 1
+func Bump(m map[string]int, k string) {
+	m[k] = m[k] + 1
+}
+
+// ErrMissing and ErrEmpty are errors that are known not to be nil.
+var (
+	ErrMissing = errors.New("missing")
+	ErrEmpty   = errors.New("empty")
+	ErrRange   = errors.New("out of range")
+)
+
+// Head says when it succeeds and what it returns then.
+//
+// @Ensures err = nil <-> |A| > 0
+// @Ensures err = nil -> first = A[0]
+func Head(A []int) (first int, err error) {
+	if len(A) == 0 {
+		return 0, ErrEmpty
+	}
+	return A[0], nil
+}
+
+// HeadWeak only says what success looks like.
+//
+// @Ensures err = nil -> first = A[0]
+func HeadWeak(A []int) (first int, err error) { // want `vego: the contract of HeadWeak may also be met by a function that always returns an error.*`
+	if len(A) == 0 {
+		return 0, ErrEmpty
+	}
+	return A[0], nil
+}
+
+// At makes an error that says what went wrong.
+//
+// @Ensures err = nil <-> 0 <= i < |A|
+// @Ensures err = nil -> x = A[i]
+func At(A []int, i int) (x int, err error) {
+	if i < 0 || i >= len(A) {
+		return 0, fmt.Errorf("index %d out of range", i)
+	}
+	return A[i], nil
+}
+
+// ParsePort relies on the contract that ships for strconv.Atoi.
+//
+// @Ensures err = nil -> 1 <= port <= 65535
+func ParsePort(s string) (port int, err error) {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, err
+	}
+	if n < 1 || n > 65535 {
+		return 0, ErrRange
+	}
+	return n, nil
+}
+
+// Lock is held or not.
+type Lock struct{ held bool }
+
+// Acquire takes the lock.
+//
+// @Requires l != nil And ~l.held
+// @Modifies l
+// @Ensures l.held'
+func (l *Lock) Acquire() {
+	l.held = true
+}
+
+// Release gives the lock back.
+//
+// @Requires l != nil And l.held
+// @Modifies l
+// @Ensures ~l.held'
+func (l *Lock) Release() {
+	l.held = false
+}
+
+// Guarded gives the lock back on every way out.
+//
+// @Requires l != nil And ~l.held And c != nil And c.n < c.limit
+// @Modifies l, c.n
+// @Ensures ~l.held'
+func Guarded(l *Lock, c *Counter, skip bool) {
+	l.Acquire()
+	defer l.Release()
+	if skip {
+		return
+	}
+	c.Inc()
+}
+
+// Pack puts two bytes into sixteen bits.
+//
+// @Ensures result = 256 * hi + lo
+func Pack(hi, lo byte) (result uint16) {
+	return uint16(hi)<<8 | uint16(lo)
+}
+
+// Join concatenates two strings of bounded length.
+//
+// @Requires |a| <= 1000 And |b| <= 1000
+// @Ensures |result| = |a| + |b|
+func Join(a, b string) (result string) {
+	return a + b
+}
+
+// IsAdmin compares a string with a literal.
+//
+// @Ensures result <-> role = "admin"
+func IsAdmin(role string) (result bool) {
+	return role == "admin"
+}
+
+// SafeOnly has no contract to speak of; the annotation only asks for the
+// checks every verified function gets.
+//
+// @Ensures True
+func SafeOnly(A []int, i int) (result int) {
+	if 0 <= i && i < len(A) {
+		return A[i]
+	}
+	return 0
+}
+
+// CountPositive needs no name for the position, since its invariant does
+// not speak of it.
+//
+// @Requires |A| <= 1000
+// @Ensures 0 <= result
+func CountPositive(A []int) (result int) {
+	n := 0
+	// @Invariant 0 <= n
+	for _, x := range A {
+		if x > 0 && n < 1000 {
+			n++
+		}
+	}
+	return n
+}
+
+// @Predicate digits(s) ::= Forall k in [0, |s|) : 48 <= s[k] <= 57
+
+// FirstDigit reads a digit from a string of digits.
+//
+// @Requires digits(s) And |s| > 0
+// @Ensures 0 <= result <= 9
+func FirstDigit(s string) (result int) {
+	return int(s[0]) - 48
+}
+
+// @Predicate zeros(A, n) ::= n <= 0 Or (zeros(A, n-1) And A[n-1] = 0)
+
+// LastZero unfolds a recursive predicate once.
+//
+// @Requires 0 < n <= |A| And zeros(A, n)
+// @Ensures result = 0
+func LastZero(A []int, n int) (result int) {
+	return A[n-1]
+}
+
+// Push grows the slice the stack holds, so it lists both the struct, whose
+// field it assigns, and the elements, which append may write. Its last
+// clause tells a caller where the new slice lies.
+//
+// @Requires s != nil And s.n = |s.items| And s.n < 1000
+// @Modifies s, s.items
+// @Ensures s.n' = s.n + 1 And |s.items'| = s.n' And s.items'[s.n] = x
+// @Ensures fresh(s.items) Or within(s.items', s.items)
+func (s *Stack) Push(x int) {
+	s.items = append(s.items, x)
+	s.n++
+}
+
+// PushTwo can push again because it knows where the slice went.
+//
+// @Requires s != nil And s.n = |s.items| And s.n < 100
+// @Modifies s, s.items
+// @Ensures s.n' = s.n + 2
+func PushTwo(s *Stack) {
+	s.Push(1)
+	s.Push(2)
+}
+
+// Pop changes the stack and returns a value.
+//
+// @Requires s != nil And s.n > 0
+// @Modifies s.n
+// @Ensures s.n' = s.n - 1 And result = s.items[s.n-1]
+func (s *Stack) Pop() (result int) {
+	s.n--
+	return s.items[s.n]
+}
+
+// PopTwice calls Pop in the two places a call that changes memory may
+// stand besides a statement of its own.
+//
+// @Requires s != nil And s.n > 1
+// @Modifies s.n
+func PopTwice(s *Stack) (result int) {
+	x := s.Pop()
+	if x > 0 {
+		return x
+	}
+	return s.Pop()
+}
+
+// PopInCondition calls it where it may not stand.
+//
+// @Requires s != nil And s.n > 0
+// @Modifies s.n
+func PopInCondition(s *Stack) (result bool) {
+	if s.Pop() > 0 { // want `vego: cannot verify PopInCondition: Pop may modify s.n, so the call must be a statement of its own or the whole right-hand side of an assignment to variables`
+		return true
+	}
+	return false
+}
+
+// DrainForgets changes the stack in a loop, which forgets the invariant of
+// the type along with everything else about what the loop changes.
+//
+// @Requires s != nil
+// @Modifies s.n
+func DrainForgets(s *Stack) {
+	// @Variant s.n
+	for s.n > 0 {
+		s.Pop() // want `vego: invariant of Stack may not hold for what is passed to Pop as s: 0 <= n <= \|items\|`
+	}
+} // want `vego: invariant of Stack may not hold for s on return: 0 <= n <= \|items\|`
+
+// Drain says it again in the invariant of the loop.
+//
+// @Requires s != nil
+// @Modifies s.n
+// @Ensures s.n' = 0
+func Drain(s *Stack) {
+	// @Invariant 0 <= s.n <= |s.items|
+	// @Variant s.n
+	for s.n > 0 {
+		s.Pop()
+	}
+}
+
+// Account holds money within a limit.
+//
+// @Invariant 0 <= balance <= 1000000
+type Account struct {
+	mu      sync.Mutex
+	balance int
+}
+
+// TotalUnsaid adds up accounts reached through a slice, of which the
+// invariant of the type is not known.
+//
+// @Requires |as| <= 100
+// @Requires Forall k in [0, |as|) : as[k] != nil
+func TotalUnsaid(as []*Account) (result int) {
+	total := 0
+	// @Invariant 0 <= total <= 1000000 * i
+	for i := range as { // want `vego: loop invariant may not be preserved: 0 <= total <= 1000000 \* i`
+		total += as[i].balance // want `vego: addition may overflow int`
+	}
+	return total
+}
+
+// Total states the bound for each element.
+//
+// @Requires |as| <= 100
+// @Requires Forall k in [0, |as|) : as[k] != nil And 0 <= as[k].balance <= 1000000
+// @Ensures 0 <= result <= 100000000
+func Total(as []*Account) (result int) {
+	total := 0
+	// @Invariant 0 <= total <= 1000000 * i
+	for i := range as {
+		total += as[i].balance
+	}
+	return total
+}
+
+// Deposit is not verified. It takes the lock, checks what the verified
+// part requires, and leaves the arithmetic to it.
+func (a *Account) Deposit(n int) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if n < 0 || n > 1000000-a.balance {
+		return false
+	}
+	a.deposit(n)
+	return true
+}
+
+// deposit is the verified part: it changes the balance and nothing else,
+// and keeps the invariant of the account.
+//
+// @Requires a != nil And 0 <= n And a.balance + n <= 1000000
+// @Modifies a.balance
+// @Ensures a.balance' = a.balance + n
+func (a *Account) deposit(n int) {
+	a.balance += n
+}
+
+// DepositLocked tries to take the lock in verified code. Lock has no
+// contract, and no true one can be written for it.
+//
+// @Requires a != nil And 0 <= n And a.balance + n <= 1000000
+// @Modifies a
+func (a *Account) DepositLocked(n int) {
+	a.mu.Lock() // want `vego: cannot verify DepositLocked: it calls Lock, which has no contract`
+	a.balance += n
+	a.mu.Unlock()
+}
+
+// QuantityWrapped formats an error that came from a trusted function.
+//
+// @Ensures err = nil -> True
+func QuantityWrapped(line string) (n int, err error) {
+	n, err = strconv.Atoi(line)
+	if err != nil {
+		return 0, fmt.Errorf("bad quantity %q: %w", line, err) // want `vego: cannot verify QuantityWrapped: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, can be formatted`
+	}
+	return n, nil
+}
+
+// Quantity wraps an error of its own instead.
+//
+// @Ensures err = nil -> True
+func Quantity(line string) (n int, err error) {
+	n, err = strconv.Atoi(line)
+	if err != nil {
+		return 0, fmt.Errorf("bad quantity %q: %w", line, ErrRange)
+	}
+	return n, nil
+}
+
+// IsEmpty asks which error it is, which runs methods of the error that
+// nobody has seen.
+//
+// @Ensures True
+func IsEmpty(err error) (result bool) {
+	return errors.Is(err, ErrEmpty) // want `vego: cannot verify IsEmpty: it calls Is, which has no contract`
+}
+
+var calls int
+
+// Counted reads a package-level variable.
+//
+// @Ensures True
+func Counted() (result int) {
+	return calls // want `vego: cannot verify Counted: calls is not a local variable`
+}
+
+// Clear removes the keys of the map it ranges over.
+//
+// @Modifies m
+func Clear(m map[string]int) {
+	for k := range m { // want `vego: cannot verify Clear: the loop modifies a map of the type it ranges over, which is not supported`
+		delete(m, k)
+	}
+}
+
+// Unnamed has a result without a name, which its contract could not
+// refer to.
+//
+// @Ensures True
+func Unnamed(x int) int { // want `vego: Unnamed has annotations, so each of its results needs a name, as in func Unnamed\(...\) \(n int, err error\)`
+	return x
+}
+
+// Find has a postcondition that runs over two lines.
+//
+// @Ensures result = -1 Or
+// @   (0 <= result < |A| And A[result] = x)
+func Find(A []int, x int) (result int) {
+	// @Invariant Forall k in [0, i) : A[k] != x
+	for i := range A {
+		if A[i] == x {
+			return i
+		}
+	}
+	return -1
+}

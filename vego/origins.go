@@ -1,0 +1,217 @@
+package vego
+
+import (
+	"go/ast"
+	"go/token"
+	"go/types"
+
+	"golang.org/x/tools/go/types/typeutil"
+)
+
+// An error may be formatted only when it is known where it comes from.
+// Formatting runs the error's methods and, for some verbs, methods of what
+// the error contains; an error from outside could use them to write memory
+// the function reasons about. An error of known origin cannot: it was made
+// by errors.New or fmt.Errorf, here or in a verified function this one
+// called, and nothing but plain values and other such errors went into it.
+//
+// Origin is decided from the text of a function, without regard to the path
+// taken: an error variable has a known origin when every assignment to it in
+// the function gives it one.
+
+// origins holds, for one function body, what each error variable is assigned.
+// A variable that is assigned in a way that is not understood is unknown.
+type origins struct {
+	sources map[*types.Var][]source
+	unknown map[*types.Var]bool
+}
+
+// source is something assigned to an error variable: an expression, or the
+// result with the given index of a call that returns several values.
+type source struct {
+	expr  ast.Expr
+	index int
+}
+
+// originsOf collects the assignments to variables in a function body.
+func (pv *pkgVerifier) originsOf(body *ast.BlockStmt) *origins {
+	if known, ok := pv.origins[body]; ok {
+		return known
+	}
+	o := &origins{sources: map[*types.Var][]source{}, unknown: map[*types.Var]bool{}}
+	pv.origins[body] = o
+	variable := func(e ast.Expr) *types.Var {
+		id, ok := ast.Unparen(e).(*ast.Ident)
+		if !ok {
+			return nil
+		}
+		found, _ := pv.info.ObjectOf(id).(*types.Var)
+		return found
+	}
+	assign := func(targets, values []ast.Expr) {
+		for i, target := range targets {
+			to := variable(target)
+			switch {
+			case to == nil:
+			case len(values) == len(targets):
+				o.sources[to] = append(o.sources[to], source{values[i], -1})
+			case len(values) == 1:
+				o.sources[to] = append(o.sources[to], source{values[0], i})
+			default:
+				o.unknown[to] = true
+			}
+		}
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.AssignStmt:
+			if n.Tok != token.ASSIGN && n.Tok != token.DEFINE {
+				for _, target := range n.Lhs {
+					o.unknown[variable(target)] = true
+				}
+				break
+			}
+			assign(n.Lhs, n.Rhs)
+		case *ast.ValueSpec:
+			targets := make([]ast.Expr, len(n.Names))
+			for i, name := range n.Names {
+				targets[i] = name
+			}
+			// Without a value the variable starts as nil.
+			if len(n.Values) > 0 {
+				assign(targets, n.Values)
+			}
+		case *ast.RangeStmt:
+			for _, target := range []ast.Expr{n.Key, n.Value} {
+				if target != nil {
+					o.unknown[variable(target)] = true
+				}
+			}
+		case *ast.UnaryExpr:
+			if n.Op == token.AND {
+				o.unknown[variable(n.X)] = true
+			}
+		}
+		return true
+	})
+	return o
+}
+
+// knownError reports whether an error expression in a function body has a
+// known origin: nil, a new error, an error variable of this package that
+// always holds a new error into which nothing of unknown origin went, the result of a function that only returns such
+// errors, or a local variable that is only ever assigned such errors.
+// visiting holds the variables being decided, which settles a variable that
+// is assigned from itself.
+func (pv *pkgVerifier) knownError(o *origins, e ast.Expr, index int, visiting map[*types.Var]bool) bool {
+	e = ast.Unparen(e)
+	if pv.info.Types[e].IsNil() {
+		return true
+	}
+	switch e := e.(type) {
+	case *ast.CallExpr:
+		callee := typeutil.StaticCallee(pv.info, e)
+		if errorConstructor(callee) {
+			return true
+		}
+		// What a function is known for is the errors it returns, not
+		// whatever else it returns that happens to be assigned to an error.
+		result := pv.info.TypeOf(e)
+		if tuple, ok := result.(*types.Tuple); ok && index >= 0 && index < tuple.Len() {
+			result = tuple.At(index).Type()
+		}
+		return callee != nil && isError(result) && pv.returnsKnownErrors(callee)
+	case *ast.Ident:
+		variable, ok := pv.info.ObjectOf(e).(*types.Var)
+		return ok && index < 0 && isError(variable.Type()) && pv.knownVariable(o, variable, visiting)
+	}
+	return false
+}
+
+// knownVariable reports whether an error variable only ever holds errors of
+// known origin.
+func (pv *pkgVerifier) knownVariable(o *origins, variable *types.Var, visiting map[*types.Var]bool) bool {
+	switch {
+	case pv.sentinels[variable] && pv.homemade[variable]:
+		pv.relied[variable] = true
+		return true
+	case visiting[variable]:
+		return true
+	case o.unknown[variable] || variable.Parent() == pv.pass.Pkg.Scope() || pv.isParameter[variable]:
+		return false
+	}
+	visiting[variable] = true
+	defer delete(visiting, variable)
+	for _, from := range o.sources[variable] {
+		if !pv.knownError(o, from.expr, from.index, visiting) {
+			return false
+		}
+	}
+	return true
+}
+
+// returnsKnownErrors reports whether every error a function returns has a
+// known origin. Only verified functions qualify: for one of this package the
+// answer is computed from its body, for one of another package it was
+// published with its contract.
+func (pv *pkgVerifier) returnsKnownErrors(callee *types.Func) bool {
+	if fn := pv.funcs[callee]; fn != nil {
+		return pv.knownReturns[fn]
+	}
+	imported := pv.importedContract(callee)
+	return imported != nil && imported.imported.KnownErrors
+}
+
+// findKnownReturns decides for every annotated function of the package
+// whether all errors it returns have a known origin. A function qualifies
+// only through functions that qualify, so the answer is the least fixed
+// point: functions that only return each other's errors do not qualify.
+func (pv *pkgVerifier) findKnownReturns() {
+	for _, fn := range pv.order {
+		for _, param := range fn.params {
+			pv.isParameter[param] = true
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, fn := range pv.order {
+			if pv.knownReturns[fn] || !fn.annotated() || fn.decl.Body == nil || !pv.allReturnsKnown(fn) {
+				continue
+			}
+			pv.knownReturns[fn], changed = true, true
+		}
+	}
+}
+
+// allReturnsKnown reports whether every return statement of a function
+// returns errors of known origin, given what is known of other functions.
+func (pv *pkgVerifier) allReturnsKnown(fn *funcInfo) bool {
+	o := pv.originsOf(fn.decl.Body)
+	known := true
+	check := func(e ast.Expr, index int) {
+		known = known && pv.knownError(o, e, index, map[*types.Var]bool{})
+	}
+	ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
+		if _, isLiteral := n.(*ast.FuncLit); isLiteral {
+			return false
+		}
+		ret, ok := n.(*ast.ReturnStmt)
+		if !ok {
+			return true
+		}
+		for i, result := range fn.results {
+			switch {
+			case !isError(result.Type()):
+			case len(ret.Results) == 0:
+				// A bare return yields the named result.
+				known = known && pv.knownVariable(o, result, map[*types.Var]bool{})
+			case len(ret.Results) == len(fn.results):
+				check(ret.Results[i], -1)
+			default:
+				check(ret.Results[0], i)
+			}
+		}
+		return true
+	})
+	return known
+}

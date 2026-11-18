@@ -1,14 +1,47 @@
+// Command laas runs the analyzers of this module over Go packages:
+//
+//   - funcdoc reports complex functions without a doc comment that explains
+//     their plan;
+//   - inlinehelper reports small helper functions that are called once;
+//   - teststructure reports tests that belong together by name and are
+//     not grouped as subtests of one test;
+//   - vego proves functions that carry // @ annotations correct.
+//
+// Usage:
+//
+//	laas [flags] [packages]
+//
+// It is a go/analysis multichecker, so it takes package patterns as go vet
+// does and every analyzer's flags under the analyzer's name, for example
+// -funcdoc.limit=15, or -vego.other-tags=Summary,Param to declare the words
+// that another tool reads after "// @". Two flags are its own:
+//
+//	-exclude-packages regexp   skip packages whose import path matches
+//	-vego.trust                print what the proofs of the packages take
+//	                           on trust, instead of the diagnostics
+//
+// Run it directly. Under go vet -vettool, results are cached by a mechanism
+// that does not know about vego's trust files, so vego refuses to verify
+// there and says so.
 package main
 
 import (
 	"flag"
+	"fmt"
+	"os"
+	"reflect"
 	"regexp"
+	"slices"
+	"strings"
 
 	"github.com/spachava753/laas/funcdoc"
 	"github.com/spachava753/laas/inlinehelper"
 	"github.com/spachava753/laas/teststructure"
+	"github.com/spachava753/laas/vego"
 	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/analysis/checker"
 	"golang.org/x/tools/go/analysis/multichecker"
+	"golang.org/x/tools/go/packages"
 )
 
 var excludedPackages packageFilter
@@ -36,7 +69,83 @@ func (filter *packageFilter) Match(packagePath string) bool {
 	return filter.expression != nil && filter.expression.MatchString(packagePath)
 }
 
+// trustReport prints what the proofs of the given packages take on trust,
+// instead of running the linters. It is selected by -vego.trust; any other
+// -vego. flags are passed on to the verifier. The status is 3, as for
+// findings, when verification reported problems, and 1 without a report
+// when an analysis failed.
+func trustReport(args []string) int {
+	var patterns []string
+	for _, arg := range args {
+		name, value, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+		switch {
+		case !strings.HasPrefix(arg, "-"):
+			patterns = append(patterns, arg)
+		case name == "vego.trust":
+		case strings.HasPrefix(name, "vego.") && hasValue:
+			if err := vego.Analyzer.Flags.Set(strings.TrimPrefix(name, "vego."), value); err != nil {
+				fmt.Fprintf(os.Stderr, "laas: %s: %v\n", arg, err)
+				return 2
+			}
+		default:
+			fmt.Fprintf(os.Stderr, "laas: %s cannot be combined with -vego.trust\n", arg)
+			return 2
+		}
+	}
+	packagesLoaded, err := packages.Load(&packages.Config{Mode: packages.LoadAllSyntax}, patterns...)
+	if err != nil || packages.PrintErrors(packagesLoaded) > 0 {
+		fmt.Fprintf(os.Stderr, "laas: cannot load packages: %v\n", err)
+		return 1
+	}
+	graph, err := checker.Analyze([]*analysis.Analyzer{vego.Analyzer}, packagesLoaded, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "laas: %v\n", err)
+		return 1
+	}
+	// An analysis that failed, as one does when Z3 is missing, verified
+	// nothing, so there is no report to print.
+	failed := false
+	for action := range graph.All() {
+		if action.Err != nil {
+			fmt.Fprintf(os.Stderr, "laas: %s: %v\n", action.Package.PkgPath, action.Err)
+			failed = true
+		}
+	}
+	if failed {
+		return 1
+	}
+	var usages []*vego.Usage
+	failures := 0
+	for _, action := range graph.Roots {
+		if usage, ok := action.Result.(*vego.Usage); ok {
+			usages = append(usages, usage)
+		}
+		failures += len(action.Diagnostics)
+	}
+	dir, _ := os.Getwd()
+	fmt.Print(vego.TrustReport(usages, dir))
+	if failures > 0 {
+		fmt.Printf("\nNote: verification reported %d problems; run laas without -vego.trust to see them.\n", failures)
+		// The report is of proofs that do not all stand, which a script
+		// that reads only the status must be able to tell.
+		return 3
+	}
+	return 0
+}
+
 func main() {
+	if slices.ContainsFunc(os.Args[1:], func(arg string) bool { return strings.TrimLeft(arg, "-") == "vego.trust" }) {
+		os.Exit(trustReport(os.Args[1:]))
+	}
+	// go vet -vettool passes the path of a configuration file as the last
+	// argument, once per package, and caches what comes back; the verifier
+	// must not be cached that way. A package directory whose name ends in
+	// .cfg is not such a file.
+	if last := os.Args[len(os.Args)-1]; strings.HasSuffix(last, ".cfg") {
+		if info, err := os.Stat(last); err == nil && info.Mode().IsRegular() {
+			vego.RefuseCachedRuns()
+		}
+	}
 	flag.Var(
 		&excludedPackages,
 		"exclude-packages",
@@ -47,11 +156,16 @@ func main() {
 		funcdoc.Analyzer,
 		inlinehelper.Analyzer,
 		teststructure.Analyzer,
+		vego.Analyzer,
 	}
 	for _, analyzer := range analyzers {
 		run := analyzer.Run
 		analyzer.Run = func(pass *analysis.Pass) (any, error) {
 			if excludedPackages.Match(pass.Pkg.Path()) {
+				// The driver insists on a result of the declared type.
+				if analyzer.ResultType != nil {
+					return reflect.Zero(analyzer.ResultType).Interface(), nil
+				}
 				return nil, nil
 			}
 			return run(pass)

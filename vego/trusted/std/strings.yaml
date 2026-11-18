@@ -1,0 +1,51 @@
+version: 1
+
+trusted:
+  strings.Contains:
+    reason: Documented to report whether substr is within s; it reads its arguments only.
+    modifies: []
+
+  strings.HasPrefix:
+    reason: Documented to report whether s begins with prefix.
+    ensures:
+      - "result <-> (|prefix| <= |s| And Forall k in [0, |prefix|) : s[k] = prefix[k])"
+    modifies: []
+
+  strings.HasSuffix:
+    reason: Documented to report whether s ends with suffix.
+    ensures:
+      - "result <-> (|suffix| <= |s| And Forall k in [0, |suffix|) : s[|s| - |suffix| + k] = suffix[k])"
+    modifies: []
+
+  strings.Index:
+    reason: Documented to return the index of the first instance of substr in s, or -1.
+    ensures:
+      - "result = -1 Or (0 <= result And result + |substr| <= |s|)"
+    modifies: []
+
+  strings.TrimSpace:
+    reason: Documented to return a slice of s with leading and trailing white space removed.
+    ensures:
+      - "|result| <= |s|"
+    modifies: []
+
+  strings.Repeat:
+    reason: >-
+      Documented to return count copies of s, and to panic if count is
+      negative or the result would overflow. A result longer than the
+      largest allocation cannot be made either.
+    requires:
+      - "count >= 0"
+      - "|s| * count <= MaxAlloc"
+      - "|s| * count <= MaxInt"
+    ensures:
+      - "|result| = |s| * count"
+    modifies: []
+
+  strings.ToUpper:
+    reason: Documented to return s mapped to upper case; the length may change.
+    modifies: []
+
+  strings.ToLower:
+    reason: Documented to return s mapped to lower case; the length may change.
+    modifies: []
