@@ -678,3 +678,112 @@ func Find(A []int, x int) (result int) {
 	}
 	return -1
 }
+
+// DivideWrong is Divide with the loop condition that the README shows
+// broken: the loop stops one step early when r = d.
+//
+// @Requires n >= 0 And d > 0
+// @Ensures n = d*q + r And 0 <= r < d
+func DivideWrong(n, d int) (q, r int) {
+	q, r = 0, n
+	// @Invariant n = d*q + r And 0 <= r
+	// @Variant r
+	for d < r {
+		q, r = q+1, r-d
+	}
+	return q, r // want `vego: postcondition may not hold: 0 <= r < d`
+}
+
+// zero sets every element of A to zero.
+//
+// @Modifies A
+// @Ensures Forall k in [0, |A|) : A'[k] = 0
+func zero(A []int) {
+	// @Invariant Forall k in [0, i) : A[k] = 0
+	for i := range A {
+		A[i] = 0
+	}
+}
+
+// ZeroHeadWrong passes a slice that keeps the capacity of A, so zero may
+// write all of A.
+//
+// @Requires |A| = 4
+// @Modifies A
+// @Ensures A'[3] = A[3]
+func ZeroHeadWrong(A []int) {
+	zero(A[:2])
+} // want `vego: postcondition may not hold: A'\[3\] = A\[3\]`
+
+// ZeroHead cuts the capacity, so the call cannot reach A[3].
+//
+// @Requires |A| = 4
+// @Modifies A
+// @Ensures A'[3] = A[3]
+func ZeroHead(A []int) {
+	zero(A[:2:2])
+}
+
+// Buffer holds the numbers that ClearCounted clears.
+type Buffer struct {
+	items []int
+}
+
+// ClearCountedWrong writes through b.items[i] in its loop, which makes the
+// loop forget every []int the function may write, count included.
+//
+// @Requires b != nil
+// @Modifies b.items
+// @Ensures |result| = 1 And result[0] = |b.items|
+func ClearCountedWrong(b *Buffer) (result []int) {
+	count := make([]int, 1)
+	count[0] = len(b.items)
+	for i := range b.items {
+		b.items[i] = 0
+	}
+	return count // want `vego: postcondition may not hold: result\[0\] = \|b.items\|`
+}
+
+// ClearCounted writes through a variable that the loop does not assign, so
+// the loop forgets only what that variable refers to.
+//
+// @Requires b != nil
+// @Modifies b.items
+// @Ensures |result| = 1 And result[0] = |b.items|
+func ClearCounted(b *Buffer) (result []int) {
+	count := make([]int, 1)
+	count[0] = len(b.items)
+	items := b.items
+	for i := range items {
+		items[i] = 0
+	}
+	return count
+}
+
+// ClearCountedKept restates what the loop must keep as an invariant.
+//
+// @Requires b != nil
+// @Modifies b.items
+// @Ensures |result| = 1 And result[0] = |b.items|
+func ClearCountedKept(b *Buffer) (result []int) {
+	count := make([]int, 1)
+	count[0] = len(b.items)
+	// @Invariant count[0] = |b.items|
+	for i := range b.items {
+		b.items[i] = 0
+	}
+	return count
+}
+
+// CodeError is an error type of its own, which verified code cannot
+// convert to error.
+type CodeError struct{ code int }
+
+func (e CodeError) Error() string { return "code " + strconv.Itoa(e.code) }
+
+// AsError returns a CodeError as an error.
+//
+// @Ensures err != nil
+func AsError() (err error) {
+	return CodeError{code: 1} // want `vego: cannot verify AsError: converting a guide.CodeError to an error is not supported`
+}

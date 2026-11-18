@@ -1,6 +1,6 @@
 # vego roadmap
 
-What is planned and not built, and the decisions behind what is built. The README describes what exists today for someone using it; this file is for someone changing it.
+What is planned and not built, and the decisions behind what is built. `docs/verification.md` describes what exists today for someone using it, and the README gives a short overview. This file is for someone changing the verifier.
 
 ## Target
 
@@ -166,6 +166,7 @@ Decisions:
 - **Only an error of known origin can be formatted.** `fmt.Errorf` runs the `Error` method of an error it formats and, with verbs such as `%#v`, methods of the values the error contains. An error passed in from outside could use them to write memory the function reasons about. An error may therefore be formatted only if it was made by `errors.New` or `fmt.Errorf`, here or in a verified function that returns nothing else, or is a package-level variable holding such an error. That is decided from the text of each function, without regard to the path taken: a variable qualifies when every assignment to it does. Errors from parameters and from trusted functions can be returned and compared with `nil` but not formatted. Not built: letting a trusted contract vouch for the errors of its function, which wrapping the error of a standard-library call needs.
 - **A contract must not allow a function to always fail.** For every verified function that returns an error, vego checks whether an implementation that always returns a non-nil error and zero values would satisfy the postcondition. If it provably would, that is an error, not an opt-in audit finding. The fix is to state when the function succeeds, as in `err = nil <-> 0 <= i < |A|`.
 - **Exception: success that hangs on the outside.** A function cannot promise success when a call nothing predicts decides it: a trusted function whose contract leaves open what comes back, or a verified function that is itself excused. The call must decide between failure and success: some return of an error and some return without one must each depend on what the call produced, and each must be reachable by some input. Reaching the call is not enough, and a function that fails whatever the call does is not excused.
+- **Reaching the call is judged generously.** Only the conditions on the function's own inputs must be satisfiable by a concrete input. When the path to the call depends on values the verifier does not know, such as the result of an earlier call, the path counts as possible. A call that is in fact dead behind such an unknown can therefore excuse a weak contract. So can a call that in fact always succeeds when seeing that takes facts about memory more than one pointer away from its arguments: what the types guarantee is supplied for the arguments, for the elements of their slices, and for the objects their pointers refer to, but not further. Both make the check miss a weak contract; neither makes a proof wrong.
 - **Depending on a call is decided by proof.** Whether a returned error is nil, or the condition of a branch that was a real choice, depends on a call when it cannot be proved to stay as it is once everything the call produced is replaced by other values the call could have produced. What a call produced spreads to what a later call returns that was handed any of it, and to the unknowns that loops put in place of variables. It is not followed through memory that a later call reads or that a loop writes; a function that depends on the call only in that way is reported and has to be restructured.
 - **A sentinel is trusted only when nothing can run before it is set.** `var ErrX = errors.New("x")` is non-nil for a verified function unless code of the package can run during the initialisation of its variables in a way Go's ordering does not see. Code of a package reaches another package only by being handed over, so every hand-over in code that runs during initialisation costs the package its sentinels: an argument, receiver, or type argument of another package's function, an assignment to another package's variable or to anything but a plain variable, a send, a built-in that passes its argument on, and a call or range that cannot be resolved. A value whose type has no room for code is not a hand-over.
 
@@ -200,7 +201,7 @@ Possible later: facts that are true of real floats, such as small integers conve
 
 ### Strings
 
-Built: the basic tier and approximate ranging. A concatenation must be proved not to exceed the largest `int`, for the same reason as an `append`.
+Built: the basic tier and approximate ranging. A concatenation must be proved not to exceed `MaxAlloc`, the largest allocation of the platform, for the same reason as an `append`.
 
 Decisions:
 
@@ -241,6 +242,6 @@ A further step, deliberately not planned, is modelling the world's state as an i
 ### Other items from the paper
 
 - Multiset reasoning, so a sort can promise that its output is a permutation of its input.
-- The `Preserves`, `Immutable`, and `Cost` annotations.
+- The `Preserves`, `Immutable`, `Cost`, and `Library` annotations.
 - Mutation-based candidates for the specification audit.
 - Counterexamples in diagnostics.

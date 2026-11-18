@@ -1,121 +1,127 @@
 # laas
 
-`laas` is a home for linters, development helpers, and reusable agent skills that help coding agents write better, more idiomatic Go.
+`laas` is a command that checks Go code. It runs four analyzers over Go packages:
 
-## Why laas?
+| Analyzer | What it reports |
+| --- | --- |
+| [`funcdoc`](#funcdoc) | a complex function whose doc comment does not start with its name |
+| [`inlinehelper`](#inlinehelper) | a small unexported helper that is called from one place only |
+| [`teststructure`](#teststructure) | tests that share a name prefix, and subtests whose body is not written inline |
+| [`vego`](#vego) | an annotated function that it cannot prove correct against its contract |
 
-*Laas* (Ancient Greek: λᾶας) means stone. The word evokes the enormous stones and boulders of Greek mythology: those thrown by heroes and the one Sisyphus was condemned to push uphill.
+The first three are linters. `vego` is a verifier. It proves that a function meets a contract written in comments. The repository also has [agent skills](#agent-skills) for setting up `laas` and for writing Go documentation, and [evaluations](#documentation-evals) of the second.
 
-A Sisyphean task is grueling, uphill, and seemingly endless. Code quality can feel similar. Lint violations, structural details, and idiomatic conventions demand sustained attention, but coding agents are intelligent, tireless, and particularly good at hill climbing.
+The checks are meant to help coding agents write idiomatic, well-structured Go.
 
-`laas` gives agents a boulder to push. By expressing Go code-quality expectations as tools and skills, the project aims to turn that persistence into consistently better code.
-
-## Scope
-
-The project will contain:
-
-- Linters and checks for idiomatic Go and sound code structure.
-- A deductive verifier that proves annotated functions correct.
-- Helpers that make code-quality constraints easier for agents to apply.
-- Agent skills that capture reusable guidance for writing and reviewing Go.
-
-## Skills
-
-### setup-laas-pre-commit
-
-[`setup-laas-pre-commit`](skills/setup-laas-pre-commit/SKILL.md) teaches an agent to pin `laas` as a Go tool and integrate `go tool laas ./...` into a repository's existing pre-commit workflow. When no hook system exists, it creates a tracked `.githooks/pre-commit` hook without silently replacing local hooks.
-
-Install the skill with a GitHub CLI version that supports Agent Skills:
-
-```sh
-gh skill install spachava753/laas setup-laas-pre-commit --scope user
-```
-
-Pass `--agent` when installing it for a specific agent.
-
-### golang-docs
-
-[`golang-docs`](skills/golang-docs/SKILL.md) guides agents to write evidence-backed Go API contracts, including preconditions, zero values, ownership, errors, and field interactions. Its instructions are general; no benchmark repositories, declarations, or answer text are included. The [Harbor experiment](evals/golang-docs/EXPERIMENT.md) records its baseline and skill-assisted comparisons. This is experimental guidance: the selected revision's small development gain did not transfer to holdout.
-
-## Documentation evals
-
-[`evals/golang-docs`](evals/golang-docs/README.md) builds a 12-task Harbor pilot from pinned `jsonschema-go` and MCP Go SDK sources. Agents restore removed function, method, type, and struct-field comments. An isolated verifier checks that only the requested docs changed, then scores semantic coverage using OpenAI's Decisions API. The generator, verifier, runner, and tests use Go's standard library; Harbor remains an external CLI dependency. These evals were built before the `golang-docs` skill and now support its baseline and refinement comparisons.
-
-## funcdoc
-
-`funcdoc` reports a function or method when both of these conditions hold:
-
-- Its cyclomatic complexity is greater than the configured limit, which defaults to 10.
-- It does not have a doc comment immediately above its declaration whose first word exactly matches the function or method name and explains the implementation's plan.
-
-The score follows [`gocyclo`](https://github.com/fzipp/gocyclo): every function starts at 1, then each `if`, `for`, `range`, non-default `case`, `&&`, and `||` adds 1. Following Go's documentation convention, a comment for `reconcile` must begin with `reconcile`. `funcdoc` reads the declaration's `Doc` field, the same association used by Go's parser and documentation tooling. A detached comment or a comment inside the function body does not satisfy the rule.
-
-Files ending in `_test.go` are excluded by default.
-
-Install and run the analyzer across a module:
+## Install and run
 
 ```sh
 go install github.com/spachava753/laas/cmd/laas@latest
 laas ./...
 ```
 
-The `go` command that `laas` finds when it runs must not be newer than the Go that built `laas`; installing with the `go` you use, as above, takes care of that. A `laas` built by an older Go reports errors about the standard library, and is run with `GOTOOLCHAIN` set to the version that built it, or rebuilt.
+The arguments are package patterns, as for `go vet`. `laas` runs every analyzer and prints one line for each problem it finds. It exits with status 0 if it found nothing, 3 if it reported something, and 1 if it could not load the packages.
 
-Set a different limit with the analyzer-specific flag:
+The flags of each analyzer start with its name, as in `-funcdoc.limit=15`. `laas -help` lists them all. Test files are analysed too. `-test=false` leaves them out.
 
-```sh
-laas -funcdoc.limit=15 ./...
-```
+Build `laas` with the same Go that you run it with. The `go` command that `laas` finds at run time must not be newer than the Go that built `laas`. If it is, `laas` reports errors about the standard library. Rebuild `laas`, or set `GOTOOLCHAIN` to the version that built it.
 
-Include test files explicitly when they should be checked too:
+### Skipping packages
 
 ```sh
-laas -funcdoc.include-tests ./...
+laas -exclude-packages='(^|/)(generated|mocks)($|/)' ./...
 ```
 
-## teststructure
+`-exclude-packages` takes a Go regular expression and skips every package whose import path it matches. The expression can match anywhere in the path unless you anchor it. If the expression is not valid, `laas` stops before it analyses anything.
 
-`teststructure` reports groups of standard `TestXxx(*testing.T)` functions whose names share a prefix at Go identifier-word boundaries. For example, `TestParseValidInput` and `TestParseInvalidInput` share `TestParse` and should be consolidated into one `TestParse` using either a table or `t.Run` subtests.
+## funcdoc
 
-Name grouping does not inspect test bodies or attempt to recognize tables and subtests. Unique flat tests are allowed; only same-prefix groups produce a naming diagnostic. CamelCase, initialisms, digits, and underscores are recognized when comparing names. Benchmarks, fuzz targets, examples, test helpers, and `TestMain` are not grouped.
+`funcdoc` reports a function or method whose cyclomatic complexity is above a limit, unless its doc comment starts with its name.
 
-`teststructure` also requires every `testing.T.Run` callback to be an inline function literal. Passing a named function, method value, or function variable separates the subtest name from its implementation and produces a diagnostic:
-
-```go
-t.Run("valid input", func(t *testing.T) {
-	// Test logic stays next to the scenario name.
-})
+```text
+function classify has cyclomatic complexity 12 (limit 10); its doc comment should start with "classify"
 ```
 
-This callback rule applies only to the real `testing.T.Run` method in `_test.go` files; unrelated methods named `Run` are ignored.
+A function with no doc comment gets a different message: `add a doc comment immediately above it starting with "classify" that explains its logic`.
 
-The analyzer runs as part of the standard command:
+The complexity is computed as by [`gocyclo`](https://github.com/fzipp/gocyclo). A function starts at 1. Each `if`, `for`, `range`, `case` other than `default`, `&&`, and `||` adds 1.
 
-```sh
-laas ./...
-```
+The doc comment is the one Go attaches to the declaration, directly above it. A comment separated from the declaration by a blank line does not count, and neither does a comment inside the body. `funcdoc` checks only that the first word is the function's name. The rest of the comment should explain how the function works, for a reader who is about to read it.
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `-funcdoc.limit=n` | 10 | the highest complexity allowed without such a comment |
+| `-funcdoc.include-tests` | off | also check functions in `_test.go` files |
 
 ## inlinehelper
 
-`inlinehelper` reports an unexported function or method when it has at most four statements and exactly one reference, which is also a direct call. The diagnostic recommends considering whether the helper should be folded into its only call site; it does not provide an autofix.
+`inlinehelper` reports an unexported function or method that has a few statements and is called from exactly one place.
 
-Statement count is based on the Go syntax tree rather than physical lines. Exported declarations are excluded because calls from other packages are not visible. Unused functions, recursive functions, function values, and helpers with multiple references are also excluded.
-
-Change the size threshold with:
-
-```sh
-laas -inlinehelper.max-statements=3 ./...
+```go
+func double(n int) int {
+	return n * 2
+}
 ```
+
+```text
+function double has 1 statement and is called once; consider inlining it at its call site
+```
+
+Statements are counted in the syntax tree, including those in nested blocks. A block itself does not count, and a statement that spans several lines counts once.
+
+A function is not reported if any of these is true:
+
+- it is exported, because calls from other packages are not visible;
+- it is never called, or it is referenced more than once;
+- its only reference is not a direct call, as when it is used as a function value;
+- it calls itself.
+
+The message is advice. A small helper can be worth keeping for its name. `inlinehelper` offers no automatic fix.
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `-inlinehelper.max-statements=n` | 4 | the largest number of statements a reported helper can have |
+
+## teststructure
+
+`teststructure` checks `_test.go` files for two things.
+
+The first is a group of tests whose names share a prefix:
+
+```go
+func TestParseValidInput(t *testing.T)   { ... }
+func TestParseInvalidInput(t *testing.T) { ... }
+```
+
+```text
+tests TestParseValidInput and TestParseInvalidInput share prefix TestParse; consolidate scenarios into one test using a table or t.Run subtests
+```
+
+Names are split into words at changes of case, at initialisms, at digits, and at underscores, and then compared word by word. `TestHTTPServer` and `TestHTTPClient` share the prefix `TestHTTP`. `TestParseInput` and `TestParserInput` share no prefix, because `Parse` and `Parser` are different words. Only functions of the form `TestXxx(*testing.T)` are compared, so benchmarks, fuzz tests, examples, helpers, and `TestMain` are left alone. `teststructure` reads only the names. It does not look at whether a test already uses a table or subtests.
+
+The second is a subtest whose body is defined somewhere else:
+
+```go
+t.Run("zero", checkZero)
+```
+
+```text
+testing.T.Run callback must be an inline function literal; move the subtest body into the Run call
+```
+
+A named function, a method value, and a function variable are all reported. Write the body as a function literal in the call, so that it stays next to the subtest's name. This check applies only to the `Run` method of `testing.T`. Other methods named `Run` are not checked.
+
+`teststructure` has no flags.
 
 ## vego
 
-`vego` is a deductive verifier for Go. You state what a function must do in `// @` comments, and `vego` proves that the code does it for every input, or tells you which obligation it could not prove. It implements the approach of the VeGo paper ([Masoudi and Dutchyn, arXiv:2608.22630](https://arxiv.org/abs/2608.22630)): specifications live in comments, so annotated files stay ordinary Go that builds, runs, and formats with the standard toolchain.
+`vego` is a deductive verifier for Go. You write a function's contract in `// @` comments. `vego` either proves that the function meets the contract for every input, or reports what it could not prove. The comments do not change the program. It builds and runs with the standard Go toolchain as before. `vego` follows the approach of the VeGo paper ([Masoudi and Dutchyn, arXiv:2608.22630](https://arxiv.org/abs/2608.22630)).
 
 ```go
 // Divide computes quotient and remainder by repeated subtraction.
 //
 // @Requires n >= 0 And d > 0
-// @Ensures n = d*q + r And 0 <= r And r < d
+// @Ensures n = d*q + r And 0 <= r < d
 func Divide(n, d int) (q, r int) {
 	q, r = 0, n
 	// @Invariant n = d*q + r And 0 <= r
@@ -127,272 +133,74 @@ func Divide(n, d int) (q, r int) {
 }
 ```
 
-**New to it? Read [Writing verified Go](docs/verification.md)**, a walkthrough that doubles as a reference. The sections below are a shorter description.
+`Requires` states what must be true when the function is called, and `Ensures` what is true when it returns. The `Invariant` holds each time the loop tests its condition. The `Variant` is a number that never goes below zero and decreases on each iteration, so the loop ends.
 
-**Status: experimental.** `vego` has been reviewed and tested hard for accepting only what is true, but it has not yet been used on a large existing codebase, and much ordinary Go is outside what it supports; see [Supported Go](#supported-go).
-
-A function opts in by carrying at least one annotation; everything else is left alone. The analyzer runs as part of the standard command:
-
-```sh
-laas ./...
-```
-
-`vego` proves its obligations with [Z3](https://github.com/Z3Prover/z3) 5.4.1, run as a separate program. Install that release from <https://github.com/Z3Prover/z3/releases/tag/z3-5.4.1> and put its `bin/z3` on `PATH`, or name the binary with `-vego.z3=path`. Each version of `laas` expects one version of Z3 and refuses any other, because another version may prove different things. A package without annotations does not need Z3.
-
-Change the loop condition above to `d < r` and the run fails with `vego: postcondition may not hold: r < d`.
-
-### What is proved
-
-For every annotated function, `vego` proves that from any state satisfying `Requires`:
-
-- every `return` establishes each `Ensures` clause, and every `Assert` holds;
-- every loop invariant holds on entry and is preserved by the body;
-- every loop terminates (its `Variant` is non-negative and decreases) and every recursive call decreases the `Variant` of its function;
-- no slice index is out of range, no nil pointer is followed, no divisor is zero, no `make` length is negative, and no `panic` is reachable;
-- the function writes nothing a caller can see except what its `Modifies` clauses list. An entry that no write needs is reported; that is judged by a quick proof attempt for each write, and an entry counts as needed when the attempt is inconclusive;
-- no integer arithmetic or conversion overflows. Go would wrap silently; verified code may not;
-- every call goes to a function with a contract and satisfies its `Requires`. Callers then rely on the callee's `Ensures` and `Modifies` only, never on its body;
-- a function that returns an error does not have a contract it could meet by failing every time.
-
-Proof obligations are generated by symbolic execution over single-assignment values. Each one is written as an SMT-LIB problem and handed to Z3. An obligation is proved when Z3 shows that its negation has no model. Any other answer leaves it unproved. Z3 decides linear integer arithmetic and reads and writes of slices and memory. It handles products of variables, `Forall` facts, and recursive predicates incompletely. When it cannot prove a true fact, add an `Assert` with an intermediate step or strengthen an invariant.
-
-### Annotations
-
-| Annotation | Where | Meaning |
-| --- | --- | --- |
-| `Requires P` | doc comment of a function | Precondition: callers must establish `P`. |
-| `Ensures P` | doc comment of a function | Postcondition. A parameter, and anything reached from it, denotes the state on entry; a prime asks for the state on return, as in `A'` for the contents of slice `A` and `c.count'` for a field. The results are referred to by their names, so a verified function must name each of them. |
-| `Modifies a, b` | doc comment of a function | What the function may write that a caller can see. Everything else is unchanged for the caller. |
-| `Invariant P` | directly above a `for` loop | Holds before every evaluation of the loop condition. |
-| `Invariant P` | doc comment of a struct type | Holds of every value of the type where it crosses a function boundary; see below. |
-| `Variant e` | directly above a `for` loop | Integer that is non-negative while the loop runs and decreases every iteration. `range` loops need none. |
-| `Variant e` | doc comment of a recursive function | Integer over the parameters that is non-negative and decreases at every recursive call, including mutual recursion. |
-| `Assert P` | anywhere in a body | Must hold at that point; later proofs may use it. |
-| `Predicate name(params) ::= P` | top level | A named, possibly recursive formula. Recursion must not pass through negation. |
-
-Formulas use `And`, `Or`, `~`, `->`, `<->`, `True`, `False`, the comparisons `=`, `!=`, `<`, `<=`, `>`, `>=` (which chain, as in `0 <= i < |A|`), and integer arithmetic with Go's `/` and `%`. Integers in formulas are mathematical and never overflow; the limits of the Go types are available as `MaxInt`, `MinInt`, `MaxInt8` to `MaxInt64`, `MinInt8` to `MinInt64`, and `MaxUint` to `MaxUint64`. `MaxAlloc` is the largest number of bytes a single allocation can have on the platform, which is what limits the length of a string. `|A|` is the length of a slice or string and `A[i]` an element or byte. Strings compare with `=` and can be written as literals, as in `role = "admin"`. An error can be compared with `nil`, as in `err = nil -> value = A[i]`. Quantifiers range over the integers or an interval: `Forall k in [0, |A|) : A[k] >= 0`, `Exists t in Z : ...`. A slice range used as a comparison operand stands for all its elements: `A[0:i) <= A[i]`. Fields are selected with a dot, through pointers too: `c.count`, `s.items[i]`, `|s.items|`. A pointer can be compared with `nil` and with another pointer. Inside a body a name denotes the current value of the variable and `old(x)` what parameter `x`, or something reached from it such as `old(c.count)`, was on entry. Boolean variables are compared with constants as in the paper (`found = True`) or used directly. A `//` inside an annotation starts an ordinary comment, and a `// @ ...` line, with a space after the `@` and no keyword, continues the previous annotation. An ordinary comment directly after an annotation is an error, since it would be left out of the annotation without notice; put an empty `//` line between them. An `@` with a keyword that is not at the start of its comment line is an error too, unless it follows a `//` of its own, as in `// // @Ensures ...`: that is an annotation that is commented out or shown as an example. An annotation inside a body must stand between statements on a line of its own.
-
-An annotation is written `// @Keyword ...`, with one space between `//` and `@` and none after the `@`, a form `gofmt` leaves alone. A line `// @ ...`, with a space after the `@` and no keyword, continues the annotation above it. Any other spacing is an error. Annotations are read from `//` comments only; one in a `/* */` comment is an error. A `// @ ...` line with no annotation above it to continue is an error, and so is any word directly after `@` that is not a keyword, so a wrong keyword cannot switch a check off by passing for the tag of another tool. Words that another tool does read there, as in `// @Summary`, are declared with `-vego.other-tags=Summary,Param`; a keyword, or a word within two letters of one, cannot be declared. An `Ensures` clause outside a doc comment is an error. While a package has an annotation that could not be read or attached to anything, none of its contracts can be relied on from other packages, since the annotation may have been meant for any of its functions. A variable named `True`, `False`, or `nil` is an error in a function whose annotations use that word and can see the variable. The length of a slice, string, or map is written `|A|`; there is no `len`.
-
-### Pointers, structs, and slices that share memory
-
-Two pointers may refer to the same struct, and two slices to the same array. `vego` does not forbid that; it reasons about it. A proof has to hold whether or not two pointers are equal, unless the contract says they differ:
-
-```go
-// @Requires a != nil And b != nil And a != b
-// @Modifies a.n, b.n
-// @Ensures result = 1
-func Different(a, b *Counter) (result int) {
-	a.n = 1
-	b.n = 2
-	return a.n
-}
-```
-
-Without `a != b` the postcondition is rejected, because the second assignment may overwrite the first.
-
-The same holds for memory that lies inside other memory. A `*Point` may point at an element of a `[]Point`, or at a `Point` that is a field of a larger struct, and a `*A` may point at the same struct as a `*B` when the two types have the same fields. A write through one is then a write to the other, and a proof has to hold in either case unless the contract rules the overlap out with `~within(p, s)`.
-
-A `Modifies` clause lists what a function may write, starting from its parameters:
-
-- a pointer, as in `Modifies c`, means every field of the struct it points to;
-- a slice, as in `Modifies A` or `Modifies s.items`, means its elements, including the capacity beyond its length, which an `append` may write;
-- any other path must lead into memory, through a pointer or a slice, and means what it names: `Modifies c.count` is one field, `Modifies ps[0]` one element of a slice of structs, `Modifies s.From` a struct inside the struct `s` points to;
-- an element can be selected on the way, as in `Modifies cs[0]` for the struct the first pointer of a slice points to.
-
-The paths are read when the function is entered. A write to anything else that existed at that moment is an error, and so is an entry that no write needs, so the clause says neither less nor more than the body does. What the function creates itself, with `&T{...}`, `new`, `make`, a slice literal, an `append` that had to move the slice, or as a variable of its own, it may write freely.
-
-Two further forms say where a pointer or slice comes from. `fresh(x)` in an `Ensures` states that the call created what `x` refers to, so it cannot be anything the caller already had. A slice without capacity reaches no memory at all and counts as fresh, whichever array it was cut from. `within(a, b)` states that `a` lies inside `b`, where each is a slice, taken with its capacity, or a pointer, taken as the struct it points to. A slice without capacity lies within anything, and a nil pointer within nothing. A method that appends to a slice in a struct typically promises both possibilities:
-
-```go
-// @Requires s != nil And |s.items| < 1000
-// @Modifies s, s.items
-// @Ensures |s.items'| = |s.items| + 1 And s.items'[|s.items|] = x
-// @Ensures fresh(s.items) Or within(s.items', s.items)
-func (s *Stack) Push(x int) {
-	s.items = append(s.items, x)
-}
-```
-
-Rules that follow from sharing:
-
-- **A pointer must be known not to be nil where it is followed.** For a parameter or receiver that means `Requires p != nil`; `vego` proves the rest.
-- **Slice parameters of one element type must not overlap**, capacities included. A function may assume it, and every call must prove it. `zero(A[:2])` may therefore write all of `A`'s capacity; cut the capacity with `A[:2:2]` to keep the rest.
-- **`append` is the whole right-hand side of an assignment or the returned value.** It either writes into the capacity, where other slices of the array see it, or moves the slice to a new array; both outcomes are verified unless one can be ruled out.
-- **A pointer points to a struct.** `&T{...}`, `&x`, `&p.field`, and `&s[i]` are all supported when what they point to is a struct, and so is calling a method with a pointer receiver on a variable, a field, or an element. A pointer to anything else, such as `*int`, is rejected.
-
-### Invariants of structs
-
-An invariant in the doc comment of a struct type names the fields directly and says what every value of the type satisfies:
-
-```go
-// Stack keeps a count that never exceeds what it holds.
-//
-// @Invariant 0 <= n <= |items|
-type Stack struct {
-	items []int
-	n     int
-}
-
-// @Requires s != nil And s.n > 0
-func (s *Stack) Top() (result int) {
-	return s.items[s.n-1]
-}
-```
-
-`Top` may index with `s.n-1` because the invariant bounds `n`. An invariant is short for clauses at every boundary of every verified function:
-
-- it is assumed on entry for each parameter and receiver of the type, or of a pointer to it that is not nil;
-- it must be proved on return for each of them and for each result of the type. A struct passed by value is checked too, as it was on entry against memory as it is on return, because what it points to is shared with the caller;
-- it must be proved at a call for each argument, and is known again afterwards for what a verified function hands back.
-
-Inside a function the invariant may be broken and restored. There is no way to switch it off for a function: a helper that has to run while the invariant is broken takes the fields it needs instead of the struct. After a call to a trusted function that may modify a struct, its invariant is not assumed, since nobody proved it. The invariant is not applied to structs reached in other ways, such as the elements of a slice or the target of a pointer field.
-
-### Maps
-
-A map is a reference, like a pointer: two map variables may be the same map, and `Modifies m` allows writing it. In annotations `m[k]` is the value of a key, which is the zero value when the key is absent, as in Go; `has(m, k)` says whether the key is present; and `|m|` is the number of keys.
-
-```go
-// @Ensures err = nil <-> has(m, k)
-// @Ensures err = nil -> v = m[k]
-func Get(m map[string]int, k string) (v int, err error) {
-	v, ok := m[k]
-	if !ok {
-		return 0, errMissing
-	}
-	return v, nil
-}
-```
-
-Keys are integers or strings; values are any supported type. Writing to a map needs a proof that it is not nil; `delete` does not, since removing a key from a nil map does nothing. A `range` over a map visits some key the map has in each iteration, as many times as the map has keys; that the keys differ from one iteration to the next is not known to the verifier, an invariant has no name for how many iterations have run, and the loop must not change a map of that type. A loop can therefore check each value of a map, but cannot yet add the values up.
-
-### Auditing specifications
-
-A function can verify against a contract that says almost nothing. With `-vego.audit`, `vego` also probes each postcondition with degenerate implementations, the adversarial archetypes of the paper's Anti-VeGo: return zero values, return constants, return an argument unchanged, fill slices with zeros or with `0, 1, 2, ...`. Each one that provably satisfies the contract is reported as a hole:
-
-```sh
-laas -vego.audit ./...
-```
+`laas -vego` prints nothing for this function, because every clause is proved. If you change the loop condition to `d < r`, the loop can stop with `r` equal to `d`, and `vego` reports:
 
 ```text
-vego: specification of Sort has a hole [OBLIVIOUS]: it also accepts an implementation that fills its slices with 0, 1, 2, ... whatever the input
+vego: postcondition may not hold: 0 <= r < d
 ```
 
-A sort that only ensures sortedness gets this report until its contract also ties the output to the input's elements.
+Apart from the contract, `vego` proves these things about every verified function:
 
-### Calling code that is not verified
+- it does not panic, for example on an index out of range, a nil pointer, or a division by zero;
+- no integer arithmetic overflows;
+- every loop and every recursion ends;
+- it writes only the memory that its contract lists.
 
-Verified code may only call a function that has a contract. A function with `// @` annotations is verified against them, and an exported one can be called from other packages: its contract and the predicates it uses travel with the package, and a function whose verification failed cannot be relied on from elsewhere. Any other function, whether in the standard library, in another module, or in your own code where `vego` cannot follow it, needs a trusted contract: a claim about the function that `vego` uses but does not check. A call to a function with neither is an error:
+`vego` checks only functions that have at least one annotation.
 
-```text
-vego: cannot verify Total: it calls applyDiscount, which has no contract; annotate applyDiscount with // @ annotations so that it is verified, or add a trusted contract for example.com/shop.applyDiscount to vego-trusted.yaml
-```
+### Status
 
-Trusted contracts for a module live in one file, `vego-trusted.yaml`, next to `go.mod`. There is no way to declare trust in source, so every assumption a proof rests on is in that one file:
+`vego` is experimental. Its tests check that it does not prove false claims, but it has not yet been used on a large existing codebase.
 
-```yaml
-version: 1
+`vego` supports only part of Go. It verifies functions over integers, booleans, strings, errors, structs, pointers to structs, slices, and maps with integer or string keys. Floats can be used, but nothing is proved about their values. A function that uses other Go is reported as `cannot verify` and is not verified. Examples are interfaces other than `error`, closures, generics, goroutines, and arrays. [`vego/ROADMAP.md`](vego/ROADMAP.md) lists what is missing, in the order in which it is planned.
 
-trusted:
-  example.com/shop/internal/store.load:
-    reason: Reads the stock file; reviewed 2026-11-10.
-    modifies: []
-    ensures:
-      - "err = nil -> count >= 0"
+### Running it
 
-  example.com/vendor/ledger.Post:
-    reason: Reviewed v1.4.2; appends one entry and keeps the others.
-    modifies: [entries]
-    requires:
-      - "amount > 0"
-    ensures:
-      - "|entries'| = |entries|"
-```
-
-- The key is the function's full name as Go prints it: `sort.Ints`, `example.com/pkg.Func`, `(*bytes.Buffer).Len`.
-- `reason` is mandatory. It says why the contract is believed, for whoever audits the file.
-- `requires` and `ensures` use the annotation language. Callers must prove every `requires` and may assume every `ensures`. Names are the parameter and result names of the real function; unnamed results are `result`, or `result1`, `result2`, and so on.
-- `modifies` lists what the function may write, in the form of a `Modifies` clause: `[x]` for the elements of slice `x`, `[b]` for the struct that pointer or receiver `b` points to, `[b.count]` for one field. Anything not listed is taken to be unchanged. The list is mandatory: a function that writes nothing a caller can see says so with `modifies: []`.
-- `runs` is optional and lists the parameters whose code the function may run: the methods of an error or an interface, or a function, held in them. A trusted function is believed as far as its own code goes, so a value that carries code from elsewhere is passed to it only when the contract says, with `runs`, that it holds whatever that code does. An error made by `errors.New` or `fmt.Errorf` in verified code needs no such entry. `runs` checks nothing, and is asked for by the type of the parameter: the contract must then hold for the whole call whatever value arrives. That is so when the function never calls the code it is handed, or when every value that can arrive is known and its code has been read; it is no remedy for a function that calls the methods of an `error` that unverified callers can fill with anything.
-- Quote the formulas. YAML gives a meaning to `: `, to a leading `|`, `!`, `[`, or `-`, and to `#`, all of which formulas use.
-
-`vego` checks what it can about a contract: the function must exist, the names must be parameters or results of the right type, `modifies` must list memory a caller can see, an `ensures` may only describe memory after the call (`x'`) if the path reads memory of a kind that `modifies` lists, since the call can have changed no other, and the contract must not contradict itself. At each call, a contract whose promise contradicts what is known there is reported as well, since everything after such a call would be provable; that check is a quick one and can miss a contradiction that is hard to find. A function cannot have both annotations and a trusted contract. Nothing is known about a pointer or slice that a trusted function returns unless its contract says so, for example with `fresh(result)`.
-
-`vego` ships contracts for a small part of the standard library, such as `sort.Ints`, `sort.SearchInts`, `rand.Intn`, `strings.HasPrefix`, `strings.Index`, and `strconv.Itoa`. They state documented behaviour only, and each is tested against the real function. An entry in your file for the same function replaces the shipped one.
-
-Run `laas` directly, as above. Under `go vet -vettool`, results are cached by a mechanism that does not know about trust files, so a proof could outlive the contract it rests on; `laas` therefore refuses to verify in that mode and says so.
-
-To see everything the proofs of a project take on trust, with reasons and call sites:
+`vego` proves its obligations with [Z3](https://github.com/Z3Prover/z3) 5.4.1, which runs as a separate program. Install [that release](https://github.com/Z3Prover/z3/releases/tag/z3-5.4.1) and put its `bin/z3` on `PATH`, or pass the path of the binary with `-vego.z3=path`. `laas` refuses any other version of Z3, because another version may prove different things. A package without annotations does not need Z3.
 
 ```sh
-laas -vego.trust ./...
+laas -vego ./...
 ```
 
-The report lists the project contracts in use, the shipped contracts in use, project entries that no proof uses, and which trusted functions may fail unpredictably.
+`-vego` runs only the verifier. Plain `laas ./...` runs it together with the other analyzers. Run `laas` directly, not through `go vet -vettool`. The cache of `go vet` does not know about the trust file, so `vego` refuses to verify in that mode.
 
-The trust file is found next to `go.mod`; `-vego.trusted=path` names another one.
+A verified function can call only functions that have a contract. A function without annotations, such as one in another module, can be given a trusted contract in `vego-trusted.yaml`, next to `go.mod`. `vego` uses a trusted contract without checking it, and ships trusted contracts for a few functions of the standard library. `laas -vego.trust ./...` lists every trusted contract that the proofs use.
 
-### Supported Go
+### Learning more
 
-The verified fragment covers functions and methods over the integer types (`int`, `int8` to `int64`, `uint`, `uint8` to `uint64`, with `byte` and `rune`), `bool`, `string`, `error`, the float types, structs, pointers to structs, maps with integer or string keys, and slices of any of these: assignments, `if`, `switch`, `for` and `range` loops with `break` and `continue`, `return`, `defer`, calls to named functions and methods, recursion, `len`, `cap`, `min`, `max`, `new`, `make`, `delete`, struct, slice, and map literals, slicing, `append`, and the arithmetic, comparison, shift, and bitwise operators. A struct field of a type outside this list cannot be read or assigned, but it remains part of its struct: assigning the whole struct writes it, so `Modifies` must then list the struct and not only the other fields. The exception is a field that is an array, or a struct holding one: a slice of the array would be a second view of the struct's memory, so a struct with such a field is not supported at all until arrays are.
+[Writing verified Go](docs/verification.md) is the guide to `vego`. It covers the annotations and the formula language, loops, memory, errors, trusted contracts, and the messages `vego` prints. Its [Summary](docs/verification.md#summary) section is a reference for every annotation, formula form, and flag. A proof also rests on assumptions about code that `vego` cannot see, and the guide lists them in [What a proof assumes](docs/verification.md#what-a-proof-assumes).
 
-Anything else makes `vego` report the function as `cannot verify`; it is never verified wrongly or in part. That covers arrays, channels, interfaces other than `error`, closures, goroutines, generics, variadic calls, `append(s, t...)`, and package-level variables other than error variables that are initialised with `errors.New` or `fmt.Errorf` and never assigned. [`vego/ROADMAP.md`](vego/ROADMAP.md) lists them in the order they are planned.
+## Agent skills
 
-### How Go is understood
+### setup-laas-pre-commit
 
-These are rules of the verifier, not assumptions: each is checked, and a function that breaks one is reported.
+[`setup-laas-pre-commit`](skills/setup-laas-pre-commit/SKILL.md) tells an agent how to run `laas` before every commit in a Go repository. The agent pins `laas` as a Go tool dependency and adds `go tool laas ./...` to the pre-commit hook mechanism that the repository already uses. If the repository has none, the agent creates a tracked `.githooks/pre-commit` hook. It asks before it bypasses a hook that is already installed in `.git/hooks`.
 
-- **Overflow is an error, not a behaviour.** Every `+`, `-`, `*`, `/`, negation, and conversion must be proved to stay within its type, so `(lo+hi)/2` is rejected and `lo + (hi-lo)/2` verifies. This usually means stating bounds on inputs, for example on the elements a loop adds up. Code that wraps on purpose, such as a hash function, cannot be verified.
-- **Bits are numbers.** The verifier computes with whole numbers, not with bits, so shifts and bitwise operators are understood through arithmetic.
-  - `x << k` is `x * 2^k` and must not lose bits, like any arithmetic that would leave its type. `x >> k` is `x / 2^k` rounded towards minus infinity, which differs from `/` for a negative `x`. A count that may be negative is an error, since Go panics on one.
-  - `x & m` is known exactly when `m` is a constant mask of low bits (`x & 0xFF` is `x % 256` for an `x` that is not negative, and the remainder counted upwards for a negative one, so `-1 & 0xFF` is 255) or of a single bit. Of any other `x & y` only what always holds is known: it is at most either operand when they are not negative, and so on.
-  - `x | y`, `x ^ y`, and `x &^ y` are computed from `x & y`, so they are known exactly whenever it is. `hi<<8 | lo` is `256*hi + lo` when `lo` is below 256. Two numbers that fit in so many bits give a result that fits in as many, and a flag that was just set or cleared is known to be set or clear: after `f |= m`, `f & m` is `m`.
-  - `^x` is `-x - 1`, or for an unsigned type the largest value minus `x`.
-  - Annotations have no bit operators; say what you mean with `*`, `/`, and `%`.
-- **String length stays representable.** Concatenation must be proved not to exceed the largest `int`, which usually means bounding the lengths of the operands.
-- **A deferred call runs at every return.** `defer mu.Unlock()` settles the function, the receiver, and the arguments where it is written, and the call is then verified at each way out of the function, last one first: its `Requires` must hold there, and what it changes is part of what the function's `Ensures` describe. It can change a result through a pointer to a named result, as Go allows. Only a call of a named function or method can be deferred, and not inside a loop. No contract is shipped for `sync.Mutex`: `Lock` blocks on a mutex the goroutine holds and `Unlock` crashes on one that is not locked, so an entry without a condition on the state of the lock would be false, and the only way to state that condition today is through the private fields of the mutex, which ties a contract to one version of Go. Lock in a function that is not verified and call the verified work from it.
-- **Calls that modify memory stand alone.** A call to a function with a `Modifies` clause must be a statement of its own, the only returned expression, or the whole right-hand side of an assignment to variables or their fields, so that it cannot run between the evaluation of other operands. It is rejected inside a larger expression, as an argument, in a loop condition, or when the assignment's target is reached through a pointer, a slice, or a map.
-- **Memory a loop writes is forgotten at the loop.** What a loop changes through a variable it does not reassign, or through a slice it only appends to, is forgotten precisely: everything else stays known. A loop that writes through anything more involved, such as `s.items[i]` or a pointer it advances, forgets every object of that type that the function may modify, and an invariant has to restate what is needed.
-
-Three kinds of value are followed without being fully understood:
-
-- **Errors are opaque.** The only thing known about an error is whether it is `nil`. `errors.New` and `fmt.Errorf` return a non-nil error, and so does a package-level variable initialised with one of them and never assigned in its package, provided no code of the package can run before the variable is set: a package whose variable initialisers call a function value or an interface method, range over a function, start a goroutine, or put something of the package where another package may find it (as an argument or type argument to its functions, by assigning to anything but a plain variable, by a send, or by `append` or `copy`) gives up that knowledge, and says so where such a variable is read. Comparing two errors with `==` is rejected, because it panics when both hold the same uncomparable type. `fmt.Errorf` may only format numbers, booleans, strings, and slices of them whose types have no methods, and errors whose origin is known, since formatting anything else may run methods the verifier does not see. An error has a known origin when it was made by `errors.New` or `fmt.Errorf`, in the function itself or in a verified function it called, or is such a package-level variable into whose initialiser only plain values and other such variables went; `fmt.Errorf("load: %w", err)` is accepted for those. An error that came in as a parameter or from a trusted function can be returned and compared with `nil`, but not formatted. Nothing but an error or `nil` can be converted to an error.
-- **Floats are opaque.** Arithmetic on floats yields an unknown float and a comparison an unknown boolean, so no fact about a float value can be stated or proved. An integer converted from a float can be anything in its type's range and needs a range check before it is used as an index.
-- **Strings are sequences of bytes**: length, indexing, `==`, literals, concatenation, substrings, and conversion to and from `[]byte`. Ordering with `<` is unknown. Ranging over a string yields some character and advances by one to four bytes; which character is not modelled.
-
-### Functions that return an error
-
-A function that returns an error must say when it succeeds. A contract such as `err = nil -> value = A[i]` alone is rejected, because a function that always fails would satisfy it. The contract has to force success for some input, as `0 <= i < |A| -> err = nil` or `err = nil <-> 0 <= i < |A|` does. The verifier looks for a concrete input that satisfies the precondition and for which the postcondition leaves no outcome with a non-nil error. The input has a simple shape, and Z3 picks its numbers. The verifier rejects the contract if it finds no such input. The exception is a function whose success hangs on a call to a trusted function whose contract does not say what comes back, such as one that reads a file: it cannot promise success and is not asked to. Its success hangs on the call when the call decides between failure and success: some return of an error and some return without one each depend on what the call returned, by returning the call's error or by a branch on something it returned. A function that ignores what the call returned, or that fails whatever it returned, is not excused. What the call returned is followed through variables, also across loops, through memory the function itself reads, and through later calls it is passed to, but not through memory that a later call reads or that a loop writes. Whether the call is reached is judged generously when the path to it depends on values the verifier does not know, such as the result of an earlier call; only the conditions on the function's own inputs must be satisfiable by a concrete input. A dead call behind such an unknown can therefore keep a weak contract from being reported. The same holds for a call that in fact always succeeds, when seeing that takes facts about memory more than one pointer away from its arguments: what the types guarantee is supplied for the arguments, for the elements of their slices, and for the objects their pointers refer to, but not further.
-
-### What a proof assumes
-
-A proof holds under these assumptions. They are about things the verifier cannot see; everything it can see, it checks.
-
-- **Trusted contracts are true.** A function that is not verified can only be called through a contract in a trust file, and every proof that uses it holds only if that contract does. For a parameter that the contract lists under `runs`, that includes whatever the code held in the argument does. Such a function is also trusted to return without panicking when its `requires` hold, to write nothing a caller can see beyond its `modifies`, and not to keep the pointers and slices it is given. Returning includes not calling back into the verified function that called it by way of another package; a call back that stays inside the package is seen and reported, whether by name or through a function value or an interface method.
-- **Callers outside the verified code keep the contract.** A verified function may assume its `Requires`, the invariants of the structs it is handed, and that slice parameters of one element type do not overlap. Verified callers prove all three; code that is not verified is trusted to respect them.
-- **Code that is not verified keeps Go's types.** It does not use `unsafe`, `reflect`, or cgo to make one piece of memory two different types, or to change a string. The memory model relies on what Go's types guarantee.
-- **Nothing else runs at the same time.** A proof is about one goroutine. No other goroutine writes memory that a verified function reads or writes while it runs.
-- **Exported error variables are not reassigned.** A sentinel such as `var ErrNotFound = errors.New(...)` is taken to be non-nil when its own package never assigns to it. Another package assigning to it would break that; one that `laas` analyses in the same run is reported, one that it does not see is trusted not to.
-- **Z3 is correct.** Every proof rests on Z3 5.4.1 answering correctly that a problem has no model.
-- **The proof is for the platform it was run for.** The sizes of `int`, `uint`, and pointers, the layout of structs, and the largest allocation are those of the `GOOS` and `GOARCH` that `laas` was run with. A function verified for a 64-bit target is not thereby verified for a 32-bit one. Files left out by a build constraint, or by a name such as `_windows.go`, are not read at all, so their annotations are not checked; run `laas` once for each configuration that is shipped.
-- **There is memory.** An allocation larger than the runtime permits is an error the verifier reports: `make([]T, n)`, an `append` that has to move its slice, and a string concatenation must be proved to stay under the limit of the platform. That the machine actually has the memory, and that the stack is deep enough for the recursion, is assumed.
-- **Annotations are not checked for meaning.** `A[i]` in an annotation is not required to be in range and `x / y` not to have a divisor other than zero. Such a term has some value nobody knows, so a clause that depends on it can usually not be proved, but it is not reported either.
-
-### Limits of the prover
-
-Z3 may fail to prove something true. When that happens, add an `Assert` with an intermediate step or strengthen an invariant. A message that ends with `(Z3 reached its resource limit; -vego.rlimit raises it)` means Z3 stopped at its resource limit. `-vego.rlimit` raises that limit, which is 4000000 by default. Z3 counts that resource deterministically, so the same binary gives the same answers on every run. Two other notes say that Z3 ran past its time limit of five minutes, which depends on the machine, or out of the 1 GB of memory a process may use. More effort does not help with either.
-
-Not implemented yet from the paper: residual runtime checks for unproved obligations (gradual mode), multiset reasoning, the `Preserves`, `Immutable`, `Cost`, and `Library` annotations, and mutation-based audit candidates.
-
-## Package filtering
-
-Skip packages for every analyzer with `-exclude-packages`. The value is a Go regular expression matched against the package import path:
+Install the skill with a version of the GitHub CLI that supports agent skills:
 
 ```sh
-laas -exclude-packages='(^|/)(generated|mocks)($|/)' ./...
+gh skill install spachava753/laas setup-laas-pre-commit --scope user
 ```
 
-Regular expressions use substring matching unless anchored. An invalid expression causes argument parsing to fail before analysis starts.
+Add `--agent` to install it for one agent only.
+
+### golang-docs
+
+[`golang-docs`](skills/golang-docs/SKILL.md) guides an agent in writing doc comments that state a Go API's contract: preconditions, zero values, ownership, errors, and how fields interact. Its instructions are general. It contains no benchmark repositories, declarations, or answer text.
+
+The skill is experimental. The [Harbor experiment](evals/golang-docs/EXPERIMENT.md) records how agents did with and without it. The revision that was selected showed a small gain on the development tasks, and that gain did not carry over to the holdout tasks.
+
+## Documentation evals
+
+[`evals/golang-docs`](evals/golang-docs/README.md) builds a pilot of 12 Harbor tasks from pinned sources of `jsonschema-go` and the MCP Go SDK. In each task, an agent restores comments that were removed from functions, methods, types, and struct fields. An isolated verifier checks that only the requested comments changed. It then scores how much of the meaning they cover, using OpenAI's Decisions API.
+
+The generator, verifier, runner, and tests use only Go's standard library. Harbor is an external command-line tool, needed only to run the trials in containers. The evals were built before the `golang-docs` skill, and they now provide its baseline and the comparisons for its revisions.
+
+## The name
+
+*Laas* (Ancient Greek: λᾶας) means stone. The name refers to the boulder that Sisyphus pushed uphill without end. Code quality needs the same repeated effort, and `laas` turns it into checks that a coding agent can run until its code passes.
 
 ## License
 
