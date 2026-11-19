@@ -141,7 +141,7 @@ func applyAll(xs []int, f Mapper) {
 //
 // @Ensures a != nil
 func UsesApply() (a Applier) {
-	return Apply // want `vego: cannot verify UsesApply: Apply may call through a function value, and code that a function value runs cannot do that yet: no contract of a function type has a variant, so nothing would prove that such calls end`
+	return Apply // want `vego: cannot verify UsesApply: Apply may call through a function value or an interface value, and code that a function value runs cannot do that yet: no contract of a function type or of a method of an interface has a variant, so nothing would prove that such calls end`
 }
 
 // Stepper steps.

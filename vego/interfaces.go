@@ -66,15 +66,98 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		return value{held}
 	case types.IsInterface(from):
 		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported", from, want))
-	case want.Underlying().(*types.Interface).NumMethods() > 0:
-		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to the interface %s is not supported yet", from, want))
 	}
 	// An interface without methods can hold anything. Nothing can be done
-	// with what it holds but pass it on.
-	v.eval(e, st, guard)
+	// with what it holds but pass it on. Each method of any other
+	// interface is checked against its contract, for the value as it is
+	// here.
+	converted := v.evalConverted(e, st, guard)
+	if want.Underlying().(*types.Interface).NumMethods() > 0 {
+		v.madeInterface(e, converted, from, want, st, guard)
+	}
 	held := v.fresh("iface", logic.Ref)
 	st.assume(logic.Ne(held, logic.RefLit(0)))
 	return value{held}
+}
+
+// evalConverted evaluates an expression that Go converts to an interface
+// type here; see converted.
+func (v *fnVerifier) evalConverted(e ast.Expr, st *state, guard []*logic.Term) value {
+	inner := ast.Unparen(e)
+	v.converting[inner]++
+	defer func() { v.converting[inner]-- }()
+	return v.eval(e, st, guard)
+}
+
+// madeInterface checks every method of the interface want, for a value of
+// the concrete type from that the expression e gives, against the contract
+// of the method. A method is checked as a method value whose receiver is
+// what the interface value holds: the value as it is here, which an
+// interface keeps for as long as it lives, or, for a method with a value
+// receiver of what a pointer points to, the struct read when the method
+// runs, from memory the check knows nothing about.
+func (v *fnVerifier) madeInterface(e ast.Expr, held value, from, want types.Type, st *state, guard []*logic.Term) {
+	iface := want.Underlying().(*types.Interface)
+	for method := range iface.Methods() {
+		T := v.methodContract(method)
+		if T == nil {
+			v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: its method %s has no contract, so nothing would say "+
+				"what code that calls it may rely on", from, want, methodTitle(method)))
+		}
+		for _, defect := range T.defects {
+			v.report(e.Pos(), "the contract of %s cannot be used: %s", methodTitle(method), defect)
+		}
+		if T.broken {
+			v.unsupported(e.Pos(), fmt.Sprintf("the contract of %s could not be understood", methodTitle(method)))
+		}
+	}
+	shown := types.TypeString(from, types.RelativeTo(v.pass.Pkg))
+	for method := range iface.Methods() {
+		selection := types.NewMethodSet(from).Lookup(method.Pkg(), method.Name())
+		concrete := selection.Obj().(*types.Func)
+		switch {
+		case isIfaceMethod(concrete):
+			// A method promoted from an embedded interface field calls
+			// through that field.
+			v.unsupported(e.Pos(), fmt.Sprintf("%s gets %s from an embedded field that holds an interface value, so it calls through that value, "+
+				"and code that an interface value runs cannot do that yet: no contract of a method of an interface has a variant, "+
+				"so nothing would prove that such calls end", shown, method.Name()))
+		case len(selection.Index()) > 1:
+			v.unsupported(e.Pos(), fmt.Sprintf("%s gets %s from an embedded field, and a promoted method cannot be used as a method of an interface yet",
+				shown, method.Name()))
+		}
+		recv := concrete.Type().(*types.Signature).Recv().Type()
+		_, fromPointer := from.Underlying().(*types.Pointer)
+		_, recvPointer := recv.(*types.Pointer)
+		title := methodOf(recv, concrete, v.pass.Pkg)
+		site := v.site(e.Pos(), "in %s used as a method of %s at %s", title, types.TypeString(want, types.RelativeTo(v.pass.Pkg)), v.placeOf(e.Pos()))
+		fun := &ast.SelectorExpr{X: e, Sel: &ast.Ident{NamePos: e.End(), Name: concrete.Name()}}
+		v.madeAs(e, fun, v.methodContract(method), concrete, "a method of "+types.TypeString(want, types.RelativeTo(v.pass.Pkg)), "an interface value", site,
+			func(sv *fnVerifier, entry *state, carry *transport) value {
+				kept := carry.value(held)
+				if !fromPointer || recvPointer {
+					return kept
+				}
+				// Go reads what the pointer points to each time the method
+				// runs, and panics if it is nil.
+				sv.check(entry, nil, logic.Ne(kept[0], logic.RefLit(0)), e.Pos(),
+					"%s has a value receiver, and the pointer that the interface value holds may be nil", title)
+				object := from.Underlying().(*types.Pointer).Elem()
+				read := sv.fetch(entry, entry.mem, sv.cellsOf(object), kept[0], kept[1])
+				sv.noteTyped(entry, read, object)
+				return read
+			}, st, guard)
+	}
+}
+
+// methodOf names a method of a concrete type in messages, as in
+// (*Table).Price or Level.String.
+func methodOf(recv types.Type, method *types.Func, pkg *types.Package) string {
+	shown := types.TypeString(recv, types.RelativeTo(pkg))
+	if _, isPointer := recv.(*types.Pointer); isPointer {
+		shown = "(" + shown + ")"
+	}
+	return shown + "." + method.Name()
 }
 
 // foreignMethod returns a method of the interface want that the interface
@@ -181,13 +264,14 @@ func (pv *pkgVerifier) addMethodContract(method *types.Func, defined bool, c *cl
 	pv.addValueClause(fn, c)
 }
 
-// withoutReceiver returns a function with the name, parameters, and results
-// of a method, but no receiver: what the contract of an interface method
-// speaks of.
+// withoutReceiver returns a function with the parameters and results of a
+// method, but no receiver: what the contract of an interface method speaks
+// of. It is named after the interface and the method, as in Pricer.Price,
+// which is how messages about the contract name it.
 func withoutReceiver(method *types.Func) *types.Func {
 	sig := method.Type().(*types.Signature)
 	plain := types.NewSignatureType(nil, nil, nil, sig.Params(), sig.Results(), sig.Variadic())
-	return types.NewFunc(method.Pos(), method.Pkg(), method.Name(), plain)
+	return types.NewFunc(method.Pos(), method.Pkg(), methodTitle(method), plain)
 }
 
 // methodTitle names a method of an interface type in messages, as in

@@ -234,7 +234,10 @@ func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term
 			v.unsupported(arg.Pos(), fmt.Sprintf(
 				"formatting a value of type %s may call methods, which are not verified, or follow pointers", t))
 		}
-		values[arg] = v.eval(arg, st, guard)
+		// Go converts the arguments of fmt.Errorf to any. That makes no
+		// interface value that verified code can call; what formatting
+		// may run is decided above.
+		values[arg] = v.evalConverted(arg, st, guard)
 	}
 	if position := v.pass.Fset.Position(call.Pos()); !slices.Contains(v.usage.Constructors, position) {
 		v.usage.Constructors = append(v.usage.Constructors, position)

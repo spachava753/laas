@@ -954,3 +954,12 @@ trusted:
   interfaces.loadShape:
     reason: Returns some shape or nil.
     modifies: []
+
+  interfaces.pricesAll:
+    reason: Takes a pricer without saying what it runs.
+    modifies: []
+
+  interfaces.keepsAny:
+    reason: Reads nothing of what it is given and calls nothing on it.
+    runs: [a]
+    modifies: []

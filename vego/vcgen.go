@@ -42,6 +42,10 @@ type loopSpec struct {
 type fnVerifier struct {
 	*pkgVerifier
 	fn *funcInfo
+	// converting counts, for each expression that Go converts to an
+	// interface type, the evaluations of it under way that check the
+	// conversion; see converted.
+	converting map[ast.Expr]int
 	// entry holds the values of the parameters on entry, entryBrk the number
 	// below which everything that existed on entry lies, and inputs the names
 	// of the constants that stand for the state on entry.
@@ -187,6 +191,7 @@ func (pv *pkgVerifier) newVerifier(fn *funcInfo) *fnVerifier {
 		pkgVerifier: pv, fn: fn, entry: map[*types.Var]value{}, names: map[string]int{},
 		reached: map[*funcInfo]bool{}, bitTerms: map[string]*logic.Term{}, lowZeros: map[string]uint{}, bitOrigins: map[string]bitOrigin{}, forgotten: map[string]forgottenPart{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{},
 		backgroundSeen: map[string]bool{}, targetSeen: map[string]bool{}, inlining: map[*ast.FuncLit]bool{}, joins: map[string]*joinedRegion{},
+		converting: map[ast.Expr]int{},
 	}
 }
 
@@ -455,6 +460,12 @@ func (v *fnVerifier) verify() {
 	v.seq(body.List, body.Lbrace, body.Rbrace, st, ctrl{}, func(end *state) {
 		v.returned(end, nil, body.Rbrace)
 	})
+	// A conversion to an interface type of a value without an expression
+	// of its own was not checked anywhere.
+	if unplaced := v.findConversions().unplaced[fn.decl]; len(unplaced) > 0 {
+		v.unsupported(unplaced[0], "Go converts a value to an interface type here that has no expression of its own, "+
+			"such as one result of a call with several, and such a conversion cannot be checked; assign the value to a variable of its own type first")
+	}
 	v.tieFailures()
 	for i, t := range v.frame {
 		// After a failure the state may hold a false assumption, under
@@ -766,6 +777,21 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 	}
 	var tag *logic.Term
 	if s.Tag != nil {
+		// Where the tag or a case is an interface and the other is not,
+		// Go converts the other one to compare them. That is refused
+		// before either is evaluated.
+		for _, clause := range s.Body.List {
+			for _, e := range clause.(*ast.CaseClause).List {
+				tagType, caseType := v.info.TypeOf(s.Tag), v.info.TypeOf(e)
+				switch {
+				case v.isNil(e) || types.IsInterface(tagType) == types.IsInterface(caseType):
+				case isError(tagType) || isError(caseType):
+					v.bothErrors(s.Tag, e, e.Pos())
+				default:
+					v.unsupported(e.Pos(), ifaceCompared)
+				}
+			}
+		}
 		v.evaluate(st, func() { tag = v.expr(s.Tag, st, nil) })
 	}
 	inner := ctrl{brk: k, cont: c.cont}

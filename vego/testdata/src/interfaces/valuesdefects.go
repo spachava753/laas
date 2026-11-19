@@ -73,7 +73,7 @@ func (q Square) Area() (a int) { return q.side * q.side }
 
 // @Ensures True
 func Concrete(q Square) (s Shape) {
-	return q // want `cannot verify Concrete: converting a interfaces.Square to the interface interfaces.Shape is not supported yet`
+	return q // want `cannot verify Concrete: it uses Area as a method of Shape, and Area has no contract`
 }
 
 type Stringish interface {

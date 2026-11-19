@@ -444,6 +444,9 @@ type pkgVerifier struct {
 	// nil for a method known to have none. See interfaces.go.
 	ifaceMethods    map[*types.Func]*funcInfo
 	importedMethods map[*types.Func]*funcInfo
+	// conversions lists the conversions to interface types in the package,
+	// once something asks; see conversions.go.
+	conversions *conversions
 	// assignedIn holds, for the body of each declared function, the
 	// variables that something other than their declaration assigns; see
 	// final.

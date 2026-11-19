@@ -118,7 +118,7 @@ func (pv *pkgVerifier) checkValueContract(fn *funcInfo) {
 	example := fmt.Sprintf("type %s func(...) (n int)", title)
 	if fn.methodOf != nil {
 		title = methodTitle(fn.methodOf)
-		example = fmt.Sprintf("%s(...) (n int)", fn.obj.Name())
+		example = fmt.Sprintf("%s(...) (n int)", fn.methodOf.Name())
 	}
 	sig := fn.obj.Type().(*types.Signature)
 	if sig.Variadic() {
@@ -822,14 +822,31 @@ func (v *fnVerifier) valueForm(e ast.Expr) (named, method *types.Func) {
 // of the type true. What it runs must make no call through a function
 // value.
 func (v *fnVerifier) madeFrom(e ast.Expr, T *funcInfo, callee *types.Func, receiver value, st *state, guard []*logic.Term) {
+	site := v.site(e.Pos(), "in %s used as a value of type %s at %s", types.ExprString(e), T.obj.Name(), v.placeOf(e.Pos()))
+	v.madeAs(e, e, T, callee, "a value", "a function value", site, func(_ *fnVerifier, _ *state, carry *transport) value {
+		return carry.value(receiver)
+	}, st, guard)
+}
+
+// madeAs checks that a function or method meets the contract T of what it
+// is made into where e is converted: a value of a function type, or a
+// method of an interface value. It is checked as a function of its own that
+// calls it, written fun: called in a state where the Requires of T hold,
+// with memory of its own, it must meet the Requires of the function, write
+// nothing T does not list, and leave the Ensures of T true. What it runs
+// must make no call through a function value or an interface value. as
+// says what it is used as, and holder what holds it, in messages; receive
+// gives the receiver of a method in the state of the check.
+func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as, holder string, site inlineSite,
+	receive func(sv *fnVerifier, entry *state, carry *transport) value, st *state, guard []*logic.Term) {
 	sig := callee.Type().(*types.Signature)
 	if sig.Variadic() || sig.TypeParams() != nil || sig.RecvTypeParams() != nil {
-		v.unsupported(e.Pos(), "variadic and generic functions cannot be used as values yet")
+		v.unsupported(e.Pos(), fmt.Sprintf("variadic and generic functions cannot be used as %s yet", as))
 	}
 	fn := v.contractOf(callee)
 	if fn == nil {
-		v.unsupported(e.Pos(), fmt.Sprintf("it uses %s as a value, and %s has no contract; annotate %s with // @ annotations so that it is verified, "+
-			"or add a trusted contract for %s to %s", callee.Name(), callee.Name(), callee.Name(), callee.FullName(), TrustFileName))
+		v.unsupported(e.Pos(), fmt.Sprintf("it uses %s as %s, and %s has no contract; annotate %s with // @ annotations so that it is verified, "+
+			"or add a trusted contract for %s to %s", callee.Name(), as, callee.Name(), callee.Name(), callee.FullName(), TrustFileName))
 	}
 	for _, defect := range fn.defects {
 		v.report(e.Pos(), "the contract of %s cannot be used: %s", callee.FullName(), defect)
@@ -838,35 +855,34 @@ func (v *fnVerifier) madeFrom(e ast.Expr, T *funcInfo, callee *types.Func, recei
 		v.unsupported(e.Pos(), callee.Name()+" has a contract that could not be understood")
 	}
 	// What a value made by verified code runs may make no call through a
-	// function value. No contract of a function type has a variant, so
-	// nothing would then prove that a chain of such calls ends: a value
-	// could be handed back to code that calls it again. With this rule a
-	// call through a value made by verified code runs code that makes no
-	// such call.
+	// function value or an interface value. No contract of a function type
+	// or an interface method has a variant, so nothing would then prove
+	// that a chain of such calls ends: a value could be handed back to code
+	// that calls it again. With this rule a call through a value made by
+	// verified code runs code that makes no such call.
 	if v.pkgVerifier.mayCallValues(callee) {
-		v.unsupported(e.Pos(), fmt.Sprintf("%s may call through a function value, and code that a function value runs cannot do that yet: "+
-			"no contract of a function type has a variant, so nothing would prove that such calls end", callee.Name()))
+		v.unsupported(e.Pos(), fmt.Sprintf("%s may call through a function value or an interface value, and code that %s runs cannot do that yet: "+
+			"no contract of a function type or of a method of an interface has a variant, so nothing would prove that such calls end", callee.Name(), holder))
 	}
-	site := v.site(e.Pos(), "in %s used as a value of type %s at %s", types.ExprString(e), T.obj.Name(), v.placeOf(e.Pos()))
 	sv, entry, carry := v.subVerifier(T, st, guard, site)
-	// The arguments of the call: the receiver as it was where the value
-	// was made, and the parameters of the type in order.
+	// The arguments of the call: the receiver, and the parameters of T in
+	// order.
 	args := map[*types.Var]value{}
 	var inputs []*types.Var
 	if sig.Recv() != nil {
-		args[fn.params[0]] = carry.value(receiver)
+		args[fn.params[0]] = receive(sv, entry, carry)
 		inputs = fn.params[1:]
 	} else {
 		inputs = fn.params
 	}
-	call := &ast.CallExpr{Fun: e, Lparen: e.End(), Rparen: e.End()}
+	call := &ast.CallExpr{Fun: fun, Lparen: e.End(), Rparen: e.End()}
 	for i, param := range inputs {
 		args[param] = sv.entry[T.params[i]]
 		call.Args = append(call.Args, &ast.Ident{NamePos: e.Pos(), Name: T.params[i].Name()})
 	}
 	if fn.trust != nil && len(fn.calls) > 0 {
-		v.unsupported(e.Pos(), fmt.Sprintf("%s calls a function it is given, and cannot be used as a value: "+
-			"what it would be given would come from code nobody has seen", callee.Name()))
+		v.unsupported(e.Pos(), fmt.Sprintf("%s calls a function it is given, and cannot be used as %s: "+
+			"what it would be given would come from code nobody has seen", callee.Name(), as))
 	}
 	if fn.trust != nil {
 		v.noteUse(fn, e.Pos())
@@ -876,9 +892,9 @@ func (v *fnVerifier) madeFrom(e ast.Expr, T *funcInfo, callee *types.Func, recei
 			if fn.runs[param] || !holdsCode(param.Type(), map[types.Type]bool{}) {
 				continue
 			}
-			v.unsupported(e.Pos(), fmt.Sprintf("%s is used as a value, which passes what it is called with to %s as %s; "+
+			v.unsupported(e.Pos(), fmt.Sprintf("%s is used as %s, which passes what it is called with to %s as %s; "+
 				"%s is trusted, and that can hold code nobody has seen. If its contract holds whatever that code does, "+
-				"list %s under runs in the contract", types.ExprString(e), fn.obj.Name(), param.Name(), fn.obj.Name(), param.Name()))
+				"list %s under runs in the contract", types.ExprString(e), as, fn.obj.Name(), param.Name(), fn.obj.Name(), param.Name()))
 		}
 	}
 	results := sv.invoke(call, fn, args, entry, nil)
