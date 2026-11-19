@@ -556,7 +556,7 @@ fix the order; split the statement so that the order is the one you mean, as in 
 
 ### Literals that cannot be verified
 
-A literal that is passed to a function, returned, or stored is a function value, unless the function is a trusted one that calls it while it runs. It needs a function type with a contract, and is verified as described in [Function literals as values](#function-literals-as-values). A literal given a type without a contract is reported as `cannot verify`:
+A literal that is passed to a function, returned, or stored is a function value, unless it is passed to a parameter of a trusted function that has a contract under `calls`. It needs a function type with a contract, and is verified as described in [Function literals as values](#function-literals-as-values). A literal given a type without a contract is reported as `cannot verify`:
 
 ```go
 // @Ensures True
@@ -2141,8 +2141,25 @@ func FieldsOf(line string) (n int) {
 
 ```text
 vego: cannot verify FieldsOf: isComma holds a function literal and is used here other than by
-calling it; ...; to hand it to a trusted function that calls it, write the literal where it is
-handed over
+calling it; a variable that holds a function literal is supported only when it is never assigned
+again and only called. To use the literal as a value, declare the variable with a function type
+that has a contract, as in var isComma T = func...; to hand it to a trusted function that calls
+it, write the literal where it is handed over
+```
+
+A literal, a function, or a method value passed to a parameter that the entry lists under `runs` without a contract under `calls` is reported too. With an entry for `each` that has `runs: [f]` and no `calls`:
+
+```go
+// @Ensures True
+func Visits(n int) {
+	each(n, func(i int) {})
+}
+```
+
+```text
+vego: cannot verify Visits: the function literal is handed to each as f, which its trusted contract
+lists under runs with no contract under calls; give f a contract under calls in the entry for
+guide.each
 ```
 
 #### What a run knows
@@ -2207,7 +2224,7 @@ handed; a function it is handed may not write what it may write, in the function
 count at callbacks.go:75:11
 ```
 
-The contract of `count` describes what `count` does to `t`. If a run could write `t` too, the contract would no longer say what `t` holds afterwards. A run could also call the trusted function again on the same memory. For `(*sync.Once).Do` that would never return: a function that `Do` runs and that calls `Do` on the same `Once` waits for itself. The rule covers such a call too, since the inner call writes what the outer one does. `Do` still has no contract that is true, shipped or your own: a run could copy the `Once` while `Do` holds its lock and call `Do` on the copy, which never returns either.
+The contract of `count` describes what `count` does to `t`. If a run could write `t` too, the contract would no longer say what `t` holds afterwards. A run could also call the trusted function again on the same memory. For `(*sync.Once).Do` that would never return. A function that `Do` runs and that calls `Do` on the same `Once` waits for itself. The rule covers such a call too, since the inner call writes what the outer one does. `Do` still has no contract that is true, shipped or your own. A run could copy the `Once` while `Do` holds its lock and call `Do` on the copy, which never returns either.
 
 #### Results that depend on what is handed over
 
@@ -2486,6 +2503,7 @@ This table lists the most common messages.
 | `x is assigned, which G may write itself while it runs the function it is handed` | A function handed to `G` writes memory that the `modifies` of `G` covers. | Write other memory, or make the write outside the function handed over. |
 | `the function literal run by G is not proved to return the same result whenever it is called with the same argument` | The contract of `G` speaks of what the function returns, and its result may depend on something other than its argument. | Make the result depend only on the argument and on memory that nothing writes during the call. |
 | `cannot verify F: x is passed to G as f, which G calls, and its type T has no contract` | Only a literal, a function, a method value, or a value of a type with a contract can be handed to `G`. | Hand over one of those. |
+| `cannot verify F: the function literal is handed to G as f, which its trusted contract lists under runs with no contract under calls` | The entry of `G` does not say how `G` calls `f`. | Give `f` a contract under `calls` in the entry. |
 | `cannot verify F: G calls a function it is given, and cannot be used as a value` | A trusted function with a contract under `calls` is used as a function value. | Call it directly. |
 | `the Ensures clauses of T are not proved to be satisfiable for every call that its Requires allow` | Some call that the `Requires` of `T` allow has no result that meets its `Ensures`. | Add the condition to the `Requires` clauses, or weaken the `Ensures`. |
 | `cannot verify F: a function literal used as a value cannot assign x` | The literal assigns a variable of the function around it. | Return the value from the literal, or write it into memory that the contract of the type lists. |

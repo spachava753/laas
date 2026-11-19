@@ -127,3 +127,20 @@ func UsesOldPlain() {
 func UsesEach() {
 	each(3, func(i int) {})
 }
+
+func runsOnly(n int, f func(i int)) {}
+
+// HandsRunsOnly hands a literal to a parameter that the entry lists under
+// runs with no contract under calls.
+//
+// @Ensures True
+func HandsRunsOnly() {
+	runsOnly(2, func(i int) {}) // want `cannot verify HandsRunsOnly: the function literal is handed to runsOnly as f, which its trusted contract lists under runs with no contract under calls; give f a contract under calls in the entry for callbacks.runsOnly`
+}
+
+// HandsRunsOnlyFunction hands it a function.
+//
+// @Ensures True
+func HandsRunsOnlyFunction() {
+	runsOnly(2, visitAny) // want `cannot verify HandsRunsOnlyFunction: visitAny is handed to runsOnly as f, which its trusted contract lists under runs with no contract under calls`
+}

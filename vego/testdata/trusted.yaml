@@ -925,3 +925,13 @@ trusted:
       f(i):
         deterministic: true
     modifies: []
+
+  callbacks.runsOnly:
+    reason: Test helper whose entry lists f under runs and gives it no contract under calls.
+    runs: [f]
+    modifies: []
+
+  guide.each:
+    reason: Calls f with each number below n; reviewed 2026-11-19.
+    runs: [f]
+    modifies: []

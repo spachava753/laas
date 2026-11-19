@@ -86,3 +86,17 @@ func Coin(n int) (i int) {
 		return rand.Intn(2) == 0
 	})
 }
+
+func each(n int, f func(i int)) {
+	for i := range n {
+		f(i)
+	}
+}
+
+// Visits hands each a literal, and the entry of each gives f no contract
+// under calls.
+//
+// @Ensures True
+func Visits(n int) {
+	each(n, func(i int) {}) // want `vego: cannot verify Visits: the function literal is handed to each as f, which its trusted contract lists under runs with no contract under calls; give f a contract under calls in the entry for guide.each`
+}

@@ -189,8 +189,38 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func) *funcIn
 	if fn.trust != nil {
 		v.noteUse(fn, call.Pos())
 		v.checkHandedOver(call, fn)
+		v.checkNotHandable(call, fn)
 	}
 	return fn
+}
+
+// checkNotHandable refuses a function literal, a function, or a method
+// value written as the argument of a trusted function's parameter that its
+// entry lists under runs and gives no contract under calls. Made into a
+// value of the parameter's type it would need a contract that the type,
+// which is not ours, cannot have; the entry is where to give one.
+func (v *fnVerifier) checkNotHandable(call *ast.CallExpr, fn *funcInfo) {
+	sig := fn.obj.Type().(*types.Signature)
+	for i, arg := range call.Args {
+		if i >= sig.Params().Len() {
+			break
+		}
+		param := sig.Params().At(i)
+		if !fn.runs[param] || fn.calls[param] != nil || !isFunc(param.Type()) {
+			continue
+		}
+		what := types.ExprString(arg)
+		switch inner := ast.Unparen(arg).(type) {
+		case *ast.FuncLit:
+			what = "the function literal"
+		default:
+			if named, method := v.valueForm(inner); named == nil && method == nil {
+				continue
+			}
+		}
+		v.unsupported(arg.Pos(), fmt.Sprintf("%s is handed to %s as %s, which its trusted contract lists under runs with no contract under calls; "+
+			"give %s a contract under calls in the entry for %s", what, fn.obj.Name(), param.Name(), param.Name(), fn.trust.key))
+	}
 }
 
 // checkHandedOver looks at what a call gives to a trusted function. Such a
