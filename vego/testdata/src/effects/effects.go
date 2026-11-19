@@ -19,7 +19,7 @@ func ConditionMutation(a []int) {
 	i := 0
 	// @Invariant 0 <= i <= 2
 	// @Variant 2-i
-	for step(a, i) { // want `vego:\ cannot\ verify\ ConditionMutation:\ step\ may\ modify\ a,\ so\ the\ call\ must\ be\ a\ statement\ of\ its\ own\ or\ the\ whole\ right\-hand\ side\ of\ an\ assignment\ to\ variables`
+	for step(a, i) { // want `vego: cannot verify ConditionMutation: step may modify a, and a call that may modify memory is not supported yet in the condition of a for loop`
 		i++
 	}
 }
@@ -39,7 +39,7 @@ func again(a []int) (result bool) {
 func Forever(a []int) {
 	// @Invariant a[0] >= 0
 	// @Variant a[0]
-	for again(a) { // want `vego: precondition of again may not hold: a\[0\] < 1000` `vego:\ cannot\ verify\ Forever:\ again\ may\ modify\ a,\ so\ the\ call\ must\ be\ a\ statement\ of\ its\ own\ or\ the\ whole\ right\-hand\ side\ of\ an\ assignment\ to\ variables`
+	for again(a) { // want `vego: precondition of again may not hold: a\[0\] < 1000` `vego: cannot verify Forever: again may modify a, and a call that may modify memory is not supported yet in the condition of a for loop`
 		a[0]--
 	}
 }
@@ -71,12 +71,13 @@ func reset(a []int) (result int) {
 // @Ensures result = 0
 func read(a []int, ignored int) (result int) { return a[0] }
 
-// ArgumentMutation returns 1: reset runs before read starts.
+// ArgumentMutation returns 1: reset runs before read starts, so read is
+// called with a[0] = 1.
 //
 // @Ensures result = 0
 func ArgumentMutation() (result int) {
 	a := []int{0}
-	return read(a, reset(a)) // want `vego:\ cannot\ verify\ ArgumentMutation:\ reset\ may\ modify\ a,\ so\ the\ call\ must\ be\ a\ statement\ of\ its\ own\ or\ the\ whole\ right\-hand\ side\ of\ an\ assignment\ to\ variables`
+	return read(a, reset(a)) // want `vego: precondition of read may not hold: a\[0\] = 0`
 }
 
 // @Requires |a| = 2 And a[1] < 1000
@@ -90,10 +91,11 @@ func tick(a []int) (result int) {
 // IndexTwice returns 1: the index expression is evaluated once.
 //
 // @Requires |a| = 2 And a[0] = 0 And a[1] = 0
+// @Modifies a
 // @Ensures result = 2
 func IndexTwice(a []int) (result int) {
-	a[tick(a)]++ // want `vego:\ cannot\ verify\ IndexTwice:\ tick\ may\ modify\ a,\ so\ the\ call\ must\ be\ a\ statement\ of\ its\ own\ or\ the\ whole\ right\-hand\ side\ of\ an\ assignment\ to\ variables`
-	return a[1]
+	a[tick(a)]++
+	return a[1] // want `vego: postcondition may not hold: result = 2`
 }
 
 func unknown() int { return 0 }
@@ -204,7 +206,7 @@ func TemporaryMake() (result int) {
 //
 // @Ensures result = 42
 func TemporaryOperand() (result int) {
-	return change([]int{0}) + 1 // want `vego:\ cannot\ verify\ TemporaryOperand:\ change\ may\ modify\ a,\ so\ the\ call\ must\ be\ a\ statement\ of\ its\ own\ or\ the\ whole\ right\-hand\ side\ of\ an\ assignment\ to\ variables`
+	return change([]int{0}) + 1 // want `vego: postcondition may not hold: result = 42`
 }
 
 // TemporaryAccepted passes a temporary where that is sound.
@@ -222,11 +224,13 @@ func setIndex(a []int) (result int) {
 	return 0
 }
 
-// AssignmentPanics indexes with a[0] after the call has changed it.
+// AssignmentPanics indexes with a[0], which Go may read after the call has
+// changed it.
 //
 // @Requires |a| = 1 And a[0] = 0
+// @Modifies a
 func AssignmentPanics(a []int) {
-	a[a[0]] = setIndex(a) // want `vego:\ cannot\ verify\ AssignmentPanics:\ setIndex\ may\ modify\ a,\ so\ the\ call\ must\ be\ a\ statement\ of\ its\ own\ or\ the\ whole\ right\-hand\ side\ of\ an\ assignment\ to\ variables`
+	a[a[0]] = setIndex(a) // want `vego: a\[0\] may be read before or after the call to setIndex, which may change it`
 }
 
 // SavedIndex states the intended order explicitly.

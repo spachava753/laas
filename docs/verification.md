@@ -767,13 +767,7 @@ The other way to keep a fact is to state it as a loop invariant, here `// @Invar
 
 ### Where a modifying call can appear
 
-A call to a function that has a `Modifies` clause is allowed in three places:
-
-- as a statement on its own;
-- as the only expression in a `return`;
-- as the entire right-hand side of an assignment to local variables or their fields. An assignment through a pointer, to a slice element, or to a map entry does not qualify.
-
-Consider a method that changes the stack and also returns a value:
+A call to a function that has a `Modifies` clause can stand where any other expression can. Consider a method that changes the stack and also returns a value:
 
 ```go
 // @Requires s != nil And s.n > 0
@@ -785,25 +779,64 @@ func (s *Stack) Pop() (result int) {
 }
 ```
 
-These calls are accepted:
+It can be an operand, an argument of another call, the condition of an `if`, or the tag of a `switch`:
 
 ```go
-x := s.Pop()
-return s.Pop()
+// @Requires s != nil And s.n > 1
+// @Requires Forall k in [0, s.n) : 0 <= s.items[k] <= 1000
+// @Modifies s.n
+// @Ensures result = s.items[s.n-1] + s.items[s.n-2]
+func PopSum(s *Stack) (result int) {
+	return s.Pop() + s.Pop()
+}
+
+// @Requires s != nil And s.n > 0
+// @Modifies s.n
+// @Ensures result <-> s.items[s.n-1] > 0
+func PopInCondition(s *Stack) (result bool) {
+	if s.Pop() > 0 {
+		return true
+	}
+	return false
+}
 ```
 
-A call inside a larger expression, as an argument, or in a condition is rejected:
+Go runs the calls in a statement from left to right, so the first `Pop` in `PopSum` takes the top element and the second takes the one below it.
+
+Three places are not supported yet: the condition of a `for` loop, the right of `&&` and `||`, and a `case` expression. A call there is reported as `cannot verify`. Call it in a statement of its own and use the result.
+
+### Reads that Go may make before or after a call
+
+Go fixes the order of the calls in a statement, and it runs an operation after its operands. It does not fix when the other operands are read. In `s.n + s.Pop()`, Go may read `s.n` before `Pop` runs or after it:
 
 ```go
-if s.Pop() > 0 {
+// @Requires s != nil And 0 < s.n < 1000
+// @Requires Forall k in [0, s.n) : 0 <= s.items[k] <= 1000
+// @Modifies s.n
+func PopAndCount(s *Stack) (result int) {
+	return s.n + s.Pop()
+}
 ```
 
 ```text
-vego: cannot verify PopInCondition: Pop may modify s.n, so the call must be a statement
-of its own or the whole right-hand side of an assignment to variables
+vego: s.n may be read before or after the call to Pop, which may change it, and Go does
+not fix the order; split the statement so that the order is the one you mean
 ```
 
-Assign the result to a variable first.
+`vego` looks at every read of memory in a statement: a field reached through a pointer, an element of a slice, an entry of a map, and a variable whose address is taken. For each one that Go may make before or after a call that modifies memory, it must prove that the read gives the same value either way. It decides this from the `Modifies` and `Ensures` clauses of the call. A local variable whose address is not taken cannot be changed by a call, so reading it never conflicts.
+
+Write the order you mean in separate statements:
+
+```go
+n := s.n
+return n + s.Pop()
+```
+
+Some reads are ordered after all. Go evaluates the arguments of a call before the call, and the left operand of `&&` and `||` before the right one. In `id(s.n) + s.Pop()`, `s.n` is read for `id`, which runs before `Pop`. In `s.Pop() > 0 && s.n > 0`, `s.n` is read after `Pop`.
+
+An assignment evaluates the operands of its targets together with its right-hand side, and assigns only after that. In `c.n = c.Inc()`, the field gets what `Inc` returns. In `a[a[0]] = f(a)`, the index `a[0]` is a read that Go may make before or after `f`.
+
+`append` is not ordered like a call, because the Go specification does not say that it is. When an `append` may write into the array of its slice, a call in the target of the same assignment may run before or after that write. Such a call must not modify anything, and its parameters and results must refer to no memory: integers, booleans, strings, errors, and structs of these. Otherwise `vego` reports the function as `cannot verify`. Assign the result of the call to a variable in a statement of its own first. A call among the operands of the `append` orders the `append` after the target, and then any call can stand there.
 
 ## Invariants of structs
 
@@ -1712,7 +1745,7 @@ A message that starts with `cannot verify` is different. `vego` did not attempt 
 
 - Unsupported Go, such as `parameter x has unsupported type any`. Rewrite that part, or move it out of the verified function.
 - A missing contract, such as `it calls helper, which has no contract`. Verify the callee or give it a trusted contract.
-- A restriction on where something can appear, such as `the call must be a statement of its own`. The message says what to do.
+- A restriction on where something can appear, such as `append is only supported as the whole right-hand side of an assignment or as the returned value`. The message says what to do.
 
 ## Messages
 
@@ -1736,6 +1769,7 @@ This table lists the most common messages.
 | `Ensures annotation is not attached to a function` | The clause is not in the doc comment of a function. | Move it into the doc comment. |
 | `x is assigned, which F may not modify; list it in a // @Modifies clause` | No `Modifies` entry covers memory of this kind. | Add it to `Modifies`. |
 | `... which F may not modify: nothing its // @Modifies clauses list is known to cover it` | An entry covers memory of this kind, but `vego` cannot prove it is this memory. It may be another element, another struct, or a slice that was replaced after `F` was called. | Make the entry match. For a replaced slice, the callee needs a `fresh ... Or within ...` clause. |
+| `x may be read before or after the call to F, which may change it, and Go does not fix the order` | Go may read `x` before or after `F` runs in this statement, and the two are not proved to give the same value. | Read `x` or call `F` in a statement of its own, in the order you mean. See [Reads that Go may make before or after a call](#reads-that-go-may-make-before-or-after-a-call). |
 | `Modifies lists x, but F never needs to modify it` | The `Modifies` list allows more than the body needs. | Remove or narrow the entry. |
 | `invariant of T may not hold for what is passed to F as x` | The struct invariant is not proved at the call. | Restore it before the call. In a loop, repeat it as a loop invariant. |
 | `invariant of T may not hold for x on return` | The struct invariant is not proved at the end of the function. | Restore it before returning. |
@@ -1771,7 +1805,8 @@ A function that uses any of the following is reported as `cannot verify`:
 - package-level variables, except error variables that are never assigned, of this package or another;
 - calls to variadic functions other than `fmt.Errorf`;
 - `append(s, t...)` and `copy`;
-- a modifying call inside a condition or a larger expression, as in `if !s.Push(x)` (see [Where a modifying call can appear](#where-a-modifying-call-can-appear));
+- a modifying call in the condition of a `for` loop, on the right of `&&` or `||`, or in a `case` expression (see [Where a modifying call can appear](#where-a-modifying-call-can-appear));
+- a call in the target of an assignment whose right-hand side is an `append` that may write into the array of its slice, unless the call modifies nothing and refers to no memory (see [Reads that Go may make before or after a call](#reads-that-go-may-make-before-or-after-a-call));
 - comparing structs with `==`;
 - comparing two errors with `==` when neither is `nil`, an error made by `errors.New` or `fmt.Errorf`, an error that a trusted contract vouches for, or an error variable that holds one or holds a pointer, integer, string, or boolean, or an array or struct of these (see [Comparing errors](#comparing-errors));
 - `errors.As`, `errors.Join`, `errors.Unwrap`, and `errors.Is` on an error whose origin is not known (see [Asking errors.Is](#asking-errorsis));

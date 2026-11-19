@@ -10,9 +10,15 @@ import (
 	"github.com/spachava753/laas/vego/internal/logic"
 )
 
-// variable returns the current value of a variable.
-func (v *fnVerifier) variable(id *ast.Ident, st *state) value {
+// variable returns the current value of a variable. One that lives in
+// memory is read from there.
+func (v *fnVerifier) variable(id *ast.Ident, st *state, guard []*logic.Term) value {
 	variable, _ := v.info.ObjectOf(id).(*types.Var)
+	if held := st.vals[variable]; held != nil && v.boxed[variable] {
+		return v.readAt(st, guard, v.unit.start(), id.Name, id.Pos(), func(sink *state, mem memory) value {
+			return v.pointedIn(sink, mem, variable.Type(), held)
+		})
+	}
 	if val := v.current(st, variable); val != nil {
 		return val
 	}
@@ -56,6 +62,7 @@ func (v *fnVerifier) expr(e ast.Expr, st *state, guard []*logic.Term) *logic.Ter
 // guard holds the conditions under which the expression is evaluated at all,
 // which matters on the right of && and ||.
 func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
+	defer v.begin()()
 	t := v.info.TypeOf(e)
 	if _, ok := layoutOf(t); !ok {
 		v.unsupported(e.Pos(), fmt.Sprintf("expressions of type %s are not supported", t))
@@ -68,15 +75,18 @@ func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 	case *ast.ParenExpr:
 		return v.eval(e.X, st, guard)
 	case *ast.Ident:
-		return v.variable(e, st)
+		return v.variable(e, st, guard)
 	case *ast.StarExpr:
 		object, ok := pointee(v.info.TypeOf(e.X))
 		if !ok {
 			break
 		}
+		start := v.unit.start()
 		pointer := v.eval(e.X, st, guard)
 		v.checkNil(st, guard, pointer[0], e.Pos())
-		return v.pointed(st, object, pointer)
+		return v.readAt(st, guard, start, types.ExprString(e), e.Pos(), func(sink *state, mem memory) value {
+			return v.pointedIn(sink, mem, object, pointer)
+		})
 	case *ast.UnaryExpr:
 		return v.unary(e, st, guard)
 	case *ast.BinaryExpr:
@@ -97,7 +107,16 @@ func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 		if selection == nil || selection.Kind() != types.FieldVal {
 			v.unsupported(e.Pos(), "only fields can be selected; variables of other packages and method values are not supported")
 		}
-		return v.fields(v.eval(e.X, st, guard), v.info.TypeOf(e.X), selection.Index(), st, guard, e.Sel.Pos())
+		// A field of a struct that lies in memory is read on its own, as
+		// Go reads it, and not as part of the whole struct.
+		start := v.unit.start()
+		if v.inMemory(e) && !hopsPointer(v.info.TypeOf(e.X), selection.Index()) {
+			lv := v.lvalue(e, st, guard)
+			return v.readAt(st, guard, start, types.ExprString(e), e.Pos(), func(sink *state, mem memory) value {
+				return v.loadIn(lv, sink, mem)
+			})
+		}
+		return v.fields(v.eval(e.X, st, guard), v.info.TypeOf(e.X), selection.Index(), st, guard, e.Sel.Pos(), start, types.ExprString(e))
 	case *ast.CompositeLit:
 		return v.literal(e, t, st, guard)
 	case *ast.CallExpr:
@@ -144,9 +163,57 @@ func (v *fnVerifier) settled(st *state, guard []*logic.Term, val value, t types.
 
 // pointed reads the struct a pointer points to.
 func (v *fnVerifier) pointed(st *state, t types.Type, pointer value) value {
-	val := v.fetch(st, st.mem, v.cellsOf(t), pointer[0], pointer[1])
-	v.noteTyped(st, val, t)
+	return v.pointedIn(st, st.mem, t, pointer)
+}
+
+// pointedIn reads the struct a pointer points to in some memory.
+func (v *fnVerifier) pointedIn(sink *state, mem memory, t types.Type, pointer value) value {
+	val := v.fetch(sink, mem, v.cellsOf(t), pointer[0], pointer[1])
+	v.noteTyped(sink, val, t)
 	return val
+}
+
+// inMemory reports whether an expression is a struct, or a field of one,
+// that lies in memory: a variable whose address is taken, what a pointer
+// points to, an element of a slice, or a field of one of these.
+func (v *fnVerifier) inMemory(e ast.Expr) bool {
+	switch e := ast.Unparen(e).(type) {
+	case *ast.Ident:
+		variable, ok := v.info.ObjectOf(e).(*types.Var)
+		return ok && v.boxed[variable]
+	case *ast.StarExpr:
+		_, ok := pointee(v.info.TypeOf(e.X))
+		return ok
+	case *ast.IndexExpr:
+		return isSlice(v.info.TypeOf(e.X))
+	case *ast.SelectorExpr:
+		selection := v.info.Selections[e]
+		if selection == nil || selection.Kind() != types.FieldVal {
+			return false
+		}
+		if _, viaPointer := pointee(v.info.TypeOf(e.X)); viaPointer {
+			return true
+		}
+		return v.inMemory(e.X)
+	}
+	return false
+}
+
+// hopsPointer reports whether a path of field indices from a value of the
+// type follows a pointer after its first step, as a field promoted from an
+// embedded pointer does.
+func hopsPointer(t types.Type, path []int) bool {
+	if object, ok := pointee(t); ok {
+		t = object
+	}
+	for _, index := range path[:len(path)-1] {
+		field := t.Underlying().(*types.Struct).Field(index).Type()
+		if _, ok := pointee(field); ok {
+			return true
+		}
+		t = field
+	}
+	return false
 }
 
 // newObject creates a struct holding the given value in an allocation of its
@@ -154,6 +221,7 @@ func (v *fnVerifier) pointed(st *state, t types.Type, pointer value) value {
 func (v *fnVerifier) newObject(st *state, t types.Type, val value) value {
 	ref := v.alloc(st, v.pass.TypesSizes.Sizeof(t) > 0)
 	v.put(st, v.cellsOf(t), ref, logic.IntLit(0), val)
+	v.noteBorn(st, ref, rowKeys(v.cellsOf(t)))
 	return value{ref, logic.IntLit(0)}
 }
 
@@ -248,13 +316,23 @@ func (v *fnVerifier) binaryExpr(e *ast.BinaryExpr, st *state, guard []*logic.Ter
 		}
 		v.unsupported(e.Pos(), fmt.Sprintf("operator %s is not supported for pointers", e.Op))
 	}
-	left := v.expr(e.X, st, guard)
-	switch e.Op {
-	case token.LAND:
-		return logic.And(left, v.expr(e.Y, st, append(slices.Clip(guard), left)))
-	case token.LOR:
+	if e.Op == token.LAND || e.Op == token.LOR {
+		// Go decides after the left operand whether to evaluate the right
+		// one, and evaluates it after that decision.
+		u := v.unit
+		decided := u.pushCeiling()
+		left := v.expr(e.X, st, guard)
+		u.reach(decided)
+		u.event()
+		floor := u.floor
+		u.floor = u.after
+		defer func() { u.floor = floor }()
+		if e.Op == token.LAND {
+			return logic.And(left, v.expr(e.Y, st, append(slices.Clip(guard), left)))
+		}
 		return logic.Or(left, v.expr(e.Y, st, append(slices.Clip(guard), logic.Not(left))))
 	}
+	left := v.expr(e.X, st, guard)
 	return v.binary(e.Op, left, v.expr(e.Y, st, guard), v.info.TypeOf(e), e.OpPos, st, guard)
 }
 
@@ -266,8 +344,11 @@ func (v *fnVerifier) indexExpr(e *ast.IndexExpr, st *state, guard []*logic.Term)
 		// Reading a key that is absent, or any key of a nil map, gives the
 		// zero value.
 		keyType, _ := mapParts(t)
+		start := v.unit.start()
 		ref, key := v.expr(e.X, st, guard), v.evalAs(e.Index, keyType, st, guard)[0]
-		return v.mapValue(st, st.mem, t, ref, key)
+		return v.readAt(st, guard, start, types.ExprString(e), e.Pos(), func(sink *state, mem memory) value {
+			return v.mapValue(sink, mem, t, ref, key)
+		})
 	case isString(t):
 		text, index := v.expr(e.X, st, guard), v.expr(e.Index, st, guard)
 		v.checkIndex(st, guard, logic.Len(text), index, e.Pos())
@@ -275,13 +356,16 @@ func (v *fnVerifier) indexExpr(e *ast.IndexExpr, st *state, guard []*logic.Term)
 		st.assume(logic.Implies(logic.And(guard...), v.typeFact(char, v.info.TypeOf(e))))
 		return value{char}
 	case isSlice(t):
+		start := v.unit.start()
 		header, index := v.eval(e.X, st, guard), v.expr(e.Index, st, guard)
 		v.checkIndex(st, guard, header[2], index, e.Pos())
-		element, ok := v.element(st, st.mem, header, t, index)
-		if !ok {
+		if _, ok := layoutOf(elemType(t)); !ok {
 			break
 		}
-		return element
+		return v.readAt(st, guard, start, types.ExprString(e), e.Pos(), func(sink *state, mem memory) value {
+			element, _ := v.element(sink, mem, header, t, index)
+			return element
+		})
 	}
 	v.unsupported(e.X.Pos(), fmt.Sprintf("indexing a %s is not supported", t))
 	return nil
@@ -311,18 +395,32 @@ func (v *fnVerifier) sliceExpr(e *ast.SliceExpr, st *state, guard []*logic.Term)
 	return value{header[0], v.elementAt(header, t, lo), logic.Sub(hi, lo), logic.Sub(limit, lo)}
 }
 
-// fields follows a path of field indices from a value.
-func (v *fnVerifier) fields(cur value, t types.Type, path []int, st *state, guard []*logic.Term, pos token.Pos) value {
+// fields follows a path of field indices from a value. A step through a
+// pointer reads memory; start is the number of events before the operand
+// was evaluated, and what names the selection.
+func (v *fnVerifier) fields(cur value, t types.Type, path []int, st *state, guard []*logic.Term, pos token.Pos, start int, what string) value {
 	for _, index := range path {
-		_, viaPointer := pointee(t)
-		if viaPointer {
-			v.checkNil(st, guard, cur[0], pos)
+		from := t
+		object, viaPointer := pointee(t)
+		if !viaPointer {
+			next, fieldType, ok := v.member(st, st.mem, cur, t, index)
+			if !ok {
+				v.unsupported(pos, fmt.Sprintf("this field has type %s, which is not supported", fieldType))
+			}
+			cur, t = next, fieldType
+			continue
 		}
-		next, fieldType, ok := v.member(st, st.mem, cur, t, index)
-		if !ok {
-			v.unsupported(pos, fmt.Sprintf("this field has type %s, which is not supported", fieldType))
+		v.checkNil(st, guard, cur[0], pos)
+		field := object.Underlying().(*types.Struct).Field(index).Type()
+		if _, _, ok := fieldLeaves(object, index); !ok {
+			v.unsupported(pos, fmt.Sprintf("this field has type %s, which is not supported", field))
 		}
-		cur, t = next, fieldType
+		pointer := cur
+		cur = v.readAt(st, guard, start, what, pos, func(sink *state, mem memory) value {
+			next, _, _ := v.member(sink, mem, pointer, from, index)
+			return next
+		})
+		t = field
 	}
 	return cur
 }
@@ -380,7 +478,9 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) v
 		operand := v.eval(e.Args[0], st, guard)
 		switch {
 		case isMap(v.info.TypeOf(e.Args[0])) && builtin("len"):
-			return value{v.mapLen(st, st.mem, v.info.TypeOf(e.Args[0]), operand[0])}
+			return v.readAt(st, guard, v.unit.start(), types.ExprString(e), e.Pos(), func(sink *state, mem memory) value {
+				return value{v.mapLen(sink, mem, v.info.TypeOf(e.Args[0]), operand[0])}
+			})
 		case isMap(v.info.TypeOf(e.Args[0])):
 			v.unsupported(e.Pos(), "cap of a map is not supported")
 		case isString(v.info.TypeOf(e.Args[0])):
@@ -482,8 +582,12 @@ func (v *fnVerifier) conversion(e *ast.CallExpr, st *state, guard []*logic.Term)
 	case v.isNil(e.Args[0]):
 		return v.evalAs(e.Args[0], to, st, guard)
 	case bytes(from) && isString(to):
-		text, _ := v.view(st, st.mem, v.eval(e.Args[0], st, guard), from)
-		return value{text}
+		start := v.unit.start()
+		header := v.eval(e.Args[0], st, guard)
+		return v.readAt(st, guard, start, "the elements of "+types.ExprString(e.Args[0]), e.Pos(), func(sink *state, mem memory) value {
+			text, _ := v.view(sink, mem, header, from)
+			return value{text}
+		})
 	case isString(from) && bytes(to):
 		// Go does not say how much capacity the new array has. The bytes go
 		// into memory and the new slice is described by facts that hold
@@ -493,6 +597,7 @@ func (v *fnVerifier) conversion(e *ast.CallExpr, st *state, guard []*logic.Term)
 		only := v.cellsOf(elemType(to))[0]
 		copied := value{v.alloc(st, true), logic.IntLit(0), logic.Len(text), v.fresh("cap", logic.Int)}
 		st.storeRow(only.key, only.sort, copied[0], text)
+		v.noteBorn(st, copied[0], rowKeys([]cell{only}))
 		st.assume(v.wellFormed(copied, to, st.brk))
 		return copied
 	}

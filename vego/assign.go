@@ -176,9 +176,11 @@ func bounds(cells []cell) (lo, hi int64) {
 	return lo, hi
 }
 
-// load returns the current value of an assignment target without evaluating
-// its operands a second time.
-func (v *fnVerifier) load(lv lvalue, st *state) value {
+// loadRecorded returns the current value of an assignment target without
+// evaluating its operands a second time. Reading memory is recorded in the
+// unit; start is the number of events before the operands of the target
+// were evaluated.
+func (v *fnVerifier) loadRecorded(lv lvalue, st *state, guard []*logic.Term, start int) value {
 	switch lv.kind {
 	case placeLocal:
 		whole := st.vals[lv.local]
@@ -186,15 +188,23 @@ func (v *fnVerifier) load(lv lvalue, st *state) value {
 			v.unsupported(lv.pos, "this operand cannot be read and updated in place")
 		}
 		return whole[lv.lo : lv.lo+len(lv.leaves)]
-	case placeMem:
-		val := v.fetch(st, st.mem, lv.cells, lv.ref, lv.at)
-		v.noteTyped(st, val, lv.typ)
-		return val
-	case placeMap:
-		return v.mapValue(st, st.mem, lv.mapType, lv.ref, lv.at)
+	case placeMem, placeMap:
+		return v.readAt(st, guard, start, lv.text, lv.pos, func(sink *state, mem memory) value {
+			return v.loadIn(lv, sink, mem)
+		})
 	}
 	v.unsupported(lv.pos, "this operand cannot be read and updated in place")
 	return nil
+}
+
+// loadIn reads what an assignment target in memory holds in some memory.
+func (v *fnVerifier) loadIn(lv lvalue, sink *state, mem memory) value {
+	if lv.kind == placeMap {
+		return v.mapValue(sink, mem, lv.mapType, lv.ref, lv.at)
+	}
+	val := v.fetch(sink, mem, lv.cells, lv.ref, lv.at)
+	v.noteTyped(sink, val, lv.typ)
+	return val
 }
 
 // store performs an assignment in the symbolic state. A write to memory must
@@ -229,26 +239,16 @@ func (v *fnVerifier) store(lv lvalue, val value, st *state) {
 }
 
 // assign executes an assignment. The operands of the targets and the
-// right-hand sides are evaluated first, and only then are the targets
-// updated, in order. The relative order of those evaluations only matters
-// when one of them modifies memory, which is ruled out: a call that does is
-// allowed only as the whole right-hand side of an assignment to variables.
-// An append is such a right-hand side too, and continues once for each way
-// it can turn out.
+// right-hand sides are evaluated first, as one unit, and only then are the
+// targets updated, in order. An append as the right-hand side continues
+// once for each way it can turn out, and ends the unit itself.
 func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
+	v.openUnit(st)
 	targets := make([]lvalue, len(s.Lhs))
-	plain := true
 	for i, lhs := range s.Lhs {
 		targets[i] = v.lvalue(lhs, st, nil)
-		// Where a variable is does not depend on what a call does, whether
-		// it is held by the verifier or lives in memory.
-		plain = plain && (targets[i].kind <= placeLocal || targets[i].box != nil)
 	}
 	simple := s.Tok == token.ASSIGN || s.Tok == token.DEFINE
-	v.effectful = nil
-	if len(s.Rhs) == 1 && plain && simple {
-		v.allowEffects(s.Rhs[0])
-	}
 	var values []value
 	switch {
 	case !simple:
@@ -258,7 +258,9 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
 			token.SHL_ASSIGN: token.SHL, token.SHR_ASSIGN: token.SHR, token.AND_ASSIGN: token.AND,
 			token.OR_ASSIGN: token.OR, token.XOR_ASSIGN: token.XOR, token.AND_NOT_ASSIGN: token.AND_NOT,
 		}[s.Tok]
-		current, operand := v.load(targets[0], st), v.expr(s.Rhs[0], st, nil)
+		// x op= y reads x once, as one of the operands.
+		current := v.loadRecorded(targets[0], st, nil, 0)
+		operand := v.expr(s.Rhs[0], st, nil)
 		if _, single := sortOf(targets[0].typ); !single {
 			v.unsupported(s.Pos(), fmt.Sprintf("operator %s is not supported here", s.Tok))
 		}
@@ -279,8 +281,14 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
 		if want := wanted(targets)[0]; want != nil && !types.Identical(want, elem) {
 			v.unsupported(s.Pos(), fmt.Sprintf("converting a %s to a %s is not supported here; assign the value to a variable of its own type first", elem, want))
 		}
+		start := v.unit.events
 		ref, key := v.expr(read.X, st, nil), v.evalAs(read.Index, keyType, st, nil)[0]
-		values = []value{v.mapValue(st, st.mem, t, ref, key), {v.mapHas(st, st.mem, t, ref, key)}}
+		v.unit.starts = append(v.unit.starts, start)
+		both := v.readAt(st, nil, start, types.ExprString(read), read.Pos(), func(sink *state, mem memory) value {
+			return append(slices.Clone(v.mapValue(sink, mem, t, ref, key)), v.mapHas(sink, mem, t, ref, key))
+		})
+		v.unit.starts = v.unit.starts[:len(v.unit.starts)-1]
+		values = []value{both[:len(both)-1], both[len(both)-1:]}
 	case len(s.Rhs) == 1 && len(s.Lhs) > 1:
 		values = v.callResults(s.Rhs[0], st, wanted(targets))
 	default:
@@ -288,6 +296,7 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
 			values = append(values, v.evalAs(rhs, v.targetType(targets[i], rhs), st, nil))
 		}
 	}
+	v.closeUnit(st)
 	for i, target := range targets {
 		v.store(target, values[i], st)
 	}
@@ -335,6 +344,7 @@ func (v *fnVerifier) callResults(e ast.Expr, st *state, wants []types.Type) []va
 			}
 		}
 	}
+	defer v.begin()()
 	return v.call(call, st, nil)
 }
 
@@ -364,12 +374,20 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 	if _, ok := layoutOf(elem); !ok {
 		v.unsupported(call.Pos(), fmt.Sprintf("slices of %s are not supported", elem))
 	}
+	// The append runs after its operands. Since it is not ordered like a
+	// call, it is ordered after the calls of the targets only by an event
+	// among its operands.
+	u := v.unit
+	operands := u.pushCeiling()
+	start, readsBefore := u.events, len(u.reads)
 	base := v.evalAs(call.Args[0], t, st, nil)
 	var added []value
 	for _, arg := range call.Args[1:] {
 		added = append(added, v.evalAs(arg, elem, st, nil))
 	}
+	u.reach(operands)
 	if len(added) == 0 {
+		v.closeUnit(st)
 		k(st, base)
 		return
 	}
@@ -389,16 +407,36 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		v.branch(call.Pos())
 		next := st.clone()
 		next.assume(inPlace)
-		start := v.elementAt(base, t, length)
+		at := v.elementAt(base, t, length)
 		into := written{ref: ref}
 		for j := range added {
-			into.parts = append(into.parts, stretchesOf(cells, logic.Add(start, logic.IntLit(int64(j)*step)))...)
+			into.parts = append(into.parts, stretchesOf(cells, logic.Add(at, logic.IntLit(int64(j)*step)))...)
 		}
 		v.checkWrite(next, nil, into, call.Pos(),
 			fmt.Sprintf("append may write into the capacity of %s", types.ExprString(call.Args[0])))
 		for j, element := range added {
-			v.put(next, cells, ref, logic.Add(start, logic.IntLit(int64(j)*step)), element)
+			v.put(next, cells, ref, logic.Add(at, logic.IntLit(int64(j)*step)), element)
 		}
+		v.unit = u.fork()
+		if v.unit.events == start {
+			// Nothing orders the write after the targets. A call there may
+			// run before or after it, which is the same only for a call
+			// whose contract changes nothing and reads no memory; and
+			// every read there, including those for such a call, may see
+			// the write.
+			for _, made := range v.unit.calls {
+				if !made.pure {
+					v.unsupported(made.pos, fmt.Sprintf("%s is called in the target of this assignment, and Go may call it before or after "+
+						"append writes into the array of %s; assign the result of %s to a variable in a statement of its own first",
+						made.name, types.ExprString(call.Args[0]), made.name))
+				}
+			}
+			for _, r := range v.unit.reads[:readsBefore] {
+				r.end = true
+			}
+		}
+		v.unit.wrote(next, "the write of append into the array of "+types.ExprString(call.Args[0]))
+		v.closeUnit(next)
 		k(next, value{ref, base[1], grown, capacity})
 	}
 	if !v.quickly(st, nil, inPlace) {
@@ -410,6 +448,20 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		// already at the limit and make everything after the append
 		// provable.
 		v.checkAlloc(next, nil, grown, elem, call.Pos(), "the slice that append grows")
+		// Copying the old elements reads them, which may happen before or
+		// after the calls of the targets.
+		v.unit = u.fork()
+		v.unit.starts = append(v.unit.starts, start)
+		extent := logic.Mul(length, logic.IntLit(step))
+		v.readAt(next, nil, start, "the elements of "+types.ExprString(call.Args[0])+" that append copies", call.Pos(),
+			func(sink *state, mem memory) value {
+				copied := make(value, len(keys))
+				for i, key := range keys {
+					copied[i] = logic.Subseq(v.row(sink, mem, key, sorts[key], ref), base[1], logic.Add(base[1], extent))
+				}
+				return copied
+			})
+		v.closeUnit(next)
 		// The new array holds the old elements and the added ones. What
 		// lies in its capacity beyond them is not said: it is certainly not
 		// what followed the old elements in their array.
@@ -444,28 +496,25 @@ func (v *fnVerifier) declare(s *ast.DeclStmt, st *state) {
 	}
 	for _, spec := range decl.Specs {
 		spec := spec.(*ast.ValueSpec)
+		v.openUnit(st)
 		targets := make([]lvalue, len(spec.Names))
 		for i, name := range spec.Names {
 			targets[i] = v.lvalue(name, st, nil)
 		}
 		var values []value
-		v.effectful = nil
 		switch {
 		case len(spec.Values) == 0:
 			for _, target := range targets {
 				values = append(values, zeroValue(v.targetType(target, nil)))
 			}
 		case len(spec.Values) == 1 && len(spec.Names) > 1:
-			v.allowEffects(spec.Values[0])
 			values = v.callResults(spec.Values[0], st, wanted(targets))
 		default:
-			if len(spec.Values) == 1 {
-				v.allowEffects(spec.Values[0])
-			}
 			for i, initial := range spec.Values {
 				values = append(values, v.evalAs(initial, v.targetType(targets[i], initial), st, nil))
 			}
 		}
+		v.closeUnit(st)
 		for i, target := range targets {
 			v.store(target, values[i], st)
 		}
@@ -475,15 +524,15 @@ func (v *fnVerifier) declare(s *ast.DeclStmt, st *state) {
 // returnStmt evaluates the returned values and checks the postcondition.
 func (v *fnVerifier) returnStmt(s *ast.ReturnStmt, st *state) {
 	results := make([]value, len(v.fn.results))
-	v.effectful = nil
-	if len(s.Results) == 1 {
-		v.allowEffects(s.Results[0])
-	}
-	switch {
-	case len(s.Results) == 0:
+	if len(s.Results) == 0 {
 		for i, result := range v.fn.results {
 			results[i] = v.current(st, result)
 		}
+		v.atReturn(st, results, s.Pos())
+		return
+	}
+	v.openUnit(st)
+	switch {
 	case len(s.Results) == 1 && len(results) > 1:
 		wants := make([]types.Type, len(v.fn.results))
 		for i, result := range v.fn.results {
@@ -500,6 +549,7 @@ func (v *fnVerifier) returnStmt(s *ast.ReturnStmt, st *state) {
 			results[i] = v.evalAs(e, v.fn.results[i].Type(), st, nil)
 		}
 	}
+	v.closeUnit(st)
 	v.atReturn(st, results, s.Pos())
 }
 
@@ -526,7 +576,6 @@ func (v *fnVerifier) atReturn(st *state, results []value, pos token.Pos) {
 	for _, put := range slices.Backward(st.deferred) {
 		// A deferred call is a statement of its own, so it may modify
 		// memory; what it returns is dropped.
-		v.effectful = put.call
 		v.invoke(put.call, put.fn, put.args, st, nil)
 	}
 	st.deferred = nil

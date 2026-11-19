@@ -72,12 +72,10 @@ type fnVerifier struct {
 	names    map[string]int
 	branches int
 	measure  *logic.Term
-	// effectful is the one call of the current statement that may modify
-	// memory: a call that is a statement of its own, the whole right-hand
-	// side of an assignment to variables, or the only returned expression.
-	// Anywhere else such a call would run between the evaluation of other
-	// operands, whose order the symbolic execution does not model.
-	effectful *ast.CallExpr
+	// unit is the evaluation of the operands of the statement being
+	// executed, in which reads of memory are recorded so that their order
+	// relative to the calls that write memory can be checked; see order.go.
+	unit *unit
 	// outside records that execution reached a call whose failure no
 	// contract predicts; reached holds the verified callees returning an
 	// error that execution reached, which may turn out to be excused.
@@ -125,12 +123,6 @@ type fnVerifier struct {
 	trees      []errorTree
 	isTargets  []*logic.Term
 	targetSeen map[string]bool
-}
-
-// allowEffects marks e, when it is a call, as the call of the current
-// statement that may modify memory.
-func (v *fnVerifier) allowEffects(e ast.Expr) {
-	v.effectful, _ = ast.Unparen(e).(*ast.CallExpr)
 }
 
 // run executes one task on a function, turning the panics that abandon a
@@ -554,8 +546,10 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 			v.deleteKey(call, st)
 			break
 		}
-		v.allowEffects(call)
-		v.call(call, st, nil)
+		v.evaluate(st, func() {
+			defer v.begin()()
+			v.call(call, st, nil)
+		})
 	case *ast.AssignStmt:
 		v.assign(s, st, k)
 		return
@@ -564,8 +558,12 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 		if s.Tok == token.DEC {
 			delta = logic.IntLit(-1)
 		}
-		target := v.lvalue(s.X, st, nil)
-		current := v.load(target, st)[0]
+		var target lvalue
+		var current *logic.Term
+		v.evaluate(st, func() {
+			target = v.lvalue(s.X, st, nil)
+			current = v.loadRecorded(target, st, nil, 0)[0]
+		})
 		if current.Sort == logic.Float {
 			current = v.opaque(s.Tok, current)
 		} else {
@@ -622,7 +620,13 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 		v.unsupported(s.Pos(), "deferring errors.Is is not supported: its result would be lost")
 	}
 	fn := v.contractFor(s.Call, callee)
-	st.deferred = append(slices.Clip(st.deferred), deferredCall{s.Call, fn, v.arguments(s.Call, callee, st, nil)})
+	// The deferred call itself runs later, so nothing here comes before it.
+	var args map[*types.Var]value
+	v.evaluate(st, func() {
+		defer v.begin()()
+		args = v.arguments(s.Call, callee, st, nil)
+	})
+	st.deferred = append(slices.Clip(st.deferred), deferredCall{s.Call, fn, args})
 }
 
 // branch counts one more fork in the path exploration.
@@ -649,7 +653,7 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 	}
 	var tag *logic.Term
 	if s.Tag != nil {
-		tag = v.expr(s.Tag, st, nil)
+		v.evaluate(st, func() { tag = v.expr(s.Tag, st, nil) })
 	}
 	inner := ctrl{brk: k, cont: c.cont}
 	var failed []*logic.Term
@@ -664,20 +668,24 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 		for _, e := range clause.List {
 			guard := append(slices.Clip(failed), logic.Not(logic.Or(alternatives...)))
 			var value *logic.Term
-			switch {
-			case tag == nil:
-				value = v.expr(e, st, guard)
-			case v.isNil(e) && tag.Sort == logic.Err:
-				value = logic.IsNil(tag)
-			case v.isNil(e) && tag.Sort == logic.Ref:
-				value = logic.Eq(tag, logic.RefLit(0))
-			case tag.Sort == logic.Err:
-				value = v.errorsEqual(s.Tag, e, tag, v.expr(e, st, guard), e.Pos())
-			default:
-				// A case matches when Go's == holds, which for floats,
-				// strings, and errors is not plain equality of terms.
-				value = v.binary(token.EQL, tag, v.expr(e, st, guard), v.info.TypeOf(s.Tag), e.Pos(), st, guard)
-			}
+			// Each case expression is evaluated on its own, after the
+			// comparisons before it.
+			v.evaluate(st, func() {
+				switch {
+				case tag == nil:
+					value = v.expr(e, st, guard)
+				case v.isNil(e) && tag.Sort == logic.Err:
+					value = logic.IsNil(tag)
+				case v.isNil(e) && tag.Sort == logic.Ref:
+					value = logic.Eq(tag, logic.RefLit(0))
+				case tag.Sort == logic.Err:
+					value = v.errorsEqual(s.Tag, e, tag, v.expr(e, st, guard), e.Pos())
+				default:
+					// A case matches when Go's == holds, which for floats,
+					// strings, and errors is not plain equality of terms.
+					value = v.binary(token.EQL, tag, v.expr(e, st, guard), v.info.TypeOf(s.Tag), e.Pos(), st, guard)
+				}
+			})
 			alternatives = append(alternatives, value)
 		}
 		matched := logic.Or(alternatives...)
@@ -706,7 +714,8 @@ func (v *fnVerifier) ifStmt(s *ast.IfStmt, st *state, c ctrl, k func(*state)) {
 		return
 	}
 	v.branch(s.Pos())
-	cond := v.expr(s.Cond, st, nil)
+	var cond *logic.Term
+	v.evaluate(st, func() { cond = v.expr(s.Cond, st, nil) })
 	taken, skipped := st.clone(), st.clone()
 	taken.decide(cond)
 	skipped.decide(logic.Not(cond))

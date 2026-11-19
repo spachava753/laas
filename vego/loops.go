@@ -464,7 +464,12 @@ func (v *fnVerifier) forStmt(s *ast.ForStmt, spec *loopSpec, renewed []*types.Va
 		if s.Cond == nil {
 			return logic.True()
 		}
-		return v.expr(s.Cond, st, nil)
+		var cond *logic.Term
+		v.evaluate(st, func() {
+			v.unit.refuse = "the condition of a for loop"
+			cond = v.expr(s.Cond, st, nil)
+		})
+		return cond
 	}
 	v.loop(shape, st, k)
 }
@@ -493,9 +498,13 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 	}
 	ranged := v.info.TypeOf(s.X)
 	sort, single := sortOf(ranged)
+	// The range expression is evaluated once, before the first iteration.
+	// What it reads of memory is read in the same unit.
+	v.openUnit(st)
 	switch {
 	case single && sort == logic.Int:
 		count := v.expr(s.X, st, nil)
+		v.closeUnit(st)
 		shape.limit = logic.Ite(logic.Le(logic.IntLit(0), count), count, logic.IntLit(0))
 		shape.bind = func(st *state, counter *logic.Term) {
 			if key != nil {
@@ -508,6 +517,7 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 		// never past the end. Which character, and how many bytes, is not
 		// modelled.
 		shape.limit = logic.Len(v.expr(s.X, st, nil))
+		v.closeUnit(st)
 		shape.step = func(st *state, counter *logic.Term) *logic.Term {
 			next := v.fresh("offset", logic.Int)
 			st.assume(logic.And(logic.Lt(counter, next), logic.Le(next, logic.Add(counter, logic.IntLit(4))), logic.Le(next, shape.limit)))
@@ -532,6 +542,7 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 			}
 		}
 		ref := v.expr(s.X, st, nil)
+		v.closeUnit(st)
 		shape.limit = v.mapLen(st, st.mem, ranged, ref)
 		keyType, _ := mapParts(ranged)
 		shape.bind = func(st *state, counter *logic.Term) {
@@ -546,6 +557,7 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 		}
 	case isSlice(ranged):
 		header := v.eval(s.X, st, nil)
+		v.closeUnit(st)
 		shape.limit = header[2]
 		shape.bind = func(st *state, counter *logic.Term) {
 			if key != nil {

@@ -181,6 +181,12 @@ func (v *fnVerifier) table(sink *state, mem memory, key string, sort logic.Sort,
 	if sink == nil {
 		return current
 	}
+	// While an evaluation unit is open, every read of memory made on
+	// behalf of a state must be a recorded read or a quiet one; a read made
+	// any other way is one whose order has not been looked at.
+	if u := v.unit; u != nil && u.recording == 0 && u.quiet == 0 {
+		panic("vego: internal error: memory is read without being recorded in the evaluation unit")
+	}
 	for at := current; ; {
 		for at.Op == logic.OpStore {
 			at = at.Args[0]
@@ -361,7 +367,17 @@ func (v *fnVerifier) allocSlice(st *state, elem types.Type, elements []value, le
 	for i, element := range elements {
 		v.put(st, cells, ref, logic.IntLit(int64(i)*v.span(elem)), element)
 	}
+	v.noteBorn(st, ref, rowKeys(cells))
 	return value{ref, logic.IntLit(0), length, capacity}
+}
+
+// rowKeys returns the regions that the cells lie in, with the sort of each.
+func rowKeys(cells []cell) map[string]logic.Sort {
+	keys := map[string]logic.Sort{}
+	for _, c := range cells {
+		keys[c.key] = logic.SeqOf(logic.SeqOf(c.sort))
+	}
+	return keys
 }
 
 // mustLayout returns the leaves of a type that is known to be modelled.

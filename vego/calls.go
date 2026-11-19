@@ -96,14 +96,51 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	if callee == nil {
 		v.unsupported(call.Pos(), "only calls to named functions and methods are supported")
 	}
-	if errorConstructor(callee) {
-		return []value{{v.newError(call, st, guard)}}
+	// The receiver and the arguments are evaluated before the call, which
+	// is an event in the order Go fixes; see order.go.
+	u := v.unit
+	operands := u.pushCeiling()
+	made := unitCall{name: callee.Name(), pos: call.Pos()}
+	var results []value
+	switch {
+	case errorConstructor(callee):
+		results = []value{{v.newError(call, st, guard)}}
+		u.reach(operands)
+		made.pure = true
+	case isErrorsIs(callee):
+		results = []value{{v.errorsIs(call, st, guard)}}
+		u.reach(operands)
+		made.pure = true
+	default:
+		fn := v.contractFor(call, callee)
+		args := v.arguments(call, callee, st, guard)
+		u.reach(operands)
+		made.pure = len(fn.modifies) == 0 && signatureMemoryFree(callee.Type().(*types.Signature))
+		results = v.invoke(call, fn, args, st, guard)
 	}
-	if isErrorsIs(callee) {
-		return []value{{v.errorsIs(call, st, guard)}}
+	u.calls = append(u.calls, made)
+	u.event()
+	return results
+}
+
+// signatureMemoryFree reports whether no receiver, parameter, or result of
+// a signature refers to memory. A contract over such a signature reads no
+// memory and means the same whatever memory holds. That rests on contracts
+// naming nothing but parameters, results, and error variables; once a
+// contract can name another package-level variable, naming one must count
+// as reading memory too.
+func signatureMemoryFree(sig *types.Signature) bool {
+	if sig.Recv() != nil && !memoryFree(sig.Recv().Type()) {
+		return false
 	}
-	fn := v.contractFor(call, callee)
-	return v.invoke(call, fn, v.arguments(call, callee, st, guard), st, guard)
+	for _, tuple := range []*types.Tuple{sig.Params(), sig.Results()} {
+		for variable := range tuple.Variables() {
+			if !memoryFree(variable.Type()) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // contractFor returns the contract a call is checked against, after making
@@ -241,7 +278,17 @@ func (v *fnVerifier) arguments(call *ast.CallExpr, callee *types.Func, st *state
 // evaluated: at the call itself, or earlier for a deferred call, which runs
 // when the function returns with the arguments it was given at the defer
 // statement.
+//
+// What it reads of memory is what the contract says, which is not a read Go
+// makes; the receiver and the arguments have been read already.
 func (v *fnVerifier) invoke(call *ast.CallExpr, fn *funcInfo, args map[*types.Var]value, st *state, guard []*logic.Term) []value {
+	var results []value
+	v.quietly(func() { results = v.apply(call, fn, args, st, guard) })
+	return results
+}
+
+// apply does the work of invoke.
+func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var]value, st *state, guard []*logic.Term) []value {
 	callee := fn.obj
 	sig := callee.Type().(*types.Signature)
 	passed := map[*types.Var]string{}
@@ -272,10 +319,16 @@ func (v *fnVerifier) invoke(call *ast.CallExpr, fn *funcInfo, args map[*types.Va
 	}
 	v.checkRecursion(fn, pre, st, guard, call)
 	written := v.targets(fn, args, st, before)
-	if len(written) > 0 && (call != v.effectful || len(guard) > 0) {
-		v.unsupported(call.Pos(), fmt.Sprintf(
-			"%s may modify %s, so the call must be a statement of its own "+
-				"or the whole right-hand side of an assignment to variables", name, written[0].text))
+	if u := v.unit; len(written) > 0 && u != nil {
+		switch {
+		case len(guard) > 0:
+			v.unsupported(call.Pos(), fmt.Sprintf(
+				"%s may modify %s, and a call that may modify memory is not supported yet where it runs only on some paths: "+
+					"on the right of && or ||, or in a case expression; call it in a statement of its own", name, written[0].text))
+		case u.refuse != "":
+			v.unsupported(call.Pos(), fmt.Sprintf(
+				"%s may modify %s, and a call that may modify memory is not supported yet in %s", name, written[0].text, u.refuse))
+		}
 	}
 	for _, t := range written {
 		what := "what it calls " + t.text
@@ -286,6 +339,9 @@ func (v *fnVerifier) invoke(call *ast.CallExpr, fn *funcInfo, args map[*types.Va
 	}
 	for _, t := range written {
 		v.havoc(st, t)
+	}
+	if u := v.unit; len(written) > 0 && u != nil {
+		u.wrote(st, "the call to "+name)
 	}
 	// The callee may have created objects.
 	st.brk = v.fresh("brk", logic.Ref)
@@ -377,16 +433,29 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 	// promoted from. where is the position of the current struct while it
 	// is known to lie in memory.
 	// The operand is evaluated once, as Go does: a struct that lies in
-	// memory is located, and its value read from there.
+	// memory is located, and its value read from there only when the method
+	// needs it. A pointer receiver takes its address and reads nothing.
 	t := v.info.TypeOf(sel.X)
+	path := selection.Index()
+	_, wantPointer := recv.Type().Underlying().(*types.Pointer)
+	start, what := v.unit.start(), "the receiver of "+types.ExprString(sel)
 	var cur, where value
 	if _, isStruct := t.Underlying().(*types.Struct); isStruct && v.place(sel.X).kind == placeMem {
 		lv := v.lvalue(sel.X, st, guard)
-		where, cur = value{lv.ref, logic.Add(lv.at, logic.IntLit(lv.offset))}, v.load(lv, st)
+		where = value{lv.ref, logic.Add(lv.at, logic.IntLit(lv.offset))}
+		if wantPointer && !hopsPointer(t, path) {
+			for _, index := range path[:len(path)-1] {
+				where = value{where[0], logic.Add(where[1], logic.IntLit(v.fieldOffset(t, index)))}
+				t = t.Underlying().(*types.Struct).Field(index).Type()
+			}
+			return where
+		}
+		cur = v.readAt(st, guard, start, what, sel.X.Pos(), func(sink *state, mem memory) value {
+			return v.loadIn(lv, sink, mem)
+		})
 	} else {
 		cur = v.eval(sel.X, st, guard)
 	}
-	path := selection.Index()
 	for _, index := range path[:len(path)-1] {
 		object, viaPointer := pointee(t)
 		if viaPointer {
@@ -395,16 +464,22 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 		} else {
 			object = t
 		}
-		next, fieldType, ok := v.member(st, st.mem, cur, t, index)
+		from, pointer := t, cur
+		next, fieldType, ok := v.member(nil, st.mem, cur, t, index)
 		if !ok {
 			v.unsupported(sel.Sel.Pos(), fmt.Sprintf("this field has type %s, which is not supported", fieldType))
+		}
+		if viaPointer {
+			next = v.readAt(st, guard, start, what, sel.Sel.Pos(), func(sink *state, mem memory) value {
+				read, _, _ := v.member(sink, mem, pointer, from, index)
+				return read
+			})
 		}
 		if where != nil {
 			where = value{where[0], logic.Add(where[1], logic.IntLit(v.fieldOffset(object, index)))}
 		}
 		cur, t = next, fieldType
 	}
-	_, wantPointer := recv.Type().Underlying().(*types.Pointer)
 	object, havePointer := pointee(t)
 	switch {
 	case wantPointer == havePointer:
@@ -416,7 +491,9 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 			"calling %s takes the address of %s, which is not supported", sel.Sel.Name, types.ExprString(sel.X)))
 	}
 	v.checkNil(st, guard, cur[0], sel.Pos())
-	return v.pointed(st, object, cur)
+	return v.readAt(st, guard, start, what, sel.Pos(), func(sink *state, mem memory) value {
+		return v.pointedIn(sink, mem, object, cur)
+	})
 }
 
 // deepFacts states what the type of a value guarantees beyond the value

@@ -148,7 +148,23 @@ func (v *fnVerifier) newMap(st *state, t types.Type) value {
 	for _, lf := range leaves {
 		st.storeRow(mapOwner(t)+"#val"+lf.path, lf.sort, ref, logic.Fill(logic.IntLit(0), zeroLeaf(lf)))
 	}
+	v.noteBorn(st, ref, mapRegions(t))
 	return value{ref}
+}
+
+// mapRegions returns the regions that hold the maps of a type, with the
+// sort of each.
+func mapRegions(t types.Type) map[string]logic.Sort {
+	_, elem := mapParts(t)
+	leaves, _ := layoutOf(elem)
+	keys := map[string]logic.Sort{
+		mapOwner(t) + countLeaf.path: logic.SeqOf(countLeaf.sort),
+		mapOwner(t) + hasLeaf.path:   logic.SeqOf(logic.SeqOf(hasLeaf.sort)),
+	}
+	for _, lf := range leaves {
+		keys[mapOwner(t)+"#val"+lf.path] = logic.SeqOf(logic.SeqOf(lf.sort))
+	}
+	return keys
 }
 
 // mapStore sets the value of a key, or with present false removes the key.
@@ -156,7 +172,15 @@ func (v *fnVerifier) newMap(st *state, t types.Type) value {
 // that is not nil. Removing one from the nil map does nothing, in Go and
 // here: the nil map has no keys, every key it lacks has the zero value, and
 // that is all the removal writes.
+//
+// What it reads of the map is part of the write, which comes after the
+// operands of the statement, so it is not recorded as a read.
 func (v *fnVerifier) mapStore(st *state, t types.Type, ref, key *logic.Term, val value, present bool, pos token.Pos, what string) {
+	v.quietly(func() { v.storeKey(st, t, ref, key, val, present, pos, what) })
+}
+
+// storeKey does the work of mapStore.
+func (v *fnVerifier) storeKey(st *state, t types.Type, ref, key *logic.Term, val value, present bool, pos token.Pos, what string) {
 	if present {
 		v.check(st, nil, logic.Lt(logic.IntLit(0), ref), pos, "map may be nil")
 	}
@@ -192,7 +216,10 @@ func (v *fnVerifier) deleteKey(call *ast.CallExpr, st *state) {
 	if !isMap(t) || !mapModelled(t) {
 		v.unsupported(call.Pos(), fmt.Sprintf("delete on a %s is not supported", t))
 	}
-	ref, key := v.expr(call.Args[0], st, nil), v.expr(call.Args[1], st, nil)
+	var ref, key *logic.Term
+	v.evaluate(st, func() {
+		ref, key = v.expr(call.Args[0], st, nil), v.expr(call.Args[1], st, nil)
+	})
 	_, elem := mapParts(t)
 	v.mapStore(st, t, ref, key, zeroValue(elem), false, call.Pos(), types.ExprString(call.Args[0])+" is modified")
 }
@@ -211,5 +238,6 @@ func (v *fnVerifier) mapLiteral(e *ast.CompositeLit, t types.Type, st *state, gu
 		held := v.settled(st, guard, v.evalAs(pair.Value, elem, st, guard), elem)
 		v.mapStore(st, t, m[0], key, held, true, pair.Pos(), "a new map is filled")
 	}
+	v.noteBorn(st, m[0], mapRegions(t))
 	return m
 }

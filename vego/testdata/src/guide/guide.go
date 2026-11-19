@@ -614,28 +614,47 @@ func (s *Stack) Pop() (result int) {
 	return s.items[s.n]
 }
 
-// PopTwice calls Pop in the two places a call that changes memory may
-// stand besides a statement of its own.
+// PopSum calls Pop twice in one expression. Go runs the two calls from
+// left to right.
 //
 // @Requires s != nil And s.n > 1
+// @Requires Forall k in [0, s.n) : 0 <= s.items[k] <= 1000
 // @Modifies s.n
-func PopTwice(s *Stack) (result int) {
-	x := s.Pop()
-	if x > 0 {
-		return x
-	}
-	return s.Pop()
+// @Ensures result = s.items[s.n-1] + s.items[s.n-2]
+func PopSum(s *Stack) (result int) {
+	return s.Pop() + s.Pop()
 }
 
-// PopInCondition calls it where it may not stand.
+// PopInCondition calls Pop in the condition of an if.
 //
 // @Requires s != nil And s.n > 0
 // @Modifies s.n
+// @Ensures result <-> s.items[s.n-1] > 0
 func PopInCondition(s *Stack) (result bool) {
-	if s.Pop() > 0 { // want `vego: cannot verify PopInCondition: Pop may modify s.n, so the call must be a statement of its own or the whole right-hand side of an assignment to variables`
+	if s.Pop() > 0 {
 		return true
 	}
 	return false
+}
+
+// PopAndCount reads s.n beside a call that changes it.
+//
+// @Requires s != nil And 0 < s.n < 1000
+// @Requires Forall k in [0, s.n) : 0 <= s.items[k] <= 1000
+// @Modifies s.n
+func PopAndCount(s *Stack) (result int) {
+	return s.n + s.Pop() // want `vego: s.n may be read before or after the call to Pop, which may change it, and Go does not fix the order; split the statement so that the order is the one you mean`
+}
+
+// CountThenPop reads s.n in a statement of its own first.
+//
+// @Requires s != nil And 0 < s.n < 1000
+// @Requires Forall k in [0, s.n) : 0 <= s.items[k] <= 1000
+// @Modifies s.n
+// @Ensures result = s.n + s.items[s.n-1]
+func CountThenPop(s *Stack) (result int) {
+	n := s.n
+	return n + s.Pop()
 }
 
 // DrainForgets changes the stack in a loop, which forgets the invariant of
