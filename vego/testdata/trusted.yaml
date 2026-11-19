@@ -1219,6 +1219,11 @@ trusted:
     vouches: [g]
     modifies: []
     ensures: ["g != nil And ~shut(g) And fresh(g)"]
+  ensuresentry.trusted:
+    reason: A test of an ensures that speaks only of the state on entry.
+    requires: ["p != nil", "p.x = 3"]
+    modifies: [p]
+    ensures: ["p.x = 3"]
   ifacestate.logCloser:
     reason: A test of a trusted function that runs what a Record holds.
     runs: [r]

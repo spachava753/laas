@@ -174,6 +174,9 @@ func (pv *pkgVerifier) checkValueContract(fn *funcInfo) {
 			return
 		}
 		v.primedPaths(fn)
+		for _, refused := range v.entryOnly(state) {
+			fault(refused.clause.pos, "%s", refused.message(title))
+		}
 		if !entry {
 			for _, defect := range fn.defects {
 				pv.report(at, "the contract of %s cannot be used: %s", title, defect)

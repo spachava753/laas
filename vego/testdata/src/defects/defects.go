@@ -152,7 +152,7 @@ func ForgetsAfterCall(A []int) (x int) {
 // @Requires |A| > 0
 // @Modifies A
 // @Ensures A'[0] = 5
-// @Ensures A[0] = 5
+// @Ensures A[0] = 5 // want `the Ensures clause "A\[0\] = 5" names no result and nothing on return, so it speaks of the state when EntryVersusExit is called, and it reads memory that EntryVersusExit may modify; write a prime for the value on return, as in A'\[0\], or move the clause to a Requires`
 func EntryVersusExit(A []int) {
 	A[0] = 5
 } // want `vego:\ postcondition\ may\ not\ hold:\ A\[0\]\ =\ 5`

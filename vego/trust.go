@@ -823,6 +823,9 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 		// writes through another that is the same object.
 		v.primedPaths(fn)
 		entry := v.enter()
+		for _, refused := range v.entryOnly(entry) {
+			fn.defect("%s", refused.message(fn.obj.Name()))
+		}
 		// The requires of calls are read once here, so that a name they
 		// cannot use is a defect of the entry.
 		for _, param := range fn.params {
