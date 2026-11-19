@@ -204,27 +204,29 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			}
 		}()
 		pv := &pkgVerifier{
-			otherTags:     foreignTags,
-			pass:          pass,
-			info:          pass.TypesInfo,
-			res:           logic.NewResolver(),
-			funcs:         map[*types.Func]*funcInfo{},
-			reported:      map[string]bool{},
-			outcomes:      map[*funcInfo]*outcome{},
-			trusted:       map[*types.Func]*funcInfo{},
-			origins:       map[*ast.BlockStmt]*origins{},
-			knownReturns:  map[*funcInfo]bool{},
-			isParameter:   map[*types.Var]bool{},
-			invariants:    map[*types.TypeName]*invariantSet{},
-			funcTypes:     map[*types.TypeName]*funcInfo{},
-			importedTypes: map[*types.TypeName]*funcInfo{},
-			foreignBroken: map[*types.Package]bool{},
-			imported:      map[*types.Func]*funcInfo{},
-			foreign:       map[*types.Package]*logic.Resolver{},
-			plain:         logic.NewResolver(),
-			trustSources:  map[*trustFile]*token.File{},
-			z3Path:        z3Path,
-			effort:        effort,
+			otherTags:       foreignTags,
+			pass:            pass,
+			info:            pass.TypesInfo,
+			res:             logic.NewResolver(),
+			funcs:           map[*types.Func]*funcInfo{},
+			reported:        map[string]bool{},
+			outcomes:        map[*funcInfo]*outcome{},
+			trusted:         map[*types.Func]*funcInfo{},
+			origins:         map[*ast.BlockStmt]*origins{},
+			knownReturns:    map[*funcInfo]bool{},
+			isParameter:     map[*types.Var]bool{},
+			invariants:      map[*types.TypeName]*invariantSet{},
+			funcTypes:       map[*types.TypeName]*funcInfo{},
+			importedTypes:   map[*types.TypeName]*funcInfo{},
+			ifaceMethods:    map[*types.Func]*funcInfo{},
+			importedMethods: map[*types.Func]*funcInfo{},
+			foreignBroken:   map[*types.Package]bool{},
+			imported:        map[*types.Func]*funcInfo{},
+			foreign:         map[*types.Package]*logic.Resolver{},
+			plain:           logic.NewResolver(),
+			trustSources:    map[*trustFile]*token.File{},
+			z3Path:          z3Path,
+			effort:          effort,
 		}
 		if refuseCache {
 			pv.usage = &Usage{}
@@ -330,6 +332,12 @@ type funcInfo struct {
 	// funcvalues.go. Such a contract is not verified, and is treated where
 	// that matters like a trusted one.
 	valueOf *types.TypeName
+	// methodOf is set for the contract of a method of an interface type,
+	// which a call of the method through an interface value is checked
+	// against; see interfaces.go. Like the contract of a function type, it
+	// is not verified, and is treated where that matters like a trusted
+	// one.
+	methodOf *types.Func
 	// ownParams is set for a function literal verified against the
 	// contract of a function type: the contract names its parameters as the
 	// type does, and old(x) in its body names its own parameter x.
@@ -431,6 +439,11 @@ type pkgVerifier struct {
 	funcTypes     map[*types.TypeName]*funcInfo
 	importedTypes map[*types.TypeName]*funcInfo
 	mayCall       map[*types.Func]bool
+	// ifaceMethods holds the contracts of the methods of the interface
+	// types of this package, and importedMethods those of other packages,
+	// nil for a method known to have none. See interfaces.go.
+	ifaceMethods    map[*types.Func]*funcInfo
+	importedMethods map[*types.Func]*funcInfo
 	// assignedIn holds, for the body of each declared function, the
 	// variables that something other than their declaration assigns; see
 	// final.
@@ -910,6 +923,10 @@ func (pv *pkgVerifier) collect() {
 				}
 				if plannedKinds[c.kind] {
 					pv.report(c.pos, "%s annotations are not supported yet", c.kind)
+					continue
+				}
+				if method, defined, ok := pv.methodDocumented(file, group); ok {
+					pv.addMethodContract(method, defined, c)
 					continue
 				}
 				if name, ok := pv.typeDocumented(file, group); ok {

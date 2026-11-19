@@ -59,6 +59,12 @@ func (pv *pkgVerifier) addTypeContract(name *types.TypeName, c *clause) {
 		fn.valueOf = name
 		pv.funcTypes[name] = fn
 	}
+	pv.addValueClause(fn, c)
+}
+
+// addValueClause records a Requires, Ensures, or Modifies annotation of the
+// contract of a function type or of a method of an interface type.
+func (pv *pkgVerifier) addValueClause(fn *funcInfo, c *clause) {
 	if c.kind == "Modifies" {
 		targets, err := logic.ParseTargets(c.text)
 		if err != nil {
@@ -89,67 +95,88 @@ func (pv *pkgVerifier) addTypeContract(name *types.TypeName, c *clause) {
 // uses means something, its Requires clauses can be met, and what it
 // promises does not contradict itself.
 func (pv *pkgVerifier) checkTypeContracts() {
-	names := make([]*types.TypeName, 0, len(pv.funcTypes))
-	for name := range pv.funcTypes {
-		names = append(names, name)
+	var contracts []*funcInfo
+	for _, fn := range pv.funcTypes {
+		contracts = append(contracts, fn)
 	}
-	slices.SortFunc(names, func(a, b *types.TypeName) int { return int(a.Pos() - b.Pos()) })
-	for _, name := range names {
-		fn := pv.funcTypes[name]
-		sig := fn.obj.Type().(*types.Signature)
-		if sig.Variadic() {
-			pv.report(name.Pos(), "a contract on a variadic function type is not supported yet")
+	for _, fn := range pv.ifaceMethods {
+		contracts = append(contracts, fn)
+	}
+	slices.SortFunc(contracts, func(a, b *funcInfo) int { return int(a.obj.Pos() - b.obj.Pos()) })
+	for _, fn := range contracts {
+		pv.checkValueContract(fn)
+	}
+	pv.checkDroppedContracts()
+}
+
+// checkValueContract checks the contract of a function type or of a method
+// of an interface type where it is declared.
+func (pv *pkgVerifier) checkValueContract(fn *funcInfo) {
+	// The contract is named as the type, or as the interface and the
+	// method.
+	at, title := fn.obj.Pos(), fn.obj.Name()
+	example := fmt.Sprintf("type %s func(...) (n int)", title)
+	if fn.methodOf != nil {
+		title = methodTitle(fn.methodOf)
+		example = fmt.Sprintf("%s(...) (n int)", fn.obj.Name())
+	}
+	sig := fn.obj.Type().(*types.Signature)
+	if sig.Variadic() {
+		what := "function type"
+		if fn.methodOf != nil {
+			what = "method of an interface"
+		}
+		pv.report(at, "a contract on a variadic %s is not supported yet", what)
+		fn.broken = true
+	}
+	for _, result := range fn.results {
+		if result.Name() == "" || result.Name() == "_" {
+			pv.report(at, "%s has a contract, so each of its results needs a name, as in %s", title, example)
+			fn.broken = true
+			break
+		}
+	}
+	for _, variable := range slices.Concat(fn.params, fn.results) {
+		if _, ok := layoutOf(variable.Type()); !ok {
+			pv.report(at, "%s has a contract, and its %s has type %s, which is not supported", title, describe(variable), variable.Type())
 			fn.broken = true
 		}
-		for _, result := range fn.results {
-			if result.Name() == "" || result.Name() == "_" {
-				pv.report(name.Pos(), "%s has a contract, so each of its results needs a name, as in type %s func(...) (n int)", name.Name(), name.Name())
-				fn.broken = true
-				break
-			}
+		if variable.Name() != "" && fn.ambiguous(variable.Name(), false) {
+			pv.report(at, "%s names %s, which means something else in annotations; rename it", title, variable.Name())
+			fn.broken = true
 		}
-		for _, variable := range slices.Concat(fn.params, fn.results) {
-			if _, ok := layoutOf(variable.Type()); !ok {
-				pv.report(name.Pos(), "%s has a contract, and its %s has type %s, which is not supported", name.Name(), describe(variable), variable.Type())
-				fn.broken = true
-			}
-			if variable.Name() != "" && fn.ambiguous(variable.Name(), false) {
-				pv.report(name.Pos(), "%s names %s, which means something else in annotations; rename it", name.Name(), variable.Name())
-				fn.broken = true
-			}
-		}
-		if fn.broken {
-			continue
-		}
-		pv.run(fn, func(v *fnVerifier) {
-			v.misreadAs = func(c *clause, err error) {
-				fn.broken = true
-				pv.report(c.pos, "in %s annotation: %v", c.kind, err)
-			}
-			entry := v.enter()
-			if v.quickly(entry, nil, logic.False()) {
-				fn.broken = true
-				pv.report(name.Pos(), "nothing can satisfy the Requires clauses of %s together with what the types of its parameters guarantee, "+
-					"so no value of the type could be called", name.Name())
-				return
-			}
-			v.primedPaths(fn)
-			for _, defect := range fn.defects {
-				pv.report(name.Pos(), "the contract of %s cannot be used: %s", name.Name(), defect)
-			}
-			if _, post, _ := v.contractInstance(entry); pv.contradictory(post) {
-				fn.broken = true
-				pv.report(name.Pos(), "the contract of %s contradicts itself, so a call of a value of the type would prove anything", name.Name())
-				return
-			}
-			if !v.canBeMet(entry) {
-				fn.broken = true
-				pv.report(name.Pos(), "the Ensures clauses of %s are not proved to be satisfiable for every call that its Requires allow, "+
-					"by results and a change of what Modifies lists; a value of the type is taken to meet them, so a call of one could prove something false. "+
-					"State in the Requires when some result exists, or weaken the Ensures", name.Name())
-			}
-		})
 	}
+	if fn.broken {
+		return
+	}
+	pv.run(fn, func(v *fnVerifier) {
+		v.misreadAs = func(c *clause, err error) {
+			fn.broken = true
+			pv.report(c.pos, "in %s annotation: %v", c.kind, err)
+		}
+		entry := v.enter()
+		if v.quickly(entry, nil, logic.False()) {
+			fn.broken = true
+			pv.report(at, "nothing can satisfy the Requires clauses of %s together with what the types of its parameters guarantee, "+
+				"so no value of the type could be called", title)
+			return
+		}
+		v.primedPaths(fn)
+		for _, defect := range fn.defects {
+			pv.report(at, "the contract of %s cannot be used: %s", title, defect)
+		}
+		if _, post, _ := v.contractInstance(entry); pv.contradictory(post) {
+			fn.broken = true
+			pv.report(at, "the contract of %s contradicts itself, so a call of a value of the type would prove anything", title)
+			return
+		}
+		if !v.canBeMet(entry) {
+			fn.broken = true
+			pv.report(at, "the Ensures clauses of %s are not proved to be satisfiable for every call that its Requires allow, "+
+				"by results and a change of what Modifies lists; a value of the type is taken to meet them, so a call of one could prove something false. "+
+				"State in the Requires when some result exists, or weaken the Ensures", title)
+		}
+	})
 }
 
 // canBeMet reports whether, in every state its Requires allow, some outcome
@@ -282,7 +309,8 @@ func substituteConsts(t *logic.Term, by map[string]*logic.Term, memo map[*logic.
 }
 
 // exportTypeContracts publishes the contracts of the function types of the
-// package. A value of an unexported type can reach another package too.
+// package and of the methods of its interface types. A value of an
+// unexported type can reach another package too.
 func (pv *pkgVerifier) exportTypeContracts() {
 	for name, fn := range pv.funcTypes {
 		if name.Parent() != pv.pass.Pkg.Scope() {
@@ -291,6 +319,13 @@ func (pv *pkgVerifier) exportTypeContracts() {
 		fact := pv.contractFactOf(fn, name.Pos())
 		fact.Verified = !fn.broken && !pv.unread && !pv.predicatesBroken
 		pv.pass.ExportObjectFact(name, fact)
+	}
+	// A method of an interface type has a contract only when the type is
+	// declared at package level.
+	for method, fn := range pv.ifaceMethods {
+		fact := pv.contractFactOf(fn, method.Pos())
+		fact.Verified = !fn.broken && !pv.unread && !pv.predicatesBroken
+		pv.pass.ExportObjectFact(method, fact)
 	}
 }
 
