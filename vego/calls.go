@@ -196,9 +196,9 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func) *funcIn
 
 // checkNotHandable refuses a function literal, a function, or a method
 // value written as the argument of a trusted function's parameter that its
-// entry lists under runs and gives no contract under calls. Made into a
-// value of the parameter's type it would need a contract that the type,
-// which is not ours, cannot have; the entry is where to give one.
+// entry lists under runs and gives no contract under calls, and whose type
+// has no contract. Made into a value of that type it would need a contract
+// the type does not have; the entry is where to give one.
 func (v *fnVerifier) checkNotHandable(call *ast.CallExpr, fn *funcInfo) {
 	sig := fn.obj.Type().(*types.Signature)
 	for i, arg := range call.Args {
@@ -206,7 +206,9 @@ func (v *fnVerifier) checkNotHandable(call *ast.CallExpr, fn *funcInfo) {
 			break
 		}
 		param := sig.Params().At(i)
-		if !fn.runs[param] || fn.calls[param] != nil || !isFunc(param.Type()) {
+		// A parameter whose type has a contract takes a value made of the
+		// type, which is checked where it is made.
+		if !fn.runs[param] || fn.calls[param] != nil || !isFunc(param.Type()) || v.valueContract(param.Type()) != nil {
 			continue
 		}
 		what := types.ExprString(arg)

@@ -935,3 +935,9 @@ trusted:
     reason: Calls f with each number below n; reviewed 2026-11-19.
     runs: [f]
     modifies: []
+
+  callbacks.applyDoubler:
+    reason: Test helper that calls f once with 1.
+    runs: [f]
+    modifies: []
+    ensures: ["0 <= result <= 20"]

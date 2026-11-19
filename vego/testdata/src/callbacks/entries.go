@@ -144,3 +144,28 @@ func HandsRunsOnly() {
 func HandsRunsOnlyFunction() {
 	runsOnly(2, visitAny) // want `cannot verify HandsRunsOnlyFunction: visitAny is handed to runsOnly as f, which its trusted contract lists under runs with no contract under calls`
 }
+
+// Doubler maps a small number to a number at most twice as large.
+//
+// @Requires 0 <= x <= 10
+// @Ensures 0 <= y <= 20
+type Doubler func(x int) (y int)
+
+func applyDoubler(f Doubler) int { return f(1) }
+
+// same is a Doubler.
+//
+// @Requires 0 <= x <= 10
+// @Ensures y = x
+func same(x int) (y int) { return x }
+
+// UsesNamed hands a function to a parameter under runs whose type has a
+// contract: it is made into a value of the type.
+//
+// @Ensures 0 <= r <= 20
+func UsesNamed() (r int) { return applyDoubler(same) }
+
+// UsesLiteral does it with a literal.
+//
+// @Ensures 0 <= r <= 20
+func UsesLiteral() (r int) { return applyDoubler(func(x int) int { return x }) }
