@@ -716,3 +716,182 @@ func EmbeddedReceiver() (result int) {
 	x := Outer{Inner: &Inner{v: 1}}
 	return x.PM(bumpOuter(&x))
 }
+
+// @Requires c != nil And c.n < 1000
+// @Modifies c.n
+// @Ensures c.n' = c.n + 1 And result
+func (c *Counter) IncB() (result bool) {
+	c.n++
+	return true
+}
+
+// OnlyWhenNeeded calls IncB on the right of ||, where it runs only when skip
+// is false. When skip is true the counter is as it was.
+//
+// @Requires c != nil And 0 <= c.n < 100
+// @Modifies c.n
+// @Ensures result
+// @Ensures skip -> c.n' = c.n
+// @Ensures ~skip -> c.n' = c.n + 1
+func OnlyWhenNeeded(c *Counter, skip bool) (result bool) {
+	return skip || c.IncB()
+}
+
+// AlwaysRan claims that the call always runs.
+//
+// @Requires c != nil And 0 <= c.n < 100
+// @Modifies c.n
+// @Ensures c.n' = c.n + 1
+func AlwaysRan(c *Counter, skip bool) (result bool) {
+	return skip || c.IncB() // want `vego: postcondition may not hold: c.n' = c.n \+ 1`
+}
+
+// NeverRan claims that the call never runs.
+//
+// @Requires c != nil And 0 <= c.n < 100
+// @Modifies c.n
+// @Ensures c.n' = c.n
+func NeverRan(c *Counter, skip bool) (result bool) {
+	return skip && c.IncB() // want `vego: postcondition may not hold: c.n' = c.n`
+}
+
+// GuardedPrecondition calls IncB only where its precondition holds.
+//
+// @Requires c != nil
+// @Modifies c.n
+// @Ensures c.n < 1000 -> c.n' = c.n + 1
+func GuardedPrecondition(c *Counter) (result bool) {
+	return c.n >= 1000 || c.IncB()
+}
+
+// UnguardedPrecondition calls IncB exactly where its precondition fails.
+//
+// @Requires c != nil
+// @Modifies c.n
+func UnguardedPrecondition(c *Counter) (result bool) {
+	return c.n < 1000 || c.IncB() // want `vego: precondition of IncB may not hold: c.n < 1000`
+}
+
+// GuardedFrame lets a call on the right of && write what it does not list.
+//
+// @Requires c != nil And 0 <= c.n < 100
+func GuardedFrame(c *Counter, go_ bool) (result bool) {
+	return go_ && c.IncB() // want `vego: IncB may modify what it calls c.n, which GuardedFrame may not modify`
+}
+
+// InCase calls IncB in a case expression, which Go evaluates only when the
+// cases before it did not match.
+//
+// @Requires c != nil And 0 <= c.n < 100
+// @Modifies c.n
+// @Ensures c.n > 5 -> result = 0 And c.n' = c.n
+// @Ensures c.n <= 5 -> result = 1 And c.n' = c.n + 1
+func InCase(c *Counter) (result int) {
+	switch {
+	case c.n > 5:
+		return 0
+	case c.IncB():
+		return 1
+	}
+	return 2
+}
+
+// ReadBesideGuarded reads c.n outside the || on whose right IncB may run.
+//
+// @Requires c != nil And 0 <= c.n < 100
+// @Modifies c.n
+func ReadBesideGuarded(c *Counter, skip bool) (result int) {
+	return c.n + b2i(skip || c.IncB()) // want `vego: c.n may be read before or after the call to IncB`
+}
+
+type Box struct {
+	n    int
+	size int
+}
+
+// @Requires b != nil And 0 <= b.n <= b.size
+// @Modifies b.n
+// @Ensures b.n < b.size -> b.n' = b.n + 1 And result
+// @Ensures b.n = b.size -> b.n' = b.n And ~result
+func (b *Box) TryPush() (result bool) {
+	if b.n < b.size {
+		b.n++
+		return true
+	}
+	return false
+}
+
+// @Requires b != nil And b.size < 1000
+// @Modifies b.size
+// @Ensures b.size' = b.size + 10 And result
+func (b *Box) Grow() (result bool) {
+	b.size += 10
+	return true
+}
+
+// PushOrGrow grows the box only when the first push failed.
+//
+// @Requires b != nil And 0 <= b.n <= b.size < 1000
+// @Modifies b.n, b.size
+// @Ensures b.n' = b.n + 1
+// @Ensures b.n < b.size -> b.size' = b.size
+func PushOrGrow(b *Box) {
+	if ok := b.TryPush(); !ok && b.Grow() {
+		b.TryPush()
+	}
+}
+
+// @Ensures fresh(result) And result.n = 0
+func NewCounter() (result *Counter) {
+	return &Counter{}
+}
+
+// FreshOnRight allocates on the right of ||.
+//
+// @Ensures result <-> skip
+func FreshOnRight(skip bool) (result bool) {
+	return skip || NewCounter().n == 5
+}
+
+// FreshClaimed claims what the counter cannot hold.
+//
+// @Ensures result
+func FreshClaimed(skip bool) (result bool) {
+	return skip || NewCounter().n == 5 // want `vego: postcondition may not hold: result`
+}
+
+// @Requires |a| > 0
+// @Modifies a
+// @Ensures a'[0] = 0 And result
+func zap(a []int) (result bool) {
+	a[0] = 0
+	return true
+}
+
+// ZapWhenAsked writes the slice only when skip is false.
+//
+// @Requires |a| > 0
+// @Modifies a
+// @Ensures skip -> a'[0] = a[0]
+// @Ensures ~skip -> a'[0] = 0
+func ZapWhenAsked(a []int, skip bool) (result bool) {
+	return skip || zap(a)
+}
+
+// @Requires m != nil And |m| < 1000
+// @Modifies m
+// @Ensures m'[1] = 5 And has(m', 1) And result
+func putB(m map[int]int) (result bool) {
+	m[1] = 5
+	return true
+}
+
+// PutWhenAsked writes the map only when skip is false.
+//
+// @Requires m != nil And |m| < 1000
+// @Modifies m
+// @Ensures skip -> m'[1] = m[1] And |m'| = |m| And (has(m', 1) <-> has(m, 1))
+// @Ensures ~skip -> m'[1] = 5
+func PutWhenAsked(m map[int]int, skip bool) (result bool) {
+	return skip || putB(m)
+}

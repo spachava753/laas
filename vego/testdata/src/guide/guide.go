@@ -644,6 +644,16 @@ func PopInCondition(s *Stack) (result bool) {
 	return false
 }
 
+// PopIfAny pops only when the stack is not empty.
+//
+// @Requires s != nil
+// @Modifies s.n
+// @Ensures s.n = 0 -> s.n' = 0 And ~result
+// @Ensures s.n > 0 -> s.n' = s.n - 1
+func PopIfAny(s *Stack) (result bool) {
+	return s.n > 0 && s.Pop() >= 0
+}
+
 // PopAndCount reads s.n beside a call that changes it.
 //
 // @Requires s != nil And 0 < s.n < 1000

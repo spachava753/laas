@@ -320,12 +320,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	v.checkRecursion(fn, pre, st, guard, call)
 	written := v.targets(fn, args, st, before)
 	if u := v.unit; len(written) > 0 && u != nil {
-		switch {
-		case len(guard) > 0:
-			v.unsupported(call.Pos(), fmt.Sprintf(
-				"%s may modify %s, and a call that may modify memory is not supported yet where it runs only on some paths: "+
-					"on the right of && or ||, or in a case expression; call it in a statement of its own", name, written[0].text))
-		case u.refuse != "":
+		if u.refuse != "" {
 			v.unsupported(call.Pos(), fmt.Sprintf(
 				"%s may modify %s, and a call that may modify memory is not supported yet in %s", name, written[0].text, u.refuse))
 		}
@@ -338,14 +333,17 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		v.checkWrite(st, guard, t.reach(), call.Pos(), fmt.Sprintf("%s may modify %s", name, what))
 	}
 	for _, t := range written {
-		v.havoc(st, t)
+		v.havoc(st, t, guard)
 	}
 	if u := v.unit; len(written) > 0 && u != nil {
 		u.wrote(st, "the call to "+name)
 	}
-	// The callee may have created objects.
+	// The callee may have created objects, if it ran.
 	st.brk = v.fresh("brk", logic.Ref)
 	st.assume(logic.Le(existed, st.brk))
+	if len(guard) > 0 {
+		st.assume(logic.Implies(logic.Not(logic.And(guard...)), logic.Eq(st.brk, existed)))
+	}
 	results := make([]value, sig.Results().Len())
 	for i := range results {
 		if _, ok := layoutOf(sig.Results().At(i).Type()); ok {

@@ -828,7 +828,7 @@ func (v *fnVerifier) contractInstance(entry *state) (pre, post, failures []*logi
 	fn := v.fn
 	st := entry.clone()
 	for _, t := range v.frame {
-		v.havoc(st, t)
+		v.havoc(st, t, nil)
 	}
 	st.brk = v.fresh("brk", logic.Ref)
 	st.assume(logic.Le(entry.brk, st.brk))

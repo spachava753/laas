@@ -779,7 +779,7 @@ func (s *Stack) Pop() (result int) {
 }
 ```
 
-It can be an operand, an argument of another call, the condition of an `if`, or the tag of a `switch`:
+It can be an operand, an argument of another call, the condition of an `if`, the tag of a `switch`, or a `case` expression:
 
 ```go
 // @Requires s != nil And s.n > 1
@@ -803,7 +803,21 @@ func PopInCondition(s *Stack) (result bool) {
 
 Go runs the calls in a statement from left to right, so the first `Pop` in `PopSum` takes the top element and the second takes the one below it.
 
-Three places are not supported yet: the condition of a `for` loop, the right of `&&` and `||`, and a `case` expression. A call there is reported as `cannot verify`. Call it in a statement of its own and use the result.
+On the right of `&&` and `||`, and in a `case` expression, the call runs only when Go evaluates it there. Where it does not run, `vego` knows that memory is unchanged:
+
+```go
+// @Requires s != nil
+// @Modifies s.n
+// @Ensures s.n = 0 -> s.n' = 0 And ~result
+// @Ensures s.n > 0 -> s.n' = s.n - 1
+func PopIfAny(s *Stack) (result bool) {
+	return s.n > 0 && s.Pop() >= 0
+}
+```
+
+The precondition of `Pop` only has to hold where `Pop` runs, here when `s.n > 0`.
+
+The condition of a `for` loop is not supported yet. A call there is reported as `cannot verify`. Call it in a statement of its own and use the result.
 
 ### Reads that Go may make before or after a call
 
@@ -1822,7 +1836,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - package-level variables, except error variables that are never assigned, of this package or another;
 - calls to variadic functions other than `fmt.Errorf`;
 - `append(s, t...)` and `copy`;
-- a modifying call in the condition of a `for` loop, on the right of `&&` or `||`, or in a `case` expression (see [Where a modifying call can appear](#where-a-modifying-call-can-appear));
+- a modifying call in the condition of a `for` loop (see [Where a modifying call can appear](#where-a-modifying-call-can-appear));
 - a call in the target of an assignment whose right-hand side is an `append` that may write into the array of its slice, unless the call modifies nothing and refers to no memory (see [Reads that Go may make before or after a call](#reads-that-go-may-make-before-or-after-a-call));
 - comparing structs with `==`;
 - comparing two errors with `==` when neither is `nil`, an error made by `errors.New` or `fmt.Errorf`, an error that a trusted contract vouches for, or an error variable that holds one or holds a pointer, integer, string, or boolean, or an array or struct of these (see [Comparing errors](#comparing-errors));

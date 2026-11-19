@@ -520,16 +520,41 @@ func (t target) reach() written {
 // havoc forgets what a target holds: a call that may write it has run.
 // Everything else stays as it was, which is what makes a Modifies clause
 // useful to the caller.
-func (v *fnVerifier) havoc(st *state, t target) {
+//
+// guard holds the conditions under which the call runs at all, as on the
+// right of && or ||. Where they do not hold, the call did not run, and what
+// the target holds is what it held before.
+func (v *fnVerifier) havoc(st *state, t target, guard []*logic.Term) {
+	skipped := logic.False()
+	if len(guard) > 0 {
+		skipped = logic.Not(logic.And(guard...))
+	}
+	// kept states that a sequence holds what another held, everywhere or
+	// where the call did not run.
+	kept := func(now, before *logic.Term) {
+		if len(guard) == 0 {
+			return
+		}
+		index := v.bound("k")
+		st.assume(logic.Implies(skipped, logic.Forall(index, v.same(logic.Select(now, index), logic.Select(before, index)))))
+	}
 	switch {
 	case t.mapType != nil:
 		owner := mapOwner(t.mapType)
 		t.regions(func(key string, sort logic.Sort) {
 			if key == owner+countLeaf.path {
-				st.storeCell(key, countLeaf, t.ref, v.fresh("written", sort))
+				before := logic.Select(st.mem.region(key, logic.SeqOf(sort)), t.ref)
+				written := v.fresh("written", sort)
+				if len(guard) > 0 {
+					st.assume(logic.Implies(skipped, logic.Eq(written, before)))
+				}
+				st.storeCell(key, countLeaf, t.ref, written)
 				return
 			}
-			st.storeRow(key, sort, t.ref, v.fresh("written", logic.SeqOf(sort)))
+			before := logic.Select(st.mem.region(key, logic.SeqOf(logic.SeqOf(sort))), t.ref)
+			written := v.fresh("written", logic.SeqOf(sort))
+			kept(written, before)
+			st.storeRow(key, sort, t.ref, written)
 		})
 		// Nothing can be put into the nil map, so if that is what the
 		// target is, it is as empty afterwards as it was.
@@ -537,13 +562,17 @@ func (v *fnVerifier) havoc(st *state, t target) {
 		has := logic.Select(st.mem.region(owner+hasLeaf.path, logic.SeqOf(logic.SeqOf(logic.Bool))), t.ref)
 		count := logic.Select(st.mem.region(owner+countLeaf.path, logic.SeqOf(logic.Int)), t.ref)
 		empty := logic.And(logic.Eq(count, logic.IntLit(0)), logic.Forall(index, logic.Not(logic.Select(has, index))))
-		st.assume(logic.Implies(logic.Eq(t.ref, logic.RefLit(0)), empty))
+		st.assume(logic.Implies(logic.And(append(slices.Clip(guard), logic.Eq(t.ref, logic.RefLit(0)))...), empty))
 	case t.single:
 		// What the types guarantee of the new values is noted where they
 		// are read.
+		before := v.fetch(nil, st.mem, t.cells, t.ref, t.lo)
 		unknown := make(value, len(t.cells))
 		for i, c := range t.cells {
 			unknown[i] = v.fresh("written", c.sort)
+			if len(guard) > 0 {
+				st.assume(logic.Implies(skipped, v.same(unknown[i], before[i])))
+			}
 		}
 		v.put(st, t.cells, t.ref, t.lo, unknown)
 	default:
@@ -551,7 +580,7 @@ func (v *fnVerifier) havoc(st *state, t target) {
 			before := logic.Select(st.mem.region(key, logic.SeqOf(logic.SeqOf(sort))), t.ref)
 			unknown := v.fresh("written", logic.SeqOf(sort))
 			index := v.bound("k")
-			outside := logic.Or(logic.Lt(index, t.lo), logic.Le(t.hi, index))
+			outside := logic.Or(skipped, logic.Lt(index, t.lo), logic.Le(t.hi, index))
 			st.assume(logic.Forall(index, logic.Implies(outside, v.same(logic.Select(unknown, index), logic.Select(before, index)))))
 			st.storeRow(key, sort, t.ref, unknown)
 		})
