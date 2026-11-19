@@ -67,6 +67,11 @@ type fnVerifier struct {
 	lit       *litFrame
 	inlining  map[*ast.FuncLit]bool
 	sites     []inlineSite
+	// captured holds, with a number of its own, every variable that a
+	// function literal assigns and that is declared outside it, and that
+	// does not live in memory. A call of the literal can change it, so
+	// within a unit it is read like memory; see snapshot.
+	captured map[*types.Var]int
 	// boxed holds the variables of the function that live in memory because
 	// their address is taken. Such a variable holds a pointer to the struct
 	// that is its value.

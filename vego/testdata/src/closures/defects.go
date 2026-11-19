@@ -134,17 +134,6 @@ func Recovers() {
 	}()
 }
 
-// AssignsCaptured changes a variable of the function from a literal.
-//
-// @Ensures True
-func AssignsCaptured() (result int) {
-	n := 0
-	func() {
-		n = 1 // want `vego: cannot verify AssignsCaptured: the function literal assigns n, a variable of the function around it, which is not supported yet`
-	}()
-	return n
-}
-
 // ReadsBeforeOrAfter reads a field that the literal changes, in the same
 // expression.
 //

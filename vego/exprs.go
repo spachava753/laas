@@ -20,6 +20,9 @@ func (v *fnVerifier) variable(id *ast.Ident, st *state, guard []*logic.Term) val
 		})
 	}
 	if val := v.current(st, variable); val != nil {
+		if _, captured := v.captured[variable]; captured {
+			return v.readCapturedPart(st, guard, v.unit.start(), variable, 0, len(val), id.Name, id.Pos())
+		}
 		return val
 	}
 	if variable != nil && variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope() && isError(variable.Type()) {
@@ -27,6 +30,26 @@ func (v *fnVerifier) variable(id *ast.Ident, st *state, guard []*logic.Term) val
 	}
 	v.unsupported(id.Pos(), id.Name+" is not a local variable of a supported type")
 	return nil
+}
+
+// readCapturedPart reads the leaves from lo, n of them, of a variable that
+// a function literal assigns, as a read that the unit records: a call of
+// the literal in the same unit may change it. A field of the variable is
+// read alone, as Go reads it. start is the number of events before the read
+// began.
+func (v *fnVerifier) readCapturedPart(st *state, guard []*logic.Term, start int, variable *types.Var, lo, n int, what string, pos token.Pos) value {
+	index := v.captured[variable]
+	return v.readAt(st, guard, start, what, pos, func(_ *state, mem memory) value {
+		val := make(value, n)
+		for i := range val {
+			leaf, ok := mem[localKey(index, lo+i)]
+			if !ok {
+				panic("vego: internal error: a version of a unit does not hold a variable that a function literal assigns")
+			}
+			val[i] = leaf
+		}
+		return val
+	})
 }
 
 // errorVariable reads a package-level error variable, which must be a
@@ -108,8 +131,15 @@ func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 			v.unsupported(e.Pos(), "only fields can be selected; variables of other packages and method values are not supported")
 		}
 		// A field of a struct that lies in memory is read on its own, as
-		// Go reads it, and not as part of the whole struct.
+		// Go reads it, and not as part of the whole struct. So is a field
+		// of a variable that a function literal assigns.
 		start := v.unit.start()
+		if variable := v.assignedLocal(e); variable != nil && st.vals[variable] != nil {
+			if _, captured := v.captured[variable]; captured && !v.boxed[variable] {
+				lv := v.place(e)
+				return v.readCapturedPart(st, guard, start, lv.local, lv.lo, len(lv.leaves), types.ExprString(e), e.Pos())
+			}
+		}
 		if v.inMemory(e) && !hopsPointer(v.info.TypeOf(e.X), selection.Index()) {
 			lv := v.lvalue(e, st, guard)
 			return v.readAt(st, guard, start, types.ExprString(e), e.Pos(), func(sink *state, mem memory) value {

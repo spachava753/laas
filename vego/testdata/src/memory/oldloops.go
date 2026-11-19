@@ -46,3 +46,34 @@ func OldRangeVariable(ps []Point) (result int) {
 	}
 	return total
 }
+
+// OldLoopLiteral advances the variable of a for loop from a function
+// literal as well, which the post statement then sees. A literal called in
+// place runs in the iteration it is called in, so sharing the variable
+// changes nothing here.
+//
+// @Ensures result = 2
+func OldLoopLiteral() (result int) {
+	count := 0
+	// @Invariant 0 <= count <= 2 And i = 2 * count
+	// @Variant 4 - i
+	for i := 0; i < 4; i++ {
+		func() { i++ }()
+		count++
+	}
+	return count
+}
+
+// OldLoopLiteralWrong claims that the literal's write is lost.
+//
+// @Ensures result = 4
+func OldLoopLiteralWrong() (result int) {
+	count := 0
+	// @Invariant 0 <= count <= 2 And i = 2 * count
+	// @Variant 4 - i
+	for i := 0; i < 4; i++ {
+		func() { i++ }()
+		count++
+	}
+	return count // want `vego: postcondition may not hold: result = 4`
+}

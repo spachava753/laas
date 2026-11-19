@@ -187,6 +187,9 @@ func (v *fnVerifier) loadRecorded(lv lvalue, st *state, guard []*logic.Term, sta
 		if whole == nil {
 			v.unsupported(lv.pos, "this operand cannot be read and updated in place")
 		}
+		if _, captured := v.captured[lv.local]; captured {
+			return v.readCapturedPart(st, guard, start, lv.local, lv.lo, len(lv.leaves), lv.text, lv.pos)
+		}
 		return whole[lv.lo : lv.lo+len(lv.leaves)]
 	case placeMem, placeMap:
 		return v.readAt(st, guard, start, lv.text, lv.pos, func(sink *state, mem memory) value {

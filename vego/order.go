@@ -1,6 +1,7 @@
 package vego
 
 import (
+	"fmt"
 	"go/token"
 	"go/types"
 	"maps"
@@ -63,6 +64,9 @@ type unit struct {
 	// and quiet the reads of memory that are not reads Go makes, such as
 	// what a contract says; see table.
 	recording, quiet int
+	// snapshot returns what a version holds in a state: memory, and the
+	// values of the variables a function literal assigns; see captured.
+	snapshot func(st *state) memory
 }
 
 // ceiling is an event that reads come before. version is the latest
@@ -110,7 +114,33 @@ func (v *fnVerifier) openUnit(st *state) {
 	if v.unit != nil {
 		panic("vego: internal error: an evaluation unit was opened inside another")
 	}
-	v.unit = &unit{versions: []memory{maps.Clone(st.mem)}, writers: []string{""}}
+	v.unit = &unit{writers: []string{""}, snapshot: v.snapshot}
+	v.unit.versions = []memory{v.unit.snapshot(st)}
+}
+
+// snapshot returns memory as it is in a state, as a version of a unit has
+// it. A call of a function literal can change a variable of the function
+// that the literal assigns, which no other call can; a version also holds
+// the value of each such variable, under a key of its own, so that a read
+// of it is compared across a call like a read of memory.
+func (v *fnVerifier) snapshot(st *state) memory {
+	if len(v.captured) == 0 {
+		return maps.Clone(st.mem)
+	}
+	mem := maps.Clone(st.mem)
+	for variable, index := range v.captured {
+		for i, leaf := range st.vals[variable] {
+			mem[localKey(index, i)] = leaf
+		}
+	}
+	return mem
+}
+
+// localKey is the key under which a version of a unit holds one leaf of a
+// variable that a function literal assigns. A space keeps it apart from the
+// keys of regions.
+func localKey(variable, leaf int) string {
+	return fmt.Sprintf("local %d.%d", variable, leaf)
 }
 
 // fork returns a copy of the unit that can be closed on a state of its own,
@@ -171,7 +201,7 @@ func (u *unit) event() {
 // wrote records that memory has changed: what made the change, and memory
 // as it is afterwards.
 func (u *unit) wrote(st *state, writer string) {
-	u.versions = append(u.versions, maps.Clone(st.mem))
+	u.versions = append(u.versions, u.snapshot(st))
 	u.writers = append(u.writers, writer)
 }
 
@@ -195,6 +225,9 @@ func (v *fnVerifier) readAt(st *state, guard []*logic.Term, start int, what stri
 	u.reads = append(u.reads, r)
 	u.recording++
 	defer func() { u.recording-- }()
+	if len(v.captured) > 0 {
+		return read(st, u.snapshot(st))
+	}
 	return read(st, st.mem)
 }
 

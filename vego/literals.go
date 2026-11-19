@@ -141,12 +141,13 @@ func (v *fnVerifier) isBoundLiteral(e ast.Expr) bool {
 	return variable != nil && v.boundLits[variable] != nil
 }
 
-// classifyLiterals finds the literals of the function being verified and
-// refuses those that are not used in place, those whose signature is not
-// supported, and, for now, those that assign a variable of the function
-// around them.
+// classifyLiterals finds the literals of the function being verified,
+// refuses those that are not used in place and those whose signature is not
+// supported, and collects the variables that a literal assigns and that
+// are declared outside it.
 func (v *fnVerifier) classifyLiterals() {
 	body := v.fn.decl.Body
+	v.captured = map[*types.Var]int{}
 	bound, refused := literalUses(v.info, body)
 	if len(refused) > 0 {
 		first := slices.Min(slices.Collect(maps.Keys(refused)))
@@ -169,7 +170,8 @@ func (v *fnVerifier) classifyLiterals() {
 				}
 			}
 		}
-		// Assigning a captured variable is not supported yet.
+		// A variable of the function around the literal that the literal
+		// assigns can change at a call of the literal; see captured.
 		ast.Inspect(lit.Body, func(inner ast.Node) bool {
 			var targets []ast.Expr
 			switch s := inner.(type) {
@@ -185,8 +187,9 @@ func (v *fnVerifier) classifyLiterals() {
 			for _, target := range targets {
 				variable := v.assignedLocal(target)
 				if variable != nil && !v.boxed[variable] && (variable.Pos() < lit.Pos() || variable.Pos() >= lit.End()) {
-					v.unsupported(target.Pos(), fmt.Sprintf("the function literal assigns %s, a variable of the function around it, "+
-						"which is not supported yet", variable.Name()))
+					if _, known := v.captured[variable]; !known {
+						v.captured[variable] = len(v.captured)
+					}
 				}
 			}
 			return true
@@ -261,14 +264,14 @@ func (v *fnVerifier) callLiteral(call *ast.CallExpr, lit *ast.FuncLit, st *state
 		args[i] = v.evalAs(arg, sig.Params().At(i).Type(), st, guard)
 	}
 	u.reach(operands)
-	before := st.mem
+	before := v.snapshot(st)
 	results := v.inline(lit, args, st, guard, inlineSite{call.Pos(), "called"})
 	name := "the function literal"
 	if id, ok := ast.Unparen(call.Fun).(*ast.Ident); ok {
 		name = id.Name
 	}
 	u.calls = append(u.calls, unitCall{name: name, pos: call.Pos()})
-	if changed(before, st.mem) {
+	if changed(before, v.snapshot(st)) {
 		u.wrote(st, "the call to "+name)
 	}
 	u.event()
