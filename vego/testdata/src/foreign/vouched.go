@@ -144,3 +144,25 @@ func BoundDone(e error) (err error) {
 	}
 	return nil
 }
+
+// MakesErr makes an error.
+//
+// @Ensures err != nil
+type MakesErr func() (err error)
+
+// errors.New calls nothing, so a value may call it. Before, it counted as
+// a function that may call through a value, and this was refused.
+//
+// @Ensures m != nil
+func MakesNew() (m MakesErr) {
+	return func() error { return errors.New("made") }
+}
+
+// fmt.Errorf formats its operands, which can run their methods.
+//
+// @Ensures m != nil
+func MakesWrapped() (m MakesErr) {
+	return func() error {
+		return fmt.Errorf("made: %w", foreignlib.ErrFull) // want `cannot verify MakesWrapped: the function literal used as a value calls Errorf, which may call through a function value or an interface value: Errorf formats its operands, which can run their methods`
+	}
+}

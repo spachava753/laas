@@ -618,9 +618,14 @@ func holdsCallable(pv *pkgVerifier, t types.Type, seen map[types.Type]bool) bool
 // may when its contract lists, under runs, a parameter that can hold a
 // function value. A function without a contract or a body may.
 func (pv *pkgVerifier) mayCallValues(obj *types.Func) bool {
-	// A method of an interface runs whatever the value holds.
-	if isIfaceMethod(obj) {
+	// A method of an interface runs whatever the value holds. errors.New
+	// makes an error of the string it is given and calls nothing, while
+	// fmt.Errorf formats its operands, which runs their methods.
+	switch {
+	case isIfaceMethod(obj):
 		return true
+	case errorConstructor(obj) && obj.Name() == "New":
+		return false
 	}
 	if pv.mayCall == nil {
 		pv.mayCall = map[*types.Func]bool{}
@@ -800,6 +805,8 @@ func (pv *pkgVerifier) whyValues(obj *types.Func) string {
 			hops = append(hops, "is a method of an interface, which runs whatever the value holds")
 		default:
 			switch fn := pv.contractOf(obj.Origin()); {
+			case errorConstructor(obj) && obj.Name() == "Errorf":
+				hops = append(hops, "formats its operands, which can run their methods")
 			case fn == nil:
 				hops = append(hops, "has no contract")
 			case fn.imported != nil:

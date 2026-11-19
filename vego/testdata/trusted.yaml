@@ -1149,3 +1149,28 @@ trusted:
   (foreignlib.Copier).Copy:
     reason: Does not write the slice it copies from.
     modifies: []
+
+  # The entry the guide shows for wrapping the errors of Read; it replaces
+  # the shipped one for the tests.
+  (io.Reader).Read:
+    reason: >-
+      The readers our callers pass are *os.File, *bytes.Reader, and
+      *bufio.Reader over those. Read returns the bytes read, 0 <= n <= len(p).
+      Their errors are io.EOF, made by errors.New, and *fs.PathError holding
+      a syscall.Errno, whose methods only read their fields; reviewed 2026-11-19.
+    requires: ["|p| > 0"]
+    vouches: [err]
+    modifies: [p]
+    ensures: ["0 <= n And n <= |p|"]
+
+  (*bufio.Scanner).Scan:
+    reason: Reads the next token through the reader the scanner holds, and keeps that reader.
+    requires: ["s != nil"]
+    runs: [s]
+    vouches: [s]
+    modifies: [s]
+
+  guide.logRecord:
+    reason: Formats the number of a record and writes it to the writer the record holds, whatever writer that is.
+    runs: [r]
+    modifies: []

@@ -622,7 +622,7 @@ vego: cannot verify TwiceOf: f has type func(int) int, which has no contract; de
 function type with a contract and use it here
 ```
 
-Declare a named type such as `Mapper` and use it for the parameter. A contract can only be written on a named type, so a function type of another package that has no annotations, such as `context.CancelFunc`, cannot be called.
+Declare a named type such as `Mapper` and use it for the parameter. A contract can only be written on a named type. A function type of another module gets its contract from an entry in the trust file, as `context.CancelFunc` does from a shipped one. See [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages).
 
 ### Writing a contract on a function type
 
@@ -774,7 +774,8 @@ func Logged(f Mapper) (g Mapper) {
 ```text
 vego: cannot verify Logged: the function literal used as a value calls through the function value
 f, and code that a function value runs cannot do that yet: no contract of a function type has a
-variant, so nothing would prove that such calls end
+variant, so nothing would prove that such calls end. Make the value in code that is not verified,
+or keep that call out of the literal
 ```
 
 A contract of a function type has no `Variant`. A value could be handed back to code that calls it again, and nothing would show that this ends. With this rule, a call through a value that verified code made runs code that makes no such call.
@@ -897,7 +898,7 @@ interface gets one in its doc comment where the interface is declared, with // @
 for a type of another module, give it an entry (io.Closer).Close in vego-trusted.yaml
 ```
 
-Make such a call in code that is not verified, or give the method an entry.
+`io.Closer` has no shipped entry because its documentation leaves a second `Close` undefined, and `vego` cannot yet say that a value has not been closed. Make such a call in code that is not verified. An entry that you write for `(io.Closer).Close` claims that every `Close` returns without panicking, a second one included. See [Types without a shipped entry](#types-without-a-shipped-entry) before you write one.
 
 ### Making an interface value
 
@@ -987,7 +988,7 @@ parameters refer to, so a method that writes what its receiver refers to cannot 
 method of Pricer yet, in (*LineCounter).Price used as a method of Pricer at interfaces.go:90:9
 ```
 
-Interfaces whose methods write state behind the receiver, such as `io.Writer`, `io.Closer`, and `sort.Interface`, wait for a way to name that state.
+So verified code cannot yet convert its own value to an interface whose methods write state behind the receiver, such as a `*bytes.Buffer` to `io.Writer`, or a type to `sort.Interface`. That waits for a way to name the state.
 
 A method with a pointer receiver cannot rely on what the receiver points to. A `Requires` clause that reads it, or a struct invariant of the receiver's type, cannot be proved in the check, and is reported there. A method with a value receiver gets the struct that was converted, so its invariant is proved from what is known where the value is converted. Give the method a value receiver and convert the struct, or make the conversion in code that is not verified. Through a pointer, a value receiver gets the struct as it is when the method runs, so its invariant cannot be proved there either.
 
@@ -1045,7 +1046,9 @@ func LoggedPricer(inner Pricer) (p Pricer) {
 ```text
 vego: cannot verify LoggedPricer: Price may call through a function value or an interface value,
 and code that an interface value runs cannot do that yet: no contract of a function type or of a
-method of an interface has a variant, so nothing would prove that such calls end
+method of an interface has a variant, so nothing would prove that such calls end; Price calls
+through the interface value l.Inner. Make the value in code that is not verified, or keep that
+call out of what Price runs
 ```
 
 A struct that embeds an interface value gets the methods of that value, which call through it. Such a struct cannot be converted either.
@@ -2190,7 +2193,7 @@ func Rounds(l *Lock, n int) {
 }
 ```
 
-A call through a function value of a type with a contract can be deferred too, and so can a call of a method with a contract through an interface value. See [Function values](#function-values) and [Interfaces](#interfaces). `defer cancel()` after `context.WithCancel` and `defer resp.Body.Close()` cannot be verified yet, because `context.Context` and `io.ReadCloser` are interfaces whose methods have no contract, and `context.CancelFunc` has no contract.
+A call through a function value of a type with a contract can be deferred too, and so can a call of a method with a contract through an interface value. See [Function values](#function-values) and [Interfaces](#interfaces). `defer cancel()` verifies for a `context.CancelFunc` that the function is given, whose shipped entry is described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages). It does not verify after `context.WithCancel`, which has no entry, and `defer resp.Body.Close()` does not verify, because `io.Closer` has no shipped entry.
 
 `recover` is not supported, because it returns an interface. Call it in a function that is not verified.
 
@@ -2274,13 +2277,13 @@ Each entry has these fields:
 
 | Field | Required | Content |
 | --- | --- | --- |
-| key | yes | The full name of the function as Go prints it, such as `sort.Ints`, `example.com/pkg.Func`, or `(*bytes.Buffer).Len`. |
+| key | yes | The full name of the function as Go prints it, such as `sort.Ints`, `example.com/pkg.Func`, or `(*bytes.Buffer).Len`. For a method of an interface or a function type of another module, the method or the type, such as `(io.Writer).Write` or `context.CancelFunc`; see [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages). |
 | `reason` | yes | Why you believe the contract. |
 | `modifies` | yes | What the function may write, in the form of a `Modifies` clause. `[x]` is the elements of slice `x`, `[b]` is the struct `b` points to, and `[b.count]` is one field. Write `modifies: []` if it writes nothing a caller can see. |
 | `requires` | no | A list of formulas. Callers must prove each one. |
 | `ensures` | no | A list of formulas. Callers can assume each one. |
 | `runs` | no | Parameters that carry code the function may call, at any depth inside the value. See [Arguments that carry code](#arguments-that-carry-code). |
-| `vouches` | no | Error results whose errors verified code may format, compare, and pass to `errors.Is`, and results that hold function values or interface values verified code may call. See [Errors that a trusted function returns](#errors-that-a-trusted-function-returns) and [Function values and interface values that a trusted function returns](#function-values-and-interface-values-that-a-trusted-function-returns). |
+| `vouches` | no | Error results whose errors verified code may format, compare, and pass to `errors.Is`, results that hold function values or interface values verified code may call, and parameters under whose memory the function writes such values. See [Errors that a trusted function returns](#errors-that-a-trusted-function-returns) and [Function values and interface values that a trusted function returns](#function-values-and-interface-values-that-a-trusted-function-returns). |
 | `calls` | no | Function parameters that the function calls while it runs, each with what holds when it calls them. See [Functions that a trusted function calls](#functions-that-a-trusted-function-calls). |
 
 Put the formulas in quotes. Several characters that formulas use have a special meaning in YAML.
@@ -2299,7 +2302,9 @@ The names in an entry are the parameter and result names from the function's sou
 - `os.Remove`
 - `math/rand.Intn`, `math/rand.Int`
 
-The contracts are in `vego/trusted/std` in the source of `laas`. They state only behaviour that the function's documentation promises, and the tests of `vego` check each one against the real function. For a function that calls a function it is given, the tests also check that it calls it only with arguments that its contract under `calls` allows. The contracts of `strconv.Atoi` and `os.Remove` vouch for their errors. For those, the tests also check that every error in the tree of a returned error has a type whose methods were read against what `vouches` claims. An entry in your own file with the same key replaces the shipped contract.
+It also includes contracts for `(io.Writer).Write`, `(io.Reader).Read`, `(context.Context).Err`, and `context.CancelFunc`, which are described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages).
+
+The contracts are in `vego/trusted/std` in the source of `laas`. They state only behaviour that the function's documentation promises, and the tests of `vego` check each one against the real function. For a function that calls a function it is given, the tests also check that it calls it only with arguments that its contract under `calls` allows. The contracts of `strconv.Atoi`, `os.Remove`, and `(context.Context).Err` vouch for their errors. For those, the tests also check that every error in the tree of a returned error has a type whose methods were read against what `vouches` claims. A contract for a method of an interface or a function type is tested against several implementations from the standard library, and against one that does at random everything the documentation of the type allows. An entry in your own file with the same key replaces the shipped contract.
 
 ### What is checked in an entry
 
@@ -2370,9 +2375,18 @@ The claim is false for a function that calls the methods of an `error` when unve
 
 A function that stores a callback and calls it later, such as one that registers a handler, makes these claims false. Do not list its parameter under `runs`. Call it from code that is not verified.
 
-When the parameter can hold a function value of a type with a contract (see [Function values](#function-values)), `runs` claims that the function calls such a value only with arguments that meet the `Requires` clauses of its type. The same goes for an interface value with a method that has a contract (see [Interfaces](#interfaces)): the function calls such a method only with arguments that meet the method's `Requires`. The rest of the claim then has to hold only for values that meet their contracts, and every value that verified code passes does. For an interface value, that covers the methods that have contracts. For any other code, the claim has to hold whatever code arrives. That includes the methods of an interface without contracts, such as `io.Writer`, an `any`, and an interface type written in place that embeds a named one.
+When the parameter can hold a function value of a type with a contract (see [Function values](#function-values)), `runs` claims that the function calls such a value only with arguments that meet the `Requires` clauses of its type. The same goes for an interface value with a method that has a contract (see [Interfaces](#interfaces)): the function calls such a method only with arguments that meet the method's `Requires`. For a function value of a type with a contract, and an interface value whose methods all have contracts, the rest of the claim then has to hold only for values that meet their contracts, and every value that verified code passes does. For any other code, the claim has to hold whatever code arrives. That includes an interface value of a type with a method that has no contract, even when other methods of the type have one, such as `context.Context`. It also includes the methods of an interface without contracts, such as `io.Closer`, an `any`, and an interface type written in place that embeds a named one.
 
-A trusted function that lists such a parameter under `runs` may run code that verified code made. That code could call back into the verified code that handed it over. So a function that calls such a trusted function cannot itself be made into a function value or a method of an interface value.
+A trusted function may run code that verified code made when it lists under `runs` a parameter that can hold a function value, or an interface value whose methods all have contracts. Verified code can make values of those, and of no other interface. That code could call back into the verified code that handed it over. So a function that calls such a trusted function cannot itself be made into a function value or a method of an interface value. The message says which call and which parameter are the reason:
+
+```text
+vego: cannot verify MakeSink: logNumber may call through a function value or an interface value,
+and code that a function value runs cannot do that yet: no contract of a function type or of a
+method of an interface has a variant, so nothing would prove that such calls end; logNumber calls
+logRecord, which is trusted and runs what r holds, which can be a value of io.Writer, whose methods
+all have contracts, so that verified code can make one. Make the value in code that is not
+verified, or keep that call out of what logNumber runs
+```
 
 A trusted method that is made into a function value, as in `w.Get`, or into a method of an interface value is handed its receiver at each call. If the receiver can carry code, the entry must list it under `runs`, as for a call written out.
 
@@ -2595,7 +2609,196 @@ value of a type with a contract; list it under vouches to claim that every such 
 contract of its type
 ```
 
-With `vouches: [m]`, you claim that every such value in `m` meets the contract of its type, or the contracts of its methods. The claim also covers the values in memory that `m` reaches and that the function allocated or wrote during the call. An entry whose `modifies` covers memory that can hold such a value, at any depth, cannot be used yet.
+With `vouches: [m]`, you claim that every such value in `m` meets the contract of its type, or the contracts of its methods. That includes what the contract says the value writes: nothing a caller can see outside what its `Modifies` or `modifies` lists. The claim also covers the values in memory that `m` reaches and that the function allocated or wrote during the call.
+
+The claim cannot be made for every function. Take a function that is not verified, `NewLineWriter(c *Counter) io.Writer`, whose writer adds one to `c.N` at each `Write`. Its entry may say `modifies: []`, since the function itself writes nothing. Listing its result under `vouches` would claim that the writer writes nothing a caller can see, which is false: the caller holds `c`. Such a function needs a wrapper that verified code can call without the writer, or it stays out of verified code.
+
+A trusted function can also write such a value into memory it is given. If its `modifies` covers memory that can hold, at any depth, a function value or an interface value of a type with a contract, list the parameter that the memory belongs to under `vouches`:
+
+```yaml
+  (*bufio.Scanner).Scan:
+    reason: Reads the next token through the reader the scanner holds, and keeps that reader.
+    requires: ["s != nil"]
+    runs: [s]
+    vouches: [s]
+    modifies: [s]
+```
+
+With `vouches: [s]`, you claim that every such value that the function writes into, or leaves in, the memory its `modifies` covers under `s` meets the contract of its type. A `*bufio.Scanner` holds an `io.Reader`, which has a shipped contract. Without `vouches: [s]`, each call reports that the entry cannot be used, and says to list `s`.
+
+### Interfaces and function types of other packages
+
+An interface or a function type of another module has no doc comment that you can annotate. An entry in the trust file gives it a contract instead. The key of an entry for a method of an interface is the method as Go prints it, as in `(io.Writer).Write`. The key of an entry for a function type is the type, as in `context.CancelFunc`.
+
+`vego` ships entries for these:
+
+- `(io.Writer).Write`
+- `(io.Reader).Read`
+- `(context.Context).Err`
+- `context.CancelFunc`
+
+With them, this verifies:
+
+```go
+// @Requires ctx != nil And cancel != nil And w != nil
+// @Ensures True
+func Work(ctx context.Context, cancel context.CancelFunc, w io.Writer) (err error) {
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("work: %w", err)
+	}
+	_, err = w.Write([]byte("done"))
+	return err
+}
+```
+
+The shipped entries state what the documentation of each type asks of every implementation. The entry for `Write` is:
+
+```yaml
+  (io.Writer).Write:
+    reason: ...
+    modifies: []
+    ensures:
+      - "0 <= n And n <= |p|"
+      - "n < |p| -> err != nil"
+```
+
+The entry for `Read` says that `0 <= n <= |p|` and that `Read` may write all of `p`. It also requires `|p| > 0`: the documentation says only that a `Read` into an empty slice should return 0, and `iotest.DataErrReader` never returns from one. The entry for `Err` says that the error is nil, `context.Canceled`, or `context.DeadlineExceeded`, what `errors.Is` finds in each, and vouches for them. The entry for `context.CancelFunc` says that a cancel function writes nothing that verified code can see.
+
+A call through such a value is checked like a call of a method with a contract in source. See [Interfaces](#interfaces) and [Function values](#function-values). The value must not be nil, the `requires` must hold, and afterwards `vego` knows the `ensures` and forgets only what `modifies` lists.
+
+An entry for a type has the fields of a trusted contract, with three differences:
+
+- The names are those of the method or the function type, and an unnamed result is `result`, as in a trusted contract. A method has no receiver to name.
+- `runs` and `calls` are not allowed. A call through such a value cannot be handed code that nobody has seen.
+- `vouches` can list only results of type `error`.
+
+The key must name the interface that declares the method. Go gives `io.ReadWriter` the `Write` of `io.Writer`, so the entry for it is `(io.Writer).Write`, and it applies to `io.ReadWriter` too. An entry keyed `(io.ReadWriter).Write`, or by an alias or a type defined from `io.Writer`, is reported with the key to use.
+
+An entry for a type of the module that you verify is refused. Write the contract in the doc comment where the type is declared.
+
+#### What an entry for a type claims
+
+An entry for a type is a claim about every value of the type that verified code gets from code that is not verified. That includes a value that a caller passes, a value in memory that an argument reaches, and a value that a call through another value returns. For an entry for a method, it includes the values of every interface that has the method from that declaration. You claim that each such value, called with arguments that meet the `requires`:
+
+- returns without panicking;
+- leaves the `ensures` true;
+- writes nothing that verified code can see, outside what `modifies` lists;
+- returns, in a result listed under `vouches`, only errors that meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns).
+
+The first claim fails most often for real readers and writers. A `Read` from a pipe, a terminal, or a network connection returns only when data or an error arrives, and a reader that never makes progress never returns. A proof that a verified function ends assumes that every such call returns.
+
+The third claim depends on the caller. A caller that is not verified can pass a `*bytes.Buffer` to one verified function twice, once as an `io.Writer` and once as a `*bytes.Buffer`. `Write` then changes memory that the function reads through its other parameter, and the claim is false. The same goes for a writer that writes into a struct and a pointer to that struct, passed together. Verified code cannot make such a pair itself.
+
+The entry does not cover two kinds of values. A value that verified code makes is checked against the entry where it is made. A value that a trusted function returns or writes is covered by the `vouches` of that function's entry. See [Function values and interface values that a trusted function returns](#function-values-and-interface-values-that-a-trusted-function-returns).
+
+The trust report shows an entry for a type with a line that states this claim.
+
+#### Making a value of such a type
+
+Verified code can make a value of such a type from its own types and functions. The method or function is checked against the entry where the value is made:
+
+```go
+// discard writes nothing anywhere.
+type discard struct{}
+
+// @Ensures n = |p| And err = nil
+func (discard) Write(p []byte) (n int, err error) {
+	return len(p), nil
+}
+
+// @Ensures w != nil
+func Discard() (w io.Writer) {
+	return discard{}
+}
+```
+
+A method that writes what its receiver refers to cannot be checked against such an entry, because the entry can list only parameters. So verified code cannot pass a `*bytes.Buffer`, or a writer of its own that buffers or counts, as an `io.Writer` yet. A type whose `Write` has a contract that writes nothing behind the receiver does convert. A `net.Conn` or an `http.ResponseWriter` cannot be converted to `io.Writer` either, because each declares a `Write` of its own. See [Converting between interfaces](#converting-between-interfaces). Make such a conversion in code that is not verified.
+
+#### Wrapping the errors of Read and Write
+
+The shipped entries for `Read` and `Write` do not vouch for errors. The documentation of `io.Reader` and `io.Writer` says nothing about the errors an implementation returns, so verified code can return such an error and compare it with `nil`, but cannot wrap it:
+
+```go
+// @Requires w != nil
+// @Ensures True
+func Save(w io.Writer, b []byte) (err error) {
+	if _, err := w.Write(b); err != nil {
+		return fmt.Errorf("save: %w", err)
+	}
+	return nil
+}
+```
+
+```text
+vego: cannot verify Save: formatting err would run the methods of an error whose origin is not
+known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that
+a trusted contract vouches for, can be formatted
+```
+
+To wrap them, replace the shipped entry with one of your own that vouches:
+
+```yaml
+  (io.Reader).Read:
+    reason: >-
+      The readers our callers pass are *os.File, *bytes.Reader, and
+      *bufio.Reader over those. Read returns the bytes read, 0 <= n <= len(p).
+      Their errors are io.EOF, made by errors.New, and *fs.PathError holding
+      a syscall.Errno, whose methods only read their fields; reviewed 2026-11-19.
+    requires: ["|p| > 0"]
+    vouches: [err]
+    modifies: [p]
+    ensures: ["0 <= n And n <= |p|"]
+```
+
+```go
+// @Requires r != nil And |buf| > 0
+// @Modifies buf
+// @Ensures err = nil -> 0 <= n <= |buf|
+func Load(r io.Reader, buf []byte) (n int, err error) {
+	n, err = r.Read(buf)
+	if err != nil {
+		return 0, fmt.Errorf("load: %w", err)
+	}
+	return n, nil
+}
+```
+
+With `vouches: [err]`, you claim that every reader that verified code in the module gets from code that is not verified returns only errors that meet the conditions of `vouches`: their methods return without panicking and write nothing a caller can see, `==` on them is identity, and what `errors.Is` reports of them does not change. Before you write the entry, list the readers that the callers of your verified code pass, and read the source of the errors each returns and of every error in their trees. A reader that wraps another returns the errors of the reader it wraps.
+
+A type of your own that is converted to `io.Reader` under such an entry must return only errors of known origin, such as errors made by `errors.New` and error variables that hold one. It cannot wrap an error, because code that an interface value made by verified code runs cannot call `fmt.Errorf`, which formats its operands and so can run their methods.
+
+#### Types without a shipped entry
+
+`(io.Closer).Close` has no shipped entry. Its documentation says that the behaviour of `Close` after the first call is undefined, and `vego` cannot yet express that a value has not been closed. An entry with `modifies: []` claims that every closer from code that is not verified returns without panicking and writes nothing verified code can see, each time it is closed. Nothing stops verified code from calling `Close` twice, so the claim covers a second call. You can make it for the closers you know: a `*os.File` returns an error from a second `Close` and does not panic. A type whose `Close` closes a channel panics the second time. Write the entry only if every closer that your callers pass meets the claim. `defer resp.Body.Close()` also needs `http.Response`, which `vego` does not model.
+
+`(fmt.Stringer).String` has no shipped entry. Its documentation states no contract, and the `String` methods of many types panic on a nil pointer.
+
+Only `Err` of `context.Context` has an entry. `Done` returns a channel, which `vego` does not model, and `Value` takes an `any`, which cannot be passed to a method of an interface value. So a `context.Context` can be passed to a verified function, and to a trusted function under `runs`, but not to a function value or to a method of an interface value, and verified code cannot make one.
+
+`context.WithCancel` has no true entry yet, so `defer cancel()` verifies for a `cancel` that a function is given, as in `Work`, and not for one it gets from `context.WithCancel`. The function keeps its parent context in the one it returns and runs the parent's methods later and on another goroutine, and `runs` claims that a trusted function does neither.
+
+#### One entry for each type in a build
+
+Without `-vego.trusted`, each module reads its own trust file, so two modules built together can give one type two entries. A value that one module checked against its entry could then reach verified code of the other, which relies on another entry. `vego` reports this in every package that is built with both:
+
+```text
+vego: the trust files of this build give (example.com/lib.Sink).Put two contracts, at
+a/vego-trusted.yaml:4 and at b/vego-trusted.yaml:4; a value that verified code checked against one
+can reach verified code that relies on the other. Make the entries the same, or run laas with
+-vego.trusted naming one file
+```
+
+A module whose proofs were made with no entry for a type conflicts with a module that gives it one. With no entry, a trusted function that returns a value of the type was not asked to vouch for it:
+
+```text
+vego: the trust files of this build give (example.com/lib.Sink).Put a contract at
+b/vego-trusted.yaml:4, and the proofs of package example.com/a were made with none; what they let
+through can reach verified code that relies on the entry: add the same entry to the trust file of
+its module, or run laas with -vego.trusted naming one file
+```
+
+The check sees only packages that are built together in one run. Run `laas` on the module of the main package as well as on the modules it uses.
 
 ### Error variables in a trusted contract
 
@@ -2610,15 +2813,15 @@ The package must be in the build of the package that calls the function. An entr
 
 A trusted contract does not make an unsupported signature callable. If a function has a parameter or result of an unsupported type, such as an array or a channel, verified code cannot call it even with an entry. Write a small wrapper whose signature uses only supported types, and trust the wrapper.
 
-A trusted contract cannot be given to a method of an interface. An entry such as `(example.com/shop.Store).Get` is reported in the trust file:
+An entry for a method of an interface or a function type of the module that you verify is reported in the trust file:
 
 ```text
-vego: the trusted contract names (example.com/shop.Store).Get, a method of an interface type,
-which the trust file cannot give a contract yet; write the contract in the doc comment of the
-method where the interface is declared
+vego: the trusted contract names (example.com/shop.Store).Get, a method of an interface type of the
+module of this package; write its contract in the doc comment of the method where the interface is
+declared
 ```
 
-Write the contract in the doc comment of the method where the interface is declared, as described in [Interfaces](#interfaces).
+Write the contract in the doc comment of the method where the interface is declared, as described in [Interfaces](#interfaces). An entry for a type of another module is described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages).
 
 A function cannot have both annotations and a trusted contract. When you verify a function that you previously trusted, delete its entry.
 
@@ -2639,6 +2842,17 @@ The report has three lists:
 - the entries in your trust file that no proof uses.
 
 An entry that lists parameters under `runs` or results under `vouches` shows them in the lines `runs code held by:` and `vouches for the errors and function values in:`, and each contract under `calls` in a line such as `calls f(i) when: 0 <= i < n`. Each is a claim about code that `vego` does not read. See [Arguments that carry code](#arguments-that-carry-code) and [Errors that a trusted function returns](#errors-that-a-trusted-function-returns).
+
+An entry for a method of an interface or a function type shows the reach of its claim in a line such as:
+
+```text
+    a claim about Write of every value of io.Writer, or of an interface that has Write from it, that
+    verified code gets from code that is not verified: from a caller, directly or in memory an
+    argument reaches, or from a call through a value; a value that a trusted function returns or
+    writes is claimed by that function's vouches
+```
+
+Such an entry can be relied on where no call names it, for example where a value of the type is passed to a trusted function under `runs`. The report then lists, in a line `relied on in:`, the packages whose proofs rest on it.
 
 A contract marked `[may fail unpredictably]` does not say when its function succeeds. A verified function that calls it can be excused from saying when it succeeds, as described in [Functions that cannot promise success](#functions-that-cannot-promise-success).
 
@@ -2808,10 +3022,10 @@ This table lists the most common messages.
 | `cannot verify F: G calls a function it is given, and cannot be used as a value` | A trusted function with a contract under `calls` is used as a function value. | Call it directly. |
 | `the Ensures clauses of T are not proved to be satisfiable for every call that its Requires allow` | Some call that the `Requires` of `T` allow has no result that meets its `Ensures`. | Add the condition to the `Requires` clauses, or weaken the `Ensures`. |
 | `cannot verify F: a function literal used as a value cannot assign x` | The literal assigns a variable of the function around it. | Return the value from the literal, or write it into memory that the contract of the type lists. |
-| `... calls through the function value f, and code that a function value runs cannot do that yet`, or `g may call through a function value or an interface value, and code that a function value runs cannot do that yet` (or `that an interface value runs`) | Code that a function value or an interface value runs would call through a function value or an interface value. | Leave that code unverified. See [Function values that call function values](#function-values-that-call-function-values) and [Interface values that call interface values](#interface-values-that-call-interface-values). |
+| `... calls through the function value f, and code that a function value runs cannot do that yet`, or `g may call through a function value or an interface value, and code that a function value runs cannot do that yet` (or `that an interface value runs`) | Code that a function value or an interface value runs would call through a function value or an interface value. The message ends with the call or the trusted function under `runs` that is the reason. | Leave that code unverified, or keep that call out of it. See [Function values that call function values](#function-values-that-call-function-values), [Interface values that call interface values](#interface-values-that-call-interface-values), and [Arguments that carry code](#arguments-that-carry-code). |
 | `cannot verify F: x is passed to the function value f and is an error whose origin is not known` (or `to the method s.M`) | The value may come from code that is not verified, which could run the methods of the error. | Pass an error made by `errors.New` or `fmt.Errorf`, or call from code that is not verified. |
 | `the interface value p may be nil` | A call through `p` is not proved to have a value to call. | Add `p != nil` to the `Requires` clauses, or check `p` before the call. |
-| `cannot verify F: p.M calls I.M, which has no contract` | The method has no contract, as for every interface of the standard library. | Write the contract in the doc comment of the method where `I` is declared, or make the call in code that is not verified. See [Interfaces](#interfaces). |
+| `cannot verify F: p.M calls I.M, which has no contract` | The method has no contract, in source or in the trust file. | Write the contract in the doc comment of the method where `I` is declared, give a method of another module an entry, or make the call in code that is not verified. See [Interfaces](#interfaces) and [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages). |
 | `..., in (*T).M used as a method of I at f.go:n:c` | The method of `T` does not meet the contract of `I.M` where a `T` is converted to `I`. | Fix the method, or the contract of `I.M`. See [What a conversion checks](#what-a-conversion-checks). |
 | `... which I.M may not modify; I.M can list only what its parameters refer to, so a method that writes what its receiver refers to cannot be used as a method of I yet` (or `the contract of T ... as a value of type T`) | The method writes behind its receiver, which the contract it is made into cannot name. | Keep the conversion, or the method value, in code that is not verified. |
 | `T.M has a value receiver, and the pointer that the interface value holds may be nil` | A `*T` that may be nil is converted to an interface, and `M` copies what it points to. | Convert a pointer that is not nil. |
@@ -2822,7 +3036,12 @@ This table lists the most common messages.
 | `a contract can only be declared on a method of a defined interface type at package level without type parameters` | The contract is on a method of an interface type written in place, of an alias, or of a generic type. | Declare a named interface type at package level. |
 | `... has unsupported type interface{p.A}; an interface literal that embeds a declared interface ...` | An interface type written in place embeds a named interface. | Declare a named type, as in `type D interface{ A }`. |
 | `cannot verify F: w is used as a method of I, which hands its receiver to M at each call; M is trusted, and its receiver ...` (or `as a value`) | A trusted method whose receiver can carry code is made into a method of an interface value or a function value. | List the receiver under `runs`, if the contract holds whatever that code does. See [Arguments that carry code](#arguments-that-carry-code). |
-| `the trusted contract names (p.I).M, a method of an interface type` | The trust file has an entry for a method of an interface. | Write the contract in the doc comment of the method. |
+| `the trusted contract names (p.J).M, but J has M from (p.I).M; key the entry (p.I).M` | The entry is keyed by an interface that embeds the declaration, an alias, or a type defined from it. | Use the key the message gives. |
+| `the trusted contract names (p.I).M, a method of an interface type of the module of this package` (or `a function type of the module`) | The trust file has an entry for a type that you can annotate. | Write the contract in the doc comment where the type is declared. |
+| `... which I.M may not modify; the entry (p.I).M in the trust file does not list it, so code that writes it cannot be used there` (or `the contract of T does not list it`) | A value that verified code makes writes memory that the contract of its type does not list. | Write nothing that the contract does not list. |
+| `g may return an error whose origin is not known in err, and the trusted contract of K vouches for the errors there` | A value that verified code makes could return an error that the entry of its type is claimed to vouch for. | Return only errors made by `errors.New` or error variables that hold them. |
+| `its modifies "x" covers memory that can hold a function value or an interface value of a type with a contract; list x under vouches` | A trusted function writes memory that can hold such a value. | List the parameter under `vouches` if you can claim what that says. See [Function values and interface values that a trusted function returns](#function-values-and-interface-values-that-a-trusted-function-returns). |
+| `the trust files of this build give K two contracts` (or `a contract at F, and the proofs of package P were made with none`) | Modules built together give one type different entries. | Make the entries the same, or run `laas` with `-vego.trusted`. See [One entry for each type in a build](#one-entry-for-each-type-in-a-build). |
 | `cannot verify F: Go converts a value to an interface type here, and which expression it converts could not be told` | A value without an expression of its own, such as one result of a call with several, is converted to an interface. | Assign the value to a variable of its own type first. |
 | `cannot verify F: f holds a function literal and is used here other than by calling it` | The variable that holds the literal is passed, compared, or assigned again. | Only call the variable. |
 | `cannot verify F: recover is not supported` | `recover` returns an interface. | Call `recover` in a function that is not verified. |
@@ -2835,7 +3054,9 @@ This table lists the most common messages.
 
 A function that uses any of the following is reported as `cannot verify`:
 
-- calls of a method of an interface that has no contract, which includes the interfaces of the standard library, and converting a value to an interface with such a method (see [Interfaces](#interfaces));
+- calls of a method of an interface that has no contract, in source or in the trust file, and converting a value to an interface with such a method (see [Interfaces](#interfaces)); of the standard library, only `(io.Writer).Write`, `(io.Reader).Read`, and `(context.Context).Err` have shipped contracts (see [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages));
+- an entry in the trust file for a type of the module of the analysed package, or one with `runs` or `calls`;
+- `context.WithCancel` and the functions like it, which keep the context they are given (see [Types without a shipped entry](#types-without-a-shipped-entry));
 - comparing interface values with anything but `nil`, type assertions, and type switches;
 - converting an interface value to an interface whose methods it does not have from the same declarations, other than `any`;
 - interface types written in place that embed a named interface, generic interface types, and interfaces that embed `error`;
@@ -2866,7 +3087,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - a `range` over a map whose body modifies a map of the same type;
 - `goto`, `fallthrough`, labelled `break` and `continue`, and `defer` inside a loop, except inside a function literal that the loop calls.
 
-Two more limits are reported in other ways. A method of a type that writes what its receiver points to, or relies on what it points to, cannot be used as a method of an interface. The conversion reports the obligation that fails, as described in [What a conversion checks](#what-a-conversion-checks). An entry in the trust file for a method of an interface is reported in the trust file, as described in [Limits of trusted contracts](#limits-of-trusted-contracts).
+Two more limits are reported in other ways. A method of a type that writes what its receiver points to, or relies on what it points to, cannot be used as a method of an interface. The conversion reports the obligation that fails, as described in [What a conversion checks](#what-a-conversion-checks). An entry in the trust file for a type of the module that you verify is reported in the trust file, as described in [Limits of trusted contracts](#limits-of-trusted-contracts). Two different entries for one type in packages built together are reported in every package built with both, as described in [One entry for each type in a build](#one-entry-for-each-type-in-a-build).
 
 Floating-point values are supported but opaque. They can be passed around and used in arithmetic, but nothing can be stated or proved about their values. An integer converted from a float can have any value of its type, so check its range in code before you use it as an index.
 
@@ -2874,9 +3095,11 @@ Floating-point values are supported but opaque. They can be passed around and us
 
 A proof by `vego` depends on the following assumptions. Each concerns something `vego` cannot see.
 
-- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and it keeps no value that can hold code. It does not call back, through another package, into the verified function that called it. A call back within the same package is found and reported. For a parameter listed under `runs`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value with a method that has a contract, it holds for every value whose methods with contracts meet them, and the function calls such a method only with arguments that meet its `Requires`. For any other method, it holds whatever code the method runs. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values it returns meet the contracts of their types.
+- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and it keeps no value that can hold code. It does not call back, through another package, into the verified function that called it. A call back within the same package is found and reported. For a parameter listed under `runs`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter.
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method.
-- An interface value that reaches verified code from code that is not verified meets the contracts of its methods. That includes a value passed as an argument, a value in memory that an argument reaches, and a value that a trusted function returns. Called with arguments that meet the `Requires` of a method, the method returns without panicking, leaves its `Ensures` true, and writes nothing that verified code can see outside what its `Modifies` lists. This holds also when the value holds a pointer to a struct that verified code holds.
+- An interface value that reaches verified code from code that is not verified meets the contracts of its methods. That includes a value passed as an argument, a value in memory that an argument reaches, a value that a call through another value returns, and a value that a trusted function returns or writes, which its entry vouches for. Called with arguments that meet the `Requires` of a method, the method returns without panicking, leaves its `Ensures` true, and writes nothing that verified code can see outside what its `Modifies` lists. This holds also when the value holds a pointer to a struct that verified code holds.
+- The same holds of the methods and function types that entries of the trust file give contracts, which is what such an entry claims (see [What an entry for a type claims](#what-an-entry-for-a-type-claims)). In particular, a caller that is not verified does not pass a verified function such a value together with a pointer to memory that the value writes, as a `*bytes.Buffer` passed both as an `io.Writer` and as a `*bytes.Buffer` would be. Every call through such a value returns: a `Read` from a pipe, a terminal, or a connection returns only once data or an error arrives.
+- Packages that are built together give each type at most one entry. `vego` reports two entries for one type, or an entry against none, in every package that `laas` analyses and that is built with both. A program whose main package is never given to `laas` is not checked.
 - A function value that reaches verified code from code that is not verified meets the contract of its type. That includes a value passed as an argument, a value in memory that an argument reaches, and a value made with `reflect.MakeFunc` or by generic code. Called with arguments that meet the `Requires` of its type, such a value returns without panicking, writes only what the `Modifies` of its type lists, and leaves its `Ensures` true.
 - Unverified code respects Go's type system. It does not use `unsafe`, `reflect`, or cgo to give one piece of memory two types or to change a string.
 - No other goroutine writes memory that a verified function reads or writes while it runs. A proof covers one goroutine.
