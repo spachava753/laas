@@ -151,6 +151,9 @@ func TestSortsAreChecked(t *testing.T) {
 		{Op: logic.OpLe, Sort: logic.Bool, Args: []*logic.Term{b, x}},
 		{Op: logic.OpAnd, Sort: logic.Bool, Args: []*logic.Term{b, x}},
 		{Op: logic.OpIte, Sort: logic.Bool, Args: []*logic.Term{x, b, b}},
+		{Op: logic.OpIs, Sort: logic.Bool, Args: []*logic.Term{x, logic.NilErr()}},
+		{Op: logic.OpIs, Sort: logic.Bool, Args: []*logic.Term{logic.NilErr()}},
+		{Op: logic.OpIs, Sort: logic.Int, Args: []*logic.Term{logic.NilErr(), logic.NilErr()}},
 	} {
 		func() {
 			defer func() {

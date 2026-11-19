@@ -67,6 +67,7 @@ func TestResolve(t *testing.T) {
 		"found": Const("found", Bool), "flags": Const("flags", BoolSeq),
 		"s.count": Const("count0", Int), "s.count'": Const("count1", Int), "old s.count": Const("count0", Int),
 		"s.items'": Const("items1", IntSeq), "p": Const("p", Ref), "q": Const("q", Ref), "has A": Const("has A", Bool),
+		"err": Const("err", Err), "ErrEmpty": Const("ErrEmpty", Err),
 	}
 	resolver := NewResolver()
 	sumTo, err := ParsePredicate("sumTo(A, i, s) ::= ((i <= 0 -> s = 0) And " +
@@ -78,7 +79,11 @@ func TestResolve(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse predicate: %v", err)
 	}
-	if errs := resolver.Define([]*PredDecl{sumTo, marked}); len(errs) > 0 {
+	wraps, err := ParsePredicate("wraps(e, t) ::= is(e, t) And e != t")
+	if err != nil {
+		t.Fatalf("parse predicate: %v", err)
+	}
+	if errs := resolver.Define([]*PredDecl{sumTo, marked, wraps}); len(errs) > 0 {
 		t.Fatalf("define predicates: %v", errs[0].Err)
 	}
 
@@ -129,6 +134,15 @@ func TestResolve(t *testing.T) {
 		{"missing(i)", "error: unknown predicate missing"},
 		{"k > 0", "error: unknown name k"},
 		{"A[0:i)", "error: slice range"},
+		{"err = nil Or err = ErrEmpty", "((err = nil) Or (err = ErrEmpty))"},
+		{"err != ErrEmpty", "~(err = ErrEmpty)"},
+		{"is(err, ErrEmpty) <-> |A| = 0", "(is(err, ErrEmpty) <-> (|A| = 0))"},
+		{"is(err, nil)", "is(err, nil)"},
+		{"wraps(err, ErrEmpty)", "wraps(err, ErrEmpty)"},
+		{"err < ErrEmpty", "error: operator < cannot be applied to errors"},
+		{"is(err)", "error: is takes two errors"},
+		{"is(err, n)", "error: expected an error but n has type int"},
+		{"err = n", "error: cannot compare"},
 	}
 	for _, test := range tests {
 		t.Run(test.src, func(t *testing.T) {
@@ -172,6 +186,7 @@ func TestDefine(t *testing.T) {
 			[]string{"negate(b) ::= ~b", "liar(n) ::= negate(liar(n))"}, "must not occur under negation"},
 		{"rejects duplicate names", []string{"p(n) ::= n > 0", "p(n) ::= n < 0"}, "already defined"},
 		{"rejects free names", []string{"p(n) ::= n > m"}, "may only mention their parameters"},
+		{"rejects the name is", []string{"is(n) ::= n > 0"}, "already defined"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

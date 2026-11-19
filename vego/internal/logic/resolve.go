@@ -127,6 +127,8 @@ func describe(sort Sort) string {
 		return "a formula"
 	case Int:
 		return "an integer"
+	case Err:
+		return "an error"
 	}
 	return "a slice or a string"
 }
@@ -262,6 +264,12 @@ func (s *scope) call(n *Node) *Term {
 	case "len":
 		// One spelling for one thing: the length is written with bars.
 		fail("there is no len in annotations; write |x| for the length of x")
+	case "is":
+		// is(err, target): whether errors.Is(err, target) reports true.
+		if len(n.Kids) != 2 {
+			fail("is takes two errors, as in is(err, ErrEmpty)")
+		}
+		return Is(s.expect(n.Kids[0], Err), s.expect(n.Kids[1], Err))
 	case "has":
 		// has(m, k): whether map m has key k.
 		if s.env == nil || len(n.Kids) != 2 {
@@ -410,10 +418,12 @@ func (s *scope) relation(op string, a, b *Term) *Term {
 	case a.Sort.IsSeq() && equality:
 		result = SeqEq(a, b, s.r.newBound("k", Int))
 	case a.Sort == Err && equality && (a == NilErr() || b == NilErr()):
-		// Whether an error is nil is all that is known about it.
 		result = And(IsNil(a), IsNil(b))
+	case a.Sort == Err && equality:
+		// Two errors are equal when they are the same error.
+		result = Eq(a, b)
 	case a.Sort == Err:
-		fail("an error can only be compared with nil")
+		fail("operator %s cannot be applied to errors; compare them with = or !=", op)
 	case a.Sort == Bool && equality:
 		result = Iff(a, b)
 	case a.Sort == Ref && equality && Incomparable(a, b) != "":
@@ -491,7 +501,7 @@ func (r *Resolver) Define(decls []*PredDecl) []DefineError {
 	var errs []DefineError
 	byName := map[string]*PredDecl{}
 	for _, decl := range decls {
-		if _, dup := byName[decl.Name]; dup || slices.Contains([]string{"len", "old", "fresh", "within", "has"}, decl.Name) {
+		if _, dup := byName[decl.Name]; dup || slices.Contains([]string{"len", "old", "fresh", "within", "has", "is"}, decl.Name) {
 			errs = append(errs, DefineError{decl, fmt.Errorf("predicate %s is already defined", decl.Name)})
 			continue
 		}
@@ -638,6 +648,11 @@ func inferSorts(decls map[string]*PredDecl) map[string][]Sort {
 				case NCall:
 					if n.Name == "len" && len(n.Kids) == 1 {
 						set(n.Kids[0], IntSeq)
+					}
+					if n.Name == "is" {
+						for _, kid := range n.Kids {
+							set(kid, Err)
+						}
 					}
 					for i, kid := range n.Kids {
 						if callee, ok := sorts[n.Name]; ok && i < len(callee) && callee[i] != Int {

@@ -15,7 +15,9 @@ import (
 //
 // Integers and references are Int, booleans are Bool, and floats and errors
 // are uninterpreted sorts. The nil error is a constant, an error is nil
-// exactly when it equals that constant, and some error is not nil.
+// exactly when it equals that constant, and some error is not nil. Two
+// errors are the same error when they are equal, and whether errors.Is
+// reports true for them is an uninterpreted function.
 //
 // A sequence is a datatype of an (Array Int E) and a raw length, so reads
 // are total: a read outside the length gives some value, and a filled
@@ -196,8 +198,11 @@ func (e *encoder) sort(s logic.Sort) string {
 	case s == logic.Err:
 		name = "Err"
 		// Some error is not nil. Without that fact a model could have
-		// only the nil error, and in it every error would be nil.
-		e.out.WriteString("(declare-sort Err 0)\n(declare-const nil Err)\n(declare-const some-error Err)\n(assert (not (= some-error nil)))\n")
+		// only the nil error, and in it every error would be nil. Whether
+		// errors.Is reports true for two errors is a function of them and
+		// nothing more.
+		e.out.WriteString("(declare-sort Err 0)\n(declare-const nil Err)\n(declare-const some-error Err)\n(assert (not (= some-error nil)))\n" +
+			"(declare-fun error-is (Err Err) Bool)\n")
 	case s.IsSeq():
 		elem := e.sort(s.Elem())
 		name = "Seq" + elem
@@ -597,6 +602,9 @@ func (e *encoder) node(b *strings.Builder, t *logic.Term) {
 		b.WriteString("(= ")
 		e.term(b, t.Args[0])
 		b.WriteString(" nil)")
+	case logic.OpIs:
+		e.sort(logic.Err)
+		apply("error-is", t.Args...)
 	case logic.OpKey:
 		e.key(b, t)
 	case logic.OpIte:
@@ -722,6 +730,8 @@ func checkSorts(t *logic.Term) {
 		ok = arity(3) && t.Args[0].Sort.IsSeq() && numeric(t.Args[1]) && numeric(t.Args[2]) && is(t, t.Args[0].Sort)
 	case logic.OpIsNil:
 		ok = arity(1) && t.Sort == logic.Bool && t.Args[0].Sort == logic.Err
+	case logic.OpIs:
+		ok = arity(2) && t.Sort == logic.Bool && t.Args[0].Sort == logic.Err && t.Args[1].Sort == logic.Err
 	case logic.OpKey:
 		ok = arity(1) && numeric(t) && t.Args[0].Sort.IsSeq()
 	case logic.OpIte:

@@ -12,9 +12,11 @@ import (
 type Sort int
 
 // The sorts of the logic. Integers are mathematical (unbounded) integers.
-// Float and Err are opaque: a float has no known properties at all, and an
-// error has exactly one, whether it is nil. A Ref is the identity of an
-// object in memory; the logic treats it as a number, and nil is zero.
+// Float and Err are opaque. A float has no known properties at all. Of an
+// error the logic knows its identity, so two errors are equal when they are
+// the same error, and whether it is nil, which is equality with the nil
+// error. A Ref is the identity of an object in memory; the logic treats it
+// as a number, and nil is zero.
 //
 // A sequence sort is its element sort plus seqStep for each level, so
 // sequences nest to any depth: a sequence of integers models a slice or a
@@ -78,6 +80,7 @@ const (
 	OpConcat // Concat(a, b): the elements of a followed by those of b
 	OpSub    // Sub(seq, lo, hi): the elements of seq from lo up to hi
 	OpIsNil  // IsNil(err): whether an error value is nil
+	OpIs     // Is(err, target): whether errors.Is(err, target) reports true
 	OpKey    // Key(seq): a number that identifies a sequence by its contents
 	OpPair   // Pair(ref, at): a pointer, which only ever occurs as an operand of RefEq
 	OpIte
@@ -206,6 +209,12 @@ func IsNil(err *Term) *Term {
 	}
 	return node(OpIsNil, Bool, err)
 }
+
+// Is returns the formula stating that errors.Is(err, target) reports true.
+// The logic knows nothing about it beyond its being a function of the two
+// errors; what it is for a particular error is told by the facts the
+// verifier adds.
+func Is(err, target *Term) *Term { return node(OpIs, Bool, err, target) }
 
 // Pair returns a pointer into an allocation at a position. It is not a term
 // the solver knows; RefEq takes it apart. A nil position marks a pointer
@@ -451,6 +460,8 @@ func (t *Term) write(b *strings.Builder) {
 		list("sub(", t.Args, ", ", ")")
 	case OpIsNil:
 		list("(", t.Args, "", " = nil)")
+	case OpIs:
+		list("is(", t.Args, ", ", ")")
 	case OpKey:
 		list("key(", t.Args, "", ")")
 	case OpPair:

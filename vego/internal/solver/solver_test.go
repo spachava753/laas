@@ -69,6 +69,21 @@ type model struct {
 	// which the logic leaves open, and divided records that one was used.
 	wild    int64
 	divided *bool
+	// relation selects what errors.Is reports for two errors, which the
+	// logic leaves open: equality, inequality, or a fixed table that is
+	// neither.
+	relation int64
+}
+
+// is says whether errors.Is reports true for two errors of a model.
+func (m model) is(err, target int64) bool {
+	switch m.relation {
+	case 0:
+		return err == target
+	case 1:
+		return err != target
+	}
+	return (err*2+target*3)%4 < 2
 }
 
 // key returns the number of a sequence.
@@ -165,6 +180,8 @@ func (m model) eval(t *logic.Term) int64 {
 		return m.seq(t.Args[0]).at(arg(1))
 	case logic.OpIsNil:
 		return truth(arg(0) == 0)
+	case logic.OpIs:
+		return truth(m.is(arg(0), arg(1)))
 	case logic.OpPred:
 		def := m.preds[t.Name]
 		saved := make([]int64, len(t.Args))
@@ -434,6 +451,16 @@ func (g *generator) formula(depth int) *logic.Term {
 					return logic.Eq(logic.Div(logic.IntLit(a), logic.IntLit(b)), logic.IntLit(claimed))
 				}
 				return logic.Eq(logic.Mod(logic.IntLit(a), logic.IntLit(b)), logic.IntLit(claimed))
+			case 9:
+				return logic.Eq(g.failure(depth), g.failure(depth))
+			case 10:
+				return logic.Is(g.failure(depth), g.failure(depth))
+			case 11:
+				// Two errors are the same, or one of them is nil: false of
+				// two different errors, which a translation that compared
+				// errors only by whether they are nil would miss.
+				a, b := g.failure(0), g.failure(0)
+				return logic.Or(logic.Eq(a, b), logic.IsNil(a), logic.IsNil(b))
 			}
 		}
 		a, b := g.intTerm(depth), g.intTerm(depth)
@@ -681,7 +708,8 @@ func models() (small, large []model) {
 				row := (r*r + shape) % 3
 				return seqValue{(row + shape/4) % 3, func(i int64) int64 { return (row*i + shape/6) % 3 }}
 			}},
-			preds: definitions(),
+			preds:    definitions(),
+			relation: int64(rng.IntN(3)),
 		}
 	}
 	for x := int64(-2); x <= 2; x++ {
@@ -1024,6 +1052,7 @@ func TestTranslation(t *testing.T) {
 	pow := Options{Preds: map[string]*logic.PredDef{"pow": {Name: "pow", Params: []*logic.Term{n2}, Body: logic.Or(logic.Eq(n2, lit(1)), halved)}}}
 	x := logic.Const("x", logic.Int)
 	e := logic.Bound("e", logic.Err)
+	ea, eb, ec := logic.Const("ea", logic.Err), logic.Const("eb", logic.Err), logic.Const("ec", logic.Err)
 	tests := []struct {
 		name string
 		opts Options
@@ -1077,6 +1106,20 @@ func TestTranslation(t *testing.T) {
 		{"an odd power of two is one", pow, []*logic.Term{logic.Pred("pow", x), logic.Eq(logic.Mod(x, lit(2)), lit(1))}, logic.Eq(x, lit(1)), Proved},
 		// Guards against a model in which every error is nil.
 		{"some error is not nil", Options{}, nil, logic.Not(logic.Forall(e, logic.IsNil(e))), Proved},
+		// Guards against errors being told apart only by whether they are
+		// nil, which would make every two non-nil errors the same, and
+		// against is being written as equality or as anything that holds
+		// or fails of every two errors.
+		{"two errors that are not nil may differ", Options{}, []*logic.Term{logic.Not(logic.IsNil(ea)), logic.Not(logic.IsNil(eb))}, logic.Eq(ea, eb), Refuted},
+		{"two errors that are not nil may be the same", Options{}, []*logic.Term{logic.Not(logic.IsNil(ea)), logic.Not(logic.IsNil(eb))}, logic.Not(logic.Eq(ea, eb)), Refuted},
+		{"an error equal to a nil one is nil", Options{}, []*logic.Term{logic.Eq(ea, eb), logic.IsNil(eb)}, logic.IsNil(ea), Proved},
+		{"is is not equality", Options{}, []*logic.Term{logic.Not(logic.Eq(ea, eb))}, logic.Not(logic.Is(ea, eb)), Refuted},
+		{"is may differ from equality the other way", Options{}, []*logic.Term{logic.Eq(ea, eb)}, logic.Is(ea, eb), Refuted},
+		{"is is not symmetric", Options{}, []*logic.Term{logic.Is(ea, eb)}, logic.Is(eb, ea), Refuted},
+		{"is is a function of the two errors", Options{}, []*logic.Term{logic.Eq(ea, ec), logic.Is(ea, eb)}, logic.Is(ec, eb), Proved},
+		{"is is a function of its target", Options{}, []*logic.Term{logic.Eq(eb, ec), logic.Is(ea, eb)}, logic.Is(ea, ec), Proved},
+		{"is depends on its target", Options{}, []*logic.Term{logic.Is(ea, eb)}, logic.Is(ea, ec), Refuted},
+		{"is depends on the error", Options{}, []*logic.Term{logic.Is(ea, eb)}, logic.Is(ec, eb), Refuted},
 		// Guards against a predicate written out in place capturing a
 		// variable bound around its application.
 		{"an inlined predicate does not capture", Options{Preds: map[string]*logic.PredDef{"some": {Name: "some", Params: []*logic.Term{n2}, Body: logic.Exists(k, logic.Lt(n2, k))}}},
