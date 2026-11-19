@@ -86,6 +86,8 @@ func TestProtocol(t *testing.T) {
 		{"another word", `echo valid; echo '(:reason-unknown "")'`, 0, true},
 		{"a process that ends", `exit 3`, 0, true},
 		{"a reason that is a limit", `echo unknown; echo '(:reason-unknown "max. resource limit exceeded")'`, Exhausted, false},
+		{"a tactic out of the limit", `echo '(error "tactic failed: max. resource limit exceeded")'; echo '(:reason-unknown "max. resource limit exceeded")'`, Exhausted, false},
+		{"a tactic that fails otherwise", `echo '(error "tactic failed: something")'; echo '(:reason-unknown "max. resource limit exceeded")'`, 0, true},
 		{"another reason", `echo unknown; echo '(:reason-unknown "(incomplete quantifiers)")'`, Unknown, false},
 		{"a process out of memory", `echo '(error "out of memory")' >&2; exit 101`, OutOfMemory, false},
 	}

@@ -81,7 +81,7 @@ type Response struct {
 // @Requires r != nil And r.Body != nil
 // @Ensures True
 func Close(r *Response) {
-	defer r.Body.Close() // want `cannot verify Close: r.Body.Close calls Closer.Close, which has no contract`
+	defer r.Body.Close() // want `precondition of r.Body.Close may not hold: ~closed\(c\)` `r.Body.Close may modify the states of r.Body, which Close may not modify; list it in a // @Modifies clause`
 }
 
 // @Requires err != nil

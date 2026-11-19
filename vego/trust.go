@@ -56,8 +56,11 @@ type trustEntry struct {
 	// calls gives function parameters a contract: how the function calls
 	// what it is given there.
 	calls []trustCall
-	file  *trustFile
-	line  int
+	// receiver names the receiver of a method of an interface, so that the
+	// contract can speak of its states; see ifacestate.go.
+	receiver trustFormula
+	file     *trustFile
+	line     int
 }
 
 // trustCall is one entry under calls: a function parameter, names for the
@@ -85,7 +88,9 @@ type trustFile struct {
 	shipped bool
 	entries map[string]*trustEntry
 	// states holds the states the file declares, by the type they belong
-	// to, as in sync.Mutex. Only the shipped files may declare one.
+	// to, as in sync.Mutex. Only the shipped files may declare one of a
+	// struct type; a project file may declare those of an interface of
+	// another module.
 	states map[string][]stateDecl
 	// problems are the defects of the file itself, by line.
 	problems []trustProblem
@@ -245,8 +250,14 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			}
 		case "calls":
 			f.addCalls(entry, value, formulas)
+		case "receiver":
+			if value.Kind != yaml.ScalarNode {
+				f.problem(value.Line, "the receiver of %s must be a name", entry.key)
+				continue
+			}
+			entry.receiver = trustFormula{text: value.Value, line: value.Line, col: value.Column}
 		default:
-			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, requires, ensures, modifies, runs, vouches, or calls",
+			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, receiver, requires, ensures, modifies, runs, vouches, or calls",
 				field.Value, entry.key)
 		}
 	}
@@ -545,6 +556,23 @@ func (pv *pkgVerifier) loadTrust(explicit string) {
 				"the trusted contract names %s, but package %s has no such function", key, pkg)
 		}
 	}
+	// A state declared for a type of the build must be one an interface
+	// of another module can have; see fileStates.
+	for _, key := range slices.Sorted(maps.Keys(pv.projectTrust.states)) {
+		line := pv.projectTrust.states[key][0].typeLine
+		pkg, name, _ := splitTypeName(key)
+		if visible[pkg] == nil {
+			continue
+		}
+		owner, ok := visible[pkg].Scope().Lookup(name).(*types.TypeName)
+		if !ok {
+			pv.report(pv.trustPos(pv.projectTrust, line, 1), "the trust file declares states of %s, but package %s has no such type", key, pkg)
+			continue
+		}
+		if problem := pv.fileStateProblem(owner, key); problem != "" {
+			pv.report(pv.trustPos(pv.projectTrust, line, 1), "the trust file declares states of %s, which %s", key, problem)
+		}
+	}
 }
 
 // splitFuncName splits the full name of a function or method, as Go prints
@@ -666,6 +694,9 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 	fn.trust = entry
 	pv.trusted[callee] = fn
 	pv.readEntry(fn, entry)
+	if entry.receiver.text != "" {
+		fn.defect("it names a receiver, which only an entry for a method of an interface can do")
+	}
 	// The parameters whose code the function is said to run. Listing one
 	// that can hold no code would be a claim about nothing.
 	for _, item := range entry.runs {
@@ -846,7 +877,7 @@ func (v *fnVerifier) primedPaths(fn *funcInfo) {
 			// The one argument of a state, as in held(m'), reads the state
 			// where it lies.
 			inner := ""
-			if n.Kind == logic.NCall && len(n.Kids) == 1 && stateNamed(n.Name) {
+			if n.Kind == logic.NCall && len(n.Kids) == 1 && v.stateNamed(n.Name) {
 				inner = n.Name
 			}
 			for i, kid := range n.Kids {
@@ -952,6 +983,10 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 				read, own = append(read, cells[len(cells)-len(decls)+index]), append(own, false)
 			}
 		}
+	}
+	// The states of an interface value lie in the row of its home.
+	if isIface(t) && state != "" {
+		read, own = append(read, stateCell), append(own, false)
 	}
 	switch {
 	case isMap(t) && mapModelled(t):

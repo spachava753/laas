@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"go/types"
 	"slices"
+	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 )
@@ -71,6 +72,13 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 	// with what it holds but pass it on. Each method of any other
 	// interface is checked against its contract, for the value as it is
 	// here.
+	if method := v.stateSpeaker(want); method != nil {
+		shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
+		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported yet: %s has the states %s, and the contract of %s speaks of them; "+
+			"nothing ties a state to what the methods of %s do until the memory a value owns is modelled, the next part of interfaces. "+
+			"Make the conversion in code that is not verified",
+			shown(from), shown(want), shown(want), stateNames(v.ifaceStatesOf(want)), methodTitle(method), shown(from)))
+	}
 	converted := v.evalConverted(e, want, st, guard)
 	if want.Underlying().(*types.Interface).NumMethods() > 0 {
 		v.madeInterface(e, converted, from, want, st, guard)
@@ -250,9 +258,9 @@ func (pv *pkgVerifier) addMethodContract(method *types.Func, defined bool, c *cl
 		pv.report(c.pos, "a contract can only be declared on a method of a defined interface type at package level without type parameters, "+
 			"not on an interface literal or an alias: two interface literals with the same methods are the same type, and a value would carry either contract")
 		return
-	case c.kind != "Requires" && c.kind != "Ensures" && c.kind != "Modifies":
+	case c.kind != "Requires" && c.kind != "Ensures" && c.kind != "Modifies" && c.kind != "Receiver":
 		pv.unread = true
-		pv.report(c.pos, "%s annotations do not belong on a method of an interface; it can only have Requires, Ensures, and Modifies annotations", c.kind)
+		pv.report(c.pos, "%s annotations do not belong on a method of an interface; it can only have Receiver, Requires, Ensures, and Modifies annotations", c.kind)
 		return
 	}
 	fn := pv.ifaceMethods[method]
@@ -260,6 +268,13 @@ func (pv *pkgVerifier) addMethodContract(method *types.Func, defined bool, c *cl
 		fn = newFuncInfo(withoutReceiver(method))
 		fn.methodOf = method
 		pv.ifaceMethods[method] = fn
+	}
+	if c.kind == "Receiver" {
+		if problem := fn.setReceiver(strings.TrimSpace(c.text), method); problem != "" {
+			pv.report(c.pos, "in Receiver annotation: %s", problem)
+			fn.broken = true
+		}
+		return
 	}
 	pv.addValueClause(fn, c)
 }
@@ -305,6 +320,11 @@ func (pv *pkgVerifier) methodContract(method *types.Func) *funcInfo {
 		return fn
 	}
 	fn := pv.contractFromFact(withoutReceiver(method), method.Pkg(), fact)
+	if fact.Receiver != "" {
+		if problem := fn.setReceiver(fact.Receiver, method); problem != "" {
+			fn.defect("its receiver: %s", problem)
+		}
+	}
 	if !fact.Verified {
 		fn.defects = []string{fmt.Sprintf("the annotations of package %s were not all read", method.Pkg().Path())}
 	}
@@ -398,6 +418,9 @@ func (v *fnVerifier) usableMethodContract(call *ast.CallExpr, callee *types.Func
 			"where the interface is declared, with // @ annotations%s", types.ExprString(call.Fun), methodTitle(callee), v.entryHint(callee.Pkg(), callee.Pos(), callee.FullName())))
 	}
 	v.usable(call.Pos(), fn, methodTitle(callee))
+	// The proof rests on which states the value has, or on it having none,
+	// whatever the method says of them; see fileStates.
+	v.ifaceStatesOf(selection.Recv())
 	if fn.obj.Type().(*types.Signature).Variadic() {
 		v.unsupported(call.Pos(), "calls of variadic methods of interfaces are not supported yet")
 	}
@@ -432,6 +455,10 @@ func (v *fnVerifier) methodOperands(call *ast.CallExpr, sel *ast.SelectorExpr, f
 	}
 	held := v.eval(sel.X, st, guard)
 	args := map[*types.Var]value{}
+	if fn.receiver != nil {
+		// The contract speaks of the states of the value it is called on.
+		args[fn.receiver] = held
+	}
 	for i, arg := range call.Args {
 		args[fn.params[i]] = v.evalAs(arg, fn.params[i].Type(), st, guard)
 	}

@@ -1,5 +1,20 @@
 version: 1
 
+state:
+  io.Closer:
+    closed:
+      reason: >-
+        True once Close has been called on the value, by any code, whatever
+        Close returned. The documentation of io.Closer says that the
+        behaviour of Close after the first call is undefined, so a second
+        Close is ruled out by the entry for Close, which requires that the
+        value is not closed. Declaring the state also claims that every
+        method of a value with it whose contract does not list the receiver
+        leaves it unchanged: Read of io.Reader and Write of io.Writer, on an
+        io.ReadCloser, an io.WriteCloser, or an io.ReadWriteCloser, never
+        close the value. The documentation does not say that, and it goes
+        beyond it; the shipped implementations were tested for it.
+
 trusted:
   (io.Writer).Write:
     reason: >-
@@ -43,3 +58,24 @@ trusted:
     modifies: [p]
     ensures:
       - "0 <= n And n <= |p|"
+
+  (io.Closer).Close:
+    reason: >-
+      A claim about every io.Closer that verified code gets from code that
+      is not verified, other than from a trusted function, whose own vouches
+      covers what it returns. The documentation of io.Closer says only that
+      the behaviour of Close after the first call is undefined, and that
+      specific implementations may document their own behaviour. So the
+      entry requires that the value has not been closed, and claims that a
+      first Close returns without panicking and changes nothing verified
+      code can see but the states of the value, after which it is closed.
+      Like every entry, it also claims that Close returns: a Close that
+      flushes to a connection returns only when it can go on. Nothing is
+      claimed of the error: an implementation may return any error, also
+      from a first Close.
+    receiver: c
+    requires:
+      - "~closed(c)"
+    modifies: [c]
+    ensures:
+      - "closed(c')"

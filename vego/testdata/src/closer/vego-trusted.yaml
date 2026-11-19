@@ -7,3 +7,7 @@ trusted:
       without panicking and writes nothing a caller can see, also when it is
       called a second time; reviewed 2026-11-19.
     modifies: []
+  closer.logCloser:
+    reason: A test of a trusted function that runs what a Record holds.
+    runs: [r]
+    modifies: []

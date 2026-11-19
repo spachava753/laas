@@ -901,20 +901,20 @@ vego: the contract of Bounded.Size is not part of this interface: it has Size fr
 and Go keeps one declaration of a method; declare the method once, with its contract
 ```
 
-A method without a contract cannot be called through an interface value. A method of an interface of another module has no doc comment you can annotate. It gets a contract from an entry in the trust file instead, and `vego` ships entries for a few methods of the standard library, such as `(io.Writer).Write`. `io.Closer` has none:
+A method without a contract cannot be called through an interface value. A method of an interface of another module has no doc comment you can annotate. It gets a contract from an entry in the trust file instead, and `vego` ships entries for a few methods of the standard library, such as `(io.Writer).Write`. `fmt.Stringer` has none:
 
 ```go
-// @Requires c != nil
+// @Requires s != nil
 // @Ensures True
-func Shut(c io.Closer) (err error) {
-	return c.Close()
+func Show(s fmt.Stringer) (text string) {
+	return s.String()
 }
 ```
 
 ```text
-vego: cannot verify Shut: c.Close calls Closer.Close, which has no contract; a method of an
+vego: cannot verify Show: s.String calls Stringer.String, which has no contract; a method of an
 interface gets one in its doc comment where the interface is declared, with // @ annotations;
-for a type of another module, give it an entry (io.Closer).Close in vego-trusted.yaml
+for a type of another module, give it an entry (fmt.Stringer).String in vego-trusted.yaml
 ```
 
 `io.Closer` has no shipped entry because its documentation leaves a second `Close` undefined, and `vego` cannot yet say that a value has not been closed. Make such a call in code that is not verified. An entry that you write for `(io.Closer).Close` claims that every `Close` returns without panicking, a second one included. See [Types without a shipped entry](#types-without-a-shipped-entry) before you write one.

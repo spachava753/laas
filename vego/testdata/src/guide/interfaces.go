@@ -1,6 +1,6 @@
 package guide
 
-import "io"
+import "fmt"
 
 // The programs of the section on interfaces.
 
@@ -153,10 +153,10 @@ func LoggedPricer(inner Pricer) (p Pricer) {
 	return Logging{Inner: inner} // want `cannot verify LoggedPricer: Price may call through a function value or an interface value, and code that an interface value runs cannot do that yet: no contract of a function type or of a method of an interface has a variant, so nothing would prove that such calls end`
 }
 
-// @Requires c != nil
+// @Requires s != nil
 // @Ensures True
-func Shut(c io.Closer) (err error) {
-	return c.Close() // want `cannot verify Shut: c.Close calls Closer.Close, which has no contract; a method of an interface gets one in its doc comment where the interface is declared, with // @ annotations; for a type of another module, give it an entry \(io.Closer\).Close in vego-trusted.yaml`
+func Show(s fmt.Stringer) (text string) {
+	return s.String() // want `cannot verify Show: s.String calls Stringer.String, which has no contract; a method of an interface gets one in its doc comment where the interface is declared, with // @ annotations; for a type of another module, give it an entry \(fmt.Stringer\).String in vego-trusted.yaml`
 }
 
 // Bounded declares a Size of its own.

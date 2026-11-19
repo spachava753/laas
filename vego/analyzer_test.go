@@ -140,7 +140,7 @@ func TestAnalyzer(t *testing.T) {
 
 		runCorpus(t, analyzer,
 			"paper", "algorithms", "defects", "rejected", "leetcode", "semantics", "effects", "ordering", "integers", "values", "trust",
-			"lib", "client", "memory", "shapes", "badshapes", "invariants", "mapping", "badpred", "usesbadpred", "early", "settled", "gen", "earlytype", "earlyrange", "earlybox", "earlyloop", "earlycarrier", "earlypanic", "guide", "wrapped", "unread", "usesunread", "twovariants", "usestwovariants", "lonecr", "errorsid", "errorsvars", "errorsvarsclient", "vouched", "vouchedclient", "vouchedcapture", "earlyalias", "earlyaliasok", "sentinellib", "sentinelclient", "usesearly", "sentinelfar", "sentinelfarther", "closures", "funcvalues", "funcvalueslib", "funcvaluesclient", "funcvaluesunread", "funcvaluesinit", "funcvaluesinitdefer", "funcvaluesinitok", "funcvaluesinitmethod", "funcvaluesoldloop", "funcvaluesinitlit", "callbacks", "callbacksinit", "interfaces", "interfaceslib", "interfacesunread", "interfacesinitok", "interfacesinithand", "interfacesinitcall", "foreign", "stdtypes", "locks", "lockspred", "lockslib", "locksclient", "layers")
+			"lib", "client", "memory", "shapes", "badshapes", "invariants", "mapping", "badpred", "usesbadpred", "early", "settled", "gen", "earlytype", "earlyrange", "earlybox", "earlyloop", "earlycarrier", "earlypanic", "guide", "wrapped", "unread", "usesunread", "twovariants", "usestwovariants", "lonecr", "errorsid", "errorsvars", "errorsvarsclient", "vouched", "vouchedclient", "vouchedcapture", "earlyalias", "earlyaliasok", "sentinellib", "sentinelclient", "usesearly", "sentinelfar", "sentinelfarther", "closures", "funcvalues", "funcvalueslib", "funcvaluesclient", "funcvaluesunread", "funcvaluesinit", "funcvaluesinitdefer", "funcvaluesinitok", "funcvaluesinitmethod", "funcvaluesoldloop", "funcvaluesinitlit", "callbacks", "callbacksinit", "interfaces", "interfaceslib", "interfacesunread", "interfacesinitok", "interfacesinithand", "interfacesinitcall", "foreign", "stdtypes", "locks", "lockspred", "lockslib", "locksclient", "layers", "ifacestate")
 	})
 
 	// The bound on the size of a formula stops a program whose formulas
@@ -175,6 +175,19 @@ func TestAnalyzer(t *testing.T) {
 	t.Run("reports an entry against none in a build", func(t *testing.T) {
 		runCorpus(t, newAnalyzer(), "twod")
 	})
+	// A module that declares states of an interface of another module, and
+	// one whose proofs were made with none.
+	t.Run("reports two declarations of states in a build", func(t *testing.T) {
+		runCorpus(t, newAnalyzer(), "stateroot")
+	})
+	t.Run("refuses states of io.Closer in a project file", func(t *testing.T) {
+		runCorpus(t, newAnalyzer(), "stateover")
+	})
+	for _, root := range []string{"statea", "stateb"} {
+		t.Run("uses the states of its own module in "+root, func(t *testing.T) {
+			runCorpus(t, newAnalyzer(), root)
+		})
+	}
 	// A module that gives (io.Closer).Close an entry of its own.
 	t.Run("closes a body under a project entry", func(t *testing.T) {
 		runCorpus(t, newAnalyzer(), "closer")

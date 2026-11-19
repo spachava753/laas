@@ -38,6 +38,9 @@ type contractFact struct {
 	// CallsValues is set when running the function may make a call through
 	// a function value, itself or in what it calls; see mayCallValues.
 	CallsValues bool
+	// Receiver names the receiver of the contract of a method of an
+	// interface, if it names one.
+	Receiver string
 }
 
 func (*contractFact) AFact() {}
@@ -141,6 +144,9 @@ func (pv *pkgVerifier) contractFactOf(fn *funcInfo, at token.Pos) *contractFact 
 				visit(step.index)
 			}
 		}
+	}
+	if fn.receiver != nil {
+		fact.Receiver = fn.receiver.Name()
 	}
 	return fact
 }

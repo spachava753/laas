@@ -29,7 +29,7 @@ type Unknown interface {
 }
 
 type WrongKind interface {
-	// @Invariant x > 0 // want `Invariant annotations do not belong on a method of an interface; it can only have Requires, Ensures, and Modifies annotations`
+	// @Invariant x > 0 // want `Invariant annotations do not belong on a method of an interface; it can only have Receiver, Requires, Ensures, and Modifies annotations`
 	Get(x int) (y int)
 }
 

@@ -560,6 +560,10 @@ func TestShippedContracts(t *testing.T) {
 				if err != nil {
 					t.Fatalf("import %s: %v", path, err)
 				}
+				if fn := shippedTypeContract(pv, pkg, name); fn != nil && key == "(io.Closer).Close" {
+					checkCloseEntry(t, pv, fn)
+					return
+				}
 				if fn := shippedTypeContract(pv, pkg, name); fn != nil {
 					checkTypeContract(t, pv, key, fn)
 					return

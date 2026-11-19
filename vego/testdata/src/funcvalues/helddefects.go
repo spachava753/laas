@@ -22,7 +22,7 @@ func AsCondition(f func()) {
 
 // Fresh asks whether a function value was created by the call.
 //
-// @Ensures fresh(h) // want `vego: in Ensures annotation: fresh\(h\): h is not a pointer, a slice, or a map`
+// @Ensures fresh(h) // want `vego: in Ensures annotation: fresh\(h\): h is not a pointer, a slice, a map, or an interface value`
 func Fresh() (h func()) {
 	return nil
 }

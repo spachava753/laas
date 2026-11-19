@@ -323,6 +323,13 @@ var reasonPattern = regexp.MustCompile(`^\(:reason-unknown "(.*)"\)$`)
 // parseAnswer reads the reply to a problem: the result of the check-sat and
 // the reason for an unknown result, and nothing else.
 func parseAnswer(lines []string) (answer, error) {
+	// A tactic of the chain that runs out of the resource limit stops the
+	// check-sat with an error in place of its answer. That is the limit,
+	// which leaves the problem open, as an unknown for it does.
+	if len(lines) == 2 && lines[0] == `(error "tactic failed: max. resource limit exceeded")` &&
+		lines[1] == `(:reason-unknown "max. resource limit exceeded")` {
+		return answer{status: "unknown", reason: "max. resource limit exceeded"}, nil
+	}
 	if len(lines) != 2 {
 		return answer{}, fmt.Errorf("unexpected reply %q", strings.Join(lines, "\n"))
 	}

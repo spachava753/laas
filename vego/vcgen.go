@@ -252,11 +252,24 @@ func (v *fnVerifier) enter() *state {
 		v.typing[typed] = true
 		st.assume(typed)
 	}
+	if fn.receiver != nil {
+		// The receiver of the contract of an interface method is an
+		// interface value like a parameter.
+		val := value{logic.Const("$"+fn.receiver.Name(), logic.Ref)}
+		v.inputs[val[0].Name] = true
+		st.vals[fn.receiver], v.entry[fn.receiver] = val, val
+		typed := v.wellFormed(val, fn.receiver.Type(), st.brk)
+		v.typing[typed] = true
+		st.assume(typed)
+	}
 	for _, pair := range overlapping(fn) {
 		if v.entry[pair[0]] != nil && v.entry[pair[1]] != nil {
 			st.assume(v.separate(v.entry[pair[0]], v.entry[pair[1]], pair[0].Type()))
 		}
 	}
+	// Interface parameters with states that are not nil have homes of
+	// their own, which every caller has shown.
+	v.assumeApart(st, v.sharing(fn))
 	// Every caller has proved the invariants of what it passes.
 	for _, param := range fn.params {
 		if v.entry[param] != nil {

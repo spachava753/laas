@@ -401,6 +401,11 @@ func (pv *pkgVerifier) wellFormed(val value, t types.Type, brk *logic.Term) *log
 		case lf.part == partPtr:
 			facts = append(facts, exists(val[i]), logic.Le(zero, val[i+1]), logic.Le(val[i+1], logic.BigLit(pv.maxAlloc())))
 		case lf.part != partValue:
+		case lf.sort == logic.Ref && isIface(lf.typ):
+			// The reference of an interface value is not the address of
+			// what it holds; its home, where its states lie, exists, as
+			// what it holds does. See ifacestate.go.
+			facts = append(facts, exists(home(val[i])), logic.Lt(logic.IntLit(0), home(val[i])))
 		case lf.sort == logic.Ref && holdsCodeRef(lf.typ):
 			// A function value refers to no allocation, and the reference
 			// of an interface value is not the address of what it holds.

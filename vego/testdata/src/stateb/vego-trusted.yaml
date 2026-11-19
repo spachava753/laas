@@ -1,0 +1,6 @@
+version: 1
+
+trusted:
+  (statelib.Conn).Stop:
+    reason: Says Stop writes nothing, which keeps every state.
+    modifies: []

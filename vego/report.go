@@ -65,7 +65,12 @@ func TrustReport(usages []*Usage, dir string) string {
 			// is claimed by that function's vouches instead.
 			reach := "that verified code gets from code that is not verified: from a caller, directly or in memory an argument reaches, " +
 				"or from a call through a value; a value that a trusted function returns or writes is claimed by that function's vouches"
-			if _, method, ok := strings.Cut(use.Key, ")."); ok && use.Every != "" && strings.HasPrefix(use.Key, "(") {
+			if strings.HasPrefix(use.Key, "states of ") {
+				// A declaration of states claims what every method that
+				// does not list its receiver leaves alone.
+				fmt.Fprintf(&b, "    a claim about every value of %s, or of an interface that has a method from it: each of its methods "+
+					"whose contract does not list the receiver under modifies leaves these states unchanged\n", use.Every)
+			} else if _, method, ok := strings.Cut(use.Key, ")."); ok && use.Every != "" && strings.HasPrefix(use.Key, "(") {
 				fmt.Fprintf(&b, "    a claim about %s of every value of %s, or of an interface that has %s from it, %s\n", method, use.Every, method, reach)
 			} else if use.Every != "" {
 				fmt.Fprintf(&b, "    a claim about every value of %s %s\n", use.Every, reach)

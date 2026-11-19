@@ -1223,6 +1223,11 @@ type sampler struct {
 	// holds the sentinels the formulas mention, which a leaf may hold.
 	errs      int
 	sentinels []*logic.Term
+	// home is the one home that every interface value of a sample has,
+	// and states holds the state positions sampled there; see
+	// ifacestate.go.
+	home   *logic.Term
+	states map[string]bool
 }
 
 // number returns a new constant for a number of an integer type.
@@ -1367,6 +1372,9 @@ func (b *sampler) add(t types.Type, to binding, depth int) {
 		// A function value or an interface value is nil or not, and
 		// nothing else is known of it.
 		scalar([]*logic.Term{logic.RefLit(0), logic.RefLit(1)})
+		if isIface(t) {
+			b.addStates(t)
+		}
 	case single && sort != logic.Float:
 		scalar([]*logic.Term{b.scalarOf(t)})
 	case single:
@@ -1393,6 +1401,35 @@ func (b *sampler) add(t types.Type, to binding, depth int) {
 			at, choice := len(leaves)-len(decls)+i, b.boolean()
 			b.choose(slot{func(s *witness) { to.set(s, at, choice) }}, to.name(at))
 		}
+	}
+}
+
+// addStates creates the slots for the states of an interface value. Every
+// interface value of a sample has one home of its own, which exists; each
+// state there gets a value that Z3 chooses, the same for every value, since
+// two interface values of a sample that are not nil are one value.
+func (b *sampler) addStates(t types.Type) {
+	if b.home == nil {
+		b.refs++
+		b.home = logic.RefLit(b.refs)
+		b.states = map[string]bool{}
+		at := b.home
+		b.slots = append(b.slots, slot{func(s *witness) { s.consts[homes.Name] = logic.Fill(logic.IntLit(0), at) }})
+	}
+	for _, state := range b.v.ifaceStatesOf(t) {
+		if b.states[state.qualified()] {
+			continue
+		}
+		b.states[state.qualified()] = true
+		choice, at, position := b.boolean(), b.home, state.position()
+		b.choose(slot{func(s *witness) {
+			name := entryRegion + stateRegion
+			region, ok := s.consts[name]
+			if !ok {
+				region = logic.Const(name, logic.SeqOf(logic.BoolSeq))
+			}
+			s.consts[name] = logic.Store(region, at, logic.Store(logic.Select(region, at), position, choice))
+		}}, entryRegion+stateRegion)
 	}
 }
 

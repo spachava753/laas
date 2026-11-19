@@ -21,16 +21,13 @@ type stateDecl struct {
 	name   string
 	reason string
 	line   int
+	// typeLine is the line of the type the state is declared for.
+	typeLine int
 }
 
 // addStates reads the state section of a file: a mapping from a type, as
 // in sync.Mutex, to the names of its states, each with a reason.
 func (f *trustFile) addStates(node *yaml.Node) {
-	if !f.shipped {
-		f.problem(node.Line, "a project trust file cannot declare the state of a type yet; "+
-			"only the contracts shipped with vego declare states, such as held for sync.Mutex")
-		return
-	}
 	if node.Kind != yaml.MappingNode {
 		f.problem(node.Line, "state must map types to their states")
 		return
@@ -49,8 +46,7 @@ func (f *trustFile) addStates(node *yaml.Node) {
 			name, decl := body.Content[j], body.Content[j+1]
 			// A name that means something of its own in formulas cannot
 			// name a state.
-			reserved := slices.Contains([]string{"len", "is", "has", "old", "fresh", "within", "nil", "True", "False",
-				"And", "Or", "Forall", "Exists", "in", "result"}, name.Value)
+			reserved := slices.Contains(reservedStateNames, name.Value)
 			if !token.IsIdentifier(name.Value) || reserved {
 				f.problem(name.Line, "%q cannot name a state: it must be an identifier that the formula language does not use", name.Value)
 				continue
@@ -71,7 +67,7 @@ func (f *trustFile) addStates(node *yaml.Node) {
 					name.Value, typeName.Value)
 				continue
 			}
-			f.states[typeName.Value] = append(f.states[typeName.Value], stateDecl{name: name.Value, reason: reason, line: name.Line})
+			f.states[typeName.Value] = append(f.states[typeName.Value], stateDecl{name: name.Value, reason: reason, line: name.Line, typeLine: typeName.Line})
 		}
 	}
 }

@@ -1,0 +1,13 @@
+version: 1
+
+state:
+  statelib.Conn:
+    started:
+      reason: True between a Start that returned nil and anything else.
+
+trusted:
+  (statelib.Conn).Start:
+    reason: Says Start starts the connection.
+    receiver: c
+    modifies: [c]
+    ensures: ["(result = nil) -> started(c')"]

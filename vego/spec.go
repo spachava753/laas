@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"go/token"
 	"go/types"
+	"golang.org/x/tools/go/analysis"
+	"maps"
 	"slices"
 	"strings"
 
@@ -400,7 +402,9 @@ func (e *specEnv) locateAt(name string, steps []logic.Step, when logic.When, thr
 		return reached{}, fmt.Errorf("%s' describes the state on return and is only allowed in Ensures", name)
 	case when == logic.Primed:
 		_, pointer := pointee(final)
-		if !reachesMemory(hops, final) && !(throughPointer && pointer) {
+		// A state of what a pointer points to, or of what an interface
+		// value holds, lies in memory.
+		if !reachesMemory(hops, final) && !(throughPointer && (pointer || isIface(final))) {
 			return reached{}, fmt.Errorf("%s is passed by value, so only its value on entry is visible to callers; drop the prime", name)
 		}
 		mem = e.post
@@ -544,7 +548,7 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 // state resolves name(x) for a state of a struct, read from the value x or
 // where the pointer x points; see stateDecl.
 func (e *specEnv) state(name string, steps []logic.Step, state string, when logic.When) (*logic.Term, error) {
-	if !stateNamed(state) {
+	if !e.v.stateNamed(state) {
 		return nil, &logic.NoState{}
 	}
 	what := spell(name, steps)
@@ -561,6 +565,8 @@ func (e *specEnv) state(name string, steps []logic.Step, state string, when logi
 		return nil, err
 	case found.constant != nil:
 		return nil, &logic.NoState{Msg: fmt.Sprintf("%s(%s): %s is a constant and has no state", state, what, what)}
+	case isIface(found.typ):
+		return e.ifaceState(what, found.typ, found.val[0], found.sink, found.mem, state)
 	}
 	object, viaPointer := pointee(found.typ)
 	if !viaPointer {
@@ -593,7 +599,52 @@ func (e *specEnv) state(name string, steps []logic.Step, state string, when logi
 	return e.v.fetch(found.sink, found.mem, e.v.cellsOf(object)[position:position+1], found.val[0], found.val[1])[0], nil
 }
 
-// stateNamed reports whether some type has a state of the name.
+// stateNamed reports whether some type that the package can see has a
+// state of the name: a struct or interface of the shipped files, an
+// interface of the project's trust file, of this package, or of a package
+// it is built with.
+func (pv *pkgVerifier) stateNamed(name string) bool {
+	if stateNamed(name) || (pv.projectTrust != nil && slices.ContainsFunc(slices.Collect(maps.Values(pv.projectTrust.states)),
+		func(decls []stateDecl) bool {
+			return slices.ContainsFunc(decls, func(d stateDecl) bool { return d.name == name })
+		})) {
+		return true
+	}
+	if pv.importedStateNames == nil {
+		pv.importedStateNames = map[string]bool{}
+		var facts []analysis.ObjectFact
+		if pv.pass.AllObjectFacts != nil {
+			facts = pv.pass.AllObjectFacts()
+		}
+		built := map[*types.Package]bool{}
+		var visit func(pkg *types.Package)
+		visit = func(pkg *types.Package) {
+			if !built[pkg] {
+				built[pkg] = true
+				for _, imported := range pkg.Imports() {
+					visit(imported)
+				}
+			}
+		}
+		visit(pv.pass.Pkg)
+		for _, fact := range facts {
+			if states, ok := fact.Fact.(*stateFact); ok && built[fact.Object.Pkg()] {
+				for _, n := range states.Names {
+					pv.importedStateNames[n] = true
+				}
+			}
+		}
+	}
+	for _, states := range pv.ownStates {
+		if slices.ContainsFunc(states, func(s ifaceState) bool { return s.name == name }) {
+			return true
+		}
+	}
+	return pv.importedStateNames[name]
+}
+
+// stateNamed reports whether some type has a state of the name in the
+// shipped files.
 func stateNamed(name string) bool {
 	for _, byType := range shippedStates() {
 		for _, decls := range byType {
@@ -649,7 +700,13 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		spelled := spell(path.Root, path.Steps)
 		_, isPointer := pointee(found[i].typ)
 		switch {
+		case name == "fresh" && found[i].constant == nil && isIface(found[i].typ):
+			// The states of an interface value lie at its home, which
+			// is new when what it holds is.
 		case found[i].constant != nil || (!isPointer && !isSlice(found[i].typ) && !isMap(found[i].typ)):
+			if name == "fresh" {
+				return nil, fmt.Errorf("fresh(%s): %s is not a pointer, a slice, a map, or an interface value", spelled, spelled)
+			}
 			return nil, fmt.Errorf("%s(%s): %s is not a pointer, a slice, or a map", name, spelled, spelled)
 		case name == "within" && isMap(found[i].typ):
 			return nil, fmt.Errorf("within(%s): %s is a map, and nothing lies within a map or holds one", spelled, spelled)
@@ -680,6 +737,9 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 	after, err := e.locate(paths[0].Root, paths[0].Steps, map[bool]logic.When{false: logic.Primed}[found[0].isResult])
 	if err != nil {
 		return nil, err
+	}
+	if isIface(after.typ) {
+		return logic.Le(e.before, home(after.val[0])), nil
 	}
 	if isSlice(after.typ) {
 		// A slice without capacity shares nothing with anything either.
@@ -883,6 +943,8 @@ func newModTargets(nodes []*logic.Node, c *clause) []*modTarget {
 // when the entry names what that parameter itself points to or holds.
 type shape struct {
 	param *types.Var
+	// row is set for the states of an interface value.
+	row   bool
 	cells []cell
 	// elem is set for the elements of a slice and mapType for a map; else
 	// the entry is a struct or a part of one.
@@ -1013,6 +1075,22 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 		if !symbolic {
 			t.ref = cur.val[0]
 		}
+	case isIface(final):
+		// Every state of what the interface value holds, which lies in
+		// the row of its home; see ifacestate.go. The value itself, a
+		// field or an element, is not part of it.
+		if fn.trust == nil && !v.hasStates(final) {
+			return shape{}, target{}, fmt.Errorf("%s is a %s, which has no states; an entry for an interface value covers the states of what it holds, "+
+				"and to assign %s itself, list what holds it", m.text, final, m.text)
+		}
+		form.cells, form.direct, form.row = []cell{stateCell}, len(hops) == 0, true
+		if inMemory {
+			t.holder = cur.cells
+		}
+		if !symbolic {
+			t.ref = home(cur.val[0])
+		}
+		t.row = true
 	case !inMemory:
 		return shape{}, target{}, fmt.Errorf("%s is passed by value, so the caller cannot see a change to it", m.text)
 	default:

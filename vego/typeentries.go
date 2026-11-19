@@ -61,6 +61,18 @@ func (pv *pkgVerifier) typeEntry(key string, obj *types.Func, methodOf *types.Fu
 		}
 		fn.defect("%s is declared in the module of this package; write its contract in the doc comment where it is declared", what)
 	}
+	if text := entry.receiver.text; text != "" {
+		switch {
+		case methodOf == nil:
+			fn.defect("it names a receiver, which only an entry for a method of an interface can do")
+		default:
+			if problem := fn.setReceiver(text, methodOf); problem != "" {
+				fn.defect("its receiver: %s", problem)
+			} else if !pv.hasStates(fn.receiver.Type()) {
+				fn.defect("it names the receiver %s, but %s has no states, which is all a contract can say of its receiver", text, declaringInterface(methodOf).Name())
+			}
+		}
+	}
 	pv.readEntry(fn, entry)
 	// What a call through the value is handed is refused when it can
 	// carry code nobody has seen, so nothing is left for runs or calls to
@@ -295,6 +307,9 @@ func (entry *trustEntry) fingerprint() string {
 			parts = append(parts, kind+" "+formula.text)
 		}
 	}
+	if entry.receiver.text != "" {
+		parts = append(parts, "receiver "+entry.receiver.text)
+	}
 	list("requires", entry.requires)
 	list("ensures", entry.ensures)
 	list("modifies", entry.modifies)
@@ -337,6 +352,12 @@ func (pv *pkgVerifier) reportTwoEntries(total *Usage) {
 		if b < a {
 			a, b = b, a
 		}
+		if owner, isState := strings.CutPrefix(use.Key, "states of "); isState {
+			pv.report(pv.pass.Files[0].Package, "the trust files of this build declare the states of %s differently, at %s and at %s; "+
+				"a value whose states one proof changed can reach a proof that reads them otherwise. Make the declarations the same, "+
+				"or run laas with -vego.trusted naming one file", owner, a, b)
+			continue
+		}
 		pv.report(pv.pass.Files[0].Package, "the trust files of this build give %s two contracts, at %s and at %s; a value that verified code checked "+
 			"against one can reach verified code that relies on the other. Make the entries the same, or run laas with -vego.trusted naming one file",
 			use.Key, a, b)
@@ -353,6 +374,15 @@ func (pv *pkgVerifier) reportTwoEntries(total *Usage) {
 			continue
 		}
 		reported[missing.Key+" "+missing.Package] = true
+		if owner, isState := strings.CutPrefix(missing.Key, "states of "); isState {
+			remedy := "declare the same states in the trust file of its module, or run laas with -vego.trusted naming one file"
+			if missing.Own {
+				remedy = "the type is declared in its module, so declare the states with @State in its doc comment and remove the declaration"
+			}
+			pv.report(pv.pass.Files[0].Package, "the trust files of this build declare states of %s at %s:%d, and the proofs of package %s were made with none; "+
+				"a value whose states one proof changed can reach a proof that reads them otherwise: %s", owner, use.File, use.Line, missing.Package, remedy)
+			continue
+		}
 		remedy := "add the same entry to the trust file of its module, or run laas with -vego.trusted naming one file"
 		if missing.Own {
 			remedy = "the type is declared in its module, so write the contract in source where the type is declared and remove the entry"
@@ -372,6 +402,10 @@ func (pv *pkgVerifier) noteLookups() {
 	}
 	for _, fn := range pv.lookedUp {
 		pv.noteUse(fn, token.NoPos)
+	}
+	for _, use := range pv.stateUses {
+		use.Relied = []string{pv.pass.Pkg.Path()}
+		pv.usage.Entries = append(pv.usage.Entries, use)
 	}
 	for _, key := range slices.Sorted(maps.Keys(pv.unentered)) {
 		pv.usage.Unentered = append(pv.usage.Unentered, Unentered{Key: key, Package: pv.pass.Pkg.Path(), Own: pv.unentered[key]})

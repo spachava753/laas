@@ -27,6 +27,9 @@ type site struct {
 	// positions written from where the pointer points.
 	root   *types.Var
 	lo, hi int64
+	// row is set when the site may write every state of an interface
+	// value, at the home of the value root holds.
+	row bool
 }
 
 // effects describes what a loop may change.
@@ -251,7 +254,7 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 		sig = callee.Type().(*types.Signature)
 	}
 	argument := func(param *types.Var) ast.Expr {
-		if param == sig.Recv() {
+		if param == sig.Recv() || (param != nil && param == fn.receiver) {
 			sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
 			if selection := v.info.Selections[sel]; ok && selection != nil && len(selection.Index()) == 1 {
 				return sel.X
@@ -270,7 +273,18 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 		if err != nil {
 			v.misread(m.clause, err)
 		}
-		at := site{cells: form.cells, elem: form.elem, mapType: form.mapType, lo: form.lo, hi: form.hi}
+		at := site{cells: form.cells, elem: form.elem, mapType: form.mapType, lo: form.lo, hi: form.hi, row: form.row}
+		if form.row {
+			// An interface value held in a variable that the loop does not
+			// assign keeps its home.
+			if arg := argument(form.param); form.direct && arg != nil {
+				if variable := v.localVar(arg); variable != nil && !v.boxed[variable] && isIface(variable.Type()) {
+					at.root = variable
+				}
+			}
+			eff.sites = append(eff.sites, at)
+			continue
+		}
 		// Only a pointer or slice passed as it is names the same object
 		// before and inside the call.
 		if arg := argument(form.param); form.direct && arg != nil {
@@ -372,9 +386,11 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 	for _, at := range eff.sites {
 		val := st.vals[at.root]
 		precise := at.root != nil && val != nil && (!eff.whole[at.root] || (at.elem != nil && eff.grown[at.root]))
-		t := target{cells: at.cells, elem: at.elem, mapType: at.mapType}
+		t := target{cells: at.cells, elem: at.elem, mapType: at.mapType, row: at.row}
 		switch {
 		case !precise:
+		case at.row:
+			t.ref, t.row = home(val[0]), true
 		case at.mapType != nil:
 			t.ref = val[0]
 		case at.elem != nil:

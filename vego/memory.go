@@ -131,6 +131,13 @@ type target struct {
 	// param is set when the object or array is the very one that this
 	// parameter holds.
 	param *types.Var
+	// row is set when the target is every state of an interface value:
+	// the whole row of its home in the region of states, which ref is.
+	// lo and hi are nil, as for a map. holder is set to the cells of the
+	// interface value when it lies in memory, which the target does not
+	// cover; see checkWriteOr.
+	row    bool
+	holder []cell
 }
 
 // regions calls visit for every region the target reaches into, with the
@@ -564,9 +571,22 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 		for _, i := range candidates {
 			v.used[i] = true
 		}
+		// A Modifies entry that ends in an interface value covers the
+		// states of what it holds, and not where the value lies.
+		var stated *target
+		for i, t := range v.frame {
+			if t.row && slices.ContainsFunc(t.holder, func(c cell) bool {
+				return slices.ContainsFunc(w.parts, func(part stretch) bool { return part.key == c.key })
+			}) {
+				stated = &v.frame[i]
+			}
+		}
 		switch {
 		case remedy != "":
 			v.report(pos, "%s, which %s may not modify; %s%s", what, v.fn.obj.Name(), remedy, limitNote(result))
+		case len(candidates) == 0 && stated != nil:
+			v.report(pos, "%s, which %s may not modify: // @Modifies %s covers the states of what the interface value %s holds, not the place that holds it; "+
+				"to assign it, list the struct that holds it%s", what, v.fn.obj.Name(), stated.text, stated.text, limitNote(result))
 		case len(candidates) == 0 && (v.fn.spelling().valueOf != nil || v.fn.spelling().methodOf != nil):
 			// What is checked against the contract of a type cannot add to
 			// it: the clause it would need is in the contract.
@@ -650,6 +670,12 @@ func (v *fnVerifier) havoc(st *state, t target, guard []*logic.Term) {
 		count := logic.Select(st.mem.region(owner+countLeaf.path, logic.SeqOf(logic.Int)), t.ref)
 		empty := logic.And(logic.Eq(count, logic.IntLit(0)), logic.Forall(index, logic.Not(logic.Select(has, index))))
 		st.assume(logic.Implies(logic.And(append(slices.Clip(guard), logic.Eq(t.ref, logic.RefLit(0)))...), empty))
+	case t.row:
+		// Every state of the value, whoever declared it, may change.
+		before := v.row(nil, st.mem, stateRegion, logic.Bool, t.ref)
+		unknown := v.fresh("written", logic.BoolSeq)
+		kept(unknown, before)
+		st.storeRow(stateRegion, logic.Bool, t.ref, unknown)
 	case t.single:
 		// What the types guarantee of the new values is noted where they
 		// are read.

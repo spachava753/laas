@@ -484,3 +484,85 @@ func MakeChain(fs []Setter, k int) {
 	fs[28] = func(c *Store) { c.n = k }
 	fs[29] = func(c *Store) { c.n = k }
 }
+
+// Gate has a state that Shut changes.
+//
+// @State shut
+type Gate interface {
+	// @Receiver g
+	// @Requires ~shut(g)
+	// @Modifies g
+	// @Ensures shut(g')
+	Shut()
+}
+
+func openedGate() (g Gate) { return nil }
+
+// CloseChain shuts thirty interface values, each new, each a write of the
+// row of its home in the region of states, which every later read of a
+// state goes through.
+//
+// @Ensures shut(g)
+func CloseChain() (g Gate) {
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	g = openedGate()
+	g.Shut()
+	return g
+}

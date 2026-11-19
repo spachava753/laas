@@ -1180,3 +1180,62 @@ trusted:
     reason: Formats the number of a record and writes it to the writer the record holds, whatever writer that is.
     runs: [r]
     modifies: []
+
+  ifacestatelib.Fetch:
+    reason: A test of a trusted function whose result holds a new body that is not closed.
+    vouches: [resp]
+    modifies: []
+    ensures: ["err = nil -> resp != nil And resp.Body != nil And ~closed(resp.Body) And fresh(resp.Body)"]
+  ifacestatelib.Stale:
+    reason: A test of a body that is not closed, of which nothing says it is new.
+    vouches: [resp]
+    modifies: []
+    ensures: ["err = nil -> resp != nil And resp.Body != nil And ~closed(resp.Body)"]
+  (ifacestatelib.Conn).Start:
+    reason: A test of a state of an interface of another module.
+    receiver: c
+    requires: ["~started(c)"]
+    modifies: [c]
+    ensures: ["(result = nil) <-> started(c')"]
+  (ifacestatelib.Conn).Finish:
+    reason: A test of a state of an interface of another module.
+    receiver: c
+    requires: ["started(c)"]
+    modifies: [c]
+    ensures: ["~started(c')"]
+  (ifacestatelib.Conn).Abort:
+    reason: A test of a method that names no receiver, which keeps every state.
+    modifies: []
+  (ifacestatelib.Wrapped).Ping:
+    reason: A test of a method of an interface that embeds one with a state.
+    modifies: []
+  ifacestatelib.Consume:
+    reason: A test of a trusted function that may change the states of an io.Reader it is given, through an assertion.
+    runs: [r]
+    vouches: [r]
+    modifies: [r]
+  semantics.openedGate:
+    reason: A test of thirty new gates, each not shut.
+    vouches: [g]
+    modifies: []
+    ensures: ["g != nil And ~shut(g) And fresh(g)"]
+  ifacestate.logCloser:
+    reason: A test of a trusted function that runs what a Record holds.
+    runs: [r]
+    modifies: []
+  ifacestate.receiverNamed:
+    reason: A test of a receiver on a function, which has none.
+    receiver: c
+    modifies: []
+
+# States of interfaces of another module, and contracts that speak of them.
+state:
+  ifacestatelib.Conn:
+    started:
+      reason: True between a Start that returned nil and the next Finish.
+  ifacestatelib.Response: # // want `the trust file declares states of ifacestatelib.Response, which is not an interface type; a trust file can declare states only of an interface`
+    ready:
+      reason: A struct cannot have a state declared in a project file.
+  ifacestatelib.Alias: # // want `the trust file declares states of ifacestatelib.Alias, which declares no method of its own`
+    gone:
+      reason: Declares no method.

@@ -212,6 +212,14 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 	for _, m := range fn.modifies {
 		_, t, err := v.locateTarget(fn, m, v.entry, st, memory{})
 		covered := coveredType(fn, m)
+		if err == nil && t.row && covered != nil {
+			// Each state the value is known to have gets a value that Z3
+			// chooses.
+			for _, state := range v.ifaceStatesOf(covered) {
+				v.put(st, []cell{stateCell}, t.ref, state.position(), value{v.fresh("out", logic.Bool)})
+			}
+			continue
+		}
 		if err != nil || !t.single || covered == nil {
 			continue
 		}
@@ -570,7 +578,8 @@ func (pv *pkgVerifier) holdsContractedValue(t types.Type, seen map[types.Type]bo
 
 // holdsCallable reports whether a value of a type can hold, however deep, a
 // function value of any type, or an interface value that verified code can
-// make: one of an interface whose methods all have contracts. For those,
+// make: one of an interface whose methods all have contracts, none of
+// which speaks of a state (see makeable). For those,
 // runs claims only that the contract holds for values that meet their
 // contracts, which a cycle back through code that verified code made would
 // make circular. Verified code makes no value of an interface with a method
@@ -591,7 +600,7 @@ func holdsCallable(pv *pkgVerifier, t types.Type, seen map[types.Type]bool) bool
 	case *types.Signature:
 		return true
 	case *types.Interface:
-		return pv.fullyContracted(t)
+		return pv.makeable(t)
 	case *types.Pointer:
 		return holdsCallable(pv, u.Elem(), seen)
 	case *types.Slice:
@@ -845,7 +854,7 @@ func (pv *pkgVerifier) callableIn(t types.Type, seen map[types.Type]bool) string
 	case *types.Signature:
 		return "a function value of type " + t.String()
 	case *types.Interface:
-		if pv.fullyContracted(t) {
+		if pv.makeable(t) {
 			return fmt.Sprintf("a value of %s, whose methods all have contracts, so that verified code can make one", t)
 		}
 	case *types.Pointer:

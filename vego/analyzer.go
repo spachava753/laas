@@ -180,7 +180,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		"comma-separated words that other tools read after \"// @\", as in Summary,Param; any other unknown word there is an error",
 	)
 	analyzer.ResultType = reflect.TypeFor[*Usage]()
-	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact), new(sentinelsFact), new(sentinelWritesFact), new(sentinelRelianceFact)}
+	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact), new(sentinelsFact), new(sentinelWritesFact), new(sentinelRelianceFact), new(stateFact)}
 	analyzer.Run = func(pass *analysis.Pass) (result any, err error) {
 		foreignTags, err := parseOtherTags(otherTags)
 		if err != nil {
@@ -223,6 +223,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			importedMethods: map[*types.Func]*funcInfo{},
 			typeEntries:     map[string]*funcInfo{},
 			unentered:       map[string]bool{},
+			ownStates:       map[*types.TypeName][]ifaceState{},
 			foreignBroken:   map[*types.Package]bool{},
 			imported:        map[*types.Func]*funcInfo{},
 			foreign:         map[*types.Package]*logic.Resolver{},
@@ -251,6 +252,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		pv.exportInvariants()
 		pv.checkTypeContracts()
 		pv.exportTypeContracts()
+		pv.exportStates()
 		for _, fn := range pv.order {
 			if !fn.annotated() || fn.broken {
 				continue
@@ -328,6 +330,11 @@ type funcInfo struct {
 	trust   *trustEntry
 	defects []string  // what is wrong with a trusted or imported contract
 	use     *EntryUse // the report entry of a trusted contract in use
+	// receiver is set for the contract of a method of an interface that
+	// names its receiver, with a Receiver annotation or receiver in an entry, so that
+	// the contract can speak of its states; see ifacestate.go. It is not
+	// among params.
+	receiver *types.Var
 	// imported is set for a function verified in another package, whose
 	// contract was published by that package.
 	imported *contractFact
@@ -496,6 +503,15 @@ type pkgVerifier struct {
 	// whether the type is of this module; see noteLookups.
 	lookedUp  []*funcInfo
 	unentered map[string]bool
+	// ownStates holds the states that interface types declare themselves,
+	// by type, nil for one that declares none, and stateUses the state
+	// declarations of trust files the package looked up; see
+	// ifacestate.go.
+	ownStates map[*types.TypeName][]ifaceState
+	stateUses []*EntryUse
+	// importedStateNames holds the names of the states that the facts of
+	// other packages declare.
+	importedStateNames map[string]bool
 	// conversions lists the conversions to interface types in the package,
 	// once something asks; see conversions.go.
 	conversions *conversions
@@ -537,7 +553,7 @@ var (
 	leadingAt   = regexp.MustCompile(`(?m)^[^\pL\pN@\n]*@[^\pL\pN\s]*(\S*)`)
 	clauseKinds = map[string]bool{
 		"Requires": true, "Ensures": true, "Invariant": true, "Variant": true,
-		"Predicate": true, "Assert": true, "Modifies": true,
+		"Predicate": true, "Assert": true, "Modifies": true, "State": true, "Receiver": true,
 	}
 	// retiredKinds are keywords that earlier versions read, with what to
 	// write now.
@@ -977,7 +993,7 @@ func (pv *pkgVerifier) collect() {
 				}
 				if c.kind == "" {
 					pv.report(c.pos, "unknown annotation %q; an annotation starts with one of "+
-						"Requires, Ensures, Modifies, Invariant, Variant, Assert, Predicate. "+
+						"Requires, Ensures, Modifies, Invariant, Variant, Assert, Predicate, State, Receiver. "+
 						"If another tool reads this comment, declare the word with -vego.other-tags", c.text)
 					continue
 				}
@@ -990,11 +1006,23 @@ func (pv *pkgVerifier) collect() {
 					continue
 				}
 				if name, ok := pv.typeDocumented(file, group); ok {
-					if name != nil && isFunc(name.Type().Underlying()) {
+					switch {
+					case name != nil && isFunc(name.Type().Underlying()):
 						pv.addTypeContract(name, c)
-						continue
+					case c.kind == "State":
+						pv.addState(name, c)
+					default:
+						pv.addInvariant(name, c)
 					}
-					pv.addInvariant(name, c)
+					continue
+				}
+				switch c.kind {
+				case "State":
+					pv.report(c.pos, "a State annotation belongs in the doc comment of a defined interface type, as in // @State closed")
+					continue
+				case "Receiver":
+					pv.report(c.pos, "a Receiver annotation belongs in the doc comment of a method in an interface type, "+
+						"where it names the receiver for the contract of the method, as in // @Receiver c")
 					continue
 				}
 				owner := pv.place(file, group, c)
@@ -1041,6 +1069,7 @@ func (pv *pkgVerifier) collect() {
 		// proof of this package that may have used it counts.
 		pv.predicatesBroken = true
 	}
+	pv.checkReceivers()
 	pv.findSentinels()
 	pv.findKnownReturns()
 	// A contract speaks of the results by the names the function gives

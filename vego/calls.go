@@ -351,6 +351,9 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	if sig.Recv() != nil {
 		passed[sig.Recv()] = types.ExprString(ast.Unparen(call.Fun).(*ast.SelectorExpr).X)
 	}
+	if fn.receiver != nil {
+		passed[fn.receiver] = types.ExprString(ast.Unparen(call.Fun).(*ast.SelectorExpr).X)
+	}
 	for i, arg := range call.Args {
 		passed[sig.Params().At(i)] = types.ExprString(arg)
 	}
@@ -363,6 +366,18 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	for _, pair := range overlapping(fn) {
 		v.check(st, guard, v.separate(args[pair[0]], args[pair[1]], pair[0].Type()), call.Pos(),
 			"the slices passed to %s as %s and %s may overlap", name, describe(pair[0]), describe(pair[1]))
+	}
+	for _, pair := range v.sharing(fn) {
+		if args[pair[0]] != nil && args[pair[1]] != nil {
+			// Two interface values that are not nil have homes of their
+			// own. The nil interface has a home too, and two nil values
+			// share it.
+			zero := logic.RefLit(0)
+			apart := logic.Or(logic.Eq(args[pair[0]][0], zero), logic.Eq(args[pair[1]][0], zero), logic.Ne(home(args[pair[0]][0]), home(args[pair[1]][0])))
+			v.check(st, guard, apart, call.Pos(),
+				"the interface values passed to %s as %s and %s may share their states: they may be one value, hold one value, or hold a value "+
+					"and one that wraps it, and %s may rely on them not doing so", name, describe(pair[0]), describe(pair[1]), name)
+		}
 	}
 	// The contract speaks about memory as it is now, before the call.
 	before, existed := maps.Clone(st.mem), st.brk
@@ -384,6 +399,9 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		what := "what it calls " + t.text
 		if t.param != nil {
 			what = passed[t.param]
+		}
+		if t.row {
+			what = "the states of " + what
 		}
 		// What a method writes behind the receiver of a value it is made
 		// into is something no clause of that contract can list.

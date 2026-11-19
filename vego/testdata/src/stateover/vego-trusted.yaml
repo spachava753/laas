@@ -1,0 +1,6 @@
+version: 1
+
+state:
+  io.Closer: # // want `the trust file declares states of io.Closer, which the contracts shipped with vego declare; remove the declaration`
+    shut:
+      reason: The shipped files declare closed.

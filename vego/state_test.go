@@ -12,18 +12,21 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-// TestStateDeclarations checks that a project trust file cannot declare a
-// state, and every state the shipped files declare: the type
-// exists, is a struct with a size, so that two values of it never start at
-// the same position, and its layout and cells carry the state once, after
-// its fields. A type defined from it shares its memory and so its states.
+// TestStateDeclarations checks that a project trust file can declare a
+// state, which is checked against the type where the type is seen, and
+// every state the shipped files declare. The type exists. A struct has a
+// size, so that two values of it never start at the same position, and its
+// layout and cells carry the state once, after its fields; a type defined
+// from it shares its memory and so its states. An interface is one that a
+// state can be declared on: a defined interface type that declares a
+// method of its own.
 func TestStateDeclarations(t *testing.T) {
 	t.Run("project", func(t *testing.T) {
 		file := parseTrustFile("vego-trusted.yaml", []byte("version: 1\nstate:\n  example.com/x.T:\n    open:\n      reason: r\n"), false)
-		if len(file.problems) != 1 || !strings.Contains(file.problems[0].msg, "cannot declare the state of a type yet") {
+		if len(file.problems) != 0 {
 			t.Fatalf("problems = %+v", file.problems)
 		}
-		if len(file.states) != 0 {
+		if len(file.states["example.com/x.T"]) != 1 {
 			t.Fatalf("states = %+v", file.states)
 		}
 	})
@@ -41,6 +44,12 @@ func TestStateDeclarations(t *testing.T) {
 			obj, ok := pkg.Scope().Lookup(name).(*types.TypeName)
 			if !ok {
 				t.Errorf("%s.%s: no such type", path, name)
+				continue
+			}
+			if types.IsInterface(obj.Type()) {
+				if problem := pv.stateDeclProblem(obj); problem != "" {
+					t.Errorf("%s.%s %s", path, name, problem)
+				}
 				continue
 			}
 			u, isStruct := obj.Type().Underlying().(*types.Struct)
