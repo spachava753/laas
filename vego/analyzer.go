@@ -305,6 +305,9 @@ type funcInfo struct {
 	// vouches holds the indices of the error results of a trusted function
 	// whose errors its contract vouches for; see knownError.
 	vouches map[int]bool
+	// calls holds the contracts a trusted function gives its function
+	// parameters; see callbacks.go.
+	calls   map[*types.Var]*callback
 	broken  bool // an annotation failed to parse; verification is skipped
 	callees []*funcInfo
 	// modifies lists what the function may write, from its Modifies clauses.
@@ -1147,7 +1150,8 @@ func (pv *pkgVerifier) addFunc(decl *ast.FuncDecl) {
 // annotations and trusted contracts may use for its parameters and results.
 // The receiver of a method is its first parameter.
 func newFuncInfo(obj *types.Func) *funcInfo {
-	fn := &funcInfo{obj: obj, paramNames: map[string]*types.Var{}, resultNames: map[string]int{}, runs: map[*types.Var]bool{}, vouches: map[int]bool{}}
+	fn := &funcInfo{obj: obj, paramNames: map[string]*types.Var{}, resultNames: map[string]int{}, runs: map[*types.Var]bool{}, vouches: map[int]bool{},
+		calls: map[*types.Var]*callback{}}
 	sig := obj.Type().(*types.Signature)
 	inputs := slices.Collect(sig.Params().Variables())
 	if sig.Recv() != nil {

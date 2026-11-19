@@ -44,6 +44,14 @@ trusted:
 		{"rejects a second document", "version: 1\ntrusted: {}\n---\nversion: 1\ntrusted: {}\n", "exactly one YAML document"},
 		{"accepts a list of error results it vouches for", "version: 1\ntrusted:\n  os.Remove:\n    reason: r\n    modifies: []\n    vouches: [result]\n", ""},
 		{"rejects vouches that is not a list", "version: 1\ntrusted:\n  os.Remove:\n    reason: r\n    modifies: []\n    vouches: result\n", "vouches of os.Remove must be a list"},
+		{"accepts a function parameter with a contract", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    runs: [f]\n    calls:\n      f(i):\n        requires: [\"0 <= i < n\"]\n    modifies: []\n", ""},
+		{"accepts a contract with nothing in it", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    runs: [f]\n    calls:\n      f(i): {}\n    modifies: []\n", ""},
+		{"rejects calls that is not a mapping", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    calls: [f]\n    modifies: []\n", "calls of sort.Search must map"},
+		{"rejects a key without parameters", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    calls:\n      f: {}\n    modifies: []\n", `"f" must name a function parameter and its parameters`},
+		{"rejects a key that is not names", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    calls:\n      f(i + 1): {}\n    modifies: []\n", "must name a function parameter"},
+		{"rejects a contract that is not a mapping", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    calls:\n      f(i):\n    modifies: []\n", "f(i) must be a mapping"},
+		{"rejects an unknown field of a contract", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    calls:\n      f(i):\n        ensures: []\n    modifies: []\n", `unknown field "ensures" under f(i)`},
+		{"rejects calls requires that do not parse", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    calls:\n      f(i):\n        requires: [\"i <\"]\n    modifies: []\n", "syntax error in requires of f(i) in calls"},
 		{"explains an unquoted formula", "version: 1\ntrusted:\n  sort.Ints:\n    reason: r\n    ensures:\n      - Forall i in [0, |x|) : x'[i] >= 0\n", "must be quoted"},
 	}
 	for _, test := range tests {
@@ -106,8 +114,9 @@ func TestReport(t *testing.T) {
 				},
 				{
 					Key: "sort.Ints", Reason: "Another module's override.", File: "/work/other/vego-trusted.yaml", Line: 4,
-					Runs:  []string{"x", "less"},
-					Calls: []token.Position{at("other/c.go", 3)},
+					Runs:      []string{"x", "less"},
+					Callbacks: []string{"less(i, j) when 0 <= i < |x| And 0 <= j < |x|"},
+					Calls:     []token.Position{at("other/c.go", 3)},
 				},
 				{
 					Key: "math/rand.Intn", Reason: "Documented.", Shipped: true, File: "vego/trusted/std/math_rand.yaml", Line: 4,
@@ -131,6 +140,7 @@ Project contracts in use: 3
   sort.Ints
     reason:  Another module's override.
     runs code held by: x, less
+    calls less(i, j) when 0 <= i < |x| And 0 <= j < |x|
     defined: other/vego-trusted.yaml:4
     used at: other/c.go:3
   sort.Ints

@@ -100,7 +100,7 @@ func small(x int) (y int) {
 //
 // @Ensures f != nil
 func Small() (f Mapper) {
-	return small // want `vego: precondition of small may not hold: 0 <= x <= 10, in small used as a Mapper at funcvalues.go:103:9`
+	return small // want `vego: precondition of small may not hold: 0 <= x <= 10, in small used as a value of type Mapper at funcvalues.go:103:9`
 }
 
 // Offset adds an amount the literal captures.
@@ -119,7 +119,7 @@ func Offset(k int) (f Mapper) {
 func Later() (f Mapper) {
 	k := 1
 	f = func(x int) int {
-		return x + k // want `vego: addition may overflow int, in the function literal used as a Mapper at funcvalues.go:121:6` `vego: postcondition may not hold: 0 <= y <= 2000, in the function literal used as a Mapper at funcvalues.go:121:6`
+		return x + k // want `vego: addition may overflow int, in the function literal used as a value of type Mapper at funcvalues.go:121:6` `vego: postcondition may not hold: 0 <= y <= 2000, in the function literal used as a value of type Mapper at funcvalues.go:121:6`
 	}
 	k = 5000
 	return f

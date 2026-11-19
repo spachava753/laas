@@ -183,6 +183,9 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func) *funcIn
 	}
 	if fn.trust != nil {
 		v.noteUse(fn, call.Pos())
+		if len(fn.calls) > 0 {
+			v.unsupported(call.Pos(), fmt.Sprintf("%s calls a function it is given, and handing one over is not supported yet", callee.Name()))
+		}
 		v.checkHandedOver(call, fn)
 	}
 	return fn

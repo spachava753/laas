@@ -12,6 +12,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -52,9 +53,26 @@ type trustEntry struct {
 	// vouches names the error results whose errors the author vouches
 	// for; see knownError.
 	vouches []trustFormula
-	file    *trustFile
-	line    int
+	// calls gives function parameters a contract: how the function calls
+	// what it is given there.
+	calls []trustCall
+	file  *trustFile
+	line  int
 }
+
+// trustCall is one entry under calls: a function parameter, names for the
+// parameters of its function type, and what holds whenever the trusted
+// function calls it.
+type trustCall struct {
+	name     string
+	params   []string
+	requires []trustFormula
+	line     int
+	col      int
+}
+
+// callShape reads the key of an entry under calls, as in f(i) or less(i, j).
+var callShape = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\(\s*((?:[A-Za-z_][A-Za-z0-9_]*)(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)?\s*\)$`)
 
 // trustFile is a parsed file of trusted contracts.
 type trustFile struct {
@@ -216,8 +234,10 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			for _, item := range scalars("vouches", value) {
 				entry.vouches = append(entry.vouches, trustFormula{text: item.Value, line: item.Line, col: item.Column})
 			}
+		case "calls":
+			f.addCalls(entry, value, formulas)
 		default:
-			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, requires, ensures, modifies, runs, or vouches",
+			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, requires, ensures, modifies, runs, vouches, or calls",
 				field.Value, entry.key)
 		}
 	}
@@ -229,6 +249,45 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 	if !listed {
 		f.problem(name.Line, "the entry for %s needs a modifies list saying what the function may write; "+
 			"write \"modifies: []\" if it writes nothing a caller can see", entry.key)
+	}
+}
+
+// addCalls reads the calls of an entry: a mapping from the function
+// parameter, written with names for its parameters as in f(i), to what
+// holds when the function calls it.
+func (f *trustFile) addCalls(entry *trustEntry, node *yaml.Node, formulas func(string, *yaml.Node) []trustFormula) {
+	if node.Kind != yaml.MappingNode {
+		f.problem(node.Line, "calls of %s must map a function parameter, written as in f(i), to what holds when %s calls it",
+			entry.key, entry.key)
+		return
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key, body := node.Content[i], node.Content[i+1]
+		match := callShape.FindStringSubmatch(key.Value)
+		if key.Kind != yaml.ScalarNode || match == nil {
+			f.problem(key.Line, "calls of %s: %q must name a function parameter and its parameters, as in f(i) or do()", entry.key, key.Value)
+			continue
+		}
+		call := trustCall{name: match[1], line: key.Line, col: key.Column}
+		for _, name := range strings.Split(match[2], ",") {
+			if name = strings.TrimSpace(name); name != "" {
+				call.params = append(call.params, name)
+			}
+		}
+		if body.Kind != yaml.MappingNode {
+			f.problem(body.Line, "calls of %s: %s must be a mapping, such as {} or one with requires", entry.key, key.Value)
+			continue
+		}
+		for j := 0; j+1 < len(body.Content); j += 2 {
+			field, value := body.Content[j], body.Content[j+1]
+			switch field.Value {
+			case "requires":
+				call.requires = formulas("requires of "+key.Value+" in calls", value)
+			default:
+				f.problem(field.Line, "unknown field %q under %s in the calls of %s; expected requires", field.Value, key.Value, entry.key)
+			}
+		}
+		entry.calls = append(entry.calls, call)
 	}
 }
 
@@ -317,7 +376,10 @@ type EntryUse struct {
 	// Vouches the error results whose errors the contract vouches for.
 	Runs    []string
 	Vouches []string
-	Calls   []token.Position
+	// Callbacks describes each function parameter given a contract under
+	// calls, as in "f(i) when 0 <= i < n".
+	Callbacks []string
+	Calls     []token.Position
 }
 
 // add merges another usage into u.
@@ -532,6 +594,9 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 			fn.runs[param] = true
 		}
 	}
+	for _, item := range entry.calls {
+		pv.trustedCall(fn, item)
+	}
 	// The error results whose errors the author vouches for. Listing
 	// anything else would be a claim about nothing.
 	for _, item := range entry.vouches {
@@ -603,7 +668,19 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 		// a path through one parameter may describe what the function
 		// writes through another that is the same object.
 		v.primedPaths(fn)
-		_, outcome, _ := v.contractInstance(v.enter())
+		entry := v.enter()
+		// The requires of calls are read once here, so that a name they
+		// cannot use is a defect of the entry.
+		for _, param := range fn.params {
+			if cb := fn.calls[param]; cb != nil {
+				given := make([]value, len(cb.params))
+				for i, p := range cb.params {
+					given[i] = v.unknown(p.Name(), p.Type(), entry)
+				}
+				v.callRequires(cb, given, v.entry, entry.clone())
+			}
+		}
+		_, outcome, _ := v.contractInstance(entry)
 		if pv.contradictory(outcome) {
 			fn.defect("it contradicts itself, so anything could be proved from it")
 		}
@@ -760,9 +837,21 @@ func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 		for _, item := range entry.vouches {
 			vouches = append(vouches, item.text)
 		}
+		var callbacks []string
+		for _, call := range entry.calls {
+			described := call.name + "(" + strings.Join(call.params, ", ") + ")"
+			var conditions []string
+			for _, formula := range call.requires {
+				conditions = append(conditions, formula.text)
+			}
+			if len(conditions) > 0 {
+				described += " when " + strings.Join(conditions, " And ")
+			}
+			callbacks = append(callbacks, described)
+		}
 		pv.usage.Entries = append(pv.usage.Entries, &EntryUse{
 			Key: entry.key, Reason: entry.reason, Shipped: entry.file.shipped,
-			File: entry.file.path, Line: entry.line, Runs: runs, Vouches: vouches,
+			File: entry.file.path, Line: entry.line, Runs: runs, Vouches: vouches, Callbacks: callbacks,
 		})
 		index = len(pv.usage.Entries) - 1
 	}

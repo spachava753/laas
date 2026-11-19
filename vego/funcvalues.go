@@ -772,7 +772,7 @@ func (v *fnVerifier) madeFrom(e ast.Expr, T *funcInfo, callee *types.Func, recei
 		v.unsupported(e.Pos(), fmt.Sprintf("%s may call through a function value, and code that a function value runs cannot do that yet: "+
 			"no contract of a function type has a variant, so nothing would prove that such calls end", callee.Name()))
 	}
-	site := v.site(e.Pos(), "in %s used as a %s at %s", types.ExprString(e), T.obj.Name(), v.placeOf(e.Pos()))
+	site := v.site(e.Pos(), "in %s used as a value of type %s at %s", types.ExprString(e), T.obj.Name(), v.placeOf(e.Pos()))
 	sv, entry, carry := v.subVerifier(T, st, guard, site)
 	// The arguments of the call: the receiver as it was where the value
 	// was made, and the parameters of the type in order.
@@ -954,7 +954,7 @@ func (v *fnVerifier) madeLiteral(lit *ast.FuncLit, T *funcInfo, st *state, guard
 			fn.body = append(fn.body, c)
 		}
 	}
-	site := v.site(lit.Pos(), "in the function literal used as a %s at %s", T.obj.Name(), v.placeOf(lit.Pos()))
+	site := v.site(lit.Pos(), "in the function literal used as a value of type %s at %s", T.obj.Name(), v.placeOf(lit.Pos()))
 	sv, entry, carry := v.subVerifier(fn, st, guard, site)
 	for _, variable := range captured {
 		held := st.vals[variable]

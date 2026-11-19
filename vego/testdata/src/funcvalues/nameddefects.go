@@ -14,7 +14,7 @@ func strict(x int) (y int) {
 //
 // @Ensures f != nil
 func Strict() (f Mapper) {
-	return strict // want `vego: precondition of strict may not hold: 0 <= x <= 10, in strict used as a Mapper at nameddefects.go:\d+:\d+`
+	return strict // want `vego: precondition of strict may not hold: 0 <= x <= 10, in strict used as a value of type Mapper at nameddefects.go:\d+:\d+`
 }
 
 // tripled can leave the range of Mapper.
@@ -29,7 +29,7 @@ func tripled(x int) (y int) {
 //
 // @Ensures f != nil
 func Tripled() (f Mapper) {
-	return tripled // want `vego: postcondition may not hold: 0 <= y <= 2000, in tripled used as a Mapper`
+	return tripled // want `vego: postcondition may not hold: 0 <= y <= 2000, in tripled used as a value of type Mapper`
 }
 
 // Retimes changes the timeout of a configuration.
@@ -93,7 +93,7 @@ type Plainly func(x int) (y int)
 // @Ensures f != nil
 func MakeDiv(d *Divider) (f Plainly) {
 	d.k = 1
-	f = d.Div // want `vego: precondition of Div may not hold: d.k > 0, in d.Div used as a Plainly at nameddefects.go:\d+:\d+`
+	f = d.Div // want `vego: precondition of Div may not hold: d.k > 0, in d.Div used as a value of type Plainly at nameddefects.go:\d+:\d+`
 	d.k = 0
 	return f
 }
@@ -242,5 +242,5 @@ func divide(x int) (y int) {
 // @Requires x > 0
 // @Ensures True
 func Leak(x int) (d DivBy) {
-	return divide // want `vego: precondition of divide may not hold: x != 0, in divide used as a DivBy`
+	return divide // want `vego: precondition of divide may not hold: x != 0, in divide used as a value of type DivBy`
 }

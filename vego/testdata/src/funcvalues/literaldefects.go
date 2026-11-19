@@ -5,7 +5,7 @@ package funcvalues
 // @Ensures f != nil
 func Big(k int) (f Mapper) {
 	return func(x int) int {
-		return x + k // want `vego: postcondition may not hold: 0 <= y <= 2000, in the function literal used as a Mapper at literaldefects.go:\d+:\d+` `addition may overflow int`
+		return x + k // want `vego: postcondition may not hold: 0 <= y <= 2000, in the function literal used as a value of type Mapper at literaldefects.go:\d+:\d+` `addition may overflow int`
 	}
 }
 
@@ -194,7 +194,7 @@ func ReturnedInner() (n int, p Picker) {
 // @Requires x > 0
 // @Ensures True
 func MakeDivLit(x int) (d DivBy) {
-	return func(x int) int { return 100 / x } // want `vego: possible division by zero, in the function literal used as a DivBy`
+	return func(x int) int { return 100 / x } // want `vego: possible division by zero, in the function literal used as a value of type DivBy`
 }
 
 // Added captures a variable that += changes later.

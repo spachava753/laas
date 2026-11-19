@@ -667,7 +667,7 @@ func Small() (f Mapper) {
 ```
 
 ```text
-vego: precondition of small may not hold: 0 <= x <= 10, in small used as a Mapper at funcvalues.go:103:9
+vego: precondition of small may not hold: 0 <= x <= 10, in small used as a value of type Mapper at funcvalues.go:103:9
 ```
 
 The receiver of a method value is evaluated where the value is made, as in Go. What `vego` knows of the receiver's value there is known when the value runs, but not what is in memory.
@@ -735,8 +735,8 @@ func Later() (f Mapper) {
 `Offset` is verified. In `Later`, `k` is assigned after the literal is made, so `vego` reports:
 
 ```text
-vego: addition may overflow int, in the function literal used as a Mapper at funcvalues.go:121:6
-vego: postcondition may not hold: 0 <= y <= 2000, in the function literal used as a Mapper at funcvalues.go:121:6
+vego: addition may overflow int, in the function literal used as a value of type Mapper at funcvalues.go:121:6
+vego: postcondition may not hold: 0 <= y <= 2000, in the function literal used as a value of type Mapper at funcvalues.go:121:6
 ```
 
 A literal used as a value cannot assign a variable it captures:
@@ -2315,7 +2315,7 @@ This table lists the most common messages.
 | `cannot verify F: f has type T, which has no contract` | `f` is called, and its type has no contract. | Declare a named function type with a contract and use it for `f`. See [Function values](#function-values). |
 | `cannot verify F: x is used as a value of type T, which has no contract` | A function, method value, or literal is given a function type that has no contract. | Give it a named function type with a contract. |
 | `cannot verify F: converting x to T is not supported` | A function value of another type is converted to a function type. | Make the value of the type it is used as, from a function, a method value, or a literal. |
-| `..., in g used as a T at f.go:n:c`, or `..., in the function literal used as a T at f.go:n:c` | The function, method value, or literal does not meet the contract of `T` where it is made into a value of `T`. | Fix the function or the literal, or the contract of `T`. See [Making a function value](#making-a-function-value). |
+| `..., in g used as a value of type T at f.go:n:c`, or `..., in the function literal used as a value of type T at f.go:n:c` | The function, method value, or literal does not meet the contract of `T` where it is made into a value of `T`. | Fix the function or the literal, or the contract of `T`. See [Making a function value](#making-a-function-value). |
 | `the Ensures clauses of T are not proved to be satisfiable for every call that its Requires allow` | Some call that the `Requires` of `T` allow has no result that meets its `Ensures`. | Add the condition to the `Requires` clauses, or weaken the `Ensures`. |
 | `cannot verify F: a function literal used as a value cannot assign x` | The literal assigns a variable of the function around it. | Return the value from the literal, or write it into memory that the contract of the type lists. |
 | `... calls through the function value f, and code that a function value runs cannot do that yet`, or `g may call through a function value, and code that a function value runs cannot do that yet` | Code that a function value runs would call through a function value. | Leave that code unverified. See [Function values that call function values](#function-values-that-call-function-values). |

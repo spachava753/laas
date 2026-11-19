@@ -662,3 +662,118 @@ trusted:
   keeper.Flush:
     reason: Test helper that runs a method of the kept error.
     modifies: []
+
+  callbacks.each:
+    reason: Test helper that calls f with each number below n.
+    runs: [f]
+    calls:
+      f(i):
+        requires: ["0 <= i < n"]
+    modifies: []
+
+  callbacks.notRun:
+    reason: Test helper whose calls gives f a contract that runs does not list.
+    calls:
+      f(i): {}
+    modifies: []
+
+  callbacks.notFunc:
+    reason: Test helper whose calls lists a number.
+    runs: [f]
+    calls:
+      f(i): {}
+    modifies: []
+
+  callbacks.twice:
+    reason: Test helper whose calls lists f twice.
+    runs: [f]
+    calls:
+      f(i): {}
+      f(j): {}
+    modifies: []
+
+  callbacks.wrongCount:
+    reason: Test helper whose calls names too few parameters.
+    runs: [f]
+    calls:
+      f(i): {}
+    modifies: []
+
+  callbacks.sameName:
+    reason: Test helper whose calls names one parameter twice.
+    runs: [f]
+    calls:
+      f(i, i): {}
+    modifies: []
+
+  callbacks.clash:
+    reason: Test helper whose calls names a parameter after one of the function.
+    runs: [f]
+    calls:
+      f(n): {}
+    modifies: []
+
+  callbacks.clashResult:
+    reason: Test helper whose calls names a parameter after a result of the function.
+    runs: [f]
+    calls:
+      f(k): {}
+    modifies: []
+
+  callbacks.reserved:
+    reason: Test helper whose calls names a parameter result.
+    runs: [f]
+    calls:
+      f(result): {}
+    modifies: []
+
+  callbacks.badRequires:
+    reason: Test helper whose calls requires names nothing that exists.
+    runs: [f]
+    calls:
+      f(i):
+        requires: ["0 <= i < m"]
+    modifies: []
+
+  callbacks.primed:
+    reason: Test helper whose calls requires is primed.
+    runs: [f]
+    calls:
+      f(i):
+        requires: ["xs'[i] > 0"]
+    modifies: []
+
+  callbacks.takesError:
+    reason: Test helper that calls f with an error.
+    runs: [f]
+    calls:
+      f(e): {}
+    modifies: []
+
+  callbacks.variadic:
+    reason: Test helper whose f is variadic.
+    runs: [f]
+    calls:
+      f(xs): {}
+    modifies: []
+
+  callbacks.applied:
+    reason: Test helper whose function parameter has a name that a formula applies as a word of its own.
+    runs: [is]
+    calls:
+      is(i): {}
+    modifies: []
+
+  callbacks.withContract:
+    reason: Test helper whose function parameter has a type with a contract.
+    runs: [f]
+    calls:
+      f(i): {}
+    modifies: []
+
+  callbacks.noParam:
+    reason: Test helper whose calls names no parameter.
+    runs: [f]
+    calls:
+      g(i): {}
+    modifies: []
