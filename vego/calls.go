@@ -98,13 +98,14 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	if isBuiltin(v.info, call, "recover") {
 		v.unsupported(call.Pos(), recoverRefused)
 	}
-	callee, _ := typeutil.Callee(v.info, call).(*types.Func)
-	if callee == nil && isFunc(v.info.TypeOf(call.Fun)) && !v.info.Types[call.Fun].IsBuiltin() {
+	method, viaValue := throughValue(v.info, call)
+	switch {
+	case viaValue:
 		return v.callValue(call, st, guard)
+	case method != nil:
+		return v.callMethod(call, method, st, guard)
 	}
-	if isIfaceMethod(callee) {
-		return v.callMethod(call, callee, st, guard)
-	}
+	callee, _ := typeutil.Callee(v.info, call).(*types.Func)
 	if callee == nil {
 		v.unsupported(call.Pos(), "only calls to named functions and methods are supported")
 	}

@@ -173,19 +173,20 @@ func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
 // Modifies clauses of the function called.
 func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 	callee, _ := typeutil.Callee(v.info, call).(*types.Func)
+	method, value := throughValue(v.info, call)
 	var fn *funcInfo
 	switch {
 	case v.literalOf(call) != nil:
 		// The body of the literal is walked where it is called.
 		return
-	case callee == nil && isFunc(v.info.TypeOf(call.Fun)) && !v.info.Types[call.Fun].IsBuiltin() && !v.info.Types[call.Fun].IsType():
+	case value:
 		// A call through a function value writes what the Modifies of its
 		// type lists.
 		fn = v.valueContract(v.info.TypeOf(call.Fun))
-	case isIfaceMethod(callee):
+	case method != nil:
 		// So does a call through an interface value, by the Modifies of
 		// the method.
-		fn = v.methodContract(callee)
+		fn = v.methodContract(method)
 	case callee == nil || errorConstructor(callee):
 		return
 	default:

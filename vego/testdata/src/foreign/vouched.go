@@ -130,3 +130,17 @@ func RefillsUnclaimed(h *Holder) {
 func VouchesNothing(b *Box) {
 	vouchesNothing(b) // want `the trusted contract of foreign.vouchesNothing \(trusted.yaml:\d+\) cannot be used: its vouches lists b, but nothing its modifies lists under b can hold` `cannot verify VouchesNothing: vouchesNothing has a contract that could not be understood`
 }
+
+// A variable of a vouching type bound to a literal used in place runs the
+// literal where it is called: the entry plays no part, and the error the
+// literal returns is e, whose origin is not known.
+//
+// @Requires e != nil
+// @Ensures True
+func BoundDone(e error) (err error) {
+	var d foreignlib.Done = func() error { return e }
+	if err := d(); err != nil {
+		return fmt.Errorf("done: %w", err) // want `cannot verify BoundDone: formatting err would run the methods of an error whose origin is not known`
+	}
+	return nil
+}

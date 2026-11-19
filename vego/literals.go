@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"golang.org/x/tools/go/types/typeutil"
 )
 
 // A function literal is verified where it is used, and only where every use
@@ -133,15 +134,38 @@ const recoverRefused = "recover is not supported: it returns an interface, and t
 
 // literalOf returns the literal a call calls in place, or nil.
 func (v *fnVerifier) literalOf(call *ast.CallExpr) *ast.FuncLit {
+	return calledLiteral(v.info, v.boundLits, call)
+}
+
+// calledLiteral returns the function literal a call runs, written there or
+// bound to a variable in place, as literalUses binds them in bound, or nil.
+// Such a call is not a call through a value: the literal's body runs where
+// it is called, and the contract of its type plays no part.
+func calledLiteral(info *types.Info, bound map[*types.Var]*ast.FuncLit, call *ast.CallExpr) *ast.FuncLit {
 	switch fun := ast.Unparen(call.Fun).(type) {
 	case *ast.FuncLit:
 		return fun
 	case *ast.Ident:
-		if variable, ok := v.info.Uses[fun].(*types.Var); ok {
-			return v.boundLits[variable]
+		if variable, ok := info.Uses[fun].(*types.Var); ok {
+			return bound[variable]
 		}
 	}
 	return nil
+}
+
+// throughValue says whether a call that runs no literal is a call through
+// an interface value, of the method returned, or through a function value.
+// Every place that tells calls apart decides it here, after calledLiteral,
+// so that none of them takes one kind of call for another.
+func throughValue(info *types.Info, call *ast.CallExpr) (method *types.Func, value bool) {
+	callee, _ := typeutil.Callee(info, call).(*types.Func)
+	switch {
+	case callee == nil && isFunc(info.TypeOf(call.Fun)) && !info.Types[call.Fun].IsBuiltin() && !info.Types[call.Fun].IsType():
+		return nil, true
+	case isIfaceMethod(callee):
+		return callee, false
+	}
+	return nil, false
 }
 
 // isBoundLiteral reports whether an expression names a variable bound to a

@@ -710,6 +710,7 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 	callee, _ := typeutil.Callee(v.info, s.Call).(*types.Func)
 	lit := v.literalOf(s.Call)
+	method, viaValue := throughValue(v.info, s.Call)
 	switch {
 	case v.looped[s]:
 		v.unsupported(s.Pos(), "defer inside a loop is not supported: how many calls it puts off is not known")
@@ -732,11 +733,11 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 		return
 	case isBuiltin(v.info, s.Call, "recover"):
 		v.unsupported(s.Pos(), recoverRefused)
-	case callee == nil && isFunc(v.info.TypeOf(s.Call.Fun)) && !v.info.Types[s.Call.Fun].IsBuiltin():
+	case viaValue:
 		v.deferValue(s, st)
 		return
-	case isIfaceMethod(callee):
-		v.deferMethod(s, callee, st)
+	case method != nil:
+		v.deferMethod(s, method, st)
 		return
 	case callee == nil:
 		v.unsupported(s.Pos(), "only a call of a named function or method, of a function literal, or of a function value can be deferred; "+

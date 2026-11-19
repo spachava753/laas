@@ -45,6 +45,9 @@ import (
 type origins struct {
 	sources map[*types.Var][]source
 	unknown map[*types.Var]bool
+	// bound holds the variables of the body bound to literals used in
+	// place; see literalUses.
+	bound map[*types.Var]*ast.FuncLit
 }
 
 // source is something assigned to an error variable: an expression, or the
@@ -154,6 +157,7 @@ func (pv *pkgVerifier) originsOf(body *ast.BlockStmt) *origins {
 	// of its calls, which are all in the body. Those of any other literal
 	// could be given anything.
 	bound, _ := literalUses(pv.info, body)
+	o.bound = bound
 	inPlace := map[*ast.FuncLit]bool{}
 	for _, lit := range bound {
 		inPlace[lit] = true
@@ -220,6 +224,11 @@ func (pv *pkgVerifier) knownError(o *origins, e ast.Expr, index int, visiting ma
 		if tuple, ok := result.(*types.Tuple); ok && index >= 0 && index < tuple.Len() {
 			result, at = tuple.At(index).Type(), index
 		}
+		// A call of a literal runs its body, whose returns are not judged
+		// here; it is no call through a value, whatever its type says.
+		if calledLiteral(pv.info, o.bound, e) != nil {
+			return false
+		}
 		if callee == nil && isError(result) {
 			return pv.vouchedThroughValue(e, at)
 		}
@@ -266,10 +275,11 @@ func (pv *pkgVerifier) knownVariable(o *origins, variable *types.Var, visiting m
 // written in source vouches for nothing.
 func (pv *pkgVerifier) vouchedThroughValue(call *ast.CallExpr, index int) bool {
 	var fn *funcInfo
-	if method, ok := typeutil.Callee(pv.info, call).(*types.Func); ok && isIfaceMethod(method) {
+	switch method, value := throughValue(pv.info, call); {
+	case method != nil:
 		fn = pv.methodContract(method)
-	} else if tv, ok := pv.info.Types[call.Fun]; ok && tv.IsValue() && isFunc(tv.Type) {
-		fn = pv.valueContract(tv.Type)
+	case value:
+		fn = pv.valueContract(pv.info.TypeOf(call.Fun))
 	}
 	return fn != nil && fn.trust != nil && fn.vouches[index]
 }
