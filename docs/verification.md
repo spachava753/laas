@@ -1008,7 +1008,16 @@ n := s.n
 return n + s.Pop()
 ```
 
-The message shows the statement that reads the value first, with a name that is not yet in scope. It shows none for a read that a statement of its own before it would not make in the same way. That is a read on the right of `&&` or `||`, in a `case` expression, or in the condition or post statement of a `for` loop, and a read that is described in words, such as the receiver of a method. Decide there where the read belongs, and move it yourself.
+The message ends with a statement that makes the read first, with a name that is not yet in scope. Put that statement before the one with the read, and use the name in place of the read.
+
+The message has no such statement where moving the read would change when or how often Go makes it. That is the case for a read in these places:
+
+- on the right of `&&` or `||`;
+- in a `case` expression;
+- in the init statement or the condition of an `else if`;
+- in the condition or the post statement of a `for` loop.
+
+It also has none for a read that the message describes in words, such as the receiver of a method. Decide there where the read belongs, and move it yourself.
 
 Some reads do have a fixed order. Go evaluates the arguments of a call before the call, and the left operand of `&&` and `||` before the right one. In `id(s.n) + s.Pop()`, `s.n` is read for `id`, which runs before `Pop`. In `s.Pop() > 0 && s.n > 0`, `s.n` is read after `Pop`.
 

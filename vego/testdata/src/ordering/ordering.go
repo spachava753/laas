@@ -1068,3 +1068,96 @@ func PostRead(c *Counter) {
 	for i := 0; i < 3; i, c.m = i+1, c.n+c.Inc() { // want `vego: c.n may be read before or after the call to Inc, which may change it, and Go does not fix the order; split the statement so that the order is the one you mean$`
 	}
 }
+
+// ElseIf reads c.n in the condition of an else if, which runs only when the
+// condition before it is false, so no fix is quoted.
+//
+// @Requires c != nil And 0 <= c.n < 100
+// @Modifies c.n
+func ElseIf(c *Counter) (r int) {
+	if c.Inc() > 50 {
+		return 1
+	} else if c.n+c.Inc() > 0 { // want `vego: c.n may be read before or after the call to Inc, which may change it, and Go does not fix the order; split the statement so that the order is the one you mean$`
+		return 2
+	}
+	return 0
+}
+
+// ElseIfInit reads c.n in the init statement of an else if.
+//
+// @Requires c != nil And 0 <= c.n < 100
+// @Modifies c.n
+func ElseIfInit(c *Counter) (r int) {
+	if c.Inc() > 50 {
+		return 1
+	} else if k := c.n + c.Inc(); k > 0 { // want `vego: c.n may be read before or after the call to Inc, which may change it, and Go does not fix the order; split the statement so that the order is the one you mean$`
+		return 2
+	}
+	return 0
+}
+
+// The fix of a read in the header of an if, a for, or a switch goes before
+// the statement, into the block around it, so a name declared later in that
+// block is not used for it.
+
+// IfCondLater reads c.n in the condition of an if.
+//
+// @Requires c != nil And 0 <= c.n < 100
+// @Modifies c.n
+func IfCondLater(c *Counter) (r int) {
+	if c.n+c.Inc() > 0 { // want `, as in n0 := c.n before it$`
+		return 2
+	}
+	n := 3
+	return n
+}
+
+// IfInitLater reads c.n in the init statement of an if.
+//
+// @Requires c != nil And 0 <= c.n < 100
+// @Modifies c.n
+func IfInitLater(c *Counter) (r int) {
+	if k := c.n + c.Inc(); k > 0 { // want `, as in n0 := c.n before it$`
+		return 2
+	}
+	n := 3
+	return n
+}
+
+// IfShadows reads c.n in the condition of an if whose init statement
+// declares n, which would hide the new variable there.
+//
+// @Requires c != nil And 0 <= c.n < 100
+// @Modifies c.n
+func IfShadows(c *Counter) (r int) {
+	if n := 1; c.n+c.Inc() > n { // want `, as in n0 := c.n before it$`
+		return 2
+	}
+	return 0
+}
+
+// ForInitLater reads c.n in the init statement of a for loop.
+//
+// @Requires c != nil And 0 <= c.n < 100
+// @Modifies c.n
+func ForInitLater(c *Counter) (r int) {
+	// @Invariant 0 <= i
+	// @Variant 3 - i
+	for i := c.n + c.Inc(); i < 3; i++ { // want `, as in n0 := c.n before it$`
+	}
+	n := 3
+	return n
+}
+
+// SwitchTagLater reads c.n in the tag of a switch.
+//
+// @Requires c != nil And 0 <= c.n < 100
+// @Modifies c.n
+func SwitchTagLater(c *Counter) (r int) {
+	switch c.n + c.Inc() { // want `, as in n0 := c.n before it$`
+	case 0:
+		return 1
+	}
+	n := 3
+	return n
+}

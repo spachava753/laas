@@ -446,12 +446,12 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 			// The post statement may continue in more than one state. No
 			// statement can be put before it, so no read in it is shown
 			// as one to move there.
-			v.postStmt = true
+			v.unsplit = true
 			v.stmt(shape.post, end, ctrl{}, func(next *state) {
-				v.postStmt = false
+				v.unsplit = false
 				finish(next)
 			})
-			v.postStmt = false
+			v.unsplit = false
 			return
 		}
 		finish(end)

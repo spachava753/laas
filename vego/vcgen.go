@@ -89,9 +89,12 @@ type fnVerifier struct {
 	names    map[string]int
 	branches int
 	measure  *logic.Term
-	// postStmt is set while the post statement of a for loop is executed;
-	// see unit.sometimes.
-	postStmt bool
+	// unsplit is set while a statement is executed before which nothing
+	// can be put, the post statement of a for loop and the init statement
+	// of an else if; see unit.sometimes. elseIfs holds, by the position of
+	// their keyword, the if statements that follow an else.
+	unsplit bool
+	elseIfs map[token.Pos]bool
 	// unit is the evaluation of the operands of the statement being
 	// executed, in which reads of memory are recorded so that their order
 	// relative to the calls that write memory can be checked; see order.go.
@@ -757,18 +760,28 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 }
 
 func (v *fnVerifier) ifStmt(s *ast.IfStmt, st *state, c ctrl, k func(*state)) {
+	elseIf := v.elseIfs[s.If]
 	if s.Init != nil {
 		// The initializer may continue in more than one state.
+		v.unsplit = elseIf
 		v.stmt(s.Init, st, c, func(next *state) {
+			v.unsplit = false
 			without := *s
 			without.Init = nil
 			v.ifStmt(&without, next, c, k)
 		})
+		v.unsplit = false
 		return
 	}
 	v.branch(s.Pos())
 	var cond *logic.Term
-	v.evaluate(st, func() { cond = v.expr(s.Cond, st, nil) })
+	evaluate := v.evaluate
+	if elseIf {
+		// The condition of an else if is evaluated only when the one
+		// before it is false.
+		evaluate = v.evaluateSometimes
+	}
+	evaluate(st, func() { cond = v.expr(s.Cond, st, nil) })
 	taken, skipped := st.clone(), st.clone()
 	taken.decide(cond)
 	skipped.decide(logic.Not(cond))
@@ -776,6 +789,12 @@ func (v *fnVerifier) ifStmt(s *ast.IfStmt, st *state, c ctrl, k func(*state)) {
 	if s.Else == nil {
 		k(skipped)
 		return
+	}
+	if next, ok := s.Else.(*ast.IfStmt); ok {
+		if v.elseIfs == nil {
+			v.elseIfs = map[token.Pos]bool{}
+		}
+		v.elseIfs[next.If] = true
 	}
 	v.stmt(s.Else, skipped, c, k)
 }

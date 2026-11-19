@@ -10,6 +10,7 @@ import (
 	"slices"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"golang.org/x/tools/go/ast/astutil"
 )
 
 // Go fixes part of the order in which the operands of a statement are
@@ -71,8 +72,9 @@ type unit struct {
 	snapshot func(st *state) memory
 	// sometimes is set for operands that a statement evaluates on some of
 	// its runs only, or more than once, and for those of a statement
-	// nothing can be put before: a case expression, the condition of a
-	// for loop, and its post statement. A read among them cannot be moved
+	// nothing can be put before: a case expression, the init statement
+	// and condition of an else if, the condition of a for loop, and its
+	// post statement. A read among them cannot be moved
 	// to a statement of its own before them.
 	sometimes bool
 }
@@ -122,7 +124,7 @@ func (v *fnVerifier) openUnit(st *state) {
 	if v.unit != nil {
 		panic("vego: internal error: an evaluation unit was opened inside another")
 	}
-	v.unit = &unit{writers: []string{""}, snapshot: v.snapshot, sometimes: v.postStmt}
+	v.unit = &unit{writers: []string{""}, snapshot: v.snapshot, sometimes: v.unsplit}
 	v.unit.versions = []memory{v.unit.snapshot(st)}
 }
 
@@ -330,8 +332,8 @@ func (v *fnVerifier) closeUnit(st *state) {
 // can make again with the same meaning, how to make it first: as in
 // ", as in n := s.n before it". That means the same only for a read Go
 // makes once each time the statement runs, before the statement would: not
-// on the right of && or ||, and not in a case expression or the condition
-// of a loop. The name is the field or variable read, or
+// on the right of && or ||, and not in a case expression, the header of an
+// else if, or the condition or post statement of a loop. The name is the field or variable read, or
 // v for anything else, followed by the first number that makes it a name
 // not in scope where the read is and not declared in its block. A read described in words, such as the
 // elements an append copies, or one that would call something, gets
@@ -351,17 +353,55 @@ func (v *fnVerifier) splitFix(u *unit, r *recorded) string {
 	case *ast.SelectorExpr:
 		name = e.Sel.Name
 	}
-	scope := v.pass.Pkg.Scope().Innermost(r.pos)
+	// The new statement goes into the block that holds the statement of
+	// the read, so it must not clash with a name declared anywhere in that
+	// block, and the read's own place must not see another variable of the
+	// name.
+	scope, block := v.pass.Pkg.Scope().Innermost(r.pos), v.blockScope(r.pos)
+	if scope == nil || block == nil {
+		return ""
+	}
 	free := name
-	for i := 0; scope != nil; i++ {
-		// A name declared later in the same block would clash with the new
-		// statement too.
-		if _, found := scope.LookupParent(free, r.pos); found == nil && scope.Lookup(free) == nil {
+	for i := 0; ; i++ {
+		if _, found := scope.LookupParent(free, r.pos); found == nil && block.Lookup(free) == nil {
 			break
 		}
 		free = fmt.Sprintf("%s%d", name, i)
 	}
 	return fmt.Sprintf(", as in %s := %s before it", free, r.what)
+}
+
+// blockScope returns the scope of the block that holds the statement in
+// which a position lies: of the statement in a list of statements nearest
+// to it. The body of a function shares its scope with the signature.
+func (v *fnVerifier) blockScope(pos token.Pos) *types.Scope {
+	for _, file := range v.pass.Files {
+		if pos < file.FileStart || pos >= file.FileEnd {
+			continue
+		}
+		path, _ := astutil.PathEnclosingInterval(file, pos, pos)
+		for i := 1; i < len(path); i++ {
+			if _, isStmt := path[i-1].(ast.Stmt); !isStmt {
+				continue
+			}
+			switch list := path[i].(type) {
+			case *ast.CaseClause:
+				return v.info.Scopes[list]
+			case *ast.BlockStmt:
+				if scope := v.info.Scopes[list]; scope != nil {
+					return scope
+				}
+				switch fn := path[i+1].(type) {
+				case *ast.FuncDecl:
+					return v.info.Scopes[fn.Type]
+				case *ast.FuncLit:
+					return v.info.Scopes[fn.Type]
+				}
+				return nil
+			}
+		}
+	}
+	return nil
 }
 
 // copyable reports whether evaluating an expression again in a statement
