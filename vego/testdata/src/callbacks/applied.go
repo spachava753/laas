@@ -187,3 +187,48 @@ func UsesTwoArgs() {
 func UsesAppliedEarly() {
 	_ = appliedEarly(func(i int) bool { return true }) // want `its requires "f\(0\)" applies f; only its ensures can speak of what f returns` `in its requires "f\(0\)": f\(...\) can only be used in ensures` `cannot verify UsesAppliedEarly: `
 }
+
+func noResult(f func())                   {}
+func twoResults(f func(i int) (a, b int)) {}
+func structResult(f func(i int) (p Pt))   {}
+
+// Pt has two leaves.
+type Pt struct {
+	A, B int
+}
+
+// @Ensures True
+func UsesNoResult() {
+	noResult(func() {}) // want `its calls says that f is deterministic, but f returns nothing` `cannot verify UsesNoResult: `
+}
+
+// SecondChanges returns, second, what an earlier run left.
+//
+// @Ensures True
+func SecondChanges() {
+	c := 0
+	twoResults(func(i int) (a, b int) { // want `vego: the function literal run by twoResults is not proved to return the same result whenever it is called with the same argument`
+		r := c
+		c = i
+		return 1, r
+	})
+}
+
+// FieldChanges returns it in a field.
+//
+// @Ensures True
+func FieldChanges() {
+	c := 0
+	structResult(func(i int) (p Pt) { // want `vego: the function literal run by structResult is not proved to return the same result whenever it is called with the same argument`
+		r := c
+		c = i
+		return Pt{A: 1, B: r}
+	})
+}
+
+// BothFixed returns two results that its argument fixes.
+//
+// @Ensures True
+func BothFixed() {
+	twoResults(func(i int) (a, b int) { return 1, 2 })
+}

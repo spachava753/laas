@@ -892,3 +892,27 @@ trusted:
     calls:
       f(i): {}
     modifies: []
+
+  callbacks.noResult:
+    reason: Test helper that says a function without results is deterministic.
+    runs: [f]
+    calls:
+      f():
+        deterministic: true
+    modifies: []
+
+  callbacks.twoResults:
+    reason: Test helper that relies on both results of f being fixed by its argument.
+    runs: [f]
+    calls:
+      f(i):
+        deterministic: true
+    modifies: []
+
+  callbacks.structResult:
+    reason: Test helper that relies on the result of f being fixed by its argument.
+    runs: [f]
+    calls:
+      f(i):
+        deterministic: true
+    modifies: []

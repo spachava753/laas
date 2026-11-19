@@ -174,6 +174,9 @@ func (pv *pkgVerifier) trustedCall(fn *funcInfo, item trustCall) {
 		fn.defect("its ensures applies %s, whose type %s does not have one integer parameter and one integer or boolean result, "+
 			"which is all that can be applied yet", item.name, param.Type())
 	}
+	if item.deterministic && sig.Results().Len() == 0 {
+		fn.defect("its calls says that %s is deterministic, but %s returns nothing", item.name, item.name)
+	}
 	cb.deterministic = item.deterministic || cb.applied
 	fn.calls[param] = cb
 }
@@ -394,16 +397,16 @@ func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types
 			}
 		}
 		v.forbidden = v.forbidden[:len(v.forbidden)-1]
-		if !cb.deterministic {
-			continue
-		}
 		// The facts of the run are taken once, and both the proof that the
 		// run returns the same result for the same argument and the summary
 		// are made from them.
 		run := ranOnce{head: head, facts: slices.Clip(head.hyps[known:]), made: slices.Clip(v.made[mark:]),
-			given: given, premise: premise, result: results[0][0]}
+			given: given, premise: premise, results: results}
 		for name := range run.produced() {
 			runsMade[name] = true
+		}
+		if !cb.deterministic {
+			continue
 		}
 		v.checkRunNames(run, callMark)
 		if !v.sameEachRun(run, h.arg.Pos(), what, name) || !cb.applied {
@@ -414,8 +417,16 @@ func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types
 		summaries = append(summaries, v.summary(run, applied[param]))
 	}
 	*st = *v.forget(st, eff)
+	// A summary is true in every state that meets the facts at the call,
+	// so it cannot make a state contradictory that was not. If it does,
+	// the summary is wrong, and anything would follow from it; that must
+	// not pass quietly.
+	live := len(summaries) > 0 && !v.quickly(st, nil, logic.False())
 	for _, summary := range summaries {
 		st.assume(summary)
+	}
+	if live && v.quickly(st, nil, logic.False()) {
+		panic("vego: internal error: what is known of the functions handed to " + name + " contradicts what is known at the call")
 	}
 	// A fact about what a run made, outside the existential of a summary,
 	// would be a fact about one hypothetical run, which another could
@@ -465,7 +476,11 @@ func (v *fnVerifier) checkRunNames(run ranOnce, callMark int) {
 	for _, fact := range run.facts {
 		visit(fact)
 	}
-	visit(run.result)
+	for _, result := range run.results {
+		for _, leaf := range result {
+			visit(leaf)
+		}
+	}
 }
 
 
@@ -473,14 +488,14 @@ func (v *fnVerifier) checkRunNames(run ranOnce, callMark int) {
 // relies on to give the same result for the same argument: the state the
 // run ended in, the facts it added to those known at the call, the names
 // made for the state of the run and by the run, the arguments, what was
-// known of them, and the result.
+// known of them, and the results.
 type ranOnce struct {
 	head    *state
 	facts   []*logic.Term
 	made    []string
 	given   []value
 	premise []*logic.Term
-	result  *logic.Term
+	results []value
 }
 
 // produced returns the names a run made, apart from its arguments: the
@@ -514,12 +529,18 @@ func (v *fnVerifier) sameEachRun(run ranOnce, pos token.Pos, what, by string) bo
 	for _, fact := range run.facts {
 		twice.assume(rename(fact))
 	}
-	other := rename(run.result)
-	same := v.same(run.result, other)
-	if run.result.Sort == logic.Bool {
-		same = logic.Iff(run.result, other)
+	var same []*logic.Term
+	for _, result := range run.results {
+		for _, leaf := range result {
+			other := rename(leaf)
+			if leaf.Sort == logic.Bool {
+				same = append(same, logic.Iff(leaf, other))
+			} else {
+				same = append(same, v.same(leaf, other))
+			}
+		}
 	}
-	if result := v.attempt(twice, nil, same); result != solver.Proved {
+	if result := v.attempt(twice, nil, logic.And(same...)); result != solver.Proved {
 		v.report(pos, "%s run by %s is not proved to return the same result whenever it is called with the same argument, "+
 			"which the trusted contract of %s relies on%s", what, by, by, limitNote(result))
 		return false
@@ -571,11 +592,13 @@ func (v *fnVerifier) summary(run ranOnce, returns *logic.Term) *logic.Term {
 		}
 	}
 	facts := slices.Clone(run.facts)
+	// An applied function has one result of a single leaf.
+	result := run.results[0][0]
 	got := logic.Select(returns, run.given[0][0])
-	if run.result.Sort == logic.Bool {
-		facts = append(facts, logic.Iff(got, run.result))
+	if result.Sort == logic.Bool {
+		facts = append(facts, logic.Iff(got, result))
 	} else {
-		facts = append(facts, logic.Eq(got, run.result))
+		facts = append(facts, logic.Eq(got, result))
 	}
 	some := v.someOutcome(facts, made)
 	k := v.bound("k")
