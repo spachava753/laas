@@ -181,7 +181,7 @@ Numbers in formulas are mathematical integers. They do not overflow, so `x + 1` 
 
 `|A|` is the length of a slice or string, or the number of keys in a map. `A[i]` is an element. Fields are written with a dot, including through pointers: `c.count`, `s.items[i]`, `|s.items|`.
 
-Formulas can also use strings and `nil`: `role = "admin"`, `p != nil`, `err = nil`. Two pointers can be compared with each other, as in `a != b`.
+Formulas can also use strings and `nil`: `role = "admin"`, `p != nil`, `err = nil`. Two pointers can be compared with each other, as in `a != b`. Two errors can be compared too, as in `err = ErrEmpty`, and `is(err, ErrEmpty)` says what `errors.Is` reports. See [Saying which error a function returns](#saying-which-error-a-function-returns).
 
 A boolean can be used as a formula on its own, as in `found` or `~found`. It can also be compared with `True` and `False`, as in `found = True`.
 
@@ -202,9 +202,9 @@ There is a short form for a condition on a range of elements. `A[lo:hi) <= x` me
 
 ### Names
 
-A contract can use the function's parameters and results, and the integer and boolean constants of the package. String constants cannot be used by name. Write the string itself.
+A contract can use the function's parameters and results, and the integer and boolean constants of the package. String constants cannot be used by name. Write the string itself. A contract can also name the error variables of the package, as in `ErrEmpty`, and those of an imported package, as in `io.EOF`.
 
-Results are referred to by their names, so every result of a verified function must be named. This guide calls a single result `result`, but you can choose another name. Go does not allow a result to share a name with a parameter, so a name in a contract cannot mean both. Three names are not available for variables that annotations use: `True`, `False`, and `nil`, which are words of the formula language.
+Results are referred to by their names, so every result of a verified function must be named. This guide calls a single result `result`, but you can choose another name. Go does not allow a result to share a name with a parameter, so a name in a contract cannot mean both. Three names are not available for variables that annotations use: `True`, `False`, and `nil`, which are words of the formula language. A predicate cannot be called `is`.
 
 ```text
 vego: Unnamed has annotations, so each of its results needs a name, as in func Unnamed(...) (n int, err error)
@@ -922,7 +922,9 @@ Quantifiers range over integers. A formula can therefore describe all the values
 
 ## Errors
 
-`vego` knows only one thing about an error value: whether it is `nil`. It knows that `errors.New` and `fmt.Errorf` return non-nil errors. It also knows that a package-level variable is non-nil if it is initialised with one of them and never assigned again, as in `var ErrEmpty = errors.New("empty")`.
+`vego` knows two things about an error value: whether it is `nil`, and which error it is. It knows that `errors.New` and `fmt.Errorf` return non-nil errors, and that each call returns a new error that differs from every other.
+
+A package-level variable that is initialised with one of these calls and never assigned again holds that error, as in `var ErrEmpty = errors.New("empty")`. This guide calls such a variable an error variable. The error variables of other packages count too, such as `io.EOF`. [When a package-level error is known](#when-a-package-level-error-is-known) gives the exact conditions.
 
 ### Saying when a function succeeds
 
@@ -959,13 +961,159 @@ To decide, `vego` searches for one example input. The input must satisfy the `Re
 - pointers to structs, followed at most two levels deep;
 - maps with a single key, whose value can be a pointer to a struct.
 
-Z3 picks the numbers in an example: lengths, elements, fields, keys, and whether an error is `nil`. `vego` then proves both facts about the example before it accepts it.
+Z3 picks the numbers in an example: lengths, elements, fields, and keys. It also picks each error. An error in an example is `nil`, an error of its own, the same error as another error of the example, or an error variable that the contract names. `vego` then proves both facts about the example before it accepts it.
 
 When Z3 shows that no input at all can force success, the message says `it requires success for no input` instead. The contract then needs a clause that says when the function succeeds.
 
 The search is enough for most contracts. If your contract does state when the function succeeds and you still get `no simple input was found`, there are two possible causes. Either every succeeding input lies outside the shapes above, for example because success needs a slice with two different elements. Or the prover could not show that a suitable example satisfies the `Requires` clauses or that the `Ensures` clauses force success. That can happen when the clauses involve non-trivial arithmetic.
 
 In both cases, add a clause that some simple input clearly satisfies, such as `|A| = 0 -> err = nil`. An `Assert` cannot help, because this check does not involve the function body.
+
+### Saying which error a function returns
+
+A contract can say which error a function returns.
+
+```go
+// @Ensures err = nil <-> |A| > 0
+// @Ensures err = ErrEmpty <-> |A| = 0
+// @Ensures err = nil -> first = A[0]
+func Peek(A []int) (first int, err error) {
+	if len(A) == 0 {
+		return 0, ErrEmpty
+	}
+	return A[0], nil
+}
+```
+
+In a formula, `err = ErrEmpty` means that `err` is the same error as `ErrEmpty`. This is what `err == ErrEmpty` tests in Go. A contract can name the error variables of its own package, and those of an imported package by the package name, as in `io.EOF`.
+
+The second clause alone does not say when `Peek` succeeds. A function that always returns another error would meet it, so the first clause is still needed. See [Saying when a function succeeds](#saying-when-a-function-succeeds).
+
+A caller can compare the error with the error variable:
+
+```go
+// @Ensures v = 0 <-> (|A| = 0 Or A[0] = 0)
+func PeekOrZero(A []int) (v int) {
+	first, err := Peek(A)
+	if err == ErrEmpty {
+		return 0
+	}
+	return first
+}
+```
+
+The same works with an error variable of another package:
+
+```go
+// @Requires 0 <= i
+// @Ensures err = nil <-> i < |s|
+// @Ensures err = io.EOF <-> i >= |s|
+// @Ensures err = nil -> b = s[i]
+func Next(s string, i int) (b byte, err error) {
+	if i >= len(s) {
+		return 0, io.EOF
+	}
+	return s[i], nil
+}
+
+// @Requires 0 <= i
+// @Ensures end <-> i >= |s|
+func AtEnd(s string, i int) (end bool) {
+	_, err := Next(s, i)
+	return err == io.EOF
+}
+```
+
+A `switch` on an error works the same way, as in `switch err { case io.EOF: ... }`.
+
+### Comparing errors
+
+Go's `==` on two error values panics when both hold the same type and that type is not comparable, such as a slice type with an `Error` method. So `vego` accepts `==`, `!=`, and the cases of a `switch` on errors only when one of the two errors is one of these:
+
+- `nil`;
+- an error variable, of this package or another;
+- an error made by `errors.New` or `fmt.Errorf`, here or in a verified function that returns nothing else.
+
+A comparison with `nil` cannot panic, and the errors in the other two kinds are pointers, so a comparison with them cannot panic either. Comparing two errors of which nothing is known is reported:
+
+```go
+// @Ensures True
+func SameError(a, b error) (same bool) {
+	return a == b
+}
+```
+
+```text
+vego: cannot verify SameError: comparing two errors can panic when both hold the same
+uncomparable type; one of them must be nil, a package-level error variable, or an error
+made by errors.New or fmt.Errorf
+```
+
+Compare one of them with an error variable instead, or ask `errors.Is`.
+
+`vego` knows that a new error differs from every error variable and from every other error the function made. It does not know that a new error differs from an error that was passed in or that a call returned, although in Go it always does.
+
+### Asking errors.Is
+
+`errors.Is(err, target)` reports whether `err`, or an error that `err` wraps, is `target`. In a formula, `is(err, target)` means that `errors.Is(err, target)` reports true.
+
+```go
+// @Ensures err = nil <-> |A| > 0
+// @Ensures is(err, ErrEmpty) <-> |A| = 0
+func PeekLabelled(A []int) (first int, err error) {
+	first, err = Peek(A)
+	if err != nil {
+		return 0, fmt.Errorf("peek: %w", err)
+	}
+	return first, nil
+}
+
+// @Ensures empty <-> |A| = 0
+func Empty(A []int) (empty bool) {
+	_, err := PeekLabelled(A)
+	return errors.Is(err, ErrEmpty)
+}
+```
+
+`vego` knows what `errors.Is` finds in an error made by `errors.New` or `fmt.Errorf`. It finds the error itself and, when `fmt.Errorf` wraps an error with `%w`, whatever it finds in the wrapped error. `%v` does not wrap, so with `%v` in place of `%w` in `PeekLabelled` the contract is not proved:
+
+```go
+return 0, fmt.Errorf("peek: %v", err)
+```
+
+```text
+vego: postcondition may not hold: is(err, ErrEmpty) <-> |A| = 0
+```
+
+To know what an error wraps, `vego` reads the format of `fmt.Errorf`. It does not know what `errors.Is` finds in the error when the call has an error operand and the format has any of these:
+
+- the format is not a constant;
+- it has more than one `%w`;
+- it has an argument index, as in `%[1]w`, or a width or precision taken from an operand, as in `%*d`;
+- it has a width or precision of seven digits or more.
+
+Such an error still has a known origin. It can be returned, compared, and formatted as before. A claim about what `errors.Is` finds in it is not proved, whether the claim says that `errors.Is` finds the target or that it does not.
+
+The same holds for an error variable made by `fmt.Errorf`. `vego` knows what `errors.Is` finds in `var ErrRead = fmt.Errorf("read: %w", io.EOF)`, also in other packages.
+
+For an error that a verified function returns, the caller knows only what the function's contract says. The contract of `PeekLabelled` says nothing about `ErrRange`. A caller can therefore prove neither that `errors.Is(err, ErrRange)` is true for its error nor that it is false.
+
+`errors.Is` calls the `Is` and `Unwrap` methods of the error it searches. That error must therefore have a known origin, in the same sense as for formatting. See [Wrapping errors](#wrapping-errors). The target can be any error, because `errors.Is` calls no method of the target.
+
+```go
+// @Ensures True
+func IsEmpty(err error) (result bool) {
+	return errors.Is(err, ErrEmpty)
+}
+```
+
+```text
+vego: cannot verify IsEmpty: errors.Is would run the Is and Unwrap methods of err, an
+error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or
+in a verified function, can be its first argument
+```
+
+An error that a trusted function returns has no known origin, so `errors.Is(err, io.EOF)` on it is reported. You can compare it with `==` instead, as in `err == io.EOF`, which runs no method. That comparison is true only when the function returned `io.EOF` itself, and not when it returned an error that wraps `io.EOF`.
 
 ### Functions that cannot promise success
 
@@ -997,7 +1145,7 @@ This check can miss a weak contract. When the path to the call depends on values
 
 ### Wrapping errors
 
-`fmt.Errorf` can format numbers, booleans, strings, and slices of them, when their types have no methods. It can also format errors that verified code created with `errors.New` or `fmt.Errorf`. A value whose type has methods, such as a string type with a `String` method, is rejected, because formatting it may call them.
+`fmt.Errorf` can format numbers, booleans, strings, and slices of them, when their types have no methods. It can also format an error of known origin. Such an error was made by `errors.New` or `fmt.Errorf`, in verified code or in the initialiser of an error variable, and nothing went into it but such values and other errors of known origin. `io.EOF` and the error variables of verified packages qualify. A value whose type has methods, such as a string type with a `String` method, is rejected, because formatting it may call them.
 
 It cannot format an error that came from a trusted function or from a parameter. Formatting an error calls its methods, and `vego` cannot see what the methods of an unknown error do. For the same reason, such an error cannot be passed to a trusted function unless that function's contract allows it. See [Arguments that carry code](#arguments-that-carry-code).
 
@@ -1021,7 +1169,14 @@ return 0, fmt.Errorf("bad quantity %q: %w", line, ErrRange)
 
 ### Other limits
 
-`vego` does not know which error a value is. Two errors cannot be compared with `==`. `errors.Is` and `errors.As` are not supported, so a contract cannot say "returns `ErrEmpty` when the slice is empty". `errors.Is` can call the `Is` and `Unwrap` methods of the error it receives, and `errors.As` can call its `As` and `Unwrap` methods. A trusted contract for them could therefore accept errors from outside only by listing its parameters under `runs`, as described in [Arguments that carry code](#arguments-that-carry-code). Even then, nothing would be known about the result. An error variable from another package, such as `io.EOF`, cannot be read.
+These are not supported, and a function that uses one is reported as `cannot verify`:
+
+- `errors.As`, which needs typed errors;
+- `errors.Join` and `errors.Unwrap`;
+- `errors.Is` on an error that came from a parameter or a trusted function;
+- an error variable that is not initialised with `errors.New` or `fmt.Errorf`, or that is assigned, such as `os.ErrNotExist`, which holds another variable.
+
+A struct invariant cannot name an error variable.
 
 Only an error or `nil` can be converted to `error`. A value of another type is rejected even if it has an `Error` method:
 
@@ -1042,7 +1197,7 @@ vego: cannot verify AsError: converting a guide.CodeError to an error is not sup
 
 ### When a package-level error is known
 
-A package-level error is known to be non-nil only under these conditions. Nothing in its package assigns to it or takes its address. And no code in the package can run before the variable is initialised.
+An error variable of your own package holds the error it was declared with under these conditions. Nothing in the package assigns to it or takes its address. And no code in the package can run before the variable is initialised.
 
 Go initialises the variables of a package in an order it works out from their dependencies. Code of the package can still run earlier if an initialiser hands something to code that Go's ordering does not see. The package then loses what it knew about all its error variables. That happens when the initialiser of any package-level variable does one of these things:
 
@@ -1054,7 +1209,7 @@ Go initialises the variables of a package in an order it works out from their de
 - sends on a channel;
 - passes something of the package to `append`, `copy`, or `panic`.
 
-A value whose type cannot hold code, such as a number or a string, does not count. `vego` reports the error where the variable is read and names what ran:
+A value whose type cannot hold code, such as a number or a string, does not count. `vego` reports the error where the variable is read, or named in a contract, and names what ran:
 
 ```text
 vego: cannot verify Ok: ErrX is not known to have its value yet when this runs: a function
@@ -1062,14 +1217,32 @@ value or an interface method is called at early.go:24 while the variables of the
 are initialised, which may run this function first
 ```
 
-Another package can also assign to an exported error variable. If `laas` analyses that package in the same run, it reports the assignment:
+For an error variable of another package, only the first condition matters. Go initialises a package before any code of the packages that import it runs. `vego` reads the source of every package your package is built with, the standard library included. So `io.EOF` holds the error it was declared with in your package because nothing in package `io` assigns to it.
+
+A package can also assign to an error variable of another package. A package that does so cannot rely on that variable:
 
 ```text
-vego: lib.ErrGone may be changed here, but proofs in package lib rely on it being the
-error it was declared with
+vego: cannot verify Gone: gonelib.ErrGone is changed at gonemid.go:6 in package gonemid,
+which this package is built with, so it is not known to hold the error it was declared with
 ```
 
-A package that `laas` does not analyse is assumed not to do this. See [What a proof assumes](#what-a-proof-assumes).
+Your package gets this message when it is built with the package that assigns, directly or through another package. It gets it as well when the variable that is assigned went into the error variable that your package reads, as `io.EOF` goes into `fmt.Errorf("read: %w", io.EOF)`.
+
+A proof in another package may rely on the variable all the same. `laas` reports the assignment in every package it runs on that is built with both the assignment and that proof:
+
+```text
+vego: gonelib.ErrGone may be changed here, but proofs in package gonelib rely on it being
+the error it was declared with
+```
+
+```text
+vego: gonelib.ErrGone is changed at gonemid.go:6 in package gonemid, which this package is
+built with, but proofs in package gonelib rely on it being the error it was declared with
+```
+
+The first message is at the assignment, in the package that assigns. The second is at the `package` clause of a package that imports both, directly or not.
+
+A package that none of the packages `laas` runs on is built with is not seen. See [What a proof assumes](#what-a-proof-assumes).
 
 ## Defer
 
@@ -1251,7 +1424,7 @@ contract holds whatever that code does, list e under runs in the contract
 
 There are three ways to deal with this.
 
-The first is to pass an error that verified code created with `errors.New` or `fmt.Errorf`. Such an error has only the standard library's methods and wraps nothing from outside. A package-level error also qualifies if its initialiser used only plain values and other errors of this kind. `var ErrRead = fmt.Errorf("read: %w", io.EOF)` does not qualify, because it wraps an error from another package.
+The first is to pass an error that verified code created with `errors.New` or `fmt.Errorf`. Such an error has only the standard library's methods and wraps nothing from outside. An error variable also qualifies if its initialiser used only plain values and other errors of this kind, in its own package or another. `var ErrRead = fmt.Errorf("read: %w", io.EOF)` qualifies. `var ErrMissing = fmt.Errorf("missing: %w", os.ErrNotExist)` does not, because `os.ErrNotExist` is initialised with another variable and not with `errors.New`.
 
 The second is to make the call from unverified code. This is the right choice for logging an error that came from elsewhere. The unverified caller logs the error, and the verified function only returns it.
 
@@ -1437,8 +1610,12 @@ This table lists the most common messages.
 | `the slices passed to F as a and b may overlap` | Two slice arguments with the same element type are not proved to be separate memory. | Pass two slice parameters of your own function, or a slice that the function allocated. No formula can yet state that two slices share no memory, so a slice stored in a struct cannot be proved separate from a parameter. |
 | `cannot verify F: it calls G, which has no contract` | `G` is neither verified nor trusted. | Annotate `G`, or add it to the trust file. |
 | `cannot verify F: parameter x has unsupported type T` | `T` is outside the supported subset. | Keep `T` out of the signatures of verified functions. |
-| `cannot verify F: x is not a local variable` | `F` uses a package-level variable. | Pass the value as a parameter. |
+| `cannot verify F: x is not a local variable` | `F` uses a package-level variable that is not an error variable. | Pass the value as a parameter. |
 | `cannot verify F: formatting err would run the methods of an error whose origin is not known` | `fmt.Errorf` is given an error whose origin is not known, such as one from a trusted function or a parameter. | Return the error unchanged, or wrap your own error. |
+| `cannot verify F: comparing two errors can panic when both hold the same uncomparable type` | Neither error is `nil`, an error variable, or an error made by `errors.New` or `fmt.Errorf`. | Compare one of them with an error variable instead. See [Comparing errors](#comparing-errors). |
+| `cannot verify F: errors.Is would run the Is and Unwrap methods of err, an error whose origin is not known` | `errors.Is` is asked about an error from a parameter or a trusted function. | Compare it with an error variable using `==`. See [Asking errors.Is](#asking-errorsis). |
+| `x.E is a variable of package x that is not known to hold the error it was declared with` | The variable is not initialised with `errors.New` or `fmt.Errorf`, or its package assigns it. | Use another error variable, or leave the comparison to unverified code. |
+| `x.E is changed at f.go:n in package p, which this package is built with` | A package in the build assigns the error variable, or one that went into it. | Remove the assignment. See [When a package-level error is known](#when-a-package-level-error-is-known). |
 | `x is passed to F, which is trusted, and is an error whose origin is not known` (or `a value of type T, which can hold an error, an interface, or a function`) | The trusted function `F` could call code that `x` carries. | See [Arguments that carry code](#arguments-that-carry-code). |
 | `the trusted contract of F cannot be true of this call` | The contract contradicts what is known at the call. | The entry is wrong, or it needs a `requires` clause. |
 | `the trusted contract ... cannot be used` | The entry in the trust file is invalid. The message says why. | Fix the entry. Check the parameter names. |
@@ -1456,13 +1633,13 @@ A function that uses any of the following is reported as `cannot verify`:
 - goroutines, channels, and `select`;
 - arrays, and structs that contain an array;
 - pointers to anything other than a struct;
-- package-level variables, except error variables initialised with `errors.New` or `fmt.Errorf` and never assigned;
+- package-level variables, except error variables initialised with `errors.New` or `fmt.Errorf` and never assigned, of this package or another;
 - calls to variadic functions other than `fmt.Errorf`;
 - `append(s, t...)` and `copy`;
 - a modifying call inside a condition or a larger expression, as in `if !s.Push(x)` (see [Where a modifying call can appear](#where-a-modifying-call-can-appear));
-- comparing structs or errors with `==`;
-- `errors.Is` and `errors.As`;
-- reading an error variable of another package, such as `io.EOF`;
+- comparing structs with `==`;
+- comparing two errors with `==` when neither is `nil`, an error variable, or an error made by `errors.New` or `fmt.Errorf` (see [Comparing errors](#comparing-errors));
+- `errors.As`, `errors.Join`, `errors.Unwrap`, and `errors.Is` on an error whose origin is not known (see [Asking errors.Is](#asking-errorsis));
 - a `range` over a map whose body modifies a map of the same type;
 - `goto`, `fallthrough`, labelled `break` and `continue`, and `defer` inside a loop.
 
@@ -1476,7 +1653,8 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type.
 - Unverified code respects Go's type system. It does not use `unsafe`, `reflect`, or cgo to give one piece of memory two types or to change a string.
 - No other goroutine writes memory that a verified function reads or writes while it runs. A proof covers one goroutine.
-- Packages that `laas` does not analyse do not reassign exported error variables. A package that `laas` analyses and that does this is reported.
+- No code outside the packages that a verified package is built with assigns an error variable that a proof relies on, and no code changes one through `go:linkname`, assembly, `unsafe`, or `reflect`. An assignment in a package that it is built with is found: the package does not rely on the variable, and the assignment is reported wherever it meets a proof that does.
+- `errors.New`, `fmt.Errorf`, and `errors.Is` behave as they do in the Go releases that `laas` is tested with. Each call of `errors.New` or `fmt.Errorf` returns a new pointer. The errors they return have no `Is` method. `Unwrap` returns the operand of the one `%w`. `errors.Is` finds an error, or an error it wraps, that is the target. The tests of `vego` check this against the running toolchain.
 - The program runs on the platform `laas` was run for. The sizes of `int`, `uint`, and pointers, the layout of structs, and `MaxAlloc` are those of the `GOOS` and `GOARCH` that `laas` runs with. A proof for a 64-bit target does not hold for a 32-bit target.
 - The program is built from the files `laas` read. Files left out by a build constraint or a file name such as `_windows.go` are not read, so their annotations are not checked. Run `laas` once for each configuration you ship.
 - The machine has enough memory and stack.
@@ -1516,6 +1694,9 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `Forall k in [a, b) : P`, `Exists k in [a, b] : P` | quantifiers over an interval |
 | `Forall k in Z : P` | quantifier over all integers |
 | `"text"`, `nil` | a string; the nil pointer or nil error |
+| `ErrEmpty`, `io.EOF` | an error variable of the package, or of an imported package |
+| `err = ErrEmpty` | the two are the same error |
+| `is(err, target)` | `errors.Is(err, target)` reports true |
 | `has(m, k)` | the map contains the key |
 | `name(x, y)` | a predicate |
 

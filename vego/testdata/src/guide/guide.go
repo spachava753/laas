@@ -5,6 +5,7 @@ package guide
 import (
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"sync"
 )
@@ -354,6 +355,100 @@ func ParsePort(s string) (port int, err error) {
 	return n, nil
 }
 
+// Peek says which error it returns, and when.
+//
+// @Ensures err = nil <-> |A| > 0
+// @Ensures err = ErrEmpty <-> |A| = 0
+// @Ensures err = nil -> first = A[0]
+func Peek(A []int) (first int, err error) {
+	if len(A) == 0 {
+		return 0, ErrEmpty
+	}
+	return A[0], nil
+}
+
+// PeekOrZero compares the error with a package-level error variable.
+//
+// @Ensures v = 0 <-> (|A| = 0 Or A[0] = 0)
+func PeekOrZero(A []int) (v int) {
+	first, err := Peek(A)
+	if err == ErrEmpty {
+		return 0
+	}
+	return first
+}
+
+// Next returns io.EOF at the end of the string.
+//
+// @Requires 0 <= i
+// @Ensures err = nil <-> i < |s|
+// @Ensures err = io.EOF <-> i >= |s|
+// @Ensures err = nil -> b = s[i]
+func Next(s string, i int) (b byte, err error) {
+	if i >= len(s) {
+		return 0, io.EOF
+	}
+	return s[i], nil
+}
+
+// AtEnd compares with an error variable of another package.
+//
+// @Requires 0 <= i
+// @Ensures end <-> i >= |s|
+func AtEnd(s string, i int) (end bool) {
+	_, err := Next(s, i)
+	return err == io.EOF
+}
+
+// SameError compares two errors of which nothing is known.
+//
+// @Ensures True
+func SameError(a, b error) (same bool) {
+	return a == b // want `vego: cannot verify SameError: comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, a package-level error variable, or an error made by errors.New or fmt.Errorf`
+}
+
+// PeekLabelled wraps the error of Peek, so that errors.Is still finds
+// ErrEmpty in it.
+//
+// @Ensures err = nil <-> |A| > 0
+// @Ensures is(err, ErrEmpty) <-> |A| = 0
+func PeekLabelled(A []int) (first int, err error) {
+	first, err = Peek(A)
+	if err != nil {
+		return 0, fmt.Errorf("peek: %w", err)
+	}
+	return first, nil
+}
+
+// PeekLabelledWrong formats the error with %v, which does not wrap it.
+//
+// @Ensures err = nil <-> |A| > 0
+// @Ensures is(err, ErrEmpty) <-> |A| = 0
+func PeekLabelledWrong(A []int) (first int, err error) {
+	first, err = Peek(A)
+	if err != nil {
+		return 0, fmt.Errorf("peek: %v", err) // want `vego: postcondition may not hold: is\(err, ErrEmpty\) <-> \|A\| = 0`
+	}
+	return first, nil
+}
+
+// Empty asks errors.Is about an error of known origin.
+//
+// @Ensures empty <-> |A| = 0
+func Empty(A []int) (empty bool) {
+	_, err := PeekLabelled(A)
+	return errors.Is(err, ErrEmpty)
+}
+
+// EmptyRange asks about an error variable that the contract of
+// PeekLabelled does not mention.
+//
+// @Ensures ~ranged
+func EmptyRange(A []int) (ranged bool) {
+	_, err := PeekLabelled(A)
+	return errors.Is(err, ErrRange) // want `vego: postcondition may not hold: ~ranged`
+}
+
 // Lock is held or not.
 type Lock struct{ held bool }
 
@@ -636,7 +731,7 @@ func Quantity(line string) (n int, err error) {
 //
 // @Ensures True
 func IsEmpty(err error) (result bool) {
-	return errors.Is(err, ErrEmpty) // want `vego: cannot verify IsEmpty: errors.Is would run the Is and Unwrap methods of err, an error whose origin is not known`
+	return errors.Is(err, ErrEmpty) // want `vego: cannot verify IsEmpty: errors.Is would run the Is and Unwrap methods of err, an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, can be its first argument`
 }
 
 var calls int
