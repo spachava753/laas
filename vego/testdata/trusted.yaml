@@ -647,3 +647,18 @@ trusted:
   funcvalues.logErr:
     reason: Test helper that is given an error and does not say it runs it.
     modifies: []
+
+  keeper.Keep:
+    reason: >-
+      Test helper. Its entry is false: runs claims that Keep keeps no value
+      that can hold code once it returns, and Keep keeps e for Flush.
+    runs: [e]
+    modifies: []
+
+  keeper.KeepUnlisted:
+    reason: Test helper that keeps the error it is given.
+    modifies: []
+
+  keeper.Flush:
+    reason: Test helper that runs a method of the kept error.
+    modifies: []
