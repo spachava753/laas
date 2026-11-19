@@ -6,9 +6,12 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/analysis/checker"
+	"golang.org/x/tools/go/packages"
 )
 
 // TestInAnalysedModule checks which packages count as packages of the
@@ -55,5 +58,50 @@ func TestInAnalysedModule(t *testing.T) {
 				t.Fatalf("got %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+// TestTypeEntriesInUse checks which entries for types the analysis of the
+// corpus foreign reports as relied on: those that proofs use, and none
+// that cannot be used, since every use of such an entry is an error.
+func TestTypeEntriesInUse(t *testing.T) {
+	analyzer := newAnalyzer()
+	if err := analyzer.Flags.Set("trusted", filepath.Join("testdata", "trusted.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	testdata, err := filepath.Abs("testdata")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := &packages.Config{
+		Mode: packages.LoadAllSyntax,
+		Dir:  filepath.Join(testdata, "src"),
+		Env:  append(os.Environ(), "GOPATH="+testdata, "GO111MODULE=off", "GOPROXY=off", "GOWORK=off"),
+	}
+	loaded, err := packages.Load(config, "foreign")
+	if err != nil || packages.PrintErrors(loaded) > 0 {
+		t.Fatalf("load: %v", err)
+	}
+	graph, err := checker.Analyze([]*analysis.Analyzer{analyzer}, loaded, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage := graph.Roots[0].Result.(*Usage)
+	var keys []string
+	for _, use := range usage.Entries {
+		if use.Every != "" {
+			keys = append(keys, use.Key)
+		}
+	}
+	slices.Sort(keys)
+	for _, want := range []string{"(foreignlib.Filler).Fill", "(foreignlib.Sink).Put", "(foreignlib.Source).Next", "foreignlib.Hook", "foreignlib.Mapper"} {
+		if !slices.Contains(keys, want) {
+			t.Errorf("%s is not among the entries in use: %v", want, keys)
+		}
+	}
+	for _, unusable := range []string{"(foreignlib.Opener).Open", "foreign.Local", "foreignlib.Half", "foreignlib.Runs"} {
+		if slices.Contains(keys, unusable) {
+			t.Errorf("%s cannot be used, and is among the entries in use: %v", unusable, keys)
+		}
 	}
 }

@@ -30,7 +30,8 @@ import (
 // contract is read and checked once per package; a fault in it is a defect,
 // reported where it is used. Looking it up records that the proofs of the
 // package rely on it, so that two entries for one type in a build are
-// found (see the check of fingerprints), whatever made the proof look.
+// found (see the check of fingerprints), whatever made the proof look. An
+// entry that cannot be used is not recorded: every use of it is an error.
 func (pv *pkgVerifier) typeEntry(key string, obj *types.Func, methodOf *types.Func, valueOf *types.TypeName) *funcInfo {
 	if fn, done := pv.typeEntries[key]; done {
 		return fn
@@ -66,7 +67,11 @@ func (pv *pkgVerifier) typeEntry(key string, obj *types.Func, methodOf *types.Fu
 	}
 	pv.readVouches(fn, entry, false)
 	pv.checkValueContract(fn)
-	pv.noteUse(fn, token.NoPos)
+	// A contract that cannot be used makes every use of it an error, so
+	// no proof rests on it.
+	if !fn.broken {
+		pv.noteUse(fn, token.NoPos)
+	}
 	return fn
 }
 

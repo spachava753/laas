@@ -93,7 +93,7 @@ func Nothing() (h foreignlib.Hook) {
 // @Modifies b
 // @Ensures h != nil
 func Writes(b *Box) (h foreignlib.Hook) {
-	return func() { b.N = 1 } // want `b.N is assigned, which Hook may not modify`
+	return func() { b.N = 1 } // want `b.N is assigned, which Hook may not modify; the entry foreignlib.Hook in the trust file does not list it`
 }
 
 // ErrFull is an error of this package with the name of foreignlib's.
@@ -115,4 +115,35 @@ func FailsWrong() (f foreignlib.Fails) {
 // @Ensures True
 func NoBareEntry(c foreignlib.Ctx) (b foreignlib.Bare) {
 	return nil
+}
+
+// scribble lists p, which the entry of Copy does not.
+type scribble struct{}
+
+// @Modifies p
+// @Ensures n = |p|
+func (scribble) Copy(p []int) (n int) {
+	if len(p) > 0 {
+		p[0] = 0
+	}
+	return len(p)
+}
+
+// @Ensures c != nil
+func Scribbles() (c foreignlib.Copier) {
+	return scribble{} // want `Copy may modify p, which Copier.Copy may not modify; the entry \(foreignlib.Copier\).Copy in the trust file does not list it, so code that writes it cannot be used there, in scribble.Copy used as a method of foreignlib.Copier`
+}
+
+// Clear has a contract in source without Modifies.
+//
+// @Ensures True
+type Clear func(p []int)
+
+// @Ensures c != nil
+func Clears() (c Clear) {
+	return func(p []int) {
+		if len(p) > 0 {
+			p[0] = 0 // want `p\[0\] is assigned, which Clear may not modify; the contract of Clear does not list it, so code that writes it cannot be used there, in the function literal used as a value of type Clear`
+		}
+	}
 }

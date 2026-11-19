@@ -554,6 +554,15 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 		switch {
 		case remedy != "":
 			v.report(pos, "%s, which %s may not modify; %s%s", what, v.fn.obj.Name(), remedy, limitNote(result))
+		case len(candidates) == 0 && (v.fn.spelling().valueOf != nil || v.fn.spelling().methodOf != nil):
+			// What is checked against the contract of a type cannot add to
+			// it: the clause it would need is in the contract.
+			contract := "the contract of " + v.fn.obj.Name()
+			if entry := v.fn.spelling().trust; entry != nil {
+				contract = "the entry " + entry.key + " in the trust file"
+			}
+			v.report(pos, "%s, which %s may not modify; %s does not list it, so code that writes it cannot be used there%s",
+				what, v.fn.obj.Name(), contract, limitNote(result))
 		case len(candidates) == 0:
 			v.report(pos, "%s, which %s may not modify; list it in a // @Modifies clause%s", what, v.fn.obj.Name(), limitNote(result))
 		default:

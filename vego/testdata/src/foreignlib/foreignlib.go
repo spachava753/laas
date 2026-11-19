@@ -77,3 +77,8 @@ type Opener interface {
 // Done is called with nothing, and fails with an error its entry vouches
 // for.
 type Done func() (err error)
+
+// Copier copies from a slice.
+type Copier interface {
+	Copy(p []int) (n int)
+}

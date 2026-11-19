@@ -1140,3 +1140,7 @@ trusted:
     reason: Lists a parameter under vouches whose memory holds nothing to vouch for.
     vouches: [b]
     modifies: [b]
+
+  (foreignlib.Copier).Copy:
+    reason: Does not write the slice it copies from.
+    modifies: []
