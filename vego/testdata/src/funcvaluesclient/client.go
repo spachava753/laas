@@ -32,3 +32,75 @@ func TooFar(s funcvalueslib.Step) (y int) {
 func UsesUnread(op funcvaluesunread.Op) (y int) {
 	return op(1) // want `vego: the contract of Op cannot be used: the annotations of package funcvaluesunread were not all read` `cannot verify UsesUnread: the contract of Op could not be understood`
 }
+
+// Each caller of a function of another package that calls through a value
+// may make such a call too, whichever is looked at first.
+
+// idStep takes a step of nothing.
+//
+// @Requires 0 <= x <= 100
+// @Ensures x <= y <= x + 100
+func idStep(x int) (y int) {
+	return x
+}
+
+// viaRunA takes a step through Run.
+//
+// @Requires 0 <= x <= 100
+// @Ensures x <= y <= x + 100
+func viaRunA(x int) (y int) {
+	return funcvalueslib.Run(idStep, x)
+}
+
+// viaRunB takes a step through Run too.
+//
+// @Requires 0 <= x <= 100
+// @Ensures x <= y <= x + 100
+func viaRunB(x int) (y int) {
+	return funcvalueslib.Run(idStep, x)
+}
+
+// BothA uses viaRunA as a value.
+//
+// @Ensures s != nil
+func BothA() (s funcvalueslib.Step) {
+	return viaRunA // want `vego: cannot verify BothA: viaRunA may call through a function value`
+}
+
+// BothB uses viaRunB as a value.
+//
+// @Ensures s != nil
+func BothB() (s funcvalueslib.Step) {
+	return viaRunB // want `vego: cannot verify BothB: viaRunB may call through a function value`
+}
+
+// First hands a step on to Run.
+//
+// @Requires s != nil
+// @Ensures True
+func First(s funcvalueslib.Step) (r int) {
+	return funcvalueslib.Run(s, 1)
+}
+
+// helper takes a step by looping back through loop, which hands helper to
+// Run: helper(5) calls loop(4), which calls helper(5) again through Run.
+//
+// @Requires 0 <= x <= 100
+// @Variant x
+// @Ensures x <= y <= x + 100
+func helper(x int) (y int) {
+	if x == 0 {
+		return 0
+	}
+	loop(x - 1)
+	return x
+}
+
+// loop hands helper to Run.
+//
+// @Requires 0 <= x <= 99
+// @Variant x
+// @Ensures True
+func loop(x int) (r int) {
+	return funcvalueslib.Run(helper, x+1) // want `vego: cannot verify loop: helper may call through a function value`
+}

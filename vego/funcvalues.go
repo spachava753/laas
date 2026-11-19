@@ -556,11 +556,16 @@ func (pv *pkgVerifier) mayCallValues(obj *types.Func) bool {
 // runs says.
 func (pv *pkgVerifier) findValueCallers() {
 	calls := map[*types.Func][]*types.Func{}
+	// local holds the functions judged by their bodies here. It is kept
+	// apart from mayCall, which also caches what other functions are
+	// judged to do as they are asked about.
+	local := map[*types.Func]bool{}
 	var pending []*types.Func
 	for _, fn := range pv.order {
 		if fn.decl.Body == nil {
 			continue
 		}
+		local[fn.obj] = true
 		direct := false
 		if trusted := pv.trustedContract(fn.obj); trusted != nil {
 			for param := range trusted.runs {
@@ -602,7 +607,7 @@ func (pv *pkgVerifier) findValueCallers() {
 	callers := map[*types.Func][]*types.Func{}
 	for caller, callees := range calls {
 		for _, callee := range callees {
-			if _, local := pv.mayCall[callee]; !local && pv.mayCallValues(callee) {
+			if !local[callee] && pv.mayCallValues(callee) {
 				if !pv.mayCall[caller] {
 					pv.mayCall[caller] = true
 					pending = append(pending, caller)
