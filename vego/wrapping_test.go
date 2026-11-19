@@ -119,12 +119,13 @@ func TestErrorsAsModelled(t *testing.T) {
 	// the format is not a constant here.
 	onInt := "x: %w"
 	made := map[string]func() error{
-		"errors.New":                func() error { return errors.New("x") },
-		"fmt.Errorf without %w":     func() error { return fmt.Errorf("x %d", 1) },
-		"fmt.Errorf with %w":        func() error { return fmt.Errorf("x: %w", base) },
-		"fmt.Errorf with %w on nil": func() error { return fmt.Errorf("x: %w", error(nil)) },
-		"fmt.Errorf with %w on 1":   func() error { return fmt.Errorf(onInt, 1) },
-		"fmt.Errorf with two %w":    func() error { return fmt.Errorf("x: %w %w", base, base) },
+		"errors.New":                 func() error { return errors.New("x") },
+		"fmt.Errorf without %w":      func() error { return fmt.Errorf("x %d", 1) },
+		"fmt.Errorf of a plain text": func() error { return fmt.Errorf("x") },
+		"fmt.Errorf with %w":         func() error { return fmt.Errorf("x: %w", base) },
+		"fmt.Errorf with %w on nil":  func() error { return fmt.Errorf("x: %w", error(nil)) },
+		"fmt.Errorf with %w on 1":    func() error { return fmt.Errorf(onInt, 1) },
+		"fmt.Errorf with two %w":     func() error { return fmt.Errorf("x: %w %w", base, base) },
 	}
 	for name, make := range made {
 		t.Run(name, func(t *testing.T) {
@@ -150,11 +151,12 @@ func TestErrorsAsModelled(t *testing.T) {
 		err  error
 		want error
 	}{
-		"errors.New":                {errors.New("x"), nil},
-		"fmt.Errorf without %w":     {fmt.Errorf("x %v", base), nil},
-		"fmt.Errorf with %w":        {fmt.Errorf("x: %w", base), base},
-		"fmt.Errorf with %w on nil": {fmt.Errorf("x: %w", error(nil)), nil},
-		"fmt.Errorf with %w on 1":   {fmt.Errorf(onInt, 1), nil},
+		"errors.New":                 {errors.New("x"), nil},
+		"fmt.Errorf without %w":      {fmt.Errorf("x %v", base), nil},
+		"fmt.Errorf of a plain text": {fmt.Errorf("x"), nil},
+		"fmt.Errorf with %w":         {fmt.Errorf("x: %w", base), base},
+		"fmt.Errorf with %w on nil":  {fmt.Errorf("x: %w", error(nil)), nil},
+		"fmt.Errorf with %w on 1":    {fmt.Errorf(onInt, 1), nil},
 	}
 	for name, test := range unwrapped {
 		if got := errors.Unwrap(test.err); got != test.want {

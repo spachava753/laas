@@ -159,3 +159,26 @@ func Deferred() {
 func WrappedFull() (b bool) {
 	return errors.Is(ErrWrapped, ErrFull) // want `vego: postcondition may not hold: b`
 }
+
+// NilWrappedIsNil claims errors.Is reports true for an error that wraps a
+// nil error and the target nil. Unwrap returns the nil error, at which
+// errors.Is stops.
+//
+// @Ensures b
+func NilWrappedIsNil() (b bool) {
+	var none error
+	e := fmt.Errorf("x: %w", none)
+	if errors.Is(e, nil) {
+		return true
+	}
+	return false // want `vego: postcondition may not hold: b`
+}
+
+// NotItself claims errors.Is does not find an error that wraps another in
+// itself.
+//
+// @Ensures b
+func NotItself() (b bool) {
+	e := fmt.Errorf("x: %w", ErrEmpty)
+	return !errors.Is(e, e) // want `vego: postcondition may not hold: b`
+}
