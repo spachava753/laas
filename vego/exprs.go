@@ -166,16 +166,14 @@ func (v *fnVerifier) settled(st *state, guard []*logic.Term, val value, t types.
 // A rule that puts an operand into its result more than once uses it, so
 // that a chain of such operations does not double what it builds at each
 // step. What the constant depends on is recorded for tieFailures, like the
-// result of a call. t must not be a sequence.
+// result of a call. A sequence is told to have the length and elements of
+// t, which is how the verifier compares sequences everywhere.
 func (v *fnVerifier) named(st *state, base string, t *logic.Term) *logic.Term {
 	if len(t.Args) == 0 {
 		return t
 	}
-	if t.Sort.IsSeq() {
-		panic("vego: internal error: a sequence is named")
-	}
 	c := v.fresh(base, t.Sort)
-	fact := logic.Eq(c, t)
+	fact := v.same(c, t)
 	if t.Sort == logic.Bool {
 		fact = logic.Iff(c, t)
 	}
@@ -635,8 +633,12 @@ func (v *fnVerifier) conversion(e *ast.CallExpr, st *state, guard []*logic.Term)
 		// replaced by one that is a string whether or not it is evaluated.
 		text := v.settled(st, guard, value{v.expr(e.Args[0], st, guard)}, from)[0]
 		only := v.cellsOf(elemType(to))[0]
-		copied := value{v.alloc(st, true), logic.IntLit(0), logic.Len(text), v.fresh("cap", logic.Int)}
-		st.storeRow(only.key, only.sort, copied[0], text)
+		// The length is named, so that what string(b) reads back holds the
+		// string once.
+		copied := value{v.alloc(st, true), logic.IntLit(0), v.named(st, "len", logic.Len(text)), v.fresh("cap", logic.Int)}
+		// The bytes go into a region that the string may have been read
+		// from.
+		st.storeRow(only.key, only.sort, copied[0], v.apart(st, text, logic.SeqOf(logic.SeqOf(only.sort))))
 		v.noteBorn(st, copied[0], rowKeys([]cell{only}))
 		st.assume(v.wellFormed(copied, to, st.brk))
 		return copied

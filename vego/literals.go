@@ -554,36 +554,6 @@ func (v *fnVerifier) joinedAt(now *logic.Term, joined *joinedRegion, ref *logic.
 	return logic.And(facts...)
 }
 
-// joinSizeLimit, when it is not zero, is the size beyond which a term that
-// goes into a join is a fault of the verifier: what a join makes must not
-// grow with the joins before it. The tests set it, so that such growth is
-// caught at once and not by the machine running out of memory.
-var joinSizeLimit int
-
-// checkJoinSize panics when a term that goes into a join has grown beyond
-// joinSizeLimit, counted as a tree with shared parts counted again.
-func checkJoinSize(terms []*logic.Term) {
-	if joinSizeLimit == 0 {
-		return
-	}
-	for _, t := range terms {
-		budget := joinSizeLimit
-		var count func(t *logic.Term)
-		count = func(t *logic.Term) {
-			budget--
-			for _, arg := range t.Args {
-				if budget < 0 {
-					return
-				}
-				count(arg)
-			}
-		}
-		if count(t); budget < 0 {
-			panic(fmt.Sprintf("vego: internal error: a term that goes into a join has more than %d nodes", joinSizeLimit))
-		}
-	}
-}
-
 // report emits a diagnostic. One found while the body of a literal is
 // executed says through which calls it was reached, since the body is
 // verified at each of them.

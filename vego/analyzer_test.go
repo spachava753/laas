@@ -143,6 +143,16 @@ func TestAnalyzer(t *testing.T) {
 			"lib", "client", "memory", "shapes", "badshapes", "invariants", "mapping", "badpred", "usesbadpred", "early", "settled", "gen", "earlytype", "earlyrange", "earlybox", "earlyloop", "earlycarrier", "earlypanic", "guide", "wrapped", "unread", "usesunread", "twovariants", "usestwovariants", "lonecr", "errorsid", "errorsvars", "errorsvarsclient", "vouched", "vouchedclient", "vouchedcapture", "earlyalias", "earlyaliasok", "sentinellib", "sentinelclient", "usesearly", "sentinelfar", "sentinelfarther", "closures")
 	})
 
+	// The bound on the size of a formula stops a program whose formulas
+	// grow faster than its text. That growth is what the program is for, so
+	// the check that fails on it is off.
+	t.Run("refuses a formula that grows beyond the limit", func(t *testing.T) {
+		saved := growthRatio
+		growthRatio = 0
+		defer func() { growthRatio = saved }()
+		runCorpus(t, newAnalyzer(), "toolarge")
+	})
+
 	// Each of these is the only package analysed, as when laas is run on
 	// it alone: a dependency that changes an error variable is reported in
 	// every package built with both it and a proof that relies on the
@@ -242,6 +252,11 @@ func TestShownAnnotationsScan(t *testing.T) {
 	}
 }
 
-// A term that goes into a join of the ends of a function literal must not
-// grow with the joins before it; the tests catch such growth at once.
-func init() { joinSizeLimit = 1 << 12 }
+// What the verifier builds must not grow faster than the program: a term
+// that goes into a join of the ends of a function literal must not grow
+// with the joins before it, and a value bound or stored must not be much
+// larger as a tree than in memory. The tests catch either at once.
+func init() {
+	joinSizeLimit = 1 << 12
+	growthRatio = 8
+}

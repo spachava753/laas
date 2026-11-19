@@ -210,6 +210,7 @@ func (v *fnVerifier) loadIn(lv lvalue, sink *state, mem memory) value {
 // store performs an assignment in the symbolic state. A write to memory must
 // be one the function is allowed to make.
 func (v *fnVerifier) store(lv lvalue, val value, st *state) {
+	checkGrowth(val)
 	if lv.kind != placeBlank && len(val) != len(lv.leaves) {
 		v.unsupported(lv.pos, fmt.Sprintf("a value of this type cannot be assigned to %s", lv.text))
 	}

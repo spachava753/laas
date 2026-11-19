@@ -312,6 +312,7 @@ func (v *fnVerifier) localRoot(e ast.Expr) *types.Var {
 // lives in memory gets a new allocation, so each execution of a declaration
 // creates a variable of its own.
 func (v *fnVerifier) bind(st *state, variable *types.Var, val value) {
+	checkGrowth(val)
 	if v.boxed[variable] {
 		val = v.newObject(st, variable.Type(), val)
 	}

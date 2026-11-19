@@ -238,16 +238,48 @@ func (v *fnVerifier) bitwise(op token.Token, x, y *logic.Term, t types.Type, pos
 	}
 	and := v.bitAnd(x, y, uint(greatest.BitLen())+1, st)
 	result := and
-	switch op {
-	case token.OR:
+	// When x & y is one of the operands, the identities are written out
+	// with it cancelled, so that no operand is held twice and a chain of
+	// such operations does not double what it builds.
+	is := func(a, b *logic.Term) bool { return a == b || a.String() == b.String() }
+	zero := logic.IntLit(0)
+	switch {
+	case op == token.AND:
+	case is(x, y):
+		// x | x is x; x ^ x and x &^ x are zero.
+		result = x
+		if op != token.OR {
+			result = zero
+		}
+	case is(and, x):
+		// Every bit of x is in y.
+		switch op {
+		case token.OR:
+			result = y
+		case token.XOR:
+			result = logic.Sub(y, x)
+		case token.AND_NOT:
+			result = zero
+		}
+	case is(and, y):
+		switch op {
+		case token.OR:
+			result = x
+		case token.XOR, token.AND_NOT:
+			result = logic.Sub(x, y)
+		}
+	case op == token.OR:
 		result = logic.Sub(logic.Add(x, y), and)
-	case token.XOR:
+	case op == token.XOR:
 		result = logic.Sub(logic.Add(x, y), logic.Mul(logic.IntLit(2), and))
-	case token.AND_NOT:
+	case op == token.AND_NOT:
 		result = logic.Sub(x, and)
 	}
 	st.assume(logic.Implies(logic.And(v.typeFact(x, t), v.typeFact(y, t)), v.typeFact(result, t)))
-	v.bitOrigins[result.String()] = bitOrigin{op, x.String(), y.String()}
+	// An operand that is the result keeps the origin it has.
+	if !is(result, x) && !is(result, y) {
+		v.bitOrigins[result.String()] = bitOrigin{op, x.String(), y.String()}
+	}
 	return result
 }
 

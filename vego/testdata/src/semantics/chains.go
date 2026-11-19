@@ -162,3 +162,233 @@ func PutChain() (r map[int]int) {
 	m[29] = 29
 	return m
 }
+
+// XorChain flips every bit again and again, the way some code writes ^x.
+//
+// @Ensures r = x
+func XorChain(x int) (r int) {
+	y := x
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	y ^= -1
+	return y
+}
+
+// OrChain sets in a number the bits it already has.
+//
+// @Ensures r = x
+func OrChain(x int) (r int) {
+	y := x
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	y |= y
+	return y
+}
+
+// ConvChain copies a string to bytes and back again and again.
+//
+// @Requires |s| <= 10
+// @Ensures |r| = |s|
+func ConvChain(s string) (r string) {
+	t := s
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	t = string([]byte(t))
+	return t
+}
+
+// CopyChain copies elements of a slice into each other again and again: a
+// write of a value read from the memory it writes.
+//
+// @Requires |A| >= 2
+// @Modifies A
+// @Ensures A'[0] = A[1] And A'[1] = A[1]
+func CopyChain(A []int) {
+	A[0] = A[1]
+	A[1] = A[0]
+	A[0] = A[1]
+	A[1] = A[0]
+	A[0] = A[1]
+	A[1] = A[0]
+	A[0] = A[1]
+	A[1] = A[0]
+	A[0] = A[1]
+	A[1] = A[0]
+	A[0] = A[1]
+	A[1] = A[0]
+	A[0] = A[1]
+	A[1] = A[0]
+	A[0] = A[1]
+	A[1] = A[0]
+	A[0] = A[1]
+	A[1] = A[0]
+	A[0] = A[1]
+	A[1] = A[0]
+	A[0] = A[1]
+	A[1] = A[0]
+	A[0] = A[1]
+	A[1] = A[0]
+	A[0] = A[1]
+	A[1] = A[0]
+	A[0] = A[1]
+	A[1] = A[0]
+	A[0] = A[1]
+	A[1] = A[0]
+}
+
+// IndexChain writes at an index it reads from the slice it writes.
+//
+// @Requires |A| >= 1 And 0 <= A[0] < |A|
+// @Modifies A
+// @Ensures True
+func IndexChain(A []int) {
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+	A[A[0]] = 0
+}
+
+// XorSelfChain clears a number by itself again and again.
+//
+// @Ensures r = 0
+func XorSelfChain(x int) (r int) {
+	y := x
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	y ^= y
+	return y
+}

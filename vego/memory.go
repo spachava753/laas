@@ -271,8 +271,9 @@ func (v *fnVerifier) fetch(sink *state, mem memory, cells []cell, ref, at *logic
 // put writes the leaves with the given cells of a value stored at a position
 // of an allocation.
 func (v *fnVerifier) put(st *state, cells []cell, ref, at *logic.Term, val value) {
+	checkGrowth(val)
 	for i, c := range cells {
-		st.writeAt(c.key, c.sort, ref, logic.Add(at, logic.IntLit(c.off)), val[i])
+		v.writeAt(st, c.key, c.sort, ref, logic.Add(at, logic.IntLit(c.off)), val[i])
 	}
 }
 
@@ -347,9 +348,35 @@ func (st *state) storeCell(key string, lf leaf, ref, written *logic.Term) {
 }
 
 // writeAt replaces one position of the sequence a region has for a
-// reference.
-func (st *state) writeAt(key string, sort logic.Sort, ref, at, written *logic.Term) {
-	st.mem[key] = logic.Write(st.mem.region(key, logic.SeqOf(logic.SeqOf(sort))), ref, at, written)
+// reference. What is written, and where, may have been read from the same
+// region; see apart.
+func (v *fnVerifier) writeAt(st *state, key string, sort logic.Sort, ref, at, written *logic.Term) {
+	table := logic.SeqOf(logic.SeqOf(sort))
+	ref, at, written = v.apart(st, ref, table), v.apart(st, at, table), v.apart(st, written, table)
+	st.mem[key] = logic.Write(st.mem.region(key, table), ref, at, written)
+}
+
+// apart returns a term that stands for t and holds no region of the given
+// sort: t itself, or t named. A write puts what it writes, and where, into
+// the region it writes; if those held the region, as A[0] = A[1] does, a
+// run of such writes would double the region at every step.
+func (v *fnVerifier) apart(st *state, t *logic.Term, region logic.Sort) *logic.Term {
+	seen := map[*logic.Term]bool{}
+	var holds func(t *logic.Term) bool
+	holds = func(t *logic.Term) bool {
+		if seen[t] {
+			return false
+		}
+		seen[t] = true
+		if t.Sort == region {
+			return true
+		}
+		return slices.ContainsFunc(t.Args, holds)
+	}
+	if !holds(t) {
+		return t
+	}
+	return v.named(st, "written", t)
 }
 
 // storeRow replaces the sequence a region has for a reference.
