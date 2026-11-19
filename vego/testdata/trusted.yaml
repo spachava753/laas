@@ -635,3 +635,7 @@ trusted:
   (*funcvalues.Chain).grow:
     reason: Test helper that may hang a new link with a mapper on a chain.
     modifies: [c]
+
+  funcvalues.loadUnnamed:
+    reason: Test helper that hands back a mapper in an unnamed result.
+    modifies: []

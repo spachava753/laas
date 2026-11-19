@@ -121,6 +121,8 @@ func fail(format string, args ...any) {
 // neither, a map: those are the only references a path gives.
 func kindOf(t *Term) string {
 	switch {
+	case t.Op == OpIntLit && t.Sort == Ref && t.Val == 0:
+		return "nil"
 	case t.Op == OpFuncVal:
 		return "function value"
 	case t.Op == OpPair:
@@ -459,7 +461,12 @@ func (s *scope) relation(op string, a, b *Term) *Term {
 	case a.Sort == Ref && equality:
 		result = RefEq(a, b)
 	case a.Sort == Ref:
-		fail("operator %s cannot be applied to a %s", op, kindOf(a))
+		// Of nil and something else, the message names the other.
+		named := a
+		if kindOf(a) == "nil" {
+			named = b
+		}
+		fail("operator %s cannot be applied to a %s", op, kindOf(named))
 	case a.Sort != Int:
 		fail("operator %s cannot be applied to %s values", op, a.Sort)
 	case equality:

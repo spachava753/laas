@@ -72,3 +72,9 @@ func MapWithNumber(m map[int]int) {
 // @Requires f < nil // want `vego: in Requires annotation: operator < cannot be applied to a function value`
 func Ordered(f func()) {
 }
+
+// OrderedNil orders nil before a function value.
+//
+// @Requires nil < f // want `vego: in Requires annotation: operator < cannot be applied to a function value`
+func OrderedNil(f func()) {
+}

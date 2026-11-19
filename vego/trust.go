@@ -554,9 +554,12 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 	// function writes into memory, at any depth of what it may modify.
 	for i, result := range fn.results {
 		if !fn.vouches[i] && pv.holdsContractedValue(result.Type(), map[types.Type]bool{}) {
+			// The result is named as the entry spells it.
 			name := result.Name()
-			if name == "" || name == "_" {
-				name = fmt.Sprintf("result %d", i+1)
+			for spelled, index := range fn.resultNames {
+				if index == i {
+					name = spelled
+				}
 			}
 			fn.defect("its result %s can hold a function value of a type with a contract; "+
 				"list it under vouches to claim that every such value meets the contract of its type", name)

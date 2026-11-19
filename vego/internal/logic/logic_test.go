@@ -108,6 +108,7 @@ func TestResolve(t *testing.T) {
 		{"p < q", "error: operator < cannot be applied to a pointer"},
 		{"m < m", "error: operator < cannot be applied to a map"},
 		{"f < nil", "error: operator < cannot be applied to a function value"},
+		{"nil < f", "error: operator < cannot be applied to a function value"},
 		{"f = m", "error: a function value can only be compared with nil"},
 		{"f = 0", "error: cannot compare f (function value) with 0 (int)"},
 		{"m = 0", "error: cannot compare m (map) with 0 (int)"},

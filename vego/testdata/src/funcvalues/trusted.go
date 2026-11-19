@@ -44,3 +44,14 @@ func UsesVouched() (y int) {
 func Grows(c *Chain) {
 	c.grow() // want `vego: the trusted contract of \(\*funcvalues.Chain\).grow \(trusted.yaml:\d+\) cannot be used: its modifies "c" covers memory that can hold a function value of a type with a contract, which a trusted function cannot write yet` `cannot verify Grows`
 }
+
+func loadUnnamed() Mapper { return nil }
+
+// UsesUnnamed calls a mapper from an unnamed result that the entry does not
+// vouch for. The message names the result as the entry spells it.
+//
+// @Ensures True
+func UsesUnnamed() (y int) {
+	m := loadUnnamed() // want `vego: the trusted contract of funcvalues.loadUnnamed \(trusted.yaml:\d+\) cannot be used: its result result can hold a function value` `cannot verify UsesUnnamed`
+	return m(1)
+}
