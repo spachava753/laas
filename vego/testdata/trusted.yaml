@@ -639,3 +639,11 @@ trusted:
   funcvalues.loadUnnamed:
     reason: Test helper that hands back a mapper in an unnamed result.
     modifies: []
+
+  funcvalues.fire:
+    reason: Test helper that calls a hook that unverified code sets.
+    modifies: []
+
+  funcvalues.logErr:
+    reason: Test helper that is given an error and does not say it runs it.
+    modifies: []

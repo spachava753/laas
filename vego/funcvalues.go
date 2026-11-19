@@ -382,7 +382,7 @@ func (v *fnVerifier) checkHandedToValue(call *ast.CallExpr, fn *funcInfo) {
 	for i, arg := range call.Args {
 		t := fn.params[i].Type()
 		if isError(t) {
-			if v.knownError(v.originsOf(v.fn.decl.Body), arg, -1, map[*types.Var]bool{}) {
+			if v.knownError(v.bodyOrigins(), arg, -1, map[*types.Var]bool{}) {
 				continue
 			}
 			v.unsupported(arg.Pos(), fmt.Sprintf("%s is passed to the function value %s and is an error whose origin is not known%s; "+
@@ -627,4 +627,243 @@ func coveredType(fn *funcInfo, m *modTarget) types.Type {
 		return nil
 	}
 	return final
+}
+
+// A value of a function type with a contract is made in one of these ways,
+// where Go converts it to the type: from a function literal, a function, or
+// a method value written there; from nil; or from a value of the same type.
+// The first three are checked against the contract of the type there, as a
+// function of their own: in a state with memory of its own, knowing of
+// what they capture only its value where the value is made. Every other way
+// is refused, since nothing would show that the value meets the contract.
+// So is making a value of a function type that has no contract.
+
+// functionValue evaluates an expression that is assigned to something of a
+// function type.
+func (v *fnVerifier) functionValue(e ast.Expr, want types.Type, st *state, guard []*logic.Term) value {
+	inner := ast.Unparen(e)
+	named, method := v.valueForm(inner)
+	_, isLiteral := inner.(*ast.FuncLit)
+	if named == nil && method == nil && !isLiteral {
+		if !types.Identical(v.info.TypeOf(e), want) {
+			v.unsupported(e.Pos(), fmt.Sprintf("converting %s to %s is not supported: a value of a function type is made only from "+
+				"a function literal, a function, or a method value written there, from nil, or from a value of the same type",
+				types.ExprString(e), want))
+		}
+		return v.eval(e, st, guard)
+	}
+	T := v.valueContract(want)
+	if T == nil {
+		v.unsupported(e.Pos(), fmt.Sprintf("%s is used as a value of type %s, which has no contract; "+
+			"declare a named function type with a contract and use it here", types.ExprString(e), want))
+	}
+	for _, defect := range T.defects {
+		v.report(e.Pos(), "the contract of %s cannot be used: %s", T.obj.Name(), defect)
+	}
+	if T.broken {
+		v.unsupported(e.Pos(), fmt.Sprintf("the contract of %s could not be understood", T.obj.Name()))
+	}
+	switch {
+	case isLiteral:
+		v.unsupported(e.Pos(), "a function literal is supported only where it is called or deferred, or as the value "+
+			"that declares a new variable which is only ever called; this one is used as a value")
+	case named != nil:
+		v.madeFrom(e, T, named, nil, st, guard)
+	default:
+		sel := inner.(*ast.SelectorExpr)
+		recv := method.Type().(*types.Signature).Recv()
+		// The receiver is evaluated where the method value is made, as for
+		// a call: a pointer receiver takes the address of a variable, and a
+		// value receiver copies the struct, which a nil pointer cannot.
+		var receiver value
+		func() {
+			defer v.begin()()
+			receiver = v.receiver(&ast.CallExpr{Fun: sel, Lparen: sel.End(), Rparen: sel.End()}, recv, st, guard)
+		}()
+		v.madeFrom(e, T, method, receiver, st, guard)
+	}
+	return value{logic.RefLit(1)}
+}
+
+// valueForm returns the function, or the method of a method value, that an
+// expression names, if it is one of those. A method expression, T.M, is
+// neither and is refused.
+func (v *fnVerifier) valueForm(e ast.Expr) (named, method *types.Func) {
+	switch e := e.(type) {
+	case *ast.Ident:
+		named, _ = v.info.Uses[e].(*types.Func)
+	case *ast.SelectorExpr:
+		if selection := v.info.Selections[e]; selection != nil {
+			switch selection.Kind() {
+			case types.MethodVal:
+				method, _ = selection.Obj().(*types.Func)
+			case types.MethodExpr:
+				v.unsupported(e.Pos(), "a method expression, as in T.M, cannot be used as a value yet; use a method value, as in x.M, or a function literal")
+			}
+			break
+		}
+		named, _ = v.info.Uses[e.Sel].(*types.Func)
+	}
+	return named, method
+}
+
+// madeFrom checks that a function, or a method on a receiver, meets the
+// contract of the function type it is used as. It is checked as a
+// function of its own that calls it: called in a state where the Requires
+// of the type hold, with memory of its own, it must meet the Requires of
+// the function, write nothing the type does not list, and leave the Ensures
+// of the type true. What it runs must make no call through a function
+// value.
+func (v *fnVerifier) madeFrom(e ast.Expr, T *funcInfo, callee *types.Func, receiver value, st *state, guard []*logic.Term) {
+	sig := callee.Type().(*types.Signature)
+	if sig.Variadic() || sig.TypeParams() != nil || sig.RecvTypeParams() != nil {
+		v.unsupported(e.Pos(), "variadic and generic functions cannot be used as values yet")
+	}
+	fn := v.contractOf(callee)
+	if fn == nil {
+		v.unsupported(e.Pos(), fmt.Sprintf("it uses %s as a value, and %s has no contract; annotate %s with // @ annotations so that it is verified, "+
+			"or add a trusted contract for %s to %s", callee.Name(), callee.Name(), callee.Name(), callee.FullName(), TrustFileName))
+	}
+	for _, defect := range fn.defects {
+		v.report(e.Pos(), "the contract of %s cannot be used: %s", callee.FullName(), defect)
+	}
+	if fn.broken {
+		v.unsupported(e.Pos(), callee.Name()+" has a contract that could not be understood")
+	}
+	// What a value made by verified code runs may make no call through a
+	// function value. No contract of a function type has a variant, so
+	// nothing would then prove that a chain of such calls ends: a value
+	// could be handed back to code that calls it again. With this rule a
+	// call through a value made by verified code runs code that makes no
+	// such call.
+	if v.pkgVerifier.mayCallValues(callee) {
+		v.unsupported(e.Pos(), fmt.Sprintf("%s may call through a function value, and code that a function value runs cannot do that yet: "+
+			"no contract of a function type has a variant, so nothing would prove that such calls end", callee.Name()))
+	}
+	site := v.site(e.Pos(), "in %s used as a %s at %s", types.ExprString(e), T.obj.Name(), v.placeOf(e.Pos()))
+	sv, entry, carry := v.subVerifier(T, st, guard, site)
+	// The arguments of the call: the receiver as it was where the value
+	// was made, and the parameters of the type in order.
+	args := map[*types.Var]value{}
+	var inputs []*types.Var
+	if sig.Recv() != nil {
+		args[fn.params[0]] = carry.value(receiver)
+		inputs = fn.params[1:]
+	} else {
+		inputs = fn.params
+	}
+	call := &ast.CallExpr{Fun: e, Lparen: e.End(), Rparen: e.End()}
+	for i, param := range inputs {
+		args[param] = sv.entry[T.params[i]]
+		call.Args = append(call.Args, &ast.Ident{NamePos: e.Pos(), Name: T.params[i].Name()})
+	}
+	if fn.trust != nil {
+		v.noteUse(fn, e.Pos())
+		// The parameters of the value come from whoever calls it, so what
+		// can carry code is handed on to the trusted function unseen.
+		for _, param := range inputs {
+			if fn.runs[param] || !holdsCode(param.Type(), map[types.Type]bool{}) {
+				continue
+			}
+			v.unsupported(e.Pos(), fmt.Sprintf("%s is used as a value, which passes what it is called with to %s as %s; "+
+				"%s is trusted, and that can hold code nobody has seen. If its contract holds whatever that code does, "+
+				"list %s under runs in the contract", types.ExprString(e), fn.obj.Name(), param.Name(), fn.obj.Name(), param.Name()))
+		}
+	}
+	results := sv.invoke(call, fn, args, entry, nil)
+	sv.atReturn(entry, results, e.Pos())
+}
+
+// subVerifier returns a verifier for a function value that is made in a
+// state: a function of its own with the contract of its type, whose entry
+// state holds its parameters as the contract describes them, memory of its
+// own, and a copy of the state where the value is made, in which every
+// constant is renamed. The copy tells what is known of the values the
+// function value keeps, and nothing of the memory it sees when it runs.
+// carry renames values of the state where the value is made into the copy.
+func (v *fnVerifier) subVerifier(fn *funcInfo, st *state, guard []*logic.Term, site inlineSite) (sv *fnVerifier, entry *state, carry *transport) {
+	sv = v.newVerifier(fn)
+	sv.originBody = v.bodyOrigin()
+	sv.boxed = v.boxed
+	sv.sites = append(slices.Clip(v.sites), site)
+	// The names of the copy cannot be those of the verifier that reads it.
+	// A copy made inside a copy renames the names of the outer copy again,
+	// so they stay apart from both.
+	carry = &transport{prefix: transportMark + " ", memo: map[*logic.Term]*logic.Term{}}
+	entry = sv.enter()
+	for _, fact := range st.hyps {
+		entry.assume(carry.term(fact))
+	}
+	for _, cond := range guard {
+		entry.assume(carry.term(cond))
+	}
+	// Everything that existed where the value was made exists when it runs.
+	entry.assume(logic.Le(carry.term(st.brk), entry.brk))
+	return sv, entry, carry
+}
+
+// bodyOrigin returns the body bodyOrigins reads.
+func (v *fnVerifier) bodyOrigin() *ast.BlockStmt {
+	if v.originBody != nil {
+		return v.originBody
+	}
+	if v.fn.decl != nil {
+		return v.fn.decl.Body
+	}
+	return nil
+}
+
+// transportMark begins every name in a renamed copy of a state. No name the
+// verifier makes begins with it; see fresh.
+const transportMark = "^"
+
+// transport renames the constants of terms into a namespace of its own,
+// apart from the names of the verifier that reads them. The constants of
+// error variables and nil are kept, since they mean the same everywhere.
+type transport struct {
+	prefix string
+	memo   map[*logic.Term]*logic.Term
+}
+
+// term returns a term with its constants renamed.
+func (tr *transport) term(t *logic.Term) *logic.Term {
+	if renamed, done := tr.memo[t]; done {
+		return renamed
+	}
+	var renamed *logic.Term
+	switch {
+	case t == logic.NilErr() || isSentinelTerm(t):
+		renamed = t
+	case t.Op == logic.OpConst:
+		renamed = logic.Const(tr.prefix+t.Name, t.Sort)
+	case t.Op == logic.OpBound:
+		renamed = logic.Bound(tr.prefix+t.Name, t.Sort)
+	case len(t.Args) == 0:
+		renamed = t
+	default:
+		args := make([]*logic.Term, len(t.Args))
+		changed := false
+		for i, arg := range t.Args {
+			args[i] = tr.term(arg)
+			changed = changed || args[i] != arg
+		}
+		renamed = t
+		if changed {
+			renamed = logic.WithArgs(t, args)
+		}
+	}
+	tr.memo[t] = renamed
+	return renamed
+}
+
+// value renames the leaves of a value.
+func (tr *transport) value(val value) value {
+	if val == nil {
+		return nil
+	}
+	renamed := make(value, len(val))
+	for i, leaf := range val {
+		renamed[i] = tr.term(leaf)
+	}
+	return renamed
 }

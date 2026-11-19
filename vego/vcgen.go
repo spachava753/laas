@@ -89,6 +89,10 @@ type fnVerifier struct {
 	names    map[string]int
 	branches int
 	measure  *logic.Term
+	// originBody, when set, is the body of the declared function whose
+	// origins of errors a function value made in it is judged by; see
+	// bodyOrigins.
+	originBody *ast.BlockStmt
 	// unsplit is set while a statement is executed before which nothing
 	// can be put, the post statement of a for loop and the init statement
 	// of an else if; see unit.sometimes. elseIfs holds, by the position of
@@ -151,11 +155,7 @@ type fnVerifier struct {
 // run executes one task on a function, turning the panics that abandon a
 // verification into diagnostics.
 func (pv *pkgVerifier) run(fn *funcInfo, task func(v *fnVerifier)) {
-	v := &fnVerifier{
-		pkgVerifier: pv, fn: fn, entry: map[*types.Var]value{}, names: map[string]int{},
-		reached: map[*funcInfo]bool{}, bitTerms: map[string]*logic.Term{}, lowZeros: map[string]uint{}, bitOrigins: map[string]bitOrigin{}, forgotten: map[string]forgottenPart{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{},
-		backgroundSeen: map[string]bool{}, targetSeen: map[string]bool{}, inlining: map[*ast.FuncLit]bool{}, joins: map[string]*joinedRegion{},
-	}
+	v := pv.newVerifier(fn)
 	defer func() {
 		switch r := recover().(type) {
 		case nil, abort:
@@ -173,6 +173,30 @@ func (pv *pkgVerifier) run(fn *funcInfo, task func(v *fnVerifier)) {
 		}
 	}()
 	task(v)
+}
+
+// newVerifier returns a verifier for one function, with nothing known yet.
+func (pv *pkgVerifier) newVerifier(fn *funcInfo) *fnVerifier {
+	return &fnVerifier{
+		pkgVerifier: pv, fn: fn, entry: map[*types.Var]value{}, names: map[string]int{},
+		reached: map[*funcInfo]bool{}, bitTerms: map[string]*logic.Term{}, lowZeros: map[string]uint{}, bitOrigins: map[string]bitOrigin{}, forgotten: map[string]forgottenPart{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{},
+		backgroundSeen: map[string]bool{}, targetSeen: map[string]bool{}, inlining: map[*ast.FuncLit]bool{}, joins: map[string]*joinedRegion{},
+	}
+}
+
+// bodyOrigins returns what the variables of the function being verified are
+// assigned, from the body of the declared function it is part of: a
+// function value made there is verified on its own, but the variables it
+// captures are assigned around it.
+func (v *fnVerifier) bodyOrigins() *origins {
+	body := v.originBody
+	if body == nil && v.fn.decl != nil {
+		body = v.fn.decl.Body
+	}
+	if body == nil {
+		return &origins{sources: map[*types.Var][]source{}, unknown: map[*types.Var]bool{}}
+	}
+	return v.originsOf(body)
 }
 
 // enter builds the state on function entry: parameters hold arbitrary values
@@ -242,8 +266,8 @@ func (v *fnVerifier) enter() *state {
 }
 
 // findBoxed returns the variables whose address a function body takes: with
-// &x or &x.f, or by calling a method with a pointer receiver on x or x.f.
-// Such a variable is kept in memory, in an allocation of its own that is
+// &x or &x.f, or by calling a method with a pointer receiver on x or x.f,
+// or using such a method as a value, as in x.M. Such a variable is kept in memory, in an allocation of its own that is
 // created where the variable is declared, so that a pointer to it is like
 // any other pointer: a write through the pointer changes the variable, and
 // a write to the variable is seen through the pointer.
@@ -255,10 +279,12 @@ func (v *fnVerifier) findBoxed(body *ast.BlockStmt) map[*types.Var]bool {
 			if root := v.localRoot(n.X); n.Op == token.AND && root != nil {
 				boxed[root] = true
 			}
-		case *ast.CallExpr:
-			sel, ok := ast.Unparen(n.Fun).(*ast.SelectorExpr)
+		case *ast.SelectorExpr:
+			// A call of a method with a pointer receiver, and a method
+			// value of one, take the address of the receiver.
+			sel := n
 			selection := v.info.Selections[sel]
-			if !ok || selection == nil || selection.Kind() != types.MethodVal {
+			if selection == nil || selection.Kind() != types.MethodVal {
 				break
 			}
 			recv := selection.Obj().Type().(*types.Signature).Recv()
@@ -445,6 +471,9 @@ func (v *fnVerifier) misread(c *clause, err error) {
 // fresh returns a new symbolic constant. The @ keeps generated names apart
 // from Go identifiers.
 func (v *fnVerifier) fresh(base string, sort logic.Sort) *logic.Term {
+	if strings.HasPrefix(base, transportMark) {
+		panic("vego: internal error: a name is made in the namespace of renamed states")
+	}
 	v.names[base]++
 	name := fmt.Sprintf("%s@%d", base, v.names[base])
 	v.made = append(v.made, name)

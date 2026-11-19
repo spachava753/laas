@@ -152,7 +152,7 @@ func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term
 		// Formatting an error runs its methods, which known origin of either
 		// kind makes harmless.
 		switch {
-		case isError(t) && !v.knownError(v.originsOf(v.fn.decl.Body), arg, -1, map[*types.Var]bool{}):
+		case isError(t) && !v.knownError(v.bodyOrigins(), arg, -1, map[*types.Var]bool{}):
 			v.unsupported(arg.Pos(), fmt.Sprintf("formatting %s would run the methods of an error whose origin is not known; "+
 				"only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a trusted contract vouches for, "+
 				"can be formatted%s", types.ExprString(arg), v.originWhy(arg)))
