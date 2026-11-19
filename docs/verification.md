@@ -982,13 +982,14 @@ func CountingPricer(c *LineCounter) (p Pricer) {
 ```
 
 ```text
-vego: Price may modify c, which Pricer.Price may not modify; list it in a // @Modifies clause,
-in (*LineCounter).Price used as a method of Pricer at interfaces.go:90:9
+vego: Price may modify c, which Pricer.Price may not modify; Pricer.Price can list only what its
+parameters refer to, so a method that writes what its receiver refers to cannot be used as a
+method of Pricer yet, in (*LineCounter).Price used as a method of Pricer at interfaces.go:90:9
 ```
 
 Interfaces whose methods write state behind the receiver, such as `io.Writer`, `io.Closer`, and `sort.Interface`, wait for a way to name that state.
 
-A method with a pointer receiver cannot rely on what the receiver points to. A `Requires` clause that reads it, or a struct invariant of the receiver's type, cannot be proved in the check, and is reported there. A method with a value receiver gets the struct that was converted, so its invariant is proved from what is known where the value is converted.
+A method with a pointer receiver cannot rely on what the receiver points to. A `Requires` clause that reads it, or a struct invariant of the receiver's type, cannot be proved in the check, and is reported there. A method with a value receiver gets the struct that was converted, so its invariant is proved from what is known where the value is converted. Give the method a value receiver and convert the struct, or make the conversion in code that is not verified. Through a pointer, a value receiver gets the struct as it is when the method runs, so its invariant cannot be proved there either.
 
 A method with a value receiver called through a pointer reads the struct each time it is called, and panics if the pointer is nil:
 
@@ -1068,7 +1069,7 @@ func AsPricer(c Catalog) (p Pricer) {
 
 The converted value is nil exactly when the original is. Converting to an interface that declares a method of the same name itself is refused, because its contract may differ. An interface type written in place, such as `interface{ Pricer }` as the type of a parameter, is not supported if it embeds a declared interface. Go treats two such types as the same type whenever their methods have the same names and signatures, so a value could pass from one contract to another without a conversion. Declare a named type instead, as in `type PricerOnly interface{ Pricer }`.
 
-A value of any type can be converted to `any`. An `any` can be held, passed, and compared with nil, and nothing else can be done with it. An error converted to `any` is nil exactly when the error is nil.
+A value of any type that `vego` supports can be converted to `any`. An `any` can be held, passed, and compared with nil, and nothing else can be done with it. An error converted to `any` is nil exactly when the error is nil.
 
 ### Comparing interface values
 
@@ -2369,9 +2370,9 @@ The claim is false for a function that calls the methods of an `error` when unve
 
 A function that stores a callback and calls it later, such as one that registers a handler, makes these claims false. Do not list its parameter under `runs`. Call it from code that is not verified.
 
-When the parameter can hold a function value of a type with a contract (see [Function values](#function-values)), `runs` claims that the function calls such a value only with arguments that meet the `Requires` clauses of its type. The same goes for an interface value of a named interface type whose methods have contracts (see [Interfaces](#interfaces)): the function calls a method only with arguments that meet the method's `Requires`. The rest of the claim then has to hold only for values that meet their contracts, and every value that verified code passes does. For any other code, the claim has to hold whatever code arrives. That includes an interface without contracts, such as `io.Writer`, an `any`, and an interface type written in place that embeds a named one.
+When the parameter can hold a function value of a type with a contract (see [Function values](#function-values)), `runs` claims that the function calls such a value only with arguments that meet the `Requires` clauses of its type. The same goes for an interface value with a method that has a contract (see [Interfaces](#interfaces)): the function calls such a method only with arguments that meet the method's `Requires`. The rest of the claim then has to hold only for values that meet their contracts, and every value that verified code passes does. For an interface value, that covers the methods that have contracts. For any other code, the claim has to hold whatever code arrives. That includes the methods of an interface without contracts, such as `io.Writer`, an `any`, and an interface type written in place that embeds a named one.
 
-A function under `runs` that may call such a value may run code that verified code made. That code could call back into the verified code that handed it over, so a function that calls it cannot itself be made into a function value or a method of an interface value.
+A trusted function that lists such a parameter under `runs` may run code that verified code made. That code could call back into the verified code that handed it over. So a function that calls such a trusted function cannot itself be made into a function value or a method of an interface value.
 
 A trusted method that is made into a function value, as in `w.Get`, or into a method of an interface value is handed its receiver at each call. If the receiver can carry code, the entry must list it under `runs`, as for a call written out.
 
@@ -2609,7 +2610,15 @@ The package must be in the build of the package that calls the function. An entr
 
 A trusted contract does not make an unsupported signature callable. If a function has a parameter or result of an unsupported type, such as an array or a channel, verified code cannot call it even with an entry. Write a small wrapper whose signature uses only supported types, and trust the wrapper.
 
-A trusted contract cannot be given to a method of an interface. An entry such as `(example.com/shop.Store).Get` is reported in the trust file. Write the contract in the doc comment of the method where the interface is declared, as described in [Interfaces](#interfaces).
+A trusted contract cannot be given to a method of an interface. An entry such as `(example.com/shop.Store).Get` is reported in the trust file:
+
+```text
+vego: the trusted contract names (example.com/shop.Store).Get, a method of an interface type,
+which the trust file cannot give a contract yet; write the contract in the doc comment of the
+method where the interface is declared
+```
+
+Write the contract in the doc comment of the method where the interface is declared, as described in [Interfaces](#interfaces).
 
 A function cannot have both annotations and a trusted contract. When you verify a function that you previously trusted, delete its entry.
 
@@ -2804,6 +2813,7 @@ This table lists the most common messages.
 | `the interface value p may be nil` | A call through `p` is not proved to have a value to call. | Add `p != nil` to the `Requires` clauses, or check `p` before the call. |
 | `cannot verify F: p.M calls I.M, which has no contract` | The method has no contract, as for every interface of the standard library. | Write the contract in the doc comment of the method where `I` is declared, or make the call in code that is not verified. See [Interfaces](#interfaces). |
 | `..., in (*T).M used as a method of I at f.go:n:c` | The method of `T` does not meet the contract of `I.M` where a `T` is converted to `I`. | Fix the method, or the contract of `I.M`. See [What a conversion checks](#what-a-conversion-checks). |
+| `... which I.M may not modify; I.M can list only what its parameters refer to, so a method that writes what its receiver refers to cannot be used as a method of I yet` (or `the contract of T ... as a value of type T`) | The method writes behind its receiver, which the contract it is made into cannot name. | Keep the conversion, or the method value, in code that is not verified. |
 | `T.M has a value receiver, and the pointer that the interface value holds may be nil` | A `*T` that may be nil is converted to an interface, and `M` copies what it points to. | Convert a pointer that is not nil. |
 | `cannot verify F: comparing interface values is not supported yet` | Two interface values, or an interface value and a value of another type, are compared. | Compare with `nil` only. |
 | `cannot verify F: type assertions and type switches are not supported yet` | The type that an interface value holds is not known. | Make the assertion in code that is not verified. |
@@ -2826,8 +2836,6 @@ This table lists the most common messages.
 A function that uses any of the following is reported as `cannot verify`:
 
 - calls of a method of an interface that has no contract, which includes the interfaces of the standard library, and converting a value to an interface with such a method (see [Interfaces](#interfaces));
-- a trusted contract for a method of an interface;
-- converting a value to an interface when the method of its type writes what its receiver points to, or relies on it (see [What a conversion checks](#what-a-conversion-checks));
 - comparing interface values with anything but `nil`, type assertions, and type switches;
 - converting an interface value to an interface whose methods it does not have from the same declarations, other than `any`;
 - interface types written in place that embed a named interface, generic interface types, and interfaces that embed `error`;
@@ -2858,13 +2866,15 @@ A function that uses any of the following is reported as `cannot verify`:
 - a `range` over a map whose body modifies a map of the same type;
 - `goto`, `fallthrough`, labelled `break` and `continue`, and `defer` inside a loop, except inside a function literal that the loop calls.
 
+Two more limits are reported in other ways. A method of a type that writes what its receiver points to, or relies on what it points to, cannot be used as a method of an interface. The conversion reports the obligation that fails, as described in [What a conversion checks](#what-a-conversion-checks). An entry in the trust file for a method of an interface is reported in the trust file, as described in [Limits of trusted contracts](#limits-of-trusted-contracts).
+
 Floating-point values are supported but opaque. They can be passed around and used in arithmetic, but nothing can be stated or proved about their values. An integer converted from a float can have any value of its type, so check its range in code before you use it as an index.
 
 ## What a proof assumes
 
 A proof by `vego` depends on the following assumptions. Each concerns something `vego` cannot see.
 
-- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and it keeps no value that can hold code. It does not call back, through another package, into the verified function that called it. A call back within the same package is found and reported. For a parameter listed under `runs`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value of a named interface type whose methods have contracts, it holds for every value whose methods meet them, and the function calls a method only with arguments that meet its `Requires`. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values it returns meet the contracts of their types.
+- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and it keeps no value that can hold code. It does not call back, through another package, into the verified function that called it. A call back within the same package is found and reported. For a parameter listed under `runs`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value with a method that has a contract, it holds for every value whose methods with contracts meet them, and the function calls such a method only with arguments that meet its `Requires`. For any other method, it holds whatever code the method runs. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values it returns meet the contracts of their types.
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method.
 - An interface value that reaches verified code from code that is not verified meets the contracts of its methods. That includes a value passed as an argument, a value in memory that an argument reaches, and a value that a trusted function returns. Called with arguments that meet the `Requires` of a method, the method returns without panicking, leaves its `Ensures` true, and writes nothing that verified code can see outside what its `Modifies` lists. This holds also when the value holds a pointer to a struct that verified code holds.
 - A function value that reaches verified code from code that is not verified meets the contract of its type. That includes a value passed as an argument, a value in memory that an argument reaches, and a value made with `reflect.MakeFunc` or by generic code. Called with arguments that meet the `Requires` of its type, such a value returns without panicking, writes only what the `Modifies` of its type lists, and leaves its `Ensures` true.

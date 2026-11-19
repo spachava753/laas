@@ -62,7 +62,7 @@ func (c *Counting) Price(sku string, qty int) (cents int, ok bool) {
 // @Requires c != nil
 // @Ensures True
 func FromCounting(c *Counting) (p Pricer) {
-	return c // want `precondition of Price may not hold: c.calls < 1000, in \(\*Counting\).Price used as a method of Pricer` `Price may modify c, which Pricer.Price may not modify; list it in a // @Modifies clause, in \(\*Counting\).Price used as a method of Pricer`
+	return c // want `precondition of Price may not hold: c.calls < 1000, in \(\*Counting\).Price used as a method of Pricer` `Price may modify c, which Pricer.Price may not modify; Pricer.Price can list only what its parameters refer to, so a method that writes what its receiver refers to cannot be used as a method of Pricer yet, in \(\*Counting\).Price used as a method of Pricer`
 }
 
 // Bounded has an invariant, which a conversion cannot show of memory it
@@ -247,4 +247,36 @@ func Formats(n int, s string) (err error) {
 		return nil
 	}
 	return fmt.Errorf("bad %d %s %w", n, s, errors.New("inner"))
+}
+
+// Ticker counts its ticks.
+type Ticker struct{ n int }
+
+// @Requires t != nil
+// @Modifies t
+// @Ensures True
+func (t *Ticker) Tick() {
+	if t.n < 1000 {
+		t.n++
+	}
+}
+
+// Tick is something to run.
+//
+// @Ensures True
+type Tick func()
+
+// @Requires t != nil
+// @Ensures f != nil
+func TickValue(t *Ticker) (f Tick) {
+	return t.Tick // want `Tick may modify t, which Tick may not modify; the contract of Tick can list only what its parameters refer to, so a method that writes what its receiver refers to cannot be used as a value of type Tick yet, in t.Tick used as a value of type Tick`
+}
+
+// Through a pointer, a value receiver gets the struct as it is when the
+// method runs, so its invariant cannot be proved.
+//
+// @Requires r != nil
+// @Ensures p != nil
+func FromRangedPointer(r *Ranged) (p Pricer) {
+	return r // want `invariant of Ranged may not hold for what is passed to Price as r: 0 <= Rate <= 1000, in Ranged.Price used as a method of Pricer`
 }

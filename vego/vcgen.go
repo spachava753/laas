@@ -46,6 +46,12 @@ type fnVerifier struct {
 	// interface type, the evaluations of it under way that check the
 	// conversion; see converted.
 	converting map[ast.Expr]int
+	// heldReceiver is set in the check of a method made into a function
+	// value or a method of an interface value: the receiver of the method,
+	// which the contract of what it is made into cannot name, and
+	// heldRemedy what a write behind it calls for instead; see madeAs.
+	heldReceiver *types.Var
+	heldRemedy   string
 	// entry holds the values of the parameters on entry, entryBrk the number
 	// below which everything that existed on entry lies, and inputs the names
 	// of the constants that stand for the state on entry.

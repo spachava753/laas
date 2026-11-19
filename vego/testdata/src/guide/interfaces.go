@@ -87,7 +87,7 @@ func (c *LineCounter) Price(sku string, qty int) (cents int, ok bool) {
 // @Requires c != nil
 // @Ensures p != nil
 func CountingPricer(c *LineCounter) (p Pricer) {
-	return c // want `Price may modify c, which Pricer.Price may not modify; list it in a // @Modifies clause, in \(\*LineCounter\).Price used as a method of Pricer at interfaces.go:\d+:\d+`
+	return c // want `Price may modify c, which Pricer.Price may not modify; Pricer.Price can list only what its parameters refer to, so a method that writes what its receiver refers to cannot be used as a method of Pricer yet, in \(\*LineCounter\).Price used as a method of Pricer at interfaces.go:\d+:\d+`
 }
 
 // Rated has a value receiver.

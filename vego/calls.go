@@ -373,12 +373,18 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	}
 	v.checkRecursion(fn, pre, st, guard, call)
 	written := v.targets(fn, args, st, before)
-	for _, t := range written {
+	for i, t := range written {
 		what := "what it calls " + t.text
 		if t.param != nil {
 			what = passed[t.param]
 		}
-		v.checkWrite(st, guard, t.reach(), call.Pos(), fmt.Sprintf("%s may modify %s", name, what))
+		// What a method writes behind the receiver of a value it is made
+		// into is something no clause of that contract can list.
+		remedy := ""
+		if v.heldReceiver != nil && fn.paramNames[fn.modifies[i].name] == v.heldReceiver {
+			remedy = v.heldRemedy
+		}
+		v.checkWriteOr(st, guard, t.reach(), call.Pos(), fmt.Sprintf("%s may modify %s", name, what), remedy)
 	}
 	// What a call that runs what it is handed is like at its start, before
 	// anything it writes is forgotten.

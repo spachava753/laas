@@ -493,6 +493,13 @@ func stretchesOf(cells []cell, at *logic.Term) []stretch {
 // pointer, a nil slice, or a nil map, so a call that may modify what one of
 // them refers to changes nothing there and needs no permission for it.
 func (v *fnVerifier) checkWrite(st *state, guard []*logic.Term, w written, pos token.Pos, what string) {
+	v.checkWriteOr(st, guard, w, pos, what, "")
+}
+
+// checkWriteOr is checkWrite, with what a report says to do in place of the
+// advice to list the write, when remedy is not empty: for a write that no
+// clause could list.
+func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos token.Pos, what, remedy string) {
 	if len(w.parts) == 0 {
 		return
 	}
@@ -544,9 +551,12 @@ func (v *fnVerifier) checkWrite(st *state, guard []*logic.Term, w written, pos t
 		for _, i := range candidates {
 			v.used[i] = true
 		}
-		if len(candidates) == 0 {
+		switch {
+		case remedy != "":
+			v.report(pos, "%s, which %s may not modify; %s%s", what, v.fn.obj.Name(), remedy, limitNote(result))
+		case len(candidates) == 0:
 			v.report(pos, "%s, which %s may not modify; list it in a // @Modifies clause%s", what, v.fn.obj.Name(), limitNote(result))
-		} else {
+		default:
 			// Something of the kind is listed, so telling the reader to
 			// list it would send them in a circle.
 			v.report(pos, "%s, which %s may not modify: nothing its // @Modifies clauses list is known to cover it; "+

@@ -896,6 +896,15 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 			"no contract of a function type or of a method of an interface has a variant, so nothing would prove that such calls end", callee.Name(), holder))
 	}
 	sv, entry, carry := v.subVerifier(T, st, guard, site)
+	if sig.Recv() != nil {
+		contract, made := T.obj.Name(), as
+		if T.methodOf == nil {
+			contract, made = "the contract of "+T.obj.Name(), "a value of type "+T.obj.Name()
+		}
+		sv.heldReceiver = fn.params[0]
+		sv.heldRemedy = fmt.Sprintf("%s can list only what its parameters refer to, so a method that writes what its receiver refers to "+
+			"cannot be used as %s yet", contract, made)
+	}
 	// The arguments of the call: the receiver, and the parameters of T in
 	// order.
 	args := map[*types.Var]value{}
