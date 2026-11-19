@@ -57,7 +57,7 @@ func TrustReport(usages []*Usage, dir string) string {
 				fmt.Fprintf(&b, "    runs code held by: %s\n", strings.Join(use.Runs, ", "))
 			}
 			if len(use.Vouches) > 0 {
-				fmt.Fprintf(&b, "    vouches for the errors in: %s\n", strings.Join(use.Vouches, ", "))
+				fmt.Fprintf(&b, "    vouches for the errors and function values in: %s\n", strings.Join(use.Vouches, ", "))
 			}
 			fmt.Fprintf(&b, "    defined: %s:%d\n", relative(use.File), use.Line)
 			fmt.Fprintf(&b, "    used at: %s\n", places(use.Calls))

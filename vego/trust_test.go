@@ -125,7 +125,7 @@ None of them is checked against the code of the function it describes.
 Project contracts in use: 3
   example.com/app.load  [may fail unpredictably]
     reason:  Reads a file.
-    vouches for the errors in: err
+    vouches for the errors and function values in: err
     defined: vego-trusted.yaml:4
     used at: a.go:10, b/b.go:7
   sort.Ints

@@ -16,7 +16,7 @@ This guide shows how to write Go that `vego` can verify. Read it from top to bot
 
 `vego` never reports a function as correct when it is not. If it cannot handle a piece of Go, it reports `cannot verify` and names the construct. If it cannot find a proof, it reports `may not hold`. That means "not proved". The code may be wrong, the contract may be wrong, or both may be right and the prover needs a hint. Much of this guide is about working out which.
 
-`vego` is experimental and supports only part of Go. It does not yet support interfaces other than `error`, function values that are passed or stored, generics, goroutines, arrays, or package-level variables. [What is not supported](#what-is-not-supported) lists the main gaps. Code that does I/O usually runs into these limits. The usual approach is to verify the logic and leave the code around it unverified. [Adopting it](#adopting-it) describes how.
+`vego` is experimental and supports only part of Go. It does not yet support interfaces other than `error`, calls of function values whose type has no contract, generics, goroutines, arrays, or package-level variables. [What is not supported](#what-is-not-supported) lists the main gaps. Code that does I/O usually runs into these limits. The usual approach is to verify the logic and leave the code around it unverified. [Adopting it](#adopting-it) describes how.
 
 ## Running it
 
@@ -554,7 +554,7 @@ fix the order; split the statement so that the order is the one you mean, as in 
 
 ### Literals that cannot be verified
 
-A literal that is passed to a function, returned, or stored is a function value. It needs a function type with a contract. A literal given a type without one is reported as `cannot verify`:
+A literal that is passed to a function, returned, or stored is a function value. It needs a function type with a contract, and is verified as described in [Function literals as values](#function-literals-as-values). A literal given a type without a contract is reported as `cannot verify`:
 
 ```go
 // @Ensures True
@@ -569,6 +569,230 @@ has no contract; declare a named function type with a contract and use it here
 ```
 
 A variable declared with `:=` that holds a literal and is used other than by calling it is reported as `cannot verify` too, with the message `f holds a function literal and is used here other than by calling it`. Declare it with a type that has a contract instead, as in `var f T = func...`. A variadic literal cannot be verified, and neither can a literal that takes or returns a type that `vego` does not support.
+
+## Function values
+
+A function value is a value of a function type: a parameter, a result, a variable, a field, an element of a slice, or a value in a map. `vego` calls a function value only through the contract of its type. You write that contract in the doc comment of a named function type, with the keywords a function uses:
+
+```go
+// Mapper maps a number in range to a number in range.
+//
+// @Requires 0 <= x <= 1000
+// @Ensures 0 <= y <= 2000
+type Mapper func(x int) (y int)
+
+// @Requires f != nil
+// @Requires Forall i in [0, |xs|) : 0 <= xs[i] <= 1000
+// @Modifies xs
+// @Ensures Forall i in [0, |xs|) : 0 <= xs'[i] <= 2000
+func Apply(xs []int, f Mapper) {
+	// @Invariant Forall k in [0, i) : 0 <= xs[k] <= 2000
+	// @Invariant Forall k in [i, |xs|) : xs[k] = old(xs)[k]
+	for i := range xs {
+		xs[i] = f(xs[i])
+	}
+}
+```
+
+At the call `f(xs[i])`, `Apply` proves that `f` is not nil and that the `Requires` clause of `Mapper` holds. After the call it knows the `Ensures` clause of `Mapper` and nothing else. The call is checked like any other call: what the `Modifies` clauses of the type list must be memory that `Apply` may modify. A call through a value can be deferred too, as in `defer done(s)`. The value and the arguments are evaluated at the `defer` statement.
+
+A function value that may be nil cannot be called:
+
+```text
+vego: the function value f may be nil
+```
+
+A function value can be compared with `nil`, in code and in formulas, as in `f != nil` and `Forall i in [0, |opts|) : opts[i] != nil`. Go allows no other comparison of function values, and neither do formulas.
+
+### A function type without a contract
+
+A value of a function type without a contract can be held, passed on, stored, and compared with `nil`, but not called:
+
+```go
+// @Ensures True
+func TwiceOf(f func(int) int) (y int) {
+	return f(1)
+}
+```
+
+```text
+vego: cannot verify TwiceOf: f has type func(int) int, which has no contract; declare a named
+function type with a contract and use it here
+```
+
+Declare a named type such as `Mapper` and use it for the parameter. A contract can only be written on a named type, so a function type of another package that has no annotations, such as `context.CancelFunc`, cannot be called.
+
+### Writing a contract on a function type
+
+The contract of a function type names the parameters and results of its signature. A function type with a contract must name its results, as a verified function does. Parameters that the contract does not mention may stay unnamed. `Requires`, `Ensures`, and `Modifies` are the only annotations a function type can have.
+
+`vego` checks the contract where the type is declared, whether or not anything uses the type. It reports a contract that cannot be read, `Requires` clauses that nothing satisfies, and an `Ensures` that some call its `Requires` allow could not meet:
+
+```go
+// @Requires 0 <= x <= 1000
+// @Ensures 2 * y = x
+type Half func(x int) (y int)
+```
+
+```text
+vego: the Ensures clauses of Half are not proved to be satisfiable for every call that its
+Requires allow, by results and a change of what Modifies lists; a value of the type is taken to
+meet them, so a call of one could prove something false. State in the Requires when some result
+exists, or weaken the Ensures
+```
+
+No `y` satisfies `2 * y = x` when `x` is odd. `vego` takes a value that comes from code it does not verify to meet the contract of its type, so a call of such a value would let `vego` conclude that `x` is even. To show that a contract can be met, `vego` chooses results and, for each struct or field that `Modifies` lists, new contents. It does not choose new elements for a slice or a map, so an `Ensures` that only a change of their elements can meet is reported too.
+
+### Making a function value
+
+A value of a type with a contract is checked where Go converts something to the type: where it is passed, assigned, returned, stored, or converted with `T(...)`. Three things can become such a value there:
+
+- a function, as in `Apply(xs, double)`;
+- a method value, as in `h.Serve`;
+- a function literal.
+
+`vego` checks each as a function of its own with the contract of the type. Called with arguments that meet the `Requires` of the type, it must meet its own `Requires`, write only what the type lists in `Modifies`, and leave the `Ensures` of the type true. It is checked against memory it knows nothing about, because the value may run at any later time:
+
+```go
+// @Requires 0 <= x <= 10
+// @Ensures y = x
+func small(x int) (y int) {
+	return x
+}
+
+// @Ensures f != nil
+func Small() (f Mapper) {
+	return small
+}
+```
+
+```text
+vego: precondition of small may not hold: 0 <= x <= 10, in small used as a Mapper at funcvalues.go:103:9
+```
+
+The receiver of a method value is evaluated where the value is made, as in Go. What `vego` knows of the receiver's value there is known when the value runs, but not what is in memory.
+
+`nil` and a value of the same type can also be assigned. Nothing else can become a value of the type: a value of another function type cannot, even when Go would convert it, because nothing shows that it meets the contract. A method expression, as in `T.M`, cannot be used as a value.
+
+### Function literals as values
+
+A function literal that is passed, returned, or stored is a value of the type it is given. This option sets a field of the configuration it is called with:
+
+```go
+type Config struct {
+	Timeout int
+	Retries int
+}
+
+// @Requires c != nil
+// @Modifies c
+type Option func(c *Config)
+
+// @Requires Forall i in [0, |opts|) : opts[i] != nil
+// @Ensures True
+func Configure(opts []Option) (cfg Config) {
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	return cfg
+}
+
+// @Ensures o != nil
+func WithTimeout(d int) (o Option) {
+	return func(c *Config) {
+		c.Timeout = d
+	}
+}
+```
+
+A literal used as a value may run after the function that made it has returned. So the body of the literal knows this of the variables it captures:
+
+- A variable that nothing assigns after its declaration, and whose address is not taken, has the value it had where the literal was made. What `vego` knew of that value there is known in the literal. `d` above is such a variable.
+- Any other variable can have any value of its type. A named result is one, because a `return` assigns it.
+
+From Go 1.22 on, each iteration of a `range` loop has its own variables, so a literal made in an iteration knows the values of that iteration. In a file compiled as an earlier Go, and for the variable of a three-clause `for` loop, the loop assigns the variable, so the literal knows nothing of it.
+
+```go
+// @Requires 0 <= k <= 1000
+// @Ensures f != nil
+func Offset(k int) (f Mapper) {
+	return func(x int) int {
+		return x + k
+	}
+}
+
+// @Ensures f != nil
+func Later() (f Mapper) {
+	k := 1
+	f = func(x int) int {
+		return x + k
+	}
+	k = 5000
+	return f
+}
+```
+
+`Offset` is verified. In `Later`, `k` is assigned after the literal is made, so `vego` reports:
+
+```text
+vego: addition may overflow int, in the function literal used as a Mapper at funcvalues.go:121:6
+vego: postcondition may not hold: 0 <= y <= 2000, in the function literal used as a Mapper at funcvalues.go:121:6
+```
+
+A literal used as a value cannot assign a variable it captures:
+
+```text
+vego: cannot verify Tally: a function literal used as a value cannot assign calls, a variable of
+the function around it: it may run when that function has moved on, and no call of it could tell
+that function what it did
+```
+
+A literal used as a value cannot call a variable that holds a literal of the function around it. Inside the body of the literal, `old(x)` is the value that its own parameter `x` had when it was called.
+
+### Function values that call function values
+
+The code that a function value made by verified code runs cannot call through a function value. That rules out a literal that calls a value it captures, a literal or function that passes a value to a function that calls it, and a function used as a value that calls through a value itself:
+
+```go
+// @Requires f != nil
+// @Ensures g != nil
+func Logged(f Mapper) (g Mapper) {
+	return func(x int) int {
+		return f(x)
+	}
+}
+```
+
+```text
+vego: cannot verify Logged: the function literal used as a value calls through the function value
+f, and code that a function value runs cannot do that yet: no contract of a function type has a
+variant, so nothing would prove that such calls end
+```
+
+A contract of a function type has no `Variant`. A value could be handed back to code that calls it again, and nothing would show that this ends. With this rule, a call through a value that verified code made runs code that makes no such call.
+
+### Function values from code that is not verified
+
+A function value that verified code receives from code it does not verify is taken to meet the contract of its type. See [What a proof assumes](#what-a-proof-assumes). Such a value could run code that an argument carries. So an argument that can carry code nobody has seen cannot be passed to a function value: an error whose origin is not known, a function value whose type has no contract, or another interface.
+
+```go
+// @Requires e != nil
+type Report func(e error)
+
+// @Requires r != nil And e != nil
+// @Ensures True
+func Tell(r Report, e error) {
+	r(e)
+}
+```
+
+```text
+vego: cannot verify Tell: e is passed to the function value r and is an error whose origin is
+not known; the value may come from code that is not verified, which could run code through it
+that nobody has seen
+```
+
+An error made with `errors.New` or `fmt.Errorf` can be passed, and so can a function value of a type with a contract.
 
 ## Predicates
 
@@ -1666,7 +1890,7 @@ func Rounds(l *Lock, n int) {
 }
 ```
 
-Only a call of a named function or method, or of a function literal, can be deferred. A function value, as in `defer cancel()`, cannot.
+A call through a function value of a type with a contract can be deferred too. See [Function values](#function-values). `defer cancel()` after `context.WithCancel` cannot be verified yet, because `context.Context` is an interface and `context.CancelFunc` has no contract.
 
 `recover` is not supported, because it returns an interface. Call it in a function that is not verified.
 
@@ -1756,7 +1980,7 @@ Each entry has these fields:
 | `requires` | no | A list of formulas. Callers must prove each one. |
 | `ensures` | no | A list of formulas. Callers can assume each one. |
 | `runs` | no | Parameters that carry code the function may call, at any depth inside the value. See [Arguments that carry code](#arguments-that-carry-code). |
-| `vouches` | no | Error results whose errors verified code may format, compare, and pass to `errors.Is`. See [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). |
+| `vouches` | no | Error results whose errors verified code may format, compare, and pass to `errors.Is`, and results that hold function values verified code may call. See [Errors that a trusted function returns](#errors-that-a-trusted-function-returns) and [Function values that a trusted function returns](#function-values-that-a-trusted-function-returns). |
 
 Put the formulas in quotes. Several characters that formulas use have a special meaning in YAML.
 
@@ -1836,6 +2060,16 @@ The third is to list the parameter under `runs` in the trusted contract:
 
 The claim is false for a function that calls the methods of an `error` when unverified callers can pass any error. Do not add `runs` in that case just to remove the message. The contract would be false, and every proof that uses it would be worthless.
 
+`runs` also claims three things about when the function runs the code it receives, whatever kind of code that is:
+
+- It runs the code only before it returns.
+- It runs the code only on the goroutine that called it.
+- It keeps no value that can hold code once it returns, in memory or anywhere else.
+
+A function that stores a callback and calls it later, such as one that registers a handler, makes these claims false. Do not list its parameter under `runs`. Call it from code that is not verified.
+
+When the parameter can hold a function value of a type with a contract (see [Function values](#function-values)), `runs` claims that the function calls such a value only with arguments that meet the `Requires` clauses of its type. The rest of the claim then has to hold only for values that meet the contract of their type, and every value that verified code passes does. For any other code, the claim has to hold whatever code arrives.
+
 The trust report shows `runs`, so that a reviewer of the trust file notices the larger claim.
 
 ### Errors that a trusted function returns
@@ -1866,6 +2100,17 @@ A pointer to a struct meets these conditions when its methods only read its fiel
 
 If the function returns an error that it was given, the claim covers that error too. With `runs`, the claim must hold whatever value is passed. The trust report shows `vouches`.
 
+### Function values that a trusted function returns
+
+A function value that a trusted function returns is code that the author of the contract may not have read. If a result can hold a function value of a type with a contract, at any depth, the entry must list the result under `vouches`. Otherwise the entry cannot be used, and each call reports:
+
+```text
+the trusted contract of F cannot be used: its result m can hold a function value of a type
+with a contract; list it under vouches to claim that every such value meets the contract of its type
+```
+
+With `vouches: [m]`, you claim that every such function value in `m` meets the contract of its type. The claim also covers the values in memory that `m` reaches and that the function allocated or wrote during the call. An entry whose `modifies` covers memory that can hold such a value, at any depth, cannot be used yet.
+
 ### Error variables in a trusted contract
 
 A trusted contract can name error variables, as in `err = io.EOF` and `is(err, io.EOF)`. The contract means the same in every package that calls the function, so its names do not depend on what any file imports:
@@ -1877,7 +2122,7 @@ The package must be in the build of the package that calls the function. An entr
 
 ### Limits of trusted contracts
 
-A trusted contract does not make an unsupported signature callable. If a function has a parameter or result of an unsupported type, such as an interface or a function value, verified code cannot call it even with an entry. The message is `cannot verify Sync: parameter s has unsupported type example.com/shop.Store`. Write a small wrapper whose signature uses only supported types, and trust the wrapper.
+A trusted contract does not make an unsupported signature callable. If a function has a parameter or result of an unsupported type, such as an interface, verified code cannot call it even with an entry. The message is `cannot verify Sync: parameter s has unsupported type example.com/shop.Store`. Write a small wrapper whose signature uses only supported types, and trust the wrapper.
 
 A function cannot have both annotations and a trusted contract. When you verify a function that you previously trusted, delete its entry.
 
@@ -1897,7 +2142,7 @@ The report has three lists:
 - the shipped contracts that the proofs use;
 - the entries in your trust file that no proof uses.
 
-An entry that lists parameters under `runs` or results under `vouches` shows them in the lines `runs code held by:` and `vouches for the errors in:`. Each is a claim about code that `vego` does not read. See [Arguments that carry code](#arguments-that-carry-code) and [Errors that a trusted function returns](#errors-that-a-trusted-function-returns).
+An entry that lists parameters under `runs` or results under `vouches` shows them in the lines `runs code held by:` and `vouches for the errors and function values in:`. Each is a claim about code that `vego` does not read. See [Arguments that carry code](#arguments-that-carry-code) and [Errors that a trusted function returns](#errors-that-a-trusted-function-returns).
 
 A contract marked `[may fail unpredictably]` does not say when its function succeeds. A verified function that calls it can be excused from saying when it succeeds, as described in [Functions that cannot promise success](#functions-that-cannot-promise-success).
 
@@ -1934,7 +2179,7 @@ A verified function can only call functions that have contracts. Start with func
 2. Add `// @Ensures True` and run `laas -vego` on the package. This checks the function for index errors, overflow, nil dereferences, and termination. You will usually need to add `Requires` clauses with bounds, loop invariants, and variants. You may also find bugs.
 3. Replace `Ensures True` with the real contract. Run `-vego.audit` to check that the contract says enough.
 4. Move on to the callers. Each caller needs contracts for everything it calls. If a callee is not ready, give it a trusted contract with a reason such as "not verified yet". Delete the entry once the callee is verified.
-5. Split functions that use unsupported Go. Move the logic into a verified function that works on plain data. Leave the part that uses an interface, a function value, or a goroutine unverified, and have it call the verified function.
+5. Split functions that use unsupported Go. Move the logic into a verified function that works on plain data. Leave the part that uses an interface, a function value whose type has no contract, or a goroutine unverified, and have it call the verified function.
 
 Keep two things in mind while a package is partly verified.
 
@@ -1957,7 +2202,7 @@ The second is that package-level variables are not supported. The only exception
 
 The steps are the same, but design the component first so that it stays within the supported subset of Go.
 
-- Use plain data: structs, slices, integers, strings, maps with integer or string keys, and pointers to structs. Keep interfaces, function values, and arrays out of its types.
+- Use plain data: structs, slices, integers, strings, maps with integer or string keys, and pointers to structs. Keep interfaces and arrays out of its types, and give every function type in them a contract.
 - Write the struct invariant first. It is usually a sentence you would put in the doc comment anyway, such as "`n` never exceeds the length".
 - Add `fresh(result)` to the contract of the constructor.
 - Give each method the smallest `Modifies` list that works. If a method can replace a slice, add the clause described in [A slice that grows inside a struct](#a-slice-that-grows-inside-a-struct).
@@ -2054,6 +2299,15 @@ This table lists the most common messages.
 | `the trusted contract ... cannot be used` | The entry in the trust file is invalid. The message says why. | Fix the entry. Check the parameter names. |
 | `..., in the function literal called at f.go:n:c`, or `..., in the function literal deferred at f.go:n:c and run at the return at f.go:n:c` (or `at the end of the function at`, or `at the end of the function literal at`) | The problem is in the body of a function literal, at the call named at the end. For a deferred literal, the message names the `defer` statement and where the literal runs. | Fix the body, or what holds at that call. See [Function literals](#function-literals). |
 | `cannot verify F: the function literal is used as a value of type T, which has no contract` | The literal is passed, returned, or stored as a value of a function type that has no contract. | Declare a named function type with a contract and use it there. |
+| `the function value f may be nil` | A call through `f` is not proved to have a value to call. | Add `f != nil` to the `Requires` clauses, or check `f` before the call. |
+| `cannot verify F: f has type T, which has no contract` | `f` is called, and its type has no contract. | Declare a named function type with a contract and use it for `f`. See [Function values](#function-values). |
+| `cannot verify F: x is used as a value of type T, which has no contract` | A function, method value, or literal is given a function type that has no contract. | Give it a named function type with a contract. |
+| `cannot verify F: converting x to T is not supported` | A function value of another type is converted to a function type. | Make the value of the type it is used as, from a function, a method value, or a literal. |
+| `..., in g used as a T at f.go:n:c`, or `..., in the function literal used as a T at f.go:n:c` | The function, method value, or literal does not meet the contract of `T` where it is made into a value of `T`. | Fix the function or the literal, or the contract of `T`. See [Making a function value](#making-a-function-value). |
+| `the Ensures clauses of T are not proved to be satisfiable for every call that its Requires allow` | Some call that the `Requires` of `T` allow has no result that meets its `Ensures`. | Add the condition to the `Requires` clauses, or weaken the `Ensures`. |
+| `cannot verify F: a function literal used as a value cannot assign x` | The literal assigns a variable of the function around it. | Return the value from the literal, or write it into memory that the contract of the type lists. |
+| `... calls through the function value f, and code that a function value runs cannot do that yet`, or `g may call through a function value, and code that a function value runs cannot do that yet` | Code that a function value runs would call through a function value. | Leave that code unverified. See [Function values that call function values](#function-values-that-call-function-values). |
+| `cannot verify F: x is passed to the function value f and is an error whose origin is not known` | The value may come from code that is not verified, which could run the methods of the error. | Pass an error made by `errors.New` or `fmt.Errorf`, or call from code that is not verified. |
 | `cannot verify F: f holds a function literal and is used here other than by calling it` | The variable that holds the literal is passed, compared, or assigned again. | Only call the variable. |
 | `cannot verify F: recover is not supported` | `recover` returns an interface. | Call `recover` in a function that is not verified. |
 | `cannot verify F: a formula built to verify it has grown beyond 1048576 nodes, which is the limit` | An expression or a run of statements builds a formula that grows faster than the code, as `x = x + x` does when repeated. | Split the function, or the expressions in it, into smaller ones. |
@@ -2061,12 +2315,17 @@ This table lists the most common messages.
 
 ## What is not supported
 
-`vego` supports functions and methods over these types: the integer types, `bool`, `string`, `error`, the float types, structs, pointers to structs, slices, and maps with integer or string keys. In the body it supports assignments, `if`, `switch`, `for` and `range` loops with `break` and `continue`, `return`, `defer`, calls to named functions and methods, function literals that are called or deferred where they are written or bound to a variable that is only called, and recursion. The built-ins `len`, `cap`, `min`, `max`, `new`, `make`, `append`, and `delete` are supported, and so are composite literals, slicing, and the arithmetic, comparison, shift, and bitwise operators.
+`vego` supports functions and methods over these types: the integer types, `bool`, `string`, `error`, the float types, structs, pointers to structs, slices, and maps with integer or string keys. In the body it supports assignments, `if`, `switch`, `for` and `range` loops with `break` and `continue`, `return`, `defer`, calls to named functions and methods, function literals that are called or deferred where they are written or bound to a variable that is only called, function values of named function types with a contract (see [Function values](#function-values)), and recursion. The built-ins `len`, `cap`, `min`, `max`, `new`, `make`, `append`, and `delete` are supported, and so are composite literals, slicing, and the arithmetic, comparison, shift, and bitwise operators.
 
 A function that uses any of the following is reported as `cannot verify`:
 
 - interfaces other than `error`, calls through interfaces, type switches, and type assertions;
-- function values and method values, and function literals that are passed, returned, stored, compared, or assigned again (see [Literals that cannot be verified](#literals-that-cannot-be-verified));
+- calls of function values whose type has no contract, and making a function value of such a type from a function, a method, or a literal (see [A function type without a contract](#a-function-type-without-a-contract));
+- converting a function value to another function type, and method expressions such as `T.M`;
+- a function literal used as a value that assigns a variable it captures (see [Function literals as values](#function-literals-as-values));
+- code that a function value made by verified code runs and that calls through a function value (see [Function values that call function values](#function-values-that-call-function-values));
+- a contract on a function type whose `Ensures` only a change of the elements of a slice or a map, or memory that the call creates, can meet;
+- passing an error of unknown origin, or a value that can hold an interface or a function value of a type without a contract, to a function value;
 - `recover`;
 - generic functions and types;
 - goroutines, channels, and `select`;
@@ -2089,8 +2348,9 @@ Floating-point values are supported but opaque. They can be passed around and us
 
 A proof by `vego` depends on the following assumptions. Each concerns something `vego` cannot see.
 
-- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list. It does not keep the pointers and slices it receives. It does not call back, through another package, into the verified function that called it. A call back within the same package is found and reported. For a parameter listed under `runs`, all of this holds whatever value is passed. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns).
-- Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type.
+- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list. It does not keep the pointers and slices it receives. It does not call back, through another package, into the verified function that called it. A call back within the same package is found and reported. For a parameter listed under `runs`, all of this holds whatever value is passed, or for a function value of a type with a contract, whatever value that meets the contract is passed. The function runs the code it receives only before it returns, only on the goroutine that called it, and only with arguments that meet the `Requires` of the type of a function value, and it keeps no value that can hold code. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values it returns meet the contracts of their types.
+- Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. They call a function value that verified code made only with arguments that meet the `Requires` of its type.
+- A function value that reaches verified code from code that is not verified meets the contract of its type. That includes a value passed as an argument, a value in memory that an argument reaches, and a value made with `reflect.MakeFunc` or by generic code. Called with arguments that meet the `Requires` of its type, such a value returns without panicking, writes only what the `Modifies` of its type lists, and leaves its `Ensures` true.
 - Unverified code respects Go's type system. It does not use `unsafe`, `reflect`, or cgo to give one piece of memory two types or to change a string.
 - No other goroutine writes memory that a verified function reads or writes while it runs. A proof covers one goroutine.
 - No code outside the packages that a verified package is built with assigns an error variable that a proof relies on, and no code changes one through `go:linkname`, assembly, `unsafe`, or `reflect`. When a verified package is built with a package that makes such an assignment, the verified package does not rely on the variable. The assignment is also reported wherever it meets a proof that does rely on it.
@@ -2108,9 +2368,9 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 
 | Annotation | Where | Meaning |
 | --- | --- | --- |
-| `Requires P` | doc comment of a function | `P` must be true when the function is called. |
-| `Ensures P` | doc comment of a function | `P` is true when the function returns. |
-| `Modifies a, b.f` | doc comment of a function | The memory the function may write that a caller can see. |
+| `Requires P` | doc comment of a function or of a named function type | `P` must be true when the function, or a value of the type, is called. |
+| `Ensures P` | doc comment of a function or of a named function type | `P` is true when the function, or a value of the type, returns. |
+| `Modifies a, b.f` | doc comment of a function or of a named function type | The memory the function, or a value of the type, may write that a caller can see. |
 | `Variant e` | doc comment of a recursive function | `e` is never negative and is smaller at each recursive call. |
 | `Invariant P` | directly above a loop | `P` is true each time the loop tests its condition. |
 | `Variant e` | directly above a `for` loop | `e` is never negative and decreases on each iteration. |
@@ -2175,6 +2435,7 @@ Results are referred to by the names in the function's signature.
 | the right operand of `&&` and <code>&#124;&#124;</code> | after the left one, and only when the left one does not decide the result |
 | an assignment | assigns after every operand is evaluated |
 | a call of a function literal | like a call, and it may change the variables that the literal assigns |
+| a call through a function value | like a call; the value is evaluated with the arguments, before the call |
 | any other read of memory, or of a variable that a function literal assigns | not fixed; `vego` proves that every order gives the same value |
 | `append` and other built-in functions | after their operands, and not ordered like calls |
 | the entries of a map literal | not fixed; keys that are not both constants must be proved different |
