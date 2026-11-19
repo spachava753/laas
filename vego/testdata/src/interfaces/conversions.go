@@ -164,3 +164,22 @@ func FieldsBothSwapped(f Flat) (s struct {
 	}{f, f}
 	return s
 }
+
+// Ranged has an invariant, and a value receiver.
+//
+// @Invariant 0 <= Rate <= 1000
+type Ranged struct{ Rate int }
+
+// @Requires 0 <= qty <= 1000
+// @Ensures ok -> 0 <= cents <= 1000000
+func (r Ranged) Price(sku string, qty int) (cents int, ok bool) {
+	return r.Rate * qty, true
+}
+
+// The struct a value receiver gets is the one converted, so its invariant
+// is proved from what is known where it is converted.
+//
+// @Ensures p != nil
+func FromRanged(r Ranged) (p Pricer) {
+	return r
+}
