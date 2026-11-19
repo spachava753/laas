@@ -204,7 +204,24 @@ There is a short form for a condition on a range of elements. `A[lo:hi) <= x` me
 
 A contract can use the function's parameters and results, and the integer and boolean constants of the package. String constants cannot be used by name. Write the string itself. A contract can also name the error variables of the package, as in `ErrEmpty`, and those of an imported package, as in `io.EOF`. A trusted contract names them by the path of their package instead. See [Error variables in a trusted contract](#error-variables-in-a-trusted-contract).
 
-Results are referred to by their names, so every result of a verified function must be named. This guide calls a single result `result`, but you can choose another name. Go does not allow a result to share a name with a parameter, so a name in a contract cannot mean both. Three names are not available for variables that annotations use: `True`, `False`, and `nil`, which are words of the formula language. A predicate cannot be called `is`.
+Results are referred to by their names, so every result of a verified function must be named. This guide calls a single result `result`, but you can choose another name. Go does not allow a result to share a name with a parameter, so a name in a contract cannot mean both. Three names are not available for variables that annotations use: `True`, `False`, and `nil`, which are words of the formula language. A predicate cannot be called `is`. A predicate called `held` or `rheld` cannot be used on a mutex, whose states have those names. See [Locks](#locks).
+
+A contract can name an unexported field only of a struct declared in the package where the contract is written. A contract of another package that names one is refused:
+
+```go
+// @Requires a != nil And a.mu.mu.state = 0
+// @Ensures True
+func Free(a *Account) {
+}
+```
+
+```text
+vego: in Requires annotation: a.mu.mu: mu is an unexported field of sync.Mutex, declared in package
+sync, and a formula in package guide cannot name it; sync.Mutex has the state held, which a formula
+names as held(x) for a value or a pointer x
+```
+
+A contract that a package publishes keeps naming the unexported fields of its own package where other packages read it. Such a field can change between versions of the package that declares it, so a contract of another package speaks of the type through its exported fields.
 
 ```text
 vego: Unnamed has annotations, so each of its results needs a name, as in func Unnamed(...) (n int, err error)
@@ -1317,7 +1334,7 @@ The first, third, and fourth rows apply wherever the path ends. `Modifies s.item
 
 To assign a field that holds a slice, pointer, or map, list the struct that contains it. A method that assigns `s.n` and writes `s.items[i]` needs `Modifies s.n, s.items`. A method that assigns `s.items` needs `Modifies s`.
 
-A struct can have a field of a type that `vego` does not support, such as a `sync.Mutex`. Verified code cannot read or assign that field, but it is still part of the struct. Assigning the whole struct writes that field too. For a pointer `h` to such a struct, `*h = H{}` needs `Modifies h`, and entries for the other fields are not enough. A struct with an array field is the exception. It is not supported at all.
+A struct can have a field of a type that `vego` does not support, such as a channel. Verified code cannot read or assign that field, but it is still part of the struct. Assigning the whole struct writes that field too. For a pointer `h` to such a struct, `*h = H{}` needs `Modifies h`, and entries for the other fields are not enough. A struct with an array field is the exception. It is not supported at all.
 
 ### Aliasing
 
@@ -2199,24 +2216,27 @@ A call through a function value of a type with a contract can be deferred too, a
 
 ### Locks
 
-`vego` has no contract for `sync.Mutex`, and you should not write the obvious trusted one, with no conditions. `Lock` blocks forever if the goroutine already holds the mutex. `Unlock` crashes the program if the mutex is not locked. A contract without a condition on the lock's state would claim that both calls always return, and `vego` would then accept a double `Lock` or an `Unlock` without a `Lock`. The condition cannot be stated in a portable way. A formula could only refer to the private fields of the mutex, which would tie the contract to one version of Go.
-
-Keep locking outside the verified code instead. An unverified function takes the lock and calls a verified function to do the work:
+`vego` ships contracts for the methods of `sync.Mutex` and `sync.RWMutex` that lock and unlock. Their formulas speak of whether the goroutine that runs the function holds the mutex. A formula writes that as `held(m)`, where `m` is a mutex or a pointer to one:
 
 ```go
-// Deposit is not verified. It takes the lock, checks what the verified
-// part requires, and leaves the arithmetic to it.
-func (a *Account) Deposit(n int) bool {
+// Deposit adds n to the balance if the result stays within the limit.
+//
+// @Requires a != nil And ~held(a.mu) And 0 <= n
+// @Modifies a.mu, a.balance
+// @Ensures ~held(a.mu')
+func (a *Account) Deposit(n int) (ok bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if n < 0 || n > 1000000-a.balance {
+	if n > 1000000-a.balance {
 		return false
 	}
 	a.deposit(n)
 	return true
 }
 
-// @Requires a != nil And 0 <= n And a.balance + n <= 1000000
+// deposit runs while the caller holds the lock.
+//
+// @Requires a != nil And held(a.mu) And 0 <= n And a.balance + n <= 1000000
 // @Modifies a.balance
 // @Ensures a.balance' = a.balance + n
 func (a *Account) deposit(n int) {
@@ -2224,9 +2244,142 @@ func (a *Account) deposit(n int) {
 }
 ```
 
-A struct used by verified code can contain a mutex. Verified code cannot call `Lock` or `Unlock`, and should not touch the field.
+`held(a.mu)` is true when the goroutine that runs the function has locked `a.mu` and has not unlocked it since. It says nothing about other goroutines. It is false for a mutex that was just created, such as the one in `&Account{}`.
 
-The proof of `deposit` shows that it is correct when one goroutine runs it. Keeping other goroutines out is the job of `Deposit`, and that part is not proved.
+`Deposit` lists `a.mu` in `Modifies`, because `Lock` and `Unlock` write the mutex. It requires `~held(a.mu)`, because `Lock` on a mutex that the goroutine already holds waits for ever. `vego` reports a `Lock` that may do that, and an `Unlock` of a mutex that the goroutine may not hold, which is a run-time error:
+
+```go
+// DepositLocked takes the lock without saying that the caller does not
+// hold it.
+//
+// @Requires a != nil And 0 <= n And a.balance + n <= 1000000
+// @Modifies a
+func (a *Account) DepositLocked(n int) {
+	a.mu.Lock()
+	a.balance += n
+	a.mu.Unlock()
+}
+```
+
+```text
+vego: precondition of Lock may not hold: ~held(m)
+```
+
+The message shows the clause as the contract of `Lock` writes it. `m` is the receiver of `Lock`, here `&a.mu`. An `Unlock` gives `precondition of Unlock may not hold: held(m)`.
+
+The contracts are these:
+
+| Method | Requires | Ensures |
+| --- | --- | --- |
+| `(*sync.Mutex).Lock` | `~held(m)` | `held(m')` |
+| `(*sync.Mutex).Unlock` | `held(m)` | `~held(m')` |
+| `(*sync.Mutex).TryLock` | | `result -> ~held(m) And held(m')`, and `~result -> (held(m') <-> held(m))` |
+| `(*sync.RWMutex).Lock` | `~held(rw)`, `~rheld(rw)` | `held(rw')`, `~rheld(rw')` |
+| `(*sync.RWMutex).Unlock` | `held(rw)` | `~held(rw')` |
+| `(*sync.RWMutex).RLock` | `~held(rw)`, `~rheld(rw)` | `rheld(rw')`, `~held(rw')` |
+| `(*sync.RWMutex).RUnlock` | `rheld(rw)` | `~rheld(rw')` |
+| `(*sync.RWMutex).TryLock` | | `result -> ~held(rw) And ~rheld(rw) And held(rw')` |
+| `(*sync.RWMutex).TryRLock` | `~rheld(rw)` | `result -> ~held(rw) And rheld(rw')`, and `~result -> ~rheld(rw')` |
+
+Every one also requires that the receiver is not `nil` and lists the receiver under `modifies`. A state that a row does not mention stays as it was. `rheld(rw)` is true when the goroutine holds a read lock on `rw`. The goroutine can hold at most one, because the documentation of `sync` rules out recursive read locking: a second `RLock` can wait for a writer that waits for the first. For the same reason, `RLock` and `Lock` require that the goroutine holds neither lock, and `TryRLock` requires that it holds no read lock.
+
+#### What a proof of a function that locks shows
+
+A verified function that locks a mutex is proved for one goroutine. The proof shows that this goroutine never locks a mutex that it holds, never unlocks one that it does not hold, writes only what `Modifies` lists, and meets its contract. Each of these holds only if no other goroutine writes memory that the function reads or writes while it runs, including while it waits in `Lock`. The one exception is that other goroutines can lock and unlock a mutex that this goroutine does not hold. Taking a lock does not change that assumption. `vego` still assumes that nothing else writes the memory that the lock protects.
+
+So the proof does not show that other goroutines take the lock before they touch the same memory. It also does not show that what the lock protects is unchanged between an `Unlock` and the next `Lock`. A verified function that locks is not proved to be safe to call from several goroutines.
+
+This contract is proved, and it is false in a program where two goroutines deposit at the same time:
+
+```go
+// DepositSum adds n to the balance and says what the balance becomes.
+//
+// @Requires a != nil And ~held(a.mu) And 0 <= n
+// @Modifies a.mu, a.balance
+// @Ensures ~held(a.mu')
+// @Ensures ok -> a.balance' = a.balance + n
+func (a *Account) DepositSum(n int) (ok bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if n > 1000000-a.balance {
+		return false
+	}
+	a.deposit(n)
+	return true
+}
+```
+
+While `DepositSum` waits in `Lock`, another goroutine can take the lock, deposit, and unlock. `a.balance` on return is then more than `a.balance + n` for the value of `a.balance` at the call. `vego` proves the clause because it assumes that no other goroutine writes `a.balance`. Do not state in a contract what other goroutines can change, even when the function holds a lock while it reads it.
+
+The lock discipline rests on the same assumption. This function is proved, and it crashes if another goroutine changes `t.on` between the two `if` statements:
+
+```go
+// Switch locks only when on is set.
+type Switch struct {
+	mu sync.Mutex
+	on bool
+	n  int
+}
+
+// @Requires t != nil And ~held(t.mu)
+// @Modifies t.mu, t.n
+// @Ensures ~held(t.mu')
+func (t *Switch) Step() {
+	if t.on {
+		t.mu.Lock()
+	}
+	t.n = 1
+	if t.on {
+		t.mu.Unlock()
+	}
+}
+```
+
+A proof about several goroutines needs goroutines and channels, which `vego` does not support yet.
+
+#### Values that hold a mutex cannot be copied or overwritten
+
+`sync` documents that a mutex must not be copied after first use. `vego` refuses every copy and every assignment of a value that holds a mutex: a `sync.Mutex`, a `sync.RWMutex`, or a struct with one as a field at any depth. Such a value can only be created, used through a pointer, and changed through the methods of the mutex.
+
+```go
+// Snapshot copies the account, and its mutex with it.
+//
+// @Requires a != nil
+// @Ensures True
+func Snapshot(a *Account) (balance int) {
+	b := *a
+	return b.balance
+}
+```
+
+```text
+vego: cannot verify Snapshot: *a copies a guide.Account, which holds a sync.Mutex; use a pointer
+to it; a value that holds a state, such as a sync.Mutex, must not be copied or overwritten, since
+its state changes only through its methods and sync documents that a Mutex must not be copied
+after first use
+```
+
+These are refused, each with a message that says what to write instead:
+
+- a value of such a type that is assigned, passed, returned, converted, or put into a composite literal, as `*a` above;
+- a parameter, result, or receiver of such a type, since the caller copies it;
+- a method with a value receiver of such a type, called directly or through a pointer, and a pointer converted to an interface whose method has such a receiver;
+- a field selected from a value that cannot be addressed, as in `m[k].balance` for a map of such structs, and a call that returns such a value;
+- a `range` variable that holds an element of such a type, and the variable of a three-clause `for` loop of such a type;
+- an assignment to a variable, field, or element of such a type, as in `*a = Account{}`;
+- `append` to a slice of such elements, since `append` copies every element when it moves the slice.
+
+A composite literal, a variable declaration, `new`, `&Account{}`, and `make([]Account, n)` create new values and are allowed. So are `a.mu.Lock()`, `as[i].mu.Lock()`, and `&as[i]`, which use the value where it is. Hold such values by pointer, and build a slice of them with its final length.
+
+#### Locking in a function that a trusted function calls
+
+A function literal that a trusted function calls while it runs, such as the `less` of `sort.Search`, cannot lock a mutex. `vego` checks such a literal once for every call, in a state where everything that any call writes is unknown. The lock is one of those things, so whether the goroutine holds it is not known there. Lock outside the call instead. See [Functions that a trusted function calls](#functions-that-a-trusted-function-calls).
+
+#### Trusted contracts for functions that lock
+
+A trusted function that locks a mutex that it reaches must require that the caller does not hold it, as in `~held(c.mu)`. Without that clause, its claim that it returns is false whenever the caller holds the mutex. A `modifies` that covers a struct that holds a mutex makes the caller forget whether it holds the mutex, unless the `ensures` says so again, as in `~held(c.mu')`.
+
+A formula can name an unexported field only of a struct declared in the package where the formula is written, so `a.mu.mu` is refused outside package `sync`. The fields of a mutex differ between versions of Go, and other goroutines change them. Speak of a mutex through `held` and `rheld`.
 
 ## Bits
 
@@ -2301,6 +2454,7 @@ The names in an entry are the parameter and result names from the function's sou
 - `strconv.Itoa`, `strconv.Atoi`
 - `os.Remove`
 - `math/rand.Intn`, `math/rand.Int`
+- the methods of `sync.Mutex` and `sync.RWMutex` that lock and unlock, described in [Locks](#locks)
 
 It also includes contracts for `(io.Writer).Write`, `(io.Reader).Read`, `(context.Context).Err`, and `context.CancelFunc`, which are described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages).
 
@@ -3052,6 +3206,9 @@ This table lists the most common messages.
 | `the trust files of this build give K two contracts` (or `a contract at F, and the proofs of package P were made with none`) | Modules built together give one type different entries. | Make the entries the same, or run `laas` with `-vego.trusted`. See [One entry for each type in a build](#one-entry-for-each-type-in-a-build). |
 | `cannot verify F: Go converts a value to an interface type here, and which expression it converts could not be told` | A value without an expression of its own, such as one result of a call with several, is converted to an interface. | Assign the value to a variable of its own type first. |
 | `cannot verify F: f holds a function literal and is used here other than by calling it` | The variable that holds the literal is passed, compared, or assigned again. | Only call the variable. |
+| `precondition of Lock may not hold: ~held(m)`, or `precondition of Unlock may not hold: held(m)` | The goroutine may already hold the mutex it locks, or may not hold the one it unlocks. | Add `~held(a.mu)` to the `Requires` clauses, and unlock on every path, as with `defer a.mu.Unlock()`. See [Locks](#locks). |
+| `cannot verify F: x copies a T, which holds a sync.Mutex`, and the other messages that end in `must not be copied after first use` | Go copies or overwrites a value that holds a mutex here. | Do what the message says: use a pointer, give the method a pointer receiver, or build the slice with its final length. See [Values that hold a mutex cannot be copied or overwritten](#values-that-hold-a-mutex-cannot-be-copied-or-overwritten). |
+| `... is an unexported field of T, declared in package p, and a formula in package q cannot name it` | A contract names a private field of another package. | Name an exported field, or the state of a mutex with `held`. See [Names](#names). |
 | `cannot verify F: recover is not supported` | `recover` returns an interface. | Call `recover` in a function that is not verified. |
 | `cannot verify F: a formula built to verify it has grown beyond 1048576 nodes, which is the limit` | An expression or a run of statements builds a formula that grows faster than the code, as `x = x + x` does when repeated. | Split the function, or the expressions in it, into smaller ones. |
 | `analysis skipped due to errors in package` | The package does not compile, or the toolchain does not match. | See [Running it](#running-it). |
@@ -3079,6 +3236,9 @@ A function that uses any of the following is reported as `cannot verify`:
 - deferring a call that hands over a function, and using a trusted function with a contract under `calls` as a value;
 - applying a function parameter in a trusted contract unless it has one integer parameter and one integer or boolean result, and a contract under `calls` for a function that is given or returns an error, an interface, or a function;
 - `(*sync.Once).Do`, which has no true contract yet (see [What a run may write](#what-a-run-may-write));
+- copying or assigning a value that holds a `sync.Mutex` or a `sync.RWMutex`, parameters, results, and receivers of such a type, a method with a value receiver of such a type, `append` to a slice of them, and `range` variables and loop variables of such a type (see [Values that hold a mutex cannot be copied or overwritten](#values-that-hold-a-mutex-cannot-be-copied-or-overwritten));
+- locking a mutex in a function literal that a trusted function calls while it runs (see [Locking in a function that a trusted function calls](#locking-in-a-function-that-a-trusted-function-calls));
+- a formula that names an unexported field of a struct declared in another package (see [Names](#names));
 - `recover`;
 - generic functions and types;
 - goroutines, channels, and `select`;
@@ -3110,7 +3270,10 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - Packages that are built together give each type at most one entry. `vego` reports two entries for one type, or an entry against none, in every package that `laas` analyses and that is built with both. A program whose main package is never given to `laas` is not checked.
 - A function value that reaches verified code from code that is not verified meets the contract of its type. That includes a value passed as an argument, a value in memory that an argument reaches, and a value made with `reflect.MakeFunc` or by generic code. Called with arguments that meet the `Requires` of its type, such a value returns without panicking, writes only what the `Modifies` of its type lists, and leaves its `Ensures` true.
 - Unverified code respects Go's type system. It does not use `unsafe`, `reflect`, or cgo to give one piece of memory two types or to change a string.
-- No other goroutine writes memory that a verified function reads or writes while it runs. A proof covers one goroutine.
+- No other goroutine writes memory that a verified function reads or writes while it runs, also while the function waits in `Lock` or `RLock`. The one exception is that other goroutines can lock and unlock a mutex that the goroutine running the function does not hold. A proof covers one goroutine. A function that takes a lock is not proved to be safe to call from several goroutines. See [What a proof of a function that locks shows](#what-a-proof-of-a-function-that-locks-shows).
+- Every call that waits for another goroutine returns: `Lock`, `RLock`, and the `Lock` of an `RWMutex` return once the other goroutines release the mutex. A deadlock that the verified function takes part in breaks this.
+- No other goroutine unlocks a mutex that the goroutine running a verified function holds.
+- Code that is not verified does not copy a value that holds a `sync.Mutex` or a `sync.RWMutex` after the mutex was first used, as the documentation of `sync` requires.
 - No code outside the packages that a verified package is built with assigns an error variable that a proof relies on, and no code changes one through `go:linkname`, assembly, `unsafe`, or `reflect`. When a verified package is built with a package that makes such an assignment, the verified package does not rely on the variable. The assignment is also reported wherever it meets a proof that does rely on it.
 - `errors.New`, `fmt.Errorf`, and `errors.Is` behave as they do in the Go releases that `laas` is tested with. Each call of `errors.New` or `fmt.Errorf` returns a new pointer. The errors they return have no `Is` method. `Unwrap` returns the operand of the one `%w`. `errors.Is` finds an error, or an error it wraps, that is the target. The tests of `vego` check this against the running toolchain.
 - The compiler evaluates each statement in an order that the Go specification allows. Calls, `&&`, and `||` run from left to right, an operation runs after its operands, and an assignment assigns only after it has evaluated everything. Where the specification leaves the order open, `vego` proves that every order it allows gives the same values.
@@ -3158,6 +3321,8 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `err = ErrEmpty` | the two are the same error |
 | `is(err, target)` | `errors.Is(err, target)` reports true |
 | `has(m, k)` | the map contains the key |
+| `held(m)`, `held(a.mu')` | the goroutine that runs the function holds the `sync.Mutex` or `sync.RWMutex`; `m` is a mutex or a pointer to one |
+| `rheld(rw)` | the goroutine holds a read lock on the `sync.RWMutex` |
 | `name(x, y)` | a predicate |
 | `f(x)` | in the `ensures` of a trusted contract, what the function parameter `f` returns for `x` |
 

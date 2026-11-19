@@ -818,30 +818,32 @@ func Total(as []*Account) (result int) {
 	return total
 }
 
-// Deposit is not verified. It takes the lock, checks what the verified
-// part requires, and leaves the arithmetic to it.
-func (a *Account) Deposit(n int) bool {
+// Deposit adds n to the balance if the result stays within the limit.
+//
+// @Requires a != nil And ~held(a.mu) And 0 <= n
+// @Modifies a.mu, a.balance
+// @Ensures ~held(a.mu')
+func (a *Account) Deposit(n int) (ok bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if n < 0 || n > 1000000-a.balance {
+	if n > 1000000-a.balance {
 		return false
 	}
 	a.deposit(n)
 	return true
 }
 
-// deposit is the verified part: it changes the balance and nothing else,
-// and keeps the invariant of the account.
+// deposit runs while the caller holds the lock.
 //
-// @Requires a != nil And 0 <= n And a.balance + n <= 1000000
+// @Requires a != nil And held(a.mu) And 0 <= n And a.balance + n <= 1000000
 // @Modifies a.balance
 // @Ensures a.balance' = a.balance + n
 func (a *Account) deposit(n int) {
 	a.balance += n
 }
 
-// DepositLocked takes the lock in verified code without saying that the
-// caller does not hold it.
+// DepositLocked takes the lock without saying that the caller does not
+// hold it.
 //
 // @Requires a != nil And 0 <= n And a.balance + n <= 1000000
 // @Modifies a
@@ -849,6 +851,56 @@ func (a *Account) DepositLocked(n int) {
 	a.mu.Lock() // want `vego: precondition of Lock may not hold: ~held\(m\)`
 	a.balance += n
 	a.mu.Unlock()
+}
+
+// DepositSum adds n to the balance and says what the balance becomes.
+//
+// @Requires a != nil And ~held(a.mu) And 0 <= n
+// @Modifies a.mu, a.balance
+// @Ensures ~held(a.mu')
+// @Ensures ok -> a.balance' = a.balance + n
+func (a *Account) DepositSum(n int) (ok bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if n > 1000000-a.balance {
+		return false
+	}
+	a.deposit(n)
+	return true
+}
+
+// Switch locks only when on is set.
+type Switch struct {
+	mu sync.Mutex
+	on bool
+	n  int
+}
+
+// @Requires t != nil And ~held(t.mu)
+// @Modifies t.mu, t.n
+// @Ensures ~held(t.mu')
+func (t *Switch) Step() {
+	if t.on {
+		t.mu.Lock()
+	}
+	t.n = 1
+	if t.on {
+		t.mu.Unlock()
+	}
+}
+
+// @Requires a != nil And a.mu.mu.state = 0 // want `vego: in Requires annotation: a.mu.mu: mu is an unexported field of sync.Mutex, declared in package sync, and a formula in package guide cannot name it; sync.Mutex has the state held, which a formula names as held\(x\) for a value or a pointer x`
+// @Ensures True
+func Free(a *Account) {
+}
+
+// Snapshot copies the account, and its mutex with it.
+//
+// @Requires a != nil
+// @Ensures True
+func Snapshot(a *Account) (balance int) {
+	b := *a // want `vego: cannot verify Snapshot: \*a copies a guide.Account, which holds a sync.Mutex; use a pointer to it; a value that holds a state, such as a sync.Mutex, must not be copied or overwritten, since its state changes only through its methods and sync documents that a Mutex must not be copied after first use`
+	return b.balance
 }
 
 var ErrTooMany = errors.New("too many")

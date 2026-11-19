@@ -99,6 +99,10 @@ func TrustReport(usages []*Usage, dir string) string {
 	states = slices.Compact(states)
 	if len(states) > 0 {
 		fmt.Fprintf(&b, "States the contracts in use speak of: %d\n", len(states))
+		b.WriteString("  Each is about the goroutine that runs a verified function. A proof that reads one holds only if no other\n" +
+			"  goroutine writes the memory the function uses while it runs, also while it waits for a lock, except to lock\n" +
+			"  and unlock a mutex this goroutine does not hold; if nobody unlocks a mutex this goroutine holds; and if every\n" +
+			"  call that waits for another goroutine returns.\n")
 		for _, state := range states {
 			name, reason, _ := strings.Cut(state, ": ")
 			fmt.Fprintf(&b, "  %s\n    means:   %s\n", name, reason)
