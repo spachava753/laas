@@ -22,6 +22,18 @@ func isSlice(t types.Type) bool {
 	return ok
 }
 
+// isFunc reports whether a type is a function type that is modelled: one
+// without type parameters. A function value is one leaf, a reference that
+// is zero exactly when the value is nil. Go lets a function value be
+// compared with nil and nothing else, so nothing else is known of it.
+func isFunc(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	sig, ok := t.Underlying().(*types.Signature)
+	return ok && sig.TypeParams() == nil && sig.RecvTypeParams() == nil
+}
+
 func isString(t types.Type) bool {
 	basic, ok := t.Underlying().(*types.Basic)
 	return ok && basic.Info()&types.IsString != 0

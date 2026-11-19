@@ -73,16 +73,17 @@ const (
 	OpDiv // Go division: truncates toward zero
 	OpMod // Go remainder: takes the sign of the dividend
 	OpLen
-	OpSelect // Select(seq, index)
-	OpStore  // Store(seq, index, value)
-	OpFill   // Fill(length, value): a sequence holding one value everywhere
-	OpPush   // Push(seq, value): seq with value appended
-	OpConcat // Concat(a, b): the elements of a followed by those of b
-	OpSub    // Sub(seq, lo, hi): the elements of seq from lo up to hi
-	OpIsNil  // IsNil(err): whether an error value is nil
-	OpIs     // Is(err, target): whether errors.Is(err, target) reports true
-	OpKey    // Key(seq): a number that identifies a sequence by its contents
-	OpPair   // Pair(ref, at): a pointer, which only ever occurs as an operand of RefEq
+	OpSelect  // Select(seq, index)
+	OpStore   // Store(seq, index, value)
+	OpFill    // Fill(length, value): a sequence holding one value everywhere
+	OpPush    // Push(seq, value): seq with value appended
+	OpConcat  // Concat(a, b): the elements of a followed by those of b
+	OpSub     // Sub(seq, lo, hi): the elements of seq from lo up to hi
+	OpIsNil   // IsNil(err): whether an error value is nil
+	OpIs      // Is(err, target): whether errors.Is(err, target) reports true
+	OpKey     // Key(seq): a number that identifies a sequence by its contents
+	OpPair    // Pair(ref, at): a pointer, which only ever occurs as an operand of RefEq
+	OpFuncVal // FuncVal(ref): a function value, which only ever occurs as an operand of RefEq
 	OpIte
 	OpEq
 	OpLe
@@ -284,12 +285,20 @@ func Pair(ref, at *Term) *Term {
 	return node(OpPair, Ref, ref, at)
 }
 
+// FuncVal stands for a function value in a formula, which can only be
+// compared with nil: ref is zero exactly when the value is nil.
+func FuncVal(ref *Term) *Term { return node(OpFuncVal, Ref, ref) }
+
 // Incomparable says why two references cannot be compared, or returns ""
-// if they can: a pointer with a pointer or with nil, and anything that is
-// not a pointer, such as a map, with its like.
+// if they can: a pointer with a pointer or with nil, a function value with
+// nil, and anything else, such as a map, with its like.
 func Incomparable(a, b *Term) string {
 	isNil := func(t *Term) bool { return t.Op == OpIntLit && t.Val == 0 }
 	switch {
+	case (a.Op == OpFuncVal && !isNil(b)) || (b.Op == OpFuncVal && !isNil(a)):
+		return "a function value can only be compared with nil"
+	case a.Op == OpFuncVal || b.Op == OpFuncVal:
+		return ""
 	case a.Op != OpPair && b.Op != OpPair:
 		return ""
 	case a.Op != OpPair || b.Op != OpPair:
@@ -307,6 +316,12 @@ func Incomparable(a, b *Term) string {
 // nil, are equal: both nil, or into the same allocation at the same
 // position.
 func RefEq(a, b *Term) *Term {
+	if a.Op == OpFuncVal {
+		a = a.Args[0]
+	}
+	if b.Op == OpFuncVal {
+		b = b.Args[0]
+	}
 	switch {
 	case a.Op == OpPair && b.Op == OpPair:
 		return And(Eq(a.Args[0], b.Args[0]), Or(Eq(a.Args[0], RefLit(0)), Eq(a.Args[1], b.Args[1])))
@@ -528,6 +543,8 @@ func (t *Term) write(b *strings.Builder) {
 		list("key(", t.Args, "", ")")
 	case OpPair:
 		list("pointer(", t.Args, ", ", ")")
+	case OpFuncVal:
+		list("function(", t.Args, "", ")")
 	case OpIte:
 		list("ite(", t.Args, ", ", ")")
 	case OpForall:

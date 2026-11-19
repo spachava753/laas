@@ -159,6 +159,10 @@ func layoutOf(t types.Type) ([]leaf, bool) {
 		if mapKeyed(t) {
 			return one(logic.Ref)
 		}
+	case *types.Signature:
+		if isFunc(t) {
+			return one(logic.Ref)
+		}
 	case *types.Slice:
 		return []leaf{
 			{"#ref", logic.Ref, t, partRef}, {"#off", logic.Int, t, partOff},
@@ -207,7 +211,7 @@ func holdsArray(t types.Type) bool {
 }
 
 // sortOf maps a Go type whose values are a single leaf to the sort of that
-// leaf: numbers, booleans, strings, errors, and maps.
+// leaf: numbers, booleans, strings, errors, maps, and functions.
 func sortOf(t types.Type) (logic.Sort, bool) {
 	// A struct is never a single leaf, even when only one of its fields is
 	// modelled: the fields left out are part of its value too.
@@ -379,6 +383,8 @@ func (pv *pkgVerifier) wellFormed(val value, t types.Type, brk *logic.Term) *log
 		case lf.part == partPtr:
 			facts = append(facts, exists(val[i]), logic.Le(zero, val[i+1]), logic.Le(val[i+1], logic.BigLit(pv.maxAlloc())))
 		case lf.part != partValue:
+		case lf.sort == logic.Ref && isFunc(lf.typ):
+			// A function value refers to no allocation.
 		case lf.sort == logic.Ref:
 			facts = append(facts, exists(val[i]))
 		default:

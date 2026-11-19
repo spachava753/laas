@@ -172,7 +172,7 @@ func (v *fnVerifier) evalAs(e ast.Expr, want types.Type, st *state, guard []*log
 		return v.eval(e, st, guard)
 	}
 	_, isPointer := pointee(want)
-	if !isError(want) && !isSlice(want) && !isPointer && !isMap(want) {
+	if !isError(want) && !isSlice(want) && !isPointer && !isMap(want) && !isFunc(want) {
 		v.unsupported(e.Pos(), fmt.Sprintf("nil of type %s is not supported", want))
 	}
 	return zeroValue(want)
@@ -336,7 +336,7 @@ func (v *fnVerifier) binaryExpr(e *ast.BinaryExpr, st *state, guard []*logic.Ter
 		switch {
 		case isError(t):
 			isNil = logic.IsNil(val[0])
-		case isPointer, isSlice(t), isMap(t):
+		case isPointer, isSlice(t), isMap(t), isFunc(t):
 			isNil = logic.Eq(val[0], logic.RefLit(0))
 		default:
 			v.unsupported(e.Pos(), fmt.Sprintf("comparing a %s with nil is not supported", t))

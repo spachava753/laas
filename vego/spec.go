@@ -424,6 +424,10 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 	case found.constant != nil:
 		return found.constant, nil
 	}
+	if isFunc(found.typ) {
+		// A function value can only be compared with nil.
+		return logic.FuncVal(found.val[0]), nil
+	}
 	if _, single := sortOf(found.typ); single {
 		return found.val[0], nil
 	}

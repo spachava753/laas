@@ -1363,6 +1363,9 @@ func (b *sampler) add(t types.Type, to binding, depth int) {
 		b.addMap(t, to, depth)
 	case isString(t):
 		scalar(b.texts())
+	case isFunc(t):
+		// A function value is nil or not, and nothing else is known of it.
+		scalar([]*logic.Term{logic.RefLit(0), logic.RefLit(1)})
 	case single && sort != logic.Float:
 		scalar([]*logic.Term{b.scalarOf(t)})
 	case single:
