@@ -977,3 +977,20 @@ func CondForgets(it *Iter, g *Gauge) {
 	for bumpN(g) == 0 && it.Next() { // want `vego: loop invariant may not be preserved: g.n < 1000`
 	}
 } // want `vego: postcondition may not hold: g.n' >= g.n`
+
+// @Requires o != nil
+// @Modifies o
+// @Ensures result = 0
+func replInner(o *Outer) (result int) {
+	o.Inner = &Inner{}
+	return 0
+}
+
+// EmbeddedReplaced calls a method promoted from an embedded pointer beside a
+// call that replaces that pointer.
+//
+// @Requires o != nil And o.Inner != nil And -1000 <= o.Inner.v <= 1000
+// @Modifies o
+func EmbeddedReplaced(o *Outer) (result int) {
+	return o.PM(replInner(o)) // want `vego: the receiver of o.PM may be read before or after the call to replInner`
+}

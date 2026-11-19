@@ -878,7 +878,14 @@ vego: s.n may be read before or after the call to Pop, which may change it, and 
 not fix the order; split the statement so that the order is the one you mean
 ```
 
-`vego` looks at every read of memory in a statement: a field reached through a pointer, an element of a slice, an entry of a map, and a variable whose address is taken. For each one that Go may make before or after a call that modifies memory, it must prove that the read gives the same value either way. It decides this from the `Modifies` and `Ensures` clauses of the call. A local variable whose address is not taken cannot be changed by a call, so reading it never conflicts.
+`vego` looks at every read of memory in a statement. These are the reads of memory:
+
+- a field, or a whole struct, reached through a pointer, as in `p.n`, `*p`, and the receiver of a method with a value receiver called on a pointer;
+- an element of a slice, and the elements that `string(b)` copies;
+- an entry of a map, and the number of its keys, `len(m)`;
+- a variable whose address is taken.
+
+For each one that Go may make before or after a call that modifies memory, it must prove that the read gives the same value either way. It decides this from the `Modifies` and `Ensures` clauses of the call. A local variable whose address is not taken cannot be changed by a call, so reading it never conflicts.
 
 Write the order you mean in separate statements:
 
@@ -893,7 +900,7 @@ An assignment evaluates the operands of its targets together with its right-hand
 
 ### An append beside a call
 
-`append` and the other built-in functions are not ordered like calls, because the Go specification does not say that they are. An `append` runs after its operands, and nothing else orders it. So when an `append` writes into the array of its slice, the operands of the targets of the same assignment may be evaluated before or after that write. Reads there are checked like any other read. A call there must not modify anything, and its parameters and results must refer to no memory: integers, booleans, strings, errors, and structs of these. A call that is passed a pointer, a slice, or a map is refused:
+`append` and the other built-in functions are not ordered like calls, because the Go specification does not say that they are. An `append` runs after its operands, and nothing else orders it. So when an `append` writes into the array of its slice, the operands of the targets of the same assignment may be evaluated before or after that write. Reads there are checked like any other read. A call there must not modify anything, and its receiver, parameters, and results must refer to no memory. Integers, floats, booleans, strings, errors, and structs of these refer to no memory. A call that is passed a pointer, a slice, or a map is refused:
 
 ```go
 // @Requires c != nil

@@ -177,15 +177,16 @@ func (v *fnVerifier) bound(base string) *logic.Term {
 // reads memory, which Z3 decides less often and slows Z3 down, while facts
 // about the references read keep such problems free of quantifiers.
 func (v *fnVerifier) table(sink *state, mem memory, key string, sort logic.Sort, ref *logic.Term) *logic.Term {
+	// While an evaluation unit is open, every read of memory must be a
+	// recorded read or a quiet one, whether or not it tells a state what
+	// it learns; a read made any other way is one whose order has not been
+	// looked at.
+	if u := v.unit; u != nil && u.recording == 0 && u.quiet == 0 {
+		panic("vego: internal error: memory is read without being recorded in the evaluation unit")
+	}
 	current := mem.region(key, sort)
 	if sink == nil {
 		return current
-	}
-	// While an evaluation unit is open, every read of memory made on
-	// behalf of a state must be a recorded read or a quiet one; a read made
-	// any other way is one whose order has not been looked at.
-	if u := v.unit; u != nil && u.recording == 0 && u.quiet == 0 {
-		panic("vego: internal error: memory is read without being recorded in the evaluation unit")
 	}
 	for at := current; ; {
 		for at.Op == logic.OpStore {

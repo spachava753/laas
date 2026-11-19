@@ -472,16 +472,20 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 		} else {
 			object = t
 		}
-		from, pointer := t, cur
-		next, fieldType, ok := v.member(nil, st.mem, cur, t, index)
-		if !ok {
+		fieldType := object.Underlying().(*types.Struct).Field(index).Type()
+		if _, _, ok := fieldLeaves(object, index); !ok {
 			v.unsupported(sel.Sel.Pos(), fmt.Sprintf("this field has type %s, which is not supported", fieldType))
 		}
+		from, pointer := t, cur
+		var next value
 		if viaPointer {
 			next = v.readAt(st, guard, start, what, sel.Sel.Pos(), func(sink *state, mem memory) value {
 				read, _, _ := v.member(sink, mem, pointer, from, index)
 				return read
 			})
+		} else {
+			// A field of a struct value is part of the value, not memory.
+			next, _, _ = v.member(nil, nil, cur, t, index)
 		}
 		if where != nil {
 			where = value{where[0], logic.Add(where[1], logic.IntLit(v.fieldOffset(object, index)))}
