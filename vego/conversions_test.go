@@ -33,9 +33,48 @@ func TestConversionLists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load packages: %v", err)
 	}
-	checked := 0
+	if checked := checkConversionLists(t, loaded, true); checked < 50 {
+		t.Fatalf("only %d packages of the corpus were checked", checked)
+	}
+}
+
+// TestConversionListsOnStd makes the check of TestConversionLists on
+// packages of the standard library, which use far more forms of Go than
+// the corpus. Every conversion go/ssa makes must have an expression the
+// walk lists; that a listed expression is converted is only logged, since
+// go/ssa folds some expressions that are not constants into constants, as
+// msg in msg := "failed"; panic(msg), and does not build generic bodies as
+// written. It loads the packages from source and takes a few minutes, so it
+// runs only when VEGO_STD_PACKAGES names them, in a scope of its own:
+//
+//	VEGO_STD_PACKAGES="encoding/json text/template go/types net/http" \
+//	systemd-run --user --scope --quiet -p MemoryMax=12G -p MemorySwapMax=4G -- \
+//	go test -count=1 -run TestConversionListsOnStd ./vego
+func TestConversionListsOnStd(t *testing.T) {
+	patterns := strings.Fields(os.Getenv("VEGO_STD_PACKAGES"))
+	if len(patterns) == 0 {
+		t.Skip("VEGO_STD_PACKAGES names no packages")
+	}
+	// Export data of a newer Go than golang.org/x/tools knows cannot be
+	// read, so everything is loaded from source.
+	loaded, err := packages.Load(&packages.Config{Mode: packages.LoadAllSyntax}, patterns...)
+	if err != nil {
+		t.Fatalf("load packages: %v", err)
+	}
+	if checked := checkConversionLists(t, loaded, false); checked < len(patterns) {
+		t.Fatalf("only %d of the %d packages named were checked", checked, len(patterns))
+	}
+}
+
+// checkConversionLists compares the walk with go/ssa on packages and
+// returns how many it checked. With strict, a listed expression that is not
+// a constant and that go/ssa converts no value of is an error; otherwise it
+// is logged.
+func checkConversionLists(t *testing.T, loaded []*packages.Package, strict bool) (checked int) {
+	t.Helper()
 	for _, pkg := range loaded {
 		if len(pkg.Errors) > 0 {
+			t.Logf("%s does not load: %v", pkg.PkgPath, pkg.Errors[0])
 			continue
 		}
 		checked++
@@ -68,16 +107,20 @@ func TestConversionLists(t *testing.T) {
 			}
 		}
 		for e := range walked {
-			if pkg.TypesInfo.Types[e].Value == nil && !candidate[e] {
-				problems = append(problems, pkg.Fset.Position(e.Pos()).String()+": the walk lists it, and go/ssa converts no value it is an expression of")
+			if pkg.TypesInfo.Types[e].Value != nil || candidate[e] {
+				continue
 			}
+			problem := pkg.Fset.Position(e.Pos()).String() + ": the walk lists it, and go/ssa converts no value it is an expression of"
+			if !strict {
+				t.Log(problem)
+				continue
+			}
+			problems = append(problems, problem)
 		}
 		slices.Sort(problems)
 		for _, problem := range problems {
 			t.Error(problem)
 		}
 	}
-	if checked < 50 {
-		t.Fatalf("only %d packages of the corpus were checked", checked)
-	}
+	return checked
 }
