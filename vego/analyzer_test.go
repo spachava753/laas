@@ -175,6 +175,10 @@ func TestAnalyzer(t *testing.T) {
 	t.Run("reports an entry against none in a build", func(t *testing.T) {
 		runCorpus(t, newAnalyzer(), "twod")
 	})
+	// A module that gives (io.Closer).Close an entry of its own.
+	t.Run("closes a body under a project entry", func(t *testing.T) {
+		runCorpus(t, newAnalyzer(), "closer")
+	})
 	for _, root := range []string{"twoa", "twob", "twoc"} {
 		t.Run("uses one entry for a type in "+root, func(t *testing.T) {
 			runCorpus(t, newAnalyzer(), root)

@@ -2193,7 +2193,7 @@ func Rounds(l *Lock, n int) {
 }
 ```
 
-A call through a function value of a type with a contract can be deferred too, and so can a call of a method with a contract through an interface value. See [Function values](#function-values) and [Interfaces](#interfaces). `defer cancel()` verifies for a `context.CancelFunc` that the function is given, whose shipped entry is described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages). It does not verify after `context.WithCancel`, which has no entry, and `defer resp.Body.Close()` does not verify, because `io.Closer` has no shipped entry.
+A call through a function value of a type with a contract can be deferred too, and so can a call of a method with a contract through an interface value. See [Function values](#function-values) and [Interfaces](#interfaces). `defer cancel()` verifies for a `context.CancelFunc` that the function is given, whose shipped entry is described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages). It does not verify after `context.WithCancel`, which has no entry. `defer resp.Body.Close()` verifies only under an entry of your own for `(io.Closer).Close`, which has no shipped entry; see [Types without a shipped entry](#types-without-a-shipped-entry).
 
 `recover` is not supported, because it returns an interface. Call it in a function that is not verified.
 
@@ -2617,7 +2617,11 @@ A trusted function can also write such a value into memory it is given. If its `
 
 ```yaml
   (*bufio.Scanner).Scan:
-    reason: Reads the next token through the reader the scanner holds, and keeps that reader.
+    reason: >-
+      Reads the next token through the reader the scanner holds, and keeps
+      that reader. Every scanner our callers pass splits with
+      bufio.ScanLines, which advances on every token and writes nothing a
+      caller can see; reviewed 2026-11-19.
     requires: ["s != nil"]
     runs: [s]
     vouches: [s]
@@ -2625,6 +2629,8 @@ A trusted function can also write such a value into memory it is given. If its `
 ```
 
 With `vouches: [s]`, you claim that every such value that the function writes into, or leaves in, the memory its `modifies` covers under `s` meets the contract of its type. A `*bufio.Scanner` holds an `io.Reader`, which has a shipped contract. Without `vouches: [s]`, each call reports that the entry cannot be used, and says to list `s`.
+
+With `runs: [s]`, the entry also claims that the contract of `Scan` holds whatever code `s` holds, and that includes its split function. `Scan` panics if the split function returns too many empty tokens without advancing, and a split function set by code that is not verified can write memory that verified code reads. So the entry is true only if every scanner that your callers pass uses a split function that advances and writes nothing a caller can see, such as `bufio.ScanLines` or `bufio.ScanWords`. It is false for a scanner with any other split function.
 
 ### Interfaces and function types of other packages
 
@@ -2743,8 +2749,10 @@ To wrap them, replace the shipped entry with one of your own that vouches:
     reason: >-
       The readers our callers pass are *os.File, *bytes.Reader, and
       *bufio.Reader over those. Read returns the bytes read, 0 <= n <= len(p).
-      Their errors are io.EOF, made by errors.New, and *fs.PathError holding
-      a syscall.Errno, whose methods only read their fields; reviewed 2026-11-19.
+      Their errors are io.EOF and io.ErrNoProgress, made by errors.New,
+      os.ErrInvalid, and *fs.PathError holding a syscall.Errno, os.ErrClosed,
+      or os.ErrDeadlineExceeded, a *poll.DeadlineExceededError; the methods
+      of each only read its fields; reviewed 2026-11-19.
     requires: ["|p| > 0"]
     vouches: [err]
     modifies: [p]
@@ -2770,7 +2778,7 @@ A type of your own that is converted to `io.Reader` under such an entry must ret
 
 #### Types without a shipped entry
 
-`(io.Closer).Close` has no shipped entry. Its documentation says that the behaviour of `Close` after the first call is undefined, and `vego` cannot yet express that a value has not been closed. An entry with `modifies: []` claims that every closer from code that is not verified returns without panicking and writes nothing verified code can see, each time it is closed. Nothing stops verified code from calling `Close` twice, so the claim covers a second call. You can make it for the closers you know: a `*os.File` returns an error from a second `Close` and does not panic. A type whose `Close` closes a channel panics the second time. Write the entry only if every closer that your callers pass meets the claim. `defer resp.Body.Close()` also needs `http.Response`, which `vego` does not model.
+`(io.Closer).Close` has no shipped entry. Its documentation says that the behaviour of `Close` after the first call is undefined, and `vego` cannot yet express that a value has not been closed. An entry with `modifies: []` claims that every closer from code that is not verified returns without panicking and writes nothing verified code can see, each time it is closed. Nothing stops verified code from calling `Close` twice, so the claim covers a second call. You can make it for the closers you know: a `*os.File` returns an error from a second `Close` and does not panic. A type whose `Close` closes a channel panics the second time. Write the entry only if every closer that your callers pass meets the claim. Under such an entry, `defer resp.Body.Close()` on an `*http.Response` verifies, and the entry then claims this of every response body that your callers pass.
 
 `(fmt.Stringer).String` has no shipped entry. Its documentation states no contract, and the `String` methods of many types panic on a nil pointer.
 

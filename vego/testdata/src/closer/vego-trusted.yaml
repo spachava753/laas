@@ -1,0 +1,9 @@
+version: 1
+
+trusted:
+  (io.Closer).Close:
+    reason: >-
+      The bodies our callers pass are those of net/http, whose Close returns
+      without panicking and writes nothing a caller can see, also when it is
+      called a second time; reviewed 2026-11-19.
+    modifies: []

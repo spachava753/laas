@@ -1156,15 +1156,21 @@ trusted:
     reason: >-
       The readers our callers pass are *os.File, *bytes.Reader, and
       *bufio.Reader over those. Read returns the bytes read, 0 <= n <= len(p).
-      Their errors are io.EOF, made by errors.New, and *fs.PathError holding
-      a syscall.Errno, whose methods only read their fields; reviewed 2026-11-19.
+      Their errors are io.EOF and io.ErrNoProgress, made by errors.New,
+      os.ErrInvalid, and *fs.PathError holding a syscall.Errno, os.ErrClosed,
+      or os.ErrDeadlineExceeded, a *poll.DeadlineExceededError; the methods
+      of each only read its fields; reviewed 2026-11-19.
     requires: ["|p| > 0"]
     vouches: [err]
     modifies: [p]
     ensures: ["0 <= n And n <= |p|"]
 
   (*bufio.Scanner).Scan:
-    reason: Reads the next token through the reader the scanner holds, and keeps that reader.
+    reason: >-
+      Reads the next token through the reader the scanner holds, and keeps
+      that reader. Every scanner our callers pass splits with
+      bufio.ScanLines, which advances on every token and writes nothing a
+      caller can see; reviewed 2026-11-19.
     requires: ["s != nil"]
     runs: [s]
     vouches: [s]
