@@ -13,57 +13,57 @@ import (
 
 // TestConversionLists checks the walk over the contexts of assignment,
 // which lists the conversions to interface types, against what go/ssa
-// records, on every package of the corpus. Every conversion go/ssa makes of
-// a value that is not a constant must have an expression the walk lists
-// among the expressions of its operand, or none at all, as for one result
-// of a call with several, which the verifier refuses. And every expression
-// the walk lists that is not a constant must be an expression of a value
-// go/ssa converts; go/ssa gives constants no expression.
+// records. Every conversion go/ssa makes of a value that is not a constant
+// must have an expression the walk lists among the expressions of its
+// operand, or none at all, as for one result of a call with several, which
+// the verifier refuses. And every expression the walk lists that is not a
+// constant must be an expression of a value go/ssa converts; go/ssa gives
+// constants no expression.
 func TestConversionLists(t *testing.T) {
-	testdata, err := filepath.Abs("testdata")
-	if err != nil {
-		t.Fatal(err)
-	}
-	config := &packages.Config{
-		Mode: packages.LoadAllSyntax,
-		Dir:  filepath.Join(testdata, "src"),
-		Env:  append(os.Environ(), "GOPATH="+testdata, "GO111MODULE=off", "GOPROXY=off", "GOWORK=off"),
-	}
-	loaded, err := packages.Load(config, "./...")
-	if err != nil {
-		t.Fatalf("load packages: %v", err)
-	}
-	if checked := checkConversionLists(t, loaded, true); checked < 50 {
-		t.Fatalf("only %d packages of the corpus were checked", checked)
-	}
-}
+	t.Run("on the corpus", func(t *testing.T) {
+		testdata, err := filepath.Abs("testdata")
+		if err != nil {
+			t.Fatal(err)
+		}
+		config := &packages.Config{
+			Mode: packages.LoadAllSyntax,
+			Dir:  filepath.Join(testdata, "src"),
+			Env:  append(os.Environ(), "GOPATH="+testdata, "GO111MODULE=off", "GOPROXY=off", "GOWORK=off"),
+		}
+		loaded, err := packages.Load(config, "./...")
+		if err != nil {
+			t.Fatalf("load packages: %v", err)
+		}
+		if checked := checkConversionLists(t, loaded, true); checked < 50 {
+			t.Fatalf("only %d packages of the corpus were checked", checked)
+		}
+	})
 
-// TestConversionListsOnStd makes the check of TestConversionLists on
-// packages of the standard library, which use far more forms of Go than
-// the corpus. Every conversion go/ssa makes must have an expression the
-// walk lists; that a listed expression is converted is only logged, since
-// go/ssa folds some expressions that are not constants into constants, as
-// msg in msg := "failed"; panic(msg), and does not build generic bodies as
-// written. It loads the packages from source and takes a few minutes, so it
-// runs only when VEGO_STD_PACKAGES names them, in a scope of its own:
-//
-//	VEGO_STD_PACKAGES="encoding/json text/template go/types net/http" \
-//	systemd-run --user --scope --quiet -p MemoryMax=12G -p MemorySwapMax=4G -- \
-//	go test -count=1 -run TestConversionListsOnStd ./vego
-func TestConversionListsOnStd(t *testing.T) {
-	patterns := strings.Fields(os.Getenv("VEGO_STD_PACKAGES"))
-	if len(patterns) == 0 {
-		t.Skip("VEGO_STD_PACKAGES names no packages")
-	}
-	// Export data of a newer Go than golang.org/x/tools knows cannot be
-	// read, so everything is loaded from source.
-	loaded, err := packages.Load(&packages.Config{Mode: packages.LoadAllSyntax}, patterns...)
-	if err != nil {
-		t.Fatalf("load packages: %v", err)
-	}
-	if checked := checkConversionLists(t, loaded, false); checked < len(patterns) {
-		t.Fatalf("only %d of the %d packages named were checked", checked, len(patterns))
-	}
+	// Packages of the standard library use far more forms of Go than the
+	// corpus. That a listed expression is converted is only logged there,
+	// since go/ssa folds some expressions that are not constants into
+	// constants, as msg in msg := "failed"; panic(msg), and does not build
+	// generic bodies as written. They are loaded from source, so this runs
+	// only when VEGO_STD_PACKAGES names them, in a scope of its own:
+	//
+	//	VEGO_STD_PACKAGES="encoding/json text/template go/types net/http" \
+	//	systemd-run --user --scope --quiet -p MemoryMax=12G -p MemorySwapMax=4G -- \
+	//	go test -count=1 -run TestConversionLists ./vego
+	t.Run("on the standard library", func(t *testing.T) {
+		patterns := strings.Fields(os.Getenv("VEGO_STD_PACKAGES"))
+		if len(patterns) == 0 {
+			t.Skip("VEGO_STD_PACKAGES names no packages")
+		}
+		// Export data of a newer Go than golang.org/x/tools knows cannot
+		// be read, so everything is loaded from source.
+		loaded, err := packages.Load(&packages.Config{Mode: packages.LoadAllSyntax}, patterns...)
+		if err != nil {
+			t.Fatalf("load packages: %v", err)
+		}
+		if checked := checkConversionLists(t, loaded, false); checked < len(patterns) {
+			t.Fatalf("only %d of the %d packages named were checked", checked, len(patterns))
+		}
+	})
 }
 
 // checkConversionLists compares the walk with go/ssa on packages and
