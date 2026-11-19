@@ -1,5 +1,7 @@
 package interfaces
 
+import "errors"
+
 // @Ensures t != nil
 func KeepsNil(s Shape) (t Shape) {
 	return s // want `postcondition may not hold: t != nil`
@@ -145,4 +147,66 @@ func NeedsShape(s Shape) (err error) {
 		return errNoShape
 	}
 	return nil
+}
+
+var errTag = errors.New("tag")
+
+// @Ensures ~b
+func SentinelTag(x any) (b bool) {
+	switch errTag {
+	case x: // want `cannot verify SentinelTag: comparing an error with a value of type any is not supported`
+		return true
+	}
+	return false
+}
+
+// @Ensures ~b
+func MadeTag(x any) (b bool) {
+	switch errors.New("made") {
+	case x: // want `cannot verify MadeTag: comparing an error with a value of type any is not supported`
+		return true
+	}
+	return false
+}
+
+// @Ensures ~b
+func ParameterTag(err error, s interface{ Error() string }) (b bool) {
+	switch err {
+	case s: // want `cannot verify ParameterTag: comparing an error with a value of type interface\{Error\(\) string\} is not supported`
+		return true
+	}
+	return false
+}
+
+// @Ensures True
+func CommaOk(x any) (ok bool) {
+	_, ok = x.(int) // want `cannot verify CommaOk: type assertions and type switches are not supported yet`
+	return ok
+}
+
+// @Ensures True
+func CommaOkDefine(x any) (n int) {
+	m, ok := x.(int) // want `cannot verify CommaOkDefine: type assertions and type switches are not supported yet`
+	if ok {
+		return m
+	}
+	return 0
+}
+
+// @Ensures True
+func CommaOkIf(x any) (n int) {
+	if s, ok := x.(Shape); ok { // want `cannot verify CommaOkIf: type assertions and type switches are not supported yet`
+		_ = s
+		return 1
+	}
+	return 0
+}
+
+// @Ensures True
+func CommaOkVar(x any) (n int) {
+	var m, ok = x.(int) // want `cannot verify CommaOkVar: type assertions and type switches are not supported yet`
+	if ok {
+		return m
+	}
+	return 0
 }

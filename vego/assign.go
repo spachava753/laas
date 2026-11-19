@@ -352,6 +352,9 @@ func (v *fnVerifier) isAppend(e ast.Expr) bool {
 // follow.
 func (v *fnVerifier) callResults(e ast.Expr, st *state, wants []types.Type) []value {
 	call, ok := ast.Unparen(e).(*ast.CallExpr)
+	if _, asserted := ast.Unparen(e).(*ast.TypeAssertExpr); asserted {
+		v.unsupported(e.Pos(), ifaceAsserted)
+	}
 	if !ok {
 		v.unsupported(e.Pos(), "multi-value expressions other than function calls are not supported")
 	}

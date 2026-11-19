@@ -498,11 +498,7 @@ func (v *fnVerifier) comparableError(e ast.Expr) bool {
 
 // compareErrors evaluates x == y or x != y on two errors.
 func (v *fnVerifier) compareErrors(x, y ast.Expr, op token.Token, st *state, guard []*logic.Term, pos token.Pos) *logic.Term {
-	for _, side := range []ast.Expr{x, y} {
-		if !isError(v.info.TypeOf(side)) {
-			v.unsupported(pos, fmt.Sprintf("comparing an error with a value of type %s is not supported", v.info.TypeOf(side)))
-		}
-	}
+	v.bothErrors(x, y, pos)
 	same := v.errorsEqual(x, y, v.expr(x, st, guard), v.expr(y, st, guard), pos)
 	if op == token.NEQ {
 		return logic.Not(same)
@@ -510,9 +506,22 @@ func (v *fnVerifier) compareErrors(x, y ast.Expr, op token.Token, st *state, gua
 	return same
 }
 
+// bothErrors refuses a comparison of an error with something that is not
+// one, such as an interface value, before anything is said of its result.
+// Go converts the error to the type of the other operand there, and == then
+// compares what the two interface values hold.
+func (v *fnVerifier) bothErrors(x, y ast.Expr, pos token.Pos) {
+	for _, side := range []ast.Expr{x, y} {
+		if !v.isNil(side) && !isError(v.info.TypeOf(side)) {
+			v.unsupported(pos, fmt.Sprintf("comparing an error with a value of type %s is not supported", v.info.TypeOf(side)))
+		}
+	}
+}
+
 // errorsEqual returns whether two evaluated errors are equal, after making
 // sure that Go's == on them is equality and cannot panic.
 func (v *fnVerifier) errorsEqual(x, y ast.Expr, a, b *logic.Term, pos token.Pos) *logic.Term {
+	v.bothErrors(x, y, pos)
 	if !v.comparableError(x) && !v.comparableError(y) {
 		v.unsupported(pos, "comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, "+
 			"an error made by errors.New or fmt.Errorf or vouched for by a trusted contract, or a package-level error variable that holds such an error or a pointer, "+
