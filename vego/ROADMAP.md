@@ -275,7 +275,7 @@ Decisions:
 
 Not built yet:
 
-- **Locking in a function handed to a trusted function**, such as the `less` of `sort.Search`. A run is verified in a state where what any run writes is forgotten, the mutex included, so `~held` is not known there. It needs a way to state what the runs preserve (see Callbacks handed to trusted functions).
+- **Locking in a function handed to a trusted function**, such as the function that `sort.Search` calls, a mutex that exists when the trusted function is called, or calling `Do` on such a `Once`. A run is verified in a state where what any run writes is forgotten, the mutex included, so `~held` is not known there; a mutex the run creates itself can be locked. It needs a way to state what the runs preserve (see Callbacks handed to trusted functions).
 - **States of interface values**, item 1 of the list at the top, and **states of the project's own struct types and of types of third-party modules**: an annotation on a struct type, travelling as a fact, and a rule for how the type's verified methods set it, either a ghost statement or a definition as a formula over the type's own fields, which needs no ghost code (to be weighed when it is built); for third-party types a declaration in the trust file, with one declaration per type in a build, stricter than entries since the layout depends on it.
 - **States other than booleans**, such as a count of read locks.
 - **`sync.WaitGroup`, `sync.Cond`, and the rest of `sync`**, which need goroutines.

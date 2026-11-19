@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 	"sync"
 )
@@ -485,31 +486,31 @@ func EmptyRange(A []int) (ranged bool) {
 }
 
 // Lock is held or not.
-type Lock struct{ held bool }
+type Lock struct{ taken bool }
 
 // Acquire takes the lock.
 //
-// @Requires l != nil And ~l.held
+// @Requires l != nil And ~l.taken
 // @Modifies l
-// @Ensures l.held'
+// @Ensures l.taken'
 func (l *Lock) Acquire() {
-	l.held = true
+	l.taken = true
 }
 
 // Release gives the lock back.
 //
-// @Requires l != nil And l.held
+// @Requires l != nil And l.taken
 // @Modifies l
-// @Ensures ~l.held'
+// @Ensures ~l.taken'
 func (l *Lock) Release() {
-	l.held = false
+	l.taken = false
 }
 
 // Guarded gives the lock back on every way out.
 //
-// @Requires l != nil And ~l.held And c != nil And c.n < c.limit
+// @Requires l != nil And ~l.taken And c != nil And c.n < c.limit
 // @Modifies l, c.n
-// @Ensures ~l.held'
+// @Ensures ~l.taken'
 func Guarded(l *Lock, c *Counter, skip bool) {
 	l.Acquire()
 	defer l.Release()
@@ -882,6 +883,20 @@ type Settings struct {
 // @Ensures ~running(c.once')
 func (c *Settings) Setup(n int) {
 	c.once.Do(func() { c.size = n })
+}
+
+// SearchLocked locks the account in each call of the function that
+// sort.Search calls.
+//
+// @Requires a != nil And ~held(a.mu) And 0 <= n
+// @Modifies a.mu
+// @Ensures True
+func SearchLocked(a *Account, n int) (i int) {
+	return sort.Search(n, func(k int) bool {
+		a.mu.Lock() // want `vego: precondition of Lock may not hold: ~held\(m\), in the function literal run by sort.Search at guide.go:895:24`
+		defer a.mu.Unlock()
+		return k > 3
+	})
 }
 
 // Switch locks only when on is set.

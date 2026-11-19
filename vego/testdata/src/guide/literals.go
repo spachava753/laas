@@ -74,11 +74,11 @@ func IncAndRead(c *Counter) (result int) {
 // Rounds takes and gives back a lock in each iteration, with the release
 // deferred in a literal that each iteration calls.
 //
-// @Requires l != nil And ~l.held And 0 <= n <= 10
+// @Requires l != nil And ~l.taken And 0 <= n <= 10
 // @Modifies l
-// @Ensures ~l.held'
+// @Ensures ~l.taken'
 func Rounds(l *Lock, n int) {
-	// @Invariant ~l.held
+	// @Invariant ~l.taken
 	for range n {
 		func() {
 			l.Acquire()
