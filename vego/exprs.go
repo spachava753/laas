@@ -229,7 +229,7 @@ func (v *fnVerifier) binaryExpr(e *ast.BinaryExpr, st *state, guard []*logic.Ter
 		}
 		return isNil
 	}
-	if isError(v.info.TypeOf(e.X)) && (e.Op == token.EQL || e.Op == token.NEQ) {
+	if (isError(v.info.TypeOf(e.X)) || isError(v.info.TypeOf(e.Y))) && (e.Op == token.EQL || e.Op == token.NEQ) {
 		return v.compareErrors(e.X, e.Y, e.Op, st, guard, e.Pos())
 	}
 	if object, isPointer := pointee(v.info.TypeOf(e.X)); isPointer {

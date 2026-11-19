@@ -136,7 +136,7 @@ func (pv *pkgVerifier) knownError(o *origins, e ast.Expr, index int, visiting ma
 // known origin.
 func (pv *pkgVerifier) knownVariable(o *origins, variable *types.Var, visiting map[*types.Var]bool) bool {
 	switch {
-	case pv.sentinels[variable] && pv.homemade[variable], pv.importedHomemade(variable):
+	case pv.homemadeSentinel(variable):
 		pv.relied[variable] = true
 		return true
 	case visiting[variable]:

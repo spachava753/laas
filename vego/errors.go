@@ -30,6 +30,7 @@ func (pv *pkgVerifier) findSentinels() {
 	pv.reassigned = map[*types.Var]bool{}
 	pv.relied = map[*types.Var]bool{}
 	pv.homemade = map[*types.Var]bool{}
+	pv.candidates = map[*types.Var]sentinelInfo{}
 	// What this package writes of the error variables of other packages
 	// is published, whichever way this returns.
 	defer func() {
@@ -77,7 +78,7 @@ func (pv *pkgVerifier) findSentinels() {
 		pv.reassigned[variable] = true
 		// A proof in another package may rest on the value of a variable
 		// of another package.
-		if pv.isForeignSentinel(variable) {
+		if _, published := pv.foreignSentinel(variable); published {
 			position := pv.pass.Fset.Position(e.Pos())
 			pv.writes = append(pv.writes, sentinelWrite{
 				Key: errorKey(variable), Name: variable.Pkg().Name() + "." + variable.Name(), Package: pv.pass.Pkg.Path(),
@@ -126,7 +127,7 @@ func (pv *pkgVerifier) findSentinels() {
 					return false
 				}
 				if other := pv.namedVariable(arg); other != nil && isError(other.Type()) {
-					return !pv.homemade[other] && !pv.importedHomemade(other)
+					return !pv.homemade[other] && (other.Pkg() == pv.pass.Pkg || !pv.homemadeSentinel(other))
 				}
 				return !formatsPlainly(pv.info.TypeOf(arg))
 			})
@@ -135,9 +136,38 @@ func (pv *pkgVerifier) findSentinels() {
 			}
 		}
 	}
-	for variable := range pv.sentinels {
-		pv.pass.ExportObjectFact(variable, &errorVarFact{Homemade: pv.homemade[variable]})
+	// What is known of a sentinel rests on the variables that went into
+	// its error, and on what theirs rests on.
+	var restsOf func(variable *types.Var) []string
+	restsOf = func(variable *types.Var) []string {
+		if info, done := pv.candidates[variable]; done {
+			return info.Rests
+		}
+		var rests []string
+		for _, arg := range made[variable].Args {
+			other := pv.namedVariable(arg)
+			if other == nil || other.Pkg() == nil || other.Parent() != other.Pkg().Scope() || !isError(other.Type()) {
+				continue
+			}
+			rests = append(rests, errorKey(other))
+			switch info, published := pv.foreignSentinel(other); {
+			case pv.sentinels[other]:
+				rests = append(rests, restsOf(other)...)
+			case published:
+				rests = append(rests, info.Rests...)
+			}
+		}
+		slices.Sort(rests)
+		rests = slices.Compact(rests)
+		pv.candidates[variable] = sentinelInfo{Homemade: pv.homemade[variable], Rests: rests}
+		return rests
 	}
+	published := map[string]sentinelInfo{}
+	for variable := range pv.sentinels {
+		restsOf(variable)
+		published[variable.Name()] = pv.candidates[variable]
+	}
+	pv.pass.ExportPackageFact(&sentinelsFact{Vars: published})
 	if hidden := pv.hiddenInitCode(); hidden != "" {
 		for variable := range pv.sentinels {
 			pv.unsettled[variable] = hidden

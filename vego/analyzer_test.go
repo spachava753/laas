@@ -140,14 +140,14 @@ func TestAnalyzer(t *testing.T) {
 
 		runCorpus(t, analyzer,
 			"paper", "algorithms", "defects", "rejected", "leetcode", "semantics", "effects", "integers", "values", "trust",
-			"lib", "client", "memory", "shapes", "badshapes", "invariants", "mapping", "badpred", "usesbadpred", "early", "settled", "gen", "earlytype", "earlyrange", "earlybox", "earlyloop", "earlycarrier", "earlypanic", "guide", "wrapped", "unread", "usesunread", "twovariants", "usestwovariants", "lonecr", "errorsid", "sentinellib", "sentinelclient", "usesearly")
+			"lib", "client", "memory", "shapes", "badshapes", "invariants", "mapping", "badpred", "usesbadpred", "early", "settled", "gen", "earlytype", "earlyrange", "earlybox", "earlyloop", "earlycarrier", "earlypanic", "guide", "wrapped", "unread", "usesunread", "twovariants", "usestwovariants", "lonecr", "errorsid", "sentinellib", "sentinelclient", "usesearly", "sentinelfar", "sentinelfarther")
 	})
 
 	// Each of these is the only package analysed, as when laas is run on
 	// it alone: a dependency that changes an error variable is reported in
 	// every package built with both it and a proof that relies on the
 	// variable.
-	for _, root := range []string{"gonelib", "gonemid", "goneroot"} {
+	for _, root := range []string{"gonelib", "gonemid", "goneroot", "gonereader", "wrapsp", "wrapsmid", "wrapsroot"} {
 		t.Run("reports a changed error variable in "+root, func(t *testing.T) {
 			runCorpus(t, newAnalyzer(), root)
 		})

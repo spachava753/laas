@@ -28,17 +28,26 @@ import (
 // of them differ from each other. A sentinel stands for one constant
 // throughout, named by its package path and name.
 
-// errorVarFact marks a package-level error variable that holds, from the
-// end of the initialisation of its package on, the error its declaration
-// made with errors.New or fmt.Errorf.
-type errorVarFact struct {
-	// Homemade is set when nothing of unknown origin went into the error.
-	Homemade bool
+// sentinelsFact lists the sentinels of a package by name. It is a fact
+// about the package and not about each variable, since only facts about
+// packages reach every package built with this one; a fact about a
+// variable reaches only the packages that import its package.
+type sentinelsFact struct {
+	Vars map[string]sentinelInfo
 }
 
-func (*errorVarFact) AFact() {}
+// sentinelInfo is what is known of one sentinel.
+type sentinelInfo struct {
+	// Homemade is set when nothing of unknown origin went into the error.
+	Homemade bool
+	// Rests holds the keys of the other sentinels that went into the
+	// error, however deep, on whose values what is known of it rests.
+	Rests []string
+}
 
-func (f *errorVarFact) String() string { return fmt.Sprintf("error variable(homemade=%t)", f.Homemade) }
+func (*sentinelsFact) AFact() {}
+
+func (f *sentinelsFact) String() string { return fmt.Sprintf("sentinels(%d)", len(f.Vars)) }
 
 // sentinelWrite is an assignment to an error variable of another package,
 // or a place that takes its address.
@@ -86,20 +95,103 @@ func isSentinelTerm(t *logic.Term) bool {
 	return t.Op == logic.OpConst && t.Sort == logic.Err && strings.HasPrefix(t.Name, sentinelName)
 }
 
-// isForeignSentinel reports whether a variable is an error variable of
-// another package that its package published as a sentinel.
-func (pv *pkgVerifier) isForeignSentinel(variable *types.Var) bool {
-	return variable.Pkg() != nil && variable.Pkg() != pv.pass.Pkg && variable.Parent() == variable.Pkg().Scope() &&
-		isError(variable.Type()) && pv.pass.ImportObjectFact(variable, new(errorVarFact))
+// foreignSentinel returns what the package of a variable of another
+// package published about it as a sentinel, if anything.
+func (pv *pkgVerifier) foreignSentinel(variable *types.Var) (sentinelInfo, bool) {
+	pkg := variable.Pkg()
+	if pkg == nil || pkg == pv.pass.Pkg || variable.Parent() != pkg.Scope() || !isError(variable.Type()) {
+		return sentinelInfo{}, false
+	}
+	if pv.published == nil {
+		pv.published = map[*types.Package]map[string]sentinelInfo{}
+	}
+	published, done := pv.published[pkg]
+	if !done {
+		fact := new(sentinelsFact)
+		if pv.pass.ImportPackageFact(pkg, fact) {
+			published = fact.Vars
+		}
+		pv.published[pkg] = published
+	}
+	info, ok := published[variable.Name()]
+	return info, ok
 }
 
-// importedHomemade reports whether a variable of another package is a
-// sentinel into which nothing of unknown origin went, and which this
-// package does not write.
-func (pv *pkgVerifier) importedHomemade(variable *types.Var) bool {
-	fact := new(errorVarFact)
-	return variable.Pkg() != nil && variable.Pkg() != pv.pass.Pkg && !pv.reassigned[variable] &&
-		pv.pass.ImportObjectFact(variable, fact) && fact.Homemade
+// sentinelOf returns what is known of a sentinel of this package or of
+// another, if the variable is one.
+func (pv *pkgVerifier) sentinelOf(variable *types.Var) (sentinelInfo, bool) {
+	if variable.Pkg() == pv.pass.Pkg {
+		info, ok := pv.candidates[variable]
+		return info, ok
+	}
+	return pv.foreignSentinel(variable)
+}
+
+// usableSentinel reports whether this package may take a variable to hold
+// the error it was declared with, and why not when it may not.
+func (pv *pkgVerifier) usableSentinel(variable *types.Var) (sentinelInfo, string) {
+	spelled := variable.Name()
+	if variable.Pkg() != pv.pass.Pkg {
+		spelled = variable.Pkg().Name() + "." + variable.Name()
+	}
+	info, isSentinel := pv.sentinelOf(variable)
+	switch {
+	case variable.Pkg() == pv.pass.Pkg && pv.unsettled[variable] != "":
+		return info, fmt.Sprintf("%s is not known to have its value yet when this runs: %s while the variables of the package are "+
+			"initialised, which may run this function first", spelled, pv.unsettled[variable])
+	case variable.Pkg() != pv.pass.Pkg && pv.reassigned[variable]:
+		return info, fmt.Sprintf("%s is assigned in this package, so it is not known to hold the error it was declared with", spelled)
+	case !isSentinel && variable.Pkg() != pv.pass.Pkg:
+		return info, fmt.Sprintf("%s is a variable of package %s that is not known to hold the error it was declared with; only a "+
+			"package-level error variable initialised with errors.New or fmt.Errorf, and never assigned, can be read", spelled, variable.Pkg().Path())
+	case !isSentinel:
+		return info, spelled + " is not a local variable of a supported type"
+	}
+	// A package this one is built with may change the variable, or one
+	// that went into its error, before any of this runs.
+	for _, key := range append([]string{errorKey(variable)}, info.Rests...) {
+		if write, changed := pv.writtenInBuild()[key]; changed {
+			what := spelled
+			if key != errorKey(variable) {
+				what = fmt.Sprintf("%s, which went into %s,", write.Name, spelled)
+			}
+			return info, fmt.Sprintf("%s is changed at %s in package %s, which this package is built with, so it is not known to hold "+
+				"the error it was declared with", what, write.At, write.Package)
+		}
+	}
+	return info, ""
+}
+
+// writtenInBuild returns, by key, a write to an error variable in this
+// package or in a package it is built with.
+func (pv *pkgVerifier) writtenInBuild() map[string]sentinelWrite {
+	if pv.buildWrites != nil {
+		return pv.buildWrites
+	}
+	pv.buildWrites = map[string]sentinelWrite{}
+	writes := slices.Clone(pv.writes)
+	for _, published := range pv.pass.AllPackageFacts() {
+		if fact, ok := published.Fact.(*sentinelWritesFact); ok && published.Package != pv.pass.Pkg {
+			writes = append(writes, fact.Writes...)
+		}
+	}
+	slices.SortFunc(writes, func(a, b sentinelWrite) int {
+		return strings.Compare(a.Package+" "+a.At, b.Package+" "+b.At)
+	})
+	for _, write := range writes {
+		if _, seen := pv.buildWrites[write.Key]; !seen {
+			pv.buildWrites[write.Key] = write
+		}
+	}
+	return pv.buildWrites
+}
+
+// homemadeSentinel reports whether a variable is a sentinel of this
+// package or another into which nothing of unknown origin went, and which
+// this package may read.
+func (pv *pkgVerifier) homemadeSentinel(variable *types.Var) bool {
+	info, why := pv.usableSentinel(variable)
+	return why == "" && info.Homemade
 }
 
 // namedVariable returns the variable an expression names: a plain
@@ -124,16 +216,6 @@ func (pv *pkgVerifier) namedVariable(e ast.Expr) *types.Var {
 func (pv *pkgVerifier) isPackageName(id *ast.Ident) bool {
 	_, ok := pv.info.Uses[id].(*types.PkgName)
 	return ok
-}
-
-// isSentinel reports whether a variable is a sentinel that this package
-// may read: one of its own, or one of another package that it does not
-// write.
-func (pv *pkgVerifier) isSentinel(variable *types.Var) bool {
-	if variable.Pkg() == pv.pass.Pkg {
-		return pv.sentinels[variable]
-	}
-	return !pv.reassigned[variable] && pv.isForeignSentinel(variable)
 }
 
 // lookupKey finds the variable a key names among the packages this one
@@ -169,21 +251,8 @@ func (pv *pkgVerifier) lookupKey(key string) *types.Var {
 // is read, or, when it cannot be read, why. The facts that hold of it are
 // noted in sink, which may be nil.
 func (v *fnVerifier) sentinelTerm(sink *state, variable *types.Var) (*logic.Term, string) {
-	spelled := variable.Name()
-	if variable.Pkg() != v.pass.Pkg {
-		spelled = variable.Pkg().Name() + "." + variable.Name()
-	}
-	switch {
-	case variable.Pkg() == v.pass.Pkg && v.unsettled[variable] != "":
-		return nil, fmt.Sprintf("%s is not known to have its value yet when this runs: %s while the variables of the package are "+
-			"initialised, which may run this function first", spelled, v.unsettled[variable])
-	case variable.Pkg() != v.pass.Pkg && v.reassigned[variable]:
-		return nil, fmt.Sprintf("%s is assigned in this package, so it is not known to hold the error it was declared with", spelled)
-	case !v.isSentinel(variable) && variable.Pkg() != v.pass.Pkg:
-		return nil, fmt.Sprintf("%s is a variable of package %s that is not known to hold the error it was declared with; only a "+
-			"package-level error variable initialised with errors.New or fmt.Errorf, and never assigned, can be read", spelled, variable.Pkg().Path())
-	case !v.isSentinel(variable):
-		return nil, spelled + " is not a local variable of a supported type"
+	if _, why := v.usableSentinel(variable); why != "" {
+		return nil, why
 	}
 	v.relied[variable] = true
 	sentinel := logic.Const(sentinelName+errorKey(variable), logic.Err)
@@ -270,13 +339,19 @@ func (v *fnVerifier) comparableError(e ast.Expr) bool {
 		return true
 	}
 	variable := v.namedVariable(e)
-	return variable != nil && variable.Parent() == variable.Pkg().Scope() && v.isSentinel(variable)
+	if variable == nil || variable.Parent() != variable.Pkg().Scope() {
+		return false
+	}
+	_, why := v.usableSentinel(variable)
+	return why == ""
 }
 
 // compareErrors evaluates x == y or x != y on two errors.
 func (v *fnVerifier) compareErrors(x, y ast.Expr, op token.Token, st *state, guard []*logic.Term, pos token.Pos) *logic.Term {
-	if !isError(v.info.TypeOf(x)) || !isError(v.info.TypeOf(y)) {
-		v.unsupported(pos, fmt.Sprintf("comparing an error with a value of type %s is not supported", v.info.TypeOf(y)))
+	for _, side := range []ast.Expr{x, y} {
+		if !isError(v.info.TypeOf(side)) {
+			v.unsupported(pos, fmt.Sprintf("comparing an error with a value of type %s is not supported", v.info.TypeOf(side)))
+		}
 	}
 	same := v.errorsEqual(x, y, v.expr(x, st, guard), v.expr(y, st, guard), pos)
 	if op == token.NEQ {
@@ -302,9 +377,15 @@ func (v *fnVerifier) errorsEqual(x, y ast.Expr, a, b *logic.Term, pos token.Pos)
 // this package; a package with no verified code and none in its
 // dependencies relies on nothing and reports nothing.
 func (pv *pkgVerifier) reportSentinelWrites() {
+	// What is known of a sentinel rests on the sentinels that went into
+	// it as well.
 	own := map[string]bool{}
 	for variable := range pv.relied {
 		own[errorKey(variable)] = true
+		info, _ := pv.sentinelOf(variable)
+		for _, key := range info.Rests {
+			own[key] = true
+		}
 	}
 	if len(own) > 0 {
 		pv.pass.ExportPackageFact(&sentinelRelianceFact{Keys: slices.Sorted(maps.Keys(own))})

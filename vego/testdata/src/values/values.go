@@ -809,3 +809,15 @@ func SameFloats(A []float64) (result []float64) {
 func SameFloatCount(A []float64) (result []float64) {
 	return A
 }
+
+// PtrCmp compares a pointer whose type has an Error method with an error.
+//
+// @Requires t != nil
+// @Ensures True
+func PtrCmp(t *ptrError, err error) (b bool) {
+	return t == err // want `vego: cannot verify PtrCmp: comparing an error with a value of type \*values.ptrError is not supported`
+}
+
+type ptrError struct{ code int }
+
+func (p *ptrError) Error() string { return "pointer" }
