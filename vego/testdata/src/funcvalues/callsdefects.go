@@ -180,3 +180,30 @@ func ConfigureCounted(opts []Option) (cfg Config) {
 	}
 	return cfg // want `vego: postcondition may not hold: cfg.Timeout = 0`
 }
+
+// ConfigureThroughLiteral calls the options through a literal used in
+// place, which the loop calls.
+//
+// @Requires Forall i in [0, |opts|) : opts[i] != nil
+// @Ensures cfg.Timeout = 0
+func ConfigureThroughLiteral(opts []Option) (cfg Config) {
+	for _, opt := range opts {
+		apply := func() { opt(&cfg) }
+		apply()
+	}
+	return cfg // want `vego: postcondition may not hold: cfg.Timeout = 0`
+}
+
+// ConfigureDeferred defers the call of each option in a literal that the
+// loop calls.
+//
+// @Requires Forall i in [0, |opts|) : opts[i] != nil
+// @Ensures cfg.Timeout = 0
+func ConfigureDeferred(opts []Option) (cfg Config) {
+	for _, opt := range opts {
+		func() {
+			defer opt(&cfg)
+		}()
+	}
+	return cfg // want `vego: postcondition may not hold: cfg.Timeout = 0`
+}
