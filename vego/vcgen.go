@@ -463,8 +463,8 @@ func (v *fnVerifier) verify() {
 	// A conversion to an interface type of a value without an expression
 	// of its own was not checked anywhere.
 	if unplaced := v.findConversions().unplaced[fn.decl]; len(unplaced) > 0 {
-		v.unsupported(unplaced[0], "Go converts a value to an interface type here that has no expression of its own, "+
-			"such as one result of a call with several, and such a conversion cannot be checked; assign the value to a variable of its own type first")
+		v.unsupported(unplaced[0], "Go converts a value to an interface type here, and which expression it converts could not be told, "+
+			"as for one result of a call with several, so the conversion cannot be checked; assign the value to a variable of its own type first")
 	}
 	v.tieFailures()
 	for i, t := range v.frame {

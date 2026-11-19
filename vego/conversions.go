@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"slices"
 
 	"golang.org/x/tools/go/ssa"
 )
@@ -17,36 +18,36 @@ import (
 // evaluated as an ordinary expression would make an interface value nobody
 // checked.
 //
-// So the conversions of a package are listed from two sources, and the
-// verifier stops with an internal error when it evaluates a listed
-// expression anywhere but where the conversion is checked
-// (evalConverted), or where newError formats it:
+// So the conversions of a package are listed by walking the contexts in
+// which the specification lets a value be assigned to something of another
+// type (syntacticConversions), and the verifier stops with an internal
+// error when it evaluates a listed expression anywhere but where the
+// conversion is checked (evalConverted), or for another target type.
 //
-//   - The record that go/ssa makes of the package: every conversion to an
-//     interface type is a MakeInterface instruction there, implicit or
-//     explicit. Built in debug mode, every expression whose value is
-//     computed gets a DebugRef to that value, and the expression converted
-//     is the nearest DebugRef of the operand before the MakeInterface in the
-//     same block that no other MakeInterface took. A constant gets no
-//     DebugRef, and a conversion of something without an expression of its
-//     own, such as one result of a call with several, has none either; a
-//     function with such a conversion that is not a constant cannot be
-//     verified (see unplaced).
-//   - The contexts in which the specification lets a value be assigned to
-//     a variable of another type, walked in the syntax tree
-//     (syntacticConversions).
-//
-// The type checker keeps no record of implicit conversions. A test checks
-// that the two lists agree on the corpus, so that a gap in either shows.
+// The type checker keeps no record of implicit conversions. go/ssa does:
+// every conversion to an interface type is a MakeInterface instruction,
+// and in debug mode every expression whose value is computed gets a
+// DebugRef to its value. But one value can carry several expressions, as x
+// does in p, t = x, x, and nothing says which of them a MakeInterface
+// converts. So go/ssa confirms the walk and does not add to it: each
+// MakeInterface of a value that is not a constant must have, among the
+// DebugRefs of its operand before it in its block, an expression that the
+// walk lists. A function where one does not, or where one converts a value
+// without any expression, such as one result of a call with several,
+// cannot be verified (see unplaced). A test checks both directions on the
+// corpus: what go/ssa converts has a listed expression, and every listed
+// expression that is not a constant is a candidate of a conversion go/ssa
+// makes.
 
-// conversions is what the two lists say of a package.
+// conversions is what the walk and go/ssa say of a package.
 type conversions struct {
 	// converted holds every expression that Go converts to an interface
-	// type where it stands.
-	converted map[ast.Expr]bool
+	// type where it stands, with the type it is converted to; a switch tag
+	// may be converted to several.
+	converted map[ast.Expr][]types.Type
 	// unplaced holds, for the function declaration around it, the position
-	// of each conversion of a value that is not a constant and has no
-	// expression of its own.
+	// of each conversion that go/ssa makes and that no expression the walk
+	// lists accounts for.
 	unplaced map[*ast.FuncDecl][]token.Pos
 }
 
@@ -55,17 +56,16 @@ func (pv *pkgVerifier) findConversions() *conversions {
 	if pv.conversions != nil {
 		return pv.conversions
 	}
-	found := &conversions{converted: map[ast.Expr]bool{}, unplaced: map[*ast.FuncDecl][]token.Pos{}}
-	placed, unplaced := ssaConversions(pv.pass.Fset, pv.pass.Pkg, pv.pass.Files, pv.info)
-	for e := range placed {
-		found.converted[e] = true
-	}
+	found := &conversions{converted: map[ast.Expr][]types.Type{}, unplaced: map[*ast.FuncDecl][]token.Pos{}}
 	for _, file := range pv.pass.Files {
-		for e := range syntacticConversions(pv.info, file) {
-			found.converted[e] = true
+		for e, targets := range syntacticConversions(pv.info, file) {
+			found.converted[e] = append(found.converted[e], targets...)
 		}
 	}
-	for _, conversion := range unplaced {
+	for _, conversion := range ssaConversions(pv.pass.Fset, pv.pass.Pkg, pv.pass.Files, pv.info) {
+		if conversion.constant || slices.ContainsFunc(conversion.candidates, func(e ast.Expr) bool { return found.converted[e] != nil }) {
+			continue
+		}
 		at := conversion.at
 		if !at.IsValid() {
 			at = conversion.fn.Pos()
@@ -82,12 +82,21 @@ func (pv *pkgVerifier) findConversions() *conversions {
 	return found
 }
 
+// ssaConversion is a MakeInterface instruction of go/ssa: the function or
+// literal it is in, the nearest position the instructions up to it give,
+// what it converts, and the expressions whose DebugRef names its operand
+// before it in its block. A constant has no DebugRef.
+type ssaConversion struct {
+	fn         ast.Node
+	at         token.Pos
+	what       string
+	constant   bool
+	candidates []ast.Expr
+}
+
 // ssaConversions builds the package in go/ssa, with a DebugRef for every
-// expression, and returns the expressions that its MakeInterface
-// instructions convert, and the positions of the functions or literals
-// that hold a conversion of a value that is not a constant and has no
-// expression of its own.
-func ssaConversions(fset *token.FileSet, pkg *types.Package, files []*ast.File, info *types.Info) (placed map[ast.Expr]bool, unplaced []unplacedConversion) {
+// expression, and returns its conversions to interface types.
+func ssaConversions(fset *token.FileSet, pkg *types.Package, files []*ast.File, info *types.Info) []ssaConversion {
 	prog := ssa.NewProgram(fset, ssa.GlobalDebug)
 	created := map[*types.Package]bool{}
 	var create func(imports []*types.Package)
@@ -103,34 +112,21 @@ func ssaConversions(fset *token.FileSet, pkg *types.Package, files []*ast.File, 
 	create(pkg.Imports())
 	built := prog.CreatePackage(pkg, files, info, false)
 	built.Build()
-	placed = map[ast.Expr]bool{}
-	isConstant := func(value ssa.Value) bool {
-		_, ok := value.(*ssa.Const)
-		return ok
-	}
+	var found []ssaConversion
 	var walk func(fn *ssa.Function)
 	walk = func(fn *ssa.Function) {
 		for _, block := range fn.Blocks {
-			// The expressions of each value, in the order the block
-			// computes them, not yet taken by a conversion.
-			refs := map[ssa.Value][]*ssa.DebugRef{}
+			refs := map[ssa.Value][]ast.Expr{}
 			for _, instr := range block.Instrs {
 				switch instr := instr.(type) {
 				case *ssa.DebugRef:
 					if !instr.IsAddr {
-						refs[instr.X] = append(refs[instr.X], instr)
+						refs[instr.X] = append(refs[instr.X], ast.Unparen(instr.Expr))
 					}
 				case *ssa.MakeInterface:
-					candidates := refs[instr.X]
-					switch {
-					case len(candidates) > 0:
-						last := candidates[len(candidates)-1]
-						refs[instr.X] = candidates[:len(candidates)-1]
-						placed[ast.Unparen(last.Expr)] = true
-					case isConstant(instr.X):
-					default:
-						unplaced = append(unplaced, unplacedConversion{fn: fn.Syntax(), at: nearestPos(block.Instrs, instr), what: instr.X.String()})
-					}
+					_, constant := instr.X.(*ssa.Const)
+					found = append(found, ssaConversion{fn: fn.Syntax(), at: nearestPos(block.Instrs, instr), what: instr.X.String(),
+						constant: constant, candidates: slices.Clone(refs[instr.X])})
 				}
 			}
 		}
@@ -153,17 +149,7 @@ func ssaConversions(fset *token.FileSet, pkg *types.Package, files []*ast.File, 
 			}
 		}
 	}
-	return placed, unplaced
-}
-
-// unplacedConversion is a conversion that go/ssa makes of a value that is
-// not a constant and has no expression of its own: the function or literal
-// it is in, the nearest position the instructions up to it give, and what
-// is converted.
-type unplacedConversion struct {
-	fn   ast.Node
-	at   token.Pos
-	what string
+	return found
 }
 
 // nearestPos returns the position of an instruction, or of the nearest one
@@ -183,13 +169,14 @@ func nearestPos(instrs []ssa.Instruction, instr ssa.Instruction) token.Pos {
 }
 
 // syntacticConversions returns the expressions under root that Go converts
-// to an interface type where they stand, found by the contexts in which
+// to an interface type where they stand, with the types they are converted
+// to, found by the contexts in which
 // the specification lets a value be assigned to something of another type.
 // One result of a call with several, an element that a range assigns, and
 // a value that a comma-ok form gives have no expression of their own and
 // are not listed.
-func syntacticConversions(info *types.Info, root ast.Node) map[ast.Expr]bool {
-	found := map[ast.Expr]bool{}
+func syntacticConversions(info *types.Info, root ast.Node) map[ast.Expr][]types.Type {
+	found := map[ast.Expr][]types.Type{}
 	add := func(e ast.Expr, to types.Type) {
 		if e == nil || to == nil || !types.IsInterface(to) {
 			return
@@ -202,7 +189,7 @@ func syntacticConversions(info *types.Info, root ast.Node) map[ast.Expr]bool {
 		if _, tuple := tv.Type.(*types.Tuple); tuple {
 			return
 		}
-		found[e] = true
+		found[e] = append(found[e], to)
 	}
 	var walk func(root ast.Node, results *types.Tuple)
 	walk = func(root ast.Node, results *types.Tuple) {

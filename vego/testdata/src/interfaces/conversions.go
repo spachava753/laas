@@ -131,3 +131,36 @@ func Twice(f Flat) (n int) {
 func both(p Pricer, q Pricer) (n int) {
 	return 0
 }
+
+// One value is converted and also assigned as it is, in one statement, so
+// go/ssa cannot tell which of its expressions it converts.
+//
+// @Ensures p != nil
+func Parallel(f Flat) (p Pricer, g Flat) {
+	p, g = f, f
+	return p, g
+}
+
+// @Ensures s.Pricer != nil And s.Flat = f
+func FieldsBoth(f Flat) (s struct {
+	Pricer Pricer
+	Flat   Flat
+}) {
+	s = struct {
+		Pricer Pricer
+		Flat   Flat
+	}{f, f}
+	return s
+}
+
+// @Ensures s.Pricer != nil And s.Flat = f
+func FieldsBothSwapped(f Flat) (s struct {
+	Flat   Flat
+	Pricer Pricer
+}) {
+	s = struct {
+		Flat   Flat
+		Pricer Pricer
+	}{f, f}
+	return s
+}

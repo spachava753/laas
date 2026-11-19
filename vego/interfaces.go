@@ -71,7 +71,7 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 	// with what it holds but pass it on. Each method of any other
 	// interface is checked against its contract, for the value as it is
 	// here.
-	converted := v.evalConverted(e, st, guard)
+	converted := v.evalConverted(e, want, st, guard)
 	if want.Underlying().(*types.Interface).NumMethods() > 0 {
 		v.madeInterface(e, converted, from, want, st, guard)
 	}
@@ -80,10 +80,15 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 	return value{held}
 }
 
-// evalConverted evaluates an expression that Go converts to an interface
-// type here; see converted.
-func (v *fnVerifier) evalConverted(e ast.Expr, st *state, guard []*logic.Term) value {
+// evalConverted evaluates an expression that Go converts to the interface
+// type target here; see conversions.go. The walk that lists the
+// conversions must have listed this one with that target.
+func (v *fnVerifier) evalConverted(e ast.Expr, target types.Type, st *state, guard []*logic.Term) value {
 	inner := ast.Unparen(e)
+	if !slices.ContainsFunc(v.findConversions().converted[inner], func(t types.Type) bool { return types.Identical(t, target) }) {
+		panic(fmt.Sprintf("internal error: %s at %s is checked as a conversion to %s, which the list of conversions does not have there",
+			types.ExprString(e), v.pass.Fset.Position(e.Pos()), target))
+	}
 	v.converting[inner]++
 	defer func() { v.converting[inner]-- }()
 	return v.eval(e, st, guard)

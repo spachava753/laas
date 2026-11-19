@@ -89,7 +89,7 @@ func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 	// A conversion to an interface type is checked where it is made; an
 	// expression that Go converts and that is evaluated anywhere else
 	// would make an interface value nobody checked.
-	if inner := ast.Unparen(e); v.findConversions().converted[inner] && v.converting[inner] == 0 {
+	if inner := ast.Unparen(e); len(v.findConversions().converted[inner]) > 0 && v.converting[inner] == 0 {
 		panic(fmt.Sprintf("internal error: %s at %s is converted to an interface type there, and is evaluated without the conversion",
 			types.ExprString(e), v.pass.Fset.Position(e.Pos())))
 	}
