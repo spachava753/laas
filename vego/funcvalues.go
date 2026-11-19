@@ -144,7 +144,8 @@ func (pv *pkgVerifier) checkTypeContracts() {
 			if !v.canBeMet(entry) {
 				fn.broken = true
 				pv.report(name.Pos(), "the Ensures clauses of %s are not proved to be satisfiable for every call that its Requires allow, "+
-					"by results and a change of what Modifies lists; a value of the type is taken to meet them, so a call of one could prove something false", name.Name())
+					"by results and a change of what Modifies lists; a value of the type is taken to meet them, so a call of one could prove something false. "+
+					"State in the Requires when some result exists, or weaken the Ensures", name.Name())
 			}
 		})
 	}
@@ -188,8 +189,30 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 	for _, c := range fn.ensures {
 		promised = append(promised, v.calleeFormula(c, env))
 	}
-	facts := append(slices.Clip(st.hyps[known:]), promised...)
-	return v.proves(entry.hyps, v.someOutcome(facts, v.made[mark:]), 0)
+	// Reading the Ensures notes facts, such as the range of a number read
+	// from memory on entry. One that mentions nothing the outcome produced
+	// is a fact about the entry state, which holds wherever that memory is
+	// read; the rest is what the outcome has to meet.
+	given := slices.Clip(entry.hyps)
+	facts := promised
+	for _, fact := range st.hyps[known:] {
+		if mentionsAny(fact, v.made[mark:]) {
+			facts = append(facts, fact)
+		} else {
+			given = append(given, fact)
+		}
+	}
+	return v.proves(given, v.someOutcome(facts, v.made[mark:]), 0)
+}
+
+// mentionsAny reports whether a term mentions a constant of the given names.
+func mentionsAny(t *logic.Term, names []string) bool {
+	set := map[string]bool{}
+	for _, name := range names {
+		set[name] = true
+	}
+	_, mentioned := estranged(t, set)
+	return mentioned
 }
 
 // someOutcome states that some outcome of a call has the facts given: the

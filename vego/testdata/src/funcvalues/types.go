@@ -48,7 +48,7 @@ type Alias = func(x int)
 //
 // @Requires 0 <= x <= 1000
 // @Ensures 2 * y = x
-type Half func(x int) (y int) // want `vego: the Ensures clauses of Half are not proved to be satisfiable for every call that its Requires allow, by results and a change of what Modifies lists; a value of the type is taken to meet them, so a call of one could prove something false`
+type Half func(x int) (y int) // want `vego: the Ensures clauses of Half are not proved to be satisfiable for every call that its Requires allow, by results and a change of what Modifies lists; a value of the type is taken to meet them, so a call of one could prove something false. State in the Requires when some result exists, or weaken the Ensures`
 
 // Counted holds a number.
 type Counted struct{ n int }
@@ -99,3 +99,19 @@ type Picks func(lo int, hi int) (r int)
 //
 // @Ensures (err != nil) <-> x < 0
 type Fails func(x int) (err error)
+
+// Get reads a field, whose value is an int.
+//
+// @Requires s != nil
+// @Ensures r = s.n
+type Get func(s *Counted) (r int)
+
+// Pair of fields, one copied into the other.
+type Two struct{ n, m int }
+
+// Copy copies one field into another.
+//
+// @Requires c != nil
+// @Modifies c.n
+// @Ensures c.n' = c.m
+type Copy func(c *Two)

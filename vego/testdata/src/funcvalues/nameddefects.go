@@ -221,3 +221,26 @@ type Logger func(e error)
 func UsesLogErr() (l Logger) {
 	return logErr // want `vego: cannot verify UsesLogErr: logErr is used as a value, which passes what it is called with to logErr as e; logErr is trusted, and that can hold code nobody has seen`
 }
+
+// Div divides by its argument, whose name is the one of the parameter of
+// Leak, which knows it is positive.
+//
+// @Ensures True
+type DivBy func(x int) (y int)
+
+// divide needs its argument not to be zero.
+//
+// @Requires x != 0
+// @Ensures True
+func divide(x int) (y int) {
+	return 100 / x
+}
+
+// Leak uses divide as a value. What Leak knows of its own x says nothing of
+// the x the value is called with.
+//
+// @Requires x > 0
+// @Ensures True
+func Leak(x int) (d DivBy) {
+	return divide // want `vego: precondition of divide may not hold: x != 0, in divide used as a DivBy`
+}
