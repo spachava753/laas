@@ -116,7 +116,10 @@ func (v *fnVerifier) shift(op token.Token, x, k *logic.Term, t types.Type, pos t
 		return down
 	}
 	// Go's division rounds towards zero, so a negative number is shifted by
-	// way of the number that is not negative and has the opposite bits.
+	// way of the number that is not negative and has the opposite bits. That
+	// uses x three times.
+	x = v.named(st, "shifted", x)
+	down = logic.Div(x, power)
 	one := logic.IntLit(1)
 	return logic.Ite(logic.Le(zero, x), down, logic.Sub(logic.Neg(logic.Div(logic.Sub(logic.Neg(x), one), power)), one))
 }

@@ -189,7 +189,9 @@ func (v *fnVerifier) storeKey(st *state, t types.Type, ref, key *logic.Term, val
 	// write, so that the write to the nil map is known to change nothing.
 	v.noteMap(st, st.mem, t, ref, key)
 	had := v.mapHas(st, st.mem, t, ref, key)
-	count := v.mapLen(st, st.mem, t, ref)
+	// The count is named, so that the new count does not hold the region
+	// of counts a second time.
+	count := v.named(st, "count", v.mapLen(st, st.mem, t, ref))
 	_, elem := mapParts(t)
 	leaves, _ := layoutOf(elem)
 	one, none := logic.IntLit(1), logic.IntLit(0)

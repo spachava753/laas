@@ -161,6 +161,29 @@ func (v *fnVerifier) settled(st *state, guard []*logic.Term, val value, t types.
 	return stored
 }
 
+// named returns a term that stands for t and is no larger than a leaf: t
+// itself if it is one, or a new constant that the state is told equals it.
+// A rule that puts an operand into its result more than once uses it, so
+// that a chain of such operations does not double what it builds at each
+// step. What the constant depends on is recorded for tieFailures, like the
+// result of a call. t must not be a sequence.
+func (v *fnVerifier) named(st *state, base string, t *logic.Term) *logic.Term {
+	if len(t.Args) == 0 {
+		return t
+	}
+	if t.Sort.IsSeq() {
+		panic("vego: internal error: a sequence is named")
+	}
+	c := v.fresh(base, t.Sort)
+	fact := logic.Eq(c, t)
+	if t.Sort == logic.Bool {
+		fact = logic.Iff(c, t)
+	}
+	st.assume(fact)
+	v.forwards = append(v.forwards, forward{given: []*logic.Term{t}, produced: []string{c.Name}, facts: []*logic.Term{fact}})
+	return c
+}
+
 // pointedIn reads the struct a pointer points to in some memory.
 func (v *fnVerifier) pointedIn(sink *state, mem memory, t types.Type, pointer value) value {
 	val := v.fetch(sink, mem, v.cellsOf(t), pointer[0], pointer[1])
@@ -488,6 +511,28 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) v
 		result := v.expr(e.Args[0], st, guard)
 		for _, arg := range e.Args[1:] {
 			other := v.expr(arg, st, guard)
+			if result.Sort == logic.Int {
+				// The least or greatest of two numbers is the one of them
+				// that is at most, or at least, both. A new number with
+				// those facts is what each step yields, so that a chain of
+				// steps neither doubles what it builds nor needs a case
+				// for each step to compare its ends.
+				extreme := v.fresh(e.Fun.(*ast.Ident).Name, logic.Int)
+				bound := func(a *logic.Term) *logic.Term {
+					if builtin("max") {
+						return logic.Le(a, extreme)
+					}
+					return logic.Le(extreme, a)
+				}
+				fact := logic.And(bound(result), bound(other), logic.Or(logic.Eq(extreme, result), logic.Eq(extreme, other)))
+				st.assume(fact)
+				v.forwards = append(v.forwards, forward{given: []*logic.Term{result, other}, produced: []string{extreme.Name}, facts: []*logic.Term{fact}})
+				result = extreme
+				continue
+			}
+			// Otherwise each step uses both operands twice.
+			result = v.named(st, "min", result)
+			other = v.named(st, "min", other)
 			smaller := logic.Le(result, other)
 			if builtin("max") {
 				smaller = logic.Le(other, result)

@@ -84,14 +84,16 @@ func (v *fnVerifier) substring(e *ast.SliceExpr, st *state, guard []*logic.Term)
 		v.unsupported(e.Pos(), "a string cannot be sliced with a capacity")
 	}
 	whole := v.expr(e.X, st, guard)
-	lo, hi := logic.IntLit(0), logic.Len(whole)
+	// The length is named, so that the substring holds the string once.
+	length := v.named(st, "len", logic.Len(whole))
+	lo, hi := logic.IntLit(0), length
 	if e.Low != nil {
 		lo = v.expr(e.Low, st, guard)
 	}
 	if e.High != nil {
 		hi = v.expr(e.High, st, guard)
 	}
-	within := logic.And(logic.Le(logic.IntLit(0), lo), logic.Le(lo, hi), logic.Le(hi, logic.Len(whole)))
+	within := logic.And(logic.Le(logic.IntLit(0), lo), logic.Le(lo, hi), logic.Le(hi, length))
 	v.check(st, guard, within, e.Pos(), "substring bounds may be out of range")
 	return logic.Subseq(whole, lo, hi)
 }
