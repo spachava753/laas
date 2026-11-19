@@ -16,7 +16,7 @@ This guide shows how to write Go that `vego` can verify. Read it from top to bot
 
 `vego` never reports a function as correct when it is not. If it cannot handle a piece of Go, it reports `cannot verify` and names the construct. If it cannot find a proof, it reports `may not hold`. That means "not proved". The code may be wrong, the contract may be wrong, or both may be right and the prover needs a hint. Much of this guide is about working out which.
 
-`vego` is experimental and supports only part of Go. It does not yet support interfaces other than `error`, closures, generics, goroutines, arrays, or package-level variables. [What is not supported](#what-is-not-supported) lists the main gaps. Code that does I/O usually runs into these limits. The usual approach is to verify the logic and leave the code around it unverified. [Adopting it](#adopting-it) describes how.
+`vego` is experimental and supports only part of Go. It does not yet support interfaces other than `error`, function values that are passed or stored, generics, goroutines, arrays, or package-level variables. [What is not supported](#what-is-not-supported) lists the main gaps. Code that does I/O usually runs into these limits. The usual approach is to verify the logic and leave the code around it unverified. [Adopting it](#adopting-it) describes how.
 
 ## Running it
 
@@ -465,6 +465,112 @@ Either verify the helper, or give it a trusted contract as described in [Code th
 
 The contract of an exported function is available to other packages, so verified code can call verified functions in other packages. If a function failed verification, other packages cannot rely on its contract.
 
+## Function literals
+
+`vego` verifies a function literal when every use of it is in the function that contains it. A literal can stand in three places:
+
+- where it is called, as in `func() { ... }()`;
+- where it is deferred, as in `defer func() { ... }()`;
+- as the value that declares a new local variable, which the function then only calls.
+
+```go
+// @Requires |A| = 3
+// @Ensures result <-> A[0] <= A[1] And A[1] <= A[2]
+func Sorted3(A []int) (result bool) {
+	inOrder := func(i, j int) bool { return A[i] <= A[j] }
+	return inOrder(0, 1) && inOrder(1, 2)
+}
+```
+
+A literal has no contract. `vego` verifies its body at each call, in the state at that call, as part of the function around it. The body is held to everything the function is held to: the built-in checks, the `Modifies` clauses of the function, and the order of evaluation. A `return` inside the body ends the literal. An `Invariant`, `Variant`, or `Assert` inside the body is checked at each call.
+
+A message about the body names the call it comes from:
+
+```go
+// @Ensures True
+func CheckEach() {
+	check := func(n int) {
+		// @Assert n >= 0
+	}
+	check(1)
+	check(-1)
+}
+```
+
+```text
+vego: assertion may not hold: n >= 0, in the function literal called at literals.go:23:2
+```
+
+The assertion holds at the first call. At the second it is not proved. For a deferred literal, the message names the `defer` statement and the `return` at which the literal runs.
+
+Inside a literal, `old(x)` is the value that the parameter `x` of the function had when the function was called. If the literal has a parameter of the same name, `old(x)` is an error. Rename the parameter of the literal.
+
+### Variables that a literal assigns
+
+A literal reads and writes the variables of the function around it, as they are when the literal runs.
+
+```go
+// @Ensures 0 <= result <= 2
+// @Ensures a >= 0 And b >= 0 -> result = 0
+func CountNegative(a, b int) (result int) {
+	count := 0
+	check := func(x int) {
+		if x < 0 {
+			count++
+		}
+	}
+	check(a)
+	check(b)
+	return count
+}
+```
+
+A loop that calls a literal forgets the variables that the literal assigns, in the same way as the variables that the loop body assigns. State what the loop keeps of them in an invariant.
+
+A call of a literal can change a variable that the literal assigns. Go does not fix whether the other operands of a statement are read before or after a call, so `vego` checks a read of such a variable like a read of memory (see [Reads that Go may make before or after a call](#reads-that-go-may-make-before-or-after-a-call)):
+
+```go
+// @Requires 0 <= x < 1000
+// @Ensures True
+func ReadAndBump(x int) (result int) {
+	bump := func() int {
+		x++
+		return 0
+	}
+	return x + bump()
+}
+```
+
+```text
+vego: x may be read before or after the call to bump, which may change it, and Go does not
+fix the order; split the statement so that the order is the one you mean
+```
+
+### Literals that cannot be verified
+
+A literal used in any other way is reported as `cannot verify`. This includes a literal that is passed to a function, returned, stored, compared, or assigned to a variable that already exists:
+
+```go
+// each calls f for every element. It is not verified.
+func each(A []int, f func(int)) {
+	for _, x := range A {
+		f(x)
+	}
+}
+
+// @Ensures True
+func Apply(A []int) {
+	each(A, func(x int) {})
+}
+```
+
+```text
+vego: cannot verify Apply: a function literal is supported only where it is called or deferred,
+or as the value that declares a new variable which is only ever called; this one is used as a value
+```
+
+Write the loop in the verified function and call the literal there, or leave the code that passes the literal unverified. A variable that holds a literal and is used other than by calling it is reported in the same way. A variadic literal cannot be verified, and neither can a literal that takes or returns a type that `vego` does not support.
+
 ## Predicates
 
 A predicate gives a name to a formula so that you can reuse it.
@@ -568,7 +674,7 @@ In an `Ensures` clause, a name refers to the value at the time of the call. To r
 
 The prime is only needed for memory that the function can change. A parameter that is a plain value, such as `v`, never takes one.
 
-Inside a function body the convention is reversed. In an `Invariant` or `Assert`, a name refers to the current value. `old(x)` refers to the value of a parameter at the time of the call. It also works for memory reached from a parameter, as in `old(c.n)`.
+Inside a function body the convention is reversed. In an `Invariant` or `Assert`, a name refers to the current value. `old(x)` refers to the value of a parameter at the time of the call. It also works for memory reached from a parameter, as in `old(c.n)`. The name must refer to the parameter at that point, and not to a variable that hides it.
 
 ## Slices
 
@@ -878,14 +984,15 @@ vego: s.n may be read before or after the call to Pop, which may change it, and 
 not fix the order; split the statement so that the order is the one you mean
 ```
 
-`vego` looks at every read of memory in a statement. These are the reads of memory:
+`vego` looks at every read of memory in a statement, and at every read of a variable that a function literal assigns. These are the reads it checks:
 
 - a field, or a whole struct, reached through a pointer, as in `p.n`, `*p`, and the receiver of a method with a value receiver called on a pointer;
 - an element of a slice, and the elements that `string(b)` copies;
 - an entry of a map, and the number of its keys, `len(m)`;
-- a variable whose address is taken.
+- a variable whose address is taken;
+- a variable that a function literal assigns (see [Variables that a literal assigns](#variables-that-a-literal-assigns)).
 
-For each one that Go may make before or after a call that modifies memory, it must prove that the read gives the same value either way. It decides this from the `Modifies` and `Ensures` clauses of the call. A local variable whose address is not taken cannot be changed by a call, so reading it never conflicts.
+For each one that Go may make before or after a call that may change it, `vego` must prove that the read gives the same value either way. It decides this from the `Modifies` and `Ensures` clauses of the call. A local variable whose address is not taken can be changed by a call only if it is a call of a function literal that assigns the variable. Reading any other such variable never conflicts.
 
 Write the order you mean in separate statements:
 
@@ -1516,7 +1623,41 @@ func Guarded(l *Lock, c *Counter, skip bool) {
 
 What a deferred call changes is part of what the `Ensures` clauses describe. A deferred call can also change a result, as Go allows, when it is passed a pointer to a named result of struct type, as in `defer set(&out)`.
 
-Only a call to a named function or method can be deferred. `defer` inside a loop and `defer func() { ... }()` are not supported yet.
+A function literal can be deferred too. It runs at each `return`, after the results have been set, so it can change a named result:
+
+```go
+// @Requires c != nil And c.n < c.limit
+// @Modifies c.n
+// @Ensures result = c.n'
+func IncAndRead(c *Counter) (result int) {
+	defer func() { result = c.n }()
+	c.Inc()
+	return 0
+}
+```
+
+The arguments of a deferred literal are evaluated at the `defer` statement. The variables it uses are read when it runs. See [Function literals](#function-literals) for what else applies to its body.
+
+`defer` inside a loop is not supported, because the number of calls it puts off is not known. A `defer` inside a function literal that the loop calls is supported, because it runs when the literal returns:
+
+```go
+// @Requires l != nil And ~l.held And 0 <= n <= 10
+// @Modifies l
+// @Ensures ~l.held'
+func Rounds(l *Lock, n int) {
+	// @Invariant ~l.held
+	for range n {
+		func() {
+			l.Acquire()
+			defer l.Release()
+		}()
+	}
+}
+```
+
+Only a call of a named function or method, or of a function literal, can be deferred. A function value, as in `defer cancel()`, cannot.
+
+`recover` is not supported, because it returns an interface. Call it in a function that is not verified.
 
 ### Locks
 
@@ -1782,7 +1923,7 @@ A verified function can only call functions that have contracts. Start with func
 2. Add `// @Ensures True` and run `laas -vego` on the package. This checks the function for index errors, overflow, nil dereferences, and termination. You will usually need to add `Requires` clauses with bounds, loop invariants, and variants. You may also find bugs.
 3. Replace `Ensures True` with the real contract. Run `-vego.audit` to check that the contract says enough.
 4. Move on to the callers. Each caller needs contracts for everything it calls. If a callee is not ready, give it a trusted contract with a reason such as "not verified yet". Delete the entry once the callee is verified.
-5. Split functions that use unsupported Go. Move the logic into a verified function that works on plain data. Leave the part that uses an interface, a closure, or a goroutine unverified, and have it call the verified function.
+5. Split functions that use unsupported Go. Move the logic into a verified function that works on plain data. Leave the part that uses an interface, a function value, or a goroutine unverified, and have it call the verified function.
 
 Keep two things in mind while a package is partly verified.
 
@@ -1900,16 +2041,22 @@ This table lists the most common messages.
 | `x is passed to F, which is trusted, and is an error whose origin is not known` (or `a value of type T, which can hold an error, an interface, or a function`) | The trusted function `F` could call code that `x` carries. | See [Arguments that carry code](#arguments-that-carry-code). |
 | `the trusted contract of F cannot be true of this call` | The contract contradicts what is known at the call. | The entry is wrong, or it needs a `requires` clause. |
 | `the trusted contract ... cannot be used` | The entry in the trust file is invalid. The message says why. | Fix the entry. Check the parameter names. |
+| `..., in the function literal called at f.go:n:c` | The problem is in the body of a function literal, at the call named at the end. A deferred literal names the `defer` statement and the `return` it runs at. | Fix the body, or what holds at that call. See [Function literals](#function-literals). |
+| `cannot verify F: a function literal is supported only where it is called or deferred, or as the value that declares a new variable which is only ever called` | The literal is passed, returned, stored, or compared. | Call the literal where it is written, or leave that code unverified. |
+| `cannot verify F: f holds a function literal and is used here other than by calling it` | The variable that holds the literal is passed, compared, or assigned again. | Only call the variable. |
+| `cannot verify F: recover is not supported` | `recover` returns an interface. | Call `recover` in a function that is not verified. |
+| `cannot verify F: a formula built to verify it has grown beyond 1048576 nodes, which is the limit` | An expression or a run of statements builds a formula that grows faster than the code, as `x = x + x` does when repeated. | Split the function, or the expressions in it, into smaller ones. |
 | `analysis skipped due to errors in package` | The package does not compile, or the toolchain does not match. | See [Running it](#running-it). |
 
 ## What is not supported
 
-`vego` supports functions and methods over these types: the integer types, `bool`, `string`, `error`, the float types, structs, pointers to structs, slices, and maps with integer or string keys. In the body it supports assignments, `if`, `switch`, `for` and `range` loops with `break` and `continue`, `return`, `defer`, calls to named functions and methods, and recursion. The built-ins `len`, `cap`, `min`, `max`, `new`, `make`, `append`, and `delete` are supported, and so are composite literals, slicing, and the arithmetic, comparison, shift, and bitwise operators.
+`vego` supports functions and methods over these types: the integer types, `bool`, `string`, `error`, the float types, structs, pointers to structs, slices, and maps with integer or string keys. In the body it supports assignments, `if`, `switch`, `for` and `range` loops with `break` and `continue`, `return`, `defer`, calls to named functions and methods, function literals that are called or deferred where they are written or bound to a variable that is only called, and recursion. The built-ins `len`, `cap`, `min`, `max`, `new`, `make`, `append`, and `delete` are supported, and so are composite literals, slicing, and the arithmetic, comparison, shift, and bitwise operators.
 
 A function that uses any of the following is reported as `cannot verify`:
 
 - interfaces other than `error`, calls through interfaces, type switches, and type assertions;
-- function values, method values, and closures, including `defer func() { ... }()`;
+- function values and method values, and function literals that are passed, returned, stored, compared, or assigned again (see [Literals that cannot be verified](#literals-that-cannot-be-verified));
+- `recover`;
 - generic functions and types;
 - goroutines, channels, and `select`;
 - arrays, and structs that contain an array;
@@ -1923,7 +2070,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - comparing two errors with `==` when neither is `nil`, an error made by `errors.New` or `fmt.Errorf`, an error that a trusted contract vouches for, or an error variable that holds one or holds a pointer, integer, string, or boolean, or an array or struct of these (see [Comparing errors](#comparing-errors));
 - `errors.As`, `errors.Join`, `errors.Unwrap`, and `errors.Is` on an error whose origin is not known (see [Asking errors.Is](#asking-errorsis));
 - a `range` over a map whose body modifies a map of the same type;
-- `goto`, `fallthrough`, labelled `break` and `continue`, and `defer` inside a loop.
+- `goto`, `fallthrough`, labelled `break` and `continue`, and `defer` inside a loop, except inside a function literal that the loop calls.
 
 Floating-point values are supported but opaque. They can be passed around and used in arithmetic, but nothing can be stated or proved about their values. An integer converted from a float can have any value of its type, so check its range in code before you use it as an index.
 
@@ -2016,7 +2163,8 @@ Results are referred to by the names in the function's signature.
 | an operation | after its operands |
 | the right operand of `&&` and <code>&#124;&#124;</code> | after the left one, and only when the left one does not decide the result |
 | an assignment | assigns after every operand is evaluated |
-| any other read of memory | not fixed; `vego` proves that every order gives the same value |
+| a call of a function literal | like a call, and it may change the variables that the literal assigns |
+| any other read of memory, or of a variable that a function literal assigns | not fixed; `vego` proves that every order gives the same value |
 | `append` and other built-in functions | after their operands, and not ordered like calls |
 | the entries of a map literal | not fixed; keys that are not both constants must be proved different |
 
