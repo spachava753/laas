@@ -150,3 +150,41 @@ func Ordered(x int) (result int) {
 	y := x
 	return y + bump()
 }
+
+type nested struct {
+	n int
+	q pair
+}
+
+// SecondField reads a field other than the first of a struct that a
+// literal assigns.
+//
+// @Ensures result = 2
+func SecondField() (result int) {
+	p := pair{a: 1, b: 2}
+	set := func() { p.a = 1 }
+	set()
+	return p.b
+}
+
+// SecondFieldUpdate updates a field other than the first of such a struct.
+//
+// @Ensures result = 12
+func SecondFieldUpdate() (result int) {
+	p := pair{a: 1, b: 2}
+	set := func() { p.a = 1 }
+	set()
+	p.b += 10
+	return p.b
+}
+
+// InnerField reads and updates a field inside a field of such a struct.
+//
+// @Ensures result = 13
+func InnerField() (result int) {
+	p := nested{n: 1, q: pair{a: 2, b: 3}}
+	set := func() { p.n = 5 }
+	set()
+	p.q.b += 10
+	return p.q.b
+}

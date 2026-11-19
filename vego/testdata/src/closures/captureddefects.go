@@ -94,3 +94,36 @@ func OverflowsCaptured(n int) (result int) {
 	inc()
 	return n
 }
+
+// SecondFieldWrong claims the first field where it reads the second.
+//
+// @Ensures result = 1
+func SecondFieldWrong() (result int) {
+	p := pair{a: 1, b: 2}
+	set := func() { p.a = 1 }
+	set()
+	return p.b // want `vego: postcondition may not hold: result = 1`
+}
+
+// SecondFieldUpdateWrong claims the update of the first field.
+//
+// @Ensures result = 11
+func SecondFieldUpdateWrong() (result int) {
+	p := pair{a: 1, b: 2}
+	set := func() { p.a = 1 }
+	set()
+	p.b += 10
+	return p.b // want `vego: postcondition may not hold: result = 11`
+}
+
+// InnerFieldWrong claims the update of the first field of the inner
+// struct.
+//
+// @Ensures result = 12
+func InnerFieldWrong() (result int) {
+	p := nested{n: 1, q: pair{a: 2, b: 3}}
+	set := func() { p.n = 5 }
+	set()
+	p.q.b += 10
+	return p.q.b // want `vego: postcondition may not hold: result = 12`
+}
