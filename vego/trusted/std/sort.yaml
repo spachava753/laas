@@ -24,3 +24,33 @@ trusted:
       - "a[0:result) < x"
       - "x <= a[result:|a|)"
     modifies: []
+
+  sort.Search:
+    reason: >-
+      Documented to call f(i) only for i in the range [0, n). Its result is
+      documented only for an f that is false and then true over [0, n), which
+      this entry cannot state, so it says nothing of it. For a negative n the
+      documentation says that it returns n, and it returns 0, so n must not be
+      negative.
+    requires:
+      - "n >= 0"
+    runs: [f]
+    calls:
+      f(i):
+        requires: ["0 <= i < n"]
+    modifies: []
+
+  sort.Find:
+    reason: >-
+      Documented to call cmp(i) only for i in the range [0, n). Its result is
+      documented only for a cmp that is positive, then zero, then negative over
+      [0, n), which this entry cannot state, so it says nothing of it. For a
+      negative n the documentation says that it returns n, and it returns 0, so
+      n must not be negative.
+    requires:
+      - "n >= 0"
+    runs: [cmp]
+    calls:
+      cmp(k):
+        requires: ["0 <= k < n"]
+    modifies: []

@@ -49,3 +49,66 @@ trusted:
   strings.ToLower:
     reason: Documented to return s mapped to lower case; the length may change.
     modifies: []
+
+  strings.IndexFunc:
+    reason: Documented to return the index into s of the first code point c satisfying f(c), or -1.
+    runs: [f]
+    calls:
+      f(c): {}
+    modifies: []
+    ensures:
+      - "result = -1 Or (0 <= result And result < |s|)"
+
+  strings.LastIndexFunc:
+    reason: Documented to return the index into s of the last code point c satisfying f(c), or -1.
+    runs: [f]
+    calls:
+      f(c): {}
+    modifies: []
+    ensures:
+      - "result = -1 Or (0 <= result And result < |s|)"
+
+  strings.ContainsFunc:
+    reason: Documented to report whether any code point r within s satisfies f(r), so it reports false for an empty s.
+    runs: [f]
+    calls:
+      f(r): {}
+    modifies: []
+    ensures:
+      - "result -> |s| > 0"
+
+  strings.TrimFunc:
+    reason: Documented to return a slice of s with all leading and trailing code points c satisfying f(c) removed.
+    runs: [f]
+    calls:
+      f(c): {}
+    modifies: []
+    ensures:
+      - "|result| <= |s|"
+
+  strings.TrimLeftFunc:
+    reason: Documented to return a slice of s with all leading code points c satisfying f(c) removed, which is what ends s.
+    runs: [f]
+    calls:
+      f(c): {}
+    modifies: []
+    ensures:
+      - "|result| <= |s|"
+      - "Forall k in [0, |result|) : result[k] = s[|s| - |result| + k]"
+
+  strings.TrimRightFunc:
+    reason: Documented to return a slice of s with all trailing code points c satisfying f(c) removed, which is what begins s.
+    runs: [f]
+    calls:
+      f(c): {}
+    modifies: []
+    ensures:
+      - "|result| <= |s|"
+      - "Forall k in [0, |result|) : result[k] = s[k]"
+
+  strings.Map:
+    reason: Documented to return a copy of s with each character replaced by what mapping returns for it, or dropped where that is negative.
+    runs: [mapping]
+    calls:
+      mapping(r): {}
+    modifies: []

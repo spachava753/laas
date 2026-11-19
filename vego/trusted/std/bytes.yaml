@@ -1,0 +1,63 @@
+version: 1
+
+trusted:
+  bytes.IndexFunc:
+    reason: Documented to return the byte index in s of the first code point c satisfying f(c), or -1.
+    runs: [f]
+    calls:
+      f(c): {}
+    modifies: []
+    ensures:
+      - "result = -1 Or (0 <= result And result < |s|)"
+
+  bytes.LastIndexFunc:
+    reason: Documented to return the byte index in s of the last code point c satisfying f(c), or -1.
+    runs: [f]
+    calls:
+      f(c): {}
+    modifies: []
+    ensures:
+      - "result = -1 Or (0 <= result And result < |s|)"
+
+  bytes.ContainsFunc:
+    reason: Documented to report whether any code point r within b satisfies f(r), so it reports false for an empty b.
+    runs: [f]
+    calls:
+      f(r): {}
+    modifies: []
+    ensures:
+      - "result -> |b| > 0"
+
+  bytes.TrimFunc:
+    reason: Documented to return a subslice of s without its leading and trailing code points c that satisfy f(c).
+    runs: [f]
+    calls:
+      f(c): {}
+    modifies: []
+    ensures:
+      - "|result| <= |s|"
+
+  bytes.TrimLeftFunc:
+    reason: Documented to return a subslice of s without its leading code points c that satisfy f(c).
+    runs: [f]
+    calls:
+      f(c): {}
+    modifies: []
+    ensures:
+      - "|result| <= |s|"
+
+  bytes.TrimRightFunc:
+    reason: Documented to return a subslice of s without its trailing code points c that satisfy f(c).
+    runs: [f]
+    calls:
+      f(c): {}
+    modifies: []
+    ensures:
+      - "|result| <= |s|"
+
+  bytes.Map:
+    reason: Documented to return a copy of s with each character replaced by what mapping returns for it, or dropped where that is negative.
+    runs: [mapping]
+    calls:
+      mapping(r): {}
+    modifies: []

@@ -1,12 +1,14 @@
 package vego
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"go/importer"
 	"go/token"
 	"go/types"
 	"io/fs"
+	"maps"
 	"math/big"
 	"math/rand"
 	"os"
@@ -30,6 +32,55 @@ type sample struct {
 	before  []any
 	after   []any
 	results []any
+	// calls holds, for each function parameter with a contract under calls,
+	// the arguments of every call the function made of it.
+	calls map[string][][]any
+}
+
+// recorder returns a function that answers at random and records the
+// arguments of each call in calls under name.
+func recorder[A, R any](rng *rand.Rand, calls map[string][][]any, name string, answer func(rng *rand.Rand, a A) R) func(A) R {
+	return func(a A) R {
+		calls[name] = append(calls[name], []any{a})
+		return answer(rng, a)
+	}
+}
+
+// randomBool answers true or false at random, whatever it is asked.
+func randomBool[A any](rng *rand.Rand, _ A) bool { return rng.Intn(2) == 0 }
+
+// runeHarness calls a function of package strings that is handed a
+// predicate on code points, with one that answers at random.
+func runeHarness[R any](call func(s string, f func(rune) bool) R) func(rng *rand.Rand) sample {
+	return func(rng *rand.Rand) sample {
+		s, calls := randomText(rng), map[string][][]any{}
+		f := recorder(rng, calls, "f", randomBool[rune])
+		return sample{before: []any{s, f}, results: []any{call(s, f)}, calls: calls}
+	}
+}
+
+// bytesHarness calls a function of package bytes that is handed a
+// predicate on code points, with one that answers at random and, at times,
+// writes the slice the function is reading.
+func bytesHarness[R any](call func(s []byte, f func(rune) bool) R) func(rng *rand.Rand) sample {
+	return func(rng *rand.Rand) sample {
+		s, calls := []byte(randomText(rng)), map[string][][]any{}
+		before := slices.Clone(s)
+		f := recorder(rng, calls, "f", func(rng *rand.Rand, r rune) bool {
+			if len(s) > 0 && rng.Intn(4) == 0 {
+				s[rng.Intn(len(s))] = "a\xff "[rng.Intn(3)]
+			}
+			return rng.Intn(2) == 0
+		})
+		result := call(s, f)
+		return sample{before: []any{before, f}, after: []any{s, f}, results: []any{result}, calls: calls}
+	}
+}
+
+// randomRune answers with what mapping may return: the code point it is
+// given, one of another length, an invalid one, or a negative number.
+func randomRune(rng *rand.Rand, r rune) rune {
+	return []rune{r, 'é', '世', -1, 0x110000, 0xD800}[rng.Intn(6)]
 }
 
 // harnesses call each function that vego ships a contract for on random
@@ -131,6 +182,43 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 		name := []string{file, filepath.Join(dir, "missing"), full, filepath.Join(file, "below"), filepath.Join(dir, "a\x00b")}[rng.Intn(5)]
 		return sample{before: []any{name}, results: []any{os.Remove(name)}}
 	},
+	"sort.Search": func(rng *rand.Rand) sample {
+		n, calls := rng.Intn(9)-2, map[string][][]any{}
+		threshold := rng.Intn(9)
+		f := recorder(rng, calls, "f", func(rng *rand.Rand, i int) bool {
+			// Half the time f is false and then true, as Search asks.
+			return rng.Intn(2) == 0 && i >= threshold || rng.Intn(2) == 0
+		})
+		return sample{before: []any{n, f}, results: []any{sort.Search(n, f)}, calls: calls}
+	},
+	"sort.Find": func(rng *rand.Rand) sample {
+		n, calls := rng.Intn(9)-2, map[string][][]any{}
+		cmp := recorder(rng, calls, "cmp", func(rng *rand.Rand, i int) int { return rng.Intn(3) - 1 })
+		i, found := sort.Find(n, cmp)
+		return sample{before: []any{n, cmp}, results: []any{i, found}, calls: calls}
+	},
+	"strings.IndexFunc":     runeHarness(strings.IndexFunc),
+	"strings.LastIndexFunc": runeHarness(strings.LastIndexFunc),
+	"strings.ContainsFunc":  runeHarness(strings.ContainsFunc),
+	"strings.TrimFunc":      runeHarness(strings.TrimFunc),
+	"strings.TrimLeftFunc":  runeHarness(strings.TrimLeftFunc),
+	"strings.TrimRightFunc": runeHarness(strings.TrimRightFunc),
+	"strings.Map": func(rng *rand.Rand) sample {
+		s, calls := randomText(rng), map[string][][]any{}
+		mapping := recorder(rng, calls, "mapping", randomRune)
+		return sample{before: []any{mapping, s}, results: []any{strings.Map(mapping, s)}, calls: calls}
+	},
+	"bytes.IndexFunc":     bytesHarness(bytes.IndexFunc),
+	"bytes.LastIndexFunc": bytesHarness(bytes.LastIndexFunc),
+	"bytes.ContainsFunc":  bytesHarness(bytes.ContainsFunc),
+	"bytes.TrimFunc":      bytesHarness(bytes.TrimFunc),
+	"bytes.TrimLeftFunc":  bytesHarness(bytes.TrimLeftFunc),
+	"bytes.TrimRightFunc": bytesHarness(bytes.TrimRightFunc),
+	"bytes.Map": func(rng *rand.Rand) sample {
+		s, calls := []byte(randomText(rng)), map[string][][]any{}
+		mapping := recorder(rng, calls, "mapping", randomRune)
+		return sample{before: []any{mapping, slices.Clone(s)}, results: []any{bytes.Map(mapping, s)}, calls: calls}
+	},
 	"unicode/utf8.RuneCountInString": func(rng *rand.Rand) sample {
 		s := randomText(rng)
 		return sample{before: []any{s}, results: []any{utf8.RuneCountInString(s)}}
@@ -215,7 +303,15 @@ func (g *grounder) groundTerm(value any) *logic.Term {
 		return logic.BoolLit(value)
 	case string:
 		return logic.Bytes(value)
+	case int32:
+		return logic.IntLit(int64(value))
 	case []int:
+		seq := logic.Fill(logic.IntLit(0), logic.IntLit(0))
+		for _, element := range value {
+			seq = logic.Push(seq, logic.IntLit(int64(element)))
+		}
+		return seq
+	case []byte:
 		seq := logic.Fill(logic.IntLit(0), logic.IntLit(0))
 		for _, element := range value {
 			seq = logic.Push(seq, logic.IntLit(int64(element)))
@@ -403,11 +499,20 @@ func TestShippedContracts(t *testing.T) {
 					g := &grounder{}
 					eval := &evaluator{bindings: map[string]*big.Int{}, errors: g}
 					for i, param := range fn.params {
+						// A function is one reference, which no formula of an
+						// entry reads.
+						if _, isFunc := param.Type().Underlying().(*types.Signature); isFunc {
+							env.given[param], env.givenPost[param] = logic.RefLit(1), logic.RefLit(1)
+							continue
+						}
 						env.given[param], env.givenPost[param] = g.groundTerm(call.before[i]), g.groundTerm(call.after[i])
 						if text, ok := call.before[i].(string); ok {
 							eval.bound = max(eval.bound, int64(len(text))+2)
 						}
 						if list, ok := call.before[i].([]int); ok {
+							eval.bound = max(eval.bound, int64(len(list))+2)
+						}
+						if list, ok := call.before[i].([]byte); ok {
 							eval.bound = max(eval.bound, int64(len(list))+2)
 						}
 					}
@@ -423,6 +528,31 @@ func TestShippedContracts(t *testing.T) {
 						continue
 					}
 					checked++
+					// The function called what it was handed only with
+					// arguments that the requires of calls allow.
+					for _, param := range fn.params {
+						cb := fn.calls[param]
+						if cb == nil {
+							continue
+						}
+						for _, args := range call.calls[param.Name()] {
+							given := maps.Clone(env.given)
+							for i, p := range cb.params {
+								given[p] = g.groundTerm(args[i])
+							}
+							inner := &specEnv{v: env.v, fn: cb.fn, given: given, givenPost: map[*types.Var]*logic.Term{}}
+							for _, c := range cb.requires {
+								formula, err := pv.res.Formula(c.node, inner)
+								if err != nil {
+									t.Fatalf("calls requires %q: %v", c.text, err)
+								}
+								if !eval.holds(formula) {
+									t.Fatalf("%s called %s with %v, for which the calls requires %q is false, in the call with arguments %v",
+										key, param.Name(), args, c.text, call.before)
+								}
+							}
+						}
+					}
 					for i, result := range call.results {
 						if fn.vouches[i] {
 							checkVouched(t, result)
