@@ -202,7 +202,7 @@ There is a short form for a condition on a range of elements. `A[lo:hi) <= x` me
 
 ### Names
 
-A contract can use the function's parameters and results, and the integer and boolean constants of the package. String constants cannot be used by name. Write the string itself. A contract can also name the error variables of the package, as in `ErrEmpty`, and those of an imported package, as in `io.EOF`.
+A contract can use the function's parameters and results, and the integer and boolean constants of the package. String constants cannot be used by name. Write the string itself. A contract can also name the error variables of the package, as in `ErrEmpty`, and those of an imported package, as in `io.EOF`. A trusted contract names them by the path of their package instead. See [Error variables in a trusted contract](#error-variables-in-a-trusted-contract).
 
 Results are referred to by their names, so every result of a verified function must be named. This guide calls a single result `result`, but you can choose another name. Go does not allow a result to share a name with a parameter, so a name in a contract cannot mean both. Three names are not available for variables that annotations use: `True`, `False`, and `nil`, which are words of the formula language. A predicate cannot be called `is`.
 
@@ -1326,6 +1326,13 @@ The third is anything else, such as `var DeadlineExceeded error = deadlineExceed
 
 `context.DeadlineExceeded` is not nil and can be compared with any error. An error made in the body of the function being verified differs from it, because a new error is new memory, which no variable held before. `vego` does not know that an error that a call returned differs from it.
 
+These variables are of the third kind too:
+
+- a variable that holds another error variable that its package assigns, or that a package in the build changes;
+- a variable set by a call that does more than return an error variable, or that passes arguments, as in `var ErrBad = newError("bad")`.
+
+`vego` does not know whether such a variable is nil, unless the type of its initialiser says so as above. It does not know whether it is the same error as another error variable, or what `errors.Is` finds in it. A proof that needs one of these facts fails with `postcondition may not hold` or a similar message, and nothing says that the variable is the reason. If a proof fails where it uses an error variable of another package, read the initialiser of that variable.
+
 ## Defer
 
 `vego` verifies a deferred call at the point where it runs. That is at every `return` of the function, after the results have been set. Deferred calls run in reverse order.
@@ -1535,7 +1542,7 @@ The trust report shows `runs`, so that a reviewer of the trust file notices the 
 
 ### Errors that a trusted function returns
 
-Without a claim in its contract, `vego` knows nothing of an error that a trusted function returns. Verified code can return such an error and compare it with `nil` or with an error variable of the kinds listed in [Comparing errors](#comparing-errors). It cannot format it, wrap it, or pass it as the first argument of `errors.Is`. To allow these, list the error result under `vouches`:
+Without a claim in its contract, `vego` knows nothing about the methods of an error that a trusted function returns. Verified code can return such an error and compare it with `nil` or with an error variable of the kinds listed in [Comparing errors](#comparing-errors). It cannot format it, wrap it, or pass it as the first argument of `errors.Is`. To allow these, list the error result under `vouches`:
 
 ```yaml
   example.com/shop/internal/scan.next:
@@ -1591,6 +1598,8 @@ The report has three lists:
 - the contracts from your trust file that the proofs use;
 - the shipped contracts that the proofs use;
 - the entries in your trust file that no proof uses.
+
+An entry that lists parameters under `runs` or results under `vouches` shows them in the lines `runs code held by:` and `vouches for the errors in:`. Each is a claim about code that `vego` does not read. See [Arguments that carry code](#arguments-that-carry-code) and [Errors that a trusted function returns](#errors-that-a-trusted-function-returns).
 
 A contract marked `[may fail unpredictably]` does not say when its function succeeds. A verified function that calls it can be excused from saying when it succeeds, as described in [Functions that cannot promise success](#functions-that-cannot-promise-success).
 
@@ -1690,7 +1699,8 @@ Work through these steps in order.
 4. If it is true and the failure comes after a call, the `Ensures` clauses of the callee are too weak. Strengthen them.
 5. If it is an overflow, add a bound on an input, or rearrange the expression as in the midpoint example.
 6. If it involves two pointers or two slices, check whether they can alias. If they must not, say so in the `Requires` clause.
-7. Otherwise, help the prover. Put the fact in an `Assert` just before the failure. If the `Assert` is proved but the failure remains, assert a smaller intermediate step. If the `Assert` is not proved, move it earlier until it is.
+7. If it involves an error variable, check what `vego` knows of it. A variable that is not initialised with `errors.New` or `fmt.Errorf` may not be known to be not nil, or to differ from another error. See [What vego knows of an error variable](#what-vego-knows-of-an-error-variable).
+8. Otherwise, help the prover. Put the fact in an `Assert` just before the failure. If the `Assert` is proved but the failure remains, assert a smaller intermediate step. If the `Assert` is not proved, move it earlier until it is.
 
 One problem often produces several messages. Fix the first one and run again.
 
@@ -1759,7 +1769,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - `append(s, t...)` and `copy`;
 - a modifying call inside a condition or a larger expression, as in `if !s.Push(x)` (see [Where a modifying call can appear](#where-a-modifying-call-can-appear));
 - comparing structs with `==`;
-- comparing two errors with `==` when neither is `nil`, an error made by `errors.New` or `fmt.Errorf`, or an error variable that holds one or holds a pointer, integer, string, or boolean, or an array or struct of these (see [Comparing errors](#comparing-errors));
+- comparing two errors with `==` when neither is `nil`, an error made by `errors.New` or `fmt.Errorf`, an error that a trusted contract vouches for, or an error variable that holds one or holds a pointer, integer, string, or boolean, or an array or struct of these (see [Comparing errors](#comparing-errors));
 - `errors.As`, `errors.Join`, `errors.Unwrap`, and `errors.Is` on an error whose origin is not known (see [Asking errors.Is](#asking-errorsis));
 - a `range` over a map whose body modifies a map of the same type;
 - `goto`, `fallthrough`, labelled `break` and `continue`, and `defer` inside a loop.
@@ -1816,6 +1826,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `Forall k in Z : P` | quantifier over all integers |
 | `"text"`, `nil` | a string; the nil pointer or nil error |
 | `ErrEmpty`, `io.EOF` | an error variable of the package, or of an imported package |
+| `"io/fs".ErrNotExist` | in a trusted contract, an error variable named by the path of its package |
 | `err = ErrEmpty` | the two are the same error |
 | `is(err, target)` | `errors.Is(err, target)` reports true |
 | `has(m, k)` | the map contains the key |
