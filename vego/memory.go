@@ -496,6 +496,7 @@ func (v *fnVerifier) checkWrite(st *state, guard []*logic.Term, w written, pos t
 	if len(w.parts) == 0 {
 		return
 	}
+	v.checkNotForbidden(st, guard, w, pos, what)
 	created := logic.Or(logic.Le(v.entryBrk, w.ref), logic.Eq(w.ref, logic.RefLit(0)))
 	covers := make([][]stretch, len(v.frame))
 	var candidates []int

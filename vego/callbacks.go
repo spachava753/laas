@@ -1,11 +1,16 @@
 package vego
 
 import (
+	"fmt"
+	"go/ast"
+	"go/token"
 	"go/types"
 	"slices"
 	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/solver"
+	"golang.org/x/tools/go/types/typeutil"
 )
 
 // A trusted function may take a function and call it while it runs, as
@@ -176,4 +181,215 @@ func (v *fnVerifier) callRequires(cb *callback, given []value, args map[*types.V
 		facts = append(facts, v.formula(c, c.node, env))
 	}
 	return facts
+}
+
+// forbidden is what a trusted function may write while it runs a function
+// it was handed, which that function may not write: the two writes would
+// meet in memory whose contents nobody describes. A run of what o.Do is
+// handed that calls o.Do writes o, and never returns.
+type forbidden struct {
+	targets []target
+	by      string
+}
+
+// callHanding verifies a call of a trusted function that is handed a
+// function it calls while it runs. The other arguments are evaluated as
+// for any call. On one branch of && or || the call is made in a state of
+// its own, which is joined with the one where it is not made, as a call of
+// a function literal is.
+func (v *fnVerifier) callHanding(call *ast.CallExpr, fn *funcInfo, st *state, guard []*logic.Term, operands *ceiling) []value {
+	callee := fn.obj
+	sig := callee.Type().(*types.Signature)
+	handed := map[*types.Var]*ast.FuncLit{}
+	args := map[*types.Var]value{}
+	if sig.Recv() != nil {
+		args[sig.Recv()] = v.receiver(call, sig.Recv(), st, guard)
+	}
+	for i, arg := range call.Args {
+		param := sig.Params().At(i)
+		if fn.calls[param] != nil {
+			// Only a function literal written there can be handed over
+			// yet.
+			lit, ok := ast.Unparen(arg).(*ast.FuncLit)
+			if !ok {
+				v.unsupported(arg.Pos(), fmt.Sprintf("%s is passed to %s as %s, which %s calls; only a function literal written there can be "+
+					"handed to it yet", types.ExprString(arg), fn.obj.Name(), param.Name(), fn.obj.Name()))
+			}
+			handed[param] = lit
+			// A function value is one reference, and this one is not nil.
+			args[param] = value{logic.RefLit(1)}
+			continue
+		}
+		if _, ok := layoutOf(param.Type()); !ok {
+			v.unsupported(arg.Pos(), fmt.Sprintf("arguments of type %s are not supported", param.Type()))
+		}
+		args[param] = v.evalAs(arg, param.Type(), st, guard)
+	}
+	u := v.unit
+	u.reach(operands)
+	// The versions of the unit are recorded here, from the state the
+	// joined call leaves; see order.go.
+	before := v.snapshot(st)
+	v.unit = nil
+	defer func() { v.unit = u }()
+	v.handing = handed
+	results := func(at *state) []value {
+		return v.invoke(call, fn, args, at, nil)
+	}
+	var out []value
+	if len(guard) == 0 {
+		out = results(st)
+	} else {
+		ran := st.clone()
+		ran.assume(logic.And(guard...))
+		made := results(ran)
+		skipped := st.clone()
+		skipped.assume(logic.Not(logic.And(guard...)))
+		zero := make([]value, sig.Results().Len())
+		for i := range zero {
+			zero[i] = zeroValue(sig.Results().At(i).Type())
+		}
+		out = v.join(st, []litEnd{{ran, made}, {skipped, zero}}, sig)
+	}
+	v.unit = u
+	if changed(before, v.snapshot(st)) {
+		u.wrote(st, "the call to "+callee.Name())
+	}
+	return out
+}
+
+// runHanded runs, within the call of a trusted function, the functions it
+// was handed, once each in a state that stands for every state in which
+// the trusted function may call them, and leaves in st what is known once
+// the call has returned. written is what the trusted function may write,
+// which st has forgotten already.
+//
+// A handed function may run any number of times, never included, in any
+// order with the others and with the writes of the trusted function. So in
+// the state of a run, as at the head of a loop without an invariant, what
+// any of them or the trusted function may write is forgotten, and the rest
+// is as it was at the call; its arguments are what the contract under calls
+// says of them. What the handed functions write is forgotten once more
+// after the call. A run is held to everything the caller is held to, since
+// it runs as part of the call, and it may not write what the trusted
+// function may.
+func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types.Var]value, written []target, st *state) {
+	handed := v.handing
+	v.handing = nil
+	if handed == nil {
+		panic("vego: internal error: a call of a trusted function that calls what it is given was applied without it")
+	}
+	var bodies []ast.Node
+	for _, param := range fn.params {
+		if lit := handed[param]; lit != nil {
+			bodies = append(bodies, lit.Body)
+		}
+	}
+	eff := v.effects(bodies...)
+	name := types.ExprString(call.Fun)
+	for _, param := range fn.params {
+		lit, cb := handed[param], fn.calls[param]
+		if lit == nil {
+			continue
+		}
+		// The trusted function may have written its part of memory before
+		// any run, or between two runs.
+		head := st.clone()
+		for _, t := range written {
+			v.havoc(head, t, nil)
+		}
+		head = v.forget(head, eff)
+		given := make([]value, len(cb.params))
+		for i, p := range cb.params {
+			given[i] = v.unknown(p.Name(), p.Type(), head)
+		}
+		for _, fact := range v.callRequires(cb, given, args, head) {
+			head.assume(fact)
+		}
+		v.forbidden = append(v.forbidden, forbidden{targets: written, by: name})
+		v.inline(lit, given, head, nil, v.site(lit.Pos(), "in the function literal run by %s at %s", name, v.placeOf(lit.Pos())))
+		v.forbidden = v.forbidden[:len(v.forbidden)-1]
+	}
+	*st = *v.forget(st, eff)
+}
+
+// checkNotForbidden requires that a write made by a function that a
+// trusted function runs misses everything that trusted function may write
+// itself, whether or not the memory was created since the caller was
+// entered.
+func (v *fnVerifier) checkNotForbidden(st *state, guard []*logic.Term, w written, pos token.Pos, what string) {
+	for _, f := range v.forbidden {
+		var apart []*logic.Term
+		for _, t := range f.targets {
+			apart = append(apart, outside(w, t))
+		}
+		goal := logic.And(apart...)
+		if result := v.attempt(st, guard, goal); result != solver.Proved {
+			v.report(pos, "%s, which %s may write itself while it runs the function it is handed; "+
+				"a function it is handed may not write what it may write%s", what, f.by, limitNote(result))
+			st.assume(logic.Implies(logic.And(guard...), goal))
+		}
+	}
+}
+
+// outside states that a write misses a target: the two lie in different
+// allocations, or in stretches of one allocation that do not meet, in each
+// region they share. A target through a nil pointer covers nothing.
+func outside(w written, t target) *logic.Term {
+	var apart []*logic.Term
+	for _, part := range w.parts {
+		for _, c := range t.stretches() {
+			switch {
+			case c.key != part.key:
+			case c.lo == nil || part.lo == nil:
+				apart = append(apart, logic.Ne(w.ref, t.ref))
+			default:
+				apart = append(apart, logic.Or(logic.Ne(w.ref, t.ref), logic.Le(part.hi, c.lo), logic.Le(c.hi, part.lo)))
+			}
+		}
+	}
+	return logic.Or(logic.Eq(t.ref, logic.RefLit(0)), logic.And(apart...))
+}
+
+// handedArgs returns the arguments of a call that its callee, a trusted
+// function, is handed to call while it runs: those for its parameters with
+// a contract under calls.
+func (pv *pkgVerifier) handedArgs(call *ast.CallExpr) []ast.Expr {
+	callee := typeutil.StaticCallee(pv.info, call)
+	if callee == nil {
+		return nil
+	}
+	fn := pv.trustedContract(callee.Origin())
+	if fn == nil || len(fn.calls) == 0 {
+		return nil
+	}
+	sig := callee.Type().(*types.Signature)
+	var handed []ast.Expr
+	for i, arg := range call.Args {
+		if i < sig.Params().Len() && fn.calls[sig.Params().At(i)] != nil {
+			handed = append(handed, arg)
+		}
+	}
+	return handed
+}
+
+// callsParam reports whether a variable is a parameter of a function that
+// its trusted contract, as written, gives a contract under calls. It reads
+// the entry without checking it: an entry with a defect cannot be used, so
+// nothing relies on what this says of it.
+func (pv *pkgVerifier) callsParam(fn *funcInfo, variable *types.Var) bool {
+	key := fn.obj.FullName()
+	var entry *trustEntry
+	if pv.projectTrust != nil {
+		entry = pv.projectTrust.entries[key]
+	}
+	for _, file := range shippedContracts() {
+		if entry == nil {
+			entry = file.entries[key]
+		}
+	}
+	if entry == nil || variable.Parent() != fn.obj.Scope() {
+		return false
+	}
+	return slices.ContainsFunc(entry.calls, func(call trustCall) bool { return call.name == variable.Name() })
 }

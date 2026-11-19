@@ -80,6 +80,12 @@ type fnVerifier struct {
 	// used marks the entries some write could not do without.
 	frame []target
 	used  []bool
+	// forbidden holds what the trusted functions running the code being
+	// executed may write themselves, which that code may not; and handing
+	// the functions handed over at the call being applied. See
+	// callbacks.go.
+	forbidden []forbidden
+	handing   map[*types.Var]*ast.FuncLit
 	// layers holds, by the name of the constant that stands for a forgotten
 	// region, what is still known of the region.
 	layers map[string]*layer
@@ -719,6 +725,9 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 		v.unsupported(s.Pos(), "deferring errors.Is is not supported: its result would be lost")
 	}
 	fn := v.contractFor(s.Call, callee)
+	if len(fn.calls) > 0 {
+		v.unsupported(s.Pos(), fmt.Sprintf("deferring a call of %s, which calls a function it is given, is not supported yet", callee.Name()))
+	}
 	// The deferred call itself runs later, so nothing here comes before it.
 	var args map[*types.Var]value
 	v.evaluate(st, func() {

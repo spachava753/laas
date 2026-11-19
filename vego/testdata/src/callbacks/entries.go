@@ -125,5 +125,5 @@ func UsesOldPlain() {
 //
 // @Ensures True
 func UsesEach() {
-	each(3, func(i int) {}) // want `cannot verify UsesEach: each calls a function it is given, and handing one over is not supported yet`
+	each(3, func(i int) {})
 }

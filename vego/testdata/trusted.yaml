@@ -790,3 +790,44 @@ trusted:
     reason: Test helper whose requires uses old.
     requires: ["old(n) > 0"]
     modifies: []
+
+  callbacks.eachOf:
+    reason: Test helper that calls f with each position of xs that holds a positive number.
+    runs: [f]
+    calls:
+      f(i):
+        requires: ["0 <= i < |xs|", "xs[i] > 0"]
+    modifies: []
+
+  callbacks.search:
+    reason: Test helper that returns the first number below n for which f is true, or -1.
+    runs: [f]
+    calls:
+      f(i):
+        requires: ["0 <= i < n"]
+    modifies: []
+    ensures:
+      - "-1 <= result < n Or (n < 0 And result = -1)"
+
+  callbacks.update:
+    reason: Test helper that counts in c and then calls f once.
+    runs: [f]
+    calls:
+      f(): {}
+    modifies: [c]
+
+  callbacks.both:
+    reason: Test helper that calls f, then g, then f.
+    runs: [f, g]
+    calls:
+      f(): {}
+      g(): {}
+    modifies: []
+
+  callbacksinit.each:
+    reason: Test helper that calls f with each number below n.
+    runs: [f]
+    calls:
+      f(i):
+        requires: ["0 <= i < n"]
+    modifies: []

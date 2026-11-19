@@ -1071,6 +1071,13 @@ func (pv *pkgVerifier) collect() {
 					if variable, ok := pv.info.Uses[fun].(*types.Var); ok && bound[variable] != nil {
 						return true
 					}
+					// A trusted function calls what its caller hands it
+					// under calls, and that is followed where it is handed
+					// over: a literal is part of the caller, a function is
+					// named there.
+					if variable, ok := pv.info.Uses[fun].(*types.Var); ok && pv.callsParam(fn, variable) {
+						return true
+					}
 				}
 				fn.callees = append(fn.callees, escaped...)
 				if sel, ok := ast.Unparen(n.Fun).(*ast.SelectorExpr); ok {

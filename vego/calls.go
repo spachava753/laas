@@ -122,6 +122,11 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		made.pure = true
 	default:
 		fn := v.contractFor(call, callee)
+		if len(fn.calls) > 0 {
+			// What the call runs may read and write anything the caller may.
+			results = v.callHanding(call, fn, st, guard, operands)
+			break
+		}
 		args := v.arguments(call, callee, st, guard)
 		u.reach(operands)
 		made.pure = len(fn.modifies) == 0 && signatureMemoryFree(callee.Type().(*types.Signature))
@@ -183,9 +188,6 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func) *funcIn
 	}
 	if fn.trust != nil {
 		v.noteUse(fn, call.Pos())
-		if len(fn.calls) > 0 {
-			v.unsupported(call.Pos(), fmt.Sprintf("%s calls a function it is given, and handing one over is not supported yet", callee.Name()))
-		}
 		v.checkHandedOver(call, fn)
 	}
 	return fn
@@ -344,6 +346,9 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	}
 	for _, t := range written {
 		v.havoc(st, t, guard)
+	}
+	if len(fn.calls) > 0 {
+		v.runHanded(call, fn, args, written, st)
 	}
 	if u := v.unit; len(written) > 0 && u != nil {
 		u.wrote(st, "the call to "+name)

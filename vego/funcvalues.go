@@ -538,13 +538,23 @@ func (pv *pkgVerifier) mayCallValues(obj *types.Func) bool {
 	case fn.imported != nil:
 		may = fn.imported.CallsValues
 	case fn.trust != nil:
-		may = false
-		for param := range fn.runs {
-			may = may || holdsFunc(param.Type(), map[types.Type]bool{})
-		}
+		may = runsValues(fn)
 	}
 	pv.mayCall[obj.Origin()] = may
 	return may
+}
+
+// runsValues reports whether a trusted function may call a function value
+// that it is given: one held, at any depth, by a parameter listed under
+// runs, other than a function parameter with a contract under calls. What
+// is handed over there is judged where it is handed over.
+func runsValues(fn *funcInfo) bool {
+	for param := range fn.runs {
+		if fn.calls[param] == nil && holdsFunc(param.Type(), map[types.Type]bool{}) {
+			return true
+		}
+	}
+	return false
 }
 
 // findValueCallers decides mayCallValues for every function of the package
@@ -567,10 +577,9 @@ func (pv *pkgVerifier) findValueCallers() {
 		}
 		local[fn.obj] = true
 		direct := false
-		if trusted := pv.trustedContract(fn.obj); trusted != nil {
-			for param := range trusted.runs {
-				direct = direct || holdsFunc(param.Type(), map[types.Type]bool{})
-			}
+		trusted := pv.trustedContract(fn.obj)
+		if trusted != nil {
+			direct = runsValues(trusted)
 		}
 		bound, _ := literalUses(pv.info, fn.decl.Body)
 		ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
@@ -591,6 +600,12 @@ func (pv *pkgVerifier) findValueCallers() {
 					return true
 				case *ast.Ident:
 					if variable, ok := pv.info.Uses[fun].(*types.Var); ok && bound[variable] != nil {
+						return true
+					}
+					// A trusted function that calls what it is handed under
+					// calls runs code its caller hands over, which is
+					// judged where it is handed over.
+					if variable, ok := pv.info.Uses[fun].(*types.Var); ok && trusted != nil && trusted.calls[variable] != nil {
 						return true
 					}
 				}
@@ -788,6 +803,10 @@ func (v *fnVerifier) madeFrom(e ast.Expr, T *funcInfo, callee *types.Func, recei
 	for i, param := range inputs {
 		args[param] = sv.entry[T.params[i]]
 		call.Args = append(call.Args, &ast.Ident{NamePos: e.Pos(), Name: T.params[i].Name()})
+	}
+	if fn.trust != nil && len(fn.calls) > 0 {
+		v.unsupported(e.Pos(), fmt.Sprintf("%s calls a function it is given, and cannot be used as a value: "+
+			"what it would be given would come from code nobody has seen", callee.Name()))
 	}
 	if fn.trust != nil {
 		v.noteUse(fn, e.Pos())
@@ -1131,6 +1150,13 @@ func (v *fnVerifier) stratified(lit *ast.FuncLit) {
 			if callee := typeutil.StaticCallee(v.info, n); callee != nil {
 				if v.pkgVerifier.mayCallValues(callee) {
 					refuse(n.Pos(), fmt.Sprintf("calls %s, which may call through a function value", callee.Name()))
+				}
+				// What a trusted function is handed to call runs during the
+				// call, as part of the literal.
+				for _, arg := range v.pkgVerifier.handedArgs(n) {
+					if inner, ok := ast.Unparen(arg).(*ast.FuncLit); ok {
+						inPlace[inner] = true
+					}
 				}
 				break
 			}
