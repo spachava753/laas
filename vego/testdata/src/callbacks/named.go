@@ -251,3 +251,59 @@ func TickBeside(c *counter) {
 		// @Assert c.m = 0 // want `vego: assertion may not hold: c.m = 0.*, in the function literal run by both`
 	})
 }
+
+// Config is changed by an Option.
+type Config struct {
+	Timeout int
+}
+
+// Option changes a configuration.
+//
+// @Requires c != nil
+// @Modifies c
+type Option func(c *Config)
+
+// HandsCaller hands each a literal that calls a value, which may write
+// cfg; the runs and the state after the call forget it.
+//
+// @Requires p != nil
+// @Ensures cfg.Timeout = 0
+func HandsCaller(p Option) (cfg Config) {
+	each(3, func(i int) { p(&cfg) })
+	return cfg // want `vego: postcondition may not hold: cfg.Timeout = 0`
+}
+
+// SetsFirst relies, in a run, on cfg as it was at the call, although an
+// earlier run may have called the value.
+//
+// @Requires p != nil
+// @Ensures True
+func SetsFirst(p Option) (cfg Config) {
+	each(3, func(i int) {
+		// @Assert cfg.Timeout = 0 // want `vego: assertion may not hold: cfg.Timeout = 0`
+		p(&cfg)
+	})
+	return cfg
+}
+
+// Bumped is counted in.
+type Bumped struct {
+	N int
+}
+
+func inc(c *Bumped, f func()) {
+	f()
+	c.N++
+}
+
+// IncrementsBoxed hands inc a literal that writes the variable inc counts
+// in, which lives in memory because its address is taken.
+//
+// @Ensures r = 1
+func IncrementsBoxed() (r int) {
+	var c Bumped
+	inc(&c, func() {
+		c.N = 100 // want `vego: c.N is assigned, which inc may write itself while it runs the function it is handed`
+	})
+	return c.N
+}

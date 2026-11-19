@@ -831,3 +831,12 @@ trusted:
       f(i):
         requires: ["0 <= i < n"]
     modifies: []
+
+  callbacks.inc:
+    reason: Test helper that calls f once and then counts in c.
+    requires: ["c != nil", "c.N < 1000"]
+    runs: [f]
+    calls:
+      f(): {}
+    modifies: [c]
+    ensures: ["c.N' = c.N + 1"]

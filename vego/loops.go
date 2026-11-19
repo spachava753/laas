@@ -173,14 +173,27 @@ func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
 // Modifies clauses of the function called.
 func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 	callee, _ := typeutil.Callee(v.info, call).(*types.Func)
-	if callee == nil || errorConstructor(callee) {
+	var fn *funcInfo
+	switch {
+	case v.literalOf(call) != nil:
+		// The body of the literal is walked where it is called.
 		return
+	case callee == nil && isFunc(v.info.TypeOf(call.Fun)) && !v.info.Types[call.Fun].IsBuiltin() && !v.info.Types[call.Fun].IsType():
+		// A call through a function value writes what the Modifies of its
+		// type lists.
+		fn = v.valueContract(v.info.TypeOf(call.Fun))
+	case callee == nil || errorConstructor(callee):
+		return
+	default:
+		fn = v.contractOf(callee)
 	}
-	fn := v.contractOf(callee)
 	if fn == nil {
 		return
 	}
-	sig := callee.Type().(*types.Signature)
+	sig := fn.obj.Type().(*types.Signature)
+	if callee != nil {
+		sig = callee.Type().(*types.Signature)
+	}
 	argument := func(param *types.Var) ast.Expr {
 		if param == sig.Recv() {
 			sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)

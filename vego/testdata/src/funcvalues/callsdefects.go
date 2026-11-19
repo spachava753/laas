@@ -155,3 +155,28 @@ func Assign(u func(int) int) (r int) {
 func Pass(u func(int) int) (r int) {
 	return through(u) // want `vego: cannot verify Pass: converting u to funcvalues.Mapper is not supported`
 }
+
+// ConfigureClaims says that the options change nothing, which a loop that
+// calls them cannot know: the loop forgets what Option may write.
+//
+// @Requires Forall i in [0, |opts|) : opts[i] != nil
+// @Ensures cfg.Timeout = 0
+func ConfigureClaims(opts []Option) (cfg Config) {
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	return cfg // want `vego: postcondition may not hold: cfg.Timeout = 0`
+}
+
+// ConfigureCounted is the same with a counted loop.
+//
+// @Requires Forall i in [0, |opts|) : opts[i] != nil
+// @Ensures cfg.Timeout = 0
+func ConfigureCounted(opts []Option) (cfg Config) {
+	// @Invariant 0 <= i <= |opts|
+	// @Variant |opts| - i
+	for i := 0; i < len(opts); i++ {
+		opts[i](&cfg)
+	}
+	return cfg // want `vego: postcondition may not hold: cfg.Timeout = 0`
+}

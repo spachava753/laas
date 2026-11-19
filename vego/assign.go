@@ -232,9 +232,13 @@ func (v *fnVerifier) store(lv lvalue, val value, st *state) {
 			break
 		}
 		// A variable that lives in memory was created by this function,
-		// which may therefore write it.
+		// which may therefore write it, unless a trusted function that runs
+		// this code may write it too.
+		w := written{ref: lv.ref, parts: stretchesOf(lv.cells, lv.at)}
 		if lv.box == nil {
-			v.checkWrite(st, nil, written{ref: lv.ref, parts: stretchesOf(lv.cells, lv.at)}, lv.pos, lv.text+" is assigned")
+			v.checkWrite(st, nil, w, lv.pos, lv.text+" is assigned")
+		} else {
+			v.checkNotForbidden(st, nil, w, lv.pos, lv.text+" is assigned")
 		}
 		v.put(st, lv.cells, lv.ref, lv.at, val)
 	case placeMap:
