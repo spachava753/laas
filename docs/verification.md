@@ -1177,9 +1177,12 @@ This check can miss a weak contract. When the path to the call depends on values
 
 ### Wrapping errors
 
-`fmt.Errorf` can format numbers, booleans, strings, and slices of them, when their types have no methods. It can also format an error of known origin. Such an error was made by `errors.New` or `fmt.Errorf`, in verified code or in the initialiser of an error variable of any package, and nothing went into it but such values and other errors of known origin. `io.EOF` is one. A value whose type has methods, such as a string type with a `String` method, is rejected, because formatting it may call them.
+`fmt.Errorf` can format numbers, booleans, strings, and slices of them, when their types have no methods. It can also format an error of known origin. An error has a known origin in two cases:
 
-It can also format an error that a trusted contract vouches for. See [Errors that a trusted function returns](#errors-that-a-trusted-function-returns).
+- It was made by `errors.New` or `fmt.Errorf`, in verified code or in the initialiser of an error variable of any package, and nothing went into it but such values and other errors of known origin. `io.EOF` is one.
+- A trusted contract vouches for it, as described in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). A verified function that returns such an error passes the known origin on to its callers.
+
+A value whose type has methods, such as a string type with a `String` method, is rejected, because formatting it may call them.
 
 It cannot format an error that came from a parameter, or from a trusted function whose contract does not vouch for it. Formatting an error calls its methods, and `vego` cannot see what the methods of an unknown error do. For the same reason, such an error cannot be passed to a trusted function unless that function's contract allows it. See [Arguments that carry code](#arguments-that-carry-code).
 
@@ -1483,7 +1486,8 @@ The contracts are in `vego/trusted/std` in the source of `laas`. They state only
 `vego` does not check that a trusted contract is true. It checks these things about each entry:
 
 - The function exists.
-- Every name in a formula is a parameter or result of the function, of a type that a contract can use.
+- Every name in a formula is a parameter or result of the function, of a type that a contract can use, or an error variable. An error variable is named as described in [Error variables in a trusted contract](#error-variables-in-a-trusted-contract). It must exist, its package must be in the build, and the calling package must be able to rely on it as described in [When a package-level error is known](#when-a-package-level-error-is-known).
+- Every name under `vouches` is a result of the function of type `error`, listed once.
 - `modifies` is present and lists only memory that a caller can see. A parameter passed by value is not such memory.
 - A primed path in `ensures`, such as `xs'[0]`, reads memory of a kind that `modifies` lists. The call cannot change any other memory.
 - The contract does not contradict itself.
