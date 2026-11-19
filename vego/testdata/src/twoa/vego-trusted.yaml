@@ -1,0 +1,6 @@
+version: 1
+
+trusted:
+  (twoentrieslib.Sink).Put:
+    reason: Says nothing of what Put returns.
+    modifies: []

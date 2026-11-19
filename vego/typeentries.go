@@ -237,3 +237,102 @@ func (pv *pkgVerifier) funcTypeHint(t types.Type) string {
 	}
 	return pv.entryHint(named.Obj().Pkg(), named.Obj().Pos(), funcTypeKey(named.Obj()))
 }
+
+// noteEntriesIn records that a proof rests on the entries that give
+// contracts to the types a value of type t can hold, however deep: a value
+// handed on there is believed to meet them.
+func (v *fnVerifier) noteEntriesIn(t types.Type, at token.Pos) {
+	seen := map[types.Type]bool{}
+	var visit func(t types.Type)
+	visit = func(t types.Type) {
+		if t == nil || seen[t] {
+			return
+		}
+		seen[t] = true
+		switch u := t.Underlying().(type) {
+		case *types.Interface:
+			if isIface(t) {
+				for method := range u.Methods() {
+					if fn := v.methodContract(method); fn != nil && fn.trust != nil && !fn.broken {
+						v.noteUse(fn, at)
+					}
+				}
+			}
+		case *types.Signature:
+			if fn := v.valueContract(t); fn != nil && fn.trust != nil && !fn.broken {
+				v.noteUse(fn, at)
+			}
+		case *types.Pointer:
+			visit(u.Elem())
+		case *types.Slice:
+			visit(u.Elem())
+		case *types.Array:
+			visit(u.Elem())
+		case *types.Map:
+			visit(u.Key())
+			visit(u.Elem())
+		case *types.Struct:
+			for field := range u.Fields() {
+				visit(field.Type())
+			}
+		}
+	}
+	visit(t)
+}
+
+// fingerprint is what an entry says, in a form two entries that say the
+// same share.
+func (entry *trustEntry) fingerprint() string {
+	var parts []string
+	list := func(kind string, formulas []trustFormula) {
+		for _, formula := range formulas {
+			parts = append(parts, kind+" "+formula.text)
+		}
+	}
+	list("requires", entry.requires)
+	list("ensures", entry.ensures)
+	list("modifies", entry.modifies)
+	list("vouches", entry.vouches)
+	list("runs", entry.runs)
+	for _, call := range entry.calls {
+		parts = append(parts, fmt.Sprintf("calls %s(%s) %v", call.name, strings.Join(call.params, ", "), call.deterministic))
+		list("calls requires", call.requires)
+	}
+	return strings.Join(parts, "\n")
+}
+
+// reportTwoEntries reports every type to which the trust files of the
+// packages built together give two different contracts. A value that
+// verified code of one module checked against its entry can reach, through
+// code that is not verified, verified code of another module that relies on
+// another entry, so that what one proof checked is not what the other
+// assumed. Every package compares the entries its proofs and those of the
+// packages it is built with used, so a package that imports two such
+// modules reports it even when it has no proofs of its own.
+func (pv *pkgVerifier) reportTwoEntries(total *Usage) {
+	seen := map[string]*EntryUse{}
+	var keys []string
+	reported := map[string]bool{}
+	for _, use := range total.Entries {
+		if use.Every == "" {
+			continue
+		}
+		first, ok := seen[use.Key]
+		if !ok {
+			seen[use.Key] = use
+			keys = append(keys, use.Key)
+			continue
+		}
+		if first.Fingerprint == use.Fingerprint || reported[use.Key] {
+			continue
+		}
+		reported[use.Key] = true
+		a, b := fmt.Sprintf("%s:%d", first.File, first.Line), fmt.Sprintf("%s:%d", use.File, use.Line)
+		if b < a {
+			a, b = b, a
+		}
+		pv.report(pv.pass.Files[0].Package, "the trust files of this build give %s two contracts, at %s and at %s; a value that verified code checked "+
+			"against one can reach verified code that relies on the other. Make the entries the same, or run laas with -vego.trusted naming one file",
+			use.Key, a, b)
+	}
+}

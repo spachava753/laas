@@ -454,6 +454,7 @@ func (v *fnVerifier) deferValue(s *ast.DeferStmt, st *state) {
 func (v *fnVerifier) checkHandedToValue(call *ast.CallExpr, fn *funcInfo, callee string) {
 	for i, arg := range call.Args {
 		t := fn.params[i].Type()
+		v.noteEntriesIn(t, arg.Pos())
 		if isError(t) {
 			if v.knownError(v.bodyOrigins(), arg, -1, map[*types.Var]bool{}) {
 				continue

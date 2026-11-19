@@ -395,7 +395,10 @@ type EntryUse struct {
 	// Calls.
 	Every  string
 	Relied []string
-	Calls  []token.Position
+	// Fingerprint is, for such an entry, what it says, so that two entries
+	// for one type in a build can be told apart from two copies of one.
+	Fingerprint string
+	Calls       []token.Position
 }
 
 // add merges another usage into u.
@@ -963,7 +966,7 @@ func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 		pv.usage.Entries = append(pv.usage.Entries, &EntryUse{
 			Key: entry.key, Reason: entry.reason, Shipped: entry.file.shipped,
 			File: entry.file.path, Line: entry.line, Runs: runs, Vouches: vouches, Callbacks: callbacks,
-			Every: every, Relied: []string{pv.pass.Pkg.Path()},
+			Every: every, Relied: []string{pv.pass.Pkg.Path()}, Fingerprint: entry.fingerprint(),
 		})
 		index = len(pv.usage.Entries) - 1
 	}

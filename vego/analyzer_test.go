@@ -163,6 +163,18 @@ func TestAnalyzer(t *testing.T) {
 		})
 	}
 
+	// Two modules give one type two entries. The packages that use them are
+	// only dependencies here, as when laas is run on the main package, and
+	// each alone is analysed without a report.
+	t.Run("reports two entries for one type in a build", func(t *testing.T) {
+		runCorpus(t, newAnalyzer(), "tworoot")
+	})
+	for _, root := range []string{"twoa", "twob"} {
+		t.Run("uses one entry for a type in "+root, func(t *testing.T) {
+			runCorpus(t, newAnalyzer(), root)
+		})
+	}
+
 	t.Run("refuses a trust file with a defect", func(t *testing.T) {
 		analyzer := newAnalyzer()
 		if err := analyzer.Flags.Set("trusted", filepath.Join("testdata", "defective-trusted.yaml")); err != nil {

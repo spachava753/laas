@@ -260,6 +260,12 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 	}
 	for _, h := range handed {
 		param, arg := h.param, h.arg
+		// What runs claims for a value whose type has a contract holds
+		// only for values that meet it, so the proof rests on the entries
+		// that give the types it can hold contracts.
+		if fn.runs[param] {
+			v.noteEntriesIn(param.Type(), arg.Pos())
+		}
 		if fn.runs[param] || !holdsCode(param.Type(), map[types.Type]bool{}) {
 			continue
 		}

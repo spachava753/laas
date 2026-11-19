@@ -1,0 +1,13 @@
+version: 1
+
+trusted:
+  (twoentrieslib.Sink).Put:
+    reason: Every sink returns a number that is not negative.
+    modifies: []
+    ensures: ["y >= 0"]
+
+  twob.run:
+    reason: Returns what the sink returns for 1.
+    runs: [s]
+    modifies: []
+    ensures: ["r >= 0"]

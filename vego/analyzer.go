@@ -270,6 +270,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 				total.add(&dependency.Usage)
 			}
 		}
+		pv.reportTwoEntries(total)
 		return total, nil
 	}
 	return analyzer
