@@ -2,6 +2,8 @@ package vego
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
 	"go/token"
 	"go/types"
 	"maps"
@@ -67,6 +69,12 @@ type unit struct {
 	// snapshot returns what a version holds in a state: memory, and the
 	// values of the variables a function literal assigns; see captured.
 	snapshot func(st *state) memory
+	// sometimes is set for operands that a statement evaluates on some of
+	// its runs only, or more than once, and for those of a statement
+	// nothing can be put before: a case expression, the condition of a
+	// for loop, and its post statement. A read among them cannot be moved
+	// to a statement of its own before them.
+	sometimes bool
 }
 
 // ceiling is an event that reads come before. version is the latest
@@ -114,7 +122,7 @@ func (v *fnVerifier) openUnit(st *state) {
 	if v.unit != nil {
 		panic("vego: internal error: an evaluation unit was opened inside another")
 	}
-	v.unit = &unit{writers: []string{""}, snapshot: v.snapshot}
+	v.unit = &unit{writers: []string{""}, snapshot: v.snapshot, sometimes: v.postStmt}
 	v.unit.versions = []memory{v.unit.snapshot(st)}
 }
 
@@ -313,14 +321,80 @@ func (v *fnVerifier) closeUnit(st *state) {
 			}
 			v.check(st, r.guard, logic.And(same...), r.pos,
 				"%s may be read before or after %s, which may change it, and Go does not fix the order; "+
-					"split the statement so that the order is the one you mean", r.what, u.writers[m])
+					"split the statement so that the order is the one you mean%s", r.what, u.writers[m], v.splitFix(u, r))
 		}
 	}
+}
+
+// splitFix shows, for a read that is an expression a statement of its own
+// can make again with the same meaning, how to make it first: as in
+// ", as in n := s.n before it". That means the same only for a read Go
+// makes once each time the statement runs, before the statement would: not
+// on the right of && or ||, and not in a case expression or the condition
+// of a loop. The name is the field or variable read, or
+// v for anything else, followed by the first number that makes it a name
+// not in scope where the read is and not declared in its block. A read described in words, such as the
+// elements an append copies, or one that would call something, gets
+// nothing.
+func (v *fnVerifier) splitFix(u *unit, r *recorded) string {
+	if u.sometimes || len(r.guard) > 0 {
+		return ""
+	}
+	read, err := parser.ParseExpr(r.what)
+	if err != nil || !copyable(read) {
+		return ""
+	}
+	name := "v"
+	switch e := read.(type) {
+	case *ast.Ident:
+		name = e.Name
+	case *ast.SelectorExpr:
+		name = e.Sel.Name
+	}
+	scope := v.pass.Pkg.Scope().Innermost(r.pos)
+	free := name
+	for i := 0; scope != nil; i++ {
+		// A name declared later in the same block would clash with the new
+		// statement too.
+		if _, found := scope.LookupParent(free, r.pos); found == nil && scope.Lookup(free) == nil {
+			break
+		}
+		free = fmt.Sprintf("%s%d", name, i)
+	}
+	return fmt.Sprintf(", as in %s := %s before it", free, r.what)
+}
+
+// copyable reports whether evaluating an expression again in a statement
+// of its own reads what it read and does nothing else: it is made of names,
+// fields, indexes, dereferences, constants, operators, and len and cap.
+func copyable(e ast.Expr) bool {
+	ok := true
+	ast.Inspect(e, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case nil, *ast.Ident, *ast.SelectorExpr, *ast.IndexExpr, *ast.StarExpr, *ast.ParenExpr, *ast.BasicLit, *ast.BinaryExpr, *ast.UnaryExpr:
+		case *ast.CallExpr:
+			id, isIdent := n.Fun.(*ast.Ident)
+			ok = ok && isIdent && (id.Name == "len" || id.Name == "cap") && len(n.Args) == 1
+		default:
+			ok = false
+		}
+		return ok
+	})
+	return ok
 }
 
 // evaluate runs the evaluation of the operands of a statement as a unit.
 func (v *fnVerifier) evaluate(st *state, task func()) {
 	v.openUnit(st)
+	task()
+	v.closeUnit(st)
+}
+
+// evaluateSometimes runs, as a unit, the evaluation of operands that the
+// statement evaluates on some of its runs only, or more than once.
+func (v *fnVerifier) evaluateSometimes(st *state, task func()) {
+	v.openUnit(st)
+	v.unit.sometimes = true
 	task()
 	v.closeUnit(st)
 }

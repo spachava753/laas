@@ -443,8 +443,15 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 			v.bind(end, variable, v.current(end, variable))
 		}
 		if shape.post != nil {
-			// The post statement may continue in more than one state.
-			v.stmt(shape.post, end, ctrl{}, finish)
+			// The post statement may continue in more than one state. No
+			// statement can be put before it, so no read in it is shown
+			// as one to move there.
+			v.postStmt = true
+			v.stmt(shape.post, end, ctrl{}, func(next *state) {
+				v.postStmt = false
+				finish(next)
+			})
+			v.postStmt = false
 			return
 		}
 		finish(end)
@@ -488,7 +495,7 @@ func (v *fnVerifier) forStmt(s *ast.ForStmt, spec *loopSpec, renewed []*types.Va
 			return logic.True()
 		}
 		var cond *logic.Term
-		v.evaluate(st, func() { cond = v.expr(s.Cond, st, nil) })
+		v.evaluateSometimes(st, func() { cond = v.expr(s.Cond, st, nil) })
 		return cond
 	}
 	v.loop(shape, st, k)

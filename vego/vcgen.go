@@ -89,6 +89,9 @@ type fnVerifier struct {
 	names    map[string]int
 	branches int
 	measure  *logic.Term
+	// postStmt is set while the post statement of a for loop is executed;
+	// see unit.sometimes.
+	postStmt bool
 	// unit is the evaluation of the operands of the statement being
 	// executed, in which reads of memory are recorded so that their order
 	// relative to the calls that write memory can be checked; see order.go.
@@ -720,7 +723,7 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 			var value *logic.Term
 			// Each case expression is evaluated on its own, after the
 			// comparisons before it.
-			v.evaluate(st, func() {
+			v.evaluateSometimes(st, func() {
 				switch {
 				case tag == nil:
 					value = v.expr(e, st, guard)

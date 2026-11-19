@@ -49,7 +49,7 @@ func ReadAndBump(x int) (result int) {
 		x++
 		return 0
 	}
-	return x + bump() // want `vego: x may be read before or after the call to bump, which may change it, and Go does not fix the order; split the statement so that the order is the one you mean`
+	return x + bump() // want `vego: x may be read before or after the call to bump, which may change it, and Go does not fix the order; split the statement so that the order is the one you mean, as in x0 := x before it$`
 }
 
 // each calls f for every element. It is not verified.

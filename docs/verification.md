@@ -549,7 +549,7 @@ func ReadAndBump(x int) (result int) {
 
 ```text
 vego: x may be read before or after the call to bump, which may change it, and Go does not
-fix the order; split the statement so that the order is the one you mean
+fix the order; split the statement so that the order is the one you mean, as in x0 := x before it
 ```
 
 ### Literals that cannot be verified
@@ -987,7 +987,8 @@ func PopAndCount(s *Stack) (result int) {
 
 ```text
 vego: s.n may be read before or after the call to Pop, which may change it, and Go does
-not fix the order; split the statement so that the order is the one you mean
+not fix the order; split the statement so that the order is the one you mean, as in n := s.n
+before it
 ```
 
 `vego` looks at every read of memory in a statement, and at every read of a variable that a function literal assigns. These are the reads it checks:
@@ -1006,6 +1007,8 @@ Write the order you mean in separate statements:
 n := s.n
 return n + s.Pop()
 ```
+
+The message shows the statement that reads the value first, with a name that is not yet in scope. It shows none for a read that a statement of its own before it would not make in the same way. That is a read on the right of `&&` or `||`, in a `case` expression, or in the condition or post statement of a `for` loop, and a read that is described in words, such as the receiver of a method. Decide there where the read belongs, and move it yourself.
 
 Some reads do have a fixed order. Go evaluates the arguments of a call before the call, and the left operand of `&&` and `||` before the right one. In `id(s.n) + s.Pop()`, `s.n` is read for `id`, which runs before `Pop`. In `s.Pop() > 0 && s.n > 0`, `s.n` is read after `Pop`.
 
@@ -2026,7 +2029,7 @@ This table lists the most common messages.
 | `Ensures annotation is not attached to a function` | The clause is not in the doc comment of a function. | Move it into the doc comment. |
 | `x is assigned, which F may not modify; list it in a // @Modifies clause` | No `Modifies` entry covers memory of this kind. | Add it to `Modifies`. |
 | `... which F may not modify: nothing its // @Modifies clauses list is known to cover it` | An entry covers memory of this kind, but `vego` cannot prove it is this memory. It may be another element, another struct, or a slice that was replaced after `F` was called. | Make the entry match. For a replaced slice, the callee needs a `fresh ... Or within ...` clause. |
-| `x may be read before or after the call to F, which may change it, and Go does not fix the order` | Go may read `x` before or after `F` runs in this statement, and the two are not proved to give the same value. | Read `x` or call `F` in a statement of its own, in the order you mean. See [Reads that Go may make before or after a call](#reads-that-go-may-make-before-or-after-a-call). |
+| `x may be read before or after the call to F, which may change it, and Go does not fix the order` | Go may read `x` before or after `F` runs in this statement, and the two are not proved to give the same value. | Read `x` or call `F` in a statement of its own, in the order you mean. The message ends with such a statement, as in `x0 := x before it`, where one fits. See [Reads that Go may make before or after a call](#reads-that-go-may-make-before-or-after-a-call). |
 | `cannot verify F: g is called in the target of this assignment, and Go may call it before or after append writes into the array of s` | The call may run on either side of the write, and it may read or write memory. | Assign the result of `g` to a variable in a statement of its own first. See [An append beside a call](#an-append-beside-a-call). |
 | `the keys a and b of this map literal may be equal` | Two keys of a map literal are not proved to differ, so it is not known which entry the map keeps. | Prove that they differ, or assign the entries one by one. |
 | `Modifies lists x, but F never needs to modify it` | The `Modifies` list allows more than the body needs. | Remove or narrow the entry. |

@@ -743,7 +743,7 @@ func RefillOrdered(rows [][]int, t []int, c *Slot) {
 // @Requires Forall k in [0, s.n) : 0 <= s.items[k] <= 1000
 // @Modifies s.n
 func PopAndCount(s *Stack) (result int) {
-	return s.n + s.Pop() // want `vego: s.n may be read before or after the call to Pop, which may change it, and Go does not fix the order; split the statement so that the order is the one you mean`
+	return s.n + s.Pop() // want `vego: s.n may be read before or after the call to Pop, which may change it, and Go does not fix the order; split the statement so that the order is the one you mean, as in n := s.n before it$`
 }
 
 // CountThenPop reads s.n in a statement of its own first.

@@ -274,7 +274,7 @@ func RangeBump(l *List) {
 // @Requires c != nil And 0 <= c.n < 100
 // @Modifies c.n
 func SameField(c *Counter) (result int) {
-	return c.n + c.Inc() // want `vego: c.n may be read before or after the call to Inc, which may change it, and Go does not fix the order; split the statement so that the order is the one you mean`
+	return c.n + c.Inc() // want `vego: c.n may be read before or after the call to Inc, which may change it, and Go does not fix the order; split the statement so that the order is the one you mean, as in n := c.n before it$`
 }
 
 // MaybeSame reads a counter that may be the one Inc changes.
@@ -340,7 +340,7 @@ func Negated(c *Counter) (result int) {
 // @Requires c != nil And 0 <= c.n < 100
 // @Modifies c.n
 func ValueReceiver(c *Counter) (result int) {
-	return c.Plus(c.Inc()) // want `vego: the receiver of c.Plus may be read before or after the call to Inc`
+	return c.Plus(c.Inc()) // want `vego: the receiver of c.Plus may be read before or after the call to Inc, .*the one you mean$`
 }
 
 // BoxedSame reads the field of a variable that IncM changes.
@@ -385,7 +385,7 @@ func TargetOperand(h *Holder) {
 // @Requires l != nil
 // @Modifies l
 func RangeReset(l *List) {
-	for range l.items[l.Reset():] { // want `vego: l.items may be read before or after the call to Reset`
+	for range l.items[l.Reset():] { // want `vego: l.items may be read before or after the call to Reset, .*, as in items := l.items before it$`
 	}
 }
 
@@ -402,7 +402,7 @@ func put(m map[int]int) (result int) {
 // @Requires m != nil And |m| < 1000
 // @Modifies m
 func MapRead(m map[int]int) (result int) {
-	return m[1] + put(m) // want `vego: m\[1\] may be read before or after the call to put`
+	return m[1] + put(m) // want `vego: m\[1\] may be read before or after the call to put, .*, as in v := m\[1\] before it$`
 }
 
 // MapLength reads the number of keys, which put may change.
@@ -410,7 +410,7 @@ func MapRead(m map[int]int) (result int) {
 // @Requires m != nil And |m| < 1000
 // @Modifies m
 func MapLength(m map[int]int) (result int) {
-	return len(m) + put(m) // want `vego: len\(m\) may be read before or after the call to put`
+	return len(m) + put(m) // want `vego: len\(m\) may be read before or after the call to put, .*, as in v := len\(m\) before it$`
 }
 
 type P struct {
@@ -436,7 +436,7 @@ func five() (result int) {
 // @Requires p != nil And |t| = 1 And t[0] = 1
 // @Modifies t, p
 func CopyRead(p *P, t []int) {
-	touch(p, t).list = append(t[:1:1], 5) // want `vego: the elements of t\[:1:1\] that append copies may be read before or after the call to touch`
+	touch(p, t).list = append(t[:1:1], 5) // want `vego: the elements of t\[:1:1\] that append copies may be read before or after the call to touch, .*the one you mean$`
 }
 
 // CopyAfterCall has a call among the operands of append, which orders the
@@ -478,7 +478,7 @@ func get(q *Q) (result int) {
 // @Requires |u| = 6 And |t| = 1 And t[0] = 0
 // @Modifies u, t
 func InPlaceIndex(u [][]int, t []int) {
-	u[t[0]] = append(t[:0], 5) // want `vego: t\[0\] may be read before or after the write of append into the array of t\[:0\], which may change it`
+	u[t[0]] = append(t[:0], 5) // want `vego: t\[0\] may be read before or after the write of append into the array of t\[:0\], which may change it, .*, as in v := t\[0\] before it$`
 }
 
 // PureIndex calls key in the target. key changes nothing and reads no
@@ -533,7 +533,7 @@ func LogicalIndex(u [][]int, t []int, x, y bool) {
 // @Requires |u| = 2 And |t| = 1
 // @Modifies u, t
 func LogicalRead(u [][]int, t []int, x bool) {
-	u[b2i(x && t[0] == 0)] = append(t[:0], 5) // want `vego: t\[0\] may be read before or after the write of append into the array of t\[:0\]`
+	u[b2i(x && t[0] == 0)] = append(t[:0], 5) // want `vego: t\[0\] may be read before or after the write of append into the array of t\[:0\], .*the one you mean$`
 }
 
 // DistinctKeys builds a map from two keys that differ.
@@ -993,4 +993,78 @@ func replInner(o *Outer) (result int) {
 // @Modifies o
 func EmbeddedReplaced(o *Outer) (result int) {
 	return o.PM(replInner(o)) // want `vego: the receiver of o.PM may be read before or after the call to replInner`
+}
+
+// The message about a read that Go may make before or after a call quotes
+// a statement that makes the read first, where one means the same: a read
+// that the statement makes once each time it runs, and that an expression
+// of its own can make again. The name of the new variable is one that is
+// not in scope there.
+
+// TakenName reads c.n where n is a variable already, so the fix names
+// another.
+//
+// @Requires c != nil And 0 <= c.n < 100
+// @Modifies c.n
+func TakenName(c *Counter, n int) (result int) {
+	return c.n + c.Inc() // want `vego: c.n may be read before or after the call to Inc, which may change it, and Go does not fix the order; split the statement so that the order is the one you mean, as in n0 := c.n before it$`
+}
+
+// DeclaredLater reads c.n where n is declared later in the same block, which
+// the new statement would clash with.
+//
+// @Requires c != nil And 0 <= c.n < 100
+// @Modifies c.n
+func DeclaredLater(c *Counter) (result int) {
+	r := c.n + c.Inc() // want `, as in n0 := c.n before it$`
+	n := r
+	return n
+}
+
+// GuardedRead reads p.n on the right of &&. Reading it in a statement before
+// would follow p when it is nil, so no fix is quoted.
+//
+// @Requires c != nil And 0 <= c.n < 100 And (p != nil -> 0 <= p.n < 100)
+// @Modifies c.n
+func GuardedRead(c *Counter, p *Counter) (result bool) {
+	return p != nil && p.n+c.Inc() > 0 // want `vego: p.n may be read before or after the call to Inc, which may change it, and Go does not fix the order; split the statement so that the order is the one you mean$`
+}
+
+// ConditionRead reads c.n in the condition of a loop, which runs at each
+// iteration, so no fix is quoted.
+//
+// @Requires c != nil And 0 <= c.n < 100
+// @Modifies c.n
+func ConditionRead(c *Counter) {
+	// @Invariant 0 <= c.n < 1000
+	// @Variant 1000 - c.n
+	for c.n+c.Inc() < 50 { // want `vego: c.n may be read before or after the call to Inc, which may change it, and Go does not fix the order; split the statement so that the order is the one you mean$`
+	}
+}
+
+// CaseRead reads c.n in a case expression, which runs only when the cases
+// before it do not match, so no fix is quoted.
+//
+// @Requires c != nil And 0 <= c.n < 100
+// @Modifies c.n
+func CaseRead(c *Counter, k int) (result int) {
+	switch k {
+	case 0:
+		return 0
+	case c.n + c.Inc(): // want `vego: c.n may be read before or after the call to Inc, which may change it, and Go does not fix the order; split the statement so that the order is the one you mean$`
+		return 1
+	}
+	return 2
+}
+
+// PostRead reads c.n in the post statement of a loop, before which no
+// statement can stand, so no fix is quoted.
+//
+// @Requires c != nil And 0 <= c.n < 100
+// @Modifies c.n
+func PostRead(c *Counter) {
+	// @Invariant 0 <= i <= 3 And 0 <= c.n < 100 + 3*i
+	// @Variant 3 - i
+	for i := 0; i < 3; i, c.m = i+1, c.n+c.Inc() { // want `vego: c.n may be read before or after the call to Inc, which may change it, and Go does not fix the order; split the statement so that the order is the one you mean$`
+	}
 }
