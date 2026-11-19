@@ -1,6 +1,9 @@
 package interfaces
 
-import "interfaceslib"
+import (
+	"interfaceslib"
+	"io"
+)
 
 func loadPricer() (p Pricer) { return nil }
 
@@ -91,4 +94,69 @@ func (Measured) Size() (n int) {
 // @Ensures True
 func FromMeasured() (s interfaceslib.Sizer) {
 	return Measured{} // want `cannot verify FromMeasured: Size may call through a function value or an interface value`
+}
+
+// Zero returns zero.
+type Zero interface {
+	// @Ensures r = 0
+	Get() (r int)
+}
+
+// A trusted method whose receiver can hold code runs that code when it is
+// called through an interface value, so its entry must list the receiver
+// under runs, as it must for a call written out.
+//
+// @Requires w != nil
+// @Ensures z != nil
+func WrapperAsZero(w *interfaceslib.Wrapper) (z Zero) {
+	return w // want `cannot verify WrapperAsZero: w is used as a method of Zero, which hands its receiver to Get at each call; Get is trusted, and its receiver is a value of type \*interfaceslib.Wrapper`
+}
+
+// ZeroFunc returns zero.
+//
+// @Ensures r = 0
+type ZeroFunc func() (r int)
+
+// @Requires w != nil
+// @Ensures f != nil
+func WrapperAsValue(w *interfaceslib.Wrapper) (f ZeroFunc) {
+	return w.Get // want `cannot verify WrapperAsValue: w.Get is used as a value, which hands its receiver to Get at each call; Get is trusted`
+}
+
+// With the receiver under runs, the method may call through what its
+// receiver holds, so it cannot be made into a value either.
+//
+// @Requires u != nil
+// @Ensures z != nil
+func UnclaimedAsZero(u *interfaceslib.Unclaimed) (z Zero) {
+	return u // want `cannot verify UnclaimedAsZero: Get may call through a function value or an interface value`
+}
+
+// Record holds a writer, which verified code does not call.
+type Record struct {
+	N int
+	W io.Writer
+}
+
+func logRecord(r Record) {}
+
+// Sink takes a number.
+//
+// @Ensures True
+type Sink func(x int)
+
+// @Ensures True
+func logNumber(x int) {
+	var r Record
+	r.N = x
+	logRecord(r)
+}
+
+// A trusted function under runs that takes an interface without contracts
+// claims its contract whatever that interface holds, so handing it one
+// does not make a call through a value that verified code made.
+//
+// @Ensures s != nil
+func MakeSink() (s Sink) {
+	return logNumber
 }

@@ -553,11 +553,16 @@ func (pv *pkgVerifier) holdsContractedValue(t types.Type, seen map[types.Type]bo
 }
 
 // holdsCallable reports whether a value of a type can hold, however deep, a
-// function value of any type, or an interface value other than an error.
-// An error is left out: no method that verified code wrote can be behind
-// one until verified types can be made into errors, and a vouched error's
-// methods are claimed to return.
-func holdsCallable(t types.Type, seen map[types.Type]bool) bool {
+// function value of any type, or an interface value with a method that has
+// a contract. For those, runs claims only that the contract holds for
+// values that meet their contracts, which a cycle back through code that
+// verified code made would make circular. For an interface without
+// contracts, any, and an error, runs claims that the contract holds
+// whatever code arrives, and a cycle would make that claim false, which is
+// on the author of the entry. Until type assertions are built, verified
+// code also makes no value that such an interface holds and that it could
+// call; they must be counted once it does.
+func holdsCallable(pv *pkgVerifier, t types.Type, seen map[types.Type]bool) bool {
 	if t == nil || seen[t] {
 		return false
 	}
@@ -566,18 +571,18 @@ func holdsCallable(t types.Type, seen map[types.Type]bool) bool {
 	case *types.Signature:
 		return true
 	case *types.Interface:
-		return !isError(t)
+		return pv.holdsContractedValue(t, map[types.Type]bool{})
 	case *types.Pointer:
-		return holdsCallable(u.Elem(), seen)
+		return holdsCallable(pv, u.Elem(), seen)
 	case *types.Slice:
-		return holdsCallable(u.Elem(), seen)
+		return holdsCallable(pv, u.Elem(), seen)
 	case *types.Array:
-		return holdsCallable(u.Elem(), seen)
+		return holdsCallable(pv, u.Elem(), seen)
 	case *types.Map:
-		return holdsCallable(u.Key(), seen) || holdsCallable(u.Elem(), seen)
+		return holdsCallable(pv, u.Key(), seen) || holdsCallable(pv, u.Elem(), seen)
 	case *types.Struct:
 		for field := range u.Fields() {
-			if holdsCallable(field.Type(), seen) {
+			if holdsCallable(pv, field.Type(), seen) {
 				return true
 			}
 		}
@@ -610,19 +615,20 @@ func (pv *pkgVerifier) mayCallValues(obj *types.Func) bool {
 	case fn.imported != nil:
 		may = fn.imported.CallsValues
 	case fn.trust != nil:
-		may = runsValues(fn)
+		may = pv.runsValues(fn)
 	}
 	pv.mayCall[obj.Origin()] = may
 	return may
 }
 
-// runsValues reports whether a trusted function may call a function value
-// that it is given: one held, at any depth, by a parameter listed under
-// runs, other than a function parameter with a contract under calls. What
-// is handed over there is judged where it is handed over.
-func runsValues(fn *funcInfo) bool {
+// runsValues reports whether a trusted function may call a function value,
+// or a method of an interface value with a contract, that it is given: one
+// held, at any depth, by a parameter listed under runs, other than a
+// function parameter with a contract under calls. What is handed over
+// there is judged where it is handed over. See holdsCallable.
+func (pv *pkgVerifier) runsValues(fn *funcInfo) bool {
 	for param := range fn.runs {
-		if fn.calls[param] == nil && holdsCallable(param.Type(), map[types.Type]bool{}) {
+		if fn.calls[param] == nil && holdsCallable(pv, param.Type(), map[types.Type]bool{}) {
 			return true
 		}
 	}
@@ -651,7 +657,7 @@ func (pv *pkgVerifier) findValueCallers() {
 		direct := false
 		trusted := pv.trustedContract(fn.obj)
 		if trusted != nil {
-			direct = runsValues(trusted)
+			direct = pv.runsValues(trusted)
 		}
 		bound, _ := literalUses(pv.info, fn.decl.Body)
 		ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
@@ -911,6 +917,16 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 	}
 	if fn.trust != nil {
 		v.noteUse(fn, e.Pos())
+		// The receiver is handed to the trusted method at each call, as
+		// at a call written out, where checkHandedOver looks at it. A
+		// method whose entry lists it under runs may call through what it
+		// holds, and is refused above.
+		if recv := sig.Recv(); recv != nil && !fn.runs[fn.params[0]] && holdsCode(recv.Type(), map[types.Type]bool{}) {
+			v.unsupported(e.Pos(), fmt.Sprintf("%s is used as %s, which hands its receiver to %s at each call; %s is trusted, and its receiver "+
+				"is a value of type %s, which can hold an error, an interface, or a function, so %s could run code through it that nobody has seen. "+
+				"If its contract holds whatever that code does, list %s under runs in the contract",
+				types.ExprString(e), as, fn.obj.Name(), fn.obj.Name(), recv.Type(), fn.obj.Name(), fn.params[0].Name()))
+		}
 		// The parameters of the value come from whoever calls it, so what
 		// can carry code is handed on to the trusted function unseen.
 		for _, param := range inputs {

@@ -21,3 +21,19 @@ type Sized Sizer
 
 // Measure calls the Size method of what it is given. It is trusted.
 func Measure(s Sizer) (n int) { return s.Size() }
+
+// Wrapper holds a function that its method calls. Get is trusted.
+type Wrapper struct{ H func() }
+
+func (w *Wrapper) Get() (r int) {
+	if w.H != nil {
+		w.H()
+	}
+	return 0
+}
+
+// Unclaimed holds a function too, and its trusted method claims its
+// contract whatever that function does.
+type Unclaimed struct{ H func() }
+
+func (u *Unclaimed) Get() (r int) { return 0 }

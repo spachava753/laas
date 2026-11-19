@@ -997,3 +997,21 @@ trusted:
     runs: [s]
     modifies: []
     ensures: ["0 <= n <= 100"]
+
+  (*interfaceslib.Wrapper).Get:
+    reason: Returns zero; what it does with the function it holds is not claimed.
+    requires: ["w != nil"]
+    modifies: []
+    ensures: ["r = 0"]
+
+  (*interfaceslib.Unclaimed).Get:
+    reason: Returns zero and calls nothing it holds.
+    requires: ["u != nil"]
+    runs: [u]
+    modifies: []
+    ensures: ["r = 0"]
+
+  interfaces.logRecord:
+    reason: Formats the number of a record and writes it to the writer the record holds, whatever writer that is.
+    runs: [r]
+    modifies: []
