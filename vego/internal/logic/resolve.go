@@ -124,14 +124,17 @@ func fail(format string, args ...any) {
 }
 
 // kindOf names what a term of a formula stands for, as a message should
-// call it. A reference is a pointer, a function value, or, when it is
-// neither, a map: those are the only references a path gives.
+// call it. A reference is a pointer, a function value, an interface value,
+// or, when it is none of these, a map: those are the only references a path
+// gives.
 func kindOf(t *Term) string {
 	switch {
 	case t.Op == OpIntLit && t.Sort == Ref && t.Val == 0:
 		return "nil"
 	case t.Op == OpFuncVal:
 		return "function value"
+	case t.Op == OpIfaceVal:
+		return "interface value"
 	case t.Op == OpPair:
 		return "pointer"
 	case t.Sort == Ref:
@@ -486,7 +489,12 @@ func (s *scope) relation(op string, a, b *Term) *Term {
 		if kindOf(a) == "nil" {
 			named = b
 		}
-		fail("operator %s cannot be applied to a %s", op, kindOf(named))
+		kind := kindOf(named)
+		article := "a"
+		if kind == "interface value" {
+			article = "an"
+		}
+		fail("operator %s cannot be applied to %s %s", op, article, kind)
 	case a.Sort != Int:
 		fail("operator %s cannot be applied to %s values", op, a.Sort)
 	case equality:

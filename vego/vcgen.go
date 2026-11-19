@@ -676,6 +676,8 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 		return
 	case *ast.DeferStmt:
 		v.deferStmt(s, st)
+	case *ast.TypeSwitchStmt:
+		v.unsupported(s.Pos(), ifaceAsserted)
 	default:
 		kind := strings.TrimSuffix(strings.TrimPrefix(fmt.Sprintf("%T", s), "*ast."), "Stmt")
 		v.unsupported(s.Pos(), strings.ToLower(kind)+" statements are not supported yet")
@@ -788,6 +790,8 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 					value = logic.Eq(tag, logic.RefLit(0))
 				case tag.Sort == logic.Err:
 					value = v.errorsEqual(s.Tag, e, tag, v.expr(e, st, guard), e.Pos())
+				case isIface(v.info.TypeOf(s.Tag)) || isIface(v.info.TypeOf(e)):
+					v.unsupported(e.Pos(), ifaceCompared)
 				default:
 					// A case matches when Go's == holds, which for floats,
 					// strings, and errors is not plain equality of terms.

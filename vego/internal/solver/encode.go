@@ -692,6 +692,8 @@ func (e *encoder) node(b *strings.Builder, t *logic.Term) {
 		fault("a pointer outside a comparison: %v", t)
 	case logic.OpFuncVal:
 		fault("a function value outside a comparison: %v", t)
+	case logic.OpIfaceVal:
+		fault("an interface value outside a comparison: %v", t)
 	default:
 		fault("no encoding for %v", t)
 	}

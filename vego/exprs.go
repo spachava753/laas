@@ -154,6 +154,8 @@ func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 		return v.literal(e, t, st, guard)
 	case *ast.CallExpr:
 		return v.callExpr(e, st, guard)
+	case *ast.TypeAssertExpr:
+		v.unsupported(e.Pos(), ifaceAsserted)
 	case *ast.FuncLit:
 		v.unsupported(e.Pos(), "a function literal is supported only where it is called or deferred, as the value that declares "+
 			"a new variable which is only ever called, or where it is given a function type with a contract")
@@ -168,6 +170,9 @@ func (v *fnVerifier) evalAs(e ast.Expr, want types.Type, st *state, guard []*log
 	if isFunc(want) && !v.isNil(e) {
 		return v.functionValue(e, want, st, guard)
 	}
+	if isIface(want) && !v.isNil(e) {
+		return v.interfaceValue(e, want, st, guard)
+	}
 	if !v.isNil(e) {
 		// An error value is only ever an error, nil, or the result of a
 		// call. Converting anything else to an error would hide a value
@@ -178,7 +183,7 @@ func (v *fnVerifier) evalAs(e ast.Expr, want types.Type, st *state, guard []*log
 		return v.eval(e, st, guard)
 	}
 	_, isPointer := pointee(want)
-	if !isError(want) && !isSlice(want) && !isPointer && !isMap(want) && !isFunc(want) {
+	if !isError(want) && !isSlice(want) && !isPointer && !isMap(want) && !holdsCodeRef(want) {
 		v.unsupported(e.Pos(), fmt.Sprintf("nil of type %s is not supported", want))
 	}
 	return zeroValue(want)
@@ -342,7 +347,7 @@ func (v *fnVerifier) binaryExpr(e *ast.BinaryExpr, st *state, guard []*logic.Ter
 		switch {
 		case isError(t):
 			isNil = logic.IsNil(val[0])
-		case isPointer, isSlice(t), isMap(t), isFunc(t):
+		case isPointer, isSlice(t), isMap(t), holdsCodeRef(t):
 			isNil = logic.Eq(val[0], logic.RefLit(0))
 		default:
 			v.unsupported(e.Pos(), fmt.Sprintf("comparing a %s with nil is not supported", t))
@@ -354,6 +359,9 @@ func (v *fnVerifier) binaryExpr(e *ast.BinaryExpr, st *state, guard []*logic.Ter
 	}
 	if (isError(v.info.TypeOf(e.X)) || isError(v.info.TypeOf(e.Y))) && (e.Op == token.EQL || e.Op == token.NEQ) {
 		return v.compareErrors(e.X, e.Y, e.Op, st, guard, e.Pos())
+	}
+	if (isIface(v.info.TypeOf(e.X)) || isIface(v.info.TypeOf(e.Y))) && (e.Op == token.EQL || e.Op == token.NEQ) {
+		v.unsupported(e.Pos(), ifaceCompared)
 	}
 	if object, isPointer := pointee(v.info.TypeOf(e.X)); isPointer {
 		if v.pass.TypesSizes.Sizeof(object) == 0 {
@@ -694,7 +702,7 @@ func (v *fnVerifier) conversion(e *ast.CallExpr, st *state, guard []*logic.Term)
 	case isScalar && source == logic.Int && target == logic.Int:
 		v.check(st, guard, v.typeFact(val[0], to), e.Pos(), "conversion may not fit %s", types.TypeString(to, nil))
 		return val
-	case types.Identical(from, to), isError(to):
+	case types.Identical(from, to), isError(to), isIface(to):
 		return val
 	}
 	// A conversion that leaves the value as it is must also leave it in

@@ -151,6 +151,9 @@ func layoutOf(t types.Type) ([]leaf, bool) {
 		if isError(t) {
 			return one(logic.Err)
 		}
+		if isIface(t) {
+			return one(logic.Ref)
+		}
 	case *types.Pointer:
 		if _, ok := pointee(t); ok {
 			return []leaf{{"#ptr", logic.Ref, t, partPtr}, {"#at", logic.Int, t, partAt}}, true
@@ -383,8 +386,9 @@ func (pv *pkgVerifier) wellFormed(val value, t types.Type, brk *logic.Term) *log
 		case lf.part == partPtr:
 			facts = append(facts, exists(val[i]), logic.Le(zero, val[i+1]), logic.Le(val[i+1], logic.BigLit(pv.maxAlloc())))
 		case lf.part != partValue:
-		case lf.sort == logic.Ref && isFunc(lf.typ):
-			// A function value refers to no allocation.
+		case lf.sort == logic.Ref && holdsCodeRef(lf.typ):
+			// A function value refers to no allocation, and the reference
+			// of an interface value is not the address of what it holds.
 		case lf.sort == logic.Ref:
 			facts = append(facts, exists(val[i]))
 		default:

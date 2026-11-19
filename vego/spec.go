@@ -475,6 +475,11 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 		// A function value can only be compared with nil.
 		return logic.FuncVal(found.val[0]), nil
 	}
+	if isIface(found.typ) {
+		// So can an interface value: two that are not nil may hold the
+		// same value under different references.
+		return logic.IfaceVal(found.val[0]), nil
+	}
 	if _, single := sortOf(found.typ); single {
 		return found.val[0], nil
 	}

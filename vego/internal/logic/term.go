@@ -73,17 +73,18 @@ const (
 	OpDiv // Go division: truncates toward zero
 	OpMod // Go remainder: takes the sign of the dividend
 	OpLen
-	OpSelect  // Select(seq, index)
-	OpStore   // Store(seq, index, value)
-	OpFill    // Fill(length, value): a sequence holding one value everywhere
-	OpPush    // Push(seq, value): seq with value appended
-	OpConcat  // Concat(a, b): the elements of a followed by those of b
-	OpSub     // Sub(seq, lo, hi): the elements of seq from lo up to hi
-	OpIsNil   // IsNil(err): whether an error value is nil
-	OpIs      // Is(err, target): whether errors.Is(err, target) reports true
-	OpKey     // Key(seq): a number that identifies a sequence by its contents
-	OpPair    // Pair(ref, at): a pointer, which only ever occurs as an operand of RefEq
-	OpFuncVal // FuncVal(ref): a function value, which only ever occurs as an operand of RefEq
+	OpSelect   // Select(seq, index)
+	OpStore    // Store(seq, index, value)
+	OpFill     // Fill(length, value): a sequence holding one value everywhere
+	OpPush     // Push(seq, value): seq with value appended
+	OpConcat   // Concat(a, b): the elements of a followed by those of b
+	OpSub      // Sub(seq, lo, hi): the elements of seq from lo up to hi
+	OpIsNil    // IsNil(err): whether an error value is nil
+	OpIs       // Is(err, target): whether errors.Is(err, target) reports true
+	OpKey      // Key(seq): a number that identifies a sequence by its contents
+	OpPair     // Pair(ref, at): a pointer, which only ever occurs as an operand of RefEq
+	OpFuncVal  // FuncVal(ref): a function value, which only ever occurs as an operand of RefEq
+	OpIfaceVal // IfaceVal(ref): an interface value, which only ever occurs as an operand of RefEq
 	OpIte
 	OpEq
 	OpLe
@@ -289,15 +290,28 @@ func Pair(ref, at *Term) *Term {
 // compared with nil: ref is zero exactly when the value is nil.
 func FuncVal(ref *Term) *Term { return node(OpFuncVal, Ref, ref) }
 
+// IfaceVal stands for a value of an interface type other than error in a
+// formula, which can only be compared with nil: ref is zero exactly when
+// the value is the nil interface. Two interface values that are not nil
+// may hold the same value under different references, and == on them can
+// panic, so nothing else is said of them.
+func IfaceVal(ref *Term) *Term { return node(OpIfaceVal, Ref, ref) }
+
+// holdsCode reports whether a term stands for a value that can only be
+// compared with nil.
+func holdsCode(t *Term) bool { return t.Op == OpFuncVal || t.Op == OpIfaceVal }
+
 // Incomparable says why two references cannot be compared, or returns ""
-// if they can: a pointer with a pointer or with nil, a function value with
-// nil, and anything else, such as a map, with its like.
+// if they can: a pointer with a pointer or with nil, a function value or an
+// interface value with nil, and anything else, such as a map, with its like.
 func Incomparable(a, b *Term) string {
 	isNil := func(t *Term) bool { return t.Op == OpIntLit && t.Val == 0 }
 	switch {
 	case (a.Op == OpFuncVal && !isNil(b)) || (b.Op == OpFuncVal && !isNil(a)):
 		return "a function value can only be compared with nil"
-	case a.Op == OpFuncVal || b.Op == OpFuncVal:
+	case (a.Op == OpIfaceVal && !isNil(b)) || (b.Op == OpIfaceVal && !isNil(a)):
+		return "an interface value can only be compared with nil"
+	case holdsCode(a) || holdsCode(b):
 		return ""
 	case a.Op != OpPair && b.Op != OpPair:
 		return ""
@@ -316,10 +330,10 @@ func Incomparable(a, b *Term) string {
 // nil, are equal: both nil, or into the same allocation at the same
 // position.
 func RefEq(a, b *Term) *Term {
-	if a.Op == OpFuncVal {
+	if holdsCode(a) {
 		a = a.Args[0]
 	}
-	if b.Op == OpFuncVal {
+	if holdsCode(b) {
 		b = b.Args[0]
 	}
 	switch {
@@ -545,6 +559,8 @@ func (t *Term) write(b *strings.Builder) {
 		list("pointer(", t.Args, ", ", ")")
 	case OpFuncVal:
 		list("function(", t.Args, "", ")")
+	case OpIfaceVal:
+		list("interface(", t.Args, "", ")")
 	case OpIte:
 		list("ite(", t.Args, ", ", ")")
 	case OpForall:

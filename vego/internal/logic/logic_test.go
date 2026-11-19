@@ -70,7 +70,7 @@ func TestResolve(t *testing.T) {
 		"i": Const("i", Int), "j": Const("j", Int), "n": Const("n", Int),
 		"found": Const("found", Bool), "flags": Const("flags", BoolSeq),
 		"s.count": Const("count0", Int), "s.count'": Const("count1", Int), "old s.count": Const("count0", Int),
-		"s.items'": Const("items1", IntSeq), "p": Pair(Const("p", Ref), Const("p at", Int)), "q": Pair(Const("q", Ref), Const("q at", Int)), "m": Const("m", Ref), "f": FuncVal(Const("f", Ref)), "has A": Const("has A", Bool),
+		"s.items'": Const("items1", IntSeq), "p": Pair(Const("p", Ref), Const("p at", Int)), "q": Pair(Const("q", Ref), Const("q at", Int)), "m": Const("m", Ref), "f": FuncVal(Const("f", Ref)), "w": IfaceVal(Const("w", Ref)), "has A": Const("has A", Bool),
 		"err": Const("err", Err), "ErrEmpty": Const("ErrEmpty", Err),
 	}
 	resolver := NewResolver()
@@ -113,6 +113,11 @@ func TestResolve(t *testing.T) {
 		{"f = 0", "error: cannot compare f (function value) with 0 (int)"},
 		{"m = 0", "error: cannot compare m (map) with 0 (int)"},
 		{"f = nil", "(f = 0)"},
+		{"w < nil", "error: operator < cannot be applied to an interface value"},
+		{"w = f", "error: can only be compared with nil"},
+		{"w = m", "error: an interface value can only be compared with nil"},
+		{"w = w", "error: an interface value can only be compared with nil"},
+		{"nil != w", "~(0 = w)"},
 		{"old(s.count')", "error: old takes a parameter"},
 		{"A.size", "error: unknown name A.size"},
 		{"0 <= i <= j < |A|", "((0 <= i) And (i <= j) And (j < |A|))"},

@@ -34,6 +34,41 @@ func isFunc(t types.Type) bool {
 	return ok && sig.TypeParams() == nil && sig.RecvTypeParams() == nil
 }
 
+// isIface reports whether a type is an interface type other than error that
+// is modelled: a set of methods, not a constraint, without type parameters
+// or type arguments, and not one that holds the methods of error, whose
+// values would be errors that the model of errors does not describe. A
+// value of such a type is one leaf, a reference that is zero exactly when
+// the value is the nil interface. Converting a concrete value gives a
+// reference that is not zero, even for a nil pointer, as in Go; converting
+// one interface value to another keeps the reference.
+func isIface(t types.Type) bool {
+	if t == nil || isError(t) {
+		return false
+	}
+	u, ok := t.Underlying().(*types.Interface)
+	if !ok || !u.IsMethodSet() {
+		return false
+	}
+	if named, isNamed := types.Unalias(t).(*types.Named); isNamed && (named.TypeParams() != nil || named.TypeArgs() != nil) {
+		return false
+	}
+	errorMethod := types.Universe.Lookup("error").Type().Underlying().(*types.Interface).Method(0)
+	for method := range u.Methods() {
+		if method == errorMethod {
+			return false
+		}
+	}
+	return true
+}
+
+// holdsCodeRef reports whether a type is one whose values are a single
+// reference that tells only whether the value is nil: a function type or
+// an interface type other than error.
+func holdsCodeRef(t types.Type) bool {
+	return isFunc(t) || isIface(t)
+}
+
 func isString(t types.Type) bool {
 	basic, ok := t.Underlying().(*types.Basic)
 	return ok && basic.Info()&types.IsString != 0

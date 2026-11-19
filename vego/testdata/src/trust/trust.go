@@ -236,7 +236,7 @@ func take(MaxInt any) int { return 0 }
 //
 // @Ensures n = MaxInt
 func UsesBlockedName() (n int) {
-	return take(nil) // want `cannot verify UsesBlockedName: ` `the trusted contract of trust.take \(trusted.yaml:\d+\) cannot be used: in its ensures "result = MaxInt": parameter MaxInt has type any, which cannot be used in a contract`
+	return take(nil) // want `cannot verify UsesBlockedName: ` `the trusted contract of trust.take \(trusted.yaml:\d+\) cannot be used: in its ensures "result = MaxInt": cannot compare result \(int\) with MaxInt \(interface value\)`
 }
 
 var errAlways = errors.New("always")
@@ -259,7 +259,7 @@ func takeAny(x any) int { return 0 }
 //
 // @Ensures n = 0
 func UsesOldOfBlockedName() (n int) {
-	return takeAny(nil) // want `cannot verify UsesOldOfBlockedName: ` `the trusted contract of trust.takeAny \(trusted.yaml:\d+\) cannot be used: in its ensures "result = old\(x\)": parameter x has type any, which cannot be used in a contract`
+	return takeAny(nil) // want `cannot verify UsesOldOfBlockedName: ` `the trusted contract of trust.takeAny \(trusted.yaml:\d+\) cannot be used: in its ensures "result = old\(x\)": cannot compare result \(int\) with old\(x\) \(interface value\)`
 }
 
 func readyWith(a []int) (err error) { return nil }

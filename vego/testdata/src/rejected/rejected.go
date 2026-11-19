@@ -163,8 +163,8 @@ func ArabicDigit() (result int) { return 1 }
 type shape interface{ Area() int }
 
 // @Requires s != nil
-func Interfaces(s shape) (result int) { // want `vego: cannot verify Interfaces: parameter s has unsupported type rejected.shape`
-	return s.Area()
+func Interfaces(s shape) (result int) {
+	return s.Area() // want `vego: cannot verify Interfaces: calls through an interface are not supported yet`
 }
 
 type cell struct{ value int }

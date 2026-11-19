@@ -123,7 +123,7 @@ trusted:
     modifies: []
 
   trust.take:
-    reason: Mentions a parameter of a type vego does not model.
+    reason: Mentions a parameter of interface type, which a formula can only compare with nil.
     ensures:
       - "result = MaxInt"
     modifies: []
@@ -135,7 +135,7 @@ trusted:
     modifies: []
 
   trust.takeAny:
-    reason: Takes old of a parameter of a type vego does not model.
+    reason: Takes old of a parameter of interface type, which a formula can only compare with nil.
     ensures:
       - "result = old(x)"
     modifies: []
@@ -941,3 +941,16 @@ trusted:
     runs: [f]
     modifies: []
     ensures: ["0 <= result <= 20"]
+
+  interfaces.describe:
+    reason: Takes an interface value without saying what it may run.
+    modifies: []
+
+  interfaces.describeRuns:
+    reason: Reads a number from its argument and calls nothing on it.
+    runs: [s]
+    modifies: []
+
+  interfaces.loadShape:
+    reason: Returns some shape or nil.
+    modifies: []
