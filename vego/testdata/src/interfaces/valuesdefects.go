@@ -115,9 +115,12 @@ func DescribedRuns(s Shape) (n int) {
 	return n
 }
 
-// @Ensures s != nil
+// A trusted function that returns an interface value with a contract must
+// vouch for it.
+//
+// @Ensures True
 func Loaded() (s Shape) {
-	return loadShape() // want `postcondition may not hold: s != nil`
+	return loadShape() // want `the trusted contract of interfaces.loadShape \(trusted.yaml:\d+\) cannot be used: its result s can hold a function value or an interface value of a type with a contract; list it under vouches` `cannot verify Loaded: loadShape has a contract that could not be understood`
 }
 
 // @Ensures True

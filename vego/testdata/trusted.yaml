@@ -963,3 +963,37 @@ trusted:
     reason: Reads nothing of what it is given and calls nothing on it.
     runs: [a]
     modifies: []
+
+  (interfaces.Shape).Area: # // want `the trusted contract names \(interfaces.Shape\).Area, a method of an interface type, which the trust file cannot give a contract yet`
+    reason: A method of an interface cannot have a trusted contract.
+    modifies: []
+
+  interfaces.loadPricer:
+    reason: Returns a pricer that some other code built, which meets the contract of Pricer.
+    vouches: [p]
+    modifies: []
+
+  (*interfaces.Shop).reset:
+    reason: Clears a shop, pricer included.
+    modifies: [s]
+
+  interfaces.priceWith:
+    reason: Calls the methods of what it is given with arguments that meet their contracts.
+    runs: [p]
+    modifies: []
+    ensures: ["n >= 0"]
+
+  interfaces.takesLiterals:
+    reason: Counts what it is given and calls nothing on it.
+    runs: [as]
+    modifies: []
+
+  interfaces.takesLiteralsUnclaimed:
+    reason: Counts what it is given.
+    modifies: []
+
+  interfaceslib.Measure:
+    reason: Calls Size on what it is given and returns what Size returns.
+    runs: [s]
+    modifies: []
+    ensures: ["0 <= n <= 100"]

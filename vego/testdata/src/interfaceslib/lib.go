@@ -18,3 +18,6 @@ type Pricer interface {
 // Sized is a defined type made from Sizer, which has Sizer's method and
 // its contract.
 type Sized Sizer
+
+// Measure calls the Size method of what it is given. It is trusted.
+func Measure(s Sizer) (n int) { return s.Size() }

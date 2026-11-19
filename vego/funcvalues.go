@@ -473,6 +473,11 @@ func (pv *pkgVerifier) foreignCode(t types.Type, seen map[types.Type]bool) strin
 			return ""
 		}
 		if isIface(t) && u.NumMethods() > 0 {
+			for method := range u.Methods() {
+				if fn := pv.methodContract(method); fn != nil && fn.broken {
+					return "an interface value with a method whose contract cannot be used"
+				}
+			}
 			return "an interface value with a method that has no contract"
 		}
 		return "an error, or another interface"
@@ -505,7 +510,7 @@ func (pv *pkgVerifier) foreignCode(t types.Type, seen map[types.Type]bool) strin
 
 // holdsContractedValue reports whether a value of a type can hold, however
 // deep, through pointers, slices, and maps, a function value of a type with
-// a contract.
+// a contract, or an interface value with a method that has one.
 func (pv *pkgVerifier) holdsContractedValue(t types.Type, seen map[types.Type]bool) bool {
 	if t == nil || seen[t] {
 		return false
@@ -514,6 +519,21 @@ func (pv *pkgVerifier) holdsContractedValue(t types.Type, seen map[types.Type]bo
 	switch u := t.Underlying().(type) {
 	case *types.Signature:
 		return pv.valueContract(t) != nil
+	case *types.Interface:
+		// Verified code can call a method that has a contract, and only
+		// such a method. Until type assertions are built, nothing else
+		// that an interface holds can reach it: an interface without
+		// contracts, any, and errors are left out, and must be counted
+		// once they are.
+		if !isIface(t) {
+			return false
+		}
+		for method := range u.Methods() {
+			if pv.methodContract(method) != nil {
+				return true
+			}
+		}
+		return false
 	case *types.Pointer:
 		return pv.holdsContractedValue(u.Elem(), seen)
 	case *types.Slice:
@@ -532,9 +552,12 @@ func (pv *pkgVerifier) holdsContractedValue(t types.Type, seen map[types.Type]bo
 	return false
 }
 
-// holdsFunc reports whether a value of a type can hold, however deep, a
-// function value of any type.
-func holdsFunc(t types.Type, seen map[types.Type]bool) bool {
+// holdsCallable reports whether a value of a type can hold, however deep, a
+// function value of any type, or an interface value other than an error.
+// An error is left out: no method that verified code wrote can be behind
+// one until verified types can be made into errors, and a vouched error's
+// methods are claimed to return.
+func holdsCallable(t types.Type, seen map[types.Type]bool) bool {
 	if t == nil || seen[t] {
 		return false
 	}
@@ -542,17 +565,19 @@ func holdsFunc(t types.Type, seen map[types.Type]bool) bool {
 	switch u := t.Underlying().(type) {
 	case *types.Signature:
 		return true
+	case *types.Interface:
+		return !isError(t)
 	case *types.Pointer:
-		return holdsFunc(u.Elem(), seen)
+		return holdsCallable(u.Elem(), seen)
 	case *types.Slice:
-		return holdsFunc(u.Elem(), seen)
+		return holdsCallable(u.Elem(), seen)
 	case *types.Array:
-		return holdsFunc(u.Elem(), seen)
+		return holdsCallable(u.Elem(), seen)
 	case *types.Map:
-		return holdsFunc(u.Key(), seen) || holdsFunc(u.Elem(), seen)
+		return holdsCallable(u.Key(), seen) || holdsCallable(u.Elem(), seen)
 	case *types.Struct:
 		for field := range u.Fields() {
-			if holdsFunc(field.Type(), seen) {
+			if holdsCallable(field.Type(), seen) {
 				return true
 			}
 		}
@@ -597,7 +622,7 @@ func (pv *pkgVerifier) mayCallValues(obj *types.Func) bool {
 // is handed over there is judged where it is handed over.
 func runsValues(fn *funcInfo) bool {
 	for param := range fn.runs {
-		if fn.calls[param] == nil && holdsFunc(param.Type(), map[types.Type]bool{}) {
+		if fn.calls[param] == nil && holdsCallable(param.Type(), map[types.Type]bool{}) {
 			return true
 		}
 	}

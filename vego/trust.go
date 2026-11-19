@@ -489,6 +489,12 @@ func (pv *pkgVerifier) loadTrust(explicit string) {
 		// Unexported names of another package may be missing from what
 		// is known about it here; they are checked when it is analysed.
 		checkable := ok && visible[pkg] != nil && (visible[pkg] == pv.pass.Pkg || token.IsExported(name[strings.LastIndex(name, ".")+1:]))
+		if checkable && declaresInterfaceMethod(visible[pkg], name) {
+			pv.report(pv.trustPos(pv.projectTrust, entry.line, 1),
+				"the trusted contract names %s, a method of an interface type, which the trust file cannot give a contract yet; "+
+					"write the contract in the doc comment of the method where the interface is declared", key)
+			continue
+		}
 		if checkable && !declares(visible[pkg], name) {
 			pv.report(pv.trustPos(pv.projectTrust, entry.line, 1),
 				"the trusted contract names %s, but package %s has no such function", key, pkg)
@@ -529,6 +535,22 @@ func declares(pkg *types.Package, name string) bool {
 		return false
 	}
 	found, _, _ := types.LookupFieldOrMethod(types.NewPointer(typeName.Type()), true, pkg, method)
+	_, ok = found.(*types.Func)
+	return ok
+}
+
+// declaresInterfaceMethod reports whether a package declares an interface
+// type that has a method of the name, as Go prints it: "(I).M".
+func declaresInterfaceMethod(pkg *types.Package, name string) bool {
+	receiver, method, isMethod := strings.Cut(strings.TrimPrefix(name, "("), ").")
+	if !isMethod {
+		return false
+	}
+	typeName, ok := pkg.Scope().Lookup(receiver).(*types.TypeName)
+	if !ok || !types.IsInterface(typeName.Type()) {
+		return false
+	}
+	found, _, _ := types.LookupFieldOrMethod(typeName.Type(), false, pkg, method)
 	_, ok = found.(*types.Func)
 	return ok
 }
@@ -621,7 +643,7 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 		case !ok:
 			fn.defect("its vouches %q: %s is not a result", item.text, item.text)
 		case !isError(fn.results[index].Type()) && !pv.holdsContractedValue(fn.results[index].Type(), map[types.Type]bool{}):
-			fn.defect("its vouches lists %s, whose type %s is not error and can hold no function value of a type with a contract", item.text, fn.results[index].Type())
+			fn.defect("its vouches lists %s, whose type %s is not error and can hold no function value or interface value of a type with a contract", item.text, fn.results[index].Type())
 		case fn.vouches[index]:
 			fn.defect("its vouches lists %s twice", item.text)
 		default:
@@ -642,13 +664,13 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 					name = spelled
 				}
 			}
-			fn.defect("its result %s can hold a function value of a type with a contract; "+
+			fn.defect("its result %s can hold a function value or an interface value of a type with a contract; "+
 				"list it under vouches to claim that every such value meets the contract of its type", name)
 		}
 	}
 	for _, m := range fn.modifies {
 		if covered := coveredType(fn, m); covered != nil && pv.holdsContractedValue(covered, map[types.Type]bool{}) {
-			fn.defect("its modifies %q covers memory that can hold a function value of a type with a contract, "+
+			fn.defect("its modifies %q covers memory that can hold a function value or an interface value of a type with a contract, "+
 				"which a trusted function cannot write yet", m.text)
 		}
 	}
