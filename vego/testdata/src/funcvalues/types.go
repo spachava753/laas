@@ -41,3 +41,61 @@ type Kept func(x int)
 //
 // @Ensures True // want `vego: a contract can only be declared on a defined function type, not on an alias`
 type Alias = func(x int)
+
+// Half promises a result for every number in range, which an odd number
+// cannot have. A value from outside is taken to meet the contract, so a
+// call of one would teach that the number is even.
+//
+// @Requires 0 <= x <= 1000
+// @Ensures 2 * y = x
+type Half func(x int) (y int) // want `vego: the Ensures clauses of Half are not proved to be satisfiable for every call that its Requires allow, by results and a change of what Modifies lists; a value of the type is taken to meet them, so a call of one could prove something false`
+
+// Counted holds a number.
+type Counted struct{ n int }
+
+// Five promises a field it may not write.
+//
+// @Requires c != nil
+// @Ensures c.n' = 5
+type Five func(c *Counted) // want `vego: the contract of Five cannot be used: its ensures "c.n' = 5" describes c.n' after the call, but nothing its modifies lists is memory that c.n' reads, so the call cannot have changed it; drop the prime or list what the function writes` `vego: the Ensures clauses of Five are not proved to be satisfiable`
+
+// Sets5 may write the field, so it can promise it.
+//
+// @Requires c != nil
+// @Modifies c.n
+// @Ensures c.n' = 5
+type Sets5 func(c *Counted)
+
+// Even would learn from a call of a Half that its number is even.
+//
+// @Requires h != nil And 0 <= x <= 1000
+// @Ensures True
+func Even(h Half, x int) {
+	h(x) // want `vego: cannot verify Even: the contract of Half could not be understood`
+}
+
+// Unbounded promises one more than a field that may already be the largest
+// int, which no value can meet.
+//
+// @Requires c != nil
+// @Modifies c.n
+// @Ensures c.n' = c.n + 1
+type Unbounded func(c *Counted) // want `vego: the Ensures clauses of Unbounded are not proved to be satisfiable`
+
+// Zeroes promises to clear a slice, which the check cannot show a value can
+// do: it does not choose new contents for a slice.
+//
+// @Modifies xs
+// @Ensures Forall i in [0, |xs|) : xs'[i] = 0
+type Zeroes func(xs []int) // want `vego: the Ensures clauses of Zeroes are not proved to be satisfiable`
+
+// Picks promises a result in a range that depends on its argument.
+//
+// @Requires 0 <= lo <= hi
+// @Ensures lo <= r <= hi
+type Picks func(lo int, hi int) (r int)
+
+// Fails promises an error when its argument is negative.
+//
+// @Ensures (err != nil) <-> x < 0
+type Fails func(x int) (err error)

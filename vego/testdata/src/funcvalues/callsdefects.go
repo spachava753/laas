@@ -98,20 +98,6 @@ func ClearedBeside(s *Host, clear Clearer) (y int) {
 	return s.handler(clear(s)) // want `vego: s.handler may be read before or after the call to clear, which may change it` `vego: precondition of s.handler may not hold`
 }
 
-// Sets claims to set a field it may not modify.
-//
-// @Requires c != nil
-// @Ensures c.Retries' = 5
-type Sets func(c *Config)
-
-// ContradictsCall calls a value whose contract contradicts what is known
-// there: Sets may not modify c, so c.Retries stays 3.
-//
-// @Requires c != nil And s != nil And c.Retries = 3
-// @Ensures True
-func ContradictsCall(c *Config, s Sets) {
-	s(c) // want `vego: the contract of Sets cannot be true of this call: what it promises contradicts what is known here`
-}
 
 // Box keeps a count that is never negative.
 //

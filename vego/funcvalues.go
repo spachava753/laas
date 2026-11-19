@@ -132,12 +132,129 @@ func (pv *pkgVerifier) checkTypeContracts() {
 					"so no value of the type could be called", name.Name())
 				return
 			}
-			if _, outcome, _ := v.contractInstance(entry); pv.contradictory(outcome) {
+			v.primedPaths(fn)
+			for _, defect := range fn.defects {
+				pv.report(name.Pos(), "the contract of %s cannot be used: %s", name.Name(), defect)
+			}
+			if _, post, _ := v.contractInstance(entry); pv.contradictory(post) {
 				fn.broken = true
 				pv.report(name.Pos(), "the contract of %s contradicts itself, so a call of a value of the type would prove anything", name.Name())
+				return
+			}
+			if !v.canBeMet(entry) {
+				fn.broken = true
+				pv.report(name.Pos(), "the Ensures clauses of %s are not proved to be satisfiable for every call that its Requires allow, "+
+					"by results and a change of what Modifies lists; a value of the type is taken to meet them, so a call of one could prove something false", name.Name())
 			}
 		})
 	}
+}
+
+// canBeMet reports whether, in every state its Requires allow, some outcome
+// of a call meets the contract of the function type being checked. A value
+// that comes from code that is not verified is taken to meet the contract.
+// A contract that cannot be met for some call would make what it promises
+// there a fact about the arguments, as 2 * y = x would make x even.
+//
+// The outcome is built so that Z3 only has to choose numbers: the results,
+// the bound of what exists afterwards, and, for each struct or field that
+// Modifies lists, a value written there. Slices and maps that Modifies
+// lists keep their contents. A contract that can only be met by changing
+// those, or by memory the call creates, is reported, which errs towards
+// refusing.
+func (v *fnVerifier) canBeMet(entry *state) bool {
+	fn := v.fn
+	st := entry.clone()
+	mark, known := len(v.made), len(st.hyps)
+	st.brk = v.fresh("brk", logic.Ref)
+	st.assume(logic.Le(entry.brk, st.brk))
+	for _, m := range fn.modifies {
+		_, t, err := v.locateTarget(fn, m, v.entry, st, memory{})
+		covered := coveredType(fn, m)
+		if err != nil || !t.single || covered == nil {
+			continue
+		}
+		if object, isPointer := pointee(covered); isPointer {
+			covered = object
+		}
+		v.put(st, t.cells, t.ref, t.lo, v.unknown("out", covered, st))
+	}
+	results := make([]value, len(fn.results))
+	for i, result := range fn.results {
+		results[i] = v.unknown("out", result.Type(), st)
+	}
+	env := &specEnv{v: v, sink: st, fn: fn, args: v.entry, results: results, now: memory{}, post: st.mem, before: entry.brk}
+	var promised []*logic.Term
+	for _, c := range fn.ensures {
+		promised = append(promised, v.calleeFormula(c, env))
+	}
+	facts := append(slices.Clip(st.hyps[known:]), promised...)
+	return v.proves(entry.hyps, v.someOutcome(facts, v.made[mark:]), 0)
+}
+
+// someOutcome states that some outcome of a call has the facts given: the
+// constants that stand for what the call produced, among made, are bound
+// by an existential quantifier.
+func (v *fnVerifier) someOutcome(facts []*logic.Term, made []string) *logic.Term {
+	produced := map[string]bool{}
+	for _, name := range made {
+		produced[name] = true
+	}
+	sorts := map[string]logic.Sort{}
+	var order []string
+	var collect func(t *logic.Term)
+	seen := map[*logic.Term]bool{}
+	collect = func(t *logic.Term) {
+		if seen[t] {
+			return
+		}
+		seen[t] = true
+		if t.Op == logic.OpConst && produced[t.Name] {
+			if _, known := sorts[t.Name]; !known {
+				order = append(order, t.Name)
+			}
+			sorts[t.Name] = t.Sort
+		}
+		for _, arg := range t.Args {
+			collect(arg)
+		}
+	}
+	body := logic.And(facts...)
+	collect(body)
+	bound := map[string]*logic.Term{}
+	for _, name := range order {
+		bound[name] = v.bound("out")
+		bound[name] = logic.Bound(bound[name].Name, sorts[name])
+	}
+	body = substituteConsts(body, bound, map[*logic.Term]*logic.Term{})
+	for _, name := range slices.Backward(order) {
+		body = logic.Exists(bound[name], body)
+	}
+	return body
+}
+
+// substituteConsts replaces constants by the terms given for their names.
+func substituteConsts(t *logic.Term, by map[string]*logic.Term, memo map[*logic.Term]*logic.Term) *logic.Term {
+	if done, ok := memo[t]; ok {
+		return done
+	}
+	result := t
+	switch {
+	case t.Op == logic.OpConst && by[t.Name] != nil:
+		result = by[t.Name]
+	case len(t.Args) > 0:
+		args := make([]*logic.Term, len(t.Args))
+		changed := false
+		for i, arg := range t.Args {
+			args[i] = substituteConsts(arg, by, memo)
+			changed = changed || args[i] != arg
+		}
+		if changed {
+			result = logic.WithArgs(t, args)
+		}
+	}
+	memo[t] = result
+	return result
 }
 
 // exportTypeContracts publishes the contracts of the function types of the
@@ -409,16 +526,23 @@ func (pv *pkgVerifier) mayCallValues(obj *types.Func) bool {
 // findValueCallers decides mayCallValues for every function of the package
 // that has a body, as the least set closed under calls: a function is in it
 // when its body makes a call through a function value, or calls a function
-// that is in it. A trusted function of the package is judged by its
-// contract, as one of another package is.
+// that is in it. A trusted function of the package is judged by its body
+// too, which is there to read, as well as by its contract: one whose body
+// calls a function value kept in a variable makes such a call whatever its
+// runs says.
 func (pv *pkgVerifier) findValueCallers() {
 	calls := map[*types.Func][]*types.Func{}
 	var pending []*types.Func
 	for _, fn := range pv.order {
-		if fn.decl.Body == nil || pv.trustedContract(fn.obj) != nil {
+		if fn.decl.Body == nil {
 			continue
 		}
 		direct := false
+		if trusted := pv.trustedContract(fn.obj); trusted != nil {
+			for param := range trusted.runs {
+				direct = direct || holdsFunc(param.Type(), map[types.Type]bool{})
+			}
+		}
 		bound, _ := literalUses(pv.info, fn.decl.Body)
 		ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
 			switch n := n.(type) {

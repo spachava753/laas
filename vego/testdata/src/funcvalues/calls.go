@@ -98,7 +98,7 @@ func Route(routes map[string]Mapper, name string, x int) (y int) {
 
 // Done is called when something is finished.
 //
-// @Requires s != nil
+// @Requires s != nil And s.hits < 1000
 // @Modifies s.hits
 // @Ensures s.hits' = s.hits + 1
 type Done func(s *Host)

@@ -602,38 +602,44 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 		// contradict the caller. Tables are compared, not objects, so that
 		// a path through one parameter may describe what the function
 		// writes through another that is the same object.
-		// For each table, the slice parameters whose own elements an entry
-		// lists, or nil for an entry that may reach anything in the table.
-		changed := map[string][]*types.Var{}
-		for _, m := range fn.modifies {
-			if form, _, err := v.locateTarget(fn, m, nil, nil, nil); err == nil {
-				var whose *types.Var
-				if form.direct && form.elem != nil {
-					whose = form.param
-				}
-				target{cells: form.cells, mapType: form.mapType}.regions(func(key string, _ logic.Sort) {
-					changed[key] = append(changed[key], whose)
-				})
-			}
-		}
-		for _, c := range fn.ensures {
-			var visit func(n *logic.Node, whole bool)
-			visit = func(n *logic.Node, whole bool) {
-				isPath := n.Kind == logic.NIdent || n.Kind == logic.NField || n.Kind == logic.NIndex
-				if isPath && whole {
-					v.checkPrimed(fn, c, n, changed)
-				}
-				for i, kid := range n.Kids {
-					visit(kid, !isPath || i > 0)
-				}
-			}
-			visit(c.node, true)
-		}
+		v.primedPaths(fn)
 		_, outcome, _ := v.contractInstance(v.enter())
 		if pv.contradictory(outcome) {
 			fn.defect("it contradicts itself, so anything could be proved from it")
 		}
 	})
+}
+
+// primedPaths rejects every path of an ensures that is primed although no
+// table it reads is one the function may change; see checkPrimed.
+func (v *fnVerifier) primedPaths(fn *funcInfo) {
+	// For each table, the slice parameters whose own elements an entry
+	// lists, or nil for an entry that may reach anything in the table.
+	changed := map[string][]*types.Var{}
+	for _, m := range fn.modifies {
+		if form, _, err := v.locateTarget(fn, m, nil, nil, nil); err == nil {
+			var whose *types.Var
+			if form.direct && form.elem != nil {
+				whose = form.param
+			}
+			target{cells: form.cells, mapType: form.mapType}.regions(func(key string, _ logic.Sort) {
+				changed[key] = append(changed[key], whose)
+			})
+		}
+	}
+	for _, c := range fn.ensures {
+		var visit func(n *logic.Node, whole bool)
+		visit = func(n *logic.Node, whole bool) {
+			isPath := n.Kind == logic.NIdent || n.Kind == logic.NField || n.Kind == logic.NIndex
+			if isPath && whole {
+				v.checkPrimed(fn, c, n, changed)
+			}
+			for i, kid := range n.Kids {
+				visit(kid, !isPath || i > 0)
+			}
+		}
+		visit(c.node, true)
+	}
 }
 
 // checkPrimed rejects a path of a trusted ensures that is primed somewhere
