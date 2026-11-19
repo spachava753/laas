@@ -367,6 +367,22 @@ func (f *funcInfo) spelling() *funcInfo {
 	return f
 }
 
+// writtenIn returns the package whose source or trust file the contract of
+// a function was written in, which decides the unexported fields it may
+// name; nil for a contract shipped with vego, which may name none.
+func (f *funcInfo) writtenIn() *types.Package {
+	f = f.spelling()
+	switch {
+	case f.trust != nil && f.trust.file != nil && f.trust.file.shipped:
+		return nil
+	case f.valueOf != nil:
+		return f.valueOf.Pkg()
+	case f.methodOf != nil:
+		return f.methodOf.Pkg()
+	}
+	return f.obj.Pkg()
+}
+
 func (f *funcInfo) annotated() bool {
 	return len(f.requires)+len(f.ensures)+len(f.body)+len(f.modifies) > 0 || f.measure != nil
 }

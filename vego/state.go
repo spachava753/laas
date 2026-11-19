@@ -107,7 +107,9 @@ var shippedStates = sync.OnceValue(func() map[string]map[string][]stateDecl {
 // not to the name, so a type defined from sync.Mutex, which can be
 // converted to and from it, has the same states. A struct identical to the
 // underlying type of a declared type has fields declared in the package of
-// that type, which is where the declaration is looked up.
+// that type, which is where the declaration is looked up. That finds every
+// such struct only when the declared type has an unexported field, which
+// TestStateDeclarations requires of every declaration.
 func statesOf(u *types.Struct) []stateDecl {
 	var home *types.Package
 	for field := range u.Fields() {

@@ -833,17 +833,23 @@ func (v *fnVerifier) primedPaths(fn *funcInfo) {
 		}
 	}
 	for _, c := range fn.ensures {
-		var visit func(n *logic.Node, whole bool)
-		visit = func(n *logic.Node, whole bool) {
+		var visit func(n *logic.Node, whole bool, state string)
+		visit = func(n *logic.Node, whole bool, state string) {
 			isPath := n.Kind == logic.NIdent || n.Kind == logic.NField || n.Kind == logic.NIndex
 			if isPath && whole {
-				v.checkPrimed(fn, c, n, changed)
+				v.checkPrimed(fn, c, n, changed, state)
+			}
+			// The one argument of a state, as in held(m'), reads the state
+			// where it lies.
+			inner := ""
+			if n.Kind == logic.NCall && len(n.Kids) == 1 && stateNamed(n.Name) {
+				inner = n.Name
 			}
 			for i, kid := range n.Kids {
-				visit(kid, !isPath || i > 0)
+				visit(kid, !isPath || i > 0, inner)
 			}
 		}
-		visit(c.node, true)
+		visit(c.node, true, "")
 	}
 }
 
@@ -851,8 +857,9 @@ func (v *fnVerifier) primedPaths(fn *funcInfo) {
 // although no table it reads is one the function may change. The elements
 // of a slice parameter are a special case: slice parameters of one element
 // type do not overlap, so listing another one changes nothing in this one.
-// A path it cannot follow is left to the checks that read the clause.
-func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, changed map[string][]*types.Var) {
+// A path it cannot follow is left to the checks that read the clause. With
+// state set, the path is the argument of that state, which is read too.
+func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, changed map[string][]*types.Var, state string) {
 	primed := false
 	for n := path; ; n = n.Kids[0] {
 		primed = primed || n.Primed
@@ -932,7 +939,16 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 		}
 	}
 	// What the path leads to is read as well: the elements of a slice, the
-	// keys and values of a map.
+	// keys and values of a map, and a state where a pointer points.
+	if object, viaPointer := pointee(t); viaPointer && state != "" {
+		if u, isStruct := object.Underlying().(*types.Struct); isStruct {
+			decls := statesOf(u)
+			if index := slices.IndexFunc(decls, func(d stateDecl) bool { return d.name == state }); index >= 0 {
+				cells := v.cellsOf(object)
+				read, own = append(read, cells[len(cells)-len(decls)+index]), append(own, false)
+			}
+		}
+	}
 	switch {
 	case isMap(t) && mapModelled(t):
 		target{mapType: t}.regions(func(key string, _ logic.Sort) { read, own = append(read, cell{key: key}), append(own, false) })

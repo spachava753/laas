@@ -1385,6 +1385,14 @@ func (b *sampler) add(t types.Type, to binding, depth int) {
 				}, depth)
 			}
 		}
+		// The states of the struct come after its fields; those of a
+		// struct in a field were given slots with the field.
+		leaves, _ := layoutOf(t)
+		decls := statesOf(u)
+		for i := range decls {
+			at, choice := len(leaves)-len(decls)+i, b.boolean()
+			b.choose(slot{func(s *witness) { to.set(s, at, choice) }}, to.name(at))
+		}
 	}
 }
 
@@ -1431,7 +1439,7 @@ func (b *sampler) addSlice(t types.Type, to binding) {
 	for i, lf := range leaves {
 		var element *logic.Term
 		switch {
-		case lf.part != partValue:
+		case lf.part != partValue && lf.part != partState:
 			// A slice or a pointer inside an element has no sample.
 			continue
 		case lf.sort == logic.Int:

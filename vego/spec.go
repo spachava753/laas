@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go/token"
 	"go/types"
+	"slices"
 	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
@@ -301,8 +302,34 @@ type reached struct {
 	constant *logic.Term // set instead of val for a constant
 }
 
+// writtenIn returns the package the annotation was written in: the package
+// of the function inside a body, that of the type for an invariant, and
+// that of the contract otherwise; nil for a contract shipped with vego.
+func (e *specEnv) writtenIn() *types.Package {
+	switch {
+	case e.selfType != nil:
+		object := e.selfType
+		if target, ok := pointee(object); ok {
+			object = target
+		}
+		if named, ok := types.Unalias(object).(*types.Named); ok {
+			return named.Obj().Pkg()
+		}
+		return e.v.pass.Pkg
+	case e.fn == nil:
+		return e.v.pass.Pkg
+	}
+	return e.fn.writtenIn()
+}
+
 // locate follows a path of an annotation through values and memory.
 func (e *specEnv) locate(name string, steps []logic.Step, when logic.When) (reached, error) {
+	return e.locateAt(name, steps, when, false)
+}
+
+// locateAt is locate. With throughPointer, a path that ends in a pointer to
+// a struct reads memory, since what is asked of it is read where it points.
+func (e *specEnv) locateAt(name string, steps []logic.Step, when logic.When, throughPointer bool) (reached, error) {
 	if when == logic.Old && e.fn == nil {
 		// Inside a body, old(x) is the value on entry of the function being
 		// verified, which is how its own contract sees x.
@@ -348,7 +375,7 @@ func (e *specEnv) locate(name string, steps []logic.Step, when logic.When) (reac
 	case constant != nil:
 		return reached{constant: constant}, nil
 	}
-	hops, final, err := plan(t, steps)
+	hops, final, err := plan(t, steps, e.writtenIn())
 	if err != nil {
 		return reached{}, fmt.Errorf("%s%v", name, err)
 	}
@@ -363,7 +390,8 @@ func (e *specEnv) locate(name string, steps []logic.Step, when logic.When) (reac
 	case when == logic.Primed && e.post == nil:
 		return reached{}, fmt.Errorf("%s' describes the state on return and is only allowed in Ensures", name)
 	case when == logic.Primed:
-		if !reachesMemory(hops, final) {
+		_, pointer := pointee(final)
+		if !reachesMemory(hops, final) && !(throughPointer && pointer) {
 			return reached{}, fmt.Errorf("%s is passed by value, so only its value on entry is visible to callers; drop the prime", name)
 		}
 		mem = e.post
@@ -382,7 +410,7 @@ func (e *specEnv) locateField(name string, steps []logic.Step, when logic.When) 
 	if when != logic.Now {
 		return reached{}, fmt.Errorf("an invariant describes one state, so %s cannot be primed or put in old()", name)
 	}
-	hops, final, err := plan(e.selfType, append([]logic.Step{{Field: name}}, steps...))
+	hops, final, err := plan(e.selfType, append([]logic.Step{{Field: name}}, steps...), e.writtenIn())
 	if err != nil {
 		// A name that is a field stays a field, also when the field cannot
 		// be used; only a name that is no field can be a constant.
@@ -421,6 +449,9 @@ func (e *specEnv) locateField(name string, steps []logic.Step, when logic.When) 
 // a slice of single values yields the sequence of its elements; one that
 // ends in a struct, or in a slice of structs, has no value of its own.
 func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic.Term, error) {
+	if last := len(steps) - 1; last >= 0 && steps[last].State != "" {
+		return e.state(name, steps[:last], steps[last].State, when)
+	}
 	measured := len(steps) > 0 && steps[len(steps)-1].Len
 	if measured {
 		steps = steps[:len(steps)-1]
@@ -499,6 +530,60 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 		return nil, fmt.Errorf("%s is a slice of %s; index it and name a field", spell(name, steps), elemType(found.typ))
 	}
 	return nil, fmt.Errorf("%s is a %s; name one of its fields", spell(name, steps), found.typ)
+}
+
+// state resolves name(x) for a state of a struct, read from the value x or
+// where the pointer x points; see stateDecl.
+func (e *specEnv) state(name string, steps []logic.Step, state string, when logic.When) (*logic.Term, error) {
+	if !stateNamed(state) {
+		return nil, &logic.NoState{}
+	}
+	what := spell(name, steps)
+	found, err := e.locateAt(name, steps, when, true)
+	switch {
+	case err != nil:
+		return nil, err
+	case found.constant != nil:
+		return nil, &logic.NoState{Msg: fmt.Sprintf("%s(%s): %s is a constant and has no state", state, what, what)}
+	}
+	object, viaPointer := pointee(found.typ)
+	if !viaPointer {
+		object = found.typ
+	}
+	var decls []stateDecl
+	if u, isStruct := object.Underlying().(*types.Struct); isStruct {
+		decls = statesOf(u)
+	}
+	index := slices.IndexFunc(decls, func(d stateDecl) bool { return d.name == state })
+	if index < 0 {
+		has := "no states"
+		if len(decls) > 0 {
+			names := make([]string, len(decls))
+			for i, d := range decls {
+				names[i] = d.name
+			}
+			has = "the states " + strings.Join(names, ", ")
+		}
+		return nil, &logic.NoState{Msg: fmt.Sprintf("%s(%s): %s is a %s, which has %s", state, what, what, found.typ, has)}
+	}
+	leaves, _ := layoutOf(object)
+	position := len(leaves) - len(decls) + index
+	if !viaPointer {
+		return found.val[position], nil
+	}
+	return e.v.fetch(found.sink, found.mem, e.v.cellsOf(object)[position:position+1], found.val[0], found.val[1])[0], nil
+}
+
+// stateNamed reports whether some type has a state of the name.
+func stateNamed(name string) bool {
+	for _, byType := range shippedStates() {
+		for _, decls := range byType {
+			if slices.ContainsFunc(decls, func(d stateDecl) bool { return d.name == name }) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // readyMade returns the term that was given for a parameter or a result in
@@ -606,8 +691,10 @@ type hop struct {
 
 // plan checks a path against the type it starts from, and returns its hops
 // and the type it ends in. A field promoted from an embedded struct takes
-// one hop for each struct on the way.
-func plan(t types.Type, steps []logic.Step) ([]hop, types.Type, error) {
+// one hop for each struct on the way. from is the package the formula was
+// written in, nil for a contract shipped with vego: only there may it name
+// an unexported field.
+func plan(t types.Type, steps []logic.Step, from *types.Package) ([]hop, types.Type, error) {
 	var hops []hop
 	spelled := ""
 	for _, step := range steps {
@@ -657,13 +744,37 @@ func plan(t types.Type, steps []logic.Step) ([]hop, types.Type, error) {
 			if target, ok := pointee(t); ok {
 				object = target
 			}
-			t = object.Underlying().(*types.Struct).Field(index).Type()
+			field := object.Underlying().(*types.Struct).Field(index)
+			if !field.Exported() && (from == nil || field.Pkg() == nil || field.Pkg().Path() != from.Path()) {
+				return nil, nil, unexportedField(spelled, field, object, from)
+			}
+			t = field.Type()
 		}
 		if _, ok := layoutOf(t); !ok {
 			return nil, nil, fmt.Errorf("%s has type %s, which is not supported", spelled, t)
 		}
 	}
 	return hops, t, nil
+}
+
+// unexportedField reports a path that names an unexported field of a struct
+// declared in another package than the formula. Such a field may change
+// between versions of Go or of the module, and what another goroutine may
+// do to it, as to the fields of a sync.Mutex, is not known; a formula speaks
+// of such a type through its exported fields and its states.
+func unexportedField(spelled string, field *types.Var, object types.Type, from *types.Package) error {
+	where := "a contract shipped with vego"
+	if from != nil {
+		where = "package " + from.Path()
+	}
+	instead := ""
+	if u, ok := object.Underlying().(*types.Struct); ok {
+		if decls := statesOf(u); len(decls) > 0 {
+			instead = fmt.Sprintf("; %s has the state %s, which a formula names as %s(x) for a value or a pointer x", object, decls[0].name, decls[0].name)
+		}
+	}
+	return fmt.Errorf("%s: %s is an unexported field of %s, declared in package %s, and a formula in %s cannot name it%s",
+		spelled, field.Name(), object, field.Pkg().Path(), where, instead)
 }
 
 // follow reads a path, without the checks execution makes: an annotation
@@ -799,7 +910,7 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 		}
 		// What is indexed decides what the index is: a map with strings for
 		// keys takes a string, everything else a number.
-		_, indexed, err := plan(param.Type(), steps[:i])
+		_, indexed, err := plan(param.Type(), steps[:i], fn.writtenIn())
 		if err != nil {
 			return shape{}, target{}, fmt.Errorf("%s%v", m.name, err)
 		}
@@ -819,7 +930,7 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 			steps[i].Index = index
 		}
 	}
-	hops, final, err := plan(param.Type(), steps)
+	hops, final, err := plan(param.Type(), steps, fn.writtenIn())
 	if err != nil {
 		return shape{}, target{}, fmt.Errorf("%s%v", m.name, err)
 	}

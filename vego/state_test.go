@@ -4,9 +4,11 @@ import (
 	"go/importer"
 	"go/token"
 	"go/types"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/spachava753/laas/vego/internal/logic"
 	"golang.org/x/tools/go/analysis"
 )
 
@@ -46,6 +48,13 @@ func TestStateDeclarations(t *testing.T) {
 				t.Errorf("%s.%s is not a struct type", path, name)
 				continue
 			}
+			// statesOf finds a declaration through the package of the
+			// struct's fields. A struct with only exported fields is
+			// identical to a struct written in any package, which would
+			// share its regions without its states.
+			if !slices.ContainsFunc(slices.Collect(u.Fields()), func(f *types.Var) bool { return !f.Exported() }) {
+				t.Errorf("%s.%s has only exported fields, so a struct of another package can be identical to it and would have no states", path, name)
+			}
 			if size := pv.pass.TypesSizes.Sizeof(obj.Type()); size == 0 {
 				t.Errorf("%s.%s has no size, so two of its values may share their states", path, name)
 			}
@@ -74,5 +83,25 @@ func TestStateDeclarations(t *testing.T) {
 	}
 	if declared == 0 {
 		t.Fatal("no shipped file declares a state")
+	}
+}
+
+// TestUnexportedFields checks which package may name an unexported field
+// in a formula: only the one that declares it, and no shipped contract.
+func TestUnexportedFields(t *testing.T) {
+	imports := importer.ForCompiler(token.NewFileSet(), "source", nil)
+	syncPkg, err := imports.Import("sync")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutex := types.NewPointer(syncPkg.Scope().Lookup("Mutex").Type())
+	steps := []logic.Step{{Field: "mu"}}
+	if _, _, err := plan(mutex, steps, syncPkg); err != nil {
+		t.Errorf("package sync cannot name its own field: %v", err)
+	}
+	for _, from := range []*types.Package{nil, types.NewPackage("example.com/x", "x")} {
+		if _, _, err := plan(mutex, steps, from); err == nil || !strings.Contains(err.Error(), "unexported field") {
+			t.Errorf("from %v: err = %v", from, err)
+		}
 	}
 }

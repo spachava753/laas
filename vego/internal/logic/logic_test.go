@@ -11,11 +11,13 @@ type testEnv map[string]*Term
 // Path looks a path up by its spelling: fields are part of the name, and
 // elements are read from whatever the name denotes.
 func (e testEnv) Path(root string, steps []Step, when When) (*Term, error) {
-	name := root
+	name, state := root, ""
 	var indices []*Term
 	measured := false
 	for _, step := range steps {
 		switch {
+		case step.State != "":
+			state = step.State
 		case step.Has:
 			name = "has " + name
 		case step.Len:
@@ -33,6 +35,13 @@ func (e testEnv) Path(root string, steps []Step, when When) (*Term, error) {
 		name += "'"
 	case Old:
 		name = "old " + name
+	}
+	if state != "" {
+		// A state is known by its spelling, as held(p').
+		if t, ok := e[state+"("+name+")"]; ok {
+			return t, nil
+		}
+		return nil, &NoState{}
 	}
 	t, ok := e[name]
 	if !ok {
@@ -72,6 +81,7 @@ func TestResolve(t *testing.T) {
 		"s.count": Const("count0", Int), "s.count'": Const("count1", Int), "old s.count": Const("count0", Int),
 		"s.items'": Const("items1", IntSeq), "p": Pair(Const("p", Ref), Const("p at", Int)), "q": Pair(Const("q", Ref), Const("q at", Int)), "m": Const("m", Ref), "f": FuncVal(Const("f", Ref)), "w": IfaceVal(Const("w", Ref)), "has A": Const("has A", Bool),
 		"err": Const("err", Err), "ErrEmpty": Const("ErrEmpty", Err),
+		"held(p)": Const("held p", Bool), "held(p')": Const("held p1", Bool), "held(old p)": Const("held p0", Bool),
 	}
 	resolver := NewResolver()
 	sumTo, err := ParsePredicate("sumTo(A, i, s) ::= ((i <= 0 -> s = 0) And " +
@@ -159,6 +169,10 @@ func TestResolve(t *testing.T) {
 		{"is(err)", "error: is takes two errors"},
 		{"is(err, n)", "error: expected an error but n has type int"},
 		{"err = n", "error: cannot compare"},
+		{"held(p) -> ~held(p')", "(held p -> ~held p1)"},
+		{"held(old(p))", "held p0"},
+		{"held(old(p'))", "error: old(p) is the value on entry and cannot be primed"},
+		{"held(i)", "error: unknown predicate held"},
 	}
 	for _, test := range tests {
 		t.Run(test.src, func(t *testing.T) {

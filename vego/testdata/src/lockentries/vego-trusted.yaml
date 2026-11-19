@@ -1,0 +1,18 @@
+version: 1
+
+trusted:
+  (*sync.Mutex).TryLock:
+    reason: A test of an entry that says a state changes while it writes nothing.
+    requires: ["m != nil"]
+    modifies: []
+    ensures: ["held(m')"]
+  (*sync.Mutex).Lock:
+    reason: A test of an entry that says a state changes where it writes.
+    requires: ["m != nil", "~held(m)"]
+    modifies: [m]
+    ensures: ["held(m')"]
+  (*sync.RWMutex).RLock:
+    reason: A test of an entry that names a field of package internal/sync.
+    requires: ["rw != nil", "rw.w.mu.state = 0"]
+    modifies: [rw]
+    ensures: ["True"]

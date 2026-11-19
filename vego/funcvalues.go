@@ -883,7 +883,7 @@ func coveredType(fn *funcInfo, m *modTarget) types.Type {
 		if step.index == nil {
 			continue
 		}
-		_, indexed, err := plan(param.Type(), steps[:i])
+		_, indexed, err := plan(param.Type(), steps[:i], fn.writtenIn())
 		if err != nil {
 			return nil
 		}
@@ -892,7 +892,7 @@ func coveredType(fn *funcInfo, m *modTarget) types.Type {
 			steps[i].Index = logic.Fill(logic.IntLit(0), logic.IntLit(0))
 		}
 	}
-	_, final, err := plan(param.Type(), steps)
+	_, final, err := plan(param.Type(), steps, fn.writtenIn())
 	if err != nil {
 		return nil
 	}

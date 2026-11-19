@@ -140,7 +140,7 @@ func TestAnalyzer(t *testing.T) {
 
 		runCorpus(t, analyzer,
 			"paper", "algorithms", "defects", "rejected", "leetcode", "semantics", "effects", "ordering", "integers", "values", "trust",
-			"lib", "client", "memory", "shapes", "badshapes", "invariants", "mapping", "badpred", "usesbadpred", "early", "settled", "gen", "earlytype", "earlyrange", "earlybox", "earlyloop", "earlycarrier", "earlypanic", "guide", "wrapped", "unread", "usesunread", "twovariants", "usestwovariants", "lonecr", "errorsid", "errorsvars", "errorsvarsclient", "vouched", "vouchedclient", "vouchedcapture", "earlyalias", "earlyaliasok", "sentinellib", "sentinelclient", "usesearly", "sentinelfar", "sentinelfarther", "closures", "funcvalues", "funcvalueslib", "funcvaluesclient", "funcvaluesunread", "funcvaluesinit", "funcvaluesinitdefer", "funcvaluesinitok", "funcvaluesinitmethod", "funcvaluesoldloop", "funcvaluesinitlit", "callbacks", "callbacksinit", "interfaces", "interfaceslib", "interfacesunread", "interfacesinitok", "interfacesinithand", "interfacesinitcall", "foreign", "stdtypes")
+			"lib", "client", "memory", "shapes", "badshapes", "invariants", "mapping", "badpred", "usesbadpred", "early", "settled", "gen", "earlytype", "earlyrange", "earlybox", "earlyloop", "earlycarrier", "earlypanic", "guide", "wrapped", "unread", "usesunread", "twovariants", "usestwovariants", "lonecr", "errorsid", "errorsvars", "errorsvarsclient", "vouched", "vouchedclient", "vouchedcapture", "earlyalias", "earlyaliasok", "sentinellib", "sentinelclient", "usesearly", "sentinelfar", "sentinelfarther", "closures", "funcvalues", "funcvalueslib", "funcvaluesclient", "funcvaluesunread", "funcvaluesinit", "funcvaluesinitdefer", "funcvaluesinitok", "funcvaluesinitmethod", "funcvaluesoldloop", "funcvaluesinitlit", "callbacks", "callbacksinit", "interfaces", "interfaceslib", "interfacesunread", "interfacesinitok", "interfacesinithand", "interfacesinitcall", "foreign", "stdtypes", "locks", "lockspred", "lockslib", "locksclient")
 	})
 
 	// The bound on the size of a formula stops a program whose formulas
@@ -178,6 +178,10 @@ func TestAnalyzer(t *testing.T) {
 	// A module that gives (io.Closer).Close an entry of its own.
 	t.Run("closes a body under a project entry", func(t *testing.T) {
 		runCorpus(t, newAnalyzer(), "closer")
+	})
+	// A module with entries of its own for methods of sync's mutexes.
+	t.Run("reads states in project entries", func(t *testing.T) {
+		runCorpus(t, newAnalyzer(), "lockentries")
 	})
 	for _, root := range []string{"twoa", "twob", "twoc"} {
 		t.Run("uses one entry for a type in "+root, func(t *testing.T) {

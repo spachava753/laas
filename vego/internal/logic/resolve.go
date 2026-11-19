@@ -18,14 +18,21 @@ const (
 )
 
 // Step is one step of a path: the selection of a field, of the element at
-// Index, or, as the last step, of the length or, with Has, of whether a map
-// has the key Index.
+// Index, or, as the last step, of the length, with Has of whether a map has
+// the key Index, or with State of a state of the value, as in held(m).
 type Step struct {
 	Field string
 	Index *Term
 	Len   bool
 	Has   bool
+	State string
 }
+
+// NoState is the error an Env returns for a path whose value has no state
+// of the name asked for. The name may then be a predicate.
+type NoState struct{ Msg string }
+
+func (e *NoState) Error() string { return e.Msg }
 
 // Env supplies the meaning of program names that occur in an annotation.
 type Env interface {
@@ -350,6 +357,13 @@ func (s *scope) call(n *Node) *Term {
 		}
 		return t
 	}
+	state, isState, missing := s.state(n)
+	if isState {
+		return state
+	}
+	if _, predicate := s.r.Preds[s.r.Prefix+n.Name]; missing != "" && !predicate {
+		fail("%s", missing)
+	}
 	if applier, ok := s.env.(Applier); ok && s.env != nil {
 		args := make([]*Term, len(n.Kids))
 		for i, kid := range n.Kids {
@@ -378,6 +392,45 @@ func (s *scope) call(n *Node) *Term {
 		}
 	}
 	return Pred(def.Name, args...)
+}
+
+// state resolves name(x) as a state of the value or pointer x, as in
+// held(m) or held(a.mu'), and reports whether it is one. A name that is a
+// state of x and also a predicate is an error: the formula would mean one of
+// two things. When x has no such state, missing says why, for the case that
+// the name is no predicate either; it is empty when nothing has a state of
+// that name.
+func (s *scope) state(n *Node) (t *Term, ok bool, missing string) {
+	if s.env == nil || len(n.Kids) != 1 {
+		return nil, false, ""
+	}
+	kid, when := n.Kids[0], Now
+	if kid.Kind == NCall && kid.Name == "old" && len(kid.Kids) == 1 {
+		kid, when = kid.Kids[0], Old
+	}
+	root, steps, primed := s.path(kid)
+	if _, bound := s.bound[root.Name]; root.Kind != NIdent || bound {
+		return nil, false, ""
+	}
+	if primed && when == Old {
+		fail("old(%s) is the value on entry and cannot be primed", root.Name)
+	}
+	if primed {
+		when = Primed
+	}
+	steps = append(steps, Step{State: n.Name})
+	t, err := s.env.Path(root.Name, steps, when)
+	var none *NoState
+	_, predicate := s.r.Preds[s.r.Prefix+n.Name]
+	switch {
+	case errors.As(err, &none):
+		return nil, false, none.Msg
+	case err != nil:
+		panic(resolveError{err})
+	case predicate:
+		fail("%s is both a predicate and a state of %s; rename the predicate", n.Name, plain(n.Kids[0]))
+	}
+	return t, true, ""
 }
 
 func (s *scope) binary(n *Node) *Term {
