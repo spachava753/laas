@@ -1,0 +1,23 @@
+version: 1
+
+state:
+  sync.Mutex:
+    held:
+      reason: >-
+        True when the goroutine that runs the verified function has locked
+        the mutex with Lock or a TryLock that returned true and has not
+        unlocked it since. The zero value of a Mutex is documented to be an
+        unlocked mutex, so no goroutine holds it.
+  sync.RWMutex:
+    held:
+      reason: >-
+        True when the goroutine that runs the verified function has locked
+        the mutex for writing with Lock or a TryLock that returned true and
+        has not unlocked it since. The zero value of an RWMutex is documented
+        to be an unlocked mutex.
+    rheld:
+      reason: >-
+        True when the goroutine that runs the verified function has locked
+        the mutex for reading with RLock or a TryRLock that returned true and
+        has not unlocked it with RUnlock since. The zero value of an RWMutex
+        is documented to be an unlocked mutex.

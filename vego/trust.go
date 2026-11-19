@@ -84,6 +84,9 @@ type trustFile struct {
 	content []byte
 	shipped bool
 	entries map[string]*trustEntry
+	// states holds the states the file declares, by the type they belong
+	// to, as in sync.Mutex. Only the shipped files may declare one.
+	states map[string][]stateDecl
 	// problems are the defects of the file itself, by line.
 	problems []trustProblem
 }
@@ -101,7 +104,7 @@ func (f *trustFile) problem(line int, format string, args ...any) {
 // understand is recorded as a problem rather than skipped, so that a
 // misspelt field cannot silently drop part of a contract.
 func parseTrustFile(path string, content []byte, shipped bool) *trustFile {
-	file := &trustFile{path: path, content: content, shipped: shipped, entries: map[string]*trustEntry{}}
+	file := &trustFile{path: path, content: content, shipped: shipped, entries: map[string]*trustEntry{}, states: map[string][]stateDecl{}}
 	var document, second yaml.Node
 	decoder := yaml.NewDecoder(bytes.NewReader(content))
 	if err := decoder.Decode(&document); err != nil && !errors.Is(err, io.EOF) {
@@ -139,8 +142,10 @@ func parseTrustFile(path string, content []byte, shipped bool) *trustFile {
 			for j := 0; j+1 < len(value.Content); j += 2 {
 				file.addEntry(value.Content[j], value.Content[j+1])
 			}
+		case "state":
+			file.addStates(value)
 		default:
-			file.problem(key.Line, "unknown key %q; expected version or trusted", key.Value)
+			file.problem(key.Line, "unknown key %q; expected version, trusted, or state", key.Value)
 		}
 	}
 	if !sawVersion {

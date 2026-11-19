@@ -24,6 +24,10 @@ const (
 	// is known of its value and nothing can be done with it alone, but it
 	// is copied, overwritten, and forgotten with the struct it is part of.
 	partHidden
+	// partState is a state that a type of another module owns, such as
+	// whether the calling goroutine holds a sync.Mutex; see stateDecl. No Go
+	// code can read or write it.
+	partState
 )
 
 // leaf is one indivisible component of a Go value. A number, a boolean, a
@@ -190,6 +194,11 @@ func layoutOf(t types.Type) ([]leaf, bool) {
 				leaves = append(leaves, part)
 			}
 		}
+		// The states come after the fields, so that the leaves of every
+		// field stay where fieldLeaves finds them.
+		for _, decl := range statesOf(u) {
+			leaves = append(leaves, leaf{path: "@" + decl.name, sort: logic.Bool, typ: types.Typ[types.Bool], part: partState})
+		}
 		return leaves, true
 	}
 	return nil, false
@@ -304,6 +313,12 @@ func (pv *pkgVerifier) cellsOf(t types.Type) []cell {
 		for _, lf := range inner {
 			cells = append(cells, cell{key: typeKey(u) + "." + field.Name() + lf.path, sort: lf.sort, off: offsets[i]})
 		}
+	}
+	// A state lies at the start of its struct, in a region that only
+	// states of this struct type with this name use. A type with a state
+	// has a size, so two values of it never start at the same position.
+	for _, decl := range statesOf(u) {
+		cells = append(cells, cell{key: typeKey(u) + "@" + decl.name, sort: logic.Bool})
 	}
 	return cells
 }

@@ -1,0 +1,78 @@
+package vego
+
+import (
+	"go/importer"
+	"go/token"
+	"go/types"
+	"strings"
+	"testing"
+
+	"golang.org/x/tools/go/analysis"
+)
+
+// TestStateDeclarations checks that a project trust file cannot declare a
+// state, and every state the shipped files declare: the type
+// exists, is a struct with a size, so that two values of it never start at
+// the same position, and its layout and cells carry the state once, after
+// its fields. A type defined from it shares its memory and so its states.
+func TestStateDeclarations(t *testing.T) {
+	t.Run("project", func(t *testing.T) {
+		file := parseTrustFile("vego-trusted.yaml", []byte("version: 1\nstate:\n  example.com/x.T:\n    open:\n      reason: r\n"), false)
+		if len(file.problems) != 1 || !strings.Contains(file.problems[0].msg, "cannot declare the state of a type yet") {
+			t.Fatalf("problems = %+v", file.problems)
+		}
+		if len(file.states) != 0 {
+			t.Fatalf("states = %+v", file.states)
+		}
+	})
+	fset := token.NewFileSet()
+	imports := importer.ForCompiler(fset, "source", nil)
+	pv := &pkgVerifier{pass: &analysis.Pass{Fset: fset, TypesSizes: types.SizesFor("gc", "amd64")}}
+	declared := 0
+	for path, byType := range shippedStates() {
+		pkg, err := imports.Import(path)
+		if err != nil {
+			t.Fatalf("import %s: %v", path, err)
+		}
+		for name, decls := range byType {
+			declared++
+			obj, ok := pkg.Scope().Lookup(name).(*types.TypeName)
+			if !ok {
+				t.Errorf("%s.%s: no such type", path, name)
+				continue
+			}
+			u, isStruct := obj.Type().Underlying().(*types.Struct)
+			if !isStruct {
+				t.Errorf("%s.%s is not a struct type", path, name)
+				continue
+			}
+			if size := pv.pass.TypesSizes.Sizeof(obj.Type()); size == 0 {
+				t.Errorf("%s.%s has no size, so two of its values may share their states", path, name)
+			}
+			defined := types.NewNamed(types.NewTypeName(token.NoPos, types.NewPackage("other", "other"), "M", nil), u, nil)
+			for _, typ := range []types.Type{obj.Type(), defined} {
+				leaves, ok := layoutOf(typ)
+				if !ok {
+					t.Errorf("%s is not modelled", typ)
+					continue
+				}
+				cells := pv.cellsOf(typ)
+				if len(cells) != len(leaves) {
+					t.Errorf("%s: %d cells for %d leaves", typ, len(cells), len(leaves))
+				}
+				tail := leaves[len(leaves)-len(decls):]
+				for i, decl := range decls {
+					if tail[i].path != "@"+decl.name || tail[i].part != partState {
+						t.Errorf("%s: leaf %d is %q, want the state %s", typ, len(leaves)-len(decls)+i, tail[i].path, decl.name)
+					}
+					if c := cells[len(cells)-len(decls)+i]; !strings.HasSuffix(c.key, "@"+decl.name) || c.off != 0 {
+						t.Errorf("%s: the cell of %s is %+v", typ, decl.name, c)
+					}
+				}
+			}
+		}
+	}
+	if declared == 0 {
+		t.Fatal("no shipped file declares a state")
+	}
+}
