@@ -1482,7 +1482,7 @@ The trust report shows `runs`, so that a reviewer of the trust file notices the 
 
 ### Errors that a trusted function returns
 
-Without a claim in its contract, `vego` knows nothing of an error that a trusted function returns. Verified code can return such an error and compare it with `nil` or an error variable. It cannot format it, wrap it, or pass it as the first argument of `errors.Is`. To allow these, list the error result under `vouches`:
+Without a claim in its contract, `vego` knows nothing of an error that a trusted function returns. Verified code can return such an error and compare it with `nil` or with an error variable of the kinds listed in [Comparing errors](#comparing-errors). It cannot format it, wrap it, or pass it as the first argument of `errors.Is`. To allow these, list the error result under `vouches`:
 
 ```yaml
   example.com/shop/internal/scan.next:
@@ -1504,7 +1504,7 @@ With `vouches: [err]`, an error that the function returns in `err` has a known o
 - `==` on these errors cannot panic, and it reports true only for two errors that are the same. Every one of them equals itself. `errors.Is` reports the same for two such errors that `==` reports equal, and the same for two targets that `==` reports equal.
 - What `errors.Is` reports for one of these errors and a given target does not change after the function returns.
 
-A pointer to a struct whose methods only read its fields and call the same methods of the errors it holds meets these conditions. So does an integer type whose `Is` method compares its argument with error variables, such as `syscall.Errno`. A type with a float in it does not, because `==` reports false for a NaN compared with itself. An `Is` method that calls `target.Error()` does not either.
+A pointer to a struct meets these conditions when its methods only read its fields and call the same methods of the errors it holds, those errors meet the conditions themselves, and nothing writes the fields after the function returns. The function must not keep the pointer and change the struct later. So does an integer type whose `Is` method compares its argument with error variables, such as `syscall.Errno`. A type with a float in it does not, because `==` reports false for a NaN compared with itself. An `Is` method that calls `target.Error()` does not either.
 
 If the function returns an error that it was given, the claim covers that error too. With `runs`, the claim must hold whatever value is passed. The trust report shows `vouches`.
 
@@ -1513,7 +1513,7 @@ If the function returns an error that it was given, the claim covers that error 
 A trusted contract can name error variables, as in `err = io.EOF` and `is(err, io.EOF)`. The contract means the same in every package that calls the function, so its names do not depend on what any file imports:
 
 - A name on its own is an error variable of the package that declares the function, such as `ErrSyntax` in an entry for `strconv.Atoi`.
-- A name after the import path of its package is an error variable of that package. Write a path of one element as in Go, as in `io.EOF`. Put a longer path in quotes, as in `"io/fs".ErrNotExist`. YAML then needs the formula in single quotes: `'is(err, "io/fs".ErrNotExist)'`.
+- A name after the import path of its package is an error variable of that package. Write a path that is a Go identifier as in Go, as in `io.EOF`. Put any other path in quotes, as in `"io/fs".ErrNotExist` or `"example.com".ErrRoot`. YAML then needs the formula in single quotes: `'is(err, "io/fs".ErrNotExist)'`.
 
 The package must be in the build of the package that calls the function. An entry that names a variable that does not exist, or a package that is not in the build, cannot be used. Only a trusted contract can use a path in quotes. The annotations of a verified function name packages as their file imports them.
 

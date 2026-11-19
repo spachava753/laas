@@ -177,14 +177,15 @@ func (e *specEnv) trustedErrorVariable(name string, steps []logic.Step) (*types.
 }
 
 // Qualified resolves a variable named by the path of its package in quotes,
-// which only a trusted contract may use, and only for a path of more than
-// one element: io.EOF is written without quotes.
+// which only a trusted contract may use, and only for a path that is not a
+// Go identifier: io.EOF is written without quotes, and example.com, a path
+// with a dot, with them.
 func (e *specEnv) Qualified(path, name string, steps []logic.Step, when logic.When) (*logic.Term, error) {
 	spelled := fmt.Sprintf("%q.%s", path, name)
 	switch {
 	case e.fn == nil || e.fn.trust == nil || e.selfType != nil:
 		return nil, fmt.Errorf("%s: a package path in quotes can only be used in a trusted contract; name the package as the file imports it", spelled)
-	case !strings.Contains(path, "/"):
+	case token.IsIdentifier(path):
 		return nil, fmt.Errorf("%s: write %s.%s, without quotes", spelled, path, name)
 	}
 	pkg := e.v.lookupPackage(path)

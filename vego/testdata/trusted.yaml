@@ -589,3 +589,26 @@ trusted:
     modifies: []
     ensures:
       - "err = io.ErrNone"
+
+  vouched.lib.Fail:
+    reason: Test helper that fails with ErrBad of its own package for a negative n.
+    vouches: [err]
+    modifies: []
+    ensures:
+      - "err = nil <-> n >= 0"
+      - "err != nil -> err = ErrBad"
+
+  vouched.lib.FailQuoted:
+    reason: The same, naming ErrBad by the path of its package, which has a dot.
+    vouches: [err]
+    modifies: []
+    ensures:
+      - "err = nil <-> n >= 0"
+      - 'err != nil -> err = "vouched.lib".ErrBad'
+
+  vouched.lib.End:
+    reason: Test helper that returns io.EOF.
+    vouches: [err]
+    modifies: []
+    ensures:
+      - "err = io.EOF"
