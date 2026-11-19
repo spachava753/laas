@@ -908,6 +908,15 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 		v.unsupported(e.Pos(), fmt.Sprintf("%s may call through a function value or an interface value, and code that %s runs cannot do that yet: "+
 			"no contract of a function type or of a method of an interface has a variant, so nothing would prove that such calls end", callee.Name(), holder))
 	}
+	// A contract of a type that vouches for the errors of a result is
+	// believed of every value of the type, so a value that verified code
+	// makes must return only errors of known origin there.
+	for i := range T.results {
+		if T.vouches[i] && !v.returnsKnownErrors(callee) && !(fn.trust != nil && fn.vouches[i]) {
+			v.report(e.Pos(), "%s may return an error whose origin is not known in %s, and the trusted contract of %s vouches for the errors there; "+
+				"return only errors made by errors.New or fmt.Errorf, or vouched for, %s", callee.Name(), spelledResult(T, i), T.trust.key, site.text)
+		}
+	}
 	sv, entry, carry := v.subVerifier(T, st, guard, site)
 	if sig.Recv() != nil {
 		contract, made := T.obj.Name(), as
@@ -1114,6 +1123,13 @@ func (v *fnVerifier) madeLiteral(lit *ast.FuncLit, T *funcInfo, st *state, guard
 		}
 	}
 	site := v.site(lit.Pos(), "in the function literal used as a value of type %s at %s", T.obj.Name(), v.placeOf(lit.Pos()))
+	for i := range T.results {
+		if T.vouches[i] && !v.returnsKnown(v.bodyOrigins(), lit.Body, fn.results) {
+			v.report(lit.Pos(), "the function literal may return an error whose origin is not known in %s, and the trusted contract of %s vouches for the errors there; "+
+				"return only errors made by errors.New or fmt.Errorf, or vouched for, %s", spelledResult(T, i), T.trust.key, site.text)
+			break
+		}
+	}
 	sv, entry, carry := v.subVerifier(fn, st, guard, site)
 	for _, variable := range captured {
 		held := st.vals[variable]

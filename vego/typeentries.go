@@ -64,9 +64,7 @@ func (pv *pkgVerifier) typeEntry(key string, obj *types.Func, methodOf *types.Fu
 	if len(entry.calls) > 0 {
 		fn.defect("it has calls, which a contract of a type cannot have")
 	}
-	if len(entry.vouches) > 0 {
-		fn.defect("vouches in a contract of a type is not supported yet")
-	}
+	pv.readVouches(fn, entry, false)
 	pv.checkValueContract(fn)
 	pv.noteUse(fn, token.NoPos)
 	return fn

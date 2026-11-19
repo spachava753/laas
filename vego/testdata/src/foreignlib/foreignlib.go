@@ -63,3 +63,17 @@ type Runs func(e error)
 
 // Unread is a type nothing gives an entry.
 type Unread func(x int) (y int)
+
+// Source gives numbers, and fails with errors its entry vouches for.
+type Source interface {
+	Next() (n int, err error)
+}
+
+// Opener opens a sink.
+type Opener interface {
+	Open() (s Sink)
+}
+
+// Done is called with nothing, and fails with an error its entry vouches
+// for.
+type Done func() (err error)

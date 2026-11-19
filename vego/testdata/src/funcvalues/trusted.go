@@ -42,7 +42,7 @@ func UsesVouched() (y int) {
 // @Modifies c
 // @Ensures True
 func Grows(c *Chain) {
-	c.grow() // want `vego: the trusted contract of \(\*funcvalues.Chain\).grow \(trusted.yaml:\d+\) cannot be used: its modifies "c" covers memory that can hold a function value or an interface value of a type with a contract, which a trusted function cannot write yet` `cannot verify Grows`
+	c.grow() // want `vego: the trusted contract of \(\*funcvalues.Chain\).grow \(trusted.yaml:\d+\) cannot be used: its modifies "c" covers memory that can hold a function value or an interface value of a type with a contract; list c under vouches to claim that every such value the function writes there meets the contract of its type` `cannot verify Grows`
 }
 
 func loadUnnamed() Mapper { return nil }

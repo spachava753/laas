@@ -654,41 +654,23 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 	}
 	// The error results whose errors the author vouches for. Listing
 	// anything else would be a claim about nothing.
-	for _, item := range entry.vouches {
-		index, ok := fn.resultNames[item.text]
-		switch {
-		case !ok:
-			fn.defect("its vouches %q: %s is not a result", item.text, item.text)
-		case !isError(fn.results[index].Type()) && !pv.holdsContractedValue(fn.results[index].Type(), map[types.Type]bool{}):
-			fn.defect("its vouches lists %s, whose type %s is not error and can hold no function value or interface value of a type with a contract", item.text, fn.results[index].Type())
-		case fn.vouches[index]:
-			fn.defect("its vouches lists %s twice", item.text)
-		default:
-			fn.vouches[index] = true
-		}
-	}
+	pv.readVouches(fn, entry, true)
 	// A function value that a trusted function hands back is code its
 	// author may not have seen, as an error is. Verified code calls it only
 	// on the claim that it meets the contract of its type, which vouches
-	// makes for a result. No claim can be made yet for a value the
-	// function writes into memory, at any depth of what it may modify.
+	// makes for a result, and for a parameter for what the function writes
+	// into memory it reaches.
 	for i, result := range fn.results {
 		if !fn.vouches[i] && pv.holdsContractedValue(result.Type(), map[types.Type]bool{}) {
-			// The result is named as the entry spells it.
-			name := result.Name()
-			for spelled, index := range fn.resultNames {
-				if index == i {
-					name = spelled
-				}
-			}
 			fn.defect("its result %s can hold a function value or an interface value of a type with a contract; "+
-				"list it under vouches to claim that every such value meets the contract of its type", name)
+				"list it under vouches to claim that every such value meets the contract of its type", spelledResult(fn, i))
 		}
 	}
 	for _, m := range fn.modifies {
-		if covered := coveredType(fn, m); covered != nil && pv.holdsContractedValue(covered, map[types.Type]bool{}) {
-			fn.defect("its modifies %q covers memory that can hold a function value or an interface value of a type with a contract, "+
-				"which a trusted function cannot write yet", m.text)
+		root := fn.paramNames[m.name]
+		if covered := coveredType(fn, m); covered != nil && pv.holdsContractedValue(covered, map[types.Type]bool{}) && !fn.vouchedWrites[root] {
+			fn.defect("its modifies %q covers memory that can hold a function value or an interface value of a type with a contract; "+
+				"list %s under vouches to claim that every such value the function writes there meets the contract of its type", m.text, m.name)
 		}
 	}
 	for name := range fn.paramNames {
@@ -698,6 +680,62 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 	}
 	pv.checkTrusted(fn)
 	return fn
+}
+
+// readVouches reads what an entry vouches for. A result of type error
+// claims that its errors meet what vouches says of errors; a result that can
+// hold a function value or an interface value of a type with a contract,
+// that every such value meets its contract. For a trusted function, and not
+// for the contract of a type, a parameter claims that every such value the
+// function writes into memory that the parameter reaches, and that its
+// modifies covers, meets its contract. Listing anything else would be a
+// claim about nothing.
+func (pv *pkgVerifier) readVouches(fn *funcInfo, entry *trustEntry, writes bool) {
+	for _, item := range entry.vouches {
+		index, isResult := fn.resultNames[item.text]
+		param, isParam := fn.paramNames[item.text]
+		switch {
+		case isParam && writes:
+			covers := false
+			for _, m := range fn.modifies {
+				covered := coveredType(fn, m)
+				covers = covers || (fn.paramNames[m.name] == param && covered != nil && pv.holdsContractedValue(covered, map[types.Type]bool{}))
+			}
+			switch {
+			case !covers:
+				fn.defect("its vouches lists %s, but nothing its modifies lists under %s can hold a function value or an interface value of a type with a contract", item.text, item.text)
+			case fn.vouchedWrites[param]:
+				fn.defect("its vouches lists %s twice", item.text)
+			default:
+				fn.vouchedWrites[param] = true
+			}
+		case !isResult && writes:
+			fn.defect("its vouches %q: %s is not a result or a parameter", item.text, item.text)
+		case !isResult:
+			fn.defect("its vouches %q: %s is not a result", item.text, item.text)
+		case !writes && !isError(fn.results[index].Type()):
+			fn.defect("its vouches lists %s, whose type %s is not error; what a call through a value of the type returns comes from code that is not verified, "+
+				"or from code that verified code made, and needs no claim", item.text, fn.results[index].Type())
+		case !isError(fn.results[index].Type()) && !pv.holdsContractedValue(fn.results[index].Type(), map[types.Type]bool{}):
+			fn.defect("its vouches lists %s, whose type %s is not error and can hold no function value or interface value of a type with a contract", item.text, fn.results[index].Type())
+		case fn.vouches[index]:
+			fn.defect("its vouches lists %s twice", item.text)
+		default:
+			fn.vouches[index] = true
+		}
+	}
+}
+
+// spelledResult names a result of a contract as its clauses spell it: by
+// its name, or as result, result1, ... when it has none.
+func spelledResult(fn *funcInfo, index int) string {
+	name := fn.results[index].Name()
+	for spelled, i := range fn.resultNames {
+		if i == index {
+			name = spelled
+		}
+	}
+	return name
 }
 
 // defect records that a trusted contract is unusable. Defects are reported

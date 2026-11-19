@@ -216,7 +216,7 @@ func namesMissingVariable() (err error) { return nil }
 //
 // @Ensures True
 func Defective() {
-	_ = vouchesParam(nil) // want `vouches "e": e is not a result` `cannot verify Defective`
+	_ = vouchesParam(nil) // want `its vouches lists e, but nothing its modifies lists under e can hold a function value or an interface value of a type with a contract` `cannot verify Defective`
 }
 
 // DefectiveInt calls one that lists a result of type int.

@@ -220,6 +220,9 @@ func (pv *pkgVerifier) knownError(o *origins, e ast.Expr, index int, visiting ma
 		if tuple, ok := result.(*types.Tuple); ok && index >= 0 && index < tuple.Len() {
 			result, at = tuple.At(index).Type(), index
 		}
+		if callee == nil && isError(result) {
+			return pv.vouchedThroughValue(e, at)
+		}
 		return callee != nil && isError(result) && (pv.returnsKnownErrors(callee) || pv.vouchedResult(callee, at))
 	case *ast.Ident:
 		variable, ok := pv.info.ObjectOf(e).(*types.Var)
@@ -252,6 +255,23 @@ func (pv *pkgVerifier) knownVariable(o *origins, variable *types.Var, visiting m
 		}
 	}
 	return true
+}
+
+// vouchedThroughValue reports whether a call through an interface value or
+// a function value returns errors of known origin in the result with the
+// given index: whether the contract it is called under is an entry of a
+// trust file that vouches for them. Every value that code which is not
+// verified hands over is claimed to meet that entry, and every value that
+// verified code makes is checked against it where it is made. A contract
+// written in source vouches for nothing.
+func (pv *pkgVerifier) vouchedThroughValue(call *ast.CallExpr, index int) bool {
+	var fn *funcInfo
+	if method, ok := typeutil.Callee(pv.info, call).(*types.Func); ok && isIfaceMethod(method) {
+		fn = pv.methodContract(method)
+	} else if tv, ok := pv.info.Types[call.Fun]; ok && tv.IsValue() && isFunc(tv.Type) {
+		fn = pv.valueContract(tv.Type)
+	}
+	return fn != nil && fn.trust != nil && fn.vouches[index]
 }
 
 // returnsKnownErrors reports whether every error a function returns has a
@@ -291,7 +311,7 @@ func (pv *pkgVerifier) findKnownReturns() {
 	for changed := true; changed; {
 		changed = false
 		for _, fn := range pv.order {
-			if pv.knownReturns[fn] || !fn.annotated() || fn.decl.Body == nil || !pv.allReturnsKnown(fn) {
+			if pv.knownReturns[fn] || !fn.annotated() || fn.decl.Body == nil || !pv.returnsKnown(pv.originsOf(fn.decl.Body), fn.decl.Body, fn.results) {
 				continue
 			}
 			pv.knownReturns[fn], changed = true, true
@@ -299,10 +319,10 @@ func (pv *pkgVerifier) findKnownReturns() {
 	}
 }
 
-// allReturnsKnown reports whether every return statement of a function
-// returns errors of known origin, given what is known of other functions.
-func (pv *pkgVerifier) allReturnsKnown(fn *funcInfo) bool {
-	o := pv.originsOf(fn.decl.Body)
+// returnsKnown reports whether every return statement of a body, of a
+// function or of a literal, returns errors of known origin in its results,
+// given the origins o of the function the body is part of.
+func (pv *pkgVerifier) returnsKnown(o *origins, body *ast.BlockStmt, results []*types.Var) bool {
 	known := true
 	check := func(e ast.Expr, index int) {
 		known = known && pv.knownError(o, e, index, map[*types.Var]bool{})
@@ -313,13 +333,13 @@ func (pv *pkgVerifier) allReturnsKnown(fn *funcInfo) bool {
 	// literal counts, not only one deferred by the function, which can
 	// only make fewer functions qualify.
 	late := map[*types.Var]bool{}
-	ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
+	ast.Inspect(body, func(n ast.Node) bool {
 		if lit, ok := n.(*ast.FuncLit); ok {
 			ast.Inspect(lit.Body, func(inner ast.Node) bool {
 				if assign, ok := inner.(*ast.AssignStmt); ok {
 					for _, lhs := range assign.Lhs {
 						if id, ok := ast.Unparen(lhs).(*ast.Ident); ok {
-							if variable, ok := pv.info.ObjectOf(id).(*types.Var); ok && slices.Contains(fn.results, variable) {
+							if variable, ok := pv.info.ObjectOf(id).(*types.Var); ok && slices.Contains(results, variable) {
 								late[variable] = true
 							}
 						}
@@ -330,7 +350,7 @@ func (pv *pkgVerifier) allReturnsKnown(fn *funcInfo) bool {
 		}
 		return true
 	})
-	ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
+	ast.Inspect(body, func(n ast.Node) bool {
 		if _, isLiteral := n.(*ast.FuncLit); isLiteral {
 			return false
 		}
@@ -338,13 +358,13 @@ func (pv *pkgVerifier) allReturnsKnown(fn *funcInfo) bool {
 		if !ok {
 			return true
 		}
-		for i, result := range fn.results {
+		for i, result := range results {
 			switch {
 			case !isError(result.Type()):
 			case len(ret.Results) == 0 || late[result]:
 				// A bare return yields the named result.
 				known = known && pv.knownVariable(o, result, map[*types.Var]bool{})
-			case len(ret.Results) == len(fn.results):
+			case len(ret.Results) == len(results):
 				check(ret.Results[i], -1)
 			default:
 				check(ret.Results[0], i)

@@ -1107,3 +1107,36 @@ trusted:
   (foreignannotated.Getter).Get:
     reason: The interface has a contract in source as well.
     modifies: []
+
+  (foreignlib.Source).Next:
+    reason: Every source of the tests fails only with ErrFull, made by errors.New.
+    modifies: []
+    vouches: [err]
+    ensures: ["err = nil Or err = ErrFull"]
+
+  (foreignlib.Opener).Open:
+    reason: Vouches for a result that is not an error.
+    modifies: []
+    vouches: [s]
+
+  foreignlib.Done:
+    reason: Every done of the tests fails only with ErrFull.
+    modifies: []
+    vouches: [err]
+    ensures: ["err = nil Or err = ErrFull"]
+
+  foreign.refill:
+    reason: Puts a sink of the project into the holder, and calls nothing on what the holder held.
+    runs: [h]
+    vouches: [h]
+    modifies: [h]
+
+  foreign.refillUnclaimed:
+    reason: Puts a sink into the holder.
+    runs: [h]
+    modifies: [h]
+
+  foreign.vouchesNothing:
+    reason: Lists a parameter under vouches whose memory holds nothing to vouch for.
+    vouches: [b]
+    modifies: [b]
