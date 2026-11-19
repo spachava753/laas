@@ -182,6 +182,10 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 		// A call through a function value writes what the Modifies of its
 		// type lists.
 		fn = v.valueContract(v.info.TypeOf(call.Fun))
+	case isIfaceMethod(callee):
+		// So does a call through an interface value, by the Modifies of
+		// the method.
+		fn = v.methodContract(callee)
 	case callee == nil || errorConstructor(callee):
 		return
 	default:

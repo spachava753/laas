@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"slices"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 )
@@ -258,4 +259,124 @@ func (pv *pkgVerifier) checkDroppedContracts() {
 			return true
 		})
 	}
+}
+
+// isIfaceMethod reports whether a function is a method of an interface
+// type, which a call reaches through an interface value.
+func isIfaceMethod(callee *types.Func) bool {
+	if callee == nil {
+		return false
+	}
+	recv := callee.Type().(*types.Signature).Recv()
+	return recv != nil && types.IsInterface(recv.Type())
+}
+
+// usableMethodContract returns the contract that a call of a method through
+// an interface value is checked against, and the selector of the call, or
+// stops the verification when the call is not of that form or the method
+// has no contract that can be used.
+func (v *fnVerifier) usableMethodContract(call *ast.CallExpr, callee *types.Func) (*funcInfo, *ast.SelectorExpr) {
+	sel, _ := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+	var selection *types.Selection
+	if sel != nil {
+		selection = v.info.Selections[sel]
+	}
+	switch {
+	case selection == nil || selection.Kind() != types.MethodVal:
+		v.unsupported(call.Pos(), "a method expression, as in I.M(x), cannot be called yet; call the method on the value, as in x.M()")
+	case len(selection.Index()) > 1:
+		v.unsupported(call.Pos(), fmt.Sprintf("%s is a method of an interface value that %s holds in an embedded field; "+
+			"calling it through %s is not supported yet; call it on the field", callee.Name(), types.ExprString(sel.X), types.ExprString(sel.X)))
+	case !isIface(selection.Recv()):
+		// The type of the value decides, and not the interface that
+		// declares the method: an interface literal that embeds it is not
+		// modelled.
+		v.unsupported(call.Pos(), fmt.Sprintf("calling %s, a method of %s, is not supported yet%s", callee.Name(), selection.Recv(), unsupportedHint(selection.Recv())))
+	}
+	fn := v.methodContract(callee)
+	if fn == nil {
+		v.unsupported(call.Pos(), fmt.Sprintf("%s calls %s, which has no contract; a method of an interface gets one in its doc comment "+
+			"where the interface is declared, with // @ annotations", types.ExprString(call.Fun), methodTitle(callee)))
+	}
+	for _, defect := range fn.defects {
+		v.report(call.Pos(), "the contract of %s cannot be used: %s", methodTitle(callee), defect)
+	}
+	if fn.broken {
+		v.unsupported(call.Pos(), fmt.Sprintf("the contract of %s could not be understood", methodTitle(callee)))
+	}
+	if fn.obj.Type().(*types.Signature).Variadic() {
+		v.unsupported(call.Pos(), "calls of variadic methods of interfaces are not supported yet")
+	}
+	return fn, sel
+}
+
+// callMethod verifies a call of a method through an interface value. The
+// interface value and the arguments are evaluated before the call, which is
+// an event of the unit like any call; then the value must not be the nil
+// interface, and the contract of the method applies. Which method runs
+// depends on what the value holds: one that verified code converted was
+// checked against the contract there, and any other is taken to meet it.
+func (v *fnVerifier) callMethod(call *ast.CallExpr, callee *types.Func, st *state, guard []*logic.Term) []value {
+	fn, sel := v.usableMethodContract(call, callee)
+	u := v.unit
+	operands := u.pushCeiling()
+	held, args := v.methodOperands(call, sel, fn, st, guard)
+	u.reach(operands)
+	v.check(st, guard, logic.Ne(held[0], logic.RefLit(0)), call.Pos(), "the interface value %s may be nil", types.ExprString(sel.X))
+	results := v.invoke(call, fn, args, st, guard)
+	u.calls = append(u.calls, unitCall{name: types.ExprString(call.Fun), pos: call.Pos(),
+		pure: len(fn.modifies) == 0 && signatureMemoryFree(fn.obj.Type().(*types.Signature))})
+	u.event()
+	return results
+}
+
+// methodOperands evaluates the interface value of a method call and its
+// arguments, and refuses an argument that carries code nobody has seen.
+func (v *fnVerifier) methodOperands(call *ast.CallExpr, sel *ast.SelectorExpr, fn *funcInfo, st *state, guard []*logic.Term) (value, map[*types.Var]value) {
+	if len(call.Args) != len(fn.params) {
+		v.unsupported(call.Pos(), "a call with several results as the arguments of another call is not supported yet")
+	}
+	held := v.eval(sel.X, st, guard)
+	args := map[*types.Var]value{}
+	for i, arg := range call.Args {
+		args[fn.params[i]] = v.evalAs(arg, fn.params[i].Type(), st, guard)
+	}
+	v.checkHandedToValue(call, fn, "the method "+types.ExprString(call.Fun))
+	return held, args
+}
+
+// deferMethod executes the defer of a call of a method through an interface
+// value: the value and the arguments are settled now, and the call runs when
+// the frame returns. Go takes the method of the value at the defer
+// statement, which panics there for the nil interface.
+func (v *fnVerifier) deferMethod(s *ast.DeferStmt, callee *types.Func, st *state) {
+	fn, sel := v.usableMethodContract(s.Call, callee)
+	var held value
+	var args map[*types.Var]value
+	v.evaluate(st, func() {
+		defer v.begin()()
+		held, args = v.methodOperands(s.Call, sel, fn, st, nil)
+	})
+	v.check(st, nil, logic.Ne(held[0], logic.RefLit(0)), s.Call.Pos(), "the interface value %s may be nil", types.ExprString(sel.X))
+	st.deferred = append(slices.Clip(st.deferred), deferredCall{call: s.Call, fn: fn, args: args})
+}
+
+// fullyContracted reports whether every method of an interface type has a
+// contract that can be used. A value of such a type runs only code that
+// meets those contracts: code that verified code converted, which was
+// checked there, or code from elsewhere, which is taken to meet them.
+func (pv *pkgVerifier) fullyContracted(t types.Type) bool {
+	if !isIface(t) {
+		return false
+	}
+	iface := t.Underlying().(*types.Interface)
+	if iface.NumMethods() == 0 {
+		return false
+	}
+	for method := range iface.Methods() {
+		if fn := pv.methodContract(method); fn == nil || fn.broken {
+			return false
+		}
+	}
+	return true
 }

@@ -173,6 +173,9 @@ func (v *fnVerifier) evalAs(e ast.Expr, want types.Type, st *state, guard []*log
 	if isIface(want) && !v.isNil(e) {
 		return v.interfaceValue(e, want, st, guard)
 	}
+	if types.IsInterface(want) && !isError(want) && !isIface(want) {
+		v.unsupported(e.Pos(), fmt.Sprintf("values of type %s are not supported%s", want, unsupportedHint(want)))
+	}
 	if !v.isNil(e) {
 		// An error value is only ever an error, nil, or the result of a
 		// call. Converting anything else to an error would hide a value

@@ -102,6 +102,9 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	if callee == nil && isFunc(v.info.TypeOf(call.Fun)) && !v.info.Types[call.Fun].IsBuiltin() {
 		return v.callValue(call, st, guard)
 	}
+	if isIfaceMethod(callee) {
+		return v.callMethod(call, callee, st, guard)
+	}
 	if callee == nil {
 		v.unsupported(call.Pos(), "only calls to named functions and methods are supported")
 	}
@@ -344,9 +347,10 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	for i, arg := range call.Args {
 		passed[sig.Params().At(i)] = types.ExprString(arg)
 	}
-	// A call through a function value is named as the value is written.
+	// A call through a function value or an interface value is named as
+	// it is written.
 	name := callee.Name()
-	if fn.valueOf != nil {
+	if fn.valueOf != nil || fn.methodOf != nil {
 		name = types.ExprString(call.Fun)
 	}
 	for _, pair := range overlapping(fn) {
@@ -432,22 +436,25 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	for i, c := range fn.ensures {
 		promised[i] = v.calleeFormula(c, post)
 	}
-	dead := (fn.trust == nil && fn.valueOf == nil) || v.quickly(st, involved, logic.False())
+	dead := (fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil) || v.quickly(st, involved, logic.False())
 	for _, promise := range promised {
 		st.assume(logic.Implies(logic.And(guard...), promise))
 	}
 	if !dead && v.quickly(st, involved, logic.False()) {
 		what := "trusted contract of " + name
-		if fn.valueOf != nil {
+		switch {
+		case fn.valueOf != nil:
 			what = "contract of " + fn.obj.Name()
+		case fn.methodOf != nil:
+			what = "contract of " + methodTitle(fn.methodOf)
 		}
 		v.report(call.Pos(), "the %s cannot be true of this call: what it promises contradicts what is known here", what)
 	}
 	// A verified function has proved the invariants of what it hands back.
 	// A trusted one has proved nothing, so nothing is assumed of it, and
-	// neither is anything of a function value, which may come from code
-	// that is not verified.
-	if fn.trust == nil && fn.valueOf == nil {
+	// neither is anything of a function value or an interface value,
+	// which may come from code that is not verified.
+	if fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil {
 		for _, param := range fn.params {
 			if args[param] != nil {
 				v.assumeInvariants(st, guard, st.mem, args[param], param.Type())
@@ -671,7 +678,7 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state,
 		if results[index] == nil {
 			continue
 		}
-		source := ((fn.trust != nil || fn.valueOf != nil) && !v.trustForces(fn)) || (fn.imported != nil && fn.imported.Excused)
+		source := ((fn.trust != nil || fn.valueOf != nil || fn.methodOf != nil) && !v.trustForces(fn)) || (fn.imported != nil && fn.imported.Excused)
 		if (!local && !source) || v.proves(path, logic.IsNil(results[index][0]), 0) {
 			continue
 		}
@@ -692,7 +699,7 @@ func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state,
 	// function whose success hangs on that cannot promise success either.
 	// Where the contract does determine the results, nothing will be found
 	// to depend on them.
-	if (fn.trust != nil || fn.valueOf != nil) && len(errorResults(fn)) == 0 && len(made.produced) > 0 && v.canReach(path) {
+	if (fn.trust != nil || fn.valueOf != nil || fn.methodOf != nil) && len(errorResults(fn)) == 0 && len(made.produced) > 0 && v.canReach(path) {
 		source := failureSource{outputs: map[string]bool{}, origins: []forward{made}}
 		for _, name := range made.produced {
 			source.outputs[name] = true

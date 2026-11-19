@@ -9,6 +9,7 @@ import (
 )
 
 type Shape interface {
+	// @Ensures a >= 0
 	Area() (a int)
 }
 

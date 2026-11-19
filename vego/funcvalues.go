@@ -410,7 +410,7 @@ func (v *fnVerifier) valueOperands(call *ast.CallExpr, fn *funcInfo, st *state, 
 	for i, arg := range call.Args {
 		args[fn.params[i]] = v.evalAs(arg, fn.params[i].Type(), st, guard)
 	}
-	v.checkHandedToValue(call, fn)
+	v.checkHandedToValue(call, fn, "the function value "+types.ExprString(call.Fun))
 	return fun, args
 }
 
@@ -437,21 +437,21 @@ func (v *fnVerifier) deferValue(s *ast.DeferStmt, st *state) {
 // write memory, a function value whose type has no contract, or anything
 // else that can hold an interface. A function value of a type with a
 // contract and an error of known origin carry no such code.
-func (v *fnVerifier) checkHandedToValue(call *ast.CallExpr, fn *funcInfo) {
+func (v *fnVerifier) checkHandedToValue(call *ast.CallExpr, fn *funcInfo, callee string) {
 	for i, arg := range call.Args {
 		t := fn.params[i].Type()
 		if isError(t) {
 			if v.knownError(v.bodyOrigins(), arg, -1, map[*types.Var]bool{}) {
 				continue
 			}
-			v.unsupported(arg.Pos(), fmt.Sprintf("%s is passed to the function value %s and is an error whose origin is not known%s; "+
+			v.unsupported(arg.Pos(), fmt.Sprintf("%s is passed to %s and is an error whose origin is not known%s; "+
 				"the value may come from code that is not verified, which could run code through it that nobody has seen",
-				types.ExprString(arg), types.ExprString(call.Fun), v.originWhy(arg)))
+				types.ExprString(arg), callee, v.originWhy(arg)))
 		}
 		if what := v.foreignCode(t, map[types.Type]bool{}); what != "" {
-			v.unsupported(arg.Pos(), fmt.Sprintf("%s is passed to the function value %s and is a value of type %s, which can hold %s; "+
+			v.unsupported(arg.Pos(), fmt.Sprintf("%s is passed to %s and is a value of type %s, which can hold %s; "+
 				"the value may come from code that is not verified, which could run code through it that nobody has seen",
-				types.ExprString(arg), types.ExprString(call.Fun), t, what))
+				types.ExprString(arg), callee, t, what))
 		}
 	}
 }
@@ -467,6 +467,14 @@ func (pv *pkgVerifier) foreignCode(t types.Type, seen map[types.Type]bool) strin
 	seen[t] = true
 	switch u := t.Underlying().(type) {
 	case *types.Interface:
+		// Every method of an interface with a contract on each is code
+		// that meets its contract.
+		if pv.fullyContracted(t) {
+			return ""
+		}
+		if isIface(t) && u.NumMethods() > 0 {
+			return "an interface value with a method that has no contract"
+		}
 		return "an error, or another interface"
 	case *types.Chan:
 		return "a channel"
@@ -560,6 +568,10 @@ func holdsFunc(t types.Type, seen map[types.Type]bool) bool {
 // may when its contract lists, under runs, a parameter that can hold a
 // function value. A function without a contract or a body may.
 func (pv *pkgVerifier) mayCallValues(obj *types.Func) bool {
+	// A method of an interface runs whatever the value holds.
+	if isIfaceMethod(obj) {
+		return true
+	}
 	if pv.mayCall == nil {
 		pv.mayCall = map[*types.Func]bool{}
 		pv.findValueCallers()
@@ -1224,6 +1236,10 @@ func (v *fnVerifier) stratified(lit *ast.FuncLit) {
 				if variable, ok := v.info.Uses[fun].(*types.Var); ok && bound[variable] != nil {
 					return true
 				}
+			}
+			if callee, _ := typeutil.Callee(v.info, n).(*types.Func); isIfaceMethod(callee) {
+				refuse(n.Pos(), "calls through the interface value "+types.ExprString(ast.Unparen(n.Fun).(*ast.SelectorExpr).X))
+				break
 			}
 			refuse(n.Pos(), "calls through the function value "+types.ExprString(n.Fun))
 		}

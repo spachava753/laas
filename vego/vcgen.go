@@ -220,7 +220,7 @@ func (v *fnVerifier) enter() *state {
 			continue
 		}
 		if !ok {
-			v.unsupported(param.Pos(), fmt.Sprintf("parameter %s has unsupported type %s", param.Name(), param.Type()))
+			v.unsupported(param.Pos(), fmt.Sprintf("parameter %s has unsupported type %s%s", param.Name(), param.Type(), unsupportedHint(param.Type())))
 		}
 		// Every parameter is its own unknown, including blank ones, which
 		// all share the name "_".
@@ -258,7 +258,7 @@ func (v *fnVerifier) enter() *state {
 			continue
 		}
 		if !ok {
-			v.unsupported(fn.obj.Pos(), fmt.Sprintf("result type %s is not supported", result.Type()))
+			v.unsupported(fn.obj.Pos(), fmt.Sprintf("result type %s is not supported%s", result.Type(), unsupportedHint(result.Type())))
 		}
 		st.vals[result] = zeroValue(result.Type())
 	}
@@ -717,6 +717,9 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 		v.unsupported(s.Pos(), recoverRefused)
 	case callee == nil && isFunc(v.info.TypeOf(s.Call.Fun)) && !v.info.Types[s.Call.Fun].IsBuiltin():
 		v.deferValue(s, st)
+		return
+	case isIfaceMethod(callee):
+		v.deferMethod(s, callee, st)
 		return
 	case callee == nil:
 		v.unsupported(s.Pos(), "only a call of a named function or method, of a function literal, or of a function value can be deferred; "+

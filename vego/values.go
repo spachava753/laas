@@ -53,6 +53,9 @@ func isIface(t types.Type) bool {
 	if named, isNamed := types.Unalias(t).(*types.Named); isNamed && (named.TypeParams() != nil || named.TypeArgs() != nil) {
 		return false
 	}
+	if embedsDeclared(t) {
+		return false
+	}
 	errorMethod := types.Universe.Lookup("error").Type().Underlying().(*types.Interface).Method(0)
 	for method := range u.Methods() {
 		if method == errorMethod {
@@ -60,6 +63,42 @@ func isIface(t types.Type) bool {
 		}
 	}
 	return true
+}
+
+// embedsDeclared reports whether a type is an interface type without a name
+// that has a method of a defined interface type, which it embeds. Two such
+// types are identical when their methods have the same names and
+// signatures, whichever declarations they come from, and Go converts
+// nothing between identical types. So a value of interface{ A } would pass
+// as an interface{ B } without a conversion that could check it against
+// the contracts of B. A defined type is identical only to itself.
+func embedsDeclared(t types.Type) bool {
+	if _, named := types.Unalias(t).(*types.Named); named {
+		return false
+	}
+	u, ok := t.Underlying().(*types.Interface)
+	if !ok {
+		return false
+	}
+	for method := range u.Methods() {
+		if recv := method.Type().(*types.Signature).Recv(); recv != nil {
+			if _, declared := types.Unalias(recv.Type()).(*types.Named); declared {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// unsupportedHint says why an interface literal that embeds a declared
+// interface is not supported, and what to do instead. It returns "" for any
+// other type.
+func unsupportedHint(t types.Type) string {
+	if !embedsDeclared(t) {
+		return ""
+	}
+	return "; an interface literal that embeds a declared interface is the same type as any other with methods of " +
+		"the same names and signatures, whose contracts may differ, so declare a defined interface type, as in type D interface{ A }, and use it here"
 }
 
 // holdsCodeRef reports whether a type is one whose values are a single

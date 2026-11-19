@@ -90,7 +90,7 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 	}
 	var ok bool
 	if lv.leaves, ok = layoutOf(lv.typ); !ok {
-		v.unsupported(lv.pos, fmt.Sprintf("%s has unsupported type %s", lv.text, lv.typ))
+		v.unsupported(lv.pos, fmt.Sprintf("%s has unsupported type %s%s", lv.text, lv.typ, unsupportedHint(lv.typ)))
 	}
 	return lv
 }

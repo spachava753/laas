@@ -121,12 +121,12 @@ func Loaded() (s Shape) {
 }
 
 // @Ensures True
-type Report func(s Shape)
+type Report func(p Plain)
 
 // @Requires r != nil
 // @Ensures True
-func Reported(r Report, s Shape) {
-	r(s) // want `cannot verify Reported: s is passed to the function value r and is a value of type interfaces.Shape, which can hold an error, or another interface`
+func Reported(r Report, p Plain) {
+	r(p) // want `cannot verify Reported: p is passed to the function value r and is a value of type interfaces.Plain, which can hold an interface value with a method that has no contract`
 }
 
 type Gen[T any] interface {
