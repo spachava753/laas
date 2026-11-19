@@ -85,7 +85,7 @@ type fnVerifier struct {
 	// the functions handed over at the call being applied. See
 	// callbacks.go.
 	forbidden []forbidden
-	handing   map[*types.Var]*ast.FuncLit
+	handing   map[*types.Var]*handOver
 	// layers holds, by the name of the constant that stands for a forgotten
 	// region, what is still known of the region.
 	layers map[string]*layer

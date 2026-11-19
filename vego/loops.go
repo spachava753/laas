@@ -144,6 +144,17 @@ func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
 				eff.sites = append(eff.sites, site{mapType: v.info.TypeOf(n.Args[0]), root: v.localVar(n.Args[0])})
 			}
 			v.callSites(n, eff)
+			// What is handed over runs during the call: a literal is walked
+			// where it is written, anything else writes what its contract
+			// lists.
+			for _, arg := range v.pkgVerifier.handedArgs(n) {
+				if _, isLit := ast.Unparen(arg).(*ast.FuncLit); isLit {
+					continue
+				}
+				if contract := v.handedContract(arg); contract != nil {
+					v.handedSites(arg, contract, eff)
+				}
+			}
 		}
 		return true
 	}

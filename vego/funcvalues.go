@@ -593,6 +593,19 @@ func (pv *pkgVerifier) findValueCallers() {
 				}
 				if callee := typeutil.StaticCallee(pv.info, n); callee != nil {
 					calls[fn.obj] = append(calls[fn.obj], callee.Origin())
+					// What a trusted function is handed to call runs as part
+					// of this call: a literal is walked as part of the body,
+					// a function or method is called, and anything else is a
+					// call through a function value.
+					for _, arg := range pv.handedArgs(n) {
+						switch handed, isLit := pv.handedFunc(arg); {
+						case isLit:
+						case handed != nil:
+							calls[fn.obj] = append(calls[fn.obj], handed.Origin())
+						default:
+							direct = true
+						}
+					}
 					break
 				}
 				switch fun := ast.Unparen(n.Fun).(type) {
@@ -1154,8 +1167,16 @@ func (v *fnVerifier) stratified(lit *ast.FuncLit) {
 				// What a trusted function is handed to call runs during the
 				// call, as part of the literal.
 				for _, arg := range v.pkgVerifier.handedArgs(n) {
-					if inner, ok := ast.Unparen(arg).(*ast.FuncLit); ok {
-						inPlace[inner] = true
+					switch handed, isLit := v.pkgVerifier.handedFunc(arg); {
+					case isLit:
+						inPlace[ast.Unparen(arg).(*ast.FuncLit)] = true
+					case handed != nil:
+						if v.pkgVerifier.mayCallValues(handed) {
+							refuse(arg.Pos(), fmt.Sprintf("hands %s to %s, which calls it, and %s may call through a function value",
+								handed.Name(), callee.Name(), handed.Name()))
+						}
+					default:
+						refuse(arg.Pos(), fmt.Sprintf("hands the function value %s to %s, which calls it", types.ExprString(arg), callee.Name()))
 					}
 				}
 				break

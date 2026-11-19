@@ -200,7 +200,7 @@ type forbidden struct {
 func (v *fnVerifier) callHanding(call *ast.CallExpr, fn *funcInfo, st *state, guard []*logic.Term, operands *ceiling) []value {
 	callee := fn.obj
 	sig := callee.Type().(*types.Signature)
-	handed := map[*types.Var]*ast.FuncLit{}
+	handed := map[*types.Var]*handOver{}
 	args := map[*types.Var]value{}
 	if sig.Recv() != nil {
 		args[sig.Recv()] = v.receiver(call, sig.Recv(), st, guard)
@@ -208,14 +208,7 @@ func (v *fnVerifier) callHanding(call *ast.CallExpr, fn *funcInfo, st *state, gu
 	for i, arg := range call.Args {
 		param := sig.Params().At(i)
 		if fn.calls[param] != nil {
-			// Only a function literal written there can be handed over
-			// yet.
-			lit, ok := ast.Unparen(arg).(*ast.FuncLit)
-			if !ok {
-				v.unsupported(arg.Pos(), fmt.Sprintf("%s is passed to %s as %s, which %s calls; only a function literal written there can be "+
-					"handed to it yet", types.ExprString(arg), fn.obj.Name(), param.Name(), fn.obj.Name()))
-			}
-			handed[param] = lit
+			handed[param] = v.handOver(fn, param, arg, st, guard)
 			// A function value is one reference, and this one is not nil.
 			args[param] = value{logic.RefLit(1)}
 			continue
@@ -281,15 +274,20 @@ func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types
 	}
 	var bodies []ast.Node
 	for _, param := range fn.params {
-		if lit := handed[param]; lit != nil {
-			bodies = append(bodies, lit.Body)
+		if h := handed[param]; h != nil && h.lit != nil {
+			bodies = append(bodies, h.lit.Body)
 		}
 	}
 	eff := v.effects(bodies...)
+	for _, param := range fn.params {
+		if h := handed[param]; h != nil && h.lit == nil {
+			v.handedSites(h.arg, h.contract, eff)
+		}
+	}
 	name := types.ExprString(call.Fun)
 	for _, param := range fn.params {
-		lit, cb := handed[param], fn.calls[param]
-		if lit == nil {
+		h, cb := handed[param], fn.calls[param]
+		if h == nil {
 			continue
 		}
 		// The trusted function may have written its part of memory before
@@ -307,7 +305,11 @@ func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types
 			head.assume(fact)
 		}
 		v.forbidden = append(v.forbidden, forbidden{targets: written, by: name})
-		v.inline(lit, given, head, nil, v.site(lit.Pos(), "in the function literal run by %s at %s", name, v.placeOf(lit.Pos())))
+		if h.lit != nil {
+			v.inline(h.lit, given, head, nil, v.site(h.lit.Pos(), "in the function literal run by %s at %s", name, v.placeOf(h.lit.Pos())))
+		} else {
+			v.runHandedCall(h, cb, given, head, name)
+		}
 		v.forbidden = v.forbidden[:len(v.forbidden)-1]
 	}
 	*st = *v.forget(st, eff)
@@ -392,4 +394,163 @@ func (pv *pkgVerifier) callsParam(fn *funcInfo, variable *types.Var) bool {
 		return false
 	}
 	return slices.ContainsFunc(entry.calls, func(call trustCall) bool { return call.name == variable.Name() })
+}
+
+// handOver is what a call hands a trusted function to call while it runs:
+// a function literal written there, or a function, a method value, or a
+// value of a function type with a contract. Each of the last three is run
+// as a call the caller makes, of the contract of the function, or of the
+// type of the value; the receiver of a method value and the value are
+// evaluated where they are handed over.
+type handOver struct {
+	arg      ast.Expr
+	lit      *ast.FuncLit
+	contract *funcInfo
+	// recv is the receiver of a method value, and value is set for a value
+	// of a function type.
+	recv  value
+	value bool
+}
+
+// handOver evaluates what an argument hands a trusted function to call, or
+// refuses what cannot be handed over: anything whose code nothing
+// describes.
+func (v *fnVerifier) handOver(fn *funcInfo, param *types.Var, arg ast.Expr, st *state, guard []*logic.Term) *handOver {
+	inner := ast.Unparen(arg)
+	if lit, ok := inner.(*ast.FuncLit); ok {
+		return &handOver{arg: arg, lit: lit}
+	}
+	named, method := v.valueForm(inner)
+	callee := named
+	if method != nil {
+		callee = method
+	}
+	if callee == nil {
+		T := v.valueContract(v.info.TypeOf(arg))
+		if T == nil {
+			v.unsupported(arg.Pos(), fmt.Sprintf("%s is passed to %s as %s, which %s calls, and its type %s has no contract; "+
+				"hand over a function literal, a function, a method value, or a value of a named function type with a contract",
+				types.ExprString(arg), fn.obj.Name(), param.Name(), fn.obj.Name(), v.info.TypeOf(arg)))
+		}
+		for _, defect := range T.defects {
+			v.report(arg.Pos(), "the contract of %s cannot be used: %s", T.obj.Name(), defect)
+		}
+		if T.broken {
+			v.unsupported(arg.Pos(), fmt.Sprintf("the contract of %s could not be understood", T.obj.Name()))
+		}
+		fun := v.eval(arg, st, guard)
+		v.check(st, guard, logic.Ne(fun[0], logic.RefLit(0)), arg.Pos(), "the function value %s may be nil", types.ExprString(arg))
+		return &handOver{arg: arg, contract: T, value: true}
+	}
+	sig := callee.Type().(*types.Signature)
+	if sig.Variadic() || sig.TypeParams() != nil || sig.RecvTypeParams() != nil {
+		v.unsupported(arg.Pos(), "variadic and generic functions cannot be handed over yet")
+	}
+	c := v.contractOf(callee)
+	if c == nil {
+		v.unsupported(arg.Pos(), fmt.Sprintf("it hands %s to %s, and %s has no contract; annotate %s with // @ annotations so that it is verified, "+
+			"or add a trusted contract for %s to %s", callee.Name(), fn.obj.Name(), callee.Name(), callee.Name(), callee.FullName(), TrustFileName))
+	}
+	for _, defect := range c.defects {
+		v.report(arg.Pos(), "the contract of %s cannot be used: %s", callee.FullName(), defect)
+	}
+	if c.broken {
+		v.unsupported(arg.Pos(), callee.Name()+" has a contract that could not be understood")
+	}
+	if c.trust != nil {
+		v.noteUse(c, arg.Pos())
+	}
+	h := &handOver{arg: arg, contract: c}
+	if method != nil {
+		sel := inner.(*ast.SelectorExpr)
+		h.recv = v.receiver(&ast.CallExpr{Fun: sel, Lparen: sel.End(), Rparen: sel.End()}, sig.Recv(), st, guard)
+	}
+	return h
+}
+
+// runHandedCall runs, in the state of a run, a function, method value, or
+// function value that was handed over: as a call the caller makes, with
+// the arguments of the run.
+func (v *fnVerifier) runHandedCall(h *handOver, cb *callback, given []value, head *state, by string) {
+	call := &ast.CallExpr{Fun: h.arg, Lparen: h.arg.End(), Rparen: h.arg.End()}
+	args := map[*types.Var]value{}
+	inputs := h.contract.params
+	if h.recv != nil {
+		args[inputs[0]] = h.recv
+		inputs = inputs[1:]
+	}
+	for i, param := range inputs {
+		args[param] = given[i]
+		call.Args = append(call.Args, &ast.Ident{NamePos: h.arg.Pos(), Name: cb.params[i].Name()})
+	}
+	what := types.ExprString(h.arg)
+	if h.value {
+		what = "the function value " + what
+	}
+	v.sites = append(v.sites, v.site(h.arg.Pos(), "in %s run by %s at %s", what, by, v.placeOf(h.arg.Pos())))
+	defer func() { v.sites = v.sites[:len(v.sites)-1] }()
+	v.invoke(call, h.contract, args, head, nil)
+}
+
+// handedSites adds to the effects of the runs of a call what a function,
+// method value, or function value handed to it may write, by its contract.
+// Only the receiver of a method value names an object both where it is
+// handed over and in its runs.
+func (v *fnVerifier) handedSites(arg ast.Expr, contract *funcInfo, eff *effects) {
+	sel, isMethod := ast.Unparen(arg).(*ast.SelectorExpr)
+	var recv *types.Var
+	if selection := v.info.Selections[sel]; isMethod && selection != nil && selection.Kind() == types.MethodVal && len(selection.Index()) == 1 {
+		recv = contract.params[0]
+	}
+	for _, m := range contract.modifies {
+		form, _, err := v.locateTarget(contract, m, nil, nil, nil)
+		if err != nil {
+			v.misread(m.clause, err)
+		}
+		at := site{cells: form.cells, elem: form.elem, mapType: form.mapType, lo: form.lo, hi: form.hi}
+		if form.direct && recv != nil && form.param == recv {
+			at.root = v.holder(sel.X, recv.Type())
+		}
+		eff.sites = append(eff.sites, at)
+	}
+}
+
+// handedFunc says what an argument handed to a trusted function to call
+// is, as the analysis of calls through function values needs it: a
+// literal, a function or the method of a method value, or, when it returns
+// neither, a function value.
+func (pv *pkgVerifier) handedFunc(arg ast.Expr) (*types.Func, bool) {
+	switch e := ast.Unparen(arg).(type) {
+	case *ast.FuncLit:
+		return nil, true
+	case *ast.Ident:
+		named, _ := pv.info.Uses[e].(*types.Func)
+		return named, false
+	case *ast.SelectorExpr:
+		if selection := pv.info.Selections[e]; selection != nil {
+			method, _ := selection.Obj().(*types.Func)
+			return method, false
+		}
+		named, _ := pv.info.Uses[e.Sel].(*types.Func)
+		return named, false
+	}
+	return nil, false
+}
+
+// handedContract returns the contract of what a function, method value, or
+// function value handed over runs, if it has one usable.
+func (v *fnVerifier) handedContract(arg ast.Expr) *funcInfo {
+	named, isLit := v.pkgVerifier.handedFunc(arg)
+	var contract *funcInfo
+	switch {
+	case isLit:
+	case named != nil:
+		contract = v.contractOf(named)
+	default:
+		contract = v.valueContract(v.info.TypeOf(arg))
+	}
+	if contract == nil || contract.broken {
+		return nil
+	}
+	return contract
 }
