@@ -893,6 +893,15 @@ trusted:
       f(i): {}
     modifies: []
 
+  guide.count:
+    reason: Calls record once and then adds one to t.Calls; reviewed 2026-11-19.
+    requires: ["t != nil", "t.Calls < 1000"]
+    runs: [record]
+    calls:
+      record(): {}
+    modifies: [t]
+    ensures: ["t.Calls' = t.Calls + 1"]
+
   callbacks.noResult:
     reason: Test helper that says a function without results is deterministic.
     runs: [f]

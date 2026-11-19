@@ -113,7 +113,8 @@ func literalUses(info *types.Info, body ast.Node) (bound map[*types.Var]*ast.Fun
 			}
 			refused[id.Pos()] = fmt.Sprintf("%s holds a function literal and is used here other than by calling it; "+
 				"a variable that holds a function literal is supported only when it is never assigned again and only called. "+
-				"To use the literal as a value, declare the variable with a function type that has a contract, as in var %s T = func...", id.Name, id.Name)
+				"To use the literal as a value, declare the variable with a function type that has a contract, as in var %s T = func...; "+
+				"to hand it to a trusted function that calls it, write the literal where it is handed over", id.Name, id.Name)
 		}
 		return true
 	})
