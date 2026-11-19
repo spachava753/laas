@@ -96,8 +96,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		return v.callLiteral(call, lit, st, guard)
 	}
 	if isBuiltin(v.info, call, "recover") {
-		v.unsupported(call.Pos(), "recover is not supported: it returns an interface, and those are not supported yet; "+
-			"recover in a function that is not verified")
+		v.unsupported(call.Pos(), recoverRefused)
 	}
 	callee, _ := typeutil.Callee(v.info, call).(*types.Func)
 	if callee == nil {

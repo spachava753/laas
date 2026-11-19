@@ -159,12 +159,12 @@ func DefersInLoop(g *Gauge, n int) {
 	}
 }
 
-// DefersLiteral puts off a function literal.
+// DefersLiteral puts off a function literal, which runs at the return.
 //
 // @Requires g != nil
 // @Modifies g
 func DefersLiteral(g *Gauge) {
-	defer func() { g.Set(1) }() // want `vego: cannot verify DefersLiteral: only a call of a named function or method can be deferred; function literals, function values, and built-in functions are not supported here`
+	defer func() { g.Set(1) }()
 }
 
 // LoopThenReturn puts a call off before a loop that may return early.

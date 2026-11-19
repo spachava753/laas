@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"slices"
 
 	"golang.org/x/tools/go/types/typeutil"
 )
@@ -114,6 +115,41 @@ func (pv *pkgVerifier) originsOf(body *ast.BlockStmt) *origins {
 		}
 		return true
 	})
+	// A return assigns what it returns to the named results of its frame,
+	// the function or the literal it is written in. A deferred literal can
+	// read them after that.
+	var frame func(root ast.Node, results *types.Tuple)
+	frame = func(root ast.Node, results *types.Tuple) {
+		ast.Inspect(root, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.FuncLit:
+				frame(n.Body, pv.info.TypeOf(n).(*types.Signature).Results())
+				return false
+			case *ast.ReturnStmt:
+				if results == nil || len(n.Results) == 0 {
+					break
+				}
+				for i := range results.Len() {
+					result := results.At(i)
+					switch {
+					case result.Name() == "" || result.Name() == "_":
+					case len(n.Results) == results.Len():
+						o.sources[result] = append(o.sources[result], source{n.Results[i], -1})
+					case len(n.Results) == 1:
+						o.sources[result] = append(o.sources[result], source{n.Results[0], i})
+					}
+				}
+			}
+			return true
+		})
+	}
+	var results *types.Tuple
+	for _, fn := range pv.order {
+		if fn.decl != nil && fn.decl.Body == body {
+			results = fn.obj.Type().(*types.Signature).Results()
+		}
+	}
+	frame(body, results)
 	// The parameters of a literal used in place are assigned the arguments
 	// of its calls, which are all in the body. Those of any other literal
 	// could be given anything.
@@ -271,6 +307,29 @@ func (pv *pkgVerifier) allReturnsKnown(fn *funcInfo) bool {
 	check := func(e ast.Expr, index int) {
 		known = known && pv.knownError(o, e, index, map[*types.Var]bool{})
 	}
+	// A deferred literal may assign a named result after a return has set
+	// it, so a result that a literal assigns returns whatever it may be
+	// assigned anywhere: the variable decides, not the returned value. Any
+	// literal counts, not only one deferred by the function, which can
+	// only make fewer functions qualify.
+	late := map[*types.Var]bool{}
+	ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
+		if lit, ok := n.(*ast.FuncLit); ok {
+			ast.Inspect(lit.Body, func(inner ast.Node) bool {
+				if assign, ok := inner.(*ast.AssignStmt); ok {
+					for _, lhs := range assign.Lhs {
+						if id, ok := ast.Unparen(lhs).(*ast.Ident); ok {
+							if variable, ok := pv.info.ObjectOf(id).(*types.Var); ok && slices.Contains(fn.results, variable) {
+								late[variable] = true
+							}
+						}
+					}
+				}
+				return true
+			})
+		}
+		return true
+	})
 	ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
 		if _, isLiteral := n.(*ast.FuncLit); isLiteral {
 			return false
@@ -282,7 +341,7 @@ func (pv *pkgVerifier) allReturnsKnown(fn *funcInfo) bool {
 		for i, result := range fn.results {
 			switch {
 			case !isError(result.Type()):
-			case len(ret.Results) == 0:
+			case len(ret.Results) == 0 || late[result]:
 				// A bare return yields the named result.
 				known = known && pv.knownVariable(o, result, map[*types.Var]bool{})
 			case len(ret.Results) == len(fn.results):

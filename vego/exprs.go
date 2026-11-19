@@ -87,6 +87,9 @@ func (v *fnVerifier) expr(e ast.Expr, st *state, guard []*logic.Term) *logic.Ter
 func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 	defer v.begin()()
 	t := v.info.TypeOf(e)
+	if call, ok := ast.Unparen(e).(*ast.CallExpr); ok && isBuiltin(v.info, call, "recover") {
+		v.unsupported(e.Pos(), recoverRefused)
+	}
 	if _, ok := layoutOf(t); !ok {
 		v.unsupported(e.Pos(), fmt.Sprintf("expressions of type %s are not supported", t))
 	}

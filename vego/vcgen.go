@@ -638,12 +638,32 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 // not be known.
 func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 	callee, _ := typeutil.Callee(v.info, s.Call).(*types.Func)
+	lit := v.literalOf(s.Call)
 	switch {
 	case v.looped[s]:
 		v.unsupported(s.Pos(), "defer inside a loop is not supported: how many calls it puts off is not known")
+	case lit != nil:
+		// A literal is run at each return like any deferred call, with the
+		// arguments it is given here; the variables it captures are read
+		// when it runs.
+		sig := v.info.TypeOf(lit).(*types.Signature)
+		if len(s.Call.Args) != sig.Params().Len() {
+			v.unsupported(s.Call.Pos(), "a call with several results as the arguments of another call is not supported yet")
+		}
+		args := make([]value, len(s.Call.Args))
+		v.evaluate(st, func() {
+			defer v.begin()()
+			for i, arg := range s.Call.Args {
+				args[i] = v.evalAs(arg, sig.Params().At(i).Type(), st, nil)
+			}
+		})
+		st.deferred = append(slices.Clip(st.deferred), deferredCall{call: s.Call, lit: lit, litArgs: args})
+		return
+	case isBuiltin(v.info, s.Call, "recover"):
+		v.unsupported(s.Pos(), recoverRefused)
 	case callee == nil:
-		v.unsupported(s.Pos(), "only a call of a named function or method can be deferred; "+
-			"function literals, function values, and built-in functions are not supported here")
+		v.unsupported(s.Pos(), "only a call of a named function or method, or of a function literal, can be deferred; "+
+			"function values and built-in functions are not supported here")
 	case errorConstructor(callee):
 		v.unsupported(s.Pos(), "deferring a call that only makes an error is not supported")
 	case isErrorsIs(callee):
@@ -656,7 +676,7 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 		defer v.begin()()
 		args = v.arguments(s.Call, callee, st, nil)
 	})
-	st.deferred = append(slices.Clip(st.deferred), deferredCall{s.Call, fn, args})
+	st.deferred = append(slices.Clip(st.deferred), deferredCall{call: s.Call, fn: fn, args: args})
 }
 
 // branch counts one more fork in the path exploration.

@@ -59,11 +59,14 @@ type state struct {
 
 // deferredCall is a call that a defer statement put off: the call, the
 // contract of what it calls, and the receiver and arguments as they were
-// when the defer statement ran.
+// when the defer statement ran. For a function literal, lit is the literal
+// and litArgs its arguments, in order.
 type deferredCall struct {
-	call *ast.CallExpr
-	fn   *funcInfo
-	args map[*types.Var]value
+	call    *ast.CallExpr
+	fn      *funcInfo
+	args    map[*types.Var]value
+	lit     *ast.FuncLit
+	litArgs []value
 }
 
 func (st *state) clone() *state {

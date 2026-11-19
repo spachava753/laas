@@ -31,6 +31,10 @@ trusted:
     reason: Test helper standing for a call whose failure cannot be predicted.
     modifies: []
 
+  closures.closeIt:
+    reason: Test helper standing for Close, whose error nothing predicts and nobody vouches for.
+    modifies: []
+
   values.outsideNumber:
     reason: Test helper standing for a call whose result cannot be predicted.
     modifies: []

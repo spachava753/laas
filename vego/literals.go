@@ -116,6 +116,13 @@ func literalUses(info *types.Info, body ast.Node) (bound map[*types.Var]*ast.Fun
 	return bound, refused
 }
 
+// recoverRefused says why a call of recover cannot be verified. In a
+// verified function nothing panics, so recover could be given the value
+// nil, but it returns an interface, and checking it against nil needs
+// interfaces.
+const recoverRefused = "recover is not supported: it returns an interface, and those are not supported yet; " +
+	"recover in a function that is not verified"
+
 // literalOf returns the literal a call calls in place, or nil.
 func (v *fnVerifier) literalOf(call *ast.CallExpr) *ast.FuncLit {
 	switch fun := ast.Unparen(call.Fun).(type) {
@@ -246,7 +253,18 @@ type litEnd struct {
 // the call, or of the return at which a deferred literal runs.
 type inlineSite struct {
 	pos  token.Pos
-	what string
+	text string
+}
+
+// site describes, for a diagnostic, where a literal is called.
+func (v *fnVerifier) site(pos token.Pos, format string, args ...any) inlineSite {
+	return inlineSite{pos, fmt.Sprintf(format, args...)}
+}
+
+// placeOf gives a position as a diagnostic about a literal names it.
+func (v *fnVerifier) placeOf(pos token.Pos) string {
+	at := v.pass.Fset.Position(pos)
+	return fmt.Sprintf("%s:%d:%d", filepath.Base(at.Filename), at.Line, at.Column)
 }
 
 // callLiteral verifies a call of a literal used in place. Its arguments are
@@ -265,7 +283,7 @@ func (v *fnVerifier) callLiteral(call *ast.CallExpr, lit *ast.FuncLit, st *state
 	}
 	u.reach(operands)
 	before := v.snapshot(st)
-	results := v.inline(lit, args, st, guard, inlineSite{call.Pos(), "called"})
+	results := v.inline(lit, args, st, guard, v.site(call.Pos(), "in the function literal called at %s", v.placeOf(call.Pos())))
 	name := "the function literal"
 	if id, ok := ast.Unparen(call.Fun).(*ast.Ident); ok {
 		name = id.Name
@@ -369,9 +387,21 @@ func (v *fnVerifier) returned(st *state, results []value, pos token.Pos) {
 			st.vals[result] = results[i]
 		}
 	}
+	// Where the frame ends, for a diagnostic about a literal it put off.
+	end := "the return at " + v.placeOf(pos)
+	if body := v.fn.decl.Body; (v.lit == nil && pos == body.Rbrace) || (v.lit != nil && pos == v.lit.lit.Body.Rbrace) {
+		end = "the end of the function at " + v.placeOf(pos)
+		if v.lit != nil {
+			end = "the end of the function literal at " + v.placeOf(pos)
+		}
+	}
 	for _, put := range slices.Backward(st.deferred) {
 		// A deferred call is a statement of its own, so it may modify
 		// memory; what it returns is dropped.
+		if put.lit != nil {
+			v.inline(put.lit, put.litArgs, st, nil, v.site(pos, "in the function literal deferred at %s and run at %s", v.placeOf(put.call.Pos()), end))
+			continue
+		}
 		v.invoke(put.call, put.fn, put.args, st, nil)
 	}
 	st.deferred = nil
@@ -564,8 +594,7 @@ func (v *fnVerifier) report(pos token.Pos, format string, args ...any) {
 	if len(v.sites) > 0 {
 		var through []string
 		for _, site := range v.sites {
-			at := v.pass.Fset.Position(site.pos)
-			through = append(through, fmt.Sprintf("in the function literal %s at %s:%d:%d", site.what, filepath.Base(at.Filename), at.Line, at.Column))
+			through = append(through, site.text)
 		}
 		format, args = format+"%s", append(slices.Clip(args), ", "+strings.Join(through, ", "))
 	}
