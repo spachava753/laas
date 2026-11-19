@@ -162,11 +162,7 @@ func (pv *pkgVerifier) declaredStates(owner *types.TypeName) []ifaceState {
 // one proof changed reach another proof that reads it otherwise. A
 // declaration that is not allowed gives no state; loadTrust reports it.
 func (pv *pkgVerifier) fileStates(owner *types.TypeName) []ifaceState {
-	// The trust files key a type as in io.Closer or "example.com/lib".Conn.
-	key := strconv.Quote(owner.Pkg().Path()) + "." + owner.Name()
-	if token.IsIdentifier(owner.Pkg().Path()) {
-		key = owner.Pkg().Path() + "." + owner.Name()
-	}
+	key := stateKey(owner.Pkg().Path(), owner.Name())
 	var file *trustFile
 	var decls []stateDecl
 	for _, shipped := range shippedContracts() {

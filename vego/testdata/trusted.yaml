@@ -1224,6 +1224,15 @@ trusted:
     requires: ["p != nil", "p.x = 3"]
     modifies: [p]
     ensures: ["p.x = 3"]
+  guide.open:
+    reason: >-
+      open returns what os.Open returns, as an io.ReadCloser. When err is
+      nil, rc holds a new *os.File that nobody has closed. Its Read and
+      Close meet the shipped entries.
+    vouches: [rc]
+    modifies: []
+    ensures:
+      - "err = nil -> rc != nil And ~closed(rc) And fresh(rc)"
   ifacestate.logCloser:
     reason: A test of a trusted function that runs what a Record holds.
     runs: [r]

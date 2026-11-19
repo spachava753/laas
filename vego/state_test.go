@@ -26,8 +26,13 @@ func TestStateDeclarations(t *testing.T) {
 		if len(file.problems) != 0 {
 			t.Fatalf("problems = %+v", file.problems)
 		}
-		if len(file.states["example.com/x.T"]) != 1 {
+		if len(file.states[`"example.com/x".T`]) != 1 {
 			t.Fatalf("states = %+v", file.states)
+		}
+		// A path in quotes is the same type.
+		quoted := parseTrustFile("vego-trusted.yaml", []byte("version: 1\nstate:\n  '\"example.com/x\".T':\n    open:\n      reason: r\n"), false)
+		if len(quoted.problems) != 0 || len(quoted.states[`"example.com/x".T`]) != 1 {
+			t.Fatalf("problems = %+v, states = %+v", quoted.problems, quoted.states)
 		}
 	})
 	fset := token.NewFileSet()

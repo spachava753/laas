@@ -4,6 +4,7 @@ import (
 	"go/token"
 	"go/types"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -67,9 +68,20 @@ func (f *trustFile) addStates(node *yaml.Node) {
 					name.Value, typeName.Value)
 				continue
 			}
-			f.states[typeName.Value] = append(f.states[typeName.Value], stateDecl{name: name.Value, reason: reason, line: name.Line, typeLine: typeName.Line})
+			pkg, typ, _ := splitTypeName(typeName.Value)
+			key := stateKey(pkg, typ)
+			f.states[key] = append(f.states[key], stateDecl{name: name.Value, reason: reason, line: name.Line, typeLine: typeName.Line})
 		}
 	}
+}
+
+// stateKey is the one spelling of the key of a type's states, whether the
+// file quotes the path or not: sync.Mutex, or "example.com/lib".Conn.
+func stateKey(pkg, name string) string {
+	if token.IsIdentifier(pkg) {
+		return pkg + "." + name
+	}
+	return strconv.Quote(pkg) + "." + name
 }
 
 // splitTypeName splits a type named by its package, as in sync.Mutex or

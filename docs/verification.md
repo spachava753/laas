@@ -870,7 +870,7 @@ An interface value can be compared with `nil`, in code and in formulas, as in `p
 
 ### Writing a contract on a method of an interface
 
-A contract on a method of an interface has `Requires`, `Ensures`, and `Modifies` clauses over the parameters and results of the method. The method must name its results. The receiver has no name, so a contract cannot refer to the value that the interface value holds. `Modifies` can list only memory that the parameters refer to. A method that writes what its receiver refers to cannot meet such a contract. See [What a conversion checks](#what-a-conversion-checks).
+A contract on a method of an interface has `Requires`, `Ensures`, and `Modifies` clauses over the parameters and results of the method. The method must name its results. The receiver has no name, so a contract cannot refer to what the interface value holds. `Modifies` can list only memory that the parameters refer to. A method that writes what its receiver refers to cannot meet such a contract. See [What a conversion checks](#what-a-conversion-checks). A `Receiver` annotation names the receiver so that the contract can speak of its states, and of nothing else. See [States of interface values](#states-of-interface-values).
 
 `vego` checks the contract where the interface is declared, in the same way as the contract of a function type. See [Writing a contract on a function type](#writing-a-contract-on-a-function-type). An `Ensures` that some call its `Requires` allow could not meet is reported there.
 
@@ -917,7 +917,7 @@ interface gets one in its doc comment where the interface is declared, with // @
 for a type of another module, give it an entry (fmt.Stringer).String in vego-trusted.yaml
 ```
 
-`io.Closer` has no shipped entry because its documentation leaves a second `Close` undefined, and `vego` cannot yet say that a value has not been closed. Make such a call in code that is not verified. An entry that you write for `(io.Closer).Close` claims that every `Close` returns without panicking, a second one included. See [Types without a shipped entry](#types-without-a-shipped-entry) before you write one.
+`io.Closer` has a shipped entry whose contract speaks of whether the value has been closed. See [States of interface values](#states-of-interface-values).
 
 ### Making an interface value
 
@@ -1007,7 +1007,7 @@ parameters refer to, so a method that writes what its receiver refers to cannot 
 method of Pricer yet, in (*LineCounter).Price used as a method of Pricer at interfaces.go:90:9
 ```
 
-So verified code cannot yet convert its own value to an interface whose methods write state behind the receiver, such as a `*bytes.Buffer` to `io.Writer`, or a type to `sort.Interface`. That waits for a way to name the state.
+So verified code cannot yet convert its own value to an interface whose methods write behind the receiver, such as a `*bytes.Buffer` to `io.Writer`, or a type to `sort.Interface`. That waits for a way to name the memory a value owns. A state of an interface value, described in [States of interface values](#states-of-interface-values), is not part of the value's memory.
 
 A method with a pointer receiver cannot rely on what the receiver points to. A `Requires` clause that reads it, or a struct invariant of the receiver's type, cannot be proved in the check, and is reported there. A method with a value receiver gets the struct that was converted, so its invariant is proved from what is known where the value is converted. Give the method a value receiver and convert the struct, or make the conversion in code that is not verified. Through a pointer, a value receiver gets the struct as it is when the method runs, so its invariant cannot be proved there either.
 
@@ -1111,6 +1111,232 @@ is not comparable; compare with nil instead
 ```
 
 Type assertions and type switches are not supported either.
+
+### States of interface values
+
+Some interfaces have a protocol. A value of `io.Closer` must not be closed twice, and a transaction is committed only after it began. A contract speaks of such a protocol through a state of the interface value. A state is a boolean that no Go code reads or writes. Only contracts speak of it.
+
+`vego` ships one state for an interface. `closed(c)` is true once `Close` has been called on the value that `c` holds. The shipped contract of `(io.Closer).Close` requires `~closed(c)` and ensures `closed(c')`, where `c` is the value that `Close` is called on:
+
+```go
+// ReadOnce reads once into buf and closes rc.
+//
+// @Requires rc != nil And ~closed(rc) And |buf| > 0
+// @Modifies rc, buf
+// @Ensures closed(rc') And 0 <= n <= |buf|
+func ReadOnce(rc io.ReadCloser, buf []byte) (n int, err error) {
+	defer rc.Close()
+	return rc.Read(buf)
+}
+```
+
+`io.ReadCloser` has `Close` from `io.Closer`, so its values have the state `closed` too. The documentation of `io.Closer` says that the behaviour of a second `Close` is undefined. `vego` reports a `Close` of a value that may be closed:
+
+```go
+// @Requires c != nil And ~closed(c)
+// @Modifies c
+// @Ensures True
+func CloseTwice(c io.Closer) {
+	c.Close()
+	c.Close()
+}
+```
+
+```text
+vego: precondition of c.Close may not hold: ~closed(c)
+```
+
+The message shows the clause as the contract of `Close` writes it. A function that calls `Close` on a value it is given requires `~closed` of it, as `ReadOnce` does.
+
+`Close` changes the state of the value it is called on. So a function that closes a value lists it in `Modifies`, as `ReadOnce` lists `rc`. `Modifies rc` for an interface value covers the states of what `rc` holds, and nothing else. After `rc.Close()`, a caller knows `closed(rc')`. `Read` keeps the state. A method whose contract does not list its receiver in `Modifies` changes none of the states of the receiver, and the contract of `Read` does not list it.
+
+For a field, `Modifies resp.Body` covers the states of the body:
+
+```go
+// @Requires resp != nil And resp.Body != nil And ~closed(resp.Body)
+// @Modifies resp.Body
+// @Ensures closed(resp.Body')
+func Status(resp *http.Response) (code int) {
+	defer resp.Body.Close()
+	return resp.StatusCode
+}
+```
+
+`Modifies resp.Body` does not cover the field `Body` itself. To assign the field, list the struct that holds it, as in `Modifies resp`:
+
+```go
+// @Requires resp != nil
+// @Modifies resp.Body
+// @Ensures True
+func Replace(resp *http.Response, body io.ReadCloser) {
+	resp.Body = body
+}
+```
+
+```text
+vego: resp.Body is assigned, which Replace may not modify: // @Modifies resp.Body covers the
+states of what the interface value resp.Body holds, not the place that holds it; to assign it,
+list the struct that holds it
+```
+
+#### Which values share a state
+
+A state belongs to what an interface value holds, not to the variable. A copy of an interface value has the same state. So does the value converted to an interface that it embeds, as `rc` converted to `io.Closer`, and the value stored in an `any`. Closing one of them closes the others.
+
+Two interface values that `vego` cannot tell apart may hold the same value, or one may wrap the other. Two parameters are told apart when the contract lists one of them in `Modifies` and both have states. The function then assumes that, unless one of them is nil, they share no state, and every verified caller must show this:
+
+```go
+// @Requires a != nil And b != nil And ~closed(a) And ~closed(b)
+// @Modifies a, b
+// @Ensures closed(a') And closed(b')
+func ShutBoth(a, b io.Closer) {
+	a.Close()
+	b.Close()
+}
+
+// @Requires resp != nil And resp.Body != nil And c != nil
+// @Requires ~closed(resp.Body) And ~closed(c)
+// @Modifies resp.Body, c
+// @Ensures True
+func ShutWithBody(resp *http.Response, c io.Closer) {
+	ShutBoth(resp.Body, c)
+}
+```
+
+```text
+vego: the interface values passed to ShutBoth as a and b may share their states: they may be
+one value, hold one value, or hold a value and one that wraps it, and ShutBoth may rely on them
+not doing so
+```
+
+`ShutWithBody` cannot show it. Its caller may pass `resp.Body` as `c`. Passing one value as both `a` and `b` is refused too, since `ShutBoth` would close it twice. Interface values in memory, such as the bodies of two responses or the elements of a slice, and the values that calls return, are not assumed to share no state. Closing one of them makes the state of the others unknown.
+
+#### Values that a trusted function returns
+
+A trusted function can say that the interface value it returns is new and not closed. `fresh(rc)` for an interface value means that the call created what `rc` holds, so that it shares no state with anything that existed before the call:
+
+```yaml
+  example.com/files.open:
+    reason: >-
+      open returns what os.Open returns, as an io.ReadCloser. When err is
+      nil, rc holds a new *os.File that nobody has closed. Its Read and
+      Close meet the shipped entries.
+    vouches: [rc]
+    modifies: []
+    ensures:
+      - "err = nil -> rc != nil And ~closed(rc) And fresh(rc)"
+```
+
+```go
+// @Ensures True
+func FirstByte(name string) (b byte, err error) {
+	rc, err := open(name)
+	if err != nil {
+		return 0, err
+	}
+	defer rc.Close()
+	buf := make([]byte, 1)
+	if _, err := rc.Read(buf); err != nil {
+		return 0, err
+	}
+	return buf[0], nil
+}
+```
+
+`FirstByte` needs no `Modifies` for `rc`, because a value that the call created is not memory that a caller can see. Without `fresh(rc)`, `rc` may hold a value that the caller holds, and closing it is reported as a change that `FirstByte` may not make. The result is listed under `vouches`, which claims that its methods meet their contracts. See [Function values and interface values that a trusted function returns](#function-values-and-interface-values-that-a-trusted-function-returns).
+
+#### Declaring a state on an interface of your own
+
+Declare a state with a `State` annotation in the doc comment of the interface type. To speak of the state in the contract of a method, name the receiver with a `Receiver` annotation in the doc comment of the method:
+
+```go
+// Tx is a transaction whose state open its methods change.
+//
+// @State open
+type Tx interface {
+	// Begin starts the transaction.
+	//
+	// @Receiver t
+	// @Requires ~open(t)
+	// @Modifies t
+	// @Ensures (err = nil) <-> open(t')
+	Begin() (err error)
+
+	// Commit ends it.
+	//
+	// @Receiver t
+	// @Requires open(t)
+	// @Modifies t
+	// @Ensures ~open(t')
+	Commit() (err error)
+}
+
+// @Requires t != nil And ~open(t)
+// @Modifies t
+// @Ensures ~open(t')
+func Transact(t Tx) (err error) {
+	if err := t.Begin(); err != nil {
+		return err
+	}
+	return t.Commit()
+}
+```
+
+A `Commit` that may not follow a `Begin` is reported, as `CloseTwice` was:
+
+```text
+vego: precondition of t.Commit may not hold: open(t)
+```
+
+A state can be declared only on a named interface type at package level, without type parameters, that declares at least one method itself. `type B io.Closer` declares no method of its own and cannot have a state. The name of the receiver must differ from the names of the parameters and results. A contract can use the receiver only as the argument of a state, as in `open(t)`, and in `Modifies`. `Modifies t` lets the method change every state of the value, also one that another interface declares, such as `closed` of a value whose interface also embeds `io.Closer`.
+
+A declaration makes a claim about every value of the interface. Each method whose contract does not list the receiver in `Modifies` leaves every state of the value unchanged. You must check this claim yourself against every implementation that reaches your verified code.
+
+An interface of another module gets its states in the trust file, in a `state` section beside `trusted`. Its entries name the receiver with a `receiver` field:
+
+```yaml
+state:
+  example.com/lib.Conn:
+    started:
+      reason: True between a Start that returned nil and the next Finish.
+
+trusted:
+  (example.com/lib.Conn).Start:
+    reason: ...
+    receiver: c
+    requires: ["~started(c)"]
+    modifies: [c]
+    ensures: ["(result = nil) <-> started(c')"]
+```
+
+The same conditions apply as for a declaration in source, and the interface must be of another module. A trust file cannot declare states of an interface that has shipped states, such as `io.Closer`, or of a struct type. Modules built together must declare the same states for an interface, as they must give a method the same entry. See [One entry for each type in a build](#one-entry-for-each-type-in-a-build).
+
+#### Making a value of an interface with a state
+
+Verified code cannot yet convert a value of its own type to an interface whose contracts speak of a state:
+
+```go
+// @Ensures err = nil
+func (quiet) Close() (err error) {
+	return nil
+}
+
+// @Ensures c != nil
+func Quiet() (c io.Closer) {
+	return quiet{}
+}
+```
+
+```text
+vego: cannot verify Quiet: converting a value of type quiet to io.Closer is not supported yet:
+io.Closer has the states closed, and the contract of Closer.Close speaks of them; nothing ties a
+state to what the methods of quiet do until the memory a value owns is modelled, the next part
+of interfaces. Make the conversion in code that is not verified
+```
+
+So a closer of your own cannot be passed as an `io.Closer`, an `io.ReadCloser`, or another interface with `Close` from `io.Closer`. Make the conversion in code that is not verified.
+
+An entry of your own for `(io.Closer).Close` replaces the shipped one, and the state `closed` stays. An entry with `modifies: []` and no `receiver` claims that every closer from code that is not verified returns without panicking and writes nothing verified code can see, each time it is closed. Nothing then stops verified code from calling `Close` twice, so the claim covers a second call. You can make it for the closers you know: a `*os.File` returns an error from a second `Close` and does not panic. A type whose `Close` closes a channel panics the second time. Write the entry only if every closer that your callers pass meets the claim. Under such an entry, verified code can convert a closer of its own to `io.Closer`, since no contract in use speaks of the state.
 
 ### Interface values from code that is not verified
 
@@ -1218,6 +1444,25 @@ A `Modifies` path is evaluated when the function is called. `Modifies s.items` r
 In an `Ensures` clause, a name refers to the value at the time of the call. To refer to memory as it is when the function returns, add a prime. In the example, `A'[k]` is element `k` on return and `A[k]` is the element at the time of the call. For a field, write `c.n'`. The prime comes after the name or field and before any index: `s.items'[0]`.
 
 The prime is only needed for memory that the function can change. A parameter that is a plain value, such as `v`, never takes one.
+
+A clause of an `Ensures` that names no result and nothing primed speaks only of the state at the call. `vego` reports such a clause when it reads memory that the function may modify, because the prime is then most likely missing:
+
+```go
+// @Requires l != nil And l.Max = 7
+// @Modifies l.Max
+// @Ensures l.Max = 7
+func SetMax(l *Limits) {
+	l.Max = 7
+}
+```
+
+```text
+vego: the Ensures clause "l.Max = 7" names no result and nothing on return, so it speaks of the
+state when SetMax is called, and it reads memory that SetMax may modify; write a prime for the
+value on return, as in l.Max', or move the clause to a Requires
+```
+
+A clause joined with `And` is checked one part at a time. A clause that relates a result to the state at the call, such as `r = c.n`, or that reads only memory that the function cannot modify, is not reported. The same check applies to the contracts of function types, methods of interfaces, and trusted functions.
 
 Inside a function body the convention is reversed. In an `Invariant` or `Assert`, a name refers to the current value. `old(x)` refers to the value of a parameter at the time of the call. It also works for memory reached from a parameter, as in `old(c.n)`. The name must refer to the parameter at that point, and not to a variable that hides it.
 
@@ -1331,10 +1576,11 @@ What a `Modifies` entry covers depends on the type at the end of its path.
 | a number, boolean, string, or struct | `Modifies c.n`, `Modifies ps[0]` | that field or element |
 | a slice | `Modifies A`, `Modifies s.items` | the elements, up to the capacity |
 | a map | `Modifies m` | the map |
+| an interface value | `Modifies rc`, `Modifies resp.Body` | the states of what the value holds; see [States of interface values](#states-of-interface-values) |
 
-The first, third, and fourth rows apply wherever the path ends. `Modifies s.items` covers the elements of the slice and not the field `items`. In the same way, `Modifies s.next` for a pointer field covers the struct that `next` points to, and `Modifies m[k]` for a map of pointers covers the struct that the pointer stored under `k` points to.
+The first, third, fourth, and fifth rows apply wherever the path ends. A path that ends in a function value covers the field that holds it, as for a number. `Modifies s.items` covers the elements of the slice and not the field `items`. In the same way, `Modifies s.next` for a pointer field covers the struct that `next` points to, and `Modifies m[k]` for a map of pointers covers the struct that the pointer stored under `k` points to.
 
-To assign a field that holds a slice, pointer, or map, list the struct that contains it. A method that assigns `s.n` and writes `s.items[i]` needs `Modifies s.n, s.items`. A method that assigns `s.items` needs `Modifies s`.
+To assign a field that holds a slice, pointer, map, or interface value, list the struct that contains it. A method that assigns `s.n` and writes `s.items[i]` needs `Modifies s.n, s.items`. A method that assigns `s.items` needs `Modifies s`.
 
 A struct can have a field of a type that `vego` does not support, such as a channel. Verified code cannot read or assign that field, but it is still part of the struct. Assigning the whole struct writes that field too. For a pointer `h` to such a struct, `*h = H{}` needs `Modifies h`, and entries for the other fields are not enough. A struct with an array field is the exception. It is not supported at all.
 
@@ -2212,7 +2458,7 @@ func Rounds(l *Lock, n int) {
 }
 ```
 
-A call through a function value of a type with a contract can be deferred too, and so can a call of a method with a contract through an interface value. See [Function values](#function-values) and [Interfaces](#interfaces). `defer cancel()` verifies for a `context.CancelFunc` that the function is given, whose shipped entry is described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages). It does not verify after `context.WithCancel`, which has no entry. `defer resp.Body.Close()` verifies only under an entry of your own for `(io.Closer).Close`, which has no shipped entry; see [Types without a shipped entry](#types-without-a-shipped-entry).
+A call through a function value of a type with a contract can be deferred too, and so can a call of a method with a contract through an interface value. See [Function values](#function-values) and [Interfaces](#interfaces). `defer cancel()` verifies for a `context.CancelFunc` that the function is given, whose shipped entry is described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages). It does not verify after `context.WithCancel`, which has no entry. `defer resp.Body.Close()` verifies for a body that is not closed, as described in [States of interface values](#states-of-interface-values).
 
 `recover` is not supported, because it returns an interface. Call it in a function that is not verified.
 
@@ -2495,7 +2741,8 @@ Each entry has these fields:
 | --- | --- | --- |
 | key | yes | The full name of the function as Go prints it, such as `sort.Ints`, `example.com/pkg.Func`, or `(*bytes.Buffer).Len`. For a method of an interface or a function type of another module, the method or the type, such as `(io.Writer).Write` or `context.CancelFunc`; see [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages). |
 | `reason` | yes | Why you believe the contract. |
-| `modifies` | yes | What the function may write, in the form of a `Modifies` clause. `[x]` is the elements of slice `x`, `[b]` is the struct `b` points to, and `[b.count]` is one field. Write `modifies: []` if it writes nothing a caller can see. |
+| `modifies` | yes | What the function may write, in the form of a `Modifies` clause. `[x]` is the elements of slice `x`, `[b]` is the struct `b` points to, and `[b.count]` is one field. For an interface value, `[r]` is every state of what `r` holds, for an `io.Reader` or an `any` too. Write `modifies: []` if it writes nothing a caller can see and changes no state of an interface value. |
+| `receiver` | no | For a method of an interface, the name that the contract uses for the value the method is called on. See [States of interface values](#states-of-interface-values). |
 | `requires` | no | A list of formulas. Callers must prove each one. |
 | `ensures` | no | A list of formulas. Callers can assume each one. |
 | `runs` | no | Parameters that carry code the function may call, at any depth inside the value. See [Arguments that carry code](#arguments-that-carry-code). |
@@ -2519,7 +2766,7 @@ The names in an entry are the parameter and result names from the function's sou
 - `math/rand.Intn`, `math/rand.Int`
 - the methods of `sync.Mutex` and `sync.RWMutex` that lock and unlock, and `(*sync.Once).Do`, described in [Locks](#locks)
 
-It also includes contracts for `(io.Writer).Write`, `(io.Reader).Read`, `(context.Context).Err`, and `context.CancelFunc`, which are described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages).
+It also includes contracts for `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, `(context.Context).Err`, and `context.CancelFunc`, which are described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages), and the state `closed` of `io.Closer`, described in [States of interface values](#states-of-interface-values).
 
 The contracts are in `vego/trusted/std` in the source of `laas`. They state only behaviour that the function's documentation promises, and the tests of `vego` check each one against the real function. For a function that calls a function it is given, the tests also check that it calls it only with arguments that its contract under `calls` allows. The contracts of `strconv.Atoi`, `os.Remove`, and `(context.Context).Err` vouch for their errors. For those, the tests also check that every error in the tree of a returned error has a type whose methods were read against what `vouches` claims. A contract for a method of an interface or a function type is tested against several implementations from the standard library, and against one that does at random everything the documentation of the type allows. An entry in your own file with the same key replaces the shipped contract.
 
@@ -2550,6 +2797,8 @@ A call back by way of another package is not found. See [What a proof assumes](#
 ### Arguments that carry code
 
 A trusted contract describes what the function's own code does. Some arguments bring code with them. An `error` has methods, and their code is chosen by whoever created the error. The same is true of other interface values. A struct can have a field that holds a function, and the value can be nested at any depth inside a struct, slice, or map. A trusted function could call that code, for example `err.Error()` or `l.sink(text)`, and the code could write memory that your proof depends on.
+
+A state of an interface value counts as memory that a caller can see. A trusted function that may close a value it is given, also one that it type-asserts from an `io.Reader` or an `any`, must list that parameter in `modifies`. Otherwise its entry claims that the state stays as it was.
 
 For this reason `vego` refuses to pass such a value to a trusted function:
 
@@ -2592,9 +2841,9 @@ The claim is false for a function that calls the methods of an `error` when unve
 
 A function that stores a callback and calls it later, such as one that registers a handler, makes these claims false. Do not list its parameter under `runs`. Call it from code that is not verified.
 
-When the parameter can hold a function value of a type with a contract (see [Function values](#function-values)), `runs` claims that the function calls such a value only with arguments that meet the `Requires` clauses of its type. The same goes for an interface value with a method that has a contract (see [Interfaces](#interfaces)): the function calls such a method only with arguments that meet the method's `Requires`. For a function value of a type with a contract, and an interface value whose methods all have contracts, the rest of the claim then has to hold only for values that meet their contracts, and every value that verified code passes does. For any other code, the claim has to hold whatever code arrives. That includes an interface value of a type with a method that has no contract, even when other methods of the type have one, such as `context.Context`. It also includes the methods of an interface without contracts, such as `io.Closer`, an `any`, and an interface type written in place that embeds a named one.
+When the parameter can hold a function value of a type with a contract (see [Function values](#function-values)), `runs` claims that the function calls such a value only with arguments that meet the `Requires` clauses of its type. The same goes for an interface value with a method that has a contract (see [Interfaces](#interfaces)): the function calls such a method only with arguments that meet the method's `Requires`. For a function value of a type with a contract, and an interface value whose methods all have contracts, the rest of the claim then has to hold only for values that meet their contracts, and every value that verified code passes does. For any other code, the claim has to hold whatever code arrives. That includes an interface value of a type with a method that has no contract, even when other methods of the type have one, such as `context.Context`. It also includes the methods of an interface without contracts, such as `fmt.Stringer`, an `any`, and an interface type written in place that embeds a named one.
 
-A trusted function may run code that verified code made when it lists under `runs` a parameter that can hold a function value, or an interface value whose methods all have contracts. Verified code can make values of those, and of no other interface. That code could call back into the verified code that handed it over. So a function that calls such a trusted function cannot itself be made into a function value or a method of an interface value. The message says which call and which parameter are the reason:
+A trusted function may run code that verified code made when it lists under `runs` a parameter that can hold a function value, or an interface value whose methods all have contracts that speak of no state. Verified code can make values of those, and of no other interface. See [Making a value of an interface with a state](#making-a-value-of-an-interface-with-a-state). That code could call back into the verified code that handed it over. So a function that calls such a trusted function cannot itself be made into a function value or a method of an interface value. The message says which call and which parameter are the reason:
 
 ```text
 vego: cannot verify MakeSink: logNumber may call through a function value or an interface value,
@@ -2857,6 +3106,7 @@ An interface or a function type of another module has no doc comment that you ca
 
 - `(io.Writer).Write`
 - `(io.Reader).Read`
+- `(io.Closer).Close`
 - `(context.Context).Err`
 - `context.CancelFunc`
 
@@ -2886,7 +3136,9 @@ The shipped entries state what the documentation of each type asks of every impl
       - "n < |p| -> err != nil"
 ```
 
-The entry for `Read` says that `0 <= n <= |p|` and that `Read` may write all of `p`. It also requires `|p| > 0`: the documentation says only that a `Read` into an empty slice should return 0, and `iotest.DataErrReader` never returns from one. The entry for `Err` says that the error is nil, `context.Canceled`, or `context.DeadlineExceeded`, what `errors.Is` finds in each, and vouches for them. The entry for `context.CancelFunc` says that a cancel function writes nothing that verified code can see.
+The entry for `Read` says that `0 <= n <= |p|` and that `Read` may write all of `p`. It also requires `|p| > 0`: the documentation says only that a `Read` into an empty slice should return 0, and `iotest.DataErrReader` never returns from one. The entry for `Err` says that the error is nil, `context.Canceled`, or `context.DeadlineExceeded`, what `errors.Is` finds in each, and vouches for them. The entry for `context.CancelFunc` says that a cancel function writes nothing that verified code can see. The entry for `Close` is described in [States of interface values](#states-of-interface-values). It claims nothing of the errors that `Close` returns.
+
+The documentation of `io.Reader` and `io.Writer` says nothing about a value that was closed, so their entries do not speak of `closed` and hold before and after `Close`. The tests of `vego` call `Read` and `Write` after `Close` on the closers of the standard library, and each still meets its entry.
 
 A call through such a value is checked like a call of a method with a contract in source. See [Interfaces](#interfaces) and [Function values](#function-values). The value must not be nil, the `requires` must hold, and afterwards `vego` knows the `ensures` and forgets only what `modifies` lists.
 
@@ -2936,7 +3188,7 @@ func Discard() (w io.Writer) {
 }
 ```
 
-A method that writes what its receiver refers to cannot be checked against such an entry, because the entry can list only parameters. So verified code cannot pass a `*bytes.Buffer`, or a writer of its own that buffers or counts, as an `io.Writer` yet. A type whose `Write` has a contract that writes nothing behind the receiver does convert. A `net.Conn` or an `http.ResponseWriter` cannot be converted to `io.Writer` either, because each declares a `Write` of its own. See [Converting between interfaces](#converting-between-interfaces). Make such a conversion in code that is not verified.
+A method that writes what its receiver refers to cannot be checked against such an entry, because the entry can list only parameters. So verified code cannot pass a `*bytes.Buffer`, or a writer of its own that buffers or counts, as an `io.Writer` yet. Nor can it pass a closer of its own as an `io.Closer`, since the shipped contract of `Close` speaks of the state `closed`. See [Making a value of an interface with a state](#making-a-value-of-an-interface-with-a-state). A type whose `Write` has a contract that writes nothing behind the receiver does convert. A `net.Conn` or an `http.ResponseWriter` cannot be converted to `io.Writer` either, because each declares a `Write` of its own. See [Converting between interfaces](#converting-between-interfaces). Make such a conversion in code that is not verified.
 
 #### Wrapping the errors of Read and Write
 
@@ -2995,9 +3247,9 @@ A type of your own that is converted to `io.Reader` under such an entry must ret
 
 #### Types without a shipped entry
 
-`(io.Closer).Close` has no shipped entry. Its documentation says that the behaviour of `Close` after the first call is undefined, and `vego` cannot yet express that a value has not been closed. An entry with `modifies: []` claims that every closer from code that is not verified returns without panicking and writes nothing verified code can see, each time it is closed. Nothing stops verified code from calling `Close` twice, so the claim covers a second call. You can make it for the closers you know: a `*os.File` returns an error from a second `Close` and does not panic. A type whose `Close` closes a channel panics the second time. Write the entry only if every closer that your callers pass meets the claim. Under such an entry, `defer resp.Body.Close()` on an `*http.Response` verifies, and the entry then claims this of every response body that your callers pass.
-
 `(fmt.Stringer).String` has no shipped entry. Its documentation states no contract, and the `String` methods of many types panic on a nil pointer.
+
+`net.Conn` declares a `Close` of its own, so its values do not have the state `closed` of `io.Closer`, and none of its methods has an entry.
 
 Only `Err` of `context.Context` has an entry. `Done` returns a channel, which `vego` does not model, and `Value` takes an `any`, which cannot be passed to a method of an interface value. So a `context.Context` can be passed to a verified function, and to a trusted function under `runs`, but not to a function value or to a method of an interface value, and verified code cannot make one.
 
@@ -3269,6 +3521,14 @@ This table lists the most common messages.
 | `the trust files of this build give K two contracts` (or `a contract at F, and the proofs of package P were made with none`) | Modules built together give one type different entries. | Make the entries the same, or run `laas` with `-vego.trusted`. See [One entry for each type in a build](#one-entry-for-each-type-in-a-build). |
 | `cannot verify F: Go converts a value to an interface type here, and which expression it converts could not be told` | A value without an expression of its own, such as one result of a call with several, is converted to an interface. | Assign the value to a variable of its own type first. |
 | `cannot verify F: f holds a function literal and is used here other than by calling it` | The variable that holds the literal is passed, compared, or assigned again. | Only call the variable. |
+| `precondition of c.Close may not hold: ~closed(c)` | The value may have been closed already, by an earlier `Close` or by the caller. | Add `~closed(c)` to the `Requires` clauses, and close each value once. See [States of interface values](#states-of-interface-values). |
+| `the interface values passed to F as a and b may share their states` | `F` lists one of the two in `Modifies`, and they may be one value or hold one value. | Pass two interface parameters of your own function whose contract lists one of them, or a value that a call created with `fresh`. |
+| `... covers the states of what the interface value p.f holds, not the place that holds it; to assign it, list the struct that holds it` | `Modifies p.f` for an interface field does not cover the field. | List `p` in `Modifies`. |
+| `x has type T, which has no states` | A formula or a `Modifies` entry speaks of a state of an interface value whose type has none. | Name a state that the type has, or declare one. A `Modifies` entry for an interface value without states covers nothing; to assign it, list what holds it. |
+| `cannot verify F: converting a value of type T to I is not supported yet: I has the states ...` | A contract of `I` speaks of a state, which nothing ties to the methods of `T`. | Make the conversion in code that is not verified. See [Making a value of an interface with a state](#making-a-value-of-an-interface-with-a-state). |
+| `the Ensures clause "P" names no result and nothing on return, so it speaks of the state when F is called` | The clause reads memory that `F` may modify as it was at the call. | Add the prime for the value on return, or move the clause to a `Requires`. See [Before and after](#before-and-after). |
+| `a state can be declared only on a defined interface type that declares a method of its own`, `I.M names its receiver r, but I has no states` | A `State` or `Receiver` annotation is where it has no effect. | Declare the state on the interface that declares the methods whose contracts speak of it. |
+| `the trust files of this build declare the states of I differently` (or `declare states of I at F, and the proofs of package P were made with none`) | Modules built together disagree about the states of one interface. | Make the declarations the same, or run `laas` with `-vego.trusted`. |
 | `precondition of Lock may not hold: ~held(m)`, or `precondition of Unlock may not hold: held(m)` | The goroutine may already hold the mutex it locks, or may not hold the one it unlocks. | Add `~held(a.mu)` to the `Requires` clauses, and unlock on every path, as with `defer a.mu.Unlock()`. See [Locks](#locks). |
 | `cannot verify F: x copies a value of type T, which holds a sync.Mutex`, and the other messages that end in `must not be copied after first use` | Go copies or overwrites a value that holds a mutex here. | Do what the message says: use a pointer, give the method a pointer receiver, or build the slice with its final length. See [Values that hold a mutex cannot be copied or overwritten](#values-that-hold-a-mutex-cannot-be-copied-or-overwritten). |
 | `... is an unexported field of T, declared in package p, and a formula in package q cannot name it` | A contract names a private field of another package. | Name an exported field, or the state of a mutex with `held`. See [Names](#names). |
@@ -3282,7 +3542,9 @@ This table lists the most common messages.
 
 A function that uses any of the following is reported as `cannot verify`:
 
-- calls of a method of an interface that has no contract, in source or in the trust file, and converting a value to an interface with such a method (see [Interfaces](#interfaces)); of the standard library, only `(io.Writer).Write`, `(io.Reader).Read`, and `(context.Context).Err` have shipped contracts (see [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages));
+- calls of a method of an interface that has no contract, in source or in the trust file, and converting a value to an interface with such a method (see [Interfaces](#interfaces)); of the standard library, only `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, and `(context.Context).Err` have shipped contracts (see [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages));
+- converting a value of a type that is not an interface to an interface whose contracts speak of a state, such as a closer of your own to `io.Closer` (see [Making a value of an interface with a state](#making-a-value-of-an-interface-with-a-state));
+- states of struct types of your own or of another module, and states that are not booleans;
 - an entry in the trust file for a type of the module of the analysed package, or one with `runs` or `calls`;
 - `context.WithCancel` and the functions like it, which keep the context they are given (see [Types without a shipped entry](#types-without-a-shipped-entry));
 - comparing interface values with anything but `nil`, type assertions, and type switches;
@@ -3323,14 +3585,15 @@ Floating-point values are supported but opaque. They can be passed around and us
 
 A proof by `vego` depends on the following assumptions. Each concerns something `vego` cannot see.
 
-- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and it keeps no value that can hold code. It does not call back, through another package, into the verified function that called it. A call back within the same package is found and reported. For a parameter listed under `runs`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter.
-- Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method.
+- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and it keeps no value that can hold code. It does not call back, through another package, into the verified function that called it. A call back within the same package is found and reported. For a parameter listed under `runs`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter.
+- Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one that wraps it, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method.
 - An interface value that reaches verified code from code that is not verified meets the contracts of its methods. That includes a value passed as an argument, a value in memory that an argument reaches, a value that a call through another value returns, and a value that a trusted function returns or writes, which its entry vouches for. Called with arguments that meet the `Requires` of a method, the method returns without panicking, leaves its `Ensures` true, and writes nothing that verified code can see outside what its `Modifies` lists. This holds also when the value holds a pointer to a struct that verified code holds.
 - The same holds of the methods and function types that entries of the trust file give contracts, which is what such an entry claims (see [What an entry for a type claims](#what-an-entry-for-a-type-claims)). In particular, a caller that is not verified does not pass a verified function such a value together with a pointer to memory that the value writes, as a `*bytes.Buffer` passed both as an `io.Writer` and as a `*bytes.Buffer` would be. Every call through such a value returns: a `Read` from a pipe, a terminal, or a connection returns only once data or an error arrives.
 - Packages that are built together give each type at most one entry. `vego` reports two entries for one type, or an entry against none, in every package that `laas` analyses and that is built with both. A program whose main package is never given to `laas` is not checked.
 - A function value that reaches verified code from code that is not verified meets the contract of its type. That includes a value passed as an argument, a value in memory that an argument reaches, and a value made with `reflect.MakeFunc` or by generic code. Called with arguments that meet the `Requires` of its type, such a value returns without panicking, writes only what the `Modifies` of its type lists, and leaves its `Ensures` true.
 - Unverified code respects Go's type system. It does not use `unsafe`, `reflect`, or cgo to give one piece of memory two types or to change a string.
-- No other goroutine writes memory that a verified function reads or writes while it runs, also while the function waits in `Lock`, `RLock`, or `Do`. The one exception is that other goroutines can lock and unlock a mutex that the goroutine running the function does not hold, and call `Do` on a `sync.Once` that this goroutine is not inside `Do` on, which writes that `Once`. What the function that another goroutine hands to `Do` writes is not part of the exception. A proof covers one goroutine. A function that takes a lock is not proved to be safe to call from several goroutines. See [What a proof of a function that locks shows](#what-a-proof-of-a-function-that-locks-shows).
+- A declaration of a state, shipped, in a trust file, or in source, is true of every value of the interface that verified code gets from code that is not verified. Every method whose contract does not list the receiver in `Modifies` leaves every state of the value unchanged. For the shipped state `closed` of `io.Closer`, this means that `Read` and `Write` on an `io.ReadCloser`, an `io.WriteCloser`, or an `io.ReadWriteCloser` never close the value, which the documentation does not say. Code that is not verified does not change a state of a value that verified code holds while a verified function runs, other than through calls that the function makes.
+- No other goroutine writes memory that a verified function reads or writes while it runs, also while the function waits in `Lock`, `RLock`, or `Do`. The one exception is that other goroutines can lock and unlock a mutex that the goroutine running the function does not hold, and call `Do` on a `sync.Once` that this goroutine is not inside `Do` on, which writes that `Once`. What the function that another goroutine hands to `Do` writes is not part of the exception. Closing an interface value that the function uses counts as such a write. A proof covers one goroutine. A function that takes a lock is not proved to be safe to call from several goroutines. See [What a proof of a function that locks shows](#what-a-proof-of-a-function-that-locks-shows).
 - Every call that waits for another goroutine returns: `Lock` and `RLock` return once the other goroutines release the mutex, and `(*sync.Once).Do` returns once the function that another goroutine runs in it returns. A deadlock that the verified function takes part in breaks this.
 - No other goroutine unlocks a mutex that the goroutine running a verified function holds.
 - Code that is not verified does not copy a value that holds a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once` after it was first used, as the documentation of `sync` requires.
@@ -3358,6 +3621,8 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `Assert P` | in a function body | `P` must be true at this point and can be used afterwards. |
 | `Invariant P` | doc comment of a struct type | `P` is true for every parameter, receiver, and result of the type at function boundaries. |
 | `Predicate name(x, y) ::= P` | top level | Names a formula over its parameters. |
+| `State name` | doc comment of a named interface type that declares a method | Declares a state of the values of the interface. |
+| `Receiver r` | doc comment of a method in a named interface type | Names the value the method is called on, so that its contract can speak of its states as `name(r)` and list it in `Modifies`. |
 
 ### Formulas
 
@@ -3384,6 +3649,8 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `held(m)`, `held(a.mu')` | the goroutine that runs the function holds the `sync.Mutex` or `sync.RWMutex`; `m` is a mutex or a pointer to one |
 | `rheld(rw)` | the goroutine holds a read lock on the `sync.RWMutex` |
 | `running(o)` | the goroutine is inside a call of `Do` on the `sync.Once` |
+| `closed(c)`, `closed(resp.Body')` | `Close` has been called on what the `io.Closer` `c` holds |
+| `name(x)` | the state `name` of the interface value `x`, declared with a `State` annotation or in the trust file |
 | `name(x, y)` | a predicate |
 | `f(x)` | in the `ensures` of a trusted contract, what the function parameter `f` returns for `x` |
 
@@ -3408,7 +3675,8 @@ Results are referred to by the names in the function's signature.
 | `Modifies ps[0]` | one element of a slice of structs; for a slice of pointers, the struct the element points to |
 | `Modifies m` | a map |
 | `Modifies m[k]` | for a map of pointers, the struct that the pointer under key `k` points to |
-| `fresh(x)` | the memory `x` refers to on return was allocated by the call; true for a slice with zero capacity |
+| `Modifies rc`, `Modifies p.f` | if `rc` or `f` is an interface value: every state of what it holds, not the variable or the field; a function value field is the field itself |
+| `fresh(x)` | the memory `x` refers to on return was allocated by the call; true for a slice with zero capacity; for an interface value, what it holds was created by the call |
 | `within(a, b)` | `a` lies inside the memory of `b`; each is a pointer or a slice, and a slice includes its capacity |
 
 ### Order of evaluation
