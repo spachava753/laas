@@ -344,7 +344,7 @@ func DescribeWrongly(err error) (code int) {
 // @Ensures True
 func DescribeOther(err, other error) (code int) {
 	switch err {
-	case other: // want `vego: cannot verify DescribeOther: comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, an error made by errors.New or fmt.Errorf, or a package-level error variable that holds such an error or a value of a type for which == cannot panic`
+	case other: // want `vego: cannot verify DescribeOther: comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, an error made by errors.New or fmt.Errorf, or a package-level error variable that holds such an error or a pointer, integer, string, or boolean, or an array or struct of these`
 		return 1
 	}
 	return 2

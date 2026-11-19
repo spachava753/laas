@@ -385,9 +385,11 @@ func concreteError(tv types.TypeAndValue, index int) (nonNil, comparable bool) {
 }
 
 // identityComparable reports whether == on two values of a type cannot panic
-// and holds exactly when the values are the same: no interface, which may
-// hold an uncomparable value, and no float or complex number, for which ==
-// is not identity (NaN differs from itself, and 0 equals -0), anywhere in it.
+// and holds exactly when the values are the same: the type is a pointer,
+// integer, string, or boolean type, or an array or struct type made only of
+// these. An interface may hold an uncomparable value, and for a float or
+// complex number == is not identity: NaN differs from itself, and 0 equals
+// -0.
 func identityComparable(t types.Type, seen map[types.Type]bool) bool {
 	if seen[t] {
 		return true
@@ -396,7 +398,7 @@ func identityComparable(t types.Type, seen map[types.Type]bool) bool {
 	switch u := t.Underlying().(type) {
 	case *types.Basic:
 		return u.Info()&(types.IsFloat|types.IsComplex) == 0 && u.Kind() != types.UntypedNil
-	case *types.Pointer, *types.Chan:
+	case *types.Pointer:
 		return true
 	case *types.Array:
 		return identityComparable(u.Elem(), seen)

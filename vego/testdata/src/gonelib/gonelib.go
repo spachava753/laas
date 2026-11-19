@@ -17,11 +17,12 @@ var (
 	ErrAliased       = ErrTarget
 )
 
-// Same relies on ErrOpaque and on what ErrAliased holds.
+// Same relies on ErrOpaque, and on ErrTarget only through ErrAliased,
+// which holds it.
 //
 // @Ensures same
 func Same() (same bool) {
-	return ErrOpaque != nil && ErrAliased == ErrTarget
+	return ErrOpaque != nil && ErrAliased != nil
 }
 
 // Fail fails unless told otherwise.

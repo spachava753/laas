@@ -431,7 +431,7 @@ func AtEnd(s string, i int) (end bool) {
 //
 // @Ensures True
 func SameError(a, b error) (same bool) {
-	return a == b // want `vego: cannot verify SameError: comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, an error made by errors.New or fmt.Errorf, or a package-level error variable that holds such an error or a value of a type for which == cannot panic`
+	return a == b // want `vego: cannot verify SameError: comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, an error made by errors.New or fmt.Errorf, or a package-level error variable that holds such an error or a pointer, integer, string, or boolean, or an array or struct of these`
 }
 
 // PeekLabelled wraps the error of Peek, so that errors.Is still finds

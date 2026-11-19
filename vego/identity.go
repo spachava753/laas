@@ -505,8 +505,8 @@ func (v *fnVerifier) compareErrors(x, y ast.Expr, op token.Token, st *state, gua
 func (v *fnVerifier) errorsEqual(x, y ast.Expr, a, b *logic.Term, pos token.Pos) *logic.Term {
 	if !v.comparableError(x) && !v.comparableError(y) {
 		v.unsupported(pos, "comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, "+
-			"an error made by errors.New or fmt.Errorf, or a package-level error variable that holds such an error or a value "+
-			"of a type for which == cannot panic")
+			"an error made by errors.New or fmt.Errorf, or a package-level error variable that holds such an error or a pointer, "+
+			"integer, string, or boolean, or an array or struct of these")
 	}
 	return logic.Eq(a, b)
 }

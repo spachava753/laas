@@ -43,6 +43,22 @@ var (
 
 func (T) err() error { return nil }
 
+// concreteErr makes an opaque variable that is not nil once it is set.
+type concreteErr struct{}
+
+func (concreteErr) Error() string { return "concrete" }
+
+// ErrConcreteX would be known not to be nil in a package that did not run
+// its own code while its variables are initialised.
+var ErrConcreteX error = concreteErr{}
+
+// Concrete reads it alone.
+//
+// @Ensures r
+func Concrete() (r bool) {
+	return ErrConcreteX != nil // want `vego: cannot verify Concrete: ErrConcreteX is not known to have its value yet when this runs`
+}
+
 // Aliased reads them.
 //
 // @Ensures True
