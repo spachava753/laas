@@ -377,7 +377,7 @@ type EntryUse struct {
 	Runs    []string
 	Vouches []string
 	// Callbacks describes each function parameter given a contract under
-	// calls, as in "f(i) when 0 <= i < n".
+	// calls, as in "f(i) when: 0 <= i; i < n".
 	Callbacks []string
 	Calls     []token.Position
 }
@@ -567,6 +567,13 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 		return list
 	}
 	fn.requires, fn.ensures = clauses("requires", entry.requires), clauses("ensures", entry.ensures)
+	// A requires is read in one state, so old(x) there could only mean x;
+	// it is refused rather than given that meaning without notice.
+	for _, c := range fn.requires {
+		if mentionsOld(c.node) {
+			fn.defect("its requires %q uses old, which has no meaning there: a requires is read in the state of the call", c.text)
+		}
+	}
 	// A trusted contract means the same wherever it is used, so it may not
 	// mention the predicates or constants of whichever package calls it.
 	for _, c := range slices.Concat(fn.requires, fn.ensures) {
@@ -844,8 +851,10 @@ func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 			for _, formula := range call.requires {
 				conditions = append(conditions, formula.text)
 			}
+			// Each clause is shown as written, apart from the others, so
+			// that no clause reads as part of its neighbour.
 			if len(conditions) > 0 {
-				described += " when " + strings.Join(conditions, " And ")
+				described += " when: " + strings.Join(conditions, "; ")
 			}
 			callbacks = append(callbacks, described)
 		}

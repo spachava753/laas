@@ -133,6 +133,13 @@ func (pv *pkgVerifier) trustedCall(fn *funcInfo, item trustCall) {
 		}
 	}
 	for _, formula := range item.requires {
+		// The requires are read in the state at each call of the function
+		// parameter, and in no other, so old has no meaning in them.
+		if mentionsOld(formula.node) {
+			fn.defect("its calls requires %q for %s uses old, which has no meaning there: it is read in the state at each call of %s",
+				formula.text, item.name, item.name)
+			return
+		}
 		cb.requires = append(cb.requires, &clause{
 			kind: "requires", text: formula.text, node: formula.node, res: pv.plain,
 			pos: pv.trustPos(fn.trust.file, formula.line, formula.col),
@@ -140,6 +147,15 @@ func (pv *pkgVerifier) trustedCall(fn *funcInfo, item trustCall) {
 	}
 	cb.fn.requires = cb.requires
 	fn.calls[param] = cb
+}
+
+// mentionsOld reports whether a formula uses old.
+func mentionsOld(n *logic.Node) bool {
+	found := false
+	n.Walk(func(n *logic.Node) {
+		found = found || (n.Kind == logic.NCall && n.Name == "old")
+	})
+	return found
 }
 
 // callRequires resolves what holds when a trusted function calls a

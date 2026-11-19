@@ -25,6 +25,8 @@ func variadic(f func(xs ...int))               {}
 func applied(is func(i int))                   {}
 func withContract(n int, f Visit)              {}
 func noParam(n int, f func(i int))             {}
+func oldCall(n int, f func(i int))             {}
+func oldPlain(n int)                           {}
 
 // Visit has a contract of its own.
 //
@@ -107,6 +109,16 @@ func UsesWithContract() {
 // @Ensures True
 func UsesNoParam() {
 	noParam(1, nil) // want `its calls g\(...\): g is not a parameter` `cannot verify UsesNoParam: `
+}
+
+// @Ensures True
+func UsesOldCall() {
+	oldCall(1, nil) // want `its calls requires "old\(i\) >= 0" for f uses old, which has no meaning there: it is read in the state at each call of f` `cannot verify UsesOldCall: `
+}
+
+// @Ensures True
+func UsesOldPlain() {
+	oldPlain(1) // want `its requires "old\(n\) > 0" uses old, which has no meaning there: a requires is read in the state of the call` `cannot verify UsesOldPlain: `
 }
 
 // UsesEach hands a function to a trusted function with a sound entry.

@@ -45,6 +45,7 @@ trusted:
 		{"accepts a list of error results it vouches for", "version: 1\ntrusted:\n  os.Remove:\n    reason: r\n    modifies: []\n    vouches: [result]\n", ""},
 		{"rejects vouches that is not a list", "version: 1\ntrusted:\n  os.Remove:\n    reason: r\n    modifies: []\n    vouches: result\n", "vouches of os.Remove must be a list"},
 		{"accepts a function parameter with a contract", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    runs: [f]\n    calls:\n      f(i):\n        requires: [\"0 <= i < n\"]\n    modifies: []\n", ""},
+		{"shows each clause of calls apart in the report", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    runs: [f]\n    calls:\n      f(i):\n        requires: [\"i < 0 Or i > n\", \"i = 0\"]\n    modifies: []\n", ""},
 		{"accepts a contract with nothing in it", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    runs: [f]\n    calls:\n      f(i): {}\n    modifies: []\n", ""},
 		{"rejects calls that is not a mapping", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    calls: [f]\n    modifies: []\n", "calls of sort.Search must map"},
 		{"rejects a key without parameters", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    calls:\n      f: {}\n    modifies: []\n", `"f" must name a function parameter and its parameters`},
@@ -115,7 +116,7 @@ func TestReport(t *testing.T) {
 				{
 					Key: "sort.Ints", Reason: "Another module's override.", File: "/work/other/vego-trusted.yaml", Line: 4,
 					Runs:      []string{"x", "less"},
-					Callbacks: []string{"less(i, j) when 0 <= i < |x| And 0 <= j < |x|"},
+					Callbacks: []string{"less(i, j) when: 0 <= i < |x| Or i = 0; 0 <= j < |x|"},
 					Calls:     []token.Position{at("other/c.go", 3)},
 				},
 				{
@@ -140,7 +141,7 @@ Project contracts in use: 3
   sort.Ints
     reason:  Another module's override.
     runs code held by: x, less
-    calls less(i, j) when 0 <= i < |x| And 0 <= j < |x|
+    calls less(i, j) when: 0 <= i < |x| Or i = 0; 0 <= j < |x|
     defined: other/vego-trusted.yaml:4
     used at: other/c.go:3
   sort.Ints

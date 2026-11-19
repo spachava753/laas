@@ -777,3 +777,16 @@ trusted:
     calls:
       g(i): {}
     modifies: []
+
+  callbacks.oldCall:
+    reason: Test helper whose calls requires uses old.
+    runs: [f]
+    calls:
+      f(i):
+        requires: ["old(i) >= 0"]
+    modifies: []
+
+  callbacks.oldPlain:
+    reason: Test helper whose requires uses old.
+    requires: ["old(n) > 0"]
+    modifies: []
