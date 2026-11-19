@@ -28,13 +28,16 @@ state:
         has not unlocked it with RUnlock since. The zero value of an RWMutex
         is documented to be an unlocked mutex.
 
-# held and rheld are about the goroutine that runs the verified function.
-# Each entry claims what the documentation of Go 1.18 (where TryLock and
-# TryRLock appeared) and later says of that goroutine, under the condition
-# every proof has: no other goroutine writes the memory the function uses,
-# except to lock and unlock a mutex this goroutine does not hold. A call
-# that waits for another goroutine returns once that goroutine releases the
-# mutex. A method on a nil pointer dereferences it and panics.
+# held, rheld, and running are about the goroutine that runs the verified
+# function. Each entry claims what the documentation of Go 1.18 (where
+# TryLock and TryRLock appeared) and later says of that goroutine, under the
+# condition every proof has: no other goroutine writes the memory the
+# function uses while it runs, also while it waits in Lock, RLock, or Do,
+# except to lock and unlock a mutex this goroutine does not hold, or to call
+# Do on a Once this goroutine is not inside Do on; what the function handed
+# to that Do writes is not excepted. A call that waits for another goroutine
+# returns once that goroutine releases the mutex or its function returns. A
+# method on a nil pointer dereferences it and panics.
 trusted:
   (*sync.Mutex).Lock:
     reason: >-

@@ -193,9 +193,10 @@ Shipped contracts in use: 3
 
 States the contracts in use speak of: 1
   Each is about the goroutine that runs a verified function. A proof that reads one holds only if no other
-  goroutine writes the memory the function uses while it runs, also while it waits for a lock, except to lock
-  and unlock a mutex this goroutine does not hold; if nobody unlocks a mutex this goroutine holds; and if every
-  call that waits for another goroutine returns.
+  goroutine writes the memory the function uses while it runs, also while it waits in Lock, RLock, or Do,
+  except to lock and unlock a mutex this goroutine does not hold or to call Do on a Once this goroutine is not
+  inside Do on (what the function handed to that Do writes is not excepted); if nobody unlocks a mutex this
+  goroutine holds; and if every call that waits for another goroutine returns.
   sync.Mutex held
     means:   True when locked.
 

@@ -2308,13 +2308,13 @@ func (c *Settings) Setup(n int) {
 }
 ```
 
-`Do` requires `~running(o)`, because `Do` on a `Once` whose `Do` the goroutine is inside waits for itself. A function that is not verified could call `Setup` from the function it hands to `Do` on the same `Once`. The function literal that `Do` runs is checked as described in [Functions that a trusted function calls](#functions-that-a-trusted-function-calls). It may not write `c.once`, so it cannot call `Do` on `c.once` either. After `Do` nothing is known of `c.size`, since the function may have run in this call, in an earlier one, or in another goroutine. A function literal that `Do` runs cannot call `Do` on another `Once`, for the reason given in [Locking in a function that a trusted function calls](#locking-in-a-function-that-a-trusted-function-calls).
+`Do` requires `~running(o)`, because `Do` on a `Once` whose `Do` the goroutine is inside waits for itself. A function that is not verified could call `Setup` from the function it hands to `Do` on the same `Once`. The function literal that `Do` runs is checked as described in [Functions that a trusted function calls](#functions-that-a-trusted-function-calls). It may not write `c.once`, so it cannot call `Do` on `c.once` either. After `Do` nothing is known of `c.size`, since the function may have run in this call, in an earlier one, or in another goroutine. While `Setup` waits in `Do` for a function that another goroutine runs, that function may write memory that `Setup` relies on. The proof assumes that it does not, as for any other goroutine. See [What a proof of a function that locks shows](#what-a-proof-of-a-function-that-locks-shows). A function literal that `Do` runs cannot call `Do` on another `Once`, for the reason given in [Locking in a function that a trusted function calls](#locking-in-a-function-that-a-trusted-function-calls).
 
 The contract is:
 
 | Method | Requires | Ensures | Calls |
 | --- | --- | --- | --- |
-| `(*sync.Once).Do` | `o != nil`, `~running(o)` | `~running(o')` | `f()` with no conditions, at most once and only before `Do` returns |
+| `(*sync.Once).Do` | `o != nil`, `~running(o)` | `~running(o')` | `f()` with no conditions, at most once and only before `Do` returns (`vego` checks the function for any number of calls) |
 
 #### What a proof of a function that locks shows
 
@@ -2325,7 +2325,7 @@ A verified function that locks a mutex is proved for one goroutine. The proof sh
 - It writes only what `Modifies` lists.
 - It meets its contract.
 
-Each of these holds only if no other goroutine writes memory that the function reads or writes while it runs, including while it waits in `Lock`. The one exception is that other goroutines can lock and unlock a mutex that this goroutine does not hold. Taking a lock does not change that assumption. `vego` still assumes that nothing else writes the memory that the lock protects.
+Each of these holds only if no other goroutine writes memory that the function reads or writes while it runs, including while it waits in `Lock`, `RLock`, or `Do`. The one exception is that other goroutines can lock and unlock a mutex that this goroutine does not hold, and call `Do` on a `sync.Once` that this goroutine is not inside `Do` on, which writes that `Once`. What the function that another goroutine hands to `Do` writes is not part of the exception. Taking a lock does not change that assumption. `vego` still assumes that nothing else writes the memory that the lock protects.
 
 So the proof does not show that other goroutines take the lock before they touch the same memory. It also does not show that what the lock protects is unchanged between an `Unlock` and the next `Lock`. A verified function that locks is not proved to be safe to call from several goroutines.
 
@@ -3330,7 +3330,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - Packages that are built together give each type at most one entry. `vego` reports two entries for one type, or an entry against none, in every package that `laas` analyses and that is built with both. A program whose main package is never given to `laas` is not checked.
 - A function value that reaches verified code from code that is not verified meets the contract of its type. That includes a value passed as an argument, a value in memory that an argument reaches, and a value made with `reflect.MakeFunc` or by generic code. Called with arguments that meet the `Requires` of its type, such a value returns without panicking, writes only what the `Modifies` of its type lists, and leaves its `Ensures` true.
 - Unverified code respects Go's type system. It does not use `unsafe`, `reflect`, or cgo to give one piece of memory two types or to change a string.
-- No other goroutine writes memory that a verified function reads or writes while it runs, also while the function waits in `Lock` or `RLock`. The one exception is that other goroutines can lock and unlock a mutex that the goroutine running the function does not hold. A proof covers one goroutine. A function that takes a lock is not proved to be safe to call from several goroutines. See [What a proof of a function that locks shows](#what-a-proof-of-a-function-that-locks-shows).
+- No other goroutine writes memory that a verified function reads or writes while it runs, also while the function waits in `Lock`, `RLock`, or `Do`. The one exception is that other goroutines can lock and unlock a mutex that the goroutine running the function does not hold, and call `Do` on a `sync.Once` that this goroutine is not inside `Do` on, which writes that `Once`. What the function that another goroutine hands to `Do` writes is not part of the exception. A proof covers one goroutine. A function that takes a lock is not proved to be safe to call from several goroutines. See [What a proof of a function that locks shows](#what-a-proof-of-a-function-that-locks-shows).
 - Every call that waits for another goroutine returns: `Lock` and `RLock` return once the other goroutines release the mutex, and `(*sync.Once).Do` returns once the function that another goroutine runs in it returns. A deadlock that the verified function takes part in breaks this.
 - No other goroutine unlocks a mutex that the goroutine running a verified function holds.
 - Code that is not verified does not copy a value that holds a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once` after it was first used, as the documentation of `sync` requires.
