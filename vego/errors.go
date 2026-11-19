@@ -1540,6 +1540,7 @@ func (v *fnVerifier) someInput(terms []*logic.Term, search func(input *witness) 
 	defer func() { v.searching-- }()
 	b := &sampler{v: v, mentioned: map[string]bool{}}
 	seen := map[*logic.Term]bool{}
+	var sentinels []*logic.Term
 	var harvest func(t *logic.Term)
 	harvest = func(t *logic.Term) {
 		if seen[t] {
@@ -1549,7 +1550,7 @@ func (v *fnVerifier) someInput(terms []*logic.Term, search func(input *witness) 
 		switch {
 		case isSentinelTerm(t) && !b.mentioned[t.Name]:
 			b.mentioned[t.Name] = true
-			b.sentinels = append(b.sentinels, t)
+			sentinels = append(sentinels, t)
 		case t.Op == logic.OpConst:
 			b.mentioned[t.Name] = true
 		case t.Op == logic.OpPush && len(b.literals) < 8:
@@ -1569,6 +1570,7 @@ func (v *fnVerifier) someInput(terms []*logic.Term, search func(input *witness) 
 			harvest(t)
 		}
 	}
+	b.sentinels = v.tiedToInputs(terms, sentinels)
 	for _, param := range v.fn.params {
 		entry := v.entry[param]
 		if entry != nil {
@@ -1611,6 +1613,76 @@ func (v *fnVerifier) someInput(terms []*logic.Term, search func(input *witness) 
 		}
 	}
 	return false
+}
+
+// tiedToInputs returns the variables among sentinels that the formulas tie
+// to an error of the input: two constants that hold or contain errors are
+// tied when one formula mentions both, and ties are followed from one
+// constant to the next. A sample may give an input error the value of such
+// a variable. One that is tied only to what calls returned, as those that a
+// contract of a callee names, would only widen the search: no fact about
+// the input can then need the input to be it. Which variables are offered
+// decides only where the search looks, never whether a sample is taken.
+func (v *fnVerifier) tiedToInputs(terms, sentinels []*logic.Term) []*logic.Term {
+	if len(sentinels) == 0 {
+		return nil
+	}
+	holdsError := func(sort logic.Sort) bool {
+		for sort.IsSeq() {
+			sort = sort.Elem()
+		}
+		return sort == logic.Err
+	}
+	parent := map[string]string{}
+	var find func(name string) string
+	find = func(name string) string {
+		if up, ok := parent[name]; ok && up != name {
+			root := find(up)
+			parent[name] = root
+			return root
+		}
+		parent[name] = name
+		return name
+	}
+	inputs := map[string]bool{}
+	for _, t := range terms {
+		if v.typing[t] {
+			continue
+		}
+		var names []string
+		seen := map[*logic.Term]bool{}
+		var walk func(t *logic.Term)
+		walk = func(t *logic.Term) {
+			if seen[t] {
+				return
+			}
+			seen[t] = true
+			if t.Op == logic.OpConst && t != logic.NilErr() && holdsError(t.Sort) {
+				names = append(names, t.Name)
+				if v.isInput(t) && !isSentinelTerm(t) {
+					inputs[t.Name] = true
+				}
+			}
+			for _, arg := range t.Args {
+				walk(arg)
+			}
+		}
+		walk(t)
+		for _, name := range names {
+			parent[find(name)] = find(names[0])
+		}
+	}
+	tied := map[string]bool{}
+	for name := range inputs {
+		tied[find(name)] = true
+	}
+	var offered []*logic.Term
+	for _, sentinel := range sentinels {
+		if tied[find(sentinel.Name)] {
+			offered = append(offered, sentinel)
+		}
+	}
+	return offered
 }
 
 // proposeFor asks Z3 for values of the constants of a sample that satisfy

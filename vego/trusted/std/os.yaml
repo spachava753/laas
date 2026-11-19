@@ -1,0 +1,15 @@
+version: 1
+
+trusted:
+  os.Remove:
+    reason: >-
+      Documented to remove the named file or empty directory, and to return
+      an error of type *PathError if there is one. It is given only a string,
+      so every error in the tree is made by the standard library: the
+      *PathError, whose methods only read its fields and call those of its
+      Err, and an Err that package syscall makes from what the system
+      returned: a syscall.Errno, or a syscall.ErrorString on Plan 9. Their
+      methods read only their value, and their Is methods only compare the
+      argument with error variables. Which removals succeed is not modelled.
+    vouches: [result]
+    modifies: []

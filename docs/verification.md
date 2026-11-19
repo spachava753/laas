@@ -1119,6 +1119,34 @@ argument
 
 An error that a trusted function returns has no known origin unless the contract of the function vouches for it. See [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). Without that, `errors.Is(err, io.EOF)` on it is reported. You can compare it with `==` instead, as in `err == io.EOF`, which runs no method. That comparison is true only when the function returned `io.EOF` itself, and not when it returned an error that wraps `io.EOF`.
 
+The shipped contracts of `strconv.Atoi` and `os.Remove` vouch for their errors. The contract of `strconv.Atoi` also says that a failure is a syntax error or a range error, and which number comes with each:
+
+```go
+// @Ensures err = nil Or is(err, strconv.ErrSyntax)
+func Nearest(s string) (n int, err error) {
+	n, err = strconv.Atoi(s)
+	if errors.Is(err, strconv.ErrRange) {
+		return n, nil
+	}
+	return n, err
+}
+```
+
+The contract of `os.Remove` says nothing about which error it returns. Its error can still be searched:
+
+```go
+// @Ensures ~is(err, os.ErrNotExist)
+func RemoveIfPresent(name string) (err error) {
+	err = os.Remove(name)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+```
+
+This is proved because `os.ErrNotExist` is not nil, so `errors.Is` does not find it in `nil`. See [What vego knows of an error variable](#what-vego-knows-of-an-error-variable).
+
 ### Functions that cannot promise success
 
 Some functions cannot say when they succeed, because their success depends on a call whose contract does not say what it returns.
@@ -1155,22 +1183,46 @@ It can also format an error that a trusted contract vouches for. See [Errors tha
 
 It cannot format an error that came from a parameter, or from a trusted function whose contract does not vouch for it. Formatting an error calls its methods, and `vego` cannot see what the methods of an unknown error do. For the same reason, such an error cannot be passed to a trusted function unless that function's contract allows it. See [Arguments that carry code](#arguments-that-carry-code).
 
-As a result, this very common line is rejected when `err` came from a trusted function:
+The shipped contract of `strconv.Atoi` vouches for its error, so its error can be wrapped:
 
 ```go
-return 0, fmt.Errorf("bad quantity %q: %w", line, err)
+var ErrTooMany = errors.New("too many")
+
+// @Ensures err = nil -> 0 <= n <= 1000
+// @Ensures err = nil Or err = ErrTooMany Or is(err, strconv.ErrSyntax) Or is(err, strconv.ErrRange)
+func ParseQuantity(line string) (n int, err error) {
+	n, err = strconv.Atoi(line)
+	if err != nil {
+		return 0, fmt.Errorf("bad quantity %q: %w", line, err)
+	}
+	if n < 0 || n > 1000 {
+		return 0, ErrTooMany
+	}
+	return n, nil
+}
+```
+
+The second clause is proved because `%w` keeps what `errors.Is` finds in `err`, and the contract of `strconv.Atoi` says that its error is a syntax error or a range error.
+
+An error that was passed in is rejected:
+
+```go
+// @Ensures err != nil
+func Labelled(cause error) (err error) {
+	return fmt.Errorf("load: %w", cause)
+}
 ```
 
 ```text
-vego: cannot verify QuantityWrapped: formatting err would run the methods of an error
-whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in
-a verified function, or one that a trusted contract vouches for, can be formatted
+vego: cannot verify Labelled: formatting cause would run the methods of an error whose
+origin is not known; only an error made by errors.New or fmt.Errorf, here or in a
+verified function, or one that a trusted contract vouches for, can be formatted
 ```
 
 Return the error unchanged, or wrap an error of your own:
 
 ```go
-return 0, fmt.Errorf("bad quantity %q: %w", line, ErrRange)
+return fmt.Errorf("load: %w", ErrMissing)
 ```
 
 ### Other limits
@@ -1179,7 +1231,7 @@ These are not supported, and a function that uses one is reported as `cannot ver
 
 - `errors.As`, which needs typed errors;
 - `errors.Join` and `errors.Unwrap`;
-- `errors.Is` on an error that came from a parameter or a trusted function;
+- `errors.Is` on an error that came from a parameter, or from a trusted function whose contract does not vouch for it;
 - an error variable that its package assigns or takes the address of.
 
 A struct invariant cannot name an error variable.
@@ -1414,9 +1466,10 @@ The names in an entry are the parameter and result names from the function's sou
 - `strings.Contains`, `strings.HasPrefix`, `strings.HasSuffix`, `strings.Index`, `strings.TrimSpace`, `strings.Repeat`, `strings.ToUpper`, `strings.ToLower`
 - `unicode/utf8.RuneCountInString`
 - `strconv.Itoa`, `strconv.Atoi`
+- `os.Remove`
 - `math/rand.Intn`, `math/rand.Int`
 
-The contracts are in `vego/trusted/std` in the source of `laas`. They state only behaviour that the function's documentation promises, and the tests of `vego` check each one against the real function. An entry in your own file with the same key replaces the shipped contract.
+The contracts are in `vego/trusted/std` in the source of `laas`. They state only behaviour that the function's documentation promises, and the tests of `vego` check each one against the real function. The contracts of `strconv.Atoi` and `os.Remove` vouch for their errors. For those, the tests also check that every error in the tree of a returned error has a type whose methods were read against what `vouches` claims. An entry in your own file with the same key replaces the shipped contract.
 
 ### What is checked in an entry
 
@@ -1504,7 +1557,7 @@ With `vouches: [err]`, an error that the function returns in `err` has a known o
 - `==` on these errors cannot panic, and it reports true only for two errors that are the same. Every one of them equals itself. `errors.Is` reports the same for two such errors that `==` reports equal, and the same for two targets that `==` reports equal.
 - What `errors.Is` reports for one of these errors and a given target does not change after the function returns.
 
-A pointer to a struct meets these conditions when its methods only read its fields and call the same methods of the errors it holds, those errors meet the conditions themselves, and nothing writes the fields after the function returns. The function must not keep the pointer and change the struct later. So does an integer type whose `Is` method compares its argument with error variables, such as `syscall.Errno`. A type with a float in it does not, because `==` reports false for a NaN compared with itself. An `Is` method that calls `target.Error()` does not either.
+A pointer to a struct meets these conditions when its methods only read its fields and call the same methods of the errors it holds, those errors meet the conditions themselves, and nothing writes the fields after the function returns. The function must not keep the pointer and change the struct later. An integer type whose `Is` method only compares its argument with error variables, such as `syscall.Errno`, also meets them. A type with a float in it does not, because `==` reports false for a NaN compared with itself. An `Is` method that calls `target.Error()` does not either.
 
 If the function returns an error that it was given, the claim covers that error too. With `runs`, the claim must hold whatever value is passed. The trust report shows `vouches`.
 

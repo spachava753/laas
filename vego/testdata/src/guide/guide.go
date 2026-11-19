@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"sync"
 )
@@ -731,26 +732,58 @@ func (a *Account) DepositLocked(n int) {
 	a.mu.Unlock()
 }
 
-// QuantityWrapped formats an error that came from a trusted function.
+var ErrTooMany = errors.New("too many")
+
+// ParseQuantity wraps the error of strconv.Atoi, whose contract vouches for
+// it.
 //
-// @Ensures err = nil -> True
-func QuantityWrapped(line string) (n int, err error) {
+// @Ensures err = nil -> 0 <= n <= 1000
+// @Ensures err = nil Or err = ErrTooMany Or is(err, strconv.ErrSyntax) Or is(err, strconv.ErrRange)
+func ParseQuantity(line string) (n int, err error) {
 	n, err = strconv.Atoi(line)
 	if err != nil {
-		return 0, fmt.Errorf("bad quantity %q: %w", line, err) // want `vego: cannot verify QuantityWrapped: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a trusted contract vouches for, can be formatted`
+		return 0, fmt.Errorf("bad quantity %q: %w", line, err)
+	}
+	if n < 0 || n > 1000 {
+		return 0, ErrTooMany
 	}
 	return n, nil
 }
 
-// Quantity wraps an error of its own instead.
+// Labelled formats an error that was passed in.
 //
-// @Ensures err = nil -> True
-func Quantity(line string) (n int, err error) {
-	n, err = strconv.Atoi(line)
-	if err != nil {
-		return 0, fmt.Errorf("bad quantity %q: %w", line, ErrRange)
+// @Ensures err != nil
+func Labelled(cause error) (err error) {
+	return fmt.Errorf("load: %w", cause) // want `vego: cannot verify Labelled: formatting cause would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a trusted contract vouches for, can be formatted`
+}
+
+// Nearest gives the int nearest to a number that does not fit in one.
+//
+// @Ensures err = nil Or is(err, strconv.ErrSyntax)
+func Nearest(s string) (n int, err error) {
+	n, err = strconv.Atoi(s)
+	if errors.Is(err, strconv.ErrRange) {
+		return n, nil
 	}
-	return n, nil
+	return n, err
+}
+
+// RemoveIfPresent removes a file, and does not fail when there is none.
+//
+// @Ensures ~is(err, os.ErrNotExist)
+func RemoveIfPresent(name string) (err error) {
+	err = os.Remove(name)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+// LabelledOwn wraps an error of its own instead.
+//
+// @Ensures err != nil
+func LabelledOwn() (err error) { // want `vego: the contract of LabelledOwn may also be met by a function that always returns an error`
+	return fmt.Errorf("load: %w", ErrMissing)
 }
 
 // IsEmpty asks which error it is, which runs methods of the error that

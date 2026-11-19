@@ -9,6 +9,18 @@ trusted:
 
   strconv.Atoi:
     reason: >-
-      Documented to parse a decimal integer and to report a syntax or range
-      error otherwise. Which strings it accepts is not modelled.
+      Documented as ParseInt(s, 10, 0) converted to int. ParseInt's errors
+      have concrete type *NumError, whose Err is ErrSyntax, with the value 0,
+      for an empty string or invalid digits, and ErrRange, with the value of
+      greatest magnitude of the sign, for a number that does not fit; base 10
+      and bit size 0 are valid, so no other Err occurs. NumError.Unwrap
+      returns Err (Go 1.14). Its methods only read its fields and call
+      Err.Error, and ErrSyntax and ErrRange are made by errors.New, so the
+      errors meet what vouches claims. Which strings it accepts is not
+      modelled.
+    vouches: [result2]
     modifies: []
+    ensures:
+      - "result2 != nil -> (is(result2, ErrSyntax) <-> ~is(result2, ErrRange))"
+      - "is(result2, ErrSyntax) -> result1 = 0"
+      - "is(result2, ErrRange) -> (result1 = MaxInt Or result1 = MinInt)"

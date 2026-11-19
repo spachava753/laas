@@ -48,13 +48,22 @@ func IsFull(A []int) (full bool) {
 	return errors.Is(err, ErrFull) // want `vego: postcondition may not hold: full = False`
 }
 
-// ParseIs asks errors.Is about the error of a trusted call, whose methods
-// nobody has seen.
+// ParseIs asks errors.Is about the error of strconv.Atoi, whose shipped
+// contract vouches for it and says that a syntax error comes with 0.
 //
-// @Ensures True
-func ParseIs(s string) (bad bool) {
-	_, err := strconv.Atoi(s)
-	return errors.Is(err, strconv.ErrSyntax) // want `vego: cannot verify ParseIs: errors.Is would run the Is and Unwrap methods of err, an error whose origin is not known`
+// @Ensures r
+func ParseIs(s string) (r bool) {
+	n, err := strconv.Atoi(s)
+	return !errors.Is(err, strconv.ErrSyntax) || n == 0
+}
+
+// ParseIsRange claims the same of a range error, which comes with the
+// number of greatest magnitude.
+//
+// @Ensures r
+func ParseIsRange(s string) (r bool) {
+	n, err := strconv.Atoi(s)
+	return !errors.Is(err, strconv.ErrRange) || n == 0 // want `vego: postcondition may not hold: r`
 }
 
 // Holds asks errors.Is about a sentinel and a target of which nothing is
