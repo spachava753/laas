@@ -162,6 +162,15 @@ func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 // evalAs evaluates an expression that is assigned to something of type want.
 // It differs from eval only for nil, which has no type of its own.
 func (v *fnVerifier) evalAs(e ast.Expr, want types.Type, st *state, guard []*logic.Term) value {
+	// A value of a function type is made only from nil or from a value
+	// of the same type. Anything else would give a value the contract of
+	// a type without a check that it meets it: a value of another function
+	// type, which Go converts when the underlying types are the same, or a
+	// function, method, or literal written there.
+	if isFunc(want) && !v.isNil(e) && !types.Identical(v.info.TypeOf(e), want) {
+		v.unsupported(e.Pos(), fmt.Sprintf("converting %s to %s is not supported: a value of a function type is made only from "+
+			"nil or from a value of the same type", types.ExprString(e), want))
+	}
 	if !v.isNil(e) {
 		// An error value is only ever an error, nil, or the result of a
 		// call. Converting anything else to an error would hide a value

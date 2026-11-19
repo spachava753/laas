@@ -132,3 +132,40 @@ func FromValue(mk MakeBox) (r int) {
 	b := mk()
 	return b.n // want `vego: postcondition may not hold: r >= 0`
 }
+
+// A value of a type without a contract does not become one of a type with a
+// contract: nothing claims that it meets the contract.
+
+// through calls a mapper.
+//
+// @Requires m != nil
+// @Ensures 0 <= r <= 2000
+func through(m Mapper) (r int) {
+	return m(1)
+}
+
+// Convert converts a value of another named type.
+//
+// @Requires p != nil
+// @Ensures 0 <= r <= 2000
+func Convert(p Plain) (r int) {
+	m := Mapper(p) // want `vego: cannot verify Convert: converting p to funcvalues.Mapper is not supported: a value of a function type is made only from`
+	return m(1)
+}
+
+// Assign assigns a value of an unnamed type.
+//
+// @Requires u != nil
+// @Ensures 0 <= r <= 2000
+func Assign(u func(int) int) (r int) {
+	var m Mapper = u // want `vego: cannot verify Assign: converting u to funcvalues.Mapper is not supported`
+	return m(1)
+}
+
+// Pass passes a value of an unnamed type.
+//
+// @Requires u != nil
+// @Ensures 0 <= r <= 2000
+func Pass(u func(int) int) (r int) {
+	return through(u) // want `vego: cannot verify Pass: converting u to funcvalues.Mapper is not supported`
+}
