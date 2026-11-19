@@ -303,6 +303,13 @@ func Bump(m map[string]int, k string) {
 	m[k] = m[k] + 1
 }
 
+// Pair builds a map from two keys that may be equal.
+//
+// @Ensures True
+func Pair(a, b int) (result map[int]int) {
+	return map[int]int{a: 1, b: 2} // want `vego: the keys a and b of this map literal may be equal, and Go does not fix which of their entries the map keeps; build the map with assignments instead`
+}
+
 // ErrMissing and ErrEmpty are errors that are known not to be nil.
 var (
 	ErrMissing = errors.New("missing")

@@ -225,16 +225,30 @@ func (v *fnVerifier) deleteKey(call *ast.CallExpr, st *state) {
 }
 
 // mapLiteral evaluates map[K]V{k: v, ...}: a new map that gets the entries
-// one after the other.
+// one after the other. Go does not fix the order in which the entries are
+// put into the map, so when two keys are equal it is not known which value
+// the map keeps. Two constant keys cannot be equal, since Go rejects the
+// literal; any other two must be proved to differ.
 func (v *fnVerifier) mapLiteral(e *ast.CompositeLit, t types.Type, st *state, guard []*logic.Term) value {
 	if !mapModelled(t) {
 		v.unsupported(e.Pos(), fmt.Sprintf("maps of type %s are not supported", t))
 	}
 	m := v.newMap(st, t)
 	keyType, elem := mapParts(t)
+	var keys []*logic.Term
 	for _, element := range e.Elts {
 		pair := element.(*ast.KeyValueExpr)
 		key := v.settled(st, guard, v.evalAs(pair.Key, keyType, st, guard), keyType)[0]
+		for j, earlier := range keys {
+			other := e.Elts[j].(*ast.KeyValueExpr).Key
+			if v.info.Types[pair.Key].Value != nil && v.info.Types[other].Value != nil {
+				continue
+			}
+			v.check(st, guard, logic.Not(v.same(earlier, key)), pair.Key.Pos(),
+				"the keys %s and %s of this map literal may be equal, and Go does not fix which of their entries the map keeps; "+
+					"build the map with assignments instead", types.ExprString(other), types.ExprString(pair.Key))
+		}
+		keys = append(keys, key)
 		held := v.settled(st, guard, v.evalAs(pair.Value, elem, st, guard), elem)
 		v.mapStore(st, t, m[0], key, held, true, pair.Pos(), "a new map is filled")
 	}

@@ -535,3 +535,35 @@ func LogicalIndex(u [][]int, t []int, x, y bool) {
 func LogicalRead(u [][]int, t []int, x bool) {
 	u[b2i(x && t[0] == 0)] = append(t[:0], 5) // want `vego: t\[0\] may be read before or after the write of append into the array of t\[:0\]`
 }
+
+// DistinctKeys builds a map from two keys that differ.
+//
+// @Requires a != b
+// @Ensures result[a] = 1 And result[b] = 2
+func DistinctKeys(a, b int) (result map[int]int) {
+	return map[int]int{a: 1, b: 2}
+}
+
+// ConstantKeys builds a map from constant keys, which Go requires to differ,
+// and one more.
+//
+// @Requires k > 2
+// @Ensures result[1] = 10 And result[2] = 20 And result[k] = 0
+func ConstantKeys(k int) (result map[int]int) {
+	return map[int]int{1: 10, 2: 20, k: 0}
+}
+
+// RepeatedKey builds a map from two keys that may be the same. Go does not
+// fix which of the two entries the map then keeps.
+//
+// @Ensures True
+func RepeatedKey(a, b int) (result map[int]int) {
+	return map[int]int{a: 1, b: 2} // want `vego: the keys a and b of this map literal may be equal, and Go does not fix which of their entries the map keeps; build the map with assignments instead`
+}
+
+// RepeatedName builds a map from a constant key and one that may equal it.
+//
+// @Ensures True
+func RepeatedName(s string) (result map[string]int) {
+	return map[string]int{"x": 1, s: 2} // want `vego: the keys "x" and s of this map literal may be equal`
+}

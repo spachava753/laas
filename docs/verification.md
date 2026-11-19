@@ -939,6 +939,22 @@ func Bump(m map[string]int, k string) {
 
 Keys must be integers or strings. Writing to a map requires a proof that the map is not nil. Reading from a map and calling `delete` do not.
 
+The keys of a map literal must be different. Go rejects two equal constant keys, and `vego` must prove that any other two keys differ. Go does not fix the order in which a literal puts its entries into the map, so when two keys are equal, either value may be kept:
+
+```go
+// @Ensures True
+func Pair(a, b int) (result map[int]int) {
+	return map[int]int{a: 1, b: 2}
+}
+```
+
+```text
+vego: the keys a and b of this map literal may be equal, and Go does not fix which of their
+entries the map keeps; build the map with assignments instead
+```
+
+Add `Requires a != b`, or assign the entries one by one, which runs in order.
+
 A `range` loop over a map has two limits. The first is that it can check every value but cannot add the values up, because `vego` does not know that each key is visited exactly once. The second is that the loop body must not modify any map of the same type. The common loop that deletes entries is therefore not supported:
 
 ```go
@@ -1770,6 +1786,7 @@ This table lists the most common messages.
 | `x is assigned, which F may not modify; list it in a // @Modifies clause` | No `Modifies` entry covers memory of this kind. | Add it to `Modifies`. |
 | `... which F may not modify: nothing its // @Modifies clauses list is known to cover it` | An entry covers memory of this kind, but `vego` cannot prove it is this memory. It may be another element, another struct, or a slice that was replaced after `F` was called. | Make the entry match. For a replaced slice, the callee needs a `fresh ... Or within ...` clause. |
 | `x may be read before or after the call to F, which may change it, and Go does not fix the order` | Go may read `x` before or after `F` runs in this statement, and the two are not proved to give the same value. | Read `x` or call `F` in a statement of its own, in the order you mean. See [Reads that Go may make before or after a call](#reads-that-go-may-make-before-or-after-a-call). |
+| `the keys a and b of this map literal may be equal` | Two keys of a map literal are not proved to differ, so it is not known which entry the map keeps. | Prove that they differ, or assign the entries one by one. |
 | `Modifies lists x, but F never needs to modify it` | The `Modifies` list allows more than the body needs. | Remove or narrow the entry. |
 | `invariant of T may not hold for what is passed to F as x` | The struct invariant is not proved at the call. | Restore it before the call. In a loop, repeat it as a loop invariant. |
 | `invariant of T may not hold for x on return` | The struct invariant is not proved at the end of the function. | Restore it before returning. |
