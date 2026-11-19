@@ -2,6 +2,7 @@ package vego
 
 import (
 	"fmt"
+	"go/token"
 	"go/types"
 	"math/big"
 	"slices"
@@ -34,6 +35,9 @@ type contractFact struct {
 	// Errors holds, by how the contract spells them, the keys of the
 	// package-level error variables it mentions; see errorKey.
 	Errors map[string]string
+	// CallsValues is set when running the function may make a call through
+	// a function value, itself or in what it calls; see mayCallValues.
+	CallsValues bool
 }
 
 func (*contractFact) AFact() {}
@@ -79,57 +83,66 @@ func (pv *pkgVerifier) exportContracts(excused map[*funcInfo]bool) {
 		if !fn.annotated() || !fn.obj.Exported() {
 			continue
 		}
-		fact := &contractFact{Excused: excused[fn], Verified: !unverified[fn], KnownErrors: pv.knownReturns[fn], Consts: map[string]string{}, Errors: map[string]string{}}
-		// The constants a contract mentions are recorded with their
-		// values, and the error variables with their keys.
-		at := fn.decl.Pos()
-		scope := pv.pass.Pkg.Scope().Innermost(at)
-		var visit func(n *logic.Node)
-		visit = func(n *logic.Node) {
-			if constant, ok := pv.pass.Pkg.Scope().Lookup(n.Name).(*types.Const); ok && n.Kind == logic.NIdent {
-				if literal, ok := literalOf(constant.Val()); ok {
-					fact.Consts[n.Name] = literal.String()
-				}
-			}
-			if _, obj := scope.LookupParent(n.Name, at); n.Kind == logic.NIdent && obj != nil {
-				if variable := errorVariableOf(obj, ""); variable != nil {
-					fact.Errors[n.Name] = errorKey(variable)
-				}
-			}
-			if n.Kind == logic.NField && n.Kids[0].Kind == logic.NIdent {
-				if _, obj := scope.LookupParent(n.Kids[0].Name, at); obj != nil {
-					if variable := errorVariableOf(obj, n.Name); variable != nil {
-						fact.Errors[n.Kids[0].Name+"."+n.Name] = errorKey(variable)
-					}
-				}
-			}
-			for _, kid := range n.Kids {
-				visit(kid)
-			}
-		}
-		capture := func(c *clause) string {
-			if c.node != nil {
-				visit(c.node)
-			}
-			return c.text
-		}
-		for _, c := range fn.requires {
-			fact.Requires = append(fact.Requires, capture(c))
-		}
-		for _, c := range fn.ensures {
-			fact.Ensures = append(fact.Ensures, capture(c))
-		}
-		for _, m := range fn.modifies {
-			fact.Modifies = append(fact.Modifies, m.text)
-			// The indices of a path may mention constants too.
-			for _, step := range m.steps {
-				if step.index != nil {
-					visit(step.index)
-				}
-			}
-		}
+		fact := pv.contractFactOf(fn, fn.decl.Pos())
+		fact.Excused, fact.Verified, fact.KnownErrors = excused[fn], !unverified[fn], pv.knownReturns[fn]
+		fact.CallsValues = pv.mayCallValues(fn.obj)
 		pv.pass.ExportObjectFact(fn.obj, fact)
 	}
+}
+
+// contractFactOf records the clauses of a contract written in this package
+// as a fact, with the values of the constants they mention and the keys of
+// the error variables, as they are seen at a position.
+func (pv *pkgVerifier) contractFactOf(fn *funcInfo, at token.Pos) *contractFact {
+	fact := &contractFact{Consts: map[string]string{}, Errors: map[string]string{}}
+	// The constants a contract mentions are recorded with their
+	// values, and the error variables with their keys.
+	scope := pv.pass.Pkg.Scope().Innermost(at)
+	var visit func(n *logic.Node)
+	visit = func(n *logic.Node) {
+		if constant, ok := pv.pass.Pkg.Scope().Lookup(n.Name).(*types.Const); ok && n.Kind == logic.NIdent {
+			if literal, ok := literalOf(constant.Val()); ok {
+				fact.Consts[n.Name] = literal.String()
+			}
+		}
+		if _, obj := scope.LookupParent(n.Name, at); n.Kind == logic.NIdent && obj != nil {
+			if variable := errorVariableOf(obj, ""); variable != nil {
+				fact.Errors[n.Name] = errorKey(variable)
+			}
+		}
+		if n.Kind == logic.NField && n.Kids[0].Kind == logic.NIdent {
+			if _, obj := scope.LookupParent(n.Kids[0].Name, at); obj != nil {
+				if variable := errorVariableOf(obj, n.Name); variable != nil {
+					fact.Errors[n.Kids[0].Name+"."+n.Name] = errorKey(variable)
+				}
+			}
+		}
+		for _, kid := range n.Kids {
+			visit(kid)
+		}
+	}
+	capture := func(c *clause) string {
+		if c.node != nil {
+			visit(c.node)
+		}
+		return c.text
+	}
+	for _, c := range fn.requires {
+		fact.Requires = append(fact.Requires, capture(c))
+	}
+	for _, c := range fn.ensures {
+		fact.Ensures = append(fact.Ensures, capture(c))
+	}
+	for _, m := range fn.modifies {
+		fact.Modifies = append(fact.Modifies, m.text)
+		// The indices of a path may mention constants too.
+		for _, step := range m.steps {
+			if step.index != nil {
+				visit(step.index)
+			}
+		}
+	}
+	return fact
 }
 
 // importedContract returns the contract of a function that was verified in
@@ -143,16 +156,23 @@ func (pv *pkgVerifier) importedContract(callee *types.Func) *funcInfo {
 	if callee.Pkg() == nil || callee.Pkg() == pv.pass.Pkg || !pv.pass.ImportObjectFact(callee, fact) {
 		return nil
 	}
-	fn := newFuncInfo(callee)
-	fn.imported = fact
+	fn := pv.contractFromFact(callee, callee.Pkg(), fact)
 	pv.imported[callee] = fn
+	return fn
+}
+
+// contractFromFact builds the contract that another package published for
+// one of its functions or function types, whose signature obj has.
+func (pv *pkgVerifier) contractFromFact(obj *types.Func, pkg *types.Package, fact *contractFact) *funcInfo {
+	fn := newFuncInfo(obj)
+	fn.imported = fact
 	if !fact.Verified {
-		fn.defect("its verification failed in package %s", callee.Pkg().Path())
+		fn.defect("its verification failed in package %s", pkg.Path())
 		return fn
 	}
-	resolver := pv.foreignResolver(callee.Pkg())
-	if pv.foreignBroken[callee.Pkg()] {
-		fn.defect("the predicates of package %s could not be understood", callee.Pkg().Path())
+	resolver := pv.foreignResolver(pkg)
+	if pv.foreignBroken[pkg] {
+		fn.defect("the predicates of package %s could not be understood", pkg.Path())
 		return fn
 	}
 	clauses := func(kind string, texts []string) []*clause {
@@ -163,7 +183,7 @@ func (pv *pkgVerifier) importedContract(callee *types.Func) *funcInfo {
 				fn.defect("its %s %q cannot be read: %v", kind, text, err)
 				continue
 			}
-			list = append(list, &clause{kind: kind, text: text, node: node, pos: callee.Pos(), res: resolver})
+			list = append(list, &clause{kind: kind, text: text, node: node, pos: obj.Pos(), res: resolver})
 		}
 		return list
 	}
@@ -174,7 +194,7 @@ func (pv *pkgVerifier) importedContract(callee *types.Func) *funcInfo {
 			fn.defect("its Modifies %q cannot be read: %v", text, err)
 			continue
 		}
-		fn.modifies = append(fn.modifies, newModTargets(targets, &clause{kind: "Modifies", text: text, pos: callee.Pos(), res: resolver})...)
+		fn.modifies = append(fn.modifies, newModTargets(targets, &clause{kind: "Modifies", text: text, pos: obj.Pos(), res: resolver})...)
 	}
 	return fn
 }

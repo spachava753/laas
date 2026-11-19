@@ -216,6 +216,8 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			knownReturns:  map[*funcInfo]bool{},
 			isParameter:   map[*types.Var]bool{},
 			invariants:    map[*types.TypeName]*invariantSet{},
+			funcTypes:     map[*types.TypeName]*funcInfo{},
+			importedTypes: map[*types.TypeName]*funcInfo{},
 			foreignBroken: map[*types.Package]bool{},
 			imported:      map[*types.Func]*funcInfo{},
 			foreign:       map[*types.Package]*logic.Resolver{},
@@ -242,6 +244,8 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		pv.collect()
 		pv.checkInvariantsDeclared()
 		pv.exportInvariants()
+		pv.checkTypeContracts()
+		pv.exportTypeContracts()
 		for _, fn := range pv.order {
 			if !fn.annotated() || fn.broken {
 				continue
@@ -318,6 +322,11 @@ type funcInfo struct {
 	// forces caches whether a trusted contract forces success for some
 	// input; see forcesSuccess.
 	forces *bool
+	// valueOf is set for the contract of a named function type, which a
+	// call through a value of the type is checked against; see
+	// funcvalues.go. Such a contract is not verified, and is treated where
+	// that matters like a trusted one.
+	valueOf *types.TypeName
 }
 
 func (f *funcInfo) annotated() bool {
@@ -408,6 +417,13 @@ type pkgVerifier struct {
 	// invariants holds the invariants of struct types, nil for a type known
 	// to have none.
 	invariants map[*types.TypeName]*invariantSet
+	// funcTypes holds the contracts of the named function types of this
+	// package, and importedTypes those of other packages, nil for a type
+	// known to have none; mayCall caches whether running a function may
+	// make a call through a function value. See funcvalues.go.
+	funcTypes     map[*types.TypeName]*funcInfo
+	importedTypes map[*types.TypeName]*funcInfo
+	mayCall       map[*types.Func]bool
 }
 
 // report emits a diagnostic once per position and message. Symbolic execution
@@ -886,6 +902,10 @@ func (pv *pkgVerifier) collect() {
 					continue
 				}
 				if name, ok := pv.typeDocumented(file, group); ok {
+					if name != nil && isFunc(name.Type().Underlying()) {
+						pv.addTypeContract(name, c)
+						continue
+					}
 					pv.addInvariant(name, c)
 					continue
 				}

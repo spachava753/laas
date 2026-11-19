@@ -539,12 +539,33 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 		switch {
 		case !ok:
 			fn.defect("its vouches %q: %s is not a result", item.text, item.text)
-		case !isError(fn.results[index].Type()):
-			fn.defect("its vouches lists %s, whose type %s is not error", item.text, fn.results[index].Type())
+		case !isError(fn.results[index].Type()) && !pv.holdsContractedValue(fn.results[index].Type(), map[types.Type]bool{}):
+			fn.defect("its vouches lists %s, whose type %s is not error and can hold no function value of a type with a contract", item.text, fn.results[index].Type())
 		case fn.vouches[index]:
 			fn.defect("its vouches lists %s twice", item.text)
 		default:
 			fn.vouches[index] = true
+		}
+	}
+	// A function value that a trusted function hands back is code its
+	// author may not have seen, as an error is. Verified code calls it only
+	// on the claim that it meets the contract of its type, which vouches
+	// makes for a result. No claim can be made yet for a value the
+	// function writes into memory, at any depth of what it may modify.
+	for i, result := range fn.results {
+		if !fn.vouches[i] && pv.holdsContractedValue(result.Type(), map[types.Type]bool{}) {
+			name := result.Name()
+			if name == "" || name == "_" {
+				name = fmt.Sprintf("result %d", i+1)
+			}
+			fn.defect("its result %s can hold a function value of a type with a contract; "+
+				"list it under vouches to claim that every such value meets the contract of its type", name)
+		}
+	}
+	for _, m := range fn.modifies {
+		if covered := coveredType(fn, m); covered != nil && pv.holdsContractedValue(covered, map[types.Type]bool{}) {
+			fn.defect("its modifies %q covers memory that can hold a function value of a type with a contract, "+
+				"which a trusted function cannot write yet", m.text)
 		}
 	}
 	for name := range fn.paramNames {

@@ -620,3 +620,18 @@ trusted:
     modifies: []
     ensures:
       - "err = io.EOF"
+
+  funcvalues.loadMapper:
+    reason: Test helper that hands back a mapper and claims nothing about it.
+    modifies: []
+    ensures: ["m != nil"]
+
+  funcvalues.loadMapperVouched:
+    reason: Test helper that hands back a mapper made by verified code.
+    vouches: [m]
+    modifies: []
+    ensures: ["m != nil"]
+
+  (*funcvalues.Chain).grow:
+    reason: Test helper that may hang a new link with a mapper on a chain.
+    modifies: [c]

@@ -162,7 +162,11 @@ func (pv *pkgVerifier) run(fn *funcInfo, task func(v *fnVerifier)) {
 		case unsupported:
 			pv.report(r.pos, "cannot verify %s: %s", fn.obj.Name(), r.msg)
 		case logic.TooLarge:
-			pv.report(fn.decl.Name.Pos(), "cannot verify %s: a formula built to verify it has grown beyond %d nodes, "+
+			at := fn.obj.Pos()
+			if fn.decl != nil {
+				at = fn.decl.Name.Pos()
+			}
+			pv.report(at, "cannot verify %s: a formula built to verify it has grown beyond %d nodes, "+
 				"which is the limit; split the function, or the expressions in it, into smaller ones", fn.obj.Name(), logic.MaxSize)
 		default:
 			panic(r)
@@ -667,9 +671,12 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 		return
 	case isBuiltin(v.info, s.Call, "recover"):
 		v.unsupported(s.Pos(), recoverRefused)
+	case callee == nil && isFunc(v.info.TypeOf(s.Call.Fun)) && !v.info.Types[s.Call.Fun].IsBuiltin():
+		v.deferValue(s, st)
+		return
 	case callee == nil:
-		v.unsupported(s.Pos(), "only a call of a named function or method, or of a function literal, can be deferred; "+
-			"function values and built-in functions are not supported here")
+		v.unsupported(s.Pos(), "only a call of a named function or method, of a function literal, or of a function value can be deferred; "+
+			"built-in functions are not supported here")
 	case errorConstructor(callee):
 		v.unsupported(s.Pos(), "deferring a call that only makes an error is not supported")
 	case isErrorsIs(callee):

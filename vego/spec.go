@@ -140,7 +140,12 @@ func (e *specEnv) errorVariable(name string, steps []logic.Step, when logic.When
 			return nil, true, fmt.Errorf("%s names %s, which is not known here", spelled, key)
 		}
 	default:
-		at := e.fn.decl.Pos()
+		// A function type has no declaration of a function; its contract
+		// is read where the type is declared.
+		at := e.fn.obj.Pos()
+		if e.fn.decl != nil {
+			at = e.fn.decl.Pos()
+		}
 		_, obj := e.v.pass.Pkg.Scope().Innermost(at).LookupParent(name, at)
 		variable, rest = e.v.packageErrorVariable(obj, steps)
 	}
