@@ -2216,7 +2216,7 @@ A call through a function value of a type with a contract can be deferred too, a
 
 ### Locks
 
-`vego` ships contracts for the methods of `sync.Mutex` and `sync.RWMutex` that lock and unlock. Their formulas speak of whether the goroutine that runs the function holds the mutex. A formula writes that as `held(m)`, where `m` is a mutex or a pointer to one:
+`vego` ships contracts for the methods of `sync.Mutex` and `sync.RWMutex` that lock and unlock, and for `(*sync.Once).Do`. Their formulas speak of whether the goroutine that runs the function holds the mutex. A formula writes that as `held(m)`, where `m` is a mutex or a pointer to one:
 
 ```go
 // Deposit adds n to the balance if the result stays within the limit.
@@ -2283,6 +2283,35 @@ The contracts are these:
 
 Every one also requires that the receiver is not `nil` and lists the receiver under `modifies`. A state that a row does not mention stays as it was. `rheld(rw)` is true when the goroutine holds a read lock on `rw`. The goroutine can hold at most one, because the documentation of `sync` rules out recursive read locking: a second `RLock` can wait for a writer that waits for the first. For the same reason, `RLock` and `Lock` require that the goroutine holds neither lock, and `TryRLock` requires that it holds no read lock.
 
+#### Doing something once
+
+`(*sync.Once).Do` has a shipped contract too. Its state `running(o)` is true while the goroutine that runs the function is inside a call of `Do` on `o`:
+
+```go
+// Settings is set up once.
+type Settings struct {
+	once sync.Once
+	size int
+}
+
+// Setup sets the size the first time it is called.
+//
+// @Requires c != nil And ~running(c.once)
+// @Modifies c.once, c.size
+// @Ensures ~running(c.once')
+func (c *Settings) Setup(n int) {
+	c.once.Do(func() { c.size = n })
+}
+```
+
+`Do` requires `~running(o)`, because `Do` on a `Once` whose `Do` the goroutine is inside waits for itself. A function that is not verified could call `Setup` from the function it hands to `Do` on the same `Once`. The function literal that `Do` runs is checked as described in [Functions that a trusted function calls](#functions-that-a-trusted-function-calls). It may not write `c.once`, so it cannot call `Do` on `c.once` either. After `Do` nothing is known of `c.size`, since the function may have run in this call, in an earlier one, or in another goroutine. A function literal that `Do` runs cannot call `Do` on another `Once`, for the reason given in [Locking in a function that a trusted function calls](#locking-in-a-function-that-a-trusted-function-calls).
+
+The contract is:
+
+| Method | Requires | Ensures | Calls |
+| --- | --- | --- | --- |
+| `(*sync.Once).Do` | `o != nil`, `~running(o)` | `~running(o')` | `f()` with no conditions, at most once and only before `Do` returns |
+
 #### What a proof of a function that locks shows
 
 A verified function that locks a mutex is proved for one goroutine. The proof shows that this goroutine never locks a mutex that it holds, never unlocks one that it does not hold, writes only what `Modifies` lists, and meets its contract. Each of these holds only if no other goroutine writes memory that the function reads or writes while it runs, including while it waits in `Lock`. The one exception is that other goroutines can lock and unlock a mutex that this goroutine does not hold. Taking a lock does not change that assumption. `vego` still assumes that nothing else writes the memory that the lock protects.
@@ -2339,7 +2368,7 @@ A proof about several goroutines needs goroutines and channels, which `vego` doe
 
 #### Values that hold a mutex cannot be copied or overwritten
 
-`sync` documents that a mutex must not be copied after first use. `vego` refuses every copy and every assignment of a value that holds a mutex: a `sync.Mutex`, a `sync.RWMutex`, or a struct with one as a field at any depth. Such a value can only be created, used through a pointer, and changed through the methods of the mutex.
+`sync` documents that a mutex and a `Once` must not be copied after first use. `vego` refuses every copy and every assignment of a value that holds a mutex: a `sync.Mutex`, a `sync.RWMutex`, a `sync.Once`, or a struct with one as a field at any depth. Such a value can only be created, used through a pointer, and changed through the methods of the mutex.
 
 ```go
 // Snapshot copies the account, and its mutex with it.
@@ -2373,7 +2402,7 @@ A composite literal, a variable declaration, `new`, `&Account{}`, and `make([]Ac
 
 #### Locking in a function that a trusted function calls
 
-A function literal that a trusted function calls while it runs, such as the `less` of `sort.Search`, cannot lock a mutex. `vego` checks such a literal once for every call, in a state where everything that any call writes is unknown. The lock is one of those things, so whether the goroutine holds it is not known there. Lock outside the call instead. See [Functions that a trusted function calls](#functions-that-a-trusted-function-calls).
+A function literal that a trusted function calls while it runs, such as the function that `sort.Search` calls, cannot lock a mutex or call `Do` on a `sync.Once`. `vego` checks such a literal once for every call, in a state where everything that any call writes is unknown. The mutex or the `Once` is one of those things, so its state is not known there. Lock outside the call instead. See [Functions that a trusted function calls](#functions-that-a-trusted-function-calls).
 
 #### Trusted contracts for functions that lock
 
@@ -2454,7 +2483,7 @@ The names in an entry are the parameter and result names from the function's sou
 - `strconv.Itoa`, `strconv.Atoi`
 - `os.Remove`
 - `math/rand.Intn`, `math/rand.Int`
-- the methods of `sync.Mutex` and `sync.RWMutex` that lock and unlock, described in [Locks](#locks)
+- the methods of `sync.Mutex` and `sync.RWMutex` that lock and unlock, and `(*sync.Once).Do`, described in [Locks](#locks)
 
 It also includes contracts for `(io.Writer).Write`, `(io.Reader).Read`, `(context.Context).Err`, and `context.CancelFunc`, which are described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages).
 
@@ -2682,7 +2711,7 @@ handed; a function it is handed may not write what it may write, in the function
 count at callbacks.go:75:11
 ```
 
-The contract of `count` describes what `count` does to `t`. If a run could write `t` too, the contract would no longer say what `t` holds afterwards. A run could also call the trusted function again on the same memory. For `(*sync.Once).Do` that would never return. A function that `Do` runs and that calls `Do` on the same `Once` waits for itself. The rule covers such a call too, since the inner call writes what the outer one does. `Do` still has no contract that is true, shipped or your own. A run could copy the `Once` while `Do` holds its lock and call `Do` on the copy, which never returns either.
+The contract of `count` describes what `count` does to `t`. If a run could write `t` too, the contract would no longer say what `t` holds afterwards. A run could also call the trusted function again on the same memory. For `(*sync.Once).Do` that would never return. A function that `Do` runs and that calls `Do` on the same `Once` waits for itself. The rule covers such a call too, since the inner call writes what the outer one does. A run could also copy the `Once` while `Do` holds its lock and call `Do` on the copy, which never returns either. `vego` refuses that copy. See [Locks](#locks) for the shipped contract of `Do`.
 
 #### Results that depend on what is handed over
 
@@ -3235,9 +3264,8 @@ A function that uses any of the following is reported as `cannot verify`:
 - handing a trusted function anything but a function literal written there, a function, a method value, or a value of a type with a contract, for a parameter with a contract under `calls`; a variable that holds a literal cannot be handed over;
 - deferring a call that hands over a function, and using a trusted function with a contract under `calls` as a value;
 - applying a function parameter in a trusted contract unless it has one integer parameter and one integer or boolean result, and a contract under `calls` for a function that is given or returns an error, an interface, or a function;
-- `(*sync.Once).Do`, which has no true contract yet (see [What a run may write](#what-a-run-may-write));
-- copying or assigning a value that holds a `sync.Mutex` or a `sync.RWMutex`, parameters, results, and receivers of such a type, a method with a value receiver of such a type, `append` to a slice of them, and `range` variables and loop variables of such a type (see [Values that hold a mutex cannot be copied or overwritten](#values-that-hold-a-mutex-cannot-be-copied-or-overwritten));
-- locking a mutex in a function literal that a trusted function calls while it runs (see [Locking in a function that a trusted function calls](#locking-in-a-function-that-a-trusted-function-calls));
+- copying or assigning a value that holds a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once`, parameters, results, and receivers of such a type, a method with a value receiver of such a type, `append` to a slice of them, and `range` variables and loop variables of such a type (see [Values that hold a mutex cannot be copied or overwritten](#values-that-hold-a-mutex-cannot-be-copied-or-overwritten));
+- locking a mutex, or calling `Do` on another `sync.Once`, in a function literal that a trusted function calls while it runs (see [Locking in a function that a trusted function calls](#locking-in-a-function-that-a-trusted-function-calls));
 - a formula that names an unexported field of a struct declared in another package (see [Names](#names));
 - `recover`;
 - generic functions and types;
@@ -3271,9 +3299,9 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - A function value that reaches verified code from code that is not verified meets the contract of its type. That includes a value passed as an argument, a value in memory that an argument reaches, and a value made with `reflect.MakeFunc` or by generic code. Called with arguments that meet the `Requires` of its type, such a value returns without panicking, writes only what the `Modifies` of its type lists, and leaves its `Ensures` true.
 - Unverified code respects Go's type system. It does not use `unsafe`, `reflect`, or cgo to give one piece of memory two types or to change a string.
 - No other goroutine writes memory that a verified function reads or writes while it runs, also while the function waits in `Lock` or `RLock`. The one exception is that other goroutines can lock and unlock a mutex that the goroutine running the function does not hold. A proof covers one goroutine. A function that takes a lock is not proved to be safe to call from several goroutines. See [What a proof of a function that locks shows](#what-a-proof-of-a-function-that-locks-shows).
-- Every call that waits for another goroutine returns: `Lock`, `RLock`, and the `Lock` of an `RWMutex` return once the other goroutines release the mutex. A deadlock that the verified function takes part in breaks this.
+- Every call that waits for another goroutine returns: `Lock` and `RLock` return once the other goroutines release the mutex, and `(*sync.Once).Do` returns once the function that another goroutine runs in it returns. A deadlock that the verified function takes part in breaks this.
 - No other goroutine unlocks a mutex that the goroutine running a verified function holds.
-- Code that is not verified does not copy a value that holds a `sync.Mutex` or a `sync.RWMutex` after the mutex was first used, as the documentation of `sync` requires.
+- Code that is not verified does not copy a value that holds a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once` after it was first used, as the documentation of `sync` requires.
 - No code outside the packages that a verified package is built with assigns an error variable that a proof relies on, and no code changes one through `go:linkname`, assembly, `unsafe`, or `reflect`. When a verified package is built with a package that makes such an assignment, the verified package does not rely on the variable. The assignment is also reported wherever it meets a proof that does rely on it.
 - `errors.New`, `fmt.Errorf`, and `errors.Is` behave as they do in the Go releases that `laas` is tested with. Each call of `errors.New` or `fmt.Errorf` returns a new pointer. The errors they return have no `Is` method. `Unwrap` returns the operand of the one `%w`. `errors.Is` finds an error, or an error it wraps, that is the target. The tests of `vego` check this against the running toolchain.
 - The compiler evaluates each statement in an order that the Go specification allows. Calls, `&&`, and `||` run from left to right, an operation runs after its operands, and an assignment assigns only after it has evaluated everything. Where the specification leaves the order open, `vego` proves that every order it allows gives the same values.
@@ -3323,6 +3351,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `has(m, k)` | the map contains the key |
 | `held(m)`, `held(a.mu')` | the goroutine that runs the function holds the `sync.Mutex` or `sync.RWMutex`; `m` is a mutex or a pointer to one |
 | `rheld(rw)` | the goroutine holds a read lock on the `sync.RWMutex` |
+| `running(o)` | the goroutine is inside a call of `Do` on the `sync.Once` |
 | `name(x, y)` | a predicate |
 | `f(x)` | in the `ensures` of a trusted contract, what the function parameter `f` returns for `x` |
 

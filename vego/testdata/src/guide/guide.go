@@ -869,6 +869,21 @@ func (a *Account) DepositSum(n int) (ok bool) {
 	return true
 }
 
+// Settings is set up once.
+type Settings struct {
+	once sync.Once
+	size int
+}
+
+// Setup sets the size the first time it is called.
+//
+// @Requires c != nil And ~running(c.once)
+// @Modifies c.once, c.size
+// @Ensures ~running(c.once')
+func (c *Settings) Setup(n int) {
+	c.once.Do(func() { c.size = n })
+}
+
 // Switch locks only when on is set.
 type Switch struct {
 	mu sync.Mutex

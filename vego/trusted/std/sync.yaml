@@ -8,6 +8,12 @@ state:
         the mutex with Lock or a TryLock that returned true and has not
         unlocked it since. The zero value of a Mutex is documented to be an
         unlocked mutex, so no goroutine holds it.
+  sync.Once:
+    running:
+      reason: >-
+        True while the goroutine that runs the verified function is inside a
+        call of Do on the Once, which is while Do runs its function. Nobody
+        has called Do on a Once that was just created.
   sync.RWMutex:
     held:
       reason: >-
@@ -114,3 +120,18 @@ trusted:
     requires: ["rw != nil", "rheld(rw)"]
     modifies: [rw]
     ensures: ["~rheld(rw')", "held(rw') <-> held(rw)"]
+  (*sync.Once).Do:
+    reason: >-
+      Documented: "Because no call to Do returns until the one call to f
+      returns, if f causes Do to be called, it will deadlock", which is a call
+      of Do on the same Once; the requires rules it out for the calling
+      goroutine, and a function that Do runs may not write o, so it cannot
+      call Do on o either. Do calls f at most once, on the calling goroutine,
+      before it returns, or not at all when f ran before; when another
+      goroutine runs f, Do waits for it to return. It changes only o.
+    requires: ["o != nil", "~running(o)"]
+    runs: [f]
+    calls:
+      f(): {}
+    modifies: [o]
+    ensures: ["~running(o')"]

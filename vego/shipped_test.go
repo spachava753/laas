@@ -564,6 +564,10 @@ func TestShippedContracts(t *testing.T) {
 					checkTypeContract(t, pv, key, fn)
 					return
 				}
+				if key == "(*sync.Once).Do" {
+					checkOnceEntry(t, pv, pkg, key)
+					return
+				}
 				if strings.HasPrefix(key, "(*sync.") {
 					checkLockEntry(t, pv, pkg, key)
 					return

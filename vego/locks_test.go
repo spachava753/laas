@@ -203,3 +203,107 @@ func checkLockEntry(t *testing.T, pv *pkgVerifier, pkg *types.Package, key strin
 		t.Fatalf("only %d calls of %s satisfied its requires; the harness does not exercise the contract", checked, key)
 	}
 }
+
+// checkOnceEntry runs the entry of (*sync.Once).Do against sync. Rounds of
+// calls are made on fresh Onces, some while another goroutine calls Do on
+// the same Once with a function that takes a while. Every call the requires
+// allows must return within a bound, the function must run at most once for
+// each Once and only before the call that ran it returned, the contract
+// under calls must hold for each run (it has no requires), and the ensures
+// must hold of what the harness knows: the calling goroutine is not inside
+// Do, before or after.
+func checkOnceEntry(t *testing.T, pv *pkgVerifier, pkg *types.Package, key string) {
+	typeName := pkg.Scope().Lookup("Once").(*types.TypeName)
+	found, _, _ := types.LookupFieldOrMethod(types.NewPointer(typeName.Type()), true, pkg, "Do")
+	fn := pv.trustedContract(found.(*types.Func))
+	for _, defect := range fn.defects {
+		t.Errorf("contract cannot be used: %s", defect)
+	}
+	param := fn.params[0]
+	if len(fn.calls) != 1 {
+		t.Fatalf("the entry gives %d function parameters a contract under calls, want 1", len(fn.calls))
+	}
+	for _, cb := range fn.calls {
+		if len(cb.requires) != 0 {
+			t.Fatalf("the contract under calls has requires, which the harness does not check")
+		}
+	}
+	notRunning := func(*types.Var, string, logic.When) *logic.Term { return logic.False() }
+	env := &specEnv{
+		v: &fnVerifier{pkgVerifier: pv, fn: fn}, fn: fn,
+		given:      map[*types.Var]*logic.Term{param: logic.Pair(logic.RefLit(1), logic.IntLit(0))},
+		givenPost:  map[*types.Var]*logic.Term{param: logic.Pair(logic.RefLit(1), logic.IntLit(0))},
+		givenState: notRunning,
+	}
+	eval := &evaluator{bindings: map[string]*big.Int{}}
+	holds := func(clauses []*clause) bool {
+		for _, c := range clauses {
+			formula, err := pv.res.Formula(c.node, env)
+			if err != nil {
+				t.Fatalf("%q: %v", c.text, err)
+			}
+			if !eval.holds(formula) {
+				return false
+			}
+		}
+		return true
+	}
+	rng := rand.New(rand.NewSource(1))
+	checked := 0
+	for round := range 100 {
+		var once sync.Once
+		var mu sync.Mutex
+		runs := 0
+		body := func(pause bool) func() {
+			return func() {
+				mu.Lock()
+				runs++
+				mu.Unlock()
+				if pause {
+					time.Sleep(time.Millisecond)
+				}
+			}
+		}
+		contended := make(chan struct{})
+		if round%2 == 0 {
+			go func() {
+				defer close(contended)
+				once.Do(body(true))
+			}()
+		} else {
+			close(contended)
+		}
+		for range 1 + rng.Intn(4) {
+			if !holds(fn.requires) {
+				t.Fatal("the requires does not hold for a goroutine that is not inside Do")
+			}
+			ran := false
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				once.Do(func() { body(false)(); ran = true })
+			}()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("Do did not return within 5s")
+			}
+			mu.Lock()
+			if runs > 1 {
+				t.Fatalf("Do ran its function %d times on one Once", runs)
+			}
+			if !ran && runs == 0 {
+				t.Fatal("Do returned without the function having run on that Once")
+			}
+			mu.Unlock()
+			checked++
+			if !holds(fn.ensures) {
+				t.Fatal("the ensures is false after Do returned")
+			}
+		}
+		<-contended
+	}
+	if checked < 100 {
+		t.Fatalf("only %d calls of %s were checked", checked, key)
+	}
+}
