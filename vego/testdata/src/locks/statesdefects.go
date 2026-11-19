@@ -23,7 +23,7 @@ func PrivateRW(rw *sync.RWMutex) {
 func Unknown(a *Account) {
 }
 
-// @Requires a != nil And rheld(a.mu) // want `rheld\(a.mu\): a.mu is a sync.Mutex, which has the states held`
+// @Requires a != nil And rheld(a.mu) // want `rheld\(a.mu\): a.mu is a sync.Mutex, which has the state held`
 // @Ensures True
 func Other(a *Account) {
 }
@@ -34,6 +34,6 @@ func Number(n int) {
 }
 
 // @Requires held(m)
-// @Ensures held(m') // want `m is passed by value`
-func ByValue(m sync.Mutex) {
+// @Ensures True
+func ByValue(m sync.Mutex) { // want `cannot verify ByValue: the parameter m has type sync.Mutex, which holds a state, and passing it copies the value; use a pointer to sync.Mutex`
 }

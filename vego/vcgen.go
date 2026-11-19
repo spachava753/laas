@@ -427,6 +427,7 @@ func (v *fnVerifier) verify() {
 	if sig.TypeParams() != nil || sig.RecvTypeParams() != nil {
 		v.unsupported(fn.decl.Pos(), "generic functions are not supported yet")
 	}
+	v.checkCopies(fn.decl)
 	// A variable whose name means something else in annotations would be
 	// read as that other thing, silently.
 	ast.Inspect(fn.decl, func(n ast.Node) bool {

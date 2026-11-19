@@ -111,6 +111,7 @@ import (
 	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
 	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/ssa"
 	"golang.org/x/tools/go/types/typeutil"
 )
 
@@ -498,6 +499,11 @@ type pkgVerifier struct {
 	// conversions lists the conversions to interface types in the package,
 	// once something asks; see conversions.go.
 	conversions *conversions
+	// copies holds what go/ssa copies of values that hold a state, by
+	// function; see findCopies.
+	copies map[*ast.FuncDecl][]ssaCopy
+	// ssaProg is the package built in go/ssa; see ssaProgram.
+	ssaProg *ssa.Program
 	// assignedIn holds, for the body of each declared function, the
 	// variables that something other than their declaration assigns; see
 	// final.

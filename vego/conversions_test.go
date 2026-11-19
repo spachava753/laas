@@ -86,7 +86,7 @@ func checkConversionLists(t *testing.T, loaded []*packages.Package, strict bool)
 		}
 		candidate := map[ast.Expr]bool{}
 		var problems []string
-		for _, conversion := range ssaConversions(pkg.Fset, pkg.Types, pkg.Syntax, pkg.TypesInfo) {
+		for _, conversion := range conversionsIn(buildSSA(pkg.Fset, pkg.Types, pkg.Syntax, pkg.TypesInfo), pkg.Syntax, pkg.TypesInfo) {
 			for _, e := range conversion.candidates {
 				candidate[e] = true
 			}

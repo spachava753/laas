@@ -80,6 +80,12 @@ func (e *specEnv) Apply(name string, args []*logic.Term) (*logic.Term, bool, err
 	return logic.Select(e.applied[param], args[0]), true, nil
 }
 
+// Applies reports whether name is a function parameter with a contract
+// under calls, which Apply gives a meaning; see logic.Applier.
+func (e *specEnv) Applies(name string) bool {
+	return e.fn != nil && e.fn.calls != nil && e.fn.calls[e.fn.paramNames[name]] != nil
+}
+
 var errNoValue = errors.New("value of unsupported type")
 
 // root resolves the name a path starts from. It returns either a value and
@@ -557,7 +563,10 @@ func (e *specEnv) state(name string, steps []logic.Step, state string, when logi
 	index := slices.IndexFunc(decls, func(d stateDecl) bool { return d.name == state })
 	if index < 0 {
 		has := "no states"
-		if len(decls) > 0 {
+		if len(decls) == 1 {
+			has = "the state " + decls[0].name
+		}
+		if len(decls) > 1 {
 			names := make([]string, len(decls))
 			for i, d := range decls {
 				names[i] = d.name

@@ -288,6 +288,8 @@ func (e applyingEnv) Apply(name string, args []*Term) (*Term, bool, error) {
 	return Select(Const("F", SeqOf(Bool)), args[0]), true, nil
 }
 
+func (e applyingEnv) Applies(name string) bool { return name == "f" }
+
 // TestApply checks that an environment that knows an application gives it
 // its meaning, and that any other name is still a predicate.
 func TestApply(t *testing.T) {

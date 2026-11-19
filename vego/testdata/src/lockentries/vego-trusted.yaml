@@ -16,3 +16,18 @@ trusted:
     requires: ["rw != nil", "rw.w.mu.state = 0"]
     modifies: [rw]
     ensures: ["True"]
+  lockentries.each:
+    reason: A test of a function parameter with the name of a state, applied in an ensures.
+    runs: [held]
+    calls:
+      held(i): {}
+    modifies: []
+    ensures: ["result <-> held(n)"]
+  lockentries.both:
+    reason: A test of a function parameter with the name of a state of another parameter.
+    requires: ["m != nil"]
+    runs: [held]
+    calls:
+      held(i): {}
+    modifies: []
+    ensures: ["held(m)"]

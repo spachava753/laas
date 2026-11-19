@@ -29,3 +29,24 @@ func Take(m *sync.Mutex) {
 func Read(rw *sync.RWMutex) {
 	rw.RLock() // want `rw.w.mu.state: state is an unexported field of internal/sync.Mutex, declared in package internal/sync, and a formula in package sync cannot name it` `cannot verify Read: RLock has a contract`
 }
+
+func each(n int, held func(i int) bool) bool { return held(n) }
+
+func both(m *sync.Mutex, held func(i int) bool) bool { return held(0) }
+
+// A function parameter named like a state is applied as the parameter.
+//
+// @Requires 0 <= n
+// @Ensures ok <-> n > 0
+func Each(n int) (ok bool) {
+	return each(n, func(i int) bool { return i > 0 })
+}
+
+// A name that is both a parameter the contract applies and a state of the
+// argument cannot be read either way.
+//
+// @Requires m != nil
+// @Ensures True
+func Both(m *sync.Mutex) {
+	both(m, func(i int) bool { return true }) // want `held is both a function that the contract applies and a state of m; rename the parameter` `cannot verify Both`
+}

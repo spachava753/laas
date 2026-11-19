@@ -54,6 +54,8 @@ type Env interface {
 // the name; a name it does not know is a predicate.
 type Applier interface {
 	Apply(name string, args []*Term) (t *Term, known bool, err error)
+	// Applies reports whether Apply knows the name, without arguments.
+	Applies(name string) bool
 }
 
 // Path is a path together with the state it is read in.
@@ -358,10 +360,15 @@ func (s *scope) call(n *Node) *Term {
 		return t
 	}
 	state, isState, missing := s.state(n)
+	applier, _ := s.env.(Applier)
+	applies := s.env != nil && applier != nil && applier.Applies(n.Name)
+	if isState && applies {
+		fail("%s is both a function that the contract applies and a state of %s; rename the parameter", n.Name, plain(n.Kids[0]))
+	}
 	if isState {
 		return state
 	}
-	if _, predicate := s.r.Preds[s.r.Prefix+n.Name]; missing != "" && !predicate {
+	if _, predicate := s.r.Preds[s.r.Prefix+n.Name]; missing != "" && !predicate && !applies {
 		fail("%s", missing)
 	}
 	if applier, ok := s.env.(Applier); ok && s.env != nil {

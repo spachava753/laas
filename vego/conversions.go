@@ -62,7 +62,7 @@ func (pv *pkgVerifier) findConversions() *conversions {
 			found.converted[e] = append(found.converted[e], targets...)
 		}
 	}
-	for _, conversion := range ssaConversions(pv.pass.Fset, pv.pass.Pkg, pv.pass.Files, pv.info) {
+	for _, conversion := range conversionsIn(pv.ssaProgram(), pv.pass.Files, pv.info) {
 		if conversion.constant || slices.ContainsFunc(conversion.candidates, func(e ast.Expr) bool { return found.converted[e] != nil }) {
 			continue
 		}
@@ -82,6 +82,14 @@ func (pv *pkgVerifier) findConversions() *conversions {
 	return found
 }
 
+// ssaProgram returns the package built in go/ssa, built once.
+func (pv *pkgVerifier) ssaProgram() *ssa.Program {
+	if pv.ssaProg == nil {
+		pv.ssaProg = buildSSA(pv.pass.Fset, pv.pass.Pkg, pv.pass.Files, pv.info)
+	}
+	return pv.ssaProg
+}
+
 // ssaConversion is a MakeInterface instruction of go/ssa: the function or
 // literal it is in, the nearest position the instructions up to it give,
 // what it converts, and the expressions whose DebugRef names its operand
@@ -94,9 +102,9 @@ type ssaConversion struct {
 	candidates []ast.Expr
 }
 
-// ssaConversions builds the package in go/ssa, with a DebugRef for every
-// expression, and returns its conversions to interface types.
-func ssaConversions(fset *token.FileSet, pkg *types.Package, files []*ast.File, info *types.Info) []ssaConversion {
+// buildSSA builds a package in go/ssa, with a DebugRef for every
+// expression.
+func buildSSA(fset *token.FileSet, pkg *types.Package, files []*ast.File, info *types.Info) *ssa.Program {
 	prog := ssa.NewProgram(fset, ssa.GlobalDebug)
 	created := map[*types.Package]bool{}
 	var create func(imports []*types.Package)
@@ -110,8 +118,33 @@ func ssaConversions(fset *token.FileSet, pkg *types.Package, files []*ast.File, 
 		}
 	}
 	create(pkg.Imports())
-	built := prog.CreatePackage(pkg, files, info, false)
-	built.Build()
+	prog.CreatePackage(pkg, files, info, false).Build()
+	return prog
+}
+
+// ssaFunctions calls visit for every function declaration of the files
+// with the function go/ssa built for it.
+func ssaFunctions(prog *ssa.Program, files []*ast.File, info *types.Info, visit func(*ast.FuncDecl, *ssa.Function)) {
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			obj, _ := info.Defs[fd.Name].(*types.Func)
+			if obj == nil {
+				continue
+			}
+			if fn := prog.FuncValue(obj); fn != nil && fn.Synthetic == "" {
+				visit(fd, fn)
+			}
+		}
+	}
+}
+
+// conversionsIn returns the conversions to interface types of a package
+// built in go/ssa.
+func conversionsIn(prog *ssa.Program, files []*ast.File, info *types.Info) []ssaConversion {
 	var found []ssaConversion
 	var walk func(fn *ssa.Function)
 	walk = func(fn *ssa.Function) {
@@ -134,21 +167,7 @@ func ssaConversions(fset *token.FileSet, pkg *types.Package, files []*ast.File, 
 			walk(anon)
 		}
 	}
-	for _, file := range files {
-		for _, decl := range file.Decls {
-			fd, ok := decl.(*ast.FuncDecl)
-			if !ok {
-				continue
-			}
-			obj, _ := info.Defs[fd.Name].(*types.Func)
-			if obj == nil {
-				continue
-			}
-			if fn := prog.FuncValue(obj); fn != nil && fn.Synthetic == "" {
-				walk(fn)
-			}
-		}
-	}
+	ssaFunctions(prog, files, info, func(_ *ast.FuncDecl, fn *ssa.Function) { walk(fn) })
 	return found
 }
 
