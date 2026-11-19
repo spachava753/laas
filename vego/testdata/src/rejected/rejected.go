@@ -771,3 +771,34 @@ func ShownContinuation() (r int) {
 func StringJoins(x int) (r int) {
 	return 0
 }
+
+// Doubles builds a number whose formula, written out, doubles in size with
+// each statement. The verifier refuses it before it grows without bound.
+//
+// @Requires 0 <= x <= 1
+// @Ensures True
+func Doubles(x int) (result int) { // want `vego: cannot verify Doubles: a formula built to verify it has grown beyond 1048576 nodes, which is the limit; split the function, or the expressions in it, into smaller ones`
+	x = x + x
+	x = x + x
+	x = x + x
+	x = x + x
+	x = x + x
+	x = x + x
+	x = x + x
+	x = x + x
+	x = x + x
+	x = x + x
+	x = x + x
+	x = x + x
+	x = x + x
+	x = x + x
+	x = x + x
+	x = x + x
+	x = x + x
+	x = x + x
+	x = x + x
+	x = x + x
+	x = x + x
+	x = x + x
+	return x
+}

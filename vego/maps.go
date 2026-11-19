@@ -198,14 +198,9 @@ func (v *fnVerifier) storeKey(st *state, t types.Type, ref, key *logic.Term, val
 		change = logic.Ite(had, logic.IntLit(-1), none)
 	}
 	st.storeCell(mapOwner(t)+countLeaf.path, countLeaf, ref, logic.Add(count, change))
-	rows := func(lf leaf) *logic.Term {
-		return logic.Select(st.mem.region(mapOwner(t)+lf.path, logic.SeqOf(logic.SeqOf(lf.sort))), ref)
-	}
-	st.storeRow(mapOwner(t)+hasLeaf.path, hasLeaf.sort, ref, logic.Store(rows(hasLeaf), mapKey(key), logic.BoolLit(present)))
+	st.writeAt(mapOwner(t)+hasLeaf.path, hasLeaf.sort, ref, mapKey(key), logic.BoolLit(present))
 	for i, lf := range leaves {
-		inMap := lf
-		inMap.path = "#val" + lf.path
-		st.storeRow(mapOwner(t)+inMap.path, lf.sort, ref, logic.Store(rows(inMap), mapKey(key), val[i]))
+		st.writeAt(mapOwner(t)+"#val"+lf.path, lf.sort, ref, mapKey(key), val[i])
 	}
 }
 

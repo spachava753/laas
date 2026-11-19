@@ -197,6 +197,8 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 				result, err = nil, r.err
 			case *solver.Fault:
 				result, err = nil, fmt.Errorf("Z3 failed: %v", r)
+			case logic.TooLarge:
+				result, err = nil, fmt.Errorf("a formula built for an annotation of the package has grown beyond %d nodes, which is the limit", logic.MaxSize)
 			default:
 				panic(r)
 			}

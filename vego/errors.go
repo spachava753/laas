@@ -1167,7 +1167,7 @@ func (s *witness) apply(terms []*logic.Term) []*logic.Term {
 			// built.
 			result = logic.IsNil(args[0])
 		case changed:
-			result = &logic.Term{Op: t.Op, Sort: t.Sort, Name: t.Name, Val: t.Val, Big: t.Big, Args: args}
+			result = logic.WithArgs(t, args)
 		}
 		s.memo[t] = result
 		return result

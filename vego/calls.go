@@ -703,9 +703,7 @@ func estranged(t *logic.Term, names map[string]bool) (*logic.Term, bool) {
 	if !changed {
 		return t, false
 	}
-	copied := *t
-	copied.Args = args
-	return &copied, true
+	return logic.WithArgs(t, args), true
 }
 
 // failure is a return, with the errors it returns and the conditions of the

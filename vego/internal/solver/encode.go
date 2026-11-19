@@ -99,11 +99,16 @@ func (e *encoder) name(prefix string) string {
 // count records the parents of every node reachable from t.
 func (e *encoder) count(t *logic.Term) {
 	e.uses[t]++
-	if e.uses[t] > 1 {
-		return
+	if e.uses[t] == 1 {
+		for _, arg := range t.Args {
+			e.count(arg)
+		}
 	}
-	for _, arg := range t.Args {
-		e.count(arg)
+	// A write is encoded with its table twice; see node. The table counts
+	// once more only after it has been visited, so that its own parts are
+	// counted too.
+	if t.Op == logic.OpWrite {
+		e.uses[t.Args[0]]++
 	}
 }
 
@@ -589,6 +594,10 @@ func (e *encoder) node(b *strings.Builder, t *logic.Term) {
 		b.WriteByte(')')
 	case logic.OpStore:
 		apply(seqOp("store"), t.Args...)
+	case logic.OpWrite:
+		// The table is used twice; count made it shared, so that it is
+		// written once.
+		e.node(b, logic.Expand(t))
 	case logic.OpFill:
 		apply(e.sort(t.Sort)+".fill", t.Args...)
 	case logic.OpPush:
@@ -720,6 +729,9 @@ func checkSorts(t *logic.Term) {
 		ok = arity(2) && t.Args[0].Sort.IsSeq() && numeric(t.Args[1]) && is(t, t.Args[0].Sort.Elem())
 	case logic.OpStore:
 		ok = arity(3) && t.Args[0].Sort.IsSeq() && numeric(t.Args[1]) && is(t.Args[2], t.Args[0].Sort.Elem()) && is(t, t.Args[0].Sort)
+	case logic.OpWrite:
+		ok = arity(4) && t.Args[0].Sort.IsSeq() && t.Args[0].Sort.Elem().IsSeq() && numeric(t.Args[1]) && numeric(t.Args[2]) &&
+			is(t.Args[3], t.Args[0].Sort.Elem().Elem()) && is(t, t.Args[0].Sort)
 	case logic.OpFill:
 		ok = arity(2) && numeric(t.Args[0]) && is(t, logic.SeqOf(t.Args[1].Sort))
 	case logic.OpPush:
@@ -862,7 +874,7 @@ func (e *encoder) shifted(b *strings.Builder, sh shift) {
 		for i, arg := range t.Args {
 			args[i] = rewrite(arg)
 		}
-		return &logic.Term{Op: t.Op, Sort: t.Sort, Name: t.Name, Val: t.Val, Big: t.Big, Args: args}
+		return logic.WithArgs(t, args)
 	}
 	body := rewrite(sh.fact.Args[1])
 	if guard != nil {
@@ -979,5 +991,5 @@ func (e *encoder) freshen(t *logic.Term) *logic.Term {
 	if !changed {
 		return t
 	}
-	return &logic.Term{Op: t.Op, Sort: t.Sort, Name: t.Name, Val: t.Val, Big: t.Big, Args: args}
+	return logic.WithArgs(t, args)
 }

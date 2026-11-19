@@ -196,7 +196,7 @@ func (v *fnVerifier) table(sink *state, mem memory, key string, sort logic.Sort,
 	for pending := []*logic.Term{current}; len(pending) > 0; {
 		at := pending[len(pending)-1]
 		pending = pending[:len(pending)-1]
-		for at.Op == logic.OpStore {
+		for at.Op == logic.OpStore || at.Op == logic.OpWrite {
 			at = at.Args[0]
 		}
 		if seen[at.Name] {
@@ -272,8 +272,7 @@ func (v *fnVerifier) fetch(sink *state, mem memory, cells []cell, ref, at *logic
 // of an allocation.
 func (v *fnVerifier) put(st *state, cells []cell, ref, at *logic.Term, val value) {
 	for i, c := range cells {
-		row := logic.Select(st.mem.region(c.key, logic.SeqOf(logic.SeqOf(c.sort))), ref)
-		st.storeRow(c.key, c.sort, ref, logic.Store(row, logic.Add(at, logic.IntLit(c.off)), val[i]))
+		st.writeAt(c.key, c.sort, ref, logic.Add(at, logic.IntLit(c.off)), val[i])
 	}
 }
 
@@ -345,6 +344,12 @@ func (v *fnVerifier) view(sink *state, mem memory, header value, t types.Type) (
 // storeCell writes the one number a flat region has for a reference.
 func (st *state) storeCell(key string, lf leaf, ref, written *logic.Term) {
 	st.mem[key] = logic.Store(st.mem.region(key, logic.SeqOf(lf.sort)), ref, written)
+}
+
+// writeAt replaces one position of the sequence a region has for a
+// reference.
+func (st *state) writeAt(key string, sort logic.Sort, ref, at, written *logic.Term) {
+	st.mem[key] = logic.Write(st.mem.region(key, logic.SeqOf(logic.SeqOf(sort))), ref, at, written)
 }
 
 // storeRow replaces the sequence a region has for a reference.

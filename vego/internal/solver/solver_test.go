@@ -112,6 +112,15 @@ func (m model) table(t *logic.Term) func(index int64) seqValue {
 		}
 		return m.table(t.Args[2])
 	}
+	if t.Op == logic.OpWrite {
+		base, ref, at, written := m.table(t.Args[0]), m.eval(t.Args[1]), m.eval(t.Args[2]), m.eval(t.Args[3])
+		return func(index int64) seqValue {
+			if index == ref {
+				return base(index).with(at, written)
+			}
+			return base(index)
+		}
+	}
 	if t.Op != logic.OpStore {
 		panic("unexpected sequence of sequences " + t.String())
 	}
@@ -375,6 +384,10 @@ func (g *generator) table(depth int) *logic.Term {
 	}
 	if depth > 0 && g.rng.IntN(2) == 0 {
 		return logic.Store(g.table(depth-1), g.intTerm(0), g.seq(depth-1))
+	}
+	// A write of one element of one sequence is how memory is written.
+	if g.wide && depth > 0 && g.rng.IntN(2) == 0 {
+		return logic.Write(g.table(depth-1), g.intTerm(0), g.intTerm(0), g.intTerm(0))
 	}
 	return logic.Const("M", logic.SeqOf(logic.IntSeq))
 }
@@ -998,6 +1011,14 @@ func TestRules(t *testing.T) {
 		{"a chosen table is the first when the condition holds", Options{}, []*logic.Term{c, logic.Eq(logic.Select(logic.Select(tableM, x), lit(0)), lit(1)), logic.Eq(logic.Select(logic.Select(tableN, x), lit(0)), lit(2))}, logic.Eq(logic.Select(logic.Select(logic.Ite(c, tableM, tableN), x), lit(0)), lit(1)), Proved},
 		{"a chosen table is not the second when the condition holds", Options{}, []*logic.Term{c, logic.Eq(logic.Select(logic.Select(tableM, x), lit(0)), lit(1)), logic.Eq(logic.Select(logic.Select(tableN, x), lit(0)), lit(2))}, logic.Eq(logic.Select(logic.Select(logic.Ite(c, tableM, tableN), x), lit(0)), lit(2)), Refuted},
 		{"a chosen table is the second when the condition fails", Options{}, []*logic.Term{logic.Not(c), logic.Eq(logic.Select(logic.Select(tableM, x), lit(0)), lit(1)), logic.Eq(logic.Select(logic.Select(tableN, x), lit(0)), lit(2))}, logic.Eq(logic.Select(logic.Select(logic.Ite(c, tableM, tableN), x), lit(0)), lit(2)), Proved},
+		// Guards against a write of one element of one sequence of a table
+		// reaching the wrong sequence or the wrong element, or losing the
+		// rest of the sequence it writes.
+		{"a written element is read back", Options{}, nil, logic.Eq(logic.Select(logic.Select(logic.Write(tableM, x, y, z), x), y), z), Proved},
+		{"a write leaves the other elements of its sequence", Options{}, []*logic.Term{logic.Ne(y, z)}, logic.Eq(logic.Select(logic.Select(logic.Write(tableM, x, y, lit(5)), x), z), logic.Select(logic.Select(tableM, x), z)), Proved},
+		{"a write leaves the other sequences", Options{}, []*logic.Term{logic.Ne(x, y)}, logic.Eq(logic.Select(logic.Select(logic.Write(tableM, x, z, lit(5)), y), z), logic.Select(logic.Select(tableM, y), z)), Proved},
+		{"a write does not reach another sequence", Options{}, []*logic.Term{logic.Ne(x, y)}, logic.Eq(logic.Select(logic.Select(logic.Write(tableM, x, z, lit(5)), y), z), lit(5)), Refuted},
+		{"a write keeps the length of its sequence", Options{}, nil, logic.Eq(logic.Len(logic.Select(logic.Write(tableM, x, y, z), x)), logic.Len(logic.Select(tableM, x))), Proved},
 		// Guards against the remainder of two numbers being computed the
 		// Euclidean way, which never yields a negative remainder, and the
 		// quotient being rounded down. Go truncates: -7 / 2 is -3 and
@@ -1039,6 +1060,28 @@ func TestRules(t *testing.T) {
 				t.Fatalf("Prove(%v, %v) = %v, want %v", test.hyps, test.goal, got, test.want)
 			}
 		})
+	}
+}
+
+// TestWritesStayLinear checks that a chain of writes to one table, the
+// shape memory has after a run of assignments, is encoded in text that
+// grows with the number of writes and not with two to its power: each
+// write mentions its table twice.
+func TestWritesStayLinear(t *testing.T) {
+	x := logic.Const("x", logic.Int)
+	table := logic.Const("M", logic.SeqOf(logic.IntSeq))
+	// Sixteen writes keep a wrong encoding to a few megabytes, so that it
+	// fails quickly.
+	for i := range 16 {
+		table = logic.Write(table, x, logic.IntLit(int64(i)), logic.IntLit(int64(i)))
+	}
+	goal := logic.Eq(logic.Select(logic.Select(table, x), logic.IntLit(0)), logic.IntLit(0))
+	_, script := encode([]*logic.Term{logic.Not(goal)}, Options{})
+	if len(script) > 16*1000 {
+		t.Fatalf("a chain of 16 writes is encoded in %d bytes", len(script))
+	}
+	if result := solverFor(t).Prove(nil, goal, Options{}); result != Proved {
+		t.Fatalf("the first write of a chain of 16 is not read back: %v", result)
 	}
 }
 

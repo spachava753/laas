@@ -150,6 +150,9 @@ func (pv *pkgVerifier) run(fn *funcInfo, task func(v *fnVerifier)) {
 		case nil, abort:
 		case unsupported:
 			pv.report(r.pos, "cannot verify %s: %s", fn.obj.Name(), r.msg)
+		case logic.TooLarge:
+			pv.report(fn.decl.Name.Pos(), "cannot verify %s: a formula built to verify it has grown beyond %d nodes, "+
+				"which is the limit; split the function, or the expressions in it, into smaller ones", fn.obj.Name(), logic.MaxSize)
 		default:
 			panic(r)
 		}

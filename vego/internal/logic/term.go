@@ -95,6 +95,12 @@ const (
 	OpForall
 	OpExists
 	OpPred
+	// Write(table, ref, at, value): a sequence of sequences whose sequence
+	// at ref has value at at, and which is table everywhere else. It is
+	// Store(table, ref, Store(Select(table, ref), at, value)), written with
+	// table once, so that a chain of writes to one table is no larger as a
+	// tree than it is in memory.
+	OpWrite
 )
 
 // Term is a node of a logical term or formula. Formulas are terms of sort
@@ -106,6 +112,46 @@ type Term struct {
 	Val  int64    // OpIntLit
 	Big  *big.Int // OpIntLit whose value does not fit Val
 	Args []*Term
+	// size is the number of nodes of the term counted as a tree, a part it
+	// shares counted each time; see Size.
+	size int64
+}
+
+// MaxSize is the largest number of nodes a term may have, counted as a
+// tree. Terms share structure, so a term built in a few steps can be far
+// larger as a tree than in memory, and printing it or walking it costs its
+// size as a tree. Building a larger term panics with TooLarge, so that no
+// input can make the verifier use time and memory without bound.
+const MaxSize = 1 << 20
+
+// TooLarge is the panic of building a term larger than MaxSize.
+type TooLarge struct{}
+
+// Size returns the number of nodes of the term counted as a tree, up to a
+// little more than MaxSize.
+func (t *Term) Size() int64 {
+	if t.size > 0 {
+		return t.size
+	}
+	return 1
+}
+
+// WithArgs returns a copy of a node with other arguments.
+func WithArgs(t *Term, args []*Term) *Term {
+	return sized(&Term{Op: t.Op, Sort: t.Sort, Name: t.Name, Val: t.Val, Big: t.Big, Args: args})
+}
+
+// sized records the size of a new node from those of its arguments.
+func sized(t *Term) *Term {
+	total := int64(1)
+	for _, arg := range t.Args {
+		total += arg.Size()
+	}
+	if total > MaxSize {
+		panic(TooLarge{})
+	}
+	t.size = total
+	return t
 }
 
 var (
@@ -153,7 +199,7 @@ func Const(name string, sort Sort) *Term { return &Term{Op: OpConst, Sort: sort,
 // within any formula they are nested in.
 func Bound(name string, sort Sort) *Term { return &Term{Op: OpBound, Sort: sort, Name: name} }
 
-func node(op Op, sort Sort, args ...*Term) *Term { return &Term{Op: op, Sort: sort, Args: args} }
+func node(op Op, sort Sort, args ...*Term) *Term { return sized(&Term{Op: op, Sort: sort, Args: args}) }
 
 // Add returns a + b.
 func Add(a, b *Term) *Term { return node(OpAdd, Int, a, b) }
@@ -181,6 +227,18 @@ func Select(seq, index *Term) *Term { return node(OpSelect, seq.Sort.Elem(), seq
 
 // Store returns seq with the element at index replaced by value.
 func Store(seq, index, value *Term) *Term { return node(OpStore, seq.Sort, seq, index, value) }
+
+// Write returns table with the element at at of its sequence at ref
+// replaced by value; see OpWrite.
+func Write(table, ref, at, value *Term) *Term {
+	return node(OpWrite, table.Sort, table, ref, at, value)
+}
+
+// Expand returns what a Write equals in terms of Store and Select.
+func Expand(write *Term) *Term {
+	table, ref, at, value := write.Args[0], write.Args[1], write.Args[2], write.Args[3]
+	return Store(table, ref, Store(Select(table, ref), at, value))
+}
 
 // Fill returns a sequence of the given length whose elements all equal value.
 func Fill(length, value *Term) *Term { return node(OpFill, SeqOf(value.Sort), length, value) }
@@ -364,7 +422,7 @@ func Exists(bound, body *Term) *Term { return node(OpExists, Bool, bound, body) 
 
 // Pred returns the application of a user-defined predicate.
 func Pred(name string, args ...*Term) *Term {
-	return &Term{Op: OpPred, Sort: Bool, Name: name, Args: args}
+	return sized(&Term{Op: OpPred, Sort: Bool, Name: name, Args: args})
 }
 
 // Conjuncts returns the top-level conjuncts of a formula.
@@ -400,7 +458,7 @@ func Subst(t *Term, bindings map[string]*Term) *Term {
 	if args == nil {
 		return t
 	}
-	return &Term{Op: t.Op, Sort: t.Sort, Name: t.Name, Val: t.Val, Big: t.Big, Args: args}
+	return WithArgs(t, args)
 }
 
 var infix = map[Op]string{
@@ -450,6 +508,10 @@ func (t *Term) write(b *strings.Builder) {
 	case OpStore:
 		t.Args[0].write(b)
 		list("[", t.Args[1:], " := ", "]")
+	case OpWrite:
+		t.Args[0].write(b)
+		list("[", t.Args[1:2], "", "]")
+		list("[", t.Args[2:], " := ", "]")
 	case OpFill:
 		list("fill(", t.Args, ", ", ")")
 	case OpPush:
