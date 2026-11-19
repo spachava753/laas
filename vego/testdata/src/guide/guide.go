@@ -367,6 +367,33 @@ func Peek(A []int) (first int, err error) {
 	return A[0], nil
 }
 
+// PeekWhichOnly says which error it returns, but not when it succeeds.
+//
+// @Ensures err = ErrEmpty <-> |A| = 0
+// @Ensures err = nil -> first = A[0]
+func PeekWhichOnly(A []int) (first int, err error) { // want `vego: the contract of PeekWhichOnly may also be met by a function that always returns an error`
+	if len(A) == 0 {
+		return 0, ErrEmpty
+	}
+	return A[0], nil
+}
+
+// EmptyRangeTrue claims the opposite for an empty slice.
+//
+// @Ensures |A| = 0 -> ranged
+func EmptyRangeTrue(A []int) (ranged bool) {
+	_, err := PeekLabelled(A)
+	return errors.Is(err, ErrRange) // want `vego: postcondition may not hold: \|A\| = 0 -> ranged`
+}
+
+// EmptyRangeFull knows that the error is nil for a slice that is not empty.
+//
+// @Ensures |A| > 0 -> ~ranged
+func EmptyRangeFull(A []int) (ranged bool) {
+	_, err := PeekLabelled(A)
+	return errors.Is(err, ErrRange)
+}
+
 // PeekOrZero compares the error with a package-level error variable.
 //
 // @Ensures v = 0 <-> (|A| = 0 Or A[0] = 0)
@@ -443,10 +470,10 @@ func Empty(A []int) (empty bool) {
 // EmptyRange asks about an error variable that the contract of
 // PeekLabelled does not mention.
 //
-// @Ensures ~ranged
+// @Ensures |A| = 0 -> ~ranged
 func EmptyRange(A []int) (ranged bool) {
 	_, err := PeekLabelled(A)
-	return errors.Is(err, ErrRange) // want `vego: postcondition may not hold: ~ranged`
+	return errors.Is(err, ErrRange) // want `vego: postcondition may not hold: \|A\| = 0 -> ~ranged`
 }
 
 // Lock is held or not.
