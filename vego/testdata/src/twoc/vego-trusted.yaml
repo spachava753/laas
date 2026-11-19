@@ -1,0 +1,6 @@
+version: 1
+
+trusted:
+  twoc.newSink:
+    reason: Builds a sink; writes nothing itself.
+    modifies: []

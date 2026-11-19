@@ -2,6 +2,8 @@ package vego
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"go/token"
 	"go/types"
 	"os"
@@ -30,24 +32,28 @@ import (
 // contract is read and checked once per package; a fault in it is a defect,
 // reported where it is used. Looking it up records that the proofs of the
 // package rely on it, so that two entries for one type in a build are
-// found (see the check of fingerprints), whatever made the proof look. An
-// entry that cannot be used is not recorded: every use of it is an error.
+// found (see the check of fingerprints), whatever made the proof look, and
+// so does finding none: a proof that rests on a type having no contract
+// waives what a contract would have asked for, such as vouches on the
+// trusted functions that return a value of the type. An entry that cannot
+// be used is not recorded: every use of it is an error.
 func (pv *pkgVerifier) typeEntry(key string, obj *types.Func, methodOf *types.Func, valueOf *types.TypeName) *funcInfo {
 	if fn, done := pv.typeEntries[key]; done {
 		return fn
 	}
 	pv.typeEntries[key] = nil
 	entry := pv.entryFor(key)
+	declared, pkg := obj.Pos(), obj.Pkg()
+	if valueOf != nil {
+		declared, pkg = valueOf.Pos(), valueOf.Pkg()
+	}
 	if entry == nil {
+		pv.unentered[key] = pv.inAnalysedModule(pkg, declared)
 		return nil
 	}
 	fn := newFuncInfo(obj)
 	fn.trust, fn.methodOf, fn.valueOf = entry, methodOf, valueOf
 	pv.typeEntries[key] = fn
-	declared, pkg := obj.Pos(), obj.Pkg()
-	if valueOf != nil {
-		declared, pkg = valueOf.Pos(), valueOf.Pkg()
-	}
 	if pv.inAnalysedModule(pkg, declared) {
 		what := "the method " + key
 		if valueOf != nil {
@@ -70,7 +76,7 @@ func (pv *pkgVerifier) typeEntry(key string, obj *types.Func, methodOf *types.Fu
 	// A contract that cannot be used makes every use of it an error, so
 	// no proof rests on it.
 	if !fn.broken {
-		pv.noteUse(fn, token.NoPos)
+		pv.lookedUp = append(pv.lookedUp, fn)
 	}
 	return fn
 }
@@ -334,5 +340,40 @@ func (pv *pkgVerifier) reportTwoEntries(total *Usage) {
 		pv.report(pv.pass.Files[0].Package, "the trust files of this build give %s two contracts, at %s and at %s; a value that verified code checked "+
 			"against one can reach verified code that relies on the other. Make the entries the same, or run laas with -vego.trusted naming one file",
 			use.Key, a, b)
+	}
+	// A proof made with no entry for a type waived what an entry asks
+	// for, such as vouches on a trusted function that returns a value of
+	// it, and a value it lets through can reach a proof that relies on
+	// an entry.
+	none := slices.Clone(total.Unentered)
+	slices.SortFunc(none, func(a, b Unentered) int { return strings.Compare(a.Key+" "+a.Package, b.Key+" "+b.Package) })
+	for _, missing := range none {
+		use := seen[missing.Key]
+		if use == nil || reported[missing.Key+" "+missing.Package] {
+			continue
+		}
+		reported[missing.Key+" "+missing.Package] = true
+		remedy := "add the same entry to the trust file of its module, or run laas with -vego.trusted naming one file"
+		if missing.Own {
+			remedy = "the type is declared in its module, so write the contract in source where the type is declared and remove the entry"
+		}
+		pv.report(pv.pass.Files[0].Package, "the trust files of this build give %s a contract at %s:%d, and the proofs of package %s were made with none; "+
+			"what they let through can reach verified code that relies on the entry: %s", missing.Key, use.File, use.Line, missing.Package, remedy)
+	}
+}
+
+// noteLookups records, once the package has been verified, the entries it
+// looked up and the keys it found none for, if it has proofs: a package
+// without annotated functions relies on nothing, whatever it looked up
+// while its declarations were read.
+func (pv *pkgVerifier) noteLookups() {
+	if !slices.ContainsFunc(pv.order, (*funcInfo).annotated) {
+		return
+	}
+	for _, fn := range pv.lookedUp {
+		pv.noteUse(fn, token.NoPos)
+	}
+	for _, key := range slices.Sorted(maps.Keys(pv.unentered)) {
+		pv.usage.Unentered = append(pv.usage.Unentered, Unentered{Key: key, Package: pv.pass.Pkg.Path(), Own: pv.unentered[key]})
 	}
 }

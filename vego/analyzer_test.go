@@ -169,7 +169,13 @@ func TestAnalyzer(t *testing.T) {
 	t.Run("reports two entries for one type in a build", func(t *testing.T) {
 		runCorpus(t, newAnalyzer(), "tworoot")
 	})
-	for _, root := range []string{"twoa", "twob"} {
+	// A module whose proofs were made with no entry for a type, and one
+	// that declares the type and has proofs that rest on it having none,
+	// against a module that gives it an entry.
+	t.Run("reports an entry against none in a build", func(t *testing.T) {
+		runCorpus(t, newAnalyzer(), "twod")
+	})
+	for _, root := range []string{"twoa", "twob", "twoc"} {
 		t.Run("uses one entry for a type in "+root, func(t *testing.T) {
 			runCorpus(t, newAnalyzer(), root)
 		})

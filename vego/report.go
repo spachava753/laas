@@ -61,12 +61,14 @@ func TrustReport(usages []*Usage, dir string) string {
 			}
 			// An entry for a method of an interface is a claim about the
 			// method of every value of every interface that has it from
-			// that declaration.
+			// that declaration. What a trusted function returns or writes
+			// is claimed by that function's vouches instead.
+			reach := "that verified code gets from code that is not verified: from a caller, directly or in memory an argument reaches, " +
+				"or from a call through a value; a value that a trusted function returns or writes is claimed by that function's vouches"
 			if _, method, ok := strings.Cut(use.Key, ")."); ok && use.Every != "" && strings.HasPrefix(use.Key, "(") {
-				fmt.Fprintf(&b, "    a claim about %s of every value that code which is not verified hands to verified code, of %s or of an interface that has %s from it\n",
-					method, use.Every, method)
+				fmt.Fprintf(&b, "    a claim about %s of every value of %s, or of an interface that has %s from it, %s\n", method, use.Every, method, reach)
 			} else if use.Every != "" {
-				fmt.Fprintf(&b, "    a claim about every value of %s that code which is not verified hands to verified code\n", use.Every)
+				fmt.Fprintf(&b, "    a claim about every value of %s %s\n", use.Every, reach)
 			}
 			if len(use.Vouches) > 0 {
 				fmt.Fprintf(&b, "    vouches for the errors and function values in: %s\n", strings.Join(use.Vouches, ", "))

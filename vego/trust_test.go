@@ -145,7 +145,7 @@ None of them is checked against the code of the function it describes.
 Project contracts in use: 5
   (example.com/lib.Sink).Put
     reason:  Every sink takes a number.
-    a claim about Put of every value that code which is not verified hands to verified code, of example.com/lib.Sink or of an interface that has Put from it
+    a claim about Put of every value of example.com/lib.Sink, or of an interface that has Put from it, that verified code gets from code that is not verified: from a caller, directly or in memory an argument reaches, or from a call through a value; a value that a trusted function returns or writes is claimed by that function's vouches
     defined: vego-trusted.yaml:12
     used at: b/b.go:11
   example.com/app.load  [may fail unpredictably]
@@ -155,7 +155,7 @@ Project contracts in use: 5
     used at: a.go:10, b/b.go:7
   example.com/lib.Hook
     reason:  Hooks write nothing.
-    a claim about every value of example.com/lib.Hook that code which is not verified hands to verified code
+    a claim about every value of example.com/lib.Hook that verified code gets from code that is not verified: from a caller, directly or in memory an argument reaches, or from a call through a value; a value that a trusted function returns or writes is claimed by that function's vouches
     defined: vego-trusted.yaml:16
     relied on in: example.com/app, example.com/app/b
   sort.Ints

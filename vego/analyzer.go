@@ -221,6 +221,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			ifaceMethods:    map[*types.Func]*funcInfo{},
 			importedMethods: map[*types.Func]*funcInfo{},
 			typeEntries:     map[string]*funcInfo{},
+			unentered:       map[string]bool{},
 			foreignBroken:   map[*types.Package]bool{},
 			imported:        map[*types.Func]*funcInfo{},
 			foreign:         map[*types.Package]*logic.Resolver{},
@@ -260,6 +261,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		}
 		pv.exportContracts(pv.reportAlwaysFailing())
 		pv.reportSentinelWrites()
+		pv.noteLookups()
 		// The proofs of this package also rest on whatever the packages it
 		// depends on took on trust.
 		pass.ExportPackageFact(&usageFact{Usage: *pv.usage})
@@ -469,6 +471,11 @@ type pkgVerifier struct {
 	// interface types and function types, by key, nil for a key with none;
 	// see typeentries.go.
 	typeEntries map[string]*funcInfo
+	// lookedUp holds the type entries the package looked up and could use,
+	// and unentered the keys it looked up and found no entry for, with
+	// whether the type is of this module; see noteLookups.
+	lookedUp  []*funcInfo
+	unentered map[string]bool
 	// conversions lists the conversions to interface types in the package,
 	// once something asks; see conversions.go.
 	conversions *conversions

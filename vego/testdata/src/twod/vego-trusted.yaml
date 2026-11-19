@@ -1,0 +1,10 @@
+version: 1
+
+trusted:
+  (twoentrieslib.Sink).Put:
+    reason: Every sink writes nothing a caller can see.
+    modifies: []
+
+  (twoownlib.Gauge).Read:
+    reason: Every gauge reads nothing it writes.
+    modifies: []

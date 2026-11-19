@@ -367,6 +367,19 @@ type Usage struct {
 	// Constructors holds the calls to errors.New and fmt.Errorf, whose
 	// non-nil result vego knows without a contract.
 	Constructors []token.Position
+	// Unentered holds the types that proofs looked up an entry for and
+	// found none: such a proof rests on the type having no contract.
+	Unentered []Unentered
+}
+
+// Unentered is a type, by the key its entry would have, that the proofs of
+// a package rely on having no entry. Own is set when the package is in the
+// module that declares the type, which gives it a contract in source if at
+// all.
+type Unentered struct {
+	Key     string
+	Package string
+	Own     bool
 }
 
 // EntryUse describes one trusted contract and where it is relied on. Two
@@ -408,6 +421,11 @@ func (u *Usage) add(other *Usage) {
 			u.ProjectKeys = map[string][]string{}
 		}
 		u.ProjectKeys[file] = keys
+	}
+	for _, none := range other.Unentered {
+		if !slices.Contains(u.Unentered, none) {
+			u.Unentered = append(u.Unentered, none)
+		}
 	}
 	for _, position := range other.Constructors {
 		if !slices.Contains(u.Constructors, position) {
