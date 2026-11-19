@@ -52,3 +52,9 @@ func End(ok bool) (err error) {
 	}
 	return io.EOF
 }
+
+// ErrChanged is assigned by Change, so it is not stable.
+var ErrChanged = errors.New("changed")
+
+// Change assigns ErrChanged.
+func Change() { ErrChanged = nil }

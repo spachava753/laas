@@ -22,22 +22,48 @@ import (
 // uncomparable type, and then == panics, so comparing them is not
 // supported.
 //
-// A sentinel is a package-level error variable that holds the error its
-// declaration made with errors.New or fmt.Errorf; see findSentinels. Each
-// such call makes a new error, as does each call in a verified body, so all
-// of them differ from each other. A sentinel stands for one constant
-// throughout, named by its package path and name.
+// A stable error variable is a package-level variable of type error that
+// holds one error for as long as code of its importers runs; see
+// findSentinels. It stands for one constant throughout, named by its package
+// path and name, or by those of the variable it holds. A sentinel is a
+// stable variable that holds the error its declaration made with errors.New
+// or fmt.Errorf. Each such call makes a new error, as does each call in a
+// verified body, so all of them differ from each other.
 
-// sentinelsFact lists the sentinels of a package by name. It is a fact
-// about the package and not about each variable, since only facts about
-// packages reach every package built with this one; a fact about a
+// stableKind says how a stable error variable gets its value.
+type stableKind int
+
+const (
+	// stableMade: its initialiser is a call of errors.New or fmt.Errorf,
+	// which makes a new error; the variable is a sentinel.
+	stableMade stableKind = iota
+	// stableAlias: it holds the value of another package-level error
+	// variable, which its initialiser names or a function returns.
+	stableAlias
+	// stableOpaque: anything else. The variable holds one value, and
+	// nothing is known of it but what the static type of its initialiser
+	// says.
+	stableOpaque
+)
+
+// sentinelsFact lists the stable error variables of a package by name, and
+// says of every other error variable of the package what changes it. It is
+// a fact about the package and not about each variable, since only facts
+// about packages reach every package built with this one; a fact about a
 // variable reaches only the packages that import its package.
 type sentinelsFact struct {
-	Vars map[string]sentinelInfo
+	Vars    map[string]sentinelInfo
+	Changed map[string]string
 }
 
-// sentinelInfo is what is known of one sentinel.
+// sentinelInfo is what is known of one stable error variable.
 type sentinelInfo struct {
+	Kind stableKind
+	// Alias is the key of the variable an alias holds.
+	Alias string
+	// NonNil and Comparable say of an opaque variable that it is not nil,
+	// and that == on it is identity and cannot panic; see concreteError.
+	NonNil, Comparable bool
 	// Homemade is set when nothing of unknown origin went into the error.
 	Homemade bool
 	// Rests holds the keys of the other sentinels that went into the
@@ -100,45 +126,56 @@ func isSentinelTerm(t *logic.Term) bool {
 }
 
 // foreignSentinel returns what the package of a variable of another
-// package published about it as a sentinel, if anything.
+// package published about it as a stable variable, if anything.
 func (pv *pkgVerifier) foreignSentinel(variable *types.Var) (sentinelInfo, bool) {
-	pkg := variable.Pkg()
-	if pkg == nil || pkg == pv.pass.Pkg || variable.Parent() != pkg.Scope() || !isError(variable.Type()) {
+	fact := pv.publishedBy(variable)
+	if fact == nil {
 		return sentinelInfo{}, false
 	}
-	if pv.published == nil {
-		pv.published = map[*types.Package]map[string]sentinelInfo{}
-	}
-	published, done := pv.published[pkg]
-	if !done {
-		fact := new(sentinelsFact)
-		if pv.pass.ImportPackageFact(pkg, fact) {
-			published = fact.Vars
-		}
-		pv.published[pkg] = published
-	}
-	info, ok := published[variable.Name()]
+	info, ok := fact.Vars[variable.Name()]
 	return info, ok
 }
 
-// sentinelOf returns what is known of a sentinel of this package or of
-// another, if the variable is one.
-func (pv *pkgVerifier) sentinelOf(variable *types.Var) (sentinelInfo, bool) {
-	if variable.Pkg() == pv.pass.Pkg {
-		info, ok := pv.candidates[variable]
-		return info, ok
+// publishedBy returns what the package of a variable of another package
+// published about its error variables, or nil.
+func (pv *pkgVerifier) publishedBy(variable *types.Var) *sentinelsFact {
+	pkg := variable.Pkg()
+	if pkg == nil || pkg == pv.pass.Pkg || variable.Parent() != pkg.Scope() || !isError(variable.Type()) {
+		return nil
 	}
-	return pv.foreignSentinel(variable)
+	if pv.published == nil {
+		pv.published = map[*types.Package]*sentinelsFact{}
+	}
+	fact, done := pv.published[pkg]
+	if !done {
+		fact = new(sentinelsFact)
+		if !pv.pass.ImportPackageFact(pkg, fact) {
+			fact = nil
+		}
+		pv.published[pkg] = fact
+	}
+	return fact
+}
+
+// spelling returns the name of a package-level variable as this package
+// writes it.
+func (pv *pkgVerifier) spelling(variable *types.Var) string {
+	if variable.Pkg() != pv.pass.Pkg {
+		return variable.Pkg().Name() + "." + variable.Name()
+	}
+	return variable.Name()
 }
 
 // usableSentinel reports whether this package may take a variable to hold
-// the error it was declared with, and why not when it may not.
+// one error throughout, and why not when it may not. It looks at the
+// variable alone; see resolve for the variable an alias holds.
 func (pv *pkgVerifier) usableSentinel(variable *types.Var) (sentinelInfo, string) {
-	spelled := variable.Name()
+	spelled := pv.spelling(variable)
+	// What is known of a stable variable of this package, or of another.
+	info, isSentinel := pv.candidates[variable]
 	if variable.Pkg() != pv.pass.Pkg {
-		spelled = variable.Pkg().Name() + "." + variable.Name()
+		info, isSentinel = pv.foreignSentinel(variable)
 	}
-	info, isSentinel := pv.sentinelOf(variable)
 	switch {
 	case variable.Pkg() == pv.pass.Pkg && pv.unsettled[variable] != "":
 		return info, fmt.Sprintf("%s is not known to have its value yet when this runs: %s while the variables of the package are "+
@@ -146,10 +183,13 @@ func (pv *pkgVerifier) usableSentinel(variable *types.Var) (sentinelInfo, string
 	case variable.Pkg() != pv.pass.Pkg && pv.reassigned[variable]:
 		return info, fmt.Sprintf("%s is assigned in this package, so it is not known to hold the error it was declared with", spelled)
 	case !isSentinel && variable.Pkg() != pv.pass.Pkg:
-		return info, fmt.Sprintf("%s is a variable of package %s that is not known to hold the error it was declared with; only a "+
-			"package-level error variable initialised with errors.New or fmt.Errorf, and never assigned, can be read", spelled, variable.Pkg().Path())
+		if fact := pv.publishedBy(variable); fact != nil && fact.Changed[variable.Name()] != "" {
+			return info, fmt.Sprintf("%s %s in package %s, so it is not known to hold the error it was declared with",
+				spelled, fact.Changed[variable.Name()], variable.Pkg().Path())
+		}
+		return info, fmt.Sprintf("%s is a variable of package %s that is not known to hold the error it was declared with", spelled, variable.Pkg().Path())
 	case !isSentinel:
-		return info, spelled + " is not a local variable of a supported type"
+		return info, fmt.Sprintf("%s %s, so it is not known to hold the error it was declared with", spelled, pv.ownChanges[variable])
 	}
 	// A package this one is built with may change the variable, or one
 	// that went into its error, before any of this runs.
@@ -190,12 +230,59 @@ func (pv *pkgVerifier) writtenInBuild() map[string]sentinelWrite {
 	return pv.buildWrites
 }
 
-// homemadeSentinel reports whether a variable is a sentinel of this
-// package or another into which nothing of unknown origin went, and which
-// this package may read.
-func (pv *pkgVerifier) homemadeSentinel(variable *types.Var) bool {
+// stableValue is what a stable variable holds, once aliases are followed:
+// the value of final, of which info says what is known, and the keys of
+// the variables on which that rests.
+type stableValue struct {
+	final *types.Var
+	info  sentinelInfo
+	keys  []string
+}
+
+// resolve returns what a variable that this package may read holds, or why
+// it may not read it. An alias holds what its target holds. An alias whose
+// target cannot be relied on holds the value the target had when the alias
+// was initialised, which nothing changes, and of which nothing is known.
+func (pv *pkgVerifier) resolve(variable *types.Var) (stableValue, string) {
+	return pv.resolveFrom(variable, map[*types.Var]bool{})
+}
+
+func (pv *pkgVerifier) resolveFrom(variable *types.Var, seen map[*types.Var]bool) (stableValue, string) {
 	info, why := pv.usableSentinel(variable)
-	return why == "" && info.Homemade
+	if why != "" {
+		return stableValue{}, why
+	}
+	seen[variable] = true
+	key := errorKey(variable)
+	switch info.Kind {
+	case stableAlias:
+		if target := pv.lookupKey(info.Alias); target != nil && !seen[target] {
+			if r, why := pv.resolveFrom(target, seen); why == "" {
+				r.keys = append([]string{key}, r.keys...)
+				return r, ""
+			}
+		}
+		return stableValue{final: variable, info: sentinelInfo{Kind: stableOpaque}, keys: []string{key}}, ""
+	case stableMade:
+		return stableValue{final: variable, info: info, keys: append([]string{key}, info.Rests...)}, ""
+	}
+	return stableValue{final: variable, info: info, keys: []string{key}}, ""
+}
+
+// homemadeValue returns what a variable holds when it holds a sentinel of
+// this package or another into which nothing of unknown origin went, and
+// which this package may read.
+func (pv *pkgVerifier) homemadeValue(variable *types.Var) (stableValue, bool) {
+	r, why := pv.resolve(variable)
+	return r, why == "" && r.info.Kind == stableMade && r.info.Homemade
+}
+
+// rely records that a proof rests on the values of the variables with the
+// given keys.
+func (pv *pkgVerifier) rely(keys []string) {
+	for _, key := range keys {
+		pv.reliedKeys[key] = true
+	}
 }
 
 // namedVariable returns the variable an expression names: a plain
@@ -255,12 +342,17 @@ func (pv *pkgVerifier) lookupKey(key string) *types.Var {
 // is read, or, when it cannot be read, why. The facts that hold of it are
 // noted in sink, which may be nil.
 func (v *fnVerifier) sentinelTerm(sink *state, variable *types.Var) (*logic.Term, string) {
-	info, why := v.usableSentinel(variable)
+	r, why := v.resolve(variable)
 	if why != "" {
 		return nil, why
 	}
-	v.relied[variable] = true
-	sentinel := logic.Const(sentinelName+errorKey(variable), logic.Err)
+	v.rely(r.keys)
+	info := r.info
+	sentinel := logic.Const(sentinelName+errorKey(r.final), logic.Err)
+	if info.Kind != stableMade {
+		v.noteOpaque(sink, sentinel, info.NonNil)
+		return sentinel, ""
+	}
 	v.noteError(sink, sentinel)
 	// Only the tree of an error into which nothing of unknown origin went
 	// is a matter of the standard library alone.
@@ -295,6 +387,27 @@ func (v *fnVerifier) noteError(sink *state, made *logic.Term) {
 		if other.Name != made.Name {
 			v.fact(sink, logic.Not(logic.Eq(made, other)))
 		}
+	}
+}
+
+// noteOpaque records the value of an opaque variable: it is not nil when
+// its type says so, and it differs from every error made in the body,
+// which is a new allocation, while the variable has held its value since
+// the package was initialised. It is not known to differ from a sentinel,
+// whose error it may hold.
+func (v *fnVerifier) noteOpaque(sink *state, value *logic.Term, nonNil bool) {
+	if !slices.ContainsFunc(v.opaqueErrors, func(known *logic.Term) bool { return known.Name == value.Name }) {
+		v.opaqueErrors = append(v.opaqueErrors, value)
+	}
+	if sink == nil || sink.noted["opaque "+value.Name] {
+		return
+	}
+	sink.noted["opaque "+value.Name] = true
+	if nonNil {
+		v.fact(sink, logic.Not(logic.IsNil(value)))
+	}
+	for _, made := range v.madeHere {
+		v.fact(sink, logic.Not(logic.Eq(made, value)))
 	}
 }
 
@@ -358,17 +471,19 @@ func (v *fnVerifier) noteIs(sink *state, t *logic.Term) {
 
 // comparableError reports whether Go's == on an error expression and any
 // other error agrees with equality in the logic and cannot panic: the
-// expression is nil, has a known origin, or names a sentinel.
+// expression is nil, has a known origin, or names a variable that holds a
+// sentinel, which is a pointer, or an opaque value whose type makes ==
+// identity.
 func (v *fnVerifier) comparableError(e ast.Expr) bool {
 	if v.isNil(e) || v.knownError(v.originsOf(v.fn.decl.Body), e, -1, map[*types.Var]bool{}) {
 		return true
 	}
-	variable := v.namedVariable(e)
-	if variable == nil || variable.Parent() != variable.Pkg().Scope() {
+	variable := v.namedErrorVariable(e)
+	if variable == nil {
 		return false
 	}
-	_, why := v.usableSentinel(variable)
-	return why == ""
+	r, why := v.resolve(variable)
+	return why == "" && (r.info.Kind == stableMade || r.info.Comparable)
 }
 
 // compareErrors evaluates x == y or x != y on two errors.
@@ -390,7 +505,8 @@ func (v *fnVerifier) compareErrors(x, y ast.Expr, op token.Token, st *state, gua
 func (v *fnVerifier) errorsEqual(x, y ast.Expr, a, b *logic.Term, pos token.Pos) *logic.Term {
 	if !v.comparableError(x) && !v.comparableError(y) {
 		v.unsupported(pos, "comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, "+
-			"a package-level error variable, or an error made by errors.New or fmt.Errorf")
+			"an error made by errors.New or fmt.Errorf, or a package-level error variable that holds such an error or a value "+
+			"of a type for which == cannot panic")
 	}
 	return logic.Eq(a, b)
 }
@@ -404,14 +520,7 @@ func (v *fnVerifier) errorsEqual(x, y ast.Expr, a, b *logic.Term, pos token.Pos)
 func (pv *pkgVerifier) reportSentinelWrites() {
 	// What is known of a sentinel rests on the sentinels that went into
 	// it as well.
-	own := map[string]bool{}
-	for variable := range pv.relied {
-		own[errorKey(variable)] = true
-		info, _ := pv.sentinelOf(variable)
-		for _, key := range info.Rests {
-			own[key] = true
-		}
-	}
+	own := pv.reliedKeys
 	if len(own) > 0 {
 		pv.pass.ExportPackageFact(&sentinelRelianceFact{Keys: slices.Sorted(maps.Keys(own))})
 	}

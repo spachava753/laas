@@ -142,16 +142,17 @@ func Unrelated(e, f error) (same bool) {
 }
 
 // NotExist reads an error variable of another package that holds another
-// variable, which is not known to be a sentinel.
+// variable, which holds a sentinel: it is not nil.
 //
-// @Ensures True
-func NotExist() (err error) {
-	return os.ErrNotExist // want `vego: cannot verify NotExist: os.ErrNotExist is a variable of package os that is not known to hold the error it was declared with`
+// @Ensures err != nil
+func NotExist() (err error) { // want `the contract of NotExist may also be met by a function that always returns an error: it requires success for no input`
+	return os.ErrNotExist
 }
 
 // NotExistNamed names it in a contract.
 //
-// @Ensures err != os.ErrNotExist // want `vego: in Ensures annotation: os.ErrNotExist is a variable of package os that is not known to hold the error it was declared with`
+// @Ensures err = nil
+// @Ensures err != os.ErrNotExist
 func NotExistNamed() (err error) {
 	return nil
 }

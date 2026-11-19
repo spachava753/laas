@@ -113,9 +113,12 @@ type fnVerifier struct {
 	// made in the body and those of sentinels. background holds the facts
 	// noted so far that speak of inputs alone and are true of every input,
 	// by their text in backgroundSeen; see fact.
-	distinct       []*logic.Term
-	background     []*logic.Term
-	backgroundSeen map[string]bool
+	distinct []*logic.Term
+	// opaqueErrors holds the opaque error variables met, and madeHere the
+	// errors made in the body; see noteOpaque.
+	opaqueErrors, madeHere []*logic.Term
+	background             []*logic.Term
+	backgroundSeen         map[string]bool
 	// trees holds the errors met whose tree is known, and isTargets the
 	// targets of is met outside quantifiers, by their text in targetSeen;
 	// see noteTree and noteIs.

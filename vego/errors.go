@@ -16,11 +16,12 @@ import (
 	"golang.org/x/tools/go/types/typeutil"
 )
 
-// findSentinels records the package-level error variables that are known to
-// be non-nil: those initialised with errors.New or fmt.Errorf and never
-// assigned or addressed anywhere in the package, provided that no code of
-// the package can run before they are initialised. Each of them is published
-// as a fact for the packages that import this one, which run only once its
+// findSentinels records the package-level error variables that hold one
+// error for as long as code of their importers runs: those never assigned
+// or addressed anywhere in the package, provided that no code of the
+// package can run before they are initialised. Such a variable is stable,
+// and of one of three kinds; see stableKind. Each of them is published as a
+// fact for the packages built with this one, which run only once its
 // initialisation is over and so need no such proviso. That another package
 // does not assign to it is checked where both that package and a proof that
 // relies on the variable are known; see reportSentinelWrites.
@@ -28,9 +29,10 @@ func (pv *pkgVerifier) findSentinels() {
 	pv.sentinels = map[*types.Var]bool{}
 	pv.unsettled = map[*types.Var]string{}
 	pv.reassigned = map[*types.Var]bool{}
-	pv.relied = map[*types.Var]bool{}
+	pv.reliedKeys = map[string]bool{}
 	pv.homemade = map[*types.Var]bool{}
 	pv.candidates = map[*types.Var]sentinelInfo{}
+	pv.ownChanges = map[*types.Var]string{}
 	// What this package writes of the error variables of other packages
 	// is published, whichever way this returns.
 	defer func() {
@@ -38,9 +40,24 @@ func (pv *pkgVerifier) findSentinels() {
 			pv.pass.ExportPackageFact(&sentinelWritesFact{Writes: pv.writes})
 		}
 	}()
-	made := map[*types.Var]*ast.CallExpr{}
+	// The error variables of the package in the order of their
+	// declarations, with what each is initialised with: a value of its
+	// own, or the result at index of a call that gives several.
+	type declared struct {
+		value ast.Expr
+		index int
+	}
+	declarations := map[*types.Var]declared{}
+	var variables []*types.Var
+	bodies := map[*types.Func]*ast.FuncDecl{}
 	for _, file := range pv.pass.Files {
 		for _, decl := range file.Decls {
+			if fd, ok := decl.(*ast.FuncDecl); ok {
+				if fn, ok := pv.info.Defs[fd.Name].(*types.Func); ok {
+					bodies[fn] = fd
+				}
+				continue
+			}
 			gen, ok := decl.(*ast.GenDecl)
 			if !ok || gen.Tok != token.VAR {
 				continue
@@ -48,20 +65,24 @@ func (pv *pkgVerifier) findSentinels() {
 			for _, spec := range gen.Specs {
 				spec := spec.(*ast.ValueSpec)
 				for i, name := range spec.Names {
-					if len(spec.Values) != len(spec.Names) {
-						break
-					}
-					call, isCall := ast.Unparen(spec.Values[i]).(*ast.CallExpr)
 					variable, _ := pv.info.Defs[name].(*types.Var)
-					if isCall && variable != nil && errorConstructor(typeutil.StaticCallee(pv.info, call)) {
-						pv.sentinels[variable] = true
-						made[variable] = call
+					if variable == nil || !isError(variable.Type()) {
+						continue
 					}
+					d := declared{index: -1}
+					switch {
+					case len(spec.Values) == len(spec.Names):
+						d.value = spec.Values[i]
+					case len(spec.Values) == 1:
+						d.value, d.index = spec.Values[0], i
+					}
+					declarations[variable] = d
+					variables = append(variables, variable)
 				}
 			}
 		}
 	}
-	changed := func(e ast.Expr) {
+	changed := func(e ast.Expr, what string) {
 		e = ast.Unparen(e)
 		if sel, ok := e.(*ast.SelectorExpr); ok {
 			e = sel.Sel
@@ -74,15 +95,18 @@ func (pv *pkgVerifier) findSentinels() {
 		if !ok {
 			return
 		}
-		delete(pv.sentinels, variable)
 		pv.reassigned[variable] = true
+		position := pv.pass.Fset.Position(e.Pos())
+		at := fmt.Sprintf("%s:%d", filepath.Base(position.Filename), position.Line)
+		if variable.Pkg() == pv.pass.Pkg && pv.ownChanges[variable] == "" {
+			pv.ownChanges[variable] = what + " at " + at
+		}
 		// A proof in another package may rest on the value of a variable
 		// of another package.
 		if _, published := pv.foreignSentinel(variable); published {
-			position := pv.pass.Fset.Position(e.Pos())
 			pv.writes = append(pv.writes, sentinelWrite{
 				Key: errorKey(variable), Name: variable.Pkg().Name() + "." + variable.Name(), Package: pv.pass.Pkg.Path(),
-				At: fmt.Sprintf("%s:%d", filepath.Base(position.Filename), position.Line), pos: e.Pos(),
+				At: at, pos: e.Pos(),
 			})
 		}
 	}
@@ -91,54 +115,140 @@ func (pv *pkgVerifier) findSentinels() {
 			switch n := n.(type) {
 			case *ast.AssignStmt:
 				for _, lhs := range n.Lhs {
-					changed(lhs)
+					changed(lhs, "is assigned")
 				}
 			case *ast.UnaryExpr:
 				if n.Op == token.AND {
-					changed(n.X)
+					changed(n.X, "has its address taken")
 				}
 			case *ast.RangeStmt:
 				if n.Key != nil {
-					changed(n.Key)
+					changed(n.Key, "is assigned")
 				}
 				if n.Value != nil {
-					changed(n.Value)
+					changed(n.Value, "is assigned")
 				}
 			}
 			return true
 		})
 	}
-	if len(pv.sentinels) == 0 {
-		return
+	// Each stable variable is of one kind, read from its initialiser.
+	made := map[*types.Var]*ast.CallExpr{}
+	aliases := map[*types.Var]*types.Var{}
+	var stable []*types.Var
+	for _, variable := range variables {
+		if pv.reassigned[variable] {
+			continue
+		}
+		stable = append(stable, variable)
+		d := declarations[variable]
+		call, isCall := ast.Unparen(d.value).(*ast.CallExpr)
+		switch target := pv.aliasTarget(d.value, bodies); {
+		case d.index < 0 && isCall && errorConstructor(typeutil.StaticCallee(pv.info, call)):
+			made[variable] = call
+			pv.sentinels[variable] = true
+		case d.index < 0 && target != nil:
+			aliases[variable] = target
+			pv.candidates[variable] = sentinelInfo{Kind: stableAlias, Alias: errorKey(target)}
+		default:
+			info := sentinelInfo{Kind: stableOpaque}
+			if d.value != nil {
+				info.NonNil, info.Comparable = concreteError(pv.info.Types[d.value], d.index)
+			}
+			pv.candidates[variable] = info
+		}
+	}
+	// resolved follows an alias of this package to the variable it holds
+	// in the end, which is not an alias of this package; nil when the
+	// chain ends in a variable of this package that is not stable.
+	var resolved func(variable *types.Var, seen map[*types.Var]bool) *types.Var
+	resolved = func(variable *types.Var, seen map[*types.Var]bool) *types.Var {
+		target, isAlias := aliases[variable]
+		switch {
+		case variable.Pkg() != pv.pass.Pkg || made[variable] != nil:
+			return variable
+		case !isAlias || seen[variable]:
+			return nil
+		}
+		seen[variable] = true
+		return resolved(target, seen)
+	}
+	// An alias that holds a sentinel of this package, or a variable of
+	// another package, holds no code of this package, as a sentinel does
+	// not; see hiddenInitCode. A variable of another package holds code of
+	// this package only if this package handed it over, which is looked for
+	// where that happens. An alias of an opaque variable of this package is
+	// decided by the initialiser of that variable.
+	for variable := range aliases {
+		if final := resolved(variable, map[*types.Var]bool{}); final != nil && (final.Pkg() != pv.pass.Pkg || made[final] != nil) {
+			pv.sentinels[variable] = true
+		}
+	}
+	// homemadeOf says whether an error variable that went into an error
+	// holds one into which nothing of unknown origin went.
+	homemadeOf := func(other *types.Var) bool {
+		final := resolved(other, map[*types.Var]bool{})
+		switch {
+		case final == nil:
+			return false
+		case final.Pkg() == pv.pass.Pkg:
+			return pv.homemade[final]
+		}
+		_, ok := pv.homemadeValue(final)
+		return ok
 	}
 	// An initialiser is not verified code, so nobody has checked what went
 	// into the error it makes. The error is not nil whatever went in; its
 	// origin is known only if nothing went in that brings code: plain values,
 	// and other such variables. With %w anything else stays inside the
 	// error, where Unwrap finds it.
-	for changed := true; changed; {
-		changed = false
-		for variable := range pv.sentinels {
+	for again := true; again; {
+		again = false
+		for variable, call := range made {
 			if pv.homemade[variable] {
 				continue
 			}
-			plain := !slices.ContainsFunc(made[variable].Args, func(arg ast.Expr) bool {
+			plain := !slices.ContainsFunc(call.Args, func(arg ast.Expr) bool {
 				if pv.info.Types[arg].IsNil() {
 					return false
 				}
 				if other := pv.namedVariable(arg); other != nil && isError(other.Type()) {
-					return !pv.homemade[other] && (other.Pkg() == pv.pass.Pkg || !pv.homemadeSentinel(other))
+					return !homemadeOf(other)
 				}
 				return !formatsPlainly(pv.info.TypeOf(arg))
 			})
 			if plain {
-				pv.homemade[variable], changed = true, true
+				pv.homemade[variable], again = true, true
 			}
 		}
 	}
 	// What is known of a sentinel rests on the variables that went into
-	// its error, and on what theirs rests on.
+	// its error, on the variables they hold, and on what theirs rests on.
 	var restsOf func(variable *types.Var) []string
+	keysOf := func(other *types.Var) []string {
+		keys := []string{errorKey(other)}
+		if other.Pkg() != pv.pass.Pkg {
+			if r, why := pv.resolve(other); why == "" {
+				keys = r.keys
+			}
+			return keys
+		}
+		seen := map[*types.Var]bool{}
+		for at := other; aliases[at] != nil && !seen[at]; at = aliases[at] {
+			seen[at] = true
+			keys = append(keys, errorKey(aliases[at]))
+			if target := aliases[at]; target.Pkg() != pv.pass.Pkg {
+				if r, why := pv.resolve(target); why == "" {
+					keys = append(keys, r.keys...)
+				}
+				return keys
+			}
+		}
+		if final := resolved(other, map[*types.Var]bool{}); final != nil && made[final] != nil {
+			keys = append(keys, restsOf(final)...)
+		}
+		return keys
+	}
 	restsOf = func(variable *types.Var) []string {
 		if info, done := pv.candidates[variable]; done {
 			return info.Rests
@@ -149,17 +259,11 @@ func (pv *pkgVerifier) findSentinels() {
 			if other == nil || other.Pkg() == nil || other.Parent() != other.Pkg().Scope() || !isError(other.Type()) {
 				continue
 			}
-			rests = append(rests, errorKey(other))
-			switch info, published := pv.foreignSentinel(other); {
-			case pv.sentinels[other]:
-				rests = append(rests, restsOf(other)...)
-			case published:
-				rests = append(rests, info.Rests...)
-			}
+			rests = append(rests, keysOf(other)...)
 		}
 		slices.Sort(rests)
 		rests = slices.Compact(rests)
-		info := sentinelInfo{Homemade: pv.homemade[variable], Rests: rests}
+		info := sentinelInfo{Kind: stableMade, Homemade: pv.homemade[variable], Rests: rests}
 		var wrapped ast.Expr
 		info.Tree, wrapped = pv.callWraps(made[variable])
 		if wrapped != nil {
@@ -176,17 +280,135 @@ func (pv *pkgVerifier) findSentinels() {
 		return rests
 	}
 	published := map[string]sentinelInfo{}
-	for variable := range pv.sentinels {
-		restsOf(variable)
+	for _, variable := range stable {
+		if made[variable] != nil {
+			restsOf(variable)
+		}
 		published[variable.Name()] = pv.candidates[variable]
 	}
-	pv.pass.ExportPackageFact(&sentinelsFact{Vars: published})
+	changes := map[string]string{}
+	for _, variable := range variables {
+		if why := pv.ownChanges[variable]; why != "" {
+			changes[variable.Name()] = why
+		}
+	}
+	if len(published) > 0 || len(changes) > 0 {
+		pv.pass.ExportPackageFact(&sentinelsFact{Vars: published, Changed: changes})
+	}
+	if len(stable) == 0 {
+		return
+	}
 	if hidden := pv.hiddenInitCode(); hidden != "" {
-		for variable := range pv.sentinels {
+		for _, variable := range stable {
 			pv.unsettled[variable] = hidden
 		}
 		clear(pv.sentinels)
 	}
+}
+
+// aliasTarget returns the package-level error variable whose value an
+// initialiser gives to the variable it initialises, if it is one of these:
+// the variable itself, as in ErrNotExist = fs.ErrNotExist, or a call of a
+// function of this package that takes nothing, is not generic, and whose
+// whole body is a return of the variable, as in errNotExist() of io/fs.
+// Go initialises the variable before the call is made: one of another
+// package before this package, one of this package before every variable
+// whose initialiser refers to a function that refers to it.
+func (pv *pkgVerifier) aliasTarget(value ast.Expr, bodies map[*types.Func]*ast.FuncDecl) *types.Var {
+	if value == nil {
+		return nil
+	}
+	if target := pv.namedErrorVariable(value); target != nil {
+		return target
+	}
+	call, ok := ast.Unparen(value).(*ast.CallExpr)
+	if !ok || len(call.Args) > 0 {
+		return nil
+	}
+	id, ok := ast.Unparen(call.Fun).(*ast.Ident)
+	if !ok {
+		return nil
+	}
+	fn, ok := pv.info.Uses[id].(*types.Func)
+	if !ok || fn.Pkg() != pv.pass.Pkg {
+		return nil
+	}
+	sig := fn.Type().(*types.Signature)
+	decl := bodies[fn]
+	if sig.Recv() != nil || sig.TypeParams() != nil || sig.Params().Len() > 0 || sig.Results().Len() != 1 || decl == nil || decl.Body == nil {
+		return nil
+	}
+	if len(decl.Body.List) != 1 {
+		return nil
+	}
+	ret, ok := decl.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(ret.Results) != 1 {
+		return nil
+	}
+	return pv.namedErrorVariable(ret.Results[0])
+}
+
+// namedErrorVariable returns the package-level variable of type error that
+// an expression names, or nil.
+func (pv *pkgVerifier) namedErrorVariable(e ast.Expr) *types.Var {
+	variable := pv.namedVariable(e)
+	if variable == nil || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() || !isError(variable.Type()) {
+		return nil
+	}
+	return variable
+}
+
+// concreteError reads what the static type of an initialiser says of the
+// error it gives a variable: when it is a type other than an interface, the
+// value is not nil, since converting a value of such a type to an interface,
+// even a nil pointer, makes an interface that is not nil; and when, beyond
+// that, == on values of the type is identity and cannot panic, comparing
+// the variable with any error cannot panic either. index is the result of a
+// call that gives several, or -1.
+func concreteError(tv types.TypeAndValue, index int) (nonNil, comparable bool) {
+	t := tv.Type
+	if tuple, ok := t.(*types.Tuple); ok {
+		if index < 0 || index >= tuple.Len() {
+			return false, false
+		}
+		t = tuple.At(index).Type()
+	} else if tv.IsNil() {
+		return false, false
+	}
+	if t == nil || types.IsInterface(t) {
+		return false, false
+	}
+	if basic, ok := t.(*types.Basic); ok && basic.Kind() == types.UntypedNil {
+		return false, false
+	}
+	return true, identityComparable(t, map[types.Type]bool{})
+}
+
+// identityComparable reports whether == on two values of a type cannot panic
+// and holds exactly when the values are the same: no interface, which may
+// hold an uncomparable value, and no float or complex number, for which ==
+// is not identity (NaN differs from itself, and 0 equals -0), anywhere in it.
+func identityComparable(t types.Type, seen map[types.Type]bool) bool {
+	if seen[t] {
+		return true
+	}
+	seen[t] = true
+	switch u := t.Underlying().(type) {
+	case *types.Basic:
+		return u.Info()&(types.IsFloat|types.IsComplex) == 0 && u.Kind() != types.UntypedNil
+	case *types.Pointer, *types.Chan:
+		return true
+	case *types.Array:
+		return identityComparable(u.Elem(), seen)
+	case *types.Struct:
+		for field := range u.Fields() {
+			if !identityComparable(field.Type(), seen) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // hiddenInitCode looks for code that runs while the package-level variables

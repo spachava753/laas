@@ -366,31 +366,34 @@ type pkgVerifier struct {
 	// current is the function being verified, which a diagnostic counts
 	// against.
 	current *funcInfo
-	// sentinels are the package-level error variables known to be non-nil,
-	// and relied those among them a proof has used. unsettled holds the
-	// ones that would be sentinels if no code of the package could run
-	// before they are initialised, with what stands in the way.
-	sentinels map[*types.Var]bool
-	relied    map[*types.Var]bool
+	// sentinels are the stable error variables of the package that hold a
+	// sentinel of this package or a variable of another, and so no code of
+	// this package; reliedKeys holds the keys of the error variables a proof
+	// has relied on. unsettled holds the stable variables that would be
+	// usable if no code of the package could run before they are
+	// initialised, with what stands in the way.
+	sentinels  map[*types.Var]bool
+	reliedKeys map[string]bool
 	// writes holds the assignments to error variables of other packages
 	// and the places that take their address, and buildWrites those of
 	// this package and of every package it is built with, by key; see
 	// writtenInBuild.
 	writes      []sentinelWrite
 	buildWrites map[string]sentinelWrite
-	// candidates holds what is known of the variables that are sentinels
-	// as far as this package goes, whether or not code of the package can
-	// run before they are set; published holds what other packages
-	// published of theirs.
+	// candidates holds what is known of the stable variables of the
+	// package, whether or not code of the package can run before they are
+	// set; published holds what other packages published of theirs.
 	candidates map[*types.Var]sentinelInfo
-	published  map[*types.Package]map[string]sentinelInfo
+	published  map[*types.Package]*sentinelsFact
 	// homemade holds the sentinels whose origin is known: nothing but plain
 	// values and other such sentinels went into the error.
 	homemade  map[*types.Var]bool
 	unsettled map[*types.Var]string
 	// reassigned holds the variables that are assigned, addressed, or
-	// ranged into somewhere in the package.
+	// ranged into somewhere in the package, and ownChanges says for those
+	// of the package how and where first.
 	reassigned map[*types.Var]bool
+	ownChanges map[*types.Var]string
 	// origins caches what the variables of each function body are assigned,
 	// knownReturns holds the functions that only return errors of known
 	// origin, and isParameter the parameters of all functions.

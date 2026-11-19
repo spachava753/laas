@@ -226,14 +226,19 @@ func isErrorsIs(callee *types.Func) bool {
 
 // originWhy says, for an error expression that names a package-level error
 // variable which may not be taken to hold the error it was declared with,
-// why not, after a separator; otherwise it returns "".
+// or which holds an error that was not made by errors.New or fmt.Errorf,
+// why, after a separator; otherwise it returns "".
 func (v *fnVerifier) originWhy(e ast.Expr) string {
-	variable := v.namedVariable(e)
-	if variable == nil || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
+	variable := v.namedErrorVariable(e)
+	if variable == nil {
 		return ""
 	}
-	if _, why := v.usableSentinel(variable); why != "" {
+	r, why := v.resolve(variable)
+	switch {
+	case why != "":
 		return "; " + why
+	case r.info.Kind != stableMade:
+		return fmt.Sprintf("; %s is not initialised with errors.New or fmt.Errorf, so nothing is known of its methods", v.spelling(variable))
 	}
 	return ""
 }

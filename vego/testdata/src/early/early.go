@@ -33,3 +33,19 @@ var ErrX = fmt.Errorf("x %d", 1)
 func Named() (err error) {
 	return nil
 }
+
+// ErrAliasX holds ErrX, and ErrOpaqueX holds something else; neither is
+// known to have its value yet either.
+var (
+	ErrAliasX        = ErrX
+	ErrOpaqueX error = T{}.err()
+)
+
+func (T) err() error { return nil }
+
+// Aliased reads them.
+//
+// @Ensures True
+func Aliased() (a, b error) {
+	return ErrAliasX, ErrOpaqueX // want `vego: cannot verify Aliased: ErrAliasX is not known to have its value yet when this runs`
+}

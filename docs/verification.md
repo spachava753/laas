@@ -924,7 +924,7 @@ Quantifiers range over integers. A formula can therefore describe all the values
 
 `vego` knows two things about an error value: whether it is `nil`, and which error it is. It knows that `errors.New` and `fmt.Errorf` return non-nil errors. It also knows that such an error differs from every error variable and from the other errors the function makes.
 
-A package-level variable that is initialised with one of these calls and never assigned again holds that error, as in `var ErrEmpty = errors.New("empty")`. This guide calls such a variable an error variable. The error variables of other packages count too, such as `io.EOF`. [When a package-level error is known](#when-a-package-level-error-is-known) gives the exact conditions.
+A package-level variable of type `error` that nothing assigns after it is initialised holds the same error for as long as your code runs, as in `var ErrEmpty = errors.New("empty")`. This guide calls such a variable an error variable. The error variables of other packages count too, such as `io.EOF`. What `vego` knows of the error depends on the initialiser of the variable. [What vego knows of an error variable](#what-vego-knows-of-an-error-variable) describes the cases, and [When a package-level error is known](#when-a-package-level-error-is-known) gives the exact conditions.
 
 ### Saying when a function succeeds
 
@@ -1031,10 +1031,11 @@ A `switch` on an error works the same way, as in `switch err { case io.EOF: ... 
 Go's `==` on two error values panics when both hold the same type and that type is not comparable, such as a slice type with an `Error` method. So `vego` accepts `==`, `!=`, and the cases of a `switch` on errors only when one of the two errors is one of these:
 
 - `nil`;
-- an error variable, of this package or another;
-- an error made by `errors.New` or `fmt.Errorf`, here or in a verified function that returns nothing else.
+- an error made by `errors.New` or `fmt.Errorf`, here or in a verified function that returns nothing else;
+- an error variable, of this package or another, that holds such an error;
+- an error variable whose initialiser has a type in which `==` cannot panic, as described in [What vego knows of an error variable](#what-vego-knows-of-an-error-variable).
 
-A comparison with `nil` cannot panic, and the errors in the other two kinds are pointers, so a comparison with them cannot panic either. Comparing two errors of which nothing is known is reported:
+A comparison with `nil` cannot panic. The errors that `errors.New` and `fmt.Errorf` make are pointers, so a comparison with them cannot panic either. Comparing two errors of which nothing is known is reported:
 
 ```go
 // @Ensures True
@@ -1045,8 +1046,9 @@ func SameError(a, b error) (same bool) {
 
 ```text
 vego: cannot verify SameError: comparing two errors can panic when both hold the same
-uncomparable type; one of them must be nil, a package-level error variable, or an error
-made by errors.New or fmt.Errorf
+uncomparable type; one of them must be nil, an error made by errors.New or fmt.Errorf, or
+a package-level error variable that holds such an error or a value of a type for which ==
+cannot panic
 ```
 
 Compare one of them with an error variable instead.
@@ -1174,7 +1176,7 @@ These are not supported, and a function that uses one is reported as `cannot ver
 - `errors.As`, which needs typed errors;
 - `errors.Join` and `errors.Unwrap`;
 - `errors.Is` on an error that came from a parameter or a trusted function;
-- an error variable that is not initialised with `errors.New` or `fmt.Errorf`, or that is assigned, such as `os.ErrNotExist`, which holds another variable.
+- an error variable that its package assigns or takes the address of.
 
 A struct invariant cannot name an error variable.
 
@@ -1217,6 +1219,13 @@ value or an interface method is called at early.go:24 while the variables of the
 are initialised, which may run this function first
 ```
 
+An error variable that the package assigns, or whose address it takes, is reported where it is read:
+
+```text
+vego: cannot verify UnreliableSentinel: ErrReassigned is assigned at values.go:16, so it is
+not known to hold the error it was declared with
+```
+
 For an error variable of another package, only the first condition matters. Go initialises a package before any code of the packages that import it runs. `vego` reads the source of every package your package is built with, the standard library included. So `io.EOF` holds the error it was declared with in your package because nothing in package `io` assigns to it.
 
 A package can also assign to an error variable of another package. A package that does so cannot rely on that variable:
@@ -1227,6 +1236,8 @@ which this package is built with, so it is not known to hold the error it was de
 ```
 
 Your package gets this message when it is built with the package that assigns, directly or through another package. It gets it as well when the variable that is assigned went into the error variable that your package reads, as `io.EOF` goes into `fmt.Errorf("read: %w", io.EOF)`.
+
+A variable that holds another error variable is not affected when that variable is changed. It holds the value the other variable had when it was initialised, and `vego` knows only that it is the same error each time it is read.
 
 A proof in another package may rely on the variable all the same. `laas` reports the assignment in every package it runs on that is built with both the assignment and that proof:
 
@@ -1243,6 +1254,21 @@ built with, but proofs in package gonelib rely on it being the error it was decl
 The first message is at the assignment, in the package that assigns. The second is at the `package` clause of a package that imports both, directly or not.
 
 An assignment in a package that is not in the build of any package `laas` runs on is not seen. See [What a proof assumes](#what-a-proof-assumes).
+
+### What vego knows of an error variable
+
+`vego` reads the initialiser of each error variable. There are three cases.
+
+The first is a call of `errors.New` or `fmt.Errorf`, as in `var ErrEmpty = errors.New("empty")`. The error is not nil. It differs from the error of every other such variable and from every error that a function makes. `vego` knows what `errors.Is` finds in it, and it can be formatted if nothing of unknown origin went into it. See [Wrapping errors](#wrapping-errors).
+
+The second is another error variable, as in `var ErrNotFound = os.ErrNotExist`. The variable is then the same error as that one, and `vego` knows of it what it knows of that one. The same holds for a call of a function of the same package that takes no arguments and whose body is only `return` of an error variable. `fs.ErrNotExist` is set this way to `oserror.ErrNotExist`, which `errors.New` makes, and `os.ErrNotExist` holds `fs.ErrNotExist`. So `vego` knows that the three are one error made by `errors.New`.
+
+The third is anything else, such as `var DeadlineExceeded error = deadlineExceededError{}` in package `context`. `vego` knows only that the variable holds the same error each time it is read. Such a variable can be the target of `errors.Is`, and a contract can name it. It cannot be formatted, and it cannot be the first argument of `errors.Is`, because its methods are not known. Two more facts come from the type of the initialiser:
+
+- If the type is not an interface type, the variable is not nil. This is true even of a nil pointer of a concrete type, which makes a non-nil error.
+- If the type also has no interface, float, or complex number in it, `==` on it cannot panic, and the variable can be compared with any error. A float is excluded because `==` on a NaN reports false.
+
+`context.DeadlineExceeded` is not nil and can be compared with any error. An error that a function makes differs from it, because a new error is new memory, which no variable held before.
 
 ## Defer
 
@@ -1424,7 +1450,7 @@ contract holds whatever that code does, list e under runs in the contract
 
 There are three ways to deal with this.
 
-The first is to pass an error that verified code created with `errors.New` or `fmt.Errorf`. Such an error has only the standard library's methods and wraps nothing from outside. An error variable also qualifies if its initialiser used only plain values and other errors of this kind, in its own package or another. `var ErrRead = fmt.Errorf("read: %w", io.EOF)` qualifies. `var ErrMissing = fmt.Errorf("missing: %w", os.ErrNotExist)` does not, because `os.ErrNotExist` is initialised with another variable and not with `errors.New`.
+The first is to pass an error that verified code created with `errors.New` or `fmt.Errorf`. Such an error has only the standard library's methods and wraps nothing from outside. An error variable also qualifies if its initialiser used only plain values and other errors of this kind, in its own package or another. `var ErrRead = fmt.Errorf("read: %w", io.EOF)` qualifies. `var ErrLate = fmt.Errorf("late: %w", context.DeadlineExceeded)` does not, because `context.DeadlineExceeded` is not made by `errors.New` or `fmt.Errorf`.
 
 The second is to make the call from unverified code. This is the right choice for logging an error that came from elsewhere. The unverified caller logs the error, and the verified function only returns it.
 
@@ -1523,7 +1549,7 @@ func At(A []int, i int) (x int, err error) {
 }
 ```
 
-The second is that package-level variables are not supported. The only exception is an error variable that is initialised with `errors.New` or `fmt.Errorf` and never assigned, as described in [Errors](#errors). A function that reads a global variable must receive the value as a parameter instead.
+The second is that package-level variables are not supported. The only exception is an error variable, a package-level variable of type `error` that is never assigned, as described in [Errors](#errors). A function that reads a global variable must receive the value as a parameter instead.
 
 ### For one core component
 
@@ -1612,9 +1638,9 @@ This table lists the most common messages.
 | `cannot verify F: parameter x has unsupported type T` | `T` is outside the supported subset. | Keep `T` out of the signatures of verified functions. |
 | `cannot verify F: x is not a local variable` | `F` uses a package-level variable that is not an error variable. | Pass the value as a parameter. |
 | `cannot verify F: formatting err would run the methods of an error whose origin is not known` | `fmt.Errorf` is given an error whose origin is not known, such as one from a trusted function or a parameter. | Return the error unchanged, or wrap your own error. |
-| `cannot verify F: comparing two errors can panic when both hold the same uncomparable type` | Neither error is `nil`, an error variable, or an error made by `errors.New` or `fmt.Errorf`. | Compare one of them with an error variable instead. See [Comparing errors](#comparing-errors). |
+| `cannot verify F: comparing two errors can panic when both hold the same uncomparable type` | Neither error is `nil`, an error made by `errors.New` or `fmt.Errorf`, or an error variable that holds one or a value of a type for which `==` cannot panic. | Compare one of them with an error variable instead. See [Comparing errors](#comparing-errors). |
 | `cannot verify F: errors.Is would run the Is and Unwrap methods of err, an error whose origin is not known` | `errors.Is` is asked about an error from a parameter or a trusted function. | Compare it with an error variable using `==`. See [Asking errors.Is](#asking-errorsis). |
-| `x.E is a variable of package x that is not known to hold the error it was declared with` | The variable is not initialised with `errors.New` or `fmt.Errorf`, or its package assigns it. | Use another error variable, or leave the comparison to unverified code. |
+| `E is assigned at f.go:n, so it is not known to hold the error it was declared with`, or `x.E is assigned at f.go:n in package x` | The package of the error variable assigns it, or takes its address. | Remove the assignment, or pass the error as a parameter. |
 | `x.E is changed at f.go:n in package p, which this package is built with` | A package in the build assigns the error variable, or one that went into it. | Remove the assignment. See [When a package-level error is known](#when-a-package-level-error-is-known). |
 | `x is passed to F, which is trusted, and is an error whose origin is not known` (or `a value of type T, which can hold an error, an interface, or a function`) | The trusted function `F` could call code that `x` carries. | See [Arguments that carry code](#arguments-that-carry-code). |
 | `the trusted contract of F cannot be true of this call` | The contract contradicts what is known at the call. | The entry is wrong, or it needs a `requires` clause. |
@@ -1633,12 +1659,12 @@ A function that uses any of the following is reported as `cannot verify`:
 - goroutines, channels, and `select`;
 - arrays, and structs that contain an array;
 - pointers to anything other than a struct;
-- package-level variables, except error variables initialised with `errors.New` or `fmt.Errorf` and never assigned, of this package or another;
+- package-level variables, except error variables that are never assigned, of this package or another;
 - calls to variadic functions other than `fmt.Errorf`;
 - `append(s, t...)` and `copy`;
 - a modifying call inside a condition or a larger expression, as in `if !s.Push(x)` (see [Where a modifying call can appear](#where-a-modifying-call-can-appear));
 - comparing structs with `==`;
-- comparing two errors with `==` when neither is `nil`, an error variable, or an error made by `errors.New` or `fmt.Errorf` (see [Comparing errors](#comparing-errors));
+- comparing two errors with `==` when neither is `nil`, an error made by `errors.New` or `fmt.Errorf`, or an error variable that holds one or a value of a type for which `==` cannot panic (see [Comparing errors](#comparing-errors));
 - `errors.As`, `errors.Join`, `errors.Unwrap`, and `errors.Is` on an error whose origin is not known (see [Asking errors.Is](#asking-errorsis));
 - a `range` over a map whose body modifies a map of the same type;
 - `goto`, `fallthrough`, labelled `break` and `continue`, and `defer` inside a loop.

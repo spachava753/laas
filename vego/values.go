@@ -150,6 +150,11 @@ func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term
 	}
 	created := v.fresh("error", logic.Err)
 	v.noteError(st, created)
+	// It differs from every opaque variable; see noteOpaque.
+	v.madeHere = append(v.madeHere, created)
+	for _, value := range v.opaqueErrors {
+		v.fact(st, logic.Not(logic.Eq(created, value)))
+	}
 	switch tree, wrapped := v.callWraps(call); tree {
 	case wrapsNothing:
 		v.noteTree(st, errorTree{err: created})

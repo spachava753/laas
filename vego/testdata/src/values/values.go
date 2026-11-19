@@ -90,7 +90,7 @@ func NoPostcondition(A []int, i int) (result1 int, result2 error) { // want `veg
 // @Ensures err = nil <-> ok = True
 func UnreliableSentinel(ok bool) (err error) {
 	if !ok {
-		return ErrReassigned // want `vego:\ cannot\ verify\ UnreliableSentinel:\ ErrReassigned\ is\ not\ a\ local\ variable\ of\ a\ supported\ type`
+		return ErrReassigned // want `vego: cannot verify UnreliableSentinel: ErrReassigned is assigned at values.go:16, so it is not known to hold the error it was declared with`
 	}
 	return nil
 }
@@ -344,7 +344,7 @@ func DescribeWrongly(err error) (code int) {
 // @Ensures True
 func DescribeOther(err, other error) (code int) {
 	switch err {
-	case other: // want `vego: cannot verify DescribeOther: comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, a package-level error variable, or an error made by errors.New or fmt.Errorf`
+	case other: // want `vego: cannot verify DescribeOther: comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, an error made by errors.New or fmt.Errorf, or a package-level error variable that holds such an error or a value of a type for which == cannot panic`
 		return 1
 	}
 	return 2

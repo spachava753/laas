@@ -135,10 +135,11 @@ func (pv *pkgVerifier) knownError(o *origins, e ast.Expr, index int, visiting ma
 // knownVariable reports whether an error variable only ever holds errors of
 // known origin.
 func (pv *pkgVerifier) knownVariable(o *origins, variable *types.Var, visiting map[*types.Var]bool) bool {
-	switch {
-	case pv.homemadeSentinel(variable):
-		pv.relied[variable] = true
+	if r, ok := pv.homemadeValue(variable); ok {
+		pv.rely(r.keys)
 		return true
+	}
+	switch {
 	case visiting[variable]:
 		return true
 	case o.unknown[variable] || (variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope()) || pv.isParameter[variable]:

@@ -7,8 +7,8 @@ package wrapped
 import (
 	"errors"
 	"fmt"
+	"context"
 	"io"
-	"os"
 
 	"lib"
 )
@@ -18,7 +18,7 @@ var (
 	errOver    = fmt.Errorf("over: %w", errBase)
 	errCounted = fmt.Errorf("%d over: %w", 3, errOver)
 	errEOF     = fmt.Errorf("eof: %w", io.EOF)
-	errForeign = fmt.Errorf("foreign: %w", os.ErrNotExist)
+	errForeign = fmt.Errorf("foreign: %w", context.DeadlineExceeded)
 	errOnTop   = fmt.Errorf("on top: %w", errForeign)
 	errNumbers = fmt.Errorf("numbers: %v", [][]int{{1}, {2}})
 	errNested  = fmt.Errorf("nested: %v", lib.Nest(nil))
@@ -44,7 +44,8 @@ func TellsEOF() {
 }
 
 // TellsForeign passes one that holds an error of another package that is
-// not known to be one: os.ErrNotExist is assigned another variable.
+// not known to be one: context.DeadlineExceeded holds a value that is not
+// made by errors.New or fmt.Errorf.
 //
 // @Ensures True
 func TellsForeign() {
