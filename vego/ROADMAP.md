@@ -14,16 +14,15 @@ Design choices should be judged against the first group. A feature that only hel
 
 Each of these makes vego report the function that uses it as `cannot verify`. They are listed here in one place, in the order they are meant to be built, which is roughly how often ordinary code runs into them. The sections by area further down say more about some of them.
 
-1. **A call that modifies memory inside a condition or a larger expression**: `if !s.Push(x)`, `for it.Next()`, `p.x = f(p)`. Such a call has to be a statement of its own today.
-2. **Function values and closures.** This is what `defer cancel()` and `defer func() { ... }()` wait for, the two most common deferred calls that are not supported.
-3. **Interfaces other than `error`**, and calls through them: `defer resp.Body.Close()`, `io.Writer`, `sort.Interface`. Typed errors come with them: `errors.As`, a type switch on an error, and what an error of a struct type holds.
-4. **Calls to variadic functions**, which `log.Printf` and `fmt.Println` are, and `append(s, t...)`.
-5. **Arrays**, and with them every struct that holds one.
-6. **Package-level variables** other than error sentinels. Existing code is full of them, and a function that reads one cannot be verified at all today.
-7. **`copy`, comparing structs with `==`, labelled `break` and `continue`, `goto`, `fallthrough`, `select`, `defer` inside a loop, a `range` over a map that changes a map of that type.**
-8. **Pointers to anything but a struct**, such as `*int`.
-9. **Generic functions and types.**
-10. **Goroutines and channels.** A proof is about one goroutine; nothing is said about what runs beside it.
+1. **Function values and closures.** This is what `defer cancel()` and `defer func() { ... }()` wait for, the two most common deferred calls that are not supported.
+2. **Interfaces other than `error`**, and calls through them: `defer resp.Body.Close()`, `io.Writer`, `sort.Interface`. Typed errors come with them: `errors.As`, a type switch on an error, and what an error of a struct type holds.
+3. **Calls to variadic functions**, which `log.Printf` and `fmt.Println` are, and `append(s, t...)`.
+4. **Arrays**, and with them every struct that holds one.
+5. **Package-level variables** other than error sentinels. Existing code is full of them, and a function that reads one cannot be verified at all today. When they come, a contract that names one reads memory, which the rule for a call beside an `append` depends on (see Order of evaluation).
+6. **`copy`, comparing structs with `==`, labelled `break` and `continue`, `goto`, `fallthrough`, `select`, `defer` inside a loop, a `range` over a map that changes a map of that type, a call with several results as the arguments of another call (`g(f())`), an `append` inside a larger expression, and a call in the target of an assignment beside an `append` that may write in place, unless the call modifies nothing and its signature refers to no memory.**
+7. **Pointers to anything but a struct**, such as `*int`.
+8. **Generic functions and types.**
+9. **Goroutines and channels.** A proof is about one goroutine; nothing is said about what runs beside it.
 
 Two things do not stop a function from being verified but come up as often:
 
@@ -84,8 +83,8 @@ Decisions:
 - **A value without size has no identity.** Two pointers to such values may or may not be equal in Go, so nothing is assumed about where they are, and annotations may compare them only with nil.
 - **`defer` is a call at every return.** The function, receiver, and arguments are settled where the statement is written; at each return the results are assigned, the calls that were put off are verified last one first like calls written there, and results that live in memory are read back. Inside a loop the number of calls is not known, so that is not supported.
 - **Nil.** Every dereference carries a proof obligation that the pointer is not nil. The verifier generates and discharges it; the user writes `Requires p != nil` for parameters and nothing at the dereference.
-- **`append` forks.** Whether an append writes in place or moves the slice is decided by the capacity, which is often unknown, so execution continues once for each outcome. That is why an append has to be a whole right-hand side or a returned value.
-- **Loops forget memory by region.** A region the loop writes gets a new unknown value. If every write to it goes through a variable the loop does not assign, or through a slice the loop only appends to, everything else that existed before the loop is known to be unchanged. Otherwise only what existed on entry and is not listed in `Modifies` is known to be unchanged.
+- **`append` forks.** Whether an append writes in place or moves the slice is decided by the capacity, which is often unknown, so execution continues once for each outcome. That is why an append has to be a whole right-hand side or a returned value. Inside an expression it would have to be a write on condition of the capacity instead, made the way a call on the right of `&&` is (see Order of evaluation), with a header that is one of two; that is not built, since using it for every append would change the proof of every append.
+- **Loops forget memory by region.** A region the loop writes, in its body, its post statement, or its condition, gets a new unknown value. If every write to it goes through a variable the loop does not assign, or through a slice the loop only appends to, everything else that existed before the loop is known to be unchanged. Otherwise only what existed on entry and is not listed in `Modifies` is known to be unchanged.
 - **Where a pointer or slice comes from is stated with `fresh` and `within`.** A function that returns something new says `fresh(result)`; one that appends to a slice it holds says `fresh(s.items) Or within(s.items', s.items)`. Without such a clause the caller knows nothing about what the value may share.
 
 Not built yet:
@@ -98,6 +97,24 @@ Not built yet:
 - **Linked structures** such as lists and trees. They can be built and read, but a loop that walks one forgets every node the function may modify, and there is no way to state an invariant over all nodes.
 - **Letting a function accept overlapping slices.**
 - **Runs of elements in `Modifies`**, such as all the structs a slice of pointers refers to.
+
+### Order of evaluation
+
+Built on 2026-11-19: a call that modifies memory may stand wherever an expression may, in the condition of an `if` or a `for`, the tag and the cases of a `switch`, as an operand or argument, on the right of an assignment to anything, among several results, in the arguments of a `defer`, and on the right of `&&` and `||`. Before, it had to be a statement of its own, the only returned expression, or the whole right-hand side of an assignment to variables.
+
+Decisions:
+
+- **One meaning, or reported.** Go fixes the order of calls, `&&`, and `||` among themselves (lexical, left to right), runs an operation after its operands and the right of `&&` and `||` after the left, and stores the targets of an assignment after every operand. It does not fix when the other reads of memory happen relative to the calls. A read whose value would depend on that order is reported where it is written, as an obligation that failed, not as `cannot verify`. It is never given the meaning one compiler happens to give it; gc reads after the call in every form that was tried.
+- **Decided by the value, from the contract.** The operands of one statement, condition, case expression, range expression, or `defer` are one unit. Memory has a version at the start of the unit and after each call that may modify it and each `append` that writes into its array. Each read records from the syntax which versions Go may let it see: from after the latest call or decision of `&&` or `||` among its operands, or the decision whose right side it is on, up to before the innermost call whose receiver or argument it is part of, the decision on whose left it is, or the `append` whose operand it is, and otherwise up to the end. The verifier proves that the read gives the same value in each two consecutive versions of that window, under the guard of the read. It compares values and not places, so a call that writes back what was there does not collide; what a call may change comes from its `Modifies` and `Ensures`. Variables the verifier holds itself are not memory, and no call can change them.
+- **A read that is not recorded crashes the run.** Every read of memory goes through `table`. While a unit is open, a read there outside `readAt`, or outside `quietly` (what a contract says, and the bookkeeping of a map write), panics with an internal error, so a read site added later without its order cannot pass quietly. The one read Go makes that does not go through `table`, the copy an `append` makes when it moves, is recorded on its own.
+- **A read is as narrow as Go's.** A field of a struct that lies in memory is read alone, and a pointer receiver reached through embedded fields reads only the embedded pointers on the way. `string(b)` reads every element, and an equality of two map keys with equal values is still reported; both are stricter than Go needs.
+- **An allocation made in a unit** is put into the earlier versions by the same terms. Nothing could refer to it there.
+- **Built-in functions are not ordered like calls,** since the specification does not say that they are (decided by the orchestrator). An `append` runs after its operands, and is ordered after the calls of the targets only by a call or a decision of `&&` or `||` among its operands. Its write in place is a version of the unit. When nothing orders it, every call in the targets must modify nothing and have a signature that refers to no memory, with no pointer, slice, or map at any depth of the receiver, the parameters, or the results; otherwise the function cannot be verified. Every read of the targets, including those in the arguments of such a call, is compared with the write. The copy of an `append` that moves is a read like the others. `u[t[0]] = append(t[:0], 5)` verified before and was unsound, since Go may write `t[0]` first; it is now reported. The rule on signatures rests on contracts naming only parameters, results, and error variables: once a contract can name another package-level variable, naming one must count as reading memory.
+- **A call on one branch** (the right of `&&` and `||`, a case expression) keeps the single state with guards. Its targets are forgotten as usual, and where the guard fails, memory and the bound of allocations are as they were. No region becomes an `Ite`, so the layers of loops are walked as before.
+- **A condition of a `for` loop that modifies memory.** What it writes is forgotten at the head with what the body writes. The invariants hold where the condition is about to run, and the variant is measured there too, so it must decrease over the condition and the body together: a condition could otherwise undo what the body did. The loop is left in the state after the last evaluation of the condition.
+- **The keys of a map literal must differ** unless both are constants, since Go does not fix the order of the entries. `map[int]int{a: 1, b: 2}` with `a == b` verified before and was unsound; it is now reported.
+
+Not built yet: an `append` inside a larger expression (see Structs and pointers); a call in the targets beside an `append` that may write in place, when its contract reads memory, which would need a frame of what contracts read and is not planned; a call with several results as the arguments of another call, `g(f())`; and narrower reads for `string(b)` and for map keys with equal values.
 
 ### Maps
 

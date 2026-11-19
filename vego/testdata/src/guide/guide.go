@@ -688,6 +688,55 @@ func Count(it *Iter) (result int) {
 	return count
 }
 
+// Slot holds one number.
+type Slot struct {
+	v int
+}
+
+// value reads the number a slot holds.
+//
+// @Requires c != nil
+// @Ensures result = c.v
+func value(c *Slot) (result int) {
+	return c.v
+}
+
+// Refill calls value in the target of an assignment whose append may write
+// into the array of t.
+//
+// @Requires c != nil And 0 <= c.v < |rows| And |t| = 1
+// @Modifies rows, t
+func Refill(rows [][]int, t []int, c *Slot) {
+	rows[value(c)] = append(t[:0], 5) // want `vego: cannot verify Refill: value is called in the target of this assignment, and Go may call it before or after append writes into the array of t\[:0\]; assign the result of value to a variable in a statement of its own first`
+}
+
+// RefillFirst assigns the result of value first.
+//
+// @Requires c != nil And 0 <= c.v < |rows| And |t| = 1
+// @Modifies rows, t
+// @Ensures rows'[c.v][0] = 5
+func RefillFirst(rows [][]int, t []int, c *Slot) {
+	i := value(c)
+	rows[i] = append(t[:0], 5)
+}
+
+// five returns 5.
+//
+// @Ensures result = 5
+func five() (result int) {
+	return 5
+}
+
+// RefillOrdered has a call among the operands of append, which orders the
+// append after value.
+//
+// @Requires c != nil And 0 <= c.v < |rows| And |t| = 1
+// @Modifies rows, t
+// @Ensures rows'[c.v][0] = 5
+func RefillOrdered(rows [][]int, t []int, c *Slot) {
+	rows[value(c)] = append(t[:0], five())
+}
+
 // PopAndCount reads s.n beside a call that changes it.
 //
 // @Requires s != nil And 0 < s.n < 1000

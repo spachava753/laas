@@ -316,7 +316,7 @@ func Divide(n, d int) (q, r int) {
 
 `vego` checks two things about an invariant. It must be true when the loop is first reached. And if it is true before an iteration, it must be true after it.
 
-After the loop, `vego` knows the invariant and that the loop condition is false. Here that gives `n = d*q + r`, `0 <= r`, and `r < d`, which is the postcondition.
+After the loop, `vego` knows the invariant and that the loop condition is false. Here that gives `n = d*q + r`, `0 <= r`, and `r < d`, which is the postcondition. A condition that modifies memory is different: see [A condition that modifies memory](#a-condition-that-modifies-memory).
 
 **After a loop, `vego` knows nothing about the variables the loop changed except what the invariant states.** If a proof fails in the code after a loop and the fact is true, the invariant is too weak: it is missing something you know about the loop variables. A loop that writes memory can also make `vego` forget memory it did not write. See [What a loop forgets about memory](#what-a-loop-forgets-about-memory).
 
@@ -397,7 +397,7 @@ func Count(it *Iter) (result int) {
 }
 ```
 
-The invariant must be true each time the loop is about to test its condition, before the condition runs. The condition runs once more than the body: the last time, it returns false and the loop ends. After the loop, `vego` knows that the invariant held of memory as it was before that last test. What the condition wrote then is known only from the `Ensures` clauses of the call. Here `Next` returned false, so `it.i` equals `it.n`.
+The invariant must be true each time the loop is about to test its condition, before the condition runs. The condition runs once more than the body. The last time, it returns false and the loop ends. After the loop, `vego` knows that the invariant held of memory as it was before that last test. What the condition wrote then is known only from the `Ensures` clauses of the call. Here `Next` returned false, so `it.i` equals `it.n`.
 
 The `Variant` is also measured before the condition runs, so it must decrease over the condition and the body together. The loop forgets what its condition writes, as it forgets what its body writes, and the function must list that memory in `Modifies`.
 
@@ -887,11 +887,42 @@ n := s.n
 return n + s.Pop()
 ```
 
-Some reads are ordered after all. Go evaluates the arguments of a call before the call, and the left operand of `&&` and `||` before the right one. In `id(s.n) + s.Pop()`, `s.n` is read for `id`, which runs before `Pop`. In `s.Pop() > 0 && s.n > 0`, `s.n` is read after `Pop`.
+Some reads do have a fixed order. Go evaluates the arguments of a call before the call, and the left operand of `&&` and `||` before the right one. In `id(s.n) + s.Pop()`, `s.n` is read for `id`, which runs before `Pop`. In `s.Pop() > 0 && s.n > 0`, `s.n` is read after `Pop`.
 
 An assignment evaluates the operands of its targets together with its right-hand side, and assigns only after that. In `c.n = c.Inc()`, the field gets what `Inc` returns. In `a[a[0]] = f(a)`, the index `a[0]` is a read that Go may make before or after `f`.
 
-`append` is not ordered like a call, because the Go specification does not say that it is. When an `append` may write into the array of its slice, a call in the target of the same assignment may run before or after that write. Such a call must not modify anything, and its parameters and results must refer to no memory: integers, booleans, strings, errors, and structs of these. Otherwise `vego` reports the function as `cannot verify`. Assign the result of the call to a variable in a statement of its own first. A call among the operands of the `append` orders the `append` after the target, and then any call can stand there.
+### An append beside a call
+
+`append` and the other built-in functions are not ordered like calls, because the Go specification does not say that they are. An `append` runs after its operands, and nothing else orders it. So when an `append` writes into the array of its slice, the operands of the targets of the same assignment may be evaluated before or after that write. Reads there are checked like any other read. A call there must not modify anything, and its parameters and results must refer to no memory: integers, booleans, strings, errors, and structs of these. A call that is passed a pointer, a slice, or a map is refused:
+
+```go
+// @Requires c != nil
+// @Ensures result = c.v
+func value(c *Slot) (result int) {
+	return c.v
+}
+
+// @Requires c != nil And 0 <= c.v < |rows| And |t| = 1
+// @Modifies rows, t
+func Refill(rows [][]int, t []int, c *Slot) {
+	rows[value(c)] = append(t[:0], 5)
+}
+```
+
+```text
+vego: cannot verify Refill: value is called in the target of this assignment, and Go may
+call it before or after append writes into the array of t[:0]; assign the result of value to
+a variable in a statement of its own first
+```
+
+Assign the result first:
+
+```go
+i := value(c)
+rows[i] = append(t[:0], 5)
+```
+
+A call among the operands of the `append`, as in `append(t[:0], five())`, orders the `append` after every call in the targets, and then any call can stand there. An `append` that moves its slice to a new array reads the old elements to copy them, and that read is checked like any other.
 
 ## Invariants of structs
 
@@ -1807,8 +1838,9 @@ Work through these steps in order.
 4. If it is true and the failure comes after a call, the `Ensures` clauses of the callee are too weak. Strengthen them.
 5. If it is an overflow, add a bound on an input, or rearrange the expression as in the midpoint example.
 6. If it involves two pointers or two slices, check whether they can alias. If they must not, say so in the `Requires` clause.
-7. If it involves an error variable, check what `vego` knows of it. A variable that is not initialised with `errors.New` or `fmt.Errorf` may not be known to be not nil, or to differ from another error. See [What vego knows of an error variable](#what-vego-knows-of-an-error-variable).
-8. Otherwise, help the prover. Put the fact in an `Assert` just before the failure. If the `Assert` is proved but the failure remains, assert a smaller intermediate step. If the `Assert` is not proved, move it earlier until it is.
+7. If it says that a read may be made before or after a call, decide which order you mean and write it as separate statements. See [Reads that Go may make before or after a call](#reads-that-go-may-make-before-or-after-a-call).
+8. If it involves an error variable, check what `vego` knows of it. A variable that is not initialised with `errors.New` or `fmt.Errorf` may not be known to be not nil, or to differ from another error. See [What vego knows of an error variable](#what-vego-knows-of-an-error-variable).
+9. Otherwise, help the prover. Put the fact in an `Assert` just before the failure. If the `Assert` is proved but the failure remains, assert a smaller intermediate step. If the `Assert` is not proved, move it earlier until it is.
 
 One problem often produces several messages. Fix the first one and run again.
 
@@ -1841,6 +1873,7 @@ This table lists the most common messages.
 | `x is assigned, which F may not modify; list it in a // @Modifies clause` | No `Modifies` entry covers memory of this kind. | Add it to `Modifies`. |
 | `... which F may not modify: nothing its // @Modifies clauses list is known to cover it` | An entry covers memory of this kind, but `vego` cannot prove it is this memory. It may be another element, another struct, or a slice that was replaced after `F` was called. | Make the entry match. For a replaced slice, the callee needs a `fresh ... Or within ...` clause. |
 | `x may be read before or after the call to F, which may change it, and Go does not fix the order` | Go may read `x` before or after `F` runs in this statement, and the two are not proved to give the same value. | Read `x` or call `F` in a statement of its own, in the order you mean. See [Reads that Go may make before or after a call](#reads-that-go-may-make-before-or-after-a-call). |
+| `cannot verify F: g is called in the target of this assignment, and Go may call it before or after append writes into the array of s` | The call may run on either side of the write, and it may read or write memory. | Assign the result of `g` to a variable in a statement of its own first. See [An append beside a call](#an-append-beside-a-call). |
 | `the keys a and b of this map literal may be equal` | Two keys of a map literal are not proved to differ, so it is not known which entry the map keeps. | Prove that they differ, or assign the entries one by one. |
 | `Modifies lists x, but F never needs to modify it` | The `Modifies` list allows more than the body needs. | Remove or narrow the entry. |
 | `invariant of T may not hold for what is passed to F as x` | The struct invariant is not proved at the call. | Restore it before the call. In a loop, repeat it as a loop invariant. |
@@ -1877,7 +1910,8 @@ A function that uses any of the following is reported as `cannot verify`:
 - package-level variables, except error variables that are never assigned, of this package or another;
 - calls to variadic functions other than `fmt.Errorf`;
 - `append(s, t...)` and `copy`;
-- a call in the target of an assignment whose right-hand side is an `append` that may write into the array of its slice, unless the call modifies nothing and refers to no memory (see [Reads that Go may make before or after a call](#reads-that-go-may-make-before-or-after-a-call));
+- a call in the target of an assignment whose right-hand side is an `append` that may write into the array of its slice, unless the call modifies nothing and refers to no memory or a call among the operands of the `append` orders it (see [An append beside a call](#an-append-beside-a-call));
+- a call with several results as the arguments of another call, as in `g(f())`;
 - comparing structs with `==`;
 - comparing two errors with `==` when neither is `nil`, an error made by `errors.New` or `fmt.Errorf`, an error that a trusted contract vouches for, or an error variable that holds one or holds a pointer, integer, string, or boolean, or an array or struct of these (see [Comparing errors](#comparing-errors));
 - `errors.As`, `errors.Join`, `errors.Unwrap`, and `errors.Is` on an error whose origin is not known (see [Asking errors.Is](#asking-errorsis));
@@ -1896,6 +1930,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - No other goroutine writes memory that a verified function reads or writes while it runs. A proof covers one goroutine.
 - No code outside the packages that a verified package is built with assigns an error variable that a proof relies on, and no code changes one through `go:linkname`, assembly, `unsafe`, or `reflect`. When a verified package is built with a package that makes such an assignment, the verified package does not rely on the variable. The assignment is also reported wherever it meets a proof that does rely on it.
 - `errors.New`, `fmt.Errorf`, and `errors.Is` behave as they do in the Go releases that `laas` is tested with. Each call of `errors.New` or `fmt.Errorf` returns a new pointer. The errors they return have no `Is` method. `Unwrap` returns the operand of the one `%w`. `errors.Is` finds an error, or an error it wraps, that is the target. The tests of `vego` check this against the running toolchain.
+- The compiler evaluates each statement in an order that the Go specification allows. Calls, `&&`, and `||` run from left to right, an operation runs after its operands, and an assignment assigns only after it has evaluated everything. Where the specification leaves the order open, `vego` proves that every order it allows gives the same values.
 - The program runs on the platform `laas` was run for. The sizes of `int`, `uint`, and pointers, the layout of structs, and `MaxAlloc` are those of the `GOOS` and `GOARCH` that `laas` runs with. A proof for a 64-bit target does not hold for a 32-bit target.
 - The program is built from the files `laas` read. Files left out by a build constraint or a file name such as `_windows.go` are not read, so their annotations are not checked. Run `laas` once for each configuration you ship.
 - The machine has enough memory and stack.
@@ -1965,6 +2000,18 @@ Results are referred to by the names in the function's signature.
 | `Modifies m[k]` | for a map of pointers, the struct that the pointer under key `k` points to |
 | `fresh(x)` | the memory `x` refers to on return was allocated by the call; true for a slice with zero capacity |
 | `within(a, b)` | `a` lies inside the memory of `b`; each is a pointer or a slice, and a slice includes its capacity |
+
+### Order of evaluation
+
+| In a statement | Order |
+| --- | --- |
+| calls, `&&`, and <code>&#124;&#124;</code> | from left to right |
+| an operation | after its operands |
+| the right operand of `&&` and <code>&#124;&#124;</code> | after the left one, and only when the left one does not decide the result |
+| an assignment | assigns after every operand is evaluated |
+| any other read of memory | not fixed; `vego` proves that every order gives the same value |
+| `append` and other built-in functions | after their operands, and not ordered like calls |
+| the entries of a map literal | not fixed; keys that are not both constants must be proved different |
 
 ### Flags
 
