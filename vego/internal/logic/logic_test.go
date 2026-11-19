@@ -53,6 +53,10 @@ func (e testEnv) Path(root string, steps []Step, when When) (*Term, error) {
 	return t, nil
 }
 
+func (e testEnv) Qualified(path, name string, steps []Step, when When) (*Term, error) {
+	return e.Path(fmt.Sprintf("%q.%s", path, name), steps, when)
+}
+
 func (e testEnv) Relation(name string, paths []Path) (*Term, error) {
 	for _, path := range paths {
 		name += " " + path.Root + map[When]string{Primed: "'"}[path.When]

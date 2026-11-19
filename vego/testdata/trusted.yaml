@@ -496,3 +496,96 @@ trusted:
     modifies: []
     ensures:
       - "result = 7"
+
+  # Contracts that vouch for the errors their functions return; see the
+  # vouched corpus.
+  vouched.next:
+    reason: Test helper that returns io.EOF at the end of s and nothing else.
+    requires: ["0 <= i"]
+    vouches: [err]
+    modifies: []
+    ensures:
+      - "err = nil <-> i < |s|"
+      - "err != nil -> err = io.EOF"
+      - "err = nil -> b = s[i]"
+
+  vouched.nextUnvouched:
+    reason: The same helper, without the claim about its errors.
+    requires: ["0 <= i"]
+    modifies: []
+    ensures:
+      - "err = nil <-> i < |s|"
+      - "err != nil -> err = io.EOF"
+      - "err = nil -> b = s[i]"
+
+  vouched.open:
+    reason: Test helper that fails with a *fs.PathError wrapping fs.ErrNotExist for an empty name.
+    vouches: [err]
+    modifies: []
+    ensures:
+      - 'err = nil <-> name != ""'
+      - 'err != nil -> is(err, "io/fs".ErrNotExist)'
+
+  vouched.two:
+    reason: Test helper with two error results, of which it vouches for the second.
+    vouches: [b]
+    modifies: []
+
+  vouched.log:
+    reason: Test helper that takes an error and does nothing with it.
+    modifies: []
+
+  vouched.hidden:
+    reason: Test helper that returns an unexported error variable of its package.
+    vouches: [err]
+    modifies: []
+    ensures:
+      - "err = errHidden"
+
+  vouched.late:
+    reason: Test helper that returns context.DeadlineExceeded.
+    vouches: [err]
+    modifies: []
+    ensures:
+      - "err = context.DeadlineExceeded"
+
+  vouched.vouchesParam:
+    reason: Lists a parameter under vouches.
+    vouches: [e]
+    modifies: []
+
+  vouched.vouchesInt:
+    reason: Lists a result that is not an error.
+    vouches: [n]
+    modifies: []
+
+  vouched.vouchesTwice:
+    reason: Lists a result twice.
+    vouches: [err, err]
+    modifies: []
+
+  vouched.vouchesUnknown:
+    reason: Lists a name the function does not have.
+    vouches: [failure]
+    modifies: []
+
+  vouched.namesQuotedShort:
+    reason: Names io.EOF in quotes.
+    vouches: [err]
+    modifies: []
+    ensures:
+      - 'err = "io".EOF'
+
+  vouched.namesMissingPackage:
+    reason: Names a package that is not in the build.
+    vouches: [err]
+    modifies: []
+    ensures:
+      - 'err = "example.com/none".ErrNone'
+
+  vouched.namesMissingVariable:
+    reason: Names a variable that io does not have.
+    vouches: [err]
+    modifies: []
+    ensures:
+      - "err = io.ErrNone"

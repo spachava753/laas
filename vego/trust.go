@@ -49,8 +49,11 @@ type trustEntry struct {
 	// runs names the parameters whose code the function may run: methods
 	// of an error or an interface, or a function, held in them.
 	runs []trustFormula
-	file *trustFile
-	line int
+	// vouches names the error results whose errors the author vouches
+	// for; see knownError.
+	vouches []trustFormula
+	file    *trustFile
+	line    int
 }
 
 // trustFile is a parsed file of trusted contracts.
@@ -209,8 +212,12 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			for _, item := range scalars("runs", value) {
 				entry.runs = append(entry.runs, trustFormula{text: item.Value, line: item.Line, col: item.Column})
 			}
+		case "vouches":
+			for _, item := range scalars("vouches", value) {
+				entry.vouches = append(entry.vouches, trustFormula{text: item.Value, line: item.Line, col: item.Column})
+			}
 		default:
-			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, requires, ensures, modifies, or runs",
+			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, requires, ensures, modifies, runs, or vouches",
 				field.Value, entry.key)
 		}
 	}
@@ -306,9 +313,11 @@ type EntryUse struct {
 	// Unpredictable is set when the function returns an error and its
 	// contract never says that it succeeds.
 	Unpredictable bool
-	// Runs names the parameters whose code the function may run.
-	Runs  []string
-	Calls []token.Position
+	// Runs names the parameters whose code the function may run, and
+	// Vouches the error results whose errors the contract vouches for.
+	Runs    []string
+	Vouches []string
+	Calls   []token.Position
 }
 
 // add merges another usage into u.
@@ -523,6 +532,21 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 			fn.runs[param] = true
 		}
 	}
+	// The error results whose errors the author vouches for. Listing
+	// anything else would be a claim about nothing.
+	for _, item := range entry.vouches {
+		index, ok := fn.resultNames[item.text]
+		switch {
+		case !ok:
+			fn.defect("its vouches %q: %s is not a result", item.text, item.text)
+		case !isError(fn.results[index].Type()):
+			fn.defect("its vouches lists %s, whose type %s is not error", item.text, fn.results[index].Type())
+		case fn.vouches[index]:
+			fn.defect("its vouches lists %s twice", item.text)
+		default:
+			fn.vouches[index] = true
+		}
+	}
 	for name := range fn.paramNames {
 		if fn.ambiguous(name, false) {
 			fn.defect("its parameter %s has a name that means something else in a contract", name)
@@ -599,6 +623,11 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 		primed = primed || n.Primed
 		if n.Kind == logic.NIdent {
 			break
+		}
+		// A path from a package in quotes names an error variable, which
+		// the resolver refuses to see primed.
+		if len(n.Kids) == 0 {
+			return
 		}
 	}
 	steps := newModTargets([]*logic.Node{path}, c)[0]
@@ -694,13 +723,16 @@ func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 		return use.Key == entry.key && use.File == entry.file.path
 	})
 	if index < 0 {
-		var runs []string
+		var runs, vouches []string
 		for _, item := range entry.runs {
 			runs = append(runs, item.text)
 		}
+		for _, item := range entry.vouches {
+			vouches = append(vouches, item.text)
+		}
 		pv.usage.Entries = append(pv.usage.Entries, &EntryUse{
 			Key: entry.key, Reason: entry.reason, Shipped: entry.file.shipped,
-			File: entry.file.path, Line: entry.line, Runs: runs,
+			File: entry.file.path, Line: entry.line, Runs: runs, Vouches: vouches,
 		})
 		index = len(pv.usage.Entries) - 1
 	}

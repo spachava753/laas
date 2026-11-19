@@ -208,9 +208,13 @@ func (v *fnVerifier) treeInstance(sink *state, tree errorTree, target *logic.Ter
 // type and, when that is comparable, the value.
 func (v *fnVerifier) errorsIs(call *ast.CallExpr, st *state, guard []*logic.Term) *logic.Term {
 	err, target := call.Args[0], call.Args[1]
+	// Known origin of either kind makes the methods harmless, also with any
+	// target, and errors.Is a function of the two errors. What it finds is
+	// known only of a made error, from noteTree.
 	if !v.knownError(v.originsOf(v.fn.decl.Body), err, -1, map[*types.Var]bool{}) {
 		v.unsupported(err.Pos(), fmt.Sprintf("errors.Is would run the Is and Unwrap methods of %s, an error whose origin is not known; "+
-			"only an error made by errors.New or fmt.Errorf, here or in a verified function, can be its first argument%s",
+			"only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a trusted contract vouches for, "+
+			"can be its first argument%s",
 			types.ExprString(err), v.originWhy(err)))
 	}
 	errorType := types.Universe.Lookup("error").Type()

@@ -42,6 +42,8 @@ trusted:
 		{"rejects an alias as a reason", "version: 1\ntrusted:\n  os.Getpid:\n    requires: &empty []\n    reason: *empty\n", "aliases are not supported"},
 		{"rejects a reason that is not text", "version: 1\ntrusted:\n  os.Getpid:\n    reason: [a, b]\n", "must be text"},
 		{"rejects a second document", "version: 1\ntrusted: {}\n---\nversion: 1\ntrusted: {}\n", "exactly one YAML document"},
+		{"accepts a list of error results it vouches for", "version: 1\ntrusted:\n  os.Remove:\n    reason: r\n    modifies: []\n    vouches: [result]\n", ""},
+		{"rejects vouches that is not a list", "version: 1\ntrusted:\n  os.Remove:\n    reason: r\n    modifies: []\n    vouches: result\n", "vouches of os.Remove must be a list"},
 		{"explains an unquoted formula", "version: 1\ntrusted:\n  sort.Ints:\n    reason: r\n    ensures:\n      - Forall i in [0, |x|) : x'[i] >= 0\n", "must be quoted"},
 	}
 	for _, test := range tests {
@@ -85,7 +87,7 @@ func TestReport(t *testing.T) {
 			Entries: []*EntryUse{
 				{
 					Key: "example.com/app.load", Reason: "Reads a file.", File: "/work/vego-trusted.yaml", Line: 4,
-					Unpredictable: true, Calls: []token.Position{at("a.go", 10)},
+					Unpredictable: true, Vouches: []string{"err"}, Calls: []token.Position{at("a.go", 10)},
 				},
 				{
 					Key: "sort.Ints", Reason: "Project override.", File: "/work/vego-trusted.yaml", Line: 9,
@@ -123,6 +125,7 @@ None of them is checked against the code of the function it describes.
 Project contracts in use: 3
   example.com/app.load  [may fail unpredictably]
     reason:  Reads a file.
+    vouches for the errors in: err
     defined: vego-trusted.yaml:4
     used at: a.go:10, b/b.go:7
   sort.Ints

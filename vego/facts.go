@@ -24,8 +24,9 @@ type contractFact struct {
 	// function of its package that its proof relies on, reported a problem.
 	// Its contract is then not established and must not be used.
 	Verified bool
-	// KnownErrors is set when every error the function returns was made by
-	// errors.New or fmt.Errorf, so that formatting it runs no unknown code.
+	// KnownErrors is set when every error the function returns has a known
+	// origin, made or vouched, so that formatting it runs no unknown code;
+	// see knownError.
 	KnownErrors bool
 	// Consts holds the values of the package constants the contract
 	// mentions, so that it means the same in every package that reads it.

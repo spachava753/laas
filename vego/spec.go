@@ -94,7 +94,9 @@ func (e *specEnv) root(name string) (val value, t types.Type, isResult bool, con
 // ErrEmpty, or of another, as io.EOF. It reports whether the name is one.
 // A contract keeps the meaning it had where it was written: a verified
 // function sees the names of its file, an imported contract the variables
-// its package recorded for its spellings, and a trusted contract none.
+// its package recorded for its spellings, and a trusted contract the
+// variables of the function's own package by name and those of any package
+// in the build by its path; see trustedErrorVariable.
 func (e *specEnv) errorVariable(name string, steps []logic.Step, when logic.When) (*logic.Term, bool, error) {
 	var variable *types.Var
 	rest := steps
@@ -110,10 +112,14 @@ func (e *specEnv) errorVariable(name string, steps []logic.Step, when logic.When
 		}
 		_, obj := scope.LookupParent(name, e.pos)
 		variable, rest = e.v.packageErrorVariable(obj, steps)
-	case e.fn.trust != nil:
-		return nil, false, nil
 	case e.fn.paramNames[name] != nil || isResult:
 		return nil, false, nil
+	case e.fn.trust != nil:
+		var err error
+		variable, rest, err = e.trustedErrorVariable(name, steps)
+		if err != nil {
+			return nil, true, err
+		}
 	case e.fn.imported != nil:
 		spelled := name
 		if len(steps) > 0 && steps[0].Field != "" {
@@ -141,19 +147,73 @@ func (e *specEnv) errorVariable(name string, steps []logic.Step, when logic.When
 	if variable == nil {
 		return nil, false, nil
 	}
+	sentinel, err := e.errorVariableTerm(variable, rest, when)
+	return sentinel, true, err
+}
+
+// trustedErrorVariable resolves a name in a trusted contract that is not a
+// parameter or a result. A contract of a function means the same wherever it
+// is used, whatever the package that declares the function imports, so a
+// name is a package-level error variable of that package, and a name with a
+// field after it is the variable of that name in the package of the build
+// whose path is the name, as in io.EOF. A longer path is written in quotes;
+// see Qualified.
+func (e *specEnv) trustedErrorVariable(name string, steps []logic.Step) (*types.Var, []logic.Step, error) {
+	if variable := errorVariableOf(e.fn.obj.Pkg().Scope().Lookup(name), ""); variable != nil {
+		return variable, steps, nil
+	}
+	if len(steps) == 0 || steps[0].Field == "" {
+		return nil, nil, nil
+	}
+	pkg := e.v.lookupPackage(name)
+	if pkg == nil {
+		return nil, nil, nil
+	}
+	variable := errorVariableOf(pkg.Scope().Lookup(steps[0].Field), "")
+	if variable == nil {
+		return nil, nil, fmt.Errorf("package %s has no package-level error variable %s", name, steps[0].Field)
+	}
+	return variable, steps[1:], nil
+}
+
+// Qualified resolves a variable named by the path of its package in quotes,
+// which only a trusted contract may use, and only for a path of more than
+// one element: io.EOF is written without quotes.
+func (e *specEnv) Qualified(path, name string, steps []logic.Step, when logic.When) (*logic.Term, error) {
+	spelled := fmt.Sprintf("%q.%s", path, name)
+	switch {
+	case e.fn == nil || e.fn.trust == nil || e.selfType != nil:
+		return nil, fmt.Errorf("%s: a package path in quotes can only be used in a trusted contract; name the package as the file imports it", spelled)
+	case !strings.Contains(path, "/"):
+		return nil, fmt.Errorf("%s: write %s.%s, without quotes", spelled, path, name)
+	}
+	pkg := e.v.lookupPackage(path)
+	if pkg == nil {
+		return nil, fmt.Errorf("%s: package %s is not in the build of this package", spelled, path)
+	}
+	variable := errorVariableOf(pkg.Scope().Lookup(name), "")
+	if variable == nil {
+		return nil, fmt.Errorf("%s: package %s has no package-level error variable %s", spelled, path, name)
+	}
+	return e.errorVariableTerm(variable, steps, when)
+}
+
+// errorVariableTerm returns the constant for a package-level error variable
+// named in an annotation and followed by steps, which it cannot have.
+func (e *specEnv) errorVariableTerm(variable *types.Var, rest []logic.Step, when logic.When) (*logic.Term, error) {
 	switch {
 	case len(rest) > 0 && rest[len(rest)-1].Len:
-		return nil, true, fmt.Errorf("%s is an error and has no length", variable.Name())
+		return nil, fmt.Errorf("%s is an error and has no length", variable.Name())
 	case len(rest) > 0:
-		return nil, true, fmt.Errorf("%s is an error variable and has no fields or elements", variable.Name())
+		return nil, fmt.Errorf("%s is an error variable and has no fields or elements", variable.Name())
 	case when != logic.Now:
-		return nil, true, fmt.Errorf("%s is an error variable of a package, which cannot be primed or put in old()", variable.Name())
+		return nil, fmt.Errorf("%s is an error variable of a package, which cannot be primed or put in old()", variable.Name())
 	}
 	sentinel, why := e.v.sentinelTerm(e.sink, variable)
 	if why != "" {
-		return nil, true, errors.New(why)
+		return nil, errors.New(why)
 	}
-	return sentinel, true, nil
+	return sentinel, nil
 }
 
 // packageErrorVariable returns the package-level error variable that an

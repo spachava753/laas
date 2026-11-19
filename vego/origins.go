@@ -11,9 +11,29 @@ import (
 // An error may be formatted only when it is known where it comes from.
 // Formatting runs the error's methods and, for some verbs, methods of what
 // the error contains; an error from outside could use them to write memory
-// the function reasons about. An error of known origin cannot: it was made
-// by errors.New or fmt.Errorf, here or in a verified function this one
-// called, and nothing but plain values and other such errors went into it.
+// the function reasons about. An error of known origin cannot. It is one of
+// two kinds:
+//
+//   - made: errors.New or fmt.Errorf made it, here, in a verified function
+//     this one called, or in the initialiser of a sentinel, and nothing but
+//     plain values and other made errors went into it. Its methods, and
+//     those of every error in its tree, are those of the standard library.
+//   - vouched: a trusted function returned it in a result its contract
+//     lists under vouches, or it holds such an error in its tree, or a
+//     verified function returned it. Nothing is known of its type. The author of the contract claims that every method of it,
+//     of every error in its tree, and of every value these hold returns
+//     without panicking and writes nothing a caller can see, whatever it
+//     is passed; that == on these errors cannot panic and is identity, so
+//     that errors.Is answers the same for errors and for targets that ==
+//     reports equal; and that what errors.Is reports for it never changes.
+//
+// What is concluded from a known origin needs only what both kinds give:
+// formatting it, the first argument of errors.Is, the safe side of ==, and
+// handing it to a trusted function without runs all rest on its methods
+// and its == alone. What needs a made error is not drawn from knownError:
+// that an error is not nil and differs from others, and what errors.Is finds
+// in it, are noted where errors.New and fmt.Errorf are called and for
+// sentinels; see noteError and noteTree.
 //
 // Origin is decided from the text of a function, without regard to the path
 // taken: an error variable has a known origin when every assignment to it in
@@ -118,10 +138,11 @@ func (pv *pkgVerifier) knownError(o *origins, e ast.Expr, index int, visiting ma
 		// What a function is known for is the errors it returns, not
 		// whatever else it returns that happens to be assigned to an error.
 		result := pv.info.TypeOf(e)
+		at := 0
 		if tuple, ok := result.(*types.Tuple); ok && index >= 0 && index < tuple.Len() {
-			result = tuple.At(index).Type()
+			result, at = tuple.At(index).Type(), index
 		}
-		return callee != nil && isError(result) && pv.returnsKnownErrors(callee)
+		return callee != nil && isError(result) && (pv.returnsKnownErrors(callee) || pv.vouchedResult(callee, at))
 	case *ast.Ident:
 		variable, ok := pv.info.ObjectOf(e).(*types.Var)
 		return ok && index < 0 && isError(variable.Type()) && pv.knownVariable(o, variable, visiting)
@@ -165,6 +186,18 @@ func (pv *pkgVerifier) returnsKnownErrors(callee *types.Func) bool {
 	}
 	imported := pv.importedContract(callee)
 	return imported != nil && imported.imported.KnownErrors
+}
+
+// vouchedResult reports whether a function is trusted and its contract
+// vouches for the errors of the result with the given index. A contract that
+// cannot be used makes the call itself an error, so its claim is read here
+// as written.
+func (pv *pkgVerifier) vouchedResult(callee *types.Func, index int) bool {
+	if own := pv.funcs[callee]; (own != nil && own.annotated()) || pv.importedContract(callee) != nil {
+		return false
+	}
+	fn := pv.trustedContract(callee)
+	return fn != nil && fn.vouches[index]
 }
 
 // findKnownReturns decides for every annotated function of the package

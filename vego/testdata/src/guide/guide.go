@@ -431,7 +431,7 @@ func AtEnd(s string, i int) (end bool) {
 //
 // @Ensures True
 func SameError(a, b error) (same bool) {
-	return a == b // want `vego: cannot verify SameError: comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, an error made by errors.New or fmt.Errorf, or a package-level error variable that holds such an error or a pointer, integer, string, or boolean, or an array or struct of these`
+	return a == b // want `vego: cannot verify SameError: comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, an error made by errors.New or fmt.Errorf or vouched for by a trusted contract, or a package-level error variable that holds such an error or a pointer, integer, string, or boolean, or an array or struct of these`
 }
 
 // PeekLabelled wraps the error of Peek, so that errors.Is still finds
@@ -737,7 +737,7 @@ func (a *Account) DepositLocked(n int) {
 func QuantityWrapped(line string) (n int, err error) {
 	n, err = strconv.Atoi(line)
 	if err != nil {
-		return 0, fmt.Errorf("bad quantity %q: %w", line, err) // want `vego: cannot verify QuantityWrapped: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, can be formatted`
+		return 0, fmt.Errorf("bad quantity %q: %w", line, err) // want `vego: cannot verify QuantityWrapped: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a trusted contract vouches for, can be formatted`
 	}
 	return n, nil
 }
@@ -758,7 +758,7 @@ func Quantity(line string) (n int, err error) {
 //
 // @Ensures True
 func IsEmpty(err error) (result bool) {
-	return errors.Is(err, ErrEmpty) // want `vego: cannot verify IsEmpty: errors.Is would run the Is and Unwrap methods of err, an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, can be its first argument`
+	return errors.Is(err, ErrEmpty) // want `vego: cannot verify IsEmpty: errors.Is would run the Is and Unwrap methods of err, an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a trusted contract vouches for, can be its first argument`
 }
 
 var calls int

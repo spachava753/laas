@@ -316,17 +316,26 @@ func (pv *pkgVerifier) lookupKey(key string) *types.Var {
 	if dot < 0 {
 		return nil
 	}
-	path, name := key[:dot], key[dot+1:]
+	pkg := pv.lookupPackage(key[:dot])
+	if pkg == nil {
+		return nil
+	}
+	variable, _ := pkg.Scope().Lookup(key[dot+1:]).(*types.Var)
+	return variable
+}
+
+// lookupPackage finds the package with a path among this one and the
+// packages it depends on, or nil.
+func (pv *pkgVerifier) lookupPackage(path string) *types.Package {
 	seen := map[*types.Package]bool{}
-	var find func(pkg *types.Package) *types.Var
-	find = func(pkg *types.Package) *types.Var {
+	var find func(pkg *types.Package) *types.Package
+	find = func(pkg *types.Package) *types.Package {
 		if seen[pkg] {
 			return nil
 		}
 		seen[pkg] = true
 		if pkg.Path() == path {
-			variable, _ := pkg.Scope().Lookup(name).(*types.Var)
-			return variable
+			return pkg
 		}
 		for _, imported := range pkg.Imports() {
 			if found := find(imported); found != nil {
@@ -475,6 +484,7 @@ func (v *fnVerifier) noteIs(sink *state, t *logic.Term) {
 // sentinel, which is a pointer, or an opaque value whose type makes ==
 // identity.
 func (v *fnVerifier) comparableError(e ast.Expr) bool {
+	// Known origin of either kind makes == identity that cannot panic.
 	if v.isNil(e) || v.knownError(v.originsOf(v.fn.decl.Body), e, -1, map[*types.Var]bool{}) {
 		return true
 	}
@@ -505,7 +515,7 @@ func (v *fnVerifier) compareErrors(x, y ast.Expr, op token.Token, st *state, gua
 func (v *fnVerifier) errorsEqual(x, y ast.Expr, a, b *logic.Term, pos token.Pos) *logic.Term {
 	if !v.comparableError(x) && !v.comparableError(y) {
 		v.unsupported(pos, "comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, "+
-			"an error made by errors.New or fmt.Errorf, or a package-level error variable that holds such an error or a pointer, "+
+			"an error made by errors.New or fmt.Errorf or vouched for by a trusted contract, or a package-level error variable that holds such an error or a pointer, "+
 			"integer, string, or boolean, or an array or struct of these")
 	}
 	return logic.Eq(a, b)

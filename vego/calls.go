@@ -176,6 +176,7 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 		if fn.runs[param] || !holdsCode(param.Type(), map[types.Type]bool{}) {
 			continue
 		}
+		// Known origin of either kind makes every method harmless.
 		if isError(param.Type()) && v.knownError(v.originsOf(v.fn.decl.Body), arg, -1, map[*types.Var]bool{}) {
 			continue
 		}

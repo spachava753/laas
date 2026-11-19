@@ -1032,6 +1032,7 @@ Go's `==` on two error values panics when both hold the same type and that type 
 
 - `nil`;
 - an error made by `errors.New` or `fmt.Errorf`, here or in a verified function that returns nothing else;
+- an error that a trusted contract vouches for, as described in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns);
 - an error variable, of this package or another, that holds such an error;
 - an error variable whose initialiser has a pointer, integer, string, or boolean type, or an array or struct type made only of these, as described in [What vego knows of an error variable](#what-vego-knows-of-an-error-variable).
 
@@ -1046,9 +1047,9 @@ func SameError(a, b error) (same bool) {
 
 ```text
 vego: cannot verify SameError: comparing two errors can panic when both hold the same
-uncomparable type; one of them must be nil, an error made by errors.New or fmt.Errorf, or
-a package-level error variable that holds such an error or a pointer, integer, string, or
-boolean, or an array or struct of these
+uncomparable type; one of them must be nil, an error made by errors.New or fmt.Errorf or
+vouched for by a trusted contract, or a package-level error variable that holds such an
+error or a pointer, integer, string, or boolean, or an array or struct of these
 ```
 
 Compare one of them with an error variable instead.
@@ -1112,10 +1113,11 @@ func IsEmpty(err error) (result bool) {
 ```text
 vego: cannot verify IsEmpty: errors.Is would run the Is and Unwrap methods of err, an
 error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or
-in a verified function, can be its first argument
+in a verified function, or one that a trusted contract vouches for, can be its first
+argument
 ```
 
-An error that a trusted function returns has no known origin, so `errors.Is(err, io.EOF)` on it is reported. You can compare it with `==` instead, as in `err == io.EOF`, which runs no method. That comparison is true only when the function returned `io.EOF` itself, and not when it returned an error that wraps `io.EOF`.
+An error that a trusted function returns has no known origin unless the contract of the function vouches for it. See [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). Without that, `errors.Is(err, io.EOF)` on it is reported. You can compare it with `==` instead, as in `err == io.EOF`, which runs no method. That comparison is true only when the function returned `io.EOF` itself, and not when it returned an error that wraps `io.EOF`.
 
 ### Functions that cannot promise success
 
@@ -1149,7 +1151,9 @@ This check can miss a weak contract. When the path to the call depends on values
 
 `fmt.Errorf` can format numbers, booleans, strings, and slices of them, when their types have no methods. It can also format an error of known origin. Such an error was made by `errors.New` or `fmt.Errorf`, in verified code or in the initialiser of an error variable of any package, and nothing went into it but such values and other errors of known origin. `io.EOF` is one. A value whose type has methods, such as a string type with a `String` method, is rejected, because formatting it may call them.
 
-It cannot format an error that came from a trusted function or from a parameter. Formatting an error calls its methods, and `vego` cannot see what the methods of an unknown error do. For the same reason, such an error cannot be passed to a trusted function unless that function's contract allows it. See [Arguments that carry code](#arguments-that-carry-code).
+It can also format an error that a trusted contract vouches for. See [Errors that a trusted function returns](#errors-that-a-trusted-function-returns).
+
+It cannot format an error that came from a parameter, or from a trusted function whose contract does not vouch for it. Formatting an error calls its methods, and `vego` cannot see what the methods of an unknown error do. For the same reason, such an error cannot be passed to a trusted function unless that function's contract allows it. See [Arguments that carry code](#arguments-that-carry-code).
 
 As a result, this very common line is rejected when `err` came from a trusted function:
 
@@ -1160,7 +1164,7 @@ return 0, fmt.Errorf("bad quantity %q: %w", line, err)
 ```text
 vego: cannot verify QuantityWrapped: formatting err would run the methods of an error
 whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in
-a verified function, can be formatted
+a verified function, or one that a trusted contract vouches for, can be formatted
 ```
 
 Return the error unchanged, or wrap an error of your own:
@@ -1396,6 +1400,7 @@ Each entry has these fields:
 | `requires` | no | A list of formulas. Callers must prove each one. |
 | `ensures` | no | A list of formulas. Callers can assume each one. |
 | `runs` | no | Parameters that carry code the function may call, at any depth inside the value. See [Arguments that carry code](#arguments-that-carry-code). |
+| `vouches` | no | Error results whose errors verified code may format, compare, and pass to `errors.Is`. See [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). |
 
 Put the formulas in quotes. Several characters that formulas use have a special meaning in YAML.
 
@@ -1450,7 +1455,7 @@ contract holds whatever that code does, list e under runs in the contract
 
 There are three ways to deal with this.
 
-The first is to pass an error that verified code created with `errors.New` or `fmt.Errorf`. Such an error has only the standard library's methods and wraps nothing from outside. An error variable also qualifies if its initialiser used only plain values and other errors of this kind, in its own package or another. `var ErrRead = fmt.Errorf("read: %w", io.EOF)` qualifies. `var ErrLate = fmt.Errorf("late: %w", context.DeadlineExceeded)` does not, because `context.DeadlineExceeded` is not made by `errors.New` or `fmt.Errorf`.
+The first is to pass an error that verified code created with `errors.New` or `fmt.Errorf`, or one that a trusted contract vouches for. An error that verified code created has only the standard library's methods and wraps nothing from outside. An error variable also qualifies if its initialiser used only plain values and other errors of this kind, in its own package or another. `var ErrRead = fmt.Errorf("read: %w", io.EOF)` qualifies. `var ErrLate = fmt.Errorf("late: %w", context.DeadlineExceeded)` does not, because `context.DeadlineExceeded` is not made by `errors.New` or `fmt.Errorf`.
 
 The second is to make the call from unverified code. This is the right choice for logging an error that came from elsewhere. The unverified caller logs the error, and the verified function only returns it.
 
@@ -1474,6 +1479,43 @@ The third is to list the parameter under `runs` in the trusted contract:
 The claim is false for a function that calls the methods of an `error` when unverified callers can pass any error. Do not add `runs` in that case just to remove the message. The contract would be false, and every proof that uses it would be worthless.
 
 The trust report shows `runs`, so that a reviewer of the trust file notices the larger claim.
+
+### Errors that a trusted function returns
+
+Without a claim in its contract, `vego` knows nothing of an error that a trusted function returns. Verified code can return such an error and compare it with `nil` or an error variable. It cannot format it, wrap it, or pass it as the first argument of `errors.Is`. To allow these, list the error result under `vouches`:
+
+```yaml
+  example.com/shop/internal/scan.next:
+    reason: Returns io.EOF at the end of s and no other error; reviewed 2026-11-19.
+    requires: ["0 <= i"]
+    vouches: [err]
+    modifies: []
+    ensures:
+      - "err = nil <-> i < |s|"
+      - "err != nil -> err = io.EOF"
+      - "err = nil -> b = s[i]"
+```
+
+With `vouches: [err]`, an error that the function returns in `err` has a known origin. Verified code can format it, wrap it with `%w`, ask `errors.Is` about it, compare it with any error, and pass it to another trusted function. A verified function that returns it passes the claim on to its callers. `vego` knows what `errors.Is` finds in the error only from what the contract says, as in `err = io.EOF` above.
+
+`vouches` is a claim about code that `vego` does not read. Before you make it, read the source of the function and of every error type it can return. The claim is about every non-nil error that the function returns in a listed result. It covers every error in the tree of that error, which is what `Unwrap` returns from it, and from that again. It also covers every value that these errors hold. You claim three things:
+
+- Every method of these values returns without panicking and writes nothing that a caller can see, whatever arguments it is passed. This covers `Error`, `Is`, `Unwrap`, and the methods that `fmt` calls when it formats a value. An `Is` method must not call a method of its argument, because the argument can be any error.
+- `==` on these errors cannot panic, and it reports true only for two errors that are the same. Every one of them equals itself. `errors.Is` reports the same for two such errors that `==` reports equal, and the same for two targets that `==` reports equal.
+- What `errors.Is` reports for one of these errors and a given target does not change after the function returns.
+
+A pointer to a struct whose methods only read its fields and call the same methods of the errors it holds meets these conditions. So does an integer type whose `Is` method compares its argument with error variables, such as `syscall.Errno`. A type with a float in it does not, because `==` reports false for a NaN compared with itself. An `Is` method that calls `target.Error()` does not either.
+
+If the function returns an error that it was given, the claim covers that error too. With `runs`, the claim must hold whatever value is passed. The trust report shows `vouches`.
+
+### Error variables in a trusted contract
+
+A trusted contract can name error variables, as in `err = io.EOF` and `is(err, io.EOF)`. The contract means the same in every package that calls the function, so its names do not depend on what any file imports:
+
+- A name on its own is an error variable of the package that declares the function, such as `ErrSyntax` in an entry for `strconv.Atoi`.
+- A name after the import path of its package is an error variable of that package. Write a path of one element as in Go, as in `io.EOF`. Put a longer path in quotes, as in `"io/fs".ErrNotExist`. YAML then needs the formula in single quotes: `'is(err, "io/fs".ErrNotExist)'`.
+
+The package must be in the build of the package that calls the function. An entry that names a variable that does not exist, or a package that is not in the build, cannot be used. Only a trusted contract can use a path in quotes. The annotations of a verified function name packages as their file imports them.
 
 ### Limits of trusted contracts
 
@@ -1637,9 +1679,9 @@ This table lists the most common messages.
 | `cannot verify F: it calls G, which has no contract` | `G` is neither verified nor trusted. | Annotate `G`, or add it to the trust file. |
 | `cannot verify F: parameter x has unsupported type T` | `T` is outside the supported subset. | Keep `T` out of the signatures of verified functions. |
 | `cannot verify F: x is not a local variable` | `F` uses a package-level variable that is not an error variable. | Pass the value as a parameter. |
-| `cannot verify F: formatting err would run the methods of an error whose origin is not known` | `fmt.Errorf` is given an error whose origin is not known, such as one from a trusted function or a parameter. | Return the error unchanged, or wrap your own error. |
+| `cannot verify F: formatting err would run the methods of an error whose origin is not known` | `fmt.Errorf` is given an error whose origin is not known, such as one from a parameter or from a trusted function whose contract does not vouch for it. | Return the error unchanged, or wrap your own error. If the error comes from a trusted function, see [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). |
 | `cannot verify F: comparing two errors can panic when both hold the same uncomparable type` | Neither error is `nil`, an error made by `errors.New` or `fmt.Errorf`, or an error variable that holds one or holds a pointer, integer, string, or boolean, or an array or struct of these. | Compare one of them with an error variable instead. See [Comparing errors](#comparing-errors). |
-| `cannot verify F: errors.Is would run the Is and Unwrap methods of err, an error whose origin is not known` | `errors.Is` is asked about an error from a parameter or a trusted function. | Compare it with an error variable using `==`. See [Asking errors.Is](#asking-errorsis). |
+| `cannot verify F: errors.Is would run the Is and Unwrap methods of err, an error whose origin is not known` | `errors.Is` is asked about an error from a parameter, or from a trusted function whose contract does not vouch for it. | Compare it with an error variable using `==`. See [Asking errors.Is](#asking-errorsis). |
 | `E is assigned at f.go:n, so it is not known to hold the error it was declared with`, or `x.E is assigned at f.go:n in package x` | The package of the error variable assigns it, or takes its address. | Remove the assignment, or pass the error as a parameter. |
 | `x.E is changed at f.go:n in package p, which this package is built with` | A package in the build assigns the error variable, or one that went into it. | Remove the assignment. See [When a package-level error is known](#when-a-package-level-error-is-known). |
 | `x is passed to F, which is trusted, and is an error whose origin is not known` (or `a value of type T, which can hold an error, an interface, or a function`) | The trusted function `F` could call code that `x` carries. | See [Arguments that carry code](#arguments-that-carry-code). |
@@ -1675,7 +1717,7 @@ Floating-point values are supported but opaque. They can be passed around and us
 
 A proof by `vego` depends on the following assumptions. Each concerns something `vego` cannot see.
 
-- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list. It does not keep the pointers and slices it receives. It does not call back, through another package, into the verified function that called it. A call back within the same package is found and reported. For a parameter listed under `runs`, all of this holds whatever value is passed.
+- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list. It does not keep the pointers and slices it receives. It does not call back, through another package, into the verified function that called it. A call back within the same package is found and reported. For a parameter listed under `runs`, all of this holds whatever value is passed. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns).
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type.
 - Unverified code respects Go's type system. It does not use `unsafe`, `reflect`, or cgo to give one piece of memory two types or to change a string.
 - No other goroutine writes memory that a verified function reads or writes while it runs. A proof covers one goroutine.

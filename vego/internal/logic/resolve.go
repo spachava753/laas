@@ -37,6 +37,9 @@ type Env interface {
 	// was created during the call, and "within" that the memory the first
 	// of two paths refers to lies inside that of the second.
 	Relation(name string, paths []Path) (*Term, error)
+	// Qualified returns the value of a variable named by the path of its
+	// package in quotes, as in "io/fs".ErrNotExist, followed by steps.
+	Qualified(path, name string, steps []Step, when When) (*Term, error)
 }
 
 // Path is a path together with the state it is read in.
@@ -217,6 +220,16 @@ func (s *scope) path(n *Node) (root *Node, steps []Step, primed bool) {
 func (s *scope) access(n *Node, when When) *Term {
 	root, steps, primed := s.path(n)
 	_, bound := s.bound[root.Name]
+	if root.Kind == NStr && len(steps) > 0 && steps[0].Field != "" && s.env != nil {
+		if primed {
+			when = Primed
+		}
+		t, err := s.env.Qualified(root.Name, steps[0].Field, steps[1:], when)
+		if err != nil {
+			panic(resolveError{err})
+		}
+		return t
+	}
 	if root.Kind != NIdent || bound {
 		var base *Term
 		switch {
