@@ -265,6 +265,34 @@ func (v *fnVerifier) enter() *state {
 	return st
 }
 
+// findLooped returns, for every defer statement of a body, whether it lies
+// inside a loop of its own frame, the function or a literal.
+func findLooped(body *ast.BlockStmt) map[*ast.DeferStmt]bool {
+	looped := map[*ast.DeferStmt]bool{}
+	var scan func(root ast.Node, inLoop bool)
+	scan = func(root ast.Node, inLoop bool) {
+		ast.Inspect(root, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.FuncLit:
+				if n != root {
+					scan(n.Body, false)
+					return false
+				}
+			case *ast.ForStmt, *ast.RangeStmt:
+				if n != root && !inLoop {
+					scan(n, true)
+					return false
+				}
+			case *ast.DeferStmt:
+				looped[n] = inLoop
+			}
+			return true
+		})
+	}
+	scan(body, false)
+	return looped
+}
+
 // findBoxed returns the variables whose address a function body takes: with
 // &x or &x.f, or by calling a method with a pointer receiver on x or x.f,
 // or using such a method as a value, as in x.M. Such a variable is kept in memory, in an allocation of its own that is
@@ -397,28 +425,7 @@ func (v *fnVerifier) verify() {
 	// A defer statement puts a call off until its own frame returns, the
 	// function or the literal it is written in, so only a loop of that
 	// frame repeats it.
-	v.looped = map[*ast.DeferStmt]bool{}
-	var scan func(root ast.Node, inLoop bool)
-	scan = func(root ast.Node, inLoop bool) {
-		ast.Inspect(root, func(n ast.Node) bool {
-			switch n := n.(type) {
-			case *ast.FuncLit:
-				if n != root {
-					scan(n.Body, false)
-					return false
-				}
-			case *ast.ForStmt, *ast.RangeStmt:
-				if n != root && !inLoop {
-					scan(n, true)
-					return false
-				}
-			case *ast.DeferStmt:
-				v.looped[n] = inLoop
-			}
-			return true
-		})
-	}
-	scan(fn.decl.Body, false)
+	v.looped = findLooped(fn.decl.Body)
 	v.boxed = v.findBoxed(fn.decl.Body)
 	v.classifyLiterals()
 	st := v.enter()

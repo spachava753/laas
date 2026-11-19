@@ -327,6 +327,10 @@ type funcInfo struct {
 	// funcvalues.go. Such a contract is not verified, and is treated where
 	// that matters like a trusted one.
 	valueOf *types.TypeName
+	// ownParams is set for a function literal verified against the
+	// contract of a function type: the contract names its parameters as the
+	// type does, and old(x) in its body names its own parameter x.
+	ownParams map[string]*types.Var
 }
 
 func (f *funcInfo) annotated() bool {
@@ -424,6 +428,10 @@ type pkgVerifier struct {
 	funcTypes     map[*types.TypeName]*funcInfo
 	importedTypes map[*types.TypeName]*funcInfo
 	mayCall       map[*types.Func]bool
+	// assignedIn holds, for the body of each declared function, the
+	// variables that something other than their declaration assigns; see
+	// final.
+	assignedIn map[*ast.BlockStmt]map[*types.Var]bool
 }
 
 // report emits a diagnostic once per position and message. Symbolic execution

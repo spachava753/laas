@@ -88,8 +88,8 @@ func literalUses(info *types.Info, body ast.Node) (bound map[*types.Var]*ast.Fun
 				}
 			}
 		}
-		refused[lit.Pos()] = "a function literal is supported only where it is called or deferred, or as the value " +
-			"that declares a new variable which is only ever called; this one is used as a value"
+		// Any other literal is a value. It is made where it is converted
+		// to a function type, which is checked there; see functionValue.
 		return true
 	})
 	// Every use of a bound variable must call it; one that is used any other
@@ -104,9 +104,16 @@ func literalUses(info *types.Info, body ast.Node) (bound map[*types.Var]*ast.Fun
 			return true
 		}
 		if variable, isVar := info.Uses[id].(*types.Var); isVar && bound[variable] != nil && !called[id] {
-			refused[id.Pos()] = fmt.Sprintf("%s holds a function literal and is used here other than by calling it; "+
-				"a variable that holds a function literal is supported only when it is never assigned again and only called", id.Name)
 			misused = append(misused, variable)
+			// A variable declared with a function type of its own holds
+			// the literal as a value of that type, which is checked where
+			// it is declared.
+			if !types.Identical(variable.Type(), info.TypeOf(bound[variable])) {
+				return true
+			}
+			refused[id.Pos()] = fmt.Sprintf("%s holds a function literal and is used here other than by calling it; "+
+				"a variable that holds a function literal is supported only when it is never assigned again and only called. "+
+				"To use the literal as a value, declare the variable with a function type that has a contract, as in var %s T = func...", id.Name, id.Name)
 		}
 		return true
 	})

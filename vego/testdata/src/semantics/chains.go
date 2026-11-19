@@ -392,3 +392,95 @@ func XorSelfChain(x int) (r int) {
 	y ^= y
 	return y
 }
+
+// Step keeps a number small.
+//
+// @Requires 0 <= x <= 10
+// @Ensures 0 <= y <= 10
+type Step func(x int) (y int)
+
+// CallChain calls through a function value again and again.
+//
+// @Requires f != nil And 0 <= x <= 10
+// @Ensures 0 <= r <= 10
+func CallChain(f Step, x int) (r int) {
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	x = f(x)
+	return x
+}
+
+type Store struct{ n int }
+
+// Setter sets the number of a store.
+//
+// @Requires c != nil
+// @Modifies c.n
+type Setter func(c *Store)
+
+// MakeChain makes a function literal into a value again and again. Each is
+// verified with a renamed copy of what is known where it is made, which
+// holds what the ones before it added.
+//
+// @Requires |fs| = 30
+// @Modifies fs
+// @Ensures True
+func MakeChain(fs []Setter, k int) {
+	fs[0] = func(c *Store) { c.n = k }
+	fs[1] = func(c *Store) { c.n = k }
+	fs[2] = func(c *Store) { c.n = k }
+	fs[3] = func(c *Store) { c.n = k }
+	fs[4] = func(c *Store) { c.n = k }
+	fs[5] = func(c *Store) { c.n = k }
+	fs[6] = func(c *Store) { c.n = k }
+	fs[7] = func(c *Store) { c.n = k }
+	fs[8] = func(c *Store) { c.n = k }
+	fs[9] = func(c *Store) { c.n = k }
+	fs[10] = func(c *Store) { c.n = k }
+	fs[11] = func(c *Store) { c.n = k }
+	fs[12] = func(c *Store) { c.n = k }
+	fs[13] = func(c *Store) { c.n = k }
+	fs[14] = func(c *Store) { c.n = k }
+	fs[15] = func(c *Store) { c.n = k }
+	fs[16] = func(c *Store) { c.n = k }
+	fs[17] = func(c *Store) { c.n = k }
+	fs[18] = func(c *Store) { c.n = k }
+	fs[19] = func(c *Store) { c.n = k }
+	fs[20] = func(c *Store) { c.n = k }
+	fs[21] = func(c *Store) { c.n = k }
+	fs[22] = func(c *Store) { c.n = k }
+	fs[23] = func(c *Store) { c.n = k }
+	fs[24] = func(c *Store) { c.n = k }
+	fs[25] = func(c *Store) { c.n = k }
+	fs[26] = func(c *Store) { c.n = k }
+	fs[27] = func(c *Store) { c.n = k }
+	fs[28] = func(c *Store) { c.n = k }
+	fs[29] = func(c *Store) { c.n = k }
+}

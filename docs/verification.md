@@ -554,28 +554,21 @@ fix the order; split the statement so that the order is the one you mean, as in 
 
 ### Literals that cannot be verified
 
-A literal used in any other way is reported as `cannot verify`. This includes a literal that is passed to a function, returned, stored, compared, or assigned to a variable that already exists:
+A literal that is passed to a function, returned, or stored is a function value. It needs a function type with a contract. A literal given a type without one is reported as `cannot verify`:
 
 ```go
-// each calls f for every element. It is not verified.
-func each(A []int, f func(int)) {
-	for _, x := range A {
-		f(x)
-	}
-}
-
 // @Ensures True
-func Apply(A []int) {
-	each(A, func(x int) {})
+func Printer() (f func(x int)) {
+	return func(x int) {}
 }
 ```
 
 ```text
-vego: cannot verify Apply: a function literal is supported only where it is called or deferred,
-or as the value that declares a new variable which is only ever called; this one is used as a value
+vego: cannot verify Printer: the function literal is used as a value of type func(x int), which
+has no contract; declare a named function type with a contract and use it here
 ```
 
-Write the loop in the verified function and call the literal there, or leave the code that passes the literal unverified. A variable that holds a literal and is used other than by calling it is reported as `cannot verify` too, with the message `f holds a function literal and is used here other than by calling it`. A variadic literal cannot be verified, and neither can a literal that takes or returns a type that `vego` does not support.
+A variable declared with `:=` that holds a literal and is used other than by calling it is reported as `cannot verify` too, with the message `f holds a function literal and is used here other than by calling it`. Declare it with a type that has a contract instead, as in `var f T = func...`. A variadic literal cannot be verified, and neither can a literal that takes or returns a type that `vego` does not support.
 
 ## Predicates
 
@@ -2060,7 +2053,7 @@ This table lists the most common messages.
 | `the trusted contract of F cannot be true of this call` | The contract contradicts what is known at the call. | The entry is wrong, or it needs a `requires` clause. |
 | `the trusted contract ... cannot be used` | The entry in the trust file is invalid. The message says why. | Fix the entry. Check the parameter names. |
 | `..., in the function literal called at f.go:n:c`, or `..., in the function literal deferred at f.go:n:c and run at the return at f.go:n:c` (or `at the end of the function at`, or `at the end of the function literal at`) | The problem is in the body of a function literal, at the call named at the end. For a deferred literal, the message names the `defer` statement and where the literal runs. | Fix the body, or what holds at that call. See [Function literals](#function-literals). |
-| `cannot verify F: a function literal is supported only where it is called or deferred, or as the value that declares a new variable which is only ever called` | The literal is passed, returned, stored, or compared. | Call the literal where it is written, or leave that code unverified. |
+| `cannot verify F: the function literal is used as a value of type T, which has no contract` | The literal is passed, returned, or stored as a value of a function type that has no contract. | Declare a named function type with a contract and use it there. |
 | `cannot verify F: f holds a function literal and is used here other than by calling it` | The variable that holds the literal is passed, compared, or assigned again. | Only call the variable. |
 | `cannot verify F: recover is not supported` | `recover` returns an interface. | Call `recover` in a function that is not verified. |
 | `cannot verify F: a formula built to verify it has grown beyond 1048576 nodes, which is the limit` | An expression or a run of statements builds a formula that grows faster than the code, as `x = x + x` does when repeated. | Split the function, or the expressions in it, into smaller ones. |

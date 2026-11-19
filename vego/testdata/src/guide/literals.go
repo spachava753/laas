@@ -52,18 +52,11 @@ func ReadAndBump(x int) (result int) {
 	return x + bump() // want `vego: x may be read before or after the call to bump, which may change it, and Go does not fix the order; split the statement so that the order is the one you mean, as in x0 := x before it$`
 }
 
-// each calls f for every element. It is not verified.
-func each(A []int, f func(int)) {
-	for _, x := range A {
-		f(x)
-	}
-}
-
-// Apply hands a literal to another function.
+// Printer returns a literal as a value of a type without a contract.
 //
 // @Ensures True
-func Apply(A []int) {
-	each(A, func(x int) {}) // want `vego: cannot verify Apply: a function literal is supported only where it is called or deferred, or as the value that declares a new variable which is only ever called; this one is used as a value`
+func Printer() (f func(x int)) {
+	return func(x int) {} // want `vego: cannot verify Printer: the function literal is used as a value of type func\(x int\), which has no contract; declare a named function type with a contract and use it here`
 }
 
 // IncAndRead changes its result in a deferred literal, after the return

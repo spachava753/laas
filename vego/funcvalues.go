@@ -3,6 +3,7 @@ package vego
 import (
 	"fmt"
 	"go/ast"
+	"go/token"
 	"go/types"
 	"slices"
 
@@ -677,8 +678,12 @@ func (v *fnVerifier) functionValue(e ast.Expr, want types.Type, st *state, guard
 	}
 	T := v.valueContract(want)
 	if T == nil {
+		what := types.ExprString(e)
+		if isLiteral {
+			what = "the function literal"
+		}
 		v.unsupported(e.Pos(), fmt.Sprintf("%s is used as a value of type %s, which has no contract; "+
-			"declare a named function type with a contract and use it here", types.ExprString(e), want))
+			"declare a named function type with a contract and use it here", what, want))
 	}
 	for _, defect := range T.defects {
 		v.report(e.Pos(), "the contract of %s cannot be used: %s", T.obj.Name(), defect)
@@ -688,8 +693,7 @@ func (v *fnVerifier) functionValue(e ast.Expr, want types.Type, st *state, guard
 	}
 	switch {
 	case isLiteral:
-		v.unsupported(e.Pos(), "a function literal is supported only where it is called or deferred, or as the value "+
-			"that declares a new variable which is only ever called; this one is used as a value")
+		v.madeLiteral(inner.(*ast.FuncLit), T, st, guard)
 	case named != nil:
 		v.madeFrom(e, T, named, nil, st, guard)
 	default:
@@ -889,4 +893,253 @@ func (tr *transport) value(val value) value {
 		renamed[i] = tr.term(leaf)
 	}
 	return renamed
+}
+
+// A function literal used as a value travels: it may run during the call it
+// is handed to or long after, any number of times, while the function that
+// made it has moved on or returned. It is verified once where it is made,
+// against the contract of the type it is given, as a function of its own:
+// its parameters are what the contract allows, the memory it sees is
+// memory of its own, and of the variables it captures it knows this:
+//
+//   - one that nothing assigns but its declaration, and whose address is not
+//     taken, has the value it has where the literal is made, for ever, with
+//     what is known of that value there;
+//   - any other is a value of its type and nothing more.
+//
+// It may not assign a variable it captures, so no call through a value can
+// change a variable of any function, and what in-place literals assume of
+// the variables they capture stays true. A loop variable belongs to its
+// iteration from Go 1.22 on and is captured with the value it has there; in
+// older files the iterations share it, and it is assigned by the loop.
+
+// madeLiteral checks a function literal that is made into a value of a
+// function type with the contract T.
+func (v *fnVerifier) madeLiteral(lit *ast.FuncLit, T *funcInfo, st *state, guard []*logic.Term) {
+	captured := v.capturedBy(lit)
+	v.stratified(lit)
+	sig := v.info.TypeOf(lit).(*types.Signature)
+	fn := &funcInfo{
+		obj:         types.NewFunc(lit.Pos(), v.pass.Pkg, T.obj.Name(), sig),
+		requires:    T.requires,
+		ensures:     T.ensures,
+		modifies:    T.modifies,
+		params:      slices.Collect(sig.Params().Variables()),
+		results:     slices.Collect(sig.Results().Variables()),
+		paramNames:  map[string]*types.Var{},
+		resultNames: map[string]int{},
+		runs:        map[*types.Var]bool{},
+		vouches:     map[int]bool{},
+		decl:        &ast.FuncDecl{Name: &ast.Ident{NamePos: lit.Pos(), Name: T.obj.Name()}, Type: lit.Type, Body: lit.Body},
+		ownParams:   map[string]*types.Var{},
+	}
+	// The contract names the parameters and results of the type, which are
+	// those of the literal in the same order.
+	for i, param := range T.params {
+		fn.paramNames[param.Name()] = fn.params[i]
+	}
+	for name, index := range T.resultNames {
+		fn.resultNames[name] = index
+	}
+	for _, param := range fn.params {
+		fn.ownParams[param.Name()] = param
+	}
+	for _, c := range v.fn.body {
+		if c.pos >= lit.Body.Pos() && c.pos < lit.Body.End() {
+			fn.body = append(fn.body, c)
+		}
+	}
+	site := v.site(lit.Pos(), "in the function literal used as a %s at %s", T.obj.Name(), v.placeOf(lit.Pos()))
+	sv, entry, carry := v.subVerifier(fn, st, guard, site)
+	for _, variable := range captured {
+		held := st.vals[variable]
+		if held == nil {
+			continue
+		}
+		if v.final(variable) || v.boxed[variable] {
+			// The value is fixed: the variable itself, or for one that
+			// lives in memory, the pointer to it. What it holds there is
+			// read from the memory the literal sees.
+			entry.vals[variable] = carry.value(held)
+			continue
+		}
+		entry.vals[variable] = sv.unknown(variable.Name(), variable.Type(), entry)
+	}
+	sv.looped = findLooped(lit.Body)
+	sv.classifyLiterals()
+	for _, variable := range slices.Concat(fn.params, fn.results) {
+		if sv.boxed[variable] && entry.vals[variable] != nil {
+			sv.bind(entry, variable, entry.vals[variable])
+		}
+	}
+	sv.seq(lit.Body.List, lit.Body.Lbrace, lit.Body.Rbrace, entry, ctrl{}, func(end *state) {
+		sv.returned(end, nil, lit.Body.Rbrace)
+	})
+}
+
+// capturedBy returns the local variables declared outside a literal that it
+// uses, and refuses one that it assigns, or that holds a literal used in
+// place: that literal may assign the variables of the function around it.
+func (v *fnVerifier) capturedBy(lit *ast.FuncLit) []*types.Var {
+	outside := func(variable *types.Var) bool {
+		return variable != nil && !variable.IsField() && variable.Pkg() == v.pass.Pkg && variable.Parent() != v.pass.Pkg.Scope() &&
+			(variable.Pos() < lit.Pos() || variable.Pos() >= lit.End())
+	}
+	var captured []*types.Var
+	seen := map[*types.Var]bool{}
+	ast.Inspect(lit.Body, func(n ast.Node) bool {
+		var targets []ast.Expr
+		switch n := n.(type) {
+		case *ast.Ident:
+			variable, _ := v.info.Uses[n].(*types.Var)
+			if !outside(variable) || seen[variable] {
+				break
+			}
+			seen[variable] = true
+			if v.boundLits[variable] != nil {
+				v.unsupported(n.Pos(), fmt.Sprintf("a function literal used as a value cannot use %s, which holds a function literal "+
+					"of the function around it", n.Name))
+			}
+			captured = append(captured, variable)
+		case *ast.AssignStmt:
+			targets = n.Lhs
+		case *ast.IncDecStmt:
+			targets = []ast.Expr{n.X}
+		case *ast.RangeStmt:
+			if n.Tok == token.ASSIGN {
+				targets = []ast.Expr{n.Key, n.Value}
+			}
+		}
+		for _, target := range targets {
+			if variable := v.assignedLocal(target); outside(variable) && !v.boxed[variable] {
+				v.unsupported(target.Pos(), fmt.Sprintf("a function literal used as a value cannot assign %s, a variable of the function "+
+					"around it: it may run when that function has moved on, and no call of it could tell that function what it did", variable.Name()))
+			}
+		}
+		return true
+	})
+	return captured
+}
+
+// final reports whether a variable keeps the value it is declared with: no
+// statement of the declared function around it assigns it but its
+// declaration, its address is not taken, and it is not a named result, which
+// a return assigns. The variable of a range loop belongs to its iteration
+// from Go 1.22 on; before that the loop assigns it at each iteration.
+func (v *fnVerifier) final(variable *types.Var) bool {
+	body := v.bodyOrigin()
+	if v.assignedIn == nil {
+		v.assignedIn = map[*ast.BlockStmt]map[*types.Var]bool{}
+	}
+	assigned := v.assignedIn[body]
+	if assigned == nil {
+		assigned = v.findReassigned(body)
+		v.assignedIn[body] = assigned
+	}
+	return !assigned[variable] && !v.boxed[variable]
+}
+
+// findReassigned returns the variables of a body that something other than
+// their declaration assigns.
+func (v *fnVerifier) findReassigned(body *ast.BlockStmt) map[*types.Var]bool {
+	assigned := map[*types.Var]bool{}
+	mark := func(e ast.Expr) {
+		if variable := v.assignedLocal(e); variable != nil {
+			assigned[variable] = true
+		}
+	}
+	results := func(t *ast.FuncType) {
+		if t.Results == nil {
+			return
+		}
+		for _, field := range t.Results.List {
+			for _, name := range field.Names {
+				if variable, ok := v.info.Defs[name].(*types.Var); ok {
+					assigned[variable] = true
+				}
+			}
+		}
+	}
+	// The named results of the declared function whose body this is, which
+	// may be the function around a literal that is verified on its own.
+	for _, fn := range v.order {
+		if fn.decl.Body == body {
+			results(fn.decl.Type)
+		}
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.FuncLit:
+			results(n.Type)
+		case *ast.AssignStmt:
+			for _, lhs := range n.Lhs {
+				id, isIdent := ast.Unparen(lhs).(*ast.Ident)
+				if n.Tok == token.DEFINE && isIdent && v.info.Defs[id] != nil {
+					continue
+				}
+				mark(lhs)
+			}
+		case *ast.IncDecStmt:
+			mark(n.X)
+		case *ast.RangeStmt:
+			if n.Tok == token.ASSIGN || !v.freshEachIteration(n.Pos()) {
+				for _, target := range []ast.Expr{n.Key, n.Value} {
+					if target != nil {
+						mark(target)
+					}
+				}
+			}
+		}
+		return true
+	})
+	return assigned
+}
+
+// stratified refuses a literal used as a value whose body may call through
+// a function value: itself, in a literal it calls in place, or in what it
+// calls. No contract of a function type has a variant, so nothing would
+// prove that a chain of such calls ends. A literal that it makes into a
+// value is checked where it is made.
+func (v *fnVerifier) stratified(lit *ast.FuncLit) {
+	bound, _ := literalUses(v.info, lit.Body)
+	inPlace := map[*ast.FuncLit]bool{}
+	for _, inner := range bound {
+		inPlace[inner] = true
+	}
+	refuse := func(pos token.Pos, what string) {
+		v.unsupported(pos, fmt.Sprintf("the function literal used as a value %s, and code that a function value runs cannot do that yet: "+
+			"no contract of a function type has a variant, so nothing would prove that such calls end", what))
+	}
+	ast.Inspect(lit.Body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.FuncLit:
+			return inPlace[n]
+		case *ast.RangeStmt:
+			if rangesByCalling(v.info.TypeOf(n.X)) {
+				refuse(n.Pos(), "ranges over a function")
+			}
+		case *ast.CallExpr:
+			tv := v.info.Types[n.Fun]
+			if tv.IsType() || tv.IsBuiltin() {
+				break
+			}
+			if callee := typeutil.StaticCallee(v.info, n); callee != nil {
+				if v.pkgVerifier.mayCallValues(callee) {
+					refuse(n.Pos(), fmt.Sprintf("calls %s, which may call through a function value", callee.Name()))
+				}
+				break
+			}
+			switch fun := ast.Unparen(n.Fun).(type) {
+			case *ast.FuncLit:
+				inPlace[fun] = true
+				return true
+			case *ast.Ident:
+				if variable, ok := v.info.Uses[fun].(*types.Var); ok && bound[variable] != nil {
+					return true
+				}
+			}
+			refuse(n.Pos(), "calls through the function value "+types.ExprString(n.Fun))
+		}
+		return true
+	})
 }

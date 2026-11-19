@@ -273,6 +273,14 @@ func (e *specEnv) locate(name string, steps []logic.Step, when logic.When) (reac
 		// verified, which is how its own contract sees x.
 		entry := &specEnv{v: e.v, sink: e.sink, fn: e.v.fn, args: e.v.entry, now: memory{}}
 		param, isParam := e.v.fn.paramNames[name]
+		if own := e.v.fn.ownParams; own != nil {
+			// In a function literal verified on its own, old names its own
+			// parameter, whatever the contract of its type calls it.
+			param, isParam = own[name]
+			renamed := *e.v.fn
+			renamed.paramNames = own
+			entry.fn = &renamed
+		}
 		if !isParam {
 			return reached{}, fmt.Errorf("old(%s): %s is not a parameter", name, name)
 		}

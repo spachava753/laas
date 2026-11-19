@@ -96,7 +96,7 @@ func WrapsUnknown(e error) (result bool) {
 //
 // @Ensures True
 func Passed() {
-	apply(func() {}) // want `vego: cannot verify Passed: a function literal is supported only where it is called or deferred, or as the value that declares a new variable which is only ever called; this one is used as a value`
+	apply(func() {}) // want `vego: cannot verify Passed: it calls apply, which has no contract`
 }
 
 func apply(f func()) { f() }
