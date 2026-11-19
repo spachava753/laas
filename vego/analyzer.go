@@ -1010,6 +1010,9 @@ func (pv *pkgVerifier) collect() {
 			continue
 		}
 		pv.checkPlacement(fn)
+		// A literal used in place is part of the body, so what it calls
+		// is found with the rest, and calling it calls nothing else.
+		bound, _ := literalUses(pv.info, fn.decl.Body)
 		ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.Ident:
@@ -1027,6 +1030,14 @@ func (pv *pkgVerifier) collect() {
 				tv := pv.info.Types[n.Fun]
 				if tv.IsType() || tv.IsBuiltin() || typeutil.StaticCallee(pv.info, n) != nil {
 					break
+				}
+				switch fun := ast.Unparen(n.Fun).(type) {
+				case *ast.FuncLit:
+					return true
+				case *ast.Ident:
+					if variable, ok := pv.info.Uses[fun].(*types.Var); ok && bound[variable] != nil {
+						return true
+					}
 				}
 				fn.callees = append(fn.callees, escaped...)
 				if sel, ok := ast.Unparen(n.Fun).(*ast.SelectorExpr); ok {

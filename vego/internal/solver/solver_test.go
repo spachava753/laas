@@ -106,6 +106,12 @@ func (m model) table(t *logic.Term) func(index int64) seqValue {
 	if t.Op == logic.OpConst {
 		return m.maps[t.Name]
 	}
+	if t.Op == logic.OpIte {
+		if m.eval(t.Args[0]) == 1 {
+			return m.table(t.Args[1])
+		}
+		return m.table(t.Args[2])
+	}
 	if t.Op != logic.OpStore {
 		panic("unexpected sequence of sequences " + t.String())
 	}
@@ -271,6 +277,11 @@ func (m model) seq(t *logic.Term) seqValue {
 			}
 			return second.at(plus(index, times(-1, first.length)))
 		}}
+	case logic.OpIte:
+		if value(0) == 1 {
+			return m.seq(t.Args[1])
+		}
+		return m.seq(t.Args[2])
 	case logic.OpSub:
 		whole, lo := m.seq(t.Args[0]), value(1)
 		return seqValue{max(plus(value(2), times(-1, lo)), 0), func(index int64) int64 { return whole.at(plus(lo, index)) }}
@@ -357,6 +368,11 @@ func (g *generator) ref() *logic.Term {
 // table builds a sequence of sequences: a base, possibly with some of its
 // sequences replaced, which is the shape memory has in the verifier.
 func (g *generator) table(depth int) *logic.Term {
+	// A choice between two memories is what joining the ends of a function
+	// literal makes.
+	if g.wide && depth > 0 && g.rng.IntN(4) == 0 {
+		return logic.Ite(g.formula(depth-1), g.table(depth-1), g.table(depth-1))
+	}
 	if depth > 0 && g.rng.IntN(2) == 0 {
 		return logic.Store(g.table(depth-1), g.intTerm(0), g.seq(depth-1))
 	}
@@ -371,6 +387,8 @@ func (g *generator) seq(depth int) *logic.Term {
 	switch {
 	case g.wide && g.rng.IntN(8) == 0:
 		return logic.Fill(g.intTerm(0), g.intTerm(0))
+	case g.wide && depth > 0 && g.rng.IntN(8) == 0:
+		return logic.Ite(g.formula(depth-1), g.seq(depth-1), g.seq(depth-1))
 	case g.rng.IntN(6) == 0:
 		return logic.Select(g.table(depth), g.intTerm(0))
 	case depth > 0 && g.rng.IntN(4) == 0:
@@ -931,6 +949,8 @@ func TestRules(t *testing.T) {
 	pos := Options{Preds: map[string]*logic.PredDef{"pos": {Name: "pos", Params: []*logic.Term{n}, Body: logic.Lt(lit(0), n)}}}
 	bound := logic.Bound("w", logic.Int)
 	chosen := logic.Ite(c, e, f)
+	seqA, seqB := logic.Const("A", logic.IntSeq), logic.Const("B", logic.IntSeq)
+	tableM, tableN := logic.Const("M", logic.SeqOf(logic.IntSeq)), logic.Const("N", logic.SeqOf(logic.IntSeq))
 	tests := []struct {
 		name string
 		opts Options
@@ -968,6 +988,16 @@ func TestRules(t *testing.T) {
 		{"a conditional formula does not give its second branch", Options{}, []*logic.Term{c, logic.Ite(c, atMost(x), logic.Lt(lit(0), x))}, logic.Lt(lit(0), x), Refuted},
 		{"a refuted conditional formula refutes its first branch", Options{}, []*logic.Term{c, logic.Not(logic.Ite(c, atMost(x), atMost(y)))}, logic.Lt(lit(0), x), Proved},
 		{"a refuted conditional formula leaves its second branch", Options{}, []*logic.Term{c, logic.Not(logic.Ite(c, atMost(x), atMost(y)))}, logic.Lt(lit(0), y), Refuted},
+		// Guards against the branches of a conditional sequence, or of a
+		// conditional sequence of sequences, being swapped. Joining the ends
+		// of a function literal makes both: a string or slice that differs
+		// between the ends, and a region of memory.
+		{"a chosen sequence is the first when the condition holds", Options{}, []*logic.Term{c, logic.Eq(logic.Select(seqA, lit(0)), lit(1)), logic.Eq(logic.Select(seqB, lit(0)), lit(2))}, logic.Eq(logic.Select(logic.Ite(c, seqA, seqB), lit(0)), lit(1)), Proved},
+		{"a chosen sequence is not the second when the condition holds", Options{}, []*logic.Term{c, logic.Eq(logic.Select(seqA, lit(0)), lit(1)), logic.Eq(logic.Select(seqB, lit(0)), lit(2))}, logic.Eq(logic.Select(logic.Ite(c, seqA, seqB), lit(0)), lit(2)), Refuted},
+		{"a chosen sequence is the second when the condition fails", Options{}, []*logic.Term{logic.Not(c), logic.Eq(logic.Len(seqA), lit(1)), logic.Eq(logic.Len(seqB), lit(2))}, logic.Eq(logic.Len(logic.Ite(c, seqA, seqB)), lit(2)), Proved},
+		{"a chosen table is the first when the condition holds", Options{}, []*logic.Term{c, logic.Eq(logic.Select(logic.Select(tableM, x), lit(0)), lit(1)), logic.Eq(logic.Select(logic.Select(tableN, x), lit(0)), lit(2))}, logic.Eq(logic.Select(logic.Select(logic.Ite(c, tableM, tableN), x), lit(0)), lit(1)), Proved},
+		{"a chosen table is not the second when the condition holds", Options{}, []*logic.Term{c, logic.Eq(logic.Select(logic.Select(tableM, x), lit(0)), lit(1)), logic.Eq(logic.Select(logic.Select(tableN, x), lit(0)), lit(2))}, logic.Eq(logic.Select(logic.Select(logic.Ite(c, tableM, tableN), x), lit(0)), lit(2)), Refuted},
+		{"a chosen table is the second when the condition fails", Options{}, []*logic.Term{logic.Not(c), logic.Eq(logic.Select(logic.Select(tableM, x), lit(0)), lit(1)), logic.Eq(logic.Select(logic.Select(tableN, x), lit(0)), lit(2))}, logic.Eq(logic.Select(logic.Select(logic.Ite(c, tableM, tableN), x), lit(0)), lit(2)), Proved},
 		// Guards against the remainder of two numbers being computed the
 		// Euclidean way, which never yields a negative remainder, and the
 		// quotient being rounded down. Go truncates: -7 / 2 is -3 and

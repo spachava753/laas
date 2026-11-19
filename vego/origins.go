@@ -114,6 +114,48 @@ func (pv *pkgVerifier) originsOf(body *ast.BlockStmt) *origins {
 		}
 		return true
 	})
+	// The parameters of a literal used in place are assigned the arguments
+	// of its calls, which are all in the body. Those of any other literal
+	// could be given anything.
+	bound, _ := literalUses(pv.info, body)
+	inPlace := map[*ast.FuncLit]bool{}
+	for _, lit := range bound {
+		inPlace[lit] = true
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		var lit *ast.FuncLit
+		switch fun := ast.Unparen(call.Fun).(type) {
+		case *ast.FuncLit:
+			lit = fun
+		case *ast.Ident:
+			lit = bound[variable(fun)]
+		}
+		if lit == nil {
+			return true
+		}
+		inPlace[lit] = true
+		params := pv.info.TypeOf(lit).(*types.Signature).Params()
+		for i := range params.Len() {
+			if len(call.Args) != params.Len() {
+				o.unknown[params.At(i)] = true
+				continue
+			}
+			o.sources[params.At(i)] = append(o.sources[params.At(i)], source{call.Args[i], -1})
+		}
+		return true
+	})
+	ast.Inspect(body, func(n ast.Node) bool {
+		if lit, ok := n.(*ast.FuncLit); ok && !inPlace[lit] {
+			for param := range pv.info.TypeOf(lit).(*types.Signature).Params().Variables() {
+				o.unknown[param] = true
+			}
+		}
+		return true
+	})
 	return o
 }
 

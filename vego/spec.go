@@ -267,8 +267,17 @@ func (e *specEnv) locate(name string, steps []logic.Step, when logic.When) (reac
 		// Inside a body, old(x) is the value on entry of the function being
 		// verified, which is how its own contract sees x.
 		entry := &specEnv{v: e.v, sink: e.sink, fn: e.v.fn, args: e.v.entry, now: memory{}}
-		if _, isParam := e.v.fn.paramNames[name]; !isParam {
+		param, isParam := e.v.fn.paramNames[name]
+		if !isParam {
 			return reached{}, fmt.Errorf("old(%s): %s is not a parameter", name, name)
+		}
+		// A variable declared in the body, such as a parameter of a
+		// function literal, may hide the parameter here.
+		if scope := e.v.pass.Pkg.Scope().Innermost(e.pos); scope != nil {
+			if _, obj := scope.LookupParent(name, e.pos); obj != param {
+				return reached{}, fmt.Errorf("old(%s): %s here is not the parameter of %s but a variable that hides it; rename the variable",
+					name, name, e.v.fn.obj.Name())
+			}
 		}
 		return entry.locate(name, steps, logic.Now)
 	}

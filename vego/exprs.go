@@ -161,11 +161,6 @@ func (v *fnVerifier) settled(st *state, guard []*logic.Term, val value, t types.
 	return stored
 }
 
-// pointed reads the struct a pointer points to.
-func (v *fnVerifier) pointed(st *state, t types.Type, pointer value) value {
-	return v.pointedIn(st, st.mem, t, pointer)
-}
-
 // pointedIn reads the struct a pointer points to in some memory.
 func (v *fnVerifier) pointedIn(sink *state, mem memory, t types.Type, pointer value) value {
 	val := v.fetch(sink, mem, v.cellsOf(t), pointer[0], pointer[1])

@@ -246,6 +246,12 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
 	v.openUnit(st)
 	targets := make([]lvalue, len(s.Lhs))
 	for i, lhs := range s.Lhs {
+		// A variable bound to a literal has no value; its calls run the
+		// literal.
+		if v.isBoundLiteral(lhs) {
+			targets[i] = lvalue{kind: placeBlank}
+			continue
+		}
 		targets[i] = v.lvalue(lhs, st, nil)
 	}
 	simple := s.Tok == token.ASSIGN || s.Tok == token.DEFINE
@@ -293,6 +299,10 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
 		values = v.callResults(s.Rhs[0], st, wanted(targets))
 	default:
 		for i, rhs := range s.Rhs {
+			if v.isBoundLiteral(s.Lhs[i]) {
+				values = append(values, nil)
+				continue
+			}
 			values = append(values, v.evalAs(rhs, v.targetType(targets[i], rhs), st, nil))
 		}
 	}
@@ -503,6 +513,10 @@ func (v *fnVerifier) declare(s *ast.DeclStmt, st *state) {
 		v.openUnit(st)
 		targets := make([]lvalue, len(spec.Names))
 		for i, name := range spec.Names {
+			if v.isBoundLiteral(name) {
+				targets[i] = lvalue{kind: placeBlank}
+				continue
+			}
 			targets[i] = v.lvalue(name, st, nil)
 		}
 		var values []value
@@ -515,6 +529,10 @@ func (v *fnVerifier) declare(s *ast.DeclStmt, st *state) {
 			values = v.callResults(spec.Values[0], st, wanted(targets))
 		default:
 			for i, initial := range spec.Values {
+				if v.isBoundLiteral(spec.Names[i]) {
+					values = append(values, nil)
+					continue
+				}
 				values = append(values, v.evalAs(initial, v.targetType(targets[i], initial), st, nil))
 			}
 		}
@@ -525,65 +543,43 @@ func (v *fnVerifier) declare(s *ast.DeclStmt, st *state) {
 	}
 }
 
-// returnStmt evaluates the returned values and checks the postcondition.
+// returnStmt evaluates the returned values and ends the frame being
+// executed, the function or a literal; see returned.
 func (v *fnVerifier) returnStmt(s *ast.ReturnStmt, st *state) {
-	results := make([]value, len(v.fn.results))
+	vars := v.fn.results
+	if v.lit != nil {
+		vars = slices.Collect(v.lit.sig.Results().Variables())
+	}
 	if len(s.Results) == 0 {
-		for i, result := range v.fn.results {
-			results[i] = v.current(st, result)
-		}
-		v.atReturn(st, results, s.Pos())
+		v.returned(st, nil, s.Pos())
 		return
 	}
+	results := make([]value, len(vars))
 	v.openUnit(st)
 	switch {
 	case len(s.Results) == 1 && len(results) > 1:
-		wants := make([]types.Type, len(v.fn.results))
-		for i, result := range v.fn.results {
+		wants := make([]types.Type, len(vars))
+		for i, result := range vars {
 			wants[i] = result.Type()
 		}
 		results = v.callResults(s.Results[0], st, wants)
 	case len(s.Results) == 1 && v.isAppend(s.Results[0]):
 		v.appendTo(ast.Unparen(s.Results[0]).(*ast.CallExpr), st, func(next *state, result value) {
-			v.atReturn(next, []value{result}, s.Pos())
+			v.returned(next, []value{result}, s.Pos())
 		})
 		return
 	default:
 		for i, e := range s.Results {
-			results[i] = v.evalAs(e, v.fn.results[i].Type(), st, nil)
+			results[i] = v.evalAs(e, vars[i].Type(), st, nil)
 		}
 	}
 	v.closeUnit(st)
-	v.atReturn(st, results, s.Pos())
+	v.returned(st, results, s.Pos())
 }
 
-// atReturn checks the postcondition in a final state.
+// atReturn checks the postcondition in a final state, once the results
+// have been assigned and the deferred calls have run.
 func (v *fnVerifier) atReturn(st *state, results []value, pos token.Pos) {
-	// Returning assigns the results to the result variables, then runs the
-	// calls that were put off, last one first. Such a call can see and
-	// change a result only through a pointer to a result variable, which
-	// then lives in memory, so those results are stored before the calls
-	// and read back after them.
-	stored := func(read bool) {
-		for i, result := range v.fn.results {
-			held := st.vals[result]
-			switch {
-			case !v.boxed[result] || held == nil || results[i] == nil:
-			case read:
-				results[i] = v.pointed(st, result.Type(), held)
-			default:
-				v.put(st, v.cellsOf(result.Type()), held[0], held[1], results[i])
-			}
-		}
-	}
-	stored(false)
-	for _, put := range slices.Backward(st.deferred) {
-		// A deferred call is a statement of its own, so it may modify
-		// memory; what it returns is dropped.
-		v.invoke(put.call, put.fn, put.args, st, nil)
-	}
-	st.deferred = nil
-	stored(true)
 	// The return is recorded with the branches taken to get here, as a
 	// possible failure, a possible success, or both; see tieFailures.
 	// A return fails if any of its errors is one and succeeds if none is.

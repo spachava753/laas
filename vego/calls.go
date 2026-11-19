@@ -92,6 +92,13 @@ func (v *fnVerifier) binary(op token.Token, x, y *logic.Term, t types.Type, pos 
 // clauses list is forgotten, and its postcondition is assumed. The callee's
 // body is never inspected, so an unannotated callee tells the caller nothing.
 func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []value {
+	if lit := v.literalOf(call); lit != nil {
+		return v.callLiteral(call, lit, st, guard)
+	}
+	if isBuiltin(v.info, call, "recover") {
+		v.unsupported(call.Pos(), "recover is not supported: it returns an interface, and those are not supported yet; "+
+			"recover in a function that is not verified")
+	}
 	callee, _ := typeutil.Callee(v.info, call).(*types.Func)
 	if callee == nil {
 		v.unsupported(call.Pos(), "only calls to named functions and methods are supported")

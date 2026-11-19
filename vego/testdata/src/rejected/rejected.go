@@ -89,8 +89,9 @@ func ReadsGlobal(x int) (result int) {
 
 // @Requires x > 0
 func Closure(x int) (result int) {
-	f := func() int { return x } // want `vego: cannot verify Closure: f has unsupported type func\(\) int`
-	return f()
+	f := func() int { return x }
+	g := f // want `vego: cannot verify Closure: f holds a function literal and is used here other than by calling it`
+	return g()
 }
 
 // @Preserves |A| // want `vego:\ Preserves\ annotations\ are\ not\ supported\ yet`

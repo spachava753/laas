@@ -79,7 +79,7 @@ func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
 	eff := &effects{whole: map[*types.Var]bool{}, grown: map[*types.Var]bool{}}
 	otherwise := map[*types.Var]bool{}
 	assigned := func(e ast.Expr, appendedTo *types.Var) {
-		if e == nil {
+		if e == nil || v.isBoundLiteral(e) {
 			return
 		}
 		lv := v.place(e)
@@ -105,8 +105,19 @@ func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
 			eff.sites = append(eff.sites, site{mapType: lv.mapType, root: v.localVar(lv.slice)})
 		}
 	}
-	visit := func(n ast.Node) bool {
+	// The body of a literal runs where it is called, so a loop that calls
+	// one changes what the body changes. A literal written inside the loop
+	// is walked where it is written; one bound outside is walked at its
+	// calls, once.
+	walked := map[*ast.FuncLit]bool{}
+	var visit func(n ast.Node) bool
+	visit = func(n ast.Node) bool {
 		switch n := n.(type) {
+		case *ast.FuncLit:
+			if walked[n] {
+				return false
+			}
+			walked[n] = true
 		case *ast.AssignStmt:
 			var appendedTo *types.Var
 			if len(n.Lhs) == 1 && len(n.Rhs) == 1 && v.isAppend(n.Rhs[0]) {
@@ -126,6 +137,9 @@ func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
 			assigned(n.Key, nil)
 			assigned(n.Value, nil)
 		case *ast.CallExpr:
+			if lit := v.literalOf(n); lit != nil && !walked[lit] {
+				ast.Inspect(lit, visit)
+			}
 			if isBuiltin(v.info, n, "delete") && isMap(v.info.TypeOf(n.Args[0])) {
 				eff.sites = append(eff.sites, site{mapType: v.info.TypeOf(n.Args[0]), root: v.localVar(n.Args[0])})
 			}

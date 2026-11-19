@@ -56,8 +56,17 @@ type fnVerifier struct {
 	// bitOrigins holds, by the term, how the result of a bitwise operator
 	// was made.
 	bitOrigins map[string]bitOrigin
-	// looped holds the defer statements that lie inside a loop.
+	// looped holds the defer statements that lie inside a loop of their
+	// own frame, the function or a literal.
 	looped map[*ast.DeferStmt]bool
+	// boundLits holds the variables bound to a literal used in place, lit the
+	// literal whose body is being executed, inlining the literals being
+	// executed, and sites the calls through which they were reached; see
+	// literals.go.
+	boundLits map[*types.Var]*ast.FuncLit
+	lit       *litFrame
+	inlining  map[*ast.FuncLit]bool
+	sites     []inlineSite
 	// boxed holds the variables of the function that live in memory because
 	// their address is taken. Such a variable holds a pointer to the struct
 	// that is its value.
@@ -131,7 +140,7 @@ func (pv *pkgVerifier) run(fn *funcInfo, task func(v *fnVerifier)) {
 	v := &fnVerifier{
 		pkgVerifier: pv, fn: fn, entry: map[*types.Var]value{}, names: map[string]int{},
 		reached: map[*funcInfo]bool{}, bitTerms: map[string]*logic.Term{}, lowZeros: map[string]uint{}, bitOrigins: map[string]bitOrigin{}, forgotten: map[string]forgottenPart{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{},
-		backgroundSeen: map[string]bool{}, targetSeen: map[string]bool{},
+		backgroundSeen: map[string]bool{}, targetSeen: map[string]bool{}, inlining: map[*ast.FuncLit]bool{},
 	}
 	defer func() {
 		switch r := recover().(type) {
@@ -307,7 +316,7 @@ func (v *fnVerifier) bind(st *state, variable *types.Var, val value) {
 func (v *fnVerifier) current(st *state, variable *types.Var) value {
 	val := st.vals[variable]
 	if val != nil && v.boxed[variable] {
-		return v.pointed(st, variable.Type(), val)
+		return v.pointedIn(st, st.mem, variable.Type(), val)
 	}
 	return val
 }
@@ -337,20 +346,33 @@ func (v *fnVerifier) verify() {
 		}
 		return true
 	})
+	// A defer statement puts a call off until its own frame returns, the
+	// function or the literal it is written in, so only a loop of that
+	// frame repeats it.
 	v.looped = map[*ast.DeferStmt]bool{}
-	ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
-		switch n.(type) {
-		case *ast.ForStmt, *ast.RangeStmt:
-			ast.Inspect(n, func(inner ast.Node) bool {
-				if deferred, ok := inner.(*ast.DeferStmt); ok {
-					v.looped[deferred] = true
+	var scan func(root ast.Node, inLoop bool)
+	scan = func(root ast.Node, inLoop bool) {
+		ast.Inspect(root, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.FuncLit:
+				if n != root {
+					scan(n.Body, false)
+					return false
 				}
-				return true
-			})
-		}
-		return true
-	})
+			case *ast.ForStmt, *ast.RangeStmt:
+				if n != root && !inLoop {
+					scan(n, true)
+					return false
+				}
+			case *ast.DeferStmt:
+				v.looped[n] = inLoop
+			}
+			return true
+		})
+	}
+	scan(fn.decl.Body, false)
 	v.boxed = v.findBoxed(fn.decl.Body)
+	v.classifyLiterals()
 	st := v.enter()
 	for _, variable := range slices.Concat(fn.params, fn.results) {
 		if v.boxed[variable] && st.vals[variable] != nil {
@@ -370,11 +392,7 @@ func (v *fnVerifier) verify() {
 	}
 	body := fn.decl.Body
 	v.seq(body.List, body.Lbrace, body.Rbrace, st, ctrl{}, func(end *state) {
-		results := make([]value, len(fn.results))
-		for i, result := range fn.results {
-			results[i] = v.current(end, result)
-		}
-		v.atReturn(end, results, body.Rbrace)
+		v.returned(end, nil, body.Rbrace)
 	})
 	v.tieFailures()
 	for i, t := range v.frame {

@@ -188,20 +188,30 @@ func (v *fnVerifier) table(sink *state, mem memory, key string, sort logic.Sort,
 	if sink == nil {
 		return current
 	}
-	for at := current; ; {
+	// A region is a chain of writes on a forgotten region, or, after a call
+	// of a function literal that ended in several ways, a choice between
+	// such chains; every forgotten region on the way is looked at. What a
+	// layer keeps is true whichever way was taken.
+	for pending := []*logic.Term{current}; len(pending) > 0; {
+		at := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
 		for at.Op == logic.OpStore {
 			at = at.Args[0]
 		}
+		if at.Op == logic.OpIte {
+			pending = append(pending, at.Args[2], at.Args[1])
+			continue
+		}
 		known := v.layers[at.Name]
 		if known == nil {
-			break
+			continue
 		}
 		note := at.Name + "|" + ref.String()
 		if !sink.noted[note] {
 			sink.noted[note] = true
 			sink.assume(v.unchanged(at, known, ref))
 		}
-		at = known.prev
+		pending = append(pending, known.prev)
 	}
 	return current
 }
