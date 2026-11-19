@@ -14,12 +14,28 @@ func step(a []int, i int) (result bool) {
 // ConditionMutation runs step three times, so a[0] ends at 3.
 //
 // @Requires |a| > 0 And a[0] = 0
+// @Modifies a
 // @Ensures a'[0] = 1
 func ConditionMutation(a []int) {
 	i := 0
-	// @Invariant 0 <= i <= 2
+	// @Invariant 0 <= i <= 2 And a[0] = i
 	// @Variant 2-i
-	for step(a, i) { // want `vego: cannot verify ConditionMutation: step may modify a, and a call that may modify memory is not supported yet in the condition of a for loop`
+	for step(a, i) {
+		i++
+	}
+} // want `vego: postcondition may not hold: a'\[0\] = 1`
+
+// ConditionCounts says what ConditionMutation does: the condition runs once
+// more than the body.
+//
+// @Requires |a| > 0 And a[0] = 0
+// @Modifies a
+// @Ensures a'[0] = 3
+func ConditionCounts(a []int) {
+	i := 0
+	// @Invariant 0 <= i <= 2 And a[0] = i
+	// @Variant 2-i
+	for step(a, i) {
 		i++
 	}
 }
@@ -34,12 +50,13 @@ func again(a []int) (result bool) {
 
 // Forever never terminates: the condition undoes what the body does.
 //
-// @Requires |a| = 1 And a[0] >= 0
+// @Requires |a| = 1 And 0 <= a[0] < 1000
+// @Modifies a
 // @Ensures False
 func Forever(a []int) {
-	// @Invariant a[0] >= 0
+	// @Invariant 0 <= a[0] < 1000
 	// @Variant a[0]
-	for again(a) { // want `vego: precondition of again may not hold: a\[0\] < 1000` `vego: cannot verify Forever: again may modify a, and a call that may modify memory is not supported yet in the condition of a for loop`
+	for again(a) { // want `vego: loop variant may not decrease: a\[0\]`
 		a[0]--
 	}
 }

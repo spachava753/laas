@@ -362,6 +362,47 @@ A common way to find an invariant is to take the postcondition and replace the u
 
 `break`, `continue`, and `return` work inside loops. A `return` inside a loop must establish the postcondition using only the invariant and the conditions on the path to the `return`.
 
+### A condition that modifies memory
+
+The condition of a `for` loop can call a function that modifies memory, as an iterator does:
+
+```go
+type Iter struct {
+	i, n int
+}
+
+// @Requires it != nil And 0 <= it.i <= it.n
+// @Modifies it.i
+// @Ensures it.i < it.n -> it.i' = it.i + 1 And result
+// @Ensures it.i = it.n -> it.i' = it.i And ~result
+func (it *Iter) Next() (result bool) {
+	if it.i < it.n {
+		it.i++
+		return true
+	}
+	return false
+}
+
+// @Requires it != nil And it.i = 0 And 0 <= it.n < 1000
+// @Modifies it.i
+// @Ensures result = it.n And it.i' = it.n
+func Count(it *Iter) (result int) {
+	count := 0
+	// @Invariant 0 <= it.i <= it.n And count = it.i
+	// @Variant it.n - it.i
+	for it.Next() {
+		count++
+	}
+	return count
+}
+```
+
+The invariant must be true each time the loop is about to test its condition, before the condition runs. The condition runs once more than the body: the last time, it returns false and the loop ends. After the loop, `vego` knows that the invariant held of memory as it was before that last test. What the condition wrote then is known only from the `Ensures` clauses of the call. Here `Next` returned false, so `it.i` equals `it.n`.
+
+The `Variant` is also measured before the condition runs, so it must decrease over the condition and the body together. The loop forgets what its condition writes, as it forgets what its body writes, and the function must list that memory in `Modifies`.
+
+### Messages about invariants
+
 There are two messages about invariants:
 
 - `loop invariant may not hold on entry` means the invariant was not proved before the first iteration. Usually it is false at that point. Sometimes the prover needs help.
@@ -779,7 +820,7 @@ func (s *Stack) Pop() (result int) {
 }
 ```
 
-It can be an operand, an argument of another call, the condition of an `if`, the tag of a `switch`, or a `case` expression:
+It can be an operand, an argument of another call, the condition of an `if` or a `for` loop, the tag of a `switch`, or a `case` expression:
 
 ```go
 // @Requires s != nil And s.n > 1
@@ -817,7 +858,7 @@ func PopIfAny(s *Stack) (result bool) {
 
 The precondition of `Pop` only has to hold where `Pop` runs, here when `s.n > 0`.
 
-The condition of a `for` loop is not supported yet. A call there is reported as `cannot verify`. Call it in a statement of its own and use the result.
+A call in the condition of a `for` loop is described in [A condition that modifies memory](#a-condition-that-modifies-memory).
 
 ### Reads that Go may make before or after a call
 
@@ -1836,7 +1877,6 @@ A function that uses any of the following is reported as `cannot verify`:
 - package-level variables, except error variables that are never assigned, of this package or another;
 - calls to variadic functions other than `fmt.Errorf`;
 - `append(s, t...)` and `copy`;
-- a modifying call in the condition of a `for` loop (see [Where a modifying call can appear](#where-a-modifying-call-can-appear));
 - a call in the target of an assignment whose right-hand side is an `append` that may write into the array of its slice, unless the call modifies nothing and refers to no memory (see [Reads that Go may make before or after a call](#reads-that-go-may-make-before-or-after-a-call));
 - comparing structs with `==`;
 - comparing two errors with `==` when neither is `nil`, an error made by `errors.New` or `fmt.Errorf`, an error that a trusted contract vouches for, or an error variable that holds one or holds a pointer, integer, string, or boolean, or an array or struct of these (see [Comparing errors](#comparing-errors));

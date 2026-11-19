@@ -895,3 +895,85 @@ func putB(m map[int]int) (result bool) {
 func PutWhenAsked(m map[int]int, skip bool) (result bool) {
 	return skip || putB(m)
 }
+
+type Iter struct {
+	i int
+	n int
+}
+
+// @Requires it != nil And 0 <= it.i <= it.n
+// @Modifies it.i
+// @Ensures it.i < it.n -> it.i' = it.i + 1 And result
+// @Ensures it.i = it.n -> it.i' = it.i And ~result
+func (it *Iter) Next() (result bool) {
+	if it.i < it.n {
+		it.i++
+		return true
+	}
+	return false
+}
+
+// Count advances the iterator in the condition of the loop. The invariant
+// holds where the condition is about to be evaluated.
+//
+// @Requires it != nil And it.i = 0 And 0 <= it.n < 1000
+// @Modifies it.i
+// @Ensures result = it.n And it.i' = it.n
+func Count(it *Iter) (result int) {
+	count := 0
+	// @Invariant 0 <= it.i <= it.n And count = it.i
+	// @Variant it.n - it.i
+	for it.Next() {
+		count++
+	}
+	return count
+}
+
+// CountUnlisted advances the iterator without listing it.
+//
+// @Requires it != nil And it.i = 0 And 0 <= it.n < 1000
+func CountUnlisted(it *Iter) {
+	// @Invariant 0 <= it.i <= it.n
+	// @Variant it.n - it.i
+	for it.Next() { // want `vego: Next may modify`
+	}
+}
+
+// CondWrites calls bumpN in the condition, which runs once more than the
+// body.
+//
+// @Requires it != nil And g != nil And it.i = 0 And 0 <= it.n < 100 And 0 <= g.n < 100
+// @Modifies it.i, g.n
+// @Ensures g.n' = g.n + it.n + 1
+func CondWrites(it *Iter, g *Gauge) {
+	// @Invariant 0 <= it.i <= it.n And g.n = old(g.n) + it.i
+	// @Variant it.n - it.i
+	for bumpN(g) == 0 && it.Next() {
+	}
+}
+
+// CondWritesOnce claims that the condition ran once, which would follow if
+// the loop did not forget what the condition writes.
+//
+// @Requires it != nil And g != nil And it.i = 0 And 0 <= it.n < 100 And 0 <= g.n < 100
+// @Modifies it.i, g.n
+// @Ensures g.n' = g.n + 1
+func CondWritesOnce(it *Iter, g *Gauge) {
+	// @Invariant 0 <= it.i <= it.n And g.n = old(g.n) + it.i
+	// @Variant it.n - it.i
+	for bumpN(g) == 0 && it.Next() {
+	}
+} // want `vego: postcondition may not hold: g.n' = g.n \+ 1`
+
+// CondForgets knows nothing after the loop about what the condition wrote
+// but what the invariant says.
+//
+// @Requires it != nil And g != nil And it.i = 0 And 0 <= it.n < 100 And 0 <= g.n < 100
+// @Modifies it.i, g.n
+// @Ensures g.n' >= g.n
+func CondForgets(it *Iter, g *Gauge) {
+	// @Invariant 0 <= it.i <= it.n And g.n < 1000
+	// @Variant it.n - it.i
+	for bumpN(g) == 0 && it.Next() { // want `vego: loop invariant may not be preserved: g.n < 1000`
+	}
+} // want `vego: postcondition may not hold: g.n' >= g.n`

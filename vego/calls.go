@@ -319,12 +319,6 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	}
 	v.checkRecursion(fn, pre, st, guard, call)
 	written := v.targets(fn, args, st, before)
-	if u := v.unit; len(written) > 0 && u != nil {
-		if u.refuse != "" {
-			v.unsupported(call.Pos(), fmt.Sprintf(
-				"%s may modify %s, and a call that may modify memory is not supported yet in %s", name, written[0].text, u.refuse))
-		}
-	}
 	for _, t := range written {
 		what := "what it calls " + t.text
 		if t.param != nil {

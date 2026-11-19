@@ -654,6 +654,40 @@ func PopIfAny(s *Stack) (result bool) {
 	return s.n > 0 && s.Pop() >= 0
 }
 
+// Iter counts up to n.
+type Iter struct {
+	i, n int
+}
+
+// Next advances the iterator if it can.
+//
+// @Requires it != nil And 0 <= it.i <= it.n
+// @Modifies it.i
+// @Ensures it.i < it.n -> it.i' = it.i + 1 And result
+// @Ensures it.i = it.n -> it.i' = it.i And ~result
+func (it *Iter) Next() (result bool) {
+	if it.i < it.n {
+		it.i++
+		return true
+	}
+	return false
+}
+
+// Count advances the iterator in the condition of its loop.
+//
+// @Requires it != nil And it.i = 0 And 0 <= it.n < 1000
+// @Modifies it.i
+// @Ensures result = it.n And it.i' = it.n
+func Count(it *Iter) (result int) {
+	count := 0
+	// @Invariant 0 <= it.i <= it.n And count = it.i
+	// @Variant it.n - it.i
+	for it.Next() {
+		count++
+	}
+	return count
+}
+
 // PopAndCount reads s.n beside a call that changes it.
 //
 // @Requires s != nil And 0 < s.n < 1000

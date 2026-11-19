@@ -370,6 +370,16 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 	for _, taken := range st.chosen {
 		summary.path = append(summary.path, taken.cond)
 	}
+	// The variant is measured where the invariants hold, before the
+	// condition is evaluated, so that it must decrease across the condition
+	// and the body together: a condition that writes memory could otherwise
+	// undo what the body did.
+	var before *logic.Term
+	if spec.variant != nil {
+		before = v.intTerm(spec.variant, v.bodyEnv(head, at))
+	}
+	// The condition is evaluated once more than the body runs: the loop is
+	// left in the state after that last evaluation.
 	var cond *logic.Term
 	if shape.limit != nil {
 		cond = logic.Lt(counter, shape.limit)
@@ -382,9 +392,7 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 		k(exit)
 	}
 	head.decide(cond)
-	var before *logic.Term
-	if spec.variant != nil {
-		before = v.intTerm(spec.variant, v.bodyEnv(head, at))
+	if before != nil {
 		v.check(head, nil, logic.Le(logic.IntLit(0), before), shape.pos,
 			"loop variant may be negative: %s", spec.variant.text)
 	}
@@ -456,7 +464,8 @@ func (v *fnVerifier) forStmt(s *ast.ForStmt, spec *loopSpec, renewed []*types.Va
 		v.report(s.Pos(), "loop needs a // @Variant annotation to prove that it terminates")
 	}
 	shape := loopShape{pos: s.Pos(), body: s.Body, post: s.Post, spec: spec, always: s.Cond == nil, renewed: renewed}
-	shape.effects = v.effects(s.Body, s.Post)
+	// What the condition writes is forgotten at the head too.
+	shape.effects = v.effects(s.Cond, s.Body, s.Post)
 	for _, variable := range renewed {
 		shape.effects.whole[variable] = true
 	}
@@ -465,10 +474,7 @@ func (v *fnVerifier) forStmt(s *ast.ForStmt, spec *loopSpec, renewed []*types.Va
 			return logic.True()
 		}
 		var cond *logic.Term
-		v.evaluate(st, func() {
-			v.unit.refuse = "the condition of a for loop"
-			cond = v.expr(s.Cond, st, nil)
-		})
+		v.evaluate(st, func() { cond = v.expr(s.Cond, st, nil) })
 		return cond
 	}
 	v.loop(shape, st, k)

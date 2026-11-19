@@ -63,9 +63,6 @@ type unit struct {
 	// and quiet the reads of memory that are not reads Go makes, such as
 	// what a contract says; see table.
 	recording, quiet int
-	// refuse is set where a call that may modify memory is not supported
-	// yet, and says where that is.
-	refuse string
 }
 
 // ceiling is an event that reads come before. version is the latest
