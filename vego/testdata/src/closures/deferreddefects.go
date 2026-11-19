@@ -136,3 +136,14 @@ func FormatsKnown(fail bool) (err error) {
 	}
 	return nil
 }
+
+// OverflowsInLiteral increments without a bound in a literal deferred
+// inside another literal, which runs where that literal ends.
+//
+// @Ensures True
+func OverflowsInLiteral(x int) (result int) {
+	func() {
+		defer func() { x++ }() // want `vego: addition may overflow int, in the function literal called at deferreddefects.go:145:2, in the function literal deferred at deferreddefects.go:146:9 and run at the end of the function literal at deferreddefects.go:147:2`
+	}()
+	return x
+}

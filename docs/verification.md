@@ -501,7 +501,13 @@ func CheckEach() {
 vego: assertion may not hold: n >= 0, in the function literal called at literals.go:23:2
 ```
 
-The assertion holds at the first call. At the second it is not proved. For a deferred literal, the message names the `defer` statement and the `return` at which the literal runs.
+The assertion holds at the first call. At the second it is not proved. For a deferred literal, the message ends in one of these ways, depending on whether the literal runs at a `return`, at the end of the function, or at the end of the function literal it is deferred in:
+
+```text
+, in the function literal deferred at f.go:19:8 and run at the return at f.go:20:2
+, in the function literal deferred at f.go:19:8 and run at the end of the function at f.go:20:1
+, in the function literal deferred at f.go:19:8 and run at the end of the function literal at f.go:20:2
+```
 
 Inside a literal, `old(x)` is the value that the parameter `x` of the function had when the function was called. If the literal has a parameter of the same name, `old(x)` is an error. Rename the parameter of the literal.
 
@@ -569,7 +575,7 @@ vego: cannot verify Apply: a function literal is supported only where it is call
 or as the value that declares a new variable which is only ever called; this one is used as a value
 ```
 
-Write the loop in the verified function and call the literal there, or leave the code that passes the literal unverified. A variable that holds a literal and is used other than by calling it is reported in the same way. A variadic literal cannot be verified, and neither can a literal that takes or returns a type that `vego` does not support.
+Write the loop in the verified function and call the literal there, or leave the code that passes the literal unverified. A variable that holds a literal and is used other than by calling it is reported as `cannot verify` too, with the message `f holds a function literal and is used here other than by calling it`. A variadic literal cannot be verified, and neither can a literal that takes or returns a type that `vego` does not support.
 
 ## Predicates
 
@@ -992,7 +998,7 @@ not fix the order; split the statement so that the order is the one you mean
 - a variable whose address is taken;
 - a variable that a function literal assigns (see [Variables that a literal assigns](#variables-that-a-literal-assigns)).
 
-For each one that Go may make before or after a call that may change it, `vego` must prove that the read gives the same value either way. It decides this from the `Modifies` and `Ensures` clauses of the call. A local variable whose address is not taken can be changed by a call only if it is a call of a function literal that assigns the variable. Reading any other such variable never conflicts.
+For each one that Go may make before or after a call that may change it, `vego` must prove that the read gives the same value either way. It decides this from the `Modifies` and `Ensures` clauses of the call. A local variable whose address is not taken can be changed only by a call of a function literal, and only if some function literal assigns it. Reading any other such variable never conflicts.
 
 Write the order you mean in separate statements:
 
@@ -2041,7 +2047,7 @@ This table lists the most common messages.
 | `x is passed to F, which is trusted, and is an error whose origin is not known` (or `a value of type T, which can hold an error, an interface, or a function`) | The trusted function `F` could call code that `x` carries. | See [Arguments that carry code](#arguments-that-carry-code). |
 | `the trusted contract of F cannot be true of this call` | The contract contradicts what is known at the call. | The entry is wrong, or it needs a `requires` clause. |
 | `the trusted contract ... cannot be used` | The entry in the trust file is invalid. The message says why. | Fix the entry. Check the parameter names. |
-| `..., in the function literal called at f.go:n:c` | The problem is in the body of a function literal, at the call named at the end. A deferred literal names the `defer` statement and the `return` it runs at. | Fix the body, or what holds at that call. See [Function literals](#function-literals). |
+| `..., in the function literal called at f.go:n:c`, or `..., in the function literal deferred at f.go:n:c and run at the return at f.go:n:c` (or `at the end of the function at`, or `at the end of the function literal at`) | The problem is in the body of a function literal, at the call named at the end. For a deferred literal, the message names the `defer` statement and where the literal runs. | Fix the body, or what holds at that call. See [Function literals](#function-literals). |
 | `cannot verify F: a function literal is supported only where it is called or deferred, or as the value that declares a new variable which is only ever called` | The literal is passed, returned, stored, or compared. | Call the literal where it is written, or leave that code unverified. |
 | `cannot verify F: f holds a function literal and is used here other than by calling it` | The variable that holds the literal is passed, compared, or assigned again. | Only call the variable. |
 | `cannot verify F: recover is not supported` | `recover` returns an interface. | Call `recover` in a function that is not verified. |
