@@ -27,11 +27,12 @@ trusted:
 
   sort.Search:
     reason: >-
-      Documented to call f(i) only for i in the range [0, n). Its result is
-      documented only for an f that is false and then true over [0, n), which
-      this entry cannot state, so it says nothing of it. For a negative n the
-      documentation says that it returns n, and it returns 0, so n must not be
-      negative.
+      Documented to call f(i) only for i in the range [0, n), and, for an f
+      that is false and then true over [0, n), to return the first i at which
+      f(i) is true, or n if there is none. For any other f the documentation
+      says nothing of the result, and neither does this entry. For a negative
+      n the documentation says that it returns n, and it returns 0, so n must
+      not be negative.
     requires:
       - "n >= 0"
     runs: [f]
@@ -39,14 +40,18 @@ trusted:
       f(i):
         requires: ["0 <= i < n"]
     modifies: []
+    ensures:
+      - "(Forall i in [0, n) : Forall j in [i, n) : f(i) -> f(j)) -> (0 <= result And result <= n And (Forall i in [0, result) : ~f(i)) And (result < n -> f(result)))"
 
   sort.Find:
     reason: >-
-      Documented to call cmp(i) only for i in the range [0, n). Its result is
-      documented only for a cmp that is positive, then zero, then negative over
-      [0, n), which this entry cannot state, so it says nothing of it. For a
-      negative n the documentation says that it returns n, and it returns 0, so
-      n must not be negative.
+      Documented to call cmp(i) only for i in the range [0, n), and, for a cmp
+      that is positive, then zero, then negative over [0, n), to return the
+      first i at which cmp(i) <= 0, or n if there is none, with found true when
+      i < n and cmp(i) is 0. For any other cmp the documentation says nothing
+      of the result, and neither does this entry. For a negative n the
+      documentation says that it returns n, and it returns 0, so n must not be
+      negative.
     requires:
       - "n >= 0"
     runs: [cmp]
@@ -54,3 +59,5 @@ trusted:
       cmp(k):
         requires: ["0 <= k < n"]
     modifies: []
+    ensures:
+      - "(Forall a in [0, n) : Forall b in [a, n) : (cmp(a) <= 0 -> cmp(b) <= 0) And (cmp(a) < 0 -> cmp(b) < 0)) -> (0 <= i And i <= n And (Forall a in [0, i) : cmp(a) > 0) And (i < n -> cmp(i) <= 0) And (found <-> (i < n And cmp(i) = 0)))"

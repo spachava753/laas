@@ -42,6 +42,13 @@ type Env interface {
 	Qualified(path, name string, steps []Step, when When) (*Term, error)
 }
 
+// Applier is an Env that gives a meaning to some applications, as f(i) for
+// a function that a trusted contract names. Apply reports whether it knows
+// the name; a name it does not know is a predicate.
+type Applier interface {
+	Apply(name string, args []*Term) (t *Term, known bool, err error)
+}
+
 // Path is a path together with the state it is read in.
 type Path struct {
 	Root  string
@@ -339,6 +346,19 @@ func (s *scope) call(n *Node) *Term {
 			panic(resolveError{err})
 		}
 		return t
+	}
+	if applier, ok := s.env.(Applier); ok && s.env != nil {
+		args := make([]*Term, len(n.Kids))
+		for i, kid := range n.Kids {
+			args[i] = s.term(kid)
+		}
+		t, known, err := applier.Apply(n.Name, args)
+		if err != nil {
+			panic(resolveError{err})
+		}
+		if known {
+			return t
+		}
 	}
 	def, ok := s.r.Preds[s.r.Prefix+n.Name]
 	if !ok {

@@ -67,8 +67,12 @@ type trustCall struct {
 	name     string
 	params   []string
 	requires []trustFormula
-	line     int
-	col      int
+	// deterministic says that the function relies on what it is handed
+	// returning the same result whenever it is called with the same
+	// arguments.
+	deterministic bool
+	line          int
+	col           int
 }
 
 // callShape reads the key of an entry under calls, as in f(i) or less(i, j).
@@ -283,8 +287,13 @@ func (f *trustFile) addCalls(entry *trustEntry, node *yaml.Node, formulas func(s
 			switch field.Value {
 			case "requires":
 				call.requires = formulas("requires of "+key.Value+" in calls", value)
+			case "deterministic":
+				if value.Kind != yaml.ScalarNode || (value.Value != "true" && value.Value != "false") {
+					f.problem(value.Line, "deterministic under %s in the calls of %s must be true or false", key.Value, entry.key)
+				}
+				call.deterministic = value.Value == "true"
 			default:
-				f.problem(field.Line, "unknown field %q under %s in the calls of %s; expected requires", field.Value, key.Value, entry.key)
+				f.problem(field.Line, "unknown field %q under %s in the calls of %s; expected requires or deterministic", field.Value, key.Value, entry.key)
 			}
 		}
 		entry.calls = append(entry.calls, call)
@@ -684,7 +693,16 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 				for i, p := range cb.params {
 					given[i] = v.unknown(p.Name(), p.Type(), entry)
 				}
-				v.callRequires(cb, given, v.entry, entry.clone())
+				at := entry.clone()
+				facts := v.callRequires(cb, given, v.entry, at)
+				// What f returns for an argument is stated for every argument
+				// its requires allow, read in the state at the call of the
+				// trusted function, so they may not read memory, which changes
+				// between the calls of f.
+				if cb.applied && slices.ContainsFunc(append(facts, at.hyps[len(entry.hyps):]...), mentionsMemory) {
+					fn.defect("its ensures applies %s, and its calls requires for %s read memory; a requires of a function that is applied "+
+						"may speak only of values", cb.param.Name(), cb.param.Name())
+				}
 			}
 		}
 		_, outcome, _ := v.contractInstance(entry)

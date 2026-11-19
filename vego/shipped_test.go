@@ -33,8 +33,64 @@ type sample struct {
 	after   []any
 	results []any
 	// calls holds, for each function parameter with a contract under calls,
-	// the arguments of every call the function made of it.
-	calls map[string][][]any
+	// the arguments of every call the function made of it, and answers, for
+	// one that the contract applies, what it returns for each argument.
+	calls   map[string][][]any
+	answers map[string]func(int64) int64
+}
+
+// table returns a function that answers what a random table says, the
+// same for the same argument, and the table as an answer to an
+// application. Half the time the table is false and then true, or
+// positive, then zero, then negative.
+func table[R int | bool](rng *rand.Rand, calls map[string][][]any, name string) (func(int) R, func(int64) int64) {
+	values := make([]int64, 12)
+	monotone := rng.Intn(2) == 0
+	for i := range values {
+		values[i] = int64(rng.Intn(3) - 1)
+	}
+	if monotone {
+		slices.Sort(values)
+		slices.Reverse(values)
+	}
+	answer := func(i int64) int64 {
+		if i < 0 || i >= int64(len(values)) {
+			return 0
+		}
+		var zero R
+		if _, isBool := any(zero).(bool); isBool && monotone {
+			// False, then true: true where the sorted value is not positive.
+			if values[i] <= 0 {
+				return 1
+			}
+			return 0
+		}
+		if _, isBool := any(zero).(bool); isBool {
+			return values[i] & 1
+		}
+		return values[i]
+	}
+	return func(i int) R {
+		calls[name] = append(calls[name], []any{i})
+		var result R
+		switch r := any(&result).(type) {
+		case *bool:
+			*r = answer(int64(i)) != 0
+		case *int:
+			*r = int(answer(int64(i)))
+		}
+		return result
+	}, answer
+}
+
+// fixedRunes returns a predicate on code points that answers what a random
+// table says, the same for the same code point, as FieldsFunc assumes.
+func fixedRunes(rng *rand.Rand, calls map[string][][]any) func(rune) bool {
+	seed := rng.Int63()
+	return func(r rune) bool {
+		calls["f"] = append(calls["f"], []any{r})
+		return rand.New(rand.NewSource(seed+int64(r))).Intn(2) == 0
+	}
 }
 
 // recorder returns a function that answers at random and records the
@@ -183,19 +239,25 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 		return sample{before: []any{name}, results: []any{os.Remove(name)}}
 	},
 	"sort.Search": func(rng *rand.Rand) sample {
-		n, calls := rng.Intn(9)-2, map[string][][]any{}
-		threshold := rng.Intn(9)
-		f := recorder(rng, calls, "f", func(rng *rand.Rand, i int) bool {
-			// Half the time f is false and then true, as Search asks.
-			return rng.Intn(2) == 0 && i >= threshold || rng.Intn(2) == 0
-		})
-		return sample{before: []any{n, f}, results: []any{sort.Search(n, f)}, calls: calls}
+		n, calls := rng.Intn(14)-2, map[string][][]any{}
+		f, answers := table[bool](rng, calls, "f")
+		return sample{before: []any{n, f}, results: []any{sort.Search(n, f)}, calls: calls, answers: map[string]func(int64) int64{"f": answers}}
 	},
 	"sort.Find": func(rng *rand.Rand) sample {
-		n, calls := rng.Intn(9)-2, map[string][][]any{}
-		cmp := recorder(rng, calls, "cmp", func(rng *rand.Rand, i int) int { return rng.Intn(3) - 1 })
+		n, calls := rng.Intn(14)-2, map[string][][]any{}
+		cmp, answers := table[int](rng, calls, "cmp")
 		i, found := sort.Find(n, cmp)
-		return sample{before: []any{n, cmp}, results: []any{i, found}, calls: calls}
+		return sample{before: []any{n, cmp}, results: []any{i, found}, calls: calls, answers: map[string]func(int64) int64{"cmp": answers}}
+	},
+	"strings.FieldsFunc": func(rng *rand.Rand) sample {
+		s, calls := randomText(rng), map[string][][]any{}
+		f := fixedRunes(rng, calls)
+		return sample{before: []any{s, f}, results: []any{strings.FieldsFunc(s, f)}, calls: calls}
+	},
+	"bytes.FieldsFunc": func(rng *rand.Rand) sample {
+		s, calls := []byte(randomText(rng)), map[string][][]any{}
+		f := fixedRunes(rng, calls)
+		return sample{before: []any{slices.Clone(s), f}, results: []any{bytes.FieldsFunc(s, f)}, calls: calls}
 	},
 	"strings.IndexFunc":     runeHarness(strings.IndexFunc),
 	"strings.LastIndexFunc": runeHarness(strings.LastIndexFunc),
@@ -317,6 +379,11 @@ func (g *grounder) groundTerm(value any) *logic.Term {
 			seq = logic.Push(seq, logic.IntLit(int64(element)))
 		}
 		return seq
+	case []string, [][]byte:
+		// No shipped contract reads the fields of FieldsFunc yet; a
+		// formula that did would fail on this constant, which the
+		// evaluator cannot read.
+		return logic.Const("unreadable", logic.IntSeq)
 	case error:
 		if value != nil {
 			g.errs = append(g.errs, value)
@@ -335,6 +402,9 @@ type evaluator struct {
 	bound    int64
 	bindings map[string]*big.Int
 	errors   *grounder
+	// callbacks answers, by the name of the sequence that stands for a
+	// function a contract applies, what the function returns.
+	callbacks map[string]func(int64) int64
 }
 
 func (e *evaluator) number(t *logic.Term) *big.Int {
@@ -353,6 +423,9 @@ func (e *evaluator) number(t *logic.Term) *big.Int {
 	case logic.OpLen:
 		return big.NewInt(int64(len(e.sequence(t.Args[0]))))
 	case logic.OpSelect:
+		if answer, ok := e.callbacks[t.Args[0].Name]; ok && t.Args[0].Op == logic.OpConst {
+			return big.NewInt(answer(x(1).Int64()))
+		}
 		elements, index := e.sequence(t.Args[0]), x(1)
 		if index.Sign() < 0 || index.Cmp(big.NewInt(int64(len(elements)))) >= 0 {
 			// Outside the sequence the logic leaves the value open; any
@@ -402,6 +475,8 @@ func (e *evaluator) holds(t *logic.Term) bool {
 		return slices.ContainsFunc(t.Args, e.holds)
 	case logic.OpIsNil:
 		return e.errors.error(t.Args[0]) == nil
+	case logic.OpSelect:
+		return e.number(t).Sign() != 0
 	case logic.OpForall, logic.OpExists:
 		for index := int64(-2); index <= e.bound; index++ {
 			e.bindings[t.Args[0].Name] = big.NewInt(index)
@@ -497,7 +572,18 @@ func TestShippedContracts(t *testing.T) {
 						given: map[*types.Var]*logic.Term{}, givenPost: map[*types.Var]*logic.Term{},
 					}
 					g := &grounder{}
-					eval := &evaluator{bindings: map[string]*big.Int{}, errors: g}
+					eval := &evaluator{bindings: map[string]*big.Int{}, errors: g, callbacks: map[string]func(int64) int64{}}
+					// What a function the contract applies returns is what
+					// the harness answers.
+					env.applied = map[*types.Var]*logic.Term{}
+					for _, param := range fn.params {
+						if cb := fn.calls[param]; cb != nil && cb.applied {
+							sort, _ := sortOf(cb.sig.Results().At(0).Type())
+							name := "callback " + param.Name()
+							env.applied[param] = logic.Const(name, logic.SeqOf(sort))
+							eval.callbacks[name] = call.answers[param.Name()]
+						}
+					}
 					for i, param := range fn.params {
 						// A function is one reference, which no formula of an
 						// entry reads.
@@ -514,6 +600,10 @@ func TestShippedContracts(t *testing.T) {
 						}
 						if list, ok := call.before[i].([]byte); ok {
 							eval.bound = max(eval.bound, int64(len(list))+2)
+						}
+						// A quantifier over [0, n) needs the indices up to n.
+						if number, ok := call.before[i].(int); ok {
+							eval.bound = max(eval.bound, int64(number)+2)
 						}
 					}
 					satisfied := true

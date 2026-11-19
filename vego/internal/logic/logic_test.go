@@ -255,3 +255,46 @@ func TestParseTargets(t *testing.T) {
 		})
 	}
 }
+
+// applyingEnv gives f(x) the meaning of the element x of a sequence F.
+type applyingEnv struct{ testEnv }
+
+func (e applyingEnv) Apply(name string, args []*Term) (*Term, bool, error) {
+	if name != "f" {
+		return nil, false, nil
+	}
+	if len(args) != 1 || args[0].Sort != Int {
+		return nil, true, fmt.Errorf("f takes one integer")
+	}
+	return Select(Const("F", SeqOf(Bool)), args[0]), true, nil
+}
+
+// TestApply checks that an environment that knows an application gives it
+// its meaning, and that any other name is still a predicate.
+func TestApply(t *testing.T) {
+	env := applyingEnv{testEnv{"n": Const("n", Int)}}
+	r := NewResolver()
+	tests := []struct {
+		formula, want, err string
+	}{
+		{formula: "Forall i in [0, n) : f(i) -> f(i + 1)", want: "Forall"},
+		{formula: "f(n) And ~f(0)", want: "F"},
+		{formula: "f(n, n)", err: "f takes one integer"},
+		{formula: "g(n)", err: "unknown predicate g"},
+	}
+	for _, test := range tests {
+		node, err := ParseFormula(test.formula)
+		if err != nil {
+			t.Fatalf("parse %q: %v", test.formula, err)
+		}
+		got, err := r.Formula(node, env)
+		switch {
+		case test.err != "" && (err == nil || !strings.Contains(err.Error(), test.err)):
+			t.Errorf("%s: got %v, want an error containing %q", test.formula, err, test.err)
+		case test.err == "" && err != nil:
+			t.Errorf("%s: %v", test.formula, err)
+		case test.err == "" && !strings.Contains(got.String(), test.want):
+			t.Errorf("%s resolves to %s, which does not contain %s", test.formula, got, test.want)
+		}
+	}
+}

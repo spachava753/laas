@@ -344,11 +344,18 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		}
 		v.checkWrite(st, guard, t.reach(), call.Pos(), fmt.Sprintf("%s may modify %s", name, what))
 	}
+	// What a call that runs what it is handed is like at its start, before
+	// anything it writes is forgotten.
+	var atCall *state
+	if len(fn.calls) > 0 {
+		atCall = st.clone()
+	}
 	for _, t := range written {
 		v.havoc(st, t, guard)
 	}
+	var applied map[*types.Var]*logic.Term
 	if len(fn.calls) > 0 {
-		v.runHanded(call, fn, args, written, st)
+		applied = v.runHanded(call, fn, args, written, atCall, st, mark)
 	}
 	if u := v.unit; len(written) > 0 && u != nil {
 		u.wrote(st, "the call to "+name)
@@ -365,7 +372,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			results[i] = v.unknown(name, sig.Results().At(i).Type(), st)
 		}
 	}
-	post := &specEnv{v: v, sink: st, fn: fn, args: args, results: results, now: before, post: st.mem, before: existed}
+	post := &specEnv{v: v, sink: st, fn: fn, args: args, results: results, now: before, post: st.mem, before: existed, applied: applied}
 	// What the types guarantee of everything the call took and produced.
 	// The state only holds such facts for the elements that were actually
 	// read, and both the check of a trusted promise below and the proof

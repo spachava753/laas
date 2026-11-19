@@ -43,6 +43,40 @@ type specEnv struct {
 	// pos and denote their values in st.
 	st  *state
 	pos token.Pos
+	// applied holds, for each function parameter of a trusted contract
+	// that its ensures applies, the sequence of what it returns for each
+	// argument; see Apply.
+	applied map[*types.Var]*logic.Term
+}
+
+// Apply resolves f(x) in an ensures of a trusted contract, for a function
+// parameter f with a contract under calls: what f returns for x, as the
+// element x of a sequence that stands for f during the call. Any other
+// name is a predicate.
+func (e *specEnv) Apply(name string, args []*logic.Term) (*logic.Term, bool, error) {
+	if e.fn == nil || e.fn.calls == nil {
+		return nil, false, nil
+	}
+	param := e.fn.paramNames[name]
+	cb := e.fn.calls[param]
+	switch {
+	case cb == nil:
+		return nil, false, nil
+	case !cb.applied:
+		return nil, true, fmt.Errorf("%s cannot be applied here", name)
+	case e.results == nil && e.givenResults == nil:
+		return nil, true, fmt.Errorf("%s(...) can only be used in ensures", name)
+	case len(args) != 1 || args[0].Sort != logic.Int:
+		return nil, true, fmt.Errorf("%s takes one integer", name)
+	}
+	if e.applied == nil {
+		e.applied = map[*types.Var]*logic.Term{}
+	}
+	if e.applied[param] == nil {
+		sort, _ := sortOf(cb.sig.Results().At(0).Type())
+		e.applied[param] = e.v.fresh("returns of "+name, logic.SeqOf(sort))
+	}
+	return logic.Select(e.applied[param], args[0]), true, nil
 }
 
 var errNoValue = errors.New("value of unsupported type")

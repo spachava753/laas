@@ -44,6 +44,12 @@ type callback struct {
 	// type and those of the trusted function.
 	fn       *funcInfo
 	requires []*clause
+	// applied is set when the ensures of the entry speak of what the
+	// function returns, and deterministic when the entry relies on it
+	// returning the same result for the same arguments, which applying it
+	// does too.
+	applied       bool
+	deterministic bool
 }
 
 // callWords are the names that a formula reads as something else when
@@ -151,7 +157,55 @@ func (pv *pkgVerifier) trustedCall(fn *funcInfo, item trustCall) {
 		})
 	}
 	cb.fn.requires = cb.requires
+	// The ensures of the entry, and only those, may apply the function: a
+	// requires is read before the function has been called.
+	// The contract is kept when it has a defect here, so that what applies
+	// it is read as an application and draws a message that says so.
+	for _, c := range fn.requires {
+		if applies(c.node, item.name) {
+			fn.defect("its requires %q applies %s; only its ensures can speak of what %s returns", c.text, item.name, item.name)
+			cb.applied = true
+		}
+	}
+	for _, c := range fn.ensures {
+		cb.applied = cb.applied || applies(c.node, item.name)
+	}
+	if cb.applied && !applicable(sig) {
+		fn.defect("its ensures applies %s, whose type %s does not have one integer parameter and one integer or boolean result, "+
+			"which is all that can be applied yet", item.name, param.Type())
+	}
+	cb.deterministic = item.deterministic || cb.applied
 	fn.calls[param] = cb
+}
+
+// applies reports whether a formula applies a name, as in f(i).
+func applies(n *logic.Node, name string) bool {
+	found := false
+	n.Walk(func(n *logic.Node) {
+		found = found || (n.Kind == logic.NCall && n.Name == name)
+	})
+	return found
+}
+
+// applicable reports whether what a function of the type returns can be
+// stated in a formula: it takes one integer, and returns one integer or
+// boolean.
+func applicable(sig *types.Signature) bool {
+	if sig.Params().Len() != 1 || sig.Results().Len() != 1 {
+		return false
+	}
+	param, _ := sig.Params().At(0).Type().Underlying().(*types.Basic)
+	result, _ := sig.Results().At(0).Type().Underlying().(*types.Basic)
+	return param != nil && param.Info()&types.IsInteger != 0 && result != nil && result.Info()&(types.IsInteger|types.IsBoolean) != 0
+}
+
+// mentionsMemory reports whether a term reads a region of memory as it is
+// on entry.
+func mentionsMemory(t *logic.Term) bool {
+	if t.Op == logic.OpConst && strings.HasPrefix(t.Name, entryRegion) {
+		return true
+	}
+	return slices.ContainsFunc(t.Args, mentionsMemory)
 }
 
 // mentionsOld reports whether a formula uses old.
@@ -266,7 +320,12 @@ func (v *fnVerifier) callHanding(call *ast.CallExpr, fn *funcInfo, st *state, gu
 // after the call. A run is held to everything the caller is held to, since
 // it runs as part of the call, and it may not write what the trusted
 // function may.
-func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types.Var]value, written []target, st *state) {
+//
+// atCall is the state at the call, before anything is forgotten, from which
+// the state of each run is made, and callMark the number of names made
+// before the call. A run that the trusted function relies on to return the
+// same result for the same argument is summarised; see summary.
+func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types.Var]value, written []target, atCall, st *state, callMark int) map[*types.Var]*logic.Term {
 	handed := v.handing
 	v.handing = nil
 	if handed == nil {
@@ -285,18 +344,32 @@ func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types
 		}
 	}
 	name := types.ExprString(call.Fun)
+	var summaries []*logic.Term
+	applied := map[*types.Var]*logic.Term{}
+	runsMade := map[string]bool{}
+	stKnown := len(st.hyps)
 	for _, param := range fn.params {
 		h, cb := handed[param], fn.calls[param]
 		if h == nil {
 			continue
 		}
-		// The trusted function may have written its part of memory before
-		// any run, or between two runs.
-		head := st.clone()
+		// Everything made from here on stands for the state of a run or
+		// for what the run made, apart from the arguments.
+		mark, known := len(v.made), len(atCall.hyps)
+		// The state of a run stands for the state at the call and every
+		// state between two runs: the trusted function may have written its
+		// part of memory before any run, or between two runs, and the runs
+		// what they write. It says nothing of memory at references from the
+		// bound at the call on, so it also stands for a state in which the
+		// trusted function has created and written objects of its own. A
+		// change that states facts about memory not yet allocated breaks
+		// that, and with it the summary of a run.
+		head := atCall.clone()
 		for _, t := range written {
 			v.havoc(head, t, nil)
 		}
 		head = v.forget(head, eff)
+		start := len(head.hyps)
 		given := make([]value, len(cb.params))
 		for i, p := range cb.params {
 			given[i] = v.unknown(p.Name(), p.Type(), head)
@@ -304,15 +377,211 @@ func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types
 		for _, fact := range v.callRequires(cb, given, args, head) {
 			head.assume(fact)
 		}
+		// What the arguments of a run are known to be: their types and the
+		// requires of calls, which for a function the entry applies speak
+		// of values of the call only.
+		premise := slices.Clip(head.hyps[start:])
 		v.forbidden = append(v.forbidden, forbidden{targets: written, by: name})
+		var results []value
+		what := "the function literal"
 		if h.lit != nil {
-			v.inline(h.lit, given, head, nil, v.site(h.lit.Pos(), "in the function literal run by %s at %s", name, v.placeOf(h.lit.Pos())))
+			results = v.inline(h.lit, given, head, nil, v.site(h.lit.Pos(), "in the function literal run by %s at %s", name, v.placeOf(h.lit.Pos())))
 		} else {
-			v.runHandedCall(h, cb, given, head, name)
+			results = v.runHandedCall(h, cb, given, head, name)
+			what = types.ExprString(h.arg)
+			if h.value {
+				what = "the function value " + what
+			}
 		}
 		v.forbidden = v.forbidden[:len(v.forbidden)-1]
+		if !cb.deterministic {
+			continue
+		}
+		// The facts of the run are taken once, and both the proof that the
+		// run returns the same result for the same argument and the summary
+		// are made from them.
+		run := ranOnce{head: head, facts: slices.Clip(head.hyps[known:]), made: slices.Clip(v.made[mark:]),
+			given: given, premise: premise, result: results[0][0]}
+		for name := range run.produced() {
+			runsMade[name] = true
+		}
+		v.checkRunNames(run, callMark)
+		if !v.sameEachRun(run, h.arg.Pos(), what, name) || !cb.applied {
+			continue
+		}
+		sort, _ := sortOf(cb.sig.Results().At(0).Type())
+		applied[param] = v.fresh("returns of "+param.Name(), logic.SeqOf(sort))
+		summaries = append(summaries, v.summary(run, applied[param]))
 	}
 	*st = *v.forget(st, eff)
+	for _, summary := range summaries {
+		st.assume(summary)
+	}
+	// A fact about what a run made, outside the existential of a summary,
+	// would be a fact about one hypothetical run, which another could
+	// contradict.
+	for _, fact := range st.hyps[stKnown:] {
+		if _, mentioned := estranged(fact, runsMade); mentioned {
+			panic("vego: internal error: a fact about what a run of a function handed to a trusted function made reached the state after the call")
+		}
+	}
+	return applied
+}
+
+// checkRunNames panics unless every constant that the facts or the result
+// of a run mention is an argument of the run, was made for the run, or was
+// made before the call: the summary is a statement about the state at the
+// call, and anything else in it would be free where it must be bound.
+func (v *fnVerifier) checkRunNames(run ranOnce, callMark int) {
+	before := map[string]bool{}
+	for _, name := range v.made[:callMark] {
+		before[name] = true
+	}
+	since := map[string]bool{}
+	for _, name := range v.made[callMark:] {
+		since[name] = true
+	}
+	produced := run.produced()
+	allowed := func(name string) bool {
+		return before[name] || produced[name] || !since[name] || slices.ContainsFunc(run.given, func(arg value) bool {
+			return slices.ContainsFunc(arg, func(leaf *logic.Term) bool { return leaf.Name == name })
+		})
+	}
+	seen := map[*logic.Term]bool{}
+	var visit func(t *logic.Term)
+	visit = func(t *logic.Term) {
+		if seen[t] {
+			return
+		}
+		seen[t] = true
+		if t.Op == logic.OpConst && !allowed(t.Name) {
+			panic("vego: internal error: the run of a function handed to a trusted function mentions " + t.Name +
+				", which was made for the call but not for the run")
+		}
+		for _, arg := range t.Args {
+			visit(arg)
+		}
+	}
+	for _, fact := range run.facts {
+		visit(fact)
+	}
+	visit(run.result)
+}
+
+
+// ranOnce is the run of a function handed over that a trusted function
+// relies on to give the same result for the same argument: the state the
+// run ended in, the facts it added to those known at the call, the names
+// made for the state of the run and by the run, the arguments, what was
+// known of them, and the result.
+type ranOnce struct {
+	head    *state
+	facts   []*logic.Term
+	made    []string
+	given   []value
+	premise []*logic.Term
+	result  *logic.Term
+}
+
+// produced returns the names a run made, apart from its arguments: the
+// state it ran in, and what it made.
+func (run ranOnce) produced() map[string]bool {
+	names := map[string]bool{}
+	for _, name := range run.made {
+		names[name] = true
+	}
+	for _, arg := range run.given {
+		for _, leaf := range arg {
+			delete(names, leaf.Name)
+		}
+	}
+	return names
+}
+
+// sameEachRun proves that the result of a run is fixed by its argument:
+// for a second run with the same argument, whose state and whatever it
+// made are named apart, the result is the same. The state of a run stands
+// for every state in which the trusted function may call the function, so
+// this covers runs between writes of the trusted function and of earlier
+// runs. It reports when the proof fails.
+func (v *fnVerifier) sameEachRun(run ranOnce, pos token.Pos, what, by string) bool {
+	names := run.produced()
+	memo := map[*logic.Term]*logic.Term{}
+	rename := func(t *logic.Term) *logic.Term {
+		return renamedApart(t, names, memo)
+	}
+	twice := run.head.clone()
+	for _, fact := range run.facts {
+		twice.assume(rename(fact))
+	}
+	other := rename(run.result)
+	same := v.same(run.result, other)
+	if run.result.Sort == logic.Bool {
+		same = logic.Iff(run.result, other)
+	}
+	if result := v.attempt(twice, nil, same); result != solver.Proved {
+		v.report(pos, "%s run by %s is not proved to return the same result whenever it is called with the same argument, "+
+			"which the trusted contract of %s relies on%s", what, by, by, limitNote(result))
+		return false
+	}
+	return true
+}
+
+// renamedApart returns a term in which every constant of the given names
+// is replaced by one of its own, the same for each name. The names the
+// verifier makes end in a number, so no name with " again" after it is
+// one of them.
+func renamedApart(t *logic.Term, names map[string]bool, memo map[*logic.Term]*logic.Term) *logic.Term {
+	if done, ok := memo[t]; ok {
+		return done
+	}
+	result := t
+	switch {
+	case t.Op == logic.OpConst && names[t.Name]:
+		result = logic.Const(t.Name+" again", t.Sort)
+	case len(t.Args) > 0:
+		args := make([]*logic.Term, len(t.Args))
+		changed := false
+		for i, arg := range t.Args {
+			args[i] = renamedApart(arg, names, memo)
+			changed = changed || args[i] != arg
+		}
+		if changed {
+			result = logic.WithArgs(t, args)
+		}
+	}
+	memo[t] = result
+	return result
+}
+
+// summary states what a function that a trusted function applies returns
+// for each argument: for every k that its type and the requires of calls
+// allow, some run with the argument k, in some state of a run, has the
+// facts this run has, and returns returns[k]. Such a run exists for every
+// such k, since the state at the call is a state of a run and the body was
+// verified for every argument the premise allows; and since every run
+// returns the same result for the same argument, returns[k] is what each
+// call of the trusted function got.
+func (v *fnVerifier) summary(run ranOnce, returns *logic.Term) *logic.Term {
+	names := run.produced()
+	var made []string
+	for _, name := range run.made {
+		if names[name] {
+			made = append(made, name)
+		}
+	}
+	facts := slices.Clone(run.facts)
+	got := logic.Select(returns, run.given[0][0])
+	if run.result.Sort == logic.Bool {
+		facts = append(facts, logic.Iff(got, run.result))
+	} else {
+		facts = append(facts, logic.Eq(got, run.result))
+	}
+	some := v.someOutcome(facts, made)
+	k := v.bound("k")
+	by := map[string]*logic.Term{run.given[0][0].Name: k}
+	premise := substituteConsts(logic.And(run.premise...), by, map[*logic.Term]*logic.Term{})
+	return logic.Forall(k, logic.Implies(premise, substituteConsts(some, by, map[*logic.Term]*logic.Term{})))
 }
 
 // checkNotForbidden requires that a write made by a function that a
@@ -471,7 +740,7 @@ func (v *fnVerifier) handOver(fn *funcInfo, param *types.Var, arg ast.Expr, st *
 // runHandedCall runs, in the state of a run, a function, method value, or
 // function value that was handed over: as a call the caller makes, with
 // the arguments of the run.
-func (v *fnVerifier) runHandedCall(h *handOver, cb *callback, given []value, head *state, by string) {
+func (v *fnVerifier) runHandedCall(h *handOver, cb *callback, given []value, head *state, by string) []value {
 	call := &ast.CallExpr{Fun: h.arg, Lparen: h.arg.End(), Rparen: h.arg.End()}
 	args := map[*types.Var]value{}
 	inputs := h.contract.params
@@ -489,7 +758,7 @@ func (v *fnVerifier) runHandedCall(h *handOver, cb *callback, given []value, hea
 	}
 	v.sites = append(v.sites, v.site(h.arg.Pos(), "in %s run by %s at %s", what, by, v.placeOf(h.arg.Pos())))
 	defer func() { v.sites = v.sites[:len(v.sites)-1] }()
-	v.invoke(call, h.contract, args, head, nil)
+	return v.invoke(call, h.contract, args, head, nil)
 }
 
 // handedSites adds to the effects of the runs of a call what a function,

@@ -61,3 +61,14 @@ trusted:
     calls:
       mapping(r): {}
     modifies: []
+
+  bytes.FieldsFunc:
+    reason: >-
+      Documented to split s at each run of code points c satisfying f(c),
+      assuming that f always returns the same value for a given c; before Go
+      1.10 it could crash otherwise. Nothing is claimed of the fields.
+    runs: [f]
+    calls:
+      f(c):
+        deterministic: true
+    modifies: []

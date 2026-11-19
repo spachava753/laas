@@ -840,3 +840,55 @@ trusted:
       f(): {}
     modifies: [c]
     ensures: ["c.N' = c.N + 1"]
+
+  callbacks.probe:
+    reason: Test helper that returns what f returns for 0.
+    runs: [f]
+    calls:
+      f(p): {}
+    modifies: []
+    ensures: ["result <-> f(0)"]
+
+  callbacks.pair:
+    reason: Test helper that returns what f returns for 0, twice.
+    runs: [f]
+    calls:
+      f(i):
+        requires: ["i = 0"]
+    modifies: []
+    ensures: ["a <-> f(0)", "b <-> f(0)"]
+
+  callbacks.touchAsk:
+    reason: Test helper that counts in c and returns what f returns for 0.
+    requires: ["c != nil", "c.n < 1000"]
+    runs: [f]
+    calls:
+      f(i):
+        requires: ["i = 0"]
+    modifies: [c]
+    ensures: ["result <-> f(0)"]
+
+  callbacks.memReq:
+    reason: Test helper whose calls requires read memory, and whose ensures applies f.
+    runs: [f]
+    calls:
+      f(i):
+        requires: ["0 <= i < |xs|", "xs[i] > 0"]
+    modifies: []
+    ensures: ["result -> f(0)"]
+
+  callbacks.twoArgs:
+    reason: Test helper whose ensures applies a function of two numbers.
+    runs: [f]
+    calls:
+      f(i, j): {}
+    modifies: []
+    ensures: ["result <-> f(0)"]
+
+  callbacks.appliedEarly:
+    reason: Test helper whose requires applies f.
+    requires: ["f(0)"]
+    runs: [f]
+    calls:
+      f(i): {}
+    modifies: []
