@@ -73,6 +73,57 @@ func (v *fnVerifier) holder(arg ast.Expr, want types.Type) *types.Var {
 	return nil
 }
 
+// fieldHolder returns the variable that an argument passes a pointer into,
+// for a parameter of the given pointer type, and the offset of the
+// pointer from where the variable points: the argument is &x.f.g, or x.f.g
+// where Go takes the address for a pointer receiver, x is a local variable
+// that holds a pointer to a struct, and every selection is of a field of a
+// struct held in the one before, not behind another pointer.
+func (v *fnVerifier) fieldHolder(arg ast.Expr, want types.Type) (*types.Var, int64, bool) {
+	arg = ast.Unparen(arg)
+	if address, ok := arg.(*ast.UnaryExpr); ok && address.Op == token.AND {
+		arg = ast.Unparen(address.X)
+	}
+	if t := v.info.TypeOf(arg); t == nil || !types.Identical(types.NewPointer(t), want) {
+		return nil, 0, false
+	}
+	var offset int64
+	for {
+		sel, ok := arg.(*ast.SelectorExpr)
+		if !ok {
+			return nil, 0, false
+		}
+		selection := v.info.Selections[sel]
+		if selection == nil || selection.Kind() != types.FieldVal {
+			return nil, 0, false
+		}
+		object := selection.Recv()
+		pointer, viaPointer := pointee(object)
+		if viaPointer {
+			object = pointer
+		}
+		// A promoted field takes one step for each struct on the way,
+		// none of which may be a pointer.
+		for _, index := range selection.Index() {
+			u, isStruct := object.Underlying().(*types.Struct)
+			if !isStruct {
+				return nil, 0, false
+			}
+			offset += v.fieldOffset(object, index)
+			object = u.Field(index).Type()
+		}
+		inner := ast.Unparen(sel.X)
+		if viaPointer {
+			variable := v.localVar(inner)
+			if variable == nil || v.boxed[variable] {
+				return nil, 0, false
+			}
+			return variable, offset, true
+		}
+		arg = inner
+	}
+}
+
 // effects computes what a loop may change: the variables it assigns and the
 // memory it may write, directly or through a call.
 func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
@@ -224,6 +275,18 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 		// before and inside the call.
 		if arg := argument(form.param); form.direct && arg != nil {
 			at.root = v.holder(arg, form.param.Type())
+			if at.root == nil && form.elem == nil && form.mapType == nil {
+				// A pointer to a field of what a variable points to, as the
+				// receiver of h.mu.Lock() is, names that field before and
+				// inside the call.
+				if root, offset, ok := v.fieldHolder(arg, form.param.Type()); ok {
+					at.root, at.lo, at.hi = root, at.lo+offset, at.hi+offset
+					at.cells = slices.Clone(at.cells)
+					for i := range at.cells {
+						at.cells[i].off += offset
+					}
+				}
+			}
 		}
 		eff.sites = append(eff.sites, at)
 	}
@@ -318,7 +381,9 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 			t.ref, t.lo = val[0], val[1]
 			t.hi = logic.Add(val[1], logic.Mul(val[3], logic.IntLit(v.span(at.elem))))
 		default:
-			t.ref, t.lo, t.hi = val[0], logic.Add(val[1], logic.IntLit(at.lo)), logic.Add(val[1], logic.IntLit(at.hi))
+			// The cells are counted from where the pointer points, which
+			// is where a single target starts.
+			t.ref, t.lo, t.hi, t.single = val[0], val[1], logic.Add(val[1], logic.IntLit(at.hi)), true
 		}
 		t.regions(func(key string, sort logic.Sort) {
 			if regions[key] == nil {
@@ -337,7 +402,7 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 		if written.flat {
 			sort = logic.SeqOf(written.sort)
 		}
-		known := &layer{prev: st.mem.region(key, sort), bound: st.brk, targets: written.targets, flat: written.flat}
+		known := &layer{prev: st.mem.region(key, sort), bound: st.brk, targets: written.targets, flat: written.flat, key: key}
 		if !written.precise {
 			known.bound, known.targets = v.entryBrk, nil
 			for _, t := range v.frame {

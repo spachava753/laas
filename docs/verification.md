@@ -1443,7 +1443,7 @@ vego: postcondition may not hold: result[0] = |b.items|
 
 The loop never writes `count`, but after it `vego` no longer knows `count[0]`. These are the rules:
 
-- If every write in the loop goes through a variable that the loop does not assign, or through a slice that the loop only appends to, `vego` forgets only the memory written that way. It keeps what it knew about all other memory.
+- If every write in the loop goes through a variable that the loop does not assign, or through a slice that the loop only appends to, `vego` forgets only the memory written that way. It keeps what it knew about all other memory. A call counts as such a write when it is passed the variable, or a pointer to a field of the struct the variable points to, as `h.mu.Lock()` passes `&h.mu`. For a write to one struct, or to some of its fields, `vego` forgets those fields of that struct and keeps the other fields and every other struct.
 - Otherwise `vego` forgets all memory of the same kind that the function may write. For `b.items[i]` that is the elements of every `[]int` the function lists in `Modifies` or allocated itself. Memory of that kind that existed when the function was called and is not in `Modifies` is still known to be unchanged.
 
 `b.items[i]` is not a write through a variable, so the second rule applies. Copy the slice to a local variable first, and only that slice is forgotten:

@@ -103,6 +103,8 @@ type layer struct {
 	prev    *logic.Term
 	bound   *logic.Term
 	targets []target
+	// key is the region the layer is of.
+	key string
 	// flat is set for the region that holds one number for each map: how
 	// many keys it has. Every other region holds a sequence per reference.
 	flat bool
@@ -240,12 +242,23 @@ func (v *fnVerifier) unchanged(now *logic.Term, known *layer, ref *logic.Term) *
 	index := v.bound("k")
 	var untouched []*logic.Term
 	for _, t := range known.targets {
-		if t.lo == nil {
+		switch {
+		case t.lo == nil:
 			// A map is written as a whole.
 			untouched = append(untouched, logic.Ne(ref, t.ref))
-			continue
+		case t.single:
+			// One struct value, or some of its fields: what may change is
+			// the position of each of its cells in this region, as havoc
+			// writes them, and nothing between them.
+			for _, c := range t.cells {
+				if c.key == known.key {
+					at := logic.Add(t.lo, logic.IntLit(c.off))
+					untouched = append(untouched, logic.Not(logic.And(logic.Eq(ref, t.ref), logic.Le(at, index), logic.Lt(index, logic.Add(at, logic.IntLit(1))))))
+				}
+			}
+		default:
+			untouched = append(untouched, logic.Not(logic.And(logic.Eq(ref, t.ref), logic.Le(t.lo, index), logic.Lt(index, t.hi))))
 		}
-		untouched = append(untouched, logic.Not(logic.And(logic.Eq(ref, t.ref), logic.Le(t.lo, index), logic.Lt(index, t.hi))))
 	}
 	kept := v.same(logic.Select(logic.Select(now, ref), index), logic.Select(logic.Select(known.prev, ref), index))
 	return logic.Implies(existed, logic.Forall(index, logic.Implies(logic.And(untouched...), kept)))
