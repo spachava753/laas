@@ -1,6 +1,7 @@
 package interfaces
 
 import (
+	"fmt"
 	"interfaceslib"
 	"io"
 )
@@ -152,11 +153,36 @@ func logNumber(x int) {
 	logRecord(r)
 }
 
+// io.Writer has a shipped contract, so verified code can make one, and a
+// trusted function that runs what a Record holds may run code that
+// verified code made. Before io.Writer had a contract, nothing could, and
+// this verified.
+//
+// @Ensures s != nil
+func MakeSink() (s Sink) {
+	return logNumber // want `cannot verify MakeSink: logNumber may call through a function value or an interface value, and code that a function value runs cannot do that yet: .*; logNumber calls logRecord, which is trusted and runs what r holds, which can be a value of io.Writer, whose methods all have contracts, so that verified code can make one. Make the value in code that is not verified, or keep that call out of what logNumber runs`
+}
+
+// Labelled holds a stringer, which verified code does not call.
+type Labelled struct {
+	N int
+	S fmt.Stringer
+}
+
+func logLabelled(r Labelled) {}
+
+// @Ensures True
+func labelNumber(x int) {
+	var r Labelled
+	r.N = x
+	logLabelled(r)
+}
+
 // A trusted function under runs that takes an interface without contracts
 // claims its contract whatever that interface holds, so handing it one
 // does not make a call through a value that verified code made.
 //
 // @Ensures s != nil
-func MakeSink() (s Sink) {
-	return logNumber
+func MakeLabelSink() (s Sink) {
+	return labelNumber
 }

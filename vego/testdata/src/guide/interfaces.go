@@ -153,11 +153,10 @@ func LoggedPricer(inner Pricer) (p Pricer) {
 	return Logging{Inner: inner} // want `cannot verify LoggedPricer: Price may call through a function value or an interface value, and code that an interface value runs cannot do that yet: no contract of a function type or of a method of an interface has a variant, so nothing would prove that such calls end`
 }
 
-// @Requires w != nil
+// @Requires c != nil
 // @Ensures True
-func Save(w io.Writer, b []byte) (err error) {
-	_, err = w.Write(b) // want `cannot verify Save: w.Write calls Writer.Write, which has no contract; a method of an interface gets one in its doc comment where the interface is declared, with // @ annotations`
-	return err
+func Shut(c io.Closer) (err error) {
+	return c.Close() // want `cannot verify Shut: c.Close calls Closer.Close, which has no contract; a method of an interface gets one in its doc comment where the interface is declared, with // @ annotations; for a type of another module, give it an entry \(io.Closer\).Close in vego-trusted.yaml`
 }
 
 // Bounded declares a Size of its own.

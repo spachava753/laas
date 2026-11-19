@@ -2,12 +2,12 @@ package vego
 
 import (
 	"fmt"
-	"maps"
-	"slices"
 	"go/token"
 	"go/types"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 

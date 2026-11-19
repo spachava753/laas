@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"go/types"
 	"slices"
+	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"golang.org/x/tools/go/types/typeutil"
@@ -623,6 +624,7 @@ func (pv *pkgVerifier) mayCallValues(obj *types.Func) bool {
 	}
 	if pv.mayCall == nil {
 		pv.mayCall = map[*types.Func]bool{}
+		pv.valueReasons = map[*types.Func]valueReason{}
 		pv.findValueCallers()
 	}
 	if may, known := pv.mayCall[obj.Origin()]; known {
@@ -673,16 +675,24 @@ func (pv *pkgVerifier) findValueCallers() {
 			continue
 		}
 		local[fn.obj] = true
-		direct := false
+		direct, why := false, ""
+		because := func(text string) {
+			if !direct {
+				why = text
+			}
+			direct = true
+		}
 		trusted := pv.trustedContract(fn.obj)
-		if trusted != nil {
-			direct = pv.runsValues(trusted)
+		if trusted != nil && pv.runsValues(trusted) {
+			because(pv.runsReason(trusted))
 		}
 		bound, _ := literalUses(pv.info, fn.decl.Body)
 		ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.RangeStmt:
-				direct = direct || rangesByCalling(pv.info.TypeOf(n.X))
+				if rangesByCalling(pv.info.TypeOf(n.X)) {
+					because("ranges over a function")
+				}
 			case *ast.CallExpr:
 				tv := pv.info.Types[n.Fun]
 				if tv.IsType() || tv.IsBuiltin() {
@@ -700,7 +710,7 @@ func (pv *pkgVerifier) findValueCallers() {
 						case handed != nil:
 							calls[fn.obj] = append(calls[fn.obj], handed.Origin())
 						default:
-							direct = true
+							because(fmt.Sprintf("hands %s to %s, which calls it", types.ExprString(arg), callee.Name()))
 						}
 					}
 					break
@@ -719,12 +729,17 @@ func (pv *pkgVerifier) findValueCallers() {
 						return true
 					}
 				}
-				direct = true
+				if method, _ := throughValue(pv.info, n); method != nil {
+					because("calls through the interface value " + types.ExprString(ast.Unparen(n.Fun).(*ast.SelectorExpr).X))
+				} else {
+					because("calls through the function value " + types.ExprString(n.Fun))
+				}
 			}
 			return true
 		})
 		pv.mayCall[fn.obj] = direct
 		if direct {
+			pv.valueReasons[fn.obj] = valueReason{text: why}
 			pending = append(pending, fn.obj)
 		}
 	}
@@ -735,6 +750,7 @@ func (pv *pkgVerifier) findValueCallers() {
 			if !local[callee] && pv.mayCallValues(callee) {
 				if !pv.mayCall[caller] {
 					pv.mayCall[caller] = true
+					pv.valueReasons[caller] = valueReason{via: callee}
 					pending = append(pending, caller)
 				}
 			}
@@ -747,10 +763,103 @@ func (pv *pkgVerifier) findValueCallers() {
 		for _, caller := range callers[callee] {
 			if !pv.mayCall[caller] {
 				pv.mayCall[caller] = true
+				pv.valueReasons[caller] = valueReason{via: callee}
 				pending = append(pending, caller)
 			}
 		}
 	}
+}
+
+// valueReason is why a function may make a call through a value: a call,
+// a range, or a hand-over in its body, or what the entry of a trusted
+// function runs, in text; or a function it calls that may, in via.
+type valueReason struct {
+	text string
+	via  *types.Func
+}
+
+// whyValues says why running a function may make a call through a value,
+// as a sentence with the function as its subject, following the functions
+// it calls that may to the first that does.
+func (pv *pkgVerifier) whyValues(obj *types.Func) string {
+	pv.mayCallValues(obj)
+	hops := []string{}
+	seen := map[*types.Func]bool{}
+	for {
+		reason, local := pv.valueReasons[obj.Origin()]
+		switch {
+		case seen[obj.Origin()]:
+		case local && reason.via != nil:
+			seen[obj.Origin()] = true
+			hops = append(hops, "calls "+reason.via.Name())
+			obj = reason.via
+			continue
+		case local:
+			hops = append(hops, reason.text)
+		case isIfaceMethod(obj):
+			hops = append(hops, "is a method of an interface, which runs whatever the value holds")
+		default:
+			switch fn := pv.contractOf(obj.Origin()); {
+			case fn == nil:
+				hops = append(hops, "has no contract")
+			case fn.imported != nil:
+				hops = append(hops, "is verified in package "+obj.Pkg().Path()+", whose contract says that it may")
+			case fn.trust != nil:
+				hops = append(hops, pv.runsReason(fn))
+			}
+		}
+		break
+	}
+	return strings.Join(hops, ", which ")
+}
+
+// runsReason says which parameter of a trusted function under runs makes it
+// one that may call through a value, and what that parameter can hold that
+// verified code can make.
+func (pv *pkgVerifier) runsReason(fn *funcInfo) string {
+	for _, param := range fn.params {
+		if !fn.runs[param] || fn.calls[param] != nil {
+			continue
+		}
+		if what := pv.callableIn(param.Type(), map[types.Type]bool{}); what != "" {
+			return fmt.Sprintf("is trusted and runs what %s holds, which can be %s", param.Name(), what)
+		}
+	}
+	return "is trusted and runs what it is given"
+}
+
+// callableIn names what holdsCallable finds in a type.
+func (pv *pkgVerifier) callableIn(t types.Type, seen map[types.Type]bool) string {
+	if t == nil || seen[t] {
+		return ""
+	}
+	seen[t] = true
+	switch u := t.Underlying().(type) {
+	case *types.Signature:
+		return "a function value of type " + t.String()
+	case *types.Interface:
+		if pv.fullyContracted(t) {
+			return fmt.Sprintf("a value of %s, whose methods all have contracts, so that verified code can make one", t)
+		}
+	case *types.Pointer:
+		return pv.callableIn(u.Elem(), seen)
+	case *types.Slice:
+		return pv.callableIn(u.Elem(), seen)
+	case *types.Array:
+		return pv.callableIn(u.Elem(), seen)
+	case *types.Map:
+		if what := pv.callableIn(u.Key(), seen); what != "" {
+			return what
+		}
+		return pv.callableIn(u.Elem(), seen)
+	case *types.Struct:
+		for field := range u.Fields() {
+			if what := pv.callableIn(field.Type(), seen); what != "" {
+				return what
+			}
+		}
+	}
+	return ""
 }
 
 // coveredType returns the type a Modifies entry ends in: the pointer, slice,
@@ -907,7 +1016,9 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 	// verified code runs code that makes no such call.
 	if v.pkgVerifier.mayCallValues(callee) {
 		v.unsupported(e.Pos(), fmt.Sprintf("%s may call through a function value or an interface value, and code that %s runs cannot do that yet: "+
-			"no contract of a function type or of a method of an interface has a variant, so nothing would prove that such calls end", callee.Name(), holder))
+			"no contract of a function type or of a method of an interface has a variant, so nothing would prove that such calls end; %s %s. "+
+			"Make the value in code that is not verified, or keep that call out of what %s runs",
+			callee.Name(), holder, callee.Name(), v.pkgVerifier.whyValues(callee), callee.Name()))
 	}
 	// A contract of a type that vouches for the errors of a result is
 	// believed of every value of the type, so a value that verified code
@@ -1289,7 +1400,8 @@ func (v *fnVerifier) stratified(lit *ast.FuncLit) {
 	}
 	refuse := func(pos token.Pos, what string) {
 		v.unsupported(pos, fmt.Sprintf("the function literal used as a value %s, and code that a function value runs cannot do that yet: "+
-			"no contract of a function type has a variant, so nothing would prove that such calls end", what))
+			"no contract of a function type has a variant, so nothing would prove that such calls end. "+
+			"Make the value in code that is not verified, or keep that call out of the literal", what))
 	}
 	ast.Inspect(lit.Body, func(n ast.Node) bool {
 		switch n := n.(type) {
@@ -1306,7 +1418,8 @@ func (v *fnVerifier) stratified(lit *ast.FuncLit) {
 			}
 			if callee := typeutil.StaticCallee(v.info, n); callee != nil {
 				if v.pkgVerifier.mayCallValues(callee) {
-					refuse(n.Pos(), fmt.Sprintf("calls %s, which may call through a function value", callee.Name()))
+					refuse(n.Pos(), fmt.Sprintf("calls %s, which may call through a function value or an interface value: %s %s",
+						callee.Name(), callee.Name(), v.pkgVerifier.whyValues(callee)))
 				}
 				// What a trusted function is handed to call runs during the
 				// call, as part of the literal.
@@ -1316,8 +1429,8 @@ func (v *fnVerifier) stratified(lit *ast.FuncLit) {
 						inPlace[ast.Unparen(arg).(*ast.FuncLit)] = true
 					case handed != nil:
 						if v.pkgVerifier.mayCallValues(handed) {
-							refuse(arg.Pos(), fmt.Sprintf("hands %s to %s, which calls it, and %s may call through a function value",
-								handed.Name(), callee.Name(), handed.Name()))
+							refuse(arg.Pos(), fmt.Sprintf("hands %s to %s, which calls it, and %s may call through a function value or an interface value: %s %s",
+								handed.Name(), callee.Name(), handed.Name(), handed.Name(), v.pkgVerifier.whyValues(handed)))
 						}
 					default:
 						refuse(arg.Pos(), fmt.Sprintf("hands the function value %s to %s, which calls it", types.ExprString(arg), callee.Name()))

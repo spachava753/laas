@@ -462,6 +462,9 @@ type pkgVerifier struct {
 	funcTypes     map[*types.TypeName]*funcInfo
 	importedTypes map[*types.TypeName]*funcInfo
 	mayCall       map[*types.Func]bool
+	// valueReasons holds, for a function of this package that may make a
+	// call through a value, why; see valueReason.
+	valueReasons map[*types.Func]valueReason
 	// ifaceMethods holds the contracts of the methods of the interface
 	// types of this package, and importedMethods those of other packages,
 	// nil for a method known to have none. See interfaces.go.

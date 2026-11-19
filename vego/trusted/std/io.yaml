@@ -1,0 +1,36 @@
+version: 1
+
+trusted:
+  (io.Writer).Write:
+    reason: >-
+      A claim about every io.Writer that code which is not verified hands
+      to verified code. The documentation of io.Writer states it for every
+      implementation: Write returns the number of bytes written from p,
+      0 <= n <= len(p), returns a non-nil error if n < len(p), and must not
+      modify the slice data, even temporarily. These are obligations on the
+      implementer, which the standard library itself checks in places
+      (io.Copy maps a count outside them to an error). Nothing is claimed
+      of the errors: an implementation may return any error.
+    modifies: []
+    ensures:
+      - "0 <= n And n <= |p|"
+      - "n < |p| -> err != nil"
+
+  (io.Reader).Read:
+    reason: >-
+      A claim about every io.Reader that code which is not verified hands
+      to verified code. The documentation of io.Reader states it for every
+      implementation: Read reads up to len(p) bytes into p and returns the
+      number of bytes read, 0 <= n <= len(p), and may use all of p as
+      scratch space during the call. This is an obligation on the
+      implementer, which the standard library itself checks in places
+      (bufio panics on a negative count). For an empty p the documentation
+      says only that Read should return 0, and iotest.DataErrReader never
+      returns from such a call while it holds data, so p must not be empty.
+      Nothing is claimed of the errors: an implementation may return any
+      error, not only io.EOF.
+    requires:
+      - "|p| > 0"
+    modifies: [p]
+    ensures:
+      - "0 <= n And n <= |p|"

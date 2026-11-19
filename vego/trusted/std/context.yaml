@@ -1,0 +1,32 @@
+version: 1
+
+trusted:
+  (context.Context).Err:
+    reason: >-
+      A claim about every context.Context that code which is not verified
+      hands to verified code. The documentation of Context states it for
+      every implementation: Err returns nil if Done is not yet closed, and
+      otherwise DeadlineExceeded if the deadline passed or Canceled if the
+      context was canceled; since Go 1.7 it has said that no other values
+      are defined. The errors are those two variables: Canceled is made by
+      errors.New, and DeadlineExceeded holds a deadlineExceededError, an
+      empty struct whose methods Error, Timeout, and Temporary return
+      constants, so == on it is identity and what errors.Is reports does
+      not change. That Err returns the same error once it is not nil is not
+      modelled.
+    vouches: [result]
+    modifies: []
+    ensures:
+      - "result = nil Or result = context.Canceled Or result = context.DeadlineExceeded"
+
+  context.CancelFunc:
+    reason: >-
+      A claim about every context.CancelFunc that code which is not verified
+      hands to verified code. Its documentation says that it may be called
+      by several goroutines, and after the first call does nothing. The
+      CancelFunc of a context derived from a context of another type calls
+      that context's Done and Value, and canceling starts the functions
+      registered with context.AfterFunc on goroutines of their own; what
+      those write is covered by this claim and by the assumption that no
+      other goroutine writes what a proof reads.
+    modifies: []

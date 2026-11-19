@@ -881,23 +881,23 @@ vego: the contract of Bounded.Size is not part of this interface: it has Size fr
 and Go keeps one declaration of a method; declare the method once, with its contract
 ```
 
-A method without a contract cannot be called through an interface value. The interfaces of the standard library and of other packages that `vego` does not verify have no contracts, so their methods cannot be called yet:
+A method without a contract cannot be called through an interface value. A method of an interface of another module has no doc comment you can annotate. It gets a contract from an entry in the trust file instead, and `vego` ships entries for a few methods of the standard library, such as `(io.Writer).Write`. `io.Closer` has none:
 
 ```go
-// @Requires w != nil
+// @Requires c != nil
 // @Ensures True
-func Save(w io.Writer, b []byte) (err error) {
-	_, err = w.Write(b)
-	return err
+func Shut(c io.Closer) (err error) {
+	return c.Close()
 }
 ```
 
 ```text
-vego: cannot verify Save: w.Write calls Writer.Write, which has no contract; a method of an
-interface gets one in its doc comment where the interface is declared, with // @ annotations
+vego: cannot verify Shut: c.Close calls Closer.Close, which has no contract; a method of an
+interface gets one in its doc comment where the interface is declared, with // @ annotations;
+for a type of another module, give it an entry (io.Closer).Close in vego-trusted.yaml
 ```
 
-Make such a call in code that is not verified. A trusted contract cannot be given to a method of an interface yet.
+Make such a call in code that is not verified, or give the method an entry.
 
 ### Making an interface value
 

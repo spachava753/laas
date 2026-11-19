@@ -2,6 +2,7 @@ package vego
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"go/importer"
@@ -314,9 +315,11 @@ var scratch string
 // by key, with their values. A contract that names another fails the test
 // until it is added here.
 var shippedVariables = map[string]error{
-	"strconv.ErrSyntax": strconv.ErrSyntax,
-	"strconv.ErrRange":  strconv.ErrRange,
-	"io/fs.ErrNotExist": fs.ErrNotExist,
+	"strconv.ErrSyntax":        strconv.ErrSyntax,
+	"strconv.ErrRange":         strconv.ErrRange,
+	"io/fs.ErrNotExist":        fs.ErrNotExist,
+	"context.Canceled":         context.Canceled,
+	"context.DeadlineExceeded": context.DeadlineExceeded,
 }
 
 // reviewedErrorTypes are the dynamic types that may occur in the tree of an
@@ -330,6 +333,9 @@ var reviewedErrorTypes = map[string]bool{
 	"*errors.errorString": true,
 	"*fs.PathError":       true,
 	"syscall.Errno":       true,
+	// The type of context.DeadlineExceeded, an empty struct whose methods
+	// Error, Timeout, and Temporary return constants.
+	"context.deadlineExceededError": true,
 }
 
 // grounder converts Go values to the terms that denote them. Each error that
@@ -524,6 +530,7 @@ func TestShippedContracts(t *testing.T) {
 		reported:     map[string]bool{},
 		usage:        &Usage{},
 		reliedKeys:   map[string]bool{},
+		typeEntries:  map[string]*funcInfo{},
 	}
 	imports := importer.ForCompiler(pv.pass.Fset, "source", nil)
 	// A contract names the variables of a package by its path, which must
@@ -543,131 +550,151 @@ func TestShippedContracts(t *testing.T) {
 		}
 		for key := range file.entries {
 			t.Run(key, func(t *testing.T) {
-				harness, ok := harnesses[key]
-				if !ok {
-					t.Fatalf("no harness calls %s; add one to harnesses", key)
-				}
 				path, name, _ := splitFuncName(key)
 				pkg, err := imports.Import(path)
 				if err != nil {
 					t.Fatalf("import %s: %v", path, err)
 				}
+				if fn := shippedTypeContract(pv, pkg, name); fn != nil {
+					checkTypeContract(t, pv, key, fn)
+					return
+				}
 				callee, ok := pkg.Scope().Lookup(name).(*types.Func)
 				if !ok {
 					t.Fatalf("package %s has no function %s", path, name)
+				}
+				harness, ok := harnesses[key]
+				if !ok {
+					t.Fatalf("no harness calls %s; add one to harnesses", key)
 				}
 				fn := pv.trustedContract(callee)
 				for _, defect := range fn.defects {
 					t.Errorf("contract cannot be used: %s", defect)
 				}
-				rng := rand.New(rand.NewSource(1))
-				checked := 0
-				for range 400 {
-					call := harness(rng)
-					if call.after == nil {
-						call.after = call.before
-					}
-					env := &specEnv{
-						v: &fnVerifier{pkgVerifier: pv, fn: fn}, fn: fn,
-						given: map[*types.Var]*logic.Term{}, givenPost: map[*types.Var]*logic.Term{},
-					}
-					g := &grounder{}
-					eval := &evaluator{bindings: map[string]*big.Int{}, errors: g, callbacks: map[string]func(int64) int64{}}
-					// What a function the contract applies returns is what
-					// the harness answers.
-					env.applied = map[*types.Var]*logic.Term{}
-					for _, param := range fn.params {
-						if cb := fn.calls[param]; cb != nil && cb.applied {
-							sort, _ := sortOf(cb.sig.Results().At(0).Type())
-							name := "callback " + param.Name()
-							env.applied[param] = logic.Const(name, logic.SeqOf(sort))
-							eval.callbacks[name] = call.answers[param.Name()]
-						}
-					}
-					for i, param := range fn.params {
-						// A function is one reference, which no formula of an
-						// entry reads.
-						if _, isFunc := param.Type().Underlying().(*types.Signature); isFunc {
-							env.given[param], env.givenPost[param] = logic.RefLit(1), logic.RefLit(1)
-							continue
-						}
-						env.given[param], env.givenPost[param] = g.groundTerm(call.before[i]), g.groundTerm(call.after[i])
-						if text, ok := call.before[i].(string); ok {
-							eval.bound = max(eval.bound, int64(len(text))+2)
-						}
-						if list, ok := call.before[i].([]int); ok {
-							eval.bound = max(eval.bound, int64(len(list))+2)
-						}
-						if list, ok := call.before[i].([]byte); ok {
-							eval.bound = max(eval.bound, int64(len(list))+2)
-						}
-						// A quantifier over [0, n) needs the indices up to n.
-						if number, ok := call.before[i].(int); ok {
-							eval.bound = max(eval.bound, int64(number)+2)
-						}
-					}
-					satisfied := true
-					for _, c := range fn.requires {
-						formula, err := pv.res.Formula(c.node, env)
-						if err != nil {
-							t.Fatalf("requires %q: %v", c.text, err)
-						}
-						satisfied = satisfied && eval.holds(formula)
-					}
-					if !satisfied {
-						continue
-					}
-					checked++
-					// The function called what it was handed only with
-					// arguments that the requires of calls allow.
-					for _, param := range fn.params {
-						cb := fn.calls[param]
-						if cb == nil {
-							continue
-						}
-						for _, args := range call.calls[param.Name()] {
-							given := maps.Clone(env.given)
-							for i, p := range cb.params {
-								given[p] = g.groundTerm(args[i])
-							}
-							inner := &specEnv{v: env.v, fn: cb.fn, given: given, givenPost: map[*types.Var]*logic.Term{}}
-							for _, c := range cb.requires {
-								formula, err := pv.res.Formula(c.node, inner)
-								if err != nil {
-									t.Fatalf("calls requires %q: %v", c.text, err)
-								}
-								if !eval.holds(formula) {
-									t.Fatalf("%s called %s with %v, for which the calls requires %q is false, in the call with arguments %v",
-										key, param.Name(), args, c.text, call.before)
-								}
-							}
-						}
-					}
-					for i, result := range call.results {
-						if fn.vouches[i] {
-							checkVouched(t, result)
-						}
-						env.givenResults = append(env.givenResults, g.groundTerm(result))
-						if text, ok := result.(string); ok {
-							eval.bound = max(eval.bound, int64(len(text))+2)
-						}
-					}
-					for _, c := range fn.ensures {
-						formula, err := pv.res.Formula(c.node, env)
-						if err != nil {
-							t.Fatalf("ensures %q: %v", c.text, err)
-						}
-						if !eval.holds(formula) {
-							t.Fatalf("ensures %q is false for the call with arguments %v, which left them as %v and returned %v",
-								c.text, call.before, call.after, call.results)
-						}
-					}
-				}
-				if checked < 100 {
-					t.Fatalf("only %d of 400 random calls satisfied the requires; the harness does not exercise the contract", checked)
-				}
+				checkContract(t, pv, key, fn, harness, false)
 			})
 		}
+	}
+}
+
+// checkContract runs a harness 400 times and checks every call whose
+// arguments satisfy the requires of the contract fn: what the function
+// called through calls was given, the vouched errors, and every ensures.
+// With unchanged, the parameters that its modifies does not list must be
+// as they were before the call.
+func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harness func(*rand.Rand) sample, unchanged bool) {
+	t.Helper()
+	rng := rand.New(rand.NewSource(1))
+	checked := 0
+	for range 400 {
+		call := harness(rng)
+		if call.after == nil {
+			call.after = call.before
+		}
+		env := &specEnv{
+			v: &fnVerifier{pkgVerifier: pv, fn: fn}, fn: fn,
+			given: map[*types.Var]*logic.Term{}, givenPost: map[*types.Var]*logic.Term{},
+		}
+		g := &grounder{}
+		eval := &evaluator{bindings: map[string]*big.Int{}, errors: g, callbacks: map[string]func(int64) int64{}}
+		// What a function the contract applies returns is what
+		// the harness answers.
+		env.applied = map[*types.Var]*logic.Term{}
+		for _, param := range fn.params {
+			if cb := fn.calls[param]; cb != nil && cb.applied {
+				sort, _ := sortOf(cb.sig.Results().At(0).Type())
+				name := "callback " + param.Name()
+				env.applied[param] = logic.Const(name, logic.SeqOf(sort))
+				eval.callbacks[name] = call.answers[param.Name()]
+			}
+		}
+		for i, param := range fn.params {
+			// A function is one reference, which no formula of an
+			// entry reads.
+			if _, isFunc := param.Type().Underlying().(*types.Signature); isFunc {
+				env.given[param], env.givenPost[param] = logic.RefLit(1), logic.RefLit(1)
+				continue
+			}
+			env.given[param], env.givenPost[param] = g.groundTerm(call.before[i]), g.groundTerm(call.after[i])
+			if text, ok := call.before[i].(string); ok {
+				eval.bound = max(eval.bound, int64(len(text))+2)
+			}
+			if list, ok := call.before[i].([]int); ok {
+				eval.bound = max(eval.bound, int64(len(list))+2)
+			}
+			if list, ok := call.before[i].([]byte); ok {
+				eval.bound = max(eval.bound, int64(len(list))+2)
+			}
+			// A quantifier over [0, n) needs the indices up to n.
+			if number, ok := call.before[i].(int); ok {
+				eval.bound = max(eval.bound, int64(number)+2)
+			}
+		}
+		satisfied := true
+		for _, c := range fn.requires {
+			formula, err := pv.res.Formula(c.node, env)
+			if err != nil {
+				t.Fatalf("requires %q: %v", c.text, err)
+			}
+			satisfied = satisfied && eval.holds(formula)
+		}
+		if !satisfied {
+			continue
+		}
+		checked++
+		for i, param := range fn.params {
+			listed := slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.name == param.Name() })
+			if unchanged && !listed && !reflect.DeepEqual(call.before[i], call.after[i]) {
+				t.Fatalf("%s changed %s, which its modifies does not list: %v became %v", key, param.Name(), call.before[i], call.after[i])
+			}
+		}
+		// The function called what it was handed only with
+		// arguments that the requires of calls allow.
+		for _, param := range fn.params {
+			cb := fn.calls[param]
+			if cb == nil {
+				continue
+			}
+			for _, args := range call.calls[param.Name()] {
+				given := maps.Clone(env.given)
+				for i, p := range cb.params {
+					given[p] = g.groundTerm(args[i])
+				}
+				inner := &specEnv{v: env.v, fn: cb.fn, given: given, givenPost: map[*types.Var]*logic.Term{}}
+				for _, c := range cb.requires {
+					formula, err := pv.res.Formula(c.node, inner)
+					if err != nil {
+						t.Fatalf("calls requires %q: %v", c.text, err)
+					}
+					if !eval.holds(formula) {
+						t.Fatalf("%s called %s with %v, for which the calls requires %q is false, in the call with arguments %v",
+							key, param.Name(), args, c.text, call.before)
+					}
+				}
+			}
+		}
+		for i, result := range call.results {
+			if fn.vouches[i] {
+				checkVouched(t, result)
+			}
+			env.givenResults = append(env.givenResults, g.groundTerm(result))
+			if text, ok := result.(string); ok {
+				eval.bound = max(eval.bound, int64(len(text))+2)
+			}
+		}
+		for _, c := range fn.ensures {
+			formula, err := pv.res.Formula(c.node, env)
+			if err != nil {
+				t.Fatalf("ensures %q: %v", c.text, err)
+			}
+			if !eval.holds(formula) {
+				t.Fatalf("ensures %q is false for the call with arguments %v, which left them as %v and returned %v",
+					c.text, call.before, call.after, call.results)
+			}
+		}
+	}
+	if checked < 100 {
+		t.Fatalf("only %d of 400 random calls satisfied the requires; the harness does not exercise the contract", checked)
 	}
 }
 

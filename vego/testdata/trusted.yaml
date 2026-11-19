@@ -1016,6 +1016,11 @@ trusted:
     runs: [r]
     modifies: []
 
+  interfaces.logLabelled:
+    reason: Formats the number of a record and the label of its stringer, whatever stringer that is.
+    runs: [r]
+    modifies: []
+
   # Contracts of types of another module; see foreign/.
   (foreignlib.Sink).Put:
     reason: Every sink of the tests takes a small number and returns at most twice it.

@@ -64,11 +64,13 @@ func NoContract(p Plain) (n int) {
 	return p.Get() // want `cannot verify NoContract: p.Get calls Plain.Get, which has no contract`
 }
 
+// The shipped entry of Write says nothing of when it succeeds.
+//
 // @Requires w != nil
-// @Ensures True
+// @Ensures err = nil
 func Foreign(w io.Writer, b []byte) (err error) {
-	_, err = w.Write(b) // want `cannot verify Foreign: w.Write calls Writer.Write, which has no contract`
-	return err
+	_, err = w.Write(b)
+	return err // want `postcondition may not hold: err = nil`
 }
 
 type Response struct {
