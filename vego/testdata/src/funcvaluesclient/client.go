@@ -3,6 +3,8 @@
 package funcvaluesclient
 
 import (
+	"errors"
+
 	"funcvalueslib"
 	"funcvaluesunread"
 )
@@ -103,4 +105,22 @@ func helper(x int) (y int) {
 // @Ensures True
 func loop(x int) (r int) {
 	return funcvalueslib.Run(helper, x+1) // want `vego: cannot verify loop: helper may call through a function value`
+}
+
+// ErrStop is an error of this package with the name of the one that the
+// contract of funcvalueslib.Stop names.
+var ErrStop = errors.New("mine")
+
+// A literal made into a value of a type of another package is checked
+// against the contract as it was written there: ErrStop is the error of
+// funcvalueslib. Before, it was read in this file, and this verified.
+//
+// @Ensures s != nil
+func WrongStop() (s funcvalueslib.Stop) {
+	return func() error { return ErrStop } // want `postcondition may not hold: err = nil Or err = ErrStop, in the function literal used as a value of type Stop`
+}
+
+// @Ensures s != nil
+func RightStop() (s funcvalueslib.Stop) {
+	return func() error { return funcvalueslib.ErrStop }
 }

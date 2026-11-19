@@ -2,6 +2,8 @@
 // packages use.
 package funcvalueslib
 
+import "errors"
+
 const Limit = 100
 
 // Step moves a number up by at most Limit.
@@ -25,3 +27,11 @@ func Run(s Step, x int) (y int) {
 func Count(n int) (m int) {
 	return n + 1
 }
+
+// ErrStop is what a stop returns.
+var ErrStop = errors.New("stop")
+
+// Stop fails with ErrStop of this package.
+//
+// @Ensures err = nil Or err = ErrStop
+type Stop func() (err error)

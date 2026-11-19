@@ -110,7 +110,10 @@ func (pv *pkgVerifier) checkTypeContracts() {
 }
 
 // checkValueContract checks the contract of a function type or of a method
-// of an interface type where it is declared.
+// of an interface type: where it is declared for one written in source, and
+// where it is first used for one that a trust file gives a type of another
+// package, whose faults are then defects of the entry, reported at each use
+// as for a trusted function.
 func (pv *pkgVerifier) checkValueContract(fn *funcInfo) {
 	// The contract is named as the type, or as the interface and the
 	// method.
@@ -120,30 +123,36 @@ func (pv *pkgVerifier) checkValueContract(fn *funcInfo) {
 		title = methodTitle(fn.methodOf)
 		example = fmt.Sprintf("%s(...) (n int)", fn.methodOf.Name())
 	}
+	entry := fn.trust != nil
+	fault := func(at token.Pos, format string, args ...any) {
+		fn.broken = true
+		if entry {
+			fn.defect(format, args...)
+			return
+		}
+		pv.report(at, format, args...)
+	}
 	sig := fn.obj.Type().(*types.Signature)
 	if sig.Variadic() {
 		what := "function type"
 		if fn.methodOf != nil {
 			what = "method of an interface"
 		}
-		pv.report(at, "a contract on a variadic %s is not supported yet", what)
-		fn.broken = true
+		fault(at, "a contract on a variadic %s is not supported yet", what)
 	}
+	// An entry names unnamed results as a trusted contract does.
 	for _, result := range fn.results {
-		if result.Name() == "" || result.Name() == "_" {
-			pv.report(at, "%s has a contract, so each of its results needs a name, as in %s", title, example)
-			fn.broken = true
+		if !entry && (result.Name() == "" || result.Name() == "_") {
+			fault(at, "%s has a contract, so each of its results needs a name, as in %s", title, example)
 			break
 		}
 	}
 	for _, variable := range slices.Concat(fn.params, fn.results) {
 		if _, ok := layoutOf(variable.Type()); !ok {
-			pv.report(at, "%s has a contract, and its %s has type %s, which is not supported", title, describe(variable), variable.Type())
-			fn.broken = true
+			fault(at, "%s has a contract, and its %s has type %s, which is not supported", title, describe(variable), variable.Type())
 		}
 		if variable.Name() != "" && fn.ambiguous(variable.Name(), false) {
-			pv.report(at, "%s names %s, which means something else in annotations; rename it", title, variable.Name())
-			fn.broken = true
+			fault(at, "%s names %s, which means something else in annotations; rename it", title, variable.Name())
 		}
 	}
 	if fn.broken {
@@ -151,28 +160,30 @@ func (pv *pkgVerifier) checkValueContract(fn *funcInfo) {
 	}
 	pv.run(fn, func(v *fnVerifier) {
 		v.misreadAs = func(c *clause, err error) {
-			fn.broken = true
-			pv.report(c.pos, "in %s annotation: %v", c.kind, err)
+			if entry {
+				fault(c.pos, "in its %s %q: %v", c.kind, c.text, err)
+				return
+			}
+			fault(c.pos, "in %s annotation: %v", c.kind, err)
 		}
-		entry := v.enter()
-		if v.quickly(entry, nil, logic.False()) {
-			fn.broken = true
-			pv.report(at, "nothing can satisfy the Requires clauses of %s together with what the types of its parameters guarantee, "+
+		state := v.enter()
+		if v.quickly(state, nil, logic.False()) {
+			fault(at, "nothing can satisfy the Requires clauses of %s together with what the types of its parameters guarantee, "+
 				"so no value of the type could be called", title)
 			return
 		}
 		v.primedPaths(fn)
-		for _, defect := range fn.defects {
-			pv.report(at, "the contract of %s cannot be used: %s", title, defect)
+		if !entry {
+			for _, defect := range fn.defects {
+				pv.report(at, "the contract of %s cannot be used: %s", title, defect)
+			}
 		}
-		if _, post, _ := v.contractInstance(entry); pv.contradictory(post) {
-			fn.broken = true
-			pv.report(at, "the contract of %s contradicts itself, so a call of a value of the type would prove anything", title)
+		if _, post, _ := v.contractInstance(state); pv.contradictory(post) {
+			fault(at, "the contract of %s contradicts itself, so a call of a value of the type would prove anything", title)
 			return
 		}
-		if !v.canBeMet(entry) {
-			fn.broken = true
-			pv.report(at, "the Ensures clauses of %s are not proved to be satisfiable for every call that its Requires allow, "+
+		if !v.canBeMet(state) {
+			fault(at, "the Ensures clauses of %s are not proved to be satisfiable for every call that its Requires allow, "+
 				"by results and a change of what Modifies lists; a value of the type is taken to meet them, so a call of one could prove something false. "+
 				"State in the Requires when some result exists, or weaken the Ensures", title)
 		}
@@ -338,7 +349,10 @@ func (pv *pkgVerifier) valueContract(t types.Type) *funcInfo {
 	}
 	name := named.Origin().Obj()
 	if name.Pkg() == pv.pass.Pkg {
-		return pv.funcTypes[name]
+		if fn := pv.funcTypes[name]; fn != nil {
+			return fn
+		}
+		return pv.entryFuncType(name)
 	}
 	if fn, done := pv.importedTypes[name]; done {
 		return fn
@@ -346,12 +360,17 @@ func (pv *pkgVerifier) valueContract(t types.Type) *funcInfo {
 	pv.importedTypes[name] = nil
 	fact := &contractFact{}
 	if name.Pkg() == nil || !pv.pass.ImportObjectFact(name, fact) {
-		return nil
+		fn := pv.entryFuncType(name)
+		pv.importedTypes[name] = fn
+		return fn
 	}
 	sig := name.Type().Underlying().(*types.Signature)
 	fn := pv.contractFromFact(types.NewFunc(name.Pos(), name.Pkg(), name.Name(), sig), name.Pkg(), fact)
 	if !fact.Verified {
 		fn.defects = []string{fmt.Sprintf("the annotations of package %s were not all read", name.Pkg().Path())}
+	}
+	if pv.entryFor(funcTypeKey(name)) != nil {
+		fn.defect("it has a contract where it is declared and also an entry %s in the trust file", funcTypeKey(name))
 	}
 	fn.valueOf = name
 	pv.importedTypes[name] = fn
@@ -366,14 +385,9 @@ func (v *fnVerifier) usableValueContract(fun ast.Expr) *funcInfo {
 	fn := v.valueContract(t)
 	if fn == nil {
 		v.unsupported(fun.Pos(), fmt.Sprintf("%s has type %s, which has no contract; "+
-			"declare a named function type with a contract and use it here", types.ExprString(fun), t))
+			"declare a named function type with a contract and use it here%s", types.ExprString(fun), t, v.funcTypeHint(t)))
 	}
-	for _, defect := range fn.defects {
-		v.report(fun.Pos(), "the contract of %s cannot be used: %s", fn.obj.Name(), defect)
-	}
-	if fn.broken {
-		v.unsupported(fun.Pos(), fmt.Sprintf("the contract of %s could not be understood", fn.obj.Name()))
-	}
+	v.usable(fun.Pos(), fn, fn.obj.Name())
 	sig := fn.obj.Type().(*types.Signature)
 	if sig.Variadic() {
 		v.unsupported(fun.Pos(), "calls of variadic function values are not supported yet")
@@ -553,15 +567,19 @@ func (pv *pkgVerifier) holdsContractedValue(t types.Type, seen map[types.Type]bo
 }
 
 // holdsCallable reports whether a value of a type can hold, however deep, a
-// function value of any type, or an interface value with a method that has
-// a contract. For those, runs claims only that the contract holds for
-// values that meet their contracts, which a cycle back through code that
-// verified code made would make circular. For an interface without
-// contracts, any, and an error, runs claims that the contract holds
-// whatever code arrives, and a cycle would make that claim false, which is
-// on the author of the entry. Until type assertions are built, verified
-// code also makes no value that such an interface holds and that it could
-// call; they must be counted once it does.
+// function value of any type, or an interface value that verified code can
+// make: one of an interface whose methods all have contracts. For those,
+// runs claims only that the contract holds for values that meet their
+// contracts, which a cycle back through code that verified code made would
+// make circular. Verified code makes no value of an interface with a method
+// that has no contract: a conversion to one is refused, and a conversion
+// between interfaces keeps the methods of the value. So no such value holds
+// code that verified code made, and nothing is circular; for it, as for an
+// interface without contracts, any, and an error, runs claims that the
+// contract holds whatever code arrives, and a cycle would make that claim
+// false, which is on the author of the entry. Until type assertions are
+// built, verified code also makes no value that such an interface holds and
+// that it could call; they must be counted once it does.
 func holdsCallable(pv *pkgVerifier, t types.Type, seen map[types.Type]bool) bool {
 	if t == nil || seen[t] {
 		return false
@@ -571,7 +589,7 @@ func holdsCallable(pv *pkgVerifier, t types.Type, seen map[types.Type]bool) bool
 	case *types.Signature:
 		return true
 	case *types.Interface:
-		return pv.holdsContractedValue(t, map[types.Type]bool{})
+		return pv.fullyContracted(t)
 	case *types.Pointer:
 		return holdsCallable(pv, u.Elem(), seen)
 	case *types.Slice:
@@ -794,14 +812,9 @@ func (v *fnVerifier) functionValue(e ast.Expr, want types.Type, st *state, guard
 			what = "the function literal"
 		}
 		v.unsupported(e.Pos(), fmt.Sprintf("%s is used as a value of type %s, which has no contract; "+
-			"declare a named function type with a contract and use it here", what, want))
+			"declare a named function type with a contract and use it here%s", what, want, v.funcTypeHint(want)))
 	}
-	for _, defect := range T.defects {
-		v.report(e.Pos(), "the contract of %s cannot be used: %s", T.obj.Name(), defect)
-	}
-	if T.broken {
-		v.unsupported(e.Pos(), fmt.Sprintf("the contract of %s could not be understood", T.obj.Name()))
-	}
+	v.usable(e.Pos(), T, T.obj.Name())
 	switch {
 	case isLiteral:
 		v.madeLiteral(inner.(*ast.FuncLit), T, st, guard)
@@ -1082,6 +1095,7 @@ func (v *fnVerifier) madeLiteral(lit *ast.FuncLit, T *funcInfo, st *state, guard
 		vouches:     map[int]bool{},
 		decl:        &ast.FuncDecl{Name: &ast.Ident{NamePos: lit.Pos(), Name: T.obj.Name()}, Type: lit.Type, Body: lit.Body},
 		ownParams:   map[string]*types.Var{},
+		spelled:     T,
 	}
 	// The contract names the parameters and results of the type, which are
 	// those of the literal in the same order.

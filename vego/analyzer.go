@@ -220,6 +220,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			importedTypes:   map[*types.TypeName]*funcInfo{},
 			ifaceMethods:    map[*types.Func]*funcInfo{},
 			importedMethods: map[*types.Func]*funcInfo{},
+			typeEntries:     map[string]*funcInfo{},
 			foreignBroken:   map[*types.Package]bool{},
 			imported:        map[*types.Func]*funcInfo{},
 			foreign:         map[*types.Package]*logic.Resolver{},
@@ -342,6 +343,21 @@ type funcInfo struct {
 	// contract of a function type: the contract names its parameters as the
 	// type does, and old(x) in its body names its own parameter x.
 	ownParams map[string]*types.Var
+	// spelled is set for a function literal verified against the contract
+	// of a function type: the names in that contract other than its
+	// parameters and results mean what they mean where the contract was
+	// written, in the package that declares the type or in a trust file.
+	spelled *funcInfo
+}
+
+// spelling returns the contract whose clauses a function's annotations
+// were written as: the contract of the type a literal is made into, or the
+// function's own.
+func (f *funcInfo) spelling() *funcInfo {
+	if f.spelled != nil {
+		return f.spelled
+	}
+	return f
 }
 
 func (f *funcInfo) annotated() bool {
@@ -444,6 +460,10 @@ type pkgVerifier struct {
 	// nil for a method known to have none. See interfaces.go.
 	ifaceMethods    map[*types.Func]*funcInfo
 	importedMethods map[*types.Func]*funcInfo
+	// typeEntries holds the contracts that the trust files give methods of
+	// interface types and function types, by key, nil for a key with none;
+	// see typeentries.go.
+	typeEntries map[string]*funcInfo
 	// conversions lists the conversions to interface types in the package,
 	// once something asks; see conversions.go.
 	conversions *conversions

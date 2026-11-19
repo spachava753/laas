@@ -483,7 +483,6 @@ func (v *fnVerifier) checkRunNames(run ranOnce, callMark int) {
 	}
 }
 
-
 // ranOnce is the run of a function handed over that a trusted function
 // relies on to give the same result for the same argument: the state the
 // run ended in, the facts it added to those known at the call, the names
@@ -724,12 +723,7 @@ func (v *fnVerifier) handOver(fn *funcInfo, param *types.Var, arg ast.Expr, st *
 				"hand over a function literal, a function, a method value, or a value of a named function type with a contract",
 				types.ExprString(arg), fn.obj.Name(), param.Name(), fn.obj.Name(), v.info.TypeOf(arg)))
 		}
-		for _, defect := range T.defects {
-			v.report(arg.Pos(), "the contract of %s cannot be used: %s", T.obj.Name(), defect)
-		}
-		if T.broken {
-			v.unsupported(arg.Pos(), fmt.Sprintf("the contract of %s could not be understood", T.obj.Name()))
-		}
+		v.usable(arg.Pos(), T, T.obj.Name())
 		fun := v.eval(arg, st, guard)
 		v.check(st, guard, logic.Ne(fun[0], logic.RefLit(0)), arg.Pos(), "the function value %s may be nil", types.ExprString(arg))
 		return &handOver{arg: arg, contract: T, value: true}

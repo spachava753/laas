@@ -119,7 +119,7 @@ func (e *specEnv) root(name string) (val value, t types.Type, isResult bool, con
 		}
 		return e.results[index], e.fn.results[index].Type(), true, nil, nil
 	}
-	constant, err = e.v.contractConstant(e.fn, name)
+	constant, err = e.v.contractConstant(e.fn.spelling(), name)
 	return nil, nil, false, constant, err
 }
 
@@ -148,16 +148,17 @@ func (e *specEnv) errorVariable(name string, steps []logic.Step, when logic.When
 		variable, rest = e.v.packageErrorVariable(obj, steps)
 	case e.fn.paramNames[name] != nil || isResult:
 		return nil, false, nil
-	case e.fn.trust != nil:
+	case e.fn.spelling().trust != nil:
 		var err error
 		variable, rest, err = e.trustedErrorVariable(name, steps)
 		if err != nil {
 			return nil, true, err
 		}
-	case e.fn.imported != nil:
+	case e.fn.spelling().imported != nil:
+		imported := e.fn.spelling().imported
 		spelled := name
 		if len(steps) > 0 && steps[0].Field != "" {
-			if key, ok := e.fn.imported.Errors[name+"."+steps[0].Field]; ok {
+			if key, ok := imported.Errors[name+"."+steps[0].Field]; ok {
 				spelled, rest = name+"."+steps[0].Field, steps[1:]
 				variable = e.v.lookupKey(key)
 				if variable == nil {
@@ -166,7 +167,7 @@ func (e *specEnv) errorVariable(name string, steps []logic.Step, when logic.When
 				break
 			}
 		}
-		key, ok := e.fn.imported.Errors[spelled]
+		key, ok := imported.Errors[spelled]
 		if !ok {
 			return nil, false, nil
 		}
@@ -176,9 +177,9 @@ func (e *specEnv) errorVariable(name string, steps []logic.Step, when logic.When
 	default:
 		// A function type has no declaration of a function; its contract
 		// is read where the type is declared.
-		at := e.fn.obj.Pos()
-		if e.fn.decl != nil {
-			at = e.fn.decl.Pos()
+		at := e.fn.spelling().obj.Pos()
+		if decl := e.fn.spelling().decl; decl != nil {
+			at = decl.Pos()
 		}
 		_, obj := e.v.pass.Pkg.Scope().Innermost(at).LookupParent(name, at)
 		variable, rest = e.v.packageErrorVariable(obj, steps)
@@ -198,7 +199,7 @@ func (e *specEnv) errorVariable(name string, steps []logic.Step, when logic.When
 // whose path is the name, as in io.EOF. A longer path is written in quotes;
 // see Qualified.
 func (e *specEnv) trustedErrorVariable(name string, steps []logic.Step) (*types.Var, []logic.Step, error) {
-	if variable := errorVariableOf(e.fn.obj.Pkg().Scope().Lookup(name), ""); variable != nil {
+	if variable := errorVariableOf(e.fn.spelling().obj.Pkg().Scope().Lookup(name), ""); variable != nil {
 		return variable, steps, nil
 	}
 	if len(steps) == 0 || steps[0].Field == "" {
@@ -222,7 +223,7 @@ func (e *specEnv) trustedErrorVariable(name string, steps []logic.Step) (*types.
 func (e *specEnv) Qualified(path, name string, steps []logic.Step, when logic.When) (*logic.Term, error) {
 	spelled := fmt.Sprintf("%q.%s", path, name)
 	switch {
-	case e.fn == nil || e.fn.trust == nil || e.selfType != nil:
+	case e.fn == nil || e.fn.spelling().trust == nil || e.selfType != nil:
 		return nil, fmt.Errorf("%s: a package path in quotes can only be used in a trusted contract; name the package as the file imports it", spelled)
 	case token.IsIdentifier(path):
 		return nil, fmt.Errorf("%s: write %s.%s, without quotes", spelled, path, name)
@@ -399,7 +400,7 @@ func (e *specEnv) locateField(name string, steps []logic.Step, when logic.When) 
 		if variable, _ := e.v.packageErrorVariable(e.v.pass.Pkg.Scope().Lookup(name), steps); variable != nil {
 			return reached{}, fmt.Errorf("an invariant cannot name the error variable %s yet", name)
 		}
-		constant, constErr := e.v.contractConstant(e.fn, name)
+		constant, constErr := e.v.contractConstant(e.fn.spelling(), name)
 		switch {
 		case constErr != nil:
 			return reached{}, fmt.Errorf("%s is neither a field of the type nor a constant", name)

@@ -107,14 +107,9 @@ func (v *fnVerifier) madeInterface(e ast.Expr, held value, from, want types.Type
 		T := v.methodContract(method)
 		if T == nil {
 			v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: its method %s has no contract, so nothing would say "+
-				"what code that calls it may rely on", from, want, methodTitle(method)))
+				"what code that calls it may rely on%s", from, want, methodTitle(method), v.entryHint(method.Pkg(), method.Pos(), method.FullName())))
 		}
-		for _, defect := range T.defects {
-			v.report(e.Pos(), "the contract of %s cannot be used: %s", methodTitle(method), defect)
-		}
-		if T.broken {
-			v.unsupported(e.Pos(), fmt.Sprintf("the contract of %s could not be understood", methodTitle(method)))
-		}
+		v.usable(e.Pos(), T, methodTitle(method))
 	}
 	shown := types.TypeString(from, types.RelativeTo(v.pass.Pkg))
 	for method := range iface.Methods() {
@@ -294,7 +289,10 @@ func methodTitle(method *types.Func) string {
 // nil if it has none.
 func (pv *pkgVerifier) methodContract(method *types.Func) *funcInfo {
 	if method.Pkg() == pv.pass.Pkg {
-		return pv.ifaceMethods[method]
+		if fn := pv.ifaceMethods[method]; fn != nil {
+			return fn
+		}
+		return pv.entryMethod(method)
 	}
 	if fn, done := pv.importedMethods[method]; done {
 		return fn
@@ -302,11 +300,16 @@ func (pv *pkgVerifier) methodContract(method *types.Func) *funcInfo {
 	pv.importedMethods[method] = nil
 	fact := &contractFact{}
 	if method.Pkg() == nil || !pv.pass.ImportObjectFact(method, fact) {
-		return nil
+		fn := pv.entryMethod(method)
+		pv.importedMethods[method] = fn
+		return fn
 	}
 	fn := pv.contractFromFact(withoutReceiver(method), method.Pkg(), fact)
 	if !fact.Verified {
 		fn.defects = []string{fmt.Sprintf("the annotations of package %s were not all read", method.Pkg().Path())}
+	}
+	if pv.entryFor(method.FullName()) != nil {
+		fn.defect("it has a contract where it is declared and also an entry %s in the trust file", method.FullName())
 	}
 	fn.methodOf = method
 	pv.importedMethods[method] = fn
@@ -392,14 +395,9 @@ func (v *fnVerifier) usableMethodContract(call *ast.CallExpr, callee *types.Func
 	fn := v.methodContract(callee)
 	if fn == nil {
 		v.unsupported(call.Pos(), fmt.Sprintf("%s calls %s, which has no contract; a method of an interface gets one in its doc comment "+
-			"where the interface is declared, with // @ annotations", types.ExprString(call.Fun), methodTitle(callee)))
+			"where the interface is declared, with // @ annotations%s", types.ExprString(call.Fun), methodTitle(callee), v.entryHint(callee.Pkg(), callee.Pos(), callee.FullName())))
 	}
-	for _, defect := range fn.defects {
-		v.report(call.Pos(), "the contract of %s cannot be used: %s", methodTitle(callee), defect)
-	}
-	if fn.broken {
-		v.unsupported(call.Pos(), fmt.Sprintf("the contract of %s could not be understood", methodTitle(callee)))
-	}
+	v.usable(call.Pos(), fn, methodTitle(callee))
 	if fn.obj.Type().(*types.Signature).Variadic() {
 		v.unsupported(call.Pos(), "calls of variadic methods of interfaces are not supported yet")
 	}

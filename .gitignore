@@ -20,6 +20,10 @@
 !/vego/trusted/std/*.yaml
 !/vego/testdata/*.yaml
 
+# Test packages that stand for other modules have a go.mod of their own,
+# which the loader of the tests ignores and vego reads.
+!/vego/testdata/src/*/go.mod
+
 # Design notes and guides.
 !/vego/ROADMAP.md
 !/docs/*.md

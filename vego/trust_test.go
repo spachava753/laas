@@ -125,6 +125,14 @@ func TestReport(t *testing.T) {
 					Key: "math/rand.Intn", Reason: "Documented.", Shipped: true, File: "vego/trusted/std/math_rand.yaml", Line: 4,
 					Calls: []token.Position{at("b/b.go", 9)},
 				},
+				{
+					Key: "(example.com/lib.Sink).Put", Reason: "Every sink takes a number.", File: "/work/vego-trusted.yaml", Line: 12,
+					Every: "example.com/lib.Sink", Relied: []string{"example.com/app"}, Calls: []token.Position{at("b/b.go", 11)},
+				},
+				{
+					Key: "example.com/lib.Hook", Reason: "Hooks write nothing.", File: "/work/vego-trusted.yaml", Line: 16,
+					Every: "example.com/lib.Hook", Relied: []string{"example.com/app/b", "example.com/app"},
+				},
 			},
 		},
 	}
@@ -134,12 +142,22 @@ func TestReport(t *testing.T) {
 Every proof vego reports as successful holds only if the contracts below are true.
 None of them is checked against the code of the function it describes.
 
-Project contracts in use: 3
+Project contracts in use: 5
+  (example.com/lib.Sink).Put
+    reason:  Every sink takes a number.
+    a claim about Put of every value that code which is not verified hands to verified code, of example.com/lib.Sink or of an interface that has Put from it
+    defined: vego-trusted.yaml:12
+    used at: b/b.go:11
   example.com/app.load  [may fail unpredictably]
     reason:  Reads a file.
     vouches for the errors and function values in: err
     defined: vego-trusted.yaml:4
     used at: a.go:10, b/b.go:7
+  example.com/lib.Hook
+    reason:  Hooks write nothing.
+    a claim about every value of example.com/lib.Hook that code which is not verified hands to verified code
+    defined: vego-trusted.yaml:16
+    relied on in: example.com/app, example.com/app/b
   sort.Ints
     reason:  Another module's override.
     runs code held by: x, less

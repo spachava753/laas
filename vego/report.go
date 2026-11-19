@@ -59,11 +59,26 @@ func TrustReport(usages []*Usage, dir string) string {
 			for _, callback := range use.Callbacks {
 				fmt.Fprintf(&b, "    calls %s\n", callback)
 			}
+			// An entry for a method of an interface is a claim about the
+			// method of every value of every interface that has it from
+			// that declaration.
+			if _, method, ok := strings.Cut(use.Key, ")."); ok && use.Every != "" && strings.HasPrefix(use.Key, "(") {
+				fmt.Fprintf(&b, "    a claim about %s of every value that code which is not verified hands to verified code, of %s or of an interface that has %s from it\n",
+					method, use.Every, method)
+			} else if use.Every != "" {
+				fmt.Fprintf(&b, "    a claim about every value of %s that code which is not verified hands to verified code\n", use.Every)
+			}
 			if len(use.Vouches) > 0 {
 				fmt.Fprintf(&b, "    vouches for the errors and function values in: %s\n", strings.Join(use.Vouches, ", "))
 			}
 			fmt.Fprintf(&b, "    defined: %s:%d\n", relative(use.File), use.Line)
-			fmt.Fprintf(&b, "    used at: %s\n", places(use.Calls))
+			if len(use.Calls) > 0 {
+				fmt.Fprintf(&b, "    used at: %s\n", places(use.Calls))
+			} else {
+				relied := slices.Clone(use.Relied)
+				slices.Sort(relied)
+				fmt.Fprintf(&b, "    relied on in: %s\n", strings.Join(relied, ", "))
+			}
 		}
 		b.WriteString("\n")
 	}

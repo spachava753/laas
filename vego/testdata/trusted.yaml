@@ -964,8 +964,8 @@ trusted:
     runs: [a]
     modifies: []
 
-  (interfaces.Shape).Area: # // want `the trusted contract names \(interfaces.Shape\).Area, a method of an interface type, which the trust file cannot give a contract yet`
-    reason: A method of an interface cannot have a trusted contract.
+  (interfaces.Shape).Area: # // want `the trusted contract names \(interfaces.Shape\).Area, a method of an interface type of the module of this package; write its contract in the doc comment`
+    reason: An entry for a type of the module of the package is refused.
     modifies: []
 
   interfaces.loadPricer:
@@ -1014,4 +1014,96 @@ trusted:
   interfaces.logRecord:
     reason: Formats the number of a record and writes it to the writer the record holds, whatever writer that is.
     runs: [r]
+    modifies: []
+
+  # Contracts of types of another module; see foreign/.
+  (foreignlib.Sink).Put:
+    reason: Every sink of the tests takes a small number and returns at most twice it.
+    requires: ["0 <= x And x <= 100"]
+    modifies: []
+    ensures: ["err = nil -> (0 <= y And y <= 2 * x)"]
+
+  (foreignlib.Store).Size:
+    reason: A size is not negative.
+    modifies: []
+    ensures: ["n >= 0"]
+
+  (foreignlib.Filler).Fill:
+    reason: Fills what it is given.
+    modifies: [p]
+
+  (foreignlib.Ctx).Err:
+    reason: Says nothing of the error.
+    modifies: []
+
+  foreignlib.Hook:
+    reason: A hook writes nothing verified code can see.
+    modifies: []
+
+  foreignlib.Mapper:
+    reason: Doubles a small number.
+    requires: ["0 <= x And x <= 10"]
+    modifies: []
+    ensures: ["y = 2 * x"]
+
+  foreignlib.Fails:
+    reason: Fails only with ErrFull.
+    modifies: []
+    ensures: ["err = nil Or err = ErrFull"]
+
+  foreignlib.Half:
+    reason: No result meets this for an odd x.
+    modifies: []
+    ensures: ["2 * y = x"]
+
+  foreignlib.Runs:
+    reason: Lists runs, which a type cannot.
+    runs: [e]
+    modifies: []
+
+  (foreignlib.Store).Put: # // want `the trusted contract names \(foreignlib.Store\).Put, but Store has Put from \(foreignlib.Sink\).Put; key the entry \(foreignlib.Sink\).Put`
+    reason: Keyed by an interface that embeds the declaration.
+    modifies: []
+
+  (foreignlib.SinkAlias).Put: # // want `the trusted contract names \(foreignlib.SinkAlias\).Put, but SinkAlias has Put from \(foreignlib.Sink\).Put`
+    reason: Keyed by an alias.
+    modifies: []
+
+  (foreignlib.SinkCopy).Put: # // want `the trusted contract names \(foreignlib.SinkCopy\).Put, but SinkCopy has Put from \(foreignlib.Sink\).Put`
+    reason: Keyed by a type defined from the interface.
+    modifies: []
+
+  foreignlib.Bare: # // want `the trusted contract names foreignlib.Bare, an interface type; give the contract to each of its methods`
+    reason: Names the interface.
+    modifies: []
+
+  (foreignlib.Gen).Get: # // want `the trusted contract names \(foreignlib.Gen\).Get, a method of an interface type with type parameters`
+    reason: Generic.
+    modifies: []
+
+  foreign.Local: # // want `the trusted contract names foreign.Local, a function type of the module of this package; write its contract in the doc comment where it is declared`
+    reason: A type of this module.
+    modifies: []
+
+  foreign.passSink:
+    reason: Hands the sink nothing; its runs claim holds whatever sink arrives.
+    runs: [s]
+    modifies: []
+
+  foreign.pingCtx:
+    reason: Reads the error of the context.
+    runs: [c]
+    modifies: []
+
+  foreign.sinkOf:
+    reason: Returns a sink without vouching for it.
+    modifies: []
+
+  foreign.vouchedSink:
+    reason: Returns a sink of this project that meets the contract of Put.
+    vouches: [s]
+    modifies: []
+
+  (foreignannotated.Getter).Get:
+    reason: The interface has a contract in source as well.
     modifies: []

@@ -388,7 +388,14 @@ type EntryUse struct {
 	// Callbacks describes each function parameter given a contract under
 	// calls, as in "f(i) when: 0 <= i; i < n".
 	Callbacks []string
-	Calls     []token.Position
+	// Every names the type of an entry that gives a contract to a method
+	// of an interface type or to a function type, as in io.Writer; such an
+	// entry is a claim about every value of the type. Relied names the
+	// packages whose proofs rest on it, which may be none of the places in
+	// Calls.
+	Every  string
+	Relied []string
+	Calls  []token.Position
 }
 
 // add merges another usage into u.
@@ -410,12 +417,17 @@ func (u *Usage) add(other *Usage) {
 		})
 		if index < 0 {
 			copied := *use
-			copied.Calls = nil
+			copied.Calls, copied.Relied = nil, nil
 			u.Entries = append(u.Entries, &copied)
 			index = len(u.Entries) - 1
 		}
 		merged := u.Entries[index]
 		merged.Unpredictable = merged.Unpredictable || use.Unpredictable
+		for _, pkg := range use.Relied {
+			if !slices.Contains(merged.Relied, pkg) {
+				merged.Relied = append(merged.Relied, pkg)
+			}
+		}
 		for _, call := range use.Calls {
 			if !slices.Contains(merged.Calls, call) {
 				merged.Calls = append(merged.Calls, call)
@@ -489,13 +501,16 @@ func (pv *pkgVerifier) loadTrust(explicit string) {
 		// Unexported names of another package may be missing from what
 		// is known about it here; they are checked when it is analysed.
 		checkable := ok && visible[pkg] != nil && (visible[pkg] == pv.pass.Pkg || token.IsExported(name[strings.LastIndex(name, ".")+1:]))
-		if checkable && declaresInterfaceMethod(visible[pkg], name) {
-			pv.report(pv.trustPos(pv.projectTrust, entry.line, 1),
-				"the trusted contract names %s, a method of an interface type, which the trust file cannot give a contract yet; "+
-					"write the contract in the doc comment of the method where the interface is declared", key)
+		if !checkable {
 			continue
 		}
-		if checkable && !declares(visible[pkg], name) {
+		if isType, problem := pv.typeKeyProblem(visible[pkg], key, name); isType {
+			if problem != "" {
+				pv.report(pv.trustPos(pv.projectTrust, entry.line, 1), "%s", problem)
+			}
+			continue
+		}
+		if !declares(visible[pkg], name) {
 			pv.report(pv.trustPos(pv.projectTrust, entry.line, 1),
 				"the trusted contract names %s, but package %s has no such function", key, pkg)
 		}
@@ -539,48 +554,26 @@ func declares(pkg *types.Package, name string) bool {
 	return ok
 }
 
-// declaresInterfaceMethod reports whether a package declares an interface
-// type that has a method of the name, as Go prints it: "(I).M".
-func declaresInterfaceMethod(pkg *types.Package, name string) bool {
-	receiver, method, isMethod := strings.Cut(strings.TrimPrefix(name, "("), ").")
-	if !isMethod {
-		return false
-	}
-	typeName, ok := pkg.Scope().Lookup(receiver).(*types.TypeName)
-	if !ok || !types.IsInterface(typeName.Type()) {
-		return false
-	}
-	found, _, _ := types.LookupFieldOrMethod(typeName.Type(), false, pkg, method)
-	_, ok = found.(*types.Func)
-	return ok
-}
-
-// trustedContract returns the trusted contract of a function as a funcInfo,
-// or nil when it has none. A project entry replaces a shipped one. The
-// contract is checked against the real signature on first use: its names
-// must be parameters and results of the right types, modifies must list
-// what a caller can see change, and the contract must not contradict itself.
-func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
-	if fn, done := pv.trusted[callee]; done {
-		return fn
-	}
-	key := callee.FullName()
-	var entry *trustEntry
+// entryFor returns the entry of the trust files for a key, or nil. A
+// project entry replaces a shipped one.
+func (pv *pkgVerifier) entryFor(key string) *trustEntry {
 	if pv.projectTrust != nil {
-		entry = pv.projectTrust.entries[key]
-	}
-	for _, file := range shippedContracts() {
-		if entry == nil {
-			entry = file.entries[key]
+		if entry := pv.projectTrust.entries[key]; entry != nil {
+			return entry
 		}
 	}
-	if entry == nil {
-		pv.trusted[callee] = nil
-		return nil
+	for _, file := range shippedContracts() {
+		if entry := file.entries[key]; entry != nil {
+			return entry
+		}
 	}
-	fn := newFuncInfo(callee)
-	fn.trust = entry
-	pv.trusted[callee] = fn
+	return nil
+}
+
+// readEntry reads the requires, ensures, and modifies of an entry into the
+// contract fn, recording as defects what cannot be read. The clauses mean
+// the same wherever the contract is used.
+func (pv *pkgVerifier) readEntry(fn *funcInfo, entry *trustEntry) {
 	// A file with any problem is not a source of trust at all: which of
 	// its entries the problem touched cannot be told apart reliably, and a
 	// proof must not rest on a contract that was read wrongly.
@@ -619,6 +612,30 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 		c := &clause{kind: "modifies", text: item.text, pos: pv.trustPos(entry.file, item.line, item.col), res: pv.plain}
 		fn.modifies = append(fn.modifies, newModTargets(targets, c)...)
 	}
+}
+
+// trustedContract returns the trusted contract of a function as a funcInfo,
+// or nil when it has none. A project entry replaces a shipped one. The
+// contract is checked against the real signature on first use: its names
+// must be parameters and results of the right types, modifies must list
+// what a caller can see change, and the contract must not contradict itself.
+func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
+	if fn, done := pv.trusted[callee]; done {
+		return fn
+	}
+	// The method of an interface has no code of its own to trust: an
+	// entry for one is a contract of the interface, read by
+	// methodContract.
+	key := callee.FullName()
+	entry := pv.entryFor(key)
+	if entry == nil || isIfaceMethod(callee) {
+		pv.trusted[callee] = nil
+		return nil
+	}
+	fn := newFuncInfo(callee)
+	fn.trust = entry
+	pv.trusted[callee] = fn
+	pv.readEntry(fn, entry)
 	// The parameters whose code the function is said to run. Listing one
 	// that can hold no code would be a claim about nothing.
 	for _, item := range entry.runs {
@@ -898,13 +915,25 @@ func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 			}
 			callbacks = append(callbacks, described)
 		}
+		every := ""
+		switch {
+		case fn.methodOf != nil:
+			every = types.TypeString(fn.methodOf.Type().(*types.Signature).Recv().Type(), nil)
+		case fn.valueOf != nil:
+			every = funcTypeKey(fn.valueOf)
+		}
 		pv.usage.Entries = append(pv.usage.Entries, &EntryUse{
 			Key: entry.key, Reason: entry.reason, Shipped: entry.file.shipped,
 			File: entry.file.path, Line: entry.line, Runs: runs, Vouches: vouches, Callbacks: callbacks,
+			Every: every, Relied: []string{pv.pass.Pkg.Path()},
 		})
 		index = len(pv.usage.Entries) - 1
 	}
 	use := pv.usage.Entries[index]
+	fn.use = use
+	if !at.IsValid() {
+		return
+	}
 	position := pv.pass.Fset.Position(at)
 	if !slices.Contains(use.Calls, position) {
 		use.Calls = append(use.Calls, position)
