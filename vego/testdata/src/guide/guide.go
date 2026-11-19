@@ -840,13 +840,13 @@ func (a *Account) deposit(n int) {
 	a.balance += n
 }
 
-// DepositLocked tries to take the lock in verified code. Lock has no
-// contract, and no true one can be written for it.
+// DepositLocked takes the lock in verified code without saying that the
+// caller does not hold it.
 //
 // @Requires a != nil And 0 <= n And a.balance + n <= 1000000
 // @Modifies a
 func (a *Account) DepositLocked(n int) {
-	a.mu.Lock() // want `vego: cannot verify DepositLocked: it calls Lock, which has no contract`
+	a.mu.Lock() // want `vego: precondition of Lock may not hold: ~held\(m\)`
 	a.balance += n
 	a.mu.Unlock()
 }

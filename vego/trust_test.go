@@ -126,6 +126,14 @@ func TestReport(t *testing.T) {
 					Calls: []token.Position{at("b/b.go", 9)},
 				},
 				{
+					Key: "(*sync.Mutex).Lock", Reason: "Documented.", Shipped: true, File: "vego/trusted/std/sync.yaml", Line: 9,
+					Calls: []token.Position{at("a.go", 40)}, States: []string{"sync.Mutex held: True when locked."},
+				},
+				{
+					Key: "(*sync.Mutex).Unlock", Reason: "Documented.", Shipped: true, File: "vego/trusted/std/sync.yaml", Line: 19,
+					Calls: []token.Position{at("a.go", 41)}, States: []string{"sync.Mutex held: True when locked."},
+				},
+				{
 					Key: "(example.com/lib.Sink).Put", Reason: "Every sink takes a number.", File: "/work/vego-trusted.yaml", Line: 12,
 					Every: "example.com/lib.Sink", Relied: []string{"example.com/app"}, Calls: []token.Position{at("b/b.go", 11)},
 				},
@@ -169,11 +177,23 @@ Project contracts in use: 5
     defined: vego-trusted.yaml:9
     used at: a.go:20
 
-Shipped contracts in use: 1
+Shipped contracts in use: 3
+  (*sync.Mutex).Lock
+    reason:  Documented.
+    defined: vego/trusted/std/sync.yaml:9
+    used at: a.go:40
+  (*sync.Mutex).Unlock
+    reason:  Documented.
+    defined: vego/trusted/std/sync.yaml:19
+    used at: a.go:41
   math/rand.Intn
     reason:  Documented.
     defined: vego/trusted/std/math_rand.yaml:4
     used at: b/b.go:9
+
+States the contracts in use speak of: 1
+  sync.Mutex held
+    means:   True when locked.
 
 Project contracts no proof uses: 1
   example.com/app.unused  (vego-trusted.yaml)

@@ -21,3 +21,96 @@ state:
         the mutex for reading with RLock or a TryRLock that returned true and
         has not unlocked it with RUnlock since. The zero value of an RWMutex
         is documented to be an unlocked mutex.
+
+# held and rheld are about the goroutine that runs the verified function.
+# Each entry claims what the documentation of Go 1.18 (where TryLock and
+# TryRLock appeared) and later says of that goroutine, under the condition
+# every proof has: no other goroutine writes the memory the function uses,
+# except to lock and unlock a mutex this goroutine does not hold. A call
+# that waits for another goroutine returns once that goroutine releases the
+# mutex. A method on a nil pointer dereferences it and panics.
+trusted:
+  (*sync.Mutex).Lock:
+    reason: >-
+      Documented: "If the lock is already in use, the calling goroutine blocks
+      until the mutex is available." A goroutine that does not hold m gets it
+      once others release it; one that holds it would wait for ever, which
+      the requires rules out. It changes only m.
+    requires: ["m != nil", "~held(m)"]
+    modifies: [m]
+    ensures: ["held(m')"]
+  (*sync.Mutex).TryLock:
+    reason: >-
+      Documented: "TryLock tries to lock m and reports whether it succeeded."
+      It never waits. When it reports true, the calling goroutine holds m,
+      which it did not before, since m was locked if it did; when false,
+      nothing changed for the calling goroutine. It changes only m.
+    requires: ["m != nil"]
+    modifies: [m]
+    ensures: ["result -> ~held(m) And held(m')", "~result -> (held(m') <-> held(m))"]
+  (*sync.Mutex).Unlock:
+    reason: >-
+      Documented: "It is a run-time error if m is not locked on entry to
+      Unlock." A goroutine that holds m has it locked, so Unlock returns and
+      the goroutine no longer holds m. It changes only m.
+    requires: ["m != nil", "held(m)"]
+    modifies: [m]
+    ensures: ["~held(m')"]
+  (*sync.RWMutex).Lock:
+    reason: >-
+      Documented: "If the lock is already locked for reading or writing, Lock
+      blocks until the lock is available." The calling goroutine must hold
+      neither lock, since it would wait for itself. It changes only rw.
+    requires: ["rw != nil", "~held(rw)", "~rheld(rw)"]
+    modifies: [rw]
+    ensures: ["held(rw')", "~rheld(rw')"]
+  (*sync.RWMutex).TryLock:
+    reason: >-
+      Documented: "TryLock tries to lock rw for writing and reports whether it
+      succeeds." It never waits, and fails while any lock is held, the
+      calling goroutine's included. It changes only rw.
+    requires: ["rw != nil"]
+    modifies: [rw]
+    ensures:
+      - "result -> ~held(rw) And ~rheld(rw) And held(rw')"
+      - "~result -> (held(rw') <-> held(rw))"
+      - "rheld(rw') <-> rheld(rw)"
+  (*sync.RWMutex).Unlock:
+    reason: >-
+      Documented: "It is a run-time error if rw is not locked for writing on
+      entry to Unlock." A goroutine that holds the write lock has it locked.
+      It changes only rw.
+    requires: ["rw != nil", "held(rw)"]
+    modifies: [rw]
+    ensures: ["~held(rw')", "rheld(rw') <-> rheld(rw)"]
+  (*sync.RWMutex).RLock:
+    reason: >-
+      Documented: it "should not be used for recursive read locking; a blocked
+      Lock call excludes new readers from acquiring the lock", and RLock waits
+      while a writer holds the lock. So the calling goroutine must hold
+      neither lock; it then gets a read lock once writers release theirs. It
+      changes only rw.
+    requires: ["rw != nil", "~held(rw)", "~rheld(rw)"]
+    modifies: [rw]
+    ensures: ["rheld(rw')", "~held(rw')"]
+  (*sync.RWMutex).TryRLock:
+    reason: >-
+      Documented: "TryRLock tries to lock rw for reading and reports whether
+      it succeeds." It never waits. The calling goroutine must not hold a read
+      lock already, or a second one would not be counted by rheld. It changes
+      only rw.
+    requires: ["rw != nil", "~rheld(rw)"]
+    modifies: [rw]
+    ensures:
+      - "result -> ~held(rw) And rheld(rw')"
+      - "~result -> ~rheld(rw')"
+      - "held(rw') <-> held(rw)"
+  (*sync.RWMutex).RUnlock:
+    reason: >-
+      Documented: "It is a run-time error if rw is not locked for reading on
+      entry to RUnlock." A goroutine that holds a read lock has rw locked for
+      reading. It holds one read lock at most, so afterwards it holds none.
+      It changes only rw.
+    requires: ["rw != nil", "rheld(rw)"]
+    modifies: [rw]
+    ensures: ["~rheld(rw')", "held(rw') <-> held(rw)"]

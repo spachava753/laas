@@ -416,7 +416,11 @@ type EntryUse struct {
 	// Fingerprint is, for such an entry, what it says, so that two entries
 	// for one type in a build can be told apart from two copies of one.
 	Fingerprint string
-	Calls       []token.Position
+	// States lists the states that the types of the parameters declare,
+	// each as the type, the name, and the reason, as in "sync.Mutex held:
+	// True when ...": what the entry's formulas mean by them.
+	States []string
+	Calls  []token.Position
 }
 
 // add merges another usage into u.
@@ -1002,10 +1006,22 @@ func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 		case fn.valueOf != nil:
 			every = funcTypeKey(fn.valueOf)
 		}
+		var states []string
+		for _, param := range fn.params {
+			object, isPointer := pointee(param.Type())
+			if !isPointer {
+				object = param.Type()
+			}
+			if u, isStruct := object.Underlying().(*types.Struct); isStruct {
+				for _, decl := range statesOf(u) {
+					states = append(states, fmt.Sprintf("%s %s: %s", types.TypeString(object, nil), decl.name, decl.reason))
+				}
+			}
+		}
 		pv.usage.Entries = append(pv.usage.Entries, &EntryUse{
 			Key: entry.key, Reason: entry.reason, Shipped: entry.file.shipped,
 			File: entry.file.path, Line: entry.line, Runs: runs, Vouches: vouches, Callbacks: callbacks,
-			Every: every, Relied: []string{pv.pass.Pkg.Path()}, Fingerprint: entry.fingerprint(),
+			Every: every, Relied: []string{pv.pass.Pkg.Path()}, Fingerprint: entry.fingerprint(), States: states,
 		})
 		index = len(pv.usage.Entries) - 1
 	}

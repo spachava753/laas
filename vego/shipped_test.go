@@ -523,6 +523,8 @@ func TestShippedContracts(t *testing.T) {
 				return true
 			},
 			AllPackageFacts: func() []analysis.PackageFact { return nil },
+			// No type of a shipped contract has an invariant.
+			ImportObjectFact: func(types.Object, analysis.Fact) bool { return false },
 		},
 		res:          logic.NewResolver(),
 		trusted:      map[*types.Func]*funcInfo{},
@@ -531,6 +533,9 @@ func TestShippedContracts(t *testing.T) {
 		usage:        &Usage{},
 		reliedKeys:   map[string]bool{},
 		typeEntries:  map[string]*funcInfo{},
+		// The types of the methods of sync are structs, whose invariants
+		// are looked up.
+		invariants: map[*types.TypeName]*invariantSet{},
 	}
 	imports := importer.ForCompiler(pv.pass.Fset, "source", nil)
 	// A contract names the variables of a package by its path, which must
@@ -557,6 +562,10 @@ func TestShippedContracts(t *testing.T) {
 				}
 				if fn := shippedTypeContract(pv, pkg, name); fn != nil {
 					checkTypeContract(t, pv, key, fn)
+					return
+				}
+				if strings.HasPrefix(key, "(*sync.") {
+					checkLockEntry(t, pv, pkg, key)
 					return
 				}
 				callee, ok := pkg.Scope().Lookup(name).(*types.Func)

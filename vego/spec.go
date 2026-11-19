@@ -30,6 +30,9 @@ type specEnv struct {
 	given        map[*types.Var]*logic.Term
 	givenPost    map[*types.Var]*logic.Term
 	givenResults []*logic.Term
+	// givenState replaces the state of a parameter, plain or primed, by a
+	// ready-made term, where given is set.
+	givenState func(param *types.Var, state string, when logic.When) *logic.Term
 	// now is the memory plain paths are read from, and post the memory
 	// primed paths and results are read from, nil where there is none.
 	now, post memory
@@ -545,6 +548,13 @@ func (e *specEnv) state(name string, steps []logic.Step, state string, when logi
 		return nil, &logic.NoState{}
 	}
 	what := spell(name, steps)
+	if e.givenState != nil && e.fn != nil && len(steps) == 0 {
+		if param, isParam := e.fn.paramNames[name]; isParam {
+			if t := e.givenState(param, state, when); t != nil {
+				return t, nil
+			}
+		}
+	}
 	found, err := e.locateAt(name, steps, when, true)
 	switch {
 	case err != nil:

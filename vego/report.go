@@ -89,6 +89,22 @@ func TrustReport(usages []*Usage, dir string) string {
 	b.WriteString("None of them is checked against the code of the function it describes.\n\n")
 	section("Project contracts in use", false)
 	section("Shipped contracts in use", true)
+	// A state means what its declaration says; every entry that speaks of
+	// it rests on that.
+	var states []string
+	for _, use := range entries {
+		states = append(states, use.States...)
+	}
+	slices.Sort(states)
+	states = slices.Compact(states)
+	if len(states) > 0 {
+		fmt.Fprintf(&b, "States the contracts in use speak of: %d\n", len(states))
+		for _, state := range states {
+			name, reason, _ := strings.Cut(state, ": ")
+			fmt.Fprintf(&b, "  %s\n    means:   %s\n", name, reason)
+		}
+		b.WriteString("\n")
+	}
 	var unused []string
 	for _, file := range slices.Sorted(maps.Keys(total.ProjectKeys)) {
 		for _, key := range total.ProjectKeys[file] {
