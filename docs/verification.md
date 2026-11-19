@@ -572,7 +572,7 @@ A variable declared with `:=` that holds a literal and is used other than by cal
 
 ## Function values
 
-A function value is a value of a function type: a parameter, a result, a variable, a field, an element of a slice, or a value in a map. `vego` calls a function value only through the contract of its type. You write that contract in the doc comment of a named function type, with the keywords a function uses:
+A function value is a value of a function type. It can be held anywhere a value can, such as in a parameter, a field, or a slice. `vego` calls a function value only through the contract of its type. You write that contract in the doc comment of a named function type, with the keywords a function uses:
 
 ```go
 // Mapper maps a number in range to a number in range.
@@ -751,7 +751,13 @@ A literal used as a value cannot call a variable that holds a literal of the fun
 
 ### Function values that call function values
 
-The code that a function value made by verified code runs cannot call through a function value. That rules out a literal that calls a value it captures, a literal or function that passes a value to a function that calls it, and a function used as a value that calls through a value itself:
+The code that a function value made by verified code runs cannot call through a function value. These are refused:
+
+- a literal that calls a value it captures;
+- a literal or a function that passes a value to a function that calls it;
+- a function used as a value that calls through a value itself.
+
+`Logged` returns a literal of the first kind:
 
 ```go
 // @Requires f != nil
@@ -773,7 +779,13 @@ A contract of a function type has no `Variant`. A value could be handed back to 
 
 ### Function values from code that is not verified
 
-A function value that verified code receives from code it does not verify is taken to meet the contract of its type. See [What a proof assumes](#what-a-proof-assumes). Such a value could run code that an argument carries. So an argument that can carry code nobody has seen cannot be passed to a function value: an error whose origin is not known, a function value whose type has no contract, or another interface.
+A function value that verified code receives from code it does not verify is taken to meet the contract of its type. See [What a proof assumes](#what-a-proof-assumes). Such a value could run code that an argument carries. So these arguments cannot be passed to a function value:
+
+- an error whose origin is not known;
+- a function value whose type has no contract;
+- any other interface.
+
+`Tell` passes an error that came from a parameter:
 
 ```go
 // @Requires e != nil
