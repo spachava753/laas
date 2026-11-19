@@ -303,3 +303,24 @@ func Behind(l *Link, n int) {
 		reset(&l.to.a)
 	}
 } // want `vego: postcondition may not hold: l.to.b.x' = l.to.b.x`
+
+// @Requires q != nil
+// @Modifies q
+// @Ensures q.a.x' = 0 And q.b.x' = 0
+func resetOuter(q *Outer) {
+	q.a, q.b = Point{}, Point{}
+}
+
+// WholeOuter writes both points of a struct, whose x fields lie in one
+// region at two positions; neither is kept.
+//
+// @Requires q != nil And 0 <= n <= 10
+// @Modifies q
+// @Ensures q.b.x' = q.b.x
+func WholeOuter(q *Outer, n int) {
+	// @Invariant 0 <= i <= n
+	// @Variant n - i
+	for i := 0; i < n; i++ {
+		resetOuter(q)
+	}
+} // want `vego: postcondition may not hold: q.b.x' = q.b.x`
