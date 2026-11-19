@@ -390,10 +390,15 @@ func (v *fnVerifier) returned(st *state, results []value, pos token.Pos) {
 // began as a copy of st and only added facts to it.
 //
 // With one end, that end is the state after the call. With several, a new
-// constant path says which end was reached: the facts each end added hold
-// when path names it, and every variable, region of memory, result, and
-// bound of memory that differs between the ends is a choice on path. With
-// none, the call never returns, and nothing after it is reached.
+// constant path says which end was reached, and the facts each end added
+// hold when path names it. Every variable, result, and bound of memory that
+// differs between the ends becomes a new constant, equal to what that end
+// has when path names it; every region of memory that differs becomes a
+// new constant too, which table relates to the region of each end at the
+// references read, as it does for a region a loop forgot. Nothing a join
+// makes holds more than the name of what an earlier join made, so a chain
+// of calls makes terms no larger than one call does. With no end, the call
+// never returns, and nothing after it is reached.
 //
 // The variables of the literal itself are dropped: nothing after the call
 // can name them.
@@ -425,8 +430,10 @@ func (v *fnVerifier) join(st *state, ends []litEnd, sig *types.Signature) []valu
 		return ends[0].results
 	}
 	path := v.fresh("path", logic.Int)
+	index := len(v.forwards)
 	which := make([]*logic.Term, len(ends))
 	facts := []*logic.Term{logic.Le(logic.IntLit(0), path), logic.Lt(path, logic.IntLit(int64(len(ends))))}
+	produced := []string{path.Name}
 	var given []*logic.Term
 	for i, end := range ends {
 		which[i] = logic.Eq(path, logic.IntLit(int64(i)))
@@ -434,19 +441,26 @@ func (v *fnVerifier) join(st *state, ends []litEnd, sig *types.Signature) []valu
 		given = append(given, added...)
 		facts = append(facts, logic.Implies(which[i], logic.And(added...)))
 	}
-	// choose returns the term that is the i-th of terms when path is i.
-	choose := func(terms []*logic.Term) *logic.Term {
+	// choose returns a constant that is the i-th of terms when path is i,
+	// or the term all of them are.
+	choose := func(base string, terms []*logic.Term) *logic.Term {
 		if !slices.ContainsFunc(terms, func(t *logic.Term) bool { return t != terms[0] }) {
 			return terms[0]
 		}
+		checkJoinSize(terms)
 		given = append(given, terms...)
-		chosen := terms[len(terms)-1]
-		for i := len(terms) - 2; i >= 0; i-- {
-			chosen = logic.Ite(which[i], terms[i], chosen)
+		joined := v.fresh(base, terms[0].Sort)
+		produced = append(produced, joined.Name)
+		for i, t := range terms {
+			same := v.same(joined, t)
+			if t.Sort == logic.Bool {
+				same = logic.Iff(joined, t)
+			}
+			facts = append(facts, logic.Implies(which[i], same))
 		}
-		return chosen
+		return joined
 	}
-	chooseValue := func(of func(end litEnd) value) value {
+	chooseValue := func(base string, of func(end litEnd) value) value {
 		first := of(ends[0])
 		if first == nil {
 			return nil
@@ -457,13 +471,13 @@ func (v *fnVerifier) join(st *state, ends []litEnd, sig *types.Signature) []valu
 			for i, end := range ends {
 				terms[i] = of(end)[j]
 			}
-			joined[j] = choose(terms)
+			joined[j] = choose(base, terms)
 		}
 		return joined
 	}
 	vals := map[*types.Var]value{}
-	for variable := range st.vals {
-		vals[variable] = chooseValue(func(end litEnd) value { return end.st.vals[variable] })
+	for _, variable := range slices.SortedFunc(maps.Keys(st.vals), func(a, b *types.Var) int { return int(a.Pos() - b.Pos()) }) {
+		vals[variable] = chooseValue(variable.Name(), func(end litEnd) value { return end.st.vals[variable] })
 	}
 	mem := memory{}
 	regions := map[string]logic.Sort{}
@@ -477,7 +491,15 @@ func (v *fnVerifier) join(st *state, ends []litEnd, sig *types.Signature) []valu
 		for i, end := range ends {
 			terms[i] = end.st.mem.region(key, regions[key])
 		}
-		mem[key] = choose(terms)
+		if !slices.ContainsFunc(terms, func(t *logic.Term) bool { return t != terms[0] }) {
+			mem[key] = terms[0]
+			continue
+		}
+		checkJoinSize(terms)
+		joined := v.fresh("mem^"+key, regions[key])
+		produced = append(produced, joined.Name)
+		v.joins[joined.Name] = &joinedRegion{which: which, alternatives: terms, forward: index}
+		mem[key] = joined
 	}
 	brks := make([]*logic.Term, len(ends))
 	for i, end := range ends {
@@ -485,19 +507,81 @@ func (v *fnVerifier) join(st *state, ends []litEnd, sig *types.Signature) []valu
 	}
 	results := make([]value, sig.Results().Len())
 	for k := range results {
-		results[k] = chooseValue(func(end litEnd) value { return end.results[k] })
+		results[k] = chooseValue("result", func(end litEnd) value { return end.results[k] })
 	}
-	st.vals, st.mem, st.brk = vals, mem, choose(brks)
+	st.vals, st.mem, st.brk = vals, mem, choose("brk", brks)
 	for _, fact := range facts {
 		st.assume(fact)
 	}
-	// What the ends depended on decides path; see tieFailures.
-	joined := forward{given: given, produced: []string{path.Name}, facts: facts}
+	// What the ends depended on decides path and what was chosen with it;
+	// see tieFailures.
+	joined := forward{given: given, produced: produced, facts: facts}
 	for _, taken := range st.chosen {
 		joined.path = append(joined.path, taken.cond)
 	}
+	if len(v.forwards) != index {
+		panic("vego: internal error: a call was recorded while the ends of a function literal were joined")
+	}
 	v.forwards = append(v.forwards, joined)
 	return results
+}
+
+// joinedRegion is a region of memory that a join made: which condition on
+// path picks each end, the region each end had, and the index in forwards
+// of the join, whose facts gain what is stated of the region where it is
+// read, so that tieFailures can follow what the region depends on.
+type joinedRegion struct {
+	which        []*logic.Term
+	alternatives []*logic.Term
+	forward      int
+}
+
+// joinedAt states, for one reference, that a joined region holds there what
+// the region of the end that was reached holds.
+func (v *fnVerifier) joinedAt(now *logic.Term, joined *joinedRegion, ref *logic.Term) *logic.Term {
+	var facts []*logic.Term
+	flat := !now.Sort.Elem().IsSeq()
+	index := v.bound("k")
+	for i, alternative := range joined.alternatives {
+		if flat {
+			facts = append(facts, logic.Implies(joined.which[i], v.same(logic.Select(now, ref), logic.Select(alternative, ref))))
+			continue
+		}
+		row, other := logic.Select(now, ref), logic.Select(alternative, ref)
+		facts = append(facts, logic.Implies(joined.which[i], logic.And(logic.Eq(logic.Len(row), logic.Len(other)),
+			logic.Forall(index, v.same(logic.Select(row, index), logic.Select(other, index))))))
+	}
+	return logic.And(facts...)
+}
+
+// joinSizeLimit, when it is not zero, is the size beyond which a term that
+// goes into a join is a fault of the verifier: what a join makes must not
+// grow with the joins before it. The tests set it, so that such growth is
+// caught at once and not by the machine running out of memory.
+var joinSizeLimit int
+
+// checkJoinSize panics when a term that goes into a join has grown beyond
+// joinSizeLimit, counted as a tree with shared parts counted again.
+func checkJoinSize(terms []*logic.Term) {
+	if joinSizeLimit == 0 {
+		return
+	}
+	for _, t := range terms {
+		budget := joinSizeLimit
+		var count func(t *logic.Term)
+		count = func(t *logic.Term) {
+			budget--
+			for _, arg := range t.Args {
+				if budget < 0 {
+					return
+				}
+				count(arg)
+			}
+		}
+		if count(t); budget < 0 {
+			panic(fmt.Sprintf("vego: internal error: a term that goes into a join has more than %d nodes", joinSizeLimit))
+		}
+	}
 }
 
 // report emits a diagnostic. One found while the body of a literal is

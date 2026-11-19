@@ -210,3 +210,99 @@ func GuardKeeps(A []int, c bool) {
 		return
 	}
 }
+
+// Chain joins one region 32 times: a literal with two ends that writes
+// memory, called again and again. What a join makes must not grow with
+// the joins before it.
+//
+// @Requires g != nil
+// @Modifies g.v
+// @Ensures result = 0 Or result = 1
+func Chain(g *Gauge, c bool) (result int) {
+	g.v = 0
+	bump := func() {
+		if c {
+			g.v = 1
+		}
+	}
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	bump()
+	return g.v
+}
+
+// ChainValue joins a value 32 times through the result of a literal with
+// two ends.
+//
+// @Requires 0 <= x <= 1000
+// @Ensures x <= result <= x + 32
+func ChainValue(x int) (result int) {
+	step := func(n int) int {
+		if n < 2000 {
+			return n + 1
+		}
+		return n
+	}
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	x = step(x)
+	return x
+}

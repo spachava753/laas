@@ -188,30 +188,38 @@ func (v *fnVerifier) table(sink *state, mem memory, key string, sort logic.Sort,
 	if sink == nil {
 		return current
 	}
-	// A region is a chain of writes on a forgotten region, or, after a call
-	// of a function literal that ended in several ways, a choice between
-	// such chains; every forgotten region on the way is looked at. What a
-	// layer keeps is true whichever way was taken.
+	// A region is a chain of writes on a region a loop forgot or a join
+	// made, or on the region on entry. Every such region on the way is
+	// looked at once: what a layer keeps, and what a join chose, are true
+	// at the reference read.
+	seen := map[string]bool{}
 	for pending := []*logic.Term{current}; len(pending) > 0; {
 		at := pending[len(pending)-1]
 		pending = pending[:len(pending)-1]
 		for at.Op == logic.OpStore {
 			at = at.Args[0]
 		}
-		if at.Op == logic.OpIte {
-			pending = append(pending, at.Args[2], at.Args[1])
+		if seen[at.Name] {
 			continue
 		}
-		known := v.layers[at.Name]
-		if known == nil {
-			continue
-		}
+		seen[at.Name] = true
 		note := at.Name + "|" + ref.String()
-		if !sink.noted[note] {
-			sink.noted[note] = true
-			sink.assume(v.unchanged(at, known, ref))
+		if known := v.layers[at.Name]; known != nil {
+			if !sink.noted[note] {
+				sink.noted[note] = true
+				sink.assume(v.unchanged(at, known, ref))
+			}
+			pending = append(pending, known.prev)
 		}
-		pending = append(pending, known.prev)
+		if joined := v.joins[at.Name]; joined != nil {
+			if !sink.noted[note] {
+				sink.noted[note] = true
+				fact := v.joinedAt(at, joined, ref)
+				sink.assume(fact)
+				v.forwards[joined.forward].facts = append(v.forwards[joined.forward].facts, fact)
+			}
+			pending = append(pending, joined.alternatives...)
+		}
 	}
 	return current
 }

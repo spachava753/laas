@@ -241,3 +241,7 @@ func TestShownAnnotationsScan(t *testing.T) {
 		})
 	}
 }
+
+// A term that goes into a join of the ends of a function literal must not
+// grow with the joins before it; the tests catch such growth at once.
+func init() { joinSizeLimit = 1 << 12 }

@@ -77,7 +77,10 @@ type fnVerifier struct {
 	used  []bool
 	// layers holds, by the name of the constant that stands for a forgotten
 	// region, what is still known of the region.
-	layers   map[string]*layer
+	layers map[string]*layer
+	// joins holds, by the name of the constant that stands for it, each
+	// region a join of the ends of a function literal made.
+	joins    map[string]*joinedRegion
 	names    map[string]int
 	branches int
 	measure  *logic.Term
@@ -140,7 +143,7 @@ func (pv *pkgVerifier) run(fn *funcInfo, task func(v *fnVerifier)) {
 	v := &fnVerifier{
 		pkgVerifier: pv, fn: fn, entry: map[*types.Var]value{}, names: map[string]int{},
 		reached: map[*funcInfo]bool{}, bitTerms: map[string]*logic.Term{}, lowZeros: map[string]uint{}, bitOrigins: map[string]bitOrigin{}, forgotten: map[string]forgottenPart{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{},
-		backgroundSeen: map[string]bool{}, targetSeen: map[string]bool{}, inlining: map[*ast.FuncLit]bool{},
+		backgroundSeen: map[string]bool{}, targetSeen: map[string]bool{}, inlining: map[*ast.FuncLit]bool{}, joins: map[string]*joinedRegion{},
 	}
 	defer func() {
 		switch r := recover().(type) {

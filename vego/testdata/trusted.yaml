@@ -31,6 +31,10 @@ trusted:
     reason: Test helper standing for a call whose failure cannot be predicted.
     modifies: []
 
+  values.outsideNumber:
+    reason: Test helper standing for a call whose result cannot be predicted.
+    modifies: []
+
   values.describe:
     reason: Test helper that reads an error.
     runs: [e]
