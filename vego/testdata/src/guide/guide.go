@@ -929,7 +929,7 @@ func Free(a *Account) {
 // @Requires a != nil
 // @Ensures True
 func Snapshot(a *Account) (balance int) {
-	b := *a // want `vego: cannot verify Snapshot: \*a copies a guide.Account, which holds a sync.Mutex; use a pointer to it; a value that holds a state, such as a sync.Mutex, must not be copied or overwritten, since its state changes only through its methods and sync documents that a Mutex must not be copied after first use`
+	b := *a // want `vego: cannot verify Snapshot: \*a copies a value of type Account, which holds a sync.Mutex; use a pointer to it; a value that holds a state, such as a sync.Mutex, must not be copied or overwritten, since its state changes only through its methods and sync documents that a Mutex must not be copied after first use`
 	return b.balance
 }
 

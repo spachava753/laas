@@ -49,12 +49,13 @@ func holdsState(t types.Type) (types.Type, bool) {
 
 // holding describes a type that holds a state, for a message, followed by
 // a comma when more of the sentence follows.
-func holding(t types.Type) string {
+// Types are named relative to the package, as q says.
+func holding(t types.Type, q types.Qualifier) string {
 	inner, _ := holdsState(t)
 	if types.Identical(inner, t) {
-		return fmt.Sprintf("%s, which holds a state", t)
+		return fmt.Sprintf("%s, which holds a state", types.TypeString(t, q))
 	}
-	return fmt.Sprintf("%s, which holds a %s", t, inner)
+	return fmt.Sprintf("%s, which holds a %s", types.TypeString(t, q), types.TypeString(inner, q))
 }
 
 // copyReason is said in every refusal.
@@ -69,19 +70,20 @@ var skipCopyWalk = false
 // included, where Go copies or overwrites a value that holds a state.
 func (v *fnVerifier) checkCopies(decl *ast.FuncDecl) {
 	if !skipCopyWalk {
-		if pos, msg := copyWalk(v.info, decl, v.findConversions()); msg != "" {
+		if pos, msg := copyWalk(v.info, v.pass.Pkg, decl, v.findConversions()); msg != "" {
 			v.unsupported(pos, msg)
 		}
 	}
 	if found := v.findCopies()[decl]; len(found) > 0 {
-		v.unsupported(found[0].pos, fmt.Sprintf("Go copies a %s, here (%s), and no rule of vego accounts for the copy; %s; "+
-			"hold the value by pointer", holding(found[0].typ), found[0].what, copyReason))
+		v.unsupported(found[0].pos, fmt.Sprintf("Go copies a value of type %s, here (%s), and no rule of vego accounts for the copy; %s; "+
+			"hold the value by pointer", holding(found[0].typ, types.RelativeTo(v.pass.Pkg)), found[0].what, copyReason))
 	}
 }
 
 // copyWalk returns the first place under decl where Go copies or
 // overwrites a value that holds a state, and what to say about it.
-func copyWalk(info *types.Info, decl *ast.FuncDecl, conv *conversions) (token.Pos, string) {
+func copyWalk(info *types.Info, pkg *types.Package, decl *ast.FuncDecl, conv *conversions) (token.Pos, string) {
+	q := types.RelativeTo(pkg)
 	var pos token.Pos
 	msg := ""
 	refuse := func(at token.Pos, format string, args ...any) {
@@ -89,7 +91,7 @@ func copyWalk(info *types.Info, decl *ast.FuncDecl, conv *conversions) (token.Po
 			pos, msg = at, fmt.Sprintf(format, args...)+"; "+copyReason
 		}
 	}
-	signature := func(fields *ast.FieldList, what string) {
+	signature := func(fields *ast.FieldList, what, of string) {
 		if fields == nil {
 			return
 		}
@@ -102,13 +104,13 @@ func copyWalk(info *types.Info, decl *ast.FuncDecl, conv *conversions) (token.Po
 			if len(field.Names) > 0 {
 				name = field.Names[0].Name
 			}
-			refuse(field.Pos(), "the %s %s has type %s, and passing it copies the value; use a pointer to %s",
-				what, name, holding(t), t)
+			refuse(field.Pos(), "the %s %s%s has type %s, and passing it copies the value; use a pointer to %s",
+				what, name, of, holding(t, q), types.TypeString(t, q))
 		}
 	}
-	signature(decl.Recv, "receiver")
-	signature(decl.Type.Params, "parameter")
-	signature(decl.Type.Results, "result")
+	signature(decl.Recv, "receiver", "")
+	signature(decl.Type.Params, "parameter", "")
+	signature(decl.Type.Results, "result", "")
 	var stack []ast.Node
 	ast.Inspect(decl.Body, func(n ast.Node) bool {
 		if n == nil {
@@ -122,8 +124,8 @@ func copyWalk(info *types.Info, decl *ast.FuncDecl, conv *conversions) (token.Po
 		stack = append(stack, n)
 		switch n := n.(type) {
 		case *ast.FuncLit:
-			signature(n.Type.Params, "parameter of the function literal,")
-			signature(n.Type.Results, "result of the function literal,")
+			signature(n.Type.Params, "parameter", " of the function literal")
+			signature(n.Type.Results, "result", " of the function literal")
 		case *ast.RangeStmt:
 			for _, e := range []ast.Expr{n.Key, n.Value} {
 				if e == nil {
@@ -131,8 +133,8 @@ func copyWalk(info *types.Info, decl *ast.FuncDecl, conv *conversions) (token.Po
 				}
 				if t := info.TypeOf(e); t != nil {
 					if _, ok := holdsState(t); ok {
-						refuse(e.Pos(), "the range variable %s copies each element, a %s; range over the indices and use &s[i]",
-							types.ExprString(e), holding(t))
+						refuse(e.Pos(), "the range variable %s copies each element, a value of type %s; range over the indices and use &s[i]",
+							types.ExprString(e), holding(t, q))
 					}
 				}
 			}
@@ -142,7 +144,7 @@ func copyWalk(info *types.Info, decl *ast.FuncDecl, conv *conversions) (token.Po
 					if t := info.TypeOf(lhs); t != nil {
 						if _, ok := holdsState(t); ok {
 							refuse(lhs.Pos(), "the loop variable %s has type %s, and Go copies it into each iteration; declare it before the loop",
-								types.ExprString(lhs), holding(t))
+								types.ExprString(lhs), holding(t, q))
 						}
 					}
 				}
@@ -160,8 +162,8 @@ func copyWalk(info *types.Info, decl *ast.FuncDecl, conv *conversions) (token.Po
 				if n.Tok == token.DEFINE && isIdent && info.Defs[id] != nil {
 					continue
 				}
-				refuse(lhs.Pos(), "%s is assigned, which overwrites a %s; create the value where it is declared, "+
-					"as in x := T{} or p := &T{}, and change it only through its methods", types.ExprString(lhs), holding(t))
+				refuse(lhs.Pos(), "%s is assigned, which overwrites a value of type %s; create the value where it is declared, "+
+					"as in x := T{} or p := &T{}, and change it only through its methods", types.ExprString(lhs), holding(t, q))
 			}
 		case *ast.CallExpr:
 			if id, ok := ast.Unparen(n.Fun).(*ast.Ident); ok && len(n.Args) > 0 {
@@ -170,7 +172,7 @@ func copyWalk(info *types.Info, decl *ast.FuncDecl, conv *conversions) (token.Po
 						if s, ok := t.Underlying().(*types.Slice); ok {
 							if _, holds := holdsState(s.Elem()); holds {
 								refuse(n.Pos(), "append to a slice of %s, copies every element when the slice grows; "+
-									"build the slice with its final length, as in make([]T, n), or hold the elements by pointer", holding(s.Elem()))
+									"build the slice with its final length, as in make([]T, n), or hold the elements by pointer", holding(s.Elem(), q))
 							}
 						}
 					}
@@ -190,7 +192,7 @@ func copyWalk(info *types.Info, decl *ast.FuncDecl, conv *conversions) (token.Po
 			if _, isPointer := recv.Type().Underlying().(*types.Pointer); !isPointer {
 				if _, ok := holdsState(recv.Type()); ok {
 					refuse(n.Sel.Pos(), "%s has a value receiver of type %s, so calling it copies the value; give the method a pointer receiver",
-						selection.Obj().Name(), holding(recv.Type()))
+						selection.Obj().Name(), holding(recv.Type(), q))
 				}
 			}
 		}
@@ -208,14 +210,14 @@ func copyWalk(info *types.Info, decl *ast.FuncDecl, conv *conversions) (token.Po
 			for _, target := range conv.converted[ast.Unparen(e)] {
 				if what, ok := valueReceiverOf(tv.Type, target); ok {
 					refuse(e.Pos(), "%s is converted to %s, whose method %s has a value receiver of type %s, so each call copies the value; "+
-						"give the method a pointer receiver", types.ExprString(e), target, what.Name(), holding(what.Type().(*types.Signature).Recv().Type()))
+						"give the method a pointer receiver", types.ExprString(e), types.TypeString(target, q), what.Name(), holding(what.Type().(*types.Signature).Recv().Type(), q))
 				}
 			}
 			return true
 		}
 		if call, isCall := ast.Unparen(e).(*ast.CallExpr); isCall && !tv.IsType() {
 			if fun := info.Types[call.Fun]; !fun.IsType() {
-				refuse(e.Pos(), "%s returns a %s, by value, which copies it; return a pointer", types.ExprString(call.Fun), holding(tv.Type))
+				refuse(e.Pos(), "%s returns a value of type %s, and the call copies it; return a pointer", types.ExprString(call.Fun), holding(tv.Type, q))
 				return true
 			}
 		}
@@ -223,11 +225,11 @@ func copyWalk(info *types.Info, decl *ast.FuncDecl, conv *conversions) (token.Po
 			return true
 		}
 		if sel, ok := parent.(*ast.SelectorExpr); ok && sel.X == e {
-			refuse(e.Pos(), "%s cannot be addressed, so Go copies a %s, to select %s from it; hold the value by pointer, "+
-				"as in a map of pointers", types.ExprString(e), holding(tv.Type), sel.Sel.Name)
+			refuse(e.Pos(), "%s cannot be addressed, so Go copies a value of type %s, to select %s from it; hold the value by pointer, "+
+				"as in a map of pointers", types.ExprString(e), holding(tv.Type, q), sel.Sel.Name)
 			return true
 		}
-		refuse(e.Pos(), "%s copies a %s; use a pointer to it", types.ExprString(e), holding(tv.Type))
+		refuse(e.Pos(), "%s copies a value of type %s; use a pointer to it", types.ExprString(e), holding(tv.Type, q))
 		return true
 	})
 	return pos, msg

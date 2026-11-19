@@ -85,7 +85,7 @@ func (t *Two) Nested() {
 // @Ensures True
 func (c *Config) CopyOnce() {
 	c.once.Do(func() {
-		o2 := c.once // want `cannot verify CopyOnce: c.once copies a sync.Once, which holds a state`
+		o2 := c.once // want `cannot verify CopyOnce: c.once copies a value of type sync.Once, which holds a state`
 		o2.Do(func() {})
 	})
 }

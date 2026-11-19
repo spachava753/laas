@@ -8,7 +8,7 @@ package locks
 
 // @Ensures True
 func CopyLoopVariable() {
-	for a := (Account{}); a.balance < 1; a.balance++ { // want `cannot verify CopyLoopVariable: the loop variable a has type locks.Account, which holds a sync.Mutex, and Go copies it into each iteration; declare it before the loop`
+	for a := (Account{}); a.balance < 1; a.balance++ { // want `cannot verify CopyLoopVariable: the loop variable a has type Account, which holds a sync.Mutex, and Go copies it into each iteration; declare it before the loop`
 		take2(&a, &a)
 	}
 }

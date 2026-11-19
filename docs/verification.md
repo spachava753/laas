@@ -2393,9 +2393,9 @@ func Snapshot(a *Account) (balance int) {
 ```
 
 ```text
-vego: cannot verify Snapshot: *a copies a guide.Account, which holds a sync.Mutex; use a pointer
-to it; a value that holds a state, such as a sync.Mutex, must not be copied or overwritten, since
-its state changes only through its methods and sync documents that a Mutex must not be copied
+vego: cannot verify Snapshot: *a copies a value of type Account, which holds a sync.Mutex; use a
+pointer to it; a value that holds a state, such as a sync.Mutex, must not be copied or overwritten,
+since its state changes only through its methods and sync documents that a Mutex must not be copied
 after first use
 ```
 
@@ -3270,7 +3270,7 @@ This table lists the most common messages.
 | `cannot verify F: Go converts a value to an interface type here, and which expression it converts could not be told` | A value without an expression of its own, such as one result of a call with several, is converted to an interface. | Assign the value to a variable of its own type first. |
 | `cannot verify F: f holds a function literal and is used here other than by calling it` | The variable that holds the literal is passed, compared, or assigned again. | Only call the variable. |
 | `precondition of Lock may not hold: ~held(m)`, or `precondition of Unlock may not hold: held(m)` | The goroutine may already hold the mutex it locks, or may not hold the one it unlocks. | Add `~held(a.mu)` to the `Requires` clauses, and unlock on every path, as with `defer a.mu.Unlock()`. See [Locks](#locks). |
-| `cannot verify F: x copies a T, which holds a sync.Mutex`, and the other messages that end in `must not be copied after first use` | Go copies or overwrites a value that holds a mutex here. | Do what the message says: use a pointer, give the method a pointer receiver, or build the slice with its final length. See [Values that hold a mutex cannot be copied or overwritten](#values-that-hold-a-mutex-cannot-be-copied-or-overwritten). |
+| `cannot verify F: x copies a value of type T, which holds a sync.Mutex`, and the other messages that end in `must not be copied after first use` | Go copies or overwrites a value that holds a mutex here. | Do what the message says: use a pointer, give the method a pointer receiver, or build the slice with its final length. See [Values that hold a mutex cannot be copied or overwritten](#values-that-hold-a-mutex-cannot-be-copied-or-overwritten). |
 | `... is an unexported field of T, declared in package p, and a formula in package q cannot name it` | A contract names a private field of another package. | Name an exported field, or the state of a mutex with `held`. See [Names](#names). |
 | `cannot verify F: recover is not supported` | `recover` returns an interface. | Call `recover` in a function that is not verified. |
 | `cannot verify F: a formula built to verify it has grown beyond 1048576 nodes, which is the limit` | An expression or a run of statements builds a formula that grows faster than the code, as `x = x + x` does when repeated. | Split the function, or the expressions in it, into smaller ones. |
