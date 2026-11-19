@@ -1223,11 +1223,10 @@ type sampler struct {
 	// holds the sentinels the formulas mention, which a leaf may hold.
 	errs      int
 	sentinels []*logic.Term
-	// home is the one home that every interface value of a sample has,
-	// and states holds the state positions sampled there; see
-	// ifacestate.go.
-	home   *logic.Term
-	states map[string]bool
+	// homes holds the home of each reference of an interface value of a
+	// sample with states, and under 0 the one home of every other
+	// reference; see ifacestate.go.
+	homes map[int64]*logic.Term
 }
 
 // number returns a new constant for a number of an integer type.
@@ -1368,13 +1367,13 @@ func (b *sampler) add(t types.Type, to binding, depth int) {
 		b.addMap(t, to, depth)
 	case isString(t):
 		scalar(b.texts())
+	case isIface(t):
+		// An interface value is nil or not, and has a home.
+		b.addStates(t, to)
 	case holdsCodeRef(t):
-		// A function value or an interface value is nil or not, and
-		// nothing else is known of it.
+		// A function value is nil or not, and nothing else is known of
+		// it.
 		scalar([]*logic.Term{logic.RefLit(0), logic.RefLit(1)})
-		if isIface(t) {
-			b.addStates(t)
-		}
 	case single && sort != logic.Float:
 		scalar([]*logic.Term{b.scalarOf(t)})
 	case single:
@@ -1404,33 +1403,53 @@ func (b *sampler) add(t types.Type, to binding, depth int) {
 	}
 }
 
-// addStates creates the slots for the states of an interface value. Every
-// interface value of a sample has one home of its own, which exists; each
-// state there gets a value that Z3 chooses, the same for every value, since
-// two interface values of a sample that are not nil are one value.
-func (b *sampler) addStates(t types.Type) {
-	if b.home == nil {
+// addStates creates the slot for an interface value with states: nil, or
+// a reference of its own, whose home is its own too, so that a sample can
+// meet the fact that parameters have homes of their own. Each state there
+// gets a value that Z3 chooses. Every other reference, which an interface
+// value without states has, gets one home that exists.
+func (b *sampler) addStates(t types.Type, to binding) {
+	if b.homes == nil {
 		b.refs++
-		b.home = logic.RefLit(b.refs)
-		b.states = map[string]bool{}
-		at := b.home
-		b.slots = append(b.slots, slot{func(s *witness) { s.consts[homes.Name] = logic.Fill(logic.IntLit(0), at) }})
+		b.homes = map[int64]*logic.Term{0: logic.RefLit(b.refs)}
+		b.slots = append(b.slots, slot{func(s *witness) {
+			table := logic.Fill(logic.IntLit(0), b.homes[0])
+			for _, ref := range slices.Sorted(maps.Keys(b.homes)) {
+				if ref != 0 {
+					table = logic.Store(table, logic.RefLit(ref), b.homes[ref])
+				}
+			}
+			s.consts[homes.Name] = table
+		}})
 	}
+	if !b.v.hasStates(t) {
+		b.choose(slot{func(s *witness) { to.set(s, 0, logic.RefLit(0)) }, func(s *witness) { to.set(s, 0, logic.RefLit(1)) }}, to.name(0))
+		return
+	}
+	b.refs++
+	own := logic.RefLit(b.refs)
+	b.homes[b.refs] = own
+	var states []func(s *witness)
 	for _, state := range b.v.ifaceStatesOf(t) {
-		if b.states[state.qualified()] {
-			continue
-		}
-		b.states[state.qualified()] = true
-		choice, at, position := b.boolean(), b.home, state.position()
-		b.choose(slot{func(s *witness) {
+		choice, position := b.boolean(), state.position()
+		states = append(states, func(s *witness) {
 			name := entryRegion + stateRegion
 			region, ok := s.consts[name]
 			if !ok {
 				region = logic.Const(name, logic.SeqOf(logic.BoolSeq))
 			}
-			s.consts[name] = logic.Store(region, at, logic.Store(logic.Select(region, at), position, choice))
-		}}, entryRegion+stateRegion)
+			s.consts[name] = logic.Store(region, own, logic.Store(logic.Select(region, own), position, choice))
+		})
 	}
+	b.choose(slot{
+		func(s *witness) {
+			to.set(s, 0, own)
+			for _, set := range states {
+				set(s)
+			}
+		},
+		func(s *witness) { to.set(s, 0, logic.RefLit(0)) },
+	}, to.name(0), entryRegion+stateRegion)
 }
 
 // addSlice creates the slots for a slice: one for its length, and one for

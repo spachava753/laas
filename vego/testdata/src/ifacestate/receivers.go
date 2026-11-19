@@ -86,3 +86,9 @@ type Embedding interface {
 	io.Closer
 	M()
 }
+
+// Defined is made from io.Closer and has its methods, which belong to
+// io.Closer.
+//
+// @State gone // want `a state can be declared only on a defined interface type that declares a method of its own; Defined declares no method of its own`
+type Defined io.Closer

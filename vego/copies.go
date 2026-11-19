@@ -343,22 +343,35 @@ func (pv *pkgVerifier) findCopies() map[*ast.FuncDecl][]ssaCopy {
 	return pv.copies
 }
 
-// holdsStates reports whether any type of the package or of what it is
-// built with has a declared state, so that the package can hold one; the
-// confirmation by go/ssa is not built otherwise.
+// holdsStates reports whether any struct type of the package or of what it
+// is built with has a declared state, so that the package can hold one; the
+// confirmation by go/ssa is not built otherwise. A state of an interface
+// lies at a home, not in a value, so copying the value copies none.
 func (pv *pkgVerifier) holdsStates() bool {
-	for path := range shippedStates() {
+	for path, byType := range shippedStates() {
 		seen := map[*types.Package]bool{}
+		var reached *types.Package
 		var reaches func(pkg *types.Package) bool
 		reaches = func(pkg *types.Package) bool {
 			if seen[pkg] {
 				return false
 			}
 			seen[pkg] = true
-			return pkg.Path() == path || slices.ContainsFunc(pkg.Imports(), reaches)
+			if pkg.Path() == path {
+				reached = pkg
+				return true
+			}
+			return slices.ContainsFunc(pkg.Imports(), reaches)
 		}
-		if reaches(pv.pass.Pkg) {
-			return true
+		if !reaches(pv.pass.Pkg) {
+			continue
+		}
+		for name := range byType {
+			if obj, ok := reached.Scope().Lookup(name).(*types.TypeName); ok {
+				if _, isStruct := obj.Type().Underlying().(*types.Struct); isStruct {
+					return true
+				}
+			}
 		}
 	}
 	return false

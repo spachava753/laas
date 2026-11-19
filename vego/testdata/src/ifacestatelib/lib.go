@@ -33,5 +33,8 @@ type Wrapped interface {
 // Alias is another name for Conn, which declares nothing.
 type Alias interface{ Conn }
 
+// Defined is made from Conn and has its methods.
+type Defined Conn
+
 // Consume may close what it reads through an assertion.
 func Consume(r io.Reader) {}

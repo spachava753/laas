@@ -269,7 +269,11 @@ func (v *fnVerifier) enter() *state {
 	}
 	// Interface parameters with states that are not nil have homes of
 	// their own, which every caller has shown.
-	v.assumeApart(st, v.sharing(fn))
+	for _, pair := range v.sharing(fn) {
+		if v.entry[pair[0]] != nil && v.entry[pair[1]] != nil {
+			st.assume(apartHomes(v.entry[pair[0]][0], v.entry[pair[1]][0]))
+		}
+	}
 	// Every caller has proved the invariants of what it passes.
 	for _, param := range fn.params {
 		if v.entry[param] != nil {

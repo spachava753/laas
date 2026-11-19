@@ -11,7 +11,7 @@ func Shut(c io.Closer) {
 	c.Close()
 }
 
-// @Requires c != nil And ~shut(c) // want `shut\(c\): c is a io.Closer, which has the states closed`
+// @Requires c != nil And ~shut(c) // want `shut\(c\): c has type io.Closer, which has the states closed`
 // @Ensures True
 func Other(c io.Closer) {
 }

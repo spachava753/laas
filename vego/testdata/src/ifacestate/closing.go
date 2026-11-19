@@ -118,3 +118,45 @@ func KeepOther(a, b io.Closer, n int) {
 	}
 	b.Close()
 }
+
+// Apart has two interface parameters with states and promises success,
+// which a sample of an input with two values of their own meets.
+//
+// @Requires a != nil And b != nil
+// @Ensures err = nil
+func Apart(a io.Closer, b io.Closer) (err error) {
+	return nil
+}
+
+// TwoStates needs two values whose states differ.
+//
+// @Requires a != nil And b != nil And ~closed(a) And closed(b)
+// @Modifies a
+// @Ensures err = nil -> closed(a')
+func TwoStates(a io.Closer, b io.Closer) (err error) {
+	if err := a.Close(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Pump reads and writes without changing a state of either value.
+//
+// @Requires r != nil And w != nil And |buf| > 0
+// @Modifies buf
+// @Ensures True
+func Pump(r io.ReadCloser, w io.WriteCloser, buf []byte) {
+	n, _ := r.Read(buf)
+	if n >= 0 && n <= len(buf) {
+		w.Write(buf[:n])
+	}
+}
+
+// Echo hands one value to Pump twice, which changes no state of either.
+//
+// @Requires rwc != nil And |buf| > 0
+// @Modifies buf
+// @Ensures True
+func Echo(rwc io.ReadWriteCloser, buf []byte) {
+	Pump(rwc, rwc, buf)
+}

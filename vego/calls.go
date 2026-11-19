@@ -369,12 +369,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	}
 	for _, pair := range v.sharing(fn) {
 		if args[pair[0]] != nil && args[pair[1]] != nil {
-			// Two interface values that are not nil have homes of their
-			// own. The nil interface has a home too, and two nil values
-			// share it.
-			zero := logic.RefLit(0)
-			apart := logic.Or(logic.Eq(args[pair[0]][0], zero), logic.Eq(args[pair[1]][0], zero), logic.Ne(home(args[pair[0]][0]), home(args[pair[1]][0])))
-			v.check(st, guard, apart, call.Pos(),
+			v.check(st, guard, apartHomes(args[pair[0]][0], args[pair[1]][0]), call.Pos(),
 				"the interface values passed to %s as %s and %s may share their states: they may be one value, hold one value, or hold a value "+
 					"and one that wraps it, and %s may rely on them not doing so", name, describe(pair[0]), describe(pair[1]), name)
 		}

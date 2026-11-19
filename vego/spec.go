@@ -1080,7 +1080,7 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 		// the row of its home; see ifacestate.go. The value itself, a
 		// field or an element, is not part of it.
 		if fn.trust == nil && !v.hasStates(final) {
-			return shape{}, target{}, fmt.Errorf("%s is a %s, which has no states; an entry for an interface value covers the states of what it holds, "+
+			return shape{}, target{}, fmt.Errorf("%s has type %s, which has no states; an entry for an interface value covers the states of what it holds, "+
 				"and to assign %s itself, list what holds it", m.text, final, m.text)
 		}
 		form.cells, form.direct, form.row = []cell{stateCell}, len(hops) == 0, true

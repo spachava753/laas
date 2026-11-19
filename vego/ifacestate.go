@@ -65,17 +65,13 @@ type ifaceState struct {
 	file *trustFile
 }
 
-// qualified names the state for its position and in messages that must tell
-// two states of one name apart, as in "io".Closer@closed.
-func (s ifaceState) qualified() string {
-	return strconv.Quote(s.owner.Pkg().Path()) + "." + s.owner.Name() + "@" + s.name
-}
-
 // position returns where the state lies in the row of a home: the number
-// whose digits in base 256 are the bytes of the qualified name. No name
+// whose digits in base 256 are the bytes of its name qualified by the
+// interface that declares it, as in "io".Closer@closed. No name
 // holds a zero byte, so two names give two numbers.
 func (s ifaceState) position() *logic.Term {
-	return logic.BigLit(new(big.Int).SetBytes([]byte(s.qualified())))
+	qualified := strconv.Quote(s.owner.Pkg().Path()) + "." + s.owner.Name() + "@" + s.name
+	return logic.BigLit(new(big.Int).SetBytes([]byte(qualified)))
 }
 
 // title names the state for a reader, as in closed of io.Closer.
@@ -213,6 +209,18 @@ func (pv *pkgVerifier) fileStateProblem(owner *types.TypeName, key string) strin
 	return pv.stateDeclProblem(owner)
 }
 
+// declaresMethod reports whether an interface type declares a method
+// itself. A type defined from another interface, as in type B io.Closer, has
+// the methods of that declaration, which its states belong to.
+func declaresMethod(owner *types.TypeName) bool {
+	for method := range owner.Type().Underlying().(*types.Interface).Methods() {
+		if declaringInterface(method) == owner {
+			return true
+		}
+	}
+	return false
+}
+
 // stateDeclProblem says what is wrong with declaring a state on a type, or
 // returns "".
 func (pv *pkgVerifier) stateDeclProblem(owner *types.TypeName) string {
@@ -224,7 +232,7 @@ func (pv *pkgVerifier) stateDeclProblem(owner *types.TypeName) string {
 		return "is not a defined interface type at package level without type parameters"
 	case isError(owner.Type()) || !isIface(owner.Type()):
 		return "is not an interface that vego models"
-	case named.Underlying().(*types.Interface).NumExplicitMethods() == 0:
+	case !declaresMethod(owner):
 		return "declares no method of its own; declare the state on the interface that declares the methods whose contracts speak of it"
 	case pv.inAnalysedModule(owner.Pkg(), owner.Pos()):
 		return "is declared in the module of this package; declare the state with @State in its doc comment"
@@ -285,9 +293,9 @@ func (e *specEnv) ifaceState(what string, typ types.Type, ref *logic.Term, sink 
 		return nil, fmt.Errorf("%s(%s) is ambiguous: %s has the state %s of %s and of %s", name, what, typ,
 			name, found[0].owner.Name(), found[1].owner.Name())
 	case len(found) == 0 && len(states) == 0:
-		return nil, &logic.NoState{Msg: fmt.Sprintf("%s(%s): %s is a %s, which has no states", name, what, what, typ)}
+		return nil, &logic.NoState{Msg: fmt.Sprintf("%s(%s): %s has type %s, which has no states", name, what, what, typ)}
 	case len(found) == 0:
-		return nil, &logic.NoState{Msg: fmt.Sprintf("%s(%s): %s is a %s, which has the states %s", name, what, what, typ, stateNames(states))}
+		return nil, &logic.NoState{Msg: fmt.Sprintf("%s(%s): %s has type %s, which has the states %s", name, what, what, typ, stateNames(states))}
 	}
 	return e.v.fetch(sink, mem, []cell{stateCell}, home(ref), found[0].position())[0], nil
 }
@@ -336,7 +344,7 @@ func (pv *pkgVerifier) stateDeclProblemHere(name *types.TypeName) string {
 		return "is not a defined interface type at package level without type parameters"
 	case isError(name.Type()) || !isIface(name.Type()):
 		return "is not an interface that vego models"
-	case named.Underlying().(*types.Interface).NumExplicitMethods() == 0:
+	case !declaresMethod(name):
 		return "declares no method of its own, so no contract written on it could change the state"
 	}
 	return ""
@@ -413,23 +421,33 @@ func (pv *pkgVerifier) exportStates() {
 // sharing lists the pairs of interface parameters with states, the
 // receiver of an interface method among them, which a function may assume,
 // and its callers must show, to have homes of their own when neither is
-// nil, as slice parameters of one element type share no element. One value
-// passed twice shares its home, and is refused as two overlapping slices
-// are: a function that closes both could not be verified otherwise. A call
-// that changes the states of one changes every state at its home, so two
-// values whose types have no state in common may still not share a home.
-func (pv *pkgVerifier) sharing(fn *funcInfo) [][2]*types.Var {
+// nil, as slice parameters of one element type share no element. Only a
+// pair of which the contract lists one under Modifies is such a pair: a
+// contract that lists neither changes no state of either, since a write of
+// a state it does not list is refused, so what it reads of their states
+// does not depend on whether their homes are one. One value passed as both
+// of such a pair is refused, as two overlapping slices are: a function that
+// closes both could not be verified otherwise. A call that changes the
+// states of one changes every state at its home, so two values whose types
+// have no state in common may still not share a home.
+func (v *fnVerifier) sharing(fn *funcInfo) [][2]*types.Var {
 	inputs := slices.Clone(fn.params)
 	if fn.receiver != nil {
 		inputs = append([]*types.Var{fn.receiver}, inputs...)
 	}
+	listed := map[*types.Var]bool{}
+	for _, m := range fn.modifies {
+		if form, _, err := v.locateTarget(fn, m, nil, nil, nil); err == nil && form.row && form.direct && len(m.steps) == 0 {
+			listed[form.param] = true
+		}
+	}
 	var pairs [][2]*types.Var
 	for i, first := range inputs {
-		if !pv.hasStates(first.Type()) {
+		if !v.hasStates(first.Type()) {
 			continue
 		}
 		for _, second := range inputs[i+1:] {
-			if pv.hasStates(second.Type()) {
+			if v.hasStates(second.Type()) && (listed[first] || listed[second]) {
 				pairs = append(pairs, [2]*types.Var{first, second})
 			}
 		}
@@ -437,24 +455,10 @@ func (pv *pkgVerifier) sharing(fn *funcInfo) [][2]*types.Var {
 	return pairs
 }
 
-// homeIndexes names a function that numbers the homes of the interface
-// parameters, which is how the entry states that they differ: a home has
-// one number, so two parameters with two numbers have two homes. Stated
-// pairwise, the homes of thirty parameters took Z3 far longer.
-var homeIndexes = logic.Const("home index", logic.IntSeq)
-
-// assumeApart states, on entry, that the interface parameters of the pairs
-// that are not nil have homes of their own.
-func (v *fnVerifier) assumeApart(st *state, pairs [][2]*types.Var) {
-	numbered := map[*types.Var]bool{}
-	for _, pair := range pairs {
-		for _, param := range pair {
-			if numbered[param] || v.entry[param] == nil {
-				continue
-			}
-			numbered[param] = true
-			ref := v.entry[param][0]
-			st.assume(logic.Or(logic.Eq(ref, logic.RefLit(0)), logic.Eq(logic.Select(homeIndexes, home(ref)), logic.IntLit(int64(len(numbered))))))
-		}
-	}
+// apartHomes states that two interface values that are not nil have homes
+// of their own. The nil interface has a home too, and two nil values share
+// it.
+func apartHomes(a, b *logic.Term) *logic.Term {
+	zero := logic.RefLit(0)
+	return logic.Or(logic.Eq(a, zero), logic.Eq(b, zero), logic.Ne(home(a), home(b)))
 }

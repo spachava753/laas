@@ -90,7 +90,7 @@ func Reassign(resp *Response, rc io.ReadCloser) {
 // NoStates lists a writer, which has no states.
 //
 // @Requires w != nil
-// @Modifies w // want `in Modifies annotation: w is a io.Writer, which has no states`
+// @Modifies w // want `in Modifies annotation: w has type io.Writer, which has no states`
 // @Ensures True
 func NoStates(w io.Writer) {
 }
@@ -137,7 +137,7 @@ func (file) Close() (err error) {
 //
 // @Ensures True
 func Make() (c io.Closer) {
-	return file{} // want `cannot verify Make: converting a file to io.Closer is not supported yet: io.Closer has the states closed, and the contract of Closer.Close speaks of them`
+	return file{} // want `cannot verify Make: converting a value of type file to io.Closer is not supported yet: io.Closer has the states closed, and the contract of Closer.Close speaks of them`
 }
 
 // Fresh says a parameter is new.
@@ -149,7 +149,7 @@ func Fresh(c io.Closer) {
 
 // Unknown names a state that io.Closer does not have.
 //
-// @Requires c != nil And ~held(c) // want `held\(c\): c is a io.Closer, which has the states closed`
+// @Requires c != nil And ~held(c) // want `held\(c\): c has type io.Closer, which has the states closed`
 // @Ensures True
 func Unknown(c io.Closer) {
 }

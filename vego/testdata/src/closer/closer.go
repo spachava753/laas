@@ -56,3 +56,16 @@ func logNumber(x int) {
 func MakeSink() (s Sink) {
 	return logNumber // want `cannot verify MakeSink: logNumber may call through a function value or an interface value.*a value of io.Closer, whose methods all have contracts, so that verified code can make one`
 }
+
+// @Requires a != nil And b != nil
+// @Ensures True
+func two(a, b io.Closer) {}
+
+// Two hands a made value beside a parameter to a function that changes
+// the state of neither.
+//
+// @Requires c != nil
+// @Ensures True
+func Two(c io.Closer) {
+	two(c, file{})
+}

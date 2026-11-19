@@ -1244,3 +1244,6 @@ state:
   ifacestatelib.Alias: # // want `the trust file declares states of ifacestatelib.Alias, which declares no method of its own`
     gone:
       reason: Declares no method.
+  ifacestatelib.Defined: # // want `the trust file declares states of ifacestatelib.Defined, which declares no method of its own`
+    gone:
+      reason: Defined from Conn, whose methods it has.
