@@ -636,7 +636,7 @@ func Quantity(line string) (n int, err error) {
 //
 // @Ensures True
 func IsEmpty(err error) (result bool) {
-	return errors.Is(err, ErrEmpty) // want `vego: cannot verify IsEmpty: it calls Is, which has no contract`
+	return errors.Is(err, ErrEmpty) // want `vego: cannot verify IsEmpty: errors.Is would run the Is and Unwrap methods of err, an error whose origin is not known`
 }
 
 var calls int

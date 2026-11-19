@@ -4,12 +4,19 @@ package sentinellib
 
 import (
 	"errors"
+	"fmt"
 	"io"
 )
 
 var (
 	ErrGone   = errors.New("gone")
 	errHidden = errors.New("hidden")
+	// Sentinels that wrap others, here and in io, and one whose format is
+	// not a constant, so that what it wraps is not known.
+	ErrLost   = fmt.Errorf("lost: %w", ErrGone)
+	ErrShort  = fmt.Errorf("short: %w", io.EOF)
+	oddFormat = "odd: %w"
+	ErrOdd    = fmt.Errorf(oddFormat, ErrGone)
 )
 
 // Find fails with ErrGone for a negative key.

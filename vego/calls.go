@@ -99,6 +99,9 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	if errorConstructor(callee) {
 		return []value{{v.newError(call, st, guard)}}
 	}
+	if isErrorsIs(callee) {
+		return []value{{v.errorsIs(call, st, guard)}}
+	}
 	fn := v.contractFor(call, callee)
 	return v.invoke(call, fn, v.arguments(call, callee, st, guard), st, guard)
 }
@@ -176,7 +179,7 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 		if isError(param.Type()) && v.knownError(v.originsOf(v.fn.decl.Body), arg, -1, map[*types.Var]bool{}) {
 			continue
 		}
-		what := "an error whose origin is not known"
+		what := "an error whose origin is not known" + v.originWhy(arg)
 		if !isError(param.Type()) {
 			what = fmt.Sprintf("a value of type %s, which can hold an error, an interface, or a function", param.Type())
 		}

@@ -132,22 +132,29 @@ func formatsPlainly(t types.Type) bool {
 // that are formatted without such calls are therefore accepted, and errors
 // whose origin is known; see knownError.
 func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term) *logic.Term {
+	values := map[ast.Expr]value{}
 	for _, arg := range call.Args {
 		t := v.info.TypeOf(arg)
 		switch {
 		case isError(t) && !v.knownError(v.originsOf(v.fn.decl.Body), arg, -1, map[*types.Var]bool{}):
 			v.unsupported(arg.Pos(), fmt.Sprintf("formatting %s would run the methods of an error whose origin is not known; "+
-				"only an error made by errors.New or fmt.Errorf, here or in a verified function, can be formatted", types.ExprString(arg)))
+				"only an error made by errors.New or fmt.Errorf, here or in a verified function, can be formatted%s", types.ExprString(arg), v.originWhy(arg)))
 		case !isError(t) && !formatsPlainly(t):
 			v.unsupported(arg.Pos(), fmt.Sprintf(
 				"formatting a value of type %s may call methods, which are not verified, or follow pointers", t))
 		}
-		v.eval(arg, st, guard)
+		values[arg] = v.eval(arg, st, guard)
 	}
 	if position := v.pass.Fset.Position(call.Pos()); !slices.Contains(v.usage.Constructors, position) {
 		v.usage.Constructors = append(v.usage.Constructors, position)
 	}
 	created := v.fresh("error", logic.Err)
 	v.noteError(st, created)
+	switch tree, wrapped := v.callWraps(call); tree {
+	case wrapsNothing:
+		v.noteTree(st, errorTree{err: created})
+	case wrapsOperand:
+		v.noteTree(st, errorTree{err: created, wraps: values[wrapped][0]})
+	}
 	return created
 }

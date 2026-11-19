@@ -43,6 +43,10 @@ type sentinelInfo struct {
 	// Rests holds the keys of the other sentinels that went into the
 	// error, however deep, on whose values what is known of it rests.
 	Rests []string
+	// Tree says what the error wraps, and Wraps names the variable it
+	// wraps when it wraps one.
+	Tree  wrapping
+	Wraps string
 }
 
 func (*sentinelsFact) AFact() {}
@@ -251,12 +255,26 @@ func (pv *pkgVerifier) lookupKey(key string) *types.Var {
 // is read, or, when it cannot be read, why. The facts that hold of it are
 // noted in sink, which may be nil.
 func (v *fnVerifier) sentinelTerm(sink *state, variable *types.Var) (*logic.Term, string) {
-	if _, why := v.usableSentinel(variable); why != "" {
+	info, why := v.usableSentinel(variable)
+	if why != "" {
 		return nil, why
 	}
 	v.relied[variable] = true
 	sentinel := logic.Const(sentinelName+errorKey(variable), logic.Err)
 	v.noteError(sink, sentinel)
+	// Only the tree of an error into which nothing of unknown origin went
+	// is a matter of the standard library alone.
+	switch {
+	case !info.Homemade:
+	case info.Tree == wrapsNothing:
+		v.noteTree(sink, errorTree{err: sentinel})
+	case info.Tree == wrapsOperand:
+		if wrapped := v.lookupKey(info.Wraps); wrapped != nil {
+			if inner, why := v.sentinelTerm(sink, wrapped); why == "" {
+				v.noteTree(sink, errorTree{err: sentinel, wraps: inner})
+			}
+		}
+	}
 	return sentinel, ""
 }
 
@@ -314,6 +332,13 @@ func (v *fnVerifier) noteIs(sink *state, t *logic.Term) {
 		seen[t] = true
 		if t.Op == logic.OpIs && !hasBound(t) {
 			err, target := t.Args[0], t.Args[1]
+			if note := target.String(); !v.targetSeen[note] {
+				v.targetSeen[note] = true
+				v.isTargets = append(v.isTargets, target)
+			}
+			for _, tree := range v.trees {
+				v.treeInstance(sink, tree, target)
+			}
 			for _, fact := range []*logic.Term{
 				logic.Implies(logic.IsNil(err), logic.Iff(t, logic.IsNil(target))),
 				logic.Implies(logic.IsNil(target), logic.Iff(t, logic.IsNil(err))),

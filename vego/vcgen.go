@@ -116,6 +116,12 @@ type fnVerifier struct {
 	distinct       []*logic.Term
 	background     []*logic.Term
 	backgroundSeen map[string]bool
+	// trees holds the errors met whose tree is known, and isTargets the
+	// targets of is met outside quantifiers, by their text in targetSeen;
+	// see noteTree and noteIs.
+	trees      []errorTree
+	isTargets  []*logic.Term
+	targetSeen map[string]bool
 }
 
 // allowEffects marks e, when it is a call, as the call of the current
@@ -130,7 +136,7 @@ func (pv *pkgVerifier) run(fn *funcInfo, task func(v *fnVerifier)) {
 	v := &fnVerifier{
 		pkgVerifier: pv, fn: fn, entry: map[*types.Var]value{}, names: map[string]int{},
 		reached: map[*funcInfo]bool{}, bitTerms: map[string]*logic.Term{}, lowZeros: map[string]uint{}, bitOrigins: map[string]bitOrigin{}, forgotten: map[string]forgottenPart{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{},
-		backgroundSeen: map[string]bool{},
+		backgroundSeen: map[string]bool{}, targetSeen: map[string]bool{},
 	}
 	defer func() {
 		switch r := recover().(type) {
@@ -609,6 +615,8 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 			"function literals, function values, and built-in functions are not supported here")
 	case errorConstructor(callee):
 		v.unsupported(s.Pos(), "deferring a call that only makes an error is not supported")
+	case isErrorsIs(callee):
+		v.unsupported(s.Pos(), "deferring errors.Is is not supported: its result would be lost")
 	}
 	fn := v.contractFor(s.Call, callee)
 	st.deferred = append(slices.Clip(st.deferred), deferredCall{s.Call, fn, v.arguments(s.Call, callee, st, nil)})

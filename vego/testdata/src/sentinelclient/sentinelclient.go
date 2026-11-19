@@ -5,6 +5,7 @@ package sentinelclient
 
 import (
 	"errors"
+	"fmt"
 	"io"
 
 	"sentinellib"
@@ -59,4 +60,30 @@ func Hidden(ok bool) (err error) {
 // @Ensures eof <-> ~ok
 func End(ok bool) (eof bool) {
 	return sentinellib.End(ok) == io.EOF
+}
+
+// Trees asks errors.Is about sentinels of another package that wrap
+// others, there and in a third package.
+//
+// @Ensures lost And short And ~own
+func Trees() (lost, short, own bool) {
+	return errors.Is(sentinellib.ErrLost, sentinellib.ErrGone), errors.Is(sentinellib.ErrShort, io.EOF), errors.Is(sentinellib.ErrLost, ErrGone)
+}
+
+// OddTree asks about the sentinel whose tree is not known.
+//
+// @Ensures b
+func OddTree() (b bool) {
+	return errors.Is(sentinellib.ErrOdd, sentinellib.ErrGone) // want `vego: postcondition may not hold: b`
+}
+
+// Short wraps a sentinel of another package that wraps io.EOF.
+//
+// @Ensures err = nil <-> ok
+// @Ensures err != nil -> is(err, io.EOF)
+func Short(ok bool) (err error) {
+	if ok {
+		return nil
+	}
+	return fmt.Errorf("client: %w", sentinellib.ErrShort)
 }

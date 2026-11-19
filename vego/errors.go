@@ -159,7 +159,20 @@ func (pv *pkgVerifier) findSentinels() {
 		}
 		slices.Sort(rests)
 		rests = slices.Compact(rests)
-		pv.candidates[variable] = sentinelInfo{Homemade: pv.homemade[variable], Rests: rests}
+		info := sentinelInfo{Homemade: pv.homemade[variable], Rests: rests}
+		var wrapped ast.Expr
+		info.Tree, wrapped = pv.callWraps(made[variable])
+		if wrapped != nil {
+			// Only a variable that went into the error is a value that
+			// can be named; anything else leaves the tree unknown.
+			other := pv.namedVariable(wrapped)
+			if other == nil || other.Pkg() == nil || other.Parent() != other.Pkg().Scope() {
+				info.Tree = treeUnknown
+			} else {
+				info.Wraps = errorKey(other)
+			}
+		}
+		pv.candidates[variable] = info
 		return rests
 	}
 	published := map[string]sentinelInfo{}
