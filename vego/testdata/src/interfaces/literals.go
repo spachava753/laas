@@ -25,7 +25,7 @@ func UseDefined(x OnlyEnsurer) (r int) {
 // @Requires y != nil
 // @Ensures True
 func DefinedFromDenier(y Denier) (r int) {
-	var z OnlyEnsurer = y // want `cannot verify DefinedFromDenier: converting y, a interfaces.Denier, to interfaces.OnlyEnsurer is not supported: interfaces.OnlyEnsurer declares M itself`
+	var z OnlyEnsurer = y // want `cannot verify DefinedFromDenier: converting y, a interfaces.Denier, to interfaces.OnlyEnsurer is not supported: OnlyEnsurer has M from Ensurer.M, and Denier has M from Denier.M;`
 	return UseDefined(z)
 }
 

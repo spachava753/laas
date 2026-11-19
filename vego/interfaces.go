@@ -42,9 +42,16 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		// The value keeps its methods, so a method of want must be one of
 		// them, the very declaration, and so with the same contract.
 		if method := v.foreignMethod(from, want); method != nil {
-			v.unsupported(e.Pos(), fmt.Sprintf("converting %s, a %s, to %s is not supported: %s declares %s itself, "+
-				"which %s does not have; an interface value can be converted only to an interface whose methods are "+
-				"declarations it has, as through embedding, or to any", types.ExprString(e), from, want, want, method.Name(), from))
+			// Go lets the value be assigned only if it has a method of the
+			// name, from another declaration.
+			own := method.Name() + " from no declaration"
+			if have, _, _ := types.LookupFieldOrMethod(from, false, method.Pkg(), method.Name()); have != nil {
+				own = method.Name() + " from " + methodTitle(have.(*types.Func))
+			}
+			shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
+			v.unsupported(e.Pos(), fmt.Sprintf("converting %s, a %s, to %s is not supported: %s has %s from %s, and %s has %s; "+
+				"an interface value can be converted only to an interface whose methods are declarations it has, as through embedding, or to any",
+				types.ExprString(e), from, want, shown(want), method.Name(), methodTitle(method), shown(from), own))
 		}
 		return v.eval(e, st, guard)
 	case isError(from):
