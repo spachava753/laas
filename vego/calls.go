@@ -439,23 +439,39 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 	path := selection.Index()
 	_, wantPointer := recv.Type().Underlying().(*types.Pointer)
 	start, what := v.unit.start(), "the receiver of "+types.ExprString(sel)
-	var cur, where value
 	if _, isStruct := t.Underlying().(*types.Struct); isStruct && v.place(sel.X).kind == placeMem {
+		// The struct is followed by its position, and only the embedded
+		// pointers on the way are read.
 		lv := v.lvalue(sel.X, st, guard)
-		where = value{lv.ref, logic.Add(lv.at, logic.IntLit(lv.offset))}
-		if wantPointer && !hopsPointer(t, path) {
-			for _, index := range path[:len(path)-1] {
+		where := value{lv.ref, logic.Add(lv.at, logic.IntLit(lv.offset))}
+		for _, index := range path[:len(path)-1] {
+			field := t.Underlying().(*types.Struct).Field(index).Type()
+			object, isPointer := pointee(field)
+			if !isPointer {
 				where = value{where[0], logic.Add(where[1], logic.IntLit(v.fieldOffset(t, index)))}
-				t = t.Underlying().(*types.Struct).Field(index).Type()
+				t = field
+				continue
 			}
+			if _, _, ok := fieldLeaves(t, index); !ok {
+				v.unsupported(sel.Sel.Pos(), fmt.Sprintf("this field has type %s, which is not supported", field))
+			}
+			from, at := types.NewPointer(t), where
+			where = v.readAt(st, guard, start, what, sel.Sel.Pos(), func(sink *state, mem memory) value {
+				read, _, _ := v.member(sink, mem, at, from, index)
+				return read
+			})
+			v.checkNil(st, guard, where[0], sel.Sel.Pos())
+			t = object
+		}
+		if wantPointer {
 			return where
 		}
-		cur = v.readAt(st, guard, start, what, sel.X.Pos(), func(sink *state, mem memory) value {
-			return v.loadIn(lv, sink, mem)
+		return v.readAt(st, guard, start, what, sel.Pos(), func(sink *state, mem memory) value {
+			return v.pointedIn(sink, mem, t, where)
 		})
-	} else {
-		cur = v.eval(sel.X, st, guard)
 	}
+	var where value
+	cur := v.eval(sel.X, st, guard)
 	for _, index := range path[:len(path)-1] {
 		object, viaPointer := pointee(t)
 		if viaPointer {

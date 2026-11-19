@@ -386,7 +386,11 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		added = append(added, v.evalAs(arg, elem, st, nil))
 	}
 	u.reach(operands)
+	// Each way the append can turn out closes a copy of the unit, and a
+	// path that is not taken closes none; the unit is open no longer.
+	v.unit = nil
 	if len(added) == 0 {
+		v.unit = u
 		v.closeUnit(st)
 		k(st, base)
 		return

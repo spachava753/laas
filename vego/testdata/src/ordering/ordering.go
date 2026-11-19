@@ -567,3 +567,152 @@ func RepeatedKey(a, b int) (result map[int]int) {
 func RepeatedName(s string) (result map[string]int) {
 	return map[string]int{"x": 1, s: 2} // want `vego: the keys "x" and s of this map literal may be equal`
 }
+
+// DeadAppend appends on a path that cannot be taken, where neither way the
+// append can turn out is explored.
+//
+// @Ensures |result| <= 1
+func DeadAppend(x int) (result []int) {
+	s := make([]int, 0, 1)
+	if x > 0 && x < 0 {
+		s = append(s, 1)
+	}
+	return s
+}
+
+// DeadReturnAppend returns an append on a path that cannot be taken.
+//
+// @Ensures |result| = 0
+func DeadReturnAppend(x int) (result []int) {
+	s := make([]int, 0, 1)
+	if x > 0 && x < 0 {
+		return append(s, 1)
+	}
+	return s
+}
+
+type Gauge struct {
+	n     int
+	limit int
+}
+
+// @Requires g != nil And g.n < 1000
+// @Modifies g.n
+// @Ensures g.n' = g.n + 1 And result = 0
+func bumpN(g *Gauge) (result int) {
+	g.n++
+	return 0
+}
+
+// @Requires g != nil
+// @Modifies g.limit
+// @Ensures g.limit' = 7 And result = 0
+func setLimit(g *Gauge) (result int) {
+	g.limit = 7
+	return 0
+}
+
+// @Requires g != nil And g.n < 1000
+// @Modifies g.n
+// @Ensures g.n' = g.n + 1 And result
+func bumpB(g *Gauge) (result bool) {
+	g.n++
+	return true
+}
+
+// SecondWrite reads g.limit beside two calls, of which only the second
+// changes it.
+//
+// @Requires g != nil And 0 <= g.n < 100 And 0 <= g.limit < 100
+// @Modifies g.n, g.limit
+func SecondWrite(g *Gauge) (result int) {
+	return g.limit + bumpN(g) + setLimit(g) // want `vego: g.limit may be read before or after the call to setLimit`
+}
+
+// AfterAnd reads g.n outside the && whose left operand changes it, so it is
+// not ordered after the decision.
+//
+// @Requires g != nil And 0 <= g.n < 100
+// @Modifies g.n
+func AfterAnd(g *Gauge) (result int) {
+	return b2i(bumpB(g) && true) + g.n // want `vego: g.n may be read before or after the call to bumpB`
+}
+
+// @Requires |t| > 0
+// @Ensures result = t[0]
+func first(t []int) (result int) {
+	return t[0]
+}
+
+// @Ensures result = |m|
+func count(m map[int]int) (result int) {
+	return len(m)
+}
+
+type Wrap struct {
+	q *Q
+}
+
+// @Requires w.q != nil
+// @Ensures result = w.q.i
+func unwrap(w Wrap) (result int) {
+	return w.q.i
+}
+
+// SliceHelper calls first in the target, which is passed a slice and so may
+// read what the append writes.
+//
+// @Requires |u| = 6 And |t| = 1 And 0 <= t[0] < 6
+// @Modifies u, t
+func SliceHelper(u [][]int, t []int) {
+	u[first(t)] = append(t[:0], 5) // want `vego: cannot verify SliceHelper: first is called in the target of this assignment`
+}
+
+// MapHelper calls count in the target, which is passed a map.
+//
+// @Requires |u| = 2 And |t| = 1 And |m| < 2
+// @Modifies u, t
+func MapHelper(u [][]int, t []int, m map[int]int) {
+	u[count(m)] = append(t[:0], 5) // want `vego: cannot verify MapHelper: count is called in the target of this assignment`
+}
+
+// StructHelper calls unwrap in the target, which is passed a struct that
+// holds a pointer.
+//
+// @Requires |u| = 2 And |t| = 1 And w.q != nil And 0 <= w.q.i < 2
+// @Modifies u, t
+func StructHelper(u [][]int, t []int, w Wrap) {
+	u[unwrap(w)] = append(t[:0], 5) // want `vego: cannot verify StructHelper: unwrap is called in the target of this assignment`
+}
+
+type Inner struct {
+	v int
+}
+
+type Outer struct {
+	*Inner
+	n int
+}
+
+// @Requires i != nil And -1000 <= i.v <= 1000 And -1000 <= x <= 1000
+// @Ensures result = i.v + x
+func (i *Inner) PM(x int) (result int) {
+	return i.v + x
+}
+
+// @Requires o != nil And o.n < 1000
+// @Modifies o.n
+// @Ensures o.n' = o.n + 1 And result = 0
+func bumpOuter(o *Outer) (result int) {
+	o.n++
+	return 0
+}
+
+// EmbeddedReceiver calls a method promoted from an embedded pointer. The
+// receiver is the pointer x.Inner, which bumpOuter does not change.
+//
+// @Ensures result = 1
+func EmbeddedReceiver() (result int) {
+	x := Outer{Inner: &Inner{v: 1}}
+	return x.PM(bumpOuter(&x))
+}
