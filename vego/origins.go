@@ -98,9 +98,10 @@ func (pv *pkgVerifier) originsOf(body *ast.BlockStmt) *origins {
 }
 
 // knownError reports whether an error expression in a function body has a
-// known origin: nil, a new error, an error variable of this package that
-// always holds a new error into which nothing of unknown origin went, the result of a function that only returns such
-// errors, or a local variable that is only ever assigned such errors.
+// known origin: nil, a new error, an error variable of this package or of
+// another that always holds a new error into which nothing of unknown origin
+// went, the result of a function that only returns such errors, or a local
+// variable that is only ever assigned such errors.
 // visiting holds the variables being decided, which settles a variable that
 // is assigned from itself.
 func (pv *pkgVerifier) knownError(o *origins, e ast.Expr, index int, visiting map[*types.Var]bool) bool {
@@ -124,6 +125,9 @@ func (pv *pkgVerifier) knownError(o *origins, e ast.Expr, index int, visiting ma
 	case *ast.Ident:
 		variable, ok := pv.info.ObjectOf(e).(*types.Var)
 		return ok && index < 0 && isError(variable.Type()) && pv.knownVariable(o, variable, visiting)
+	case *ast.SelectorExpr:
+		variable := pv.namedVariable(e)
+		return variable != nil && index < 0 && isError(variable.Type()) && pv.knownVariable(o, variable, visiting)
 	}
 	return false
 }
@@ -132,12 +136,12 @@ func (pv *pkgVerifier) knownError(o *origins, e ast.Expr, index int, visiting ma
 // known origin.
 func (pv *pkgVerifier) knownVariable(o *origins, variable *types.Var, visiting map[*types.Var]bool) bool {
 	switch {
-	case pv.sentinels[variable] && pv.homemade[variable]:
+	case pv.sentinels[variable] && pv.homemade[variable], pv.importedHomemade(variable):
 		pv.relied[variable] = true
 		return true
 	case visiting[variable]:
 		return true
-	case o.unknown[variable] || variable.Parent() == pv.pass.Pkg.Scope() || pv.isParameter[variable]:
+	case o.unknown[variable] || (variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope()) || pv.isParameter[variable]:
 		return false
 	}
 	visiting[variable] = true

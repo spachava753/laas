@@ -179,7 +179,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		"comma-separated words that other tools read after \"// @\", as in Summary,Param; any other unknown word there is an error",
 	)
 	analyzer.ResultType = reflect.TypeFor[*Usage]()
-	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact), new(sentinelFact)}
+	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact), new(errorVarFact), new(sentinelWritesFact), new(sentinelRelianceFact)}
 	analyzer.Run = func(pass *analysis.Pass) (result any, err error) {
 		foreignTags, err := parseOtherTags(otherTags)
 		if err != nil {
@@ -250,9 +250,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			}
 		}
 		pv.exportContracts(pv.reportAlwaysFailing())
-		for variable := range pv.relied {
-			pass.ExportObjectFact(variable, new(sentinelFact))
-		}
+		pv.reportSentinelWrites()
 		// The proofs of this package also rest on whatever the packages it
 		// depends on took on trust.
 		pass.ExportPackageFact(&usageFact{Usage: *pv.usage})
@@ -374,6 +372,9 @@ type pkgVerifier struct {
 	// before they are initialised, with what stands in the way.
 	sentinels map[*types.Var]bool
 	relied    map[*types.Var]bool
+	// writes holds the assignments to error variables of other packages
+	// and the places that take their address.
+	writes []sentinelWrite
 	// homemade holds the sentinels whose origin is known: nothing but plain
 	// values and other such sentinels went into the error.
 	homemade  map[*types.Var]bool

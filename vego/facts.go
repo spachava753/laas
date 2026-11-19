@@ -30,6 +30,9 @@ type contractFact struct {
 	// Consts holds the values of the package constants the contract
 	// mentions, so that it means the same in every package that reads it.
 	Consts map[string]string
+	// Errors holds, by how the contract spells them, the keys of the
+	// package-level error variables it mentions; see errorKey.
+	Errors map[string]string
 }
 
 func (*contractFact) AFact() {}
@@ -75,13 +78,28 @@ func (pv *pkgVerifier) exportContracts(excused map[*funcInfo]bool) {
 		if !fn.annotated() || !fn.obj.Exported() {
 			continue
 		}
-		fact := &contractFact{Excused: excused[fn], Verified: !unverified[fn], KnownErrors: pv.knownReturns[fn], Consts: map[string]string{}}
-		// The constants a contract mentions are recorded with their values.
+		fact := &contractFact{Excused: excused[fn], Verified: !unverified[fn], KnownErrors: pv.knownReturns[fn], Consts: map[string]string{}, Errors: map[string]string{}}
+		// The constants a contract mentions are recorded with their
+		// values, and the error variables with their keys.
+		at := fn.decl.Pos()
+		scope := pv.pass.Pkg.Scope().Innermost(at)
 		var visit func(n *logic.Node)
 		visit = func(n *logic.Node) {
 			if constant, ok := pv.pass.Pkg.Scope().Lookup(n.Name).(*types.Const); ok && n.Kind == logic.NIdent {
 				if literal, ok := literalOf(constant.Val()); ok {
 					fact.Consts[n.Name] = literal.String()
+				}
+			}
+			if _, obj := scope.LookupParent(n.Name, at); n.Kind == logic.NIdent && obj != nil {
+				if variable := errorVariableOf(obj, ""); variable != nil {
+					fact.Errors[n.Name] = errorKey(variable)
+				}
+			}
+			if n.Kind == logic.NField && n.Kids[0].Kind == logic.NIdent {
+				if _, obj := scope.LookupParent(n.Kids[0].Name, at); obj != nil {
+					if variable := errorVariableOf(obj, n.Name); variable != nil {
+						fact.Errors[n.Kids[0].Name+"."+n.Name] = errorKey(variable)
+					}
 				}
 			}
 			for _, kid := range n.Kids {

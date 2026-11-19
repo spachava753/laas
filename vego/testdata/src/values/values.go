@@ -312,15 +312,39 @@ func SameFloat(f float64) (same bool) {
 	return false // want `vego:\ postcondition\ may\ not\ hold:\ same\ =\ True`
 }
 
-// Describe switches on an error.
+// Describe switches on an error. A case may be a sentinel, which is a
+// pointer, so that == cannot panic.
 //
 // @Ensures err = nil <-> code = 0
-// @Ensures code != 1
+// @Ensures err = errOutOfRange <-> code = 1
 func Describe(err error) (code int) {
 	switch err {
 	case nil:
 		return 0
-	case errOutOfRange: // want `vego:\ cannot\ verify\ Describe:\ comparing\ two\ errors\ can\ panic\ when\ they\ hold\ an\ uncomparable\ type;\ compare\ with\ nil`
+	case errOutOfRange:
+		return 1
+	}
+	return 2
+}
+
+// DescribeWrongly claims that the case of the sentinel is never taken.
+//
+// @Ensures code != 1
+func DescribeWrongly(err error) (code int) {
+	switch err {
+	case errOutOfRange:
+		return 1 // want `vego: postcondition may not hold: code != 1`
+	}
+	return 2
+}
+
+// DescribeOther switches on an error with a case that is another error of
+// which nothing is known.
+//
+// @Ensures True
+func DescribeOther(err, other error) (code int) {
+	switch err {
+	case other: // want `vego: cannot verify DescribeOther: comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, a package-level error variable, or an error made by errors.New or fmt.Errorf`
 		return 1
 	}
 	return 2
@@ -342,7 +366,7 @@ func Lookup(A []int, i int) (result1 int, result2 error) {
 //
 // @Ensures True
 func Equal(a, b error) (same bool) {
-	return a == b // want `vego:\ cannot\ verify\ Equal:\ comparing\ two\ errors\ can\ panic\ when\ they\ hold\ an\ uncomparable\ type;\ compare\ with\ nil`
+	return a == b // want `vego: cannot verify Equal: comparing two errors can panic when both hold the same uncomparable type; one of them must be nil`
 }
 
 type numbers []int

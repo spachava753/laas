@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	"lib"
 )
@@ -16,7 +17,8 @@ var (
 	errBase    = errors.New("base")
 	errOver    = fmt.Errorf("over: %w", errBase)
 	errCounted = fmt.Errorf("%d over: %w", 3, errOver)
-	errForeign = fmt.Errorf("foreign: %w", io.EOF)
+	errEOF     = fmt.Errorf("eof: %w", io.EOF)
+	errForeign = fmt.Errorf("foreign: %w", os.ErrNotExist)
 	errOnTop   = fmt.Errorf("on top: %w", errForeign)
 	errNumbers = fmt.Errorf("numbers: %v", [][]int{{1}, {2}})
 	errNested  = fmt.Errorf("nested: %v", lib.Nest(nil))
@@ -33,7 +35,16 @@ func TellsOwn() {
 	tell(errCounted)
 }
 
-// TellsForeign passes one that holds an error of another package.
+// TellsEOF passes one that holds an error of another package that is a
+// sentinel there, made by errors.New.
+//
+// @Ensures True
+func TellsEOF() {
+	tell(errEOF)
+}
+
+// TellsForeign passes one that holds an error of another package that is
+// not known to be one: os.ErrNotExist is assigned another variable.
 //
 // @Ensures True
 func TellsForeign() {

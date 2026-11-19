@@ -25,3 +25,11 @@ var First = checker.Ok()
 
 // ErrX would be known not to be nil in a package that did not do this.
 var ErrX = fmt.Errorf("x %d", 1)
+
+// Named names ErrX in its contract, which says nothing true about the
+// value it may have when this runs.
+//
+// @Ensures err != ErrX // want `vego: in Ensures annotation: ErrX is not known to have its value yet when this runs`
+func Named() (err error) {
+	return nil
+}

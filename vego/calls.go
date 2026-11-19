@@ -775,6 +775,7 @@ func (v *fnVerifier) calleeFormula(c *clause, env *specEnv) *logic.Term {
 	case err != nil:
 		v.misread(c, err)
 	}
+	v.noteIs(env.sink, t)
 	return t
 }
 

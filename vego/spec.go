@@ -89,6 +89,106 @@ func (e *specEnv) root(name string) (val value, t types.Type, isResult bool, con
 	return nil, nil, false, constant, err
 }
 
+// errorVariable resolves a name that, with the field after it for a
+// package name, is a package-level error variable: one of this package, as
+// ErrEmpty, or of another, as io.EOF. It reports whether the name is one.
+// A contract keeps the meaning it had where it was written: a verified
+// function sees the names of its file, an imported contract the variables
+// its package recorded for its spellings, and a trusted contract none.
+func (e *specEnv) errorVariable(name string, steps []logic.Step, when logic.When) (*logic.Term, bool, error) {
+	var variable *types.Var
+	rest := steps
+	isResult := false
+	if e.fn != nil {
+		_, isResult = e.fn.resultNames[name]
+	}
+	switch {
+	case e.fn == nil:
+		scope := e.v.pass.Pkg.Scope().Innermost(e.pos)
+		if scope == nil {
+			return nil, false, nil
+		}
+		_, obj := scope.LookupParent(name, e.pos)
+		variable, rest = e.v.packageErrorVariable(obj, steps)
+	case e.fn.trust != nil:
+		return nil, false, nil
+	case e.fn.paramNames[name] != nil || isResult:
+		return nil, false, nil
+	case e.fn.imported != nil:
+		spelled := name
+		if len(steps) > 0 && steps[0].Field != "" {
+			if key, ok := e.fn.imported.Errors[name+"."+steps[0].Field]; ok {
+				spelled, rest = name+"."+steps[0].Field, steps[1:]
+				variable = e.v.lookupKey(key)
+				if variable == nil {
+					return nil, true, fmt.Errorf("%s names %s, which is not known here", spelled, key)
+				}
+				break
+			}
+		}
+		key, ok := e.fn.imported.Errors[spelled]
+		if !ok {
+			return nil, false, nil
+		}
+		if variable = e.v.lookupKey(key); variable == nil {
+			return nil, true, fmt.Errorf("%s names %s, which is not known here", spelled, key)
+		}
+	default:
+		at := e.fn.decl.Pos()
+		_, obj := e.v.pass.Pkg.Scope().Innermost(at).LookupParent(name, at)
+		variable, rest = e.v.packageErrorVariable(obj, steps)
+	}
+	if variable == nil {
+		return nil, false, nil
+	}
+	switch {
+	case len(rest) > 0 && rest[len(rest)-1].Len:
+		return nil, true, fmt.Errorf("%s is an error and has no length", variable.Name())
+	case len(rest) > 0:
+		return nil, true, fmt.Errorf("%s is an error variable and has no fields or elements", variable.Name())
+	case when != logic.Now:
+		return nil, true, fmt.Errorf("%s is an error variable of a package, which cannot be primed or put in old()", variable.Name())
+	}
+	sentinel, why := e.v.sentinelTerm(e.sink, variable)
+	if why != "" {
+		return nil, true, errors.New(why)
+	}
+	return sentinel, true, nil
+}
+
+// packageErrorVariable returns the package-level error variable that an
+// object is, or that its first step selects when it is a package name, and
+// the steps after it.
+func (v *fnVerifier) packageErrorVariable(obj types.Object, steps []logic.Step) (*types.Var, []logic.Step) {
+	field := ""
+	if _, isPackage := obj.(*types.PkgName); isPackage && len(steps) > 0 && steps[0].Field != "" {
+		field, steps = steps[0].Field, steps[1:]
+	}
+	if variable := errorVariableOf(obj, field); variable != nil {
+		return variable, steps
+	}
+	return nil, nil
+}
+
+// errorVariableOf returns the package-level error variable that an object
+// is, or, when the object is a package name, the one of that package with
+// the given name, or nil.
+func errorVariableOf(obj types.Object, field string) *types.Var {
+	if pkgName, ok := obj.(*types.PkgName); ok {
+		if field == "" {
+			return nil
+		}
+		obj = pkgName.Imported().Scope().Lookup(field)
+	} else if field != "" {
+		return nil
+	}
+	variable, ok := obj.(*types.Var)
+	if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() || !isError(variable.Type()) {
+		return nil
+	}
+	return variable
+}
+
 // reached is what a path leads to.
 type reached struct {
 	val      value
@@ -113,6 +213,9 @@ func (e *specEnv) locate(name string, steps []logic.Step, when logic.When) (reac
 	}
 	if e.selfType != nil {
 		return e.locateField(name, steps, when)
+	}
+	if sentinel, named, err := e.errorVariable(name, steps, when); named {
+		return reached{constant: sentinel}, err
 	}
 	val, t, isResult, constant, err := e.root(name)
 	switch {
@@ -175,6 +278,9 @@ func (e *specEnv) locateField(name string, steps []logic.Step, when logic.When) 
 		}
 		if found, _, _ := types.LookupFieldOrMethod(e.selfType, true, home, name); found != nil {
 			return reached{}, errors.New(strings.TrimPrefix(err.Error(), "."))
+		}
+		if variable, _ := e.v.packageErrorVariable(e.v.pass.Pkg.Scope().Lookup(name), steps); variable != nil {
+			return reached{}, fmt.Errorf("an invariant cannot name the error variable %s yet", name)
 		}
 		constant, constErr := e.v.contractConstant(e.fn, name)
 		switch {

@@ -16,18 +16,21 @@ func (v *fnVerifier) variable(id *ast.Ident, st *state) value {
 	if val := v.current(st, variable); val != nil {
 		return val
 	}
-	if hidden := v.unsettled[variable]; hidden != "" {
-		v.unsupported(id.Pos(), fmt.Sprintf("%s is not known to have its value yet when this runs: %s while the variables of the package are "+
-			"initialised, which may run this function first", id.Name, hidden))
-	}
-	if v.sentinels[variable] {
-		v.relied[variable] = true
-		sentinel := logic.Const("var "+variable.Name(), logic.Err)
-		st.assume(logic.Not(logic.IsNil(sentinel)))
-		return value{sentinel}
+	if variable != nil && variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope() && isError(variable.Type()) {
+		return v.errorVariable(variable, id.Pos(), st)
 	}
 	v.unsupported(id.Pos(), id.Name+" is not a local variable of a supported type")
 	return nil
+}
+
+// errorVariable reads a package-level error variable, which must be a
+// sentinel.
+func (v *fnVerifier) errorVariable(variable *types.Var, pos token.Pos, st *state) value {
+	sentinel, why := v.sentinelTerm(st, variable)
+	if why != "" {
+		v.unsupported(pos, why)
+	}
+	return value{sentinel}
 }
 
 func (v *fnVerifier) checkIndex(st *state, guard []*logic.Term, length, index *logic.Term, pos token.Pos) {
@@ -83,6 +86,11 @@ func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 	case *ast.SliceExpr:
 		return v.sliceExpr(e, st, guard)
 	case *ast.SelectorExpr:
+		if x, ok := e.X.(*ast.Ident); ok && v.isPackageName(x) {
+			if variable, isVar := v.info.Uses[e.Sel].(*types.Var); isVar && isError(variable.Type()) {
+				return v.errorVariable(variable, e.Pos(), st)
+			}
+		}
 		// The field selection x.f follows a pointer where x is one, which
 		// must then not be nil.
 		selection := v.info.Selections[e]
@@ -220,6 +228,9 @@ func (v *fnVerifier) binaryExpr(e *ast.BinaryExpr, st *state, guard []*logic.Ter
 			return logic.Not(isNil)
 		}
 		return isNil
+	}
+	if isError(v.info.TypeOf(e.X)) && (e.Op == token.EQL || e.Op == token.NEQ) {
+		return v.compareErrors(e.X, e.Y, e.Op, st, guard, e.Pos())
 	}
 	if object, isPointer := pointee(v.info.TypeOf(e.X)); isPointer {
 		if v.pass.TypesSizes.Sizeof(object) == 0 {

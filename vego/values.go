@@ -148,6 +148,6 @@ func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term
 		v.usage.Constructors = append(v.usage.Constructors, position)
 	}
 	created := v.fresh("error", logic.Err)
-	st.assume(logic.Not(logic.IsNil(created)))
+	v.noteError(st, created)
 	return created
 }

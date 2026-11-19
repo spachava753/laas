@@ -109,6 +109,13 @@ type fnVerifier struct {
 	// misreadAs, when set, receives an annotation that cannot be resolved,
 	// in place of the diagnostic at the annotation.
 	misreadAs func(c *clause, err error)
+	// distinct holds the errors met that differ from each other: those
+	// made in the body and those of sentinels. background holds the facts
+	// noted so far that speak of inputs alone and are true of every input,
+	// by their text in backgroundSeen; see fact.
+	distinct       []*logic.Term
+	background     []*logic.Term
+	backgroundSeen map[string]bool
 }
 
 // allowEffects marks e, when it is a call, as the call of the current
@@ -123,6 +130,7 @@ func (pv *pkgVerifier) run(fn *funcInfo, task func(v *fnVerifier)) {
 	v := &fnVerifier{
 		pkgVerifier: pv, fn: fn, entry: map[*types.Var]value{}, names: map[string]int{},
 		reached: map[*funcInfo]bool{}, bitTerms: map[string]*logic.Term{}, lowZeros: map[string]uint{}, bitOrigins: map[string]bitOrigin{}, forgotten: map[string]forgottenPart{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{},
+		backgroundSeen: map[string]bool{},
 	}
 	defer func() {
 		switch r := recover().(type) {
@@ -421,6 +429,9 @@ func (v *fnVerifier) formula(c *clause, node *logic.Node, env logic.Env) *logic.
 	if err != nil {
 		v.misread(c, err)
 	}
+	if spec, ok := env.(*specEnv); ok {
+		v.noteIs(spec.sink, t)
+	}
 	return t
 }
 
@@ -649,6 +660,8 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 				value = logic.IsNil(tag)
 			case v.isNil(e) && tag.Sort == logic.Ref:
 				value = logic.Eq(tag, logic.RefLit(0))
+			case tag.Sort == logic.Err:
+				value = v.errorsEqual(s.Tag, e, tag, v.expr(e, st, guard), e.Pos())
 			default:
 				// A case matches when Go's == holds, which for floats,
 				// strings, and errors is not plain equality of terms.

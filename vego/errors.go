@@ -16,27 +16,27 @@ import (
 	"golang.org/x/tools/go/types/typeutil"
 )
 
-// sentinelFact marks a package-level error variable that a proof of its
-// package took to be non-nil, so that a package that assigns to it can be
-// told.
-type sentinelFact struct{}
-
-func (*sentinelFact) AFact() {}
-
-func (*sentinelFact) String() string { return "sentinel" }
-
 // findSentinels records the package-level error variables that are known to
 // be non-nil: those initialised with errors.New or fmt.Errorf and never
 // assigned or addressed anywhere in the package, provided that no code of
-// the package can run before they are initialised. For an exported variable
-// this relies on other packages not assigning to it; one that is analysed
-// and does is reported.
+// the package can run before they are initialised. Each of them is published
+// as a fact for the packages that import this one, which run only once its
+// initialisation is over and so need no such proviso. That another package
+// does not assign to it is checked where both that package and a proof that
+// relies on the variable are known; see reportSentinelWrites.
 func (pv *pkgVerifier) findSentinels() {
 	pv.sentinels = map[*types.Var]bool{}
 	pv.unsettled = map[*types.Var]string{}
 	pv.reassigned = map[*types.Var]bool{}
 	pv.relied = map[*types.Var]bool{}
 	pv.homemade = map[*types.Var]bool{}
+	// What this package writes of the error variables of other packages
+	// is published, whichever way this returns.
+	defer func() {
+		if len(pv.writes) > 0 {
+			pv.pass.ExportPackageFact(&sentinelWritesFact{Writes: pv.writes})
+		}
+	}()
 	made := map[*types.Var]*ast.CallExpr{}
 	for _, file := range pv.pass.Files {
 		for _, decl := range file.Decls {
@@ -75,10 +75,14 @@ func (pv *pkgVerifier) findSentinels() {
 		}
 		delete(pv.sentinels, variable)
 		pv.reassigned[variable] = true
-		// A proof in the variable's own package may rest on its value.
-		if variable.Pkg() != nil && variable.Pkg() != pv.pass.Pkg && pv.pass.ImportObjectFact(variable, new(sentinelFact)) {
-			pv.report(e.Pos(), "%s.%s may be changed here, but proofs in package %s rely on it being the error it was declared with",
-				variable.Pkg().Name(), variable.Name(), variable.Pkg().Path())
+		// A proof in another package may rest on the value of a variable
+		// of another package.
+		if pv.isForeignSentinel(variable) {
+			position := pv.pass.Fset.Position(e.Pos())
+			pv.writes = append(pv.writes, sentinelWrite{
+				Key: errorKey(variable), Name: variable.Pkg().Name() + "." + variable.Name(), Package: pv.pass.Pkg.Path(),
+				At: fmt.Sprintf("%s:%d", filepath.Base(position.Filename), position.Line), pos: e.Pos(),
+			})
 		}
 	}
 	for _, file := range pv.pass.Files {
@@ -106,12 +110,6 @@ func (pv *pkgVerifier) findSentinels() {
 	if len(pv.sentinels) == 0 {
 		return
 	}
-	if hidden := pv.hiddenInitCode(); hidden != "" {
-		for variable := range pv.sentinels {
-			pv.unsettled[variable] = hidden
-		}
-		clear(pv.sentinels)
-	}
 	// An initialiser is not verified code, so nobody has checked what went
 	// into the error it makes. The error is not nil whatever went in; its
 	// origin is known only if nothing went in that brings code: plain values,
@@ -127,10 +125,8 @@ func (pv *pkgVerifier) findSentinels() {
 				if pv.info.Types[arg].IsNil() {
 					return false
 				}
-				id, _ := ast.Unparen(arg).(*ast.Ident)
-				other, _ := pv.info.Uses[id].(*types.Var)
-				if id != nil && other != nil && isError(other.Type()) {
-					return !pv.homemade[other]
+				if other := pv.namedVariable(arg); other != nil && isError(other.Type()) {
+					return !pv.homemade[other] && !pv.importedHomemade(other)
 				}
 				return !formatsPlainly(pv.info.TypeOf(arg))
 			})
@@ -138,6 +134,15 @@ func (pv *pkgVerifier) findSentinels() {
 				pv.homemade[variable], changed = true, true
 			}
 		}
+	}
+	for variable := range pv.sentinels {
+		pv.pass.ExportObjectFact(variable, &errorVarFact{Homemade: pv.homemade[variable]})
+	}
+	if hidden := pv.hiddenInitCode(); hidden != "" {
+		for variable := range pv.sentinels {
+			pv.unsettled[variable] = hidden
+		}
+		clear(pv.sentinels)
 	}
 }
 
@@ -634,9 +639,9 @@ func (v *fnVerifier) forcesSuccess() solver.Result {
 	for i, failure := range failures {
 		nils[i] = logic.IsNil(failure)
 	}
-	// The sample error is the one sample that is not a literal; all that
-	// is known of it is that it is not nil.
-	known := []*logic.Term{logic.Not(logic.IsNil(someError))}
+	// The sample errors are the samples that are not literals; all that
+	// is known of them is that they are not nil and differ from each other.
+	known := v.knownFacts()
 	forced := func(input *witness) *logic.Term {
 		return logic.And(logic.And(input.apply(pre)...), logic.Implies(logic.And(input.apply(post)...), logic.And(input.apply(nils)...)))
 	}
@@ -674,8 +679,43 @@ func (v *fnVerifier) forcesSuccess() solver.Result {
 	return solver.Unknown
 }
 
-// someError is the sample value for an error that is not nil.
-var someError = logic.Const("some error", logic.Err)
+// sampleErrors are the values a sample gives to errors that are not nil.
+// They are different errors, as different calls of errors.New make, so
+// that a sample can hold two errors that differ as well as two that are
+// the same.
+var sampleErrors = func() []*logic.Term {
+	errs := make([]*logic.Term, maxSampleErrors)
+	for i := range errs {
+		errs[i] = logic.Const(fmt.Sprintf("%s%d", sampleErrorName, i), logic.Err)
+	}
+	return errs
+}()
+
+// sampleErrorName begins the names of the sample errors, and
+// maxSampleErrors is how many there are.
+const (
+	sampleErrorName = "some error "
+	maxSampleErrors = 6
+)
+
+// isSampleError reports whether a term is one of the sample errors.
+func isSampleError(t *logic.Term) bool {
+	return t.Op == logic.OpConst && t.Sort == logic.Err && strings.HasPrefix(t.Name, sampleErrorName)
+}
+
+// sampleErrorFacts states what is known of the sample errors: none is nil,
+// and no two are the same. Distinct errors made by errors.New are a Go
+// input with these properties.
+func sampleErrorFacts() []*logic.Term {
+	var facts []*logic.Term
+	for i, e := range sampleErrors {
+		facts = append(facts, logic.Not(logic.IsNil(e)))
+		for _, other := range sampleErrors[:i] {
+			facts = append(facts, logic.Not(logic.Eq(e, other)))
+		}
+	}
+	return facts
+}
 
 // produced returns the constants of a formula that do not stand for the
 // state on entry or for part of a sample, in the order they occur.
@@ -689,7 +729,7 @@ func (v *fnVerifier) produced(t *logic.Term) []*logic.Term {
 			return
 		}
 		seen[t] = true
-		if t.Op == logic.OpConst && !v.isInput(t) && t != someError && !names[t.Name] {
+		if t.Op == logic.OpConst && !v.isInput(t) && !isSampleError(t) && !names[t.Name] {
 			names[t.Name] = true
 			found = append(found, t)
 		}
@@ -702,7 +742,7 @@ func (v *fnVerifier) produced(t *logic.Term) []*logic.Term {
 }
 
 // unsampled returns the constants of a formula other than those of a
-// sample, the sample error, and nil.
+// sample, the sample errors, sentinels, and nil.
 func (v *fnVerifier) unsampled(t *logic.Term) []*logic.Term {
 	var found []*logic.Term
 	seen := map[*logic.Term]bool{}
@@ -713,7 +753,7 @@ func (v *fnVerifier) unsampled(t *logic.Term) []*logic.Term {
 			return
 		}
 		seen[t] = true
-		if t.Op == logic.OpConst && t != logic.NilErr() && t != someError && !strings.HasPrefix(t.Name, sampleName) && !names[t.Name] {
+		if t.Op == logic.OpConst && t != logic.NilErr() && !isSampleError(t) && !isSentinelTerm(t) && !strings.HasPrefix(t.Name, sampleName) && !names[t.Name] {
 			names[t.Name] = true
 			found = append(found, t)
 		}
@@ -727,9 +767,9 @@ func (v *fnVerifier) unsampled(t *logic.Term) []*logic.Term {
 
 // isInput reports whether a constant stands for part of the state on
 // entry, a parameter or the memory, or for part of a sample of it, or is
-// the nil error.
+// the nil error or a sentinel, which are the same for every input.
 func (v *fnVerifier) isInput(t *logic.Term) bool {
-	return t == logic.NilErr() || v.inputs[t.Name] || strings.HasPrefix(t.Name, entryRegion) || strings.HasPrefix(t.Name, sampleName)
+	return t == logic.NilErr() || isSentinelTerm(t) || v.inputs[t.Name] || strings.HasPrefix(t.Name, entryRegion) || strings.HasPrefix(t.Name, sampleName)
 }
 
 // canReach reports whether there is evidence that execution can arrive at
@@ -756,7 +796,7 @@ func (v *fnVerifier) canReach(path []*logic.Term) bool {
 			}
 		}
 	}
-	known := []*logic.Term{logic.Not(logic.IsNil(someError))}
+	known := v.knownFacts()
 	return v.someInput(path, func(input *witness) ([]*logic.Term, [][]*logic.Term) {
 		return append(input.apply(required), input.apply(path)...), [][]*logic.Term{nil}
 	}, func(input *witness) bool {
@@ -912,6 +952,10 @@ type sampler struct {
 	// types give them.
 	vars  []*logic.Term
 	facts []*logic.Term
+	// errs counts the leaves of type error sampled so far, and sentinels
+	// holds the sentinels the formulas mention, which a leaf may hold.
+	errs      int
+	sentinels []*logic.Term
 }
 
 // number returns a new constant for a number of an integer type.
@@ -939,10 +983,22 @@ func (b *sampler) boolean() *logic.Term {
 	return c
 }
 
-// failure returns an error that is nil or the sample error, as a boolean
-// constant decides.
+// failure returns an error for one leaf of a sample, as a number constant
+// decides: nil, a sample error of its own, the sample error of an earlier
+// leaf, so that two leaves can hold different errors or the same, or a
+// sentinel the formulas mention. Leaves past the number of sample errors
+// have only the choices of the last one.
 func (b *sampler) failure() *logic.Term {
-	return logic.Ite(b.boolean(), logic.NilErr(), someError)
+	own := min(b.errs, maxSampleErrors-1)
+	b.errs++
+	choices := append([]*logic.Term{logic.NilErr()}, sampleErrors[:own+1]...)
+	choices = append(choices, b.sentinels...)
+	choice := b.within(0, int64(len(choices)-1))
+	chosen := choices[len(choices)-1]
+	for i := len(choices) - 2; i >= 0; i-- {
+		chosen = logic.Ite(logic.Eq(choice, logic.IntLit(int64(i))), choices[i], chosen)
+	}
+	return chosen
 }
 
 // text returns a sample string: a run of one byte, of some length.
@@ -1224,6 +1280,9 @@ func (v *fnVerifier) someInput(terms []*logic.Term, search func(input *witness) 
 		}
 		seen[t] = true
 		switch {
+		case isSentinelTerm(t) && !b.mentioned[t.Name]:
+			b.mentioned[t.Name] = true
+			b.sentinels = append(b.sentinels, t)
 		case t.Op == logic.OpConst:
 			b.mentioned[t.Name] = true
 		case t.Op == logic.OpPush && len(b.literals) < 8:
@@ -1275,6 +1334,9 @@ func (v *fnVerifier) someInput(terms []*logic.Term, search func(input *witness) 
 			alternatives[scramble(uint64(n), uint64(i))%count](input)
 		}
 		facts, foralls := search(input)
+		// What is known of every input narrows what Z3 proposes to what
+		// accept can take.
+		facts = append(slices.Clip(facts), v.knownFacts()...)
 		for _, forall := range foralls {
 			if v.proposeFor(b, input, append(slices.Clip(b.facts), facts...), forall, accept) {
 				return true
