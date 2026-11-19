@@ -45,3 +45,30 @@ func Has(f func()) {
 func Calls(f func(int) int) (n int) {
 	return f(1) // want `vego: cannot verify Calls: .*`
 }
+
+// @Predicate same(a, b) ::= a = b
+
+// InPredicate hands a function value to a predicate, whose parameters are
+// numbers.
+//
+// @Ensures same(f, g) // want `vego: in Ensures annotation: argument 1 of same has type function value, want int`
+func InPredicate(f, g func()) {
+}
+
+// WithNumber compares a function value with a number.
+//
+// @Requires f = 0 // want `vego: in Requires annotation: cannot compare f \(function value\) with 0 \(int\)`
+func WithNumber(f func()) {
+}
+
+// MapWithNumber compares a map with a number.
+//
+// @Requires m = 0 // want `vego: in Requires annotation: cannot compare m \(map\) with 0 \(int\)`
+func MapWithNumber(m map[int]int) {
+}
+
+// Ordered orders a function value.
+//
+// @Requires f < nil // want `vego: in Requires annotation: operator < cannot be applied to a function value`
+func Ordered(f func()) {
+}

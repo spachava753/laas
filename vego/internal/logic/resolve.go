@@ -116,10 +116,25 @@ func fail(format string, args ...any) {
 	panic(resolveError{fmt.Errorf(format, args...)})
 }
 
+// kindOf names what a term of a formula stands for, as a message should
+// call it. A reference is a pointer, a function value, or, when it is
+// neither, a map: those are the only references a path gives.
+func kindOf(t *Term) string {
+	switch {
+	case t.Op == OpFuncVal:
+		return "function value"
+	case t.Op == OpPair:
+		return "pointer"
+	case t.Sort == Ref:
+		return "map"
+	}
+	return t.Sort.String()
+}
+
 func (s *scope) expect(n *Node, want Sort) *Term {
 	t := s.term(n)
 	if t.Sort != want {
-		fail("expected %s but %s has type %s", describe(want), n, t.Sort)
+		fail("expected %s but %s has type %s", describe(want), n, kindOf(t))
 	}
 	return t
 }
@@ -176,7 +191,7 @@ func (s *scope) term(n *Node) *Term {
 func (s *scope) seq(n *Node) *Term {
 	t := s.term(n)
 	if !t.Sort.IsSeq() {
-		fail("%s has type %s, not a slice", n, t.Sort)
+		fail("%s has type %s, not a slice", n, kindOf(t))
 	}
 	return t
 }
@@ -245,7 +260,7 @@ func (s *scope) access(n *Node, when When) *Term {
 				fail("%s has no field %s", root, step.Field)
 			}
 			if !base.Sort.IsSeq() {
-				fail("%s has type %s and cannot be indexed", root, base.Sort)
+				fail("%s has type %s and cannot be indexed", root, kindOf(base))
 			}
 			if step.Index.Sort != Int {
 				fail("%s is indexed by a %s, not by an integer", root, step.Index.Sort)
@@ -334,7 +349,7 @@ func (s *scope) call(n *Node) *Term {
 	for i, kid := range n.Kids {
 		args[i] = s.term(kid)
 		if want := def.Params[i].Sort; args[i].Sort != want {
-			fail("argument %d of %s has type %s, want %s", i+1, n.Name, args[i].Sort, want)
+			fail("argument %d of %s has type %s, want %s", i+1, n.Name, kindOf(args[i]), want)
 		}
 	}
 	return Pred(def.Name, args...)
@@ -396,7 +411,7 @@ func (s *scope) compare(op string, left, right *Node) *Term {
 		b = RefLit(0)
 	}
 	if a.Sort != b.Sort {
-		fail("cannot compare %s (%s) with %s (%s)", plain(left), a.Sort, plain(right), b.Sort)
+		fail("cannot compare %s (%s) with %s (%s)", plain(left), kindOf(a), plain(right), kindOf(b))
 	}
 	result := s.relation(op, a, b)
 	if len(vars) == 0 {
@@ -443,6 +458,8 @@ func (s *scope) relation(op string, a, b *Term) *Term {
 		fail("%s", Incomparable(a, b))
 	case a.Sort == Ref && equality:
 		result = RefEq(a, b)
+	case a.Sort == Ref:
+		fail("operator %s cannot be applied to a %s", op, kindOf(a))
 	case a.Sort != Int:
 		fail("operator %s cannot be applied to %s values", op, a.Sort)
 	case equality:
