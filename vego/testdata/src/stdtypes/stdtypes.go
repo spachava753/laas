@@ -176,3 +176,17 @@ func (background) Value(key any) any { return nil }
 func Background() (c context.Context) {
 	return background{} // want `cannot verify Background: converting a stdtypes.background to context.Context is not supported: its method Context.Deadline has no contract, so nothing would say what code that calls it may rely on; for a type of another module, give it an entry \(context.Context\).Deadline in vego-trusted.yaml`
 }
+
+// @Requires ctx != nil
+// @Ensures err = context.DeadlineExceeded -> late
+func IsLate(ctx context.Context) (late bool, err error) {
+	err = ctx.Err()
+	return errors.Is(err, context.DeadlineExceeded), err
+}
+
+// @Requires ctx != nil
+// @Ensures err = context.DeadlineExceeded -> ~canceled
+func NotCanceled(ctx context.Context) (canceled bool, err error) {
+	err = ctx.Err()
+	return errors.Is(err, context.Canceled), err
+}

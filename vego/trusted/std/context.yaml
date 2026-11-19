@@ -3,27 +3,35 @@ version: 1
 trusted:
   (context.Context).Err:
     reason: >-
-      A claim about every context.Context that code which is not verified
-      hands to verified code. The documentation of Context states it for
-      every implementation: Err returns nil if Done is not yet closed, and
+      A claim about every context.Context that verified code gets from code
+      that is not verified, other than from a trusted function, whose own
+      vouches covers what it returns. The documentation of Context states
+      it for every implementation: Err returns nil if Done is not yet closed, and
       otherwise DeadlineExceeded if the deadline passed or Canceled if the
-      context was canceled; since Go 1.7 it has said that no other values
-      are defined. The errors are those two variables: Canceled is made by
-      errors.New, and DeadlineExceeded holds a deadlineExceededError, an
-      empty struct whose methods Error, Timeout, and Temporary return
-      constants, so == on it is identity and what errors.Is reports does
-      not change. That Err returns the same error once it is not nil is not
-      modelled.
+      context was canceled. Go 1.7's documentation said that no other values
+      for Err are defined, and that of later versions names only these two.
+      The errors are those two variables: Canceled is made by errors.New, and
+      DeadlineExceeded holds a deadlineExceededError, an empty struct whose
+      methods Error, Timeout, and Temporary return constants, so == on it is
+      identity and what errors.Is reports does not change. Neither has an Is
+      or an Unwrap method, so errors.Is finds in each only itself, which the
+      last three clauses state; the last one is needed because vego does not
+      know that the two variables differ. That Err returns the same error
+      once it is not nil is not modelled.
     vouches: [result]
     modifies: []
     ensures:
       - "result = nil Or result = context.Canceled Or result = context.DeadlineExceeded"
+      - "is(result, context.Canceled) <-> result = context.Canceled"
+      - "is(result, context.DeadlineExceeded) <-> result = context.DeadlineExceeded"
+      - "result = context.DeadlineExceeded -> ~is(result, context.Canceled)"
 
   context.CancelFunc:
     reason: >-
-      A claim about every context.CancelFunc that code which is not verified
-      hands to verified code. Its documentation says that it may be called
-      by several goroutines, and after the first call does nothing. The
+      A claim about every context.CancelFunc that verified code gets from
+      code that is not verified, other than from a trusted function, whose
+      own vouches covers what it returns. Its documentation says that it may
+      be called by several goroutines, and after the first call does nothing. The
       CancelFunc of a context derived from a context of another type calls
       that context's Done and Value, and canceling starts the functions
       registered with context.AfterFunc on goroutines of their own; what

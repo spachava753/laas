@@ -51,6 +51,9 @@ var typeHarnesses = map[string][]implementation{
 			return w
 		})},
 		{"*gzip.Writer", writerHarness(func() io.Writer { return gzip.NewWriter(new(bytes.Buffer)) })},
+		{"any writer the documentation allows", func(rng *rand.Rand) sample {
+			return writerHarness(func() io.Writer { return anyWriter{rng} })(rng)
+		}},
 	},
 	"(io.Reader).Read": {
 		{"*bytes.Reader", readerHarness(func(data []byte) io.Reader { return bytes.NewReader(data) })},
@@ -86,6 +89,9 @@ var typeHarnesses = map[string][]implementation{
 			}
 			return r
 		})},
+		{"any reader the documentation allows", func(rng *rand.Rand) sample {
+			return readerHarness(func([]byte) io.Reader { return anyReader{rng} })(rng)
+		}},
 	},
 	"(context.Context).Err": {
 		{"context.Background", contextHarness(func(*rand.Rand) (context.Context, func()) { return context.Background(), func() {} })},
@@ -123,6 +129,9 @@ var typeHarnesses = map[string][]implementation{
 		{"context.WithTimeoutCause", contextHarness(func(rng *rand.Rand) (context.Context, func()) {
 			return context.WithTimeoutCause(randomParent(rng), 0, errors.New("cause"))
 		})},
+		{"any context the documentation allows", contextHarness(func(rng *rand.Rand) (context.Context, func()) {
+			return anyContext{rng}, func() {}
+		})},
 	},
 	"context.CancelFunc": {
 		{"of context.WithCancel", cancelHarness(func(parent context.Context) context.CancelFunc {
@@ -145,7 +154,63 @@ var typeHarnesses = map[string][]implementation{
 			_, cancel := context.WithDeadlineCause(parent, time.Now().Add(time.Hour), errors.New("cause"))
 			return cancel
 		})},
+		{"one that does nothing", cancelHarness(func(context.Context) context.CancelFunc { return func() {} })},
 	},
+}
+
+// The implementations below do, at random, everything the documentation
+// of their interface allows, so that an entry that claims more than the
+// documentation fails even where the standard library happens to meet it.
+
+// oddError is an error of a type of its own.
+type oddError struct{ n int }
+
+func (e oddError) Error() string { return "odd" }
+
+// anyWriter writes nothing of p and reports any count, with an error of
+// any type whenever the count is short, and sometimes when it is not.
+type anyWriter struct{ rng *rand.Rand }
+
+func (w anyWriter) Write(p []byte) (n int, err error) {
+	n = w.rng.Intn(len(p) + 1)
+	switch {
+	case n == len(p) && w.rng.Intn(2) == 0:
+		return n, nil
+	case w.rng.Intn(2) == 0:
+		return n, oddError{n}
+	}
+	return n, io.ErrShortWrite
+}
+
+// anyReader uses all of p as scratch and reads any count, 0 with no error
+// included, with or without an error of any type.
+type anyReader struct{ rng *rand.Rand }
+
+func (r anyReader) Read(p []byte) (n int, err error) {
+	r.rng.Read(p)
+	n = r.rng.Intn(len(p) + 1)
+	switch r.rng.Intn(4) {
+	case 0:
+		return n, io.EOF
+	case 1:
+		return n, oddError{n}
+	case 2:
+		return n, errors.New("broken")
+	}
+	return n, nil
+}
+
+// anyContext is done or not at random, and says why with either error.
+type anyContext struct{ rng *rand.Rand }
+
+func (c anyContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+
+func (c anyContext) Done() <-chan struct{} { return nil }
+
+func (c anyContext) Value(key any) any { return nil }
+
+func (c anyContext) Err() error {
+	return []error{nil, context.Canceled, context.DeadlineExceeded}[c.rng.Intn(3)]
 }
 
 // randomBytes returns up to 64 random bytes.

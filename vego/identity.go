@@ -461,9 +461,16 @@ func (v *fnVerifier) noteIs(sink *state, t *logic.Term) {
 			for _, tree := range v.trees {
 				v.treeInstance(sink, tree, target)
 			}
+			// errors.Is begins with err == nil || target == nil, so it
+			// finds nil only in nil and nothing in nil. That is stated of
+			// the error and the target, and of nil and the target, which
+			// holds whatever the error is: when the error is a result yet to
+			// be chosen, as in the check that a contract can be met, nil is
+			// then a choice whose facts are known.
 			for _, fact := range []*logic.Term{
 				logic.Implies(logic.IsNil(err), logic.Iff(t, logic.IsNil(target))),
 				logic.Implies(logic.IsNil(target), logic.Iff(t, logic.IsNil(err))),
+				logic.Iff(logic.Is(logic.NilErr(), target), logic.IsNil(target)),
 			} {
 				if note := "is " + fact.String(); !sink.noted[note] {
 					sink.noted[note] = true
