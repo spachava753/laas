@@ -92,3 +92,13 @@ type Embedding interface {
 //
 // @State gone // want `a state can be declared only on a defined interface type that declares a method of its own; Defined declares no method of its own`
 type Defined io.Closer
+
+// Compared uses the receiver outside a state.
+//
+// @State ready
+type Compared interface {
+	// @Receiver c
+	// @Requires c != nil // want `in Requires annotation: c names the receiver, which a contract can use only as the argument of a state, as in ready\(c\), and in Modifies`
+	// @Ensures True
+	M()
+}

@@ -465,6 +465,14 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 	if last := len(steps) - 1; last >= 0 && steps[last].State != "" {
 		return e.state(name, steps[:last], steps[last].State, when)
 	}
+	if e.fn != nil && e.fn.receiver != nil && e.fn.paramNames[name] == e.fn.receiver {
+		example := "closed"
+		if states := e.v.ifaceStatesOf(e.fn.receiver.Type()); len(states) > 0 {
+			example = states[0].name
+		}
+		return nil, fmt.Errorf("%s names the receiver, which a contract can use only as the argument of a state, as in %s(%s), and in Modifies",
+			name, example, name)
+	}
 	measured := len(steps) > 0 && steps[len(steps)-1].Len
 	if measured {
 		steps = steps[:len(steps)-1]

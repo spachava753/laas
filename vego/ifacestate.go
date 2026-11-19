@@ -264,14 +264,19 @@ func (pv *pkgVerifier) stateSpeaker(t types.Type) *types.Func {
 	return nil
 }
 
-// stateNames lists the names of the states of a type, for messages.
-func stateNames(states []ifaceState) string {
+// stateNames names the states of a type for messages, as in "the state
+// closed" or "the states closed and open", with the pronoun that stands for
+// them.
+func stateNames(states []ifaceState) (phrase, pronoun string) {
 	names := make([]string, len(states))
 	for i, s := range states {
 		names[i] = s.name
 	}
 	slices.Sort(names)
-	return strings.Join(names, ", ")
+	if len(names) == 1 {
+		return "the state " + names[0], "it"
+	}
+	return "the states " + strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1], "them"
 }
 
 // ifaceState resolves name(x) for an interface value x whose reference is
@@ -291,7 +296,8 @@ func (e *specEnv) ifaceState(what string, typ types.Type, ref *logic.Term, sink 
 	case len(found) == 0 && len(states) == 0:
 		return nil, &logic.NoState{Msg: fmt.Sprintf("%s(%s): %s has type %s, which has no states", name, what, what, typ)}
 	case len(found) == 0:
-		return nil, &logic.NoState{Msg: fmt.Sprintf("%s(%s): %s has type %s, which has the states %s", name, what, what, typ, stateNames(states))}
+		phrase, _ := stateNames(states)
+		return nil, &logic.NoState{Msg: fmt.Sprintf("%s(%s): %s has type %s, which has %s", name, what, what, typ, phrase)}
 	}
 	return e.v.fetch(sink, mem, []cell{stateCell}, home(ref), found[0].position())[0], nil
 }

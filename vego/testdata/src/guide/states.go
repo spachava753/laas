@@ -132,7 +132,7 @@ func (quiet) Close() (err error) {
 
 // @Ensures c != nil
 func Quiet() (c io.Closer) {
-	return quiet{} // want `cannot verify Quiet: converting a value of type quiet to io.Closer is not supported yet: io.Closer has the states closed, and the contract of Closer.Close speaks of them; nothing ties a state to what the methods of quiet do until the memory a value owns is modelled, the next part of interfaces. Make the conversion in code that is not verified`
+	return quiet{} // want `cannot verify Quiet: converting a value of type quiet to io.Closer is not supported yet: io.Closer has the state closed, and the contract of Closer.Close speaks of it; nothing ties a state to what the methods of quiet do until the memory a value owns is modelled, the next part of interfaces. Make the conversion in code that is not verified`
 }
 
 // Replace puts another body into a response.
