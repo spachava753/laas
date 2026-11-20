@@ -153,6 +153,23 @@ func LoggedPricer(inner Pricer) (p Pricer) {
 	return Logging{Inner: inner} // want `cannot verify LoggedPricer: Price may call through a function value or an interface value, and code that an interface value runs cannot do that yet: no contract of a function type or of a method of an interface has a variant, so nothing would prove that such calls end`
 }
 
+// RatedLogging wraps a Rated, a concrete type, and so calls its method
+// statically.
+type RatedLogging struct {
+	Inner Rated
+}
+
+// @Requires 0 <= qty <= 1000
+// @Ensures ok -> 0 <= cents <= 1000000
+func (l RatedLogging) Price(sku string, qty int) (cents int, ok bool) {
+	return l.Inner.Price(sku, qty)
+}
+
+// @Ensures p != nil
+func LoggedRated(inner Rated) (p Pricer) {
+	return RatedLogging{Inner: inner}
+}
+
 // @Requires s != nil
 // @Ensures True
 func Show(s fmt.Stringer) (text string) {

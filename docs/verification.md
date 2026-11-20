@@ -1325,6 +1325,29 @@ call out of what Price runs
 
 A struct that embeds an interface value gets the methods of that value, which call through it. Such a struct cannot be converted either.
 
+A decorator can be verified today when it wraps a concrete type, whose method it calls with a static call:
+
+```go
+// RatedLogging wraps a Rated, a concrete type, and so calls its method
+// statically.
+type RatedLogging struct {
+	Inner Rated
+}
+
+// @Requires 0 <= qty <= 1000
+// @Ensures ok -> 0 <= cents <= 1000000
+func (l RatedLogging) Price(sku string, qty int) (cents int, ok bool) {
+	return l.Inner.Price(sku, qty)
+}
+
+// @Ensures p != nil
+func LoggedRated(inner Rated) (p Pricer) {
+	return RatedLogging{Inner: inner}
+}
+```
+
+Both functions verify. A decorator that wraps any `Pricer`, as `Logging` does, cannot be verified yet.
+
 ### Converting between interfaces
 
 An interface value can be converted to an interface whose methods it has from the same declarations, as through embedding:

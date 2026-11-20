@@ -1155,6 +1155,7 @@ guide	(*sync.Once).Do	1	1800	0
 guide	(guide.Flat).Price	3	1429	0
 guide	(guide.Logging).Price	7	7977	0
 guide	(guide.Rated).Price	5	3026	0
+guide	(guide.RatedLogging).Price	4	1343	0
 guide	(guide.Stepper).Next	1	111	0
 guide	(guide.Temperature).String	1	142	0
 guide	(guide.discard).Write	7	5006	0
@@ -1268,6 +1269,7 @@ guide	guide.Logf	1	4194	0
 guide	guide.LogfVerified	1	895	0
 guide	guide.Logged	1	83	0
 guide	guide.LoggedPricer	1	514	0
+guide	guide.LoggedRated	5	980	0
 guide	guide.LogsTo	10	52721	0
 guide	guide.LogsToZero	5	1724	0
 guide	guide.MakeSink	1	46	0
