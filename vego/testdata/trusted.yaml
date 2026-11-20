@@ -1346,6 +1346,11 @@ trusted:
     formats: [format, args]
     modifies: []
 
+  formatting.logAny:
+    reason: A test of a function with formats made into a value.
+    formats: [v]
+    modifies: []
+
 # States of interfaces of another module, and contracts that speak of them.
 state:
   ifacestatelib.Conn:

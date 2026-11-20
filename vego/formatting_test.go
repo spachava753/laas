@@ -74,27 +74,36 @@ func TestPlainFormatting(t *testing.T) {
 		}{1, "x"},
 		nil, errors.New("made"), fmt.Errorf("wrapped: %w", io.EOF),
 	}
-	logger := log.New(io.Discard, "p ", log.Lshortfile)
+	// A logger whose output is io.Discard formats nothing, so it writes
+	// to a buffer.
+	logger := log.New(&bytes.Buffer{}, "p ", log.Lshortfile)
 	stdout, err := os.CreateTemp(scratch, "stdout")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = stdout.Close() }()
+	saved := os.Stdout
+	os.Stdout = stdout
+	defer func() { os.Stdout = saved }()
+	savedLog := log.Writer()
+	log.SetOutput(&bytes.Buffer{})
+	defer log.SetOutput(savedLog)
 	calls := map[string]func(format string, a []any){
-		"fmt.Sprintf":  func(format string, a []any) { _ = fmt.Sprintf(format, a...) },
-		"fmt.Sprint":   func(_ string, a []any) { _ = fmt.Sprint(a...) },
-		"fmt.Sprintln": func(_ string, a []any) { _ = fmt.Sprintln(a...) },
-		"fmt.Errorf":   func(format string, a []any) { _ = fmt.Errorf(format, a...) },
-		"fmt.Fprintf":  func(format string, a []any) { _, _ = fmt.Fprintf(&bytes.Buffer{}, format, a...) },
-		"fmt.Fprint":   func(_ string, a []any) { _, _ = fmt.Fprint(&bytes.Buffer{}, a...) },
-		"fmt.Fprintln": func(_ string, a []any) { _, _ = fmt.Fprintln(&bytes.Buffer{}, a...) },
-		"fmt.Printf":   func(format string, a []any) { _, _ = fmt.Fprintf(stdout, format, a...) },
-		"log.Printf":   func(format string, a []any) { toLogBuffer(func() { log.Printf(format, a...) }) },
-		"log.Print":    func(_ string, a []any) { toLogBuffer(func() { log.Print(a...) }) },
-		"log.Println":  func(_ string, a []any) { toLogBuffer(func() { log.Println(a...) }) },
-		"(*log.Logger).Printf": func(format string, a []any) {
-			logger.Printf(format, a...)
-		},
+		"fmt.Sprintf":           func(format string, a []any) { _ = fmt.Sprintf(format, a...) },
+		"fmt.Sprint":            func(_ string, a []any) { _ = fmt.Sprint(a...) },
+		"fmt.Sprintln":          func(_ string, a []any) { _ = fmt.Sprintln(a...) },
+		"fmt.Errorf":            func(format string, a []any) { _ = fmt.Errorf(format, a...) },
+		"fmt.Fprintf":           func(format string, a []any) { _, _ = fmt.Fprintf(&bytes.Buffer{}, format, a...) },
+		"fmt.Fprint":            func(_ string, a []any) { _, _ = fmt.Fprint(&bytes.Buffer{}, a...) },
+		"fmt.Fprintln":          func(_ string, a []any) { _, _ = fmt.Fprintln(&bytes.Buffer{}, a...) },
+		"fmt.Printf":            func(format string, a []any) { _, _ = fmt.Printf(format, a...) },
+		"fmt.Print":             func(_ string, a []any) { _, _ = fmt.Print(a...) },
+		"fmt.Println":           func(_ string, a []any) { _, _ = fmt.Println(a...) },
+		"log.Printf":            func(format string, a []any) { log.Printf(format, a...) },
+		"log.Print":             func(_ string, a []any) { log.Print(a...) },
+		"log.Println":           func(_ string, a []any) { log.Println(a...) },
+		"(*log.Logger).Printf":  func(format string, a []any) { logger.Printf(format, a...) },
+		"(*log.Logger).Print":   func(_ string, a []any) { logger.Print(a...) },
 		"(*log.Logger).Println": func(_ string, a []any) { logger.Println(a...) },
 	}
 	rng := rand.New(rand.NewSource(1))

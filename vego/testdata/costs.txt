@@ -595,7 +595,9 @@ formatting	formatting.JoinsWrong	4	20060	0
 formatting	formatting.Logf	1	3771	0
 formatting	formatting.Logs	10	63262	0
 formatting	formatting.LogsNil	4	15102	0
+formatting	formatting.MakeShout	1	46	0
 formatting	formatting.Prints	13	286104	0
+formatting	formatting.Shout	3	1475	0
 formatting	formatting.Sink	3	4254	0
 formatting	formatting.UsesFill	2	869	0
 formatting	formatting.UsesHanding	1	46	0
@@ -609,6 +611,7 @@ formatting	formatting.Writes	28	111897	0
 formatting	formatting.WritesNil	4	11969	0
 formatting	formatting.fill	1	6521	0
 formatting	formatting.handing	1	3183	0
+formatting	formatting.logAny	1	557	0
 formatting	formatting.notAny	1	2907	0
 formatting	formatting.sinking	1	3183	0
 formatting	formatting.twoValues	1	3319	0

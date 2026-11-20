@@ -1095,6 +1095,14 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 			if fn.runs[param] || !holdsCode(param.Type(), map[types.Type]bool{}) {
 				continue
 			}
+			// What a parameter under formats is given is checked at each
+			// call written out, and a value is called with what nobody
+			// checks.
+			if param == fn.formatted {
+				v.unsupported(e.Pos(), fmt.Sprintf("%s is used as %s, which passes what it is called with to %s as %s; %s formats %s, "+
+					"and what a value is called with cannot be checked as it is at a call written out. Call %s directly",
+					types.ExprString(e), as, fn.obj.Name(), param.Name(), fn.obj.Name(), param.Name(), fn.obj.Name()))
+			}
 			v.unsupported(e.Pos(), fmt.Sprintf("%s is used as %s, which passes what it is called with to %s as %s; "+
 				"%s is trusted, and that can hold code nobody has seen. If its contract holds whatever that code does, "+
 				"list %s under runs in the contract", types.ExprString(e), as, fn.obj.Name(), param.Name(), fn.obj.Name(), param.Name()))

@@ -55,3 +55,16 @@ func UsesTwoValues() {
 func UsesNotAny() {
 	notAny(1, 2) // want `vego:\ the\ trusted\ contract\ of\ formatting\.notAny\ .*cannot\ be\ used:\ its\ formats\ lists\ a,\ of\ type\ \[\]int` `its formats lists no parameter of type any` `cannot verify UsesNotAny`
 }
+
+// Shout is a function type of values that take a value to format.
+//
+// @Ensures True
+type Shout func(v any)
+
+// logAny formats what it is given.
+func logAny(v any) {}
+
+// @Ensures True
+func MakeShout() (s Shout) {
+	return logAny // want `vego:\ cannot\ verify\ MakeShout:\ logAny\ is\ used\ as\ a\ value,\ which\ passes\ what\ it\ is\ called\ with\ to\ logAny\ as\ v;\ logAny\ formats\ v,\ and\ what\ a\ value\ is\ called\ with\ cannot\ be\ checked\ as\ it\ is\ at\ a\ call\ written\ out\.\ Call\ logAny\ directly`
+}
