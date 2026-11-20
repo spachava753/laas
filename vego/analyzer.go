@@ -509,6 +509,19 @@ type pkgVerifier struct {
 	changeOf   map[*types.Var]string
 	ownChanges map[*types.Var]string
 	escapes    map[*types.Var]string
+	// fixed holds what is known of the package-level variables of the
+	// package that are not errors and that nothing changes, fixedOf what
+	// other packages published of theirs, and hidden the code that may run
+	// while the variables of the package are initialised, or ""; see
+	// findFixed. reliedValues holds the keys of such variables whose
+	// values a proof has relied on.
+	fixed        map[*types.Var]knownValue
+	fixedOf      map[*types.Package]*fixedFact
+	hidden       string
+	reliedValues map[string]bool
+	// namedByContract caches the package-level variables each contract
+	// names; see contractVariables.
+	namedByContract map[*funcInfo][]*types.Var
 	// origins caches what the variables of each function body are assigned,
 	// knownReturns holds the functions that only return errors of known
 	// origin, and isParameter the parameters of all functions.
@@ -1110,6 +1123,7 @@ func (pv *pkgVerifier) collect() {
 	}
 	pv.checkReceivers()
 	pv.findSentinels()
+	pv.findFixed()
 	pv.findKnownReturns()
 	// A contract speaks of the results by the names the function gives
 	// them, so a verified function has to give each of them one.

@@ -82,9 +82,11 @@ func InvariantInsideBody(n int) (s int) {
 
 var global int
 
+func setGlobal() { global = 1 }
+
 // @Requires x > 0
 func ReadsGlobal(x int) (result int) {
-	return x + global // want `vego:\ cannot\ verify\ ReadsGlobal:\ global\ is\ not\ a\ local\ variable\ of\ a\ supported\ type`
+	return x + global // want `vego:\ cannot\ verify\ ReadsGlobal:\ global\ is\ assigned\ at\ rejected.go:85;\ package-level\ variables\ that\ are\ changed\ are\ not\ supported\ yet`
 }
 
 // @Requires x > 0

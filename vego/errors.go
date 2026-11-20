@@ -29,6 +29,7 @@ func (pv *pkgVerifier) findSentinels() {
 	pv.sentinels = map[*types.Var]bool{}
 	pv.unsettled = map[*types.Var]string{}
 	pv.reliedKeys = map[string]bool{}
+	pv.reliedValues = map[string]bool{}
 	pv.homemade = map[*types.Var]bool{}
 	pv.candidates = map[*types.Var]sentinelInfo{}
 	// What this package writes of the error variables of other packages
@@ -889,6 +890,7 @@ func (v *fnVerifier) forcesSuccess() (solver.Result, func() solver.Result) {
 		body := forced(input)
 		return []*logic.Term{body}, [][]*logic.Term{v.produced(body), v.unsampled(body)}
 	}, func(input *witness) bool {
+		known := input.fixedOnly().apply(known)
 		if !v.proves(known, logic.And(input.apply(pre)...), 0) {
 			return false
 		}
@@ -992,7 +994,7 @@ func (v *fnVerifier) unsampled(t *logic.Term) []*logic.Term {
 			return
 		}
 		seen[t] = true
-		if t.Op == logic.OpConst && t != logic.NilErr() && !isSampleError(t) && !isSentinelTerm(t) && !strings.HasPrefix(t.Name, sampleName) && !names[t.Name] {
+		if t.Op == logic.OpConst && t != logic.NilErr() && !isSampleError(t) && !isFixedTerm(t) && !strings.HasPrefix(t.Name, sampleName) && !names[t.Name] {
 			names[t.Name] = true
 			found = append(found, t)
 		}
@@ -1006,9 +1008,10 @@ func (v *fnVerifier) unsampled(t *logic.Term) []*logic.Term {
 
 // isInput reports whether a constant stands for part of the state on
 // entry, a parameter or the memory, or for part of a sample of it, or is
-// the nil error or a sentinel, which are the same for every input.
+// the nil error, a sentinel, or another package-level variable that keeps
+// its value, which are the same for every input.
 func (v *fnVerifier) isInput(t *logic.Term) bool {
-	return t == logic.NilErr() || isSentinelTerm(t) || v.inputs[t.Name] || strings.HasPrefix(t.Name, entryRegion) || strings.HasPrefix(t.Name, sampleName)
+	return t == logic.NilErr() || isFixedTerm(t) || v.inputs[t.Name] || strings.HasPrefix(t.Name, entryRegion) || strings.HasPrefix(t.Name, sampleName)
 }
 
 // canReach reports whether there is evidence that execution can arrive at
@@ -1039,6 +1042,7 @@ func (v *fnVerifier) canReach(path []*logic.Term) bool {
 	return v.someInput(path, func(input *witness) ([]*logic.Term, [][]*logic.Term) {
 		return append(input.apply(required), input.apply(path)...), [][]*logic.Term{nil}
 	}, func(input *witness) bool {
+		known := input.fixedOnly().apply(known)
 		return v.proves(known, logic.And(input.apply(required)...), 0) &&
 			!v.contradictory(append(slices.Clip(known), input.apply(path)...))
 	})
@@ -1149,6 +1153,19 @@ func (s *witness) apply(terms []*logic.Term) []*logic.Term {
 		replaced[i] = replace(t)
 	}
 	return replaced
+}
+
+// fixedOnly returns the part of the witness that gives values to
+// package-level variables. What is known of every input speaks of them as
+// of the constants they are, and a sample replaces those.
+func (s *witness) fixedOnly() *witness {
+	only := &witness{consts: map[string]*logic.Term{}, memo: map[*logic.Term]*logic.Term{}}
+	for name, t := range s.consts {
+		if strings.HasPrefix(name, fixedName) {
+			only.consts[name] = t
+		}
+	}
+	return only
 }
 
 // bind returns the witness with the constants of the sample replaced by
@@ -1620,6 +1637,19 @@ func (v *fnVerifier) someInput(terms []*logic.Term, search func(input *witness) 
 			}, 0)
 		}
 	}
+	// A package-level variable that keeps its value is an input that no
+	// caller chooses: a sample gives it a value too, which what its
+	// declaration gives narrows, among the facts known of every input.
+	for _, key := range slices.Sorted(maps.Keys(v.fixedMet)) {
+		met := v.fixedMet[key]
+		if !slices.ContainsFunc(met.val, func(leaf *logic.Term) bool { return b.mentioned[leaf.Name] }) {
+			continue
+		}
+		b.add(met.typ, binding{
+			set:  func(s *witness, i int, term *logic.Term) { s.consts[met.val[i].Name] = term },
+			name: func(i int) string { return met.val[i].Name },
+		}, 0)
+	}
 	total := 1
 	for _, alternatives := range b.slots {
 		total = min(total*max(len(alternatives), 1), maxShapes+1)
@@ -1645,7 +1675,7 @@ func (v *fnVerifier) someInput(terms []*logic.Term, search func(input *witness) 
 		facts, foralls := search(input)
 		// What is known of every input narrows what Z3 proposes to what
 		// accept can take.
-		facts = append(slices.Clip(facts), v.knownFacts()...)
+		facts = append(slices.Clip(facts), input.fixedOnly().apply(v.knownFacts())...)
 		for _, forall := range foralls {
 			if v.proposeFor(b, input, append(slices.Clip(b.facts), facts...), forall, accept) {
 				return true

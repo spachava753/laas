@@ -33,7 +33,7 @@ type contractFact struct {
 	// mentions, so that it means the same in every package that reads it.
 	Consts map[string]string
 	// Errors holds, by how the contract spells them, the keys of the
-	// package-level error variables it mentions; see errorKey.
+	// package-level variables it mentions, errors and others; see errorKey.
 	Errors map[string]string
 	// CallsValues is set when running the function may make a call through
 	// a function value, itself or in what it calls; see mayCallValues.
@@ -109,13 +109,13 @@ func (pv *pkgVerifier) contractFactOf(fn *funcInfo, at token.Pos) *contractFact 
 			}
 		}
 		if _, obj := scope.LookupParent(n.Name, at); n.Kind == logic.NIdent && obj != nil {
-			if variable := errorVariableOf(obj, ""); variable != nil {
+			if variable := packageVariableOf(obj, ""); variable != nil {
 				fact.Errors[n.Name] = errorKey(variable)
 			}
 		}
 		if n.Kind == logic.NField && n.Kids[0].Kind == logic.NIdent {
 			if _, obj := scope.LookupParent(n.Kids[0].Name, at); obj != nil {
-				if variable := errorVariableOf(obj, n.Name); variable != nil {
+				if variable := packageVariableOf(obj, n.Name); variable != nil {
 					fact.Errors[n.Kids[0].Name+"."+n.Name] = errorKey(variable)
 				}
 			}

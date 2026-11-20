@@ -106,6 +106,8 @@ func (f *sentinelWritesFact) String() string { return fmt.Sprintf("writes(%d)", 
 // a package rely on, by key.
 type sentinelRelianceFact struct {
 	Keys []string
+	// Values holds the keys among them of variables that are not errors.
+	Values []string
 }
 
 func (*sentinelRelianceFact) AFact() {}
@@ -548,8 +550,9 @@ func (pv *pkgVerifier) reportSentinelWrites() {
 	// it as well.
 	own := pv.reliedKeys
 	if len(own) > 0 {
-		pv.pass.ExportPackageFact(&sentinelRelianceFact{Keys: slices.Sorted(maps.Keys(own))})
+		pv.pass.ExportPackageFact(&sentinelRelianceFact{Keys: slices.Sorted(maps.Keys(own)), Values: slices.Sorted(maps.Keys(pv.reliedValues))})
 	}
+	values := maps.Clone(pv.reliedValues)
 	relying := map[string][]string{}
 	for key := range own {
 		relying[key] = append(relying[key], pv.pass.Pkg.Path())
@@ -564,6 +567,9 @@ func (pv *pkgVerifier) reportSentinelWrites() {
 		case *sentinelRelianceFact:
 			for _, key := range fact.Keys {
 				relying[key] = append(relying[key], published.Package.Path())
+			}
+			for _, key := range fact.Values {
+				values[key] = true
 			}
 		case *sentinelWritesFact:
 			for _, write := range fact.Writes {
@@ -582,11 +588,15 @@ func (pv *pkgVerifier) reportSentinelWrites() {
 		}
 		slices.Sort(packages)
 		which := "package " + strings.Join(slices.Compact(packages), " and package ")
+		relied := "it being the error it was declared with"
+		if values[write.Key] {
+			relied = "it holding the value it was declared with"
+		}
 		if write.pos.IsValid() {
-			pv.report(write.pos, "%s may be changed here, but proofs in %s rely on it being the error it was declared with", write.Name, which)
+			pv.report(write.pos, "%s may be changed here, but proofs in %s rely on %s", write.Name, which, relied)
 			continue
 		}
-		pv.report(pv.pass.Files[0].Package, "%s is changed at %s in package %s, which this package is built with, but proofs in %s rely on "+
-			"it being the error it was declared with", write.Name, write.At, write.Package, which)
+		pv.report(pv.pass.Files[0].Package, "%s is changed at %s in package %s, which this package is built with, but proofs in %s rely on %s",
+			write.Name, write.At, write.Package, which, relied)
 	}
 }

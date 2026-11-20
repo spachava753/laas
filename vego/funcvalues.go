@@ -408,7 +408,7 @@ func (v *fnVerifier) callValue(call *ast.CallExpr, st *state, guard []*logic.Ter
 	name := types.ExprString(call.Fun)
 	v.check(st, guard, logic.Ne(fun[0], logic.RefLit(0)), call.Pos(), "the function value %s may be nil", name)
 	results := v.invoke(call, fn, args, st, guard)
-	u.calls = append(u.calls, unitCall{name: name, pos: call.Pos(), pure: len(fn.modifies) == 0 && signatureMemoryFree(fn.obj.Type().(*types.Signature))})
+	u.calls = append(u.calls, unitCall{name: name, pos: call.Pos(), pure: v.callMemoryFree(fn, fn.obj.Type().(*types.Signature))})
 	u.event()
 	return results
 }
@@ -1168,7 +1168,8 @@ const transportMark = "^"
 
 // transport renames the constants of terms into a namespace of its own,
 // apart from the names of the verifier that reads them. The constants of
-// error variables and nil are kept, since they mean the same everywhere.
+// package-level variables that keep their values and nil are kept, since
+// they mean the same everywhere.
 type transport struct {
 	prefix string
 	memo   map[*logic.Term]*logic.Term
@@ -1181,7 +1182,7 @@ func (tr *transport) term(t *logic.Term) *logic.Term {
 	}
 	var renamed *logic.Term
 	switch {
-	case t == logic.NilErr() || isSentinelTerm(t):
+	case t == logic.NilErr() || isFixedTerm(t):
 		renamed = t
 	case t.Op == logic.OpConst:
 		renamed = logic.Const(tr.prefix+t.Name, t.Sort)

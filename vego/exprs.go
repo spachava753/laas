@@ -25,8 +25,8 @@ func (v *fnVerifier) variable(id *ast.Ident, st *state, guard []*logic.Term) val
 		}
 		return val
 	}
-	if variable != nil && variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope() && isError(variable.Type()) {
-		return v.errorVariable(variable, id.Pos(), st)
+	if variable != nil && variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope() {
+		return v.packageVariable(variable, id.Pos(), st)
 	}
 	v.unsupported(id.Pos(), id.Name+" is not a local variable of a supported type")
 	return nil
@@ -50,16 +50,6 @@ func (v *fnVerifier) readCapturedPart(st *state, guard []*logic.Term, start int,
 		}
 		return val
 	})
-}
-
-// errorVariable reads a package-level error variable, which must be a
-// sentinel.
-func (v *fnVerifier) errorVariable(variable *types.Var, pos token.Pos, st *state) value {
-	sentinel, why := v.sentinelTerm(st, variable)
-	if why != "" {
-		v.unsupported(pos, why)
-	}
-	return value{sentinel}
 }
 
 func (v *fnVerifier) checkIndex(st *state, guard []*logic.Term, length, index *logic.Term, pos token.Pos) {
@@ -130,15 +120,15 @@ func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 		return v.sliceExpr(e, st, guard)
 	case *ast.SelectorExpr:
 		if x, ok := e.X.(*ast.Ident); ok && v.isPackageName(x) {
-			if variable, isVar := v.info.Uses[e.Sel].(*types.Var); isVar && isError(variable.Type()) {
-				return v.errorVariable(variable, e.Pos(), st)
+			if variable, isVar := v.info.Uses[e.Sel].(*types.Var); isVar {
+				return v.packageVariable(variable, e.Pos(), st)
 			}
 		}
 		// The field selection x.f follows a pointer where x is one, which
 		// must then not be nil.
 		selection := v.info.Selections[e]
 		if selection == nil || selection.Kind() != types.FieldVal {
-			v.unsupported(e.Pos(), "only fields can be selected; variables of other packages and method values are not supported")
+			v.unsupported(e.Pos(), "only fields can be selected; method values are not supported")
 		}
 		// A field of a struct that lies in memory is read on its own, as
 		// Go reads it, and not as part of the whole struct. So is a field

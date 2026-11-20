@@ -442,7 +442,7 @@ func (v *fnVerifier) callMethod(call *ast.CallExpr, callee *types.Func, st *stat
 	v.check(st, guard, logic.Ne(held[0], logic.RefLit(0)), call.Pos(), "the interface value %s may be nil", types.ExprString(sel.X))
 	results := v.invoke(call, fn, args, st, guard)
 	u.calls = append(u.calls, unitCall{name: types.ExprString(call.Fun), pos: call.Pos(),
-		pure: len(fn.modifies) == 0 && signatureMemoryFree(fn.obj.Type().(*types.Signature))})
+		pure: v.callMemoryFree(fn, fn.obj.Type().(*types.Signature))})
 	u.event()
 	return results
 }

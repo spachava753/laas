@@ -31,6 +31,9 @@
 # Assembly of a test package, which vego reads for references to variables.
 !/vego/testdata/src/*/*.s
 
+# A file that a test package embeds.
+!/vego/testdata/src/globalsembed/hello.txt
+
 # Design notes and guides.
 !/vego/ROADMAP.md
 !/docs/*.md

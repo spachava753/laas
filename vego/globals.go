@@ -1,15 +1,22 @@
 package vego
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/token"
 	"go/types"
+	"maps"
+	"math/big"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/spachava753/laas/vego/internal/logic"
 )
 
 // Package-level variables.
@@ -51,7 +58,8 @@ func (pv *pkgVerifier) findChanges() {
 		}
 		// A proof in another package may rest on the value of a variable
 		// of another package.
-		if _, published := pv.foreignSentinel(variable); published {
+		_, sentinel := pv.foreignSentinel(variable)
+		if _, fixed := pv.foreignFixed(variable); sentinel || fixed {
 			pv.writes = append(pv.writes, sentinelWrite{
 				Key: errorKey(variable), Name: variable.Pkg().Name() + "." + variable.Name(), Package: pv.pass.Pkg.Path(),
 				At: at(pos), pos: pos,
@@ -398,4 +406,686 @@ func (pv *pkgVerifier) assemblyReferences(changed func(*types.Var, string, token
 			pv.changedByKey(key, what, pos, changed)
 		}
 	}
+}
+
+// fixedFact lists, by name, the package-level variables of a package that
+// are not of type error and that nothing in the package changes, with what
+// their initialisers give, and says of every other such variable what
+// changes it. Error variables have sentinelsFact. It is a fact about the
+// package so that it reaches every package built with this one.
+type fixedFact struct {
+	Vars    map[string]knownValue
+	Changed map[string]string
+}
+
+func (*fixedFact) AFact() {}
+
+func (f *fixedFact) String() string { return fmt.Sprintf("fixed(%d)", len(f.Vars)) }
+
+// knownKind says what the initialiser of a fixed variable gives.
+type knownKind int
+
+const (
+	// knownNothing: a value of the type, of which nothing more is known.
+	knownNothing knownKind = iota
+	// knownZero: the zero value of the type; there is no initialiser.
+	knownZero
+	// knownConstant: the constant Text, of kind Constant.
+	knownConstant
+	// knownStruct: a struct whose fields Parts gives, one per field of
+	// the struct type, blank fields included.
+	knownStruct
+	// knownMade: a slice, a map, or a pointer the initialiser made, so not
+	// nil, at a new allocation. A slice has the length Len and capacity
+	// Cap where they are not negative. Sized is set when the allocation
+	// has a size, so that it is apart from every other one.
+	knownMade
+	// knownAlias: the value of the variable with key Alias.
+	knownAlias
+)
+
+// knownValue is what is known of a value from the initialiser of a fixed
+// variable, read from source.
+type knownValue struct {
+	Kind     knownKind
+	Text     string
+	Constant constant.Kind
+	Parts    []knownValue
+	Len, Cap int64
+	Sized    bool
+	Alias    string
+}
+
+// findFixed records the package-level variables of the package that are
+// not errors and that nothing changes, with what each initialiser gives,
+// and publishes them. It runs after findChanges and findSentinels.
+func (pv *pkgVerifier) findFixed() {
+	pv.fixed = map[*types.Var]knownValue{}
+	fact := &fixedFact{Vars: map[string]knownValue{}, Changed: map[string]string{}}
+	initialised := false
+	for _, file := range pv.pass.Files {
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.VAR {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				spec := spec.(*ast.ValueSpec)
+				for i, name := range spec.Names {
+					variable, _ := pv.info.Defs[name].(*types.Var)
+					if variable == nil || isError(variable.Type()) {
+						continue
+					}
+					if pv.reassigned[variable] {
+						fact.Changed[variable.Name()] = pv.ownChanges[variable]
+						continue
+					}
+					known := knownValue{Kind: knownZero}
+					switch {
+					case embedded(gen, spec):
+						// The value is the content of files, which the
+						// directive names and the source does not hold.
+						known = knownValue{}
+					case len(spec.Values) == len(spec.Names):
+						known = pv.knownOf(spec.Values[i], variable.Type())
+						initialised = true
+					case len(spec.Values) > 0:
+						known = knownValue{}
+						initialised = true
+					}
+					pv.fixed[variable] = known
+					fact.Vars[variable.Name()] = known
+				}
+			}
+		}
+	}
+	if len(fact.Vars) > 0 || len(fact.Changed) > 0 {
+		pv.pass.ExportPackageFact(fact)
+	}
+	// Code that Go's order of initialisation does not see may run a
+	// function of the package before a variable has its value.
+	if initialised {
+		pv.hidden = pv.hiddenInitCode()
+	}
+}
+
+// knownOf reads what an initialiser of a variable of type t gives.
+func (pv *pkgVerifier) knownOf(e ast.Expr, t types.Type) knownValue {
+	e = ast.Unparen(e)
+	if tv := pv.info.Types[e]; tv.Value != nil {
+		return knownConstantOf(tv.Value)
+	}
+	sized := func(elem types.Type) bool { return pv.pass.TypesSizes.Sizeof(elem) > 0 }
+	switch e := e.(type) {
+	case *ast.CompositeLit:
+		switch u := t.Underlying().(type) {
+		case *types.Struct:
+			parts := make([]knownValue, u.NumFields())
+			for i := range parts {
+				parts[i] = knownValue{Kind: knownZero}
+			}
+			for i, elt := range e.Elts {
+				index, value := i, elt
+				if kv, ok := elt.(*ast.KeyValueExpr); ok {
+					value = kv.Value
+					key, _ := kv.Key.(*ast.Ident)
+					index = -1
+					for j := range u.NumFields() {
+						if key != nil && u.Field(j).Name() == key.Name {
+							index = j
+						}
+					}
+				}
+				if index < 0 || index >= len(parts) {
+					return knownValue{}
+				}
+				parts[index] = pv.knownOf(value, u.Field(index).Type())
+			}
+			return knownValue{Kind: knownStruct, Parts: parts}
+		case *types.Slice:
+			length, next := int64(0), int64(0)
+			for _, elt := range e.Elts {
+				if kv, ok := elt.(*ast.KeyValueExpr); ok {
+					index, exact := constant.Int64Val(constant.ToInt(pv.info.Types[kv.Key].Value))
+					if !exact {
+						return knownValue{}
+					}
+					next = index
+				}
+				next++
+				length = max(length, next)
+			}
+			return knownValue{Kind: knownMade, Len: length, Cap: length, Sized: length > 0 && sized(u.Elem())}
+		case *types.Map:
+			return knownValue{Kind: knownMade, Len: -1, Cap: -1, Sized: true}
+		}
+	case *ast.UnaryExpr:
+		if _, ok := ast.Unparen(e.X).(*ast.CompositeLit); ok && e.Op == token.AND {
+			if object, ok := pointee(t); ok {
+				return knownValue{Kind: knownMade, Len: -1, Cap: -1, Sized: sized(object)}
+			}
+		}
+	case *ast.CallExpr:
+		size := func(i int) int64 {
+			if i >= len(e.Args) {
+				return -1
+			}
+			if value := pv.info.Types[e.Args[i]].Value; value != nil {
+				if n, exact := constant.Int64Val(constant.ToInt(value)); exact {
+					return n
+				}
+			}
+			return -1
+		}
+		id, _ := ast.Unparen(e.Fun).(*ast.Ident)
+		builtin, _ := pv.info.Uses[id].(*types.Builtin)
+		switch {
+		case builtin != nil && builtin.Name() == "make":
+			switch u := t.Underlying().(type) {
+			case *types.Slice:
+				length, capacity := size(1), size(1)
+				if len(e.Args) > 2 {
+					capacity = size(2)
+				}
+				return knownValue{Kind: knownMade, Len: length, Cap: capacity, Sized: capacity > 0 && sized(u.Elem())}
+			case *types.Map:
+				return knownValue{Kind: knownMade, Len: -1, Cap: -1, Sized: true}
+			}
+		case builtin != nil && builtin.Name() == "new":
+			if object, ok := pointee(t); ok {
+				return knownValue{Kind: knownMade, Len: -1, Cap: -1, Sized: sized(object)}
+			}
+		case pv.info.Types[e.Fun].IsType() && len(e.Args) == 1:
+			// []byte of a constant string is a new array of its bytes,
+			// whose capacity the runtime rounds up.
+			value := pv.info.Types[e.Args[0]].Value
+			if u, ok := t.Underlying().(*types.Slice); ok && value != nil && value.Kind() == constant.String {
+				n := int64(len(constant.StringVal(value)))
+				return knownValue{Kind: knownMade, Len: n, Cap: -1, Sized: n > 0 && sized(u.Elem())}
+			}
+		}
+	case *ast.Ident, *ast.SelectorExpr:
+		if variable := pv.namedVariable(e); variable != nil && variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope() {
+			return knownValue{Kind: knownAlias, Alias: errorKey(variable)}
+		}
+	}
+	return knownValue{}
+}
+
+// knownConstantOf records a constant.
+func knownConstantOf(value constant.Value) knownValue {
+	text := value.ExactString()
+	switch value.Kind() {
+	case constant.String:
+		text = constant.StringVal(value)
+	case constant.Int:
+		text = constant.ToInt(value).ExactString()
+	}
+	return knownValue{Kind: knownConstant, Text: text, Constant: value.Kind()}
+}
+
+// publishedFixed returns what the package of a variable of another package
+// published about its fixed variables, or nil.
+func (pv *pkgVerifier) publishedFixed(variable *types.Var) *fixedFact {
+	pkg := variable.Pkg()
+	if pkg == nil || pkg == pv.pass.Pkg || variable.Parent() != pkg.Scope() || isError(variable.Type()) {
+		return nil
+	}
+	if pv.fixedOf == nil {
+		pv.fixedOf = map[*types.Package]*fixedFact{}
+	}
+	fact, done := pv.fixedOf[pkg]
+	if !done {
+		fact = new(fixedFact)
+		if !pv.pass.ImportPackageFact(pkg, fact) {
+			fact = nil
+		}
+		pv.fixedOf[pkg] = fact
+	}
+	return fact
+}
+
+// foreignFixed returns what the package of a variable of another package
+// published about it as a fixed variable, if anything.
+func (pv *pkgVerifier) foreignFixed(variable *types.Var) (knownValue, bool) {
+	fact := pv.publishedFixed(variable)
+	if fact == nil {
+		return knownValue{}, false
+	}
+	known, ok := fact.Vars[variable.Name()]
+	return known, ok
+}
+
+// changedNotYet ends the messages about variables that a later part
+// supports.
+const changedNotYet = "package-level variables that are changed are not supported yet"
+
+// usableFixed reports what is known of a package-level variable that is
+// not an error and that a function reads, or why it cannot be read.
+func (pv *pkgVerifier) usableFixed(variable *types.Var) (knownValue, string) {
+	spelled := pv.spelling(variable)
+	t := variable.Type()
+	if _, ok := layoutOf(t); !ok {
+		return knownValue{}, fmt.Sprintf("%s has type %s, which is not supported%s", spelled, t, unsupportedHint(t))
+	}
+	if !pv.dataType(t, map[types.Type]bool{}) {
+		return knownValue{}, fmt.Sprintf("%s has type %s, which can hold a function value, an interface value, an error, or a channel; "+
+			"package-level variables of such types are not supported yet", spelled, t)
+	}
+	var known knownValue
+	switch {
+	case variable.Pkg() == pv.pass.Pkg && pv.reassigned[variable]:
+		return knownValue{}, fmt.Sprintf("%s %s; %s", spelled, pv.ownChanges[variable], changedNotYet)
+	case variable.Pkg() == pv.pass.Pkg:
+		known = pv.fixed[variable]
+		if pv.hidden != "" && known.Kind != knownZero {
+			return knownValue{}, fmt.Sprintf("%s is not known to have its value yet when this runs: %s while the variables of the package are "+
+				"initialised, which may run this function first", spelled, pv.hidden)
+		}
+	case pv.reassigned[variable]:
+		return knownValue{}, fmt.Sprintf("%s is changed in this package; %s", spelled, changedNotYet)
+	default:
+		var published bool
+		known, published = pv.foreignFixed(variable)
+		if !published {
+			if fact := pv.publishedFixed(variable); fact != nil && fact.Changed[variable.Name()] != "" {
+				return knownValue{}, fmt.Sprintf("%s %s in package %s; %s", spelled, fact.Changed[variable.Name()], variable.Pkg().Path(), changedNotYet)
+			}
+			return knownValue{}, fmt.Sprintf("%s is a variable of package %s that is not known to keep its value", spelled, variable.Pkg().Path())
+		}
+	}
+	if write, changed := pv.writtenInBuild()[errorKey(variable)]; changed {
+		return knownValue{}, fmt.Sprintf("%s is changed at %s in package %s, which this package is built with; %s", spelled, write.At, write.Package, changedNotYet)
+	}
+	return known, ""
+}
+
+// dataType reports whether a value of the type, and the memory it refers
+// to at any depth, can hold no code: no function value, interface value,
+// error, or channel. The unexported fields of a struct type of another
+// package are left out, since verified code cannot read them.
+func (pv *pkgVerifier) dataType(t types.Type, seen map[types.Type]bool) bool {
+	if seen[t] {
+		return true
+	}
+	seen[t] = true
+	switch u := t.Underlying().(type) {
+	case *types.Basic:
+		return u.Kind() != types.UnsafePointer
+	case *types.Pointer:
+		return pv.dataType(u.Elem(), seen)
+	case *types.Slice:
+		return pv.dataType(u.Elem(), seen)
+	case *types.Array:
+		return pv.dataType(u.Elem(), seen)
+	case *types.Map:
+		return pv.dataType(u.Key(), seen) && pv.dataType(u.Elem(), seen)
+	case *types.Struct:
+		for field := range u.Fields() {
+			if !field.Exported() && field.Pkg() != pv.pass.Pkg {
+				continue
+			}
+			if !pv.dataType(field.Type(), seen) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// fixedName begins the names of the constants that stand for the leaves of
+// fixed variables, as it does those of sentinels.
+const fixedName = sentinelName
+
+// isFixedTerm reports whether a term is a constant that stands for the
+// value of a package-level variable that keeps its value, or for what such
+// a variable refers to: the same in every function and every package.
+func isFixedTerm(t *logic.Term) bool {
+	return t.Op == logic.OpConst && strings.HasPrefix(t.Name, fixedName)
+}
+
+// packageVariable reads a package-level variable in a body: an error
+// variable as a sentinel, and any other as a fixed variable.
+func (v *fnVerifier) packageVariable(variable *types.Var, pos token.Pos, st *state) value {
+	if isError(variable.Type()) {
+		sentinel, why := v.sentinelTerm(st, variable)
+		if why != "" {
+			v.unsupported(pos, why)
+		}
+		return value{sentinel}
+	}
+	val, why := v.fixedValue(st, variable)
+	if why != "" {
+		v.unsupported(pos, why)
+	}
+	return val
+}
+
+// fixedValue returns the value of a fixed variable that is not an error,
+// noting in sink, which may be nil, what is known of it, or why it cannot
+// be read.
+func (v *fnVerifier) fixedValue(sink *state, variable *types.Var) (value, string) {
+	known, why := v.usableFixed(variable)
+	if why != "" {
+		return nil, why
+	}
+	keys := []string{errorKey(variable)}
+	// A variable that holds the value of another fixed variable is that
+	// value; one that held the value of a variable that changes holds
+	// what it was, of which nothing is known.
+	final := variable
+	for seen := map[*types.Var]bool{variable: true}; known.Kind == knownAlias; {
+		target := v.lookupKey(known.Alias)
+		if target == nil || seen[target] || isError(target.Type()) || !types.Identical(target.Type().Underlying(), variable.Type().Underlying()) {
+			known = knownValue{}
+			break
+		}
+		seen[target] = true
+		next, why := v.usableFixed(target)
+		if why != "" {
+			known = knownValue{}
+			break
+		}
+		final, known = target, next
+		keys = append(keys, errorKey(target))
+	}
+	// A proof rests on the values of these variables, which are not
+	// errors.
+	for _, key := range keys {
+		v.reliedKeys[key] = true
+		v.reliedValues[key] = true
+	}
+	leaves := mustLayout(variable.Type())
+	val := make(value, len(leaves))
+	for i, lf := range leaves {
+		val[i] = logic.Const(fixedName+errorKey(final)+lf.path, lf.sort)
+	}
+	if v.fixedMet == nil {
+		v.fixedMet = map[string]fixedMet{}
+	}
+	v.fixedMet[errorKey(final)] = fixedMet{val: val, typ: variable.Type()}
+	if sink == nil || sink.noted["fixed "+errorKey(final)] {
+		return val, ""
+	}
+	sink.noted["fixed "+errorKey(final)] = true
+	v.declared(sink, v.wellFormed(val, variable.Type(), v.entryBrk))
+	v.noteKnown(sink, val, variable.Type(), known)
+	return val, ""
+}
+
+// declared notes a fact that the declaration of a fixed variable gives.
+// It speaks of inputs alone, so it is part of the background of the
+// function too, from which checkDeclaredRequires proves.
+func (v *fnVerifier) declared(sink *state, fact *logic.Term) {
+	v.fact(sink, fact)
+}
+
+// noteKnown notes what an initialiser gives of a value of type t.
+func (v *fnVerifier) noteKnown(sink *state, val value, t types.Type, known knownValue) {
+	switch known.Kind {
+	case knownZero:
+		for i, zero := range zeroValue(t) {
+			v.declared(sink, v.same(val[i], zero))
+		}
+	case knownConstant:
+		if term := v.knownConstantTerm(sink, known, val[0]); term != nil {
+			v.declared(sink, v.same(val[0], term))
+		}
+	case knownStruct:
+		u := t.Underlying().(*types.Struct)
+		for i, part := range known.Parts {
+			if lo, hi, ok := fieldLeaves(t, i); ok && i < u.NumFields() {
+				v.noteKnown(sink, val[lo:hi], u.Field(i).Type(), part)
+			}
+		}
+	case knownMade:
+		ref := val[0]
+		v.declared(sink, logic.Lt(logic.IntLit(0), ref))
+		switch t.Underlying().(type) {
+		case *types.Slice:
+			v.declared(sink, logic.Eq(val[1], logic.IntLit(0)))
+			if known.Len >= 0 {
+				v.declared(sink, logic.Eq(val[2], logic.IntLit(known.Len)))
+			}
+			if known.Cap >= 0 {
+				v.declared(sink, logic.Eq(val[3], logic.IntLit(known.Cap)))
+			}
+		case *types.Pointer:
+			v.declared(sink, logic.Eq(val[1], logic.IntLit(0)))
+		}
+		if known.Sized {
+			for _, other := range v.madeFixed {
+				if other.Name != ref.Name {
+					v.declared(sink, logic.Not(logic.Eq(ref, other)))
+				}
+			}
+			if !slices.ContainsFunc(v.madeFixed, func(other *logic.Term) bool { return other.Name == ref.Name }) {
+				v.madeFixed = append(v.madeFixed, ref)
+			}
+		}
+	}
+}
+
+// knownConstantTerm returns the term for a constant an initialiser gives,
+// or nil for one that a term of the sort cannot hold.
+func (v *fnVerifier) knownConstantTerm(sink *state, known knownValue, leaf *logic.Term) *logic.Term {
+	switch sort := leaf.Sort; {
+	case sort == logic.Int && known.Constant == constant.Int:
+		if number, ok := new(big.Int).SetString(known.Text, 10); ok {
+			return logic.BigLit(number)
+		}
+	case sort == logic.Bool && known.Constant == constant.Bool:
+		return logic.BoolLit(known.Text == "true")
+	case sort == logic.Float:
+		return logic.Const("float "+known.Text, logic.Float)
+	case sort == logic.IntSeq && known.Constant == constant.String:
+		if len(known.Text) <= maxLiteral {
+			return logic.Bytes(known.Text)
+		}
+		long := logic.Const(leaf.Name+" text", logic.IntSeq)
+		v.declared(sink, logic.Eq(logic.Len(long), logic.IntLit(int64(len(known.Text)))))
+		return long
+	}
+	return nil
+}
+
+// locateVariable follows a path of an annotation that starts at a
+// package-level variable that is not an error.
+func (e *specEnv) locateVariable(variable *types.Var, steps []logic.Step, when logic.When) (reached, error) {
+	spelled := e.v.spelling(variable)
+	if when == logic.Old {
+		return reached{}, fmt.Errorf("old(%s): %s is not a parameter", spelled, spelled)
+	}
+	val, why := e.v.fixedValue(e.sink, variable)
+	if why != "" {
+		return reached{}, errors.New(why)
+	}
+	hops, final, err := plan(variable.Type(), steps, e.writtenIn())
+	if err != nil {
+		return reached{}, fmt.Errorf("%s%v", spelled, err)
+	}
+	mem := e.now
+	if when == logic.Primed {
+		switch {
+		case e.fn == nil:
+			return reached{}, fmt.Errorf("%s' is only allowed in Ensures; inside a body %s already denotes the current value", spelled, spelled)
+		case e.post == nil:
+			return reached{}, fmt.Errorf("%s' describes the state on return and is only allowed in Ensures", spelled)
+		case !reachesMemory(hops, final):
+			return reached{}, fmt.Errorf("%s is a package-level variable that nothing changes, so it holds the same value on return; drop the prime", spelled)
+		}
+		mem = e.post
+	}
+	cur, ground := e.v.follow(e.sink, mem, val, hops)
+	found := reached{val: cur, typ: final, mem: mem, hops: len(hops)}
+	if ground {
+		found.sink = e.sink
+	}
+	return found, nil
+}
+
+// callMemoryFree reports whether a call can be moved across a write to
+// memory without changing what its contract says: it modifies nothing,
+// its signature refers to no memory, and its contract names no
+// package-level variable whose value refers to memory. Every call whose
+// purity a unit records is judged here.
+func (v *fnVerifier) callMemoryFree(fn *funcInfo, sig *types.Signature) bool {
+	if len(fn.modifies) > 0 || !signatureMemoryFree(sig) {
+		return false
+	}
+	return !slices.ContainsFunc(v.contractVariables(fn), func(variable *types.Var) bool { return !memoryFree(variable.Type()) })
+}
+
+// contractVariables returns the package-level variables a contract names:
+// those an imported contract recorded, or those a contract in source names
+// where it is written. A trusted contract names error variables only.
+func (pv *pkgVerifier) contractVariables(fn *funcInfo) []*types.Var {
+	spelled := fn.spelling()
+	if pv.namedByContract == nil {
+		pv.namedByContract = map[*funcInfo][]*types.Var{}
+	}
+	if found, done := pv.namedByContract[spelled]; done {
+		return found
+	}
+	keys := map[string]string{}
+	switch {
+	case spelled.imported != nil:
+		keys = spelled.imported.Errors
+	case spelled.trust == nil && spelled.decl != nil:
+		keys = pv.contractFactOf(spelled, spelled.decl.Pos()).Errors
+	case spelled.trust == nil && spelled.obj != nil:
+		keys = pv.contractFactOf(spelled, spelled.obj.Pos()).Errors
+	}
+	var found []*types.Var
+	for _, spelling := range slices.Sorted(maps.Keys(keys)) {
+		if variable := pv.lookupKey(keys[spelling]); variable != nil {
+			found = append(found, variable)
+		}
+	}
+	pv.namedByContract[spelled] = found
+	return found
+}
+
+// packageRoot returns the package-level variable that an assignment target
+// other than a variable itself is reached from, through fields, elements,
+// and pointers, or nil, and whether the way passes through a pointer, a
+// slice, or a map.
+func (v *fnVerifier) packageRoot(e ast.Expr) (*types.Var, bool) {
+	inMemory := false
+	through := func(x ast.Expr) {
+		switch v.info.TypeOf(x).Underlying().(type) {
+		case *types.Pointer, *types.Slice, *types.Map:
+			inMemory = true
+		}
+	}
+	for first := true; ; first = false {
+		switch x := ast.Unparen(e).(type) {
+		case *ast.Ident:
+			if variable := packageVariableOf(v.info.Uses[x], ""); variable != nil && !first {
+				return variable, inMemory
+			}
+			return nil, false
+		case *ast.SelectorExpr:
+			if id, ok := x.X.(*ast.Ident); ok && v.isPackageName(id) {
+				if variable := packageVariableOf(v.info.Uses[x.Sel], ""); variable != nil && !first {
+					return variable, inMemory
+				}
+				return nil, false
+			}
+			through(x.X)
+			e = x.X
+		case *ast.IndexExpr:
+			through(x.X)
+			e = x.X
+		case *ast.StarExpr:
+			inMemory = true
+			e = x.X
+		default:
+			return nil, false
+		}
+	}
+}
+
+// checkDeclaredRequires reports each top-level conjunct of a Requires
+// clause that reads package-level variables and nothing else, unless what
+// their declarations give shows it. No caller can choose the value of such
+// a variable, and a caller in another package may not even be able to
+// name it, so such a clause would be a claim about the initialiser that
+// nothing checks.
+func (v *fnVerifier) checkDeclaredRequires(st *state) {
+	for _, c := range v.fn.requires {
+		if c.node == nil {
+			continue
+		}
+		for _, conjunct := range c.node.Conjuncts() {
+			scratch := st.clone()
+			env := &specEnv{v: v, sink: scratch, fn: v.fn, args: v.entry, now: memory{}}
+			t := v.formula(c, conjunct, env)
+			onlyVariables, named := true, false
+			seen := map[*logic.Term]bool{}
+			var walk func(t *logic.Term)
+			walk = func(t *logic.Term) {
+				if seen[t] {
+					return
+				}
+				seen[t] = true
+				switch {
+				case isFixedTerm(t):
+					named = true
+				case t.Op == logic.OpConst && t != logic.NilErr() && !strings.HasPrefix(t.Name, "float "):
+					onlyVariables = false
+				}
+				for _, arg := range t.Args {
+					walk(arg)
+				}
+			}
+			walk(t)
+			if !onlyVariables || !named || v.proves(v.knownFacts(), t, 0) {
+				continue
+			}
+			v.report(c.pos, "the Requires clause %s reads only package-level variables, and their declarations do not show that it holds; "+
+				"test the value in the body instead", conjunct)
+		}
+	}
+}
+
+// refuseWriteThrough stops the verification of a function that assigns a
+// part of a package-level variable, or memory one refers to.
+func (v *fnVerifier) refuseWriteThrough(e ast.Expr) {
+	v.refuseWriteThroughAs(e, types.ExprString(e))
+}
+
+// refuseWriteThroughAs is refuseWriteThrough for a write that text spells.
+func (v *fnVerifier) refuseWriteThroughAs(e ast.Expr, text string) {
+	switch root, inMemory := v.packageRoot(e); {
+	case root != nil && inMemory:
+		v.unsupported(e.Pos(), fmt.Sprintf("%s writes memory that the package-level variable %s refers to, which a Modifies clause cannot name yet",
+			text, v.spelling(root)))
+	case root != nil:
+		v.unsupported(e.Pos(), fmt.Sprintf("%s is part of the package-level variable %s, which a verified function cannot assign yet", text, v.spelling(root)))
+	}
+}
+
+// embedded reports whether a go:embed directive gives the variables of a
+// declaration their values.
+func embedded(gen *ast.GenDecl, spec *ast.ValueSpec) bool {
+	for _, doc := range []*ast.CommentGroup{gen.Doc, spec.Doc} {
+		if doc == nil {
+			continue
+		}
+		for _, c := range doc.List {
+			if strings.HasPrefix(c.Text, "//go:embed") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// fixedMet is a fixed variable that a function read: its leaves and its
+// type, for the samples of the check of a contract that may always fail.
+type fixedMet struct {
+	val value
+	typ types.Type
 }

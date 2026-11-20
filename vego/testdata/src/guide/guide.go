@@ -999,11 +999,14 @@ func IsEmpty(err error) (result bool) {
 
 var calls int
 
-// Counted reads a package-level variable.
+// countCall changes calls, and is not verified.
+func countCall() { calls++ }
+
+// Counted reads a package-level variable that is changed.
 //
 // @Ensures True
 func Counted() (result int) {
-	return calls // want `vego: cannot verify Counted: calls is not a local variable`
+	return calls // want `vego: cannot verify Counted: calls is assigned at guide.go:1003; package-level variables that are changed are not supported yet`
 }
 
 // Clear removes the keys of the map it ranges over.

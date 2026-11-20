@@ -135,15 +135,17 @@ func (e *specEnv) root(name string) (val value, t types.Type, isResult bool, con
 	return nil, nil, false, constant, err
 }
 
-// errorVariable resolves a name that, with the field after it for a
-// package name, is a package-level error variable: one of this package, as
-// ErrEmpty, or of another, as io.EOF. It reports whether the name is one.
-// A contract keeps the meaning it had where it was written: a verified
-// function sees the names of its file, an imported contract the variables
-// its package recorded for its spellings, and a trusted contract the
-// variables of the function's own package by name and those of any package
-// in the build by its path; see trustedErrorVariable.
-func (e *specEnv) errorVariable(name string, steps []logic.Step, when logic.When) (*logic.Term, bool, error) {
+// packageVariable resolves a name that, with the field after it for a
+// package name, is a package-level variable: one of this package, as
+// ErrEmpty or limit, or of another, as io.EOF. It reports whether the name
+// is one, and returns the steps after it. A contract keeps the meaning it
+// had where it was written: a verified function sees the names of its
+// file, an imported contract the variables its package recorded for its
+// spellings, and a trusted contract the error variables of the function's
+// own package by name and those of any package in the build by its path;
+// see trustedErrorVariable. Only error variables may be named in a trusted
+// contract or a contract of a type.
+func (e *specEnv) packageVariable(name string, steps []logic.Step) (*types.Var, []logic.Step, bool, error) {
 	var variable *types.Var
 	rest := steps
 	isResult := false
@@ -154,17 +156,17 @@ func (e *specEnv) errorVariable(name string, steps []logic.Step, when logic.When
 	case e.fn == nil:
 		scope := e.v.pass.Pkg.Scope().Innermost(e.pos)
 		if scope == nil {
-			return nil, false, nil
+			return nil, nil, false, nil
 		}
 		_, obj := scope.LookupParent(name, e.pos)
-		variable, rest = e.v.packageErrorVariable(obj, steps)
+		variable, rest = e.v.packageVariableNamed(obj, steps)
 	case e.fn.paramNames[name] != nil || isResult:
-		return nil, false, nil
+		return nil, nil, false, nil
 	case e.fn.spelling().trust != nil:
 		var err error
 		variable, rest, err = e.trustedErrorVariable(name, steps)
 		if err != nil {
-			return nil, true, err
+			return nil, nil, true, err
 		}
 	case e.fn.spelling().imported != nil:
 		imported := e.fn.spelling().imported
@@ -174,17 +176,17 @@ func (e *specEnv) errorVariable(name string, steps []logic.Step, when logic.When
 				spelled, rest = name+"."+steps[0].Field, steps[1:]
 				variable = e.v.lookupKey(key)
 				if variable == nil {
-					return nil, true, fmt.Errorf("%s names %s, which is not known here", spelled, key)
+					return nil, nil, true, fmt.Errorf("%s names %s, which is not known here", spelled, key)
 				}
 				break
 			}
 		}
 		key, ok := imported.Errors[spelled]
 		if !ok {
-			return nil, false, nil
+			return nil, nil, false, nil
 		}
 		if variable = e.v.lookupKey(key); variable == nil {
-			return nil, true, fmt.Errorf("%s names %s, which is not known here", spelled, key)
+			return nil, nil, true, fmt.Errorf("%s names %s, which is not known here", spelled, key)
 		}
 	default:
 		// A function type has no declaration of a function; its contract
@@ -194,13 +196,16 @@ func (e *specEnv) errorVariable(name string, steps []logic.Step, when logic.When
 			at = decl.Pos()
 		}
 		_, obj := e.v.pass.Pkg.Scope().Innermost(at).LookupParent(name, at)
-		variable, rest = e.v.packageErrorVariable(obj, steps)
+		variable, rest = e.v.packageVariableNamed(obj, steps)
+		if variable != nil && !isError(variable.Type()) && (e.fn.spelling().valueOf != nil || e.fn.spelling().methodOf != nil) {
+			return nil, nil, true, fmt.Errorf("a contract of a function type or of a method of an interface cannot name the package-level variable %s yet",
+				e.v.spelling(variable))
+		}
 	}
 	if variable == nil {
-		return nil, false, nil
+		return nil, nil, false, nil
 	}
-	sentinel, err := e.errorVariableTerm(variable, rest, when)
-	return sentinel, true, err
+	return variable, rest, true, nil
 }
 
 // trustedErrorVariable resolves a name in a trusted contract that is not a
@@ -273,11 +278,21 @@ func (e *specEnv) errorVariableTerm(variable *types.Var, rest []logic.Step, when
 // object is, or that its first step selects when it is a package name, and
 // the steps after it.
 func (v *fnVerifier) packageErrorVariable(obj types.Object, steps []logic.Step) (*types.Var, []logic.Step) {
+	if variable, rest := v.packageVariableNamed(obj, steps); variable != nil && isError(variable.Type()) {
+		return variable, rest
+	}
+	return nil, nil
+}
+
+// packageVariableNamed returns the package-level variable that an object
+// is, or that its first step selects when it is a package name, and the
+// steps after it.
+func (v *fnVerifier) packageVariableNamed(obj types.Object, steps []logic.Step) (*types.Var, []logic.Step) {
 	field := ""
 	if _, isPackage := obj.(*types.PkgName); isPackage && len(steps) > 0 && steps[0].Field != "" {
 		field, steps = steps[0].Field, steps[1:]
 	}
-	if variable := errorVariableOf(obj, field); variable != nil {
+	if variable := packageVariableOf(obj, field); variable != nil {
 		return variable, steps
 	}
 	return nil, nil
@@ -287,6 +302,16 @@ func (v *fnVerifier) packageErrorVariable(obj types.Object, steps []logic.Step) 
 // is, or, when the object is a package name, the one of that package with
 // the given name, or nil.
 func errorVariableOf(obj types.Object, field string) *types.Var {
+	if variable := packageVariableOf(obj, field); variable != nil && isError(variable.Type()) {
+		return variable
+	}
+	return nil
+}
+
+// packageVariableOf returns the package-level variable that an object is,
+// or, when the object is a package name, the one of that package with the
+// given name, or nil.
+func packageVariableOf(obj types.Object, field string) *types.Var {
 	if pkgName, ok := obj.(*types.PkgName); ok {
 		if field == "" {
 			return nil
@@ -296,7 +321,7 @@ func errorVariableOf(obj types.Object, field string) *types.Var {
 		return nil
 	}
 	variable, ok := obj.(*types.Var)
-	if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() || !isError(variable.Type()) {
+	if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
 		return nil
 	}
 	return variable
@@ -370,8 +395,15 @@ func (e *specEnv) locateAt(name string, steps []logic.Step, when logic.When, thr
 	if e.selfType != nil {
 		return e.locateField(name, steps, when)
 	}
-	if sentinel, named, err := e.errorVariable(name, steps, when); named {
-		return reached{constant: sentinel}, err
+	if variable, rest, named, err := e.packageVariable(name, steps); named {
+		switch {
+		case err != nil:
+			return reached{}, err
+		case isError(variable.Type()):
+			sentinel, err := e.errorVariableTerm(variable, rest, when)
+			return reached{constant: sentinel}, err
+		}
+		return e.locateVariable(variable, rest, when)
 	}
 	val, t, isResult, constant, err := e.root(name)
 	switch {
@@ -438,8 +470,11 @@ func (e *specEnv) locateField(name string, steps []logic.Step, when logic.When) 
 		if found, _, _ := types.LookupFieldOrMethod(e.selfType, true, home, name); found != nil {
 			return reached{}, errors.New(strings.TrimPrefix(err.Error(), "."))
 		}
-		if variable, _ := e.v.packageErrorVariable(e.v.pass.Pkg.Scope().Lookup(name), steps); variable != nil {
-			return reached{}, fmt.Errorf("an invariant cannot name the error variable %s yet", name)
+		if variable, _ := e.v.packageVariableNamed(e.v.pass.Pkg.Scope().Lookup(name), steps); variable != nil {
+			if isError(variable.Type()) {
+				return reached{}, fmt.Errorf("an invariant cannot name the error variable %s yet", name)
+			}
+			return reached{}, fmt.Errorf("an invariant cannot name the package-level variable %s yet", name)
 		}
 		constant, constErr := e.v.contractConstant(e.fn.spelling(), name)
 		switch {

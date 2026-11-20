@@ -260,6 +260,7 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
 			targets[i] = lvalue{kind: placeBlank}
 			continue
 		}
+		v.refuseWriteThrough(lhs)
 		targets[i] = v.lvalue(lhs, st, nil)
 	}
 	simple := s.Tok == token.ASSIGN || s.Tok == token.DEFINE

@@ -135,7 +135,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		u.reach(operands)
 		formatted := v.checkFormattedAlloc(st, guard, call, fn, args, v.held)
 		v.checkFormatRuns(call, v.formatRuns(call, fn), st, guard)
-		made.pure = len(fn.modifies) == 0 && signatureMemoryFree(callee.Type().(*types.Signature))
+		made.pure = v.callMemoryFree(fn, callee.Type().(*types.Signature))
 		results = v.invoke(call, fn, args, st, guard)
 		// What Sprintf returns is what fmt wrote, which is no longer than
 		// the bound when the bound counts all of it.
@@ -149,11 +149,9 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 }
 
 // signatureMemoryFree reports whether no receiver, parameter, or result of
-// a signature refers to memory. A contract over such a signature reads no
-// memory and means the same whatever memory holds. That rests on contracts
-// naming nothing but parameters, results, and error variables; once a
-// contract can name another package-level variable, naming one must count
-// as reading memory too.
+// a signature refers to memory. A contract over such a signature that
+// names no package-level variable whose value refers to memory reads no
+// memory and means the same whatever memory holds; see callMemoryFree.
 func signatureMemoryFree(sig *types.Signature) bool {
 	if sig.Recv() != nil && !memoryFree(sig.Recv().Type()) {
 		return false

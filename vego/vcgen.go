@@ -166,8 +166,13 @@ type fnVerifier struct {
 	// opaqueErrors holds the opaque error variables met, and madeHere the
 	// errors made in the body; see noteOpaque.
 	opaqueErrors, madeHere []*logic.Term
-	background             []*logic.Term
-	backgroundSeen         map[string]bool
+	// madeFixed holds the references of the fixed variables met whose
+	// initialisers made an allocation with a size, which are apart, and
+	// fixedMet the fixed variables met; see fixedValue.
+	madeFixed      []*logic.Term
+	fixedMet       map[string]fixedMet
+	background     []*logic.Term
+	backgroundSeen map[string]bool
 	// trees holds the errors met whose tree is known, and isTargets the
 	// targets of is met outside quantifiers, by their text in targetSeen;
 	// see noteTree and noteIs.
@@ -484,6 +489,8 @@ func (v *fnVerifier) verify() {
 	if v.quickly(st, nil, logic.False()) {
 		v.report(fn.decl.Name.Pos(), "nothing can satisfy the Requires clauses of %s together with what the types of its parameters guarantee, "+
 			"so verifying it would prove nothing", fn.obj.Name())
+	} else {
+		v.checkDeclaredRequires(st)
 	}
 	for _, refused := range v.entryOnly(st) {
 		v.report(refused.clause.pos, "%s", refused.message(fn.obj.Name()))
@@ -677,6 +684,7 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 			return
 		}
 		if isBuiltin(v.info, call, "delete") {
+			v.refuseWriteThroughAs(&ast.IndexExpr{X: call.Args[0], Index: call.Args[1]}, types.ExprString(call))
 			v.deleteKey(call, st)
 			break
 		}
@@ -694,6 +702,7 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 		}
 		var target lvalue
 		var current *logic.Term
+		v.refuseWriteThrough(s.X)
 		v.evaluate(st, func() {
 			target = v.lvalue(s.X, st, nil)
 			current = v.loadRecorded(target, st, nil, 0)[0]
