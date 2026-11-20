@@ -55,7 +55,7 @@ type callback struct {
 
 // callWords are the names that a formula reads as something else when
 // they are applied, as in is(err, target).
-var callWords = []string{"is", "has", "old", "fresh", "within", "len"}
+var callWords = logic.Reserved
 
 // trustedCall reads one entry under calls of a trusted contract into fn,
 // or records why it cannot be used.

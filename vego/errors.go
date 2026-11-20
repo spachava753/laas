@@ -1569,6 +1569,25 @@ func (b *sampler) addSlice(t types.Type, to binding) {
 		}
 	}
 	lengths := slot{sized(b.within(0, maxSampleLen), func(*witness) {})}
+	if b.mentioned[names[3]] && b.v.namedInFormulas[names[3]] {
+		// A slice whose capacity a formula names, as in cap(A), may have
+		// more capacity than length, as one made with make or cut with
+		// s[:n] has.
+		length, spare := b.within(0, maxSampleLen), b.within(0, maxSampleLen)
+		lengths = append(lengths, func(s *witness) {
+			for i, part := range []*logic.Term{ref, logic.IntLit(0), length, logic.Add(length, spare)} {
+				to.set(s, i, part)
+			}
+		})
+	}
+	if b.mentioned[names[0]] && b.v.namedInFormulas[names[0]+" = nil"] {
+		// A slice that a formula compares with nil may be nil.
+		lengths = append(lengths, func(s *witness) {
+			for i := range 4 {
+				to.set(s, i, map[bool]*logic.Term{true: logic.RefLit(0), false: logic.IntLit(0)}[i == 0])
+			}
+		})
+	}
 	if sort, single := sortOf(elem); single {
 		for _, literal := range b.literals {
 			if literal.Sort == logic.SeqOf(sort) && b.v.proves(nil, b.v.elementFacts(literal, elem), 0) {

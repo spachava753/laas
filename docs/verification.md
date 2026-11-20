@@ -185,6 +185,10 @@ Formulas can also use strings and `nil`: `role = "admin"`, `p != nil`, `err = ni
 
 A boolean can be used as a formula on its own, as in `found` or `~found`. It can also be compared with `True` and `False`, as in `found = True`.
 
+A character in single quotes is the number of that character, as in Go. `s[0] = '/'` means `s[0] = 47`. Escapes are written as in Go, as in `'\n'` and `'\x41'`. A quote directly after a name is a prime, as in `x'`. Any other quote starts a character, so `x' = 'a'` compares the value on return with 97. In a doc comment, `gofmt` turns two quotes in a row into `”`, so write the quote character as `'\x27'` there.
+
+`cap(A)` is the capacity of a slice. `A = nil` and `A != nil` say whether a slice is nil, as `A == nil` does in code. See [Capacity and nil in a formula](#capacity-and-nil-in-a-formula).
+
 ### Quantifiers
 
 `Forall` and `Exists` range over an interval of integers.
@@ -204,7 +208,7 @@ There is a short form for a condition on a range of elements. `A[lo:hi) <= x` me
 
 A contract can use the function's parameters and results, and the integer and boolean constants of the package. String constants cannot be used by name. Write the string itself. A contract can also name the error variables of the package, as in `ErrEmpty`, and those of an imported package, as in `io.EOF`. A trusted contract names them by the path of their package instead. See [Error variables in a trusted contract](#error-variables-in-a-trusted-contract). The contract of a verified function can name other package-level variables that nothing changes, as described in [Package-level variables](#package-level-variables).
 
-Results are referred to by their names, so every result of a verified function must be named. This guide calls a single result `result`, but you can choose another name. Go does not allow a result to share a name with a parameter, so a name in a contract cannot mean both. Three names are not available for variables that annotations use: `True`, `False`, and `nil`, which are words of the formula language. A predicate cannot be called `is`.
+Results are referred to by their names, so every result of a verified function must be named. This guide calls a single result `result`, but you can choose another name. Go does not allow a result to share a name with a parameter, so a name in a contract cannot mean both. Three names are not available for variables that annotations use: `True`, `False`, and `nil`, which are words of the formula language. A predicate cannot be called `len`, `cap`, `old`, `fresh`, `within`, `apart`, `has`, or `is`.
 
 ```text
 vego: Unnamed has annotations, so each of its results needs a name, as in func Unnamed(x int) (i int)
@@ -231,7 +235,7 @@ A predicate called `held`, `rheld`, or `running` cannot be used on a mutex or a 
 
 ### Limits
 
-Formulas have no bit operators, no `len` or `cap`, and no floating-point facts. Write `|A|` for a length. They cannot call functions, only predicates. They have no character literals, so write `48` for `'0'`. A slice cannot be compared with `nil`. Use `|A| = 0`. Structs cannot be compared as a whole. Compare their fields.
+Formulas have no bit operators, no `len`, and no floating-point facts. Write `|A|` for a length. They cannot call functions, only predicates. Structs cannot be compared as a whole. Compare their fields.
 
 An interface value can be compared only with `nil`, also in a formula. So a contract cannot say that a field of an interface type, such as `any`, keeps its value:
 
@@ -1912,6 +1916,55 @@ func Remove(A []int, i int) (result []int) {
 
 Slice expressions `A[i:j]` and `A[i:j:k]`, `len`, `cap`, `make`, and slice literals are supported. A nil slice has length and capacity 0, so after `if a == nil` the function knows that `len(a)` is 0. `copy` is not supported yet: write the copy as a loop that assigns each element, or, when the two slices have the same length, as `dst = append(dst[:0], src...)`.
 
+### Capacity and nil in a formula
+
+`cap(A)` is the capacity of `A`, and `A = nil` says that `A` is nil. A nil slice has length 0, but a slice of length 0 need not be nil. So `|A| = 0` and `A = nil` are different conditions:
+
+```go
+// Reserve returns an empty slice with room for n elements.
+//
+// @Requires 0 <= n <= 1000
+// @Ensures |r| = 0 And cap(r) = n And r != nil
+func Reserve(n int) (r []int) {
+	return make([]int, 0, n)
+}
+
+// @Ensures r != nil
+func EmptyOf(A []int) (r []int) {
+	return A[:0]
+}
+```
+
+```text
+vego: postcondition may not hold: r != nil
+```
+
+`A[:0]` of a nil slice is nil, so `EmptyOf` does not meet its contract.
+
+Both forms can be primed and put in `old`, as in `cap(s.items')` and `old(A) = nil`. `cap` applies only to a slice. A string is never nil, and `s = nil` for a string `s` is reported.
+
+### Slices that share no memory
+
+Slice parameters of one element type are assumed not to overlap. Slices that a function reaches through memory are not: two fields of one struct may share an array. `apart(a, b)` says that two slices share no memory, up to their capacities:
+
+```go
+// Halves holds two slices that the type does not keep apart.
+type Halves struct {
+	front, back []int
+}
+
+// @Requires h != nil And |h.front| > 0 And |h.back| > 0 And apart(h.front, h.back)
+// @Modifies h.front
+// @Ensures h.front'[0] = 0 And h.back'[0] = h.back[0]
+func ClearFront(h *Halves) {
+	h.front[0] = 0
+}
+```
+
+Without `apart(h.front, h.back)` in the `Requires`, `vego` reports `postcondition may not hold: h.back'[0] = h.back[0]`, because `h.back[0]` may be the element that the function writes.
+
+A slice with no capacity shares no memory with anything. `apart` takes two slices of one element type. Slices of two element types never share memory, and `apart` of them is reported.
+
 ## Strings
 
 A string is an immutable sequence of bytes. `vego` supports `|s|`, `s[i]`, `==`, string literals, concatenation, substrings, and conversion to and from `[]byte`.
@@ -2024,6 +2077,43 @@ Without `fresh(result)`, a caller must assume that the result could be a counter
 For two pointers to structs, `within(p, l)` means that `p` points to `l`'s struct itself or to a field of it. That struct or field has `p`'s struct type, or a type with the same fields, tags ignored. The field may be held directly or in a struct that `l`'s struct holds, but not behind a pointer. So `@Modifies l` covers a write through `p` when the `Requires` says `within(p, l)`. When `p` points to a struct whose size is not zero and `l`'s struct has no such place, `within(p, l)` is an error.
 
 `&x`, `&p.field`, and `&s[i]` are supported when the result points to a struct. Methods with pointer receivers can be called on variables, fields, and elements. Pointers to other types, such as `*int`, are not supported.
+
+### The address of a field in a formula
+
+A formula can name the address of a struct that it reaches through a pointer or an element of a slice, as in `&e.ring.root` and `&s[i]`. It is the pointer that the same expression gives in code, and it compares like any pointer:
+
+```go
+// Item is an element of a Ring, whose root marks where it starts.
+type Item struct {
+	next *Item
+	ring *Ring
+}
+
+// Ring is a list that ends at its own root.
+type Ring struct {
+	root Item
+	size int
+}
+
+// Next returns the item after e, or nil at the end of the ring.
+//
+// @Requires e != nil
+// @Ensures result = nil <-> (e.ring = nil Or e.next = nil Or e.next = &e.ring.root)
+// @Ensures result != nil -> result = e.next
+func (e *Item) Next() (result *Item) {
+	if p := e.next; e.ring != nil && p != &e.ring.root {
+		return p
+	}
+	return nil
+}
+```
+
+These rules apply:
+
+- The path must go through a pointer or an element of a slice, and must end in a struct. `&x` of a variable, `&p.n` for a field `n` of type `int`, and `&h.f` for a struct `h` passed by value are reported.
+- When the pointer that the path goes through is nil, Go panics on `&e.ring.root`. In a formula the address is then nil. So `e.next = &e.ring.root` holds when `e.next` and `e.ring` are both nil.
+- A primed path is read on return, wherever the prime stands. `&e.ring'.root` and `&e'.ring.root` both take the address in `e.ring` as it is on return.
+- A pointer to a struct of size zero can be compared only with nil, as in code.
 
 ### A slice that grows inside a struct
 
@@ -4924,6 +5014,10 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `Forall k in [a, b) : P`, `Exists k in [a, b] : P` | quantifiers over an interval |
 | `Forall k in Z : P` | quantifier over all integers |
 | `"text"`, `nil` | a string; the nil pointer, error, function value, or interface value |
+| `'/'`, `'\n'` | the number of a character, as in Go |
+| `cap(A)` | the capacity of a slice |
+| `A = nil`, `A != nil` | for a slice: whether it is nil, which <code>&#124;A&#124; = 0</code> is not |
+| `&p.f`, `&s[i]` | the address of a struct reached through a pointer or an element of a slice; nil when that pointer is nil |
 | `ErrEmpty`, `io.EOF` | an error variable of the package, or of an imported package |
 | `limit`, `lib.Limit`, `table[i]` | in the contract of a verified function, a package-level variable that nothing changes, of the package or of an imported package |
 | `"io/fs".ErrNotExist` | in a trusted contract, an error variable named by the path of its package |
@@ -4962,6 +5056,7 @@ Results are referred to by the names in the function's signature.
 | `Modifies rc`, `Modifies p.f` | if `rc` or `f` is an interface value: every state of what it holds, not the variable or the field; a function value field is the field itself |
 | `fresh(x)` | the memory `x` refers to on return was allocated by the call; true for a slice with zero capacity; for an interface value, what it holds was created by the call |
 | `within(a, b)` | `a` lies inside the memory of `b`; each is a pointer or a slice, and a slice includes its capacity |
+| `apart(a, b)` | the slices `a` and `b`, of one element type, share no memory up to their capacities |
 
 ### Order of evaluation
 

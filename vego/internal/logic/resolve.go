@@ -19,14 +19,24 @@ const (
 
 // Step is one step of a path: the selection of a field, of the element at
 // Index, or, as the last step, of the length, with Has of whether a map has
-// the key Index, or with State of a state of the value, as in held(m).
+// the key Index, with State of a state of the value, as in held(m), with
+// Cap of the capacity of a slice, with Nil of whether a slice is nil, or
+// with Addr of the address of what the path leads to, as in &e.list.root.
 type Step struct {
 	Field string
 	Index *Term
 	Len   bool
 	Has   bool
 	State string
+	Cap   bool
+	Nil   bool
+	Addr  bool
 }
+
+// NotSlice is what an Env returns for a path with a last step Nil that does
+// not lead to a slice: the comparison with nil is then resolved as for any
+// other value.
+var NotSlice = errors.New("not a slice")
 
 // NoState is the error an Env returns for a path whose value has no state
 // of the name asked for. The name may then be a predicate.
@@ -41,8 +51,9 @@ type Env interface {
 	Path(root string, steps []Step, when When) (*Term, error)
 	// Relation returns a formula about the identity of the pointers or
 	// slices that paths lead to: "fresh" states that what one path refers to
-	// was created during the call, and "within" that the memory the first
-	// of two paths refers to lies inside that of the second.
+	// was created during the call, "within" that the memory the first of
+	// two paths refers to lies inside that of the second, and "apart" that
+	// two slices share no memory.
 	Relation(name string, paths []Path) (*Term, error)
 	// Qualified returns the value of a variable named by the path of its
 	// package in quotes, as in "io/fs".ErrNotExist, followed by steps.
@@ -71,6 +82,10 @@ type PredDef struct {
 	Params []*Term // bound variables standing for the parameters
 	Body   *Term
 }
+
+// Reserved lists the names of the forms of the language that look like
+// applications, which no predicate, state, or other name may take.
+var Reserved = []string{"len", "cap", "old", "fresh", "within", "apart", "has", "is"}
 
 // Resolver type-checks parsed annotations and turns them into terms.
 type Resolver struct {
@@ -204,6 +219,8 @@ func (s *scope) term(n *Node) *Term {
 		return And(parts...)
 	case NQuant:
 		return s.quantifier(n)
+	case NAddr:
+		return s.address(n)
 	}
 	fail("a slice range such as A[lo:hi) can only be used as an operand of a comparison")
 	return nil
@@ -247,6 +264,50 @@ func (s *scope) path(n *Node) (root *Node, steps []Step, primed bool) {
 		return root, append(steps, Step{Index: s.term(n.Kids[1])}), primed
 	}
 	return n, nil, n.Kind == NIdent && n.Primed
+}
+
+// address resolves &x.f, the address of a struct reached from a program
+// variable through a pointer or an element of a slice. The environment
+// decides what may be addressed.
+func (s *scope) address(n *Node) *Term {
+	kid := n.Kids[0]
+	root, steps, primed := s.path(kid)
+	_, bound := s.bound[root.Name]
+	switch {
+	case s.env == nil:
+		fail("& cannot be used in a predicate definition")
+	case (kid.Kind != NField && kid.Kind != NIndex) || root.Kind != NIdent || bound:
+		fail("& takes a field or an element reached from a variable through a pointer or a slice, as in &e.list.root or &s[i]")
+	}
+	t, err := s.env.Path(root.Name, append(steps, Step{Addr: true}), map[bool]When{true: Primed}[primed])
+	if err != nil {
+		panic(resolveError{err})
+	}
+	return t
+}
+
+// pathOf splits the argument of cap, or an operand compared with nil, into
+// the variable it starts from, its steps, and the state it is read in; old
+// around the whole path reads it on entry. It reports false for anything
+// that is not such a path.
+func (s *scope) pathOf(n *Node) (root string, steps []Step, when When, ok bool) {
+	if n.Kind == NCall && n.Name == "old" && len(n.Kids) == 1 {
+		n, when = n.Kids[0], Old
+	}
+	if n.Kind != NIdent && n.Kind != NField && n.Kind != NIndex {
+		return "", nil, Now, false
+	}
+	start, steps, primed := s.path(n)
+	if _, bound := s.bound[start.Name]; start.Kind != NIdent || bound || s.env == nil {
+		return "", nil, Now, false
+	}
+	if primed && when == Old {
+		fail("old(%s) is the value on entry and cannot be primed", start.Name)
+	}
+	if primed {
+		when = Primed
+	}
+	return start.Name, steps, when, true
 }
 
 // access resolves a name, possibly followed by field selections and
@@ -334,18 +395,36 @@ func (s *scope) call(n *Node) *Term {
 			panic(resolveError{err})
 		}
 		return t
-	case "old", "fresh", "within":
+	case "cap":
+		// cap(A): the capacity of a slice.
+		if s.env == nil {
+			fail("cap cannot be used in a predicate definition")
+		}
+		if len(n.Kids) != 1 {
+			fail("cap takes one slice, as in cap(A)")
+		}
+		root, steps, when, ok := s.pathOf(n.Kids[0])
+		if !ok {
+			fail("cap takes a slice reached from a variable, as in cap(A), cap(s.items), or cap(old(A))")
+		}
+		t, err := s.env.Path(root, append(steps, Step{Cap: true}), when)
+		if err != nil {
+			panic(resolveError{err})
+		}
+		return t
+	case "old", "fresh", "within", "apart":
 		if s.env == nil {
 			fail("%s cannot be used in a predicate definition", n.Name)
 		}
-		if want := map[string]int{"within": 2}[n.Name]; len(n.Kids) != max(want, 1) {
+		if want := map[string]int{"within": 2, "apart": 2}[n.Name]; len(n.Kids) != max(want, 1) {
 			fail("%s takes %d argument(s), as in %s", n.Name, max(want, 1),
-				map[string]string{"old": "old(A)", "fresh": "fresh(result)", "within": "within(s.items', s.items) or within(p, s.items)"}[n.Name])
+				map[string]string{"old": "old(A)", "fresh": "fresh(result)", "within": "within(s.items', s.items) or within(p, s.items)",
+					"apart": "apart(A, B)"}[n.Name])
 		}
 		var paths []Path
 		for _, kid := range n.Kids {
 			root, steps, primed := s.path(kid)
-			if _, bound := s.bound[root.Name]; root.Kind != NIdent || bound || (primed && n.Name != "within") {
+			if _, bound := s.bound[root.Name]; root.Kind != NIdent || bound || (primed && n.Name != "within" && n.Name != "apart") {
 				fail("%s takes a parameter or something reached from one, as in %s(A) or %s(s.items)", n.Name, n.Name, n.Name)
 			}
 			paths = append(paths, Path{root.Name, steps, map[bool]When{true: Primed}[primed]})
@@ -487,6 +566,9 @@ func (s *scope) compare(op string, left, right *Node) *Term {
 		vars = append(vars, index)
 		return Select(s.seq(n.Kids[0]), index)
 	}
+	if t := s.nilSlice(op, left, right); t != nil {
+		return t
+	}
 	a, b := operand(left), operand(right)
 	// nil is written the same for an error and for a pointer.
 	switch {
@@ -507,6 +589,35 @@ func (s *scope) compare(op string, left, right *Node) *Term {
 		result = Forall(vars[i], result)
 	}
 	return result
+}
+
+// nilSlice resolves A = nil and A != nil for a slice A, which has no value
+// of its own in a formula: whether it is nil is asked of the environment.
+// It returns nil when neither side is nil, or the other side is no slice.
+func (s *scope) nilSlice(op string, left, right *Node) *Term {
+	other := left
+	switch {
+	case op != "=" && op != "==" && op != "!=":
+		return nil
+	case left.Kind == NNil:
+		other = right
+	case right.Kind != NNil:
+		return nil
+	}
+	root, steps, when, ok := s.pathOf(other)
+	if !ok {
+		return nil
+	}
+	t, err := s.env.Path(root, append(steps, Step{Nil: true}), when)
+	switch {
+	case errors.Is(err, NotSlice):
+		return nil
+	case err != nil:
+		panic(resolveError{err})
+	case op == "!=":
+		return Not(t)
+	}
+	return t
 }
 
 // plain spells an operand of a comparison; of a slice range it names the
@@ -626,7 +737,7 @@ func (r *Resolver) Define(decls []*PredDecl) []DefineError {
 	var errs []DefineError
 	byName := map[string]*PredDecl{}
 	for _, decl := range decls {
-		if _, dup := byName[decl.Name]; dup || slices.Contains([]string{"len", "old", "fresh", "within", "has", "is"}, decl.Name) {
+		if _, dup := byName[decl.Name]; dup || slices.Contains(Reserved, decl.Name) {
 			errs = append(errs, DefineError{decl, fmt.Errorf("predicate %s is already defined", decl.Name)})
 			continue
 		}

@@ -304,8 +304,8 @@ func (e *specEnv) ifaceState(what string, typ types.Type, ref *logic.Term, sink 
 
 // reservedStateNames are the names that mean something of their own in
 // formulas and cannot name a state.
-var reservedStateNames = []string{"len", "is", "has", "old", "fresh", "within", "nil", "True", "False",
-	"And", "Or", "Forall", "Exists", "in", "result"}
+var reservedStateNames = append(slices.Clone(logic.Reserved), "nil", "True", "False",
+	"And", "Or", "Forall", "Exists", "in", "result")
 
 // addState records a state declared with a State annotation in the doc comment of an
 // interface type of the package.

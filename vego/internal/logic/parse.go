@@ -28,6 +28,7 @@ const (
 	NNil              // nil: the nil error or the nil pointer
 	NField            // Kids[0].Name, possibly Primed
 	NStr              // a string literal; Name holds its value
+	NAddr             // &Kids[0]: the address of a struct reached through memory
 )
 
 // Walk calls visit for the node and everything below it.
@@ -83,7 +84,12 @@ func (n *Node) String() string {
 	}
 	switch n.Kind {
 	case NInt:
+		if n.Name != "" {
+			return n.Name
+		}
 		return n.Big.String()
+	case NAddr:
+		return "&" + kid(0)
 	case NBool:
 		return map[int64]string{0: "False", 1: "True"}[n.Val]
 	case NIdent:
@@ -133,7 +139,7 @@ type PredDecl struct {
 
 type token struct {
 	size int  // length of the token in the source
-	kind byte // 'i' identifier, 'n' number, 's' string, 'o' operator, 'e' end of input
+	kind byte // 'i' identifier, 'n' number, 'c' character, 's' string, 'o' operator, 'e' end of input
 	text string
 	pos  int
 }
@@ -148,16 +154,33 @@ func (e *SyntaxError) Error() string { return e.Msg }
 
 var operators = []string{
 	"<->", "::=", "->", "<=", ">=", "!=", "==", "&&", "||",
-	"=", "<", ">", "+", "-", "*", "/", "%", "~", "!", "(", ")", "[", "]", ",", ":", "|", "'", ".",
+	"=", "<", ">", "+", "-", "*", "/", "%", "~", "!", "(", ")", "[", "]", ",", ":", "|", "'", ".", "&",
 }
 
 // lex splits clause text into tokens. Identifiers follow Go's rules, numbers
-// are decimal, and operators are matched longest first.
+// are decimal, and operators are matched longest first. A quote directly
+// after an identifier is a prime, as in x'; any other quote starts a
+// character literal, as in '/', which uses Go's syntax and stands for the
+// number of its character.
 func lex(src string) ([]token, error) {
 	var toks []token
 	for i := 0; i < len(src); {
 		r, size := utf8.DecodeRuneInString(src[i:])
 		switch {
+		case r == '\'' && !(len(toks) > 0 && toks[len(toks)-1].kind == 'i' && toks[len(toks)-1].pos+toks[len(toks)-1].size == i):
+			end := i + 1
+			for end < len(src) && src[end] != '\'' {
+				if src[end] == '\\' {
+					end++
+				}
+				end++
+			}
+			value, ok := characterValue(src[i:min(end+1, len(src))])
+			if !ok {
+				return nil, &SyntaxError{i, "malformed character literal; a prime follows a name directly, as in x', and a character is written as in Go, as in '/' or '\\n'"}
+			}
+			toks = append(toks, token{end + 1 - i, 'c', strconv.Itoa(int(value)), i})
+			i = end + 1
 		case unicode.IsSpace(r):
 			i += size
 		case unicode.IsLetter(r) || r == '_':
@@ -209,7 +232,21 @@ func lex(src string) ([]token, error) {
 	return append(toks, token{0, 'e', "", len(src)}), nil
 }
 
+// characterValue reads a character literal written as in Go: one character
+// or one escape between single quotes. It reports false for anything else.
+func characterValue(text string) (rune, bool) {
+	if len(text) < 3 || text[0] != '\'' || text[len(text)-1] != '\'' {
+		return 0, false
+	}
+	value, _, tail, err := strconv.UnquoteChar(text[1:len(text)-1], '\'')
+	if err != nil || tail != "" {
+		return 0, false
+	}
+	return value, true
+}
+
 type parser struct {
+	src  string
 	toks []token
 	pos  int
 }
@@ -279,7 +316,7 @@ func parse(src string, production func(*parser) *Node) (n *Node, err error) {
 			n, err = nil, syntaxErr
 		}
 	}()
-	p := &parser{toks: toks}
+	p := &parser{src: src, toks: toks}
 	n = production(p)
 	if p.peek().kind != 'e' {
 		p.fail("unexpected %q", p.peek().text)
@@ -296,7 +333,7 @@ func (p *parser) fail(format string, args ...any) {
 // is reports whether the next token is the given operator or keyword.
 func (p *parser) is(text string) bool {
 	tok := p.peek()
-	return tok.kind != 'e' && tok.kind != 'n' && tok.kind != 's' && tok.text == text
+	return (tok.kind == 'i' || tok.kind == 'o') && tok.text == text
 }
 
 func (p *parser) accept(text string) bool {
@@ -471,6 +508,10 @@ func (p *parser) unary() *Node {
 		kid := p.unary()
 		return &Node{Kind: NUnary, Op: "-", Kids: []*Node{kid}, Start: start, End: kid.End}
 	}
+	if p.accept("&") {
+		kid := p.postfix()
+		return &Node{Kind: NAddr, Kids: []*Node{kid}, Start: start, End: kid.End}
+	}
 	return p.postfix()
 }
 
@@ -517,6 +558,12 @@ func (p *parser) primary() *Node {
 		p.pos++
 		value, _ := new(big.Int).SetString(tok.text, 10)
 		n.Kind, n.Big = NInt, value
+	case tok.kind == 'c':
+		// A character is the number of its code point; the literal is kept
+		// for messages.
+		p.pos++
+		value, _ := new(big.Int).SetString(tok.text, 10)
+		n.Kind, n.Big, n.Name = NInt, value, p.src[tok.pos:tok.pos+tok.size]
 	case tok.kind == 's':
 		p.pos++
 		n.Kind, n.Name = NStr, tok.text

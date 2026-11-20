@@ -13,9 +13,15 @@ type testEnv map[string]*Term
 func (e testEnv) Path(root string, steps []Step, when When) (*Term, error) {
 	name, state := root, ""
 	var indices []*Term
-	measured := false
+	measured, prefix := false, ""
 	for _, step := range steps {
 		switch {
+		case step.Cap:
+			prefix = "cap "
+		case step.Nil:
+			prefix = "nil "
+		case step.Addr:
+			prefix = "&"
 		case step.State != "":
 			state = step.State
 		case step.Has:
@@ -43,9 +49,12 @@ func (e testEnv) Path(root string, steps []Step, when When) (*Term, error) {
 		}
 		return nil, &NoState{}
 	}
-	t, ok := e[name]
-	if !ok {
-		return nil, fmt.Errorf("unknown name %s", name)
+	t, ok := e[prefix+name]
+	switch {
+	case !ok && prefix == "nil ":
+		return nil, NotSlice
+	case !ok:
+		return nil, fmt.Errorf("unknown name %s", prefix+name)
 	}
 	for _, index := range indices {
 		if !t.Sort.IsSeq() {
@@ -81,6 +90,8 @@ func TestResolve(t *testing.T) {
 		"s.count": Const("count0", Int), "s.count'": Const("count1", Int), "old s.count": Const("count0", Int),
 		"s.items'": Const("items1", IntSeq), "p": Pair(Const("p", Ref), Const("p at", Int)), "q": Pair(Const("q", Ref), Const("q at", Int)), "m": Const("m", Ref), "f": FuncVal(Const("f", Ref)), "w": IfaceVal(Const("w", Ref)), "has A": Const("has A", Bool),
 		"err": Const("err", Err), "ErrEmpty": Const("ErrEmpty", Err),
+		"cap A": Const("capA", Int), "cap A'": Const("capA1", Int), "cap old A": Const("capA0", Int), "nil A": Const("nilA", Bool), "nil old A": Const("nilA0", Bool),
+		"&e.list.root": Pair(Const("e.list", Ref), Const("root at", Int)), "&e.list.root'": Pair(Const("e.list1", Ref), Const("root1 at", Int)),
 		"held(p)": Const("held p", Bool), "held(p')": Const("held p1", Bool), "held(old p)": Const("held p0", Bool),
 	}
 	resolver := NewResolver()
@@ -173,6 +184,31 @@ func TestResolve(t *testing.T) {
 		{"held(old(p))", "held p0"},
 		{"held(old(p'))", "error: old(p) is the value on entry and cannot be primed"},
 		{"held(i)", "error: unknown predicate held"},
+		{"A[i] = '/'", "(A[i] = 47)"},
+		{"A[i] != '\\n' And A[j] = '\\''", "(~(A[i] = 10) And (A[j] = 39))"},
+		{"A[i] = '\\x41' Or A[i] = '\\u00e9' Or A[i] = 'é' Or A[i] = '\\377'", "((A[i] = 65) Or (A[i] = 233) Or (A[i] = 233) Or (A[i] = 255))"},
+		{"s.count' = '0'", "(count1 = 48)"},
+		{"A[i] = ''", "error: malformed character literal"},
+		{"A[i] = 'ab'", "error: malformed character literal"},
+		{"A[i] = 'a", "error: malformed character literal"},
+		{"A[i] = '''", "error: malformed character literal"},
+		{"s.count ' = 1", "error: malformed character literal"},
+		{"cap(A) >= |A| And cap(A') = cap(old(A))", "((|A| <= capA) And (capA1 = capA0))"},
+		{"cap(A, A)", "error: cap takes one slice"},
+		{"cap(A[0])", "error: not a slice"},
+		{"cap(1)", "error: cap takes a slice reached from a variable"},
+		{"cap(old(A'))", "error: old(A) is the value on entry and cannot be primed"},
+		{"A = nil Or nil != A", "(nilA Or ~nilA)"},
+		{"old(A) = nil", "nilA0"},
+		{"p = nil", "(p = 0)"},
+		{"A == nil", "nilA"},
+		{"A < nil", "error: cannot compare"},
+		{"apart(A, A')", "apart A A'()"},
+		{"apart(A)", "error: apart takes 2 argument(s)"},
+		{"&e.list.root = p", "((e.list = p) And ((e.list = 0) Or (root at = p at)))"},
+		{"&e.list'.root = p", "((e.list1 = p) And ((e.list1 = 0) Or (root1 at = p at)))"},
+		{"&p = q", "error: & takes a field or an element"},
+		{"&1 = q", "error: & takes a field or an element"},
 	}
 	for _, test := range tests {
 		t.Run(test.src, func(t *testing.T) {
@@ -217,6 +253,8 @@ func TestDefine(t *testing.T) {
 		{"rejects duplicate names", []string{"p(n) ::= n > 0", "p(n) ::= n < 0"}, "already defined"},
 		{"rejects free names", []string{"p(n) ::= n > m"}, "may only mention their parameters"},
 		{"rejects the name is", []string{"is(n) ::= n > 0"}, "already defined"},
+		{"rejects the name cap", []string{"cap(n) ::= n > 0"}, "already defined"},
+		{"rejects the name apart", []string{"apart(n) ::= n > 0"}, "already defined"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

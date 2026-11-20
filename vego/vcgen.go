@@ -62,7 +62,11 @@ type fnVerifier struct {
 	// of the constants that stand for the state on entry.
 	entry    map[*types.Var]value
 	entryBrk *logic.Term
-	inputs   map[string]bool
+	// namedInFormulas holds the constants of slices whose capacity a
+	// formula names, and, followed by " = nil", those a formula compares
+	// with nil; see noteNamed.
+	namedInFormulas map[string]bool
+	inputs          map[string]bool
 	// bitTerms holds the unknowns that stand for powers of two and for the
 	// bitwise and of two operands, by what they stand for, and lowZeros how
 	// many low bits of such an unknown are known to be zero; see bits.go.
@@ -170,8 +174,8 @@ type fnVerifier struct {
 	// madeFixed holds the references of the fixed variables met whose
 	// initialisers made an allocation with a size, which are apart, and
 	// fixedMet the fixed variables met; see fixedValue.
-	madeFixed      []*logic.Term
-	fixedMet       map[string]fixedMet
+	madeFixed []*logic.Term
+	fixedMet  map[string]fixedMet
 	// tieLater is set when tieFailures was put off; see verified.
 	tieLater bool
 	// typedReads, when set, receives the values whose type facts reads
@@ -185,7 +189,7 @@ type fnVerifier struct {
 	// initialiser made what it refers to and some use in the build lets a
 	// reference to that out, that its contents are not known to stay as
 	// initialised and where; every obligation that fails says it.
-	lostContents []string
+	lostContents   []string
 	background     []*logic.Term
 	backgroundSeen map[string]bool
 	// trees holds the errors met whose tree is known, and isTargets the

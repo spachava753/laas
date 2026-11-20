@@ -1201,7 +1201,10 @@ func (pv *pkgVerifier) collect() {
 // that it shadows nothing the body or the contract uses, and never a word
 // of the annotation language.
 func (pv *pkgVerifier) namedSignature(fn *funcInfo) string {
-	taken := map[string]bool{"True": true, "False": true, "nil": true, "result": true, "old": true, "fresh": true, "within": true, "has": true, "len": true}
+	taken := map[string]bool{"True": true, "False": true, "nil": true, "result": true}
+	for _, word := range logic.Reserved {
+		taken[word] = true
+	}
 	// The name of a field after a dot shadows nothing.
 	var visit func(n ast.Node) bool
 	visit = func(n ast.Node) bool {

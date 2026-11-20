@@ -340,6 +340,10 @@ type reached struct {
 	isResult bool
 	hops     int
 	constant *logic.Term // set instead of val for a constant
+	// start is the value the path starts from and path its hops, which
+	// the address of what it leads to is computed from; see address.
+	start value
+	path  []hop
 }
 
 // writtenIn returns the package the annotation was written in: the package
@@ -446,7 +450,7 @@ func (e *specEnv) locateAt(name string, steps []logic.Step, when logic.When, thr
 		mem = e.post
 	}
 	cur, ground := e.v.follow(e.sink, mem, val, hops)
-	found := reached{val: cur, typ: final, mem: mem, isResult: isResult, hops: len(hops)}
+	found := reached{val: cur, typ: final, mem: mem, isResult: isResult, hops: len(hops), start: val, path: hops}
 	if ground {
 		found.sink = e.sink
 	}
@@ -490,7 +494,7 @@ func (e *specEnv) locateField(name string, steps []logic.Step, when logic.When) 
 		return reached{constant: constant}, nil
 	}
 	cur, ground := e.v.follow(e.sink, e.now, e.self, hops)
-	found := reached{val: cur, typ: final, mem: e.now, hops: len(hops)}
+	found := reached{val: cur, typ: final, mem: e.now, hops: len(hops), start: e.self, path: hops}
 	if ground {
 		found.sink = e.sink
 	}
@@ -511,6 +515,9 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 		}
 		return nil, fmt.Errorf("%s names the receiver, which a contract can use only as the argument of a state, as in %s(%s), and in Modifies",
 			name, example, name)
+	}
+	if last := len(steps) - 1; last >= 0 && (steps[last].Cap || steps[last].Nil || steps[last].Addr) {
+		return e.sliceOrAddress(name, steps[:last], steps[last], when)
 	}
 	measured := len(steps) > 0 && steps[len(steps)-1].Len
 	if measured {
@@ -590,6 +597,99 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 		return nil, fmt.Errorf("%s is a slice of %s; index it and name a field", spell(name, steps), elemType(found.typ))
 	}
 	return nil, fmt.Errorf("%s is a %s; name one of its fields", spell(name, steps), found.typ)
+}
+
+// sliceOrAddress resolves cap(A), A = nil for a slice A, and &x.f: the
+// capacity, whether the slice is nil, as code's A == nil asks it, and the
+// address of a struct that the path reaches through memory.
+func (e *specEnv) sliceOrAddress(name string, steps []logic.Step, last logic.Step, when logic.When) (*logic.Term, error) {
+	what := spell(name, steps)
+	if _, ok := e.readyMade(name, when); ok {
+		if last.Nil {
+			return nil, logic.NotSlice
+		}
+		return nil, fmt.Errorf("%s cannot be used this way here", name)
+	}
+	found, err := e.locate(name, steps, when)
+	switch {
+	case err != nil:
+		return nil, err
+	case last.Nil && found.constant == nil && isString(found.typ):
+		return nil, fmt.Errorf("%s is a string, which is never nil; compare |%s| with 0", what, what)
+	case last.Nil && (found.constant != nil || !isSlice(found.typ)):
+		return nil, logic.NotSlice
+	case last.Nil:
+		e.v.noteNamed(found.val[0], " = nil")
+		return isNilRef(found.val), nil
+	case last.Cap && (found.constant != nil || !isSlice(found.typ)):
+		return nil, fmt.Errorf("cap(%s): %s is not a slice; only a slice has a capacity", what, what)
+	case last.Cap:
+		e.v.noteNamed(found.val[3], "")
+		return found.val[3], nil
+	}
+	return e.address(what, found)
+}
+
+// noteNamed records that a formula names the capacity of a slice, or
+// compares it with nil, when the part read is a constant: the search for an
+// input on which a contract forces success then also tries slices with
+// more capacity than length, or nil ones; see addSlice.
+func (v *fnVerifier) noteNamed(part *logic.Term, how string) {
+	if part.Op != logic.OpConst {
+		return
+	}
+	if v.namedInFormulas == nil {
+		v.namedInFormulas = map[string]bool{}
+	}
+	v.namedInFormulas[part.Name+how] = true
+}
+
+// address returns the pointer to what a path leads to, as code's &x.f
+// computes it: the allocation and position of the struct or element that
+// the last pointer or slice of the path leads into, and the offsets of the
+// fields selected in it since. Nothing is read beyond that pointer or
+// slice, and nothing is checked: for a nil pointer it is a pointer with the
+// allocation 0, which is nil, where Go would panic.
+func (e *specEnv) address(what string, found reached) (*logic.Term, error) {
+	_, isStruct := types.Unalias(found.typ).Underlying().(*types.Struct)
+	if found.constant != nil || !isStruct {
+		return nil, fmt.Errorf("&%s: %s has type %s, and & gives only pointers to structs", what, what, found.typ)
+	}
+	cur, ground := found.start, true
+	var ref, at *logic.Term
+	var offset int64
+	inMemory := false
+	for i, h := range found.path {
+		reads := e.sink
+		if !ground {
+			reads = nil
+		}
+		object, viaPointer := pointee(h.from)
+		switch {
+		case h.field >= 0 && viaPointer:
+			ref, at, offset, inMemory = cur[0], cur[1], e.v.fieldOffset(object, h.field), true
+		case h.field >= 0:
+			offset += e.v.fieldOffset(h.from, h.field)
+		case isSlice(h.from):
+			ref, at, offset, inMemory = cur[0], e.v.elementAt(cur, h.from, h.index), 0, true
+		default:
+			inMemory = false
+		}
+		if i < len(found.path)-1 {
+			next, _ := e.v.follow(reads, found.mem, cur, found.path[i:i+1])
+			cur = next
+			ground = ground && (h.index == nil || !hasBound(h.index))
+		}
+	}
+	if !inMemory {
+		return nil, fmt.Errorf("&%s: %s is not reached through a pointer or an element of a slice, so it has no address a formula can name", what, what)
+	}
+	if e.v.pass.TypesSizes.Sizeof(found.typ) == 0 {
+		// Two pointers to values without size may or may not be equal, as
+		// for a pointer read from memory.
+		return logic.Pair(ref, nil), nil
+	}
+	return logic.Pair(ref, logic.Add(at, logic.IntLit(offset))), nil
 }
 
 // state resolves name(x) for a state of a struct, read from the value x or
@@ -755,6 +855,9 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		spelled := spell(path.Root, path.Steps)
 		_, isPointer := pointee(found[i].typ)
 		switch {
+		case name == "apart" && (found[i].constant != nil || !isSlice(found[i].typ)):
+			return nil, fmt.Errorf("apart(%s, ...): %s is not a slice; apart says that two slices share no memory", spelled, spelled)
+		case name == "apart":
 		case name == "fresh" && found[i].constant == nil && isIface(found[i].typ):
 			// The states of an interface value lie at its home, which
 			// is new when what it holds is.
@@ -768,6 +871,17 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		}
 	}
 	first := found[0].val
+	if name == "apart" {
+		// What two slices may reach, up to their capacities, does not
+		// meet: the assumption made of slice parameters, by the same term.
+		a, b := elemType(found[0].typ), elemType(found[1].typ)
+		if typeKey(a) != typeKey(b) {
+			return nil, fmt.Errorf("apart(%s, %s): a slice of %s and a slice of %s never share memory, so there is nothing to state",
+				spell(paths[0].Root, paths[0].Steps), spell(paths[1].Root, paths[1].Steps),
+				types.TypeString(a, types.RelativeTo(e.v.pass.Pkg)), types.TypeString(b, types.RelativeTo(e.v.pass.Pkg)))
+		}
+		return e.v.separate(first, found[1].val, found[0].typ), nil
+	}
 	if name == "within" {
 		// Inside means inside the capacity, which is what a write through
 		// a slice, or an append to it, can reach. A slice without capacity

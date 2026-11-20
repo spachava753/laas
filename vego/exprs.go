@@ -331,6 +331,13 @@ func (v *fnVerifier) unary(e *ast.UnaryExpr, st *state, guard []*logic.Term) val
 	return nil
 }
 
+// isNilRef states that a pointer, slice, map, function value, or interface
+// value is nil: its reference is 0. A formula's A = nil for a slice is the
+// same term.
+func isNilRef(val value) *logic.Term {
+	return logic.Eq(val[0], logic.RefLit(0))
+}
+
 // binaryExpr evaluates a binary operator. A comparison with nil asks the one
 // thing known about an error, whether a pointer refers to anything, or
 // whether a slice has an array.
@@ -348,7 +355,7 @@ func (v *fnVerifier) binaryExpr(e *ast.BinaryExpr, st *state, guard []*logic.Ter
 		case isError(t):
 			isNil = logic.IsNil(val[0])
 		case isPointer, isSlice(t), isMap(t), holdsCodeRef(t):
-			isNil = logic.Eq(val[0], logic.RefLit(0))
+			isNil = isNilRef(val)
 		default:
 			v.unsupported(e.Pos(), fmt.Sprintf("comparing a %s with nil is not supported", t))
 		}
