@@ -91,9 +91,23 @@ func UsesTakesError() {
 	takesError(nil) // want `its calls lists f, whose type func\(e error\) takes or returns a error, which can hold code; that is not supported yet` `cannot verify UsesTakesError: `
 }
 
+// A variadic function is handed over like any other: its parameter is a
+// slice.
+//
 // @Ensures True
 func UsesVariadic() {
-	variadic(nil) // want `its calls lists f, whose type func\(xs \.\.\.int\) is variadic or generic, which is not supported yet` `cannot verify UsesVariadic: `
+	variadic(func(xs ...int) {
+		if len(xs) > 0 {
+			_ = xs[0]
+		}
+	})
+}
+
+// @Ensures True
+func UsesVariadicWrongly() {
+	variadic(func(xs ...int) {
+		_ = xs[0] // want `vego:\ index\ may\ be\ out\ of\ range`
+	})
 }
 
 // @Ensures True

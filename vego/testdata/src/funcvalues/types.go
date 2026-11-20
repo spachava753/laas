@@ -7,10 +7,10 @@ package funcvalues
 // @Ensures True
 type Unnamed func(x int) int // want `vego: Unnamed has a contract, so each of its results needs a name, as in type Unnamed func\(...\) \(n int\)`
 
-// Spread is variadic.
+// Spread is variadic, which a type with a contract may be.
 //
 // @Ensures True
-type Spread func(xs ...int) // want `vego: a contract on a variadic function type is not supported yet`
+type Spread func(xs ...int)
 
 // Never can be called with nothing.
 //

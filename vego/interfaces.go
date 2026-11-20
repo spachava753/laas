@@ -424,9 +424,6 @@ func (v *fnVerifier) usableMethodContract(call *ast.CallExpr, callee *types.Func
 	// The proof rests on which states the value has, or on it having none,
 	// whatever the method says of them; see fileStates.
 	v.ifaceStatesOf(selection.Recv())
-	if fn.obj.Type().(*types.Signature).Variadic() {
-		v.unsupported(call.Pos(), "calls of variadic methods of interfaces are not supported yet")
-	}
 	return fn, sel
 }
 
@@ -453,17 +450,15 @@ func (v *fnVerifier) callMethod(call *ast.CallExpr, callee *types.Func, st *stat
 // methodOperands evaluates the interface value of a method call and its
 // arguments, and refuses an argument that carries code nobody has seen.
 func (v *fnVerifier) methodOperands(call *ast.CallExpr, sel *ast.SelectorExpr, fn *funcInfo, st *state, guard []*logic.Term) (value, map[*types.Var]value) {
-	if len(call.Args) != len(fn.params) {
-		v.unsupported(call.Pos(), "a call with several results as the arguments of another call is not supported yet")
-	}
+	bound := v.bindParams(call, fn)
 	held := v.eval(sel.X, st, guard)
 	args := map[*types.Var]value{}
 	if fn.receiver != nil {
 		// The contract speaks of the states of the value it is called on.
 		args[fn.receiver] = held
 	}
-	for i, arg := range call.Args {
-		args[fn.params[i]] = v.evalAs(arg, fn.params[i].Type(), st, guard)
+	for _, passed := range bound {
+		args[passed.param] = v.evalPassed(passed, st, guard)
 	}
 	v.checkHandedToValue(call, fn, "the method "+types.ExprString(call.Fun))
 	return held, args

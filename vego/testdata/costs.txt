@@ -124,7 +124,8 @@ callbacks	callbacks.UsesSameName	1	46	0
 callbacks	callbacks.UsesTakesError	1	46	0
 callbacks	callbacks.UsesTwice	1	46	0
 callbacks	callbacks.UsesTwoArgs	1	46	0
-callbacks	callbacks.UsesVariadic	1	46	0
+callbacks	callbacks.UsesVariadic	5	431	0
+callbacks	callbacks.UsesVariadicWrongly	5	787	0
 callbacks	callbacks.UsesWithContract	1	46	0
 callbacks	callbacks.UsesWrongCount	1	46	0
 callbacks	callbacks.Visit	3	558	0
@@ -174,7 +175,7 @@ callbacks	callbacks.twice	1	211	0
 callbacks	callbacks.twoArgs	1	415	0
 callbacks	callbacks.twoResults	1	139	0
 callbacks	callbacks.update	1	888	0
-callbacks	callbacks.variadic	1	70	0
+callbacks	callbacks.variadic	1	443	0
 callbacks	callbacks.visitAny	1	138	0
 callbacks	callbacks.withContract	1	154	0
 callbacks	callbacks.wrongCount	1	154	0
@@ -787,6 +788,7 @@ funcvalues	funcvalues.Shadowed	6	2051	0
 funcvalues	funcvalues.Show	3	2472	0
 funcvalues	funcvalues.ShowOf	4	3056	0
 funcvalues	funcvalues.Sink	3	255	0
+funcvalues	funcvalues.Spread	3	3675	0
 funcvalues	funcvalues.Stepper	3	1221	0
 funcvalues	funcvalues.Stored	14	5297	0
 funcvalues	funcvalues.Strict	6	1195	0
@@ -1417,6 +1419,7 @@ interfaces	interfaces.Unlisted	6	3276	0
 interfaces	interfaces.Unread	1	486	0
 interfaces	interfaces.UseDefined	5	2236	0
 interfaces	interfaces.UseLiteral	0	0	0
+interfaces	interfaces.Variadic.Sum	3	4356	0
 interfaces	interfaces.Visit	5	3164	0
 interfaces	interfaces.VisitWith	5	2431	0
 interfaces	interfaces.Visiting	3	1751	0
@@ -2492,6 +2495,8 @@ values	values.pair	4	351	0
 values	values.partner	24	16833	0
 values	values.passes	7	3199	0
 values	values.stat	3	9650	0
+variadic	(variadic.badTally).Count	2	442	0
+variadic	(variadic.tally).Count	2	442	0
 variadic	io.Closer.Close	5	9176	0
 variadic	variadic.AddGuarded	0	0	0
 variadic	variadic.AddNothing	6	4495	0
@@ -2506,6 +2511,7 @@ variadic	variadic.ConcatUnlisted	9	10528	0
 variadic	variadic.ConcatWrong	11	22715	0
 variadic	variadic.Count	2	442	0
 variadic	variadic.CountWrong	2	191	0
+variadic	variadic.Counter	3	4260	0
 variadic	variadic.Counts	8	2399	0
 variadic	variadic.DeferredPack	2	1034	0
 variadic	variadic.DeferredPackWrong	2	1060	0
@@ -2515,7 +2521,13 @@ variadic	variadic.Hold	1	368	0
 variadic	variadic.HoldMixed	1	368	0
 variadic	variadic.Joined	4	18510	2
 variadic	variadic.LiteralInPlace	2	66	0
+variadic	variadic.Logger	3	5300	0
 variadic	variadic.LongTail	10	12806	0
+variadic	variadic.MakeCounter	3	166	0
+variadic	variadic.MakeCounterLiteral	3	141	0
+variadic	variadic.MakeCounterWrong	3	574	0
+variadic	variadic.MakeTally	3	175	0
+variadic	variadic.MakeTallyWrong	3	796	0
 variadic	variadic.Max	26	49747	0
 variadic	variadic.MaxAlone	2	589	0
 variadic	variadic.MaxListed	2	4554	0
@@ -2541,7 +2553,12 @@ variadic	variadic.SetThrough	7	4373	0
 variadic	variadic.SetUnlisted	4	1910	0
 variadic	variadic.Shift	18	20163	0
 variadic	variadic.ShiftWrong	15	24258	0
+variadic	variadic.Tally.Count	3	4260	0
 variadic	variadic.Twice	13	17276	0
+variadic	variadic.UseCounter	13	31249	0
+variadic	variadic.UseCounterWrong	5	7809	0
+variadic	variadic.UseLogger	1	152	0
+variadic	variadic.UseTally	5	9063	0
 variadic	variadic.Zero	7	2747	0
 variadic	variadic.ZeroCut	16	15006	0
 variadic	variadic.ZeroListed	3	335	0
@@ -2549,6 +2566,7 @@ variadic	variadic.ZeroShared	16	990303	1
 variadic	variadic.ZeroSpread	6	2626	0
 variadic	variadic.ZeroUnlisted	3	1437	0
 variadic	variadic.bump	10	7277	0
+variadic	variadic.countAll	2	442	0
 variadic	variadic.join	1	5685	0
 variadic	variadic.report	1	555	0
 vouched	vouched.AtEnd	5	7838	0

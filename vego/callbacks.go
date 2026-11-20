@@ -78,8 +78,8 @@ func (pv *pkgVerifier) trustedCall(fn *funcInfo, item trustCall) {
 	case pv.valueContract(param.Type()) != nil:
 		fn.defect("its calls gives %s a contract, but its type %s has a contract of its own", item.name, param.Type())
 		return
-	case sig.Variadic() || sig.TypeParams() != nil:
-		fn.defect("its calls lists %s, whose type %s is variadic or generic, which is not supported yet", item.name, param.Type())
+	case sig.TypeParams() != nil:
+		fn.defect("its calls lists %s, whose type %s is generic, which is not supported yet", item.name, param.Type())
 		return
 	case slices.Contains(callWords, item.name):
 		fn.defect("its calls lists %s, which a formula reads as a word of its own when it is applied", item.name)
@@ -729,8 +729,8 @@ func (v *fnVerifier) handOver(fn *funcInfo, param *types.Var, arg ast.Expr, st *
 		return &handOver{arg: arg, contract: T, value: true}
 	}
 	sig := callee.Type().(*types.Signature)
-	if sig.Variadic() || sig.TypeParams() != nil || sig.RecvTypeParams() != nil {
-		v.unsupported(arg.Pos(), "variadic and generic functions cannot be handed over yet")
+	if sig.TypeParams() != nil || sig.RecvTypeParams() != nil {
+		v.unsupported(arg.Pos(), "generic functions cannot be handed over yet")
 	}
 	c := v.contractOf(callee)
 	if c == nil {
@@ -759,6 +759,10 @@ func (v *fnVerifier) handOver(fn *funcInfo, param *types.Var, arg ast.Expr, st *
 // the arguments of the run.
 func (v *fnVerifier) runHandedCall(h *handOver, cb *callback, given []value, head *state, by string) []value {
 	call := &ast.CallExpr{Fun: h.arg, Lparen: h.arg.End(), Rparen: h.arg.End()}
+	if h.contract.obj.Type().(*types.Signature).Variadic() {
+		// The run's slice is passed on as it is.
+		call.Ellipsis = h.arg.End()
+	}
 	args := map[*types.Var]value{}
 	inputs := h.contract.params
 	if h.recv != nil {

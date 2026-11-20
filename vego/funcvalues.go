@@ -133,14 +133,6 @@ func (pv *pkgVerifier) checkValueContract(fn *funcInfo) {
 		}
 		pv.report(at, format, args...)
 	}
-	sig := fn.obj.Type().(*types.Signature)
-	if sig.Variadic() {
-		what := "function type"
-		if fn.methodOf != nil {
-			what = "method of an interface"
-		}
-		fault(at, "a contract on a variadic %s is not supported yet", what)
-	}
 	// An entry names unnamed results as a trusted contract does.
 	for _, result := range fn.results {
 		if !entry && (result.Name() == "" || result.Name() == "_") {
@@ -400,10 +392,6 @@ func (v *fnVerifier) usableValueContract(fun ast.Expr) *funcInfo {
 			"declare a named function type with a contract and use it here%s", types.ExprString(fun), t, v.funcTypeHint(t)))
 	}
 	v.usable(fun.Pos(), fn, fn.obj.Name())
-	sig := fn.obj.Type().(*types.Signature)
-	if sig.Variadic() {
-		v.unsupported(fun.Pos(), "calls of variadic function values are not supported yet")
-	}
 	return fn
 }
 
@@ -428,13 +416,11 @@ func (v *fnVerifier) callValue(call *ast.CallExpr, st *state, guard []*logic.Ter
 // valueOperands evaluates the function value of a call and its arguments,
 // and refuses an argument that carries code nobody has seen.
 func (v *fnVerifier) valueOperands(call *ast.CallExpr, fn *funcInfo, st *state, guard []*logic.Term) (value, map[*types.Var]value) {
-	if len(call.Args) != len(fn.params) {
-		v.unsupported(call.Pos(), "a call with several results as the arguments of another call is not supported yet")
-	}
+	bound := v.bindParams(call, fn)
 	fun := v.eval(call.Fun, st, guard)
 	args := map[*types.Var]value{}
-	for i, arg := range call.Args {
-		args[fn.params[i]] = v.evalAs(arg, fn.params[i].Type(), st, guard)
+	for _, passed := range bound {
+		args[passed.param] = v.evalPassed(passed, st, guard)
 	}
 	v.checkHandedToValue(call, fn, "the function value "+types.ExprString(call.Fun))
 	return fun, args
@@ -464,8 +450,23 @@ func (v *fnVerifier) deferValue(s *ast.DeferStmt, st *state) {
 // else that can hold an interface. A function value of a type with a
 // contract and an error of known origin carry no such code.
 func (v *fnVerifier) checkHandedToValue(call *ast.CallExpr, fn *funcInfo, callee string) {
-	for i, arg := range call.Args {
-		t := fn.params[i].Type()
+	type handed struct {
+		arg ast.Expr
+		t   types.Type
+	}
+	var given []handed
+	for _, passed := range v.bindParams(call, fn) {
+		if !passed.packed {
+			given = append(given, handed{passed.expr, passed.param.Type()})
+			continue
+		}
+		// Each argument of a pack is an element of a new slice.
+		for _, arg := range passed.pack {
+			given = append(given, handed{arg, elemType(passed.param.Type())})
+		}
+	}
+	for _, h := range given {
+		arg, t := h.arg, h.t
 		v.noteEntriesIn(t, arg.Pos())
 		if isError(t) {
 			if v.knownError(v.bodyOrigins(), arg, -1, map[*types.Var]bool{}) {
@@ -1019,8 +1020,8 @@ func (v *fnVerifier) madeFrom(e ast.Expr, T *funcInfo, callee *types.Func, recei
 func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as, holder string, site inlineSite,
 	receive func(sv *fnVerifier, entry *state, carry *transport) value, st *state, guard []*logic.Term) {
 	sig := callee.Type().(*types.Signature)
-	if sig.Variadic() || sig.TypeParams() != nil || sig.RecvTypeParams() != nil {
-		v.unsupported(e.Pos(), fmt.Sprintf("variadic and generic functions cannot be used as %s yet", as))
+	if sig.TypeParams() != nil || sig.RecvTypeParams() != nil {
+		v.unsupported(e.Pos(), fmt.Sprintf("generic functions cannot be used as %s yet", as))
 	}
 	fn := v.contractOf(callee)
 	if fn == nil {
@@ -1075,6 +1076,10 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 		inputs = fn.params
 	}
 	call := &ast.CallExpr{Fun: fun, Lparen: e.End(), Rparen: e.End()}
+	if sig.Variadic() {
+		// The value passes its slice on as it is.
+		call.Ellipsis = e.End()
+	}
 	for i, param := range inputs {
 		args[param] = sv.entry[T.params[i]]
 		call.Args = append(call.Args, &ast.Ident{NamePos: e.Pos(), Name: T.params[i].Name()})

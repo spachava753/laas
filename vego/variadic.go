@@ -84,6 +84,17 @@ func (v *fnVerifier) bindCall(call *ast.CallExpr, sig *types.Signature) []passed
 	return bound
 }
 
+// bindParams is bindCall for a call through a value or an interface
+// value, whose contract lists the parameters of its signature without the
+// receiver.
+func (v *fnVerifier) bindParams(call *ast.CallExpr, fn *funcInfo) []passedArg {
+	bound, ok := bindArgs(v.info, call, fn.params, fn.obj.Type().(*types.Signature).Variadic())
+	if !ok {
+		v.unsupported(call.Pos(), "a call with several results as the arguments of another call is not supported yet")
+	}
+	return bound
+}
+
 // text spells what a call gives a parameter, for messages. A spread is
 // named by the slice, which is what a Modifies clause would list.
 func (a passedArg) text() string {

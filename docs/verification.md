@@ -538,6 +538,8 @@ vego: ClearFirst may modify xs, which ClearAll may not modify; list it in a
 
 Everything described in [Slices](#slices) about slices that share memory applies to such a slice. Two slice parameters of one element type must not overlap, so `Pair(xs, xs...)` for a `func Pair(a []int, rest ...int)` is reported as `the slices passed to Pair as a and rest may overlap`.
 
+A function type with a contract and a method of an interface can be variadic too, and so can a function literal. Calls through such values, and values made of variadic functions, work as for any other type. A value of an `...any` parameter carries code, so a call through a function value or an interface value that passes one is refused, as described in [Function values from code that is not verified](#function-values-from-code-that-is-not-verified).
+
 ## Function literals
 
 `vego` verifies a function literal when every use of it is in the function that contains it. A literal can stand in three places:
@@ -643,7 +645,7 @@ vego: cannot verify Printer: the function literal is used as a value of type fun
 has no contract; declare a named function type with a contract and use it here
 ```
 
-A variable declared with `:=` that holds a literal and is used other than by calling it is reported as `cannot verify` too, with the message `f holds a function literal and is used here other than by calling it`. Declare it with a type that has a contract instead, as in `var f T = func...`. To hand it to a trusted function that calls it, write the literal where it is handed over. A variadic literal used as a value cannot be verified yet, since a function type with a contract cannot be variadic. A literal that takes or returns a type that `vego` does not support cannot be verified either.
+A variable declared with `:=` that holds a literal and is used other than by calling it is reported as `cannot verify` too, with the message `f holds a function literal and is used here other than by calling it`. Declare it with a type that has a contract instead, as in `var f T = func...`. To hand it to a trusted function that calls it, write the literal where it is handed over. A literal that takes or returns a type that `vego` does not support cannot be verified either.
 
 ## Function values
 
@@ -3865,7 +3867,6 @@ A function that uses any of the following is reported as `cannot verify`:
 - arrays, and structs that contain an array;
 - pointers to anything other than a struct;
 - package-level variables, except error variables that are never assigned, of this package or another;
-- calls of variadic function values and variadic methods of interfaces, and contracts on variadic function types and on variadic methods of interfaces;
 - `copy`;
 - formatting a value whose type has a method `Format`, `GoString`, `Error`, or `String`, a pointer, a map, an interface value other than an error of known origin, a function value, or a value of a type that holds itself, with `fmt.Errorf` or a function whose entry lists it under `formats`, and passing such a function a slice with `...` for the values it formats (see [What can be formatted](#what-can-be-formatted));
 - `os.Stdout`, `os.Stderr`, and `log.Default()`, which are package-level variables;

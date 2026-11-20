@@ -55,9 +55,10 @@ func Literal(x interface {
 }) {
 }
 
+// Variadic has a variadic method with a contract, which is supported.
 type Variadic interface {
 	// @Ensures True
-	Sum(xs ...int) (n int) // want `a contract on a variadic method of an interface is not supported yet`
+	Sum(xs ...int) (n int)
 }
 
 // Go keeps the first declaration of a method that two embedded interfaces
