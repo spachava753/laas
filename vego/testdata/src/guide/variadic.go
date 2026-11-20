@@ -36,3 +36,14 @@ func ClearFirst(xs ...int) {
 func ClearAll(xs []int) {
 	ClearFirst(xs...) // want `vego:\ ClearFirst\ may\ modify\ xs\.\.\.,\ which\ ClearAll\ may\ not\ modify;\ list\ it\ in\ a`
 }
+
+// The program of the section on slices about append(A, B...).
+
+// @Requires 0 <= i < |A|
+// @Modifies A
+// @Ensures |result| = |A| - 1
+// @Ensures Forall k in [0, i) : result[k] = A[k]
+// @Ensures Forall k in [i, |A| - 1) : result[k] = A[k + 1]
+func Remove(A []int, i int) (result []int) {
+	return append(A[:i], A[i+1:]...)
+}

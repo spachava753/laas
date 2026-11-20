@@ -612,3 +612,81 @@ func PackChain(a int) (r int) {
 	m = pick(m, m, m)
 	return m
 }
+
+// SpreadChain adds the elements of t 30 times to a slice with room for all
+// of them, each time copying them as append(s, t...) does.
+//
+// @Requires |t| = 1
+// @Ensures |r| = 30 And r[29] = t[0]
+func SpreadChain(t []int) (r []int) {
+	s := make([]int, 0, 30)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	s = append(s, t...)
+	return s
+}
+
+// TextChain adds the bytes of a string 30 times.
+//
+// @Ensures |r| = 60 And r[59] = 98
+func TextChain() (r []byte) {
+	b := make([]byte, 0, 60)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	b = append(b, "ab"...)
+	return b
+}

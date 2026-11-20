@@ -380,21 +380,23 @@ func wanted(targets []lvalue) []types.Type {
 	return wants
 }
 
-// appendTo evaluates append(s, values...). Go writes the new elements into
-// the array of s when its capacity allows, where every other slice of that
-// array sees them, and otherwise copies everything to a new array. Which of
-// the two happens is often unknown, so execution continues once for each.
-// Writing in place is a write like any other: the function must be allowed
-// to modify the capacity of s.
+// appendTo evaluates append(s, values...) and append(s, t...). Go writes
+// the new elements into the array of s when its capacity allows, where
+// every other slice of that array sees them, and otherwise copies
+// everything to a new array. Which of the two happens is often unknown, so
+// execution continues once for each. Writing in place is a write like any
+// other: the function must be allowed to modify the capacity of s.
+//
+// With ..., the elements added are those of the slice t, or the bytes of
+// the string t when s is a []byte. Go copies them as memmove does, so when t
+// shares the array of s what is added is what t held before the write.
 func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, value)) {
-	if call.Ellipsis.IsValid() {
-		v.unsupported(call.Pos(), "append(s, t...) is not supported yet")
-	}
 	t := v.info.TypeOf(call)
 	elem := elemType(t)
 	if _, ok := layoutOf(elem); !ok {
 		v.unsupported(call.Pos(), fmt.Sprintf("slices of %s are not supported", elem))
 	}
+	spread := call.Ellipsis.IsValid()
 	// The append runs after its operands. Since it is not ordered like a
 	// call, it is ordered after the calls of the targets only by an event
 	// among its operands.
@@ -403,21 +405,25 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 	start, readsBefore := u.events, len(u.reads)
 	base := v.evalAs(call.Args[0], t, st, nil)
 	var added []value
-	for _, arg := range call.Args[1:] {
-		added = append(added, v.evalAs(arg, elem, st, nil))
+	var source value
+	if spread {
+		source = v.eval(call.Args[1], st, nil)
+	} else {
+		for _, arg := range call.Args[1:] {
+			added = append(added, v.evalAs(arg, elem, st, nil))
+		}
 	}
 	u.reach(operands)
 	// Each way the append can turn out closes a copy of the unit, and a
 	// path that is not taken closes none; the unit is open no longer.
 	v.unit = nil
-	if len(added) == 0 {
+	if !spread && len(added) == 0 {
 		v.unit = u
 		v.closeUnit(st)
 		k(st, base)
 		return
 	}
 	ref, length, capacity := base[0], base[2], base[3]
-	grown := logic.Add(length, logic.IntLit(int64(len(added))))
 	cells, step := v.cellsOf(elem), v.span(elem)
 	var keys []string
 	sorts := map[string]logic.Sort{}
@@ -427,6 +433,60 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 			sorts[c.key] = c.sort
 		}
 	}
+	// count is how many elements are added, and extent how many positions
+	// they take.
+	count := logic.IntLit(int64(len(added)))
+	fromString := spread && isString(v.info.TypeOf(call.Args[1]))
+	switch {
+	case fromString:
+		count = v.named(st, "len", logic.Len(source[0]))
+	case spread:
+		count = source[2]
+	}
+	extent := logic.Mul(count, logic.IntLit(step))
+	grown := logic.Add(length, count)
+	tName := ""
+	if spread {
+		tName = types.ExprString(call.Args[1])
+	}
+	// readSource records the read of what t holds that the append makes,
+	// which Go may make before or after the calls of the targets. When
+	// before is set, the read comes before the write of this append, which
+	// does not move.
+	readSource := func(next *state, before bool) {
+		if !spread || fromString {
+			return
+		}
+		var c *ceiling
+		if before {
+			c = v.unit.pushCeiling()
+		}
+		v.readAt(next, nil, start, "the elements of "+tName+" that append copies", call.Pos(), func(sink *state, mem memory) value {
+			copied := make(value, len(keys))
+			for i, key := range keys {
+				copied[i] = logic.Subseq(v.row(sink, mem, key, sorts[key], source[0]), source[1], logic.Add(source[1], extent))
+			}
+			return copied
+		})
+		if before {
+			v.unit.reach(c)
+		}
+	}
+	// copyFrom states that row holds, at the positions from at on, the
+	// elements of t as they are in the memory of state next, for the region
+	// key.
+	copyFrom := func(next *state, key string, row, at *logic.Term) {
+		index := v.bound("k")
+		within := logic.And(logic.Le(logic.IntLit(0), index), logic.Lt(index, extent))
+		var from *logic.Term
+		if fromString {
+			from = logic.Select(source[0], index)
+		} else {
+			old := logic.Select(next.mem.region(key, logic.SeqOf(logic.SeqOf(sorts[key]))), source[0])
+			from = logic.Select(old, logic.Add(source[1], index))
+		}
+		next.assume(logic.Forall(index, logic.Implies(within, v.same(logic.Select(row, logic.Add(at, index)), from))))
+	}
 	inPlace := logic.Le(grown, capacity)
 	if !v.quickly(st, nil, logic.Not(inPlace)) {
 		v.branch(call.Pos())
@@ -434,15 +494,35 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		next.assume(inPlace)
 		at := v.elementAt(base, t, length)
 		into := written{ref: ref}
+		if spread {
+			for _, key := range keys {
+				into.parts = append(into.parts, stretch{key: key, lo: at, hi: logic.Add(at, extent)})
+			}
+		}
 		for j := range added {
 			into.parts = append(into.parts, stretchesOf(cells, logic.Add(at, logic.IntLit(int64(j)*step)))...)
 		}
 		v.checkWrite(next, nil, into, call.Pos(),
 			fmt.Sprintf("append may write into the capacity of %s", types.ExprString(call.Args[0])))
+		v.unit = u.fork()
+		readSource(next, true)
+		if spread {
+			// Every region of the element type gets a new row: the old one
+			// outside the positions written, and the elements of t, read
+			// before the write, inside them.
+			for _, key := range keys {
+				before := logic.Select(next.mem.region(key, logic.SeqOf(logic.SeqOf(sorts[key]))), ref)
+				row := v.fresh("appended", logic.SeqOf(sorts[key]))
+				index := v.bound("k")
+				outside := logic.Or(logic.Lt(index, at), logic.Le(logic.Add(at, extent), index))
+				next.assume(logic.Forall(index, logic.Implies(outside, v.same(logic.Select(row, index), logic.Select(before, index)))))
+				copyFrom(next, key, row, at)
+				next.storeRow(key, sorts[key], ref, row)
+			}
+		}
 		for j, element := range added {
 			v.put(next, cells, ref, logic.Add(at, logic.IntLit(int64(j)*step)), element)
 		}
-		v.unit = u.fork()
 		if v.unit.events == start {
 			// Nothing orders the write after the targets. A call there may
 			// run before or after it, which is the same only for a call
@@ -477,26 +557,30 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		// after the calls of the targets.
 		v.unit = u.fork()
 		v.unit.starts = append(v.unit.starts, start)
-		extent := logic.Mul(length, logic.IntLit(step))
+		old := logic.Mul(length, logic.IntLit(step))
 		v.readAt(next, nil, start, "the elements of "+types.ExprString(call.Args[0])+" that append copies", call.Pos(),
 			func(sink *state, mem memory) value {
 				copied := make(value, len(keys))
 				for i, key := range keys {
-					copied[i] = logic.Subseq(v.row(sink, mem, key, sorts[key], ref), base[1], logic.Add(base[1], extent))
+					copied[i] = logic.Subseq(v.row(sink, mem, key, sorts[key], ref), base[1], logic.Add(base[1], old))
 				}
 				return copied
 			})
+		readSource(next, false)
 		v.closeUnit(next)
 		// The new array holds the old elements and the added ones. What
 		// lies in its capacity beyond them is not said: it is certainly not
 		// what followed the old elements in their array.
 		moved := v.alloc(next, v.pass.TypesSizes.Sizeof(elem) > 0)
 		for _, key := range keys {
-			old := logic.Select(next.mem.region(key, logic.SeqOf(logic.SeqOf(sorts[key]))), ref)
+			prev := logic.Select(next.mem.region(key, logic.SeqOf(logic.SeqOf(sorts[key]))), ref)
 			row := v.fresh("moved", logic.SeqOf(sorts[key]))
 			index := v.bound("k")
-			copied := logic.And(logic.Le(logic.IntLit(0), index), logic.Lt(index, logic.Mul(length, logic.IntLit(step))))
-			next.assume(logic.Forall(index, logic.Implies(copied, v.same(logic.Select(row, index), logic.Select(old, logic.Add(base[1], index))))))
+			copied := logic.And(logic.Le(logic.IntLit(0), index), logic.Lt(index, old))
+			next.assume(logic.Forall(index, logic.Implies(copied, v.same(logic.Select(row, index), logic.Select(prev, logic.Add(base[1], index))))))
+			if spread {
+				copyFrom(next, key, row, old)
+			}
 			next.storeRow(key, sorts[key], moved, row)
 		}
 		for j, element := range added {

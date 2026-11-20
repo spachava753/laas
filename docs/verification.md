@@ -1619,7 +1619,20 @@ func Push(A []int, x int) (result []int) {
 
 `append` does one of two things. If there is spare capacity, it writes into the existing array, and other slices of that array see the write. Otherwise it allocates a new array. `vego` verifies both cases unless it can prove that one cannot happen. `Push` therefore needs `Modifies A` for the first case and a bound on the length for the second.
 
-Slice expressions `A[i:j]` and `A[i:j:k]`, `len`, `cap`, `make`, and slice literals are supported. `copy` and `append(s, t...)` are not supported yet.
+`append(A, B...)` adds every element of `B`, and `append(b, s...)` adds the bytes of the string `s` to a `[]byte`. The elements are copied as if through a temporary copy, so what is added is what `B` held before the write, also when `B` shares the array of `A`. The usual way to delete an element verifies:
+
+```go
+// @Requires 0 <= i < |A|
+// @Modifies A
+// @Ensures |result| = |A| - 1
+// @Ensures Forall k in [0, i) : result[k] = A[k]
+// @Ensures Forall k in [i, |A| - 1) : result[k] = A[k + 1]
+func Remove(A []int, i int) (result []int) {
+	return append(A[:i], A[i+1:]...)
+}
+```
+
+Slice expressions `A[i:j]` and `A[i:j:k]`, `len`, `cap`, `make`, and slice literals are supported. `copy` is not supported yet.
 
 ## Strings
 
@@ -3672,7 +3685,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - pointers to anything other than a struct;
 - package-level variables, except error variables that are never assigned, of this package or another;
 - calls of variadic function values and variadic methods of interfaces, and contracts on variadic function types and on variadic methods of interfaces;
-- `append(s, t...)` and `copy`;
+- `copy`;
 - a call in the target of an assignment whose right-hand side is an `append` that may write into the array of its slice, unless the call modifies nothing and refers to no memory or a call among the operands of the `append` orders it (see [An append beside a call](#an-append-beside-a-call));
 - a call with several results as the arguments of another call, as in `g(f())`;
 - comparing structs with `==`;
