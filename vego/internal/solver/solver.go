@@ -211,7 +211,14 @@ func exhausted(reason string) bool {
 // kinds tries one solver for a fixed time before another, which would make
 // the answer depend on the speed of the machine. This chain has no such
 // step, so the resource limit alone bounds the work.
-const tactic = "(then simplify propagate-values ctx-simplify simplify elim-uncnstr smt)"
+//
+// The default tactic's ctx-simplify is left out. On the corpus it proved
+// nothing that the chain without it does not, and it used the whole limit
+// on goals that the core solver proves at once, such as what a field
+// written through ten pointers that may be the same holds afterwards, and
+// most of the count of late obligations of long functions; see
+// TestManyWrites.
+const tactic = "(then simplify propagate-values simplify elim-uncnstr smt)"
 
 // Script returns the SMT-LIB text of a satisfiability check of the facts,
 // ending in its check-sat-using.

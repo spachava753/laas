@@ -1,11 +1,11 @@
 // Package manywrites writes one field through thirty pointers. Its contract
-// is true, and every clause of it should be proved. At the default limit 29
-// are not, and at ten times the limit 29 are still not, also when the
-// pointers are required to differ; at 400000000 one of them stops in the
-// ctx-simplify of the chain of tactics, which the chain without it proves.
-// With five pointers the function verifies, and with ten it needs
-// -vego.rlimit=40000000. See The prover in the ROADMAP. When a change
-// proves these clauses, remove the expectations.
+// is true, and every clause of it should be proved. At the default limit 7
+// of its 30 postconditions are not proved, and at ten times the limit all
+// are.
+// With twenty pointers the function verifies, and with twenty-five one
+// clause is not proved. The cause is how a region of memory is written for
+// Z3, a sequence of rows that each write reads; see The prover in the
+// ROADMAP. When a change proves these clauses, remove the expectations.
 package manywrites
 
 // P is a point.
@@ -47,4 +47,4 @@ func Set(p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p
 	p27.x = 1
 	p28.x = 1
 	p29.x = 1
-} // want `postcondition may not hold: p0.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p1.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p2.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p3.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p4.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p5.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p6.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p7.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p8.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p9.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p10.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p11.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p12.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p13.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p14.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p15.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p16.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p17.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p18.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p19.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p20.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p21.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p22.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p23.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p24.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p25.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p26.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p27.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p28.x' = 1 \(Z3 reached its resource limit`
+} // want `postcondition may not hold: p0.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p1.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p2.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p3.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p4.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p6.x' = 1 \(Z3 reached its resource limit` `postcondition may not hold: p11.x' = 1 \(Z3 reached its resource limit`

@@ -1208,3 +1208,30 @@ func TestTranslation(t *testing.T) {
 		})
 	}
 }
+
+// TestManyWrites checks that the chain of tactics proves what a field
+// written through many pointers that may be the same holds afterwards, the
+// shape of a function that sets one field of many structs. ctx-simplify,
+// which the chain had, used the whole resource limit on these goals.
+func TestManyWrites(t *testing.T) {
+	z3 := solverFor(t)
+	lit := logic.IntLit
+	const n = 10
+	table := logic.Const("M", logic.SeqOf(logic.IntSeq))
+	var hyps []*logic.Term
+	refs, ats := make([]*logic.Term, n), make([]*logic.Term, n)
+	for i := range n {
+		refs[i], ats[i] = logic.Const(fmt.Sprintf("p%d", i), logic.Ref), logic.Const(fmt.Sprintf("a%d", i), logic.Int)
+		hyps = append(hyps, logic.Lt(lit(0), refs[i]), logic.Le(lit(0), ats[i]))
+	}
+	for i := range n {
+		table = logic.Write(table, refs[i], ats[i], lit(1))
+	}
+	for i := range n {
+		read := logic.Eq(logic.Select(logic.Select(table, refs[i]), ats[i]), lit(1))
+		if got := z3.Prove(hyps, read, Options{}); got != Proved {
+			t.Errorf("the field written through p%d is not read back after %d writes: %v", i, n, got)
+		}
+		hyps = append(hyps, read)
+	}
+}

@@ -10,13 +10,14 @@ func Add(a, b int) (r int) {
 	return a + b
 }
 
-// Cube multiplies a number by itself three times.
+// Product multiplies four numbers.
 //
-// @Requires 0 <= a <= 1000 And 0 <= b <= 1000 And 0 <= c <= 1000
+// @Requires 0 <= a <= 1000 And 0 <= b <= 1000 And 0 <= c <= 1000 And 0 <= d <= 1000
 // @Ensures r >= 0
-func Cube(a, b, c int) (r int) {
+func Product(a, b, c, d int) (r int) {
 	s := a * b
-	return s * c // want `multiplication may overflow int \(Z3 reached its resource limit`
+	t := s * c // want `multiplication may overflow int \(Z3 reached its resource limit`
+	return t * d // want `multiplication may overflow int \(Z3 reached its resource limit`
 }
 
 // P holds a number.
