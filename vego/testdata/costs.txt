@@ -2470,7 +2470,7 @@ originpath	originpath.AssignedInLiteral	8	2818	0
 originpath	originpath.BothBranches	26	7395	0
 originpath	originpath.BoundAndDeferred	8	2818	0
 originpath	originpath.CachedCycle	6	2516	0
-originpath	originpath.CallsLater	18	6725	0
+originpath	originpath.CallsLater	26	7978	0
 originpath	originpath.Chained	1	138	0
 originpath	originpath.Closes	67	52272	0
 originpath	originpath.ClosesBound	15	5936	0

@@ -4667,7 +4667,7 @@ Wrap the error of `os.Create` where it is returned, as `WriteReport` does, and r
 
 `vego` follows a variable along the paths only in the function or the function literal that declares it. Some variables are decided from every assignment to them in the function instead, wherever the error is used:
 
-- a variable that a function literal assigns, unless the literal is written in a `defer` statement, as in `defer func() { ... }()`, of the function or literal that declares the variable;
+- a variable that a function literal assigns, unless the literal is written in a `defer` statement of the function or literal that declares the variable, as in `defer func() { ... }()`;
 - a variable used inside a function literal, at that use.
 
 A function literal can run between any two statements of the function around it, so what it assigns may reach any use. A literal written in a `defer` statement of the function that declares the variable runs only when that function returns, after every use outside the literal. A literal deferred inside another function literal runs when that literal returns, so its assignments count everywhere. For a variable that is decided from every assignment, give the error you wrap a variable of its own. An error variable whose address is taken, or that a `range` assigns, has no known origin anywhere in the function.

@@ -260,10 +260,13 @@ func VarInLoop(n int, c bool) (result error) {
 // only errors it made.
 //
 // @Ensures err = nil <-> c
-func CallsLater(c bool) (err error) {
+func CallsLater(c, wrap bool) (err error) {
 	err = later(c)
 	if err != nil {
-		return fmt.Errorf("calls later: %w", err)
+		if wrap {
+			return fmt.Errorf("calls later: %w", err)
+		}
+		return err
 	}
 	return nil
 }
