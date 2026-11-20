@@ -1224,6 +1224,9 @@ trusted:
     requires: ["p != nil", "p.x = 3"]
     modifies: [p]
     ensures: ["p.x = 3"]
+  costs.read:
+    reason: A test of a trusted function whose contract never says that it succeeds.
+    modifies: []
   trackfail.parse:
     reason: A test of a trusted function whose contract never says that it succeeds.
     modifies: []

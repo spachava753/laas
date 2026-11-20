@@ -14,13 +14,19 @@ import (
 // asked of Z3, with the place of each question that stopped at the limit,
 // that it changes no diagnostic, and that nothing is printed without it.
 func TestCostFlag(t *testing.T) {
-	saved := costStderr
-	defer func() { costStderr = saved }()
+	saved, savedObserve := costStderr, observeCosts
+	defer func() { costStderr, observeCosts = saved, savedObserve }()
+	kinds := map[string][len(questionNames)]int{}
+	observeCosts = func(pass *analysis.Pass, costs []*fnCost) {
+		for _, c := range costs {
+			kinds[c.fn.obj.FullName()] = c.kinds
+		}
+	}
 	for _, flag := range []bool{false, true} {
 		var out bytes.Buffer
 		costStderr = &out
 		analyzer := newAnalyzer()
-		for name, value := range map[string]string{"rlimit": "600", "cost": map[bool]string{false: "false", true: "true"}[flag]} {
+		for name, value := range map[string]string{"rlimit": "600", "cost": map[bool]string{false: "false", true: "true"}[flag], "trusted": filepath.Join("testdata", "trusted.yaml")} {
 			if err := analyzer.Flags.Set(name, value); err != nil {
 				t.Fatal(err)
 			}
@@ -34,14 +40,34 @@ func TestCostFlag(t *testing.T) {
 			}
 			continue
 		}
-		var lines []string
-		for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
-			lines = append(lines, strings.ReplaceAll(line, filepath.Join("testdata", "src", "costs")+string(filepath.Separator), ""))
+		// Each question counts as what it is for: the kinds are, in
+		// order, proof obligations, questions of the always-fails check,
+		// contradiction checks, checks whether a Modifies entry is
+		// needed, and quick checks.
+		wantKinds := map[string][len(questionNames)]int{
+			"costs.Add":  {3, 0, 1, 0, 0},
+			"costs.Cube": {5, 0, 1, 0, 0},
+			"costs.Set":  {3, 0, 1, 2, 0},
+			"costs.Read": {0, 21, 3, 0, 2},
+			"costs.read": {0, 6, 1, 0, 0},
 		}
+		for fn, want := range wantKinds {
+			if kinds[fn] != want {
+				t.Errorf("%s asked %v questions of each kind, want %v", fn, kinds[fn], want)
+			}
+		}
+		lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
 		want := []string{
+			`^/.*costs\.go:35:6: vego cost of the trusted contract of costs\.read: 7 problems, \d+ resource units, \d+ bytes, \d+\.\d\d s$`,
+			`^\t/.*costs\.go:35:6: 4 questions of the always-fails check stopped at a limit$`,
+			`^\t/.*costs\.go:35:6: 1 contradiction check stopped at a limit$`,
 			`^/.*costs\.go:9:6: vego cost of Add: 4 problems, \d+ resource units, \d+ bytes, \d+\.\d\d s$`,
 			`^/.*costs\.go:17:6: vego cost of Cube: 6 problems, \d+ resource units, \d+ bytes, \d+\.\d\d s$`,
 			`^\t/.*costs\.go:19:11: 2 proof obligations stopped at a limit$`,
+			`^/.*costs\.go:30:6: vego cost of Set: 6 problems, \d+ resource units, \d+ bytes, \d+\.\d\d s$`,
+			`^/.*costs\.go:40:6: vego cost of Read: 26 problems, \d+ resource units, \d+ bytes, \d+\.\d\d s$`,
+			`^\t/.*costs\.go:40:6: 8 questions of the always-fails check stopped at a limit$`,
+			`^\t/.*costs\.go:41:2: 4 questions of the always-fails check stopped at a limit$`,
 		}
 		if len(lines) != len(want) {
 			t.Fatalf("-vego.cost printed\n%s\nwant %d lines", out.String(), len(want))

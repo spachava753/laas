@@ -158,11 +158,16 @@ func (pv *pkgVerifier) printCosts(w io.Writer) {
 	var out strings.Builder
 	fset := pv.pass.Fset
 	for _, c := range pv.costOrder {
+		// A contract is named as the trust report and the other
+		// messages name it.
 		name := c.fn.obj.Name()
-		if c.fn.trust != nil {
-			name = "the trusted contract of " + c.fn.obj.FullName()
-		} else if c.fn.methodOf != nil || c.fn.valueOf != nil {
-			name = "the contract of " + c.fn.obj.FullName()
+		switch {
+		case c.fn.trust != nil:
+			name = "the trusted contract of " + c.fn.trust.key
+		case c.fn.methodOf != nil:
+			name = "the contract of " + methodTitle(c.fn.methodOf)
+		case c.fn.valueOf != nil:
+			name = "the contract of " + c.fn.obj.Name()
 		}
 		at := c.fn.obj.Pos()
 		if c.fn.decl != nil {

@@ -781,7 +781,7 @@ func (pv *pkgVerifier) reportAlwaysFailing() map[*funcInfo]bool {
 			// so no input does; otherwise only the search found none.
 			why := "no simple input was found for which it forces success" + limitNote(pv.outcomes[fn].limited)
 			advice := "where the condition is about the inputs and a small input satisfies it"
-			if final := pv.outcomes[fn].final; final != nil && final() == solver.Proved {
+			if final := pv.outcomes[fn].final; final != nil && pv.askFinal(fn, final) == solver.Proved {
 				why, advice = "it requires success for no input", "where the condition is about the inputs"
 			}
 			pv.report(fn.decl.Name.Pos(), "the contract of %s may also be met by a function that always returns an error: %s; "+
@@ -789,6 +789,13 @@ func (pv *pkgVerifier) reportAlwaysFailing() map[*funcInfo]bool {
 		}
 	}
 	return excused
+}
+
+// askFinal asks the question forcesSuccess left for a contract that is
+// reported, counting its time against the function.
+func (pv *pkgVerifier) askFinal(fn *funcInfo, final func() solver.Result) solver.Result {
+	defer pv.costing(fn)()
+	return final()
 }
 
 // trustForces reports whether a trusted contract forces success for some
