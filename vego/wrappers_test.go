@@ -37,6 +37,8 @@ type keptLog struct {
 	active    bool
 	goroutine uint64
 	problems  []string
+	// written holds the length of what each call of Write was given.
+	written []int
 }
 
 // enter marks a call of a method of the wrapper as active on the calling
@@ -100,6 +102,9 @@ type keptWriter struct {
 
 func (w *keptWriter) Write(p []byte) (int, error) {
 	w.log.ran("Write")
+	w.log.mu.Lock()
+	w.log.written = append(w.log.written, len(p))
+	w.log.mu.Unlock()
 	return w.inner.Write(p)
 }
 
@@ -280,11 +285,24 @@ func contractOfKey(t *testing.T, pv *pkgVerifier, pkg *types.Package, key string
 	return fn
 }
 
-// loggerMethods prints with a method of a logger, by the key of its entry.
-var loggerMethods = map[string]func(l *log.Logger, rng *rand.Rand){
-	"(*log.Logger).Printf":  func(l *log.Logger, rng *rand.Rand) { l.Printf(randomFormat(rng), randomOperands(rng)...) },
-	"(*log.Logger).Print":   func(l *log.Logger, rng *rand.Rand) { l.Print(randomOperands(rng)...) },
-	"(*log.Logger).Println": func(l *log.Logger, rng *rand.Rand) { l.Println(randomOperands(rng)...) },
+// loggerMethods prints with a method of a logger, by the key of its entry,
+// and returns the length of what fmt prints of the same operands.
+var loggerMethods = map[string]func(l *log.Logger, rng *rand.Rand) int{
+	"(*log.Logger).Printf": func(l *log.Logger, rng *rand.Rand) int {
+		format, v := randomFormat(rng), randomOperands(rng)
+		l.Printf(format, v...)
+		return len(fmt.Sprintf(format, v...))
+	},
+	"(*log.Logger).Print": func(l *log.Logger, rng *rand.Rand) int {
+		v := randomOperands(rng)
+		l.Print(v...)
+		return len(fmt.Sprint(v...))
+	},
+	"(*log.Logger).Println": func(l *log.Logger, rng *rand.Rand) int {
+		v := randomOperands(rng)
+		l.Println(v...)
+		return len(fmt.Sprintln(v...))
+	},
 }
 
 // loggerGhost is what the harness knows of a logger: what its output and
@@ -310,6 +328,9 @@ func randomPrefix(rng *rand.Rand) string {
 // active, and only through Write; New must run nothing.
 func checkLoggerEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key string) {
 	newFn := contractOfKey(t, pv, pkg, "log.New")
+	// The header of a logger shows the name of this file with Llongfile,
+	// since the calls are made here.
+	_, file, _, _ := runtime.Caller(0)
 	if key != "log.New" && loggerMethods[key] == nil {
 		t.Fatalf("no harness calls %s; add one to loggerMethods", key)
 	}
@@ -329,7 +350,7 @@ func checkLoggerEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 			continue
 		}
 		// New runs nothing it is given: no call of a method is active.
-		l := log.New(out, prefix, rng.Intn(64))
+		l := log.New(out, prefix, rng.Intn(128))
 		k.check()
 		ghost := loggerGhost{output: out, prefix: prefix}
 		fresh := true
@@ -376,11 +397,22 @@ func checkLoggerEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 			if !m.holds(method.requires) {
 				continue
 			}
+			k.written = nil
 			done := k.enter()
-			loggerMethods[key](l, rng)
+			printed := loggerMethods[key](l, rng)
 			done()
 			k.check()
 			m.ensure(key)
+			// What the logger writes is what fmt prints, the header, and the
+			// prefix: the bound at the call counts fmtSlack and loggerPrefix
+			// beyond what fmt prints, and assumes the name of the file in the
+			// header, which is this file for these calls.
+			for _, n := range k.written {
+				if limit := printed + int(slackOf(method.obj)) + len(file); n > limit {
+					t.Fatalf("%s wrote %d bytes, more than the %d that fmt prints of the operands, the slack the bound counts, and the name of this file",
+						key, n, printed)
+				}
+			}
 			checked++
 		}
 	}
