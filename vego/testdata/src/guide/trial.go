@@ -161,16 +161,17 @@ func NewStale(e error) (l VouchedLoader) {
 	return stale{err: e} // want `Load may return an error whose origin is not known in err, and the contract of VouchedLoader.Load vouches for the errors there; return only errors made by errors.New or fmt.Errorf, or vouched for, in stale.Load used as a method of VouchedLoader at trial.go:\d+:\d+`
 }
 
-// @Ensures True
+// @Ensures r = 0
 func LocalType(n int) (r int) {
-	type pair struct{ a, b int } // want `cannot verify LocalType: local type declarations are not supported`
+	type pair struct{ a, b int }
 	p := pair{a: n}
 	return p.b
 }
 
-// @Ensures True
+// @Requires 0 <= r < 128
+// @Ensures |s| = 1 And s[0] = r
 func RuneString(r rune) (s string) {
-	return string(r) // want `cannot verify RuneString: converting a rune to a string is not supported`
+	return string(r)
 }
 
 // reset clears the total.

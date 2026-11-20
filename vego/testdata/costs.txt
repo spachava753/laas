@@ -1270,7 +1270,7 @@ guide	guide.Load	41	5285108	6
 guide	guide.LoadVouched	33	26532	0
 guide	guide.LoadWrapped	10	6184	0
 guide	guide.Loader.Load	5	6900	0
-guide	guide.LocalType	1	111	0
+guide	guide.LocalType	2	141	0
 guide	guide.Logf	1	4194	0
 guide	guide.LogfVerified	1	895	0
 guide	guide.Logged	1	83	0
@@ -1335,7 +1335,7 @@ guide	guide.Reserve	13	1620	0
 guide	guide.Reset	13	407962	2
 guide	guide.ResetServed	1	46	0
 guide	guide.Rounds	14	20771	0
-guide	guide.RuneString	1	111	0
+guide	guide.RuneString	3	5162	0
 guide	guide.Runs	35	51336	0
 guide	guide.SafeOnly	3	833	0
 guide	guide.SameError	1	46	0
@@ -2542,6 +2542,7 @@ semantics	semantics.NestedBreak	28	16601	0
 semantics	semantics.OrChain	2	427	0
 semantics	semantics.PackChain	2	31261	0
 semantics	semantics.PutChain	62	241876	0
+semantics	semantics.RuneChain	119	6364212	0
 semantics	semantics.Setter	3	3419	0
 semantics	semantics.Shadow	5	651	0
 semantics	semantics.ShiftChain	33	214258	0
@@ -2590,13 +2591,20 @@ smalls	(*smalls.Stack).PushWrong	12	18677	0
 smalls	(*smalls.buf).put	17	22788	0
 smalls	(smalls.echo).Echo	2	707	0
 smalls	(smalls.lose).Echo	2	707	0
+smalls	smalls.ASCII	3	5162	0
 smalls	smalls.Absent	12	11683	0
 smalls	smalls.Alias	6	2214	0
+smalls	smalls.AnyRune	3	7535	0
 smalls	smalls.At	5	2141	0
 smalls	smalls.AtWrong	7	5860	0
 smalls	smalls.Attach	9	5806	0
 smalls	smalls.ByValue	1	649	0
+smalls	smalls.Bytes	8	19770	0
+smalls	smalls.Celsius	8	1084	0
+smalls	smalls.Chain	8	9851	0
 smalls	smalls.Changed	4	821	0
+smalls	smalls.Converted	5	714	0
+smalls	smalls.ConvertedWrong	5	881	0
 smalls	smalls.Copy	14	26829	0
 smalls	smalls.CopyThrough	10	17845	0
 smalls	smalls.CopyThroughForgets	8	12928	0
@@ -2610,6 +2618,7 @@ smalls	smalls.FieldAbsent	15	23273	0
 smalls	smalls.FieldRoom	16	29925	0
 smalls	smalls.Fill	24	84707	0
 smalls	smalls.FillForgets	22	4069674	1
+smalls	smalls.FirstT	4	130	0
 smalls	smalls.Flags	3	1293	0
 smalls	smalls.FreshRequired	0	0	0
 smalls	smalls.GrowsCallers	7	13955	0
@@ -2620,6 +2629,7 @@ smalls	smalls.Inner	4	1393	0
 smalls	smalls.InnerAt	5	2015	0
 smalls	smalls.InnerWrong	5	6255	0
 smalls	smalls.InsideLiteral	4	650	0
+smalls	smalls.Invalid	5	6084	0
 smalls	smalls.IsAbs	4	1150	0
 smalls	smalls.IsAbsWrong	4	1707	0
 smalls	smalls.Keep	2	707	0
@@ -2637,6 +2647,7 @@ smalls	smalls.NotAPath	1	241	0
 smalls	smalls.NotAStruct	1	241	0
 smalls	smalls.NotSlices	0	0	0
 smalls	smalls.OfSlice	1	521	0
+smalls	smalls.OneByte	2	4150	0
 smalls	smalls.Owner	0	0	0
 smalls	smalls.Passed	4	1046	0
 smalls	smalls.Present	10	5657	0
@@ -2648,6 +2659,7 @@ smalls	smalls.Room	12	15305	0
 smalls	smalls.Runs	35	51336	0
 smalls	smalls.RunsLate	35	53574	0
 smalls	smalls.Same	2	609	0
+smalls	smalls.SecondT	3	554	0
 smalls	smalls.SetFirst	9	22529	0
 smalls	smalls.SetFirstWrong	8	17237	0
 smalls	smalls.Sink.Put	3	471	0
@@ -2655,6 +2667,7 @@ smalls	smalls.Sizeless	1	241	0
 smalls	smalls.StartsBlank	12	4907	0
 smalls	smalls.Swap	15	17249	0
 smalls	smalls.Tail	4	2451	0
+smalls	smalls.ThreeBytes	3	6021	0
 smalls	smalls.Twice	2	494	0
 smalls	smalls.TwiceSame	2	722	0
 smalls	smalls.TwoQuotes	2	3284	0

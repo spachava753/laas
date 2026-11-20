@@ -662,6 +662,7 @@ func sameValue(from, to types.Type) bool {
 
 // conversion evaluates T(x). Conversions between integers must fit the
 // target type, and one that involves a float yields an unknown value.
+// string(x) of an integer is its UTF-8 encoding; see runeString.
 // string(b) and []byte(s) copy, so the result holds the same bytes and
 // shares nothing with the operand. Any other conversion must leave the value
 // as it is.
@@ -709,6 +710,8 @@ func (v *fnVerifier) conversion(e *ast.CallExpr, st *state, guard []*logic.Term)
 	case isScalar && source == logic.Int && target == logic.Int:
 		v.check(st, guard, v.typeFact(val[0], to), e.Pos(), "conversion may not fit %s", types.TypeString(to, nil))
 		return val
+	case isScalar && source == logic.Int && isString(to):
+		return v.runeString(st, val[0], to)
 	case types.Identical(from, to), isError(to), isIface(to):
 		return val
 	}

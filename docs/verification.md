@@ -2039,7 +2039,17 @@ func IsAdmin(role string) (result bool) {
 
 In a formula, a byte of a string is a number. Where the code tests `'0' <= s[i] && s[i] <= '9'`, the contract says `'0' <= s[i] <= '9'`, which means `48 <= s[i] <= 57`.
 
-`vego` does not know how strings are ordered by `<`. A `range` over a string produces an unknown rune at each step and advances by one to four bytes. Converting a rune to a string, as in `string(r)`, is not supported.
+`vego` does not know how strings are ordered by `<`. A `range` over a string produces an unknown rune at each step and advances by one to four bytes.
+
+`string(r)` of a rune, or of any other integer, is the UTF-8 encoding of the character, as in Go. `vego` knows its length and its bytes. A value that is not a character, such as a negative number or a surrogate, gives the three bytes of U+FFFD:
+
+```go
+// @Requires 0 <= r < 128
+// @Ensures |s| = 1 And s[0] = r
+func RuneString(r rune) (s string) {
+	return string(r)
+}
+```
 
 ## Structs and pointers
 
@@ -2086,6 +2096,10 @@ The first, third, fourth, and fifth rows apply wherever the path ends. A path th
 To assign a field that holds a slice, pointer, map, or interface value, list the struct that contains it. A method that assigns `s.n` and writes `s.items[i]` needs `Modifies s.n, s.items`. A method that assigns `s.items` needs `Modifies s`.
 
 A struct can have a field of a type that `vego` does not support, such as a channel. Verified code cannot read or assign that field, but it is still part of the struct. Assigning the whole struct writes that field too. For a pointer `h` to such a struct, `*h = H{}` needs `Modifies h`, and entries for the other fields are not enough. A struct with an array field is the exception. It is not supported at all.
+
+### Types declared inside a function
+
+A type can be declared inside a function body, as Go allows. It is a type of its own, and a local struct with the same fields as a type of the package converts to it, as in Go. A type declared inside a function cannot have annotations. An invariant on a local struct, or a contract on a method of a local interface or on a local function type, is reported as `Invariant annotation stands on a type declared inside F; a type declared inside a function cannot have annotations, so declare it at package level to give it an invariant or a contract`. Declare the type at package level to give it one.
 
 ### Aliasing
 
@@ -5004,8 +5018,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - pointers to anything other than a struct;
 - reading a package-level variable that something in the build changes, or whose type can hold a function value, an interface value, an error, a channel, or an `unsafe.Pointer`; assigning a package-level variable, writing what one refers to, and naming one in `Modifies` (see [Package-level variables](#package-level-variables));
 - `copy`;
-- type declarations inside a function body, reported as `local type declarations are not supported`;
-- converting a rune to a string, as in `string(r)`;
+- annotations on a type declared inside a function body, such as an invariant on a local struct or a contract on a local interface;
 - formatting a value whose type has a method `Format`, `GoString`, `Error`, or `String`, a pointer, a map, an interface value other than an error of known origin, a function value, or a value of a type that holds itself, with `fmt.Errorf` or a function whose entry lists it under `formats`, and passing such a function a slice with `...` for the values it formats (see [What can be formatted](#what-can-be-formatted));
 - `os.Stdout`, `os.Stderr`, a logger in a package-level variable, and `log.Default()`;
 - a call in the target of an assignment whose right-hand side is an `append` that may write into the array of its slice, unless the call modifies nothing and refers to no memory or a call among the operands of the `append` orders it (see [An append beside a call](#an-append-beside-a-call));

@@ -690,3 +690,42 @@ func TextChain() (r []byte) {
 	b = append(b, "ab"...)
 	return b
 }
+
+// RuneChain encodes a rune again and again, each time the rune of the
+// length of the last encoding.
+//
+// @Requires 0 <= r < 1114112
+// @Ensures 1 <= |s| <= 4
+func RuneChain(r rune) (s string) {
+	s = string(r)
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	s = string(rune(len(s) + 127))
+	return s
+}

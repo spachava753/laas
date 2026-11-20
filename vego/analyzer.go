@@ -1100,6 +1100,17 @@ func (pv *pkgVerifier) collect() {
 					pv.report(c.pos, "%s annotations are not supported yet", c.kind)
 					continue
 				}
+				if fd := enclosingFunc(file, c.pos); fd != nil && fd.Body != nil && localTypeAt(fd.Body, c.pos) {
+					// It may have been meant as the contract of anything
+					// in the type; nothing reads it.
+					pv.unread = true
+					pv.report(c.pos, "%s annotation stands on a type declared inside %s; a type declared inside a function cannot have annotations, "+
+						"so declare it at package level to give it an invariant or a contract", c.kind, fd.Name.Name)
+					if fn := pv.funcs[pv.info.Defs[fd.Name].(*types.Func)]; fn != nil {
+						fn.broken = true
+					}
+					continue
+				}
 				if method, defined, ok := pv.methodDocumented(file, group); ok {
 					pv.addMethodContract(method, defined, c)
 					continue
@@ -1529,6 +1540,37 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 		fn.broken = true
 	}
 	return fn
+}
+
+// enclosingFunc returns the function declaration of a file that holds a
+// position, or nil.
+func enclosingFunc(file *ast.File, pos token.Pos) *ast.FuncDecl {
+	for _, decl := range file.Decls {
+		if fd, ok := decl.(*ast.FuncDecl); ok && fd.Pos() <= pos && pos < fd.End() {
+			return fd
+		}
+	}
+	return nil
+}
+
+// localTypeAt reports whether a position lies in a type declaration inside
+// a body, its doc comment and the comments of its fields and methods
+// included.
+func localTypeAt(body *ast.BlockStmt, pos token.Pos) bool {
+	found := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		decl, ok := n.(*ast.GenDecl)
+		if !ok || decl.Tok != token.TYPE {
+			return !found && n != nil
+		}
+		start := decl.Pos()
+		if decl.Doc != nil {
+			start = decl.Doc.Pos()
+		}
+		found = found || (start <= pos && pos < decl.End())
+		return false
+	})
+	return found
 }
 
 // misplacedVouches is the report for a Vouches annotation anywhere but in

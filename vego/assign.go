@@ -617,11 +617,11 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 // ordinary assignment. Local constants need no state.
 func (v *fnVerifier) declare(s *ast.DeclStmt, st *state) {
 	decl := s.Decl.(*ast.GenDecl)
-	if decl.Tok == token.CONST {
+	if decl.Tok == token.CONST || decl.Tok == token.TYPE {
+		// A type declaration runs nothing. Its type is a type of its own,
+		// kept apart from every other by Go's identity of types, which the
+		// keys of memory follow; see typeKey.
 		return
-	}
-	if decl.Tok != token.VAR {
-		v.unsupported(s.Pos(), "local type declarations are not supported")
 	}
 	for _, spec := range decl.Specs {
 		spec := spec.(*ast.ValueSpec)
