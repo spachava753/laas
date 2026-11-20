@@ -162,7 +162,7 @@ func TestAnalyzer(t *testing.T) {
 	// it alone: a dependency that changes an error variable is reported in
 	// every package built with both it and a proof that relies on the
 	// variable.
-	for _, root := range []string{"gonelib", "gonemid", "goneroot", "gonereader", "wrapsp", "wrapsmid", "wrapsroot"} {
+	for _, root := range []string{"gonelib", "gonemid", "goneroot", "gonereader", "wrapsp", "wrapsmid", "wrapsroot", "linkedlib", "linkedpull", "linkedroot", "linkedasm"} {
 		t.Run("reports a changed error variable in "+root, func(t *testing.T) {
 			runCorpus(t, newAnalyzer(), root)
 		})

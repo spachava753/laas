@@ -28,6 +28,9 @@
 !/vego/testdata/src/*/go.mod
 !/vego/testdata/src/*/vego-trusted.yaml
 
+# Assembly of a test package, which vego reads for references to variables.
+!/vego/testdata/src/*/*.s
+
 # Design notes and guides.
 !/vego/ROADMAP.md
 !/docs/*.md

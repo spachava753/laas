@@ -501,11 +501,13 @@ type pkgVerifier struct {
 	// values and other such sentinels went into the error.
 	homemade  map[*types.Var]bool
 	unsettled map[*types.Var]string
-	// reassigned holds the variables that are assigned, addressed, or
-	// ranged into somewhere in the package, and ownChanges says for those
-	// of the package how and where first.
+	// reassigned holds the package-level variables that the package
+	// changes, and ownChanges says for those of the package how and where
+	// first; escapes says where a use first does more than read a value
+	// out of a variable. See findChanges.
 	reassigned map[*types.Var]bool
 	ownChanges map[*types.Var]string
+	escapes    map[*types.Var]string
 	// origins caches what the variables of each function body are assigned,
 	// knownReturns holds the functions that only return errors of known
 	// origin, and isParameter the parameters of all functions.

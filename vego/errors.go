@@ -28,11 +28,9 @@ import (
 func (pv *pkgVerifier) findSentinels() {
 	pv.sentinels = map[*types.Var]bool{}
 	pv.unsettled = map[*types.Var]string{}
-	pv.reassigned = map[*types.Var]bool{}
 	pv.reliedKeys = map[string]bool{}
 	pv.homemade = map[*types.Var]bool{}
 	pv.candidates = map[*types.Var]sentinelInfo{}
-	pv.ownChanges = map[*types.Var]string{}
 	// What this package writes of the error variables of other packages
 	// is published, whichever way this returns.
 	defer func() {
@@ -82,56 +80,7 @@ func (pv *pkgVerifier) findSentinels() {
 			}
 		}
 	}
-	changed := func(e ast.Expr, what string) {
-		e = ast.Unparen(e)
-		if sel, ok := e.(*ast.SelectorExpr); ok {
-			e = sel.Sel
-		}
-		id, ok := e.(*ast.Ident)
-		if !ok {
-			return
-		}
-		variable, ok := pv.info.Uses[id].(*types.Var)
-		if !ok {
-			return
-		}
-		pv.reassigned[variable] = true
-		position := pv.pass.Fset.Position(e.Pos())
-		at := fmt.Sprintf("%s:%d", filepath.Base(position.Filename), position.Line)
-		if variable.Pkg() == pv.pass.Pkg && pv.ownChanges[variable] == "" {
-			pv.ownChanges[variable] = what + " at " + at
-		}
-		// A proof in another package may rest on the value of a variable
-		// of another package.
-		if _, published := pv.foreignSentinel(variable); published {
-			pv.writes = append(pv.writes, sentinelWrite{
-				Key: errorKey(variable), Name: variable.Pkg().Name() + "." + variable.Name(), Package: pv.pass.Pkg.Path(),
-				At: at, pos: e.Pos(),
-			})
-		}
-	}
-	for _, file := range pv.pass.Files {
-		ast.Inspect(file, func(n ast.Node) bool {
-			switch n := n.(type) {
-			case *ast.AssignStmt:
-				for _, lhs := range n.Lhs {
-					changed(lhs, "is assigned")
-				}
-			case *ast.UnaryExpr:
-				if n.Op == token.AND {
-					changed(n.X, "has its address taken")
-				}
-			case *ast.RangeStmt:
-				if n.Key != nil {
-					changed(n.Key, "is assigned")
-				}
-				if n.Value != nil {
-					changed(n.Value, "is assigned")
-				}
-			}
-			return true
-		})
-	}
+	pv.findChanges()
 	// Each stable variable is of one kind, read from its initialiser.
 	made := map[*types.Var]*ast.CallExpr{}
 	aliases := map[*types.Var]*types.Var{}
