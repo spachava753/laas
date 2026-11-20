@@ -199,9 +199,6 @@ func (v *fnVerifier) classifyLiterals() {
 			return true
 		}
 		sig := v.info.TypeOf(lit).(*types.Signature)
-		if sig.Variadic() {
-			v.unsupported(lit.Pos(), "variadic function literals are not supported yet")
-		}
 		for _, tuple := range []*types.Tuple{sig.Params(), sig.Results()} {
 			for variable := range tuple.Variables() {
 				if _, modelled := layoutOf(variable.Type()); !modelled {
@@ -299,6 +296,17 @@ func (v *fnVerifier) placeOf(pos token.Pos) string {
 	return fmt.Sprintf("%s:%d:%d", filepath.Base(at.Filename), at.Line, at.Column)
 }
 
+// litArgs evaluates the arguments of a call of a literal used in place, one
+// value for each parameter in order.
+func (v *fnVerifier) litArgs(call *ast.CallExpr, sig *types.Signature, st *state, guard []*logic.Term) []value {
+	bound := v.bindCall(call, sig)
+	args := make([]value, len(bound))
+	for i, passed := range bound {
+		args[i] = v.evalPassed(passed, st, guard)
+	}
+	return args
+}
+
 // callLiteral verifies a call of a literal used in place. Its arguments are
 // evaluated before it, as for any call; the call is an event of the unit
 // that may change memory.
@@ -306,13 +314,7 @@ func (v *fnVerifier) callLiteral(call *ast.CallExpr, lit *ast.FuncLit, st *state
 	sig := v.info.TypeOf(lit).(*types.Signature)
 	u := v.unit
 	operands := u.pushCeiling()
-	if len(call.Args) != sig.Params().Len() {
-		v.unsupported(call.Pos(), "a call with several results as the arguments of another call is not supported yet")
-	}
-	args := make([]value, len(call.Args))
-	for i, arg := range call.Args {
-		args[i] = v.evalAs(arg, sig.Params().At(i).Type(), st, guard)
-	}
+	args := v.litArgs(call, sig, st, guard)
 	u.reach(operands)
 	before := v.snapshot(st)
 	results := v.inline(lit, args, st, guard, v.site(call.Pos(), "in the function literal called at %s", v.placeOf(call.Pos())))

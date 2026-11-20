@@ -1297,6 +1297,16 @@ trusted:
     receiver: c
     modifies: []
 
+  variadic.report:
+    reason: Test helper for a trusted variadic function of errors.
+    modifies: []
+
+  variadic.join:
+    reason: Test helper for a trusted variadic function of strings.
+    ensures:
+      - "|s| >= 0"
+    modifies: []
+
 # States of interfaces of another module, and contracts that speak of them.
 state:
   ifacestatelib.Conn:
@@ -1311,3 +1321,4 @@ state:
   ifacestatelib.Defined: # // want `the trust file declares states of ifacestatelib.Defined, which declares no method of its own`
     gone:
       reason: Defined from Conn, whose methods it has.
+

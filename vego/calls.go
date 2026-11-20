@@ -166,8 +166,8 @@ func signatureMemoryFree(sig *types.Signature) bool {
 func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func) *funcInfo {
 	sig := callee.Type().(*types.Signature)
 	switch {
-	case sig.Variadic() || sig.TypeParams() != nil || sig.RecvTypeParams() != nil:
-		v.unsupported(call.Pos(), "calls to variadic and generic functions are not supported yet")
+	case sig.TypeParams() != nil || sig.RecvTypeParams() != nil:
+		v.unsupported(call.Pos(), "calls to generic functions are not supported yet")
 	case sig.Recv() != nil && types.IsInterface(sig.Recv().Type()):
 		v.unsupported(call.Pos(), "calls through an interface are not supported yet")
 	}
@@ -204,15 +204,12 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func) *funcIn
 // has no contract. Made into a value of that type it would need a contract
 // the type does not have; the entry is where to give one.
 func (v *fnVerifier) checkNotHandable(call *ast.CallExpr, fn *funcInfo) {
-	sig := fn.obj.Type().(*types.Signature)
-	for i, arg := range call.Args {
-		if i >= sig.Params().Len() {
-			break
-		}
-		param := sig.Params().At(i)
+	for _, passed := range v.bindCall(call, fn.obj.Type().(*types.Signature)) {
+		param, arg := passed.param, passed.expr
 		// A parameter whose type has a contract takes a value made of the
-		// type, which is checked where it is made.
-		if !fn.runs[param] || fn.calls[param] != nil || !isFunc(param.Type()) || v.valueContract(param.Type()) != nil {
+		// type, which is checked where it is made. A variadic parameter is
+		// a slice, which is no function.
+		if passed.packed || !fn.runs[param] || fn.calls[param] != nil || !isFunc(param.Type()) || v.valueContract(param.Type()) != nil {
 			continue
 		}
 		what := types.ExprString(arg)
@@ -244,6 +241,9 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 	type passed struct {
 		param *types.Var
 		arg   ast.Expr
+		// t is the type the argument is passed as: the parameter's, or the
+		// element type of the new slice of a pack.
+		t types.Type
 	}
 	var handed []passed
 	if sig.Recv() != nil {
@@ -253,29 +253,37 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 		if selection := v.info.Selections[selector]; !ok || selection == nil || selection.Kind() != types.MethodVal {
 			v.unsupported(call.Pos(), "this method call is not supported")
 		}
-		handed = append(handed, passed{sig.Recv(), selector.X})
+		handed = append(handed, passed{sig.Recv(), selector.X, sig.Recv().Type()})
 	}
-	for i, arg := range call.Args {
-		handed = append(handed, passed{sig.Params().At(i), arg})
+	for _, bound := range v.bindCall(call, sig) {
+		if !bound.packed {
+			handed = append(handed, passed{bound.param, bound.expr, bound.param.Type()})
+			continue
+		}
+		// Each argument of a pack is an element of a new slice that
+		// holds nothing else.
+		for _, arg := range bound.pack {
+			handed = append(handed, passed{bound.param, arg, elemType(bound.param.Type())})
+		}
 	}
 	for _, h := range handed {
-		param, arg := h.param, h.arg
+		param, arg, t := h.param, h.arg, h.t
 		// What runs claims for a value whose type has a contract holds
 		// only for values that meet it, so the proof rests on the entries
 		// that give the types it can hold contracts.
 		if fn.runs[param] {
 			v.noteEntriesIn(param.Type(), arg.Pos())
 		}
-		if fn.runs[param] || !holdsCode(param.Type(), map[types.Type]bool{}) {
+		if fn.runs[param] || !holdsCode(t, map[types.Type]bool{}) {
 			continue
 		}
 		// Known origin of either kind makes every method harmless.
-		if isError(param.Type()) && v.knownError(v.bodyOrigins(), arg, -1, map[*types.Var]bool{}) {
+		if isError(t) && v.knownError(v.bodyOrigins(), arg, -1, map[*types.Var]bool{}) {
 			continue
 		}
 		what := "an error whose origin is not known" + v.originWhy(arg)
-		if !isError(param.Type()) {
-			what = fmt.Sprintf("a value of type %s, which can hold an error, an interface, or a function", param.Type())
+		if !isError(t) {
+			what = fmt.Sprintf("a value of type %s, which can hold an error, an interface, or a function", t)
 		}
 		v.unsupported(arg.Pos(), fmt.Sprintf("%s is passed to %s, which is trusted, and is %s; "+
 			"%s could run code through it that nobody has seen. If its contract holds whatever that code does, "+
@@ -320,12 +328,8 @@ func (v *fnVerifier) arguments(call *ast.CallExpr, callee *types.Func, st *state
 	if sig.Recv() != nil {
 		args[sig.Recv()] = v.receiver(call, sig.Recv(), st, guard)
 	}
-	for i, arg := range call.Args {
-		param := sig.Params().At(i)
-		if _, ok := layoutOf(param.Type()); !ok {
-			v.unsupported(arg.Pos(), fmt.Sprintf("arguments of type %s are not supported", param.Type()))
-		}
-		args[param] = v.evalAs(arg, param.Type(), st, guard)
+	for _, passed := range v.bindCall(call, sig) {
+		args[passed.param] = v.evalPassed(passed, st, guard)
 	}
 	return args
 }
@@ -354,8 +358,11 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	if fn.receiver != nil {
 		passed[fn.receiver] = types.ExprString(ast.Unparen(call.Fun).(*ast.SelectorExpr).X)
 	}
-	for i, arg := range call.Args {
-		passed[sig.Params().At(i)] = types.ExprString(arg)
+	// A call made up to check a function used as a value has no
+	// arguments of its own, and its parameters are named as they are.
+	bound, _ := bindArgs(v.info, call, paramsOf(sig), sig.Variadic())
+	for _, b := range bound {
+		passed[b.param] = b.text()
 	}
 	// A call through a function value or an interface value is named as
 	// it is written.

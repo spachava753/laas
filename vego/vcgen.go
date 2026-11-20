@@ -749,15 +749,10 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 		// arguments it is given here; the variables it captures are read
 		// when it runs.
 		sig := v.info.TypeOf(lit).(*types.Signature)
-		if len(s.Call.Args) != sig.Params().Len() {
-			v.unsupported(s.Call.Pos(), "a call with several results as the arguments of another call is not supported yet")
-		}
-		args := make([]value, len(s.Call.Args))
+		var args []value
 		v.evaluate(st, func() {
 			defer v.begin()()
-			for i, arg := range s.Call.Args {
-				args[i] = v.evalAs(arg, sig.Params().At(i).Type(), st, nil)
-			}
+			args = v.litArgs(s.Call, sig, st, nil)
 		})
 		st.deferred = append(slices.Clip(st.deferred), deferredCall{call: s.Call, lit: lit, litArgs: args})
 		return

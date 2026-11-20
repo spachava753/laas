@@ -261,9 +261,12 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 			}
 			return nil
 		}
-		for i := range min(sig.Params().Len(), len(call.Args)) {
-			if sig.Params().At(i) == param {
-				return call.Args[i]
+		// A pack is a new slice, which no expression names; what it is
+		// rooted at is not known, and the write is forgotten by region.
+		bound, _ := bindArgs(v.info, call, paramsOf(sig), sig.Variadic())
+		for _, b := range bound {
+			if b.param == param && !b.packed {
+				return b.expr
 			}
 		}
 		return nil

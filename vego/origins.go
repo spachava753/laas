@@ -178,13 +178,16 @@ func (pv *pkgVerifier) originsOf(body *ast.BlockStmt) *origins {
 			return true
 		}
 		inPlace[lit] = true
-		params := pv.info.TypeOf(lit).(*types.Signature).Params()
-		for i := range params.Len() {
-			if len(call.Args) != params.Len() {
-				o.unknown[params.At(i)] = true
+		sig := pv.info.TypeOf(lit).(*types.Signature)
+		bound, ok := bindArgs(pv.info, call, paramsOf(sig), sig.Variadic())
+		for i, param := range paramsOf(sig) {
+			// A pack is a slice, whose elements have no origin of their
+			// own here.
+			if !ok || bound[i].packed {
+				o.unknown[param] = true
 				continue
 			}
-			o.sources[params.At(i)] = append(o.sources[params.At(i)], source{call.Args[i], -1})
+			o.sources[param] = append(o.sources[param], source{bound[i].expr, -1})
 		}
 		return true
 	})

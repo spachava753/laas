@@ -484,6 +484,60 @@ Either verify the helper, or give it a trusted contract as described in [Code th
 
 The contract of an exported function is available to other packages, so verified code can call verified functions in other packages. If a function failed verification, other packages cannot rely on its contract.
 
+### Variadic functions
+
+Inside a variadic function, and in its contract, the last parameter is a slice:
+
+```go
+// @Ensures m >= first
+// @Ensures Forall i in [0, |rest|) : m >= rest[i]
+func Largest(first int, rest ...int) (m int) {
+	m = first
+	// @Invariant 0 <= i <= |rest|
+	// @Invariant m >= first
+	// @Invariant Forall j in [0, i) : m >= rest[j]
+	// @Variant |rest| - i
+	for i := 0; i < len(rest); i++ {
+		if rest[i] > m {
+			m = rest[i]
+		}
+	}
+	return m
+}
+
+// @Ensures m >= 7
+func AtLeastSeven(x int) (m int) {
+	return Largest(7, x, 3)
+}
+```
+
+A call that lists the arguments, as in `Largest(7, x, 3)`, passes a new slice that holds them. Its length and capacity are the number of arguments. A call with no arguments for the parameter, as in `Largest(7)`, passes `nil`. The new slice shares no memory with anything that existed before the call, so the callee may write its elements without the caller listing anything in `Modifies`. The values in it are the caller's, though. If the elements are pointers, a callee that writes what they point to writes the caller's memory, and the caller needs a `Modifies` clause for it as for any other call.
+
+Each argument is converted to the element type of the slice. When that type is an interface, the conversion is checked as described in [Making an interface value](#making-an-interface-value).
+
+A call that passes a slice with `...` passes that slice itself, and not a copy. A callee that writes it writes the caller's array:
+
+```go
+// @Requires |xs| > 0
+// @Modifies xs
+// @Ensures xs'[0] = 0
+func ClearFirst(xs ...int) {
+	xs[0] = 0
+}
+
+// @Requires |xs| > 0
+func ClearAll(xs []int) {
+	ClearFirst(xs...)
+}
+```
+
+```text
+vego: ClearFirst may modify xs..., which ClearAll may not modify; list it in a
+// @Modifies clause
+```
+
+Everything described in [Slices](#slices) about slices that share memory applies to such a slice. Two slice parameters of one element type must not overlap, so `Pair(xs, xs...)` for a `func Pair(a []int, rest ...int)` is reported as `the slices passed to Pair as a and rest may overlap`.
+
 ## Function literals
 
 `vego` verifies a function literal when every use of it is in the function that contains it. A literal can stand in three places:
@@ -3617,7 +3671,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - arrays, and structs that contain an array;
 - pointers to anything other than a struct;
 - package-level variables, except error variables that are never assigned, of this package or another;
-- calls to variadic functions other than `fmt.Errorf`;
+- calls of variadic function values and variadic methods of interfaces, and contracts on variadic function types and on variadic methods of interfaces;
 - `append(s, t...)` and `copy`;
 - a call in the target of an assignment whose right-hand side is an `append` that may write into the array of its slice, unless the call modifies nothing and refers to no memory or a call among the operands of the `append` orders it (see [An append beside a call](#an-append-beside-a-call));
 - a call with several results as the arguments of another call, as in `g(f())`;

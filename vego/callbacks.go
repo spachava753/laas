@@ -262,18 +262,17 @@ func (v *fnVerifier) callHanding(call *ast.CallExpr, fn *funcInfo, st *state, gu
 	if sig.Recv() != nil {
 		args[sig.Recv()] = v.receiver(call, sig.Recv(), st, guard)
 	}
-	for i, arg := range call.Args {
-		param := sig.Params().At(i)
+	for _, passed := range v.bindCall(call, sig) {
+		param := passed.param
 		if fn.calls[param] != nil {
-			handed[param] = v.handOver(fn, param, arg, st, guard)
+			// A parameter under calls has a function type, which is never
+			// variadic, so it is given one argument.
+			handed[param] = v.handOver(fn, param, passed.expr, st, guard)
 			// A function value is one reference, and this one is not nil.
 			args[param] = value{logic.RefLit(1)}
 			continue
 		}
-		if _, ok := layoutOf(param.Type()); !ok {
-			v.unsupported(arg.Pos(), fmt.Sprintf("arguments of type %s are not supported", param.Type()))
-		}
-		args[param] = v.evalAs(arg, param.Type(), st, guard)
+		args[param] = v.evalPassed(passed, st, guard)
 	}
 	u := v.unit
 	u.reach(operands)
@@ -657,10 +656,11 @@ func (pv *pkgVerifier) handedArgs(call *ast.CallExpr) []ast.Expr {
 		return nil
 	}
 	sig := callee.Type().(*types.Signature)
+	bound, _ := bindArgs(pv.info, call, paramsOf(sig), sig.Variadic())
 	var handed []ast.Expr
-	for i, arg := range call.Args {
-		if i < sig.Params().Len() && fn.calls[sig.Params().At(i)] != nil {
-			handed = append(handed, arg)
+	for _, b := range bound {
+		if !b.packed && fn.calls[b.param] != nil {
+			handed = append(handed, b.expr)
 		}
 	}
 	return handed

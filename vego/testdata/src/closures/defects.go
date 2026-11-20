@@ -118,11 +118,15 @@ func Compared() (result bool) {
 	return f != nil // want `vego: cannot verify Compared: f holds a function literal and is used here other than by calling it`
 }
 
-// Variadic takes any number of arguments.
+// Variadic calls a variadic literal, whose parameter is a new slice of
+// the arguments.
 //
 // @Ensures True
 func Variadic() {
-	func(xs ...int) {}(1, 2) // want `vego: cannot verify Variadic: variadic function literals are not supported yet`
+	func(xs ...int) {
+		_ = xs[1]
+		_ = xs[2] // want `vego:\ index\ may\ be\ out\ of\ range`
+	}(1, 2)
 }
 
 // Recovers calls recover.

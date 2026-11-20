@@ -566,3 +566,49 @@ func CloseChain() (g Gate) {
 	g.Shut()
 	return g
 }
+
+// pick returns its first argument.
+//
+// @Ensures m = first
+func pick(first int, rest ...int) (m int) {
+	return first
+}
+
+// PackChain passes a value to a variadic function 30 times, twice more in
+// its new slice each time, and gets it back.
+//
+// @Ensures r = a
+func PackChain(a int) (r int) {
+	m := a
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	m = pick(m, m, m)
+	return m
+}
