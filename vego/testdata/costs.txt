@@ -932,6 +932,7 @@ globals	globals.Free	3	4731	0
 globals	globals.Hex	4	5766	0
 globals	globals.Hooked	1	46	0
 globals	globals.Index	14	13774	0
+globals	globals.Indexes	5	3415	0
 globals	globals.Inside	12	8507	0
 globals	globals.Length	3	983	0
 globals	globals.Level	7	10601	0

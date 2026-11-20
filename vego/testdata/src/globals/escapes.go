@@ -230,3 +230,16 @@ func ProbeMade(A []int) (r bool) {
 
 // RunProbes is not verified; it passes the other references.
 func RunProbes() (bool, bool) { return ProbeCfg(&defaults2), ProbeMade(kept) }
+
+var indexed = []int{0, 1}
+
+func moveIndex() { takes(indexed) }
+
+// Indexes uses an element of a table whose contents are let out as an
+// index, which the built-in check of the index does not prove.
+//
+// @Ensures True
+func Indexes() (r int) {
+	a := []int{5, 6}
+	return a[indexed[0]] // want `^vego: index may be negative; the contents of indexed are not known to stay as initialised: the use at escapes.go:\d+ lets a reference to them out$` `^vego: index may be out of range; the contents of indexed are not known to stay as initialised: the use at escapes.go:\d+ lets a reference to them out$`
+}

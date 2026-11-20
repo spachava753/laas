@@ -174,7 +174,7 @@ type fnVerifier struct {
 	// lostContents says, for each package-level variable read whose
 	// initialiser made what it refers to and some use in the build lets a
 	// reference to that out, that its contents are not known to stay as
-	// initialised and where; a contract clause that fails says it.
+	// initialised and where; every obligation that fails says it.
 	lostContents []string
 	background     []*logic.Term
 	backgroundSeen map[string]bool
@@ -599,7 +599,13 @@ func (v *fnVerifier) check(st *state, guard []*logic.Term, goal *logic.Term, pos
 		result := v.attempt(st, guard, conjunct)
 		done()
 		if result != solver.Proved {
-			v.report(pos, "%s%s", fmt.Sprintf(format, args...), limitNote(result))
+			// What the goal rests on may be the contents of a table that a
+			// use in the build lets out, which a plain message would not say.
+			lost := ""
+			for _, note := range v.lostContents {
+				lost += "; " + note
+			}
+			v.report(pos, "%s%s%s", fmt.Sprintf(format, args...), lost, limitNote(result))
 		}
 		st.assume(logic.Implies(logic.And(guard...), conjunct))
 	}
@@ -610,14 +616,7 @@ func (v *fnVerifier) check(st *state, guard []*logic.Term, goal *logic.Term, pos
 func (v *fnVerifier) checkClause(c *clause, env logic.Env, st *state, guard []*logic.Term, pos token.Pos, what string) {
 	for _, node := range c.node.Conjuncts() {
 		text := strings.Join(strings.Fields(c.text[node.Start:node.End]), " ")
-		goal := v.formula(c, node, env)
-		// What a contract relies on may be the contents of a table that a
-		// use in the build lets out, which a plain message would not say.
-		lost := ""
-		for _, note := range v.lostContents {
-			lost += "; " + note
-		}
-		v.check(st, guard, goal, pos, "%s: %s%s", what, text, lost)
+		v.check(st, guard, v.formula(c, node, env), pos, "%s: %s", what, text)
 	}
 }
 

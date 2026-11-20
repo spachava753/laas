@@ -2271,7 +2271,7 @@ vego: postcondition may not hold: r = 1; the contents of sizes are not known to 
 initialised: the use at globals.go:49 lets a reference to them out
 ```
 
-The message names the first use that lets a reference to what the variable refers to out, here the write in `Grow`. The length of `sizes` is still known, so `sizes[i]` needs no `Requires` for an `i` below 3.
+The message names the first use that lets a reference to what the variable refers to out, here the write in `Grow`. Every message about something not proved in a function that reads such a variable ends with this note, also one about an index or an overflow. The length of `sizes` is still known, so `sizes[i]` needs no `Requires` for an `i` below 3.
 
 A package that is built with yours may let out a reference to a variable that a proof relies on. The use is then reported where it is, and in every package `laas` analyses that is built with both:
 
@@ -4379,7 +4379,7 @@ This table lists the most common messages.
 | `cannot verify F: G keeps code it is given, and cannot be used as a value` | A trusted function with `keeps` is used as a function value or a method of an interface value. | Call it directly. |
 | `... which F may not modify; it is memory that G returned, and its contract does not say that this is new memory` | `F` writes through what a trusted function returned, such as `bufio.NewWriter`, which may return memory that existed when `F` was called. | Take the value as a parameter and list it under `Modifies`. See [Writing through a buffer](#writing-through-a-buffer). |
 | `precondition of Printf may not hold: ready(l)` (or of `Scan`, `Write`, and the other methods of `log.Logger`, `bufio.Scanner`, `bufio.Reader`, and `bufio.Writer`) | The value is not known to be ready: made by its constructor, with an output or input that is not `nil`. | Make it with its constructor, add `ready(x)` to the `Requires`, or, in a loop, to the invariant. |
-| `postcondition may not hold: P; the contents of t are not known to stay as initialised: the use at f.go:n lets a reference to them out` | `P` may rest on what the package-level variable `t` refers to, which is ordinary memory because of that use. | See [What a variable refers to](#what-a-variable-refers-to). |
+| `postcondition may not hold: P; the contents of t are not known to stay as initialised: the use at f.go:n lets a reference to them out` (or another message about something not proved, with the same note) | What is not proved may rest on what the package-level variable `t` refers to, which is ordinary memory because of that use. | See [What a variable refers to](#what-a-variable-refers-to). |
 | `the trusted contract of F cannot be true of this call` | The contract contradicts what is known at the call. | The entry is wrong, or it needs a `requires` clause. |
 | `the trusted contract ... cannot be used` | The entry in the trust file is invalid. The message says why. | Fix the entry. Check the parameter names. |
 | `..., in the function literal called at f.go:n:c`, or `..., in the function literal deferred at f.go:n:c and run at the return at f.go:n:c` (or `at the end of the function at`, or `at the end of the function literal at`) | The problem is in the body of a function literal, at the call named at the end. For a deferred literal, the message names the `defer` statement and where the literal runs. | Fix the body, or what holds at that call. See [Function literals](#function-literals). |

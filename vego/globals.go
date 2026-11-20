@@ -918,8 +918,8 @@ func (v *fnVerifier) fixedValue(sink *state, variable *types.Var) (value, string
 
 // noteLostContents records that what a variable read in the function
 // refers to is not known to stay as its initialiser made it, with the use
-// that lets a reference to it out, for the message of a contract clause
-// that fails; see checkClause.
+// that lets a reference to it out, for the message of an obligation that
+// fails; see check.
 func (v *fnVerifier) noteLostContents(variable *types.Var) {
 	where := ""
 	if at := v.escapes[variable]; at != "" {
