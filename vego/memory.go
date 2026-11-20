@@ -67,7 +67,10 @@ type deferredCall struct {
 	args map[*types.Var]value
 	// runs are the methods that formatting what the call is given calls,
 	// with the values given at the defer statement; see checkFormatRuns.
-	runs    []fmtRun
+	runs []fmtRun
+	// held holds the values of what it formats at the defer statement,
+	// for the bound on what it builds when it runs.
+	held    map[ast.Expr]value
 	lit     *ast.FuncLit
 	litArgs []value
 }

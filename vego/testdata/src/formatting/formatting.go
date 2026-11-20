@@ -234,3 +234,42 @@ func RelogsChecked() {
 		log.Println(msg)
 	}
 }
+
+type Labelled struct{ Label string }
+
+// A deferred call reads what a pointer points to when it runs, at the
+// return.
+//
+// @Requires p != nil And |p.Label| <= 10
+// @Modifies p
+// @Ensures True
+func DeferredPointer(p *Labelled, long string) {
+	defer log.Print(p) // want `vego:\ what\ Print\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated;\ it\ fits\ when\ \|p\.Label\|\ <=\ 140737488318328,\ so\ check\ the\ lengths\ before\ the\ call`
+	p.Label = long
+}
+
+// @Requires p != nil And |p.Label| <= 10 And |long| <= 10
+// @Modifies p
+// @Ensures True
+func DeferredPointerBounded(p *Labelled, long string) {
+	defer log.Print(p)
+	p.Label = long
+}
+
+// A Requires speaks of the value on entry, which the function changed
+// before the call, so the message says to check the length instead.
+//
+// @Requires |name| <= 1000
+// @Ensures True
+func Reassigned(name, other string) {
+	name = other
+	log.Println(name) // want `vego:\ what\ Println\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated;\ it\ fits\ when\ \|name\|\ <=\ 140737488318401,\ so\ check\ the\ lengths\ before\ the\ call`
+}
+
+// @Requires p != nil
+// @Modifies p
+// @Ensures True
+func WrittenField(p *Labelled, long string) {
+	p.Label = long
+	log.Print(p) // want `vego:\ what\ Print\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated;\ it\ fits\ when\ \|p\.Label\|\ <=\ 140737488318328,\ so\ check\ the\ lengths\ before\ the\ call`
+}

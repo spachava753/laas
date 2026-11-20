@@ -436,8 +436,10 @@ func (v *fnVerifier) returned(st *state, results []value, pos token.Pos) {
 			v.inline(put.lit, put.litArgs, st, nil, v.site(pos, "in the function literal deferred at %s and run at %s", v.placeOf(put.call.Pos()), end))
 			continue
 		}
-		// What formatting runs runs now, in the state at the return.
+		// What formatting runs runs now, in the state at the return, and
+		// what it reads through a pointer it reads now.
 		v.checkFormatRuns(put.call, put.runs, st, nil)
+		_ = v.checkFormattedAlloc(st, nil, put.call, put.fn, put.args, put.held)
 		v.invoke(put.call, put.fn, put.args, st, nil)
 	}
 	st.deferred = nil

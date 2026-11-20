@@ -362,6 +362,21 @@ func (v *fnVerifier) checkFormatRuns(call *ast.CallExpr, runs []fmtRun, st *stat
 	}
 }
 
+// heldOperands returns the values the operands of a call of a trusted
+// function with formats have now, for a deferred call that formats them
+// later.
+func (v *fnVerifier) heldOperands(call *ast.CallExpr, fn *funcInfo) map[ast.Expr]value {
+	held := map[ast.Expr]value{}
+	if fn.formatted != nil {
+		for _, arg := range v.formattedArgs(call, fn) {
+			if val, ok := v.held[ast.Unparen(arg)]; ok {
+				held[ast.Unparen(arg)] = val
+			}
+		}
+	}
+	return held
+}
+
 // formattedArgs returns the expressions a call gives the parameter that a
 // trusted function formats, and refuses a slice passed with ....
 func (v *fnVerifier) formattedArgs(call *ast.CallExpr, fn *funcInfo) []ast.Expr {
@@ -454,17 +469,20 @@ func (v *fnVerifier) formatHint(st *state, guard []*logic.Term, size fmtSize, fo
 	var clauses []string
 	stated := true
 	if !size.spec.line && size.spec.verbs.Op != logic.OpIntLit && !v.quickly(st, guard, logic.Le(logic.Len(formatVal[0]), logic.IntLit(fmtFormatHint))) {
-		clauses = append(clauses, fmt.Sprintf("|%s| <= %d", types.ExprString(format), fmtFormatHint))
-		stated = v.fromParameter(format)
+		clause := fmt.Sprintf("|%s| <= %d", types.ExprString(format), fmtFormatHint)
+		clauses = append(clauses, clause)
+		stated = v.fromParameter(format) && v.requiresBounds(st, guard, clause, logic.Le(logic.Len(formatVal[0]), logic.IntLit(fmtFormatHint)))
 	}
 	seen := map[string]bool{}
 	for _, l := range size.each.lens {
-		if n == 0 || seen[l.name] || v.quickly(st, guard, logic.Le(l.length, logic.IntLit(n))) {
+		bounded := logic.Le(l.length, logic.IntLit(n))
+		if n == 0 || seen[l.name] || v.quickly(st, guard, bounded) {
 			continue
 		}
 		seen[l.name] = true
-		clauses = append(clauses, fmt.Sprintf("|%s| <= %d", l.name, n))
-		stated = stated && l.param
+		clause := fmt.Sprintf("|%s| <= %d", l.name, n)
+		clauses = append(clauses, clause)
+		stated = stated && l.param && v.requiresBounds(st, guard, clause, bounded)
 	}
 	switch {
 	case len(clauses) == 0:
@@ -473,6 +491,22 @@ func (v *fnVerifier) formatHint(st *state, guard []*logic.Term, size fmtSize, fo
 		return "; bound what it formats, as in // @Requires " + strings.Join(clauses, " And ")
 	}
 	return "; it fits when " + strings.Join(clauses, " and ") + ", so check the lengths before the call, or bound what the values are made of"
+}
+
+// requiresBounds reports whether a clause, written as a Requires of the
+// function and so read in the state on entry, would prove the goal here:
+// it would not when the function assigned the parameter or wrote the memory
+// the clause reads before this point.
+func (v *fnVerifier) requiresBounds(st *state, guard []*logic.Term, text string, goal *logic.Term) bool {
+	node, err := logic.ParseFormula(text)
+	if err != nil {
+		return false
+	}
+	var entry *logic.Term
+	v.quietly(func() {
+		entry, err = v.res.Formula(node, &specEnv{v: v, sink: st, fn: v.fn, args: v.entry, now: memory{}})
+	})
+	return err == nil && v.quickly(st, guard, logic.Implies(entry, goal))
 }
 
 // fromParameter reports whether an expression is a parameter of the
@@ -510,8 +544,10 @@ func (v *fnVerifier) formatted(st *state, e ast.Expr, held value) fmtOperand {
 }
 
 // checkFormattedAlloc is checkFormatAlloc for a call of a trusted function
-// whose entry lists formats, once its arguments have been evaluated.
-func (v *fnVerifier) checkFormattedAlloc(st *state, guard []*logic.Term, call *ast.CallExpr, fn *funcInfo, args map[*types.Var]value) *logic.Term {
+// whose entry lists formats, once its arguments have been evaluated, in the
+// state where it runs; held gives the values the operands had as they were
+// converted. What a pointer points to is read in that state.
+func (v *fnVerifier) checkFormattedAlloc(st *state, guard []*logic.Term, call *ast.CallExpr, fn *funcInfo, args map[*types.Var]value, held map[ast.Expr]value) *logic.Term {
 	if fn.formatted == nil {
 		return nil
 	}
@@ -523,10 +559,10 @@ func (v *fnVerifier) checkFormattedAlloc(st *state, guard []*logic.Term, call *a
 			format = passed.expr
 		case passed.param == fn.formatted && passed.packed:
 			for _, e := range passed.pack {
-				operands = append(operands, v.formatted(st, e, v.held[ast.Unparen(e)]))
+				operands = append(operands, v.formatted(st, e, held[ast.Unparen(e)]))
 			}
 		case passed.param == fn.formatted:
-			operands = append(operands, v.formatted(st, passed.expr, v.held[ast.Unparen(passed.expr)]))
+			operands = append(operands, v.formatted(st, passed.expr, held[ast.Unparen(passed.expr)]))
 		}
 	}
 	var formatVal value

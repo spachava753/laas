@@ -133,7 +133,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		}
 		args := v.arguments(call, callee, st, guard)
 		u.reach(operands)
-		formatted := v.checkFormattedAlloc(st, guard, call, fn, args)
+		formatted := v.checkFormattedAlloc(st, guard, call, fn, args, v.held)
 		v.checkFormatRuns(call, v.formatRuns(call, fn), st, guard)
 		made.pure = len(fn.modifies) == 0 && signatureMemoryFree(callee.Type().(*types.Signature))
 		results = v.invoke(call, fn, args, st, guard)

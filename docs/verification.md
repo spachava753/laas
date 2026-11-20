@@ -2614,7 +2614,7 @@ vego: what Println builds from what it formats may be more than can be allocated
 what it formats, as in // @Requires |name| <= 70368744159185
 ```
 
-The message names each length that nothing at the call bounds, and a bound for it that is enough on the platform `laas` runs for. The number above is for a 64-bit target. Any smaller bound, such as `// @Requires |name| <= 1000`, is enough too. A format that is not a constant needs a bound as well, and the message suggests `|format| <= 100`. When what is formatted is not a parameter, as for a string a function builds, the message gives the bound and says to check the length before the call.
+The message names each length that nothing at the call bounds, and a bound for it that is enough on the platform `laas` runs for. The number above is for a 64-bit target. Any smaller bound, such as `// @Requires |name| <= 1000`, is enough too. A format that is not a constant needs a bound as well, and the message suggests `|format| <= 100`. A `Requires` clause speaks of the values on entry. When what is formatted is not a parameter, as for a string the function builds, or the function changed it before the call, the message gives the bound and says to check the length before the call. A deferred call is checked where it runs, at each return, with what a pointer it formats points to then.
 
 The bound that `vego` proves is larger than what `fmt` writes, for these reasons:
 

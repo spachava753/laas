@@ -595,9 +595,11 @@ formatting	fmt.Sprint	1	4031	0
 formatting	fmt.Sprintf	1	4959	0
 formatting	fmt.Sprintln	1	4031	0
 formatting	formatting.BoundedAsSuggested	4	19951	0
-formatting	formatting.DeferredInts	17	23014	0
-formatting	formatting.DeferredIntsWrong	16	8685	0
-formatting	formatting.DeferredUnbounded	5	15331	0
+formatting	formatting.DeferredInts	17	23097	0
+formatting	formatting.DeferredIntsWrong	16	8074	0
+formatting	formatting.DeferredPointer	11	30692	0
+formatting	formatting.DeferredPointerBounded	9	27909	0
+formatting	formatting.DeferredUnbounded	6	15585	0
 formatting	formatting.Formats	10	174669	0
 formatting	formatting.FormatsAny	1	406	0
 formatting	formatting.FormatsMap	1	138	0
@@ -607,7 +609,7 @@ formatting	formatting.FormatsSpread	1	368	0
 formatting	formatting.FormatsStringer	1	111	0
 formatting	formatting.FormatsUnknownError	1	46	0
 formatting	formatting.Formatted	4	24197	0
-formatting	formatting.FormattedUnbounded	5	24518	0
+formatting	formatting.FormattedUnbounded	6	24787	0
 formatting	formatting.Found	1	46	0
 formatting	formatting.Greets	26	86882	0
 formatting	formatting.Joins	9	23611	0
@@ -620,7 +622,8 @@ formatting	formatting.MakesShow	1	46	0
 formatting	formatting.MakesShowNamed	1	46	0
 formatting	formatting.Prints	19	303486	0
 formatting	formatting.QuotedAsSuggested	4	30352	0
-formatting	formatting.QuotedHalf	5	31751	0
+formatting	formatting.QuotedHalf	6	32134	0
+formatting	formatting.Reassigned	6	17354	0
 formatting	formatting.Relogs	7	77121	0
 formatting	formatting.RelogsChecked	7	43950	0
 formatting	formatting.RelogsError	8	45117	0
@@ -640,7 +643,7 @@ formatting	formatting.ShowsServer	5	17024	0
 formatting	formatting.ShowsTally	2	869	0
 formatting	formatting.Sink	3	4254	0
 formatting	formatting.Speak	4	17559	0
-formatting	formatting.Unbounded	6	20846	0
+formatting	formatting.Unbounded	7	21109	0
 formatting	formatting.UsesFill	2	869	0
 formatting	formatting.UsesHanding	1	46	0
 formatting	formatting.UsesLogf	4	42226	0
@@ -650,9 +653,10 @@ formatting	formatting.UsesSinking	1	46	0
 formatting	formatting.UsesTwoValues	1	46	0
 formatting	formatting.Wraps	11	8692	0
 formatting	formatting.WrapsKelvin	12	4125	0
-formatting	formatting.WrapsUnbounded	12	7970	0
+formatting	formatting.WrapsUnbounded	13	8231	0
 formatting	formatting.Writes	29	113209	0
 formatting	formatting.WritesNil	5	12289	0
+formatting	formatting.WrittenField	11	25484	0
 formatting	formatting.fill	1	6521	0
 formatting	formatting.handing	1	3183	0
 formatting	formatting.logAny	1	557	0
@@ -960,7 +964,7 @@ guide	guide.FlatPricer	5	1343	0
 guide	guide.Free	0	0	0
 guide	guide.Fresh	7	2313	0
 guide	guide.Get	3	2001	0
-guide	guide.Greet	6	20246	0
+guide	guide.Greet	7	20509	0
 guide	guide.Guarded	23	30655	0
 guide	guide.Half	3	1455	0
 guide	guide.HasComma	4	5659	0
