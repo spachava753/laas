@@ -208,6 +208,17 @@ func TestCache(t *testing.T) {
 			t.Fatalf("costs %+v, want the first solved and the others cached with its count", costs)
 		}
 	})
+	t.Run("an unknown when canceled", func(t *testing.T) {
+		s, asked := counting(t, `echo unknown; echo '(:reason-unknown "canceled")'`+counted)
+		for range 2 {
+			if got := s.Prove(nil, goal, Options{}); got != Exhausted {
+				t.Fatalf("got %v, want exhausted", got)
+			}
+		}
+		if asked() != 1 {
+			t.Fatalf("Z3 was asked %d times, want once", asked())
+		}
+	})
 	t.Run("another resource limit", func(t *testing.T) {
 		s, asked := counting(t, `echo unknown; echo '(:reason-unknown "max. resource limit exceeded")'`+counted)
 		for _, effort := range []int{1000, 2000, 1000} {
@@ -232,7 +243,6 @@ func TestCache(t *testing.T) {
 	})
 	for _, test := range []struct{ name, reply string }{
 		{"an unknown for want of memory", `echo unknown; echo '(:reason-unknown "memout")'` + counted},
-		{"an unknown when canceled", `echo unknown; echo '(:reason-unknown "canceled")'` + counted},
 		{"a process out of memory", `echo '(error "out of memory")' >&2; exit 101`},
 	} {
 		t.Run(test.name, func(t *testing.T) {

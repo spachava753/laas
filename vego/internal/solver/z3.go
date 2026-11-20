@@ -234,8 +234,10 @@ type answer struct {
 // read from the cache is the one Z3 would give again. What depends on the
 // machine is never kept: a problem that ran past the wall limit, one that
 // ran out of memory, and one whose process died or replied with anything
-// else, which are errors here; and an unknown for want of memory or because
-// Z3 was canceled.
+// else, which are errors here; and an unknown for want of memory. An
+// unknown because Z3 was canceled is kept: Z3 is given no time limit of its
+// own, so it cancels a problem only at the resource limit, which exhausted
+// takes it for, with the same count on every run.
 func (s *Solver) answer(script string, values []string) (answer, bool, error) {
 	key := script + "\x00" + strings.Join(values, " ")
 	s.mu.Lock()
@@ -246,7 +248,7 @@ func (s *Solver) answer(script string, values []string) (answer, bool, error) {
 		return a, true, nil
 	}
 	a, err := s.run(script, values)
-	if err != nil || (a.status == "unknown" && (machineBound(a.reason) || strings.Contains(a.reason, "canceled"))) {
+	if err != nil || (a.status == "unknown" && machineBound(a.reason)) {
 		return a, false, err
 	}
 	s.mu.Lock()
