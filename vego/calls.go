@@ -108,8 +108,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	if builtin, ok := typeutil.Callee(v.info, call).(*types.Builtin); ok && callee == nil {
 		advice := ""
 		if builtin.Name() == "copy" {
-			advice = "; write the copy as a loop that assigns each element, or, when the source is no longer than the destination, " +
-				"as dst = append(dst[:0], src...)"
+			advice = "; write the copy as a loop that assigns each element, or, when the two have the same length, as dst = append(dst[:0], src...)"
 		}
 		v.unsupported(call.Pos(), fmt.Sprintf("the built-in function %s is not supported yet%s", builtin.Name(), advice))
 	}
@@ -554,10 +553,10 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			// A write through what a trusted function returned that the
 			// caller may not make is reported with the function's name.
 			_, isPointer := pointee(sig.Results().At(i).Type())
-			if fn.trust != nil && (isSlice(sig.Results().At(i).Type()) || isPointer) {
+			if fn.valueOf == nil && fn.methodOf == nil && (isSlice(sig.Results().At(i).Type()) || isPointer) {
 				for _, leaf := range results[i] {
 					if leaf.Sort == logic.Ref && leaf.Op == logic.OpConst {
-						v.returnedBy[leaf.Name] = callee.Name()
+						v.returnedBy[leaf.Name] = returned{fn: fn, result: i}
 					}
 				}
 			}

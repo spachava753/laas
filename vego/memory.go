@@ -7,6 +7,7 @@ import (
 	"go/types"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
@@ -522,6 +523,53 @@ func stretchesOf(cells []cell, at *logic.Term) []stretch {
 	return parts
 }
 
+// returned is a result of a call: the contract called and which result.
+type returned struct {
+	fn     *funcInfo
+	result int
+}
+
+// parameterPath names, after the advice to list a write, the path from a
+// parameter that reaches the memory written, as in ", as s.From.X": the
+// first field of a struct a pointer parameter points to, or the elements
+// of a slice parameter, that the write is quickly shown to be. It returns
+// "" when none is.
+func (v *fnVerifier) parameterPath(st *state, guard []*logic.Term, w written) string {
+	if len(w.parts) == 0 || v.fn.decl == nil {
+		return ""
+	}
+	part := w.parts[0]
+	for _, param := range v.fn.params {
+		entry := v.entry[param]
+		if entry == nil || param.Name() == "" || param.Name() == "_" {
+			continue
+		}
+		t := param.Type()
+		if isSlice(t) {
+			if v.quickly(st, guard, logic.Eq(w.ref, entry[0])) {
+				return ", as " + param.Name()
+			}
+			continue
+		}
+		object, isPointer := pointee(t)
+		if !isPointer {
+			continue
+		}
+		leaves, _ := layoutOf(object)
+		for i, c := range v.cellsOf(object) {
+			if c.key != part.key || part.lo == nil {
+				continue
+			}
+			at := logic.And(logic.Eq(w.ref, entry[0]), logic.Eq(part.lo, logic.Add(entry[1], logic.IntLit(c.off))))
+			if v.quickly(st, guard, at) {
+				path, _, _ := strings.Cut(leaves[i].path, "#")
+				return ", as " + param.Name() + path
+			}
+		}
+	}
+	return ""
+}
+
 // notListable returns what a report of a write that nothing covers says to
 // do, in place of the advice to list the write, when the written memory is
 // reached through a local variable or a result: a Modifies clause names
@@ -694,12 +742,18 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 		if variable := v.fixedRefs[w.ref.Name]; remedy == "" && w.ref.Op == logic.OpConst && variable != "" {
 			remedy = fmt.Sprintf("it is memory that the package-level variable %s refers to, which a Modifies clause cannot name yet", variable)
 		}
-		// Memory that a trusted function returned without saying that it
-		// is new may have existed when the function was called, as what
+		// Memory that a function returned without saying that it is new
+		// may have existed when the function was called, as what
 		// bufio.NewWriter returns when it is given a large enough Writer.
-		if callee := v.returnedBy[w.ref.Name]; remedy == "" && len(candidates) == 0 && w.ref.Op == logic.OpConst && callee != "" {
+		if from, ok := v.returnedBy[w.ref.Name]; remedy == "" && len(candidates) == 0 && w.ref.Op == logic.OpConst && ok {
+			callee := from.fn.obj.Name()
 			remedy = fmt.Sprintf("it is memory that %s returned, and its contract does not say that this is new memory, so it may have existed when %s "+
 				"was called; take it as a parameter and list it in a // @Modifies clause", callee, v.fn.obj.Name())
+			if from.fn.trust == nil {
+				remedy = fmt.Sprintf("it is memory that %s returned, and its contract does not say that this is new memory, so it may have existed when %s "+
+					"was called; if it is new, say so in the contract of %s, with // @Ensures fresh(%s), or take it as a parameter and list it in a // @Modifies clause",
+					callee, v.fn.obj.Name(), callee, from.fn.results[from.result].Name())
+			}
 		}
 		switch {
 		case remedy != "":
@@ -719,7 +773,7 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 		case len(candidates) == 0 && unlisted != "":
 			v.report(pos, "%s, which %s may not modify; %s%s", what, v.fn.obj.Name(), unlisted, limitNote(result))
 		case len(candidates) == 0:
-			v.report(pos, "%s, which %s may not modify; list it in a // @Modifies clause%s", what, v.fn.obj.Name(), limitNote(result))
+			v.report(pos, "%s, which %s may not modify; list it in a // @Modifies clause%s%s", what, v.fn.obj.Name(), v.parameterPath(st, guard, w), limitNote(result))
 		default:
 			// Something of the kind is listed, so telling the reader to
 			// list it would send them in a circle.

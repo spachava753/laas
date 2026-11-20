@@ -127,7 +127,7 @@ func Written(c *counter) {
 // @Ensures True
 func Outside(c *counter) {
 	each(3, func(i int) {
-		c.n = i // want `vego: c.n is assigned, which Outside may not modify; list it in a // @Modifies clause, in the function literal run by each at literals.go:\d+:\d+`
+		c.n = i // want `vego: c.n is assigned, which Outside may not modify; list it in a // @Modifies clause, as c\.n, in the function literal run by each at literals.go:\d+:\d+`
 	})
 }
 

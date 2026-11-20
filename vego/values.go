@@ -96,7 +96,9 @@ func embedsDeclared(t types.Type) bool {
 // interface is not supported, and what to do instead. It returns "" for any
 // other type.
 func unsupportedHint(t types.Type) string {
-	if path, holder := arrayField(t, map[types.Type]bool{}); path != "" {
+	if path, holder := arrayField(t, map[types.Type]bool{}); path == "itself" {
+		return fmt.Sprintf("; %s is an array, and arrays are not supported yet", holder)
+	} else if path != "" {
 		return fmt.Sprintf("; %s holds an array in %s, and arrays are not supported yet", holder, path)
 	}
 	if !embedsDeclared(t) {

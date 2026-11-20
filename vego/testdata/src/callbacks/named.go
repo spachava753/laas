@@ -62,7 +62,7 @@ func HandsMethod(c *counter) {
 // @Requires c != nil
 // @Ensures True
 func HandsMethodOutside(c *counter) {
-	each(3, c.bump) // want `vego: bump may modify c, which HandsMethodOutside may not modify; list it in a // @Modifies clause, in c.bump run by each at named.go:\d+:\d+`
+	each(3, c.bump) // want `vego: bump may modify c, which HandsMethodOutside may not modify; list it in a // @Modifies clause, as c\.n, in c.bump run by each at named.go:\d+:\d+`
 }
 
 // HandsNilReceiver hands a method value on a pointer that may be nil.

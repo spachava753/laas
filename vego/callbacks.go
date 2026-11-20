@@ -788,6 +788,11 @@ func (v *fnVerifier) runHandedCall(h *handOver, cb *callback, given []value, hea
 // Only the receiver of a method value names an object both where it is
 // handed over and in its runs.
 func (v *fnVerifier) handedSites(arg ast.Expr, contract *funcInfo, eff *effects) {
+	view := v.viewOf(contract)
+	if view.cut {
+		return
+	}
+	contract = view.fn
 	sel, isMethod := ast.Unparen(arg).(*ast.SelectorExpr)
 	var recv *types.Var
 	if selection := v.info.Selections[sel]; isMethod && selection != nil && selection.Kind() == types.MethodVal && len(selection.Index()) == 1 {

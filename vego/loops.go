@@ -249,6 +249,14 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 	if fn == nil {
 		return
 	}
+	// A call whose contract cannot be relied on ends its path, where it is
+	// reported, so the loop needs nothing of it; one that relies on part of
+	// it writes what that part lists. See viewOf.
+	view := v.viewOf(fn)
+	if view.cut {
+		return
+	}
+	fn = view.fn
 	sig := fn.obj.Type().(*types.Signature)
 	if callee != nil {
 		sig = callee.Type().(*types.Signature)

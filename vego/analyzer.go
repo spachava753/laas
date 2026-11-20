@@ -536,7 +536,7 @@ type pkgVerifier struct {
 	// returnedBy holds, by the name of its constant, the reference of a
 	// pointer or slice that a trusted function returned, with the name of
 	// the function; see checkWriteOr.
-	returnedBy   map[string]string
+	returnedBy   map[string]returned
 	fixedOf      map[*types.Package]*fixedFact
 	hidden       string
 	reliedValues map[string]bool

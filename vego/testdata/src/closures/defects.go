@@ -32,7 +32,7 @@ func Unguarded(A []int, i int) (result bool) {
 // @Requires |A| >= 1
 // @Ensures True
 func WritesUnlisted(A []int) {
-	func() { A[0] = 1 }() // want `vego: A\[0\] is assigned, which WritesUnlisted may not modify; list it in a // @Modifies clause, in the function literal called at defects.go:35:2`
+	func() { A[0] = 1 }() // want `vego: A\[0\] is assigned, which WritesUnlisted may not modify; list it in a // @Modifies clause, as A, in the function literal called at defects.go:35:2`
 }
 
 // WrongResult claims what the literal does not do.

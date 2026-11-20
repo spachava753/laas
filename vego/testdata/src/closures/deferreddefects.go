@@ -28,7 +28,7 @@ func OverflowsLater(x int) (result int) {
 // @Requires g != nil
 // @Ensures True
 func WritesUnlistedLater(g *Gauge) {
-	defer func() { g.v = 1 }() // want `vego: g.v is assigned, which WritesUnlistedLater may not modify; list it in a // @Modifies clause, in the function literal deferred at deferreddefects.go:31:8 and run at the end of the function at deferreddefects.go:32:1`
+	defer func() { g.v = 1 }() // want `vego: g.v is assigned, which WritesUnlistedLater may not modify; list it in a // @Modifies clause, as g\.v, in the function literal deferred at deferreddefects.go:31:8 and run at the end of the function at deferreddefects.go:32:1`
 }
 
 // DefersInLoop puts off a literal in every iteration of a loop.

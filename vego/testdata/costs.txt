@@ -79,7 +79,7 @@ callbacks	callbacks.HandsCaller	10	11758	0
 callbacks	callbacks.HandsFunction	4	982	0
 callbacks	callbacks.HandsLoose	6	3568	0
 callbacks	callbacks.HandsMethod	9	2207	0
-callbacks	callbacks.HandsMethodOutside	6	1537	0
+callbacks	callbacks.HandsMethodOutside	7	1652	0
 callbacks	callbacks.HandsNil	7	1194	0
 callbacks	callbacks.HandsNilReceiver	9	2265	0
 callbacks	callbacks.HandsOnValue	1	83	0
@@ -101,7 +101,7 @@ callbacks	callbacks.Loop	1	46	0
 callbacks	callbacks.Narrow	13	20453	0
 callbacks	callbacks.OnlyIfRun	6	2930	0
 callbacks	callbacks.Option	3	2008	0
-callbacks	callbacks.Outside	6	1909	0
+callbacks	callbacks.Outside	7	2028	0
 callbacks	callbacks.Pair	8	2328	0
 callbacks	callbacks.PastTheEnd	7	5374	0
 callbacks	callbacks.Random	8	4931	0
@@ -123,7 +123,7 @@ callbacks	callbacks.Strict	3	636	0
 callbacks	callbacks.TickBeside	14	4003384	1
 callbacks	callbacks.TicksUpdated	11	4353	0
 callbacks	callbacks.TrimBytes	10	15011	0
-callbacks	callbacks.TrimBytesOutside	7	13358	0
+callbacks	callbacks.TrimBytesOutside	8	13506	0
 callbacks	callbacks.Trimmed	4	7496	0
 callbacks	callbacks.UnguardedRead	5	3109	0
 callbacks	callbacks.Unsorted	11	44130	0
@@ -216,7 +216,7 @@ callbacks	strings.TrimFunc	1	2772	0
 callbacksinit	callbacksinit.Known	1	46	0
 callbacksinit	callbacksinit.each	1	211	0
 client	client.Cleared	7	9707	0
-client	client.DepositsElsewhere	7	3786	0
+client	client.DepositsElsewhere	8	4233	0
 client	client.DividesByLocalLimit	3	320	0
 client	client.DividesByOne	4	295	0
 client	client.First	8	11687	0
@@ -307,8 +307,8 @@ closures	closures.WrapsKnownLater	14	6533	0
 closures	closures.WrapsUnknown	1	46	0
 closures	closures.WrapsUnknownLater	1	46	0
 closures	closures.Writes	13	7025	0
-closures	closures.WritesUnlisted	4	1759	0
-closures	closures.WritesUnlistedLater	3	768	0
+closures	closures.WritesUnlisted	5	1887	0
+closures	closures.WritesUnlistedLater	4	848	0
 closures	closures.WrongBranch	4	1536	0
 closures	closures.WrongLast	4	1474	0
 closures	closures.WrongResult	4	933	0
@@ -841,7 +841,7 @@ funcvalues	funcvalues.Tripled	6	1246	0
 funcvalues	funcvalues.Twice	15	3453	0
 funcvalues	funcvalues.Unbounded	3	3331	0
 funcvalues	funcvalues.Unknown	0	0	0
-funcvalues	funcvalues.Unlisted	5	1460	0
+funcvalues	funcvalues.Unlisted	6	1559	0
 funcvalues	funcvalues.UsesApply	1	46	0
 funcvalues	funcvalues.UsesFires	1	46	0
 funcvalues	funcvalues.UsesLoaded	5	85	0
@@ -1071,7 +1071,7 @@ guide	guide.Cell	7	9786	0
 guide	guide.CheckEach	3	128	0
 guide	guide.Clamp	7	799	0
 guide	guide.Clear	1	138	0
-guide	guide.ClearAll	3	1649	0
+guide	guide.ClearAll	4	1757	0
 guide	guide.ClearCounted	20	23669	0
 guide	guide.ClearCountedKept	23	29705	0
 guide	guide.ClearCountedWrong	21	22718	0
@@ -1109,7 +1109,7 @@ guide	guide.Event	3	558	0
 guide	guide.Fails	1	46	0
 guide	guide.FieldsOf	0	0	0
 guide	guide.Fill	9	20053	0
-guide	guide.FillUnlisted	4	1684	0
+guide	guide.FillUnlisted	5	1840	0
 guide	guide.Find	7	6931	0
 guide	guide.First	4	1222	0
 guide	guide.FirstByte	86	265199	1
@@ -1383,7 +1383,7 @@ integers	integers.CountdownOffByOne	7	1185	0
 integers	integers.Difference	7	1500	0
 integers	integers.Fib	17	8024923	2
 integers	integers.Flatten	7	14129	0
-integers	integers.GrowsUnbounded	9	4776	0
+integers	integers.GrowsUnbounded	10	4871	0
 integers	integers.Half	3	465	0
 integers	integers.HalfDown	4	2224	0
 integers	integers.HalfWrong	3	1437	0
@@ -1613,7 +1613,7 @@ interfaces	interfaces.Two	15	13738	0
 interfaces	interfaces.TypeSwitched	1	497	0
 interfaces	interfaces.UnclaimedAsZero	1	241	0
 interfaces	interfaces.Unknown.Get	1	46	0
-interfaces	interfaces.Unlisted	6	3388	0
+interfaces	interfaces.Unlisted	7	3868	0
 interfaces	interfaces.Unread	3	884	0
 interfaces	interfaces.UseDefined	5	2340	0
 interfaces	interfaces.UseLiteral	0	0	0
@@ -1796,7 +1796,7 @@ leetcode	leetcode.SelectionSort	51	264349	0
 leetcode	leetcode.TwoSum	33	153513	0
 leetcode	leetcode.TwoSumSameIndex	25	71737	0
 lib	(*lib.Account).Deposit	8	7515	0
-lib	(*lib.Account).Reset	8	5334	0
+lib	(*lib.Account).Reset	9	5750	0
 lib	lib.Broken	2	238	0
 lib	lib.Check	10	3613	0
 lib	lib.Clear	9	19330	0
@@ -1817,7 +1817,7 @@ locks	(*locks.Config).CopyOnce	0	0	0
 locks	(*locks.Config).Inner	22	44391	0
 locks	(*locks.Config).Setup	15	22019	0
 locks	(*locks.Config).SetupTwice	18	28448	0
-locks	(*locks.Config).Unlisted	11	12308	0
+locks	(*locks.Config).Unlisted	12	13169	0
 locks	(*locks.Config).Unsaid	15	20838	0
 locks	(*locks.Two).Nested	27	97213	0
 locks	(*sync.Mutex).Lock	1	1652	0
@@ -1896,7 +1896,7 @@ locks	locks.Try	16	16484	0
 locks	locks.TryHeld	13	11325	0
 locks	locks.Twice	16	18997	0
 locks	locks.Unknown	0	0	0
-locks	locks.Unlisted	11	11461	0
+locks	locks.Unlisted	12	12246	0
 locks	locks.Upgrade	16	17250	0
 locks	locks.Write	18	24745	0
 locks	locks.take2	1	439	0
@@ -1989,7 +1989,7 @@ memory	memory.AppendInPost	22	20539	0
 memory	memory.AppendMayAlias	24	34709	0
 memory	memory.AppendMoves	24	34647	0
 memory	memory.AppendsDeclared	13	7687	0
-memory	memory.AppendsToParameter	7	4359	0
+memory	memory.AppendsToParameter	8	4467	0
 memory	memory.BothCells	8	6617	0
 memory	memory.BothFields	9	12965	0
 memory	memory.BothFieldsApart	9	14498	0
@@ -2010,7 +2010,7 @@ memory	memory.CopyOfStruct	10	6871	0
 memory	memory.CopyWired	3	1941	0
 memory	memory.CountDigits	26	64268	0
 memory	memory.CountNothings	5	1489	0
-memory	memory.DeferredUnlisted	3	552	0
+memory	memory.DeferredUnlisted	4	628	0
 memory	memory.DefersInLoop	4	989	0
 memory	memory.DefersLiteral	5	916	0
 memory	memory.Different	13	14771	0
@@ -2042,13 +2042,13 @@ memory	memory.GuardedField	4	1789	0
 memory	memory.Halves	23	12049	0
 memory	memory.IncElement	24	26487	0
 memory	memory.IncElementOutOfRange	9	8679	0
-memory	memory.IncElementUnlisted	7	5580	0
+memory	memory.IncElementUnlisted	8	6162	0
 memory	memory.IncField	13	11476	0
 memory	memory.IncFieldWrong	13	12506	0
 memory	memory.IncPicked	16	30705	0
 memory	memory.IncPickedWrong	12	22180	0
 memory	memory.Interior	4	1001	0
-memory	memory.InteriorUnlisted	4	843	0
+memory	memory.InteriorUnlisted	5	936	0
 memory	memory.InteriorWrite	11	3529	0
 memory	memory.InteriorWriteWrong	7	2401	0
 memory	memory.LastFirst	10	4058	0
@@ -2113,7 +2113,7 @@ memory	memory.ParamAddress	4	961	0
 memory	memory.ParamAddressWrong	4	1296	0
 memory	memory.PassLocal	6	2292	0
 memory	memory.PassLocalWrong	4	1164	0
-memory	memory.PassMaybeNil	2	959	0
+memory	memory.PassMaybeNil	3	1342	0
 memory	memory.PassNil	3	845	0
 memory	memory.PointInSegment	10	17338	0
 memory	memory.PointIsFrom	11	9350	0
@@ -2163,7 +2163,7 @@ memory	memory.Tail	8	2297	0
 memory	memory.TooManyNothings	13	1477	0
 memory	memory.TooMuch	5	4142	0
 memory	memory.Twice	16	12063	0
-memory	memory.Undeclared	3	768	0
+memory	memory.Undeclared	4	848	0
 memory	memory.UnguardedAddress	5	2043	0
 memory	memory.UnguardedField	4	1786	0
 memory	memory.UnusedSlice	9	11746	0
@@ -2172,14 +2172,14 @@ memory	memory.UseRingForgets	14	231155	0
 memory	memory.UsesSetOneField	16	21226	0
 memory	memory.UsesSetOneFieldWrong	8	10411	0
 memory	memory.Viewed	8	2188	0
-memory	memory.ViewedUnlisted	3	768	0
+memory	memory.ViewedUnlisted	4	848	0
 memory	memory.ViewedWrong	7	5273	0
 memory	memory.WholeObject	7	2180	0
 memory	memory.WholeSlice	6	5782	0
 memory	memory.Width	6	7157	0
 memory	memory.WritesForgets	8	10565	0
 memory	memory.WritesTwice	83	161583	0
-memory	memory.WritesUndeclared	3	1410	0
+memory	memory.WritesUndeclared	4	1473	0
 memory	memory.WrongGuardField	4	940	0
 memory	memory.ZeroFront	15	23954	0
 memory	memory.ZeroFrontLoose	15	1786218	1
@@ -2228,7 +2228,7 @@ ordering	ordering.ConstantKeys	12	14223	0
 ordering	ordering.CopyAfterCall	20	636336	3
 ordering	ordering.CopyRead	19	809324	2
 ordering	ordering.Count	19	46319	0
-ordering	ordering.CountUnlisted	11	11667	0
+ordering	ordering.CountUnlisted	12	12277	0
 ordering	ordering.DeadAppend	13	1361	0
 ordering	ordering.DeadReturnAppend	13	1363	0
 ordering	ordering.DeclaredLater	10	10470	0
@@ -2247,7 +2247,7 @@ ordering	ordering.FreshOnRight	3	2067	0
 ordering	ordering.FreshReceiver	10	16124	0
 ordering	ordering.FreshSlice	12	15874	0
 ordering	ordering.FreshStruct	11	16095	0
-ordering	ordering.GuardedFrame	4	3224	0
+ordering	ordering.GuardedFrame	5	3667	0
 ordering	ordering.GuardedPrecondition	8	5335	0
 ordering	ordering.GuardedRead	10	16150	0
 ordering	ordering.IfCondLater	10	10470	0
@@ -2482,6 +2482,9 @@ trialfaults	(*trialfaults.R).Guarded	8	8300	0
 trialfaults	(*trialfaults.R).InLiteral	5	3906	0
 trialfaults	(*trialfaults.R).Joined	5	5566	0
 trialfaults	(*trialfaults.R).Looped	9	8339	0
+trialfaults	(*trialfaults.R).LoopedCondition	8	5114	0
+trialfaults	(*trialfaults.R).LoopedLiteral	8	5617	0
+trialfaults	(*trialfaults.R).LoopedWrites	8	5617	0
 trialfaults	(*trialfaults.R).Writes	7	3844	0
 trialfaults	(*trialfaults.R).touch	1	241	0
 trialfaults	io.Closer.Close	3	3054	0
@@ -2491,6 +2494,7 @@ trialfaults	trialfaults.Closes.Pick	3	20630	1
 trialfaults	trialfaults.Copies	2	1959	0
 trialfaults	trialfaults.DeclaredInCase	4	879	0
 trialfaults	trialfaults.Deep	6	2623	0
+trialfaults	trialfaults.Digest	0	0	0
 trialfaults	trialfaults.EitherNil	7	4020	0
 trialfaults	trialfaults.Empty.Next	3	758	0
 trialfaults	trialfaults.EmptyCase	2	154	0
@@ -2510,8 +2514,10 @@ trialfaults	trialfaults.FreshMaker	3	2828	0
 trialfaults	trialfaults.FreshOwn.New	3	2828	0
 trialfaults	trialfaults.FreshThere.New	3	2828	0
 trialfaults	trialfaults.FreshTwo.Two	3	4326	0
+trialfaults	trialfaults.FromCall	3	1402	0
 trialfaults	trialfaults.Keeps	7	15328	0
 trialfaults	trialfaults.KeepsOpen.Pick	3	19551	0
+trialfaults	trialfaults.Listed	7	5011	0
 trialfaults	trialfaults.Meter.Read	1	111	0
 trialfaults	trialfaults.Narrow	4	4904	0
 trialfaults	trialfaults.Nested	0	0	0
@@ -2539,6 +2545,7 @@ trialfaults	trialfaults.Sometimes.Next	3	2686	0
 trialfaults	trialfaults.Source.Next	3	1019	0
 trialfaults	trialfaults.Stale	17	6284	0
 trialfaults	trialfaults.StaleAux	17	6330	0
+trialfaults	trialfaults.Through	6	1255	0
 trialfaults	trialfaults.ThroughGrow	7	13722	0
 trialfaults	trialfaults.Twice.Two	3	3918	0
 trialfaults	trialfaults.UsesShape	4	4477	0
@@ -2548,8 +2555,11 @@ trialfaults	trialfaults.WrongAtEndOfCase	3	440	0
 trialfaults	trialfaults.WrongClause	3	265	0
 trialfaults	trialfaults.gate	0	0	0
 trialfaults	trialfaults.grow	13	7814	0
+trialfaults	trialfaults.mk	8	391	0
 trialfaults	trialfaults.newCloser	1	671	0
+trialfaults	trialfaults.set	7	2992	0
 trialfaults	trialfaults.writes	0	0	0
+trialfaults	trialfaults.writesOK	0	0	0
 trust	(*trust.pinged).ping	1	844	0
 trust	(*trust.sinkHolder).flush	1	844	0
 trust	(*trust.sinkHolder).flushRuns	1	844	0
@@ -2861,7 +2871,7 @@ variadic	variadic.CloseFirst	11	15888	0
 variadic	variadic.CloseStale	8	9465	0
 variadic	variadic.CloseThrough	8	8496	0
 variadic	variadic.Concat	15	43091	0
-variadic	variadic.ConcatUnlisted	9	12352	0
+variadic	variadic.ConcatUnlisted	10	12584	0
 variadic	variadic.ConcatWrong	11	25720	0
 variadic	variadic.Count	2	607	0
 variadic	variadic.CountWrong	2	191	0
@@ -2904,7 +2914,7 @@ variadic	variadic.SetInLoop	19	36003	0
 variadic	variadic.SetInLoopKnown	17	34620	0
 variadic	variadic.SetStale	11	6501	0
 variadic	variadic.SetThrough	7	4373	0
-variadic	variadic.SetUnlisted	4	1910	0
+variadic	variadic.SetUnlisted	5	2551	0
 variadic	variadic.Shift	18	21450	0
 variadic	variadic.ShiftWrong	15	24786	0
 variadic	variadic.Tally.Count	3	4390	0
@@ -2918,7 +2928,7 @@ variadic	variadic.ZeroCut	16	15758	0
 variadic	variadic.ZeroListed	3	335	0
 variadic	variadic.ZeroShared	16	995159	1
 variadic	variadic.ZeroSpread	6	2904	0
-variadic	variadic.ZeroUnlisted	3	1649	0
+variadic	variadic.ZeroUnlisted	4	1757	0
 variadic	variadic.bump	10	7277	0
 variadic	variadic.countAll	2	607	0
 variadic	variadic.join	1	5345	0

@@ -1689,7 +1689,7 @@ func Fill(A []int, v int) {
 `Modifies` lists the memory a function is allowed to write. Writing anything else is an error:
 
 ```text
-vego: A[i] is assigned, which FillUnlisted may not modify; list it in a // @Modifies clause
+vego: A[i] is assigned, which FillUnlisted may not modify; list it in a // @Modifies clause, as A
 ```
 
 A caller can rely on everything outside the list being unchanged. About the memory in the list, it knows only what the `Ensures` clauses state. So keep the list as small as possible. With `Modifies c.n`, callers keep what they know about the other fields of `c`. With `Modifies c`, they lose it.
@@ -4554,7 +4554,7 @@ This table lists the most common messages.
 | `this comment has an @ and a character that ends a line on the screen but not for Go`, or `this file has annotations and a carriage return that does not end a line` | The comment contains a character such as U+2028, or a carriage return without a newline. An editor may show what follows it as a separate line, but `vego` reads it as part of the same line. | Remove the character. |
 | `unknown annotation "W"` | The word after `// @` is not a keyword. | Correct the keyword. If another tool reads the comment, declare the word with `-vego.other-tags`. |
 | `Ensures annotation is not attached to a function` | The clause is not in the doc comment of a function. | Move it into the doc comment. |
-| `x is assigned, which F may not modify; list it in a // @Modifies clause` | No `Modifies` entry covers memory of this kind. | Add it to `Modifies`. |
+| `x is assigned, which F may not modify; list it in a // @Modifies clause`, with `, as p.f` when a path from a parameter reaches it | No `Modifies` entry covers memory of this kind. | Add it to `Modifies`, by the path the message names. |
 | `... which F may not modify: nothing its // @Modifies clauses list is known to cover it` | An entry covers memory of this kind, but `vego` cannot prove it is this memory. It may be another element, another struct, or a slice that was replaced after `F` was called. | Make the entry match. For a replaced slice, the callee needs a `fresh ... Or within ...` clause. |
 | `x may be read before or after the call to F, which may change it, and Go does not fix the order` | Go may read `x` before or after `F` runs in this statement, and the two are not proved to give the same value. | Read `x` or call `F` in a statement of its own, in the order you mean. The message ends with such a statement, as in `x0 := x before it`, where one fits. See [Reads that Go may make before or after a call](#reads-that-go-may-make-before-or-after-a-call). |
 | `cannot verify F: g is called in the target of this assignment, and Go may call it before or after append writes into the array of s` | The call may run on either side of the write, and it may read or write memory. | Assign the result of `g` to a variable in a statement of its own first. See [An append beside a call](#an-append-beside-a-call). |

@@ -8,7 +8,7 @@ import "flag"
 // @Modifies dst
 // @Ensures True
 func Copies(dst, src []byte) {
-	copy(dst, src) // want `cannot verify Copies: the built-in function copy is not supported yet; write the copy as a loop that assigns each element, or, when the source is no longer than the destination, as dst = append\(dst\[:0\], src...\)`
+	copy(dst, src) // want `cannot verify Copies: the built-in function copy is not supported yet; write the copy as a loop that assigns each element, or, when the two have the same length, as dst = append\(dst\[:0\], src...\)`
 }
 
 // encoder holds an array.
@@ -123,4 +123,57 @@ func ThroughGrow(A []int) (out []int) {
 		out = grow(out, A[i]) // want `grow may modify out, which ThroughGrow may not modify; out is a result, and a // @Modifies clause names memory only by a path from a parameter: if what out refers to may be memory of the caller, list it by the parameter it comes from; if it is memory that ThroughGrow made, nothing here shows that, since a loop that assigns out the result of a call forgets where its memory came from: append to it in the loop itself`
 	}
 	return out
+}
+
+// @Ensures True
+func Digest(hash [4]byte) { // want `cannot verify Digest: parameter hash has unsupported type \[4\]byte; \[4\]byte is an array, and arrays are not supported yet`
+}
+
+// set writes the first element.
+//
+// @Requires |s| > 0
+// @Modifies s
+// @Ensures True
+func set(s []int) {
+	s[0] = 1
+}
+
+// mk returns a slice that it does not say is new.
+//
+// @Ensures |r| = 3
+func mk() (r []int) {
+	return make([]int, 3)
+}
+
+// The advice says where the memory came from.
+//
+// @Ensures True
+func FromCall() (n int) {
+	tmp := mk()
+	set(tmp) // want `set may modify tmp, which FromCall may not modify; it is memory that mk returned, and its contract does not say that this is new memory, so it may have existed when FromCall was called; if it is new, say so in the contract of mk, with // @Ensures fresh\(r\), or take it as a parameter and list it in a // @Modifies clause`
+	return 0
+}
+
+// Point and Segment are structs.
+type Point struct{ X, Y int }
+
+type Segment struct{ From, To Point }
+
+// The advice names the path from the parameter.
+//
+// @Requires s != nil
+// @Ensures True
+func Through(s *Segment) {
+	p := &s.To
+	p.X = 7 // want `p.X is assigned, which Through may not modify; list it in a // @Modifies clause, as s.To.X`
+}
+
+// Which is what this lists.
+//
+// @Requires s != nil
+// @Modifies s.To.X
+// @Ensures True
+func Listed(s *Segment) {
+	p := &s.To
+	p.X = 7
 }

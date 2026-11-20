@@ -164,3 +164,50 @@ func Reads(m Meter, a []int) (n int) {
 	m.Read(1) // want `the contract of Meter.Read cannot be used: its Ensures annotation at badcallee.go:\d+:\d+ cannot be read`
 	return a[5] // want `index may be out of range` `postcondition may not hold: n = 1`
 }
+
+// A call whose Modifies cannot be read ends its path in a loop too, and
+// what the loop forgets needs nothing of it: in the body, in the condition,
+// and in a literal the loop calls.
+//
+// @Requires r != nil And 0 <= k <= 10
+// @Ensures n = 1
+func (r *R) LoopedWrites(a []int, k int) (n int) {
+	// @Variant k - i
+	for i := 0; i < k; i++ {
+		writes(r) // want `the contract of writes cannot be used`
+	}
+	return a[5] // want `index may be out of range` `postcondition may not hold: n = 1`
+}
+
+// writesOK has a Modifies that cannot be read and a result.
+//
+// @Requires r != nil
+// @Modifies r.missing // want `in Modifies annotation: r.missing: trialfaults.R has no field missing`
+// @Ensures True
+func writesOK(r *R) (ok bool) {
+	return true
+}
+
+// @Requires r != nil And 0 <= k <= 10
+// @Ensures n = 1
+func (r *R) LoopedCondition(a []int, k int) (n int) {
+	i := 0
+	// @Variant k - i
+	for i < k && writesOK(r) { // want `the contract of writesOK cannot be used`
+		i++
+	}
+	return a[5] // want `index may be out of range` `postcondition may not hold: n = 1`
+}
+
+// @Requires r != nil And 0 <= k <= 10
+// @Ensures n = 1
+func (r *R) LoopedLiteral(a []int, k int) (n int) {
+	f := func() {
+		writes(r) // want `the contract of writes cannot be used`
+	}
+	// @Variant k - i
+	for i := 0; i < k; i++ {
+		f()
+	}
+	return a[5] // want `index may be out of range` `postcondition may not hold: n = 1`
+}

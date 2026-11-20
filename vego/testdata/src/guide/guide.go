@@ -203,7 +203,7 @@ func Fill(A []int, v int) {
 // @Ensures True
 func FillUnlisted(A []int, v int) {
 	for i := range A {
-		A[i] = v // want `vego: A\[i\] is assigned, which FillUnlisted may not modify; list it in a // @Modifies clause`
+		A[i] = v // want `vego: A\[i\] is assigned, which FillUnlisted may not modify; list it in a // @Modifies clause, as A`
 	}
 }
 
