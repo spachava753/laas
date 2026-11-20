@@ -53,6 +53,10 @@ type trustEntry struct {
 	// vouches names the error results whose errors the author vouches
 	// for; see knownError.
 	vouches []trustFormula
+	// formats names the parameters the function formats as package fmt
+	// does: one of type any or ...any whose values it formats, and at most
+	// one string that it uses as the format; see formatting.go.
+	formats []trustFormula
 	// calls gives function parameters a contract: how the function calls
 	// what it is given there.
 	calls []trustCall
@@ -248,6 +252,10 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			for _, item := range scalars("vouches", value) {
 				entry.vouches = append(entry.vouches, trustFormula{text: item.Value, line: item.Line, col: item.Column})
 			}
+		case "formats":
+			for _, item := range scalars("formats", value) {
+				entry.formats = append(entry.formats, trustFormula{text: item.Value, line: item.Line, col: item.Column})
+			}
 		case "calls":
 			f.addCalls(entry, value, formulas)
 		case "receiver":
@@ -257,7 +265,7 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			}
 			entry.receiver = trustFormula{text: value.Value, line: value.Line, col: value.Column}
 		default:
-			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, receiver, requires, ensures, modifies, runs, vouches, or calls",
+			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, receiver, requires, ensures, modifies, runs, vouches, formats, or calls",
 				field.Value, entry.key)
 		}
 	}
@@ -414,6 +422,9 @@ type EntryUse struct {
 	// Vouches the error results whose errors the contract vouches for.
 	Runs    []string
 	Vouches []string
+	// Formats names the parameters the function formats as package fmt
+	// does.
+	Formats []string
 	// Callbacks describes each function parameter given a contract under
 	// calls, as in "f(i) when: 0 <= i; i < n".
 	Callbacks []string
@@ -713,6 +724,7 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 	for _, item := range entry.calls {
 		pv.trustedCall(fn, item)
 	}
+	pv.readFormats(fn, entry)
 	// The error results whose errors the author vouches for. Listing
 	// anything else would be a claim about nothing.
 	pv.readVouches(fn, entry, true)
@@ -1016,9 +1028,12 @@ func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 		return use.Key == entry.key && use.File == entry.file.path
 	})
 	if index < 0 {
-		var runs, vouches []string
+		var runs, vouches, formats []string
 		for _, item := range entry.runs {
 			runs = append(runs, item.text)
+		}
+		for _, item := range entry.formats {
+			formats = append(formats, item.text)
 		}
 		for _, item := range entry.vouches {
 			vouches = append(vouches, item.text)
@@ -1058,7 +1073,7 @@ func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 		}
 		pv.usage.Entries = append(pv.usage.Entries, &EntryUse{
 			Key: entry.key, Reason: entry.reason, Shipped: entry.file.shipped,
-			File: entry.file.path, Line: entry.line, Runs: runs, Vouches: vouches, Callbacks: callbacks,
+			File: entry.file.path, Line: entry.line, Runs: runs, Vouches: vouches, Formats: formats, Callbacks: callbacks,
 			Every: every, Relied: []string{pv.pass.Pkg.Path()}, Fingerprint: entry.fingerprint(), States: states,
 		})
 		index = len(pv.usage.Entries) - 1

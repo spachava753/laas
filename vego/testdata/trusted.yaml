@@ -1307,6 +1307,45 @@ trusted:
       - "|s| >= 0"
     modifies: []
 
+  formatting.Logf:
+    reason: Test of a project's logging function, which forwards its values to log.Printf.
+    formats: [format, args]
+    modifies: []
+
+  formatting.fill:
+    reason: A test of formats with a write.
+    formats: [a]
+    modifies: [b]
+
+  formatting.handing:
+    reason: A test of formats with calls.
+    runs: [f]
+    calls:
+      f(): {}
+    formats: [a]
+    modifies: []
+
+  formatting.sinking:
+    reason: A test of formats with runs over a value whose contract writes.
+    runs: [s]
+    formats: [a]
+    modifies: []
+
+  formatting.twoValues:
+    reason: A test of formats with two parameters of type any.
+    formats: [a, b]
+    modifies: []
+
+  formatting.notAny:
+    reason: A test of formats with a parameter that is not of type any.
+    formats: [a]
+    modifies: []
+
+  guide.Logf:
+    reason: Formats with log.Printf, as the guide's example of a logging function of a project.
+    formats: [format, args]
+    modifies: []
+
 # States of interfaces of another module, and contracts that speak of them.
 state:
   ifacestatelib.Conn:

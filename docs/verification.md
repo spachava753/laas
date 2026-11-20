@@ -2346,12 +2346,10 @@ This check can miss a weak contract. When the path to the call depends on values
 
 ### Wrapping errors
 
-`fmt.Errorf` can format numbers, booleans, strings, and slices of them, when their types have no methods. It can also format an error of known origin. An error has a known origin in two cases:
+`fmt.Errorf` can format what every function that formats can: numbers, booleans, strings, and slices and structs of them without the methods that `fmt` calls, and errors of known origin. [What can be formatted](#what-can-be-formatted) gives the exact rule. An error has a known origin in two cases:
 
 - It was made by `errors.New` or `fmt.Errorf`, in verified code or in the initialiser of an error variable of any package, and nothing went into it but such values and other errors of known origin. `io.EOF` is one.
 - A trusted contract vouches for it, as described in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). A verified function that returns such an error passes the known origin on to its callers.
-
-A value whose type has methods, such as a string type with a `String` method, is rejected, because formatting it may call them.
 
 It cannot format an error that came from a parameter, or from a trusted function whose contract does not vouch for it. Formatting an error calls its methods, and `vego` cannot see what the methods of an unknown error do. For the same reason, such an error cannot be passed to a trusted function unless that function's contract allows it. See [Arguments that carry code](#arguments-that-carry-code).
 
@@ -2504,6 +2502,101 @@ These variables are of the third kind too:
 - a variable set by a call that does more than return an error variable, or that passes arguments, as in `var ErrBad = newError("bad")`.
 
 `vego` does not know whether such a variable is nil, unless the type of its initialiser says so as above. It does not know whether it is the same error as another error variable, or what `errors.Is` finds in it. A proof that needs one of these facts fails with `postcondition may not hold` or a similar message, and nothing says that the variable is the reason. If a proof fails where it uses an error variable of another package, read the initialiser of that variable.
+
+## Formatting and logging
+
+Verified code can format values and write them out with `fmt` and `log`:
+
+```go
+// @Ensures True
+func Announce(host string, port int, done, total int) (addr string) {
+	addr = fmt.Sprintf("%s:%d", host, port)
+	log.Printf("processed %d of %d", done, total)
+	_, _ = fmt.Println("listening on", addr)
+	return addr
+}
+```
+
+The shipped contracts of `fmt.Sprintf`, `fmt.Sprint`, `fmt.Sprintln`, `fmt.Printf`, `fmt.Print`, `fmt.Println`, `fmt.Fprintf`, `fmt.Fprint`, `fmt.Fprintln`, `log.Printf`, `log.Print`, `log.Println`, and of the methods `Printf`, `Print`, and `Println` of `*log.Logger` promise little. They write nothing your code can see. `vego` knows nothing of the string that `Sprintf` returns, or of the count and the error that `Println` returns. A function that returns that error can leave its success open, as described in [Functions that cannot promise success](#functions-that-cannot-promise-success).
+
+### What can be formatted
+
+`fmt` calls the `Format`, `GoString`, `Error`, and `String` methods of what it formats. Code that `vego` has not checked could run that way, so `vego` checks every value at each call. These values can be formatted:
+
+- numbers, booleans, and strings, of named types too;
+- slices and structs whose elements and fields can be formatted;
+- `nil`;
+- errors of known origin, described in [Wrapping errors](#wrapping-errors).
+
+A type that has a method named `Format`, `GoString`, `Error`, or `String` cannot be formatted. Methods of a pointer to the type do not count, because `fmt` does not call them on a value. A type that holds itself, such as `type Tree []Tree`, cannot be formatted either, since such a slice can hold itself and `fmt` would then not stop. Pointers, maps, interface values, and function values cannot be formatted.
+
+Anything else is reported as `cannot verify`:
+
+```go
+// @Ensures True
+func Display(v any) {
+	_, _ = fmt.Println(v)
+}
+```
+
+```text
+vego: cannot verify Display: Println formats v, a value of type any, and that may run code
+nobody has checked: any is an interface, which can hold a value with methods that fmt
+would call; only numbers, booleans, strings, and slices and structs of them without such
+methods, and errors of known origin, can be formatted
+```
+
+A slice passed with `...`, as in `fmt.Println(values...)`, is refused too, because what its elements hold is not known. List the values in the call instead.
+
+### Writing to a writer or a logger
+
+`fmt.Fprintf`, `fmt.Fprint`, and `fmt.Fprintln` require a writer that is not `nil`. They call its `Write` method, which is described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages). The methods of `*log.Logger` require a logger that is not `nil`, and call the `Write` method of the writer the logger holds:
+
+```go
+// @Requires w != nil And l != nil
+// @Ensures True
+func Inventory(w io.Writer, l *log.Logger, n int) (err error) {
+	l.Printf("%d items", n)
+	_, err = fmt.Fprintf(w, "%d items\n", n)
+	return err
+}
+```
+
+`os.Stdout`, `os.Stderr`, `log.Default()`, and a logger in a package-level variable are not supported yet, since `vego` does not support package-level variables. So `fmt.Fprintf(os.Stderr, ...)` is reported as `cannot verify`. Use `fmt.Printf` or `log.Printf`, or take the writer or the logger as a parameter.
+
+`fmt.Printf`, `fmt.Print`, and `fmt.Println` write to standard output, and the functions of `log` write to the standard logger. Code that is not verified chooses where those go: it can set `os.Stdout`, and it can call `log.SetOutput` or `slog.SetDefault`. A proof assumes that a write there returns and writes nothing verified code can see. If your program sets the standard logger's output to a writer of its own, it makes that claim about the writer. A writer that logs through the standard logger again never returns, because the logger holds a lock while it writes. See [What a proof assumes](#what-a-proof-assumes).
+
+### Your own logging function
+
+A logging function of your own that hands its values to `fmt` or `log` cannot be verified, because it formats values that it cannot check, the elements of `args`:
+
+```go
+func Logf(format string, args ...any) {
+	log.Printf("app: "+format, args...)
+}
+```
+
+Give it a trusted contract with `formats` instead. `vego` then checks each value at each call of `Logf`, as for `log.Printf`:
+
+```yaml
+  example.com/app/internal/logging.Logf:
+    reason: Formats with log.Printf; reviewed 2026-11-19.
+    formats: [format, args]
+    modifies: []
+```
+
+`formats` lists the parameter of type `any` or `...any` whose values the function formats, and the string it uses as the format, if it has one. By listing them, you claim all of this about the function:
+
+- It does nothing with those values but format them as package `fmt` does, and it uses that string only as the format.
+- It runs no method of the values other than those `fmt` runs, and only while the call lasts, on the goroutine that called it.
+- It keeps none of the values.
+- It writes nothing your code can see.
+
+An entry with `formats` must have `modifies: []` and no `calls`. Its `runs` may list only values whose contracts write nothing. Otherwise the entry cannot be used, because `vego` checks the values in the state of the call, and what the function wrote or ran before it formatted them could change that state.
+
+### Functions that do not return
+
+`log.Fatal`, `log.Fatalf`, `log.Fatalln`, `log.Panic`, `log.Panicf`, and `log.Panicln` have no shipped contracts. A trusted contract claims that its function returns, and these do not. A call of one is reported as `cannot verify`, with the message that it has no contract.
 
 ## Defer
 
@@ -2865,6 +2958,7 @@ Each entry has these fields:
 | `runs` | no | Parameters that carry code the function may call, at any depth inside the value. See [Arguments that carry code](#arguments-that-carry-code). |
 | `vouches` | no | Error results whose errors verified code may format, compare, and pass to `errors.Is`, results that hold function values or interface values verified code may call, and parameters under whose memory the function writes such values. See [Errors that a trusted function returns](#errors-that-a-trusted-function-returns) and [Function values and interface values that a trusted function returns](#function-values-and-interface-values-that-a-trusted-function-returns). |
 | `calls` | no | Function parameters that the function calls while it runs, each with what holds when it calls them. See [Functions that a trusted function calls](#functions-that-a-trusted-function-calls). |
+| `formats` | no | The parameter of type `any` or `...any` whose values the function formats as package `fmt` does, and the string it uses as the format, if any. See [Your own logging function](#your-own-logging-function). |
 
 Put the formulas in quotes. Several characters that formulas use have a special meaning in YAML.
 
@@ -2881,6 +2975,9 @@ The names in an entry are the parameter and result names from the function's sou
 - `strconv.Itoa`, `strconv.Atoi`
 - `os.Remove`
 - `math/rand.Intn`, `math/rand.Int`
+- `fmt.Sprintf`, `fmt.Sprint`, `fmt.Sprintln`, `fmt.Printf`, `fmt.Print`, `fmt.Println`, `fmt.Fprintf`, `fmt.Fprint`, `fmt.Fprintln`, described in [Formatting and logging](#formatting-and-logging)
+- `log.Printf`, `log.Print`, `log.Println`, and the methods of `*log.Logger` of the same names
+- `path.Join`, `path/filepath.Join`
 - the methods of `sync.Mutex` and `sync.RWMutex` that lock and unlock, and `(*sync.Once).Do`, described in [Locks](#locks)
 
 It also includes contracts for `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, `(context.Context).Err`, and `context.CancelFunc`, which are described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages), and the state `closed` of `io.Closer`, described in [States of interface values](#states-of-interface-values).
@@ -2930,6 +3027,8 @@ There are three ways to deal with this.
 The first is to pass an error that verified code created with `errors.New` or `fmt.Errorf`, or one that a trusted contract vouches for. An error that verified code created has only the standard library's methods and wraps nothing from outside. An error variable also qualifies if its initialiser used only plain values and other errors of this kind, in its own package or another. `var ErrRead = fmt.Errorf("read: %w", io.EOF)` qualifies. `var ErrLate = fmt.Errorf("late: %w", context.DeadlineExceeded)` does not, because `context.DeadlineExceeded` is not made by `errors.New` or `fmt.Errorf`.
 
 The second is to make the call from unverified code. This is the right choice for logging an error that came from elsewhere. The unverified caller logs the error, and the verified function only returns it.
+
+A function that only formats what it is given, as `fmt.Println` and `log.Printf` do, needs no `runs`. Its entry lists the values under `formats` instead, and `vego` checks each value at each call, as described in [What can be formatted](#what-can-be-formatted).
 
 The third is to list the parameter under `runs` in the trusted contract:
 
@@ -3582,6 +3681,8 @@ This table lists the most common messages.
 | `... which F may not modify: nothing its // @Modifies clauses list is known to cover it` | An entry covers memory of this kind, but `vego` cannot prove it is this memory. It may be another element, another struct, or a slice that was replaced after `F` was called. | Make the entry match. For a replaced slice, the callee needs a `fresh ... Or within ...` clause. |
 | `x may be read before or after the call to F, which may change it, and Go does not fix the order` | Go may read `x` before or after `F` runs in this statement, and the two are not proved to give the same value. | Read `x` or call `F` in a statement of its own, in the order you mean. The message ends with such a statement, as in `x0 := x before it`, where one fits. See [Reads that Go may make before or after a call](#reads-that-go-may-make-before-or-after-a-call). |
 | `cannot verify F: g is called in the target of this assignment, and Go may call it before or after append writes into the array of s` | The call may run on either side of the write, and it may read or write memory. | Assign the result of `g` to a variable in a statement of its own first. See [An append beside a call](#an-append-beside-a-call). |
+| `cannot verify F: P formats x, a value of type T, and that may run code nobody has checked: ...` | `fmt` would call a method of `x`, or of what it holds, or follow a pointer in it. The message says which. | Format the fields you need, or a string you build from them. See [What can be formatted](#what-can-be-formatted). |
+| `cannot verify F: P formats what the slice s holds, which can be anything` | A slice of values to format is passed with `...`. | List the values in the call. For a logging function of your own, see [Your own logging function](#your-own-logging-function). |
 | `the keys a and b of this map literal may be equal` | Two keys of a map literal are not proved to differ, so it is not known which entry the map keeps. | Prove that they differ, or assign the entries one by one. |
 | `Modifies lists x, but F never needs to modify it` | The `Modifies` list allows more than the body needs. | Remove or narrow the entry. |
 | `invariant of T may not hold for what is passed to F as x` | The struct invariant is not proved at the call. | Restore it before the call. In a loop, repeat it as a loop invariant. |
@@ -3686,6 +3787,8 @@ A function that uses any of the following is reported as `cannot verify`:
 - package-level variables, except error variables that are never assigned, of this package or another;
 - calls of variadic function values and variadic methods of interfaces, and contracts on variadic function types and on variadic methods of interfaces;
 - `copy`;
+- formatting a value whose type has a method `Format`, `GoString`, `Error`, or `String`, a pointer, a map, an interface value other than an error of known origin, a function value, or a value of a type that holds itself, with `fmt.Errorf` or a function whose entry lists it under `formats`, and passing such a function a slice with `...` for the values it formats (see [What can be formatted](#what-can-be-formatted));
+- `os.Stdout`, `os.Stderr`, and `log.Default()`, which are package-level variables;
 - a call in the target of an assignment whose right-hand side is an `append` that may write into the array of its slice, unless the call modifies nothing and refers to no memory or a call among the operands of the `append` orders it (see [An append beside a call](#an-append-beside-a-call));
 - a call with several results as the arguments of another call, as in `g(f())`;
 - comparing structs with `==`;
@@ -3704,7 +3807,7 @@ Floating-point values are supported but opaque. They can be passed around and us
 
 A proof by `vego` depends on the following assumptions. Each concerns something `vego` cannot see.
 
-- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and it keeps no value that can hold code. It does not call back, through another package, into the verified function that called it. A call back within the same package is found and reported. For a parameter listed under `runs`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter.
+- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and it keeps no value that can hold code. It does not call back, through another package, into the verified function that called it. A call back within the same package is found and reported. For a parameter listed under `runs`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, and keeps none of them. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter.
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one that wraps it, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method.
 - An interface value that reaches verified code from code that is not verified meets the contracts of its methods. That includes a value passed as an argument, a value in memory that an argument reaches, a value that a call through another value returns, and a value that a trusted function returns or writes, which its entry vouches for. Called with arguments that meet the `Requires` of a method, the method returns without panicking, leaves its `Ensures` true, and writes nothing that verified code can see outside what its `Modifies` lists. This holds also when the value holds a pointer to a struct that verified code holds.
 - The same holds of the methods and function types that entries of the trust file give contracts, which is what such an entry claims (see [What an entry for a type claims](#what-an-entry-for-a-type-claims)). In particular, a caller that is not verified does not pass a verified function such a value together with a pointer to memory that the value writes, as a `*bytes.Buffer` passed both as an `io.Writer` and as a `*bytes.Buffer` would be. Every call through such a value returns: a `Read` from a pipe, a terminal, or a connection returns only once data or an error arrives.
@@ -3721,6 +3824,8 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - The compiler evaluates each statement in an order that the Go specification allows. Calls, `&&`, and `||` run from left to right, an operation runs after its operands, and an assignment assigns only after it has evaluated everything. Where the specification leaves the order open, `vego` proves that every order it allows gives the same values.
 - The program runs on the platform `laas` was run for. The sizes of `int`, `uint`, and pointers, the layout of structs, and `MaxAlloc` are those of the `GOOS` and `GOARCH` that `laas` runs with. A proof for a 64-bit target does not hold for a 32-bit target.
 - The program is built from the files `laas` read. Files left out by a build constraint or a file name such as `_windows.go` are not read, so their annotations are not checked. Run `laas` once for each configuration you ship.
+- A write to standard output returns. Code that is not verified may set `os.Stdout` to any `*os.File`, and a pipe that nobody reads breaks this.
+- The output of the standard logger writes nothing that verified code can see, and returns. Code that is not verified sets that output with `log.SetOutput`, or with `slog.SetDefault` to a `slog.Handler`. A program that sets it to a writer or a handler of its own makes this claim about that code. A writer or a handler that logs through the standard logger again never returns, because the logger holds a lock while it writes. The same goes for a writer made by verified code whose `Write` calls something that logs.
 - The machine has enough memory and stack.
 - Z3 is correct. Every proof rests on Z3 5.4.1 answering correctly that a problem has no solution.
 - Your formulas say what you intend. `vego` does not check a formula for out-of-range indexes or division by zero, so a formula that contains one may mean something other than you expect. See [Formulas](#formulas).
@@ -3806,6 +3911,7 @@ Results are referred to by the names in the function's signature.
 | an operation | after its operands |
 | the right operand of `&&` and <code>&#124;&#124;</code> | after the left one, and only when the left one does not decide the result |
 | an assignment | assigns after every operand is evaluated |
+| the arguments listed for a variadic parameter | like other arguments; the new slice that holds them is made after them |
 | a call of a function literal | like a call, and it may change the variables that the literal assigns |
 | a call through a function value or an interface value | like a call; the value is evaluated with the arguments, before the call |
 | any other read of memory, or of a variable that a function literal assigns | not fixed; `vego` proves that every order gives the same value |

@@ -8,11 +8,14 @@ import (
 	"go/importer"
 	"go/token"
 	"go/types"
+	"io"
 	"io/fs"
+	"log"
 	"maps"
 	"math/big"
 	"math/rand"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -217,6 +220,92 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 		n, err := strconv.Atoi(s)
 		return sample{before: []any{s}, results: []any{n, err}}
 	},
+	"fmt.Sprintf": func(rng *rand.Rand) sample {
+		format, a := randomFormat(rng), randomOperands(rng)
+		return sample{before: []any{format, a}, results: []any{fmt.Sprintf(format, a...)}}
+	},
+	"fmt.Sprint": func(rng *rand.Rand) sample {
+		a := randomOperands(rng)
+		return sample{before: []any{a}, results: []any{fmt.Sprint(a...)}}
+	},
+	"fmt.Sprintln": func(rng *rand.Rand) sample {
+		a := randomOperands(rng)
+		return sample{before: []any{a}, results: []any{fmt.Sprintln(a...)}}
+	},
+	"fmt.Printf": func(rng *rand.Rand) sample {
+		format, a := randomFormat(rng), randomOperands(rng)
+		var n int
+		var err error
+		toScratch(func() { n, err = fmt.Printf(format, a...) })
+		return sample{before: []any{format, a}, results: []any{n, err}}
+	},
+	"fmt.Print": func(rng *rand.Rand) sample {
+		a := randomOperands(rng)
+		var n int
+		var err error
+		toScratch(func() { n, err = fmt.Print(a...) })
+		return sample{before: []any{a}, results: []any{n, err}}
+	},
+	"fmt.Println": func(rng *rand.Rand) sample {
+		a := randomOperands(rng)
+		var n int
+		var err error
+		toScratch(func() { n, err = fmt.Println(a...) })
+		return sample{before: []any{a}, results: []any{n, err}}
+	},
+	"fmt.Fprintf": func(rng *rand.Rand) sample {
+		w, format, a := randomWriter(rng), randomFormat(rng), randomOperands(rng)
+		n, err := fmt.Fprintf(w, format, a...)
+		return sample{before: []any{w, format, a}, results: []any{n, err}}
+	},
+	"fmt.Fprint": func(rng *rand.Rand) sample {
+		w, a := randomWriter(rng), randomOperands(rng)
+		n, err := fmt.Fprint(w, a...)
+		return sample{before: []any{w, a}, results: []any{n, err}}
+	},
+	"fmt.Fprintln": func(rng *rand.Rand) sample {
+		w, a := randomWriter(rng), randomOperands(rng)
+		n, err := fmt.Fprintln(w, a...)
+		return sample{before: []any{w, a}, results: []any{n, err}}
+	},
+	"log.Printf": func(rng *rand.Rand) sample {
+		format, v := randomFormat(rng), randomOperands(rng)
+		toLogBuffer(func() { log.Printf(format, v...) })
+		return sample{before: []any{format, v}}
+	},
+	"log.Print": func(rng *rand.Rand) sample {
+		v := randomOperands(rng)
+		toLogBuffer(func() { log.Print(v...) })
+		return sample{before: []any{v}}
+	},
+	"log.Println": func(rng *rand.Rand) sample {
+		v := randomOperands(rng)
+		toLogBuffer(func() { log.Println(v...) })
+		return sample{before: []any{v}}
+	},
+	"(*log.Logger).Printf": func(rng *rand.Rand) sample {
+		l, format, v := log.New(randomWriter(rng), "p ", rng.Intn(64)), randomFormat(rng), randomOperands(rng)
+		l.Printf(format, v...)
+		return sample{before: []any{l, format, v}}
+	},
+	"(*log.Logger).Print": func(rng *rand.Rand) sample {
+		l, v := log.New(randomWriter(rng), "p ", rng.Intn(64)), randomOperands(rng)
+		l.Print(v...)
+		return sample{before: []any{l, v}}
+	},
+	"(*log.Logger).Println": func(rng *rand.Rand) sample {
+		l, v := log.New(randomWriter(rng), "p ", rng.Intn(64)), randomOperands(rng)
+		l.Println(v...)
+		return sample{before: []any{l, v}}
+	},
+	"path.Join": func(rng *rand.Rand) sample {
+		elem := randomElements(rng)
+		return sample{before: []any{elem}, results: []any{path.Join(elem...)}}
+	},
+	"path/filepath.Join": func(rng *rand.Rand) sample {
+		elem := randomElements(rng)
+		return sample{before: []any{elem}, results: []any{filepath.Join(elem...)}}
+	},
 	"os.Remove": func(rng *rand.Rand) sample {
 		// Only inside a directory of its own, made for each call: a file,
 		// a missing name, a directory that is not empty, a path through a
@@ -307,6 +396,88 @@ func randomText(rng *rand.Rand) string {
 	return text.String()
 }
 
+// randomFormat returns a format of the kinds code passes to Printf: verbs
+// with flags, widths, precisions, and indices, too few or too many for the
+// operands, and bad verbs.
+func randomFormat(rng *rand.Rand) string {
+	parts := []string{"x", " ", "%v", "%+v", "%#v", "%s", "%q", "%x", "% #x", "%d", "%5.2f", "%T", "%p", "%[1]v", "%[2]d", "%*d", "%-8q", "%z", "%w", "%%", "%!"}
+	var b strings.Builder
+	for range rng.Intn(6) {
+		b.WriteString(parts[rng.Intn(len(parts))])
+	}
+	return b.String()
+}
+
+// randomOperands returns values that vego lets code format: numbers,
+// booleans, strings, slices of them, plain structs, nil, and errors of
+// known origin.
+func randomOperands(rng *rand.Rand) []any {
+	type pair struct {
+		A int
+		b string
+	}
+	values := []any{0, -1, 1 << 62, uint8(200), true, "", "text", "\xff\x00", 2.5, []int{1, 2}, []string{"a", ""}, []byte("hi"),
+		pair{3, "x"}, []pair{{1, "y"}}, nil, errors.New("made"), fmt.Errorf("wrapped: %w", io.EOF)}
+	operands := make([]any, rng.Intn(5))
+	for i := range operands {
+		operands[i] = values[rng.Intn(len(values))]
+	}
+	return operands
+}
+
+// randomWriter returns a writer from the standard library: a buffer, a
+// writer that discards, or a file in scratch.
+func randomWriter(rng *rand.Rand) io.Writer {
+	switch rng.Intn(3) {
+	case 0:
+		return &bytes.Buffer{}
+	case 1:
+		return io.Discard
+	}
+	file, err := os.CreateTemp(scratch, "out")
+	if err != nil {
+		panic(err)
+	}
+	return file
+}
+
+// toScratch runs a call that writes to standard output with standard
+// output set to a file in scratch.
+func toScratch(call func()) {
+	file, err := os.CreateTemp(scratch, "stdout")
+	if err != nil {
+		panic(err)
+	}
+	defer func() { _ = file.Close() }()
+	saved := os.Stdout
+	os.Stdout = file
+	defer func() { os.Stdout = saved }()
+	call()
+}
+
+// toLogBuffer runs a call that writes to the standard logger with its
+// output set to a buffer.
+func toLogBuffer(call func()) {
+	saved := log.Writer()
+	log.SetOutput(&bytes.Buffer{})
+	defer log.SetOutput(saved)
+	call()
+}
+
+// randomElements returns elements of a path, all empty about a fifth of
+// the time.
+func randomElements(rng *rand.Rand) []string {
+	parts := []string{"", "a", "b/c", "..", "/", "./d"}
+	elem := make([]string, rng.Intn(4))
+	for i := range elem {
+		elem[i] = parts[rng.Intn(len(parts))]
+		if rng.Intn(5) == 0 {
+			elem[i] = ""
+		}
+	}
+	return elem
+}
+
 // scratch is the directory the harnesses that touch files work in, made
 // afresh for each run of the test.
 var scratch string
@@ -385,11 +556,21 @@ func (g *grounder) groundTerm(value any) *logic.Term {
 			seq = logic.Push(seq, logic.IntLit(int64(element)))
 		}
 		return seq
-	case []string, [][]byte:
-		// No shipped contract reads the fields of FieldsFunc yet; a
-		// formula that did would fail on this constant, which the
-		// evaluator cannot read.
+	case []string:
+		seq := logic.Fill(logic.IntLit(0), logic.Bytes(""))
+		for _, element := range value {
+			seq = logic.Push(seq, logic.Bytes(element))
+		}
+		return seq
+	case [][]byte, []any:
+		// No shipped contract reads the fields of FieldsFunc or the values
+		// a function formats; a formula that did would fail on this
+		// constant, which the evaluator cannot read.
 		return logic.Const("unreadable", logic.IntSeq)
+	case io.Writer, *log.Logger:
+		// A writer or a logger is one reference, which no formula of an
+		// entry reads but to compare it with nil.
+		return logic.RefLit(1)
 	case error:
 		if value != nil {
 			g.errs = append(g.errs, value)
@@ -427,6 +608,9 @@ func (e *evaluator) number(t *logic.Term) *big.Int {
 	case logic.OpNeg:
 		return new(big.Int).Neg(x(0))
 	case logic.OpLen:
+		if t.Args[0].Sort == logic.SeqOf(logic.IntSeq) {
+			return big.NewInt(int64(len(e.rows(t.Args[0]))))
+		}
 		return big.NewInt(int64(len(e.sequence(t.Args[0]))))
 	case logic.OpSelect:
 		if answer, ok := e.callbacks[t.Args[0].Name]; ok && t.Args[0].Op == logic.OpConst {
@@ -445,12 +629,30 @@ func (e *evaluator) number(t *logic.Term) *big.Int {
 
 func (e *evaluator) sequence(t *logic.Term) []*big.Int {
 	switch t.Op {
+	case logic.OpSelect:
+		rows, index := e.rows(t.Args[0]), e.number(t.Args[1])
+		if index.Sign() < 0 || index.Cmp(big.NewInt(int64(len(rows)))) >= 0 {
+			return nil
+		}
+		return rows[index.Int64()]
 	case logic.OpFill:
 		return slices.Repeat([]*big.Int{e.number(t.Args[1])}, int(e.number(t.Args[0]).Int64()))
 	case logic.OpPush:
 		return append(slices.Clone(e.sequence(t.Args[0])), e.number(t.Args[1]))
 	}
 	panic("cannot evaluate sequence " + t.String())
+}
+
+// rows computes a sequence of sequences, such as the strings of a
+// []string.
+func (e *evaluator) rows(t *logic.Term) [][]*big.Int {
+	switch t.Op {
+	case logic.OpFill:
+		return slices.Repeat([][]*big.Int{e.sequence(t.Args[1])}, int(e.number(t.Args[0]).Int64()))
+	case logic.OpPush:
+		return append(slices.Clone(e.rows(t.Args[0])), e.sequence(t.Args[1]))
+	}
+	panic("cannot evaluate sequence of sequences " + t.String())
 }
 
 func (e *evaluator) holds(t *logic.Term) bool {
@@ -533,6 +735,16 @@ func TestShippedContracts(t *testing.T) {
 		usage:        &Usage{},
 		reliedKeys:   map[string]bool{},
 		typeEntries:  map[string]*funcInfo{},
+		// What the entries under formats run is looked up by method.
+		importedMethods: map[*types.Func]*funcInfo{},
+		ifaceMethods:    map[*types.Func]*funcInfo{},
+		importedTypes:   map[*types.TypeName]*funcInfo{},
+		funcTypes:       map[*types.TypeName]*funcInfo{},
+		unentered:       map[string]bool{},
+		ownStates:       map[*types.TypeName][]ifaceState{},
+		foreignBroken:   map[*types.Package]bool{},
+		imported:        map[*types.Func]*funcInfo{},
+		foreign:         map[*types.Package]*logic.Resolver{},
 		// The types of the methods of sync are structs, whose invariants
 		// are looked up.
 		invariants: map[*types.TypeName]*invariantSet{},
@@ -577,6 +789,11 @@ func TestShippedContracts(t *testing.T) {
 					return
 				}
 				callee, ok := pkg.Scope().Lookup(name).(*types.Func)
+				if receiver, method, isMethod := strings.Cut(strings.TrimPrefix(name, "(*"), ")."); isMethod {
+					typeName := pkg.Scope().Lookup(receiver).(*types.TypeName)
+					found, _, _ := types.LookupFieldOrMethod(types.NewPointer(typeName.Type()), true, pkg, method)
+					callee, ok = found.(*types.Func)
+				}
 				if !ok {
 					t.Fatalf("package %s has no function %s", path, name)
 				}
@@ -640,6 +857,9 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 				eval.bound = max(eval.bound, int64(len(list))+2)
 			}
 			if list, ok := call.before[i].([]byte); ok {
+				eval.bound = max(eval.bound, int64(len(list))+2)
+			}
+			if list, ok := call.before[i].([]string); ok {
 				eval.bound = max(eval.bound, int64(len(list))+2)
 			}
 			// A quantifier over [0, n) needs the indices up to n.

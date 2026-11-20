@@ -1,0 +1,89 @@
+version: 1
+
+trusted:
+  fmt.Sprintf:
+    reason: >-
+      Documented to format according to a format specifier and return the
+      resulting string. It formats its operands in the manner the
+      documentation of fmt describes, which calls their Format, GoString,
+      Error, and String methods; vego checks the operands at each call.
+      Nothing is known of the string.
+    formats: [format, a]
+    modifies: []
+
+  fmt.Sprint:
+    reason: >-
+      Documented to format using the default formats for its operands and
+      return the resulting string. Nothing is known of the string.
+    formats: [a]
+    modifies: []
+
+  fmt.Sprintln:
+    reason: >-
+      Documented to format using the default formats for its operands and
+      return the resulting string, with spaces between operands and a
+      newline. Nothing is known of the string.
+    formats: [a]
+    modifies: []
+
+  fmt.Printf:
+    reason: >-
+      Documented to format according to a format specifier and write to
+      standard output, returning the number of bytes written and any write
+      error. Standard output is os.Stdout, which code that is not verified
+      may set to any *os.File; the claim that the call returns is a claim
+      that a write to it returns. Nothing is known of n or err.
+    formats: [format, a]
+    modifies: []
+
+  fmt.Print:
+    reason: >-
+      Documented to format using the default formats for its operands and
+      write to standard output, returning the number of bytes written and
+      any write error. Nothing is known of n or err.
+    formats: [a]
+    modifies: []
+
+  fmt.Println:
+    reason: >-
+      Documented to format using the default formats for its operands and
+      write to standard output, with spaces between operands and a newline,
+      returning the number of bytes written and any write error. Nothing is
+      known of n or err.
+    formats: [a]
+    modifies: []
+
+  fmt.Fprintf:
+    reason: >-
+      Documented to format according to a format specifier and write to w,
+      returning the number of bytes written and any write error. It calls
+      w.Write, and panics on a nil w. Nothing is known of n or err.
+    requires:
+      - "w != nil"
+    runs: [w]
+    formats: [format, a]
+    modifies: []
+
+  fmt.Fprint:
+    reason: >-
+      Documented to format using the default formats for its operands and
+      write to w, returning the number of bytes written and any write
+      error. It calls w.Write, and panics on a nil w. Nothing is known of n
+      or err.
+    requires:
+      - "w != nil"
+    runs: [w]
+    formats: [a]
+    modifies: []
+
+  fmt.Fprintln:
+    reason: >-
+      Documented to format using the default formats for its operands and
+      write to w, with spaces between operands and a newline, returning the
+      number of bytes written and any write error. It calls w.Write, and
+      panics on a nil w. Nothing is known of n or err.
+    requires:
+      - "w != nil"
+    runs: [w]
+    formats: [a]
+    modifies: []

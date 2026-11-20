@@ -332,6 +332,10 @@ type funcInfo struct {
 	// vouches holds the indices of the error results of a trusted function
 	// whose errors its contract vouches for; see knownError.
 	vouches map[int]bool
+	// formatted is the parameter of a trusted function whose values its
+	// contract says it formats as package fmt does, and format the string
+	// it uses as the format, if any; see formatting.go.
+	formatted, format *types.Var
 	// vouchedWrites holds the parameters of a trusted function under
 	// whose memory its contract vouches for the function values and
 	// interface values it writes.

@@ -1,0 +1,11 @@
+version: 1
+
+trusted:
+  path.Join:
+    reason: >-
+      Documented to join any number of path elements into a single path,
+      and to return an empty string if the argument list is empty or all
+      its elements are empty.
+    ensures:
+      - "(Forall i in [0, |elem|) : |elem[i]| = 0) -> |result| = 0"
+    modifies: []

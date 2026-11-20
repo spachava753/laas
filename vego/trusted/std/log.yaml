@@ -1,0 +1,62 @@
+version: 1
+
+trusted:
+  log.Printf:
+    reason: >-
+      Documented to call Output to print to the standard logger, with the
+      arguments handled in the manner of fmt.Printf. The standard logger
+      writes to the output that code that is not verified sets with
+      log.SetOutput, or hands the message to the slog.Handler it sets with
+      slog.SetDefault; the claim that the call returns and writes nothing a
+      caller can see is a claim about that output.
+    formats: [format, v]
+    modifies: []
+
+  log.Print:
+    reason: >-
+      Documented to call Output to print to the standard logger, with the
+      arguments handled in the manner of fmt.Print. See log.Printf for what
+      is claimed of the logger's output.
+    formats: [v]
+    modifies: []
+
+  log.Println:
+    reason: >-
+      Documented to call Output to print to the standard logger, with the
+      arguments handled in the manner of fmt.Println. See log.Printf for
+      what is claimed of the logger's output.
+    formats: [v]
+    modifies: []
+
+  (*log.Logger).Printf:
+    reason: >-
+      Documented to call l.Output to print to the logger, with the
+      arguments handled in the manner of fmt.Printf. It writes to the
+      writer l holds, which it runs; a nil l panics.
+    requires:
+      - "l != nil"
+    runs: [l]
+    formats: [format, v]
+    modifies: []
+
+  (*log.Logger).Print:
+    reason: >-
+      Documented to call l.Output to print to the logger, with the
+      arguments handled in the manner of fmt.Print. It writes to the writer
+      l holds, which it runs; a nil l panics.
+    requires:
+      - "l != nil"
+    runs: [l]
+    formats: [v]
+    modifies: []
+
+  (*log.Logger).Println:
+    reason: >-
+      Documented to call l.Output to print to the logger, with the
+      arguments handled in the manner of fmt.Println. It writes to the
+      writer l holds, which it runs; a nil l panics.
+    requires:
+      - "l != nil"
+    runs: [l]
+    formats: [v]
+    modifies: []

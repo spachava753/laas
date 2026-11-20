@@ -194,6 +194,7 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func) *funcIn
 		v.noteUse(fn, call.Pos())
 		v.checkHandedOver(call, fn)
 		v.checkNotHandable(call, fn)
+		v.checkFormatted(call, fn)
 	}
 	return fn
 }
@@ -274,7 +275,9 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 		if fn.runs[param] {
 			v.noteEntriesIn(param.Type(), arg.Pos())
 		}
-		if fn.runs[param] || !holdsCode(t, map[types.Type]bool{}) {
+		// What a parameter under formats is given is checked by the rule
+		// for formatting; see checkFormatted.
+		if fn.runs[param] || (param == fn.formatted && param != nil) || !holdsCode(t, map[types.Type]bool{}) {
 			continue
 		}
 		// Known origin of either kind makes every method harmless.

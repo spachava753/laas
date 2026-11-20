@@ -80,6 +80,9 @@ func (pv *pkgVerifier) typeEntry(key string, obj *types.Func, methodOf *types.Fu
 	if len(entry.runs) > 0 {
 		fn.defect("it lists runs, which a contract of a type cannot have: a call through a value of the type is never handed code nobody has seen")
 	}
+	if len(entry.formats) > 0 {
+		fn.defect("it lists formats, which a contract of a type cannot have: a call through a value of the type is never handed values whose formatting runs code")
+	}
 	if len(entry.calls) > 0 {
 		fn.defect("it has calls, which a contract of a type cannot have")
 	}
@@ -315,6 +318,7 @@ func (entry *trustEntry) fingerprint() string {
 	list("modifies", entry.modifies)
 	list("vouches", entry.vouches)
 	list("runs", entry.runs)
+	list("formats", entry.formats)
 	for _, call := range entry.calls {
 		parts = append(parts, fmt.Sprintf("calls %s(%s) %v", call.name, strings.Join(call.params, ", "), call.deterministic))
 		list("calls requires", call.requires)

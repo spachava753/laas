@@ -56,6 +56,11 @@ func TrustReport(usages []*Usage, dir string) string {
 			if len(use.Runs) > 0 {
 				fmt.Fprintf(&b, "    runs code held by: %s\n", strings.Join(use.Runs, ", "))
 			}
+			if len(use.Formats) > 0 {
+				fmt.Fprintf(&b, "    formats as package fmt does: %s; a claim that it runs only the Format, GoString, Error, and String methods "+
+					"that fmt runs, while the call lasts and on the goroutine that called it, keeps none of the values, and builds nothing longer "+
+					"than fmt would print\n", strings.Join(use.Formats, ", "))
+			}
 			for _, callback := range use.Callbacks {
 				fmt.Fprintf(&b, "    calls %s\n", callback)
 			}

@@ -215,7 +215,7 @@ func (pv *pkgVerifier) findSentinels() {
 				if other := pv.namedVariable(arg); other != nil && isError(other.Type()) {
 					return !homemadeOf(other)
 				}
-				return !formatsPlainly(pv.info.TypeOf(arg))
+				return plainReason(pv.info.TypeOf(arg), map[types.Type]bool{}) != ""
 			})
 			if plain {
 				pv.homemade[variable], again = true, true

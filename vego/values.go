@@ -1,7 +1,6 @@
 package vego
 
 import (
-	"fmt"
 	"go/ast"
 	"go/constant"
 	"go/token"
@@ -9,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"golang.org/x/tools/go/types/typeutil"
 )
 
 // isSlice reports whether a type is a slice. Strings are modelled as
@@ -194,24 +194,6 @@ func errorConstructor(callee *types.Func) bool {
 	return name == "errors.New" || name == "fmt.Errorf"
 }
 
-// formatsPlainly reports whether formatting a value of the type runs no
-// code but the formatter's own: a number, boolean, or string without methods,
-// or a slice of such values.
-func formatsPlainly(t types.Type) bool {
-	// A slice type can be its own element type, as in type S []S; following
-	// it would never end, and it holds no number, boolean, or string.
-	seen := map[types.Type]bool{}
-	for isSlice(t) && types.NewMethodSet(t).Len() == 0 {
-		if seen[t] {
-			return false
-		}
-		seen[t] = true
-		t = elemType(t)
-	}
-	_, basic := t.Underlying().(*types.Basic)
-	return basic && types.NewMethodSet(t).Len() == 0
-}
-
 // newError evaluates a call to an error constructor: its arguments are
 // evaluated for the checks they carry, and the result is some non-nil error.
 //
@@ -221,19 +203,9 @@ func formatsPlainly(t types.Type) bool {
 // whose origin is known; see knownError.
 func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term) *logic.Term {
 	values := map[ast.Expr]value{}
+	callee := typeutil.StaticCallee(v.info, call)
 	for _, arg := range call.Args {
-		t := v.info.TypeOf(arg)
-		// Formatting an error runs its methods, which known origin of either
-		// kind makes harmless.
-		switch {
-		case isError(t) && !v.knownError(v.bodyOrigins(), arg, -1, map[*types.Var]bool{}):
-			v.unsupported(arg.Pos(), fmt.Sprintf("formatting %s would run the methods of an error whose origin is not known; "+
-				"only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a trusted contract vouches for, "+
-				"can be formatted%s", types.ExprString(arg), v.originWhy(arg)))
-		case !isError(t) && !formatsPlainly(t):
-			v.unsupported(arg.Pos(), fmt.Sprintf(
-				"formatting a value of type %s may call methods, which are not verified, or follow pointers", t))
-		}
+		v.checkFormattable(arg, callee.Pkg().Name()+"."+callee.Name())
 		// Go converts the arguments of fmt.Errorf after the format to
 		// any. That makes no interface value that verified code can call;
 		// what formatting may run is decided above.

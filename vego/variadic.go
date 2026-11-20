@@ -100,15 +100,6 @@ func (a passedArg) text() string {
 	return types.ExprString(a.expr)
 }
 
-// exprs lists the expressions written for a parameter: the argument, or the
-// arguments of a pack.
-func (a passedArg) exprs() []ast.Expr {
-	if a.packed {
-		return a.pack
-	}
-	return []ast.Expr{a.expr}
-}
-
 // evalPassed evaluates what a call gives one parameter: the argument as the
 // parameter takes it, or, for a pack, a new slice of its arguments, each
 // converted to the element type. The arguments are operands of the call
