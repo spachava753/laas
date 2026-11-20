@@ -122,7 +122,7 @@ type Caller struct{ inner Pricer }
 // @Requires c.inner != nil And 0 <= qty <= 1000
 // @Ensures ok -> 0 <= cents <= 1000000
 func (c Caller) Price(sku string, qty int) (cents int, ok bool) {
-	return c.inner.Price(sku, qty)
+	return c.inner.Price(sku, qty) // want `this call may not end: Caller.Price calls c.inner.Price\(sku, qty\) at conversionsdefects.go:\d+:\d+, which may run Caller.Price`
 }
 
 // @Ensures True
@@ -139,7 +139,7 @@ type PriceFunc func(sku string, qty int) (cents int, ok bool)
 // @Requires f != nil And 0 <= qty <= 1000
 // @Ensures ok -> 0 <= cents <= 1000000
 func (f PriceFunc) Price(sku string, qty int) (cents int, ok bool) {
-	return f(sku, qty)
+	return f(sku, qty) // want `this call may not end: PriceFunc.Price calls f\(sku, qty\) at conversionsdefects.go:\d+:\d+, which may run PriceFunc.Price`
 }
 
 // @Ensures True
@@ -153,7 +153,7 @@ type Looping struct{}
 // @Requires 0 <= qty <= 1000
 // @Ensures ok -> 0 <= cents <= 1000000
 func (Looping) Price(sku string, qty int) (cents int, ok bool) {
-	return LoopBack(qty) // want `recursive call needs a // @Variant annotation in the doc comment of Price to prove termination`
+	return LoopBack(qty) // want `this call may not end: Looping.Price calls LoopBack at conversionsdefects.go:\d+:\d+, LoopBack calls p.Price\("a", qty\) at conversionsdefects.go:\d+:\d+, which may run Looping.Price`
 }
 
 // @Requires 0 <= qty <= 1000

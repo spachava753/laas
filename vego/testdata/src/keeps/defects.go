@@ -136,7 +136,7 @@ func (a Again) Read(p []byte) (n int, err error) {
 	if a.box == nil {
 		return 0, nil
 	}
-	return a.box.Fill(p), nil
+	return a.box.Fill(p), nil // want `this call may not end: Again.Read hands a.box to a.box.Fill\(p\) at defects.go:\d+:\d+, which may run Again.Read`
 }
 
 // Cycles keeps a reader whose Read fills the box it is kept in.
@@ -160,7 +160,7 @@ type Drained struct{}
 // @Ensures 0 <= n And n <= |p| And err = nil
 func (Drained) Read(p []byte) (n int, err error) {
 	p[0] = 0
-	drain()
+	drain() // want `this call may not end: Drained.Read calls drain at defects.go:\d+:\d+, drain hands keepslib.Closing\(Drained\{\}\) to keepslib.Consume\(keepslib.Closing\(Drained\{\}\)\) at defects.go:\d+:\d+, which may run Drained.Read`
 	return 1, nil
 }
 

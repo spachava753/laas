@@ -144,7 +144,7 @@ type Logging struct {
 // @Requires l.Inner != nil And 0 <= qty <= 1000
 // @Ensures ok -> 0 <= cents <= 1000000
 func (l Logging) Price(sku string, qty int) (cents int, ok bool) {
-	return l.Inner.Price(sku, qty)
+	return l.Inner.Price(sku, qty) // want `this call may not end: Logging.Price calls l.Inner.Price\(sku, qty\) at interfaces.go:\d+:\d+, which may run Logging.Price`
 }
 
 // @Requires inner != nil

@@ -115,7 +115,7 @@ type Drained struct{}
 // @Ensures 0 <= n And n <= |p| And err = nil
 func (Drained) Read(p []byte) (n int, err error) {
 	p[0] = 0
-	drain()
+	drain() // want `this call may not end: Drained.Read calls drain at iowrap.go:\d+:\d+, drain hands io.NopCloser\(Drained\{\}\) to keepslib.Consume\(io.NopCloser\(Drained\{\}\)\) at iowrap.go:\d+:\d+, which may run Drained.Read`
 	return 1, nil
 }
 

@@ -144,14 +144,14 @@ func HandsStrict(p Strict) {
 //
 // @Ensures True
 func handsItself(i int) (b bool) {
-	return search(2, handsItself) >= 0 // want `recursive call needs a // @Variant annotation in the doc comment of handsItself to prove termination, in handsItself run by search`
+	return search(2, handsItself) >= 0 // want `recursive call needs a // @Variant annotation in the doc comment of handsItself to prove termination; the cycle: handsItself calls handsItself at named.go:\d+:\d+, in handsItself run by search`
 }
 
 // handsBack hands search a function that calls it back.
 //
 // @Ensures True
 func handsBack() (b bool) {
-	return search(2, callsBack) >= 0 // want `recursive call needs a // @Variant annotation in the doc comment of handsBack to prove termination, in callsBack run by search`
+	return search(2, callsBack) >= 0 // want `recursive call needs a // @Variant annotation in the doc comment of handsBack to prove termination; the cycle: handsBack calls callsBack at named.go:\d+:\d+, callsBack calls handsBack at named.go:\d+:\d+, in callsBack run by search`
 }
 
 // callsBack calls handsBack.
@@ -194,7 +194,7 @@ type box struct {
 // @Requires 0 <= i
 // @Ensures True
 func (b *box) relay(i int) {
-	b.f(i)
+	b.f(i) // want `this call may not end: \(\*box\).relay calls b.f\(i\) at named.go:\d+:\d+, which may run \(\*box\).relay`
 }
 
 // Relayed makes a value that hands each a method that calls a value.
@@ -219,7 +219,7 @@ func visitAny(i int) {}
 // @Ensures True
 func relayAll(i int) {
 	vs := []Visitor{visitAny}
-	vs[0](i)
+	vs[0](i) // want `this call may not end: relayAll calls vs\[0\]\(i\) at named.go:\d+:\d+, which may run relayAll`
 }
 
 // spread hands each a function that calls a value.
@@ -229,7 +229,7 @@ func relayAll(i int) {
 func spread(i int) {
 	// What relayAll calls through a value may be spread itself, which is
 	// made into a value below.
-	each(i, relayAll) // want `recursive call needs a // @Variant annotation in the doc comment of spread to prove termination, in relayAll run by each`
+	each(i, relayAll) // want `this call may not end: spread calls relayAll at named.go:\d+:\d+, relayAll calls vs\[0\]\(i\) at named.go:\d+:\d+, which may run spread`
 }
 
 // Spreads makes spread into a value.

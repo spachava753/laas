@@ -224,7 +224,7 @@ func InLoop(n int) {
 // @Ensures True
 func Recurses(n int) {
 	each(n, func(i int) {
-		Recurses(i) // want `recursive call needs a // @Variant annotation in the doc comment of Recurses to prove termination, in the function literal run by each at literals.go:\d+:\d+`
+		Recurses(i) // want `recursive call needs a // @Variant annotation in the doc comment of Recurses to prove termination; the cycle: Recurses calls Recurses at literals.go:\d+:\d+, in the function literal run by each at literals.go:\d+:\d+`
 	})
 }
 

@@ -1116,26 +1116,43 @@ func (v *fnVerifier) calleeFormula(c *clause, env *specEnv) *logic.Term {
 	return t
 }
 
-// checkRecursion requires a decreasing measure for every call that can lead
-// back to the function under verification.
+// checkRecursion looks at every call for a way back to the function under
+// verification; see callgraph.go. A cycle that goes only through calls that
+// name their callee needs a Variant on each function of it, decreasing at
+// the call; one that goes through a call with no static callee, of an
+// interface method or a function value, or through code of another
+// package, is reported: no Variant can be checked across such a call.
+// Calls that a function used as a value makes are not recursion of the
+// function around it, and stratification bounds them.
 func (v *fnVerifier) checkRecursion(callee *funcInfo, pre *specEnv, st *state, guard []*logic.Term, call *ast.CallExpr) {
-	// A trusted function of this package has a body all the same, and what
-	// it calls is known.
-	from := callee
-	if own := v.funcs[callee.obj]; own != nil {
-		from = own
-	}
-	if !v.reaches(from, v.fn) {
+	self := v.graph.byObj[v.fn.obj]
+	if self == nil || v.fn.decl == nil || v.fn.spelled != nil {
 		return
 	}
-	if callee.trust != nil {
-		v.report(call.Pos(), "%s is trusted and calls back into %s, so that this call ends cannot be proved; verify %s instead of trusting it",
-			callee.obj.Name(), v.fn.obj.Name(), callee.obj.Name())
+	first := v.callEdges(call, callee)
+	through, direct := v.cycleThrough(self, first, false), v.cycleThrough(self, first, true)
+	// A trusted function of this package has a body to verify instead.
+	if callee.trust != nil && v.graph.byObj[callee.obj.Origin()] != nil && (through != nil || direct != nil) {
+		shown := direct
+		if shown == nil {
+			shown = through
+		}
+		v.report(call.Pos(), "%s is trusted and calls back into %s, so that this call ends cannot be proved; verify %s instead of trusting it; the cycle: %s",
+			callee.obj.Name(), v.fn.obj.Name(), callee.obj.Name(), v.describeCycle(shown))
 		return
 	}
+	if through != nil {
+		v.report(call.Pos(), "this call may not end: %s; a cycle that goes through a call with no static callee, of an interface method or "+
+			"a function value, or through code of another package, cannot be shown to end, since no Variant can be checked across such a call. "+
+			"Break the cycle", v.describeCycle(through))
+	}
+	if direct == nil {
+		return
+	}
+	shown := "; the cycle: " + v.describeCycle(direct)
 	for _, fn := range []*funcInfo{v.fn, callee} {
 		if fn.measure == nil {
-			v.report(call.Pos(), "recursive call needs a // @Variant annotation in the doc comment of %s to prove termination", fn.obj.Name())
+			v.report(call.Pos(), "recursive call needs a // @Variant annotation in the doc comment of %s to prove termination%s", fn.obj.Name(), shown)
 			return
 		}
 	}

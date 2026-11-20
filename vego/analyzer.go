@@ -113,7 +113,6 @@ import (
 	"github.com/spachava753/laas/vego/internal/solver"
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/ssa"
-	"golang.org/x/tools/go/types/typeutil"
 )
 
 // Analyzer verifies annotated functions and reports every proof obligation it
@@ -346,13 +345,12 @@ type funcInfo struct {
 	vouchedWrites map[*types.Var]bool
 	// calls holds the contracts a trusted function gives its function
 	// parameters; see callbacks.go.
-	calls   map[*types.Var]*callback
-	broken  bool // an annotation failed to parse; verification is skipped
+	calls  map[*types.Var]*callback
+	broken bool // an annotation failed to parse; verification is skipped
 	// faulted is set for the contract of a type or of a method of an
 	// interface that was refused for something other than a clause that
 	// cannot be read, as a contradiction; see viewOf.
 	faulted bool
-	callees []*funcInfo
 	// modifies lists what the function may write, from its Modifies clauses.
 	modifies []*modTarget
 	// trust is set for a function whose contract comes from a trust file
@@ -593,6 +591,8 @@ type pkgVerifier struct {
 	copies map[*ast.FuncDecl][]ssaCopy
 	// ssaProg is the package built in go/ssa; see ssaProgram.
 	ssaProg *ssa.Program
+	// graph is the call graph of the package; see callgraph.go.
+	graph *callGraph
 	// views holds what a use of each contract may rely on; see viewOf.
 	views map[*funcInfo]*contractView
 	// caseTails holds the annotations that follow the last statement of a
@@ -1172,112 +1172,14 @@ func (pv *pkgVerifier) collect() {
 				"a function is either verified or trusted, not both", fn.obj.Name())
 		}
 	}
-	// A call of a function value or of an interface method may go to any
-	// function of the package that some code has got hold of: one that is
-	// named anywhere but as the function of a call, and for a method called
-	// through an interface, any method of that name. Where such a value
-	// ends up is not followed; any call that cannot be resolved may reach
-	// any of them.
-	called := map[*ast.Ident]bool{}
-	var escaped []*funcInfo
-	for _, file := range pv.pass.Files {
-		ast.Inspect(file, func(n ast.Node) bool {
-			if call, ok := n.(*ast.CallExpr); ok {
-				switch fun := ast.Unparen(call.Fun).(type) {
-				case *ast.Ident:
-					called[fun] = true
-				case *ast.SelectorExpr:
-					called[fun.Sel] = true
-				}
-			}
-			return true
-		})
-		// Inside a function literal every function counts, called or
-		// not: the literal is itself a value that may be called from
-		// anywhere. A method of an interface that is named as a value
-		// stands for every method of that name.
-		var visit func(n ast.Node, inLiteral bool)
-		visit = func(root ast.Node, inLiteral bool) {
-			ast.Inspect(root, func(n ast.Node) bool {
-				switch n := n.(type) {
-				case *ast.FuncLit:
-					if !inLiteral {
-						visit(n.Body, true)
-						return false
-					}
-				case *ast.Ident:
-					named, ok := pv.info.Uses[n].(*types.Func)
-					if !ok || (called[n] && !inLiteral) {
-						break
-					}
-					if pv.funcs[named.Origin()] != nil {
-						escaped = append(escaped, pv.funcs[named.Origin()])
-					}
-					if recv := named.Type().(*types.Signature).Recv(); recv != nil && types.IsInterface(recv.Type()) {
-						escaped = append(escaped, pv.methodsNamed(named.Name())...)
-					}
-				}
-				return true
-			})
-		}
-		visit(file, false)
-	}
 	for _, fn := range pv.order {
 		sort.Slice(fn.body, func(i, j int) bool { return fn.body[i].pos < fn.body[j].pos })
 		if fn.decl.Body == nil {
 			continue
 		}
 		pv.checkPlacement(fn)
-		// A literal used in place is part of the body, so what it calls
-		// is found with the rest, and calling it calls nothing else.
-		bound, _ := literalUses(pv.info, fn.decl.Body)
-		ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
-			switch n := n.(type) {
-			case *ast.Ident:
-				// A function that is named here may be called from here.
-				if named, ok := pv.info.Uses[n].(*types.Func); ok && pv.funcs[named.Origin()] != nil {
-					fn.callees = append(fn.callees, pv.funcs[named.Origin()])
-				}
-			case *ast.RangeStmt:
-				// Ranging over a function calls it; which one is not
-				// followed here either.
-				if rangesByCalling(pv.info.TypeOf(n.X)) {
-					fn.callees = append(fn.callees, escaped...)
-				}
-			case *ast.CallExpr:
-				// Formatting a value calls its String or Error method.
-				for _, method := range pv.formattedMethods(n) {
-					if pv.funcs[method.Origin()] != nil {
-						fn.callees = append(fn.callees, pv.funcs[method.Origin()])
-					}
-				}
-				tv := pv.info.Types[n.Fun]
-				if tv.IsType() || tv.IsBuiltin() || typeutil.StaticCallee(pv.info, n) != nil {
-					break
-				}
-				switch fun := ast.Unparen(n.Fun).(type) {
-				case *ast.FuncLit:
-					return true
-				case *ast.Ident:
-					if variable, ok := pv.info.Uses[fun].(*types.Var); ok && bound[variable] != nil {
-						return true
-					}
-					// A trusted function calls what its caller hands it
-					// under calls, and that is followed where it is handed
-					// over: a literal is part of the caller, a function is
-					// named there.
-					if variable, ok := pv.info.Uses[fun].(*types.Var); ok && pv.callsParam(fn, variable) {
-						return true
-					}
-				}
-				fn.callees = append(fn.callees, escaped...)
-				if sel, ok := ast.Unparen(n.Fun).(*ast.SelectorExpr); ok {
-					fn.callees = append(fn.callees, pv.methodsNamed(sel.Sel.Name)...)
-				}
-			}
-			return true
-		})
 	}
+	pv.buildGraph()
 }
 
 // namedSignature writes the signature of a function with a name for each
@@ -1413,18 +1315,6 @@ func rangesByCalling(t types.Type) bool {
 		return true
 	}
 	return true
-}
-
-// methodsNamed returns the methods of the package with the given name, any
-// of which a call of an interface method of that name may reach.
-func (pv *pkgVerifier) methodsNamed(name string) []*funcInfo {
-	var methods []*funcInfo
-	for _, method := range pv.order {
-		if method.obj.Name() == name && method.obj.Type().(*types.Signature).Recv() != nil {
-			methods = append(methods, method)
-		}
-	}
-	return methods
 }
 
 // addFunc records a function declaration with the names annotations may use
@@ -1678,28 +1568,6 @@ func (pv *pkgVerifier) scopeAt(pos token.Pos) *types.Scope {
 		return pv.info.Scopes[clause]
 	}
 	return pv.pass.Pkg.Scope().Innermost(pos)
-}
-
-// reaches reports whether a call chain leads from one function to another.
-func (pv *pkgVerifier) reaches(from, to *funcInfo) bool {
-	seen := map[*funcInfo]bool{}
-	var visit func(fn *funcInfo) bool
-	visit = func(fn *funcInfo) bool {
-		if fn == to {
-			return true
-		}
-		if seen[fn] {
-			return false
-		}
-		seen[fn] = true
-		for _, callee := range fn.callees {
-			if visit(callee) {
-				return true
-			}
-		}
-		return false
-	}
-	return visit(from)
 }
 
 func isBuiltin(info *types.Info, call *ast.CallExpr, name string) bool {

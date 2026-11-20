@@ -181,6 +181,12 @@ func Expression() (f func(d *Divider, x int) (y int)) {
 // hook is set by code that is not verified.
 var hook func()
 
+// setHook is not verified. It puts a literal that calls fires into hook, so
+// that fire, which calls the hook, calls back into fires.
+func setHook() {
+	hook = func() { fires(1) }
+}
+
 // fire is trusted, and calls the hook, which its body shows although its
 // contract lists nothing under runs.
 func fire() {

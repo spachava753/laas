@@ -94,7 +94,7 @@ func helper(x int) (y int) {
 	if x == 0 {
 		return 0
 	}
-	loop(x - 1)
+	loop(x - 1) // want `this call may not end: helper calls loop at client.go:\d+:\d+, loop hands helper to funcvalueslib.Run\(helper, x \+ 1\) at client.go:\d+:\d+, which may run helper`
 	return x
 }
 

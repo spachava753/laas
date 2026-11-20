@@ -1135,6 +1135,31 @@ trusted:
     modifies: []
     vouches: [s]
 
+  cycles/r10.T:
+    reason: A probe of the recursion check, which runs what it is given.
+    requires: ["f != nil"]
+    runs: [f]
+    modifies: []
+
+  cycles/r11.T:
+    reason: A probe of the recursion check, which calls what it is given.
+    requires: ["f != nil"]
+    runs: [f]
+    calls:
+      f():
+        requires: []
+    modifies: []
+
+  cycles/r25/q.Run:
+    reason: A probe of the recursion check; it runs Hello of what it is given, which it finds by assertion.
+    runs: [x]
+    modifies: []
+
+  cycles/r26/r.Run:
+    reason: A probe of the recursion check; it runs Hello of what it is given, which it finds by assertion.
+    runs: [x]
+    modifies: []
+
   trialfaults.newCloser:
     reason: Returns a new value or nil, as some constructors are documented to.
     ensures: ["fresh(result)"]

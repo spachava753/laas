@@ -215,7 +215,7 @@ type Calls struct{ n int }
 // @Ensures True
 func (c Calls) String() (s string) {
 	f := makeShow()
-	return f()
+	return f() // want `this call may not end: Calls.String calls f\(\) at stringers.go:\d+:\d+, which may run Calls.String`
 }
 
 // @Ensures r != nil
@@ -236,7 +236,7 @@ func MakesShow() (r Show) {
 //
 // @Ensures True
 func showCalls() (s string) {
-	return fmt.Sprint(Calls{2}) // want `vego:\ recursive\ call\ needs\ a\ .*\ annotation\ in\ the\ doc\ comment\ of\ showCalls`
+	return fmt.Sprint(Calls{2}) // want `this call may not end: showCalls calls Calls.String at stringers.go:\d+:\d+, Calls.String calls f\(\) at stringers.go:\d+:\d+, which may run showCalls`
 }
 
 // @Ensures True

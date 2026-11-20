@@ -544,6 +544,57 @@ func Steps(n int) (result int) {
 
 At the recursive call, `vego` uses the contract of `Steps` with `n-1` as the argument. It does not look at the body. All calls work this way.
 
+A message about a missing `Variant` names the cycle, as in `recursive call needs a // @Variant annotation in the doc comment of F to prove termination; the cycle: F calls G at f.go:12:9, G calls F at f.go:20:9`.
+
+### Cycles through function values and interface methods
+
+A call through an interface value or a function value has no callee that `vego` can name, so it cannot check a `Variant` across it. A cycle of calls that goes through such a call is reported at every call of the cycle in a verified function. Here `Pull` calls `s.Next()`, and a `*Retry` held in `s` calls `Pull` again:
+
+```go
+// Source reads a number.
+type Source interface {
+	// @Ensures n >= 0
+	Next() (n int)
+}
+
+// Retry calls back into Pull through a Source it holds.
+type Retry struct{ src Source }
+
+// @Requires r != nil
+// @Variant 1
+// @Ensures n >= 0
+func (r *Retry) Next() (n int) {
+	if r.src == nil {
+		return 0
+	}
+	return Pull(r.src)
+}
+
+// @Requires s != nil
+// @Variant 0
+// @Ensures n >= 0
+func Pull(s Source) (n int) {
+	return s.Next()
+}
+```
+
+```text
+vego: this call may not end: Pull calls s.Next() at cycles.go:28:9, which may run (*Retry).Next,
+(*Retry).Next calls Pull at cycles.go:21:9; a cycle that goes through a call with no static callee,
+of an interface method or a function value, or through code of another package, cannot be shown to
+end, since no Variant can be checked across such a call. Break the cycle
+```
+
+The variants do not help, because nothing compares them across `s.Next()`. A `*Retry` whose `src` is itself loops for ever. Break the cycle: call the method on the concrete type, or keep the call back out of the method.
+
+`vego` finds such a cycle from the types alone, whoever makes the value, also code that is not verified or code of another package:
+
+- A call of an interface method `M` may run every method named `M` in the package whose signature, receiver aside, is the same.
+- A call through a function value may run every function, method value, method expression, and function literal of the package that is used as a value of a type with the same signature. Every exported function, and every method with an exported name, counts as such a value, since another package can make one of it. A function literal made in a verified function does not, since the rule in [Function values that call function values](#function-values-that-call-function-values) is checked where it is made.
+- A call of a function of another package may run what its arguments and its receiver can hold, at any depth. A function value counts as a call through it. An interface value counts as a call of each of its methods, and may run every method with an exported name of every type of the package, which that code can find by a type assertion or reflection. A value of another type converted to an interface there may run the exported methods of its type and of the types it holds. A function or a literal written as the argument may run only itself. A value that `fmt` formats may run the methods named `String`, `Error`, `Format`, and `GoString`.
+
+A method of another name or another signature is not reached. A method `Next(step int) (n int)` beside `Source` above is no part of the cycle.
+
 ## Calls
 
 `vego` verifies a call using only the contract of the called function. It never looks at the callee's body.
@@ -1196,7 +1247,7 @@ nil, in Rated.Price used as a method of Pricer at interfaces.go:109:9
 
 ### Interface values that call interface values
 
-Code that an interface value made by verified code runs cannot call through an interface value or a function value. The reason is the same as for function values: no contract has a `Variant`, so nothing would prove that such calls end. See [Function values that call function values](#function-values-that-call-function-values). A type that wraps another interface value cannot be converted:
+Code that an interface value made by verified code runs cannot call through an interface value or a function value. The reason is the same as for function values: no contract has a `Variant`, so nothing would prove that such calls end. See [Function values that call function values](#function-values-that-call-function-values). A type that wraps another interface value cannot be converted, and its method is itself reported, since the value it wraps may be one of its own type:
 
 ```go
 // Logging wraps a pricer.
@@ -1218,6 +1269,10 @@ func LoggedPricer(inner Pricer) (p Pricer) {
 ```
 
 ```text
+vego: this call may not end: Logging.Price calls l.Inner.Price(sku, qty) at interfaces.go:147:9,
+which may run Logging.Price; a cycle that goes through a call with no static callee, of an interface
+method or a function value, or through code of another package, cannot be shown to end, since no
+Variant can be checked across such a call. Break the cycle
 vego: cannot verify LoggedPricer: Price may call through a function value or an interface value,
 and code that an interface value runs cannot do that yet: no contract of a function type or of a
 method of an interface has a variant, so nothing would prove that such calls end; Price calls
@@ -4548,6 +4603,7 @@ This table lists the most common messages.
 | `loop invariant may not be preserved` | An iteration may break the invariant, or the invariant is too weak. | Add the clause that the invariant depends on. |
 | `loop variant may not decrease`, `loop variant may be negative` | The `Variant` is not proved to decrease, or to stay non-negative. | Use a different `Variant`, or add an invariant that bounds it. |
 | `variant may not decrease in recursive call`, `variant of the function may be negative` | The same, for the `Variant` of a recursive function. | Use a different `Variant`, or strengthen the `Requires`. |
+| `this call may not end: F calls x.M() at f.go:n:c, which may run T.M, ...` | A cycle of calls goes through a call with no static callee, or through code of another package. The message names the cycle. | Break the cycle. See [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods). |
 | `F has annotations, so each of its results needs a name` | A verified function has an unnamed or blank result. | Name every result in the signature. |
 | `an annotation is written "// @Keyword ...", with one space before the @ and none after it` (or `with nothing but one space`) | The comment looks like an annotation but has different spacing, or something stands before the `@`. | Write `// @Keyword ...`. |
 | `a comment directly after an annotation is not read as part of it` | An ordinary comment follows an annotation in the same comment group. | Start the line with `// @` to continue the annotation, or put an empty `//` line before the comment. |
@@ -4654,6 +4710,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - `context.WithCancel` and the functions like it, which keep the context they are given and run it on other goroutines (see [Types without a shipped entry](#types-without-a-shipped-entry));
 - a function that keeps code it is given anywhere but in a result or in memory that a parameter reaches, such as a registry, a goroutine, or a timer, which has no true entry; making a trusted function with `keeps` into a value; and handing a function literal, a function, or a method value of a type without a contract to a parameter under `keeps` (see [Functions that keep what they are given](#functions-that-keep-what-they-are-given));
 - comparing interface values with anything but `nil`, type assertions, and type switches;
+- a cycle of calls that goes through a call through an interface value or a function value, or through code of another package (see [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods)), reported as `this call may not end`;
 - converting an interface value to an interface whose methods it does not have from the same declarations, other than `any`;
 - interface types written in place that embed a named interface, generic interface types, and interfaces that embed `error`;
 - calls of methods promoted from an embedded interface field, method expressions such as `I.M`, and method values of interface methods;
@@ -4696,7 +4753,8 @@ Floating-point values are supported but opaque. They can be passed around and us
 
 A proof by `vego` depends on the following assumptions. Each concerns something `vego` cannot see.
 
-- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and holds no value that can hold code anywhere it was not held when the call began, unless `keeps` lists the parameter. For a parameter listed under `keeps`, it runs the code during the call only if `runs` lists the parameter too, holds it when it returns only in memory that the results and parameters listed there reach, and has started or registered nothing that runs it later: no goroutine, timer, finalizer or cleanup, callback given to another package, or package-level variable. It does not call back, through another package, into the verified function that called it. A call back within the same package is found and reported. For a parameter listed under `runs` or `keeps`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter. Where such a value runs what the function keeps, as the reader that `io.TeeReader` returns runs the reader and the writer it is given, it meets its contract whenever what the function keeps meets theirs.
+- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and holds no value that can hold code anywhere it was not held when the call began, unless `keeps` lists the parameter. For a parameter listed under `keeps`, it runs the code during the call only if `runs` lists the parameter too, holds it when it returns only in memory that the results and parameters listed there reach, and has started or registered nothing that runs it later: no goroutine, timer, finalizer or cleanup, callback given to another package, or package-level variable. For a parameter listed under `runs` or `keeps`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter. Where such a value runs what the function keeps, as the reader that `io.TeeReader` returns runs the reader and the writer it is given, it meets its contract whenever what the function keeps meets theirs.
+- Code of another package runs code of the verified package only as `vego` follows it, which [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods) describes: during a call that the verified package makes, it runs only what that call hands it, through the arguments and the receiver. Code that it kept from an earlier call, a value it stored, or code that it runs on another goroutine or at another time, does not call back into a verified function while that function runs, so that the call never ends. A cycle that stays in the package, or that goes through what a call hands to another package, is found and reported.
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one that wraps it, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method.
 - An interface value that reaches verified code from code that is not verified meets the contracts of its methods. That includes a value passed as an argument, a value in memory that an argument reaches, a value that a call through another value returns, and a value that a trusted function returns or writes, which its entry vouches for. Called with arguments that meet the `Requires` of a method, the method returns without panicking, leaves its `Ensures` true, and writes nothing that verified code can see outside what its `Modifies` lists. This holds also when the value holds a pointer to a struct that verified code holds.
 - The same holds of the methods and function types that entries of the trust file give contracts, which is what such an entry claims (see [What an entry for a type claims](#what-an-entry-for-a-type-claims)). In particular, a caller that is not verified does not pass a verified function such a value together with a pointer to memory that the value writes, as a `*bytes.Buffer` passed both as an `io.Writer` and as a `*bytes.Buffer` would be. Every call through such a value returns: a `Read` from a pipe, a terminal, or a connection returns only once data or an error arrives.

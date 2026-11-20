@@ -143,7 +143,7 @@ func TestAnalyzer(t *testing.T) {
 		runCorpus(t, analyzer,
 			"paper", "algorithms", "defects", "variadic", "formatting", "rejected", "leetcode", "semantics", "effects", "ordering", "integers", "values", "trust",
 			"lib", "client", "memory", "shapes", "badshapes", "invariants", "mapping", "badpred", "usesbadpred", "early", "settled", "gen", "earlytype", "earlyrange", "earlybox", "earlyloop", "earlycarrier", "earlypanic", "guide", "wrapped", "unread", "usesunread", "twovariants", "usestwovariants", "lonecr", "errorsid", "errorsvars", "errorsvarsclient", "vouched", "vouchedclient", "vouchedcapture", "earlyalias", "earlyaliasok", "sentinellib", "sentinelclient", "usesearly", "sentinelfar", "sentinelfarther", "closures", "funcvalues", "funcvalueslib", "funcvaluesclient", "funcvaluesunread", "funcvaluesinit", "funcvaluesinitdefer", "funcvaluesinitok", "funcvaluesinitmethod", "funcvaluesoldloop", "funcvaluesinitlit", "callbacks", "callbacksinit", "interfaces", "interfaceslib", "interfacesunread", "interfacesinitok", "interfacesinithand", "interfacesinitcall", "foreign", "stdtypes", "locks", "lockspred", "lockslib", "locksclient", "layers", "ifacestate", "ensuresentry", "manywrites", "slowresp", "slowhttp", "deepfacts",
-			"globals", "globalslib", "globalsclient", "globalsembed", "globalsearly", "unsafelib", "unsafeuse", "keeps", "keepslib", "buffered", "iowrap", "globalsleak", "globalsleakclient", "trialfaults")
+			"globals", "globalslib", "globalsclient", "globalsembed", "globalsearly", "unsafelib", "unsafeuse", "keeps", "keepslib", "buffered", "iowrap", "globalsleak", "globalsleakclient", "trialfaults", "cycles/...")
 		recorded, quoted := costs()
 		checkCosts(t, recorded)
 		checkGuideCost(t, quoted)
