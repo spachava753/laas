@@ -137,7 +137,7 @@ func AddNothing(s []int) (r []int) {
 // The append may write into the array that t lies in, and Go may read t[0]
 // in the target before or after that.
 //
-// @Requires |t| > 0 And |u| > 0 And 0 <= t[0] < |u|
+// @Requires |t| > 0 And |u| > 0 And 0 <= t[0] < |u| And |w| <= 1000
 // @Modifies u, t
 // @Ensures True
 func OrderSpread(u [][]int, t, w []int) {
@@ -159,7 +159,7 @@ func AddGuarded(gs, hs []Guarded) (r []Guarded) {
 }
 
 // Nothing bounds |ys|, so the array append moves to may be more than can
-// be allocated.
+// be allocated. The runtime may make it up to twice as large as it needs.
 //
 // @Requires |xs| < 10
 // @Modifies xs

@@ -336,8 +336,11 @@ func Disjoint(A []int) {
 	copyInto(A[:2:2], A[2:])
 }
 
-// Doubled builds a new slice while reading another.
+// Doubled builds a new slice while reading another. The slice it grows
+// must stay well below the largest allocation, since the runtime may give
+// it up to twice the room it asks for.
 //
+// @Requires |A| <= 1000000
 // @Requires Forall k in [0, |A|) : -1000 <= A[k] <= 1000
 // @Ensures fresh(R) And |R| = |A| And Forall k in [0, |A|) : R[k] = 2 * A[k]
 func Doubled(A []int) (R []int) {

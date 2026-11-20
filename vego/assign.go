@@ -551,8 +551,17 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		// The array to move to must be one that can be allocated. That is
 		// proved and not assumed: assuming it would contradict a slice
 		// already at the limit and make everything after the append
-		// provable.
-		v.checkAlloc(next, nil, grown, elem, call.Pos(), "the slice that append grows")
+		// provable. The runtime does not allocate grown elements: it picks
+		// a capacity of its own, twice the old one while that is small and
+		// a quarter more after, and panics when that capacity in bytes,
+		// rounded up to a whole page for a large array, is more than can be
+		// allocated, even where grown is not. The old capacity is less than
+		// grown, or the slice would not move, so the capacity picked is
+		// less than twice grown; no platform has pages of more than 64 KB.
+		size := v.pass.TypesSizes.Sizeof(elem)
+		room := logic.Add(logic.Mul(grown, logic.IntLit(2*size)), logic.IntLit(1<<16))
+		fits := logic.And(logic.Le(room, logic.BigLit(v.maxAlloc())), v.typeFact(grown, types.Typ[types.Int]))
+		v.check(next, nil, fits, call.Pos(), "the slice that append grows may be more than can be allocated")
 		// Copying the old elements reads them, which may happen before or
 		// after the calls of the targets.
 		v.unit = u.fork()
