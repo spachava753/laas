@@ -85,3 +85,231 @@ trusted:
       f(c):
         deterministic: true
     modifies: []
+
+  bytes.IndexByte:
+    reason: >-
+      "IndexByte returns the index of the first instance of c in b, or -1 if
+      c is not present in b."
+    modifies: []
+    ensures:
+      - "-1 <= result And result < |b|"
+      - "result >= 0 -> b[result] = c"
+      - "Forall k in [0, |b|) : (result = -1 Or k < result) -> b[k] != c"
+
+  bytes.LastIndexByte:
+    reason: >-
+      "LastIndexByte returns the index of the last instance of c in s, or -1
+      if c is not present in s."
+    modifies: []
+    ensures:
+      - "-1 <= result And result < |s|"
+      - "result >= 0 -> s[result] = c"
+      - "Forall k in [result + 1, |s|) : s[k] != c"
+
+  bytes.Index:
+    reason: >-
+      "Index returns the index of the first instance of sep in s, or -1 if
+      sep is not present in s." Not said: that it is the first instance, and
+      that -1 means sep is nowhere in s, for the reason given in the entry
+      of strings.Index.
+    modifies: []
+    ensures:
+      - "result = -1 Or (0 <= result And result + |sep| <= |s|)"
+      - "result >= 0 -> Forall k in [0, |sep|) : s[result + k] = sep[k]"
+      - "|sep| = 0 -> result = 0"
+
+  bytes.LastIndex:
+    reason: >-
+      "LastIndex returns the index of the last instance of sep in s, or -1 if
+      sep is not present in s." Not said: that it is the last instance, and
+      that -1 means sep is nowhere in s, for the reason given in the entry of
+      strings.Index.
+    modifies: []
+    ensures:
+      - "result = -1 Or (0 <= result And result + |sep| <= |s|)"
+      - "result >= 0 -> Forall k in [0, |sep|) : s[result + k] = sep[k]"
+      - "|sep| = 0 -> result = |s|"
+
+  bytes.Contains:
+    reason: >-
+      "Contains reports whether subslice is within b." Not said: the
+      converse, for the reason given in the entry of strings.Contains.
+    modifies: []
+    ensures:
+      - "result -> Exists i in [0, |b| - |subslice|] : Forall k in [0, |subslice|) : b[i + k] = subslice[k]"
+      - "|subslice| = 0 -> result"
+
+  bytes.HasPrefix:
+    reason: >-
+      "HasPrefix reports whether the byte slice s begins with prefix."
+    modifies: []
+    ensures:
+      - "result <-> (|prefix| <= |s| And Forall k in [0, |prefix|) : s[k] = prefix[k])"
+
+  bytes.HasSuffix:
+    reason: >-
+      "HasSuffix reports whether the byte slice s ends with suffix."
+    modifies: []
+    ensures:
+      - "result <-> (|suffix| <= |s| And Forall k in [0, |suffix|) : s[|s| - |suffix| + k] = suffix[k])"
+
+  bytes.Equal:
+    reason: >-
+      "Equal reports whether a and b are the same length and contain the
+      same bytes. A nil argument is equivalent to an empty slice." In a
+      formula, = between two slices compares their lengths and elements,
+      which is this.
+    modifies: []
+    ensures:
+      - "result <-> a = b"
+
+  bytes.Count:
+    reason: >-
+      "Count counts the number of non-overlapping instances of sep in s. If
+      sep is an empty slice, Count returns 1 + the number of UTF-8-encoded
+      code points in s." Not said: the exact count.
+    modifies: []
+    ensures:
+      - "result >= 0"
+      - "|sep| > 0 -> result * |sep| <= |s|"
+      - "|sep| = 0 -> 1 <= result And result <= |s| + 1"
+
+  bytes.EqualFold:
+    reason: >-
+      "EqualFold reports whether s and t, interpreted as UTF-8 strings, are
+      equal under simple Unicode case-folding, which is a more general form
+      of case-insensitivity." Not said: which other slices it reports equal,
+      which needs a model of Unicode's case folding.
+    modifies: []
+    ensures:
+      - "s = t -> result"
+
+  bytes.Cut:
+    reason: >-
+      "Cut slices s around the first instance of sep, returning the text
+      before and after sep. The found result reports whether sep appears in
+      s. If sep does not appear in s, cut returns s, nil, false. Cut returns
+      slices of the original slice s, not copies." So before and after lie
+      within s, and after is empty when sep is not found. Not said: that the
+      instance is the first, for the reason given in the entry of
+      strings.Index.
+    modifies: []
+    ensures:
+      - "within(before, s) And within(after, s)"
+      - "found -> |before| + |sep| + |after| = |s|"
+      - "found -> Forall k in [0, |before|) : before[k] = s[k]"
+      - "found -> Forall k in [0, |sep|) : s[|before| + k] = sep[k]"
+      - "found -> Forall k in [0, |after|) : after[k] = s[|before| + |sep| + k]"
+      - "~found -> before = s And |after| = 0"
+
+  bytes.TrimPrefix:
+    reason: >-
+      "TrimPrefix returns s without the provided leading prefix string. If s
+      doesn't start with prefix, s is returned unchanged." Read from the
+      source of Go 1.26.6 (bytes.go, TrimPrefix): it returns s[len(prefix):]
+      or s, so the result lies within s.
+    modifies: []
+    ensures:
+      - "within(result, s)"
+      - "(|prefix| <= |s| And Forall k in [0, |prefix|) : s[k] = prefix[k]) -> (|result| = |s| - |prefix| And Forall k in [0, |result|) : result[k] = s[|prefix| + k])"
+      - "~(|prefix| <= |s| And Forall k in [0, |prefix|) : s[k] = prefix[k]) -> result = s"
+
+  bytes.TrimSuffix:
+    reason: >-
+      "TrimSuffix returns s without the provided trailing suffix string. If s
+      doesn't end with suffix, s is returned unchanged." Read from the source
+      of Go 1.26.6 (bytes.go, TrimSuffix): it returns s[:len(s)-len(suffix)]
+      or s, so the result lies within s.
+    modifies: []
+    ensures:
+      - "within(result, s)"
+      - "(|suffix| <= |s| And Forall k in [0, |suffix|) : s[|s| - |suffix| + k] = suffix[k]) -> (|result| = |s| - |suffix| And Forall k in [0, |result|) : result[k] = s[k])"
+      - "~(|suffix| <= |s| And Forall k in [0, |suffix|) : s[|s| - |suffix| + k] = suffix[k]) -> result = s"
+
+  bytes.TrimSpace:
+    reason: >-
+      "TrimSpace returns a subslice of s by slicing off all leading and
+      trailing white space, as defined by Unicode." A subslice lies within
+      s; the nil it returns for a slice of white space has no memory, which
+      lies within anything. Not said: which bytes it removed, which needs a
+      model of Unicode's white space.
+    modifies: []
+    ensures:
+      - "|result| <= |s|"
+      - "within(result, s)"
+
+  bytes.Repeat:
+    reason: >-
+      "Repeat returns a new byte slice consisting of count copies of b. It
+      panics if count is negative or if the result of (len(b) * count)
+      overflows." Its result is made with exactly that length (Go 1.26.6,
+      bytes.go), which must also be something that can be allocated.
+    requires:
+      - "count >= 0"
+      - "|b| * count <= MaxAlloc"
+      - "|b| * count <= MaxInt"
+    modifies: []
+    ensures:
+      - "|result| = |b| * count"
+      - "fresh(result)"
+
+  bytes.Join:
+    reason: >-
+      "Join concatenates the elements of s to create a new byte slice. The
+      separator sep is placed between elements in the resulting slice." Not
+      said: its exact length, a sum the logic has no term for. Read from the
+      source of Go 1.26.6 (bytes.go, Join): it checks the total as
+      strings.Join does, whose entry gives the reason for the bound of
+      MaxInt; it makes the result with exactly the total, and for one
+      element copies it with append, which may round the room up, so the
+      allocation is bounded with room to spare.
+    requires:
+      - "Forall i in [0, |s|) : |s| * (|s[i]| + |sep| + 1) <= MaxInt"
+      - "Forall i in [0, |s|) : |s| * (|s[i]| + |sep| + 1) + 65536 <= MaxAlloc"
+    modifies: []
+    ensures:
+      - "|s| = 0 -> |result| = 0"
+      - "|s| = 1 -> result = s[0]"
+      - "Forall i in [0, |s|) : |s[i]| <= |result|"
+      - "|s| >= 2 -> (|s| - 1) * |sep| <= |result|"
+      - "|s| > 0 -> Exists i in [0, |s|) : |result| <= |s| * (|s[i]| + |sep|)"
+      - "fresh(result)"
+
+  bytes.Replace:
+    reason: >-
+      "Replace returns a copy of the slice s with the first n non-overlapping
+      instances of old replaced by new. If old is empty, it matches at the
+      beginning of the slice and after each UTF-8 sequence, yielding up to
+      k+1 replacements for a k-rune slice. If n < 0, there is no limit on the
+      number of replacements." A copy is new memory. Not said: what the
+      result holds. Read from the source of Go 1.26.6 (bytes.go, Replace): it
+      makes len(s) + n*(len(new)-len(old)) bytes for n replacements, or
+      copies s with append when there is none, which may round the room up;
+      the requires keep the int arithmetic and the allocation within MaxInt
+      and MaxAlloc, also where an int has 32 bits.
+    requires:
+      - "|s| + (|s| + 1) * |new| <= MaxInt"
+      - "|s| + (|s| + 1) * |new| + 65536 <= MaxAlloc"
+    modifies: []
+    ensures:
+      - "|result| <= |s| + (|s| + 1) * |new|"
+      - "n = 0 -> result = s"
+      - "old = new -> result = s"
+      - "fresh(result)"
+
+  bytes.ReplaceAll:
+    reason: >-
+      "ReplaceAll returns a copy of the slice s with all non-overlapping
+      instances of old replaced by new. If old is empty, it matches at the
+      beginning of the slice and after each UTF-8 sequence, yielding up to
+      k+1 replacements for a k-rune slice." It is Replace with n = -1 (Go
+      1.26.6, bytes.go), so its requires are those of Replace. Not said: what
+      the result holds.
+    requires:
+      - "|s| + (|s| + 1) * |new| <= MaxInt"
+      - "|s| + (|s| + 1) * |new| + 65536 <= MaxAlloc"
+    modifies: []
+    ensures:
+      - "|result| <= |s| + (|s| + 1) * |new|"
+      - "old = new -> result = s"
+      - "fresh(result)"

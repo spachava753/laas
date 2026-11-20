@@ -41,6 +41,9 @@ type sample struct {
 	// one that the contract applies, what it returns for each argument.
 	calls   map[string][][]any
 	answers map[string]func(int64) int64
+	// unwritten holds, where a function the call was handed writes the
+	// arguments, what they would be had only that function written them.
+	unwritten []any
 }
 
 // table returns a function that answers what a random table says, the
@@ -125,15 +128,16 @@ func runeHarness[R any](call func(s string, f func(rune) bool) R) func(rng *rand
 func bytesHarness[R any](call func(s []byte, f func(rune) bool) R) func(rng *rand.Rand) sample {
 	return func(rng *rand.Rand) sample {
 		s, calls := []byte(randomText(rng)), map[string][][]any{}
-		before := slices.Clone(s)
+		before, unwritten := slices.Clone(s), slices.Clone(s)
 		f := recorder(rng, calls, "f", func(rng *rand.Rand, r rune) bool {
 			if len(s) > 0 && rng.Intn(4) == 0 {
-				s[rng.Intn(len(s))] = "a\xff "[rng.Intn(3)]
+				at, b := rng.Intn(len(s)), "a\xff "[rng.Intn(3)]
+				s[at], unwritten[at] = b, b
 			}
 			return rng.Intn(2) == 0
 		})
 		result := call(s, f)
-		return sample{before: []any{before, f}, after: []any{s, f}, results: []any{result}, calls: calls}
+		return sample{before: []any{before, f}, after: []any{s, f}, unwritten: []any{unwritten, f}, results: []any{result}, calls: calls}
 	}
 }
 
@@ -158,12 +162,14 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 		if rng.Intn(2) == 0 {
 			sort.Ints(x)
 		}
-		return sample{before: []any{x}, results: []any{sort.IntsAreSorted(x)}}
+		before := snapshot(x)
+		return sample{before: before, after: []any{x}, results: []any{sort.IntsAreSorted(x)}}
 	},
 	"sort.SearchInts": func(rng *rand.Rand) sample {
 		a, x := randomInts(rng), rng.Intn(9)-4
 		sort.Ints(a)
-		return sample{before: []any{a, x}, results: []any{sort.SearchInts(a, x)}}
+		before := snapshot(a, x)
+		return sample{before: before, after: []any{a, x}, results: []any{sort.SearchInts(a, x)}}
 	},
 	"math/rand.Intn": func(rng *rand.Rand) sample {
 		n := rng.Intn(50) + 1
@@ -222,80 +228,94 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 	},
 	"fmt.Sprintf": func(rng *rand.Rand) sample {
 		format, a := randomFormat(rng), randomOperands(rng)
-		return sample{before: []any{format, a}, results: []any{fmt.Sprintf(format, a...)}}
+		before := snapshot(format, a)
+		return sample{before: before, after: []any{format, a}, results: []any{fmt.Sprintf(format, a...)}}
 	},
 	"fmt.Sprint": func(rng *rand.Rand) sample {
 		a := randomOperands(rng)
-		return sample{before: []any{a}, results: []any{fmt.Sprint(a...)}}
+		before := snapshot(a)
+		return sample{before: before, after: []any{a}, results: []any{fmt.Sprint(a...)}}
 	},
 	"fmt.Sprintln": func(rng *rand.Rand) sample {
 		a := randomOperands(rng)
-		return sample{before: []any{a}, results: []any{fmt.Sprintln(a...)}}
+		before := snapshot(a)
+		return sample{before: before, after: []any{a}, results: []any{fmt.Sprintln(a...)}}
 	},
 	"fmt.Printf": func(rng *rand.Rand) sample {
 		format, a := randomFormat(rng), randomOperands(rng)
 		var n int
 		var err error
 		toScratch(func() { n, err = fmt.Printf(format, a...) })
-		return sample{before: []any{format, a}, results: []any{n, err}}
+		before := snapshot(format, a)
+		return sample{before: before, after: []any{format, a}, results: []any{n, err}}
 	},
 	"fmt.Print": func(rng *rand.Rand) sample {
 		a := randomOperands(rng)
 		var n int
 		var err error
 		toScratch(func() { n, err = fmt.Print(a...) })
-		return sample{before: []any{a}, results: []any{n, err}}
+		before := snapshot(a)
+		return sample{before: before, after: []any{a}, results: []any{n, err}}
 	},
 	"fmt.Println": func(rng *rand.Rand) sample {
 		a := randomOperands(rng)
 		var n int
 		var err error
 		toScratch(func() { n, err = fmt.Println(a...) })
-		return sample{before: []any{a}, results: []any{n, err}}
+		before := snapshot(a)
+		return sample{before: before, after: []any{a}, results: []any{n, err}}
 	},
 	"fmt.Fprintf": func(rng *rand.Rand) sample {
 		format, a := randomFormat(rng), randomOperands(rng)
 		var n int
 		var err error
 		w := keptFormatting(rng, func(w io.Writer) { n, err = fmt.Fprintf(w, format, a...) })
-		return sample{before: []any{w, format, a}, results: []any{n, err}}
+		before := snapshot(w, format, a)
+		return sample{before: before, after: []any{w, format, a}, results: []any{n, err}}
 	},
 	"fmt.Fprint": func(rng *rand.Rand) sample {
 		a := randomOperands(rng)
 		var n int
 		var err error
 		w := keptFormatting(rng, func(w io.Writer) { n, err = fmt.Fprint(w, a...) })
-		return sample{before: []any{w, a}, results: []any{n, err}}
+		before := snapshot(w, a)
+		return sample{before: before, after: []any{w, a}, results: []any{n, err}}
 	},
 	"fmt.Fprintln": func(rng *rand.Rand) sample {
 		a := randomOperands(rng)
 		var n int
 		var err error
 		w := keptFormatting(rng, func(w io.Writer) { n, err = fmt.Fprintln(w, a...) })
-		return sample{before: []any{w, a}, results: []any{n, err}}
+		before := snapshot(w, a)
+		return sample{before: before, after: []any{w, a}, results: []any{n, err}}
 	},
 	"log.Printf": func(rng *rand.Rand) sample {
 		format, v := randomFormat(rng), randomOperands(rng)
 		toLogBuffer(func() { log.Printf(format, v...) })
-		return sample{before: []any{format, v}}
+		before := snapshot(format, v)
+		return sample{before: before, after: []any{format, v}}
 	},
 	"log.Print": func(rng *rand.Rand) sample {
 		v := randomOperands(rng)
 		toLogBuffer(func() { log.Print(v...) })
-		return sample{before: []any{v}}
+		before := snapshot(v)
+		return sample{before: before, after: []any{v}}
 	},
 	"log.Println": func(rng *rand.Rand) sample {
 		v := randomOperands(rng)
 		toLogBuffer(func() { log.Println(v...) })
-		return sample{before: []any{v}}
+		before := snapshot(v)
+		return sample{before: before, after: []any{v}}
 	},
 	"path.Join": func(rng *rand.Rand) sample {
 		elem := randomElements(rng)
-		return sample{before: []any{elem}, results: []any{path.Join(elem...)}}
+		before := snapshot(elem)
+		return sample{before: before, after: []any{elem}, results: []any{path.Join(elem...)}}
 	},
 	"path/filepath.Join": func(rng *rand.Rand) sample {
 		elem := randomElements(rng)
-		return sample{before: []any{elem}, results: []any{filepath.Join(elem...)}}
+		before := snapshot(elem)
+		return sample{before: before, after: []any{elem}, results: []any{filepath.Join(elem...)}}
 	},
 	"os.IsExist":      osPredicate(os.IsExist, false),
 	"os.IsNotExist":   osPredicate(os.IsNotExist, false),
@@ -342,7 +362,8 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 	"bytes.FieldsFunc": func(rng *rand.Rand) sample {
 		s, calls := []byte(randomText(rng)), map[string][][]any{}
 		f := fixedRunes(rng, calls)
-		return sample{before: []any{slices.Clone(s), f}, results: []any{bytes.FieldsFunc(s, f)}, calls: calls}
+		before := snapshot(s, f)
+		return sample{before: before, after: []any{s, f}, results: []any{bytes.FieldsFunc(s, f)}, calls: calls}
 	},
 	"strings.IndexFunc":     runeHarness(strings.IndexFunc),
 	"strings.LastIndexFunc": runeHarness(strings.LastIndexFunc),
@@ -364,12 +385,182 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 	"bytes.Map": func(rng *rand.Rand) sample {
 		s, calls := []byte(randomText(rng)), map[string][][]any{}
 		mapping := recorder(rng, calls, "mapping", randomRune)
-		return sample{before: []any{mapping, slices.Clone(s)}, results: []any{bytes.Map(mapping, s)}, calls: calls}
+		before := snapshot(mapping, s)
+		return sample{before: before, after: []any{mapping, s}, results: []any{bytes.Map(mapping, s)}, calls: calls}
+	},
+	"strings.IndexByte": func(rng *rand.Rand) sample {
+		s, c := randomText(rng), randomByte(rng)
+		return sample{before: []any{s, c}, results: []any{strings.IndexByte(s, c)}}
+	},
+	"strings.LastIndexByte": func(rng *rand.Rand) sample {
+		s, c := randomText(rng), randomByte(rng)
+		return sample{before: []any{s, c}, results: []any{strings.LastIndexByte(s, c)}}
+	},
+	"strings.LastIndex":  textHarness(func(s, t string) []any { return []any{strings.LastIndex(s, t)} }),
+	"strings.Cut":        textHarness(func(s, t string) []any { before, after, found := strings.Cut(s, t); return []any{before, after, found} }),
+	"strings.TrimPrefix": textHarness(func(s, t string) []any { return []any{strings.TrimPrefix(s, t)} }),
+	"strings.TrimSuffix": textHarness(func(s, t string) []any { return []any{strings.TrimSuffix(s, t)} }),
+	"strings.Split":      textHarness(func(s, t string) []any { return []any{strings.Split(s, t)} }),
+	"strings.EqualFold": func(rng *rand.Rand) sample {
+		s, t := foldPair(rng)
+		return sample{before: []any{s, t}, results: []any{strings.EqualFold(s, t)}}
+	},
+	"strings.Count": textHarness(func(s, t string) []any { return []any{strings.Count(s, t)} }),
+	"strings.Fields": func(rng *rand.Rand) sample {
+		s := randomText(rng)
+		return sample{before: []any{s}, results: []any{strings.Fields(s)}}
+	},
+	"strings.Join": func(rng *rand.Rand) sample {
+		elems, sep := randomElements(rng), []string{"", ",", ", ", randomText(rng)}[rng.Intn(4)]
+		before := snapshot(elems, sep)
+		return sample{before: before, after: []any{elems, sep}, results: []any{strings.Join(elems, sep)}}
+	},
+	"strings.Replace": func(rng *rand.Rand) sample {
+		s, old := randomPair(rng)
+		replacement, n := randomReplacement(rng, old), rng.Intn(5)-2
+		return sample{before: []any{s, old, replacement, n}, results: []any{strings.Replace(s, old, replacement, n)}}
+	},
+	"strings.ReplaceAll": func(rng *rand.Rand) sample {
+		s, old := randomPair(rng)
+		replacement := randomReplacement(rng, old)
+		return sample{before: []any{s, old, replacement}, results: []any{strings.ReplaceAll(s, old, replacement)}}
+	},
+	"bytes.IndexByte": func(rng *rand.Rand) sample {
+		b, c := []byte(randomText(rng)), randomByte(rng)
+		before := snapshot(b, c)
+		return sample{before: before, after: []any{b, c}, results: []any{bytes.IndexByte(b, c)}}
+	},
+	"bytes.LastIndexByte": func(rng *rand.Rand) sample {
+		b, c := []byte(randomText(rng)), randomByte(rng)
+		before := snapshot(b, c)
+		return sample{before: before, after: []any{b, c}, results: []any{bytes.LastIndexByte(b, c)}}
+	},
+	"bytes.Index":     bytesPairHarness(func(s, t []byte) []any { return []any{bytes.Index(s, t)} }),
+	"bytes.LastIndex": bytesPairHarness(func(s, t []byte) []any { return []any{bytes.LastIndex(s, t)} }),
+	"bytes.Contains":  bytesPairHarness(func(s, t []byte) []any { return []any{bytes.Contains(s, t)} }),
+	"bytes.HasPrefix": bytesPairHarness(func(s, t []byte) []any { return []any{bytes.HasPrefix(s, t)} }),
+	"bytes.HasSuffix": bytesPairHarness(func(s, t []byte) []any { return []any{bytes.HasSuffix(s, t)} }),
+	"bytes.Equal":     bytesPairHarness(func(s, t []byte) []any { return []any{bytes.Equal(s, t)} }),
+	"bytes.Count":     bytesPairHarness(func(s, t []byte) []any { return []any{bytes.Count(s, t)} }),
+	"bytes.EqualFold": func(rng *rand.Rand) sample {
+		text, other := foldPair(rng)
+		s, t := []byte(text), []byte(other)
+		before := snapshot(s, t)
+		return sample{before: before, after: []any{s, t}, results: []any{bytes.EqualFold(s, t)}}
+	},
+	"bytes.Cut": bytesPairHarness(func(s, t []byte) []any {
+		before, after, found := bytes.Cut(s, t)
+		return []any{before, after, found}
+	}),
+	"bytes.TrimPrefix": bytesPairHarness(func(s, t []byte) []any { return []any{bytes.TrimPrefix(s, t)} }),
+	"bytes.TrimSuffix": bytesPairHarness(func(s, t []byte) []any { return []any{bytes.TrimSuffix(s, t)} }),
+	"bytes.TrimSpace": func(rng *rand.Rand) sample {
+		s := []byte(randomText(rng))
+		before := snapshot(s)
+		return sample{before: before, after: []any{s}, results: []any{bytes.TrimSpace(s)}}
+	},
+	"bytes.Repeat": func(rng *rand.Rand) sample {
+		b, count := []byte(randomText(rng)), rng.Intn(4)
+		before := snapshot(b, count)
+		return sample{before: before, after: []any{b, count}, results: []any{bytes.Repeat(b, count)}}
+	},
+	"bytes.Join": func(rng *rand.Rand) sample {
+		var s [][]byte
+		for _, elem := range randomElements(rng) {
+			s = append(s, []byte(elem))
+		}
+		sep := []byte([]string{"", ",", ", ", randomText(rng)}[rng.Intn(4)])
+		before := snapshot(s, sep)
+		return sample{before: before, after: []any{s, sep}, results: []any{bytes.Join(s, sep)}}
+	},
+	"bytes.Replace": func(rng *rand.Rand) sample {
+		text, oldText := randomPair(rng)
+		s, old, replacement, n := []byte(text), []byte(oldText), []byte(randomReplacement(rng, oldText)), rng.Intn(5)-2
+		before := snapshot(s, old, replacement, n)
+		return sample{before: before, after: []any{s, old, replacement, n}, results: []any{bytes.Replace(s, old, replacement, n)}}
+	},
+	"bytes.ReplaceAll": func(rng *rand.Rand) sample {
+		text, oldText := randomPair(rng)
+		s, old, replacement := []byte(text), []byte(oldText), []byte(randomReplacement(rng, oldText))
+		before := snapshot(s, old, replacement)
+		return sample{before: before, after: []any{s, old, replacement}, results: []any{bytes.ReplaceAll(s, old, replacement)}}
 	},
 	"unicode/utf8.RuneCountInString": func(rng *rand.Rand) sample {
 		s := randomText(rng)
 		return sample{before: []any{s}, results: []any{utf8.RuneCountInString(s)}}
 	},
+}
+
+// randomByte returns a byte that random text holds at times: a letter, a
+// space, the lead byte of a multi-byte character, or an invalid one.
+func randomByte(rng *rand.Rand) byte {
+	return "aB \t\xc3\xe4\xff,"[rng.Intn(8)]
+}
+
+// randomPair returns a text and a second one that is, at random, a piece,
+// a prefix, or a suffix of it, the text itself, empty, other text, or
+// longer than it.
+func randomPair(rng *rand.Rand) (string, string) {
+	s := randomText(rng)
+	i := rng.Intn(len(s) + 1)
+	j := i + rng.Intn(len(s)-i+1)
+	return s, []string{s[i:j], s[:j], s[i:], s, "", randomText(rng), s + "a"}[rng.Intn(7)]
+}
+
+// randomReplacement returns what a replacement puts in place of old: old
+// itself, nothing, or other text.
+func randomReplacement(rng *rand.Rand, old string) string {
+	return []string{old, "", "x", randomText(rng)}[rng.Intn(4)]
+}
+
+// foldPair returns a text and one that is, at random, the same, the same
+// in another case, with the Kelvin sign that folds to k, or another pair.
+func foldPair(rng *rand.Rand) (string, string) {
+	s, t := randomPair(rng)
+	switch rng.Intn(4) {
+	case 0:
+		t = strings.ToUpper(s)
+	case 1:
+		t = strings.ToLower(s)
+	case 2:
+		s, t = s+"k", s+"\u212a"
+	}
+	return s, t
+}
+
+// textHarness calls a function of package strings on a pair of texts.
+func textHarness(call func(s, t string) []any) func(rng *rand.Rand) sample {
+	return func(rng *rand.Rand) sample {
+		s, t := randomPair(rng)
+		return sample{before: []any{s, t}, results: call(s, t)}
+	}
+}
+
+// bytesPairHarness calls a function of package bytes on a pair of slices
+// that share no memory, as verified code passes them.
+func bytesPairHarness(call func(s, t []byte) []any) func(rng *rand.Rand) sample {
+	return func(rng *rand.Rand) sample {
+		text, other := randomPair(rng)
+		s, t := []byte(text), []byte(other)
+		before := snapshot(s, t)
+		return sample{before: before, after: []any{s, t}, results: call(s, t)}
+	}
+}
+
+// snapshot returns the arguments of a call as they are before it: a copy
+// of each slice, of its elements and not deeper, and every other value as
+// it is.
+func snapshot(args ...any) []any {
+	before := make([]any, len(args))
+	for i, arg := range args {
+		before[i] = arg
+		if v := reflect.ValueOf(arg); v.Kind() == reflect.Slice && !v.IsNil() {
+			copied := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
+			reflect.Copy(copied, v)
+			before[i] = copied.Interface()
+		}
+	}
+	return before
 }
 
 func randomInts(rng *rand.Rand) []int {
@@ -557,10 +748,22 @@ func (g *grounder) groundTerm(value any) *logic.Term {
 			seq = logic.Push(seq, logic.Bytes(element))
 		}
 		return seq
-	case [][]byte, []any:
-		// No shipped contract reads the fields of FieldsFunc or the values
-		// a function formats; a formula that did would fail on this
-		// constant, which the evaluator cannot read.
+	case uint8:
+		return logic.IntLit(int64(value))
+	case int64:
+		return logic.IntLit(value)
+	case uint64:
+		return logic.BigLit(new(big.Int).SetUint64(value))
+	case [][]byte:
+		seq := logic.Fill(logic.IntLit(0), logic.Fill(logic.IntLit(0), logic.IntLit(0)))
+		for _, element := range value {
+			seq = logic.Push(seq, g.groundTerm(element))
+		}
+		return seq
+	case []any:
+		// No shipped contract reads the values a function formats; a
+		// formula that did would fail on this constant, which the
+		// evaluator cannot read.
 		return logic.Const("unreadable", logic.IntSeq)
 	case io.Writer, *log.Logger:
 		// A writer or a logger is one reference, which no formula of an
@@ -576,120 +779,6 @@ func (g *grounder) groundTerm(value any) *logic.Term {
 		panic(fmt.Sprintf("no term for %T", value))
 	}
 	return logic.NilErr()
-}
-
-// evaluator computes the value of ground terms. Quantifiers range over the
-// indices from -2 to bound, which covers every sequence in the samples.
-type evaluator struct {
-	bound    int64
-	bindings map[string]*big.Int
-	errors   *grounder
-	// callbacks answers, by the name of the sequence that stands for a
-	// function a contract applies, what the function returns.
-	callbacks map[string]func(int64) int64
-}
-
-func (e *evaluator) number(t *logic.Term) *big.Int {
-	x := func(i int) *big.Int { return e.number(t.Args[i]) }
-	switch t.Op {
-	case logic.OpIntLit:
-		return t.Value()
-	case logic.OpBound:
-		return e.bindings[t.Name]
-	case logic.OpAdd:
-		return new(big.Int).Add(x(0), x(1))
-	case logic.OpMul:
-		return new(big.Int).Mul(x(0), x(1))
-	case logic.OpNeg:
-		return new(big.Int).Neg(x(0))
-	case logic.OpLen:
-		if t.Args[0].Sort == logic.SeqOf(logic.IntSeq) {
-			return big.NewInt(int64(len(e.rows(t.Args[0]))))
-		}
-		return big.NewInt(int64(len(e.sequence(t.Args[0]))))
-	case logic.OpSelect:
-		if answer, ok := e.callbacks[t.Args[0].Name]; ok && t.Args[0].Op == logic.OpConst {
-			return big.NewInt(answer(x(1).Int64()))
-		}
-		elements, index := e.sequence(t.Args[0]), x(1)
-		if index.Sign() < 0 || index.Cmp(big.NewInt(int64(len(elements)))) >= 0 {
-			// Outside the sequence the logic leaves the value open; any
-			// fixed choice is a model.
-			return big.NewInt(-99)
-		}
-		return elements[index.Int64()]
-	}
-	panic("cannot evaluate number " + t.String())
-}
-
-func (e *evaluator) sequence(t *logic.Term) []*big.Int {
-	switch t.Op {
-	case logic.OpSelect:
-		rows, index := e.rows(t.Args[0]), e.number(t.Args[1])
-		if index.Sign() < 0 || index.Cmp(big.NewInt(int64(len(rows)))) >= 0 {
-			return nil
-		}
-		return rows[index.Int64()]
-	case logic.OpFill:
-		return slices.Repeat([]*big.Int{e.number(t.Args[1])}, int(e.number(t.Args[0]).Int64()))
-	case logic.OpPush:
-		return append(slices.Clone(e.sequence(t.Args[0])), e.number(t.Args[1]))
-	}
-	panic("cannot evaluate sequence " + t.String())
-}
-
-// rows computes a sequence of sequences, such as the strings of a
-// []string.
-func (e *evaluator) rows(t *logic.Term) [][]*big.Int {
-	switch t.Op {
-	case logic.OpFill:
-		return slices.Repeat([][]*big.Int{e.sequence(t.Args[1])}, int(e.number(t.Args[0]).Int64()))
-	case logic.OpPush:
-		return append(slices.Clone(e.rows(t.Args[0])), e.sequence(t.Args[1]))
-	}
-	panic("cannot evaluate sequence of sequences " + t.String())
-}
-
-func (e *evaluator) holds(t *logic.Term) bool {
-	x := func(i int) bool { return e.holds(t.Args[i]) }
-	switch t.Op {
-	case logic.OpTrue, logic.OpFalse:
-		return t.Op == logic.OpTrue
-	case logic.OpEq:
-		if t.Args[0].Sort == logic.Err {
-			return e.errors.error(t.Args[0]) == e.errors.error(t.Args[1])
-		}
-		return e.number(t.Args[0]).Cmp(e.number(t.Args[1])) == 0
-	case logic.OpIs:
-		return errors.Is(e.errors.error(t.Args[0]), e.errors.error(t.Args[1]))
-	case logic.OpLe:
-		return e.number(t.Args[0]).Cmp(e.number(t.Args[1])) <= 0
-	case logic.OpLt:
-		return e.number(t.Args[0]).Cmp(e.number(t.Args[1])) < 0
-	case logic.OpNot:
-		return !x(0)
-	case logic.OpImplies:
-		return !x(0) || x(1)
-	case logic.OpIff:
-		return x(0) == x(1)
-	case logic.OpAnd:
-		return !slices.ContainsFunc(t.Args, func(arg *logic.Term) bool { return !e.holds(arg) })
-	case logic.OpOr:
-		return slices.ContainsFunc(t.Args, e.holds)
-	case logic.OpIsNil:
-		return e.errors.error(t.Args[0]) == nil
-	case logic.OpSelect:
-		return e.number(t).Sign() != 0
-	case logic.OpForall, logic.OpExists:
-		for index := int64(-2); index <= e.bound; index++ {
-			e.bindings[t.Args[0].Name] = big.NewInt(index)
-			if e.holds(t.Args[1]) == (t.Op == logic.OpExists) {
-				return t.Op == logic.OpExists
-			}
-		}
-		return t.Op == logic.OpForall
-	}
-	panic("cannot evaluate formula " + t.String())
 }
 
 // TestShippedContracts runs every contract shipped with vego against the
@@ -837,24 +926,54 @@ func TestShippedContracts(t *testing.T) {
 				for _, defect := range fn.defects {
 					t.Errorf("contract cannot be used: %s", defect)
 				}
-				checkContract(t, pv, key, fn, harness, false)
+				met := coverage{}
+				checkContract(t, pv, key, fn, harness, met)
+				met.require(t, fn)
 			})
+		}
+	}
+}
+
+// coverage counts, by clause of an ensures and condition of it, the calls
+// whose condition held.
+type coverage map[*clause][]int
+
+// require fails the test for each condition of an ensures that no call met.
+func (met coverage) require(t *testing.T, fn *funcInfo) {
+	t.Helper()
+	for _, c := range fn.ensures {
+		for j, count := range met[c] {
+			if count == 0 {
+				t.Errorf("no call met condition %d of ensures %q, so the samples do not check it; give the harness inputs that meet it", j+1, c.text)
+			}
 		}
 	}
 }
 
 // checkContract runs a harness 400 times and checks every call whose
 // arguments satisfy the requires of the contract fn: what the function
-// called through calls was given, the vouched errors, and every ensures.
-// With unchanged, the parameters that its modifies does not list must be
-// as they were before the call.
-func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harness func(*rand.Rand) sample, unchanged bool) {
+// called through calls was given, the vouched errors, that the parameters
+// its modifies does not list are as they were before the call, what fresh
+// and within say of the results, and every ensures. A clause of an ensures
+// whose condition no call met is not checked by the samples; checkContract
+// counts in met the calls that meet each condition, which met.require then
+// demands: each condition of an implication, of a conjunction of them, or
+// both sides of an iff, must hold in some call.
+func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harness func(*rand.Rand) sample, met coverage) {
 	t.Helper()
 	rng := rand.New(rand.NewSource(1))
 	checked := 0
+	// earlier holds every result so far, which fresh is checked against;
+	// keeping them keeps their memory from being used again.
+	var earlier []any
 	for range 400 {
 		call := harness(rng)
 		if call.after == nil {
+			for i, value := range call.before {
+				if kind := reflect.ValueOf(value).Kind(); kind == reflect.Slice || kind == reflect.Map {
+					t.Fatalf("the harness of %s gives no after for %s, a %T, so a change to it would not be seen", key, fn.params[i].Name(), value)
+				}
+			}
 			call.after = call.before
 		}
 		env := &specEnv{
@@ -882,22 +1001,9 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 				continue
 			}
 			env.given[param], env.givenPost[param] = g.groundTerm(call.before[i]), g.groundTerm(call.after[i])
-			if text, ok := call.before[i].(string); ok {
-				eval.bound = max(eval.bound, int64(len(text))+2)
-			}
-			if list, ok := call.before[i].([]int); ok {
-				eval.bound = max(eval.bound, int64(len(list))+2)
-			}
-			if list, ok := call.before[i].([]byte); ok {
-				eval.bound = max(eval.bound, int64(len(list))+2)
-			}
-			if list, ok := call.before[i].([]string); ok {
-				eval.bound = max(eval.bound, int64(len(list))+2)
-			}
-			// A quantifier over [0, n) needs the indices up to n.
-			if number, ok := call.before[i].(int); ok {
-				eval.bound = max(eval.bound, int64(number)+2)
-			}
+		}
+		env.givenRelation = func(name string, paths []logic.Path) (*logic.Term, error) {
+			return logic.BoolLit(relation(t, fn, call, earlier, name, paths)), nil
 		}
 		satisfied := true
 		for _, c := range fn.requires {
@@ -912,9 +1018,18 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 		}
 		checked++
 		for i, param := range fn.params {
+			if _, isFunc := param.Type().Underlying().(*types.Signature); isFunc {
+				continue
+			}
 			listed := slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.name == param.Name() })
-			if unchanged && !listed && !reflect.DeepEqual(call.before[i], call.after[i]) {
-				t.Fatalf("%s changed %s, which its modifies does not list: %v became %v", key, param.Name(), call.before[i], call.after[i])
+			// What a function the call was handed wrote is not the
+			// call's own write.
+			unwritten := call.before[i]
+			if call.unwritten != nil {
+				unwritten = call.unwritten[i]
+			}
+			if !listed && !reflect.DeepEqual(unwritten, call.after[i]) {
+				t.Fatalf("%s changed %s, which its modifies does not list: %v became %v", key, param.Name(), unwritten, call.after[i])
 			}
 		}
 		// The function called what it was handed only with
@@ -947,9 +1062,6 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 				checkVouched(t, result)
 			}
 			env.givenResults = append(env.givenResults, g.groundTerm(result))
-			if text, ok := result.(string); ok {
-				eval.bound = max(eval.bound, int64(len(text))+2)
-			}
 		}
 		for _, c := range fn.ensures {
 			formula, err := pv.res.Formula(c.node, env)
@@ -960,11 +1072,117 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 				t.Fatalf("ensures %q is false for the call with arguments %v, which left them as %v and returned %v",
 					c.text, call.before, call.after, call.results)
 			}
+			conds := conditions(formula)
+			if met[c] == nil {
+				met[c] = make([]int, len(conds))
+			}
+			for j, cond := range conds {
+				if eval.holds(cond) {
+					met[c][j]++
+				}
+			}
 		}
+		earlier = append(earlier, call.results...)
 	}
 	if checked < 100 {
 		t.Fatalf("only %d of 400 random calls satisfied the requires; the harness does not exercise the contract", checked)
 	}
+}
+
+// conditions returns what must hold in some sample for a clause to be
+// checked: the condition of an implication, those of each implication of
+// a conjunction, and both sides of an iff.
+func conditions(t *logic.Term) []*logic.Term {
+	switch t.Op {
+	case logic.OpImplies:
+		return []*logic.Term{t.Args[0]}
+	case logic.OpIff:
+		return []*logic.Term{t.Args[0], logic.Not(t.Args[0])}
+	case logic.OpAnd:
+		var all []*logic.Term
+		for _, arg := range t.Args {
+			all = append(all, conditions(arg)...)
+		}
+		return all
+	}
+	return nil
+}
+
+// extent returns where the memory a slice or a pointer refers to lies, as
+// addresses from start up to end, and false when it refers to none: a nil
+// pointer, or a slice of capacity zero, which shares runtime.zerobase with
+// every other.
+func extent(value any) (start, end uintptr, ok bool) {
+	v := reflect.ValueOf(value)
+	switch v.Kind() {
+	case reflect.Slice:
+		if v.Cap() == 0 {
+			return 0, 0, false
+		}
+		start = v.Pointer()
+		return start, start + uintptr(v.Cap())*v.Type().Elem().Size(), true
+	case reflect.Pointer:
+		if v.IsNil() {
+			return 0, 0, false
+		}
+		start = v.Pointer()
+		return start, start + max(v.Type().Elem().Size(), 1), true
+	}
+	return 0, 0, false
+}
+
+// relation decides fresh(x) and within(a, b) of a call from the real
+// memory: a result is fresh when it refers to no memory, or to memory that
+// no argument and no earlier result reaches directly; within(a, b) holds
+// when a refers to no memory, or lies inside b's. Only results can be
+// fresh, and only a result can lie within a parameter, which is all that
+// the shipped entries say.
+func relation(t *testing.T, fn *funcInfo, call sample, earlier []any, name string, paths []logic.Path) bool {
+	t.Helper()
+	valueOf := func(p logic.Path) any {
+		if len(p.Steps) > 0 {
+			t.Fatalf("the harness can tell %s only of a parameter or a result, not of a path", name)
+		}
+		if i, isResult := fn.resultNames[p.Root]; isResult {
+			return call.results[i]
+		}
+		for i, param := range fn.params {
+			if param.Name() == p.Root {
+				return call.after[i]
+			}
+		}
+		t.Fatalf("%s(%s): no parameter or result is called %s", name, p.Root, p.Root)
+		return nil
+	}
+	if _, isResult := fn.resultNames[paths[0].Root]; !isResult {
+		t.Fatalf("the harness can tell %s only of a result, not of %s", name, paths[0].Root)
+	}
+	start, end, refers := extent(valueOf(paths[0]))
+	if v := reflect.ValueOf(valueOf(paths[0])); name == "fresh" && v.Kind() == reflect.Pointer && v.IsNil() {
+		// A nil pointer is not fresh.
+		return false
+	}
+	if !refers {
+		return true
+	}
+	overlaps := func(other any) bool {
+		s, e, ok := extent(other)
+		return ok && start < e && s < end
+	}
+	switch name {
+	case "fresh":
+		for i, other := range call.results {
+			if i != fn.resultNames[paths[0].Root] && overlaps(other) {
+				return false
+			}
+		}
+		return !slices.ContainsFunc(call.after, overlaps) && !slices.ContainsFunc(earlier, overlaps)
+	case "within":
+		s, e, ok := extent(valueOf(paths[1]))
+		return ok && s <= start && end <= e
+	}
+	t.Fatalf("the harness cannot tell %s", name)
+	return false
 }
 
 // checkVouched checks an error that a shipped contract vouches for: every

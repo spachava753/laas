@@ -3882,7 +3882,8 @@ The names in an entry are the parameter and result names from the function's sou
 `vego` includes contracts for a few standard library functions:
 
 - `sort.Ints`, `sort.IntsAreSorted`, `sort.SearchInts`, `sort.Search`, `sort.Find`
-- `strings.Contains`, `strings.HasPrefix`, `strings.HasSuffix`, `strings.Index`, `strings.TrimSpace`, `strings.Repeat`, `strings.ToUpper`, `strings.ToLower`
+- `strings.Contains`, `strings.HasPrefix`, `strings.HasSuffix`, `strings.Index`, `strings.LastIndex`, `strings.IndexByte`, `strings.LastIndexByte`, `strings.Cut`, `strings.TrimPrefix`, `strings.TrimSuffix`, `strings.TrimSpace`, `strings.Split`, `strings.Fields`, `strings.Join`, `strings.Replace`, `strings.ReplaceAll`, `strings.Repeat`, `strings.Count`, `strings.EqualFold`, `strings.ToUpper`, `strings.ToLower`
+- `bytes.Contains`, `bytes.HasPrefix`, `bytes.HasSuffix`, `bytes.Index`, `bytes.LastIndex`, `bytes.IndexByte`, `bytes.LastIndexByte`, `bytes.Cut`, `bytes.TrimPrefix`, `bytes.TrimSuffix`, `bytes.TrimSpace`, `bytes.Equal`, `bytes.Join`, `bytes.Replace`, `bytes.ReplaceAll`, `bytes.Repeat`, `bytes.Count`, `bytes.EqualFold`
 - `strings.IndexFunc`, `strings.LastIndexFunc`, `strings.ContainsFunc`, `strings.FieldsFunc`, `strings.TrimFunc`, `strings.TrimLeftFunc`, `strings.TrimRightFunc`, `strings.Map`, and the `bytes` functions of the same names
 - `unicode/utf8.RuneCountInString`
 - `strconv.Itoa`, `strconv.Atoi`
@@ -3896,6 +3897,8 @@ The names in an entry are the parameter and result names from the function's sou
 - the methods of `sync.Mutex` and `sync.RWMutex` that lock and unlock, and `(*sync.Once).Do`, described in [Locks](#locks)
 
 It also includes contracts for `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, `(context.Context).Err`, and `context.CancelFunc`, which are described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages), and the state `closed` of `io.Closer`, described in [States of interface values](#states-of-interface-values).
+
+A function of package `bytes` with two slice parameters cannot be given one slice twice, or two slices that may share memory. `bytes.Equal(a, a)` is reported as `the slices passed to Equal as a and b may overlap`, as for any function with two slice parameters of one element type (see [Slices that share no memory](#slices-that-share-no-memory)).
 
 The contracts are in `vego/trusted/std` in the source of `laas`. They state only behaviour that the function's documentation promises, and the tests of `vego` check each one against the real function. For a function that calls a function it is given, the tests also check that it calls it only with arguments that its contract under `calls` allows. The contracts of `strconv.Atoi`, `os.Remove`, and `(context.Context).Err` vouch for their errors. For those, the tests also check that every error in the tree of a returned error has a type whose methods were read against what `vouches` claims. A contract for a method of an interface or a function type is tested against several implementations from the standard library, and against one that does at random everything the documentation of the type allows. An entry in your own file with the same key replaces the shipped contract.
 

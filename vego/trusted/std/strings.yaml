@@ -2,8 +2,17 @@ version: 1
 
 trusted:
   strings.Contains:
-    reason: Documented to report whether substr is within s; it reads its arguments only.
+    reason: >-
+      "Contains reports whether substr is within s." So when it reports true
+      substr occurs at some index of s, and the empty string occurs in every
+      string. Not said: the converse, that a false result means substr occurs
+      nowhere, which needs a quantifier over every index with one over the
+      bytes of substr inside it, a Forall over an Exists, which this entry
+      leaves out for what it costs the prover at every call.
     modifies: []
+    ensures:
+      - "result -> Exists i in [0, |s| - |substr|] : Forall k in [0, |substr|) : s[i + k] = substr[k]"
+      - "|substr| = 0 -> result"
 
   strings.HasPrefix:
     reason: Documented to report whether s begins with prefix.
@@ -18,9 +27,18 @@ trusted:
     modifies: []
 
   strings.Index:
-    reason: Documented to return the index of the first instance of substr in s, or -1.
+    reason: >-
+      "Index returns the index of the first instance of substr in s, or -1 if
+      substr is not present in s." An instance lies in s, and the first
+      instance of the empty string is at 0. Not said: that it is the first
+      instance, and that -1 means substr is nowhere in s. Each needs a
+      quantifier over the indices before the result with one over the bytes
+      of substr inside it, which this entry leaves out for what it costs the
+      prover at every call; strings.IndexByte says both of a byte.
     ensures:
       - "result = -1 Or (0 <= result And result + |substr| <= |s|)"
+      - "result >= 0 -> Forall k in [0, |substr|) : s[result + k] = substr[k]"
+      - "|substr| = 0 -> result = 0"
     modifies: []
 
   strings.TrimSpace:
@@ -148,3 +166,206 @@ trusted:
       f(c):
         deterministic: true
     modifies: []
+
+  strings.IndexByte:
+    reason: >-
+      "IndexByte returns the index of the first instance of c in s, or -1 if
+      c is not present in s."
+    modifies: []
+    ensures:
+      - "-1 <= result And result < |s|"
+      - "result >= 0 -> s[result] = c"
+      - "Forall k in [0, |s|) : (result = -1 Or k < result) -> s[k] != c"
+
+  strings.LastIndexByte:
+    reason: >-
+      "LastIndexByte returns the index of the last instance of c in s, or -1
+      if c is not present in s."
+    modifies: []
+    ensures:
+      - "-1 <= result And result < |s|"
+      - "result >= 0 -> s[result] = c"
+      - "Forall k in [result + 1, |s|) : s[k] != c"
+
+  strings.LastIndex:
+    reason: >-
+      "LastIndex returns the index of the last instance of substr in s, or -1
+      if substr is not present in s." An instance lies in s, and the last
+      instance of the empty string is at the end of s. Not said: that it is
+      the last instance, and that -1 means substr is nowhere in s, for the
+      reason given in the entry of strings.Index.
+    modifies: []
+    ensures:
+      - "result = -1 Or (0 <= result And result + |substr| <= |s|)"
+      - "result >= 0 -> Forall k in [0, |substr|) : s[result + k] = substr[k]"
+      - "|substr| = 0 -> result = |s|"
+
+  strings.Cut:
+    reason: >-
+      "Cut slices s around the first instance of sep, returning the text
+      before and after sep. The found result reports whether sep appears in
+      s. If sep does not appear in s, cut returns s, "", false." So when
+      found, s is before, then sep, then after. Not said: that the instance
+      is the first, so that sep does not occur in before, for the reason
+      given in the entry of strings.Index.
+    modifies: []
+    ensures:
+      - "found -> |before| + |sep| + |after| = |s|"
+      - "found -> Forall k in [0, |before|) : before[k] = s[k]"
+      - "found -> Forall k in [0, |sep|) : s[|before| + k] = sep[k]"
+      - "found -> Forall k in [0, |after|) : after[k] = s[|before| + |sep| + k]"
+      - "~found -> before = s And |after| = 0"
+
+  strings.TrimPrefix:
+    reason: >-
+      "TrimPrefix returns s without the provided leading prefix string. If s
+      doesn't start with prefix, s is returned unchanged."
+    modifies: []
+    ensures:
+      - "(|prefix| <= |s| And Forall k in [0, |prefix|) : s[k] = prefix[k]) -> (|result| = |s| - |prefix| And Forall k in [0, |result|) : result[k] = s[|prefix| + k])"
+      - "~(|prefix| <= |s| And Forall k in [0, |prefix|) : s[k] = prefix[k]) -> result = s"
+
+  strings.TrimSuffix:
+    reason: >-
+      "TrimSuffix returns s without the provided trailing suffix string. If s
+      doesn't end with suffix, s is returned unchanged."
+    modifies: []
+    ensures:
+      - "(|suffix| <= |s| And Forall k in [0, |suffix|) : s[|s| - |suffix| + k] = suffix[k]) -> (|result| = |s| - |suffix| And Forall k in [0, |result|) : result[k] = s[k])"
+      - "~(|suffix| <= |s| And Forall k in [0, |suffix|) : s[|s| - |suffix| + k] = suffix[k]) -> result = s"
+
+  strings.Split:
+    reason: >-
+      "Split slices s into all substrings separated by sep and returns a
+      slice of the substrings between those separators. If s does not
+      contain sep and sep is not empty, Split returns a slice of length 1
+      whose only element is s. If sep is empty, Split splits after each UTF-8
+      sequence. If both s and sep are empty, Split returns an empty slice."
+      Each substring lies in s, and there is at most one more of them than s
+      has bytes. The case of a sep that does not occur is said only where s
+      is shorter than sep, since saying that sep occurs nowhere needs a
+      Forall over an Exists (see the entry of strings.Contains). Not said:
+      what the substrings hold, and that joining them with sep gives s.
+      Read from the source of Go 1.26.6 (strings.go, genSplit and explode):
+      the result is made by make([]string, n) with n at most len(s)+1, so it
+      is new memory, and that make of sixteen bytes a string on a 64-bit
+      target, eight on a 32-bit one, is what the requires keeps within the
+      largest allocation; Count and len(s)+1 do not overflow an int there.
+    requires:
+      - "16 * (|s| + 1) <= MaxAlloc"
+    modifies: []
+    ensures:
+      - "|result| <= |s| + 1"
+      - "|result| = 0 <-> (|s| = 0 And |sep| = 0)"
+      - "Forall i in [0, |result|) : |result[i]| <= |s|"
+      - "(|sep| > 0 And |s| < |sep|) -> (|result| = 1 And result[0] = s)"
+      - "fresh(result)"
+
+  strings.Fields:
+    reason: >-
+      "Fields splits the string s around each instance of one or more
+      consecutive white space characters, as defined by unicode.IsSpace,
+      returning a slice of substrings of s or an empty slice if s contains
+      only white space. Every element of the returned slice is non-empty."
+      Fields are separated by at least one byte of white space, so there are
+      at most |s| / 2 + 1 of them. Not said: what the fields hold. Read from
+      the source of Go 1.26.6 (strings.go, Fields and FieldsFunc): the
+      result is made by make([]string, n), so it is new memory; for a string
+      that is not ASCII it calls FieldsFunc, which keeps the bounds of each
+      field, sixteen bytes on a 64-bit target, in a slice it grows by append,
+      which may be given twice the room it needs, so the requires is the one
+      of strings.FieldsFunc.
+    requires:
+      - "16 * |s| + 65568 <= MaxAlloc"
+    modifies: []
+    ensures:
+      - "|result| <= |s| / 2 + 1"
+      - "Forall i in [0, |result|) : 1 <= |result[i]| And |result[i]| <= |s|"
+      - "fresh(result)"
+
+  strings.Join:
+    reason: >-
+      "Join concatenates the elements of its first argument to create a
+      single string. The separator string sep is placed between elements in
+      the resulting string." The result holds every element, and is at most
+      as long as as many copies of the longest element and sep as there are
+      elements. Not said: its exact length, a sum the logic has no term for.
+      Read from the source of Go 1.26.6 (strings.go, Join): for n elements it
+      panics when len(sep) >= maxInt/(n-1), or when the total passes maxInt,
+      and then grows a Builder to exactly the total. With n * (len(elem) +
+      len(sep) + 1) at most MaxInt for every element, (n-1) * (len(sep) + 1)
+      is less than MaxInt, so len(sep) < MaxInt/(n-1) and neither check
+      fires, also where an int has 32 bits; and with the same at most
+      MaxAlloc the Builder's buffer can be allocated.
+    requires:
+      - "Forall i in [0, |elems|) : |elems| * (|elems[i]| + |sep| + 1) <= MaxInt"
+      - "Forall i in [0, |elems|) : |elems| * (|elems[i]| + |sep| + 1) <= MaxAlloc"
+    modifies: []
+    ensures:
+      - "|elems| = 0 -> |result| = 0"
+      - "|elems| = 1 -> result = elems[0]"
+      - "Forall i in [0, |elems|) : |elems[i]| <= |result|"
+      - "|elems| >= 2 -> (|elems| - 1) * |sep| <= |result|"
+      - "|elems| > 0 -> Exists i in [0, |elems|) : |result| <= |elems| * (|elems[i]| + |sep|)"
+
+  strings.Replace:
+    reason: >-
+      "Replace returns a copy of the string s with the first n
+      non-overlapping instances of old replaced by new. If old is empty, it
+      matches at the beginning of the string and after each UTF-8 sequence,
+      yielding up to k+1 replacements for a k-rune string. If n < 0, there
+      is no limit on the number of replacements." There are at most |s| + 1
+      replacements, each adding at most |new| bytes, and replacing old by
+      itself, or nothing, gives s. Not said: what the result holds. Read
+      from the source of Go 1.26.6 (strings.go, Replace): it grows a Builder
+      to len(s) + n*(len(new)-len(old)) for n replacements, so that int
+      arithmetic and the allocation are kept within MaxInt and MaxAlloc,
+      also where an int has 32 bits.
+    requires:
+      - "|s| + (|s| + 1) * |new| <= MaxInt"
+      - "|s| + (|s| + 1) * |new| <= MaxAlloc"
+    modifies: []
+    ensures:
+      - "|result| <= |s| + (|s| + 1) * |new|"
+      - "n = 0 -> result = s"
+      - "old = new -> result = s"
+
+  strings.ReplaceAll:
+    reason: >-
+      "ReplaceAll returns a copy of the string s with all non-overlapping
+      instances of old replaced by new. If old is empty, it matches at the
+      beginning of the string and after each UTF-8 sequence, yielding up to
+      k+1 replacements for a k-rune string." It is Replace with n = -1 (Go
+      1.26.6, strings.go), so its requires are those of Replace, for the
+      reasons given there. Not said: what the result holds.
+    requires:
+      - "|s| + (|s| + 1) * |new| <= MaxInt"
+      - "|s| + (|s| + 1) * |new| <= MaxAlloc"
+    modifies: []
+    ensures:
+      - "|result| <= |s| + (|s| + 1) * |new|"
+      - "old = new -> result = s"
+
+  strings.EqualFold:
+    reason: >-
+      "EqualFold reports whether s and t, interpreted as UTF-8 strings, are
+      equal under simple Unicode case-folding, which is a more general form
+      of case-insensitivity." Equal strings are equal under any folding. Not
+      said: which other strings it reports equal, which needs a model of
+      Unicode's case folding.
+    modifies: []
+    ensures:
+      - "s = t -> result"
+
+  strings.Count:
+    reason: >-
+      "Count counts the number of non-overlapping instances of substr in s.
+      If substr is an empty string, Count returns 1 + the number of Unicode
+      code points in s." Non-overlapping instances of a substr that is not
+      empty fit in s, and s has at most as many code points as bytes. Not
+      said: the exact count.
+    modifies: []
+    ensures:
+      - "result >= 0"
+      - "|substr| > 0 -> result * |substr| <= |s|"
+      - "|substr| = 0 -> 1 <= result And result <= |s| + 1"

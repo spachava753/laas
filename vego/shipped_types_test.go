@@ -354,9 +354,13 @@ func checkTypeContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo) 
 	for _, defect := range fn.defects {
 		t.Errorf("contract cannot be used: %s", defect)
 	}
+	// A condition needs a call that meets it among all the
+	// implementations, not in each: context.Background is never canceled.
+	met := coverage{}
 	for _, impl := range implementations {
 		t.Run(impl.name, func(t *testing.T) {
-			checkContract(t, pv, key, fn, impl.harness, true)
+			checkContract(t, pv, key, fn, impl.harness, met)
 		})
 	}
+	met.require(t, fn)
 }

@@ -184,27 +184,36 @@ func (r *keptReader) ReadAt([]byte, int64) (int, error) {
 	r.log.refuse("ReadAt of a kept reader")
 	return 0, io.EOF
 }
-func (r *keptReader) Seek(int64, int) (int64, error) { r.log.refuse("Seek of a kept reader"); return 0, nil }
-func (r *keptReader) String() string                 { r.log.refuse("String of a kept reader"); return "" }
-func (r *keptReader) GoString() string               { r.log.refuse("GoString of a kept reader"); return "" }
-func (r *keptReader) Format(fmt.State, rune)         { r.log.refuse("Format of a kept reader") }
-func (r *keptReader) Flush() error                   { r.log.refuse("Flush of a kept reader"); return nil }
+func (r *keptReader) Seek(int64, int) (int64, error) {
+	r.log.refuse("Seek of a kept reader")
+	return 0, nil
+}
+func (r *keptReader) String() string         { r.log.refuse("String of a kept reader"); return "" }
+func (r *keptReader) GoString() string       { r.log.refuse("GoString of a kept reader"); return "" }
+func (r *keptReader) Format(fmt.State, rune) { r.log.refuse("Format of a kept reader") }
+func (r *keptReader) Flush() error           { r.log.refuse("Flush of a kept reader"); return nil }
 
 func (w *keptWriter) Close() error { w.log.refuse("Close of a kept writer"); return nil }
 func (w *keptWriter) WriteByte(byte) error {
 	w.log.refuse("WriteByte of a kept writer")
 	return nil
 }
-func (w *keptWriter) WriteRune(rune) (int, error) { w.log.refuse("WriteRune of a kept writer"); return 0, nil }
+func (w *keptWriter) WriteRune(rune) (int, error) {
+	w.log.refuse("WriteRune of a kept writer")
+	return 0, nil
+}
 func (w *keptWriter) WriteAt([]byte, int64) (int, error) {
 	w.log.refuse("WriteAt of a kept writer")
 	return 0, nil
 }
-func (w *keptWriter) Seek(int64, int) (int64, error) { w.log.refuse("Seek of a kept writer"); return 0, nil }
-func (w *keptWriter) String() string                 { w.log.refuse("String of a kept writer"); return "" }
-func (w *keptWriter) GoString() string               { w.log.refuse("GoString of a kept writer"); return "" }
-func (w *keptWriter) Format(fmt.State, rune)         { w.log.refuse("Format of a kept writer") }
-func (w *keptWriter) Flush() error                   { w.log.refuse("Flush of a kept writer"); return nil }
+func (w *keptWriter) Seek(int64, int) (int64, error) {
+	w.log.refuse("Seek of a kept writer")
+	return 0, nil
+}
+func (w *keptWriter) String() string         { w.log.refuse("String of a kept writer"); return "" }
+func (w *keptWriter) GoString() string       { w.log.refuse("GoString of a kept writer"); return "" }
+func (w *keptWriter) Format(fmt.State, rune) { w.log.refuse("Format of a kept writer") }
+func (w *keptWriter) Flush() error           { w.log.refuse("Flush of a kept writer"); return nil }
 
 // keptError is an error that kept code returned. A function whose asserts
 // lists nothing claims that it calls no method of it either, while the
@@ -302,7 +311,6 @@ type sequenceCheck struct {
 	before, after map[*types.Var]map[string]bool
 	// fresh holds the results that the call made new.
 	fresh map[*types.Var]bool
-	bound int64
 }
 
 func (c *sequenceCheck) env() *specEnv {
@@ -335,7 +343,7 @@ func (c *sequenceCheck) env() *specEnv {
 // holds reports whether every clause holds.
 func (c *sequenceCheck) holds(clauses []*clause) bool {
 	env := c.env()
-	eval := &evaluator{bound: c.bound, bindings: map[string]*big.Int{}, errors: standIn}
+	eval := &evaluator{bindings: map[string]*big.Int{}, errors: standIn}
 	for _, cl := range clauses {
 		formula, err := c.pv.res.Formula(cl.node, env)
 		if err != nil {
@@ -351,7 +359,7 @@ func (c *sequenceCheck) holds(clauses []*clause) bool {
 // ensure fails the test unless every ensures holds.
 func (c *sequenceCheck) ensure(what string) {
 	env := c.env()
-	eval := &evaluator{bound: c.bound, bindings: map[string]*big.Int{}, errors: standIn}
+	eval := &evaluator{bindings: map[string]*big.Int{}, errors: standIn}
 	for _, cl := range c.fn.ensures {
 		formula, err := c.pv.res.Formula(cl.node, env)
 		if err != nil {
@@ -453,7 +461,7 @@ func checkLoggerEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 			out = randomKeptWriter(rng, k)
 		}
 		prefix := randomPrefix(rng)
-		c := &sequenceCheck{t: t, pv: pv, fn: newFn, bound: int64(len(prefix)) + 2,
+		c := &sequenceCheck{t: t, pv: pv, fn: newFn,
 			given: map[*types.Var]*logic.Term{newFn.params[0]: reference(out == nil), newFn.params[1]: logic.Bytes(prefix), newFn.params[2]: logic.IntLit(0)}}
 		if !c.holds(newFn.requires) {
 			continue
@@ -609,11 +617,11 @@ func lengthTerm(n int) *logic.Term {
 // its first parameter: the requires with the ghost before, the call, and
 // the ensures with the ghost after, which the call itself does not change.
 // It reports whether the requires held and the call was made.
-func checkMethod(t *testing.T, pv *pkgVerifier, fn *funcInfo, k *keptLog, ready bool, given []*logic.Term, bound int64,
+func checkMethod(t *testing.T, pv *pkgVerifier, fn *funcInfo, k *keptLog, ready bool, given []*logic.Term,
 	call func() []*logic.Term) bool {
 	t.Helper()
 	state := map[*types.Var]map[string]bool{fn.params[0]: {"ready": ready}}
-	c := &sequenceCheck{t: t, pv: pv, fn: fn, before: state, after: state, bound: bound,
+	c := &sequenceCheck{t: t, pv: pv, fn: fn, before: state, after: state,
 		given: map[*types.Var]*logic.Term{fn.params[0]: reference(false)}}
 	for i, param := range fn.params[1:] {
 		c.given[param] = given[i]
@@ -686,7 +694,7 @@ func checkScannerEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key 
 				continue
 			}
 			fn := methods[name]
-			made := checkMethod(t, pv, fn, k, ready, nil, 0, func() []*logic.Term {
+			made := checkMethod(t, pv, fn, k, ready, nil, func() []*logic.Term {
 				switch name {
 				case "Scan":
 					return []*logic.Term{logic.BoolLit(s.Scan())}
@@ -763,7 +771,7 @@ func checkReaderEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 				k.check()
 				continue
 			}
-			if checkMethod(t, pv, readByte, k, ready, nil, 0, func() []*logic.Term {
+			if checkMethod(t, pv, readByte, k, ready, nil, func() []*logic.Term {
 				c, err := b.ReadByte()
 				return []*logic.Term{logic.IntLit(int64(c)), errorTerm(err)}
 			}) {
@@ -864,7 +872,7 @@ func checkWriterEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 			case "(*bufio.Writer).WriteByte":
 				args = []*logic.Term{logic.IntLit('w')}
 			}
-			if checkMethod(t, pv, contracts[name], k, ready, args, int64(len(p))+2, func() []*logic.Term {
+			if checkMethod(t, pv, contracts[name], k, ready, args, func() []*logic.Term {
 				return writerMethods[name](b, p)
 			}) && name == key {
 				checked++
@@ -970,9 +978,9 @@ func refsTerm(n int, isNil func(int) bool) *logic.Term {
 // ensures with the states after. It reports whether the requires held and
 // the call was made.
 func checkTypeCall(t *testing.T, pv *pkgVerifier, fn *funcInfo, k *keptLog, before, after map[*types.Var]map[string]bool,
-	given map[*types.Var]*logic.Term, bound int64, call func() []*logic.Term) bool {
+	given map[*types.Var]*logic.Term, call func() []*logic.Term) bool {
 	t.Helper()
-	c := &sequenceCheck{t: t, pv: pv, fn: fn, before: before, after: after, bound: bound, given: given}
+	c := &sequenceCheck{t: t, pv: pv, fn: fn, before: before, after: after, given: given}
 	if !c.holds(fn.requires) {
 		return false
 	}
@@ -1007,7 +1015,7 @@ func checkIOEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key strin
 	k := &keptLog{}
 	for range 300 {
 		given, args, call, after := construct(rng, k, earlier)
-		c := &sequenceCheck{t: t, pv: pv, fn: fn, given: map[*types.Var]*logic.Term{}, bound: 8}
+		c := &sequenceCheck{t: t, pv: pv, fn: fn, given: map[*types.Var]*logic.Term{}}
 		for i, param := range fn.params {
 			c.given[param] = given[i]
 		}
@@ -1046,14 +1054,14 @@ func checkIOEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key strin
 					state := func(closed bool) map[*types.Var]map[string]bool {
 						return map[*types.Var]map[string]bool{closer.receiver: {"closed": closed}}
 					}
-					if checkTypeCall(t, pv, closer, k, state(closed), state(true), map[*types.Var]*logic.Term{closer.receiver: reference(false)}, 2,
+					if checkTypeCall(t, pv, closer, k, state(closed), state(true), map[*types.Var]*logic.Term{closer.receiver: reference(false)},
 						func() []*logic.Term { return []*logic.Term{errorTerm(rc.Close())} }) {
 						closed = true
 					}
 					continue
 				}
 				p := make([]byte, rng.Intn(65))
-				checkTypeCall(t, pv, read, k, nil, nil, map[*types.Var]*logic.Term{read.params[0]: lengthTerm(len(p))}, int64(len(p))+2,
+				checkTypeCall(t, pv, read, k, nil, nil, map[*types.Var]*logic.Term{read.params[0]: lengthTerm(len(p))},
 					func() []*logic.Term {
 						n, err := value.Read(p)
 						return []*logic.Term{logic.IntLit(int64(n)), errorTerm(err)}
@@ -1062,7 +1070,7 @@ func checkIOEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key strin
 				p := make([]byte, rng.Intn(65))
 				rng.Read(p)
 				before := slices.Clone(p)
-				checkTypeCall(t, pv, write, k, nil, nil, map[*types.Var]*logic.Term{write.params[0]: lengthTerm(len(p))}, int64(len(p))+2,
+				checkTypeCall(t, pv, write, k, nil, nil, map[*types.Var]*logic.Term{write.params[0]: lengthTerm(len(p))},
 					func() []*logic.Term {
 						n, err := value.Write(p)
 						return []*logic.Term{logic.IntLit(int64(n)), errorTerm(err)}
