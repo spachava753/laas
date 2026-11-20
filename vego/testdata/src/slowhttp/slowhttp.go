@@ -1,8 +1,9 @@
 // Package slowhttp calls a trusted function that returns a *http.Response,
 // the slowest case measured with speed: verifying Fetch took 101 s at
-// 35dca07 and 79 s after it, almost all in Z3. It is not part of the
-// tests, which it would slow by as much; see Speed in the ROADMAP, and
-// testdata/slow for the problems that take the time.
+// 35dca07 and 79 s after it, almost all in Z3. Since its questions are
+// solved without the axiom of extensionality it takes under a second, and
+// the main corpus run keeps it there through the table of costs; see The
+// prover in the ROADMAP.
 package slowhttp
 
 import "net/http"

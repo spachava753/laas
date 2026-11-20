@@ -2,8 +2,9 @@
 // net/http, an interface, or a pointer field: a trusted function returns a
 // struct with the fields of http.Response that hold strings, slices of
 // strings, maps of them, integers, and booleans. The reviewer of speed
-// measured Code at 84 s. It is not part of the tests; see Speed in the
-// ROADMAP.
+// measured Code at 84 s. Since its questions are solved without the axiom
+// of extensionality it takes under a second, and the main corpus run keeps
+// it there through the table of costs; see The prover in the ROADMAP.
 package slowresp
 
 import "slowresplib"

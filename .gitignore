@@ -23,9 +23,6 @@
 # The recorded cost of verifying the corpus; see vego/guard_test.go.
 !/vego/testdata/costs.txt
 
-# Problems that Z3 is slow on, kept for the work on them; see Speed in vego/ROADMAP.md.
-!/vego/testdata/slow/*.smt2
-
 # Test packages that stand for other modules have a go.mod of their own,
 # which the loader of the tests ignores and vego reads.
 !/vego/testdata/src/*/go.mod

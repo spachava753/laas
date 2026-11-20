@@ -3467,7 +3467,7 @@ laas -vego ./...
 - Build `laas` with the same Go that the job uses, as the commands above do. See the toolchain note in [Running it](#running-it).
 - Do not use `-vego.trust` as the check. It prints a report for reviewers. It also exits with status 3 if verification reported problems.
 - Install Z3 5.4.1 on the machine that runs the job, as in [Running it](#running-it).
-- Set a time limit on the job. Small functions take well under a second each. A function that calls a trusted function whose result points to a struct with several fields that hold strings, slices of strings, and maps of them, as `*http.Response` does, can take more than a minute. `-vego.rlimit` limits the work per proof obligation, not the total run time. `-vego.cost` shows which functions take the time; see [Finding out where the time goes](#finding-out-where-the-time-goes).
+- Set a time limit on the job. Small functions take well under a second each. Long functions take longer: one of 120 statements that write and read a slice takes about 10 s. `-vego.rlimit` limits the work per proof obligation, not the total run time. `-vego.cost` shows which functions take the time; see [Finding out where the time goes](#finding-out-where-the-time-goes).
 
 ## When a proof fails
 

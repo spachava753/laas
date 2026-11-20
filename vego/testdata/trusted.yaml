@@ -1233,6 +1233,34 @@ trusted:
     modifies: []
     ensures:
       - "err = nil -> resp != nil And resp.Body != nil And ~closed(resp.Body) And fresh(resp.Body)"
+  deepfactslib.GetByte:
+    reason: A test of an entry whose promise contradicts the bytes of a string it returns.
+    modifies: []
+    ensures: ["r != nil", "|r.Status| = 1", "r.Status[0] = 300"]
+  deepfactslib.GetMap:
+    reason: A test of an entry whose promise contradicts a map value it returns.
+    modifies: []
+    ensures: ["r != nil", "|r.Header[\"a\"]| < 0"]
+  deepfactslib.GetSlice:
+    reason: A test of an entry whose promise contradicts a string in a slice it returns.
+    modifies: []
+    ensures: ["r != nil", "|r.TE| = 1", "|r.TE[0]| = 1", "r.TE[0][0] = 999"]
+  deepfactslib.GetQ:
+    reason: A test of an entry whose quantified promise contradicts the bytes of a string it returns.
+    modifies: []
+    ensures: ["r != nil", "|r.Status| > 0", "Forall i in [0, |r.Status|): r.Status[i] = 300"]
+  deepfactslib.Put:
+    reason: A test of an entry whose promise contradicts the bytes of a string it is handed.
+    modifies: []
+    ensures: ["|s| > 0 And |s[0]| > 0 -> s[0][0] = 300"]
+  deepfactslib.PutMap:
+    reason: A test of an entry whose promise contradicts a map value it is handed.
+    modifies: []
+    ensures: ["|m[\"a\"]| < 0"]
+  deepfactslib.Must:
+    reason: A test of a trusted function that always succeeds.
+    modifies: []
+    ensures: ["err = nil", "r != nil"]
   slowresplib.Get:
     reason: A benchmark of a trusted function returning a struct with the plain fields of http.Response; see Speed in the ROADMAP.
     modifies: []

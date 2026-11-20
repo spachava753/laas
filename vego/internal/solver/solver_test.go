@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/big"
 	"math/rand/v2"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -824,9 +825,16 @@ func TestProveIsSound(t *testing.T) {
 		problems int
 		least    int
 		models   []model
+		// without solves every problem without the axiom of
+		// extensionality, as the encoder chooses for some problems; see
+		// tacticWithoutExtensionality. The problems are those of the test
+		// with the same seed solved with it.
+		without bool
 	}{
-		{"plain problems", false, 1, 4000, 1000, small},
-		{"wide problems", true, 3, 4000, 1100, append(small, large...)},
+		{"plain problems", false, 1, 4000, 1000, small, false},
+		{"wide problems", true, 3, 4000, 1100, append(small, large...), false},
+		{"plain problems without extensionality", false, 1, 4000, 1000, small, true},
+		{"wide problems without extensionality", true, 3, 4000, 1100, append(small, large...), true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -854,7 +862,7 @@ func TestProveIsSound(t *testing.T) {
 			for range maxProcesses {
 				wg.Go(func() {
 					for i := range next {
-						results[i] = z3.Prove(problems[i].hyps, problems[i].goal, Options{Preds: definitions(), Effort: 200_000})
+						results[i] = z3.Prove(problems[i].hyps, problems[i].goal, Options{Preds: definitions(), Effort: 200_000, withoutExtensionality: test.without})
 					}
 				})
 			}
@@ -1233,5 +1241,64 @@ func TestManyWrites(t *testing.T) {
 			t.Errorf("the field written through p%d is not read back after %d writes: %v", i, n, got)
 		}
 		hyps = append(hyps, read)
+	}
+}
+
+// TestExtensionality checks when the axiom of extensionality is left out:
+// only where a sequence of sequences of sequences is declared, and never
+// where a key function or a recursive predicate takes a sequence, since
+// those can tell apart two sequences that only the axiom makes equal. Each
+// problem that needs the axiom also declares such a sequence, so that it is
+// the second condition alone that keeps the axiom.
+func TestExtensionality(t *testing.T) {
+	z3 := solverFor(t)
+	lit := logic.IntLit
+	x, y, n := logic.Const("x", logic.Int), logic.Const("y", logic.Int), logic.Const("n", logic.Int)
+	A := logic.Const("A", logic.IntSeq)
+	M := logic.Const("M", logic.SeqOf(logic.IntSeq))
+	// Strings held in a region, as the strings of a struct field are.
+	deep := logic.Le(lit(0), logic.Len(logic.Select(logic.Select(logic.Const("D", logic.SeqOf(logic.SeqOf(logic.IntSeq))), x), y)))
+	s := logic.Bound("s", logic.IntSeq)
+	// A recursive predicate of a sequence: every element from the first
+	// on is at least zero, read through a cut.
+	rest := logic.Subseq(s, lit(1), logic.Len(s))
+	nonneg := Options{Preds: map[string]*logic.PredDef{"nonneg": {Name: "nonneg", Params: []*logic.Term{s},
+		Body: logic.Or(logic.Eq(logic.Len(s), lit(0)), logic.And(logic.Le(lit(0), logic.Select(s, lit(0))), logic.Pred("nonneg", rest)))}}}
+	k := logic.Bound("k", logic.Int)
+	keyed := logic.Forall(k, logic.Implies(logic.And(logic.Le(lit(0), k), logic.Lt(k, n)), logic.Eq(logic.Key(logic.Select(M, k)), lit(7))))
+	tests := []struct {
+		name    string
+		opts    Options
+		hyps    []*logic.Term
+		goal    *logic.Term
+		without bool
+	}{
+		// Guards against the axiom being left out where a predicate tells
+		// sequences apart: Store(A, x, y) is A only by extensionality.
+		{"a recursive predicate of a sequence that a write left as it was", nonneg,
+			[]*logic.Term{deep, logic.Pred("nonneg", A), logic.Eq(logic.Select(A, x), y)}, logic.Pred("nonneg", logic.Store(A, x, y)), false},
+		// Guards against the axiom being left out where a key inside a
+		// quantifier tells sequences apart.
+		{"a key inside a quantifier of a sequence that a write left as it was", Options{},
+			[]*logic.Term{deep, keyed, logic.Lt(lit(0), n), logic.Eq(logic.Select(logic.Select(M, lit(0)), x), y)},
+			logic.Eq(logic.Key(logic.Store(logic.Select(M, lit(0)), x, y)), lit(7)), false},
+		// Guards against the axiom being kept where nothing tells
+		// sequences apart, and against reads through writes being lost
+		// without it.
+		{"a region of strings without a key", Options{}, []*logic.Term{deep}, logic.Eq(logic.Select(logic.Select(logic.Write(M, x, y, lit(5)), x), y), lit(5)), true},
+		{"a region of strings beside a write elsewhere", Options{}, []*logic.Term{deep, logic.Ne(x, y)},
+			logic.Eq(logic.Select(logic.Select(logic.Write(M, x, y, lit(5)), y), y), logic.Select(logic.Select(M, y), y)), true},
+		{"no region of strings", Options{}, nil, logic.Eq(logic.Select(logic.Select(logic.Write(M, x, y, lit(5)), x), y), lit(5)), false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			script := Script([]*logic.Term{logic.And(append(slices.Clip(test.hyps), logic.Not(test.goal))...)}, test.opts)
+			if without := strings.Contains(script, "array.extensional false"); without != test.without {
+				t.Fatalf("the problem is solved without extensionality: %v, want %v\n%s", without, test.without, script)
+			}
+			if got := z3.Prove(test.hyps, test.goal, test.opts); got != Proved {
+				t.Fatalf("Prove(%v, %v) = %v, want proved", test.hyps, test.goal, got)
+			}
+		})
 	}
 }

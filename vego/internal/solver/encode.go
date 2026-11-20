@@ -85,6 +85,11 @@ type encoder struct {
 	// one is encoded that is denied, and 0 where it is both or neither.
 	// It only decides where shifted copies of facts are worth adding.
 	polarity int
+	// tellsApart is set when a function of the problem takes a sequence
+	// (a key function, or a recursive predicate with a sequence
+	// parameter), and nested when a sequence of sequences of sequences is
+	// declared, as a region of strings is. See tacticWithoutExtensionality.
+	tellsApart, nested bool
 }
 
 // fault reports a term that the logic does not allow where it stands. It is
@@ -212,6 +217,7 @@ func (e *encoder) sort(s logic.Sort) string {
 			"(declare-fun error-is (Err Err) Bool)\n")
 	case s.IsSeq():
 		elem := e.sort(s.Elem())
+		e.nested = e.nested || (s.Elem().IsSeq() && s.Elem().Elem().IsSeq())
 		name = "Seq" + elem
 		array := "(Array Int " + elem + ")"
 		r := strings.NewReplacer("S", name, "E", elem, "A", array)
@@ -321,6 +327,7 @@ func (e *encoder) key(b *strings.Builder, t *logic.Term) {
 		fault("a key of a sequence of sequences, %v", s)
 	}
 	sort := e.sort(s)
+	e.tellsApart = true
 	if !e.keyed[s] {
 		e.keyed[s] = true
 		fmt.Fprintf(&e.out, "(declare-fun %s.key (%s) Int)\n", sort, sort)
@@ -391,6 +398,7 @@ func (e *encoder) pred(name string) string {
 			var sorts strings.Builder
 			for _, param := range e.preds[member].Params {
 				sorts.WriteString(" " + e.sort(param.Sort))
+				e.tellsApart = e.tellsApart || param.Sort.IsSeq()
 			}
 			fmt.Fprintf(&e.out, "(declare-fun %s (%s) Bool)\n", e.defining[member], strings.TrimSpace(sorts.String()))
 		}

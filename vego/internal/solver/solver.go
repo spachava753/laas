@@ -66,6 +66,10 @@ type Options struct {
 	Forall []*logic.Term
 	// Observe, when set, is told what the problem cost.
 	Observe func(Cost)
+	// withoutExtensionality makes every problem be solved without the
+	// axiom of extensionality, so that the tests can check Z3's proofs in
+	// that setting on problems of every shape; see encode.
+	withoutExtensionality bool
 }
 
 // Cost is what one problem took. Bytes is the length of its SMT-LIB text
@@ -220,6 +224,47 @@ func exhausted(reason string) bool {
 // TestManyWrites.
 const tactic = "(then simplify propagate-values simplify elim-uncnstr smt)"
 
+// tacticWithoutExtensionality is tactic with the core solver told not to
+// use the axiom of extensionality, by which two arrays with the same
+// elements are equal.
+//
+// This can never make a proof wrong, whatever problem it is used for.
+// Without the axiom the theory is weaker, so a problem that has no model
+// without it has none with it, and every unsat Z3 gives stands. Soundness
+// does not rest on the rule below that picks the problems.
+//
+// The rule is there so that no proof is lost. The axiom is needed only to
+// equate two arrays that something tells apart, and in a problem of the
+// logic nothing does unless a function takes a sequence: the logic has no
+// equality of sequences (the encoder refuses one), and every other symbol
+// applied to a sequence (a read, a write, a fill, a cut, a concatenation, a
+// condition, the constructor and the fields of the datatype, a quantifier)
+// gives equal results for sequences with equal elements. In a model without
+// the axiom, identifying the arrays with equal elements then gives a model
+// with it, so such a problem has a model with the axiom exactly when it has
+// one without it. A key function and a recursive predicate with a sequence
+// parameter can tell sequences apart, so a problem with either keeps the
+// axiom (tellsApart). That the two have the same models does not make Z3
+// give the same answer: its procedure is incomplete with quantifiers, and
+// without the axiom it may stop at a limit, or give up on the quantifiers
+// at once, where with it the new indices of its axioms led to a
+// contradiction. That was measured, not proved; see The prover in the
+// ROADMAP.
+//
+// Which of the problems the rule allows leave the axiom out is a choice of
+// search, made from measurements of the corpus, not a law. Where a region
+// holds sequences (strings, slices of strings, or slices held as map
+// values, inside structs or slices), Z3 kept adding axioms of
+// extensionality between the rows of the region, each with a new index
+// that matched the quantified facts of what the types guarantee of their
+// contents, and ran to the limit on questions without a model: the call of
+// a trusted function returning a *http.Response took 80 s, and without the
+// axiom takes a second. Leaving it out of every problem the rule allows
+// lost one proof of the corpus, and made 22 problems that Z3 answers sat
+// quickly with it, since it uses it to finish a model, and 23 in all, run
+// to a limit.
+const tacticWithoutExtensionality = "(then simplify propagate-values simplify elim-uncnstr (using-params smt :array.extensional false))"
+
 // Script returns the SMT-LIB text of a satisfiability check of the facts,
 // ending in its check-sat-using.
 func Script(facts []*logic.Term, opts Options) string {
@@ -258,5 +303,12 @@ func encode(facts []*logic.Term, opts Options) (*encoder, string) {
 		e.assertForall(opts.Forall, facts)
 	}
 	e.keyFacts()
-	return e, "(set-option :rlimit " + strconv.Itoa(effort) + ")\n" + e.out.String() + "(check-sat-using " + tactic + ")\n"
+	// A problem in which a region holds sequences, and in which no
+	// function tells sequences apart, is solved without extensionality;
+	// see tacticWithoutExtensionality.
+	chain := tactic
+	if opts.withoutExtensionality || (e.nested && !e.tellsApart) {
+		chain = tacticWithoutExtensionality
+	}
+	return e, "(set-option :rlimit " + strconv.Itoa(effort) + ")\n" + e.out.String() + "(check-sat-using " + chain + ")\n"
 }
