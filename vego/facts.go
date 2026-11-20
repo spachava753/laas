@@ -76,7 +76,7 @@ func (pv *pkgVerifier) exportContracts(excused map[*funcInfo]bool) {
 		for _, fn := range pv.order {
 			result := pv.outcomes[fn]
 			failed := result == nil || !result.complete || fn.failed || fn.broken || pv.predicatesBroken || pv.unread ||
-				slices.ContainsFunc(pv.spreadCallees(fn), func(callee *funcInfo) bool { return unverified[callee] })
+				(fn.annotated() && slices.ContainsFunc(pv.spreadCallees(fn), func(callee *funcInfo) bool { return unverified[callee] }))
 			if fn.annotated() && failed && !unverified[fn] {
 				unverified[fn], changed = true, true
 			}

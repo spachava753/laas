@@ -120,8 +120,18 @@ func funcTitle(obj *types.Func) string {
 	return name + "." + obj.Name()
 }
 
-// buildGraph builds the call graph of the package, once its trusted
-// contracts are loaded and its annotations collected.
+// callGraph returns the call graph of the package, built when it is first
+// asked for, once the annotations are collected. A package with nothing to
+// verify never builds it. It reads the trust files as written and checks
+// no entry, which would ask Z3.
+func (pv *pkgVerifier) callGraph() *callGraph {
+	if pv.graph == nil {
+		pv.buildGraph()
+	}
+	return pv.graph
+}
+
+// buildGraph builds the call graph of the package.
 func (pv *pkgVerifier) buildGraph() {
 	g := &callGraph{byObj: map[*types.Func]*callNode{}, lits: map[*ast.FuncLit]*callNode{}, sites: map[*ast.CallExpr][]callEdge{}}
 	pv.graph = g
@@ -146,7 +156,7 @@ func (pv *pkgVerifier) buildGraph() {
 				if lit, ok := ast.Unparen(n.Fun).(*ast.FuncLit); ok {
 					inPlace[lit] = true
 				}
-				for _, arg := range pv.handedArgs(n) {
+				for _, arg := range pv.handedAsWritten(n) {
 					if lit, ok := ast.Unparen(arg).(*ast.FuncLit); ok {
 						inPlace[lit] = true
 					}
@@ -171,7 +181,7 @@ func (pv *pkgVerifier) buildGraph() {
 			if lit, ok := n.(*ast.FuncLit); ok && !inPlace[lit] {
 				node := &callNode{lit: lit}
 				g.lits[lit] = node
-				if within == nil || !within.annotated() || pv.trustedContract(within.obj) != nil {
+				if within == nil || !within.annotated() || pv.entryFor(within.obj.FullName()) != nil {
 					g.escapes = append(g.escapes, valueEscape{node, pv.info.TypeOf(lit)})
 				}
 			}
@@ -488,10 +498,7 @@ func (pv *pkgVerifier) concreteMethods(t types.Type, seen map[types.Type]bool) [
 // is a node of its own and is not walked here.
 func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 	g := pv.graph
-	var trusted *funcInfo
-	if node.fn != nil {
-		trusted = pv.trustedContract(node.fn.obj)
-	}
+	trusted := node.fn != nil && pv.entryFor(node.fn.obj.FullName()) != nil
 	var bound map[*types.Var]*ast.FuncLit
 	if node.fn != nil {
 		bound, _ = literalUses(pv.info, node.fn.decl.Body)
@@ -548,7 +555,7 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 				}
 				// A trusted function calls what its caller hands it under
 				// calls, and that is followed where it is handed over.
-				if variable, ok := pv.info.Uses[fun].(*types.Var); ok && trusted != nil && node.fn != nil && pv.callsParam(node.fn, variable) {
+				if variable, ok := pv.info.Uses[fun].(*types.Var); ok && trusted && pv.callsParam(node.fn, variable) {
 					return true
 				}
 			}
@@ -566,7 +573,7 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 // the code its arguments and receiver hold.
 func (pv *pkgVerifier) outsideCall(call *ast.CallExpr, callee *types.Func, text string, unresolved func(*ast.CallExpr, string, []*callNode)) {
 	handed := map[ast.Expr]bool{}
-	for _, arg := range pv.handedArgs(call) {
+	for _, arg := range pv.handedAsWritten(call) {
 		handed[ast.Unparen(arg)] = true
 	}
 	formatted := map[*types.Var]bool{}
@@ -647,8 +654,30 @@ func (pv *pkgVerifier) outsideCall(call *ast.CallExpr, callee *types.Func, text 
 	}
 }
 
+// handedAsWritten returns the arguments of a call that the entry of its
+// callee, as written and unchecked, gives a contract under calls.
+func (pv *pkgVerifier) handedAsWritten(call *ast.CallExpr) []ast.Expr {
+	callee := typeutil.StaticCallee(pv.info, call)
+	if callee == nil {
+		return nil
+	}
+	entry := pv.entryFor(callee.Origin().FullName())
+	if entry == nil || len(entry.calls) == 0 {
+		return nil
+	}
+	sig := callee.Type().(*types.Signature)
+	bound, _ := bindArgs(pv.info, call, paramsOf(sig), sig.Variadic())
+	var handed []ast.Expr
+	for _, b := range bound {
+		if !b.packed && slices.ContainsFunc(entry.calls, func(c trustCall) bool { return c.name == b.param.Name() }) {
+			handed = append(handed, b.expr)
+		}
+	}
+	return handed
+}
+
 // g returns the call graph.
-func g(pv *pkgVerifier) *callGraph { return pv.graph }
+func g(pv *pkgVerifier) *callGraph { return pv.callGraph() }
 
 // asLit returns an expression as a function literal, or nil.
 func asLit(e ast.Expr) *ast.FuncLit {
@@ -783,7 +812,7 @@ func (pv *pkgVerifier) describeCycle(c *cycle) string {
 // is in it, and otherwise from its contract: a call that a function used
 // as a value or a run of a trusted function makes is not in a body.
 func (pv *pkgVerifier) callEdges(call *ast.CallExpr, fn *funcInfo) []callEdge {
-	g := pv.graph
+	g := pv.callGraph()
 	var edges []callEdge
 	switch {
 	case fn.methodOf != nil:
@@ -809,7 +838,7 @@ func (pv *pkgVerifier) callEdges(call *ast.CallExpr, fn *funcInfo) []callEdge {
 // spreadCallees returns the functions of the package a function may lead
 // to directly, for the rule that failure spreads from callee to caller.
 func (pv *pkgVerifier) spreadCallees(fn *funcInfo) []*funcInfo {
-	node := pv.graph.byObj[fn.obj]
+	node := pv.callGraph().byObj[fn.obj]
 	if node == nil {
 		return nil
 	}

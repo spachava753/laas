@@ -1179,7 +1179,6 @@ func (pv *pkgVerifier) collect() {
 		}
 		pv.checkPlacement(fn)
 	}
-	pv.buildGraph()
 }
 
 // namedSignature writes the signature of a function with a name for each

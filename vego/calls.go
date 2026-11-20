@@ -1125,14 +1125,14 @@ func (v *fnVerifier) calleeFormula(c *clause, env *specEnv) *logic.Term {
 // Calls that a function used as a value makes are not recursion of the
 // function around it, and stratification bounds them.
 func (v *fnVerifier) checkRecursion(callee *funcInfo, pre *specEnv, st *state, guard []*logic.Term, call *ast.CallExpr) {
-	self := v.graph.byObj[v.fn.obj]
+	self := v.callGraph().byObj[v.fn.obj]
 	if self == nil || v.fn.decl == nil || v.fn.spelled != nil {
 		return
 	}
 	first := v.callEdges(call, callee)
 	through, direct := v.cycleThrough(self, first, false), v.cycleThrough(self, first, true)
 	// A trusted function of this package has a body to verify instead.
-	if callee.trust != nil && v.graph.byObj[callee.obj.Origin()] != nil && (through != nil || direct != nil) {
+	if callee.trust != nil && v.callGraph().byObj[callee.obj.Origin()] != nil && (through != nil || direct != nil) {
 		shown := direct
 		if shown == nil {
 			shown = through
