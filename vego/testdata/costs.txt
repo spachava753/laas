@@ -1166,6 +1166,7 @@ guide	guide.PopInCondition	14	16271	0
 guide	guide.PopSum	20	424399	0
 guide	guide.Position	13	67837	0
 guide	guide.Pricer.Price	3	3934	0
+guide	guide.PrintLines	102	11855215	20
 guide	guide.Printer	1	46	0
 guide	guide.Push	13	7217	0
 guide	guide.PushTwo	26	862036	4

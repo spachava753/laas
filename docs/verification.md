@@ -3763,7 +3763,7 @@ A `bufio.Scanner` reads lines from a reader:
 ```go
 // @Requires r != nil And limit >= 0
 // @Ensures 0 <= n And n <= limit
-func ReadLines(r io.Reader, limit int) (n int, err error) {
+func PrintLines(r io.Reader, limit int) (n int, err error) {
 	sc := bufio.NewScanner(r)
 	// @Invariant 0 <= n And n <= limit And ready(sc)
 	// @Variant limit - n
@@ -3771,10 +3771,7 @@ func ReadLines(r io.Reader, limit int) (n int, err error) {
 		fmt.Println(sc.Text())
 		n++
 	}
-	if err := sc.Err(); err != nil {
-		return n, fmt.Errorf("read lines: %w", err)
-	}
-	return n, nil
+	return n, sc.Err()
 }
 ```
 
@@ -3799,7 +3796,7 @@ vego: loop needs a // @Variant annotation to prove that it terminates
 vego: precondition of Scan may not hold: ready(s)
 ```
 
-Bound the number of lines, as `ReadLines` does.
+Bound the number of lines, as `PrintLines` does.
 
 A scanner that code which is not verified hands your function may have another split function. Require the state in the contract, `@Requires sc != nil And ready(sc)`, and list the scanner under `@Modifies`.
 
@@ -3810,7 +3807,25 @@ A scanner that code which is not verified hands your function may have another s
 
 #### Errors that pass through
 
-The error that `Err` returns may be one that the reader returned. Under the shipped entries nothing is known of it, so `ReadLines` cannot wrap it:
+The error that `Err` returns may be one that the reader returned. Under the shipped entries nothing is known of it, so a function can return it as it is, as `PrintLines` does, but cannot wrap it:
+
+```go
+// @Requires r != nil And limit >= 0
+// @Ensures 0 <= n And n <= limit
+func ReadLines(r io.Reader, limit int) (n int, err error) {
+	sc := bufio.NewScanner(r)
+	// @Invariant 0 <= n And n <= limit And ready(sc)
+	// @Variant limit - n
+	for n < limit && sc.Scan() {
+		fmt.Println(sc.Text())
+		n++
+	}
+	if err := sc.Err(); err != nil {
+		return n, fmt.Errorf("read lines: %w", err)
+	}
+	return n, nil
+}
+```
 
 ```text
 vego: cannot verify ReadLines: formatting err would run the methods of an error whose origin is
@@ -3818,7 +3833,7 @@ not known; only an error made by errors.New or fmt.Errorf, here or in a verified
 that a trusted contract vouches for, can be formatted
 ```
 
-You can return it as it is. To wrap it, your trust file needs an entry for `(io.Reader).Read` that vouches for the errors of the readers your callers pass, as described in [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write). It also needs an entry for `Err` that vouches for what it returns:
+To wrap it, your trust file needs an entry for `(io.Reader).Read` that vouches for the errors of the readers your callers pass, as described in [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write). It also needs an entry for `Err` that vouches for what it returns:
 
 ```yaml
   (*bufio.Scanner).Err:

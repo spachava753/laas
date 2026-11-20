@@ -50,3 +50,19 @@ func ReadLines(r io.Reader, limit int) (n int, err error) {
 	}
 	return n, nil
 }
+
+// PrintLines is the guide's first program on reading lines, which returns
+// the error of the Scanner as it is and verifies under the shipped entries.
+//
+// @Requires r != nil And limit >= 0
+// @Ensures 0 <= n And n <= limit
+func PrintLines(r io.Reader, limit int) (n int, err error) {
+	sc := bufio.NewScanner(r)
+	// @Invariant 0 <= n And n <= limit And ready(sc)
+	// @Variant limit - n
+	for n < limit && sc.Scan() {
+		fmt.Println(sc.Text())
+		n++
+	}
+	return n, sc.Err()
+}
