@@ -2248,7 +2248,7 @@ When both conditions hold, a literal tells `vego` the elements, the keys and val
 
 What is made inside a literal, such as the inner slices of `[][]int{{1, 2}}`, is ordinary memory.
 
- Otherwise the memory is like memory that a parameter refers to. Nothing is known of what it holds when the function is called, and a write through another slice may change it:
+Otherwise the memory is like memory that a parameter refers to. Nothing is known of what it holds when the function is called, and a write through another slice may change it:
 
 ```go
 var sizes = []int{1, 2, 4}
