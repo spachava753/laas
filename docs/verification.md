@@ -3914,7 +3914,7 @@ The contracts are in `vego/trusted/std` in the source of `laas`. They state only
 A shipped contract states only what the documentation of its function promises, and some of that has no formula yet. So some contracts say less than you may need:
 
 - `strings.Index`, `strings.LastIndex`, `strings.Cut`, `strings.Contains`, and their `bytes` forms do not say that the instance they find is the first or the last, or that `-1` or `false` means that there is none. `strings.IndexByte` and `strings.LastIndexByte` say both of a byte.
-- `sort.Strings` does not say that the strings are in order. It says that the elements after the call are the elements before it.
+- `sort.Strings` does not say that the strings are in order. It says that each element after the call is one of those before it, and that each one before is still there, but not how many times.
 - The predicates of `unicode` say what they report for ASCII, and nothing of other characters.
 - `strconv.Unquote` does not bound the length of its result. `strconv.Quote` bounds its result by `10 * |s| + 2`.
 - The functions of `math` say only that they return.
@@ -3922,7 +3922,8 @@ A shipped contract states only what the documentation of its function promises, 
 
 Some functions of the standard library have no shipped contract, because no true contract can be written yet:
 
-- `os.ReadFile` and `os.ReadDir` do not return for every input. See [Reading and writing files](#reading-and-writing-files).
+- `os.ReadFile` does not return for every input. See [Reading and writing files](#reading-and-writing-files).
+- `os.ReadDir` and `os.Stat` return values of `io/fs.DirEntry` and `io/fs.FileInfo`, whose methods have no contracts. `os.ReadDir` also collects every entry of a directory, which on a 32-bit target can be more than can be allocated.
 - `flag.Parse` can end the program.
 - `sort.SearchStrings` needs a sorted slice of strings, and a formula cannot say that.
 - `bytes.Split` and `bytes.Fields` return slices inside their argument, which a contract cannot say of every element.
