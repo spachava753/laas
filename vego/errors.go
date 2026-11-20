@@ -900,6 +900,7 @@ const (
 // to be nil: a function with two of them succeeds only when both are, and
 // inputs that each force one of them say nothing about that.
 func (v *fnVerifier) forcesSuccess() solver.Result {
+	defer v.asking(failureCheck)()
 	entry := v.enter()
 	pre, post, failures := v.contractInstance(entry)
 	nils := make([]*logic.Term, len(failures))
@@ -938,7 +939,7 @@ func (v *fnVerifier) forcesSuccess() solver.Result {
 		}
 	}
 	body := logic.And(logic.And(wellFormed...), forced(&witness{consts: map[string]*logic.Term{}, memo: map[*logic.Term]*logic.Term{}}))
-	opts := v.options(0)
+	opts := v.options(0, failureCheck)
 	opts.Forall = v.produced(body)
 	if result := v.solver().Check(append(known, body), opts); result != solver.Refuted {
 		return result
@@ -1760,7 +1761,7 @@ func (v *fnVerifier) tiedToInputs(terms, sentinels []*logic.Term) []*logic.Term 
 func (v *fnVerifier) proposeFor(b *sampler, input *witness, facts, forall []*logic.Term, accept func(input *witness) bool) bool {
 	// A proposal decides nothing, so it gets a part of the effort a proof
 	// gets.
-	opts := v.options(max(v.effort/4, 1))
+	opts := v.options(max(v.effort/4, 1), failureCheck)
 	opts.Forall = forall
 	for range maxRounds {
 		result, values := v.solver().Model(facts, opts, b.vars)

@@ -105,6 +105,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -130,13 +131,17 @@ var refuseCache bool
 // annotations instead.
 func RefuseCachedRuns() { refuseCache = true }
 
+// observeCosts, when set, is given the costs of the functions of each
+// package once it is verified; the tests of the corpus set it.
+var observeCosts func(pass *analysis.Pass, costs []*fnCost)
+
 // newAnalyzer builds the analyzer with its flags. A run loads the trusted
 // contracts, collects the annotations of the package, verifies every
 // annotated function, applies the always-fails rule, and publishes the
 // verified contracts and the trust the proofs rest on. For a caching driver
 // it only reports that nothing was verified.
 func newAnalyzer() *analysis.Analyzer {
-	effort, audit, trustPath, otherTags, z3Path := 0, false, "", "", ""
+	effort, audit, trustPath, otherTags, z3Path, printCost := 0, false, "", "", "", false
 	analyzer := &analysis.Analyzer{
 		Name: "vego",
 		Doc: `verifies functions against their // @ specifications
@@ -172,6 +177,12 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		"trusted",
 		"",
 		"file of trusted contracts to use instead of "+TrustFileName+" next to go.mod",
+	)
+	analyzer.Flags.BoolVar(
+		&printCost,
+		"cost",
+		false,
+		"print what verifying each function asked of Z3, and where questions stopped at a limit, on standard error",
 	)
 	analyzer.Flags.StringVar(
 		&otherTags,
@@ -231,6 +242,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			trustSources:    map[*trustFile]*token.File{},
 			z3Path:          z3Path,
 			effort:          effort,
+			printCost:       printCost,
 		}
 		if refuseCache {
 			pv.usage = &Usage{}
@@ -265,6 +277,12 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		pv.exportContracts(pv.reportAlwaysFailing())
 		pv.reportSentinelWrites()
 		pv.noteLookups()
+		if pv.printCost {
+			pv.printCosts(costStderr)
+		}
+		if observeCosts != nil {
+			observeCosts(pass, pv.costOrder)
+		}
 		// The proofs of this package also rest on whatever the packages it
 		// depends on took on trust.
 		pass.ExportPackageFact(&usageFact{Usage: *pv.usage})
@@ -412,6 +430,20 @@ type pkgVerifier struct {
 	// counts the searches under way.
 	searchLimit solver.Result
 	searching   int
+	// costs holds what verifying each function has asked of Z3, in
+	// costOrder in the order first asked; costFn is the function that
+	// questions count against now, askAt the place they come from, and
+	// purpose their kind when purposeSet; nested is the time spent on
+	// other functions since costFn was set. See cost.go.
+	costs      map[*funcInfo]*fnCost
+	costOrder  []*fnCost
+	costFn     *funcInfo
+	askAt      token.Pos
+	purpose    question
+	purposeSet bool
+	nested     time.Duration
+	// printCost is set by -vego.cost.
+	printCost bool
 	// otherTags holds the words that the user declared to be read by other
 	// tools when they follow "// @".
 	otherTags map[string]bool

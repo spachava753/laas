@@ -609,6 +609,7 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 	}
 	// An entry counts as needed unless the write is quickly shown to be
 	// allowed without it.
+	defer v.asking(modifiesCheck)()
 	if len(candidates) == 0 || v.quickly(st, guard, created) {
 		return
 	}

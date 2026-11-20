@@ -172,6 +172,7 @@ type fnVerifier struct {
 // verification into diagnostics.
 func (pv *pkgVerifier) run(fn *funcInfo, task func(v *fnVerifier)) {
 	v := pv.newVerifier(fn)
+	defer pv.costing(fn)()
 	defer func() {
 		switch r := recover().(type) {
 		case nil, abort:
@@ -573,7 +574,10 @@ func (v *fnVerifier) check(st *state, guard []*logic.Term, goal *logic.Term, pos
 		if conjunct.Op == logic.OpTrue {
 			continue
 		}
-		if result := v.attempt(st, guard, conjunct); result != solver.Proved {
+		done := v.at(pos)
+		result := v.attempt(st, guard, conjunct)
+		done()
+		if result != solver.Proved {
 			v.report(pos, "%s%s", fmt.Sprintf(format, args...), limitNote(result))
 		}
 		st.assume(logic.Implies(logic.And(guard...), conjunct))
@@ -633,6 +637,7 @@ func (v *fnVerifier) seq(list []ast.Stmt, from, to token.Pos, st *state, c ctrl,
 		k(st)
 		return
 	}
+	defer v.at(list[0].Pos())()
 	rest := func(next *state) { v.seq(list[1:], list[0].End(), to, next, c, k) }
 	switch s := list[0].(type) {
 	case *ast.ForStmt:

@@ -698,6 +698,7 @@ func (v *fnVerifier) elementFacts(seq *logic.Term, elem types.Type) *logic.Term 
 // guarantee of its outputs, and made what the call produced: its results
 // and the memory it may have written.
 func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state, facts []*logic.Term, made forward) {
+	defer v.asking(failureCheck)()
 	path := append(slices.Clip(st.hyps), facts...)
 	local := fn.decl != nil
 	for _, index := range errorResults(fn) {
@@ -834,6 +835,7 @@ type failure struct {
 // call, the unknown that stands for the variable afterwards does too. What
 // a loop forgets of memory is not followed in this way.
 func (v *fnVerifier) tieFailures() {
+	defer v.asking(failureCheck)()
 	// What a call produced spreads: to the unknown that stands for a
 	// variable a loop forgot, if what an iteration leaves in the variable
 	// depends on it, and to what a later call produced, if that call was

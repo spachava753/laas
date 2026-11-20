@@ -33,17 +33,25 @@ func (pv *pkgVerifier) solver() *solver.Solver {
 }
 
 // options returns the options of a problem with the given resource limit;
-// zero selects the one the flags set.
-func (pv *pkgVerifier) options(effort int) solver.Options {
+// zero selects the one the flags set. What the problem costs counts as a
+// question of the given kind unless the caller set another; see asking.
+func (pv *pkgVerifier) options(effort int, kind question) solver.Options {
 	if effort == 0 {
 		effort = pv.effort
 	}
-	return solver.Options{Preds: pv.res.Preds, Effort: effort}
+	return solver.Options{Preds: pv.res.Preds, Effort: effort, Observe: pv.observe(kind)}
 }
 
 // proves reports whether goal provably follows from the hypotheses.
 func (pv *pkgVerifier) proves(hyps []*logic.Term, goal *logic.Term, effort int) bool {
-	result := pv.solver().Prove(hyps, goal, pv.options(effort))
+	kind := obligation
+	switch {
+	case goal.Op == logic.OpFalse:
+		kind = contradictionCheck
+	case effort == quickEffort:
+		kind = quickCheck
+	}
+	result := pv.solver().Prove(hyps, goal, pv.options(effort, kind))
 	pv.noteLimit(result)
 	return result == solver.Proved
 }
@@ -58,7 +66,7 @@ func (pv *pkgVerifier) noteLimit(result solver.Result) {
 
 // contradictory reports whether the facts provably have no model.
 func (pv *pkgVerifier) contradictory(facts []*logic.Term) bool {
-	return pv.solver().Check(facts, pv.options(0)) == solver.Proved
+	return pv.solver().Check(facts, pv.options(0, contradictionCheck)) == solver.Proved
 }
 
 // quickly is prove with a small budget.
@@ -69,7 +77,7 @@ func (v *fnVerifier) quickly(st *state, guard []*logic.Term, goal *logic.Term) b
 // attempt tries to prove a goal from the facts of a state together with the
 // conditions under which the current expression is evaluated.
 func (v *fnVerifier) attempt(st *state, guard []*logic.Term, goal *logic.Term) solver.Result {
-	return v.solver().Prove(append(slices.Clip(st.hyps), guard...), goal, v.options(0))
+	return v.solver().Prove(append(slices.Clip(st.hyps), guard...), goal, v.options(0, obligation))
 }
 
 // limitNote returns what a report of an obligation that was not proved adds
