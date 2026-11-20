@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/big"
 	"math/rand"
+	"reflect"
 	"runtime"
 	"slices"
 	"strconv"
@@ -154,6 +155,28 @@ func (r *keptReader) ReadFrom(io.Reader) (int64, error) {
 func (r *keptReader) WriteString(string) (int, error) {
 	r.log.refuse("WriteString of a kept reader")
 	return 0, nil
+}
+
+// Close would close what a wrapper keeps, which no entry of a wrapper
+// claims.
+func (r *keptReader) Close() error {
+	r.log.refuse("Close of a kept reader")
+	return nil
+}
+
+// poisoned is put into a slice after it was handed to a function that keeps
+// what the slice holds: the function must have copied the slice, so any
+// call fails the test.
+type poisoned struct{ log *keptLog }
+
+func (p poisoned) Read([]byte) (int, error) {
+	p.log.refuse("Read of a reader put into the slice after the call")
+	return 0, io.EOF
+}
+
+func (p poisoned) Write(q []byte) (int, error) {
+	p.log.refuse("Write of a writer put into the slice after the call")
+	return len(q), nil
 }
 
 // randomKeptWriter returns a writer that keptWriter wraps around one of
@@ -766,6 +789,204 @@ func checkWriterEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 				if !bytes.Equal(given[i], copies[i]) {
 					t.Fatalf("a slice that Write was given changed after %s", name)
 				}
+			}
+		}
+	}
+	if checked < 100 {
+		t.Fatalf("only %d calls of %s were checked", checked, key)
+	}
+}
+
+// ioConstructors makes a wrapper of package io from kept readers and
+// writers, by the key of its entry. It returns the arguments, grounded, and
+// a function that makes the call. A nil argument comes now and then, and so
+// does an argument that is a wrapper made before, so that a claim that the
+// result is new is tested against it. The variadic functions are passed a
+// spread slice, into which the harness puts poisoned values after the call.
+var ioConstructors = map[string]func(rng *rand.Rand, k *keptLog, earlier []any) (given []*logic.Term, args []any, call func() any, after func()){
+	"io.NopCloser": func(rng *rand.Rand, k *keptLog, earlier []any) ([]*logic.Term, []any, func() any, func()) {
+		r := randomIOReader(rng, k, earlier)
+		return []*logic.Term{reference(r == nil)}, []any{r}, func() any { return io.NopCloser(r) }, nil
+	},
+	"io.LimitReader": func(rng *rand.Rand, k *keptLog, earlier []any) ([]*logic.Term, []any, func() any, func()) {
+		r, n := randomIOReader(rng, k, earlier), int64(rng.Intn(100)-10)
+		return []*logic.Term{reference(r == nil), logic.IntLit(n)}, []any{r}, func() any { return io.LimitReader(r, n) }, nil
+	},
+	"io.TeeReader": func(rng *rand.Rand, k *keptLog, earlier []any) ([]*logic.Term, []any, func() any, func()) {
+		r := randomIOReader(rng, k, earlier)
+		var w io.Writer
+		if rng.Intn(8) > 0 {
+			w = randomKeptWriter(rng, k)
+		}
+		return []*logic.Term{reference(r == nil), reference(w == nil)}, []any{r, w}, func() any { return io.TeeReader(r, w) }, nil
+	},
+	"io.MultiReader": func(rng *rand.Rand, k *keptLog, earlier []any) ([]*logic.Term, []any, func() any, func()) {
+		readers := make([]io.Reader, rng.Intn(4))
+		for i := range readers {
+			readers[i] = randomIOReader(rng, k, earlier)
+		}
+		args := make([]any, len(readers))
+		for i, r := range readers {
+			args[i] = r
+		}
+		return []*logic.Term{refsTerm(len(readers), func(i int) bool { return readers[i] == nil })}, args,
+			func() any { return io.MultiReader(readers...) },
+			func() {
+				for i := range readers {
+					readers[i] = poisoned{k}
+				}
+			}
+	},
+	"io.MultiWriter": func(rng *rand.Rand, k *keptLog, earlier []any) ([]*logic.Term, []any, func() any, func()) {
+		writers := make([]io.Writer, rng.Intn(4))
+		for i := range writers {
+			if rng.Intn(10) > 0 {
+				writers[i] = randomKeptWriter(rng, k)
+			}
+		}
+		args := make([]any, len(writers))
+		for i, w := range writers {
+			args[i] = w
+		}
+		return []*logic.Term{refsTerm(len(writers), func(i int) bool { return writers[i] == nil })}, args,
+			func() any { return io.MultiWriter(writers...) },
+			func() {
+				for i := range writers {
+					writers[i] = poisoned{k}
+				}
+			}
+	},
+}
+
+// randomIOReader returns a kept reader, nil now and then, or a wrapper
+// that the harness made before.
+func randomIOReader(rng *rand.Rand, k *keptLog, earlier []any) io.Reader {
+	switch n := rng.Intn(10); {
+	case n == 0:
+		return nil
+	case n == 1 && len(earlier) > 0:
+		if r, ok := earlier[rng.Intn(len(earlier))].(io.Reader); ok {
+			return r
+		}
+	}
+	return randomKeptReader(rng, k)
+}
+
+// refsTerm grounds a slice of interface values by which are nil.
+func refsTerm(n int, isNil func(int) bool) *logic.Term {
+	seq := logic.Fill(logic.IntLit(0), logic.RefLit(0))
+	for i := range n {
+		seq = logic.Push(seq, reference(isNil(i)))
+	}
+	return seq
+}
+
+// checkTypeCall checks one call through a value against the shipped entry
+// of its method: the requires with the states before, the call, and the
+// ensures with the states after. It reports whether the requires held and
+// the call was made.
+func checkTypeCall(t *testing.T, pv *pkgVerifier, fn *funcInfo, k *keptLog, before, after map[*types.Var]map[string]bool,
+	given map[*types.Var]*logic.Term, bound int64, call func() []*logic.Term) bool {
+	t.Helper()
+	c := &sequenceCheck{t: t, pv: pv, fn: fn, before: before, after: after, bound: bound, given: given}
+	if !c.holds(fn.requires) {
+		return false
+	}
+	within(t, k, fn.obj.FullName(), func() { c.results = call() })
+	c.ensure(fn.obj.FullName())
+	return true
+}
+
+// checkIOEntries runs the entries of the functions of io that keep the
+// readers and writers they are given. Each round makes a wrapper, when the
+// requires holds, with no call active, and checks the ensures: that it is
+// not nil, and, where the entry says so, that it is new and not closed.
+// Then the wrapper is read from, written to, or closed at random, each call
+// checked against the shipped entry of its method, with the kept values
+// run only while a call of the wrapper is active, only through Read and
+// Write, and never closed.
+func checkIOEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key string) {
+	fn := contractOfKey(t, pv, pkg, key)
+	construct := ioConstructors[key]
+	if construct == nil {
+		t.Fatalf("no harness calls %s; add one to ioConstructors", key)
+	}
+	read := shippedTypeContract(pv, pkg, "(Reader).Read")
+	write := shippedTypeContract(pv, pkg, "(Writer).Write")
+	closer := shippedTypeContract(pv, pkg, "(Closer).Close")
+	rng := rand.New(rand.NewSource(1))
+	checked := 0
+	var earlier []any
+	for range 300 {
+		k := &keptLog{}
+		given, args, call, after := construct(rng, k, earlier)
+		c := &sequenceCheck{t: t, pv: pv, fn: fn, given: map[*types.Var]*logic.Term{}, bound: 8}
+		for i, param := range fn.params {
+			c.given[param] = given[i]
+		}
+		if !c.holds(fn.requires) {
+			continue
+		}
+		made := call()
+		k.check()
+		if after != nil {
+			after()
+		}
+		// A value whose dynamic type is not a pointer has no identity in Go:
+		// two NopClosers of one reader are ==. It is new unless the call
+		// returned one of the wrappers it was given; one that is a pointer
+		// is new unless it is one made before.
+		fresh := true
+		for _, other := range earlier {
+			if reflect.ValueOf(made).Kind() == reflect.Pointer {
+				fresh = fresh && other != made
+			}
+		}
+		for _, arg := range args {
+			fresh = fresh && arg != made
+		}
+		earlier = append(earlier, made)
+		closed := false
+		c.results = []*logic.Term{reference(made == nil)}
+		c.fresh = map[*types.Var]bool{fn.results[0]: fresh}
+		c.after = map[*types.Var]map[string]bool{fn.results[0]: {"closed": closed}}
+		c.ensure(key)
+		checked++
+		for range 1 + rng.Intn(8) {
+			switch value := made.(type) {
+			case io.Reader:
+				if rc, ok := value.(io.ReadCloser); ok && rng.Intn(4) == 0 {
+					state := func(closed bool) map[*types.Var]map[string]bool {
+						return map[*types.Var]map[string]bool{closer.receiver: {"closed": closed}}
+					}
+					if checkTypeCall(t, pv, closer, k, state(closed), state(true), map[*types.Var]*logic.Term{closer.receiver: reference(false)}, 2,
+						func() []*logic.Term { return []*logic.Term{errorTerm(rc.Close())} }) {
+						closed = true
+					}
+					continue
+				}
+				p := make([]byte, rng.Intn(65))
+				checkTypeCall(t, pv, read, k, nil, nil, map[*types.Var]*logic.Term{read.params[0]: lengthTerm(len(p))}, int64(len(p))+2,
+					func() []*logic.Term {
+						n, err := value.Read(p)
+						return []*logic.Term{logic.IntLit(int64(n)), errorTerm(err)}
+					})
+			case io.Writer:
+				p := make([]byte, rng.Intn(65))
+				rng.Read(p)
+				before := slices.Clone(p)
+				checkTypeCall(t, pv, write, k, nil, nil, map[*types.Var]*logic.Term{write.params[0]: lengthTerm(len(p))}, int64(len(p))+2,
+					func() []*logic.Term {
+						n, err := value.Write(p)
+						return []*logic.Term{logic.IntLit(int64(n)), errorTerm(err)}
+					})
+				if !bytes.Equal(p, before) {
+					t.Fatalf("the Write of what %s returned changed what it was given", key)
+				}
+			}
+			if rng.Intn(4) == 0 {
+				time.Sleep(time.Millisecond)
+				k.check()
 			}
 		}
 	}

@@ -66,3 +66,20 @@ func WriteTotal(bw *bufio.Writer, total []byte) (err error) {
 	}
 	return bw.Flush()
 }
+
+// @Requires r != nil And log != nil
+// @Ensures True
+func ReadLogged(r io.Reader, log io.Writer) (err error) {
+	rc := io.NopCloser(io.TeeReader(r, log))
+	defer rc.Close()
+	_, err = rc.Read(make([]byte, 512))
+	return err
+}
+
+// @Requires Forall i in [0, |parts|) : parts[i] != nil
+// @Ensures True
+func ReadParts(parts []io.Reader) (err error) {
+	all := io.MultiReader(parts...)
+	_, err = all.Read(make([]byte, 512))
+	return err
+}

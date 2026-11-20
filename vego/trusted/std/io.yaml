@@ -79,3 +79,99 @@ trusted:
     modifies: [c]
     ensures:
       - "closed(c')"
+
+  # Functions that keep the readers and writers they are given. What was
+  # read in io.go and multi.go of Go 1.27.3: each stores what it is given in
+  # the value it returns (MultiReader and MultiWriter copy the slice), and
+  # only the Read, Write, and Close of that value read it again, while they
+  # run; no goroutine, timer, finalizer, cleanup, callback, or package-level
+  # variable reaches it. The Read and Write of the values returned call only
+  # Read and Write of what they keep. NopCloser asserts r to io.WriterTo and
+  # calls nothing; only the WriteTo of its result, which no entry covers,
+  # would call r's.
+  io.NopCloser:
+    reason: >-
+      Documented: "NopCloser returns a ReadCloser with a no-op Close method
+      wrapping the provided Reader r." Its Read is r's, and its Close
+      returns nil and does nothing, so closing it closes nothing of r. The
+      value it returns is a new one, which nobody has closed.
+    requires:
+      - "r != nil"
+    keeps:
+      r: [result]
+    modifies: []
+    vouches: [result]
+    ensures:
+      - "result != nil"
+      - "fresh(result)"
+      - "~closed(result)"
+
+  io.LimitReader:
+    reason: >-
+      Documented: "LimitReader returns a Reader that reads from r but stops
+      with EOF after n bytes." Its Read calls r.Read with a part of p that
+      is not empty, or returns EOF, so it meets the entry of (io.Reader).Read
+      whenever r does.
+    requires:
+      - "r != nil"
+    keeps:
+      r: [result]
+    modifies: []
+    vouches: [result]
+    ensures:
+      - "result != nil"
+
+  io.TeeReader:
+    reason: >-
+      Documented: "TeeReader returns a Reader that writes to w what it reads
+      from r. All reads from r performed through it are matched with
+      corresponding writes to w. There is no internal buffering - the write
+      must complete before the read completes." Its Read calls r.Read with
+      p and then w.Write with what was read, so it meets the entry of
+      (io.Reader).Read whenever r and w meet theirs.
+    requires:
+      - "r != nil"
+      - "w != nil"
+    keeps:
+      r: [result]
+      w: [result]
+    modifies: []
+    vouches: [result]
+    ensures:
+      - "result != nil"
+
+  io.MultiReader:
+    reason: >-
+      Documented: "MultiReader returns a Reader that's the logical
+      concatenation of the provided input readers. They're read
+      sequentially." It copies the slice, so a later change of an element
+      changes nothing it reads. Its Read calls Read of one reader with p,
+      so it meets the entry of (io.Reader).Read whenever they meet theirs;
+      a nil reader would panic.
+    requires:
+      - "Forall i in [0, |readers|) : readers[i] != nil"
+    keeps:
+      readers: [result]
+    modifies: []
+    vouches: [result]
+    ensures:
+      - "result != nil"
+
+  io.MultiWriter:
+    reason: >-
+      Documented: "MultiWriter creates a writer that duplicates its writes
+      to all the provided writers. Each write is written to each listed
+      writer, one at a time. If a listed writer returns an error, that
+      overall write operation stops and returns the error." It copies the
+      slice. Its Write returns len(p) and nil only after every writer wrote
+      all of p, and otherwise what the failing writer returned, or
+      ErrShortWrite, so it meets the entry of (io.Writer).Write whenever
+      they meet theirs; a nil writer would panic.
+    requires:
+      - "Forall i in [0, |writers|) : writers[i] != nil"
+    keeps:
+      writers: [result]
+    modifies: []
+    vouches: [result]
+    ensures:
+      - "result != nil"

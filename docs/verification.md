@@ -3361,6 +3361,7 @@ The names in an entry are the parameter and result names from the function's sou
 - `os.Remove`
 - `math/rand.Intn`, `math/rand.Int`
 - `fmt.Sprintf`, `fmt.Sprint`, `fmt.Sprintln`, `fmt.Printf`, `fmt.Print`, `fmt.Println`, `fmt.Fprintf`, `fmt.Fprint`, `fmt.Fprintln`, described in [Formatting and logging](#formatting-and-logging)
+- `io.NopCloser`, `io.LimitReader`, `io.TeeReader`, `io.MultiReader`, `io.MultiWriter`, described in [Wrappers in package io](#wrappers-in-package-io)
 - `bufio.NewScanner` with `Scan`, `Text`, and `Err`; `bufio.NewReader` with `ReadByte`; `bufio.NewWriter` with `Write`, `WriteByte`, and `Flush`; and the states `ready` of `bufio.Scanner`, `bufio.Reader`, and `bufio.Writer`, described in [Wrappers of readers and writers](#wrappers-of-readers-and-writers)
 - `log.Printf`, `log.Print`, `log.Println`, `log.New`, and the methods of `*log.Logger` of the same names, with the state `ready` of `log.Logger`, described in [Writing to a writer or a logger](#writing-to-a-writer-or-a-logger)
 - `path.Join`, `path/filepath.Join`
@@ -3889,6 +3890,35 @@ func WriteTotal(bw *bufio.Writer, total []byte) (err error) {
 `Write`, `WriteByte`, and `Flush` have entries. `ready(bw)` holds when the last of `bufio.NewWriter`, `bufio.NewWriterSize`, and `Reset` that set the writer's output set one that is not `nil`. `WriteString` has no entry, because it calls the `WriteString` method of the writer it wraps when that writer has one, and no entry covers that method. Write `bw.Write([]byte(s))` instead.
 
 A `*bufio.Reader` is the same: `bufio.NewReader` may return the reader it is given, and `ReadByte` requires `ready(br)`.
+
+#### Wrappers in package io
+
+`io.NopCloser`, `io.LimitReader`, `io.TeeReader`, `io.MultiReader`, and `io.MultiWriter` have shipped entries. Each keeps the readers and writers it is given in the value it returns, and that value's `Read`, `Write`, or `Close` meets the entry of its interface whenever what it keeps meets theirs:
+
+```go
+// @Requires r != nil And log != nil
+// @Ensures True
+func ReadLogged(r io.Reader, log io.Writer) (err error) {
+	rc := io.NopCloser(io.TeeReader(r, log))
+	defer rc.Close()
+	_, err = rc.Read(make([]byte, 512))
+	return err
+}
+```
+
+Each requires that what it is given is not `nil`. `MultiReader` and `MultiWriter` require it of every element:
+
+```go
+// @Requires Forall i in [0, |parts|) : parts[i] != nil
+// @Ensures True
+func ReadParts(parts []io.Reader) (err error) {
+	all := io.MultiReader(parts...)
+	_, err = all.Read(make([]byte, 512))
+	return err
+}
+```
+
+`NopCloser` ensures that what it returns is new and not closed, so a function can close it once. Closing it closes nothing of the reader it wraps.
 
 ### Errors that a trusted function returns
 

@@ -793,6 +793,9 @@ func TestShippedContracts(t *testing.T) {
 				case key == "bufio.NewWriter" || strings.HasPrefix(key, "(*bufio.Writer)."):
 					checkWriterEntries(t, pv, pkg, key)
 					return
+				case slices.Contains([]string{"io.NopCloser", "io.LimitReader", "io.TeeReader", "io.MultiReader", "io.MultiWriter"}, key):
+					checkIOEntries(t, pv, pkg, key)
+					return
 				}
 				callee, ok := pkg.Scope().Lookup(name).(*types.Func)
 				if receiver, method, isMethod := strings.Cut(strings.TrimPrefix(name, "(*"), ")."); isMethod {
