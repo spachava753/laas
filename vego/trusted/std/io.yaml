@@ -82,13 +82,14 @@ trusted:
 
   # Functions that keep the readers and writers they are given. What was
   # read in io.go and multi.go of Go 1.27.3: each stores what it is given in
-  # the value it returns (MultiReader and MultiWriter copy the slice), and
-  # only the Read, Write, and Close of that value read it again, while they
-  # run; no goroutine, timer, finalizer, cleanup, callback, or package-level
-  # variable reaches it. The Read and Write of the values returned call only
-  # Read and Write of what they keep. NopCloser asserts r to io.WriterTo and
-  # calls nothing; only the WriteTo of its result, which no entry covers,
-  # would call r's.
+  # the value it returns (MultiReader and MultiWriter copy the slice). The
+  # methods of that value read it again only while they are called: Read,
+  # Write, and Close, and also the WriteTo of a NopCloser of an io.WriterTo
+  # and of a MultiReader, and the WriteString of a MultiWriter, which have
+  # no entry. No goroutine, timer, finalizer, cleanup, callback, or
+  # package-level variable reaches it. The Read and Write of the values
+  # returned call only Read and Write of what they keep. NopCloser asserts r
+  # to io.WriterTo and calls nothing.
   io.NopCloser:
     reason: >-
       Documented: "NopCloser returns a ReadCloser with a no-op Close method

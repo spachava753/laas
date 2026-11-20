@@ -917,8 +917,11 @@ func checkIOEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key strin
 	rng := rand.New(rand.NewSource(1))
 	checked := 0
 	var earlier []any
+	// One log for the whole run: a wrapper made in an earlier round may be
+	// given to a later one, and what it keeps records into the log it was
+	// made with, which every call must find active.
+	k := &keptLog{}
 	for range 300 {
-		k := &keptLog{}
 		given, args, call, after := construct(rng, k, earlier)
 		c := &sequenceCheck{t: t, pv: pv, fn: fn, given: map[*types.Var]*logic.Term{}, bound: 8}
 		for i, param := range fn.params {
