@@ -281,7 +281,7 @@ func (v *fnVerifier) checkFormattable(arg ast.Expr, who string, errorf bool) *fm
 	if isError(t) {
 		// Formatting an error runs its methods, which known origin of
 		// either kind makes harmless.
-		if !v.knownError(v.bodyOrigins(), arg, -1, map[*types.Var]bool{}) {
+		if !v.knownError(v.bodyOrigins(), arg, -1) {
 			v.unsupported(arg.Pos(), fmt.Sprintf("formatting %s would run the methods of an error whose origin is not known; "+
 				"only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, "+
 				"can be formatted%s", types.ExprString(arg), v.originWhy(arg)))

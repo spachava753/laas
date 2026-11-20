@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/constant"
+	"go/token"
 	"go/types"
 	"path/filepath"
 	"unicode/utf8"
@@ -212,7 +213,7 @@ func (v *fnVerifier) errorsIs(call *ast.CallExpr, st *state, guard []*logic.Term
 	// Known origin of either kind makes the methods harmless, also with any
 	// target, and errors.Is a function of the two errors. What it finds is
 	// known only of a made error, from noteTree.
-	if !v.knownError(v.bodyOrigins(), err, -1, map[*types.Var]bool{}) {
+	if !v.knownError(v.bodyOrigins(), err, -1) {
 		v.unsupported(err.Pos(), fmt.Sprintf("errors.Is would run the Is and Unwrap methods of %s, an error whose origin is not known; "+
 			"only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, "+
 			"can be its first argument%s",
@@ -230,10 +231,9 @@ func isErrorsIs(callee *types.Func) bool {
 }
 
 // localOriginWhy says, for an error expression that names a local variable
-// of unknown origin, after a separator, which assignment makes it unknown:
-// origin is decided for a variable from every assignment to it, so a later
-// call whose errors nothing vouches for takes the origin away from an
-// earlier one, and the message names that call and says what works.
+// of unknown origin, after a separator, which assignment makes it unknown
+// and what to do. Along the paths it names a definition that reaches the
+// use; otherwise it says why every assignment counts and names one of them.
 func (v *fnVerifier) localOriginWhy(e ast.Expr) string {
 	id, ok := ast.Unparen(e).(*ast.Ident)
 	if !ok {
@@ -244,30 +244,142 @@ func (v *fnVerifier) localOriginWhy(e ast.Expr) string {
 		return ""
 	}
 	o := v.bodyOrigins()
-	if v.isParameter[variable] || o.unknown[variable] {
+	if o.unknown[variable] {
 		return ""
 	}
+	if o.alongPath(variable, id.Pos()) {
+		if defs, ok := v.reaching(o, variable, id.Pos()); ok {
+			return v.pathWhy(o, id, defs)
+		}
+	}
+	if v.isParameter[variable] || o.open[variable] {
+		return ""
+	}
+	return v.textWhy(o, id, variable)
+}
+
+// assignedWhere describes what an assignment gives a variable and where.
+func (v *fnVerifier) assignedWhere(from source) (where, what string) {
+	at := v.pass.Fset.Position(from.expr.Pos())
+	where = fmt.Sprintf("%s at %s:%d:%d", types.ExprString(from.expr), filepath.Base(at.Filename), at.Line, at.Column)
+	what = "an error whose origin is not known"
+	if _, isCall := ast.Unparen(from.expr).(*ast.CallExpr); isCall {
+		what = "a call whose errors nothing vouches for"
+	}
+	return where, what
+}
+
+// pathWhy names the first definition, by position, of those that reach a use
+// along the paths, that gives no known origin, and says what to do.
+func (v *fnVerifier) pathWhy(o *origins, id *ast.Ident, defs []*def) string {
+	var bad *def
+	known := false
+	for _, d := range defs {
+		switch {
+		case v.knownDef(o, d, newSearch()):
+			known = true
+		case bad == nil || d.pos < bad.pos:
+			bad = d
+		}
+	}
+	if bad == nil {
+		return ""
+	}
+	switch bad.kind {
+	case defParam, defOpen:
+		if !known {
+			return ""
+		}
+		return fmt.Sprintf("; %s is a parameter, and on a path to here nothing assigns it, so it may still hold the error it was passed, "+
+			"which can be returned unchanged but not formatted", id.Name)
+	case defArgs:
+		for _, arg := range o.args[bad.variable] {
+			if !v.knownError(o, arg.expr, arg.index) {
+				where, what := v.assignedWhere(arg)
+				return fmt.Sprintf("; %s is a parameter of the function literal, and is given %s, %s", id.Name, where, what)
+			}
+		}
+		return ""
+	}
+	where, what := v.assignedWhere(bad.src)
+	switch {
+	case !known:
+		return fmt.Sprintf("; %s is assigned %s, %s", id.Name, where, what)
+	case aroundLoop(o.homeOf(bad.variable), bad.pos, id.Pos()):
+		return fmt.Sprintf("; %s may hold here the error assigned %s, %s, in an earlier iteration of the loop; "+
+			"declare %s inside the loop, or give that error a variable of its own", id.Name, where, what, id.Name)
+	}
+	return fmt.Sprintf("; %s may hold here the error assigned %s, %s, on a path that reaches this use; "+
+		"give that error a variable of its own", id.Name, where, what)
+}
+
+// aroundLoop reports whether a definition reaches a use only by going around
+// a loop of a body that holds both: it stands after the use, or in the post
+// statement of the loop.
+func aroundLoop(body *ast.BlockStmt, def, use token.Pos) bool {
+	around := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.FuncLit:
+			return false
+		case *ast.ForStmt, *ast.RangeStmt:
+			if n.Pos() <= def && def < n.End() && n.Pos() <= use && use < n.End() {
+				post, _ := n.(*ast.ForStmt)
+				around = def > use || (post != nil && post.Post != nil && post.Post.Pos() <= def && def < post.Post.End())
+			}
+		}
+		return true
+	})
+	return around
+}
+
+// textWhy says, for a variable whose use is decided from every assignment to
+// it, why, and names the first assignment that gives no known origin.
+func (v *fnVerifier) textWhy(o *origins, id *ast.Ident, variable *types.Var) string {
+	home := o.homeOf(variable)
+	reason := ""
+	place := func(lit *ast.FuncLit) string {
+		at := v.pass.Fset.Position(lit.Pos())
+		return fmt.Sprintf("%s:%d:%d", filepath.Base(at.Filename), at.Line, at.Column)
+	}
+	if lit := o.outermostIn(home, id.Pos()); lit != nil {
+		reason = fmt.Sprintf("the function literal at %s reads %s and may run after any assignment to it", place(lit), id.Name)
+	} else {
+		for _, at := range o.sites[variable] {
+			if lit := o.outermostIn(home, at); lit != nil && !o.deferred[lit] {
+				reason = fmt.Sprintf("%s is assigned in the function literal at %s, which may run at any point, so every assignment to %s counts",
+					id.Name, place(lit), id.Name)
+				break
+			}
+		}
+	}
+	var bad *source
+	known := false
 	for _, from := range o.sources[variable] {
-		if v.knownError(o, from.expr, from.index, map[*types.Var]bool{variable: true}) {
+		s := newSearch()
+		s.vars[variable] = true
+		if v.knownErrorIn(o, from.expr, from.index, s) {
+			known = true
 			continue
 		}
-		at := v.pass.Fset.Position(from.expr.Pos())
-		where := fmt.Sprintf("%s at %s:%d:%d", types.ExprString(from.expr), filepath.Base(at.Filename), at.Line, at.Column)
-		what := "an error whose origin is not known"
-		if _, isCall := ast.Unparen(from.expr).(*ast.CallExpr); isCall {
-			what = "a call whose errors nothing vouches for"
+		if bad == nil {
+			bad = &from
 		}
-		// An assignment after the use, as a later call into the same
-		// variable, is the one a variable of its own would take away; one
-		// before it may be the error that is used, and then it is that
-		// call's errors that nothing vouches for.
-		if from.expr.Pos() < e.Pos() {
-			return fmt.Sprintf("; %s is assigned %s, %s", id.Name, where, what)
-		}
-		return fmt.Sprintf("; %s is also assigned %s, later, %s, and an error variable has a known origin only when "+
-			"every assignment to it gives it one; give that a variable of its own", id.Name, where, what)
 	}
-	return ""
+	if bad == nil {
+		return ""
+	}
+	where, what := v.assignedWhere(*bad)
+	switch {
+	case reason != "" && known:
+		return fmt.Sprintf("; %s, and %s is assigned %s, %s; give that error a variable of its own", reason, id.Name, where, what)
+	case reason != "" || bad.expr.Pos() < id.Pos():
+		// An assignment before the use may be the error that is used,
+		// and then it is that call's errors that nothing vouches for.
+		return fmt.Sprintf("; %s is assigned %s, %s", id.Name, where, what)
+	}
+	return fmt.Sprintf("; %s is also assigned %s, later, %s, and an error variable has a known origin only when "+
+		"every assignment to it gives it one; give that a variable of its own", id.Name, where, what)
 }
 
 // originWhy says, for an error expression that names a package-level error

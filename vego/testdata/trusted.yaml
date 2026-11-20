@@ -1706,6 +1706,23 @@ trusted:
     reason: A test of a trusted String method run by formatting; it only reads the number.
     modifies: []
 
+  originpath.vouched:
+    reason: Test helper whose errors are claimed to be harmless.
+    vouches: [err]
+    modifies: []
+
+  originpath.unvouched:
+    reason: Test helper whose errors nothing vouches for.
+    modifies: []
+
+  originpath.closeIt:
+    reason: Test helper whose errors nothing vouches for.
+    modifies: []
+
+  originpath.log:
+    reason: Test helper that takes an error and does nothing with it.
+    modifies: []
+
 # States of interfaces of another module, and contracts that speak of them.
 state:
   ifacestatelib.Conn:

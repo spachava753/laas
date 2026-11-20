@@ -494,7 +494,7 @@ func (v *fnVerifier) noteIs(sink *state, t *logic.Term) {
 // identity.
 func (v *fnVerifier) comparableError(e ast.Expr) bool {
 	// Known origin of either kind makes == identity that cannot panic.
-	if v.isNil(e) || v.knownError(v.bodyOrigins(), e, -1, map[*types.Var]bool{}) {
+	if v.isNil(e) || v.knownError(v.bodyOrigins(), e, -1) {
 		return true
 	}
 	variable := v.namedErrorVariable(e)

@@ -335,7 +335,7 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 			continue
 		}
 		// Known origin of either kind makes every method harmless.
-		if isError(t) && v.knownError(v.bodyOrigins(), arg, -1, map[*types.Var]bool{}) {
+		if isError(t) && v.knownError(v.bodyOrigins(), arg, -1) {
 			continue
 		}
 		what := "an error whose origin is not known" + v.originWhy(arg)

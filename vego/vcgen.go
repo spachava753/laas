@@ -249,7 +249,7 @@ func (v *fnVerifier) bodyOrigins() *origins {
 		body = v.fn.decl.Body
 	}
 	if body == nil {
-		return &origins{sources: map[*types.Var][]source{}, unknown: map[*types.Var]bool{}}
+		return emptyOrigins(v.info)
 	}
 	return v.originsOf(body)
 }

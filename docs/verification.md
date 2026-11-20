@@ -4619,7 +4619,7 @@ func LoadSettings(name string) (data []byte, err error) {
 }
 ```
 
-`vego` decides whether an error can be formatted from every assignment to its variable in the function, not from the path taken. A later call into the same variable whose errors nothing vouches for, here `fmt.Fprintln`, makes the earlier `%w` fail:
+`vego` decides whether an error can be formatted from what its variable can hold where it is formatted. That is the errors assigned to the variable on the paths that lead there. In `WriteReport`, only the error of `os.Create` reaches the `%w`. The later call of `fmt.Fprintln`, whose errors nothing vouches for, reuses `err` after the `%w`, so it does not matter:
 
 ```go
 // @Requires |name| <= 4096 And |title| <= 1000
@@ -4635,15 +4635,40 @@ func WriteReport(name, title string) (err error) {
 }
 ```
 
-```text
-vego: cannot verify WriteReport: formatting err would run the methods of an error whose origin is not
-known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a
-contract vouches for, can be formatted; err is also assigned fmt.Fprintln(f, title) at files.go:62:11,
-later, a call whose errors nothing vouches for, and an error variable has a known origin only when every
-assignment to it gives it one; give that a variable of its own
+If any path to the `%w` brings an error that nothing vouches for, the `%w` is refused. Here both calls lead to the same `%w`:
+
+```go
+// @Requires |name| <= 4096 And |title| <= 1000
+// @Ensures True
+func ReportOnce(name, title string) (err error) {
+	f, err := os.Create(name)
+	if err == nil {
+		_, err = fmt.Fprintln(f, title)
+		f.Close()
+	}
+	if err != nil {
+		return fmt.Errorf("report %s: %w", name, err)
+	}
+	return nil
+}
 ```
 
-Give the error of `os.Create` a variable of its own, as in `f, cerr := os.Create(name)`. A `return x` assigns a named result too, so it counts as such an assignment.
+```text
+vego: cannot verify ReportOnce: formatting err would run the methods of an error whose origin is not
+known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a
+contract vouches for, can be formatted; err may hold here the error assigned fmt.Fprintln(f, title) at
+files.go:75:12, a call whose errors nothing vouches for, on a path that reaches this use; give that
+error a variable of its own
+```
+
+Wrap the error of `os.Create` where it is returned, as `WriteReport` does, and return the error of `fmt.Fprintln` unwrapped. A loop counts as a path too. An error assigned at the end of one iteration reaches a `%w` at the start of the next.
+
+`vego` follows a variable along the paths only in the function or the function literal that declares it. Some variables are decided from every assignment to them in the function instead, wherever the error is used:
+
+- a variable that a function literal assigns, unless the literal is deferred where it is written, as in `defer func() { ... }()`;
+- a variable used inside a function literal, at that use.
+
+A function literal can run between any two statements of the function around it, so what it assigns may reach any use. A literal deferred where it is written runs only when the function returns, after every use outside it. For a variable that is decided from every assignment, give the error you wrap a variable of its own. An error variable whose address is taken, or that a `range` assigns, has no known origin anywhere in the function.
 
 An `*os.File` is an `io.Writer`, so `fmt.Fprintf`, `fmt.Fprintln`, and a logger made by `log.New` can write to it:
 
@@ -5089,7 +5114,7 @@ This table lists the most common messages.
 | `cannot verify F: x is a package-level variable, which a verified function cannot assign yet`, or `x[i] writes memory that the package-level variable x refers to, which a Modifies clause cannot name yet` | `F` changes a package-level variable or what one refers to. | Leave the change to code that is not verified, or pass the memory as a parameter. See [Changing a variable](#changing-a-variable). |
 | `the Requires clause P reads only package-level variables, and their declarations do not show that it holds` | No caller can choose the values the clause is about. | Test the value in the body. See [What vego knows of the value](#what-vego-knows-of-the-value). |
 | `x may be changed here, but proofs in package p rely on it holding the value it was declared with`, or `... rely on what it refers to being only read` | A package in the build changes a variable, or lets out a reference to what it refers to, and a proof relies on it. | Remove the change, or the proof that relies on the variable. See [What a variable refers to](#what-a-variable-refers-to). |
-| `cannot verify F: formatting err would run the methods of an error whose origin is not known` | `fmt.Errorf` is given an error whose origin is not known, such as one from a parameter or from a trusted function whose contract does not vouch for it. The message names the assignment to `err` that gives it no known origin. | Return the error unchanged, or wrap your own error. If the error comes from a trusted function, see [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). If a later assignment is named, give that error a variable of its own, as in [Reading and writing files](#reading-and-writing-files). |
+| `cannot verify F: formatting err would run the methods of an error whose origin is not known` | `fmt.Errorf` is given an error whose origin is not known, such as one from a parameter or from a trusted function whose contract does not vouch for it. The message names an assignment to `err` on a path to the use that gives it no known origin. | Return the error unchanged, or wrap your own error. If the error comes from a trusted function, see [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). If the message says to give that error a variable of its own, do so, as in [Reading and writing files](#reading-and-writing-files). |
 | `cannot verify F: comparing two errors can panic when both hold the same uncomparable type` | Neither error is `nil`, an error made by `errors.New` or `fmt.Errorf`, or an error variable that holds one or holds a pointer, integer, string, or boolean, or an array or struct of these. | Compare one of them with an error variable instead. See [Comparing errors](#comparing-errors). |
 | `cannot verify F: errors.Is would run the Is and Unwrap methods of err, an error whose origin is not known` | `errors.Is` is asked about an error from a parameter, or from a trusted function whose contract does not vouch for it. | Compare it with an error variable using `==`. See [Asking errors.Is](#asking-errorsis). |
 | `E is assigned at f.go:n, so it is not known to hold the error it was declared with`, or `x.E is assigned at f.go:n in package x` | The package of the error variable assigns it, or takes its address. | Remove the assignment, or pass the error as a parameter. |

@@ -857,7 +857,7 @@ func (v *fnVerifier) checkHandedToValue(call *ast.CallExpr, fn *funcInfo, callee
 		arg, t := h.arg, h.t
 		v.noteEntriesIn(t, arg.Pos())
 		if isError(t) {
-			if v.knownError(v.bodyOrigins(), arg, -1, map[*types.Var]bool{}) {
+			if v.knownError(v.bodyOrigins(), arg, -1) {
 				continue
 			}
 			v.unsupported(arg.Pos(), fmt.Sprintf("%s is passed to %s and is an error whose origin is not known%s; "+

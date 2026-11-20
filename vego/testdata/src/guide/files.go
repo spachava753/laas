@@ -50,32 +50,35 @@ func LoadSettings(name string) (data []byte, err error) {
 	return data, nil
 }
 
-// WriteReport writes a line to a new file.
+// WriteReport writes a line to a new file. Only os.Create reaches the %w.
 //
 // @Requires |name| <= 4096 And |title| <= 1000
 // @Ensures True
 func WriteReport(name, title string) (err error) {
 	f, err := os.Create(name)
 	if err != nil {
-		return fmt.Errorf("create %s: %w", name, err) // want `cannot verify WriteReport: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, can be formatted; err is also assigned fmt.Fprintln\(f, title\) at files.go:62:11, later, a call whose errors nothing vouches for, and an error variable has a known origin only when every assignment to it gives it one; give that a variable of its own`
+		return fmt.Errorf("create %s: %w", name, err)
 	}
 	_, err = fmt.Fprintln(f, title)
 	f.Close()
 	return err
 }
 
-// WriteReportApart gives the error of Create a variable of its own.
+// ReportOnce wraps the error of either call in one place, so the error of
+// fmt.Fprintln reaches the %w.
 //
 // @Requires |name| <= 4096 And |title| <= 1000
 // @Ensures True
-func WriteReportApart(name, title string) (err error) {
-	f, cerr := os.Create(name)
-	if cerr != nil {
-		return fmt.Errorf("create %s: %w", name, cerr)
+func ReportOnce(name, title string) (err error) {
+	f, err := os.Create(name)
+	if err == nil {
+		_, err = fmt.Fprintln(f, title)
+		f.Close()
 	}
-	_, err = fmt.Fprintln(f, title)
-	f.Close()
-	return err
+	if err != nil {
+		return fmt.Errorf("report %s: %w", name, err) // want `cannot verify ReportOnce: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, can be formatted; err may hold here the error assigned fmt.Fprintln\(f, title\) at files.go:75:12, a call whose errors nothing vouches for, on a path that reaches this use; give that error a variable of its own`
+	}
+	return nil
 }
 
 // LogToFile logs a line to a new file through a logger that writes to it.

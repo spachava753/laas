@@ -78,14 +78,15 @@ func Report(name, title string, count int) (err error) {
 	return f.Close()
 }
 
-// ReportReused reuses err for a call whose errors nothing vouches for.
+// ReportReused reuses err for a call whose errors nothing vouches for,
+// after it wraps the error of os.Create; only os.Create reaches the %w.
 //
-// @Requires |name| <= 4096 And |title| <= 1000
+// @Requires |name| <= 4096 And |title| <= 1000 And w != nil
 // @Ensures True
 func ReportReused(name, title string, w io.Writer) (err error) {
 	f, err := os.Create(name)
 	if err != nil {
-		return fmt.Errorf("create %s: %w", name, err) // want `formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, can be formatted; err is also assigned w.Write\(\[\]byte\(title\)\) at files.go:\d+:\d+, later, a call whose errors nothing vouches for, and an error variable has a known origin only when every assignment to it gives it one; give that a variable of its own`
+		return fmt.Errorf("create %s: %w", name, err)
 	}
 	_, err = w.Write([]byte(title))
 	f.Close()
