@@ -308,6 +308,8 @@ type clause struct {
 	// an annotation but is written where annotations are not read.
 	misplaced string
 	node      *logic.Node
+	// snapshot is the name a Snapshot clause gives its value, which node is.
+	snapshot string
 	// res is set for a clause written in another package, which has its
 	// own predicates.
 	res *logic.Resolver
@@ -600,6 +602,9 @@ type pkgVerifier struct {
 	// caseTails holds the annotations that follow the last statement of a
 	// case clause, with that clause; see scopeAt.
 	caseTails map[token.Pos]*ast.CaseClause
+	// snapshotEnds holds where the scope of each Snapshot ends; see
+	// snapshotScope.
+	snapshotEnds map[*clause]token.Pos
 	// assignedIn holds, for the body of each declared function, the
 	// variables that something other than their declaration assigns; see
 	// final.
@@ -644,7 +649,7 @@ var (
 	leadingAt   = regexp.MustCompile(`(?m)^[^\pL\pN@\n]*@[^\pL\pN\s]*(\S*)`)
 	clauseKinds = map[string]bool{
 		"Requires": true, "Ensures": true, "Invariant": true, "Variant": true,
-		"Predicate": true, "Assert": true, "Modifies": true, "State": true, "Receiver": true,
+		"Predicate": true, "Assert": true, "Modifies": true, "State": true, "Receiver": true, "Snapshot": true,
 	}
 	// retiredKinds are keywords that earlier versions read, with what to
 	// write now.
@@ -1084,7 +1089,7 @@ func (pv *pkgVerifier) collect() {
 				}
 				if c.kind == "" {
 					pv.report(c.pos, "unknown annotation %q; an annotation starts with one of "+
-						"Requires, Ensures, Modifies, Invariant, Variant, Assert, Predicate, State, Receiver. "+
+						"Requires, Ensures, Modifies, Invariant, Variant, Assert, Snapshot, Predicate, State, Receiver. "+
 						"If another tool reads this comment, declare the word with -vego.other-tags", c.text)
 					continue
 				}
@@ -1142,7 +1147,13 @@ func (pv *pkgVerifier) collect() {
 					}
 					continue
 				}
-				node, err := logic.ParseFormula(c.text)
+				var node *logic.Node
+				var err error
+				if c.kind == "Snapshot" {
+					c.snapshot, node, err = logic.ParseSnapshot(c.text)
+				} else {
+					node, err = logic.ParseFormula(c.text)
+				}
 				if err != nil {
 					pv.report(c.pos, "syntax error in %s annotation: %v", c.kind, err)
 					if owner != nil {
@@ -1191,6 +1202,7 @@ func (pv *pkgVerifier) collect() {
 			continue
 		}
 		pv.checkPlacement(fn)
+		pv.checkSnapshots(fn)
 	}
 }
 
@@ -1462,7 +1474,7 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 		}
 		fn := pv.funcs[pv.info.Defs[fd.Name].(*types.Func)]
 		switch c.kind {
-		case "Invariant", "Variant", "Assert":
+		case "Invariant", "Variant", "Assert", "Snapshot":
 			fn.body = append(fn.body, c)
 		case "Predicate":
 		default:
@@ -1478,7 +1490,7 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 	switch {
 	case next != nil && next.Doc == group:
 		fn = pv.funcs[pv.info.Defs[next.Name].(*types.Func)]
-	case c.kind == "Invariant" || c.kind == "Assert":
+	case c.kind == "Invariant" || c.kind == "Assert" || c.kind == "Snapshot":
 		pv.unread = true
 		pv.report(c.pos, "%s annotation is not attached to anything; "+
 			"it stands inside a function body, or, for an Invariant, in the doc comment of a struct type", c.kind)

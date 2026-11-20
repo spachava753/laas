@@ -90,8 +90,7 @@ func Runs(A []int) (runs int) {
 	// @Invariant 0 <= i <= |A| And 0 <= runs <= i
 	// @Variant |A| - i
 	for i < len(A) {
-		start := i
-		_ = start
+		// @Snapshot start = i
 		i++
 		// @Invariant start < i <= |A| And 0 <= runs <= start
 		// @Variant |A| - i

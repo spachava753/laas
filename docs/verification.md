@@ -113,16 +113,17 @@ Together, `Requires` and `Ensures` are the function's contract. Working with `ve
 
 ## Annotations
 
-An annotation is a comment line of the form `// @Keyword ...`. There are seven keywords. Each is allowed only in certain places.
+An annotation is a comment line of the form `// @Keyword ...`. Each keyword is allowed only in certain places.
 
 | Keyword | Where it goes |
 | --- | --- |
 | `Requires`, `Ensures`, `Modifies` | the doc comment of a function |
 | `Variant` | the doc comment of a recursive function, or directly above a `for` loop |
 | `Invariant` | directly above a loop |
-| `Assert` | anywhere in a function body, on its own line |
+| `Assert`, `Snapshot` | anywhere in a function body, on its own line |
 | `Invariant` | the doc comment of a struct type |
 | `Predicate` | the top level of a file |
+| `State`, `Receiver` | the doc comment of an interface type and of its methods (see [States of interface values](#states-of-interface-values)) |
 
 Write one space between `//` and `@`, and no space between `@` and the keyword. `gofmt` leaves this form unchanged. Any other spacing, such as `//@Requires` or `// @ Requires`, is reported as an error.
 
@@ -147,8 +148,8 @@ Any other word after `// @` is also an error. `vego` cannot tell a wrong keyword
 
 ```text
 vego: unknown annotation "Post"; an annotation starts with one of Requires, Ensures, Modifies,
-Invariant, Variant, Assert, Predicate. If another tool reads this comment, declare the word
-with -vego.other-tags
+Invariant, Variant, Assert, Snapshot, Predicate, State, Receiver. If another tool reads this
+comment, declare the word with -vego.other-tags
 ```
 
 If your code has comments such as `// @Summary` for another tool, list those words once:
@@ -1726,9 +1727,9 @@ A message without a note means that Z3 gave its answer within the limits.
 
 At the default limit, `vego` does not prove all the postconditions of a function that writes one field through twenty-four or more different pointers, such as `p0.x = 1` through `p23.x = 1` with `@Ensures p0.x' = 1 And ... And p23.x' = 1`. The messages carry the note about the resource limit. With thirty pointers, `-vego.rlimit=40000000` proves them all. With twenty-three pointers such a function verifies at the default limit, and so do thirty writes through one pointer.
 
-### A variable that only an annotation reads
+### A value that only an annotation reads
 
-An invariant can name a local variable that the code does not need. This is how an inner loop states that it moved past where the iteration began, so that the outer loop's `Variant` decreases:
+`Snapshot` names the value that a formula has at the point where the annotation stands. This is how an inner loop states that it moved past where the iteration began, so that the outer loop's `Variant` decreases:
 
 ```go
 // Runs counts the runs of equal elements.
@@ -1740,8 +1741,7 @@ func Runs(A []int) (runs int) {
 	// @Invariant 0 <= i <= |A| And 0 <= runs <= i
 	// @Variant |A| - i
 	for i < len(A) {
-		start := i
-		_ = start
+		// @Snapshot start = i
 		i++
 		// @Invariant start < i <= |A| And 0 <= runs <= start
 		// @Variant |A| - i
@@ -1754,7 +1754,17 @@ func Runs(A []int) (runs int) {
 }
 ```
 
-`vego` has no variables that exist only for annotations. `start` is an ordinary variable, and `_ = start` is there because Go rejects a variable that is declared and not used. Without the inner invariant `start < i`, `vego` knows nothing after the inner loop that shows that `i` grew, and reports `loop variant may not decrease: |A| - i`.
+`start` is the value `i` had when the outer iteration began. Without the inner invariant `start < i`, `vego` knows nothing after the inner loop that shows that `i` grew, and reports `loop variant may not decrease: |A| - i`.
+
+A snapshot is written `// @Snapshot name = value`, where the value is an integer expression or a formula. It is read in the state where the annotation stands, so it may use `old`, lengths, fields, and `fresh`, as an `Assert` there may. From there to the end of the innermost block, or of the `case` clause, that holds it, `name` in an annotation of the body is that value. No statement can change it, and it cannot be primed or put in `old`. A snapshot holds an integer or a boolean. A snapshot of a slice or a string is reported.
+
+These rules keep one meaning for each name, and each break is reported:
+
+- The name must not name anything visible where the snapshot stands, such as a variable, a constant, or a function such as `max`, and must not be a word of the annotation language.
+- Nothing in its scope may declare the name again, in Go or in another snapshot, and no quantifier there may bind it.
+- An annotation must use it. A snapshot that nothing names is an error, as an unused variable is in Go.
+- An annotation inside a function literal cannot name a snapshot taken outside the literal. Take it inside the literal.
+- A snapshot must stand above the `Invariant` and `Variant` lines of a loop. One between or below them is reported.
 
 ### Finding out where the time goes
 
@@ -5019,6 +5029,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `Invariant P` | directly above a loop | `P` is true each time the loop tests its condition. |
 | `Variant e` | directly above a `for` loop | `e` is never negative and decreases on each iteration. |
 | `Assert P` | in a function body | `P` must be true at this point and can be used afterwards. |
+| `Snapshot n = e` | in a function body | `n` is the value `e` has at this point, in the annotations that follow in the block. |
 | `Invariant P` | doc comment of a struct type | `P` is true for every parameter, receiver, and result of the type at function boundaries. |
 | `Predicate name(x, y) ::= P` | top level | Names a formula over its parameters. |
 | `State name` | doc comment of a named interface type that declares a method | Declares a state of the values of the interface. |

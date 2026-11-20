@@ -56,6 +56,9 @@ type state struct {
 	// deferred holds the calls that defer statements have put off until the
 	// function returns, in the order the statements ran.
 	deferred []deferredCall
+	// snapshots holds the values of the Snapshot annotations taken on the
+	// path; see takeSnapshot. A map is never changed once a state holds it.
+	snapshots map[*clause]*logic.Term
 }
 
 // deferredCall is a call that a defer statement put off: the call, the
@@ -80,7 +83,7 @@ func (st *state) clone() *state {
 	return &state{
 		vals: maps.Clone(st.vals), mem: maps.Clone(st.mem), brk: st.brk,
 		hyps: slices.Clone(st.hyps), chosen: slices.Clone(st.chosen), noted: maps.Clone(st.noted),
-		deferred: slices.Clone(st.deferred),
+		deferred: slices.Clone(st.deferred), snapshots: st.snapshots,
 	}
 }
 

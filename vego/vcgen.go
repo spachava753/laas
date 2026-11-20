@@ -678,6 +678,8 @@ func (v *fnVerifier) seq(list []ast.Stmt, from, to token.Pos, st *state, c ctrl,
 		switch clause.kind {
 		case "Assert":
 			v.checkClause(clause, v.bodyEnv(st, clause.pos), st, nil, clause.pos, "assertion may not hold")
+		case "Snapshot":
+			v.takeSnapshot(clause, st)
 		case "Invariant":
 			spec.invariants = append(spec.invariants, clause)
 		default:

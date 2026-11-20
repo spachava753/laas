@@ -374,6 +374,20 @@ func (e *specEnv) locate(name string, steps []logic.Step, when logic.When) (reac
 // locateAt is locate. With throughPointer, a path that ends in a pointer to
 // a struct reads memory, since what is asked of it is read where it points.
 func (e *specEnv) locateAt(name string, steps []logic.Step, when logic.When, throughPointer bool) (reached, error) {
+	if e.fn == nil && e.st != nil {
+		if c := e.v.snapshotAt(name, e.pos); c != nil {
+			taken, ok := e.st.snapshots[c]
+			switch {
+			case when != logic.Now:
+				return reached{}, fmt.Errorf("%s is a snapshot, which has one value; it cannot be primed or put in old()", name)
+			case len(steps) > 0:
+				return reached{}, fmt.Errorf("%s is a snapshot of an integer or a boolean, and has no fields or elements", name)
+			case !ok:
+				panic(fmt.Sprintf("vego: internal error: the snapshot %s is read where it was not taken", name))
+			}
+			return reached{constant: taken}, nil
+		}
+	}
 	if when == logic.Old && e.fn == nil {
 		// Inside a body, old(x) is the value on entry of the function being
 		// verified, which is how its own contract sees x.

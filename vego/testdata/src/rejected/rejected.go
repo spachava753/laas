@@ -132,7 +132,7 @@ func InsideSwitch(n int) (result int) {
 // @Ensures	False
 func TabSeparator() (result int) { return 0 } // want `vego:\ postcondition\ may\ not\ hold:\ False`
 
-// @ Ensure result = 1 // want `vego:\ unknown\ annotation\ "Ensure";\ an\ annotation\ starts\ with\ one\ of\ Requires,\ Ensures,\ Modifies,\ Invariant,\ Variant,\ Assert,\ Predicate`
+// @ Ensure result = 1 // want `vego:\ unknown\ annotation\ "Ensure";\ an\ annotation\ starts\ with\ one\ of\ Requires,\ Ensures,\ Modifies,\ Invariant,\ Variant,\ Assert,\ Snapshot,\ Predicate`
 func MisspeltKeyword() int { return 0 }
 
 // @Summary comments of other tools are not annotations.

@@ -122,6 +122,21 @@ func (r *Resolver) IntTerm(n *Node, env Env) (*Term, error) {
 	return r.resolve(n, env, nil, Int)
 }
 
+// Value resolves a parsed expression of any sort.
+func (r *Resolver) Value(n *Node, env Env) (t *Term, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			resolveErr, ok := recovered.(resolveError)
+			if !ok {
+				panic(recovered)
+			}
+			t, err = nil, resolveErr.err
+		}
+	}()
+	s := &scope{r: r, env: env}
+	return s.term(n), nil
+}
+
 // Term resolves a parsed expression that must have the given sort.
 func (r *Resolver) Term(n *Node, env Env, want Sort) (*Term, error) {
 	return r.resolve(n, env, nil, want)

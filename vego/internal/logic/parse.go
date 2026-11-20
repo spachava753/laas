@@ -288,6 +288,19 @@ func ParseTargets(src string) ([]*Node, error) {
 	return targets, err
 }
 
+// ParseSnapshot parses a Snapshot clause, "name = value", where the value
+// is a formula or an integer expression.
+func ParseSnapshot(src string) (name string, value *Node, err error) {
+	value, err = parse(src, func(p *parser) *Node {
+		name = p.ident()
+		if !p.accept("=") {
+			p.fail("a Snapshot is written as name = value, as in // @Snapshot r0 = r")
+		}
+		return p.formula()
+	})
+	return name, value, err
+}
+
 // ParsePredicate parses a predicate definition clause.
 func ParsePredicate(src string) (*PredDecl, error) {
 	decl := &PredDecl{}
