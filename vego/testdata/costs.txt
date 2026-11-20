@@ -2605,6 +2605,7 @@ trialfaults	(*trialfaults.R).Writes	7	3844	0
 trialfaults	(*trialfaults.R).touch	1	241	0
 trialfaults	io.Closer.Close	3	3054	0
 trialfaults	io.Reader.Read	3	5361	0
+trialfaults	os.IsNotExist	1	209	0
 trialfaults	trialfaults.BothNil	7	4386	0
 trialfaults	trialfaults.CallsOp	8	4997	0
 trialfaults	trialfaults.Closes.Pick	3	20630	1
@@ -2643,6 +2644,7 @@ trialfaults	trialfaults.KeepsOpen.Pick	3	19551	0
 trialfaults	trialfaults.Listed	7	5011	0
 trialfaults	trialfaults.MakesPoint	3	1980	0
 trialfaults	trialfaults.Meter.Read	1	111	0
+trialfaults	trialfaults.Missing	4	394	0
 trialfaults	trialfaults.Narrow	4	4904	0
 trialfaults	trialfaults.Nested	0	0	0
 trialfaults	trialfaults.NilCap	3	719	0

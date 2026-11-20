@@ -297,6 +297,10 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 		elem := randomElements(rng)
 		return sample{before: []any{elem}, results: []any{filepath.Join(elem...)}}
 	},
+	"os.IsExist":      osPredicate(os.IsExist, false),
+	"os.IsNotExist":   osPredicate(os.IsNotExist, false),
+	"os.IsPermission": osPredicate(os.IsPermission, false),
+	"os.IsTimeout":    osPredicate(os.IsTimeout, true),
 	"os.Remove": func(rng *rand.Rand) sample {
 		// Only inside a directory of its own, made for each call: a file,
 		// a missing name, a directory that is not empty, a path through a
@@ -1003,5 +1007,74 @@ func TestRemoveOutcomes(t *testing.T) {
 		if !seen[want] {
 			t.Errorf("no call of os.Remove ended with %s; got %v", want, seen)
 		}
+	}
+}
+
+// recordingError is an error whose methods fail the test when called while
+// the call it is handed to is active: the entries of the os predicates
+// claim under asserts that they call no method of what err holds, but for
+// IsTimeout its Timeout. It also has Unwrap, Is, and the methods of fmt,
+// which an assertion could find.
+type recordingError struct {
+	log      *keptLog
+	timeout  bool
+	allowed  bool
+	wrapping error
+}
+
+func (e recordingError) Error() string {
+	e.log.called("Error of the error handed to an os predicate")
+	return "recorded"
+}
+
+func (e recordingError) Unwrap() error {
+	e.log.called("Unwrap of the error handed to an os predicate")
+	return e.wrapping
+}
+
+func (e recordingError) Is(error) bool {
+	e.log.called("Is of the error handed to an os predicate")
+	return true
+}
+
+func (e recordingError) String() string {
+	e.log.called("String of the error handed to an os predicate")
+	return ""
+}
+
+func (e recordingError) Timeout() bool {
+	if !e.allowed {
+		e.log.called("Timeout of the error handed to an os predicate")
+	}
+	return e.timeout
+}
+
+// osPredicate returns a harness for an os predicate on errors: nil, the
+// errors of package fs and syscall it looks for, those wrapped in a
+// *PathError, a *LinkError, or a *SyscallError, and a recording error,
+// bare or wrapped. Each call runs as one that is handed what it is given,
+// so a method of the recording error called during it fails the test.
+func osPredicate(predicate func(error) bool, timeout bool) func(rng *rand.Rand) sample {
+	return func(rng *rand.Rand) sample {
+		k := &keptLog{}
+		recorded := recordingError{log: k, timeout: rng.Intn(2) == 0, allowed: timeout, wrapping: fs.ErrNotExist}
+		inner := []error{nil, fs.ErrNotExist, fs.ErrExist, fs.ErrPermission, syscall.ENOENT, syscall.EEXIST, syscall.EACCES,
+			syscall.ETIMEDOUT, recorded}[rng.Intn(9)]
+		err := inner
+		if inner != nil {
+			switch rng.Intn(4) {
+			case 1:
+				err = &os.PathError{Op: "open", Path: "x", Err: inner}
+			case 2:
+				err = &os.LinkError{Op: "link", Old: "x", New: "y", Err: inner}
+			case 3:
+				err = os.NewSyscallError("read", inner)
+			}
+		}
+		done := k.enter()
+		result := predicate(err)
+		done()
+		k.check()
+		return sample{before: []any{err}, results: []any{result}}
 	}
 }

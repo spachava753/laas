@@ -17,3 +17,75 @@ trusted:
       - "|name| < MaxAlloc"
     vouches: [result]
     modifies: []
+
+  os.IsExist:
+    reason: >-
+      Documented to report whether the error is known to report that
+      a file or directory already exists. It
+      calls underlyingErrorIs with ErrExist: that takes the Err field of a
+      *PathError, *LinkError, or *SyscallError, compares what it has with
+      ErrExist by ==, and asserts it to syscall.Errno (syscall.ErrorString
+      on Plan 9), whose Is compares only numbers. These are concrete types
+      of os and syscall that hold no code of the caller, so it calls no
+      method of what err holds. For a nil error it returns false.
+    runs: [err]
+    modifies: []
+    # Read from the source of Go 1.27, os/error.go: it calls nothing that
+    # err holds; the types it asserts to are concrete and hold no code.
+    asserts:
+      err: []
+    ensures:
+      - "err = nil -> ~result"
+
+  os.IsNotExist:
+    reason: >-
+      Documented to report whether the error is known to report that
+      a file or directory does not exist. It
+      calls underlyingErrorIs with ErrNotExist: that takes the Err field of a
+      *PathError, *LinkError, or *SyscallError, compares what it has with
+      ErrNotExist by ==, and asserts it to syscall.Errno (syscall.ErrorString
+      on Plan 9), whose Is compares only numbers. These are concrete types
+      of os and syscall that hold no code of the caller, so it calls no
+      method of what err holds. For a nil error it returns false.
+    runs: [err]
+    modifies: []
+    # Read from the source of Go 1.27, os/error.go: it calls nothing that
+    # err holds; the types it asserts to are concrete and hold no code.
+    asserts:
+      err: []
+    ensures:
+      - "err = nil -> ~result"
+
+  os.IsPermission:
+    reason: >-
+      Documented to report whether the error is known to report that
+      permission is denied. It
+      calls underlyingErrorIs with ErrPermission: that takes the Err field of a
+      *PathError, *LinkError, or *SyscallError, compares what it has with
+      ErrPermission by ==, and asserts it to syscall.Errno (syscall.ErrorString
+      on Plan 9), whose Is compares only numbers. These are concrete types
+      of os and syscall that hold no code of the caller, so it calls no
+      method of what err holds. For a nil error it returns false.
+    runs: [err]
+    modifies: []
+    # Read from the source of Go 1.27, os/error.go: it calls nothing that
+    # err holds; the types it asserts to are concrete and hold no code.
+    asserts:
+      err: []
+    ensures:
+      - "err = nil -> ~result"
+
+  os.IsTimeout:
+    reason: >-
+      Documented to report whether the error is known to report that a
+      timeout occurred. It takes the Err field of a *PathError, *LinkError,
+      or *SyscallError, asserts what it has to interface{ Timeout() bool },
+      and calls its Timeout. For a nil error it returns false.
+    runs: [err]
+    modifies: []
+    # Read from the source of Go 1.27, os/error.go: the only method of
+    # what err holds that it calls is Timeout.
+    asserts:
+      err: ["interface{ Timeout() bool }"]
+    ensures:
+      - "err = nil -> ~result"
