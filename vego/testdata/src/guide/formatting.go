@@ -9,6 +9,7 @@ import (
 
 // The programs of the section on formatting and logging.
 
+// @Requires |host| <= 1000
 // @Ensures True
 func Announce(host string, port int, done, total int) (addr string) {
 	addr = fmt.Sprintf("%s:%d", host, port)
@@ -62,4 +63,9 @@ func Fails(err error) {
 	if err != nil {
 		log.Fatal("failed") // want `vego:\ cannot\ verify\ Fails:\ it\ calls\ Fatal,\ which\ has\ no\ contract`
 	}
+}
+
+// @Ensures True
+func Greet(name string) {
+	log.Println("hello", name) // want `vego:\ what\ Println\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated;\ bound\ the\ lengths\ of\ the\ strings\ and\ slices\ it\ formats,\ and\ of\ a\ format\ that\ is\ not\ a\ constant`
 }

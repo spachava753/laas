@@ -218,6 +218,13 @@ func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term
 	if position := v.pass.Fset.Position(call.Pos()); !slices.Contains(v.usage.Constructors, position) {
 		v.usage.Constructors = append(v.usage.Constructors, position)
 	}
+	if callee.Name() == "Errorf" {
+		var operands []fmtOperand
+		for _, arg := range call.Args[1:] {
+			operands = append(operands, v.formatted(arg, values[arg]))
+		}
+		_ = v.checkFormatAlloc(st, guard, call, "fmt.Errorf", call.Args[0], values[call.Args[0]], operands)
+	}
 	created := v.fresh("error", logic.Err)
 	v.noteError(st, created)
 	// It differs from every opaque variable; see noteOpaque.

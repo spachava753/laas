@@ -241,6 +241,7 @@ func ToAnyTrusted(t *Table) (n int) {
 
 func keepsAny(a any) (n int) { return 0 }
 
+// @Requires |s| <= 1000
 // @Ensures err = nil <-> n <= 0
 func Formats(n int, s string) (err error) {
 	if n <= 0 {

@@ -1485,7 +1485,7 @@ laas -vego -vego.cost ./...
 For `Load` from [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write), under the entries shown there, in a file `foreign.go` that declares it at line 52, it prints:
 
 ```text
-foreign.go:52:6: vego cost of Load: 40 problems, 3472893 resource units, 136896 bytes, 1.59 s
+foreign.go:52:6: vego cost of Load: 41 problems, 3473903 resource units, 141167 bytes, 1.61 s
 	foreign.go:52:6: 2 questions of the always-fails check stopped at a limit
 	foreign.go:53:2: 2 contradiction checks stopped at a limit
 ```
@@ -2304,6 +2304,7 @@ func Nearest(s string) (n int, err error) {
 The contract of `os.Remove` says nothing about which error it returns. Its error can still be searched:
 
 ```go
+// @Requires |name| <= 4096
 // @Ensures ~is(err, os.ErrNotExist)
 func RemoveIfPresent(name string) (err error) {
 	err = os.Remove(name)
@@ -2358,6 +2359,7 @@ The shipped contract of `strconv.Atoi` vouches for its error, so its error can b
 ```go
 var ErrTooMany = errors.New("too many")
 
+// @Requires |line| <= 1000
 // @Ensures err = nil -> 0 <= n <= 1000
 // @Ensures err = nil Or err = ErrTooMany Or is(err, strconv.ErrSyntax) Or is(err, strconv.ErrRange)
 func ParseQuantity(line string) (n int, err error) {
@@ -2372,7 +2374,7 @@ func ParseQuantity(line string) (n int, err error) {
 }
 ```
 
-The second clause is proved because `%w` keeps what `errors.Is` finds in `err`, and the contract of `strconv.Atoi` says that its error is a syntax error or a range error.
+The second clause is proved because `%w` keeps what `errors.Is` finds in `err`, and the contract of `strconv.Atoi` says that its error is a syntax error or a range error. The `Requires` bounds the length of `line`, which `fmt.Errorf` quotes, as described in [How long a formatted string can be](#how-long-a-formatted-string-can-be).
 
 An error that was passed in is rejected:
 
@@ -2508,6 +2510,7 @@ These variables are of the third kind too:
 Verified code can format values and write them out with `fmt` and `log`:
 
 ```go
+// @Requires |host| <= 1000
 // @Ensures True
 func Announce(host string, port int, done, total int) (addr string) {
 	addr = fmt.Sprintf("%s:%d", host, port)
@@ -2547,6 +2550,34 @@ methods, and errors of known origin, can be formatted
 ```
 
 A slice passed with `...`, as in `fmt.Println(values...)`, is refused too, because what its elements hold is not known. List the values in the call instead.
+
+### How long a formatted string can be
+
+What `fmt` builds must fit in one allocation, as a joined string must. At each call of a function that formats, and of `fmt.Errorf`, `vego` proves this from the format and from the lengths of the strings and slices that are formatted:
+
+```go
+// @Ensures True
+func Greet(name string) {
+	log.Println("hello", name)
+}
+```
+
+```text
+vego: what Println builds from what it formats may be more than can be allocated; bound
+the lengths of the strings and slices it formats, and of a format that is not a constant
+```
+
+Add a `Requires` clause that bounds the length, such as `// @Requires |name| <= 1000`. The bound that `vego` proves is larger than what `fmt` writes, so keep the lengths well below `MaxAlloc`. These are the reasons:
+
+- `%q` and `% #x` write up to six bytes for one byte of a string.
+- A width or a precision can be as large as ten million.
+- Each verb may format any operand, and the buffer that `fmt` grows may be given twice the room it needs.
+
+A format that is not a constant needs a bound too, such as `// @Requires |format| <= 100`.
+
+The string that `fmt.Sprintf`, `fmt.Sprint`, and `fmt.Sprintln` return is known to be no longer than the bound proved at the call, so you can format it again. That is not known when the call formats an error or a slice of strings, whose lengths `vego` does not know.
+
+Some lengths have no term in the logic: the text of an error, the strings in a slice of strings or in a slice of structs, and the prefix and header that a logger adds. For these the proof assumes that they do not make what is built longer than can be allocated. See [What a proof assumes](#what-a-proof-assumes).
 
 ### Writing to a writer or a logger
 
@@ -2591,6 +2622,7 @@ Give it a trusted contract with `formats` instead. `vego` then checks each value
 - It runs no method of the values other than those `fmt` runs, and only while the call lasts, on the goroutine that called it.
 - It keeps none of the values.
 - It writes nothing your code can see.
+- What it builds from them is at most 4096 bytes longer than what `fmt` prints for them.
 
 An entry with `formats` must have `modifies: []` and no `calls`. Its `runs` may list only values whose contracts write nothing. Otherwise the entry cannot be used, because `vego` checks the values in the state of the call, and what the function wrote or ran before it formatted them could change that state.
 
@@ -3682,6 +3714,7 @@ This table lists the most common messages.
 | `x may be read before or after the call to F, which may change it, and Go does not fix the order` | Go may read `x` before or after `F` runs in this statement, and the two are not proved to give the same value. | Read `x` or call `F` in a statement of its own, in the order you mean. The message ends with such a statement, as in `x0 := x before it`, where one fits. See [Reads that Go may make before or after a call](#reads-that-go-may-make-before-or-after-a-call). |
 | `cannot verify F: g is called in the target of this assignment, and Go may call it before or after append writes into the array of s` | The call may run on either side of the write, and it may read or write memory. | Assign the result of `g` to a variable in a statement of its own first. See [An append beside a call](#an-append-beside-a-call). |
 | `cannot verify F: P formats x, a value of type T, and that may run code nobody has checked: ...` | `fmt` would call a method of `x`, or of what it holds, or follow a pointer in it. The message says which. | Format the fields you need, or a string you build from them. See [What can be formatted](#what-can-be-formatted). |
+| `what F builds from what it formats may be more than can be allocated` | The bound on what `fmt` writes for this call is not proved to fit in one allocation. | Bound the lengths of the strings and slices it formats, and of the format if it is not a constant. See [How long a formatted string can be](#how-long-a-formatted-string-can-be). |
 | `cannot verify F: P formats what the slice s holds, which can be anything` | A slice of values to format is passed with `...`. | List the values in the call. For a logging function of your own, see [Your own logging function](#your-own-logging-function). |
 | `the keys a and b of this map literal may be equal` | Two keys of a map literal are not proved to differ, so it is not known which entry the map keeps. | Prove that they differ, or assign the entries one by one. |
 | `Modifies lists x, but F never needs to modify it` | The `Modifies` list allows more than the body needs. | Remove or narrow the entry. |
@@ -3807,7 +3840,7 @@ Floating-point values are supported but opaque. They can be passed around and us
 
 A proof by `vego` depends on the following assumptions. Each concerns something `vego` cannot see.
 
-- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and it keeps no value that can hold code. It does not call back, through another package, into the verified function that called it. A call back within the same package is found and reported. For a parameter listed under `runs`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, and keeps none of them. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter.
+- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and it keeps no value that can hold code. It does not call back, through another package, into the verified function that called it. A call back within the same package is found and reported. For a parameter listed under `runs`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter.
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one that wraps it, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method.
 - An interface value that reaches verified code from code that is not verified meets the contracts of its methods. That includes a value passed as an argument, a value in memory that an argument reaches, a value that a call through another value returns, and a value that a trusted function returns or writes, which its entry vouches for. Called with arguments that meet the `Requires` of a method, the method returns without panicking, leaves its `Ensures` true, and writes nothing that verified code can see outside what its `Modifies` lists. This holds also when the value holds a pointer to a struct that verified code holds.
 - The same holds of the methods and function types that entries of the trust file give contracts, which is what such an entry claims (see [What an entry for a type claims](#what-an-entry-for-a-type-claims)). In particular, a caller that is not verified does not pass a verified function such a value together with a pointer to memory that the value writes, as a `*bytes.Buffer` passed both as an `io.Writer` and as a `*bytes.Buffer` would be. Every call through such a value returns: a `Read` from a pipe, a terminal, or a connection returns only once data or an error arrives.
@@ -3827,6 +3860,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - A write to standard output returns. Code that is not verified may set `os.Stdout` to any `*os.File`, and a pipe that nobody reads breaks this.
 - The output of the standard logger writes nothing that verified code can see, and returns. Code that is not verified sets that output with `log.SetOutput`, or with `slog.SetDefault` to a `slog.Handler`. A program that sets it to a writer or a handler of its own makes this claim about that code. A writer or a handler that logs through the standard logger again never returns, because the logger holds a lock while it writes. The same goes for a writer made by verified code whose `Write` calls something that logs.
 - The machine has enough memory and stack.
+- A trusted function that builds a string or a slice is not asked for one larger than can be allocated, and neither is `fmt.Errorf`. Where the logic has the lengths, `vego` proves this. For the functions of `fmt` and `log` and for `fmt.Errorf`, it proves a bound on what is formatted at each call. For `strings.ToUpper`, `strings.ToLower`, `strings.Map`, `bytes.Map`, `strings.FieldsFunc`, `bytes.FieldsFunc`, and `os.Remove`, the shipped contract requires a bound on the input. What is assumed is that the parts without a term do not take the whole result past what can be allocated: the text of an error, the strings of a slice of strings and of the elements of other slices, the elements that `path.Join` and `path/filepath.Join` join, and the prefix and header of a logger. On a 64-bit target, these parts would have to be terabytes long. On a 32-bit target, where one allocation can be at most about 4 GB, this can be reached.
 - Z3 is correct. Every proof rests on Z3 5.4.1 answering correctly that a problem has no solution.
 - Your formulas say what you intend. `vego` does not check a formula for out-of-range indexes or division by zero, so a formula that contains one may mean something other than you expect. See [Formulas](#formulas).
 

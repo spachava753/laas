@@ -62,6 +62,7 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		// The nil error becomes the nil interface, and any other error an
 		// interface value that is not nil.
 		err := v.eval(e, st, guard)[0]
+		v.held[ast.Unparen(e)] = value{err}
 		held := v.fresh("iface", logic.Ref)
 		st.assume(logic.Iff(logic.Eq(held, logic.RefLit(0)), logic.IsNil(err)))
 		return value{held}
@@ -81,6 +82,7 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 			shown(from), shown(want), shown(want), phrase, methodTitle(method), pronoun, shown(from)))
 	}
 	converted := v.evalConverted(e, want, st, guard)
+	v.held[ast.Unparen(e)] = converted
 	if want.Underlying().(*types.Interface).NumMethods() > 0 {
 		v.madeInterface(e, converted, from, want, st, guard)
 	}

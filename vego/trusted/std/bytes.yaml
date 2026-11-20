@@ -56,7 +56,14 @@ trusted:
       - "|result| <= |s|"
 
   bytes.Map:
-    reason: Documented to return a copy of s with each character replaced by what mapping returns for it, or dropped where that is negative.
+    reason: >-
+      Documented to return a copy of s with each character replaced by what
+      mapping returns for it, or dropped where that is negative. Each byte
+      becomes at most four, a character mapping returns for it, and the
+      slice it grows may be given twice the room it needs, so the requires
+      keeps that within the largest allocation.
+    requires:
+      - "8 * |s| + 65544 <= MaxAlloc"
     runs: [mapping]
     calls:
       mapping(r): {}
@@ -66,7 +73,13 @@ trusted:
     reason: >-
       Documented to split s at each run of code points c satisfying f(c),
       assuming that f always returns the same value for a given c; before Go
-      1.10 it could crash otherwise. Nothing is claimed of the fields.
+      1.10 it could crash otherwise. Nothing is claimed of the fields. It
+      keeps the bounds of each field, sixteen bytes for each of at most
+      |s| / 2 + 1, in a slice it grows by append, which may be given twice
+      the room it needs, so the requires keeps that within the largest
+      allocation.
+    requires:
+      - "16 * |s| + 65568 <= MaxAlloc"
     runs: [f]
     calls:
       f(c):

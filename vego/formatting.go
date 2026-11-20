@@ -3,7 +3,10 @@ package vego
 import (
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/types"
+
+	"github.com/spachava753/laas/vego/internal/logic"
 )
 
 // Formatting runs code. Package fmt calls the Format, GoString, Error, and
@@ -225,4 +228,90 @@ func (v *fnVerifier) checkFormatted(call *ast.CallExpr, fn *funcInfo) {
 			v.checkFormattable(passed.expr, fn.obj.Name())
 		}
 	}
+}
+
+// fmtSlack is what a function that formats may build beyond what fmt
+// prints: a logger's header and newline, or a prefix that a logging
+// function of a project adds. What a logger's prefix and the name of a
+// file take beyond it is assumed.
+const fmtSlack = 4096
+
+// checkFormatAlloc proves that what a function builds from what it formats
+// can be allocated: twice what fmtBound counts, plus fmtSlack, plus a page,
+// since the buffer fmt writes into grows by append (see appendTo). format
+// is the expression of the format, or nil, with its value; operands are the
+// values formatted, as they were before they were converted to any. It
+// returns the bound on what fmt writes when that bound counts all of it,
+// and nil otherwise.
+func (v *fnVerifier) checkFormatAlloc(st *state, guard []*logic.Term, call *ast.CallExpr, who string, format ast.Expr, formatVal value, operands []fmtOperand) *logic.Term {
+	spec := fmtSpec{line: true}
+	if format != nil {
+		if tv := v.info.Types[format]; tv.Value != nil && tv.Value.Kind() == constant.String {
+			spec = constantSpec(constant.StringVal(tv.Value))
+		} else {
+			length := logic.Len(formatVal[0])
+			spec = fmtSpec{verbs: length, length: length, width: fmtMaxWidth, precision: fmtMaxWidth, expands: true}
+		}
+	}
+	bound, complete := fmtBound(spec, operands)
+	built := logic.Add(bound, logic.IntLit(fmtSlack))
+	room := logic.Add(logic.Mul(built, logic.IntLit(2)), logic.IntLit(1<<16))
+	v.check(st, guard, logic.Le(room, logic.BigLit(v.maxAlloc())), call.Pos(),
+		"what %s builds from what it formats may be more than can be allocated; bound the lengths of the strings and slices it formats, "+
+			"and of a format that is not a constant", who)
+	if !complete {
+		return nil
+	}
+	return bound
+}
+
+// formatted returns an operand of formatting, with the value an expression
+// had as it was converted, or nil for an expression that held one.
+func (v *fnVerifier) formatted(e ast.Expr, held value) fmtOperand {
+	if held == nil || v.isNil(e) {
+		// nil, which formats as <nil> or %!d(<nil>).
+		return fmtOperand{t: types.Typ[types.UntypedNil]}
+	}
+	return fmtOperand{val: held, t: v.info.TypeOf(e)}
+}
+
+// checkFormattedAlloc is checkFormatAlloc for a call of a trusted function
+// whose entry lists formats, once its arguments have been evaluated.
+func (v *fnVerifier) checkFormattedAlloc(st *state, guard []*logic.Term, call *ast.CallExpr, fn *funcInfo, args map[*types.Var]value) *logic.Term {
+	if fn.formatted == nil {
+		return nil
+	}
+	var format ast.Expr
+	var operands []fmtOperand
+	for _, passed := range v.bindCall(call, fn.obj.Type().(*types.Signature)) {
+		switch {
+		case passed.param == fn.format:
+			format = passed.expr
+		case passed.param == fn.formatted && passed.packed:
+			for _, e := range passed.pack {
+				operands = append(operands, v.formatted(e, v.held[ast.Unparen(e)]))
+			}
+		case passed.param == fn.formatted:
+			operands = append(operands, v.formatted(passed.expr, v.held[ast.Unparen(passed.expr)]))
+		}
+	}
+	var formatVal value
+	if fn.format != nil {
+		formatVal = args[fn.format]
+	}
+	return v.checkFormatAlloc(st, guard, call, fn.obj.Name(), format, formatVal, operands)
+}
+
+// returnsFormatted reports whether a function is one of those of fmt
+// documented to return the string they format: Sprintf, Sprint, and
+// Sprintln.
+func returnsFormatted(callee *types.Func) bool {
+	if callee.Pkg() == nil || callee.Pkg().Path() != "fmt" {
+		return false
+	}
+	switch callee.Name() {
+	case "Sprintf", "Sprint", "Sprintln":
+		return true
+	}
+	return false
 }

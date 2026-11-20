@@ -108,6 +108,7 @@ func TwoWrapsNot(fail bool) (err error) {
 	return nil
 }
 
+// @Requires |format| <= 100
 // @Ensures err = nil <-> ~fail
 func Unread(fail bool, format string, n int) (err error) {
 	if !fail {
@@ -122,6 +123,7 @@ func Unread(fail bool, format string, n int) (err error) {
 	return fmt.Errorf("%*d: %w", 3, n, ErrEmpty)
 }
 
+// @Requires |format| <= 100
 // @Ensures err != nil -> is(err, ErrEmpty)
 // @Ensures err = nil <-> ~fail
 func UnreadIs(fail bool, format string) (err error) {

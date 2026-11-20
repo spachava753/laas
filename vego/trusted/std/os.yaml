@@ -11,5 +11,9 @@ trusted:
       returned: a syscall.Errno, or a syscall.ErrorString on Plan 9. Their
       methods read only their value, and their Is methods only compare the
       argument with error variables. Which removals succeed is not modelled.
+      It copies the name into a slice one byte longer, which must be
+      something that can be allocated.
+    requires:
+      - "|name| < MaxAlloc"
     vouches: [result]
     modifies: []

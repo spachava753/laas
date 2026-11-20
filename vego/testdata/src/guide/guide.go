@@ -938,6 +938,7 @@ var ErrTooMany = errors.New("too many")
 // ParseQuantity wraps the error of strconv.Atoi, whose contract vouches for
 // it.
 //
+// @Requires |line| <= 1000
 // @Ensures err = nil -> 0 <= n <= 1000
 // @Ensures err = nil Or err = ErrTooMany Or is(err, strconv.ErrSyntax) Or is(err, strconv.ErrRange)
 func ParseQuantity(line string) (n int, err error) {
@@ -971,6 +972,7 @@ func Nearest(s string) (n int, err error) {
 
 // RemoveIfPresent removes a file, and does not fail when there is none.
 //
+// @Requires |name| <= 4096
 // @Ensures ~is(err, os.ErrNotExist)
 func RemoveIfPresent(name string) (err error) {
 	err = os.Remove(name)

@@ -140,6 +140,7 @@ func ReadsOther(c, d *counter) (b bool) {
 
 // Counting hands strings.FieldsFunc a predicate that counts its calls.
 //
+// @Requires |line| <= 1000
 // @Ensures True
 func Counting(line string) (n int) {
 	calls := 0
@@ -153,6 +154,7 @@ func Counting(line string) (n int) {
 
 // Fields hands it a predicate that does not.
 //
+// @Requires |line| <= 1000
 // @Ensures True
 func Fields(line string) (n int) {
 	fields := strings.FieldsFunc(line, func(r rune) bool { return r == ',' || r == ';' })

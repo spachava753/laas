@@ -29,6 +29,7 @@ type Held struct {
 
 type Name string
 
+// @Requires |host| <= 1000 And |ps| <= 1000 And |h.Label| <= 1000 And |n| <= 1000
 // @Ensures True
 func Formats(host string, port int, p Point, ps []Point, h Held, n Name) (s string) {
 	s = fmt.Sprintf("%s:%d", host, port)
@@ -36,6 +37,7 @@ func Formats(host string, port int, p Point, ps []Point, h Held, n Name) (s stri
 	return fmt.Sprintln(s, errors.New("made"), io.EOF)
 }
 
+// @Requires |name| <= 1000
 // @Ensures True
 func Prints(done, total int, name string) {
 	_, _ = fmt.Printf("processed %d of %d\n", done, total)
@@ -81,6 +83,7 @@ func JoinsWrong(a string) (p string) {
 	return path.Join(a, "") // want `vego:\ postcondition\ may\ not\ hold:\ \|p\|\ =\ 0`
 }
 
+// @Requires |n| <= 1000
 // @Ensures err = nil <-> ~fail
 func Wraps(fail bool, p Point, n Name) (err error) {
 	if !fail {
@@ -134,8 +137,74 @@ func FormatsStringer(c Celsius) (s string) {
 // The error that Println returns is not known, so the contract may leave
 // success open.
 //
+// @Requires |name| <= 1000
 // @Ensures True
 func Greets(name string) (err error) {
 	_, err = fmt.Println("hello", name)
 	return err
+}
+
+// What fmt builds must be something the runtime can allocate, and nothing
+// bounds name.
+//
+// @Ensures True
+func Unbounded(name string) {
+	log.Println("starting", name) // want `vego:\ what\ Println\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated`
+}
+
+// %q may write four bytes for one, so a bound of the largest allocation is
+// not enough.
+//
+// @Requires |s| <= MaxAlloc / 2
+// @Ensures True
+func QuotedHalf(s string) (r string) {
+	return fmt.Sprintf("%q", s) // want `vego:\ what\ Sprintf\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated`
+}
+
+// A format that is not a constant may hold a verb with a width of ten
+// million in every few bytes.
+//
+// @Requires |format| <= 100
+// @Ensures True
+func Formatted(format string, n int) (r string) {
+	return fmt.Sprintf(format, n)
+}
+
+// @Ensures True
+func FormattedUnbounded(format string, n int) (r string) {
+	return fmt.Sprintf(format, n) // want `vego:\ what\ Sprintf\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated`
+}
+
+// The values of a deferred call are those at the defer statement.
+//
+// @Ensures True
+func DeferredUnbounded(name string) {
+	defer log.Print(name) // want `vego:\ what\ Print\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated`
+}
+
+// @Ensures err = nil <-> ~fail
+func WrapsUnbounded(fail bool, s string) (err error) {
+	if !fail {
+		return nil
+	}
+	return fmt.Errorf("bad %q: %w", s, io.EOF) // want `vego:\ what\ fmt\.Errorf\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated`
+}
+
+// What Sprintf returns is no longer than the bound proved at the call, so it
+// can be formatted again.
+//
+// @Requires |host| <= 1000
+// @Ensures True
+func Relogs(host string, port int) {
+	msg := fmt.Sprintf("%s:%d", host, port)
+	log.Println("listening on", msg)
+}
+
+// The text of an error has no bound, so neither has what Sprintf makes of
+// it.
+//
+// @Ensures True
+func RelogsError() {
+	msg := fmt.Sprintf("%v", io.EOF)
+	log.Println(msg) // want `vego:\ what\ Println\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated`
 }

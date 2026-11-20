@@ -63,6 +63,7 @@ func Trimmed(line string, cut rune) (t string) {
 
 // Upper maps a line with a named function.
 //
+// @Requires |line| <= 1000
 // @Ensures True
 func Upper(line string) (u string) {
 	return strings.Map(shout, line)

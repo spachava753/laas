@@ -46,6 +46,10 @@ type fnVerifier struct {
 	// interface type, the evaluations of it under way that check the
 	// conversion; see converted.
 	converting map[ast.Expr]int
+	// held records, for each expression converted to an interface, the
+	// value it had as it was converted, for the bound on what formatting
+	// it writes; see fmtsize.go.
+	held map[ast.Expr]value
 	// heldReceiver is set in the check of a method made into a function
 	// value or a method of an interface value: the receiver of the method,
 	// which the contract of what it is made into cannot name, and
@@ -203,6 +207,7 @@ func (pv *pkgVerifier) newVerifier(fn *funcInfo) *fnVerifier {
 		reached: map[*funcInfo]bool{}, bitTerms: map[string]*logic.Term{}, lowZeros: map[string]uint{}, bitOrigins: map[string]bitOrigin{}, forgotten: map[string]forgottenPart{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{},
 		backgroundSeen: map[string]bool{}, targetSeen: map[string]bool{}, inlining: map[*ast.FuncLit]bool{}, joins: map[string]*joinedRegion{},
 		converting: map[ast.Expr]int{},
+		held:       map[ast.Expr]value{},
 	}
 }
 
@@ -781,6 +786,7 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 	v.evaluate(st, func() {
 		defer v.begin()()
 		args = v.arguments(s.Call, callee, st, nil)
+		_ = v.checkFormattedAlloc(st, nil, s.Call, fn, args)
 	})
 	st.deferred = append(slices.Clip(st.deferred), deferredCall{call: s.Call, fn: fn, args: args})
 }
