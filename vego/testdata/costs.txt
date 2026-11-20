@@ -1334,7 +1334,7 @@ guide	guide.Refill	12	23954	0
 guide	guide.RefillFirst	17	37488	0
 guide	guide.RefillOrdered	17	38366	0
 guide	guide.Remove	19	24370	0
-guide	guide.RemoveIfPresent	51	92235	0
+guide	guide.RemoveIfPresent	52	94675	0
 guide	guide.Replace	4	4536	0
 guide	guide.Report	3	589	0
 guide	guide.Reserve	13	1620	0
@@ -1430,7 +1430,7 @@ guide	math/rand.Intn	1	380	0
 guide	os.Create	7	2010228	2
 guide	os.Open	7	2010228	2
 guide	os.ReadFile	3	20828	0
-guide	os.Remove	3	7516	0
+guide	os.Remove	3	7892	0
 guide	sort.Search	1	2397	0
 guide	strconv.Atoi	3	18318	0
 guide	strconv.Itoa	1	1444	0

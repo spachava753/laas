@@ -12,9 +12,11 @@ trusted:
       methods read only their value, and their Is methods only compare the
       argument with error variables. Which removals succeed is not modelled.
       It copies the name into a slice one byte longer, which must be
-      something that can be allocated.
+      something that can be allocated, and whose length len(name)+1 must be
+      an int: on a 32-bit target MaxAlloc is larger than MaxInt.
     requires:
       - "|name| < MaxAlloc"
+      - "|name| < MaxInt"
     vouches: [result]
     modifies: []
 

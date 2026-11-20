@@ -2697,7 +2697,7 @@ an interface value, an error, a channel, or an unsafe.Pointer; package-level var
 supported yet
 ```
 
-Two types of the standard library are counted by what their package lets them hold, as described in [Arguments that carry code](#arguments-that-carry-code). So `*os.File` holds no code, and `os.Stdout` and `os.Stderr` can be read where nothing in the build assigns them.
+Two types of the standard library are counted by what their package lets them hold, as described in [Arguments that carry code](#arguments-that-carry-code). So `*os.File` holds no code, and `os.Stdin`, `os.Stdout`, and `os.Stderr` can be read where nothing in the build assigns them.
 
 ### What vego knows of the value
 
@@ -3088,7 +3088,7 @@ argument
 
 An error that a trusted function returns has no known origin unless the contract of the function vouches for it. See [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). Without that, `errors.Is(err, io.EOF)` on it is reported. You can compare it with `==` instead, as in `err == io.EOF`, which runs no method. That comparison is true only when the function returned `io.EOF` itself, and not when it returned an error that wraps `io.EOF`.
 
-The shipped contracts of `strconv.Atoi` and `os.Remove` vouch for their errors. The contract of `strconv.Atoi` also says that a failure is a syntax error or a range error, and which number comes with each:
+The shipped contracts of `strconv.Atoi`, `strconv.ParseInt`, and the functions of `os` that return an error vouch for their errors, among others listed in [Shipped contracts](#shipped-contracts). The contract of `strconv.Atoi` also says that a failure is a syntax error or a range error, and which number comes with each:
 
 ```go
 // @Ensures err = nil Or is(err, strconv.ErrSyntax)
@@ -3881,7 +3881,7 @@ The names in an entry are the parameter and result names from the function's sou
 
 ### Shipped contracts
 
-`vego` includes contracts for a few standard library functions:
+`vego` includes contracts for these functions of the standard library:
 
 - `sort.Ints`, `sort.IntsAreSorted`, `sort.SearchInts`, `sort.Search`, `sort.Find`, `sort.Strings`
 - `strings.Contains`, `strings.HasPrefix`, `strings.HasSuffix`, `strings.Index`, `strings.LastIndex`, `strings.IndexByte`, `strings.LastIndexByte`, `strings.Cut`, `strings.TrimPrefix`, `strings.TrimSuffix`, `strings.TrimSpace`, `strings.Split`, `strings.Fields`, `strings.Join`, `strings.Replace`, `strings.ReplaceAll`, `strings.Repeat`, `strings.Count`, `strings.EqualFold`, `strings.ToUpper`, `strings.ToLower`, `strings.TrimLeft`, `strings.TrimRight`, `strings.SplitAfter`
@@ -3908,6 +3908,27 @@ It also includes contracts for `(io.Writer).Write`, `(io.Reader).Read`, `(io.Clo
 A function of package `bytes` with two slice parameters cannot be given one slice twice, or two slices that may share memory. `bytes.Equal(a, a)` is reported as `the slices passed to Equal as a and b may overlap`, as for any function with two slice parameters of one element type (see [Slices that share no memory](#slices-that-share-no-memory)).
 
 The contracts are in `vego/trusted/std` in the source of `laas`. They state only behaviour that the function's documentation promises, read from the documentation of the oldest Go that `laas` builds with. A clause that the documentation does not give, such as `fresh` of a result, a `requires` that keeps an allocation within bounds, or a claim under `vouches`, rests on reading the function's source, and the reason of the entry says what was read. The tests of `vego` check each contract against the real function. For a function that calls a function it is given, the tests also check that it calls it only with arguments that its contract under `calls` allows. The contracts of `strconv.Atoi`, `strconv.ParseInt`, `strconv.ParseUint`, `strconv.ParseBool`, `strconv.Unquote`, `path/filepath.Rel`, `regexp.Compile`, `(context.Context).Err`, and the functions of `os` that return an error vouch for their errors. For those, the tests also check that every error in the tree of a returned error has a type whose methods were read against what `vouches` claims. A contract for a method of an interface or a function type is tested against several implementations from the standard library, and against one that does at random everything the documentation of the type allows. An entry in your own file with the same key replaces the shipped contract.
+
+### What the shipped contracts do not say
+
+A shipped contract states only what the documentation of its function promises, and some of that has no formula yet. So some contracts say less than you may need:
+
+- `strings.Index`, `strings.LastIndex`, `strings.Cut`, `strings.Contains`, and their `bytes` forms do not say that the instance they find is the first or the last, or that `-1` or `false` means that there is none. `strings.IndexByte` and `strings.LastIndexByte` say both of a byte.
+- `sort.Strings` does not say that the strings are in order. It says that the elements after the call are the elements before it.
+- The predicates of `unicode` say what they report for ASCII, and nothing of other characters.
+- `strconv.Unquote` does not bound the length of its result. `strconv.Quote` bounds its result by `10 * |s| + 2`.
+- The functions of `math` say only that they return.
+- The functions of `os` say nothing of the files they read or write.
+
+Some functions of the standard library have no shipped contract, because no true contract can be written yet:
+
+- `os.ReadFile` and `os.ReadDir` do not return for every input. See [Reading and writing files](#reading-and-writing-files).
+- `flag.Parse` can end the program.
+- `sort.SearchStrings` needs a sorted slice of strings, and a formula cannot say that.
+- `bytes.Split` and `bytes.Fields` return slices inside their argument, which a contract cannot say of every element.
+- The methods of `bytes.Buffer` and `strings.Builder` that grow the buffer need its length, an unexported field.
+- `(*regexp.Regexp).FindStringIndex` names its result differently in different releases of Go, and `regexp.MustCompile` panics on a pattern that does not compile.
+- `http.Error` and the `Header` method of `http.ResponseWriter` write memory of the writer.
 
 ### What is checked in an entry
 
@@ -5228,10 +5249,10 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 
 | Form | Meaning |
 | --- | --- |
-| `~P`, `P And Q`, `P Or Q` | not, and, or (in order of precedence, tightest first) |
+| `~P`, `P And Q`, `P Or Q` | not, and, or (in order of precedence, tightest first); Go's `!`, `&&`, and `\|\|` are reported |
 | `P -> Q`, `P <-> Q` | implies, if and only if (lowest precedence) |
 | `True`, `False` | the constants |
-| `=`, `!=`, `<`, `<=`, `>`, `>=` | comparisons, which can be chained: `0 <= i < n` |
+| `=`, `!=`, `<`, `<=`, `>`, `>=` | comparisons, which can be chained: `0 <= i < n`; Go's `==` is reported |
 | `+`, `-`, `*`, `/`, `%` | arithmetic on mathematical integers; `/` and `%` round as in Go |
 | `MaxInt`, `MinInt`, `MaxInt8` ... `MaxUint64` | limits of the Go integer types |
 | `MaxAlloc` | the largest number of bytes in one allocation |
