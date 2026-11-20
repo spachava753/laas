@@ -245,27 +245,65 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 			given = append(given, fact)
 		}
 	}
-	facts = v.chooseHomes(given, facts, v.made[mark:])
+	facts, homesChosen := v.chooseHomes(facts, v.made[mark:])
+	if len(homesChosen) > 0 {
+		// Z3 does not find a home and a bound above it for a value by
+		// itself, so instances are offered beside the question as it is:
+		// new homes at the bound on entry, one after another, with the
+		// bound after them; and every home the home of one interface value
+		// whose home the entry reads outside a quantifier, with the bound
+		// as it was. Each is an instance of the outcome, so a proof of one
+		// is a proof that some outcome exists.
+		instances := []map[string]*logic.Term{{st.brk.Name: logic.Add(entry.brk, logic.IntLit(int64(len(homesChosen))))}}
+		for i, h := range homesChosen {
+			instances[0][h.Name] = logic.Add(entry.brk, logic.IntLit(int64(i)))
+		}
+		for _, at := range freeHomeReads(given, 4) {
+			instance := map[string]*logic.Term{st.brk.Name: entry.brk}
+			for _, h := range homesChosen {
+				instance[h.Name] = home(at)
+			}
+			instances = append(instances, instance)
+		}
+		alternatives := []*logic.Term{logic.And(facts...)}
+		for _, instance := range instances {
+			memo := map[*logic.Term]*logic.Term{}
+			var instantiated []*logic.Term
+			for _, fact := range facts {
+				instantiated = append(instantiated, substituteConsts(fact, instance, memo))
+			}
+			alternatives = append(alternatives, logic.And(instantiated...))
+		}
+		facts = []*logic.Term{logic.Or(alternatives...)}
+	}
 	return v.proves(given, v.someOutcome(facts, v.made[mark:]), 0)
 }
 
 // chooseHomes lets an outcome choose the home of each interface value it
 // produces. The homes are one table, which the entry does not constrain at a
 // reference it has never seen, so an outcome that returns a new interface
-// value chooses its home as it chooses the value: the home of each produced
-// reference read in the facts becomes a constant of the outcome. A produced
-// reference that is not nil is a new one, apart from every reference whose
-// home the facts or the entry read, and two produced references that are
-// equal have one home; a nil one has the home the table gives it.
-func (v *fnVerifier) chooseHomes(given, facts []*logic.Term, made []string) []*logic.Term {
+// value chooses its home as it chooses the value. The facts become one
+// disjunction over which of the produced references are nil: a nil one is
+// the reference 0, and one that is not nil has a home of its own, chosen
+// like a result. Z3 then has no equation under the existential to solve.
+//
+// What this lets the outcome choose is what an outcome of Go can be. A
+// formula compares an interface value only with nil, so in the facts a
+// produced reference occurs only as compared with 0 and inside its home;
+// which number it is decides nothing, and it can be taken to be a new
+// reference, apart from every other. A new reference is what a conversion
+// gives, and the model gives its home no value of its own: a converted
+// value may hold memory that is new, or what another value holds, so any
+// home from 1 up to the bound afterwards is one that some outcome has.
+//
+// It also returns the homes it made, in order.
+func (v *fnVerifier) chooseHomes(facts []*logic.Term, made []string) ([]*logic.Term, []*logic.Term) {
 	produced := map[string]bool{}
 	for _, name := range made {
 		produced[name] = true
 	}
-	chosen := map[string]*logic.Term{}
 	var order []*logic.Term
-	var read []*logic.Term
-	readSeen := map[*logic.Term]bool{}
+	listed := map[string]bool{}
 	seen := map[*logic.Term]bool{}
 	var collect func(t *logic.Term)
 	collect = func(t *logic.Term) {
@@ -274,54 +312,93 @@ func (v *fnVerifier) chooseHomes(given, facts []*logic.Term, made []string) []*l
 		}
 		seen[t] = true
 		if t.Op == logic.OpSelect && t.Args[0].Op == logic.OpConst && t.Args[0].Name == homes.Name {
-			at := t.Args[1]
-			switch {
-			case at.Op == logic.OpConst && produced[at.Name]:
-				if chosen[at.Name] == nil {
-					chosen[at.Name] = nil
-					order = append(order, at)
-				}
-			case !readSeen[at]:
-				readSeen[at] = true
-				read = append(read, at)
+			if at := t.Args[1]; at.Op == logic.OpConst && produced[at.Name] && !listed[at.Name] {
+				listed[at.Name] = true
+				order = append(order, at)
 			}
 		}
 		for _, arg := range t.Args {
 			collect(arg)
 		}
 	}
-	for _, fact := range given {
-		collect(fact)
-	}
 	for _, fact := range facts {
 		collect(fact)
 	}
 	if len(order) == 0 {
-		return facts
+		return facts, nil
 	}
+	chosen := map[string]*logic.Term{}
+	var homesMade []*logic.Term
 	for _, ref := range order {
 		chosen[ref.Name] = v.fresh("outhome", logic.Ref)
-	}
-	replaced := make([]*logic.Term, len(facts))
-	memo := map[*logic.Term]*logic.Term{}
-	for i, fact := range facts {
-		replaced[i] = replaceHomes(fact, chosen, memo)
+		homesMade = append(homesMade, chosen[ref.Name])
 	}
 	zero := logic.RefLit(0)
-	for i, ref := range order {
-		own := chosen[ref.Name]
-		apart := []*logic.Term{}
-		for _, other := range read {
-			apart = append(apart, logic.Ne(ref, other))
+	// Each subset of the produced references is a choice of which are nil.
+	// Beyond three, only all and none are tried, which can only refuse more.
+	var subsets [][]bool
+	if len(order) <= 3 {
+		for mask := 0; mask < 1<<len(order); mask++ {
+			nils := make([]bool, len(order))
+			for i := range order {
+				nils[i] = mask&(1<<i) != 0
+			}
+			subsets = append(subsets, nils)
 		}
-		replaced = append(replaced,
-			logic.Implies(logic.Eq(ref, zero), logic.Eq(own, home(zero))),
-			logic.Or(logic.Eq(ref, zero), logic.And(apart...)))
-		for _, other := range order[i+1:] {
-			replaced = append(replaced, logic.Implies(logic.Eq(ref, other), logic.Eq(own, chosen[other.Name])))
+	} else {
+		none, all := make([]bool, len(order)), make([]bool, len(order))
+		for i := range all {
+			all[i] = true
+		}
+		subsets = [][]bool{none, all}
+	}
+	var cases []*logic.Term
+	for _, nils := range subsets {
+		asZero, asHome := map[string]*logic.Term{}, map[string]*logic.Term{}
+		var conditions []*logic.Term
+		for i, ref := range order {
+			if nils[i] {
+				asZero[ref.Name] = zero
+				continue
+			}
+			asHome[ref.Name] = chosen[ref.Name]
+			conditions = append(conditions, logic.Ne(ref, zero))
+		}
+		homeMemo, zeroMemo := map[*logic.Term]*logic.Term{}, map[*logic.Term]*logic.Term{}
+		for _, fact := range facts {
+			conditions = append(conditions, substituteConsts(replaceHomes(fact, asHome, homeMemo), asZero, zeroMemo))
+		}
+		cases = append(cases, logic.And(conditions...))
+	}
+	return []*logic.Term{logic.Or(cases...)}, homesMade
+}
+
+// freeHomeReads returns up to limit references, in the order met, whose
+// homes the facts read outside any quantifier.
+func freeHomeReads(facts []*logic.Term, limit int) []*logic.Term {
+	var found []*logic.Term
+	listed := map[string]bool{}
+	seen := map[*logic.Term]bool{}
+	var collect func(t *logic.Term)
+	collect = func(t *logic.Term) {
+		if seen[t] || len(found) >= limit || t.Op == logic.OpForall || t.Op == logic.OpExists {
+			return
+		}
+		seen[t] = true
+		if t.Op == logic.OpSelect && t.Args[0].Op == logic.OpConst && t.Args[0].Name == homes.Name {
+			if key := t.Args[1].String(); !listed[key] {
+				listed[key] = true
+				found = append(found, t.Args[1])
+			}
+		}
+		for _, arg := range t.Args {
+			collect(arg)
 		}
 	}
-	return replaced
+	for _, fact := range facts {
+		collect(fact)
+	}
+	return found
 }
 
 // replaceHomes replaces the home of each reference that by names with the

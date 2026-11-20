@@ -1135,6 +1135,12 @@ trusted:
     modifies: []
     vouches: [s]
 
+  trialfaults.newCloser:
+    reason: Returns a new value or nil, as some constructors are documented to.
+    ensures: ["fresh(result)"]
+    vouches: [result]
+    modifies: []
+
   (foreignlib.Maker).Make:
     reason: An outcome may return a new interface value.
     modifies: []
