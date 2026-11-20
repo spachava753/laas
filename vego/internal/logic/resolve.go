@@ -627,7 +627,7 @@ func (s *scope) nilSlice(op string, left, right *Node) *Term {
 		return nil
 	case err != nil:
 		panic(resolveError{err})
-	case op != "=" && op != "==" && op != "!=":
+	case op != "=" && op != "!=":
 		fail("operator %s cannot be applied to a slice and nil; a slice is compared with nil by = or !=", op)
 	case op == "!=":
 		return Not(t)
@@ -647,7 +647,7 @@ func plain(n *Node) string {
 // relation builds a comparison between two terms of the same sort. Slices
 // compare by length and elements, booleans by equivalence.
 func (s *scope) relation(op string, a, b *Term) *Term {
-	equality := op == "=" || op == "==" || op == "!="
+	equality := op == "=" || op == "!="
 	var result *Term
 	switch {
 	case a.Sort.IsSeq() && a.Sort.Elem() == Float:

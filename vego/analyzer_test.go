@@ -221,6 +221,11 @@ func TestAnalyzer(t *testing.T) {
 		})
 	}
 
+	// Formulas written with Go's operators, in source and in a trust file.
+	t.Run("refuses the operators of Go in formulas", func(t *testing.T) {
+		runCorpus(t, newAnalyzer(), "gospellings")
+	})
+
 	// A project trust file with a problem is named at every call that
 	// went through the trust file, since an entry it means to give may be
 	// among what was not read.

@@ -173,6 +173,14 @@ The text after a keyword is a formula. Formulas look like Go conditions, with th
 
 The logical operators are `And`, `Or`, `~` (not), `->` (implies), and `<->` (if and only if). Equality is a single `=`. Comparisons can be chained, so `0 <= i < n` is valid.
 
+Each operator has one spelling. Go's `&&`, `||`, `!`, and `==` are reported with the word to use:
+
+```text
+vego: syntax error in Requires annotation: && is not a spelling of the formula language; write And
+```
+
+Inequality is written `!=`, as in Go.
+
 ```go
 // @Ensures result = -1 Or (0 <= result < |A| And A[result] = x)
 ```
@@ -4895,6 +4903,7 @@ This table lists the most common messages.
 | `an annotation is written "// @Keyword ...", with one space before the @ and none after it` (or `with nothing but one space`) | The comment looks like an annotation but has different spacing, or something stands before the `@`. | Write `// @Keyword ...`. |
 | `a comment directly after an annotation is not read as part of it` | An ordinary comment follows an annotation in the same comment group. | Start the line with `// @` to continue the annotation, or put an empty `//` line before the comment. |
 | `this comment has an @ and a character that ends a line on the screen but not for Go`, or `this file has annotations and a carriage return that does not end a line` | The comment contains a character such as U+2028, or a carriage return without a newline. An editor may show what follows it as a separate line, but `vego` reads it as part of the same line. | Remove the character. |
+| `syntax error in Requires annotation: && is not a spelling of the formula language; write And`, and the same for `\|\|`, `!`, `==`, and `ℤ` | The formula uses a spelling of Go, or `ℤ` for the integers. | Write `And`, `Or`, `~`, `=`, or `Z`. |
 | `unknown annotation "W"` | The word after `// @` is not a keyword. | Correct the keyword. If another tool reads the comment, declare the word with `-vego.other-tags`. |
 | `Ensures annotation is not attached to a function` | The clause is not in the doc comment of a function. | Move it into the doc comment. |
 | `x is assigned, which F may not modify; list it in a // @Modifies clause`, with `, as p.f` when a path from a parameter reaches it | No `Modifies` entry covers memory of this kind. | Add it to `Modifies`, by the path the message names. |

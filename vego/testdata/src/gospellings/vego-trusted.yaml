@@ -1,0 +1,18 @@
+version: 1
+
+trusted:
+  gospellings.positive:
+    reason: Reads only x; its ensures is written as in Go.
+    modifies: []
+    ensures:
+      - "result == (x > 0)" # // want `syntax error in ensures of gospellings.positive: == is not a spelling of the formula language; write =`
+
+  sort.Search:
+    reason: The shipped entry, with what holds at each call of f written as in Go.
+    requires:
+      - "n >= 0"
+    runs: [f]
+    calls:
+      f(i):
+        requires: ["0 <= i && i < n"] # // want `syntax error in requires of f\(i\) in calls of sort.Search: && is not a spelling of the formula language; write And`
+    modifies: []

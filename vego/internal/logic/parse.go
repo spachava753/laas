@@ -157,6 +157,12 @@ var operators = []string{
 	"=", "<", ">", "+", "-", "*", "/", "%", "~", "!", "(", ")", "[", "]", ",", ":", "|", "'", ".", "&",
 }
 
+// goSpellings are the operators of Go that the formula language spells
+// otherwise, each with its one spelling there. lex recognises them only to
+// refuse them, so that each thing has one spelling and a formula written as
+// Go is reported with the spelling to use.
+var goSpellings = map[string]string{"&&": "And", "||": "Or", "!": "~", "==": "="}
+
 // lex splits clause text into tokens. Identifiers follow Go's rules, numbers
 // are decimal, and operators are matched longest first. A quote directly
 // after an identifier is a prime, as in x'; any other quote starts a
@@ -200,6 +206,9 @@ func lex(src string) ([]token, error) {
 				}
 				i += size
 			}
+			if src[start:i] == "ℤ" {
+				return nil, &SyntaxError{start, "ℤ is not a spelling of the formula language; write Z"}
+			}
 			toks = append(toks, token{i - start, 'i', src[start:i], start})
 		case r == '"':
 			// A string literal uses Go's syntax for interpreted strings.
@@ -226,6 +235,9 @@ func lex(src string) ([]token, error) {
 			matched := false
 			for _, op := range operators {
 				if strings.HasPrefix(src[i:], op) {
+					if spelling, refused := goSpellings[op]; refused {
+						return nil, &SyntaxError{i, fmt.Sprintf("%s is not a spelling of the formula language; write %s", op, spelling)}
+					}
 					toks = append(toks, token{len(op), 'o', op, i})
 					i += len(op)
 					matched = true
@@ -422,7 +434,7 @@ func (p *parser) implication() *Node {
 func (p *parser) disjunction() *Node {
 	left := p.conjunction()
 	for {
-		if _, ok := p.acceptAny("Or", "||"); !ok {
+		if _, ok := p.acceptAny("Or"); !ok {
 			return left
 		}
 		left = p.binary("Or", left, p.conjunction())
@@ -432,7 +444,7 @@ func (p *parser) disjunction() *Node {
 func (p *parser) conjunction() *Node {
 	left := p.negation()
 	for {
-		if _, ok := p.acceptAny("And", "&&"); !ok {
+		if _, ok := p.acceptAny("And"); !ok {
 			return left
 		}
 		left = p.binary("And", left, p.negation())
@@ -441,7 +453,7 @@ func (p *parser) conjunction() *Node {
 
 func (p *parser) negation() *Node {
 	start := p.peek().pos
-	if _, ok := p.acceptAny("~", "!"); ok {
+	if _, ok := p.acceptAny("~"); ok {
 		kid := p.negation()
 		return &Node{Kind: NUnary, Op: "~", Kids: []*Node{kid}, Start: start, End: kid.End}
 	}
@@ -461,7 +473,7 @@ func (p *parser) quantifier() *Node {
 		n.Vars = append(n.Vars, p.ident())
 	}
 	p.expect("in")
-	if _, unbounded := p.acceptAny("Z", "ℤ"); !unbounded {
+	if _, unbounded := p.acceptAny("Z"); !unbounded {
 		open, ok := p.acceptAny("[", "(")
 		if !ok {
 			p.fail("expected a quantifier domain: Z or an interval such as [0, n)")
@@ -487,7 +499,7 @@ func (p *parser) comparison() *Node {
 	first := p.arith()
 	n := &Node{Kind: NCompare, Kids: []*Node{first}, Start: first.Start}
 	for {
-		op, ok := p.acceptAny("<=", ">=", "!=", "==", "=", "<", ">")
+		op, ok := p.acceptAny("<=", ">=", "!=", "=", "<", ">")
 		if !ok {
 			break
 		}

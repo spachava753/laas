@@ -147,10 +147,10 @@ func TestResolve(t *testing.T) {
 		{"A.size", "error: unknown name A.size"},
 		{"0 <= i <= j < |A|", "((0 <= i) And (i <= j) And (j < |A|))"},
 		{"n = i*j + 1", "(n = ((i * j) + 1))"},
-		{"n == i / 2 % 3 - -j", "(n = (((i / 2) % 3) + --j))"},
+		{"n = i / 2 % 3 - -j", "(n = (((i / 2) % 3) + --j))"},
 		{"found = True -> A[i] = n", "((found <-> True) -> (A[i] = n))"},
 		{"~found Or i != j", "(~found Or ~(i = j))"},
-		{"!found && flags[i] || found", "((~found And flags[i]) Or found)"},
+		{"~found And flags[i] Or found", "((~found And flags[i]) Or found)"},
 		{"found <-> i < j -> j > i", "(found <-> ((i < j) -> (i < j)))"},
 		{"|A| = |A'| And old(A)[0] = 1", "((|A| = |A1|) And (A0[0] = 1))"},
 		{"Forall k in Z : A[k] >= 0", "(Forall k#1 : (True -> (0 <= A[k#1])))"},
@@ -205,7 +205,7 @@ func TestResolve(t *testing.T) {
 		{"A = nil Or nil != A", "(nilA Or ~nilA)"},
 		{"old(A) = nil", "nilA0"},
 		{"p = nil", "(p = 0)"},
-		{"A == nil", "nilA"},
+		{"nil = A", "nilA"},
 		{"A < nil", "error: operator < cannot be applied to a slice and nil"},
 		{"p < nil", "error: operator < cannot be applied to a pointer"},
 		{"A[i] = “a”", "error: which gofmt makes of two backquotes or two quotes in a row"},
@@ -361,6 +361,44 @@ func TestApply(t *testing.T) {
 			t.Errorf("%s: %v", test.formula, err)
 		case test.err == "" && !strings.Contains(got.String(), test.want):
 			t.Errorf("%s resolves to %s, which does not contain %s", test.formula, got, test.want)
+		}
+	}
+}
+
+// TestGoSpellings checks that the operators of Go that the formula language
+// spells otherwise are refused wherever they stand, with the spelling to use,
+// and that != and the same characters inside literals are not.
+func TestGoSpellings(t *testing.T) {
+	refused := map[string]string{"&&": "And", "||": "Or", "!": "~", "==": "=", "ℤ": "Z"}
+	places := []string{
+		"i > 0 %s n > 0",
+		"~(i > 0 %s n > 0)",
+		"Forall k in [0, n) : k > 0 %s k < n",
+		"Exists k in [0, n) : (k = 0 %s k = 1)",
+	}
+	for op, spelling := range refused {
+		want := op + " is not a spelling of the formula language; write " + spelling
+		srcs := []string{"%s(i > 0)", "Forall k in %s : k = k"}
+		if op != "!" && op != "ℤ" {
+			srcs = places
+		}
+		for _, form := range srcs {
+			src := fmt.Sprintf(form, op)
+			if _, err := ParseFormula(src); err == nil || err.Error() != want {
+				t.Errorf("ParseFormula(%q) = %v, want %q", src, err, want)
+			}
+		}
+		pred := fmt.Sprintf("p(i, n) ::= i > 0 %s n > 0", op)
+		if op == "!" || op == "ℤ" {
+			pred = fmt.Sprintf("p(i, n) ::= %s(i > 0)", op)
+		}
+		if _, err := ParsePredicate(pred); err == nil || err.Error() != want {
+			t.Errorf("ParsePredicate(%q) = %v, want %q", pred, err, want)
+		}
+	}
+	for _, src := range []string{`i != n`, `~(i = n)`, `s = "a && b || !c == d ℤ"`, `c = '!'`, `c != '&'`, `Forall k in Z : k = k`} {
+		if _, err := ParseFormula(src); err != nil {
+			t.Errorf("ParseFormula(%q): %v", src, err)
 		}
 	}
 }

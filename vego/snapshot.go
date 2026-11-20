@@ -88,7 +88,7 @@ func (pv *pkgVerifier) checkSnapshots(fn *funcInfo) {
 			pv.report(c.pos, "Snapshot %s: "+format, append([]any{name}, args...)...)
 			fn.broken = true
 		}
-		if _, limit := pv.namedLimit(name); limit || slices.Contains(reservedStateNames, name) || name == "Z" || name == "ℤ" {
+		if _, limit := pv.namedLimit(name); limit || slices.Contains(reservedStateNames, name) || name == "Z" {
 			fail("%s is a word of the annotation language; choose another name", name)
 			continue
 		}
