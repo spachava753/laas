@@ -2749,6 +2749,8 @@ stdentries	stdentries.Save	56	130876	0
 stdentries	stdentries.SaveAnywhere	12	19648	0
 stdentries	stdentries.SelfEqual	4	13922	0
 stdentries	stdentries.Shout	4	1248	0
+stdentries	stdentries.Shut	27	54924	0
+stdentries	stdentries.ShutListed	26	27177	0
 stdentries	stdentries.Small	28	73813	0
 stdentries	stdentries.SortNames	7	44013	1
 stdentries	stdentries.Stuck	15	31791	0

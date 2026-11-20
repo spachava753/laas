@@ -148,3 +148,18 @@ func Here() (dir string, err error) {
 func Warn(msg string) {
 	fmt.Fprintln(os.Stderr, "warning:", msg)
 }
+
+// Shut closes a file it is handed without saying that it writes it.
+//
+// @Ensures True
+func Shut(f *os.File) (err error) {
+	return f.Close() // want `Close may modify f, which Shut may not modify; list it in a // @Modifies clause, as f$`
+}
+
+// ShutListed says so.
+//
+// @Modifies f
+// @Ensures True
+func ShutListed(f *os.File) (err error) {
+	return f.Close()
+}

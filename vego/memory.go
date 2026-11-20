@@ -614,11 +614,38 @@ func (v *fnVerifier) parameterPath(st *state, guard []*logic.Term, w written) st
 			at := logic.And(logic.Eq(w.ref, entry[0]), logic.Eq(part.lo, logic.Add(entry[1], logic.IntLit(c.off))))
 			if v.quickly(st, guard, at) {
 				path, _, _ := strings.Cut(leaves[i].path, "#")
-				return ", as " + param.Name() + path
+				return ", as " + param.Name() + v.nameablePrefix(object, path)
 			}
 		}
 	}
 	return ""
+}
+
+// nameablePrefix returns the part of a path of fields, as ".From.X", into a
+// struct of type t that a formula of this package can name: it stops before
+// the first unexported field of a struct of another package, as
+// ".file" of os.File, so that the advice it ends names memory that a
+// Modifies clause can list.
+func (v *fnVerifier) nameablePrefix(t types.Type, path string) string {
+	kept := ""
+	for _, name := range strings.Split(strings.TrimPrefix(path, "."), ".") {
+		st, ok := t.Underlying().(*types.Struct)
+		if !ok || name == "" {
+			return kept
+		}
+		var field *types.Var
+		for f := range st.Fields() {
+			if f.Name() == name {
+				field = f
+			}
+		}
+		if field == nil || (!field.Exported() && field.Pkg() != v.pass.Pkg) {
+			return kept
+		}
+		kept += "." + name
+		t = field.Type()
+	}
+	return kept
 }
 
 // notListable returns what a report of a write that nothing covers says to
