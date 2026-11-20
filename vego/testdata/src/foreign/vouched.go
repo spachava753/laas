@@ -91,7 +91,7 @@ func DoneWith(e error) (d foreignlib.Done) {
 // @Requires o != nil
 // @Ensures True
 func Opens(o foreignlib.Opener) (s foreignlib.Sink) {
-	return o.Open() // want `the trusted contract of \(foreignlib.Opener\).Open \(trusted.yaml:\d+\) cannot be used: its vouches lists s, whose type foreignlib.Sink is not error` `cannot verify Opens: the contract of Opener.Open could not be understood`
+	return o.Open() // want `the trusted contract of \(foreignlib.Opener\).Open \(trusted.yaml:\d+\) cannot be used: its vouches lists s, whose type foreignlib.Sink is not error`
 }
 
 // Holder holds a sink.
@@ -121,14 +121,14 @@ func Refills(h *Holder) (y int, err error) {
 // @Modifies h
 // @Ensures True
 func RefillsUnclaimed(h *Holder) {
-	refillUnclaimed(h) // want `the trusted contract of foreign.refillUnclaimed \(trusted.yaml:\d+\) cannot be used: its modifies "h" covers memory that can hold a function value or an interface value of a type with a contract; list h under vouches` `cannot verify RefillsUnclaimed: refillUnclaimed has a contract that could not be understood`
+	refillUnclaimed(h) // want `the trusted contract of foreign.refillUnclaimed \(trusted.yaml:\d+\) cannot be used: its modifies "h" covers memory that can hold a function value or an interface value of a type with a contract; list h under vouches`
 }
 
 // @Requires b != nil
 // @Modifies b
 // @Ensures True
 func VouchesNothing(b *Box) {
-	vouchesNothing(b) // want `the trusted contract of foreign.vouchesNothing \(trusted.yaml:\d+\) cannot be used: its vouches lists b, but nothing its modifies lists under b can hold` `cannot verify VouchesNothing: vouchesNothing has a contract that could not be understood`
+	vouchesNothing(b) // want `the trusted contract of foreign.vouchesNothing \(trusted.yaml:\d+\) cannot be used: its vouches lists b, but nothing its modifies lists under b can hold`
 }
 
 // A variable of a vouching type bound to a literal used in place runs the
@@ -181,5 +181,5 @@ func Made(m foreignlib.Maker) (x any) {
 // @Requires m != nil
 // @Ensures True
 func Unmade(m foreignlib.Unmakeable) (x any) {
-	return m.Make(1) // want `the trusted contract of \(foreignlib.Unmakeable\).Make \(trusted.yaml:\d+\) cannot be used: the Ensures clauses of Unmakeable.Make are not proved to be satisfiable` `cannot verify Unmade: the contract of Unmakeable.Make could not be understood`
+	return m.Make(1) // want `the trusted contract of \(foreignlib.Unmakeable\).Make \(trusted.yaml:\d+\) cannot be used: the Ensures clauses of Unmakeable.Make are not proved to be satisfiable`
 }

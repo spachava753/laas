@@ -724,7 +724,7 @@ func (v *fnVerifier) handOver(fn *funcInfo, param *types.Var, arg ast.Expr, st *
 				"hand over a function literal, a function, a method value, or a value of a named function type with a contract",
 				types.ExprString(arg), fn.obj.Name(), param.Name(), fn.obj.Name(), v.info.TypeOf(arg)))
 		}
-		v.usable(arg.Pos(), T, T.obj.Name())
+		T = v.usable(arg.Pos(), T, T.obj.Name(), st, guard, true)
 		fun := v.eval(arg, st, guard)
 		v.check(st, guard, logic.Ne(fun[0], logic.RefLit(0)), arg.Pos(), "the function value %s may be nil", types.ExprString(arg))
 		return &handOver{arg: arg, contract: T, value: true}
@@ -736,15 +736,15 @@ func (v *fnVerifier) handOver(fn *funcInfo, param *types.Var, arg ast.Expr, st *
 	c := v.contractOf(callee)
 	if c == nil {
 		v.unsupported(arg.Pos(), fmt.Sprintf("it hands %s to %s, and %s has no contract; annotate %s with // @ annotations so that it is verified, "+
-			"or add a trusted contract for %s to %s", callee.Name(), fn.obj.Name(), callee.Name(), callee.Name(), callee.FullName(), TrustFileName))
+			"%s", callee.Name(), fn.obj.Name(), callee.Name(), callee.Name(), v.addEntryAdvice(callee.FullName())))
 	}
-	for _, defect := range c.defects {
-		v.report(arg.Pos(), "the contract of %s cannot be used: %s", callee.FullName(), defect)
+	view := v.viewOf(c)
+	v.reportUnusable(arg.Pos(), view, v.calleeName(callee))
+	if view.cut {
+		v.cut(st, guard)
 	}
-	if c.broken {
-		v.unsupported(arg.Pos(), callee.Name()+" has a contract that could not be understood")
-	}
-	if c.trust != nil {
+	c = view.fn
+	if c.trust != nil && !view.cut {
 		v.noteUse(c, arg.Pos())
 	}
 	h := &handOver{arg: arg, contract: c}

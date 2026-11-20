@@ -24,6 +24,8 @@ type lvalue struct {
 	typ    types.Type // the type of what is assigned
 	leaves []leaf
 	pos    token.Pos
+	// expr is the expression assigned to.
+	expr ast.Expr
 	text   string
 	// local and lo locate the leaves of a placeLocal inside its variable.
 	local *types.Var
@@ -102,6 +104,10 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 // struct x points to, or part of wherever the struct x itself is stored.
 func (v *fnVerifier) fieldPlace(e *ast.SelectorExpr) lvalue {
 	selection := v.info.Selections[e]
+	if variable, ok := v.info.Uses[e.Sel].(*types.Var); ok && selection == nil && variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope() {
+		v.unsupported(e.Pos(), fmt.Sprintf("%s is a package-level variable of package %s, and assigning one is not supported yet",
+			types.ExprString(e), variable.Pkg().Path()))
+	}
 	if selection == nil || selection.Kind() != types.FieldVal {
 		v.unsupported(e.Pos(), "only variables, fields, and slice elements can be assigned")
 	}
@@ -138,6 +144,7 @@ func (v *fnVerifier) fieldPlace(e *ast.SelectorExpr) lvalue {
 // evaluated at all.
 func (v *fnVerifier) lvalue(e ast.Expr, st *state, guard []*logic.Term) lvalue {
 	lv := v.place(e)
+	lv.expr = e
 	switch {
 	case lv.box != nil:
 		// A variable that an assignment creates has no place yet.
@@ -239,7 +246,7 @@ func (v *fnVerifier) store(lv lvalue, val value, st *state) {
 		// this code may write it too.
 		w := written{ref: lv.ref, parts: stretchesOf(lv.cells, lv.at)}
 		if lv.box == nil {
-			v.checkWrite(st, nil, w, lv.pos, lv.text+" is assigned")
+			v.checkWriteOr(st, nil, w, lv.pos, lv.text+" is assigned", "", v.notListable(lv.expr, lv.pos))
 		} else {
 			v.checkNotForbidden(st, nil, w, lv.pos, lv.text+" is assigned")
 		}

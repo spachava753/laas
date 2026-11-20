@@ -177,17 +177,17 @@ func countdown(n int) (b bool) {
 //
 // @Ensures True
 func UsesMemReq(xs []int) {
-	_ = memReq(xs, func(i int) bool { return true }) // want `the trusted contract of callbacks.memReq \(trusted.yaml:\d+\) cannot be used: its ensures applies f, and its calls requires for f read memory` `cannot verify UsesMemReq: `
+	_ = memReq(xs, func(i int) bool { return true }) // want `the trusted contract of callbacks.memReq \(trusted.yaml:\d+\) cannot be used: its ensures applies f, and its calls requires for f read memory`
 }
 
 // @Ensures True
 func UsesTwoArgs() {
-	_ = twoArgs(func(i, j int) bool { return true }) // want `its ensures applies f, whose type func\(i int, j int\) bool does not have one integer parameter and one integer or boolean result` `cannot verify UsesTwoArgs: `
+	_ = twoArgs(func(i, j int) bool { return true }) // want `its ensures applies f, whose type func\(i int, j int\) bool does not have one integer parameter and one integer or boolean result`
 }
 
 // @Ensures True
 func UsesAppliedEarly() {
-	_ = appliedEarly(func(i int) bool { return true }) // want `its requires "f\(0\)" applies f; only its ensures can speak of what f returns` `in its requires "f\(0\)": f\(...\) can only be used in ensures` `cannot verify UsesAppliedEarly: `
+	_ = appliedEarly(func(i int) bool { return true }) // want `its requires "f\(0\)" applies f; only its ensures can speak of what f returns` `in its requires "f\(0\)": f\(...\) can only be used in ensures`
 }
 
 func noResult(f func())                   {}
@@ -201,7 +201,7 @@ type Pt struct {
 
 // @Ensures True
 func UsesNoResult() {
-	noResult(func() {}) // want `its calls says that f is deterministic, but f returns nothing` `cannot verify UsesNoResult: `
+	noResult(func() {}) // want `its calls says that f is deterministic, but f returns nothing`
 }
 
 // SecondChanges returns, second, what an earlier run left.

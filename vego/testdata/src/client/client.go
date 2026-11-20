@@ -56,7 +56,7 @@ func First(A []int) (first int, err error) {
 //
 // @Ensures y > x
 func UsesBroken(x int) (y int) {
-	return lib.Broken(x) // want `the contract of lib.Broken cannot be used: its verification failed in package lib` `cannot verify UsesBroken: Broken has a contract that could not be understood`
+	return lib.Broken(x) // want `the contract of lib.Broken cannot be used: its verification failed in package lib`
 }
 
 // UsesUnannotated calls an exported function that has no contract.
@@ -70,7 +70,7 @@ func UsesUnannotated(x int) (y int) {
 //
 // @Ensures y > x
 func UsesWrap(x int) (y int) {
-	return lib.Wrap(x) // want `the contract of lib.Wrap cannot be used: its verification failed in package lib` `cannot verify UsesWrap: Wrap has a contract that could not be understood`
+	return lib.Wrap(x) // want `the contract of lib.Wrap cannot be used: its verification failed in package lib`
 }
 
 // limit here is not the limit lib's contract speaks of.
@@ -122,7 +122,7 @@ func DepositsElsewhere(a *lib.Account) {
 // @Requires a != nil
 // @Modifies a.Balance
 func UsesReset(a *lib.Account) {
-	a.Reset() // want `the contract of \(\*lib.Account\).Reset cannot be used: its verification failed in package lib` `cannot verify UsesReset: Reset has a contract that could not be understood`
+	a.Reset() // want `the contract of \(\*lib.Account\).Reset cannot be used: its verification failed in package lib`
 }
 
 // TouchesFirst calls a function whose Modifies clause uses a constant of its

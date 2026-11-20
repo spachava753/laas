@@ -186,13 +186,29 @@ func (pv *pkgVerifier) checkInvariantsDeclared() {
 
 // invariantEnv gives meaning to the names in an invariant: the fields of the
 // value it is stated of, which is self when the value is a struct and what
-// self points to when it is a pointer. A type whose invariants could not be
-// read cannot be used at a boundary at all.
+// self points to when it is a pointer.
 func (v *fnVerifier) invariantEnv(set *invariantSet, sink *state, mem memory, self value, t types.Type) *specEnv {
-	if set.broken {
-		v.unsupported(v.fn.obj.Pos(), fmt.Sprintf("the invariants of %s could not be understood", set.name.Name()))
-	}
 	return &specEnv{v: v, sink: sink, fn: set.owner, now: mem, self: self, selfType: t}
+}
+
+// unusableInvariants reports, where the invariants of a type whose
+// declaration could not be read are used, that they are neither assumed
+// nor proved there. Leaving out an assumption only weakens what is known,
+// and the function has failed at the report, so its other faults are
+// still reported.
+func (v *fnVerifier) unusableInvariants(set *invariantSet, pos token.Pos) {
+	if v.unusableSets == nil {
+		v.unusableSets = map[*invariantSet]bool{}
+	}
+	if v.unusableSets[set] {
+		return
+	}
+	v.unusableSets[set] = true
+	why := "an Invariant annotation of " + set.name.Name() + " could not be read, or they contradict each other, as reported at them"
+	if set.name.Pkg() != v.pass.Pkg {
+		why = "the annotations of package " + set.name.Pkg().Path() + " could not all be read"
+	}
+	v.report(pos, "the invariants of %s cannot be used: %s, so they are neither assumed nor proved here", set.name.Name(), why)
 }
 
 // assumeInvariants adds the invariants of a value to the state, for a
@@ -200,6 +216,10 @@ func (v *fnVerifier) invariantEnv(set *invariantSet, sink *state, mem memory, se
 func (v *fnVerifier) assumeInvariants(st *state, guard []*logic.Term, mem memory, val value, t types.Type) {
 	set, viaPointer := v.invariantsOf(t)
 	if set == nil {
+		return
+	}
+	if set.broken {
+		v.unusableInvariants(set, v.fn.obj.Pos())
 		return
 	}
 	if viaPointer {
@@ -218,6 +238,10 @@ func (v *fnVerifier) checkInvariants(st *state, guard []*logic.Term, mem memory,
 	if set == nil {
 		return
 	}
+	if set.broken {
+		v.unusableInvariants(set, pos)
+		return
+	}
 	if viaPointer {
 		guard = append(slices.Clip(guard), logic.Lt(logic.IntLit(0), val[0]))
 	}
@@ -233,6 +257,9 @@ func (v *fnVerifier) invariantsHold(st *state, mem memory, val value, t types.Ty
 	set, viaPointer := v.invariantsOf(t)
 	if set == nil {
 		return true
+	}
+	if set.broken {
+		return false
 	}
 	var guard []*logic.Term
 	if viaPointer {

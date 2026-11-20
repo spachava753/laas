@@ -125,8 +125,12 @@ func (pv *pkgVerifier) checkValueContract(fn *funcInfo) {
 		example = fmt.Sprintf("%s(...) (n int)", fn.methodOf.Name())
 	}
 	entry := fn.trust != nil
+	misreading := false
 	fault := func(at token.Pos, format string, args ...any) {
 		fn.broken = true
+		// A contract refused for anything but a clause that cannot be read
+		// is used nowhere; see viewOf.
+		fn.faulted = fn.faulted || !misreading
 		if entry {
 			fn.defect(format, args...)
 			return
@@ -153,6 +157,8 @@ func (pv *pkgVerifier) checkValueContract(fn *funcInfo) {
 	}
 	pv.run(fn, func(v *fnVerifier) {
 		v.misreadAs = func(c *clause, err error) {
+			misreading = true
+			defer func() { misreading = false }()
 			if entry {
 				fault(c.pos, "in its %s %q: %v", c.kind, c.text, err)
 				return
@@ -716,15 +722,14 @@ func (pv *pkgVerifier) valueContract(t types.Type) *funcInfo {
 // usableValueContract returns the contract of the type of a function value
 // that is called, or stops the verification when there is none or it cannot
 // be used.
-func (v *fnVerifier) usableValueContract(fun ast.Expr) *funcInfo {
+func (v *fnVerifier) usableValueContract(fun ast.Expr, st *state, guard []*logic.Term) *funcInfo {
 	t := v.info.TypeOf(fun)
 	fn := v.valueContract(t)
 	if fn == nil {
 		v.unsupported(fun.Pos(), fmt.Sprintf("%s has type %s, which has no contract; "+
 			"declare a named function type with a contract and use it here%s", types.ExprString(fun), t, v.funcTypeHint(t)))
 	}
-	v.usable(fun.Pos(), fn, fn.obj.Name())
-	return fn
+	return v.usable(fun.Pos(), fn, fn.obj.Name(), st, guard, true)
 }
 
 // callValue verifies a call through a function value. The value and the
@@ -732,7 +737,7 @@ func (v *fnVerifier) usableValueContract(fun ast.Expr) *funcInfo {
 // like any call; then the value must not be nil, and the contract of its
 // type applies.
 func (v *fnVerifier) callValue(call *ast.CallExpr, st *state, guard []*logic.Term) []value {
-	fn := v.usableValueContract(call.Fun)
+	fn := v.usableValueContract(call.Fun, st, guard)
 	u := v.unit
 	operands := u.pushCeiling()
 	fun, args := v.valueOperands(call, fn, st, guard)
@@ -763,7 +768,7 @@ func (v *fnVerifier) valueOperands(call *ast.CallExpr, fn *funcInfo, st *state, 
 // returns. A nil value would panic then; it is reported here, where the
 // value is fixed.
 func (v *fnVerifier) deferValue(s *ast.DeferStmt, st *state) {
-	fn := v.usableValueContract(s.Call.Fun)
+	fn := v.usableValueContract(s.Call.Fun, st, nil)
 	var fun value
 	var args map[*types.Var]value
 	v.evaluate(st, func() {
@@ -1290,7 +1295,7 @@ func (v *fnVerifier) functionValue(e ast.Expr, want types.Type, st *state, guard
 		v.unsupported(e.Pos(), fmt.Sprintf("%s is used as a value of type %s, which has no contract; "+
 			"declare a named function type with a contract and use it here%s", what, want, v.funcTypeHint(want)))
 	}
-	v.usable(e.Pos(), T, T.obj.Name())
+	T = v.usable(e.Pos(), T, T.obj.Name(), st, guard, false)
 	switch {
 	case isLiteral:
 		v.madeLiteral(inner.(*ast.FuncLit), T, st, guard)
@@ -1366,14 +1371,16 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 	fn := v.contractOf(callee)
 	if fn == nil {
 		v.unsupported(e.Pos(), fmt.Sprintf("it uses %s as %s, and %s has no contract; annotate %s with // @ annotations so that it is verified, "+
-			"or add a trusted contract for %s to %s", callee.Name(), as, callee.Name(), callee.Name(), callee.FullName(), TrustFileName))
+			"%s", callee.Name(), as, callee.Name(), callee.Name(), v.addEntryAdvice(callee.FullName())))
 	}
-	for _, defect := range fn.defects {
-		v.report(e.Pos(), "the contract of %s cannot be used: %s", callee.FullName(), defect)
+	// A contract that cannot be read is reported here, and the check runs
+	// with what can be read, or not at all; see viewOf.
+	view := v.viewOf(fn)
+	v.reportUnusable(e.Pos(), view, v.calleeName(callee))
+	if view.cut {
+		return
 	}
-	if fn.broken {
-		v.unsupported(e.Pos(), callee.Name()+" has a contract that could not be understood")
-	}
+	fn = view.fn
 	// What a value made by verified code runs may make no call through a
 	// function value or an interface value. No contract of a function type
 	// or an interface method has a variant, so nothing would then prove

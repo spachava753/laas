@@ -1043,6 +1043,11 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 // noteUse records that a proof relies on a trusted contract.
 func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 	entry := fn.trust
+	// The project's file may hold an entry that would take the place of
+	// this one, or say more, among what could not be read.
+	if problem := pv.trustProblem(); problem != "" {
+		pv.report(at, "%s, so the contract used here for %s may not be the one the file means to give it: fix the file first", problem, entry.key)
+	}
 	index := slices.IndexFunc(pv.usage.Entries, func(use *EntryUse) bool {
 		return use.Key == entry.key && use.File == entry.file.path
 	})

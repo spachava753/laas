@@ -108,7 +108,7 @@ func contradictory() int { return 0 }
 //
 // @Ensures n = 42
 func UsesContradiction() (n int) {
-	return contradictory() // want `vego:\ cannot\ verify\ UsesContradiction:\ contradictory\ has\ a\ contract\ that\ could\ not\ be\ understood` `vego:\ the\ trusted\ contract\ of\ trust\.contradictory\ \(trusted\.yaml:\d+\)\ cannot\ be\ used:\ it\ contradicts\ itself,\ so\ anything\ could\ be\ proved\ from\ it`
+	return contradictory() // want `vego:\ the\ trusted\ contract\ of\ trust\.contradictory\ \(trusted\.yaml:\d+\)\ cannot\ be\ used:\ it\ contradicts\ itself,\ so\ anything\ could\ be\ proved\ from\ it`
 }
 
 func wrongModifies(count int) {}
@@ -116,7 +116,7 @@ func wrongModifies(count int) {}
 // UsesWrongModifies relies on a contract whose modifies makes no sense.
 func UsesWrongModifies() {
 	// @Assert True
-	wrongModifies(1) // want `vego:\ cannot\ verify\ UsesWrongModifies:\ wrongModifies\ has\ a\ contract\ that\ could\ not\ be\ understood` `vego:\ the\ trusted\ contract\ of\ trust\.wrongModifies\ \(trusted\.yaml:\d+\)\ cannot\ be\ used:\ in\ its\ modifies\ \"count\":\ count\ is\ passed\ by\ value,\ so\ the\ caller\ cannot\ see\ a\ change\ to\ it`
+	wrongModifies(1) // want `vego:\ the\ trusted\ contract\ of\ trust\.wrongModifies\ \(trusted\.yaml:\d+\)\ cannot\ be\ used:\ in\ its\ modifies\ \"count\":\ count\ is\ passed\ by\ value,\ so\ the\ caller\ cannot\ see\ a\ change\ to\ it`
 }
 
 func wrongName(count int) int { return count }
@@ -125,7 +125,7 @@ func wrongName(count int) int { return count }
 //
 // @Ensures n >= 0
 func UsesWrongName() (n int) {
-	return wrongName(1) // want `vego:\ cannot\ verify\ UsesWrongName:\ wrongName\ has\ a\ contract\ that\ could\ not\ be\ understood` `vego:\ the\ trusted\ contract\ of\ trust\.wrongName\ \(trusted\.yaml:\d+\)\ cannot\ be\ used:\ in\ its\ ensures\ "total\ >=\ 0":\ unknown\ name\ total`
+	return wrongName(1) // want `vego:\ the\ trusted\ contract\ of\ trust\.wrongName\ \(trusted\.yaml:\d+\)\ cannot\ be\ used:\ in\ its\ ensures\ "total\ >=\ 0":\ unknown\ name\ total`
 }
 
 func makesSlice() []int { return nil }
@@ -216,7 +216,7 @@ func usesPredicate() int { return 0 }
 //
 // @Ensures n = 1
 func UsesPredicate() (n int) {
-	return usesPredicate() // want `the trusted contract of trust.usesPredicate \(trusted.yaml:\d+\) cannot be used: in its ensures "good\(result\)": unknown predicate good` `cannot verify UsesPredicate: usesPredicate has a contract that could not be understood`
+	return usesPredicate() // want `the trusted contract of trust.usesPredicate \(trusted.yaml:\d+\) cannot be used: in its ensures "good\(result\)": unknown predicate good`
 }
 
 func impossibleString() string { return "a" }
@@ -225,7 +225,7 @@ func impossibleString() string { return "a" }
 //
 // @Ensures False
 func UsesImpossibleString() (b byte) {
-	s := impossibleString() // want `the trusted contract of trust.impossibleString \(trusted.yaml:\d+\) cannot be used: it contradicts itself` `cannot verify UsesImpossibleString: impossibleString has a contract that could not be understood`
+	s := impossibleString() // want `the trusted contract of trust.impossibleString \(trusted.yaml:\d+\) cannot be used: it contradicts itself`
 	return s[0]
 }
 
@@ -236,7 +236,7 @@ func take(MaxInt any) int { return 0 }
 //
 // @Ensures n = MaxInt
 func UsesBlockedName() (n int) {
-	return take(nil) // want `cannot verify UsesBlockedName: ` `the trusted contract of trust.take \(trusted.yaml:\d+\) cannot be used: in its ensures "result = MaxInt": cannot compare result \(int\) with MaxInt \(interface value\)`
+	return take(nil) // want `the trusted contract of trust.take \(trusted.yaml:\d+\) cannot be used: in its ensures "result = MaxInt": cannot compare result \(int\) with MaxInt \(interface value\)`
 }
 
 var errAlways = errors.New("always")
@@ -259,7 +259,7 @@ func takeAny(x any) int { return 0 }
 //
 // @Ensures n = 0
 func UsesOldOfBlockedName() (n int) {
-	return takeAny(nil) // want `cannot verify UsesOldOfBlockedName: ` `the trusted contract of trust.takeAny \(trusted.yaml:\d+\) cannot be used: in its ensures "result = old\(x\)": cannot compare result \(int\) with old\(x\) \(interface value\)`
+	return takeAny(nil) // want `the trusted contract of trust.takeAny \(trusted.yaml:\d+\) cannot be used: in its ensures "result = old\(x\)": cannot compare result \(int\) with old\(x\) \(interface value\)`
 }
 
 func readyWith(a []int) (err error) { return nil }
@@ -515,7 +515,7 @@ func claimsChange(xs []int) {}
 // @Requires |xs| > 0 And xs[0] = 1
 // @Ensures xs'[0] = 99
 func UsesClaimsChange(xs []int) {
-	claimsChange(xs) // want `vego: cannot verify UsesClaimsChange: claimsChange has a contract that could not be understood` `vego: the trusted contract of trust.claimsChange \(trusted.yaml:\d+\) cannot be used: its ensures "xs'\[0\] = 7" describes xs'\[0\] after the call, but nothing its modifies lists is memory that xs'\[0\] reads, so the call cannot have changed it; drop the prime or list what the function writes`
+	claimsChange(xs) // want `vego: the trusted contract of trust.claimsChange \(trusted.yaml:\d+\) cannot be used: its ensures "xs'\[0\] = 7" describes xs'\[0\] after the call, but nothing its modifies lists is memory that xs'\[0\] reads, so the call cannot have changed it; drop the prime or list what the function writes`
 }
 
 // Bounced calls a trusted function of this package that calls it back, so
@@ -1006,7 +1006,7 @@ func claimsOtherChange(xs []int, p *box) {}
 // @Modifies p
 // @Ensures xs'[0] = xs[0]
 func UsesClaimsOtherChange(xs []int, p *box) {
-	claimsOtherChange(xs, p) // want `vego: cannot verify UsesClaimsOtherChange: claimsOtherChange has a contract that could not be understood` `vego: the trusted contract of trust.claimsOtherChange \(trusted.yaml:\d+\) cannot be used: its ensures "xs'\[0\] = 7" describes xs'\[0\] after the call, but nothing its modifies lists is memory that xs'\[0\] reads, so the call cannot have changed it; drop the prime or list what the function writes`
+	claimsOtherChange(xs, p) // want `vego: the trusted contract of trust.claimsOtherChange \(trusted.yaml:\d+\) cannot be used: its ensures "xs'\[0\] = 7" describes xs'\[0\] after the call, but nothing its modifies lists is memory that xs'\[0\] reads, so the call cannot have changed it; drop the prime or list what the function writes`
 }
 
 // FailsInSecondResult returns the error of a call and, next to it, an
@@ -1135,7 +1135,7 @@ func claimsOtherSlice(xs, ys []int) {}
 // @Modifies ys
 // @Ensures xs'[0] = xs[0]
 func UsesClaimsOtherSlice(xs, ys []int) {
-	claimsOtherSlice(xs, ys) // want `vego: cannot verify UsesClaimsOtherSlice: claimsOtherSlice has a contract that could not be understood` `vego: the trusted contract of trust.claimsOtherSlice \(trusted.yaml:\d+\) cannot be used: its ensures "xs'\[0\] = 7" describes xs'\[0\] after the call, .*`
+	claimsOtherSlice(xs, ys) // want `vego: the trusted contract of trust.claimsOtherSlice \(trusted.yaml:\d+\) cannot be used: its ensures "xs'\[0\] = 7" describes xs'\[0\] after the call, .*`
 }
 
 func setsFirst(xs []int) { xs[0] = 7 }
@@ -1213,7 +1213,7 @@ func claimsOtherCell(xs, ys []box) {}
 // @Modifies ys
 // @Ensures xs'[0].X = xs[0].X
 func UsesClaimsOtherCell(xs, ys []box) {
-	claimsOtherCell(xs, ys) // want `vego: cannot verify UsesClaimsOtherCell: claimsOtherCell has a contract that could not be understood` `vego: the trusted contract of trust.claimsOtherCell \(trusted.yaml:\d+\) cannot be used: its ensures "xs'\[0\]\.X = 7" describes xs'\[0\]\.X after the call, .*`
+	claimsOtherCell(xs, ys) // want `vego: the trusted contract of trust.claimsOtherCell \(trusted.yaml:\d+\) cannot be used: its ensures "xs'\[0\]\.X = 7" describes xs'\[0\]\.X after the call, .*`
 }
 
 var sequence func(func() bool)
@@ -1327,14 +1327,14 @@ func FlushesDeclared(s *sinkHolder) (result int) {
 //
 // @Ensures True
 func UsesRunsNothing() {
-	runsNothing(1) // want `the trusted contract of trust.runsNothing \(trusted.yaml:\d+\) cannot be used: its runs lists x, whose type int can hold no error, interface value, function value, channel, or unsafe.Pointer to run` `cannot verify UsesRunsNothing: `
+	runsNothing(1) // want `the trusted contract of trust.runsNothing \(trusted.yaml:\d+\) cannot be used: its runs lists x, whose type int can hold no error, interface value, function value, channel, or unsafe.Pointer to run`
 }
 
 // UsesRunsNobody calls one whose contract lists a name that is no parameter.
 //
 // @Ensures True
 func UsesRunsNobody() {
-	runsNobody(1) // want `the trusted contract of trust.runsNobody \(trusted.yaml:\d+\) cannot be used: its runs "y": y is not a parameter` `cannot verify UsesRunsNobody: `
+	runsNobody(1) // want `the trusted contract of trust.runsNobody \(trusted.yaml:\d+\) cannot be used: its runs "y": y is not a parameter`
 }
 
 type pinged struct{ n int }
@@ -1400,5 +1400,5 @@ func UsesSecondNamed() (a int) {
 //
 // @Ensures r = 7
 func UsesClash() (r int) {
-	return clash(1) // want `the trusted contract of trust.clash \(trusted.yaml:\d+\) cannot be used: its parameter result has a name that means something else in a contract` `cannot verify UsesClash: `
+	return clash(1) // want `the trusted contract of trust.clash \(trusted.yaml:\d+\) cannot be used: its parameter result has a name that means something else in a contract`
 }

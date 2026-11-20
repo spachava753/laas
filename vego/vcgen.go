@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -174,6 +175,10 @@ type fnVerifier struct {
 	// typedReads, when set, receives the values whose type facts reads
 	// note; see canBeMet.
 	typedReads *[]typedRead
+	// unusableSets holds the sets of invariants whose use has been
+	// reported as impossible, once for each function; see
+	// unusableInvariants.
+	unusableSets map[*invariantSet]bool
 	// lostContents says, for each package-level variable read whose
 	// initialiser made what it refers to and some use in the build lets a
 	// reference to that out, that its contents are not known to stay as
@@ -538,10 +543,30 @@ func (v *fnVerifier) unsupported(pos token.Pos, msg string) {
 func (v *fnVerifier) misread(c *clause, err error) {
 	if v.misreadAs != nil {
 		v.misreadAs(c, err)
-	} else {
-		v.report(c.pos, "in %s annotation: %v", c.kind, err)
+		panic(abort{})
+	}
+	v.report(c.pos, "in %s annotation: %v", c.kind, err)
+	// An annotation of another declaration, read here, is reported at it,
+	// which may be a report its own verification makes too. The function
+	// being verified stops here, so it gets a report of its own.
+	if !v.ownClause(c) {
+		at := v.pass.Fset.Position(c.pos)
+		panic(unsupported{pos: v.askAt, msg: fmt.Sprintf("an annotation that it relies on here cannot be read: the %s annotation at %s:%d:%d (%v)",
+			c.kind, filepath.Base(at.Filename), at.Line, at.Column, err)})
 	}
 	panic(abort{})
+}
+
+// ownClause reports whether a clause is one of the function being verified,
+// or of the contract it is verified against.
+func (v *fnVerifier) ownClause(c *clause) bool {
+	for _, fn := range []*funcInfo{v.fn, v.fn.spelling()} {
+		if slices.Contains(fn.requires, c) || slices.Contains(fn.ensures, c) || slices.Contains(fn.body, c) || fn.measure == c ||
+			slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.clause == c }) {
+			return true
+		}
+	}
+	return false
 }
 
 // fresh returns a new symbolic constant. The @ keeps generated names apart
@@ -800,7 +825,10 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 	case isErrorsIs(callee):
 		v.unsupported(s.Pos(), "deferring errors.Is is not supported: its result would be lost")
 	}
-	fn := v.contractFor(s.Call, callee)
+	fn, cut := v.contractFor(s.Call, callee, st, nil)
+	if cut {
+		return
+	}
 	if len(fn.calls) > 0 {
 		v.unsupported(s.Pos(), fmt.Sprintf("deferring a call of %s, which calls a function it is given, is not supported yet", callee.Name()))
 	}

@@ -1,11 +1,13 @@
 package vego
 
 import (
+	"fmt"
 	"go/ast"
 	"go/constant"
 	"go/token"
 	"go/types"
 	"slices"
+	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"golang.org/x/tools/go/types/typeutil"
@@ -94,11 +96,48 @@ func embedsDeclared(t types.Type) bool {
 // interface is not supported, and what to do instead. It returns "" for any
 // other type.
 func unsupportedHint(t types.Type) string {
+	if path, holder := arrayField(t, map[types.Type]bool{}); path != "" {
+		return fmt.Sprintf("; %s holds an array in %s, and arrays are not supported yet", holder, path)
+	}
 	if !embedsDeclared(t) {
 		return ""
 	}
 	return "; an interface literal that embeds a declared interface is the same type as any other with methods of " +
 		"the same names and signatures, whose contracts may differ, so declare a defined interface type, as in type D interface{ A }, and use it here"
+}
+
+// arrayField returns the field at any depth through which a type holds an
+// array, as field out or field e.buf, with the type that holds it, or ""
+// for a type that holds none where a value of it lies: in itself, in what
+// a pointer points to, or in the elements of a slice.
+func arrayField(t types.Type, seen map[types.Type]bool) (path string, holder types.Type) {
+	if seen[t] {
+		return "", nil
+	}
+	seen[t] = true
+	switch u := t.Underlying().(type) {
+	case *types.Pointer:
+		return arrayField(u.Elem(), seen)
+	case *types.Slice:
+		return arrayField(u.Elem(), seen)
+	case *types.Array:
+		if u.Len() != 0 {
+			return "itself", t
+		}
+	case *types.Struct:
+		for field := range u.Fields() {
+			if field.Name() == "_" {
+				continue
+			}
+			if _, isArray := field.Type().Underlying().(*types.Array); isArray && holdsArray(field.Type()) {
+				return "field " + field.Name(), t
+			}
+			if inner, _ := arrayField(field.Type(), seen); inner != "" && holdsArray(field.Type()) {
+				return "field " + field.Name() + "." + strings.TrimPrefix(inner, "field "), t
+			}
+		}
+	}
+	return "", nil
 }
 
 // holdsCodeRef reports whether a type is one whose values are a single

@@ -116,19 +116,19 @@ func Fail(f foreignlib.Fails) (err error) {
 // @Requires f != nil
 // @Ensures True
 func Halves(f foreignlib.Half) (y int) {
-	return f(3) // want `the trusted contract of foreignlib.Half \(trusted.yaml:\d+\) cannot be used: the Ensures clauses of Half are not proved to be satisfiable` `cannot verify Halves: the contract of Half could not be understood`
+	return f(3) // want `the trusted contract of foreignlib.Half \(trusted.yaml:\d+\) cannot be used: the Ensures clauses of Half are not proved to be satisfiable`
 }
 
 // @Requires f != nil
 // @Ensures True
 func Kept(f foreignlib.Keeps) {
-	f(errors.New("x")) // want `the trusted contract of foreignlib.Keeps \(trusted.yaml:\d+\) cannot be used: it lists keeps, which a contract of a type cannot have` `cannot verify Kept: the contract of Keeps could not be understood`
+	f(errors.New("x")) // want `the trusted contract of foreignlib.Keeps \(trusted.yaml:\d+\) cannot be used: it lists keeps, which a contract of a type cannot have`
 }
 
 // @Requires f != nil
 // @Ensures True
 func Ran(f foreignlib.Runs) {
-	f(errors.New("x")) // want `the trusted contract of foreignlib.Runs \(trusted.yaml:\d+\) cannot be used: it lists runs` `cannot verify Ran: the contract of Runs could not be understood`
+	f(errors.New("x")) // want `the trusted contract of foreignlib.Runs \(trusted.yaml:\d+\) cannot be used: it lists runs`
 }
 
 // @Requires f != nil
@@ -149,7 +149,7 @@ type Local func()
 // @Requires l != nil
 // @Ensures True
 func CallsLocal(l Local) {
-	l() // want `the trusted contract of foreign.Local \(trusted.yaml:\d+\) cannot be used: the function type foreign.Local is declared in the module of this package` `cannot verify CallsLocal: the contract of Local could not be understood`
+	l() // want `the trusted contract of foreign.Local \(trusted.yaml:\d+\) cannot be used: the function type foreign.Local is declared in the module of this package`
 }
 
 // An interface literal that embeds a declared interface is not modelled.
@@ -187,5 +187,5 @@ func PutAliasAndCopy(a foreignlib.SinkAlias, c foreignlib.SinkCopy) (y int, err 
 // @Requires g != nil
 // @Ensures True
 func GetsAnnotated(g foreignannotated.Getter) (n int) {
-	return g.Get() // want `the contract of Getter.Get cannot be used: it has a contract where it is declared and also an entry \(foreignannotated.Getter\).Get in the trust file` `cannot verify GetsAnnotated: the contract of Getter.Get could not be understood`
+	return g.Get() // want `the contract of Getter.Get cannot be used: it has a contract where it is declared and also an entry \(foreignannotated.Getter\).Get in the trust file`
 }

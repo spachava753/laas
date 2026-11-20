@@ -120,7 +120,7 @@ func (v *fnVerifier) madeInterface(e ast.Expr, held value, from, want types.Type
 			v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: its method %s has no contract, so nothing would say "+
 				"what code that calls it may rely on%s", from, want, methodTitle(method), v.entryHint(method.Pkg(), method.Pos(), method.FullName())))
 		}
-		v.usable(e.Pos(), T, methodTitle(method))
+		v.usable(e.Pos(), T, methodTitle(method), st, guard, false)
 	}
 	shown := types.TypeString(from, types.RelativeTo(v.pass.Pkg))
 	for method := range iface.Methods() {
@@ -397,7 +397,7 @@ func isIfaceMethod(callee *types.Func) bool {
 // an interface value is checked against, and the selector of the call, or
 // stops the verification when the call is not of that form or the method
 // has no contract that can be used.
-func (v *fnVerifier) usableMethodContract(call *ast.CallExpr, callee *types.Func) (*funcInfo, *ast.SelectorExpr) {
+func (v *fnVerifier) usableMethodContract(call *ast.CallExpr, callee *types.Func, st *state, guard []*logic.Term) (*funcInfo, *ast.SelectorExpr) {
 	sel, _ := ast.Unparen(call.Fun).(*ast.SelectorExpr)
 	var selection *types.Selection
 	if sel != nil {
@@ -420,7 +420,7 @@ func (v *fnVerifier) usableMethodContract(call *ast.CallExpr, callee *types.Func
 		v.unsupported(call.Pos(), fmt.Sprintf("%s calls %s, which has no contract; a method of an interface gets one in its doc comment "+
 			"where the interface is declared, with // @ annotations%s", types.ExprString(call.Fun), methodTitle(callee), v.entryHint(callee.Pkg(), callee.Pos(), callee.FullName())))
 	}
-	v.usable(call.Pos(), fn, methodTitle(callee))
+	fn = v.usable(call.Pos(), fn, methodTitle(callee), st, guard, true)
 	// The proof rests on which states the value has, or on it having none,
 	// whatever the method says of them; see fileStates.
 	v.ifaceStatesOf(selection.Recv())
@@ -434,7 +434,7 @@ func (v *fnVerifier) usableMethodContract(call *ast.CallExpr, callee *types.Func
 // depends on what the value holds: one that verified code converted was
 // checked against the contract there, and any other is taken to meet it.
 func (v *fnVerifier) callMethod(call *ast.CallExpr, callee *types.Func, st *state, guard []*logic.Term) []value {
-	fn, sel := v.usableMethodContract(call, callee)
+	fn, sel := v.usableMethodContract(call, callee, st, guard)
 	u := v.unit
 	operands := u.pushCeiling()
 	held, args := v.methodOperands(call, sel, fn, st, guard)
@@ -469,7 +469,7 @@ func (v *fnVerifier) methodOperands(call *ast.CallExpr, sel *ast.SelectorExpr, f
 // the frame returns. Go takes the method of the value at the defer
 // statement, which panics there for the nil interface.
 func (v *fnVerifier) deferMethod(s *ast.DeferStmt, callee *types.Func, st *state) {
-	fn, sel := v.usableMethodContract(s.Call, callee)
+	fn, sel := v.usableMethodContract(s.Call, callee, st, nil)
 	var held value
 	var args map[*types.Var]value
 	v.evaluate(st, func() {

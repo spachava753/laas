@@ -33,27 +33,27 @@ func notAny(n int, a ...int)     {}
 // @Modifies b
 // @Ensures True
 func UsesFill(b []int) {
-	fill(b, 1) // want `vego:\ the\ trusted\ contract\ of\ formatting\.fill\ .*cannot\ be\ used:\ it\ lists\ formats\ and\ writes\ memory\ under\ modifies` `cannot verify UsesFill`
+	fill(b, 1) // want `vego:\ the\ trusted\ contract\ of\ formatting\.fill\ .*cannot\ be\ used:\ it\ lists\ formats\ and\ writes\ memory\ under\ modifies`
 }
 
 // @Ensures True
 func UsesHanding() {
-	handing(func() {}, 1) // want `vego:\ the\ trusted\ contract\ of\ formatting\.handing\ .*cannot\ be\ used:\ it\ lists\ formats\ and\ has\ calls` `cannot verify UsesHanding`
+	handing(func() {}, 1) // want `vego:\ the\ trusted\ contract\ of\ formatting\.handing\ .*cannot\ be\ used:\ it\ lists\ formats\ and\ has\ calls`
 }
 
 // @Ensures True
 func UsesSinking(s Sink) {
-	sinking(s, 1) // want `vego:\ the\ trusted\ contract\ of\ formatting\.sinking\ .*cannot\ be\ used:\ it\ lists\ formats\ and\ runs\ s` `cannot verify UsesSinking`
+	sinking(s, 1) // want `vego:\ the\ trusted\ contract\ of\ formatting\.sinking\ .*cannot\ be\ used:\ it\ lists\ formats\ and\ runs\ s`
 }
 
 // @Ensures True
 func UsesTwoValues() {
-	twoValues(1, 2) // want `vego:\ the\ trusted\ contract\ of\ formatting\.twoValues\ .*cannot\ be\ used:\ its\ formats\ lists\ a\ and\ b` `cannot verify UsesTwoValues`
+	twoValues(1, 2) // want `vego:\ the\ trusted\ contract\ of\ formatting\.twoValues\ .*cannot\ be\ used:\ its\ formats\ lists\ a\ and\ b`
 }
 
 // @Ensures True
 func UsesNotAny() {
-	notAny(1, 2) // want `vego:\ the\ trusted\ contract\ of\ formatting\.notAny\ .*cannot\ be\ used:\ its\ formats\ lists\ a,\ of\ type\ \[\]int` `its formats lists no parameter of type any` `cannot verify UsesNotAny`
+	notAny(1, 2) // want `vego:\ the\ trusted\ contract\ of\ formatting\.notAny\ .*cannot\ be\ used:\ its\ formats\ lists\ a,\ of\ type\ \[\]int` `its formats lists no parameter of type any`
 }
 
 // Shout is a function type of values that take a value to format.

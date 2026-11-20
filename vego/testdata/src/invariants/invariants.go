@@ -226,20 +226,20 @@ type Tagged struct {
 // be read.
 //
 // @Ensures True
-func MakesTagged() (result Tagged) { // want `vego: cannot verify MakesTagged: the invariants of Tagged could not be understood`
-	return Tagged{}
+func MakesTagged() (result Tagged) {
+	return Tagged{} // want `the invariants of Tagged cannot be used: an Invariant annotation of Tagged could not be read`
 }
 
 // MakesBroken uses a type of another package whose invariant cannot be read.
 //
 // @Ensures True
-func MakesBroken() (result badshapes.Broken) { // want `vego: cannot verify MakesBroken: the invariants of Broken could not be understood`
-	return badshapes.Broken{X: 99}
+func MakesBroken() (result badshapes.Broken) {
+	return badshapes.Broken{X: 99} // want `the invariants of Broken cannot be used: the annotations of package badshapes could not all be read`
 }
 
 // TakesNever takes a value of a type whose invariants contradict each other.
 //
 // @Ensures result = 0
-func TakesNever(n badshapes.Never) (result int) { // want `vego: cannot verify TakesNever: the invariants of Never could not be understood`
-	return 1
+func TakesNever(n badshapes.Never) (result int) { // want `the invariants of Never cannot be used: the annotations of package badshapes could not all be read, so they are neither assumed nor proved here`
+	return 1 // want `postcondition may not hold: result = 0`
 }

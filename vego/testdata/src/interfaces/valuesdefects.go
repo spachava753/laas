@@ -120,7 +120,7 @@ func DescribedRuns(s Shape) (n int) {
 //
 // @Ensures True
 func Loaded() (s Shape) {
-	return loadShape() // want `the trusted contract of interfaces.loadShape \(trusted.yaml:\d+\) cannot be used: its result s can hold a function value or an interface value of a type with a contract; list it under vouches` `cannot verify Loaded: loadShape has a contract that could not be understood`
+	return loadShape() // want `the trusted contract of interfaces.loadShape \(trusted.yaml:\d+\) cannot be used: its result s can hold a function value or an interface value of a type with a contract; list it under vouches`
 }
 
 // @Ensures True

@@ -71,7 +71,7 @@ type Sets5 func(c *Counted)
 // @Requires h != nil And 0 <= x <= 1000
 // @Ensures True
 func Even(h Half, x int) {
-	h(x) // want `vego: cannot verify Even: the contract of Half could not be understood`
+	h(x) // want `the contract of Half cannot be used: it was refused where it is declared, as reported there`
 }
 
 // Unbounded promises one more than a field that may already be the largest

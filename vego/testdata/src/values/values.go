@@ -580,7 +580,7 @@ func LiveSquareSource(x int) (result error) {
 // leaves a contract no name for it.
 //
 // @Ensures first = 1
-func BlankResult() (first int, _ int) { // want `vego: BlankResult has annotations, so each of its results needs a name, as in func BlankResult\(...\) \(n int, err error\)`
+func BlankResult() (first int, _ int) { // want `vego: BlankResult has annotations, so each of its results needs a name, as in func BlankResult\(\) \(first int, i int\)`
 	return 1, 0
 }
 

@@ -142,7 +142,7 @@ func OtherTool() int { return 0 }
 func malformed() (result int) { return 0 }
 
 // @Ensures result = 0
-func CallsMalformed() (result int) { return malformed() } // want `vego:\ cannot\ verify\ CallsMalformed:\ malformed\ has\ a\ contract\ that\ could\ not\ be\ understood`
+func CallsMalformed() (result int) { return malformed() } // want `the contract of malformed cannot be used: some annotations of malformed could not be read, as reported at them`
 
 // @Predicate negate(b) ::= ~b
 // @Predicate hiddenLiar(n) ::= negate(hiddenLiar(n)) // want `vego:\ recursive\ use\ of\ predicate\ hiddenLiar\ must\ not\ occur\ under\ negation,\ on\ the\ left\ of\ \->,\ or\ under\ <\->`
@@ -230,7 +230,7 @@ func Impossible(A []int) (result int) { // want `vego: nothing can satisfy the R
 //
 // @Requires result = 7
 // @Ensures result = 7
-func ResultParameter(result int) int { // want `vego: ResultParameter has annotations, so each of its results needs a name, as in func ResultParameter\(...\) \(n int, err error\)`
+func ResultParameter(result int) int { // want `vego: ResultParameter has annotations, so each of its results needs a name, as in func ResultParameter\(result int\) \(i int\)`
 	return 5
 }
 

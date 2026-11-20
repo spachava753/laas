@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/spachava753/laas/vego/internal/logic"
 )
 
 // A type of another package has nowhere to put a contract: io.Writer is
@@ -223,23 +225,25 @@ func nearestGoMod(file string) string {
 }
 
 // usable reports the defects of the contract of a type or of a method of an
-// interface where it is used, and stops the verification when it cannot be
-// used. A contract that a trust file gives a type of another package is
-// named as its entry, and its use is recorded for the trust report.
-func (v *fnVerifier) usable(pos token.Pos, fn *funcInfo, title string) {
-	for _, defect := range fn.defects {
-		if fn.trust != nil {
-			v.report(pos, "the trusted contract of %s (%s:%d) cannot be used: %s", fn.trust.key, filepath.Base(fn.trust.file.path), fn.trust.line, defect)
-			continue
-		}
-		v.report(pos, "the contract of %s cannot be used: %s", title, defect)
-	}
-	if fn.broken {
-		v.unsupported(pos, fmt.Sprintf("the contract of %s could not be understood", title))
+// interface where it is used. A contract that cannot be used ends the path
+// there, under guard, and what is returned in its place promises and
+// writes nothing; see viewOf. A contract that a trust file gives a type of
+// another package is named as its entry, and its use is recorded for the
+// trust report.
+//
+// A use that calls through a value of the type may rely on part of a
+// contract; any other use, a check of a value against it, cannot.
+func (v *fnVerifier) usable(pos token.Pos, fn *funcInfo, title string, st *state, guard []*logic.Term, forCall bool) *funcInfo {
+	view := v.viewOf(fn)
+	v.reportUnusable(pos, view, title)
+	if view.cut || (view.partial && !forCall) {
+		v.cut(st, guard)
+		return blank(fn)
 	}
 	if fn.trust != nil {
 		v.noteUse(fn, pos)
 	}
+	return view.fn
 }
 
 // entryHint tells, in a message about a method of an interface or a
@@ -249,7 +253,31 @@ func (pv *pkgVerifier) entryHint(pkg *types.Package, declared token.Pos, key str
 	if pkg == nil || pv.inAnalysedModule(pkg, declared) {
 		return ""
 	}
+	if problem := pv.trustProblem(); problem != "" {
+		return fmt.Sprintf("; %s, so an entry %s there may not have been read: fix the file first", problem, key)
+	}
 	return fmt.Sprintf("; for a type of another module, give it an entry %s in %s", key, TrustFileName)
+}
+
+// trustProblem describes the first problem of the project's trust file, or
+// returns "" when it has none. Entries of a file with a problem may not have
+// been read, so no message advises adding one to it without saying so.
+func (pv *pkgVerifier) trustProblem() string {
+	if pv.projectTrust == nil || len(pv.projectTrust.problems) == 0 {
+		return ""
+	}
+	first := pv.projectTrust.problems[0]
+	return fmt.Sprintf("the trust file %s has problems, the first at line %d (%s)", filepath.Base(pv.projectTrust.path), first.line, first.msg)
+}
+
+// addEntryAdvice is the end of a message about a function without a
+// contract: add a trusted contract for it, or, when the project's trust
+// file has problems, fix the file, where the entry may already be.
+func (pv *pkgVerifier) addEntryAdvice(key string) string {
+	if problem := pv.trustProblem(); problem != "" {
+		return fmt.Sprintf("or, since %s, fix the file first: an entry for %s there may not have been read", problem, key)
+	}
+	return fmt.Sprintf("or add a trusted contract for %s to %s", key, TrustFileName)
 }
 
 // funcTypeHint is entryHint for a function type, which must be a defined

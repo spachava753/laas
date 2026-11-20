@@ -26,7 +26,7 @@ func (s *Shop) reset() {}
 // @Modifies s
 // @Ensures True
 func Resets(s *Shop) {
-	s.reset() // want `the trusted contract of \(\*interfaces.Shop\).reset \(trusted.yaml:\d+\) cannot be used: its modifies "s" covers memory that can hold a function value or an interface value of a type with a contract` `cannot verify Resets: reset has a contract that could not be understood`
+	s.reset() // want `the trusted contract of \(\*interfaces.Shop\).reset \(trusted.yaml:\d+\) cannot be used: its modifies "s" covers memory that can hold a function value or an interface value of a type with a contract`
 }
 
 func priceWith(p Pricer) (n int) { return 0 }

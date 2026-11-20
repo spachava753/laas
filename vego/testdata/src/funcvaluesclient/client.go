@@ -32,7 +32,7 @@ func TooFar(s funcvalueslib.Step) (y int) {
 // @Requires op != nil
 // @Ensures True
 func UsesUnread(op funcvaluesunread.Op) (y int) {
-	return op(1) // want `vego: the contract of Op cannot be used: the annotations of package funcvaluesunread were not all read` `cannot verify UsesUnread: the contract of Op could not be understood`
+	return op(1) // want `vego: the contract of Op cannot be used: the annotations of package funcvaluesunread were not all read`
 }
 
 // Each caller of a function of another package that calls through a value

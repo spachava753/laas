@@ -13,30 +13,30 @@ import (
 //
 // @Ensures True
 func KeepsGlobally() {
-	keepslib.Keep(show) // want `the trusted contract of keepslib.Keep \(trusted.yaml:\d+\) cannot be used: its keeps lists h with no destination` `cannot verify KeepsGlobally: Keep has a contract that could not be understood`
+	keepslib.Keep(show) // want `the trusted contract of keepslib.Keep \(trusted.yaml:\d+\) cannot be used: its keeps lists h with no destination`
 }
 
 // @Ensures True
 func KeepsCount() {
-	_ = keepslib.KeepsCount(1) // want `its keeps lists n, whose type int can hold no error, interface value, function value, channel, or unsafe.Pointer to keep` `KeepsCount has a contract that could not be understood`
+	_ = keepslib.KeepsCount(1) // want `its keeps lists n, whose type int can hold no error, interface value, function value, channel, or unsafe.Pointer to keep`
 }
 
 // @Requires r != nil
 // @Ensures True
 func KeepsInCount(r io.Reader) {
-	_ = keepslib.KeepsInCount(r) // want `its keeps lists r as kept in result, whose type int can hold no code` `KeepsInCount has a contract that could not be understood`
+	_ = keepslib.KeepsInCount(r) // want `its keeps lists r as kept in result, whose type int can hold no code`
 }
 
 // @Requires r != nil
 // @Ensures True
 func KeepsInSelf(r io.Reader) {
-	keepslib.KeepsInSelf(r) // want `its keeps lists r as kept in itself` `KeepsInSelf has a contract that could not be understood`
+	keepslib.KeepsInSelf(r) // want `its keeps lists r as kept in itself`
 }
 
 // @Requires reg != nil
 // @Ensures True
 func KeepsInUnlisted(reg *keepslib.Registry) {
-	keepslib.KeepsInUnlisted(reg, show) // want `its keeps lists h as kept in reg, which its modifies does not list` `KeepsInUnlisted has a contract that could not be understood`
+	keepslib.KeepsInUnlisted(reg, show) // want `its keeps lists h as kept in reg, which its modifies does not list`
 }
 
 // KeepsInError keeps a handler in an error, through which a later call
@@ -44,32 +44,32 @@ func KeepsInUnlisted(reg *keepslib.Registry) {
 //
 // @Ensures True
 func KeepsInError() {
-	_ = keepslib.KeepsInError(show) // want `its keeps lists h as kept in result, whose type error can hold no function value and no value of an interface whose methods all have contracts. But h can hold a function value of type keepslib.Handler, and a call handed result would run that code without being counted as one that may call through a value` `KeepsInError has a contract that could not be understood`
+	_ = keepslib.KeepsInError(show) // want `its keeps lists h as kept in result, whose type error can hold no function value and no value of an interface whose methods all have contracts. But h can hold a function value of type keepslib.Handler, and a call handed result would run that code without being counted as one that may call through a value`
 }
 
 // @Ensures True
 func KeepsInNothing() {
-	keepslib.KeepsInNothing(show) // want `its keeps lists h as kept in box, which is not a result or a parameter` `KeepsInNothing has a contract that could not be understood`
+	keepslib.KeepsInNothing(show) // want `its keeps lists h as kept in box, which is not a result or a parameter`
 }
 
 // @Ensures True
 func KeepsUnknown() {
-	keepslib.KeepsUnknown(show) // want `its keeps "g": g is not a parameter` `KeepsUnknown has a contract that could not be understood`
+	keepslib.KeepsUnknown(show) // want `its keeps "g": g is not a parameter`
 }
 
 // @Ensures True
 func KeepsCalled() {
-	_ = keepslib.KeepsCalled(func(i int) bool { return true }) // want `its keeps lists f, which its calls gives a contract` `KeepsCalled has a contract that could not be understood`
+	_ = keepslib.KeepsCalled(func(i int) bool { return true }) // want `its keeps lists f, which its calls gives a contract`
 }
 
 // @Ensures True
 func KeepsFormatted() {
-	_ = keepslib.KeepsFormatted(1) // want `its keeps lists v, which its formats lists` `KeepsFormatted has a contract that could not be understood`
+	_ = keepslib.KeepsFormatted(1) // want `its keeps lists v, which its formats lists`
 }
 
 // @Ensures True
 func KeepsTwice() {
-	_ = keepslib.KeepsTwice(show) // want `its keeps lists h as kept in result twice` `KeepsTwice has a contract that could not be understood`
+	_ = keepslib.KeepsTwice(show) // want `its keeps lists h as kept in result twice`
 }
 
 // AddsRaw hands a literal of a type without a contract to a parameter under
@@ -182,5 +182,5 @@ func Drains() {
 // @Requires reg != nil
 // @Ensures True
 func KeepsInCountField(reg *keepslib.Registry) {
-	reg.AddCounted(show) // want `its keeps lists h as kept in r, but nothing its modifies lists under r can hold it` `AddCounted has a contract that could not be understood`
+	reg.AddCounted(show) // want `its keeps lists h as kept in r, but nothing its modifies lists under r can hold it`
 }

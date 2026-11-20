@@ -612,7 +612,7 @@ func WritesUndeclared(l *Log) {
 //
 // @Requires l != nil
 func Grabs(l *Log) {
-	grab(l) // want `vego: the trusted contract of memory.grab \(trusted.yaml:\d+\) cannot be used: in its modifies "l.missing": l\.missing: memory.Log has no field missing` `vego: cannot verify Grabs: grab has a contract that could not be understood`
+	grab(l) // want `vego: the trusted contract of memory.grab \(trusted.yaml:\d+\) cannot be used: in its modifies "l.missing": l\.missing: memory.Log has no field missing`
 }
 
 // Queue has operations that fail for reasons its fields decide.

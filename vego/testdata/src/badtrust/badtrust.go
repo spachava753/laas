@@ -11,12 +11,12 @@ func fine() int { return 0 }
 //
 // @Ensures True
 func Wrap() (result int) {
-	return divide(0) // want `the trusted contract of badtrust.divide \(defective-trusted.yaml:6\) cannot be used: defective-trusted.yaml:9: "requires" occurs more than once` `cannot verify Wrap: divide has a contract that could not be understood`
+	return divide(0) // want `the trusted contract of badtrust.divide \(defective-trusted.yaml:6\) cannot be used: defective-trusted.yaml:9: "requires" occurs more than once`
 }
 
 // UsesFine relies on an entry of the same file.
 //
 // @Ensures True
 func UsesFine() (result int) {
-	return fine() // want `the trusted contract of badtrust.fine \(defective-trusted.yaml:\d+\) cannot be used: defective-trusted.yaml:9: "requires" occurs more than once` `cannot verify UsesFine: fine has a contract that could not be understood`
+	return fine() // want `the trusted contract of badtrust.fine \(defective-trusted.yaml:\d+\) cannot be used: defective-trusted.yaml:9: "requires" occurs more than once`
 }

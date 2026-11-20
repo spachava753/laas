@@ -11,7 +11,7 @@ import "deepfactslib"
 //
 // @Ensures code = 7
 func A(url string) (code int) {
-	r, _ := deepfactslib.GetByte(url) // want `the trusted contract of deepfactslib.GetByte \(trusted.yaml:\d+\) cannot be used: it contradicts itself` `cannot verify A: GetByte has a contract that could not be understood`
+	r, _ := deepfactslib.GetByte(url) // want `the trusted contract of deepfactslib.GetByte \(trusted.yaml:\d+\) cannot be used: it contradicts itself`
 	_ = r.Status[0]
 	return 5
 }
@@ -20,7 +20,7 @@ func A(url string) (code int) {
 //
 // @Ensures code = 7
 func B(url string) (code int) {
-	r, _ := deepfactslib.GetMap(url) // want `the trusted contract of deepfactslib.GetMap \(trusted.yaml:\d+\) cannot be used: it contradicts itself` `cannot verify B: GetMap has a contract that could not be understood`
+	r, _ := deepfactslib.GetMap(url) // want `the trusted contract of deepfactslib.GetMap \(trusted.yaml:\d+\) cannot be used: it contradicts itself`
 	_ = len(r.Header["a"])
 	return 5
 }
@@ -29,7 +29,7 @@ func B(url string) (code int) {
 //
 // @Ensures code = 7
 func C(url string) (code int) {
-	r, _ := deepfactslib.GetSlice(url) // want `the trusted contract of deepfactslib.GetSlice \(trusted.yaml:\d+\) cannot be used: it contradicts itself` `cannot verify C: GetSlice has a contract that could not be understood`
+	r, _ := deepfactslib.GetSlice(url) // want `the trusted contract of deepfactslib.GetSlice \(trusted.yaml:\d+\) cannot be used: it contradicts itself`
 	_ = r.TE[0][0]
 	return 5
 }
@@ -38,7 +38,7 @@ func C(url string) (code int) {
 //
 // @Ensures code = 7
 func Q(url string) (code int) {
-	r, _ := deepfactslib.GetQ(url) // want `the trusted contract of deepfactslib.GetQ \(trusted.yaml:\d+\) cannot be used: it contradicts itself` `cannot verify Q: GetQ has a contract that could not be understood`
+	r, _ := deepfactslib.GetQ(url) // want `the trusted contract of deepfactslib.GetQ \(trusted.yaml:\d+\) cannot be used: it contradicts itself`
 	_ = r.Status[0]
 	return 5
 }
@@ -57,7 +57,7 @@ func P(s []string) (code int) {
 //
 // @Ensures code = 7
 func M(m map[string][]string) (code int) {
-	deepfactslib.PutMap(m) // want `the trusted contract of deepfactslib.PutMap \(trusted.yaml:\d+\) cannot be used: it contradicts itself` `cannot verify M: PutMap has a contract that could not be understood`
+	deepfactslib.PutMap(m) // want `the trusted contract of deepfactslib.PutMap \(trusted.yaml:\d+\) cannot be used: it contradicts itself`
 	_ = len(m["a"])
 	return 5
 }
@@ -66,7 +66,7 @@ func M(m map[string][]string) (code int) {
 //
 // @Ensures code = 7
 func BI(url string) (code int) {
-	r, _ := deepfactslib.GetIntMap(url) // want `the trusted contract of deepfactslib.GetIntMap \(trusted.yaml:\d+\) cannot be used: it contradicts itself` `cannot verify BI: GetIntMap has a contract that could not be understood`
+	r, _ := deepfactslib.GetIntMap(url) // want `the trusted contract of deepfactslib.GetIntMap \(trusted.yaml:\d+\) cannot be used: it contradicts itself`
 	_ = len(r.H[3])
 	return 5
 }
@@ -76,7 +76,7 @@ func BI(url string) (code int) {
 // @Requires |m[3]| > 0 And |m[3][0]| > 0
 // @Ensures code = 7
 func MI(m map[int][]string) (code int) {
-	deepfactslib.PutIntMap(m) // want `the trusted contract of deepfactslib.PutIntMap \(trusted.yaml:\d+\) cannot be used: it contradicts itself` `cannot verify MI: PutIntMap has a contract that could not be understood`
+	deepfactslib.PutIntMap(m) // want `the trusted contract of deepfactslib.PutIntMap \(trusted.yaml:\d+\) cannot be used: it contradicts itself`
 	_ = len(m[3])
 	return 5
 }

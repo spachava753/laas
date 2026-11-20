@@ -221,6 +221,15 @@ func TestAnalyzer(t *testing.T) {
 		})
 	}
 
+	// A project trust file with a problem is named at every call that
+	// went through the trust file, since an entry it means to give may be
+	// among what was not read.
+	for _, root := range []string{"badyaml", "badkeys"} {
+		t.Run("names the problems of the trust file in "+root, func(t *testing.T) {
+			runCorpus(t, newAnalyzer(), root)
+		})
+	}
+
 	t.Run("refuses a trust file with a defect", func(t *testing.T) {
 		analyzer := newAnalyzer()
 		if err := analyzer.Flags.Set("trusted", filepath.Join("testdata", "defective-trusted.yaml")); err != nil {

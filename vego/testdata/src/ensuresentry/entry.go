@@ -169,5 +169,5 @@ func trusted(p *Point) {}
 // @Modifies p
 // @Ensures True
 func UsesTrusted(p *Point) {
-	trusted(p) // want `the Ensures clause "p.x = 3" names no result and nothing on return, so it speaks of the state when trusted is called` `cannot verify UsesTrusted`
+	trusted(p) // want `the Ensures clause "p.x = 3" names no result and nothing on return, so it speaks of the state when trusted is called`
 }

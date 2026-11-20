@@ -1,0 +1,10 @@
+# A trust file that is not valid YAML. // want `not valid YAML`
+version: 1
+trusted:
+  "strings.ToUpper":
+    reason: "x"
+    ensures: ["|result| = |s|"
+    modifies: []
+  badyaml.lookup:
+    reason: "the entry that would give lookup its contract"
+    modifies: []

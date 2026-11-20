@@ -38,57 +38,57 @@ type Visit func(i int)
 //
 // @Ensures True
 func UsesNotRun() {
-	notRun(1, nil) // want `the trusted contract of callbacks.notRun \(trusted.yaml:\d+\) cannot be used: its calls gives f a contract, so its runs must list f too: calls claims everything runs does` `cannot verify UsesNotRun: `
+	notRun(1, nil) // want `the trusted contract of callbacks.notRun \(trusted.yaml:\d+\) cannot be used: its calls gives f a contract, so its runs must list f too: calls claims everything runs does`
 }
 
 // @Ensures True
 func UsesNotFunc() {
-	notFunc(1, 2) // want `its runs lists f, whose type int can hold no` `its calls lists f, whose type int is not a function type` `cannot verify UsesNotFunc: `
+	notFunc(1, 2) // want `its runs lists f, whose type int can hold no` `its calls lists f, whose type int is not a function type`
 }
 
 // @Ensures True
 func UsesTwice() {
-	twice(1, nil) // want `its calls lists f twice` `cannot verify UsesTwice: `
+	twice(1, nil) // want `its calls lists f twice`
 }
 
 // @Ensures True
 func UsesWrongCount() {
-	wrongCount(1, nil) // want `its calls names 1 parameters for f, whose type func\(i int, j int\) has 2` `cannot verify UsesWrongCount: `
+	wrongCount(1, nil) // want `its calls names 1 parameters for f, whose type func\(i int, j int\) has 2`
 }
 
 // @Ensures True
 func UsesSameName() {
-	sameName(1, nil) // want `its calls names the parameter i of f twice` `cannot verify UsesSameName: `
+	sameName(1, nil) // want `its calls names the parameter i of f twice`
 }
 
 // @Ensures True
 func UsesClash() {
-	clash(1, nil) // want `its calls names a parameter of f n, which is a parameter of clash already` `cannot verify UsesClash: `
+	clash(1, nil) // want `its calls names a parameter of f n, which is a parameter of clash already`
 }
 
 // @Ensures True
 func UsesClashResult() {
-	_ = clashResult(1, nil) // want `its calls names a parameter of f k, which is a result of clashResult` `cannot verify UsesClashResult: `
+	_ = clashResult(1, nil) // want `its calls names a parameter of f k, which is a result of clashResult`
 }
 
 // @Ensures True
 func UsesReserved() {
-	reserved(1, nil) // want `its calls names a parameter of f result, which means something else in a formula` `cannot verify UsesReserved: `
+	reserved(1, nil) // want `its calls names a parameter of f result, which means something else in a formula`
 }
 
 // @Ensures True
 func UsesBadRequires() {
-	badRequires(1, nil) // want `in its requires "0 <= i < m": .*m` `cannot verify UsesBadRequires: `
+	badRequires(1, nil) // want `in its requires "0 <= i < m": .*m`
 }
 
 // @Ensures True
 func UsesPrimed() {
-	primed(nil, nil) // want `in its requires "xs'\[i\] > 0"` `cannot verify UsesPrimed: `
+	primed(nil, nil) // want `in its requires "xs'\[i\] > 0"`
 }
 
 // @Ensures True
 func UsesTakesError() {
-	takesError(nil) // want `its calls lists f, whose type func\(e error\) takes or returns a error, which can hold code; that is not supported yet` `cannot verify UsesTakesError: `
+	takesError(nil) // want `its calls lists f, whose type func\(e error\) takes or returns a error, which can hold code; that is not supported yet`
 }
 
 // A variadic function is handed over like any other: its parameter is a
@@ -112,27 +112,27 @@ func UsesVariadicWrongly() {
 
 // @Ensures True
 func UsesIs() {
-	applied(nil) // want `its calls lists is, which a formula reads as a word of its own when it is applied` `cannot verify UsesIs: `
+	applied(nil) // want `its calls lists is, which a formula reads as a word of its own when it is applied`
 }
 
 // @Ensures True
 func UsesWithContract() {
-	withContract(1, nil) // want `its calls gives f a contract, but its type callbacks.Visit has a contract of its own` `cannot verify UsesWithContract: `
+	withContract(1, nil) // want `its calls gives f a contract, but its type callbacks.Visit has a contract of its own`
 }
 
 // @Ensures True
 func UsesNoParam() {
-	noParam(1, nil) // want `its calls g\(...\): g is not a parameter` `cannot verify UsesNoParam: `
+	noParam(1, nil) // want `its calls g\(...\): g is not a parameter`
 }
 
 // @Ensures True
 func UsesOldCall() {
-	oldCall(1, nil) // want `its calls requires "old\(i\) >= 0" for f uses old, which has no meaning there: it is read in the state at each call of f` `cannot verify UsesOldCall: `
+	oldCall(1, nil) // want `its calls requires "old\(i\) >= 0" for f uses old, which has no meaning there: it is read in the state at each call of f`
 }
 
 // @Ensures True
 func UsesOldPlain() {
-	oldPlain(1) // want `its requires "old\(n\) > 0" uses old, which has no meaning there: a requires is read in the state of the call` `cannot verify UsesOldPlain: `
+	oldPlain(1) // want `its requires "old\(n\) > 0" uses old, which has no meaning there: a requires is read in the state of the call`
 }
 
 // UsesEach hands a function to a trusted function with a sound entry.

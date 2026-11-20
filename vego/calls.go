@@ -7,7 +7,6 @@ import (
 	"go/token"
 	"go/types"
 	"maps"
-	"path/filepath"
 	"slices"
 
 	"github.com/spachava753/laas/vego/internal/logic"
@@ -106,6 +105,14 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		return v.callMethod(call, method, st, guard)
 	}
 	callee, _ := typeutil.Callee(v.info, call).(*types.Func)
+	if builtin, ok := typeutil.Callee(v.info, call).(*types.Builtin); ok && callee == nil {
+		advice := ""
+		if builtin.Name() == "copy" {
+			advice = "; write the copy as a loop that assigns each element, or, when the source is no longer than the destination, " +
+				"as dst = append(dst[:0], src...)"
+		}
+		v.unsupported(call.Pos(), fmt.Sprintf("the built-in function %s is not supported yet%s", builtin.Name(), advice))
+	}
 	if callee == nil {
 		v.unsupported(call.Pos(), "only calls to named functions and methods are supported")
 	}
@@ -125,7 +132,13 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		u.reach(operands)
 		made.pure = true
 	default:
-		fn := v.contractFor(call, callee)
+		fn, cut := v.contractFor(call, callee, st, guard)
+		if cut {
+			// The path has ended here; the results stand for nothing.
+			u.reach(operands)
+			results = v.nothingKnown(callee, st)
+			break
+		}
 		if len(fn.calls) > 0 {
 			// What the call runs may read and write anything the caller may.
 			results = v.callHanding(call, fn, st, guard, operands)
@@ -168,7 +181,11 @@ func signatureMemoryFree(sig *types.Signature) bool {
 
 // contractFor returns the contract a call is checked against, after making
 // sure that the callee is one vego can call and that its contract is usable.
-func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func) *funcInfo {
+//
+// A contract that cannot be read in full is reported at the call, and the
+// call relies only on what can be; see viewOf. When nothing can be relied
+// on, the path ends at the call, under guard.
+func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func, st *state, guard []*logic.Term) (*funcInfo, bool) {
 	sig := callee.Type().(*types.Signature)
 	switch {
 	case sig.TypeParams() != nil || sig.RecvTypeParams() != nil:
@@ -182,19 +199,15 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func) *funcIn
 	if fn == nil {
 		v.unsupported(call.Pos(), fmt.Sprintf(
 			"it calls %s, which has no contract; annotate %s with // @ annotations so that it is verified, "+
-				"or add a trusted contract for %s to %s", callee.Name(), callee.Name(), callee.FullName(), TrustFileName))
+				"%s", callee.Name(), callee.Name(), v.addEntryAdvice(callee.FullName())))
 	}
-	for _, defect := range fn.defects {
-		if fn.trust == nil {
-			v.report(call.Pos(), "the contract of %s cannot be used: %s", callee.FullName(), defect)
-			continue
-		}
-		v.report(call.Pos(), "the trusted contract of %s (%s:%d) cannot be used: %s",
-			fn.trust.key, filepath.Base(fn.trust.file.path), fn.trust.line, defect)
+	view := v.viewOf(fn)
+	v.reportUnusable(call.Pos(), view, v.calleeName(callee))
+	if view.cut {
+		v.cut(st, guard)
+		return view.fn, true
 	}
-	if fn.broken {
-		v.unsupported(call.Pos(), callee.Name()+" has a contract that could not be understood")
-	}
+	fn = view.fn
 	if fn.trust != nil {
 		v.noteUse(fn, call.Pos())
 		v.checkHandedOver(call, fn)
@@ -209,7 +222,29 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func) *funcIn
 			}
 		}
 	}
-	return fn
+	return fn, false
+}
+
+// nothingKnown returns values of the results of a call after which the
+// path has ended: values of their types of which nothing else is known.
+func (v *fnVerifier) nothingKnown(callee *types.Func, st *state) []value {
+	sig := callee.Type().(*types.Signature)
+	results := make([]value, sig.Results().Len())
+	for i := range results {
+		if _, ok := layoutOf(sig.Results().At(i).Type()); ok {
+			results[i] = v.unknown("cut", sig.Results().At(i).Type(), st)
+		}
+	}
+	return results
+}
+
+// calleeName names a function in a message: by its name in this package,
+// and in full in another.
+func (v *fnVerifier) calleeName(callee *types.Func) string {
+	if callee.Pkg() == v.pass.Pkg {
+		return callee.Name()
+	}
+	return callee.FullName()
 }
 
 // checkNotHandable refuses a function literal, a function, or a method
@@ -420,8 +455,10 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	callee := fn.obj
 	sig := callee.Type().(*types.Signature)
 	passed := map[*types.Var]string{}
+	passedExpr := map[*types.Var]ast.Expr{}
 	if sig.Recv() != nil {
 		passed[sig.Recv()] = types.ExprString(ast.Unparen(call.Fun).(*ast.SelectorExpr).X)
+		passedExpr[sig.Recv()] = ast.Unparen(call.Fun).(*ast.SelectorExpr).X
 	}
 	if fn.receiver != nil {
 		passed[fn.receiver] = types.ExprString(ast.Unparen(call.Fun).(*ast.SelectorExpr).X)
@@ -431,6 +468,9 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	bound, _ := bindArgs(v.info, call, paramsOf(sig), sig.Variadic())
 	for _, b := range bound {
 		passed[b.param] = b.text()
+		if !b.packed {
+			passedExpr[b.param] = b.expr
+		}
 	}
 	// A call through a function value or an interface value is named as
 	// it is written.
@@ -479,7 +519,11 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		if v.heldReceiver != nil && fn.paramNames[fn.modifies[i].name] == v.heldReceiver {
 			remedy = v.heldRemedy
 		}
-		v.checkWriteOr(st, guard, t.reach(), call.Pos(), fmt.Sprintf("%s may modify %s", name, what), remedy)
+		unlisted := ""
+		if t.param != nil && passedExpr[t.param] != nil {
+			unlisted = v.notListable(passedExpr[t.param], call.Pos())
+		}
+		v.checkWriteOr(st, guard, t.reach(), call.Pos(), fmt.Sprintf("%s may modify %s", name, what), remedy, unlisted)
 	}
 	// What a call that runs what it is handed is like at its start, before
 	// anything it writes is forgotten.

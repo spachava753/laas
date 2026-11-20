@@ -207,7 +207,7 @@ A contract can use the function's parameters and results, and the integer and bo
 Results are referred to by their names, so every result of a verified function must be named. This guide calls a single result `result`, but you can choose another name. Go does not allow a result to share a name with a parameter, so a name in a contract cannot mean both. Three names are not available for variables that annotations use: `True`, `False`, and `nil`, which are words of the formula language. A predicate cannot be called `is`.
 
 ```text
-vego: Unnamed has annotations, so each of its results needs a name, as in func Unnamed(...) (n int, err error)
+vego: Unnamed has annotations, so each of its results needs a name, as in func Unnamed(x int) (i int)
 ```
 
 A contract can name an unexported field only of a struct declared in the package where the contract is written. For an entry in the trust file, that is the package of the function or type that the entry describes. A shipped entry can name no unexported field. A contract of another package that names one is refused:
@@ -2004,10 +2004,14 @@ func CopyThrough(A []int) (out []int) {
 ```
 
 ```text
-vego: grow may modify out, which CopyThrough may not modify; list it in a // @Modifies clause
+vego: grow may modify out, which CopyThrough may not modify; out is a result, and a // @Modifies
+clause names memory only by a path from a parameter: if what out refers to may be memory of the
+caller, list it by the parameter it comes from; if it is memory that CopyThrough made, nothing here
+shows that, since a loop that assigns out the result of a call forgets where its memory came from:
+append to it in the loop itself
 ```
 
-At the head of the loop `out` is a slice of which nothing is known, so it may be memory that the caller holds. The message asks for a `Modifies` clause, but a result cannot be listed: `// @Modifies out` is reported as `in Modifies annotation: out is not a parameter`. `fresh` cannot say otherwise in an invariant either. `// @Invariant fresh(out)` is reported as `in Invariant annotation: fresh says what a call created and is only allowed in Ensures`. Write the `append` in the loop itself. A slice that the loop only appends to keeps what is known of it:
+At the head of the loop `out` is a slice of which nothing is known, so it may be memory that the caller holds. A result cannot be listed in `Modifies`: `// @Modifies out` is reported as `in Modifies annotation: out is not a parameter`. `fresh` cannot say otherwise in an invariant either. `// @Invariant fresh(out)` is reported as `in Invariant annotation: fresh says what a call created and is only allowed in Ensures`. Write the `append` in the loop itself. A slice that the loop only appends to keeps what is known of it:
 
 ```go
 // CopyAppend appends in the loop itself.

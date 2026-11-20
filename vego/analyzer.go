@@ -348,6 +348,10 @@ type funcInfo struct {
 	// parameters; see callbacks.go.
 	calls   map[*types.Var]*callback
 	broken  bool // an annotation failed to parse; verification is skipped
+	// faulted is set for the contract of a type or of a method of an
+	// interface that was refused for something other than a clause that
+	// cannot be read, as a contradiction; see viewOf.
+	faulted bool
 	callees []*funcInfo
 	// modifies lists what the function may write, from its Modifies clauses.
 	modifies []*modTarget
@@ -589,6 +593,8 @@ type pkgVerifier struct {
 	copies map[*ast.FuncDecl][]ssaCopy
 	// ssaProg is the package built in go/ssa; see ssaProgram.
 	ssaProg *ssa.Program
+	// views holds what a use of each contract may rely on; see viewOf.
+	views map[*funcInfo]*contractView
 	// caseTails holds the annotations that follow the last statement of a
 	// case clause, with that clause; see scopeAt.
 	caseTails map[token.Pos]*ast.CaseClause
@@ -1153,8 +1159,8 @@ func (pv *pkgVerifier) collect() {
 		}
 		for _, result := range fn.results {
 			if result.Name() == "" || result.Name() == "_" {
-				pv.report(fn.decl.Name.Pos(), "%s has annotations, so each of its results needs a name, as in func %s(...) (n int, err error)",
-					fn.obj.Name(), fn.obj.Name())
+				pv.report(fn.decl.Name.Pos(), "%s has annotations, so each of its results needs a name, as in %s",
+					fn.obj.Name(), pv.namedSignature(fn))
 				fn.broken = true
 				break
 			}
@@ -1272,6 +1278,104 @@ func (pv *pkgVerifier) collect() {
 			return true
 		})
 	}
+}
+
+// namedSignature writes the signature of a function with a name for each
+// result that has none: err for an error, ok for a boolean, and otherwise
+// the first letter of the type, each made unique. A name is never one that
+// an identifier anywhere in the declaration or its annotations has, so
+// that it shadows nothing the body or the contract uses, and never a word
+// of the annotation language.
+func (pv *pkgVerifier) namedSignature(fn *funcInfo) string {
+	taken := map[string]bool{"True": true, "False": true, "nil": true, "result": true, "old": true, "fresh": true, "within": true, "has": true, "len": true}
+	// The name of a field after a dot shadows nothing.
+	var visit func(n ast.Node) bool
+	visit = func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.SelectorExpr:
+			ast.Inspect(n.X, visit)
+			return false
+		case *ast.Ident:
+			taken[n.Name] = true
+		}
+		return true
+	}
+	ast.Inspect(fn.decl, visit)
+	// The words of the annotations count whether or not they could be
+	// read: a name that an annotation uses for something else, such as an
+	// error variable or a predicate, would change what it means.
+	clauses := slices.Concat(fn.requires, fn.ensures, fn.body)
+	if fn.measure != nil {
+		clauses = append(clauses, fn.measure)
+	}
+	for _, m := range fn.modifies {
+		taken[m.name] = true
+	}
+	// A word of an annotation that names something where the function is
+	// declared, as an error variable or a predicate does, would mean the
+	// result instead; one that names nothing is likely the name meant for
+	// a result, and is free.
+	scope := pv.pass.Pkg.Scope().Innermost(fn.decl.Pos())
+	for _, c := range clauses {
+		for _, word := range strings.FieldsFunc(c.text, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' }) {
+			if _, obj := scope.LookupParent(word, fn.decl.Pos()); obj != nil || pv.res.Preds[word] != nil {
+				taken[word] = true
+			}
+		}
+	}
+	qualifier := types.RelativeTo(pv.pass.Pkg)
+	var parts []string
+	for _, result := range fn.results {
+		name := result.Name()
+		if name == "" || name == "_" {
+			base := "r"
+			switch {
+			case isError(result.Type()):
+				base = "err"
+			case types.Identical(result.Type().Underlying(), types.Typ[types.Bool]):
+				base = "ok"
+			default:
+				shown := types.TypeString(result.Type(), qualifier)
+				for _, r := range shown {
+					if unicode.IsLetter(r) {
+						base = strings.ToLower(string(r))
+						break
+					}
+				}
+			}
+			name = base
+			for i := 1; taken[name]; i++ {
+				name = fmt.Sprintf("%s%d", base, i)
+			}
+		}
+		taken[name] = true
+		parts = append(parts, name+" "+types.TypeString(result.Type(), qualifier))
+	}
+	recv := ""
+	var paramText []string
+	for _, field := range fn.decl.Type.Params.List {
+		var names []string
+		for _, name := range field.Names {
+			names = append(names, name.Name)
+		}
+		text := types.ExprString(field.Type)
+		if len(names) > 0 {
+			text = strings.Join(names, ", ") + " " + text
+		}
+		paramText = append(paramText, text)
+	}
+	if fn.decl.Recv != nil {
+		var recvText []string
+		for _, field := range fn.decl.Recv.List {
+			text := types.ExprString(field.Type)
+			if len(field.Names) > 0 {
+				text = field.Names[0].Name + " " + text
+			}
+			recvText = append(recvText, text)
+		}
+		recv = "(" + strings.Join(recvText, ", ") + ") "
+	}
+	return fmt.Sprintf("func %s%s(%s) (%s)", recv, fn.decl.Name.Name, strings.Join(paramText, ", "), strings.Join(parts, ", "))
 }
 
 // rangesByCalling reports whether a range over a value of the type may call

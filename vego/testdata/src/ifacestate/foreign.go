@@ -121,7 +121,7 @@ func receiverNamed() {}
 //
 // @Ensures True
 func UsesReceiverNamed() {
-	receiverNamed() // want `it names a receiver, which only an entry for a method of an interface can do` `cannot verify UsesReceiverNamed: receiverNamed has a contract that could not be understood`
+	receiverNamed() // want `it names a receiver, which only an entry for a method of an interface can do`
 }
 
 // GetThenClose closes a new body and then a parameter, whose home the new

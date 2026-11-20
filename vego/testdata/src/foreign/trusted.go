@@ -68,7 +68,7 @@ func sinkOf() (s foreignlib.Sink) { return nil }
 //
 // @Ensures True
 func Unvouched() (s foreignlib.Sink) {
-	return sinkOf() // want `the trusted contract of foreign.sinkOf \(trusted.yaml:\d+\) cannot be used: its result s can hold a function value or an interface value of a type with a contract; list it under vouches` `cannot verify Unvouched: sinkOf has a contract that could not be understood`
+	return sinkOf() // want `the trusted contract of foreign.sinkOf \(trusted.yaml:\d+\) cannot be used: its result s can hold a function value or an interface value of a type with a contract; list it under vouches`
 }
 
 func vouchedSink() (s foreignlib.Sink) { return Doubler{} }

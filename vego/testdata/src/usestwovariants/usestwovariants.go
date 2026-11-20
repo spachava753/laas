@@ -7,5 +7,5 @@ import "twovariants"
 //
 // @Ensures result = 0
 func Use() (result int) {
-	return twovariants.Down(3) // want `the contract of twovariants.Down cannot be used: its verification failed in package twovariants` `cannot verify Use: Down has a contract that could not be understood`
+	return twovariants.Down(3) // want `the contract of twovariants.Down cannot be used: its verification failed in package twovariants`
 }

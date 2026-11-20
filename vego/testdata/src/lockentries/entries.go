@@ -10,7 +10,7 @@ import "sync"
 // @Requires m != nil
 // @Ensures True
 func Try(m *sync.Mutex) {
-	m.TryLock() // want `vego: the trusted contract of \(\*sync.Mutex\).TryLock \(vego-trusted.yaml:4\) cannot be used: its ensures "held\(m'\)" describes m' after the call, but nothing its modifies lists is memory that m' reads` `cannot verify Try: TryLock has a contract that could not be understood`
+	m.TryLock() // want `vego: the trusted contract of \(\*sync.Mutex\).TryLock \(vego-trusted.yaml:4\) cannot be used: its ensures "held\(m'\)" describes m' after the call, but nothing its modifies lists is memory that m' reads`
 }
 
 // @Requires m != nil And ~held(m)
@@ -27,7 +27,7 @@ func Take(m *sync.Mutex) {
 // @Modifies rw
 // @Ensures True
 func Read(rw *sync.RWMutex) {
-	rw.RLock() // want `rw.w.mu.state: state is an unexported field of internal/sync.Mutex, declared in package internal/sync, and a formula in package sync cannot name it` `cannot verify Read: RLock has a contract`
+	rw.RLock() // want `rw.w.mu.state: state is an unexported field of internal/sync.Mutex, declared in package internal/sync, and a formula in package sync cannot name it`
 }
 
 func each(n int, held func(i int) bool) bool { return held(n) }
@@ -48,5 +48,5 @@ func Each(n int) (ok bool) {
 // @Requires m != nil
 // @Ensures True
 func Both(m *sync.Mutex) {
-	both(m, func(i int) bool { return true }) // want `held is both a function that the contract applies and a state of m; rename the parameter` `cannot verify Both`
+	both(m, func(i int) bool { return true }) // want `held is both a function that the contract applies and a state of m; rename the parameter`
 }

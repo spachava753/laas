@@ -216,47 +216,47 @@ func namesMissingVariable() (err error) { return nil }
 //
 // @Ensures True
 func Defective() {
-	_ = vouchesParam(nil) // want `its vouches lists e, but nothing its modifies lists under e can hold a function value or an interface value of a type with a contract` `cannot verify Defective`
+	_ = vouchesParam(nil) // want `its vouches lists e, but nothing its modifies lists under e can hold a function value or an interface value of a type with a contract`
 }
 
 // DefectiveInt calls one that lists a result of type int.
 //
 // @Ensures True
 func DefectiveInt() {
-	_, _ = vouchesInt() // want `its vouches lists n, whose type int is not error` `cannot verify DefectiveInt`
+	_, _ = vouchesInt() // want `its vouches lists n, whose type int is not error`
 }
 
 // DefectiveTwice calls one that lists a result twice.
 //
 // @Ensures True
 func DefectiveTwice() {
-	_ = vouchesTwice() // want `its vouches lists err twice` `cannot verify DefectiveTwice`
+	_ = vouchesTwice() // want `its vouches lists err twice`
 }
 
 // DefectiveUnknown calls one that lists a name it does not have.
 //
 // @Ensures True
 func DefectiveUnknown() {
-	_ = vouchesUnknown() // want `its vouches "failure": failure is not a result` `cannot verify DefectiveUnknown`
+	_ = vouchesUnknown() // want `its vouches "failure": failure is not a result`
 }
 
 // QuotedShort calls one that writes io.EOF in quotes.
 //
 // @Ensures True
 func QuotedShort() {
-	_ = namesQuotedShort() // want `in its ensures "err = \\"io\\".EOF": "io".EOF: write io.EOF, without quotes` `cannot verify QuotedShort`
+	_ = namesQuotedShort() // want `in its ensures "err = \\"io\\".EOF": "io".EOF: write io.EOF, without quotes`
 }
 
 // MissingPackage calls one that names a package not in the build.
 //
 // @Ensures True
 func MissingPackage() {
-	_ = namesMissingPackage() // want `"example.com/none".ErrNone: package example.com/none is not in the build of this package` `cannot verify MissingPackage`
+	_ = namesMissingPackage() // want `"example.com/none".ErrNone: package example.com/none is not in the build of this package`
 }
 
 // MissingVariable calls one that names a variable io does not have.
 //
 // @Ensures True
 func MissingVariable() {
-	_ = namesMissingVariable() // want `package io has no package-level error variable ErrNone` `cannot verify MissingVariable`
+	_ = namesMissingVariable() // want `package io has no package-level error variable ErrNone`
 }

@@ -1022,7 +1022,7 @@ func Clear(m map[string]int) {
 // refer to.
 //
 // @Ensures True
-func Unnamed(x int) int { // want `vego: Unnamed has annotations, so each of its results needs a name, as in func Unnamed\(...\) \(n int, err error\)`
+func Unnamed(x int) int { // want `vego: Unnamed has annotations, so each of its results needs a name, as in func Unnamed\(x int\) \(i int\)`
 	return x
 }
 

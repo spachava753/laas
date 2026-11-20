@@ -522,6 +522,89 @@ func stretchesOf(cells []cell, at *logic.Term) []stretch {
 	return parts
 }
 
+// notListable returns what a report of a write that nothing covers says to
+// do, in place of the advice to list the write, when the written memory is
+// reached through a local variable or a result: a Modifies clause names
+// memory by a path from a parameter, so that advice could not be followed.
+// It returns "" when the path starts at a parameter or cannot be told.
+func (v *fnVerifier) notListable(e ast.Expr, pos token.Pos) string {
+	root := e
+	for {
+		switch x := ast.Unparen(root).(type) {
+		case *ast.SelectorExpr:
+			root = x.X
+			continue
+		case *ast.IndexExpr:
+			root = x.X
+			continue
+		case *ast.SliceExpr:
+			root = x.X
+			continue
+		case *ast.StarExpr:
+			root = x.X
+			continue
+		}
+		break
+	}
+	id, ok := ast.Unparen(root).(*ast.Ident)
+	if !ok {
+		return ""
+	}
+	variable, ok := v.info.Uses[id].(*types.Var)
+	if !ok || variable.Pkg() == nil || variable.Parent() == variable.Pkg().Scope() || slices.Contains(v.fn.params, variable) || v.fn.decl == nil {
+		return ""
+	}
+	// A local variable that a loop around the write assigns may hold
+	// memory the loop forgot the origin of; one that is not still holds
+	// what it was given, which is the caller's through a parameter or the
+	// function's own, and the advice to list it can be followed.
+	what, looped := "a local variable", v.assignedInLoopAround(variable, pos)
+	switch {
+	case slices.Contains(v.fn.results, variable):
+		what = "a result"
+	case !looped:
+		return ""
+	}
+	remedy := fmt.Sprintf("%s is %s, and a // @Modifies clause names memory only by a path from a parameter: if what %s refers to may be memory of the caller, "+
+		"list it by the parameter it comes from; if it is memory that %s made, nothing here shows that", id.Name, what, id.Name, v.fn.obj.Name())
+	if looped {
+		remedy += fmt.Sprintf(", since a loop that assigns %s the result of a call forgets where its memory came from: append to it in the loop itself", id.Name)
+	}
+	return remedy
+}
+
+// assignedInLoopAround reports whether a loop of the function around a
+// position assigns a variable.
+func (v *fnVerifier) assignedInLoopAround(variable *types.Var, pos token.Pos) bool {
+	found := false
+	ast.Inspect(v.fn.decl.Body, func(n ast.Node) bool {
+		if found || n == nil || pos < n.Pos() || pos >= n.End() {
+			return !found && n != nil && (pos >= n.Pos() && pos < n.End())
+		}
+		var body ast.Node
+		switch loop := n.(type) {
+		case *ast.ForStmt:
+			body = loop
+		case *ast.RangeStmt:
+			body = loop
+		}
+		if body != nil {
+			ast.Inspect(body, func(m ast.Node) bool {
+				if assign, ok := m.(*ast.AssignStmt); ok {
+					for _, lhs := range assign.Lhs {
+						if id, ok := ast.Unparen(lhs).(*ast.Ident); ok && v.info.ObjectOf(id) == variable {
+							found = true
+						}
+					}
+				}
+				return !found
+			})
+		}
+		return !found
+	})
+	return found
+}
+
 // checkWrite requires that a write is one the function may make: to an
 // allocation or a map created since the function was entered, or to
 // something a Modifies clause lists. A listed target that no write ever
@@ -535,13 +618,16 @@ func stretchesOf(cells []cell, at *logic.Term) []stretch {
 // pointer, a nil slice, or a nil map, so a call that may modify what one of
 // them refers to changes nothing there and needs no permission for it.
 func (v *fnVerifier) checkWrite(st *state, guard []*logic.Term, w written, pos token.Pos, what string) {
-	v.checkWriteOr(st, guard, w, pos, what, "")
+	v.checkWriteOr(st, guard, w, pos, what, "", "")
 }
 
 // checkWriteOr is checkWrite, with what a report says to do in place of the
 // advice to list the write, when remedy is not empty: for a write that no
 // clause could list.
-func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos token.Pos, what, remedy string) {
+//
+// unlisted, when not empty, takes the place of the advice to list the
+// write in a Modifies clause, and only of that; see notListable.
+func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos token.Pos, what, remedy, unlisted string) {
 	if len(w.parts) == 0 {
 		return
 	}
@@ -630,6 +716,8 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 			}
 			v.report(pos, "%s, which %s may not modify; %s does not list it, so code that writes it cannot be used there%s",
 				what, v.fn.obj.Name(), contract, limitNote(result))
+		case len(candidates) == 0 && unlisted != "":
+			v.report(pos, "%s, which %s may not modify; %s%s", what, v.fn.obj.Name(), unlisted, limitNote(result))
 		case len(candidates) == 0:
 			v.report(pos, "%s, which %s may not modify; list it in a // @Modifies clause%s", what, v.fn.obj.Name(), limitNote(result))
 		default:

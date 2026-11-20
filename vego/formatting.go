@@ -300,14 +300,15 @@ func (v *fnVerifier) checkFormattable(arg ast.Expr, who string, errorf bool) *fm
 	fn := v.contractOf(run.method)
 	if fn == nil {
 		v.unsupported(arg.Pos(), fmt.Sprintf("%s formats %s, and fmt would call %s, which has no contract; annotate %s with // @ annotations "+
-			"so that it is verified, or add a trusted contract for %s to %s",
-			who, types.ExprString(arg), run.method.FullName(), name, run.method.FullName(), TrustFileName))
+			"so that it is verified, %s",
+			who, types.ExprString(arg), run.method.FullName(), name, v.addEntryAdvice(run.method.FullName())))
 	}
-	for _, defect := range fn.defects {
-		v.report(arg.Pos(), "the contract of %s cannot be used: %s", run.method.FullName(), defect)
-	}
-	if fn.broken {
-		v.unsupported(arg.Pos(), run.method.FullName()+" has a contract that could not be understood")
+	// A contract that cannot be read is reported here; the path ends where
+	// the methods are run, in checkFormatRuns.
+	view := v.viewOf(fn)
+	v.reportUnusable(arg.Pos(), view, v.calleeName(run.method))
+	if view.cut {
+		return run
 	}
 	if len(fn.modifies) > 0 {
 		v.unsupported(arg.Pos(), fmt.Sprintf("%s formats %s, and fmt may call %s any number of times, which modifies memory; "+
@@ -338,7 +339,12 @@ type fmtRun struct {
 // through a pointer only when the pointer is not nil.
 func (v *fnVerifier) checkFormatRuns(call *ast.CallExpr, runs []fmtRun, st *state, guard []*logic.Term) {
 	for _, run := range runs {
-		fn := v.contractOf(run.call.method)
+		view := v.viewOf(v.contractOf(run.call.method))
+		if view.cut {
+			v.cut(st, guard)
+			continue
+		}
+		fn := view.fn
 		recvVar := fn.params[0]
 		recv := run.val
 		shown := types.ExprString(run.arg)

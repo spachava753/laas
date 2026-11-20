@@ -166,7 +166,7 @@ type Mapper func(x int) (y int)
 // @Requires c != nil
 // @Ensures True
 func Unread(c interfacesunread.Counter) (n int) {
-	return c.Count() // want `the contract of Counter.Count cannot be used: the annotations of package interfacesunread were not all read` `cannot verify Unread: the contract of Counter.Count could not be understood`
+	return c.Count() // want `the contract of Counter.Count cannot be used: the annotations of package interfacesunread were not all read`
 }
 
 // @Requires s != nil
