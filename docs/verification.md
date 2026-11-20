@@ -3867,7 +3867,15 @@ Each entry has these fields:
 
 Put the formulas in quotes. Several characters that formulas use have a special meaning in YAML.
 
-A function that builds a string or a slice in proportion to its arguments panics when what it builds is more than can be allocated. Its entry must bound the arguments under `requires`, as the shipped entry of `strings.Repeat` does with `"|s| * count <= MaxAlloc"`. Nothing else stops a call that asks for more. A buffer that grows by `append` may be given twice the room it needs, so bound twice the length, as the shipped entry of `strings.ToUpper` does with `"6 * |s| + 65544 <= MaxAlloc"`.
+A function that builds a string or a slice in proportion to its arguments panics when what it builds is more than can be allocated. Its entry must bound the arguments under `requires`, as the shipped entry of `strings.Repeat` does with `"|s| * count <= MaxAlloc"`. Nothing else stops a call that asks for more. A buffer that grows by `append` may be given twice the room it needs, so bound twice the length, as the shipped entry of `strings.ToUpper` does with `"6 * |s| + 65544 <= MaxAlloc"`. A function that joins the elements of a `[]string` builds at most as many copies of the longest element and the separator as there are elements, so its entry bounds each element, as the shipped entry of `strings.Join` does:
+
+```yaml
+    requires:
+      - "Forall i in [0, |elems|) : |elems| * (|elems[i]| + |sep| + 1) <= MaxInt"
+      - "Forall i in [0, |elems|) : |elems| * (|elems[i]| + |sep| + 1) <= MaxAlloc"
+```
+
+A caller proves it from a bound on every element, as in `@Requires |parts| <= 100 And Forall i in [0, |parts|) : |parts[i]| <= 100`. On a 32-bit target, where `MaxAlloc` is larger than `MaxInt`, both bounds are needed, since the length is an `int`.
 
 The names in an entry are the parameter and result names from the function's source, including the receiver. For the standard library, `go doc -src bytes.Buffer.Len` shows that the receiver is called `b`. If the function does not name its results, use `result` for a single result, or `result1`, `result2`, and so on for several. This applies only to trusted contracts, because a verified function must name its results.
 
@@ -5185,11 +5193,10 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - A call that opens, reads, or writes a file returns. This covers `os.Open`, `os.Create`, `os.WriteFile`, `os.MkdirAll`, `os.Getwd`, and `Read`, `Write`, and `Close` of an `*os.File`, also one that code that is not verified passes in. Opening a FIFO waits for its other end, reading a FIFO, a pipe, or a terminal waits for data, writing a pipe that nobody reads waits, and a file system that does not answer, such as a network mount that is gone, waits for ever. A write to standard output or standard error through a broken pipe ends the program, as above.
 - The output of the standard logger writes nothing that verified code can see, and returns. Code that is not verified sets that output with `log.SetOutput`, or with `slog.SetDefault` to a `slog.Handler`. A program that sets it to a writer or a handler of its own makes this claim about that code. A writer or a handler that logs through the standard logger again never returns, because the logger holds a lock while it writes. The same goes for a writer made by verified code whose `Write` calls something that logs.
 - The machine has enough memory and stack.
-- What formatting and joining build from parts whose length the logic has no term for is not longer than can be allocated. Those parts are:
+- What formatting builds from parts whose length the logic has no term for is not longer than can be allocated. Those parts are:
   - the text of an error;
   - what a `String` or `Error` method returns;
-  - the strings and slices held in the elements of a slice, such as the strings of a `[]string`;
-  - the elements that `path.Join` and `path/filepath.Join` join;
+  - the strings and slices held in the elements of a slice, such as the strings of a `[]string`, when the slice is formatted;
   - the name of a file that a logger's header shows, with `log.Lshortfile` or `log.Llongfile`;
   - the prefix of the standard logger, which code that is not verified sets with `log.SetPrefix`.
 

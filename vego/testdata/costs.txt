@@ -759,8 +759,9 @@ formatting	formatting.Formatted	4	17621	0
 formatting	formatting.FormattedUnbounded	6	18147	0
 formatting	formatting.Found	1	46	0
 formatting	formatting.Greets	26	76455	0
-formatting	formatting.Joins	9	23792	0
-formatting	formatting.JoinsWrong	4	20295	0
+formatting	formatting.Joins	13	48325	2
+formatting	formatting.JoinsAnything	5	31163	0
+formatting	formatting.JoinsWrong	6	39976	0
 formatting	formatting.Logf	1	4194	0
 formatting	formatting.LoggerPrintsAsSuggested	6	18582	0
 formatting	formatting.LoggerPrintsLong	8	20818	0
@@ -824,8 +825,8 @@ formatting	log.New	1	4814	0
 formatting	log.Print	1	3073	0
 formatting	log.Printf	1	4194	0
 formatting	log.Println	1	3073	0
-formatting	path.Join	1	13253	0
-formatting	path/filepath.Join	1	13253	0
+formatting	path.Join	1	18529	1
+formatting	path/filepath.Join	1	18541	1
 funcvalues	(*funcvalues.Chain).grow	1	932	0
 funcvalues	(*funcvalues.Config).Bump	7	6241	0
 funcvalues	(*funcvalues.Divider).Div	4	2616	0

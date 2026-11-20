@@ -3,11 +3,25 @@ version: 1
 trusted:
   path.Join:
     reason: >-
-      Documented to join any number of path elements into a single path,
-      and to return an empty string if the argument list is empty or all
-      its elements are empty.
+      "Join joins any number of path elements into a single path, separating
+      them with slashes. Empty elements are ignored. The result is Cleaned.
+      However, if the argument list is empty or all its elements are empty,
+      Join returns an empty string." The joined path is at most every
+      element and a slash after each, and Cleaned it is no longer (see the
+      entry of path.Clean), so as many copies of the longest element and a
+      slash as there are elements bound it. Not said: what the result holds.
+      Read from the source of Go 1.26.6 (path.go, Join): it adds up the
+      lengths of the elements in an int, makes a buffer of that and a slash
+      for each, and copies it into a string that Clean copies again; with
+      every element bounded as the requires say, that arithmetic stays
+      within an int and those allocations within the largest one, also
+      where an int has 32 bits.
+    requires:
+      - "Forall i in [0, |elem|) : |elem| * (|elem[i]| + 2) + 4 <= MaxInt"
+      - "Forall i in [0, |elem|) : 2 * |elem| * (|elem[i]| + 2) + 65536 <= MaxAlloc"
     ensures:
       - "(Forall i in [0, |elem|) : |elem[i]| = 0) -> |result| = 0"
+      - "|elem| > 0 -> Exists i in [0, |elem|) : |result| <= |elem| * (|elem[i]| + 1)"
     modifies: []
 
   path.Clean:

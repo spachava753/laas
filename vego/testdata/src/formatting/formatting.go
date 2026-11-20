@@ -139,9 +139,18 @@ func Joins() (p string) {
 	return path.Join("", "") + filepath.Join()
 }
 
+// @Requires |a| <= 1000
 // @Ensures |p| = 0
 func JoinsWrong(a string) (p string) {
 	return path.Join(a, "") // want `vego:\ postcondition\ may\ not\ hold:\ \|p\|\ =\ 0`
+}
+
+// JoinsAnything joins a string of any length, which path.Join's entry
+// bounds.
+//
+// @Ensures True
+func JoinsAnything(a string) (p string) {
+	return path.Join(a, "") // want `precondition of Join may not hold: Forall i in \[0, \|elem\|\) : 2 \* \|elem\| \* \(\|elem\[i\]\| \+ 2\) \+ 65536 <= MaxAlloc`
 }
 
 // @Requires |n| <= 1000

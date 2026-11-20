@@ -3,11 +3,26 @@ version: 1
 trusted:
   path/filepath.Join:
     reason: >-
-      Documented to join any number of path elements into a single path,
-      and to return an empty string if the argument list is empty or all
-      its elements are empty.
+      "Join joins any number of path elements into a single path, separating
+      them with an OS specific Separator. Empty elements are ignored. The
+      result is Cleaned. However, if the argument list is empty or all its
+      elements are empty, Join returns an empty string." Not said: what the
+      result holds. Read from the source of Go 1.26.6 (path_unix.go and
+      path_plan9.go: strings.Join of the elements from the first that is
+      not empty, then Clean; path_windows.go: a strings.Builder that grows by
+      append, a separator between elements and at most a .\ once, then
+      Clean): the joined path is at most every element, a separator after
+      each, and two bytes, and Clean adds at most two more (see the comment
+      over Clean), which the ensures bounds; the requires keep the int
+      arithmetic of strings.Join and the Builder's growth within MaxInt and
+      MaxAlloc, also where an int has 32 bits. The tests run the Unix code
+      only.
+    requires:
+      - "Forall i in [0, |elem|) : |elem| * (|elem[i]| + 2) + 4 <= MaxInt"
+      - "Forall i in [0, |elem|) : 2 * |elem| * (|elem[i]| + 2) + 65536 <= MaxAlloc"
     ensures:
       - "(Forall i in [0, |elem|) : |elem[i]| = 0) -> |result| = 0"
+      - "|elem| > 0 -> Exists i in [0, |elem|) : |result| <= |elem| * (|elem[i]| + 1) + 4"
     modifies: []
 
   # Clean and Dir: the documentation says Clean returns "the shortest path
