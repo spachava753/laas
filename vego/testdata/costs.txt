@@ -1493,6 +1493,7 @@ lockslib	(*lockslib.Vault).Put	10	15891	0
 lockslib	lockslib.Held	2	1794	0
 lockspred	lockspred.Ambiguous	0	0	0
 lockspred	lockspred.Number	1	189	0
+manywrites	manywrites.Set	141	35258051	7
 mapping	(*mapping.Registry).Register	18	29368	0
 mapping	mapping.AllSmall	5	10977	0
 mapping	mapping.AllSmallWrong	2	3046	0

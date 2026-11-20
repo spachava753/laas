@@ -1227,6 +1227,16 @@ trusted:
   costs.read:
     reason: A test of a trusted function whose contract never says that it succeeds.
     modifies: []
+  slowhttp.get:
+    reason: A benchmark of a trusted function that returns a response; see Speed in the ROADMAP.
+    vouches: [resp]
+    modifies: []
+    ensures:
+      - "err = nil -> resp != nil And resp.Body != nil And ~closed(resp.Body) And fresh(resp.Body)"
+  slowresplib.Get:
+    reason: A benchmark of a trusted function returning a struct with the plain fields of http.Response; see Speed in the ROADMAP.
+    modifies: []
+    ensures: ["err = nil -> r != nil"]
   trackfail.parse:
     reason: A test of a trusted function whose contract never says that it succeeds.
     modifies: []
