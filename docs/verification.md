@@ -250,6 +250,34 @@ vego: in Ensures annotation: an interface value can only be compared with nil
 
 `Modifies s` covers that field, and after a call the caller knows nothing of it.
 
+`=` between two slices compares their lengths and elements, not whether they share memory. A copy is equal to what it copies:
+
+```go
+// Duplicate copies A into new memory.
+//
+// @Requires |A| <= 1000
+// @Ensures r = A
+func Duplicate(A []int) (r []int) {
+	return append([]int(nil), A...)
+}
+
+// Overwrite returns A after changing an element.
+//
+// @Requires |A| > 0 And A[0] = 1
+// @Modifies A
+// @Ensures r = A
+func Overwrite(A []int) (r []int) {
+	A[0] = 2
+	return A
+}
+```
+
+```text
+vego: postcondition may not hold: r = A
+```
+
+`Overwrite` returns the slice it was given, but `A` in the `Ensures` is its elements at the call, and `A[0]` has changed. To say where a slice lies, use `fresh` and `within`, described in [Newly allocated memory](#newly-allocated-memory).
+
 `vego` does not check that a formula is well defined. `A[i]` in a formula can be out of range, and `x / y` can divide by zero. Such an expression has an unknown value. A clause that uses it usually cannot be proved, but it can also be trivially true and pass, as `A[999] = A[999]` does. Guard such expressions as you would in code: `0 <= i < |A| And A[i] = x`.
 
 ## Built-in checks
@@ -356,7 +384,7 @@ After the loop, `vego` knows the invariant and that the loop condition is false.
 
 **After a loop, `vego` knows nothing about the variables the loop changed except what the invariant states.** If a proof fails in the code after a loop and the fact is true, the invariant is too weak: it is missing something you know about the loop variables. A loop that writes memory can also make `vego` forget memory it did not write. See [What a loop forgets about memory](#what-a-loop-forgets-about-memory).
 
-A variable of struct type counts as changed when the loop assigns any of its fields. This loop assigns `s.Total`, so after it nothing is known of `s.Count` either:
+A variable of struct type whose address is not taken counts as changed when the loop assigns any of its fields. This loop assigns `s.Total`, so after it nothing is known of `s.Count` either:
 
 ```go
 // TallyLoses loses Count: the loop assigns s.Total, so it forgets s.
@@ -378,7 +406,37 @@ func TallyLoses(xs []int) (s Stats) {
 vego: postcondition may not hold: s.Count = |xs|
 ```
 
-Add the field to the invariant, as in `// @Invariant s.Count = |xs| And 0 <= s.Total <= 1000 * i`. A struct in memory, reached through a pointer, is different: a loop that writes some of its fields keeps what it knew of the others, as described in [What a loop forgets about memory](#what-a-loop-forgets-about-memory).
+Add the field to the invariant, as in `// @Invariant s.Count = |xs| And 0 <= s.Total <= 1000 * i`.
+
+A struct in memory is different: a loop that writes some of its fields keeps what it knew of the others, as described in [What a loop forgets about memory](#what-a-loop-forgets-about-memory). That includes a struct reached through a pointer and a variable whose address is taken, as by calling a method with a pointer receiver on it:
+
+```go
+// reset clears the total.
+//
+// @Requires s != nil
+// @Modifies s.Total
+// @Ensures s.Total' = 0
+func (s *Stats) reset() {
+	s.Total = 0
+}
+
+// TallyInMemory keeps Count: s lives in memory, since reset takes its
+// address, and the loop writes only s.Total.
+//
+// @Requires |xs| <= 1000
+// @Requires Forall k in [0, |xs|) : 0 <= xs[k] <= 1000
+// @Ensures r = |xs|
+func TallyInMemory(xs []int) (r int) {
+	var s Stats
+	s.reset()
+	s.Count = len(xs)
+	// @Invariant 0 <= s.Total <= 1000 * i
+	for i := range xs {
+		s.Total += xs[i]
+	}
+	return s.Count
+}
+```
 
 A `Variant` proves that a `for` loop terminates. It is an integer expression that is never negative while the loop runs and that decreases on every iteration. Every `for` loop needs one.
 
@@ -1449,7 +1507,7 @@ An entry of your own for `(io.Closer).Close` replaces the shipped one, and the s
 
 An interface value that verified code receives from code it does not verify is taken to meet the contracts of its methods. See [What a proof assumes](#what-a-proof-assumes). As for function values, an argument that can carry code nobody has seen cannot be passed to a method of an interface value. An interface value whose methods all have contracts can be passed.
 
-An error that a method returns through an interface value has an unknown origin. A contract written in the declaration of the interface cannot vouch for it, so it can be returned and compared with `nil`, but not formatted or wrapped:
+An error that a method returns through an interface value has an unknown origin. A contract written in the declaration of the interface cannot vouch for it. So the error can be returned, and compared with `nil` or with an error variable (see [Comparing errors](#comparing-errors)), but not formatted, wrapped, or searched with `errors.Is` (see [Asking errors.Is](#asking-errorsis)), and it cannot be passed to a trusted function that does not list it under `runs` (see [Arguments that carry code](#arguments-that-carry-code)):
 
 ```go
 // Loader loads a number.
@@ -1919,7 +1977,7 @@ for i := range items {
 
 The other way to keep a fact is to state it as a loop invariant, here `// @Invariant count[0] = |b.items|`.
 
-A loop also forgets that a slice the function made is its own, when the loop assigns the slice the result of a call. Here `out` starts as a slice of the function's own, and `grow` returns either a new slice or one inside its argument:
+A loop also forgets that a slice belongs to the function, when the loop assigns the slice the result of a call. Here `out` starts as `nil`, which has no memory, and `grow` returns either a new slice or one inside its argument:
 
 ```go
 // grow appends x.
@@ -1949,7 +2007,7 @@ func CopyThrough(A []int) (out []int) {
 vego: grow may modify out, which CopyThrough may not modify; list it in a // @Modifies clause
 ```
 
-At the head of the loop `out` is a slice of which nothing is known, so it may be memory that the caller holds. `fresh` cannot say otherwise in an invariant. `// @Invariant fresh(out)` is reported as `in Invariant annotation: fresh says what a call created and is only allowed in Ensures`. Write the `append` in the loop itself. A slice that the loop only appends to keeps what is known of it:
+At the head of the loop `out` is a slice of which nothing is known, so it may be memory that the caller holds. The message asks for a `Modifies` clause, but a result cannot be listed: `// @Modifies out` is reported as `in Modifies annotation: out is not a parameter`. `fresh` cannot say otherwise in an invariant either. `// @Invariant fresh(out)` is reported as `in Invariant annotation: fresh says what a call created and is only allowed in Ensures`. Write the `append` in the loop itself. A slice that the loop only appends to keeps what is known of it:
 
 ```go
 // CopyAppend appends in the loop itself.

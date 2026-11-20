@@ -143,3 +143,59 @@ func LocalType(n int) (r int) {
 func RuneString(r rune) (s string) {
 	return string(r) // want `cannot verify RuneString: converting a rune to a string is not supported`
 }
+
+// reset clears the total.
+//
+// @Requires s != nil
+// @Modifies s.Total
+// @Ensures s.Total' = 0
+func (s *Stats) reset() {
+	s.Total = 0
+}
+
+// TallyInMemory keeps Count: s lives in memory, since reset takes its
+// address, and the loop writes only s.Total.
+//
+// @Requires |xs| <= 1000
+// @Requires Forall k in [0, |xs|) : 0 <= xs[k] <= 1000
+// @Ensures r = |xs|
+func TallyInMemory(xs []int) (r int) {
+	var s Stats
+	s.reset()
+	s.Count = len(xs)
+	// @Invariant 0 <= s.Total <= 1000 * i
+	for i := range xs {
+		s.Total += xs[i]
+	}
+	return s.Count
+}
+
+// CopyListed tries to list its result.
+//
+// @Requires |A| <= 1000
+// @Modifies out // want `in Modifies annotation: out is not a parameter`
+// @Ensures True
+func CopyListed(A []int) (out []int) {
+	for i := range A {
+		out = append(out, A[i])
+	}
+	return out
+}
+
+// Duplicate copies A into new memory.
+//
+// @Requires |A| <= 1000
+// @Ensures r = A
+func Duplicate(A []int) (r []int) {
+	return append([]int(nil), A...)
+}
+
+// Overwrite returns A after changing an element.
+//
+// @Requires |A| > 0 And A[0] = 1
+// @Modifies A
+// @Ensures r = A
+func Overwrite(A []int) (r []int) {
+	A[0] = 2
+	return A // want `postcondition may not hold: r = A`
+}

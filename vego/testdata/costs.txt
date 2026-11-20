@@ -1024,6 +1024,7 @@ guide	(*guide.Settings).Setup	15	22019	0
 guide	(*guide.Stack).Pop	15	23419	0
 guide	(*guide.Stack).Push	41	179815	0
 guide	(*guide.Stack).Top	10	13140	0
+guide	(*guide.Stats).reset	6	4109	0
 guide	(*guide.Switch).Step	38	49272	0
 guide	(*guide.Table).Price	8	6948	0
 guide	(*log.Logger).Printf	1	6627	0
@@ -1078,6 +1079,7 @@ guide	guide.CommitTwice	14	10613	0
 guide	guide.Configure	6	17270	0
 guide	guide.CopyAppend	13	22833	0
 guide	guide.CopyFresh	2	474	0
+guide	guide.CopyListed	0	0	0
 guide	guide.CopyThrough	7	12518	0
 guide	guide.Count	19	46319	0
 guide	guide.CountLines	20	297616	2
@@ -1094,6 +1096,7 @@ guide	guide.DivideWrong	14	6679	0
 guide	guide.DoubleAll	11	27193	0
 guide	guide.Drain	18	44161	0
 guide	guide.DrainForgets	13	58281	0
+guide	guide.Duplicate	11	13219	0
 guide	guide.Empty	2	581	0
 guide	guide.EmptyRange	2	1888	0
 guide	guide.EmptyRangeFull	2	864	0
@@ -1157,6 +1160,7 @@ guide	guide.Next	16	11499	0
 guide	guide.Notify	1	429	0
 guide	guide.Offset	6	2033	0
 guide	guide.Option	3	2393	0
+guide	guide.Overwrite	8	8804	0
 guide	guide.Pack	9	5975	0
 guide	guide.Pages	4	1561	0
 guide	guide.PagesChecked	3	283	0
@@ -1226,6 +1230,7 @@ guide	guide.Steps	10	2408	0
 guide	guide.Subscribe	13	9121	0
 guide	guide.Sum	11	24862	0
 guide	guide.Tally	1	46	0
+guide	guide.TallyInMemory	12	34416	0
 guide	guide.TallyKeeps	12	24421	0
 guide	guide.TallyLoses	10	25227	0
 guide	guide.Tell	1	186	0
