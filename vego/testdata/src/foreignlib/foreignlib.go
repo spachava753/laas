@@ -85,3 +85,13 @@ type Done func() (err error)
 type Copier interface {
 	Copy(p []int) (n int)
 }
+
+// Maker makes a value, which its entry says is there.
+type Maker interface {
+	Make() (x any)
+}
+
+// Unmakeable has an entry that no value meets when n is positive.
+type Unmakeable interface {
+	Make(n int) (x any)
+}

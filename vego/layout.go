@@ -333,6 +333,30 @@ func (pv *pkgVerifier) span(t types.Type) int64 {
 	return 1
 }
 
+// offsetsOf returns the byte offsets in a struct type at which a struct of
+// another type can lie: the struct itself when the two have one underlying
+// type, ignoring tags, and every field of such a type at any depth through
+// struct fields.
+func (pv *pkgVerifier) offsetsOf(outer, inner types.Type) []int64 {
+	var offsets []int64
+	var walk func(t types.Type, base int64)
+	walk = func(t types.Type, base int64) {
+		if types.IdenticalIgnoreTags(t.Underlying(), inner.Underlying()) {
+			offsets = append(offsets, base)
+		}
+		st, ok := t.Underlying().(*types.Struct)
+		if !ok {
+			return
+		}
+		fields := slices.Collect(st.Fields())
+		for i, offset := range pv.pass.TypesSizes.Offsetsof(fields) {
+			walk(fields[i].Type(), base+offset)
+		}
+	}
+	walk(outer, 0)
+	return offsets
+}
+
 // fieldOffset returns the byte offset of a field in a struct type.
 func (pv *pkgVerifier) fieldOffset(t types.Type, index int) int64 {
 	fields := slices.Collect(t.Underlying().(*types.Struct).Fields())
@@ -396,7 +420,10 @@ func (pv *pkgVerifier) wellFormed(val value, t types.Type, brk *logic.Term) *log
 				unit = size
 			}
 			end := logic.Add(logic.Mul(off, logic.IntLit(unit)), logic.Mul(capacity, logic.IntLit(size)))
-			facts = append(facts, exists(ref), logic.Le(zero, off), logic.Le(zero, length), logic.Le(length, capacity),
+			// A slice without an array is nil, and Go gives a nil slice no
+			// length and no capacity: without unsafe nothing else makes one.
+			nilEmpty := logic.Implies(logic.Eq(ref, logic.RefLit(0)), logic.Eq(capacity, zero))
+			facts = append(facts, exists(ref), nilEmpty, logic.Le(zero, off), logic.Le(zero, length), logic.Le(length, capacity),
 				logic.Le(end, logic.BigLit(pv.maxAlloc())), pv.typeFact(capacity, types.Typ[types.Int]))
 		case lf.part == partPtr:
 			facts = append(facts, exists(val[i]), logic.Le(zero, val[i+1]), logic.Le(val[i+1], logic.BigLit(pv.maxAlloc())))
@@ -404,8 +431,10 @@ func (pv *pkgVerifier) wellFormed(val value, t types.Type, brk *logic.Term) *log
 		case lf.sort == logic.Ref && isIface(lf.typ):
 			// The reference of an interface value is not the address of
 			// what it holds; its home, where its states lie, exists, as
-			// what it holds does. See ifacestate.go.
-			facts = append(facts, exists(home(val[i])), logic.Lt(logic.IntLit(0), home(val[i])))
+			// what it holds does. The nil interface holds nothing and has
+			// no home. See ifacestate.go.
+			facts = append(facts, logic.Or(logic.Eq(val[i], logic.RefLit(0)),
+				logic.And(exists(home(val[i])), logic.Lt(logic.IntLit(0), home(val[i])))))
 		case lf.sort == logic.Ref && holdsCodeRef(lf.typ):
 			// A function value refers to no allocation, and the reference
 			// of an interface value is not the address of what it holds.

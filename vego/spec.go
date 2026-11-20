@@ -101,7 +101,7 @@ var errNoValue = errors.New("value of unsupported type")
 // its type or, for a constant, a finished term.
 func (e *specEnv) root(name string) (val value, t types.Type, isResult bool, constant *logic.Term, err error) {
 	if e.fn == nil {
-		scope := e.v.pass.Pkg.Scope().Innermost(e.pos)
+		scope := e.v.scopeAt(e.pos)
 		if scope == nil {
 			return nil, nil, false, nil, fmt.Errorf("unknown name %s", name)
 		}
@@ -158,7 +158,7 @@ func (e *specEnv) packageVariable(name string, steps []logic.Step) (*types.Var, 
 	}
 	switch {
 	case e.fn == nil:
-		scope := e.v.pass.Pkg.Scope().Innermost(e.pos)
+		scope := e.v.scopeAt(e.pos)
 		if scope == nil {
 			return nil, nil, false, nil
 		}
@@ -388,7 +388,7 @@ func (e *specEnv) locateAt(name string, steps []logic.Step, when logic.When, thr
 		}
 		// A variable declared in the body, such as a parameter of a
 		// function literal, may hide the parameter here.
-		if scope := e.v.pass.Pkg.Scope().Innermost(e.pos); scope != nil {
+		if scope := e.v.scopeAt(e.pos); scope != nil {
 			if _, obj := scope.LookupParent(name, e.pos); obj != param {
 				return reached{}, fmt.Errorf("old(%s): %s here is not the parameter of %s but a variable that hides it; rename the variable",
 					name, name, e.v.fn.obj.Name())
@@ -779,6 +779,25 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		inside := logic.And(logic.Eq(first[0], outer[0]), logic.Le(outerStart, firstStart), logic.Le(firstEnd, outerEnd))
 		if isSlice(found[0].typ) {
 			return logic.Or(logic.Le(first[3], logic.IntLit(0)), inside), nil
+		}
+		// A pointer to a struct inside a struct lies where a field of its
+		// type does: without unsafe, the bytes of the outer struct are its
+		// fields and nothing else. A slice target covers a range, so this
+		// matters only for a pointer within a pointer.
+		object, _ := pointee(found[0].typ)
+		if outerObject, isPointer := pointee(found[1].typ); isPointer && e.v.pass.TypesSizes.Sizeof(object) > 0 {
+			offsets := e.v.offsetsOf(outerObject, object)
+			if len(offsets) == 0 {
+				return nil, fmt.Errorf("within(%s, %s): no field of %s, at any depth, has the type %s, so %s cannot lie within %s",
+					spell(paths[0].Root, paths[0].Steps), spell(paths[1].Root, paths[1].Steps),
+					types.TypeString(outerObject, types.RelativeTo(e.v.pass.Pkg)), types.TypeString(object, types.RelativeTo(e.v.pass.Pkg)),
+					spell(paths[0].Root, paths[0].Steps), spell(paths[1].Root, paths[1].Steps))
+			}
+			var at []*logic.Term
+			for _, offset := range offsets {
+				at = append(at, logic.Eq(first[1], logic.Add(outer[1], logic.IntLit(offset))))
+			}
+			return logic.And(logic.Not(logic.Eq(first[0], logic.RefLit(0))), logic.Eq(first[0], outer[0]), logic.Or(at...)), nil
 		}
 		return logic.And(logic.Not(logic.Eq(first[0], logic.RefLit(0))), inside), nil
 	}

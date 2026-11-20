@@ -169,3 +169,17 @@ func MakesWrapped() (m MakesErr) {
 		return fmt.Errorf("made: %w", foreignlib.ErrFull)
 	}
 }
+
+// Made relies on an entry whose result is a new interface value.
+//
+// @Requires m != nil
+// @Ensures x != nil
+func Made(m foreignlib.Maker) (x any) {
+	return m.Make()
+}
+
+// @Requires m != nil
+// @Ensures True
+func Unmade(m foreignlib.Unmakeable) (x any) {
+	return m.Make(1) // want `the trusted contract of \(foreignlib.Unmakeable\).Make \(trusted.yaml:\d+\) cannot be used: the Ensures clauses of Unmakeable.Make are not proved to be satisfiable` `cannot verify Unmade: the contract of Unmakeable.Make could not be understood`
+}

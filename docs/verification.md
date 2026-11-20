@@ -1642,7 +1642,7 @@ laas -vego -vego.cost ./...
 For `Load` from [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write), under the entries shown there, in a file `foreign.go` that declares it at line 52, it prints:
 
 ```text
-foreign.go:52:6: vego cost of Load: 41 problems, 3473903 resource units, 141167 bytes, 1.72 s
+foreign.go:52:6: vego cost of Load: 41 problems, 5285108 resource units, 143445 bytes, 1.60 s
 	foreign.go:52:6: 2 questions of the always-fails check stopped at a limit
 	foreign.go:53:2: 2 contradiction checks stopped at a limit
 ```

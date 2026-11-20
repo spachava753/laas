@@ -1135,6 +1135,16 @@ trusted:
     modifies: []
     vouches: [s]
 
+  (foreignlib.Maker).Make:
+    reason: An outcome may return a new interface value.
+    modifies: []
+    ensures: ["x != nil"]
+
+  (foreignlib.Unmakeable).Make:
+    reason: No outcome meets this when n is positive.
+    modifies: []
+    ensures: ["n > 0 -> (x = nil And x != nil)"]
+
   foreignlib.Done:
     reason: Every done of the tests fails only with ErrFull.
     modifies: []

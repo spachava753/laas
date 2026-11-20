@@ -245,7 +245,109 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 			given = append(given, fact)
 		}
 	}
+	facts = v.chooseHomes(given, facts, v.made[mark:])
 	return v.proves(given, v.someOutcome(facts, v.made[mark:]), 0)
+}
+
+// chooseHomes lets an outcome choose the home of each interface value it
+// produces. The homes are one table, which the entry does not constrain at a
+// reference it has never seen, so an outcome that returns a new interface
+// value chooses its home as it chooses the value: the home of each produced
+// reference read in the facts becomes a constant of the outcome. A produced
+// reference that is not nil is a new one, apart from every reference whose
+// home the facts or the entry read, and two produced references that are
+// equal have one home; a nil one has the home the table gives it.
+func (v *fnVerifier) chooseHomes(given, facts []*logic.Term, made []string) []*logic.Term {
+	produced := map[string]bool{}
+	for _, name := range made {
+		produced[name] = true
+	}
+	chosen := map[string]*logic.Term{}
+	var order []*logic.Term
+	var read []*logic.Term
+	readSeen := map[*logic.Term]bool{}
+	seen := map[*logic.Term]bool{}
+	var collect func(t *logic.Term)
+	collect = func(t *logic.Term) {
+		if seen[t] {
+			return
+		}
+		seen[t] = true
+		if t.Op == logic.OpSelect && t.Args[0].Op == logic.OpConst && t.Args[0].Name == homes.Name {
+			at := t.Args[1]
+			switch {
+			case at.Op == logic.OpConst && produced[at.Name]:
+				if chosen[at.Name] == nil {
+					chosen[at.Name] = nil
+					order = append(order, at)
+				}
+			case !readSeen[at]:
+				readSeen[at] = true
+				read = append(read, at)
+			}
+		}
+		for _, arg := range t.Args {
+			collect(arg)
+		}
+	}
+	for _, fact := range given {
+		collect(fact)
+	}
+	for _, fact := range facts {
+		collect(fact)
+	}
+	if len(order) == 0 {
+		return facts
+	}
+	for _, ref := range order {
+		chosen[ref.Name] = v.fresh("outhome", logic.Ref)
+	}
+	replaced := make([]*logic.Term, len(facts))
+	memo := map[*logic.Term]*logic.Term{}
+	for i, fact := range facts {
+		replaced[i] = replaceHomes(fact, chosen, memo)
+	}
+	zero := logic.RefLit(0)
+	for i, ref := range order {
+		own := chosen[ref.Name]
+		apart := []*logic.Term{}
+		for _, other := range read {
+			apart = append(apart, logic.Ne(ref, other))
+		}
+		replaced = append(replaced,
+			logic.Implies(logic.Eq(ref, zero), logic.Eq(own, home(zero))),
+			logic.Or(logic.Eq(ref, zero), logic.And(apart...)))
+		for _, other := range order[i+1:] {
+			replaced = append(replaced, logic.Implies(logic.Eq(ref, other), logic.Eq(own, chosen[other.Name])))
+		}
+	}
+	return replaced
+}
+
+// replaceHomes replaces the home of each reference that by names with the
+// constant given for it.
+func replaceHomes(t *logic.Term, by map[string]*logic.Term, memo map[*logic.Term]*logic.Term) *logic.Term {
+	if done, ok := memo[t]; ok {
+		return done
+	}
+	result := t
+	switch {
+	case t.Op == logic.OpSelect && t.Args[0].Op == logic.OpConst && t.Args[0].Name == homes.Name &&
+		t.Args[1].Op == logic.OpConst && by[t.Args[1].Name] != nil:
+		result = by[t.Args[1].Name]
+	case len(t.Args) > 0:
+		args := make([]*logic.Term, len(t.Args))
+		changed := false
+		for i, arg := range t.Args {
+			args[i] = replaceHomes(arg, by, memo)
+			changed = changed || args[i] != arg
+		}
+		if changed {
+			result = logic.WithArgs(t, args)
+		}
+	}
+	memo[t] = result
+	return result
 }
 
 // mentionsAny reports whether a term mentions a constant of the given names.

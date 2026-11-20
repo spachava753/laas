@@ -858,10 +858,11 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 	inner := ctrl{brk: k, cont: c.cont}
 	var failed []*logic.Term
 	var fallback *ast.CaseClause
-	for _, clause := range s.Body.List {
+	fallbackEnd := token.NoPos
+	for i, clause := range s.Body.List {
 		clause := clause.(*ast.CaseClause)
 		if clause.List == nil {
-			fallback = clause
+			fallback, fallbackEnd = clause, clauseEnd(s.Body, i)
 			continue
 		}
 		var alternatives []*logic.Term
@@ -894,7 +895,7 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 		v.branch(clause.Pos())
 		taken := st.clone()
 		taken.decide(logic.And(append(slices.Clip(failed), matched)...))
-		v.seq(clause.Body, clause.Colon, clause.End(), taken, inner, k)
+		v.seq(clause.Body, clause.Colon, clauseEnd(s.Body, i), taken, inner, k)
 		failed = append(failed, logic.Not(matched))
 	}
 	st.decide(logic.And(failed...))
@@ -902,7 +903,7 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 		k(st)
 		return
 	}
-	v.seq(fallback.Body, fallback.Colon, fallback.End(), st, inner, k)
+	v.seq(fallback.Body, fallback.Colon, fallbackEnd, st, inner, k)
 }
 
 func (v *fnVerifier) ifStmt(s *ast.IfStmt, st *state, c ctrl, k func(*state)) {

@@ -589,6 +589,9 @@ type pkgVerifier struct {
 	copies map[*ast.FuncDecl][]ssaCopy
 	// ssaProg is the package built in go/ssa; see ssaProgram.
 	ssaProg *ssa.Program
+	// caseTails holds the annotations that follow the last statement of a
+	// case clause, with that clause; see scopeAt.
+	caseTails map[token.Pos]*ast.CaseClause
 	// assignedIn holds, for the body of each declared function, the
 	// variables that something other than their declaration assigns; see
 	// final.
@@ -1516,7 +1519,17 @@ func (pv *pkgVerifier) checkPlacement(fn *funcInfo) {
 		switch n := innermost.(type) {
 		case *ast.BlockStmt:
 			switch parent.(type) {
-			case *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+			case *ast.SwitchStmt:
+				// A clause's annotations run from its colon to the next
+				// clause, so one after its last statement belongs to it.
+				if clause := trailedClause(n, c.pos); clause != nil {
+					between = true
+					if pv.caseTails == nil {
+						pv.caseTails = map[token.Pos]*ast.CaseClause{}
+					}
+					pv.caseTails[c.pos] = clause
+				}
+			case *ast.TypeSwitchStmt, *ast.SelectStmt:
 			default:
 				between = true
 			}
@@ -1528,6 +1541,39 @@ func (pv *pkgVerifier) checkPlacement(fn *funcInfo) {
 			fn.broken = true
 		}
 	}
+}
+
+// clauseEnd returns where the annotations of the i-th clause of a switch
+// end: at the next clause, or at the closing brace. gofmt indents a comment
+// after the last statement of a clause with that clause's statements, so it
+// is read as part of the clause.
+func clauseEnd(body *ast.BlockStmt, i int) token.Pos {
+	if i+1 < len(body.List) {
+		return body.List[i+1].Pos()
+	}
+	return body.Rbrace
+}
+
+// trailedClause returns the clause of a switch whose last statement a
+// position follows, before the next clause begins, or nil.
+func trailedClause(body *ast.BlockStmt, pos token.Pos) *ast.CaseClause {
+	for i, stmt := range body.List {
+		clause := stmt.(*ast.CaseClause)
+		if pos >= clause.End() && pos < clauseEnd(body, i) && pos > clause.Colon {
+			return clause
+		}
+	}
+	return nil
+}
+
+// scopeAt returns the innermost scope of a position in a body. An
+// annotation after the last statement of a case clause lies outside the
+// clause's scope as go/types records it, and is read in that scope.
+func (pv *pkgVerifier) scopeAt(pos token.Pos) *types.Scope {
+	if clause := pv.caseTails[pos]; clause != nil {
+		return pv.info.Scopes[clause]
+	}
+	return pv.pass.Pkg.Scope().Innermost(pos)
 }
 
 // reaches reports whether a call chain leads from one function to another.
