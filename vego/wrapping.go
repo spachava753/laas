@@ -269,22 +269,155 @@ func (v *fnVerifier) assignedWhere(from source) (where, what string) {
 	return where, what
 }
 
-// pathWhy names the first definition, by position, of those that reach a use
-// along the paths, that gives no known origin, and says what to do.
-func (v *fnVerifier) pathWhy(o *origins, id *ast.Ident, defs []*def) string {
-	var bad *def
-	known := false
+// copiedVariable returns the local error variable an assignment copies, or
+// nil.
+func (v *fnVerifier) copiedVariable(from source) (*ast.Ident, *types.Var) {
+	id, ok := ast.Unparen(from.expr).(*ast.Ident)
+	if !ok || from.index >= 0 {
+		return nil, nil
+	}
+	variable, ok := v.info.ObjectOf(id).(*types.Var)
+	if !ok || !isError(variable.Type()) || (variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope()) {
+		return nil, nil
+	}
+	return id, variable
+}
+
+// firstUnknown returns, of the definitions that reach a use, the one to name
+// for a use without a known origin: one that brings the unknown error
+// itself before one that copies another variable, then the first by
+// position. known reports whether some definition gives a known origin.
+func (v *fnVerifier) firstUnknown(o *origins, defs []*def) (bad *def, known bool) {
+	copies := func(d *def) bool {
+		_, copied := v.copiedVariable(d.src)
+		return d.kind == defExpr && copied != nil
+	}
 	for _, d := range defs {
 		switch {
 		case v.knownDef(o, d, newSearch()):
 			known = true
-		case bad == nil || d.pos < bad.pos:
+		case bad == nil, copies(bad) && !copies(d), copies(bad) == copies(d) && d.pos < bad.pos:
 			bad = d
 		}
 	}
+	return bad, known
+}
+
+// trail describes an assignment of unknown origin and, when it copies
+// another variable, follows the copy to the assignment that brought the
+// unknown error, through at most four variables. root is that assignment's
+// expression, and mixed reports whether a variable the trail passes through
+// also holds errors of known origin there, so that giving the error of root
+// a variable of its own would help.
+type trail struct {
+	text, root    string
+	mixed, copied bool
+}
+
+func (v *fnVerifier) describe(o *origins, from source, depth int, seen map[*def]bool) trail {
+	id, variable := v.copiedVariable(from)
+	if id == nil || depth >= 4 {
+		where, what := v.assignedWhere(from)
+		return trail{text: where + ", " + what, root: types.ExprString(from.expr)}
+	}
+	at := v.pass.Fset.Position(id.Pos())
+	held := v.heldBy(o, variable, id, depth+1, seen)
+	held.text = fmt.Sprintf("%s at %s:%d:%d, and %s holds there %s", id.Name, filepath.Base(at.Filename), at.Line, at.Column, id.Name, held.text)
+	held.copied = true
+	return held
+}
+
+// heldBy says what error of unknown origin a variable holds at a use.
+func (v *fnVerifier) heldBy(o *origins, variable *types.Var, id *ast.Ident, depth int, seen map[*def]bool) trail {
+	unknown := trail{text: "an error whose origin is not known"}
+	if o.unknown[variable] {
+		return unknown
+	}
+	if o.alongPath(variable, id.Pos()) {
+		defs, ok := v.reaching(o, variable, id.Pos())
+		if !ok {
+			return unknown
+		}
+		var fresh []*def
+		for _, d := range defs {
+			if !seen[d] {
+				fresh = append(fresh, d)
+			}
+		}
+		bad, known := v.firstUnknown(o, fresh)
+		if bad == nil {
+			return unknown
+		}
+		seen[bad] = true
+		var t trail
+		switch bad.kind {
+		case defParam, defOpen:
+			t = trail{text: "the error it was passed as a parameter"}
+		case defArgs:
+			for _, arg := range o.args[bad.variable] {
+				if !v.knownError(o, arg.expr, arg.index) {
+					t = v.describe(o, arg, depth, seen)
+					t.text = "the error its function literal is given, " + t.text
+					break
+				}
+			}
+		default:
+			t = v.describe(o, bad.src, depth, seen)
+			t.text = "the error assigned " + t.text
+		}
+		t.mixed = t.mixed || known
+		return t
+	}
+	if v.isParameter[variable] || o.open[variable] {
+		return trail{text: "the error it was passed as a parameter"}
+	}
+	known := false
+	var bad *source
+	for _, from := range o.sources[variable] {
+		s := newSearch()
+		s.vars[variable] = true
+		switch {
+		case v.knownErrorIn(o, from.expr, from.index, s):
+			known = true
+		case bad == nil:
+			bad = &from
+		}
+	}
+	if bad == nil {
+		return unknown
+	}
+	t := v.describe(o, *bad, depth, seen)
+	t.text = "the error assigned " + t.text
+	t.mixed = t.mixed || known
+	return t
+}
+
+// ownVariable is the remedy, after a separator, for an error of unknown
+// origin that a copy brought into target. When a variable the copy came
+// through also holds errors of known origin, the error of the assignment
+// the copy came from needs a variable of its own; when only target does,
+// that error must stay out of target. Otherwise nothing a variable can do
+// helps, and nothing is said.
+func ownVariable(t trail, target string, targetMixed bool) string {
+	switch {
+	case t.root == "":
+		return ""
+	case t.mixed:
+		return fmt.Sprintf("; give the error of %s a variable of its own", t.root)
+	case targetMixed:
+		return fmt.Sprintf("; keep the error of %s in a variable of its own instead of assigning it to %s", t.root, target)
+	}
+	return ""
+}
+
+// pathWhy names a definition, of those that reach a use along the paths,
+// that gives no known origin, and says what to do.
+func (v *fnVerifier) pathWhy(o *origins, id *ast.Ident, defs []*def) string {
+	bad, known := v.firstUnknown(o, defs)
 	if bad == nil {
 		return ""
 	}
+	seen := map[*def]bool{bad: true}
 	switch bad.kind {
 	case defParam, defOpen:
 		if !known {
@@ -295,22 +428,28 @@ func (v *fnVerifier) pathWhy(o *origins, id *ast.Ident, defs []*def) string {
 	case defArgs:
 		for _, arg := range o.args[bad.variable] {
 			if !v.knownError(o, arg.expr, arg.index) {
-				where, what := v.assignedWhere(arg)
-				return fmt.Sprintf("; %s is a parameter of the function literal, and is given %s, %s", id.Name, where, what)
+				t := v.describe(o, arg, 0, seen)
+				return fmt.Sprintf("; %s is a parameter of the function literal, and is given %s; "+
+					"pass the literal only errors of known origin, or return %s unchanged", id.Name, t.text, id.Name)
 			}
 		}
 		return ""
 	}
-	where, what := v.assignedWhere(bad.src)
+	t := v.describe(o, bad.src, 0, seen)
+	loop := aroundLoop(o.homeOf(bad.variable), bad.pos, id.Pos())
 	switch {
 	case !known:
-		return fmt.Sprintf("; %s is assigned %s, %s", id.Name, where, what)
-	case aroundLoop(o.homeOf(bad.variable), bad.pos, id.Pos()):
-		return fmt.Sprintf("; %s may hold here the error assigned %s, %s, in an earlier iteration of the loop; "+
-			"declare %s inside the loop, or give that error a variable of its own", id.Name, where, what, id.Name)
+		return fmt.Sprintf("; %s is assigned %s%s", id.Name, t.text, ownVariable(t, id.Name, false))
+	case t.copied && loop:
+		return fmt.Sprintf("; in an earlier iteration of the loop, %s was assigned %s%s", id.Name, t.text, ownVariable(t, id.Name, true))
+	case t.copied:
+		return fmt.Sprintf("; on a path that reaches this use, %s is assigned %s%s", id.Name, t.text, ownVariable(t, id.Name, true))
+	case loop:
+		return fmt.Sprintf("; %s may hold here the error assigned %s, in an earlier iteration of the loop; "+
+			"declare %s inside the loop, or give that error a variable of its own", id.Name, t.text, id.Name)
 	}
-	return fmt.Sprintf("; %s may hold here the error assigned %s, %s, on a path that reaches this use; "+
-		"give that error a variable of its own", id.Name, where, what)
+	return fmt.Sprintf("; %s may hold here the error assigned %s, on a path that reaches this use; "+
+		"give that error a variable of its own", id.Name, t.text)
 }
 
 // aroundLoop reports whether a definition reaches a use only by going around
@@ -369,17 +508,19 @@ func (v *fnVerifier) textWhy(o *origins, id *ast.Ident, variable *types.Var) str
 	if bad == nil {
 		return ""
 	}
-	where, what := v.assignedWhere(*bad)
+	t := v.describe(o, *bad, 0, map[*def]bool{})
 	switch {
+	case reason != "" && known && t.copied:
+		return fmt.Sprintf("; %s, and %s is assigned %s%s", reason, id.Name, t.text, ownVariable(t, id.Name, true))
 	case reason != "" && known:
-		return fmt.Sprintf("; %s, and %s is assigned %s, %s; give that error a variable of its own", reason, id.Name, where, what)
-	case reason != "" || bad.expr.Pos() < id.Pos():
+		return fmt.Sprintf("; %s, and %s is assigned %s; give that error a variable of its own", reason, id.Name, t.text)
+	case reason != "" || bad.expr.Pos() < id.Pos() || t.copied:
 		// An assignment before the use may be the error that is used,
 		// and then it is that call's errors that nothing vouches for.
-		return fmt.Sprintf("; %s is assigned %s, %s", id.Name, where, what)
+		return fmt.Sprintf("; %s is assigned %s%s", id.Name, t.text, ownVariable(t, id.Name, false))
 	}
-	return fmt.Sprintf("; %s is also assigned %s, later, %s, and an error variable has a known origin only when "+
-		"every assignment to it gives it one; give that a variable of its own", id.Name, where, what)
+	return fmt.Sprintf("; %s is also assigned %s, later, and an error variable has a known origin only when "+
+		"every assignment to it gives it one; give that a variable of its own", id.Name, t.text)
 }
 
 // originWhy says, for an error expression that names a package-level error

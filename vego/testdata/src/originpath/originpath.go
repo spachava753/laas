@@ -255,3 +255,32 @@ func VarInLoop(n int, c bool) (result error) {
 	}
 	return nil
 }
+
+// CallsLater wraps the error of a function declared after it, which returns
+// only errors it made.
+//
+// @Ensures err = nil <-> c
+func CallsLater(c bool) (err error) {
+	err = later(c)
+	if err != nil {
+		return fmt.Errorf("calls later: %w", err)
+	}
+	return nil
+}
+
+// Passes returns the error of a function declared after it, so it returns
+// only errors of known origin once that function does.
+//
+// @Ensures err = nil <-> c
+func Passes(c bool) (err error) {
+	err = later(c)
+	return err
+}
+
+// @Ensures err = nil <-> c
+func later(c bool) (err error) {
+	if c {
+		return nil
+	}
+	return errors.New("later")
+}

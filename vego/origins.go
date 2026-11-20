@@ -715,9 +715,10 @@ func (pv *pkgVerifier) knownAt(o *origins, variable *types.Var, pos token.Pos, s
 }
 
 // knownDef reports whether a definition gives its variable a known origin.
-// One found unknown stays so; one found known is kept only when the answer
-// rested on nothing being decided, since a definition being decided counts
-// as known meanwhile.
+// One found unknown stays so until findKnownReturns finds another function
+// that returns only errors of known origin; one found known is kept only
+// when the answer rested on nothing being decided, since a definition being
+// decided counts as known meanwhile.
 func (pv *pkgVerifier) knownDef(o *origins, d *def, s *search) bool {
 	if known, ok := o.found[d]; ok {
 		return known
@@ -830,6 +831,11 @@ func (pv *pkgVerifier) findKnownReturns() {
 				continue
 			}
 			pv.knownReturns[fn], changed = true, true
+			// A definition found unknown may have been a call of fn, so
+			// nothing found before this holds now.
+			for _, o := range pv.origins {
+				clear(o.found)
+			}
 		}
 	}
 }

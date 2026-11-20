@@ -50,3 +50,14 @@ func WrapsSwitched(e error) (err error) {
 	}
 	return nil
 }
+
+// WrapsPasses formats the error of Passes, which returns the error of a
+// function declared after it in its package.
+//
+// @Ensures err = nil <-> c
+func WrapsPasses(c bool) (err error) {
+	if err := originpath.Passes(c); err != nil {
+		return fmt.Errorf("client: %w", err)
+	}
+	return nil
+}

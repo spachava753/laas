@@ -107,7 +107,7 @@ func Chained(n int) (err error) {
 		e2 = unvouched()
 	}
 	if err != nil {
-		return fmt.Errorf("chained: %w", err) // want `err may hold here the error assigned e2 at defects.go:106:9, an error whose origin is not known, on a path that reaches this use`
+		return fmt.Errorf("chained: %w", err) // want `on a path that reaches this use, err is assigned e2 at defects.go:106:9, and e2 holds there the error assigned unvouched\(\) at defects.go:107:8, a call whose errors nothing vouches for; give the error of unvouched\(\) a variable of its own`
 	}
 	return nil
 }
@@ -190,7 +190,7 @@ func ClosesBound() (err error) {
 	defer keep()
 	keep()
 	if err != nil {
-		return fmt.Errorf("open: %w", err) // want `err is assigned in the function literal at defects.go:185:10, which may run at any point, so every assignment to err counts, and err is assigned cerr at defects.go:187:10, an error whose origin is not known; give that error a variable of its own`
+		return fmt.Errorf("open: %w", err) // want `err is assigned in the function literal at defects.go:185:10, which may run at any point, so every assignment to err counts, and err is assigned cerr at defects.go:187:10, and cerr holds there the error assigned closeIt\(\) at defects.go:186:14, a call whose errors nothing vouches for; keep the error of closeIt\(\) in a variable of its own instead of assigning it to err`
 	}
 	return nil
 }
@@ -215,7 +215,7 @@ func LiteralGiven(c bool) (err error) {
 		if c {
 			x = errA
 		}
-		return fmt.Errorf("wrap: %w", x) // want `x is a parameter of the function literal, and is given unvouched\(\) at defects.go:220:14, a call whose errors nothing vouches for`
+		return fmt.Errorf("wrap: %w", x) // want `x is a parameter of the function literal, and is given unvouched\(\) at defects.go:220:14, a call whose errors nothing vouches for; pass the literal only errors of known origin, or return x unchanged`
 	}
 	return wrap(unvouched())
 }
@@ -237,7 +237,7 @@ func CachedCycle(n int, c bool) (err error) {
 		}
 		err = e2
 		e2 = err
-		log(e2) // want `e2 is assigned err at defects.go:239:8, an error whose origin is not known`
+		log(e2) // want `e2 is passed to log, which is trusted, and is an error whose origin is not known; e2 is assigned err at defects.go:239:8, and err holds there the error assigned e2 at defects.go:238:9, and e2 holds there the error assigned unvouched\(\) at defects.go:242:9, a call whose errors nothing vouches for; give the error of unvouched\(\) a variable of its own`
 		if c {
 			e2 = unvouched()
 		}
@@ -287,4 +287,31 @@ func TwiceDeferred() (err error) {
 		return fmt.Errorf("twice: %w", err)
 	}
 	return nil
+}
+
+// CopiedInPost copies, in a post statement, an error that is of unknown
+// origin wherever it is held.
+//
+// @Requires 0 <= n
+// @Ensures True
+func CopiedInPost(n int) (err error) {
+	e2 := unvouched()
+	// @Variant n - i
+	for i := 0; i < n; i, err = i+1, e2 {
+		if err != nil {
+			return fmt.Errorf("copied: %w", err) // want `in an earlier iteration of the loop, err was assigned e2 at defects.go:300:35, and e2 holds there the error assigned unvouched\(\) at defects.go:298:8, a call whose errors nothing vouches for; keep the error of unvouched\(\) in a variable of its own instead of assigning it to err`
+		}
+	}
+	return nil
+}
+
+// LiteralGivenCopy gives a literal a copy of an error of unknown origin.
+//
+// @Ensures True
+func LiteralGivenCopy() (err error) {
+	e := unvouched()
+	wrap := func(x error) error {
+		return fmt.Errorf("wrap: %w", x) // want `x is a parameter of the function literal, and is given e at defects.go:316:14, and e holds there the error assigned unvouched\(\) at defects.go:312:7, a call whose errors nothing vouches for; pass the literal only errors of known origin, or return x unchanged`
+	}
+	return wrap(e)
 }
