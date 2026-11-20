@@ -482,6 +482,7 @@ Decisions:
 - **Fixed variables are inputs of the always-fails check** (decided by the orchestrator, O2). A sample gives a value to each variable the formulas mention, and the facts known of every input are applied to it (`witness.fixedOnly`); applying the whole witness there changed the cost of an unrelated function, so only these constants are replaced.
 - **Writes are refused with a message that says why.** Assigning a variable, writing what it refers to, `delete`, a `Modifies` entry that names one, and a write by a call or an `append` into memory at a fixed variable's reference say that a verified function cannot do this, or that a clause cannot name it, yet (F14).
 - **No trust-file entries for variables** (decided by the orchestrator, O5): what can be known is read from source, as for errors.
+- **A failed clause names the use that lets the contents out** (F15, at the orchestrator's request). When a function reads a variable whose initialiser made what it refers to, and a use in the build lets a reference to that out, so that the contents are ordinary memory, a contract clause that fails there (`checkClause`: postconditions, assertions, and the clauses checked with them) ends in `; the contents of sizes are not known to stay as initialised: the use at globals.go:49 lets a reference to them out`, with the package for a use in another package (`noteLostContents`, from `escapes` and the `K[]` writes of the build). It is stated as a fact, not as the cause: the clause may fail for another reason. `globalsleakclient` holds the case of another package.
 - **Assumed**: no code outside the build changes a variable a proof relies on or lets out a reference to read-only contents, and nothing does through `unsafe`, `reflect`, cgo, or a `.syso` object; the build sets no variable a proof relies on with `-ldflags -X` (F9).
 
 What the change found in the existing corpus: nothing in the corpus or the guide changed message, and two programs that read an `int` nothing assigned (`guide.Counted`, `rejected.ReadsGlobal`) verified and now assign it, to keep the message for a changed variable.
@@ -492,7 +493,6 @@ Not built yet:
 - **Part 3**: variables of function and interface types, whose initialisers make values that `madeAs` would check at the declaration, with stratification; struct variables whose address is taken, including `var mu sync.Mutex`, as allocations in their struct's regions, as a boxed local variable has; a variable that only its package's `init` assigns, which is fixed for importers (`os.Args`); and initialisers that call a trusted function, whose `ensures` hold of the value when its `requires` are proved at the declaration.
 - **`fmt.Fprint*(os.Stderr, ...)`, `log.Default()`**: see Variadic calls and formatting.
 - `flag` variables wait for pointers to anything but a struct (`flag.Int`) and for part 3 (`flag.StringVar(&s, ...)`); `var buf [64]byte` waits for arrays.
-- **A message that names the use.** A contract about the contents of a table that is not proved because some use lets a reference out is reported as `postcondition may not hold`, and nothing names that use.
 
 ### Errors
 

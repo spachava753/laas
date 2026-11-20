@@ -996,6 +996,7 @@ globalsearly	(globalsearly.T).Zero	2	81	0
 globalsembed	globalsembed.Greeting	2	456	0
 globalsembed	globalsembed.InBlock	2	456	0
 globalsembed	globalsembed.Spaced	2	456	0
+globalsleakclient	globalsleakclient.Pro	2	1811	0
 globalslib	globalslib.AtLimit	4	909	0
 globalslib	globalslib.First	4	1452	0
 globalslib	globalslib.FreeLimit	2	2386	0

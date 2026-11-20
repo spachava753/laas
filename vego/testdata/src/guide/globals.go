@@ -53,7 +53,7 @@ func Grow() {
 //
 // @Ensures r = 1
 func FirstSize() (r int) {
-	return sizes[0] // want `vego: postcondition may not hold: r = 1`
+	return sizes[0] // want `^vego: postcondition may not hold: r = 1; the contents of sizes are not known to stay as initialised: the use at globals.go:49 lets a reference to them out$`
 }
 
 var pageSize = os.Getpagesize()

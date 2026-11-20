@@ -896,6 +896,9 @@ func (v *fnVerifier) fixedValue(sink *state, variable *types.Var) (value, string
 	}
 	v.fixedMet[errorKey(final)] = fixedMet{val: val, typ: variable.Type()}
 	readOnly := v.readOnlyHere(final)
+	if !readOnly && known.Contents {
+		v.noteLostContents(final)
+	}
 	if readOnly {
 		v.reliedKeys[errorKey(final)+contentsKey] = true
 		v.reliedValues[errorKey(final)+contentsKey] = true
@@ -911,6 +914,26 @@ func (v *fnVerifier) fixedValue(sink *state, variable *types.Var) (value, string
 		v.noteContents(sink, errorKey(final), val[0], variable.Type(), known)
 	}
 	return val, ""
+}
+
+// noteLostContents records that what a variable read in the function
+// refers to is not known to stay as its initialiser made it, with the use
+// that lets a reference to it out, for the message of a contract clause
+// that fails; see checkClause.
+func (v *fnVerifier) noteLostContents(variable *types.Var) {
+	where := ""
+	if at := v.escapes[variable]; at != "" {
+		where = "the use at " + at
+	} else if write, ok := v.writtenInBuild()[errorKey(variable)+contentsKey]; ok {
+		where = fmt.Sprintf("the use at %s in package %s", write.At, write.Package)
+	}
+	if where == "" {
+		return
+	}
+	note := fmt.Sprintf("the contents of %s are not known to stay as initialised: %s lets a reference to them out", v.spelling(variable), where)
+	if !slices.Contains(v.lostContents, note) {
+		v.lostContents = append(v.lostContents, note)
+	}
 }
 
 // contentsKey ends the key under which a proof relies on what a variable

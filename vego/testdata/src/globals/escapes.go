@@ -15,7 +15,7 @@ func pass() { takes(passed) }
 //
 // @Ensures r = 1
 func Passed() (r int) {
-	return passed[0] // want `vego: postcondition may not hold: r = 1`
+	return passed[0] // want `^vego: postcondition may not hold: r = 1; the contents of passed are not known to stay as initialised: the use at escapes.go:12 lets a reference to them out$`
 }
 
 type ints []int

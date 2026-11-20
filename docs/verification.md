@@ -2267,10 +2267,11 @@ func FirstSize() (r int) {
 ```
 
 ```text
-vego: postcondition may not hold: r = 1
+vego: postcondition may not hold: r = 1; the contents of sizes are not known to stay as
+initialised: the use at globals.go:49 lets a reference to them out
 ```
 
-The length of `sizes` is still known, so `sizes[i]` needs no `Requires` for an `i` below 3. Nothing in the message says that `Grow` is the reason. If a contract about the contents of a table is not proved, look for a use of the variable that does more than read it.
+The message names the first use that lets a reference to what the variable refers to out, here the write in `Grow`. The length of `sizes` is still known, so `sizes[i]` needs no `Requires` for an `i` below 3.
 
 A package that is built with yours may let out a reference to a variable that a proof relies on. The use is then reported where it is, and in every package `laas` analyses that is built with both:
 
