@@ -1405,11 +1405,17 @@ func (b *sampler) addStates(t types.Type, to binding) {
 		b.refs++
 		b.homes = map[int64]*logic.Term{0: logic.RefLit(b.refs)}
 		b.slots = append(b.slots, slot{func(s *witness) {
-			table := logic.Fill(logic.IntLit(0), b.homes[0])
-			for _, ref := range slices.Sorted(maps.Keys(b.homes)) {
-				if ref != 0 {
-					table = logic.Store(table, logic.RefLit(ref), b.homes[ref])
+			// Every reference of the sample gets a home; a reference past
+			// them, which a call creates after entry, gets none from the
+			// sample, so that a contract that says its result is new, as
+			// in fresh(result), can be met on a path after the call.
+			table := logic.Const(sampleName+"homes", homes.Sort)
+			for ref := int64(0); ref <= b.refs; ref++ {
+				home, own := b.homes[ref]
+				if !own || ref == 0 {
+					home = b.homes[0]
 				}
+				table = logic.Store(table, logic.RefLit(ref), home)
 			}
 			s.consts[homes.Name] = table
 		}})

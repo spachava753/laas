@@ -75,3 +75,17 @@ func FillsEmpty(r io.Reader) {
 	b := keepslib.Wrap(r)
 	_ = b.Fill(nil) // want `vego: precondition of Fill may not hold: \|p\| > 0`
 }
+
+// ReadsClosing reads through a new closer, whose error nothing predicts, so
+// it cannot promise success. The always-fails check gave every reference a
+// home that existed on entry, which contradicted the fresh home of what
+// Closing returns, so it found no input that reaches the read and reported
+// that the contract requires success for no input.
+//
+// @Requires r != nil
+// @Ensures True
+func ReadsClosing(r io.Reader) (err error) {
+	rc := keepslib.Closing(r)
+	_, err = rc.Read(make([]byte, 4))
+	return err
+}
