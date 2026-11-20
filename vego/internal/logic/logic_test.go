@@ -378,9 +378,12 @@ func TestGoSpellings(t *testing.T) {
 	}
 	for op, spelling := range refused {
 		want := op + " is not a spelling of the formula language; write " + spelling
-		srcs := []string{"%s(i > 0)", "Forall k in %s : k = k"}
-		if op != "!" && op != "ℤ" {
-			srcs = places
+		srcs := places
+		switch op {
+		case "!":
+			srcs = []string{"%s(i > 0)", "Forall k in [0, n) : %s(k = 1)"}
+		case "ℤ":
+			srcs = []string{"Forall k in %s : k = k", "Exists k in %s : (k = 1)"}
 		}
 		for _, form := range srcs {
 			src := fmt.Sprintf(form, op)
@@ -389,14 +392,17 @@ func TestGoSpellings(t *testing.T) {
 			}
 		}
 		pred := fmt.Sprintf("p(i, n) ::= i > 0 %s n > 0", op)
-		if op == "!" || op == "ℤ" {
+		switch op {
+		case "!":
 			pred = fmt.Sprintf("p(i, n) ::= %s(i > 0)", op)
+		case "ℤ":
+			pred = fmt.Sprintf("p(i, n) ::= Forall k in %s : k = i", op)
 		}
 		if _, err := ParsePredicate(pred); err == nil || err.Error() != want {
 			t.Errorf("ParsePredicate(%q) = %v, want %q", pred, err, want)
 		}
 	}
-	for _, src := range []string{`i != n`, `~(i = n)`, `s = "a && b || !c == d ℤ"`, `c = '!'`, `c != '&'`, `Forall k in Z : k = k`} {
+	for _, src := range []string{`r = ℤ`, `Forall k in [0, ℤ) : k < ℤ`, `i != n`, `~(i = n)`, `s = "a && b || !c == d ℤ"`, `c = '!'`, `c != '&'`, `Forall k in Z : k = k`} {
 		if _, err := ParseFormula(src); err != nil {
 			t.Errorf("ParseFormula(%q): %v", src, err)
 		}

@@ -40,6 +40,14 @@ func WithBlackboardZ(x int) (r int) {
 	return x
 }
 
+// ℤ is a Go identifier, which a formula may name outside a quantifier's
+// domain.
+//
+// @Ensures r = ℤ
+func NamedBlackboardZ(ℤ int) (r int) {
+	return ℤ
+}
+
 // @Ensures r = x
 func InBody(x int) (r int) {
 	r = x

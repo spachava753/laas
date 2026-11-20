@@ -206,9 +206,6 @@ func lex(src string) ([]token, error) {
 				}
 				i += size
 			}
-			if src[start:i] == "ℤ" {
-				return nil, &SyntaxError{start, "ℤ is not a spelling of the formula language; write Z"}
-			}
 			toks = append(toks, token{i - start, 'i', src[start:i], start})
 		case r == '"':
 			// A string literal uses Go's syntax for interpreted strings.
@@ -473,6 +470,10 @@ func (p *parser) quantifier() *Node {
 		n.Vars = append(n.Vars, p.ident())
 	}
 	p.expect("in")
+	// ℤ is an identifier anywhere else, which a formula may name.
+	if p.is("ℤ") {
+		p.fail("ℤ is not a spelling of the formula language; write Z")
+	}
 	if _, unbounded := p.acceptAny("Z"); !unbounded {
 		open, ok := p.acceptAny("[", "(")
 		if !ok {

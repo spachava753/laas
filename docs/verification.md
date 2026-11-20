@@ -173,7 +173,7 @@ The text after a keyword is a formula. Formulas look like Go conditions, with th
 
 The logical operators are `And`, `Or`, `~` (not), `->` (implies), and `<->` (if and only if). Equality is a single `=`. Comparisons can be chained, so `0 <= i < n` is valid.
 
-Each operator has one spelling. Go's `&&`, `||`, `!`, and `==` are reported with the word to use:
+Each operator has one spelling. Go's `&&`, `||`, `!`, and `==` are reported with the spelling to use:
 
 ```text
 vego: syntax error in Requires annotation: && is not a spelling of the formula language; write And
