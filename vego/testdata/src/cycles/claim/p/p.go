@@ -34,5 +34,5 @@ func Narrow(r io.Reader) (n int) {
 // @Requires r != nil
 // @Ensures True
 func Wide(r io.Reader) (n int) {
-	return q.UseWide(r) // want `this call may not end: Wide hands r to q.UseWide\(r\) at p.go:\d+:\d+, which may run`
+	return q.UseWide(r) // want `this call may not end: Wide hands r to q.UseWide\(r\) at p.go:\d+:\d+, which may run .*; nothing in the entry of cycles/claim/q.UseWide says what it finds on r; if it calls only the methods of io.Reader, add "asserts: \{r: \[\]\}" to its entry in vego-trusted.yaml`
 }

@@ -321,6 +321,10 @@ cycles/claim/p	cycles/claim/p.Wide	4	2383	0
 cycles/claim/p	cycles/claim/q.Use	1	805	0
 cycles/claim/p	cycles/claim/q.UseWide	1	805	0
 cycles/claim/p	io.Reader.Read	3	5361	0
+cycles/claim2/p	cycles/claim2/p.Gives	5	3493	0
+cycles/claim2/p	cycles/claim2/p.Sink.Take	3	2575	0
+cycles/claim2/p	cycles/claim2/p.Through	20	44730	0
+cycles/claim2/p	io.Reader.Read	7	2008867	2
 cycles/e1	cycles/e1.F	4	516	0
 cycles/e1	cycles/e1.Fn	3	804	0
 cycles/e2	cycles/e2.F	4	516	0

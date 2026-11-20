@@ -593,7 +593,7 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 					// What a call of a function of another package may run of
 					// the code its arguments and receiver hold.
 					pv.handedCode(n, callee.Type().(*types.Signature), pv.entryFor(callee.Origin().FullName()), callee.Origin().Pkg(),
-						errorConstructor(callee) && callee.Name() == "Errorf", true, text, unresolved)
+						errorConstructor(callee) && callee.Name() == "Errorf", true, callee.Origin().FullName(), false, text, unresolved)
 				}
 				break
 			}
@@ -630,26 +630,34 @@ func (pv *pkgVerifier) valueCallArguments(call *ast.CallExpr, text string, unres
 	var sig *types.Signature
 	var entry *trustEntry
 	var from *types.Package
+	who, inSource := "", false
 	if method, _ := throughValue(pv.info, call); method != nil {
-		sig, from = method.Type().(*types.Signature), method.Pkg()
+		sig, from, who = method.Type().(*types.Signature), method.Pkg(), method.FullName()
 		entry = pv.entryFor(method.FullName())
+		inSource = method.Pkg() != nil && pv.inAnalysedModule(method.Pkg(), method.Pos())
 	} else {
 		sig = signatureOf(pv.info.TypeOf(call.Fun))
 		if named, ok := types.Unalias(pv.info.TypeOf(call.Fun)).(*types.Named); ok && named.Obj().Pkg() != nil {
-			entry, from = pv.entryFor(funcTypeKey(named.Obj())), named.Obj().Pkg()
+			entry, from, who = pv.entryFor(funcTypeKey(named.Obj())), named.Obj().Pkg(), funcTypeKey(named.Obj())
+			inSource = pv.inAnalysedModule(named.Obj().Pkg(), named.Obj().Pos())
 		}
 	}
 	if sig == nil {
 		return
 	}
-	pv.handedCode(call, sig, entry, from, false, false, text, unresolved)
+	pv.handedCode(call, sig, entry, from, false, false, who, inSource, text, unresolved)
 }
 
 // handedCode adds what code of another package may run of what a call
 // gives it, its receiver too when withReceiver is set: by the entry's
 // claims under asserts, formats, and calls, or else by type.
+//
+// who names the function, method, or function type whose entry could make
+// the claim, for the advice of a report, and inSource is set for a type of
+// the analysed module, whose contract is written in source and can claim
+// nothing of the kind.
 func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entry *trustEntry, from *types.Package, errorf, withReceiver bool,
-	text string, unresolved func(*ast.CallExpr, string, string, []*callNode)) {
+	who string, inSource bool, text string, unresolved func(*ast.CallExpr, string, string, []*callNode)) {
 	handed := map[ast.Expr]bool{}
 	for _, arg := range pv.handedAsWritten(call) {
 		handed[ast.Unparen(arg)] = true
@@ -759,7 +767,24 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 				// are the methods of that type and of the types it holds.
 				targets = append(targets, pv.concreteMethods(pv.info.TypeOf(arg), map[types.Type]bool{})...)
 			}
-			unresolved(call, fmt.Sprintf("hands %s to %s", types.ExprString(arg), text), why, targets)
+			// What can be done: an entry that says what the code finds on
+			// the parameter, where an entry can be written.
+			advice := "Hand that code a value whose type holds no interface value and no function value, or keep what it may reach from calling back"
+			if param := paramOf[arg]; param != nil && who != "" {
+				kind := "the methods of " + types.TypeString(param.Type(), types.RelativeTo(pv.pass.Pkg))
+				switch {
+				case inSource:
+					advice = fmt.Sprintf("the contract of %s in source cannot say what its implementations find on %s; "+
+						"hand it a value whose type holds no interface value and no function value, or keep what it may reach from calling back", who, param.Name())
+				case entry != nil:
+					advice = fmt.Sprintf("nothing in the entry of %s says what it finds on %s; if it calls only %s, add \"asserts: {%s: []}\" to its entry in %s",
+						who, param.Name(), kind, param.Name(), TrustFileName)
+				default:
+					advice = fmt.Sprintf("%s has no entry that says what it finds on %s; if it calls only %s, give it an entry with \"asserts: {%s: []}\" in %s",
+						who, param.Name(), kind, param.Name(), TrustFileName)
+				}
+			}
+			unresolved(call, fmt.Sprintf("hands %s to %s", types.ExprString(arg), text), why+"\n"+advice, targets)
 		}
 	}
 }

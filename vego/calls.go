@@ -8,6 +8,7 @@ import (
 	"go/types"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"golang.org/x/tools/go/types/typeutil"
@@ -1146,9 +1147,12 @@ func (v *fnVerifier) checkRecursion(callee *funcInfo, pre *specEnv, st *state, g
 		// is one the user cannot see; the message says what makes it.
 		for _, step := range through.steps {
 			if step.why != "" {
-				v.report(call.Pos(), "this call may not end: %s; %s, so a cycle goes through code of another package, and no Variant can be checked across it. "+
-					"Hand that code a value whose type holds no interface value and no function value, or keep what it may reach from calling back",
-					v.describeCycle(through), step.why)
+				why, advice, ok := strings.Cut(step.why, "\n")
+				if !ok {
+					advice = "Hand that code a value whose type holds no interface value and no function value, or keep what it may reach from calling back"
+				}
+				v.report(call.Pos(), "this call may not end: %s; %s, so a cycle goes through code of another package, and no Variant can be checked across it; %s",
+					v.describeCycle(through), why, advice)
 				return
 			}
 		}

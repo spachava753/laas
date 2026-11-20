@@ -15,3 +15,9 @@ func UseWide(r io.Reader) int {
 	n, _ := r.Read(make([]byte, 1))
 	return n
 }
+
+// Plain reads once from r, and has no entry at all.
+func Plain(r io.Reader) int {
+	n, _ := r.Read(make([]byte, 1))
+	return n
+}
