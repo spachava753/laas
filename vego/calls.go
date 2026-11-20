@@ -1142,6 +1142,16 @@ func (v *fnVerifier) checkRecursion(callee *funcInfo, pre *specEnv, st *state, g
 		return
 	}
 	if through != nil {
+		// An edge into code of another package that only the types allow
+		// is one the user cannot see; the message says what makes it.
+		for _, step := range through.steps {
+			if step.why != "" {
+				v.report(call.Pos(), "this call may not end: %s; %s, so a cycle goes through code of another package, and no Variant can be checked across it. "+
+					"Hand that code a value whose type holds no interface value and no function value, or keep what it may reach from calling back",
+					v.describeCycle(through), step.why)
+				return
+			}
+		}
 		v.report(call.Pos(), "this call may not end: %s; a cycle that goes through a call with no static callee, of an interface method or "+
 			"a function value, or through code of another package, cannot be shown to end, since no Variant can be checked across such a call. "+
 			"Break the cycle", v.describeCycle(through))

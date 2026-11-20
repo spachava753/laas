@@ -14,7 +14,7 @@ type I interface {
 // @Requires x != nil
 // @Ensures True
 func F(x I) (n int) {
-	return r.Run(x) // want `this\ call\ may\ not\ end:\ F\ hands\ x\ to\ r\.Run\(x\)\ at\ p\.go:\d+:\d+,\ which\ may\ run\ T\.Hello,\ T\.Hello\ calls\ F\ at\ p\.go:\d+:\d+`
+	return r.Run(x) // want `this\ call\ may\ not\ end:\ F\ hands\ x\ to\ r\.Run\(x\)\ at\ p\.go:\d+:\d+,\ which\ may\ run\ F`
 }
 
 // T has no Foo, so it does not implement I.

@@ -48,6 +48,9 @@ trusted:
     keeps:
       r: [result]
     modifies: []
+    # Read from the source of Go 1.27: NewScanner and the methods of Scanner assert r to nothing; Scan calls r.Read.
+    asserts:
+      r: []
     vouches: [result]
     ensures:
       - "result != nil"
@@ -72,6 +75,9 @@ trusted:
       - "ready(s)"
     runs: [s]
     modifies: [s]
+    # Read from the source of Go 1.27: Scan calls only Read of the reader it keeps, and the split function.
+    asserts:
+      s: []
     vouches: [s]
     ensures:
       - "ready(s')"
@@ -87,6 +93,9 @@ trusted:
       - "ready(s)"
     runs: [s]
     modifies: []
+    # Read from the source of Go 1.27: Text calls nothing the Scanner keeps.
+    asserts:
+      s: []
     ensures:
       - "|result| <= 65536"
 
@@ -99,6 +108,9 @@ trusted:
       - "s != nil"
     runs: [s]
     modifies: []
+    # Read from the source of Go 1.27: Err calls nothing the Scanner keeps.
+    asserts:
+      s: []
 
   bufio.NewReader:
     reason: >-
@@ -117,6 +129,9 @@ trusted:
     keeps:
       rd: [result]
     modifies: []
+    # Read from the source of Go 1.27: NewReaderSize asserts rd to *Reader, whose reader it then uses, and calls nothing.
+    asserts:
+      rd: []
     vouches: [result]
     ensures:
       - "result != nil"
@@ -136,6 +151,9 @@ trusted:
       - "ready(b)"
     runs: [b]
     modifies: [b]
+    # Read from the source of Go 1.27: ReadByte calls only Read of the reader it keeps.
+    asserts:
+      b: []
     vouches: [b]
     ensures:
       - "ready(b')"
@@ -156,6 +174,9 @@ trusted:
     keeps:
       w: [result]
     modifies: []
+    # Read from the source of Go 1.27: NewWriterSize asserts w to *Writer, whose writer it then uses, and calls nothing.
+    asserts:
+      w: []
     vouches: [result]
     ensures:
       - "result != nil"
@@ -174,6 +195,9 @@ trusted:
       - "ready(b)"
     runs: [b]
     modifies: [b]
+    # Read from the source of Go 1.27: Write calls only Write of the writer it keeps; WriteString and ReadFrom, which assert, are not shipped.
+    asserts:
+      b: []
     vouches: [b]
     ensures:
       - "ready(b')"
@@ -189,6 +213,9 @@ trusted:
       - "ready(b)"
     runs: [b]
     modifies: [b]
+    # Read from the source of Go 1.27: WriteByte calls only Write of the writer it keeps, through Flush.
+    asserts:
+      b: []
     vouches: [b]
     ensures:
       - "ready(b')"
@@ -203,6 +230,9 @@ trusted:
       - "ready(b)"
     runs: [b]
     modifies: [b]
+    # Read from the source of Go 1.27: Flush calls only Write of the writer it keeps.
+    asserts:
+      b: []
     vouches: [b]
     ensures:
       - "ready(b')"

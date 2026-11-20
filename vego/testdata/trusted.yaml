@@ -1160,6 +1160,93 @@ trusted:
     runs: [x]
     modifies: []
 
+  cycles/r27/q.Run:
+    reason: A probe of the recursion check; it runs what x holds.
+    runs: [x]
+    modifies: []
+
+  cycles/r27b/q.Run:
+    reason: A probe of the recursion check; it runs what x holds.
+    runs: [x]
+    modifies: []
+
+  cycles/r31/q.Run:
+    reason: A probe of the recursion check; it runs what x holds.
+    runs: [x]
+    modifies: []
+
+  cycles/r29.show:
+    reason: A probe of the recursion check; it formats an S.
+    modifies: []
+
+  cycles/claim/q.Use:
+    reason: A test of the claim under asserts; Use reads r and asserts it to nothing.
+    requires: ["r != nil"]
+    runs: [r]
+    asserts:
+      r: []
+    modifies: []
+
+  cycles/claim/q.UseWide:
+    reason: A test of an entry that claims nothing about what the function asserts r to.
+    requires: ["r != nil"]
+    runs: [r]
+    modifies: []
+
+  trialfaults.assertsUnknown:
+    reason: A test of asserts naming no parameter.
+    runs: [r]
+    asserts:
+      q: []
+    modifies: []
+
+  trialfaults.assertsNoCode:
+    reason: A test of asserts on a parameter that can hold no code.
+    asserts:
+      n: []
+    modifies: []
+
+  trialfaults.assertsBadType:
+    reason: A test of asserts listing a type that does not resolve.
+    runs: [r]
+    asserts:
+      r: [io.Nope]
+    modifies: []
+
+  trialfaults.assertsNotRun:
+    reason: A test of asserts on a parameter that runs and keeps do not list.
+    asserts:
+      r: []
+    modifies: []
+
+  trialfaults.assertsFormatted:
+    reason: A test of asserts on a parameter under formats.
+    formats: [v]
+    asserts:
+      v: []
+    modifies: []
+
+  trialfaults.assertsLiteral:
+    reason: A test of an interface listed by its methods.
+    runs: [r]
+    asserts:
+      r: ["interface{ Timeout() bool }"]
+    modifies: []
+
+  trialfaults.assertsLiteralBad:
+    reason: A test of an interface listed by methods that use a type that is not predeclared.
+    runs: [r]
+    asserts:
+      r: ["interface{ Next() io.Reader }"]
+    modifies: []
+
+  trialfaults.assertsNoCodeType:
+    reason: A test of asserts listing a type that holds no code.
+    runs: [r]
+    asserts:
+      r: [flag.ErrorHandling]
+    modifies: []
+
   trialfaults.unpredictable:
     reason: Fails as it likes; nothing says when it succeeds.
     modifies: []
@@ -1236,6 +1323,8 @@ trusted:
     runs: [s]
     vouches: [result]
     modifies: []
+    asserts:
+      s: []
 
   guide.logRecord:
     reason: Formats the number of a record and writes it to the writer the record holds, whatever writer that is.
@@ -1441,6 +1530,8 @@ trusted:
     requires: ["r != nil", "n >= 0"]
     runs: [r]
     modifies: []
+    asserts:
+      r: []
 
   (*keepslib.Registry).AddRaw:
     reason: A test of a function literal handed to a parameter under keeps whose type has no contract.
@@ -1457,6 +1548,8 @@ trusted:
     keeps:
       r: [result]
     modifies: []
+    asserts:
+      r: []
     vouches: [result]
     ensures: ["result != nil", "fresh(result)"]
 
@@ -1465,6 +1558,8 @@ trusted:
     requires: ["b != nil", "|p| > 0"]
     runs: [b]
     modifies: [p]
+    asserts:
+      b: []
     ensures: ["0 <= result And result <= |p|"]
 
   keepslib.Keep:
@@ -1548,6 +1643,8 @@ trusted:
     keeps:
       r: [result]
     modifies: []
+    asserts:
+      r: [io.WriterTo]
     vouches: [result]
     ensures: ["result != nil", "fresh(result)", "~closed(result)"]
 
@@ -1556,6 +1653,8 @@ trusted:
     requires: ["rc != nil"]
     runs: [rc]
     modifies: []
+    asserts:
+      rc: []
 
   (*guide.Hub).Add:
     reason: Appends e to the events of h, which only Fire reads; it calls nothing. Read 2026-11-20.

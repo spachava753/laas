@@ -1009,6 +1009,35 @@ func (pv *pkgVerifier) mayCallValues(obj *types.Func) bool {
 	return may
 }
 
+// mayCallValuesAtCall is mayCallValues for a function called where the
+// call can be seen: what a trusted function of another package may run of
+// what a call gives it is judged at the call, by heldCallWhy, and not by
+// what its entry lists under runs.
+func (pv *pkgVerifier) mayCallValuesAtCall(callee *types.Func) bool {
+	if callee.Pkg() != pv.pass.Pkg {
+		if fn := pv.contractOf(callee.Origin()); fn != nil && fn.trust != nil {
+			return false
+		}
+	}
+	return pv.mayCallValues(callee)
+}
+
+// heldCallWhy says why a call into another package may run code that it
+// gives that code, as the edges the call graph gives the call; "" when it
+// may run none of this package.
+func (pv *pkgVerifier) heldCallWhy(call *ast.CallExpr) string {
+	callee := typeutil.StaticCallee(pv.info, call)
+	if callee == nil || callee.Pkg() == pv.pass.Pkg {
+		return ""
+	}
+	sites := pv.callGraph().sites[call]
+	if len(sites) == 0 {
+		return ""
+	}
+	e := sites[0]
+	return fmt.Sprintf("%s, which may run %s", e.text, pv.nodeName(e.to))
+}
+
 // runsValues reports whether a trusted function may call a function value,
 // or a method of an interface value with a contract, that it is given: one
 // held, at any depth, by a parameter listed under runs, other than a
@@ -1066,6 +1095,11 @@ func (pv *pkgVerifier) findValueCallers() {
 					break
 				}
 				if callee := typeutil.StaticCallee(pv.info, n); callee != nil {
+					// What a call into another package may run of the code
+					// that it is given, by the one rule the call graph uses.
+					if why := pv.heldCallWhy(n); why != "" {
+						because(why)
+					}
 					calls[fn.obj] = append(calls[fn.obj], callee.Origin())
 					// Formatting a value calls its String or Error method.
 					for _, method := range pv.formattedMethods(n) {
@@ -1118,7 +1152,7 @@ func (pv *pkgVerifier) findValueCallers() {
 	callers := map[*types.Func][]*types.Func{}
 	for caller, callees := range calls {
 		for _, callee := range callees {
-			if !local[callee] && pv.mayCallValues(callee) {
+			if !local[callee] && pv.mayCallValuesAtCall(callee) {
 				if !pv.mayCall[caller] {
 					pv.mayCall[caller] = true
 					pv.valueReasons[caller] = valueReason{via: callee}
@@ -1807,7 +1841,10 @@ func (v *fnVerifier) stratified(lit *ast.FuncLit) {
 				break
 			}
 			if callee := typeutil.StaticCallee(v.info, n); callee != nil {
-				if v.pkgVerifier.mayCallValues(callee) {
+				if why := v.pkgVerifier.heldCallWhy(n); why != "" {
+					refuse(n.Pos(), why)
+				}
+				if v.pkgVerifier.mayCallValuesAtCall(callee) {
 					refuse(n.Pos(), fmt.Sprintf("calls %s, which may call through a function value or an interface value: %s %s",
 						callee.Name(), callee.Name(), v.pkgVerifier.whyValues(callee)))
 				}

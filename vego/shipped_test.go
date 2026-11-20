@@ -763,6 +763,25 @@ func TestShippedContracts(t *testing.T) {
 				if err != nil {
 					t.Fatalf("import %s: %v", path, err)
 				}
+				// A claim under asserts must be one that can be read, and
+				// every entry that makes one runs through a harness whose
+				// kept values have the methods of the optional interfaces
+				// and return errors that record their calls; see
+				// wrappers_test.go.
+				if entry := file.entries[key]; len(entry.asserts) > 0 {
+					callee, ok := pkg.Scope().Lookup(name).(*types.Func)
+					if receiver, method, isMethod := strings.Cut(strings.TrimPrefix(name, "(*"), ")."); isMethod {
+						typeName := pkg.Scope().Lookup(receiver).(*types.TypeName)
+						found, _, _ := types.LookupFieldOrMethod(types.NewPointer(typeName.Type()), true, pkg, method)
+						callee, ok = found.(*types.Func)
+					}
+					if !ok {
+						t.Fatalf("package %s has no function %s", path, name)
+					}
+					if _, problem := pv.assertsClaim(entry, callee.Type().(*types.Signature), callee.Pkg()); problem != "" {
+						t.Errorf("the claim under asserts cannot be read: %s", problem)
+					}
+				}
 				if fn := shippedTypeContract(pv, pkg, name); fn != nil && key == "(io.Closer).Close" {
 					checkCloseEntry(t, pv, fn)
 					return

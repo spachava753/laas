@@ -32,6 +32,9 @@ trusted:
     keeps:
       out: [result]
     modifies: []
+    # Read from the source of Go 1.27: The Logger calls only Write of out.
+    asserts:
+      out: []
     vouches: [result]
     ensures:
       - "result != nil"
@@ -78,6 +81,9 @@ trusted:
     runs: [l]
     formats: [format, v]
     modifies: []
+    # Read from the source of Go 1.27: The Logger calls only Write of its output.
+    asserts:
+      l: []
 
   (*log.Logger).Print:
     reason: >-
@@ -92,6 +98,9 @@ trusted:
     runs: [l]
     formats: [v]
     modifies: []
+    # Read from the source of Go 1.27: The Logger calls only Write of its output.
+    asserts:
+      l: []
 
   (*log.Logger).Println:
     reason: >-
@@ -106,3 +115,6 @@ trusted:
     runs: [l]
     formats: [v]
     modifies: []
+    # Read from the source of Go 1.27: The Logger calls only Write of its output.
+    asserts:
+      l: []

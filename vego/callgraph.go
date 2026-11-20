@@ -72,6 +72,9 @@ type callEdge struct {
 	at       token.Pos
 	text     string
 	resolved bool
+	// why says, for an edge into code of another package that only the
+	// types allow, what lets that code reach the target.
+	why string
 }
 
 // callGraph holds the call graph of a package.
@@ -165,25 +168,17 @@ func (pv *pkgVerifier) buildGraph() {
 			return true
 		})
 	}
-	// Every literal used as a value is a node, and an escape of its type
-	// unless a function that is verified makes it. Such a literal is made
-	// only where it is written, and that is checked: what it runs makes no
-	// call with no static callee and calls no function that may make one
-	// (stratification). So no cycle through an unresolved edge can reach
-	// it, since from it that cycle would reach such a call, and if the check
-	// fails it is reported there.
+	// Every literal used as a value is a node and an escape of its type,
+	// also one that a verified function makes: the check of what such a
+	// literal runs (stratification) does not count every call that the
+	// graph follows, and it is not made when the verification of the
+	// function stops before the literal.
 	for _, file := range pv.pass.Files {
-		var within *funcInfo
 		ast.Inspect(file, func(n ast.Node) bool {
-			if decl, ok := n.(*ast.FuncDecl); ok {
-				within = pv.funcs[pv.info.Defs[decl.Name].(*types.Func)]
-			}
 			if lit, ok := n.(*ast.FuncLit); ok && !inPlace[lit] {
 				node := &callNode{lit: lit}
 				g.lits[lit] = node
-				if within == nil || !within.annotated() || pv.entryFor(within.obj.FullName()) != nil {
-					g.escapes = append(g.escapes, valueEscape{node, pv.info.TypeOf(lit)})
-				}
+				g.escapes = append(g.escapes, valueEscape{node, pv.info.TypeOf(lit)})
 			}
 			return true
 		})
@@ -431,7 +426,10 @@ func (pv *pkgVerifier) codeTargets(t types.Type, seen map[types.Type]bool) []*ca
 	case *types.Signature:
 		return pv.valuesMatching(withoutRecv(u))
 	case *types.Interface:
-		found := pv.exportedMethods()
+		// What the value holds may be found by a type assertion or by
+		// reflection: a value of any type of the package, with its
+		// exported methods, or a function value of any type.
+		found := append(pv.exportedMethods(), pv.valuesMatching(nil)...)
 		for method := range u.Methods() {
 			found = append(found, pv.methodsMatching(method.Name(), withoutRecv(method.Type().(*types.Signature)))...)
 		}
@@ -494,6 +492,53 @@ func (pv *pkgVerifier) concreteMethods(t types.Type, seen map[types.Type]bool) [
 	return found
 }
 
+// formatTargets returns the methods that formatting a value of the type may
+// run: String, Error, Format, and GoString of the type and of the types it
+// holds through exported fields, elements, keys, and pointers, and of every
+// type of the package when it holds an interface value there.
+func (pv *pkgVerifier) formatTargets(t types.Type, seen map[types.Type]bool) []*callNode {
+	if t == nil || seen[t] {
+		return nil
+	}
+	seen[t] = true
+	names := []string{"String", "Error", "Format", "GoString"}
+	var found []*callNode
+	// The method set of a pointer to the type has every method of the
+	// type, those promoted from embedded fields included.
+	if _, isIface := t.Underlying().(*types.Interface); !isIface {
+		set := types.NewMethodSet(types.NewPointer(t))
+		for selection := range set.Methods() {
+			method, _ := selection.Obj().(*types.Func)
+			if method == nil || !slices.Contains(names, method.Name()) {
+				continue
+			}
+			if node := pv.graph.byObj[method.Origin()]; node != nil {
+				found = append(found, node)
+			}
+		}
+	}
+	switch u := t.Underlying().(type) {
+	case *types.Interface:
+		return append(found, pv.methodsNamed(names...)...)
+	case *types.Pointer:
+		found = append(found, pv.formatTargets(u.Elem(), seen)...)
+	case *types.Slice:
+		found = append(found, pv.formatTargets(u.Elem(), seen)...)
+	case *types.Array:
+		found = append(found, pv.formatTargets(u.Elem(), seen)...)
+	case *types.Map:
+		found = append(found, pv.formatTargets(u.Key(), seen)...)
+		found = append(found, pv.formatTargets(u.Elem(), seen)...)
+	case *types.Struct:
+		for field := range u.Fields() {
+			if field.Exported() {
+				found = append(found, pv.formatTargets(field.Type(), seen)...)
+			}
+		}
+	}
+	return found
+}
+
 // walkBody adds the edges of a body to its node. A literal used as a value
 // is a node of its own and is not walked here.
 func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
@@ -508,9 +553,12 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 		node.edges = append(node.edges, e)
 		return e
 	}
-	unresolved := func(call *ast.CallExpr, text string, targets []*callNode) {
+	unresolved := func(call *ast.CallExpr, text, why string, targets []*callNode) {
 		for _, to := range targets {
-			g.sites[call] = append(g.sites[call], edge(to, call.Pos(), text, false))
+			e := edge(to, call.Pos(), text, false)
+			e.why = why
+			node.edges[len(node.edges)-1].why = why
+			g.sites[call] = append(g.sites[call], e)
 		}
 	}
 	ast.Inspect(body, func(n ast.Node) bool {
@@ -542,7 +590,10 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 			}
 			if callee := typeutil.StaticCallee(pv.info, n); callee != nil {
 				if callee.Pkg() != pv.pass.Pkg {
-					pv.outsideCall(n, callee, text, unresolved)
+					// What a call of a function of another package may run of
+					// the code its arguments and receiver hold.
+					pv.handedCode(n, callee.Type().(*types.Signature), pv.entryFor(callee.Origin().FullName()), callee.Origin().Pkg(),
+						errorConstructor(callee) && callee.Name() == "Errorf", true, text, unresolved)
 				}
 				break
 			}
@@ -559,32 +610,58 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 					return true
 				}
 			}
+			pv.valueCallArguments(n, text, unresolved)
 			if method, _ := throughValue(pv.info, n); method != nil {
-				unresolved(n, text, pv.methodsMatching(method.Name(), withoutRecv(method.Type().(*types.Signature))))
+				unresolved(n, text, "", pv.methodsMatching(method.Name(), withoutRecv(method.Type().(*types.Signature))))
 				break
 			}
-			unresolved(n, text, pv.valuesMatching(signatureOf(pv.info.TypeOf(n.Fun))))
+			unresolved(n, text, "", pv.valuesMatching(signatureOf(pv.info.TypeOf(n.Fun))))
 		}
 		return true
 	})
 }
 
-// outsideCall adds what a call of a function of another package may run of
-// the code its arguments and receiver hold.
-func (pv *pkgVerifier) outsideCall(call *ast.CallExpr, callee *types.Func, text string, unresolved func(*ast.CallExpr, string, []*callNode)) {
+// valueCallArguments adds what the implementation of a call with no static
+// callee, an interface method or a function value, may run of what the
+// call's arguments hold: it may be code of another package. A type entry
+// of the trust file for the method or the function type may claim what it
+// finds on them, as an entry for a function does.
+func (pv *pkgVerifier) valueCallArguments(call *ast.CallExpr, text string, unresolved func(*ast.CallExpr, string, string, []*callNode)) {
+	var sig *types.Signature
+	var entry *trustEntry
+	var from *types.Package
+	if method, _ := throughValue(pv.info, call); method != nil {
+		sig, from = method.Type().(*types.Signature), method.Pkg()
+		entry = pv.entryFor(method.FullName())
+	} else {
+		sig = signatureOf(pv.info.TypeOf(call.Fun))
+		if named, ok := types.Unalias(pv.info.TypeOf(call.Fun)).(*types.Named); ok && named.Obj().Pkg() != nil {
+			entry, from = pv.entryFor(funcTypeKey(named.Obj())), named.Obj().Pkg()
+		}
+	}
+	if sig == nil {
+		return
+	}
+	pv.handedCode(call, sig, entry, from, false, false, text, unresolved)
+}
+
+// handedCode adds what code of another package may run of what a call
+// gives it, its receiver too when withReceiver is set: by the entry's
+// claims under asserts, formats, and calls, or else by type.
+func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entry *trustEntry, from *types.Package, errorf, withReceiver bool,
+	text string, unresolved func(*ast.CallExpr, string, string, []*callNode)) {
 	handed := map[ast.Expr]bool{}
 	for _, arg := range pv.handedAsWritten(call) {
 		handed[ast.Unparen(arg)] = true
 	}
 	formatted := map[*types.Var]bool{}
-	if errorConstructor(callee) && callee.Name() == "Errorf" {
+	if errorf {
 		// fmt.Errorf formats its operands, as a function under formats
 		// does.
-		for param := range callee.Type().(*types.Signature).Params().Variables() {
+		for param := range sig.Params().Variables() {
 			formatted[param] = true
 		}
-	} else if entry := pv.entryFor(callee.Origin().FullName()); entry != nil {
-		sig := callee.Type().(*types.Signature)
+	} else if entry != nil {
 		for _, item := range entry.formats {
 			for param := range sig.Params().Variables() {
 				if param.Name() == item.text {
@@ -594,12 +671,16 @@ func (pv *pkgVerifier) outsideCall(call *ast.CallExpr, callee *types.Func, text 
 		}
 	}
 	var operands []ast.Expr
-	if sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok {
+	paramOf := map[ast.Expr]*types.Var{}
+	if sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok && withReceiver {
 		if selection := pv.info.Selections[sel]; selection != nil && selection.Kind() == types.MethodVal {
 			operands = append(operands, sel.X)
+			paramOf[sel.X] = sig.Recv()
 		}
 	}
-	sig := callee.Type().(*types.Signature)
+	// What the entry claims the function finds on what it is given; a
+	// claim that cannot be read is no claim.
+	claim, _ := pv.assertsClaim(entry, sig, from)
 	formattedArgs := map[ast.Expr]bool{}
 	// What an argument is passed as: a value converted to an interface
 	// type is one that code of the other package may assert to anything.
@@ -608,6 +689,7 @@ func (pv *pkgVerifier) outsideCall(call *ast.CallExpr, callee *types.Func, text 
 		if formatted[b.param] {
 			formattedArgs[b.expr] = true
 		}
+		paramOf[b.expr] = b.param
 		t := b.param.Type()
 		if sig.Variadic() && b.param == sig.Params().At(sig.Params().Len()-1) && call.Ellipsis == token.NoPos {
 			t = elemType(t)
@@ -622,15 +704,32 @@ func (pv *pkgVerifier) outsideCall(call *ast.CallExpr, callee *types.Func, text 
 		case handed[inner]:
 			// A handed literal is part of the body, and a handed function
 			// is named, which is an edge.
-		case formattedArgs[arg] && holdsCode(pv.info.TypeOf(arg), map[types.Type]bool{}):
-			// What formatting runs of a value of a type that holds no code
-			// is its own String or Error method, which formattedMethods
-			// names; one that holds code may lead fmt to any of them.
-			unresolved(call, "formats with "+text, pv.methodsNamed("String", "Error", "Format", "GoString"))
+		case pv.knownAtCall(arg):
+			// An error of known origin holds a type of the standard
+			// library, and nothing of this package.
 		case formattedArgs[arg]:
+			// Formatting runs the methods String, Error, Format, and
+			// GoString of the value and of what it holds through exported
+			// fields, elements, and pointers, which fmt reaches by
+			// reflection; through an interface value, those of any type.
+			// The value's own String or Error is the resolved edge that
+			// formattedMethods gives; what it holds is reached by type.
+			own := map[*callNode]bool{}
+			for _, method := range pv.formattedMethods(call) {
+				if node := g(pv).byObj[method.Origin()]; node != nil {
+					own[node] = true
+				}
+			}
+			unresolved(call, "formats with "+text, fmt.Sprintf("formatting %s runs the methods String, Error, Format, and GoString of what it holds, "+
+				"through exported fields and, for an interface value, of any type of the package", types.ExprString(arg)),
+				slices.DeleteFunc(pv.formatTargets(pv.info.TypeOf(arg), map[types.Type]bool{}), func(n *callNode) bool { return own[n] }))
 		case g(pv).lits[asLit(inner)] != nil:
 			// A literal written here is the code the argument holds.
-			unresolved(call, fmt.Sprintf("hands the function literal to %s", text), []*callNode{g(pv).lits[asLit(inner)]})
+			unresolved(call, fmt.Sprintf("hands the function literal to %s", text), "", []*callNode{g(pv).lits[asLit(inner)]})
+		case claim != nil && paramOf[arg] != nil && claimFor(claim, paramOf[arg]) != nil:
+			// The entry claims what the function finds on it.
+			unresolved(call, fmt.Sprintf("hands %s to %s", types.ExprString(arg), text), "",
+				pv.claimedTargets(paramOf[arg], claimFor(claim, paramOf[arg])))
 		case named != nil || method != nil:
 			// So is a function or a method named here.
 			target := named
@@ -638,18 +737,29 @@ func (pv *pkgVerifier) outsideCall(call *ast.CallExpr, callee *types.Func, text 
 				target = method
 			}
 			if to := g(pv).byObj[target.Origin()]; to != nil {
-				unresolved(call, fmt.Sprintf("hands %s to %s", types.ExprString(arg), text), []*callNode{to})
+				unresolved(call, fmt.Sprintf("hands %s to %s", types.ExprString(arg), text), "", []*callNode{to})
 			}
 		default:
-			targets := pv.codeTargets(pv.info.TypeOf(arg), map[types.Type]bool{})
-			if as := passedAs[arg]; as != nil && types.IsInterface(as) && !types.IsInterface(pv.info.TypeOf(arg)) {
+			t := pv.info.TypeOf(arg)
+			targets := pv.codeTargets(t, map[types.Type]bool{})
+			why := fmt.Sprintf("%s holds an interface value or a function value, which may hold a value of any type of the package or any function it lets out, "+
+				"and code of another package may call that, or an exported method of it, by a type assertion or reflection", types.ExprString(arg))
+			if types.IsInterface(t) {
+				why = fmt.Sprintf("%s is an interface value, which may hold a value of any type of the package or any function it lets out, "+
+					"and code of another package may call that, or an exported method of it, by a type assertion or reflection", types.ExprString(arg))
+			}
+			if as := passedAs[arg]; as != nil && types.IsInterface(as) && !types.IsInterface(t) {
+				if len(targets) == 0 {
+					why = fmt.Sprintf("%s is converted to %s there, and code of another package may call the exported methods of its type, "+
+						"and of what it holds, by a type assertion or reflection", types.ExprString(arg), as)
+				}
 				// A value of a type that is not an interface, converted to
 				// one here, has that type as its dynamic type: what the
 				// other package can find on it by assertion or reflection
 				// are the methods of that type and of the types it holds.
 				targets = append(targets, pv.concreteMethods(pv.info.TypeOf(arg), map[types.Type]bool{})...)
 			}
-			unresolved(call, fmt.Sprintf("hands %s to %s", types.ExprString(arg), text), targets)
+			unresolved(call, fmt.Sprintf("hands %s to %s", types.ExprString(arg), text), why, targets)
 		}
 	}
 }
@@ -674,6 +784,40 @@ func (pv *pkgVerifier) handedAsWritten(call *ast.CallExpr) []ast.Expr {
 		}
 	}
 	return handed
+}
+
+// knownAtCall reports whether an argument is an error whose origin can be
+// seen at the call: nil, an error that errors.New or fmt.Errorf makes there,
+// or a sentinel of the package, which holds one of those. Its dynamic type
+// is then the standard library's.
+func (pv *pkgVerifier) knownAtCall(arg ast.Expr) bool {
+	arg = ast.Unparen(arg)
+	if !isError(pv.info.TypeOf(arg)) {
+		return false
+	}
+	if pv.info.Types[arg].IsNil() {
+		return true
+	}
+	switch e := arg.(type) {
+	case *ast.CallExpr:
+		return errorConstructor(typeutil.StaticCallee(pv.info, e))
+	case *ast.Ident:
+		variable, ok := pv.info.Uses[e].(*types.Var)
+		return ok && pv.sentinels[variable]
+	}
+	return false
+}
+
+// claimFor returns the types a claim lists for a parameter, compared by
+// position and name, since a generic function's instantiation has
+// parameters of its own; nil when the claim has no key for it.
+func claimFor(claim map[*types.Var][]types.Type, param *types.Var) []types.Type {
+	for p, listed := range claim {
+		if p == param || (p.Name() == param.Name() && p.Pos() == param.Pos()) {
+			return listed
+		}
+	}
+	return nil
 }
 
 // g returns the call graph.
@@ -816,6 +960,9 @@ func (pv *pkgVerifier) callEdges(call *ast.CallExpr, fn *funcInfo) []callEdge {
 	var edges []callEdge
 	switch {
 	case fn.methodOf != nil:
+		if sites, ok := g.sites[call]; ok {
+			return sites
+		}
 		for _, to := range pv.methodsMatching(fn.methodOf.Name(), withoutRecv(fn.methodOf.Type().(*types.Signature))) {
 			edges = append(edges, callEdge{to: to, at: call.Pos(), text: types.ExprString(call)})
 		}

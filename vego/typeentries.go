@@ -91,6 +91,19 @@ func (pv *pkgVerifier) typeEntry(key string, obj *types.Func, methodOf *types.Fu
 	if len(entry.keeps) > 0 {
 		fn.defect("it lists keeps, which a contract of a type cannot have: a call through a value of the type is never handed code nobody has seen")
 	}
+	// What an implementation may find on what a call hands it may be
+	// claimed, as for a function; see asserts.go.
+	var sig *types.Signature
+	var from *types.Package
+	switch {
+	case methodOf != nil:
+		sig, from = methodOf.Type().(*types.Signature), methodOf.Pkg()
+	case valueOf != nil:
+		sig, from = signatureOf(valueOf.Type()), valueOf.Pkg()
+	}
+	if _, problem := pv.assertsClaim(entry, sig, from); problem != "" {
+		fn.defect("%s", problem)
+	}
 	pv.readVouches(fn, entry, false)
 	pv.checkValueContract(fn)
 	// A contract that cannot be used makes every use of it an error, so

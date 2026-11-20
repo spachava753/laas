@@ -101,6 +101,9 @@ trusted:
     keeps:
       r: [result]
     modifies: []
+    # Read from the source of Go 1.27: NopCloser asserts r to WriterTo, and its result has a WriteTo that calls r.WriteTo.
+    asserts:
+      r: [io.WriterTo]
     vouches: [result]
     ensures:
       - "result != nil"
@@ -118,6 +121,9 @@ trusted:
     keeps:
       r: [result]
     modifies: []
+    # Read from the source of Go 1.27: LimitReader asserts r to nothing; its Read calls r.Read.
+    asserts:
+      r: []
     vouches: [result]
     ensures:
       - "result != nil"
@@ -137,6 +143,10 @@ trusted:
       r: [result]
       w: [result]
     modifies: []
+    # Read from the source of Go 1.27: TeeReader asserts r and w to nothing; its Read calls r.Read and w.Write.
+    asserts:
+      r: []
+      w: []
     vouches: [result]
     ensures:
       - "result != nil"
@@ -154,6 +164,9 @@ trusted:
     keeps:
       readers: [result]
     modifies: []
+    # Read from the source of Go 1.27: MultiReader asserts the readers only to its own *multiReader, and its Read calls their Read.
+    asserts:
+      readers: []
     vouches: [result]
     ensures:
       - "result != nil"
@@ -173,6 +186,9 @@ trusted:
     keeps:
       writers: [result]
     modifies: []
+    # Read from the source of Go 1.27: MultiWriter asserts the writers only to its own *multiWriter; its Write calls their Write. Its WriteString, which asserts StringWriter, runs only when code asserts the result.
+    asserts:
+      writers: []
     vouches: [result]
     ensures:
       - "result != nil"

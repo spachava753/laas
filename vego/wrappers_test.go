@@ -108,7 +108,8 @@ func (w *keptWriter) Write(p []byte) (int, error) {
 	w.log.mu.Lock()
 	w.log.written = append(w.log.written, len(p))
 	w.log.mu.Unlock()
-	return w.inner.Write(p)
+	n, err := w.inner.Write(p)
+	return n, w.log.wrap(err)
 }
 
 func (w *keptWriter) WriteString(s string) (int, error) {
@@ -139,7 +140,8 @@ func (r *keptReader) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		r.log.refuse("Read into an empty slice")
 	}
-	return r.inner.Read(p)
+	n, err := r.inner.Read(p)
+	return n, r.log.wrap(err)
 }
 
 func (r *keptReader) WriteTo(io.Writer) (int64, error) {
@@ -162,6 +164,88 @@ func (r *keptReader) WriteString(string) (int, error) {
 func (r *keptReader) Close() error {
 	r.log.refuse("Close of a kept reader")
 	return nil
+}
+
+// The methods of the other optional interfaces of io and fmt: an entry
+// whose asserts lists none of them claims that the function finds none of
+// them by a type assertion, so a call of one fails the test. The harness
+// catches only the interfaces it has methods of; see asserts.go.
+func (r *keptReader) ReadByte() (byte, error) {
+	r.log.refuse("ReadByte of a kept reader")
+	return 0, io.EOF
+}
+func (r *keptReader) UnreadByte() error { r.log.refuse("UnreadByte of a kept reader"); return nil }
+func (r *keptReader) ReadRune() (rune, int, error) {
+	r.log.refuse("ReadRune of a kept reader")
+	return 0, 0, io.EOF
+}
+func (r *keptReader) UnreadRune() error { r.log.refuse("UnreadRune of a kept reader"); return nil }
+func (r *keptReader) ReadAt([]byte, int64) (int, error) {
+	r.log.refuse("ReadAt of a kept reader")
+	return 0, io.EOF
+}
+func (r *keptReader) Seek(int64, int) (int64, error) { r.log.refuse("Seek of a kept reader"); return 0, nil }
+func (r *keptReader) String() string                 { r.log.refuse("String of a kept reader"); return "" }
+func (r *keptReader) GoString() string               { r.log.refuse("GoString of a kept reader"); return "" }
+func (r *keptReader) Format(fmt.State, rune)         { r.log.refuse("Format of a kept reader") }
+func (r *keptReader) Flush() error                   { r.log.refuse("Flush of a kept reader"); return nil }
+
+func (w *keptWriter) Close() error { w.log.refuse("Close of a kept writer"); return nil }
+func (w *keptWriter) WriteByte(byte) error {
+	w.log.refuse("WriteByte of a kept writer")
+	return nil
+}
+func (w *keptWriter) WriteRune(rune) (int, error) { w.log.refuse("WriteRune of a kept writer"); return 0, nil }
+func (w *keptWriter) WriteAt([]byte, int64) (int, error) {
+	w.log.refuse("WriteAt of a kept writer")
+	return 0, nil
+}
+func (w *keptWriter) Seek(int64, int) (int64, error) { w.log.refuse("Seek of a kept writer"); return 0, nil }
+func (w *keptWriter) String() string                 { w.log.refuse("String of a kept writer"); return "" }
+func (w *keptWriter) GoString() string               { w.log.refuse("GoString of a kept writer"); return "" }
+func (w *keptWriter) Format(fmt.State, rune)         { w.log.refuse("Format of a kept writer") }
+func (w *keptWriter) Flush() error                   { w.log.refuse("Flush of a kept writer"); return nil }
+
+// keptError is an error that kept code returned. A function whose asserts
+// lists nothing claims that it calls no method of it either, while the
+// call lasts; it may compare it, store it, and return it.
+type keptError struct {
+	log   *keptLog
+	inner error
+}
+
+func (e keptError) Error() string {
+	e.log.called("Error of an error that kept code returned")
+	return e.inner.Error()
+}
+
+func (e keptError) Unwrap() error {
+	e.log.called("Unwrap of an error that kept code returned")
+	return e.inner
+}
+
+func (e keptError) Is(target error) bool {
+	e.log.called("Is of an error that kept code returned")
+	return false
+}
+
+// wrap gives an error that kept code returns methods that record their
+// calls. io.EOF and nil stay as they are: wrappers compare them with ==.
+func (k *keptLog) wrap(err error) error {
+	if err == nil || err == io.EOF || err == io.ErrUnexpectedEOF {
+		return err
+	}
+	return keptError{log: k, inner: err}
+}
+
+// called records a call of a method of a value that kept code returned, as
+// a problem while a call that is handed what keeps it is active.
+func (k *keptLog) called(what string) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	if k.active {
+		k.problems = append(k.problems, what+" was called while the call was active, which its asserts does not allow")
+	}
 }
 
 // poisoned is put into a slice after it was handed to a function that keeps

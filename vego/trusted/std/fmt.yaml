@@ -63,6 +63,9 @@ trusted:
     runs: [w]
     formats: [format, a]
     modifies: []
+    # Read from the source of Go 1.27: Fprintf calls only w.Write.
+    asserts:
+      w: []
 
   fmt.Fprint:
     reason: >-
@@ -75,6 +78,9 @@ trusted:
     runs: [w]
     formats: [a]
     modifies: []
+    # Read from the source of Go 1.27: Fprint calls only w.Write.
+    asserts:
+      w: []
 
   fmt.Fprintln:
     reason: >-
@@ -87,3 +93,6 @@ trusted:
     runs: [w]
     formats: [a]
     modifies: []
+    # Read from the source of Go 1.27: Fprintln calls only w.Write.
+    asserts:
+      w: []

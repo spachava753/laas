@@ -22,7 +22,7 @@ func Apply(xs []int, f Mapper) {
 	// @Invariant Forall k in [0, i) : 0 <= xs[k] <= 2000
 	// @Invariant Forall k in [i, |xs|) : xs[k] = old(xs)[k]
 	for i := range xs {
-		xs[i] = f(xs[i])
+		xs[i] = f(xs[i]) // want `this\ call\ may\ not\ end:\ Apply\ calls\ f\(xs\[i\]\)\ at\ calls\.go:\d+:\d+,\ which\ may\ run\ the\ function\ literal\ at\ literaldefects\.go:\d+:\d+,\ the\ function\ literal\ at\ literaldefects\.go:\d+:\d+\ calls\ Apply\ at\ literaldefects\.go:\d+:\d+`
 	}
 }
 

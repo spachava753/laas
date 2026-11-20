@@ -112,7 +112,7 @@ type Visitor interface {
 // @Requires v != nil And p != nil
 // @Ensures True
 func Visit(v Visitor, p Pricer) {
-	v.Visit(p)
+	v.Visit(p) // want `this\ call\ may\ not\ end:\ Visit\ hands\ p\ to\ v\.Visit\(p\)\ at\ calls\.go:\d+:\d+,\ which\ may\ run\ Visit`
 }
 
 // Visiting is a function type that is given a pricer.
@@ -124,5 +124,5 @@ type Visiting func(p Pricer)
 // @Requires f != nil And p != nil
 // @Ensures True
 func VisitWith(f Visiting, p Pricer) {
-	f(p)
+	f(p) // want `this\ call\ may\ not\ end:\ VisitWith\ hands\ p\ to\ f\(p\)\ at\ calls\.go:\d+:\d+,\ which\ may\ run\ VisitWith`
 }

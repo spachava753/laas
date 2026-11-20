@@ -64,6 +64,9 @@ type trustEntry struct {
 	// where it keeps it: results, or other parameters whose memory it
 	// writes; see keeps.go.
 	keeps []trustKeep
+	// asserts names, for parameters that hold code, what the function may
+	// find on what they hold by a type assertion; see asserts.go.
+	asserts []trustKeep
 	// receiver names the receiver of a method of an interface, so that the
 	// contract can speak of its states; see ifacestate.go.
 	receiver trustFormula
@@ -273,6 +276,8 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			f.addCalls(entry, value, formulas)
 		case "keeps":
 			f.addKeeps(entry, value)
+		case "asserts":
+			f.addAsserts(entry, value)
 		case "receiver":
 			if value.Kind != yaml.ScalarNode {
 				f.problem(value.Line, "the receiver of %s must be a name", entry.key)
@@ -280,7 +285,7 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			}
 			entry.receiver = trustFormula{text: value.Value, line: value.Line, col: value.Column}
 		default:
-			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, receiver, requires, ensures, modifies, runs, keeps, vouches, formats, or calls",
+			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, receiver, requires, ensures, modifies, runs, keeps, asserts, vouches, formats, or calls",
 				field.Value, entry.key)
 		}
 	}
@@ -438,7 +443,11 @@ type EntryUse struct {
 	Runs []string
 	// Keeps describes each parameter whose code the function keeps, and
 	// where, as in "r in result".
-	Keeps   []string
+	Keeps []string
+	// Asserts describes, for each parameter the entry claims it for, what
+	// the function may find on what the parameter holds by a type
+	// assertion, as in "r: io.WriterTo" or "r: nothing".
+	Asserts []string
 	Vouches []string
 	// Formats names the parameters the function formats as package fmt
 	// does.
@@ -744,6 +753,7 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 	}
 	pv.readFormats(fn, entry)
 	pv.readKeeps(fn, entry)
+	pv.checkAsserts(fn, entry)
 	// The error results whose errors the author vouches for. Listing
 	// anything else would be a claim about nothing.
 	pv.readVouches(fn, entry, true)
@@ -1097,7 +1107,7 @@ func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 		}
 		pv.usage.Entries = append(pv.usage.Entries, &EntryUse{
 			Key: entry.key, Reason: entry.reason, Shipped: entry.file.shipped,
-			File: entry.file.path, Line: entry.line, Runs: runs, Keeps: keepsDescribed(entry), Vouches: vouches, Formats: formats, Callbacks: callbacks,
+			File: entry.file.path, Line: entry.line, Runs: runs, Keeps: keepsDescribed(entry), Asserts: assertsDescribed(entry), Vouches: vouches, Formats: formats, Callbacks: callbacks,
 			Every: every, Relied: []string{pv.pass.Pkg.Path()}, Fingerprint: entry.fingerprint(), States: states,
 		})
 		index = len(pv.usage.Entries) - 1

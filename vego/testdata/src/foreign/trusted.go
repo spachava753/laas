@@ -13,7 +13,7 @@ type Takes func(s foreignlib.Sink)
 // @Requires f != nil And s != nil
 // @Ensures True
 func HandsSink(f Takes, s foreignlib.Sink) {
-	f(s)
+	f(s) // want `this\ call\ may\ not\ end:\ HandsSink\ hands\ s\ to\ f\(s\)\ at\ trusted\.go:\d+:\d+,\ which\ may\ run\ HandsSink`
 }
 
 // TakesCtx takes a context of foreignlib.

@@ -25,7 +25,7 @@ func (c *Chain) grow() {}
 // @Ensures True
 func UsesLoaded() (y int) {
 	m := loadMapper() // want `vego: the trusted contract of funcvalues.loadMapper \(trusted.yaml:\d+\) cannot be used: its result m can hold a function value or an interface value of a type with a contract; list it under vouches to claim that every such value meets the contract of its type`
-	return m(1)
+	return m(1) // want `this\ call\ may\ not\ end:\ UsesLoaded\ calls\ m\(1\)\ at\ trusted\.go:\d+:\d+,\ which\ may\ run\ the\ function\ literal\ at\ literaldefects\.go:\d+:\d+,\ the\ function\ literal\ at\ literaldefects\.go:\d+:\d+\ calls\ zero\(\)\ at\ literaldefects\.go:\d+:\d+,\ which\ may\ run\ UsesLoaded`
 }
 
 // UsesVouched calls a mapper whose entry vouches for it.
@@ -33,7 +33,7 @@ func UsesLoaded() (y int) {
 // @Ensures 0 <= y <= 2000
 func UsesVouched() (y int) {
 	m := loadMapperVouched()
-	return m(1)
+	return m(1) // want `this\ call\ may\ not\ end:\ UsesVouched\ calls\ m\(1\)\ at\ trusted\.go:\d+:\d+,\ which\ may\ run\ the\ function\ literal\ at\ literaldefects\.go:\d+:\d+,\ the\ function\ literal\ at\ literaldefects\.go:\d+:\d+\ calls\ zero\(\)\ at\ literaldefects\.go:\d+:\d+,\ which\ may\ run\ UsesVouched`
 }
 
 // Grows lets a trusted function change a chain whose links hold mappers.
@@ -53,5 +53,5 @@ func loadUnnamed() Mapper { return nil }
 // @Ensures True
 func UsesUnnamed() (y int) {
 	m := loadUnnamed() // want `vego: the trusted contract of funcvalues.loadUnnamed \(trusted.yaml:\d+\) cannot be used: its result result can hold a function value`
-	return m(1)
+	return m(1) // want `this\ call\ may\ not\ end:\ UsesUnnamed\ calls\ m\(1\)\ at\ trusted\.go:\d+:\d+,\ which\ may\ run\ the\ function\ literal\ at\ literaldefects\.go:\d+:\d+,\ the\ function\ literal\ at\ literaldefects\.go:\d+:\d+\ calls\ zero\(\)\ at\ literaldefects\.go:\d+:\d+,\ which\ may\ run\ UsesUnnamed`
 }

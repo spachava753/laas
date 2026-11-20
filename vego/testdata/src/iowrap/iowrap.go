@@ -121,5 +121,5 @@ func (Drained) Read(p []byte) (n int, err error) {
 
 // @Ensures True
 func drain() {
-	keepslib.Consume(io.NopCloser(Drained{})) // want `cannot verify drain: Read may call through a function value or an interface value.*Read calls drain, which calls Consume`
+	keepslib.Consume(io.NopCloser(Drained{})) // want `cannot\ verify\ drain:\ Read\ may\ call\ through\ a\ function\ value\ or\ an\ interface\ value,\ and\ code\ that\ an\ interface\ value\ runs\ cannot\ do\ that\ yet:\ no\ contract\ of\ a\ function\ type\ or\ of\ a\ method\ of\ an\ interface\ has\ a\ variant,\ so\ nothing\ would\ prove\ that\ such\ calls\ end`
 }

@@ -60,6 +60,11 @@ func TrustReport(usages []*Usage, dir string) string {
 				fmt.Fprintf(&b, "    keeps code held by: %s; a claim that the function runs none of it while the call lasts unless runs lists it, "+
 					"holds it afterwards only in what it is kept in, and starts or registers nothing that runs it later\n", strings.Join(use.Keeps, "; "))
 			}
+			if len(use.Asserts) > 0 {
+				fmt.Fprintf(&b, "    asserts what it is handed to: %s; a claim that it calls nothing these parameters hold, or that a call of what they hold returns, "+
+					"but the methods of the interfaces and the function values that their types reach and those of the types listed, and uses no reflection on them\n",
+					strings.Join(use.Asserts, "; "))
+			}
 			if len(use.Formats) > 0 {
 				fmt.Fprintf(&b, "    formats as package fmt does: %s; a claim that it runs only the Format, GoString, Error, and String methods "+
 					"that fmt runs, while the call lasts and on the goroutine that called it, keeps none of the values, and builds from them "+

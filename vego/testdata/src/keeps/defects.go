@@ -107,7 +107,7 @@ type Server struct {
 // @Requires s != nil And s.reg != nil And n >= 0
 // @Ensures True
 func (s *Server) serve(n int) {
-	s.reg.Fire(n)
+	s.reg.Fire(n) // want `this\ call\ may\ not\ end:\ \(\*Server\)\.serve\ hands\ s\.reg\ to\ s\.reg\.Fire\(n\)\ at\ defects\.go:\d+:\d+,\ which\ may\ run\ the\ function\ literal\ at\ defects\.go:\d+:\d+,\ the\ function\ literal\ at\ defects\.go:\d+:\d+\ calls\ \(\*Server\)\.serve\ at\ defects\.go:\d+:\d+`
 }
 
 // Loops keeps a handler that fires the registry it is kept in: Fire would
@@ -117,7 +117,7 @@ func (s *Server) serve(n int) {
 // @Modifies s.reg
 // @Ensures True
 func Loops(s *Server) {
-	s.reg.Add(func(n int) { s.serve(n) }) // want `cannot verify Loops: the function literal used as a value calls serve, which may call through a function value or an interface value: serve calls Fire, which is trusted and runs what r holds`
+	s.reg.Add(func(n int) { s.serve(n) }) // want `cannot\ verify\ Loops:\ the\ function\ literal\ used\ as\ a\ value\ calls\ serve,\ which\ may\ call\ through\ a\ function\ value\ or\ an\ interface\ value:\ serve\ hands\ s\.reg\ to\ s\.reg\.Fire\(n\),\ which\ may\ run\ the\ function\ literal\ at\ defects\.go:\d+:\d+,\ and\ code\ that\ a\ function\ value\ run`
 	s.reg.Fire(1)
 }
 
@@ -144,7 +144,7 @@ func (a Again) Read(p []byte) (n int, err error) {
 // @Ensures True
 func Cycles() {
 	var a Again
-	a.box = keepslib.Wrap(a) // want `cannot verify Cycles: Read may call through a function value or an interface value.*Read calls Fill, which is trusted and runs what b holds, which can be a value of io.Reader`
+	a.box = keepslib.Wrap(a) // want `cannot\ verify\ Cycles:\ Read\ may\ call\ through\ a\ function\ value\ or\ an\ interface\ value,\ and\ code\ that\ an\ interface\ value\ runs\ cannot\ do\ that\ yet:\ no\ contract\ of\ a\ function\ type\ or\ of\ a\ method\ of\ an\ interface\ has\ a\ variant,\ so\ nothing\ would\ prove\ that\ such\ calls\ en`
 	_ = a.box.Fill(make([]byte, 1))
 }
 
@@ -166,14 +166,14 @@ func (Drained) Read(p []byte) (n int, err error) {
 
 // @Ensures True
 func drain() {
-	keepslib.Consume(keepslib.Closing(Drained{})) // want `cannot verify drain: Read may call through a function value or an interface value.*Read calls drain, which calls Consume`
+	keepslib.Consume(keepslib.Closing(Drained{})) // want `cannot\ verify\ drain:\ Read\ may\ call\ through\ a\ function\ value\ or\ an\ interface\ value,\ and\ code\ that\ an\ interface\ value\ runs\ cannot\ do\ that\ yet:\ no\ contract\ of\ a\ function\ type\ or\ of\ a\ method\ of\ an\ interface\ has\ a\ variant,\ so\ nothing\ would\ prove\ that\ such\ calls\ end`
 }
 
 // Drains keeps a reader that drains itself in a closer, and drains it.
 //
 // @Ensures True
 func Drains() {
-	keepslib.Consume(keepslib.Closing(Drained{})) // want `cannot verify Drains: Read may call through a function value or an interface value.*Read calls drain, which calls Consume, which is trusted and runs what rc holds, which can be a value of io.ReadCloser, whose methods all have contracts, so that it can hold code that verified code made`
+	keepslib.Consume(keepslib.Closing(Drained{})) // want `cannot\ verify\ Drains:\ Read\ may\ call\ through\ a\ function\ value\ or\ an\ interface\ value,\ and\ code\ that\ an\ interface\ value\ runs\ cannot\ do\ that\ yet:\ no\ contract\ of\ a\ function\ type\ or\ of\ a\ method\ of\ an\ interface\ has\ a\ variant,\ so\ nothing\ would\ prove\ that\ such\ calls\ en`
 }
 
 // KeepsInCountField keeps a handler in a registry, and its modifies lists only a

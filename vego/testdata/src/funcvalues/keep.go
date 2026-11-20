@@ -19,7 +19,7 @@ type State struct{ n int }
 // @Modifies s.n
 // @Ensures q = 10
 func KeepThenFlush(e error, s *State) (q int) {
-	keeper.Keep(e)
+	keeper.Keep(e) // want `this\ call\ may\ not\ end:\ KeepThenFlush\ hands\ e\ to\ keeper\.Keep\(e\)\ at\ keep\.go:\d+:\d+,\ which\ may\ run\ KeepThenFlush`
 	s.n = 1
 	keeper.Flush()
 	return 10 / s.n

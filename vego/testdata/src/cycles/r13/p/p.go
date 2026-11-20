@@ -10,7 +10,7 @@ type K struct{ F Fn }
 // @Requires k.F != nil
 // @Ensures True
 func F(k K) (n int) {
-	return k.F(k) // want `this\ call\ may\ not\ end:\ F\ calls\ k\.F\(k\)\ at\ p\.go:\d+:\d+,\ which\ may\ run\ F`
+	return k.F(k) // want `this\ call\ may\ not\ end:\ F\ hands\ k\ to\ k\.F\(k\)\ at\ p\.go:\d+:\d+,\ which\ may\ run\ F`
 }
 
 // H is never used as a value in this package.

@@ -69,7 +69,7 @@ func Pinged(w ifacestatelib.Wrapped) (err error) {
 // @Modifies rc
 // @Ensures True
 func Consumed(rc io.ReadCloser) (err error) {
-	ifacestatelib.Consume(rc)
+	ifacestatelib.Consume(rc) // want `this\ call\ may\ not\ end:\ Consumed\ hands\ rc\ to\ ifacestatelib\.Consume\(rc\)\ at\ foreign\.go:\d+:\d+,\ which\ may\ run\ Consumed`
 	return rc.Close() // want `precondition of rc.Close may not hold: ~closed\(c\)`
 }
 
@@ -78,7 +78,7 @@ func Consumed(rc io.ReadCloser) (err error) {
 // @Requires r != nil
 // @Ensures True
 func ConsumedUnlisted(r io.Reader) {
-	ifacestatelib.Consume(r) // want `Consume may modify the states of r, which ConsumedUnlisted may not modify`
+	ifacestatelib.Consume(r) // want `Consume may modify the states of r, which ConsumedUnlisted may not modify` `this\ call\ may\ not\ end:\ ConsumedUnlisted\ hands\ r\ to\ ifacestatelib\.Consume\(r\)\ at\ foreign\.go:\d+:\d+,\ which\ may\ run\ ConsumedUnlisted`
 }
 
 // Record holds a closer, which verified code cannot make under the shipped
