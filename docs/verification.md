@@ -641,6 +641,39 @@ to vego-trusted.yaml
 
 Either verify the helper, or give it a trusted contract as described in [Code that is not verified](#code-that-is-not-verified).
 
+A contract that cannot be read is reported at each call, so the caller fails there. The rest of the caller is still checked, so that its own mistakes are reported at the same time:
+
+```go
+// Box holds a value of any type.
+type Box struct{ Value any }
+
+// @Requires b != nil
+// @Ensures b.Value' = b.Value
+func (b *Box) touch() (result *Box) {
+	return b
+}
+
+// @Requires b != nil
+// @Ensures True
+func Touches(b *Box) {
+	b.touch()
+}
+```
+
+```text
+vego: in Ensures annotation: an interface value can only be compared with nil
+vego: the contract of touch cannot be used: its Ensures annotation at unreadable.go:7:1 cannot be
+read (an interface value can only be compared with nil), so this call is verified without it
+```
+
+The first message is at the clause, and the second at the call in `Touches`.
+
+What the rest of the caller relies on depends on what can be read:
+
+- When every `Requires` and `Modifies` clause can be read, the call checks the `Requires` and assumes the `Ensures` clauses that can be read.
+- When a `Requires` cannot be read, the call assumes nothing about what it returns, and what `Modifies` lists is forgotten.
+- Otherwise, for example when a `Modifies` clause cannot be read or a trusted contract has a defect, nothing after the call is checked on that path.
+
 The contract of an exported function is available to other packages, so verified code can call verified functions in other packages. If a function failed verification, other packages cannot rely on its contract.
 
 ### Variadic functions
@@ -1633,7 +1666,7 @@ Use a recursive predicate only for a property that `Forall` cannot express. The 
 
 The prover is Z3. It decides linear integer arithmetic and reads and writes of slices. It uses a `Forall` fact where the proof contains a term that matches it, and it handles products of variables only in part. When it fails to prove something true, the fix is usually to state an intermediate fact.
 
-`Assert` states such a fact. `vego` must prove the assertion at that point, and can use it in everything that follows.
+`Assert` states such a fact. `vego` must prove the assertion at that point, and can use it in everything that follows. It stands between two statements, or after the last statement of a block or of a `case` clause, where it is checked at the end of that block or clause.
 
 ```go
 // @Assert lo < |A|
@@ -1853,7 +1886,7 @@ func Remove(A []int, i int) (result []int) {
 }
 ```
 
-Slice expressions `A[i:j]` and `A[i:j:k]`, `len`, `cap`, `make`, and slice literals are supported. `copy` is not supported yet.
+Slice expressions `A[i:j]` and `A[i:j:k]`, `len`, `cap`, `make`, and slice literals are supported. A nil slice has length and capacity 0, so after `if a == nil` the function knows that `len(a)` is 0. `copy` is not supported yet: write the copy as a loop that assigns each element, or, when the two slices have the same length, as `dst = append(dst[:0], src...)`.
 
 ## Strings
 
@@ -1963,6 +1996,8 @@ func NewCounter(limit int) (result *Counter) {
 Without `fresh(result)`, a caller must assume that the result could be a counter it already has.
 
 `fresh(x)` means that the memory `x` refers to on return was allocated during the call. `within(a, b)` means that `a` lies inside the memory of `b`. Each argument is a pointer or a slice, and a slice includes its whole capacity. There are two edge cases. A slice with zero capacity has no memory, so it is `fresh` and is `within` anything. A nil pointer is `within` nothing.
+
+For two pointers to structs, `within(p, l)` means that `p` points to `l`'s struct itself or to a field of it, at any depth, of `p`'s struct type. So `@Modifies l` covers a write through `p` when the `Requires` says `within(p, l)`. When `p`'s type is neither `l`'s nor the type of any field of it, `within(p, l)` is an error.
 
 `&x`, `&p.field`, and `&s[i]` are supported when the result points to a struct. Methods with pointer receivers can be called on variables, fields, and elements. Pointers to other types, such as `*int`, are not supported.
 
@@ -4644,6 +4679,7 @@ This table lists the most common messages.
 | `loop invariant may not be preserved` | An iteration may break the invariant, or the invariant is too weak. | Add the clause that the invariant depends on. |
 | `loop variant may not decrease`, `loop variant may be negative` | The `Variant` is not proved to decrease, or to stay non-negative. | Use a different `Variant`, or add an invariant that bounds it. |
 | `variant may not decrease in recursive call`, `variant of the function may be negative` | The same, for the `Variant` of a recursive function. | Use a different `Variant`, or strengthen the `Requires`. |
+| `the contract of F cannot be used: its Ensures annotation at f.go:n:c cannot be read (...)` | A clause of the callee's contract cannot be read; it is also reported where it is written. The message ends with what the call relies on until it is fixed. | Fix the clause. See [Calls](#calls). |
 | `this call may not end: F calls x.M() at f.go:n:c, which may run T.M, ...` | A cycle of calls goes through a call with no static callee, or through code of another package. The message names the cycle. | Break the cycle. See [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods). |
 | `F has annotations, so each of its results needs a name` | A verified function has an unnamed or blank result. | Name every result in the signature. |
 | `an annotation is written "// @Keyword ...", with one space before the @ and none after it` (or `with nothing but one space`) | The comment looks like an annotation but has different spacing, or something stands before the `@`. | Write `// @Keyword ...`. |

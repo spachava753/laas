@@ -1131,6 +1131,7 @@ guide	(*guide.Account).Deposit	42	76375	0
 guide	(*guide.Account).DepositLocked	25	40970	0
 guide	(*guide.Account).DepositSum	44	79334	0
 guide	(*guide.Account).deposit	10	17593	0
+guide	(*guide.Box).touch	1	241	0
 guide	(*guide.Counter).Inc	8	7245	0
 guide	(*guide.Hub).Add	1	1573	0
 guide	(*guide.Hub).Fire	1	1808	0
@@ -1365,6 +1366,7 @@ guide	guide.Total	12	61902	0
 guide	guide.TotalAtRate	11	2024	0
 guide	guide.TotalOfNil	6	12549	0
 guide	guide.TotalUnsaid	10	25604	0
+guide	guide.Touches	2	288	0
 guide	guide.Transact	64	2082322	2
 guide	guide.Twice	13	10089	0
 guide	guide.TwiceOf	1	46	0
