@@ -295,3 +295,19 @@ func Assigns() {
 }
 
 var local int
+
+var accented = []rune("héllo")
+
+// RunesAsBytes would hold if the conversion gave bytes.
+//
+// @Ensures n = 6
+func RunesAsBytes() (n int) {
+	return len(accented) // want `vego: postcondition may not hold: n = 6`
+}
+
+// SecondAsByte would hold if the conversion gave bytes.
+//
+// @Ensures r = 195
+func SecondAsByte() (r rune) {
+	return accented[1] // want `vego: postcondition may not hold: r = 195`
+}

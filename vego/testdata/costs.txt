@@ -924,7 +924,10 @@ globals	globals.Ratio	1	46	0
 globals	globals.Received	4	1335	0
 globals	globals.RemoveLimit	1	46	0
 globals	globals.Requests	1	46	0
+globals	globals.Runes	8	4212	0
+globals	globals.RunesAsBytes	2	1425	0
 globals	globals.Scaler	1	111	0
+globals	globals.SecondAsByte	4	2508	0
 globals	globals.Settings	1	46	0
 globals	globals.Sink	1	46	0
 globals	globals.Sliced	4	1337	0

@@ -213,3 +213,11 @@ func Index(i int) (r int, err error) {
 	}
 	return table[i], nil
 }
+
+var runes = []rune("héllo\xff")
+
+// Runes reads a slice of runes made from a constant string: each element
+// is a code point, and an invalid byte is U+FFFD.
+//
+// @Ensures n = 6 And r = 233 And bad = 65533
+func Runes() (n int, r rune, bad rune) { return len(runes), runes[1], runes[5] }

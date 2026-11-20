@@ -660,16 +660,30 @@ func (pv *pkgVerifier) knownOf(e ast.Expr, t types.Type, top bool) knownValue {
 				return knownValue{Kind: knownMade, Len: -1, Cap: -1, Sized: sized(object)}
 			}
 		case pv.info.Types[e.Fun].IsType() && len(e.Args) == 1:
-			// []byte of a constant string is a new array of its bytes,
-			// whose capacity the runtime rounds up.
+			// []byte of a constant string is a new array of its bytes, and
+			// []rune one of the code points that ranging over the string
+			// gives, with U+FFFD for each byte that is not valid UTF-8, as
+			// the conversion does. The runtime rounds the capacity up.
 			value := pv.info.Types[e.Args[0]].Value
 			if u, ok := t.Underlying().(*types.Slice); ok && value != nil && value.Kind() == constant.String {
-				text := constant.StringVal(value)
-				made := knownValue{Kind: knownMade, Len: int64(len(text)), Cap: -1, Sized: len(text) > 0 && sized(u.Elem()),
-					Contents: top && len(text) <= maxKnownElems}
-				for i := range len(text) {
+				var elems []int64
+				switch basic, _ := u.Elem().Underlying().(*types.Basic); {
+				case basic != nil && basic.Kind() == types.Byte:
+					for _, b := range []byte(constant.StringVal(value)) {
+						elems = append(elems, int64(b))
+					}
+				case basic != nil && basic.Kind() == types.Rune:
+					for _, r := range constant.StringVal(value) {
+						elems = append(elems, int64(r))
+					}
+				default:
+					return knownValue{}
+				}
+				made := knownValue{Kind: knownMade, Len: int64(len(elems)), Cap: -1, Sized: len(elems) > 0 && sized(u.Elem()),
+					Contents: top && len(elems) <= maxKnownElems}
+				for i, elem := range elems {
 					if made.Contents {
-						made.Elems = append(made.Elems, knownConstantOf(constant.MakeInt64(int64(text[i]))))
+						made.Elems = append(made.Elems, knownConstantOf(constant.MakeInt64(elem)))
 						made.Indices = append(made.Indices, int64(i))
 					}
 				}
