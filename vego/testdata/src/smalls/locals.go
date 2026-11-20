@@ -125,3 +125,18 @@ func Annotated() {
 	var g getter
 	_, _ = m, g
 }
+
+// An Assert or a Snapshot directly above a local type is read in the body.
+
+// @Requires n > 1
+// @Ensures True
+func AboveType(n int) {
+	// @Snapshot n0 = n
+	// @Assert n > 1
+	type pair struct{ a, b int }
+	n--
+	// @Assert n0 = n + 1
+	// @Assert n > 1 // want `assertion may not hold: n > 1`
+	type other struct{ c int }
+	_, _ = pair{}, other{}
+}

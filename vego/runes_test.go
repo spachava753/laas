@@ -4,6 +4,7 @@ import (
 	"math"
 	"math/big"
 	"math/rand/v2"
+	"slices"
 	"testing"
 
 	"github.com/spachava753/laas/vego/internal/logic"
@@ -66,9 +67,84 @@ func TestRuneString(t *testing.T) {
 			check(at, string(rune(int8(value))), "int8")
 		}
 	}
+	// Every code point, and the values just outside, by evaluating the
+	// facts in Go: they hold of the string Go makes, and fail when one byte
+	// or the length differs. A byte changes inside a range at every
+	// multiple of 64, 4096, and 262144, which the values above do not all
+	// reach.
+	for value := int64(-1); value <= 0x110000; value++ {
+		want := []byte(string(rune(value)))
+		if !holdsRune(facts, value, want) {
+			t.Fatalf("the facts do not hold of string(%d) = %q", value, want)
+		}
+		for i := range want {
+			for _, delta := range []byte{1, 255} {
+				changed := slices.Clone(want)
+				changed[i] += delta
+				if holdsRune(facts, value, changed) {
+					t.Fatalf("the facts hold of %q for string(%d), which is %q", changed, value, want)
+				}
+			}
+		}
+		if holdsRune(facts, value, append(slices.Clone(want), want[0])) || holdsRune(facts, value, want[:len(want)-1]) {
+			t.Fatalf("the facts hold of another length for string(%d)", value)
+		}
+	}
 	// A uint64 above MaxInt64 is no code point either, and Go gives
 	// U+FFFD for it, as for every value outside the range of a rune.
 	for _, huge := range []uint64{1 << 63, math.MaxUint64} {
 		check(logic.BigLit(new(big.Int).SetUint64(huge)), string(rune(0xFFFD)), "uint64")
 	}
+}
+
+// holdsRune evaluates utf8Facts of the constants r and s for one integer and
+// one string of bytes, with Go's division, which is exact for the operands
+// the facts divide.
+func holdsRune(facts *logic.Term, r int64, s []byte) bool {
+	var number func(t *logic.Term) int64
+	var holds func(t *logic.Term) bool
+	number = func(t *logic.Term) int64 {
+		switch t.Op {
+		case logic.OpIntLit:
+			return t.Val
+		case logic.OpConst:
+			return r
+		case logic.OpAdd:
+			return number(t.Args[0]) + number(t.Args[1])
+		case logic.OpDiv:
+			return number(t.Args[0]) / number(t.Args[1])
+		case logic.OpMod:
+			return number(t.Args[0]) % number(t.Args[1])
+		case logic.OpLen:
+			return int64(len(s))
+		case logic.OpSelect:
+			if i := number(t.Args[1]); i >= 0 && i < int64(len(s)) {
+				return int64(s[i])
+			}
+			return -1
+		}
+		panic("cannot evaluate " + t.String())
+	}
+	holds = func(t *logic.Term) bool {
+		switch t.Op {
+		case logic.OpTrue:
+			return true
+		case logic.OpEq:
+			return number(t.Args[0]) == number(t.Args[1])
+		case logic.OpLe:
+			return number(t.Args[0]) <= number(t.Args[1])
+		case logic.OpLt:
+			return number(t.Args[0]) < number(t.Args[1])
+		case logic.OpNot:
+			return !holds(t.Args[0])
+		case logic.OpImplies:
+			return !holds(t.Args[0]) || holds(t.Args[1])
+		case logic.OpAnd:
+			return !slices.ContainsFunc(t.Args, func(arg *logic.Term) bool { return !holds(arg) })
+		case logic.OpOr:
+			return slices.ContainsFunc(t.Args, holds)
+		}
+		panic("cannot evaluate " + t.String())
+	}
+	return holds(facts)
 }

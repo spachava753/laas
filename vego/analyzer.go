@@ -1100,7 +1100,7 @@ func (pv *pkgVerifier) collect() {
 					pv.report(c.pos, "%s annotations are not supported yet", c.kind)
 					continue
 				}
-				if fd := enclosingFunc(file, c.pos); fd != nil && fd.Body != nil && localTypeAt(fd.Body, c.pos) {
+				if fd := enclosingFunc(file, c.pos); fd != nil && fd.Body != nil && localTypeAt(fd.Body, c.pos, c.kind == "Assert" || c.kind == "Snapshot") {
 					// It may have been meant as the contract of anything
 					// in the type; nothing reads it.
 					pv.unread = true
@@ -1555,8 +1555,10 @@ func enclosingFunc(file *ast.File, pos token.Pos) *ast.FuncDecl {
 
 // localTypeAt reports whether a position lies in a type declaration inside
 // a body, its doc comment and the comments of its fields and methods
-// included.
-func localTypeAt(body *ast.BlockStmt, pos token.Pos) bool {
+// included. With bodyKeyword, for an Assert or a Snapshot, the doc comment
+// does not count: such an annotation belongs in a body, and one directly
+// above a local type is read there, between the statements around it.
+func localTypeAt(body *ast.BlockStmt, pos token.Pos, bodyKeyword bool) bool {
 	found := false
 	ast.Inspect(body, func(n ast.Node) bool {
 		decl, ok := n.(*ast.GenDecl)
@@ -1564,7 +1566,7 @@ func localTypeAt(body *ast.BlockStmt, pos token.Pos) bool {
 			return !found && n != nil
 		}
 		start := decl.Pos()
-		if decl.Doc != nil {
+		if decl.Doc != nil && !bodyKeyword {
 			start = decl.Doc.Pos()
 		}
 		found = found || (start <= pos && pos < decl.End())

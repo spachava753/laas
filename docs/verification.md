@@ -2099,7 +2099,7 @@ A struct can have a field of a type that `vego` does not support, such as a chan
 
 ### Types declared inside a function
 
-A type can be declared inside a function body, as Go allows. It is a type of its own, and a local struct with the same fields as a type of the package converts to it, as in Go. A type declared inside a function cannot have annotations. An invariant on a local struct, or a contract on a method of a local interface or on a local function type, is reported as `Invariant annotation stands on a type declared inside F; a type declared inside a function cannot have annotations, so declare it at package level to give it an invariant or a contract`. Declare the type at package level to give it one.
+A type can be declared inside a function body, as Go allows. It is a type of its own, and a local struct with the same fields as a type of the package converts to it, as in Go. A type declared inside a function cannot have annotations. An invariant on a local struct, or a contract on a method of a local interface or on a local function type, is reported as `Invariant annotation stands on a type declared inside F; a type declared inside a function cannot have annotations, so declare it at package level to give it an invariant or a contract`. Declare the type at package level to give it one. An `Assert` or a `Snapshot` directly above a local type is read in the body, as anywhere between statements.
 
 ### Aliasing
 

@@ -2592,6 +2592,7 @@ smalls	(*smalls.buf).put	17	22788	0
 smalls	(smalls.echo).Echo	2	707	0
 smalls	(smalls.lose).Echo	2	707	0
 smalls	smalls.ASCII	3	5162	0
+smalls	smalls.AboveType	6	1034	0
 smalls	smalls.Absent	12	11683	0
 smalls	smalls.Alias	6	2214	0
 smalls	smalls.AnyRune	3	7535	0
