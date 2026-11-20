@@ -43,7 +43,8 @@ var questionNames = [...][2]string{
 // fnCost is what verifying a function asked of Z3: the problems, the
 // resources Z3 counted for them, and the bytes of their text; the wall
 // time spent on the function, other functions it led to excluded; and, by
-// the line and the kind of question, the problems that stopped at a limit.
+// the line and the kind of question, the problems that stopped at a limit;
+// and the problems Z3 left open, at a limit or for another reason.
 type fnCost struct {
 	fn       *funcInfo
 	problems int
@@ -51,6 +52,7 @@ type fnCost struct {
 	bytes    int64
 	elapsed  time.Duration
 	limits   map[costLimit]int
+	open     int
 	// kinds counts the problems of each kind.
 	kinds [len(questionNames)]int
 }
@@ -139,6 +141,9 @@ func (pv *pkgVerifier) observe(kind question) func(solver.Cost) {
 		}
 		if limitNote(c.Result) != "" {
 			record.limits[costLimit{at, kind}]++
+		}
+		if limitNote(c.Result) != "" || c.Result == solver.Unknown {
+			record.open++
 		}
 	}
 }

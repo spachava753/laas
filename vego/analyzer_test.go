@@ -139,9 +139,11 @@ func TestAnalyzer(t *testing.T) {
 			t.Fatalf("set other-tags: %v", err)
 		}
 
+		costs := collectCosts()
 		runCorpus(t, analyzer,
 			"paper", "algorithms", "defects", "rejected", "leetcode", "semantics", "effects", "ordering", "integers", "values", "trust",
 			"lib", "client", "memory", "shapes", "badshapes", "invariants", "mapping", "badpred", "usesbadpred", "early", "settled", "gen", "earlytype", "earlyrange", "earlybox", "earlyloop", "earlycarrier", "earlypanic", "guide", "wrapped", "unread", "usesunread", "twovariants", "usestwovariants", "lonecr", "errorsid", "errorsvars", "errorsvarsclient", "vouched", "vouchedclient", "vouchedcapture", "earlyalias", "earlyaliasok", "sentinellib", "sentinelclient", "usesearly", "sentinelfar", "sentinelfarther", "closures", "funcvalues", "funcvalueslib", "funcvaluesclient", "funcvaluesunread", "funcvaluesinit", "funcvaluesinitdefer", "funcvaluesinitok", "funcvaluesinitmethod", "funcvaluesoldloop", "funcvaluesinitlit", "callbacks", "callbacksinit", "interfaces", "interfaceslib", "interfacesunread", "interfacesinitok", "interfacesinithand", "interfacesinitcall", "foreign", "stdtypes", "locks", "lockspred", "lockslib", "locksclient", "layers", "ifacestate", "ensuresentry")
+		checkCosts(t, costs())
 	})
 
 	// The bound on the size of a formula stops a program whose formulas
