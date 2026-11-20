@@ -84,7 +84,8 @@ func (v *fnVerifier) bindCall(call *ast.CallExpr, sig *types.Signature) []passed
 	return bound
 }
 
-// text spells what a call gives a parameter, for messages.
+// text spells what a call gives a parameter, for messages. A spread is
+// named by the slice, which is what a Modifies clause would list.
 func (a passedArg) text() string {
 	switch {
 	case a.packed && len(a.pack) == 0:
@@ -95,8 +96,6 @@ func (a passedArg) text() string {
 			parts[i] = types.ExprString(e)
 		}
 		return strings.Join(parts, ", ")
-	case a.spread:
-		return types.ExprString(a.expr) + "..."
 	}
 	return types.ExprString(a.expr)
 }

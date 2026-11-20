@@ -532,7 +532,7 @@ func ClearAll(xs []int) {
 ```
 
 ```text
-vego: ClearFirst may modify xs..., which ClearAll may not modify; list it in a
+vego: ClearFirst may modify xs, which ClearAll may not modify; list it in a
 // @Modifies clause
 ```
 
@@ -643,7 +643,7 @@ vego: cannot verify Printer: the function literal is used as a value of type fun
 has no contract; declare a named function type with a contract and use it here
 ```
 
-A variable declared with `:=` that holds a literal and is used other than by calling it is reported as `cannot verify` too, with the message `f holds a function literal and is used here other than by calling it`. Declare it with a type that has a contract instead, as in `var f T = func...`. To hand it to a trusted function that calls it, write the literal where it is handed over. A variadic literal cannot be verified, and neither can a literal that takes or returns a type that `vego` does not support.
+A variable declared with `:=` that holds a literal and is used other than by calling it is reported as `cannot verify` too, with the message `f holds a function literal and is used here other than by calling it`. Declare it with a type that has a contract instead, as in `var f T = func...`. To hand it to a trusted function that calls it, write the literal where it is handed over. A variadic literal used as a value cannot be verified yet, since a function type with a contract cannot be variadic. A literal that takes or returns a type that `vego` does not support cannot be verified either.
 
 ## Function values
 

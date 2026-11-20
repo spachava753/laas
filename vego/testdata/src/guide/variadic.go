@@ -34,7 +34,7 @@ func ClearFirst(xs ...int) {
 
 // @Requires |xs| > 0
 func ClearAll(xs []int) {
-	ClearFirst(xs...) // want `vego:\ ClearFirst\ may\ modify\ xs\.\.\.,\ which\ ClearAll\ may\ not\ modify;\ list\ it\ in\ a`
+	ClearFirst(xs...) // want `vego:\ ClearFirst\ may\ modify\ xs,\ which\ ClearAll\ may\ not\ modify;\ list\ it\ in\ a`
 }
 
 // The program of the section on slices about append(A, B...).

@@ -96,7 +96,7 @@ func ZeroSpread(xs []int) {
 //
 // @Requires |xs| > 0
 func ZeroUnlisted(xs []int) {
-	Zero(xs...) // want `vego:\ Zero\ may\ modify\ xs\.\.\.,\ which\ ZeroUnlisted\ may\ not\ modify;\ list\ it\ in\ a`
+	Zero(xs...) // want `vego:\ Zero\ may\ modify\ xs,\ which\ ZeroUnlisted\ may\ not\ modify;\ list\ it\ in\ a`
 }
 
 // Zero may write all of a's capacity, which b lies in.
