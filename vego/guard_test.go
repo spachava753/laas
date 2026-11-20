@@ -79,6 +79,9 @@ func checkCosts(t *testing.T, costs map[string]costLine) {
 	t.Helper()
 	path := filepath.Join("testdata", costsFile)
 	if os.Getenv(recordCosts) != "" {
+		if t.Failed() {
+			t.Fatalf("the costs are not recorded, since this run failed: the table must hold the costs of a corpus that gives the messages it expects")
+		}
 		var b strings.Builder
 		fmt.Fprintf(&b, "# What verifying each function of the corpus asks of Z3: package, function, problems, resources counted, problems Z3 left open, at a limit or otherwise.\n")
 		fmt.Fprintf(&b, "# Written by %s=1 go test ./vego -run 'TestAnalyzer/verifies'; see guard_test.go.\n", recordCosts)
