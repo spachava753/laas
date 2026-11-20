@@ -45,7 +45,8 @@ type sample struct {
 	calls   map[string][][]any
 	answers map[string]func(int64) int64
 	// unwritten holds, where a function the call was handed writes the
-	// arguments, what they would be had only that function written them.
+	// arguments, what they would be had only that function written them,
+	// to the capacity of each slice.
 	unwritten []any
 }
 
@@ -131,7 +132,10 @@ func runeHarness[R any](call func(s string, f func(rune) bool) R) func(rng *rand
 func bytesHarness[R any](call func(s []byte, f func(rune) bool) R) func(rng *rand.Rand) sample {
 	return func(rng *rand.Rand) sample {
 		s, calls := []byte(randomText(rng)), map[string][][]any{}
-		before, unwritten := slices.Clone(s), slices.Clone(s)
+		before := snapshot(s)
+		// What s would hold had only f written it, to its capacity.
+		unwritten := make([]byte, len(s), cap(s))
+		copy(unwritten[:cap(s)], s[:cap(s)])
 		f := recorder(rng, calls, "f", func(rng *rand.Rand, r rune) bool {
 			if len(s) > 0 && rng.Intn(4) == 0 {
 				at, b := rng.Intn(len(s)), "a\xff "[rng.Intn(3)]
@@ -140,7 +144,7 @@ func bytesHarness[R any](call func(s []byte, f func(rune) bool) R) func(rng *ran
 			return rng.Intn(2) == 0
 		})
 		result := call(s, f)
-		return sample{before: []any{before, f}, after: []any{s, f}, unwritten: []any{unwritten, f}, results: []any{result}, calls: calls}
+		return sample{before: []any{before[0], f}, after: []any{s, f}, unwritten: []any{unwritten, f}, results: []any{result}, calls: calls}
 	}
 }
 
@@ -589,44 +593,41 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 	},
 	"(time.Time).Date": func(rng *rand.Rand) sample {
 		t := randomTime(rng)
+		before := snapshot(t)
 		year, month, day := t.Date()
-		return sample{before: []any{t}, results: []any{year, month, day}}
+		return sample{before: before, after: []any{t}, results: []any{year, month, day}}
 	},
-	"(time.Time).Year":       timeHarness(time.Time.Year),
-	"(time.Time).Month":      timeHarness(time.Time.Month),
-	"(time.Time).Day":        timeHarness(time.Time.Day),
-	"(time.Time).Hour":       timeHarness(time.Time.Hour),
-	"(time.Time).Minute":     timeHarness(time.Time.Minute),
-	"(time.Time).Second":     timeHarness(time.Time.Second),
-	"(time.Time).Nanosecond": timeHarness(time.Time.Nanosecond),
-	"(time.Time).Weekday":    timeHarness(time.Time.Weekday),
-	"(time.Time).YearDay":    timeHarness(time.Time.YearDay),
-	"(time.Time).Unix":       timeHarness(time.Time.Unix),
-	"(time.Time).UnixMilli":  timeHarness(time.Time.UnixMilli),
-	"(time.Time).IsZero":     timeHarness(time.Time.IsZero),
-	"(time.Time).Sub":        timePairHarness(time.Time.Sub),
-	"(time.Time).Before":     timePairHarness(time.Time.Before),
-	"(time.Time).After":      timePairHarness(time.Time.After),
-	"(time.Time).Equal":      timePairHarness(time.Time.Equal),
-	"time.Since": func(rng *rand.Rand) sample {
-		t := randomTime(rng)
-		return sample{before: []any{t}, results: []any{time.Since(t)}}
-	},
-	"time.Until": func(rng *rand.Rand) sample {
-		t := randomTime(rng)
-		return sample{before: []any{t}, results: []any{time.Until(t)}}
-	},
+	"(time.Time).Year":             timeHarness(time.Time.Year),
+	"(time.Time).Month":            timeHarness(time.Time.Month),
+	"(time.Time).Day":              timeHarness(time.Time.Day),
+	"(time.Time).Hour":             timeHarness(time.Time.Hour),
+	"(time.Time).Minute":           timeHarness(time.Time.Minute),
+	"(time.Time).Second":           timeHarness(time.Time.Second),
+	"(time.Time).Nanosecond":       timeHarness(time.Time.Nanosecond),
+	"(time.Time).Weekday":          timeHarness(time.Time.Weekday),
+	"(time.Time).YearDay":          timeHarness(time.Time.YearDay),
+	"(time.Time).Unix":             timeHarness(time.Time.Unix),
+	"(time.Time).UnixMilli":        timeHarness(time.Time.UnixMilli),
+	"(time.Time).IsZero":           timeHarness(time.Time.IsZero),
+	"(time.Time).Sub":              timePairHarness(time.Time.Sub),
+	"(time.Time).Before":           timePairHarness(time.Time.Before),
+	"(time.Time).After":            timePairHarness(time.Time.After),
+	"(time.Time).Equal":            timePairHarness(time.Time.Equal),
+	"time.Since":                   timeHarness(time.Since),
+	"time.Until":                   timeHarness(time.Until),
 	"time.Now":                     func(*rand.Rand) sample { return sample{results: []any{time.Now()}} },
 	"(time.Duration).Seconds":      durationHarness(time.Duration.Seconds),
 	"(time.Duration).Milliseconds": durationHarness(time.Duration.Milliseconds),
 	"(time.Duration).Nanoseconds":  durationHarness(time.Duration.Nanoseconds),
 	"(time.Time).Add": func(rng *rand.Rand) sample {
 		t, d := randomTime(rng), randomDuration(rng)
-		return sample{before: []any{t, d}, results: []any{t.Add(d)}}
+		before := snapshot(t, d)
+		return sample{before: before, after: []any{t, d}, results: []any{t.Add(d)}}
 	},
 	"(time.Time).AddDate": func(rng *rand.Rand) sample {
 		t, years, months, days := randomTime(rng), randomCalendarInt(rng), randomCalendarInt(rng), randomCalendarInt(rng)
-		return sample{before: []any{t, years, months, days}, results: []any{t.AddDate(years, months, days)}}
+		before := snapshot(t, years, months, days)
+		return sample{before: before, after: []any{t, years, months, days}, results: []any{t.AddDate(years, months, days)}}
 	},
 	"time.Unix": func(rng *rand.Rand) sample {
 		sec, nsec := randomInt64(rng), randomInt64(rng)
@@ -639,7 +640,8 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 		if rng.Intn(8) == 0 {
 			return sample{before: []any{year, month, day, hour, minute, sec, nsec, (*time.Location)(nil)}}
 		}
-		return sample{before: []any{year, month, day, hour, minute, sec, nsec, loc}, results: []any{time.Date(year, month, day, hour, minute, sec, nsec, loc)}}
+		before := snapshot(year, month, day, hour, minute, sec, nsec, loc)
+		return sample{before: before, after: []any{year, month, day, hour, minute, sec, nsec, loc}, results: []any{time.Date(year, month, day, hour, minute, sec, nsec, loc)}}
 	},
 	"unicode/utf8.RuneCountInString": func(rng *rand.Rand) sample {
 		s := randomText(rng)
@@ -835,7 +837,8 @@ func randomTime(rng *rand.Rand) time.Time {
 func timeHarness[R any](method func(time.Time) R) func(rng *rand.Rand) sample {
 	return func(rng *rand.Rand) sample {
 		t := randomTime(rng)
-		return sample{before: []any{t}, results: []any{method(t)}}
+		before := snapshot(t)
+		return sample{before: before, after: []any{t}, results: []any{method(t)}}
 	}
 }
 
@@ -846,7 +849,8 @@ func timePairHarness[R any](method func(time.Time, time.Time) R) func(rng *rand.
 		if rng.Intn(4) == 0 {
 			u = t
 		}
-		return sample{before: []any{t, u}, results: []any{method(t, u)}}
+		before := snapshot(t, u)
+		return sample{before: before, after: []any{t, u}, results: []any{method(t, u)}}
 	}
 }
 
@@ -914,20 +918,188 @@ func bytesPairHarness(call func(s, t []byte) []any) func(rng *rand.Rand) sample 
 	}
 }
 
-// snapshot returns the arguments of a call as they are before it: a copy
-// of each slice, of its elements and not deeper, and every other value as
-// it is.
+// snapped is an argument as a harness saw it before a call: a copy that
+// the formulas read, and a print of all the memory it reaches, which the
+// check of what an entry's modifies leaves out compares with the print of
+// the argument after the call.
+type snapped struct {
+	value any
+	print string
+}
+
+// snapshot returns the arguments of a call as they are before it: each a
+// copy, of the elements of a slice up to its length and of the entries of
+// a map, with a print of everything it reaches.
 func snapshot(args ...any) []any {
 	before := make([]any, len(args))
 	for i, arg := range args {
-		before[i] = arg
-		if v := reflect.ValueOf(arg); v.Kind() == reflect.Slice && !v.IsNil() {
+		value := arg
+		switch v := reflect.ValueOf(arg); {
+		case v.Kind() == reflect.Slice && !v.IsNil():
 			copied := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
 			reflect.Copy(copied, v)
-			before[i] = copied.Interface()
+			value = copied.Interface()
+		case v.Kind() == reflect.Map && !v.IsNil():
+			copied := reflect.MakeMapWithSize(v.Type(), v.Len())
+			for iter := v.MapRange(); iter.Next(); {
+				copied.SetMapIndex(iter.Key(), iter.Value())
+			}
+			value = copied.Interface()
 		}
+		before[i] = snapped{value: value, print: fingerprint(arg)}
 	}
 	return before
+}
+
+// fingerprint prints a value and all the memory it reaches: the elements
+// of a slice up to its capacity, the entries of a map, what a pointer or an
+// interface value refers to, and the fields of a struct, exported or not,
+// with the address of each array and object, so that a write anywhere in
+// it, or a pointer that now refers elsewhere, changes the print.
+func fingerprint(arg any) string { return printOf(arg, true) }
+
+// printOf is fingerprint, with the addresses of arrays and objects left out
+// unless addresses is set, so that two copies of a value print the same.
+func printOf(arg any, addresses bool) string {
+	var b strings.Builder
+	address := func(format string, p uintptr) {
+		if addresses {
+			fmt.Fprintf(&b, format, p)
+		}
+	}
+	seen := map[uintptr]bool{}
+	var walk func(v reflect.Value, depth int)
+	walk = func(v reflect.Value, depth int) {
+		if depth > 20 {
+			panic(fmt.Sprintf("%T reaches memory deeper than a print follows", arg))
+		}
+		switch v.Kind() {
+		case reflect.Invalid:
+			b.WriteString("nil ")
+		case reflect.Bool:
+			fmt.Fprintf(&b, "%v ", v.Bool())
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			fmt.Fprintf(&b, "%d ", v.Int())
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+			fmt.Fprintf(&b, "%d ", v.Uint())
+		case reflect.Float32, reflect.Float64:
+			fmt.Fprintf(&b, "%x ", math.Float64bits(v.Float()))
+		case reflect.Complex64, reflect.Complex128:
+			fmt.Fprintf(&b, "%v ", v.Complex())
+		case reflect.String:
+			fmt.Fprintf(&b, "%q ", v.String())
+		case reflect.Pointer:
+			if v.IsNil() {
+				b.WriteString("nil ")
+				return
+			}
+			address("*%x ", v.Pointer())
+			if !seen[v.Pointer()] {
+				seen[v.Pointer()] = true
+				walk(v.Elem(), depth+1)
+			}
+		case reflect.UnsafePointer, reflect.Func, reflect.Chan:
+			b.WriteString(v.Kind().String())
+			address(" %x ", v.Pointer())
+		case reflect.Slice:
+			if v.IsNil() {
+				b.WriteString("nil[] ")
+				return
+			}
+			address("[%x ", v.Pointer())
+			fmt.Fprintf(&b, "[%d %d: ", v.Len(), v.Cap())
+			whole := v.Slice3(0, v.Cap(), v.Cap())
+			for k := range whole.Len() {
+				walk(whole.Index(k), depth+1)
+			}
+			b.WriteString("] ")
+		case reflect.Array:
+			for k := range v.Len() {
+				walk(v.Index(k), depth+1)
+			}
+		case reflect.Map:
+			if v.IsNil() {
+				b.WriteString("nil{} ")
+				return
+			}
+			address("{%x ", v.Pointer())
+			b.WriteString("{ ")
+			keys := v.MapKeys()
+			slices.SortFunc(keys, func(x, y reflect.Value) int { return strings.Compare(fmt.Sprint(x), fmt.Sprint(y)) })
+			for _, key := range keys {
+				walk(key, depth+1)
+				walk(v.MapIndex(key), depth+1)
+			}
+			b.WriteString("} ")
+		case reflect.Struct:
+			for k := range v.NumField() {
+				walk(v.Field(k), depth+1)
+			}
+		case reflect.Interface:
+			walk(v.Elem(), depth+1)
+		}
+	}
+	walk(reflect.ValueOf(arg), 0)
+	return b.String()
+}
+
+// reach returns where the memory that values reach lies, as extents from
+// start up to end: the array of every slice up to its capacity and every
+// object a pointer refers to, at any depth. A slice of capacity zero
+// reaches no memory.
+func reach(values ...any) [][2]uintptr {
+	var extents [][2]uintptr
+	seen := map[[2]uintptr]bool{}
+	var walk func(v reflect.Value, depth int)
+	walk = func(v reflect.Value, depth int) {
+		if depth > 20 {
+			panic("a value reaches memory deeper than reach follows")
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			extent := [2]uintptr{v.Pointer(), v.Pointer() + max(v.Type().Elem().Size(), 1)}
+			if !seen[extent] {
+				seen[extent] = true
+				extents = append(extents, extent)
+				walk(v.Elem(), depth+1)
+			}
+		case reflect.Slice:
+			if v.Cap() == 0 {
+				return
+			}
+			extent := [2]uintptr{v.Pointer(), v.Pointer() + uintptr(v.Cap())*v.Type().Elem().Size()}
+			if !seen[extent] {
+				seen[extent] = true
+				extents = append(extents, extent)
+				whole := v.Slice3(0, v.Cap(), v.Cap())
+				for k := range whole.Len() {
+					walk(whole.Index(k), depth+1)
+				}
+			}
+		case reflect.Array:
+			for k := range v.Len() {
+				walk(v.Index(k), depth+1)
+			}
+		case reflect.Map:
+			for iter := v.MapRange(); iter.Next(); {
+				walk(iter.Key(), depth+1)
+				walk(iter.Value(), depth+1)
+			}
+		case reflect.Struct:
+			for k := range v.NumField() {
+				walk(v.Field(k), depth+1)
+			}
+		case reflect.Interface:
+			walk(v.Elem(), depth+1)
+		}
+	}
+	for _, value := range values {
+		walk(reflect.ValueOf(value), 0)
+	}
+	return extents
 }
 
 func randomInts(rng *rand.Rand) []int {
@@ -1357,13 +1529,22 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 	var earlier []any
 	for range 400 {
 		call := harness(rng)
+		// What the formulas read of an argument before the call, and the
+		// print of what it reached then, where the harness took one.
+		before, prints := make([]any, len(call.before)), make([]string, len(call.before))
+		for i, value := range call.before {
+			before[i] = value
+			if snap, ok := value.(snapped); ok {
+				before[i], prints[i] = snap.value, snap.print
+			}
+		}
 		if call.after == nil {
 			for i, value := range call.before {
-				if kind := reflect.ValueOf(value).Kind(); kind == reflect.Slice || kind == reflect.Map {
-					t.Fatalf("the harness of %s gives no after for %s, a %T, so a change to it would not be seen", key, fn.params[i].Name(), value)
+				if _, ok := value.(snapped); ok || len(reach(value)) > 0 {
+					t.Fatalf("the harness of %s gives no after for %s, a %T that reaches memory, so a change to it would not be seen", key, fn.params[i].Name(), before[i])
 				}
 			}
-			call.after = call.before
+			call.after = before
 		}
 		env := &specEnv{
 			v: &fnVerifier{pkgVerifier: pv, fn: fn}, fn: fn,
@@ -1389,7 +1570,7 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 				env.given[param], env.givenPost[param] = logic.RefLit(1), logic.RefLit(1)
 				continue
 			}
-			env.given[param], env.givenPost[param] = g.groundTerm(call.before[i]), g.groundTerm(call.after[i])
+			env.given[param], env.givenPost[param] = g.groundTerm(before[i]), g.groundTerm(call.after[i])
 		}
 		env.givenRelation = func(name string, paths []logic.Path) (*logic.Term, error) {
 			return logic.BoolLit(relation(t, fn, call, earlier, name, paths)), nil
@@ -1400,7 +1581,7 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 			if err != nil {
 				t.Fatalf("requires %q: %v", c.text, err)
 			}
-			satisfied = satisfied && eval.holds(formula)
+			satisfied = satisfied && eval.judge(t, fmt.Sprintf("requires %q", c.text), formula)
 		}
 		if !satisfied {
 			continue
@@ -1410,15 +1591,24 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 			if _, isFunc := param.Type().Underlying().(*types.Signature); isFunc {
 				continue
 			}
-			listed := slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.name == param.Name() })
-			// What a function the call was handed wrote is not the
-			// call's own write.
-			unwritten := call.before[i]
-			if call.unwritten != nil {
-				unwritten = call.unwritten[i]
-			}
-			if !listed && !unchanged(unwritten, call.after[i]) {
-				t.Fatalf("%s changed %s, which its modifies does not list: %v became %v", key, param.Name(), unwritten, call.after[i])
+			// What code that a parameter under runs holds writes is that
+			// code's own write, as is what a function the call was
+			// handed writes.
+			listed := slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.name == param.Name() }) || fn.runs[param]
+			switch {
+			case listed:
+			case call.unwritten != nil:
+				if printOf(call.unwritten[i], false) != printOf(call.after[i], false) {
+					t.Fatalf("%s changed %s, which its modifies does not list: %v became %v", key, param.Name(), call.unwritten[i], call.after[i])
+				}
+			case prints[i] != "":
+				if prints[i] != fingerprint(call.after[i]) {
+					t.Fatalf("%s changed %s, or memory it reaches, which its modifies does not list: %v became %v", key, param.Name(), before[i], call.after[i])
+				}
+			case len(reach(before[i])) > 0:
+				t.Fatalf("the harness of %s does not snapshot %s, a %T that reaches memory, so a change to it would not be seen", key, param.Name(), before[i])
+			case !unchanged(before[i], call.after[i]):
+				t.Fatalf("%s changed %s, which its modifies does not list: %v became %v", key, param.Name(), before[i], call.after[i])
 			}
 		}
 		// The function called what it was handed only with
@@ -1439,9 +1629,9 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 					if err != nil {
 						t.Fatalf("calls requires %q: %v", c.text, err)
 					}
-					if !eval.holds(formula) {
+					if !eval.judge(t, fmt.Sprintf("calls requires %q", c.text), formula) {
 						t.Fatalf("%s called %s with %v, for which the calls requires %q is false, in the call with arguments %v",
-							key, param.Name(), args, c.text, call.before)
+							key, param.Name(), args, c.text, before)
 					}
 				}
 			}
@@ -1457,16 +1647,16 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 			if err != nil {
 				t.Fatalf("ensures %q: %v", c.text, err)
 			}
-			if !eval.holds(formula) {
+			if !eval.judge(t, fmt.Sprintf("ensures %q", c.text), formula) {
 				t.Fatalf("ensures %q is false for the call with arguments %v, which left them as %v and returned %v",
-					c.text, call.before, call.after, call.results)
+					c.text, before, call.after, call.results)
 			}
 			conds := conditions(formula)
 			if met[c] == nil {
 				met[c] = make([]int, len(conds))
 			}
 			for j, cond := range conds {
-				if eval.holds(cond) {
+				if eval.judge(t, fmt.Sprintf("condition %d of ensures %q", j+1, c.text), cond) {
 					met[c][j]++
 				}
 			}
@@ -1556,26 +1746,33 @@ func relation(t *testing.T, fn *funcInfo, call sample, earlier []any, name strin
 	if _, isResult := fn.resultNames[paths[0].Root]; !isResult {
 		t.Fatalf("the harness can tell %s only of a result, not of %s", name, paths[0].Root)
 	}
-	start, end, refers := extent(valueOf(paths[0]))
-	if v := reflect.ValueOf(valueOf(paths[0])); name == "fresh" && v.Kind() == reflect.Pointer && v.IsNil() {
-		// A nil pointer is not fresh.
+	value := valueOf(paths[0])
+	switch v := reflect.ValueOf(value); {
+	case v.Kind() == reflect.Pointer && v.IsNil():
+		// A nil pointer is not fresh, and lies within nothing.
 		return false
+	case v.Kind() != reflect.Slice && v.Kind() != reflect.Pointer:
+		t.Fatalf("the harness cannot tell %s of %s, a %T; it tells it of slices and pointers", name, paths[0].Root, value)
 	}
+	start, end, refers := extent(value)
 	if !refers {
+		// A slice of capacity zero has no memory.
 		return true
 	}
-	overlaps := func(other any) bool {
-		s, e, ok := extent(other)
-		return ok && start < e && s < end
+	overlaps := func(extents [][2]uintptr) bool {
+		return slices.ContainsFunc(extents, func(e [2]uintptr) bool { return start < e[1] && e[0] < end })
 	}
 	switch name {
 	case "fresh":
+		// Fresh memory is none that an argument, another result of the
+		// call, or an earlier result reaches, at any depth.
+		var others []any
 		for i, other := range call.results {
-			if i != fn.resultNames[paths[0].Root] && overlaps(other) {
-				return false
+			if i != fn.resultNames[paths[0].Root] {
+				others = append(others, other)
 			}
 		}
-		return !slices.ContainsFunc(call.after, overlaps) && !slices.ContainsFunc(earlier, overlaps)
+		return !overlaps(reach(call.after...)) && !overlaps(reach(others...)) && !overlaps(reach(earlier...))
 	case "within":
 		s, e, ok := extent(valueOf(paths[1]))
 		return ok && s <= start && end <= e
@@ -1688,10 +1885,11 @@ func osPredicate(predicate func(error) bool, timeout bool) func(rng *rand.Rand) 
 				err = os.NewSyscallError("read", inner)
 			}
 		}
+		before := snapshot(err)
 		done := k.enter()
 		result := predicate(err)
 		done()
 		k.check()
-		return sample{before: []any{err}, results: []any{result}}
+		return sample{before: before, after: []any{err}, results: []any{result}}
 	}
 }

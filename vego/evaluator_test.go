@@ -71,9 +71,11 @@ func (e *evaluator) number(t *logic.Term) *big.Int {
 		}
 		elements, index := e.sequence(t.Args[0]), x(1)
 		if index.Sign() < 0 || index.Cmp(big.NewInt(int64(len(elements)))) >= 0 {
-			// Outside the sequence the logic leaves the value open; any
-			// fixed choice is a model.
-			return big.NewInt(-99)
+			// Outside a sequence the logic leaves the value open in some
+			// places and not in others: past the end of a substring is
+			// its parent's byte. A formula that reads there is one the
+			// evaluator cannot judge.
+			panic(fmt.Sprintf("a formula reads %s at %s, outside its %d elements: %s", t.Args[0], index, len(elements), t))
 		}
 		return elements[index.Int64()]
 	}
@@ -85,7 +87,7 @@ func (e *evaluator) sequence(t *logic.Term) []*big.Int {
 	case logic.OpSelect:
 		rows, index := e.rows(t.Args[0]), e.number(t.Args[1])
 		if index.Sign() < 0 || index.Cmp(big.NewInt(int64(len(rows)))) >= 0 {
-			return nil
+			panic(fmt.Sprintf("a formula reads %s at %s, outside its %d elements: %s", t.Args[0], index, len(rows), t))
 		}
 		return rows[index.Int64()]
 	case logic.OpFill:
@@ -108,31 +110,16 @@ func (e *evaluator) rows(t *logic.Term) [][]*big.Int {
 	panic("cannot evaluate sequence of sequences " + t.String())
 }
 
-// sameSequence reports whether two sequences, of numbers or of sequences,
-// have the same elements.
-func (e *evaluator) sameSequence(a, b *logic.Term) bool {
-	if a.Sort == logic.SeqOf(logic.IntSeq) {
-		x, y := e.rows(a), e.rows(b)
-		return slices.EqualFunc(x, y, func(r, s []*big.Int) bool {
-			return slices.EqualFunc(r, s, func(m, n *big.Int) bool { return m.Cmp(n) == 0 })
-		})
-	}
-	return slices.EqualFunc(e.sequence(a), e.sequence(b), func(m, n *big.Int) bool { return m.Cmp(n) == 0 })
-}
-
 func (e *evaluator) holds(t *logic.Term) bool {
 	x := func(i int) bool { return e.holds(t.Args[i]) }
 	switch t.Op {
 	case logic.OpTrue, logic.OpFalse:
 		return t.Op == logic.OpTrue
 	case logic.OpEq:
-		switch {
-		case t.Args[0].Sort == logic.Err:
+		// The resolver writes = of booleans as an iff and of sequences as
+		// a quantified formula, so only numbers and errors come here.
+		if t.Args[0].Sort == logic.Err {
 			return e.errors.error(t.Args[0]) == e.errors.error(t.Args[1])
-		case t.Args[0].Sort == logic.Bool:
-			return x(0) == x(1)
-		case t.Args[0].Sort.IsSeq():
-			return e.sameSequence(t.Args[0], t.Args[1])
 		}
 		return e.number(t.Args[0]).Cmp(e.number(t.Args[1])) == 0
 	case logic.OpIs:
@@ -175,6 +162,19 @@ func (e *evaluator) holds(t *logic.Term) bool {
 		return t.Op == logic.OpForall
 	}
 	panic("cannot evaluate formula " + t.String())
+}
+
+// judge reports whether a formula holds of a sample, and fails the test
+// with what the evaluator could not judge, such as a read outside a
+// sequence.
+func (e *evaluator) judge(t *testing.T, what string, formula *logic.Term) (holds bool) {
+	t.Helper()
+	defer func() {
+		if fault := recover(); fault != nil {
+			t.Fatalf("%s cannot be judged on this sample: %v", what, fault)
+		}
+	}()
+	return e.holds(formula)
 }
 
 // rangeOf returns the integers, lo to hi inclusive, that the variable of
@@ -313,7 +313,8 @@ func ints(values ...int64) *logic.Term {
 // rest on against Go on random values: each kind of interval, a value that
 // makes a formula false only at its first or last index, quantifiers
 // nested and sharing an interval, a range of elements, Go's / and %, and
-// numbers past int64. A quantifier the evaluator cannot bound panics.
+// numbers past int64. A quantifier the evaluator cannot bound, and a read
+// outside a sequence, panic.
 func TestEvaluator(t *testing.T) {
 	res := logic.NewResolver()
 	eval := func(src string, env groundEnv) bool {
@@ -336,12 +337,9 @@ func TestEvaluator(t *testing.T) {
 		}
 		lo, hi, x := int64(rng.Intn(9)-2), int64(rng.Intn(9)-2), int64(rng.Intn(5))
 		env := groundEnv{"A": ints(values...), "lo": logic.IntLit(lo), "hi": logic.IntLit(hi), "x": logic.IntLit(x)}
-		at := func(k int64) int64 {
-			if k < 0 || k >= int64(len(values)) {
-				return -99
-			}
-			return values[k]
-		}
+		// A read outside A cannot be judged, so the formulas read A only
+		// inside it, and Go's answer counts only those indices.
+		inside := func(k int64) bool { return 0 <= k && k < int64(len(values)) }
 		// Go's answer over the integers from first to last.
 		every := func(first, last int64, p func(int64) bool) bool {
 			for k := first; k <= last; k++ {
@@ -351,17 +349,17 @@ func TestEvaluator(t *testing.T) {
 			}
 			return true
 		}
-		below := func(k int64) bool { return at(k) < x }
+		below := func(k int64) bool { return !inside(k) || values[k] < x }
 		for _, interval := range []struct {
 			text        string
 			first, last int64
 		}{
 			{"[lo, hi)", lo, hi - 1}, {"[lo, hi]", lo, hi}, {"(lo, hi)", lo + 1, hi - 1}, {"(lo, hi]", lo + 1, hi},
 		} {
-			if got, want := eval("Forall k in "+interval.text+" : A[k] < x", env), every(interval.first, interval.last, below); got != want {
+			if got, want := eval("Forall k in "+interval.text+" : (0 <= k And k < |A|) -> A[k] < x", env), every(interval.first, interval.last, below); got != want {
 				t.Fatalf("Forall k in %s : A[k] < x with A = %v, lo = %d, hi = %d, x = %d: got %v, want %v", interval.text, values, lo, hi, x, got, want)
 			}
-			if got, want := eval("Exists k in "+interval.text+" : ~(A[k] < x)", env), !every(interval.first, interval.last, below); got != want {
+			if got, want := eval("Exists k in "+interval.text+" : 0 <= k And k < |A| And ~(A[k] < x)", env), !every(interval.first, interval.last, below); got != want {
 				t.Fatalf("Exists k in %s : ~(A[k] < x) with A = %v, lo = %d, hi = %d, x = %d: got %v, want %v", interval.text, values, lo, hi, x, got, want)
 			}
 		}
@@ -376,8 +374,10 @@ func TestEvaluator(t *testing.T) {
 		if got, want := eval("Exists i, j in [0, |A|) : i < j And A[j] < A[i]", env), !sorted; got != want {
 			t.Fatalf("unsorted with a shared interval %v: got %v", values, got)
 		}
-		if got, want := eval("A[lo:hi) < x", env), every(lo, hi-1, below); got != want {
-			t.Fatalf("A[lo:hi) < x with A = %v, lo = %d, hi = %d, x = %d: got %v, want %v", values, lo, hi, x, got, want)
+		from, to := int64(rng.Intn(len(values)+1)), int64(rng.Intn(len(values)+1))
+		env["from"], env["to"] = logic.IntLit(from), logic.IntLit(to)
+		if got, want := eval("A[from:to) < x", env), every(from, to-1, below); got != want {
+			t.Fatalf("A[from:to) < x with A = %v, from = %d, to = %d, x = %d: got %v, want %v", values, from, to, x, got, want)
 		}
 		if got, want := eval("Exists i in [0, |A|) : Forall j in [0, |A|) : A[j] <= A[i]", env), n > 0; got != want {
 			t.Fatalf("a greatest element of %v: got %v", values, got)
@@ -396,11 +396,11 @@ func TestEvaluator(t *testing.T) {
 	if !eval("u > 9223372036854775807 And u = 18446744073709551615 And u + 1 > 18446744073709551615 And u / 2 = 9223372036854775807", huge) {
 		t.Fatalf("MaxUint64 is not evaluated as itself")
 	}
-	for _, src := range []string{"Forall k in Z : k = k", "Exists k in [0, 1 + 4096 * 4096) : A[k] < 0"} {
+	for _, src := range []string{"Forall k in Z : k = k", "Exists k in [0, 1 + 4096 * 4096) : A[k] < 0", "A[1] = 1", "A[-1] = 1", "Forall k in [0, |A|] : A[k] = 1"} {
 		func() {
 			defer func() {
 				if recover() == nil {
-					t.Errorf("%s was evaluated, though no sample can range over its integers", src)
+					t.Errorf("%s was evaluated, though it reads outside A or ranges over integers no sample can", src)
 				}
 			}()
 			eval(src, groundEnv{"A": ints(1)})

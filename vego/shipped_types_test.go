@@ -230,12 +230,12 @@ func writerHarness(open func() io.Writer) func(rng *rand.Rand) sample {
 			w.Write(randomBytes(rng))
 		}
 		p := randomBytes(rng)
-		before := slices.Clone(p)
+		before := snapshot(p)
 		n, err := w.Write(p)
 		if f, ok := w.(*os.File); ok {
 			f.Close()
 		}
-		return sample{before: []any{before}, after: []any{p}, results: []any{n, err}}
+		return sample{before: before, after: []any{p}, results: []any{n, err}}
 	}
 }
 
