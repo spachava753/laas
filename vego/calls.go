@@ -309,7 +309,8 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 
 // holdsCode reports whether a value of a type can hold, however deep, a
 // value whose methods or body are chosen where the value is made: an
-// interface, a function, or a channel through which one may arrive.
+// interface, a function, a channel through which one may arrive, or an
+// unsafe.Pointer, which may point to any of these.
 func holdsCode(t types.Type, seen map[types.Type]bool) bool {
 	if t == nil || seen[t] {
 		return false
@@ -318,6 +319,8 @@ func holdsCode(t types.Type, seen map[types.Type]bool) bool {
 	switch u := t.Underlying().(type) {
 	case *types.Interface, *types.Signature, *types.Chan:
 		return true
+	case *types.Basic:
+		return u.Kind() == types.UnsafePointer
 	case *types.Pointer:
 		return holdsCode(u.Elem(), seen)
 	case *types.Slice:

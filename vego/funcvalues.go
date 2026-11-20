@@ -511,6 +511,10 @@ func (pv *pkgVerifier) foreignCode(t types.Type, seen map[types.Type]bool) strin
 		return "an error, or another interface"
 	case *types.Chan:
 		return "a channel"
+	case *types.Basic:
+		if u.Kind() == types.UnsafePointer {
+			return "an unsafe.Pointer"
+		}
 	case *types.Signature:
 		if pv.valueContract(t) == nil {
 			return "a function value whose type has no contract"
@@ -603,6 +607,10 @@ func holdsCallable(pv *pkgVerifier, t types.Type, seen map[types.Type]bool) bool
 	switch u := t.Underlying().(type) {
 	case *types.Signature:
 		return true
+	case *types.Basic:
+		// An unsafe.Pointer may point to a function value or to an
+		// interface value that verified code made.
+		return u.Kind() == types.UnsafePointer
 	case *types.Interface:
 		return pv.makeable(t)
 	case *types.Pointer:
