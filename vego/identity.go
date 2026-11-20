@@ -181,7 +181,7 @@ func (pv *pkgVerifier) usableSentinel(variable *types.Var) (sentinelInfo, string
 		return info, fmt.Sprintf("%s is not known to have its value yet when this runs: %s while the variables of the package are "+
 			"initialised, which may run this function first", spelled, pv.unsettled[variable])
 	case variable.Pkg() != pv.pass.Pkg && pv.reassigned[variable]:
-		return info, fmt.Sprintf("%s is assigned in this package, so it is not known to hold the error it was declared with", spelled)
+		return info, fmt.Sprintf("%s %s in this package, so it is not known to hold the error it was declared with", spelled, pv.changeOf[variable])
 	case !isSentinel && variable.Pkg() != pv.pass.Pkg:
 		if fact := pv.publishedBy(variable); fact != nil && fact.Changed[variable.Name()] != "" {
 			return info, fmt.Sprintf("%s %s in package %s, so it is not known to hold the error it was declared with",

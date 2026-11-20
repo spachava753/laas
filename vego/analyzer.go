@@ -502,10 +502,11 @@ type pkgVerifier struct {
 	homemade  map[*types.Var]bool
 	unsettled map[*types.Var]string
 	// reassigned holds the package-level variables that the package
-	// changes, and ownChanges says for those of the package how and where
-	// first; escapes says where a use first does more than read a value
-	// out of a variable. See findChanges.
+	// changes, changeOf says for each how and where first, and ownChanges
+	// the same for those of the package; escapes says where a use first
+	// does more than read a value out of a variable. See findChanges.
 	reassigned map[*types.Var]bool
+	changeOf   map[*types.Var]string
 	ownChanges map[*types.Var]string
 	escapes    map[*types.Var]string
 	// origins caches what the variables of each function body are assigned,

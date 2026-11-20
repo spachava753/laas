@@ -35,6 +35,7 @@ import (
 func (pv *pkgVerifier) findChanges() {
 	pv.reassigned = map[*types.Var]bool{}
 	pv.ownChanges = map[*types.Var]string{}
+	pv.changeOf = map[*types.Var]string{}
 	pv.escapes = map[*types.Var]string{}
 	at := func(pos token.Pos) string {
 		position := pv.pass.Fset.Position(pos)
@@ -42,6 +43,9 @@ func (pv *pkgVerifier) findChanges() {
 	}
 	changed := func(variable *types.Var, what string, pos token.Pos) {
 		pv.reassigned[variable] = true
+		if pv.changeOf[variable] == "" {
+			pv.changeOf[variable] = what + " at " + at(pos)
+		}
 		if variable.Pkg() == pv.pass.Pkg && pv.ownChanges[variable] == "" {
 			pv.ownChanges[variable] = what + " at " + at(pos)
 		}
@@ -212,7 +216,7 @@ func (pv *pkgVerifier) useOf(stack []ast.Node) use {
 				}
 				return escape
 			}
-			if parent.X == cur {
+			if parent.X == cur && pv.rangeCopies(pv.info.TypeOf(cur)) {
 				return use{pos: cur.Pos()}
 			}
 			return escape
@@ -231,12 +235,45 @@ func (pv *pkgVerifier) useOf(stack []ast.Node) use {
 }
 
 // readOf decides a use that ends at cur: a read of a value without
-// references is a read, and anything else an escape.
+// references is a read, and anything else an escape. The index of a map
+// that gives two results, as in v, ok := m[k], has the type of a tuple,
+// which is read when both of its parts are.
 func (pv *pkgVerifier) readOf(cur ast.Expr, inValue bool, escape use) use {
-	if flat(pv.info.TypeOf(cur), map[types.Type]bool{}) {
+	t := pv.info.TypeOf(cur)
+	if tuple, ok := t.(*types.Tuple); ok {
+		for part := range tuple.Variables() {
+			if !flat(part.Type(), map[types.Type]bool{}) {
+				return escape
+			}
+		}
+		return use{pos: cur.Pos()}
+	}
+	if flat(t, map[types.Type]bool{}) {
 		return use{pos: cur.Pos()}
 	}
 	return escape
+}
+
+// rangeCopies reports whether each iteration of a range over a value of
+// the type copies out only values without references: the keys and
+// values of a map, the elements of a slice or an array, the bytes and
+// runes of a string, or the numbers up to an integer. Ranging over a
+// function calls it.
+func (pv *pkgVerifier) rangeCopies(t types.Type) bool {
+	switch u := t.Underlying().(type) {
+	case *types.Basic:
+		return true
+	case *types.Slice:
+		return flat(u.Elem(), map[types.Type]bool{})
+	case *types.Array:
+		return flat(u.Elem(), map[types.Type]bool{})
+	case *types.Pointer:
+		array, ok := u.Elem().Underlying().(*types.Array)
+		return ok && flat(array.Elem(), map[types.Type]bool{})
+	case *types.Map:
+		return flat(u.Key(), map[types.Type]bool{}) && flat(u.Elem(), map[types.Type]bool{})
+	}
+	return false
 }
 
 // flat reports whether a value of the type holds no reference at any
