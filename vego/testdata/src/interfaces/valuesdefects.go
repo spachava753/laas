@@ -53,7 +53,7 @@ func TypeSwitched(a any) (n int) {
 	return 0
 }
 
-// @Ensures u = s // want `in Ensures annotation: an interface value can only be compared with nil`
+// @Ensures u < s // want `in Ensures annotation: operator < cannot be applied to an interface value`
 func InFormula(s Shape) (u Shape) {
 	return s
 }

@@ -62,6 +62,10 @@ type fnVerifier struct {
 	// of the constants that stand for the state on entry.
 	entry    map[*types.Var]value
 	entryBrk *logic.Term
+	// converted holds the references of the interface values that
+	// conversions of concrete values in the function made; see
+	// interfaceValue.
+	converted []*logic.Term
 	// namedInFormulas holds the constants of slices whose capacity a
 	// formula names, and, followed by " = nil", those a formula compares
 	// with nil; see noteNamed.

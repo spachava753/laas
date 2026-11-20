@@ -291,10 +291,12 @@ func Pair(ref, at *Term) *Term {
 func FuncVal(ref *Term) *Term { return node(OpFuncVal, Ref, ref) }
 
 // IfaceVal stands for a value of an interface type other than error in a
-// formula, which can only be compared with nil: ref is zero exactly when
-// the value is the nil interface. Two interface values that are not nil
-// may hold the same value under different references, and == on them can
-// panic, so nothing else is said of them.
+// formula, which can be compared with nil and with another interface
+// value: ref is zero exactly when the value is the nil interface, and two
+// values are the same value when their references are equal, which is when
+// one was copied from the other. That is not Go's ==: two conversions of
+// one concrete value have references of their own, and == on them may be
+// true or panic.
 func IfaceVal(ref *Term) *Term { return node(OpIfaceVal, Ref, ref) }
 
 // holdsCode reports whether a term stands for a value that can only be
@@ -303,14 +305,15 @@ func holdsCode(t *Term) bool { return t.Op == OpFuncVal || t.Op == OpIfaceVal }
 
 // Incomparable says why two references cannot be compared, or returns ""
 // if they can: a pointer with a pointer or with nil, a function value or an
-// interface value with nil, and anything else, such as a map, with its like.
+// interface value with nil or with an interface value, and anything else,
+// such as a map, with its like.
 func Incomparable(a, b *Term) string {
 	isNil := func(t *Term) bool { return t.Op == OpIntLit && t.Val == 0 }
 	switch {
 	case (a.Op == OpFuncVal && !isNil(b)) || (b.Op == OpFuncVal && !isNil(a)):
 		return "a function value can only be compared with nil"
-	case (a.Op == OpIfaceVal && !isNil(b)) || (b.Op == OpIfaceVal && !isNil(a)):
-		return "an interface value can only be compared with nil"
+	case (a.Op == OpIfaceVal && !isNil(b) && b.Op != OpIfaceVal) || (b.Op == OpIfaceVal && !isNil(a) && a.Op != OpIfaceVal):
+		return "an interface value can only be compared with nil or with another interface value"
 	case holdsCode(a) || holdsCode(b):
 		return ""
 	case a.Op != OpPair && b.Op != OpPair:

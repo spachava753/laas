@@ -312,9 +312,10 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 //
 // What this lets the outcome choose is what an outcome of Go can be, for a
 // produced reference that the facts use only inside its home or compared
-// with 0. A formula compares an interface value only with nil, so such a
-// reference is one whose number decides nothing, and it can be taken to be
-// a new reference, apart from every other. A new reference is what a
+// with 0. Such a reference is one whose number decides nothing, so it can
+// be taken to be a new reference, apart from every other. One that a
+// formula compares with another interface value, as in r = x, occurs
+// elsewhere and keeps the home the table gives it. A new reference is what a
 // conversion gives, and the model gives its home no value of its own: a
 // converted value may hold memory that is new, or what another value holds,
 // so any home from 1 up to the bound afterwards is one that some outcome

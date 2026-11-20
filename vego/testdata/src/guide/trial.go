@@ -110,7 +110,7 @@ type Link struct {
 
 // @Requires s != nil
 // @Modifies s
-// @Ensures s.next' = s And s.Value' = s.Value // want `in Ensures annotation: an interface value can only be compared with nil`
+// @Ensures s.next' = s And s.Value' = s.Value
 func (s *Link) Loop() {
 	s.next = s
 }
@@ -197,4 +197,11 @@ func Duplicate(A []int) (r []int) {
 func Overwrite(A []int) (r []int) {
 	A[0] = 2
 	return A // want `postcondition may not hold: r = A`
+}
+
+// @Requires a != nil And b != nil And a != b
+// @Modifies a, b
+// @Ensures a.Value' = b.Value And b.Value' = a.Value
+func Swap(a, b *Link) {
+	a.Value, b.Value = b.Value, a.Value
 }

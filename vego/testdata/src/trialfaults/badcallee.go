@@ -13,7 +13,7 @@ type R struct {
 // touch has an Ensures that cannot be read.
 //
 // @Requires r != nil
-// @Ensures r.Value' = r.Value // want `in Ensures annotation: an interface value can only be compared with nil`
+// @Ensures r.Value' = r // want `in Ensures annotation: an interface value can only be compared with nil or with another interface value`
 func (r *R) touch() (result *R) {
 	return r
 }
@@ -23,7 +23,7 @@ func (r *R) touch() (result *R) {
 // @Requires r != nil
 // @Ensures n = 1
 func (r *R) Caller(a []int) (n int) {
-	r.touch() // want `the contract of touch cannot be used: its Ensures annotation at badcallee.go:\d+:\d+ cannot be read \(an interface value can only be compared with nil\), so this call is verified without it`
+	r.touch() // want `the contract of touch cannot be used: its Ensures annotation at badcallee.go:\d+:\d+ cannot be read \(an interface value can only be compared with nil or with another interface value\), so this call is verified without it`
 	return a[5] // want `index may be out of range` `postcondition may not hold: n = 1`
 }
 
@@ -91,7 +91,7 @@ func (r *R) Joined(a []int, ok bool) (n int) {
 // gate has a Requires that cannot be read, so nothing it ensures is
 // assumed: its Ensures would rest on a precondition that was not checked.
 //
-// @Requires x.Value = x.Value // want `in Requires annotation: an interface value can only be compared with nil`
+// @Requires x.Value = x // want `in Requires annotation: an interface value can only be compared with nil or with another interface value`
 // @Ensures n = 7
 func gate(x *R) (n int) {
 	return 7
@@ -100,7 +100,7 @@ func gate(x *R) (n int) {
 // @Requires r != nil
 // @Ensures n = 7
 func (r *R) Gated() (n int) {
-	n = gate(r) // want `the contract of gate cannot be used: its Requires annotation at badcallee.go:\d+:\d+ cannot be read \(an interface value can only be compared with nil\), so this call is verified with none of its Requires and Ensures`
+	n = gate(r) // want `the contract of gate cannot be used: its Requires annotation at badcallee.go:\d+:\d+ cannot be read \(an interface value can only be compared with nil or with another interface value\), so this call is verified with none of its Requires and Ensures`
 	return n // want `postcondition may not hold: n = 7`
 }
 

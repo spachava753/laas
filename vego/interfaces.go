@@ -12,12 +12,17 @@ import (
 )
 
 // An interface value other than an error is one reference, zero exactly
-// for the nil interface. Nothing else is known of it: which type it holds,
-// and what value of that type, is not modelled, so two interface values can
-// only be compared with nil, in code and in formulas. Go's == on two
-// interface values compares the dynamic types and then the values, and
-// panics when both hold the same type and that type is not comparable;
-// none of that can be decided without the dynamic types.
+// for the nil interface. Which type it holds, and what value of that type,
+// is not modelled, so code can compare two interface values only with nil:
+// Go's == on two interface values compares the dynamic types and then the
+// values, and panics when both hold the same type and that type is not
+// comparable, and none of that can be decided without the dynamic types.
+// A formula can also compare two of them by =, which is identity, as for
+// errors: the same value, one copied from the other. Each conversion makes
+// a reference that differs from those of the other conversions of the
+// function, so two conversions of one concrete value are two values, where
+// Go's == may say they are equal. When dynamic types bring == to code, it
+// gets a term of its own, and = in a formula keeps this meaning.
 //
 // Converting a concrete value to an interface gives a reference that is
 // not zero, also for a nil pointer, which in Go makes an interface that is
@@ -88,6 +93,14 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 	}
 	held := v.fresh("iface", logic.Ref)
 	st.assume(logic.Ne(held, logic.RefLit(0)))
+	// Each conversion makes a value of its own, which is not any value
+	// another conversion of the function made, even of the same concrete
+	// value: in a formula, two interface values are the same value only
+	// when one was copied from the other.
+	for _, other := range v.converted {
+		st.assume(logic.Ne(held, other))
+	}
+	v.converted = append(v.converted, held)
 	return value{held}
 }
 

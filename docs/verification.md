@@ -238,7 +238,7 @@ A predicate called `held`, `rheld`, or `running` cannot be used on a mutex or a 
 
 Formulas have no bit operators, no `len`, and no floating-point facts. Write `|A|` for a length. They cannot call functions, only predicates. Structs cannot be compared as a whole. Compare their fields.
 
-An interface value can be compared only with `nil`, also in a formula. So a contract cannot say that a field of an interface type, such as `any`, keeps its value:
+In a formula, `=` between two interface values says that they are the same value: one was copied from the other. This is how a contract says that a field of an interface type, such as `any`, keeps its value:
 
 ```go
 // @Requires s != nil
@@ -249,11 +249,9 @@ func (s *Link) Loop() {
 }
 ```
 
-```text
-vego: in Ensures annotation: an interface value can only be compared with nil
-```
+`Modifies s` covers the field `Value` too, so without the clause a caller would know nothing of it after the call.
 
-`Modifies s` covers that field, and after a call the caller knows nothing of it.
+This is not Go's `==`. Two conversions of one concrete value are two values, so after `a, b := any(p), any(p)` the formula `a = b` is false, although `a == b` is true in Go. Code still cannot compare two interface values. See [Comparing interface values](#comparing-interface-values).
 
 `=` between two slices compares their lengths and elements, not whether they share memory. A copy is equal to what it copies:
 
@@ -653,7 +651,7 @@ A contract that cannot be read is reported at each call, so the caller fails the
 type Box struct{ Value any }
 
 // @Requires b != nil
-// @Ensures b.Value' = b.Value
+// @Ensures b.Value' = b
 func (b *Box) touch() (result *Box) {
 	return b
 }
@@ -666,9 +664,11 @@ func Touches(b *Box) {
 ```
 
 ```text
-vego: in Ensures annotation: an interface value can only be compared with nil
+vego: in Ensures annotation: an interface value can only be compared with nil or with another
+interface value
 vego: the contract of touch cannot be used: its Ensures annotation at unreadable.go:7:1 cannot be
-read (an interface value can only be compared with nil), so this call is verified without it
+read (an interface value can only be compared with nil or with another interface value), so this
+call is verified without it
 ```
 
 The first message is at the clause, and the second at the call in `Touches`.
@@ -1120,7 +1120,7 @@ An interface value that may be nil cannot be called:
 vego: the interface value p may be nil
 ```
 
-An interface value can be compared with `nil`, in code and in formulas, as in `p != nil`.
+An interface value can be compared with `nil`, in code and in formulas, as in `p != nil`. A formula can also compare two interface values by `=`, which says that they are the same value (see [Comparing interface values](#comparing-interface-values)).
 
 ### Writing a contract on a method of an interface
 
@@ -1392,6 +1392,19 @@ is not comparable; compare with nil instead
 ```
 
 Type assertions and type switches are not supported either.
+
+A formula can compare two interface values. `a = b` says that they are the same value: one was copied from the other, by an assignment, a conversion to another interface type, or a call that hands it on. It is not Go's `==`. Two conversions of one concrete value are two values, so a function that returns `any(p), any(p)` proves `a != b`, although `a == b` is true in Go. A contract that says a function hands back what it was given, or that a field keeps its value, uses this form:
+
+```go
+// @Requires a != nil And b != nil And a != b
+// @Modifies a, b
+// @Ensures a.Value' = b.Value And b.Value' = a.Value
+func Swap(a, b *Link) {
+	a.Value, b.Value = b.Value, a.Value
+}
+```
+
+An interface value and an error cannot be compared in a formula. An error is modelled apart from other interface values (see [Errors](#errors)).
 
 ### States of interface values
 
@@ -4937,7 +4950,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - an entry in the trust file for a type of the module of the analysed package, or one with `runs`, `keeps`, or `calls`;
 - `context.WithCancel` and the functions like it, which keep the context they are given and run it on other goroutines (see [Types without a shipped entry](#types-without-a-shipped-entry));
 - a function that keeps code it is given anywhere but in a result or in memory that a parameter reaches, such as a registry, a goroutine, or a timer, which has no true entry; making a trusted function with `keeps` into a value; and handing a function literal, a function, or a method value of a type without a contract to a parameter under `keeps` (see [Functions that keep what they are given](#functions-that-keep-what-they-are-given));
-- comparing interface values with anything but `nil`, type assertions, and type switches;
+- comparing interface values in code with anything but `nil`, type assertions, and type switches;
 - a cycle of calls that goes through a call through an interface value or a function value, or through code of another package (see [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods)), reported as `this call may not end`;
 - converting an interface value to an interface whose methods it does not have from the same declarations, other than `any`;
 - interface types written in place that embed a named interface, generic interface types, and interfaces that embed `error`;
@@ -5060,6 +5073,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `limit`, `lib.Limit`, `table[i]` | in the contract of a verified function, a package-level variable that nothing changes, of the package or of an imported package |
 | `"io/fs".ErrNotExist` | in a trusted contract, an error variable named by the path of its package |
 | `err = ErrEmpty` | the two are the same error |
+| `x = y` | for two interface values: the same value, one copied from the other; not Go's `==` |
 | `is(err, target)` | `errors.Is(err, target)` reports true |
 | `has(m, k)` | the map contains the key |
 | `held(m)`, `held(a.mu')` | the goroutine that runs the function holds the `sync.Mutex` or `sync.RWMutex`; `m` is a mutex or a pointer to one |
