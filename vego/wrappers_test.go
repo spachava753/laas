@@ -1,6 +1,8 @@
 package vego
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
 	"go/types"
 	"io"
@@ -226,7 +228,7 @@ func (c *sequenceCheck) env() *specEnv {
 // holds reports whether every clause holds.
 func (c *sequenceCheck) holds(clauses []*clause) bool {
 	env := c.env()
-	eval := &evaluator{bound: c.bound, bindings: map[string]*big.Int{}}
+	eval := &evaluator{bound: c.bound, bindings: map[string]*big.Int{}, errors: standIn}
 	for _, cl := range clauses {
 		formula, err := c.pv.res.Formula(cl.node, env)
 		if err != nil {
@@ -242,7 +244,7 @@ func (c *sequenceCheck) holds(clauses []*clause) bool {
 // ensure fails the test unless every ensures holds.
 func (c *sequenceCheck) ensure(what string) {
 	env := c.env()
-	eval := &evaluator{bound: c.bound, bindings: map[string]*big.Int{}}
+	eval := &evaluator{bound: c.bound, bindings: map[string]*big.Int{}, errors: standIn}
 	for _, cl := range c.fn.ensures {
 		formula, err := c.pv.res.Formula(cl.node, env)
 		if err != nil {
@@ -414,6 +416,357 @@ func checkLoggerEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 				}
 			}
 			checked++
+		}
+	}
+	if checked < 100 {
+		t.Fatalf("only %d calls of %s were checked", checked, key)
+	}
+}
+
+// randomKeptReader returns a reader that keptReader wraps around one of
+// several: random lines, any reader the documentation allows, an endless
+// reader of one byte with no newline, or a final line without a newline of
+// exactly MaxScanTokenSize bytes or one more.
+func randomKeptReader(rng *rand.Rand, k *keptLog) *keptReader {
+	var inner io.Reader
+	switch rng.Intn(5) {
+	case 0:
+		inner = anyReader{rng}
+	case 1:
+		inner = endless{}
+	case 2:
+		inner = strings.NewReader(strings.Repeat("x", bufio.MaxScanTokenSize+rng.Intn(2)))
+	default:
+		var lines strings.Builder
+		for range rng.Intn(20) {
+			lines.WriteString(strings.Repeat("ab", rng.Intn(40)))
+			lines.WriteString([]string{"\n", "\r\n", ""}[rng.Intn(3)])
+		}
+		inner = strings.NewReader(lines.String())
+	}
+	return &keptReader{log: k, inner: inner}
+}
+
+// endless reads the byte x for ever.
+type endless struct{}
+
+func (endless) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 'x'
+	}
+	return len(p), nil
+}
+
+// within runs a call of a method of a wrapper as active on a goroutine of
+// its own, so that kept code that runs on another goroutine is seen, and
+// fails the test if it does not return within 5 s.
+func within(t *testing.T, k *keptLog, what string, call func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		leave := k.enter()
+		defer leave()
+		call()
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s did not return within 5s", what)
+	}
+	if len(k.problems) > 0 {
+		t.Fatalf("after %s: %s", what, strings.Join(k.problems, "; "))
+	}
+}
+
+// standIn is the error that errorTerm grounds every error that is not nil
+// to; the entries compare errors only with nil.
+var standIn = &grounder{errs: []error{io.ErrShortWrite}}
+
+// errorTerm grounds an error that no formula of these entries reads but
+// to compare it with nil, as an error the evaluator knows.
+func errorTerm(err error) *logic.Term {
+	if err == nil {
+		return logic.NilErr()
+	}
+	return logic.Const(errorName+"0", logic.Err)
+}
+
+// lengthTerm grounds a string or a slice by its length, which is all that
+// the entries of these wrappers say of one.
+func lengthTerm(n int) *logic.Term {
+	return logic.Fill(logic.IntLit(int64(n)), logic.IntLit(0))
+}
+
+// checkMethod checks one call of a method of a wrapper whose receiver is
+// its first parameter: the requires with the ghost before, the call, and
+// the ensures with the ghost after, which the call itself does not change.
+// It reports whether the requires held and the call was made.
+func checkMethod(t *testing.T, pv *pkgVerifier, fn *funcInfo, k *keptLog, ready bool, given []*logic.Term, bound int64,
+	call func() []*logic.Term) bool {
+	t.Helper()
+	state := map[*types.Var]map[string]bool{fn.params[0]: {"ready": ready}}
+	c := &sequenceCheck{t: t, pv: pv, fn: fn, before: state, after: state, bound: bound,
+		given: map[*types.Var]*logic.Term{fn.params[0]: reference(false)}}
+	for i, param := range fn.params[1:] {
+		c.given[param] = given[i]
+	}
+	if !c.holds(fn.requires) {
+		return false
+	}
+	within(t, k, fn.obj.FullName(), func() { c.results = call() })
+	c.ensure(fn.obj.FullName())
+	return true
+}
+
+// checkScannerEntries runs the entries of bufio.NewScanner and the methods
+// of a Scanner. Each round makes a Scanner over a reader that records how
+// it is called, then calls Scan, Text, and Err at random, and Split or
+// Buffer as code that is not verified may before the first Scan, after
+// which ready is false. NewScanner must run nothing it is given, and
+// make a new Scanner each time.
+func checkScannerEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key string) {
+	newFn := contractOfKey(t, pv, pkg, "bufio.NewScanner")
+	methods := map[string]*funcInfo{}
+	for _, name := range []string{"Scan", "Text", "Err"} {
+		methods[name] = contractOfKey(t, pv, pkg, "(*bufio.Scanner)."+name)
+	}
+	rng := rand.New(rand.NewSource(1))
+	checked := 0
+	var made []*bufio.Scanner
+	for range 300 {
+		k := &keptLog{}
+		var r io.Reader
+		if rng.Intn(8) > 0 {
+			r = randomKeptReader(rng, k)
+		}
+		c := &sequenceCheck{t: t, pv: pv, fn: newFn, given: map[*types.Var]*logic.Term{newFn.params[0]: reference(r == nil)}}
+		if !c.holds(newFn.requires) {
+			continue
+		}
+		s := bufio.NewScanner(r)
+		k.check()
+		fresh := !slices.Contains(made, s)
+		made = append(made, s)
+		ready := true
+		c.results = []*logic.Term{reference(s == nil)}
+		c.fresh = map[*types.Var]bool{newFn.results[0]: fresh}
+		c.after = map[*types.Var]map[string]bool{newFn.results[0]: {"ready": ready}}
+		c.ensure("NewScanner")
+		if key == "bufio.NewScanner" {
+			checked++
+			continue
+		}
+		scanned := false
+		for range 1 + rng.Intn(10) {
+			name := []string{"Scan", "Scan", "Text", "Text", "Err", "Split", "Buffer", "sleep"}[rng.Intn(8)]
+			switch name {
+			case "Split", "Buffer":
+				// Both panic once Scan has been called.
+				if scanned {
+					continue
+				}
+				if name == "Split" {
+					s.Split(bufio.ScanWords)
+				} else {
+					s.Buffer(make([]byte, 16), 64)
+				}
+				ready = false
+				continue
+			case "sleep":
+				time.Sleep(time.Millisecond)
+				k.check()
+				continue
+			}
+			fn := methods[name]
+			made := checkMethod(t, pv, fn, k, ready, nil, 0, func() []*logic.Term {
+				switch name {
+				case "Scan":
+					return []*logic.Term{logic.BoolLit(s.Scan())}
+				case "Text":
+					return []*logic.Term{lengthTerm(len(s.Text()))}
+				}
+				return []*logic.Term{errorTerm(s.Err())}
+			})
+			scanned = scanned || (made && name == "Scan")
+			if made && fn.obj.FullName() == key {
+				checked++
+			}
+		}
+	}
+	if checked < 100 {
+		t.Fatalf("only %d calls of %s were checked", checked, key)
+	}
+}
+
+// checkReaderEntries runs the entries of bufio.NewReader and of ReadByte.
+// The reader given to NewReader is sometimes a *bufio.Reader that is large
+// enough, which NewReader returns as it is, so that a claim that the result
+// is new fails. Code that is not verified may Reset the Reader at random.
+func checkReaderEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key string) {
+	newFn := contractOfKey(t, pv, pkg, "bufio.NewReader")
+	readByte := contractOfKey(t, pv, pkg, "(*bufio.Reader).ReadByte")
+	rng := rand.New(rand.NewSource(1))
+	checked := 0
+	var made []*bufio.Reader
+	for range 200 {
+		k := &keptLog{}
+		var rd io.Reader
+		switch rng.Intn(8) {
+		case 0:
+		case 1:
+			own := bufio.NewReaderSize(randomKeptReader(rng, k), 8192)
+			made = append(made, own)
+			rd = own
+		default:
+			rd = randomKeptReader(rng, k)
+		}
+		c := &sequenceCheck{t: t, pv: pv, fn: newFn, given: map[*types.Var]*logic.Term{newFn.params[0]: reference(rd == nil)}}
+		if !c.holds(newFn.requires) {
+			continue
+		}
+		b := bufio.NewReader(rd)
+		k.check()
+		c.results = []*logic.Term{reference(b == nil)}
+		c.fresh = map[*types.Var]bool{newFn.results[0]: !slices.Contains(made, b)}
+		made = append(made, b)
+		ready := true
+		c.after = map[*types.Var]map[string]bool{newFn.results[0]: {"ready": ready}}
+		c.ensure("NewReader")
+		if key == "bufio.NewReader" {
+			checked++
+			continue
+		}
+		for range 1 + rng.Intn(10) {
+			switch rng.Intn(8) {
+			case 0:
+				b.Reset(nil)
+				ready = false
+				continue
+			case 1:
+				b.Reset(randomKeptReader(rng, k))
+				ready = true
+				continue
+			case 2:
+				// Reset to itself sets nothing.
+				b.Reset(b)
+				continue
+			case 3:
+				time.Sleep(time.Millisecond)
+				k.check()
+				continue
+			}
+			if checkMethod(t, pv, readByte, k, ready, nil, 0, func() []*logic.Term {
+				c, err := b.ReadByte()
+				return []*logic.Term{logic.IntLit(int64(c)), errorTerm(err)}
+			}) {
+				checked++
+			}
+		}
+	}
+	if checked < 100 {
+		t.Fatalf("only %d calls of %s were checked", checked, key)
+	}
+}
+
+// writerMethods calls a method of a Writer by the key of its entry, with
+// the slice Write is given, and returns its results.
+var writerMethods = map[string]func(b *bufio.Writer, p []byte) []*logic.Term{
+	"(*bufio.Writer).Write": func(b *bufio.Writer, p []byte) []*logic.Term {
+		n, err := b.Write(p)
+		return []*logic.Term{logic.IntLit(int64(n)), errorTerm(err)}
+	},
+	"(*bufio.Writer).WriteByte": func(b *bufio.Writer, p []byte) []*logic.Term {
+		return []*logic.Term{errorTerm(b.WriteByte('w'))}
+	},
+	"(*bufio.Writer).Flush": func(b *bufio.Writer, p []byte) []*logic.Term {
+		return []*logic.Term{errorTerm(b.Flush())}
+	},
+}
+
+// checkWriterEntries runs the entries of bufio.NewWriter and the methods of
+// a Writer, as checkReaderEntries does for a Reader. Every slice that Write
+// was given must be as it was, after that call and after the later ones.
+func checkWriterEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key string) {
+	newFn := contractOfKey(t, pv, pkg, "bufio.NewWriter")
+	if key != "bufio.NewWriter" && writerMethods[key] == nil {
+		t.Fatalf("no harness calls %s; add one to writerMethods", key)
+	}
+	contracts := map[string]*funcInfo{}
+	for name := range writerMethods {
+		contracts[name] = contractOfKey(t, pv, pkg, name)
+	}
+	rng := rand.New(rand.NewSource(1))
+	checked := 0
+	var made []*bufio.Writer
+	for range 200 {
+		k := &keptLog{}
+		var w io.Writer
+		switch rng.Intn(8) {
+		case 0:
+		case 1:
+			own := bufio.NewWriterSize(randomKeptWriter(rng, k), 8192)
+			made = append(made, own)
+			w = own
+		default:
+			w = randomKeptWriter(rng, k)
+		}
+		c := &sequenceCheck{t: t, pv: pv, fn: newFn, given: map[*types.Var]*logic.Term{newFn.params[0]: reference(w == nil)}}
+		if !c.holds(newFn.requires) {
+			continue
+		}
+		b := bufio.NewWriter(w)
+		k.check()
+		c.results = []*logic.Term{reference(b == nil)}
+		c.fresh = map[*types.Var]bool{newFn.results[0]: !slices.Contains(made, b)}
+		made = append(made, b)
+		ready := true
+		c.after = map[*types.Var]map[string]bool{newFn.results[0]: {"ready": ready}}
+		c.ensure("NewWriter")
+		if key == "bufio.NewWriter" {
+			checked++
+			continue
+		}
+		var given, copies [][]byte
+		for range 1 + rng.Intn(10) {
+			switch rng.Intn(9) {
+			case 0:
+				b.Reset(nil)
+				ready = false
+				continue
+			case 1:
+				b.Reset(randomKeptWriter(rng, k))
+				ready = true
+				continue
+			case 2:
+				b.Reset(b)
+				continue
+			case 3:
+				time.Sleep(time.Millisecond)
+				k.check()
+				continue
+			}
+			name := []string{"(*bufio.Writer).Write", "(*bufio.Writer).WriteByte", "(*bufio.Writer).Flush"}[rng.Intn(3)]
+			p := make([]byte, []int{0, 1, 100, 4096, 10000}[rng.Intn(5)])
+			rng.Read(p)
+			var args []*logic.Term
+			switch name {
+			case "(*bufio.Writer).Write":
+				args = []*logic.Term{lengthTerm(len(p))}
+				given, copies = append(given, p), append(copies, slices.Clone(p))
+			case "(*bufio.Writer).WriteByte":
+				args = []*logic.Term{logic.IntLit('w')}
+			}
+			if checkMethod(t, pv, contracts[name], k, ready, args, int64(len(p))+2, func() []*logic.Term {
+				return writerMethods[name](b, p)
+			}) && name == key {
+				checked++
+			}
+			for i := range given {
+				if !bytes.Equal(given[i], copies[i]) {
+					t.Fatalf("a slice that Write was given changed after %s", name)
+				}
+			}
 		}
 	}
 	if checked < 100 {

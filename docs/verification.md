@@ -3361,6 +3361,7 @@ The names in an entry are the parameter and result names from the function's sou
 - `os.Remove`
 - `math/rand.Intn`, `math/rand.Int`
 - `fmt.Sprintf`, `fmt.Sprint`, `fmt.Sprintln`, `fmt.Printf`, `fmt.Print`, `fmt.Println`, `fmt.Fprintf`, `fmt.Fprint`, `fmt.Fprintln`, described in [Formatting and logging](#formatting-and-logging)
+- `bufio.NewScanner` with `Scan`, `Text`, and `Err`; `bufio.NewReader` with `ReadByte`; `bufio.NewWriter` with `Write`, `WriteByte`, and `Flush`; and the states `ready` of `bufio.Scanner`, `bufio.Reader`, and `bufio.Writer`, described in [Wrappers of readers and writers](#wrappers-of-readers-and-writers)
 - `log.Printf`, `log.Print`, `log.Println`, `log.New`, and the methods of `*log.Logger` of the same names, with the state `ready` of `log.Logger`, described in [Writing to a writer or a logger](#writing-to-a-writer-or-a-logger)
 - `path.Join`, `path/filepath.Join`
 - the methods of `sync.Mutex` and `sync.RWMutex` that lock and unlock, and `(*sync.Once).Do`, described in [Locks](#locks)
@@ -3751,6 +3752,129 @@ An entry with `keeps` cannot be used when any of these holds:
 
 A function literal, a function, or a method value of a function type without a contract cannot be handed to a parameter under `keeps`. A trusted function with `keeps` cannot be made into a function value or a method of an interface value.
 
+### Wrappers of readers and writers
+
+`vego` ships entries for `bufio.NewScanner`, `bufio.NewReader`, and `bufio.NewWriter`, and for some methods of what they return. Each constructor keeps the reader or writer it is given, and the methods run it later.
+
+#### Reading lines
+
+A `bufio.Scanner` reads lines from a reader:
+
+```go
+// @Requires r != nil And limit >= 0
+// @Ensures 0 <= n And n <= limit
+func ReadLines(r io.Reader, limit int) (n int, err error) {
+	sc := bufio.NewScanner(r)
+	// @Invariant 0 <= n And n <= limit And ready(sc)
+	// @Variant limit - n
+	for n < limit && sc.Scan() {
+		fmt.Println(sc.Text())
+		n++
+	}
+	if err := sc.Err(); err != nil {
+		return n, fmt.Errorf("read lines: %w", err)
+	}
+	return n, nil
+}
+```
+
+`Scan`, `Text`, and `Err` are the methods with entries. `Scan` and `Text` require the state `ready` of the scanner. It holds when the scanner was made by `bufio.NewScanner` with a reader that is not `nil`, and neither `Split` nor `Buffer` has been called on it since. `NewScanner` ensures it, and `Scan` keeps it. A loop that calls `Scan` forgets it, as it forgets what any call writes, so the loop's invariant must state `ready(sc)`.
+
+`Text` returns at most 65536 bytes, the size of the buffer of a ready scanner. That bound lets `fmt.Println(sc.Text())` be proved not to build more than can be allocated.
+
+A loop needs a variant, and a reader may never end. So `for sc.Scan()` alone cannot be verified:
+
+```go
+// @Requires r != nil
+// @Ensures True
+func ReadAll(r io.Reader) {
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+	}
+}
+```
+
+```text
+vego: loop needs a // @Variant annotation to prove that it terminates
+vego: precondition of Scan may not hold: ready(s)
+```
+
+Bound the number of lines, as `ReadLines` does.
+
+A scanner that code which is not verified hands your function may have another split function. Require the state in the contract, `@Requires sc != nil And ready(sc)`, and list the scanner under `@Modifies`.
+
+`ReadString`, `ReadBytes`, `ReadLine`, `ReadSlice`, and `(*bufio.Scanner).Bytes` have no entries:
+
+- `ReadString` and `ReadBytes` do not return from a reader that never sends the delimiter. They grow their buffer until the program runs out of memory. Use a `Scanner`, whose buffer is bounded.
+- `ReadLine`, `ReadSlice`, and `Bytes` return a slice of the buffer that the next call overwrites. No entry can name that memory.
+
+#### Errors that pass through
+
+The error that `Err` returns may be one that the reader returned. Under the shipped entries nothing is known of it, so `ReadLines` cannot wrap it:
+
+```text
+vego: cannot verify ReadLines: formatting err would run the methods of an error whose origin is
+not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one
+that a trusted contract vouches for, can be formatted
+```
+
+You can return it as it is. To wrap it, your trust file needs an entry for `(io.Reader).Read` that vouches for the errors of the readers your callers pass, as described in [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write). It also needs an entry for `Err` that vouches for what it returns:
+
+```yaml
+  (*bufio.Scanner).Err:
+    reason: >-
+      Err returns nil, an error that the reader returned other than io.EOF,
+      or an error of bufio or io made by errors.New (ErrTooLong,
+      ErrNegativeAdvance, ErrAdvanceTooFar, ErrBadReadCount, io.ErrNoProgress).
+      A ready Scanner splits with ScanLines, which returns no error. Our entry
+      for (io.Reader).Read vouches for the errors of every reader; reviewed
+      2026-11-20.
+    requires: ["s != nil", "ready(s)"]
+    runs: [s]
+    vouches: [result]
+    modifies: []
+```
+
+With both entries, `ReadLines` verifies. The claim of the `Err` entry rests on the claim of the `Read` entry. If the `Read` entry is false for some reader, so is this one.
+
+#### Writing through a buffer
+
+`bufio.NewWriter` returns the writer it is given when that writer is already a large enough `*bufio.Writer`. So what it returns is not known to be new, and a function that writes through it writes memory that may have existed when it was called:
+
+```go
+// @Requires w != nil
+// @Ensures True
+func WriteBuffered(w io.Writer) (err error) {
+	bw := bufio.NewWriter(w)
+	_, err = bw.Write([]byte("done\n"))
+	return err
+}
+```
+
+```text
+vego: Write may modify bw, which WriteBuffered may not modify; it is memory that NewWriter returned,
+and its contract does not say that this is new memory, so it may have existed when WriteBuffered was
+called; take it as a parameter and list it in a // @Modifies clause
+```
+
+Until `vego` can tell memory that only an argument reaches, take the `*bufio.Writer` as a parameter and require that it is ready:
+
+```go
+// @Requires bw != nil And ready(bw)
+// @Modifies bw
+// @Ensures True
+func WriteTotal(bw *bufio.Writer, total []byte) (err error) {
+	if _, err = bw.Write(total); err != nil {
+		return err
+	}
+	return bw.Flush()
+}
+```
+
+`Write`, `WriteByte`, and `Flush` have entries. `ready(bw)` holds when the last of `bufio.NewWriter`, `bufio.NewWriterSize`, and `Reset` that set the writer's output set one that is not `nil`. `WriteString` has no entry, because it calls the `WriteString` method of the writer it wraps when that writer has one, and no entry covers that method. Write `bw.Write([]byte(s))` instead.
+
+A `*bufio.Reader` is the same: `bufio.NewReader` may return the reader it is given, and `ReadByte` requires `ready(br)`.
+
 ### Errors that a trusted function returns
 
 Without a claim in its contract, `vego` knows nothing about the methods of an error that a trusted function returns. Verified code can return such an error and compare it with `nil` or with an error variable of the kinds listed in [Comparing errors](#comparing-errors). It cannot format it, wrap it, or pass it as the first argument of `errors.Is`. To allow these, list the error result under `vouches`:
@@ -3795,22 +3919,23 @@ The claim cannot be made for every function. Take a function that is not verifie
 
 A trusted function can also write such a value into memory it is given. If its `modifies` covers memory that can hold, at any depth, a function value or an interface value of a type with a contract, list the parameter that the memory belongs to under `vouches`:
 
+The shipped entry of `(*bufio.Scanner).Scan` is one:
+
 ```yaml
   (*bufio.Scanner).Scan:
-    reason: >-
-      Reads the next token through the reader the scanner holds, and keeps
-      that reader. Every scanner our callers pass splits with
-      bufio.ScanLines, which advances on every token and writes nothing a
-      caller can see; reviewed 2026-11-19.
-    requires: ["s != nil"]
+    requires:
+      - "s != nil"
+      - "ready(s)"
     runs: [s]
-    vouches: [s]
     modifies: [s]
+    vouches: [s]
+    ensures:
+      - "ready(s')"
 ```
 
 With `vouches: [s]`, you claim that every such value that the function writes into, or leaves in, the memory its `modifies` covers under `s` meets the contract of its type. A `*bufio.Scanner` holds an `io.Reader`, which has a shipped contract. Without `vouches: [s]`, each call reports that the entry cannot be used, and says to list `s`.
 
-With `runs: [s]`, the entry also claims that the contract of `Scan` holds whatever code `s` holds, and that includes its split function. `Scan` panics if the split function returns too many empty tokens without advancing, and a split function set by code that is not verified can write memory that verified code reads. So the entry is true only if every scanner that your callers pass uses a split function that advances and writes nothing a caller can see, such as `bufio.ScanLines` or `bufio.ScanWords`. It is false for a scanner with any other split function.
+With `runs: [s]`, the entry also claims that the contract of `Scan` holds whatever code `s` holds, and that includes its split function. The requires `ready(s)` limits that to scanners whose split function is `bufio.ScanLines`, as described in [Reading lines](#reading-lines).
 
 ### Interfaces and function types of other packages
 

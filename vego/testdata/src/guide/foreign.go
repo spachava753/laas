@@ -11,7 +11,7 @@ import (
 // The programs of the section on interfaces and function types of other
 // packages. The trust file of the tests gives (io.Reader).Read the entry
 // that vouches for its errors, which the section shows, and
-// (*bufio.Scanner).Scan an entry.
+// (*bufio.Scanner).Err the entry that rests on it.
 
 // @Requires ctx != nil And cancel != nil And w != nil
 // @Ensures True
@@ -96,11 +96,11 @@ func Wrapping() (r io.Reader) {
 	return wrapping{}
 }
 
-// @Requires s != nil And 0 <= n <= 1000
+// @Requires s != nil And ready(s) And 0 <= n <= 1000
 // @Modifies s
 // @Ensures 0 <= lines <= n
 func CountLines(s *bufio.Scanner, n int) (lines int) {
-	// @Invariant 0 <= lines <= n
+	// @Invariant 0 <= lines <= n And ready(s)
 	// @Variant n - lines
 	for lines < n && s.Scan() {
 		lines++

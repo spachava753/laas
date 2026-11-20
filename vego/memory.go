@@ -599,6 +599,13 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 		if variable := v.fixedRefs[w.ref.Name]; remedy == "" && w.ref.Op == logic.OpConst && variable != "" {
 			remedy = fmt.Sprintf("it is memory that the package-level variable %s refers to, which a Modifies clause cannot name yet", variable)
 		}
+		// Memory that a trusted function returned without saying that it
+		// is new may have existed when the function was called, as what
+		// bufio.NewWriter returns when it is given a large enough Writer.
+		if callee := v.returnedBy[w.ref.Name]; remedy == "" && len(candidates) == 0 && w.ref.Op == logic.OpConst && callee != "" {
+			remedy = fmt.Sprintf("it is memory that %s returned, and its contract does not say that this is new memory, so it may have existed when %s "+
+				"was called; take it as a parameter and list it in a // @Modifies clause", callee, v.fn.obj.Name())
+		}
 		switch {
 		case remedy != "":
 			v.report(pos, "%s, which %s may not modify; %s%s", what, v.fn.obj.Name(), remedy, limitNote(result))

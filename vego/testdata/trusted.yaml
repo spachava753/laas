@@ -1176,16 +1176,20 @@ trusted:
     modifies: [p]
     ensures: ["0 <= n And n <= |p|"]
 
-  (*bufio.Scanner).Scan:
+  # The entry the guide shows for wrapping the error of a Scanner, which
+  # rests on the entry above for the errors of Read.
+  (*bufio.Scanner).Err:
     reason: >-
-      Reads the next token through the reader the scanner holds, and keeps
-      that reader. Every scanner our callers pass splits with
-      bufio.ScanLines, which advances on every token and writes nothing a
-      caller can see; reviewed 2026-11-19.
-    requires: ["s != nil"]
+      Err returns nil, an error that the reader returned other than io.EOF,
+      or an error of bufio or io made by errors.New (ErrTooLong,
+      ErrNegativeAdvance, ErrAdvanceTooFar, ErrBadReadCount, io.ErrNoProgress).
+      A ready Scanner splits with ScanLines, which returns no error. Our entry
+      for (io.Reader).Read vouches for the errors of every reader; reviewed
+      2026-11-20.
+    requires: ["s != nil", "ready(s)"]
     runs: [s]
-    vouches: [s]
-    modifies: [s]
+    vouches: [result]
+    modifies: []
 
   guide.logRecord:
     reason: Formats the number of a record and writes it to the writer the record holds, whatever writer that is.

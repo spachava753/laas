@@ -528,7 +528,11 @@ type pkgVerifier struct {
 	// fixedRefs holds, by the name of its constant, the reference of a
 	// fixed variable that a function has read, with the variable as this
 	// package spells it; see checkWriteOr.
-	fixedRefs    map[string]string
+	fixedRefs map[string]string
+	// returnedBy holds, by the name of its constant, the reference of a
+	// pointer or slice that a trusted function returned, with the name of
+	// the function; see checkWriteOr.
+	returnedBy   map[string]string
 	fixedOf      map[*types.Package]*fixedFact
 	hidden       string
 	reliedValues map[string]bool

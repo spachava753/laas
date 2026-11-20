@@ -783,6 +783,17 @@ func TestShippedContracts(t *testing.T) {
 					checkLoggerEntries(t, pv, pkg, key)
 					return
 				}
+				switch {
+				case key == "bufio.NewScanner" || strings.HasPrefix(key, "(*bufio.Scanner)."):
+					checkScannerEntries(t, pv, pkg, key)
+					return
+				case key == "bufio.NewReader" || strings.HasPrefix(key, "(*bufio.Reader)."):
+					checkReaderEntries(t, pv, pkg, key)
+					return
+				case key == "bufio.NewWriter" || strings.HasPrefix(key, "(*bufio.Writer)."):
+					checkWriterEntries(t, pv, pkg, key)
+					return
+				}
 				callee, ok := pkg.Scope().Lookup(name).(*types.Func)
 				if receiver, method, isMethod := strings.Cut(strings.TrimPrefix(name, "(*"), ")."); isMethod {
 					typeName := pkg.Scope().Lookup(receiver).(*types.TypeName)

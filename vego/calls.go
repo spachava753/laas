@@ -507,6 +507,16 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	for i := range results {
 		if _, ok := layoutOf(sig.Results().At(i).Type()); ok {
 			results[i] = v.unknown(name, sig.Results().At(i).Type(), st)
+			// A write through what a trusted function returned that the
+			// caller may not make is reported with the function's name.
+			_, isPointer := pointee(sig.Results().At(i).Type())
+			if fn.trust != nil && (isSlice(sig.Results().At(i).Type()) || isPointer) {
+				for _, leaf := range results[i] {
+					if leaf.Sort == logic.Ref && leaf.Op == logic.OpConst {
+						v.returnedBy[leaf.Name] = callee.Name()
+					}
+				}
+			}
 		}
 	}
 	post := &specEnv{v: v, sink: st, fn: fn, args: args, results: results, now: before, post: st.mem, before: existed, applied: applied}
