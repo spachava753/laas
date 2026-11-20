@@ -82,3 +82,18 @@ trusted:
     modifies: []
     ensures:
       - "result <-> (|path| > 0 And path[0] = '/')"
+
+  path.Split:
+    reason: >-
+      "Split splits path immediately following the final slash, separating it
+      into a directory and file name component. If there is no slash in
+      path, Split returns an empty dir and file set to path. The returned
+      values have the property that path = dir+file." So dir begins path and
+      file ends it, and file holds no slash.
+    modifies: []
+    ensures:
+      - "|dir| + |file| = |path|"
+      - "Forall k in [0, |dir|) : dir[k] = path[k]"
+      - "Forall k in [0, |file|) : file[k] = path[|dir| + k]"
+      - "Forall k in [0, |file|) : file[k] != '/'"
+      - "|dir| > 0 -> dir[|dir| - 1] = '/'"

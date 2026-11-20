@@ -3898,7 +3898,7 @@ The names in an entry are the parameter and result names from the function's sou
 - `io.NopCloser`, `io.LimitReader`, `io.TeeReader`, `io.MultiReader`, `io.MultiWriter`, described in [Wrappers in package io](#wrappers-in-package-io)
 - `bufio.NewScanner` with `Scan`, `Text`, and `Err`; `bufio.NewReader` with `ReadByte`; `bufio.NewWriter` with `Write`, `WriteByte`, and `Flush`; and the states `ready` of `bufio.Scanner`, `bufio.Reader`, and `bufio.Writer`, described in [Wrappers of readers and writers](#wrappers-of-readers-and-writers)
 - `log.Printf`, `log.Print`, `log.Println`, `log.New`, and the methods of `*log.Logger` of the same names, with the state `ready` of `log.Logger`, described in [Writing to a writer or a logger](#writing-to-a-writer-or-a-logger)
-- `path.Join`, `path.Clean`, `path.Dir`, `path.Base`, `path.Ext`, `path.IsAbs`, `path/filepath.Join`, `path/filepath.Clean`, `path/filepath.Dir`, `path/filepath.Base`, `path/filepath.Ext`, `path/filepath.Rel`. The bound `|result| <= |path| + 2` of `path/filepath.Clean` and `Dir` allows for Windows, where `Clean` can put `.\` before a path. It is read from the source for every system, and the tests check it on Unix only.
+- `path.Join`, `path.Clean`, `path.Dir`, `path.Base`, `path.Ext`, `path.IsAbs`, `path.Split`, `path/filepath.Join`, `path/filepath.Clean`, `path/filepath.Dir`, `path/filepath.Base`, `path/filepath.Ext`, `path/filepath.Rel`, `path/filepath.Split`. The bound `|result| <= |path| + 2` of `path/filepath.Clean` and `Dir` allows for Windows, where `Clean` can put `.\` before a path. It is read from the source for every system, and the tests check it on Unix only.
 - `regexp.Compile` and the methods `MatchString`, `Match`, `FindString`, and `FindStringSubmatch` of `*regexp.Regexp`, which say nothing of what matches
 - `(*net/http.Request).PathValue`, `(net/http.Header).Get` and `Set`, and `net/http.NewServeMux`
 - the methods of `sync.Mutex` and `sync.RWMutex` that lock and unlock, and `(*sync.Once).Do`, described in [Locks](#locks)
@@ -3927,7 +3927,8 @@ Some functions of the standard library have no shipped contract, because no true
 - `sort.SearchStrings` needs a sorted slice of strings, and a formula cannot say that.
 - `bytes.Split` and `bytes.Fields` return slices inside their argument, which a contract cannot say of every element.
 - The methods of `bytes.Buffer` and `strings.Builder` that grow the buffer need its length, an unexported field.
-- `(*regexp.Regexp).FindStringIndex` names its result differently in different releases of Go, and `regexp.MustCompile` panics on a pattern that does not compile.
+- `(*regexp.Regexp).FindStringIndex` names its result differently in different releases of Go.
+- `regexp.MustCompile` panics on a pattern that does not compile. Call `regexp.Compile` and handle its error.
 - `http.Error` and the `Header` method of `http.ResponseWriter` write memory of the writer.
 
 ### What is checked in an entry

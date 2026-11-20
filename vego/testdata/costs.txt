@@ -2718,11 +2718,13 @@ stdentries	os.Open	7	2010228	2
 stdentries	os.WriteFile	3	13086	0
 stdentries	path.Base	1	4885	0
 stdentries	path.IsAbs	1	1330	0
+stdentries	path.Split	1	8152	0
 stdentries	path/filepath.Base	1	7260	0
 stdentries	path/filepath.Clean	1	4091	0
 stdentries	path/filepath.Dir	1	4091	0
 stdentries	path/filepath.Ext	1	5941	0
 stdentries	path/filepath.Rel	3	14609	0
+stdentries	path/filepath.Split	1	10132	0
 stdentries	regexp.Compile	7	1102499	5
 stdentries	sort.Strings	1	10263	0
 stdentries	stdentries.BeforeColon	10	14785	0
@@ -2766,6 +2768,8 @@ stdentries	stdentries.MatchAny	4	61374	2
 stdentries	stdentries.Matches	35	325968	11
 stdentries	stdentries.MonthName	7	100323	2
 stdentries	stdentries.MonthNameOff	5	99041	2
+stdentries	stdentries.Parent	5	19630	0
+stdentries	stdentries.ParentClaimsTooMuch	4	21715	0
 stdentries	stdentries.Parts	6	30720	2
 stdentries	stdentries.Port	30	72287	0
 stdentries	stdentries.Quoted	7	11137	0

@@ -123,3 +123,19 @@ func Groups(re *regexp.Regexp, line string) (groups []string) {
 func MatchAny(re *regexp.Regexp, line string) (ok bool) {
 	return re.MatchString(line) // want `precondition of MatchString may not hold: re != nil`
 }
+
+// Parent splits a slash-separated path into its directory and its last
+// element.
+//
+// @Ensures |dir| + |file| = |p|
+// @Ensures Forall k in [0, |file|) : file[k] != '/'
+func Parent(p string) (dir, file string) {
+	return path.Split(p)
+}
+
+// ParentClaimsTooMuch says the directory is never empty.
+//
+// @Ensures |dir| > 0
+func ParentClaimsTooMuch(p string) (dir, file string) {
+	return filepath.Split(p) // want `postcondition may not hold: \|dir\| > 0`
+}

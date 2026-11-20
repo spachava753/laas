@@ -721,11 +721,21 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 	"net/http.NewServeMux": func(*rand.Rand) sample {
 		return sample{results: []any{http.NewServeMux()}}
 	},
-	"path.Clean":          pathHarness(path.Clean),
-	"path.Dir":            pathHarness(path.Dir),
-	"path.Base":           pathHarness(path.Base),
-	"path.Ext":            pathHarness(path.Ext),
-	"path.IsAbs":          pathHarness(path.IsAbs),
+	"path.Clean": pathHarness(path.Clean),
+	"path.Dir":   pathHarness(path.Dir),
+	"path.Base":  pathHarness(path.Base),
+	"path.Ext":   pathHarness(path.Ext),
+	"path.IsAbs": pathHarness(path.IsAbs),
+	"path.Split": func(rng *rand.Rand) sample {
+		p := randomPathText(rng)
+		dir, file := path.Split(p)
+		return sample{before: []any{p}, results: []any{dir, file}}
+	},
+	"path/filepath.Split": func(rng *rand.Rand) sample {
+		p := randomPathText(rng)
+		dir, file := filepath.Split(p)
+		return sample{before: []any{p}, results: []any{dir, file}}
+	},
 	"path/filepath.Clean": pathHarness(filepath.Clean),
 	"path/filepath.Dir":   pathHarness(filepath.Dir),
 	"path/filepath.Base":  pathHarness(filepath.Base),

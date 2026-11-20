@@ -110,3 +110,17 @@ trusted:
       - "2 * (3 * |basePath| + |targPath| + 16) + 65536 <= MaxAlloc"
     vouches: [result2]
     modifies: []
+
+  path/filepath.Split:
+    reason: >-
+      "Split splits path immediately following the final Separator,
+      separating it into a directory and file name component. If there is no
+      Separator in path, Split returns an empty dir and file set to path. The
+      returned values have the property that path = dir+file." So dir begins
+      path and file ends it. Not said: which bytes are separators, which
+      differs between systems.
+    modifies: []
+    ensures:
+      - "|dir| + |file| = |path|"
+      - "Forall k in [0, |dir|) : dir[k] = path[k]"
+      - "Forall k in [0, |file|) : file[k] = path[|dir| + k]"
