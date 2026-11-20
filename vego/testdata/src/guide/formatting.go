@@ -67,7 +67,7 @@ func Fails(err error) {
 
 // @Ensures True
 func Greet(name string) {
-	log.Println("hello", name) // want `vego:\ what\ Println\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated;\ bound\ the\ lengths\ of\ the\ strings\ and\ slices\ it\ formats,\ and\ of\ a\ format\ that\ is\ not\ a\ constant`
+	log.Println("hello", name) // want `vego:\ what\ Println\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated;\ bound\ what\ it\ formats,\ as\ in\ .*Requires\ \|name\|\ <=\ 70368744159185`
 }
 
 type Temperature int

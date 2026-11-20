@@ -6,9 +6,12 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"math/big"
 	"slices"
+	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/solver"
 	"golang.org/x/tools/go/types/typeutil"
 )
 
@@ -420,16 +423,72 @@ func (v *fnVerifier) checkFormatAlloc(st *state, guard []*logic.Term, call *ast.
 			spec = fmtSpec{verbs: length, length: length, width: fmtMaxWidth, precision: fmtMaxWidth, expands: true}
 		}
 	}
-	bound, complete := fmtBound(spec, operands)
+	size := fmtBound(spec, operands)
+	bound := size.term()
 	built := logic.Add(bound, logic.IntLit(fmtSlack))
-	room := logic.Add(logic.Mul(built, logic.IntLit(2)), logic.IntLit(1<<16))
-	v.check(st, guard, logic.Le(room, logic.BigLit(v.maxAlloc())), call.Pos(),
-		"what %s builds from what it formats may be more than can be allocated; bound the lengths of the strings and slices it formats, "+
-			"and of a format that is not a constant", who)
-	if !complete {
+	needed := logic.Add(logic.Mul(built, logic.IntLit(2)), logic.IntLit(1<<16))
+	goal := logic.Le(needed, logic.BigLit(v.maxAlloc()))
+	done := v.at(call.Pos())
+	result := v.attempt(st, guard, goal)
+	done()
+	if result != solver.Proved {
+		v.report(call.Pos(), "what %s builds from what it formats may be more than can be allocated%s%s", who, v.formatHint(st, guard, size, format, formatVal), limitNote(result))
+	}
+	st.assume(logic.Implies(logic.And(guard...), goal))
+	if !size.complete {
 		return nil
 	}
 	return bound
+}
+
+// formatHint says, for a bound that is not proved to fit, what would make
+// it fit: a bound on each length it counts that the facts at the call do not
+// bound already, and on a format that is not a constant, chosen so that the
+// bound fits on this platform once the rest of it is counted.
+func (v *fnVerifier) formatHint(st *state, guard []*logic.Term, size fmtSize, format ast.Expr, formatVal value) string {
+	// What the bound may be: half of what can be allocated, less a page
+	// and what may be built beyond what fmt prints.
+	room := new(big.Int).Sub(v.maxAlloc(), big.NewInt(1<<16))
+	room.Rsh(room, 1).Sub(room, big.NewInt(fmtSlack))
+	n := size.suggest(room.Int64())
+	var clauses []string
+	stated := true
+	if !size.spec.line && size.spec.verbs.Op != logic.OpIntLit && !v.quickly(st, guard, logic.Le(logic.Len(formatVal[0]), logic.IntLit(fmtFormatHint))) {
+		clauses = append(clauses, fmt.Sprintf("|%s| <= %d", types.ExprString(format), fmtFormatHint))
+		stated = v.fromParameter(format)
+	}
+	seen := map[string]bool{}
+	for _, l := range size.each.lens {
+		if n == 0 || seen[l.name] || v.quickly(st, guard, logic.Le(l.length, logic.IntLit(n))) {
+			continue
+		}
+		seen[l.name] = true
+		clauses = append(clauses, fmt.Sprintf("|%s| <= %d", l.name, n))
+		stated = stated && l.param
+	}
+	switch {
+	case len(clauses) == 0:
+		return "; bound the lengths of the strings and slices it formats, and of a format that is not a constant"
+	case stated:
+		return "; bound what it formats, as in // @Requires " + strings.Join(clauses, " And ")
+	}
+	return "; it fits when " + strings.Join(clauses, " and ") + ", so check the lengths before the call, or bound what the values are made of"
+}
+
+// fromParameter reports whether an expression is a parameter of the
+// function, or a field of one, which a Requires clause can name.
+func (v *fnVerifier) fromParameter(e ast.Expr) bool {
+	for {
+		switch x := ast.Unparen(e).(type) {
+		case *ast.Ident:
+			param, ok := v.info.Uses[x].(*types.Var)
+			return ok && v.lit == nil && slices.Contains(v.fn.params, param)
+		case *ast.SelectorExpr:
+			e = x.X
+		default:
+			return false
+		}
+	}
 }
 
 // formatted returns an operand of formatting, with the value an expression
@@ -445,9 +504,9 @@ func (v *fnVerifier) formatted(st *state, e ast.Expr, held value) fmtOperand {
 		// fmt prints what the pointer points to, or <nil>, as it is now.
 		var object value
 		v.quietly(func() { object = v.pointedIn(st, st.mem, pointer.Elem(), held) })
-		return fmtOperand{val: object, t: pointer.Elem(), pointer: true, assumed: run != nil}
+		return fmtOperand{val: object, t: pointer.Elem(), pointer: true, assumed: run != nil, name: types.ExprString(e), param: v.fromParameter(e)}
 	}
-	return fmtOperand{val: held, t: t, assumed: run != nil && !isError(t)}
+	return fmtOperand{val: held, t: t, assumed: run != nil && !isError(t), name: types.ExprString(e), param: v.fromParameter(e)}
 }
 
 // checkFormattedAlloc is checkFormatAlloc for a call of a trusted function

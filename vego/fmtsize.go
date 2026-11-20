@@ -2,6 +2,7 @@ package vego
 
 import (
 	"go/types"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -117,18 +118,60 @@ func constantSpec(format string) fmtSpec {
 // fmtOperand is a value that is formatted, with its type. For a pointer,
 // val and t are what it points to and pointer is set. assumed is set for a
 // value whose String or Error method fmt may call, whose result has no
-// term.
+// term. name spells the value, for messages, and param says that it is a
+// parameter or a field of one, which a Requires clause can name.
 type fmtOperand struct {
 	val     value
 	t       types.Type
 	pointer bool
 	assumed bool
+	name    string
+	param   bool
 }
 
-// fmtBound returns a term that is at least the number of bytes that fmt
-// writes when it formats the operands under the spec, apart from the parts
-// the logic has no terms for, and whether there are none of those, so that
-// the term bounds all of it.
+// fmtLen is a length the bound counts: of a string or a slice, how many
+// bytes each of its units may take, and how it is spelled.
+type fmtLen struct {
+	length *logic.Term
+	coef   int64
+	name   string
+	param  bool
+}
+
+// fmtLinear is a constant and lengths, each with its coefficient.
+type fmtLinear struct {
+	c    int64
+	lens []fmtLen
+}
+
+// plus adds two linear forms.
+func (l fmtLinear) plus(o fmtLinear) fmtLinear {
+	return fmtLinear{c: l.c + o.c, lens: append(slices.Clip(l.lens), o.lens...)}
+}
+
+// term is the linear form as a term.
+func (l fmtLinear) term() *logic.Term {
+	terms := []*logic.Term{logic.IntLit(l.c)}
+	for _, n := range l.lens {
+		terms = append(terms, logic.Mul(n.length, logic.IntLit(n.coef)))
+	}
+	return sumOf(terms)
+}
+
+// fmtSize is a bound on what fmt writes: fixed, plus the format's own bytes
+// and, for each of its verbs, its width, precision, and wrapper, plus each
+// operand under the widest verb once for each use, verbs + 1 times, or once
+// without a format. complete says that nothing of it is assumed.
+type fmtSize struct {
+	spec     fmtSpec
+	each     fmtLinear
+	complete bool
+	count    int64
+}
+
+// fmtBound returns the bound on the bytes that fmt writes when it formats
+// the operands under the spec, apart from the parts the logic has no terms
+// for.
 //
 // Each verb formats one operand, or none, so with V verbs no operand is
 // formatted more than V times, and once more after the last verb as an
@@ -136,33 +179,62 @@ type fmtOperand struct {
 // its width, its precision, and what wraps it, plus V + 1 times what each
 // operand takes under the widest verb the format has. Without a format,
 // each operand is formatted once with %v.
-func fmtBound(spec fmtSpec, operands []fmtOperand) (*logic.Term, bool) {
-	terms := []*logic.Term{logic.IntLit(fmtVerbCost)}
-	complete := true
-	var each []*logic.Term
+func fmtBound(spec fmtSpec, operands []fmtOperand) fmtSize {
+	size := fmtSize{spec: spec, complete: true, count: int64(len(operands))}
 	for _, op := range operands {
-		weight, whole := fmtWeight(op.val, op.t, spec, true)
+		weight, whole := fmtWeight(op.val, op.t, spec, true, op.name)
+		for i := range weight.lens {
+			weight.lens[i].param = op.param
+		}
 		if op.pointer {
 			// A pointer is printed as & and what it points to, or as
 			// <nil>, which takes less.
-			weight = logic.Add(weight, logic.IntLit(fmtPointerCost))
+			weight.c += fmtPointerCost
 		}
-		each = append(each, weight)
-		complete = complete && whole && !op.assumed
+		size.each = size.each.plus(weight)
+		size.complete = size.complete && whole && !op.assumed
 	}
-	if spec.line {
-		for _, weight := range each {
-			terms = append(terms, weight, logic.IntLit(1))
+	return size
+}
+
+// term is the bound as a term.
+func (z fmtSize) term() *logic.Term {
+	if z.spec.line {
+		// A separator or a newline after each operand.
+		return logic.Add(logic.IntLit(fmtVerbCost+z.count), z.each.term())
+	}
+	perVerb := logic.IntLit(z.spec.width + z.spec.precision + fmtVerbCost)
+	uses := logic.Add(z.spec.verbs, logic.IntLit(1))
+	return sumOf([]*logic.Term{logic.IntLit(fmtVerbCost), z.spec.length, logic.Mul(z.spec.verbs, perVerb), logic.Mul(uses, z.each.term())})
+}
+
+// fmtFormatHint is the length of a format that is not a constant that a
+// message suggests bounding it by.
+const fmtFormatHint = 100
+
+// suggest returns a bound N such that the bound is at most room when every
+// length it counts is at most N, and a format that is not a constant at
+// most fmtFormatHint; or 0 when there is none.
+func (z fmtSize) suggest(room int64) int64 {
+	verbs, length, uses := int64(0), int64(0), int64(1)
+	if !z.spec.line {
+		if known := z.spec.verbs.Value(); z.spec.verbs.Op == logic.OpIntLit && known.IsInt64() {
+			verbs = known.Int64()
+			length = z.spec.length.Value().Int64()
+		} else {
+			verbs, length = fmtFormatHint, fmtFormatHint
 		}
-		return sumOf(terms), complete
+		uses = verbs + 1
 	}
-	perVerb := logic.IntLit(spec.width + spec.precision + fmtVerbCost)
-	terms = append(terms, spec.length, logic.Mul(spec.verbs, perVerb))
-	if len(each) > 0 {
-		uses := logic.Add(spec.verbs, logic.IntLit(1))
-		terms = append(terms, logic.Mul(uses, sumOf(each)))
+	coefs := int64(0)
+	for _, n := range z.each.lens {
+		coefs += n.coef
 	}
-	return sumOf(terms), complete
+	avail := room - fmtVerbCost - z.count - length - verbs*(z.spec.width+z.spec.precision+fmtVerbCost) - uses*z.each.c
+	if coefs == 0 || avail <= 0 {
+		return 0
+	}
+	return avail / (uses * coefs)
 }
 
 // fmtTypeName bounds how many bytes fmt writes for the name of a type, which
@@ -178,8 +250,8 @@ func fmtTypeName(t types.Type) int64 {
 // verb of the spec, and says whether it counts all of it. top is set for an
 // operand itself, whose elements and fields have terms; below the elements
 // of a slice, the lengths of what they hold have none and count as
-// nothing.
-func fmtWeight(val value, t types.Type, spec fmtSpec, top bool) (*logic.Term, bool) {
+// nothing. name spells the value.
+func fmtWeight(val value, t types.Type, spec fmtSpec, top bool, name string) (fmtLinear, bool) {
 	pad := spec.width + spec.precision + fmtTypeName(t)
 	perByte := int64(1)
 	if spec.expands && !spec.line {
@@ -192,50 +264,50 @@ func fmtWeight(val value, t types.Type, spec fmtSpec, top bool) (*logic.Term, bo
 		switch {
 		case u.Info()&types.IsString != 0:
 			if !top {
-				return logic.IntLit(pad + 2), false
+				return fmtLinear{c: pad + 2}, false
 			}
-			return logic.Add(logic.Mul(logic.Len(val[0]), logic.IntLit(perByte)), logic.IntLit(pad+2)), true
+			return fmtLinear{c: pad + 2, lens: []fmtLen{{length: logic.Len(val[0]), coef: perByte, name: name}}}, true
 		case u.Info()&types.IsComplex != 0:
 			// Each part takes the width and the precision, and %f of
 			// MaxFloat64 is 317 bytes.
-			return logic.IntLit(2*(spec.width+spec.precision+330) + fmtTypeName(t) + 4), true
+			return fmtLinear{c: 2*(spec.width+spec.precision+330) + fmtTypeName(t) + 4}, true
 		case u.Info()&types.IsFloat != 0:
-			return logic.IntLit(pad + 330), true
+			return fmtLinear{c: pad + 330}, true
 		}
 		// %#b of MinInt64 is 67 bytes, and nil prints as <nil>.
-		return logic.IntLit(pad + 80), true
+		return fmtLinear{c: pad + 80}, true
 	case *types.Slice:
 		elem := u.Elem()
 		if !top {
-			return logic.IntLit(pad + 4), false
+			return fmtLinear{c: pad + 4}, false
 		}
 		// Each element takes the width and the precision, as %5v of a
 		// []int shows, and a separator. A byte slice written as a string
-		// takes less for each byte than that, at most six with %#v.
-		weight, whole := fmtWeight(nil, elem, spec, false)
-		each := logic.Add(weight, logic.IntLit(2))
-		return logic.Add(logic.Mul(val[2], each), logic.IntLit(pad+4)), whole
+		// takes less for each byte than that, at most six with %#v. What an
+		// element takes is a constant: below the top nothing has a term.
+		weight, whole := fmtWeight(nil, elem, spec, false, "")
+		return fmtLinear{c: pad + 4, lens: []fmtLen{{length: val[2], coef: weight.c + 2, name: name}}}, whole
 	case *types.Struct:
-		terms := []*logic.Term{logic.IntLit(pad + 4)}
+		total := fmtLinear{c: pad + 4}
 		complete := true
 		for i := range u.NumFields() {
 			field := u.Field(i)
-			terms = append(terms, logic.IntLit(int64(len(field.Name())+2)))
+			total.c += int64(len(field.Name()) + 2)
 			lo, hi, _ := fieldLeaves(t, i)
 			var leaves value
 			if top {
 				leaves = val[lo:hi]
 			}
-			weight, whole := fmtWeight(leaves, field.Type(), spec, top)
-			terms = append(terms, weight)
+			weight, whole := fmtWeight(leaves, field.Type(), spec, top, name+"."+field.Name())
+			total = total.plus(weight)
 			complete = complete && whole
 		}
-		return sumOf(terms), complete
+		return total, complete
 	}
 	// An error, whose text has no term, and anything else that may be
 	// formatted holds what is assumed; around it come the width, the
 	// precision, and a name.
-	return logic.IntLit(pad + 64), false
+	return fmtLinear{c: pad + 64}, false
 }
 
 // sumOf adds up terms, of which there is at least one.

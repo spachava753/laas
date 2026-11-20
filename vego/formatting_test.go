@@ -198,7 +198,9 @@ func boundCases() []boundCase {
 	scalar := func(x any, t types.Type) boundCase {
 		return boundCase{x, t, value{logic.IntLit(0)}, none, false}
 	}
-	text := func(s string) boundCase { return boundCase{s, types.Typ[types.String], value{logic.Bytes(s)}, none, false} }
+	text := func(s string) boundCase {
+		return boundCase{s, types.Typ[types.String], value{logic.Bytes(s)}, none, false}
+	}
 	header := func(n int) value {
 		return value{logic.RefLit(1), logic.IntLit(0), logic.IntLit(int64(n)), logic.IntLit(int64(n))}
 	}
@@ -273,8 +275,8 @@ func TestBoundOnFormatting(t *testing.T) {
 		for _, c := range cases {
 			for _, verb := range append(slices.Clone(verbs), "%8.3v", "%-12q", "%.400e", "%999999.0f", "%999999v", "% #999x") {
 				out := fmt.Sprintf(verb, c.value)
-				term, _ := fmtWeight(c.val, c.t, constantSpec(verb), true)
-				weight := eval.number(term).Int64() + int64(c.assumed(verbs))
+				linear, _ := fmtWeight(c.val, c.t, constantSpec(verb), true, "x")
+				weight := eval.number(linear.term()).Int64() + int64(c.assumed(verbs))
 				if c.pointer {
 					weight += fmtPointerCost
 				}
@@ -297,7 +299,8 @@ func TestBoundOnFormatting(t *testing.T) {
 			ops[i] = fmtOperand{val: c.val, t: c.t, pointer: c.pointer}
 			assumed += uses * c.assumed(verbs)
 		}
-		term, complete := fmtBound(spec, ops)
+		size := fmtBound(spec, ops)
+		term, complete := size.term(), size.complete
 		if complete && assumed != 0 {
 			t.Fatalf("formatting %q: the bound counts all of it, but %d bytes are assumed", format, assumed)
 		}

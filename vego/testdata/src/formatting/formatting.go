@@ -151,7 +151,7 @@ func Greets(name string) (err error) {
 //
 // @Ensures True
 func Unbounded(name string) {
-	log.Println("starting", name) // want `vego:\ what\ Println\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated`
+	log.Println("starting", name) // want `vego:\ what\ Println\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated;\ bound\ what\ it\ formats,\ as\ in\ .*Requires\ \|name\|\ <=\ 70368744159185`
 }
 
 // %q may write four bytes for one, so a bound of the largest allocation is
@@ -160,7 +160,7 @@ func Unbounded(name string) {
 // @Requires |s| <= MaxAlloc / 2
 // @Ensures True
 func QuotedHalf(s string) (r string) {
-	return fmt.Sprintf("%q", s) // want `vego:\ what\ Sprintf\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated`
+	return fmt.Sprintf("%q", s) // want `vego:\ what\ Sprintf\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated;\ bound\ what\ it\ formats,\ as\ in\ .*Requires\ \|s\|\ <=\ 11728124026528`
 }
 
 // A format that is not a constant may hold a verb with a width of ten
@@ -174,14 +174,14 @@ func Formatted(format string, n int) (r string) {
 
 // @Ensures True
 func FormattedUnbounded(format string, n int) (r string) {
-	return fmt.Sprintf(format, n) // want `vego:\ what\ Sprintf\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated`
+	return fmt.Sprintf(format, n) // want `vego:\ what\ Sprintf\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated;\ bound\ what\ it\ formats,\ as\ in\ .*Requires\ \|format\|\ <=\ 100`
 }
 
 // The values of a deferred call are those at the defer statement.
 //
 // @Ensures True
 func DeferredUnbounded(name string) {
-	defer log.Print(name) // want `vego:\ what\ Print\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated`
+	defer log.Print(name) // want `vego:\ what\ Print\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated;\ bound\ what\ it\ formats,\ as\ in\ .*Requires\ \|name\|\ <=\ 140737488318401`
 }
 
 // @Ensures err = nil <-> ~fail
@@ -189,7 +189,7 @@ func WrapsUnbounded(fail bool, s string) (err error) {
 	if !fail {
 		return nil
 	}
-	return fmt.Errorf("bad %q: %w", s, io.EOF) // want `vego:\ what\ fmt\.Errorf\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated`
+	return fmt.Errorf("bad %q: %w", s, io.EOF) // want `vego:\ what\ fmt\.Errorf\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated;\ bound\ what\ it\ formats,\ as\ in\ .*Requires\ \|s\|\ <=\ 7818749350999`
 }
 
 // What Sprintf returns is no longer than the bound proved at the call, so it
@@ -208,5 +208,29 @@ func Relogs(host string, port int) {
 // @Ensures True
 func RelogsError() {
 	msg := fmt.Sprintf("%v", io.EOF)
-	log.Println(msg) // want `vego:\ what\ Println\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated`
+	log.Println(msg) // want `vego:\ what\ Println\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated;\ it\ fits\ when\ \|msg\|\ <=\ 140737488318401,\ so\ check\ the\ lengths\ before\ the\ call`
+}
+
+// The bound the message of Unbounded and QuotedHalf suggests is enough.
+//
+// @Requires |name| <= 70368744159185
+// @Ensures True
+func BoundedAsSuggested(name string) {
+	log.Println("starting", name)
+}
+
+// @Requires |s| <= 11728124026528
+// @Ensures True
+func QuotedAsSuggested(s string) (r string) {
+	return fmt.Sprintf("%q", s)
+}
+
+// A length checked in the body, as the message of RelogsError suggests.
+//
+// @Ensures True
+func RelogsChecked() {
+	msg := fmt.Sprintf("%v", io.EOF)
+	if len(msg) <= 140737488318401 {
+		log.Println(msg)
+	}
 }
