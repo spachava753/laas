@@ -4,6 +4,7 @@
 package keeps
 
 import (
+	"errors"
 	"io"
 
 	"keepslib"
@@ -77,10 +78,11 @@ func FillsEmpty(r io.Reader) {
 }
 
 // ReadsClosing reads through a new closer, whose error nothing predicts, so
-// it cannot promise success. The always-fails check gave every reference a
-// home that existed on entry, which contradicted the fresh home of what
-// Closing returns, so it found no input that reaches the read and reported
-// that the contract requires success for no input.
+// it cannot promise success. A sample of the always-fails check gives every
+// reference that is not the input's the home of one that is, which
+// contradicted the fresh home of what Closing returns, so the check found
+// no input that reaches the read and reported that the contract requires
+// success for no input.
 //
 // @Requires r != nil
 // @Ensures True
@@ -88,4 +90,27 @@ func ReadsClosing(r io.Reader) (err error) {
 	rc := keepslib.Closing(r)
 	_, err = rc.Read(make([]byte, 4))
 	return err
+}
+
+// AlwaysFails reads through a new closer and fails whatever the read did,
+// so its failure depends on no call, and the check reports it.
+//
+// @Requires r != nil
+// @Ensures True
+func AlwaysFails(r io.Reader) (err error) { // want `vego: the contract of AlwaysFails may also be met by a function that always returns an error`
+	rc := keepslib.Closing(r)
+	_, _ = rc.Read(make([]byte, 4))
+	return errors.New("x")
+}
+
+// FailsAfterRead fails on both branches after the read.
+//
+// @Requires r != nil
+// @Ensures True
+func FailsAfterRead(r io.Reader) (err error) { // want `vego: the contract of FailsAfterRead may also be met by a function that always returns an error`
+	rc := keepslib.Closing(r)
+	if _, e := rc.Read(make([]byte, 4)); e != nil {
+		return errors.New("read")
+	}
+	return errors.New("always")
 }

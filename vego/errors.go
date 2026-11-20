@@ -1042,13 +1042,35 @@ func (v *fnVerifier) canReach(path []*logic.Term) bool {
 		}
 	}
 	known := v.knownFacts()
+	// A sample gives a home only to the interface values of the input, and
+	// every other reference the home of one of them, which is not what a
+	// value that a call made after entry has: a contract that says such a
+	// value is new, as fresh(result) does, would contradict it. So the
+	// facts that read the home of a reference that is not the input's are
+	// left out where a sample is applied; that can only make the path more
+	// likely to be reached, which is the side this check errs on.
+	var sampled []*logic.Term
+	for _, fact := range path {
+		if !v.readsLaterHome(fact) {
+			sampled = append(sampled, fact)
+		}
+	}
 	return v.someInput(path, func(input *witness) ([]*logic.Term, [][]*logic.Term) {
-		return append(input.apply(required), input.apply(path)...), [][]*logic.Term{nil}
+		return append(input.apply(required), input.apply(sampled)...), [][]*logic.Term{nil}
 	}, func(input *witness) bool {
 		known := input.fixedOnly().apply(known)
 		return v.proves(known, logic.And(input.apply(required)...), 0) &&
-			!v.contradictory(append(slices.Clip(known), input.apply(path)...))
+			!v.contradictory(append(slices.Clip(known), input.apply(sampled)...))
 	})
+}
+
+// readsLaterHome reports whether a term reads the home of an interface
+// value whose reference is not one of the input; see canReach.
+func (v *fnVerifier) readsLaterHome(t *logic.Term) bool {
+	if t.Op == logic.OpSelect && t.Args[0].Op == logic.OpConst && t.Args[0].Name == homes.Name && !v.inputsOnly(t.Args[1]) {
+		return true
+	}
+	return slices.ContainsFunc(t.Args, v.readsLaterHome)
 }
 
 // inputsOnly reports whether a formula mentions nothing but the state on
@@ -1405,17 +1427,11 @@ func (b *sampler) addStates(t types.Type, to binding) {
 		b.refs++
 		b.homes = map[int64]*logic.Term{0: logic.RefLit(b.refs)}
 		b.slots = append(b.slots, slot{func(s *witness) {
-			// Every reference of the sample gets a home; a reference past
-			// them, which a call creates after entry, gets none from the
-			// sample, so that a contract that says its result is new, as
-			// in fresh(result), can be met on a path after the call.
-			table := logic.Const(sampleName+"homes", homes.Sort)
-			for ref := int64(0); ref <= b.refs; ref++ {
-				home, own := b.homes[ref]
-				if !own || ref == 0 {
-					home = b.homes[0]
+			table := logic.Fill(logic.IntLit(0), b.homes[0])
+			for _, ref := range slices.Sorted(maps.Keys(b.homes)) {
+				if ref != 0 {
+					table = logic.Store(table, logic.RefLit(ref), b.homes[ref])
 				}
-				table = logic.Store(table, logic.RefLit(ref), home)
 			}
 			s.consts[homes.Name] = table
 		}})
