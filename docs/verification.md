@@ -1412,11 +1412,39 @@ When Z3 stopped at a limit, the message ends with a note that says which one:
 
 | Note | What to do |
 | --- | --- |
-| `(Z3 reached its resource limit; -vego.rlimit raises it)` | Add the missing fact first. If the obligation still fails, try a higher `-vego.rlimit`. |
+| `(Z3 reached its resource limit; -vego.rlimit raises it)` | Add the missing fact first. If the obligation still fails, try a higher `-vego.rlimit`. If ten times the limit gives the same message, more effort is unlikely to help: Z3 can spend any limit simplifying the formulas before it starts the proof. Split the function instead. |
 | `(Z3 ran past its time limit, which depends on the machine)` | Z3 ran for five minutes. Split the function or add facts. This limit depends on the speed of the machine, so the result may differ elsewhere. |
 | `(Z3 ran out of memory)` | Z3 used the 1 GB a process may have. `-vego.rlimit` does not help. Split the function or add facts. |
 
 A message without a note means that Z3 gave its answer within the limits.
+
+### Finding out where the time goes
+
+`-vego.cost` prints, on standard error, what verifying each function asked of Z3. It changes no message and no exit status.
+
+```sh
+laas -vego -vego.cost ./...
+```
+
+For `Load` from [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write), under the entries shown there, it prints lines like these. Here the function is in a file `load.go` that starts with its contract.
+
+```text
+load.go:4:6: vego cost of Load: 40 problems, 3476767 resource units, 137416 bytes, 1.65 s
+	load.go:4:6: 2 questions of the always-fails check stopped at a limit
+	load.go:5:2: 2 contradiction checks stopped at a limit
+```
+
+The first line counts the problems that `vego` handed to Z3, the work Z3 counted for them, and the size of their text. These three numbers are the same on every run with the same Z3. The seconds are the time spent on the function. They include time spent waiting for a free Z3 process while other packages are verified at the same time, so they change with the machine and its load. They do not include the time spent on other functions, such as checking a trusted contract that the function calls, which get a line of their own.
+
+Each indented line gives a place in the function and a kind of question that stopped at a limit there. A question that stops at the resource limit has used all of `-vego.rlimit`, so these lines usually show where the time goes. The kinds are:
+
+- a proof obligation;
+- a question of the always-fails check, which looks for an input on which the contract makes the function succeed (see [Saying when a function succeeds](#saying-when-a-function-succeeds));
+- a contradiction check, which asks whether what is known at a place, such as after a call of a trusted function, contradicts itself;
+- a check whether a `Modifies` entry is needed;
+- a quick check, such as whether an `append` writes in place.
+
+A proof obligation that stops at a limit draws a message with the note. The other questions draw no message of their own. When one of them stops at a limit, `vego` goes on as when a proof fails: a path counts as possible, a `Modifies` entry counts as needed, an outcome counts as one that may depend on a call, and a contradiction counts as not found.
 
 ## Changing memory
 
@@ -3427,7 +3455,7 @@ laas -vego ./...
 - Build `laas` with the same Go that the job uses, as the commands above do. See the toolchain note in [Running it](#running-it).
 - Do not use `-vego.trust` as the check. It prints a report for reviewers. It also exits with status 3 if verification reported problems.
 - Install Z3 5.4.1 on the machine that runs the job, as in [Running it](#running-it).
-- Set a time limit on the job. Small functions take well under a second each. Functions with many pointer parameters that may alias take much longer, and the tool has not been optimised yet. `-vego.rlimit` limits the work per proof obligation, not the total run time.
+- Set a time limit on the job. Small functions take well under a second each. A function that calls a trusted function returning a pointer to a large struct of another package, such as `*http.Response`, can take more than a minute. `-vego.rlimit` limits the work per proof obligation, not the total run time. `-vego.cost` shows which functions take the time; see [Finding out where the time goes](#finding-out-where-the-time-goes).
 
 ## When a proof fails
 
@@ -3710,6 +3738,7 @@ Results are referred to by the names in the function's signature.
 | `-vego` | run only the verifier |
 | `-vego.audit` | also report contracts that trivial implementations satisfy |
 | `-vego.rlimit=n` | Z3's resource limit for one proof obligation, 4000000 by default |
+| `-vego.cost` | print what verifying each function asked of Z3, on standard error |
 | `-vego.z3=path` | the Z3 5.4.1 binary to use, instead of the `z3` on `PATH` |
 | `-vego.trusted=path` | use this trust file instead of the one next to `go.mod` |
 | `-vego.other-tags=A,B` | words that another tool reads after `// @`; any other unknown word there is an error |

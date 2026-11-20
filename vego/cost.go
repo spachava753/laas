@@ -178,8 +178,12 @@ func (pv *pkgVerifier) printCosts(w io.Writer) {
 		if c.fn.decl != nil {
 			at = c.fn.decl.Name.Pos()
 		}
-		fmt.Fprintf(&out, "%s: vego cost of %s: %d problems, %d resource units, %d bytes, %.2f s\n",
-			fset.Position(at), name, c.problems, c.effort, c.bytes, c.elapsed.Seconds())
+		problems := "problems"
+		if c.problems == 1 {
+			problems = "problem"
+		}
+		fmt.Fprintf(&out, "%s: vego cost of %s: %d %s, %d resource units, %d bytes, %.2f s\n",
+			fset.Position(at), name, c.problems, problems, c.effort, c.bytes, c.elapsed.Seconds())
 		limits := slices.Collect(func(yield func(costLimit) bool) {
 			for l := range c.limits {
 				if !yield(l) {

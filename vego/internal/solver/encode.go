@@ -50,8 +50,10 @@ import (
 
 // encoder writes one problem as SMT-LIB commands.
 type encoder struct {
-	out   strings.Builder
-	preds map[string]*logic.PredDef
+	out strings.Builder
+	// remarks counts the bytes of the comments written to out.
+	remarks int
+	preds   map[string]*logic.PredDef
 	// sorts holds the declared sorts by the sort of the logic they stand
 	// for, after references are taken for integers.
 	sorts map[logic.Sort]string
@@ -290,18 +292,23 @@ func (e *encoder) constant(t *logic.Term) string {
 	name := e.name("c")
 	e.consts[t.Name] = name
 	e.constSorts[t.Name] = sort
-	fmt.Fprintf(&e.out, "(declare-const %s %s) ; %s\n", name, sort, comment(t.Name))
+	fmt.Fprintf(&e.out, "(declare-const %s %s)", name, sort)
+	e.remark(t.Name)
 	return name
 }
 
-// comment makes a name safe to write after a semicolon.
-func comment(name string) string {
-	return strings.Map(func(r rune) rune {
+// remark ends the line with a comment that gives the name of the logic,
+// made safe to write after a semicolon, and counts its bytes, which say
+// nothing to Z3; see Cost.
+func (e *encoder) remark(name string) {
+	text := " ; " + strings.Map(func(r rune) rune {
 		if r == '\n' || r == '\r' {
 			return ' '
 		}
 		return r
 	}, name)
+	e.remarks += len(text)
+	e.out.WriteString(text + "\n")
 }
 
 // key writes the key of a sequence, declaring the key function of its sort
@@ -414,7 +421,8 @@ func (e *encoder) pred(name string) string {
 		bodies[i] = body.String()
 	}
 	if !recursive {
-		fmt.Fprintf(&e.out, "(define-fun %s %s) ; %s\n", headers[0], bodies[0], comment(name))
+		fmt.Fprintf(&e.out, "(define-fun %s %s)", headers[0], bodies[0])
+		e.remark(name)
 	} else {
 		// A recursive predicate is a function with its definition as an
 		// axiom, which Z3 unfolds where an application occurs. Recursion
@@ -429,11 +437,13 @@ func (e *encoder) pred(name string) string {
 			}
 			application := "(" + e.defining[member] + args.String() + ")"
 			if len(def.Params) == 0 {
-				fmt.Fprintf(&e.out, "(assert (= %s %s)) ; %s\n", e.defining[member], bodies[i], comment(member))
+				fmt.Fprintf(&e.out, "(assert (= %s %s))", e.defining[member], bodies[i])
+				e.remark(member)
 				continue
 			}
-			fmt.Fprintf(&e.out, "(assert (forall (%s) (! (= %s %s) :pattern (%s)))) ; %s\n",
-				vars.String(), application, bodies[i], application, comment(member))
+			fmt.Fprintf(&e.out, "(assert (forall (%s) (! (= %s %s) :pattern (%s))))",
+				vars.String(), application, bodies[i], application)
+			e.remark(member)
 		}
 	}
 	for _, member := range group {

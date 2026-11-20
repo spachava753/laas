@@ -275,6 +275,17 @@ func TestCache(t *testing.T) {
 			t.Fatal("one binary answered with what another said")
 		}
 	})
+	t.Run("bytes without comments", func(t *testing.T) {
+		s, _ := counting(t, `echo unsat; echo '(:reason-unknown "")'`+counted)
+		costs = nil
+		for _, name := range []string{"a", "a much longer name"} {
+			c := logic.Const(name, logic.Int)
+			s.Prove(nil, logic.Lt(c, c), observed)
+		}
+		if len(costs) != 2 || costs[0].Bytes != costs[1].Bytes || costs[1].Cached {
+			t.Fatalf("costs %+v, want two problems solved with the same bytes, which differ only in the comments", costs)
+		}
+	})
 	t.Run("the oldest are forgotten", func(t *testing.T) {
 		s, asked := counting(t, `echo unsat; echo '(:reason-unknown "")'`+counted)
 		saved := cacheBytes

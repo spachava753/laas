@@ -69,7 +69,9 @@ type Options struct {
 }
 
 // Cost is what one problem took. Bytes is the length of its SMT-LIB text
-// and Effort the resources Z3 counted while solving it, which, like the
+// without the comments that name the terms of the logic, which carry
+// numbers that depend on what the process did before; Effort is the
+// resources Z3 counted while solving it, which, like the
 // answer, is the same on every run of one binary; it is -1 when the
 // problem stopped at a limit that depends on the machine. A problem that
 // was answered from the cache has Cached set, the Effort Z3 counted when it
@@ -148,7 +150,7 @@ func (s *Solver) Model(facts []*logic.Term, opts Options, consts []*logic.Term) 
 		if err != nil || result == OutOfMemory {
 			effort = -1
 		}
-		opts.Observe(Cost{Result: result, Bytes: len(script), Effort: effort, Cached: cached, Time: a.took})
+		opts.Observe(Cost{Result: result, Bytes: len(script) - e.remarks, Effort: effort, Cached: cached, Time: a.took})
 	}
 	if result == Proved || err != nil {
 		return result, nil
