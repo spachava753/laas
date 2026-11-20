@@ -45,11 +45,11 @@ func TestCostFlag(t *testing.T) {
 		// contradiction checks, checks whether a Modifies entry is
 		// needed, and quick checks.
 		wantKinds := map[string][len(questionNames)]int{
-			"costs.Add":  {3, 0, 1, 0, 0},
+			"costs.Add":     {3, 0, 1, 0, 0},
 			"costs.Product": {7, 0, 1, 0, 0},
-			"costs.Set":  {3, 0, 1, 2, 0},
-			"costs.Read": {0, 21, 3, 0, 2},
-			"costs.read": {0, 6, 1, 0, 0},
+			"costs.Set":     {3, 0, 1, 2, 0},
+			"costs.Read":    {0, 21, 3, 0, 2},
+			"costs.read":    {0, 6, 1, 0, 0},
 		}
 		for fn, want := range wantKinds {
 			if kinds[fn] != want {

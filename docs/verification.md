@@ -1418,7 +1418,7 @@ When Z3 stopped at a limit, the message ends with a note that says which one:
 
 A message without a note means that Z3 gave its answer within the limits.
 
-At the default limit, `vego` does not prove all the postconditions of a function that writes one field through twenty-five or more different pointers, such as `p0.x = 1` through `p24.x = 1` with `@Ensures p0.x' = 1 And ... And p24.x' = 1`. The messages carry the note about the resource limit. With thirty pointers, `-vego.rlimit=40000000` proves them all. With twenty pointers such a function verifies at the default limit, and so do thirty writes through one pointer.
+At the default limit, `vego` does not prove all the postconditions of a function that writes one field through twenty-four or more different pointers, such as `p0.x = 1` through `p23.x = 1` with `@Ensures p0.x' = 1 And ... And p23.x' = 1`. The messages carry the note about the resource limit. With thirty pointers, `-vego.rlimit=40000000` proves them all. With twenty-three pointers such a function verifies at the default limit, and so do thirty writes through one pointer.
 
 ### Finding out where the time goes
 
@@ -1431,7 +1431,7 @@ laas -vego -vego.cost ./...
 For `Load` from [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write), under the entries shown there, in a file `foreign.go` that declares it at line 52, it prints:
 
 ```text
-foreign.go:52:6: vego cost of Load: 40 problems, 3476767 resource units, 137416 bytes, 1.65 s
+foreign.go:52:6: vego cost of Load: 40 problems, 3472893 resource units, 136896 bytes, 1.59 s
 	foreign.go:52:6: 2 questions of the always-fails check stopped at a limit
 	foreign.go:53:2: 2 contradiction checks stopped at a limit
 ```
@@ -3629,7 +3629,7 @@ A function that uses any of the following is reported as `cannot verify`:
 
 Some limits are reported in other ways. A state can be declared only for an interface, and only as a boolean. A `State` annotation on a struct type is reported at the annotation as `a state can be declared only on a defined interface type that declares a method of its own`, and a state of a struct type in your trust file is reported in the file. A mutex or a `sync.Once` that exists when a trusted function is called cannot be used in a function literal that it calls, and its `Lock` or `Do` is reported as a precondition that may not hold, as described in [Locking in a function that a trusted function calls](#locking-in-a-function-that-a-trusted-function-calls). A formula that names an unexported field of a struct of another package is reported at the annotation, as described in [Names](#names). A method of a type that writes what its receiver points to, or relies on what it points to, cannot be used as a method of an interface. The conversion reports the obligation that fails, as described in [What a conversion checks](#what-a-conversion-checks). An entry in the trust file for a type of the module that you verify is reported in the trust file, as described in [Limits of trusted contracts](#limits-of-trusted-contracts). Two different entries for one type in packages built together are reported in every package built with both, as described in [One entry for each type in a build](#one-entry-for-each-type-in-a-build).
 
-Some true contracts are not proved at the default limit. A function that writes one field through twenty-five or more different pointers has postconditions that are reported as not proved, with the note about the resource limit (see [Helping the prover](#helping-the-prover)).
+Some true contracts are not proved at the default limit. A function that writes one field through twenty-four or more different pointers has postconditions that are reported as not proved, with the note about the resource limit (see [Helping the prover](#helping-the-prover)).
 
 Floating-point values are supported but opaque. They can be passed around and used in arithmetic, but nothing can be stated or proved about their values. An integer converted from a float can have any value of its type, so check its range in code before you use it as an index.
 

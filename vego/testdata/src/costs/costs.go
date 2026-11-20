@@ -16,7 +16,7 @@ func Add(a, b int) (r int) {
 // @Ensures r >= 0
 func Product(a, b, c, d int) (r int) {
 	s := a * b
-	t := s * c // want `multiplication may overflow int \(Z3 reached its resource limit`
+	t := s * c   // want `multiplication may overflow int \(Z3 reached its resource limit`
 	return t * d // want `multiplication may overflow int \(Z3 reached its resource limit`
 }
 

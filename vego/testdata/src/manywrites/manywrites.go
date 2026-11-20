@@ -2,8 +2,8 @@
 // is true, and every clause of it should be proved. At the default limit 7
 // of its 30 postconditions are not proved, and at ten times the limit all
 // are.
-// With twenty pointers the function verifies, and with twenty-five one
-// clause is not proved. The cause is how a region of memory is written for
+// With twenty-three pointers the function verifies, and with twenty-four
+// one clause is not proved. The cause is how a region of memory is written for
 // Z3, a sequence of rows that each write reads; see The prover in the
 // ROADMAP. When a change proves these clauses, remove the expectations.
 package manywrites

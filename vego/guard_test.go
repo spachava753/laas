@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -50,11 +51,13 @@ func costEnv() string {
 
 // collectCosts sets observeCosts to gather the cost of every function, by
 // its package and name, until the returned function is called, which
-// returns them.
-func collectCosts() func() map[string]costLine {
+// returns them, and what -vego.cost prints for the function of the guide
+// that the guide quotes; see checkGuideCost.
+func collectCosts() func() (map[string]costLine, string) {
 	saved := observeCosts
 	var mu sync.Mutex
 	costs := map[string]costLine{}
+	var quoted string
 	observeCosts = func(pass *analysis.Pass, records []*fnCost) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -65,11 +68,48 @@ func collectCosts() func() map[string]costLine {
 			line.effort += c.effort
 			line.limits += c.open
 			costs[key] = line
+			if key == guideCostKey {
+				quoted += costText(pass.Fset, c)
+			}
 		}
 	}
-	return func() map[string]costLine {
+	return func() (map[string]costLine, string) {
 		observeCosts = saved
-		return costs
+		return costs, quoted
+	}
+}
+
+// guideCostKey is the function whose -vego.cost output the guide quotes,
+// in "Finding out where the time goes".
+const guideCostKey = "guide\tguide.Load"
+
+// checkGuideCost compares the output of -vego.cost that the guide quotes
+// with what verifying the function in the corpus printed, with file names
+// without their directories and the seconds left out, which depend on the
+// machine. Like the table, the numbers hold for one toolchain and Z3, so
+// with another nothing is compared.
+func checkGuideCost(t *testing.T, printed string) {
+	t.Helper()
+	if _, env, err := readCosts(filepath.Join("testdata", costsFile)); err != nil || env != costEnv() {
+		t.Logf("the output of -vego.cost that the guide quotes is not compared on %s", costEnv())
+		return
+	}
+	guide, err := os.ReadFile(filepath.Join("..", "docs", "verification.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var quoted string
+	for block := range strings.SplitSeq(string(guide), "```text\n") {
+		if strings.Contains(block, "vego cost of Load:") {
+			quoted, _, _ = strings.Cut(block, "```")
+		}
+	}
+	seconds := regexp.MustCompile(`, [0-9]+\.[0-9]{2} s\n`)
+	dirs := regexp.MustCompile(`(?m)^(\t?)[^\t]*/`)
+	want := seconds.ReplaceAllString(quoted, ", s\n")
+	got := seconds.ReplaceAllString(dirs.ReplaceAllString(printed, "$1"), ", s\n")
+	if got != want {
+		t.Errorf("the guide quotes -vego.cost for Load as\n%s\nbut it prints\n%s", quoted, dirs.ReplaceAllString(printed, "$1"))
 	}
 }
 

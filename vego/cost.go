@@ -161,54 +161,62 @@ func (pv *pkgVerifier) printCosts(w io.Writer) {
 		return
 	}
 	var out strings.Builder
-	fset := pv.pass.Fset
 	for _, c := range pv.costOrder {
-		// A contract is named as the trust report and the other
-		// messages name it.
-		name := c.fn.obj.Name()
-		switch {
-		case c.fn.trust != nil:
-			name = "the trusted contract of " + c.fn.trust.key
-		case c.fn.methodOf != nil:
-			name = "the contract of " + methodTitle(c.fn.methodOf)
-		case c.fn.valueOf != nil:
-			name = "the contract of " + c.fn.obj.Name()
-		}
-		at := c.fn.obj.Pos()
-		if c.fn.decl != nil {
-			at = c.fn.decl.Name.Pos()
-		}
-		problems := "problems"
-		if c.problems == 1 {
-			problems = "problem"
-		}
-		fmt.Fprintf(&out, "%s: vego cost of %s: %d %s, %d resource units, %d bytes, %.2f s\n",
-			fset.Position(at), name, c.problems, problems, c.effort, c.bytes, c.elapsed.Seconds())
-		limits := slices.Collect(func(yield func(costLimit) bool) {
-			for l := range c.limits {
-				if !yield(l) {
-					return
-				}
-			}
-		})
-		slices.SortFunc(limits, func(a, b costLimit) int {
-			if a.pos != b.pos {
-				return int(a.pos - b.pos)
-			}
-			return int(a.kind - b.kind)
-		})
-		for _, l := range limits {
-			names := questionNames[l.kind]
-			name := names[1]
-			if c.limits[l] == 1 {
-				name = names[0]
-			}
-			fmt.Fprintf(&out, "\t%s: %d %s stopped at a limit\n", fset.Position(l.pos), c.limits[l], name)
-		}
+		out.WriteString(costText(pv.pass.Fset, c))
 	}
 	costsMu.Lock()
 	defer costsMu.Unlock()
 	io.WriteString(w, out.String())
+}
+
+// costText returns what -vego.cost prints for one function: a line with
+// what it asked, and a line for each place and kind of question that
+// stopped at a limit.
+func costText(fset *token.FileSet, c *fnCost) string {
+	var out strings.Builder
+	// A contract is named as the trust report and the other messages
+	// name it.
+	name := c.fn.obj.Name()
+	switch {
+	case c.fn.trust != nil:
+		name = "the trusted contract of " + c.fn.trust.key
+	case c.fn.methodOf != nil:
+		name = "the contract of " + methodTitle(c.fn.methodOf)
+	case c.fn.valueOf != nil:
+		name = "the contract of " + c.fn.obj.Name()
+	}
+	at := c.fn.obj.Pos()
+	if c.fn.decl != nil {
+		at = c.fn.decl.Name.Pos()
+	}
+	problems := "problems"
+	if c.problems == 1 {
+		problems = "problem"
+	}
+	fmt.Fprintf(&out, "%s: vego cost of %s: %d %s, %d resource units, %d bytes, %.2f s\n",
+		fset.Position(at), name, c.problems, problems, c.effort, c.bytes, c.elapsed.Seconds())
+	limits := slices.Collect(func(yield func(costLimit) bool) {
+		for l := range c.limits {
+			if !yield(l) {
+				return
+			}
+		}
+	})
+	slices.SortFunc(limits, func(a, b costLimit) int {
+		if a.pos != b.pos {
+			return int(a.pos - b.pos)
+		}
+		return int(a.kind - b.kind)
+	})
+	for _, l := range limits {
+		names := questionNames[l.kind]
+		name := names[1]
+		if c.limits[l] == 1 {
+			name = names[0]
+		}
+		fmt.Fprintf(&out, "\t%s: %d %s stopped at a limit\n", fset.Position(l.pos), c.limits[l], name)
+	}
+	return out.String()
 }
 
 // costStderr is where -vego.cost prints.
