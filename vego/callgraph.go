@@ -422,6 +422,9 @@ func (pv *pkgVerifier) codeTargets(t types.Type, seen map[types.Type]bool) []*ca
 		return nil
 	}
 	seen[t] = true
+	if held, replaced := heldAs(t); replaced {
+		return pv.codeTargets(held, seen)
+	}
 	switch u := t.Underlying().(type) {
 	case *types.Signature:
 		return pv.valuesMatching(withoutRecv(u))
@@ -464,6 +467,9 @@ func (pv *pkgVerifier) concreteMethods(t types.Type, seen map[types.Type]bool) [
 		return nil
 	}
 	seen[t] = true
+	if held, replaced := heldAs(t); replaced {
+		return pv.concreteMethods(held, seen)
+	}
 	var found []*callNode
 	if named, ok := types.Unalias(t).(*types.Named); ok {
 		for method := range named.Origin().Methods() {

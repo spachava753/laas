@@ -1,0 +1,10 @@
+version: 1
+
+trusted:
+  heldcode.store:
+    reason: Stores nothing; it stands for a function that keeps a cache.
+    modifies: [c]
+
+  heldcode.install:
+    reason: Stores nothing; it stands for a function that keeps hooks.
+    modifies: [h]

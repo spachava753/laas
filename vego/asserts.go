@@ -228,6 +228,9 @@ func (pv *pkgVerifier) staticTargets(t types.Type, seen map[types.Type]bool) []*
 		return nil
 	}
 	seen[t] = true
+	if held, replaced := heldAs(t); replaced {
+		return pv.staticTargets(held, seen)
+	}
 	switch u := t.Underlying().(type) {
 	case *types.Signature:
 		return pv.valuesMatching(withoutRecv(u))

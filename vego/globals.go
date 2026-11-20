@@ -797,6 +797,9 @@ func (pv *pkgVerifier) dataType(t types.Type, seen map[types.Type]bool) bool {
 		return true
 	}
 	seen[t] = true
+	if held, replaced := heldAs(t); replaced {
+		return held == nil || pv.dataType(held, seen)
+	}
 	switch u := t.Underlying().(type) {
 	case *types.Basic:
 		return u.Kind() != types.UnsafePointer

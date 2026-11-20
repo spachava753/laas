@@ -221,6 +221,11 @@ func TestAnalyzer(t *testing.T) {
 		})
 	}
 
+	// Values that hold a sync/atomic.Pointer, handed to trusted functions.
+	t.Run("counts an atomic pointer as a pointer to its type argument", func(t *testing.T) {
+		runCorpus(t, newAnalyzer(), "heldcode")
+	})
+
 	// Formulas written with Go's operators, in source and in a trust file.
 	t.Run("refuses the operators of Go in formulas", func(t *testing.T) {
 		runCorpus(t, newAnalyzer(), "gospellings")

@@ -314,6 +314,10 @@ func (v *fnVerifier) noteEntriesIn(t types.Type, at token.Pos) {
 			return
 		}
 		seen[t] = true
+		if held, replaced := heldAs(t); replaced {
+			visit(held)
+			return
+		}
 		switch u := t.Underlying().(type) {
 		case *types.Interface:
 			if isIface(t) {

@@ -95,7 +95,7 @@ func Notify(msg string) {
 // @Requires |msg| <= 1000
 // @Ensures True
 func Warn(msg string) {
-	fmt.Fprintln(os.Stderr, "warning:", msg) // want `vego: cannot verify Warn: os.Stderr has type \*os.File, which can hold a function value, an interface value, an error, a channel, or an unsafe.Pointer; package-level variables of such types are not supported yet`
+	fmt.Fprintln(os.Stderr, "warning:", msg) // want `vego: cannot verify Warn: it uses Write as a method of io.Writer, and Write has no contract; annotate Write with // @ annotations so that it is verified, or add a trusted contract for \(\*os.File\).Write to vego-trusted.yaml`
 }
 
 // Client reads a variable whose type can hold code.

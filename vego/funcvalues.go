@@ -881,6 +881,9 @@ func (pv *pkgVerifier) foreignCode(t types.Type, seen map[types.Type]bool) strin
 		return ""
 	}
 	seen[t] = true
+	if held, replaced := heldAs(t); replaced {
+		return pv.foreignCode(held, seen)
+	}
 	switch u := t.Underlying().(type) {
 	case *types.Interface:
 		// Every method of an interface with a contract on each is code
@@ -936,6 +939,9 @@ func (pv *pkgVerifier) holdsContractedValue(t types.Type, seen map[types.Type]bo
 		return false
 	}
 	seen[t] = true
+	if held, replaced := heldAs(t); replaced {
+		return pv.holdsContractedValue(held, seen)
+	}
 	switch u := t.Underlying().(type) {
 	case *types.Signature:
 		return pv.valueContract(t) != nil
@@ -992,6 +998,9 @@ func holdsCallable(pv *pkgVerifier, t types.Type, seen map[types.Type]bool) bool
 		return false
 	}
 	seen[t] = true
+	if held, replaced := heldAs(t); replaced {
+		return holdsCallable(pv, held, seen)
+	}
 	switch u := t.Underlying().(type) {
 	case *types.Signature:
 		return true
@@ -1290,9 +1299,16 @@ func (pv *pkgVerifier) callableIn(t types.Type, seen map[types.Type]bool) string
 		return ""
 	}
 	seen[t] = true
+	if held, replaced := heldAs(t); replaced {
+		return pv.callableIn(held, seen)
+	}
 	switch u := t.Underlying().(type) {
 	case *types.Signature:
 		return "a function value of type " + t.String()
+	case *types.Basic:
+		if u.Kind() == types.UnsafePointer {
+			return "an unsafe.Pointer, which may point to a function value or an interface value that verified code made"
+		}
 	case *types.Interface:
 		if pv.fullyContracted(t) {
 			return fmt.Sprintf("a value of %s, whose methods all have contracts, so that it can hold code that verified code made", t)

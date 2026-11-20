@@ -2679,7 +2679,7 @@ are not supported yet
 
 Pass the value as a parameter instead. For a variable of another package, the message names the package that changes it. An `init` function that assigns a variable changes it too.
 
-The type of the variable must be one that cannot hold code. A function value, an interface value, an error, a channel, or an `unsafe.Pointer` may not appear in the type at any depth, also behind a pointer, and also in a field that the type does not export. Verified code cannot read such a field, but it can hand the variable to a trusted function that runs the code the field holds. So `*http.Client` cannot be read, and neither can `*os.File` or `*log.Logger`:
+The type of the variable must be one that cannot hold code. A function value, an interface value, an error, a channel, or an `unsafe.Pointer` may not appear in the type at any depth, also behind a pointer, and also in a field that the type does not export. Verified code cannot read such a field, but it can hand the variable to a trusted function that runs the code the field holds. So `*http.Client` cannot be read, and neither can `*log.Logger`:
 
 ```go
 // Client reads a variable whose type can hold code.
@@ -2695,6 +2695,8 @@ vego: cannot verify Client: http.DefaultClient has type *net/http.Client, which 
 an interface value, an error, a channel, or an unsafe.Pointer; package-level variables of such types are not
 supported yet
 ```
+
+Two types of the standard library are counted by what their package lets them hold, as described in [Arguments that carry code](#arguments-that-carry-code). So `*os.File` holds no code, and `os.Stdout` and `os.Stderr` can be read where nothing in the build assigns them.
 
 ### What vego knows of the value
 
@@ -2855,12 +2857,12 @@ A variable holds its value only once the package has initialised it. `vego` reli
 Some code that uses package-level variables still cannot be verified:
 
 - A counter, a cache, or any other variable that is assigned, also in an `init` function, as `os.Args` is in package `os`. Pass the value as a parameter.
-- `fmt.Fprintln(os.Stderr, ...)`. The type of `os.Stderr`, `*os.File`, holds an `unsafe.Pointer` in a field it does not export, so a function cannot read it:
+- `fmt.Fprintln(os.Stderr, ...)`. A function can read `os.Stderr`, but `(*os.File).Write` has no contract, so an `*os.File` cannot be used as an `io.Writer`:
 
   ```text
-  vego: cannot verify Warn: os.Stderr has type *os.File, which can hold a function value, an interface
-  value, an error, a channel, or an unsafe.Pointer; package-level variables of such types are not
-  supported yet
+  vego: cannot verify Warn: it uses Write as a method of io.Writer, and Write has no contract; annotate
+  Write with // @ annotations so that it is verified, or add a trusted contract for (*os.File).Write to
+  vego-trusted.yaml
   ```
 
   Use `fmt.Printf`, or take the writer as a parameter.
@@ -3932,6 +3934,13 @@ A call back by way of another package is not found. See [What a proof assumes](#
 ### Arguments that carry code
 
 A trusted contract describes what the function's own code does. Some arguments bring code with them. An `error` has methods, and their code is chosen by whoever created the error. The same is true of other interface values. A struct can have a field that holds a function, and the value can be nested at any depth inside a struct, slice, or map. A field of type `unsafe.Pointer` counts too, also one that its type does not export, since it can point to a function or an interface value. A trusted function could call that code, for example `err.Error()` or `l.sink(text)`, and the code could write memory that your proof depends on.
+
+Two types of the standard library are counted by what their package lets their `unsafe.Pointer` hold:
+
+- `sync/atomic.Pointer[T]` counts as a `*T`. Its package stores only a `*T` there, so it holds code exactly when `T` does.
+- `runtime.Pinner` counts as holding nothing. It holds the pointers it pins, and nothing calls them.
+
+So an `*os.File` carries no code. Its only `unsafe.Pointer` is in an `atomic.Pointer` of a type that holds no code, and on Windows also in a `runtime.Pinner`.
 
 A state of an interface value counts as memory that a caller can see. A trusted function that may close a value it is given, also one that it type-asserts from an `io.Reader` or an `any`, must list that parameter in `modifies`. Otherwise its entry claims that the state stays as it was.
 
@@ -5035,7 +5044,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - `copy`;
 - annotations on a type declared inside a function body, such as an invariant on a local struct or a contract on a local interface;
 - formatting a value whose type has a method `Format`, `GoString`, `Error`, or `String`, a pointer, a map, an interface value other than an error of known origin, a function value, or a value of a type that holds itself, with `fmt.Errorf` or a function whose entry lists it under `formats`, and passing such a function a slice with `...` for the values it formats (see [What can be formatted](#what-can-be-formatted));
-- `os.Stdout`, `os.Stderr`, a logger in a package-level variable, and `log.Default()`;
+- `fmt.Fprintf` and the functions like it with `os.Stdout` or `os.Stderr`, a logger in a package-level variable, and `log.Default()`;
 - a call in the target of an assignment whose right-hand side is an `append` that may write into the array of its slice, unless the call modifies nothing and refers to no memory or a call among the operands of the `append` orders it (see [An append beside a call](#an-append-beside-a-call));
 - a call with several results as the arguments of another call, as in `g(f())`;
 - comparing structs with `==`;

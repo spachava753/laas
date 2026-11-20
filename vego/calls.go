@@ -349,6 +349,36 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 	}
 }
 
+// heldAs returns, for the two types of the standard library whose fields
+// say less of what they can hold than their package does, the type that
+// says it, and replaced = true; every rule that asks whether a value can
+// hold code walks that type instead. Its field of type unsafe.Pointer
+// would otherwise count as anything at all.
+//
+//   - sync/atomic.Pointer[T] holds a *T: its one field v is unexported, and
+//     package sync/atomic only loads, stores, swaps, and compares it as a
+//     *T, so anything else in it needs unsafe, which code that is not
+//     verified is assumed not to use to give memory another type.
+//   - runtime.Pinner holds the pointers it pins, which nothing reads as
+//     values or calls, so it holds nothing: held is nil.
+//
+// The types are matched by the path of their package and their name, not
+// by their shape. sync/atomic.Value and the other types of sync/atomic are
+// walked as they are declared.
+func heldAs(t types.Type) (held types.Type, replaced bool) {
+	named, ok := types.Unalias(t).(*types.Named)
+	if !ok || named.Obj().Pkg() == nil {
+		return nil, false
+	}
+	switch path, name := named.Obj().Pkg().Path(), named.Obj().Name(); {
+	case path == "sync/atomic" && name == "Pointer" && named.TypeArgs().Len() == 1:
+		return types.NewPointer(named.TypeArgs().At(0)), true
+	case path == "runtime" && name == "Pinner":
+		return nil, true
+	}
+	return nil, false
+}
+
 // heldCode names what a value of a type that holdsCode accepts can hold
 // that carries code, the first that holdsCode finds.
 func heldCode(t types.Type, seen map[types.Type]bool) string {
@@ -356,6 +386,9 @@ func heldCode(t types.Type, seen map[types.Type]bool) string {
 		return ""
 	}
 	seen[t] = true
+	if held, replaced := heldAs(t); replaced {
+		return heldCode(held, seen)
+	}
 	switch u := t.Underlying().(type) {
 	case *types.Interface:
 		if isError(t) {
@@ -400,6 +433,9 @@ func holdsCode(t types.Type, seen map[types.Type]bool) bool {
 		return false
 	}
 	seen[t] = true
+	if held, replaced := heldAs(t); replaced {
+		return holdsCode(held, seen)
+	}
 	switch u := t.Underlying().(type) {
 	case *types.Interface, *types.Signature, *types.Chan:
 		return true
