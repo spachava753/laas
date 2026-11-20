@@ -244,3 +244,47 @@ func CachedCycle(n int, c bool) (err error) {
 	}
 	return nil
 }
+
+// DeferredInLiteral defers a literal inside a literal it calls, so the
+// deferred literal runs when that literal returns, before the %w.
+//
+// @Ensures True
+func DeferredInLiteral() (err error) {
+	err = vouched()
+	func() {
+		defer func() { err = unvouched() }()
+	}()
+	if err != nil {
+		return fmt.Errorf("deferred inside: %w", err) // want `err is assigned in the function literal at defects.go:254:2, which may run at any point, so every assignment to err counts, and err is assigned unvouched\(\) at defects.go:255:24, a call whose errors nothing vouches for; give that error a variable of its own`
+	}
+	return nil
+}
+
+// BoundAndDeferred defers a literal bound to a variable, which it does not
+// call otherwise.
+//
+// @Ensures True
+func BoundAndDeferred() (err error) {
+	err = vouched()
+	keep := func() { err = unvouched() }
+	defer keep()
+	if err != nil {
+		return fmt.Errorf("bound: %w", err) // want `err is assigned in the function literal at defects.go:269:10, which may run at any point, so every assignment to err counts, and err is assigned unvouched\(\) at defects.go:269:25, a call whose errors nothing vouches for; give that error a variable of its own`
+	}
+	return nil
+}
+
+// TwiceDeferred defers a literal that defers another, both of which run
+// after the return, so only vouched reaches the %w.
+//
+// @Ensures True
+func TwiceDeferred() (err error) {
+	err = vouched()
+	defer func() {
+		defer func() { err = unvouched() }()
+	}()
+	if err != nil {
+		return fmt.Errorf("twice: %w", err)
+	}
+	return nil
+}

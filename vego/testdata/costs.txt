@@ -2468,12 +2468,14 @@ ordering	ordering.zap	7	3049	0
 originpath	originpath.AfterLoop	1	138	0
 originpath	originpath.AssignedInLiteral	8	2818	0
 originpath	originpath.BothBranches	26	7395	0
+originpath	originpath.BoundAndDeferred	8	2818	0
 originpath	originpath.CachedCycle	6	2516	0
 originpath	originpath.Chained	1	138	0
 originpath	originpath.Closes	67	52272	0
 originpath	originpath.ClosesBound	15	5936	0
 originpath	originpath.DeferKnownThenUnknown	28	17740	0
 originpath	originpath.DeferUnknown	8	2818	0
+originpath	originpath.DeferredInLiteral	15	5936	0
 originpath	originpath.Fetch	3	255	0
 originpath	originpath.HalfAssigned	1	46	0
 originpath	originpath.LiteralGiven	8	2818	0
@@ -2495,6 +2497,7 @@ originpath	originpath.Rewrapped	28	14464	0
 originpath	originpath.SameStatement	8	2818	0
 originpath	originpath.Shadowed	47	24968	0
 originpath	originpath.Switched	50	22365	0
+originpath	originpath.TwiceDeferred	67	38687	0
 originpath	originpath.TypeSwitched	1	46	0
 originpath	originpath.VarInLoop	105	69922	0
 originpath	originpath.closeIt	3	3620	0
