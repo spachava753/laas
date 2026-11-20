@@ -60,7 +60,7 @@ func WritesNil(w io.Writer, n int) {
 	_, _ = fmt.Fprintln(w, n) // want `vego:\ precondition\ of\ Fprintln\ may\ not\ hold:\ w\ !=\ nil`
 }
 
-// @Requires l != nil
+// @Requires l != nil And ready(l)
 // @Ensures True
 func Logs(l *log.Logger, n int) {
 	l.Printf("%d", n)
@@ -68,9 +68,70 @@ func Logs(l *log.Logger, n int) {
 	l.Print(n)
 }
 
+// @Requires ready(l)
 // @Ensures True
 func LogsNil(l *log.Logger, n int) {
 	l.Print(n) // want `vego:\ precondition\ of\ Print\ may\ not\ hold:\ l\ !=\ nil`
+}
+
+// LogsUnready logs to a logger of which nothing says that it has an
+// output. A logger made as a zero value has none, and Print panics on it.
+//
+// @Requires l != nil
+// @Ensures True
+func LogsUnready(l *log.Logger, n int) {
+	l.Print(n) // want `vego:\ precondition\ of\ Print\ may\ not\ hold:\ ready\(l\)`
+}
+
+// LogsToZero makes a logger as a zero value and prints to it, which panics:
+// it has no output. This verified before the state ready.
+//
+// @Ensures True
+func LogsToZero() {
+	l := &log.Logger{}
+	l.Printf("x") // want `vego:\ precondition\ of\ Printf\ may\ not\ hold:\ ready\(l\)`
+}
+
+// LogsToNew makes a logger with log.New and prints to it.
+//
+// @Requires w != nil
+// @Ensures True
+func LogsToNew(w io.Writer, n int) {
+	l := log.New(w, "app: ", log.LstdFlags)
+	l.Printf("%d", n)
+}
+
+// LogsWithLongPrefix makes a logger whose prefix may be longer than New
+// allows.
+//
+// @Requires w != nil
+// @Ensures True
+func LogsWithLongPrefix(w io.Writer, prefix string) {
+	_ = log.New(w, prefix, 0) // want `vego:\ precondition\ of\ New\ may\ not\ hold:\ \|prefix\|\ <=\ 4096`
+}
+
+// LogsToNil makes a logger without an output.
+//
+// @Ensures True
+func LogsToNil() {
+	_ = log.New(nil, "", 0) // want `vego:\ precondition\ of\ New\ may\ not\ hold:\ out\ !=\ nil`
+}
+
+// A logger adds its prefix to what it formats, so the bound on what a
+// method of a logger formats is lower than the one for log.Println.
+//
+// @Requires l != nil And ready(l) And |msg| <= 140737488318401
+// @Ensures True
+func LoggerPrintsLong(l *log.Logger, msg string) {
+	l.Println(msg) // want `vego:\ what\ Println\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated;\ bound\ what\ it\ formats,\ as\ in\ .*Requires\ \|msg\|\ <=\ 140737488314305`
+}
+
+// The bound that the message of LoggerPrintsLong suggests is enough.
+//
+// @Requires l != nil And ready(l) And |msg| <= 140737488314305
+// @Ensures True
+func LoggerPrintsAsSuggested(l *log.Logger, msg string) {
+	l.Println(msg)
 }
 
 // @Ensures |p| = 0

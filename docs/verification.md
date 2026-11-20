@@ -2901,14 +2901,14 @@ The bound that `vego` proves is larger than what `fmt` writes, for these reasons
 
 The string that `fmt.Sprintf`, `fmt.Sprint`, and `fmt.Sprintln` return is known to be no longer than the bound proved at the call, so you can format it again. That is not known when the call formats an error or a slice of strings, whose lengths `vego` does not know.
 
-Some lengths have no term in the logic: the text of an error, the strings in a slice of strings or in a slice of structs, and the prefix and header that a logger adds. For these the proof assumes that they do not make what is built longer than can be allocated. See [What a proof assumes](#what-a-proof-assumes).
+Some lengths have no term in the logic: the text of an error, the strings in a slice of strings or in a slice of structs, the name of a file in a logger's header, and the prefix of the standard logger. For these the proof assumes that they do not make what is built longer than can be allocated. See [What a proof assumes](#what-a-proof-assumes).
 
 ### Writing to a writer or a logger
 
-`fmt.Fprintf`, `fmt.Fprint`, and `fmt.Fprintln` require a writer that is not `nil`. They call its `Write` method, which is described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages). The methods of `*log.Logger` require a logger that is not `nil`, and call the `Write` method of the writer the logger holds:
+`fmt.Fprintf`, `fmt.Fprint`, and `fmt.Fprintln` require a writer that is not `nil`. They call its `Write` method, which is described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages). The methods of `*log.Logger` that print require a logger that is not `nil` and whose state `ready` holds, and call the `Write` method of the writer the logger holds:
 
 ```go
-// @Requires w != nil And l != nil
+// @Requires w != nil And l != nil And ready(l)
 // @Ensures True
 func Inventory(w io.Writer, l *log.Logger, n int) (err error) {
 	l.Printf("%d items", n)
@@ -2916,6 +2916,33 @@ func Inventory(w io.Writer, l *log.Logger, n int) (err error) {
 	return err
 }
 ```
+
+`ready(l)` holds when the output of the logger is a writer that is not `nil` and its prefix is at most 4096 bytes long. A logger made as a zero value, such as `&log.Logger{}`, has no output, and printing to it panics:
+
+```go
+// @Ensures True
+func LogsToZero() {
+	l := &log.Logger{}
+	l.Printf("x")
+}
+```
+
+```text
+vego: precondition of Printf may not hold: ready(l)
+```
+
+`log.New` returns a logger whose state `ready` holds. It requires a writer that is not `nil` and a prefix of at most 4096 bytes. The logger keeps the writer, and its methods call the writer's `Write` later, as described in [Functions that keep what they are given](#functions-that-keep-what-they-are-given):
+
+```go
+// @Requires w != nil
+// @Ensures True
+func LogsTo(w io.Writer, n int) {
+	l := log.New(w, "app: ", log.LstdFlags)
+	l.Printf("%d items", n)
+}
+```
+
+A logger that your function is handed by code that is not verified needs `ready(l)` in its `Requires`, as `Inventory` has.
 
 `fmt.Fprintf(os.Stderr, ...)`, `log.Default()`, and a logger in a package-level variable are reported as `cannot verify`, as described in [What this does not cover yet](#what-this-does-not-cover-yet). Use `fmt.Printf` or `log.Printf`, or take the writer or the logger as a parameter.
 
@@ -3334,7 +3361,7 @@ The names in an entry are the parameter and result names from the function's sou
 - `os.Remove`
 - `math/rand.Intn`, `math/rand.Int`
 - `fmt.Sprintf`, `fmt.Sprint`, `fmt.Sprintln`, `fmt.Printf`, `fmt.Print`, `fmt.Println`, `fmt.Fprintf`, `fmt.Fprint`, `fmt.Fprintln`, described in [Formatting and logging](#formatting-and-logging)
-- `log.Printf`, `log.Print`, `log.Println`, and the methods of `*log.Logger` of the same names
+- `log.Printf`, `log.Print`, `log.Println`, `log.New`, and the methods of `*log.Logger` of the same names, with the state `ready` of `log.Logger`, described in [Writing to a writer or a logger](#writing-to-a-writer-or-a-logger)
 - `path.Join`, `path/filepath.Join`
 - the methods of `sync.Mutex` and `sync.RWMutex` that lock and unlock, and `(*sync.Once).Do`, described in [Locks](#locks)
 
@@ -4309,7 +4336,8 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
   - what a `String` or `Error` method returns;
   - the strings and slices held in the elements of a slice, such as the strings of a `[]string`;
   - the elements that `path.Join` and `path/filepath.Join` join;
-  - the prefix and the header that a logger adds from its own settings.
+  - the name of a file that a logger's header shows, with `log.Lshortfile` or `log.Llongfile`;
+  - the prefix of the standard logger, which code that is not verified sets with `log.SetPrefix`.
 
   `vego` proves the rest of the bound at each call of a function that formats and of `fmt.Errorf`, as described in [How long a formatted string can be](#how-long-a-formatted-string-can-be). On a 64-bit target, these parts would have to be terabytes long. On a 32-bit target, where one allocation can be at most about 4 GB, this can be reached.
 - Z3 is correct. Every proof rests on Z3 5.4.1 answering correctly that a problem has no solution.

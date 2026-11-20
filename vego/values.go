@@ -231,7 +231,7 @@ func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term
 		for _, arg := range call.Args[1:] {
 			operands = append(operands, v.formatted(st, arg, values[arg]))
 		}
-		_ = v.checkFormatAlloc(st, guard, call, "fmt.Errorf", call.Args[0], values[call.Args[0]], operands)
+		_ = v.checkFormatAlloc(st, guard, call, "fmt.Errorf", fmtSlack, call.Args[0], values[call.Args[0]], operands)
 	}
 	created := v.fresh("error", logic.Err)
 	v.noteError(st, created)

@@ -32,9 +32,13 @@ type specEnv struct {
 	given        map[*types.Var]*logic.Term
 	givenPost    map[*types.Var]*logic.Term
 	givenResults []*logic.Term
-	// givenState replaces the state of a parameter, plain or primed, by a
-	// ready-made term, where given is set.
+	// givenState replaces the state of a parameter or a result, plain or
+	// primed, by a ready-made term, where given is set.
 	givenState func(param *types.Var, state string, when logic.When) *logic.Term
+	// givenRelation resolves fresh and within where given is set, which
+	// otherwise cannot be read there; the tests of shipped entries answer
+	// it from what they saw.
+	givenRelation func(name string, paths []logic.Path) (*logic.Term, error)
 	// now is the memory plain paths are read from, and post the memory
 	// primed paths and results are read from, nil where there is none.
 	now, post memory
@@ -601,6 +605,11 @@ func (e *specEnv) state(name string, steps []logic.Step, state string, when logi
 				return t, nil
 			}
 		}
+		if index, isResult := e.fn.resultNames[name]; isResult {
+			if t := e.givenState(e.fn.results[index], state, when); t != nil {
+				return t, nil
+			}
+		}
 	}
 	found, err := e.locateAt(name, steps, when, true)
 	switch {
@@ -731,6 +740,9 @@ func reachesMemory(hops []hop, final types.Type) bool {
 
 // Relation resolves fresh(x) and within(a, b); see logic.Env.
 func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error) {
+	if e.given != nil && e.givenRelation != nil {
+		return e.givenRelation(name, paths)
+	}
 	if e.given != nil {
 		return nil, fmt.Errorf("%s cannot be used here", name)
 	}

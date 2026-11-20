@@ -28,7 +28,7 @@ func ShowAll(values []any) {
 	_, _ = fmt.Println(values...) // want `vego:\ cannot\ verify\ ShowAll:\ Println\ formats\ what\ the\ slice\ values\ holds`
 }
 
-// @Requires w != nil And l != nil
+// @Requires w != nil And l != nil And ready(l)
 // @Ensures True
 func Inventory(w io.Writer, l *log.Logger, n int) (err error) {
 	l.Printf("%d items", n)
@@ -90,4 +90,17 @@ func ShowTemperature(t Temperature) {
 // @Ensures True
 func ShowAnyTemperature(t Temperature) {
 	log.Println("temperature", t) // want `vego:\ precondition\ of\ String\ may\ not\ hold\ where\ Println\ formats\ t:\ t\ >=\ -273`
+}
+
+// @Ensures True
+func LogsToZero() {
+	l := &log.Logger{}
+	l.Printf("x") // want `vego:\ precondition\ of\ Printf\ may\ not\ hold:\ ready\(l\)`
+}
+
+// @Requires w != nil
+// @Ensures True
+func LogsTo(w io.Writer, n int) {
+	l := log.New(w, "app: ", log.LstdFlags)
+	l.Printf("%d items", n)
 }

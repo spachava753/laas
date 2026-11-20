@@ -417,9 +417,28 @@ func (v *fnVerifier) formatRuns(call *ast.CallExpr, fn *funcInfo) []fmtRun {
 
 // fmtSlack is what a function that formats may build beyond what fmt
 // prints: a logger's header and newline, or a prefix that a logging
-// function of a project adds. What a logger's prefix and the name of a
-// file take beyond it is assumed.
+// function of a project adds. What the name of a file in a logger's header
+// takes beyond it is assumed, and so is the prefix of the standard logger,
+// which code that is not verified sets.
 const fmtSlack = 4096
+
+// loggerPrefix is the longest prefix of a *log.Logger whose state ready
+// holds, which log.New requires of its prefix. A method of such a logger
+// that prints builds that much more than fmtSlack.
+const loggerPrefix = 4096
+
+// slackOf is what a function that formats may build beyond what fmt prints.
+func slackOf(callee *types.Func) int64 {
+	if sig, ok := callee.Type().(*types.Signature); ok && sig.Recv() != nil {
+		if object, isPointer := pointee(sig.Recv().Type()); isPointer {
+			if named, ok := types.Unalias(object).(*types.Named); ok && named.Obj().Pkg() != nil &&
+				named.Obj().Pkg().Path() == "log" && named.Obj().Name() == "Logger" {
+				return fmtSlack + loggerPrefix
+			}
+		}
+	}
+	return fmtSlack
+}
 
 // checkFormatAlloc proves that what a function builds from what it formats
 // can be allocated: twice what fmtBound counts, plus fmtSlack, plus a page,
@@ -428,7 +447,7 @@ const fmtSlack = 4096
 // values formatted, as they were before they were converted to any. It
 // returns the bound on what fmt writes when that bound counts all of it,
 // and nil otherwise.
-func (v *fnVerifier) checkFormatAlloc(st *state, guard []*logic.Term, call *ast.CallExpr, who string, format ast.Expr, formatVal value, operands []fmtOperand) *logic.Term {
+func (v *fnVerifier) checkFormatAlloc(st *state, guard []*logic.Term, call *ast.CallExpr, who string, slack int64, format ast.Expr, formatVal value, operands []fmtOperand) *logic.Term {
 	spec := fmtSpec{line: true}
 	if format != nil {
 		if tv := v.info.Types[format]; tv.Value != nil && tv.Value.Kind() == constant.String {
@@ -440,14 +459,14 @@ func (v *fnVerifier) checkFormatAlloc(st *state, guard []*logic.Term, call *ast.
 	}
 	size := fmtBound(spec, operands)
 	bound := size.term()
-	built := logic.Add(bound, logic.IntLit(fmtSlack))
+	built := logic.Add(bound, logic.IntLit(slack))
 	needed := logic.Add(logic.Mul(built, logic.IntLit(2)), logic.IntLit(1<<16))
 	goal := logic.Le(needed, logic.BigLit(v.maxAlloc()))
 	done := v.at(call.Pos())
 	result := v.attempt(st, guard, goal)
 	done()
 	if result != solver.Proved {
-		v.report(call.Pos(), "what %s builds from what it formats may be more than can be allocated%s%s", who, v.formatHint(st, guard, size, format, formatVal), limitNote(result))
+		v.report(call.Pos(), "what %s builds from what it formats may be more than can be allocated%s%s", who, v.formatHint(st, guard, size, slack, format, formatVal), limitNote(result))
 	}
 	st.assume(logic.Implies(logic.And(guard...), goal))
 	if !size.complete {
@@ -460,11 +479,11 @@ func (v *fnVerifier) checkFormatAlloc(st *state, guard []*logic.Term, call *ast.
 // it fit: a bound on each length it counts that the facts at the call do not
 // bound already, and on a format that is not a constant, chosen so that the
 // bound fits on this platform once the rest of it is counted.
-func (v *fnVerifier) formatHint(st *state, guard []*logic.Term, size fmtSize, format ast.Expr, formatVal value) string {
+func (v *fnVerifier) formatHint(st *state, guard []*logic.Term, size fmtSize, slack int64, format ast.Expr, formatVal value) string {
 	// What the bound may be: half of what can be allocated, less a page
 	// and what may be built beyond what fmt prints.
 	room := new(big.Int).Sub(v.maxAlloc(), big.NewInt(1<<16))
-	room.Rsh(room, 1).Sub(room, big.NewInt(fmtSlack))
+	room.Rsh(room, 1).Sub(room, big.NewInt(slack))
 	n := size.suggest(room.Int64())
 	var clauses []string
 	stated := true
@@ -569,7 +588,7 @@ func (v *fnVerifier) checkFormattedAlloc(st *state, guard []*logic.Term, call *a
 	if fn.format != nil {
 		formatVal = args[fn.format]
 	}
-	return v.checkFormatAlloc(st, guard, call, fn.obj.Name(), format, formatVal, operands)
+	return v.checkFormatAlloc(st, guard, call, fn.obj.Name(), slackOf(fn.obj), format, formatVal, operands)
 }
 
 // returnsFormatted reports whether a function is one of those of fmt

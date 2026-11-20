@@ -254,18 +254,24 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 		return sample{before: []any{a}, results: []any{n, err}}
 	},
 	"fmt.Fprintf": func(rng *rand.Rand) sample {
-		w, format, a := randomWriter(rng), randomFormat(rng), randomOperands(rng)
-		n, err := fmt.Fprintf(w, format, a...)
+		format, a := randomFormat(rng), randomOperands(rng)
+		var n int
+		var err error
+		w := keptFormatting(rng, func(w io.Writer) { n, err = fmt.Fprintf(w, format, a...) })
 		return sample{before: []any{w, format, a}, results: []any{n, err}}
 	},
 	"fmt.Fprint": func(rng *rand.Rand) sample {
-		w, a := randomWriter(rng), randomOperands(rng)
-		n, err := fmt.Fprint(w, a...)
+		a := randomOperands(rng)
+		var n int
+		var err error
+		w := keptFormatting(rng, func(w io.Writer) { n, err = fmt.Fprint(w, a...) })
 		return sample{before: []any{w, a}, results: []any{n, err}}
 	},
 	"fmt.Fprintln": func(rng *rand.Rand) sample {
-		w, a := randomWriter(rng), randomOperands(rng)
-		n, err := fmt.Fprintln(w, a...)
+		a := randomOperands(rng)
+		var n int
+		var err error
+		w := keptFormatting(rng, func(w io.Writer) { n, err = fmt.Fprintln(w, a...) })
 		return sample{before: []any{w, a}, results: []any{n, err}}
 	},
 	"log.Printf": func(rng *rand.Rand) sample {
@@ -282,21 +288,6 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 		v := randomOperands(rng)
 		toLogBuffer(func() { log.Println(v...) })
 		return sample{before: []any{v}}
-	},
-	"(*log.Logger).Printf": func(rng *rand.Rand) sample {
-		l, format, v := log.New(randomWriter(rng), "p ", rng.Intn(64)), randomFormat(rng), randomOperands(rng)
-		l.Printf(format, v...)
-		return sample{before: []any{l, format, v}}
-	},
-	"(*log.Logger).Print": func(rng *rand.Rand) sample {
-		l, v := log.New(randomWriter(rng), "p ", rng.Intn(64)), randomOperands(rng)
-		l.Print(v...)
-		return sample{before: []any{l, v}}
-	},
-	"(*log.Logger).Println": func(rng *rand.Rand) sample {
-		l, v := log.New(randomWriter(rng), "p ", rng.Intn(64)), randomOperands(rng)
-		l.Println(v...)
-		return sample{before: []any{l, v}}
 	},
 	"path.Join": func(rng *rand.Rand) sample {
 		elem := randomElements(rng)
@@ -786,6 +777,10 @@ func TestShippedContracts(t *testing.T) {
 				}
 				if strings.HasPrefix(key, "(*sync.") {
 					checkLockEntry(t, pv, pkg, key)
+					return
+				}
+				if key == "log.New" || strings.HasPrefix(key, "(*log.Logger).") {
+					checkLoggerEntries(t, pv, pkg, key)
 					return
 				}
 				callee, ok := pkg.Scope().Lookup(name).(*types.Func)

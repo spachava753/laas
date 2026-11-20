@@ -1,6 +1,43 @@
 version: 1
 
+state:
+  log.Logger:
+    ready:
+      reason: >-
+        True when the output of the logger is a writer that is not nil,
+        whichever of New and SetOutput set it last, and its prefix is at most
+        4096 bytes long, whichever of New and SetPrefix set it last. The zero
+        value of a Logger has no output, and a method that prints to it
+        panics on the nil writer; so does a Logger whose output was set to
+        nil.
+
 trusted:
+  log.New:
+    reason: >-
+      Documented: "New creates a new Logger. The out variable sets the
+      destination to which log data will be written." It returns a new
+      Logger, which is ready since out is not nil and the prefix is short
+      enough. It keeps out in that Logger and runs nothing: in the source of
+      Go 1.27.3 New calls SetOutput, which stores out in the field out and
+      compares it with io.Discard, and SetPrefix and SetFlags, which store
+      numbers and a string. The field out is read only while a method of
+      the Logger runs: in output, which every method that prints calls and
+      which calls its Write and no other method, under a mutex, and in
+      Writer and SetOutput. No goroutine, timer, finalizer, or package-level
+      variable reaches it. The bound on the prefix is one that the formatting
+      bound at the methods that print counts.
+    requires:
+      - "out != nil"
+      - "|prefix| <= 4096"
+    keeps:
+      out: [result]
+    modifies: []
+    vouches: [result]
+    ensures:
+      - "result != nil"
+      - "fresh(result)"
+      - "ready(result)"
+
   log.Printf:
     reason: >-
       Documented to call Output to print to the standard logger, with the
@@ -31,10 +68,13 @@ trusted:
   (*log.Logger).Printf:
     reason: >-
       Documented to call l.Output to print to the logger, with the
-      arguments handled in the manner of fmt.Printf. It writes to the
-      writer l holds, which it runs; a nil l panics.
+      arguments handled in the manner of fmt.Printf. It writes to the writer l holds, which it runs, and calls only its
+      Write method. A nil l panics, and so does a Logger whose output is
+      nil, which ready rules out. The prefix it prints is at most 4096 bytes
+      long while ready holds.
     requires:
       - "l != nil"
+      - "ready(l)"
     runs: [l]
     formats: [format, v]
     modifies: []
@@ -42,10 +82,13 @@ trusted:
   (*log.Logger).Print:
     reason: >-
       Documented to call l.Output to print to the logger, with the
-      arguments handled in the manner of fmt.Print. It writes to the writer
-      l holds, which it runs; a nil l panics.
+      arguments handled in the manner of fmt.Print. It writes to the writer l holds, which it runs, and calls only its
+      Write method. A nil l panics, and so does a Logger whose output is
+      nil, which ready rules out. The prefix it prints is at most 4096 bytes
+      long while ready holds.
     requires:
       - "l != nil"
+      - "ready(l)"
     runs: [l]
     formats: [v]
     modifies: []
@@ -53,10 +96,13 @@ trusted:
   (*log.Logger).Println:
     reason: >-
       Documented to call l.Output to print to the logger, with the
-      arguments handled in the manner of fmt.Println. It writes to the
-      writer l holds, which it runs; a nil l panics.
+      arguments handled in the manner of fmt.Println. It writes to the writer l holds, which it runs, and calls only its
+      Write method. A nil l panics, and so does a Logger whose output is
+      nil, which ready rules out. The prefix it prints is at most 4096 bytes
+      long while ready holds.
     requires:
       - "l != nil"
+      - "ready(l)"
     runs: [l]
     formats: [v]
     modifies: []
