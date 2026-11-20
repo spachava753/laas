@@ -1602,6 +1602,21 @@ func (b *sampler) addSlice(t types.Type, to binding) {
 	for i, lf := range leaves {
 		var element *logic.Term
 		switch {
+		case lf.part == partRef && b.v.namedInFormulas[entryRegion+cells[i].key+" = nil"]:
+			// A slice inside an element that a formula compares with nil
+			// is left open, as every slice inside an element is, or is nil
+			// in every element.
+			nils := func(s *witness) {
+				for j, c := range cells[i : i+4] {
+					zero := map[bool]*logic.Term{true: logic.RefLit(0), false: logic.IntLit(0)}[j == 0]
+					if !s.fixed[array(i+j)] {
+						row := logic.Fill(logic.IntLit(maxSampleLen), zero)
+						s.store(c.key, logic.SeqOf(row.Sort), ref, row)
+					}
+				}
+			}
+			b.choose(slot{func(*witness) {}, nils}, entryRegion+cells[i].key)
+			continue
 		case lf.part != partValue && lf.part != partState:
 			// A slice or a pointer inside an element has no sample.
 			continue

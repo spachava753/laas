@@ -185,7 +185,7 @@ Formulas can also use strings and `nil`: `role = "admin"`, `p != nil`, `err = ni
 
 A boolean can be used as a formula on its own, as in `found` or `~found`. It can also be compared with `True` and `False`, as in `found = True`.
 
-A character in single quotes is the number of that character, as in Go. `s[0] = '/'` means `s[0] = 47`. Escapes are written as in Go, as in `'\n'` and `'\x41'`. A quote directly after a name is a prime, as in `x'`. Any other quote starts a character, so `x' = 'a'` compares the value on return with 97. In a doc comment, `gofmt` turns two quotes in a row into `”`, so write the quote character as `'\x27'` there.
+A character in single quotes is the number of that character, as in Go. `s[0] = '/'` means `s[0] = 47`. Escapes are written as in Go, as in `'\n'` and `'\x41'`. A quote directly after a name is a prime, as in `x'`. Any other quote starts a character, so `x' = 'a'` compares the value on return with 97. In a doc comment, `gofmt` turns two quotes in a row into `”`, and two backquotes into `“`. So write the quote character as `'\x27'`, and two quotes in a string as `"\x27\x27"`. A formula that contains `“` or `”` is reported, also inside a string, where the mark is written `"\u201d"`.
 
 `cap(A)` is the capacity of a slice. `A = nil` and `A != nil` say whether a slice is nil, as `A == nil` does in code. See [Capacity and nil in a formula](#capacity-and-nil-in-a-formula).
 
@@ -1675,7 +1675,7 @@ func Smallest(A []int) (result int) {
 The parameters of a predicate can be numbers, slices of numbers, or strings.
 
 ```go
-// @Predicate digits(s) ::= Forall k in [0, |s|) : 48 <= s[k] <= 57
+// @Predicate digits(s) ::= Forall k in [0, |s|) : '0' <= s[k] <= '9'
 ```
 
 The body of a predicate can refer only to its parameters. It cannot use the constants or variables of the package, so pass them as arguments.
@@ -1982,7 +1982,7 @@ func IsAdmin(role string) (result bool) {
 }
 ```
 
-In a formula, a byte of a string is a number. Where the code tests `'0' <= s[i] && s[i] <= '9'`, the contract says `48 <= s[i] <= 57`.
+In a formula, a byte of a string is a number. Where the code tests `'0' <= s[i] && s[i] <= '9'`, the contract says `'0' <= s[i] <= '9'`, which means `48 <= s[i] <= 57`.
 
 `vego` does not know how strings are ordered by `<`. A `range` over a string produces an unknown rune at each step and advances by one to four bytes. Converting a rune to a string, as in `string(r)`, is not supported.
 
@@ -2120,7 +2120,7 @@ func (e *Item) Next() (result *Item) {
 These rules apply:
 
 - The path must go through a pointer or an element of a slice, and must end in a struct. `&x` of a variable, `&p.n` for a field `n` of type `int`, and `&h.f` for a struct `h` passed by value are reported.
-- When the pointer that the path goes through is nil, Go panics on `&e.ring.root`. In a formula the address is then nil. So `e.next = &e.ring.root` holds when `e.next` and `e.ring` are both nil.
+- When the last pointer that the path goes through is nil, Go panics on `&e.ring.root`. In a formula the address is then nil. So `e.next = &e.ring.root` holds when `e.next` and `e.ring` are both nil. When an earlier pointer is nil, as `e` is here, nothing is known of the address.
 - A primed path is read on return, wherever the prime stands. `&e.ring'.root` and `&e'.ring.root` both take the address in `e.ring` as it is on return.
 - A pointer to a struct of size zero can be compared only with nil, as in code.
 
@@ -4842,7 +4842,7 @@ This table lists the most common messages.
 | `the contract of F may also be met by a function that always returns an error` | No example input was found for which the contract forces success. | Add a clause of the form `condition -> err = nil`. See [Errors](#errors). |
 | `specification of F has a hole` | Reported by `-vego.audit`. A trivial implementation satisfies the contract. | Relate the result to the input. |
 | `nothing can satisfy the Requires clauses of F` | The `Requires` clauses contradict each other or the parameter types, so no call could satisfy them. | Fix the `Requires` clauses. |
-| `the slices passed to F as a and b may overlap` | Two slice arguments with the same element type are not proved to be separate memory. | Pass two slice parameters of your own function, or a slice that the function allocated. No formula can yet state that two slices share no memory, so a slice stored in a struct cannot be proved separate from a parameter. |
+| `the slices passed to F as a and b may overlap` | Two slice arguments with the same element type are not proved to be separate memory. | Pass two slice parameters of your own function, or a slice that the function allocated. For a slice stored in a struct, state `apart(s.items, A)` in the `Requires`. See [Slices that share no memory](#slices-that-share-no-memory). |
 | `cannot verify F: it calls G, which has no contract` | `G` is neither verified nor trusted. | Annotate `G`, or add it to the trust file. |
 | `cannot verify F: parameter x has unsupported type T` | `T` is outside the supported subset. | Keep `T` out of the signatures of verified functions. |
 | `cannot verify F: x is assigned at f.go:n; package-level variables that are changed are not supported yet` | `F` reads a package-level variable that something in the build assigns, takes the address of, or names in a `//go:linkname` directive or in assembly. | Pass the value as a parameter. See [Which variables a function can read](#which-variables-a-function-can-read). |

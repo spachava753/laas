@@ -597,8 +597,6 @@ func (s *scope) compare(op string, left, right *Node) *Term {
 func (s *scope) nilSlice(op string, left, right *Node) *Term {
 	other := left
 	switch {
-	case op != "=" && op != "==" && op != "!=":
-		return nil
 	case left.Kind == NNil:
 		other = right
 	case right.Kind != NNil:
@@ -614,6 +612,8 @@ func (s *scope) nilSlice(op string, left, right *Node) *Term {
 		return nil
 	case err != nil:
 		panic(resolveError{err})
+	case op != "=" && op != "==" && op != "!=":
+		fail("operator %s cannot be applied to a slice and nil; a slice is compared with nil by = or !=", op)
 	case op == "!=":
 		return Not(t)
 	}

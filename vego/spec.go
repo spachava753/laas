@@ -631,10 +631,16 @@ func (e *specEnv) sliceOrAddress(name string, steps []logic.Step, last logic.Ste
 }
 
 // noteNamed records that a formula names the capacity of a slice, or
-// compares it with nil, when the part read is a constant: the search for an
-// input on which a contract forces success then also tries slices with
-// more capacity than length, or nil ones; see addSlice.
+// compares it with nil: the search for an input on which a contract forces
+// success then also tries slices with more capacity than length, or nil
+// ones; see addSlice. What is recorded is the constant the part was read
+// from: the part itself for a slice the function holds, and the region for
+// one that lies in memory, as a field behind a pointer or an element does,
+// which is the name the sample gives that part.
 func (v *fnVerifier) noteNamed(part *logic.Term, how string) {
+	for part.Op == logic.OpSelect {
+		part = part.Args[0]
+	}
 	if part.Op != logic.OpConst {
 		return
 	}

@@ -163,6 +163,14 @@ var operators = []string{
 // character literal, as in '/', which uses Go's syntax and stands for the
 // number of its character.
 func lex(src string) ([]token, error) {
+	// gofmt rewrites two quotes in a row in a doc comment as a closing
+	// quotation mark, and two backquotes as an opening one, so in a
+	// formula, in a string as well as outside, one of them is taken for
+	// what gofmt made of an annotation and is refused.
+	if at := strings.IndexAny(src, "“”"); at >= 0 {
+		return nil, &SyntaxError{at, "this formula has “ or ”, which gofmt makes of two backquotes or two quotes in a row in a doc comment; " +
+			"write '\\x27' for a quote character, \\x27\\x27 for two quotes in a string, and \\u201c or \\u201d in a string for the mark itself"}
+	}
 	var toks []token
 	for i := 0; i < len(src); {
 		r, size := utf8.DecodeRuneInString(src[i:])

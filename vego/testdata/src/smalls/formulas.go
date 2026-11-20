@@ -26,8 +26,21 @@ func StartsBlank(s string) (r bool) {
 	return len(s) > 0 && (s[0] == '\n' || s[0] == '\t' || s[0] == ' ')
 }
 
-// @Ensures r <-> s = "”"
+// gofmt made ” of two quotes in a row here, so the formula is refused
+// rather than read as the mark.
+//
+// @Ensures r <-> s = "”" // want `syntax error in Ensures annotation: this formula has “ or ”, which gofmt makes of two backquotes or two quotes in a row in a doc comment`
 func Mangled(s string) (r bool) {
+	return s == "''"
+}
+
+// @Ensures r <-> s = "\x27\x27"
+func TwoQuotes(s string) (r bool) {
+	return s == "''"
+}
+
+// @Ensures r <-> s = "\u201d"
+func Mark(s string) (r bool) {
 	return s == "”"
 }
 
@@ -278,3 +291,67 @@ func (s *Stack) Push(x int) {
 func (s *Stack) PushWrong(x int) {
 	s.items = append(s.items, x)
 } // want `postcondition may not hold: cap\(s.items'\) = cap\(s.items\) \+ 1`
+
+// The search for an input on which a contract forces success tries a nil
+// slice, and one with spare capacity, also behind a pointer and inside an
+// element.
+
+// @Requires s != nil
+// @Ensures err = nil <-> cap(s.items) > |s.items|
+func FieldRoom(s *Stack) (err error) {
+	if cap(s.items) == len(s.items) {
+		return errors.New("full")
+	}
+	return nil
+}
+
+// @Requires s != nil
+// @Ensures err = nil <-> s.items = nil
+func FieldAbsent(s *Stack) (err error) {
+	if s.items != nil {
+		return errors.New("an array")
+	}
+	return nil
+}
+
+// @Requires |xs| > 0
+// @Ensures err = nil <-> xs[0] = nil
+func ElemAbsent(xs [][]int) (err error) {
+	if xs[0] != nil {
+		return errors.New("an array")
+	}
+	return nil
+}
+
+// The offsets of fields selected after the last pointer count too.
+
+type In struct{ a, b int }
+
+type Mid struct {
+	pad int
+	In
+}
+
+type Out struct {
+	x   int
+	m   Mid
+	ptr *Mid
+}
+
+// @Requires o != nil
+// @Ensures p = &o.m.In
+func Inner(o *Out) (p *In) {
+	return &o.m.In
+}
+
+// @Requires o != nil And o.ptr != nil
+// @Ensures p = &o.m.In
+func InnerWrong(o *Out) (p *In) {
+	return &o.ptr.In // want `postcondition may not hold: p = &o.m.In`
+}
+
+// @Requires 0 <= i < |s|
+// @Ensures p = &s[i].In
+func InnerAt(s []Mid, i int) (p *In) {
+	return &s[i].In
+}

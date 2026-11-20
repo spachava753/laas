@@ -569,7 +569,7 @@ func CountPositive(A []int) (result int) {
 	return n
 }
 
-// @Predicate digits(s) ::= Forall k in [0, |s|) : 48 <= s[k] <= 57
+// @Predicate digits(s) ::= Forall k in [0, |s|) : '0' <= s[k] <= '9'
 
 // FirstDigit reads a digit from a string of digits.
 //
