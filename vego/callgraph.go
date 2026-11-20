@@ -432,11 +432,20 @@ func (pv *pkgVerifier) codeTargets(t types.Type, seen map[types.Type]bool) []*ca
 		// What the value holds may be found by a type assertion or by
 		// reflection: a value of any type of the package, with its
 		// exported methods, or a function value of any type.
-		found := append(pv.exportedMethods(), pv.valuesMatching(nil)...)
+		found := pv.anythingTargets()
 		for method := range u.Methods() {
 			found = append(found, pv.methodsMatching(method.Name(), withoutRecv(method.Type().(*types.Signature)))...)
 		}
 		return found
+	case *types.Basic:
+		// An unsafe.Pointer may point to any value, which code of another
+		// package can convert back to its type and call: it reaches what
+		// an any reaches. The two types of the standard library whose
+		// unsafe.Pointer their package fixes were walked as heldAs says
+		// before they came here.
+		if u.Kind() == types.UnsafePointer {
+			return pv.anythingTargets()
+		}
 	case *types.Pointer:
 		return pv.codeTargets(u.Elem(), seen)
 	case *types.Slice:
@@ -455,6 +464,15 @@ func (pv *pkgVerifier) codeTargets(t types.Type, seen map[types.Type]bool) []*ca
 		return found
 	}
 	return nil
+}
+
+// anythingTargets returns what code of another package may run that a
+// value which can hold anything holds: a value of any type of the package,
+// found by a type assertion, by reflection, or by converting an
+// unsafe.Pointer, with its exported methods, or a function value of any
+// type.
+func (pv *pkgVerifier) anythingTargets() []*callNode {
+	return append(pv.exportedMethods(), pv.valuesMatching(nil)...)
 }
 
 // concreteMethods returns the methods with exported names declared on a
@@ -758,9 +776,13 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 			targets := pv.codeTargets(t, map[types.Type]bool{})
 			why := fmt.Sprintf("%s holds an interface value or a function value, which may hold a value of any type of the package or any function it lets out, "+
 				"and code of another package may call that, or an exported method of it, by a type assertion or reflection", types.ExprString(arg))
-			if types.IsInterface(t) {
+			switch {
+			case types.IsInterface(t):
 				why = fmt.Sprintf("%s is an interface value, which may hold a value of any type of the package or any function it lets out, "+
 					"and code of another package may call that, or an exported method of it, by a type assertion or reflection", types.ExprString(arg))
+			case heldCode(t, map[types.Type]bool{}) == "an unsafe.Pointer":
+				why = fmt.Sprintf("%s holds an unsafe.Pointer, which may point to a value of any type of the package or any function it lets out, "+
+					"and code of another package may convert it back and call that, or an exported method of it", types.ExprString(arg))
 			}
 			if as := passedAs[arg]; as != nil && types.IsInterface(as) && !types.IsInterface(t) {
 				if len(targets) == 0 {

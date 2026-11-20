@@ -13,11 +13,15 @@ func Call(h *unsafelib.Holder) {
 	unsafelib.Run(h) // want `vego: cannot verify Call: h is passed to Run, which is trusted, and is a value of type \*unsafelib.Holder, which is or holds an unsafe.Pointer; Run could run code through it that nobody has seen`
 }
 
-// CallListed hands it to one whose entry does.
+// CallListed hands it to one whose entry does. An exported function of
+// this package can be what h.P points to, and RunListed runs what it
+// holds, so a cycle may go through it.
 //
 // @Requires h != nil
 // @Ensures True
-func CallListed(h *unsafelib.Holder) { unsafelib.RunListed(h) }
+func CallListed(h *unsafelib.Holder) {
+	unsafelib.RunListed(h) // want `vego: this call may not end: CallListed hands h to unsafelib.RunListed\(h\) at use.go:\d+:\d+, which may run CallListed; h holds an unsafe.Pointer, which may point to a value of any type of the package or any function it lets out, and code of another package may convert it back and call that, or an exported method of it`
+}
 
 // Use takes a holder.
 //

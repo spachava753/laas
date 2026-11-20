@@ -1,0 +1,17 @@
+version: 1
+
+trusted:
+  unsafecycle.t:
+    reason: Runs nothing it is handed, since it is handed nothing; what lib does with the address it hands over is the point.
+    modifies: []
+  unsafecycle.u:
+    reason: The same with a function value.
+    modifies: []
+  unsafecycle.v:
+    reason: The same with the address of plain data.
+    modifies: []
+  unsafecycle.logTo:
+    reason: Formats as fmt does and runs what s holds.
+    formats: [format, args]
+    runs: [s]
+    modifies: []

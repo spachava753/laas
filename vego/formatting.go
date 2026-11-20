@@ -102,14 +102,22 @@ func isAnyParam(sig *types.Signature, param *types.Var) bool {
 
 // writingCode names what a value of a type can hold that a trusted function
 // may run and whose contract writes memory: a function value or an
-// interface value whose type's contract lists something under Modifies. It
-// returns "" when there is none.
+// interface value whose type's contract lists something under Modifies, or
+// an unsafe.Pointer, which may point to one. It returns "" when there is
+// none.
 func (pv *pkgVerifier) writingCode(t types.Type, seen map[types.Type]bool) string {
 	if t == nil || seen[t] {
 		return ""
 	}
 	seen[t] = true
+	if held, replaced := heldAs(t); replaced {
+		return pv.writingCode(held, seen)
+	}
 	switch u := t.Underlying().(type) {
+	case *types.Basic:
+		if u.Kind() == types.UnsafePointer {
+			return "an unsafe.Pointer, which may point to a function value or an interface value whose contract modifies memory"
+		}
 	case *types.Signature:
 		if fn := pv.valueContract(t); fn != nil && len(fn.modifies) > 0 {
 			return "a function value of type " + t.String() + ", whose contract modifies memory"

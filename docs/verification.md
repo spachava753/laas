@@ -606,6 +606,7 @@ The variants do not help, because nothing compares them across `s.Next()`. A `*R
 - A call of a function of another package may run what its arguments and its receiver can hold, at any depth. So may a call through an interface value or a function value, whose implementation may be code of another package, for its arguments:
   - A function value counts as a call through it.
   - An interface value counts as a call of each of its methods. It may also run every method with an exported name of every type of the package, and every function value the package lets out, of any signature, since that code can find them by a type assertion or reflection.
+  - An `unsafe.Pointer` may run the same, since that code can convert it back to the type of what it points to and call that. The two types described in [Arguments that carry code](#arguments-that-carry-code), `sync/atomic.Pointer[T]` and `runtime.Pinner`, count as what their package lets them hold instead.
   - A value of another type converted to an interface there may run the exported methods of its type and of the types it holds.
   - A function or a literal written as the argument may run only itself.
   - A value that `fmt` formats may run the methods named `String`, `Error`, `Format`, and `GoString` of what it holds through exported fields, and of every type of the package through an interface value.

@@ -221,6 +221,12 @@ func TestAnalyzer(t *testing.T) {
 		})
 	}
 
+	// Code of the package handed to another package through an
+	// unsafe.Pointer.
+	t.Run("follows an unsafe.Pointer handed to another package", func(t *testing.T) {
+		runCorpus(t, newAnalyzer(), "unsafecycle")
+	})
+
 	// Values that hold a sync/atomic.Pointer, handed to trusted functions.
 	t.Run("counts an atomic pointer as a pointer to its type argument", func(t *testing.T) {
 		runCorpus(t, newAnalyzer(), "heldcode")
