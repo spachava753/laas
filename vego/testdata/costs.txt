@@ -2399,6 +2399,7 @@ variadic	variadic.Hold	1	368	0
 variadic	variadic.HoldMixed	1	368	0
 variadic	variadic.Joined	4	18510	2
 variadic	variadic.LiteralInPlace	2	66	0
+variadic	variadic.LongTail	10	12819	0
 variadic	variadic.Max	26	49747	0
 variadic	variadic.MaxAlone	2	589	0
 variadic	variadic.MaxListed	2	4554	0

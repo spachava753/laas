@@ -157,3 +157,13 @@ type Guarded struct {
 func AddGuarded(gs, hs []Guarded) (r []Guarded) {
 	return append(gs, hs...) // want `vego:\ cannot\ verify\ AddGuarded:\ append\ to\ a\ slice\ of\ Guarded,\ which\ holds\ a\ sync\.Mutex`
 }
+
+// Nothing bounds |ys|, so the array append moves to may be more than can
+// be allocated.
+//
+// @Requires |xs| < 10
+// @Modifies xs
+// @Ensures True
+func LongTail(xs, ys []int) (r []int) {
+	return append(xs, ys...) // want `vego:\ the\ slice\ that\ append\ grows\ may\ be\ more\ than\ can\ be\ allocated`
+}
