@@ -57,8 +57,8 @@ func TrustReport(usages []*Usage, dir string) string {
 				fmt.Fprintf(&b, "    runs code held by: %s\n", strings.Join(use.Runs, ", "))
 			}
 			if len(use.Keeps) > 0 {
-				fmt.Fprintf(&b, "    keeps code held by: %s; a claim that the code runs later only during calls handed what it is kept in, "+
-					"on the goroutine of that call, and is kept nowhere else\n", strings.Join(use.Keeps, "; "))
+				fmt.Fprintf(&b, "    keeps code held by: %s; a claim that the function runs none of it while the call lasts unless runs lists it, "+
+					"holds it afterwards only in what it is kept in, and starts or registers nothing that runs it later\n", strings.Join(use.Keeps, "; "))
 			}
 			if len(use.Formats) > 0 {
 				fmt.Fprintf(&b, "    formats as package fmt does: %s; a claim that it runs only the Format, GoString, Error, and String methods "+

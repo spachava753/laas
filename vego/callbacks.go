@@ -26,7 +26,8 @@ import (
 //
 // The parameter must be listed under runs as well: the entry claims what
 // runs claims, that the function calls f only before it returns, on the
-// goroutine that called it, and keeps it nowhere, and also that it calls f
+// goroutine that called it, and holds it nowhere it was not held before the
+// call, and also that it calls f
 // only with arguments that meet the requires of calls, in the state at that
 // call. The rest of the contract has to hold for every function that meets
 // them, returns, and writes nothing that the modifies of the entry covers.

@@ -163,7 +163,7 @@ Project contracts in use: 5
     used at: b/b.go:11
   example.com/app.load  [may fail unpredictably]
     reason:  Reads a file.
-    keeps code held by: r in result and w; a claim that the code runs later only during calls handed what it is kept in, on the goroutine of that call, and is kept nowhere else
+    keeps code held by: r in result and w; a claim that the function runs none of it while the call lasts unless runs lists it, holds it afterwards only in what it is kept in, and starts or registers nothing that runs it later
     vouches for the errors and function values in: err
     defined: vego-trusted.yaml:4
     used at: a.go:10, b/b.go:7

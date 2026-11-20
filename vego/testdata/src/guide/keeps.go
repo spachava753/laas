@@ -57,3 +57,11 @@ func (p *Prefetcher) fill() {
 	n, _ := p.r.Read(buf)
 	p.ahead <- buf[:n]
 }
+
+// tell is trusted, and its entry lists neither runs nor keeps.
+func tell(e error) {}
+
+// @Ensures True
+func TellsUnknown(e error) {
+	tell(e) // want `^vego: cannot verify TellsUnknown: e is passed to tell, which is trusted, and is an error whose origin is not known; tell could run code through it that nobody has seen. If its contract holds whatever that code does, list e under runs in the contract if tell runs it only while the call lasts, or under keeps, with where it keeps it, if it keeps it in a result or a parameter for later calls$`
+}

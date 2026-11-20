@@ -1378,6 +1378,14 @@ trusted:
     modifies: [r]
     vouches: [r]
 
+  (*keepslib.Registry).AddCounted:
+    reason: A test of keeps into a parameter whose modifies lists only memory that cannot hold the kept code.
+    requires: ["r != nil"]
+    runs: [r]
+    keeps:
+      h: [r]
+    modifies: [r.Count]
+
   (*keepslib.Registry).Fire:
     reason: Calls each handler kept in r with n, which handlers of the registry require not to be negative.
     requires: ["r != nil", "n >= 0"]
@@ -1512,6 +1520,10 @@ trusted:
     reason: Calls each event of h with n, on the calling goroutine, before it returns. Read 2026-11-20.
     requires: ["h != nil", "n >= 0"]
     runs: [h]
+    modifies: []
+
+  guide.tell:
+    reason: The guide's example of a trusted function that is handed an error, with neither runs nor keeps.
     modifies: []
 
   foreignlib.Keeps:

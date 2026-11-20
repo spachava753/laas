@@ -44,7 +44,7 @@ func KeepsInUnlisted(reg *keepslib.Registry) {
 //
 // @Ensures True
 func KeepsInError() {
-	_ = keepslib.KeepsInError(show) // want `its keeps lists h, which can hold a function value of type keepslib.Handler, as kept in result, whose type error can hold no function value and no value of an interface whose methods all have contracts` `KeepsInError has a contract that could not be understood`
+	_ = keepslib.KeepsInError(show) // want `its keeps lists h as kept in result, whose type error can hold no function value and no value of an interface whose methods all have contracts. But h can hold a function value of type keepslib.Handler, and a call handed result would run that code without being counted as one that may call through a value` `KeepsInError has a contract that could not be understood`
 }
 
 // @Ensures True
@@ -174,4 +174,13 @@ func drain() {
 // @Ensures True
 func Drains() {
 	keepslib.Consume(keepslib.Closing(Drained{})) // want `cannot verify Drains: Read may call through a function value or an interface value.*Read calls drain, which calls Consume, which is trusted and runs what rc holds, which can be a value of io.ReadCloser, whose methods all have contracts, so that it can hold code that verified code made`
+}
+
+// KeepsInCountField keeps a handler in a registry, and its modifies lists only a
+// count, which cannot hold one.
+//
+// @Requires reg != nil
+// @Ensures True
+func KeepsInCountField(reg *keepslib.Registry) {
+	reg.AddCounted(show) // want `its keeps lists h as kept in r, but nothing its modifies lists under r can hold it` `AddCounted has a contract that could not be understood`
 }

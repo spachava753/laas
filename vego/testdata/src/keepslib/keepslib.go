@@ -18,6 +18,7 @@ type Handler func(n int)
 // Registry keeps handlers and calls them when it fires.
 type Registry struct {
 	handlers []Handler
+	Count    int
 }
 
 // NewRegistry returns an empty registry.
@@ -102,3 +103,9 @@ func Closing(r io.Reader) io.ReadCloser { return io.NopCloser(r) }
 
 // Consume reads from rc until it fails.
 func Consume(rc io.ReadCloser) {}
+
+// AddCounted keeps h in r and counts it.
+func (r *Registry) AddCounted(h Handler) {
+	r.handlers = append(r.handlers, h)
+	r.Count++
+}
