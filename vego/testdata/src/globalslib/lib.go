@@ -57,3 +57,12 @@ var Plans = map[string]int{"free": 10, "pro": 1000}
 //
 // @Ensures r = 10
 func FreeLimit() (r int) { return Plans["free"] }
+
+// Tally counts what is written to it.
+type Tally struct{ N int }
+
+// Write is not verified.
+func (t *Tally) Write(p []byte) (int, error) {
+	t.N += len(p)
+	return len(p), nil
+}

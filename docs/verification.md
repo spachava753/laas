@@ -1929,7 +1929,7 @@ An assignment evaluates the operands of its targets together with its right-hand
 
 ### An append beside a call
 
-`append` and the other built-in functions are not ordered like calls, because the Go specification does not say that they are. An `append` runs after its operands, and nothing else orders it. So when an `append` writes into the array of its slice, the operands of the targets of the same assignment may be evaluated before or after that write. Reads there are checked like any other read. A call there must not modify anything, and its receiver, parameters, and results must refer to no memory. Integers, floats, booleans, strings, errors, and structs of these refer to no memory. A call that is passed a pointer, a slice, or a map is refused:
+`append` and the other built-in functions are not ordered like calls, because the Go specification does not say that they are. An `append` runs after its operands, and nothing else orders it. So when an `append` writes into the array of its slice, the operands of the targets of the same assignment may be evaluated before or after that write. Reads there are checked like any other read. A call there must not modify anything, its receiver, parameters, and results must refer to no memory, and its contract must name no package-level variable that refers to memory. Integers, floats, booleans, strings, errors, and structs of these refer to no memory. A call that is passed a pointer, a slice, or a map is refused:
 
 ```go
 // @Requires c != nil
@@ -2155,7 +2155,7 @@ are not supported yet
 
 Pass the value as a parameter instead. For a variable of another package, the message names the package that changes it. An `init` function that assigns a variable changes it too.
 
-The type of the variable must be one that cannot hold code. A function value, an interface value, an error, or a channel may not appear in the type at any depth, also behind a pointer. The unexported fields of a struct type of another package do not count, because verified code cannot read them. So `*os.File` and `*log.Logger` can be read, but `*http.Client` cannot, because its exported field `Transport` holds an interface value:
+The type of the variable must be one that cannot hold code. A function value, an interface value, an error, a channel, or an `unsafe.Pointer` may not appear in the type at any depth, also behind a pointer, and also in a field that the type does not export. Verified code cannot read such a field, but it can hand the variable to a trusted function that runs the code the field holds. So `*http.Client` cannot be read, and neither can `*os.File` or `*log.Logger`:
 
 ```go
 // Client reads a variable whose type can hold code.
@@ -2168,14 +2168,15 @@ func Client() (r bool) {
 
 ```text
 vego: cannot verify Client: http.DefaultClient has type *net/http.Client, which can hold a function value,
-an interface value, an error, or a channel; package-level variables of such types are not supported yet
+an interface value, an error, a channel, or an unsafe.Pointer; package-level variables of such types are not
+supported yet
 ```
 
 ### What vego knows of the value
 
 `vego` reads the initialiser of the variable. The value is known in these cases:
 
-- There is no initialiser. The variable holds the zero value of its type.
+- There is no initialiser and no `//go:embed` directive. The variable holds the zero value of its type, unless the build sets it with `-ldflags -X`, as described at the end of this section.
 - The initialiser is a constant, as in `var defaultTimeout = 30`. The variable holds that constant. A float constant is one value, but nothing is known of it, as for every float.
 - The initialiser is a struct literal, as in `var defaults = Config{Timeout: 30}`. Each field holds what the literal gives it, by these same rules.
 - The initialiser is a slice or map literal, `make`, `new`, `&T{...}`, or `[]byte` or `[]rune` of a constant string. The variable is not nil. A slice has the length that the literal, the constant arguments of `make`, or the string gives, and the capacity of a literal or of `make` with constant arguments.
@@ -2220,18 +2221,34 @@ func PagesChecked(n int) (r int) {
 
 A clause that relates a parameter to a variable, such as `@Requires n < defaultTimeout`, is a condition on callers as usual. The check that a contract does not allow a function to always fail, described in [Saying when a function succeeds](#saying-when-a-function-succeeds), counts a variable as part of the input. Its declaration narrows the values that the check tries.
 
-A variable named in the code is read as a value, so it cannot be primed. `defaultTimeout'` and `old(defaultTimeout)` are reported. A struct invariant, and the contract of a function type or of a method of an interface, cannot name a package-level variable yet.
+In an `Ensures` clause, a prime on a variable that reads no memory is reported, as in `defaultTimeout'`, since the variable holds the same value on return. A primed path that reads memory, as in `sizes'[0]`, is the memory on return, as for a parameter. `old(defaultTimeout)` is reported. A struct invariant, and the contract of a function type or of a method of an interface, cannot name a package-level variable yet.
 
 ### What a variable refers to
 
 A variable that holds a slice, a map, or a pointer is fixed, but the memory it refers to may not be. `table[0] = 5` assigns no variable. `vego` treats that memory as unchanged only when both of these hold:
 
 - The initialiser made the memory: it is a slice or map literal, `make`, `new`, `&T{...}`, or `[]byte` or `[]rune` of a constant string. No other reference to it existed then.
-- Every use of the variable in the build only reads a value out of it. A read is `v[i]`, `v.f`, or a path of these such as `v[i].f`, that ends in a value with no pointer, slice, or map in it. It can also be `len(v)` or `cap(v)`, a comparison with `nil`, a `range` over `v` whose elements, and for a map whose keys, hold no pointer, slice, or map, or `n, ok := v[k]`.
+- Every use of the variable in the build only reads a value out of it.
+
+These uses are reads:
+
+- `v[i]`, `v.f`, or a path of these such as `v[i].f`, that ends in a value with no pointer, slice, or map in it;
+- `n, ok := v[k]`, on the same condition;
+- `len(v)` and `cap(v)`;
+- a comparison with `nil`;
+- a `range` over `v` whose elements, and for a map whose keys, hold no pointer, slice, or map.
 
 Any other use lets a reference to the memory out of the variable. Examples are passing `v` to a function, assigning it, slicing it, calling a method on it or on one of its elements, writing an element, and `delete` on a map. A use in code that is not verified counts. So does a use in another package that is built with yours, and a use in the initialiser of another variable, as in `var view = table[1:]`.
 
-When both hold, a literal tells `vego` the elements, the keys and values, or the fields. `Limit` above relies on this. Otherwise the memory is like memory that a parameter refers to. Nothing is known of what it holds when the function is called, and a write through another slice may change it:
+When both conditions hold, a literal tells `vego` the elements, the keys and values, or the fields. `Limit` above relies on this. In these cases the memory is unchanged, but what it holds is not known:
+
+- The literal has more than 1024 elements or keys. The length of a slice is still known.
+- A key of a map literal is not a constant.
+- `make` or `new` made the memory.
+
+What is made inside a literal, such as the inner slices of `[][]int{{1, 2}}`, is ordinary memory.
+
+ Otherwise the memory is like memory that a parameter refers to. Nothing is known of what it holds when the function is called, and a write through another slice may change it:
 
 ```go
 var sizes = []int{1, 2, 4}
@@ -2313,36 +2330,41 @@ A variable holds its value only once the package has initialised it. `vego` reli
 Some code that uses package-level variables still cannot be verified:
 
 - A counter, a cache, or any other variable that is assigned, also in an `init` function, as `os.Args` is in package `os`. Pass the value as a parameter.
-- `fmt.Fprintln(os.Stderr, ...)`. A function can read `os.Stderr`, but writing to it converts the `*os.File` to an `io.Writer`, and `(*os.File).Write` has no shipped contract:
+- `fmt.Fprintln(os.Stderr, ...)`. The type of `os.Stderr`, `*os.File`, holds an `unsafe.Pointer` in a field it does not export, so a function cannot read it:
 
   ```text
-  vego: cannot verify Warn: it uses Write as a method of io.Writer, and Write has no contract; annotate
-  Write with // @ annotations so that it is verified, or add a trusted contract for (*os.File).Write to
-  vego-trusted.yaml
+  vego: cannot verify Warn: os.Stderr has type *os.File, which can hold a function value, an interface
+  value, an error, a channel, or an unsafe.Pointer; package-level variables of such types are not
+  supported yet
   ```
 
   Use `fmt.Printf`, or take the writer as a parameter.
+- A logger in a package-level variable, as in `var logger = log.New(os.Stderr, "app: ", 0)`. The logger keeps the writer that its initialiser gave it, and nothing checked that writer. `vego` does not know either that `log.New` returned a logger that is not nil:
+
+  ```go
+  var logger = log.New(os.Stderr, "app: ", 0)
+
+  // Notify writes to a package-level logger.
+  //
+  // @Requires |msg| <= 1000
+  // @Ensures True
+  func Notify(msg string) {
+  	if logger != nil {
+  		logger.Printf("report: %s", msg)
+  	}
+  }
+  ```
+
+  ```text
+  vego: cannot verify Notify: logger has type *log.Logger, which can hold a function value, an interface
+  value, an error, a channel, or an unsafe.Pointer; package-level variables of such types are not
+  supported yet
+  ```
+
+  Take the logger as a parameter.
 - `log.Default()`, which has no shipped contract.
 - `flag` variables. `flag.Int` returns an `*int`, and pointers to anything but a struct are not supported. `flag.StringVar(&s, ...)` takes the address of `s`.
 - A variable of a function type or an interface type.
-
-A logger in a package-level variable can be used when the code tests it against `nil`. `log.New` is called by the initialiser, which is not verified, so `vego` does not know that its result is not nil:
-
-```go
-var logger = log.New(os.Stderr, "app: ", 0)
-
-// Notify writes to a package-level logger.
-//
-// @Requires |msg| <= 1000
-// @Ensures True
-func Notify(msg string) {
-	if logger != nil {
-		logger.Printf("report: %s", msg)
-	}
-}
-```
-
-Without the test, the call is reported as `precondition of Printf may not hold: l != nil`.
 
 A build that sets a string variable with `-ldflags "-X path.name=value"` gives it a value that `vego` does not see. A proof that relies on the value of such a variable, typically a version, does not hold for that build. See [What a proof assumes](#what-a-proof-assumes).
 
@@ -2895,7 +2917,7 @@ func Inventory(w io.Writer, l *log.Logger, n int) (err error) {
 }
 ```
 
-`fmt.Fprintf(os.Stderr, ...)` is reported as `cannot verify`, because `(*os.File).Write` has no shipped contract, and `log.Default()` has none either. Use `fmt.Printf` or `log.Printf`, or take the writer or the logger as a parameter. A logger in a package-level variable can be used when the code tests it against `nil`, as described in [What this does not cover yet](#what-this-does-not-cover-yet).
+`fmt.Fprintf(os.Stderr, ...)`, `log.Default()`, and a logger in a package-level variable are reported as `cannot verify`, as described in [What this does not cover yet](#what-this-does-not-cover-yet). Use `fmt.Printf` or `log.Printf`, or take the writer or the logger as a parameter.
 
 `fmt.Printf`, `fmt.Print`, and `fmt.Println` write to standard output, and the functions of `log` write to the standard logger. Code that is not verified chooses where those go: it can set `os.Stdout`, and it can call `log.SetOutput` or `slog.SetDefault`. A proof assumes that a write there returns and writes nothing verified code can see. If your program sets the standard logger's output to a writer of its own, it makes that claim about the writer. A writer that logs through the standard logger again never returns, because the logger holds a lock while it writes. See [What a proof assumes](#what-a-proof-assumes).
 
@@ -4031,7 +4053,7 @@ This table lists the most common messages.
 | `cannot verify F: it calls G, which has no contract` | `G` is neither verified nor trusted. | Annotate `G`, or add it to the trust file. |
 | `cannot verify F: parameter x has unsupported type T` | `T` is outside the supported subset. | Keep `T` out of the signatures of verified functions. |
 | `cannot verify F: x is assigned at f.go:n; package-level variables that are changed are not supported yet` | `F` reads a package-level variable that something in the build assigns, takes the address of, or names in a `//go:linkname` directive or in assembly. | Pass the value as a parameter. See [Which variables a function can read](#which-variables-a-function-can-read). |
-| `cannot verify F: x has type T, which can hold a function value, an interface value, an error, or a channel` | `F` reads a package-level variable of such a type. | Pass the value as a parameter. |
+| `cannot verify F: x has type T, which can hold a function value, an interface value, an error, a channel, or an unsafe.Pointer` | `F` reads a package-level variable of such a type. | Pass the value as a parameter. |
 | `cannot verify F: x is a package-level variable, which a verified function cannot assign yet`, or `x[i] writes memory that the package-level variable x refers to, which a Modifies clause cannot name yet` | `F` changes a package-level variable or what one refers to. | Leave the change to code that is not verified, or pass the memory as a parameter. See [Changing a variable](#changing-a-variable). |
 | `the Requires clause P reads only package-level variables, and their declarations do not show that it holds` | No caller can choose the values the clause is about. | Test the value in the body. See [What vego knows of the value](#what-vego-knows-of-the-value). |
 | `x may be changed here, but proofs in package p rely on it holding the value it was declared with`, or `... rely on what it refers to being only read` | A package in the build changes a variable, or lets out a reference to what it refers to, and a proof relies on it. | Remove the change, or the proof that relies on the variable. See [What a variable refers to](#what-a-variable-refers-to). |
@@ -4125,10 +4147,10 @@ A function that uses any of the following is reported as `cannot verify`:
 - goroutines, channels, and `select`;
 - arrays, and structs that contain an array;
 - pointers to anything other than a struct;
-- reading a package-level variable that something in the build changes, or whose type can hold a function value, an interface value, an error, or a channel; assigning a package-level variable, writing what one refers to, and naming one in `Modifies` (see [Package-level variables](#package-level-variables));
+- reading a package-level variable that something in the build changes, or whose type can hold a function value, an interface value, an error, a channel, or an `unsafe.Pointer`; assigning a package-level variable, writing what one refers to, and naming one in `Modifies` (see [Package-level variables](#package-level-variables));
 - `copy`;
 - formatting a value whose type has a method `Format`, `GoString`, `Error`, or `String`, a pointer, a map, an interface value other than an error of known origin, a function value, or a value of a type that holds itself, with `fmt.Errorf` or a function whose entry lists it under `formats`, and passing such a function a slice with `...` for the values it formats (see [What can be formatted](#what-can-be-formatted));
-- writing to `os.Stdout` or `os.Stderr` with `fmt.Fprint`, `fmt.Fprintf`, or `fmt.Fprintln`, since `(*os.File).Write` has no shipped contract, and `log.Default()`;
+- `os.Stdout`, `os.Stderr`, a logger in a package-level variable, and `log.Default()`;
 - a call in the target of an assignment whose right-hand side is an `append` that may write into the array of its slice, unless the call modifies nothing and refers to no memory or a call among the operands of the `append` orders it (see [An append beside a call](#an-append-beside-a-call));
 - a call with several results as the arguments of another call, as in `g(f())`;
 - comparing structs with `==`;

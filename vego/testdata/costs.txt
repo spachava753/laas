@@ -942,6 +942,7 @@ globals	globals.WriteTable	1	46	0
 globals	globals.WrittenFirst	4	1335	0
 globals	globals.fill	6	2244	0
 globals	globals.firstEntry	4	1538	0
+globalsclient	(*log.Logger).Printf	1	6178	0
 globalsclient	globalsclient.AtLimit	4	233	0
 globalsclient	globalsclient.Beside	11	60470	0
 globalsclient	globalsclient.Counter	1	46	0
@@ -952,6 +953,8 @@ globalsclient	globalsclient.Names	2	1150	0
 globalsclient	globalsclient.Origin	4	259	0
 globalsclient	globalsclient.OverLimit	3	201	0
 globalsclient	globalsclient.Pro	2	2344	0
+globalsclient	globalsclient.Quiet	2	106	0
+globalsclient	io.Writer.Write	3	5506	0
 globalsearly	(globalsearly.T).Limit	1	46	0
 globalsearly	(globalsearly.T).Zero	2	81	0
 globalsembed	globalsembed.Greeting	2	456	0
@@ -1095,7 +1098,7 @@ guide	guide.MidWrong	7	3245	0
 guide	guide.Nearest	27	66617	0
 guide	guide.NewCounter	4	1080	0
 guide	guide.Next	16	11499	0
-guide	guide.Notify	5	52514	0
+guide	guide.Notify	1	429	0
 guide	guide.Offset	6	2033	0
 guide	guide.Option	3	2393	0
 guide	guide.Pack	9	5975	0

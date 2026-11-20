@@ -1,7 +1,11 @@
 // Package globalsclient reads the package-level variables of globalslib.
 package globalsclient
 
-import "globalslib"
+import (
+	"log"
+
+	"globalslib"
+)
 
 // Limit reads a variable of another package.
 //
@@ -61,3 +65,20 @@ func Pro() (r int) { return globalslib.Plans["pro"] }
 //
 // @Modifies globalslib.Limit // want `vego: in Modifies annotation: globalslib.Limit is a package-level variable, which a Modifies clause cannot name yet`
 func ListsVariable() {}
+
+// tally and logger are arranged by two initialisers: the logger holds a
+// writer that writes what tally points to.
+var tally = &globalslib.Tally{}
+
+var logger = log.New(tally, "", 0)
+
+// Quiet would hold if logging wrote nothing a caller can see.
+//
+// @Ensures r
+func Quiet() (r bool) {
+	n := tally.N
+	if logger != nil { // want `vego: cannot verify Quiet: logger has type \*log.Logger, which can hold a function value, an interface value, an error, a channel, or an unsafe.Pointer; package-level variables of such types are not supported yet`
+		logger.Printf("x")
+	}
+	return tally.N == n
+}

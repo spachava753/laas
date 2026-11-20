@@ -755,7 +755,7 @@ func (pv *pkgVerifier) usableFixed(variable *types.Var) (knownValue, string) {
 		return knownValue{}, fmt.Sprintf("%s has type %s, which is not supported%s", spelled, t, unsupportedHint(t))
 	}
 	if !pv.dataType(t, map[types.Type]bool{}) {
-		return knownValue{}, fmt.Sprintf("%s has type %s, which can hold a function value, an interface value, an error, or a channel; "+
+		return knownValue{}, fmt.Sprintf("%s has type %s, which can hold a function value, an interface value, an error, a channel, or an unsafe.Pointer; "+
 			"package-level variables of such types are not supported yet", spelled, t)
 	}
 	var known knownValue
@@ -788,8 +788,10 @@ func (pv *pkgVerifier) usableFixed(variable *types.Var) (knownValue, string) {
 
 // dataType reports whether a value of the type, and the memory it refers
 // to at any depth, can hold no code: no function value, interface value,
-// error, or channel. The unexported fields of a struct type of another
-// package are left out, since verified code cannot read them.
+// error, channel, or unsafe.Pointer. The unexported fields of a struct type
+// of another package count too: verified code cannot read them, but it can
+// hand the value to a trusted function that runs the code they hold, as a
+// *log.Logger holds the writer its initialiser gave it.
 func (pv *pkgVerifier) dataType(t types.Type, seen map[types.Type]bool) bool {
 	if seen[t] {
 		return true
@@ -808,9 +810,6 @@ func (pv *pkgVerifier) dataType(t types.Type, seen map[types.Type]bool) bool {
 		return pv.dataType(u.Key(), seen) && pv.dataType(u.Elem(), seen)
 	case *types.Struct:
 		for field := range u.Fields() {
-			if !field.Exported() && field.Pkg() != pv.pass.Pkg {
-				continue
-			}
 			if !pv.dataType(field.Type(), seen) {
 				return false
 			}

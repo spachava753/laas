@@ -88,7 +88,7 @@ var hook func()
 //
 // @Ensures True
 func Hooked() (r bool) {
-	return hook == nil // want `vego: cannot verify Hooked: hook has type func\(\), which can hold a function value, an interface value, an error, or a channel; package-level variables of such types are not supported yet`
+	return hook == nil // want `vego: cannot verify Hooked: hook has type func\(\), which can hold a function value, an interface value, an error, a channel, or an unsafe.Pointer; package-level variables of such types are not supported yet`
 }
 
 // sink holds an interface value behind a pointer.

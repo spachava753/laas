@@ -85,7 +85,7 @@ var logger = log.New(os.Stderr, "app: ", 0)
 // @Requires |msg| <= 1000
 // @Ensures True
 func Notify(msg string) {
-	if logger != nil {
+	if logger != nil { // want `vego: cannot verify Notify: logger has type \*log.Logger, which can hold a function value, an interface value, an error, a channel, or an unsafe.Pointer; package-level variables of such types are not supported yet`
 		logger.Printf("report: %s", msg)
 	}
 }
@@ -95,14 +95,14 @@ func Notify(msg string) {
 // @Requires |msg| <= 1000
 // @Ensures True
 func Warn(msg string) {
-	fmt.Fprintln(os.Stderr, "warning:", msg) // want `vego: cannot verify Warn: it uses Write as a method of io.Writer, and Write has no contract; annotate Write with // @ annotations so that it is verified, or add a trusted contract for \(\*os.File\).Write to vego-trusted.yaml`
+	fmt.Fprintln(os.Stderr, "warning:", msg) // want `vego: cannot verify Warn: os.Stderr has type \*os.File, which can hold a function value, an interface value, an error, a channel, or an unsafe.Pointer; package-level variables of such types are not supported yet`
 }
 
 // Client reads a variable whose type can hold code.
 //
 // @Ensures True
 func Client() (r bool) {
-	return http.DefaultClient != nil // want `vego: cannot verify Client: http.DefaultClient has type \*net/http.Client, which can hold a function value, an interface value, an error, or a channel; package-level variables of such types are not supported yet`
+	return http.DefaultClient != nil // want `vego: cannot verify Client: http.DefaultClient has type \*net/http.Client, which can hold a function value, an interface value, an error, a channel, or an unsafe.Pointer; package-level variables of such types are not supported yet`
 }
 
 // ResetServed assigns a variable.
