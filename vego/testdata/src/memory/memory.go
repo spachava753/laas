@@ -1304,3 +1304,13 @@ func AlwaysFailsAfterReadyRows() (result error) { // want `vego: the contract of
 	_ = readyRows(a)
 	return errEmptyQueue
 }
+
+// GrowFull appends to a slice whose length fits and whose capacity the
+// runtime may not be able to double: growslice panics when the capacity it
+// picks is more than can be allocated, also when the length it needs is not.
+//
+// @Requires 8 * |A| + 8 <= MaxAlloc
+// @Ensures True
+func GrowFull(A []int) (r []int) {
+	return append(A[:len(A):len(A)], 0) // want `vego:\ the\ slice\ that\ append\ grows\ may\ be\ more\ than\ can\ be\ allocated`
+}

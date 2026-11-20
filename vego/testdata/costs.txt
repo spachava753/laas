@@ -1708,6 +1708,7 @@ memory	memory.FromOnly	12	8727	0
 memory	memory.FromOnlyWrong	4	3161	0
 memory	memory.Grabs	1	241	0
 memory	memory.Grid	6	6609	0
+memory	memory.GrowFull	10	3027	0
 memory	memory.GrowNothings	25	18181	0
 memory	memory.GrowPoints	26	35166	0
 memory	memory.GuardedAddress	5	2326	0
