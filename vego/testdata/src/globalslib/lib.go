@@ -49,3 +49,11 @@ var Table = []int{0, 1}
 //
 // @Ensures r = Table[0]
 func First() (r int) { return Table[0] }
+
+// Plans is only read in this package; globalsmid writes it.
+var Plans = map[string]int{"free": 10, "pro": 1000}
+
+// FreeLimit relies on what Plans refers to being only read.
+//
+// @Ensures r = 10
+func FreeLimit() (r int) { return Plans["free"] }

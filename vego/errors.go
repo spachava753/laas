@@ -30,6 +30,7 @@ func (pv *pkgVerifier) findSentinels() {
 	pv.unsettled = map[*types.Var]string{}
 	pv.reliedKeys = map[string]bool{}
 	pv.reliedValues = map[string]bool{}
+	pv.readOnlyRefs = map[string]string{}
 	pv.homemade = map[*types.Var]bool{}
 	pv.candidates = map[*types.Var]sentinelInfo{}
 	// What this package writes of the error variables of other packages

@@ -99,13 +99,11 @@ func Computed() (r int) { return computed }
 // @Ensures r = n + 1
 func Bounded(n int) (r int) { return n + 1 }
 
-// Origin is not nil. What it points to is memory, of which nothing is
-// known on entry.
+// Origin reads what a pointer that its initialiser made points to, which
+// nothing writes.
 //
-// @Ensures r = 5
-func Origin() (r int) {
-	return origin.Timeout // want `vego: postcondition may not hold: r = 5`
-}
+// @Ensures r = 5 And n = 0
+func Origin() (r int, n int) { return origin.Timeout, origin.Retries }
 
 // Ratio is one value each time it is read.
 //
@@ -123,4 +121,95 @@ func Inside() (r int) {
 		r = count()
 	}
 	return r
+}
+
+// Pow10 reads an element of a table that is only read.
+//
+// @Requires 0 <= e < |table|
+// @Ensures r = table[e] And (e = 2 -> r = 100)
+func Pow10(e int) (r int) { return table[e] }
+
+// Sum adds up the table in a loop that writes another slice, which cannot
+// be the table's array.
+//
+// @Requires |out| = 4
+// @Modifies out
+// @Ensures r = 1111 And out'[3] = 1000
+func Sum(out []int) (r int) {
+	// @Invariant 0 <= i <= 4 And |out| = 4
+	// @Invariant (i = 0 -> r = 0) And (i = 1 -> r = 1) And (i = 2 -> r = 11) And (i = 3 -> r = 111) And (i = 4 -> r = 1111)
+	// @Invariant i = 4 -> out[3] = 1000
+	// @Variant 4 - i
+	for i := 0; i < 4; i++ {
+		out[i] = table[i]
+		r += table[i]
+	}
+	return r
+}
+
+// Free reads a map that is only read, with two results.
+//
+// @Ensures n = 10 And ok
+func Free() (n int, ok bool) {
+	n, ok = limits["free"]
+	return n, ok
+}
+
+// Plan reports whether a plan is known: only the keys of the literal are.
+//
+// @Ensures ok <-> (plan = "free" Or plan = "pro")
+// @Ensures |limits| = 2
+func Plan(plan string) (ok bool) {
+	_, ok = limits[plan]
+	return ok
+}
+
+var levels = []Config{{Timeout: 1, Name: "low"}, {Timeout: 9, Name: "high"}}
+
+// Level reads a field of an element of a slice of structs.
+//
+// @Ensures r = 9 And n = 4
+func Level() (r int, n int) { return levels[1].Timeout, len(levels[1].Name) }
+
+var magic = []byte("GIF8")
+
+// Magic reads a byte of a slice made from a constant string.
+//
+// @Ensures r = 70
+func Magic() (r byte) { return magic[2] }
+
+// Ranged ranges over a table that is only read.
+//
+// @Ensures r = 4
+func Ranged() (r int) {
+	// @Invariant 0 <= r <= 4
+	for range table {
+		if r < 4 {
+			r++
+		}
+	}
+	return 4
+}
+
+// Lookup fails for a plan the map does not know, which some input avoids.
+//
+// @Ensures err = nil <-> (plan = "free" Or plan = "pro")
+// @Ensures err = nil -> n = limits[plan]
+func Lookup(plan string) (n int, err error) {
+	n, ok := limits[plan]
+	if !ok {
+		return 0, ErrTooBig
+	}
+	return n, nil
+}
+
+// Index fails outside the table.
+//
+// @Ensures err = nil <-> 0 <= i < |table|
+// @Ensures err = nil -> r = table[i]
+func Index(i int) (r int, err error) {
+	if i < 0 || i >= len(table) {
+		return 0, ErrTooBig
+	}
+	return table[i], nil
 }

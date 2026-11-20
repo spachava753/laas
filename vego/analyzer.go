@@ -515,7 +515,12 @@ type pkgVerifier struct {
 	// while the variables of the package are initialised, or ""; see
 	// findFixed. reliedValues holds the keys of such variables whose
 	// values a proof has relied on.
-	fixed        map[*types.Var]knownValue
+	fixed    map[*types.Var]knownValue
+	readOnly map[*types.Var]bool
+	// readOnlyRefs holds, by the name of the constant of its reference,
+	// the key of each variable whose contents are only read and that a
+	// function has read; see table.
+	readOnlyRefs map[string]string
 	fixedOf      map[*types.Package]*fixedFact
 	hidden       string
 	reliedValues map[string]bool

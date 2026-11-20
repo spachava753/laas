@@ -51,3 +51,8 @@ func Counter() (r int) {
 func Beside(u [][]int, t []int) {
 	u[globalslib.First()&1] = append(t[:0], 5) // want `vego: cannot verify Beside: First is called in the target of this assignment, and Go may call it before or after append writes into the array of t\[:0\]; assign the result of First to a variable in a statement of its own first`
 }
+
+// Pro reads a map of another package that is only read in its build.
+//
+// @Ensures r = 1000
+func Pro() (r int) { return globalslib.Plans["pro"] }

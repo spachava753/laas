@@ -47,18 +47,31 @@ func Settings() (r int) {
 	return settings.Retries // want `vego: cannot verify Settings: settings is assigned at defects.go:41; package-level variables that are changed are not supported yet`
 }
 
+// written is written below, so what it refers to is ordinary memory.
+var written = []int{1, 2}
+
 // WriteTable writes what a fixed variable refers to.
 //
 // @Ensures True
 func WriteTable() {
-	table[0] = 5 // want `vego: cannot verify WriteTable: table\[0\] writes memory that the package-level variable table refers to, which a Modifies clause cannot name yet`
+	written[0] = 5 // want `vego: cannot verify WriteTable: written\[0\] writes memory that the package-level variable written refers to, which a Modifies clause cannot name yet`
 }
+
+// WrittenFirst would be 1 if nothing wrote the array.
+//
+// @Ensures r = 1
+func WrittenFirst() (r int) {
+	return written[0] // want `vego: postcondition may not hold: r = 1`
+}
+
+// removed has a key deleted below.
+var removed = map[string]int{"free": 10}
 
 // RemoveLimit deletes a key of a fixed map.
 //
 // @Ensures True
 func RemoveLimit() {
-	delete(limits, "free") // want `vego: cannot verify RemoveLimit: delete\(limits, "free"\) writes memory that the package-level variable limits refers to, which a Modifies clause cannot name yet`
+	delete(removed, "free") // want `vego: cannot verify RemoveLimit: delete\(removed, "free"\) writes memory that the package-level variable removed refers to, which a Modifies clause cannot name yet`
 }
 
 // AssignField assigns a part of a variable.
@@ -188,7 +201,8 @@ func Probe(A []int) (r bool) {
 func Run() bool { return Probe(keep) }
 
 // firstEntry has a contract that reads memory through a package-level
-// variable, so a call of it cannot be moved across a write.
+// variable, so a call of it cannot be moved across a write. That the table
+// is only read does not change this.
 //
 // @Ensures r = table[0]
 func firstEntry() (r int) { return table[0] }

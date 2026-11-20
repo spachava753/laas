@@ -589,7 +589,10 @@ func (pv *pkgVerifier) reportSentinelWrites() {
 		slices.Sort(packages)
 		which := "package " + strings.Join(slices.Compact(packages), " and package ")
 		relied := "it being the error it was declared with"
-		if values[write.Key] {
+		switch {
+		case strings.HasSuffix(write.Key, contentsKey):
+			relied = "what it refers to being only read"
+		case values[write.Key]:
 			relied = "it holding the value it was declared with"
 		}
 		if write.pos.IsValid() {

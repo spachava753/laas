@@ -70,6 +70,14 @@ func (pv *pkgVerifier) findChanges() {
 		if pv.escapes[variable] == "" {
 			pv.escapes[variable] = at(pos)
 		}
+		// A proof in another package may rest on what a variable of
+		// another package refers to being only read.
+		if fact := pv.publishedFixed(variable); fact != nil && fact.ReadOnly[variable.Name()] {
+			pv.writes = append(pv.writes, sentinelWrite{
+				Key: errorKey(variable) + contentsKey, Name: variable.Pkg().Name() + "." + variable.Name(), Package: pv.pass.Pkg.Path(),
+				At: at(pos), pos: pos,
+			})
+		}
 	}
 	for _, file := range pv.pass.Files {
 		pv.linknames(file, changed)
@@ -228,6 +236,16 @@ func (pv *pkgVerifier) useOf(stack []ast.Node) use {
 				return use{pos: cur.Pos()}
 			}
 			return escape
+		case *ast.BinaryExpr:
+			// A comparison with nil reads the value and lets nothing out.
+			other := parent.X
+			if other == cur {
+				other = parent.Y
+			}
+			if (parent.Op == token.EQL || parent.Op == token.NEQ) && pv.info.Types[other].IsNil() {
+				return use{pos: cur.Pos()}
+			}
+			return pv.readOf(cur, inValue, escape)
 		case *ast.CallExpr:
 			if id, ok := ast.Unparen(parent.Fun).(*ast.Ident); ok && len(parent.Args) == 1 && parent.Args[0] == cur {
 				if builtin, ok := pv.info.Uses[id].(*types.Builtin); ok && (builtin.Name() == "len" || builtin.Name() == "cap") {
@@ -416,6 +434,9 @@ func (pv *pkgVerifier) assemblyReferences(changed func(*types.Var, string, token
 type fixedFact struct {
 	Vars    map[string]knownValue
 	Changed map[string]string
+	// ReadOnly holds those of Vars whose contents are only read; see
+	// readOnly.
+	ReadOnly map[string]bool
 }
 
 func (*fixedFact) AFact() {}
@@ -454,6 +475,14 @@ type knownValue struct {
 	Len, Cap int64
 	Sized    bool
 	Alias    string
+	// Elems is what a made slice, map, or pointer holds when it was made:
+	// the elements of a slice at the positions Indices gives, the values
+	// of a map under the keys Keys gives, or the struct a pointer points
+	// to. Contents is set when that is all it holds, as for a literal.
+	Elems    []knownValue
+	Indices  []int64
+	Keys     []knownValue
+	Contents bool
 }
 
 // findFixed records the package-level variables of the package that are
@@ -461,7 +490,8 @@ type knownValue struct {
 // and publishes them. It runs after findChanges and findSentinels.
 func (pv *pkgVerifier) findFixed() {
 	pv.fixed = map[*types.Var]knownValue{}
-	fact := &fixedFact{Vars: map[string]knownValue{}, Changed: map[string]string{}}
+	pv.readOnly = map[*types.Var]bool{}
+	fact := &fixedFact{Vars: map[string]knownValue{}, Changed: map[string]string{}, ReadOnly: map[string]bool{}}
 	initialised := false
 	for _, file := range pv.pass.Files {
 		for _, decl := range file.Decls {
@@ -487,7 +517,7 @@ func (pv *pkgVerifier) findFixed() {
 						// directive names and the source does not hold.
 						known = knownValue{}
 					case len(spec.Values) == len(spec.Names):
-						known = pv.knownOf(spec.Values[i], variable.Type())
+						known = pv.knownOf(spec.Values[i], variable.Type(), true)
 						initialised = true
 					case len(spec.Values) > 0:
 						known = knownValue{}
@@ -495,6 +525,10 @@ func (pv *pkgVerifier) findFixed() {
 					}
 					pv.fixed[variable] = known
 					fact.Vars[variable.Name()] = known
+					if known.Kind == knownMade && pv.escapes[variable] == "" {
+						pv.readOnly[variable] = true
+						fact.ReadOnly[variable.Name()] = true
+					}
 				}
 			}
 		}
@@ -509,8 +543,17 @@ func (pv *pkgVerifier) findFixed() {
 	}
 }
 
-// knownOf reads what an initialiser of a variable of type t gives.
-func (pv *pkgVerifier) knownOf(e ast.Expr, t types.Type) knownValue {
+// maxKnownElems bounds the elements, or keys, of a literal whose contents
+// are recorded, so that what a package publishes stays small: generated
+// tables of thousands of entries are read as tables of unknown contents.
+const maxKnownElems = 1024
+
+// knownOf reads what an initialiser of a variable of type t gives, or with
+// top unset what a part of it gives. The contents of what it makes are
+// recorded only for the initialiser itself, and not for what is made
+// inside it, which no read of the
+// variable reaches without passing through memory that is not only read.
+func (pv *pkgVerifier) knownOf(e ast.Expr, t types.Type, top bool) knownValue {
 	e = ast.Unparen(e)
 	if tv := pv.info.Types[e]; tv.Value != nil {
 		return knownConstantOf(tv.Value)
@@ -539,30 +582,50 @@ func (pv *pkgVerifier) knownOf(e ast.Expr, t types.Type) knownValue {
 				if index < 0 || index >= len(parts) {
 					return knownValue{}
 				}
-				parts[index] = pv.knownOf(value, u.Field(index).Type())
+				parts[index] = pv.knownOf(value, u.Field(index).Type(), false)
 			}
 			return knownValue{Kind: knownStruct, Parts: parts}
 		case *types.Slice:
+			made := knownValue{Kind: knownMade, Contents: top && len(e.Elts) <= maxKnownElems}
 			length, next := int64(0), int64(0)
 			for _, elt := range e.Elts {
+				value := elt
 				if kv, ok := elt.(*ast.KeyValueExpr); ok {
 					index, exact := constant.Int64Val(constant.ToInt(pv.info.Types[kv.Key].Value))
 					if !exact {
 						return knownValue{}
 					}
-					next = index
+					next, value = index, kv.Value
+				}
+				if made.Contents {
+					made.Elems = append(made.Elems, pv.knownOf(value, u.Elem(), false))
+					made.Indices = append(made.Indices, next)
 				}
 				next++
 				length = max(length, next)
 			}
-			return knownValue{Kind: knownMade, Len: length, Cap: length, Sized: length > 0 && sized(u.Elem())}
+			made.Len, made.Cap, made.Sized = length, length, length > 0 && sized(u.Elem())
+			return made
 		case *types.Map:
-			return knownValue{Kind: knownMade, Len: -1, Cap: -1, Sized: true}
+			made := knownValue{Kind: knownMade, Len: -1, Cap: -1, Sized: true, Contents: top && len(e.Elts) <= maxKnownElems}
+			for _, elt := range e.Elts {
+				kv, ok := elt.(*ast.KeyValueExpr)
+				if !ok || !made.Contents {
+					break
+				}
+				made.Keys = append(made.Keys, pv.knownOf(kv.Key, u.Key(), false))
+				made.Elems = append(made.Elems, pv.knownOf(kv.Value, u.Elem(), false))
+			}
+			return made
 		}
 	case *ast.UnaryExpr:
 		if _, ok := ast.Unparen(e.X).(*ast.CompositeLit); ok && e.Op == token.AND {
 			if object, ok := pointee(t); ok {
-				return knownValue{Kind: knownMade, Len: -1, Cap: -1, Sized: sized(object)}
+				made := knownValue{Kind: knownMade, Len: -1, Cap: -1, Sized: sized(object), Contents: top}
+				if top {
+					made.Elems = []knownValue{pv.knownOf(e.X, object, false)}
+				}
+				return made
 			}
 		}
 	case *ast.CallExpr:
@@ -600,8 +663,16 @@ func (pv *pkgVerifier) knownOf(e ast.Expr, t types.Type) knownValue {
 			// whose capacity the runtime rounds up.
 			value := pv.info.Types[e.Args[0]].Value
 			if u, ok := t.Underlying().(*types.Slice); ok && value != nil && value.Kind() == constant.String {
-				n := int64(len(constant.StringVal(value)))
-				return knownValue{Kind: knownMade, Len: n, Cap: -1, Sized: n > 0 && sized(u.Elem())}
+				text := constant.StringVal(value)
+				made := knownValue{Kind: knownMade, Len: int64(len(text)), Cap: -1, Sized: len(text) > 0 && sized(u.Elem()),
+					Contents: top && len(text) <= maxKnownElems}
+				for i := range len(text) {
+					if made.Contents {
+						made.Elems = append(made.Elems, knownConstantOf(constant.MakeInt64(int64(text[i]))))
+						made.Indices = append(made.Indices, int64(i))
+					}
+				}
+				return made
 			}
 		}
 	case *ast.Ident, *ast.SelectorExpr:
@@ -805,13 +876,111 @@ func (v *fnVerifier) fixedValue(sink *state, variable *types.Var) (value, string
 		v.fixedMet = map[string]fixedMet{}
 	}
 	v.fixedMet[errorKey(final)] = fixedMet{val: val, typ: variable.Type()}
+	readOnly := v.readOnlyHere(final)
+	if readOnly {
+		v.reliedKeys[errorKey(final)+contentsKey] = true
+		v.reliedValues[errorKey(final)+contentsKey] = true
+		v.readOnlyRefs[val[0].Name] = errorKey(final)
+	}
 	if sink == nil || sink.noted["fixed "+errorKey(final)] {
 		return val, ""
 	}
 	sink.noted["fixed "+errorKey(final)] = true
 	v.declared(sink, v.wellFormed(val, variable.Type(), v.entryBrk))
 	v.noteKnown(sink, val, variable.Type(), known)
+	if readOnly && known.Contents {
+		v.noteContents(sink, errorKey(final), val[0], variable.Type(), known)
+	}
 	return val, ""
+}
+
+// contentsKey ends the key under which a proof relies on what a variable
+// refers to being only read, and under which a package publishes a use
+// that lets a reference to it out.
+const contentsKey = "[]"
+
+// readOnlyHere reports whether what a fixed variable refers to is only
+// read, as this package sees it: its initialiser made that memory, so the
+// variable held the only reference to it, and every use in the build is a
+// read of a value out of it, so it still does. Nothing writes that memory
+// then, and no other reference in the program reaches it.
+func (pv *pkgVerifier) readOnlyHere(variable *types.Var) bool {
+	switch {
+	case variable.Pkg() == pv.pass.Pkg:
+		return pv.readOnly[variable]
+	case pv.escapes[variable] != "":
+		return false
+	}
+	fact := pv.publishedFixed(variable)
+	if fact == nil || !fact.ReadOnly[variable.Name()] {
+		return false
+	}
+	_, escaped := pv.writtenInBuild()[errorKey(variable)+contentsKey]
+	return !escaped
+}
+
+// readOnlyRegion is the constant that stands for a region at the reference
+// of a variable whose contents are only read, whatever memory holds.
+func readOnlyRegion(variable, key string, sort logic.Sort) *logic.Term {
+	return logic.Const(fixedName+variable+" in "+key, sort)
+}
+
+// noteContents states what the initialiser of a variable whose contents
+// are only read put into them: the elements of a slice, the keys and
+// values of a map, or the fields of the struct a pointer points to.
+func (v *fnVerifier) noteContents(sink *state, variable string, ref *logic.Term, t types.Type, known knownValue) {
+	row := func(key string, sort logic.Sort) *logic.Term {
+		return logic.Select(readOnlyRegion(variable, key, logic.SeqOf(logic.SeqOf(sort))), ref)
+	}
+	at := func(object types.Type, start *logic.Term) value {
+		cells := v.cellsOf(object)
+		val := make(value, len(cells))
+		for i, c := range cells {
+			val[i] = logic.Select(row(c.key, c.sort), logic.Add(start, logic.IntLit(c.off)))
+		}
+		return val
+	}
+	switch u := t.Underlying().(type) {
+	case *types.Slice:
+		for j, elem := range known.Elems {
+			v.noteKnown(sink, at(u.Elem(), logic.IntLit(known.Indices[j]*v.span(u.Elem()))), u.Elem(), elem)
+		}
+	case *types.Pointer:
+		v.noteKnown(sink, at(u.Elem(), logic.IntLit(0)), u.Elem(), known.Elems[0])
+	case *types.Map:
+		keyType, elem := mapParts(t)
+		keyLeaf := mustLayout(keyType)[0]
+		var keys []*logic.Term
+		for j, k := range known.Keys {
+			if k.Kind != knownConstant {
+				return
+			}
+			term := v.knownConstantTerm(sink, k, logic.Const(fmt.Sprintf("%s%s key %d", fixedName, variable, j), keyLeaf.sort))
+			if term == nil {
+				return
+			}
+			keys = append(keys, mapKey(term))
+		}
+		owner := mapOwner(t)
+		has := row(owner+hasLeaf.path, hasLeaf.sort)
+		leaves := mustLayout(elem)
+		for j, key := range keys {
+			v.declared(sink, logic.Select(has, key))
+			held := make(value, len(leaves))
+			for i, lf := range leaves {
+				held[i] = logic.Select(row(owner+"#val"+lf.path, lf.sort), key)
+			}
+			v.noteKnown(sink, held, elem, known.Elems[j])
+		}
+		count := logic.Select(readOnlyRegion(variable, owner+countLeaf.path, logic.SeqOf(countLeaf.sort)), ref)
+		v.declared(sink, logic.Eq(count, logic.IntLit(int64(len(keys)))))
+		k := v.bound("k")
+		others := make([]*logic.Term, len(keys))
+		for j, key := range keys {
+			others[j] = logic.Eq(k, key)
+		}
+		v.declared(sink, logic.Forall(k, logic.Implies(logic.Select(has, k), logic.Or(others...))))
+	}
 }
 
 // declared notes a fact that the declaration of a fixed variable gives.

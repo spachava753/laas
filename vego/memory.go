@@ -202,6 +202,13 @@ func (v *fnVerifier) table(sink *state, mem memory, key string, sort logic.Sort,
 	if u := v.unit; u != nil && u.recording == 0 && u.quiet == 0 {
 		panic("vego: internal error: memory is read without being recorded in the evaluation unit")
 	}
+	// What a package-level variable refers to that nothing writes and no
+	// other reference reaches is the same in every state; see readOnlyHere.
+	if ref != nil && ref.Op == logic.OpConst {
+		if variable, ok := v.readOnlyRefs[ref.Name]; ok {
+			return readOnlyRegion(variable, key, sort)
+		}
+	}
 	current := mem.region(key, sort)
 	if sink == nil {
 		return current
