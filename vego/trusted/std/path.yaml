@@ -9,3 +9,62 @@ trusted:
     ensures:
       - "(Forall i in [0, |elem|) : |elem[i]| = 0) -> |result| = 0"
     modifies: []
+
+  path.Clean:
+    reason: >-
+      "Clean returns the shortest path name equivalent to path by purely
+      lexical processing. ... If the result of this process is an empty
+      string, Clean returns the string "."." The path itself is equivalent
+      to path, so the shortest is no longer than it, but for the "." of an
+      empty result. Not said: what the result holds.
+    modifies: []
+    ensures:
+      - "1 <= |result|"
+      - "|result| <= |path| Or result = \".\""
+      - "|path| = 0 -> result = \".\""
+
+  path.Dir:
+    reason: >-
+      "Dir returns all but the last element of path, typically the path's
+      directory. After dropping the final element using Split, the path is
+      Cleaned and trailing slashes are removed. If the path is empty, Dir
+      returns "."." What it cleans is a prefix of path, so the result is no
+      longer than path, as the entry of Clean says, but for ".". Not said:
+      what the result holds.
+    modifies: []
+    ensures:
+      - "1 <= |result|"
+      - "|result| <= |path| Or result = \".\""
+      - "|path| = 0 -> result = \".\""
+
+  path.Base:
+    reason: >-
+      "Base returns the last element of path. Trailing slashes are removed
+      before extracting the last element. If the path is empty, Base returns
+      ".". If the path consists entirely of slashes, Base returns "/"." An
+      element of path is a part of it. Not said: what the result holds.
+    modifies: []
+    ensures:
+      - "1 <= |result|"
+      - "|result| <= |path| Or result = \".\""
+      - "|path| = 0 -> result = \".\""
+
+  path.Ext:
+    reason: >-
+      "Ext returns the file name extension used by path. The extension is the
+      suffix beginning at the final dot in the final slash-separated element
+      of path; it is empty if there is no dot."
+    modifies: []
+    ensures:
+      - "|result| <= |path|"
+      - "|result| > 0 -> result[0] = '.'"
+      - "Forall k in [0, |result|) : result[k] = path[|path| - |result| + k]"
+
+  path.IsAbs:
+    reason: >-
+      "IsAbs reports whether the path is absolute." A slash-separated path is
+      absolute when it begins with a slash (Go 1.26.6, path.go: len(path) > 0
+      && path[0] == '/').
+    modifies: []
+    ensures:
+      - "result <-> (|path| > 0 And path[0] = '/')"

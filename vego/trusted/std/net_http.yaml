@@ -1,0 +1,55 @@
+version: 1
+
+trusted:
+  (*net/http.Request).PathValue:
+    reason: >-
+      "PathValue returns the value for the named path wildcard in the
+      ServeMux pattern that matched the request. It returns the empty string
+      if the request was not matched against a pattern or there is no such
+      wildcard in the pattern." Not said: what the value holds. Read from the
+      source of Go 1.26.6 (request.go, PathValue and patIndex): it reads
+      r.pat, r.matches, and r.otherValues, and calls nothing that r holds,
+      its Body, GetBody, context, and the rest, so it runs none of the code
+      r holds (runs) and finds nothing on it (asserts); it panics for a nil
+      r, and r.matches has a value for each wildcard of r.pat, which only a
+      ServeMux sets, together.
+    requires:
+      - "r != nil"
+    runs: [r]
+    asserts:
+      r: []
+    modifies: []
+
+  (net/http.Header).Get:
+    reason: >-
+      "Get gets the first value associated with the given key. If there are
+      no values associated with the key, Get returns "". It is case
+      insensitive; textproto.CanonicalMIMEHeaderKey is used to canonicalize
+      the provided key." Not said: which key it reads, since the logic has no
+      term for the canonical form of a key. Read from the source of Go
+      1.26.6 (textproto/header.go): it reads h, also when h is nil, and the
+      canonical form it computes is a copy of the key, no longer than it.
+    modifies: []
+
+  (net/http.Header).Set:
+    reason: >-
+      "Set sets the header entries associated with key to the single element
+      value. It replaces any existing values associated with key. The key is
+      case insensitive; it is canonicalized by
+      textproto.CanonicalMIMEHeaderKey." It writes h, which must not be nil,
+      since Go panics on a write to a nil map. Not said: which key it writes,
+      for the reason given in the entry of Get. A Header that a ResponseWriter
+      returns is not reached this way: (net/http.ResponseWriter).Header has
+      no entry, since what it returns is memory of the writer.
+    requires:
+      - "h != nil"
+    modifies: [h]
+
+  net/http.NewServeMux:
+    reason: >-
+      "NewServeMux allocates and returns a new ServeMux." Not said: anything
+      more; registering handlers keeps code that a server runs later, which
+      no entry can describe yet.
+    modifies: []
+    ensures:
+      - "result != nil And fresh(result)"

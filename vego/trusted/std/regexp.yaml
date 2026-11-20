@@ -1,0 +1,75 @@
+version: 1
+
+# A *Regexp holds strings, slices of integers, runes, and strings, and
+# pointers to a syntax.Prog and a onePassProg, which hold only data (read
+# from the source of Go 1.26.6, regexp.go, onepass.go, syntax/prog.go): no
+# function, interface, or unsafe.Pointer, so its methods run no code of a
+# caller. Matching writes only the package's sync.Pools of machines, which
+# no caller can reach. Nothing is said of what matches: pattern matching is
+# kept opaque. (*Regexp).FindStringIndex is not shipped: its result is
+# called loc in Go 1.26 and m in Go 1.27, and an entry names a result by
+# its name.
+
+trusted:
+  regexp.Compile:
+    reason: >-
+      "Compile parses a regular expression and returns, if successful, a
+      Regexp object that can be used to match against text." So the Regexp is
+      not nil when there is no error. Read from the source of Go 1.26.6
+      (regexp.go, compile; syntax/parse.go): the Regexp is new memory; every
+      error comes from syntax.Parse and is a *syntax.Error, also those of a
+      pattern too large or nested too deep, which Parse turns into a
+      *syntax.Error, whose methods read its fields, so vouches holds;
+      syntax.Compile returns no error. Parse bounds what it builds by
+      maxSize and maxRunes and fails past them, so a pattern of any length
+      returns. Not said: which patterns compile.
+    vouches: [result2]
+    modifies: []
+    ensures:
+      - "result2 = nil -> result1 != nil And fresh(result1)"
+
+  (*regexp.Regexp).MatchString:
+    reason: >-
+      "MatchString reports whether the string s contains any match of the
+      regular expression re." It panics for a nil re. Not said: which strings
+      match.
+    requires:
+      - "re != nil"
+    modifies: []
+
+  (*regexp.Regexp).Match:
+    reason: >-
+      "Match reports whether the byte slice b contains any match of the
+      regular expression re." It reads b and panics for a nil re. Not said:
+      which slices match.
+    requires:
+      - "re != nil"
+    modifies: []
+
+  (*regexp.Regexp).FindString:
+    reason: >-
+      "FindString returns a string holding the text of the leftmost match in
+      s of the regular expression. If there is no match, the return value is
+      an empty string." A match is a part of s. It panics for a nil re. Not
+      said: where the match lies.
+    requires:
+      - "re != nil"
+    modifies: []
+    ensures:
+      - "|result| <= |s|"
+
+  (*regexp.Regexp).FindStringSubmatch:
+    reason: >-
+      "FindStringSubmatch returns a slice of strings holding the text of the
+      leftmost match of the regular expression in s and the matches, if any,
+      of its subexpressions ... A return value of nil indicates no match."
+      Each is a part of s. Read from the source of Go 1.26.6 (regexp.go): the
+      slice is made for the call, so it is new memory. It panics for a nil
+      re. Not said: how many there are, which is 1 + re.NumSubexp(), a method
+      no formula can call.
+    requires:
+      - "re != nil"
+    modifies: []
+    ensures:
+      - "Forall i in [0, |result|) : |result[i]| <= |s|"
+      - "fresh(result)"

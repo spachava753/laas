@@ -9,3 +9,89 @@ trusted:
     ensures:
       - "(Forall i in [0, |elem|) : |elem[i]| = 0) -> |result| = 0"
     modifies: []
+
+  # Clean and Dir: the documentation says Clean returns "the shortest path
+  # name equivalent to path", which on Windows is not so: postClean
+  # (internal/filepathlite/path_windows.go) puts .\ or \. before a path that
+  # could be read as a volume, and a path that is only a volume gets a "."
+  # after it. The bound below is read from the source of Go 1.26.6, for
+  # every system, and checked by the reviewer independently:
+  # internal/filepathlite/path.go (Clean: the volume is kept as written, and
+  # lazybuf writes at most one byte for each byte of the rest, which Go
+  # itself relies on, since its buffer is that long; an empty rest gives the
+  # path itself or the path and "."), path_windows.go (postClean prepends two
+  # bytes at most, once, only without a volume), path_nonwindows.go (on
+  # Unix, js, wasip1, and Plan 9 it does nothing), path_unix.go and
+  # path_plan9.go (no volume), and path/filepath/path.go (Dir is the volume
+  # and Clean of a part of the rest, or the volume alone). The tests run the
+  # Unix code only, so for Windows and Plan 9 the bound rests on that
+  # reading.
+
+  path/filepath.Clean:
+    reason: >-
+      "Clean returns the shortest path name equivalent to path by purely
+      lexical processing. ... If the result of this process is an empty
+      string, Clean returns the string "."." So it is never empty. Its length
+      is bounded as the comment above says, read from source; the
+      documented "shortest" is not true on Windows. Not said: what the
+      result holds.
+    modifies: []
+    ensures:
+      - "1 <= |result| And |result| <= |path| + 2"
+      - "|path| = 0 -> result = \".\""
+
+  path/filepath.Dir:
+    reason: >-
+      "Dir returns all but the last element of path, typically the path's
+      directory. After dropping the final element, Dir calls Clean on the
+      path and trailing slashes are removed. If the path is empty, Dir
+      returns "."." Its length is bounded as the comment above says, read
+      from source. Not said: what the result holds.
+    modifies: []
+    ensures:
+      - "1 <= |result| And |result| <= |path| + 2"
+      - "|path| = 0 -> result = \".\""
+
+  path/filepath.Base:
+    reason: >-
+      "Base returns the last element of path. Trailing path separators are
+      removed before extracting the last element. If the path is empty, Base
+      returns ".". If the path consists entirely of separators, Base returns
+      a single separator." An element of path is a part of it, and it adds
+      nothing on any system (path/filepath/path.go, Base). Not said: what
+      the result holds.
+    modifies: []
+    ensures:
+      - "1 <= |result|"
+      - "|result| <= |path| Or |result| = 1"
+      - "|path| = 0 -> result = \".\""
+
+  path/filepath.Ext:
+    reason: >-
+      "Ext returns the file name extension used by path. The extension is the
+      suffix beginning at the final dot in the final element of path; it is
+      empty if there is no dot."
+    modifies: []
+    ensures:
+      - "|result| <= |path|"
+      - "|result| > 0 -> result[0] = '.'"
+      - "Forall k in [0, |result|) : result[k] = path[|path| - |result| + k]"
+
+  path/filepath.Rel:
+    reason: >-
+      "Rel returns a relative path that is lexically equivalent to targPath
+      when joined to basePath with an intervening separator. ... An error is
+      returned if targPath can't be made relative to basePath or if knowing
+      the current working directory would be necessary to compute it." Not
+      said: what the result holds, or how long it is. Read from the source of
+      Go 1.26.6 (path/filepath/path.go, Rel): its error is made by
+      errors.New, so vouches holds; it cleans both paths, each at most two
+      bytes longer (see above), and for the elements of base left it makes a
+      buffer of 2 + 3 for each separator in what is left of base, and the
+      rest of targ, which it cleans again; the requires keep that int
+      arithmetic and those allocations within MaxInt and MaxAlloc.
+    requires:
+      - "3 * |basePath| + |targPath| + 16 <= MaxInt"
+      - "2 * (3 * |basePath| + |targPath| + 16) + 65536 <= MaxAlloc"
+    vouches: [result2]
+    modifies: []

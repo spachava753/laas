@@ -15,10 +15,13 @@ import (
 	"math"
 	"math/big"
 	"math/rand"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -695,6 +698,86 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 		dir, err := inWorkingDirectory(rng, os.Getwd)
 		return sample{results: []any{dir, err}}
 	},
+	"(*net/http.Request).PathValue": func(rng *rand.Rand) sample {
+		r, name := randomRequest(rng)
+		before := snapshot(r, name)
+		return sample{before: before, after: []any{r, name}, results: []any{r.PathValue(name)}}
+	},
+	"(net/http.Header).Get": func(rng *rand.Rand) sample {
+		h, key := randomHeader(rng)
+		before := snapshot(h, key)
+		return sample{before: before, after: []any{h, key}, results: []any{h.Get(key)}}
+	},
+	"(net/http.Header).Set": func(rng *rand.Rand) sample {
+		h, key := randomHeader(rng)
+		value := []string{"", "text/plain", "a, b"}[rng.Intn(3)]
+		if h == nil {
+			return sample{before: []any{h, key, value}}
+		}
+		before := snapshot(h, key, value)
+		h.Set(key, value)
+		return sample{before: before, after: []any{h, key, value}}
+	},
+	"net/http.NewServeMux": func(*rand.Rand) sample {
+		return sample{results: []any{http.NewServeMux()}}
+	},
+	"path.Clean":          pathHarness(path.Clean),
+	"path.Dir":            pathHarness(path.Dir),
+	"path.Base":           pathHarness(path.Base),
+	"path.Ext":            pathHarness(path.Ext),
+	"path.IsAbs":          pathHarness(path.IsAbs),
+	"path/filepath.Clean": pathHarness(filepath.Clean),
+	"path/filepath.Dir":   pathHarness(filepath.Dir),
+	"path/filepath.Base":  pathHarness(filepath.Base),
+	"path/filepath.Ext":   pathHarness(filepath.Ext),
+	"path/filepath.Rel": func(rng *rand.Rand) sample {
+		base, targ := randomPathText(rng), randomPathText(rng)
+		rel, err := filepath.Rel(base, targ)
+		return sample{before: []any{base, targ}, results: []any{rel, err}}
+	},
+	"strings.TrimLeft":   textHarness(func(s, t string) []any { return []any{strings.TrimLeft(s, t)} }),
+	"strings.TrimRight":  textHarness(func(s, t string) []any { return []any{strings.TrimRight(s, t)} }),
+	"strings.SplitAfter": textHarness(func(s, t string) []any { return []any{strings.SplitAfter(s, t)} }),
+	"regexp.Compile": func(rng *rand.Rand) sample {
+		// A pattern that compiles, one that does not parse, one with a
+		// repeat past the limit, and one nested too deep.
+		expr := []string{"a+b", "^x$", "(a)(b)?", "[a-z]+", "", ".*", "é|世", "(", "a{1001}", "[z-a]", "\\q", "x**",
+			strings.Repeat("(", 1001) + strings.Repeat(")", 1001), "(?P<n>a)"}[rng.Intn(14)]
+		re, err := regexp.Compile(expr)
+		return sample{before: []any{expr}, results: []any{re, err}}
+	},
+	"(*regexp.Regexp).MatchString": func(rng *rand.Rand) sample {
+		re, s := randomRegexp(rng), utf8Text(rng)
+		before := snapshot(re, s)
+		if re == nil {
+			return sample{before: before, after: []any{re, s}}
+		}
+		return sample{before: before, after: []any{re, s}, results: []any{re.MatchString(s)}}
+	},
+	"(*regexp.Regexp).Match": func(rng *rand.Rand) sample {
+		re, b := randomRegexp(rng), roomyBytes(rng)
+		before := snapshot(re, b)
+		if re == nil {
+			return sample{before: before, after: []any{re, b}}
+		}
+		return sample{before: before, after: []any{re, b}, results: []any{re.Match(b)}}
+	},
+	"(*regexp.Regexp).FindString": func(rng *rand.Rand) sample {
+		re, s := randomRegexp(rng), utf8Text(rng)
+		before := snapshot(re, s)
+		if re == nil {
+			return sample{before: before, after: []any{re, s}}
+		}
+		return sample{before: before, after: []any{re, s}, results: []any{re.FindString(s)}}
+	},
+	"(*regexp.Regexp).FindStringSubmatch": func(rng *rand.Rand) sample {
+		re, s := randomRegexp(rng), utf8Text(rng)
+		before := snapshot(re, s)
+		if re == nil {
+			return sample{before: before, after: []any{re, s}}
+		}
+		return sample{before: before, after: []any{re, s}, results: []any{re.FindStringSubmatch(s)}}
+	},
 	"unicode/utf8.RuneCountInString": func(rng *rand.Rand) sample {
 		s := randomText(rng)
 		return sample{before: []any{s}, results: []any{utf8.RuneCountInString(s)}}
@@ -1072,6 +1155,74 @@ func inWorkingDirectory[R any](rng *rand.Rand, call func() (R, error)) (R, error
 		os.Remove(dir)
 	}
 	return call()
+}
+
+// randomRequest returns a request that a ServeMux matched against a
+// pattern with wildcards, one that it matched against a pattern without,
+// one that no pattern matched, and one with a path value set by
+// SetPathValue, with the name of a wildcard of its pattern, of none, or
+// empty. Its Body, GetBody, and context hold code of their own.
+func randomRequest(rng *rand.Rand) (*http.Request, string) {
+	name := []string{"id", "rest", "missing", ""}[rng.Intn(4)]
+	target := []string{"/items/7/a/b", "/items/x/", "/plain", "/nowhere"}[rng.Intn(4)]
+	request := httptest.NewRequest("POST", target, strings.NewReader("a body"))
+	request.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader("a body")), nil }
+	if rng.Intn(4) == 0 {
+		request.SetPathValue("other", "set")
+		return request, []string{"other", name}[rng.Intn(2)]
+	}
+	var matched *http.Request
+	mux := http.NewServeMux()
+	keep := func(_ http.ResponseWriter, r *http.Request) { matched = r }
+	mux.HandleFunc("/items/{id}/{rest...}", keep)
+	mux.HandleFunc("/plain", keep)
+	mux.ServeHTTP(httptest.NewRecorder(), request)
+	if matched == nil {
+		return request, name
+	}
+	return matched, name
+}
+
+// randomHeader returns a header with canonical keys, one that is empty,
+// or nil, and a key in another case, a key it lacks, or an empty key.
+func randomHeader(rng *rand.Rand) (http.Header, string) {
+	key := []string{"Content-Type", "content-type", "X-Missing", "", "x-many"}[rng.Intn(5)]
+	switch rng.Intn(4) {
+	case 0:
+		return nil, key
+	case 1:
+		return http.Header{}, key
+	}
+	return http.Header{"Content-Type": {"text/html", "text/plain"}, "X-Many": {"1", "2", "3"}, "Empty": {}}, key
+}
+
+// randomPathText returns a path of the kinds code cleans and splits:
+// empty, rooted, relative, with dots, doubled and trailing slashes, a
+// colon in its first element, a volume of Windows, and an extension.
+func randomPathText(rng *rand.Rand) string {
+	pieces := []string{"", "/", "a", "b.go", "..", ".", "/", "//", "c:", "a:b", "C:\\", ".tar.gz", "\\", "é"}
+	var b strings.Builder
+	for range rng.Intn(6) {
+		b.WriteString(pieces[rng.Intn(len(pieces))])
+	}
+	return b.String()
+}
+
+// pathHarness calls a function of package path or path/filepath of one
+// path.
+func pathHarness[R any](f func(string) R) func(rng *rand.Rand) sample {
+	return func(rng *rand.Rand) sample {
+		p := randomPathText(rng)
+		return sample{before: []any{p}, results: []any{f(p)}}
+	}
+}
+
+// randomRegexp returns a compiled expression, or nil.
+func randomRegexp(rng *rand.Rand) *regexp.Regexp {
+	if rng.Intn(8) == 0 {
+		return nil
+	}
+	return regexp.MustCompile([]string{"a+b", "^x$", "(a)(b)?", "[a-z]+", "", ".*", "é|世", "(?P<n>a)|(b)"}[rng.Intn(8)])
 }
 
 // randomByte returns a byte that random text holds at times: a letter, a
@@ -1468,6 +1619,8 @@ var reviewedErrorTypes = map[string]bool{
 	"*errors.errorString": true,
 	"*fs.PathError":       true,
 	"*os.SyscallError":    true,
+	// The errors of regexp.Compile, whose methods Error reads its fields.
+	"*syntax.Error": true,
 	// poll.ErrDeadlineExceeded, an empty struct whose methods Error,
 	// Timeout, and Temporary return constants.
 	"*poll.DeadlineExceededError": true,
@@ -1574,8 +1727,12 @@ func (g *grounder) groundTerm(value any) *logic.Term {
 			return logic.BigLit(new(big.Int).SetUint64(v.Uint()))
 		case v.CanFloat():
 			return logic.Const("unreadable float", logic.Float)
-		case v.Kind() == reflect.Pointer && v.IsNil():
+		case (v.Kind() == reflect.Pointer || v.Kind() == reflect.Map) && v.IsNil():
 			return logic.RefLit(0)
+		case v.Kind() == reflect.Map:
+			// A map is a reference, which no formula of an entry reads but
+			// to compare it with nil.
+			return logic.RefLit(1)
 		case v.Kind() == reflect.Pointer:
 			// A pointer is a reference, which no formula of an entry
 			// reads but to compare it with nil; fresh and within are
@@ -2135,6 +2292,10 @@ func TestFileOutcomes(t *testing.T) {
 			seen[outcome(err)] = true
 		}
 		for _, w := range want {
+			// A file of mode 000 is open to root.
+			if w == syscall.EACCES.Error() && os.Geteuid() == 0 {
+				continue
+			}
 			if !seen[w] {
 				t.Errorf("no call of %s ended with %s; got %v", key, w, seen)
 			}

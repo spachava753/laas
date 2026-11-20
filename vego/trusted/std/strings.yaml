@@ -369,3 +369,44 @@ trusted:
       - "result >= 0"
       - "|substr| > 0 -> result * |substr| <= |s|"
       - "|substr| = 0 -> 1 <= result And result <= |s| + 1"
+
+  strings.TrimLeft:
+    reason: >-
+      "TrimLeft returns a slice of the string s with all leading Unicode code
+      points contained in cutset removed." What is left ends s. Not said:
+      which code points it removed.
+    modifies: []
+    ensures:
+      - "|result| <= |s|"
+      - "Forall k in [0, |result|) : result[k] = s[|s| - |result| + k]"
+      - "|cutset| = 0 -> result = s"
+
+  strings.TrimRight:
+    reason: >-
+      "TrimRight returns a slice of the string s, with all trailing Unicode
+      code points contained in cutset removed." What is left begins s. Not
+      said: which code points it removed.
+    modifies: []
+    ensures:
+      - "|result| <= |s|"
+      - "Forall k in [0, |result|) : result[k] = s[k]"
+      - "|cutset| = 0 -> result = s"
+
+  strings.SplitAfter:
+    reason: >-
+      "SplitAfter slices s into all substrings after each instance of sep and
+      returns a slice of those substrings. If s does not contain sep and sep
+      is not empty, SplitAfter returns a slice of length 1 whose only element
+      is s. If sep is empty, SplitAfter splits after each UTF-8 sequence. If
+      both s and sep are empty, SplitAfter returns an empty slice." The rest,
+      and the reading of genSplit behind fresh and the requires, is as in the
+      entry of strings.Split.
+    requires:
+      - "16 * (|s| + 1) <= MaxAlloc"
+    modifies: []
+    ensures:
+      - "|result| <= |s| + 1"
+      - "|result| = 0 <-> (|s| = 0 And |sep| = 0)"
+      - "Forall i in [0, |result|) : |result[i]| <= |s|"
+      - "(|sep| > 0 And |s| < |sep|) -> (|result| = 1 And result[0] = s)"
+      - "fresh(result)"
