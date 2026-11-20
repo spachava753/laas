@@ -3881,12 +3881,15 @@ The names in an entry are the parameter and result names from the function's sou
 
 `vego` includes contracts for a few standard library functions:
 
-- `sort.Ints`, `sort.IntsAreSorted`, `sort.SearchInts`, `sort.Search`, `sort.Find`
+- `sort.Ints`, `sort.IntsAreSorted`, `sort.SearchInts`, `sort.Search`, `sort.Find`, `sort.Strings`
 - `strings.Contains`, `strings.HasPrefix`, `strings.HasSuffix`, `strings.Index`, `strings.LastIndex`, `strings.IndexByte`, `strings.LastIndexByte`, `strings.Cut`, `strings.TrimPrefix`, `strings.TrimSuffix`, `strings.TrimSpace`, `strings.Split`, `strings.Fields`, `strings.Join`, `strings.Replace`, `strings.ReplaceAll`, `strings.Repeat`, `strings.Count`, `strings.EqualFold`, `strings.ToUpper`, `strings.ToLower`
 - `bytes.Contains`, `bytes.HasPrefix`, `bytes.HasSuffix`, `bytes.Index`, `bytes.LastIndex`, `bytes.IndexByte`, `bytes.LastIndexByte`, `bytes.Cut`, `bytes.TrimPrefix`, `bytes.TrimSuffix`, `bytes.TrimSpace`, `bytes.Equal`, `bytes.Join`, `bytes.Replace`, `bytes.ReplaceAll`, `bytes.Repeat`, `bytes.Count`, `bytes.EqualFold`
 - `strings.IndexFunc`, `strings.LastIndexFunc`, `strings.ContainsFunc`, `strings.FieldsFunc`, `strings.TrimFunc`, `strings.TrimLeftFunc`, `strings.TrimRightFunc`, `strings.Map`, and the `bytes` functions of the same names
-- `unicode/utf8.RuneCountInString`
-- `strconv.Itoa`, `strconv.Atoi`
+- `unicode/utf8.RuneCountInString`, `unicode/utf8.DecodeRuneInString`, `unicode/utf8.DecodeRune`, `unicode/utf8.AppendRune`, `unicode/utf8.RuneLen`, `unicode/utf8.ValidString`
+- `unicode.IsSpace`, `unicode.IsDigit`, `unicode.IsLetter`, `unicode.IsUpper`, `unicode.IsLower`, which say what they report for ASCII and for a value that is no character
+- `strconv.Itoa`, `strconv.Atoi`, `strconv.ParseInt`, `strconv.ParseUint`, `strconv.ParseBool`, `strconv.FormatInt`, `strconv.AppendInt`, `strconv.Quote`, `strconv.Unquote`
+- `math.Sqrt`, `math.Min`, `math.Max`, `math.Abs`, `math.Floor`, `math.Ceil`, `math.Trunc`, `math.Round`, `math.Pow`, `math.Mod`, `math.Log`, `math.Exp`, `math.Inf`, `math.NaN`, `math.IsNaN`, `math.IsInf`, which say only that they return and write nothing, since nothing can be stated of a float
+- the methods `Date`, `Year`, `Month`, `Day`, `Hour`, `Minute`, `Second`, `Nanosecond`, `Weekday`, `YearDay`, `Unix`, `UnixMilli`, `Add`, `AddDate`, `Sub`, `Before`, `After`, `Equal`, and `IsZero` of `time.Time`, `time.Now`, `time.Since`, `time.Until`, `time.Unix`, `time.Date`, and the methods `Seconds`, `Milliseconds`, and `Nanoseconds` of `time.Duration`
 - `os.Remove`
 - `math/rand.Intn`, `math/rand.Int`
 - `fmt.Sprintf`, `fmt.Sprint`, `fmt.Sprintln`, `fmt.Printf`, `fmt.Print`, `fmt.Println`, `fmt.Fprintf`, `fmt.Fprint`, `fmt.Fprintln`, described in [Formatting and logging](#formatting-and-logging)

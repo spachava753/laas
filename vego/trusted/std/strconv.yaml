@@ -24,3 +24,159 @@ trusted:
       - "result2 != nil -> (is(result2, ErrSyntax) <-> ~is(result2, ErrRange))"
       - "is(result2, ErrSyntax) -> result1 = 0"
       - "is(result2, ErrRange) -> (result1 = MaxInt Or result1 = MinInt)"
+
+  strconv.Quote:
+    reason: >-
+      "Quote returns a double-quoted Go string literal representing s. The
+      returned string uses Go escape sequences (\t, \n, \xFF, Ā) for
+      control characters and non-printable characters as defined by
+      IsPrint." So it begins and ends with a double quote, and each byte of
+      s is itself, or part of a character that is written as itself or as an
+      escape; the longest Go escape, \U followed by eight digits, takes ten
+      bytes, for a character of at least one byte. Not said: which escapes it
+      uses. Read from the source of Go 1.26.6 (quote.go, quoteWith and
+      appendQuotedWith): it makes a buffer of 3*len(s)/2, or of len(s)+2,
+      and grows it by append, which may give it twice the room it needs; the
+      requires keep the int arithmetic and the allocation within MaxInt and
+      MaxAlloc for a result as long as the documentation allows, also where
+      an int has 32 bits.
+    requires:
+      - "10 * |s| + 2 <= MaxInt"
+      - "2 * (10 * |s| + 2) + 65536 <= MaxAlloc"
+    modifies: []
+    ensures:
+      - "2 <= |result| And |result| <= 10 * |s| + 2"
+      - "result[0] = '\"' And result[|result| - 1] = '\"'"
+
+  strconv.Unquote:
+    reason: >-
+      "Unquote interprets s as a single-quoted, double-quoted, or backquoted
+      Go string literal, returning the string value that s quotes." A
+      literal has a quote at each end, so s has at least two bytes when
+      Unquote succeeds. Not said: the length of the result, which the
+      documentation does not bound. Read from the source of Go 1.26.6
+      (quote.go, Unquote and unquote): every error it returns is ErrSyntax,
+      made by errors.New, so vouches holds; for a literal with escapes it
+      makes a buffer of 3*end/2 bytes, end at most len(s)+1, and appends the
+      characters to it, each at most three bytes for each byte it is written
+      with (an invalid byte becomes U+FFFD), so the requires keep 3 * (|s| +
+      1) within an int and twice the most it can build within the largest
+      allocation, also where an int has 32 bits.
+    requires:
+      - "3 * (|s| + 1) <= MaxInt"
+      - "2 * (3 * |s| + 3) + 65536 <= MaxAlloc"
+    vouches: [result2]
+    modifies: []
+    ensures:
+      - "result2 = nil -> |s| >= 2"
+
+  strconv.ParseInt:
+    reason: >-
+      "ParseInt interprets a string s in the given base (0, 2 to 36) and bit
+      size (0 to 64) and returns the corresponding value i. ... Bit sizes 0,
+      8, 16, 32, and 64 correspond to int, int8, int16, int32, and int64. If
+      bitSize is below 0 or above 64, an error is returned. The errors that
+      ParseInt returns have concrete type *NumError and include err.Num = s.
+      If s is empty or contains invalid digits, err.Err = ErrSyntax and the
+      returned value is 0; if the value corresponding to s cannot be
+      represented by a signed integer of the given size, err.Err = ErrRange
+      and the returned value is the maximum magnitude integer of the
+      appropriate bitSize and sign." So with a valid base and bit size every
+      error is one of the two. Not said: the value for an invalid base or
+      bit size, and the range of a bit size other than the five named.
+      NumError's methods read its fields, call Err's Error and Quote, and
+      Unwrap returns Err (Go 1.14); Err is ErrSyntax, ErrRange, or, for an
+      invalid base or bit size, an error made by errors.New (Go 1.26.6,
+      number.go, toError), so the errors meet what vouches claims.
+    vouches: [err]
+    modifies: []
+    ensures:
+      - "((base = 0 Or (2 <= base And base <= 36)) And 0 <= bitSize And bitSize <= 64 And err != nil) -> (is(err, ErrSyntax) <-> ~is(err, ErrRange))"
+      - "is(err, ErrSyntax) -> i = 0"
+      - "err = nil And bitSize = 0 -> MinInt <= i And i <= MaxInt"
+      - "err = nil And bitSize = 8 -> MinInt8 <= i And i <= MaxInt8"
+      - "err = nil And bitSize = 16 -> MinInt16 <= i And i <= MaxInt16"
+      - "err = nil And bitSize = 32 -> MinInt32 <= i And i <= MaxInt32"
+      - "is(err, ErrRange) And bitSize = 0 -> i = MinInt Or i = MaxInt"
+      - "is(err, ErrRange) And bitSize = 8 -> i = MinInt8 Or i = MaxInt8"
+      - "is(err, ErrRange) And bitSize = 16 -> i = MinInt16 Or i = MaxInt16"
+      - "is(err, ErrRange) And bitSize = 32 -> i = MinInt32 Or i = MaxInt32"
+      - "is(err, ErrRange) And bitSize = 64 -> i = MinInt64 Or i = MaxInt64"
+
+  strconv.ParseUint:
+    reason: >-
+      "ParseUint is like ParseInt but for unsigned numbers. A sign prefix is
+      not permitted." So, as for ParseInt, with a valid base and bit size
+      every error is ErrSyntax, with the value 0, or ErrRange, with the
+      largest value of the bit size. Not said: the value for an invalid base
+      or bit size. Its errors are those of ParseInt; see its entry for why
+      they meet what vouches claims.
+    vouches: [result2]
+    modifies: []
+    ensures:
+      - "((base = 0 Or (2 <= base And base <= 36)) And 0 <= bitSize And bitSize <= 64 And result2 != nil) -> (is(result2, ErrSyntax) <-> ~is(result2, ErrRange))"
+      - "is(result2, ErrSyntax) -> result1 = 0"
+      - "result2 = nil And bitSize = 0 -> result1 <= MaxUint"
+      - "result2 = nil And bitSize = 8 -> result1 <= MaxUint8"
+      - "result2 = nil And bitSize = 16 -> result1 <= MaxUint16"
+      - "result2 = nil And bitSize = 32 -> result1 <= MaxUint32"
+      - "is(result2, ErrRange) And bitSize = 0 -> result1 = MaxUint"
+      - "is(result2, ErrRange) And bitSize = 8 -> result1 = MaxUint8"
+      - "is(result2, ErrRange) And bitSize = 16 -> result1 = MaxUint16"
+      - "is(result2, ErrRange) And bitSize = 32 -> result1 = MaxUint32"
+      - "is(result2, ErrRange) And bitSize = 64 -> result1 = MaxUint64"
+
+  strconv.ParseBool:
+    reason: >-
+      "ParseBool returns the boolean value represented by the string. It
+      accepts 1, t, T, TRUE, true, True, 0, f, F, FALSE, false, False. Any
+      other value returns an error." Not said: the value it returns with an
+      error. Read from the source of Go 1.26.6 (number.go, ParseBool and
+      toError): its error is a *NumError whose Err is ErrSyntax, so it meets
+      what vouches claims, as ParseInt's does.
+    vouches: [result2]
+    modifies: []
+    ensures:
+      - 'result2 = nil <-> (str = "1" Or str = "t" Or str = "T" Or str = "TRUE" Or str = "true" Or str = "True" Or str = "0" Or str = "f" Or str = "F" Or str = "FALSE" Or str = "false" Or str = "False")'
+      - 'result2 = nil -> (result1 <-> (str = "1" Or str = "t" Or str = "T" Or str = "TRUE" Or str = "true" Or str = "True"))'
+
+  strconv.FormatInt:
+    reason: >-
+      "FormatInt returns the string representation of i in the given base,
+      for 2 <= base <= 36. The result uses the lower-case letters 'a' to 'z'
+      for digit values >= 10." It panics for another base (Go 1.26.6,
+      itoa.go: "strconv: illegal AppendInt/FormatInt base"). The
+      representation is at least one digit, a minus sign for a negative
+      number, and at most 64 digits, the binary digits of MinInt64; in base
+      10 it is at most 20 bytes, the length of -9223372036854775808. Not
+      said: which digits.
+    requires:
+      - "2 <= base And base <= 36"
+    modifies: []
+    ensures:
+      - "1 <= |result| And |result| <= 65"
+      - "base = 10 -> |result| <= 20"
+      - "i < 0 <-> result[0] = '-'"
+      - "i = 0 -> result = \"0\""
+      - "Forall k in [0, |result|) : ('0' <= result[k] And result[k] <= '9') Or ('a' <= result[k] And result[k] <= 'z') Or (k = 0 And result[k] = '-')"
+
+  strconv.AppendInt:
+    reason: >-
+      "AppendInt appends the string form of the integer i, as generated by
+      FormatInt, to dst and returns the extended buffer." So it adds one to
+      65 bytes after those of dst, as FormatInt's entry says, and panics for
+      a base outside 2 to 36. It appends as the built-in append does: in
+      place when dst has room, which writes dst's array past its length, and
+      into new memory otherwise; that new array may be given twice the room
+      it needs, which the requires keeps within the largest allocation and
+      an int.
+    requires:
+      - "2 <= base And base <= 36"
+      - "|dst| + 65 <= MaxInt"
+      - "2 * (|dst| + 65) + 65536 <= MaxAlloc"
+    modifies: [dst]
+    ensures:
+      - "|dst| + 1 <= |result| And |result| <= |dst| + 65"
+      - "Forall k in [0, |dst|) : result[k] = dst[k]"
+      - "i < 0 <-> result[|dst|] = '-'"
+      - "fresh(result) Or within(result, dst)"

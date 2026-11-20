@@ -1,0 +1,278 @@
+version: 1
+
+# Functions and methods of package time that take and return values.
+
+trusted:
+  (time.Time).Date:
+    reason: >-
+      "Date returns the year, month, and day in which t occurs." A Month is
+      January = 1 to December = 12, and a day of a month is 1 to 31. Not said:
+      the year, and which day each month has. Read from the source of Go
+      1.26.6 (time.go, zoneinfo.go): it reads t and the Location t points to,
+      which writes nothing a caller can see but the lazy set-up of the Local
+      location by a sync.Once in package time, memory that no formula can
+      name.
+    modifies: []
+    ensures:
+      - "1 <= month And month <= 12"
+      - "1 <= day And day <= 31"
+
+  (time.Time).Year:
+    reason: >-
+      "Year returns the year in which t occurs." Not said: anything of the
+      year. Read from the source of Go 1.26.6 (time.go, zoneinfo.go): it reads
+      t and the Location t points to, which writes nothing a caller can see
+      but the lazy set-up of the Local location by a sync.Once in package
+      time, memory that no formula can name.
+    modifies: []
+
+  (time.Time).Month:
+    reason: >-
+      "Month returns the month of the year specified by t." A Month is January
+      = 1 to December = 12. Read from the source of Go 1.26.6 (time.go,
+      zoneinfo.go): it reads t and the Location t points to, which writes
+      nothing a caller can see but the lazy set-up of the Local location by a
+      sync.Once in package time, memory that no formula can name.
+    modifies: []
+    ensures:
+      - "1 <= result And result <= 12"
+
+  (time.Time).Day:
+    reason: >-
+      "Day returns the day of the month specified by t." A day of a month is 1
+      to 31. Read from the source of Go 1.26.6 (time.go, zoneinfo.go): it
+      reads t and the Location t points to, which writes nothing a caller can
+      see but the lazy set-up of the Local location by a sync.Once in package
+      time, memory that no formula can name.
+    modifies: []
+    ensures:
+      - "1 <= result And result <= 31"
+
+  (time.Time).Hour:
+    reason: >-
+      "Hour returns the hour within the day specified by t, in the range [0,
+      23]." Read from the source of Go 1.26.6 (time.go, zoneinfo.go): it reads
+      t and the Location t points to, which writes nothing a caller can see
+      but the lazy set-up of the Local location by a sync.Once in package
+      time, memory that no formula can name.
+    modifies: []
+    ensures:
+      - "0 <= result And result <= 23"
+
+  (time.Time).Minute:
+    reason: >-
+      "Minute returns the minute offset within the hour specified by t, in the
+      range [0, 59]." Read from the source of Go 1.26.6 (time.go,
+      zoneinfo.go): it reads t and the Location t points to, which writes
+      nothing a caller can see but the lazy set-up of the Local location by a
+      sync.Once in package time, memory that no formula can name.
+    modifies: []
+    ensures:
+      - "0 <= result And result <= 59"
+
+  (time.Time).Second:
+    reason: >-
+      "Second returns the second offset within the minute specified by t, in
+      the range [0, 59]." Read from the source of Go 1.26.6 (time.go,
+      zoneinfo.go): it reads t and the Location t points to, which writes
+      nothing a caller can see but the lazy set-up of the Local location by a
+      sync.Once in package time, memory that no formula can name.
+    modifies: []
+    ensures:
+      - "0 <= result And result <= 59"
+
+  (time.Time).Nanosecond:
+    reason: >-
+      "Nanosecond returns the nanosecond offset within the second specified by
+      t, in the range [0, 999999999]." Read from the source of Go 1.26.6
+      (time.go, zoneinfo.go): it reads t and the Location t points to, which
+      writes nothing a caller can see but the lazy set-up of the Local
+      location by a sync.Once in package time, memory that no formula can
+      name.
+    modifies: []
+    ensures:
+      - "0 <= result And result <= 999999999"
+
+  (time.Time).Weekday:
+    reason: >-
+      "Weekday returns the day of the week specified by t." A Weekday is
+      Sunday = 0 to Saturday = 6. Read from the source of Go 1.26.6 (time.go,
+      zoneinfo.go): it reads t and the Location t points to, which writes
+      nothing a caller can see but the lazy set-up of the Local location by a
+      sync.Once in package time, memory that no formula can name.
+    modifies: []
+    ensures:
+      - "0 <= result And result <= 6"
+
+  (time.Time).YearDay:
+    reason: >-
+      "YearDay returns the day of the year specified by t, in the range
+      [1,365] for non-leap years, and [1,366] in leap years." Read from the
+      source of Go 1.26.6 (time.go, zoneinfo.go): it reads t and the Location
+      t points to, which writes nothing a caller can see but the lazy set-up
+      of the Local location by a sync.Once in package time, memory that no
+      formula can name.
+    modifies: []
+    ensures:
+      - "1 <= result And result <= 366"
+
+  (time.Time).Unix:
+    reason: >-
+      "Unix returns t as a Unix time, the number of seconds elapsed since
+      January 1, 1970 UTC." Not said: anything of the number. Read from the
+      source of Go 1.26.6 (time.go, zoneinfo.go): it reads t and the Location
+      t points to, which writes nothing a caller can see but the lazy set-up
+      of the Local location by a sync.Once in package time, memory that no
+      formula can name.
+    modifies: []
+
+  (time.Time).UnixMilli:
+    reason: >-
+      "UnixMilli returns t as a Unix time, the number of milliseconds elapsed
+      since January 1, 1970 UTC. The result is undefined if the Unix time in
+      milliseconds cannot be represented by an int64." Undefined is a value of
+      the type, not a panic. Not said: anything of the number. Read from the
+      source of Go 1.26.6 (time.go, zoneinfo.go): it reads t and the Location
+      t points to, which writes nothing a caller can see but the lazy set-up
+      of the Local location by a sync.Once in package time, memory that no
+      formula can name.
+    modifies: []
+
+  (time.Time).Add:
+    reason: >-
+      "Add returns the time t+d." Not said: anything of the time. Read from
+      the source of Go 1.26.6 (time.go, zoneinfo.go): it reads t and the
+      Location t points to, which writes nothing a caller can see but the lazy
+      set-up of the Local location by a sync.Once in package time, memory that
+      no formula can name.
+    modifies: []
+
+  (time.Time).AddDate:
+    reason: >-
+      "AddDate returns the time corresponding to adding the given number of
+      years, months, and days to t." It normalizes its result as Date does,
+      and names no panic. Not said: anything of the time. Read from the source
+      of Go 1.26.6 (time.go, zoneinfo.go): it reads t and the Location t
+      points to, which writes nothing a caller can see but the lazy set-up of
+      the Local location by a sync.Once in package time, memory that no
+      formula can name.
+    modifies: []
+
+  (time.Time).Sub:
+    reason: >-
+      "Sub returns the duration t-u. If the result exceeds the maximum (or
+      minimum) value that can be stored in a Duration, the maximum (or
+      minimum) duration will be returned." Not said: anything of the duration.
+      Read from the source of Go 1.26.6 (time.go, zoneinfo.go): it reads t and
+      the Location t points to, which writes nothing a caller can see but the
+      lazy set-up of the Local location by a sync.Once in package time, memory
+      that no formula can name.
+    modifies: []
+
+  (time.Time).Before:
+    reason: >-
+      "Before reports whether the time instant t is before u." Not said: how
+      it relates to After and Equal. Read from the source of Go 1.26.6
+      (time.go, zoneinfo.go): it reads t and the Location t points to, which
+      writes nothing a caller can see but the lazy set-up of the Local
+      location by a sync.Once in package time, memory that no formula can
+      name.
+    modifies: []
+
+  (time.Time).After:
+    reason: >-
+      "After reports whether the time instant t is after u." Not said: how it
+      relates to Before and Equal. Read from the source of Go 1.26.6 (time.go,
+      zoneinfo.go): it reads t and the Location t points to, which writes
+      nothing a caller can see but the lazy set-up of the Local location by a
+      sync.Once in package time, memory that no formula can name.
+    modifies: []
+
+  (time.Time).Equal:
+    reason: >-
+      "Equal reports whether t and u represent the same time instant." Not
+      said: how it relates to Before and After. Read from the source of Go
+      1.26.6 (time.go, zoneinfo.go): it reads t and the Location t points to,
+      which writes nothing a caller can see but the lazy set-up of the Local
+      location by a sync.Once in package time, memory that no formula can
+      name.
+    modifies: []
+
+  (time.Time).IsZero:
+    reason: >-
+      "IsZero reports whether t represents the zero time instant, January 1,
+      year 1, 00:00:00 UTC." Read from the source of Go 1.26.6 (time.go,
+      zoneinfo.go): it reads t and the Location t points to, which writes
+      nothing a caller can see but the lazy set-up of the Local location by a
+      sync.Once in package time, memory that no formula can name.
+    modifies: []
+
+  time.Now:
+    reason: >-
+      "Now returns the current local time." What the clock says is the outside
+      world, a value of which nothing is known.
+    modifies: []
+
+  time.Since:
+    reason: >-
+      "Since returns the time elapsed since t. It is shorthand for
+      time.Now().Sub(t)." Not said: anything of the duration. Read from the
+      source of Go 1.26.6 (time.go, zoneinfo.go): it reads t and the Location
+      t points to, which writes nothing a caller can see but the lazy set-up
+      of the Local location by a sync.Once in package time, memory that no
+      formula can name.
+    modifies: []
+
+  time.Until:
+    reason: >-
+      "Until returns the duration until t. It is shorthand for
+      t.Sub(time.Now())." Not said: anything of the duration. Read from the
+      source of Go 1.26.6 (time.go, zoneinfo.go): it reads t and the Location
+      t points to, which writes nothing a caller can see but the lazy set-up
+      of the Local location by a sync.Once in package time, memory that no
+      formula can name.
+    modifies: []
+
+  time.Unix:
+    reason: >-
+      "Unix returns the local Time corresponding to the given Unix time, sec
+      seconds and nsec nanoseconds since January 1, 1970 UTC. It is valid to
+      pass nsec outside the range [0, 999999999]. Not all sec values have a
+      corresponding time value." No value panics. Not said: anything of the
+      time.
+    modifies: []
+
+  time.Date:
+    reason: >-
+      "Date returns the Time corresponding to yyyy-mm-dd hh:mm:ss + nsec
+      nanoseconds in the appropriate zone for that time in the given location.
+      The month, day, hour, min, sec, and nsec values may be outside their
+      usual ranges and will be normalized during the conversion. ... Date
+      panics if loc is nil." Not said: anything of the time. Read from the
+      source of Go 1.26.6 (time.go, zoneinfo.go): it reads loc, which writes
+      nothing a caller can see but the lazy set-up of the Local location,
+      memory that no formula can name.
+    requires:
+      - "loc != nil"
+    modifies: []
+
+  (time.Duration).Seconds:
+    reason: >-
+      "Seconds returns the duration as a floating point number of seconds." It
+      reads only d.
+    modifies: []
+
+  (time.Duration).Milliseconds:
+    reason: >-
+      "Milliseconds returns the duration as an integer millisecond count." It
+      reads only d. Not said: how it rounds.
+    modifies: []
+
+  (time.Duration).Nanoseconds:
+    reason: >-
+      "Nanoseconds returns the duration as an integer nanosecond count." "A
+      Duration represents the elapsed time between two instants as an int64
+      nanosecond count", so the count is d itself.
+    modifies: []
+    ensures:
+      - "result = d"

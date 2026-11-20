@@ -6,3 +6,98 @@ trusted:
     ensures:
       - "0 <= n And n <= |s|"
     modifies: []
+
+  unicode/utf8.DecodeRuneInString:
+    reason: >-
+      "DecodeRuneInString is like DecodeRune but its input is a string. If s
+      is empty it returns (RuneError, 0). Otherwise, if the encoding is
+      invalid, it returns (RuneError, 1). Both are impossible results for
+      correct, non-empty UTF-8. An encoding is invalid if it is incorrect
+      UTF-8, encodes a rune that is out of range, or is not the shortest
+      possible UTF-8 encoding for the value." A UTF-8 encoding is one to
+      UTFMax = 4 bytes of s and encodes a code point up to MaxRune that is
+      not a surrogate (UTF-8 has no encoding of a surrogate). "RuneSelf =
+      0x80: characters below RuneSelf are represented as themselves in a
+      single byte", so a byte below it decodes to itself, a byte at or above
+      it is never a whole encoding, and the shortest encoding of two bytes
+      or more is of a rune of 0x80 or more. RuneError is U+FFFD, 65533. Not
+      said: which rune a valid encoding of more than one byte stands for.
+    modifies: []
+    ensures:
+      - "|s| = 0 -> r = 65533 And size = 0"
+      - "|s| > 0 -> 1 <= size And size <= 4 And size <= |s|"
+      - "0 <= r And r <= 1114111"
+      - "~(55296 <= r And r <= 57343)"
+      - "|s| > 0 And s[0] < 128 -> r = s[0] And size = 1"
+      - "|s| > 0 And s[0] >= 128 -> r >= 128"
+      - "|s| > 0 And s[0] >= 128 And size = 1 -> r = 65533"
+      - "size >= 2 -> r >= 128"
+
+  unicode/utf8.DecodeRune:
+    reason: >-
+      "DecodeRune unpacks the first UTF-8 encoding in p and returns the rune
+      and its width in bytes. If p is empty it returns (RuneError, 0).
+      Otherwise, if the encoding is invalid, it returns (RuneError, 1). Both
+      are impossible results for correct, non-empty UTF-8. An encoding is
+      invalid if it is incorrect UTF-8, encodes a rune that is out of range,
+      or is not the shortest possible UTF-8 encoding for the value." The rest
+      is as in the entry of DecodeRuneInString.
+    modifies: []
+    ensures:
+      - "|p| = 0 -> r = 65533 And size = 0"
+      - "|p| > 0 -> 1 <= size And size <= 4 And size <= |p|"
+      - "0 <= r And r <= 1114111"
+      - "~(55296 <= r And r <= 57343)"
+      - "|p| > 0 And p[0] < 128 -> r = p[0] And size = 1"
+      - "|p| > 0 And p[0] >= 128 -> r >= 128"
+      - "|p| > 0 And p[0] >= 128 And size = 1 -> r = 65533"
+      - "size >= 2 -> r >= 128"
+
+  unicode/utf8.AppendRune:
+    reason: >-
+      "AppendRune appends the UTF-8 encoding of r to the end of p and returns
+      the extended buffer. If the rune is out of range, it appends the
+      encoding of RuneError." An encoding is one to UTFMax = 4 bytes, a rune
+      below RuneSelf is its own byte, and RuneError, U+FFFD, takes three. It
+      appends as the built-in append does: in place when p has room, which
+      writes p's array past its length, and into new memory otherwise; that
+      new array may be given twice the room it needs, which the requires
+      keeps within the largest allocation and an int. Not said: the bytes of
+      an encoding of more than one byte.
+    requires:
+      - "2 * (|p| + 4) + 65536 <= MaxAlloc"
+      - "|p| + 4 <= MaxInt"
+    modifies: [p]
+    ensures:
+      - "|p| + 1 <= |result| And |result| <= |p| + 4"
+      - "Forall k in [0, |p|) : result[k] = p[k]"
+      - "0 <= r And r < 128 -> |result| = |p| + 1 And result[|p|] = r"
+      - "(r < 0 Or r > 1114111) -> |result| = |p| + 3"
+      - "fresh(result) Or within(result, p)"
+
+  unicode/utf8.RuneLen:
+    reason: >-
+      "RuneLen returns the number of bytes in the UTF-8 encoding of the rune.
+      It returns -1 if the rune is not a valid value to encode in UTF-8." The
+      values UTF-8 encodes are 0 to MaxRune, 0x10FFFF, without the
+      surrogates U+D800 to U+DFFF, and the length of an encoding is fixed by
+      the range of the value: one byte below 0x80, two below 0x800, three
+      below 0x10000, and four above.
+    modifies: []
+    ensures:
+      - "result = -1 <-> (r < 0 Or r > 1114111 Or (55296 <= r And r <= 57343))"
+      - "0 <= r And r < 128 -> result = 1"
+      - "128 <= r And r < 2048 -> result = 2"
+      - "2048 <= r And r < 65536 And ~(55296 <= r And r <= 57343) -> result = 3"
+      - "65536 <= r And r <= 1114111 -> result = 4"
+
+  unicode/utf8.ValidString:
+    reason: >-
+      "ValidString reports whether s consists entirely of valid UTF-8-encoded
+      runes." A string of bytes below 0x80 is valid, each byte encoding
+      itself, and the bytes 0xC0, 0xC1, and 0xF5 to 0xFF occur in no valid
+      UTF-8 encoding. Not said: which other strings are valid.
+    modifies: []
+    ensures:
+      - "(Forall k in [0, |s|) : s[k] < 128) -> result"
+      - "(Exists k in [0, |s|) : s[k] = 192 Or s[k] = 193 Or s[k] >= 245) -> ~result"

@@ -61,3 +61,16 @@ trusted:
     modifies: []
     ensures:
       - "(Forall a in [0, n) : Forall b in [a, n) : (cmp(a) <= 0 -> cmp(b) <= 0) And (cmp(a) < 0 -> cmp(b) < 0)) -> (0 <= i And i <= n And (Forall a in [0, i) : cmp(a) > 0) And (i < n -> cmp(i) <= 0) And (found <-> (i < n And cmp(i) = 0)))"
+
+  sort.Strings:
+    reason: >-
+      "Strings sorts a slice of strings in increasing order." Sorting
+      permutes the elements of x, so every element after the call is one of
+      those before it, and every element before it is still there. Not said:
+      the order, since the logic has no order of strings, and that each
+      element is there as many times as before, which needs a count the
+      logic has no term for.
+    modifies: [x]
+    ensures:
+      - "Forall i in [0, |x|) : Exists j in [0, |x|) : x'[i] = x[j]"
+      - "Forall j in [0, |x|) : Exists i in [0, |x|) : x'[i] = x[j]"

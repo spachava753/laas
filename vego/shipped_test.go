@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"log"
 	"maps"
+	"math"
 	"math/big"
 	"math/rand"
 	"os"
@@ -24,6 +25,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/spachava753/laas/vego/internal/logic"
@@ -485,10 +488,374 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 		before := snapshot(s, old, replacement)
 		return sample{before: before, after: []any{s, old, replacement}, results: []any{bytes.ReplaceAll(s, old, replacement)}}
 	},
+	"unicode/utf8.DecodeRuneInString": func(rng *rand.Rand) sample {
+		s := utf8Text(rng)
+		r, size := utf8.DecodeRuneInString(s)
+		return sample{before: []any{s}, results: []any{r, size}}
+	},
+	"unicode/utf8.DecodeRune": func(rng *rand.Rand) sample {
+		p := []byte(utf8Text(rng))
+		before := snapshot(p)
+		r, size := utf8.DecodeRune(p)
+		return sample{before: before, after: []any{p}, results: []any{r, size}}
+	},
+	"unicode/utf8.AppendRune": func(rng *rand.Rand) sample {
+		p, r := roomyBytes(rng), randomCodePoint(rng)
+		before := snapshot(p, r)
+		return sample{before: before, after: []any{p, r}, results: []any{utf8.AppendRune(p, r)}}
+	},
+	"unicode/utf8.RuneLen": func(rng *rand.Rand) sample {
+		r := randomCodePoint(rng)
+		return sample{before: []any{r}, results: []any{utf8.RuneLen(r)}}
+	},
+	"unicode/utf8.ValidString": func(rng *rand.Rand) sample {
+		s := utf8Text(rng)
+		return sample{before: []any{s}, results: []any{utf8.ValidString(s)}}
+	},
+	"unicode.IsSpace":  runePredicate(unicode.IsSpace),
+	"unicode.IsDigit":  runePredicate(unicode.IsDigit),
+	"unicode.IsLetter": runePredicate(unicode.IsLetter),
+	"unicode.IsUpper":  runePredicate(unicode.IsUpper),
+	"unicode.IsLower":  runePredicate(unicode.IsLower),
+	"strconv.Quote": func(rng *rand.Rand) sample {
+		s := utf8Text(rng) + []string{"", "\x01", "\n", "\"", "\\", "\u0085", "\U0001F600", "\u00ff"}[rng.Intn(8)]
+		return sample{before: []any{s}, results: []any{strconv.Quote(s)}}
+	},
+	"strconv.Unquote": func(rng *rand.Rand) sample {
+		s := randomLiteral(rng)
+		value, err := strconv.Unquote(s)
+		return sample{before: []any{s}, results: []any{value, err}}
+	},
+	"strconv.ParseInt": numeralHarness(func(s string, base, bitSize int) []any {
+		i, err := strconv.ParseInt(s, base, bitSize)
+		return []any{i, err}
+	}),
+	"strconv.ParseUint": numeralHarness(func(s string, base, bitSize int) []any {
+		u, err := strconv.ParseUint(s, base, bitSize)
+		return []any{u, err}
+	}),
+	"strconv.ParseBool": func(rng *rand.Rand) sample {
+		str := []string{"1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False", "", "yes", "tRUE", "2", " true", randomText(rng)}[rng.Intn(18)]
+		value, err := strconv.ParseBool(str)
+		return sample{before: []any{str}, results: []any{value, err}}
+	},
+	"strconv.FormatInt": func(rng *rand.Rand) sample {
+		i, base := randomInt64(rng), []int{2, 10, 10, 16, 36, rng.Intn(40)}[rng.Intn(6)]
+		if base < 2 || base > 36 {
+			return sample{before: []any{i, base}}
+		}
+		return sample{before: []any{i, base}, results: []any{strconv.FormatInt(i, base)}}
+	},
+	"strconv.AppendInt": func(rng *rand.Rand) sample {
+		dst, i, base := roomyBytes(rng), randomInt64(rng), []int{2, 10, 10, 16, 36, rng.Intn(40)}[rng.Intn(6)]
+		before := snapshot(dst, i, base)
+		if base < 2 || base > 36 {
+			return sample{before: before, after: []any{dst, i, base}}
+		}
+		return sample{before: before, after: []any{dst, i, base}, results: []any{strconv.AppendInt(dst, i, base)}}
+	},
+	"sort.Strings": func(rng *rand.Rand) sample {
+		x := randomElements(rng)
+		before := snapshot(x)
+		sort.Strings(x)
+		return sample{before: before, after: []any{x}}
+	},
+	"math.Sqrt":  floatHarness(math.Sqrt),
+	"math.Abs":   floatHarness(math.Abs),
+	"math.Floor": floatHarness(math.Floor),
+	"math.Ceil":  floatHarness(math.Ceil),
+	"math.Trunc": floatHarness(math.Trunc),
+	"math.Round": floatHarness(math.Round),
+	"math.Log":   floatHarness(math.Log),
+	"math.Exp":   floatHarness(math.Exp),
+	"math.Min":   floatPairHarness(math.Min),
+	"math.Max":   floatPairHarness(math.Max),
+	"math.Pow":   floatPairHarness(math.Pow),
+	"math.Mod":   floatPairHarness(math.Mod),
+	"math.Inf": func(rng *rand.Rand) sample {
+		sign := rng.Intn(5) - 2
+		return sample{before: []any{sign}, results: []any{math.Inf(sign)}}
+	},
+	"math.NaN": func(*rand.Rand) sample {
+		return sample{results: []any{math.NaN()}}
+	},
+	"math.IsNaN": func(rng *rand.Rand) sample {
+		f := randomFloat(rng)
+		return sample{before: []any{f}, results: []any{math.IsNaN(f)}}
+	},
+	"math.IsInf": func(rng *rand.Rand) sample {
+		f, sign := randomFloat(rng), rng.Intn(5)-2
+		return sample{before: []any{f, sign}, results: []any{math.IsInf(f, sign)}}
+	},
+	"(time.Time).Date": func(rng *rand.Rand) sample {
+		t := randomTime(rng)
+		year, month, day := t.Date()
+		return sample{before: []any{t}, results: []any{year, month, day}}
+	},
+	"(time.Time).Year":       timeHarness(time.Time.Year),
+	"(time.Time).Month":      timeHarness(time.Time.Month),
+	"(time.Time).Day":        timeHarness(time.Time.Day),
+	"(time.Time).Hour":       timeHarness(time.Time.Hour),
+	"(time.Time).Minute":     timeHarness(time.Time.Minute),
+	"(time.Time).Second":     timeHarness(time.Time.Second),
+	"(time.Time).Nanosecond": timeHarness(time.Time.Nanosecond),
+	"(time.Time).Weekday":    timeHarness(time.Time.Weekday),
+	"(time.Time).YearDay":    timeHarness(time.Time.YearDay),
+	"(time.Time).Unix":       timeHarness(time.Time.Unix),
+	"(time.Time).UnixMilli":  timeHarness(time.Time.UnixMilli),
+	"(time.Time).IsZero":     timeHarness(time.Time.IsZero),
+	"(time.Time).Sub":        timePairHarness(time.Time.Sub),
+	"(time.Time).Before":     timePairHarness(time.Time.Before),
+	"(time.Time).After":      timePairHarness(time.Time.After),
+	"(time.Time).Equal":      timePairHarness(time.Time.Equal),
+	"time.Since": func(rng *rand.Rand) sample {
+		t := randomTime(rng)
+		return sample{before: []any{t}, results: []any{time.Since(t)}}
+	},
+	"time.Until": func(rng *rand.Rand) sample {
+		t := randomTime(rng)
+		return sample{before: []any{t}, results: []any{time.Until(t)}}
+	},
+	"time.Now":                     func(*rand.Rand) sample { return sample{results: []any{time.Now()}} },
+	"(time.Duration).Seconds":      durationHarness(time.Duration.Seconds),
+	"(time.Duration).Milliseconds": durationHarness(time.Duration.Milliseconds),
+	"(time.Duration).Nanoseconds":  durationHarness(time.Duration.Nanoseconds),
+	"(time.Time).Add": func(rng *rand.Rand) sample {
+		t, d := randomTime(rng), randomDuration(rng)
+		return sample{before: []any{t, d}, results: []any{t.Add(d)}}
+	},
+	"(time.Time).AddDate": func(rng *rand.Rand) sample {
+		t, years, months, days := randomTime(rng), randomCalendarInt(rng), randomCalendarInt(rng), randomCalendarInt(rng)
+		return sample{before: []any{t, years, months, days}, results: []any{t.AddDate(years, months, days)}}
+	},
+	"time.Unix": func(rng *rand.Rand) sample {
+		sec, nsec := randomInt64(rng), randomInt64(rng)
+		return sample{before: []any{sec, nsec}, results: []any{time.Unix(sec, nsec)}}
+	},
+	"time.Date": func(rng *rand.Rand) sample {
+		year, month, day := randomCalendarInt(rng), time.Month(randomCalendarInt(rng)), randomCalendarInt(rng)
+		hour, minute, sec, nsec := randomCalendarInt(rng), randomCalendarInt(rng), randomCalendarInt(rng), randomCalendarInt(rng)
+		loc := randomLocation(rng)
+		if rng.Intn(8) == 0 {
+			return sample{before: []any{year, month, day, hour, minute, sec, nsec, (*time.Location)(nil)}}
+		}
+		return sample{before: []any{year, month, day, hour, minute, sec, nsec, loc}, results: []any{time.Date(year, month, day, hour, minute, sec, nsec, loc)}}
+	},
 	"unicode/utf8.RuneCountInString": func(rng *rand.Rand) sample {
 		s := randomText(rng)
 		return sample{before: []any{s}, results: []any{utf8.RuneCountInString(s)}}
 	},
+}
+
+// utf8Text returns text whose bytes are each kind UTF-8 has: ASCII, valid
+// encodings of two, three, and four bytes, U+FFFD itself, and invalid
+// ones: a lone continuation byte, an overlong encoding, an encoded
+// surrogate, one past MaxRune, a truncated encoding, and 0xC0, 0xC1, and
+// 0xF5 to 0xFF.
+func utf8Text(rng *rand.Rand) string {
+	pieces := []string{"a", " ", "\x7f", "é", "世", "\U0001F600", "\U0010FFFF", "\uFFFD", "\x80", "\xc0\x80", "\xc1\xbf",
+		"\xed\xa0\x80", "\xf4\x90\x80\x80", "\xe4\xb8", "\xf5", "\xff", "\u0085", "\u00a0"}
+	var text strings.Builder
+	for range rng.Intn(5) {
+		text.WriteString(pieces[rng.Intn(len(pieces))])
+	}
+	return text.String()
+}
+
+// roomyBytes returns random text as a slice that has spare capacity half
+// the time, so that an append writes in place or into new memory.
+func roomyBytes(rng *rand.Rand) []byte {
+	text := randomText(rng)
+	p := make([]byte, len(text), len(text)+rng.Intn(2)*rng.Intn(70))
+	copy(p, text)
+	return p
+}
+
+// randomCodePoint returns a value of a rune at the edges of what UTF-8
+// encodes, or at random.
+func randomCodePoint(rng *rand.Rand) rune {
+	edges := []rune{-1 << 31, -2, -1, 0, 0x7f, 0x80, 0x7ff, 0x800, 0xd7ff, 0xd800, 0xdfff, 0xe000, 0xfffd, 0xffff, 0x10000, 0x10ffff, 0x110000, 1<<31 - 1}
+	if rng.Intn(2) == 0 {
+		return edges[rng.Intn(len(edges))]
+	}
+	return rune(rng.Intn(0x110010)) - 8
+}
+
+// runePredicate returns a harness that calls a predicate of package unicode
+// on every value from -2 to 300 in turn, and then on random code points.
+func runePredicate(predicate func(rune) bool) func(rng *rand.Rand) sample {
+	next := rune(-2)
+	return func(rng *rand.Rand) sample {
+		r := next
+		if next <= 300 {
+			next++
+		} else {
+			r = randomCodePoint(rng)
+		}
+		return sample{before: []any{r}, results: []any{predicate(r)}}
+	}
+}
+
+// randomLiteral returns a quoted literal of each form, with escapes,
+// invalid bytes, and carriage returns, or text that is no literal.
+func randomLiteral(rng *rand.Rand) string {
+	body := utf8Text(rng) + []string{"", "\\n", "\\x41", "\\u00e9", "\\U0001F600", "\\'", "\\q", "\r"}[rng.Intn(8)]
+	switch rng.Intn(6) {
+	case 0:
+		return "`" + body + "`"
+	case 1:
+		return "'" + body + "'"
+	case 2:
+		return []string{"", "\"", "'", "`", "\"\"x", "'ab'", "''"}[rng.Intn(7)]
+	case 3:
+		return strconv.Quote(body)
+	}
+	return "\"" + body + "\""
+}
+
+// numeralEdges are the edges of each bit size, signed and unsigned, and a
+// number past each by one.
+var numeralEdges = []string{"-128", "127", "-129", "128", "255", "256", "-32768", "32767", "-32769", "32768", "65535", "65536",
+	"-2147483648", "2147483647", "-2147483649", "2147483648", "4294967295", "4294967296",
+	"-9223372036854775808", "9223372036854775807", "-9223372036854775809", "9223372036854775808",
+	"18446744073709551615", "18446744073709551616"}
+
+// numeralHarness returns a harness for ParseInt or ParseUint that parses
+// each edge in base 10 at each bit size the documentation names in turn,
+// and then random numerals in random bases and bit sizes.
+func numeralHarness(parse func(s string, base, bitSize int) []any) func(rng *rand.Rand) sample {
+	next := 0
+	return func(rng *rand.Rand) sample {
+		// Digits of each base, with signs, prefixes, and underscores,
+		// numbers past every bit size, and text that is no number, in a
+		// base that ParseInt accepts, mostly 10, or one it does not, and a
+		// bit size it names, mostly, or another.
+		sign := []string{"", "", "-", "+"}[rng.Intn(4)]
+		digits := []string{"0", "7", "127", "128", "255", "256", "32767", "32768", "65535", "65536", "2147483647", "2147483648",
+			"4294967295", "4294967296", "9223372036854775807", "9223372036854775808", "18446744073709551615", "18446744073709551616",
+			"99999999999999999999999", "0x7f", "0b101", "0o17", "017", "1_000", "z", "ff", ""}[rng.Intn(27)]
+		s, base, bitSize := sign+digits, []int{10, 10, 10, 0, 0, 2, 8, 16, 36, 1, 37, -1}[rng.Intn(12)], []int{0, 8, 16, 32, 64, 0, 8, 16, 32, 64, 7, -1, 65}[rng.Intn(13)]
+		if next < 5*len(numeralEdges) {
+			s, base, bitSize = numeralEdges[next/5], 10, []int{0, 8, 16, 32, 64}[next%5]
+			next++
+		}
+		return sample{before: []any{s, base, bitSize}, results: parse(s, base, bitSize)}
+	}
+}
+
+// randomInt64 returns an int64 at an edge or at random.
+func randomInt64(rng *rand.Rand) int64 {
+	edges := []int64{math.MinInt64, math.MinInt64 + 1, -1, 0, 1, 9, 10, 35, 36, math.MaxInt64}
+	if rng.Intn(2) == 0 {
+		return edges[rng.Intn(len(edges))]
+	}
+	return int64(rng.Uint64())
+}
+
+// randomFloat returns a float at an edge or at random.
+func randomFloat(rng *rand.Rand) float64 {
+	edges := []float64{0, math.Copysign(0, -1), 1, -1, 0.5, -2.5, math.Inf(1), math.Inf(-1), math.NaN(), math.MaxFloat64, math.SmallestNonzeroFloat64}
+	if rng.Intn(2) == 0 {
+		return edges[rng.Intn(len(edges))]
+	}
+	return math.Float64frombits(rng.Uint64())
+}
+
+// floatHarness calls a function of package math of one float.
+func floatHarness(f func(float64) float64) func(rng *rand.Rand) sample {
+	return func(rng *rand.Rand) sample {
+		x := randomFloat(rng)
+		return sample{before: []any{x}, results: []any{f(x)}}
+	}
+}
+
+// floatPairHarness calls a function of package math of two floats.
+func floatPairHarness(f func(float64, float64) float64) func(rng *rand.Rand) sample {
+	return func(rng *rand.Rand) sample {
+		x, y := randomFloat(rng), randomFloat(rng)
+		return sample{before: []any{x, y}, results: []any{f(x, y)}}
+	}
+}
+
+// randomLocation returns UTC, Local, a zone loaded from the system's
+// database, or a fixed zone at an edge of its offset.
+func randomLocation(rng *rand.Rand) *time.Location {
+	switch rng.Intn(5) {
+	case 0:
+		return time.UTC
+	case 1:
+		return time.Local
+	case 2:
+		if loc, err := time.LoadLocation("America/New_York"); err == nil {
+			return loc
+		}
+		return time.UTC
+	}
+	return time.FixedZone("edge", []int{math.MinInt32, math.MaxInt32, -1, 0, 3600 * 14}[rng.Intn(5)])
+}
+
+// randomCalendarInt returns a field of a date at an edge, outside its
+// usual range, or at random.
+func randomCalendarInt(rng *rand.Rand) int {
+	edges := []int{math.MinInt, math.MinInt / 2, -1 << 40, -400, -1, 0, 1, 12, 13, 28, 31, 32, 59, 60, 366, 1e9, 1 << 40, math.MaxInt / 2, math.MaxInt}
+	if rng.Intn(2) == 0 {
+		return edges[rng.Intn(len(edges))]
+	}
+	return rng.Intn(4000) - 2000
+}
+
+// randomDuration returns a duration at an edge or at random.
+func randomDuration(rng *rand.Rand) time.Duration {
+	return time.Duration(randomInt64(rng))
+}
+
+// randomTime returns the zero Time, the time now, a time from time.Unix
+// over all of int64 or from time.Date with fields outside their ranges,
+// in a random location.
+func randomTime(rng *rand.Rand) time.Time {
+	loc := randomLocation(rng)
+	switch rng.Intn(6) {
+	case 0:
+		return time.Time{}
+	case 5:
+		// The last instant of a year, leap or not, and of a month of 31
+		// days, in a zone that may move it to another day.
+		year := []int{2024, 2023, 2000, 1900, 1, 0, -4}[rng.Intn(7)]
+		return time.Date(year, time.Month([]int{12, 1, 2, 3}[rng.Intn(4)]), []int{31, 29, 28, 1}[rng.Intn(4)], 23, 59, 59, 999999999, loc)
+	case 1:
+		return time.Now().In(loc)
+	case 2:
+		return time.Date(randomCalendarInt(rng), time.Month(randomCalendarInt(rng)), randomCalendarInt(rng),
+			randomCalendarInt(rng), randomCalendarInt(rng), randomCalendarInt(rng), randomCalendarInt(rng), loc)
+	}
+	return time.Unix(randomInt64(rng), randomInt64(rng)).In(loc)
+}
+
+// timeHarness calls a method of time.Time that takes nothing.
+func timeHarness[R any](method func(time.Time) R) func(rng *rand.Rand) sample {
+	return func(rng *rand.Rand) sample {
+		t := randomTime(rng)
+		return sample{before: []any{t}, results: []any{method(t)}}
+	}
+}
+
+// timePairHarness calls a method of time.Time that takes another time.
+func timePairHarness[R any](method func(time.Time, time.Time) R) func(rng *rand.Rand) sample {
+	return func(rng *rand.Rand) sample {
+		t, u := randomTime(rng), randomTime(rng)
+		if rng.Intn(4) == 0 {
+			u = t
+		}
+		return sample{before: []any{t, u}, results: []any{method(t, u)}}
+	}
+}
+
+// durationHarness calls a method of time.Duration.
+func durationHarness[R any](method func(time.Duration) R) func(rng *rand.Rand) sample {
+	return func(rng *rand.Rand) sample {
+		d := randomDuration(rng)
+		return sample{before: []any{d}, results: []any{method(d)}}
+	}
 }
 
 // randomByte returns a byte that random text holds at times: a letter, a
@@ -776,6 +1143,28 @@ func (g *grounder) groundTerm(value any) *logic.Term {
 		}
 	case nil:
 	default:
+		// Integers of named types, as time.Month, are numbers; floats and
+		// values of which no formula of an entry reads anything, a
+		// time.Time or a *time.Location, are constants the evaluator
+		// cannot read, so a formula that read one would fail.
+		v := reflect.ValueOf(value)
+		switch {
+		case v.CanInt():
+			return logic.IntLit(v.Int())
+		case v.CanUint():
+			return logic.BigLit(new(big.Int).SetUint64(v.Uint()))
+		case v.CanFloat():
+			return logic.Const("unreadable float", logic.Float)
+		case v.Kind() == reflect.Pointer && v.IsNil():
+			return logic.RefLit(0)
+		case v.Kind() == reflect.Pointer:
+			// A pointer is a reference, which no formula of an entry
+			// reads but to compare it with nil; fresh and within are
+			// told from the real memory.
+			return logic.RefLit(1)
+		case v.Kind() == reflect.Struct:
+			return logic.Const("unreadable", logic.IntSeq)
+		}
 		panic(fmt.Sprintf("no term for %T", value))
 	}
 	return logic.NilErr()
@@ -863,7 +1252,7 @@ func TestShippedContracts(t *testing.T) {
 				// wrappers_test.go.
 				if entry := file.entries[key]; len(entry.asserts) > 0 {
 					callee, ok := pkg.Scope().Lookup(name).(*types.Func)
-					if receiver, method, isMethod := strings.Cut(strings.TrimPrefix(name, "(*"), ")."); isMethod {
+					if receiver, method, isMethod := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(name, "("), "*"), ")."); isMethod {
 						typeName := pkg.Scope().Lookup(receiver).(*types.TypeName)
 						found, _, _ := types.LookupFieldOrMethod(types.NewPointer(typeName.Type()), true, pkg, method)
 						callee, ok = found.(*types.Func)
@@ -910,7 +1299,7 @@ func TestShippedContracts(t *testing.T) {
 					return
 				}
 				callee, ok := pkg.Scope().Lookup(name).(*types.Func)
-				if receiver, method, isMethod := strings.Cut(strings.TrimPrefix(name, "(*"), ")."); isMethod {
+				if receiver, method, isMethod := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(name, "("), "*"), ")."); isMethod {
 					typeName := pkg.Scope().Lookup(receiver).(*types.TypeName)
 					found, _, _ := types.LookupFieldOrMethod(types.NewPointer(typeName.Type()), true, pkg, method)
 					callee, ok = found.(*types.Func)
@@ -1028,7 +1417,7 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 			if call.unwritten != nil {
 				unwritten = call.unwritten[i]
 			}
-			if !listed && !reflect.DeepEqual(unwritten, call.after[i]) {
+			if !listed && !unchanged(unwritten, call.after[i]) {
 				t.Fatalf("%s changed %s, which its modifies does not list: %v became %v", key, param.Name(), unwritten, call.after[i])
 			}
 		}
@@ -1087,6 +1476,16 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 	if checked < 100 {
 		t.Fatalf("only %d of 400 random calls satisfied the requires; the harness does not exercise the contract", checked)
 	}
+}
+
+// unchanged reports whether an argument is as it was: deeply equal, with a
+// float equal to itself also when it is a NaN.
+func unchanged(before, after any) bool {
+	if x, isFloat := before.(float64); isFloat {
+		y, isFloat := after.(float64)
+		return isFloat && math.Float64bits(x) == math.Float64bits(y)
+	}
+	return reflect.DeepEqual(before, after)
 }
 
 // conditions returns what must hold in some sample for a clause to be

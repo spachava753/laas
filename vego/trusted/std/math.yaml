@@ -1,0 +1,80 @@
+version: 1
+
+# Floats are opaque to vego: no formula can say anything of a float's value.
+# Each entry says only what is true whatever the value: the function returns
+# for every argument, panicking for none, and writes nothing. That is what
+# the documentation of each says, which names no panic.
+
+trusted:
+  math.Sqrt:
+    reason: '"Sqrt returns the square root of x." It reads only x.'
+    modifies: []
+
+  math.Min:
+    reason: '"Min returns the smaller of x or y." It reads only x and y.'
+    modifies: []
+
+  math.Max:
+    reason: '"Max returns the larger of x or y." It reads only x and y.'
+    modifies: []
+
+  math.Abs:
+    reason: '"Abs returns the absolute value of x." It reads only x.'
+    modifies: []
+
+  math.Floor:
+    reason: '"Floor returns the greatest integer value less than or equal to x." It reads only x.'
+    modifies: []
+
+  math.Ceil:
+    reason: '"Ceil returns the least integer value greater than or equal to x." It reads only x.'
+    modifies: []
+
+  math.Trunc:
+    reason: '"Trunc returns the integer value of x." It reads only x.'
+    modifies: []
+
+  math.Round:
+    reason: '"Round returns the nearest integer, rounding half away from zero." It reads only x.'
+    modifies: []
+
+  math.Pow:
+    reason: '"Pow returns x**y, the base-x exponential of y." It reads only x and y.'
+    modifies: []
+
+  math.Mod:
+    reason: >-
+      "Mod returns the floating-point remainder of x/y." For y = 0 it returns
+      NaN, as its special cases say, and does not panic. It reads only x and
+      y.
+    modifies: []
+
+  math.Log:
+    reason: '"Log returns the natural logarithm of x." It reads only x.'
+    modifies: []
+
+  math.Exp:
+    reason: '"Exp returns e**x, the base-e exponential of x." It reads only x.'
+    modifies: []
+
+  math.Inf:
+    reason: >-
+      "Inf returns positive infinity if sign >= 0, negative infinity if sign
+      < 0." It reads only sign.
+    modifies: []
+
+  math.NaN:
+    reason: '"NaN returns an IEEE 754 “not-a-number” value." It reads nothing.'
+    modifies: []
+
+  math.IsNaN:
+    reason: '"IsNaN reports whether f is an IEEE 754 “not-a-number” value." It reads only f.'
+    modifies: []
+
+  math.IsInf:
+    reason: >-
+      "IsInf reports whether f is an infinity, according to sign. If sign >
+      0, IsInf reports whether f is positive infinity. If sign < 0, IsInf
+      reports whether f is negative infinity. If sign == 0, IsInf reports
+      whether f is either infinity." It reads only f and sign.
+    modifies: []

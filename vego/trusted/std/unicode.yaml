@@ -1,0 +1,62 @@
+version: 1
+
+# The predicates of package unicode are defined by Unicode's tables. Each
+# entry says what they report for ASCII, whose categories Unicode keeps
+# fixed, and for a value that is no code point; it says nothing of any
+# other character, which needs a model of the tables.
+
+trusted:
+  unicode.IsSpace:
+    reason: >-
+      "IsSpace reports whether the rune is a space character as defined by
+      Unicode's White Space property; in the Latin-1 space this is '\t',
+      '\n', '\v', '\f', '\r', ' ', U+0085 (NEL), U+00A0 (NBSP)." A negative
+      value or one above MaxRune is no character. Not said: which characters
+      above U+00FF are spaces.
+    modifies: []
+    ensures:
+      - "0 <= r And r < 256 -> (result <-> ((9 <= r And r <= 13) Or r = 32 Or r = 133 Or r = 160))"
+      - "(r < 0 Or r > 1114111) -> ~result"
+
+  unicode.IsDigit:
+    reason: >-
+      "IsDigit reports whether the rune is a decimal digit." The decimal
+      digits of ASCII are '0' to '9', and a negative value or one above
+      MaxRune is no character. Not said: the digits of other scripts.
+    modifies: []
+    ensures:
+      - "0 <= r And r < 128 -> (result <-> ('0' <= r And r <= '9'))"
+      - "(r < 0 Or r > 1114111) -> ~result"
+
+  unicode.IsLetter:
+    reason: >-
+      "IsLetter reports whether the rune is a letter (category L)." The
+      letters of ASCII are 'A' to 'Z' and 'a' to 'z', and a negative value
+      or one above MaxRune is no character. Not said: which other characters
+      are letters.
+    modifies: []
+    ensures:
+      - "0 <= r And r < 128 -> (result <-> (('A' <= r And r <= 'Z') Or ('a' <= r And r <= 'z')))"
+      - "(r < 0 Or r > 1114111) -> ~result"
+
+  unicode.IsUpper:
+    reason: >-
+      "IsUpper reports whether the rune is an upper case letter." The upper
+      case letters of ASCII are 'A' to 'Z', and a negative value or one above
+      MaxRune is no character. Not said: which other characters are upper
+      case.
+    modifies: []
+    ensures:
+      - "0 <= r And r < 128 -> (result <-> ('A' <= r And r <= 'Z'))"
+      - "(r < 0 Or r > 1114111) -> ~result"
+
+  unicode.IsLower:
+    reason: >-
+      "IsLower reports whether the rune is a lower case letter." The lower
+      case letters of ASCII are 'a' to 'z', and a negative value or one above
+      MaxRune is no character. Not said: which other characters are lower
+      case.
+    modifies: []
+    ensures:
+      - "0 <= r And r < 128 -> (result <-> ('a' <= r And r <= 'z'))"
+      - "(r < 0 Or r > 1114111) -> ~result"
