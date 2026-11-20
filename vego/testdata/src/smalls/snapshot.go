@@ -110,6 +110,14 @@ func NamesWord(x int) {
 	// @Assert x = x
 }
 
+// @Requires x >= 0
+// @Ensures True
+func NamesLimit(x int) {
+	// @Snapshot MaxInt = x // want `Snapshot MaxInt: MaxInt is a word of the annotation language; choose another name`
+	// @Snapshot Z = x // want `Snapshot Z: Z is a word of the annotation language; choose another name`
+	// @Assert MaxInt = x And Z = x
+}
+
 // @Ensures True
 func DeclaredAgain(x int) {
 	// @Snapshot x0 = x // want `Snapshot x0: x0 is declared again at .*snapshot.go:\d+:\d+, inside the scope of the snapshot; choose another name`
