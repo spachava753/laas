@@ -3154,7 +3154,7 @@ This check can miss a weak contract. When the path to the call depends on values
 
 It cannot format an error that came from a parameter, or from a trusted function whose contract does not vouch for it. Formatting an error calls its methods, and `vego` cannot see what the methods of an unknown error do. For the same reason, such an error cannot be passed to a trusted function unless that function's contract allows it. See [Arguments that carry code](#arguments-that-carry-code).
 
-An error variable has a known origin where it is formatted when every assignment that can reach that place gives it one. A later assignment does not count, so you can reuse `err` for the next call after you wrap it. [Reading and writing files](#reading-and-writing-files) shows this.
+An error variable has a known origin where it is formatted when every assignment that can reach that place gives it one. An assignment after the `%w` does not reach it, so you can reuse `err` for the next call after you wrap it. In a loop, an assignment at the end of one iteration reaches a `%w` at the start of the next. See [Reading and writing files](#reading-and-writing-files) for an example.
 
 The shipped contract of `strconv.Atoi` vouches for its error, so its error can be wrapped:
 
@@ -4667,10 +4667,10 @@ Wrap the error of `os.Create` where it is returned, as `WriteReport` does, and r
 
 `vego` follows a variable along the paths only in the function or the function literal that declares it. Some variables are decided from every assignment to them in the function instead, wherever the error is used:
 
-- a variable that a function literal assigns, unless the literal is deferred where it is written, as in `defer func() { ... }()`;
+- a variable that a function literal assigns, unless the literal is written in a `defer` statement, as in `defer func() { ... }()`, of the function or literal that declares the variable;
 - a variable used inside a function literal, at that use.
 
-A function literal can run between any two statements of the function around it, so what it assigns may reach any use. A literal deferred where it is written runs only when the function returns, after every use outside it. For a variable that is decided from every assignment, give the error you wrap a variable of its own. An error variable whose address is taken, or that a `range` assigns, has no known origin anywhere in the function.
+A function literal can run between any two statements of the function around it, so what it assigns may reach any use. A literal written in a `defer` statement of the function that declares the variable runs only when that function returns, after every use outside the literal. A literal deferred inside another function literal runs when that literal returns, so its assignments count everywhere. For a variable that is decided from every assignment, give the error you wrap a variable of its own. An error variable whose address is taken, or that a `range` assigns, has no known origin anywhere in the function.
 
 An `*os.File` is an `io.Writer`, so `fmt.Fprintf`, `fmt.Fprintln`, and a logger made by `log.New` can write to it:
 
