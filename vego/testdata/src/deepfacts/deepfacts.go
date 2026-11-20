@@ -1,7 +1,8 @@
 // Package deepfacts calls the functions of deepfactslib, whose entries
 // promise what the types of strings, slices of strings, and maps of them
-// rule out. Each must still be reported, also now that the questions about
-// them are solved without the axiom of extensionality.
+// rule out. Each must still be reported. The questions about A, C, Q, P,
+// BI, MI, and Weak are solved without the axiom of extensionality; those
+// about B and M read a map by a string key, whose key function keeps it.
 package deepfacts
 
 import "deepfactslib"
@@ -58,6 +59,25 @@ func P(s []string) (code int) {
 func M(m map[string][]string) (code int) {
 	deepfactslib.PutMap(m) // want `the trusted contract of deepfactslib.PutMap \(trusted.yaml:\d+\) cannot be used: it contradicts itself` `cannot verify M: PutMap has a contract that could not be understood`
 	_ = len(m["a"])
+	return 5
+}
+
+// BI reads a map value under an integer key.
+//
+// @Ensures code = 7
+func BI(url string) (code int) {
+	r, _ := deepfactslib.GetIntMap(url) // want `the trusted contract of deepfactslib.GetIntMap \(trusted.yaml:\d+\) cannot be used: it contradicts itself` `cannot verify BI: GetIntMap has a contract that could not be understood`
+	_ = len(r.H[3])
+	return 5
+}
+
+// MI hands over a map with integer keys and reads it back.
+//
+// @Requires |m[3]| > 0 And |m[3][0]| > 0
+// @Ensures code = 7
+func MI(m map[int][]string) (code int) {
+	deepfactslib.PutIntMap(m) // want `the trusted contract of deepfactslib.PutIntMap \(trusted.yaml:\d+\) cannot be used: it contradicts itself` `cannot verify MI: PutIntMap has a contract that could not be understood`
+	_ = len(m[3])
 	return 5
 }
 
