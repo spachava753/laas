@@ -56,3 +56,8 @@ func Beside(u [][]int, t []int) {
 //
 // @Ensures r = 1000
 func Pro() (r int) { return globalslib.Plans["pro"] }
+
+// ListsVariable names a variable of another package in Modifies.
+//
+// @Modifies globalslib.Limit // want `vego: in Modifies annotation: globalslib.Limit is a package-level variable, which a Modifies clause cannot name yet`
+func ListsVariable() {}

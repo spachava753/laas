@@ -876,6 +876,7 @@ globals	globals.ApartSized	2	536	0
 globals	globals.Appended	5	1990	0
 globals	globals.AssignField	1	46	0
 globals	globals.AssignedTo	4	1412	0
+globals	globals.Assigns	1	46	0
 globals	globals.Beside	11	61398	0
 globals	globals.Bounded	4	969	0
 globals	globals.Buf	1	46	0
@@ -899,6 +900,7 @@ globals	globals.Inside	12	8507	0
 globals	globals.Length	3	983	0
 globals	globals.Level	7	10601	0
 globals	globals.Linked	1	46	0
+globals	globals.ListsVariable	0	0	0
 globals	globals.Literal	4	1335	0
 globals	globals.Lookup	50	398805	0
 globals	globals.Magic	4	1577	0
@@ -907,6 +909,7 @@ globals	globals.Nested	1	46	0
 globals	globals.Old	1	46	0
 globals	globals.Origin	5	3457	0
 globals	globals.Pages	4	1561	0
+globals	globals.Pass	3	1030	0
 globals	globals.Passed	4	1335	0
 globals	globals.Plan	3	13816	0
 globals	globals.Plans	2	1871	0
@@ -929,16 +932,19 @@ globals	globals.Snapshot	2	226	0
 globals	globals.Sum	36	74135	0
 globals	globals.Timeout	3	125	0
 globals	globals.TooHigh	1	34	0
+globals	globals.Twice	6	1352	0
 globals	globals.Weak	10	7819	0
 globals	globals.Window	0	0	0
 globals	globals.WriteTable	1	46	0
 globals	globals.WrittenFirst	4	1335	0
+globals	globals.fill	6	2244	0
 globals	globals.firstEntry	4	1538	0
 globalsclient	globalsclient.AtLimit	4	233	0
 globalsclient	globalsclient.Beside	11	60470	0
 globalsclient	globalsclient.Counter	1	46	0
 globalsclient	globalsclient.Hidden	2	114	0
 globalsclient	globalsclient.Limit	3	125	0
+globalsclient	globalsclient.ListsVariable	0	0	0
 globalsclient	globalsclient.Names	2	1150	0
 globalsclient	globalsclient.Origin	4	259	0
 globalsclient	globalsclient.OverLimit	3	201	0
@@ -946,6 +952,8 @@ globalsclient	globalsclient.Pro	2	2344	0
 globalsearly	(globalsearly.T).Limit	1	46	0
 globalsearly	(globalsearly.T).Zero	2	81	0
 globalsembed	globalsembed.Greeting	2	456	0
+globalsembed	globalsembed.InBlock	2	456	0
+globalsembed	globalsembed.Spaced	2	456	0
 globalslib	globalslib.AtLimit	4	909	0
 globalslib	globalslib.First	4	1452	0
 globalslib	globalslib.FreeLimit	2	2386	0

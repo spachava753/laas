@@ -521,6 +521,10 @@ type pkgVerifier struct {
 	// the key of each variable whose contents are only read and that a
 	// function has read; see table.
 	readOnlyRefs map[string]string
+	// fixedRefs holds, by the name of its constant, the reference of a
+	// fixed variable that a function has read, with the variable as this
+	// package spells it; see checkWriteOr.
+	fixedRefs map[string]string
 	fixedOf      map[*types.Package]*fixedFact
 	hidden       string
 	reliedValues map[string]bool

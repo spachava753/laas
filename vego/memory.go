@@ -594,6 +594,11 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 				stated = &v.frame[i]
 			}
 		}
+		// Memory that a package-level variable refers to cannot be
+		// listed, so telling the reader to list it would mislead.
+		if variable := v.fixedRefs[w.ref.Name]; remedy == "" && w.ref.Op == logic.OpConst && variable != "" {
+			remedy = fmt.Sprintf("it is memory that the package-level variable %s refers to, which a Modifies clause cannot name yet", variable)
+		}
 		switch {
 		case remedy != "":
 			v.report(pos, "%s, which %s may not modify; %s%s", what, v.fn.obj.Name(), remedy, limitNote(result))

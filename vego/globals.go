@@ -491,6 +491,7 @@ type knownValue struct {
 func (pv *pkgVerifier) findFixed() {
 	pv.fixed = map[*types.Var]knownValue{}
 	pv.readOnly = map[*types.Var]bool{}
+	embeds := pv.embedded()
 	fact := &fixedFact{Vars: map[string]knownValue{}, Changed: map[string]string{}, ReadOnly: map[string]bool{}}
 	initialised := false
 	for _, file := range pv.pass.Files {
@@ -512,7 +513,7 @@ func (pv *pkgVerifier) findFixed() {
 					}
 					known := knownValue{Kind: knownZero}
 					switch {
-					case embedded(gen, spec):
+					case embeds[spec]:
 						// The value is the content of files, which the
 						// directive names and the source does not hold.
 						known = knownValue{}
@@ -875,6 +876,11 @@ func (v *fnVerifier) fixedValue(sink *state, variable *types.Var) (value, string
 	if v.fixedMet == nil {
 		v.fixedMet = map[string]fixedMet{}
 	}
+	for i, lf := range leaves {
+		if lf.part == partRef || lf.part == partPtr || (lf.sort == logic.Ref && isMap(lf.typ)) {
+			v.fixedRefs[val[i].Name] = v.spelling(variable)
+		}
+	}
 	v.fixedMet[errorKey(final)] = fixedMet{val: val, typ: variable.Type()}
 	readOnly := v.readOnlyHere(final)
 	if readOnly {
@@ -1236,20 +1242,34 @@ func (v *fnVerifier) refuseWriteThroughAs(e ast.Expr, text string) {
 	}
 }
 
-// embedded reports whether a go:embed directive gives the variables of a
-// declaration their values.
-func embedded(gen *ast.GenDecl, spec *ast.ValueSpec) bool {
-	for _, doc := range []*ast.CommentGroup{gen.Doc, spec.Doc} {
-		if doc == nil {
-			continue
+// embedded returns the declarations of variables that a go:embed
+// directive gives their values. A directive belongs to the first
+// declaration of a variable after it, as the compiler reads it: blank lines
+// and other comments may stand between them, so the doc comment of the
+// declaration is not where to look.
+func (pv *pkgVerifier) embedded() map[*ast.ValueSpec]bool {
+	embeds := map[*ast.ValueSpec]bool{}
+	for _, file := range pv.pass.Files {
+		var specs []*ast.ValueSpec
+		for _, decl := range file.Decls {
+			if gen, ok := decl.(*ast.GenDecl); ok && gen.Tok == token.VAR {
+				for _, spec := range gen.Specs {
+					specs = append(specs, spec.(*ast.ValueSpec))
+				}
+			}
 		}
-		for _, c := range doc.List {
-			if strings.HasPrefix(c.Text, "//go:embed") {
-				return true
+		for _, group := range file.Comments {
+			for _, c := range group.List {
+				if !strings.HasPrefix(c.Text, "//go:embed") {
+					continue
+				}
+				if i := slices.IndexFunc(specs, func(spec *ast.ValueSpec) bool { return spec.Pos() > c.Pos() }); i >= 0 {
+					embeds[specs[i]] = true
+				}
 			}
 		}
 	}
-	return false
+	return embeds
 }
 
 // fixedMet is a fixed variable that a function read: its leaves and its
@@ -1257,4 +1277,30 @@ func embedded(gen *ast.GenDecl, spec *ast.ValueSpec) bool {
 type fixedMet struct {
 	val value
 	typ types.Type
+}
+
+// modifiesVariable returns the package-level variable that the path of a
+// Modifies entry starts from, as the function's file spells it, or nil.
+func (v *fnVerifier) modifiesVariable(fn *funcInfo, m *modTarget) *types.Var {
+	spelled := fn.spelling()
+	var obj types.Object
+	switch {
+	case spelled.decl != nil && spelled.obj.Pkg() == v.pass.Pkg:
+		if scope := v.pass.Pkg.Scope().Innermost(spelled.decl.Pos()); scope != nil {
+			_, obj = scope.LookupParent(m.name, spelled.decl.Pos())
+		}
+	case spelled.obj != nil && spelled.obj.Pkg() != nil:
+		obj = spelled.obj.Pkg().Scope().Lookup(m.name)
+	}
+	field := ""
+	if len(m.steps) > 0 {
+		field = m.steps[0].field
+	}
+	if variable := packageVariableOf(obj, ""); variable != nil {
+		return variable
+	}
+	if _, isPackage := obj.(*types.PkgName); isPackage {
+		return packageVariableOf(obj, field)
+	}
+	return nil
 }

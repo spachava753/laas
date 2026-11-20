@@ -58,7 +58,10 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 			return lv
 		}
 		variable, ok := v.info.ObjectOf(e).(*types.Var)
-		if !ok || variable.Parent() == v.pass.Pkg.Scope() || variable.Pkg() != v.pass.Pkg {
+		switch {
+		case ok && packageVariableOf(variable, "") != nil:
+			v.unsupported(e.Pos(), fmt.Sprintf("%s is a package-level variable, which a verified function cannot assign yet", e.Name))
+		case !ok || variable.Pkg() != v.pass.Pkg:
 			v.unsupported(e.Pos(), fmt.Sprintf("%s is not a local variable", e.Name))
 		}
 		if v.boxed[variable] {

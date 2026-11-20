@@ -1020,6 +1020,9 @@ type located struct {
 func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Var]value, sink *state, mem memory) (shape, target, error) {
 	param, ok := fn.paramNames[m.name]
 	if !ok {
+		if variable := v.modifiesVariable(fn, m); variable != nil {
+			return shape{}, target{}, fmt.Errorf("%s is a package-level variable, which a Modifies clause cannot name yet", v.spelling(variable))
+		}
 		return shape{}, target{}, fmt.Errorf("%s is not a parameter", m.name)
 	}
 	symbolic := mem == nil

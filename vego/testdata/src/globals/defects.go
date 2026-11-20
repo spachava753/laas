@@ -252,3 +252,46 @@ type Scaler func(n int) (r int)
 type Window struct {
 	Size int
 }
+
+// spare has room for more elements than it holds.
+var spare = make([]int, 2, 10)
+
+// Twice appends twice into the room of a variable, which is memory that
+// existed on entry.
+//
+// @Ensures r = 9
+func Twice() (r int) {
+	x := append(spare, 9) // want `vego: append may write into the capacity of spare, which Twice may not modify; it is memory that the package-level variable spare refers to, which a Modifies clause cannot name yet`
+	y := append(spare, 8)
+	_ = y
+	return x[2]
+}
+
+// fill writes its slice.
+//
+// @Requires |s| > 0
+// @Modifies s
+func fill(s []int) { s[0] = 0 }
+
+var filled = []int{1}
+
+// Pass hands what a variable refers to to a function that writes it.
+//
+// @Ensures True
+func Pass() {
+	fill(filled) // want `vego: fill may modify filled, which Pass may not modify; it is memory that the package-level variable filled refers to, which a Modifies clause cannot name yet`
+}
+
+// ListsVariable names a variable in Modifies.
+//
+// @Modifies filled // want `vego: in Modifies annotation: filled is a package-level variable, which a Modifies clause cannot name yet`
+func ListsVariable() {}
+
+// Assigns assigns a variable.
+//
+// @Ensures True
+func Assigns() {
+	local = 4 // want `vego: cannot verify Assigns: local is a package-level variable, which a verified function cannot assign yet`
+}
+
+var local int
