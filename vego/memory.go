@@ -527,6 +527,21 @@ func stretchesOf(cells []cell, at *logic.Term) []stretch {
 type returned struct {
 	fn     *funcInfo
 	result int
+	// call is how the call is written, for one through a function value
+	// or an interface value.
+	call string
+}
+
+// contractTitle names the contract of a function type or of an interface
+// method, or returns "" for any other contract.
+func (v *fnVerifier) contractTitle(fn *funcInfo) string {
+	switch {
+	case fn.methodOf != nil:
+		return methodTitle(fn.methodOf)
+	case fn.valueOf != nil:
+		return fn.valueOf.Name()
+	}
+	return ""
 }
 
 // parameterPath names, after the advice to list a write, the path from a
@@ -749,7 +764,13 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 			callee := from.fn.obj.Name()
 			remedy = fmt.Sprintf("it is memory that %s returned, and its contract does not say that this is new memory, so it may have existed when %s "+
 				"was called; take it as a parameter and list it in a // @Modifies clause", callee, v.fn.obj.Name())
-			if from.fn.trust == nil {
+			switch contract := v.contractTitle(from.fn); {
+			case from.fn.trust != nil:
+			case contract != "":
+				remedy = fmt.Sprintf("it is memory that a call of %s returned, and the contract of %s does not say that this is new memory, so it may have existed when %s "+
+					"was called; if it is new, say so in the contract of %s, with // @Ensures fresh(%s), or take it as a parameter and list it in a // @Modifies clause",
+					from.call, contract, v.fn.obj.Name(), contract, spelledResult(from.fn, from.result))
+			default:
 				remedy = fmt.Sprintf("it is memory that %s returned, and its contract does not say that this is new memory, so it may have existed when %s "+
 					"was called; if it is new, say so in the contract of %s, with // @Ensures fresh(%s), or take it as a parameter and list it in a // @Modifies clause",
 					callee, v.fn.obj.Name(), callee, from.fn.results[from.result].Name())

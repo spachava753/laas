@@ -553,10 +553,10 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			// A write through what a trusted function returned that the
 			// caller may not make is reported with the function's name.
 			_, isPointer := pointee(sig.Results().At(i).Type())
-			if fn.valueOf == nil && fn.methodOf == nil && (isSlice(sig.Results().At(i).Type()) || isPointer) {
+			if isSlice(sig.Results().At(i).Type()) || isPointer {
 				for _, leaf := range results[i] {
 					if leaf.Sort == logic.Ref && leaf.Op == logic.OpConst {
-						v.returnedBy[leaf.Name] = returned{fn: fn, result: i}
+						v.returnedBy[leaf.Name] = returned{fn: fn, result: i, call: name}
 					}
 				}
 			}

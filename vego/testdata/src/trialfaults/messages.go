@@ -177,3 +177,41 @@ func Listed(s *Segment) {
 	p := &s.To
 	p.X = 7
 }
+
+// MakesPoint is a function type whose result its contract does not say is
+// new.
+//
+// @Ensures p != nil
+type MakesPoint func() (p *Point)
+
+// @Requires m != nil
+// @Ensures True
+func FromValue(m MakesPoint) {
+	p := m()
+	p.X = 1 // want `p.X is assigned, which FromValue may not modify; it is memory that a call of m returned, and the contract of MakesPoint does not say that this is new memory, so it may have existed when FromValue was called; if it is new, say so in the contract of MakesPoint, with // @Ensures fresh\(p\), or take it as a parameter and list it in a // @Modifies clause`
+}
+
+// PointSource has a method whose result its contract does not say is new.
+type PointSource interface {
+	// @Ensures p != nil
+	Get() (p *Point)
+}
+
+// @Requires s != nil
+// @Ensures True
+func FromMethod(s PointSource) {
+	p := s.Get()
+	p.X = 1 // want `p.X is assigned, which FromMethod may not modify; it is memory that a call of s.Get returned, and the contract of PointSource.Get does not say that this is new memory`
+}
+
+// FreshPoint says it is new, and the write is the function's own.
+//
+// @Ensures p != nil And fresh(p)
+type FreshPoint func() (p *Point)
+
+// @Requires m != nil
+// @Ensures True
+func FromFresh(m FreshPoint) {
+	p := m()
+	p.X = 1
+}
