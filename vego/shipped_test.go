@@ -925,6 +925,10 @@ func bytesPairHarness(call func(s, t []byte) []any) func(rng *rand.Rand) sample 
 type snapped struct {
 	value any
 	print string
+	// codePrint is the print with every interface value and function
+	// value inside left opaque, which is what a parameter under runs is
+	// compared by: what its code writes is that code's own.
+	codePrint string
 }
 
 // snapshot returns the arguments of a call as they are before it: each a
@@ -946,7 +950,7 @@ func snapshot(args ...any) []any {
 			}
 			value = copied.Interface()
 		}
-		before[i] = snapped{value: value, print: fingerprint(arg)}
+		before[i] = snapped{value: value, print: fingerprint(arg), codePrint: printOf(arg, true, true)}
 	}
 	return before
 }
@@ -956,18 +960,26 @@ func snapshot(args ...any) []any {
 // interface value refers to, and the fields of a struct, exported or not,
 // with the address of each array and object, so that a write anywhere in
 // it, or a pointer that now refers elsewhere, changes the print.
-func fingerprint(arg any) string { return printOf(arg, true) }
+func fingerprint(arg any) string { return printOf(arg, true, false) }
 
 // printOf is fingerprint, with the addresses of arrays and objects left out
-// unless addresses is set, so that two copies of a value print the same.
-func printOf(arg any, addresses bool) string {
+// unless addresses is set, so that two copies of a value print the same,
+// and with each interface value and function value inside printed as its
+// dynamic type and address alone when opaqueCode is set.
+func printOf(arg any, addresses, opaqueCode bool) string {
 	var b strings.Builder
 	address := func(format string, p uintptr) {
 		if addresses {
 			fmt.Fprintf(&b, format, p)
 		}
 	}
-	seen := map[uintptr]bool{}
+	// An object is known by its address and its type: a struct and its
+	// first field share an address.
+	type object struct {
+		at  uintptr
+		typ reflect.Type
+	}
+	seen := map[object]bool{}
 	var walk func(v reflect.Value, depth int)
 	walk = func(v reflect.Value, depth int) {
 		if depth > 20 {
@@ -994,8 +1006,8 @@ func printOf(arg any, addresses bool) string {
 				return
 			}
 			address("*%x ", v.Pointer())
-			if !seen[v.Pointer()] {
-				seen[v.Pointer()] = true
+			if at := (object{v.Pointer(), v.Type()}); !seen[at] {
+				seen[at] = true
 				walk(v.Elem(), depth+1)
 			}
 		case reflect.UnsafePointer, reflect.Func, reflect.Chan:
@@ -1036,6 +1048,13 @@ func printOf(arg any, addresses bool) string {
 				walk(v.Field(k), depth+1)
 			}
 		case reflect.Interface:
+			if opaqueCode && depth > 0 {
+				fmt.Fprintf(&b, "%v ", v.Elem().Kind())
+				if v.Elem().Kind() == reflect.Pointer {
+					address("%x ", v.Elem().Pointer())
+				}
+				return
+			}
 			walk(v.Elem(), depth+1)
 		}
 	}
@@ -1306,7 +1325,11 @@ func (g *grounder) groundTerm(value any) *logic.Term {
 		return logic.Const("unreadable", logic.IntSeq)
 	case io.Writer, *log.Logger:
 		// A writer or a logger is one reference, which no formula of an
-		// entry reads but to compare it with nil.
+		// entry reads but to compare it with nil, which a nil pointer in
+		// the interface is.
+		if v := reflect.ValueOf(value); v.Kind() == reflect.Pointer && v.IsNil() {
+			return logic.RefLit(0)
+		}
 		return logic.RefLit(1)
 	case error:
 		if value != nil {
@@ -1594,16 +1617,28 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 			// What code that a parameter under runs holds writes is that
 			// code's own write, as is what a function the call was
 			// handed writes.
-			listed := slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.name == param.Name() }) || fn.runs[param]
+			listed := slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.name == param.Name() })
+			_, isInterface := param.Type().Underlying().(*types.Interface)
+			snap, snapshotted := call.before[i].(snapped)
 			switch {
 			case listed:
+			case fn.runs[param] && isInterface:
+				// An interface value under runs is code, and what it
+				// reaches is its code's own memory.
+			case fn.runs[param] && snapshotted:
+				if snap.codePrint != printOf(call.after[i], true, true) {
+					t.Fatalf("%s changed %s, or memory it reaches outside the code it holds, which its modifies does not list", key, param.Name())
+				}
+			case fn.runs[param]:
+				t.Fatalf("the harness of %s does not snapshot %s, which is under runs and reaches memory outside the code it holds", key, param.Name())
 			case call.unwritten != nil:
-				if printOf(call.unwritten[i], false) != printOf(call.after[i], false) {
+				if printOf(call.unwritten[i], false, false) != printOf(call.after[i], false, false) {
 					t.Fatalf("%s changed %s, which its modifies does not list: %v became %v", key, param.Name(), call.unwritten[i], call.after[i])
 				}
 			case prints[i] != "":
 				if prints[i] != fingerprint(call.after[i]) {
-					t.Fatalf("%s changed %s, or memory it reaches, which its modifies does not list: %v became %v", key, param.Name(), before[i], call.after[i])
+					t.Fatalf("%s changed %s, or memory it reaches, which its modifies does not list: before it, the print of %s was\n%s\nand after it\n%s",
+						key, param.Name(), param.Name(), prints[i], fingerprint(call.after[i]))
 				}
 			case len(reach(before[i])) > 0:
 				t.Fatalf("the harness of %s does not snapshot %s, a %T that reaches memory, so a change to it would not be seen", key, param.Name(), before[i])
