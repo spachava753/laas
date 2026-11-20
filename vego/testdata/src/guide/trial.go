@@ -131,6 +131,36 @@ func LoadWrapped(l Loader) (n int, err error) {
 	return n, nil
 }
 
+// VouchedLoader loads a number, and vouches for the errors it returns.
+type VouchedLoader interface {
+	// @Ensures True
+	// @Vouches err
+	Load() (n int, err error)
+}
+
+// @Requires l != nil
+// @Ensures True
+func LoadVouched(l VouchedLoader) (n int, err error) {
+	n, err = l.Load()
+	if err != nil {
+		return 0, fmt.Errorf("load: %w", err)
+	}
+	return n, nil
+}
+
+// stale returns an error it was given.
+type stale struct{ err error }
+
+// @Ensures err = s.err
+func (s stale) Load() (n int, err error) {
+	return 0, s.err
+}
+
+// @Ensures l != nil
+func NewStale(e error) (l VouchedLoader) {
+	return stale{err: e} // want `Load may return an error whose origin is not known in err, and the contract of VouchedLoader.Load vouches for the errors there; return only errors made by errors.New or fmt.Errorf, or vouched for, in stale.Load used as a method of VouchedLoader at trial.go:\d+:\d+`
+}
+
 // @Ensures True
 func LocalType(n int) (r int) {
 	type pair struct{ a, b int } // want `cannot verify LocalType: local type declarations are not supported`

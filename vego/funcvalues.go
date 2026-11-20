@@ -40,9 +40,9 @@ import (
 func (pv *pkgVerifier) addTypeContract(name *types.TypeName, c *clause) {
 	named, isNamed := name.Type().(*types.Named)
 	switch {
-	case c.kind != "Requires" && c.kind != "Ensures" && c.kind != "Modifies":
+	case c.kind != "Requires" && c.kind != "Ensures" && c.kind != "Modifies" && c.kind != "Vouches":
 		pv.unread = true
-		pv.report(c.pos, "%s annotations do not belong on a function type; a function type can only have Requires, Ensures, and Modifies annotations", c.kind)
+		pv.report(c.pos, "%s annotations do not belong on a function type; a function type can only have Requires, Ensures, Modifies, and Vouches annotations", c.kind)
 		return
 	case !isNamed || name.IsAlias():
 		pv.unread = true
@@ -66,6 +66,10 @@ func (pv *pkgVerifier) addTypeContract(name *types.TypeName, c *clause) {
 // addValueClause records a Requires, Ensures, or Modifies annotation of the
 // contract of a function type or of a method of an interface type.
 func (pv *pkgVerifier) addValueClause(fn *funcInfo, c *clause) {
+	if c.kind == "Vouches" {
+		pv.addVouches(fn, c)
+		return
+	}
 	if c.kind == "Modifies" {
 		targets, err := logic.ParseTargets(c.text)
 		if err != nil {
@@ -87,6 +91,34 @@ func (pv *pkgVerifier) addValueClause(fn *funcInfo, c *clause) {
 		fn.requires = append(fn.requires, c)
 	} else {
 		fn.ensures = append(fn.ensures, c)
+	}
+}
+
+// addVouches reads a Vouches annotation of a contract of a type: the error
+// results whose errors it vouches for, as vouches does in the trust file.
+// The claim is checked of every value that verified code makes of the type,
+// and assumed of every other, as the rest of the contract is.
+func (pv *pkgVerifier) addVouches(fn *funcInfo, c *clause) {
+	fn.vouchClauses = append(fn.vouchClauses, c)
+	fail := func(format string, args ...any) {
+		pv.report(c.pos, "in Vouches annotation: "+format, args...)
+		fn.broken = true
+	}
+	for item := range strings.SplitSeq(c.text, ",") {
+		name := strings.TrimSpace(item)
+		index, isResult := fn.resultNames[name]
+		switch {
+		case !token.IsIdentifier(name):
+			fail("%q is not a name; a Vouches annotation lists error results, as in // @Vouches err", name)
+		case !isResult:
+			fail("%s is not a result of %s", name, fn.obj.Name())
+		case !isError(fn.results[index].Type()):
+			fail("%s has type %s; a Vouches annotation lists results of type error, whose errors it vouches for", name, fn.results[index].Type())
+		case fn.vouches[index]:
+			fail("%s is listed twice", name)
+		default:
+			fn.vouches[index] = true
+		}
 	}
 }
 
@@ -136,6 +168,11 @@ func (pv *pkgVerifier) checkValueContract(fn *funcInfo) {
 			return
 		}
 		pv.report(at, format, args...)
+	}
+	// A Vouches annotation adds to a contract; alone, it would be the
+	// whole contract without anyone having written one.
+	if !entry && len(fn.vouchClauses) > 0 && len(fn.requires) == 0 && len(fn.ensures) == 0 && len(fn.modifies) == 0 {
+		fault(fn.vouchClauses[0].pos, "%s has a Vouches annotation and no other clause; a Vouches annotation adds to a contract, so write one, as in // @Ensures True", title)
 	}
 	// An entry names unnamed results as a trusted contract does.
 	for _, result := range fn.results {
@@ -681,6 +718,19 @@ func (pv *pkgVerifier) exportTypeContracts() {
 		fact.Verified = !fn.broken && !pv.unread && !pv.predicatesBroken
 		pv.pass.ExportObjectFact(method, fact)
 	}
+}
+
+// vouchingContract names the contract of a type that vouches for errors, in
+// a message: the trusted contract by its key, or the contract in source by
+// the type, or the interface and the method.
+func vouchingContract(T *funcInfo) string {
+	switch {
+	case T.trust != nil:
+		return "the trusted contract of " + T.trust.key
+	case T.methodOf != nil:
+		return "the contract of " + methodTitle(T.methodOf)
+	}
+	return "the contract of " + T.obj.Name()
 }
 
 // valueContract returns the contract that a call through a value of a type
@@ -1433,8 +1483,8 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 	// makes must return only errors of known origin there.
 	for i := range T.results {
 		if T.vouches[i] && !v.returnsKnownErrors(callee) && !(fn.trust != nil && fn.vouches[i]) {
-			v.report(e.Pos(), "%s may return an error whose origin is not known in %s, and the trusted contract of %s vouches for the errors there; "+
-				"return only errors made by errors.New or fmt.Errorf, or vouched for, %s", callee.Name(), spelledResult(T, i), T.trust.key, site.text)
+			v.report(e.Pos(), "%s may return an error whose origin is not known in %s, and %s vouches for the errors there; "+
+				"return only errors made by errors.New or fmt.Errorf, or vouched for, %s", callee.Name(), spelledResult(T, i), vouchingContract(T), site.text)
 		}
 	}
 	sv, entry, carry := v.subVerifier(T, st, guard, site)
@@ -1662,8 +1712,8 @@ func (v *fnVerifier) madeLiteral(lit *ast.FuncLit, T *funcInfo, st *state, guard
 	site := v.site(lit.Pos(), "in the function literal used as a value of type %s at %s", T.obj.Name(), v.placeOf(lit.Pos()))
 	for i := range T.results {
 		if T.vouches[i] && !v.returnsKnown(v.bodyOrigins(), lit.Body, fn.results) {
-			v.report(lit.Pos(), "the function literal may return an error whose origin is not known in %s, and the trusted contract of %s vouches for the errors there; "+
-				"return only errors made by errors.New or fmt.Errorf, or vouched for, %s", spelledResult(T, i), T.trust.key, site.text)
+			v.report(lit.Pos(), "the function literal may return an error whose origin is not known in %s, and %s vouches for the errors there; "+
+				"return only errors made by errors.New or fmt.Errorf, or vouched for, %s", spelledResult(T, i), vouchingContract(T), site.text)
 			break
 		}
 	}

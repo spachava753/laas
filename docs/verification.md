@@ -124,6 +124,7 @@ An annotation is a comment line of the form `// @Keyword ...`. Each keyword is a
 | `Invariant` | the doc comment of a struct type |
 | `Predicate` | the top level of a file |
 | `State`, `Receiver` | the doc comment of an interface type and of its methods (see [States of interface values](#states-of-interface-values)) |
+| `Vouches` | the doc comment of a method in an interface type or of a function type, beside its contract (see [Interface values from code that is not verified](#interface-values-from-code-that-is-not-verified)) |
 
 Write one space between `//` and `@`, and no space between `@` and the keyword. `gofmt` leaves this form unchanged. Any other spacing, such as `//@Requires` or `// @ Requires`, is reported as an error.
 
@@ -148,8 +149,8 @@ Any other word after `// @` is also an error. `vego` cannot tell a wrong keyword
 
 ```text
 vego: unknown annotation "Post"; an annotation starts with one of Requires, Ensures, Modifies,
-Invariant, Variant, Assert, Snapshot, Predicate, State, Receiver. If another tool reads this
-comment, declare the word with -vego.other-tags
+Invariant, Variant, Assert, Snapshot, Predicate, State, Receiver, Vouches. If another tool reads
+this comment, declare the word with -vego.other-tags
 ```
 
 If your code has comments such as `// @Summary` for another tool, list those words once:
@@ -1646,7 +1647,7 @@ An entry of your own for `(io.Closer).Close` replaces the shipped one, and the s
 
 An interface value that verified code receives from code it does not verify is taken to meet the contracts of its methods. See [What a proof assumes](#what-a-proof-assumes). As for function values, an argument that can carry code nobody has seen cannot be passed to a method of an interface value. An interface value whose methods all have contracts can be passed.
 
-An error that a method returns through an interface value has an unknown origin. A contract written in the declaration of the interface cannot vouch for it. So the error can be returned, and compared with `nil` or with an error variable (see [Comparing errors](#comparing-errors)), but not formatted, wrapped, or searched with `errors.Is` (see [Asking errors.Is](#asking-errorsis)), and it cannot be passed to a trusted function that does not list it under `runs` (see [Arguments that carry code](#arguments-that-carry-code)):
+An error that a method returns through an interface value has an unknown origin, unless the contract of the method vouches for it. Without that, the error can be returned, and compared with `nil` or with an error variable (see [Comparing errors](#comparing-errors)), but not formatted, wrapped, or searched with `errors.Is` (see [Asking errors.Is](#asking-errorsis)), and it cannot be passed to a trusted function that does not list it under `runs` (see [Arguments that carry code](#arguments-that-carry-code)):
 
 ```go
 // Loader loads a number.
@@ -1667,10 +1668,41 @@ func LoadWrapped(l Loader) (n int, err error) {
 ```
 
 ```text
-vego: cannot verify LoadWrapped: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a trusted contract vouches for, can be formatted
+vego: cannot verify LoadWrapped: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, can be formatted
 ```
 
-Return the error unchanged. For an interface of another module, an entry in the trust file can vouch for the errors of a method, as described in [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write).
+Return the error unchanged, or vouch for the errors of the method in its contract with `Vouches`:
+
+```go
+// VouchedLoader loads a number, and vouches for the errors it returns.
+type VouchedLoader interface {
+	// @Ensures True
+	// @Vouches err
+	Load() (n int, err error)
+}
+
+// @Requires l != nil
+// @Ensures True
+func LoadVouched(l VouchedLoader) (n int, err error) {
+	n, err = l.Load()
+	if err != nil {
+		return 0, fmt.Errorf("load: %w", err)
+	}
+	return n, nil
+}
+```
+
+`Vouches` lists error results of the method. It makes the claim that `vouches` makes in the trust file, described in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), about every error that a value of the interface returns there. `vego` checks the claim of every value that verified code makes of the interface: its method must return only errors of known origin there, made by `errors.New` or `fmt.Errorf` or vouched for. A value that returns an error it was given is reported:
+
+```text
+vego: Load may return an error whose origin is not known in err, and the contract of
+VouchedLoader.Load vouches for the errors there; return only errors made by errors.New or
+fmt.Errorf, or vouched for, in stale.Load used as a method of VouchedLoader at trial.go:161:9
+```
+
+Of every value that comes from code that is not verified, the claim is assumed, as the rest of the contract is (see [What a proof assumes](#what-a-proof-assumes)). Read the code that makes such values before you write the annotation. The contract of a function type can vouch for its errors in the same way.
+
+A `Vouches` annotation adds to a contract, so a method with no other clause is reported. It belongs only in these two places. In the doc comment of a function it is reported, because the errors of a verified function are judged from its body, and those of a trusted function are vouched for in the trust file. For an interface of another module, an entry in the trust file can vouch for the errors of a method, as described in [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write).
 
 ## Predicates
 
@@ -3034,7 +3066,7 @@ func IsEmpty(err error) (result bool) {
 ```text
 vego: cannot verify IsEmpty: errors.Is would run the Is and Unwrap methods of err, an
 error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or
-in a verified function, or one that a trusted contract vouches for, can be its first
+in a verified function, or one that a contract vouches for, can be its first
 argument
 ```
 
@@ -3140,7 +3172,7 @@ func Labelled(cause error) (err error) {
 ```text
 vego: cannot verify Labelled: formatting cause would run the methods of an error whose
 origin is not known; only an error made by errors.New or fmt.Errorf, here or in a
-verified function, or one that a trusted contract vouches for, can be formatted
+verified function, or one that a contract vouches for, can be formatted
 ```
 
 Return the error unchanged, or wrap an error of your own:
@@ -3887,7 +3919,7 @@ result or a parameter for later calls
 
 There are three ways to deal with this.
 
-The first is to pass an error that verified code created with `errors.New` or `fmt.Errorf`, or one that a trusted contract vouches for. An error that verified code created has only the standard library's methods and wraps nothing from outside. An error variable also qualifies if its initialiser used only plain values and other errors of this kind, in its own package or another. `var ErrRead = fmt.Errorf("read: %w", io.EOF)` qualifies. `var ErrLate = fmt.Errorf("late: %w", context.DeadlineExceeded)` does not, because `context.DeadlineExceeded` is not made by `errors.New` or `fmt.Errorf`.
+The first is to pass an error that verified code created with `errors.New` or `fmt.Errorf`, or one that a contract vouches for. An error that verified code created has only the standard library's methods and wraps nothing from outside. An error variable also qualifies if its initialiser used only plain values and other errors of this kind, in its own package or another. `var ErrRead = fmt.Errorf("read: %w", io.EOF)` qualifies. `var ErrLate = fmt.Errorf("late: %w", context.DeadlineExceeded)` does not, because `context.DeadlineExceeded` is not made by `errors.New` or `fmt.Errorf`.
 
 The second is to make the call from unverified code. This is the right choice for logging an error that came from elsewhere. The unverified caller logs the error, and the verified function only returns it.
 
@@ -4333,7 +4365,7 @@ func ReadLines(r io.Reader, limit int) (n int, err error) {
 ```text
 vego: cannot verify ReadLines: formatting err would run the methods of an error whose origin is
 not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one
-that a trusted contract vouches for, can be formatted
+that a contract vouches for, can be formatted
 ```
 
 To wrap it, your trust file needs an entry for `(io.Reader).Read` that vouches for the errors of the readers your callers pass, as described in [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write). It also needs an entry for `Err` that vouches for what it returns:
@@ -4596,7 +4628,7 @@ func Save(w io.Writer, b []byte) (err error) {
 ```text
 vego: cannot verify Save: formatting err would run the methods of an error whose origin is not
 known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that
-a trusted contract vouches for, can be formatted
+a contract vouches for, can be formatted
 ```
 
 To wrap them, replace the shipped entry with one of your own that vouches:
@@ -4998,10 +5030,10 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - Code of another package runs code of the verified package only as `vego` follows it, which [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods) describes: during a call that the verified package makes, it runs only what that call hands it, through the arguments and the receiver. Code that it kept from an earlier call, a value it stored, or code that it runs on another goroutine or at another time, does not call back into a verified function while that function runs, so that the call never ends. A cycle that stays in the package, or that goes through what a call hands to another package, is found and reported.
 - A claim under `asserts` is true: the function calls nothing that the parameter holds, or that a call of what the parameter holds returns, but what the claim allows, and uses no reflection on it (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)).
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one that wraps it, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method.
-- An interface value that reaches verified code from code that is not verified meets the contracts of its methods. That includes a value passed as an argument, a value in memory that an argument reaches, a value that a call through another value returns, and a value that a trusted function returns or writes, which its entry vouches for. Called with arguments that meet the `Requires` of a method, the method returns without panicking, leaves its `Ensures` true, and writes nothing that verified code can see outside what its `Modifies` lists. This holds also when the value holds a pointer to a struct that verified code holds.
+- An interface value that reaches verified code from code that is not verified meets the contracts of its methods. That includes a value passed as an argument, a value in memory that an argument reaches, a value that a call through another value returns, and a value that a trusted function returns or writes, which its entry vouches for. Called with arguments that meet the `Requires` of a method, the method returns without panicking, leaves its `Ensures` true, and writes nothing that verified code can see outside what its `Modifies` lists. For a result that the contract of the method lists under `Vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). This holds also when the value holds a pointer to a struct that verified code holds.
 - The same holds of the methods and function types that entries of the trust file give contracts, which is what such an entry claims (see [What an entry for a type claims](#what-an-entry-for-a-type-claims)). In particular, a caller that is not verified does not pass a verified function such a value together with a pointer to memory that the value writes, as a `*bytes.Buffer` passed both as an `io.Writer` and as a `*bytes.Buffer` would be. Every call through such a value returns: a `Read` from a pipe, a terminal, or a connection returns only once data or an error arrives.
 - Packages that are built together give each type at most one entry, and declare the same states for an interface. `vego` reports two entries for one type, or an entry against none, and two different declarations of the states of an interface, or a declaration against none, in every package that `laas` analyses and that is built with both. A program whose main package is never given to `laas` is not checked.
-- A function value that reaches verified code from code that is not verified meets the contract of its type. That includes a value passed as an argument, a value in memory that an argument reaches, and a value made with `reflect.MakeFunc` or by generic code. Called with arguments that meet the `Requires` of its type, such a value returns without panicking, writes only what the `Modifies` of its type lists, and leaves its `Ensures` true.
+- A function value that reaches verified code from code that is not verified meets the contract of its type. That includes a value passed as an argument, a value in memory that an argument reaches, and a value made with `reflect.MakeFunc` or by generic code. Called with arguments that meet the `Requires` of its type, such a value returns without panicking, writes only what the `Modifies` of its type lists, and leaves its `Ensures` true. For a result that the contract of its type lists under `Vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns).
 - Unverified code respects Go's type system. It does not use `unsafe`, `reflect`, or cgo to give one piece of memory two types or to change a string.
 - A declaration of a state, shipped, in a trust file, or in source, is true of every value of the interface that verified code gets from code that is not verified. Every method whose contract does not list the receiver in `Modifies` leaves every state of the value unchanged. For the shipped state `closed` of `io.Closer`, this means that `Read` and `Write` on an `io.ReadCloser`, an `io.WriteCloser`, or an `io.ReadWriteCloser` never close the value, which the documentation does not say. Code that is not verified does not change a state of a value that verified code holds while a verified function runs, other than through calls that the function makes.
 - No other goroutine writes memory that a verified function reads or writes while it runs, also while the function waits in `Lock`, `RLock`, or `Do`. The one exception is that other goroutines can lock and unlock a mutex that the goroutine running the function does not hold, and call `Do` on a `sync.Once` that this goroutine is not inside `Do` on, which writes that `Once`. What the function that another goroutine hands to `Do` writes is not part of the exception. Closing an interface value that the function uses counts as such a write. A proof covers one goroutine. A function that takes a lock is not proved to be safe to call from several goroutines. See [What a proof of a function that locks shows](#what-a-proof-of-a-function-that-locks-shows).
@@ -5043,6 +5075,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `Variant e` | directly above a `for` loop | `e` is never negative and decreases on each iteration. |
 | `Assert P` | in a function body | `P` must be true at this point and can be used afterwards. |
 | `Snapshot n = e` | in a function body | `n` is the value `e` has at this point, in the annotations that follow in the block. |
+| `Vouches err` | doc comment of a named function type, or of a method in a named interface type, beside its contract | The errors that values of the type return in `err` have a known origin; `vego` checks it of every value that verified code makes. |
 | `Invariant P` | doc comment of a struct type | `P` is true for every parameter, receiver, and result of the type at function boundaries. |
 | `Predicate name(x, y) ::= P` | top level | Names a formula over its parameters. |
 | `State name` | doc comment of a named interface type that declares a method | Declares a state of the values of the interface. |

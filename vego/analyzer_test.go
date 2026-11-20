@@ -143,7 +143,7 @@ func TestAnalyzer(t *testing.T) {
 		runCorpus(t, analyzer,
 			"paper", "algorithms", "defects", "variadic", "formatting", "rejected", "leetcode", "semantics", "effects", "ordering", "integers", "values", "trust",
 			"lib", "client", "memory", "shapes", "badshapes", "invariants", "mapping", "badpred", "usesbadpred", "early", "settled", "gen", "earlytype", "earlyrange", "earlybox", "earlyloop", "earlycarrier", "earlypanic", "guide", "wrapped", "unread", "usesunread", "twovariants", "usestwovariants", "lonecr", "errorsid", "errorsvars", "errorsvarsclient", "vouched", "vouchedclient", "vouchedcapture", "earlyalias", "earlyaliasok", "sentinellib", "sentinelclient", "usesearly", "sentinelfar", "sentinelfarther", "closures", "funcvalues", "funcvalueslib", "funcvaluesclient", "funcvaluesunread", "funcvaluesinit", "funcvaluesinitdefer", "funcvaluesinitok", "funcvaluesinitmethod", "funcvaluesoldloop", "funcvaluesinitlit", "callbacks", "callbacksinit", "interfaces", "interfaceslib", "interfacesunread", "interfacesinitok", "interfacesinithand", "interfacesinitcall", "foreign", "stdtypes", "locks", "lockspred", "lockslib", "locksclient", "layers", "ifacestate", "ensuresentry", "manywrites", "slowresp", "slowhttp", "deepfacts",
-			"globals", "globalslib", "globalsclient", "globalsembed", "globalsearly", "unsafelib", "unsafeuse", "keeps", "keepslib", "buffered", "iowrap", "globalsleak", "globalsleakclient", "trialfaults", "smalls", "cycles/...")
+			"globals", "globalslib", "globalsclient", "globalsembed", "globalsearly", "unsafelib", "unsafeuse", "keeps", "keepslib", "buffered", "iowrap", "globalsleak", "globalsleakclient", "trialfaults", "smalls", "vouchsrc", "vouchsrcclient", "vouchsrcbad", "cycles/...")
 		recorded, quoted := costs()
 		checkCosts(t, recorded)
 		checkGuideCost(t, quoted)
@@ -281,6 +281,9 @@ func TestOtherTagsFlag(t *testing.T) {
 		{name: "a snapshot but for two letters", list: "Snapsot", wantErr: "too close"},
 		{name: "a snapshot in another case", list: "snapshot", wantErr: "too close"},
 		{name: "the tags of swag beside the snapshot", list: "host,Post,title", want: []string{"Post", "host", "title"}},
+		{name: "a vouch", list: "Vouches", wantErr: "too close"},
+		{name: "a vouch in another case", list: "vouches", wantErr: "too close"},
+		{name: "a vouch with its names glued to it", list: "Vouches(err)", wantErr: "too close"},
 		{name: "a retired keyword behind a sign", list: "-Measure", wantErr: "does not start with a letter"},
 		{name: "a keyword after other letters and a sign", list: "x-Ensures", wantErr: "too close"},
 		{name: "two words in one", list: "Summary Param", wantErr: "not a single word"},

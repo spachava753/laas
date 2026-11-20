@@ -34,7 +34,7 @@ type ByValue func(x int)
 
 // Kept has an annotation a function type cannot have.
 //
-// @Invariant x > 0 // want `vego: Invariant annotations do not belong on a function type; a function type can only have Requires, Ensures, and Modifies annotations`
+// @Invariant x > 0 // want `vego: Invariant annotations do not belong on a function type; a function type can only have Requires, Ensures, Modifies, and Vouches annotations`
 type Kept func(x int)
 
 // Alias is an alias.

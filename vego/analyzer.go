@@ -335,8 +335,11 @@ type funcInfo struct {
 	// see keeps.go.
 	keeps map[*types.Var][]string
 	// vouches holds the indices of the error results of a trusted function
-	// whose errors its contract vouches for; see knownError.
-	vouches map[int]bool
+	// whose errors its contract vouches for, or, for a contract of a type,
+	// those a Vouches annotation lists; see knownError. vouchClauses holds
+	// those annotations.
+	vouches      map[int]bool
+	vouchClauses []*clause
 	// formatted is the parameter of a trusted function whose values its
 	// contract says it formats as package fmt does, and format the string
 	// it uses as the format, if any; see formatting.go.
@@ -649,7 +652,7 @@ var (
 	leadingAt   = regexp.MustCompile(`(?m)^[^\pL\pN@\n]*@[^\pL\pN\s]*(\S*)`)
 	clauseKinds = map[string]bool{
 		"Requires": true, "Ensures": true, "Invariant": true, "Variant": true,
-		"Predicate": true, "Assert": true, "Modifies": true, "State": true, "Receiver": true, "Snapshot": true,
+		"Predicate": true, "Assert": true, "Modifies": true, "State": true, "Receiver": true, "Snapshot": true, "Vouches": true,
 	}
 	// retiredKinds are keywords that earlier versions read, with what to
 	// write now.
@@ -1089,7 +1092,7 @@ func (pv *pkgVerifier) collect() {
 				}
 				if c.kind == "" {
 					pv.report(c.pos, "unknown annotation %q; an annotation starts with one of "+
-						"Requires, Ensures, Modifies, Invariant, Variant, Assert, Snapshot, Predicate, State, Receiver. "+
+						"Requires, Ensures, Modifies, Invariant, Variant, Assert, Snapshot, Predicate, State, Receiver, Vouches. "+
 						"If another tool reads this comment, declare the word with -vego.other-tags", c.text)
 					continue
 				}
@@ -1477,6 +1480,9 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 		case "Invariant", "Variant", "Assert", "Snapshot":
 			fn.body = append(fn.body, c)
 		case "Predicate":
+		case "Vouches":
+			pv.report(c.pos, "%s", misplacedVouches)
+			fn.broken = true
 		default:
 			pv.report(c.pos, "%s annotation stands inside %s; put it in the doc comment of the function", c.kind, fn.obj.Name())
 			fn.broken = true
@@ -1503,6 +1509,9 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 	}
 	switch c.kind {
 	case "Modifies":
+	case "Vouches":
+		pv.report(c.pos, "%s", misplacedVouches)
+		fn.broken = true
 	case "Requires":
 		fn.requires = append(fn.requires, c)
 	case "Ensures":
@@ -1521,6 +1530,12 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 	}
 	return fn
 }
+
+// misplacedVouches is the report for a Vouches annotation anywhere but in
+// the contract of a type.
+const misplacedVouches = "a Vouches annotation belongs in the doc comment of a method of an interface type or of a function type, " +
+	"where it vouches for the errors that values of the type return; the errors of a verified function are judged from its body, " +
+	"and those of a trusted function are vouched for in the trust file"
 
 // checkPlacement rejects body annotations that are not written between
 // statements. Symbolic execution only meets annotations at statement

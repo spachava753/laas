@@ -213,7 +213,7 @@ func (v *fnVerifier) errorsIs(call *ast.CallExpr, st *state, guard []*logic.Term
 	// known only of a made error, from noteTree.
 	if !v.knownError(v.bodyOrigins(), err, -1, map[*types.Var]bool{}) {
 		v.unsupported(err.Pos(), fmt.Sprintf("errors.Is would run the Is and Unwrap methods of %s, an error whose origin is not known; "+
-			"only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a trusted contract vouches for, "+
+			"only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, "+
 			"can be its first argument%s",
 			types.ExprString(err), v.originWhy(err)))
 	}

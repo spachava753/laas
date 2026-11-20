@@ -274,9 +274,9 @@ func (pv *pkgVerifier) addMethodContract(method *types.Func, defined bool, c *cl
 		pv.report(c.pos, "a contract can only be declared on a method of a defined interface type at package level without type parameters, "+
 			"not on an interface literal or an alias: two interface literals with the same methods are the same type, and a value would carry either contract")
 		return
-	case c.kind != "Requires" && c.kind != "Ensures" && c.kind != "Modifies" && c.kind != "Receiver":
+	case c.kind != "Requires" && c.kind != "Ensures" && c.kind != "Modifies" && c.kind != "Receiver" && c.kind != "Vouches":
 		pv.unread = true
-		pv.report(c.pos, "%s annotations do not belong on a method of an interface; it can only have Receiver, Requires, Ensures, and Modifies annotations", c.kind)
+		pv.report(c.pos, "%s annotations do not belong on a method of an interface; it can only have Receiver, Requires, Ensures, Modifies, and Vouches annotations", c.kind)
 		return
 	}
 	fn := pv.ifaceMethods[method]

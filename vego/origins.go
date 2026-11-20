@@ -271,11 +271,11 @@ func (pv *pkgVerifier) knownVariable(o *origins, variable *types.Var, visiting m
 
 // vouchedThroughValue reports whether a call through an interface value or
 // a function value returns errors of known origin in the result with the
-// given index: whether the contract it is called under is an entry of a
-// trust file that vouches for them. Every value that code which is not
-// verified hands over is claimed to meet that entry, and every value that
-// verified code makes is checked against it where it is made. A contract
-// written in source vouches for nothing.
+// given index: whether the contract it is called under vouches for them,
+// an entry of a trust file or a contract in source with a Vouches
+// annotation. Every value that code which is not verified hands over is
+// claimed to meet that contract, and every value that verified code makes
+// is checked against it where it is made.
 func (pv *pkgVerifier) vouchedThroughValue(call *ast.CallExpr, index int) bool {
 	var fn *funcInfo
 	switch method, value := throughValue(pv.info, call); {
@@ -284,7 +284,7 @@ func (pv *pkgVerifier) vouchedThroughValue(call *ast.CallExpr, index int) bool {
 	case value:
 		fn = pv.valueContract(pv.info.TypeOf(call.Fun))
 	}
-	return fn != nil && fn.trust != nil && fn.vouches[index]
+	return fn != nil && fn.vouches[index]
 }
 
 // returnsKnownErrors reports whether every error a function returns has a

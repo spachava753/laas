@@ -41,6 +41,10 @@ type contractFact struct {
 	// Receiver names the receiver of the contract of a method of an
 	// interface, if it names one.
 	Receiver string
+	// Vouches names the error results whose errors the contract of a
+	// type vouches for; see addVouches. Every package that calls through
+	// a value of the type, or makes one, reads it from here.
+	Vouches []string
 }
 
 func (*contractFact) AFact() {}
@@ -148,6 +152,11 @@ func (pv *pkgVerifier) contractFactOf(fn *funcInfo, at token.Pos) *contractFact 
 	if fn.receiver != nil {
 		fact.Receiver = fn.receiver.Name()
 	}
+	for i := range fn.results {
+		if fn.vouches[i] {
+			fact.Vouches = append(fact.Vouches, spelledResult(fn, i))
+		}
+	}
 	return fact
 }
 
@@ -194,6 +203,14 @@ func (pv *pkgVerifier) contractFromFact(obj *types.Func, pkg *types.Package, fac
 		return list
 	}
 	fn.requires, fn.ensures = clauses("Requires", fact.Requires), clauses("Ensures", fact.Ensures)
+	for _, name := range fact.Vouches {
+		index, isResult := fn.resultNames[name]
+		if !isResult {
+			fn.defect("its Vouches names %s, which is not a result", name)
+			continue
+		}
+		fn.vouches[index] = true
+	}
 	for _, text := range fact.Modifies {
 		targets, err := logic.ParseTargets(text)
 		if err != nil {
