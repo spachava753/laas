@@ -1049,11 +1049,18 @@ func printOf(arg any, addresses, opaqueCode bool) string {
 			}
 		case reflect.Interface:
 			if opaqueCode && depth > 0 {
-				fmt.Fprintf(&b, "%v ", v.Elem().Kind())
+				// The code an interface value holds is its dynamic type
+				// and, for a pointer, the address; a value of another
+				// kind is printed with the code inside it opaque.
+				if v.IsNil() {
+					b.WriteString("nil ")
+					return
+				}
+				fmt.Fprintf(&b, "%v ", v.Elem().Type())
 				if v.Elem().Kind() == reflect.Pointer {
 					address("%x ", v.Elem().Pointer())
+					return
 				}
-				return
 			}
 			walk(v.Elem(), depth+1)
 		}

@@ -32,7 +32,9 @@ func TestHeldAs(t *testing.T) {
 		}
 		return instance
 	}
-	field := func(name string, typ types.Type) *types.Var { return types.NewField(token.NoPos, nil, name, typ, false) }
+	field := func(name string, typ types.Type) *types.Var {
+		return types.NewField(token.NoPos, nil, name, typ, false)
+	}
 	plain := types.NewStruct([]*types.Var{field("n", types.Typ[types.Int]), field("s", types.Typ[types.String])}, nil)
 	callback := types.NewStruct([]*types.Var{field("f", types.NewSignatureType(nil, nil, nil, nil, nil, false))}, nil)
 	raw := types.NewStruct([]*types.Var{field("p", types.Typ[types.UnsafePointer])}, nil)
