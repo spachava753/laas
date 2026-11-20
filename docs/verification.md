@@ -4637,12 +4637,30 @@ func WriteReport(name, title string) (err error) {
 ```text
 vego: cannot verify WriteReport: formatting err would run the methods of an error whose origin is not
 known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a
-contract vouches for, can be formatted; err is also assigned fmt.Fprintln(f, title) at files.go:61:11,
+contract vouches for, can be formatted; err is also assigned fmt.Fprintln(f, title) at files.go:62:11,
 later, a call whose errors nothing vouches for, and an error variable has a known origin only when every
 assignment to it gives it one; give that a variable of its own
 ```
 
 Give the error of `os.Create` a variable of its own, as in `f, cerr := os.Create(name)`. A `return x` assigns a named result too, so it counts as such an assignment.
+
+An `*os.File` is an `io.Writer`, so `fmt.Fprintf`, `fmt.Fprintln`, and a logger made by `log.New` can write to it:
+
+```go
+// @Requires |name| <= 4096 And |line| <= 1000
+// @Ensures True
+func LogToFile(name, line string) (err error) {
+	f, cerr := os.Create(name)
+	if cerr != nil {
+		return fmt.Errorf("create %s: %w", name, cerr)
+	}
+	l := log.New(f, "app: ", 0)
+	l.Println(line)
+	return f.Close()
+}
+```
+
+A `bufio.Writer` made over the file with `bufio.NewWriter(f)` cannot be written through yet, as described in [Writing through a buffer](#writing-through-a-buffer).
 
 Every call that opens, reads, or writes a file is assumed to return. See [What a proof assumes](#what-a-proof-assumes).
 

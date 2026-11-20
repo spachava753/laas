@@ -3,6 +3,7 @@ package guide
 import (
 	"fmt"
 	"io"
+	"log"
 	"os"
 )
 
@@ -56,7 +57,7 @@ func LoadSettings(name string) (data []byte, err error) {
 func WriteReport(name, title string) (err error) {
 	f, err := os.Create(name)
 	if err != nil {
-		return fmt.Errorf("create %s: %w", name, err) // want `cannot verify WriteReport: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, can be formatted; err is also assigned fmt.Fprintln\(f, title\) at files.go:61:11, later, a call whose errors nothing vouches for, and an error variable has a known origin only when every assignment to it gives it one; give that a variable of its own`
+		return fmt.Errorf("create %s: %w", name, err) // want `cannot verify WriteReport: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, can be formatted; err is also assigned fmt.Fprintln\(f, title\) at files.go:62:11, later, a call whose errors nothing vouches for, and an error variable has a known origin only when every assignment to it gives it one; give that a variable of its own`
 	}
 	_, err = fmt.Fprintln(f, title)
 	f.Close()
@@ -75,4 +76,18 @@ func WriteReportApart(name, title string) (err error) {
 	_, err = fmt.Fprintln(f, title)
 	f.Close()
 	return err
+}
+
+// LogToFile logs a line to a new file through a logger that writes to it.
+//
+// @Requires |name| <= 4096 And |line| <= 1000
+// @Ensures True
+func LogToFile(name, line string) (err error) {
+	f, cerr := os.Create(name)
+	if cerr != nil {
+		return fmt.Errorf("create %s: %w", name, cerr)
+	}
+	l := log.New(f, "app: ", 0)
+	l.Println(line)
+	return f.Close()
 }

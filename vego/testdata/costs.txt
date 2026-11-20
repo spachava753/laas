@@ -1151,6 +1151,7 @@ guide	(*guide.Stats).reset	6	4109	0
 guide	(*guide.Switch).Step	38	49272	0
 guide	(*guide.Table).Price	8	6948	0
 guide	(*log.Logger).Printf	1	6898	0
+guide	(*log.Logger).Println	1	5719	0
 guide	(*os.File).Close	3	8576	0
 guide	(*os.File).Read	7	2017624	2
 guide	(*os.File).Write	3	19167	0
@@ -1276,6 +1277,7 @@ guide	guide.LoadVouched	33	26532	0
 guide	guide.LoadWrapped	10	6184	0
 guide	guide.Loader.Load	5	6900	0
 guide	guide.LocalType	2	141	0
+guide	guide.LogToFile	90	280473	0
 guide	guide.Logf	1	4194	0
 guide	guide.LogfVerified	1	895	0
 guide	guide.Logged	1	83	0
