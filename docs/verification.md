@@ -1676,7 +1676,7 @@ func LoadWrapped(l Loader) (n int, err error) {
 ```
 
 ```text
-vego: cannot verify LoadWrapped: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, can be formatted
+vego: cannot verify LoadWrapped: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, can be formatted; err is assigned l.Load() at trial.go:127:11, a call whose errors nothing vouches for
 ```
 
 Return the error unchanged, or vouch for the errors of the method in its contract with `Vouches`:
@@ -2857,15 +2857,6 @@ A variable holds its value only once the package has initialised it. `vego` reli
 Some code that uses package-level variables still cannot be verified:
 
 - A counter, a cache, or any other variable that is assigned, also in an `init` function, as `os.Args` is in package `os`. Pass the value as a parameter.
-- `fmt.Fprintln(os.Stderr, ...)`. A function can read `os.Stderr`, but `(*os.File).Write` has no contract, so an `*os.File` cannot be used as an `io.Writer`:
-
-  ```text
-  vego: cannot verify Warn: it uses Write as a method of io.Writer, and Write has no contract; annotate
-  Write with // @ annotations so that it is verified, or add a trusted contract for (*os.File).Write to
-  vego-trusted.yaml
-  ```
-
-  Use `fmt.Printf`, or take the writer as a parameter.
 - A logger in a package-level variable, as in `var logger = log.New(os.Stderr, "app: ", 0)`. The logger keeps the writer that its initialiser gave it, and nothing checked that writer. `vego` does not know either that `log.New` returned a logger that is not nil:
 
   ```go
@@ -3473,7 +3464,7 @@ func LogsTo(w io.Writer, n int) {
 
 A logger that your function is handed by code that is not verified needs `ready(l)` in its `Requires`, as `Inventory` has.
 
-`fmt.Fprintf(os.Stderr, ...)`, `log.Default()`, and a logger in a package-level variable are reported as `cannot verify`, as described in [What this does not cover yet](#what-this-does-not-cover-yet). Use `fmt.Printf` or `log.Printf`, or take the writer or the logger as a parameter.
+`log.Default()` and a logger in a package-level variable are reported as `cannot verify`, as described in [What this does not cover yet](#what-this-does-not-cover-yet). Use `fmt.Printf` or `log.Printf`, or take the writer or the logger as a parameter.
 
 `fmt.Printf`, `fmt.Print`, and `fmt.Println` write to standard output, and the functions of `log` write to the standard logger. Code that is not verified chooses where those go: it can set `os.Stdout`, and it can call `log.SetOutput` or `slog.SetDefault`. A proof assumes that a write there returns and writes nothing verified code can see. If your program sets the standard logger's output to a writer of its own, it makes that claim about the writer. A writer that logs through the standard logger again never returns, because the logger holds a lock while it writes. See [What a proof assumes](#what-a-proof-assumes).
 
@@ -3892,7 +3883,7 @@ The names in an entry are the parameter and result names from the function's sou
 - `strconv.Itoa`, `strconv.Atoi`, `strconv.ParseInt`, `strconv.ParseUint`, `strconv.ParseBool`, `strconv.FormatInt`, `strconv.AppendInt`, `strconv.Quote`, `strconv.Unquote`
 - `math.Sqrt`, `math.Min`, `math.Max`, `math.Abs`, `math.Floor`, `math.Ceil`, `math.Trunc`, `math.Round`, `math.Pow`, `math.Mod`, `math.Log`, `math.Exp`, `math.Inf`, `math.NaN`, `math.IsNaN`, `math.IsInf`, which say only that they return and write nothing, since nothing can be stated of a float
 - the methods `Date`, `Year`, `Month`, `Day`, `Hour`, `Minute`, `Second`, `Nanosecond`, `Weekday`, `YearDay`, `Unix`, `UnixMilli`, `Add`, `AddDate`, `Sub`, `Before`, `After`, `Equal`, and `IsZero` of `time.Time`, `time.Now`, `time.Since`, `time.Until`, `time.Unix`, `time.Date`, and the methods `Seconds`, `Milliseconds`, and `Nanoseconds` of `time.Duration`
-- `os.Remove`
+- `os.Remove`, `os.Open`, `os.Create`, `os.WriteFile`, `os.MkdirAll`, `os.Getenv`, `os.LookupEnv`, `os.Getwd`, and the methods `Read`, `Write`, and `Close` of `*os.File`, described in [Reading and writing files](#reading-and-writing-files)
 - `math/rand.Intn`, `math/rand.Int`
 - `fmt.Sprintf`, `fmt.Sprint`, `fmt.Sprintln`, `fmt.Printf`, `fmt.Print`, `fmt.Println`, `fmt.Fprintf`, `fmt.Fprint`, `fmt.Fprintln`, described in [Formatting and logging](#formatting-and-logging)
 - `io.NopCloser`, `io.LimitReader`, `io.TeeReader`, `io.MultiReader`, `io.MultiWriter`, described in [Wrappers in package io](#wrappers-in-package-io)
@@ -3905,7 +3896,7 @@ It also includes contracts for `(io.Writer).Write`, `(io.Reader).Read`, `(io.Clo
 
 A function of package `bytes` with two slice parameters cannot be given one slice twice, or two slices that may share memory. `bytes.Equal(a, a)` is reported as `the slices passed to Equal as a and b may overlap`, as for any function with two slice parameters of one element type (see [Slices that share no memory](#slices-that-share-no-memory)).
 
-The contracts are in `vego/trusted/std` in the source of `laas`. They state only behaviour that the function's documentation promises, and the tests of `vego` check each one against the real function. For a function that calls a function it is given, the tests also check that it calls it only with arguments that its contract under `calls` allows. The contracts of `strconv.Atoi`, `os.Remove`, and `(context.Context).Err` vouch for their errors. For those, the tests also check that every error in the tree of a returned error has a type whose methods were read against what `vouches` claims. A contract for a method of an interface or a function type is tested against several implementations from the standard library, and against one that does at random everything the documentation of the type allows. An entry in your own file with the same key replaces the shipped contract.
+The contracts are in `vego/trusted/std` in the source of `laas`. They state only behaviour that the function's documentation promises, read from the documentation of the oldest Go that `laas` builds with. A clause that the documentation does not give, such as `fresh` of a result, a `requires` that keeps an allocation within bounds, or a claim under `vouches`, rests on reading the function's source, and the reason of the entry says what was read. The tests of `vego` check each contract against the real function. For a function that calls a function it is given, the tests also check that it calls it only with arguments that its contract under `calls` allows. The contracts of `strconv.Atoi`, `strconv.ParseInt`, `strconv.ParseUint`, `strconv.ParseBool`, `strconv.Unquote`, `(context.Context).Err`, and the functions of `os` that return an error vouch for their errors. For those, the tests also check that every error in the tree of a returned error has a type whose methods were read against what `vouches` claims. A contract for a method of an interface or a function type is tested against several implementations from the standard library, and against one that does at random everything the documentation of the type allows. An entry in your own file with the same key replaces the shipped contract.
 
 ### What is checked in an entry
 
@@ -4519,6 +4510,109 @@ A pointer to a struct meets these conditions when its methods only read its fiel
 
 If the function returns an error that it was given, the claim covers that error too. With `runs`, the claim must hold whatever value is passed. The trust report shows `vouches`.
 
+### Reading and writing files
+
+The shipped contracts of `os.Open`, `os.Create`, and the `Read`, `Write`, and `Close` methods of `*os.File` vouch for their errors, so you can wrap them with `%w`. `os.ReadFile` has no shipped contract. It does not return for a file that never ends, such as `/dev/zero`, or for one larger than can be allocated, and a shipped contract cannot know which files your program reads. Read a file with a loop that stops at a bound:
+
+```go
+// ReadConfig reads at most 4096 bytes of a file.
+//
+// @Requires |name| <= 4096
+// @Ensures err = nil -> |data| <= 4096
+func ReadConfig(name string) (data []byte, err error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", name, err)
+	}
+	buf := make([]byte, 4096)
+	n := 0
+	// @Invariant 0 <= n And n <= 4096 And |buf| = 4096 And fresh(buf)
+	// @Variant 4096 - n
+	for n < len(buf) {
+		m, rerr := f.Read(buf[n:])
+		n += m
+		if rerr == io.EOF || m == 0 {
+			break
+		}
+		if rerr != nil {
+			f.Close()
+			return nil, fmt.Errorf("read %s: %w", name, rerr)
+		}
+	}
+	if cerr := f.Close(); cerr != nil {
+		return nil, fmt.Errorf("close %s: %w", name, cerr)
+	}
+	return buf[:n], nil
+}
+```
+
+The loop stops when a read returns no bytes, since the contract of `Read` allows a read of none without an error, and then the `Variant` would not decrease.
+
+If your program reads only files that it controls, you can give `os.ReadFile` an entry of your own. The entry claims something about the files your program reads, so its reason must say what they are:
+
+```yaml
+  os.ReadFile:
+    reason: >-
+      This program reads only regular files that it wrote itself, each small
+      enough to be read into memory twice over. os.ReadFile returns for
+      such a file; it does not for a file that never ends, such as
+      /dev/zero, or one larger than can be allocated, so that is what this
+      entry claims of every name passed to it. The rest is read from the
+      source of os: ReadFile opens the file as os.Open does, reads it with
+      (*os.File).Read into new memory, and closes it, so its errors are
+      those that the shipped entries of Open and Read vouch for, and its
+      result is new memory.
+    requires:
+      - "|name| < MaxInt"
+      - "4 * |name| + 65536 <= MaxAlloc"
+    vouches: [result2]
+    modifies: []
+    ensures:
+      - "fresh(result1)"
+```
+
+The `requires` and the `vouches` are those of `os.Open`, and the tests of `vego` check the entry against `os.ReadFile` on regular files. The claim about which files are read is yours. With the entry, a function can wrap the error:
+
+```go
+// @Requires |name| <= 4096
+// @Ensures True
+func LoadSettings(name string) (data []byte, err error) {
+	data, err = os.ReadFile(name)
+	if err != nil {
+		return nil, fmt.Errorf("load %s: %w", name, err)
+	}
+	return data, nil
+}
+```
+
+`vego` decides whether an error can be formatted from every assignment to its variable in the function, not from the path taken. A later call into the same variable whose errors nothing vouches for, here `fmt.Fprintln`, makes the earlier `%w` fail:
+
+```go
+// @Requires |name| <= 4096 And |title| <= 1000
+// @Ensures True
+func WriteReport(name, title string) (err error) {
+	f, err := os.Create(name)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", name, err)
+	}
+	_, err = fmt.Fprintln(f, title)
+	f.Close()
+	return err
+}
+```
+
+```text
+vego: cannot verify WriteReport: formatting err would run the methods of an error whose origin is not
+known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a
+contract vouches for, can be formatted; err is also assigned fmt.Fprintln(f, title) at files.go:61:11,
+later, a call whose errors nothing vouches for, and an error variable has a known origin only when every
+assignment to it gives it one; give that a variable of its own
+```
+
+Give the error of `os.Create` a variable of its own, as in `f, cerr := os.Create(name)`. A `return x` assigns a named result too, so it counts as such an assignment.
+
+Every call that opens, reads, or writes a file is assumed to return. See [What a proof assumes](#what-a-proof-assumes).
+
 ### Function values and interface values that a trusted function returns
 
 A function value or an interface value that a trusted function returns is code that the author of the contract may not have read. If a result can hold, at any depth, a function value of a type with a contract or an interface value with a method that has a contract, the entry must list the result under `vouches`. Otherwise the entry cannot be used, and each call reports:
@@ -4943,7 +5037,7 @@ This table lists the most common messages.
 | `cannot verify F: x is a package-level variable, which a verified function cannot assign yet`, or `x[i] writes memory that the package-level variable x refers to, which a Modifies clause cannot name yet` | `F` changes a package-level variable or what one refers to. | Leave the change to code that is not verified, or pass the memory as a parameter. See [Changing a variable](#changing-a-variable). |
 | `the Requires clause P reads only package-level variables, and their declarations do not show that it holds` | No caller can choose the values the clause is about. | Test the value in the body. See [What vego knows of the value](#what-vego-knows-of-the-value). |
 | `x may be changed here, but proofs in package p rely on it holding the value it was declared with`, or `... rely on what it refers to being only read` | A package in the build changes a variable, or lets out a reference to what it refers to, and a proof relies on it. | Remove the change, or the proof that relies on the variable. See [What a variable refers to](#what-a-variable-refers-to). |
-| `cannot verify F: formatting err would run the methods of an error whose origin is not known` | `fmt.Errorf` is given an error whose origin is not known, such as one from a parameter or from a trusted function whose contract does not vouch for it. | Return the error unchanged, or wrap your own error. If the error comes from a trusted function, see [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). |
+| `cannot verify F: formatting err would run the methods of an error whose origin is not known` | `fmt.Errorf` is given an error whose origin is not known, such as one from a parameter or from a trusted function whose contract does not vouch for it. The message names the assignment to `err` that gives it no known origin. | Return the error unchanged, or wrap your own error. If the error comes from a trusted function, see [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). If a later assignment is named, give that error a variable of its own, as in [Reading and writing files](#reading-and-writing-files). |
 | `cannot verify F: comparing two errors can panic when both hold the same uncomparable type` | Neither error is `nil`, an error made by `errors.New` or `fmt.Errorf`, or an error variable that holds one or holds a pointer, integer, string, or boolean, or an array or struct of these. | Compare one of them with an error variable instead. See [Comparing errors](#comparing-errors). |
 | `cannot verify F: errors.Is would run the Is and Unwrap methods of err, an error whose origin is not known` | `errors.Is` is asked about an error from a parameter, or from a trusted function whose contract does not vouch for it. | Compare it with an error variable using `==`. See [Asking errors.Is](#asking-errorsis). |
 | `E is assigned at f.go:n, so it is not known to hold the error it was declared with`, or `x.E is assigned at f.go:n in package x` | The package of the error variable assigns it, or takes its address. | Remove the assignment, or pass the error as a parameter. |
@@ -5044,7 +5138,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - `copy`;
 - annotations on a type declared inside a function body, such as an invariant on a local struct or a contract on a local interface;
 - formatting a value whose type has a method `Format`, `GoString`, `Error`, or `String`, a pointer, a map, an interface value other than an error of known origin, a function value, or a value of a type that holds itself, with `fmt.Errorf` or a function whose entry lists it under `formats`, and passing such a function a slice with `...` for the values it formats (see [What can be formatted](#what-can-be-formatted));
-- `fmt.Fprintf` and the functions like it with `os.Stdout` or `os.Stderr`, a logger in a package-level variable, and `log.Default()`;
+- a logger in a package-level variable, and `log.Default()`;
 - a call in the target of an assignment whose right-hand side is an `append` that may write into the array of its slice, unless the call modifies nothing and refers to no memory or a call among the operands of the `append` orders it (see [An append beside a call](#an-append-beside-a-call));
 - a call with several results as the arguments of another call, as in `g(f())`;
 - comparing structs with `==`;
@@ -5083,7 +5177,8 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - The program runs on the platform `laas` was run for. The sizes of `int`, `uint`, and pointers, the layout of structs, and `MaxAlloc` are those of the `GOOS` and `GOARCH` that `laas` runs with. A proof for a 64-bit target does not hold for a 32-bit target.
 - The program is built without `-ldflags "-X ..."` for a variable that a proof relies on. The linker sets a string variable that way, typically a version, to a value that `vego` does not see.
 - The program is built from the files `laas` read. Files left out by a build constraint or a file name such as `_windows.go` are not read, so their annotations are not checked. Run `laas` once for each configuration you ship.
-- A write to standard output returns. Code that is not verified may set `os.Stdout` to any `*os.File`, and a pipe that nobody reads breaks this.
+- A write to standard output or standard error returns. Code that is not verified may set `os.Stdout` and `os.Stderr` to any `*os.File`. A pipe that nobody reads breaks this, and so does a pipe whose reader has closed it, which ends the program with `SIGPIPE`.
+- A call that opens, reads, or writes a file returns. This covers `os.Open`, `os.Create`, `os.WriteFile`, `os.MkdirAll`, `os.Getwd`, and `Read`, `Write`, and `Close` of an `*os.File`, also one that code that is not verified passes in. Opening a FIFO waits for its other end, reading a FIFO, a pipe, or a terminal waits for data, writing a pipe that nobody reads waits, and a file system that does not answer, such as a network mount that is gone, waits for ever. A write to standard output or standard error through a broken pipe ends the program, as above.
 - The output of the standard logger writes nothing that verified code can see, and returns. Code that is not verified sets that output with `log.SetOutput`, or with `slog.SetDefault` to a `slog.Handler`. A program that sets it to a writer or a handler of its own makes this claim about that code. A writer or a handler that logs through the standard logger again never returns, because the logger holds a lock while it writes. The same goes for a writer made by verified code whose `Write` calls something that logs.
 - The machine has enough memory and stack.
 - What formatting and joining build from parts whose length the logic has no term for is not longer than can be allocated. Those parts are:

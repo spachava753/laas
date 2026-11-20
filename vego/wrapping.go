@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/constant"
 	"go/types"
+	"path/filepath"
 	"unicode/utf8"
 
 	"github.com/spachava753/laas/vego/internal/logic"
@@ -228,11 +229,55 @@ func isErrorsIs(callee *types.Func) bool {
 	return callee != nil && callee.Pkg() != nil && callee.Pkg().Path() == "errors" && callee.Name() == "Is"
 }
 
+// localOriginWhy says, for an error expression that names a local variable
+// of unknown origin, after a separator, which assignment makes it unknown:
+// origin is decided for a variable from every assignment to it, so a later
+// call whose errors nothing vouches for takes the origin away from an
+// earlier one, and the message names that call and says what works.
+func (v *fnVerifier) localOriginWhy(e ast.Expr) string {
+	id, ok := ast.Unparen(e).(*ast.Ident)
+	if !ok {
+		return ""
+	}
+	variable, ok := v.info.ObjectOf(id).(*types.Var)
+	if !ok || !isError(variable.Type()) || (variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope()) {
+		return ""
+	}
+	o := v.bodyOrigins()
+	if v.isParameter[variable] || o.unknown[variable] {
+		return ""
+	}
+	for _, from := range o.sources[variable] {
+		if v.knownError(o, from.expr, from.index, map[*types.Var]bool{variable: true}) {
+			continue
+		}
+		at := v.pass.Fset.Position(from.expr.Pos())
+		where := fmt.Sprintf("%s at %s:%d:%d", types.ExprString(from.expr), filepath.Base(at.Filename), at.Line, at.Column)
+		what := "an error whose origin is not known"
+		if _, isCall := ast.Unparen(from.expr).(*ast.CallExpr); isCall {
+			what = "a call whose errors nothing vouches for"
+		}
+		// An assignment after the use, as a later call into the same
+		// variable, is the one a variable of its own would take away; one
+		// before it may be the error that is used, and then it is that
+		// call's errors that nothing vouches for.
+		if from.expr.Pos() < e.Pos() {
+			return fmt.Sprintf("; %s is assigned %s, %s", id.Name, where, what)
+		}
+		return fmt.Sprintf("; %s is also assigned %s, later, %s, and an error variable has a known origin only when "+
+			"every assignment to it gives it one; give that a variable of its own", id.Name, where, what)
+	}
+	return ""
+}
+
 // originWhy says, for an error expression that names a package-level error
 // variable which may not be taken to hold the error it was declared with,
 // or which holds an error that was not made by errors.New or fmt.Errorf,
 // why, after a separator; otherwise it returns "".
 func (v *fnVerifier) originWhy(e ast.Expr) string {
+	if why := v.localOriginWhy(e); why != "" {
+		return why
+	}
 	variable := v.namedErrorVariable(e)
 	if variable == nil {
 		return ""

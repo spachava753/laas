@@ -89,3 +89,185 @@ trusted:
       err: ["interface{ Timeout() bool }"]
     ensures:
       - "err = nil -> ~result"
+
+  # The errors of the functions below were read from the source of Go
+  # 1.26.6, for every system: os/file.go, file_posix.go, file_unix.go,
+  # file_windows.go, file_plan9.go, file_wasip1.go, path.go, getwd.go,
+  # internal/poll/fd.go, fd_unix.go, fd_windows.go, fd_poll_runtime.go,
+  # fd_poll_js.go, and package syscall's errors. A *File is made by os
+  # alone (its one field is unexported), and the internal/poll descriptor
+  # it holds is set up with Init("file", ...), so a descriptor that is
+  # closed under it reports poll.ErrFileClosing, which os turns into
+  # ErrClosed. Every error in the tree is one of these: a *PathError,
+  # whose methods read its fields and call those of its Err; a
+  # *SyscallError, the same; a syscall.Errno (syscall.ErrorString on Plan
+  # 9), whose methods read its number and whose Is compares the argument
+  # with error variables; io.EOF, io.ErrShortWrite, ErrClosed, ErrInvalid,
+  # all made by errors.New; and poll.ErrDeadlineExceeded, an empty
+  # *DeadlineExceededError whose methods return constants, which a Read or
+  # Write gives once code that is not verified set a deadline on a file
+  # that has one. None keeps code of the caller, and == on each is
+  # identity, so they meet what vouches claims. internal/testlog's Open
+  # and Getenv, which these call, run a logger only in a test binary that
+  # package testing set up, and it writes only its own file.
+
+  os.Open:
+    reason: >-
+      "Open opens the named file for reading. If successful, methods on the
+      returned file can be used for reading; the associated file descriptor
+      has mode O_RDONLY. If there is an error, it will be of type
+      *PathError." So the file is not nil when there is no error. Read from
+      the source: the *File is made by newFile, so it is new memory; it
+      copies the name into a slice one byte longer, and on Windows into
+      UTF-16 behind a prefix of at most four characters, at most four bytes
+      for each byte of the name and some room, which the requires keep
+      within the largest allocation and an int; see above for its errors.
+      Not said: which names it opens. Like every call that waits on the
+      system, it is assumed to return: opening a FIFO for reading waits for
+      a writer.
+    requires:
+      - "|name| < MaxInt"
+      - "4 * |name| + 65536 <= MaxAlloc"
+    vouches: [result2]
+    modifies: []
+    ensures:
+      - "result2 = nil -> result1 != nil And fresh(result1)"
+
+  os.Create:
+    reason: >-
+      "Create creates or truncates the named file. If the file already
+      exists, it is truncated. If the file does not exist, it is created with
+      mode 0o666 (before umask). If successful, methods on the returned File
+      can be used for I/O; the associated file descriptor has mode O_RDWR.
+      ... If there is an error, it will be of type *PathError." The rest is as
+      in the entry of os.Open.
+    requires:
+      - "|name| < MaxInt"
+      - "4 * |name| + 65536 <= MaxAlloc"
+    vouches: [result2]
+    modifies: []
+    ensures:
+      - "result2 = nil -> result1 != nil And fresh(result1)"
+
+  (*os.File).Close:
+    reason: >-
+      "Close closes the File, rendering it unusable for I/O. On files that
+      support SetDeadline, any pending I/O operations will be canceled and
+      return immediately with an ErrClosed error. Close will return an error
+      if it has already been called." A second Close returns an error and
+      does not panic, and so do Read and Write of a closed File, so no
+      entry needs a state that says the File is closed. Read from the
+      source: Close of a nil *File returns ErrInvalid; it writes the File
+      (its descriptor and what it holds), which modifies lists; see above
+      for its errors. Not said: when it fails.
+    vouches: [result]
+    modifies: [f]
+
+  (*os.File).Read:
+    reason: >-
+      "Read reads up to len(b) bytes from the File and stores them in b. It
+      returns the number of bytes read and any error encountered. At end of
+      file, Read returns 0, io.EOF." Read from the source: Read of a nil
+      *File returns ErrInvalid; it writes b, and leaves the File as it was:
+      the descriptor's lock state goes back to what it was, and the poller's
+      state is the runtime's, not the File's (on Windows, the first read
+      allocates the pinner of the descriptor, an unexported field no formula
+      can name); see above for its errors. Not said: how many bytes it
+      reads. Like every call that waits on the system, it is assumed to
+      return: a read from a FIFO, a terminal, or a pipe waits for data.
+    vouches: [err]
+    modifies: [b]
+    ensures:
+      - "0 <= n And n <= |b|"
+      - "err = io.EOF -> n = 0"
+
+  (*os.File).Write:
+    reason: >-
+      "Write writes len(b) bytes from b to the File. It returns the number of
+      bytes written and an error, if any. Write returns a non-nil error when
+      n != len(b)." Read from the source: Write of a nil *File returns
+      ErrInvalid; it writes neither b nor the File, whose descriptor's lock
+      state goes back to what it was (on Windows, the first write allocates
+      the pinner of the descriptor, an unexported field no formula can
+      name); see above for its errors. Like every call that waits on the
+      system, it is assumed to return: a write to a pipe nobody reads waits,
+      and to standard output or standard error, descriptors 1 and 2, when
+      the pipe is broken, ends the program with SIGPIPE.
+    vouches: [err]
+    modifies: []
+    ensures:
+      - "0 <= n And n <= |b|"
+      - "n != |b| -> err != nil"
+
+  os.WriteFile:
+    reason: >-
+      "WriteFile writes data to the named file, creating it if necessary. If
+      the file does not exist, WriteFile creates it with permissions perm
+      (before umask); otherwise WriteFile truncates it before writing,
+      without changing permissions. Since WriteFile requires multiple system
+      calls to complete, a failure mid-operation can leave the file in a
+      partially written state." Read from the source: it opens the file as
+      Create does, writes data with Write, and closes it, so it writes none
+      of data, and its name is copied as in the entry of os.Open; see above
+      for its errors. Not said: when it fails. It is assumed to return, as
+      Open and Write are.
+    requires:
+      - "|name| < MaxInt"
+      - "4 * |name| + 65536 <= MaxAlloc"
+    vouches: [result]
+    modifies: []
+
+  os.MkdirAll:
+    reason: >-
+      "MkdirAll creates a directory named path, along with any necessary
+      parents, and returns nil, or else returns an error. The permission bits
+      perm (before umask) are used for all directories that MkdirAll
+      creates. If path is already a directory, MkdirAll does nothing and
+      returns nil." Read from the source (path.go): it calls Stat, Mkdir,
+      and Lstat on path and on its parents, each copying a name no longer
+      than path as in the entry of os.Open, and returns a *PathError or what
+      Mkdir returns; see above for its errors. Not said: when it fails.
+    requires:
+      - "|path| < MaxInt"
+      - "4 * |path| + 65536 <= MaxAlloc"
+    vouches: [result]
+    modifies: []
+
+  os.Getenv:
+    reason: >-
+      "Getenv retrieves the value of the environment variable named by the
+      key. It returns the value, which will be empty if the variable is not
+      present." The environment is the outside world, of which nothing is
+      known. Read from the source: on Windows it converts the key to UTF-16,
+      at most two bytes for each byte of the key and some room, which the
+      requires keep within the largest allocation; the copy of the
+      environment that syscall makes on the first call is package syscall's
+      own memory.
+    requires:
+      - "4 * |key| + 65536 <= MaxAlloc"
+    modifies: []
+
+  os.LookupEnv:
+    reason: >-
+      "LookupEnv retrieves the value of the environment variable named by the
+      key. If the variable is present in the environment the value (which
+      may be empty) is returned and the boolean is true. Otherwise the
+      returned value will be empty and the boolean will be false." The rest
+      is as in the entry of os.Getenv.
+    requires:
+      - "4 * |key| + 65536 <= MaxAlloc"
+    modifies: []
+    ensures:
+      - "~result2 -> |result1| = 0"
+
+  os.Getwd:
+    reason: >-
+      "Getwd returns an absolute path name corresponding to the current
+      directory. If the current directory can be reached via multiple paths
+      (due to symbolic links), Getwd may return any one of them." Not said:
+      what the path holds. Read from the source (getwd.go): its errors are a
+      *SyscallError of syscall's error, or a *PathError of a Stat; see above.
+      It writes only its own cache of the last answer, memory of package os
+      that no formula can name.
+    vouches: [err]
+    modifies: []

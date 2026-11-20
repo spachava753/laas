@@ -95,7 +95,7 @@ func Notify(msg string) {
 // @Requires |msg| <= 1000
 // @Ensures True
 func Warn(msg string) {
-	fmt.Fprintln(os.Stderr, "warning:", msg) // want `vego: cannot verify Warn: it uses Write as a method of io.Writer, and Write has no contract; annotate Write with // @ annotations so that it is verified, or add a trusted contract for \(\*os.File\).Write to vego-trusted.yaml`
+	fmt.Fprintln(os.Stderr, "warning:", msg)
 }
 
 // Client reads a variable whose type can hold code.

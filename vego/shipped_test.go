@@ -643,6 +643,58 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 		before := snapshot(year, month, day, hour, minute, sec, nsec, loc)
 		return sample{before: before, after: []any{year, month, day, hour, minute, sec, nsec, loc}, results: []any{time.Date(year, month, day, hour, minute, sec, nsec, loc)}}
 	},
+	"os.Open": func(rng *rand.Rand) sample {
+		name := randomPath(rng)
+		f, err := os.Open(name)
+		return sample{before: []any{name}, results: []any{f, err}}
+	},
+	"os.Create": func(rng *rand.Rand) sample {
+		name := randomPath(rng)
+		f, err := os.Create(name)
+		return sample{before: []any{name}, results: []any{f, err}}
+	},
+	"os.WriteFile": func(rng *rand.Rand) sample {
+		name, data, perm := randomPath(rng), roomyBytes(rng), []os.FileMode{0o600, 0o644, 0o400, 0}[rng.Intn(4)]
+		before := snapshot(name, data, perm)
+		return sample{before: before, after: []any{name, data, perm}, results: []any{os.WriteFile(name, data, perm)}}
+	},
+	"os.MkdirAll": func(rng *rand.Rand) sample {
+		path := randomPath(rng)
+		if rng.Intn(2) == 0 {
+			path = filepath.Join(path, "a", "b")
+		}
+		return sample{before: []any{path, os.FileMode(0o700)}, results: []any{os.MkdirAll(path, 0o700)}}
+	},
+	"(*os.File).Close": func(rng *rand.Rand) sample {
+		f := randomFile(rng)
+		before := snapshot(f)
+		return sample{before: before, after: []any{f}, results: []any{f.Close()}}
+	},
+	"(*os.File).Read": func(rng *rand.Rand) sample {
+		f, b := randomFile(rng), roomyBytes(rng)
+		before := snapshot(f, b)
+		n, err := f.Read(b)
+		return sample{before: before, after: []any{f, b}, results: []any{n, err}}
+	},
+	"(*os.File).Write": func(rng *rand.Rand) sample {
+		f, b := randomFile(rng), roomyBytes(rng)
+		before := snapshot(f, b)
+		n, err := f.Write(b)
+		return sample{before: before, after: []any{f, b}, results: []any{n, err}}
+	},
+	"os.Getenv": func(rng *rand.Rand) sample {
+		key := randomEnvKey(rng)
+		return sample{before: []any{key}, results: []any{os.Getenv(key)}}
+	},
+	"os.LookupEnv": func(rng *rand.Rand) sample {
+		key := randomEnvKey(rng)
+		value, found := os.LookupEnv(key)
+		return sample{before: []any{key}, results: []any{value, found}}
+	},
+	"os.Getwd": func(rng *rand.Rand) sample {
+		dir, err := inWorkingDirectory(rng, os.Getwd)
+		return sample{results: []any{dir, err}}
+	},
 	"unicode/utf8.RuneCountInString": func(rng *rand.Rand) sample {
 		s := randomText(rng)
 		return sample{before: []any{s}, results: []any{utf8.RuneCountInString(s)}}
@@ -860,6 +912,166 @@ func durationHarness[R any](method func(time.Duration) R) func(rng *rand.Rand) s
 		d := randomDuration(rng)
 		return sample{before: []any{d}, results: []any{method(d)}}
 	}
+}
+
+// randomPath returns a name in a directory of its own in scratch, made
+// for each call: a file with data, an empty file, one nobody may read or
+// write, a directory, one nobody may write in, a missing name, a name
+// below a file, a name with a NUL byte, a component too long for the
+// system, and a FIFO with a reader and a writer kept open, so that
+// opening it does not wait.
+func randomPath(rng *rand.Rand) string {
+	dir, err := os.MkdirTemp(scratch, "path")
+	if err != nil {
+		panic(err)
+	}
+	must := func(err error) {
+		if err != nil {
+			panic(err)
+		}
+	}
+	data, empty, locked := filepath.Join(dir, "data"), filepath.Join(dir, "empty"), filepath.Join(dir, "locked")
+	must(os.WriteFile(data, []byte("some data\n"), 0o600))
+	must(os.WriteFile(empty, nil, 0o600))
+	must(os.WriteFile(locked, []byte("x"), 0o000))
+	sub, closed := filepath.Join(dir, "sub"), filepath.Join(dir, "closed")
+	must(os.Mkdir(sub, 0o700))
+	must(os.Mkdir(closed, 0o500))
+	fifo := filepath.Join(dir, "fifo")
+	must(syscall.Mkfifo(fifo, 0o600))
+	reader, err := os.OpenFile(fifo, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	must(err)
+	writer, err := os.OpenFile(fifo, os.O_WRONLY, 0)
+	must(err)
+	keptOpen = append(keptOpen, reader, writer)
+	return []string{data, empty, locked, sub, filepath.Join(closed, "new"), filepath.Join(dir, "missing"),
+		filepath.Join(data, "below"), filepath.Join(dir, "a\x00b"), filepath.Join(dir, strings.Repeat("n", 300)), fifo,
+		filepath.Join(dir, "new")}[rng.Intn(11)]
+}
+
+// keptOpen holds files the harnesses keep open for the rest of a run.
+var keptOpen []*os.File
+
+// randomFile returns a file of each kind a caller may hand over: opened
+// for reading, for writing, or both, at its end, closed, nil, a directory,
+// the ends of a pipe, a pipe whose reader is closed, and a pipe with a
+// deadline that has passed.
+func randomFile(rng *rand.Rand) *os.File {
+	name := filepath.Join(scratch, fmt.Sprintf("file%d", rng.Int63()))
+	if err := os.WriteFile(name, []byte("contents of a file\n"), 0o600); err != nil {
+		panic(err)
+	}
+	open := func(flag int) *os.File {
+		f, err := os.OpenFile(name, flag, 0)
+		if err != nil {
+			panic(err)
+		}
+		keptOpen = append(keptOpen, f)
+		return f
+	}
+	pipe := func() (*os.File, *os.File) {
+		r, w, err := os.Pipe()
+		if err != nil {
+			panic(err)
+		}
+		keptOpen = append(keptOpen, r, w)
+		return r, w
+	}
+	switch rng.Intn(11) {
+	case 0:
+		return open(os.O_RDONLY)
+	case 1:
+		return open(os.O_WRONLY)
+	case 2:
+		return open(os.O_RDWR | os.O_APPEND)
+	case 3:
+		f := open(os.O_RDONLY)
+		if _, err := f.Seek(0, io.SeekEnd); err != nil {
+			panic(err)
+		}
+		return f
+	case 4:
+		f := open(os.O_RDWR)
+		f.Close()
+		return f
+	case 5:
+		return nil
+	case 6:
+		f, err := os.Open(scratch)
+		if err != nil {
+			panic(err)
+		}
+		keptOpen = append(keptOpen, f)
+		return f
+	case 7:
+		r, w := pipe()
+		if _, err := w.Write([]byte("piped")); err != nil {
+			panic(err)
+		}
+		return r
+	case 8:
+		r, w := pipe()
+		r.Close()
+		return w
+	case 9:
+		r, w := pipe()
+		if rng.Intn(2) == 0 {
+			r.SetDeadline(time.Now().Add(-time.Second))
+			return r
+		}
+		w.SetDeadline(time.Now().Add(-time.Second))
+		return w
+	}
+	_, w := pipe()
+	return w
+}
+
+// randomEnvKey returns the name of an environment variable that the
+// harness has set, to something or to nothing, that it has not, or one
+// that cannot be a name.
+func randomEnvKey(rng *rand.Rand) string {
+	os.Setenv("VEGO_HARNESS_SET", "a value")
+	os.Setenv("VEGO_HARNESS_EMPTY", "")
+	return []string{"VEGO_HARNESS_SET", "VEGO_HARNESS_EMPTY", "VEGO_HARNESS_UNSET", "", "A=B", "a\x00b", "PATH"}[rng.Intn(7)]
+}
+
+// inWorkingDirectory runs a call in a working directory of its own, with
+// $PWD naming it, naming another directory, or not set, and at times a
+// directory that has been removed, and then goes back.
+func inWorkingDirectory[R any](rng *rand.Rand, call func() (R, error)) (R, error) {
+	saved, err := os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+	savedPWD, hadPWD := os.LookupEnv("PWD")
+	defer func() {
+		if err := os.Chdir(saved); err != nil {
+			panic(err)
+		}
+		if hadPWD {
+			os.Setenv("PWD", savedPWD)
+		} else {
+			os.Unsetenv("PWD")
+		}
+	}()
+	dir, err := os.MkdirTemp(scratch, "wd")
+	if err != nil {
+		panic(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		panic(err)
+	}
+	switch rng.Intn(4) {
+	case 0:
+		os.Setenv("PWD", dir)
+	case 1:
+		os.Setenv("PWD", scratch)
+	case 2:
+		os.Unsetenv("PWD")
+	case 3:
+		os.Remove(dir)
+	}
+	return call()
 }
 
 // randomByte returns a byte that random text holds at times: a letter, a
@@ -1239,6 +1451,7 @@ var scratch string
 var shippedVariables = map[string]error{
 	"strconv.ErrSyntax":        strconv.ErrSyntax,
 	"strconv.ErrRange":         strconv.ErrRange,
+	"io.EOF":                   io.EOF,
 	"io/fs.ErrNotExist":        fs.ErrNotExist,
 	"context.Canceled":         context.Canceled,
 	"context.DeadlineExceeded": context.DeadlineExceeded,
@@ -1254,7 +1467,11 @@ var reviewedErrorTypes = map[string]bool{
 	"*strconv.NumError":   true,
 	"*errors.errorString": true,
 	"*fs.PathError":       true,
-	"syscall.Errno":       true,
+	"*os.SyscallError":    true,
+	// poll.ErrDeadlineExceeded, an empty struct whose methods Error,
+	// Timeout, and Temporary return constants.
+	"*poll.DeadlineExceededError": true,
+	"syscall.Errno":               true,
 	// The type of context.DeadlineExceeded, an empty struct whose methods
 	// Error, Timeout, and Temporary return constants.
 	"context.deadlineExceededError": true,
@@ -1376,8 +1593,11 @@ func (g *grounder) groundTerm(value any) *logic.Term {
 // function it describes. For each random call whose arguments satisfy the
 // contract's requires, every ensures must be true of what the function did.
 // This does not prove a contract, but a wrong one is caught before it ships.
-func TestShippedContracts(t *testing.T) {
-	scratch = t.TempDir()
+// shippedVerifier returns a verifier of no package that reads the shipped
+// contracts, with the packages of the error variables they name in its
+// build, and an importer of the standard library from source.
+func shippedVerifier(t *testing.T) (*pkgVerifier, types.Importer) {
+	t.Helper()
 	pv := &pkgVerifier{
 		pass: &analysis.Pass{
 			Fset:       token.NewFileSet(),
@@ -1436,6 +1656,12 @@ func TestShippedContracts(t *testing.T) {
 		built = append(built, pkg)
 	}
 	pv.pass.Pkg.SetImports(built)
+	return pv, imports
+}
+
+func TestShippedContracts(t *testing.T) {
+	scratch = t.TempDir()
+	pv, imports := shippedVerifier(t)
 	for _, file := range shippedContracts() {
 		for _, problem := range file.problems {
 			t.Errorf("%s:%d: %s", file.path, problem.line, problem.msg)
@@ -1864,6 +2090,90 @@ func TestRemoveOutcomes(t *testing.T) {
 			t.Errorf("no call of os.Remove ended with %s; got %v", want, seen)
 		}
 	}
+}
+
+// TestFileOutcomes checks that the harnesses of the os entries produce
+// each outcome they are meant to, so that the errors checkVouched sees
+// include every kind those functions return here.
+func TestFileOutcomes(t *testing.T) {
+	scratch = t.TempDir()
+	defer func() {
+		for _, f := range keptOpen {
+			f.Close()
+		}
+		keptOpen = nil
+	}()
+	outcome := func(err error) string {
+		var errno syscall.Errno
+		switch {
+		case err == nil:
+			return "success"
+		case errors.Is(err, os.ErrDeadlineExceeded):
+			return "deadline"
+		case errors.Is(err, os.ErrClosed):
+			return os.ErrClosed.Error()
+		case errors.As(err, &errno):
+			return errno.Error()
+		}
+		return err.Error()
+	}
+	for key, want := range map[string][]string{
+		"os.Open":          {"success", syscall.ENOENT.Error(), syscall.EACCES.Error(), syscall.ENOTDIR.Error(), syscall.EINVAL.Error(), syscall.ENAMETOOLONG.Error()},
+		"os.Create":        {"success", syscall.EISDIR.Error(), syscall.EACCES.Error(), syscall.ENOTDIR.Error()},
+		"os.WriteFile":     {"success", syscall.EACCES.Error(), syscall.EISDIR.Error()},
+		"os.MkdirAll":      {"success", syscall.ENOTDIR.Error(), syscall.EACCES.Error()},
+		"(*os.File).Close": {"success", os.ErrClosed.Error(), os.ErrInvalid.Error()},
+		"(*os.File).Read":  {"success", io.EOF.Error(), os.ErrClosed.Error(), os.ErrInvalid.Error(), syscall.EISDIR.Error(), syscall.EBADF.Error(), "deadline"},
+		"(*os.File).Write": {"success", os.ErrClosed.Error(), os.ErrInvalid.Error(), syscall.EBADF.Error(), syscall.EPIPE.Error(), "deadline"},
+		"os.Getwd":         {"success", syscall.ENOENT.Error()},
+	} {
+		seen := map[string]bool{}
+		rng := rand.New(rand.NewSource(1))
+		for range 400 {
+			call := harnesses[key](rng)
+			err, _ := call.results[len(call.results)-1].(error)
+			seen[outcome(err)] = true
+		}
+		for _, w := range want {
+			if !seen[w] {
+				t.Errorf("no call of %s ended with %s; got %v", key, w, seen)
+			}
+		}
+	}
+}
+
+// TestReadFileEntry checks the guide's entry for os.ReadFile, in the trust
+// file of the corpus, against the real function on what it claims to be
+// given: regular files, missing names, directories, and names no system
+// opens, but no FIFO, which ReadFile would wait on for ever.
+func TestReadFileEntry(t *testing.T) {
+	scratch = t.TempDir()
+	defer func() {
+		for _, f := range keptOpen {
+			f.Close()
+		}
+		keptOpen = nil
+	}()
+	pv, imports := shippedVerifier(t)
+	pv.projectTrust = loadTrustFile(filepath.Join("testdata", "trusted.yaml"))
+	osPkg, err := imports.Import("os")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn := pv.trustedContract(osPkg.Scope().Lookup("ReadFile").(*types.Func))
+	for _, defect := range fn.defects {
+		t.Errorf("contract cannot be used: %s", defect)
+	}
+	met := coverage{}
+	checkContract(t, pv, "os.ReadFile", fn, func(rng *rand.Rand) sample {
+		name := randomPath(rng)
+		for strings.HasSuffix(name, "fifo") {
+			name = randomPath(rng)
+		}
+		data, err := os.ReadFile(name)
+		return sample{before: []any{name}, results: []any{data, err}}
+	}, met)
+	met.require(t, fn)
 }
 
 // recordingError is an error whose methods fail the test when called while

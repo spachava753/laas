@@ -3,6 +3,27 @@
 version: 1
 
 trusted:
+  # The guide's entry for os.ReadFile, which TestReadFileEntry checks
+  # against the real function on regular files.
+  os.ReadFile:
+    reason: >-
+      This program reads only regular files that it wrote itself, each small
+      enough to be read into memory twice over. os.ReadFile returns for
+      such a file; it does not for a file that never ends, such as
+      /dev/zero, or one larger than can be allocated, so that is what this
+      entry claims of every name passed to it. The rest is read from the
+      source of os: ReadFile opens the file as os.Open does, reads it with
+      (*os.File).Read into new memory, and closes it, so its errors are
+      those that the shipped entries of Open and Read vouch for, and its
+      result is new memory.
+    requires:
+      - "|name| < MaxInt"
+      - "4 * |name| + 65536 <= MaxAlloc"
+    vouches: [result2]
+    modifies: []
+    ensures:
+      - "fresh(result1)"
+
   unsafelib.Run:
     reason: A test entry for a function that calls through an unsafe.Pointer.
     requires: ["h != nil"]

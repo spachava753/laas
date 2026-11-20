@@ -38,7 +38,7 @@ func Inventory(w io.Writer, l *log.Logger, n int) (err error) {
 
 // @Ensures True
 func ToStderr(n int) {
-	_, _ = fmt.Fprintf(os.Stderr, "%d\n", n) // want `vego:\ cannot\ verify\ ToStderr:\ `
+	_, _ = fmt.Fprintf(os.Stderr, "%d\n", n)
 }
 
 // Logf is trusted, with formats.
