@@ -120,7 +120,7 @@ func grow(s []int, x int) (result []int) {
 func ThroughGrow(A []int) (out []int) {
 	// @Invariant |out| <= i
 	for i := range A {
-		out = grow(out, A[i]) // want `grow may modify out, which ThroughGrow may not modify; out is a result, and a // @Modifies clause names memory only by a path from a parameter: if what out refers to may be memory of the caller, list it by the parameter it comes from; if it is memory that ThroughGrow made, nothing here shows that, since a loop that assigns out the result of a call forgets where its memory came from: append to it in the loop itself`
+		out = grow(out, A[i]) // want `grow may modify out, which ThroughGrow may not modify; out is a result, and a // @Modifies clause names memory only by a path from a parameter: if what out refers to may be memory of the caller, list it by the parameter it comes from; if it is memory that ThroughGrow made, nothing here shows that, since a loop that assigns out forgets where its memory came from: say so with // @Invariant fresh\(out\) on the loop`
 	}
 	return out
 }

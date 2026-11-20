@@ -631,9 +631,42 @@ func (v *fnVerifier) notListable(e ast.Expr, pos token.Pos) string {
 	remedy := fmt.Sprintf("%s is %s, and a // @Modifies clause names memory only by a path from a parameter: if what %s refers to may be memory of the caller, "+
 		"list it by the parameter it comes from; if it is memory that %s made, nothing here shows that", id.Name, what, id.Name, v.fn.obj.Name())
 	if looped {
-		remedy += fmt.Sprintf(", since a loop that assigns %s the result of a call forgets where its memory came from: append to it in the loop itself", id.Name)
+		remedy += fmt.Sprintf(", since a loop that assigns %s forgets where its memory came from", id.Name)
+		if through := v.writtenThrough(e); through != "" {
+			remedy += fmt.Sprintf(": say so with // @Invariant fresh(%s) on the loop", through)
+		}
 	}
 	return remedy
+}
+
+// writtenThrough spells the pointer, slice, map, or interface value through
+// which an expression writes memory, the one a fresh clause would be about:
+// p for p.next, s.items for s.items[i], and the expression itself when it
+// is such a value. It returns "" when there is none.
+func (v *fnVerifier) writtenThrough(e ast.Expr) string {
+	for {
+		switch x := ast.Unparen(e).(type) {
+		case *ast.SelectorExpr:
+			if _, isPointer := pointee(v.info.TypeOf(x.X)); isPointer {
+				return types.ExprString(x.X)
+			}
+			e = x.X
+			continue
+		case *ast.IndexExpr:
+			if isSlice(v.info.TypeOf(x.X)) {
+				return types.ExprString(x.X)
+			}
+			e = x.X
+			continue
+		case *ast.StarExpr:
+			return types.ExprString(x.X)
+		}
+		t := v.info.TypeOf(e)
+		if _, isPointer := pointee(t); isPointer || isSlice(t) || isMap(t) || isIface(t) {
+			return types.ExprString(e)
+		}
+		return ""
+	}
 }
 
 // assignedInLoopAround reports whether a loop of the function around a

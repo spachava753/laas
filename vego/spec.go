@@ -915,10 +915,19 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		}
 		return logic.And(logic.Not(logic.Eq(first[0], logic.RefLit(0))), inside), nil
 	}
-	if e.before == nil || e.post == nil {
-		return nil, errors.New("fresh says what a call created and is only allowed in Ensures")
-	}
-	if found[0].hops == 0 && !found[0].isResult {
+	where := "is allowed in an Ensures, where it says what the call allocated, and in an Invariant or an Assert inside a body, " +
+		"where it says what the function allocated since it was entered"
+	switch {
+	case e.selfType != nil:
+		return nil, fmt.Errorf("an invariant of a type describes one state, so it cannot say what was allocated since a call began; fresh %s", where)
+	case e.fn == nil && e.st != nil:
+		// Inside a body, what the path leads to now was allocated since the
+		// function was entered: the bound the check of every write uses
+		// for memory the function may write without a Modifies entry.
+		return freshSince(e.v.entryBrk, found[0]), nil
+	case e.before == nil || e.post == nil:
+		return nil, fmt.Errorf("fresh says what was allocated since a call began, and nothing has been allocated where this annotation is read; fresh %s", where)
+	case found[0].hops == 0 && !found[0].isResult:
 		return nil, fmt.Errorf("fresh(%s): %s was passed in, so the call did not create it", paths[0].Root, paths[0].Root)
 	}
 	// What a path leads to on return is what the call may have created.
@@ -926,14 +935,21 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 	if err != nil {
 		return nil, err
 	}
-	if isIface(after.typ) {
-		return logic.Le(e.before, home(after.val[0])), nil
+	return freshSince(e.before, after), nil
+}
+
+// freshSince states that what a value refers to was allocated at or past a
+// bound. A slice without capacity shares nothing with anything, and a nil
+// interface value holds nothing, so both count as fresh; a nil pointer or
+// map does not, so fresh(p) gives p != nil.
+func freshSince(before *logic.Term, found reached) *logic.Term {
+	switch {
+	case isIface(found.typ):
+		return logic.Or(isNilRef(found.val), logic.Le(before, home(found.val[0])))
+	case isSlice(found.typ):
+		return logic.Or(logic.Le(found.val[3], logic.IntLit(0)), logic.Le(before, found.val[0]))
 	}
-	if isSlice(after.typ) {
-		// A slice without capacity shares nothing with anything either.
-		return logic.Or(logic.Le(after.val[3], logic.IntLit(0)), logic.Le(e.before, after.val[0])), nil
-	}
-	return logic.Le(e.before, after.val[0]), nil
+	return logic.Le(before, found.val[0])
 }
 
 // spell writes a path the way an annotation does.

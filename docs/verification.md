@@ -2072,7 +2072,16 @@ func NewCounter(limit int) (result *Counter) {
 
 Without `fresh(result)`, a caller must assume that the result could be a counter it already has.
 
-`fresh(x)` means that the memory `x` refers to on return was allocated during the call. `within(a, b)` means that `a` lies inside the memory of `b`. Each argument is a pointer or a slice, and a slice includes its whole capacity. There are two edge cases. A slice with zero capacity has no memory, so it is `fresh` and is `within` anything. A nil pointer is `within` nothing.
+In an `Ensures`, `fresh(x)` means that the memory `x` refers to on return was allocated during the call. In an `Invariant` or an `Assert` inside a body, `fresh(x)` means that the memory `x` refers to there was allocated since the function was entered. That is the memory a function may write without listing it in `Modifies`, so a loop can use it to keep that knowledge (see [What a loop forgets about memory](#what-a-loop-forgets-about-memory)). `fresh` cannot stand in a `Requires` or in the invariant of a type, where no call has allocated anything yet, and both are reported.
+
+`fresh` says only when the memory was allocated. It does not say that nothing else refers to the memory: two fresh slices may share one array, and a fresh pointer may have been stored where the caller can reach it. A proof that needs such a fact needs a clause that states it, such as `apart(a, b)` or `p != q`.
+
+`within(a, b)` means that `a` lies inside the memory of `b`. Each argument of `fresh` and `within` is a pointer or a slice, and `fresh` also takes a map or an interface value. A slice includes its whole capacity. These edge cases apply:
+
+- A slice with zero capacity has no memory, so it is `fresh` and is `within` anything.
+- A nil interface value holds nothing, so it is `fresh`.
+- A nil pointer and a nil map are not `fresh`, so `fresh(p)` also says that `p` is not nil.
+- A nil pointer is `within` nothing.
 
 For two pointers to structs, `within(p, l)` means that `p` points to `l`'s struct itself or to a field of it. That struct or field has `p`'s struct type, or a type with the same fields, tags ignored. The field may be held directly or in a struct that `l`'s struct holds, but not behind a pointer. So `@Modifies l` covers a write through `p` when the `Requires` says `within(p, l)`. When `p` points to a struct whose size is not zero and `l`'s struct has no such place, `within(p, l)` is an error.
 
@@ -2220,11 +2229,29 @@ func CopyThrough(A []int) (out []int) {
 vego: grow may modify out, which CopyThrough may not modify; out is a result, and a // @Modifies
 clause names memory only by a path from a parameter: if what out refers to may be memory of the
 caller, list it by the parameter it comes from; if it is memory that CopyThrough made, nothing here
-shows that, since a loop that assigns out the result of a call forgets where its memory came from:
-append to it in the loop itself
+shows that, since a loop that assigns out forgets where its memory came from: say so with
+// @Invariant fresh(out) on the loop
 ```
 
-At the head of the loop `out` is a slice of which nothing is known, so it may be memory that the caller holds. A result cannot be listed in `Modifies`: `// @Modifies out` is reported as `in Modifies annotation: out is not a parameter`. `fresh` cannot say otherwise in an invariant either. `// @Invariant fresh(out)` is reported as `in Invariant annotation: fresh says what a call created and is only allowed in Ensures`. Write the `append` in the loop itself. A slice that the loop only appends to keeps what is known of it:
+At the head of the loop `out` is a slice of which nothing is known, so it may be memory that the caller holds. A result cannot be listed in `Modifies`: `// @Modifies out` is reported as `in Modifies annotation: out is not a parameter`. Say in the invariant that the slice is the function's own:
+
+```go
+// CopyFresh says that out is its own.
+//
+// @Requires |A| <= 1000
+// @Ensures |out| = |A|
+func CopyFresh(A []int) (out []int) {
+	// @Invariant |out| = i And fresh(out)
+	for i := range A {
+		out = grow(out, A[i])
+	}
+	return out
+}
+```
+
+In a body, `fresh(out)` means that the memory `out` refers to was allocated since the function was entered. The invariant holds on entry to the loop, because a nil slice has no memory. `grow` keeps it, because it returns new memory or memory inside `out`. When `out` may really be memory of the caller, as after `out = A`, the invariant is reported as `loop invariant may not hold on entry: fresh(out)`, and the slice has to be listed by the parameter it comes from.
+
+A slice that the loop only appends to with `append` keeps what is known of it, and needs no such clause:
 
 ```go
 // CopyAppend appends in the loop itself.
@@ -5054,7 +5081,7 @@ Results are referred to by the names in the function's signature.
 | `Modifies m` | a map |
 | `Modifies m[k]` | for a map of pointers, the struct that the pointer under key `k` points to |
 | `Modifies rc`, `Modifies p.f` | if `rc` or `f` is an interface value: every state of what it holds, not the variable or the field; a function value field is the field itself |
-| `fresh(x)` | the memory `x` refers to on return was allocated by the call; true for a slice with zero capacity; for an interface value, what it holds was created by the call |
+| `fresh(x)` | in an `Ensures`, the memory `x` refers to on return was allocated by the call; in a body, it was allocated since the function was entered; true for a slice with zero capacity and a nil interface value, false for a nil pointer or map; for an interface value, what it holds was created then |
 | `within(a, b)` | `a` lies inside the memory of `b`; each is a pointer or a slice, and a slice includes its capacity |
 | `apart(a, b)` | the slices `a` and `b`, of one element type, share no memory up to their capacities |
 

@@ -57,12 +57,12 @@ func CopyThrough(A []int) (out []int) {
 	return out
 }
 
-// CopyFresh tries to say that out is its own.
+// CopyFresh says that out is its own.
 //
 // @Requires |A| <= 1000
-// @Ensures True
+// @Ensures |out| = |A|
 func CopyFresh(A []int) (out []int) {
-	// @Invariant |out| <= i And fresh(out) // want `fresh says what a call created and is only allowed in Ensures`
+	// @Invariant |out| = i And fresh(out)
 	for i := range A {
 		out = grow(out, A[i])
 	}
