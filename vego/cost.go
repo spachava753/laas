@@ -51,6 +51,8 @@ type fnCost struct {
 	bytes    int64
 	elapsed  time.Duration
 	limits   map[costLimit]int
+	// kinds counts the problems of each kind.
+	kinds [len(questionNames)]int
 }
 
 // costLimit is a place and kind of question that stopped at a limit.
@@ -130,6 +132,7 @@ func (pv *pkgVerifier) observe(kind question) func(solver.Cost) {
 	return func(c solver.Cost) {
 		record := pv.costOf(fn)
 		record.problems++
+		record.kinds[kind]++
 		record.bytes += int64(c.Bytes)
 		if c.Effort > 0 {
 			record.effort += c.Effort

@@ -709,6 +709,10 @@ type outcome struct {
 	// search stopped at, if one did.
 	forces  solver.Result
 	limited solver.Result
+	// final, when the search found no input, asks whether any state the
+	// logic describes forces success; only the report of a contract that
+	// may always fail reads it. See forcesSuccess.
+	final func() solver.Result
 	// outside is set when execution reached a call without a contract that
 	// returns an error; reached holds the verified callees returning an
 	// error that it reached.
@@ -730,9 +734,10 @@ func (pv *pkgVerifier) verified(fn *funcInfo) {
 	// report of an always-failing contract rests on.
 	pv.searchLimit = solver.Unknown
 	pv.run(fn, func(v *fnVerifier) {
+		v.tracksFailure = len(errorResults(fn)) > 0
 		v.verify()
-		if len(errorResults(fn)) > 0 {
-			result.forces = v.forcesSuccess()
+		if v.tracksFailure {
+			result.forces, result.final = v.forcesSuccess()
 			result.limited = pv.searchLimit
 		}
 		result.outside, result.reached, result.complete = v.outside, v.reached, true
@@ -776,7 +781,7 @@ func (pv *pkgVerifier) reportAlwaysFailing() map[*funcInfo]bool {
 			// so no input does; otherwise only the search found none.
 			why := "no simple input was found for which it forces success" + limitNote(pv.outcomes[fn].limited)
 			advice := "where the condition is about the inputs and a small input satisfies it"
-			if pv.outcomes[fn].forces == solver.Proved {
+			if final := pv.outcomes[fn].final; final != nil && final() == solver.Proved {
 				why, advice = "it requires success for no input", "where the condition is about the inputs"
 			}
 			pv.report(fn.decl.Name.Pos(), "the contract of %s may also be met by a function that always returns an error: %s; "+
@@ -799,7 +804,10 @@ func (pv *pkgVerifier) trustForces(fn *funcInfo) bool {
 	// vego does not model take no part in it.
 	pv.run(fn, func(v *fnVerifier) {
 		v.lenient = true
-		forces = v.forcesSuccess() == solver.Refuted
+		// Whether no state forces success is not asked: only whether
+		// some input does is read here.
+		found, _ := v.forcesSuccess()
+		forces = found == solver.Refuted
 	})
 	if fn.use != nil && len(errorResults(fn)) > 0 {
 		fn.use.Unpredictable = !forces
@@ -894,12 +902,15 @@ const (
 //
 // It returns Refuted when it found such an input, which is a concrete input
 // that someInput builds and for which both facts are proved. Otherwise it
-// returns Proved when not even the states the logic describes, which
-// include every input Go has, contain one, and the outcome of that question
-// when Z3 could not settle it. One input has to force every error result
-// to be nil: a function with two of them succeeds only when both are, and
-// inputs that each force one of them say nothing about that.
-func (v *fnVerifier) forcesSuccess() solver.Result {
+// returns Unknown and a function that asks the further question: it returns
+// Proved when not even the states the logic describes, which include every
+// input Go has, contain one, and the outcome of that question when Z3 could
+// not settle it. The further question is the costliest of the check and
+// only decides the wording of a report, so it is asked only for a contract
+// that is reported. One input has to force every error result to be nil: a
+// function with two of them succeeds only when both are, and inputs that
+// each force one of them say nothing about that.
+func (v *fnVerifier) forcesSuccess() (solver.Result, func() solver.Result) {
 	defer v.asking(failureCheck)()
 	entry := v.enter()
 	pre, post, failures := v.contractInstance(entry)
@@ -928,7 +939,7 @@ func (v *fnVerifier) forcesSuccess() solver.Result {
 		return !slices.ContainsFunc(input.apply(nils), func(none *logic.Term) bool { return !v.proves(outcome, none, 0) })
 	})
 	if found {
-		return solver.Refuted
+		return solver.Refuted, nil
 	}
 	// Every input satisfies what its types guarantee in full, which the
 	// facts of the entry state only say of what the contract reads.
@@ -941,10 +952,13 @@ func (v *fnVerifier) forcesSuccess() solver.Result {
 	body := logic.And(logic.And(wellFormed...), forced(&witness{consts: map[string]*logic.Term{}, memo: map[*logic.Term]*logic.Term{}}))
 	opts := v.options(0, failureCheck)
 	opts.Forall = v.produced(body)
-	if result := v.solver().Check(append(known, body), opts); result != solver.Refuted {
-		return result
+	facts := append(known, body)
+	return solver.Unknown, func() solver.Result {
+		if result := v.solver().Check(facts, opts); result != solver.Refuted {
+			return result
+		}
+		return solver.Unknown
 	}
-	return solver.Unknown
 }
 
 // sampleErrors are the values a sample gives to errors that are not nil.

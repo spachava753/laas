@@ -119,6 +119,10 @@ type fnVerifier struct {
 	// executed, in which reads of memory are recorded so that their order
 	// relative to the calls that write memory can be checked; see order.go.
 	unit *unit
+	// tracksFailure is set while a function that returns an error is
+	// verified, whose report under the always-fails rule reads what
+	// noteFailureSource and tieFailures find; nothing else does.
+	tracksFailure bool
 	// outside records that execution reached a call whose failure no
 	// contract predicts; reached holds the verified callees returning an
 	// error that execution reached, which may turn out to be excused.

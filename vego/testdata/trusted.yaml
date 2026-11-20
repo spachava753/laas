@@ -1224,6 +1224,12 @@ trusted:
     requires: ["p != nil", "p.x = 3"]
     modifies: [p]
     ensures: ["p.x = 3"]
+  trackfail.parse:
+    reason: A test of a trusted function whose contract never says that it succeeds.
+    modifies: []
+  trackquiet.parse:
+    reason: A test of a trusted function whose contract never says that it succeeds.
+    modifies: []
   guide.open:
     reason: >-
       open returns what os.Open returns, as an io.ReadCloser. When err is

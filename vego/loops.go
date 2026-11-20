@@ -535,8 +535,10 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 		}
 		// A variable the loop forgot stands, at the head, for what an
 		// earlier iteration left in it, which is recorded here; see
-		// tieFailures.
-		for name, lost := range forgotten {
+		// tieFailures. They are taken in the order of their names, so that
+		// the questions tieFailures asks come in the same order every run.
+		for _, name := range slices.Sorted(maps.Keys(forgotten)) {
+			lost := forgotten[name]
 			if held := end.vals[lost.variable]; held != nil {
 				v.left = append(v.left, leftover{name: name, val: held[lost.index], facts: slices.Clip(end.hyps), loop: summary,
 					path: slices.Clip(end.chosen[len(summary.path):])})

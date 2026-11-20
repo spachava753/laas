@@ -26,7 +26,7 @@ var wantPattern = regexp.MustCompile("`([^`]*)`")
 // This is the contract of analysistest.Run, which is not used here because
 // it would also demand an expectation for every fact, and the analyzer
 // exports one for each verified function.
-func runCorpus(t *testing.T, analyzer *analysis.Analyzer, patterns ...string) {
+func runCorpus(t *testing.T, analyzer *analysis.Analyzer, patterns ...string) *checker.Graph {
 	t.Helper()
 	testdata, err := filepath.Abs("testdata")
 	if err != nil {
@@ -124,6 +124,7 @@ func runCorpus(t *testing.T, analyzer *analysis.Analyzer, patterns ...string) {
 	for _, message := range missing {
 		t.Error(message)
 	}
+	return graph
 }
 
 func TestAnalyzer(t *testing.T) {

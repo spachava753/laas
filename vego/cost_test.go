@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"golang.org/x/tools/go/analysis"
 )
 
 // TestCostFlag checks that -vego.cost prints what verifying each function
@@ -48,6 +50,50 @@ func TestCostFlag(t *testing.T) {
 			if !regexp.MustCompile(pattern).MatchString(lines[i]) {
 				t.Errorf("line %d is %q, want it to match %s", i+1, lines[i], pattern)
 			}
+		}
+	}
+}
+
+// TestFailureTracking checks that a function that returns no error asks no
+// question of the always-fails check, which nothing would read, while one
+// that returns an error does; and that a trusted contract that never says
+// it succeeds is still marked so in the trust report when only a function
+// that returns no error calls it.
+func TestFailureTracking(t *testing.T) {
+	saved := observeCosts
+	defer func() { observeCosts = saved }()
+	kinds := map[string][len(questionNames)]int{}
+	observeCosts = func(pass *analysis.Pass, costs []*fnCost) {
+		for _, c := range costs {
+			kinds[c.fn.obj.FullName()] = c.kinds
+		}
+	}
+	analyzer := newAnalyzer()
+	if err := analyzer.Flags.Set("trusted", filepath.Join("testdata", "trusted.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	graph := runCorpus(t, analyzer, "trackfail", "trackquiet")
+	if n := kinds["trackfail.Passes"][failureCheck]; n == 0 {
+		t.Errorf("Passes asked no question of the always-fails check")
+	}
+	for _, fn := range []string{"trackfail.Ignores", "trackquiet.Length"} {
+		if n := kinds[fn][failureCheck]; n != 0 {
+			t.Errorf("%s returns no error and asked %d questions of the always-fails check", fn, n)
+		}
+	}
+	for _, action := range graph.Roots {
+		usage := action.Result.(*Usage)
+		found := false
+		for _, use := range usage.Entries {
+			if strings.HasSuffix(use.Key, ".parse") {
+				found = true
+				if !use.Unpredictable {
+					t.Errorf("in %s, %s is not marked as failing unpredictably", action.Package.PkgPath, use.Key)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("in %s, the entry of parse is not in use", action.Package.PkgPath)
 		}
 	}
 }

@@ -699,6 +699,20 @@ func (v *fnVerifier) elementFacts(seq *logic.Term, elem types.Type) *logic.Term 
 // and the memory it may have written.
 func (v *fnVerifier) noteFailureSource(fn *funcInfo, results []value, st *state, facts []*logic.Term, made forward) {
 	defer v.asking(failureCheck)()
+	if !v.tracksFailure {
+		// Nothing reads the sources of a function that returns no error,
+		// or of code that is checked for some other purpose. Whether a
+		// trusted contract forces success is still settled, for the
+		// trust report.
+		if fn.trust != nil || fn.valueOf != nil || fn.methodOf != nil {
+			for _, index := range errorResults(fn) {
+				if results[index] != nil {
+					v.trustForces(fn)
+				}
+			}
+		}
+		return
+	}
 	path := append(slices.Clip(st.hyps), facts...)
 	local := fn.decl != nil
 	for _, index := range errorResults(fn) {
@@ -836,6 +850,9 @@ type failure struct {
 // a loop forgets of memory is not followed in this way.
 func (v *fnVerifier) tieFailures() {
 	defer v.asking(failureCheck)()
+	if !v.tracksFailure {
+		return
+	}
 	// What a call produced spreads: to the unknown that stands for a
 	// variable a loop forgot, if what an iteration leaves in the variable
 	// depends on it, and to what a later call produced, if that call was
