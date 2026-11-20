@@ -223,7 +223,7 @@ func (v *fnVerifier) checkNotHandable(call *ast.CallExpr, fn *funcInfo) {
 		// A parameter whose type has a contract takes a value made of the
 		// type, which is checked where it is made. A variadic parameter is
 		// a slice, which is no function.
-		if passed.packed || !fn.runs[param] || fn.calls[param] != nil || !isFunc(param.Type()) || v.valueContract(param.Type()) != nil {
+		if passed.packed || (!fn.runs[param] && fn.keeps[param] == nil) || fn.calls[param] != nil || !isFunc(param.Type()) || v.valueContract(param.Type()) != nil {
 			continue
 		}
 		what := types.ExprString(arg)
@@ -234,6 +234,12 @@ func (v *fnVerifier) checkNotHandable(call *ast.CallExpr, fn *funcInfo) {
 			if named, method := v.valueForm(inner); named == nil && method == nil {
 				continue
 			}
+		}
+		if !fn.runs[param] {
+			// What a function keeps runs after the call, which a contract
+			// under calls cannot describe.
+			v.unsupported(arg.Pos(), fmt.Sprintf("%s is handed to %s as %s, which its trusted contract lists under keeps, and whose type %s has no contract; "+
+				"declare a named function type with a contract and pass a value of it", what, fn.obj.Name(), param.Name(), param.Type()))
 		}
 		v.unsupported(arg.Pos(), fmt.Sprintf("%s is handed to %s as %s, which its trusted contract lists under runs with no contract under calls; "+
 			"give %s a contract under calls in the entry for %s", what, fn.obj.Name(), param.Name(), param.Name(), fn.trust.key))
@@ -285,12 +291,12 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 		// What runs claims for a value whose type has a contract holds
 		// only for values that meet it, so the proof rests on the entries
 		// that give the types it can hold contracts.
-		if fn.runs[param] {
+		if fn.runs[param] || fn.keeps[param] != nil {
 			v.noteEntriesIn(param.Type(), arg.Pos())
 		}
 		// What a parameter under formats is given is checked by the rule
 		// for formatting; see checkFormatted.
-		if fn.runs[param] || (param == fn.formatted && param != nil) || !holdsCode(t, map[types.Type]bool{}) {
+		if fn.runs[param] || fn.keeps[param] != nil || (param == fn.formatted && param != nil) || !holdsCode(t, map[types.Type]bool{}) {
 			continue
 		}
 		// Known origin of either kind makes every method harmless.
@@ -303,7 +309,8 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 		}
 		v.unsupported(arg.Pos(), fmt.Sprintf("%s is passed to %s, which is trusted, and is %s; "+
 			"%s could run code through it that nobody has seen. If its contract holds whatever that code does, "+
-			"list %s under runs in the contract", types.ExprString(arg), fn.obj.Name(), what, fn.obj.Name(), param.Name()))
+			"list %s under runs in the contract if %s runs it only while the call lasts, or under keeps, with where it keeps it, "+
+			"if it keeps it in a result or a parameter for later calls", types.ExprString(arg), fn.obj.Name(), what, fn.obj.Name(), param.Name(), fn.obj.Name()))
 	}
 }
 

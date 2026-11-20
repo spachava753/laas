@@ -60,6 +60,10 @@ type trustEntry struct {
 	// calls gives function parameters a contract: how the function calls
 	// what it is given there.
 	calls []trustCall
+	// keeps names the parameters whose code the function keeps, each with
+	// where it keeps it: results, or other parameters whose memory it
+	// writes; see keeps.go.
+	keeps []trustKeep
 	// receiver names the receiver of a method of an interface, so that the
 	// contract can speak of its states; see ifacestate.go.
 	receiver trustFormula
@@ -80,6 +84,15 @@ type trustCall struct {
 	deterministic bool
 	line          int
 	col           int
+}
+
+// trustKeep is one entry under keeps: a parameter and the results and
+// parameters in which the function keeps the code it holds.
+type trustKeep struct {
+	name  string
+	dests []trustFormula
+	line  int
+	col   int
 }
 
 // callShape reads the key of an entry under calls, as in f(i) or less(i, j).
@@ -258,6 +271,8 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			}
 		case "calls":
 			f.addCalls(entry, value, formulas)
+		case "keeps":
+			f.addKeeps(entry, value)
 		case "receiver":
 			if value.Kind != yaml.ScalarNode {
 				f.problem(value.Line, "the receiver of %s must be a name", entry.key)
@@ -265,7 +280,7 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			}
 			entry.receiver = trustFormula{text: value.Value, line: value.Line, col: value.Column}
 		default:
-			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, receiver, requires, ensures, modifies, runs, vouches, formats, or calls",
+			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, receiver, requires, ensures, modifies, runs, keeps, vouches, formats, or calls",
 				field.Value, entry.key)
 		}
 	}
@@ -420,7 +435,10 @@ type EntryUse struct {
 	Unpredictable bool
 	// Runs names the parameters whose code the function may run, and
 	// Vouches the error results whose errors the contract vouches for.
-	Runs    []string
+	Runs []string
+	// Keeps describes each parameter whose code the function keeps, and
+	// where, as in "r in result".
+	Keeps   []string
 	Vouches []string
 	// Formats names the parameters the function formats as package fmt
 	// does.
@@ -725,6 +743,7 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 		pv.trustedCall(fn, item)
 	}
 	pv.readFormats(fn, entry)
+	pv.readKeeps(fn, entry)
 	// The error results whose errors the author vouches for. Listing
 	// anything else would be a claim about nothing.
 	pv.readVouches(fn, entry, true)
@@ -1073,7 +1092,7 @@ func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 		}
 		pv.usage.Entries = append(pv.usage.Entries, &EntryUse{
 			Key: entry.key, Reason: entry.reason, Shipped: entry.file.shipped,
-			File: entry.file.path, Line: entry.line, Runs: runs, Vouches: vouches, Formats: formats, Callbacks: callbacks,
+			File: entry.file.path, Line: entry.line, Runs: runs, Keeps: keepsDescribed(entry), Vouches: vouches, Formats: formats, Callbacks: callbacks,
 			Every: every, Relied: []string{pv.pass.Pkg.Path()}, Fingerprint: entry.fingerprint(), States: states,
 		})
 		index = len(pv.usage.Entries) - 1

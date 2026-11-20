@@ -130,7 +130,7 @@ func logNumber(x int) {
 
 // @Ensures s != nil
 func MakeSink() (s Sink) {
-	return logNumber // want `cannot verify MakeSink: logNumber may call through a function value or an interface value, and code that a function value runs cannot do that yet: no contract of a function type or of a method of an interface has a variant, so nothing would prove that such calls end; logNumber calls logRecord, which is trusted and runs what r holds, which can be a value of io.Writer, whose methods all have contracts, so that verified code can make one. Make the value in code that is not verified, or keep that call out of what logNumber runs`
+	return logNumber // want `cannot verify MakeSink: logNumber may call through a function value or an interface value, and code that a function value runs cannot do that yet: no contract of a function type or of a method of an interface has a variant, so nothing would prove that such calls end; logNumber calls logRecord, which is trusted and runs what r holds, which can be a value of io.Writer, whose methods all have contracts, so that it can hold code that verified code made. Make the value in code that is not verified, or keep that call out of what logNumber runs`
 }
 
 // fresh makes the error it returns with errors.New, which calls nothing.

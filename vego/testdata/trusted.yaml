@@ -1362,6 +1362,164 @@ trusted:
     formats: [v]
     modifies: []
 
+
+  # Functions that keep what they are given; see testdata/src/keeps.
+  keepslib.NewRegistry:
+    reason: Returns a new, empty registry.
+    modifies: []
+    ensures: ["result != nil", "fresh(result)"]
+
+  (*keepslib.Registry).Add:
+    reason: Keeps h in the registry r, and Fire calls it later; it calls nothing while it runs.
+    requires: ["r != nil"]
+    runs: [r]
+    keeps:
+      h: [r]
+    modifies: [r]
+    vouches: [r]
+
+  (*keepslib.Registry).Fire:
+    reason: Calls each handler kept in r with n, which handlers of the registry require not to be negative.
+    requires: ["r != nil", "n >= 0"]
+    runs: [r]
+    modifies: []
+
+  (*keepslib.Registry).AddRaw:
+    reason: A test of a function literal handed to a parameter under keeps whose type has no contract.
+    requires: ["r != nil"]
+    runs: [r]
+    keeps:
+      f: [r]
+    modifies: [r]
+    vouches: [r]
+
+  keepslib.Wrap:
+    reason: Returns a new box that keeps r and reads from it in Fill.
+    requires: ["r != nil"]
+    keeps:
+      r: [result]
+    modifies: []
+    vouches: [result]
+    ensures: ["result != nil", "fresh(result)"]
+
+  (*keepslib.Box).Fill:
+    reason: Reads once from the reader in b into p, which must not be empty.
+    requires: ["b != nil", "|p| > 0"]
+    runs: [b]
+    modifies: [p]
+    ensures: ["0 <= result And result <= |p|"]
+
+  keepslib.Keep:
+    reason: Keeps h in a package-level variable, which keeps cannot name.
+    keeps:
+      h: []
+    modifies: []
+
+  keepslib.KeepsCount:
+    reason: A test of keeps over a parameter that holds no code.
+    keeps:
+      n: [result]
+    modifies: []
+    vouches: [result]
+
+  keepslib.KeepsInCount:
+    reason: A test of keeps into a result that can hold no code.
+    keeps:
+      r: [result]
+    modifies: []
+
+  keepslib.KeepsInSelf:
+    reason: A test of keeps into the parameter itself.
+    keeps:
+      r: [r]
+    modifies: [r]
+    vouches: [r]
+
+  keepslib.KeepsInUnlisted:
+    reason: A test of keeps into a parameter that modifies does not list.
+    keeps:
+      h: [reg]
+    modifies: []
+
+  keepslib.KeepsInError:
+    reason: A test of keeps of a function value into an error, which stratification does not count.
+    keeps:
+      h: [result]
+    modifies: []
+
+  keepslib.KeepsInNothing:
+    reason: A test of keeps into a name that is not a parameter or a result.
+    keeps:
+      h: [box]
+    modifies: []
+
+  keepslib.KeepsUnknown:
+    reason: A test of keeps of a name that is not a parameter.
+    keeps:
+      g: [result]
+    modifies: []
+
+  keepslib.KeepsCalled:
+    reason: A test of keeps of a parameter with a contract under calls.
+    runs: [f]
+    calls:
+      f(i): {}
+    keeps:
+      f: [result]
+    modifies: []
+    vouches: [result]
+
+  keepslib.KeepsFormatted:
+    reason: A test of keeps of a parameter under formats.
+    formats: [v]
+    keeps:
+      v: [result]
+    modifies: []
+    vouches: [result]
+
+  keepslib.KeepsTwice:
+    reason: A test of keeps that names a destination twice.
+    keeps:
+      h: [result, result]
+    modifies: []
+    vouches: [result]
+
+  keepslib.Closing:
+    reason: Returns a new closer whose Close does nothing and whose Read reads from r.
+    requires: ["r != nil"]
+    keeps:
+      r: [result]
+    modifies: []
+    vouches: [result]
+    ensures: ["result != nil", "fresh(result)", "~closed(result)"]
+
+  keepslib.Consume:
+    reason: A test of a trusted function that runs a closer it is given; it reads from rc and leaves it open.
+    requires: ["rc != nil"]
+    runs: [rc]
+    modifies: []
+
+  (*guide.Hub).Add:
+    reason: Appends e to the events of h, which only Fire reads; it calls nothing. Read 2026-11-20.
+    requires: ["h != nil"]
+    runs: [h]
+    keeps:
+      e: [h]
+    modifies: [h]
+    vouches: [h]
+
+  (*guide.Hub).Fire:
+    reason: Calls each event of h with n, on the calling goroutine, before it returns. Read 2026-11-20.
+    requires: ["h != nil", "n >= 0"]
+    runs: [h]
+    modifies: []
+
+  foreignlib.Keeps:
+    reason: Lists keeps, which a type cannot.
+    keeps:
+      e: [e]
+    modifies: []
+
   (time.Duration).String:
     reason: A test of a trusted String method run by formatting; it only reads the number.
     modifies: []

@@ -86,6 +86,9 @@ func (pv *pkgVerifier) typeEntry(key string, obj *types.Func, methodOf *types.Fu
 	if len(entry.calls) > 0 {
 		fn.defect("it has calls, which a contract of a type cannot have")
 	}
+	if len(entry.keeps) > 0 {
+		fn.defect("it lists keeps, which a contract of a type cannot have: a call through a value of the type is never handed code nobody has seen")
+	}
 	pv.readVouches(fn, entry, false)
 	pv.checkValueContract(fn)
 	// A contract that cannot be used makes every use of it an error, so
@@ -322,6 +325,9 @@ func (entry *trustEntry) fingerprint() string {
 	for _, call := range entry.calls {
 		parts = append(parts, fmt.Sprintf("calls %s(%s) %v", call.name, strings.Join(call.params, ", "), call.deterministic))
 		list("calls requires", call.requires)
+	}
+	for _, kept := range keepsDescribed(entry) {
+		parts = append(parts, "keeps "+kept)
 	}
 	return strings.Join(parts, "\n")
 }

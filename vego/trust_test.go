@@ -55,6 +55,11 @@ trusted:
 		{"rejects a contract that is not a mapping", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    calls:\n      f(i):\n    modifies: []\n", "f(i) must be a mapping"},
 		{"rejects an unknown field of a contract", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    calls:\n      f(i):\n        ensures: []\n    modifies: []\n", `unknown field "ensures" under f(i) in the calls of sort.Search; expected requires or deterministic`},
 		{"rejects calls requires that do not parse", "version: 1\ntrusted:\n  sort.Search:\n    reason: r\n    calls:\n      f(i):\n        requires: [\"i <\"]\n    modifies: []\n", "syntax error in requires of f(i) in calls"},
+		{"accepts what a function keeps", "version: 1\ntrusted:\n  bufio.NewScanner:\n    reason: r\n    keeps:\n      r: [result]\n    modifies: []\n", ""},
+		{"rejects keeps that is not a mapping", "version: 1\ntrusted:\n  bufio.NewScanner:\n    reason: r\n    keeps: [r]\n    modifies: []\n", "keeps of bufio.NewScanner must map a parameter"},
+		{"rejects a destination that is not a list", "version: 1\ntrusted:\n  bufio.NewScanner:\n    reason: r\n    keeps:\n      r: result\n    modifies: []\n", "r must map to a list of results and parameters"},
+		{"rejects a destination that is not a name", "version: 1\ntrusted:\n  bufio.NewScanner:\n    reason: r\n    keeps:\n      r: [[result]]\n    modifies: []\n", "r must map to a list of names"},
+		{"rejects a parameter kept twice", "version: 1\ntrusted:\n  io.TeeReader:\n    reason: r\n    keeps:\n      r: [result]\n      r: [result]\n    modifies: []\n", "occurs more than once"},
 		{"explains an unquoted formula", "version: 1\ntrusted:\n  sort.Ints:\n    reason: r\n    ensures:\n      - Forall i in [0, |x|) : x'[i] >= 0\n", "must be quoted"},
 	}
 	for _, test := range tests {
@@ -98,7 +103,7 @@ func TestReport(t *testing.T) {
 			Entries: []*EntryUse{
 				{
 					Key: "example.com/app.load", Reason: "Reads a file.", File: "/work/vego-trusted.yaml", Line: 4,
-					Unpredictable: true, Vouches: []string{"err"}, Calls: []token.Position{at("a.go", 10)},
+					Unpredictable: true, Vouches: []string{"err"}, Keeps: []string{"r in result and w"}, Calls: []token.Position{at("a.go", 10)},
 				},
 				{
 					Key: "sort.Ints", Reason: "Project override.", File: "/work/vego-trusted.yaml", Line: 9,
@@ -158,6 +163,7 @@ Project contracts in use: 5
     used at: b/b.go:11
   example.com/app.load  [may fail unpredictably]
     reason:  Reads a file.
+    keeps code held by: r in result and w; a claim that the code runs later only during calls handed what it is kept in, on the goroutine of that call, and is kept nowhere else
     vouches for the errors and function values in: err
     defined: vego-trusted.yaml:4
     used at: a.go:10, b/b.go:7

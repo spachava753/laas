@@ -612,7 +612,7 @@ func holdsCallable(pv *pkgVerifier, t types.Type, seen map[types.Type]bool) bool
 		// interface value that verified code made.
 		return u.Kind() == types.UnsafePointer
 	case *types.Interface:
-		return pv.makeable(t)
+		return pv.fullyContracted(t)
 	case *types.Pointer:
 		return holdsCallable(pv, u.Elem(), seen)
 	case *types.Slice:
@@ -872,8 +872,8 @@ func (pv *pkgVerifier) callableIn(t types.Type, seen map[types.Type]bool) string
 	case *types.Signature:
 		return "a function value of type " + t.String()
 	case *types.Interface:
-		if pv.makeable(t) {
-			return fmt.Sprintf("a value of %s, whose methods all have contracts, so that verified code can make one", t)
+		if pv.fullyContracted(t) {
+			return fmt.Sprintf("a value of %s, whose methods all have contracts, so that it can hold code that verified code made", t)
 		}
 	case *types.Pointer:
 		return pv.callableIn(u.Elem(), seen)
@@ -1091,6 +1091,10 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 	for i, param := range inputs {
 		args[param] = sv.entry[T.params[i]]
 		call.Args = append(call.Args, &ast.Ident{NamePos: e.Pos(), Name: T.params[i].Name()})
+	}
+	if fn.trust != nil && len(fn.keeps) > 0 {
+		v.unsupported(e.Pos(), fmt.Sprintf("%s keeps code it is given, and cannot be used as %s: "+
+			"what it would be given would come from whoever calls the value, and a value of a type has no place to say what it keeps", callee.Name(), as))
 	}
 	if fn.trust != nil && len(fn.calls) > 0 {
 		v.unsupported(e.Pos(), fmt.Sprintf("%s calls a function it is given, and cannot be used as %s: "+

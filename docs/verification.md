@@ -3377,7 +3377,9 @@ For this reason `vego` refuses to pass such a value to a trusted function:
 ```text
 vego: cannot verify TellsUnknown: e is passed to tell, which is trusted, and is an error
 whose origin is not known; tell could run code through it that nobody has seen. If its
-contract holds whatever that code does, list e under runs in the contract
+contract holds whatever that code does, list e under runs in the contract if tell runs it
+only while the call lasts, or under keeps, with where it keeps it, if it keeps it in a
+result or a parameter for later calls
 ```
 
 There are three ways to deal with this.
@@ -3411,21 +3413,23 @@ The claim is false for a function that calls the methods of an `error` when unve
 
 - It runs the code only before it returns.
 - It runs the code only on the goroutine that called it.
-- It keeps no value that can hold code once it returns, in memory or anywhere else.
+- Once it returns, it holds no value that can hold code anywhere that value was not held when the call began, unless the entry lists the parameter under `keeps`.
 
-A function that stores a callback and calls it later, such as one that registers a handler, makes these claims false. Do not list its parameter under `runs`. Call it from code that is not verified.
+A method of a logger with `runs: [l]` meets the third claim. The logger held its writer before the call, and it holds the same writer afterwards.
+
+A function that stores a callback and calls it later, such as one that registers a handler, makes these claims false. Do not list its parameter under `runs` alone. If it keeps the callback in a result, or in memory that a parameter reaches, list the parameter under `keeps`, as described in [Functions that keep what they are given](#functions-that-keep-what-they-are-given). Otherwise call the function from code that is not verified.
 
 When the parameter can hold a function value of a type with a contract (see [Function values](#function-values)), `runs` claims that the function calls such a value only with arguments that meet the `Requires` clauses of its type. The same goes for an interface value with a method that has a contract (see [Interfaces](#interfaces)): the function calls such a method only with arguments that meet the method's `Requires`. For a function value of a type with a contract, and an interface value whose methods all have contracts, the rest of the claim then has to hold only for values that meet their contracts, and every value that verified code passes does. For any other code, the claim has to hold whatever code arrives. That includes an interface value of a type with a method that has no contract, even when other methods of the type have one, such as `context.Context`. It also includes the methods of an interface without contracts, such as `fmt.Stringer`, an `any`, and an interface type written in place that embeds a named one.
 
-A trusted function may run code that verified code made when it lists under `runs` a parameter that can hold a function value, or an interface value whose methods all have contracts that speak of no state. Verified code can make values of those, and of no other interface. See [Making a value of an interface with a state](#making-a-value-of-an-interface-with-a-state). That code could call back into the verified code that handed it over. So a function that calls such a trusted function cannot itself be made into a function value or a method of an interface value. The message says which call and which parameter are the reason:
+A trusted function may run code that verified code made when it lists under `runs` a parameter that can hold a function value, or an interface value whose methods all have contracts. Verified code can make values of those, and of no other interface. It makes a value of an interface whose contracts speak of a state, such as `io.ReadCloser`, only through a trusted function that keeps a value it is given in such an interface. See [Making a value of an interface with a state](#making-a-value-of-an-interface-with-a-state) and [Functions that keep what they are given](#functions-that-keep-what-they-are-given). That code could call back into the verified code that handed it over. So a function that calls such a trusted function cannot itself be made into a function value or a method of an interface value. The message says which call and which parameter are the reason:
 
 ```text
 vego: cannot verify MakeSink: logNumber may call through a function value or an interface value,
 and code that a function value runs cannot do that yet: no contract of a function type or of a
 method of an interface has a variant, so nothing would prove that such calls end; logNumber calls
 logRecord, which is trusted and runs what r holds, which can be a value of io.Writer, whose methods
-all have contracts, so that verified code can make one. Make the value in code that is not
-verified, or keep that call out of what logNumber runs
+all have contracts, so that it can hold code that verified code made. Make the value in code that
+is not verified, or keep that call out of what logNumber runs
 ```
 
 A trusted method that is made into a function value, as in `w.Get`, or into a method of an interface value is handed its receiver at each call. If the receiver can carry code, the entry must list it under `runs`, as for a call written out.
@@ -3610,6 +3614,116 @@ After the call, `vego` knows, for every argument that the type of `f` and the `r
 - With `deterministic: true`, or when the `ensures` applies the parameter, the contract has to hold only for a function that returns the same result whenever it is called with the same argument. `f(x)` in the `ensures` is the value that such a function returns for `x`.
 
 The trust report shows each contract under `calls` in a line such as `calls f(i) when: 0 <= i < n`.
+
+### Functions that keep what they are given
+
+Some functions keep a value they are given and run its code later. A registry keeps a handler and calls it when it fires:
+
+```go
+// Event is called with a number that is not negative.
+//
+// @Requires n >= 0
+// @Ensures True
+type Event func(n int)
+
+type Hub struct {
+	events []Event
+}
+
+func (h *Hub) Add(e Event) { h.events = append(h.events, e) }
+
+func (h *Hub) Fire(n int) {
+	for _, e := range h.events {
+		e(n)
+	}
+}
+```
+
+`runs` cannot describe `Add`, because `Add` keeps `e` after it returns. List the parameter under `keeps` instead, with the results and parameters in which the function keeps it:
+
+```yaml
+  (*example.com/app/events.Hub).Add:
+    reason: Appends e to the events of h, which only Fire reads; it calls nothing. Read 2026-11-20.
+    requires: ["h != nil"]
+    runs: [h]
+    keeps:
+      e: [h]
+    modifies: [h]
+    vouches: [h]
+
+  (*example.com/app/events.Hub).Fire:
+    reason: Calls each event of h with n, on the calling goroutine, before it returns. Read 2026-11-20.
+    requires: ["h != nil", "n >= 0"]
+    runs: [h]
+    modifies: []
+```
+
+With these entries, a verified function can register a handler and fire it:
+
+```go
+// @Requires n >= 0
+// @Ensures True
+func record(n int) {}
+
+// @Requires h != nil
+// @Modifies h
+// @Ensures True
+func Subscribe(h *Hub) {
+	h.Add(record)
+	h.Fire(1)
+}
+```
+
+`Add` lists `h` under `runs` as well, because `h` holds code: every trusted function that is handed a value that can hold code must list it under `runs` or `keeps`. Its `vouches: [h]` claims that what it writes into `h` meets the contract of `Event`.
+
+#### What keeps claims
+
+By listing a parameter under `keeps` with its destinations, you claim all of this about the function, for whatever code the parameter holds:
+
+- While the call lasts, the function runs none of that code, unless `runs` lists the parameter too.
+- After the call, the code runs only during a later call that is handed a value through which a destination can be reached. That includes a call of a method of a destination, and a call through a function value or an interface value read out of a destination.
+- Such a later call runs the code only on the goroutine that made it, and only before it returns.
+- The function keeps the code nowhere else. It does not store it in a package-level variable, give it to a goroutine, a timer, or a finalizer, or register it with code elsewhere.
+
+As for `runs`, for a function value of a type with a contract and an interface value whose methods all have contracts, the claim has to hold only for values that meet their contracts. For any other code it has to hold whatever code arrives.
+
+Under this claim, every later run of the code happens inside a call that `vego` checks. A trusted function that is handed a destination lists it under `runs`, and its entry then covers what the kept code does during that call. A call through a value is counted as one that may call through a value. So `Fire` above cannot be made to call back into the verified code that registered the handler without the cycle being refused, as described in [Arguments that carry code](#arguments-that-carry-code).
+
+A function that keeps a callback somewhere no destination reaches has no true entry. This applies to `http.HandleFunc`, `time.AfterFunc`, and a function that stores a handler in a package-level registry. Call such a function from code that is not verified.
+
+#### Checking an entry against the source
+
+Before you write `keeps` for a function of another module, read its source and check these things:
+
+1. Find where the argument is stored, directly or inside another value. Each place must be inside a result or inside memory that a listed parameter reaches.
+2. Find every read of each of those places. Each read must be in code that runs only during a call handed that result or parameter.
+3. Check that none of those reads is in a goroutine (`go`), a timer (`time.AfterFunc`, a `time.Timer` or `time.Ticker`), a finalizer or cleanup (`runtime.SetFinalizer`, `runtime.AddCleanup`), a callback that the function registers with another package (`context.AfterFunc`), or code that a package-level variable reaches.
+4. Check what each later call runs of the kept value. A type assertion of the kept value to another interface, such as `w.(io.StringWriter)`, followed by a call, runs a method that no contract covers, and makes the entry of that later call false.
+
+This entry looks true and is not:
+
+```go
+func NewPrefetcher(r io.Reader) *Prefetcher {
+	p := &Prefetcher{r: r, ahead: make(chan []byte, 1)}
+	go p.fill()
+	return p
+}
+```
+
+`NewPrefetcher` stores `r` only in its result, so `keeps: {r: [result]}` looks right. But `p.fill` runs on a goroutine of its own and calls `r.Read` while the caller goes on. That `Read` runs during no call that is handed the result. The entry would be false.
+
+#### What vego checks in an entry with keeps
+
+An entry with `keeps` cannot be used when any of these holds:
+
+- A listed name is not a parameter, or its type can hold no code.
+- A parameter is listed with no destination.
+- A destination is not a result or another parameter, or its type can hold no code.
+- A destination is a parameter that `modifies` does not list. Keeping a value in memory that a parameter reaches writes that memory.
+- The kept parameter can hold a function value, or a value of an interface whose methods all have contracts, and a destination can hold neither. A later call handed that destination would run code that verified code made without being counted.
+- The parameter has a contract under `calls`, or is listed under `formats`.
+
+A function literal, a function, or a method value of a function type without a contract cannot be handed to a parameter under `keeps`. A trusted function with `keeps` cannot be made into a function value or a method of an interface value.
 
 ### Errors that a trusted function returns
 
@@ -4169,7 +4283,7 @@ Floating-point values are supported but opaque. They can be passed around and us
 
 A proof by `vego` depends on the following assumptions. Each concerns something `vego` cannot see.
 
-- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and it keeps no value that can hold code. It does not call back, through another package, into the verified function that called it. A call back within the same package is found and reported. For a parameter listed under `runs`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter.
+- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and holds no value that can hold code anywhere it was not held when the call began, unless `keeps` lists the parameter. For a parameter listed under `keeps`, it keeps that code only in the results and parameters listed there, runs it during the call only if `runs` lists the parameter too, and the code runs later only during a call that is handed a value through which one of those can be reached, or a call through a value read out of one of them, on the goroutine of that call and before that call returns. It does not call back, through another package, into the verified function that called it. A call back within the same package is found and reported. For a parameter listed under `runs`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter.
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one that wraps it, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method.
 - An interface value that reaches verified code from code that is not verified meets the contracts of its methods. That includes a value passed as an argument, a value in memory that an argument reaches, a value that a call through another value returns, and a value that a trusted function returns or writes, which its entry vouches for. Called with arguments that meet the `Requires` of a method, the method returns without panicking, leaves its `Ensures` true, and writes nothing that verified code can see outside what its `Modifies` lists. This holds also when the value holds a pointer to a struct that verified code holds.
 - The same holds of the methods and function types that entries of the trust file give contracts, which is what such an entry claims (see [What an entry for a type claims](#what-an-entry-for-a-type-claims)). In particular, a caller that is not verified does not pass a verified function such a value together with a pointer to memory that the value writes, as a `*bytes.Buffer` passed both as an `io.Writer` and as a `*bytes.Buffer` would be. Every call through such a value returns: a `Read` from a pipe, a terminal, or a connection returns only once data or an error arrives.

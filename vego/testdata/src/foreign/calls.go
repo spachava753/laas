@@ -121,6 +121,12 @@ func Halves(f foreignlib.Half) (y int) {
 
 // @Requires f != nil
 // @Ensures True
+func Kept(f foreignlib.Keeps) {
+	f(errors.New("x")) // want `the trusted contract of foreignlib.Keeps \(trusted.yaml:\d+\) cannot be used: it lists keeps, which a contract of a type cannot have` `cannot verify Kept: the contract of Keeps could not be understood`
+}
+
+// @Requires f != nil
+// @Ensures True
 func Ran(f foreignlib.Runs) {
 	f(errors.New("x")) // want `the trusted contract of foreignlib.Runs \(trusted.yaml:\d+\) cannot be used: it lists runs` `cannot verify Ran: the contract of Runs could not be understood`
 }

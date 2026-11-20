@@ -54,7 +54,7 @@ func logNumber(x int) {
 //
 // @Ensures s != nil
 func MakeSink() (s Sink) {
-	return logNumber // want `cannot verify MakeSink: logNumber may call through a function value or an interface value.*a value of io.Closer, whose methods all have contracts, so that verified code can make one`
+	return logNumber // want `cannot verify MakeSink: logNumber may call through a function value or an interface value.*a value of io.Closer, whose methods all have contracts, so that it can hold code that verified code made`
 }
 
 // @Requires a != nil And b != nil

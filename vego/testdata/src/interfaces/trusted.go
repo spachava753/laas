@@ -160,7 +160,7 @@ func logNumber(x int) {
 //
 // @Ensures s != nil
 func MakeSink() (s Sink) {
-	return logNumber // want `cannot verify MakeSink: logNumber may call through a function value or an interface value, and code that a function value runs cannot do that yet: .*; logNumber calls logRecord, which is trusted and runs what r holds, which can be a value of io.Writer, whose methods all have contracts, so that verified code can make one. Make the value in code that is not verified, or keep that call out of what logNumber runs`
+	return logNumber // want `cannot verify MakeSink: logNumber may call through a function value or an interface value, and code that a function value runs cannot do that yet: .*; logNumber calls logRecord, which is trusted and runs what r holds, which can be a value of io.Writer, whose methods all have contracts, so that it can hold code that verified code made. Make the value in code that is not verified, or keep that call out of what logNumber runs`
 }
 
 // Labelled holds a stringer, which verified code does not call.

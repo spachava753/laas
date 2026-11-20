@@ -1,0 +1,77 @@
+// Package keeps holds verified code that hands values to trusted functions
+// that keep them, and what is refused when an entry for such a function
+// cannot be true or would leave a later run unseen.
+package keeps
+
+import (
+	"io"
+
+	"keepslib"
+)
+
+// show takes a number that is not negative.
+//
+// @Requires n >= 0
+// @Ensures True
+func show(n int) {}
+
+// Registers keeps a handler in a registry it is handed and fires it. What
+// Fire runs was kept by Add, and Fire's runs carries the claim.
+//
+// @Requires reg != nil
+// @Modifies reg
+// @Ensures True
+func Registers(reg *keepslib.Registry) {
+	reg.Add(show)
+	reg.Add(func(n int) { show(n) })
+	reg.Fire(3)
+}
+
+// FiresNegative fires a handler with a number its contract does not allow.
+//
+// @Requires reg != nil
+// @Ensures True
+func FiresNegative(reg *keepslib.Registry) {
+	reg.Fire(-1) // want `vego: precondition of Fire may not hold: n >= 0`
+}
+
+// Zeros reads zeros.
+type Zeros struct{}
+
+// Read fills one byte of p with a zero.
+//
+// @Requires |p| > 0
+// @Modifies p
+// @Ensures 0 <= n And n <= |p| And err = nil
+func (Zeros) Read(p []byte) (n int, err error) {
+	p[0] = 0
+	return 1, nil
+}
+
+// Boxes keeps a reader that verified code made in a box and reads through
+// the box.
+//
+// @Ensures 0 <= n And n <= 8
+func Boxes() (n int) {
+	b := keepslib.Wrap(Zeros{})
+	buf := make([]byte, 8)
+	return b.Fill(buf)
+}
+
+// BoxesGiven keeps a reader it is given.
+//
+// @Requires r != nil
+// @Ensures 0 <= n And n <= 1
+func BoxesGiven(r io.Reader) (n int) {
+	b := keepslib.Wrap(r)
+	return b.Fill(make([]byte, 1))
+}
+
+// FillsEmpty reads into an empty slice through the box.
+//
+// @Requires r != nil
+// @Ensures True
+func FillsEmpty(r io.Reader) {
+	b := keepslib.Wrap(r)
+	_ = b.Fill(nil) // want `vego: precondition of Fill may not hold: \|p\| > 0`
+}

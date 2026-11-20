@@ -103,12 +103,16 @@ func logNumber(x int) {
 }
 
 // MakeSink makes a value of a function that hands a closer to a trusted
-// function that runs it. Verified code makes no io.Closer, so nothing the
-// trusted function runs is code that verified code made.
+// function that runs it. Verified code converts nothing to io.Closer under
+// the shipped entry, whose contract speaks of the state closed, but a
+// trusted function that keeps what it is given, such as io.NopCloser, can
+// put code that verified code made into one. So logCloser counts as a call
+// through a value, and MakeSink, which verified before trusted functions
+// that keep a value, is refused.
 //
 // @Ensures s != nil
 func MakeSink() (s Sink) {
-	return logNumber
+	return logNumber // want `cannot verify MakeSink: logNumber may call through a function value or an interface value.*logCloser, which is trusted and runs what r holds, which can be a value of io.Closer, whose methods all have contracts, so that it can hold code that verified code made`
 }
 
 func receiverNamed() {}

@@ -61,6 +61,9 @@ type Half func(x int) (y int)
 // Runs has an entry that lists runs.
 type Runs func(e error)
 
+// Keeps has an entry that lists keeps.
+type Keeps func(e error)
+
 // Unread is a type nothing gives an entry.
 type Unread func(x int) (y int)
 

@@ -329,6 +329,10 @@ type funcInfo struct {
 	// runs holds the parameters of a trusted function whose code its
 	// contract says it may run.
 	runs map[*types.Var]bool
+	// keeps holds, for each parameter of a trusted function whose code its
+	// contract says it keeps, the results and parameters it keeps it in;
+	// see keeps.go.
+	keeps map[*types.Var][]string
 	// vouches holds the indices of the error results of a trusted function
 	// whose errors its contract vouches for; see knownError.
 	vouches map[int]bool
@@ -524,7 +528,7 @@ type pkgVerifier struct {
 	// fixedRefs holds, by the name of its constant, the reference of a
 	// fixed variable that a function has read, with the variable as this
 	// package spells it; see checkWriteOr.
-	fixedRefs map[string]string
+	fixedRefs    map[string]string
 	fixedOf      map[*types.Package]*fixedFact
 	hidden       string
 	reliedValues map[string]bool
@@ -1331,7 +1335,7 @@ func (pv *pkgVerifier) addFunc(decl *ast.FuncDecl) {
 // annotations and trusted contracts may use for its parameters and results.
 // The receiver of a method is its first parameter.
 func newFuncInfo(obj *types.Func) *funcInfo {
-	fn := &funcInfo{obj: obj, paramNames: map[string]*types.Var{}, resultNames: map[string]int{}, runs: map[*types.Var]bool{}, vouches: map[int]bool{},
+	fn := &funcInfo{obj: obj, paramNames: map[string]*types.Var{}, resultNames: map[string]int{}, runs: map[*types.Var]bool{}, keeps: map[*types.Var][]string{}, vouches: map[int]bool{},
 		vouchedWrites: map[*types.Var]bool{}, calls: map[*types.Var]*callback{}}
 	sig := obj.Type().(*types.Signature)
 	inputs := slices.Collect(sig.Params().Variables())
