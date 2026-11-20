@@ -2716,6 +2716,7 @@ stdentries	stdentries.Elapsed	5	92710	2
 stdentries	stdentries.Encode	8	14449	0
 stdentries	stdentries.Ext	10	11953	0
 stdentries	stdentries.Field	5	49925	0
+stdentries	stdentries.FieldQuietly	7	82125	0
 stdentries	stdentries.FirstASCII	4	7063	0
 stdentries	stdentries.FirstPart	10	45070	2
 stdentries	stdentries.Flag	10	100044	0

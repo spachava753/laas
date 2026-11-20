@@ -533,6 +533,39 @@ type returned struct {
 	// call is how the call is written, for one through a function value
 	// or an interface value.
 	call string
+	// within is, when the contract says that the result lies within a
+	// parameter, as within(result, s), the argument passed there as the
+	// caller wrote it, and param that parameter's name.
+	within, param string
+}
+
+// withinArgument finds, in the ensures of a callee, a conjunct that places
+// one of its results within a parameter, and returns the parameter and
+// the argument the call passed for it, when that argument is a variable or
+// a path of fields from one; otherwise it returns "".
+func withinArgument(fn *funcInfo, result int, args []passedArg) (param, argument string) {
+	name := spelledResult(fn, result)
+	for _, c := range fn.ensures {
+		if c.node == nil {
+			continue
+		}
+		for _, conjunct := range c.node.Conjuncts() {
+			if conjunct.Kind != logic.NCall || conjunct.Name != "within" || len(conjunct.Kids) != 2 ||
+				conjunct.Kids[0].Kind != logic.NIdent || conjunct.Kids[0].Name != name || conjunct.Kids[1].Kind != logic.NIdent {
+				continue
+			}
+			for _, arg := range args {
+				if arg.param.Name() != conjunct.Kids[1].Name || arg.expr == nil {
+					continue
+				}
+				switch e := ast.Unparen(arg.expr).(type) {
+				case *ast.Ident, *ast.SelectorExpr:
+					return arg.param.Name(), types.ExprString(e)
+				}
+			}
+		}
+	}
+	return "", ""
 }
 
 // contractTitle names the contract of a function type or of an interface
@@ -800,6 +833,10 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 			callee := from.fn.obj.Name()
 			remedy = fmt.Sprintf("it is memory that %s returned, and its contract does not say that this is new memory, so it may have existed when %s "+
 				"was called; take it as a parameter and list it in a // @Modifies clause", callee, v.fn.obj.Name())
+			if from.within != "" {
+				remedy = fmt.Sprintf("it is memory that %s returned, which its contract places within %s, and %s passed %s as %s; list %s in a // @Modifies clause",
+					callee, from.param, v.fn.obj.Name(), from.within, from.param, from.within)
+			}
 			switch contract := v.contractTitle(from.fn); {
 			case from.fn.trust != nil:
 			case contract != "":

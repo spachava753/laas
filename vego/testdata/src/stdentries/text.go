@@ -169,9 +169,21 @@ func Trimmed(b []byte) (result []byte) {
 func TrimmedQuietly(b []byte) (result []byte) {
 	result = bytes.TrimSpace(b)
 	if len(result) > 0 {
-		result[0] = 'y' // want `result\[0\] is assigned, which TrimmedQuietly may not modify; it is memory that TrimSpace returned`
+		result[0] = 'y' // want `result\[0\] is assigned, which TrimmedQuietly may not modify; it is memory that TrimSpace returned, which its contract places within s, and TrimmedQuietly passed b as s; list b in a // @Modifies clause`
 	}
 	return result
+}
+
+// FieldQuietly writes the part of a record before a comma without saying
+// so.
+//
+// @Ensures True
+func FieldQuietly(b []byte) (before []byte) {
+	before, _, _ = bytes.Cut(b, []byte{','})
+	if len(before) > 0 {
+		before[0] = 'x' // want `before\[0\] is assigned, which FieldQuietly may not modify; it is memory that Cut returned, which its contract places within s, and FieldQuietly passed b as s; list b in a // @Modifies clause`
+	}
+	return before
 }
 
 // SameBytes compares two slices by their contents.

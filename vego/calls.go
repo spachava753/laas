@@ -593,7 +593,9 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			if isSlice(sig.Results().At(i).Type()) || isPointer {
 				for _, leaf := range results[i] {
 					if leaf.Sort == logic.Ref && leaf.Op == logic.OpConst {
-						v.returnedBy[leaf.Name] = returned{fn: fn, result: i, call: name}
+						from := returned{fn: fn, result: i, call: name}
+						from.param, from.within = withinArgument(fn, i, bound)
+						v.returnedBy[leaf.Name] = from
 					}
 				}
 			}
