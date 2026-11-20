@@ -93,7 +93,7 @@ func (wrapping) Read(p []byte) (n int, err error) {
 
 // @Ensures r != nil
 func Wrapping() (r io.Reader) {
-	return wrapping{} // want `cannot verify Wrapping: Read may call through a function value or an interface value, and code that an interface value runs cannot do that yet: .*Read calls Errorf, which formats its operands, which can run their methods`
+	return wrapping{}
 }
 
 // @Requires s != nil And 0 <= n <= 1000

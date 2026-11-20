@@ -97,9 +97,11 @@ func FormatsAny(v any) {
 	_, _ = fmt.Println(v) // want `vego:\ cannot\ verify\ FormatsAny:\ Println\ formats\ v,\ a\ value\ of\ type\ any,\ and\ that\ may\ run\ code\ nobody\ has\ checked:\ any\ is\ an\ interface`
 }
 
+// A pointer to a plain struct prints what it points to, or <nil>.
+//
 // @Ensures True
 func FormatsPointer(p *Point) {
-	log.Print(p) // want `vego:\ cannot\ verify\ FormatsPointer:\ Print\ formats\ p,\ a\ value\ of\ type\ \*formatting\.Point,\ and\ that\ may\ run\ code\ nobody\ has\ checked:\ \*formatting\.Point\ is\ a\ pointer`
+	log.Print(p)
 }
 
 // @Ensures True
@@ -131,7 +133,7 @@ func (c Celsius) String() string { return "C" }
 
 // @Ensures True
 func FormatsStringer(c Celsius) (s string) {
-	return fmt.Sprint(c) // want `vego:\ cannot\ verify\ FormatsStringer:\ Sprint\ formats\ c,\ a\ value\ of\ type\ formatting\.Celsius,\ and\ that\ may\ run\ code\ nobody\ has\ checked:\ formatting\.Celsius\ has\ a\ method\ String`
+	return fmt.Sprint(c) // want `vego:\ cannot\ verify\ FormatsStringer:\ Sprint\ formats\ c,\ and\ fmt\ would\ call\ \(formatting\.Celsius\)\.String,\ which\ has\ no\ contract`
 }
 
 // The error that Println returns is not known, so the contract may leave

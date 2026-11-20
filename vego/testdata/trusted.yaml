@@ -1351,6 +1351,10 @@ trusted:
     formats: [v]
     modifies: []
 
+  (time.Duration).String:
+    reason: A test of a trusted String method run by formatting; it only reads the number.
+    modifies: []
+
 # States of interfaces of another module, and contracts that speak of them.
 state:
   ifacestatelib.Conn:

@@ -381,7 +381,7 @@ func (n numbers) String() string {
 // @Requires |a| = 1 And a[0] = 0
 // @Ensures result = 0
 func Stale(a numbers) (result int) {
-	_ = fmt.Errorf("%s", a) // want `vego:\ cannot\ verify\ Stale:\ fmt\.Errorf\ formats\ a,\ a\ value\ of\ type\ values\.numbers,\ and\ that\ may\ run\ code\ nobody\ has\ checked:\ values\.numbers\ has\ a\ method\ String`
+	_ = fmt.Errorf("%s", a) // want `vego:\ cannot\ verify\ Stale:\ fmt\.Errorf\ formats\ a,\ and\ fmt\ would\ call\ \(values\.numbers\)\.String,\ which\ has\ no\ contract`
 	return a[0]
 }
 

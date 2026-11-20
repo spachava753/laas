@@ -44,6 +44,9 @@ type fmtSpec struct {
 	line bool
 }
 
+// fmtPointerCost is what a pointer to a struct takes beyond the struct.
+const fmtPointerCost = 8
+
 // fmtVerbCost bounds what a verb writes apart from its operand: a wrapper
 // such as %!d(MISSING), %!(BADWIDTH), or %!(NOVERB), and the separator
 // and parenthesis of %!(EXTRA ...).
@@ -111,10 +114,15 @@ func constantSpec(format string) fmtSpec {
 	return spec
 }
 
-// fmtOperand is a value that is formatted, with its type.
+// fmtOperand is a value that is formatted, with its type. For a pointer,
+// val and t are what it points to and pointer is set. assumed is set for a
+// value whose String or Error method fmt may call, whose result has no
+// term.
 type fmtOperand struct {
-	val value
-	t   types.Type
+	val     value
+	t       types.Type
+	pointer bool
+	assumed bool
 }
 
 // fmtBound returns a term that is at least the number of bytes that fmt
@@ -134,8 +142,13 @@ func fmtBound(spec fmtSpec, operands []fmtOperand) (*logic.Term, bool) {
 	var each []*logic.Term
 	for _, op := range operands {
 		weight, whole := fmtWeight(op.val, op.t, spec, true)
+		if op.pointer {
+			// A pointer is printed as & and what it points to, or as
+			// <nil>, which takes less.
+			weight = logic.Add(weight, logic.IntLit(fmtPointerCost))
+		}
 		each = append(each, weight)
-		complete = complete && whole
+		complete = complete && whole && !op.assumed
 	}
 	if spec.line {
 		for _, weight := range each {

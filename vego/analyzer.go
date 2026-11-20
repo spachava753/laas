@@ -1202,6 +1202,12 @@ func (pv *pkgVerifier) collect() {
 					fn.callees = append(fn.callees, escaped...)
 				}
 			case *ast.CallExpr:
+				// Formatting a value calls its String or Error method.
+				for _, method := range pv.formattedMethods(n) {
+					if pv.funcs[method.Origin()] != nil {
+						fn.callees = append(fn.callees, pv.funcs[method.Origin()])
+					}
+				}
 				tv := pv.info.Types[n.Fun]
 				if tv.IsType() || tv.IsBuiltin() || typeutil.StaticCallee(pv.info, n) != nil {
 					break

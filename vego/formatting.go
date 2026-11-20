@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"go/ast"
 	"go/constant"
+	"go/token"
 	"go/types"
+	"slices"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"golang.org/x/tools/go/types/typeutil"
 )
 
 // Formatting runs code. Package fmt calls the Format, GoString, Error, and
@@ -185,9 +188,84 @@ func plainReason(t types.Type, visiting map[types.Type]bool) string {
 	return fmt.Sprintf("%s cannot be formatted by verified code", t)
 }
 
+// fmtCall is a method that fmt calls on a value it formats: Error, or
+// String for a type that is no error. deref is set when the value is a
+// pointer and the method has a value receiver, so that fmt calls it on what
+// the pointer points to.
+type fmtCall struct {
+	method *types.Func
+	deref  bool
+}
+
+// errorType and stringerType are the interfaces by which fmt decides
+// whether it calls Error or String.
+var (
+	errorType    = types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
+	stringerType = types.NewInterfaceType([]*types.Func{types.NewFunc(token.NoPos, nil, "String",
+		types.NewSignatureType(nil, nil, nil, nil, types.NewTuple(types.NewVar(token.NoPos, nil, "", types.Typ[types.String])), false))}, nil).Complete()
+)
+
+// formatMethod decides what fmt runs when it formats a value of a type that
+// is not error: nothing, a method it calls on the value (see fmtCall), or
+// something vego cannot check, which it says why.
+//
+// fmt calls Error on a value that is an error and String on one that is a
+// fmt.Stringer, for the verbs v, s, x, X, and q, and for an extra operand;
+// for other verbs it prints the value instead. So a value with such a
+// method may be formatted when the method can be checked and what fmt would
+// print instead is plain: its type has no Format or GoString, is not a
+// pointer, or is a pointer to a struct, and what it is, or points to, is
+// plain apart from the method. A pointer to a plain struct without such a
+// method is plain too: fmt prints the fields of what it points to, or
+// <nil>.
+func formatMethod(t types.Type) (*fmtCall, string) {
+	why := plainReason(t, map[types.Type]bool{})
+	if why == "" {
+		return nil, ""
+	}
+	base := t
+	pointer, isPointer := types.Unalias(t).(*types.Pointer)
+	if isPointer {
+		if _, isStruct := pointer.Elem().Underlying().(*types.Struct); !isStruct {
+			return nil, why
+		}
+		base = pointer.Elem()
+	}
+	methods := types.NewMethodSet(t)
+	for method := range methods.Methods() {
+		if name := method.Obj().Name(); name == "Format" || name == "GoString" {
+			return nil, fmt.Sprintf("%s has a method %s, which fmt would call; of the methods fmt calls, only String and Error can be checked", t, name)
+		}
+	}
+	var name string
+	switch {
+	case types.Implements(t, errorType):
+		name = "Error"
+	case types.Implements(t, stringerType):
+		name = "String"
+	case isPointer:
+		// A pointer to a struct whose fields are plain and that has none
+		// of the methods.
+		if inner := plainReason(base, map[types.Type]bool{}); inner != "" {
+			return nil, inner
+		}
+		return nil, ""
+	default:
+		return nil, why
+	}
+	if inner := plainReason(base.Underlying(), map[types.Type]bool{}); inner != "" {
+		return nil, fmt.Sprintf("%s has a method %s, and for verbs that do not call it fmt prints what it holds, where %s", t, name, inner)
+	}
+	method := methods.Lookup(nil, name).Obj().(*types.Func)
+	_, pointerReceiver := method.Type().(*types.Signature).Recv().Type().(*types.Pointer)
+	return &fmtCall{method: method, deref: isPointer && !pointerReceiver}, ""
+}
+
 // checkFormattable refuses a value that the function named by who formats,
-// when formatting it may run code nobody has checked.
-func (v *fnVerifier) checkFormattable(arg ast.Expr, who string) {
+// when formatting it may run code nobody has checked, and returns the
+// method that formatting it calls, if any; see checkFormatRuns. errorf is
+// set for fmt.Errorf, which keeps what %w is given.
+func (v *fnVerifier) checkFormattable(arg ast.Expr, who string, errorf bool) *fmtCall {
 	t := v.info.TypeOf(arg)
 	if isError(t) {
 		// Formatting an error runs its methods, which known origin of
@@ -197,23 +275,94 @@ func (v *fnVerifier) checkFormattable(arg ast.Expr, who string) {
 				"only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a trusted contract vouches for, "+
 				"can be formatted%s", types.ExprString(arg), v.originWhy(arg)))
 		}
-		return
+		return nil
 	}
-	if why := plainReason(t, map[types.Type]bool{}); why != "" {
+	run, why := formatMethod(t)
+	if why != "" {
 		v.unsupported(arg.Pos(), fmt.Sprintf("%s formats %s, a value of type %s, and that may run code nobody has checked: %s; "+
-			"only numbers, booleans, strings, and slices and structs of them without such methods, and errors of known origin, can be formatted",
+			"only numbers, booleans, strings, and slices and structs of them, pointers to such structs, errors of known origin, "+
+			"and values whose String or Error method has a contract that modifies nothing can be formatted",
 			who, types.ExprString(arg), t, why))
+	}
+	if run == nil {
+		return nil
+	}
+	name := run.method.Name()
+	if errorf && types.Implements(t, errorType) {
+		// %w would keep it in the tree of the new error, whose methods
+		// would then not be the standard library's.
+		v.unsupported(arg.Pos(), fmt.Sprintf("fmt.Errorf formats %s, a value of type %s, which is an error that %%w would wrap; "+
+			"only an error of type error whose origin is known can be wrapped", types.ExprString(arg), t))
+	}
+	fn := v.contractOf(run.method)
+	if fn == nil {
+		v.unsupported(arg.Pos(), fmt.Sprintf("%s formats %s, and fmt would call %s, which has no contract; annotate %s with // @ annotations "+
+			"so that it is verified, or add a trusted contract for %s to %s",
+			who, types.ExprString(arg), run.method.FullName(), name, run.method.FullName(), TrustFileName))
+	}
+	for _, defect := range fn.defects {
+		v.report(arg.Pos(), "the contract of %s cannot be used: %s", run.method.FullName(), defect)
+	}
+	if fn.broken {
+		v.unsupported(arg.Pos(), run.method.FullName()+" has a contract that could not be understood")
+	}
+	if len(fn.modifies) > 0 {
+		v.unsupported(arg.Pos(), fmt.Sprintf("%s formats %s, and fmt may call %s any number of times, which modifies memory; "+
+			"only a String or Error method that modifies nothing can be run by formatting", who, types.ExprString(arg), run.method.FullName()))
+	}
+	if fn.trust != nil {
+		v.noteUse(fn, arg.Pos())
+	}
+	return run
+}
+
+// fmtRun is a call of a method that formatting makes: the operand as it
+// was given, and its value then.
+type fmtRun struct {
+	call *fmtCall
+	arg  ast.Expr
+	val  value
+	who  string
+}
+
+// checkFormatRuns proves, for each method that formatting calls, what it
+// requires of its receiver, and the receiver's invariant, in the state in
+// which the function that formats runs: at its call, or at a return for a
+// deferred call. fmt and every such method write nothing a caller can see,
+// so that is the state of every call fmt makes of the method, and it may
+// make any number of them. Each counts as a call of the method for the
+// variant of the function, and fmt calls a method with a value receiver
+// through a pointer only when the pointer is not nil.
+func (v *fnVerifier) checkFormatRuns(call *ast.CallExpr, runs []fmtRun, st *state, guard []*logic.Term) {
+	for _, run := range runs {
+		fn := v.contractOf(run.call.method)
+		recvVar := fn.params[0]
+		recv := run.val
+		shown := types.ExprString(run.arg)
+		name := run.call.method.Name()
+		if run.call.deref {
+			v.check(st, guard, logic.Ne(recv[0], logic.RefLit(0)), run.arg.Pos(),
+				"%s formats %s and calls %s on what it points to, and %s may be nil", run.who, shown, name, shown)
+			object, _ := pointee(v.info.TypeOf(run.arg))
+			pointer := recv
+			v.quietly(func() { recv = v.pointedIn(st, st.mem, object, pointer) })
+		}
+		args := map[*types.Var]value{recvVar: recv}
+		v.quietly(func() {
+			v.checkInvariants(st, guard, st.mem, recv, recvVar.Type(), run.arg.Pos(), "what "+run.who+" formats as "+shown)
+			pre := &specEnv{v: v, sink: st, fn: fn, args: args, now: st.mem}
+			for _, c := range fn.requires {
+				v.checkClause(c, pre, st, guard, run.arg.Pos(), fmt.Sprintf("precondition of %s may not hold where %s formats %s", name, run.who, shown))
+			}
+			v.checkRecursion(fn, pre, st, guard, call)
+		})
 	}
 }
 
-// checkFormatted checks what a call gives the parameter that a trusted
-// function formats: a value passed as any, or each argument of a pack, is
-// checked on its own, and a slice passed with ... is refused, since what its
-// elements hold is not known.
-func (v *fnVerifier) checkFormatted(call *ast.CallExpr, fn *funcInfo) {
-	if fn.formatted == nil {
-		return
-	}
+// formattedArgs returns the expressions a call gives the parameter that a
+// trusted function formats, and refuses a slice passed with ....
+func (v *fnVerifier) formattedArgs(call *ast.CallExpr, fn *funcInfo) []ast.Expr {
+	var args []ast.Expr
 	for _, passed := range v.bindCall(call, fn.obj.Type().(*types.Signature)) {
 		switch {
 		case passed.param != fn.formatted:
@@ -221,13 +370,31 @@ func (v *fnVerifier) checkFormatted(call *ast.CallExpr, fn *funcInfo) {
 			v.unsupported(passed.expr.Pos(), fmt.Sprintf("%s formats what the slice %s holds, which can be anything; "+
 				"list the values in the call instead, so that each is checked", fn.obj.Name(), types.ExprString(passed.expr)))
 		case passed.packed:
-			for _, arg := range passed.pack {
-				v.checkFormattable(arg, fn.obj.Name())
-			}
+			args = append(args, passed.pack...)
 		default:
-			v.checkFormattable(passed.expr, fn.obj.Name())
+			args = append(args, passed.expr)
 		}
 	}
+	return args
+}
+
+// formatRuns returns the methods that formatting what a call gives a
+// trusted function will call, with the values given, once its arguments
+// have been evaluated.
+func (v *fnVerifier) formatRuns(call *ast.CallExpr, fn *funcInfo) []fmtRun {
+	if fn.formatted == nil {
+		return nil
+	}
+	var runs []fmtRun
+	for _, arg := range v.formattedArgs(call, fn) {
+		if isError(v.info.TypeOf(arg)) {
+			continue
+		}
+		if run, _ := formatMethod(v.info.TypeOf(arg)); run != nil {
+			runs = append(runs, fmtRun{call: run, arg: arg, val: v.held[ast.Unparen(arg)], who: fn.obj.Name()})
+		}
+	}
+	return runs
 }
 
 // fmtSlack is what a function that formats may build beyond what fmt
@@ -267,12 +434,20 @@ func (v *fnVerifier) checkFormatAlloc(st *state, guard []*logic.Term, call *ast.
 
 // formatted returns an operand of formatting, with the value an expression
 // had as it was converted, or nil for an expression that held one.
-func (v *fnVerifier) formatted(e ast.Expr, held value) fmtOperand {
+func (v *fnVerifier) formatted(st *state, e ast.Expr, held value) fmtOperand {
 	if held == nil || v.isNil(e) {
 		// nil, which formats as <nil> or %!d(<nil>).
 		return fmtOperand{t: types.Typ[types.UntypedNil]}
 	}
-	return fmtOperand{val: held, t: v.info.TypeOf(e)}
+	t := v.info.TypeOf(e)
+	run, _ := formatMethod(t)
+	if pointer, isPointer := types.Unalias(t).(*types.Pointer); isPointer && !isError(t) {
+		// fmt prints what the pointer points to, or <nil>, as it is now.
+		var object value
+		v.quietly(func() { object = v.pointedIn(st, st.mem, pointer.Elem(), held) })
+		return fmtOperand{val: object, t: pointer.Elem(), pointer: true, assumed: run != nil}
+	}
+	return fmtOperand{val: held, t: t, assumed: run != nil && !isError(t)}
 }
 
 // checkFormattedAlloc is checkFormatAlloc for a call of a trusted function
@@ -289,10 +464,10 @@ func (v *fnVerifier) checkFormattedAlloc(st *state, guard []*logic.Term, call *a
 			format = passed.expr
 		case passed.param == fn.formatted && passed.packed:
 			for _, e := range passed.pack {
-				operands = append(operands, v.formatted(e, v.held[ast.Unparen(e)]))
+				operands = append(operands, v.formatted(st, e, v.held[ast.Unparen(e)]))
 			}
 		case passed.param == fn.formatted:
-			operands = append(operands, v.formatted(passed.expr, v.held[ast.Unparen(passed.expr)]))
+			operands = append(operands, v.formatted(st, passed.expr, v.held[ast.Unparen(passed.expr)]))
 		}
 	}
 	var formatVal value
@@ -314,4 +489,43 @@ func returnsFormatted(callee *types.Func) bool {
 		return true
 	}
 	return false
+}
+
+// formattedMethods returns the String and Error methods that a call may run
+// by formatting what it is given: a call of fmt.Errorf, or of a trusted
+// function whose entry lists formats. Such a call is a call of each of them,
+// for recursion and for what may call through a value.
+func (pv *pkgVerifier) formattedMethods(call *ast.CallExpr) []*types.Func {
+	callee := typeutil.StaticCallee(pv.info, call)
+	if callee == nil {
+		return nil
+	}
+	// The entry is read without being checked, as callsParam does: this
+	// runs for every package, and an entry with a defect cannot be used,
+	// so nothing relies on what this says of it.
+	var operands []ast.Expr
+	if errorConstructor(callee) && callee.Name() == "Errorf" {
+		operands = call.Args
+	} else if entry := pv.entryFor(callee.Origin().FullName()); entry != nil && len(entry.formats) > 0 {
+		sig := callee.Type().(*types.Signature)
+		bound, _ := bindArgs(pv.info, call, paramsOf(sig), sig.Variadic())
+		for _, b := range bound {
+			if !isAnyParam(sig, b.param) || !slices.ContainsFunc(entry.formats, func(f trustFormula) bool { return f.text == b.param.Name() }) {
+				continue
+			}
+			operands = append(operands, b.pack...)
+			if !b.packed {
+				operands = append(operands, b.expr)
+			}
+		}
+	}
+	var methods []*types.Func
+	for _, e := range operands {
+		if t := pv.info.TypeOf(e); t != nil && !isError(t) {
+			if run, _ := formatMethod(t); run != nil {
+				methods = append(methods, run.method)
+			}
+		}
+	}
+	return methods
 }

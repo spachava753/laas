@@ -134,6 +134,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		args := v.arguments(call, callee, st, guard)
 		u.reach(operands)
 		formatted := v.checkFormattedAlloc(st, guard, call, fn, args)
+		v.checkFormatRuns(call, v.formatRuns(call, fn), st, guard)
 		made.pure = len(fn.modifies) == 0 && signatureMemoryFree(callee.Type().(*types.Signature))
 		results = v.invoke(call, fn, args, st, guard)
 		// What Sprintf returns is what fmt wrote, which is no longer than
@@ -200,7 +201,15 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func) *funcIn
 		v.noteUse(fn, call.Pos())
 		v.checkHandedOver(call, fn)
 		v.checkNotHandable(call, fn)
-		v.checkFormatted(call, fn)
+		// What a parameter under formats is given is checked by the rule
+		// for formatting: a value passed as any, or each argument of a
+		// pack, on its own; formattedArgs refuses a slice passed with ...,
+		// since what its elements hold is not known.
+		if fn.formatted != nil {
+			for _, arg := range v.formattedArgs(call, fn) {
+				v.checkFormattable(arg, fn.obj.Name(), false)
+			}
+		}
 	}
 	return fn
 }

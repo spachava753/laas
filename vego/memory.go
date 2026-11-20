@@ -62,9 +62,12 @@ type state struct {
 // when the defer statement ran. For a function literal, lit is the literal
 // and litArgs its arguments, in order.
 type deferredCall struct {
-	call    *ast.CallExpr
-	fn      *funcInfo
-	args    map[*types.Var]value
+	call *ast.CallExpr
+	fn   *funcInfo
+	args map[*types.Var]value
+	// runs are the methods that formatting what the call is given calls,
+	// with the values given at the defer statement; see checkFormatRuns.
+	runs    []fmtRun
 	lit     *ast.FuncLit
 	litArgs []value
 }

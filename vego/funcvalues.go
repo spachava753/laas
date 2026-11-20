@@ -631,12 +631,16 @@ func holdsCallable(pv *pkgVerifier, t types.Type, seen map[types.Type]bool) bool
 // function value. A function without a contract or a body may.
 func (pv *pkgVerifier) mayCallValues(obj *types.Func) bool {
 	// A method of an interface runs whatever the value holds. errors.New
-	// makes an error of the string it is given and calls nothing, while
-	// fmt.Errorf formats its operands, which runs their methods.
+	// makes an error of the string it is given and calls nothing. fmt.Errorf
+	// formats its operands, which runs the methods of errors of known
+	// origin, which are the standard library's or vouched for and so return
+	// and write nothing, and the String and Error methods that the rule for
+	// formatting admits, which are calls of the function that formats; see
+	// formattedMethods.
 	switch {
 	case isIfaceMethod(obj):
 		return true
-	case errorConstructor(obj) && obj.Name() == "New":
+	case errorConstructor(obj):
 		return false
 	}
 	if pv.mayCall == nil {
@@ -717,6 +721,10 @@ func (pv *pkgVerifier) findValueCallers() {
 				}
 				if callee := typeutil.StaticCallee(pv.info, n); callee != nil {
 					calls[fn.obj] = append(calls[fn.obj], callee.Origin())
+					// Formatting a value calls its String or Error method.
+					for _, method := range pv.formattedMethods(n) {
+						calls[fn.obj] = append(calls[fn.obj], method.Origin())
+					}
 					// What a trusted function is handed to call runs as part
 					// of this call: a literal is walked as part of the body,
 					// a function or method is called, and anything else is a
@@ -817,8 +825,6 @@ func (pv *pkgVerifier) whyValues(obj *types.Func) string {
 			hops = append(hops, "is a method of an interface, which runs whatever the value holds")
 		default:
 			switch fn := pv.contractOf(obj.Origin()); {
-			case errorConstructor(obj) && obj.Name() == "Errorf":
-				hops = append(hops, "formats its operands, which can run their methods")
 			case fn == nil:
 				hops = append(hops, "has no contract")
 			case fn.imported != nil:
@@ -1447,6 +1453,14 @@ func (v *fnVerifier) stratified(lit *ast.FuncLit) {
 				if v.pkgVerifier.mayCallValues(callee) {
 					refuse(n.Pos(), fmt.Sprintf("calls %s, which may call through a function value or an interface value: %s %s",
 						callee.Name(), callee.Name(), v.pkgVerifier.whyValues(callee)))
+				}
+				// Formatting a value calls its String or Error method, as
+				// part of the call.
+				for _, method := range v.pkgVerifier.formattedMethods(n) {
+					if v.pkgVerifier.mayCallValues(method) {
+						refuse(n.Pos(), fmt.Sprintf("calls %s, which formats a value whose %s may call through a function value or an interface value: %s %s",
+							callee.Name(), method.FullName(), method.Name(), v.pkgVerifier.whyValues(method)))
+					}
 				}
 				// What a trusted function is handed to call runs during the
 				// call, as part of the literal.

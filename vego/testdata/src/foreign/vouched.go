@@ -158,11 +158,14 @@ func MakesNew() (m MakesErr) {
 	return func() error { return errors.New("made") }
 }
 
-// fmt.Errorf formats its operands, which can run their methods.
+// fmt.Errorf formats its operands, and runs no method of an error of
+// known origin that calls through a value, so a value may call it. Before,
+// it counted as a function that may call through a value, and this was
+// refused.
 //
 // @Ensures m != nil
 func MakesWrapped() (m MakesErr) {
 	return func() error {
-		return fmt.Errorf("made: %w", foreignlib.ErrFull) // want `cannot verify MakesWrapped: the function literal used as a value calls Errorf, which may call through a function value or an interface value: Errorf formats its operands, which can run their methods`
+		return fmt.Errorf("made: %w", foreignlib.ErrFull)
 	}
 }

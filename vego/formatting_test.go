@@ -49,6 +49,37 @@ type probeNest struct {
 // probeName is a named string type without methods.
 type probeName string
 
+// badCalls counts the calls of methods fmt must not call on the values of
+// the rule for String and Error methods.
+var badCalls int
+
+// valueString has String on the value; fmt calls it on a value and through
+// a pointer that is not nil.
+type valueString struct{ N int }
+
+func (v valueString) String() string { return "value" }
+
+// both is an error and a Stringer; fmt must call Error only.
+type both struct{ N int }
+
+func (b both) Error() string  { return "error" }
+func (b both) String() string { badCalls++; return "string" }
+
+// nilSafe has String on the pointer and answers for nil.
+type nilSafe struct{ N int }
+
+func (p *nilSafe) String() string {
+	if p == nil {
+		return "nil"
+	}
+	return "safe"
+}
+
+// nilPanics has String on the pointer and panics for nil.
+type nilPanics struct{ N int }
+
+func (p *nilPanics) String() string { return strings.Repeat("x", p.N) }
+
 // probeFormat returns a format of every verb and form the reviewers tried
 // against fmt, with operands too few or too many.
 func probeFormat(rng *rand.Rand) string {
@@ -66,7 +97,9 @@ func probeFormat(rng *rand.Rand) string {
 // formatting a value of a type that the rule calls plain runs none of the
 // methods fmt calls, also when the type holds, at any depth, a type whose
 // pointer has them all, whatever the verbs, the indices, and the number of
-// operands. Every function shipped with formats is run.
+// operands; and of a value with a String or Error method, fmt calls only
+// that method, and Error for a value that has both. Every function shipped
+// with formats is run.
 func TestPlainFormatting(t *testing.T) {
 	scratch = t.TempDir()
 	// Values of every shape the rule calls plain, each of which holds a
@@ -80,6 +113,8 @@ func TestPlainFormatting(t *testing.T) {
 			B string
 		}{1, "x"},
 		nil, errors.New("made"), fmt.Errorf("wrapped: %w", io.EOF),
+		// Values whose String or Error method the rule checks.
+		valueString{1}, &valueString{2}, (*valueString)(nil), both{3}, &both{4}, &nilSafe{5}, (*nilSafe)(nil), &nilPanics{6}, (*nilPanics)(nil),
 	}
 	// A logger whose output is io.Discard formats nothing, so it writes
 	// to a buffer.
@@ -121,10 +156,13 @@ func TestPlainFormatting(t *testing.T) {
 			a[i] = operands[rng.Intn(len(operands))]
 		}
 		for name, call := range calls {
-			probeCalls = 0
+			probeCalls, badCalls = 0, 0
 			call(format, a)
 			if probeCalls != 0 {
 				t.Fatalf("%s(%q, %#v) ran %d methods of a probe", name, format, a, probeCalls)
+			}
+			if badCalls != 0 {
+				t.Fatalf("%s(%q, %#v) called String on an error", name, format, a)
 			}
 		}
 	}
@@ -138,6 +176,9 @@ type boundCase struct {
 	t       types.Type
 	val     value
 	assumed func(verbs []string) int
+	// pointer is set when value is a pointer to a struct, and t and val
+	// are what it points to.
+	pointer bool
 }
 
 // pair is a struct of the kind the bound reads field by field.
@@ -155,9 +196,9 @@ func boundCases() []boundCase {
 	}, nil), nil)
 	none := func([]string) int { return 0 }
 	scalar := func(x any, t types.Type) boundCase {
-		return boundCase{x, t, value{logic.IntLit(0)}, none}
+		return boundCase{x, t, value{logic.IntLit(0)}, none, false}
 	}
-	text := func(s string) boundCase { return boundCase{s, types.Typ[types.String], value{logic.Bytes(s)}, none} }
+	text := func(s string) boundCase { return boundCase{s, types.Typ[types.String], value{logic.Bytes(s)}, none, false} }
 	header := func(n int) value {
 		return value{logic.RefLit(1), logic.IntLit(0), logic.IntLit(int64(n)), logic.IntLit(int64(n))}
 	}
@@ -187,27 +228,29 @@ func boundCases() []boundCase {
 		text(strings.Repeat("\x01", 1000)),
 		text(strings.Repeat("\u0080", 500)),
 		text(""),
-		{[]byte("\x80\x01\xff\x00"), types.NewSlice(types.Typ[types.Uint8]), header(4), none},
-		{[]byte(strings.Repeat("\xff", 1000)), types.NewSlice(types.Typ[types.Uint8]), header(1000), none},
-		{[]int{math.MinInt64, 0, 7}, types.NewSlice(types.Typ[types.Int]), header(3), none},
-		{[]float64{-math.MaxFloat64, math.SmallestNonzeroFloat64}, types.NewSlice(types.Typ[types.Float64]), header(2), none},
+		{[]byte("\x80\x01\xff\x00"), types.NewSlice(types.Typ[types.Uint8]), header(4), none, false},
+		{[]byte(strings.Repeat("\xff", 1000)), types.NewSlice(types.Typ[types.Uint8]), header(1000), none, false},
+		{[]int{math.MinInt64, 0, 7}, types.NewSlice(types.Typ[types.Int]), header(3), none, false},
+		{[]float64{-math.MaxFloat64, math.SmallestNonzeroFloat64}, types.NewSlice(types.Typ[types.Float64]), header(2), none, false},
 		{words, types.NewSlice(types.Typ[types.String]), header(len(words)), func(verbs []string) int {
 			total := 0
 			for _, word := range words {
 				total += printed(word)(verbs)
 			}
 			return total
-		}},
-		{pair{math.MinInt64, "\x80\x01"}, pairType, value{logic.IntLit(0), logic.Bytes("\x80\x01")}, none},
+		}, false},
+		{pair{math.MinInt64, "\x80\x01"}, pairType, value{logic.IntLit(0), logic.Bytes("\x80\x01")}, none, false},
 		{pairs, types.NewSlice(pairType), header(len(pairs)), func(verbs []string) int {
 			total := 0
 			for _, p := range pairs {
 				total += printed(p.B)(verbs)
 			}
 			return total
-		}},
-		{nil, types.Typ[types.UntypedNil], nil, none},
-		{errors.New("made \x80"), types.Universe.Lookup("error").Type(), value{logic.NilErr()}, printed(errors.New("made \x80"))},
+		}, false},
+		{nil, types.Typ[types.UntypedNil], nil, none, false},
+		{&pair{math.MinInt64, strings.Repeat("\x80", 300)}, pairType, value{logic.IntLit(0), logic.Bytes(strings.Repeat("\x80", 300))}, none, true},
+		{(*pair)(nil), pairType, value{logic.IntLit(0), logic.Bytes("")}, none, true},
+		{errors.New("made \x80"), types.Universe.Lookup("error").Type(), value{logic.NilErr()}, printed(errors.New("made \x80")), false},
 	}
 }
 
@@ -232,6 +275,9 @@ func TestBoundOnFormatting(t *testing.T) {
 				out := fmt.Sprintf(verb, c.value)
 				term, _ := fmtWeight(c.val, c.t, constantSpec(verb), true)
 				weight := eval.number(term).Int64() + int64(c.assumed(verbs))
+				if c.pointer {
+					weight += fmtPointerCost
+				}
 				if int64(len(out)) > weight {
 					t.Errorf("%s of a %s wrote %d bytes, more than its weight %d", verb, c.t, len(out), weight)
 				}
@@ -248,7 +294,7 @@ func TestBoundOnFormatting(t *testing.T) {
 			uses = int(eval.number(spec.verbs).Int64()) + 1
 		}
 		for i, c := range picked {
-			ops[i] = fmtOperand{val: c.val, t: c.t}
+			ops[i] = fmtOperand{val: c.val, t: c.t, pointer: c.pointer}
 			assumed += uses * c.assumed(verbs)
 		}
 		term, complete := fmtBound(spec, ops)
@@ -262,7 +308,7 @@ func TestBoundOnFormatting(t *testing.T) {
 	}
 	t.Run("formats", func(t *testing.T) {
 		text := cases[slices.IndexFunc(cases, func(c boundCase) bool { s, ok := c.value.(string); return ok && len(s) == 1000 })]
-		number := boundCase{999999, types.Typ[types.Int], value{logic.IntLit(0)}, func([]string) int { return 0 }}
+		number := boundCase{999999, types.Typ[types.Int], value{logic.IntLit(0)}, func([]string) int { return 0 }, false}
 		// Fixed calls first: one operand used eight times, and a width
 		// taken from an operand.
 		for _, fixed := range []struct {

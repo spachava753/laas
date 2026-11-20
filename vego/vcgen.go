@@ -783,12 +783,14 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 	}
 	// The deferred call itself runs later, so nothing here comes before it.
 	var args map[*types.Var]value
+	var runs []fmtRun
 	v.evaluate(st, func() {
 		defer v.begin()()
 		args = v.arguments(s.Call, callee, st, nil)
 		_ = v.checkFormattedAlloc(st, nil, s.Call, fn, args)
+		runs = v.formatRuns(s.Call, fn)
 	})
-	st.deferred = append(slices.Clip(st.deferred), deferredCall{call: s.Call, fn: fn, args: args})
+	st.deferred = append(slices.Clip(st.deferred), deferredCall{call: s.Call, fn: fn, args: args, runs: runs})
 }
 
 // branch counts one more fork in the path exploration.

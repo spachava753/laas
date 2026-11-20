@@ -204,8 +204,12 @@ func errorConstructor(callee *types.Func) bool {
 func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term) *logic.Term {
 	values := map[ast.Expr]value{}
 	callee := typeutil.StaticCallee(v.info, call)
+	errorf := callee.Name() == "Errorf"
+	var runs []fmtRun
 	for _, arg := range call.Args {
-		v.checkFormattable(arg, callee.Pkg().Name()+"."+callee.Name())
+		if run := v.checkFormattable(arg, callee.Pkg().Name()+"."+callee.Name(), errorf); run != nil {
+			runs = append(runs, fmtRun{call: run, arg: arg})
+		}
 		// Go converts the arguments of fmt.Errorf after the format to
 		// any. That makes no interface value that verified code can call;
 		// what formatting may run is decided above.
@@ -218,10 +222,14 @@ func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term
 	if position := v.pass.Fset.Position(call.Pos()); !slices.Contains(v.usage.Constructors, position) {
 		v.usage.Constructors = append(v.usage.Constructors, position)
 	}
-	if callee.Name() == "Errorf" {
+	if errorf {
+		for i := range runs {
+			runs[i].val, runs[i].who = values[runs[i].arg], "fmt.Errorf"
+		}
+		v.checkFormatRuns(call, runs, st, guard)
 		var operands []fmtOperand
 		for _, arg := range call.Args[1:] {
-			operands = append(operands, v.formatted(arg, values[arg]))
+			operands = append(operands, v.formatted(st, arg, values[arg]))
 		}
 		_ = v.checkFormatAlloc(st, guard, call, "fmt.Errorf", call.Args[0], values[call.Args[0]], operands)
 	}

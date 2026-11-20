@@ -2527,11 +2527,13 @@ The shipped contracts of `fmt.Sprintf`, `fmt.Sprint`, `fmt.Sprintln`, `fmt.Print
 `fmt` calls the `Format`, `GoString`, `Error`, and `String` methods of what it formats. Code that `vego` has not checked could run that way, so `vego` checks every value at each call. These values can be formatted:
 
 - numbers, booleans, and strings, of named types too;
-- slices and structs whose elements and fields can be formatted;
+- slices and structs whose elements and fields can be formatted, when their types have none of these four methods;
+- a pointer to such a struct, which `fmt` prints as `&` and the fields, or as `<nil>`;
 - `nil`;
-- errors of known origin, described in [Wrapping errors](#wrapping-errors).
+- errors of known origin, described in [Wrapping errors](#wrapping-errors);
+- a value whose `String` or `Error` method has a contract that modifies nothing, described in [Values with a String or Error method](#values-with-a-string-or-error-method).
 
-A type that has a method named `Format`, `GoString`, `Error`, or `String` cannot be formatted. Methods of a pointer to the type do not count, because `fmt` does not call them on a value. A type that holds itself, such as `type Tree []Tree`, cannot be formatted either, since such a slice can hold itself and `fmt` would then not stop. Pointers, maps, interface values, and function values cannot be formatted.
+Methods of a pointer to a type do not count for a value of the type, because `fmt` does not call them on a value. A type that holds itself, such as `type Tree []Tree`, cannot be formatted, since such a slice can hold itself and `fmt` would then not stop. Maps, interface values, function values, and pointers to anything but a struct cannot be formatted, and neither can a value of a type with a `Format` or `GoString` method.
 
 Anything else is reported as `cannot verify`:
 
@@ -2545,11 +2547,54 @@ func Display(v any) {
 ```text
 vego: cannot verify Display: Println formats v, a value of type any, and that may run code
 nobody has checked: any is an interface, which can hold a value with methods that fmt
-would call; only numbers, booleans, strings, and slices and structs of them without such
-methods, and errors of known origin, can be formatted
+would call; only numbers, booleans, strings, and slices and structs of them, pointers to
+such structs, errors of known origin, and values whose String or Error method has a
+contract that modifies nothing can be formatted
 ```
 
 A slice passed with `...`, as in `fmt.Println(values...)`, is refused too, because what its elements hold is not known. List the values in the call instead.
+
+### Values with a String or Error method
+
+`fmt` calls the `Error` method of a value that is an error, and the `String` method of one that has `String() string`. Such a value can be formatted when the method has a contract, verified or trusted, that lists nothing under `Modifies`:
+
+```go
+type Temperature int
+
+// @Requires t >= -273
+// @Ensures True
+func (t Temperature) String() (s string) {
+	if t < 0 {
+		return "below zero"
+	}
+	return "zero or above"
+}
+
+// @Requires t >= -273
+// @Ensures True
+func ShowTemperature(t Temperature) {
+	log.Println("temperature", t)
+}
+```
+
+At each call, `vego` proves the `Requires` of the method for the value as it is passed, in the state of the call. For a deferred call, that is the state at the return where the call runs. Without the `Requires` of `ShowTemperature`, the call is reported:
+
+```text
+vego: precondition of String may not hold where Println formats t: t >= -273
+```
+
+`fmt` may call the method any number of times. The call counts as a call of the method, so a `String` method that formats its own value, as `fmt.Sprint(t)` inside `String` would, is reported as recursion without a `Variant`.
+
+These conditions apply:
+
+- The method must modify nothing. `fmt` may call it any number of times, and the proof of the call assumes it changes nothing.
+- What the type holds must be plain, because `fmt` prints it instead of calling the method for verbs such as `%d`. A struct with a field whose type has a `String` method cannot be formatted.
+- A type with both `Error` and `String` is an error to `fmt`, so only `Error` is called and checked.
+- A pointer can be formatted when `*T` has the method. A method with a pointer receiver is called with the pointer, also when it is `nil`, so its `Requires` decides. A method with a value receiver is called on what the pointer points to, so `vego` proves that the pointer is not `nil`.
+- `fmt.Errorf` cannot format a value whose type is an error other than `error` itself, because `%w` would put it into the tree of the new error.
+- A method of a type of another package needs a contract too, in the trust file if the package is not verified, as in `(time.Duration).String`.
+
+What the method returns has no term in the logic. It counts as one of the parts whose length is assumed, as described in [How long a formatted string can be](#how-long-a-formatted-string-can-be).
 
 ### How long a formatted string can be
 
@@ -3491,7 +3536,7 @@ func Load(r io.Reader, buf []byte) (n int, err error) {
 
 With `vouches: [err]`, you claim that every reader that verified code in the module gets from code that is not verified returns only errors that meet the conditions of `vouches`: their methods return without panicking and write nothing a caller can see, `==` on them is identity, and what `errors.Is` reports of them does not change. Before you write the entry, list the readers that the callers of your verified code pass, and read the source of the errors each returns and of every error in their trees. A reader that wraps another returns the errors of the reader it wraps.
 
-A type of your own that is converted to `io.Reader` under such an entry must return only errors of known origin, such as errors made by `errors.New` and error variables that hold one. It cannot wrap an error, because code that an interface value made by verified code runs cannot call `fmt.Errorf`, which formats its operands and so can run their methods.
+A type of your own that is converted to `io.Reader` under such an entry must return only errors of known origin, such as errors made by `errors.New` or `fmt.Errorf` and error variables that hold one. It can wrap an error of known origin with `fmt.Errorf`, as in `fmt.Errorf("read: %w", ErrLong)`.
 
 #### Types without a shipped entry
 
