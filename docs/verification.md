@@ -233,6 +233,23 @@ A predicate called `held`, `rheld`, or `running` cannot be used on a mutex or a 
 
 Formulas have no bit operators, no `len` or `cap`, and no floating-point facts. Write `|A|` for a length. They cannot call functions, only predicates. They have no character literals, so write `48` for `'0'`. A slice cannot be compared with `nil`. Use `|A| = 0`. Structs cannot be compared as a whole. Compare their fields.
 
+An interface value can be compared only with `nil`, also in a formula. So a contract cannot say that a field of an interface type, such as `any`, keeps its value:
+
+```go
+// @Requires s != nil
+// @Modifies s
+// @Ensures s.next' = s And s.Value' = s.Value
+func (s *Link) Loop() {
+	s.next = s
+}
+```
+
+```text
+vego: in Ensures annotation: an interface value can only be compared with nil
+```
+
+`Modifies s` covers that field, and after a call the caller knows nothing of it.
+
 `vego` does not check that a formula is well defined. `A[i]` in a formula can be out of range, and `x / y` can divide by zero. Such an expression has an unknown value. A clause that uses it usually cannot be proved, but it can also be trivially true and pass, as `A[999] = A[999]` does. Guard such expressions as you would in code: `0 <= i < |A| And A[i] = x`.
 
 ## Built-in checks
@@ -338,6 +355,30 @@ func Divide(n, d int) (q, r int) {
 After the loop, `vego` knows the invariant and that the loop condition is false. Here that gives `n = d*q + r`, `0 <= r`, and `r < d`, which is the postcondition. A condition that modifies memory is different: see [A condition that modifies memory](#a-condition-that-modifies-memory).
 
 **After a loop, `vego` knows nothing about the variables the loop changed except what the invariant states.** If a proof fails in the code after a loop and the fact is true, the invariant is too weak: it is missing something you know about the loop variables. A loop that writes memory can also make `vego` forget memory it did not write. See [What a loop forgets about memory](#what-a-loop-forgets-about-memory).
+
+A variable of struct type counts as changed when the loop assigns any of its fields. This loop assigns `s.Total`, so after it nothing is known of `s.Count` either:
+
+```go
+// TallyLoses loses Count: the loop assigns s.Total, so it forgets s.
+//
+// @Requires |xs| <= 1000
+// @Requires Forall k in [0, |xs|) : 0 <= xs[k] <= 1000
+// @Ensures s.Count = |xs|
+func TallyLoses(xs []int) (s Stats) {
+	s.Count = len(xs)
+	// @Invariant 0 <= s.Total <= 1000 * i
+	for i := range xs {
+		s.Total += xs[i]
+	}
+	return s
+}
+```
+
+```text
+vego: postcondition may not hold: s.Count = |xs|
+```
+
+Add the field to the invariant, as in `// @Invariant s.Count = |xs| And 0 <= s.Total <= 1000 * i`. A struct in memory, reached through a pointer, is different: a loop that writes some of its fields keeps what it knew of the others, as described in [What a loop forgets about memory](#what-a-loop-forgets-about-memory).
 
 A `Variant` proves that a `for` loop terminates. It is an integer expression that is never negative while the loop runs and that decreases on every iteration. Every `for` loop needs one.
 
@@ -1408,6 +1449,32 @@ An entry of your own for `(io.Closer).Close` replaces the shipped one, and the s
 
 An interface value that verified code receives from code it does not verify is taken to meet the contracts of its methods. See [What a proof assumes](#what-a-proof-assumes). As for function values, an argument that can carry code nobody has seen cannot be passed to a method of an interface value. An interface value whose methods all have contracts can be passed.
 
+An error that a method returns through an interface value has an unknown origin. A contract written in the declaration of the interface cannot vouch for it, so it can be returned and compared with `nil`, but not formatted or wrapped:
+
+```go
+// Loader loads a number.
+type Loader interface {
+	// @Ensures True
+	Load() (n int, err error)
+}
+
+// @Requires l != nil
+// @Ensures True
+func LoadWrapped(l Loader) (n int, err error) {
+	n, err = l.Load()
+	if err != nil {
+		return 0, fmt.Errorf("load: %w", err)
+	}
+	return n, nil
+}
+```
+
+```text
+vego: cannot verify LoadWrapped: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a trusted contract vouches for, can be formatted
+```
+
+Return the error unchanged. For an interface of another module, an entry in the trust file can vouch for the errors of a method, as described in [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write).
+
 ## Predicates
 
 A predicate gives a name to a formula so that you can reuse it.
@@ -1475,6 +1542,36 @@ When Z3 stopped at a limit, the message ends with a note that says which one:
 A message without a note means that Z3 gave its answer within the limits.
 
 At the default limit, `vego` does not prove all the postconditions of a function that writes one field through twenty-four or more different pointers, such as `p0.x = 1` through `p23.x = 1` with `@Ensures p0.x' = 1 And ... And p23.x' = 1`. The messages carry the note about the resource limit. With thirty pointers, `-vego.rlimit=40000000` proves them all. With twenty-three pointers such a function verifies at the default limit, and so do thirty writes through one pointer.
+
+### A variable that only an annotation reads
+
+An invariant can name a local variable that the code does not need. This is how an inner loop states that it moved past where the iteration began, so that the outer loop's `Variant` decreases:
+
+```go
+// Runs counts the runs of equal elements.
+//
+// @Requires |A| <= 1000
+// @Ensures 0 <= runs <= |A|
+func Runs(A []int) (runs int) {
+	i := 0
+	// @Invariant 0 <= i <= |A| And 0 <= runs <= i
+	// @Variant |A| - i
+	for i < len(A) {
+		start := i
+		_ = start
+		i++
+		// @Invariant start < i <= |A| And 0 <= runs <= start
+		// @Variant |A| - i
+		for i < len(A) && A[i] == A[i-1] {
+			i++
+		}
+		runs++
+	}
+	return runs
+}
+```
+
+`vego` has no variables that exist only for annotations. `start` is an ordinary variable, and `_ = start` is there because Go rejects a variable that is declared and not used. Without the inner invariant `start < i`, `vego` knows nothing after the inner loop that shows that `i` grew, and reports `loop variant may not decrease: |A| - i`.
 
 ### Finding out where the time goes
 
@@ -1655,7 +1752,7 @@ func IsAdmin(role string) (result bool) {
 
 In a formula, a byte of a string is a number. Where the code tests `'0' <= s[i] && s[i] <= '9'`, the contract says `48 <= s[i] <= 57`.
 
-`vego` does not know how strings are ordered by `<`. A `range` over a string produces an unknown rune at each step and advances by one to four bytes.
+`vego` does not know how strings are ordered by `<`. A `range` over a string produces an unknown rune at each step and advances by one to four bytes. Converting a rune to a string, as in `string(r)`, is not supported.
 
 ## Structs and pointers
 
@@ -1821,6 +1918,52 @@ for i := range items {
 ```
 
 The other way to keep a fact is to state it as a loop invariant, here `// @Invariant count[0] = |b.items|`.
+
+A loop also forgets that a slice the function made is its own, when the loop assigns the slice the result of a call. Here `out` starts as a slice of the function's own, and `grow` returns either a new slice or one inside its argument:
+
+```go
+// grow appends x.
+//
+// @Requires |s| < 1000000
+// @Modifies s
+// @Ensures |result| = |s| + 1
+// @Ensures fresh(result) Or within(result, s)
+func grow(s []int, x int) (result []int) {
+	return append(s, x)
+}
+
+// CopyThrough appends through grow in a loop.
+//
+// @Requires |A| <= 1000
+// @Ensures True
+func CopyThrough(A []int) (out []int) {
+	// @Invariant |out| <= i
+	for i := range A {
+		out = grow(out, A[i])
+	}
+	return out
+}
+```
+
+```text
+vego: grow may modify out, which CopyThrough may not modify; list it in a // @Modifies clause
+```
+
+At the head of the loop `out` is a slice of which nothing is known, so it may be memory that the caller holds. `fresh` cannot say otherwise in an invariant. `// @Invariant fresh(out)` is reported as `in Invariant annotation: fresh says what a call created and is only allowed in Ensures`. Write the `append` in the loop itself. A slice that the loop only appends to keeps what is known of it:
+
+```go
+// CopyAppend appends in the loop itself.
+//
+// @Requires |A| <= 1000
+// @Ensures |out| = |A|
+func CopyAppend(A []int) (out []int) {
+	// @Invariant |out| = i
+	for i := range A {
+		out = append(out, A[i])
+	}
+	return out
+}
+```
 
 ### Where a modifying call can appear
 
@@ -2013,6 +2156,8 @@ A function that takes a slice of accounts must state the bound for each element:
 // @Requires Forall k in [0, |as|) : as[k] != nil And 0 <= as[k].balance <= 1000000
 func Total(as []*Account) (result int) {
 ```
+
+A function of another package cannot state such a clause when the invariant names unexported fields, because a contract can name an unexported field only in the package that declares the struct (see [Names](#names)). It then cannot call a method that needs the invariant of a struct it reaches through a field, such as `s.store.Delete(id)` for a `store` whose invariant is `tasks != nil`.
 
 ### A loop does not keep it
 
@@ -4467,6 +4612,8 @@ A function that uses any of the following is reported as `cannot verify`:
 - pointers to anything other than a struct;
 - reading a package-level variable that something in the build changes, or whose type can hold a function value, an interface value, an error, a channel, or an `unsafe.Pointer`; assigning a package-level variable, writing what one refers to, and naming one in `Modifies` (see [Package-level variables](#package-level-variables));
 - `copy`;
+- type declarations inside a function body, reported as `local type declarations are not supported`;
+- converting a rune to a string, as in `string(r)`;
 - formatting a value whose type has a method `Format`, `GoString`, `Error`, or `String`, a pointer, a map, an interface value other than an error of known origin, a function value, or a value of a type that holds itself, with `fmt.Errorf` or a function whose entry lists it under `formats`, and passing such a function a slice with `...` for the values it formats (see [What can be formatted](#what-can-be-formatted));
 - `os.Stdout`, `os.Stderr`, a logger in a package-level variable, and `log.Default()`;
 - a call in the target of an assignment whose right-hand side is an `append` that may write into the array of its slice, unless the call modifies nothing and refers to no memory or a call among the operands of the `append` orders it (see [An append beside a call](#an-append-beside-a-call));

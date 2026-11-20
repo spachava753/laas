@@ -1017,6 +1017,7 @@ guide	(*guide.Hub).Add	1	1429	0
 guide	(*guide.Hub).Fire	1	1632	0
 guide	(*guide.Iter).Next	13	10665	0
 guide	(*guide.LineCounter).Price	10	8114	0
+guide	(*guide.Link).Loop	7	2223	0
 guide	(*guide.Lock).Acquire	6	4035	0
 guide	(*guide.Lock).Release	6	3879	0
 guide	(*guide.Settings).Setup	15	22019	0
@@ -1075,6 +1076,9 @@ guide	guide.CloseTwice	14	10846	0
 guide	guide.Coin	8	4931	0
 guide	guide.CommitTwice	14	10613	0
 guide	guide.Configure	6	17270	0
+guide	guide.CopyAppend	13	22833	0
+guide	guide.CopyFresh	2	474	0
+guide	guide.CopyThrough	7	12518	0
 guide	guide.Count	19	46319	0
 guide	guide.CountLines	20	297616	2
 guide	guide.CountNegative	8	5171	0
@@ -1132,6 +1136,9 @@ guide	guide.Limit	3	19423	0
 guide	guide.LinesTotal	15	30472	0
 guide	guide.ListsSizes	0	0	0
 guide	guide.Load	41	3473903	6
+guide	guide.LoadWrapped	10	6014	0
+guide	guide.Loader.Load	5	6900	0
+guide	guide.LocalType	1	111	0
 guide	guide.Logf	1	3771	0
 guide	guide.LogfVerified	1	712	0
 guide	guide.Logged	1	83	0
@@ -1190,6 +1197,8 @@ guide	guide.Report	3	589	0
 guide	guide.Reset	13	407962	2
 guide	guide.ResetServed	1	46	0
 guide	guide.Rounds	14	20771	0
+guide	guide.RuneString	1	111	0
+guide	guide.Runs	35	48318	0
 guide	guide.SafeOnly	3	646	0
 guide	guide.SameError	1	46	0
 guide	guide.SameOrNot	13	13892	0
@@ -1217,6 +1226,8 @@ guide	guide.Steps	10	2408	0
 guide	guide.Subscribe	13	9121	0
 guide	guide.Sum	11	24862	0
 guide	guide.Tally	1	46	0
+guide	guide.TallyKeeps	12	24421	0
+guide	guide.TallyLoses	10	25227	0
 guide	guide.Tell	1	186	0
 guide	guide.TellMade	5	646	0
 guide	guide.TellsUnknown	1	46	0
@@ -1245,6 +1256,7 @@ guide	guide.count	1	1216	0
 guide	guide.double	4	660	0
 guide	guide.each	1	154	0
 guide	guide.five	2	61	0
+guide	guide.grow	13	6781	0
 guide	guide.isSeparator	2	153	0
 guide	guide.logNumber	3	1267	0
 guide	guide.logRecord	1	625	0
