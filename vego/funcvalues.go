@@ -1104,9 +1104,9 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 		// holds, and is refused above.
 		if recv := sig.Recv(); recv != nil && !fn.runs[fn.params[0]] && holdsCode(recv.Type(), map[types.Type]bool{}) {
 			v.unsupported(e.Pos(), fmt.Sprintf("%s is used as %s, which hands its receiver to %s at each call; %s is trusted, and its receiver "+
-				"is a value of type %s, which can hold an error, an interface, or a function, so %s could run code through it that nobody has seen. "+
+				"is a value of type %s, which is or holds %s, so %s could run code through it that nobody has seen. "+
 				"If its contract holds whatever that code does, list %s under runs in the contract",
-				types.ExprString(e), as, fn.obj.Name(), fn.obj.Name(), recv.Type(), fn.obj.Name(), fn.params[0].Name()))
+				types.ExprString(e), as, fn.obj.Name(), fn.obj.Name(), recv.Type(), heldCode(recv.Type(), map[types.Type]bool{}), fn.obj.Name(), fn.params[0].Name()))
 		}
 		// The parameters of the value come from whoever calls it, so what
 		// can carry code is handed on to the trusted function unseen.

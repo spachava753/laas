@@ -299,12 +299,54 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 		}
 		what := "an error whose origin is not known" + v.originWhy(arg)
 		if !isError(t) {
-			what = fmt.Sprintf("a value of type %s, which can hold an error, an interface, or a function", t)
+			what = fmt.Sprintf("a value of type %s, which is or holds %s", t, heldCode(t, map[types.Type]bool{}))
 		}
 		v.unsupported(arg.Pos(), fmt.Sprintf("%s is passed to %s, which is trusted, and is %s; "+
 			"%s could run code through it that nobody has seen. If its contract holds whatever that code does, "+
 			"list %s under runs in the contract", types.ExprString(arg), fn.obj.Name(), what, fn.obj.Name(), param.Name()))
 	}
+}
+
+// heldCode names what a value of a type that holdsCode accepts can hold
+// that carries code, the first that holdsCode finds.
+func heldCode(t types.Type, seen map[types.Type]bool) string {
+	if t == nil || seen[t] {
+		return ""
+	}
+	seen[t] = true
+	switch u := t.Underlying().(type) {
+	case *types.Interface:
+		if isError(t) {
+			return "an error"
+		}
+		return "an interface value"
+	case *types.Signature:
+		return "a function value"
+	case *types.Chan:
+		return "a channel"
+	case *types.Basic:
+		if u.Kind() == types.UnsafePointer {
+			return "an unsafe.Pointer"
+		}
+	case *types.Pointer:
+		return heldCode(u.Elem(), seen)
+	case *types.Slice:
+		return heldCode(u.Elem(), seen)
+	case *types.Array:
+		return heldCode(u.Elem(), seen)
+	case *types.Map:
+		if what := heldCode(u.Key(), seen); what != "" {
+			return what
+		}
+		return heldCode(u.Elem(), seen)
+	case *types.Struct:
+		for field := range u.Fields() {
+			if what := heldCode(field.Type(), seen); what != "" {
+				return what
+			}
+		}
+	}
+	return ""
 }
 
 // holdsCode reports whether a value of a type can hold, however deep, a

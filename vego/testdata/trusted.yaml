@@ -3,6 +3,17 @@
 version: 1
 
 trusted:
+  unsafelib.Run:
+    reason: A test entry for a function that calls through an unsafe.Pointer.
+    requires: ["h != nil"]
+    modifies: []
+
+  unsafelib.RunListed:
+    reason: The same, with the parameter listed under runs.
+    requires: ["h != nil"]
+    runs: [h]
+    modifies: []
+
   defects.touch:
     reason: Test helper that writes the first element.
     modifies: [A]

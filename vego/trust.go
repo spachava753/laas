@@ -716,7 +716,7 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 		case !ok:
 			fn.defect("its runs %q: %s is not a parameter", item.text, item.text)
 		case !holdsCode(param.Type(), map[types.Type]bool{}):
-			fn.defect("its runs lists %s, whose type %s can hold no error, interface, or function to run", item.text, param.Type())
+			fn.defect("its runs lists %s, whose type %s can hold no error, interface value, function value, channel, or unsafe.Pointer to run", item.text, param.Type())
 		default:
 			fn.runs[param] = true
 		}

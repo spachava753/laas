@@ -103,7 +103,7 @@ func loadShape() (s Shape) { return nil }
 
 // @Ensures True
 func Described(s Shape) (n int) {
-	return describe(s) // want `cannot verify Described: s is passed to describe, which is trusted, and is a value of type interfaces.Shape, which can hold an error, an interface, or a function`
+	return describe(s) // want `cannot verify Described: s is passed to describe, which is trusted, and is a value of type interfaces.Shape, which is or holds an interface value`
 }
 
 // @Ensures s = nil -> n = 0

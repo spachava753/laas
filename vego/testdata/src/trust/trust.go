@@ -1310,7 +1310,7 @@ func TellsDeclared(e error) {
 // @Requires s != nil And s.n = 1
 // @Ensures result = 1
 func Flushes(s *sinkHolder) (result int) {
-	s.flush() // want `cannot verify Flushes: s is passed to flush, which is trusted, and is a value of type \*trust.sinkHolder, which can hold an error, an interface, or a function; flush could run code through it that nobody has seen. If its contract holds whatever that code does, list s under runs in the contract`
+	s.flush() // want `cannot verify Flushes: s is passed to flush, which is trusted, and is a value of type \*trust.sinkHolder, which is or holds a function value; flush could run code through it that nobody has seen. If its contract holds whatever that code does, list s under runs in the contract`
 	return s.n
 }
 
@@ -1327,7 +1327,7 @@ func FlushesDeclared(s *sinkHolder) (result int) {
 //
 // @Ensures True
 func UsesRunsNothing() {
-	runsNothing(1) // want `the trusted contract of trust.runsNothing \(trusted.yaml:\d+\) cannot be used: its runs lists x, whose type int can hold no error, interface, or function to run` `cannot verify UsesRunsNothing: `
+	runsNothing(1) // want `the trusted contract of trust.runsNothing \(trusted.yaml:\d+\) cannot be used: its runs lists x, whose type int can hold no error, interface value, function value, channel, or unsafe.Pointer to run` `cannot verify UsesRunsNothing: `
 }
 
 // UsesRunsNobody calls one whose contract lists a name that is no parameter.

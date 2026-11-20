@@ -2498,6 +2498,12 @@ trust	trust.wrongModifies	0	0	0
 trust	trust.wrongName	0	0	0
 unread	unread.Other	2	61	0
 unread	unread.Value	2	61	0
+unsafeuse	unsafelib.Run	1	384	0
+unsafeuse	unsafelib.RunListed	1	384	0
+unsafeuse	unsafeuse.Call	1	241	0
+unsafeuse	unsafeuse.CallListed	4	1110	0
+unsafeuse	unsafeuse.CallValue	1	254	0
+unsafeuse	unsafeuse.Use	3	806	0
 usesbadpred	usesbadpred.Use	1	46	0
 usesearly	usesearly.Fail	12	3311	0
 usestwovariants	usestwovariants.Use	1	46	0
