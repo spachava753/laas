@@ -994,6 +994,7 @@ guide	(guide.zeros).Read	16	9944	0
 guide	context.CancelFunc	3	255	0
 guide	context.Context.Err	9	20720	0
 guide	fmt.Fprintf	5	14230	0
+guide	fmt.Fprintln	1	3501	0
 guide	fmt.Println	7	2008929	2
 guide	fmt.Sprintf	1	4959	0
 guide	guide.Abs	7	1250	0
@@ -1020,6 +1021,7 @@ guide	guide.ClearCounted	20	22528	0
 guide	guide.ClearCountedKept	23	27602	0
 guide	guide.ClearCountedWrong	21	21512	0
 guide	guide.ClearFirst	7	2747	0
+guide	guide.Client	1	46	0
 guide	guide.CloseTwice	14	10846	0
 guide	guide.Coin	8	4931	0
 guide	guide.CommitTwice	14	10613	0
@@ -1052,6 +1054,7 @@ guide	guide.First	4	1046	0
 guide	guide.FirstByte	86	287819	1
 guide	guide.FirstDigit	9	10821	0
 guide	guide.FirstField	8	7712	0
+guide	guide.FirstSize	4	1335	0
 guide	guide.FirstWrong	4	1290	0
 guide	guide.FlatPricer	5	1343	0
 guide	guide.Free	0	0	0
@@ -1063,6 +1066,7 @@ guide	guide.Half	3	1455	0
 guide	guide.HasComma	4	5659	0
 guide	guide.Head	14	11523	0
 guide	guide.HeadWeak	12	21196	0
+guide	guide.Hex	4	5766	0
 guide	guide.IncAndRead	8	6101	0
 guide	guide.Index	9	11173	0
 guide	guide.Inventory	42	224275	0
@@ -1074,7 +1078,9 @@ guide	guide.LabelledOwn	8	6277	0
 guide	guide.Largest	26	49747	0
 guide	guide.LastZero	6	210430	1
 guide	guide.Later	6	1716	0
+guide	guide.Limit	3	19423	0
 guide	guide.LinesTotal	15	30472	0
+guide	guide.ListsSizes	0	0	0
 guide	guide.Load	41	3473903	6
 guide	guide.Logf	1	3771	0
 guide	guide.LogfVerified	1	712	0
@@ -1089,9 +1095,12 @@ guide	guide.MidWrong	7	3245	0
 guide	guide.Nearest	27	66617	0
 guide	guide.NewCounter	4	1080	0
 guide	guide.Next	16	11499	0
+guide	guide.Notify	5	52514	0
 guide	guide.Offset	6	2033	0
 guide	guide.Option	3	2393	0
 guide	guide.Pack	9	5975	0
+guide	guide.Pages	4	1561	0
+guide	guide.PagesChecked	3	283	0
 guide	guide.Pair	6	3430	0
 guide	guide.ParsePort	31	71222	0
 guide	guide.ParseQuantity	34	154627	0
@@ -1122,6 +1131,7 @@ guide	guide.RemoveIfPresent	51	92235	0
 guide	guide.Replace	4	4268	0
 guide	guide.Report	3	589	0
 guide	guide.Reset	13	407962	2
+guide	guide.ResetServed	1	46	0
 guide	guide.Rounds	14	20771	0
 guide	guide.SafeOnly	3	646	0
 guide	guide.SameError	1	46	0
@@ -1129,7 +1139,9 @@ guide	guide.SameOrNot	13	13892	0
 guide	guide.SamePricer	1	689	0
 guide	guide.Save	10	28370	0
 guide	guide.SearchLocked	28	248968	1
+guide	guide.Served	1	46	0
 guide	guide.SetMax	7	5364	0
+guide	guide.SetSize	1	46	0
 guide	guide.Show	1	486	0
 guide	guide.ShowAll	1	368	0
 guide	guide.ShowAnyTemperature	5	20274	0
@@ -1161,6 +1173,7 @@ guide	guide.Tx.Begin	5	9447	0
 guide	guide.Tx.Commit	5	9099	0
 guide	guide.UsesLogf	4	36469	0
 guide	guide.Visits	1	111	0
+guide	guide.Warn	1	429	0
 guide	guide.WithTimeout	6	1456	0
 guide	guide.Work	136	232483	0
 guide	guide.Wrapping	7	2313	0

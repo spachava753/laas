@@ -16,7 +16,7 @@ This guide shows how to write Go that `vego` can verify. Read it from top to bot
 
 `vego` never reports a function as correct when it is not. If it cannot handle a piece of Go, it reports `cannot verify` and names the construct. If it cannot find a proof, it reports `may not hold`. That means "not proved". The code may be wrong, the contract may be wrong, or both may be right and the prover needs a hint. Much of this guide is about working out which.
 
-`vego` is experimental and supports only part of Go. It does not yet support calls through interfaces whose methods have no contract (which includes the interfaces of the standard library), methods of an interface that write what the interface value holds, calls of function values whose type has no contract, generics, goroutines, arrays, or package-level variables. [What is not supported](#what-is-not-supported) lists the main gaps. Code that does I/O usually runs into these limits. The usual approach is to verify the logic and leave the code around it unverified. [Adopting it](#adopting-it) describes how.
+`vego` is experimental and supports only part of Go. It does not yet support calls through interfaces whose methods have no contract (which includes the interfaces of the standard library), methods of an interface that write what the interface value holds, calls of function values whose type has no contract, generics, goroutines, arrays, or package-level variables that are changed. [What is not supported](#what-is-not-supported) lists the main gaps. Code that does I/O usually runs into these limits. The usual approach is to verify the logic and leave the code around it unverified. [Adopting it](#adopting-it) describes how.
 
 ## Running it
 
@@ -202,7 +202,7 @@ There is a short form for a condition on a range of elements. `A[lo:hi) <= x` me
 
 ### Names
 
-A contract can use the function's parameters and results, and the integer and boolean constants of the package. String constants cannot be used by name. Write the string itself. A contract can also name the error variables of the package, as in `ErrEmpty`, and those of an imported package, as in `io.EOF`. A trusted contract names them by the path of their package instead. See [Error variables in a trusted contract](#error-variables-in-a-trusted-contract).
+A contract can use the function's parameters and results, and the integer and boolean constants of the package. String constants cannot be used by name. Write the string itself. A contract can also name the error variables of the package, as in `ErrEmpty`, and those of an imported package, as in `io.EOF`. A trusted contract names them by the path of their package instead. See [Error variables in a trusted contract](#error-variables-in-a-trusted-contract). The contract of a verified function can name other package-level variables that nothing changes, as described in [Package-level variables](#package-level-variables).
 
 Results are referred to by their names, so every result of a verified function must be named. This guide calls a single result `result`, but you can choose another name. Go does not allow a result to share a name with a parameter, so a name in a contract cannot mean both. Three names are not available for variables that annotations use: `True`, `False`, and `nil`, which are words of the formula language. A predicate cannot be called `is`.
 
@@ -2091,6 +2091,261 @@ vego: cannot verify Clear: the loop modifies a map of the type it ranges over, w
 
 Quantifiers range over integers. A formula can therefore describe all the values of a map with integer keys in some range, but not all the values of a map with string keys.
 
+## Package-level variables
+
+A function can read a package-level variable that nothing changes after it is initialised. A contract can name it as the code does:
+
+```go
+var digits = "0123456789abcdef"
+
+var limits = map[string]int{"free": 10, "pro": 1000}
+
+// Hex returns the digit for d.
+//
+// @Requires 0 <= d < 16
+// @Ensures r = digits[d]
+func Hex(d int) (r byte) {
+	return digits[d]
+}
+
+// Limit returns the limit of a plan.
+//
+// @Ensures ok <-> (plan = "free" Or plan = "pro")
+// @Ensures plan = "pro" -> n = 1000
+func Limit(plan string) (n int, ok bool) {
+	n, ok = limits[plan]
+	return n, ok
+}
+```
+
+Both functions verify. `vego` knows the string that `digits` holds and the keys and values of `limits`. It knows these values from the initialisers, and nothing in the program can change them. A variable of an imported package is named as in Go, as in `lib.Limit`.
+
+Error variables follow rules of their own, described in [Errors](#errors).
+
+### Which variables a function can read
+
+`vego` reads every file of your package and of every package it is built with. That includes code that is not verified and the standard library. A function can read a variable when none of that code changes it in one of these ways:
+
+- assigns it, or a field of it, as in `x = 1`, `x.n = 1`, `x++`, or `for x = range s`;
+- takes its address, as in `&x` or `&x.n`, or selects a method with a pointer receiver on it, as in `x.Reset()` or the method value `x.Reset`;
+- names it in a `//go:linkname` directive, or refers to it in an assembly file.
+
+Reading a variable that is changed is reported:
+
+```go
+var served int
+
+// Serve counts requests, and is not verified.
+func Serve() {
+	served++
+}
+
+// Served reads the count.
+//
+// @Ensures True
+func Served() (r int) {
+	return served
+}
+```
+
+```text
+vego: cannot verify Served: served is assigned at globals.go:35; package-level variables that are changed
+are not supported yet
+```
+
+Pass the value as a parameter instead. For a variable of another package, the message names the package that changes it. An `init` function that assigns a variable changes it too.
+
+The type of the variable must be one that cannot hold code. A function value, an interface value, an error, or a channel may not appear in the type at any depth, also behind a pointer. The unexported fields of a struct type of another package do not count, because verified code cannot read them. So `*os.File` and `*log.Logger` can be read, but `*http.Client` cannot, because its exported field `Transport` holds an interface value:
+
+```go
+// Client reads a variable whose type can hold code.
+//
+// @Ensures True
+func Client() (r bool) {
+	return http.DefaultClient != nil
+}
+```
+
+```text
+vego: cannot verify Client: http.DefaultClient has type *net/http.Client, which can hold a function value,
+an interface value, an error, or a channel; package-level variables of such types are not supported yet
+```
+
+### What vego knows of the value
+
+`vego` reads the initialiser of the variable. The value is known in these cases:
+
+- There is no initialiser. The variable holds the zero value of its type.
+- The initialiser is a constant, as in `var defaultTimeout = 30`. The variable holds that constant. A float constant is one value, but nothing is known of it, as for every float.
+- The initialiser is a struct literal, as in `var defaults = Config{Timeout: 30}`. Each field holds what the literal gives it, by these same rules.
+- The initialiser is a slice or map literal, `make`, `new`, `&T{...}`, or `[]byte` or `[]rune` of a constant string. The variable is not nil. A slice has the length that the literal, the constant arguments of `make`, or the string gives, and the capacity of a literal or of `make` with constant arguments.
+- The initialiser is another package-level variable that a function can read. The variable holds the same value.
+
+Anything else gives a value of the type of which nothing more is known. That includes a call, as in `var pageSize = os.Getpagesize()`, arithmetic on other variables, and a variable that a `//go:embed` directive fills.
+
+`vego` does not know that such a value is what your code expects. A `Requires` clause cannot state it either, since no caller chooses the value of a package-level variable, and a caller in another package may not be able to name it. So a clause that reads package-level variables and nothing else must follow from what their declarations give:
+
+```go
+var pageSize = os.Getpagesize()
+
+// Pages counts the pages that n bytes take.
+//
+// @Requires pageSize > 0
+// @Requires n >= 0
+// @Ensures True
+func Pages(n int) (r int) {
+	return n / pageSize
+}
+```
+
+```text
+vego: the Requires clause pageSize > 0 reads only package-level variables, and their declarations do not
+show that it holds; test the value in the body instead
+```
+
+Test the value in the body:
+
+```go
+// PagesChecked tests the value in the body.
+//
+// @Requires n >= 0
+// @Ensures True
+func PagesChecked(n int) (r int) {
+	if pageSize <= 0 {
+		return 0
+	}
+	return n / pageSize
+}
+```
+
+A clause that relates a parameter to a variable, such as `@Requires n < defaultTimeout`, is a condition on callers as usual. The check that a contract does not allow a function to always fail, described in [Saying when a function succeeds](#saying-when-a-function-succeeds), counts a variable as part of the input. Its declaration narrows the values that the check tries.
+
+A variable named in the code is read as a value, so it cannot be primed. `defaultTimeout'` and `old(defaultTimeout)` are reported. A struct invariant, and the contract of a function type or of a method of an interface, cannot name a package-level variable yet.
+
+### What a variable refers to
+
+A variable that holds a slice, a map, or a pointer is fixed, but the memory it refers to may not be. `table[0] = 5` assigns no variable. `vego` treats that memory as unchanged only when both of these hold:
+
+- The initialiser made the memory: it is a slice or map literal, `make`, `new`, `&T{...}`, or `[]byte` or `[]rune` of a constant string. No other reference to it existed then.
+- Every use of the variable in the build only reads a value out of it. A read is `v[i]`, `v.f`, or a path of these such as `v[i].f`, that ends in a value with no pointer, slice, or map in it. It can also be `len(v)` or `cap(v)`, a comparison with `nil`, a `range` over `v` whose elements, and for a map whose keys, hold no pointer, slice, or map, or `n, ok := v[k]`.
+
+Any other use lets a reference to the memory out of the variable. Examples are passing `v` to a function, assigning it, slicing it, calling a method on it or on one of its elements, writing an element, and `delete` on a map. A use in code that is not verified counts. So does a use in another package that is built with yours, and a use in the initialiser of another variable, as in `var view = table[1:]`.
+
+When both hold, a literal tells `vego` the elements, the keys and values, or the fields. `Limit` above relies on this. Otherwise the memory is like memory that a parameter refers to. Nothing is known of what it holds when the function is called, and a write through another slice may change it:
+
+```go
+var sizes = []int{1, 2, 4}
+
+// Grow writes the table, and is not verified.
+func Grow() {
+	sizes[0] = 8
+}
+
+// FirstSize reads the table.
+//
+// @Ensures r = 1
+func FirstSize() (r int) {
+	return sizes[0]
+}
+```
+
+```text
+vego: postcondition may not hold: r = 1
+```
+
+The length of `sizes` is still known, so `sizes[i]` needs no `Requires` for an `i` below 3. Nothing in the message says that `Grow` is the reason. If a contract about the contents of a table is not proved, look for a use of the variable that does more than read it.
+
+A package that is built with yours may let out a reference to a variable that a proof relies on. The use is then reported where it is, and in every package `laas` analyses that is built with both:
+
+```text
+vego: globalslib.Plans may be changed here, but proofs in package globalslib rely on what it refers to
+being only read
+```
+
+```text
+vego: globalslib.Plans is changed at mid.go:12 in package globalsmid, which this package is built with,
+but proofs in package globalslib rely on what it refers to being only read
+```
+
+An assignment in such a package to a variable that a proof relies on is reported in the same way, with `rely on it holding the value it was declared with`.
+
+### Changing a variable
+
+A verified function cannot change a package-level variable, or the memory one refers to, yet:
+
+```go
+// ResetServed assigns a variable.
+//
+// @Ensures True
+func ResetServed() {
+	served = 0
+}
+
+// SetSize writes what a variable refers to.
+//
+// @Ensures True
+func SetSize() {
+	sizes[1] = 3
+}
+
+// ListsSizes names a variable in Modifies.
+//
+// @Modifies sizes
+func ListsSizes() {}
+```
+
+```text
+vego: cannot verify ResetServed: served is a package-level variable, which a verified function cannot
+assign yet
+vego: cannot verify SetSize: sizes[1] writes memory that the package-level variable sizes refers to,
+which a Modifies clause cannot name yet
+vego: in Modifies annotation: sizes is a package-level variable, which a Modifies clause cannot name yet
+```
+
+A call that would write such memory, or an `append` that would write into its capacity, is reported with the same reason: `it is memory that the package-level variable sizes refers to, which a Modifies clause cannot name yet`.
+
+### Variables and initialisation
+
+A variable holds its value only once the package has initialised it. `vego` relies on Go's order of initialisation, under the same conditions as for an error variable. Code that Go's ordering does not see can run during initialisation, as described in [When a package-level error is known](#when-a-package-level-error-is-known). Then a variable with an initialiser cannot be read, and the message has the form shown there: `x is not known to have its value yet when this runs: ...`. A variable without an initialiser is zero before any code runs, so it can still be read.
+
+### What this does not cover yet
+
+Some code that uses package-level variables still cannot be verified:
+
+- A counter, a cache, or any other variable that is assigned, also in an `init` function, as `os.Args` is in package `os`. Pass the value as a parameter.
+- `fmt.Fprintln(os.Stderr, ...)`. A function can read `os.Stderr`, but writing to it converts the `*os.File` to an `io.Writer`, and `(*os.File).Write` has no shipped contract:
+
+  ```text
+  vego: cannot verify Warn: it uses Write as a method of io.Writer, and Write has no contract; annotate
+  Write with // @ annotations so that it is verified, or add a trusted contract for (*os.File).Write to
+  vego-trusted.yaml
+  ```
+
+  Use `fmt.Printf`, or take the writer as a parameter.
+- `log.Default()`, which has no shipped contract.
+- `flag` variables. `flag.Int` returns an `*int`, and pointers to anything but a struct are not supported. `flag.StringVar(&s, ...)` takes the address of `s`.
+- A variable of a function type or an interface type.
+
+A logger in a package-level variable can be used when the code tests it against `nil`. `log.New` is called by the initialiser, which is not verified, so `vego` does not know that its result is not nil:
+
+```go
+var logger = log.New(os.Stderr, "app: ", 0)
+
+// Notify writes to a package-level logger.
+//
+// @Requires |msg| <= 1000
+// @Ensures True
+func Notify(msg string) {
+	if logger != nil {
+		logger.Printf("report: %s", msg)
+	}
+}
+```
+
+Without the test, the call is reported as `precondition of Printf may not hold: l != nil`.
+
+A build that sets a string variable with `-ldflags "-X path.name=value"` gives it a value that `vego` does not see. A proof that relies on the value of such a variable, typically a version, does not hold for that build. See [What a proof assumes](#what-a-proof-assumes).
+
 ## Errors
 
 `vego` knows two things about an error value: whether it is `nil`, and which error it is. It knows that `errors.New` and `fmt.Errorf` return non-nil errors. It also knows that such an error differs from every error variable and from the other errors the function makes.
@@ -2429,7 +2684,7 @@ vego: cannot verify AsError: converting a guide.CodeError to an error is not sup
 
 ### When a package-level error is known
 
-An error variable of your own package holds the error it was declared with under these conditions. Nothing in the package assigns to it or takes its address. And no code in the package can run before the variable is initialised.
+An error variable of your own package holds the error it was declared with under these conditions. Nothing in the package changes it, in any of the ways listed in [Which variables a function can read](#which-variables-a-function-can-read). And no code in the package can run before the variable is initialised.
 
 Go initialises the variables of a package in an order it works out from their dependencies. Code of the package can still run earlier if an initialiser hands something to code that Go's ordering does not see. The package then loses what it knew about all its error variables. That happens when the initialiser of any package-level variable does one of these things:
 
@@ -2640,7 +2895,7 @@ func Inventory(w io.Writer, l *log.Logger, n int) (err error) {
 }
 ```
 
-`os.Stdout`, `os.Stderr`, `log.Default()`, and a logger in a package-level variable are not supported yet, since `vego` does not support package-level variables. So `fmt.Fprintf(os.Stderr, ...)` is reported as `cannot verify`. Use `fmt.Printf` or `log.Printf`, or take the writer or the logger as a parameter.
+`fmt.Fprintf(os.Stderr, ...)` is reported as `cannot verify`, because `(*os.File).Write` has no shipped contract, and `log.Default()` has none either. Use `fmt.Printf` or `log.Printf`, or take the writer or the logger as a parameter. A logger in a package-level variable can be used when the code tests it against `nil`, as described in [What this does not cover yet](#what-this-does-not-cover-yet).
 
 `fmt.Printf`, `fmt.Print`, and `fmt.Println` write to standard output, and the functions of `log` write to the standard logger. Code that is not verified chooses where those go: it can set `os.Stdout`, and it can call `log.SetOutput` or `slog.SetDefault`. A proof assumes that a write there returns and writes nothing verified code can see. If your program sets the standard logger's output to a writer of its own, it makes that claim about the writer. A writer that logs through the standard logger again never returns, because the logger holds a lock while it writes. See [What a proof assumes](#what-a-proof-assumes).
 
@@ -3680,7 +3935,7 @@ func At(A []int, i int) (x int, err error) {
 }
 ```
 
-The second is that package-level variables are not supported. The only exception is an error variable, a package-level variable of type `error` that is never assigned, as described in [Errors](#errors). A function that reads a global variable must receive the value as a parameter instead.
+The second is that a verified function can read only package-level variables that nothing changes, as described in [Package-level variables](#package-level-variables). A function that reads a counter, a cache, or another variable that is assigned must receive the value as a parameter instead.
 
 ### For one core component
 
@@ -3775,7 +4030,11 @@ This table lists the most common messages.
 | `the slices passed to F as a and b may overlap` | Two slice arguments with the same element type are not proved to be separate memory. | Pass two slice parameters of your own function, or a slice that the function allocated. No formula can yet state that two slices share no memory, so a slice stored in a struct cannot be proved separate from a parameter. |
 | `cannot verify F: it calls G, which has no contract` | `G` is neither verified nor trusted. | Annotate `G`, or add it to the trust file. |
 | `cannot verify F: parameter x has unsupported type T` | `T` is outside the supported subset. | Keep `T` out of the signatures of verified functions. |
-| `cannot verify F: x is not a local variable` | `F` uses a package-level variable that is not an error variable. | Pass the value as a parameter. |
+| `cannot verify F: x is assigned at f.go:n; package-level variables that are changed are not supported yet` | `F` reads a package-level variable that something in the build assigns, takes the address of, or names in a `//go:linkname` directive or in assembly. | Pass the value as a parameter. See [Which variables a function can read](#which-variables-a-function-can-read). |
+| `cannot verify F: x has type T, which can hold a function value, an interface value, an error, or a channel` | `F` reads a package-level variable of such a type. | Pass the value as a parameter. |
+| `cannot verify F: x is a package-level variable, which a verified function cannot assign yet`, or `x[i] writes memory that the package-level variable x refers to, which a Modifies clause cannot name yet` | `F` changes a package-level variable or what one refers to. | Leave the change to code that is not verified, or pass the memory as a parameter. See [Changing a variable](#changing-a-variable). |
+| `the Requires clause P reads only package-level variables, and their declarations do not show that it holds` | No caller can choose the values the clause is about. | Test the value in the body. See [What vego knows of the value](#what-vego-knows-of-the-value). |
+| `x may be changed here, but proofs in package p rely on it holding the value it was declared with`, or `... rely on what it refers to being only read` | A package in the build changes a variable, or lets out a reference to what it refers to, and a proof relies on it. | Remove the change, or the proof that relies on the variable. See [What a variable refers to](#what-a-variable-refers-to). |
 | `cannot verify F: formatting err would run the methods of an error whose origin is not known` | `fmt.Errorf` is given an error whose origin is not known, such as one from a parameter or from a trusted function whose contract does not vouch for it. | Return the error unchanged, or wrap your own error. If the error comes from a trusted function, see [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). |
 | `cannot verify F: comparing two errors can panic when both hold the same uncomparable type` | Neither error is `nil`, an error made by `errors.New` or `fmt.Errorf`, or an error variable that holds one or holds a pointer, integer, string, or boolean, or an array or struct of these. | Compare one of them with an error variable instead. See [Comparing errors](#comparing-errors). |
 | `cannot verify F: errors.Is would run the Is and Unwrap methods of err, an error whose origin is not known` | `errors.Is` is asked about an error from a parameter, or from a trusted function whose contract does not vouch for it. | Compare it with an error variable using `==`. See [Asking errors.Is](#asking-errorsis). |
@@ -3866,10 +4125,10 @@ A function that uses any of the following is reported as `cannot verify`:
 - goroutines, channels, and `select`;
 - arrays, and structs that contain an array;
 - pointers to anything other than a struct;
-- package-level variables, except error variables that are never assigned, of this package or another;
+- reading a package-level variable that something in the build changes, or whose type can hold a function value, an interface value, an error, or a channel; assigning a package-level variable, writing what one refers to, and naming one in `Modifies` (see [Package-level variables](#package-level-variables));
 - `copy`;
 - formatting a value whose type has a method `Format`, `GoString`, `Error`, or `String`, a pointer, a map, an interface value other than an error of known origin, a function value, or a value of a type that holds itself, with `fmt.Errorf` or a function whose entry lists it under `formats`, and passing such a function a slice with `...` for the values it formats (see [What can be formatted](#what-can-be-formatted));
-- `os.Stdout`, `os.Stderr`, and `log.Default()`, which are package-level variables;
+- writing to `os.Stdout` or `os.Stderr` with `fmt.Fprint`, `fmt.Fprintf`, or `fmt.Fprintln`, since `(*os.File).Write` has no shipped contract, and `log.Default()`;
 - a call in the target of an assignment whose right-hand side is an `append` that may write into the array of its slice, unless the call modifies nothing and refers to no memory or a call among the operands of the `append` orders it (see [An append beside a call](#an-append-beside-a-call));
 - a call with several results as the arguments of another call, as in `g(f())`;
 - comparing structs with `==`;
@@ -3888,7 +4147,7 @@ Floating-point values are supported but opaque. They can be passed around and us
 
 A proof by `vego` depends on the following assumptions. Each concerns something `vego` cannot see.
 
-- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and it keeps no value that can hold code. It does not call back, through another package, into the verified function that called it. A call back within the same package is found and reported. For a parameter listed under `runs`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter.
+- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and it keeps no value that can hold code. It does not call back, through another package, into the verified function that called it. A call back within the same package is found and reported. For a parameter listed under `runs`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter.
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one that wraps it, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method.
 - An interface value that reaches verified code from code that is not verified meets the contracts of its methods. That includes a value passed as an argument, a value in memory that an argument reaches, a value that a call through another value returns, and a value that a trusted function returns or writes, which its entry vouches for. Called with arguments that meet the `Requires` of a method, the method returns without panicking, leaves its `Ensures` true, and writes nothing that verified code can see outside what its `Modifies` lists. This holds also when the value holds a pointer to a struct that verified code holds.
 - The same holds of the methods and function types that entries of the trust file give contracts, which is what such an entry claims (see [What an entry for a type claims](#what-an-entry-for-a-type-claims)). In particular, a caller that is not verified does not pass a verified function such a value together with a pointer to memory that the value writes, as a `*bytes.Buffer` passed both as an `io.Writer` and as a `*bytes.Buffer` would be. Every call through such a value returns: a `Read` from a pipe, a terminal, or a connection returns only once data or an error arrives.
@@ -3900,10 +4159,11 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - Every call that waits for another goroutine returns: `Lock` and `RLock` return once the other goroutines release the mutex, and `(*sync.Once).Do` returns once the function that another goroutine runs in it returns. A deadlock that the verified function takes part in breaks this.
 - No other goroutine unlocks a mutex that the goroutine running a verified function holds.
 - Code that is not verified does not copy a value that holds a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once` after it was first used, as the documentation of `sync` requires.
-- No code outside the packages that a verified package is built with assigns an error variable that a proof relies on, and no code changes one through `go:linkname`, assembly, `unsafe`, or `reflect`. When a verified package is built with a package that makes such an assignment, the verified package does not rely on the variable. The assignment is also reported wherever it meets a proof that does rely on it.
+- No code outside the packages that a verified package is built with changes a package-level variable that a proof relies on, or lets out a reference to what such a variable refers to when a proof relies on it being only read. No code does either through `unsafe`, `reflect`, C code of a cgo package, or an object file (`.syso`) linked into the program. `vego` reads the `//go:linkname` directives and the assembly files of the build, and counts what they name as changed. When a verified package is built with a package that makes such a change, the verified package does not rely on the variable. The change is also reported wherever it meets a proof that does rely on it.
 - `errors.New`, `fmt.Errorf`, and `errors.Is` behave as they do in the Go releases that `laas` is tested with. Each call of `errors.New` or `fmt.Errorf` returns a new pointer. The errors they return have no `Is` method. `Unwrap` returns the operand of the one `%w`. `errors.Is` finds an error, or an error it wraps, that is the target. The tests of `vego` check this against the running toolchain.
 - The compiler evaluates each statement in an order that the Go specification allows. Calls, `&&`, and `||` run from left to right, an operation runs after its operands, and an assignment assigns only after it has evaluated everything. Where the specification leaves the order open, `vego` proves that every order it allows gives the same values.
 - The program runs on the platform `laas` was run for. The sizes of `int`, `uint`, and pointers, the layout of structs, and `MaxAlloc` are those of the `GOOS` and `GOARCH` that `laas` runs with. A proof for a 64-bit target does not hold for a 32-bit target.
+- The program is built without `-ldflags "-X ..."` for a variable that a proof relies on. The linker sets a string variable that way, typically a version, to a value that `vego` does not see.
 - The program is built from the files `laas` read. Files left out by a build constraint or a file name such as `_windows.go` are not read, so their annotations are not checked. Run `laas` once for each configuration you ship.
 - A write to standard output returns. Code that is not verified may set `os.Stdout` to any `*os.File`, and a pipe that nobody reads breaks this.
 - The output of the standard logger writes nothing that verified code can see, and returns. Code that is not verified sets that output with `log.SetOutput`, or with `slog.SetDefault` to a `slog.Handler`. A program that sets it to a writer or a handler of its own makes this claim about that code. A writer or a handler that logs through the standard logger again never returns, because the logger holds a lock while it writes. The same goes for a writer made by verified code whose `Write` calls something that logs.
@@ -3955,6 +4215,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `Forall k in Z : P` | quantifier over all integers |
 | `"text"`, `nil` | a string; the nil pointer, error, function value, or interface value |
 | `ErrEmpty`, `io.EOF` | an error variable of the package, or of an imported package |
+| `limit`, `lib.Limit`, `table[i]` | in the contract of a verified function, a package-level variable that nothing changes, of the package or of an imported package |
 | `"io/fs".ErrNotExist` | in a trusted contract, an error variable named by the path of its package |
 | `err = ErrEmpty` | the two are the same error |
 | `is(err, target)` | `errors.Is(err, target)` reports true |
