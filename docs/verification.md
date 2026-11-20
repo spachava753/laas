@@ -670,9 +670,10 @@ The first message is at the clause, and the second at the call in `Touches`.
 
 What the rest of the caller relies on depends on what can be read:
 
-- When every `Requires` and `Modifies` clause can be read, the call checks the `Requires` and assumes the `Ensures` clauses that can be read.
-- When a `Requires` cannot be read, the call assumes nothing about what it returns, and what `Modifies` lists is forgotten.
-- Otherwise, for example when a `Modifies` clause cannot be read or a trusted contract has a defect, nothing after the call is checked on that path.
+- For a function of the package, when every `Requires` and `Modifies` clause can be read, the call checks the `Requires` and assumes the `Ensures` clauses that can be read.
+- For a function of the package whose `Modifies` clauses can be read but a `Requires` clause cannot, the call assumes nothing about what it returns, and what `Modifies` lists is forgotten.
+- For the contract of a function type or of an interface method declared in the package, when its `Modifies` clauses can be read, a call checks the `Requires` clauses that can be read and assumes no `Ensures`. What `Modifies` lists is forgotten.
+- Otherwise, nothing after the use is checked on that path. This happens, for example, when a `Modifies` clause cannot be read, when a trusted contract has a defect, or when a value is converted to a function type or an interface whose contract cannot be read.
 
 The contract of an exported function is available to other packages, so verified code can call verified functions in other packages. If a function failed verification, other packages cannot rely on its contract.
 
@@ -1997,7 +1998,7 @@ Without `fresh(result)`, a caller must assume that the result could be a counter
 
 `fresh(x)` means that the memory `x` refers to on return was allocated during the call. `within(a, b)` means that `a` lies inside the memory of `b`. Each argument is a pointer or a slice, and a slice includes its whole capacity. There are two edge cases. A slice with zero capacity has no memory, so it is `fresh` and is `within` anything. A nil pointer is `within` nothing.
 
-For two pointers to structs, `within(p, l)` means that `p` points to `l`'s struct itself or to a field of it, at any depth, of `p`'s struct type. So `@Modifies l` covers a write through `p` when the `Requires` says `within(p, l)`. When `p`'s type is neither `l`'s nor the type of any field of it, `within(p, l)` is an error.
+For two pointers to structs, `within(p, l)` means that `p` points to `l`'s struct itself or to a field of it. That struct or field has `p`'s struct type, or a type with the same fields, tags ignored. The field may be held directly or in a struct that `l`'s struct holds, but not behind a pointer. So `@Modifies l` covers a write through `p` when the `Requires` says `within(p, l)`. When `p` points to a struct whose size is not zero and `l`'s struct has no such place, `within(p, l)` is an error.
 
 `&x`, `&p.field`, and `&s[i]` are supported when the result points to a struct. Methods with pointer receivers can be called on variables, fields, and elements. Pointers to other types, such as `*int`, are not supported.
 
