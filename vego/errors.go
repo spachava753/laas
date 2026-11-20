@@ -671,6 +671,19 @@ type outcome struct {
 	// error that it reached.
 	outside bool
 	reached map[*funcInfo]bool
+	// pending, when set, runs the search for an input on which the
+	// contract forces success, which was put off because the function
+	// reported something of its own; see verified.
+	pending func()
+}
+
+// settle runs the search that was put off, if it was.
+func (o *outcome) settle() {
+	if o.pending != nil {
+		pending := o.pending
+		o.pending = nil
+		pending()
+	}
 }
 
 // verified verifies a function once and records the outcome.
@@ -689,11 +702,41 @@ func (pv *pkgVerifier) verified(fn *funcInfo) {
 	pv.run(fn, func(v *fnVerifier) {
 		v.tracksFailure = len(errorResults(fn)) > 0
 		v.verify()
-		if v.tracksFailure {
+		search := func() {
 			result.forces, result.final = v.forcesSuccess()
 			result.limited = pv.searchLimit
 		}
-		result.outside, result.reached, result.complete = v.outside, v.reached, true
+		tie := func() {
+			if v.tieLater {
+				v.tieFailures()
+			}
+			result.outside, result.reached = v.outside, v.reached
+		}
+		switch {
+		case !v.tracksFailure:
+			tie()
+		case fn.reportedHere:
+			// A function that has reported a fault of its own is not
+			// judged by the always-fails check until the fault is fixed:
+			// its contract will change, and the search, which is the
+			// costliest question of the check, rarely finds anything on a
+			// function that does not verify. Whether its contract forces
+			// success still decides whether a caller that reaches it is
+			// excused, so the search is kept, in the state it would have run
+			// in, and run only if a caller needs it.
+			result.pending = func() {
+				defer pv.costing(fn)()
+				saved := pv.searchLimit
+				pv.searchLimit = solver.Unknown
+				tie()
+				search()
+				pv.searchLimit = saved
+			}
+		default:
+			tie()
+			search()
+		}
+		result.complete = true
 	})
 }
 
@@ -709,9 +752,40 @@ func (pv *pkgVerifier) verified(fn *funcInfo) {
 // does not matter.
 func (pv *pkgVerifier) reportAlwaysFailing() map[*funcInfo]bool {
 	excused := map[*funcInfo]bool{}
-	candidate := func(fn *funcInfo) bool {
+	judged := func(fn *funcInfo) bool {
 		result := pv.outcomes[fn]
-		return result != nil && result.complete && len(errorResults(fn)) > 0 && result.forces != solver.Refuted
+		return result != nil && result.complete && len(errorResults(fn)) > 0
+	}
+	// The functions whose contracts are judged are those that reported
+	// nothing of their own; whether one is excused depends on the callees
+	// it reached, so those are looked at too, and only they settle a search
+	// that was put off.
+	needed := map[*funcInfo]bool{}
+	var pending []*funcInfo
+	for _, fn := range pv.order {
+		if judged(fn) && !fn.reportedHere {
+			needed[fn] = true
+			pending = append(pending, fn)
+		}
+	}
+	for len(pending) > 0 {
+		fn := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		pv.outcomes[fn].settle()
+		for callee, reached := range pv.outcomes[fn].reached {
+			if reached && judged(callee) && !needed[callee] {
+				needed[callee] = true
+				pending = append(pending, callee)
+			}
+		}
+	}
+	candidate := func(fn *funcInfo) bool {
+		if !needed[fn] {
+			return false
+		}
+		result := pv.outcomes[fn]
+		result.settle()
+		return result.forces != solver.Refuted
 	}
 	for changed := true; changed; {
 		changed = false
@@ -728,7 +802,7 @@ func (pv *pkgVerifier) reportAlwaysFailing() map[*funcInfo]bool {
 		}
 	}
 	for _, fn := range pv.order {
-		if candidate(fn) && !excused[fn] {
+		if !fn.reportedHere && candidate(fn) && !excused[fn] {
 			fn.failed = true
 			// Proved means that no state the logic describes forces success,
 			// so no input does; otherwise only the search found none.

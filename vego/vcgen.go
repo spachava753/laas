@@ -172,6 +172,8 @@ type fnVerifier struct {
 	// fixedMet the fixed variables met; see fixedValue.
 	madeFixed      []*logic.Term
 	fixedMet       map[string]fixedMet
+	// tieLater is set when tieFailures was put off; see verified.
+	tieLater bool
 	// typedReads, when set, receives the values whose type facts reads
 	// note; see canBeMet.
 	typedReads *[]typedRead
@@ -523,7 +525,15 @@ func (v *fnVerifier) verify() {
 		v.unsupported(unplaced[0], "Go converts a value to an interface type here, and which expression it converts could not be told, "+
 			"as for one result of a call with several, so the conversion cannot be checked; assign the value to a variable of its own type first")
 	}
-	v.tieFailures()
+	// Which calls decide the failures only says whether the function is
+	// excused by the always-fails check, which a function that reported a
+	// fault of its own is judged by only if a caller needs it; see
+	// verified.
+	if v.fn.reportedHere && v.tracksFailure {
+		v.tieLater = true
+	} else {
+		v.tieFailures()
+	}
 	for i, t := range v.frame {
 		// After a failure the state may hold a false assumption, under
 		// which nothing is needed.

@@ -366,8 +366,10 @@ type funcInfo struct {
 	// imported is set for a function verified in another package, whose
 	// contract was published by that package.
 	imported *contractFact
-	// failed is set when verifying the function reported a problem.
-	failed bool
+	// failed is set when verifying the function reported a problem, and
+	// reportedHere when one of them lies in its declaration.
+	failed       bool
+	reportedHere bool
 	// forces caches whether a trusted contract forces success for some
 	// input; see forcesSuccess.
 	forces *bool
@@ -609,6 +611,17 @@ type pkgVerifier struct {
 func (pv *pkgVerifier) report(pos token.Pos, format string, args ...any) {
 	if pv.current != nil {
 		pv.current.failed = true
+		// A report within the declaration, its doc comment included, is
+		// one of the function's own.
+		if decl := pv.current.decl; decl != nil {
+			start := decl.Pos()
+			if decl.Doc != nil {
+				start = decl.Doc.Pos()
+			}
+			if start <= pos && pos < decl.End() {
+				pv.current.reportedHere = true
+			}
+		}
 	}
 	msg := "vego: " + fmt.Sprintf(format, args...)
 	key := fmt.Sprintf("%d %s", pos, msg)

@@ -2665,6 +2665,8 @@ inputs and a small input satisfies it
 
 A contract that only says "if the function succeeds, then ..." is also satisfied by a function that always fails. `vego` rejects such contracts because they are easy to write by accident and guarantee nothing.
 
+The check is made once the function's other checks pass. A function that has a report of its own, such as an index that may be out of range, gets no report from this check, so this message can appear after you fix something else. The search it needs is the costliest question `vego` asks, and the contract of a function with a fault is likely to change anyway.
+
 To decide, `vego` searches for one example input. The input must satisfy the `Requires` clauses, and the `Ensures` clauses must then force every error result to be `nil`. The examples have a simple shape:
 
 - slices in which every element is the same, or the slice literals in the contract;

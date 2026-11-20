@@ -1160,6 +1160,11 @@ trusted:
     runs: [x]
     modifies: []
 
+  trialfaults.unpredictable:
+    reason: Fails as it likes; nothing says when it succeeds.
+    modifies: []
+    vouches: [result]
+
   trialfaults.newCloser:
     reason: Returns a new value or nil, as some constructors are documented to.
     ensures: ["fresh(result)"]
