@@ -3154,6 +3154,8 @@ This check can miss a weak contract. When the path to the call depends on values
 
 It cannot format an error that came from a parameter, or from a trusted function whose contract does not vouch for it. Formatting an error calls its methods, and `vego` cannot see what the methods of an unknown error do. For the same reason, such an error cannot be passed to a trusted function unless that function's contract allows it. See [Arguments that carry code](#arguments-that-carry-code).
 
+An error variable has a known origin where it is formatted when every assignment that can reach that place gives it one. A later assignment does not count, so you can reuse `err` for the next call after you wrap it. [Reading and writing files](#reading-and-writing-files) shows this.
+
 The shipped contract of `strconv.Atoi` vouches for its error, so its error can be wrapped:
 
 ```go
