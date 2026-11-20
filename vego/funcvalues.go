@@ -229,14 +229,31 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 	}
 	env := &specEnv{v: v, sink: st, fn: fn, args: v.entry, results: results, now: memory{}, post: st.mem, before: entry.brk}
 	var promised []*logic.Term
+	var reads []typedRead
+	v.typedReads = &reads
 	for _, c := range fn.ensures {
 		promised = append(promised, v.calleeFormula(c, env))
 	}
+	v.typedReads = nil
 	// Reading the Ensures notes facts, such as the range of a number read
 	// from memory on entry. One that mentions nothing the outcome produced
 	// is a fact about the entry state, which holds wherever that memory is
 	// read; the rest is what the outcome has to meet.
 	given := slices.Clip(entry.hyps)
+	// A value read from memory that existed on entry is a value of its
+	// type there, below the bound on entry; the read notes it with the
+	// bound of the outcome, which makes it a goal about the table of
+	// homes that the entry may not settle. Its fact with the bound on entry
+	// is true of the entry state, and given.
+	outcomeMade := map[string]bool{}
+	for _, name := range v.made[mark:] {
+		outcomeMade[name] = name != st.brk.Name
+	}
+	for _, read := range reads {
+		if !mentionsMade(read.val, outcomeMade) {
+			given = append(given, v.wellFormed(read.val, read.t, entry.brk))
+		}
+	}
 	facts := promised
 	for _, fact := range st.hyps[known:] {
 		if mentionsAny(fact, v.made[mark:]) {
@@ -287,14 +304,21 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 // the reference 0, and one that is not nil has a home of its own, chosen
 // like a result. Z3 then has no equation under the existential to solve.
 //
-// What this lets the outcome choose is what an outcome of Go can be. A
-// formula compares an interface value only with nil, so in the facts a
-// produced reference occurs only as compared with 0 and inside its home;
-// which number it is decides nothing, and it can be taken to be a new
-// reference, apart from every other. A new reference is what a conversion
-// gives, and the model gives its home no value of its own: a converted
-// value may hold memory that is new, or what another value holds, so any
-// home from 1 up to the bound afterwards is one that some outcome has.
+// What this lets the outcome choose is what an outcome of Go can be, for a
+// produced reference that the facts use only inside its home or compared
+// with 0. A formula compares an interface value only with nil, so such a
+// reference is one whose number decides nothing, and it can be taken to be
+// a new reference, apart from every other. A new reference is what a
+// conversion gives, and the model gives its home no value of its own: a
+// converted value may hold memory that is new, or what another value holds,
+// so any home from 1 up to the bound afterwards is one that some outcome
+// has. An outcome writes produced values into what Modifies lists too, and
+// the facts read them back through those writes; such a read is written
+// out first as the value written where the place is the one written and
+// what was there otherwise, which means the same, so that a read of the
+// home of a value the outcome wrote is the home of that value. A produced
+// reference that then still occurs anywhere else, as inside a region, keeps
+// the home the table gives it.
 //
 // It also returns the homes it made, in order.
 func (v *fnVerifier) chooseHomes(facts []*logic.Term, made []string) ([]*logic.Term, []*logic.Term) {
@@ -302,20 +326,36 @@ func (v *fnVerifier) chooseHomes(facts []*logic.Term, made []string) ([]*logic.T
 	for _, name := range made {
 		produced[name] = true
 	}
+	expanded := make([]*logic.Term, len(facts))
+	memo := map[*logic.Term]*logic.Term{}
+	for i, fact := range facts {
+		expanded[i] = liftHomes(readBack(fact, produced, memo), map[*logic.Term]*logic.Term{})
+	}
+	facts = expanded
+	// The produced references whose homes are read, and those that occur
+	// elsewhere than in their home or compared with 0.
 	var order []*logic.Term
-	listed := map[string]bool{}
+	listed, pinned := map[string]bool{}, map[string]bool{}
 	seen := map[*logic.Term]bool{}
+	isProduced := func(t *logic.Term) bool { return t.Op == logic.OpConst && produced[t.Name] }
 	var collect func(t *logic.Term)
 	collect = func(t *logic.Term) {
 		if seen[t] {
 			return
 		}
 		seen[t] = true
-		if t.Op == logic.OpSelect && t.Args[0].Op == logic.OpConst && t.Args[0].Name == homes.Name {
-			if at := t.Args[1]; at.Op == logic.OpConst && produced[at.Name] && !listed[at.Name] {
-				listed[at.Name] = true
-				order = append(order, at)
+		switch {
+		case isHomeRead(t) && isProduced(t.Args[1]):
+			if !listed[t.Args[1].Name] {
+				listed[t.Args[1].Name] = true
+				order = append(order, t.Args[1])
 			}
+			return
+		case t.Op == logic.OpEq && (isProduced(t.Args[0]) && isZeroRef(t.Args[1]) || isProduced(t.Args[1]) && isZeroRef(t.Args[0])):
+			return
+		case isProduced(t):
+			pinned[t.Name] = true
+			return
 		}
 		for _, arg := range t.Args {
 			collect(arg)
@@ -324,6 +364,7 @@ func (v *fnVerifier) chooseHomes(facts []*logic.Term, made []string) ([]*logic.T
 	for _, fact := range facts {
 		collect(fact)
 	}
+	order = slices.DeleteFunc(order, func(ref *logic.Term) bool { return pinned[ref.Name] })
 	if len(order) == 0 {
 		return facts, nil
 	}
@@ -401,6 +442,107 @@ func freeHomeReads(facts []*logic.Term, limit int) []*logic.Term {
 	return found
 }
 
+// isHomeRead reports whether a term reads the table of homes.
+func isHomeRead(t *logic.Term) bool {
+	return t.Op == logic.OpSelect && t.Args[0].Op == logic.OpConst && t.Args[0].Name == homes.Name
+}
+
+// isZeroRef reports whether a term is the reference 0.
+func isZeroRef(t *logic.Term) bool {
+	return t.Op == logic.OpIntLit && t.Sort == logic.Ref && t.Val == 0
+}
+
+// readBack writes out each read of a cell through a write whose value is a
+// produced constant as that value where the cell is the one written, and
+// the read beneath otherwise. A read and a write of the same reference and
+// position, the same terms, give the value.
+func readBack(t *logic.Term, produced map[string]bool, memo map[*logic.Term]*logic.Term) *logic.Term {
+	if done, ok := memo[t]; ok {
+		return done
+	}
+	result := t
+	if len(t.Args) > 0 {
+		args := make([]*logic.Term, len(t.Args))
+		changed := false
+		for i, arg := range t.Args {
+			args[i] = readBack(arg, produced, memo)
+			changed = changed || args[i] != arg
+		}
+		if changed {
+			result = logic.WithArgs(t, args)
+		}
+	}
+	// A cell is read as Select(Select(region, ref), at).
+	if result.Op == logic.OpSelect && result.Args[0].Op == logic.OpSelect {
+		result = readCell(result.Args[0].Args[0], result.Args[0].Args[1], result.Args[1], produced, result)
+	}
+	memo[t] = result
+	return result
+}
+
+// readCell reads the cell at ref and at of a region, through the writes of
+// produced constants on top of it; plain is the read as it stands.
+func readCell(region, ref, at *logic.Term, produced map[string]bool, plain *logic.Term) *logic.Term {
+	if region.Op != logic.OpWrite {
+		return plain
+	}
+	written := region.Args[3]
+	if written.Op != logic.OpConst || !produced[written.Name] {
+		return plain
+	}
+	beneath := readCell(region.Args[0], ref, at, produced, logic.Select(logic.Select(region.Args[0], ref), at))
+	var same []*logic.Term
+	if !sameTerm(ref, region.Args[1]) {
+		same = append(same, logic.Eq(ref, region.Args[1]))
+	}
+	if !sameTerm(at, region.Args[2]) {
+		same = append(same, logic.Eq(at, region.Args[2]))
+	}
+	if len(same) == 0 {
+		return written
+	}
+	return logic.Ite(logic.And(same...), written, beneath)
+}
+
+// sameTerm reports whether two terms are written the same.
+func sameTerm(a, b *logic.Term) bool {
+	return a == b || a.String() == b.String()
+}
+
+// liftHomes moves a choice out of a read of a home and out of a comparison
+// of references, so that a produced reference read back from memory stands
+// inside its home, or compared with 0, as it does when it is a result.
+func liftHomes(t *logic.Term, memo map[*logic.Term]*logic.Term) *logic.Term {
+	if done, ok := memo[t]; ok {
+		return done
+	}
+	result := t
+	if len(t.Args) > 0 {
+		args := make([]*logic.Term, len(t.Args))
+		changed := false
+		for i, arg := range t.Args {
+			args[i] = liftHomes(arg, memo)
+			changed = changed || args[i] != arg
+		}
+		if changed {
+			result = logic.WithArgs(t, args)
+		}
+	}
+	switch {
+	case isHomeRead(result) && result.Args[1].Op == logic.OpIte:
+		choice := result.Args[1]
+		result = logic.Ite(choice.Args[0], liftHomes(home(choice.Args[1]), memo), liftHomes(home(choice.Args[2]), memo))
+	case result.Op == logic.OpEq && result.Args[0].Sort == logic.Ref && result.Args[0].Op == logic.OpIte:
+		choice := result.Args[0]
+		result = logic.Ite(choice.Args[0], liftHomes(logic.Eq(choice.Args[1], result.Args[1]), memo), liftHomes(logic.Eq(choice.Args[2], result.Args[1]), memo))
+	case result.Op == logic.OpEq && result.Args[1].Sort == logic.Ref && result.Args[1].Op == logic.OpIte:
+		choice := result.Args[1]
+		result = logic.Ite(choice.Args[0], liftHomes(logic.Eq(result.Args[0], choice.Args[1]), memo), liftHomes(logic.Eq(result.Args[0], choice.Args[2]), memo))
+	}
+	memo[t] = result
+	return result
+}
+
 // replaceHomes replaces the home of each reference that by names with the
 // constant given for it.
 func replaceHomes(t *logic.Term, by map[string]*logic.Term, memo map[*logic.Term]*logic.Term) *logic.Term {
@@ -425,6 +567,17 @@ func replaceHomes(t *logic.Term, by map[string]*logic.Term, memo map[*logic.Term
 	}
 	memo[t] = result
 	return result
+}
+
+// mentionsMade reports whether a value mentions a constant that the set
+// marks.
+func mentionsMade(val value, set map[string]bool) bool {
+	for _, leaf := range val {
+		if _, mentioned := estranged(leaf, set); mentioned {
+			return true
+		}
+	}
+	return false
 }
 
 // mentionsAny reports whether a term mentions a constant of the given names.

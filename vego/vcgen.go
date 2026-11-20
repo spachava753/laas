@@ -171,6 +171,9 @@ type fnVerifier struct {
 	// fixedMet the fixed variables met; see fixedValue.
 	madeFixed      []*logic.Term
 	fixedMet       map[string]fixedMet
+	// typedReads, when set, receives the values whose type facts reads
+	// note; see canBeMet.
+	typedReads *[]typedRead
 	// lostContents says, for each package-level variable read whose
 	// initialiser made what it refers to and some use in the build lets a
 	// reference to that out, that its contents are not known to stay as

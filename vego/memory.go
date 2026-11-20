@@ -350,6 +350,12 @@ func (v *fnVerifier) element(sink *state, mem memory, header value, t types.Type
 	return result, ok
 }
 
+// typedRead is a value read from memory with its type; see canBeMet.
+type typedRead struct {
+	val value
+	t   types.Type
+}
+
 // noteTyped records, once, what the type of a value read from memory
 // guarantees. Everything in memory is a value of its type, whether or not
 // the read that found it was a sensible one, so this holds unconditionally.
@@ -361,6 +367,9 @@ func (v *fnVerifier) noteTyped(sink *state, val value, t types.Type) {
 	if note := "typed " + fact.String(); !sink.noted[note] {
 		sink.noted[note] = true
 		sink.assume(fact)
+		if v.typedReads != nil {
+			*v.typedReads = append(*v.typedReads, typedRead{val: val, t: t})
+		}
 	}
 }
 

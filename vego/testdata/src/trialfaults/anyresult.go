@@ -152,3 +152,50 @@ type Closes interface {
 	// @Ensures y != nil And fresh(y) And (Forall i in [0, |xs|) : closed(xs[i]))
 	Pick(xs []io.Closer) (y io.Closer) // want `the Ensures clauses of Closes.Pick are not proved to be satisfiable`
 }
+
+// Box holds a closer.
+type Box struct{ c io.Closer }
+
+// Fills puts a new closer in the box: what the outcome writes into memory
+// chooses its home as a result does.
+type Fills interface {
+	// @Requires b != nil
+	// @Modifies b
+	// @Ensures b.c' != nil And fresh(b.c)
+	Fill(b *Box)
+}
+
+// FillsGiven puts the open closer it is given in the box.
+type FillsGiven interface {
+	// @Requires b != nil And c != nil And ~closed(c)
+	// @Modifies b
+	// @Ensures b.c' != nil And ~closed(b.c')
+	Fill(b *Box, c io.Closer)
+}
+
+// FillsAndMakes puts a new closer in the box and returns another.
+type FillsAndMakes interface {
+	// @Requires b != nil
+	// @Modifies b
+	// @Ensures y != nil And fresh(y) And b.c' != nil And fresh(b.c)
+	Fill(b *Box) (y io.Closer)
+}
+
+// FillsOpen demands a new closer that is open, whose state lies in memory
+// the call creates.
+type FillsOpen interface {
+	// @Requires b != nil And c != nil And ~closed(c)
+	// @Modifies b
+	// @Ensures b.c' != nil And fresh(b.c) And ~closed(b.c')
+	Fill(b *Box, c io.Closer) // want `the Ensures clauses of FillsOpen.Fill are not proved to be satisfiable`
+}
+
+// FillsBoth cannot be met when a and b are one box: what is in it would be
+// new and not new. A read of b.c' through the write of a.c is read back as
+// what was written when the boxes are one.
+type FillsBoth interface {
+	// @Requires a != nil And b != nil And p != nil
+	// @Modifies a, b
+	// @Ensures a = b -> (b.c' != nil And fresh(b.c) And ~fresh(a.c))
+	Fill(a *Box, b *Box, p io.Closer) // want `the Ensures clauses of FillsBoth.Fill are not proved to be satisfiable`
+}

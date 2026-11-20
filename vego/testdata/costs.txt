@@ -426,7 +426,7 @@ ensuresentry	ensuresentry.UsesTrusted	2	1215	0
 ensuresentry	ensuresentry.Value	2	206	0
 ensuresentry	ensuresentry.Zeros	9	4605698	4
 ensuresentry	ensuresentry.trusted	2	2394	0
-ensuresentry	io.Closer.Close	7	2009074	2
+ensuresentry	io.Closer.Close	7	2008994	2
 errorsid	errorsid.Check	12	4581	0
 errorsid	errorsid.Deferred	1	46	0
 errorsid	errorsid.End	12	9063	0
@@ -733,7 +733,7 @@ funcvalues	funcvalues.Changed	6	1716	0
 funcvalues	funcvalues.ChangedInLiteral	6	1716	0
 funcvalues	funcvalues.Clear	6	1604	0
 funcvalues	funcvalues.ClearedBeside	16	15488	0
-funcvalues	funcvalues.Clearer	3	2849	0
+funcvalues	funcvalues.Clearer	3	2789	0
 funcvalues	funcvalues.ComparesTwo	1	46	0
 funcvalues	funcvalues.Configure	6	17356	0
 funcvalues	funcvalues.ConfigureClaims	7	4018080	1
@@ -743,7 +743,7 @@ funcvalues	funcvalues.ConfigureIn	10	24157	0
 funcvalues	funcvalues.ConfigureThroughLiteral	7	4018080	1
 funcvalues	funcvalues.Convert	1	83	0
 funcvalues	funcvalues.Converts	1	46	0
-funcvalues	funcvalues.Copy	3	3363	0
+funcvalues	funcvalues.Copy	3	3282	0
 funcvalues	funcvalues.CountOf	5	292	0
 funcvalues	funcvalues.CountSet	13	9465	0
 funcvalues	funcvalues.CountedLoop	17	11271	0
@@ -755,7 +755,7 @@ funcvalues	funcvalues.Deferred	10	7632	0
 funcvalues	funcvalues.DeferredLit	9	5978	0
 funcvalues	funcvalues.DeferredNil	10	7857	0
 funcvalues	funcvalues.DivBy	3	1024	0
-funcvalues	funcvalues.Done	3	3517	0
+funcvalues	funcvalues.Done	3	3437	0
 funcvalues	funcvalues.DoubleAll	11	34267	0
 funcvalues	funcvalues.Doubler	6	1228	0
 funcvalues	funcvalues.Either	3	206	0
@@ -765,11 +765,11 @@ funcvalues	funcvalues.Fails	3	1362	0
 funcvalues	funcvalues.Fetch	5	6864	0
 funcvalues	funcvalues.FetchDigit	34	19469	0
 funcvalues	funcvalues.FirstNotZero	4	465	0
-funcvalues	funcvalues.Five	3	2574	0
+funcvalues	funcvalues.Five	3	2589	0
 funcvalues	funcvalues.Forgets	9	8303	0
 funcvalues	funcvalues.Fresh	1	46	0
 funcvalues	funcvalues.FromValue	5	761	0
-funcvalues	funcvalues.Get	3	2373	0
+funcvalues	funcvalues.Get	3	2386	0
 funcvalues	funcvalues.Grows	2	292	0
 funcvalues	funcvalues.Half	3	1455	0
 funcvalues	funcvalues.HandsOn	1	46	0
@@ -827,7 +827,7 @@ funcvalues	funcvalues.Route	10	11618	0
 funcvalues	funcvalues.ScaleBy	8	1917	0
 funcvalues	funcvalues.SecondNotZero	4	192	0
 funcvalues	funcvalues.Serve	9	5988	0
-funcvalues	funcvalues.Sets5	3	3003	0
+funcvalues	funcvalues.Sets5	3	2911	0
 funcvalues	funcvalues.Shadowed	6	2051	0
 funcvalues	funcvalues.Show	3	2472	0
 funcvalues	funcvalues.ShowOf	4	3056	0
@@ -839,7 +839,7 @@ funcvalues	funcvalues.Strict	6	1195	0
 funcvalues	funcvalues.ToUnnamed	1	46	0
 funcvalues	funcvalues.Tripled	6	1246	0
 funcvalues	funcvalues.Twice	15	3453	0
-funcvalues	funcvalues.Unbounded	3	3411	0
+funcvalues	funcvalues.Unbounded	3	3331	0
 funcvalues	funcvalues.Unknown	0	0	0
 funcvalues	funcvalues.Unlisted	5	1460	0
 funcvalues	funcvalues.UsesApply	1	46	0
@@ -1248,8 +1248,8 @@ guide	guide.TotalUnsaid	10	25604	0
 guide	guide.Transact	64	2082322	2
 guide	guide.Twice	13	10089	0
 guide	guide.TwiceOf	1	46	0
-guide	guide.Tx.Begin	7	2009263	2
-guide	guide.Tx.Commit	6	1011587	1
+guide	guide.Tx.Begin	7	2009183	2
+guide	guide.Tx.Commit	6	1011507	1
 guide	guide.UsesLogf	4	25563	0
 guide	guide.Visits	1	111	0
 guide	guide.Warn	1	429	0
@@ -1275,7 +1275,7 @@ guide	guide.small	2	207	0
 guide	guide.tell	1	70	0
 guide	guide.value	3	869	0
 guide	guide.zero	9	19438	0
-guide	io.Closer.Close	7	2009074	2
+guide	io.Closer.Close	7	2008994	2
 guide	io.MultiReader	1	4737	0
 guide	io.NopCloser	1	1725	0
 guide	io.Reader.Read	7	2008867	2
@@ -1332,8 +1332,8 @@ ifacestate	ifacestate.Pump	16	426389	2
 ifacestate	ifacestate.ReadThenClose	76	5582020	6
 ifacestate	ifacestate.Reassign	4	4536	0
 ifacestate	ifacestate.Same	9	7584	0
-ifacestate	ifacestate.Session.Begin	6	1013150	1
-ifacestate	ifacestate.Session.Commit	6	1012344	1
+ifacestate	ifacestate.Session.Begin	6	1012950	1
+ifacestate	ifacestate.Session.Commit	6	1012156	1
 ifacestate	ifacestate.Session.Rows	3	961	0
 ifacestate	ifacestate.Sink	3	471	0
 ifacestate	ifacestate.Stated	1	514	0
@@ -1352,13 +1352,13 @@ ifacestate	ifacestate.logCloser	1	743	0
 ifacestate	ifacestate.logNumber	3	927	0
 ifacestate	ifacestate.receiverNamed	1	70	0
 ifacestate	ifacestatelib.Conn.Abort	3	255	0
-ifacestate	ifacestatelib.Conn.Finish	6	1011588	1
-ifacestate	ifacestatelib.Conn.Start	6	1476300	1
+ifacestate	ifacestatelib.Conn.Finish	6	1011508	1
+ifacestate	ifacestatelib.Conn.Start	6	1476220	1
 ifacestate	ifacestatelib.Consume	1	667	0
 ifacestate	ifacestatelib.Fetch	7	2012722	2
 ifacestate	ifacestatelib.Stale	7	2012637	2
 ifacestate	ifacestatelib.Wrapped.Ping	3	255	0
-ifacestate	io.Closer.Close	7	2009074	2
+ifacestate	io.Closer.Close	7	2008994	2
 ifacestate	io.Reader.Read	7	2008867	2
 ifacestate	io.Writer.Write	5	16032	0
 integers	integers.Accumulate	7	60457	0
@@ -1588,7 +1588,7 @@ interfaces	interfaces.Reused	23	6692	0
 interfaces	interfaces.SentinelTag	1	497	0
 interfaces	interfaces.SetMany	18	92959	0
 interfaces	interfaces.SetOne	11	14360	0
-interfaces	interfaces.Setter.Set	3	3382	0
+interfaces	interfaces.Setter.Set	3	3290	0
 interfaces	interfaces.Shape.Area	3	961	0
 interfaces	interfaces.Sink	3	471	0
 interfaces	interfaces.Size2.Size	3	961	0
@@ -1643,7 +1643,7 @@ interfaces	interfaces.same	2	141	0
 interfaces	interfaces.takesLiterals	1	772	0
 interfaces	interfaces.takesLiteralsUnclaimed	1	772	0
 interfaces	interfaceslib.Measure	1	809	0
-interfaces	io.Closer.Close	7	2009074	2
+interfaces	io.Closer.Close	7	2008994	2
 interfaces	io.Writer.Write	5	16032	0
 interfacesinitcall	(interfacesinitcall.Small).Size	3	85	0
 interfacesinitcall	interfacesinitcall.Known	1	46	0
@@ -1687,7 +1687,7 @@ invariants	invariants.UsesNew	12	4635	0
 invariants	invariants.Widen	9	7704	0
 invariants	invariants.count	10	8296	0
 iowrap	(iowrap.Drained).Read	13	8424	0
-iowrap	io.Closer.Close	7	2009074	2
+iowrap	io.Closer.Close	7	2008994	2
 iowrap	io.LimitReader	1	1111	0
 iowrap	io.MultiReader	1	4737	0
 iowrap	io.MultiWriter	1	4737	0
@@ -1716,7 +1716,7 @@ keeps	(*keepslib.Registry).Fire	1	1952	0
 keeps	(keeps.Again).Read	23	48078	0
 keeps	(keeps.Drained).Read	13	8424	0
 keeps	(keeps.Zeros).Read	13	8220	0
-keeps	io.Closer.Close	3	3134	0
+keeps	io.Closer.Close	3	3054	0
 keeps	io.Reader.Read	7	2008867	2
 keeps	keeps.AddsRaw	2	292	0
 keeps	keeps.AlwaysFails	33	72119	0
@@ -2394,7 +2394,7 @@ semantics	semantics.CopyChain	213	717916	0
 semantics	semantics.CountPositive	26	28432	0
 semantics	semantics.CutChain	92	900024	0
 semantics	semantics.EagerOr	3	1955	0
-semantics	semantics.Gate.Shut	3	3134	0
+semantics	semantics.Gate.Shut	3	3054	0
 semantics	semantics.Increment	13	109216	0
 semantics	semantics.IndexChain	212	1530258	0
 semantics	semantics.InfiniteLoop	10	2997	0
@@ -2442,7 +2442,7 @@ shapes	(*shapes.Rect).Area	11	9990	0
 shapes	shapes.New	8	3662	0
 shapes	shapes.Rect	1	221	0
 shapes	shapes.Unchecked	6	2616	0
-slowhttp	io.Closer.Close	7	2009074	2
+slowhttp	io.Closer.Close	7	2008994	2
 slowhttp	slowhttp.Fetch	39	210022	4
 slowhttp	slowhttp.get	7	1171540	5
 slowresp	slowresp.Code	27	148506	6
@@ -2475,7 +2475,7 @@ stdtypes	stdtypes.Scribble	8	8704	0
 stdtypes	stdtypes.Short	7	2474	0
 stdtypes	stdtypes.Work	136	237563	0
 stdtypes	stdtypes.WorkMaybeNil	4	335	0
-trialfaults	io.Closer.Close	3	3134	0
+trialfaults	io.Closer.Close	3	3054	0
 trialfaults	trialfaults.BothNil	7	4386	0
 trialfaults	trialfaults.Closes.Pick	3	20630	1
 trialfaults	trialfaults.DeclaredInCase	4	879	0
@@ -2487,6 +2487,11 @@ trialfaults	trialfaults.EmptyIsNil	2	1077	0
 trialfaults	trialfaults.EndOfCase	2	154	0
 trialfaults	trialfaults.EndOfCaseThenDefault	3	201	0
 trialfaults	trialfaults.Factory	3	2599	0
+trialfaults	trialfaults.Fills.Fill	3	6584	0
+trialfaults	trialfaults.FillsAndMakes.Fill	3	8349	0
+trialfaults	trialfaults.FillsBoth.Fill	3	24281	0
+trialfaults	trialfaults.FillsGiven.Fill	3	8154	0
+trialfaults	trialfaults.FillsOpen.Fill	3	12362	0
 trialfaults	trialfaults.Fresh.New	3	3851	0
 trialfaults	trialfaults.FreshClosed.New	3	3093	0
 trialfaults	trialfaults.FreshMaker	3	2828	0
@@ -2823,7 +2828,7 @@ values	values.passes	7	3199	0
 values	values.stat	3	9650	0
 variadic	(variadic.badTally).Count	2	607	0
 variadic	(variadic.tally).Count	2	607	0
-variadic	io.Closer.Close	7	2009074	2
+variadic	io.Closer.Close	7	2008994	2
 variadic	variadic.AddGuarded	0	0	0
 variadic	variadic.AddNothing	6	4978	0
 variadic	variadic.AddPoints	13	36953	0
