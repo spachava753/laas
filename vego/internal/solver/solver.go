@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 )
@@ -63,6 +64,22 @@ type Options struct {
 	// the facts: the facts then have a model when some values of the other
 	// constants satisfy them for every value of these.
 	Forall []*logic.Term
+	// Observe, when set, is told what the problem cost.
+	Observe func(Cost)
+}
+
+// Cost is what one problem took. Bytes is the length of its SMT-LIB text
+// and Effort the resources Z3 counted while solving it, which, like the
+// answer, is the same on every run of one binary; it is -1 when the
+// problem stopped at a limit that depends on the machine. A problem that
+// was answered from the cache has Cached set, the Effort Z3 counted when it
+// solved the same text, and no Time.
+type Cost struct {
+	Result Result
+	Bytes  int
+	Effort int64
+	Cached bool
+	Time   time.Duration
 }
 
 // Fault is panicked when Z3 fails in a way that is not an answer: it
@@ -108,14 +125,33 @@ func (s *Solver) Model(facts []*logic.Term, opts Options, consts []*logic.Term) 
 			byName[name] = c
 		}
 	}
-	a, err := s.run(script, names)
+	a, cached, err := s.answer(script, names)
+	result := Unknown
 	switch {
 	case err == errTimeout:
-		return Timeout, nil
+		result = Timeout
 	case err == errMemory:
-		return OutOfMemory, nil
+		result = OutOfMemory
 	case err != nil:
 		panic(&Fault{err, dump(script)})
+	case a.status == "unsat":
+		result = Proved
+	case a.status == "sat":
+		result = Refuted
+	case machineBound(a.reason):
+		result = OutOfMemory
+	case exhausted(a.reason):
+		result = Exhausted
+	}
+	if opts.Observe != nil {
+		effort := a.effort
+		if err != nil || result == OutOfMemory {
+			effort = -1
+		}
+		opts.Observe(Cost{Result: result, Bytes: len(script), Effort: effort, Cached: cached, Time: a.took})
+	}
+	if result == Proved || err != nil {
+		return result, nil
 	}
 	var values map[string]*logic.Term
 	for name, text := range a.values {
@@ -128,19 +164,7 @@ func (s *Solver) Model(facts []*logic.Term, opts Options, consts []*logic.Term) 
 		}
 		values[c.Name] = literal(c.Sort, text)
 	}
-	switch a.status {
-	case "unsat":
-		return Proved, nil
-	case "sat":
-		return Refuted, values
-	}
-	if strings.Contains(a.reason, "memout") || strings.Contains(a.reason, "memory") {
-		return OutOfMemory, values
-	}
-	if exhausted(a.reason) {
-		return Exhausted, values
-	}
-	return Unknown, values
+	return result, values
 }
 
 // literal turns a value Z3 printed into a term of the sort.
@@ -161,6 +185,12 @@ func literal(sort logic.Sort, text string) *logic.Term {
 		}
 		return logic.BigLit(n)
 	}
+}
+
+// machineBound reports whether Z3 gave up for want of memory, a limit that
+// depends on the machine and on what the process did before.
+func machineBound(reason string) bool {
+	return strings.Contains(reason, "memout") || strings.Contains(reason, "memory")
 }
 
 // exhausted reports whether Z3 gave up because a limit was reached.

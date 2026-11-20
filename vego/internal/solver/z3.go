@@ -55,7 +55,19 @@ type Solver struct {
 	path  string
 	idle  chan *process
 	slots chan struct{}
+	// answers holds what Z3 answered to each problem whose answer does
+	// not depend on the machine, by the text of the problem and the names
+	// whose values were asked; see answer. queue holds the keys in the
+	// order they were added, and held the bytes of the keys kept.
+	mu      sync.Mutex
+	answers map[string]answer
+	queue   []string
+	held    int
 }
+
+// cacheBytes bounds the text of the problems whose answers a solver keeps.
+// The oldest are forgotten first.
+var cacheBytes = 256 << 20
 
 var (
 	solversMu sync.Mutex
@@ -117,9 +129,10 @@ func start(path string) (*Solver, error) {
 		return nil, fmt.Errorf("proving obligations needs Z3 %s, and %s is Z3 %s; %s", Version, resolved, version[1], installHint)
 	}
 	return &Solver{
-		path:  resolved,
-		idle:  make(chan *process, maxProcesses),
-		slots: make(chan struct{}, maxProcesses),
+		path:    resolved,
+		idle:    make(chan *process, maxProcesses),
+		slots:   make(chan struct{}, maxProcesses),
+		answers: map[string]answer{},
 	}, nil
 }
 
@@ -204,6 +217,51 @@ type answer struct {
 	// values holds the values Z3 gave the constants asked for, when it
 	// found a model; see parseValues.
 	values map[string]string
+	// effort is the resources Z3 counted for the problem, and took the
+	// time it took once a process was free.
+	effort int64
+	took   time.Duration
+}
+
+// answer returns Z3's answer to a problem, from the cache when the same
+// text with the same names asked was answered before, and reports which.
+//
+// After (reset), with the options fixed on the command line and the
+// resource limit in the text, Z3 of one binary gives a problem the same
+// answer, values, and resource count every time; the answer depends on the
+// text alone. That is what makes a proof deterministic in the first place,
+// since any process of the pool may serve any problem. So an answer
+// read from the cache is the one Z3 would give again. What depends on the
+// machine is never kept: a problem that ran past the wall limit, one that
+// ran out of memory, and one whose process died or replied with anything
+// else, which are errors here; and an unknown for want of memory or because
+// Z3 was canceled.
+func (s *Solver) answer(script string, values []string) (answer, bool, error) {
+	key := script + "\x00" + strings.Join(values, " ")
+	s.mu.Lock()
+	a, ok := s.answers[key]
+	s.mu.Unlock()
+	if ok {
+		a.took = 0
+		return a, true, nil
+	}
+	a, err := s.run(script, values)
+	if err != nil || (a.status == "unknown" && (machineBound(a.reason) || strings.Contains(a.reason, "canceled"))) {
+		return a, false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.answers[key]; !ok && len(key) <= cacheBytes {
+		s.answers[key] = a
+		s.queue = append(s.queue, key)
+		s.held += len(key)
+		for s.held > cacheBytes {
+			s.held -= len(s.queue[0])
+			delete(s.answers, s.queue[0])
+			s.queue = s.queue[1:]
+		}
+	}
+	return a, false, nil
 }
 
 // errTimeout is returned when a problem runs past the wall limit, and
@@ -224,8 +282,9 @@ func (s *Solver) run(script string, values []string) (answer, error) {
 	if err != nil {
 		return answer{}, fmt.Errorf("starting %s: %v", s.path, err)
 	}
-	deadline := time.Now().Add(wallLimit)
-	lines, err := s.exchange(p, "(reset)\n"+script+"(get-info :reason-unknown)\n", deadline)
+	began := time.Now()
+	deadline := began.Add(wallLimit)
+	lines, err := s.exchange(p, "(reset)\n"+script+"(get-info :reason-unknown)\n(get-info :rlimit)\n", deadline)
 	if err != nil {
 		return answer{}, err
 	}
@@ -251,7 +310,8 @@ func (s *Solver) run(script string, values []string) (answer, error) {
 	}
 	// A process that ran out of resources may hold on to memory; a fresh
 	// one serves the next problem.
-	if a.status == "unknown" && (exhausted(a.reason) || strings.Contains(a.reason, "memout") || strings.Contains(a.reason, "memory")) {
+	a.took = time.Since(began)
+	if a.status == "unknown" && (exhausted(a.reason) || machineBound(a.reason)) {
 		s.discard(p)
 	} else {
 		s.idle <- p
@@ -320,9 +380,31 @@ func (s *Solver) exchange(p *process, commands string, deadline time.Time) ([]st
 
 var reasonPattern = regexp.MustCompile(`^\(:reason-unknown "(.*)"\)$`)
 
-// parseAnswer reads the reply to a problem: the result of the check-sat and
-// the reason for an unknown result, and nothing else.
+// parseAnswer reads the reply to a problem: the result of the check-sat,
+// the reason for an unknown result, and the resources Z3 counted, and
+// nothing else.
 func parseAnswer(lines []string) (answer, error) {
+	if len(lines) == 0 {
+		return answer{}, fmt.Errorf("no reply")
+	}
+	count := rlimitPattern.FindStringSubmatch(lines[len(lines)-1])
+	if count == nil {
+		return answer{}, fmt.Errorf("unexpected reply %q, which does not end in the resources counted", strings.Join(lines, "\n"))
+	}
+	effort, err := strconv.ParseInt(count[1], 10, 64)
+	if err != nil {
+		return answer{}, fmt.Errorf("unexpected count of resources %q", count[1])
+	}
+	a, err := parseStatus(lines[:len(lines)-1])
+	a.effort = effort
+	return a, err
+}
+
+var rlimitPattern = regexp.MustCompile(`^\(:rlimit (\d+)\)$`)
+
+// parseStatus reads the result of the check-sat and the reason for an
+// unknown result.
+func parseStatus(lines []string) (answer, error) {
 	// A tactic of the chain that runs out of the resource limit stops the
 	// check-sat with an error in place of its answer. That is the limit,
 	// which leaves the problem open, as an unknown for it does.

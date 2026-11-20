@@ -73,7 +73,8 @@ func TestVersionPin(t *testing.T) {
 func TestProtocol(t *testing.T) {
 	x := logic.Const("x", logic.Int)
 	goal := logic.Lt(x, x)
-	answer := `echo unsat; echo '(:reason-unknown "")'`
+	const counted = `; echo '(:rlimit 7)'`
+	answer := `echo unsat; echo '(:reason-unknown "")'` + counted
 	tests := []struct {
 		name, reply string
 		want        Result // checked when fault is false
@@ -81,14 +82,16 @@ func TestProtocol(t *testing.T) {
 	}{
 		{"an answer", answer, Proved, false},
 		{"an error before the answer", `echo '(error "line 1: unknown constant")'; ` + answer, 0, true},
-		{"a line after the answer", answer + `; echo extra`, 0, true},
-		{"no reason", `echo unsat`, 0, true},
-		{"another word", `echo valid; echo '(:reason-unknown "")'`, 0, true},
+		{"a line after the answer", `echo unsat; echo '(:reason-unknown "")'; echo extra` + counted, 0, true},
+		{"no count of resources", `echo unsat; echo '(:reason-unknown "")'`, 0, true},
+		{"a count that is not one", `echo unsat; echo '(:reason-unknown "")'; echo '(:rlimit many)'`, 0, true},
+		{"no reason", `echo unsat` + counted, 0, true},
+		{"another word", `echo valid; echo '(:reason-unknown "")'` + counted, 0, true},
 		{"a process that ends", `exit 3`, 0, true},
-		{"a reason that is a limit", `echo unknown; echo '(:reason-unknown "max. resource limit exceeded")'`, Exhausted, false},
-		{"a tactic out of the limit", `echo '(error "tactic failed: max. resource limit exceeded")'; echo '(:reason-unknown "max. resource limit exceeded")'`, Exhausted, false},
-		{"a tactic that fails otherwise", `echo '(error "tactic failed: something")'; echo '(:reason-unknown "max. resource limit exceeded")'`, 0, true},
-		{"another reason", `echo unknown; echo '(:reason-unknown "(incomplete quantifiers)")'`, Unknown, false},
+		{"a reason that is a limit", `echo unknown; echo '(:reason-unknown "max. resource limit exceeded")'` + counted, Exhausted, false},
+		{"a tactic out of the limit", `echo '(error "tactic failed: max. resource limit exceeded")'; echo '(:reason-unknown "max. resource limit exceeded")'` + counted, Exhausted, false},
+		{"a tactic that fails otherwise", `echo '(error "tactic failed: something")'; echo '(:reason-unknown "max. resource limit exceeded")'` + counted, 0, true},
+		{"another reason", `echo unknown; echo '(:reason-unknown "(incomplete quantifiers)")'` + counted, Unknown, false},
 		{"a process out of memory", `echo '(error "out of memory")' >&2; exit 101`, OutOfMemory, false},
 	}
 	for _, test := range tests {
@@ -166,4 +169,123 @@ func TestSortsAreChecked(t *testing.T) {
 			z3.Prove(nil, bad, Options{})
 		}()
 	}
+}
+
+// TestCache checks that an answer is read from the cache only for the same
+// text with the same names asked, and that an answer that depends on the
+// machine is asked again.
+func TestCache(t *testing.T) {
+	x := logic.Const("x", logic.Int)
+	goal := logic.Lt(x, x)
+	const counted = `; echo '(:rlimit 7)'`
+	// counting returns a solver whose fake Z3 gives the reply, and a
+	// function that reports how many problems it was asked.
+	counting := func(t *testing.T, reply string) (*Solver, func() int) {
+		file := filepath.Join(t.TempDir(), "asked")
+		s, err := New(fake(t, pinned, "echo x >> "+file+"; "+reply))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s, func() int {
+			content, _ := os.ReadFile(file)
+			return strings.Count(string(content), "x")
+		}
+	}
+	var costs []Cost
+	observed := Options{Observe: func(c Cost) { costs = append(costs, c) }}
+	t.Run("the same problem", func(t *testing.T) {
+		s, asked := counting(t, `echo unsat; echo '(:reason-unknown "")'`+counted)
+		costs = nil
+		for range 3 {
+			if got := s.Prove(nil, goal, observed); got != Proved {
+				t.Fatalf("got %v, want proved", got)
+			}
+		}
+		if asked() != 1 {
+			t.Fatalf("Z3 was asked %d times, want once", asked())
+		}
+		if len(costs) != 3 || costs[0].Cached || !costs[1].Cached || !costs[2].Cached || costs[1].Effort != 7 || costs[1].Bytes != costs[0].Bytes {
+			t.Fatalf("costs %+v, want the first solved and the others cached with its count", costs)
+		}
+	})
+	t.Run("another resource limit", func(t *testing.T) {
+		s, asked := counting(t, `echo unknown; echo '(:reason-unknown "max. resource limit exceeded")'`+counted)
+		for _, effort := range []int{1000, 2000, 1000} {
+			if got := s.Prove(nil, goal, Options{Effort: effort}); got != Exhausted {
+				t.Fatalf("got %v, want exhausted", got)
+			}
+		}
+		if asked() != 2 {
+			t.Fatalf("Z3 was asked %d times, want twice", asked())
+		}
+	})
+	t.Run("other names asked", func(t *testing.T) {
+		s, asked := counting(t, `echo unsat; echo '(:reason-unknown "")'`+counted)
+		y := logic.Const("y", logic.Int)
+		facts := []*logic.Term{logic.Lt(x, y), logic.Lt(y, x)}
+		s.Model(facts, Options{}, []*logic.Term{x})
+		s.Model(facts, Options{}, []*logic.Term{y})
+		s.Model(facts, Options{}, []*logic.Term{x})
+		if asked() != 2 {
+			t.Fatalf("Z3 was asked %d times, want twice", asked())
+		}
+	})
+	for _, test := range []struct{ name, reply string }{
+		{"an unknown for want of memory", `echo unknown; echo '(:reason-unknown "memout")'` + counted},
+		{"an unknown when canceled", `echo unknown; echo '(:reason-unknown "canceled")'` + counted},
+		{"a process out of memory", `echo '(error "out of memory")' >&2; exit 101`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s, asked := counting(t, test.reply)
+			s.Prove(nil, goal, Options{})
+			s.Prove(nil, goal, Options{})
+			if asked() != 2 {
+				t.Fatalf("Z3 was asked %d times, want twice", asked())
+			}
+		})
+	}
+	t.Run("a late answer", func(t *testing.T) {
+		saved := wallLimit
+		wallLimit = 200 * time.Millisecond
+		defer func() { wallLimit = saved }()
+		s, asked := counting(t, `sleep 1; echo unsat; echo '(:reason-unknown "")'`+counted)
+		for range 2 {
+			if got := s.Prove(nil, goal, Options{}); got != Timeout {
+				t.Fatalf("got %v, want %v", got, Timeout)
+			}
+		}
+		if asked() != 2 {
+			t.Fatalf("Z3 was asked %d times, want twice", asked())
+		}
+	})
+	t.Run("two binaries", func(t *testing.T) {
+		proving, _ := counting(t, `echo unsat; echo '(:reason-unknown "")'`+counted)
+		refuting, _ := counting(t, `echo sat; echo '(:reason-unknown "")'`+counted)
+		if proving.Prove(nil, goal, Options{}) != Proved || refuting.Prove(nil, goal, Options{}) != Refuted {
+			t.Fatal("one binary answered with what another said")
+		}
+	})
+	t.Run("the oldest are forgotten", func(t *testing.T) {
+		s, asked := counting(t, `echo unsat; echo '(:reason-unknown "")'`+counted)
+		saved := cacheBytes
+		cacheBytes = len(Script([]*logic.Term{logic.Not(goal)}, Options{})) + 10
+		defer func() { cacheBytes = saved }()
+		other := logic.Lt(logic.Const("y", logic.Int), logic.Const("y", logic.Int))
+		s.Prove(nil, goal, Options{})
+		s.Prove(nil, other, Options{})
+		s.Prove(nil, goal, Options{})
+		if asked() != 3 {
+			t.Fatalf("Z3 was asked %d times, want three times", asked())
+		}
+	})
+	t.Run("Z3", func(t *testing.T) {
+		z3 := solverFor(t)
+		costs = nil
+		y := logic.Const("cache y", logic.Int)
+		first := z3.Prove([]*logic.Term{logic.Lt(x, y)}, logic.Le(x, y), observed)
+		again := z3.Prove([]*logic.Term{logic.Lt(x, y)}, logic.Le(x, y), observed)
+		if first != Proved || again != Proved || len(costs) != 2 || !costs[1].Cached || costs[0].Cached || costs[0].Effort <= 0 || costs[1].Effort != costs[0].Effort {
+			t.Fatalf("got %v and %v with costs %+v, want proved twice, the second from the cache with the same count", first, again, costs)
+		}
+	})
 }
