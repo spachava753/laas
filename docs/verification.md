@@ -1418,7 +1418,7 @@ When Z3 stopped at a limit, the message ends with a note that says which one:
 
 A message without a note means that Z3 gave its answer within the limits.
 
-`vego` does not prove the postconditions of a function that writes one field through about ten or more different pointers, such as `p0.x = 1` through `p9.x = 1` with `@Ensures p0.x' = 1 And ... And p9.x' = 1`. The messages carry the note about the resource limit, but a higher limit does not help, and neither does moving the writes into helper functions or requiring that the pointers differ. With five pointers such a function verifies, and so do thirty writes through one pointer.
+At the default limit, `vego` does not prove the postconditions of a function that writes one field through ten or more different pointers, such as `p0.x = 1` through `p9.x = 1` with `@Ensures p0.x' = 1 And ... And p9.x' = 1`. The messages carry the note about the resource limit. With ten pointers, `-vego.rlimit=40000000` proves them. With fifteen or more, ten times the default limit leaves all but one of them not proved. Moving the writes into helper functions or requiring that the pointers differ does not help. With five pointers such a function verifies, and so do thirty writes through one pointer.
 
 ### Finding out where the time goes
 
@@ -1438,13 +1438,23 @@ foreign.go:52:6: vego cost of Load: 40 problems, 3476767 resource units, 137416 
 
 The first line counts the problems that `vego` handed to Z3, the work Z3 counted for them, and the size of their text. These three numbers are the same on every run with the same `laas`, Go, and Z3. The seconds are the time spent on the function. They include time spent waiting for a free Z3 process while other packages are verified at the same time, so they change with the machine and its load. They do not include the time spent on other functions, such as checking a trusted contract that the function calls, which get a line of their own.
 
-Each indented line gives a place in the function and a kind of question that stopped at a limit there. A question that stops at its limit has used all the work it is allowed, so these lines usually show where the time goes. Most questions are allowed `-vego.rlimit`. A quick check, and a contradiction check after a call, are allowed 200000 units whatever the flag says, and a proposal of the always-fails check a quarter of `-vego.rlimit`. The kinds are:
+Each indented line gives a place in the function and a kind of question that stopped at a limit there. A question that stops at its limit has used all the work it is allowed, so these lines usually show where the time goes. The kinds are:
 
 - a proof obligation;
 - a question of the always-fails check, which looks for an input on which the contract makes the function succeed (see [Saying when a function succeeds](#saying-when-a-function-succeeds));
 - a contradiction check, which asks whether what is known at a place, such as after a call of a trusted function, contradicts itself;
 - a check whether a `Modifies` entry is needed;
 - a quick check, such as whether an `append` writes in place.
+
+The work each is allowed:
+
+| Kind | Limit |
+| --- | --- |
+| proof obligation | `-vego.rlimit` |
+| question of the always-fails check | `-vego.rlimit`, 200000 units for whether an outcome depends on a call, and a quarter of `-vego.rlimit` for a proposal of an input |
+| contradiction check | 200000 units, and `-vego.rlimit` for the check of a trusted contract, of a contract of a type, and of the invariants of a type |
+| check whether a `Modifies` entry is needed | 200000 units |
+| quick check | 200000 units |
 
 A proof obligation that stops at a limit draws a message with the note. So does the always-fails check when it reports a contract and a question of its search stopped at a limit. Other questions draw no message of their own. When one of them stops at a limit, `vego` goes on as when a proof fails: a path counts as possible, a `Modifies` entry counts as needed, an outcome counts as one that may depend on a call, a contradiction counts as not found, and an input that the search did not find counts as not found, which can make `vego` report the contract.
 
@@ -3619,7 +3629,7 @@ A function that uses any of the following is reported as `cannot verify`:
 
 Some limits are reported in other ways. A state can be declared only for an interface, and only as a boolean. A `State` annotation on a struct type is reported at the annotation as `a state can be declared only on a defined interface type that declares a method of its own`, and a state of a struct type in your trust file is reported in the file. A mutex or a `sync.Once` that exists when a trusted function is called cannot be used in a function literal that it calls, and its `Lock` or `Do` is reported as a precondition that may not hold, as described in [Locking in a function that a trusted function calls](#locking-in-a-function-that-a-trusted-function-calls). A formula that names an unexported field of a struct of another package is reported at the annotation, as described in [Names](#names). A method of a type that writes what its receiver points to, or relies on what it points to, cannot be used as a method of an interface. The conversion reports the obligation that fails, as described in [What a conversion checks](#what-a-conversion-checks). An entry in the trust file for a type of the module that you verify is reported in the trust file, as described in [Limits of trusted contracts](#limits-of-trusted-contracts). Two different entries for one type in packages built together are reported in every package built with both, as described in [One entry for each type in a build](#one-entry-for-each-type-in-a-build).
 
-Some true contracts are not proved. The postconditions of a function that writes one field through about ten or more different pointers are reported as not proved, with the note about the resource limit, and no limit helps (see [Helping the prover](#helping-the-prover)).
+Some true contracts are not proved. The postconditions of a function that writes one field through fifteen or more different pointers are reported as not proved, with the note about the resource limit, and ten times the default limit does not prove them (see [Helping the prover](#helping-the-prover)).
 
 Floating-point values are supported but opaque. They can be passed around and used in arithmetic, but nothing can be stated or proved about their values. An integer converted from a float can have any value of its type, so check its range in code before you use it as an index.
 
