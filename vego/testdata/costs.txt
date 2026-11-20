@@ -2592,6 +2592,7 @@ smalls	smalls.CopyThrough	10	17845	0
 smalls	smalls.CopyThroughForgets	8	12928	0
 smalls	smalls.Detached	3	2257	0
 smalls	smalls.ElemAbsent	26	1345831	5
+smalls	smalls.ElemRoom	28	1315977	5
 smalls	smalls.EmptyOf	6	1752	0
 smalls	smalls.FieldAbsent	15	23273	0
 smalls	smalls.FieldRoom	16	29925	0

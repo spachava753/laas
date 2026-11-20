@@ -355,3 +355,12 @@ func InnerWrong(o *Out) (p *In) {
 func InnerAt(s []Mid, i int) (p *In) {
 	return &s[i].In
 }
+
+// @Requires |xs| > 0
+// @Ensures err = nil <-> cap(xs[0]) > |xs[0]|
+func ElemRoom(xs [][]int) (err error) {
+	if cap(xs[0]) == len(xs[0]) {
+		return errors.New("full")
+	}
+	return nil
+}

@@ -1602,20 +1602,34 @@ func (b *sampler) addSlice(t types.Type, to binding) {
 	for i, lf := range leaves {
 		var element *logic.Term
 		switch {
-		case lf.part == partRef && b.v.namedInFormulas[entryRegion+cells[i].key+" = nil"]:
-			// A slice inside an element that a formula compares with nil
-			// is left open, as every slice inside an element is, or is nil
-			// in every element.
-			nils := func(s *witness) {
+		case lf.part == partRef && (b.v.namedInFormulas[entryRegion+cells[i].key+" = nil"] || b.v.namedInFormulas[entryRegion+cells[i+3].key]):
+			// A slice inside an element is left open, as every slice inside
+			// an element is. When a formula compares it with nil it may also
+			// be nil in every element, and when a formula names its
+			// capacity it may also be, in every element, a slice of an
+			// array of its own with more capacity than length.
+			parts := func(s *witness, values ...*logic.Term) {
 				for j, c := range cells[i : i+4] {
-					zero := map[bool]*logic.Term{true: logic.RefLit(0), false: logic.IntLit(0)}[j == 0]
 					if !s.fixed[array(i+j)] {
-						row := logic.Fill(logic.IntLit(maxSampleLen), zero)
+						row := logic.Fill(logic.IntLit(maxSampleLen), values[j])
 						s.store(c.key, logic.SeqOf(row.Sort), ref, row)
 					}
 				}
 			}
-			b.choose(slot{func(*witness) {}, nils}, entryRegion+cells[i].key)
+			alternatives := slot{func(*witness) {}}
+			if b.v.namedInFormulas[entryRegion+cells[i].key+" = nil"] {
+				alternatives = append(alternatives, func(s *witness) {
+					parts(s, logic.RefLit(0), logic.IntLit(0), logic.IntLit(0), logic.IntLit(0))
+				})
+			}
+			if b.v.namedInFormulas[entryRegion+cells[i+3].key] {
+				b.refs++
+				inner, length, spare := logic.RefLit(b.refs), b.within(0, maxSampleLen), b.within(0, maxSampleLen)
+				alternatives = append(alternatives, func(s *witness) {
+					parts(s, inner, logic.IntLit(0), length, logic.Add(length, spare))
+				})
+			}
+			b.choose(alternatives, entryRegion+cells[i].key, entryRegion+cells[i+3].key)
 			continue
 		case lf.part != partValue && lf.part != partState:
 			// A slice or a pointer inside an element has no sample.
