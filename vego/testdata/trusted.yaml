@@ -1262,9 +1262,9 @@ trusted:
     modifies: []
     ensures: ["r != nil", "|r.H[3]| < 0"]
   deepfactslib.PutIntMap:
-    reason: A test of an entry whose promise contradicts a value of a map with integer keys it is handed.
+    reason: A test of an entry whose promise contradicts a value of a map with integer keys it is handed, and reads a string of it, so that its check holds a region of strings.
     modifies: []
-    ensures: ["|m[3]| < 0"]
+    ensures: ["|m[3]| < 0", "|m[3]| > 0 -> |m[3][0]| = 0"]
   deepfactslib.Must:
     reason: A test of a trusted function that always succeeds.
     modifies: []

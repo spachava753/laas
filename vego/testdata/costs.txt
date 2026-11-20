@@ -304,7 +304,7 @@ deepfacts	deepfactslib.GetQ	1	14242	0
 deepfacts	deepfactslib.GetSlice	1	14229	0
 deepfacts	deepfactslib.Must	4	28921	1
 deepfacts	deepfactslib.Put	1	5386	0
-deepfacts	deepfactslib.PutIntMap	1	996	0
+deepfacts	deepfactslib.PutIntMap	1	1250	0
 deepfacts	deepfactslib.PutMap	1	1062	0
 defects	defects.AbsWrong	2	269	0
 defects	defects.AssertFails	4	857	0
