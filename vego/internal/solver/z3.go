@@ -213,19 +213,23 @@ func (s *Solver) spawn() (*process, error) {
 		_ = cmd.Wait()
 		close(p.done)
 	}()
-	if s.disk != nil {
-		// What the process runs is read once it has answered, so that a
-		// program that starts another with exec has done so.
-		if _, err := s.exchange(p, "", time.Now().Add(wallLimit)); err != nil {
-			return nil, err
-		}
-		if err := s.disk.identify(cmd.Process.Pid, s.path); err != nil {
-			_ = cmd.Process.Kill()
-			<-p.done
-			return nil, &CacheError{err}
-		}
-	}
 	return p, nil
+}
+
+// identified checks a new process against the identity of the cache
+// directory. What the process runs is read once it has answered, so that a
+// program that starts another with exec has done so. On any failure the
+// process is discarded, which frees its slot.
+func (s *Solver) identified(p *process) error {
+	if _, err := s.exchange(p, "", time.Now().Add(wallLimit)); err != nil {
+		// exchange has discarded the process.
+		return err
+	}
+	if err := s.disk.identify(p.cmd.Process.Pid, s.path); err != nil {
+		s.discard(p)
+		return &CacheError{err}
+	}
+	return nil
 }
 
 type lockedWriter struct {
@@ -255,6 +259,11 @@ func (s *Solver) acquire() (*process, error) {
 		if err != nil {
 			<-s.slots
 			return nil, err
+		}
+		if s.disk != nil {
+			if err := s.identified(p); err != nil {
+				return nil, err
+			}
 		}
 		return p, nil
 	}
@@ -388,6 +397,15 @@ var (
 	errMemory  = errors.New("out of memory")
 )
 
+// What a process is sent around a problem: before it, after it, and, to
+// ask for values, with the names in place of the verb. They are part of the
+// identity of a cache directory, since a reply depends on them.
+const (
+	resetCommand  = "(reset)\n"
+	infoCommands  = "(get-info :reason-unknown)\n(get-info :rlimit)\n"
+	valuesCommand = "(get-value (%s))\n"
+)
+
 // run sends one problem, which must end in a check-sat-using, and reads the
 // answer. When the answer is not unsat and values names constants, it then
 // asks for their values in the model. Every reply other than the expected
@@ -404,14 +422,14 @@ func (s *Solver) run(script string, values []string) (answer, reply, error) {
 	}
 	began := time.Now()
 	deadline := began.Add(wallLimit)
-	lines, err := s.exchange(p, "(reset)\n"+script+"(get-info :reason-unknown)\n(get-info :rlimit)\n", deadline)
+	lines, err := s.exchange(p, resetCommand+script+infoCommands, deadline)
 	if err != nil {
 		return answer{}, reply{}, err
 	}
 	r := reply{check: lines}
 	a, err := parseAnswer(lines)
 	if err == nil && len(values) > 0 && a.status != "unsat" {
-		lines, err := s.exchange(p, "(get-value ("+strings.Join(values, " ")+"))\n", deadline)
+		lines, err := s.exchange(p, fmt.Sprintf(valuesCommand, strings.Join(values, " ")), deadline)
 		if err != nil {
 			return answer{}, reply{}, err
 		}

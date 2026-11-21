@@ -229,7 +229,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			case *solver.Fault:
 				result, err = nil, fmt.Errorf("Z3 failed: %v", r)
 			case *solver.CacheError:
-				result, err = nil, fmt.Errorf("the answer cache cannot be used: %v", r)
+				result, err = nil, r
 			case logic.TooLarge:
 				result, err = nil, fmt.Errorf("a formula built for an annotation of the package has grown beyond %d nodes, which is the limit", logic.MaxSize)
 			default:

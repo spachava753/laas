@@ -244,7 +244,7 @@ func (pv *pkgVerifier) noteStored(w io.Writer) {
 	pv.usage.AnswerCaches = append(pv.usage.AnswerCaches, pv.z3.CacheDir())
 	costsMu.Lock()
 	defer costsMu.Unlock()
-	fmt.Fprintf(w, "vego: %d of the %d answers of Z3 that the proofs of %s rest on came from the answer cache in %s\n",
+	fmt.Fprintf(w, "vego: %d of the %d answers of Z3 for %s came from the answer cache in %s\n",
 		stored, problems, pv.pass.Pkg.Path(), pv.z3.CacheDir())
 }
 

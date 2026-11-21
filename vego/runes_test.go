@@ -16,7 +16,7 @@ import (
 // no other, of any length or with any other byte.
 func TestRuneString(t *testing.T) {
 	parallel(t)
-	z3, err := solver.New("")
+	z3, err := solver.Open("", testCache)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -178,7 +178,7 @@ func TestAnswerCache(t *testing.T) {
 				problems += line.problems
 			}
 		}
-		want := fmt.Sprintf("vego: %d of the %d answers of Z3 that the proofs of %s rest on came from the answer cache in %s\n", problems, problems, pkg, dir)
+		want := fmt.Sprintf("vego: %d of the %d answers of Z3 for %s came from the answer cache in %s\n", problems, problems, pkg, dir)
 		if !strings.Contains(printed[1].String(), want) {
 			t.Errorf("the second run printed %q, want a line %q", printed[1].String(), want)
 		}

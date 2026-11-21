@@ -15,7 +15,7 @@ import (
 // false for some pair shows as a contradiction there.
 func TestBitFacts(t *testing.T) {
 	parallel(t)
-	z3, err := solver.New("")
+	z3, err := solver.Open("", testCache)
 	if err != nil {
 		t.Fatal(err)
 	}

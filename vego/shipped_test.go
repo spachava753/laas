@@ -1822,6 +1822,7 @@ func shippedVerifier(t *testing.T) (*pkgVerifier, types.Importer) {
 			ImportObjectFact: func(types.Object, analysis.Fact) bool { return false },
 		},
 		res:          logic.NewResolver(),
+		cacheDir:     testCache,
 		trusted:      map[*types.Func]*funcInfo{},
 		trustSources: map[*trustFile]*token.File{},
 		reported:     map[string]bool{},

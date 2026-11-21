@@ -14,6 +14,7 @@ import (
 	mrand "math/rand/v2"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
@@ -122,8 +123,8 @@ func openDisk(root string) (*disk, error) {
 		return nil, fmt.Errorf("the answer cache %s is inside %s, which holds %s; a cache in a module or a repository could carry its answers into the runs of others, so it must be outside any",
 			abs, filepath.Dir(inside), filepath.Base(inside))
 	}
-	if err := os.MkdirAll(abs, 0o755); err != nil {
-		return nil, fmt.Errorf("the answer cache %s cannot be made: %v", abs, err)
+	if err := claim(abs); err != nil {
+		return nil, err
 	}
 	var seed [16]byte
 	if _, err := rand.Read(seed[:]); err != nil {
@@ -163,6 +164,48 @@ func SearchRepositoriesBelow(dir string) func() {
 	return func() { searchedUpTo = saved }
 }
 
+// tagName and tag mark a directory as an answer cache. The first line is
+// the signature of a cache directory that backup tools skip
+// (https://bford.info/cachedir/); the second says whose it is.
+const (
+	tagName = "CACHEDIR.TAG"
+	tag     = "Signature: 8a477f597d28d172789f06886806bc55\n# This directory is an answer cache of vego, made by -vego.cache.\n"
+)
+
+// claim makes dir an answer cache, or checks that it is one. A directory
+// that holds anything and is not marked as an answer cache is refused: the
+// trim removes files, and must never remove what is not its own.
+func claim(dir string) error {
+	remedy := "; give -vego.cache a new or empty directory"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("the answer cache %s cannot be made: %v; run without -vego.cache or with another directory", dir, err)
+	}
+	content, err := os.ReadFile(filepath.Join(dir, tagName))
+	switch {
+	case err == nil && string(content) == tag:
+		return nil
+	case err == nil:
+		return fmt.Errorf("%s holds a %s that vego did not write, so it is not an answer cache%s", dir, tagName, remedy)
+	case !errors.Is(err, fs.ErrNotExist):
+		return fmt.Errorf("the answer cache %s cannot be read: %v; run without -vego.cache or with another directory", dir, err)
+	}
+	held, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("the answer cache %s cannot be read: %v; run without -vego.cache or with another directory", dir, err)
+	}
+	// Another run may be making the cache at this moment, and has then
+	// written at most the temporary file of its mark.
+	for _, entry := range held {
+		if !strings.HasPrefix(entry.Name(), tempPrefix) || !entry.Type().IsRegular() {
+			return fmt.Errorf("%s is not empty and is not an answer cache%s", dir, remedy)
+		}
+	}
+	if err := publish(dir, filepath.Join(dir, tagName), []byte(tag)); err != nil && !errors.Is(err, fs.ErrExist) {
+		return fmt.Errorf("the answer cache %s cannot be written: %v; run without -vego.cache or with another directory", dir, err)
+	}
+	return nil
+}
+
 // repository returns the mark of the directory at or above dir that is a
 // module or the root of a repository, or "".
 func repository(dir string) string {
@@ -189,11 +232,11 @@ func (d *disk) identify(pid int, path string) error {
 	proc := "/proc/" + strconv.Itoa(pid)
 	exe, err := os.Stat(proc + "/exe")
 	if err != nil {
-		return fmt.Errorf("the binary of Z3 process %d cannot be read from /proc: %v", pid, err)
+		return fmt.Errorf("the binary of Z3 process %d cannot be read from /proc: %v; run without -vego.cache", pid, err)
 	}
 	named, err := os.Stat(path)
 	if err != nil {
-		return fmt.Errorf("%s cannot be read: %v", path, err)
+		return fmt.Errorf("%s cannot be read: %v; run without -vego.cache", path, err)
 	}
 	if !os.SameFile(exe, named) {
 		target, _ := os.Readlink(proc + "/exe")
@@ -201,7 +244,7 @@ func (d *disk) identify(pid int, path string) error {
 	}
 	maps, err := os.ReadFile(proc + "/maps")
 	if err != nil {
-		return fmt.Errorf("the files of Z3 process %d cannot be read from /proc: %v", pid, err)
+		return fmt.Errorf("the files of Z3 process %d cannot be read from /proc: %v; run without -vego.cache", pid, err)
 	}
 	files := []string{}
 	for line := range strings.Lines(string(maps)) {
@@ -216,7 +259,7 @@ func (d *disk) identify(pid int, path string) error {
 			continue
 		}
 		if strings.HasSuffix(file, " (deleted)") {
-			return fmt.Errorf("Z3 process %d runs %s, which was replaced while it ran", pid, file)
+			return fmt.Errorf("Z3 process %d runs %s, which was replaced while it ran; run again once Z3 is installed", pid, file)
 		}
 		files = append(files, file)
 	}
@@ -225,7 +268,8 @@ func (d *disk) identify(pid int, path string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	var id strings.Builder
-	fmt.Fprintf(&id, "%s\nsettings %s\nsystem %s/%s\n", cacheFormat, strings.Join(settings, " "), runtime.GOOS, runtime.GOARCH)
+	fmt.Fprintf(&id, "%s\nsettings %s\nprotocol %q %q %q\nsystem %s/%s\n", cacheFormat, strings.Join(settings, " "),
+		resetCommand, infoCommands, valuesCommand, runtime.GOOS, runtime.GOARCH)
 	cpu, err := processor()
 	if err != nil {
 		return err
@@ -255,20 +299,20 @@ func (d *disk) identify(pid int, path string) error {
 		sum := sha256.Sum256([]byte(identity))
 		dir := filepath.Join(d.root, "z3-"+hex.EncodeToString(sum[:16]))
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("the answer cache %s cannot be made: %v", dir, err)
+			return fmt.Errorf("the answer cache %s cannot be made: %v; run without -vego.cache or with another directory", dir, err)
 		}
 		// The identity is written for a person to read; nothing reads it.
 		description := filepath.Join(dir, "identity")
 		if _, err := os.Stat(description); errors.Is(err, fs.ErrNotExist) {
 			if err := publish(dir, description, []byte(identity)); err != nil && !errors.Is(err, fs.ErrExist) {
-				return fmt.Errorf("the answer cache %s cannot be written: %v", dir, err)
+				return fmt.Errorf("the answer cache %s cannot be written: %v; run without -vego.cache or with another directory", dir, err)
 			}
 		}
 		d.identity, d.dir = identity, dir
 		return nil
 	}
 	if identity != d.identity {
-		return fmt.Errorf("a Z3 process of this run runs other files than the first one did, so its answers cannot be kept with theirs:\n%s\nagainst\n%s", identity, d.identity)
+		return fmt.Errorf("a Z3 process of this run runs other files than the first one did, so its answers cannot be kept with theirs; check that Z3 and its libraries were not replaced during the run, and run again:\n%s\nagainst\n%s", identity, d.identity)
 	}
 	return nil
 }
@@ -278,7 +322,7 @@ func (d *disk) identify(pid int, path string) error {
 func processor() (string, error) {
 	f, err := os.Open("/proc/cpuinfo")
 	if err != nil {
-		return "", fmt.Errorf("the processor cannot be read from /proc/cpuinfo: %v", err)
+		return "", fmt.Errorf("the processor cannot be read from /proc/cpuinfo: %v; run without -vego.cache", err)
 	}
 	defer f.Close()
 	var model, flags string
@@ -302,11 +346,11 @@ func processor() (string, error) {
 func (d *disk) hash(path string) (string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return "", fmt.Errorf("%s, which Z3 runs, cannot be read: %v", path, err)
+		return "", fmt.Errorf("%s, which Z3 runs, cannot be read: %v; run without -vego.cache", path, err)
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
-		return "", fmt.Errorf("%s, which Z3 runs, cannot be told apart from another file", path)
+		return "", fmt.Errorf("%s, which Z3 runs, cannot be told apart from another file; run without -vego.cache", path)
 	}
 	key := fileKey{uint64(stat.Dev), stat.Ino, info.Size(), info.ModTime().UnixNano()}
 	if h, ok := d.hashes[key]; ok {
@@ -314,12 +358,12 @@ func (d *disk) hash(path string) (string, error) {
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return "", fmt.Errorf("%s, which Z3 runs, cannot be read: %v", path, err)
+		return "", fmt.Errorf("%s, which Z3 runs, cannot be read: %v; run without -vego.cache", path, err)
 	}
 	defer f.Close()
 	sum := sha256.New()
 	if _, err := io.Copy(sum, f); err != nil {
-		return "", fmt.Errorf("%s, which Z3 runs, cannot be read: %v", path, err)
+		return "", fmt.Errorf("%s, which Z3 runs, cannot be read: %v; run without -vego.cache", path, err)
 	}
 	h := hex.EncodeToString(sum.Sum(nil))
 	d.hashes[key] = h
@@ -533,11 +577,26 @@ func decodeEntry(content []byte) (key string, r reply, problem string) {
 	return string(text), r, ""
 }
 
+// The names of the cache's own files: a directory per identity, a
+// directory per first two digits of the name of an entry, and the entry. The
+// trim lists only these, and removes nothing else.
+var (
+	identityName = regexp.MustCompile(`^z3-[0-9a-f]{32}$`)
+	shardName    = regexp.MustCompile(`^[0-9a-f]{2}$`)
+	entryName    = regexp.MustCompile(`^[0-9a-f]{62}$`)
+)
+
 // trim removes the entries not used for entryAge, the temporary files left
 // for tempAge, and then the oldest entries until the cache holds at most
-// cacheLimit bytes, when it was last trimmed trimEvery ago or never. A file
-// that another run removed meanwhile is no error.
+// cacheLimit bytes, when it was last trimmed trimEvery ago or never, or
+// when its mark is later than now, as after the clock went back. It looks
+// only at the files of the cache's own layout, and leaves anything else in
+// the directory alone. A file that another run removed meanwhile is no
+// error.
 func (d *disk) trim(now time.Time) error {
+	failed := func(err error) error {
+		return fmt.Errorf("the answer cache %s cannot be trimmed: %v; run without -vego.cache or with another directory", d.root, err)
+	}
 	marker := filepath.Join(d.root, "trimmed")
 	if info, err := os.Stat(marker); err == nil && now.Sub(info.ModTime()) < trimEvery && info.ModTime().Before(now.Add(time.Minute)) {
 		return nil
@@ -549,37 +608,78 @@ func (d *disk) trim(now time.Time) error {
 	}
 	var entries []kept
 	var total int64
-	err := filepath.WalkDir(d.root, func(path string, entry fs.DirEntry, err error) error {
+	// list returns the names in dir that match, as paths.
+	list := func(dir string, match func(fs.DirEntry) bool) ([]string, error) {
+		held, err := os.ReadDir(dir)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		var paths []string
+		for _, entry := range held {
+			if match(entry) {
+				paths = append(paths, filepath.Join(dir, entry.Name()))
+			}
+		}
+		return paths, err
+	}
+	// visit removes a file of the layout that is too old, or keeps it in
+	// the count.
+	visit := func(path string, temporary bool) error {
+		info, err := os.Lstat(path)
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		if entry.IsDir() || path == marker || entry.Name() == "identity" {
+		if !info.Mode().IsRegular() {
 			return nil
-		}
-		info, err := entry.Info()
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil
-		}
-		if err != nil {
-			return err
 		}
 		age := now.Sub(info.ModTime())
-		switch {
-		case strings.HasPrefix(entry.Name(), tempPrefix) && age > tempAge, !strings.HasPrefix(entry.Name(), tempPrefix) && age > entryAge:
+		if temporary && age > tempAge || !temporary && age > entryAge {
 			if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return err
 			}
-		case !strings.HasPrefix(entry.Name(), tempPrefix):
+			return nil
+		}
+		if !temporary {
 			entries = append(entries, kept{path, info.Size(), info.ModTime()})
 			total += info.Size()
 		}
 		return nil
-	})
+	}
+	isTemp := func(e fs.DirEntry) bool { return strings.HasPrefix(e.Name(), tempPrefix) && e.Type().IsRegular() }
+	identities, err := list(d.root, func(e fs.DirEntry) bool { return e.IsDir() && identityName.MatchString(e.Name()) })
 	if err != nil {
-		return fmt.Errorf("the answer cache %s cannot be trimmed: %v", d.root, err)
+		return failed(err)
+	}
+	for _, id := range identities {
+		temps, err := list(id, isTemp)
+		if err != nil {
+			return failed(err)
+		}
+		shards, err := list(id, func(e fs.DirEntry) bool { return e.IsDir() && shardName.MatchString(e.Name()) })
+		if err != nil {
+			return failed(err)
+		}
+		for _, temp := range temps {
+			if err := visit(temp, true); err != nil {
+				return failed(err)
+			}
+		}
+		for _, shard := range shards {
+			files, err := list(shard, func(e fs.DirEntry) bool {
+				return e.Type().IsRegular() && (entryName.MatchString(e.Name()) || strings.HasPrefix(e.Name(), tempPrefix))
+			})
+			if err != nil {
+				return failed(err)
+			}
+			for _, file := range files {
+				if err := visit(file, strings.HasPrefix(filepath.Base(file), tempPrefix)); err != nil {
+					return failed(err)
+				}
+			}
+		}
 	}
 	slices.SortFunc(entries, func(a, b kept) int { return a.mtime.Compare(b.mtime) })
 	for _, e := range entries {
@@ -587,13 +687,16 @@ func (d *disk) trim(now time.Time) error {
 			break
 		}
 		if err := os.Remove(e.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("the answer cache %s cannot be trimmed: %v", d.root, err)
+			return failed(err)
 		}
 		total -= e.size
 	}
 	if err := os.WriteFile(marker, nil, 0o644); err != nil {
-		return fmt.Errorf("the answer cache %s cannot be written: %v", d.root, err)
+		return failed(err)
 	}
 	now = time.Now()
-	return os.Chtimes(marker, now, now)
+	if err := os.Chtimes(marker, now, now); err != nil {
+		return failed(err)
+	}
+	return nil
 }

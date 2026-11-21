@@ -102,7 +102,7 @@ func entries(t *testing.T, dir string) []string {
 		if err != nil {
 			return err
 		}
-		if !entry.IsDir() && entry.Name() != "identity" && entry.Name() != "trimmed" && !strings.HasPrefix(entry.Name(), tempPrefix) {
+		if !entry.IsDir() && entryName.MatchString(entry.Name()) {
 			found = append(found, path)
 		}
 		return nil
@@ -336,6 +336,153 @@ func TestDiskCache(t *testing.T) {
 		endIdle(replaced)
 		if message := cacheFailure(func() { replaced.Prove(nil, logic.Lt(x, logic.Add(x, logic.IntLit(2))), Options{}) }); !strings.Contains(message, "other files") {
 			t.Fatalf("got %q, want a failure that says a process runs other files", message)
+		}
+	})
+
+	// What depends on the machine, and a reply that is no answer, are not
+	// kept; the reply to a get-value without a model is kept in one form,
+	// whatever line Z3 says it is on.
+	t.Run("an answer for want of memory", func(t *testing.T) {
+		dir := cacheDir(t)
+		s, err := fakeSolver(t, dir, "unknown\n(:reason-unknown \"memout\")\n(:rlimit 7)", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := s.Prove(nil, goal, Options{}); got != OutOfMemory {
+			t.Fatalf("got %v", got)
+		}
+		if n := len(entries(t, dir)); n != 0 {
+			t.Fatalf("%d entries were written for an answer that depends on the machine", n)
+		}
+	})
+	t.Run("a reply that is no answer", func(t *testing.T) {
+		dir := cacheDir(t)
+		s, err := fakeSolver(t, dir, "valid\n(:reason-unknown \"\")\n(:rlimit 7)", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		func() {
+			defer func() {
+				if _, ok := recover().(*Fault); !ok {
+					t.Fatal("a reply that is no answer is not a fault")
+				}
+			}()
+			s.Prove(nil, goal, Options{})
+		}()
+		if n := len(entries(t, dir)); n != 0 {
+			t.Fatalf("%d entries were written for a fault", n)
+		}
+	})
+	t.Run("a get-value without a model", func(t *testing.T) {
+		var written [2][]byte
+		facts := []*logic.Term{logic.Lt(x, y)}
+		for i := range 2 {
+			dir := cacheDir(t)
+			s, err := fakeSolver(t, dir, "unknown\n(:reason-unknown \"canceled\")\n(:rlimit 7)", `(error "line {line} column 21: model is not available")`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The second process has read other lines before.
+			if i == 1 {
+				s.Prove(nil, goal, Options{})
+			}
+			if result, values := s.Model(facts, Options{}, []*logic.Term{x}); result != Exhausted || values != nil {
+				t.Fatalf("got %v with %v", result, values)
+			}
+			path := s.disk.entryPath(Script(facts, Options{}) + "\x00c1")
+			content, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			written[i] = content
+		}
+		if !bytes.Equal(written[0], written[1]) || !bytes.Contains(written[0], []byte(noModelReply+"\n")) {
+			t.Fatalf("the entries differ, or do not hold the fixed form:\n%s\n%s", written[0], written[1])
+		}
+	})
+	// A Z3 that ends at once stops the run, and frees the slot of its
+	// process once, so that the run neither hangs nor starts a fifth.
+	t.Run("a Z3 that ends at start", func(t *testing.T) {
+		dir := cacheDir(t)
+		done := make(chan error, 1)
+		go func() {
+			_, err := fakeSolver(t, dir, "exit", "")
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Fatal("a Z3 that ends at start was accepted")
+			}
+		case <-time.After(20 * time.Second):
+			t.Fatal("a Z3 that ends at start hangs the run")
+		}
+	})
+
+	// The trim removes files, so a directory that holds anything and is
+	// not an answer cache is refused, and the trim of a cache removes
+	// nothing but the cache's own files.
+	t.Run("a directory that is not a cache", func(t *testing.T) {
+		for name, content := range map[string]string{"notes.txt": "mine", tagName: "Signature: 8a477f597d28d172789f06886806bc55\n"} {
+			dir := cacheDir(t)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := opened(t, z3, dir); err == nil || !strings.Contains(err.Error(), "not an answer cache") {
+				t.Fatalf("a directory holding %s was accepted: %v", name, err)
+			}
+			if got, _ := os.ReadFile(filepath.Join(dir, name)); string(got) != content {
+				t.Fatalf("%s was changed", name)
+			}
+		}
+	})
+	t.Run("files of others in a cache", func(t *testing.T) {
+		dir := cacheDir(t)
+		s := cached(t, z3, dir)
+		s.Prove(nil, goal, Options{})
+		entry := entries(t, dir)[0]
+		shard := filepath.Dir(entry)
+		foreign := []string{
+			filepath.Join(dir, "notes.txt"),
+			filepath.Join(dir, "sub", "old.txt"),
+			filepath.Join(filepath.Dir(shard), "foreign.txt"),
+			filepath.Join(shard, "foreign"),
+			filepath.Join(shard, strings.Repeat("a", 61)),
+		}
+		old := time.Now().Add(-10 * 24 * time.Hour)
+		for _, path := range append(foreign, entry) {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if path != entry {
+				if err := os.WriteFile(path, []byte("mine"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Chtimes(path, old, old); err != nil {
+				t.Fatal(err)
+			}
+		}
+		savedLimit := cacheLimit
+		cacheLimit = 0
+		defer func() { cacheLimit = savedLimit }()
+		if err := s.disk.trim(time.Now().Add(2 * trimEvery)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(entry); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatal("an entry unused for ten days was kept")
+		}
+		for _, path := range foreign {
+			if got, err := os.ReadFile(path); err != nil || string(got) != "mine" {
+				t.Fatalf("the trim removed or changed %s, which is not the cache's", path)
+			}
+		}
+		// A cache made before is one, whatever else it holds now.
+		if _, err := opened(t, z3, dir); err != nil {
+			t.Fatalf("the cache is refused: %v", err)
 		}
 	})
 
