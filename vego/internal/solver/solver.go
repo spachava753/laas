@@ -346,6 +346,10 @@ func CompareModelFirst() func() int64 {
 	}
 }
 
+// Compared returns how many checks have been compared so far; see
+// compareModelFirst.
+func Compared() int64 { return compared.Load() }
+
 // effortOf returns the resource limit of a problem.
 func effortOf(opts Options) int {
 	if opts.Effort == 0 {

@@ -151,7 +151,13 @@ func TestAnalyzer(t *testing.T) {
 		}
 
 		costs := collectCosts(analyzer)
+		compared := solver.Compared()
 		runCorpus(t, analyzer, mainCorpus...)
+		// The comparison that init turns on ran on the checks of the
+		// corpus; tests beside this one can only add to the count.
+		if solver.Compared() == compared {
+			t.Error("no contradiction check of the corpus was compared with its first attempt")
+		}
 		recorded, quoted := costs()
 		// The checks for a contradiction of the shipped entries of
 		// slices.Delete, slices.DeleteFunc, and slices.Compact, and after
