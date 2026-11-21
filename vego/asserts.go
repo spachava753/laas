@@ -27,6 +27,15 @@ import (
 // every method with an exported name and every function value of the
 // package as reachable from an interface value handed over; see
 // callgraph.go. The claim narrows only the call graph.
+//
+// For a generic function, a key may also name a type parameter, with the
+// empty list only, as in asserts: {E: []}. The claim: the function runs no
+// method of a value of type E or *E, or of anything such a value holds,
+// directly or through what it calls (fmt and reflect included), neither
+// while the call lasts nor later through anything it returns, keeps, or
+// registers. Without it, a type argument whose values reach a method makes
+// a verified call refused, and in the call graph it reaches the methods of
+// the package that such a value reaches; see checkTypeArgs and handedCode.
 
 // addAsserts reads the asserts of an entry: a mapping from a parameter to
 // the types the function may assert what it holds to.
