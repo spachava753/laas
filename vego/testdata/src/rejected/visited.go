@@ -100,7 +100,7 @@ func VisitedAgain(m map[int]int) {
 // @Ensures True
 func VisitedIndexed(m map[int]int) {
 	// @Visited done
-	// @Invariant done[1] = 0 // want `vego: in Invariant annotation: done is the set of keys that the loop has visited; a formula reads it only as \|done\| and has\(done, k\)`
+	// @Invariant done[1] = 0 // want `vego: in Invariant annotation: done is the set of keys that the loop has visited; a formula reads it only as \|done\|, has\(done, k\), and in Forall k in done`
 	for range m {
 	}
 }
@@ -120,7 +120,7 @@ func VisitedOld(m map[int]int) {
 // @Ensures True
 func VisitedBare(m map[int]int) {
 	// @Visited done
-	// @Invariant done = done // want `vego: in Invariant annotation: done is the set of keys that the loop has visited; a formula reads it only as \|done\| and has\(done, k\)`
+	// @Invariant done = done // want `vego: in Invariant annotation: done is the set of keys that the loop has visited; a formula reads it only as \|done\|, has\(done, k\), and in Forall k in done`
 	for range m {
 	}
 }
@@ -130,7 +130,7 @@ func VisitedBare(m map[int]int) {
 // @Ensures True
 func VisitedFresh(m map[int]int) {
 	// @Visited done
-	// @Invariant fresh(done) // want `vego: in Invariant annotation: done is the set of keys that the loop has visited; a formula reads it only as \|done\| and has\(done, k\)`
+	// @Invariant fresh(done) // want `vego: in Invariant annotation: done is the set of keys that the loop has visited; a formula reads it only as \|done\|, has\(done, k\), and in Forall k in done`
 	for range m {
 	}
 }
@@ -140,7 +140,7 @@ func VisitedFresh(m map[int]int) {
 // @Ensures True
 func VisitedCap(m map[int]int) {
 	// @Visited done
-	// @Invariant cap(done) = 0 // want `vego: in Invariant annotation: done is the set of keys that the loop has visited; a formula reads it only as \|done\| and has\(done, k\)`
+	// @Invariant cap(done) = 0 // want `vego: in Invariant annotation: done is the set of keys that the loop has visited; a formula reads it only as \|done\|, has\(done, k\), and in Forall k in done`
 	for range m {
 	}
 }
@@ -151,7 +151,7 @@ func VisitedCap(m map[int]int) {
 // @Ensures True
 func VisitedPredicate(m map[int]int) {
 	// @Visited done
-	// @Invariant small(done) // want `vego: in Invariant annotation: done is the set of keys that the loop has visited; a formula reads it only as \|done\| and has\(done, k\)`
+	// @Invariant small(done) // want `vego: in Invariant annotation: done is the set of keys that the loop has visited; a formula reads it only as \|done\|, has\(done, k\), and in Forall k in done`
 	for range m {
 	}
 }

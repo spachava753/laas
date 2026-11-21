@@ -983,6 +983,7 @@ func TestRules(t *testing.T) {
 	chosen := logic.Ite(c, e, f)
 	seqA, seqB := logic.Const("A", logic.IntSeq), logic.Const("B", logic.IntSeq)
 	tableM, tableN := logic.Const("M", logic.SeqOf(logic.IntSeq)), logic.Const("N", logic.SeqOf(logic.IntSeq))
+	keyVar, keys := logic.Bound("s", logic.IntSeq), logic.Const("H", logic.BoolSeq)
 	tests := []struct {
 		name string
 		opts Options
@@ -1038,6 +1039,29 @@ func TestRules(t *testing.T) {
 		{"a write leaves the other sequences", Options{}, []*logic.Term{logic.Ne(x, y)}, logic.Eq(logic.Select(logic.Select(logic.Write(tableM, x, z, lit(5)), y), z), logic.Select(logic.Select(tableM, y), z)), Proved},
 		{"a write does not reach another sequence", Options{}, []*logic.Term{logic.Ne(x, y)}, logic.Eq(logic.Select(logic.Select(logic.Write(tableM, x, z, lit(5)), y), z), lit(5)), Refuted},
 		{"a write keeps the length of its sequence", Options{}, nil, logic.Eq(logic.Len(logic.Select(logic.Write(tableM, x, y, z), x)), logic.Len(logic.Select(tableM, x))), Proved},
+		// Guards against a quantifier over the keys of a map with string
+		// keys, whose variable is a sequence, being lost or misread: it is
+		// instantiated at a string whose key the map has, says nothing of
+		// one whose key it may lack, and its key function tells nothing
+		// apart inside the quantifier, which only keeps facts from being
+		// proved.
+		{"a fact of every string key holds of one the map has", Options{}, []*logic.Term{
+			logic.Forall(keyVar, logic.Implies(logic.Select(keys, logic.Key(keyVar)), logic.Le(logic.Len(keyVar), lit(3)))),
+			logic.Select(keys, logic.Key(seqA))}, logic.Le(logic.Len(seqA), lit(3)), Proved},
+		// Z3 builds no model of a fact over every sequence, so what is
+		// not proved here is unknown, not refuted.
+		{"a fact of every string key says no more than it says", Options{}, []*logic.Term{
+			logic.Forall(keyVar, logic.Implies(logic.Select(keys, logic.Key(keyVar)), logic.Le(logic.Len(keyVar), lit(3)))),
+			logic.Select(keys, logic.Key(seqA))}, logic.Le(logic.Len(seqA), lit(2)), Unknown},
+		{"a fact of every string key says nothing of one the map may lack", Options{}, []*logic.Term{
+			logic.Forall(keyVar, logic.Implies(logic.Select(keys, logic.Key(keyVar)), logic.Le(logic.Len(keyVar), lit(3))))},
+			logic.Le(logic.Len(seqA), lit(3)), Refuted},
+		{"some string key the map has is found", Options{}, []*logic.Term{
+			logic.Select(keys, logic.Key(seqA)), logic.Eq(logic.Len(seqA), lit(2))},
+			logic.Exists(keyVar, logic.And(logic.Select(keys, logic.Key(keyVar)), logic.Eq(logic.Len(keyVar), lit(2)))), Proved},
+		{"no string key is found in a map that has none", Options{}, []*logic.Term{
+			logic.Forall(keyVar, logic.Not(logic.Select(keys, logic.Key(keyVar))))},
+			logic.Exists(keyVar, logic.Select(keys, logic.Key(keyVar))), Refuted},
 		// Guards against the remainder of two numbers being computed the
 		// Euclidean way, which never yields a negative remainder, and the
 		// quotient being rounded down. Go truncates: -7 / 2 is -3 and

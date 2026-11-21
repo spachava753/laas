@@ -24,7 +24,7 @@ const (
 	NUnary            // Op is "-" or "~"
 	NBinary           // Op is an arithmetic or logical connective
 	NCompare          // Kids[0] Ops[0] Kids[1] Ops[1] Kids[2] ...
-	NQuant            // Op is "Forall" or "Exists"; Kids is [body] or [lo, hi, body]
+	NQuant            // Op is "Forall" or "Exists"; Kids is [body] over Z, [lo, hi, body] over an interval, or [map, body] over the keys of a map
 	NNil              // nil: the nil error or the nil pointer
 	NField            // Kids[0].Name, possibly Primed
 	NStr              // a string literal; Name holds its value
@@ -473,7 +473,8 @@ func (p *parser) negation() *Node {
 	return p.comparison()
 }
 
-// quantifier parses "Forall x, y in domain : body". The domain is Z or an
+// quantifier parses "Forall x, y in domain : body". The domain is Z, the
+// keys of a map named by a path, as in "Forall k in m", or an
 // interval with square (closed) or round (open) ends; the body extends as far
 // to the right as possible.
 func (p *parser) quantifier() *Node {
@@ -487,11 +488,20 @@ func (p *parser) quantifier() *Node {
 	if p.is("ℤ") {
 		p.fail("ℤ is not a spelling of the formula language; write Z")
 	}
-	if _, unbounded := p.acceptAny("Z"); !unbounded {
-		open, ok := p.acceptAny("[", "(")
-		if !ok {
-			p.fail("expected a quantifier domain: Z or an interval such as [0, n)")
+	_, unbounded := p.acceptAny("Z")
+	open, interval := "", false
+	if !unbounded {
+		open, interval = p.acceptAny("[", "(")
+	}
+	switch {
+	case unbounded:
+	case !interval:
+		// The keys of a map: a path, which the resolver checks.
+		if p.peek().kind != 'i' {
+			p.fail("expected a quantifier domain: Z, an interval such as [0, n), or a map such as m")
 		}
+		n.Kids = []*Node{p.arith()}
+	default:
 		lo := p.arith()
 		p.expect(",")
 		hi := p.arith()

@@ -21,9 +21,10 @@ const (
 // Index, or, as the last step, of the length, with Has of whether a map has
 // the key Index, with State of a state of the value, as in held(m), with
 // Cap of the capacity of a slice, with Nil of whether a slice is nil, with
-// Addr of the address of what the path leads to, as in &e.list.root, or
-// with ElemSize of the size in bytes of an element of a slice, as in
-// elemsize(s).
+// Addr of the address of what the path leads to, as in &e.list.root, with
+// ElemSize of the size in bytes of an element of a slice, as in
+// elemsize(s), or with Keys of the sort of the keys of a map, which a
+// quantifier over them binds: the Env returns any term of that sort.
 type Step struct {
 	Field string
 	Index *Term
@@ -36,6 +37,7 @@ type Step struct {
 	// ElemSize depends only on the type the path leads to, so it reads
 	// nothing.
 	ElemSize bool
+	Keys     bool
 }
 
 // NotSlice is what an Env returns for a path with a last step Nil that does
@@ -746,13 +748,33 @@ func (s *scope) relation(op string, a, b *Term) *Term {
 	return result
 }
 
+// quantifier resolves Forall and Exists. Each variable ranges over the
+// integers, an interval, whose ends give guards, or the keys of a map,
+// whose guard is that the map has the variable as a key and whose sort is
+// that of the keys. A Forall implies its body from the guards and an Exists
+// conjoins them, at the innermost variable. Over Z, a name Z that means
+// something here is refused, since it would give Z two meanings.
 func (s *scope) quantifier(n *Node) *Term {
 	inner := &scope{r: s.r, env: s.env, bound: map[string]*Term{}}
 	for name, t := range s.bound {
 		inner.bound[name] = t
 	}
 	var vars, guards []*Term
+	if len(n.Kids) == 1 && s.env != nil {
+		// Z is the integers, which a variable of that name would make a
+		// second meaning of.
+		if _, err := s.env.Path("Z", nil, Now); err == nil {
+			fail("Z names something here, so Forall %s in Z could mean the integers or what Z names; rename it, or write an interval", n.Vars[0])
+		}
+	}
 	for _, name := range n.Vars {
+		if len(n.Kids) == 2 {
+			// The keys of a map, which have the sort of its keys.
+			v, guard := s.keyOf(n.Kids[0], name)
+			vars, guards = append(vars, v), append(guards, guard)
+			inner.bound[name] = v
+			continue
+		}
 		v := s.r.newBound(name, Int)
 		vars = append(vars, v)
 		inner.bound[name] = v
@@ -782,6 +804,29 @@ func (s *scope) quantifier(n *Node) *Term {
 		guards = nil
 	}
 	return result
+}
+
+// keyOf binds a variable to the keys of a map named by a path, and returns
+// it with the formula that the map has it. A quantifier over the keys says
+// its body of every key the map has, or that some key it has meets it.
+func (s *scope) keyOf(domain *Node, name string) (*Term, *Term) {
+	if s.env == nil {
+		fail("a quantifier over the keys of a map cannot be used in a predicate definition")
+	}
+	root, steps, when, ok := s.pathOf(domain)
+	if !ok {
+		fail("a quantifier ranges over Z, an interval, or the keys of a map reached from a variable, as in Forall k in m; %s is none of these", domain)
+	}
+	sorted, err := s.env.Path(root, append(slices.Clip(steps), Step{Keys: true}), when)
+	if err != nil {
+		panic(resolveError{err})
+	}
+	v := s.r.newBound(name, sorted.Sort)
+	has, err := s.env.Path(root, append(slices.Clip(steps), Step{Index: v, Has: true}), when)
+	if err != nil {
+		panic(resolveError{err})
+	}
+	return v, has
 }
 
 // DefineError reports a predicate definition that could not be accepted.

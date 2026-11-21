@@ -147,8 +147,10 @@ func (e *specEnv) visitedPath(c *clause, steps []logic.Step, when logic.When) (*
 		return set.counter, nil
 	case len(steps) == 1 && steps[0].Has:
 		return e.v.visitedHas(e.sink, set, steps[0].Index)
+	case len(steps) == 1 && steps[0].Keys:
+		return keyPlaceholder(set.r.mapType), nil
 	}
-	return nil, fmt.Errorf("%s is the set of keys that the loop has visited; a formula reads it only as |%s| and has(%s, k)", name, name, name)
+	return nil, fmt.Errorf("%s is the set of keys that the loop has visited; a formula reads it only as |%s|, has(%s, k), and in Forall k in %s", name, name, name, name)
 }
 
 // visitedHas states that the loop has passed a key. For a key without a
@@ -327,4 +329,14 @@ func (pv *pkgVerifier) checkVisited(fn *funcInfo) {
 			fail("no annotation of the loop names %s, so it says nothing; remove it, or name it in an Invariant", name)
 		}
 	}
+}
+
+// keyPlaceholder returns a term of the sort of the keys of a map type, which
+// is all a quantifier over its keys asks of the map before binding a
+// variable to them.
+func keyPlaceholder(t types.Type) *logic.Term {
+	if key, _ := mapParts(t); isString(key) {
+		return logic.Fill(logic.IntLit(0), logic.IntLit(0))
+	}
+	return logic.IntLit(0)
 }

@@ -385,7 +385,7 @@ func (e *specEnv) locate(name string, steps []logic.Step, when logic.When) (reac
 func (e *specEnv) locateAt(name string, steps []logic.Step, when logic.When, throughPointer bool) (reached, error) {
 	if e.fn == nil && e.st != nil {
 		if c := e.v.visitedAt(name, e.pos); c != nil {
-			return reached{}, fmt.Errorf("%s is the set of keys that the loop has visited; a formula reads it only as |%s| and has(%s, k)", name, name, name)
+			return reached{}, fmt.Errorf("%s is the set of keys that the loop has visited; a formula reads it only as |%s|, has(%s, k), and in Forall k in %s", name, name, name, name)
 		}
 		if c := e.v.snapshotAt(name, e.pos); c != nil {
 			taken, ok := e.st.snapshots[c]
@@ -541,6 +541,16 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 	}
 	if last := len(steps) - 1; last >= 0 && steps[last].ElemSize {
 		return e.elemSize(name, steps[:last], when)
+	}
+	if last := len(steps) - 1; last >= 0 && steps[last].Keys {
+		found, err := e.locate(name, steps[:last], when)
+		switch {
+		case err != nil:
+			return nil, err
+		case found.constant != nil || !isMap(found.typ):
+			return nil, fmt.Errorf("%s is not a map, so a quantifier cannot range over its keys; it ranges over Z, an interval, or the keys of a map", spell(name, steps[:last]))
+		}
+		return keyPlaceholder(found.typ), nil
 	}
 	if last := len(steps) - 1; last >= 0 && steps[last].State != "" {
 		return e.state(name, steps[:last], steps[last].State, when)
