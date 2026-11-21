@@ -848,7 +848,7 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 	if cut {
 		return
 	}
-	if len(fn.calls) > 0 {
+	if fn.calls.len() > 0 {
 		v.unsupported(s.Pos(), fmt.Sprintf("deferring a call of %s, which calls a function it is given, is not supported yet", callee.Name()))
 	}
 	// The deferred call itself runs later, so nothing here comes before it.

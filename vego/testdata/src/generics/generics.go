@@ -18,6 +18,12 @@ type IDs []int
 // Ints is an alias, which is the same type as []int.
 type Ints = []int
 
+// ShowInt calls Show at int, before LoopL calls it at L, whose underlying
+// type is int (later.go).
+//
+// @Ensures True
+func ShowInt() (s string) { return genericslib.Show(1) }
+
 // IndexOf finds an integer.
 //
 // @Ensures r = -1 Or xs[r] = 3
@@ -306,7 +312,7 @@ type P struct{ n int }
 // String calls Loop, which calls Show, which calls String.
 //
 // @Ensures True
-func (p P) String() (s string) { return Loop(p) } // want `this call may not end: P.String calls Loop at generics.go:\d+:\d+, Loop calls genericslib.Show\(p\) with T = P at generics.go:\d+:\d+, which may run P.String; a generic function may run the methods of a value of its type argument T`
+func (p P) String() (s string) { return Loop(p) } // want `this call may not end: P.String calls Loop at generics.go:\d+:\d+, Loop calls genericslib.Show\(p\) with T = P at generics.go:\d+:\d+, which may run P.String; a generic function may run the methods of a value of its type argument T, and of what such a value holds, through its constraint, through an interface, or by reflection, so a cycle goes through code of another package, and no Variant can be checked across it; if genericslib.Show runs no method of a value of type T, add "asserts: \{T: \[\]\}" to its entry in vego-trusted.yaml, or call it with a type that has no methods`
 
 // Loop hands a P to a generic function whose entry does not say that it
 // runs none of its methods.
@@ -473,7 +479,7 @@ func Back[E any](x E) E {
 // @Requires n >= 0
 // @Ensures True
 func CallsBack(n int) {
-	Back(n) // want `Back is trusted and calls back into CallsBack, so that this call ends cannot be proved; .*the cycle: CallsBack calls Back at generics.go:\d+:\d+, Back calls CallsBack at generics.go:\d+:\d+`
+	Back(n) // want `Back is trusted and calls back into CallsBack, so that this call ends cannot be proved; Back is generic and cannot be verified yet, so break the cycle; the cycle: CallsBack calls Back at generics.go:\d+:\d+, Back calls CallsBack at generics.go:\d+:\d+`
 }
 
 // Finder finds an element.

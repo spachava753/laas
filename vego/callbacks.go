@@ -69,10 +69,10 @@ func (pv *pkgVerifier) trustedCall(fn *funcInfo, item trustCall) {
 	case !isFunc:
 		fn.defect("its calls lists %s, whose type %s is not a function type", item.name, param.Type())
 		return
-	case !fn.runs[param]:
+	case !fn.runs.get(param):
 		fn.defect("its calls gives %s a contract, so its runs must list %s too: calls claims everything runs does", item.name, item.name)
 		return
-	case fn.calls[param] != nil:
+	case fn.calls.get(param) != nil:
 		fn.defect("its calls lists %s twice", item.name)
 		return
 	case pv.valueContract(param.Type()) != nil:
@@ -94,7 +94,7 @@ func (pv *pkgVerifier) trustedCall(fn *funcInfo, item trustCall) {
 	cb := &callback{param: param, sig: sig}
 	cb.fn = &funcInfo{
 		obj: fn.obj, trust: fn.trust, paramNames: map[string]*types.Var{}, resultNames: map[string]int{},
-		runs: map[*types.Var]bool{}, vouches: map[int]bool{}, calls: map[*types.Var]*callback{},
+		vouches: map[int]bool{},
 		genericTypes: fn.genericTypes,
 	}
 	for name, p := range fn.paramNames {
@@ -186,7 +186,7 @@ func (pv *pkgVerifier) trustedCall(fn *funcInfo, item trustCall) {
 		fn.defect("its calls says that %s is deterministic, but %s returns nothing", item.name, item.name)
 	}
 	cb.deterministic = item.deterministic || cb.applied
-	fn.calls[param] = cb
+	fn.calls.set(param, cb)
 }
 
 // applies reports whether a formula applies a name, as in f(i).
@@ -272,7 +272,7 @@ func (v *fnVerifier) callHanding(call *ast.CallExpr, fn *funcInfo, st *state, gu
 	}
 	for _, passed := range v.bindCall(call, sig) {
 		param := passed.param
-		if fn.calls[param] != nil {
+		if fn.calls.get(param) != nil {
 			// A parameter under calls has a function type, which is never
 			// variadic, so it is given one argument.
 			handed[param] = v.handOver(fn, param, passed.expr, st, guard)
@@ -359,7 +359,7 @@ func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types
 	runsMade := map[string]bool{}
 	stKnown := len(st.hyps)
 	for _, param := range fn.params {
-		h, cb := handed[param], fn.calls[param]
+		h, cb := handed[param], fn.calls.get(param)
 		if h == nil {
 			continue
 		}
@@ -660,14 +660,14 @@ func (pv *pkgVerifier) handedArgs(call *ast.CallExpr) []ast.Expr {
 		return nil
 	}
 	fn := pv.trustedContract(callee.Origin())
-	if fn == nil || len(fn.calls) == 0 {
+	if fn == nil || fn.calls.len() == 0 {
 		return nil
 	}
 	sig := callee.Type().(*types.Signature)
 	bound, _ := bindArgs(pv.info, call, paramsOf(sig), sig.Variadic())
 	var handed []ast.Expr
 	for _, b := range bound {
-		if !b.packed && fn.calls[b.param] != nil {
+		if !b.packed && fn.calls.get(b.param) != nil {
 			handed = append(handed, b.expr)
 		}
 	}

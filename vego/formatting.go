@@ -53,7 +53,7 @@ func (pv *pkgVerifier) readFormats(fn *funcInfo, entry *trustEntry) {
 		switch {
 		case !ok || param == sig.Recv():
 			fn.defect("its formats %q: %s is not a parameter", item.text, item.text)
-		case fn.runs[param]:
+		case fn.runs.get(param):
 			fn.defect("its formats lists %s, which its runs lists too; a parameter is either formatted or run", item.text)
 		case isString(param.Type()) && types.Identical(param.Type(), types.Typ[types.String]):
 			if fn.format != nil {
@@ -80,7 +80,7 @@ func (pv *pkgVerifier) readFormats(fn *funcInfo, entry *trustEntry) {
 		fn.defect("it lists formats and has calls; the values are checked in the state of the call, " +
 			"which a function it calls before it formats them could change")
 	}
-	for param := range fn.runs {
+	for param := range fn.runs.all() {
 		if what := pv.writingCode(param.Type(), map[types.Type]bool{}); what != "" {
 			fn.defect("it lists formats and runs %s, which can hold %s; the values are checked in the state of the call, "+
 				"which that code could change before they are formatted", param.Name(), what)

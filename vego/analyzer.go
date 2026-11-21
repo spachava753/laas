@@ -336,11 +336,11 @@ type funcInfo struct {
 	resultNames map[string]int
 	// runs holds the parameters of a trusted function whose code its
 	// contract says it may run.
-	runs map[*types.Var]bool
+	runs byParam[bool]
 	// keeps holds, for each parameter of a trusted function whose code its
 	// contract says it keeps, the results and parameters it keeps it in;
 	// see keeps.go.
-	keeps map[*types.Var][]string
+	keeps byParam[[]string]
 	// vouches holds the indices of the error results of a trusted function
 	// whose errors its contract vouches for, or, for a contract of a type,
 	// those a Vouches annotation lists; see knownError. vouchClauses holds
@@ -354,10 +354,10 @@ type funcInfo struct {
 	// vouchedWrites holds the parameters of a trusted function under
 	// whose memory its contract vouches for the function values and
 	// interface values it writes.
-	vouchedWrites map[*types.Var]bool
+	vouchedWrites byParam[bool]
 	// calls holds the contracts a trusted function gives its function
 	// parameters; see callbacks.go.
-	calls  map[*types.Var]*callback
+	calls  byParam[*callback]
 	broken bool // an annotation failed to parse; verification is skipped
 	// genericTypes is set for the contract of an instantiation of a
 	// generic function: the type of each of its parameters and results,
@@ -1394,8 +1394,7 @@ func (pv *pkgVerifier) addFunc(decl *ast.FuncDecl) {
 // annotations and trusted contracts may use for its parameters and results.
 // The receiver of a method is its first parameter.
 func newFuncInfo(obj *types.Func) *funcInfo {
-	fn := &funcInfo{obj: obj, paramNames: map[string]*types.Var{}, resultNames: map[string]int{}, runs: map[*types.Var]bool{}, keeps: map[*types.Var][]string{}, vouches: map[int]bool{},
-		vouchedWrites: map[*types.Var]bool{}, calls: map[*types.Var]*callback{}}
+	fn := &funcInfo{obj: obj, paramNames: map[string]*types.Var{}, resultNames: map[string]int{}, vouches: map[int]bool{}}
 	sig := obj.Type().(*types.Signature)
 	inputs := slices.Collect(sig.Params().Variables())
 	if sig.Recv() != nil {

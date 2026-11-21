@@ -223,7 +223,7 @@ func (pv *pkgVerifier) checkAsserts(fn *funcInfo, entry *trustEntry) {
 		switch {
 		case param == fn.formatted:
 			fn.defect("its asserts lists %s, which its formats lists; formats already says what the function runs of it", param.Name())
-		case !fn.runs[param] && fn.keeps[param] == nil:
+		case !fn.runs.get(param) && fn.keeps.get(param) == nil:
 			fn.defect("its asserts lists %s, which its runs and keeps do not list; the function may then run no code it holds at all",
 				param.Name())
 		}

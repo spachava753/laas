@@ -139,7 +139,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 			results = v.nothingKnown(callee, st)
 			break
 		}
-		if len(fn.calls) > 0 {
+		if fn.calls.len() > 0 {
 			// What the call runs may read and write anything the caller may.
 			results = v.callHanding(call, fn, st, guard, operands)
 			break
@@ -188,7 +188,9 @@ func signatureMemoryFree(sig *types.Signature) bool {
 func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func, st *state, guard []*logic.Term) (*funcInfo, bool) {
 	sig := callee.Type().(*types.Signature)
 	switch {
-	case sig.TypeParams() != nil || sig.RecvTypeParams() != nil:
+	case sig.Recv() != nil && (sig.RecvTypeParams() != nil || genericReceiver(sig.Recv().Type())):
+		v.unsupported(call.Pos(), "calls of methods of generic types are not supported yet")
+	case sig.TypeParams() != nil:
 		v.unsupported(call.Pos(), "calls to generic functions are not supported yet")
 	case sig.Recv() != nil && types.IsInterface(sig.Recv().Type()):
 		v.unsupported(call.Pos(), "calls through an interface are not supported yet")
@@ -261,7 +263,7 @@ func (v *fnVerifier) checkNotHandable(call *ast.CallExpr, fn *funcInfo) {
 		// A parameter whose type has a contract takes a value made of the
 		// type, which is checked where it is made. A variadic parameter is
 		// a slice, which is no function.
-		if passed.packed || (!fn.runs[param] && fn.keeps[param] == nil) || fn.calls[param] != nil || !isFunc(param.Type()) || v.valueContract(param.Type()) != nil {
+		if passed.packed || (!fn.runs.get(param) && fn.keeps.get(param) == nil) || fn.calls.get(param) != nil || !isFunc(param.Type()) || v.valueContract(param.Type()) != nil {
 			continue
 		}
 		what := types.ExprString(arg)
@@ -273,7 +275,7 @@ func (v *fnVerifier) checkNotHandable(call *ast.CallExpr, fn *funcInfo) {
 				continue
 			}
 		}
-		if !fn.runs[param] {
+		if !fn.runs.get(param) {
 			// What a function keeps runs after the call, which a contract
 			// under calls cannot describe.
 			v.unsupported(arg.Pos(), fmt.Sprintf("%s is handed to %s as %s, which its trusted contract lists under keeps, and whose type %s has no contract; "+
@@ -329,12 +331,12 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 		// What runs claims for a value whose type has a contract holds
 		// only for values that meet it, so the proof rests on the entries
 		// that give the types it can hold contracts.
-		if fn.runs[param] || fn.keeps[param] != nil {
+		if fn.runs.get(param) || fn.keeps.get(param) != nil {
 			v.noteEntriesIn(param.Type(), arg.Pos())
 		}
 		// What a parameter under formats is given is checked by the rule
 		// for formatting; see checkFormatted.
-		if fn.runs[param] || fn.keeps[param] != nil || (param == fn.formatted && param != nil) || !holdsCode(t, map[types.Type]bool{}) {
+		if fn.runs.get(param) || fn.keeps.get(param) != nil || (param == fn.formatted && param != nil) || !holdsCode(t, map[types.Type]bool{}) {
 			continue
 		}
 		// Known origin of either kind makes every method harmless.
@@ -567,14 +569,14 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	// What a call that runs what it is handed is like at its start, before
 	// anything it writes is forgotten.
 	var atCall *state
-	if len(fn.calls) > 0 {
+	if fn.calls.len() > 0 {
 		atCall = st.clone()
 	}
 	for _, t := range written {
 		v.havoc(st, t, guard)
 	}
 	var applied map[*types.Var]*logic.Term
-	if len(fn.calls) > 0 {
+	if fn.calls.len() > 0 {
 		applied = v.runHanded(call, fn, args, written, atCall, st, mark)
 	}
 	if u := v.unit; len(written) > 0 && u != nil {
@@ -1179,8 +1181,12 @@ func (v *fnVerifier) checkRecursion(callee *funcInfo, pre *specEnv, st *state, g
 		if shown == nil {
 			shown = through
 		}
-		v.report(call.Pos(), "%s is trusted and calls back into %s, so that this call ends cannot be proved; verify %s instead of trusting it; the cycle: %s",
-			callee.obj.Name(), v.fn.obj.Name(), callee.obj.Name(), v.describeCycle(shown))
+		remedy := fmt.Sprintf("verify %s instead of trusting it", callee.obj.Name())
+		if v.pkgVerifier.instanceOf[callee.obj] != nil {
+			remedy = fmt.Sprintf("%s is generic and cannot be verified yet, so break the cycle", callee.obj.Name())
+		}
+		v.report(call.Pos(), "%s is trusted and calls back into %s, so that this call ends cannot be proved; %s; the cycle: %s",
+			callee.obj.Name(), v.fn.obj.Name(), remedy, v.describeCycle(shown))
 		return
 	}
 	if through != nil {

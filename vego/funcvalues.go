@@ -1114,8 +1114,8 @@ func (pv *pkgVerifier) heldCallWhy(call *ast.CallExpr) string {
 // function parameter with a contract under calls. What is handed over
 // there is judged where it is handed over. See holdsCallable.
 func (pv *pkgVerifier) runsValues(fn *funcInfo) bool {
-	for param := range fn.runs {
-		if fn.calls[param] == nil && holdsCallable(pv, param.Type(), map[types.Type]bool{}) {
+	for param := range fn.runs.all() {
+		if fn.calls.get(param) == nil && holdsCallable(pv, param.Type(), map[types.Type]bool{}) {
 			return true
 		}
 	}
@@ -1209,7 +1209,7 @@ func (pv *pkgVerifier) findValueCallers() {
 					// A trusted function that calls what it is handed under
 					// calls runs code its caller hands over, which is
 					// judged where it is handed over.
-					if variable, ok := pv.info.Uses[fun].(*types.Var); ok && trusted != nil && trusted.calls[variable] != nil {
+					if variable, ok := pv.info.Uses[fun].(*types.Var); ok && trusted != nil && trusted.calls.get(variable) != nil {
 						return true
 					}
 				}
@@ -1305,7 +1305,7 @@ func (pv *pkgVerifier) whyValues(obj *types.Func) string {
 // verified code can make.
 func (pv *pkgVerifier) runsReason(fn *funcInfo) string {
 	for _, param := range fn.params {
-		if !fn.runs[param] || fn.calls[param] != nil {
+		if !fn.runs.get(param) || fn.calls.get(param) != nil {
 			continue
 		}
 		if what := pv.callableIn(param.Type(), map[types.Type]bool{}); what != "" {
@@ -1445,6 +1445,12 @@ func (v *fnVerifier) functionValue(e ast.Expr, want types.Type, st *state, guard
 // neither and is refused.
 func (v *fnVerifier) valueForm(e ast.Expr) (named, method *types.Func) {
 	switch e := e.(type) {
+	case *ast.IndexExpr, *ast.IndexListExpr:
+		// A generic function written with its type arguments is that
+		// function, which the use then refuses as any generic function.
+		if generic := explicitInstance(v.info, e); generic != nil {
+			return generic, nil
+		}
 	case *ast.Ident:
 		named, _ = v.info.Uses[e].(*types.Func)
 	case *ast.SelectorExpr:
@@ -1554,11 +1560,11 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 		args[param] = sv.entry[T.params[i]]
 		call.Args = append(call.Args, &ast.Ident{NamePos: e.Pos(), Name: T.params[i].Name()})
 	}
-	if fn.trust != nil && len(fn.keeps) > 0 {
+	if fn.trust != nil && fn.keeps.len() > 0 {
 		v.unsupported(e.Pos(), fmt.Sprintf("%s keeps code it is given, and cannot be used as %s: "+
 			"what it would be given would come from whoever calls the value, and a value of a type has no place to say what it keeps", callee.Name(), as))
 	}
-	if fn.trust != nil && len(fn.calls) > 0 {
+	if fn.trust != nil && fn.calls.len() > 0 {
 		v.unsupported(e.Pos(), fmt.Sprintf("%s calls a function it is given, and cannot be used as %s: "+
 			"what it would be given would come from code nobody has seen", callee.Name(), as))
 	}
@@ -1568,7 +1574,7 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 		// at a call written out, where checkHandedOver looks at it. A
 		// method whose entry lists it under runs may call through what it
 		// holds, and is refused above.
-		if recv := sig.Recv(); recv != nil && !fn.runs[fn.params[0]] && holdsCode(recv.Type(), map[types.Type]bool{}) {
+		if recv := sig.Recv(); recv != nil && !fn.runs.get(fn.params[0]) && holdsCode(recv.Type(), map[types.Type]bool{}) {
 			v.unsupported(e.Pos(), fmt.Sprintf("%s is used as %s, which hands its receiver to %s at each call; %s is trusted, and its receiver "+
 				"is a value of type %s, which is or holds %s, so %s could run code through it that nobody has seen. "+
 				"If its contract holds whatever that code does, list %s under runs in the contract",
@@ -1577,7 +1583,7 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 		// The parameters of the value come from whoever calls it, so what
 		// can carry code is handed on to the trusted function unseen.
 		for _, param := range inputs {
-			if fn.runs[param] || !holdsCode(param.Type(), map[types.Type]bool{}) {
+			if fn.runs.get(param) || !holdsCode(param.Type(), map[types.Type]bool{}) {
 				continue
 			}
 			// What a parameter under formats is given is checked at each
@@ -1725,7 +1731,6 @@ func (v *fnVerifier) madeLiteral(lit *ast.FuncLit, T *funcInfo, st *state, guard
 		results:     slices.Collect(sig.Results().Variables()),
 		paramNames:  map[string]*types.Var{},
 		resultNames: map[string]int{},
-		runs:        map[*types.Var]bool{},
 		vouches:     map[int]bool{},
 		decl:        &ast.FuncDecl{Name: &ast.Ident{NamePos: lit.Pos(), Name: T.obj.Name()}, Type: lit.Type, Body: lit.Body},
 		ownParams:   map[string]*types.Var{},

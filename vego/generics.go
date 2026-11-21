@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"go/ast"
 	"go/types"
+	"iter"
+	"maps"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -186,7 +189,11 @@ func (pv *pkgVerifier) genericTypes(f *types.Func) map[*types.Var]types.Type {
 // the generic signature. The answer is the same at every instantiation,
 // so it is a defect of the entry. A path through types it cannot follow is
 // left to the resolution at the instantiation.
-func throughTypeParam(what string, t types.Type, steps []logic.Step) error {
+//
+// A step that names a state names one only when some type declares a state
+// of that name (isState); otherwise the resolver reads the form as an
+// application or a predicate, which this does not judge.
+func throughTypeParam(what string, t types.Type, steps []logic.Step, isState func(string) bool) error {
 	spelled := what
 	for _, step := range steps {
 		object := t
@@ -198,7 +205,7 @@ func throughTypeParam(what string, t types.Type, steps []logic.Step) error {
 		case isParam && step.Field != "":
 			return fmt.Errorf("%s.%s names a field of a value of type %s, a type parameter, whose type arguments need not have that field; "+
 				"%s name it", spelled, step.Field, param.Obj().Name(), genericDefect)
-		case isParam && step.State != "":
+		case isParam && step.State != "" && isState(step.State):
 			return fmt.Errorf("%s(%s) names a state of a value of type %s, a type parameter, whose type arguments need not have that state; "+
 				"%s name it", step.State, spelled, param.Obj().Name(), genericDefect)
 		case isParam && step.Addr:
@@ -450,17 +457,102 @@ func isGeneric(f *types.Func) bool {
 // itself.
 const genericDefect = "a contract of a generic function cannot"
 
+// instanceProblems are the parts of the messages of what makes a contract
+// unusable at one instantiation and not at others: a clause that cannot be
+// read at its type arguments, as one that compares structs or orders
+// strings, and a contract that contradicts what values of its types can
+// be. Any other defect is one of the entry, at every instantiation.
+var instanceProblems = []string{
+	"a formula cannot compare a struct",
+	"cannot be applied to float values",
+	"a formula has no order of them",
+	"cannot compare ",
+	"takes one integer",
+	"which is all that can be applied yet",
+	"it contradicts itself",
+}
+
 // insteadOf ends the message of a contract of an instantiation that cannot
-// be used there: what to call instead, when the problem is one of this
-// instantiation and not of the entry. That is the function of the same
-// name with Func, which is handed a function literal, where it has an
-// entry, and otherwise a loop.
+// be used there. For a problem of this instantiation it says what to call
+// instead: the function of the same name with Func, which is handed a
+// function literal, where it has an entry, and otherwise a loop. For a
+// defect of the entry, it says to fix the entry.
 func (pv *pkgVerifier) insteadOf(entry *trustEntry, problem string) string {
-	if strings.Contains(problem, genericDefect) {
-		return ""
+	if !slices.ContainsFunc(instanceProblems, func(part string) bool { return strings.Contains(problem, part) }) {
+		return fmt.Sprintf("; the entry has this defect at every type argument, so fix the entry in %s", filepath.Base(entry.file.path))
 	}
 	if alternative := entry.key + "Func"; !strings.HasSuffix(entry.key, "Func") && pv.entryFor(alternative) != nil {
 		return fmt.Sprintf("; call %s instead, with a function literal that compares what you need of the elements, or write a loop", alternative)
 	}
 	return "; write a loop instead"
 }
+
+// explicitInstance returns the generic function that an expression such as
+// glib.IsPos[int] instantiates with its type arguments written out, or nil
+// for an index of anything else.
+func explicitInstance(info *types.Info, e ast.Expr) *types.Func {
+	var x ast.Expr
+	switch e := e.(type) {
+	case *ast.IndexExpr:
+		x = e.X
+	case *ast.IndexListExpr:
+		x = e.X
+	default:
+		return nil
+	}
+	var id *ast.Ident
+	switch x := ast.Unparen(x).(type) {
+	case *ast.Ident:
+		id = x
+	case *ast.SelectorExpr:
+		if info.Selections[x] != nil {
+			return nil
+		}
+		id = x.Sel
+	default:
+		return nil
+	}
+	f, ok := info.Uses[id].(*types.Func)
+	if !ok || !isGeneric(f) {
+		return nil
+	}
+	return f
+}
+
+// genericReceiver reports whether a receiver's type is a generic type or an
+// instantiation of one, or a pointer to such a type.
+func genericReceiver(t types.Type) bool {
+	if pointer, ok := types.Unalias(t).(*types.Pointer); ok {
+		t = pointer.Elem()
+	}
+	named, ok := types.Unalias(t).(*types.Named)
+	return ok && (named.TypeParams() != nil || named.TypeArgs() != nil)
+}
+
+// byParam maps parameters of one contract to what its entry says of each,
+// as runs, calls, keeps, and vouches for what is written do. It is read
+// only through get, which panics on a parameter whose type mentions a type
+// parameter: no contract is built for a generic function, so such a
+// lookup is a site that paired arguments with the generic signature where
+// it had to use the instantiation's; see calleeAt.
+type byParam[V any] struct{ m map[*types.Var]V }
+
+func (b *byParam[V]) get(p *types.Var) V {
+	if p != nil && mentionsTypeParam(p.Type(), map[types.Type]bool{}) {
+		panic(fmt.Sprintf("vego: internal error: a contract is read for the parameter %s of type %s, of a generic signature; "+
+			"bind the call by the signature of its instantiation", p.Name(), p.Type()))
+	}
+	return b.m[p]
+}
+
+func (b *byParam[V]) set(p *types.Var, v V) {
+	if b.m == nil {
+		b.m = map[*types.Var]V{}
+	}
+	b.m[p] = v
+}
+
+func (b *byParam[V]) len() int { return len(b.m) }
+
+// all ranges over the parameters and what is said of each.
+func (b *byParam[V]) all() iter.Seq2[*types.Var, V] { return maps.All(b.m) }

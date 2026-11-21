@@ -751,7 +751,7 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 		case !holdsCode(param.Type(), map[types.Type]bool{}):
 			fn.defect("its runs lists %s, whose type %s can hold no error, interface value, function value, channel, or unsafe.Pointer to run", item.text, param.Type())
 		default:
-			fn.runs[param] = true
+			fn.runs.set(param, true)
 		}
 	}
 	for _, item := range entry.calls {
@@ -776,7 +776,7 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 	}
 	for _, m := range fn.modifies {
 		root := fn.paramNames[m.name]
-		if covered := coveredType(fn, m); covered != nil && pv.holdsContractedValue(covered, map[types.Type]bool{}) && !fn.vouchedWrites[root] {
+		if covered := coveredType(fn, m); covered != nil && pv.holdsContractedValue(covered, map[types.Type]bool{}) && !fn.vouchedWrites.get(root) {
 			fn.defect("its modifies %q covers memory that can hold a function value or an interface value of a type with a contract; "+
 				"list %s under vouches to claim that every such value the function writes there meets the contract of its type", m.text, m.name)
 		}
@@ -812,10 +812,10 @@ func (pv *pkgVerifier) readVouches(fn *funcInfo, entry *trustEntry, writes bool)
 			switch {
 			case !covers:
 				fn.defect("its vouches lists %s, but nothing its modifies lists under %s can hold a function value or an interface value of a type with a contract", item.text, item.text)
-			case fn.vouchedWrites[param]:
+			case fn.vouchedWrites.get(param):
 				fn.defect("its vouches lists %s twice", item.text)
 			default:
-				fn.vouchedWrites[param] = true
+				fn.vouchedWrites.set(param, true)
 			}
 		case !isResult && writes:
 			fn.defect("its vouches %q: %s is not a result or a parameter", item.text, item.text)
@@ -876,7 +876,7 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 		// The requires of calls are read once here, so that a name they
 		// cannot use is a defect of the entry.
 		for _, param := range fn.params {
-			if cb := fn.calls[param]; cb != nil {
+			if cb := fn.calls.get(param); cb != nil {
 				given := make([]value, len(cb.params))
 				for i, p := range cb.params {
 					given[i] = v.unknown(p.Name(), p.Type(), entry)

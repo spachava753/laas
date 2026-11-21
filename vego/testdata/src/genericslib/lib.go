@@ -122,3 +122,34 @@ func Equal[E comparable](a, b E) bool { return a == b }
 // FindWhere is FindFunc; its entry names a field of the parameter of the
 // function it is handed.
 func FindWhere[S ~[]E, E any](s S, f func(E) bool) int { return FindFunc(s, f) }
+
+// Apply applies f to the first element.
+func Apply[S ~[]E, E any](s S, f func(E) bool) bool { return len(s) > 0 && f(s[0]) }
+
+// IsPos reports whether x is positive.
+func IsPos[T ~int](x T) bool { return x > 0 }
+
+// Old tells nothing; its entry uses old in a requires.
+func Old[E any](n int, x E) bool { return false }
+
+// Box holds a value.
+type Box[T any] struct{ v T }
+
+// Get returns what the box holds.
+func (b *Box[T]) Get() T { return b.v }
+
+// Set writes nothing; its entry lists a field of what p points to.
+func Set[E any](p *E) {}
+
+// Holds tells nothing; its entry says fresh of a field of a value of a type
+// parameter.
+func Holds[E any](x E) bool { return false }
+
+// Touch calls a method of the first element's pointer, when it has one.
+func Touch[S ~[]E, E any](s S) {
+	if len(s) > 0 {
+		if t, ok := any(&s[0]).(interface{ Inc() }); ok {
+			t.Inc()
+		}
+	}
+}

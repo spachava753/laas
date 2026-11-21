@@ -68,11 +68,11 @@ type specEnv struct {
 // element x of a sequence that stands for f during the call. Any other
 // name is a predicate.
 func (e *specEnv) Apply(name string, args []*logic.Term) (*logic.Term, bool, error) {
-	if e.fn == nil || e.fn.calls == nil {
+	if e.fn == nil || e.fn.calls.len() == 0 {
 		return nil, false, nil
 	}
 	param := e.fn.paramNames[name]
-	cb := e.fn.calls[param]
+	cb := e.fn.calls.get(param)
 	switch {
 	case cb == nil:
 		return nil, false, nil
@@ -96,7 +96,7 @@ func (e *specEnv) Apply(name string, args []*logic.Term) (*logic.Term, bool, err
 // Applies reports whether name is a function parameter with a contract
 // under calls, which Apply gives a meaning; see logic.Applier.
 func (e *specEnv) Applies(name string) bool {
-	return e.fn != nil && e.fn.calls != nil && e.fn.calls[e.fn.paramNames[name]] != nil
+	return e.fn != nil && e.fn.calls.len() > 0 && e.fn.calls.get(e.fn.paramNames[name]) != nil
 }
 
 var errNoValue = errors.New("value of unsupported type")
@@ -671,7 +671,7 @@ func (e *specEnv) genericPath(name string, steps []logic.Step) error {
 	if root == nil || e.fn.genericTypes[root] == nil {
 		return nil
 	}
-	return throughTypeParam(name, e.fn.genericTypes[root], steps)
+	return throughTypeParam(name, e.fn.genericTypes[root], steps, e.v.stateNamed)
 }
 
 // elemSize resolves elemsize(A): the size in bytes of an element of the
@@ -1312,7 +1312,7 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 				steps[i].Index = logic.IntLit(0)
 			}
 		}
-		if err := throughTypeParam(m.name, generic, steps); err != nil {
+		if err := throughTypeParam(m.name, generic, steps, v.stateNamed); err != nil {
 			return shape{}, target{}, err
 		}
 	}

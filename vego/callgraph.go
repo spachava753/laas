@@ -701,7 +701,9 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 			if targets := pv.concreteMethods(t, map[types.Type]bool{}); len(targets) > 0 {
 				unresolved(call, fmt.Sprintf("%s with %s = %s", text, params.At(i).Obj().Name(), types.TypeString(t, types.RelativeTo(pv.pass.Pkg))),
 					fmt.Sprintf("a generic function may run the methods of a value of its type argument %s, and of what such a value holds, "+
-						"through its constraint, through an interface, or by reflection", params.At(i).Obj().Name()), targets)
+						"through its constraint, through an interface, or by reflection\n"+
+						"if %s runs no method of a value of type %s, add \"asserts: {%s: []}\" to its entry in %s, or call it with a type that has no methods",
+						params.At(i).Obj().Name(), who, params.At(i).Obj().Name(), params.At(i).Obj().Name(), TrustFileName), targets)
 			}
 		}
 	}
@@ -905,6 +907,8 @@ func asLit(e ast.Expr) *ast.FuncLit {
 // as a value, if it does: a function's name, or a method value.
 func (pv *pkgVerifier) valueFormOf(e ast.Expr) (named, method *types.Func) {
 	switch e := e.(type) {
+	case *ast.IndexExpr, *ast.IndexListExpr:
+		return explicitInstance(pv.info, e), nil
 	case *ast.Ident:
 		named, _ = pv.info.Uses[e].(*types.Func)
 	case *ast.SelectorExpr:

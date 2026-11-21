@@ -78,7 +78,7 @@ func (pv *pkgVerifier) readKeeps(fn *funcInfo, entry *trustEntry) {
 			fn.defect("its keeps lists %s, whose type %s can hold no error, interface value, function value, channel, or unsafe.Pointer to keep",
 				item.name, param.Type())
 			continue
-		case fn.calls[param] != nil:
+		case fn.calls.get(param) != nil:
 			fn.defect("its keeps lists %s, which its calls gives a contract; what is handed over there runs only while the call lasts, "+
 				"and a function literal handed over may assign the variables of its caller", item.name)
 			continue
@@ -138,7 +138,7 @@ func (pv *pkgVerifier) readKeeps(fn *funcInfo, entry *trustEntry) {
 			}
 		}
 		if len(dests) > 0 {
-			fn.keeps[param] = dests
+			fn.keeps.set(param, dests)
 		}
 	}
 }

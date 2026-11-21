@@ -1988,7 +1988,7 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 		// the harness answers.
 		env.applied = map[*types.Var]*logic.Term{}
 		for _, param := range fn.params {
-			if cb := fn.calls[param]; cb != nil && cb.applied {
+			if cb := fn.calls.get(param); cb != nil && cb.applied {
 				sort, _ := sortOf(cb.sig.Results().At(0).Type())
 				name := "callback " + param.Name()
 				env.applied[param] = logic.Const(name, logic.SeqOf(sort))
@@ -2032,14 +2032,14 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 			snap, snapshotted := call.before[i].(snapped)
 			switch {
 			case listed:
-			case fn.runs[param] && isInterface:
+			case fn.runs.get(param) && isInterface:
 				// An interface value under runs is code, and what it
 				// reaches is its code's own memory.
-			case fn.runs[param] && snapshotted:
+			case fn.runs.get(param) && snapshotted:
 				if snap.codePrint != printOf(call.after[i], true, true) {
 					t.Fatalf("%s changed %s, or memory it reaches outside the code it holds, which its modifies does not list", key, param.Name())
 				}
-			case fn.runs[param]:
+			case fn.runs.get(param):
 				t.Fatalf("the harness of %s does not snapshot %s, which is under runs and reaches memory outside the code it holds", key, param.Name())
 			case call.unwritten != nil:
 				if printOf(call.unwritten[i], false, false) != printOf(call.after[i], false, false) {
@@ -2059,7 +2059,7 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 		// The function called what it was handed only with
 		// arguments that the requires of calls allow.
 		for _, param := range fn.params {
-			cb := fn.calls[param]
+			cb := fn.calls.get(param)
 			if cb == nil {
 				continue
 			}

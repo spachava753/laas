@@ -220,10 +220,10 @@ func checkOnceEntry(t *testing.T, pv *pkgVerifier, pkg *types.Package, key strin
 		t.Errorf("contract cannot be used: %s", defect)
 	}
 	param := fn.params[0]
-	if len(fn.calls) != 1 {
-		t.Fatalf("the entry gives %d function parameters a contract under calls, want 1", len(fn.calls))
+	if fn.calls.len() != 1 {
+		t.Fatalf("the entry gives %d function parameters a contract under calls, want 1", fn.calls.len())
 	}
-	for _, cb := range fn.calls {
+	for _, cb := range fn.calls.all() {
 		if len(cb.requires) != 0 {
 			t.Fatalf("the contract under calls has requires, which the harness does not check")
 		}

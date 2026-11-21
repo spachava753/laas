@@ -1853,6 +1853,45 @@ trusted:
     modifies: []
     ensures: ["result <-> a = b"]
 
+  genericslib.Apply:
+    reason: Test entry whose ensures applies the function it is handed.
+    runs: [f]
+    calls:
+      f(e): {}
+    asserts: {S: [], E: []}
+    modifies: []
+    ensures:
+      - "result -> |s| > 0"
+      - "(|s| > 0 And f(s[0])) -> result"
+
+  genericslib.IsPos:
+    reason: Test entry for a generic function used as a value.
+    asserts: {T: []}
+    modifies: []
+    ensures: ["result <-> x > 0"]
+
+  genericslib.Old:
+    reason: Test entry whose requires uses old, a defect at every type argument.
+    asserts: {E: []}
+    requires: ["old(n) > 0"]
+    modifies: []
+
+  genericslib.Set:
+    reason: Test entry whose modifies names a field of a value of a type parameter.
+    asserts: {E: []}
+    requires: ["p != nil"]
+    modifies: [p.X]
+
+  genericslib.Holds:
+    reason: Test entry whose ensures says fresh of a field of a value of a type parameter.
+    asserts: {E: []}
+    modifies: []
+    ensures: ["result -> fresh(x.P)"]
+
+  genericslib.Touch:
+    reason: Test entry that claims nothing for its type parameters.
+    modifies: []
+
   generics.Back:
     reason: Test entry for a generic function of the package that calls back into its caller.
     asserts: {E: []}
