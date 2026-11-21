@@ -159,7 +159,16 @@ func (s *Solver) Model(facts []*logic.Term, opts Options, consts []*logic.Term) 
 	if opts.ModelFirst > 0 && len(consts) == 0 {
 		first := opts
 		first.Effort, first.ModelFirst, first.withoutEMatching = min(opts.ModelFirst, effortOf(opts)), 0, true
-		if result, _ := s.Model(facts, first, nil); result == Proved || result == Refuted {
+		result, _ := s.Model(facts, first, nil)
+		if result == Refuted && compareModelFirst {
+			full := opts
+			full.ModelFirst, full.Observe = 0, nil
+			if again, _ := s.Model(facts, full, nil); again == Proved {
+				_, script, remarked := encode(facts, first)
+				panic(&Fault{fmt.Errorf("the first attempt at a satisfiability check found a model, and the check found none:\n%s", script), dump(remarked)})
+			}
+		}
+		if result == Proved || result == Refuted {
 			return result, nil
 		}
 	}
@@ -312,6 +321,17 @@ const tactic = "(then simplify propagate-values simplify elim-uncnstr smt)"
 // quickly with it, since it uses it to finish a model, and 23 in all, run
 // to a limit.
 const tacticWithoutExtensionality = "(then simplify propagate-values simplify elim-uncnstr (using-params smt :array.extensional false))"
+
+// compareModelFirst makes every first attempt at a satisfiability check
+// that finds a model be followed by the full check, which must not find the
+// facts contradictory: Z3 would then have given one problem a model and a
+// proof that it has none. The tests of the corpus set it, through
+// CompareModelFirst.
+var compareModelFirst bool
+
+// CompareModelFirst turns on the comparison of compareModelFirst. Only the
+// tests call it.
+func CompareModelFirst() { compareModelFirst = true }
 
 // effortOf returns the resource limit of a problem.
 func effortOf(opts Options) int {

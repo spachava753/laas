@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spachava753/laas/vego/internal/solver"
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/checker"
 	"golang.org/x/tools/go/packages"
@@ -395,4 +396,8 @@ func init() {
 	// VEGO_CACHE names a cache of answers for the tests to use; see
 	// -vego.cache. Without it every test asks Z3.
 	testCache = os.Getenv("VEGO_CACHE")
+	// Every contradiction check of the corpus that its first attempt ends
+	// with a model is also asked in full, which must not prove the facts
+	// contradictory; see solver.Options.ModelFirst.
+	solver.CompareModelFirst()
 }
