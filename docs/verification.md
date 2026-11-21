@@ -2671,7 +2671,7 @@ func SumScores(m map[string]int) (total int) {
 
 A key that `m` does not have is outside the quantifier, so `Forall k in m : m[k] = 1` says nothing of `m[0]` when `m` lacks the key 0. `m` can be primed, put in `old`, or reached through fields, as in `Forall k in s.index'`.
 
-The body can compare a string key with another string, as in `k = node`. That comparison tells `vego` which key it is: a write to the key `node` is a write to the key `k` exactly when `k = node`. A string that the body uses only through a predicate, `has`, `|...|`, or an index gets no such tie, and neither do two keys bound by nested quantifiers. A formula that depends on such a comparison may not be proved.
+The body can compare a string key with another string, as in `k = node`. That comparison tells `vego` which key it is: a write to the key `node` is a write to the key `k` exactly when `k = node`. A comparison made through a predicate, `has`, `|...|`, or an index does not tell `vego` which key it is, and neither does a comparison of two keys bound by nested quantifiers. A formula that depends on such a comparison may not be proved.
 
 `Z` in a quantifier always means the integers. A variable, parameter, snapshot, or quantifier variable named `Z` makes `Forall k in Z` an error, so rename it.
 
@@ -2715,7 +2715,9 @@ func KeysOf(m map[string]int) (result []string) {
 }
 ```
 
-In the annotations of the loop and in its body, `|done|` is the number of iterations before the current one. `has(done, k)` says that the loop visited the key `k` before the current iteration. `Forall k in done : P` says something of every key the loop has visited. After the loop, `done` is every key the map had when the loop started. A formula reads `done` only in these three ways. It cannot be primed, put in `old`, indexed, or compared as a whole.
+In the annotations of the loop and in its body, `|done|` is the number of places in the order that the loop has passed before the current iteration. That is the number of iterations, unless the loop deletes keys it has not reached (see [Changing the map a loop ranges over](#changing-the-map-a-loop-ranges-over)). `has(done, k)` says that the loop passed the key `k` before the current iteration. `Forall k in done : P` says something of every key the loop has passed. A formula reads `done` only in these three ways. It cannot be primed, put in `old`, indexed, or compared as a whole.
+
+When the loop ends, `done` is every key the map had when the loop started. So an invariant `Forall k in done : P` gives `P` of each of those keys after the loop. `done` itself cannot be named after the loop.
 
 Without the annotation, nothing ties `i` to the number of iterations, and the write to `result[i]` is not proved to be in range:
 
@@ -2863,6 +2865,15 @@ func HitTwice(counts map[string]int) {
 For a map held in another map, `Modifies g[from][to]` lists the entry `to` of the map `g[from]`. A path that goes past the key into a field of the value, as in `m[k].qty`, is an error: list the whole entry.
 
 When the values of a map are pointers, slices, maps, or interface values, `m[k]` in a `Modifies` clause names what the value refers to, as `p.next` does for a pointer field. The entry itself is covered only by `Modifies m`:
+
+```go
+// @Requires tags != nil And |tags[k]| < 1000
+// @Modifies tags[k]
+// @Ensures True
+func AddTag(tags map[string][]string, k, tag string) {
+	tags[k] = append(tags[k], tag)
+}
+```
 
 ```text
 vego: tags[k] is assigned, which AddTag may not modify; list the whole map in a // @Modifies
@@ -5847,7 +5858,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `Variant e` | directly above a `for` loop | `e` is never negative and decreases on each iteration. |
 | `Assert P` | in a function body | `P` must be true at this point and can be used afterwards. |
 | `Snapshot n = e` | in a function body | `n` is the value `e` has at this point, in the annotations that follow in the block. |
-| `Visited done` | directly above a `range` over a map | `done` is the set of keys the loop has visited before the current iteration, in the annotations of the loop and its body. |
+| `Visited done` | directly above a `range` over a map | `done` is the set of keys the loop has passed before the current iteration, in the annotations of the loop and its body. |
 | `Vouches err` | doc comment of a named function type, or of a method in a named interface type, beside its contract | The errors that values of the type return in `err` have a known origin; `vego` checks it of every value that verified code makes. |
 | `Invariant P` | doc comment of a struct type | `P` is true for every parameter, receiver, and result of the type at function boundaries. |
 | `Predicate name(x, y) ::= P` | top level | Names a formula over its parameters. |
@@ -5871,7 +5882,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `Forall k in [a, b) : P`, `Exists k in [a, b] : P` | quantifiers over an interval |
 | `Forall k in Z : P` | quantifier over all integers |
 | `Forall k in m : P`, `Exists k in m : P` | quantifiers over the keys a map has, or that a loop has visited |
-| <code>&#124;done&#124;</code>, `has(done, k)` | for a `Visited` name: the number of iterations before the current one; whether the loop visited `k` before it |
+| <code>&#124;done&#124;</code>, `has(done, k)` | for a `Visited` name: the number of places the loop has passed before the current iteration, which is the number of iterations unless it deletes keys it has not reached; whether it passed `k` before it |
 | `"text"`, `nil` | a string; the nil pointer, error, function value, or interface value |
 | `'/'`, `'\n'` | the number of a character, as in Go |
 | `cap(A)` | the capacity of a slice |
