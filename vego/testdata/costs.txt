@@ -2258,6 +2258,7 @@ mapping	mapping.Registry	1	227	0
 mapping	mapping.RemoveFromNil	3	921	0
 mapping	mapping.RemoveFromOther	2	340	0
 mapping	mapping.Removes	9	8140	0
+mapping	mapping.SameFirst	14	450985	4
 mapping	mapping.SameKey	8	7963	0
 mapping	mapping.Set	9	9347	0
 mapping	mapping.SetNil	5	2334	0

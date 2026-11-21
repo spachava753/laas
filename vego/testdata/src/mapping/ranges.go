@@ -319,3 +319,26 @@ func NonEmptyValues(m map[int]int) {
 		_ = v
 	}
 }
+
+// SameFirst claims that two walks of one map that nothing changes start at
+// the same key. Go fixes no order, also not between two walks of one map:
+// each walk has an order of its own.
+//
+// @Requires |m| = 2
+// @Ensures r
+func SameFirst(m map[int]int) (r bool) {
+	first, second := 0, 0
+	// @Visited one
+	// @Invariant |one| = 0
+	for k := range m {
+		first = k
+		break
+	}
+	// @Visited two
+	// @Invariant |two| = 0
+	for k := range m {
+		second = k
+		break
+	}
+	return first == second // want `vego: postcondition may not hold: r`
+}
