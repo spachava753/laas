@@ -29,7 +29,7 @@ go test -p 1 -parallel 1 ./...
 
 With `-parallel 1`, the vego package peaked at 3.2 GB and took 135 s, against 5.0 GB and 79 s without it.
 
-`vego` also verifies the functions of a package ahead, on Z3 processes that would be idle, with up to three more verifiers in the process (`-vego.speculate`, on by default). That changes only the time, and cost up to 13% more memory in the runs measured; `-vego.speculate=false` turns it off for `laas`, and the tests run with it on.
+`vego` also verifies the functions of a package ahead, on Z3 processes that would be idle, with up to three more verifiers in the process (`-vego.speculate`, on by default). That changes only the time, and cost up to 13% more memory in the runs measured; `-vego.speculate=false` turns it off for `laas`, and the tests run with it on. A change to how problems reach Z3 or to speculation must leave repeated runs printing the same. To check that on a module, run `vego/repeat.sh LAAS DIR RUNS laas-arguments...`, which runs `laas` RUNS times, two at a time, in a 12G scope of its own, and compares the outputs; it is heavy work, so run nothing else heavy beside it. The few outcomes allowed to differ between runs are listed in `vego/ROADMAP.md` under "What a run can depend on besides the source and the binary".
 
 `laas` must be built by a Go that is at least as new as the `go` command it finds when it runs. `go run` builds it with that same `go`, so the command above works on any toolchain. A `laas` binary built earlier by an older Go fails with errors about the standard library; rebuild it, or set `GOTOOLCHAIN` to the version that built it.
 

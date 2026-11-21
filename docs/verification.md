@@ -1837,7 +1837,7 @@ foreign.go:52:6: vego cost of Load: 41 problems, 4894313 resource units, 143569 
 	foreign.go:52:6: 2 questions of the always-fails check stopped at a limit
 ```
 
-The first line counts the problems that `vego` handed to Z3, the work Z3 counted for them, and the size of their text. These three numbers are the same on every run with the same `laas`, Go, and Z3. The seconds are the time spent on the function. They include time spent waiting for a free Z3 process while other packages are verified at the same time, so they change with the machine and its load. They do not include the time spent on other functions, such as checking a trusted contract that the function calls, which get a line of their own.
+The first line counts the problems that `vego` handed to Z3, the work Z3 counted for them, and the size of their text. These three numbers are the same on every run with the same `laas`, Go, and Z3, unless a question ran past the time limit or out of memory, which depend on the machine (see the notes in [Helping the prover](#helping-the-prover)). The seconds are the time spent on the function. They include time spent waiting for a free Z3 process while other packages are verified at the same time, so they change with the machine and its load. They do not include the time spent on other functions, such as checking a trusted contract that the function calls, which get a line of their own.
 
 Each indented line gives a place in the function and a kind of question that stopped at a limit there. A question that stops at its limit has used all the work it is allowed, so these lines usually show where the time goes. The kinds are:
 
@@ -1865,7 +1865,7 @@ A proof obligation that stops at a limit draws a message with the note. So does 
 
 ### Using the idle Z3 processes
 
-`vego` verifies the functions of a package one after another, and `laas` runs up to four Z3 processes. When a package is verified while the other processes are idle, as when you run `laas` on one package, up to three more verifiers in the run verify the package's later functions on those processes. They report nothing. When the verification reaches such a function, the answers it needs are ready. A package of several slow functions is verified up to three times faster that way. In one package of 24 functions, a run went from 91 s to 33 s. The messages, the exit status, and what `-vego.cost` counts are the same as without it.
+`vego` verifies the functions of a package one after another, and `laas` runs up to four Z3 processes. When a package is verified while the other processes are idle, as when you run `laas` on one package, up to three more verifiers in the run verify the package's later functions on those processes. They report nothing. When the verification reaches such a function, the answers it needs are ready. A package of several slow functions is verified up to three times faster that way. In one package of 24 functions, a run went from 91 s to 33 s. The messages, the exit status, and what `-vego.cost` counts are the same as without it. If a run fails with `internal error of vego`, run it again with `-vego.speculate=false` and report the message.
 
 The extra verifiers use memory: in the runs measured, up to 13% more than without them. On a machine that is short of memory, turn them off:
 
@@ -1883,7 +1883,9 @@ laas -vego -vego.cache="$HOME/.cache/vego" ./...
 
 On the next run, a question that is the same as one asked before is answered from the directory, and Z3 is not asked again. After a small edit, most of the questions of a package are the same as before. In one package of 24 functions that took 90 s, changing one `Requires` clause left 502 of 597 questions the same.
 
-The answers are the same with the cache and without it. Each run that uses the cache solves again a random sample of the answers it reads, about one in 256, and fails the package if Z3 now answers otherwise.
+The answers are the same with the cache and without it. Each run that uses the cache solves again a random sample of the answers it reads, about one in 256, and fails the package if Z3 now answers otherwise. A wrong entry is therefore found in some runs and not in others.
+
+Two runs that use one directory at the same time can count the answers from the cache differently. The count depends on which run solved a question first and wrote its answer. The messages and the other figures of `-vego.cost` are the same in both runs.
 
 A package that used an answer from the directory says so on standard error, with a line such as:
 
@@ -5509,6 +5511,7 @@ This table lists the most common messages.
 | `the answer cache DIR is inside ..., which holds go.mod`, and similar | The `-vego.cache` directory is in a module or a repository. | Use a directory outside every module and repository, such as `$HOME/.cache/vego`. |
 | `DIR is not empty and is not an answer cache; give -vego.cache a new or empty directory` | The `-vego.cache` directory holds files and was not made by `-vego.cache`. | Give a new or empty directory, such as `$HOME/.cache/vego`. |
 | `the answer cache needs the Z3 binary itself, and P runs Q` | `-vego.z3` names a script or a link to another program, and `-vego.cache` is set. | Name the Z3 binary with `-vego.z3`, or run without `-vego.cache`. |
+| `internal error of vego: ...; run again with -vego.speculate=false, and report it at https://github.com/spachava753/laas/issues` | `vego` found a defect in itself while it asked Z3, such as a question handed to a Z3 process that had been stopped. No proof rests on what the defect touched. The package fails, and so does every later package of the run. | Run again with `-vego.speculate=false`, and report the message. |
 
 ## What is not supported
 
