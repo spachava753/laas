@@ -1,0 +1,23 @@
+version: 1
+
+# An entry for a generic function; see the header of slices.yaml for what
+# one entry for every type argument means.
+
+trusted:
+  cmp.Compare:
+    reason: >-
+      "Compare returns -1 if x is less than y, 0 if x equals y, +1 if x is
+      greater than y. For floating-point types, a NaN is considered less than
+      any non-NaN, a NaN is considered equal to a NaN, and -0.0 is equal to
+      0.0." Not said: which of -1 and +1, since one entry serves strings,
+      which a formula cannot order, as well as integers. Refused at floats, of
+      which a formula can say nothing. Read from source (cmp.go): it compares
+      with == and <, and calls no method of a value of its type parameter's
+      type or of a pointer to one, or of anything such a value holds,
+      directly or through what it calls, neither while the call lasts nor
+      later.
+    asserts: {T: []}
+    modifies: []
+    ensures:
+      - "-1 <= result And result <= 1"
+      - "result = 0 <-> x = y"

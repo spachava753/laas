@@ -251,7 +251,7 @@ func SameString(x string) (r string) {
 //
 // @Ensures True
 func SamePoint(p Point) (r Point) {
-	return genericslib.Same(p) // want `the trusted contract of genericslib.Same \(trusted.yaml:\d+\) cannot be used with E = Point: in its ensures "result = x": a value of type E, which is Point here, is a struct, and a formula cannot compare a struct or use it as a whole; write a loop instead`
+	return genericslib.Same(p) // want `the trusted contract of genericslib.Same \(trusted.yaml:\d+\) cannot be used with E = Point: in its ensures "result = x": a value of type E, which is Point here, is a struct, and a formula cannot compare a struct or use it as a whole; write out what it does instead`
 }
 
 // SameFloat cannot use the contract, whose clause compares a float.

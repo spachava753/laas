@@ -39,9 +39,9 @@ type specEnv struct {
 	// otherwise cannot be read there; the tests of shipped entries answer
 	// it from what they saw.
 	givenRelation func(name string, paths []logic.Path) (*logic.Term, error)
-	// givenSlice resolves cap(A) and A = nil of a parameter or a result
-	// where given is set; the tests of shipped entries answer it from the
-	// real slice.
+	// givenSlice resolves cap(A) and A = nil of a parameter or a result,
+	// and |m| of a map, where given is set; the tests of shipped entries
+	// answer it from the real slice or map.
 	givenSlice func(name string, last logic.Step, when logic.When) (*logic.Term, error)
 	// now is the memory plain paths are read from, and post the memory
 	// primed paths and results are read from, nil where there is none.
@@ -567,6 +567,10 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 		return e.v.mapHas(found.sink, found.mem, found.typ, found.val[0], key), nil
 	}
 	if base, ok := e.readyMade(name, when); ok {
+		if measured && len(steps) == 0 && !base.Sort.IsSeq() && e.givenSlice != nil {
+			// The number of keys of a map.
+			return e.givenSlice(name, logic.Step{Len: true}, when)
+		}
 		// A ready-made term stands for the parameter; it can only be indexed.
 		for _, step := range steps {
 			if step.Field != "" || !base.Sort.IsSeq() {

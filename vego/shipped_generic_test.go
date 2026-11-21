@@ -1,8 +1,10 @@
 package vego
 
 import (
+	"cmp"
 	"fmt"
 	"go/types"
+	"maps"
 	"math/big"
 	"math/rand"
 	"reflect"
@@ -22,14 +24,15 @@ import (
 // Types of the harness, with the same shapes as the types made for them in
 // the package of the shipped verifier (see harnessTypes).
 type (
-	harnessPoint struct{ X, Y int }
-	harnessIDs   []int
-	harnessEmpty struct{}
+	harnessPoint  struct{ X, Y int }
+	harnessIDs    []int
+	harnessEmpty  struct{}
+	harnessCounts map[string]int
 )
 
 // harnessTypes are the types of the type arguments of the harness.
 type harnessTypes struct {
-	point, ids, empty types.Type
+	point, ids, empty, counts types.Type
 }
 
 func newHarnessTypes(pkg *types.Package) *harnessTypes {
@@ -41,7 +44,8 @@ func newHarnessTypes(pkg *types.Package) *harnessTypes {
 	return &harnessTypes{
 		point: named("harnessPoint", types.NewStruct([]*types.Var{field("X"), field("Y")}, nil)),
 		ids:   named("harnessIDs", types.NewSlice(intT)),
-		empty: named("harnessEmpty", types.NewStruct(nil, nil)),
+		empty:  named("harnessEmpty", types.NewStruct(nil, nil)),
+		counts: named("harnessCounts", types.NewMap(types.Typ[types.String], intT)),
 	}
 }
 
@@ -226,6 +230,97 @@ func pairCall[S ~[]E, E any](gen func(*rand.Rand) S, call func(S, S) []any) func
 	}
 }
 
+// mapOf gives the type arguments of a function of one map type.
+func mapOf(key, value func(h *harnessTypes) types.Type) func(h *harnessTypes) []types.Type {
+	return func(h *harnessTypes) []types.Type {
+		return []types.Type{types.NewMap(key(h), value(h)), key(h), value(h)}
+	}
+}
+
+// twoMapsOf gives those of a function of two maps of one type.
+func twoMapsOf(key, value func(h *harnessTypes) types.Type) func(h *harnessTypes) []types.Type {
+	return func(h *harnessTypes) []types.Type {
+		m := types.NewMap(key(h), value(h))
+		return []types.Type{m, m, key(h), value(h)}
+	}
+}
+
+func countsArgs(h *harnessTypes) []types.Type {
+	return []types.Type{h.counts, types.Typ[types.String], types.Typ[types.Int]}
+}
+
+func intSlice(*harnessTypes) types.Type { return types.NewSlice(types.Typ[types.Int]) }
+
+func smallInts(rng *rand.Rand) []int { return randomSliceOf(rng, smallInt) }
+
+// randomMapOf returns a map of up to five keys, at times nil and at times
+// empty.
+func randomMapOf[K comparable, V any](rng *rand.Rand, key func(*rand.Rand) K, value func(*rand.Rand) V) map[K]V {
+	if rng.Intn(6) == 0 {
+		return nil
+	}
+	m := map[K]V{}
+	for range rng.Intn(6) {
+		m[key(rng)] = value(rng)
+	}
+	return m
+}
+
+func mapGen[K comparable, V any](key func(*rand.Rand) K, value func(*rand.Rand) V) func(*rand.Rand) map[K]V {
+	return func(rng *rand.Rand) map[K]V { return randomMapOf(rng, key, value) }
+}
+
+func countsGen(rng *rand.Rand) harnessCounts { return harnessCounts(randomMapOf(rng, smallString, smallInt)) }
+
+// cloneCall calls maps.Clone.
+func cloneCall[M ~map[K]V, K comparable, V any](gen func(*rand.Rand) M) func(*rand.Rand) sample {
+	return func(rng *rand.Rand) sample {
+		m := gen(rng)
+		before := snapshot(m)
+		return sample{before: before, after: []any{m}, results: []any{maps.Clone(m)}}
+	}
+}
+
+// copyCall calls maps.Copy, but not into a nil map with keys to copy,
+// which panics, and not with one map as both, which writes what src is;
+// the corpus holds a call of that kind.
+func copyCall[M ~map[K]V, K comparable, V any](gen func(*rand.Rand) M) func(*rand.Rand) sample {
+	return func(rng *rand.Rand) sample {
+		dst, src := gen(rng), gen(rng)
+		if dst == nil && rng.Intn(2) == 0 {
+			dst = M{}
+		}
+		before := snapshot(dst, src)
+		if dst != nil || len(src) == 0 {
+			maps.Copy(dst, src)
+		}
+		return sample{before: before, after: []any{dst, src}}
+	}
+}
+
+// deleteFuncCall calls maps.DeleteFunc with a function that answers at
+// random and records what it is given.
+func deleteFuncCall[M ~map[K]V, K comparable, V any](gen func(*rand.Rand) M) func(*rand.Rand) sample {
+	return func(rng *rand.Rand) sample {
+		m, calls := gen(rng), map[string][][]any{}
+		del := func(k K, v V) bool {
+			calls["del"] = append(calls["del"], []any{k, v})
+			return rng.Intn(2) == 0
+		}
+		before := snapshot(m)
+		maps.DeleteFunc(m, del)
+		return sample{before: []any{before[0], del}, after: []any{m, del}, calls: calls}
+	}
+}
+
+// compareCall calls cmp.Compare on two values that are often equal.
+func compareCall[T cmp.Ordered](value func(*rand.Rand) T) func(*rand.Rand) sample {
+	return func(rng *rand.Rand) sample {
+		x, y := value(rng), value(rng)
+		return sample{before: []any{x, y}, results: []any{cmp.Compare(x, y)}}
+	}
+}
+
 // genericHarnesses holds, for each shipped entry of a generic function, the
 // instantiations it is tested at.
 var genericHarnesses = map[string][]genericCase{
@@ -332,6 +427,28 @@ var genericHarnesses = map[string][]genericCase{
 		{targs: sliceOf(basic(types.Int)), harness: boundCall(gen(smallInt), slices.Min[[]int])},
 		{targs: sliceOf(basic(types.Int64)), harness: boundCall(gen(smallInt64), slices.Min[[]int64])},
 		{targs: sliceOf(basic(types.String)), refused: "a formula has no order of them"},
+	},
+	"maps.Clone": {
+		{targs: mapOf(basic(types.Int), basic(types.Int)), harness: cloneCall(mapGen(smallInt, smallInt))},
+		{targs: mapOf(basic(types.String), pointType), harness: cloneCall(mapGen(smallString, smallPoint))},
+		{targs: mapOf(basic(types.String), intSlice), harness: cloneCall(mapGen(smallString, smallInts))},
+		{targs: countsArgs, harness: cloneCall(countsGen)},
+	},
+	"maps.Copy": {
+		{targs: twoMapsOf(basic(types.Int), basic(types.Int)), harness: copyCall(mapGen(smallInt, smallInt))},
+		{targs: twoMapsOf(basic(types.String), pointType), harness: copyCall(mapGen(smallString, smallPoint))},
+		{targs: twoMapsOf(basic(types.String), basic(types.String)), harness: copyCall(mapGen(smallString, smallString))},
+	},
+	"maps.DeleteFunc": {
+		{targs: mapOf(basic(types.Int), basic(types.Int)), harness: deleteFuncCall(mapGen(smallInt, smallInt))},
+		{targs: mapOf(basic(types.String), pointType), harness: deleteFuncCall(mapGen(smallString, smallPoint))},
+		{targs: countsArgs, harness: deleteFuncCall(countsGen)},
+	},
+	"cmp.Compare": {
+		{targs: func(*harnessTypes) []types.Type { return []types.Type{types.Typ[types.Int]} }, harness: compareCall(smallInt)},
+		{targs: func(*harnessTypes) []types.Type { return []types.Type{types.Typ[types.String]} }, harness: compareCall(smallString)},
+		{targs: func(*harnessTypes) []types.Type { return []types.Type{types.Typ[types.Uint8]} }, harness: compareCall(smallByte)},
+		{targs: func(*harnessTypes) []types.Type { return []types.Type{types.Typ[types.Float64]} }, refused: "cannot be applied to float values"},
 	},
 	"slices.Compact": {
 		{targs: sliceOf(basic(types.Int)), harness: sliceCall(gen(smallInt), func(s []int) []any { return one(slices.Compact(s)) })},
@@ -452,14 +569,23 @@ func givenSliceOf(t *testing.T, fn *funcInfo, call sample) func(name string, las
 			value = call.results[i]
 		}
 		// A slice is passed by value, so its capacity and whether it is nil
-		// are the same before and after the call.
+		// are the same before and after the call; a map is a reference,
+		// whose keys before the call are those of its snapshot.
 		for i, param := range fn.params {
-			if param.Name() == name {
-				value = call.after[i]
+			if param.Name() != name {
+				continue
+			}
+			value = call.after[i]
+			if snap, ok := call.before[i].(snapped); ok && when != logic.Primed && last.Len {
+				value = snap.value
 			}
 		}
 		v := reflect.ValueOf(value)
 		switch {
+		case last.Len && v.Kind() == reflect.Map:
+			return logic.IntLit(int64(v.Len())), nil
+		case last.Len:
+			return nil, fmt.Errorf("|%s|: %s is not a map", name, name)
 		case v.Kind() != reflect.Slice && last.Nil:
 			// A comparison with nil of anything else is resolved as for
 			// any other value.

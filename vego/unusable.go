@@ -242,7 +242,7 @@ func (v *fnVerifier) reportUnusable(pos token.Pos, view *contractView, title str
 		if entry := fn.trust; entry != nil && entry.file != nil {
 			if at := v.pkgVerifier.typeArgsNamed(fn.obj); at != "" {
 				v.report(pos, "the trusted contract of %s (%s:%d) cannot be used with %s: %s%s", entry.key, filepath.Base(entry.file.path), entry.line,
-					at, problem, v.pkgVerifier.insteadOf(entry, problem))
+					at, problem, v.pkgVerifier.insteadOf(fn.obj, entry, problem))
 				continue
 			}
 			v.report(pos, "the trusted contract of %s (%s:%d) cannot be used: %s", entry.key, filepath.Base(entry.file.path), entry.line, problem)

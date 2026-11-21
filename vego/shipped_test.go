@@ -1483,9 +1483,17 @@ func reach(values ...any) [][2]uintptr {
 				walk(v.Index(k), depth+1)
 			}
 		case reflect.Map:
-			for iter := v.MapRange(); iter.Next(); {
-				walk(iter.Key(), depth+1)
-				walk(iter.Value(), depth+1)
+			if v.IsNil() {
+				return
+			}
+			extent := [2]uintptr{v.Pointer(), v.Pointer() + 1}
+			if !seen[extent] {
+				seen[extent] = true
+				extents = append(extents, extent)
+				for iter := v.MapRange(); iter.Next(); {
+					walk(iter.Key(), depth+1)
+					walk(iter.Value(), depth+1)
+				}
 			}
 		case reflect.Struct:
 			for k := range v.NumField() {
@@ -2161,6 +2169,13 @@ func extent(value any) (start, end uintptr, ok bool) {
 		}
 		start = v.Pointer()
 		return start, start + max(v.Type().Elem().Size(), 1), true
+	case reflect.Map:
+		// A map is the one object its header points to.
+		if v.IsNil() {
+			return 0, 0, false
+		}
+		start = v.Pointer()
+		return start, start + 1, true
 	}
 	return 0, 0, false
 }
@@ -2196,8 +2211,11 @@ func relation(t *testing.T, fn *funcInfo, call sample, earlier []any, name strin
 	case v.Kind() == reflect.Pointer && v.IsNil():
 		// A nil pointer is not fresh, and lies within nothing.
 		return false
-	case v.Kind() != reflect.Slice && v.Kind() != reflect.Pointer:
-		t.Fatalf("the harness cannot tell %s of %s, a %T; it tells it of slices and pointers", name, paths[0].Root, value)
+	case v.Kind() == reflect.Map && v.IsNil():
+		// A nil map is not fresh, as a nil pointer is not.
+		return false
+	case v.Kind() != reflect.Slice && v.Kind() != reflect.Pointer && v.Kind() != reflect.Map:
+		t.Fatalf("the harness cannot tell %s of %s, a %T; it tells it of slices, pointers, and maps", name, paths[0].Root, value)
 	}
 	start, end, refers := extent(value)
 	if !refers {

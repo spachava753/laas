@@ -477,14 +477,23 @@ var instanceProblems = []string{
 // instead: the function of the same name with Func, which is handed a
 // function literal, where it has an entry, and otherwise a loop. For a
 // defect of the entry, it says to fix the entry.
-func (pv *pkgVerifier) insteadOf(entry *trustEntry, problem string) string {
+func (pv *pkgVerifier) insteadOf(f *types.Func, entry *trustEntry, problem string) string {
 	if !slices.ContainsFunc(instanceProblems, func(part string) bool { return strings.Contains(problem, part) }) {
 		return fmt.Sprintf("; the entry has this defect at every type argument, so fix the entry in %s", filepath.Base(entry.file.path))
 	}
 	if alternative := entry.key + "Func"; !strings.HasSuffix(entry.key, "Func") && pv.entryFor(alternative) != nil {
 		return fmt.Sprintf("; call %s instead, with a function literal that compares what you need of the elements, or write a loop", alternative)
 	}
-	return "; write a loop instead"
+	// A function over a slice or a map is written out as a loop.
+	if made := pv.instanceOf[f]; made != nil {
+		for param := range made.origin.Type().(*types.Signature).Params().Variables() {
+			switch coreType(param.Type()).(type) {
+			case *types.Slice, *types.Map:
+				return "; write a loop instead"
+			}
+		}
+	}
+	return "; write out what it does instead"
 }
 
 // explicitInstance returns the generic function that an expression such as

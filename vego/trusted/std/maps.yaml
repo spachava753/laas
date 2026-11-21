@@ -1,0 +1,63 @@
+version: 1
+
+# Entries for generic functions; see the header of slices.yaml for what one
+# entry for every type argument means. A map's keys must be integers or
+# strings, as for every map vego models, and a formula can say of a map
+# whether it is nil, how many keys it has, and what it holds under a key,
+# but cannot range over every key, so these entries say nothing of what the
+# maps hold.
+#
+# Each entry claims under asserts, for every type parameter, what was read
+# from the source of package maps in Go 1.26.6 (maps.go, iter.go): the
+# function runs no method of a value of the type parameter's type or of a
+# pointer to one, or of anything such a value holds, directly or through
+# what it calls (fmt and reflect included), neither while the call lasts
+# nor later through anything it returns, keeps, or registers. Clone copies
+# the map in the runtime (maps.clone), and the others range over a map and
+# assign or delete its keys.
+
+trusted:
+  maps.Clone:
+    reason: >-
+      "Clone returns a copy of m. This is a shallow clone: the new keys and
+      values are set using ordinary assignment." A copy of a map is a new map
+      with as many keys. Not said: what it holds under each key, and that a
+      nil m gives a nil map, which only the source says. Read from source: the
+      runtime copies the tables of m, whose allocations were made once
+      already, so nothing bounds the call.
+    asserts: {M: [], K: [], V: []}
+    modifies: []
+    ensures:
+      - "|result| = |m|"
+      - "m != nil -> fresh(result)"
+
+  maps.Copy:
+    reason: >-
+      "Copy copies all key/value pairs in src adding them to dst. When a key in
+      src is already present in dst, the value in dst will be overwritten by
+      the value associated with the key in src." So dst then holds every key
+      of src, and no key it held before is gone. Assigning to a nil map
+      panics, so dst must not be nil when src has keys. Not said: what dst
+      holds under each key.
+    asserts: {M1: [], M2: [], K: [], V: []}
+    requires:
+      - "dst != nil Or |src| = 0"
+    modifies: [dst]
+    ensures:
+      - "|src| <= |dst'|"
+      - "|dst| <= |dst'|"
+      - "|dst'| <= |dst| + |src|"
+
+  maps.DeleteFunc:
+    reason: >-
+      "DeleteFunc deletes any key/value pairs from m for which del returns
+      true." So m has no more keys than before. Not said: which keys remain.
+      Read from source: it ranges over m and calls del on each key and value,
+      on the calling goroutine, while the call lasts, and keeps it nowhere.
+    asserts: {M: [], K: [], V: []}
+    runs: [del]
+    calls:
+      del(k, v): {}
+    modifies: [m]
+    ensures:
+      - "|m'| <= |m|"
