@@ -412,6 +412,8 @@ func keyHarnessAt(key, class string) func(*rand.Rand) sample {
 		return mapHarness(key, mapGen(smallLevel, smallInt))
 	case "string":
 		return mapHarness(key, mapGen(smallString, smallInt))
+	case "bool":
+		return mapHarness(key, mapGen(smallBool, smallInt))
 	}
 	return nil
 }
@@ -658,9 +660,46 @@ func (g *grounder) pointerRef(p uintptr) *logic.Term {
 	return logic.RefLit(g.pointers[p])
 }
 
+// keysOfMap answers, of a real map, whether it has a key, as a read of the
+// set of the numbers of its keys, or the sort of its keys, for a quantifier
+// over them.
+func keysOfMap(eval *evaluator, name string, when logic.When, v reflect.Value, last logic.Step) *logic.Term {
+	keys := map[int64]bool{}
+	for _, key := range v.MapKeys() {
+		switch key.Kind() {
+		case reflect.String:
+			keys[eval.intern(key.String())] = true
+		case reflect.Bool:
+			keys[map[bool]int64{true: 1}[key.Bool()]] = true
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			keys[int64(key.Uint())] = true
+		default:
+			keys[key.Int()] = true
+		}
+	}
+	if last.Keys {
+		switch v.Type().Key().Kind() {
+		case reflect.String:
+			return logic.Fill(logic.IntLit(0), logic.IntLit(0))
+		case reflect.Bool:
+			return logic.False()
+		}
+		return logic.IntLit(0)
+	}
+	// The numbers of the keys are recorded under the name of the
+	// constant that stands for them.
+	if eval.keysets == nil {
+		eval.keysets = map[string]map[int64]bool{}
+	}
+	set := fmt.Sprintf("keys of %s %d", name, when)
+	eval.keysets[set] = keys
+	return logic.Select(logic.Const(set, logic.BoolSeq), mapKey(last.Index))
+}
+
 // givenSliceOf answers cap(A) and A = nil of a parameter or a result of a
-// call from the real slice; see specEnv.givenSlice.
-func givenSliceOf(t *testing.T, fn *funcInfo, call sample) func(name string, last logic.Step, when logic.When) (*logic.Term, error) {
+// call from the real slice, |m| of a map, and has(m, k) and the sort of its
+// keys from the real map; see specEnv.givenSlice.
+func givenSliceOf(t *testing.T, fn *funcInfo, call sample, eval *evaluator) func(name string, last logic.Step, when logic.When) (*logic.Term, error) {
 	return func(name string, last logic.Step, when logic.When) (*logic.Term, error) {
 		var value any
 		if i, isResult := fn.resultNames[name]; isResult {
@@ -674,7 +713,7 @@ func givenSliceOf(t *testing.T, fn *funcInfo, call sample) func(name string, las
 				continue
 			}
 			value = call.after[i]
-			if snap, ok := call.before[i].(snapped); ok && when != logic.Primed && last.Len {
+			if snap, ok := call.before[i].(snapped); ok && when != logic.Primed && (last.Len || last.Has || last.Keys) {
 				value = snap.value
 			}
 		}
@@ -682,6 +721,10 @@ func givenSliceOf(t *testing.T, fn *funcInfo, call sample) func(name string, las
 		switch {
 		case last.Len && v.Kind() == reflect.Map:
 			return logic.IntLit(int64(v.Len())), nil
+		case (last.Has || last.Keys) && v.Kind() == reflect.Map:
+			return keysOfMap(eval, name, when, v, last), nil
+		case last.Has || last.Keys:
+			return nil, fmt.Errorf("%s is not a map", name)
 		case last.Len:
 			return nil, fmt.Errorf("|%s|: %s is not a map", name, name)
 		case v.Kind() != reflect.Slice && last.Nil:

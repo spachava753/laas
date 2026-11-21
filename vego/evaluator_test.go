@@ -3,6 +3,7 @@ package vego
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"math/rand"
 	"slices"
@@ -23,6 +24,33 @@ type evaluator struct {
 	// callbacks answers, by the name of the sequence that stands for a
 	// function a contract applies, what the function returns.
 	callbacks map[string]func(int64) int64
+	// keysets holds, by the name of the constant that stands for the keys
+	// of a real map, the numbers of its keys: an integer or a boolean is
+	// its number, and a string the number interned for it, which the key
+	// of a string is here. A quantifier whose guard reads a key set ranges
+	// over every number of every key set.
+	keysets map[string]map[int64]bool
+	interned map[string]int64
+}
+
+// intern returns the number of a string key, the same for the same string.
+func (e *evaluator) intern(s string) int64 {
+	if e.interned == nil {
+		e.interned = map[string]int64{}
+	}
+	if n, ok := e.interned[s]; ok {
+		return n
+	}
+	e.interned[s] = int64(len(e.interned))
+	return e.interned[s]
+}
+
+// readsKeyset reports whether a term reads a key set.
+func (e *evaluator) readsKeyset(t *logic.Term) bool {
+	if t.Op == logic.OpConst && e.keysets[t.Name] != nil {
+		return true
+	}
+	return slices.ContainsFunc(t.Args, e.readsKeyset)
 }
 
 // maxRange is the most integers a quantifier of a sample may range over.
@@ -76,6 +104,12 @@ func (e *evaluator) number(t *logic.Term) *big.Int {
 		if answer, ok := e.callbacks[t.Args[0].Name]; ok && t.Args[0].Op == logic.OpConst {
 			return big.NewInt(answer(x(1).Int64()))
 		}
+		if keys, ok := e.keysets[t.Args[0].Name]; ok && t.Args[0].Op == logic.OpConst {
+			if keys[x(1).Int64()] {
+				return big.NewInt(1)
+			}
+			return big.NewInt(0)
+		}
 		elements, index := e.sequence(t.Args[0]), x(1)
 		if index.Sign() < 0 || index.Cmp(big.NewInt(int64(len(elements)))) >= 0 {
 			// Outside a sequence the logic leaves the value open in some
@@ -85,6 +119,17 @@ func (e *evaluator) number(t *logic.Term) *big.Int {
 			panic(fmt.Sprintf("a formula reads %s at %s, outside its %d elements: %s", t.Args[0], index, len(elements), t))
 		}
 		return elements[index.Int64()]
+	case logic.OpKey:
+		// A bound key holds the number of a key; a string its interned
+		// number.
+		if arg := t.Args[0]; arg.Op == logic.OpBound {
+			return x(0)
+		}
+		var text []byte
+		for _, b := range e.sequence(t.Args[0]) {
+			text = append(text, byte(b.Int64()))
+		}
+		return big.NewInt(e.intern(string(text)))
 	}
 	panic("cannot evaluate number " + t.String())
 }
@@ -170,10 +215,17 @@ func (e *evaluator) holds(t *logic.Term) bool {
 		return slices.ContainsFunc(t.Args, e.holds)
 	case logic.OpIsNil:
 		return e.errors.error(t.Args[0]) == nil
+	case logic.OpBound:
+		// A boolean key bound by a quantifier over the keys of a map holds
+		// its number, which is 1 for true.
+		return e.number(t).Sign() != 0
 	case logic.OpSelect:
 		return e.number(t).Sign() != 0
 	case logic.OpForall, logic.OpExists:
 		name := t.Args[0].Name
+		if e.readsKeyset(t.Args[1]) {
+			return e.overKeys(t)
+		}
 		lo, hi := e.rangeOf(t)
 		saved, wasBound := e.bindings[name]
 		defer func() {
@@ -192,6 +244,34 @@ func (e *evaluator) holds(t *logic.Term) bool {
 		return t.Op == logic.OpForall
 	}
 	panic("cannot evaluate formula " + t.String())
+}
+
+// overKeys evaluates a quantifier over the keys of maps: its variable takes
+// the number of every key of every key set, which covers the keys of each
+// map its guard reads, and outside them the guard is false.
+func (e *evaluator) overKeys(t *logic.Term) bool {
+	name := t.Args[0].Name
+	saved, wasBound := e.bindings[name]
+	defer func() {
+		if wasBound {
+			e.bindings[name] = saved
+		} else {
+			delete(e.bindings, name)
+		}
+	}()
+	numbers := map[int64]bool{}
+	for _, keys := range e.keysets {
+		for n := range keys {
+			numbers[n] = true
+		}
+	}
+	for _, n := range slices.Sorted(maps.Keys(numbers)) {
+		e.bindings[name] = big.NewInt(n)
+		if e.holds(t.Args[1]) == (t.Op == logic.OpExists) {
+			return t.Op == logic.OpExists
+		}
+	}
+	return t.Op == logic.OpForall
 }
 
 // judge reports whether a formula holds of a sample, and fails the test

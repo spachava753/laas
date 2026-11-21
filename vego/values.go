@@ -154,6 +154,12 @@ func isString(t types.Type) bool {
 	return ok && basic.Info()&types.IsString != 0
 }
 
+// isBool reports whether a type is a boolean type.
+func isBool(t types.Type) bool {
+	basic, ok := t.Underlying().(*types.Basic)
+	return ok && basic.Info()&types.IsBoolean != 0
+}
+
 // isNil reports whether an expression is the predeclared nil.
 func (v *fnVerifier) isNil(e ast.Expr) bool {
 	return v.info.Types[ast.Unparen(e)].IsNil()

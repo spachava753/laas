@@ -542,6 +542,11 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 	if last := len(steps) - 1; last >= 0 && steps[last].ElemSize {
 		return e.elemSize(name, steps[:last], when)
 	}
+	if _, ok := e.readyMade(name, when); ok && len(steps) == 1 && (steps[0].Keys || steps[0].Has) && e.givenSlice != nil {
+		// The keys of a map a parameter or a result holds, which the
+		// tests of shipped entries answer from the real map.
+		return e.givenSlice(name, steps[0], when)
+	}
 	if last := len(steps) - 1; last >= 0 && steps[last].Keys {
 		found, err := e.locate(name, steps[:last], when)
 		switch {
@@ -579,7 +584,7 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 			return nil, err
 		case found.constant != nil || !isMap(found.typ):
 			return nil, fmt.Errorf("has(%s, ...): %s is not a map", spell(name, steps[:len(steps)-1]), spell(name, steps[:len(steps)-1]))
-		case key.Sort != map[bool]logic.Sort{true: logic.IntSeq}[isString(found.typ.Underlying().(*types.Map).Key())]:
+		case key.Sort != keyPlaceholder(found.typ).Sort:
 			return nil, fmt.Errorf("has(%s, ...): the key has type %s, which is not what the map is indexed by", name, key.Sort)
 		}
 		sink := found.sink
@@ -1128,7 +1133,11 @@ func plan(t types.Type, steps []logic.Step, from *types.Package) ([]hop, types.T
 	for _, step := range steps {
 		if step.Field == "" {
 			keyed := isMap(t) && mapModelled(t)
-			if want := map[bool]logic.Sort{true: logic.IntSeq}[keyed && isString(t.Underlying().(*types.Map).Key())]; step.Index != nil && step.Index.Sort != want {
+			want := logic.Int
+			if keyed {
+				want = keyPlaceholder(t).Sort
+			}
+			if step.Index != nil && step.Index.Sort != want {
 				return nil, nil, fmt.Errorf("%s: the index has type %s, which is not what a %s is indexed by", spelled, step.Index.Sort, t)
 			}
 			switch {
@@ -1360,8 +1369,9 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 			return shape{}, target{}, fmt.Errorf("%s%v", m.name, err)
 		}
 		want, placeholder := logic.Int, logic.IntLit(0)
-		if isMap(indexed) && isString(indexed.Underlying().(*types.Map).Key()) {
-			want, placeholder = logic.IntSeq, logic.Fill(logic.IntLit(0), logic.IntLit(0))
+		if isMap(indexed) {
+			placeholder = keyPlaceholder(indexed)
+			want = placeholder.Sort
 		}
 		steps[i].Index = placeholder
 		if !symbolic {

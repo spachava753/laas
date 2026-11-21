@@ -102,9 +102,14 @@ func (v *fnVerifier) enterPosition(st *state, r *mapRange, counter *logic.Term) 
 	number = logic.Select(r.order, position)
 	key = number
 	inside := logic.Lt(position, r.n0)
-	if isString(keyType) {
+	switch {
+	case isString(keyType):
 		key = v.fresh("key", logic.IntSeq)
 		st.assume(logic.Implies(inside, logic.Eq(logic.Key(key), number)))
+	case isBool(keyType):
+		// The number of a boolean is 0 or 1.
+		key = logic.Eq(number, logic.IntLit(1))
+		st.assume(logic.Implies(inside, logic.Or(logic.Eq(number, logic.IntLit(0)), key)))
 	}
 	st.assume(logic.Implies(inside, logic.And(
 		logic.Select(r.has0, number),
@@ -158,8 +163,7 @@ func (e *specEnv) visitedPath(c *clause, steps []logic.Step, when logic.When) (*
 // itself, so that what has(done, k) says about the order is known.
 func (v *fnVerifier) visitedHas(sink *state, set *visitedSet, key *logic.Term) (*logic.Term, error) {
 	r := set.r
-	keyType, _ := mapParts(r.mapType)
-	if want := map[bool]logic.Sort{true: logic.IntSeq, false: logic.Int}[isString(keyType)]; key.Sort != want {
+	if key.Sort != keyPlaceholder(r.mapType).Sort {
 		return nil, fmt.Errorf("has(...): the key has type %s, which is not what the map the loop ranges over is indexed by", key.Sort)
 	}
 	number := mapKey(key)
@@ -329,16 +333,6 @@ func (pv *pkgVerifier) checkVisited(fn *funcInfo) {
 			fail("no annotation of the loop names %s, so it says nothing; remove it, or name it in an Invariant", name)
 		}
 	}
-}
-
-// keyPlaceholder returns a term of the sort of the keys of a map type, which
-// is all a quantifier over its keys asks of the map before binding a
-// variable to them.
-func keyPlaceholder(t types.Type) *logic.Term {
-	if key, _ := mapParts(t); isString(key) {
-		return logic.Fill(logic.IntLit(0), logic.IntLit(0))
-	}
-	return logic.IntLit(0)
 }
 
 // What a loop may change of the map it ranges over. Go's specification

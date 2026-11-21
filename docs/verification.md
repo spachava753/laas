@@ -2633,7 +2633,7 @@ func Bump(m map[string]int, k string) {
 }
 ```
 
-Keys must be integers or strings. Writing to a map requires a proof that the map is not nil. Reading from a map and calling `delete` do not.
+Keys must be integers, strings, or booleans. Writing to a map requires a proof that the map is not nil. Reading from a map and calling `delete` do not.
 
 The keys of a map literal must be different. Go rejects two equal constant keys, and `vego` must prove that any other two keys differ. Go does not fix the order in which a literal puts its entries into the map, so when two keys are equal, either value may be kept:
 
@@ -3984,7 +3984,7 @@ A shipped contract states only what the documentation of its function promises, 
 - `strconv.Unquote` does not bound the length of its result. `strconv.Quote` bounds its result by `10 * |s| + 2`.
 - The functions of `math` say only that they return.
 - The functions of `os` say nothing of the files they read or write.
-- The contracts of generic functions say only what can be read at every type argument they are used with. `slices.Clone`, `Grow`, `Clip`, `Delete`, `DeleteFunc`, `Insert`, `Reverse`, and `Compact` do not say what the elements are, and `Delete`, `DeleteFunc`, and `Compact` do not say that they set the elements they drop to zero. `slices.Sort` does not say that the elements are in order, and `cmp.Compare` does not say which of `-1` and `1` it returns. `slices.ContainsFunc` and `IndexFunc` do not say which element the function they are handed chose. The functions of `maps` say how many keys a map has, and nothing of what it holds under a key.
+- The contracts of generic functions say only what can be read at every type argument they are used with. `slices.Clone`, `Grow`, `Clip`, `Delete`, `DeleteFunc`, `Insert`, `Reverse`, and `Compact` do not say what the elements are, and `Delete`, `DeleteFunc`, and `Compact` do not say that they set the elements they drop to zero. `slices.Sort` does not say that the elements are in order, and `cmp.Compare` does not say which of `-1` and `1` it returns. `slices.ContainsFunc` and `IndexFunc` do not say which element the function they are handed chose. The functions of `maps` say how many keys a map has and which keys it has, and nothing of what it holds under a key.
 - The documentation of `slices.Grow` says that the result has the nilness of `s`. For a nil `s` and an `n` above 0 it returns a slice that is not nil, so the contract says only that a slice that is not nil gives one that is not nil, and that a nil `s` with `n` equal to 0 gives nil.
 
 Some functions of the standard library have no shipped contract, because no true contract can be written yet:
@@ -5352,7 +5352,7 @@ The second is that a verified function can read only package-level variables tha
 
 The steps are the same, but design the component first so that it stays within the supported subset of Go.
 
-- Use plain data: structs, slices, integers, strings, maps with integer or string keys, and pointers to structs. Keep interfaces and arrays out of its types, and give every function type in them a contract.
+- Use plain data: structs, slices, integers, strings, maps with integer, string, or boolean keys, and pointers to structs. Keep interfaces and arrays out of its types, and give every function type in them a contract.
 - Write the struct invariant first. It is usually a sentence you would put in the doc comment anyway, such as "`n` never exceeds the length".
 - Add `fresh(result)` to the contract of the constructor.
 - Give each method the smallest `Modifies` list that works. If a method can replace a slice, add the clause described in [A slice that grows inside a struct](#a-slice-that-grows-inside-a-struct).
@@ -5529,7 +5529,7 @@ This table lists the most common messages.
 
 ## What is not supported
 
-`vego` supports functions and methods over these types: the integer types, `bool`, `string`, `error`, the float types, structs, pointers to structs, slices, maps with integer or string keys, function types, and interface types. In the body it supports assignments, `if`, `switch`, `for` and `range` loops with `break` and `continue`, `return`, `defer`, calls to named functions and methods, function literals that are called or deferred where they are written or bound to a variable that is only called, function values of named function types with a contract (see [Function values](#function-values)), calls through interface values of methods with a contract (see [Interfaces](#interfaces)), functions handed to a trusted function that calls them while it runs (see [Functions that a trusted function calls](#functions-that-a-trusted-function-calls)), and recursion. The built-ins `len`, `cap`, `min`, `max`, `new`, `make`, `append`, and `delete` are supported, and so are composite literals, slicing, and the arithmetic, comparison, shift, and bitwise operators.
+`vego` supports functions and methods over these types: the integer types, `bool`, `string`, `error`, the float types, structs, pointers to structs, slices, maps with integer, string, or boolean keys, function types, and interface types. In the body it supports assignments, `if`, `switch`, `for` and `range` loops with `break` and `continue`, `return`, `defer`, calls to named functions and methods, function literals that are called or deferred where they are written or bound to a variable that is only called, function values of named function types with a contract (see [Function values](#function-values)), calls through interface values of methods with a contract (see [Interfaces](#interfaces)), functions handed to a trusted function that calls them while it runs (see [Functions that a trusted function calls](#functions-that-a-trusted-function-calls)), and recursion. The built-ins `len`, `cap`, `min`, `max`, `new`, `make`, `append`, and `delete` are supported, and so are composite literals, slicing, and the arithmetic, comparison, shift, and bitwise operators.
 
 A function that uses any of the following is reported as `cannot verify`:
 

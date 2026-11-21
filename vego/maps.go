@@ -2,6 +2,7 @@ package vego
 
 import (
 	"fmt"
+	"math/big"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -30,13 +31,27 @@ func mapParts(t types.Type) (key, elem types.Type) {
 	return m.Key(), m.Elem()
 }
 
-// mapKeyed reports whether the keys of a map type are modelled: integers or
-// strings. A map with such keys is a value the verifier can hold, whatever
-// its values are.
+// mapKeyed reports whether the keys of a map type are modelled: integers,
+// strings, or booleans. A map with such keys is a value the verifier can
+// hold, whatever its values are.
 func mapKeyed(t types.Type) bool {
 	key, _ := mapParts(t)
 	basic, ok := key.Underlying().(*types.Basic)
-	return ok && basic.Info()&(types.IsInteger|types.IsString) != 0 && basic.Kind() != types.Uintptr
+	return ok && basic.Info()&(types.IsInteger|types.IsString|types.IsBoolean) != 0 && basic.Kind() != types.Uintptr
+}
+
+// keyPlaceholder returns a term of the sort that keys of a map type have
+// in the logic: a sequence for strings, a boolean for booleans, and a
+// number otherwise.
+func keyPlaceholder(t types.Type) *logic.Term {
+	key, _ := mapParts(t)
+	switch {
+	case isString(key):
+		return logic.Fill(logic.IntLit(0), logic.IntLit(0))
+	case isBool(key):
+		return logic.False()
+	}
+	return logic.IntLit(0)
 }
 
 // mapModelled reports whether the contents of maps of the type are
@@ -62,8 +77,12 @@ func mapOwner(t types.Type) string { return "map " + typeKey(t.Underlying()) }
 
 // mapKey turns a key into the number a map is indexed by.
 func mapKey(key *logic.Term) *logic.Term {
-	if key.Sort.IsSeq() {
+	switch {
+	case key.Sort.IsSeq():
 		return logic.Key(key)
+	case key.Sort == logic.Bool:
+		// false is 0 and true 1, as no two booleans share a number.
+		return logic.Ite(key, logic.IntLit(1), logic.IntLit(0))
 	}
 	return key
 }
@@ -117,6 +136,15 @@ func (v *fnVerifier) noteMap(sink *state, mem memory, t types.Type, ref, key *lo
 	keyType, elemType := mapParts(t)
 	entry := v.pass.TypesSizes.Sizeof(keyType) + v.pass.TypesSizes.Sizeof(elemType)
 	_, most, _ := v.intRange(types.Typ[types.Int])
+	// A map has no more keys than its key type has values.
+	if lo, hi, ok := v.intRange(keyType); ok {
+		if values := new(big.Int).Add(new(big.Int).Sub(hi, lo), big.NewInt(1)); values.Cmp(most) < 0 {
+			most = values
+		}
+	}
+	if isBool(keyType) {
+		most = big.NewInt(2)
+	}
 	facts := []*logic.Term{logic.Le(logic.IntLit(0), count), logic.Implies(isNil, logic.Eq(count, logic.IntLit(0))),
 		logic.Le(count, logic.BigLit(most)), logic.Le(logic.Mul(count, logic.IntLit(max(entry, 1))), logic.BigLit(v.maxAlloc()))}
 	if key != nil {

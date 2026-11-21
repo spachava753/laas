@@ -2076,7 +2076,7 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 		env.givenRelation = func(name string, paths []logic.Path) (*logic.Term, error) {
 			return logic.BoolLit(relation(t, fn, call, earlier, name, paths)), nil
 		}
-		env.givenSlice = givenSliceOf(t, fn, call)
+		env.givenSlice = givenSliceOf(t, fn, call, eval)
 		satisfied := true
 		for _, c := range fn.requires {
 			formula, err := pv.res.Formula(c.node, env)

@@ -1375,8 +1375,8 @@ func coveredType(fn *funcInfo, m *modTarget) types.Type {
 			return nil
 		}
 		steps[i].Index = logic.IntLit(0)
-		if isMap(indexed) && isString(indexed.Underlying().(*types.Map).Key()) {
-			steps[i].Index = logic.Fill(logic.IntLit(0), logic.IntLit(0))
+		if isMap(indexed) {
+			steps[i].Index = keyPlaceholder(indexed)
 		}
 	}
 	_, final, err := plan(param.Type(), steps, fn.writtenIn())
