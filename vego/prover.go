@@ -42,7 +42,7 @@ func (pv *pkgVerifier) options(effort int, kind question) solver.Options {
 	if effort == 0 {
 		effort = pv.effort
 	}
-	opts := solver.Options{Preds: pv.res.Preds, Effort: effort, Observe: pv.observe(kind), Speculative: pv.speculative}
+	opts := solver.Options{Preds: pv.res.Preds, Effort: effort, Observe: pv.observe(kind), Speculative: pv.speculative, Stop: pv.speculationStop}
 	// A contradiction check is asked first without e-matching; see
 	// solver.Options.ModelFirst. Only a check that counts as one, as
 	// observe counts it: a question of a search for an input reads an open

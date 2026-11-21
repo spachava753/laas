@@ -746,7 +746,7 @@ func TestStoredAnswersAreZ3s(t *testing.T) {
 		}
 		cut := strings.LastIndexByte(key, 0)
 		script, names := key[:cut], strings.Fields(key[cut+1:])
-		_, r, err := live.solve(script, names, false)
+		_, r, err := live.solve(script, names, asker{})
 		if err != nil {
 			t.Fatal(err)
 		}

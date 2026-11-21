@@ -236,6 +236,8 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 				result, err = nil, fmt.Errorf("Z3 failed: %v", r)
 			case *solver.CacheError:
 				result, err = nil, r
+			case *solver.InternalError:
+				result, err = nil, r
 			case logic.TooLarge:
 				result, err = nil, fmt.Errorf("a formula built for an annotation of the package has grown beyond %d nodes, which is the limit", logic.MaxSize)
 			default:
@@ -302,6 +304,9 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		pv.checkTypeContracts()
 		pv.exportTypeContracts()
 		pv.exportStates()
+		if verifying != nil {
+			verifying("begin")
+		}
 		for i, fn := range pv.order {
 			// A speculative verifier takes no function the verification
 			// has begun.
@@ -316,8 +321,17 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 				pv.run(fn, (*fnVerifier).audit)
 			}
 		}
+		if verifying != nil {
+			verifying("end")
+		}
+		// The speculative verifiers of the package stop before it is
+		// reported, so that an error they met, which nobody else reads,
+		// fails the package; see end.
 		if sp != nil {
-			sp.done.Store(true)
+			sp.end()
+		}
+		if err := sp.untrusted(pv.z3); err != nil {
+			panic(err)
 		}
 		pv.exportContracts(pv.reportAlwaysFailing())
 		pv.reportSentinelWrites()
@@ -511,10 +525,11 @@ type pkgVerifier struct {
 	// cacheDir is the directory of the answer cache, or "" for none.
 	cacheDir string
 	// speculative is set for a verifier that only fills the solver's
-	// cache, and stopSpeculation reports when its package is verified; see
-	// speculate.go.
+	// cache; stopSpeculation reports when its package is verified, and
+	// speculationStop is closed then; see speculate.go.
 	speculative     bool
 	stopSpeculation func() bool
+	speculationStop <-chan struct{}
 	// searchLimit is the last limit a question of a search for an input
 	// stopped at while the current function was verified, and searching
 	// counts the searches under way.

@@ -1,6 +1,7 @@
 package vego
 
 import (
+	"errors"
 	"go/types"
 	"reflect"
 	"slices"
@@ -8,6 +9,8 @@ import (
 	"sync/atomic"
 
 	"golang.org/x/tools/go/analysis"
+
+	"github.com/spachava753/laas/vego/internal/solver"
 )
 
 // The functions of a package are verified one after another, so a run of
@@ -24,12 +27,21 @@ import (
 // same questions in the same order with and without it, each answer is
 // Z3's answer to the same text, which any process gives (see the premise of
 // the cache in the solver), and a cached answer counts as Z3 counted it.
+// That each answer the verification gets is Z3's rests on the invariant of
+// the solver's pool of processes (see pool in the solver): a process ended
+// to free its place for another asker is never handed to anyone again, and
+// only a speculative asker can be told that its process was ended; a
+// question of the verification told so, or a pool found inconsistent, is
+// an internal error that fails the package, never an open answer.
 // A speculative problem never delays another: it takes a process only
 // while no other asker waits and at most all processes but one serve
 // speculation, and another asker that finds every process busy ends one
 // that serves speculation (solver.Options.Speculative). A speculative
 // verifier that fails, panics, or reads facts otherwise than the
-// verification does wastes only work.
+// verification does wastes only work, except for an error that says the
+// answer cache or the solver cannot be trusted: it records that in the
+// solver, and the verification of the package fails with it once its
+// speculative verifiers have stopped (end).
 
 // maxSpeculative bounds the speculative verifiers of the whole process.
 const maxSpeculative = 3
@@ -50,18 +62,86 @@ type stopped struct{}
 // them.
 var speculatedFunctions, speculationPanics atomic.Int64
 
+// verifying, when set, runs when the verification of a package begins
+// its functions ("begin") and when it has verified them ("end"); the tests
+// hold it there.
+var verifying func(phase string)
+
 // speculativeFault, when set, runs before a speculative verifier verifies a
 // function; the tests make it panic.
 var speculativeFault func(fn *funcInfo)
 
 // speculation is what the verification of a package and its speculative
-// verifiers share: the index of the function the verification is at, and
-// the next function from the end that a speculative verifier may take.
+// verifiers share: the index of the function the verification is at, the
+// next function from the end that a speculative verifier may take, and
+// whether the verification has ended, which also closes stop. mu guards
+// running, the speculative verifiers that have begun, which none does
+// once done is set, and ended is signalled when the last one ends. z3 is
+// the solver a speculative verifier used.
 type speculation struct {
-	at   atomic.Int64
-	next atomic.Int64
-	once sync.Once
-	done atomic.Bool
+	at      atomic.Int64
+	next    atomic.Int64
+	once    sync.Once
+	done    atomic.Bool
+	stop    chan struct{}
+	mu      sync.Mutex
+	running int
+	ended   *sync.Cond
+	z3      atomic.Pointer[solver.Solver]
+}
+
+// begin registers a speculative verifier, unless the verification of the
+// package has ended.
+func (sp *speculation) begin() bool {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if sp.done.Load() {
+		return false
+	}
+	sp.running++
+	return true
+}
+
+// finish unregisters a speculative verifier.
+func (sp *speculation) finish() {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	sp.running--
+	if sp.running == 0 {
+		sp.ended.Broadcast()
+	}
+}
+
+// end stops the speculative verifiers of the package and waits until
+// those that began have ended. Each stops at once: a question of one ends
+// with no answer, whether it waits for a process or for another asker's
+// problem or is being solved, since stop is closed and every asker waiting
+// for a process is woken (solver.Options.Stop); its next question panics
+// with stopped.
+func (sp *speculation) end() {
+	sp.mu.Lock()
+	sp.done.Store(true)
+	close(sp.stop)
+	sp.mu.Unlock()
+	solver.WakeAll()
+	sp.mu.Lock()
+	for sp.running > 0 {
+		sp.ended.Wait()
+	}
+	sp.mu.Unlock()
+}
+
+// untrusted returns what makes the solver of the package, the
+// verification's or one a speculative verifier used, untrustworthy; see
+// solver.Untrusted. sp may be nil.
+func (sp *speculation) untrusted(s *solver.Solver) error {
+	if s == nil && sp != nil {
+		s = sp.z3.Load()
+	}
+	if s == nil {
+		return nil
+	}
+	return s.Untrusted()
 }
 
 // take returns the index of the next function a speculative verifier may
@@ -172,7 +252,8 @@ func speculate(pass *analysis.Pass, verifier func(*analysis.Pass) *pkgVerifier, 
 		return listed
 	}
 
-	sp := &speculation{}
+	sp := &speculation{stop: make(chan struct{})}
+	sp.ended = sync.NewCond(&sp.mu)
 	sp.at.Store(-1)
 	for range maxSpeculative {
 		go func() {
@@ -182,17 +263,24 @@ func speculate(pass *analysis.Pass, verifier func(*analysis.Pass) *pkgVerifier, 
 				speculativeRunning.Add(-1)
 				<-speculating
 			}()
-			if sp.done.Load() {
+			if !sp.begin() {
 				return
 			}
+			defer sp.finish()
+			var pv *pkgVerifier
 			defer func() {
+				if pv != nil && pv.z3 != nil {
+					sp.z3.CompareAndSwap(nil, pv.z3)
+				}
 				if r := recover(); r != nil && r != (stopped{}) {
 					speculationPanics.Add(1)
+					sp.distrust(pv, r)
 				}
 			}()
-			pv := verifier(&own)
+			pv = verifier(&own)
 			pv.speculative = true
 			pv.stopSpeculation = sp.done.Load
+			pv.speculationStop = sp.stop
 			pv.loadTrust(trustPath)
 			pv.collect()
 			// Every speculative verifier of the package collects the same
@@ -216,6 +304,7 @@ func speculate(pass *analysis.Pass, verifier func(*analysis.Pass) *pkgVerifier, 
 								panic(r)
 							}
 							speculationPanics.Add(1)
+							sp.distrust(pv, r)
 						}
 					}()
 					if speculativeFault != nil {
@@ -228,6 +317,27 @@ func speculate(pass *analysis.Pass, verifier func(*analysis.Pass) *pkgVerifier, 
 		}()
 	}
 	return sp
+}
+
+// distrust records in the solver an error that a speculative verifier
+// panicked with and that says the answer cache or the solver cannot be
+// trusted, which nobody else would read; see solver.Distrust. The solver is
+// the one the package's verifiers share, which a verifier that has asked
+// nothing yet has not opened.
+func (sp *speculation) distrust(pv *pkgVerifier, r any) {
+	err, ok := r.(error)
+	if !ok || pv == nil || !(errors.As(err, new(*solver.CacheError)) || errors.As(err, new(*solver.InternalError))) {
+		return
+	}
+	s := pv.z3
+	if s == nil {
+		var openErr error
+		if s, openErr = solver.Open(pv.z3Path, pv.cacheDir); openErr != nil {
+			return
+		}
+	}
+	sp.z3.CompareAndSwap(nil, s)
+	s.Distrust(err)
 }
 
 // countFuncs counts the functions that keep says to.

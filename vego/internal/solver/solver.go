@@ -71,8 +71,14 @@ type Options struct {
 	// Speculative is set for a problem asked only so that its answer is in
 	// the cache when the verification that needs it asks: such a problem
 	// never delays another, and gets no answer when its process is needed
-	// elsewhere; see acquire.
+	// elsewhere or Stop is closed; see acquire.
 	Speculative bool
+	// Stop, for a speculative problem, is closed once its answer is no
+	// longer wanted: the problem then ends at once with no answer, whether
+	// it waits for a process or for another asker's problem, or is being
+	// solved, whose process is then ended. It is read only when
+	// Speculative is set.
+	Stop <-chan struct{}
 	// ModelFirst, when not zero, is the resource limit of a first attempt
 	// at a satisfiability check without e-matching; see Model.
 	ModelFirst int
@@ -115,6 +121,18 @@ type Fault struct {
 
 func (f *Fault) Error() string {
 	return fmt.Sprintf("%v (the problem is saved in %s)", f.Err, f.File)
+}
+
+// InternalError is a defect of vego itself, found while asking Z3: the pool
+// of processes found inconsistent, or a question that is not speculative
+// served by a process that was ended for another asker. It is never an
+// answer: it fails the package, and every later question of the run.
+type InternalError struct {
+	Err error
+}
+
+func (e *InternalError) Error() string {
+	return fmt.Sprintf("internal error of vego: %v; run again with -vego.speculate=false, and report it at https://github.com/spachava753/laas/issues", e.Err)
 }
 
 // Prove reports whether goal follows from the hypotheses.
@@ -186,16 +204,31 @@ func (s *Solver) Model(facts []*logic.Term, opts Options, consts []*logic.Term) 
 			byName[name] = c
 		}
 	}
-	a, cached, err := s.answer(script, names, opts.Speculative)
+	who := asker{speculative: opts.Speculative}
+	if opts.Speculative {
+		who.stop = opts.Stop
+	}
+	a, cached, err := s.answer(script, names, who)
+	// A defect of the solver found while this question was asked fails it,
+	// whatever it was answered.
+	if e := s.broken.Load(); e != nil {
+		panic(e)
+	}
 	result := Unknown
 	switch {
 	case err == errTimeout:
 		result = Timeout
 	case err == errMemory:
 		result = OutOfMemory
-	case err == errPreempted:
+	case err == errPreempted && opts.Speculative:
+		// Only a speculative asker is told that its process was ended for
+		// another; it gets no answer.
 		result = Unknown
-	case errors.As(err, new(*CacheError)):
+	case err == errPreempted:
+		e := &InternalError{errors.New("a question that is not speculative was told that its Z3 process was ended for another asker")}
+		s.Distrust(e)
+		panic(e)
+	case errors.As(err, new(*CacheError)), errors.As(err, new(*InternalError)):
 		panic(err)
 	case err != nil:
 		panic(&Fault{err, dump(remarked)})
