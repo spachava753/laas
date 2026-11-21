@@ -72,9 +72,8 @@ type Options struct {
 	withoutExtensionality bool
 }
 
-// Cost is what one problem took. Bytes is the length of its SMT-LIB text
-// without the comments that name the terms of the logic, which carry
-// numbers that depend on what the process did before; Effort is the
+// Cost is what one problem took. Bytes is the length of the SMT-LIB text
+// sent to Z3, which has no comments; see encode. Effort is the
 // resources Z3 counted while solving it, which, like the
 // answer, is the same on every run of one binary; it is -1 when the
 // problem stopped at a limit that depends on the machine. A problem that
@@ -90,7 +89,8 @@ type Cost struct {
 
 // Fault is panicked when Z3 fails in a way that is not an answer: it
 // crashed, could not be started, or replied with something other than an
-// answer. The problem it was given is saved in File.
+// answer. The problem it was given is saved in File, with comments that
+// name the terms of the logic, which the text sent to Z3 leaves out.
 type Fault struct {
 	Err  error
 	File string
@@ -119,7 +119,7 @@ func (s *Solver) Check(facts []*logic.Term, opts Options) Result {
 // offer values after an unknown outcome too. The values are a candidate
 // for the caller to confirm by proof, never evidence by themselves.
 func (s *Solver) Model(facts []*logic.Term, opts Options, consts []*logic.Term) (Result, map[string]*logic.Term) {
-	e, script := encode(facts, opts)
+	e, script, remarked := encode(facts, opts)
 	var names []string
 	byName := map[string]*logic.Term{}
 	for _, c := range consts {
@@ -139,7 +139,7 @@ func (s *Solver) Model(facts []*logic.Term, opts Options, consts []*logic.Term) 
 	case err == errMemory:
 		result = OutOfMemory
 	case err != nil:
-		panic(&Fault{err, dump(script)})
+		panic(&Fault{err, dump(remarked)})
 	case a.status == "unsat":
 		result = Proved
 	case a.status == "sat":
@@ -154,7 +154,7 @@ func (s *Solver) Model(facts []*logic.Term, opts Options, consts []*logic.Term) 
 		if err != nil || result == OutOfMemory {
 			effort = -1
 		}
-		opts.Observe(Cost{Result: result, Bytes: len(script) - e.remarks, Effort: effort, Cached: cached, Time: a.took})
+		opts.Observe(Cost{Result: result, Bytes: len(script), Effort: effort, Cached: cached, Time: a.took})
 	}
 	if result == Proved || err != nil {
 		return result, nil
@@ -163,7 +163,7 @@ func (s *Solver) Model(facts []*logic.Term, opts Options, consts []*logic.Term) 
 	for name, text := range a.values {
 		c := byName[name]
 		if c == nil {
-			panic(&Fault{fmt.Errorf("a value for %s, which was not asked for", name), dump(script)})
+			panic(&Fault{fmt.Errorf("a value for %s, which was not asked for", name), dump(remarked)})
 		}
 		if values == nil {
 			values = map[string]*logic.Term{}
@@ -266,13 +266,19 @@ const tactic = "(then simplify propagate-values simplify elim-uncnstr smt)"
 const tacticWithoutExtensionality = "(then simplify propagate-values simplify elim-uncnstr (using-params smt :array.extensional false))"
 
 // Script returns the SMT-LIB text of a satisfiability check of the facts,
-// ending in its check-sat-using.
+// ending in its check-sat-using, as it is sent to Z3.
 func Script(facts []*logic.Term, opts Options) string {
-	_, script := encode(facts, opts)
+	_, script, _ := encode(facts, opts)
 	return script
 }
 
-func encode(facts []*logic.Term, opts Options) (*encoder, string) {
+// encode writes a satisfiability check of the facts. It returns the text
+// sent to Z3, which has no comments, and the same text with a comment that
+// names the term of the logic after each declaration, which is what a fault
+// saves for a person to read. The text sent is what an answer is kept by:
+// the comments carry numbers that depend on what the process did before,
+// so two texts that differ only in them would be asked twice.
+func encode(facts []*logic.Term, opts Options) (e *encoder, script, remarked string) {
 	effort := opts.Effort
 	if effort == 0 {
 		effort = DefaultEffort
@@ -280,7 +286,7 @@ func encode(facts []*logic.Term, opts Options) (*encoder, string) {
 	if effort < 0 || effort > MaxEffort {
 		fault("resource limit %d is outside what Z3 accepts", effort)
 	}
-	e := &encoder{
+	e = &encoder{
 		preds:      opts.Preds,
 		sorts:      map[logic.Sort]string{},
 		keyed:      map[logic.Sort]bool{},
@@ -310,5 +316,16 @@ func encode(facts []*logic.Term, opts Options) (*encoder, string) {
 	if opts.withoutExtensionality || (e.nested && !e.tellsApart) {
 		chain = tacticWithoutExtensionality
 	}
-	return e, "(set-option :rlimit " + strconv.Itoa(effort) + ")\n" + e.out.String() + "(check-sat-using " + chain + ")\n"
+	head, body, tail := "(set-option :rlimit "+strconv.Itoa(effort)+")\n", e.out.String(), "(check-sat-using "+chain+")\n"
+	var plain strings.Builder
+	plain.Grow(len(head) + len(body) + len(tail))
+	plain.WriteString(head)
+	last := 0
+	for _, r := range e.remarks {
+		plain.WriteString(body[last:r[0]])
+		last = r[1]
+	}
+	plain.WriteString(body[last:])
+	plain.WriteString(tail)
+	return e, plain.String(), head + body + tail
 }

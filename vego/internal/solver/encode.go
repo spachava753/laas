@@ -51,8 +51,8 @@ import (
 // encoder writes one problem as SMT-LIB commands.
 type encoder struct {
 	out strings.Builder
-	// remarks counts the bytes of the comments written to out.
-	remarks int
+	// remarks holds where in out each comment begins and ends; see remark.
+	remarks [][2]int
 	preds   map[string]*logic.PredDef
 	// sorts holds the declared sorts by the sort of the logic they stand
 	// for, after references are taken for integers.
@@ -304,8 +304,10 @@ func (e *encoder) constant(t *logic.Term) string {
 }
 
 // remark ends the line with a comment that gives the name of the logic,
-// made safe to write after a semicolon, and counts its bytes, which say
-// nothing to Z3; see Cost.
+// made safe to write after a semicolon, and records where it is. The
+// comments are for a person reading a problem that was dumped: they carry
+// numbers that the process hands out in the order packages ask, so the text
+// sent to Z3, and kept with its answer, leaves them out; see encode.
 func (e *encoder) remark(name string) {
 	text := " ; " + strings.Map(func(r rune) rune {
 		if r == '\n' || r == '\r' {
@@ -313,7 +315,7 @@ func (e *encoder) remark(name string) {
 		}
 		return r
 	}, name)
-	e.remarks += len(text)
+	e.remarks = append(e.remarks, [2]int{e.out.Len(), e.out.Len() + len(text)})
 	e.out.WriteString(text + "\n")
 }
 

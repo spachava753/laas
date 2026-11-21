@@ -275,23 +275,50 @@ func TestCache(t *testing.T) {
 			t.Fatal("one binary answered with what another said")
 		}
 	})
-	t.Run("bytes without comments", func(t *testing.T) {
-		s, _ := counting(t, `echo unsat; echo '(:reason-unknown "")'`+counted)
+	// The comments that name the terms of the logic are not sent, so two
+	// problems that differ only in the names are one text, asked once; a
+	// fault still saves the names for a person to read.
+	t.Run("texts that differ only in the comments", func(t *testing.T) {
+		s, asked := counting(t, `echo unsat; echo '(:reason-unknown "")'`+counted)
 		costs = nil
 		for _, name := range []string{"a", "a much longer name"} {
 			c := logic.Const(name, logic.Int)
+			if strings.Contains(Script([]*logic.Term{logic.Not(logic.Lt(c, c))}, Options{}), ";") {
+				t.Fatalf("the text sent to Z3 has a comment")
+			}
 			s.Prove(nil, logic.Lt(c, c), observed)
 		}
-		if len(costs) != 2 || costs[0].Bytes != costs[1].Bytes || costs[1].Cached {
-			t.Fatalf("costs %+v, want two problems solved with the same bytes, which differ only in the comments", costs)
+		if asked() != 1 || len(costs) != 2 || costs[0].Bytes != costs[1].Bytes || !costs[1].Cached {
+			t.Fatalf("Z3 was asked %d times, with costs %+v; want one problem asked once, the second answer from the cache with the same bytes", asked(), costs)
 		}
+		broken, err := New(fake(t, pinned, "exit 3"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		func() {
+			defer func() {
+				fault, _ := recover().(*Fault)
+				if fault == nil {
+					t.Fatal("a process that ends is not a fault")
+				}
+				saved, err := os.ReadFile(fault.File)
+				if err != nil || !strings.Contains(string(saved), "; a much longer name") {
+					t.Errorf("the problem saved for the fault does not name the constant: %q, %v", saved, err)
+				}
+			}()
+			c := logic.Const("a much longer name", logic.Int)
+			broken.Prove(nil, logic.Lt(c, c), Options{})
+		}()
 	})
 	t.Run("the oldest are forgotten", func(t *testing.T) {
 		s, asked := counting(t, `echo unsat; echo '(:reason-unknown "")'`+counted)
 		saved := cacheBytes
 		cacheBytes = len(Script([]*logic.Term{logic.Not(goal)}, Options{})) + 10
 		defer func() { cacheBytes = saved }()
-		other := logic.Lt(logic.Const("y", logic.Int), logic.Const("y", logic.Int))
+		other := logic.Lt(x, logic.IntLit(0))
+		if len(Script([]*logic.Term{logic.Not(other)}, Options{})) > cacheBytes {
+			t.Fatal("the other problem is too long to be kept")
+		}
 		s.Prove(nil, goal, Options{})
 		s.Prove(nil, other, Options{})
 		s.Prove(nil, goal, Options{})

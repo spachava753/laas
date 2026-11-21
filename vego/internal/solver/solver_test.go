@@ -1084,7 +1084,7 @@ func TestWritesStayLinear(t *testing.T) {
 		table = logic.Write(table, x, logic.IntLit(int64(i)), logic.IntLit(int64(i)))
 	}
 	goal := logic.Eq(logic.Select(logic.Select(table, x), logic.IntLit(0)), logic.IntLit(0))
-	_, script := encode([]*logic.Term{logic.Not(goal)}, Options{})
+	_, script, _ := encode([]*logic.Term{logic.Not(goal)}, Options{})
 	if len(script) > 16*1000 {
 		t.Fatalf("a chain of 16 writes is encoded in %d bytes", len(script))
 	}
