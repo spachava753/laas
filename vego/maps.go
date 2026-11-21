@@ -111,6 +111,7 @@ func (v *fnVerifier) mapValue(sink *state, mem memory, t types.Type, ref, key *l
 	v.noteMap(sink, mem, t, ref, key)
 	if !hasBound(key) {
 		v.noteTyped(sink, val, elem)
+		v.noteReachedValue(sink, t, ref, key)
 	}
 	return val
 }

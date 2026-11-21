@@ -117,6 +117,14 @@ type fnVerifier struct {
 	// layers holds, by the name of the constant that stands for a forgotten
 	// region, what is still known of the region.
 	layers map[string]*layer
+	// epochs holds, by name, what each call or loop that writes footprints
+	// left of memory; growing the growth layers of the footprint region
+	// whose bound after the call is not set yet; and reaches the separation
+	// of each listed footprint parameter, assumed on entry. See
+	// footprint.go.
+	epochs  map[string]*epoch
+	growing []*layer
+	reaches []separation
 	// joins holds, by the name of the constant that stands for it, each
 	// region a join of the ends of a function literal made.
 	joins    map[string]*joinedRegion
@@ -241,6 +249,7 @@ func (pv *pkgVerifier) newVerifier(fn *funcInfo) *fnVerifier {
 		backgroundSeen: map[string]bool{}, targetSeen: map[string]bool{}, inlining: map[*ast.FuncLit]bool{}, joins: map[string]*joinedRegion{},
 		converting: map[ast.Expr]int{},
 		held:       map[ast.Expr]value{},
+		epochs:     map[string]*epoch{},
 	}
 }
 
@@ -339,6 +348,7 @@ func (v *fnVerifier) enter() *state {
 	}
 	v.frame = v.targets(fn, v.entry, st, memory{})
 	v.used = make([]bool, len(v.frame))
+	v.enterReaches(st)
 	return st
 }
 

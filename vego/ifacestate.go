@@ -381,9 +381,11 @@ func (fn *funcInfo) setReceiver(name string, method *types.Func) string {
 // interface of the package with two states of one name.
 func (pv *pkgVerifier) checkReceivers() {
 	for method, fn := range pv.ifaceMethods {
-		if fn.receiver != nil && !pv.hasStates(fn.receiver.Type()) {
-			pv.report(method.Pos(), "%s names its receiver %s, but %s has no states, which is all a contract can say of its receiver; "+
-				"remove the Receiver annotation, or declare a state with @State", methodTitle(method), fn.receiver.Name(), declaringInterface(method).Name())
+		if fn.receiver != nil && !pv.hasStates(fn.receiver.Type()) && !writesBehind(fn) {
+			pv.report(method.Pos(), "%s names its receiver %s, but %s has no states and the contract does not list %s in Modifies; "+
+				"a contract names its receiver to speak of its states, or to say that the method writes behind it; "+
+				"remove the Receiver annotation, list %s in a // @Modifies clause, or declare a state with @State",
+				methodTitle(method), fn.receiver.Name(), declaringInterface(method).Name(), fn.receiver.Name(), fn.receiver.Name())
 			fn.broken = true
 		}
 	}

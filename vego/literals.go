@@ -559,8 +559,30 @@ func (v *fnVerifier) join(st *state, ends []litEnd, sig *types.Signature) []valu
 	regions := map[string]logic.Sort{}
 	for _, end := range ends {
 		for key, region := range end.st.mem {
-			regions[key] = region.Sort
+			if key != epochKey {
+				regions[key] = region.Sort
+			}
 		}
+	}
+	// Ends in different epochs read a region not yet in memory differently,
+	// so the joined memory is in an epoch of its own that joins them.
+	epochs := make([]*logic.Term, len(ends))
+	for i, end := range ends {
+		epochs[i] = end.st.mem[epochKey]
+	}
+	switch {
+	case !slices.ContainsFunc(epochs, func(t *logic.Term) bool { return t != epochs[0] }):
+		if epochs[0] != nil {
+			mem[epochKey] = epochs[0]
+		}
+	default:
+		e := v.fresh("epoch", logic.Int)
+		joinedEnds := make([]memory, len(ends))
+		for i, end := range ends {
+			joinedEnds[i] = end.st.mem
+		}
+		v.epochs[e.Name] = &epoch{ends: joinedEnds, joined: &joinedRegion{which: which, forward: index}}
+		mem[epochKey] = e
 	}
 	for _, key := range slices.Sorted(maps.Keys(regions)) {
 		terms := make([]*logic.Term, len(ends))

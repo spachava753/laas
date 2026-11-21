@@ -35,6 +35,9 @@ func (m memory) region(key string, sort logic.Sort) *logic.Term {
 	if current, ok := m[key]; ok {
 		return current
 	}
+	if current := m.inEpoch(key, sort); current != nil {
+		return current
+	}
 	return logic.Const(entryRegion+key, sort)
 }
 
@@ -122,6 +125,12 @@ type layer struct {
 	// flat is set for the region that holds one number for each map: how
 	// many keys it has. Every other region holds a sequence per reference.
 	flat bool
+	// growth is set for a layer of the footprint region: every allocation
+	// below bound keeps its cells, unless skipped holds, and every cell lies
+	// below after, once that is known; see grow.
+	growth  bool
+	skipped *logic.Term
+	after   *logic.Term
 }
 
 // target is a piece of memory that may be written: a stretch of positions in
@@ -154,6 +163,13 @@ type target struct {
 	// cover; see checkWriteOr.
 	row    bool
 	holder []cell
+	// fp is set when the target is the footprint of an interface value:
+	// every cell that rows holds at the home ref, in every region; see
+	// footprint.go. skipped, when not nil, is when the call that writes it
+	// did not run.
+	fp      bool
+	rows    *logic.Term
+	skipped *logic.Term
 }
 
 // regions calls visit for every region the target reaches into, with the
@@ -238,11 +254,12 @@ func (v *fnVerifier) table(sink *state, mem memory, key string, sort logic.Sort,
 			continue
 		}
 		seen[at.Name] = true
+		v.materialize(at.Name, at.Sort)
 		note := at.Name + "|" + ref.String()
 		if known := v.layers[at.Name]; known != nil {
 			if !sink.noted[note] {
 				sink.noted[note] = true
-				sink.assume(v.unchanged(at, known, ref))
+				sink.assume(v.unchanged(sink, at, known, ref))
 			}
 			pending = append(pending, known.prev)
 		}
@@ -260,19 +277,41 @@ func (v *fnVerifier) table(sink *state, mem memory, key string, sort logic.Sort,
 }
 
 // unchanged states what a layer preserves at one reference.
-func (v *fnVerifier) unchanged(now *logic.Term, known *layer, ref *logic.Term) *logic.Term {
+func (v *fnVerifier) unchanged(sink *state, now *logic.Term, known *layer, ref *logic.Term) *logic.Term {
+	if known.growth {
+		panic("vego: internal error: the footprint region is read through table")
+	}
 	existed := logic.Lt(ref, known.bound)
+	var instances []*logic.Term
 	if known.flat {
 		conditions := []*logic.Term{existed}
 		for _, t := range known.targets {
+			if t.fp {
+				outside, facts := v.outsideFootprint(t, known.key, ref, logic.IntLit(0))
+				conditions = append(conditions, outside)
+				instances = append(instances, facts...)
+				continue
+			}
 			conditions = append(conditions, logic.Ne(ref, t.ref))
 		}
-		return logic.Implies(logic.And(conditions...), v.same(logic.Select(now, ref), logic.Select(known.prev, ref)))
+		fact := logic.Implies(logic.And(conditions...), v.same(logic.Select(now, ref), logic.Select(known.prev, ref)))
+		if hasFootprintTarget(known.targets) {
+			fact = logic.And(fact, logic.And(instances...), v.reachApart(ref, logic.IntLit(0)))
+		}
+		return fact
 	}
 	index := v.bound("k")
 	var untouched []*logic.Term
 	for _, t := range known.targets {
 		switch {
+		case t.fp:
+			position := index
+			if isMapRegion(known.key) {
+				position = logic.IntLit(0)
+			}
+			outside, facts := v.outsideFootprint(t, known.key, ref, position)
+			untouched = append(untouched, outside)
+			instances = append(instances, facts...)
 		case t.lo == nil:
 			// A map is written as a whole.
 			untouched = append(untouched, logic.Ne(ref, t.ref))
@@ -291,7 +330,17 @@ func (v *fnVerifier) unchanged(now *logic.Term, known *layer, ref *logic.Term) *
 		}
 	}
 	kept := v.same(logic.Select(logic.Select(now, ref), index), logic.Select(logic.Select(known.prev, ref), index))
-	return logic.Implies(existed, logic.Forall(index, logic.Implies(logic.And(untouched...), kept)))
+	body := logic.Implies(logic.And(untouched...), kept)
+	if hasFootprintTarget(known.targets) {
+		position := index
+		if isMapRegion(known.key) {
+			position = logic.IntLit(0)
+		}
+		// What the footprints and the separation say of the cell is true
+		// of every cell, so it stands beside the implication.
+		body = logic.And(logic.And(instances...), v.reachApart(ref, position), body)
+	}
+	return logic.Implies(existed, logic.Forall(index, body))
 }
 
 // cell reads the one number a flat region has for a reference.
@@ -340,6 +389,7 @@ func (v *fnVerifier) member(sink *state, mem memory, cur value, t types.Type, in
 	}
 	result := v.fetch(sink, mem, v.cellsOf(object)[lo:hi], cur[0], cur[1])
 	v.noteTyped(sink, result, field.Type())
+	v.noteReached(sink, v.cellsOf(object)[lo:hi], cur[0], cur[1], field.Type())
 	return result, field.Type(), true
 }
 
@@ -356,6 +406,7 @@ func (v *fnVerifier) element(sink *state, mem memory, header value, t types.Type
 	result := v.fetch(sink, mem, v.cellsOf(elem), header[0], v.elementAt(header, t, index))
 	if !hasBound(index) {
 		v.noteTyped(sink, result, elem)
+		v.noteReached(sink, v.cellsOf(elem), header[0], v.elementAt(header, t, index), elem)
 	}
 	return result, ok
 }
@@ -816,6 +867,11 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 	var candidates []int
 	for i, t := range v.frame {
 		covers[i] = t.stretches()
+		// A footprint may hold a cell of any region.
+		if t.fp {
+			candidates = append(candidates, i)
+			continue
+		}
 		if slices.ContainsFunc(covers[i], func(c stretch) bool {
 			return slices.ContainsFunc(w.parts, func(part stretch) bool { return part.key == c.key })
 		}) {
@@ -834,6 +890,14 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 			}
 			var by []*logic.Term
 			for _, i := range candidates {
+				if t := v.frame[i]; t.fp && i != without {
+					at := position
+					if part.lo == nil || isMapRegion(part.key) {
+						at = logic.IntLit(0)
+					}
+					cell, facts := v.rowAt(t.rows, t.ref, w.ref, at)
+					by = append(by, logic.And(append(facts, cell)...))
+				}
 				for _, c := range covers[i] {
 					switch {
 					case i == without || c.key != part.key || (c.lo == nil) != (part.lo == nil):
@@ -972,6 +1036,16 @@ func (v *fnVerifier) havoc(st *state, t target, guard []*logic.Term) {
 		st.assume(logic.Implies(skipped, logic.Forall(index, v.same(logic.Select(now, index), logic.Select(before, index)))))
 	}
 	switch {
+	case t.fp:
+		if len(guard) > 0 {
+			t.skipped = skipped
+		}
+		v.startEpoch(st, st.brk, []target{t})
+		var notRun *logic.Term
+		if len(guard) > 0 {
+			notRun = skipped
+		}
+		v.growing = append(v.growing, v.grow(st, st.brk, notRun))
 	case t.mapType != nil && t.key != nil:
 		v.havocEntry(st, t, skipped, len(guard) > 0)
 	case t.mapType != nil:

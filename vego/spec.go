@@ -1301,8 +1301,10 @@ func newModTargets(nodes []*logic.Node, c *clause) []*modTarget {
 // when the entry names what that parameter itself points to or holds.
 type shape struct {
 	param *types.Var
-	// row is set for the states of an interface value.
+	// row is set for the states of an interface value, and fp for its
+	// footprint.
 	row   bool
+	fp    bool
 	cells []cell
 	// elem is set for the elements of a slice and mapType for a map; else
 	// the entry is a struct or a part of one.
@@ -1466,6 +1468,18 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 		if !symbolic {
 			t.ref = cur.val[0]
 		}
+	case isIface(final) && v.hasFootprint(final):
+		// The footprint of what the interface value holds, which lies in
+		// the row of its home in the footprint region; see footprint.go.
+		// The value itself, a field or an element, is not part of it.
+		form.direct, form.fp = len(hops) == 0, true
+		if inMemory {
+			t.holder = cur.cells
+		}
+		if !symbolic {
+			t.ref, t.rows = home(cur.val[0]), mem.region(footprintRegion, footprintSort)
+		}
+		t.fp = true
 	case isIface(final):
 		// Every state of what the interface value holds, which lies in
 		// the row of its home; see ifacestate.go. The value itself, a

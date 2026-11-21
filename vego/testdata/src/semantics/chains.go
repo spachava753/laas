@@ -936,3 +936,54 @@ func EntryChain() (r map[int]int) {
 	setKey(m, 29)
 	return m
 }
+
+// Writer writes behind its receiver.
+type Writer interface {
+	// @Receiver w
+	// @Modifies w
+	// @Ensures True
+	Put(p []byte)
+}
+
+// WriteChain writes through s thirty times, each a call that may write
+// every region at the cells of s's footprint, and keeps q, which every read
+// of it after the last call finds through the thirty epochs.
+//
+// @Requires s != nil And q != nil
+// @Modifies s
+// @Ensures q.A' = q.A
+func WriteChain(s Writer, q *Pair) {
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+	s.Put(nil)
+}
+
+// Pair is two numbers.
+type Pair struct{ A, B int }

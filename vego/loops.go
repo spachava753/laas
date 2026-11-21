@@ -27,8 +27,10 @@ type site struct {
 	root   *types.Var
 	lo, hi int64
 	// row is set when the site may write every state of an interface
-	// value, at the home of the value root holds.
+	// value, at the home of the value root holds, and fp when it may write
+	// the footprint of that value.
 	row bool
+	fp  bool
 }
 
 // effects describes what a loop may change.
@@ -287,8 +289,8 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 		if err != nil {
 			v.misread(m.clause, err)
 		}
-		at := site{cells: form.cells, elem: form.elem, mapType: form.mapType, lo: form.lo, hi: form.hi, row: form.row}
-		if form.row {
+		at := site{cells: form.cells, elem: form.elem, mapType: form.mapType, lo: form.lo, hi: form.hi, row: form.row, fp: form.fp}
+		if form.row || form.fp {
 			// An interface value held in a variable that the loop does not
 			// assign keeps its home.
 			if arg := argument(form.param); form.direct && arg != nil {
@@ -397,7 +399,26 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 		targets []target
 	}
 	regions := map[string]*writes{}
+	// A site that writes a footprint may write every region, also those
+	// not yet in memory, which an epoch covers; see footprint.go.
+	var footprints []target
+	preciseFootprints := true
 	for _, at := range eff.sites {
+		if !at.fp {
+			continue
+		}
+		val := st.vals[at.root]
+		if at.root == nil || val == nil || eff.whole[at.root] {
+			preciseFootprints = false
+			continue
+		}
+		footprints = append(footprints, target{fp: true, ref: home(val[0]), rows: st.mem.region(footprintRegion, footprintSort)})
+	}
+	writesFootprints := !preciseFootprints || len(footprints) > 0
+	for _, at := range eff.sites {
+		if at.fp {
+			continue
+		}
 		val := st.vals[at.root]
 		precise := at.root != nil && val != nil && (!eff.whole[at.root] || (at.elem != nil && eff.grown[at.root]))
 		t := target{cells: at.cells, elem: at.elem, mapType: at.mapType, row: at.row}
@@ -426,6 +447,23 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 			regions[key].targets = append(regions[key].targets, t)
 		})
 	}
+	if writesFootprints {
+		for key, region := range st.mem {
+			if key == epochKey || key == footprintRegion {
+				continue
+			}
+			if regions[key] == nil {
+				flat := !region.Sort.Elem().IsSeq()
+				leafSort := region.Sort.Elem()
+				if !flat {
+					leafSort = leafSort.Elem()
+				}
+				regions[key] = &writes{sort: leafSort, precise: true, flat: flat}
+			}
+			regions[key].precise = regions[key].precise && preciseFootprints
+			regions[key].targets = append(regions[key].targets, footprints...)
+		}
+	}
 	for _, key := range slices.Sorted(maps.Keys(regions)) {
 		written := regions[key]
 		sort := logic.SeqOf(logic.SeqOf(written.sort))
@@ -434,18 +472,39 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 		}
 		known := &layer{prev: st.mem.region(key, sort), bound: st.brk, targets: written.targets, flat: written.flat, key: key}
 		if !written.precise {
-			known.bound, known.targets = v.entryBrk, nil
-			for _, t := range v.frame {
-				if t.reaches([]string{key}) {
-					known.targets = append(known.targets, t)
-				}
-			}
+			known.bound, known.targets = v.entryBrk, v.frameReaching(key)
 		}
 		forgotten := v.fresh("mem'"+key, sort)
 		v.layers[forgotten.Name] = known
 		head.mem[key] = forgotten
 	}
+	if writesFootprints {
+		// Every region not yet in memory starts from the epoch, and the
+		// footprints grow only by what the loop creates.
+		e := v.fresh("epoch", logic.Int)
+		if preciseFootprints {
+			v.epochs[e.Name] = &epoch{before: st.mem, bound: st.brk, targets: footprints}
+		} else {
+			v.epochs[e.Name] = &epoch{before: st.mem, bound: v.entryBrk, targets: v.frameReaching("")}
+		}
+		head.mem[epochKey] = e
+		grown := v.grow(head, st.brk, nil)
+		grown.after = head.brk
+	}
 	return head
+}
+
+// frameReaching returns the Modifies targets that reach into a region, a
+// footprint reaching into every one; for key "", the targets that may
+// reach into any region.
+func (v *fnVerifier) frameReaching(key string) []target {
+	var reaching []target
+	for _, t := range v.frame {
+		if t.fp || key == "" || t.reaches([]string{key}) {
+			reaching = append(reaching, t)
+		}
+	}
+	return reaching
 }
 
 // loopShape describes a for or range loop to the shared loop rule.

@@ -546,6 +546,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	}
 	v.checkRecursion(fn, pre, st, guard, call)
 	written := v.targets(fn, args, st, before)
+	v.checkReachedApart(call, fn, args, written, passed, name)
 	for i, t := range written {
 		what := "what it calls " + t.text
 		if t.param != nil {
@@ -563,6 +564,11 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		unlisted := ""
 		if t.param != nil && passedExpr[t.param] != nil {
 			unlisted = v.notListable(passedExpr[t.param], call.Pos())
+		}
+		if t.fp {
+			v.checkFootprintWrite(st, guard, t, call.Pos(), fmt.Sprintf("%s may modify the footprint of %s", name, what), remedy, unlisted)
+			v.checkFootprintRanged(st, guard, t, call.Pos(), name)
+			continue
 		}
 		v.checkWriteOr(st, guard, t.reach(), call.Pos(), fmt.Sprintf("%s may modify %s", name, what), remedy, unlisted)
 	}
@@ -586,6 +592,11 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	// The callee may have created objects, if it ran.
 	st.brk = v.fresh("brk", logic.Ref)
 	st.assume(logic.Le(existed, st.brk))
+	// A footprint the call grew holds only what exists after it.
+	for _, grown := range v.growing {
+		grown.after = st.brk
+	}
+	v.growing = nil
 	if len(guard) > 0 {
 		st.assume(logic.Implies(logic.Not(logic.And(guard...)), logic.Eq(st.brk, existed)))
 	}
