@@ -64,9 +64,8 @@ type Solver struct {
 	// asked while it is solved is not solved twice; see answer.
 	flightsMu sync.Mutex
 	flights   map[string]*flight
-	// untrusted holds the first CacheError raised for a speculative asker,
-	// and broken the first InternalError raised for any asker; see answer
-	// and Untrusted.
+	// untrusted holds the first CacheError and broken the first
+	// InternalError raised for any asker; see answer and Untrusted.
 	untrusted atomic.Pointer[CacheError]
 	broken    atomic.Pointer[InternalError]
 	// disk keeps answers between runs when a cache directory is given;
@@ -642,25 +641,22 @@ type answer struct {
 func (s *Solver) answer(script string, values []string, who asker) (answer, bool, error) {
 	speculative := who.speculative
 	key := script + "\x00" + strings.Join(values, " ")
-	// A cache that a speculative asker found cannot be trusted cannot be
-	// trusted by anyone: its error, which nobody reads where it was
-	// raised, fails every later question of another asker. A defect of
-	// the solver itself fails every later question of every asker.
-	if e := s.broken.Load(); e != nil {
+	// A cache that one asker found cannot be trusted cannot be trusted by
+	// anyone: its error fails every later question of the run, whichever
+	// asker met it, so that no package goes on reading a directory the run
+	// has shown wrong, and the outcome does not depend on which asker read
+	// an entry first. A defect of the solver itself does the same.
+	if e := s.Untrusted(); e != nil {
 		panic(e)
 	}
-	if speculative {
-		defer func() {
-			if r := recover(); r != nil {
-				if e, ok := r.(error); ok {
-					s.Distrust(e)
-				}
-				panic(r)
+	defer func() {
+		if r := recover(); r != nil {
+			if e, ok := r.(error); ok {
+				s.Distrust(e)
 			}
-		}()
-	} else if e := s.untrusted.Load(); e != nil {
-		panic(e)
-	}
+			panic(r)
+		}
+	}()
 	for {
 		s.mu.Lock()
 		a, ok := s.answers[key]
@@ -890,11 +886,10 @@ func (s *Solver) preemptedOr(p *process, err error, who asker) error {
 	return e
 }
 
-// Distrust records an error that a speculative asker met and nobody reads
-// where it was raised: a CacheError then fails every later question of an
-// asker that is not speculative, and an InternalError every later
-// question, and both are returned by Untrusted. Other errors are left
-// alone.
+// Distrust records a CacheError or an InternalError, which then fails
+// every later question of the run and is returned by Untrusted; answer
+// records every one it raises, and the speculative verifiers of vego
+// record those they meet elsewhere. Other errors are left alone.
 func (s *Solver) Distrust(err error) {
 	var cache *CacheError
 	var internal *InternalError
@@ -912,9 +907,9 @@ func (s *Solver) Distrust(err error) {
 }
 
 // Untrusted returns the first InternalError met by any asker, or else the
-// first CacheError met by a speculative asker, or nil. The verification of
-// a package calls it once the package's speculative verifiers have
-// stopped, so that what they found fails that package.
+// first CacheError, or nil. The verification of a package calls it once
+// the package's speculative verifiers have stopped, so that what they found
+// fails that package.
 func (s *Solver) Untrusted() error {
 	if e := s.broken.Load(); e != nil {
 		return e

@@ -1899,7 +1899,7 @@ Give a directory that does not exist yet, or an empty one. `laas` marks it as an
 
 The answers are kept for the Z3 binary that gave them, together with the libraries it loads and the processor. Another Z3, or the same one after a system update that changes its libraries, starts with an empty directory of its own. `-vego.z3` must name the Z3 binary itself, not a script that starts it.
 
-When `vego` cannot trust what it finds in the directory, the package fails with a message such as the one below, and `laas` exits with status 1. Other packages of the run go on, unless one of the extra verifiers of [Using the idle Z3 processes](#using-the-idle-z3-processes) found the problem. Then every package verified after it fails too.
+When `vego` cannot trust what it finds in the directory, the package fails with a message such as the one below, and so does every package verified after it in the run. `laas` exits with status 1. Packages verified before it keep their messages.
 
 ```text
 vego: the answer cache entry /home/you/.cache/vego/z3-0f5c.../c5/a4db... is damaged: it does not end in its hash; to empty the cache, remove /home/you/.cache/vego
@@ -5506,8 +5506,8 @@ This table lists the most common messages.
 | `cannot verify F: recover is not supported` | `recover` returns an interface. | Call `recover` in a function that is not verified. |
 | `cannot verify F: a formula built to verify it has grown beyond 1048576 nodes, which is the limit` | An expression or a run of statements builds a formula that grows faster than the code, as `x = x + x` does when repeated. | Split the function, or the expressions in it, into smaller ones. |
 | `analysis skipped due to errors in package` | The package does not compile, or the toolchain does not match. | See [Running it](#running-it). |
-| `the answer cache entry ... is damaged: ...; to empty the cache, remove DIR` | An entry in the `-vego.cache` directory is not whole, or is for another question. The package fails. | Remove the directory. See [Keeping answers between runs](#keeping-answers-between-runs). |
-| `Z3 answers a problem otherwise than the answer cache entry ... says`, `Z3 answered one problem in two ways`, or `a Z3 process of this run runs other files than the first one did` | An answer kept in the `-vego.cache` directory is not the answer Z3 gives, or Z3 changed during the run. The package fails. | Remove the directory, and check that only one Z3 5.4.1 is installed. |
+| `the answer cache entry ... is damaged: ...; to empty the cache, remove DIR` | An entry in the `-vego.cache` directory is not whole, or is for another question. The package fails, and so does every package verified after it. | Remove the directory. See [Keeping answers between runs](#keeping-answers-between-runs). |
+| `Z3 answers a problem otherwise than the answer cache entry ... says`, `Z3 answered one problem in two ways`, or `a Z3 process of this run runs other files than the first one did` | An answer kept in the `-vego.cache` directory is not the answer Z3 gives, or Z3 changed during the run. The package fails, and so does every package verified after it. | Remove the directory, and check that only one Z3 5.4.1 is installed. |
 | `the answer cache DIR is inside ..., which holds go.mod`, and similar | The `-vego.cache` directory is in a module or a repository. | Use a directory outside every module and repository, such as `$HOME/.cache/vego`. |
 | `DIR is not empty and is not an answer cache; give -vego.cache a new or empty directory` | The `-vego.cache` directory holds files and was not made by `-vego.cache`. | Give a new or empty directory, such as `$HOME/.cache/vego`. |
 | `the answer cache needs the Z3 binary itself, and P runs Q` | `-vego.z3` names a script or a link to another program, and `-vego.cache` is set. | Name the Z3 binary with `-vego.z3`, or run without `-vego.cache`. |

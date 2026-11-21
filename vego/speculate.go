@@ -67,7 +67,7 @@ var speculatedFunctions, speculationPanics atomic.Int64
 // verifying, when set, runs when the verification of a package begins
 // its functions ("begin") and when it has verified them ("end"); the tests
 // hold it there.
-var verifying func(phase string)
+var verifying func(pv *pkgVerifier, phase string)
 
 // speculativeFault, when set, runs before a speculative verifier verifies a
 // function; the tests make it panic.

@@ -229,6 +229,9 @@ func (s *Solver) Model(facts []*logic.Term, opts Options, consts []*logic.Term) 
 		s.Distrust(e)
 		panic(e)
 	case errors.As(err, new(*CacheError)), errors.As(err, new(*InternalError)):
+		// One met in starting a process, as when a process runs other
+		// files, fails every later question too.
+		s.Distrust(err)
 		panic(err)
 	case err != nil:
 		panic(&Fault{err, dump(remarked)})

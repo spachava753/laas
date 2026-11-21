@@ -111,7 +111,7 @@ func TestSpeculativeDistrust(t *testing.T) {
 		}
 		panic(&solver.CacheError{Err: errors.New("an entry found wrong by a speculative verifier")})
 	}
-	verifying = func(phase string) {
+	verifying = func(_ *pkgVerifier, phase string) {
 		switch phase {
 		case "begin":
 			select {

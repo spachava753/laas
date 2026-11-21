@@ -305,7 +305,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		pv.exportTypeContracts()
 		pv.exportStates()
 		if verifying != nil {
-			verifying("begin")
+			verifying(pv, "begin")
 		}
 		for i, fn := range pv.order {
 			// A speculative verifier takes no function the verification
@@ -322,7 +322,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			}
 		}
 		if verifying != nil {
-			verifying("end")
+			verifying(pv, "end")
 		}
 		// The speculative verifiers of the package stop before it is
 		// reported, so that an error they met, which nobody else reads,
