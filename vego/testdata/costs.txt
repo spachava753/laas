@@ -1309,6 +1309,7 @@ guide	fmt.Sprintf	1	4468	0
 guide	guide.Abs	7	1250	0
 guide	guide.AbsWrong	5	871	0
 guide	guide.Account	1	225	0
+guide	guide.AddTag	14	1181375	0
 guide	guide.AgeOf	5	26764	0
 guide	guide.Announce	12	187453	2
 guide	guide.AppendZero	18	26778	0
@@ -1345,6 +1346,8 @@ guide	guide.CopyFresh	10	17845	0
 guide	guide.CopyListed	0	0	0
 guide	guide.CopyThrough	7	13722	0
 guide	guide.Count	19	46319	0
+guide	guide.CountDeleting	15	175192	1
+guide	guide.CountDeletingAtMost	15	183376	1
 guide	guide.CountLines	22	492985	4
 guide	guide.CountNegative	8	5171	0
 guide	guide.CountPositive	7	6971	0
@@ -1360,6 +1363,7 @@ guide	guide.DivideWrong	14	6679	0
 guide	guide.DoubleAll	11	27244	0
 guide	guide.Drain	18	46777	0
 guide	guide.DrainForgets	13	60462	0
+guide	guide.DropNegative	13	474107	2
 guide	guide.Duplicate	11	14465	0
 guide	guide.Empty	2	746	0
 guide	guide.EmptyOf	6	1752	0
@@ -1383,6 +1387,7 @@ guide	guide.Free	0	0	0
 guide	guide.Fresh	7	2701	0
 guide	guide.Get	3	2025	0
 guide	guide.Greet	7	22078	0
+guide	guide.Group	13	21609	0
 guide	guide.Guarded	23	30655	0
 guide	guide.Half	3	1455	0
 guide	guide.HasComma	4	5207	0
@@ -1392,12 +1397,16 @@ guide	guide.HasRole	5	43611	2
 guide	guide.Head	14	12238	0
 guide	guide.HeadWeak	12	22874	0
 guide	guide.Hex	4	5766	0
+guide	guide.Hit	9	14342	0
+guide	guide.HitTwice	13	52385	0
 guide	guide.IncAndRead	8	6101	0
 guide	guide.Index	9	11055	0
 guide	guide.Inventory	43	230560	0
 guide	guide.IsAdmin	2	3907	0
 guide	guide.IsEmpty	1	46	0
 guide	guide.Join	5	5717	0
+guide	guide.KeysOf	17	148962	2
+guide	guide.KeysOfUncounted	16	149039	2
 guide	guide.Labelled	1	46	0
 guide	guide.LabelledOwn	8	6277	0
 guide	guide.Largest	26	51485	0
@@ -1425,6 +1434,7 @@ guide	guide.MakeSink	1	46	0
 guide	guide.Mapper	3	1546	0
 guide	guide.Max	7	784	0
 guide	guide.MaxWrong	5	607	0
+guide	guide.MergeEach	8	15405	0
 guide	guide.Mid	9	4455	0
 guide	guide.MidWrong	7	3245	0
 guide	guide.Nearest	27	65913	0
@@ -1515,6 +1525,7 @@ guide	guide.Status	11	14751	0
 guide	guide.Steps	10	2408	0
 guide	guide.Subscribe	13	10187	0
 guide	guide.Sum	11	24881	0
+guide	guide.SumScores	11	237830	2
 guide	guide.Swap	15	17249	0
 guide	guide.Tally	1	46	0
 guide	guide.TallyInMemory	12	34519	0
@@ -1532,6 +1543,7 @@ guide	guide.Touches	2	288	0
 guide	guide.Transact	64	2082322	2
 guide	guide.Twice	13	10089	0
 guide	guide.TwiceOf	1	46	0
+guide	guide.TwoKeys	2	4437	0
 guide	guide.Tx.Begin	7	2009183	2
 guide	guide.Tx.Commit	6	1011507	1
 guide	guide.UsesLogf	4	19725	0
@@ -1539,6 +1551,7 @@ guide	guide.Visits	1	111	0
 guide	guide.Votes	1	4769	0
 guide	guide.VouchedLoader.Load	5	6900	0
 guide	guide.Warn	12	37113	0
+guide	guide.Widen	14	79430	0
 guide	guide.WithTimeout	6	1456	0
 guide	guide.Work	136	234803	0
 guide	guide.Wrapping	7	2701	0
@@ -1572,6 +1585,7 @@ guide	io.Writer.Write	5	15680	0
 guide	log.New	1	4452	0
 guide	log.Printf	1	3565	0
 guide	log.Println	1	2741	0
+guide	maps.Copy	1	4637	0
 guide	math/rand.Intn	1	380	0
 guide	os.Create	7	2009962	2
 guide	os.Open	7	2009962	2
@@ -2237,6 +2251,8 @@ mapping	mapping.Bump	16	482056	2
 mapping	mapping.BumpEntry	9	14342	0
 mapping	mapping.CallerLoses	6	10517	0
 mapping	mapping.Clear	11	427329	2
+mapping	mapping.ClearCountedNothing	9	13526	0
+mapping	mapping.ClearCountedOld	11	427329	2
 mapping	mapping.ClearsAnother	3	13689	0
 mapping	mapping.ClearsOne	6	10857	0
 mapping	mapping.ClearsSlices	17	40334	0

@@ -120,6 +120,7 @@ An annotation is a comment line of the form `// @Keyword ...`. Each keyword is a
 | `Requires`, `Ensures`, `Modifies` | the doc comment of a function |
 | `Variant` | the doc comment of a recursive function, or directly above a `for` loop |
 | `Invariant` | directly above a loop |
+| `Visited` | directly above a `range` over a map (see [Loops over a map](#loops-over-a-map)) |
 | `Assert`, `Snapshot` | anywhere in a function body, on its own line |
 | `Invariant` | the doc comment of a struct type |
 | `Predicate` | the top level of a file |
@@ -2651,13 +2652,155 @@ entries the map keeps; build the map with assignments instead
 
 Add `Requires a != b`, or assign the entries one by one, which runs in order.
 
-A `range` loop over a map can change the map it ranges over when the change has one meaning in Go. The loop can write a key that the map has, and it can delete keys, as this loop does:
+### Saying something of every key
+
+`Forall k in m : P` says that `P` holds of every key that `m` has. `Exists k in m : P` says that `P` holds of some key it has. The variable `k` has the type of the keys, so it can be a string:
 
 ```go
-for k := range m {
-	delete(m, k)
+// @Requires Forall k in m : 0 <= m[k] <= 100
+// @Ensures 0 <= total <= 100 * |m|
+func SumScores(m map[string]int) (total int) {
+	// @Visited done
+	// @Invariant 0 <= total <= 100 * |done|
+	for _, n := range m {
+		total += n
+	}
+	return total
 }
 ```
+
+A key that `m` does not have is outside the quantifier, so `Forall k in m : m[k] = 1` says nothing of `m[0]` when `m` lacks the key 0. `m` can be primed, put in `old`, or reached through fields, as in `Forall k in s.index'`.
+
+The body can compare a string key with another string, as in `k = node`. That comparison tells `vego` which key it is: a write to the key `node` is a write to the key `k` exactly when `k = node`. A string that the body uses only through a predicate, `has`, `|...|`, or an index gets no such tie, and neither do two keys bound by nested quantifiers. A formula that depends on such a comparison may not be proved.
+
+`Z` in a quantifier always means the integers. A variable, parameter, snapshot, or quantifier variable named `Z` makes `Forall k in Z` an error, so rename it.
+
+### How many keys a map can have
+
+`vego` knows two bounds on `|m|`:
+
+- A map has no more keys than its key type has values: at most 2 for `bool` and 256 for `uint8`.
+- Every key and value takes memory of its own, so `|m|` times the size of a key and a value is at most `MaxAlloc`.
+
+The second bound lets a function make a slice with `len(m)` elements of the key type or the value type without a `Requires`. It does not bound a slice that grows by `append` one key at a time, because an `append` that moves needs twice the length. Such a loop needs a `Requires` on `|m|`, or a slice made with room for every key, as in `make([]T, 0, len(m))`.
+
+Outside a range over the map, `vego` does not tie the number of keys to the keys it knows of. This true contract is not proved:
+
+```go
+// @Requires has(m, "a") And has(m, "b")
+// @Ensures |m| >= 2
+func TwoKeys(m map[string]int) {}
+```
+
+```text
+vego: postcondition may not hold: |m| >= 2
+```
+
+### Loops over a map
+
+Go visits each key a map has when the loop starts exactly once, in an order that it does not fix. To count the iterations, name the keys the loop has visited with a `Visited` annotation above the loop:
+
+```go
+// @Ensures |result| = |m|
+func KeysOf(m map[string]int) (result []string) {
+	result = make([]string, len(m))
+	i := 0
+	// @Visited done
+	// @Invariant i = |done|
+	for k := range m {
+		result[i] = k
+		i++
+	}
+	return result
+}
+```
+
+In the annotations of the loop and in its body, `|done|` is the number of iterations before the current one. `has(done, k)` says that the loop visited the key `k` before the current iteration. `Forall k in done : P` says something of every key the loop has visited. After the loop, `done` is every key the map had when the loop started. A formula reads `done` only in these three ways. It cannot be primed, put in `old`, indexed, or compared as a whole.
+
+Without the annotation, nothing ties `i` to the number of iterations, and the write to `result[i]` is not proved to be in range:
+
+```go
+// @Ensures True
+func KeysOfUncounted(m map[string]int) (result []string) {
+	result = make([]string, len(m))
+	i := 0
+	// @Invariant 0 <= i
+	for k := range m {
+		result[i] = k
+		i++
+	}
+	return result
+}
+```
+
+```text
+vego: index may be out of range
+```
+
+The keys of different iterations differ. So a loop can copy a map and say how many keys the copy has:
+
+```go
+// @Ensures |c| = |m| And (Forall k in m : has(c, k) And c[k] = m[k])
+func Widen(m map[string]int32) (c map[string]int64) {
+	c = make(map[string]int64)
+	// @Visited done
+	// @Invariant |c| = |done| And (Forall k in done : has(c, k) And c[k] = m[k])
+	// @Invariant Forall k in c : has(done, k)
+	for k, v := range m {
+		c[k] = int64(v)
+	}
+	return c
+}
+```
+
+Two loops over one map need not visit it in the same order, and `vego` does not assume that they do.
+
+A `Visited` annotation must stand directly above a `range` over a map, with at most one on a loop, and an annotation of the loop must name it. Its name must name nothing else where it stands.
+
+### Changing the map a loop ranges over
+
+A `range` loop over a map can change the map it ranges over when the change has one meaning in Go. The loop can write a key that the map has, and a later iteration reads the value written. It can delete the key of the current iteration:
+
+```go
+// @Requires m != nil
+// @Modifies m
+// @Ensures Forall k in m' : m'[k] >= 0
+func DropNegative(m map[string]int) {
+	// @Visited done
+	// @Invariant Forall k in m : has(old(m), k) And m[k] = old(m[k])
+	// @Invariant Forall k in done : has(m, k) -> m[k] >= 0
+	for k, v := range m {
+		if v < 0 {
+			delete(m, k)
+		}
+	}
+}
+```
+
+It can also delete a key that the loop has not reached yet. Go then does not visit that key. The loop passes its place in the order without running the body, and `done` counts that place too. An invariant must hold when a place is passed this way, so `n = |done|` is not preserved here:
+
+```go
+// @Requires m != nil And has(m, "a") And has(m, "b")
+// @Modifies m
+// @Ensures n = |m|
+func CountDeleting(m map[string]int) (n int) {
+	// @Visited done
+	// @Invariant n = |done|
+	for k := range m {
+		if k == "a" {
+			delete(m, "b")
+		}
+		n++
+	}
+	return n
+}
+```
+
+```text
+vego: loop invariant may not be preserved: n = |done|
+```
+
+`n <= |done|` holds, and with it `n <= |m|`. A loop whose only deletes of maps of the type delete the key of the current iteration, through the loop's own key variable, needs no such care: every key it reaches is still there.
 
 The loop cannot add a key, because Go may or may not visit a key added while the loop runs:
 
@@ -2677,7 +2820,74 @@ or may not visit a key added during the loop; collect the new entries in another
 them after the loop
 ```
 
-`Forall k in m : P` says that `P` holds of every key that `m` has, and `Exists k in m : P` that it holds of some key. Here `k` has the type of the keys, so it can be a string.
+Writing a key that the map lacks, after deleting it, is adding it. A call that may change the map the loop ranges over is reported too, since it may add a key:
+
+```go
+// @Requires m != nil
+// @Modifies m
+func MergeEach(m, src map[string]int) {
+	for range m {
+		maps.Copy(m, src)
+	}
+}
+```
+
+```text
+vego: Copy may modify m while the loop at maps.go:169:2 ranges over it, and may add a key, which
+Go may or may not visit during the loop; change the map in the loop's body, or after the loop
+```
+
+A map of the same type that is not the ranged one can be changed freely. `vego` must prove that it is another map, for example from `Requires dst != src`, or because the function made it.
+
+### Writing one entry
+
+`Modifies m[k]` lists one entry of a map: whether `m` has the key `k`, its value, and the number of keys. A caller keeps everything it knew of the other keys, and knows the new number of keys:
+
+```go
+// @Requires counts != nil And counts[page] < 1000000
+// @Modifies counts[page]
+// @Ensures has(counts', page) And counts'[page] = counts[page] + 1
+func Hit(counts map[string]int, page string) {
+	counts[page]++
+}
+
+// @Requires counts != nil And counts["a"] < 1000 And counts["home"] = 7
+// @Modifies counts
+// @Ensures counts'["a"] = counts["a"] + 2 And counts'["home"] = 7
+func HitTwice(counts map[string]int) {
+	Hit(counts, "a")
+	Hit(counts, "a")
+}
+```
+
+For a map held in another map, `Modifies g[from][to]` lists the entry `to` of the map `g[from]`. A path that goes past the key into a field of the value, as in `m[k].qty`, is an error: list the whole entry.
+
+When the values of a map are pointers, slices, maps, or interface values, `m[k]` in a `Modifies` clause names what the value refers to, as `p.next` does for a pointer field. The entry itself is covered only by `Modifies m`:
+
+```text
+vego: tags[k] is assigned, which AddTag may not modify; list the whole map in a // @Modifies
+clause: an entry of a map whose values are pointers, slices, maps, or interface values is covered
+only by the map, since a path such as m[k] in a Modifies clause names what the value refers to
+```
+
+A contract with `Modifies m` says what it keeps with a quantifier:
+
+```go
+// @Requires g != nil
+// @Modifies g
+// @Ensures set != nil And has(g', k) And g'[k] = set
+// @Ensures Forall j in g : has(g', j) And (j = k Or g'[j] = g[j])
+func Group(g map[string]map[string]bool, k string) (set map[string]bool) {
+	set = g[k]
+	if set == nil {
+		set = make(map[string]bool)
+		g[k] = set
+	}
+	return set
+}
+```
+
+A loop that calls a function with `Modifies m[k]` forgets the whole map, as for any write to a map in a loop. State in an invariant what the loop keeps.
 
 ## Package-level variables
 
@@ -5432,6 +5642,11 @@ This table lists the most common messages.
 | `... which F may not modify: nothing its // @Modifies clauses list is known to cover it` | An entry covers memory of this kind, but `vego` cannot prove it is this memory. It may be another element, another struct, or a slice that was replaced after `F` was called. | Make the entry match. For a replaced slice, the callee needs a `fresh ... Or within ...` clause. |
 | `x may be read before or after the call to F, which may change it, and Go does not fix the order` | Go may read `x` before or after `F` runs in this statement, and the two are not proved to give the same value. | Read `x` or call `F` in a statement of its own, in the order you mean. The message ends with such a statement, as in `x0 := x before it`, where one fits. See [Reads that Go may make before or after a call](#reads-that-go-may-make-before-or-after-a-call). |
 | `cannot verify F: g is called in the target of this assignment, and Go may call it before or after append writes into the array of s` | The call may run on either side of the write, and it may read or write memory. | Assign the result of `g` to a variable in a statement of its own first. See [An append beside a call](#an-append-beside-a-call). |
+| `this may add a key to m, the map that the loop at f.go:n:c ranges over, ...` | A write in a `range` over `m` may add a key that `m` lacks. Go may or may not visit it. | Collect the new entries in another map and add them after the loop. See [Changing the map a loop ranges over](#changing-the-map-a-loop-ranges-over). |
+| `F may modify m while the loop at f.go:n:c ranges over it, and may add a key, ...` | A call in a `range` over `m` may change `m`. | Change the map in the loop's body, or after the loop. |
+| `what is known here says that m has a number of keys other than \|m\|, which no map can` | The clauses before a `range` over `m` describe a map whose keys and count disagree, as `\|m\| = 1 And has(m, 1) And has(m, 2)` does. | Fix the clauses that say which keys `m` has. |
+| `Visited done: a Visited annotation names the keys that a range over a map has visited, ...` | The `Visited` annotation is not directly above a `range` over a map, or its name is taken, or nothing names it. The message says which. | Move it above the loop, rename it, or name it in an `Invariant`. See [Loops over a map](#loops-over-a-map). |
+| `x is assigned, which F may not modify; list the whole map in a // @Modifies clause: an entry of a map whose values are pointers, ...` | `Modifies m[k]` names what the value under `k` refers to, not the entry. | List `m`, and say what is kept with `Forall k in m`. See [Writing one entry](#writing-one-entry). |
 | `cannot verify F: P formats x, a value of type T, and that may run code nobody has checked: ...` | `fmt` would call a method of `x`, or of what it holds, or follow a pointer in it. The message says which. | Format the fields you need, or a string you build from them. See [What can be formatted](#what-can-be-formatted). |
 | `what F builds from what it formats may be more than can be allocated` | The bound on what `fmt` writes for this call is not proved to fit in one allocation. | Bound the lengths of the strings and slices it formats, and of the format if it is not a constant. See [How long a formatted string can be](#how-long-a-formatted-string-can-be). |
 | `cannot verify F: P formats what the slice s holds, which can be anything` | A slice of values to format is passed with `...`. | List the values in the call. For a logging function of your own, see [Your own logging function](#your-own-logging-function). |
@@ -5547,7 +5762,8 @@ A function that uses any of the following is reported as `cannot verify`:
 - converting a function value to another function type, and method expressions such as `T.M`;
 - a function literal used as a value that assigns a variable it captures (see [Function literals as values](#function-literals-as-values));
 - code that a function value or an interface value made by verified code runs and that calls through a function value or an interface value (see [Function values that call function values](#function-values-that-call-function-values) and [Interface values that call interface values](#interface-values-that-call-interface-values));
-- a contract on a function type whose `Ensures` only a change of the elements of a slice or a map, or memory that the call creates, can meet;
+- a contract on a function type whose `Ensures` only a change of the elements of a slice or a map, of an entry of a map, or memory that the call creates, can meet;
+- maps whose keys are pointers, structs, floats, or interface values, and arrays as keys;
 - passing an error of unknown origin, or a value that can hold a function value of a type without a contract, an `any`, or an interface value with a method that has no contract, to a function value or to a method of an interface value;
 - handing a trusted function anything but a function literal written there, a function, a method value, or a value of a type with a contract, for a parameter with a contract under `calls`; a variable that holds a literal cannot be handed over;
 - deferring a call that hands over a function, and using a trusted function with a contract under `calls` as a value;
@@ -5604,6 +5820,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - A call that opens, reads, or writes a file returns. This covers `os.Open`, `os.Create`, `os.WriteFile`, `os.MkdirAll`, `os.Getwd`, and `Read`, `Write`, and `Close` of an `*os.File`, also one that code that is not verified passes in. Opening a FIFO waits for its other end, reading a FIFO, a pipe, or a terminal waits for data, writing a pipe that nobody reads waits, and a file system that does not answer, such as a network mount that is gone, waits for ever. A write to standard output or standard error through a broken pipe ends the program, as above.
 - The output of the standard logger writes nothing that verified code can see, and returns. Code that is not verified sets that output with `log.SetOutput`, or with `slog.SetDefault` to a `slog.Handler`. A program that sets it to a writer or a handler of its own makes this claim about that code. A writer or a handler that logs through the standard logger again never returns, because the logger holds a lock while it writes. The same goes for a writer made by verified code whose `Write` calls something that logs.
 - The machine has enough memory and stack.
+- The key and the value of every entry of a map take memory of their own in the heap, as Go's runtime keeps them, and the heap spans at most `MaxAlloc` bytes. `vego` uses this to bound the number of keys of a map by the size of a key and a value, as described in [How many keys a map can have](#how-many-keys-a-map-can-have). The Go specification does not say how a map is stored; the runtime of the Go releases that `laas` is tested with stores it this way, for keys and values of size zero and for large ones kept behind a pointer. Entries of different maps take memory of their own too, though `vego` bounds one map at a time.
 - What formatting builds from parts whose length the logic has no term for is not longer than can be allocated. Those parts are:
   - the text of an error;
   - what a `String` or `Error` method returns;
@@ -5630,6 +5847,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `Variant e` | directly above a `for` loop | `e` is never negative and decreases on each iteration. |
 | `Assert P` | in a function body | `P` must be true at this point and can be used afterwards. |
 | `Snapshot n = e` | in a function body | `n` is the value `e` has at this point, in the annotations that follow in the block. |
+| `Visited done` | directly above a `range` over a map | `done` is the set of keys the loop has visited before the current iteration, in the annotations of the loop and its body. |
 | `Vouches err` | doc comment of a named function type, or of a method in a named interface type, beside its contract | The errors that values of the type return in `err` have a known origin; `vego` checks it of every value that verified code makes. |
 | `Invariant P` | doc comment of a struct type | `P` is true for every parameter, receiver, and result of the type at function boundaries. |
 | `Predicate name(x, y) ::= P` | top level | Names a formula over its parameters. |
@@ -5652,6 +5870,8 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `A[lo:hi) <= x` | the comparison holds for every element from `lo` up to `hi` |
 | `Forall k in [a, b) : P`, `Exists k in [a, b] : P` | quantifiers over an interval |
 | `Forall k in Z : P` | quantifier over all integers |
+| `Forall k in m : P`, `Exists k in m : P` | quantifiers over the keys a map has, or that a loop has visited |
+| <code>&#124;done&#124;</code>, `has(done, k)` | for a `Visited` name: the number of iterations before the current one; whether the loop visited `k` before it |
 | `"text"`, `nil` | a string; the nil pointer, error, function value, or interface value |
 | `'/'`, `'\n'` | the number of a character, as in Go |
 | `cap(A)` | the capacity of a slice |
@@ -5693,7 +5913,8 @@ Results are referred to by the names in the function's signature.
 | `Modifies A`, `Modifies s.items` | the elements of a slice, up to its capacity |
 | `Modifies ps[0]` | one element of a slice of structs; for a slice of pointers, the struct the element points to |
 | `Modifies m` | a map |
-| `Modifies m[k]` | for a map of pointers, the struct that the pointer under key `k` points to |
+| `Modifies m[k]` | the entry of key `k`: whether the map has it, its value, and the number of keys; for a map of pointers, slices, maps, or interface values, what the value under `k` refers to |
+| `Modifies g[from][to]` | the entry `to` of the map held under `from` |
 | `Modifies rc`, `Modifies p.f` | if `rc` or `f` is an interface value: every state of what it holds, not the variable or the field; a function value field is the field itself |
 | `fresh(x)` | in an `Ensures`, the memory `x` refers to on return was allocated by the call; in a body, it was allocated since the function was entered; true for a slice with zero capacity and a nil interface value, false for a nil pointer or map; for an interface value, what it holds was created then |
 | `within(a, b)` | `a` lies inside the memory of `b`; each is a pointer or a slice, and a slice includes its capacity |

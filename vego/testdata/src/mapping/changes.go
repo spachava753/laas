@@ -365,3 +365,28 @@ func HandsDropOther(s *store, other map[int]int) {
 		_ = sort.Search(1, s.drop)
 	}
 }
+
+// ClearCountedOld counts what is left against the map at entry.
+//
+// @Requires m != nil
+// @Modifies m
+// @Ensures |m'| = 0
+func ClearCountedOld(m map[int]int) {
+	// @Visited done
+	// @Invariant |m| = |old(m)| - |done| And (Forall k in m : ~has(done, k))
+	for k := range m {
+		delete(m, k)
+	}
+}
+
+// ClearCountedNothing claims that the loop deletes nothing.
+//
+// @Requires m != nil
+// @Modifies m
+// @Ensures True
+func ClearCountedNothing(m map[int]int) {
+	// @Invariant |m| = |old(m)|
+	for k := range m { // want `vego: loop invariant may not be preserved: \|m\| = \|old\(m\)\|`
+		delete(m, k)
+	}
+}

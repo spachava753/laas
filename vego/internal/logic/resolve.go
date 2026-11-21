@@ -292,12 +292,11 @@ func (s *scope) seq(n *Node) *Term {
 // variable is asked of the environment, which also knows the length of a
 // slice whose elements have no value in the logic.
 func (s *scope) length(n *Node) *Term {
-	root, steps, primed := s.path(n)
-	_, bound := s.bound[root.Name]
-	if (n.Kind != NIdent && n.Kind != NField && n.Kind != NIndex) || root.Kind != NIdent || bound || s.env == nil {
+	root, steps, when, ok := s.pathOf(n)
+	if !ok {
 		return Len(s.seq(n))
 	}
-	t, err := s.env.Path(root.Name, append(steps, Step{Len: true}), map[bool]When{true: Primed}[primed])
+	t, err := s.env.Path(root, append(steps, Step{Len: true}), when)
 	if err != nil {
 		panic(resolveError{err})
 	}
