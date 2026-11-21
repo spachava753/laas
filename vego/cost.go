@@ -55,6 +55,8 @@ type fnCost struct {
 	open     int
 	// kinds counts the problems of each kind.
 	kinds [len(questionNames)]int
+	// stored counts the problems answered from the cache on disk.
+	stored int
 }
 
 // costLimit is a place and kind of question that stopped at a limit.
@@ -136,6 +138,9 @@ func (pv *pkgVerifier) observe(kind question) func(solver.Cost) {
 		record.problems++
 		record.kinds[kind]++
 		record.bytes += int64(c.Bytes)
+		if c.Stored {
+			record.stored++
+		}
 		if c.Effort > 0 {
 			record.effort += c.Effort
 		}
@@ -193,8 +198,12 @@ func costText(fset *token.FileSet, c *fnCost) string {
 	if c.problems == 1 {
 		problems = "problem"
 	}
-	fmt.Fprintf(&out, "%s: vego cost of %s: %d %s, %d resource units, %d bytes, %.2f s\n",
-		fset.Position(at), name, c.problems, problems, c.effort, c.bytes, c.elapsed.Seconds())
+	stored := ""
+	if c.stored > 0 {
+		stored = fmt.Sprintf(", %d answered from the answer cache on disk", c.stored)
+	}
+	fmt.Fprintf(&out, "%s: vego cost of %s: %d %s, %d resource units, %d bytes, %.2f s%s\n",
+		fset.Position(at), name, c.problems, problems, c.effort, c.bytes, c.elapsed.Seconds(), stored)
 	limits := slices.Collect(func(yield func(costLimit) bool) {
 		for l := range c.limits {
 			if !yield(l) {
@@ -219,5 +228,26 @@ func costText(fset *token.FileSet, c *fnCost) string {
 	return out.String()
 }
 
-// costStderr is where -vego.cost prints.
+// noteStored says on w how many of the answers the package rests on came
+// from the answer cache on disk, when any did, and records the directory in
+// what the proofs rely on, so that a proof that rests on stored answers
+// does not look like one that does not.
+func (pv *pkgVerifier) noteStored(w io.Writer) {
+	problems, stored := 0, 0
+	for _, c := range pv.costOrder {
+		problems += c.problems
+		stored += c.stored
+	}
+	if stored == 0 {
+		return
+	}
+	pv.usage.AnswerCaches = append(pv.usage.AnswerCaches, pv.z3.CacheDir())
+	costsMu.Lock()
+	defer costsMu.Unlock()
+	fmt.Fprintf(w, "vego: %d of the %d answers of Z3 that the proofs of %s rest on came from the answer cache in %s\n",
+		stored, problems, pv.pass.Pkg.Path(), pv.z3.CacheDir())
+}
+
+// costStderr is where -vego.cost prints, and where a package says how many
+// of its answers came from the cache on disk.
 var costStderr io.Writer = os.Stderr

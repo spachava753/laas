@@ -2,11 +2,14 @@ package vego
 
 import (
 	"bytes"
+	"fmt"
+	"maps"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/spachava753/laas/vego/internal/solver"
 	"golang.org/x/tools/go/analysis"
 )
 
@@ -27,7 +30,9 @@ func TestCostFlag(t *testing.T) {
 				kinds[c.fn.obj.FullName()] = c.kinds
 			}
 		}})()
-		for name, value := range map[string]string{"rlimit": "600", "cost": map[bool]string{false: "false", true: "true"}[flag], "trusted": filepath.Join("testdata", "trusted.yaml")} {
+		// What is printed is compared line by line, so answers come from
+		// Z3 and not from a cache that VEGO_CACHE names.
+		for name, value := range map[string]string{"cache": "", "rlimit": "600", "cost": map[bool]string{false: "false", true: "true"}[flag], "trusted": filepath.Join("testdata", "trusted.yaml")} {
 			if err := analyzer.Flags.Set(name, value); err != nil {
 				t.Fatal(err)
 			}
@@ -122,5 +127,63 @@ func TestFailureTracking(t *testing.T) {
 		if !found {
 			t.Errorf("in %s, the entry of parse is not in use", action.Package.PkgPath)
 		}
+	}
+}
+
+// TestAnswerCache runs corpus programs twice with -vego.cache, the second
+// time with a solver of its own on the same directory: the second run
+// answers every question from the directory, reports the same diagnostics
+// and costs, says on standard error how many answers came from it, and
+// names it in what the proofs rely on.
+func TestAnswerCache(t *testing.T) {
+	alone(t)
+	root := t.TempDir()
+	defer solver.SearchRepositoriesBelow(filepath.Dir(root))()
+	saved := costStderr
+	defer func() { costStderr = saved }()
+	dir := filepath.Join(root, "cache")
+	var printed [2]bytes.Buffer
+	var costs [2]map[string]costLine
+	var usages []*Usage
+	// The two spellings of the directory are two solvers in the process,
+	// so that the second reads what the first wrote instead of what its
+	// process kept.
+	for i, spelling := range []string{dir, dir + string(filepath.Separator)} {
+		costStderr = &printed[i]
+		analyzer := newAnalyzer()
+		for name, value := range map[string]string{"cache": spelling, "trusted": filepath.Join("testdata", "trusted.yaml")} {
+			if err := analyzer.Flags.Set(name, value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		collected := collectCosts(analyzer)
+		graph := runCorpus(t, analyzer, "defects", "paper")
+		costs[i], _ = collected()
+		if i == 1 {
+			for _, action := range graph.Roots {
+				usages = append(usages, action.Result.(*Usage))
+			}
+		}
+	}
+	if printed[0].Len() > 0 {
+		t.Errorf("a run with nothing in the cache printed %q", printed[0].String())
+	}
+	if !maps.Equal(costs[0], costs[1]) || len(costs[0]) == 0 {
+		t.Errorf("the costs differ with answers from the cache:\n%v\n%v", costs[0], costs[1])
+	}
+	for _, pkg := range []string{"defects", "paper"} {
+		problems := 0
+		for key, line := range costs[0] {
+			if strings.HasPrefix(key, pkg+"\t") {
+				problems += line.problems
+			}
+		}
+		want := fmt.Sprintf("vego: %d of the %d answers of Z3 that the proofs of %s rest on came from the answer cache in %s\n", problems, problems, pkg, dir)
+		if !strings.Contains(printed[1].String(), want) {
+			t.Errorf("the second run printed %q, want a line %q", printed[1].String(), want)
+		}
+	}
+	if report := TrustReport(usages, "."); !strings.Contains(report, "Answers of Z3 read from the answer cache: "+dir+"\n") {
+		t.Errorf("the trust report does not name the cache:\n%s", report)
 	}
 }

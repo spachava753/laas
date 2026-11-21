@@ -8,6 +8,7 @@
 package solver
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -84,6 +85,9 @@ type Cost struct {
 	Bytes  int
 	Effort int64
 	Cached bool
+	// Stored is set when the answer was read from the cache on disk, by
+	// this problem or by one with the same text before it in the process.
+	Stored bool
 	Time   time.Duration
 }
 
@@ -138,6 +142,8 @@ func (s *Solver) Model(facts []*logic.Term, opts Options, consts []*logic.Term) 
 		result = Timeout
 	case err == errMemory:
 		result = OutOfMemory
+	case errors.As(err, new(*CacheError)):
+		panic(err)
 	case err != nil:
 		panic(&Fault{err, dump(remarked)})
 	case a.status == "unsat":
@@ -154,7 +160,7 @@ func (s *Solver) Model(facts []*logic.Term, opts Options, consts []*logic.Term) 
 		if err != nil || result == OutOfMemory {
 			effort = -1
 		}
-		opts.Observe(Cost{Result: result, Bytes: len(script), Effort: effort, Cached: cached, Time: a.took})
+		opts.Observe(Cost{Result: result, Bytes: len(script), Effort: effort, Cached: cached, Stored: a.stored, Time: a.took})
 	}
 	if result == Proved || err != nil {
 		return result, nil

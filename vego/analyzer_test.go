@@ -378,4 +378,12 @@ func TestShownAnnotationsScan(t *testing.T) {
 func init() {
 	joinSizeLimit = 1 << 12
 	growthRatio = 8
+	// The numbers in the keys of regions start at 7, so that the types of
+	// a package cross from one digit to two at another place than they do
+	// in a run of laas, and the keys sort in another order; the table of
+	// costs, recorded at 0, must still be exact.
+	typeKeyBase = 7
+	// VEGO_CACHE names a cache of answers for the tests to use; see
+	// -vego.cache. Without it every test asks Z3.
+	testCache = os.Getenv("VEGO_CACHE")
 }

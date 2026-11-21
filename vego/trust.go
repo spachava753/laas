@@ -414,6 +414,9 @@ type Usage struct {
 	// Unentered holds the types that proofs looked up an entry for and
 	// found none: such a proof rests on the type having no contract.
 	Unentered []Unentered
+	// AnswerCaches lists the cache directories that answers of Z3 the
+	// proofs rest on were read from; see -vego.cache.
+	AnswerCaches []string
 }
 
 // Unentered is a type, by the key its entry would have, that the proofs of
@@ -479,6 +482,11 @@ func (u *Usage) add(other *Usage) {
 			u.ProjectKeys = map[string][]string{}
 		}
 		u.ProjectKeys[file] = keys
+	}
+	for _, dir := range other.AnswerCaches {
+		if !slices.Contains(u.AnswerCaches, dir) {
+			u.AnswerCaches = append(u.AnswerCaches, dir)
+		}
 	}
 	for _, none := range other.Unentered {
 		if !slices.Contains(u.Unentered, none) {

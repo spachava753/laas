@@ -55,6 +55,9 @@ type Solver struct {
 	path  string
 	idle  chan *process
 	slots chan struct{}
+	// disk keeps answers between runs when a cache directory is given;
+	// see disk.go.
+	disk *disk
 	// answers holds what Z3 answered to each problem whose answer does
 	// not depend on the machine, by the text of the problem and the names
 	// whose values were asked; see answer. queue holds the keys in the
@@ -75,32 +78,76 @@ var (
 )
 
 type solverOrError struct {
-	s   *Solver
-	err error
+	s     *Solver
+	err   error
+	cache bool
 }
 
 // New returns the solver that runs the Z3 binary at path, or the one named
-// z3 on PATH if path is empty. It fails unless the binary is Z3 of exactly
-// the pinned version. Solvers are shared: one binary has one pool of
-// processes in a program. The error says why and how to install Z3 the
-// first time; later calls for the same binary get a short error that
-// refers to it, so that a run over many packages says it once.
-func New(path string) (*Solver, error) {
+// z3 on PATH if path is empty, and keeps answers only in the process; see
+// Open.
+func New(path string) (*Solver, error) { return Open(path, "") }
+
+// Open returns the solver that runs the Z3 binary at path, or the one named
+// z3 on PATH if path is empty, and keeps answers between runs in the cache
+// directory when one is given. It fails unless the binary is Z3 of exactly
+// the pinned version, and, with a cache, unless the directory may hold one
+// and the binary is the Z3 that answers. Solvers are shared: one binary and
+// one cache have one pool of processes in a program. The error says why and
+// how to install Z3 the first time; later calls for the same binary get a
+// short error that refers to it, so that a run over many packages says it
+// once.
+func Open(path, cache string) (*Solver, error) {
 	solversMu.Lock()
 	defer solversMu.Unlock()
-	if found, ok := solvers[path]; ok {
+	if found, ok := solvers[path+"\x00"+cache]; ok {
 		if found.err != nil {
 			name := "the z3 on PATH"
 			if path != "" {
 				name = path
+			}
+			if found.cache {
+				return nil, fmt.Errorf("the answer cache %s cannot be used, as said for another package", cache)
 			}
 			return nil, fmt.Errorf("proving obligations needs Z3 %s, and %s cannot be used, as said for another package; %s", Version, name, installHint)
 		}
 		return found.s, nil
 	}
 	s, err := start(path)
-	solvers[path] = &solverOrError{s, err}
+	cacheFailed := false
+	if err == nil && cache != "" {
+		err = s.openCache(cache)
+		cacheFailed = err != nil
+	}
+	if err != nil {
+		s = nil
+	}
+	solvers[path+"\x00"+cache] = &solverOrError{s, err, cacheFailed}
 	return s, err
+}
+
+// CacheDir returns the directory of the answer cache, or "" for none.
+func (s *Solver) CacheDir() string {
+	if s.disk == nil {
+		return ""
+	}
+	return s.disk.root
+}
+
+// openCache opens the cache directory and identifies the first process,
+// which names the directory its answers are kept in.
+func (s *Solver) openCache(cache string) error {
+	d, err := openDisk(cache)
+	if err != nil {
+		return err
+	}
+	s.disk = d
+	p, err := s.acquire()
+	if err != nil {
+		return err
+	}
+	s.idle <- p
+	return nil
 }
 
 // start finds the binary and checks its version.
@@ -166,6 +213,18 @@ func (s *Solver) spawn() (*process, error) {
 		_ = cmd.Wait()
 		close(p.done)
 	}()
+	if s.disk != nil {
+		// What the process runs is read once it has answered, so that a
+		// program that starts another with exec has done so.
+		if _, err := s.exchange(p, "", time.Now().Add(wallLimit)); err != nil {
+			return nil, err
+		}
+		if err := s.disk.identify(cmd.Process.Pid, s.path); err != nil {
+			_ = cmd.Process.Kill()
+			<-p.done
+			return nil, &CacheError{err}
+		}
+	}
 	return p, nil
 }
 
@@ -221,6 +280,9 @@ type answer struct {
 	// time it took once a process was free.
 	effort int64
 	took   time.Duration
+	// stored is set for an answer read from the cache on disk, and for
+	// one the process kept after reading it there.
+	stored bool
 }
 
 // answer returns Z3's answer to a problem, from the cache when the same
@@ -238,6 +300,11 @@ type answer struct {
 // unknown because Z3 was canceled is kept: Z3 is given no time limit of its
 // own, so it cancels a problem only at the resource limit, which exhausted
 // takes it for, with the same count on every run.
+//
+// With a cache directory, an answer not kept in the process is looked for
+// there before Z3 is asked, and every answer kept in the process is also
+// kept there; see disk.go. An answer read from there is marked stored, and
+// so is the same answer when the process gives it again.
 func (s *Solver) answer(script string, values []string) (answer, bool, error) {
 	key := script + "\x00" + strings.Join(values, " ")
 	s.mu.Lock()
@@ -247,10 +314,58 @@ func (s *Solver) answer(script string, values []string) (answer, bool, error) {
 		a.took = 0
 		return a, true, nil
 	}
-	a, err := s.run(script, values)
+	if s.disk != nil {
+		if r, ok := s.disk.read(key); ok {
+			a, err := interpret(r)
+			if err == nil && (len(values) > 0 && a.status != "unsat") != r.asked {
+				err = errors.New("its values do not go with its answer")
+			}
+			if err != nil {
+				cacheFault(s.disk.root, "the answer cache entry %s is damaged: %v", s.disk.entryPath(key), err)
+			}
+			// A sample of the answers read, drawn anew for each run, is
+			// solved again to watch the premise.
+			s.disk.mu.Lock()
+			watched := s.disk.rng.IntN(watchRate) == 0
+			s.disk.mu.Unlock()
+			if watched {
+				s.watch(key, script, values, r)
+			}
+			a.stored = true
+			s.remember(key, a)
+			return a, true, nil
+		}
+	}
+	a, r, err := s.run(script, values)
 	if err != nil || (a.status == "unknown" && machineBound(a.reason)) {
 		return a, false, err
 	}
+	if s.disk != nil {
+		s.disk.write(key, r)
+	}
+	s.remember(key, a)
+	return a, false, nil
+}
+
+// watch solves again a problem whose answer was read from disk and stops
+// the run if Z3 now answers otherwise. An answer that depends on the
+// machine says nothing about the premise.
+func (s *Solver) watch(key, script string, values []string, stored reply) {
+	live, r, err := s.run(script, values)
+	if errors.As(err, new(*CacheError)) {
+		panic(err)
+	}
+	if err != nil || (live.status == "unknown" && machineBound(live.reason)) {
+		return
+	}
+	if !r.equal(stored) {
+		cacheFault(s.disk.root, "Z3 answers a problem otherwise than the answer cache entry %s says, %q against %q, so the answers kept there cannot be trusted", s.disk.entryPath(key), r.check, stored.check)
+	}
+}
+
+// remember keeps an answer in the process, forgetting the oldest beyond
+// cacheBytes.
+func (s *Solver) remember(key string, a answer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.answers[key]; !ok && len(key) <= cacheBytes {
@@ -263,7 +378,6 @@ func (s *Solver) answer(script string, values []string) (answer, bool, error) {
 			s.queue = s.queue[1:]
 		}
 	}
-	return a, false, nil
 }
 
 // errTimeout is returned when a problem runs past the wall limit, and
@@ -279,36 +393,40 @@ var (
 // asks for their values in the model. Every reply other than the expected
 // ones is an error: a problem that Z3 could not read was not proved,
 // whatever else it printed.
-func (s *Solver) run(script string, values []string) (answer, error) {
+func (s *Solver) run(script string, values []string) (answer, reply, error) {
 	p, err := s.acquire()
 	if err != nil {
-		return answer{}, fmt.Errorf("starting %s: %v", s.path, err)
+		var cacheErr *CacheError
+		if errors.As(err, &cacheErr) {
+			return answer{}, reply{}, err
+		}
+		return answer{}, reply{}, fmt.Errorf("starting %s: %v", s.path, err)
 	}
 	began := time.Now()
 	deadline := began.Add(wallLimit)
 	lines, err := s.exchange(p, "(reset)\n"+script+"(get-info :reason-unknown)\n(get-info :rlimit)\n", deadline)
 	if err != nil {
-		return answer{}, err
+		return answer{}, reply{}, err
 	}
+	r := reply{check: lines}
 	a, err := parseAnswer(lines)
-	if err != nil {
-		s.discard(p)
-		return answer{}, fmt.Errorf("%s: %v", s.path, err)
-	}
-	if len(values) > 0 && a.status != "unsat" {
+	if err == nil && len(values) > 0 && a.status != "unsat" {
 		lines, err := s.exchange(p, "(get-value ("+strings.Join(values, " ")+"))\n", deadline)
 		if err != nil {
-			return answer{}, err
+			return answer{}, reply{}, err
 		}
-		// Z3 may have no model to give after unknown, which it says with
-		// this error; that only means there are no values. Any other
-		// error is a fault.
-		if len(lines) != 1 || !strings.HasPrefix(lines[0], "(error") || !strings.Contains(lines[0], "model is not available") {
-			if a.values, err = parseValues(strings.Join(lines, "\n")); err != nil {
-				s.discard(p)
-				return answer{}, fmt.Errorf("%s: %v", s.path, err)
-			}
+		r.values, r.asked = lines, true
+		if noModel(lines) {
+			// The error names the line it is on, which counts what the
+			// process read before; kept on disk, the reply would depend on
+			// which process gave it.
+			r.values = []string{noModelReply}
 		}
+		a, err = interpret(r)
+	}
+	if err != nil {
+		s.discard(p)
+		return answer{}, reply{}, fmt.Errorf("%s: %v", s.path, err)
 	}
 	// A process that ran out of resources may hold on to memory; a fresh
 	// one serves the next problem.
@@ -318,7 +436,36 @@ func (s *Solver) run(script string, values []string) (answer, error) {
 	} else {
 		s.idle <- p
 	}
-	return a, nil
+	return a, r, nil
+}
+
+// noModelReply is how a reply to a get-value that Z3 had no model for is
+// kept.
+const noModelReply = `(error "model is not available")`
+
+// noModel reports whether the lines are Z3's error for a get-value without
+// a model.
+func noModel(lines []string) bool {
+	return len(lines) == 1 && strings.HasPrefix(lines[0], "(error") && strings.Contains(lines[0], "model is not available")
+}
+
+// interpret reads a reply, live or kept on disk: the answer, and the values
+// when they were asked. Z3 may have no model to give after unknown, which
+// it says with an error; that only means there are no values. Any other
+// reply that is not an answer is an error.
+func interpret(r reply) (answer, error) {
+	a, err := parseAnswer(r.check)
+	if err != nil || !r.asked {
+		return a, err
+	}
+	if a.status == "unsat" {
+		return answer{}, errors.New("values were asked after unsat")
+	}
+	if noModel(r.values) {
+		return a, nil
+	}
+	a.values, err = parseValues(strings.Join(r.values, "\n"))
+	return a, err
 }
 
 // exchange sends commands to a process and reads what it prints up to a

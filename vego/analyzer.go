@@ -143,13 +143,18 @@ type observer struct {
 	verifier func(pv *pkgVerifier)
 }
 
+// testCache is the default of -vego.cache, which only the tests set: from
+// VEGO_CACHE, so that a run of the tests without it never depends on what a
+// directory holds.
+var testCache string
+
 // newAnalyzer builds the analyzer with its flags. A run loads the trusted
 // contracts, collects the annotations of the package, verifies every
 // annotated function, applies the always-fails rule, and publishes the
 // verified contracts and the trust the proofs rest on. For a caching driver
 // it only reports that nothing was verified.
 func newAnalyzer() *analysis.Analyzer {
-	effort, audit, trustPath, otherTags, z3Path, printCost := 0, false, "", "", "", false
+	effort, audit, trustPath, otherTags, z3Path, printCost, cacheDir := 0, false, "", "", "", false, ""
 	analyzer := &analysis.Analyzer{
 		Name: "vego",
 		Doc: `verifies functions against their // @ specifications
@@ -173,6 +178,12 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		"z3",
 		"",
 		"path of the Z3 "+solver.Version+" binary, instead of the z3 found on PATH",
+	)
+	analyzer.Flags.StringVar(
+		&cacheDir,
+		"cache",
+		testCache,
+		"directory that keeps the answers of Z3 between runs, outside any module or repository; off when empty",
 	)
 	analyzer.Flags.BoolVar(
 		&audit,
@@ -217,6 +228,8 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 				result, err = nil, r.err
 			case *solver.Fault:
 				result, err = nil, fmt.Errorf("Z3 failed: %v", r)
+			case *solver.CacheError:
+				result, err = nil, fmt.Errorf("the answer cache cannot be used: %v", r)
 			case logic.TooLarge:
 				result, err = nil, fmt.Errorf("a formula built for an annotation of the package has grown beyond %d nodes, which is the limit", logic.MaxSize)
 			default:
@@ -249,6 +262,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			plain:           logic.NewResolver(),
 			trustSources:    map[*trustFile]*token.File{},
 			z3Path:          z3Path,
+			cacheDir:        cacheDir,
 			effort:          effort,
 			printCost:       printCost,
 		}
@@ -288,6 +302,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		if pv.printCost {
 			pv.printCosts(costStderr)
 		}
+		pv.noteStored(costStderr)
 		if found, ok := observers.Load(analyzer); ok {
 			o := found.(*observer)
 			if o.costs != nil {
@@ -470,6 +485,8 @@ type pkgVerifier struct {
 	z3Path string
 	z3     *solver.Solver
 	effort int
+	// cacheDir is the directory of the answer cache, or "" for none.
+	cacheDir string
 	// searchLimit is the last limit a question of a search for an input
 	// stopped at while the current function was verified, and searching
 	// counts the searches under way.

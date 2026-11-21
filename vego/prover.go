@@ -23,7 +23,7 @@ type solverUnavailable struct{ err error }
 // solver returns the solver for the package, starting it on first use.
 func (pv *pkgVerifier) solver() *solver.Solver {
 	if pv.z3 == nil {
-		s, err := solver.New(pv.z3Path)
+		s, err := solver.Open(pv.z3Path, pv.cacheDir)
 		if err != nil {
 			panic(solverUnavailable{err})
 		}

@@ -57,6 +57,11 @@ var typeKeys = struct {
 	known typeutil.Map
 }{}
 
+// typeKeyBase is where the numbers of typeKey start. The numbers depend on
+// the order in which packages and functions ask, so nothing sent to Z3 may
+// depend on them; the tests start them elsewhere to check that.
+var typeKeyBase = 0
+
 // typeKey names a type in the keys of memory regions. Types that are
 // identical apart from struct tags get the same key, so that a write through
 // one of them is seen through every other.
@@ -67,7 +72,7 @@ func typeKey(t types.Type) string {
 	if key, ok := typeKeys.known.At(t).(string); ok {
 		return key
 	}
-	key := fmt.Sprintf("%s#%d", types.TypeString(t, nil), typeKeys.known.Len())
+	key := fmt.Sprintf("%s#%d", types.TypeString(t, nil), typeKeyBase+typeKeys.known.Len())
 	typeKeys.known.Set(t, key)
 	return key
 }

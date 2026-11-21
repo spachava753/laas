@@ -68,7 +68,10 @@ func collectCosts(analyzer *analysis.Analyzer) func() (map[string]costLine, stri
 			line.limits += c.open
 			costs[key] = line
 			if key == guideCostKey {
-				quoted += costText(pass.Fset, c)
+				// The guide quotes a run without the answer cache.
+				plain := *c
+				plain.stored = 0
+				quoted += costText(pass.Fset, &plain)
 			}
 		}
 	}})

@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/big"
 	"math/rand/v2"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -816,7 +817,13 @@ func counterexample(hyps []*logic.Term, goal *logic.Term, models []model) (found
 // integers, one boolean, and the sequences built from one; the wide ones add
 // every other kind of term the logic has.
 func TestProveIsSound(t *testing.T) {
-	z3 := solverFor(t)
+	// VEGO_CACHE names a cache of answers that this test may use; every
+	// proved goal is still checked by evaluation, so a wrong answer kept
+	// there is caught as a wrong answer of Z3 is. Without it, Z3 answers.
+	z3, err := Open("", os.Getenv("VEGO_CACHE"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	small, large := models()
 	tests := []struct {
 		name     string

@@ -106,6 +106,12 @@ func TrustReport(usages []*Usage, dir string) string {
 	b.WriteString("vego trust report\n\n")
 	b.WriteString("Every proof vego reports as successful holds only if the contracts below are true.\n")
 	b.WriteString("None of them is checked against the code of the function it describes.\n\n")
+	if len(total.AnswerCaches) > 0 {
+		caches := slices.Sorted(slices.Values(total.AnswerCaches))
+		fmt.Fprintf(&b, "Answers of Z3 read from the answer cache: %s\n", strings.Join(caches, ", "))
+		b.WriteString("  A proof that rests on them holds only if nothing but vego wrote there; run without -vego.cache to prove\n" +
+			"  without them.\n\n")
+	}
 	section("Project contracts in use", false)
 	section("Shipped contracts in use", true)
 	// A state means what its declaration says; every entry that speaks of
