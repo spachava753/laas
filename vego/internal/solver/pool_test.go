@@ -718,3 +718,41 @@ func TestWatchFailure(t *testing.T) {
 		}
 	}
 }
+
+// TestDuplicateProcess checks that a process found twice among the idle
+// ones fails the next question with an internal error before either copy
+// serves it: two askers would otherwise share one process. One process is
+// held by a question, so that the counts of the pool still agree, and the
+// copy is put there by hand, which stands for any defect that would.
+func TestDuplicateProcess(t *testing.T) {
+	s, _ := pooled(t, 2)
+	held, entered := newSignal(), make(chan struct{}, 1)
+	var releases atomic.Int64
+	at(t, func(point string, p *process) {
+		if point == "release" && releases.Add(1) == 1 {
+			entered <- struct{}{}
+			<-held.ch
+		}
+	})
+	defer held.fire()
+	first := ask(s, 1, Options{})
+	<-entered
+	if got := s.Prove(nil, proof(2), Options{}); got != Proved {
+		t.Fatalf("the second question got %v, want proved", got)
+	}
+	s.pool.mu.Lock()
+	if len(s.pool.idle) != 1 || s.pool.live != 2 {
+		s.pool.mu.Unlock()
+		t.Fatalf("%d idle processes of %d, want 1 of 2", len(s.pool.idle), s.pool.live)
+	}
+	s.pool.idle = append(s.pool.idle, s.pool.idle[0])
+	s.pool.mu.Unlock()
+	if o := ask(s, 3, Options{}); !o.within(5*time.Second) || !o.internal() {
+		t.Errorf("a question on a pool with a process twice among the idle ones got %v (panic %v), want an internal error", o.result, o.panic)
+	}
+	held.fire()
+	<-first.done
+	s.pool.mu.Lock()
+	s.pool.idle = slices.Compact(s.pool.idle)
+	s.pool.mu.Unlock()
+}

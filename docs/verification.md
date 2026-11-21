@@ -1885,13 +1885,13 @@ On the next run, a question that is the same as one asked before is answered fro
 
 The answers are the same with the cache and without it. Each run that uses the cache solves again a random sample of the answers it reads, about one in 256, and fails the package if Z3 now answers otherwise. A wrong entry is therefore found in some runs and not in others.
 
-Two runs that use one directory at the same time can count the answers from the cache differently. The count depends on which run solved a question first and wrote its answer. The messages and the other figures of `-vego.cost` are the same in both runs.
-
 A package that used an answer from the directory says so on standard error, with a line such as:
 
 ```text
 vego: 157 of the 157 answers of Z3 for example.com/ring came from the answer cache in /home/you/.cache/vego
 ```
+
+These counts depend on what the directory held when the run asked. A run on a warm directory counts answers that a run on an empty one does not. Two runs that use one directory at the same time can count differently, depending on which run solved a question first and wrote its answer. The other messages and the other figures of `-vego.cost` are the same in every run.
 
 The trust report names the directory too, because the proofs then rest on what it holds. See [The trust report](#the-trust-report) and [What a proof assumes](#what-a-proof-assumes).
 
@@ -1899,7 +1899,7 @@ Give a directory that does not exist yet, or an empty one. `laas` marks it as an
 
 The answers are kept for the Z3 binary that gave them, together with the libraries it loads and the processor. Another Z3, or the same one after a system update that changes its libraries, starts with an empty directory of its own. `-vego.z3` must name the Z3 binary itself, not a script that starts it.
 
-When `vego` cannot trust what it finds in the directory, the package fails with a message such as the one below. Other packages of the run go on, and `laas` exits with status 1.
+When `vego` cannot trust what it finds in the directory, the package fails with a message such as the one below, and `laas` exits with status 1. Other packages of the run go on, unless one of the extra verifiers of [Using the idle Z3 processes](#using-the-idle-z3-processes) found the problem. Then every package verified after it fails too.
 
 ```text
 vego: the answer cache entry /home/you/.cache/vego/z3-0f5c.../c5/a4db... is damaged: it does not end in its hash; to empty the cache, remove /home/you/.cache/vego
@@ -5511,7 +5511,7 @@ This table lists the most common messages.
 | `the answer cache DIR is inside ..., which holds go.mod`, and similar | The `-vego.cache` directory is in a module or a repository. | Use a directory outside every module and repository, such as `$HOME/.cache/vego`. |
 | `DIR is not empty and is not an answer cache; give -vego.cache a new or empty directory` | The `-vego.cache` directory holds files and was not made by `-vego.cache`. | Give a new or empty directory, such as `$HOME/.cache/vego`. |
 | `the answer cache needs the Z3 binary itself, and P runs Q` | `-vego.z3` names a script or a link to another program, and `-vego.cache` is set. | Name the Z3 binary with `-vego.z3`, or run without `-vego.cache`. |
-| `internal error of vego: ...; run again with -vego.speculate=false, and report it at https://github.com/spachava753/laas/issues` | `vego` found a defect in itself while it asked Z3, such as a question handed to a Z3 process that had been stopped. No proof rests on what the defect touched. The package fails, and so does every later package of the run. | Run again with `-vego.speculate=false`, and report the message. |
+| `internal error of vego: ...; run again with -vego.speculate=false, and report it at https://github.com/spachava753/laas/issues` | `vego` found a defect in itself while it asked Z3, such as a question handed to a Z3 process that had been stopped. The package fails, and so does every later package of the run. | Run again with `-vego.speculate=false`, and report the message. |
 
 ## What is not supported
 

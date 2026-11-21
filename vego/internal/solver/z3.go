@@ -303,7 +303,7 @@ type pool struct {
 // check verifies the states of the pool, with its lock held: no idle
 // process is speculative, preempted, or ended; every process in
 // speculating is speculative and neither preempted nor ended; no process is
-// in both lists; and the counts agree with the lists. A violation is an
+// in the lists twice; and the counts agree with the lists. A violation is an
 // internal error, which check records and never panics with, since its
 // caller holds the lock: every later question fails with it (see broken),
 // and every waiter wakes to find it.
@@ -315,13 +315,16 @@ func (s *Solver) check() {
 			pl.cond.Broadcast()
 		}
 	}
-	for _, p := range pl.idle {
-		switch {
-		case p.speculative || p.preempted.Load() || p.ended:
-			fail("an idle process is speculative (%v), preempted (%v), or ended (%v)", p.speculative, p.preempted.Load(), p.ended)
+	listed := append(slices.Clip(pl.idle), pl.speculating...)
+	for i, p := range listed {
+		if slices.Contains(listed[:i], p) {
+			fail("a process is in the lists of idle and speculating processes twice")
 			return
-		case slices.Contains(pl.speculating, p):
-			fail("an idle process serves speculation")
+		}
+	}
+	for _, p := range pl.idle {
+		if p.speculative || p.preempted.Load() || p.ended {
+			fail("an idle process is speculative (%v), preempted (%v), or ended (%v)", p.speculative, p.preempted.Load(), p.ended)
 			return
 		}
 	}
