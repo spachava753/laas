@@ -60,7 +60,10 @@ callbacks	bytes.TrimFunc	1	4213	0
 callbacks	callbacks.AsValue	1	46	0
 callbacks	callbacks.AtFive	9	14399	0
 callbacks	callbacks.AtFour	6	6822	0
+callbacks	callbacks.AtFourDeferred	3	2083	0
 callbacks	callbacks.AtFourInLiteral	6	6822	0
+callbacks	callbacks.AtFourInPlace	3	2083	0
+callbacks	callbacks.AtFourThroughValue	4	249	0
 callbacks	callbacks.BinarySearch	13	68202	0
 callbacks	callbacks.BothFixed	4	301	0
 callbacks	callbacks.Bump	11	4569	0
@@ -110,6 +113,7 @@ callbacks	callbacks.Outside	7	2028	0
 callbacks	callbacks.Pair	8	2328	0
 callbacks	callbacks.PastTheEnd	7	5374	0
 callbacks	callbacks.Random	8	4665	0
+callbacks	callbacks.RangeAfterFailure	5	3768	0
 callbacks	callbacks.ReadBeside	6	3100	0
 callbacks	callbacks.ReadsOther	13	27613	0
 callbacks	callbacks.ReadsWhatIsWritten	11	9930	0
@@ -192,6 +196,7 @@ callbacks	callbacks.pair	1	381	0
 callbacks	callbacks.positive	1	138	0
 callbacks	callbacks.primed	0	0	0
 callbacks	callbacks.probe	1	354	0
+callbacks	callbacks.probeAt	3	505	0
 callbacks	callbacks.relayAll	8	2801	0
 callbacks	callbacks.reserved	1	154	0
 callbacks	callbacks.runsOnly	1	154	0

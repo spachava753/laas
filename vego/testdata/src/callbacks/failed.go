@@ -50,3 +50,49 @@ func HandsSeven() {
 func AtFourInLiteral(s *stage) {
 	_ = sort.Search(1, func(i int) (r bool) { return s.at(i) }) // want `vego: precondition of at may not hold: s.n = 5, in the function literal run by sort.Search`
 }
+
+// AtFourInPlace calls at from a literal called where it is written, which
+// has no consistency check after it.
+//
+// @Requires s != nil And s.n = 4
+// @Ensures True
+func AtFourInPlace(s *stage) {
+	func() {
+		_ = s.at(0) // want `vego: precondition of at may not hold: s.n = 5, in the function literal called at`
+	}()
+}
+
+// AtFourDeferred defers the call.
+//
+// @Requires s != nil And s.n = 4
+// @Ensures True
+func AtFourDeferred(s *stage) {
+	defer s.at(0) // want `vego: precondition of at may not hold: s.n = 5`
+}
+
+// probeAt is a function type with a contract.
+//
+// @Requires i = 5
+// @Ensures r
+type probeAt func(i int) (r bool)
+
+// AtFourThroughValue calls a function value whose contract fails for
+// certain.
+//
+// @Requires f != nil
+// @Ensures True
+func AtFourThroughValue(f probeAt) {
+	_ = f(4) // want `vego: precondition of f may not hold: i = 5`
+}
+
+// RangeAfterFailure ranges over a map after an obligation that fails for
+// certain, which the check at the range does not take for a state that no
+// map can be in.
+//
+// @Requires s != nil And s.n = 4
+// @Ensures True
+func RangeAfterFailure(s *stage, m map[int]int) {
+	_ = s.at(0) // want `vego: precondition of at may not hold: s.n = 5`
+	for range m {
+	}
+}
