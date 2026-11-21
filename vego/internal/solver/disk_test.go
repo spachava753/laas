@@ -69,12 +69,15 @@ func opened(t *testing.T, path, dir string) (*Solver, error) {
 // starts a new one.
 func endIdle(s *Solver) {
 	for {
-		select {
-		case p := <-s.idle:
-			s.discard(p)
-		default:
+		s.pool.mu.Lock()
+		if len(s.pool.idle) == 0 {
+			s.pool.mu.Unlock()
 			return
 		}
+		p := s.pool.idle[len(s.pool.idle)-1]
+		s.pool.idle = s.pool.idle[:len(s.pool.idle)-1]
+		s.pool.mu.Unlock()
+		s.discard(p)
 	}
 }
 
@@ -689,7 +692,7 @@ func TestStoredAnswersAreZ3s(t *testing.T) {
 		}
 		cut := strings.LastIndexByte(key, 0)
 		script, names := key[:cut], strings.Fields(key[cut+1:])
-		_, r, err := live.run(script, names)
+		_, r, err := live.solve(script, names, false)
 		if err != nil {
 			t.Fatal(err)
 		}

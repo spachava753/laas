@@ -10,9 +10,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -24,6 +26,9 @@ const Version = "5.4.1"
 // installHint says how to get the pinned version.
 const installHint = "install Z3 " + Version + " from https://github.com/Z3Prover/z3/releases/tag/z3-" + Version +
 	" and put its bin/z3 on PATH, or name it with -vego.z3"
+
+// Processes returns how many Z3 processes a solver keeps at most.
+func Processes() int { return maxProcesses }
 
 // maxProcesses bounds the Z3 processes one run of vego keeps. It is memory,
 // not processors, that runs out first when several large problems are
@@ -52,9 +57,13 @@ var settings = []string{
 // A Solver hands problems to a pool of Z3 processes of the pinned version.
 // It is safe for concurrent use.
 type Solver struct {
-	path  string
-	idle  chan *process
-	slots chan struct{}
+	path string
+	// pool holds the processes; see acquire.
+	pool pool
+	// flights holds the problems being solved, by key, so that a problem
+	// asked while it is solved is not solved twice; see answer.
+	flightsMu sync.Mutex
+	flights   map[string]*flight
 	// disk keeps answers between runs when a cache directory is given;
 	// see disk.go.
 	disk *disk
@@ -142,11 +151,11 @@ func (s *Solver) openCache(cache string) error {
 		return err
 	}
 	s.disk = d
-	p, err := s.acquire()
+	p, err := s.acquire(false)
 	if err != nil {
 		return err
 	}
-	s.idle <- p
+	s.release(p)
 	return nil
 }
 
@@ -177,8 +186,8 @@ func start(path string) (*Solver, error) {
 	}
 	return &Solver{
 		path:    resolved,
-		idle:    make(chan *process, maxProcesses),
-		slots:   make(chan struct{}, maxProcesses),
+		pool:    pool{limit: maxProcesses},
+		flights: map[string]*flight{},
 		answers: map[string]answer{},
 	}, nil
 }
@@ -191,6 +200,12 @@ type process struct {
 	stderr *strings.Builder
 	done   chan struct{}
 	served int
+	// speculative is set while the process solves a speculative problem,
+	// and preempted once it has been ended to free it for another; see
+	// acquire.
+	speculative bool
+	preempted   atomic.Bool
+	ended       bool
 }
 
 func (s *Solver) spawn() (*process, error) {
@@ -243,39 +258,171 @@ func (l *lockedWriter) Write(b []byte) (int, error) {
 	return l.w.Write(b)
 }
 
+// pool is the processes of a solver: those idle, how many run, which
+// serve speculative problems, and how many main askers wait for one.
+type pool struct {
+	mu          sync.Mutex
+	cond        *sync.Cond
+	limit       int
+	idle        []*process
+	live        int
+	speculating []*process
+	specHeld    int
+	mainWaiting int
+	// busy is when an asker that is not speculative last found every
+	// process busy.
+	busy time.Time
+}
+
+// quiet is how long after an asker found every process busy no
+// speculative problem starts: while other askers keep every process busy, a
+// speculative problem would mostly be ended for one of theirs, which wastes
+// its work and the start of a process.
+var quiet = 100 * time.Millisecond
+
 // acquire returns an idle process, or starts one if fewer than the limit
-// are running, or waits for one.
-func (s *Solver) acquire() (*process, error) {
-	select {
-	case p := <-s.idle:
-		return p, nil
-	default:
+// run, or waits for one. Speculative problems, which only fill the cache
+// for a verification that will ask them later, never delay another: a
+// speculative asker takes a process only while no other asker waits and at
+// most limit-1 processes serve speculation, and an asker that is not
+// speculative and finds every process busy ends one that serves
+// speculation, whose asker then gets no answer (errPreempted).
+func (s *Solver) acquire(speculative bool) (*process, error) {
+	pl := &s.pool
+	pl.mu.Lock()
+	if pl.cond == nil {
+		pl.cond = sync.NewCond(&pl.mu)
 	}
-	select {
-	case p := <-s.idle:
-		return p, nil
-	case s.slots <- struct{}{}:
-		p, err := s.spawn()
-		if err != nil {
-			<-s.slots
-			return nil, err
+	if !speculative {
+		pl.mainWaiting++
+	}
+	// pending is the process this asker ended to free a place, until its
+	// place is free.
+	var pending *process
+	for {
+		allowed := !speculative || (pl.mainWaiting == 0 && pl.specHeld < pl.limit-1)
+		if pending != nil && pending.ended {
+			pending = nil
 		}
-		if s.disk != nil {
-			if err := s.identified(p); err != nil {
+		if !speculative && len(pl.idle) == 0 && pl.live == pl.limit {
+			pl.busy = time.Now()
+		}
+		if wait := quiet - time.Since(pl.busy); allowed && speculative && wait > 0 {
+			pl.mu.Unlock()
+			time.Sleep(wait)
+			pl.mu.Lock()
+			continue
+		}
+		switch {
+		case allowed && len(pl.idle) > 0:
+			p := pl.idle[len(pl.idle)-1]
+			pl.idle = pl.idle[:len(pl.idle)-1]
+			s.taken(p, speculative)
+			pl.mu.Unlock()
+			return p, nil
+		case allowed && pl.live < pl.limit:
+			pl.live++
+			if speculative {
+				pl.specHeld++
+			} else {
+				pl.mainWaiting--
+			}
+			pl.mu.Unlock()
+			p, err := s.spawn()
+			if err == nil && s.disk != nil {
+				// identified discards the process on any failure, which
+				// frees its place.
+				err = s.identified(p)
+			} else if err != nil {
+				pl.mu.Lock()
+				pl.live--
+				pl.mu.Unlock()
+			}
+			if err != nil {
+				pl.mu.Lock()
+				if speculative {
+					pl.specHeld--
+				}
+				pl.cond.Broadcast()
+				pl.mu.Unlock()
 				return nil, err
 			}
+			pl.mu.Lock()
+			if speculative {
+				p.speculative = true
+				pl.speculating = append(pl.speculating, p)
+			}
+			pl.mu.Unlock()
+			return p, nil
+		case !speculative && pending == nil && len(pl.speculating) > 0:
+			// The youngest speculative problem has done the least work.
+			pending = pl.speculating[len(pl.speculating)-1]
+			pl.speculating = pl.speculating[:len(pl.speculating)-1]
+			pending.preempted.Store(true)
+			_ = pending.cmd.Process.Kill()
 		}
-		return p, nil
+		pl.cond.Wait()
+	}
+}
+
+// taken records that p, taken from the idle processes with the pool's lock
+// held, now serves an asker.
+func (s *Solver) taken(p *process, speculative bool) {
+	pl := &s.pool
+	if speculative {
+		p.speculative = true
+		pl.speculating = append(pl.speculating, p)
+		pl.specHeld++
+	} else {
+		pl.mainWaiting--
+	}
+}
+
+// release returns a process that answered to the idle ones. A process
+// that was ended to free its place, after it had answered, is discarded.
+func (s *Solver) release(p *process) {
+	if p.preempted.Load() {
+		s.discard(p)
+		return
+	}
+	pl := &s.pool
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	s.unspeculate(p)
+	pl.idle = append(pl.idle, p)
+	if pl.cond != nil {
+		pl.cond.Broadcast()
+	}
+}
+
+// unspeculate removes p from the processes that serve speculation, with
+// the pool's lock held.
+func (s *Solver) unspeculate(p *process) {
+	pl := &s.pool
+	if p.speculative {
+		p.speculative = false
+		pl.specHeld--
+		if i := slices.Index(pl.speculating, p); i >= 0 {
+			pl.speculating = slices.Delete(pl.speculating, i, i+1)
+		}
 	}
 }
 
 // discard ends a process that can no longer be trusted to answer the next
-// problem, freeing its slot.
+// problem, freeing its place.
 func (s *Solver) discard(p *process) {
 	_ = p.cmd.Process.Kill()
 	<-p.done
 	_ = p.in.Close()
-	<-s.slots
+	pl := &s.pool
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	s.unspeculate(p)
+	p.ended = true
+	pl.live--
+	if pl.cond != nil {
+		pl.cond.Broadcast()
+	}
 }
 
 // answer is what Z3 said about one problem.
@@ -314,53 +461,138 @@ type answer struct {
 // there before Z3 is asked, and every answer kept in the process is also
 // kept there; see disk.go. An answer read from there is marked stored, and
 // so is the same answer when the process gives it again.
-func (s *Solver) answer(script string, values []string) (answer, bool, error) {
+func (s *Solver) answer(script string, values []string, speculative bool) (answer, bool, error) {
 	key := script + "\x00" + strings.Join(values, " ")
-	s.mu.Lock()
-	a, ok := s.answers[key]
-	s.mu.Unlock()
-	if ok {
-		a.took = 0
-		return a, true, nil
-	}
-	if s.disk != nil {
-		if r, ok := s.disk.read(key); ok {
-			a, err := interpret(r)
-			if err == nil && (len(values) > 0 && a.status != "unsat") != r.asked {
-				err = errors.New("its values do not go with its answer")
-			}
-			if err != nil {
-				cacheFault(s.disk.root, "the answer cache entry %s is damaged: %v", s.disk.entryPath(key), err)
-			}
-			// A sample of the answers read, drawn anew for each run, is
-			// solved again to watch the premise.
-			s.disk.mu.Lock()
-			watched := s.disk.rng.IntN(watchRate) == 0
-			s.disk.mu.Unlock()
-			if watched {
-				s.watch(key, script, values, r)
-			}
-			a.stored = true
-			s.remember(key, a)
+	for {
+		s.mu.Lock()
+		a, ok := s.answers[key]
+		s.mu.Unlock()
+		if ok {
+			a.took = 0
 			return a, true, nil
 		}
-	}
-	a, r, err := s.run(script, values)
-	if err != nil || (a.status == "unknown" && machineBound(a.reason)) {
+		if s.disk != nil {
+			if r, ok := s.disk.read(key); ok {
+				a, err := interpret(r)
+				if err == nil && (len(values) > 0 && a.status != "unsat") != r.asked {
+					err = errors.New("its values do not go with its answer")
+				}
+				if err != nil {
+					cacheFault(s.disk.root, "the answer cache entry %s is damaged: %v", s.disk.entryPath(key), err)
+				}
+				// A sample of the answers read, drawn anew for each run, is
+				// solved again to watch the premise.
+				s.disk.mu.Lock()
+				watched := s.disk.rng.IntN(watchRate) == 0
+				s.disk.mu.Unlock()
+				if watched {
+					s.watch(key, script, values, r, speculative)
+				}
+				a.stored = true
+				s.remember(key, a)
+				return a, true, nil
+			}
+		}
+		// A problem being solved is not solved again: the asker waits for
+		// its answer. A speculative asker takes a process before it
+		// says it solves the problem, so that no other asker waits while
+		// it waits for one; see acquire.
+		var p *process
+		if speculative {
+			var err error
+			if p, err = s.acquire(true); err != nil {
+				return answer{}, false, s.startError(err)
+			}
+		}
+		s.flightsMu.Lock()
+		if f := s.flights[key]; f != nil {
+			s.flightsMu.Unlock()
+			if p != nil {
+				s.release(p)
+			}
+			<-f.done
+			switch {
+			case f.kept:
+				a := f.a
+				a.took = 0
+				return a, true, nil
+			case f.speculative:
+				// A speculative asker that got no answer to keep, as when
+				// its process was ended for another asker, answers for
+				// nobody else.
+				continue
+			}
+			return f.a, false, f.err
+		}
+		s.mu.Lock()
+		_, known := s.answers[key]
+		s.mu.Unlock()
+		if known {
+			s.flightsMu.Unlock()
+			if p != nil {
+				s.release(p)
+			}
+			continue
+		}
+		f := &flight{done: make(chan struct{}), speculative: speculative}
+		s.flights[key] = f
+		s.flightsMu.Unlock()
+		var r reply
+		var err error
+		if p == nil {
+			a, r, err = s.solve(script, values, false)
+		} else {
+			a, r, err = s.run(p, script, values)
+		}
+		if err == nil && !(a.status == "unknown" && machineBound(a.reason)) {
+			if s.disk != nil {
+				s.disk.write(key, r)
+			}
+			s.remember(key, a)
+			f.kept = true
+		}
+		f.a, f.err = a, err
+		s.flightsMu.Lock()
+		delete(s.flights, key)
+		s.flightsMu.Unlock()
+		close(f.done)
 		return a, false, err
 	}
-	if s.disk != nil {
-		s.disk.write(key, r)
+}
+
+// flight is a problem being solved, which other askers of it wait for.
+// kept is set when its answer is kept; speculative when its asker is.
+type flight struct {
+	done        chan struct{}
+	a           answer
+	err         error
+	kept        bool
+	speculative bool
+}
+
+// solve takes a process and solves a problem with it.
+func (s *Solver) solve(script string, values []string, speculative bool) (answer, reply, error) {
+	p, err := s.acquire(speculative)
+	if err != nil {
+		return answer{}, reply{}, s.startError(err)
 	}
-	s.remember(key, a)
-	return a, false, nil
+	return s.run(p, script, values)
+}
+
+// startError says that a process could not be started; a CacheError says
+// itself why.
+func (s *Solver) startError(err error) error {
+	if errors.As(err, new(*CacheError)) {
+		return err
+	}
+	return fmt.Errorf("starting %s: %v", s.path, err)
 }
 
 // watch solves again a problem whose answer was read from disk and stops
 // the run if Z3 now answers otherwise. An answer that depends on the
 // machine says nothing about the premise.
-func (s *Solver) watch(key, script string, values []string, stored reply) {
-	live, r, err := s.run(script, values)
+func (s *Solver) watch(key, script string, values []string, stored reply, speculative bool) {
+	live, r, err := s.solve(script, values, speculative)
 	if errors.As(err, new(*CacheError)) {
 		panic(err)
 	}
@@ -389,6 +621,21 @@ func (s *Solver) remember(key string, a answer) {
 	}
 }
 
+// preemptedOr returns errPreempted for a process that was ended to free
+// its place for another asker, and err otherwise.
+func (s *Solver) preemptedOr(p *process, err error) error {
+	if p.preempted.Load() {
+		return errPreempted
+	}
+	return err
+}
+
+// errPreempted is returned to a speculative asker whose process was ended
+// to free its place for another asker; see acquire. It is no answer, and
+// only a speculative asker, whose answers serve nobody but the cache, can
+// get it.
+var errPreempted = errors.New("preempted")
+
 // errTimeout is returned when a problem runs past the wall limit, and
 // errMemory when Z3 stopped because it reached its memory limit, which it
 // does by printing an error and exiting.
@@ -411,27 +658,19 @@ const (
 // asks for their values in the model. Every reply other than the expected
 // ones is an error: a problem that Z3 could not read was not proved,
 // whatever else it printed.
-func (s *Solver) run(script string, values []string) (answer, reply, error) {
-	p, err := s.acquire()
-	if err != nil {
-		var cacheErr *CacheError
-		if errors.As(err, &cacheErr) {
-			return answer{}, reply{}, err
-		}
-		return answer{}, reply{}, fmt.Errorf("starting %s: %v", s.path, err)
-	}
+func (s *Solver) run(p *process, script string, values []string) (answer, reply, error) {
 	began := time.Now()
 	deadline := began.Add(wallLimit)
 	lines, err := s.exchange(p, resetCommand+script+infoCommands, deadline)
 	if err != nil {
-		return answer{}, reply{}, err
+		return answer{}, reply{}, s.preemptedOr(p, err)
 	}
 	r := reply{check: lines}
 	a, err := parseAnswer(lines)
 	if err == nil && len(values) > 0 && a.status != "unsat" {
 		lines, err := s.exchange(p, fmt.Sprintf(valuesCommand, strings.Join(values, " ")), deadline)
 		if err != nil {
-			return answer{}, reply{}, err
+			return answer{}, reply{}, s.preemptedOr(p, err)
 		}
 		r.values, r.asked = lines, true
 		if noModel(lines) {
@@ -452,7 +691,7 @@ func (s *Solver) run(script string, values []string) (answer, reply, error) {
 	if a.status == "unknown" && (exhausted(a.reason) || machineBound(a.reason)) {
 		s.discard(p)
 	} else {
-		s.idle <- p
+		s.release(p)
 	}
 	return a, r, nil
 }

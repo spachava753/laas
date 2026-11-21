@@ -67,6 +67,11 @@ type Options struct {
 	Forall []*logic.Term
 	// Observe, when set, is told what the problem cost.
 	Observe func(Cost)
+	// Speculative is set for a problem asked only so that its answer is in
+	// the cache when the verification that needs it asks: such a problem
+	// never delays another, and gets no answer when its process is needed
+	// elsewhere; see acquire.
+	Speculative bool
 	// ModelFirst, when not zero, is the resource limit of a first attempt
 	// at a satisfiability check without e-matching; see Model.
 	ModelFirst int
@@ -170,13 +175,15 @@ func (s *Solver) Model(facts []*logic.Term, opts Options, consts []*logic.Term) 
 			byName[name] = c
 		}
 	}
-	a, cached, err := s.answer(script, names)
+	a, cached, err := s.answer(script, names, opts.Speculative)
 	result := Unknown
 	switch {
 	case err == errTimeout:
 		result = Timeout
 	case err == errMemory:
 		result = OutOfMemory
+	case err == errPreempted:
+		result = Unknown
 	case errors.As(err, new(*CacheError)):
 		panic(err)
 	case err != nil:

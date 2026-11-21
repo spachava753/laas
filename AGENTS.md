@@ -19,7 +19,9 @@ Those commands ask Z3 every question. To run the tests of `vego` with answers ke
 VEGO_CACHE="$HOME/.cache/vego-tests" go test ./...
 ```
 
-The variable is read by the test binaries of `vego` and its solver, never by `laas`. Without it every run is cold. Run without it before you ask for a review or finish a change, and whenever a result might depend on what the directory holds. To empty the cache, remove the directory.
+The variable is read by the test binaries of `vego` and its solver, never by `laas`.
+
+`vego` also verifies the functions of a package ahead, on Z3 processes that would be idle, with up to three more verifiers in the process (`-vego.speculate`, on by default). That changes only the time, and costs up to a quarter more memory in the runs measured; `-vego.speculate=false` turns it off for `laas`, and the tests run with it on. Without it every run is cold. Run without it before you ask for a review or finish a change, and whenever a result might depend on what the directory holds. To empty the cache, remove the directory.
 
 `laas` must be built by a Go that is at least as new as the `go` command it finds when it runs. `go run` builds it with that same `go`, so the command above works on any toolchain. A `laas` binary built earlier by an older Go fails with errors about the standard library; rebuild it, or set `GOTOOLCHAIN` to the version that built it.
 

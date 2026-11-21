@@ -1863,6 +1863,16 @@ A contradiction check is first asked of Z3 with a different search, at a tenth o
 
 A proof obligation that stops at a limit draws a message with the note. So does the always-fails check when it reports a contract and a question of its search stopped at a limit. Other questions draw no message of their own. When one of them stops at a limit, `vego` goes on as when a proof fails: a path counts as possible, a `Modifies` entry counts as needed, an outcome counts as one that may depend on a call, a contradiction counts as not found, and an input that the search did not find counts as not found, which can make `vego` report the contract.
 
+### Using the idle Z3 processes
+
+`vego` verifies the functions of a package one after another, and `laas` runs up to four Z3 processes. When a package is verified while the other processes are idle, as when you run `laas` on one package, up to three more verifiers in the run verify the package's later functions on those processes. They report nothing. When the verification reaches such a function, the answers it needs are ready. A package of several slow functions is verified up to three times faster that way. In one package of 24 functions, a run went from 91 s to 33 s. The messages, the exit status, and what `-vego.cost` counts are the same as without it.
+
+The extra verifiers use memory: in the runs measured, up to a quarter more than without them. On a machine that is short of memory, turn them off:
+
+```sh
+laas -vego -vego.speculate=false ./...
+```
+
 ### Keeping answers between runs
 
 `-vego.cache` names a directory where `vego` keeps the answers of Z3 from one run to the next:
@@ -5698,6 +5708,7 @@ Results are referred to by the names in the function's signature.
 | `-vego.cost` | print what verifying each function asked of Z3, on standard error |
 | `-vego.z3=path` | the Z3 5.4.1 binary to use, instead of the `z3` on `PATH` |
 | `-vego.cache=dir` | keep the answers of Z3 in this directory between runs |
+| `-vego.speculate=false` | do not verify functions ahead on idle Z3 processes, which saves memory |
 | `-vego.trusted=path` | use this trust file instead of the one next to `go.mod` |
 | `-vego.other-tags=A,B` | words that another tool reads after `// @`; any other unknown word there is an error |
 | `-vego.trust` | print the trust report |

@@ -154,7 +154,7 @@ var testCache string
 // verified contracts and the trust the proofs rest on. For a caching driver
 // it only reports that nothing was verified.
 func newAnalyzer() *analysis.Analyzer {
-	effort, audit, trustPath, otherTags, z3Path, printCost, cacheDir := 0, false, "", "", "", false, ""
+	effort, audit, trustPath, otherTags, z3Path, printCost, cacheDir, ahead := 0, false, "", "", "", false, "", true
 	analyzer := &analysis.Analyzer{
 		Name: "vego",
 		Doc: `verifies functions against their // @ specifications
@@ -184,6 +184,12 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		"cache",
 		testCache,
 		"directory that keeps the answers of Z3 between runs, outside any module or repository; off when empty",
+	)
+	analyzer.Flags.BoolVar(
+		&ahead,
+		"speculate",
+		true,
+		"verify functions of a package ahead on Z3 processes that would be idle, which changes only the time; false saves the memory of up to three more verifiers",
 	)
 	analyzer.Flags.BoolVar(
 		&audit,
@@ -236,36 +242,41 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 				panic(r)
 			}
 		}()
-		pv := &pkgVerifier{
-			otherTags:       foreignTags,
-			pass:            pass,
-			info:            pass.TypesInfo,
-			res:             logic.NewResolver(),
-			funcs:           map[*types.Func]*funcInfo{},
-			reported:        map[string]bool{},
-			outcomes:        map[*funcInfo]*outcome{},
-			trusted:         map[*types.Func]*funcInfo{},
-			origins:         map[*ast.BlockStmt]*origins{},
-			knownReturns:    map[*funcInfo]bool{},
-			isParameter:     map[*types.Var]bool{},
-			invariants:      map[*types.TypeName]*invariantSet{},
-			funcTypes:       map[*types.TypeName]*funcInfo{},
-			importedTypes:   map[*types.TypeName]*funcInfo{},
-			ifaceMethods:    map[*types.Func]*funcInfo{},
-			importedMethods: map[*types.Func]*funcInfo{},
-			typeEntries:     map[string]*funcInfo{},
-			unentered:       map[string]bool{},
-			ownStates:       map[*types.TypeName][]ifaceState{},
-			foreignBroken:   map[*types.Package]bool{},
-			imported:        map[*types.Func]*funcInfo{},
-			foreign:         map[*types.Package]*logic.Resolver{},
-			plain:           logic.NewResolver(),
-			trustSources:    map[*trustFile]*token.File{},
-			z3Path:          z3Path,
-			cacheDir:        cacheDir,
-			effort:          effort,
-			printCost:       printCost,
+		// verifier makes the verifier of the package for a pass, which
+		// is the package's own or that of a speculative verifier.
+		verifier := func(pass *analysis.Pass) *pkgVerifier {
+			return &pkgVerifier{
+				otherTags:       foreignTags,
+				pass:            pass,
+				info:            pass.TypesInfo,
+				res:             logic.NewResolver(),
+				funcs:           map[*types.Func]*funcInfo{},
+				reported:        map[string]bool{},
+				outcomes:        map[*funcInfo]*outcome{},
+				trusted:         map[*types.Func]*funcInfo{},
+				origins:         map[*ast.BlockStmt]*origins{},
+				knownReturns:    map[*funcInfo]bool{},
+				isParameter:     map[*types.Var]bool{},
+				invariants:      map[*types.TypeName]*invariantSet{},
+				funcTypes:       map[*types.TypeName]*funcInfo{},
+				importedTypes:   map[*types.TypeName]*funcInfo{},
+				ifaceMethods:    map[*types.Func]*funcInfo{},
+				importedMethods: map[*types.Func]*funcInfo{},
+				typeEntries:     map[string]*funcInfo{},
+				unentered:       map[string]bool{},
+				ownStates:       map[*types.TypeName][]ifaceState{},
+				foreignBroken:   map[*types.Package]bool{},
+				imported:        map[*types.Func]*funcInfo{},
+				foreign:         map[*types.Package]*logic.Resolver{},
+				plain:           logic.NewResolver(),
+				trustSources:    map[*trustFile]*token.File{},
+				z3Path:          z3Path,
+				cacheDir:        cacheDir,
+				effort:          effort,
+				printCost:       printCost,
+			}
 		}
+		pv := verifier(pass)
 		if refuseCache {
 			pv.usage = &Usage{}
 			pv.collect()
@@ -282,12 +293,21 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		}
 		pv.loadTrust(trustPath)
 		pv.collect()
+		var sp *speculation
+		if ahead && countFuncs(pv.order, func(fn *funcInfo) bool { return fn.annotated() && !fn.broken }) >= 2 {
+			sp = speculate(pass, verifier, trustPath)
+		}
 		pv.checkInvariantsDeclared()
 		pv.exportInvariants()
 		pv.checkTypeContracts()
 		pv.exportTypeContracts()
 		pv.exportStates()
-		for _, fn := range pv.order {
+		for i, fn := range pv.order {
+			// A speculative verifier takes no function the verification
+			// has begun.
+			if sp != nil {
+				sp.at.Store(int64(i))
+			}
 			if !fn.annotated() || fn.broken {
 				continue
 			}
@@ -295,6 +315,9 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			if audit {
 				pv.run(fn, (*fnVerifier).audit)
 			}
+		}
+		if sp != nil {
+			sp.done.Store(true)
 		}
 		pv.exportContracts(pv.reportAlwaysFailing())
 		pv.reportSentinelWrites()
@@ -487,6 +510,9 @@ type pkgVerifier struct {
 	effort int
 	// cacheDir is the directory of the answer cache, or "" for none.
 	cacheDir string
+	// speculative is set for a verifier that only fills the solver's
+	// cache; see speculate.go.
+	speculative bool
 	// searchLimit is the last limit a question of a search for an input
 	// stopped at while the current function was verified, and searching
 	// counts the searches under way.
