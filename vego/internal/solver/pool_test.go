@@ -51,7 +51,12 @@ while IFS= read -r line; do
 		end=${line#*\(echo \"}
 		end=${end%%\"*}
 		if [ -n "$slow" ]; then
-			while [ ! -e '` + release + `' ]; do sleep 0.01; done
+			while [ ! -e '` + release + `' ]; do
+				# A test that ended without letting it go leaves no
+				# process behind.
+				[ -d '` + dir + `' ] || exit 1
+				sleep 0.01
+			done
 		fi
 		echo $ans; echo '(:reason-unknown "")'; echo '(:rlimit 7)'
 		echo "$end"
