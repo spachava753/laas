@@ -10,10 +10,10 @@ package solver
 import (
 	"errors"
 	"fmt"
-	"sync/atomic"
 	"math/big"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/spachava753/laas/vego/internal/logic"
@@ -327,8 +327,8 @@ const tacticWithoutExtensionality = "(then simplify propagate-values simplify el
 // compareModelFirst makes every first attempt at a satisfiability check
 // that settles it be followed by the full check, which must not settle it
 // the other way: Z3 would then have given one problem a model and a proof
-// that it has none. compared counts the checks compared. A test that runs
-// on request sets it, through CompareModelFirst.
+// that it has none. compared counts the checks compared. The test binary
+// of vego sets it, through CompareModelFirst.
 var (
 	compareModelFirst atomic.Bool
 	compared          atomic.Int64
@@ -336,7 +336,7 @@ var (
 
 // CompareModelFirst turns on the comparison of compareModelFirst until the
 // returned function is called, which says how many checks were compared.
-// Only a test calls it.
+// Only the tests call it.
 func CompareModelFirst() func() int64 {
 	compareModelFirst.Store(true)
 	before := compared.Load()

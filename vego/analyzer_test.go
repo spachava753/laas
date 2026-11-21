@@ -289,35 +289,6 @@ func TestAnalyzer(t *testing.T) {
 	})
 }
 
-// TestModelFirstAgrees runs the main corpus with every contradiction
-// check that its first attempt settles also asked in full, and fails if
-// the two answers differ, one a model and the other a proof that there is
-// none. It takes about a minute of Z3 time more than the corpus run, so it
-// runs only when VEGO_COMPARE_ATTEMPTS is set; it is to be run again when
-// the release of Z3 moves (see The prover in the ROADMAP):
-//
-//	VEGO_COMPARE_ATTEMPTS=1 systemd-run --user --scope --quiet -p MemoryMax=12G -p MemorySwapMax=4G -- \
-//	go test -count=1 -run TestModelFirstAgrees ./vego
-func TestModelFirstAgrees(t *testing.T) {
-	alone(t)
-	if os.Getenv("VEGO_COMPARE_ATTEMPTS") == "" {
-		t.Skip("VEGO_COMPARE_ATTEMPTS is not set")
-	}
-	analyzer := newAnalyzer()
-	for name, value := range map[string]string{"trusted": filepath.Join("testdata", "trusted.yaml"), "other-tags": "Summary, Param,x-order", "cache": "", "speculate": "false"} {
-		if err := analyzer.Flags.Set(name, value); err != nil {
-			t.Fatal(err)
-		}
-	}
-	stop := solver.CompareModelFirst()
-	runCorpus(t, analyzer, mainCorpus...)
-	compared := stop()
-	if compared == 0 {
-		t.Fatal("no contradiction check was compared")
-	}
-	t.Logf("%d contradiction checks that their first attempt settled were asked in full, with the same answer", compared)
-}
-
 // TestPackageSettings runs the corpus programs that need a setting of the
 // whole package changed, while no other test runs.
 func TestPackageSettings(t *testing.T) {
@@ -429,5 +400,8 @@ func init() {
 	// VEGO_CACHE names a cache of answers for the tests to use; see
 	// -vego.cache. Without it every test asks Z3.
 	testCache = os.Getenv("VEGO_CACHE")
-
+	// Every contradiction check that its first attempt settles is also
+	// asked in full, and the two answers must agree; see
+	// solver.CompareModelFirst.
+	solver.CompareModelFirst()
 }
