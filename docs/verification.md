@@ -16,7 +16,7 @@ This guide shows how to write Go that `vego` can verify. Read it from top to bot
 
 `vego` never reports a function as correct when it is not. If it cannot handle a piece of Go, it reports `cannot verify` and names the construct. If it cannot find a proof, it reports `may not hold`. That means "not proved". The code may be wrong, the contract may be wrong, or both may be right and the prover needs a hint. Much of this guide is about working out which.
 
-`vego` is experimental and supports only part of Go. It does not yet support calls through interfaces whose methods have no contract (which includes the interfaces of the standard library), methods of an interface that write what the interface value holds, calls of function values whose type has no contract, generics, goroutines, arrays, or package-level variables that are changed. [What is not supported](#what-is-not-supported) lists the main gaps. Code that does I/O usually runs into these limits. The usual approach is to verify the logic and leave the code around it unverified. [Adopting it](#adopting-it) describes how.
+`vego` is experimental and supports only part of Go. It does not yet support calls through interfaces whose methods have no contract (which includes the interfaces of the standard library), methods of an interface that write what the interface value holds, calls of function values whose type has no contract, generic code, goroutines, arrays, or package-level variables that are changed. [What is not supported](#what-is-not-supported) lists the main gaps. Code that does I/O usually runs into these limits. The usual approach is to verify the logic and leave the code around it unverified. [Adopting it](#adopting-it) describes how.
 
 ## Running it
 
@@ -199,6 +199,8 @@ A character in single quotes is the number of that character, as in Go. `s[0] = 
 
 `cap(A)` is the capacity of a slice. `A = nil` and `A != nil` say whether a slice is nil, as `A == nil` does in code. See [Capacity and nil in a formula](#capacity-and-nil-in-a-formula).
 
+`elemsize(A)` is the number of bytes that one element of the slice `A` takes on the platform, as `unsafe.Sizeof` gives it. It is 0 for a slice of values of size zero, such as `[]struct{}`. The contracts of generic functions that allocate use it, as described in [Memory and allocation](#memory-and-allocation).
+
 ### Quantifiers
 
 `Forall` and `Exists` range over an interval of integers.
@@ -218,7 +220,7 @@ There is a short form for a condition on a range of elements. `A[lo:hi) <= x` me
 
 A contract can use the function's parameters and results, and the integer and boolean constants of the package. String constants cannot be used by name. Write the string itself. A contract can also name the error variables of the package, as in `ErrEmpty`, and those of an imported package, as in `io.EOF`. A trusted contract names them by the path of their package instead. See [Error variables in a trusted contract](#error-variables-in-a-trusted-contract). The contract of a verified function can name other package-level variables that nothing changes, as described in [Package-level variables](#package-level-variables).
 
-Results are referred to by their names, so every result of a verified function must be named. This guide calls a single result `result`, but you can choose another name. Go does not allow a result to share a name with a parameter, so a name in a contract cannot mean both. Three names are not available for variables that annotations use: `True`, `False`, and `nil`, which are words of the formula language. A predicate cannot be called `len`, `cap`, `old`, `fresh`, `within`, `apart`, `has`, or `is`.
+Results are referred to by their names, so every result of a verified function must be named. This guide calls a single result `result`, but you can choose another name. Go does not allow a result to share a name with a parameter, so a name in a contract cannot mean both. Three names are not available for variables that annotations use: `True`, `False`, and `nil`, which are words of the formula language. A predicate cannot be called `len`, `cap`, `elemsize`, `old`, `fresh`, `within`, `apart`, `has`, or `is`.
 
 ```text
 vego: Unnamed has annotations, so each of its results needs a name, as in func Unnamed(x int) (i int)
@@ -3905,7 +3907,7 @@ The names in an entry are the parameter and result names from the function's sou
 - `(*net/http.Request).PathValue`, `(net/http.Header).Get` and `Set`, and `net/http.NewServeMux`
 - the methods of `sync.Mutex` and `sync.RWMutex` that lock and unlock, and `(*sync.Once).Do`, described in [Locks](#locks)
 
-It also includes contracts for `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, `(context.Context).Err`, and `context.CancelFunc`, which are described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages), and the state `closed` of `io.Closer`, described in [States of interface values](#states-of-interface-values).
+It also includes contracts for generic functions of `slices`, `maps`, and `cmp`, described in [Generic functions of other packages](#generic-functions-of-other-packages), and for `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, `(context.Context).Err`, and `context.CancelFunc`, which are described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages), and the state `closed` of `io.Closer`, described in [States of interface values](#states-of-interface-values).
 
 A function of package `bytes` with two slice parameters cannot be given one slice twice, or two slices that may share memory. `bytes.Equal(a, a)` is reported as `the slices passed to Equal as a and b may overlap`, as for any function with two slice parameters of one element type (see [Slices that share no memory](#slices-that-share-no-memory)).
 
@@ -3921,6 +3923,8 @@ A shipped contract states only what the documentation of its function promises, 
 - `strconv.Unquote` does not bound the length of its result. `strconv.Quote` bounds its result by `10 * |s| + 2`.
 - The functions of `math` say only that they return.
 - The functions of `os` say nothing of the files they read or write.
+- The contracts of generic functions say only what can be read at every type argument they are used with. `slices.Clone`, `Grow`, `Clip`, `Delete`, `DeleteFunc`, `Insert`, `Reverse`, and `Compact` do not say what the elements are, and `Delete`, `DeleteFunc`, and `Compact` do not say that they set the elements they drop to zero. `slices.Sort` does not say that the elements are in order, and `cmp.Compare` does not say which of `-1` and `1` it returns. `slices.ContainsFunc` and `IndexFunc` do not say which element the function they are handed chose. The functions of `maps` say how many keys a map has, and nothing of what it holds under a key.
+- The documentation of `slices.Grow` says that the result has the nilness of `s`. For a nil `s` and an `n` above 0 it returns a slice that is not nil, so the contract says only that a slice that is not nil gives one that is not nil, and that a nil `s` with `n` equal to 0 gives nil.
 
 Some functions of the standard library have no shipped contract, because no true contract can be written yet:
 
@@ -3933,6 +3937,218 @@ Some functions of the standard library have no shipped contract, because no true
 - `(*regexp.Regexp).FindStringIndex` names its result differently in different releases of Go.
 - `regexp.MustCompile` panics on a pattern that does not compile. Call `regexp.Compile` and handle its error.
 - `http.Error` and the `Header` method of `http.ResponseWriter` write memory of the writer.
+- `slices.SortFunc` and `slices.BinarySearchFunc` require that the comparison function is a strict weak ordering, which a contract cannot require of a function it is handed. See [Sorting a slice of structs](#sorting-a-slice-of-structs).
+- `maps.Keys`, `maps.Values`, and the other functions that return iterators need a range over a function.
+
+### Generic functions of other packages
+
+A verified function can call a generic function, such as `slices.Contains`, when the function has a trusted contract. The contract is an entry of the trust file, shipped or your own, under the generic name of the function:
+
+```go
+// HasRole reports whether role is one of roles.
+//
+// @Ensures r <-> Exists i in [0, |roles|) : roles[i] = role
+func HasRole(roles []string, role string) (r bool) {
+	return slices.Contains(roles, role)
+}
+```
+
+These generic functions have shipped contracts:
+
+- `slices.Contains`, `slices.Index`, `slices.Equal`, `slices.ContainsFunc`, `slices.IndexFunc`
+- `slices.Clone`, `slices.Grow`, `slices.Clip`, `slices.Delete`, `slices.DeleteFunc`, `slices.Insert`, `slices.Reverse`, `slices.Compact`
+- `slices.Sort`, `slices.BinarySearch`, `slices.Max`, `slices.Min`
+- `maps.Clone`, `maps.Copy`, `maps.DeleteFunc`
+- `cmp.Compare`
+
+`vego` does not verify generic code. A generic function of your own package can be called in the same way, when your trust file gives it an entry. A generic function with annotations is reported as `generic functions are not supported yet`.
+
+#### What a contract means at each type argument
+
+One entry serves every type argument. At each call, `vego` reads the entry at the type arguments of that call. A clause means there what it means of those types:
+
+- for integers, `=`, `<`, and arithmetic are those of numbers;
+- for strings, `=` compares the bytes, as Go's `==` does, and a formula has no order of strings;
+- for booleans, `=` is the same truth value;
+- for pointers, `=` says that they point to the same place, and a pointer to a value of size zero can only be compared with `nil`;
+- a struct cannot be compared or used as a whole;
+- nothing can be said of a float.
+
+A call at which a clause of the entry has no meaning is refused. The message names the clause, the type argument, and what to call instead:
+
+```go
+// HasMember asks for a whole struct.
+//
+// @Ensures True
+func HasMember(ms []Member, m Member) (r bool) {
+	return slices.Contains(ms, m)
+}
+```
+
+```text
+vego: the trusted contract of slices.Contains (slices.yaml:21) cannot be used with S = []Member,
+E = Member: in its ensures "result <-> Exists i in [0, |s|) : s[i] = v": a value of type E, which is
+Member here, is a struct, and a formula cannot compare a struct or use it as a whole; call
+slices.ContainsFunc instead, with a function literal that compares what you need of the elements,
+or write a loop
+```
+
+`slices.ContainsFunc` and `slices.IndexFunc` take a function literal, which `vego` verifies where it is written, as for any function that a trusted function calls (see [Functions that a trusted function calls](#functions-that-a-trusted-function-calls)). The literal can compare the fields:
+
+```go
+// HasName looks for a member by name.
+//
+// @Ensures r -> |ms| > 0
+func HasName(ms []Member, name string) (r bool) {
+	return slices.ContainsFunc(ms, func(m Member) bool { return m.Name == name })
+}
+
+// AgeOf returns the age of the member with a name, or -1.
+//
+// @Ensures True
+func AgeOf(ms []Member, name string) (age int) {
+	i := slices.IndexFunc(ms, func(m Member) bool { return m.Name == name })
+	if i < 0 {
+		return -1
+	}
+	return ms[i].Age
+}
+```
+
+The contract of `IndexFunc` says that the result is `-1` or an index of `ms`, so `ms[i]` is in range after the test. It does not say which element the function chose. A formula cannot apply the literal to a struct, so the literal is verified for every value of its parameter's type.
+
+The functions whose elements may be of any type, such as `Clone`, `Delete`, `Insert`, and `DeleteFunc`, have contracts that say only lengths, capacities, whether a slice is nil, and where the result lies. They can be used with slices of structs. `Contains`, `Index`, and `Equal` say which elements are equal, and cannot be used with structs or floats. `Max`, `Min`, and `BinarySearch` order elements, and cannot be used with strings or floats:
+
+```go
+// Oldest returns the greatest age.
+//
+// @Requires |ages| > 0
+// @Ensures Forall i in [0, |ages|) : ages[i] <= r
+func Oldest(ages []int) (r int) {
+	return slices.Max(ages)
+}
+
+// Last returns the name that sorts last.
+//
+// @Requires |names| > 0
+// @Ensures True
+func Last(names []string) (r string) {
+	return slices.Max(names)
+}
+```
+
+```text
+vego: the trusted contract of slices.Max (slices.yaml:247) cannot be used with S = []string,
+E = string: in its ensures "x[0:|x|) <= result": operator <= cannot be applied to string or slice
+values; a formula has no order of them; write a loop instead
+```
+
+`slices.Sort` and `cmp.Compare` say nothing about order, so that they can be used with strings. [What the shipped contracts do not say](#what-the-shipped-contracts-do-not-say) lists what each contract leaves out.
+
+#### Type arguments that cannot be passed
+
+`vego` refuses a call of a generic function with any of these type arguments, whatever its contract says:
+
+- a type that can hold code, such as an error, an interface, or a function;
+- a type that `vego` does not model, such as an array or `complex128`;
+- an interface where the constraint is `comparable`, since `==` on two interface values can panic;
+- a type that holds a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once`, since generic functions copy their elements;
+- a type with methods, or whose values hold values with methods, unless the entry claims that the function runs none of them.
+
+```go
+// CloneErrors copies a slice of errors.
+//
+// @Requires |errs| <= 100
+// @Ensures True
+func CloneErrors(errs []error) (r []error) {
+	return slices.Clone(errs)
+}
+```
+
+```text
+vego: cannot verify CloneErrors: slices.Clone is called with S = []error, which is or holds an
+error; a generic function cannot be called yet with a type argument that can hold code
+```
+
+Generic code can reach the methods of its type arguments through its constraint, by converting a value to an interface, and by reflection. Each shipped entry claims that its function runs none of them, so `slices.Sort` of a type with a `String` method is verified. A generic function of your own needs that claim to be called with such a type (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)).
+
+#### Memory and allocation
+
+`slices.Grow` returns memory that is new or lies within its argument. A write past the length of what it returns writes the argument's memory when there was room, so the function must list the argument:
+
+```go
+// AppendZero grows buf by one element and sets it.
+//
+// @Requires |buf| < 1000
+// @Ensures |r| = |buf| + 1
+func AppendZero(buf []byte) (r []byte) {
+	r = slices.Grow(buf, 1)
+	r = r[:len(r)+1]
+	r[len(r)-1] = 0
+	return r
+}
+```
+
+```text
+vego: r[len(r) - 1] is assigned, which AppendZero may not modify; it is memory that Grow returned,
+which its contract places within s when it is not new, and AppendZero passed buf as s; list buf in a
+// @Modifies clause
+```
+
+`slices.Clone` returns a new slice, so its own elements can be written without a `Modifies` entry. What those elements point to is shared with the slice that was copied, so a write through `c[0][0]` of a clone of a `[][]int` still needs one.
+
+The functions that allocate, `Clone`, `Grow`, and `Insert`, require that what they allocate can be allocated. Their `requires` uses `elemsize(s)`, the number of bytes of an element of `s`, which depends on the type argument (see [Formulas](#formulas)). For `slices.Grow` it is `2 * (|s| + n) * elemsize(s) + 65536 <= MaxAlloc`, and `|s| + n <= MaxInt`, which is the only bound for elements of size zero.
+
+#### Sorting a slice of structs
+
+`slices.SortFunc` and `slices.BinarySearchFunc` have no shipped contract. Their documentation requires that the comparison function is a strict weak ordering, and a contract cannot require that of a function it is handed yet. To sort records, sort them in a function that is not verified, and give that function an entry of your own that says what the code that calls it needs. You can check that claim against your own code, which is not true of a claim about `slices.SortFunc`. When the records are sorted by a string or an integer key, you can also sort the keys with `slices.Sort` and use them in the verified code.
+
+#### Writing an entry for a generic function
+
+An entry for a generic function of your own uses the parameter names of the generic signature. This helper of a package is called from verified code under an entry of the project's trust file:
+
+```go
+// Votes counts how often v occurs in s.
+func Votes[S ~[]E, E comparable](s S, v E) int {
+	n := 0
+	for _, x := range s {
+		if x == v {
+			n++
+		}
+	}
+	return n
+}
+
+// CountVotes counts the votes for a name.
+//
+// @Ensures 0 <= r And r <= |names|
+func CountVotes(names []string, name string) (r int) {
+	return Votes(names, name)
+}
+```
+
+```yaml
+  guide.Votes:
+    reason: >-
+      Votes counts the elements of s that are equal to v, in a loop over s
+      that calls no method of a value of type S or E, or of what such a
+      value holds, and keeps nothing.
+    asserts: {S: [], E: []}
+    modifies: []
+    ensures:
+      - "0 <= result And result <= |s|"
+```
+
+`asserts: {S: [], E: []}` claims that the function runs no method of a value of type `S` or `E`, or of a pointer to one, or of anything such a value holds. The claim covers what the function calls too, `fmt` and `reflect` included. It holds while the call lasts and later, through anything the function returns, keeps, or registers. Read the function's source before you write it. For a type parameter only the empty list can be claimed.
+
+`vego` checks the entry at each type argument it is called with, as it checks any entry (see [What is checked in an entry](#what-is-checked-in-an-entry)). It also refuses a clause that names a field, a state, or an address of a value of a type parameter, such as `s[0].Name`, at every type argument. A type parameter has no fields. A clause that contradicts itself at one type argument only, as `result > 300` does for a `uint8` result, is refused at that type argument and used at the others.
+
+#### What is not supported yet
+
+- Generic functions as values, as in `f := slices.Contains[[]int]`, and handing one to a trusted function.
+- Methods of generic types, such as `atomic.Pointer[T].Load`, reported as `calls of methods of generic types are not supported yet`.
+- `maps.Keys`, `maps.Values`, and the other functions that return iterators, which need a range over a function.
+- A clause that holds only for some type arguments, such as an order that `Sort` could state for integers.
 
 ### What is checked in an entry
 
@@ -5128,6 +5344,10 @@ This table lists the most common messages.
 | `... which F may not modify; it is memory that G returned, and its contract does not say that this is new memory` | `F` writes through what a trusted function returned, such as `bufio.NewWriter`, which may return memory that existed when `F` was called. | Take the value as a parameter and list it under `Modifies`. See [Writing through a buffer](#writing-through-a-buffer). |
 | `precondition of Printf may not hold: ready(l)` (or of `Scan`, `Write`, and the other methods of `log.Logger`, `bufio.Scanner`, `bufio.Reader`, and `bufio.Writer`) | The value is not known to be ready: made by its constructor, with an output or input that is not `nil`. | Make it with its constructor, add `ready(x)` to the `Requires`, or, in a loop, to the invariant. |
 | `postcondition may not hold: P; the contents of t are not known to stay as initialised: the use at f.go:n lets a reference to them out` (or another message about something not proved, with the same note) | What is not proved may rest on what the package-level variable `t` refers to, which is ordinary memory because of that use. | See [What a variable refers to](#what-a-variable-refers-to). |
+| `the trusted contract of F (f.yaml:n) cannot be used with E = T: in its ensures "...": ...; call FFunc instead, ... or write a loop` | A clause of the entry of a generic function has no meaning at this type argument, such as a comparison of structs or an order of strings. | Call what the message names instead. See [What a contract means at each type argument](#what-a-contract-means-at-each-type-argument). |
+| `the trusted contract of F (f.yaml:n) cannot be used with E = T: ...; the entry has this defect at every type argument, so fix the entry` | The entry of a generic function has a defect that does not depend on the type argument, such as a name that is no parameter. | Fix the entry. |
+| `F is called with E = T, which is or holds an error; a generic function cannot be called yet with a type argument that can hold code`, and similar | A type argument is one that a generic function cannot be called with. | See [Type arguments that cannot be passed](#type-arguments-that-cannot-be-passed). |
+| `F is called with E = T, and F may run the method ..., which a value of that type reaches; ... asserts: {E: []}` | The entry of the generic function does not claim that it runs no method of its type argument. | If the function runs none, add the claim to its entry. See [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function). |
 | `the trusted contract of F cannot be true of this call` | The contract contradicts what is known at the call. | The entry is wrong, or it needs a `requires` clause. |
 | `the trusted contract ... cannot be used` | The entry in the trust file is invalid. The message says why. | Fix the entry. Check the parameter names. |
 | `..., in the function literal called at f.go:n:c`, or `..., in the function literal deferred at f.go:n:c and run at the return at f.go:n:c` (or `at the end of the function at`, or `at the end of the function literal at`) | The problem is in the body of a function literal, at the call named at the end. For a deferred literal, the message names the `defer` statement and where the literal runs. | Fix the body, or what holds at that call. See [Function literals](#function-literals). |
@@ -5210,7 +5430,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - applying a function parameter in a trusted contract unless it has one integer parameter and one integer or boolean result, and a contract under `calls` for a function that is given or returns an error, an interface, or a function;
 - copying or assigning a value that holds a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once`, parameters, results, and receivers of such a type, a method with a value receiver of such a type, `append` to a slice of them, and `range` variables and loop variables of such a type (see [Values that hold a mutex cannot be copied or overwritten](#values-that-hold-a-mutex-cannot-be-copied-or-overwritten));
 - `recover`;
-- generic functions and types;
+- generic functions and types of your own package with annotations, a call of a generic function without a trusted contract, a generic function used as a value, methods of generic types, and type arguments that can hold code, that are not modelled, or that hold a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once` (see [Generic functions of other packages](#generic-functions-of-other-packages));
 - goroutines, channels, and `select`;
 - arrays, and structs that contain an array;
 - pointers to anything other than a struct;
@@ -5239,7 +5459,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 
 - Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and holds no value that can hold code anywhere it was not held when the call began, unless `keeps` lists the parameter. For a parameter listed under `keeps`, it runs the code during the call only if `runs` lists the parameter too, holds it when it returns only in memory that the results and parameters listed there reach, and has started or registered nothing that runs it later: no goroutine, timer, finalizer or cleanup, callback given to another package, or package-level variable. For a parameter listed under `runs` or `keeps`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter. Where such a value runs what the function keeps, as the reader that `io.TeeReader` returns runs the reader and the writer it is given, it meets its contract whenever what the function keeps meets theirs.
 - Code of another package runs code of the verified package only as `vego` follows it, which [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods) describes: during a call that the verified package makes, it runs only what that call hands it, through the arguments and the receiver. Code that it kept from an earlier call, a value it stored, or code that it runs on another goroutine or at another time, does not call back into a verified function while that function runs, so that the call never ends. A cycle that stays in the package, or that goes through what a call hands to another package, is found and reported.
-- A claim under `asserts` is true: the function calls nothing that the parameter holds, or that a call of what the parameter holds returns, but what the claim allows, and uses no reflection on it (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)).
+- A claim under `asserts` is true: the function calls nothing that the parameter holds, or that a call of what the parameter holds returns, but what the claim allows, and uses no reflection on it (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one that wraps it, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method.
 - An interface value that reaches verified code from code that is not verified meets the contracts of its methods. That includes a value passed as an argument, a value in memory that an argument reaches, a value that a call through another value returns, and a value that a trusted function returns or writes, which its entry vouches for. Called with arguments that meet the `Requires` of a method, the method returns without panicking, leaves its `Ensures` true, and writes nothing that verified code can see outside what its `Modifies` lists. For a result that the contract of the method lists under `Vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). This holds also when the value holds a pointer to a struct that verified code holds.
 - The same holds of the methods and function types that entries of the trust file give contracts, which is what such an entry claims (see [What an entry for a type claims](#what-an-entry-for-a-type-claims)). In particular, a caller that is not verified does not pass a verified function such a value together with a pointer to memory that the value writes, as a `*bytes.Buffer` passed both as an `io.Writer` and as a `*bytes.Buffer` would be. Every call through such a value returns: a `Read` from a pipe, a terminal, or a connection returns only once data or an error arrives.
@@ -5311,6 +5531,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `"text"`, `nil` | a string; the nil pointer, error, function value, or interface value |
 | `'/'`, `'\n'` | the number of a character, as in Go |
 | `cap(A)` | the capacity of a slice |
+| `elemsize(A)` | the number of bytes of an element of a slice; 0 for values of size zero |
 | `A = nil`, `A != nil` | for a slice: whether it is nil, which <code>&#124;A&#124; = 0</code> is not |
 | `&p.f`, `&s[i]` | the address of a struct reached through a pointer or an element of a slice; nil when that pointer is nil |
 | `ErrEmpty`, `io.EOF` | an error variable of the package, or of an imported package |

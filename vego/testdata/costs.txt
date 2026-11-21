@@ -1296,6 +1296,7 @@ guide	guide.AbsWrong	5	871	0
 guide	guide.Account	1	225	0
 guide	guide.AgeOf	5	30980	0
 guide	guide.Announce	10	152079	0
+guide	guide.AppendZero	18	28468	0
 guide	guide.Apply	18	675723	4
 guide	guide.ApplyOnce	6	1233	0
 guide	guide.AsAny	2	709	0
@@ -1319,6 +1320,7 @@ guide	guide.ClearFirst	7	3049	0
 guide	guide.ClearFront	9	22714	0
 guide	guide.ClearFrontWrong	8	17239	0
 guide	guide.Client	1	46	0
+guide	guide.CloneErrors	1	558	0
 guide	guide.CloseTwice	14	11166	0
 guide	guide.Coin	8	4931	0
 guide	guide.CommitTwice	14	10921	0
@@ -1556,6 +1558,7 @@ guide	os.Create	7	2010228	2
 guide	os.Open	7	2010228	2
 guide	os.ReadFile	3	20828	0
 guide	os.Remove	3	7892	0
+guide	slices.Clone	1	1549	0
 guide	slices.Contains	1	7228	0
 guide	slices.ContainsFunc	1	8663	0
 guide	slices.Grow	1	6147	0

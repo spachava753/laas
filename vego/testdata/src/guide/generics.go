@@ -100,3 +100,22 @@ func Votes[S ~[]E, E comparable](s S, v E) int {
 func CountVotes(names []string, name string) (r int) {
 	return Votes(names, name)
 }
+
+// CloneErrors copies a slice of errors.
+//
+// @Requires |errs| <= 100
+// @Ensures True
+func CloneErrors(errs []error) (r []error) {
+	return slices.Clone(errs) // want `slices.Clone is called with S = \[\]error, which is or holds an error; a generic function cannot be called yet with a type argument that can hold code`
+}
+
+// AppendZero grows buf by one element and sets it.
+//
+// @Requires |buf| < 1000
+// @Ensures |r| = |buf| + 1
+func AppendZero(buf []byte) (r []byte) {
+	r = slices.Grow(buf, 1)
+	r = r[:len(r)+1]
+	r[len(r)-1] = 0 // want `r\[len\(r\) - 1\] is assigned, which AppendZero may not modify; it is memory that Grow returned, which its contract places within s when it is not new, and AppendZero passed buf as s; list buf in a // @Modifies clause`
+	return r
+}
