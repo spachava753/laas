@@ -1859,7 +1859,7 @@ The work each is allowed:
 
 With `-vego.cache`, a function whose answers came from the cache has a clause at the end of its first line, such as `, 13 answered from the answer cache on disk`. See [Keeping answers between runs](#keeping-answers-between-runs).
 
-A contradiction check is first asked of Z3 with a search that finds a solution more easily when the facts hold quantifiers, at a tenth of the check's limit. When that search does not settle the question, the check is asked again in full, so a function can count two problems for one check.
+A contradiction check is first asked of Z3 with a different search, at a tenth of the check's limit. That search settles some checks that the usual one leaves open, and leaves open some that the usual one settles. When that search does not settle the question, the check is asked again in full, so a function can count two problems for one check.
 
 A proof obligation that stops at a limit draws a message with the note. So does the always-fails check when it reports a contract and a question of its search stopped at a limit. Other questions draw no message of their own. When one of them stops at a limit, `vego` goes on as when a proof fails: a path counts as possible, a `Modifies` entry counts as needed, an outcome counts as one that may depend on a call, a contradiction counts as not found, and an input that the search did not find counts as not found, which can make `vego` report the contract.
 
