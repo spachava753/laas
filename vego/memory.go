@@ -59,6 +59,10 @@ type state struct {
 	// snapshots holds the values of the Snapshot annotations taken on the
 	// path; see takeSnapshot. A map is never changed once a state holds it.
 	snapshots map[*clause]*logic.Term
+	// visited holds, for each Visited clause of a range over a map that
+	// the path is inside, where the range has come to; see visited.go. A
+	// map is never changed once a state holds it.
+	visited map[*clause]*visitedSet
 }
 
 // deferredCall is a call that a defer statement put off: the call, the
@@ -83,7 +87,7 @@ func (st *state) clone() *state {
 	return &state{
 		vals: maps.Clone(st.vals), mem: maps.Clone(st.mem), brk: st.brk,
 		hyps: slices.Clone(st.hyps), chosen: slices.Clone(st.chosen), noted: maps.Clone(st.noted),
-		deferred: slices.Clone(st.deferred), snapshots: st.snapshots,
+		deferred: slices.Clone(st.deferred), snapshots: st.snapshots, visited: st.visited,
 	}
 }
 

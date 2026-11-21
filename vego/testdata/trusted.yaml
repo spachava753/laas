@@ -51,6 +51,12 @@ trusted:
     reason: Test helper that writes in a range clause.
     modifies: [a]
 
+  mapping.twoKeys:
+    reason: Test helper whose entry promises a map no map can be, with one key counted and two present.
+    modifies: []
+    ensures:
+      - "|result| = 1 And has(result, 1) And has(result, 2)"
+
   semantics.scramble:
     reason: Test helper that overwrites every element.
     modifies: [A]

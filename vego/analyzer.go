@@ -698,6 +698,9 @@ type pkgVerifier struct {
 	// snapshotEnds holds where the scope of each Snapshot ends; see
 	// snapshotScope.
 	snapshotEnds map[*clause]token.Pos
+	// below holds the statement directly below each annotation of a body
+	// that one was looked for; see statementAfter.
+	below map[*clause]ast.Stmt
 	// assignedIn holds, for the body of each declared function, the
 	// variables that something other than their declaration assigns; see
 	// final.
@@ -743,6 +746,7 @@ var (
 	clauseKinds = map[string]bool{
 		"Requires": true, "Ensures": true, "Invariant": true, "Variant": true,
 		"Predicate": true, "Assert": true, "Modifies": true, "State": true, "Receiver": true, "Snapshot": true, "Vouches": true,
+		"Visited": true,
 	}
 	// retiredKinds are keywords that earlier versions read, with what to
 	// write now.
@@ -1182,7 +1186,7 @@ func (pv *pkgVerifier) collect() {
 				}
 				if c.kind == "" {
 					pv.report(c.pos, "unknown annotation %q; an annotation starts with one of "+
-						"Requires, Ensures, Modifies, Invariant, Variant, Assert, Snapshot, Predicate, State, Receiver, Vouches. "+
+						"Requires, Ensures, Modifies, Invariant, Variant, Visited, Assert, Snapshot, Predicate, State, Receiver, Vouches. "+
 						"If another tool reads this comment, declare the word with -vego.other-tags", c.text)
 					continue
 				}
@@ -1253,9 +1257,12 @@ func (pv *pkgVerifier) collect() {
 				}
 				var node *logic.Node
 				var err error
-				if c.kind == "Snapshot" {
+				switch c.kind {
+				case "Snapshot":
 					c.snapshot, node, err = logic.ParseSnapshot(c.text)
-				} else {
+				case "Visited":
+					node, err = logic.ParseVisited(c.text)
+				default:
 					node, err = logic.ParseFormula(c.text)
 				}
 				if err != nil {
@@ -1307,6 +1314,7 @@ func (pv *pkgVerifier) collect() {
 		}
 		pv.checkPlacement(fn)
 		pv.checkSnapshots(fn)
+		pv.checkVisited(fn)
 	}
 }
 
@@ -1587,7 +1595,7 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 		}
 		fn := pv.funcs[pv.info.Defs[fd.Name].(*types.Func)]
 		switch c.kind {
-		case "Invariant", "Variant", "Assert", "Snapshot":
+		case "Invariant", "Variant", "Assert", "Snapshot", "Visited":
 			fn.body = append(fn.body, c)
 		case "Predicate":
 		case "Vouches":
@@ -1606,7 +1614,7 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 	switch {
 	case next != nil && next.Doc == group:
 		fn = pv.funcs[pv.info.Defs[next.Name].(*types.Func)]
-	case c.kind == "Invariant" || c.kind == "Assert" || c.kind == "Snapshot":
+	case c.kind == "Invariant" || c.kind == "Assert" || c.kind == "Snapshot" || c.kind == "Visited":
 		pv.unread = true
 		pv.report(c.pos, "%s annotation is not attached to anything; "+
 			"it stands inside a function body, or, for an Invariant, in the doc comment of a struct type", c.kind)

@@ -681,10 +681,9 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 			}
 		}
 	case isMap(ranged) && mapModelled(ranged):
-		// A map is visited once for each key it has, in an order nobody
-		// knows. Each iteration gets some key the map has; that the keys of
-		// different iterations differ is not modelled. A loop that changes
-		// a map of the type while ranging over one is not supported.
+		// A map is visited once for each key it has at the start, in an
+		// order nobody knows; see visited.go. A loop that changes a map of
+		// the type while ranging over one is not supported.
 		for _, at := range shape.effects.sites {
 			if at.mapType != nil && mapOwner(at.mapType) == mapOwner(ranged) {
 				v.unsupported(s.Pos(), "the loop modifies a map of the type it ranges over, which is not supported")
@@ -692,11 +691,18 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 		}
 		ref := v.expr(s.X, st, nil)
 		v.closeUnit(st)
-		shape.limit = v.mapLen(st, st.mem, ranged, ref)
-		keyType, _ := mapParts(ranged)
+		walk := v.startMapRange(st, ranged, ref, s.Pos(), types.ExprString(s.X))
+		shape.limit = walk.n0
 		shape.bind = func(st *state, counter *logic.Term) {
-			at := v.unknown("key", keyType, st)[0]
-			st.assume(logic.Implies(logic.Lt(counter, shape.limit), v.mapHas(st, st.mem, ranged, ref, at)))
+			at, _, position := v.enterPosition(st, walk, counter)
+			st.assume(logic.Implies(logic.Lt(position, walk.n0), v.mapHas(st, st.mem, ranged, ref, at)))
+			if spec.visited != nil {
+				st.visited = maps.Clone(st.visited)
+				if st.visited == nil {
+					st.visited = map[*clause]*visitedSet{}
+				}
+				st.visited[spec.visited] = &visitedSet{r: walk, counter: position}
+			}
 			if key != nil {
 				v.bind(st, key, value{at})
 			}

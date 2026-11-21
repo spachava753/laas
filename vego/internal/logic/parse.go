@@ -310,6 +310,19 @@ func ParseSnapshot(src string) (name string, value *Node, err error) {
 	return name, value, err
 }
 
+// ParseVisited parses a Visited clause, which is a name and nothing else,
+// as in // @Visited done. It returns the name as an identifier node.
+func ParseVisited(src string) (*Node, error) {
+	return parse(src, func(p *parser) *Node {
+		if p.peek().kind != 'i' {
+			p.fail("a Visited annotation is written as one name, as in // @Visited done")
+		}
+		start := p.peek().pos
+		name := p.ident()
+		return &Node{Kind: NIdent, Name: name, Start: start, End: p.end()}
+	})
+}
+
 // ParsePredicate parses a predicate definition clause.
 func ParsePredicate(src string) (*PredDecl, error) {
 	decl := &PredDecl{}

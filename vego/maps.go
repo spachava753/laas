@@ -101,13 +101,24 @@ func (v *fnVerifier) mapValue(sink *state, mem memory, t types.Type, ref, key *l
 // positive, a key that is absent has the zero value, and the nil map has no
 // keys. Like the typing of what is read from memory, this is true of every
 // map whether or not the read was a sensible one.
+//
+// The number of keys is also bounded by memory. len gives it as an int, and
+// the runtime keeps the key and the value of every entry in memory of their
+// own in the heap, whose addresses lie in a range of 2^heapAddrBits bytes,
+// which maxAlloc is (one less on 32-bit targets, where the map's header
+// takes a byte too). That is an assumption about the runtime, stated in the
+// guide's "What a proof assumes".
 func (v *fnVerifier) noteMap(sink *state, mem memory, t types.Type, ref, key *logic.Term) {
 	if sink == nil || hasBound(ref) || (key != nil && hasBound(key)) {
 		return
 	}
 	count := v.cell(nil, mem, mapOwner(t)+countLeaf.path, countLeaf, ref)
 	isNil := logic.Eq(ref, logic.RefLit(0))
-	facts := []*logic.Term{logic.Le(logic.IntLit(0), count), logic.Implies(isNil, logic.Eq(count, logic.IntLit(0)))}
+	keyType, elemType := mapParts(t)
+	entry := v.pass.TypesSizes.Sizeof(keyType) + v.pass.TypesSizes.Sizeof(elemType)
+	_, most, _ := v.intRange(types.Typ[types.Int])
+	facts := []*logic.Term{logic.Le(logic.IntLit(0), count), logic.Implies(isNil, logic.Eq(count, logic.IntLit(0))),
+		logic.Le(count, logic.BigLit(most)), logic.Le(logic.Mul(count, logic.IntLit(max(entry, 1))), logic.BigLit(v.maxAlloc()))}
 	if key != nil {
 		present := logic.Select(v.row(nil, mem, mapOwner(t)+hasLeaf.path, hasLeaf.sort, ref), mapKey(key))
 		facts = append(facts, logic.Implies(present, logic.Le(logic.IntLit(1), count)), logic.Implies(isNil, logic.Not(present)))

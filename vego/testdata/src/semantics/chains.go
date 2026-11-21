@@ -729,3 +729,162 @@ func RuneChain(r rune) (s string) {
 	s = string(rune(len(s) + 127))
 	return s
 }
+
+// RangeChain counts the keys of a map thirty times over, one range after
+// another, each with the keys it has visited named.
+//
+// @Requires |m| <= 1000
+// @Ensures n = 30 * |m|
+func RangeChain(m map[int]int) (n int) {
+	// @Visited d0
+	// @Invariant n = 0 * |m| + |d0|
+	for range m {
+		n++
+	}
+	// @Visited d1
+	// @Invariant n = 1 * |m| + |d1|
+	for range m {
+		n++
+	}
+	// @Visited d2
+	// @Invariant n = 2 * |m| + |d2|
+	for range m {
+		n++
+	}
+	// @Visited d3
+	// @Invariant n = 3 * |m| + |d3|
+	for range m {
+		n++
+	}
+	// @Visited d4
+	// @Invariant n = 4 * |m| + |d4|
+	for range m {
+		n++
+	}
+	// @Visited d5
+	// @Invariant n = 5 * |m| + |d5|
+	for range m {
+		n++
+	}
+	// @Visited d6
+	// @Invariant n = 6 * |m| + |d6|
+	for range m {
+		n++
+	}
+	// @Visited d7
+	// @Invariant n = 7 * |m| + |d7|
+	for range m {
+		n++
+	}
+	// @Visited d8
+	// @Invariant n = 8 * |m| + |d8|
+	for range m {
+		n++
+	}
+	// @Visited d9
+	// @Invariant n = 9 * |m| + |d9|
+	for range m {
+		n++
+	}
+	// @Visited d10
+	// @Invariant n = 10 * |m| + |d10|
+	for range m {
+		n++
+	}
+	// @Visited d11
+	// @Invariant n = 11 * |m| + |d11|
+	for range m {
+		n++
+	}
+	// @Visited d12
+	// @Invariant n = 12 * |m| + |d12|
+	for range m {
+		n++
+	}
+	// @Visited d13
+	// @Invariant n = 13 * |m| + |d13|
+	for range m {
+		n++
+	}
+	// @Visited d14
+	// @Invariant n = 14 * |m| + |d14|
+	for range m {
+		n++
+	}
+	// @Visited d15
+	// @Invariant n = 15 * |m| + |d15|
+	for range m {
+		n++
+	}
+	// @Visited d16
+	// @Invariant n = 16 * |m| + |d16|
+	for range m {
+		n++
+	}
+	// @Visited d17
+	// @Invariant n = 17 * |m| + |d17|
+	for range m {
+		n++
+	}
+	// @Visited d18
+	// @Invariant n = 18 * |m| + |d18|
+	for range m {
+		n++
+	}
+	// @Visited d19
+	// @Invariant n = 19 * |m| + |d19|
+	for range m {
+		n++
+	}
+	// @Visited d20
+	// @Invariant n = 20 * |m| + |d20|
+	for range m {
+		n++
+	}
+	// @Visited d21
+	// @Invariant n = 21 * |m| + |d21|
+	for range m {
+		n++
+	}
+	// @Visited d22
+	// @Invariant n = 22 * |m| + |d22|
+	for range m {
+		n++
+	}
+	// @Visited d23
+	// @Invariant n = 23 * |m| + |d23|
+	for range m {
+		n++
+	}
+	// @Visited d24
+	// @Invariant n = 24 * |m| + |d24|
+	for range m {
+		n++
+	}
+	// @Visited d25
+	// @Invariant n = 25 * |m| + |d25|
+	for range m {
+		n++
+	}
+	// @Visited d26
+	// @Invariant n = 26 * |m| + |d26|
+	for range m {
+		n++
+	}
+	// @Visited d27
+	// @Invariant n = 27 * |m| + |d27|
+	for range m {
+		n++
+	}
+	// @Visited d28
+	// @Invariant n = 28 * |m| + |d28|
+	for range m {
+		n++
+	}
+	// @Visited d29
+	// @Invariant n = 29 * |m| + |d29|
+	for range m {
+		n++
+	}
+	return n
+}

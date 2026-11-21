@@ -149,8 +149,8 @@ Any other word after `// @` is also an error. `vego` cannot tell a wrong keyword
 
 ```text
 vego: unknown annotation "Post"; an annotation starts with one of Requires, Ensures, Modifies,
-Invariant, Variant, Assert, Snapshot, Predicate, State, Receiver, Vouches. If another tool reads
-this comment, declare the word with -vego.other-tags
+Invariant, Variant, Visited, Assert, Snapshot, Predicate, State, Receiver, Vouches. If another tool
+reads this comment, declare the word with -vego.other-tags
 ```
 
 If your code has comments such as `// @Summary` for another tool, list those words once:

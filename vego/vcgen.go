@@ -37,6 +37,9 @@ type ctrl struct {
 type loopSpec struct {
 	invariants []*clause
 	variant    *clause
+	// visited is the Visited clause of a range over a map, which
+	// checkVisited has placed.
+	visited *clause
 }
 
 type fnVerifier struct {
@@ -685,6 +688,10 @@ func (v *fnVerifier) seq(list []ast.Stmt, from, to token.Pos, st *state, c ctrl,
 			v.takeSnapshot(clause, st)
 		case "Invariant":
 			spec.invariants = append(spec.invariants, clause)
+		case "Visited":
+			// checkVisited reports one that stands anywhere but directly
+			// above a range over a map, or a second one.
+			spec.visited = clause
 		default:
 			if spec.variant != nil {
 				v.report(clause.pos, "loop already has a Variant; give it exactly one")

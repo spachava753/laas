@@ -384,6 +384,9 @@ func (e *specEnv) locate(name string, steps []logic.Step, when logic.When) (reac
 // a struct reads memory, since what is asked of it is read where it points.
 func (e *specEnv) locateAt(name string, steps []logic.Step, when logic.When, throughPointer bool) (reached, error) {
 	if e.fn == nil && e.st != nil {
+		if c := e.v.visitedAt(name, e.pos); c != nil {
+			return reached{}, fmt.Errorf("%s is the set of keys that the loop has visited; a formula reads it only as |%s| and has(%s, k)", name, name, name)
+		}
 		if c := e.v.snapshotAt(name, e.pos); c != nil {
 			taken, ok := e.st.snapshots[c]
 			switch {
@@ -528,6 +531,11 @@ func (e *specEnv) locateField(name string, steps []logic.Step, when logic.When) 
 // a slice of single values yields the sequence of its elements; one that
 // ends in a struct, or in a slice of structs, has no value of its own.
 func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic.Term, error) {
+	if e.fn == nil && e.st != nil {
+		if c := e.v.visitedAt(name, e.pos); c != nil {
+			return e.visitedPath(c, steps, when)
+		}
+	}
 	if err := e.genericPath(name, steps); err != nil {
 		return nil, err
 	}
