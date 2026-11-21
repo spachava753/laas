@@ -87,8 +87,8 @@ type CacheError struct{ Err error }
 
 func (e *CacheError) Error() string { return e.Err.Error() }
 
-func cacheFault(dir, format string, args ...any) {
-	panic(&CacheError{fmt.Errorf(format+"; to empty the cache, remove %s", append(args, dir)...)})
+func cacheFault(format string, args ...any) {
+	panic(&CacheError{fmt.Errorf(format, args...)})
 }
 
 // disk is the cache of one solver in a directory.
@@ -414,19 +414,19 @@ func (d *disk) read(key string) (reply, bool) {
 	case errors.Is(err, fs.ErrNotExist):
 		return reply{}, false
 	case err != nil:
-		cacheFault(d.root, "the answer cache entry %s cannot be read: %v", path, err)
+		cacheFault("the answer cache entry %s cannot be read: %v; run without -vego.cache or with another directory", path, err)
 	}
 	stored, r, problem := decodeEntry(content)
 	if problem == "" && stored != key {
 		problem = "it holds the answer to another problem"
 	}
 	if problem != "" {
-		cacheFault(d.root, "the answer cache entry %s is damaged: %s", path, problem)
+		cacheFault("the answer cache entry %s is damaged: %s; to empty the cache, remove %s", path, problem, d.root)
 	}
 	if info, err := os.Stat(path); err == nil && time.Since(info.ModTime()) > touchAfter {
 		now := time.Now()
 		if err := os.Chtimes(path, now, now); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			cacheFault(d.root, "the answer cache entry %s cannot be marked as used: %v", path, err)
+			cacheFault("the answer cache entry %s cannot be marked as used: %v; run without -vego.cache or with another directory", path, err)
 		}
 	}
 	return r, true
@@ -438,18 +438,18 @@ func (d *disk) write(key string, r reply) {
 	path := d.entryPath(key)
 	content := encodeEntry(key, r)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		cacheFault(d.root, "the answer cache %s cannot be written: %v; run without -vego.cache or with another directory", d.root, err)
+		cacheFault("the answer cache %s cannot be written: %v; run without -vego.cache or with another directory", d.root, err)
 	}
 	err := publish(filepath.Dir(path), path, content)
 	switch {
 	case err == nil:
 		return
 	case !errors.Is(err, fs.ErrExist):
-		cacheFault(d.root, "the answer cache %s cannot be written: %v; run without -vego.cache or with another directory", d.root, err)
+		cacheFault("the answer cache %s cannot be written: %v; run without -vego.cache or with another directory", d.root, err)
 	}
 	other, ok := d.read(key)
 	if ok && !other.equal(r) {
-		cacheFault(d.root, "Z3 answered one problem in two ways, %q against %q as kept in %s, so its answers cannot be kept", r.check, other.check, path)
+		cacheFault("Z3 answered one problem in two ways, %q against %q as kept in %s, so its answers cannot be kept; to empty the cache, remove %s", r.check, other.check, path, d.root)
 	}
 }
 

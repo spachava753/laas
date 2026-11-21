@@ -3,6 +3,7 @@ package vego
 import (
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // Most tests of the package run side by side. A test that changes a
@@ -28,10 +29,18 @@ func parallel(t *testing.T) {
 // alone fails the test if parallel tests are running, which is the case for
 // a subtest of a parallel test and for nothing that Go runs before them,
 // in every round of -count or -cpu.
+//
+// Speculative verifiers of an earlier test may still be at work for a
+// moment after it ended (see speculate.go); alone waits for them to end.
 func alone(t *testing.T) {
 	t.Helper()
 	if running.Load() > 0 {
 		t.Fatal("this test changes a setting of the whole package while other tests run beside it; make it a top-level test that does not call parallel")
+	}
+	for deadline := time.Now().Add(time.Minute); speculativeRunning.Load() > 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("speculative verifiers of an earlier test are still at work after a minute")
+		}
 	}
 }
 

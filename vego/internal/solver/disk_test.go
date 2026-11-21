@@ -531,6 +531,60 @@ func TestDiskCache(t *testing.T) {
 		}
 	})
 
+	// An asker that panics, here because the cache cannot be written,
+	// ends its problem's flight, and an asker waiting for its answer asks
+	// again instead of waiting for ever.
+	t.Run("an asker that panics while another waits", func(t *testing.T) {
+		dir := cacheDir(t)
+		t.Setenv("VEGO_FAKE_Z3_DELAY", "1000")
+		s, err := fakeSolver(t, dir, "unsat\n(:reason-unknown \"\")\n(:rlimit 7)", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(s.disk.dir, 0o555); err != nil {
+			t.Fatal(err)
+		}
+		defer os.Chmod(s.disk.dir, 0o755)
+		var wg sync.WaitGroup
+		var messages [2]string
+		for i := range 2 {
+			wg.Go(func() {
+				time.Sleep(time.Duration(i) * 300 * time.Millisecond)
+				messages[i] = cacheFailure(func() { s.Prove(nil, goal, Options{}) })
+			})
+		}
+		returned := make(chan struct{})
+		go func() { wg.Wait(); close(returned) }()
+		select {
+		case <-returned:
+		case <-time.After(10 * time.Second):
+			t.Fatal("the second asker of the same problem has not returned 10 s after the first one panicked")
+		}
+		for i, message := range messages {
+			if !strings.Contains(message, "cannot be written") {
+				t.Errorf("asker %d got %q, want the failure to write the cache", i, message)
+			}
+		}
+	})
+	// A speculative asker that finds the cache untrustworthy, here by the
+	// watch, makes every later question of another asker fail, so that no
+	// verification uses the entry that was found wrong.
+	t.Run("a wrong entry that a speculative asker found", func(t *testing.T) {
+		dir := cacheDir(t)
+		s := cached(t, z3, dir)
+		key := Script([]*logic.Term{logic.Not(goal)}, Options{}) + "\x00"
+		s.disk.write(key, reply{check: []string{"sat", `(:reason-unknown "")`, "(:rlimit 7)"}})
+		saved := watchRate
+		defer func() { watchRate = saved }()
+		watchRate = 1
+		if message := cacheFailure(func() { s.Prove(nil, goal, Options{Speculative: true}) }); !strings.Contains(message, "otherwise") {
+			t.Fatalf("the speculative asker got %q, want the watch's failure", message)
+		}
+		watchRate = 1 << 30
+		if message := cacheFailure(func() { s.Prove(nil, goal, Options{}) }); !strings.Contains(message, "otherwise") {
+			t.Fatalf("the asker after it got %q, want the watch's failure", message)
+		}
+	})
 	t.Run("a directory inside a module", func(t *testing.T) {
 		root := t.TempDir()
 		saved := searchedUpTo

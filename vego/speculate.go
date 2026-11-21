@@ -37,6 +37,14 @@ const maxSpeculative = 3
 // speculating holds a place for each speculative verifier at work.
 var speculating = make(chan struct{}, maxSpeculative)
 
+// speculativeRunning counts the speculative verifiers at work, which a
+// test that changes a setting of the whole package waits for.
+var speculativeRunning atomic.Int64
+
+// stopped is panicked by a question of a speculative verifier whose
+// package is verified, so that the verifier ends at once.
+type stopped struct{}
+
 // speculatedFunctions counts the functions that speculative verifiers
 // verified, and speculationPanics the panics they dropped; the tests read
 // them.
@@ -169,18 +177,22 @@ func speculate(pass *analysis.Pass, verifier func(*analysis.Pass) *pkgVerifier, 
 	for range maxSpeculative {
 		go func() {
 			speculating <- struct{}{}
-			if sp.done.Load() {
+			speculativeRunning.Add(1)
+			defer func() {
+				speculativeRunning.Add(-1)
 				<-speculating
+			}()
+			if sp.done.Load() {
 				return
 			}
-			defer func() { <-speculating }()
 			defer func() {
-				if recover() != nil {
+				if r := recover(); r != nil && r != (stopped{}) {
 					speculationPanics.Add(1)
 				}
 			}()
 			pv := verifier(&own)
 			pv.speculative = true
+			pv.stopSpeculation = sp.done.Load
 			pv.loadTrust(trustPath)
 			pv.collect()
 			// Every speculative verifier of the package collects the same
@@ -199,7 +211,10 @@ func speculate(pass *analysis.Pass, verifier func(*analysis.Pass) *pkgVerifier, 
 				}
 				func() {
 					defer func() {
-						if recover() != nil {
+						if r := recover(); r != nil {
+							if r == (stopped{}) {
+								panic(r)
+							}
 							speculationPanics.Add(1)
 						}
 					}()

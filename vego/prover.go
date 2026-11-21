@@ -36,6 +36,9 @@ func (pv *pkgVerifier) solver() *solver.Solver {
 // zero selects the one the flags set. What the problem costs counts as a
 // question of the given kind unless the caller set another; see asking.
 func (pv *pkgVerifier) options(effort int, kind question) solver.Options {
+	if pv.speculative && pv.stopSpeculation() {
+		panic(stopped{})
+	}
 	if effort == 0 {
 		effort = pv.effort
 	}

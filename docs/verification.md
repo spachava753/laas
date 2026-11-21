@@ -1867,7 +1867,7 @@ A proof obligation that stops at a limit draws a message with the note. So does 
 
 `vego` verifies the functions of a package one after another, and `laas` runs up to four Z3 processes. When a package is verified while the other processes are idle, as when you run `laas` on one package, up to three more verifiers in the run verify the package's later functions on those processes. They report nothing. When the verification reaches such a function, the answers it needs are ready. A package of several slow functions is verified up to three times faster that way. In one package of 24 functions, a run went from 91 s to 33 s. The messages, the exit status, and what `-vego.cost` counts are the same as without it.
 
-The extra verifiers use memory: in the runs measured, up to a quarter more than without them. On a machine that is short of memory, turn them off:
+The extra verifiers use memory: in the runs measured, up to 13% more than without them. On a machine that is short of memory, turn them off:
 
 ```sh
 laas -vego -vego.speculate=false ./...
@@ -1893,7 +1893,7 @@ vego: 157 of the 157 answers of Z3 for example.com/ring came from the answer cac
 
 The trust report names the directory too, because the proofs then rest on what it holds. See [The trust report](#the-trust-report) and [What a proof assumes](#what-a-proof-assumes).
 
-Give a directory that does not exist yet, or an empty one. `laas` marks it as an answer cache with a file `CACHEDIR.TAG`, and refuses a directory that holds anything else and has no such mark. The directory must also be outside every module and repository: `laas` refuses one inside a directory that holds `go.mod`, `.git`, or the files of another version control system. A cache committed to a repository would carry its answers into other people's runs. The flag works on Linux only, because `vego` reads `/proc` to identify the files that Z3 runs.
+Give a directory that does not exist yet, or an empty one. `laas` marks it as an answer cache with a file `CACHEDIR.TAG`, and refuses a directory that holds anything else and has no such mark. The directory must also be outside every module and repository: `laas` refuses one inside a directory that holds `go.mod`, `.git`, or the files of another version control system. A cache committed to a repository would carry its answers into other people's runs. On a machine where `/tmp` itself holds a repository, every directory under `/tmp` is refused for that reason. Use a directory under your home directory, such as `$HOME/.cache/vego`. The flag works on Linux only, because `vego` reads `/proc` to identify the files that Z3 runs.
 
 The answers are kept for the Z3 binary that gave them, together with the libraries it loads and the processor. Another Z3, or the same one after a system update that changes its libraries, starts with an empty directory of its own. `-vego.z3` must name the Z3 binary itself, not a script that starts it.
 

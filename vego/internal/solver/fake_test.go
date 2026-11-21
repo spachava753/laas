@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The test binary stands in for Z3 when VEGO_FAKE_Z3 is set, so that the
@@ -15,7 +16,8 @@ import (
 // version, and answers each problem with the lines of VEGO_FAKE_Z3 and each
 // get-value with those of VEGO_FAKE_Z3_VALUES, in which {line} becomes the
 // number of lines it has read. With VEGO_FAKE_Z3 set to "exit" it ends at
-// once without reading anything.
+// once without reading anything. VEGO_FAKE_Z3_DELAY is a number of
+// milliseconds it waits before it answers a problem.
 func TestMain(m *testing.M) {
 	if reply, ok := os.LookupEnv("VEGO_FAKE_Z3"); ok {
 		fakeZ3(reply, os.Getenv("VEGO_FAKE_Z3_VALUES"))
@@ -49,6 +51,9 @@ func fakeZ3(reply, values string) {
 		case asked:
 			fmt.Println(strings.ReplaceAll(values, "{line}", strconv.Itoa(read)))
 		case problem:
+			if delay, err := strconv.Atoi(os.Getenv("VEGO_FAKE_Z3_DELAY")); err == nil {
+				time.Sleep(time.Duration(delay) * time.Millisecond)
+			}
 			fmt.Println(reply)
 		}
 		problem, asked = false, false

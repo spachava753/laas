@@ -64,6 +64,9 @@ type Solver struct {
 	// asked while it is solved is not solved twice; see answer.
 	flightsMu sync.Mutex
 	flights   map[string]*flight
+	// untrusted holds the first CacheError raised for a speculative asker;
+	// see answer.
+	untrusted atomic.Pointer[CacheError]
 	// disk keeps answers between runs when a cache directory is given;
 	// see disk.go.
 	disk *disk
@@ -463,6 +466,21 @@ type answer struct {
 // so is the same answer when the process gives it again.
 func (s *Solver) answer(script string, values []string, speculative bool) (answer, bool, error) {
 	key := script + "\x00" + strings.Join(values, " ")
+	// A cache that a speculative asker found cannot be trusted cannot be
+	// trusted by anyone: its error, which nobody reads where it was
+	// raised, fails every later question of another asker.
+	if speculative {
+		defer func() {
+			if r := recover(); r != nil {
+				if e, ok := r.(*CacheError); ok {
+					s.untrusted.CompareAndSwap(nil, e)
+				}
+				panic(r)
+			}
+		}()
+	} else if e := s.untrusted.Load(); e != nil {
+		panic(e)
+	}
 	for {
 		s.mu.Lock()
 		a, ok := s.answers[key]
@@ -478,7 +496,7 @@ func (s *Solver) answer(script string, values []string, speculative bool) (answe
 					err = errors.New("its values do not go with its answer")
 				}
 				if err != nil {
-					cacheFault(s.disk.root, "the answer cache entry %s is damaged: %v", s.disk.entryPath(key), err)
+					cacheFault("the answer cache entry %s is damaged: %v; to empty the cache, remove %s", s.disk.entryPath(key), err, s.disk.root)
 				}
 				// A sample of the answers read, drawn anew for each run, is
 				// solved again to watch the premise.
@@ -516,10 +534,10 @@ func (s *Solver) answer(script string, values []string, speculative bool) (answe
 				a := f.a
 				a.took = 0
 				return a, true, nil
-			case f.speculative:
+			case f.speculative, f.abandoned:
 				// A speculative asker that got no answer to keep, as when
 				// its process was ended for another asker, answers for
-				// nobody else.
+				// nobody else, and neither does an asker that panicked.
 				continue
 			}
 			return f.a, false, f.err
@@ -537,37 +555,50 @@ func (s *Solver) answer(script string, values []string, speculative bool) (answe
 		f := &flight{done: make(chan struct{}), speculative: speculative}
 		s.flights[key] = f
 		s.flightsMu.Unlock()
-		var r reply
-		var err error
-		if p == nil {
-			a, r, err = s.solve(script, values, false)
-		} else {
-			a, r, err = s.run(p, script, values)
-		}
-		if err == nil && !(a.status == "unknown" && machineBound(a.reason)) {
-			if s.disk != nil {
-				s.disk.write(key, r)
-			}
-			s.remember(key, a)
-			f.kept = true
-		}
-		f.a, f.err = a, err
-		s.flightsMu.Lock()
-		delete(s.flights, key)
-		s.flightsMu.Unlock()
-		close(f.done)
+		a, err := s.fly(f, key, p, script, values)
 		return a, false, err
 	}
 }
 
+// fly solves the problem of a flight, keeps its answer, and ends the
+// flight on every path, a panic included: an asker that panicked, as on a
+// cache that cannot be written, has no answer for its waiters, who then ask
+// again.
+func (s *Solver) fly(f *flight, key string, p *process, script string, values []string) (a answer, err error) {
+	f.abandoned = true
+	defer func() {
+		s.flightsMu.Lock()
+		delete(s.flights, key)
+		s.flightsMu.Unlock()
+		close(f.done)
+	}()
+	var r reply
+	if p == nil {
+		a, r, err = s.solve(script, values, false)
+	} else {
+		a, r, err = s.run(p, script, values)
+	}
+	if err == nil && !(a.status == "unknown" && machineBound(a.reason)) {
+		if s.disk != nil {
+			s.disk.write(key, r)
+		}
+		s.remember(key, a)
+		f.kept = true
+	}
+	f.a, f.err, f.abandoned = a, err, false
+	return a, err
+}
+
 // flight is a problem being solved, which other askers of it wait for.
-// kept is set when its answer is kept; speculative when its asker is.
+// kept is set when its answer is kept; speculative when its asker is; and
+// abandoned when its asker panicked.
 type flight struct {
 	done        chan struct{}
 	a           answer
 	err         error
 	kept        bool
 	speculative bool
+	abandoned   bool
 }
 
 // solve takes a process and solves a problem with it.
@@ -600,7 +631,7 @@ func (s *Solver) watch(key, script string, values []string, stored reply, specul
 		return
 	}
 	if !r.equal(stored) {
-		cacheFault(s.disk.root, "Z3 answers a problem otherwise than the answer cache entry %s says, %q against %q, so the answers kept there cannot be trusted", s.disk.entryPath(key), r.check, stored.check)
+		cacheFault("Z3 answers a problem otherwise than the answer cache entry %s says, %q against %q, so the answers kept there cannot be trusted; to empty the cache, remove %s", s.disk.entryPath(key), r.check, stored.check, s.disk.root)
 	}
 }
 

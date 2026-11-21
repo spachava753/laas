@@ -511,8 +511,10 @@ type pkgVerifier struct {
 	// cacheDir is the directory of the answer cache, or "" for none.
 	cacheDir string
 	// speculative is set for a verifier that only fills the solver's
-	// cache; see speculate.go.
-	speculative bool
+	// cache, and stopSpeculation reports when its package is verified; see
+	// speculate.go.
+	speculative     bool
+	stopSpeculation func() bool
 	// searchLimit is the last limit a question of a search for an input
 	// stopped at while the current function was verified, and searching
 	// counts the searches under way.
