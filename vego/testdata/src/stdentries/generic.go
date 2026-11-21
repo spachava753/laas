@@ -289,3 +289,26 @@ func Largest(xs []int) (r int) {
 func Unique(s []Point2) (r []Point2) {
 	return slices.Compact(s)
 }
+
+// GrowWrite writes past the length of a slice it grew, without listing it.
+//
+// @Requires |s| < 1000
+// @Ensures True
+func GrowWrite(s []int) (r []int) {
+	r = slices.Grow(s, 1)
+	r = r[:len(r)+1]
+	r[len(r)-1] = 1 // want `r\[len\(r\) - 1\] is assigned, which GrowWrite may not modify; it is memory that Grow returned, which its contract places within s when it is not new, and GrowWrite passed s as s; list s in a // @Modifies clause`
+	return r
+}
+
+// GrowWriteListed lists it.
+//
+// @Requires |s| < 1000
+// @Modifies s
+// @Ensures True
+func GrowWriteListed(s []int) (r []int) {
+	r = slices.Grow(s, 1)
+	r = r[:len(r)+1]
+	r[len(r)-1] = 1
+	return r
+}

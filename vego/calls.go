@@ -599,7 +599,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 				for _, leaf := range results[i] {
 					if leaf.Sort == logic.Ref && leaf.Op == logic.OpConst {
 						from := returned{fn: fn, result: i, call: name}
-						from.param, from.within = withinArgument(fn, i, bound)
+						from.param, from.within, from.unlessNew = withinArgument(fn, i, bound)
 						v.returnedBy[leaf.Name] = from
 					}
 				}

@@ -33,6 +33,13 @@ func (e *evaluator) number(t *logic.Term) *big.Int {
 	switch t.Op {
 	case logic.OpIntLit:
 		return t.Value()
+	case logic.OpTrue, logic.OpFalse:
+		// An element of a sequence of booleans, which holds reads as a
+		// number that is not zero.
+		if t.Op == logic.OpTrue {
+			return big.NewInt(1)
+		}
+		return big.NewInt(0)
 	case logic.OpBound:
 		value, bound := e.bindings[t.Name]
 		if !bound {

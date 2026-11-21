@@ -28,11 +28,33 @@ type (
 	harnessIDs    []int
 	harnessEmpty  struct{}
 	harnessCounts map[string]int
+	// harnessLevel is a named integer with methods.
+	harnessLevel int
 )
+
+// The methods of the type arguments fail the test when called: the shipped
+// entries of generic functions claim to run none.
+func calledMethod(name string) {
+	calledMethods = append(calledMethods, name)
+	panic("a shipped generic function called the method " + name + " of a type argument, which its entry claims it does not")
+}
+
+// calledMethods records each call of a method of a type argument of the
+// harness, also one whose panic something recovered.
+var calledMethods []string
+
+func (harnessLevel) String() string          { calledMethod("String"); return "" }
+func (harnessLevel) Error() string           { calledMethod("Error"); return "" }
+func (*harnessLevel) Format(fmt.State, rune) { calledMethod("Format") }
+func (*harnessLevel) GoString() string       { calledMethod("GoString"); return "" }
+func (harnessPoint) String() string          { calledMethod("String"); return "" }
+func (harnessPoint) Error() string           { calledMethod("Error"); return "" }
+func (*harnessPoint) Format(fmt.State, rune) { calledMethod("Format") }
+func (*harnessPoint) GoString() string       { calledMethod("GoString"); return "" }
 
 // harnessTypes are the types of the type arguments of the harness.
 type harnessTypes struct {
-	point, ids, empty, counts types.Type
+	point, ids, empty, counts, level types.Type
 }
 
 func newHarnessTypes(pkg *types.Package) *harnessTypes {
@@ -41,53 +63,49 @@ func newHarnessTypes(pkg *types.Package) *harnessTypes {
 	}
 	intT := types.Typ[types.Int]
 	field := func(name string) *types.Var { return types.NewField(0, pkg, name, intT, false) }
+	// The types with methods have them here too, so that the claim under
+	// asserts is what lets a call of them through.
+	withMethods := func(t types.Type) types.Type {
+		named := t.(*types.Named)
+		str := types.NewSignatureType(nil, nil, nil, nil, types.NewTuple(types.NewVar(0, pkg, "", types.Typ[types.String])), false)
+		for _, m := range []struct {
+			name    string
+			pointer bool
+		}{{"String", false}, {"Error", false}, {"GoString", true}} {
+			var recv types.Type = named
+			if m.pointer {
+				recv = types.NewPointer(named)
+			}
+			sig := types.NewSignatureType(types.NewVar(0, pkg, "", recv), nil, nil, nil, str.Results(), false)
+			named.AddMethod(types.NewFunc(0, pkg, m.name, sig))
+		}
+		return named
+	}
 	return &harnessTypes{
-		point: named("harnessPoint", types.NewStruct([]*types.Var{field("X"), field("Y")}, nil)),
-		ids:   named("harnessIDs", types.NewSlice(intT)),
+		level:  withMethods(named("harnessLevel", intT)),
+		point:  withMethods(named("harnessPoint", types.NewStruct([]*types.Var{field("X"), field("Y")}, nil))),
+		ids:    named("harnessIDs", types.NewSlice(intT)),
 		empty:  named("harnessEmpty", types.NewStruct(nil, nil)),
 		counts: named("harnessCounts", types.NewMap(types.Typ[types.String], intT)),
 	}
 }
-
-// genericCase is one instantiation of a generic function with a shipped
-// entry: the type arguments, and either the harness that calls the real
-// function at them, or a part of the defect the contract must have there.
-type genericCase struct {
-	targs   func(h *harnessTypes) []types.Type
-	harness func(rng *rand.Rand) sample
-	refused string
-}
-
-func sliceOf(elem func(h *harnessTypes) types.Type) func(h *harnessTypes) []types.Type {
-	return func(h *harnessTypes) []types.Type { return []types.Type{types.NewSlice(elem(h)), elem(h)} }
-}
-
-func basic(kind types.BasicKind) func(*harnessTypes) types.Type {
-	return func(*harnessTypes) types.Type { return types.Typ[kind] }
-}
-
-func pointType(h *harnessTypes) types.Type   { return h.point }
-func pointerType(h *harnessTypes) types.Type { return types.NewPointer(h.point) }
-func emptyType(h *harnessTypes) types.Type   { return h.empty }
-func idsArgs(h *harnessTypes) []types.Type   { return []types.Type{h.ids, types.Typ[types.Int]} }
 
 // pointPool is the memory the pointers of the harness point to, so that two
 // elements are often the same pointer.
 var pointPool = []*harnessPoint{{1, 2}, {1, 2}, {3, 4}}
 
 // Elements of each type, from few values so that elements are often equal.
-func smallInt(rng *rand.Rand) int         { return rng.Intn(4) - 1 }
-func smallInt64(rng *rand.Rand) int64     { return int64(rng.Intn(4)) << 40 }
-func smallByte(rng *rand.Rand) byte       { return byte(rng.Intn(3)) * 120 }
-func smallString(rng *rand.Rand) string   { return []string{"", "a", "b", "ab"}[rng.Intn(4)] }
+func smallInt(rng *rand.Rand) int       { return rng.Intn(4) - 1 }
+func smallByte(rng *rand.Rand) byte     { return byte(rng.Intn(3)) * 120 }
+func smallString(rng *rand.Rand) string { return []string{"", "a", "b", "ab"}[rng.Intn(4)] }
 func smallPoint(rng *rand.Rand) harnessPoint {
 	return harnessPoint{rng.Intn(2), rng.Intn(2)}
 }
 func smallPointer(rng *rand.Rand) *harnessPoint {
 	return pointPool[rng.Intn(len(pointPool))]
 }
-func smallFloat(rng *rand.Rand) float64   { return randomFloat(rng) }
-func anyEmpty(*rand.Rand) harnessEmpty    { return harnessEmpty{} }
+func smallFloat(rng *rand.Rand) float64 { return randomFloat(rng) }
+func anyEmpty(*rand.Rand) harnessEmpty  { return harnessEmpty{} }
 
 // randomSliceOf returns a slice of up to six elements, at times nil, at
 // times empty and not nil, and at times with room beyond its length.
@@ -105,7 +123,6 @@ func randomSliceOf[E any](rng *rand.Rand, elem func(*rand.Rand) E) []E {
 	}
 	return s
 }
-
 
 // sliceCall calls a function of one slice, which it may write.
 func sliceCall[S ~[]E, E any](gen func(*rand.Rand) S, call func(S) []any) func(*rand.Rand) sample {
@@ -144,17 +161,6 @@ func gen[E any](elem func(*rand.Rand) E) func(*rand.Rand) []E {
 }
 
 func genIDs(rng *rand.Rand) harnessIDs { return harnessIDs(randomSliceOf(rng, smallInt)) }
-
-// sortedGen is gen, sorted three times in four.
-func sortedGen[E interface{ ~int | ~int64 | ~uint8 }](elem func(*rand.Rand) E) func(*rand.Rand) []E {
-	return func(rng *rand.Rand) []E {
-		s := randomSliceOf(rng, elem)
-		if rng.Intn(4) > 0 {
-			slices.Sort(s)
-		}
-		return s
-	}
-}
 
 // one wraps a single result.
 func one[R any](r R) []any { return []any{r} }
@@ -230,29 +236,6 @@ func pairCall[S ~[]E, E any](gen func(*rand.Rand) S, call func(S, S) []any) func
 	}
 }
 
-// mapOf gives the type arguments of a function of one map type.
-func mapOf(key, value func(h *harnessTypes) types.Type) func(h *harnessTypes) []types.Type {
-	return func(h *harnessTypes) []types.Type {
-		return []types.Type{types.NewMap(key(h), value(h)), key(h), value(h)}
-	}
-}
-
-// twoMapsOf gives those of a function of two maps of one type.
-func twoMapsOf(key, value func(h *harnessTypes) types.Type) func(h *harnessTypes) []types.Type {
-	return func(h *harnessTypes) []types.Type {
-		m := types.NewMap(key(h), value(h))
-		return []types.Type{m, m, key(h), value(h)}
-	}
-}
-
-func countsArgs(h *harnessTypes) []types.Type {
-	return []types.Type{h.counts, types.Typ[types.String], types.Typ[types.Int]}
-}
-
-func intSlice(*harnessTypes) types.Type { return types.NewSlice(types.Typ[types.Int]) }
-
-func smallInts(rng *rand.Rand) []int { return randomSliceOf(rng, smallInt) }
-
 // randomMapOf returns a map of up to five keys, at times nil and at times
 // empty.
 func randomMapOf[K comparable, V any](rng *rand.Rand, key func(*rand.Rand) K, value func(*rand.Rand) V) map[K]V {
@@ -270,15 +253,8 @@ func mapGen[K comparable, V any](key func(*rand.Rand) K, value func(*rand.Rand) 
 	return func(rng *rand.Rand) map[K]V { return randomMapOf(rng, key, value) }
 }
 
-func countsGen(rng *rand.Rand) harnessCounts { return harnessCounts(randomMapOf(rng, smallString, smallInt)) }
-
-// cloneCall calls maps.Clone.
-func cloneCall[M ~map[K]V, K comparable, V any](gen func(*rand.Rand) M) func(*rand.Rand) sample {
-	return func(rng *rand.Rand) sample {
-		m := gen(rng)
-		before := snapshot(m)
-		return sample{before: before, after: []any{m}, results: []any{maps.Clone(m)}}
-	}
+func countsGen(rng *rand.Rand) harnessCounts {
+	return harnessCounts(randomMapOf(rng, smallString, smallInt))
 }
 
 // copyCall calls maps.Copy, but not into a nil map with keys to copy,
@@ -313,187 +289,291 @@ func deleteFuncCall[M ~map[K]V, K comparable, V any](gen func(*rand.Rand) M) fun
 	}
 }
 
-// compareCall calls cmp.Compare on two values that are often equal.
-func compareCall[T cmp.Ordered](value func(*rand.Rand) T) func(*rand.Rand) sample {
-	return func(rng *rand.Rand) sample {
-		x, y := value(rng), value(rng)
-		return sample{before: []any{x, y}, results: []any{cmp.Compare(x, y)}}
+// harnessClasses are the kinds of type argument every shipped entry of a
+// generic function is tested at, where its constraint admits them: for a
+// function of a slice or a map the class is that of the element or the
+// value. Each must have a harness or the refusal the entry draws there.
+var harnessClasses = []string{"int", "uint8", "level", "bool", "string", "pointer", "zero pointer", "struct", "zero struct", "float64", "named slice"}
+
+// keyClasses are the kinds of key every entry of a function of a map is
+// tested at, with integers as values. A key of another kind makes a map
+// that vego does not model.
+var keyClasses = []string{"int", "uint8", "level", "string", "bool", "pointer", "struct", "float64"}
+
+// classType is the type of a class in the package of the shipped verifier.
+func (h *harnessTypes) classType(class string) types.Type {
+	switch class {
+	case "int":
+		return types.Typ[types.Int]
+	case "uint8":
+		return types.Typ[types.Uint8]
+	case "level":
+		return h.level
+	case "bool":
+		return types.Typ[types.Bool]
+	case "string":
+		return types.Typ[types.String]
+	case "pointer":
+		return types.NewPointer(h.point)
+	case "zero pointer":
+		return types.NewPointer(h.empty)
+	case "struct":
+		return h.point
+	case "zero struct":
+		return h.empty
+	case "float64":
+		return types.Typ[types.Float64]
+	}
+	panic("no type for the class " + class)
+}
+
+// typeArgs gives the type arguments of a generic function at a class: of a
+// function of a map, the class is that of the value, with keys of type
+// key, and the named type is harnessCounts; of one of a slice, the class
+// is that of the element, and the named type is harnessIDs; and of any
+// other, the class is the type, and there is no named one.
+func (h *harnessTypes) typeArgs(generic *types.Func, class, key string) []types.Type {
+	params := generic.Type().(*types.Signature).TypeParams()
+	switch core := coreType(params.At(0)).(type) {
+	case *types.Map:
+		// Of a function of a map, a named type is the named map type
+		// harnessCounts.
+		var m, k, v types.Type = h.counts, types.Typ[types.String], types.Typ[types.Int]
+		if class != "named slice" {
+			k, v = h.classType(key), h.classType(class)
+			m = types.NewMap(k, v)
+		}
+		if params.Len() == 4 {
+			return []types.Type{m, m, k, v}
+		}
+		return []types.Type{m, k, v}
+	case *types.Slice:
+		if class == "named slice" {
+			return []types.Type{h.ids, types.Typ[types.Int]}
+		}
+		e := h.classType(class)
+		return []types.Type{types.NewSlice(e), e}
+	default:
+		_ = core
+		if class == "named slice" {
+			return nil
+		}
+		return []types.Type{h.classType(class)}
 	}
 }
 
-// genericHarnesses holds, for each shipped entry of a generic function, the
-// instantiations it is tested at.
-var genericHarnesses = map[string][]genericCase{
-	"slices.Contains": {
-		{targs: sliceOf(basic(types.Int)), harness: sliceValueCall(gen(smallInt), smallInt, func(s []int, v int) []any { return one(slices.Contains(s, v)) })},
-		{targs: sliceOf(basic(types.String)), harness: sliceValueCall(gen(smallString), smallString, func(s []string, v string) []any { return one(slices.Contains(s, v)) })},
-		{targs: sliceOf(pointerType), harness: sliceValueCall(gen(smallPointer), smallPointer, func(s []*harnessPoint, v *harnessPoint) []any { return one(slices.Contains(s, v)) })},
-		{targs: idsArgs, harness: sliceValueCall(genIDs, smallInt, func(s harnessIDs, v int) []any { return one(slices.Contains(s, v)) })},
-		{targs: sliceOf(pointType), refused: "is a struct, and a formula cannot compare a struct"},
-		{targs: sliceOf(basic(types.Float64)), refused: "cannot be applied to float values"},
-	},
-	"slices.Index": {
-		{targs: sliceOf(basic(types.Int)), harness: sliceValueCall(gen(smallInt), smallInt, func(s []int, v int) []any { return one(slices.Index(s, v)) })},
-		{targs: sliceOf(basic(types.String)), harness: sliceValueCall(gen(smallString), smallString, func(s []string, v string) []any { return one(slices.Index(s, v)) })},
-		{targs: sliceOf(pointerType), harness: sliceValueCall(gen(smallPointer), smallPointer, func(s []*harnessPoint, v *harnessPoint) []any { return one(slices.Index(s, v)) })},
-		{targs: sliceOf(pointType), refused: "is a struct"},
-	},
-	"slices.ContainsFunc": {
-		{targs: sliceOf(basic(types.Int)), harness: sliceFuncCall(gen(smallInt), "f", func(s []int, f func(int) bool) []any { return one(slices.ContainsFunc(s, f)) })},
-		{targs: sliceOf(basic(types.String)), harness: sliceFuncCall(gen(smallString), "f", func(s []string, f func(string) bool) []any { return one(slices.ContainsFunc(s, f)) })},
-		{targs: sliceOf(pointType), harness: sliceFuncCall(gen(smallPoint), "f", func(s []harnessPoint, f func(harnessPoint) bool) []any { return one(slices.ContainsFunc(s, f)) })},
-		{targs: sliceOf(basic(types.Float64)), harness: sliceFuncCall(gen(smallFloat), "f", func(s []float64, f func(float64) bool) []any { return one(slices.ContainsFunc(s, f)) })},
-	},
-	"slices.IndexFunc": {
-		{targs: sliceOf(basic(types.Int)), harness: sliceFuncCall(gen(smallInt), "f", func(s []int, f func(int) bool) []any { return one(slices.IndexFunc(s, f)) })},
-		{targs: sliceOf(pointType), harness: sliceFuncCall(gen(smallPoint), "f", func(s []harnessPoint, f func(harnessPoint) bool) []any { return one(slices.IndexFunc(s, f)) })},
-		{targs: sliceOf(basic(types.String)), harness: sliceFuncCall(gen(smallString), "f", func(s []string, f func(string) bool) []any { return one(slices.IndexFunc(s, f)) })},
-	},
-	"slices.Equal": {
-		{targs: sliceOf(basic(types.Int)), harness: pairCall(gen(smallInt), func(a, b []int) []any { return one(slices.Equal(a, b)) })},
-		{targs: sliceOf(basic(types.String)), harness: pairCall(gen(smallString), func(a, b []string) []any { return one(slices.Equal(a, b)) })},
-		{targs: sliceOf(pointerType), harness: pairCall(gen(smallPointer), func(a, b []*harnessPoint) []any { return one(slices.Equal(a, b)) })},
-		{targs: sliceOf(pointType), refused: "is a struct"},
-		{targs: sliceOf(basic(types.Float64)), refused: "cannot be applied to float values"},
-	},
-	"slices.Clone": {
-		{targs: sliceOf(basic(types.Int)), harness: sliceCall(gen(smallInt), func(s []int) []any { return one(slices.Clone(s)) })},
-		{targs: sliceOf(basic(types.String)), harness: sliceCall(gen(smallString), func(s []string) []any { return one(slices.Clone(s)) })},
-		{targs: sliceOf(pointType), harness: sliceCall(gen(smallPoint), func(s []harnessPoint) []any { return one(slices.Clone(s)) })},
-		{targs: sliceOf(pointerType), harness: sliceCall(gen(smallPointer), func(s []*harnessPoint) []any { return one(slices.Clone(s)) })},
-		{targs: sliceOf(basic(types.Float64)), harness: sliceCall(gen(smallFloat), func(s []float64) []any { return one(slices.Clone(s)) })},
-		{targs: sliceOf(emptyType), harness: sliceCall(gen(anyEmpty), func(s []harnessEmpty) []any { return one(slices.Clone(s)) })},
-		{targs: idsArgs, harness: sliceCall(genIDs, func(s harnessIDs) []any { return one(slices.Clone(s)) })},
-	},
-	"slices.Grow": {
-		{targs: sliceOf(basic(types.Int)), harness: growCall(gen(smallInt))},
-		{targs: sliceOf(basic(types.Uint8)), harness: growCall(gen(smallByte))},
-		{targs: sliceOf(basic(types.String)), harness: growCall(gen(smallString))},
-		{targs: sliceOf(pointType), harness: growCall(gen(smallPoint))},
-		{targs: sliceOf(emptyType), harness: growCall(gen(anyEmpty))},
-		{targs: idsArgs, harness: growCall(genIDs)},
-	},
-	"slices.Clip": {
-		{targs: sliceOf(basic(types.Int)), harness: sliceCall(gen(smallInt), func(s []int) []any { return one(slices.Clip(s)) })},
-		{targs: sliceOf(pointType), harness: sliceCall(gen(smallPoint), func(s []harnessPoint) []any { return one(slices.Clip(s)) })},
-		{targs: sliceOf(emptyType), harness: sliceCall(gen(anyEmpty), func(s []harnessEmpty) []any { return one(slices.Clip(s)) })},
-	},
-	"slices.Delete": {
-		{targs: sliceOf(basic(types.Int)), harness: deleteCall(gen(smallInt))},
-		{targs: sliceOf(basic(types.String)), harness: deleteCall(gen(smallString))},
-		{targs: sliceOf(pointType), harness: deleteCall(gen(smallPoint))},
-		{targs: sliceOf(pointerType), harness: deleteCall(gen(smallPointer))},
-	},
-	"slices.DeleteFunc": {
-		{targs: sliceOf(basic(types.Int)), harness: sliceFuncCall(gen(smallInt), "del", func(s []int, f func(int) bool) []any { return one(slices.DeleteFunc(s, f)) })},
-		{targs: sliceOf(basic(types.String)), harness: sliceFuncCall(gen(smallString), "del", func(s []string, f func(string) bool) []any { return one(slices.DeleteFunc(s, f)) })},
-		{targs: sliceOf(pointType), harness: sliceFuncCall(gen(smallPoint), "del", func(s []harnessPoint, f func(harnessPoint) bool) []any { return one(slices.DeleteFunc(s, f)) })},
-	},
-	"slices.Insert": {
-		{targs: sliceOf(basic(types.Int)), harness: insertCall(gen(smallInt), smallInt)},
-		{targs: sliceOf(basic(types.String)), harness: insertCall(gen(smallString), smallString)},
-		{targs: sliceOf(pointType), harness: insertCall(gen(smallPoint), smallPoint)},
-		{targs: sliceOf(emptyType), harness: insertCall(gen(anyEmpty), anyEmpty)},
-	},
-	"slices.Reverse": {
-		{targs: sliceOf(basic(types.Int)), harness: sliceCall(gen(smallInt), func(s []int) []any { slices.Reverse(s); return nil })},
-		{targs: sliceOf(pointType), harness: sliceCall(gen(smallPoint), func(s []harnessPoint) []any { slices.Reverse(s); return nil })},
-	},
-	"slices.Sort": {
-		{targs: sliceOf(basic(types.Int)), harness: sliceCall(gen(smallInt), func(s []int) []any { slices.Sort(s); return nil })},
-		{targs: sliceOf(basic(types.String)), harness: sliceCall(gen(smallString), func(s []string) []any { slices.Sort(s); return nil })},
-		{targs: sliceOf(basic(types.Float64)), harness: sliceCall(gen(smallFloat), func(s []float64) []any { slices.Sort(s); return nil })},
-		{targs: idsArgs, harness: sliceCall(genIDs, func(s harnessIDs) []any { slices.Sort(s); return nil })},
-	},
-	"slices.BinarySearch": {
-		{targs: sliceOf(basic(types.Int)), harness: sliceValueCall(sortedGen(smallInt), smallInt, func(s []int, v int) []any {
+// Elements of the classes of the harness.
+func smallBool(rng *rand.Rand) bool                 { return rng.Intn(2) == 0 }
+func smallLevel(rng *rand.Rand) harnessLevel        { return harnessLevel(rng.Intn(3)) }
+func smallZeroPointer(rng *rand.Rand) *harnessEmpty { return &harnessEmpty{} }
+
+// harnessAt returns the harness of an entry at a class, with string keys
+// for a function of a map.
+func harnessAt(key, class string) func(*rand.Rand) sample {
+	switch class {
+	case "int":
+		return orderedHarness(key, gen(smallInt), smallInt)
+	case "uint8":
+		return orderedHarness(key, gen(smallByte), smallByte)
+	case "level":
+		return orderedHarness(key, gen(smallLevel), smallLevel)
+	case "string":
+		return orderedHarness(key, gen(smallString), smallString)
+	case "float64":
+		return orderedHarness(key, gen(smallFloat), smallFloat)
+	case "named slice":
+		if strings.HasPrefix(key, "maps.") {
+			return mapHarness(key, countsGen)
+		}
+		return orderedHarness(key, genIDs, smallInt)
+	case "bool":
+		return comparableHarness(key, gen(smallBool), smallBool)
+	case "pointer":
+		return comparableHarness(key, gen(smallPointer), smallPointer)
+	case "zero pointer":
+		return comparableHarness(key, gen(smallZeroPointer), smallZeroPointer)
+	case "struct":
+		return comparableHarness(key, gen(smallPoint), smallPoint)
+	case "zero struct":
+		return comparableHarness(key, gen(anyEmpty), anyEmpty)
+	}
+	return nil
+}
+
+// keyHarnessAt returns the harness of an entry of a function of a map at a
+// class of key, with integers as values.
+func keyHarnessAt(key, class string) func(*rand.Rand) sample {
+	switch class {
+	case "int":
+		return mapHarness(key, mapGen(smallInt, smallInt))
+	case "uint8":
+		return mapHarness(key, mapGen(smallByte, smallInt))
+	case "level":
+		return mapHarness(key, mapGen(smallLevel, smallInt))
+	case "string":
+		return mapHarness(key, mapGen(smallString, smallInt))
+	}
+	return nil
+}
+
+// sortedOf is a generator of slices sorted three times in four.
+func sortedOf[S ~[]E, E cmp.Ordered](gen func(*rand.Rand) S) func(*rand.Rand) S {
+	return func(rng *rand.Rand) S {
+		s := gen(rng)
+		if rng.Intn(4) > 0 {
+			slices.Sort(s)
+		}
+		return s
+	}
+}
+
+// orderedHarness is the harness of an entry at an ordered element type.
+func orderedHarness[S ~[]E, E cmp.Ordered](key string, gen func(*rand.Rand) S, elem func(*rand.Rand) E) func(*rand.Rand) sample {
+	switch key {
+	case "slices.Sort":
+		return sliceCall(gen, func(s S) []any { slices.Sort(s); return nil })
+	case "slices.BinarySearch":
+		return sliceValueCall(sortedOf(gen), elem, func(s S, v E) []any {
 			i, found := slices.BinarySearch(s, v)
 			return []any{i, found}
-		})},
-		{targs: sliceOf(basic(types.Int64)), harness: sliceValueCall(sortedGen(smallInt64), smallInt64, func(s []int64, v int64) []any {
-			i, found := slices.BinarySearch(s, v)
-			return []any{i, found}
-		})},
-		{targs: sliceOf(basic(types.String)), refused: "cannot be applied to string or slice values; a formula has no order of them"},
-		{targs: sliceOf(basic(types.Float64)), refused: "cannot be applied to float values"},
-	},
-	"slices.Max": {
-		{targs: sliceOf(basic(types.Int)), harness: boundCall(gen(smallInt), slices.Max[[]int])},
-		{targs: sliceOf(basic(types.Uint8)), harness: boundCall(gen(smallByte), slices.Max[[]uint8])},
-		{targs: sliceOf(basic(types.String)), refused: "a formula has no order of them"},
-		{targs: sliceOf(basic(types.Float64)), refused: "cannot be applied to float values"},
-	},
-	"slices.Min": {
-		{targs: sliceOf(basic(types.Int)), harness: boundCall(gen(smallInt), slices.Min[[]int])},
-		{targs: sliceOf(basic(types.Int64)), harness: boundCall(gen(smallInt64), slices.Min[[]int64])},
-		{targs: sliceOf(basic(types.String)), refused: "a formula has no order of them"},
-	},
-	"maps.Clone": {
-		{targs: mapOf(basic(types.Int), basic(types.Int)), harness: cloneCall(mapGen(smallInt, smallInt))},
-		{targs: mapOf(basic(types.String), pointType), harness: cloneCall(mapGen(smallString, smallPoint))},
-		{targs: mapOf(basic(types.String), intSlice), harness: cloneCall(mapGen(smallString, smallInts))},
-		{targs: countsArgs, harness: cloneCall(countsGen)},
-	},
-	"maps.Copy": {
-		{targs: twoMapsOf(basic(types.Int), basic(types.Int)), harness: copyCall(mapGen(smallInt, smallInt))},
-		{targs: twoMapsOf(basic(types.String), pointType), harness: copyCall(mapGen(smallString, smallPoint))},
-		{targs: twoMapsOf(basic(types.String), basic(types.String)), harness: copyCall(mapGen(smallString, smallString))},
-	},
-	"maps.DeleteFunc": {
-		{targs: mapOf(basic(types.Int), basic(types.Int)), harness: deleteFuncCall(mapGen(smallInt, smallInt))},
-		{targs: mapOf(basic(types.String), pointType), harness: deleteFuncCall(mapGen(smallString, smallPoint))},
-		{targs: countsArgs, harness: deleteFuncCall(countsGen)},
-	},
-	"cmp.Compare": {
-		{targs: func(*harnessTypes) []types.Type { return []types.Type{types.Typ[types.Int]} }, harness: compareCall(smallInt)},
-		{targs: func(*harnessTypes) []types.Type { return []types.Type{types.Typ[types.String]} }, harness: compareCall(smallString)},
-		{targs: func(*harnessTypes) []types.Type { return []types.Type{types.Typ[types.Uint8]} }, harness: compareCall(smallByte)},
-		{targs: func(*harnessTypes) []types.Type { return []types.Type{types.Typ[types.Float64]} }, refused: "cannot be applied to float values"},
-	},
-	"slices.Compact": {
-		{targs: sliceOf(basic(types.Int)), harness: sliceCall(gen(smallInt), func(s []int) []any { return one(slices.Compact(s)) })},
-		{targs: sliceOf(basic(types.String)), harness: sliceCall(gen(smallString), func(s []string) []any { return one(slices.Compact(s)) })},
-		{targs: sliceOf(pointType), harness: sliceCall(gen(smallPoint), func(s []harnessPoint) []any { return one(slices.Compact(s)) })},
-		{targs: sliceOf(basic(types.Float64)), harness: sliceCall(gen(smallFloat), func(s []float64) []any { return one(slices.Compact(s)) })},
-	},
+		})
+	case "slices.Max":
+		return boundCall(gen, slices.Max[S])
+	case "slices.Min":
+		return boundCall(gen, slices.Min[S])
+	case "cmp.Compare":
+		// Two values that are often equal.
+		return func(rng *rand.Rand) sample {
+			x, y := elem(rng), elem(rng)
+			return sample{before: []any{x, y}, results: []any{cmp.Compare(x, y)}}
+		}
+	}
+	return comparableHarness(key, gen, elem)
+}
+
+// comparableHarness is the harness of an entry at a comparable element
+// type.
+func comparableHarness[S ~[]E, E comparable](key string, gen func(*rand.Rand) S, elem func(*rand.Rand) E) func(*rand.Rand) sample {
+	switch key {
+	case "slices.Contains":
+		return sliceValueCall(gen, elem, func(s S, v E) []any { return one(slices.Contains(s, v)) })
+	case "slices.Index":
+		return sliceValueCall(gen, elem, func(s S, v E) []any { return one(slices.Index(s, v)) })
+	case "slices.Equal":
+		return pairCall(gen, func(a, b S) []any { return one(slices.Equal(a, b)) })
+	case "slices.Compact":
+		return sliceCall(gen, func(s S) []any { return one(slices.Compact(s)) })
+	}
+	return anyHarness(key, gen, elem)
+}
+
+// anyHarness is the harness of an entry at any element type.
+func anyHarness[S ~[]E, E any](key string, gen func(*rand.Rand) S, elem func(*rand.Rand) E) func(*rand.Rand) sample {
+	switch key {
+	case "slices.ContainsFunc":
+		return sliceFuncCall(gen, "f", func(s S, f func(E) bool) []any { return one(slices.ContainsFunc(s, f)) })
+	case "slices.IndexFunc":
+		return sliceFuncCall(gen, "f", func(s S, f func(E) bool) []any { return one(slices.IndexFunc(s, f)) })
+	case "slices.DeleteFunc":
+		return sliceFuncCall(gen, "del", func(s S, f func(E) bool) []any { return one(slices.DeleteFunc(s, f)) })
+	case "slices.Clone":
+		return sliceCall(gen, func(s S) []any { return one(slices.Clone(s)) })
+	case "slices.Clip":
+		return sliceCall(gen, func(s S) []any { return one(slices.Clip(s)) })
+	case "slices.Reverse":
+		return sliceCall(gen, func(s S) []any { slices.Reverse(s); return nil })
+	case "slices.Grow":
+		return growCall(gen)
+	case "slices.Delete":
+		return deleteCall(gen)
+	case "slices.Insert":
+		return insertCall(gen, elem)
+	}
+	return mapHarness(key, mapGen(smallString, elem))
+}
+
+// mapHarness is the harness of an entry of a function of a map.
+func mapHarness[M ~map[K]V, K comparable, V any](key string, gen func(*rand.Rand) M) func(*rand.Rand) sample {
+	switch key {
+	case "maps.Clone":
+		return func(rng *rand.Rand) sample {
+			m := gen(rng)
+			before := snapshot(m)
+			return sample{before: before, after: []any{m}, results: []any{maps.Clone(m)}}
+		}
+	case "maps.Copy":
+		return copyCall(gen)
+	case "maps.DeleteFunc":
+		return deleteFuncCall(gen)
+	}
+	return nil
+}
+
+// refusedAt returns a part of the defect the contract of an entry has at a
+// class, or "" where it must be usable.
+func refusedAt(key, class string) string {
+	equality := []string{"slices.Contains", "slices.Index", "slices.Equal"}
+	order := []string{"slices.Max", "slices.Min", "slices.BinarySearch"}
+	switch {
+	case slices.Contains(equality, key) && (class == "struct" || class == "zero struct"):
+		return "is a struct, and a formula cannot compare a struct"
+	case slices.Contains(equality, key) && class == "zero pointer":
+		return "pointers to values of size zero may or may not be equal"
+	case (slices.Contains(equality, key) || slices.Contains(order, key) || key == "cmp.Compare") && class == "float64":
+		return "cannot be applied to float values"
+	case slices.Contains(order, key) && class == "string":
+		return "a formula has no order of them"
+	}
+	return ""
 }
 
 // checkGenericEntry tests the shipped entry of a generic function at each
-// instantiation of its harnesses. Each condition of an ensures must hold in
-// some call at some instantiation.
+// class of type argument its constraint admits: by its harness where the
+// contract must be usable, and by its defect where it must be refused. The
+// type arguments with methods, harnessLevel and harnessPoint, fail the test
+// if a method is called, as the entry claims under asserts that the
+// function runs none; that claim is also checked to be there. Each
+// condition of an ensures must hold in some call at some class.
 func checkGenericEntry(t *testing.T, pv *pkgVerifier, key string, generic *types.Func) {
-	cases, ok := genericHarnesses[key]
-	if !ok {
-		t.Fatalf("no harness calls %s; add its instantiations to genericHarnesses", key)
-	}
 	kit := newHarnessTypes(pv.pass.Pkg)
-	refusedAt, usedAt := 0, 0
+	entry := pv.entryFor(key)
 	pooled := map[string][]int{}
-	for _, c := range cases {
-		targs := c.targs(kit)
+	usedAt := 0
+	check := func(at string, targs []types.Type, harness func(*rand.Rand) sample, refused, typeRefused string) {
 		sig, err := types.Instantiate(nil, generic.Type(), targs, true)
 		if err != nil {
-			t.Fatalf("instantiate %s at %v: %v", key, targs, err)
+			return // the constraint does not admit the class
 		}
 		inst := pv.instantiate(generic, targs, sig.(*types.Signature))
-		at := pv.typeArgsNamed(inst)
-		fn := pv.trustedContract(inst)
-		if c.refused != "" {
-			refusedAt++
-			if !slices.ContainsFunc(fn.defects, func(d string) bool { return strings.Contains(d, c.refused) }) {
-				t.Errorf("at %s the contract must be refused with %q, and its defects are %q", at, c.refused, fn.defects)
+		if problem := pv.typeArgProblem(pv.instanceOf[inst], entry); problem != "" || typeRefused != "" {
+			if typeRefused == "" || !strings.Contains(problem, typeRefused) {
+				t.Errorf("at %s a call must be refused with %q, and its refusal is %q", at, typeRefused, problem)
 			}
-			continue
+			return
 		}
-		usedAt++
+		fn := pv.trustedContract(inst)
+		if refused != "" {
+			if !slices.ContainsFunc(fn.defects, func(d string) bool { return strings.Contains(d, refused) }) {
+				t.Errorf("at %s the contract must be refused with %q, and its defects are %q", at, refused, fn.defects)
+			}
+			return
+		}
 		for _, defect := range fn.defects {
 			t.Errorf("at %s the contract cannot be used: %s", at, defect)
 		}
-		if t.Failed() {
-			continue
+		if harness == nil {
+			t.Fatalf("no harness calls %s at %s", key, at)
 		}
+		if t.Failed() {
+			return
+		}
+		usedAt++
 		met := coverage{}
-		checkContract(t, pv, key+" at "+at, fn, c.harness, met)
+		calledMethods = nil
+		checkContract(t, pv, key+" at "+at, fn, harness, met)
+		if len(calledMethods) > 0 {
+			t.Errorf("at %s %s called the methods %v of its type argument, which its entry claims under asserts it does not", at, key, calledMethods)
+		}
 		for clause, counts := range met {
 			if pooled[clause.text] == nil {
 				pooled[clause.text] = make([]int, len(counts))
@@ -503,17 +583,33 @@ func checkGenericEntry(t *testing.T, pv *pkgVerifier, key string, generic *types
 			}
 		}
 	}
+	_, ofMap := coreType(generic.Type().(*types.Signature).TypeParams().At(0)).(*types.Map)
+	for _, class := range harnessClasses {
+		targs := kit.typeArgs(generic, class, "string")
+		if targs == nil {
+			continue
+		}
+		check(class, targs, harnessAt(key, class), refusedAt(key, class), "")
+	}
+	if ofMap {
+		for _, class := range keyClasses {
+			typeRefused := ""
+			if keyHarnessAt(key, class) == nil {
+				typeRefused = "a type that vego does not model"
+			}
+			check("keys of "+class, kit.typeArgs(generic, "int", class), keyHarnessAt(key, class), "", typeRefused)
+		}
+	}
 	if usedAt < 2 {
-		t.Errorf("the harness of %s tests %d instantiations at which the contract is used; test it at several", key, usedAt)
+		t.Errorf("%s is used at %d classes of type argument; it should be usable at several", key, usedAt)
 	}
 	for text, counts := range pooled {
 		for j, n := range counts {
 			if n == 0 {
-				t.Errorf("no call at any instantiation met condition %d of ensures %q; give the harness inputs that meet it", j+1, text)
+				t.Errorf("no call at any class met condition %d of ensures %q; give the harness inputs that meet it", j+1, text)
 			}
 		}
 	}
-	_ = refusedAt
 }
 
 // groundSlice converts a slice of any element type to the term that denotes
@@ -538,6 +634,8 @@ func (g *grounder) groundSlice(v reflect.Value) *logic.Term {
 		zero = logic.RefLit(0)
 	case reflect.String:
 		zero = logic.Bytes("")
+	case reflect.Bool:
+		zero = logic.BoolLit(false)
 	default:
 		zero = logic.IntLit(0)
 	}

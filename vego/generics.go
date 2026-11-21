@@ -203,14 +203,14 @@ func throughTypeParam(what string, t types.Type, steps []logic.Step, isState fun
 		param, isParam := types.Unalias(object).(*types.TypeParam)
 		switch {
 		case isParam && step.Field != "":
-			return fmt.Errorf("%s.%s names a field of a value of type %s, a type parameter, whose type arguments need not have that field; "+
-				"%s name it", spelled, step.Field, param.Obj().Name(), genericDefect)
+			return entryDefect{fmt.Errorf("%s.%s names a field of a value of type %s, a type parameter, whose type arguments need not have that field; "+
+				"%s name it", spelled, step.Field, param.Obj().Name(), genericDefect)}
 		case isParam && step.State != "" && isState(step.State):
-			return fmt.Errorf("%s(%s) names a state of a value of type %s, a type parameter, whose type arguments need not have that state; "+
-				"%s name it", step.State, spelled, param.Obj().Name(), genericDefect)
+			return entryDefect{fmt.Errorf("%s(%s) names a state of a value of type %s, a type parameter, whose type arguments need not have that state; "+
+				"%s name it", step.State, spelled, param.Obj().Name(), genericDefect)}
 		case isParam && step.Addr:
-			return fmt.Errorf("&%s takes the address of a value of type %s, a type parameter, whose type arguments need not be structs; "+
-				"%s take it", spelled, param.Obj().Name(), genericDefect)
+			return entryDefect{fmt.Errorf("&%s takes the address of a value of type %s, a type parameter, whose type arguments need not be structs; "+
+				"%s take it", spelled, param.Obj().Name(), genericDefect)}
 		case step.Field != "":
 			found, _, _ := types.LookupFieldOrMethod(t, true, nil, step.Field)
 			field, ok := found.(*types.Var)
@@ -376,38 +376,48 @@ func (pv *pkgVerifier) isTypeParamName(f *types.Func, name string) bool {
 //     interface, and by reflection, and they could write memory or call
 //     back into the caller.
 func (v *fnVerifier) checkTypeArgs(at ast.Node, callee *types.Func, entry *trustEntry) {
-	made := v.pkgVerifier.instanceOf[callee]
-	if made == nil {
-		return
+	if made := v.pkgVerifier.instanceOf[callee]; made != nil {
+		if problem := v.pkgVerifier.typeArgProblem(made, entry); problem != "" {
+			v.unsupported(at.Pos(), problem)
+		}
 	}
+}
+
+// typeArgProblem says why checkTypeArgs refuses an instantiation, or
+// returns "".
+func (pv *pkgVerifier) typeArgProblem(made *instance, entry *trustEntry) string {
 	params := made.origin.Type().(*types.Signature).TypeParams()
 	claimed := typeParamClaims(entry, made.origin)
-	q := types.RelativeTo(v.pass.Pkg)
-	name := v.calleeName(made.origin)
+	q := types.RelativeTo(pv.pass.Pkg)
+	name := made.origin.Name()
+	if made.origin.Pkg() != pv.pass.Pkg {
+		name = made.origin.FullName()
+	}
 	for i, t := range made.targs {
 		param := params.At(i)
 		arg := fmt.Sprintf("%s = %s", param.Obj().Name(), types.TypeString(t, q))
 		iface, _ := param.Constraint().Underlying().(*types.Interface)
 		switch _, modelled := layoutOf(t); {
 		case iface != nil && iface.IsComparable() && !strictlyComparable(t):
-			v.unsupported(at.Pos(), fmt.Sprintf("%s is called with %s, whose values == may compare with a panic; "+
-				"its constraint is comparable, and only a type in which no interface lies can be passed", name, arg))
+			return fmt.Sprintf("%s is called with %s, whose values == may compare with a panic; "+
+				"its constraint is comparable, and only a type in which no interface lies can be passed", name, arg)
 		case holdsCode(t, map[types.Type]bool{}):
-			v.unsupported(at.Pos(), fmt.Sprintf("%s is called with %s, which is or holds %s; "+
-				"a generic function cannot be called yet with a type argument that can hold code", name, arg, heldCode(t, map[types.Type]bool{})))
+			return fmt.Sprintf("%s is called with %s, which is or holds %s; "+
+				"a generic function cannot be called yet with a type argument that can hold code", name, arg, heldCode(t, map[types.Type]bool{}))
 		case !modelled:
-			v.unsupported(at.Pos(), fmt.Sprintf("%s is called with %s, a type that vego does not model", name, arg))
+			return fmt.Sprintf("%s is called with %s, a type that vego does not model", name, arg)
 		}
 		if _, holds := holdsState(t); holds {
-			v.unsupported(at.Pos(), fmt.Sprintf("%s is called with %s = %s; a generic function copies and overwrites values of its type arguments, "+
-				"and a value that holds a state is never copied or overwritten", name, param.Obj().Name(), holding(t, q)))
+			return fmt.Sprintf("%s is called with %s = %s; a generic function copies and overwrites values of its type arguments, "+
+				"and a value that holds a state is never copied or overwritten", name, param.Obj().Name(), holding(t, q))
 		}
 		if method := methodReached(t, map[types.Type]bool{}); method != nil && !claimed[param] {
-			v.unsupported(at.Pos(), fmt.Sprintf("%s is called with %s, and %s may run the method %s, which a value of that type reaches; "+
+			return fmt.Sprintf("%s is called with %s, and %s may run the method %s, which a value of that type reaches; "+
 				"if it runs no method of a value of type %s, claim it in the entry of %s with asserts: {%s: []}",
-				name, arg, name, types.ObjectString(method, q), param.Obj().Name(), made.origin.FullName(), param.Obj().Name()))
+				name, arg, name, types.ObjectString(method, q), param.Obj().Name(), made.origin.FullName(), param.Obj().Name())
 		}
 	}
+	return ""
 }
 
 // checkGenericCallee refuses a call of a generic function that has no
@@ -452,33 +462,24 @@ func isGeneric(f *types.Func) bool {
 	return sig.TypeParams() != nil || sig.RecvTypeParams() != nil
 }
 
-// genericDefect is the end of the message of a clause of a generic entry
-// that has no meaning at any type argument, which is a defect of the entry
-// itself.
+// genericDefect is a part of the message of a clause of a generic entry
+// that has no meaning at any type argument.
 const genericDefect = "a contract of a generic function cannot"
 
-// instanceProblems are the parts of the messages of what makes a contract
-// unusable at one instantiation and not at others: a clause that cannot be
-// read at its type arguments, as one that compares structs or orders
-// strings, and a contract that contradicts what values of its types can
-// be. Any other defect is one of the entry, at every instantiation.
-var instanceProblems = []string{
-	"a formula cannot compare a struct",
-	"cannot be applied to float values",
-	"a formula has no order of them",
-	"cannot compare ",
-	"takes one integer",
-	"which is all that can be applied yet",
-	"it contradicts itself",
-}
+// entryDefect is an error of a clause of a generic entry that is the same
+// at every type argument: it names what no type parameter's value has.
+type entryDefect struct{ error }
+
+func (e entryDefect) Unwrap() error { return e.error }
 
 // insteadOf ends the message of a contract of an instantiation that cannot
 // be used there. For a problem of this instantiation it says what to call
 // instead: the function of the same name with Func, which is handed a
 // function literal, where it has an entry, and otherwise a loop. For a
 // defect of the entry, it says to fix the entry.
-func (pv *pkgVerifier) insteadOf(f *types.Func, entry *trustEntry, problem string) string {
-	if !slices.ContainsFunc(instanceProblems, func(part string) bool { return strings.Contains(problem, part) }) {
+func (pv *pkgVerifier) insteadOf(fn *funcInfo, entry *trustEntry, problem string) string {
+	f := fn.obj
+	if !fn.atTypes[problem] {
 		return fmt.Sprintf("; the entry has this defect at every type argument, so fix the entry in %s", filepath.Base(entry.file.path))
 	}
 	if alternative := entry.key + "Func"; !strings.HasSuffix(entry.key, "Func") && pv.entryFor(alternative) != nil {

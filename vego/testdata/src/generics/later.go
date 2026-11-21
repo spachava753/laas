@@ -152,3 +152,35 @@ func (l L) String() (s string) { return LoopL(l) } // want `this call may not en
 func LoopL(l L) (s string) {
 	return genericslib.Show(l) // want `genericslib.Show is called with T = L, and genericslib.Show may run the method func \(L\).String\(\) \(s string\)`
 }
+
+// LenString relies on what Len says of a string.
+//
+// @Ensures r = |s|
+func LenString(s string) (r int) {
+	return genericslib.Len(s)
+}
+
+// LenInt calls Len at an integer, which has no length.
+//
+// @Ensures True
+func LenInt(n int) (r int) {
+	return genericslib.Len(n) // want `cannot be used with E = int: in its ensures "result = \|v\|": v is not a slice or a string and has no length; write out what it does instead`
+}
+
+// CutInt calls Cut at an integer, which has no capacity.
+//
+// @Ensures True
+func CutInt(n int) (r int) {
+	return genericslib.Cut(n) // want `cannot be used with E = int: in its ensures "cap\(result\) <= cap\(v\)": .*; write out what it does instead`
+}
+
+// Z has size zero.
+type Z struct{}
+
+// ZeroPointers finds a pointer to a value of size zero, which a formula
+// cannot compare.
+//
+// @Ensures True
+func ZeroPointers(ps []*Z, p *Z) (r int) {
+	return genericslib.Find(ps, p) // want `cannot be used with S = \[\]\*Z, E = \*Z: .*; call genericslib.FindFunc instead`
+}

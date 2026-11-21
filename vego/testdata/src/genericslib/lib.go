@@ -153,3 +153,9 @@ func Touch[S ~[]E, E any](s S) {
 		}
 	}
 }
+
+// Len returns the length of a string or a slice, and 0 otherwise.
+func Len[E any](v E) int { return 0 }
+
+// Cut returns what it is given.
+func Cut[E any](v E) E { return v }

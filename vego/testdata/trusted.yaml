@@ -1892,6 +1892,18 @@ trusted:
     reason: Test entry that claims nothing for its type parameters.
     modifies: []
 
+  genericslib.Len:
+    reason: Test entry whose ensures can be read only where E has a length.
+    asserts: {E: []}
+    modifies: []
+    ensures: ["result = |v|"]
+
+  genericslib.Cut:
+    reason: Test entry whose ensures can be read only where E is a slice.
+    asserts: {E: []}
+    modifies: []
+    ensures: ["cap(result) <= cap(v)"]
+
   generics.Back:
     reason: Test entry for a generic function of the package that calls back into its caller.
     asserts: {E: []}

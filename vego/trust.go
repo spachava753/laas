@@ -854,12 +854,33 @@ func (fn *funcInfo) defect(format string, args ...any) {
 	fn.broken = true
 }
 
+// typeDefect records a defect found by reading or checking a contract at
+// the types of its parameters, which for the contract of an instantiation
+// of a generic function belongs to that instantiation and may not hold at
+// another. A defect found otherwise is one of the entry at every type
+// argument; see insteadOf.
+func (fn *funcInfo) typeDefect(format string, args ...any) {
+	fn.defect(format, args...)
+	if fn.atTypes == nil {
+		fn.atTypes = map[string]bool{}
+	}
+	fn.atTypes[fn.defects[len(fn.defects)-1]] = true
+}
+
 // checkTrusted resolves a trusted contract against the function's signature
 // and rejects one that contradicts itself, from which anything would follow.
 func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 	pv.run(fn, func(v *fnVerifier) {
 		v.lenient = true
-		v.misreadAs = func(c *clause, err error) { fn.defect("in its %s %q: %v", c.kind, c.text, err) }
+		v.misreadAs = func(c *clause, err error) {
+			// A clause that names a field, a state, or an address of a
+			// value of a type parameter is wrong at every type argument.
+			if errors.As(err, new(entryDefect)) {
+				fn.defect("in its %s %q: %v", c.kind, c.text, err)
+				return
+			}
+			fn.typeDefect("in its %s %q: %v", c.kind, c.text, err)
+		}
 		// A primed path describes memory after the call. A call changes
 		// a table only if modifies lists something in it, and a path reads
 		// a table at each step that goes through memory. If none of the
@@ -871,7 +892,7 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 		v.primedPaths(fn)
 		entry := v.enter()
 		for _, refused := range v.entryOnly(entry) {
-			fn.defect("%s", refused.message(fn.obj.Name()))
+			fn.typeDefect("%s", refused.message(fn.obj.Name()))
 		}
 		// The requires of calls are read once here, so that a name they
 		// cannot use is a defect of the entry.
@@ -888,14 +909,14 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 				// trusted function, so they may not read memory, which changes
 				// between the calls of f.
 				if cb.applied && slices.ContainsFunc(append(facts, at.hyps[len(entry.hyps):]...), mentionsMemory) {
-					fn.defect("its ensures applies %s, and its calls requires for %s read memory; a requires of a function that is applied "+
+					fn.typeDefect("its ensures applies %s, and its calls requires for %s read memory; a requires of a function that is applied "+
 						"may speak only of values", cb.param.Name(), cb.param.Name())
 				}
 			}
 		}
 		_, outcome, _ := v.contractInstance(entry)
 		if pv.contradictory(outcome) {
-			fn.defect("it contradicts itself, so anything could be proved from it")
+			fn.typeDefect("it contradicts itself, so anything could be proved from it")
 		}
 	})
 }
@@ -1051,7 +1072,7 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 		reached = reached || slices.ContainsFunc(changed[c.key], func(whose *types.Var) bool { return !own[i] || whose == nil || whose == param })
 	}
 	if !reached {
-		fn.defect("its ensures %q describes %s after the call, but nothing its modifies lists is memory that %s reads, so the call cannot have changed it; "+
+		fn.typeDefect("its ensures %q describes %s after the call, but nothing its modifies lists is memory that %s reads, so the call cannot have changed it; "+
 			"drop the prime or list what the function writes", c.text, c.text[path.Start:path.End], c.text[path.Start:path.End])
 	}
 }

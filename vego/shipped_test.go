@@ -1410,7 +1410,11 @@ func printOf(arg any, addresses, opaqueCode bool) string {
 			address("{%x ", v.Pointer())
 			b.WriteString("{ ")
 			keys := v.MapKeys()
-			slices.SortFunc(keys, func(x, y reflect.Value) int { return strings.Compare(fmt.Sprint(x), fmt.Sprint(y)) })
+			// The keys are ordered by their prints, which call none of
+			// their methods.
+			slices.SortFunc(keys, func(x, y reflect.Value) int {
+				return strings.Compare(printOf(x.Interface(), false, false), printOf(y.Interface(), false, false))
+			})
 			for _, key := range keys {
 				walk(key, depth+1)
 				walk(v.MapIndex(key), depth+1)
@@ -1677,6 +1681,19 @@ func (g *grounder) error(t *logic.Term) error {
 
 // groundTerm converts a Go value to the term that denotes it.
 func (g *grounder) groundTerm(value any) *logic.Term {
+	// The types of the harness of generic entries have an Error method,
+	// and are not errors to a formula.
+	switch value := value.(type) {
+	case harnessLevel:
+		return logic.IntLit(int64(value))
+	case harnessPoint:
+		return logic.Const("unreadable", logic.IntSeq)
+	case *harnessPoint:
+		if value == nil {
+			return logic.RefLit(0)
+		}
+		return g.pointerRef(reflect.ValueOf(value).Pointer())
+	}
 	switch value := value.(type) {
 	case int:
 		return logic.IntLit(int64(value))

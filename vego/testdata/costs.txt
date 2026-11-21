@@ -1044,6 +1044,7 @@ generics	generics.CallsLocal	4	689	0
 generics	generics.CallsLocalWrong	4	953	0
 generics	generics.CallsVerified	1	111	0
 generics	generics.CountOf	1	521	0
+generics	generics.CutInt	1	111	0
 generics	generics.EqualAny	1	744	0
 generics	generics.EqualInts	4	750	0
 generics	generics.FilterKeeps	7	404109	2
@@ -1071,6 +1072,8 @@ generics	generics.IndexPoint	1	646	0
 generics	generics.IndexString	4	22726	0
 generics	generics.IndexWrong	4	11567	0
 generics	generics.KeepGuarded	1	46	0
+generics	generics.LenInt	1	111	0
+generics	generics.LenString	4	4558	0
 generics	generics.LoadOf	1	241	0
 generics	generics.Local	1	277	0
 generics	generics.LockedOf	1	241	0
@@ -1105,11 +1108,13 @@ generics	generics.TouchCounters	1	1329	0
 generics	generics.Unentered	1	111	0
 generics	generics.UseFinder	6	18753	0
 generics	generics.Wrap	0	0	0
+generics	generics.ZeroPointers	1	685	0
 generics	genericslib.Address	0	0	0
 generics	genericslib.Apply	1	3704	0
 generics	genericslib.Big	2	528	0
 generics	genericslib.Bump	1	844	0
 generics	genericslib.Count	1	2950	0
+generics	genericslib.Cut	0	0	0
 generics	genericslib.Equal	2	1457	0
 generics	genericslib.Filter	1	4000678	1
 generics	genericslib.Find	3	14614	0
@@ -1118,6 +1123,7 @@ generics	genericslib.FindWhere	0	0	0
 generics	genericslib.GrowBy	3	12455	0
 generics	genericslib.Holds	0	0	0
 generics	genericslib.Keep	1	1331	0
+generics	genericslib.Len	1	1398	0
 generics	genericslib.Locked	0	0	0
 generics	genericslib.Name	0	0	0
 generics	genericslib.Old	1	278	0
@@ -2939,6 +2945,8 @@ stdentries	stdentries.Flag	10	100044	0
 stdentries	stdentries.Groups	5	74984	2
 stdentries	stdentries.GrowNil	8	18177	0
 stdentries	stdentries.GrowTooFar	6	16005	0
+stdentries	stdentries.GrowWrite	17	28563	0
+stdentries	stdentries.GrowWriteListed	20	34002	0
 stdentries	stdentries.HasDot	4	8498	0
 stdentries	stdentries.HasEntity	4	168457	1
 stdentries	stdentries.HasEntityWhole	1	646	0

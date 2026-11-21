@@ -141,11 +141,11 @@ func (pv *pkgVerifier) trustedCall(fn *funcInfo, item trustCall) {
 	for _, tuple := range []*types.Tuple{sig.Params(), sig.Results()} {
 		for variable := range tuple.Variables() {
 			if _, modelled := layoutOf(variable.Type()); !modelled {
-				fn.defect("its calls lists %s, whose type %s takes or returns a %s, which is not supported", item.name, param.Type(), variable.Type())
+				fn.typeDefect("its calls lists %s, whose type %s takes or returns a %s, which is not supported", item.name, param.Type(), variable.Type())
 				return
 			}
 			if holdsCode(variable.Type(), map[types.Type]bool{}) {
-				fn.defect("its calls lists %s, whose type %s takes or returns a %s, which can hold code; that is not supported yet",
+				fn.typeDefect("its calls lists %s, whose type %s takes or returns a %s, which can hold code; that is not supported yet",
 					item.name, param.Type(), variable.Type())
 				return
 			}
@@ -179,7 +179,7 @@ func (pv *pkgVerifier) trustedCall(fn *funcInfo, item trustCall) {
 		cb.applied = cb.applied || applies(c.node, item.name)
 	}
 	if cb.applied && !applicable(sig) {
-		fn.defect("its ensures applies %s, whose type %s does not have one integer parameter and one integer or boolean result, "+
+		fn.typeDefect("its ensures applies %s, whose type %s does not have one integer parameter and one integer or boolean result, "+
 			"which is all that can be applied yet", item.name, param.Type())
 	}
 	if item.deterministic && sig.Results().Len() == 0 {

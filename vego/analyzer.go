@@ -374,6 +374,9 @@ type funcInfo struct {
 	// instead of annotations; such a function is not verified.
 	trust   *trustEntry
 	defects []string  // what is wrong with a trusted or imported contract
+	// atTypes holds the defects found at the types of the parameters; see
+	// typeDefect.
+	atTypes map[string]bool
 	use     *EntryUse // the report entry of a trusted contract in use
 	// receiver is set for the contract of a method of an interface that
 	// names its receiver, with a Receiver annotation or receiver in an entry, so that
