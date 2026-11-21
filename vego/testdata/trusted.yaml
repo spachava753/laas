@@ -57,6 +57,14 @@ trusted:
     ensures:
       - "|result| = 1 And has(result, 1) And has(result, 2)"
 
+  mapping.setEntry:
+    reason: Test helper that sets one entry of a map.
+    requires:
+      - "m != nil"
+    modifies: ["m[k]"]
+    ensures:
+      - "has(m', k) And m'[k] = v"
+
   semantics.scramble:
     reason: Test helper that overwrites every element.
     modifies: [A]

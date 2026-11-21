@@ -1383,7 +1383,20 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 	// while the allocation is still the one the parameter points into.
 	cur := located{val: args[param], typ: param.Type()}
 	first, inMemory := true, false
+	// entry is set while the path is at a key of a map, which a path that
+	// ends there names: whether the map has the key, what it holds there,
+	// and how many keys the map has.
+	type mapEntry struct {
+		t        types.Type
+		ref, key *logic.Term
+		direct   bool
+	}
+	var entry *mapEntry
+	afterEntry := false
 	for i, h := range hops {
+		if entry != nil {
+			entry, afterEntry = nil, true
+		}
 		object, viaPointer := pointee(h.from)
 		switch {
 		case h.field >= 0 && viaPointer:
@@ -1410,11 +1423,15 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 			}
 			cur.cells = v.cellsOf(elemType(h.from))
 		default:
-			// What a map has for a key, or a byte of a string, is no place
-			// that can be written through this path.
+			// What a map has for a key is an entry of the map, and a byte
+			// of a string no place that can be written through this path.
 			inMemory = false
-			if !symbolic && isMap(h.from) {
-				cur.val = v.mapValue(sink, mem, h.from, cur.val[0], h.index)
+			if isMap(h.from) {
+				entry = &mapEntry{t: h.from, direct: i == 0}
+				if !symbolic {
+					entry.ref, entry.key = cur.val[0], mapKey(h.index)
+					cur.val = v.mapValue(sink, mem, h.from, cur.val[0], h.index)
+				}
 			}
 		}
 	}
@@ -1455,6 +1472,16 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 			t.ref = home(cur.val[0])
 		}
 		t.row = true
+	case entry != nil:
+		// An entry of a map whose values are not references: the entry of
+		// one whose values are is covered by the map, since the path names
+		// what such a value refers to.
+		form.mapType, form.direct = entry.t, entry.direct
+		if !symbolic {
+			t.ref, t.key = entry.ref, entry.key
+		}
+	case afterEntry && !inMemory:
+		return shape{}, target{}, fmt.Errorf("%s is part of a value that a map holds, which a Modifies clause names only as a whole entry of the map", m.text)
 	case !inMemory:
 		return shape{}, target{}, fmt.Errorf("%s is passed by value, so the caller cannot see a change to it", m.text)
 	default:

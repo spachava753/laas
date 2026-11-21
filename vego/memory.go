@@ -137,9 +137,11 @@ type target struct {
 	// single is set when the target is one struct value at lo, whose leaves
 	// can be named one by one.
 	single bool
-	// elem is set for the elements of a slice, and mapType for a map.
+	// elem is set for the elements of a slice, and mapType for a map. key
+	// is set for one entry of a map: the number of its key.
 	elem    types.Type
 	mapType types.Type
+	key     *logic.Term
 	text    string // how the Modifies clause spells it
 	clause  *clause
 	// param is set when the object or array is the very one that this
@@ -497,6 +499,9 @@ type stretch struct {
 	lo, hi *logic.Term
 	// one is set when the stretch is the single position lo.
 	one bool
+	// entry is set for one entry of a map, which lo and hi are nil for: the
+	// number of its key.
+	entry *logic.Term
 }
 
 // written describes a write for the check against the frame: the allocation
@@ -512,7 +517,7 @@ type written struct {
 func (t target) stretches() []stretch {
 	if !t.single {
 		var parts []stretch
-		t.regions(func(key string, _ logic.Sort) { parts = append(parts, stretch{key: key, lo: t.lo, hi: t.hi}) })
+		t.regions(func(key string, _ logic.Sort) { parts = append(parts, stretch{key: key, lo: t.lo, hi: t.hi, entry: t.key}) })
 		return parts
 	}
 	return stretchesOf(t.cells, t.lo)
@@ -525,7 +530,7 @@ func (t target) stretches() []stretch {
 func stretchesOf(cells []cell, at *logic.Term) []stretch {
 	parts := make([]stretch, len(cells))
 	for i, c := range cells {
-		parts[i] = stretch{c.key, logic.Add(at, logic.IntLit(c.off)), logic.Add(at, logic.IntLit(c.off+1)), true}
+		parts[i] = stretch{key: c.key, lo: logic.Add(at, logic.IntLit(c.off)), hi: logic.Add(at, logic.IntLit(c.off+1)), one: true}
 	}
 	return parts
 }
@@ -783,7 +788,7 @@ func (v *fnVerifier) assignedInLoopAround(variable *types.Var, pos token.Pos) bo
 	return found
 }
 
-// checkWrite requires that a write is one the function may make: to an
+// checkWriteOr requires that a write is one the function may make: to an
 // allocation or a map created since the function was entered, or to
 // something a Modifies clause lists. A listed target that no write ever
 // needs is reported when the function has been verified, so each write
@@ -795,13 +800,9 @@ func (v *fnVerifier) assignedInLoopAround(variable *types.Var, pos token.Pos) bo
 // elements when each element is. Nothing can be written through a nil
 // pointer, a nil slice, or a nil map, so a call that may modify what one of
 // them refers to changes nothing there and needs no permission for it.
-func (v *fnVerifier) checkWrite(st *state, guard []*logic.Term, w written, pos token.Pos, what string) {
-	v.checkWriteOr(st, guard, w, pos, what, "", "")
-}
-
-// checkWriteOr is checkWrite, with what a report says to do in place of the
-// advice to list the write, when remedy is not empty: for a write that no
-// clause could list.
+//
+// remedy, when not empty, is what a report says to do in place of the
+// advice to list the write: for a write that no clause could list.
 //
 // unlisted, when not empty, takes the place of the advice to list the
 // write in a Modifies clause, and only of that; see notListable.
@@ -836,6 +837,10 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 				for _, c := range covers[i] {
 					switch {
 					case i == without || c.key != part.key || (c.lo == nil) != (part.lo == nil):
+					case c.lo == nil && c.entry != nil && part.entry == nil:
+						// One entry covers no write of the whole map.
+					case c.lo == nil && c.entry != nil:
+						by = append(by, logic.And(logic.Eq(w.ref, v.frame[i].ref), logic.Eq(part.entry, c.entry)))
 					case c.lo == nil:
 						by = append(by, logic.Eq(w.ref, v.frame[i].ref))
 					default:
@@ -967,6 +972,8 @@ func (v *fnVerifier) havoc(st *state, t target, guard []*logic.Term) {
 		st.assume(logic.Implies(skipped, logic.Forall(index, v.same(logic.Select(now, index), logic.Select(before, index)))))
 	}
 	switch {
+	case t.mapType != nil && t.key != nil:
+		v.havocEntry(st, t, skipped, len(guard) > 0)
 	case t.mapType != nil:
 		owner := mapOwner(t.mapType)
 		t.regions(func(key string, sort logic.Sort) {

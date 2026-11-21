@@ -888,3 +888,51 @@ func RangeChain(m map[int]int) (n int) {
 	}
 	return n
 }
+
+// setKey sets one key of a map.
+//
+// @Requires m != nil
+// @Modifies m[k]
+// @Ensures has(m', k) And m'[k] = 1
+func setKey(m map[int]int, k int) {
+	m[k] = 1
+}
+
+// EntryChain sets thirty keys through a callee that lists one entry each
+// time, so each call forgets one entry and keeps the count exact.
+//
+// @Ensures |r| = 30
+func EntryChain() (r map[int]int) {
+	m := map[int]int{}
+	setKey(m, 0)
+	setKey(m, 1)
+	setKey(m, 2)
+	setKey(m, 3)
+	setKey(m, 4)
+	setKey(m, 5)
+	setKey(m, 6)
+	setKey(m, 7)
+	setKey(m, 8)
+	setKey(m, 9)
+	setKey(m, 10)
+	setKey(m, 11)
+	setKey(m, 12)
+	setKey(m, 13)
+	setKey(m, 14)
+	setKey(m, 15)
+	setKey(m, 16)
+	setKey(m, 17)
+	setKey(m, 18)
+	setKey(m, 19)
+	setKey(m, 20)
+	setKey(m, 21)
+	setKey(m, 22)
+	setKey(m, 23)
+	setKey(m, 24)
+	setKey(m, 25)
+	setKey(m, 26)
+	setKey(m, 27)
+	setKey(m, 28)
+	setKey(m, 29)
+	return m
+}

@@ -513,8 +513,8 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		for j := range added {
 			into.parts = append(into.parts, stretchesOf(cells, logic.Add(at, logic.IntLit(int64(j)*step)))...)
 		}
-		v.checkWrite(next, nil, into, call.Pos(),
-			fmt.Sprintf("append may write into the capacity of %s", types.ExprString(call.Args[0])))
+		v.checkWriteOr(next, nil, into, call.Pos(),
+			fmt.Sprintf("append may write into the capacity of %s", types.ExprString(call.Args[0])), "", "")
 		v.unit = u.fork()
 		readSource(next, true)
 		if spread {

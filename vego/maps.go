@@ -195,7 +195,15 @@ func (v *fnVerifier) storeKey(st *state, t types.Type, ref, key *logic.Term, val
 	if present {
 		v.check(st, nil, logic.Lt(logic.IntLit(0), ref), pos, "map may be nil")
 	}
-	v.checkWrite(st, nil, target{mapType: t, ref: ref}.reach(), pos, what)
+	// An entry of a map of references is covered only by the whole map,
+	// since a path to it names what the value refers to.
+	unlisted := ""
+	_, elem := mapParts(t)
+	if _, isPointer := pointee(elem); isPointer || isSlice(elem) || isMap(elem) || isIface(elem) {
+		unlisted = "list the whole map in a // @Modifies clause: an entry of a map whose values are pointers, slices, maps, or interface values " +
+			"is covered only by the map, since a path such as m[k] in a Modifies clause names what the value refers to"
+	}
+	v.checkWriteOr(st, nil, target{mapType: t, ref: ref, key: mapKey(key)}.reach(), pos, what, "", unlisted)
 	v.checkRangedStore(st, t, ref, key, present, pos)
 	// What holds of every map is put on record for this key before the
 	// write, so that the write to the nil map is known to change nothing.
@@ -204,7 +212,6 @@ func (v *fnVerifier) storeKey(st *state, t types.Type, ref, key *logic.Term, val
 	// The count is named, so that the new count does not hold the region
 	// of counts a second time.
 	count := v.named(st, "count", v.mapLen(st, st.mem, t, ref))
-	_, elem := mapParts(t)
 	leaves, _ := layoutOf(elem)
 	one, none := logic.IntLit(1), logic.IntLit(0)
 	change := logic.Ite(had, none, one)
@@ -215,6 +222,41 @@ func (v *fnVerifier) storeKey(st *state, t types.Type, ref, key *logic.Term, val
 	v.writeAt(st, mapOwner(t)+hasLeaf.path, hasLeaf.sort, ref, mapKey(key), logic.BoolLit(present))
 	for i, lf := range leaves {
 		v.writeAt(st, mapOwner(t)+"#val"+lf.path, lf.sort, ref, mapKey(key), val[i])
+	}
+}
+
+// havocEntry forgets one entry of a map: a call that may write it has run.
+// Every other key is as it was, and the number of keys follows from
+// whether the key was there and is: the call can change no other key. The
+// new value of a key that is absent is the zero value, and the nil map
+// gets no key, as for every map. Where skipped holds, the call did not
+// run, and the entry is as it was.
+func (v *fnVerifier) havocEntry(st *state, t target, skipped *logic.Term, guarded bool) {
+	owner := mapOwner(t.mapType)
+	_, elem := mapParts(t.mapType)
+	leaves, _ := layoutOf(elem)
+	key := v.named(st, "key", t.key)
+	had := v.named(st, "had", logic.Select(v.row(nil, st.mem, owner+hasLeaf.path, hasLeaf.sort, t.ref), key))
+	count := v.named(st, "count", v.cell(nil, st.mem, owner+countLeaf.path, countLeaf, t.ref))
+	has := v.fresh("written", logic.Bool)
+	held := make(value, len(leaves))
+	for i, lf := range leaves {
+		held[i] = v.fresh("written", lf.sort)
+		st.assume(logic.Implies(logic.Not(has), isZero(held[i], lf)))
+		if guarded {
+			before := logic.Select(v.row(nil, st.mem, owner+"#val"+lf.path, lf.sort, t.ref), key)
+			st.assume(logic.Implies(skipped, v.same(held[i], before)))
+		}
+	}
+	st.assume(logic.Implies(logic.Eq(t.ref, logic.RefLit(0)), logic.Not(has)))
+	if guarded {
+		st.assume(logic.Implies(skipped, logic.Iff(has, had)))
+	}
+	one, none := logic.IntLit(1), logic.IntLit(0)
+	st.storeCell(owner+countLeaf.path, countLeaf, t.ref, logic.Sub(logic.Add(count, logic.Ite(has, one, none)), logic.Ite(had, one, none)))
+	v.writeAt(st, owner+hasLeaf.path, hasLeaf.sort, t.ref, key, has)
+	for i, lf := range leaves {
+		v.writeAt(st, owner+"#val"+lf.path, lf.sort, t.ref, key, held[i])
 	}
 }
 
