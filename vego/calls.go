@@ -546,7 +546,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	}
 	v.checkRecursion(fn, pre, st, guard, call)
 	written := v.targets(fn, args, st, before)
-	v.checkReachedApart(call, fn, args, written, passed, name)
+	v.checkReachedApart(call, fn, args, written, passed, passedExpr, name)
 	for i, t := range written {
 		what := "what it calls " + t.text
 		if t.param != nil {

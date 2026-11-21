@@ -125,6 +125,11 @@ type fnVerifier struct {
 	epochs  map[string]*epoch
 	growing []*layer
 	reaches []separation
+	// memFlowDone is the analysis of where the values of the body come
+	// from, and ranged the range statements by their ranged expression;
+	// see memorigins.go.
+	memFlowDone *memFlow
+	ranged      map[ast.Expr]*ast.RangeStmt
 	// joins holds, by the name of the constant that stands for it, each
 	// region a join of the ends of a function literal made.
 	joins    map[string]*joinedRegion

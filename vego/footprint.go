@@ -142,8 +142,6 @@ func (v *fnVerifier) grow(st *state, bound, skipped *logic.Term) *layer {
 	return known
 }
 
-
-
 // rowAt reads whether a cell is in the footprint at a home, in the rows
 // given, and returns with it what the layers of the footprint region say
 // of that very cell: each growth layer keeps it if its allocation is old
@@ -476,26 +474,6 @@ func (v *fnVerifier) noteReachedValue(sink *state, t types.Type, ref, key *logic
 		if note := "reached " + fact.String(); !sink.noted[note] {
 			sink.noted[note] = true
 			sink.assume(fact)
-		}
-	}
-}
-
-// checkReachedApart refuses a call of a verified function that relies on
-// what one argument reaches lying outside the footprint of another, which
-// showing at a call is not built yet.
-func (v *fnVerifier) checkReachedApart(call *ast.CallExpr, fn *funcInfo, args map[*types.Var]value, written []target, passed map[*types.Var]string, name string) {
-	if fn.trust != nil || fn.valueOf != nil || fn.methodOf != nil {
-		return
-	}
-	for _, t := range written {
-		if !t.fp || t.param == nil {
-			continue
-		}
-		for _, other := range fn.params {
-			if other != t.param && args[other] != nil && holdsMemory(other.Type()) {
-				v.unsupported(call.Pos(), fmt.Sprintf("%s relies on what is passed to it as %s lying outside the footprint of what is passed as %s, "+
-					"and showing that at a call is not supported yet", name, passed[other], passed[t.param]))
-			}
 		}
 	}
 }

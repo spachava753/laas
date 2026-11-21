@@ -193,13 +193,13 @@ func ThroughStates(s SinkCloser) {
 	s.Put(nil) // want `cannot verify ThroughStates: Sink.Put writes behind its receiver, and s has states; a call that writes behind the receiver of a value with states is not supported yet`
 }
 
-// CallsKeeps passes memory beside s.
+// CallsKeeps passes a parameter beside s, which its own Modifies lists.
 //
 // @Requires s != nil And q != nil
 // @Modifies s
 // @Ensures True
 func CallsKeeps(s Sink, q *Pair) {
-	Keeps(s, q, nil) // want `cannot verify CallsKeeps: Keeps relies on what is passed to it as q lying outside the footprint of what is passed as s, and showing that at a call is not supported yet`
+	Keeps(s, q, nil)
 }
 
 // Maker hands out new pairs that it may keep in its own memory.

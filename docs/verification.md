@@ -1137,7 +1137,7 @@ An interface value can be compared with `nil`, in code and in formulas, as in `p
 
 ### Writing a contract on a method of an interface
 
-A contract on a method of an interface has `Requires`, `Ensures`, and `Modifies` clauses over the parameters and results of the method. The method must name its results. The receiver has no name, so a contract cannot refer to what the interface value holds. `Modifies` can list only memory that the parameters refer to. A method that writes what its receiver refers to cannot meet such a contract. See [What a conversion checks](#what-a-conversion-checks). A `Receiver` annotation names the receiver so that the contract can speak of its states, and of nothing else. See [States of interface values](#states-of-interface-values).
+A contract on a method of an interface has `Requires`, `Ensures`, and `Modifies` clauses over the parameters and results of the method. The method must name its results. The receiver has no name, so a contract cannot refer to what the interface value holds. A `Receiver` annotation names the receiver. The contract can then use the name in two places: as the argument of a state, described in [States of interface values](#states-of-interface-values), and in `Modifies`, to say that the method writes memory behind its receiver, described in [Methods that write behind their receiver](#methods-that-write-behind-their-receiver).
 
 `vego` checks the contract where the interface is declared, in the same way as the contract of a function type. See [Writing a contract on a function type](#writing-a-contract-on-a-function-type). An `Ensures` that some call its `Requires` allow could not meet is reported there.
 
@@ -1305,6 +1305,115 @@ func RatedPricer(r *Rated) (p Pricer) {
 vego: Rated.Price has a value receiver, and the pointer that the interface value holds may be
 nil, in Rated.Price used as a method of Pricer at interfaces.go:109:9
 ```
+
+### Methods that write behind their receiver
+
+A method of an interface can write memory that the value it is called on holds, as a buffer writes its contents. Say so with a `Receiver` annotation and the receiver in `Modifies`:
+
+```go
+// Recorder keeps the lines it is given in memory of its own.
+type Recorder interface {
+	// Record adds a line.
+	//
+	// @Receiver r
+	// @Requires |line| <= 100
+	// @Modifies r
+	// @Ensures True
+	Record(line string)
+}
+```
+
+The memory that the methods of a value may write in this way is the value's footprint. `vego` does not know what the footprint holds. A function that calls `Record` lists the value in `Modifies`, as it lists a pointer whose struct it writes:
+
+```go
+// Lines counts the lines that were logged.
+type Lines struct {
+	Total int
+}
+
+// @Requires r != nil And t != nil And 0 <= t.Total < 1000 And |line| <= 100
+// @Modifies r, t
+// @Ensures t.Total' = t.Total + 1
+func Log(r Recorder, t *Lines, line string) {
+	r.Record(line)
+	t.Total++
+}
+```
+
+Without `r` in `Modifies`, the call is reported:
+
+```go
+// @Requires r != nil
+// @Ensures True
+func Forgot(r Recorder) {
+	r.Record("start")
+}
+```
+
+```text
+vego: r.Record may modify the footprint of r, which Forgot may not modify; list it in a // @Modifies clause
+```
+
+After the call, `vego` forgets everything that may lie in the footprint of `r`. It keeps what the other parameters reach without going through an interface value, such as the struct that `t` points to and what its fields point to, and memory that the function made itself. A function may assume that the footprint of a parameter it lists in `Modifies` holds none of what its other parameters reach, and every verified caller must show it. A caller shows it by where its arguments come from. An argument that it got from its own parameters, by reading fields, elements, and map entries, or that it made itself, is fine, as `t` is here:
+
+```go
+// @Requires r != nil And t != nil And 0 <= t.Total < 1000
+// @Modifies r, t
+// @Ensures True
+func Start(r Recorder, t *Lines) {
+	Log(r, t, "start")
+}
+```
+
+The value passed for the footprint must be a parameter that the caller's own `Modifies` lists. An argument that a call returned is refused when the call was handed an interface value, a function value, or a value that holds one, since such a call can return memory of any origin, unless its contract says that the result is new with `fresh`:
+
+```go
+// @Requires r != nil
+// @Modifies r
+// @Ensures True
+func Note(r Recorder, t *Lines) {
+	r.Record("note")
+}
+
+// LineCounts hands out a count it holds.
+type LineCounts interface {
+	// @Ensures t != nil
+	Current() (t *Lines)
+}
+
+// @Requires r != nil And s != nil
+// @Modifies r
+// @Ensures True
+func NoteFrom(r Recorder, s LineCounts) {
+	Note(r, s.Current())
+}
+```
+
+```text
+vego: the footprint of what is passed to Note as r may hold memory that what is passed as s.Current() reaches, and
+Note relies on it not doing so: it comes from the call of s.Current at footprints.go:59:10, which is handed s, which
+is or holds an interface value or a function value, through which it may get memory of any origin
+```
+
+The same refusal names a store when a value of unknown origin was stored into memory that the function reaches before the call, since the callee could then reach it.
+
+The states of another interface value may lie in the footprint, so a write forgets them too. Close a value before you write through another, or require what you need again afterwards:
+
+```go
+// @Requires r != nil And c != nil And ~closed(c)
+// @Modifies r, c
+// @Ensures True
+func RecordThenClose(r Recorder, c io.Closer) {
+	r.Record("done")
+	c.Close()
+}
+```
+
+```text
+vego: precondition of c.Close may not hold: ~closed(c)
+```
+
+So far this works for an interface that you declare, that has no states, and that has a method whose contract lists its receiver. A call through a value whose type also has states, of a method that writes behind its receiver, is reported as `cannot verify`. Converting a value of your own type to such an interface is not supported yet, as [What a conversion checks](#what-a-conversion-checks) describes.
 
 ### Interface values that call interface values
 
@@ -5651,6 +5760,8 @@ This table lists the most common messages.
 | `Ensures annotation is not attached to a function` | The clause is not in the doc comment of a function. | Move it into the doc comment. |
 | `x is assigned, which F may not modify; list it in a // @Modifies clause`, with `, as p.f` when a path from a parameter reaches it | No `Modifies` entry covers memory of this kind. The path stops before a field that your package cannot name, such as an unexported field of `os.File`. | Add it to `Modifies`, by the path the message names. |
 | `... which F may not modify: nothing its // @Modifies clauses list is known to cover it` | An entry covers memory of this kind, but `vego` cannot prove it is this memory. It may be another element, another struct, or a slice that was replaced after `F` was called. | Make the entry match. For a replaced slice, the callee needs a `fresh ... Or within ...` clause. |
+| `x.M may modify the footprint of x, which F may not modify; list it in a // @Modifies clause` | The method writes behind its receiver, and `F` does not list the value. | Add the value to `Modifies`. See [Methods that write behind their receiver](#methods-that-write-behind-their-receiver). |
+| `the footprint of what is passed to G as w may hold memory that what is passed as y reaches, and G relies on it not doing so: ...` | `F` cannot show where `y` comes from, or a value of unknown origin was stored into memory it reaches. The message says which. | Pass a value read from your own parameters or made in `F`, or one that a contract says is new. |
 | `x may be read before or after the call to F, which may change it, and Go does not fix the order` | Go may read `x` before or after `F` runs in this statement, and the two are not proved to give the same value. | Read `x` or call `F` in a statement of its own, in the order you mean. The message ends with such a statement, as in `x0 := x before it`, where one fits. See [Reads that Go may make before or after a call](#reads-that-go-may-make-before-or-after-a-call). |
 | `cannot verify F: g is called in the target of this assignment, and Go may call it before or after append writes into the array of s` | The call may run on either side of the write, and it may read or write memory. | Assign the result of `g` to a variable in a statement of its own first. See [An append beside a call](#an-append-beside-a-call). |
 | `this may add a key to m, the map that the loop at f.go:n:c ranges over, ...` | A write in a `range` over `m` may add a key that `m` lacks. Go may or may not visit it. | Collect the new entries in another map and add them after the loop. See [Changing the map a loop ranges over](#changing-the-map-a-loop-ranges-over). |
@@ -5761,6 +5872,7 @@ A function that uses any of the following is reported as `cannot verify`:
 
 - calls of a method of an interface that has no contract, in source or in the trust file, and converting a value to an interface with such a method (see [Interfaces](#interfaces)); of the standard library, only `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, and `(context.Context).Err` have shipped contracts (see [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages));
 - converting a value of a type that is not an interface to an interface whose contracts speak of a state, such as a closer of your own to `io.Closer` (see [Making a value of an interface with a state](#making-a-value-of-an-interface-with-a-state));
+- a call through a value whose type has states of a method that writes behind its receiver (see [Methods that write behind their receiver](#methods-that-write-behind-their-receiver));
 - an entry in the trust file for a type of the module of the analysed package, or one with `runs`, `keeps`, or `calls`;
 - `context.WithCancel` and the functions like it, which keep the context they are given and run it on other goroutines (see [Types without a shipped entry](#types-without-a-shipped-entry));
 - a function that keeps code it is given anywhere but in a result or in memory that a parameter reaches, such as a registry, a goroutine, or a timer, which has no true entry; making a trusted function with `keeps` into a value; and handing a function literal, a function, or a method value of a type without a contract to a parameter under `keeps` (see [Functions that keep what they are given](#functions-that-keep-what-they-are-given));
@@ -5810,8 +5922,8 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and holds no value that can hold code anywhere it was not held when the call began, unless `keeps` lists the parameter. For a parameter listed under `keeps`, it runs the code during the call only if `runs` lists the parameter too, holds it when it returns only in memory that the results and parameters listed there reach, and has started or registered nothing that runs it later: no goroutine, timer, finalizer or cleanup, callback given to another package, or package-level variable. For a parameter listed under `runs` or `keeps`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter. Where such a value runs what the function keeps, as the reader that `io.TeeReader` returns runs the reader and the writer it is given, it meets its contract whenever what the function keeps meets theirs.
 - Code of another package runs code of the verified package only as `vego` follows it, which [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods) describes: during a call that the verified package makes, it runs only what that call hands it, through the arguments and the receiver. Code that it kept from an earlier call, a value it stored, or code that it runs on another goroutine or at another time, does not call back into a verified function while that function runs, so that the call never ends. A cycle that stays in the package, or that goes through what a call hands to another package, is found and reported.
 - A claim under `asserts` is true: the function calls nothing that the parameter holds, or that a call of what the parameter holds returns, but what the claim allows, and uses no reflection on it (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
-- Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one that wraps it, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method.
-- An interface value that reaches verified code from code that is not verified meets the contracts of its methods. That includes a value passed as an argument, a value in memory that an argument reaches, a value that a call through another value returns, and a value that a trusted function returns or writes, which its entry vouches for. Called with arguments that meet the `Requires` of a method, the method returns without panicking, leaves its `Ensures` true, and writes nothing that verified code can see outside what its `Modifies` lists. For a result that the contract of the method lists under `Vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). This holds also when the value holds a pointer to a struct that verified code holds.
+- Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For a parameter whose footprint the contract lists in `Modifies`, they pass no other argument that reaches memory in that footprint without going through an interface value: `Log` relies on the `Lines` that `t` points to not being memory that the methods of `r` write. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one that wraps it, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method.
+- An interface value that reaches verified code from code that is not verified meets the contracts of its methods. That includes a value passed as an argument, a value in memory that an argument reaches, a value that a call through another value returns, and a value that a trusted function returns or writes, which its entry vouches for. Called with arguments that meet the `Requires` of a method, the method returns without panicking, leaves its `Ensures` true, and writes nothing that verified code can see outside what its `Modifies` lists. When the contract lists the receiver, that is the value's footprint, and the method adds to it only memory that it creates during the call. A method may keep a pointer it is handed, but no later call of the value's methods writes through it: a `Store` whose `Put(v *Value)` keeps `v` and whose `Touch()` then writes `*v` breaks this, and `vego` cannot see it. For a result that the contract of the method lists under `Vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). This holds also when the value holds a pointer to a struct that verified code holds.
 - The same holds of the methods and function types that entries of the trust file give contracts, which is what such an entry claims (see [What an entry for a type claims](#what-an-entry-for-a-type-claims)). In particular, a caller that is not verified does not pass a verified function such a value together with a pointer to memory that the value writes, as a `*bytes.Buffer` passed both as an `io.Writer` and as a `*bytes.Buffer` would be. Every call through such a value returns: a `Read` from a pipe, a terminal, or a connection returns only once data or an error arrives.
 - Packages that are built together give each type at most one entry, and declare the same states for an interface. `vego` reports two entries for one type, or an entry against none, and two different declarations of the states of an interface, or a declaration against none, in every package that `laas` analyses and that is built with both. A program whose main package is never given to `laas` is not checked.
 - A function value that reaches verified code from code that is not verified meets the contract of its type. That includes a value passed as an argument, a value in memory that an argument reaches, and a value made with `reflect.MakeFunc` or by generic code. Called with arguments that meet the `Requires` of its type, such a value returns without panicking, writes only what the `Modifies` of its type lists, and leaves its `Ensures` true. For a result that the contract of its type lists under `Vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns).
