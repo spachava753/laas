@@ -1,6 +1,7 @@
 package guide
 
 import (
+	"cmp"
 	"slices"
 )
 
@@ -118,4 +119,31 @@ func AppendZero(buf []byte) (r []byte) {
 	r = r[:len(r)+1]
 	r[len(r)-1] = 0 // want `r\[len\(r\) - 1\] is assigned, which AppendZero may not modify; it is memory that Grow returned, which its contract places within s when it is not new, and AppendZero passed buf as s; list buf in a // @Modifies clause`
 	return r
+}
+
+// SortByAge sorts members by age. It is not verified: its contract is an
+// entry of the project's trust file.
+func SortByAge(ms []Member) {
+	slices.SortFunc(ms, func(a, b Member) int { return cmp.Compare(a.Age, b.Age) })
+}
+
+// YoungestFirst sorts members by age and returns the youngest age.
+//
+// @Requires |ms| > 0
+// @Modifies ms
+// @Ensures Forall i in [0, |ms|) : r <= ms'[i].Age
+func YoungestFirst(ms []Member) (r int) {
+	SortByAge(ms)
+	return ms[0].Age
+}
+
+// OldestAfterSort claims the first age is the greatest, which sorting by
+// age does not give.
+//
+// @Requires |ms| > 0
+// @Modifies ms
+// @Ensures Forall i in [0, |ms|) : r >= ms'[i].Age
+func OldestAfterSort(ms []Member) (r int) {
+	SortByAge(ms)
+	return ms[0].Age // want `postcondition may not hold: Forall i in \[0, \|ms\|\) : r >= ms'\[i\].Age`
 }

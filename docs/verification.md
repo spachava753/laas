@@ -4047,7 +4047,7 @@ values; a formula has no order of them; write a loop instead
 
 #### Type arguments that cannot be passed
 
-`vego` refuses a call of a generic function with any of these type arguments, whatever its contract says:
+`vego` refuses a call of a generic function with any of these type arguments:
 
 - a type that can hold code, such as an error, an interface, or a function;
 - a type that `vego` does not model, such as an array or `complex128`;
@@ -4101,7 +4101,61 @@ The functions that allocate, `Clone`, `Grow`, and `Insert`, require that what th
 
 #### Sorting a slice of structs
 
-`slices.SortFunc` and `slices.BinarySearchFunc` have no shipped contract. Their documentation requires that the comparison function is a strict weak ordering, and a contract cannot require that of a function it is handed yet. To sort records, sort them in a function that is not verified, and give that function an entry of your own that says what the code that calls it needs. You can check that claim against your own code, which is not true of a claim about `slices.SortFunc`. When the records are sorted by a string or an integer key, you can also sort the keys with `slices.Sort` and use them in the verified code.
+`slices.SortFunc` and `slices.BinarySearchFunc` have no shipped contract. Their documentation requires that the comparison function is a strict weak ordering, and a contract cannot yet require that of a function it is handed.
+
+When the verified code needs the values of one field in order, copy them out and sort them with `slices.Sort`:
+
+```go
+// SortedNames returns the names of the members in order, which are new.
+//
+// @Requires |ms| <= 1000
+// @Ensures |r| = |ms|
+func SortedNames(ms []Member) (r []string) {
+	r = make([]string, len(ms))
+	// @Invariant 0 <= i And i <= |ms| And |r| = |ms|
+	// @Variant |ms| - i
+	for i := 0; i < len(ms); i++ {
+		r[i] = ms[i].Name
+	}
+	slices.Sort(r)
+	return r
+}
+```
+
+To sort the structs themselves, write the call of `slices.SortFunc` in a function of your own that is not verified, and give that function an entry in your trust file:
+
+```go
+// SortByAge sorts members by age. It is not verified: its contract is an
+// entry of the project's trust file.
+func SortByAge(ms []Member) {
+	slices.SortFunc(ms, func(a, b Member) int { return cmp.Compare(a.Age, b.Age) })
+}
+
+// YoungestFirst sorts members by age and returns the youngest age.
+//
+// @Requires |ms| > 0
+// @Modifies ms
+// @Ensures Forall i in [0, |ms|) : r <= ms'[i].Age
+func YoungestFirst(ms []Member) (r int) {
+	SortByAge(ms)
+	return ms[0].Age
+}
+```
+
+```yaml
+  guide.SortByAge:
+    reason: >-
+      SortByAge calls slices.SortFunc with a function that returns
+      cmp.Compare(a.Age, b.Age). That is a strict weak ordering, since
+      cmp.Compare of two integers is the order of the integers, so the
+      documentation of SortFunc says that it sorts ms in ascending order of
+      age. It calls no method of a Member and keeps nothing.
+    modifies: [ms]
+    ensures:
+      - "Forall i in [0, |ms|) : Forall j in [i, |ms|) : ms'[i].Age <= ms'[j].Age"
+```
+
+The entry claims that after the call the members are in ascending order of age, and that the call writes only `ms`. That claim is about your own code. Its comparison compares two integers with `cmp.Compare`, which is an order, so the documentation of `slices.SortFunc` promises the result. A contract for `slices.SortFunc` itself would have to hold for every comparison function a caller could hand it, and for one that is not an order the documentation promises nothing.
 
 #### Writing an entry for a generic function
 

@@ -925,6 +925,17 @@ trusted:
       f(i): {}
     modifies: []
 
+  guide.SortByAge:
+    reason: >-
+      SortByAge calls slices.SortFunc with a function that returns
+      cmp.Compare(a.Age, b.Age). That is a strict weak ordering, since
+      cmp.Compare of two integers is the order of the integers, so the
+      documentation of SortFunc says that it sorts ms in ascending order of
+      age. It calls no method of a Member and keeps nothing.
+    modifies: [ms]
+    ensures:
+      - "Forall i in [0, |ms|) : Forall j in [i, |ms|) : ms'[i].Age <= ms'[j].Age"
+
   guide.Votes:
     reason: >-
       Votes counts the elements of s that are equal to v, in a loop over s

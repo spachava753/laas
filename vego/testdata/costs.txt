@@ -1285,6 +1285,7 @@ guide	(guide.wrapping).Read	13	8416	0
 guide	(guide.zeros).Read	16	10595	0
 guide	bufio.NewScanner	1	2745790	0
 guide	bufio.NewWriter	1	22798	0
+guide	cmp.Compare	1	482	0
 guide	context.CancelFunc	3	255	0
 guide	context.Context.Err	9	20720	0
 guide	fmt.Fprintf	5	15089	0
@@ -1419,6 +1420,7 @@ guide	guide.Next	16	11499	0
 guide	guide.Notify	1	429	0
 guide	guide.Offset	6	2033	0
 guide	guide.Oldest	5	14142	0
+guide	guide.OldestAfterSort	9	54839	0
 guide	guide.Option	3	2393	0
 guide	guide.Overwrite	8	9212	0
 guide	guide.Pack	9	5975	0
@@ -1489,6 +1491,7 @@ guide	guide.Sized.Size	3	961	0
 guide	guide.Small	6	1195	0
 guide	guide.Smallest	4	14122	0
 guide	guide.Snapshot	0	0	0
+guide	guide.SortByAge	1	13288	0
 guide	guide.Sorted3	10	6259	0
 guide	guide.SortedNames	26	42289	0
 guide	guide.Source.Next	3	961	0
@@ -1527,6 +1530,7 @@ guide	guide.Wrapping	7	2701	0
 guide	guide.WriteBuffered	22	1072712	2
 guide	guide.WriteReport	68	177164	0
 guide	guide.WriteTotal	59	287054	0
+guide	guide.YoungestFirst	9	54366	0
 guide	guide.ZeroHead	9	7645	0
 guide	guide.ZeroHeadWrong	9	1836827	1
 guide	guide.Zeros	10	7440	0
