@@ -15,6 +15,7 @@ import (
 	"golang.org/x/tools/go/analysis/checker"
 	"golang.org/x/tools/go/packages"
 
+	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
 )
 
@@ -59,7 +60,7 @@ func TestSpeculation(t *testing.T) {
 	// A speculative verifier that panics is dropped, and the verification
 	// verifies the function as always.
 	panics := speculationPanics.Load()
-	speculativeFault = func(fn *funcInfo) { panic("a fault of a speculative verifier") }
+	speculativeFault = func(*pkgVerifier, *funcInfo) { panic("a fault of a speculative verifier") }
 	defer func() { speculativeFault = nil }()
 	faulty := run(spellings[2], true)
 	if speculationPanics.Load() == panics {
@@ -88,7 +89,7 @@ func TestSpeculativeDistrust(t *testing.T) {
 	spelling := dir + strings.Repeat("."+string(filepath.Separator), 4) + base
 	taken, finished := make(chan struct{}), make(chan struct{})
 	var once sync.Once
-	speculativeFault = func(fn *funcInfo) {
+	speculativeFault = func(pv *pkgVerifier, fn *funcInfo) {
 		first := false
 		once.Do(func() { first = true })
 		if !first {
@@ -99,6 +100,14 @@ func TestSpeculativeDistrust(t *testing.T) {
 		case <-finished:
 		case <-time.After(time.Minute):
 			t.Error("the verification did not end its functions within a minute")
+		}
+		// The end of the package closes the channel that stops a question
+		// of this verifier that would be in the solver; see
+		// TestQuestionsCarryTheStop.
+		select {
+		case <-pv.speculationStop:
+		case <-time.After(time.Minute):
+			t.Error("the end of the package did not close the stop of its speculative verifier within a minute")
 		}
 		panic(&solver.CacheError{Err: errors.New("an entry found wrong by a speculative verifier")})
 	}
@@ -141,5 +150,28 @@ func TestSpeculativeDistrust(t *testing.T) {
 	}
 	if got := graph.Roots[0].Err; got == nil || !strings.Contains(got.Error(), "found wrong by a speculative verifier") {
 		t.Errorf("the package ended with %v, want the error the speculative verifier met", got)
+	}
+}
+
+// TestQuestionsCarryTheStop checks that every question of a speculative
+// verifier carries the channel that the end of its package closes, which
+// ends the question in the solver wherever it waits; see
+// TestStoppedSpeculation in the solver.
+func TestQuestionsCarryTheStop(t *testing.T) {
+	parallel(t)
+	stop := make(chan struct{})
+	pv := &pkgVerifier{
+		speculative:     true,
+		stopSpeculation: func() bool { return false },
+		speculationStop: stop,
+		costFn:          &funcInfo{},
+		costs:           map[*funcInfo]*fnCost{},
+		res:             logic.NewResolver(),
+		effort:          solver.DefaultEffort,
+	}
+	for _, kind := range []question{obligation, contradictionCheck, quickCheck} {
+		if opts := pv.options(0, kind); !opts.Speculative || opts.Stop != stop {
+			t.Errorf("a question of kind %d of a speculative verifier has Speculative %v and Stop %v, want true and the verifier's stop", kind, opts.Speculative, opts.Stop)
+		}
 	}
 }

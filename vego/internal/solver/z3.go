@@ -343,8 +343,10 @@ func (s *Solver) check() {
 
 // paused, when set, is called with the name of the point and the process
 // at hand, if any, wherever the pool or the flights have dropped a lock, or
-// are about to take one, and then act on what was read before. Only the
-// tests set it: to hold an asker at a point until another has done
+// are about to take one, and then act on what was read before, and where an
+// asker begins to wait: "sleeps" for the quiet window, "waits" for a
+// process, with the pool's lock held, and "follows" for another asker's
+// problem. Only the tests set it: to hold an asker at a point until another has done
 // something, which forces an order of events, and to sleep at random
 // (jitter), which brings about orders that are otherwise rare. A new such
 // place gets a call.
@@ -407,6 +409,7 @@ func (s *Solver) acquire(who asker) (*process, error) {
 		}
 		if wait := quiet - time.Since(pl.busy); allowed && speculative && wait > 0 {
 			pl.mu.Unlock()
+			pause("sleeps", nil)
 			select {
 			case <-time.After(wait):
 			case <-who.stop:
@@ -480,6 +483,9 @@ func (s *Solver) acquire(who asker) (*process, error) {
 			_ = pending.cmd.Process.Kill()
 			s.check()
 		}
+		// Called with the lock held, which anything that wakes the asker
+		// takes, so the asker waits before it can be woken.
+		pause("waits", nil)
 		pl.cond.Wait()
 	}
 }
@@ -700,6 +706,7 @@ func (s *Solver) answer(script string, values []string, who asker) (answer, bool
 			if p != nil {
 				s.release(p)
 			}
+			pause("follows", nil)
 			select {
 			case <-f.done:
 			case <-who.stop:
@@ -822,7 +829,11 @@ func (s *Solver) startError(err error) error {
 // machine, past the wall limit or for want of memory, says nothing about
 // the premise, and leaves the answer read from disk to be used. So does a
 // speculative asker's process ended for another asker, the one asker that
-// can be told so. Any other failure is a fault, as for any problem.
+// can be told so. Any other failure leaves the entry unconfirmed, as when
+// Z3 crashes on a text it once answered, and is a CacheError, which a
+// speculative asker records too (see answer): whether the verification or
+// a speculative asker reads an entry first is a matter of timing, so the
+// outcome must not depend on which.
 func (s *Solver) watch(key, script string, values []string, stored reply, who asker) {
 	live, r, err := s.solve(script, values, who)
 	switch {
@@ -831,7 +842,7 @@ func (s *Solver) watch(key, script string, values []string, stored reply, who as
 	case err == errTimeout, err == errMemory, err == errPreempted && who.speculative:
 		return
 	case err != nil:
-		panic(&Fault{fmt.Errorf("solving again a problem whose answer was read from the answer cache: %v", err), dump(script)})
+		cacheFault("solving again the problem of the answer cache entry %s failed, so the entry cannot be confirmed: %v (the problem is saved in %s); to empty the cache, remove %s", s.disk.entryPath(key), err, dump(script), s.disk.root)
 	case live.status == "unknown" && machineBound(live.reason):
 		return
 	}

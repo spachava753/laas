@@ -365,22 +365,20 @@ func TestPreemption(t *testing.T) {
 	// stands for any defect that would.
 	t.Run("of the verification", func(t *testing.T) {
 		s, _ := pooled(t, 2)
-		running := make(chan *process, 4)
-		var misses atomic.Int64
+		running, following := make(chan *process, 4), make(chan struct{}, 1)
 		at(t, func(point string, p *process) {
 			switch point {
 			case "run":
 				running <- p
-			case "missed":
-				misses.Add(1)
+			case "follows":
+				following <- struct{}{}
 			}
 		})
 		first := ask(s, 999, Options{})
 		p := <-running
 		waiter := ask(s, 999, Options{})
-		// The waiter has found no answer kept; it then finds the flight.
-		until(t, "the second asker to look for the first one's problem", func() bool { return misses.Load() == 2 })
-		time.Sleep(50 * time.Millisecond)
+		// The waiter waits for the first one's problem.
+		<-following
 		s.pool.mu.Lock()
 		p.preempted.Store(true)
 		_ = p.cmd.Process.Kill()
@@ -498,60 +496,61 @@ func TestStoppedSpeculation(t *testing.T) {
 			t.Errorf("a stopped speculative question got %v (panic %v), want unknown", o.result, o.panic)
 		}
 	}
+	// begins returns a hook that passes the processes that begin a problem
+	// on running, and says on waiting when an asker begins to wait at the
+	// point named; it takes no lock, since "waits" holds the pool's.
+	begins := func(name string) (hook func(string, *process), running chan *process, waiting chan struct{}) {
+		running, waiting = make(chan *process, 4), make(chan struct{}, 1)
+		return func(point string, p *process) {
+			switch point {
+			case "run":
+				running <- p
+			case name:
+				select {
+				case waiting <- struct{}{}:
+				default:
+				}
+			}
+		}, running, waiting
+	}
 	t.Run("waiting for a process", func(t *testing.T) {
 		s, release := pooled(t, 2)
-		running := make(chan *process, 4)
-		at(t, func(point string, p *process) {
-			if point == "run" {
-				running <- p
-			}
-		})
+		hook, running, waiting := begins("waits")
+		at(t, hook)
 		a, b := ask(s, 999, Options{}), ask(s, 1999, Options{})
 		<-running
 		<-running
-		stopped(t, s, 3, func() { time.Sleep(100 * time.Millisecond) })
+		stopped(t, s, 3, func() { <-waiting })
 		release()
 		<-a.done
 		<-b.done
 	})
 	t.Run("in the quiet window", func(t *testing.T) {
 		s, _ := pooled(t, 2)
+		hook, _, waiting := begins("sleeps")
+		at(t, hook)
 		quiet = time.Hour
 		s.pool.mu.Lock()
 		s.pool.busy = time.Now()
 		s.pool.mu.Unlock()
-		stopped(t, s, 3, func() { time.Sleep(100 * time.Millisecond) })
+		stopped(t, s, 3, func() { <-waiting })
 	})
 	t.Run("waiting for another asker's problem", func(t *testing.T) {
 		s, release := pooled(t, 3)
-		running := make(chan *process, 4)
-		at(t, func(point string, p *process) {
-			if point == "run" {
-				running <- p
-			}
-		})
+		hook, running, waiting := begins("follows")
+		at(t, hook)
 		a := ask(s, 999, Options{})
 		<-running
-		stopped(t, s, 999, func() {
-			until(t, "the speculative question to wait", func() bool {
-				s.pool.mu.Lock()
-				defer s.pool.mu.Unlock()
-				return len(s.pool.idle) == 1
-			})
-		})
+		stopped(t, s, 999, func() { <-waiting })
 		release()
 		<-a.done
 	})
 	t.Run("being solved", func(t *testing.T) {
 		s, _ := pooled(t, 2)
-		running := make(chan *process, 4)
-		at(t, func(point string, p *process) {
-			if point == "run" {
-				running <- p
-			}
-		})
+		hook, running, _ := begins("")
+		at(t, hook)
 		var p *process
-		stopped(t, s, 999, func() { p = <-running; time.Sleep(50 * time.Millisecond) })
+		stopped(t, s, 999, func() { p = <-running })
 		until(t, "the stopped process to end", func() bool {
 			s.pool.mu.Lock()
 			defer s.pool.mu.Unlock()
@@ -672,5 +671,45 @@ func TestSpeculativeDrift(t *testing.T) {
 	}
 	if message := cacheFailure(func() { s.Prove(nil, proof(2), Options{}) }); !strings.Contains(message, "otherwise") {
 		t.Errorf("a later question got %q, want the drift", message)
+	}
+}
+
+// TestWatchFailure checks that solving again an answer read from disk,
+// when Z3 fails on it, fails the question of the verification, and, for a
+// speculative asker, is recorded so that Untrusted returns it: the entry
+// cannot be confirmed either way. At bb4e7be the failure was dropped
+// without a word.
+func TestWatchFailure(t *testing.T) {
+	saved := watchRate
+	watchRate = 1
+	defer func() { watchRate = saved }()
+	for _, speculative := range []bool{false, true} {
+		dir := cacheDir(t)
+		filled, err := fakeSolver(t, dir, "unsat\n(:reason-unknown \"\")\n(:rlimit 7)", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The answer is kept on disk, and the watch is not drawn for a
+		// problem solved live.
+		filled.Prove(nil, proof(1), Options{})
+		s, err := fakeSolver(t, dir, "junk", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		o := ask(s, 1, Options{Speculative: speculative})
+		if !o.within(10 * time.Second) {
+			t.Fatal("the question did not end")
+		}
+		var failure string
+		if speculative {
+			if err := s.Untrusted(); err != nil {
+				failure = err.Error()
+			}
+		} else if e, ok := o.panic.(*CacheError); ok {
+			failure = e.Error()
+		}
+		if !strings.Contains(failure, "cannot be confirmed") {
+			t.Errorf("speculative %v: a watch on which Z3 failed got %v (panic %v), and Untrusted says %v; want the failure", speculative, o.result, o.panic, s.Untrusted())
+		}
 	}
 }

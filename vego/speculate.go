@@ -2,11 +2,13 @@ package vego
 
 import (
 	"errors"
+	"fmt"
 	"go/types"
 	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/tools/go/analysis"
 
@@ -69,7 +71,12 @@ var verifying func(phase string)
 
 // speculativeFault, when set, runs before a speculative verifier verifies a
 // function; the tests make it panic.
-var speculativeFault func(fn *funcInfo)
+var speculativeFault func(pv *pkgVerifier, fn *funcInfo)
+
+// speculationBound bounds how long the verification of a package waits for
+// its speculative verifiers to stop. They stop at once, so a wait that
+// reaches it is a defect of vego, which fails the package.
+var speculationBound = 10 * time.Minute
 
 // speculation is what the verification of a package and its speculative
 // verifiers share: the index of the function the verification is at, the
@@ -86,6 +93,7 @@ type speculation struct {
 	stop    chan struct{}
 	mu      sync.Mutex
 	running int
+	late    bool
 	ended   *sync.Cond
 	z3      atomic.Pointer[solver.Solver]
 }
@@ -117,18 +125,30 @@ func (sp *speculation) finish() {
 // with no answer, whether it waits for a process or for another asker's
 // problem or is being solved, since stop is closed and every asker waiting
 // for a process is woken (solver.Options.Stop); its next question panics
-// with stopped.
-func (sp *speculation) end() {
+// with stopped. One that has not stopped within speculationBound is an
+// internal error.
+func (sp *speculation) end() error {
 	sp.mu.Lock()
 	sp.done.Store(true)
 	close(sp.stop)
 	sp.mu.Unlock()
 	solver.WakeAll()
+	timer := time.AfterFunc(speculationBound, func() {
+		sp.mu.Lock()
+		defer sp.mu.Unlock()
+		sp.late = true
+		sp.ended.Broadcast()
+	})
+	defer timer.Stop()
 	sp.mu.Lock()
-	for sp.running > 0 {
+	defer sp.mu.Unlock()
+	for sp.running > 0 && !sp.late {
 		sp.ended.Wait()
 	}
-	sp.mu.Unlock()
+	if sp.running > 0 {
+		return &solver.InternalError{Err: fmt.Errorf("%d speculative verifiers of the package did not stop within %v", sp.running, speculationBound)}
+	}
+	return nil
 }
 
 // untrusted returns what makes the solver of the package, the
@@ -308,7 +328,7 @@ func speculate(pass *analysis.Pass, verifier func(*analysis.Pass) *pkgVerifier, 
 						}
 					}()
 					if speculativeFault != nil {
-						speculativeFault(fn)
+						speculativeFault(pv, fn)
 					}
 					pv.verified(fn)
 					speculatedFunctions.Add(1)

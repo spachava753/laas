@@ -328,7 +328,9 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		// reported, so that an error they met, which nobody else reads,
 		// fails the package; see end.
 		if sp != nil {
-			sp.end()
+			if err := sp.end(); err != nil {
+				panic(err)
+			}
 		}
 		if err := sp.untrusted(pv.z3); err != nil {
 			panic(err)
