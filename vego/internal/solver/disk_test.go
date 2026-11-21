@@ -115,7 +115,7 @@ func entries(t *testing.T, dir string) []string {
 
 // TestDiskCache checks the answers kept between runs: a second solver on
 // the same directory answers from it with what Z3 counted, and every way an
-// entry, a process, or the directory can be wrong stops the run.
+// entry, a process, or the directory can be wrong fails the package.
 func TestDiskCache(t *testing.T) {
 	z3 := z3Binary(t)
 	x, y := logic.Const("x", logic.Int), logic.Const("y", logic.Int)
@@ -183,7 +183,7 @@ func TestDiskCache(t *testing.T) {
 		}
 	})
 
-	// Every kind of damage stops the run, and says how to empty the cache.
+	// Every kind of damage fails the package, and says how to empty the cache.
 	damage := []struct {
 		name  string
 		edit  func(content []byte) []byte
@@ -400,7 +400,7 @@ func TestDiskCache(t *testing.T) {
 			t.Fatalf("the entries differ, or do not hold the fixed form:\n%s\n%s", written[0], written[1])
 		}
 	})
-	// A Z3 that ends at once stops the run, and frees the slot of its
+	// A Z3 that ends at once fails the package, and frees the slot of its
 	// process once, so that the run neither hangs nor starts a fifth.
 	t.Run("a Z3 that ends at start", func(t *testing.T) {
 		dir := cacheDir(t)
@@ -436,6 +436,48 @@ func TestDiskCache(t *testing.T) {
 			}
 			if got, _ := os.ReadFile(filepath.Join(dir, name)); string(got) != content {
 				t.Fatalf("%s was changed", name)
+			}
+		}
+	})
+	// Another run makes the cache between the first look for the mark and
+	// the listing of the directory: the directory is a cache.
+	t.Run("a cache made by another run meanwhile", func(t *testing.T) {
+		dir := cacheDir(t)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		afterTagRead = func() {
+			afterTagRead = nil
+			if err := claim(dir); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "trimmed"), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		defer func() { afterTagRead = nil }()
+		if err := claim(dir); err != nil {
+			t.Fatalf("a cache made meanwhile is refused: %v", err)
+		}
+	})
+	t.Run("two runs making one cache at once", func(t *testing.T) {
+		for range 50 {
+			dir := cacheDir(t)
+			var wg sync.WaitGroup
+			errs := make([]error, 2)
+			for i := range 2 {
+				wg.Go(func() {
+					errs[i] = claim(dir)
+					if errs[i] == nil {
+						errs[i] = os.MkdirAll(filepath.Join(dir, "z3-"+strings.Repeat("0", 32)), 0o755)
+					}
+				})
+			}
+			wg.Wait()
+			for _, err := range errs {
+				if err != nil {
+					t.Fatalf("one of two runs making a cache at once failed: %v", err)
+				}
 			}
 		}
 	})

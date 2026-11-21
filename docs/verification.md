@@ -1872,7 +1872,7 @@ laas -vego -vego.cache="$HOME/.cache/vego" ./...
 
 On the next run, a question that is the same as one asked before is answered from the directory, and Z3 is not asked again. After a small edit, most of the questions of a package are the same as before. In one package of 24 functions that took 90 s, changing one `Requires` clause left 502 of 597 questions the same.
 
-The answers are the same with the cache and without it. Each run that uses the cache solves again a random sample of the answers it reads, about one in 256, and stops if Z3 now answers otherwise.
+The answers are the same with the cache and without it. Each run that uses the cache solves again a random sample of the answers it reads, about one in 256, and fails the package if Z3 now answers otherwise.
 
 A package that used an answer from the directory says so on standard error, with a line such as:
 
@@ -1886,13 +1886,13 @@ Give a directory that does not exist yet, or an empty one. `laas` marks it as an
 
 The answers are kept for the Z3 binary that gave them, together with the libraries it loads and the processor. Another Z3, or the same one after a system update that changes its libraries, starts with an empty directory of its own. `-vego.z3` must name the Z3 binary itself, not a script that starts it.
 
-`vego` stops the run when it cannot trust what it finds. The package fails with a message such as:
+When `vego` cannot trust what it finds in the directory, the package fails with a message such as the one below. Other packages of the run go on, and `laas` exits with status 1.
 
 ```text
 vego: the answer cache entry /home/you/.cache/vego/z3-0f5c.../c5/a4db... is damaged: it does not end in its hash; to empty the cache, remove /home/you/.cache/vego
 ```
 
-To empty the cache, remove the directory. Answers not used for five days are removed, and the answers are kept under 1 GB. `vego` removes only files that it wrote there.
+To empty the cache, remove the directory. Once a day, answers not used for five days are removed, and then the oldest until the directory holds at most 1 GB. `vego` removes only files that it wrote there.
 
 ## Changing memory
 
@@ -5265,7 +5265,7 @@ An entry for a method of an interface or a function type shows the reach of its 
 
 Such an entry can be relied on where no call names it, for example where a value of the type is passed to a trusted function under `runs`. The report then lists, in a line `relied on in:`, the packages whose proofs rest on it.
 
-When answers came from the answer cache, the report starts with the line `Answers of Z3 read from the answer cache:` and the directory. See [Keeping answers between runs](#keeping-answers-between-runs).
+When answers came from the answer cache, the report has a line `Answers of Z3 read from the answer cache:` with the directory, after its opening sentences. See [Keeping answers between runs](#keeping-answers-between-runs).
 
 A contract marked `[may fail unpredictably]` does not say when its function succeeds. A verified function that calls it can be excused from saying when it succeeds, as described in [Functions that cannot promise success](#functions-that-cannot-promise-success).
 

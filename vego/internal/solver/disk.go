@@ -41,18 +41,18 @@ import (
 //     code, read from /proc for every process started, the command line,
 //     the system, and the processor's model and flags. A process whose files
 //     differ from the directory's, or whose binary is not the file the path
-//     names (a script that runs Z3), stops the run.
+//     names (a script that runs Z3), fails the package.
 //   - An entry damaged, cut short, or for another text. Each entry ends in a
 //     hash of what precedes it and holds the text it answers, which must be
-//     the text being asked, byte for byte. Any doubt stops the run; nothing
+//     the text being asked, byte for byte. Any doubt fails the package; nothing
 //     is skipped or rewritten silently. A file that is missing is a miss.
 //   - Two runs that write the same entry. An entry is published with
 //     link(2), which fails when the name exists; the loser compares its
-//     reply with the winner's, and a difference stops the run, since Z3
+//     reply with the winner's, and a difference fails the package, since Z3
 //     would then have answered one text in two ways.
 //   - A drift the identity does not cover. Each run solves again, live, a
 //     sample of the answers it reads, drawn at random for the run, and a
-//     difference stops the run.
+//     difference fails the package.
 //
 // An edit that keeps an entry well formed cannot be told from an answer,
 // as an edited Z3 binary cannot; the cache directory is trusted as the
@@ -172,6 +172,11 @@ const (
 	tag     = "Signature: 8a477f597d28d172789f06886806bc55\n# This directory is an answer cache of vego, made by -vego.cache.\n"
 )
 
+// afterTagRead, when set, runs between claim's first look for the mark and
+// its listing of the directory, where another run may make the cache; the
+// tests set it.
+var afterTagRead func()
+
 // claim makes dir an answer cache, or checks that it is one. A directory
 // that holds anything and is not marked as an answer cache is refused: the
 // trim removes files, and must never remove what is not its own.
@@ -189,14 +194,22 @@ func claim(dir string) error {
 	case !errors.Is(err, fs.ErrNotExist):
 		return fmt.Errorf("the answer cache %s cannot be read: %v; run without -vego.cache or with another directory", dir, err)
 	}
+	if afterTagRead != nil {
+		afterTagRead()
+	}
 	held, err := os.ReadDir(dir)
 	if err != nil {
 		return fmt.Errorf("the answer cache %s cannot be read: %v; run without -vego.cache or with another directory", dir, err)
 	}
-	// Another run may be making the cache at this moment, and has then
-	// written at most the temporary file of its mark.
+	// Another run may be making the cache at this moment. It publishes
+	// the mark before it makes anything else, so until then the directory
+	// holds at most the temporary file of the mark, and after it the mark
+	// can be read.
 	for _, entry := range held {
 		if !strings.HasPrefix(entry.Name(), tempPrefix) || !entry.Type().IsRegular() {
+			if again, err := os.ReadFile(filepath.Join(dir, tagName)); err == nil && string(again) == tag {
+				return nil
+			}
 			return fmt.Errorf("%s is not empty and is not an answer cache%s", dir, remedy)
 		}
 	}
@@ -393,7 +406,7 @@ func (d *disk) entryPath(key string) string {
 
 // read returns the reply stored for the key, and whether there is one. A
 // file that does not exist is a miss; one that exists and is not a whole
-// entry for exactly this key stops the run.
+// entry for exactly this key fails the package.
 func (d *disk) read(key string) (reply, bool) {
 	path := d.entryPath(key)
 	content, err := os.ReadFile(path)
