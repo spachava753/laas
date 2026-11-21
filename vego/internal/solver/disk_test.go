@@ -340,6 +340,11 @@ func TestDiskCache(t *testing.T) {
 		if message := cacheFailure(func() { replaced.Prove(nil, logic.Lt(x, logic.Add(x, logic.IntLit(2))), Options{}) }); !strings.Contains(message, "other files") {
 			t.Fatalf("got %q, want a failure that says a process runs other files", message)
 		}
+		// Every later question fails with it, one whose answer is kept in
+		// the process too.
+		if message := cacheFailure(func() { replaced.Prove(nil, goal, Options{}) }); !strings.Contains(message, "other files") {
+			t.Fatalf("a later question whose answer is kept got %q, want the failure that says a process runs other files", message)
+		}
 	})
 
 	// What depends on the machine, and a reply that is no answer, are not
