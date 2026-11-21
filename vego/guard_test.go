@@ -49,16 +49,15 @@ func costEnv() string {
 	return fmt.Sprintf("%s %s/%s z3 %s", runtime.Version(), runtime.GOOS, runtime.GOARCH, solver.Version)
 }
 
-// collectCosts sets observeCosts to gather the cost of every function, by
-// its package and name, until the returned function is called, which
-// returns them, and what -vego.cost prints for the function of the guide
-// that the guide quotes; see checkGuideCost.
-func collectCosts() func() (map[string]costLine, string) {
-	saved := observeCosts
+// collectCosts gathers the cost of every function that the analyzer
+// verifies, by its package and name, until the returned function is called,
+// which returns them, and what -vego.cost prints for the function of the
+// guide that the guide quotes; see checkGuideCost.
+func collectCosts(analyzer *analysis.Analyzer) func() (map[string]costLine, string) {
 	var mu sync.Mutex
 	costs := map[string]costLine{}
 	var quoted string
-	observeCosts = func(pass *analysis.Pass, records []*fnCost) {
+	stop := observe(analyzer, &observer{costs: func(pass *analysis.Pass, records []*fnCost) {
 		mu.Lock()
 		defer mu.Unlock()
 		for _, c := range records {
@@ -72,11 +71,20 @@ func collectCosts() func() (map[string]costLine, string) {
 				quoted += costText(pass.Fset, c)
 			}
 		}
-	}
+	}})
 	return func() (map[string]costLine, string) {
-		observeCosts = saved
+		stop()
+		mu.Lock()
+		defer mu.Unlock()
 		return costs, quoted
 	}
+}
+
+// observe has the analyzer tell o what it verified until the returned
+// function is called.
+func observe(analyzer *analysis.Analyzer, o *observer) func() {
+	observers.Store(analyzer, o)
+	return func() { observers.Delete(analyzer) }
 }
 
 // guideCostKey is the function whose -vego.cost output the guide quotes,
@@ -234,6 +242,7 @@ func readCosts(path string) (map[string]costLine, string, error) {
 
 // TestCompareCosts checks the comparison of costs with the table.
 func TestCompareCosts(t *testing.T) {
+	parallel(t)
 	recorded := map[string]costLine{"p\tf": {10, 1000, 1}, "p\tg": {5, 500, 0}}
 	same := map[string]costLine{"p\tf": {10, 1000, 1}, "p\tg": {5, 500, 0}}
 	tests := []struct {

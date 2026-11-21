@@ -1857,13 +1857,54 @@ func shippedVerifier(t *testing.T) (*pkgVerifier, types.Importer) {
 }
 
 func TestShippedContracts(t *testing.T) {
+	parallel(t)
 	scratch = t.TempDir()
+	checkShipped(t, true, func(key string) bool { return !processWide[key] })
+}
+
+// processWide holds the shipped entries whose harnesses change what the
+// whole process shares: standard output, the standard logger, or the
+// working directory. TestProcessWideEntries runs them while no other
+// test runs, and TestShippedContracts runs every other entry beside other
+// tests.
+var processWide = map[string]bool{
+	"fmt.Printf": true, "fmt.Print": true, "fmt.Println": true,
+	"log.Printf": true, "log.Print": true, "log.Println": true,
+	"os.Getwd": true,
+}
+
+// TestProcessWideEntries runs the shipped entries of processWide, as
+// TestShippedContracts runs the others.
+func TestProcessWideEntries(t *testing.T) {
+	alone(t)
+	scratch = t.TempDir()
+	found := map[string]bool{}
+	checkShipped(t, false, func(key string) bool {
+		found[key] = processWide[key]
+		return processWide[key]
+	})
+	for key := range processWide {
+		if !found[key] {
+			t.Errorf("%s is not a shipped entry", key)
+		}
+	}
+}
+
+// checkShipped runs the shipped entries that run says to run, and, when
+// files is set, reports the problems of the shipped files.
+func checkShipped(t *testing.T, files bool, run func(key string) bool) {
+	defer heavy()()
 	pv, imports := shippedVerifier(t)
 	for _, file := range shippedContracts() {
-		for _, problem := range file.problems {
-			t.Errorf("%s:%d: %s", file.path, problem.line, problem.msg)
+		if files {
+			for _, problem := range file.problems {
+				t.Errorf("%s:%d: %s", file.path, problem.line, problem.msg)
+			}
 		}
 		for key := range file.entries {
+			if !run(key) {
+				continue
+			}
 			t.Run(key, func(t *testing.T) {
 				path, name, _ := splitFuncName(key)
 				pkg, err := imports.Import(path)
@@ -2284,6 +2325,7 @@ func checkVouched(t *testing.T, result any) {
 // outcome it is meant to, so that the errors checkVouched sees include
 // every kind os.Remove returns here.
 func TestRemoveOutcomes(t *testing.T) {
+	alone(t)
 	scratch = t.TempDir()
 	seen := map[string]bool{}
 	rng := rand.New(rand.NewSource(1))
@@ -2308,6 +2350,7 @@ func TestRemoveOutcomes(t *testing.T) {
 // each outcome they are meant to, so that the errors checkVouched sees
 // include every kind those functions return here.
 func TestFileOutcomes(t *testing.T) {
+	alone(t)
 	scratch = t.TempDir()
 	defer func() {
 		for _, f := range keptOpen {
@@ -2363,6 +2406,7 @@ func TestFileOutcomes(t *testing.T) {
 // given: regular files, missing names, directories, and names no system
 // opens, but no FIFO, which ReadFile would wait on for ever.
 func TestReadFileEntry(t *testing.T) {
+	alone(t)
 	scratch = t.TempDir()
 	defer func() {
 		for _, f := range keptOpen {

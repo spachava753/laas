@@ -20,6 +20,7 @@ import (
 // constant must be an expression of a value go/ssa converts; go/ssa gives
 // constants no expression.
 func TestConversionLists(t *testing.T) {
+	parallel(t)
 	t.Run("on the corpus", func(t *testing.T) {
 		testdata, err := filepath.Abs("testdata")
 		if err != nil {

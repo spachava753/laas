@@ -100,7 +100,15 @@ func (e *evaluator) sequence(t *logic.Term) []*big.Int {
 	case logic.OpFill:
 		return slices.Repeat([]*big.Int{e.number(t.Args[1])}, int(e.number(t.Args[0]).Int64()))
 	case logic.OpPush:
-		return append(slices.Clone(e.sequence(t.Args[0])), e.number(t.Args[1]))
+		// A ground sequence is a chain of pushes onto a fill, which is
+		// walked once: copying the sequence at every push would make a
+		// long one cost the square of its length.
+		pushed := pushes(t)
+		elements := slices.Clone(e.sequence(pushed[len(pushed)-1].Args[0]))
+		for _, push := range slices.Backward(pushed) {
+			elements = append(elements, e.number(push.Args[1]))
+		}
+		return elements
 	}
 	panic("cannot evaluate sequence " + t.String())
 }
@@ -112,9 +120,24 @@ func (e *evaluator) rows(t *logic.Term) [][]*big.Int {
 	case logic.OpFill:
 		return slices.Repeat([][]*big.Int{e.sequence(t.Args[1])}, int(e.number(t.Args[0]).Int64()))
 	case logic.OpPush:
-		return append(slices.Clone(e.rows(t.Args[0])), e.sequence(t.Args[1]))
+		pushed := pushes(t)
+		rows := slices.Clone(e.rows(pushed[len(pushed)-1].Args[0]))
+		for _, push := range slices.Backward(pushed) {
+			rows = append(rows, e.sequence(push.Args[1]))
+		}
+		return rows
 	}
 	panic("cannot evaluate sequence of sequences " + t.String())
+}
+
+// pushes returns the chain of pushes that t starts, from the last push to
+// the first; the sequence the first one pushes onto is not a push.
+func pushes(t *logic.Term) []*logic.Term {
+	var chain []*logic.Term
+	for ; t.Op == logic.OpPush; t = t.Args[0] {
+		chain = append(chain, t)
+	}
+	return chain
 }
 
 func (e *evaluator) holds(t *logic.Term) bool {
@@ -323,6 +346,7 @@ func ints(values ...int64) *logic.Term {
 // numbers past int64. A quantifier the evaluator cannot bound, and a read
 // outside a sequence, panic.
 func TestEvaluator(t *testing.T) {
+	parallel(t)
 	res := logic.NewResolver()
 	eval := func(src string, env groundEnv) bool {
 		t.Helper()
@@ -398,6 +422,19 @@ func TestEvaluator(t *testing.T) {
 				t.Fatalf("the evaluator gives %d / %d another value", hi, y)
 			}
 		}
+	}
+	// Pushes onto a fill that is not empty come after it, in order, and a
+	// long sequence keeps every element where it was pushed.
+	onFill := logic.Push(logic.Push(logic.Fill(logic.IntLit(2), logic.IntLit(7)), logic.IntLit(1)), logic.IntLit(2))
+	if !eval("|A| = 4 And A[0] = 7 And A[1] = 7 And A[2] = 1 And A[3] = 2", groundEnv{"A": onFill}) {
+		t.Fatalf("pushes onto a fill of two 7s are not 7 7 1 2")
+	}
+	long := make([]int64, 500)
+	for i := range long {
+		long[i] = int64(i)
+	}
+	if !eval("|A| = 500 And Forall k in [0, |A|) : A[k] = k", groundEnv{"A": ints(long...)}) {
+		t.Fatalf("a sequence of 500 pushes does not hold its elements where they were pushed")
 	}
 	huge := groundEnv{"u": logic.BigLit(new(big.Int).SetUint64(1<<64 - 1))}
 	if !eval("u > 9223372036854775807 And u = 18446744073709551615 And u + 1 > 18446744073709551615 And u / 2 = 9223372036854775807", huge) {

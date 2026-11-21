@@ -105,6 +105,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -130,13 +131,17 @@ var refuseCache bool
 // annotations instead.
 func RefuseCachedRuns() { refuseCache = true }
 
-// observeCosts, when set, is given the costs of the functions of each
-// package once it is verified; the tests of the corpus set it.
-var observeCosts func(pass *analysis.Pass, costs []*fnCost)
+// observers holds, by analyzer, what tests are told of each package the
+// analyzer verified: the costs of its functions, which the tests of the
+// corpus compare with a table, and the verifier, whose instantiations a test
+// reads. Keying them by the analyzer keeps tests that run side by side from
+// seeing each other's packages.
+var observers sync.Map // *analysis.Analyzer to *observer
 
-// observeVerifier, when set, is given the verifier of each package after it
-// has verified the package; tests read the instantiations it made.
-var observeVerifier func(pv *pkgVerifier)
+type observer struct {
+	costs    func(pass *analysis.Pass, costs []*fnCost)
+	verifier func(pv *pkgVerifier)
+}
 
 // newAnalyzer builds the analyzer with its flags. A run loads the trusted
 // contracts, collects the annotations of the package, verifies every
@@ -283,11 +288,14 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		if pv.printCost {
 			pv.printCosts(costStderr)
 		}
-		if observeCosts != nil {
-			observeCosts(pass, pv.costOrder)
-		}
-		if observeVerifier != nil {
-			observeVerifier(pv)
+		if found, ok := observers.Load(analyzer); ok {
+			o := found.(*observer)
+			if o.costs != nil {
+				o.costs(pass, pv.costOrder)
+			}
+			if o.verifier != nil {
+				o.verifier(pv)
+			}
 		}
 		// The proofs of this package also rest on whatever the packages it
 		// depends on took on trust.

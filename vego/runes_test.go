@@ -15,6 +15,7 @@ import (
 // against Go: for each value, the facts must allow the string Go makes and
 // no other, of any length or with any other byte.
 func TestRuneString(t *testing.T) {
+	parallel(t)
 	z3, err := solver.New("")
 	if err != nil {
 		t.Fatal(err)

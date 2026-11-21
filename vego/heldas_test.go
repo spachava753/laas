@@ -16,6 +16,7 @@ import (
 // pointers. atomic.Value is walked as it is declared and holds code. Every
 // rule that asks whether a value can hold code answers the same.
 func TestHeldAs(t *testing.T) {
+	parallel(t)
 	imports := importer.ForCompiler(token.NewFileSet(), "source", nil)
 	lookup := func(path, name string) types.Type {
 		pkg, err := imports.Import(path)

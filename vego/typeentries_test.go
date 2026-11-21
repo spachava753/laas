@@ -18,6 +18,7 @@ import (
 // analysed module, whose types cannot be given a contract in the trust
 // file. The analysed package lies in w/app, under w/go.mod.
 func TestInAnalysedModule(t *testing.T) {
+	parallel(t)
 	root := t.TempDir()
 	for _, dir := range []string{"", "tools", "cache/golang.org/x/text@v0.1.0"} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
@@ -65,6 +66,7 @@ func TestInAnalysedModule(t *testing.T) {
 // corpus foreign reports as relied on: those that proofs use, and none
 // that cannot be used, since every use of such an entry is an error.
 func TestTypeEntriesInUse(t *testing.T) {
+	parallel(t)
 	analyzer := newAnalyzer()
 	if err := analyzer.Flags.Set("trusted", filepath.Join("testdata", "trusted.yaml")); err != nil {
 		t.Fatal(err)

@@ -101,6 +101,7 @@ func probeFormat(rng *rand.Rand) string {
 // that method, and Error for a value that has both. Every function shipped
 // with formats is run.
 func TestPlainFormatting(t *testing.T) {
+	alone(t)
 	scratch = t.TempDir()
 	// Values of every shape the rule calls plain, each of which holds a
 	// probe or is a named type, and errors of known origin.
@@ -266,6 +267,7 @@ func boundCases() []boundCase {
 // formats hold the widest verbs, widths and precisions up to a million and
 // the largest fmt reads, indices, and stars.
 func TestBoundOnFormatting(t *testing.T) {
+	parallel(t)
 	cases := boundCases()
 	verbs := []string{"%v", "%+v", "%#v", "%s", "%q", "%+q", "%#q", "%x", "%X", "% x", "% #x", "%#x", "%d", "%b", "%#b", "%o", "%O", "%U", "%#U",
 		"%c", "%e", "%E", "%f", "%F", "%g", "%G", "%t", "%T", "%p", "%w", "%z"}

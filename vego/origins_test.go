@@ -18,6 +18,7 @@ import (
 // and a position that no node holds is a fault that panics instead of
 // turning the analysis off without a word.
 func TestReachingPositions(t *testing.T) {
+	parallel(t)
 	const src = `package p
 
 import "errors"

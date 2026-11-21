@@ -21,6 +21,7 @@ import (
 // state can be declared on: a defined interface type that declares a
 // method of its own.
 func TestStateDeclarations(t *testing.T) {
+	parallel(t)
 	t.Run("project", func(t *testing.T) {
 		file := parseTrustFile("vego-trusted.yaml", []byte("version: 1\nstate:\n  example.com/x.T:\n    open:\n      reason: r\n"), false)
 		if len(file.problems) != 0 {
@@ -103,6 +104,7 @@ func TestStateDeclarations(t *testing.T) {
 // TestUnexportedFields checks which package may name an unexported field
 // in a formula: only the one that declares it, and no shipped contract.
 func TestUnexportedFields(t *testing.T) {
+	parallel(t)
 	imports := importer.ForCompiler(token.NewFileSet(), "source", nil)
 	syncPkg, err := imports.Import("sync")
 	if err != nil {

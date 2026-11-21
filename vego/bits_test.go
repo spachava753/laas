@@ -14,6 +14,7 @@ import (
 // the facts together with the true result must have a model. A fact that is
 // false for some pair shows as a contradiction there.
 func TestBitFacts(t *testing.T) {
+	parallel(t)
 	z3, err := solver.New("")
 	if err != nil {
 		t.Fatal(err)

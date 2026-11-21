@@ -13,6 +13,7 @@ import (
 )
 
 func TestParseTrustFile(t *testing.T) {
+	parallel(t)
 	tests := []struct {
 		name    string
 		content string
@@ -80,6 +81,7 @@ trusted:
 }
 
 func TestUnreadableTrustFile(t *testing.T) {
+	parallel(t)
 	// A directory where the file should be exists but cannot be read as one.
 	file := loadTrustFile(t.TempDir())
 	if file == nil || len(file.problems) != 1 || !strings.Contains(file.problems[0].msg, "cannot read the trust file") {
@@ -91,6 +93,7 @@ func TestUnreadableTrustFile(t *testing.T) {
 }
 
 func TestReport(t *testing.T) {
+	parallel(t)
 	at := func(file string, line int) token.Position {
 		return token.Position{Filename: "/work/" + file, Line: line}
 	}
@@ -220,6 +223,7 @@ Built-in: errors.New and fmt.Errorf return a non-nil error.
 // TestSampleRanges checks that a value Z3 proposes for a sample outside the
 // range of its type is refused, so that a model is never taken for an input.
 func TestSampleRanges(t *testing.T) {
+	parallel(t)
 	pass := &analysis.Pass{TypesSizes: types.SizesFor("gc", "amd64")}
 	v := &fnVerifier{pkgVerifier: &pkgVerifier{pass: pass}}
 	b := &sampler{v: v}
@@ -235,6 +239,7 @@ func TestSampleRanges(t *testing.T) {
 // of the range of their type never reaches accept, and that one in range
 // does.
 func TestOfferChecksRanges(t *testing.T) {
+	parallel(t)
 	pass := &analysis.Pass{TypesSizes: types.SizesFor("gc", "amd64")}
 	v := &fnVerifier{pkgVerifier: &pkgVerifier{pass: pass}}
 	b := &sampler{v: v}

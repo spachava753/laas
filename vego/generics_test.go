@@ -10,10 +10,9 @@ import (
 // instantiation that calleeAt made as of the function itself, and that a
 // map of functions read with an instantiation panics.
 func TestInstancesAnswerAsTheirGenericFunction(t *testing.T) {
-	saved := observeVerifier
-	defer func() { observeVerifier = saved }()
+	parallel(t)
 	seen := 0
-	observeVerifier = func(pv *pkgVerifier) {
+	check := func(pv *pkgVerifier) {
 		if pv.pass.Pkg.Path() != "generics" {
 			return
 		}
@@ -48,6 +47,7 @@ func TestInstancesAnswerAsTheirGenericFunction(t *testing.T) {
 	if err := analyzer.Flags.Set("trusted", filepath.Join("testdata", "trusted.yaml")); err != nil {
 		t.Fatal(err)
 	}
+	defer observe(analyzer, &observer{verifier: check})()
 	runCorpus(t, analyzer, "generics", "genericslib")
 	if seen < 10 {
 		t.Errorf("only %d instantiations were made; the corpus generics should make more", seen)

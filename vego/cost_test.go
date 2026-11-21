@@ -14,18 +14,19 @@ import (
 // asked of Z3, with the place of each question that stopped at the limit,
 // that it changes no diagnostic, and that nothing is printed without it.
 func TestCostFlag(t *testing.T) {
-	saved, savedObserve := costStderr, observeCosts
-	defer func() { costStderr, observeCosts = saved, savedObserve }()
+	alone(t)
+	saved := costStderr
+	defer func() { costStderr = saved }()
 	kinds := map[string][len(questionNames)]int{}
-	observeCosts = func(pass *analysis.Pass, costs []*fnCost) {
-		for _, c := range costs {
-			kinds[c.fn.obj.FullName()] = c.kinds
-		}
-	}
 	for _, flag := range []bool{false, true} {
 		var out bytes.Buffer
 		costStderr = &out
 		analyzer := newAnalyzer()
+		defer observe(analyzer, &observer{costs: func(pass *analysis.Pass, costs []*fnCost) {
+			for _, c := range costs {
+				kinds[c.fn.obj.FullName()] = c.kinds
+			}
+		}})()
 		for name, value := range map[string]string{"rlimit": "600", "cost": map[bool]string{false: "false", true: "true"}[flag], "trusted": filepath.Join("testdata", "trusted.yaml")} {
 			if err := analyzer.Flags.Set(name, value); err != nil {
 				t.Fatal(err)
@@ -87,15 +88,14 @@ func TestCostFlag(t *testing.T) {
 // it succeeds is still marked so in the trust report when only a function
 // that returns no error calls it.
 func TestFailureTracking(t *testing.T) {
-	saved := observeCosts
-	defer func() { observeCosts = saved }()
+	parallel(t)
 	kinds := map[string][len(questionNames)]int{}
-	observeCosts = func(pass *analysis.Pass, costs []*fnCost) {
+	analyzer := newAnalyzer()
+	defer observe(analyzer, &observer{costs: func(pass *analysis.Pass, costs []*fnCost) {
 		for _, c := range costs {
 			kinds[c.fn.obj.FullName()] = c.kinds
 		}
-	}
-	analyzer := newAnalyzer()
+	}})()
 	if err := analyzer.Flags.Set("trusted", filepath.Join("testdata", "trusted.yaml")); err != nil {
 		t.Fatal(err)
 	}

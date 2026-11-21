@@ -18,6 +18,7 @@ import (
 // append are not copies of a value that go/ssa shows, and are left to the
 // walk.
 func TestCopiesConfirmed(t *testing.T) {
+	alone(t)
 	skipCopyWalk = true
 	defer func() { skipCopyWalk = false }()
 	testdata, err := filepath.Abs("testdata")

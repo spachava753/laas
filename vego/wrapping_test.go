@@ -19,6 +19,7 @@ import (
 // operands, missing and extra operands, and %w on nil and on things that
 // are not errors.
 func TestFormatWraps(t *testing.T) {
+	parallel(t)
 	rng := rand.New(rand.NewPCG(7, 8))
 	verbs := []string{"d", "v", "s", "w", "w", "w", "!", "é", "\xff", "x", "%", "["}
 	// Most numbers are short; some are long enough to overflow.
@@ -114,6 +115,7 @@ func TestFormatWraps(t *testing.T) {
 // pointer, so that == on it is equality and never panics; none of the
 // results has an Is method; and Unwrap returns what the trees say.
 func TestErrorsAsModelled(t *testing.T) {
+	parallel(t)
 	base := errors.New("base")
 	// A %w on something that is not an error is what go vet reports, so
 	// the format is not a constant here.
