@@ -1858,7 +1858,41 @@ The work each is allowed:
 | check whether a `Modifies` entry is needed | 200000 units |
 | quick check | 200000 units |
 
+With `-vego.cache`, a function whose answers came from the cache has a clause at the end of its first line, such as `, 13 answered from the answer cache on disk`. See [Keeping answers between runs](#keeping-answers-between-runs).
+
 A proof obligation that stops at a limit draws a message with the note. So does the always-fails check when it reports a contract and a question of its search stopped at a limit. Other questions draw no message of their own. When one of them stops at a limit, `vego` goes on as when a proof fails: a path counts as possible, a `Modifies` entry counts as needed, an outcome counts as one that may depend on a call, a contradiction counts as not found, and an input that the search did not find counts as not found, which can make `vego` report the contract.
+
+### Keeping answers between runs
+
+`-vego.cache` names a directory where `vego` keeps the answers of Z3 from one run to the next:
+
+```sh
+laas -vego -vego.cache="$HOME/.cache/vego" ./...
+```
+
+On the next run, a question that is the same as one asked before is answered from the directory, and Z3 is not asked again. After a small edit, most of the questions of a package are the same as before. In one package of 24 functions that took 90 s, changing one `Requires` clause left 502 of 597 questions the same.
+
+The answers are the same with the cache and without it. Each run that uses the cache solves again a random sample of the answers it reads, about one in 256, and stops if Z3 now answers otherwise.
+
+A package that used an answer from the directory says so on standard error, with a line such as:
+
+```text
+vego: 157 of the 157 answers of Z3 for example.com/ring came from the answer cache in /home/you/.cache/vego
+```
+
+The trust report names the directory too, because the proofs then rest on what it holds. See [The trust report](#the-trust-report) and [What a proof assumes](#what-a-proof-assumes).
+
+Give a directory that does not exist yet, or an empty one. `laas` marks it as an answer cache with a file `CACHEDIR.TAG`, and refuses a directory that holds anything else and has no such mark. The directory must also be outside every module and repository: `laas` refuses one inside a directory that holds `go.mod`, `.git`, or the files of another version control system. A cache committed to a repository would carry its answers into other people's runs. The flag works on Linux only, because `vego` reads `/proc` to identify the files that Z3 runs.
+
+The answers are kept for the Z3 binary that gave them, together with the libraries it loads and the processor. Another Z3, or the same one after a system update that changes its libraries, starts with an empty directory of its own. `-vego.z3` must name the Z3 binary itself, not a script that starts it.
+
+`vego` stops the run when it cannot trust what it finds. The package fails with a message such as:
+
+```text
+vego: the answer cache entry /home/you/.cache/vego/z3-0f5c.../c5/a4db... is damaged: it does not end in its hash; to empty the cache, remove /home/you/.cache/vego
+```
+
+To empty the cache, remove the directory. Answers not used for five days are removed, and the answers are kept under 1 GB. `vego` removes only files that it wrote there.
 
 ## Changing memory
 
@@ -5231,6 +5265,8 @@ An entry for a method of an interface or a function type shows the reach of its 
 
 Such an entry can be relied on where no call names it, for example where a value of the type is passed to a trusted function under `runs`. The report then lists, in a line `relied on in:`, the packages whose proofs rest on it.
 
+When answers came from the answer cache, the report starts with the line `Answers of Z3 read from the answer cache:` and the directory. See [Keeping answers between runs](#keeping-answers-between-runs).
+
 A contract marked `[may fail unpredictably]` does not say when its function succeeds. A verified function that calls it can be excused from saying when it succeeds, as described in [Functions that cannot promise success](#functions-that-cannot-promise-success).
 
 If a trusted contract is wrong, every proof that uses it is worthless. Keep trusted contracts few, and claim no more than the function's documentation promises.
@@ -5317,6 +5353,7 @@ laas -vego ./...
 - Build `laas` with the same Go that the job uses, as the commands above do. See the toolchain note in [Running it](#running-it).
 - Do not use `-vego.trust` as the check. It prints a report for reviewers. It also exits with status 3 if verification reported problems.
 - Install Z3 5.4.1 on the machine that runs the job, as in [Running it](#running-it).
+- Run without `-vego.cache`, or with a cache directory that the job makes itself. A cache that other runs wrote is part of what the proofs rest on.
 - Set a time limit on the job. Small functions take well under a second each. Long functions take longer: one of 120 statements that write and read a slice takes about 10 s. `-vego.rlimit` limits the work per proof obligation, not the total run time. `-vego.cost` shows which functions take the time; see [Finding out where the time goes](#finding-out-where-the-time-goes).
 
 ## When a proof fails
@@ -5456,6 +5493,11 @@ This table lists the most common messages.
 | `cannot verify F: recover is not supported` | `recover` returns an interface. | Call `recover` in a function that is not verified. |
 | `cannot verify F: a formula built to verify it has grown beyond 1048576 nodes, which is the limit` | An expression or a run of statements builds a formula that grows faster than the code, as `x = x + x` does when repeated. | Split the function, or the expressions in it, into smaller ones. |
 | `analysis skipped due to errors in package` | The package does not compile, or the toolchain does not match. | See [Running it](#running-it). |
+| `the answer cache entry ... is damaged: ...; to empty the cache, remove DIR` | An entry in the `-vego.cache` directory is not whole, or is for another question. The package fails. | Remove the directory. See [Keeping answers between runs](#keeping-answers-between-runs). |
+| `Z3 answers a problem otherwise than the answer cache entry ... says`, `Z3 answered one problem in two ways`, or `a Z3 process of this run runs other files than the first one did` | An answer kept in the `-vego.cache` directory is not the answer Z3 gives, or Z3 changed during the run. The package fails. | Remove the directory, and check that only one Z3 5.4.1 is installed. |
+| `the answer cache DIR is inside ..., which holds go.mod`, and similar | The `-vego.cache` directory is in a module or a repository. | Use a directory outside every module and repository, such as `$HOME/.cache/vego`. |
+| `DIR is not empty and is not an answer cache; give -vego.cache a new or empty directory` | The `-vego.cache` directory holds files and was not made by `-vego.cache`. | Give a new or empty directory, such as `$HOME/.cache/vego`. |
+| `the answer cache needs the Z3 binary itself, and P runs Q` | `-vego.z3` names a script or a link to another program, and `-vego.cache` is set. | Name the Z3 binary with `-vego.z3`, or run without `-vego.cache`. |
 
 ## What is not supported
 
@@ -5544,6 +5586,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 
   `vego` proves the rest of the bound at each call of a function that formats and of `fmt.Errorf`, as described in [How long a formatted string can be](#how-long-a-formatted-string-can-be). On a 64-bit target, these parts would have to be terabytes long. On a 32-bit target, where one allocation can be at most about 4 GB, this can be reached.
 - Z3 is correct. Every proof rests on Z3 5.4.1 answering correctly that a problem has no solution.
+- With `-vego.cache`, nothing but `vego` writes the cache directory. An answer read from the directory is used as Z3's answer. `vego` checks that each entry is whole and is for the question asked, and solves a sample again on each run. An entry changed by someone who also fixes its hash cannot be told from an answer, in the same way that an edited Z3 binary cannot. Whoever can write the directory can make any proof that uses it succeed. See [Keeping answers between runs](#keeping-answers-between-runs).
 - Your formulas say what you intend. `vego` does not check a formula for out-of-range indexes or division by zero, so a formula that contains one may mean something other than you expect. See [Formulas](#formulas).
 
 ## Summary
@@ -5653,6 +5696,7 @@ Results are referred to by the names in the function's signature.
 | `-vego.rlimit=n` | Z3's resource limit for one proof obligation, 4000000 by default |
 | `-vego.cost` | print what verifying each function asked of Z3, on standard error |
 | `-vego.z3=path` | the Z3 5.4.1 binary to use, instead of the `z3` on `PATH` |
+| `-vego.cache=dir` | keep the answers of Z3 in this directory between runs |
 | `-vego.trusted=path` | use this trust file instead of the one next to `go.mod` |
 | `-vego.other-tags=A,B` | words that another tool reads after `// @`; any other unknown word there is an error |
 | `-vego.trust` | print the trust report |
