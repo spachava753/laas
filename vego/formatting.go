@@ -12,7 +12,6 @@ import (
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
-	"golang.org/x/tools/go/types/typeutil"
 )
 
 // Formatting runs code. Package fmt calls the Format, GoString, Error, and
@@ -624,7 +623,7 @@ func returnsFormatted(callee *types.Func) bool {
 // function whose entry lists formats. Such a call is a call of each of them,
 // for recursion and for what may call through a value.
 func (pv *pkgVerifier) formattedMethods(call *ast.CallExpr) []*types.Func {
-	callee := typeutil.StaticCallee(pv.info, call)
+	callee := pv.staticCalleeAt(call)
 	if callee == nil {
 		return nil
 	}
@@ -634,7 +633,7 @@ func (pv *pkgVerifier) formattedMethods(call *ast.CallExpr) []*types.Func {
 	var operands []ast.Expr
 	if errorConstructor(callee) && callee.Name() == "Errorf" {
 		operands = call.Args
-	} else if entry := pv.entryFor(callee.Origin().FullName()); entry != nil && len(entry.formats) > 0 {
+	} else if entry := pv.entryFor(pv.originOf(callee).FullName()); entry != nil && len(entry.formats) > 0 {
 		sig := callee.Type().(*types.Signature)
 		bound, _ := bindArgs(pv.info, call, paramsOf(sig), sig.Variadic())
 		for _, b := range bound {

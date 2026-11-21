@@ -76,8 +76,22 @@ func (pv *pkgVerifier) assertsClaim(entry *trustEntry, sig *types.Signature, fro
 		params[param.Name()] = param
 	}
 	claim := map[*types.Var][]types.Type{}
+	typeParams := map[string]bool{}
+	if generic := genericOfEntry(entry, from); generic != nil {
+		for param := range generic.Type().(*types.Signature).TypeParams().TypeParams() {
+			typeParams[param.Obj().Name()] = true
+		}
+	}
 	for _, item := range entry.asserts {
 		param, ok := params[item.name]
+		switch {
+		case typeParams[item.name] && len(item.dests) > 0:
+			return nil, "its asserts lists types for " + item.name + ", a type parameter; for a type parameter only [] can be claimed yet, " +
+				"that the function runs no method of a value of its type"
+		case typeParams[item.name]:
+			// What this claims is read by typeParamClaims.
+			continue
+		}
 		switch {
 		case !ok:
 			return nil, "its asserts " + quote(item.name) + ": " + item.name + " is not a parameter"
@@ -258,4 +272,21 @@ func (pv *pkgVerifier) staticTargets(t types.Type, seen map[types.Type]bool) []*
 		return found
 	}
 	return nil
+}
+
+// genericOfEntry returns the generic function an entry is for, from the
+// package of the function, or nil when it is for no generic function.
+func genericOfEntry(entry *trustEntry, from *types.Package) *types.Func {
+	if from == nil {
+		return nil
+	}
+	_, name, ok := splitFuncName(entry.key)
+	if !ok {
+		return nil
+	}
+	f, ok := from.Scope().Lookup(name).(*types.Func)
+	if !ok || f.Type().(*types.Signature).TypeParams() == nil {
+		return nil
+	}
+	return f
 }

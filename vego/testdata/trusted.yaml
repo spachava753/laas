@@ -1723,6 +1723,147 @@ trusted:
     reason: Test helper that takes an error and does nothing with it.
     modifies: []
 
+  # Generic functions of another package, for the corpus generics.
+  genericslib.Find:
+    reason: Test entry for a generic function that compares elements.
+    asserts: {S: [], E: []}
+    modifies: []
+    ensures:
+      - "-1 <= result And result < |s|"
+      - "result >= 0 -> s[result] = v"
+
+  genericslib.FindFunc:
+    reason: Test entry for a generic function handed a function of the element type.
+    runs: [f]
+    calls:
+      f(e): {}
+    asserts: {S: [], E: []}
+    modifies: []
+    ensures:
+      - "-1 <= result And result < |s|"
+
+  genericslib.FindWhere:
+    reason: Test entry whose calls requires names a field of a value of a type parameter.
+    runs: [f]
+    calls:
+      f(e):
+        requires: ["e.X > 0"]
+    asserts: {S: [], E: []}
+    modifies: []
+
+  genericslib.Top:
+    reason: Test entry for a generic function that orders elements.
+    asserts: {S: [], E: []}
+    requires: ["|s| > 0"]
+    modifies: []
+    ensures:
+      - "Forall i in [0, |s|) : s[i] <= result"
+
+  genericslib.Filter:
+    reason: Test entry for a generic function that writes its slice while it runs what it is handed.
+    runs: [f]
+    calls:
+      f(e): {}
+    asserts: {S: [], E: []}
+    modifies: [s]
+    ensures:
+      - "|result| <= |s|"
+
+  genericslib.Reset:
+    reason: Test entry for a generic function that writes its slice.
+    asserts: {S: [], E: []}
+    modifies: [s]
+
+  genericslib.GrowBy:
+    reason: Test entry whose requires bounds an allocation by the size of an element.
+    asserts: {S: [], E: []}
+    requires:
+      - "n >= 0"
+      - "|s| + n <= MaxInt"
+      - "2 * (|s| + n) * elemsize(s) + 65536 <= MaxAlloc"
+    modifies: []
+    ensures:
+      - "|result| = |s|"
+      - "cap(result) - |result| >= n"
+
+  genericslib.Same:
+    reason: Test entry for a generic function of one value.
+    asserts: {E: []}
+    modifies: []
+    ensures: ["result = x"]
+
+  genericslib.Big:
+    reason: Test entry that contradicts itself where E is uint8 only.
+    asserts: {E: []}
+    modifies: []
+    ensures: ["result > 300"]
+
+  genericslib.Name:
+    reason: Test entry that names a field of a value of a type parameter.
+    asserts: {E: []}
+    modifies: []
+    ensures: ["result = x.N"]
+
+  genericslib.Locked:
+    reason: Test entry that names a state of a value of a type parameter.
+    asserts: {T: []}
+    requires: ["~held(x)"]
+    modifies: []
+
+  genericslib.Address:
+    reason: Test entry that takes the address of a value of a type parameter.
+    asserts: {E: []}
+    requires: ["|s| > 0 -> &s[0] != nil"]
+    modifies: []
+
+  genericslib.Sized:
+    reason: Test entry that asks the element size of an integer.
+    asserts: {E: []}
+    requires: ["elemsize(n) > 0"]
+    modifies: []
+
+  genericslib.Show:
+    reason: Test entry for a generic function that calls a method of what it is given, without a claim for its type parameter.
+    modifies: []
+
+  genericslib.Bump:
+    reason: Test entry for a generic function that calls the method of its constraint.
+    modifies: []
+
+  genericslib.Order:
+    reason: Test entry for a generic function that calls no method of its type arguments.
+    asserts: {S: [], E: []}
+    modifies: [s]
+
+  genericslib.Keep:
+    reason: Test entry for a generic function of one value.
+    asserts: {T: []}
+    modifies: []
+    ensures: ["fresh(result)"]
+
+  genericslib.Count:
+    reason: Test entry that lists types for a type parameter under asserts.
+    asserts: {E: [io.Reader]}
+    modifies: []
+    ensures: ["result = |s|"]
+
+  genericslib.Equal:
+    reason: Test entry for a generic function that compares two values.
+    asserts: {E: []}
+    modifies: []
+    ensures: ["result <-> a = b"]
+
+  generics.Back:
+    reason: Test entry for a generic function of the package that calls back into its caller.
+    asserts: {E: []}
+    modifies: []
+
+  generics.Local:
+    reason: Test entry for a generic function of the package that calls it.
+    asserts: {E: []}
+    modifies: []
+    ensures: ["result = x"]
+
 # States of interfaces of another module, and contracts that speak of them.
 state:
   ifacestatelib.Conn:

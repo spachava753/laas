@@ -612,12 +612,13 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 			if tv.IsType() || tv.IsBuiltin() {
 				break
 			}
-			if callee := typeutil.StaticCallee(pv.info, n); callee != nil {
+			if callee := pv.staticCalleeAt(n); callee != nil {
 				if callee.Pkg() != pv.pass.Pkg {
 					// What a call of a function of another package may run of
 					// the code its arguments and receiver hold.
-					pv.handedCode(n, callee.Type().(*types.Signature), pv.entryFor(callee.Origin().FullName()), callee.Origin().Pkg(),
-						errorConstructor(callee) && callee.Name() == "Errorf", true, callee.Origin().FullName(), false, text, unresolved)
+					origin := pv.originOf(callee)
+					pv.handedCode(n, callee.Type().(*types.Signature), pv.entryFor(origin.FullName()), origin.Pkg(),
+						errorConstructor(callee) && callee.Name() == "Errorf", true, origin.FullName(), false, text, unresolved)
 				}
 				break
 			}
@@ -685,6 +686,24 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 	handed := map[ast.Expr]bool{}
 	for _, arg := range pv.handedAsWritten(call) {
 		handed[ast.Unparen(arg)] = true
+	}
+	// A type argument is code handed to the call: generic code may run
+	// the methods of a value of its type, and of what such a value holds,
+	// through its constraint, through an interface, or by reflection,
+	// unless the entry claims under asserts that it runs none.
+	if made := pv.instanceOf[pv.staticCalleeAt(call)]; made != nil {
+		params := made.origin.Type().(*types.Signature).TypeParams()
+		claimed := typeParamClaims(entry, made.origin)
+		for i, t := range made.targs {
+			if claimed[params.At(i)] {
+				continue
+			}
+			if targets := pv.concreteMethods(t, map[types.Type]bool{}); len(targets) > 0 {
+				unresolved(call, fmt.Sprintf("%s with %s = %s", text, params.At(i).Obj().Name(), types.TypeString(t, types.RelativeTo(pv.pass.Pkg))),
+					fmt.Sprintf("a generic function may run the methods of a value of its type argument %s, and of what such a value holds, "+
+						"through its constraint, through an interface, or by reflection", params.At(i).Obj().Name()), targets)
+			}
+		}
 	}
 	formatted := map[*types.Var]bool{}
 	if errorf {
@@ -820,11 +839,11 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 // handedAsWritten returns the arguments of a call that the entry of its
 // callee, as written and unchecked, gives a contract under calls.
 func (pv *pkgVerifier) handedAsWritten(call *ast.CallExpr) []ast.Expr {
-	callee := typeutil.StaticCallee(pv.info, call)
+	callee := pv.staticCalleeAt(call)
 	if callee == nil {
 		return nil
 	}
-	entry := pv.entryFor(callee.Origin().FullName())
+	entry := pv.entryFor(pv.originOf(callee).FullName())
 	if entry == nil || len(entry.calls) == 0 {
 		return nil
 	}
@@ -1029,7 +1048,7 @@ func (pv *pkgVerifier) callEdges(call *ast.CallExpr, fn *funcInfo) []callEdge {
 		}
 		return edges
 	}
-	if to := g.byObj[fn.obj.Origin()]; to != nil {
+	if to := byFunc(g.byObj, pv.originOf(fn.obj)); to != nil {
 		edges = append(edges, callEdge{to: to, at: call.Pos(), text: fn.obj.Name(), resolved: true})
 	}
 	return append(edges, g.sites[call]...)

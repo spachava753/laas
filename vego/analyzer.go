@@ -134,6 +134,10 @@ func RefuseCachedRuns() { refuseCache = true }
 // package once it is verified; the tests of the corpus set it.
 var observeCosts func(pass *analysis.Pass, costs []*fnCost)
 
+// observeVerifier, when set, is given the verifier of each package after it
+// has verified the package; tests read the instantiations it made.
+var observeVerifier func(pv *pkgVerifier)
+
 // newAnalyzer builds the analyzer with its flags. A run loads the trusted
 // contracts, collects the annotations of the package, verifies every
 // annotated function, applies the always-fails rule, and publishes the
@@ -282,6 +286,9 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		if observeCosts != nil {
 			observeCosts(pass, pv.costOrder)
 		}
+		if observeVerifier != nil {
+			observeVerifier(pv)
+		}
 		// The proofs of this package also rest on whatever the packages it
 		// depends on took on trust.
 		pass.ExportPackageFact(&usageFact{Usage: *pv.usage})
@@ -352,6 +359,11 @@ type funcInfo struct {
 	// parameters; see callbacks.go.
 	calls  map[*types.Var]*callback
 	broken bool // an annotation failed to parse; verification is skipped
+	// genericTypes is set for the contract of an instantiation of a
+	// generic function: the type of each of its parameters and results,
+	// and of the parameters its calls names, in the generic signature;
+	// see throughTypeParam.
+	genericTypes map[*types.Var]types.Type
 	// faulted is set for the contract of a type or of a method of an
 	// interface that was refused for something other than a clause that
 	// cannot be read, as a contradiction; see viewOf.
@@ -437,6 +449,11 @@ type pkgVerifier struct {
 	funcs    map[*types.Func]*funcInfo
 	order    []*funcInfo
 	reported map[string]bool
+	// instances holds the instantiations of each generic function that
+	// calls in the package make, and instanceOf what is known of each by
+	// its function object; see generics.go.
+	instances  map[*types.Func][]*instance
+	instanceOf map[*types.Func]*instance
 	// z3Path names the Z3 binary, z3 the solver once started, and effort
 	// the resource limit of a proof.
 	z3Path string
@@ -1205,7 +1222,7 @@ func (pv *pkgVerifier) collect() {
 		}
 	}
 	for _, fn := range pv.order {
-		if fn.annotated() && pv.trustedContract(fn.obj) != nil {
+		if fn.annotated() && pv.entryFor(fn.obj.FullName()) != nil && !isIfaceMethod(fn.obj) {
 			pv.report(fn.decl.Name.Pos(), "%s has annotations and a trusted contract; "+
 				"a function is either verified or trusted, not both", fn.obj.Name())
 		}
@@ -1456,8 +1473,18 @@ func (fn *funcInfo) ambiguous(name string, local bool) bool {
 // against: its annotations when it is verified, otherwise its trusted
 // contract. It returns nil for a function that has neither.
 func (pv *pkgVerifier) contractOf(callee *types.Func) *funcInfo {
+	if pv.instanceOf[callee] != nil {
+		// A generic function is never verified, so an instantiation has
+		// only the contract of its entry.
+		return pv.trustedContract(callee)
+	}
 	if own := pv.funcs[callee]; own != nil && own.annotated() {
 		return own
+	}
+	// A generic function has no contract of its own: only an instantiation
+	// that calleeAt made has one.
+	if isGeneric(callee) {
+		return nil
 	}
 	if imported := pv.importedContract(callee); imported != nil {
 		if pv.trustedContract(callee) != nil {

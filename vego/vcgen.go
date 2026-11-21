@@ -11,7 +11,6 @@ import (
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
-	"golang.org/x/tools/go/types/typeutil"
 )
 
 // maxBranches bounds the number of conditional branches explored in one
@@ -811,7 +810,7 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 // deferred, and not inside a loop, where the number of calls put off would
 // not be known.
 func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
-	callee, _ := typeutil.Callee(v.info, s.Call).(*types.Func)
+	callee := v.pkgVerifier.calleeAt(s.Call)
 	lit := v.literalOf(s.Call)
 	method, viaValue := throughValue(v.info, s.Call)
 	switch {

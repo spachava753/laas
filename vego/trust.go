@@ -719,6 +719,11 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 	if fn, done := pv.trusted[callee]; done {
 		return fn
 	}
+	// A generic function has a contract only at each instantiation, which
+	// calleeAt makes; one built over type parameters would mean nothing.
+	if isGeneric(callee) {
+		panic(fmt.Sprintf("vego: internal error: a contract is asked of the generic function %s; ask it of an instantiation, by calleeAt", callee.FullName()))
+	}
 	// The method of an interface has no code of its own to trust: an
 	// entry for one is a contract of the interface, read by
 	// methodContract.
@@ -730,6 +735,7 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 	}
 	fn := newFuncInfo(callee)
 	fn.trust = entry
+	fn.genericTypes = pv.genericTypes(callee)
 	pv.trusted[callee] = fn
 	pv.readEntry(fn, entry)
 	if entry.receiver.text != "" {

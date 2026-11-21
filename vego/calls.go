@@ -105,7 +105,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	case method != nil:
 		return v.callMethod(call, method, st, guard)
 	}
-	callee, _ := typeutil.Callee(v.info, call).(*types.Func)
+	callee := v.pkgVerifier.calleeAt(call)
 	if builtin, ok := typeutil.Callee(v.info, call).(*types.Builtin); ok && callee == nil {
 		advice := ""
 		if builtin.Name() == "copy" {
@@ -192,6 +192,9 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func, st *sta
 		v.unsupported(call.Pos(), "calls to generic functions are not supported yet")
 	case sig.Recv() != nil && types.IsInterface(sig.Recv().Type()):
 		v.unsupported(call.Pos(), "calls through an interface are not supported yet")
+	}
+	if made := v.pkgVerifier.instanceOf[callee]; made != nil {
+		v.checkGenericCallee(call, callee, made)
 	}
 	// Nothing may be called on trust that is not written down: the callee
 	// is either verified against its annotations or has a trusted contract.
@@ -1171,7 +1174,7 @@ func (v *fnVerifier) checkRecursion(callee *funcInfo, pre *specEnv, st *state, g
 	first := v.callEdges(call, callee)
 	through, direct := v.cycleThrough(self, first, false), v.cycleThrough(self, first, true)
 	// A trusted function of this package has a body to verify instead.
-	if callee.trust != nil && v.callGraph().byObj[callee.obj.Origin()] != nil && (through != nil || direct != nil) {
+	if callee.trust != nil && byFunc(v.callGraph().byObj, v.pkgVerifier.originOf(callee.obj)) != nil && (through != nil || direct != nil) {
 		shown := direct
 		if shown == nil {
 			shown = through

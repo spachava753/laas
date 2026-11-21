@@ -10,7 +10,6 @@ import (
 	"slices"
 
 	"github.com/spachava753/laas/vego/internal/logic"
-	"golang.org/x/tools/go/types/typeutil"
 )
 
 // site is a place in a loop that may write memory: positions of an
@@ -226,7 +225,7 @@ func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
 // callSites adds what a call inside a loop may write, according to the
 // Modifies clauses of the function called.
 func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
-	callee, _ := typeutil.Callee(v.info, call).(*types.Func)
+	callee := v.pkgVerifier.calleeAt(call)
 	method, value := throughValue(v.info, call)
 	var fn *funcInfo
 	switch {

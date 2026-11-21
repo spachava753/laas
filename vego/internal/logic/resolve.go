@@ -20,8 +20,10 @@ const (
 // Step is one step of a path: the selection of a field, of the element at
 // Index, or, as the last step, of the length, with Has of whether a map has
 // the key Index, with State of a state of the value, as in held(m), with
-// Cap of the capacity of a slice, with Nil of whether a slice is nil, or
-// with Addr of the address of what the path leads to, as in &e.list.root.
+// Cap of the capacity of a slice, with Nil of whether a slice is nil, with
+// Addr of the address of what the path leads to, as in &e.list.root, or
+// with ElemSize of the size in bytes of an element of a slice, as in
+// elemsize(s).
 type Step struct {
 	Field string
 	Index *Term
@@ -31,6 +33,9 @@ type Step struct {
 	Cap   bool
 	Nil   bool
 	Addr  bool
+	// ElemSize depends only on the type the path leads to, so it reads
+	// nothing.
+	ElemSize bool
 }
 
 // NotSlice is what an Env returns for a path with a last step Nil that does
@@ -85,7 +90,7 @@ type PredDef struct {
 
 // Reserved lists the names of the forms of the language that look like
 // applications, which no predicate, state, or other name may take.
-var Reserved = []string{"len", "cap", "old", "fresh", "within", "apart", "has", "is"}
+var Reserved = []string{"len", "cap", "elemsize", "old", "fresh", "within", "apart", "has", "is"}
 
 // Resolver type-checks parsed annotations and turns them into terms.
 type Resolver struct {
@@ -427,6 +432,24 @@ func (s *scope) call(n *Node) *Term {
 			panic(resolveError{err})
 		}
 		return t
+	case "elemsize":
+		// elemsize(A): the number of bytes an element of the slice A takes
+		// on the target, a constant of its type.
+		if s.env == nil {
+			fail("elemsize cannot be used in a predicate definition")
+		}
+		if len(n.Kids) != 1 {
+			fail("elemsize takes one slice, as in elemsize(A)")
+		}
+		root, steps, when, ok := s.pathOf(n.Kids[0])
+		if !ok {
+			fail("elemsize takes a slice reached from a variable, as in elemsize(A) or elemsize(s.items)")
+		}
+		t, err := s.env.Path(root, append(steps, Step{ElemSize: true}), when)
+		if err != nil {
+			panic(resolveError{err})
+		}
+		return t
 	case "old", "fresh", "within", "apart":
 		if s.env == nil {
 			fail("%s cannot be used in a predicate definition", n.Name)
@@ -681,6 +704,10 @@ func (s *scope) relation(op string, a, b *Term) *Term {
 			article = "an"
 		}
 		fail("operator %s cannot be applied to %s %s", op, article, kind)
+	case a.Sort == Float:
+		fail("operator %s cannot be applied to float values; a formula can say nothing of a float", op)
+	case a.Sort.IsSeq():
+		fail("operator %s cannot be applied to string or slice values; a formula has no order of them", op)
 	case a.Sort != Int:
 		fail("operator %s cannot be applied to %s values", op, a.Sort)
 	case equality:

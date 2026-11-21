@@ -10,7 +10,6 @@ import (
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
-	"golang.org/x/tools/go/types/typeutil"
 )
 
 // A trusted function may take a function and call it while it runs, as
@@ -96,6 +95,7 @@ func (pv *pkgVerifier) trustedCall(fn *funcInfo, item trustCall) {
 	cb.fn = &funcInfo{
 		obj: fn.obj, trust: fn.trust, paramNames: map[string]*types.Var{}, resultNames: map[string]int{},
 		runs: map[*types.Var]bool{}, vouches: map[int]bool{}, calls: map[*types.Var]*callback{},
+		genericTypes: fn.genericTypes,
 	}
 	for name, p := range fn.paramNames {
 		cb.fn.paramNames[name] = p
@@ -123,6 +123,13 @@ func (pv *pkgVerifier) trustedCall(fn *funcInfo, item trustCall) {
 			return
 		}
 		named := types.NewVar(pos, fn.obj.Pkg(), name, sig.Params().At(i).Type())
+		// What the parameter is in the generic signature, for a contract
+		// of an instantiation.
+		if t := fn.genericTypes[param]; t != nil {
+			if generic, ok := t.Underlying().(*types.Signature); ok {
+				fn.genericTypes[named] = generic.Params().At(i).Type()
+			}
+		}
 		cb.params = append(cb.params, named)
 		cb.fn.params = append(cb.fn.params, named)
 		cb.fn.paramNames[name] = named
@@ -648,8 +655,8 @@ func outside(w written, t target) *logic.Term {
 // function, is handed to call while it runs: those for its parameters with
 // a contract under calls.
 func (pv *pkgVerifier) handedArgs(call *ast.CallExpr) []ast.Expr {
-	callee := typeutil.StaticCallee(pv.info, call)
-	if callee == nil {
+	callee := pv.staticCalleeAt(call)
+	if callee == nil || isGeneric(callee) || isGeneric(callee.Origin()) {
 		return nil
 	}
 	fn := pv.trustedContract(callee.Origin())

@@ -1054,18 +1054,25 @@ func (pv *pkgVerifier) mayCallValues(obj *types.Func) bool {
 		pv.valueReasons = map[*types.Func]valueReason{}
 		pv.findValueCallers()
 	}
-	if may, known := pv.mayCall[obj.Origin()]; known {
+	origin := pv.originOf(obj)
+	if may, known := byFuncOK(pv.mayCall, origin); known {
 		return may
 	}
 	may := true
-	switch fn := pv.contractOf(obj.Origin()); {
+	switch fn := pv.contractOf(origin); {
+	case isGeneric(origin):
+		// Of a generic function only the entry can be read; its
+		// parameters of a type parameter's type hold no code.
+		if entry := pv.entryFor(origin.FullName()); entry != nil {
+			may = genericRunsValues(entry)
+		}
 	case fn == nil:
 	case fn.imported != nil:
 		may = fn.imported.CallsValues
 	case fn.trust != nil:
 		may = pv.runsValues(fn)
 	}
-	pv.mayCall[obj.Origin()] = may
+	pv.mayCall[origin] = may
 	return may
 }
 
@@ -1074,8 +1081,11 @@ func (pv *pkgVerifier) mayCallValues(obj *types.Func) bool {
 // what a call gives it is judged at the call, by heldCallWhy, and not by
 // what its entry lists under runs.
 func (pv *pkgVerifier) mayCallValuesAtCall(callee *types.Func) bool {
-	if callee.Pkg() != pv.pass.Pkg {
-		if fn := pv.contractOf(callee.Origin()); fn != nil && fn.trust != nil {
+	if origin := pv.originOf(callee); callee.Pkg() != pv.pass.Pkg {
+		if fn := pv.contractOf(origin); fn != nil && fn.trust != nil {
+			return false
+		}
+		if isGeneric(origin) && pv.entryFor(origin.FullName()) != nil {
 			return false
 		}
 	}
@@ -1138,9 +1148,18 @@ func (pv *pkgVerifier) findValueCallers() {
 			}
 			direct = true
 		}
-		trusted := pv.trustedContract(fn.obj)
-		if trusted != nil && pv.runsValues(trusted) {
-			because(pv.runsReason(trusted))
+		var trusted *funcInfo
+		switch entry := pv.entryFor(fn.obj.FullName()); {
+		case isGeneric(fn.obj):
+			// Of a generic function only the entry can be read.
+			if entry != nil && genericRunsValues(entry) {
+				because("is trusted and runs what a parameter its runs lists without a contract under calls holds")
+			}
+		default:
+			trusted = pv.trustedContract(fn.obj)
+			if trusted != nil && pv.runsValues(trusted) {
+				because(pv.runsReason(trusted))
+			}
 		}
 		bound, _ := literalUses(pv.info, fn.decl.Body)
 		ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
@@ -1251,11 +1270,12 @@ func (pv *pkgVerifier) whyValues(obj *types.Func) string {
 	hops := []string{}
 	seen := map[*types.Func]bool{}
 	for {
-		reason, local := pv.valueReasons[obj.Origin()]
+		origin := pv.originOf(obj)
+		reason, local := byFuncOK(pv.valueReasons, origin)
 		switch {
-		case seen[obj.Origin()]:
+		case seen[origin]:
 		case local && reason.via != nil:
-			seen[obj.Origin()] = true
+			seen[origin] = true
 			hops = append(hops, "calls "+reason.via.Name())
 			obj = reason.via
 			continue
@@ -1264,7 +1284,9 @@ func (pv *pkgVerifier) whyValues(obj *types.Func) string {
 		case isIfaceMethod(obj):
 			hops = append(hops, "is a method of an interface, which runs whatever the value holds")
 		default:
-			switch fn := pv.contractOf(obj.Origin()); {
+			switch fn := pv.contractOf(origin); {
+			case isGeneric(origin) && pv.entryFor(origin.FullName()) != nil:
+				hops = append(hops, "is trusted and runs what a parameter its runs lists without a contract under calls holds")
 			case fn == nil:
 				hops = append(hops, "has no contract")
 			case fn.imported != nil:

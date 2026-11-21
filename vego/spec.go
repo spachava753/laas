@@ -519,6 +519,12 @@ func (e *specEnv) locateField(name string, steps []logic.Step, when logic.When) 
 // a slice of single values yields the sequence of its elements; one that
 // ends in a struct, or in a slice of structs, has no value of its own.
 func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic.Term, error) {
+	if err := e.genericPath(name, steps); err != nil {
+		return nil, err
+	}
+	if last := len(steps) - 1; last >= 0 && steps[last].ElemSize {
+		return e.elemSize(name, steps[:last], when)
+	}
 	if last := len(steps) - 1; last >= 0 && steps[last].State != "" {
 		return e.state(name, steps[:last], steps[last].State, when)
 	}
@@ -610,7 +616,89 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 		}
 		return nil, fmt.Errorf("%s is a slice of %s; index it and name a field", spell(name, steps), elemType(found.typ))
 	}
+	if generic := e.genericAt(name, steps); generic != nil {
+		return nil, fmt.Errorf("a value of type %s, which is %s here, is a struct, and a formula cannot compare a struct or use it as a whole",
+			generic.Obj().Name(), types.TypeString(found.typ, types.RelativeTo(e.v.pass.Pkg)))
+	}
 	return nil, fmt.Errorf("%s is a %s; name one of its fields", spell(name, steps), found.typ)
+}
+
+// genericAt returns, in the contract of an instantiation of a generic
+// function, the type parameter that a path leads to in the generic
+// signature, or nil.
+func (e *specEnv) genericAt(name string, steps []logic.Step) *types.TypeParam {
+	if e.fn == nil || e.fn.genericTypes == nil {
+		return nil
+	}
+	root, isParam := e.fn.paramNames[name]
+	if index, isResult := e.fn.resultNames[name]; isResult && !isParam {
+		root = e.fn.results[index]
+	}
+	t := e.fn.genericTypes[root]
+	for _, step := range steps {
+		switch u := coreType(t).(type) {
+		case *types.Slice:
+			t = u.Elem()
+		case *types.Map:
+			t = u.Elem()
+		default:
+			return nil
+		}
+		if step.Field != "" {
+			return nil
+		}
+	}
+	param, _ := types.Unalias(t).(*types.TypeParam)
+	return param
+}
+
+// genericPath refuses, in the contract of an instantiation of a generic
+// function, a path that names a field, a state, or the address of a value
+// whose type in the generic signature is a type parameter; see
+// throughTypeParam.
+func (e *specEnv) genericPath(name string, steps []logic.Step) error {
+	if e.fn == nil || e.fn.genericTypes == nil {
+		return nil
+	}
+	root, isParam := e.fn.paramNames[name]
+	if index, isResult := e.fn.resultNames[name]; isResult && !isParam {
+		root = e.fn.results[index]
+	}
+	if root == nil || e.fn.genericTypes[root] == nil {
+		return nil
+	}
+	return throughTypeParam(name, e.fn.genericTypes[root], steps)
+}
+
+// elemSize resolves elemsize(A): the size in bytes of an element of the
+// slice A on the target, which depends only on its type and reads nothing.
+// For a slice of values of size zero it is 0.
+func (e *specEnv) elemSize(name string, steps []logic.Step, when logic.When) (*logic.Term, error) {
+	what := spell(name, steps)
+	var t types.Type
+	if _, ok := e.readyMade(name, when); ok {
+		root, isParam := e.fn.paramNames[name]
+		if index, isResult := e.fn.resultNames[name]; isResult && !isParam {
+			root = e.fn.results[index]
+		}
+		_, final, err := plan(root.Type(), steps, e.writtenIn())
+		if err != nil {
+			return nil, fmt.Errorf("%s%v", name, err)
+		}
+		t = final
+	} else {
+		found, err := e.locate(name, steps, when)
+		if err != nil {
+			return nil, err
+		}
+		if found.constant == nil {
+			t = found.typ
+		}
+	}
+	if t == nil || !isSlice(t) {
+		return nil, fmt.Errorf("elemsize(%s): %s is not a slice; elemsize is the size of an element of a slice", what, what)
+	}
+	return logic.IntLit(e.v.pass.TypesSizes.Sizeof(elemType(t))), nil
 }
 
 // sliceOrAddress resolves cap(A), A = nil for a slice A, and &x.f: the
@@ -869,6 +957,9 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 	found := make([]reached, len(paths))
 	for i, path := range paths {
 		var err error
+		if err := e.genericPath(path.Root, path.Steps); err != nil {
+			return nil, err
+		}
 		if found[i], err = e.locate(path.Root, path.Steps, path.When); err != nil {
 			return nil, err
 		}
@@ -1205,6 +1296,18 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 			return shape{}, target{}, fmt.Errorf("%s is a package-level variable, which a Modifies clause cannot name yet", v.spelling(variable))
 		}
 		return shape{}, target{}, fmt.Errorf("%s is not a parameter", m.name)
+	}
+	if generic := fn.genericTypes[param]; generic != nil {
+		steps := make([]logic.Step, len(m.steps))
+		for i, step := range m.steps {
+			steps[i] = logic.Step{Field: step.field}
+			if step.index != nil {
+				steps[i].Index = logic.IntLit(0)
+			}
+		}
+		if err := throughTypeParam(m.name, generic, steps); err != nil {
+			return shape{}, target{}, err
+		}
 	}
 	symbolic := mem == nil
 	if !symbolic && args[param] == nil {

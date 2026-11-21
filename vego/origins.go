@@ -8,7 +8,6 @@ import (
 	"slices"
 
 	"golang.org/x/tools/go/cfg"
-	"golang.org/x/tools/go/types/typeutil"
 )
 
 // An error may be formatted only when it is known where it comes from.
@@ -663,7 +662,7 @@ func (pv *pkgVerifier) knownErrorIn(o *origins, e ast.Expr, index int, s *search
 	}
 	switch e := e.(type) {
 	case *ast.CallExpr:
-		callee := typeutil.StaticCallee(pv.info, e)
+		callee := pv.staticCalleeAt(e)
 		if errorConstructor(callee) {
 			return true
 		}
@@ -807,6 +806,9 @@ func (pv *pkgVerifier) returnsKnownErrors(callee *types.Func) bool {
 // cannot be used makes the call itself an error, so its claim is read here
 // as written.
 func (pv *pkgVerifier) vouchedResult(callee *types.Func, index int) bool {
+	if isGeneric(callee) {
+		return false
+	}
 	if own := pv.funcs[callee]; (own != nil && own.annotated()) || pv.importedContract(callee) != nil {
 		return false
 	}
