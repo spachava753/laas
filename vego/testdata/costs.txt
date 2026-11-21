@@ -2200,6 +2200,9 @@ lockspred	lockspred.Ambiguous	0	0	0
 lockspred	lockspred.Number	1	163	0
 manywrites	manywrites.Set	1022	68887005	23
 mapping	(*mapping.Registry).Register	18	26618	0
+mapping	(mapping.edgeGraph).addNode	13	21609	0
+mapping	(mapping.edgeGraph).addNodeKeepsAll	7	11050	0
+mapping	(mapping.edgeGraph).addNodeKeepsNode	7	18839	0
 mapping	mapping.AbsentKeysHoldZero	2	4444	0
 mapping	mapping.AfterMethod	5	1700	0
 mapping	mapping.AfterTrusted	5	11119	0
@@ -2217,6 +2220,9 @@ mapping	mapping.ClearsSlices	17	40334	0
 mapping	mapping.ClearsSlicesWrong	14	42285	0
 mapping	mapping.CopyKeys	10	33578	0
 mapping	mapping.CopyKeysCountedTwice	9	30325	0
+mapping	mapping.DeleteOne	5	6254	0
+mapping	mapping.DeleteOthersKept	5	6224	0
+mapping	mapping.DeleteOthersKeptWrong	5	7057	0
 mapping	mapping.DeleteUnlisted	2	340	0
 mapping	mapping.Depth	5	3316	0
 mapping	mapping.Floats	0	0	0
@@ -2262,6 +2268,7 @@ mapping	mapping.SameFirst	14	450985	4
 mapping	mapping.SameKey	8	7963	0
 mapping	mapping.Set	9	9347	0
 mapping	mapping.SetNil	5	2334	0
+mapping	mapping.SetOne	6	8122	0
 mapping	mapping.SetUndeclared	3	640	0
 mapping	mapping.ShortKeys	2	2791	0
 mapping	mapping.ShorterKeys	2	64737	1
@@ -2771,6 +2778,7 @@ rejected	rejected.VisitedPrimed	2	3472	0
 rejected	rejected.VisitedWrongKey	2	3472	0
 rejected	rejected.Wrapped	2	141	0
 rejected	rejected.WrongKeywordInBody	2	141	0
+rejected	rejected.ZBound	1	46	0
 rejected	rejected.ZNamed	0	0	0
 rejected	rejected.ZeroWidth	2	238	0
 rejected	rejected.unverified	1	4097	0

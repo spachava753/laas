@@ -122,3 +122,84 @@ func Kept(m map[string]int, k string) {
 func KeptWrong(m map[string]int, k string) {
 	delete(m, k)
 } // want `vego: postcondition may not hold: Forall k in m : has\(m', k\)`
+
+type edgeSet map[string]bool
+type edgeGraph map[string]edgeSet
+
+// addNode keeps every other key of the graph, which a contract says of a
+// map of references with a quantifier, since Modifies cannot name the entry
+// of one alone.
+//
+// @Requires g != nil
+// @Modifies g
+// @Ensures edges != nil And has(g', node) And g'[node] = edges
+// @Ensures Forall k in g : has(g', k) And (k = node Or g'[k] = g[k])
+func (g edgeGraph) addNode(node string) (edges edgeSet) {
+	edges = g[node]
+	if edges == nil {
+		edges = make(edgeSet)
+		g[node] = edges
+	}
+	return edges
+}
+
+// addNodeKeepsAll claims that no value changes, also that of node.
+//
+// @Requires g != nil
+// @Modifies g
+// @Ensures Forall k in g : has(g', k) And g'[k] = g[k]
+func (g edgeGraph) addNodeKeepsAll(node string) (edges edgeSet) {
+	edges = g[node]
+	if edges == nil {
+		edges = make(edgeSet)
+		g[node] = edges
+	}
+	return edges // want `vego: postcondition may not hold: Forall k in g : has\(g', k\) And g'\[k\] = g\[k\]`
+}
+
+// addNodeKeepsNode excepts every key but node.
+//
+// @Requires g != nil
+// @Modifies g
+// @Ensures Forall k in g : has(g', k) And (k != node Or g'[k] = g[k])
+func (g edgeGraph) addNodeKeepsNode(node string) (edges edgeSet) {
+	edges = g[node]
+	if edges == nil {
+		edges = make(edgeSet)
+		g[node] = edges
+	}
+	return edges // want `vego: postcondition may not hold: Forall k in g : has\(g', k\) And \(k != node Or g'\[k\] = g\[k\]\)`
+}
+
+// DeleteOthersKept deletes one key and keeps the others.
+//
+// @Modifies m
+// @Ensures Forall k in m : has(m', k) Or k = key
+func DeleteOthersKept(m map[string]int, key string) {
+	delete(m, key)
+}
+
+// DeleteOthersKeptWrong claims the deleted key is the one kept.
+//
+// @Modifies m
+// @Ensures Forall k in m : has(m', k) Or k != key
+func DeleteOthersKeptWrong(m map[string]int, key string) {
+	delete(m, key)
+} // want `vego: postcondition may not hold: Forall k in m : has\(m', k\) Or k != key`
+
+// DeleteOne leaves no key equal to the one deleted.
+//
+// @Modifies m
+// @Ensures Forall k in m' : k != key
+func DeleteOne(m map[string]int, key string) {
+	delete(m, key)
+}
+
+// SetOne claims the same after setting the key.
+//
+// @Requires m != nil
+// @Modifies m
+// @Ensures Forall k in m' : k != key
+func SetOne(m map[string]int, key string) {
+	m[key] = 0
+} // want `vego: postcondition may not hold: Forall k in m' : k != key`

@@ -984,6 +984,10 @@ func TestRules(t *testing.T) {
 	seqA, seqB := logic.Const("A", logic.IntSeq), logic.Const("B", logic.IntSeq)
 	tableM, tableN := logic.Const("M", logic.SeqOf(logic.IntSeq)), logic.Const("N", logic.SeqOf(logic.IntSeq))
 	keyVar, keys := logic.Bound("s", logic.IntSeq), logic.Const("H", logic.BoolSeq)
+	marks, otherKey := logic.Const("G", logic.BoolSeq), logic.Bound("t", logic.IntSeq)
+	keptButA := logic.Forall(otherKey, logic.Implies(logic.And(logic.Select(keys, logic.Key(otherKey)), logic.Ne(logic.Key(otherKey), logic.Key(seqA))),
+		logic.Select(marks, logic.Key(otherKey))))
+	tiedToA := logic.Iff(logic.Eq(logic.Key(keyVar), logic.Key(seqA)), logic.SeqEq(keyVar, seqA, logic.Bound("i", logic.Int)))
 	tests := []struct {
 		name string
 		opts Options
@@ -1062,6 +1066,21 @@ func TestRules(t *testing.T) {
 		{"no string key is found in a map that has none", Options{}, []*logic.Term{
 			logic.Forall(keyVar, logic.Not(logic.Select(keys, logic.Key(keyVar))))},
 			logic.Exists(keyVar, logic.Select(keys, logic.Key(keyVar))), Refuted},
+		// Guards against the tie of a bound string key to a string it is
+		// compared with, which a quantifier over string keys carries in its
+		// guard, being lost. What a write keeps is said of key numbers,
+		// every key but that of A; a contract says it of strings, every key
+		// but A, with the tie in its guard. With the tie the one follows
+		// from the other; without it a key that is not A could have the
+		// number of A.
+		{"a key that is not a string has another number, by the tie of the guard", Options{}, []*logic.Term{keptButA},
+			logic.Forall(keyVar, logic.Implies(logic.And(logic.Select(keys, logic.Key(keyVar)), tiedToA),
+				logic.Or(logic.SeqEq(keyVar, seqA, logic.Bound("j", logic.Int)), logic.Select(marks, logic.Key(keyVar))))), Proved},
+		{"without the tie a key that is not a string may have its number", Options{}, []*logic.Term{keptButA},
+			logic.Forall(keyVar, logic.Implies(logic.Select(keys, logic.Key(keyVar)),
+				logic.Or(logic.SeqEq(keyVar, seqA, logic.Bound("j", logic.Int)), logic.Select(marks, logic.Key(keyVar))))), Refuted},
+		{"the tie says nothing of the key it excepts", Options{}, []*logic.Term{keptButA},
+			logic.Forall(keyVar, logic.Implies(logic.And(logic.Select(keys, logic.Key(keyVar)), tiedToA), logic.Select(marks, logic.Key(keyVar)))), Refuted},
 		// Guards against the remainder of two numbers being computed the
 		// Euclidean way, which never yields a negative remainder, and the
 		// quotient being rounded down. Go truncates: -7 / 2 is -3 and

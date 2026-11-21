@@ -3,6 +3,7 @@ package logic
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 )
@@ -112,6 +113,18 @@ type scope struct {
 	r     *Resolver
 	env   Env
 	bound map[string]*Term
+	// compared holds, for each variable bound to the string keys of a map,
+	// the strings that the body of its quantifier compares it with; see
+	// quantifier.
+	compared map[string]*comparedKey
+}
+
+// comparedKey is what the body of a quantifier over string keys compares
+// its key with: strings that mention no variable but those in scope where
+// the quantifier binds its own.
+type comparedKey struct {
+	terms []*Term
+	scope map[string]bool
 }
 
 func (r *Resolver) newBound(name string, sort Sort) *Term {
@@ -700,6 +713,8 @@ func (s *scope) relation(op string, a, b *Term) *Term {
 		failSort("operator %s cannot be applied to %s values", op, a.Sort)
 	case a.Sort.IsSeq() && equality:
 		result = SeqEq(a, b, s.r.newBound("k", Int))
+		s.noteCompared(a, b)
+		s.noteCompared(b, a)
 	case a.Sort == Err && equality && (a == NilErr() || b == NilErr()):
 		result = And(IsNil(a), IsNil(b))
 	case a.Sort == Err && equality:
@@ -755,7 +770,10 @@ func (s *scope) relation(op string, a, b *Term) *Term {
 // conjoins them, at the innermost variable. Over Z, a name Z that means
 // something here is refused, since it would give Z two meanings.
 func (s *scope) quantifier(n *Node) *Term {
-	inner := &scope{r: s.r, env: s.env, bound: map[string]*Term{}}
+	inner := &scope{r: s.r, env: s.env, bound: map[string]*Term{}, compared: maps.Clone(s.compared)}
+	if inner.compared == nil {
+		inner.compared = map[string]*comparedKey{}
+	}
 	for name, t := range s.bound {
 		inner.bound[name] = t
 	}
@@ -767,12 +785,20 @@ func (s *scope) quantifier(n *Node) *Term {
 			fail("Z names something here, so Forall %s in Z could mean the integers or what Z names; rename it, or write an interval", n.Vars[0])
 		}
 	}
+	var keyed []*Term
 	for _, name := range n.Vars {
+		if name == "Z" {
+			fail("Z is the integers in the domain of a quantifier, so it cannot also name a bound variable; choose another name")
+		}
 		if len(n.Kids) == 2 {
 			// The keys of a map, which have the sort of its keys.
 			v, guard := s.keyOf(n.Kids[0], name)
 			vars, guards = append(vars, v), append(guards, guard)
 			inner.bound[name] = v
+			if v.Sort.IsSeq() {
+				keyed = append(keyed, v)
+				inner.compared[v.Name] = &comparedKey{}
+			}
 			continue
 		}
 		v := s.r.newBound(name, Int)
@@ -793,7 +819,26 @@ func (s *scope) quantifier(n *Node) *Term {
 			guards = append(guards, Le(v, hi))
 		}
 	}
+	// A compared string may mention the variables bound around the
+	// quantifier and its own, which are in scope where its guards stand.
+	for _, v := range keyed {
+		known := map[string]bool{}
+		for _, t := range inner.bound {
+			known[t.Name] = true
+		}
+		inner.compared[v.Name].scope = known
+	}
 	result := inner.expect(n.Kids[len(n.Kids)-1], Bool)
+	// The key of a string is the same as that of another exactly when the
+	// two strings are equal, which the solver states only of strings keyed
+	// outside quantifiers. For each string the body compares a bound key
+	// with, that is stated with the guard, so that a key the body excepts,
+	// as in k = node, is known to be the one a write to Key(node) reached.
+	for _, v := range keyed {
+		for _, t := range inner.compared[v.Name].terms {
+			guards = append(guards, Iff(Eq(Key(v), Key(t)), SeqEq(v, t, s.r.newBound("k", Int))))
+		}
+	}
 	for i := len(vars) - 1; i >= 0; i-- {
 		if n.Op == "Forall" {
 			result = Forall(vars[i], Implies(And(guards...), result))
@@ -804,6 +849,36 @@ func (s *scope) quantifier(n *Node) *Term {
 		guards = nil
 	}
 	return result
+}
+
+// noteCompared records that the body of a quantifier over string keys
+// compares its bound key with a string that does not mention it.
+func (s *scope) noteCompared(key, other *Term) {
+	if key.Op != OpBound || s.compared[key.Name] == nil {
+		return
+	}
+	entry := s.compared[key.Name]
+	if !boundWithin(other, entry.scope) || mentionsBound(other, key.Name) {
+		return
+	}
+	entry.terms = append(entry.terms, other)
+}
+
+// boundWithin reports whether every bound variable a term holds is among
+// the names given.
+func boundWithin(t *Term, names map[string]bool) bool {
+	if t.Op == OpBound && !names[t.Name] {
+		return false
+	}
+	return !slices.ContainsFunc(t.Args, func(arg *Term) bool { return !boundWithin(arg, names) })
+}
+
+// mentionsBound reports whether a term holds the bound variable of a name.
+func mentionsBound(t *Term, name string) bool {
+	if t.Op == OpBound && t.Name == name {
+		return true
+	}
+	return slices.ContainsFunc(t.Args, func(arg *Term) bool { return mentionsBound(arg, name) })
 }
 
 // keyOf binds a variable to the keys of a map named by a path, and returns

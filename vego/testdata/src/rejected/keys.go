@@ -54,3 +54,9 @@ func KeysOfPointer(p *point) {}
 func KeysOfSum(n int) {}
 
 // @Predicate allPositive(m) ::= Forall k in m : m[k] > 0 // want `a quantifier over the keys of a map cannot be used in a predicate definition`
+
+// ZBound binds Z, inside which Forall k in Z would be read over the
+// integers.
+//
+// @Ensures Forall Z in [0, 3) : Forall k in Z : k >= 0 // want `vego: in Ensures annotation: Z is the integers in the domain of a quantifier, so it cannot also name a bound variable; choose another name`
+func ZBound() {}
