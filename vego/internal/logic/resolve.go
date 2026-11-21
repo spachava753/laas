@@ -439,12 +439,12 @@ func (s *scope) call(n *Node) *Term {
 		if s.env == nil || len(n.Kids) != 2 {
 			fail("has takes a map and a key, as in has(m, k), and cannot be used in a predicate definition")
 		}
-		root, steps, primed := s.path(n.Kids[0])
-		if _, bound := s.bound[root.Name]; root.Kind != NIdent || bound {
-			fail("has takes a map reached from a variable, as in has(m, k) or has(s.index, k)")
+		root, steps, when, ok := s.pathOf(n.Kids[0])
+		if !ok {
+			fail("has takes a map reached from a variable, as in has(m, k), has(s.index, k), or has(old(m), k)")
 		}
 		steps = append(steps, Step{Index: s.term(n.Kids[1]), Has: true})
-		t, err := s.env.Path(root.Name, steps, map[bool]When{true: Primed}[primed])
+		t, err := s.env.Path(root, steps, when)
 		if err != nil {
 			panic(resolveError{err})
 		}

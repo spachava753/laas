@@ -38,6 +38,9 @@ type effects struct {
 	whole map[*types.Var]bool
 	grown map[*types.Var]bool
 	sites []site
+	// deletes holds every call of delete the loop may run, in its body or
+	// in a literal it calls.
+	deletes []*ast.CallExpr
 }
 
 // localVar returns the local variable an expression names, if it is one.
@@ -195,6 +198,7 @@ func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
 			}
 			if isBuiltin(v.info, n, "delete") && isMap(v.info.TypeOf(n.Args[0])) {
 				eff.sites = append(eff.sites, site{mapType: v.info.TypeOf(n.Args[0]), root: v.localVar(n.Args[0])})
+				eff.deletes = append(eff.deletes, n)
 			}
 			v.callSites(n, eff)
 			// What is handed over runs during the call: a literal is walked
@@ -460,6 +464,14 @@ type loopShape struct {
 	// counter and the current element in the loop variables.
 	limit *logic.Term
 	bind  func(st *state, counter *logic.Term)
+	// enter is called with the state at the head of an arbitrary
+	// iteration, before its body, and leave once the body has been
+	// verified on every path. runs, when set, gives the condition under
+	// which an iteration runs its body: an iteration whose condition fails
+	// goes on to the next one without it.
+	enter func(head *state)
+	leave func()
+	runs  func(head *state) *logic.Term
 	// renewed holds the variables a for statement declares that live in
 	// memory. Each iteration has its own: at the end of an iteration, before
 	// the post statement, the next one is created with the value of the
@@ -578,6 +590,17 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 		}
 		finish(end)
 	}
+	if shape.runs != nil {
+		body := shape.runs(head)
+		skipped := head.clone()
+		skipped.decide(logic.Not(body))
+		finish(skipped)
+		head.decide(body)
+	}
+	if shape.enter != nil {
+		shape.enter(head)
+		defer shape.leave()
+	}
 	v.seq(shape.body.List, shape.body.Lbrace, shape.body.Rbrace, head, ctrl{brk: k, cont: after}, after)
 }
 
@@ -681,21 +704,26 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 			}
 		}
 	case isMap(ranged) && mapModelled(ranged):
-		// A map is visited once for each key it has at the start, in an
-		// order nobody knows; see visited.go. A loop that changes a map of
-		// the type while ranging over one is not supported.
-		for _, at := range shape.effects.sites {
-			if at.mapType != nil && mapOwner(at.mapType) == mapOwner(ranged) {
-				v.unsupported(s.Pos(), "the loop modifies a map of the type it ranges over, which is not supported")
-			}
-		}
+		// A map is walked in one order of the keys it has at the start,
+		// which nobody knows; see visited.go. What the loop may change of
+		// a map of the type while it runs is checked where it changes it.
 		ref := v.expr(s.X, st, nil)
 		v.closeUnit(st)
 		walk := v.startMapRange(st, ranged, ref, s.Pos(), types.ExprString(s.X))
+		active := &activeRange{walk: walk, at: s.Pos(), text: types.ExprString(s.X), frame: v.lit,
+			skips: v.deletesOtherKeys(shape.effects, ranged, key)}
 		shape.limit = walk.n0
+		// The key and position of each state's iteration, which enter
+		// takes for the iteration whose body is verified.
+		positions := map[*state][2]*logic.Term{}
 		shape.bind = func(st *state, counter *logic.Term) {
-			at, _, position := v.enterPosition(st, walk, counter)
-			st.assume(logic.Implies(logic.Lt(position, walk.n0), v.mapHas(st, st.mem, ranged, ref, at)))
+			at, number, position := v.enterPosition(st, walk, counter)
+			positions[st] = [2]*logic.Term{number, position}
+			if !active.skips {
+				// No key the loop has not reached is deleted, so the key
+				// of the position is in the map; see deletesOtherKeys.
+				st.assume(logic.Implies(logic.Lt(position, walk.n0), v.mapHas(st, st.mem, ranged, ref, at)))
+			}
 			if spec.visited != nil {
 				st.visited = maps.Clone(st.visited)
 				if st.visited == nil {
@@ -709,6 +737,28 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 			if element != nil {
 				v.bind(st, element, v.mapValue(st, st.mem, ranged, ref, at))
 			}
+		}
+		if active.skips {
+			// A key deleted before the loop reached it is not visited: its
+			// position runs no body.
+			shape.runs = func(head *state) *logic.Term {
+				number := positions[head][0]
+				return logic.Select(v.row(head, head.mem, mapOwner(ranged)+hasLeaf.path, hasLeaf.sort, ref), number)
+			}
+		}
+		shape.enter = func(head *state) {
+			active.number, active.position = positions[head][0], positions[head][1]
+			v.ranges = append(v.ranges, active)
+		}
+		shape.leave = func() { v.ranges = v.ranges[:len(v.ranges)-1] }
+		// Leaving the loop by break, or after the last iteration, leaves
+		// the range.
+		outer := k
+		k = func(st *state) {
+			saved := v.ranges
+			v.ranges = slices.DeleteFunc(slices.Clone(v.ranges), func(r *activeRange) bool { return r == active })
+			outer(st)
+			v.ranges = saved
 		}
 	case isSlice(ranged):
 		header := v.eval(s.X, st, nil)

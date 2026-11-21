@@ -1013,8 +1013,18 @@ func Counted() (result int) {
 //
 // @Modifies m
 func Clear(m map[string]int) {
-	for k := range m { // want `vego: cannot verify Clear: the loop modifies a map of the type it ranges over, which is not supported`
+	for k := range m {
 		delete(m, k)
+	}
+}
+
+// Shift adds a key to the map it ranges over.
+//
+// @Requires m != nil And (Forall k in m : 0 <= k < 100)
+// @Modifies m
+func Shift(m map[int]int) {
+	for k := range m {
+		m[k+100] = m[k] // want `vego: this may add a key to m, the map that the loop at guide.go:1026:2 ranges over, and Go may or may not visit a key added during the loop; collect the new entries in another map and add them after the loop`
 	}
 }
 

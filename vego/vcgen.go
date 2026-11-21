@@ -90,6 +90,9 @@ type fnVerifier struct {
 	// literals.go.
 	boundLits map[*types.Var]*ast.FuncLit
 	lit       *litFrame
+	// ranges holds the ranges over maps whose bodies are being verified,
+	// innermost last; see visited.go.
+	ranges []*activeRange
 	inlining  map[*ast.FuncLit]bool
 	sites     []inlineSite
 	// captured holds, with a number of its own, every variable that a

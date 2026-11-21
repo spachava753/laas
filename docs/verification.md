@@ -203,7 +203,7 @@ A character in single quotes is the number of that character, as in Go. `s[0] = 
 
 ### Quantifiers
 
-`Forall` and `Exists` range over an interval of integers.
+`Forall` and `Exists` range over an interval of integers, or over the keys of a map, as described in [Maps](#maps).
 
 ```go
 // @Requires Forall k in [0, |A|) : 0 <= A[k] <= 1000
@@ -2651,7 +2651,7 @@ entries the map keeps; build the map with assignments instead
 
 Add `Requires a != b`, or assign the entries one by one, which runs in order.
 
-A `range` loop over a map has two limits. The first is that it can check every value but cannot add the values up, because `vego` does not know that each key is visited exactly once. The second is that the loop body must not modify any map of the same type. The common loop that deletes entries is therefore not supported:
+A `range` loop over a map can change the map it ranges over when the change has one meaning in Go. The loop can write a key that the map has, and it can delete keys, as this loop does:
 
 ```go
 for k := range m {
@@ -2659,11 +2659,25 @@ for k := range m {
 }
 ```
 
-```text
-vego: cannot verify Clear: the loop modifies a map of the type it ranges over, which is not supported
+The loop cannot add a key, because Go may or may not visit a key added while the loop runs:
+
+```go
+// @Requires m != nil And (Forall k in m : 0 <= k < 100)
+// @Modifies m
+func Shift(m map[int]int) {
+	for k := range m {
+		m[k+100] = m[k]
+	}
+}
 ```
 
-Quantifiers range over integers. A formula can therefore describe all the values of a map with integer keys in some range, but not all the values of a map with string keys.
+```text
+vego: this may add a key to m, the map that the loop at guide.go:1026:2 ranges over, and Go may
+or may not visit a key added during the loop; collect the new entries in another map and add
+them after the loop
+```
+
+`Forall k in m : P` says that `P` holds of every key that `m` has, and `Exists k in m : P` that it holds of some key. Here `k` has the type of the keys, so it can be a string.
 
 ## Package-level variables
 
@@ -5554,7 +5568,6 @@ A function that uses any of the following is reported as `cannot verify`:
 - comparing structs with `==`;
 - comparing two errors with `==` when neither is `nil`, an error made by `errors.New` or `fmt.Errorf`, an error that a trusted contract vouches for, or an error variable that holds one or holds a pointer, integer, string, or boolean, or an array or struct of these (see [Comparing errors](#comparing-errors));
 - `errors.As`, `errors.Join`, `errors.Unwrap`, and `errors.Is` on an error whose origin is not known (see [Asking errors.Is](#asking-errorsis));
-- a `range` over a map whose body modifies a map of the same type;
 - `goto`, `fallthrough`, labelled `break` and `continue`, and `defer` inside a loop, except inside a function literal that the loop calls.
 
 Some limits are reported in other ways. A write through what `bufio.NewReader` or `bufio.NewWriter` returns is reported as `Write may modify bw, which F may not modify; it is memory that NewWriter returned, and its contract does not say that this is new memory`, since that may be memory that existed when the function was called. Take the `*bufio.Reader` or `*bufio.Writer` as a parameter, as described in [Writing through a buffer](#writing-through-a-buffer). A state can be declared only for an interface, and only as a boolean. A `State` annotation on a struct type is reported at the annotation as `a state can be declared only on a defined interface type that declares a method of its own`, and a state of a struct type in your trust file is reported in the file. A mutex or a `sync.Once` that exists when a trusted function is called cannot be used in a function literal that it calls, and its `Lock` or `Do` is reported as a precondition that may not hold, as described in [Locking in a function that a trusted function calls](#locking-in-a-function-that-a-trusted-function-calls). A formula that names an unexported field of a struct of another package is reported at the annotation, as described in [Names](#names). A method of a type that writes what its receiver points to, or relies on what it points to, cannot be used as a method of an interface. The conversion reports the obligation that fails, as described in [What a conversion checks](#what-a-conversion-checks). An entry in the trust file for a type of the module that you verify is reported in the trust file, as described in [Limits of trusted contracts](#limits-of-trusted-contracts). Two different entries for one type in packages built together are reported in every package built with both, as described in [One entry for each type in a build](#one-entry-for-each-type-in-a-build).

@@ -566,6 +566,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		}
 		v.checkWriteOr(st, guard, t.reach(), call.Pos(), fmt.Sprintf("%s may modify %s", name, what), remedy, unlisted)
 	}
+	v.checkRangedCall(st, guard, written, call.Pos(), name)
 	// What a call that runs what it is handed is like at its start, before
 	// anything it writes is forgotten.
 	var atCall *state

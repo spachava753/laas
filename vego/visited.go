@@ -340,3 +340,99 @@ func keyPlaceholder(t types.Type) *logic.Term {
 	}
 	return logic.IntLit(0)
 }
+
+// What a loop may change of the map it ranges over. Go's specification
+// gives a change one meaning when it adds no key: an entry not yet reached
+// that is removed is not produced, and every other entry present at the
+// start is produced once, with its value read when it is produced, which
+// is m[k] in the table of range clauses. So a walk of one order fixed at
+// the start is every run of a loop that deletes but never adds: the keys
+// in the order produced, each key deleted before it was reached placed
+// right after the iteration that deleted it, where it is absent and runs
+// no body. A key added while the loop runs may or may not be produced, so
+// that has no one meaning, and a loop that adds one key in each iteration
+// may never end; it is reported.
+//
+// A loop whose deletes of a map of the ranged type all delete the key of
+// the current iteration, through the loop's own key variable that it does
+// not assign, never deletes a key it has not reached, so the key of every
+// position is in the map when the position comes: fact mode. Any other
+// delete puts the loop in skip mode, in which a position whose key is gone
+// runs no body. In fact mode every delete is still proved to be of the
+// current key, a key the loop has passed, a key the map lacks, or another
+// map, so a delete the syntax does not show cannot leave the fact assumed.
+// Before Go 1.22 the iterations share the key variable, which still holds
+// the key of the current iteration when a delete through it runs.
+
+// activeRange is a range over a map whose body is being verified.
+type activeRange struct {
+	walk *mapRange
+	// number and position are the key of the iteration whose body is
+	// verified, as a number of the map, and its position in the walk.
+	number, position *logic.Term
+	// skips is set in skip mode.
+	skips bool
+	at    token.Pos
+	text  string
+	// frame is the function literal whose body holds the loop, or nil for
+	// the function itself: the range ends when the frame returns.
+	frame *litFrame
+}
+
+// deletesOtherKeys reports whether a loop over a map of type t with key
+// variable key may delete a key of a map of that type other than the key
+// of the current iteration, which puts it in skip mode.
+func (v *fnVerifier) deletesOtherKeys(eff *effects, t types.Type, key *types.Var) bool {
+	for _, call := range eff.deletes {
+		if mapOwner(v.info.TypeOf(call.Args[0])) != mapOwner(t) {
+			continue
+		}
+		id, ok := ast.Unparen(call.Args[1]).(*ast.Ident)
+		if key == nil || !ok || v.info.Uses[id] != key || eff.whole[key] || v.boxed[key] {
+			return true
+		}
+	}
+	return false
+}
+
+// checkRangedStore checks a write or a delete of a key of a map of a type
+// that a loop ranges over: it must be another map, or a change with one
+// meaning.
+func (v *fnVerifier) checkRangedStore(st *state, t types.Type, ref, key *logic.Term, present bool, pos token.Pos) {
+	for _, r := range v.ranges {
+		if mapOwner(r.walk.mapType) != mapOwner(t) {
+			continue
+		}
+		other := logic.Ne(ref, r.walk.ref)
+		switch {
+		case present:
+			v.check(st, nil, logic.Or(other, v.mapHas(st, st.mem, t, ref, key)), pos,
+				"this may add a key to %s, the map that the loop at %s ranges over, and Go may or may not visit a key added during the loop; "+
+					"collect the new entries in another map and add them after the loop", r.text, v.placeOf(r.at))
+		case !r.skips:
+			passed, err := v.visitedHas(st, &visitedSet{r: r.walk, counter: r.position}, key)
+			if err != nil {
+				panic("vego: internal error: " + err.Error())
+			}
+			v.check(st, nil, logic.Or(other, logic.Not(v.mapHas(st, st.mem, t, ref, key)), logic.Eq(mapKey(key), r.number), passed), pos,
+				"this may delete from %s, the map that the loop at %s ranges over, a key that the loop has not reached, which the loop takes to delete only the key of the current iteration; "+
+					"delete the key of the iteration through the loop's own key variable, or write the delete in the loop's body", r.text, v.placeOf(r.at))
+		}
+	}
+}
+
+// checkRangedCall checks a call that may modify a map of a type that a
+// loop ranges over: it must be another map, since what the call does to
+// the keys is not known.
+func (v *fnVerifier) checkRangedCall(st *state, guard []*logic.Term, written []target, pos token.Pos, name string) {
+	for _, t := range written {
+		for _, r := range v.ranges {
+			if t.mapType == nil || mapOwner(r.walk.mapType) != mapOwner(t.mapType) {
+				continue
+			}
+			v.check(st, guard, logic.Ne(t.ref, r.walk.ref), pos,
+				"%s may modify %s while the loop at %s ranges over it, and may add a key, which Go may or may not visit during the loop; "+
+					"change the map in the loop's body, or after the loop", name, r.text, v.placeOf(r.at))
+		}
+	}
+}

@@ -160,12 +160,12 @@ func AllSmallWrong(m map[int]int) (ok bool) {
 	return ok // want `vego: postcondition may not hold: ok -> Forall k in Z : m\[k\] <= 10`
 }
 
-// RangeWrites changes the map it ranges over.
+// RangeWrites writes keys of the map it ranges over, which it has.
 //
 // @Requires m != nil
 // @Modifies m
 func RangeWrites(m map[int]int) {
-	for k := range m { // want `vego: cannot verify RangeWrites: the loop modifies a map of the type it ranges over, which is not supported`
+	for k := range m {
 		m[k] = 0
 	}
 }
@@ -339,9 +339,9 @@ func GrowsWhileRanging(m map[int]int) (result int) {
 	alias := Named(m)
 	n := 0
 	// @Invariant 0 <= n <= 10
-	for k := range m { // want `vego: cannot verify GrowsWhileRanging: the loop modifies a map of the type it ranges over, which is not supported`
+	for k := range m {
 		if 0 <= k && k < 2 {
-			alias[k+1] = 0
+			alias[k+1] = 0 // want `vego: this may add a key to m, the map that the loop at .* ranges over`
 		}
 		if n < 10 {
 			n++

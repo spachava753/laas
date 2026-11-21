@@ -196,6 +196,7 @@ func (v *fnVerifier) storeKey(st *state, t types.Type, ref, key *logic.Term, val
 		v.check(st, nil, logic.Lt(logic.IntLit(0), ref), pos, "map may be nil")
 	}
 	v.checkWrite(st, nil, target{mapType: t, ref: ref}.reach(), pos, what)
+	v.checkRangedStore(st, t, ref, key, present, pos)
 	// What holds of every map is put on record for this key before the
 	// write, so that the write to the nil map is known to change nothing.
 	v.noteMap(st, st.mem, t, ref, key)
