@@ -22,6 +22,7 @@ import (
 func TestConversionLists(t *testing.T) {
 	parallel(t)
 	t.Run("on the corpus", func(t *testing.T) {
+		heavyFor(t)
 		testdata, err := filepath.Abs("testdata")
 		if err != nil {
 			t.Fatal(err)
@@ -55,6 +56,7 @@ func TestConversionLists(t *testing.T) {
 		if len(patterns) == 0 {
 			t.Skip("VEGO_STD_PACKAGES names no packages")
 		}
+		heavyFor(t)
 		// Export data of a newer Go than golang.org/x/tools knows cannot
 		// be read, so everything is loaded from source.
 		loaded, err := packages.Load(&packages.Config{Mode: packages.LoadAllSyntax}, patterns...)

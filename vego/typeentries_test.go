@@ -67,6 +67,7 @@ func TestInAnalysedModule(t *testing.T) {
 // that cannot be used, since every use of such an entry is an error.
 func TestTypeEntriesInUse(t *testing.T) {
 	parallel(t)
+	heavyFor(t)
 	analyzer := newAnalyzer()
 	if err := analyzer.Flags.Set("trusted", filepath.Join("testdata", "trusted.yaml")); err != nil {
 		t.Fatal(err)

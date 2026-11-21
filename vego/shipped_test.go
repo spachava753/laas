@@ -1795,6 +1795,7 @@ func (g *grounder) groundTerm(value any) *logic.Term {
 // build, and an importer of the standard library from source.
 func shippedVerifier(t *testing.T) (*pkgVerifier, types.Importer) {
 	t.Helper()
+	heavyFor(t)
 	pv := &pkgVerifier{
 		pass: &analysis.Pass{
 			Fset:       token.NewFileSet(),
@@ -1858,6 +1859,8 @@ func shippedVerifier(t *testing.T) (*pkgVerifier, types.Importer) {
 
 func TestShippedContracts(t *testing.T) {
 	parallel(t)
+	// No other parallel test reads scratch, which only harnesses of shipped
+	// entries do; one that did would have to run alone.
 	scratch = t.TempDir()
 	checkShipped(t, true, func(key string) bool { return !processWide[key] })
 }
@@ -1893,7 +1896,6 @@ func TestProcessWideEntries(t *testing.T) {
 // checkShipped runs the shipped entries that run says to run, and, when
 // files is set, reports the problems of the shipped files.
 func checkShipped(t *testing.T, files bool, run func(key string) bool) {
-	defer heavy()()
 	pv, imports := shippedVerifier(t)
 	for _, file := range shippedContracts() {
 		if files {

@@ -436,6 +436,22 @@ func TestEvaluator(t *testing.T) {
 	if !eval("|A| = 500 And Forall k in [0, |A|) : A[k] = k", groundEnv{"A": ints(long...)}) {
 		t.Fatalf("a sequence of 500 pushes does not hold its elements where they were pushed")
 	}
+	// A sequence of sequences, as of a []string, pushed onto a fill of two
+	// rows: every row is where it was pushed and holds its own elements.
+	table := [][]int64{{9}, {9}, {1, 2}, {3}, {}, {4, 5, 6}}
+	rows := logic.Fill(logic.IntLit(2), ints(9))
+	for _, row := range table[2:] {
+		rows = logic.Push(rows, ints(row...))
+	}
+	for i, row := range table {
+		formula := fmt.Sprintf("|A| = %d And |A[%d]| = %d", len(table), i, len(row))
+		for j, v := range row {
+			formula += fmt.Sprintf(" And A[%d][%d] = %d", i, j, v)
+		}
+		if !eval(formula, groundEnv{"A": rows}) {
+			t.Fatalf("row %d of %v read back from pushes is not %v", i, table, row)
+		}
+	}
 	huge := groundEnv{"u": logic.BigLit(new(big.Int).SetUint64(1<<64 - 1))}
 	if !eval("u > 9223372036854775807 And u = 18446744073709551615 And u + 1 > 18446744073709551615 And u / 2 = 9223372036854775807", huge) {
 		t.Fatalf("MaxUint64 is not evaluated as itself")
