@@ -925,6 +925,16 @@ trusted:
       f(i): {}
     modifies: []
 
+  guide.Votes:
+    reason: >-
+      Votes counts the elements of s that are equal to v, in a loop over s
+      that calls no method of a value of type S or E, or of what such a
+      value holds, and keeps nothing.
+    asserts: {S: [], E: []}
+    modifies: []
+    ensures:
+      - "0 <= result And result <= |s|"
+
   guide.count:
     reason: Calls record once and then adds one to t.Calls; reviewed 2026-11-19.
     requires: ["t != nil", "t.Calls < 1000"]
@@ -1903,6 +1913,12 @@ trusted:
     asserts: {E: []}
     modifies: []
     ensures: ["cap(result) <= cap(v)"]
+
+  genericslib.Typo:
+    reason: Test entry whose ensures names what is no parameter, a defect at every type argument.
+    asserts: {E: []}
+    modifies: []
+    ensures: ["result = m"]
 
   generics.Back:
     reason: Test entry for a generic function of the package that calls back into its caller.

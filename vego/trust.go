@@ -873,9 +873,14 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 	pv.run(fn, func(v *fnVerifier) {
 		v.lenient = true
 		v.misreadAs = func(c *clause, err error) {
-			// A clause that names a field, a state, or an address of a
-			// value of a type parameter is wrong at every type argument.
-			if errors.As(err, new(entryDefect)) {
+			// A clause is wrong at every type argument when it names a
+			// field, a state, or an address of a value of a type
+			// parameter, or a name that is nothing, or has a form the
+			// resolver refuses whatever the types. Anything else, the
+			// sorts of what it reads and what the environment finds at
+			// the types of the parameters, may differ at another type
+			// argument.
+			if errors.As(err, new(entryDefect)) || errors.As(err, new(*logic.FormError)) {
 				fn.defect("in its %s %q: %v", c.kind, c.text, err)
 				return
 			}

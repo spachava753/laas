@@ -159,3 +159,6 @@ func Len[E any](v E) int { return 0 }
 
 // Cut returns what it is given.
 func Cut[E any](v E) E { return v }
+
+// Typo returns n; its entry names what is no parameter.
+func Typo[E any](v E, n int) int { return n }

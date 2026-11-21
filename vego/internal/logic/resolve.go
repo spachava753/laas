@@ -164,7 +164,26 @@ func (r *Resolver) resolve(n *Node, env Env, bound map[string]*Term, want Sort) 
 type resolveError struct{ err error }
 
 func fail(format string, args ...any) {
-	panic(resolveError{fmt.Errorf(format, args...)})
+	panic(resolveError{&FormError{fmt.Sprintf(format, args...)}})
+}
+
+// FormError is an error of a formula that the resolver finds whatever the
+// types of what it names: a name it does not know, a form with the wrong
+// number of arguments, a word used as a name.
+type FormError struct{ Msg string }
+
+func (e *FormError) Error() string { return e.Msg }
+
+// SortError is an error of a formula that the resolver finds from the
+// sorts of the values it reads, as an order of strings or a field of an
+// integer; at another instantiation of a generic function the same formula
+// may have a meaning.
+type SortError struct{ Msg string }
+
+func (e *SortError) Error() string { return e.Msg }
+
+func failSort(format string, args ...any) {
+	panic(resolveError{&SortError{fmt.Sprintf(format, args...)}})
 }
 
 // kindOf names what a term of a formula stands for, as a message should
@@ -190,7 +209,7 @@ func kindOf(t *Term) string {
 func (s *scope) expect(n *Node, want Sort) *Term {
 	t := s.term(n)
 	if t.Sort != want {
-		fail("expected %s but %s has type %s", describe(want), n, kindOf(t))
+		failSort("expected %s but %s has type %s", describe(want), n, kindOf(t))
 	}
 	return t
 }
@@ -249,7 +268,7 @@ func (s *scope) term(n *Node) *Term {
 func (s *scope) seq(n *Node) *Term {
 	t := s.term(n)
 	if !t.Sort.IsSeq() {
-		fail("%s has type %s, not a slice", n, kindOf(t))
+		failSort("%s has type %s, not a slice", n, kindOf(t))
 	}
 	return t
 }
@@ -362,10 +381,10 @@ func (s *scope) access(n *Node, when When) *Term {
 				fail("%s has no field %s", root, step.Field)
 			}
 			if !base.Sort.IsSeq() {
-				fail("%s has type %s and cannot be indexed", root, kindOf(base))
+				failSort("%s has type %s and cannot be indexed", root, kindOf(base))
 			}
 			if step.Index.Sort != Int {
-				fail("%s is indexed by a %s, not by an integer", root, step.Index.Sort)
+				failSort("%s is indexed by a %s, not by an integer", root, step.Index.Sort)
 			}
 			base = Select(base, step.Index)
 		}
@@ -512,7 +531,7 @@ func (s *scope) call(n *Node) *Term {
 	for i, kid := range n.Kids {
 		args[i] = s.term(kid)
 		if want := def.Params[i].Sort; args[i].Sort != want {
-			fail("argument %d of %s has type %s, want %s", i+1, n.Name, kindOf(args[i]), want)
+			failSort("argument %d of %s has type %s, want %s", i+1, n.Name, kindOf(args[i]), want)
 		}
 	}
 	return Pred(def.Name, args...)
@@ -616,7 +635,7 @@ func (s *scope) compare(op string, left, right *Node) *Term {
 		b = RefLit(0)
 	}
 	if a.Sort != b.Sort {
-		fail("cannot compare %s (%s) with %s (%s)", plain(left), kindOf(a), plain(right), kindOf(b))
+		failSort("cannot compare %s (%s) with %s (%s)", plain(left), kindOf(a), plain(right), kindOf(b))
 	}
 	result := s.relation(op, a, b)
 	if len(vars) == 0 {
@@ -651,7 +670,7 @@ func (s *scope) nilSlice(op string, left, right *Node) *Term {
 	case err != nil:
 		panic(resolveError{err})
 	case op != "=" && op != "!=":
-		fail("operator %s cannot be applied to a slice and nil; a slice is compared with nil by = or !=", op)
+		failSort("operator %s cannot be applied to a slice and nil; a slice is compared with nil by = or !=", op)
 	case op == "!=":
 		return Not(t)
 	}
@@ -676,7 +695,7 @@ func (s *scope) relation(op string, a, b *Term) *Term {
 	case a.Sort.IsSeq() && a.Sort.Elem() == Float:
 		// Nothing can be said of a float, so nothing of a sequence of them
 		// beyond its length either.
-		fail("operator %s cannot be applied to %s values", op, a.Sort)
+		failSort("operator %s cannot be applied to %s values", op, a.Sort)
 	case a.Sort.IsSeq() && equality:
 		result = SeqEq(a, b, s.r.newBound("k", Int))
 	case a.Sort == Err && equality && (a == NilErr() || b == NilErr()):
@@ -685,11 +704,11 @@ func (s *scope) relation(op string, a, b *Term) *Term {
 		// Two errors are equal when they are the same error.
 		result = Eq(a, b)
 	case a.Sort == Err:
-		fail("operator %s cannot be applied to errors; compare them with = or !=", op)
+		failSort("operator %s cannot be applied to errors; compare them with = or !=", op)
 	case a.Sort == Bool && equality:
 		result = Iff(a, b)
 	case a.Sort == Ref && equality && Incomparable(a, b) != "":
-		fail("%s", Incomparable(a, b))
+		failSort("%s", Incomparable(a, b))
 	case a.Sort == Ref && equality:
 		result = RefEq(a, b)
 	case a.Sort == Ref:
@@ -703,13 +722,13 @@ func (s *scope) relation(op string, a, b *Term) *Term {
 		if kind == "interface value" {
 			article = "an"
 		}
-		fail("operator %s cannot be applied to %s %s", op, article, kind)
+		failSort("operator %s cannot be applied to %s %s", op, article, kind)
 	case a.Sort == Float:
-		fail("operator %s cannot be applied to float values; a formula can say nothing of a float", op)
+		failSort("operator %s cannot be applied to float values; a formula can say nothing of a float", op)
 	case a.Sort.IsSeq():
-		fail("operator %s cannot be applied to string or slice values; a formula has no order of them", op)
+		failSort("operator %s cannot be applied to string or slice values; a formula has no order of them", op)
 	case a.Sort != Int:
-		fail("operator %s cannot be applied to %s values", op, a.Sort)
+		failSort("operator %s cannot be applied to %s values", op, a.Sort)
 	case equality:
 		result = Eq(a, b)
 	case op == "<":

@@ -77,9 +77,9 @@ func (e *specEnv) Apply(name string, args []*logic.Term) (*logic.Term, bool, err
 	case cb == nil:
 		return nil, false, nil
 	case !cb.applied:
-		return nil, true, fmt.Errorf("%s cannot be applied here", name)
+		return nil, true, entryDefect{fmt.Errorf("%s cannot be applied here", name)}
 	case e.results == nil && e.givenResults == nil:
-		return nil, true, fmt.Errorf("%s(...) can only be used in ensures", name)
+		return nil, true, entryDefect{fmt.Errorf("%s(...) can only be used in ensures", name)}
 	case len(args) != 1 || args[0].Sort != logic.Int:
 		return nil, true, fmt.Errorf("%s takes one integer", name)
 	}
@@ -132,7 +132,7 @@ func (e *specEnv) root(name string) (val value, t types.Type, isResult bool, con
 	}
 	if index, ok := e.fn.resultNames[name]; ok {
 		if e.results == nil {
-			return nil, nil, false, nil, fmt.Errorf("result %s can only be used in Ensures", name)
+			return nil, nil, false, nil, entryDefect{fmt.Errorf("result %s can only be used in Ensures", name)}
 		}
 		if e.results[index] == nil {
 			return nil, nil, false, nil, errNoValue
@@ -140,6 +140,11 @@ func (e *specEnv) root(name string) (val value, t types.Type, isResult bool, con
 		return e.results[index], e.fn.results[index].Type(), true, nil, nil
 	}
 	constant, err = e.v.contractConstant(e.fn.spelling(), name)
+	if err != nil {
+		// A name that is no parameter, result, or constant is unknown
+		// whatever the types of the parameters.
+		err = entryDefect{err}
+	}
 	return nil, nil, false, constant, err
 }
 

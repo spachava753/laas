@@ -1105,6 +1105,7 @@ generics	generics.TopEmpty	4	11594	0
 generics	generics.TopInt	5	13794	0
 generics	generics.TopString	1	565	0
 generics	generics.TouchCounters	1	1329	0
+generics	generics.TypoOf	1	111	0
 generics	generics.Unentered	1	111	0
 generics	generics.UseFinder	6	18753	0
 generics	generics.Wrap	0	0	0
@@ -1135,6 +1136,7 @@ generics	genericslib.Show	3	3942	0
 generics	genericslib.Sized	0	0	0
 generics	genericslib.Top	1	5093	0
 generics	genericslib.Touch	1	3653	0
+generics	genericslib.Typo	0	0	0
 genericslib	genericslib.Verified	0	0	0
 globals	globals.Addressed	4	1455	0
 globals	globals.Alias	2	81	0
@@ -1292,6 +1294,7 @@ guide	fmt.Sprintf	1	5479	0
 guide	guide.Abs	7	1250	0
 guide	guide.AbsWrong	5	871	0
 guide	guide.Account	1	225	0
+guide	guide.AgeOf	5	30980	0
 guide	guide.Announce	10	152079	0
 guide	guide.Apply	18	675723	4
 guide	guide.ApplyOnce	6	1233	0
@@ -1329,6 +1332,7 @@ guide	guide.CountLines	20	447192	2
 guide	guide.CountNegative	8	5171	0
 guide	guide.CountPositive	7	6971	0
 guide	guide.CountThenPop	14	103957	0
+guide	guide.CountVotes	5	18077	0
 guide	guide.Counted	1	46	0
 guide	guide.CountingPricer	7	2405	0
 guide	guide.Different	13	14771	0
@@ -1365,6 +1369,9 @@ guide	guide.Greet	7	23196	0
 guide	guide.Guarded	23	30655	0
 guide	guide.Half	3	1455	0
 guide	guide.HasComma	4	5659	0
+guide	guide.HasMember	1	949	0
+guide	guide.HasName	4	30409	0
+guide	guide.HasRole	4	31035	1
 guide	guide.Head	14	12238	0
 guide	guide.HeadWeak	12	22874	0
 guide	guide.Hex	4	5766	0
@@ -1377,6 +1384,7 @@ guide	guide.Join	5	5717	0
 guide	guide.Labelled	1	46	0
 guide	guide.LabelledOwn	8	6277	0
 guide	guide.Largest	26	51485	0
+guide	guide.Last	1	565	0
 guide	guide.LastZero	6	211031	1
 guide	guide.Later	6	1716	0
 guide	guide.Limit	3	19423	0
@@ -1408,9 +1416,11 @@ guide	guide.NewStale	4	750	0
 guide	guide.Next	16	11499	0
 guide	guide.Notify	1	429	0
 guide	guide.Offset	6	2033	0
+guide	guide.Oldest	5	14142	0
 guide	guide.Option	3	2393	0
 guide	guide.Overwrite	8	9212	0
 guide	guide.Pack	9	5975	0
+guide	guide.Pad	13	23168	0
 guide	guide.Pages	4	1561	0
 guide	guide.PagesChecked	3	283	0
 guide	guide.Pair	6	3430	0
@@ -1478,6 +1488,7 @@ guide	guide.Small	6	1195	0
 guide	guide.Smallest	4	14122	0
 guide	guide.Snapshot	0	0	0
 guide	guide.Sorted3	10	6259	0
+guide	guide.SortedNames	26	42289	0
 guide	guide.Source.Next	3	961	0
 guide	guide.Stack	1	711	0
 guide	guide.Status	11	14751	0
@@ -1505,6 +1516,7 @@ guide	guide.Tx.Begin	7	2009183	2
 guide	guide.Tx.Commit	6	1011507	1
 guide	guide.UsesLogf	4	25563	0
 guide	guide.Visits	1	111	0
+guide	guide.Votes	1	5321	0
 guide	guide.VouchedLoader.Load	5	6900	0
 guide	guide.Warn	12	40031	0
 guide	guide.WithTimeout	6	1456	0
@@ -1544,6 +1556,12 @@ guide	os.Create	7	2010228	2
 guide	os.Open	7	2010228	2
 guide	os.ReadFile	3	20828	0
 guide	os.Remove	3	7892	0
+guide	slices.Contains	1	7228	0
+guide	slices.ContainsFunc	1	8663	0
+guide	slices.Grow	1	6147	0
+guide	slices.IndexFunc	1	8748	0
+guide	slices.Max	1	4874	0
+guide	slices.Sort	1	5919	0
 guide	sort.Search	1	2397	0
 guide	strconv.Atoi	3	18318	0
 guide	strconv.Itoa	1	1444	0

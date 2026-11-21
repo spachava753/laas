@@ -184,3 +184,10 @@ type Z struct{}
 func ZeroPointers(ps []*Z, p *Z) (r int) {
 	return genericslib.Find(ps, p) // want `cannot be used with S = \[\]\*Z, E = \*Z: .*; call genericslib.FindFunc instead`
 }
+
+// TypoOf calls a function whose entry names what is no parameter.
+//
+// @Ensures True
+func TypoOf(n int) (r int) {
+	return genericslib.Typo(n, n) // want `cannot be used with E = int: in its ensures "result = m": unknown name m; the entry has this defect at every type argument, so fix the entry in trusted.yaml`
+}
