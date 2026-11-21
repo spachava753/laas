@@ -1644,6 +1644,9 @@ var reviewedErrorTypes = map[string]bool{
 // is not nil gets a constant of its own, which stands for that value.
 type grounder struct {
 	errs []error
+	// pointers numbers the addresses of the pointers grounded; see
+	// pointerRef.
+	pointers map[uintptr]int64
 }
 
 // errorName begins the names of the constants that stand for errors.
@@ -1744,10 +1747,12 @@ func (g *grounder) groundTerm(value any) *logic.Term {
 			// to compare it with nil.
 			return logic.RefLit(1)
 		case v.Kind() == reflect.Pointer:
-			// A pointer is a reference, which no formula of an entry
-			// reads but to compare it with nil; fresh and within are
-			// told from the real memory.
-			return logic.RefLit(1)
+			// A pointer is a reference, which a formula of an entry
+			// compares with nil or another pointer, as Go does, by its
+			// address; fresh and within are told from the real memory.
+			return g.pointerRef(v.Pointer())
+		case v.Kind() == reflect.Slice:
+			return g.groundSlice(v)
 		case v.Kind() == reflect.Struct:
 			return logic.Const("unreadable", logic.IntSeq)
 		}
@@ -1902,6 +1907,10 @@ func TestShippedContracts(t *testing.T) {
 				if !ok {
 					t.Fatalf("package %s has no function %s", path, name)
 				}
+				if isGeneric(callee) {
+					checkGenericEntry(t, pv, key, callee)
+					return
+				}
 				harness, ok := harnesses[key]
 				if !ok {
 					t.Fatalf("no harness calls %s; add one to harnesses", key)
@@ -1998,6 +2007,7 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 		env.givenRelation = func(name string, paths []logic.Path) (*logic.Term, error) {
 			return logic.BoolLit(relation(t, fn, call, earlier, name, paths)), nil
 		}
+		env.givenSlice = givenSliceOf(t, fn, call)
 		satisfied := true
 		for _, c := range fn.requires {
 			formula, err := pv.res.Formula(c.node, env)

@@ -80,7 +80,13 @@ func (pv *pkgVerifier) calleeAt(call *ast.CallExpr) *types.Func {
 	if !ok || instSig.TypeParams() != nil {
 		return callee
 	}
-	targs := slices.Collect(inst.TypeArgs.Types())
+	return pv.instantiate(callee, slices.Collect(inst.TypeArgs.Types()), instSig)
+}
+
+// instantiate returns the function object of the instantiation of a
+// generic function at the type arguments, whose signature is sig, made
+// once per package; see calleeAt.
+func (pv *pkgVerifier) instantiate(callee *types.Func, targs []types.Type, instSig *types.Signature) *types.Func {
 	// A call inside generic code, with a type parameter of its own as a
 	// type argument, is never verified, and has no instantiation to check.
 	if slices.ContainsFunc(targs, func(t types.Type) bool { return mentionsTypeParam(t, map[types.Type]bool{}) }) {

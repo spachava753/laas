@@ -1,0 +1,290 @@
+version: 1
+
+# Every entry here is for a generic function. One entry serves every type
+# argument: each clause means at an instantiation what it means at those
+# type arguments, and a clause that has no meaning there, such as one that
+# compares two structs or orders two strings, refuses the call there. So the
+# entries for functions of any element type say what they say of lengths,
+# capacities, nilness, and where a slice lies, and nothing of the elements.
+#
+# Each entry claims under asserts, for every type parameter, what was read
+# from the source of package slices in Go 1.26.6 (slices.go, sort.go,
+# zsortordered.go, zsortanyfunc.go, iter.go): the function runs no method of
+# a value of the type parameter's type or of a pointer to one, or of
+# anything such a value holds, directly or through what it calls (fmt and
+# reflect included), neither while the call lasts nor later through
+# anything it returns, keeps, or registers. Package slices imports cmp,
+# iter, math/bits, and unsafe, compares elements only with == and the
+# operators of cmp.Ordered, and copies them by assignment, append, and copy.
+
+trusted:
+  slices.Contains:
+    reason: >-
+      "Contains reports whether v is present in s." Present means equal to an
+      element by ==, which the formula's = is at integers, strings, booleans,
+      and pointers. It is refused at a struct, which a formula cannot compare
+      as a whole, and at a float, of which a formula can say nothing; there
+      ContainsFunc with a literal that compares the fields serves.
+    asserts: {S: [], E: []}
+    modifies: []
+    ensures:
+      - "result <-> Exists i in [0, |s|) : s[i] = v"
+
+  slices.Index:
+    reason: >-
+      "Index returns the index of the first occurrence of v in s, or -1 if not
+      present." Refused at the type arguments where Contains is.
+    asserts: {S: [], E: []}
+    modifies: []
+    ensures:
+      - "-1 <= result And result < |s|"
+      - "result >= 0 -> s[result] = v"
+      - "result >= 0 -> (Forall i in [0, result) : s[i] != v)"
+      - "result = -1 -> (Forall i in [0, |s|) : s[i] != v)"
+
+  slices.ContainsFunc:
+    reason: >-
+      "ContainsFunc reports whether at least one element e of s satisfies
+      f(e)." So a slice that holds no element has none that satisfies f. Not
+      said: which element, since a formula cannot apply f to an element of
+      every type, and f is verified for every value of its parameter's type.
+      Read from source: it calls f only on elements of s, on the calling
+      goroutine, while the call lasts, and keeps it nowhere.
+    asserts: {S: [], E: []}
+    runs: [f]
+    calls:
+      f(e): {}
+    modifies: []
+    ensures:
+      - "result -> |s| > 0"
+
+  slices.IndexFunc:
+    reason: >-
+      "IndexFunc returns the first index i satisfying f(s[i]), or -1 if none
+      do." Not said: which index, as for ContainsFunc. Read from source: it
+      calls f as ContainsFunc does.
+    asserts: {S: [], E: []}
+    runs: [f]
+    calls:
+      f(e): {}
+    modifies: []
+    ensures:
+      - "-1 <= result And result < |s|"
+
+  slices.Equal:
+    reason: >-
+      "Equal reports whether two slices are equal: the same length and all
+      elements equal. If the lengths are different, Equal returns false.
+      Otherwise, the elements are compared in increasing index order, and the
+      comparison stops at the first unequal pair. Empty and nil slices are
+      considered equal. Floating point NaNs are not considered equal."
+      Refused at the type arguments where Contains is.
+    asserts: {S: [], E: []}
+    modifies: []
+    ensures:
+      - "result <-> (|s1| = |s2| And (Forall i in [0, |s1|) : s1[i] = s2[i]))"
+
+  slices.Clone:
+    reason: >-
+      "Clone returns a copy of the slice. The elements are copied using
+      assignment, so this is a shallow clone. The result may have additional
+      unused capacity. The result preserves the nilness of s." Not said: the
+      elements, since a formula cannot compare elements of every type. Read
+      from source: the copy is append(S{}, s...), new memory, which growslice
+      allocates with a capacity rounded up by at most a page, and panics past
+      the largest allocation, which the requires keeps it within.
+    asserts: {S: [], E: []}
+    requires:
+      - "|s| * elemsize(s) + 65536 <= MaxAlloc"
+    modifies: []
+    ensures:
+      - "|result| = |s|"
+      - "result = nil <-> s = nil"
+      - "fresh(result)"
+
+  slices.Grow:
+    reason: >-
+      "Grow increases the slice's capacity, if necessary, to guarantee space
+      for another n elements. After Grow(n), at least n elements can be
+      appended to the slice without another allocation. If n is negative or
+      too large to allocate the memory, Grow panics. The result preserves the
+      nilness of s." The last sentence is false for a nil s and an n above 0,
+      for which Grow returns a slice that is not nil, so only what is true is
+      claimed of nilness. Not said: the elements, as for Clone. Read from
+      source: when the capacity does not suffice, the result is
+      append(s[:cap(s)], make([]E, n')...)[:len(s)] with n' the room missing,
+      new memory of a length |s| + n that growslice may give up to twice that
+      capacity, rounded up by at most a page, and otherwise it is s; the
+      requires keeps the allocation within the largest one, and the length
+      within an int, which bounds it alone for elements of size zero.
+    asserts: {S: [], E: []}
+    requires:
+      - "n >= 0"
+      - "|s| + n <= MaxInt"
+      - "2 * (|s| + n) * elemsize(s) + 65536 <= MaxAlloc"
+    modifies: []
+    ensures:
+      - "|result| = |s|"
+      - "cap(result) - |result| >= n"
+      - "s != nil -> result != nil"
+      - "(s = nil And n = 0) -> result = nil"
+      - "fresh(result) Or within(result, s)"
+
+  slices.Clip:
+    reason: >-
+      "Clip removes unused capacity from the slice, returning
+      s[:len(s):len(s)]. The result preserves the nilness of s." So the
+      result lies in the memory of s. Not said: the elements, as for Clone.
+    asserts: {S: [], E: []}
+    modifies: []
+    ensures:
+      - "|result| = |s|"
+      - "cap(result) = |s|"
+      - "within(result, s)"
+      - "result = nil <-> s = nil"
+
+  slices.Delete:
+    reason: >-
+      "Delete removes the elements s[i:j] from s, returning the modified
+      slice. Delete panics if j > len(s) or s[i:j] is not a valid slice of s.
+      Delete is O(len(s)-i), so if many items must be deleted, it is better
+      to make a single call deleting them all together than to delete one at
+      a time. Delete zeroes the elements s[len(s)-(j-i):len(s)]. If the result
+      is empty, it has the same nilness as s." Not said: which elements
+      remain and that it zeroes the others, since a formula cannot compare
+      elements of every type or name the zero value of one. Read from
+      source: the result is append(s[:i], s[j:]...), which writes s in
+      place, so it lies in the memory of s.
+    asserts: {S: [], E: []}
+    requires:
+      - "0 <= i And i <= j And j <= |s|"
+    modifies: [s]
+    ensures:
+      - "|result| = |s| - (j - i)"
+      - "within(result, s)"
+      - "|result| = 0 -> (result = nil <-> s = nil)"
+
+  slices.DeleteFunc:
+    reason: >-
+      "DeleteFunc removes any elements from s for which del returns true,
+      returning the modified slice. DeleteFunc zeroes the elements between the
+      new length and the original length. If the result is empty, it has the
+      same nilness as s." Not said: which elements remain, and the zeroing,
+      as for Delete. Read from source: it writes s in place and returns s[:i],
+      and it calls del only on elements of s, on the calling goroutine, while
+      the call lasts, and keeps it nowhere.
+    asserts: {S: [], E: []}
+    runs: [del]
+    calls:
+      del(e): {}
+    modifies: [s]
+    ensures:
+      - "|result| <= |s|"
+      - "within(result, s)"
+      - "|result| = 0 -> (result = nil <-> s = nil)"
+
+  slices.Insert:
+    reason: >-
+      "Insert inserts the values v... into s at index i, returning the
+      modified slice. The elements at s[i:] are shifted up to make room. In
+      the returned slice r, r[i] == v[0], and, if i < len(s), r[i+len(v)] ==
+      value originally at s[i]. Insert panics if i > len(s). This function is
+      O(len(s) + len(v)). If the result is empty, it has the same nilness as
+      s." Not said: the elements, as for Clone. Read from source: it writes s
+      in place when its capacity holds the result, and returns s or a part of
+      it, and otherwise returns append(s[:i], make(S, n+m-i)...), new memory
+      that growslice may give twice the room the result needs; the requires
+      keeps that within the largest allocation, and the length within an
+      int.
+    asserts: {S: [], E: []}
+    requires:
+      - "0 <= i And i <= |s|"
+      - "|s| + |v| <= MaxInt"
+      - "2 * (|s| + |v|) * elemsize(s) + 65536 <= MaxAlloc"
+    modifies: [s]
+    ensures:
+      - "|result| = |s| + |v|"
+      - "fresh(result) Or within(result, s)"
+      - "|result| = 0 -> (result = nil <-> s = nil)"
+
+  slices.Reverse:
+    reason: >-
+      "Reverse reverses the elements of the slice in place." Not said: the
+      order, since a formula cannot compare elements of every type.
+    asserts: {S: [], E: []}
+    modifies: [s]
+
+  slices.Sort:
+    reason: >-
+      "Sort sorts a slice of any ordered type in ascending order. When sorting
+      floating-point numbers, NaNs are ordered before other values." Not
+      said: the order, since one entry serves strings, which a formula cannot
+      order, as well as integers, and that each element is there as often as
+      before.
+    asserts: {S: [], E: []}
+    modifies: [x]
+
+  slices.BinarySearch:
+    reason: >-
+      "BinarySearch searches for target in a sorted slice and returns the
+      earliest position where target is found, or the position where target
+      would appear in the sort order; it also returns a bool saying whether
+      the target is really found in the slice. The slice must be sorted in
+      increasing order." In a sorted slice that position is the number of
+      elements less than target. The requires says the slice is sorted, which
+      a formula can say of integers only, so the call is refused at strings
+      and floats.
+    asserts: {S: [], E: []}
+    requires:
+      - "Forall i in [0, |x|) : Forall j in [i, |x|) : x[i] <= x[j]"
+    modifies: []
+    ensures:
+      - "0 <= result1 And result1 <= |x|"
+      - "x[0:result1) < target"
+      - "result1 < |x| -> target <= x[result1]"
+      - "result2 <-> (result1 < |x| And x[result1] = target)"
+
+  slices.Max:
+    reason: >-
+      "Max returns the maximal value in x. It panics if x is empty. For
+      floating-point E, Max propagates NaNs (any NaN value in x forces the
+      output to be NaN)." A formula orders integers only, so the call is
+      refused at strings and floats.
+    asserts: {S: [], E: []}
+    requires:
+      - "|x| > 0"
+    modifies: []
+    ensures:
+      - "Exists i in [0, |x|) : result = x[i]"
+      - "x[0:|x|) <= result"
+
+  slices.Min:
+    reason: >-
+      "Min returns the minimal value in x. It panics if x is empty. For
+      floating-point numbers, Min propagates NaNs (any NaN value in x forces
+      the output to be NaN)." Refused where Max is.
+    asserts: {S: [], E: []}
+    requires:
+      - "|x| > 0"
+    modifies: []
+    ensures:
+      - "Exists i in [0, |x|) : result = x[i]"
+      - "result <= x[0:|x|)"
+
+  slices.Compact:
+    reason: >-
+      "Compact replaces consecutive runs of equal elements with a single
+      copy. This is like the uniq command found on Unix. Compact modifies the
+      contents of the slice s and returns the modified slice, which may have
+      a smaller length. Compact zeroes the elements between the new length
+      and the original length. The result preserves the nilness of s." A
+      slice with an element keeps one. Not said: which elements remain, and
+      the zeroing, as for Delete. Read from source: it writes s in place and
+      returns s or s[:k], which lies in the memory of s.
+    asserts: {S: [], E: []}
+    modifies: [s]
+    ensures:
+      - "|result| <= |s|"
+      - "|s| > 0 -> |result| > 0"
+      - "within(result, s)"
+      - "result = nil <-> s = nil"

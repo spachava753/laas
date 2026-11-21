@@ -39,6 +39,10 @@ type specEnv struct {
 	// otherwise cannot be read there; the tests of shipped entries answer
 	// it from what they saw.
 	givenRelation func(name string, paths []logic.Path) (*logic.Term, error)
+	// givenSlice resolves cap(A) and A = nil of a parameter or a result
+	// where given is set; the tests of shipped entries answer it from the
+	// real slice.
+	givenSlice func(name string, last logic.Step, when logic.When) (*logic.Term, error)
 	// now is the memory plain paths are read from, and post the memory
 	// primed paths and results are read from, nil where there is none.
 	now, post memory
@@ -707,6 +711,9 @@ func (e *specEnv) elemSize(name string, steps []logic.Step, when logic.When) (*l
 func (e *specEnv) sliceOrAddress(name string, steps []logic.Step, last logic.Step, when logic.When) (*logic.Term, error) {
 	what := spell(name, steps)
 	if _, ok := e.readyMade(name, when); ok {
+		if e.givenSlice != nil && len(steps) == 0 && !last.Addr {
+			return e.givenSlice(name, last, when)
+		}
 		if last.Nil {
 			return nil, logic.NotSlice
 		}
