@@ -514,6 +514,9 @@ type pkgVerifier struct {
 	funcs    map[*types.Func]*funcInfo
 	order    []*funcInfo
 	reported map[string]bool
+	// reports counts the calls of report, a repeated report included,
+	// which tells whether a stretch of verification met one.
+	reports int
 	// instances holds the instantiations of each generic function that
 	// calls in the package make, and instanceOf what is known of each by
 	// its function object; see generics.go.
@@ -710,6 +713,7 @@ type pkgVerifier struct {
 // report emits a diagnostic once per position and message. Symbolic execution
 // visits a statement once per path, so the same failure can be found often.
 func (pv *pkgVerifier) report(pos token.Pos, format string, args ...any) {
+	pv.reports++
 	if pv.current != nil {
 		pv.current.failed = true
 		// A report within the declaration, its doc comment included, is

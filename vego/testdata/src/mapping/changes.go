@@ -330,3 +330,38 @@ func DeleteThroughAlias(m map[int]int) {
 		delete(alias, k)
 	}
 }
+
+type store struct{ m map[int]int }
+
+// drop deletes one key of the store's map.
+//
+// @Requires s != nil
+// @Modifies s.m
+// @Ensures r
+func (s *store) drop(i int) (r bool) {
+	delete(s.m, 100)
+	return true
+}
+
+// HandsDrop hands drop to a trusted function inside a range over the map
+// that drop changes.
+//
+// @Requires s != nil And s.m != nil
+// @Modifies s.m
+// @Ensures True
+func HandsDrop(s *store) {
+	for range s.m {
+		_ = sort.Search(1, s.drop) // want `vego: drop may modify s.m while the loop at .* ranges over it`
+	}
+}
+
+// HandsDropOther ranges over another map.
+//
+// @Requires s != nil And s.m != nil And other != nil And other != s.m
+// @Modifies s.m
+// @Ensures True
+func HandsDropOther(s *store, other map[int]int) {
+	for range other {
+		_ = sort.Search(1, s.drop)
+	}
+}

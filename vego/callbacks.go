@@ -366,6 +366,7 @@ func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types
 		// Everything made from here on stands for the state of a run or
 		// for what the run made, apart from the arguments.
 		mark, known := len(v.made), len(atCall.hyps)
+		reportsBefore := v.reports
 		// The state of a run stands for the state at the call and every
 		// state between two runs: the trusted function may have written its
 		// part of memory before any run, or between two runs, and the runs
@@ -412,7 +413,11 @@ func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types
 		for name := range run.produced() {
 			runsMade[name] = true
 		}
-		if !cb.deterministic {
+		// A run that met a report went on past an obligation that failed by
+		// assuming it, which may be false of every run, so what the run
+		// gives the caller would rest on it: its summary is left out, which
+		// only weakens what the caller knows. The run's report stands.
+		if !cb.deterministic || v.reports > reportsBefore {
 			continue
 		}
 		v.checkRunNames(run, callMark)

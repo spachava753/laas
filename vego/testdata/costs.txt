@@ -55,8 +55,12 @@ buffered	io.Writer.Write	3	5338	0
 callbacks	(*callbacks.box).relay	6	4798	0
 callbacks	(*callbacks.counter).bump	6	1449	0
 callbacks	(*callbacks.counter).tick	6	1219	0
+callbacks	(*callbacks.stage).at	1	912	0
 callbacks	bytes.TrimFunc	1	4213	0
 callbacks	callbacks.AsValue	1	46	0
+callbacks	callbacks.AtFive	9	14399	0
+callbacks	callbacks.AtFour	6	6822	0
+callbacks	callbacks.AtFourInLiteral	6	6822	0
 callbacks	callbacks.BinarySearch	13	68202	0
 callbacks	callbacks.BothFixed	4	301	0
 callbacks	callbacks.Bump	11	4569	0
@@ -67,7 +71,7 @@ callbacks	callbacks.Descends	6	806	0
 callbacks	callbacks.Doubler	3	1546	0
 callbacks	callbacks.FieldChanges	4	761	0
 callbacks	callbacks.Fields	5	11716	0
-callbacks	callbacks.FindIn	11	17427	0
+callbacks	callbacks.FindIn	8	8787	0
 callbacks	callbacks.FindsFive	8	36048	0
 callbacks	callbacks.FindsInRange	14	296977	2
 callbacks	callbacks.FirstField	8	7260	0
@@ -86,6 +90,7 @@ callbacks	callbacks.HandsOnValue	1	83	0
 callbacks	callbacks.HandsPlain	4	639	0
 callbacks	callbacks.HandsRunsOnly	1	46	0
 callbacks	callbacks.HandsRunsOnlyFunction	1	46	0
+callbacks	callbacks.HandsSeven	5	2839	0
 callbacks	callbacks.HandsStrict	6	1142	0
 callbacks	callbacks.HandsTooMuch	4	1265	0
 callbacks	callbacks.HandsUnannotated	1	111	0
@@ -112,7 +117,7 @@ callbacks	callbacks.Recurses	3	497	0
 callbacks	callbacks.Relayed	1	806	0
 callbacks	callbacks.Remembers	7	1637	0
 callbacks	callbacks.Runner	3	558	0
-callbacks	callbacks.SearchPast	11	15512	0
+callbacks	callbacks.SearchPast	8	7777	0
 callbacks	callbacks.SearchSorted	11	39143	0
 callbacks	callbacks.SearchesPositive	5	8145	0
 callbacks	callbacks.SecondChanges	4	761	0
@@ -175,6 +180,7 @@ callbacks	callbacks.handsBack	3	569	0
 callbacks	callbacks.handsItself	3	748	0
 callbacks	callbacks.inc	1	1216	0
 callbacks	callbacks.isSeparator	2	153	0
+callbacks	callbacks.isSeven	1	95	0
 callbacks	callbacks.memReq	1	2903	0
 callbacks	callbacks.noParam	1	154	0
 callbacks	callbacks.noResult	1	70	0
@@ -1484,7 +1490,7 @@ guide	guide.SameError	1	46	0
 guide	guide.SameOrNot	13	13892	0
 guide	guide.SamePricer	1	744	0
 guide	guide.Save	10	29609	0
-guide	guide.SearchLocked	32	118177	5
+guide	guide.SearchLocked	29	98982	5
 guide	guide.Served	1	46	0
 guide	guide.SetMax	7	5364	0
 guide	guide.SetSize	1	46	0
@@ -2157,7 +2163,7 @@ locks	locks.Getter.Get	3	804	0
 locks	locks.Guarded	11	15963	0
 locks	locks.InLiteral	22	31885	0
 locks	locks.InLoop	36	1759187	5
-locks	locks.InRun	31	306866	7
+locks	locks.InRun	27	89927	5
 locks	locks.Keep	7	8327	0
 locks	locks.Literal	4	1623	0
 locks	locks.Local	2	422	0
@@ -2201,6 +2207,7 @@ lockspred	lockspred.Ambiguous	0	0	0
 lockspred	lockspred.Number	1	163	0
 manywrites	manywrites.Set	1022	68887005	23
 mapping	(*mapping.Registry).Register	18	26618	0
+mapping	(*mapping.store).drop	5	4196	0
 mapping	(mapping.edgeGraph).addNode	13	21609	0
 mapping	(mapping.edgeGraph).addNodeKeepsAll	7	11050	0
 mapping	(mapping.edgeGraph).addNodeKeepsNode	7	18839	0
@@ -2209,7 +2216,7 @@ mapping	(mapping.graph).Transpose	7	52725	1
 mapping	(mapping.nodeset).AddAll	8	20840	2
 mapping	mapping.AbsentKeysHoldZero	2	4444	0
 mapping	mapping.AddsKeys	10	25784	0
-mapping	mapping.AddsThroughHanded	18	81369	2
+mapping	mapping.AddsThroughHanded	14	22966	0
 mapping	mapping.AddsThroughLiteral	10	25253	0
 mapping	mapping.AfterBreak	12	15028	0
 mapping	mapping.AfterMethod	5	1700	0
@@ -2250,6 +2257,8 @@ mapping	mapping.FoundNowhere	2	1587	0
 mapping	mapping.Fresh	12	12666	0
 mapping	mapping.Get	27	1078820	1
 mapping	mapping.GrowsWhileRanging	25	45149	0
+mapping	mapping.HandsDrop	13	26529	0
+mapping	mapping.HandsDropOther	19	98316	9
 mapping	mapping.Inner	2	8115	0
 mapping	mapping.Kept	6	4954	0
 mapping	mapping.KeptWrong	5	4529	0
