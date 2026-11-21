@@ -478,6 +478,11 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 		v.layers[forgotten.Name] = known
 		head.mem[key] = forgotten
 	}
+	if !writesFootprints {
+		// What an iteration creates may be part of a footprint afterwards.
+		grown := v.grow(head, st.brk, nil)
+		grown.after = head.brk
+	}
 	if writesFootprints {
 		// Every region not yet in memory starts from the epoch, and the
 		// footprints grow only by what the loop creates.

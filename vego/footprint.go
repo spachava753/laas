@@ -165,7 +165,9 @@ func (v *fnVerifier) rowAt(rows, home, alloc, pos *logic.Term) (*logic.Term, []*
 		seen[at.Name] = true
 		switch {
 		case at.Name == entryRegion+footprintRegion:
-			facts = append(facts, logic.Implies(cellOf(at), logic.And(logic.Lt(logic.IntLit(0), alloc), logic.Lt(alloc, v.entryBrk))))
+			// What existed on entry held only what existed on entry; a home
+			// made since has a footprint this row does not describe.
+			facts = append(facts, logic.Implies(logic.And(logic.Lt(home, v.entryBrk), cellOf(at)), logic.And(logic.Lt(logic.IntLit(0), alloc), logic.Lt(alloc, v.entryBrk))))
 		case v.layers[at.Name] != nil:
 			known := v.layers[at.Name]
 			if !known.growth {
@@ -255,15 +257,63 @@ func (v *fnVerifier) outsideFootprint(t target, key string, ref, position *logic
 	return logic.Or(conditions...), facts
 }
 
-// separation is what a function assumes of a parameter whose
-// footprint its Modifies lists: on entry, the footprint holds no cell that
-// the other parameters reach without going through an interface value.
-// rel holds, for every allocation and position, whether the cell is so
-// reached; home is the home of the parameter on entry.
+// separation is what a function assumes of a parameter whose footprint
+// its Modifies lists: on entry, the footprint holds no cell that the other
+// parameters reach without going through an interface value. A cell is so
+// reached when one of the other parameters refers to it directly (direct,
+// decided by directlyAt at the cell, with no quantifier), or when rel holds
+// of it, which the facts of noteReached give for what memory held on entry
+// at a reached cell. home is the home of the parameter on entry.
 type separation struct {
-	param *types.Var
-	rel   *logic.Term
-	home  *logic.Term
+	param  *types.Var
+	rel    *logic.Term
+	home   *logic.Term
+	direct []passedValue
+}
+
+// passedValue is a parameter's value on entry with its type.
+type passedValue struct {
+	val value
+	t   types.Type
+}
+
+// reachedAt states that a cell is reached: a parameter refers to it
+// directly, or rel holds of it.
+func (r separation) reachedAt(v *fnVerifier, ref, position *logic.Term) *logic.Term {
+	cases := []*logic.Term{logic.Select(logic.Select(r.rel, ref), position)}
+	for _, d := range r.direct {
+		cases = append(cases, v.directlyAt(d.val, d.t, ref, position))
+	}
+	return logic.Or(cases...)
+}
+
+// directlyAt states that a value of a type refers directly to a cell: the
+// cell lies in the struct a pointer points to, in the array of a slice from
+// its start to its capacity, or is the cell of a map, or a field of a
+// struct does.
+func (v *fnVerifier) directlyAt(val value, t types.Type, ref, position *logic.Term) *logic.Term {
+	zero := logic.RefLit(0)
+	inRange := func(at, lo, hi *logic.Term) *logic.Term {
+		return logic.And(logic.Ne(at, zero), logic.Eq(ref, at), logic.Le(lo, position), logic.Lt(position, hi))
+	}
+	if object, isPointer := pointee(t); isPointer {
+		return inRange(val[0], val[1], logic.Add(val[1], logic.IntLit(v.span(object))))
+	}
+	switch u := t.Underlying().(type) {
+	case *types.Slice:
+		return inRange(val[0], val[1], logic.Add(val[1], logic.Mul(val[3], logic.IntLit(v.span(u.Elem())))))
+	case *types.Map:
+		return logic.And(logic.Ne(val[0], zero), logic.Eq(ref, val[0]), logic.Eq(position, logic.IntLit(0)))
+	case *types.Struct:
+		var cases []*logic.Term
+		for i := range u.NumFields() {
+			if lo, hi, ok := fieldLeaves(t, i); ok && holdsMemory(u.Field(i).Type()) {
+				cases = append(cases, v.directlyAt(val[lo:hi], u.Field(i).Type(), ref, position))
+			}
+		}
+		return logic.Or(cases...)
+	}
+	return logic.False()
 }
 
 // reachApart states, at one cell, what the separation of every listed
@@ -271,7 +321,7 @@ type separation struct {
 func (v *fnVerifier) reachApart(ref, position *logic.Term) *logic.Term {
 	var facts []*logic.Term
 	for _, r := range v.reaches {
-		reached := logic.Select(logic.Select(r.rel, ref), position)
+		reached := r.reachedAt(v, ref, position)
 		inRow, rowFacts := v.rowAt(logic.Const(entryRegion+footprintRegion, footprintSort), r.home, ref, position)
 		facts = append(facts, rowFacts...)
 		facts = append(facts, logic.Implies(reached, logic.And(logic.Not(inRow), logic.Lt(logic.IntLit(0), ref), logic.Lt(ref, v.entryBrk))))
@@ -414,6 +464,7 @@ func holdsMemory(t types.Type) bool {
 // the callers of a value cannot be asked about.
 func (v *fnVerifier) enterReaches(st *state) {
 	fn := v.fn
+	v.reaches = nil
 	if fn.decl == nil || fn.trust != nil || fn.valueOf != nil || fn.methodOf != nil {
 		return
 	}
@@ -425,7 +476,7 @@ func (v *fnVerifier) enterReaches(st *state) {
 		v.inputs[r.rel.Name] = true
 		for _, other := range fn.params {
 			if other != t.param && v.entry[other] != nil && holdsMemory(other.Type()) {
-				st.assume(v.reachedBy(r.rel, v.entry[other], other.Type()))
+				r.direct = append(r.direct, passedValue{val: v.entry[other], t: other.Type()})
 			}
 		}
 		v.reaches = append(v.reaches, r)
@@ -448,7 +499,7 @@ func (v *fnVerifier) noteReached(sink *state, cells []cell, ref, at *logic.Term,
 	}
 	holder := logic.Add(at, logic.IntLit(cells[0].off))
 	for _, r := range v.reaches {
-		fact := logic.Implies(logic.Select(logic.Select(r.rel, ref), holder), v.reachedBy(r.rel, entry, t))
+		fact := logic.Implies(r.reachedAt(v, ref, holder), v.reachedBy(r.rel, entry, t))
 		if note := "reached " + fact.String(); !sink.noted[note] {
 			sink.noted[note] = true
 			sink.assume(fact)
@@ -470,7 +521,7 @@ func (v *fnVerifier) noteReachedValue(sink *state, t types.Type, ref, key *logic
 		entry[i] = logic.Select(logic.Select(region, ref), mapKey(key))
 	}
 	for _, r := range v.reaches {
-		fact := logic.Implies(logic.Select(logic.Select(r.rel, ref), logic.IntLit(0)), v.reachedBy(r.rel, entry, elem))
+		fact := logic.Implies(r.reachedAt(v, ref, logic.IntLit(0)), v.reachedBy(r.rel, entry, elem))
 		if note := "reached " + fact.String(); !sink.noted[note] {
 			sink.noted[note] = true
 			sink.assume(fact)
@@ -487,4 +538,22 @@ func (v *fnVerifier) refuseStatesBehind(call *ast.CallExpr, fn *funcInfo, sel *a
 		v.unsupported(call.Pos(), fmt.Sprintf("%s writes behind its receiver, and %s has states; a call that writes behind the receiver of a value with states "+
 			"is not supported yet", methodTitle(callee), types.ExprString(sel.X)))
 	}
+}
+
+// growsNothing reports whether a call can make nothing it creates part of
+// a footprint: it is not written to, it modifies no footprint, and it
+// returns nothing and writes nothing that can hold an interface value. A
+// call that does no such thing needs no growth layer, which keeps the chain
+// of layers short in a function that never meets a footprint.
+func (v *fnVerifier) growsNothing(fn *funcInfo) bool {
+	if writesFootprint(v, fn) {
+		return false
+	}
+	sig := fn.obj.Type().(*types.Signature)
+	for result := range sig.Results().Variables() {
+		if reachesCode(result.Type(), map[types.Type]bool{}) {
+			return false
+		}
+	}
+	return !v.targetsHoldReferences(fn)
 }

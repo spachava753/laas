@@ -2,7 +2,10 @@
 // interface value, through interfaces declared in source without states.
 package footprints
 
-import "io"
+import (
+	"errors"
+	"io"
+)
 
 // Sink takes bytes, and keeps what it is given in memory of its own.
 type Sink interface {
@@ -327,4 +330,140 @@ func RangedPeek(s Sink, h Shelf) {
 func NilMap(s Sink, m map[int]int) (r int) {
 	s.Put(nil)
 	return m[1] // want `postcondition may not hold: m != nil`
+}
+
+// Cell holds a pair.
+type Cell struct{ P *Pair }
+
+// RepointField points a field of a parameter at a pair that may lie in what
+// s writes, and reads it after a write through s.
+//
+// @Requires s != nil And g != nil And c != nil
+// @Modifies s, c
+// @Ensures r = 1
+func RepointField(s Sink, g Peeker, c *Cell) (r int) {
+	p := g.Peek()
+	if p.A != 1 {
+		return 1
+	}
+	c.P = p
+	q := c.P
+	s.Put(nil)
+	return q.A // want `postcondition may not hold: r = 1`
+}
+
+// RepointElem does the same through an element of a slice.
+//
+// @Requires s != nil And g != nil And |ps| > 0
+// @Modifies s, ps
+// @Ensures r = 1
+func RepointElem(s Sink, g Peeker, ps []*Pair) (r int) {
+	p := g.Peek()
+	if p.A != 1 {
+		return 1
+	}
+	ps[0] = p
+	s.Put(nil)
+	return ps[0].A // want `postcondition may not hold: r = 1`
+}
+
+// RepointMap does the same through an entry of a map.
+//
+// @Requires s != nil And g != nil And m != nil
+// @Modifies s, m
+// @Ensures r = 1
+func RepointMap(s Sink, g Peeker, m map[int]*Pair) (r int) {
+	p := g.Peek()
+	if p.A != 1 {
+		return 1
+	}
+	m[0] = p
+	s.Put(nil)
+	q := m[0]
+	if q == nil {
+		return 1
+	}
+	return q.A // want `postcondition may not hold: r = 1`
+}
+
+// Counter counts, and writes behind its receiver as a Sink.
+type Counter struct{ N int }
+
+// @Requires c != nil And |p| <= 100
+// @Modifies c
+// @Ensures 0 <= n <= |p|
+func (c *Counter) Put(p []byte) (n int) {
+	if c.N < 1000 {
+		c.N++
+	}
+	return 0
+}
+
+// @Requires c != nil
+// @Ensures s != nil
+func Conv(c *Counter) (s Sink) {
+	return c // want `cannot verify Conv: converting a value of type \*Counter to Sink is not supported yet: Sink.Put writes behind its receiver`
+}
+
+// Factory makes a sink and a pair.
+type Factory interface {
+	// @Ensures s != nil And fresh(s) And p != nil And fresh(p)
+	Make() (s Sink, p *Pair)
+}
+
+// MakeAndWrite relies on a new pair staying as it was across a write
+// through a new sink, which may hold it.
+//
+// @Requires f != nil
+// @Ensures r = 5
+func MakeAndWrite(f Factory) (r int) {
+	s, p := f.Make()
+	p.A = 5
+	s.Put(nil) // want `s.Put may modify the footprint of s, which MakeAndWrite may not modify`
+	return p.A // want `postcondition may not hold: r = 5`
+}
+
+// Reuser makes a pair, and hands out a sink that may hold it.
+type Reuser interface {
+	// @Ensures s != nil And p != nil And fresh(p)
+	Make() (s Sink, p *Pair)
+}
+
+// MakeOld relies on a new pair staying as it was across a write through a
+// sink that may be an old value holding it.
+//
+// @Requires f != nil
+// @Ensures r = 5
+func MakeOld(f Reuser) (r int) {
+	s, p := f.Make()
+	p.A = 5
+	s.Put(nil) // want `s.Put may modify the footprint of s, which MakeOld may not modify`
+	return p.A // want `postcondition may not hold: r = 5`
+}
+
+// MayFail writes through s and then fails unless q.A is 1.
+//
+// @Requires s != nil And q != nil
+// @Modifies s
+// @Ensures err = nil <-> q.A = 1
+func MayFail(s Sink, q *Pair) (err error) {
+	s.Put(nil)
+	if q.A != 1 {
+		return errors.New("not one")
+	}
+	return nil
+}
+
+// Weak lets the function always fail: it says only that success means
+// q.A is 1.
+//
+// @Requires s != nil And q != nil
+// @Modifies s
+// @Ensures err = nil -> q.A = 1
+func Weak(s Sink, q *Pair) (err error) { // want `the contract of Weak may also be met by a function that always returns an error`
+	s.Put(nil)
+	if q.A != 1 {
+		return errors.New("not one")
+	}
+	return nil
 }

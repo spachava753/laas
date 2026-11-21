@@ -217,6 +217,7 @@ func (v *fnVerifier) loadIn(lv lvalue, sink *state, mem memory) value {
 	}
 	val := v.fetch(sink, mem, lv.cells, lv.ref, lv.at)
 	v.noteTyped(sink, val, lv.typ)
+	v.noteReached(sink, lv.cells, lv.ref, lv.at, lv.typ)
 	return val
 }
 

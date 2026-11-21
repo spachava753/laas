@@ -78,6 +78,12 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 	// with what it holds but pass it on. Each method of any other
 	// interface is checked against its contract, for the value as it is
 	// here.
+	if method := v.stateSpeaker(want); method != nil && !v.hasStates(want) {
+		shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
+		v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s writes behind its receiver, "+
+			"and what the methods of %s write is not tied to the footprint of the interface value yet. Make the conversion in code that is not verified",
+			shown(from), shown(want), methodTitle(method), shown(from)))
+	}
 	if method := v.stateSpeaker(want); method != nil {
 		shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
 		phrase, pronoun := stateNames(v.ifaceStatesOf(want))

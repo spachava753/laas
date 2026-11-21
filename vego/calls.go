@@ -589,6 +589,16 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	if u := v.unit; len(written) > 0 && u != nil {
 		u.wrote(st, "the call to "+name)
 	}
+	// Whatever the callee created may be part of a footprint afterwards,
+	// of a value it wrote or of one it returned, whose home may be an old
+	// one; what existed before keeps its place in every footprint.
+	if !v.growsNothing(fn) && !hasFootprintTarget(written) {
+		var notRun *logic.Term
+		if len(guard) > 0 {
+			notRun = logic.Not(logic.And(guard...))
+		}
+		v.growing = append(v.growing, v.grow(st, existed, notRun))
+	}
 	// The callee may have created objects, if it ran.
 	st.brk = v.fresh("brk", logic.Ref)
 	st.assume(logic.Le(existed, st.brk))

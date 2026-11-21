@@ -885,9 +885,19 @@ func (v *fnVerifier) contractInstance(entry *state) (pre, post, failures []*logi
 			st.assume(v.deepFacts(st.mem, results[i], result.Type(), st.brk))
 		}
 	}
+	// What the types say of the parameters in memory on return matters,
+	// beyond what they say in memory on entry, only to an Ensures that
+	// reads the memory on return. A contract that writes a footprint makes
+	// every region unknown on return, and Z3 gives up on a question over
+	// them; without such a clause its facts are stated in memory on entry,
+	// which is part of the input, and each is true there.
+	stated := st.mem
+	if !primedEnsures(fn) && hasFootprintTarget(v.frame) {
+		stated = memory{}
+	}
 	for _, param := range fn.params {
 		if v.entry[param] != nil {
-			typed := v.deepFacts(st.mem, v.entry[param], param.Type(), st.brk)
+			typed := v.deepFacts(stated, v.entry[param], param.Type(), st.brk)
 			v.typing[typed] = true
 			st.assume(typed)
 		}
@@ -2004,4 +2014,18 @@ func scramble(sample, slot uint64) uint64 {
 	x ^= x >> 27
 	x *= 0x94D049BB133111EB
 	return x ^ x>>31
+}
+
+// primedEnsures reports whether an Ensures of a contract speaks of the
+// state on return through a primed path.
+func primedEnsures(fn *funcInfo) bool {
+	found := false
+	for _, c := range fn.ensures {
+		c.node.Walk(func(n *logic.Node) {
+			if n.Primed {
+				found = true
+			}
+		})
+	}
+	return found
 }
