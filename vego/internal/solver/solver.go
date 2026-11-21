@@ -10,6 +10,7 @@ package solver
 import (
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"math/big"
 	"strconv"
 	"strings"
@@ -160,13 +161,14 @@ func (s *Solver) Model(facts []*logic.Term, opts Options, consts []*logic.Term) 
 		first := opts
 		first.Effort, first.ModelFirst, first.withoutEMatching = min(opts.ModelFirst, effortOf(opts)), 0, true
 		result, _ := s.Model(facts, first, nil)
-		if result == Refuted && compareModelFirst {
+		if (result == Refuted || result == Proved) && compareModelFirst.Load() {
 			full := opts
 			full.ModelFirst, full.Observe = 0, nil
-			if again, _ := s.Model(facts, full, nil); again == Proved {
+			if again, _ := s.Model(facts, full, nil); again == Refuted && result == Proved || again == Proved && result == Refuted {
 				_, script, remarked := encode(facts, first)
-				panic(&Fault{fmt.Errorf("the first attempt at a satisfiability check found a model, and the check found none:\n%s", script), dump(remarked)})
+				panic(&Fault{fmt.Errorf("the first attempt at a satisfiability check answers %v and the check in full %v:\n%s", result, again, script), dump(remarked)})
 			}
+			compared.Add(1)
 		}
 		if result == Proved || result == Refuted {
 			return result, nil
@@ -323,15 +325,26 @@ const tactic = "(then simplify propagate-values simplify elim-uncnstr smt)"
 const tacticWithoutExtensionality = "(then simplify propagate-values simplify elim-uncnstr (using-params smt :array.extensional false))"
 
 // compareModelFirst makes every first attempt at a satisfiability check
-// that finds a model be followed by the full check, which must not find the
-// facts contradictory: Z3 would then have given one problem a model and a
-// proof that it has none. The tests of the corpus set it, through
-// CompareModelFirst.
-var compareModelFirst bool
+// that settles it be followed by the full check, which must not settle it
+// the other way: Z3 would then have given one problem a model and a proof
+// that it has none. compared counts the checks compared. A test that runs
+// on request sets it, through CompareModelFirst.
+var (
+	compareModelFirst atomic.Bool
+	compared          atomic.Int64
+)
 
-// CompareModelFirst turns on the comparison of compareModelFirst. Only the
-// tests call it.
-func CompareModelFirst() { compareModelFirst = true }
+// CompareModelFirst turns on the comparison of compareModelFirst until the
+// returned function is called, which says how many checks were compared.
+// Only a test calls it.
+func CompareModelFirst() func() int64 {
+	compareModelFirst.Store(true)
+	before := compared.Load()
+	return func() int64 {
+		compareModelFirst.Store(false)
+		return compared.Load() - before
+	}
+}
 
 // effortOf returns the resource limit of a problem.
 func effortOf(opts Options) int {

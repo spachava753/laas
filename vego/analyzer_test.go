@@ -129,6 +129,13 @@ func runCorpus(t *testing.T, analyzer *analysis.Analyzer, patterns ...string) *c
 	return graph
 }
 
+// mainCorpus is the packages of the main corpus run of TestAnalyzer.
+var mainCorpus = []string{
+	"paper", "algorithms", "defects", "variadic", "formatting", "rejected", "leetcode", "semantics", "effects", "ordering", "integers", "values", "trust",
+	"lib", "client", "memory", "shapes", "badshapes", "invariants", "mapping", "badpred", "usesbadpred", "early", "settled", "gen", "earlytype", "earlyrange", "earlybox", "earlyloop", "earlycarrier", "earlypanic", "guide", "wrapped", "unread", "usesunread", "twovariants", "usestwovariants", "lonecr", "errorsid", "errorsvars", "errorsvarsclient", "vouched", "vouchedclient", "vouchedcapture", "earlyalias", "earlyaliasok", "sentinellib", "sentinelclient", "usesearly", "sentinelfar", "sentinelfarther", "closures", "funcvalues", "funcvalueslib", "funcvaluesclient", "funcvaluesunread", "funcvaluesinit", "funcvaluesinitdefer", "funcvaluesinitok", "funcvaluesinitmethod", "funcvaluesoldloop", "funcvaluesinitlit", "callbacks", "callbacksinit", "interfaces", "interfaceslib", "interfacesunread", "interfacesinitok", "interfacesinithand", "interfacesinitcall", "foreign", "stdtypes", "locks", "lockspred", "lockslib", "locksclient", "layers", "ifacestate", "ensuresentry", "manywrites", "slowresp", "slowhttp", "deepfacts",
+	"globals", "globalslib", "globalsclient", "globalsembed", "globalsearly", "unsafelib", "unsafeuse", "keeps", "keepslib", "buffered", "iowrap", "globalsleak", "globalsleakclient", "trialfaults", "smalls", "vouchsrc", "vouchsrcclient", "vouchsrcbad", "stdentries", "originpath", "originpathclient", "generics", "genericslib", "deletes", "cycles/...",
+}
+
 func TestAnalyzer(t *testing.T) {
 	parallel(t)
 	t.Run("verifies annotated functions", func(t *testing.T) {
@@ -144,10 +151,7 @@ func TestAnalyzer(t *testing.T) {
 		}
 
 		costs := collectCosts(analyzer)
-		runCorpus(t, analyzer,
-			"paper", "algorithms", "defects", "variadic", "formatting", "rejected", "leetcode", "semantics", "effects", "ordering", "integers", "values", "trust",
-			"lib", "client", "memory", "shapes", "badshapes", "invariants", "mapping", "badpred", "usesbadpred", "early", "settled", "gen", "earlytype", "earlyrange", "earlybox", "earlyloop", "earlycarrier", "earlypanic", "guide", "wrapped", "unread", "usesunread", "twovariants", "usestwovariants", "lonecr", "errorsid", "errorsvars", "errorsvarsclient", "vouched", "vouchedclient", "vouchedcapture", "earlyalias", "earlyaliasok", "sentinellib", "sentinelclient", "usesearly", "sentinelfar", "sentinelfarther", "closures", "funcvalues", "funcvalueslib", "funcvaluesclient", "funcvaluesunread", "funcvaluesinit", "funcvaluesinitdefer", "funcvaluesinitok", "funcvaluesinitmethod", "funcvaluesoldloop", "funcvaluesinitlit", "callbacks", "callbacksinit", "interfaces", "interfaceslib", "interfacesunread", "interfacesinitok", "interfacesinithand", "interfacesinitcall", "foreign", "stdtypes", "locks", "lockspred", "lockslib", "locksclient", "layers", "ifacestate", "ensuresentry", "manywrites", "slowresp", "slowhttp", "deepfacts",
-			"globals", "globalslib", "globalsclient", "globalsembed", "globalsearly", "unsafelib", "unsafeuse", "keeps", "keepslib", "buffered", "iowrap", "globalsleak", "globalsleakclient", "trialfaults", "smalls", "vouchsrc", "vouchsrcclient", "vouchsrcbad", "stdentries", "originpath", "originpathclient", "generics", "genericslib", "deletes", "cycles/...")
+		runCorpus(t, analyzer, mainCorpus...)
 		recorded, quoted := costs()
 		// The checks for a contradiction of the shipped entries of
 		// slices.Delete, slices.DeleteFunc, and slices.Compact, and after
@@ -285,6 +289,35 @@ func TestAnalyzer(t *testing.T) {
 	})
 }
 
+// TestModelFirstAgrees runs the main corpus with every contradiction
+// check that its first attempt settles also asked in full, and fails if
+// the two answers differ, one a model and the other a proof that there is
+// none. It takes about a minute of Z3 time more than the corpus run, so it
+// runs only when VEGO_COMPARE_ATTEMPTS is set; it is to be run again when
+// the release of Z3 moves (see The prover in the ROADMAP):
+//
+//	VEGO_COMPARE_ATTEMPTS=1 systemd-run --user --scope --quiet -p MemoryMax=12G -p MemorySwapMax=4G -- \
+//	go test -count=1 -run TestModelFirstAgrees ./vego
+func TestModelFirstAgrees(t *testing.T) {
+	alone(t)
+	if os.Getenv("VEGO_COMPARE_ATTEMPTS") == "" {
+		t.Skip("VEGO_COMPARE_ATTEMPTS is not set")
+	}
+	analyzer := newAnalyzer()
+	for name, value := range map[string]string{"trusted": filepath.Join("testdata", "trusted.yaml"), "other-tags": "Summary, Param,x-order", "cache": "", "speculate": "false"} {
+		if err := analyzer.Flags.Set(name, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stop := solver.CompareModelFirst()
+	runCorpus(t, analyzer, mainCorpus...)
+	compared := stop()
+	if compared == 0 {
+		t.Fatal("no contradiction check was compared")
+	}
+	t.Logf("%d contradiction checks that their first attempt settled were asked in full, with the same answer", compared)
+}
+
 // TestPackageSettings runs the corpus programs that need a setting of the
 // whole package changed, while no other test runs.
 func TestPackageSettings(t *testing.T) {
@@ -396,8 +429,5 @@ func init() {
 	// VEGO_CACHE names a cache of answers for the tests to use; see
 	// -vego.cache. Without it every test asks Z3.
 	testCache = os.Getenv("VEGO_CACHE")
-	// Every contradiction check of the corpus that its first attempt ends
-	// with a model is also asked in full, which must not prove the facts
-	// contradictory; see solver.Options.ModelFirst.
-	solver.CompareModelFirst()
+
 }
