@@ -67,6 +67,13 @@ type Options struct {
 	Forall []*logic.Term
 	// Observe, when set, is told what the problem cost.
 	Observe func(Cost)
+	// ModelFirst, when not zero, is the resource limit of a first attempt
+	// at a satisfiability check without e-matching; see Model.
+	ModelFirst int
+	// withoutEMatching solves every problem without e-matching, as the
+	// first attempt does, so that the tests can check Z3's proofs in that
+	// setting; see Model.
+	withoutEMatching bool
 	// withoutExtensionality makes every problem be solved without the
 	// axiom of extensionality, so that the tests can check Z3's proofs in
 	// that setting on problems of every shape; see encode.
@@ -123,6 +130,34 @@ func (s *Solver) Check(facts []*logic.Term, opts Options) Result {
 // offer values after an unknown outcome too. The values are a candidate
 // for the caller to confirm by proof, never evidence by themselves.
 func (s *Solver) Model(facts []*logic.Term, opts Options, consts []*logic.Term) (Result, map[string]*logic.Term) {
+	// A satisfiability check whose ModelFirst is set is asked first without
+	// e-matching, at that limit, and, when that answer is open, as any other
+	// problem. Without e-matching, Z3 instantiates
+	// quantified facts only through its model-based instantiation, which on
+	// some problems builds a model at once where e-matching keeps making new
+	// instances to the limit: the contradiction check of the shipped entry of
+	// slices.Delete, whose facts quantify over a row written through a store,
+	// is sat in 5,956 units that way and open at 4,000,754 units otherwise.
+	//
+	// Either answer of the attempt is used. An unsat is an unsat whatever the
+	// search: e-matching only adds instances of the facts, so leaving it out
+	// cannot make Z3 find a contradiction that the facts do not have. A sat
+	// says that the facts have a model in the logic. This is not a model taken
+	// as evidence that a Go state exists, which the verifier never does (see
+	// Refuted): a satisfiability check asks only whether the facts of the logic
+	// contradict each other, and sat says that they do not, as an open answer
+	// says nothing more than that no contradiction was found. In Z3 5.4.1 the
+	// option is read only by the e-matching plugin and by pattern inference; a
+	// sat with quantifiers rests on the same check of the candidate model by
+	// model-based instantiation either way. TestProveIsSound solves its random
+	// problems in this setting too.
+	if opts.ModelFirst > 0 && len(consts) == 0 {
+		first := opts
+		first.Effort, first.ModelFirst, first.withoutEMatching = min(opts.ModelFirst, effortOf(opts)), 0, true
+		if result, _ := s.Model(facts, first, nil); result == Proved || result == Refuted {
+			return result, nil
+		}
+	}
 	e, script, remarked := encode(facts, opts)
 	var names []string
 	byName := map[string]*logic.Term{}
@@ -271,6 +306,14 @@ const tactic = "(then simplify propagate-values simplify elim-uncnstr smt)"
 // to a limit.
 const tacticWithoutExtensionality = "(then simplify propagate-values simplify elim-uncnstr (using-params smt :array.extensional false))"
 
+// effortOf returns the resource limit of a problem.
+func effortOf(opts Options) int {
+	if opts.Effort == 0 {
+		return DefaultEffort
+	}
+	return opts.Effort
+}
+
 // Script returns the SMT-LIB text of a satisfiability check of the facts,
 // ending in its check-sat-using, as it is sent to Z3.
 func Script(facts []*logic.Term, opts Options) string {
@@ -285,10 +328,7 @@ func Script(facts []*logic.Term, opts Options) string {
 // the comments carry numbers that depend on what the process did before,
 // so two texts that differ only in them would be asked twice.
 func encode(facts []*logic.Term, opts Options) (e *encoder, script, remarked string) {
-	effort := opts.Effort
-	if effort == 0 {
-		effort = DefaultEffort
-	}
+	effort := effortOf(opts)
 	if effort < 0 || effort > MaxEffort {
 		fault("resource limit %d is outside what Z3 accepts", effort)
 	}
@@ -321,6 +361,10 @@ func encode(facts []*logic.Term, opts Options) (e *encoder, script, remarked str
 	chain := tactic
 	if opts.withoutExtensionality || (e.nested && !e.tellsApart) {
 		chain = tacticWithoutExtensionality
+	}
+	if opts.withoutEMatching {
+		chain = strings.Replace(chain, "(using-params smt ", "(using-params smt :ematching false ", 1)
+		chain = strings.Replace(chain, " smt)", " (using-params smt :ematching false))", 1)
 	}
 	head, body, tail := "(set-option :rlimit "+strconv.Itoa(effort)+")\n", e.out.String(), "(check-sat-using "+chain+")\n"
 	var plain strings.Builder

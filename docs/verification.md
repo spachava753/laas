@@ -1833,9 +1833,8 @@ laas -vego -vego.cost ./...
 For `Load` from [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write), under the entries shown there, in a file `foreign.go` that declares it at line 52, it prints:
 
 ```text
-foreign.go:52:6: vego cost of Load: 41 problems, 5285108 resource units, 143445 bytes, 1.60 s
+foreign.go:52:6: vego cost of Load: 41 problems, 4894313 resource units, 143569 bytes, 1.60 s
 	foreign.go:52:6: 2 questions of the always-fails check stopped at a limit
-	foreign.go:53:2: 2 contradiction checks stopped at a limit
 ```
 
 The first line counts the problems that `vego` handed to Z3, the work Z3 counted for them, and the size of their text. These three numbers are the same on every run with the same `laas`, Go, and Z3. The seconds are the time spent on the function. They include time spent waiting for a free Z3 process while other packages are verified at the same time, so they change with the machine and its load. They do not include the time spent on other functions, such as checking a trusted contract that the function calls, which get a line of their own.
@@ -1854,11 +1853,13 @@ The work each is allowed:
 | --- | --- |
 | proof obligation | `-vego.rlimit` |
 | question of the always-fails check | `-vego.rlimit`, 200000 units for whether an outcome depends on a call, and a quarter of `-vego.rlimit` for a proposal of an input |
-| contradiction check | 200000 units, and `-vego.rlimit` for the check of a trusted contract, of a contract of a type, and of the invariants of a type |
+| contradiction check | 200000 units, and `-vego.rlimit` for the check of a trusted contract, of a contract of a type, and of the invariants of a type; each is first asked with a tenth of that, at most 200000 units |
 | check whether a `Modifies` entry is needed | 200000 units |
 | quick check | 200000 units |
 
 With `-vego.cache`, a function whose answers came from the cache has a clause at the end of its first line, such as `, 13 answered from the answer cache on disk`. See [Keeping answers between runs](#keeping-answers-between-runs).
+
+A contradiction check is first asked of Z3 with a search that finds a solution more easily when the facts hold quantifiers, at a tenth of the check's limit. When that search does not settle the question, the check is asked again in full, so a function can count two problems for one check.
 
 A proof obligation that stops at a limit draws a message with the note. So does the always-fails check when it reports a contract and a question of its search stopped at a limit. Other questions draw no message of their own. When one of them stops at a limit, `vego` goes on as when a proof fails: a path counts as possible, a `Modifies` entry counts as needed, an outcome counts as one that may depend on a call, a contradiction counts as not found, and an input that the search did not find counts as not found, which can make `vego` report the contract.
 

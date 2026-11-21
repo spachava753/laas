@@ -39,8 +39,23 @@ func (pv *pkgVerifier) options(effort int, kind question) solver.Options {
 	if effort == 0 {
 		effort = pv.effort
 	}
-	return solver.Options{Preds: pv.res.Preds, Effort: effort, Observe: pv.observe(kind)}
+	opts := solver.Options{Preds: pv.res.Preds, Effort: effort, Observe: pv.observe(kind)}
+	// A contradiction check is asked first without e-matching; see
+	// solver.Options.ModelFirst. Only a check that counts as one, as
+	// observe counts it: a question of a search for an input reads an open
+	// answer as a limit the search stopped at, which the report says. The
+	// attempt has a tenth of the check's limit: at the full limit of a quick
+	// check, a check whose attempt is open too would cost twice, which on
+	// the corpus cost more time than the attempts saved.
+	if pv.effectiveKind(kind) == contradictionCheck {
+		opts.ModelFirst = min(modelFirstEffort, effort/10)
+	}
+	return opts
 }
+
+// modelFirstEffort is the largest resource limit of the first attempt at a
+// contradiction check.
+const modelFirstEffort = 200_000
 
 // proves reports whether goal provably follows from the hypotheses.
 func (pv *pkgVerifier) proves(hyps []*logic.Term, goal *logic.Term, effort int) bool {

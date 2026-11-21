@@ -117,16 +117,24 @@ func (pv *pkgVerifier) asking(kind question) func() {
 	return func() { pv.purpose, pv.purposeSet = saved, savedSet }
 }
 
-// observe returns what a problem's cost is told to: it counts against the
-// function being verified, at the place and of the kind set, or else of
-// the kind given.
-func (pv *pkgVerifier) observe(kind question) func(solver.Cost) {
+// effectiveKind returns what a question of the given kind counts as: the
+// kind set by asking, and a question of the always-fails check while a
+// search for an input is under way.
+func (pv *pkgVerifier) effectiveKind(kind question) question {
 	if pv.purposeSet {
 		kind = pv.purpose
 	}
 	if pv.searching > 0 {
 		kind = failureCheck
 	}
+	return kind
+}
+
+// observe returns what a problem's cost is told to: it counts against the
+// function being verified, at the place and of the kind set, or else of
+// the kind given.
+func (pv *pkgVerifier) observe(kind question) func(solver.Cost) {
+	kind = pv.effectiveKind(kind)
 	fn, at := pv.costFn, pv.askAt
 	if fn == nil {
 		// Every question is asked while some function is verified or

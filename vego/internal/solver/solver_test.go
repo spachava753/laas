@@ -837,11 +837,15 @@ func TestProveIsSound(t *testing.T) {
 		// tacticWithoutExtensionality. The problems are those of the test
 		// with the same seed solved with it.
 		without bool
+		// noEMatching solves every problem without e-matching, as the
+		// first attempt at a contradiction check does; see Model.
+		noEMatching bool
 	}{
-		{"plain problems", false, 1, 4000, 1000, small, false},
-		{"wide problems", true, 3, 4000, 1100, append(small, large...), false},
-		{"plain problems without extensionality", false, 1, 4000, 1000, small, true},
-		{"wide problems without extensionality", true, 3, 4000, 1100, append(small, large...), true},
+		{"plain problems", false, 1, 4000, 1000, small, false, false},
+		{"wide problems", true, 3, 4000, 1100, append(small, large...), false, false},
+		{"plain problems without extensionality", false, 1, 4000, 1000, small, true, false},
+		{"wide problems without extensionality", true, 3, 4000, 1100, append(small, large...), true, false},
+		{"wide problems without e-matching", true, 3, 4000, 1100, append(small, large...), false, true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -869,7 +873,7 @@ func TestProveIsSound(t *testing.T) {
 			for range maxProcesses {
 				wg.Go(func() {
 					for i := range next {
-						results[i] = z3.Prove(problems[i].hyps, problems[i].goal, Options{Preds: definitions(), Effort: 200_000, withoutExtensionality: test.without})
+						results[i] = z3.Prove(problems[i].hyps, problems[i].goal, Options{Preds: definitions(), Effort: 200_000, withoutExtensionality: test.without, withoutEMatching: test.noEMatching})
 					}
 				})
 			}
