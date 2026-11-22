@@ -566,9 +566,15 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			unlisted = v.notListable(passedExpr[t.param], call.Pos())
 		}
 		if t.fp {
-			v.checkFootprintWrite(st, guard, t, call.Pos(), fmt.Sprintf("%s may modify the footprint of %s", name, what), remedy, unlisted)
+			footprintOf := what
+			if t.row {
+				footprintOf = strings.TrimPrefix(what, "the states of ")
+			}
+			v.checkFootprintWrite(st, guard, t, call.Pos(), fmt.Sprintf("%s may modify the footprint of %s", name, footprintOf), remedy, unlisted)
 			v.checkFootprintRanged(st, guard, t, call.Pos(), name)
-			continue
+			if !t.row {
+				continue
+			}
 		}
 		v.checkWriteOr(st, guard, t.reach(), call.Pos(), fmt.Sprintf("%s may modify %s", name, what), remedy, unlisted)
 	}

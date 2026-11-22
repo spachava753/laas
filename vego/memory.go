@@ -1046,6 +1046,14 @@ func (v *fnVerifier) havoc(st *state, t target, guard []*logic.Term) {
 			notRun = skipped
 		}
 		v.growing = append(v.growing, v.grow(st, st.brk, notRun))
+		if t.row {
+			// The states of the value itself, which the epoch keeps, are
+			// what its contract governs.
+			before := v.row(nil, st.mem, stateRegion, logic.Bool, t.ref)
+			unknown := v.fresh("written", logic.BoolSeq)
+			kept(unknown, before)
+			st.storeRow(stateRegion, logic.Bool, t.ref, unknown)
+		}
 	case t.mapType != nil && t.key != nil:
 		v.havocEntry(st, t, skipped, len(guard) > 0)
 	case t.mapType != nil:

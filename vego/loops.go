@@ -416,7 +416,7 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 	}
 	writesFootprints := !preciseFootprints || len(footprints) > 0
 	for _, at := range eff.sites {
-		if at.fp {
+		if at.fp && !at.row {
 			continue
 		}
 		val := st.vals[at.root]

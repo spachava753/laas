@@ -1480,6 +1480,11 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 			t.ref, t.rows = home(cur.val[0]), mem.region(footprintRegion, footprintSort)
 		}
 		t.fp = true
+		// A value with states: the entry also covers every state of it.
+		if v.hasStates(final) {
+			form.cells, form.row = []cell{stateCell}, true
+			t.row = true
+		}
 	case isIface(final):
 		// Every state of what the interface value holds, which lies in
 		// the row of its home; see ifacestate.go. The value itself, a

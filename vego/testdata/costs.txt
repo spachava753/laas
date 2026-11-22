@@ -702,6 +702,8 @@ footprints	footprints.PickedFrom	8	40539	0
 footprints	footprints.PickedFromUnknown	11	51987	0
 footprints	footprints.Put	6	1821	0
 footprints	footprints.PutN	8	6755	0
+footprints	footprints.PutThenClose	17	34526	6
+footprints	footprints.PutThenCloseOther	19	50823	7
 footprints	footprints.RangeStores	13	52204	0
 footprints	footprints.RangedPeek	15	56319	5
 footprints	footprints.Recursive	7	4941	0
@@ -719,7 +721,7 @@ footprints	footprints.StateLost	18	43503	7
 footprints	footprints.StoredNew	11	12626	0
 footprints	footprints.StoresSink	17	44743	2
 footprints	footprints.ThroughLater	5	3649	0
-footprints	footprints.ThroughStates	2	731	0
+footprints	footprints.ThroughStates	8	6136	0
 footprints	footprints.Touch	8	7086	0
 footprints	footprints.TouchAll	8	9271	0
 footprints	footprints.Unlisted	6	5123	0

@@ -2,7 +2,6 @@ package vego
 
 import (
 	"fmt"
-	"go/ast"
 	"go/token"
 	"go/types"
 	"strings"
@@ -35,10 +34,14 @@ import (
 //     parameters reach without going through an interface value (reach),
 //     which is the assumption about callers.
 //
-// In this first part a value has a footprint only when its interface type
-// is declared in source, has no states, and has a method whose contract
-// lists its receiver; every other interface value keeps the meaning of
-// states only.
+// A value has a footprint when its interface type has a method declared on
+// an interface without states whose contract lists its receiver, in source
+// or in a trust file. Modifies of such a value covers its footprint, and
+// its states when its type has states. A method declared on an interface
+// with states that lists its receiver changes the states and nothing else,
+// as before; and a call writes the states of its receiver only through
+// such a method (F7 (a) of the design review): Write of an io.WriteCloser,
+// declared on io.Writer, keeps closed.
 
 // footprintRegion is the ghost region of footprints.
 const footprintRegion = "footprint"
@@ -196,24 +199,31 @@ func (v *fnVerifier) rowAt(rows, home, alloc, pos *logic.Term) (*logic.Term, []*
 }
 
 // hasFootprint reports whether values of a type have a footprint: an
-// interface type that has no states and has a method whose contract lists
-// its receiver in Modifies; see the comment at the top.
+// interface type that has a method that writes behind its receiver; see
+// the comment at the top.
 func (pv *pkgVerifier) hasFootprint(t types.Type) bool {
-	if !isIface(t) || pv.hasStates(t) {
+	if !isIface(t) {
 		return false
 	}
+	// A method writes behind its receiver when its contract lists the
+	// receiver and the interface that declares it has no states. One
+	// declared on an interface with states that lists its receiver changes
+	// the states of the value and nothing else, as it did before
+	// footprints (D2, decided by the orchestrator: no contract that is
+	// legal changes its meaning).
 	for method := range t.Underlying().(*types.Interface).Methods() {
-		if writesBehind(pv.methodContract(method)) {
+		owner := declaringInterface(method)
+		if owner != nil && !pv.hasStates(owner.Type()) && writesBehind(pv.methodContract(method)) {
 			return true
 		}
 	}
 	return false
 }
 
-// writesBehind reports whether the contract of a method of an interface,
-// written in source, lists its receiver in Modifies.
+// writesBehind reports whether the contract of a method of an interface
+// lists its receiver in Modifies.
 func writesBehind(fn *funcInfo) bool {
-	if fn == nil || fn.trust != nil || fn.receiver == nil {
+	if fn == nil || fn.receiver == nil {
 		return false
 	}
 	for _, m := range fn.modifies {
@@ -529,16 +539,6 @@ func (v *fnVerifier) noteReachedValue(sink *state, t types.Type, ref, key *logic
 	}
 }
 
-// refuseStatesBehind refuses a call through a value whose type has states
-// of a method that writes behind its receiver, as a Write that an
-// interface embedding io.Closer takes from another: what such a write does
-// to the states of the value is not modelled yet.
-func (v *fnVerifier) refuseStatesBehind(call *ast.CallExpr, fn *funcInfo, sel *ast.SelectorExpr, callee *types.Func) {
-	if writesBehind(fn) && v.hasFootprint(fn.receiver.Type()) && v.hasStates(v.info.TypeOf(sel.X)) {
-		v.unsupported(call.Pos(), fmt.Sprintf("%s writes behind its receiver, and %s has states; a call that writes behind the receiver of a value with states "+
-			"is not supported yet", methodTitle(callee), types.ExprString(sel.X)))
-	}
-}
 
 // growsNothing reports whether a call can make nothing it creates part of
 // a footprint: it is not written to, it modifies no footprint, and it

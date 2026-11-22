@@ -454,7 +454,6 @@ func (v *fnVerifier) usableMethodContract(call *ast.CallExpr, callee *types.Func
 // checked against the contract there, and any other is taken to meet it.
 func (v *fnVerifier) callMethod(call *ast.CallExpr, callee *types.Func, st *state, guard []*logic.Term) []value {
 	fn, sel := v.usableMethodContract(call, callee, st, guard)
-	v.refuseStatesBehind(call, fn, sel, callee)
 	u := v.unit
 	operands := u.pushCeiling()
 	held, args := v.methodOperands(call, sel, fn, st, guard)
@@ -490,7 +489,6 @@ func (v *fnVerifier) methodOperands(call *ast.CallExpr, sel *ast.SelectorExpr, f
 // statement, which panics there for the nil interface.
 func (v *fnVerifier) deferMethod(s *ast.DeferStmt, callee *types.Func, st *state) {
 	fn, sel := v.usableMethodContract(s.Call, callee, st, nil)
-	v.refuseStatesBehind(s.Call, fn, sel, callee)
 	var held value
 	var args map[*types.Var]value
 	v.evaluate(st, func() {

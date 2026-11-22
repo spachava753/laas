@@ -72,7 +72,10 @@ trusted:
       Like every entry, it also claims that Close returns: a Close that
       flushes to a connection returns only when it can go on. Nothing is
       claimed of the error: an implementation may return any error, also
-      from a first Close.
+      from a first Close. Close is declared on an interface with states, so
+      it writes the states of the value and nothing verified code can see:
+      a closer that flushes into memory verified code holds on Close, as a
+      gzip.Writer over a bytes.Buffer does, breaks this.
     receiver: c
     requires:
       - "~closed(c)"

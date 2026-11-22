@@ -193,7 +193,29 @@ type SinkCloser interface {
 // @Modifies s
 // @Ensures True
 func ThroughStates(s SinkCloser) {
-	s.Put(nil) // want `cannot verify ThroughStates: Sink.Put writes behind its receiver, and s has states; a call that writes behind the receiver of a value with states is not supported yet`
+	s.Put(nil)
+}
+
+// PutThenClose writes through s and then closes it: Put is declared on
+// Sink, which has no states, so it keeps closed of the value it writes.
+//
+// @Requires s != nil And ~closed(s)
+// @Modifies s
+// @Ensures closed(s')
+func PutThenClose(s SinkCloser) {
+	s.Put(nil)
+	s.Close()
+}
+
+// PutThenCloseOther writes through one value and closes another, whose
+// state may lie in what the first writes.
+//
+// @Requires s != nil And c != nil And ~closed(c)
+// @Modifies s, c
+// @Ensures True
+func PutThenCloseOther(s SinkCloser, c SinkCloser) {
+	s.Put(nil)
+	c.Close() // want `precondition of c.Close may not hold: ~closed\(c\)`
 }
 
 // CallsKeeps passes a parameter beside s, which its own Modifies lists.
