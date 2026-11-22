@@ -658,7 +658,7 @@ footprints	footprints.Conv	1	241	0
 footprints	footprints.CopiesBuffer	0	0	0
 footprints	footprints.Deferred	14	35854	0
 footprints	footprints.EachItem	7	13216	0
-footprints	footprints.Factory.Make	3	7194	0
+footprints	footprints.Factory.Make	3	12426	0
 footprints	footprints.FilledThenKept	11	14386	0
 footprints	footprints.Fresh.Make	3	2891	0
 footprints	footprints.FromField	6	9545	0
@@ -685,7 +685,8 @@ footprints	footprints.LoopPeek	22	36982	0
 footprints	footprints.LoopStores	22	59110	0
 footprints	footprints.Made	5	3272	0
 footprints	footprints.MadeKept	16	17281	0
-footprints	footprints.MakeAndWrite	13	17644	0
+footprints	footprints.MakeAndKeep	11	48761	1
+footprints	footprints.MakeAndWrite	14	57100	2
 footprints	footprints.MakeOld	13	17609	0
 footprints	footprints.Maker.New	3	4398	0
 footprints	footprints.Maker.Touch	4	1824	0
@@ -693,6 +694,7 @@ footprints	footprints.MapStores	14	31208	0
 footprints	footprints.MayFail	25	33495	0
 footprints	footprints.NilBeside	9	7986	0
 footprints	footprints.NilMap	9	11137	1
+footprints	footprints.NotAFootprint.Make	1	182	0
 footprints	footprints.NotNeeded	2	731	0
 footprints	footprints.NotOwn	7	9908	0
 footprints	footprints.OnBranch	9	9056	0
@@ -700,6 +702,7 @@ footprints	footprints.OverMap	12	44663	5
 footprints	footprints.OwnNew	9	8242	0
 footprints	footprints.Packs	14	22678	0
 footprints	footprints.Passes	5	3229	0
+footprints	footprints.PassesTable	8	9519	0
 footprints	footprints.Peeked	14	20343	0
 footprints	footprints.Peeker.Peek	3	1980	0
 footprints	footprints.PickedFrom	8	40539	0
@@ -721,6 +724,7 @@ footprints	footprints.Reuser.Make	3	6597	0
 footprints	footprints.Shelf.Items	3	1801	0
 footprints	footprints.Shelves.All	3	5479	0
 footprints	footprints.Sink.Put	3	6151	0
+footprints	footprints.SinkMaker	3	7675	0
 footprints	footprints.Sliced	12	17064	0
 footprints	footprints.Spreads	17	34785	0
 footprints	footprints.StateLost	16	26705	0
@@ -731,12 +735,22 @@ footprints	footprints.ThroughStates	8	6136	0
 footprints	footprints.Touch	8	7086	0
 footprints	footprints.TouchAll	8	9271	0
 footprints	footprints.Unlisted	6	5123	0
+footprints	footprints.UsesMaker	10	21020	0
 footprints	footprints.ViaCopy	16	679205	7
 footprints	footprints.ViaSearch	20	47639	0
 footprints	footprints.Weak	29	42213	0
 footprints	footprints.WithinArg	6	6254	0
 footprints	footprints.WithinUnknown	9	19775	0
+footprints	footprints.WrapAndPut	11	40963	1
+footprints	footprints.WrapAndPutUnlisted	9	27416	1
 footprints	footprints.WriteThenRead	14	42039	0
+footprints	footprints.WritesBox	9	17607	0
+footprints	footprints.WritesBoxUnlisted	6	11394	0
+footprints	footprints.WritesSpare	10	25808	0
+footprints	footprints.WritesSpareUnlisted	7	15039	0
+footprints	footprints.WritesTable	9	11293	0
+footprints	footprints.WritesTableUnlisted	6	8483	0
+footprints	footprints.boxIn	1	4369	0
 footprints	footprints.countDown	8	2320	0
 footprints	footprints.countDownFrom	8	3350	0
 footprints	footprints.current	1	997	0
@@ -748,8 +762,12 @@ footprints	footprints.keepAll	8	5991	0
 footprints	footprints.later	3	1956	0
 footprints	footprints.pairsOf.Pairs	3	7581	0
 footprints	footprints.pick	1	8406	0
+footprints	footprints.putBeside	8	6770	0
 footprints	footprints.resetWriter	1	2648	0
+footprints	footprints.spareOf	1	5181	0
+footprints	footprints.tableOf	1	2926	0
 footprints	footprints.viaLater	1	46	0
+footprints	footprints.wrapSink	1	2911	0
 footprints	io.Closer.Close	7	2008994	2
 footprints	io.Writer.Write	3	5338	0
 footprints	sort.Search	1	2237	0
@@ -1540,7 +1558,10 @@ guide	guide.LoadWrapped	10	6184	0
 guide	guide.Loader.Load	5	6900	0
 guide	guide.LocalType	2	141	0
 guide	guide.Log	15	31229	0
+guide	guide.LogThroughTee	11	36190	1
+guide	guide.LogThroughTeeUnlisted	9	31230	1
 guide	guide.LogToFile	90	271189	0
+guide	guide.LogToNew	11	245630	2
 guide	guide.Logf	1	3565	0
 guide	guide.LogfVerified	1	895	0
 guide	guide.Logged	1	83	0
@@ -1603,6 +1624,7 @@ guide	guide.ReadOnce	46	5169483	4
 guide	guide.ReadParts	38	177769	2
 guide	guide.RecordThenClose	16	33526	0
 guide	guide.Recorder.Record	4	3410	0
+guide	guide.Recorders.New	3	7675	0
 guide	guide.Refill	12	23954	0
 guide	guide.RefillFirst	17	37488	0
 guide	guide.RefillOrdered	17	38366	0
@@ -1697,6 +1719,7 @@ guide	guide.logRecord	1	743	0
 guide	guide.open	3	11057	0
 guide	guide.record	1	138	0
 guide	guide.small	2	207	0
+guide	guide.teeRecorder	1	2911	0
 guide	guide.tell	1	70	0
 guide	guide.value	3	869	0
 guide	guide.zero	9	19438	0
@@ -3067,6 +3090,7 @@ shapes	shapes.New	8	3662	0
 shapes	shapes.Rect	1	221	0
 shapes	shapes.Unchecked	6	2616	0
 slowhttp	io.Closer.Close	7	2008994	2
+slowhttp	io.Reader.Read	3	4960	0
 slowhttp	slowhttp.Fetch	41	296332	6
 slowhttp	slowhttp.get	8	1178272	6
 slowresp	slowresp.Code	29	200416	8

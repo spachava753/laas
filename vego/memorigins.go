@@ -449,6 +449,15 @@ func (v *fnVerifier) memResult(e ast.Expr, index int, fact memFact) string {
 		return ""
 	}
 	if arg := v.withinArg(call, fn, index); arg != nil {
+		// Within an interface value is within its footprint, and within
+		// an owner may be within the footprint of what it owns: memory a
+		// writer may write, whatever the argument's own origin.
+		if t := v.info.TypeOf(arg); t != nil {
+			object, isPointer := pointee(t)
+			if isIface(t) || (isPointer && len(v.ownedFields(object)) > 0) {
+				return fmt.Sprintf("it comes from the call of %s at %s, whose contract places it within %s, which may hold memory a writer writes", name, v.placeOf(call.Pos()), types.ExprString(arg))
+			}
+		}
 		if why := v.memOrigin(arg, fact); why != "" {
 			return fmt.Sprintf("it comes from the call of %s at %s, whose contract places it within %s, and %s", name, v.placeOf(call.Pos()), types.ExprString(arg), why)
 		}

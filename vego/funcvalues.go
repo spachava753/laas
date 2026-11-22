@@ -247,6 +247,12 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 	mark, known := len(v.made), len(st.hyps)
 	st.brk = v.fresh("brk", logic.Ref)
 	st.assume(logic.Le(entry.brk, st.brk))
+	// An outcome may make interface values whose footprints hold what it
+	// creates, as a call may; the rows of the homes it makes are its
+	// choice, and one with an empty row is offered below.
+	grown := v.grow(st, entry.brk, nil)
+	grown.after = st.brk
+	rows := st.mem[footprintRegion]
 	for _, m := range fn.modifies {
 		_, t, err := v.locateTarget(fn, m, v.entry, st, memory{})
 		covered := coveredType(fn, m)
@@ -315,9 +321,16 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 		// as it was. Each is an instance of the outcome, so a proof of one
 		// is a proof that some outcome exists.
 		instances := []map[string]*logic.Term{{st.brk.Name: logic.Add(entry.brk, logic.IntLit(int64(len(homesChosen))))}}
+		// The new homes hold nothing in their footprints, which is what a
+		// value that writes nothing behind it, or only what it creates,
+		// has: fresh(result) of an interface value asks for it (F2).
+		emptyRow := logic.Fill(logic.IntLit(0), logic.Fill(logic.IntLit(0), logic.False()))
+		chosenRows := grown.prev
 		for i, h := range homesChosen {
 			instances[0][h.Name] = logic.Add(entry.brk, logic.IntLit(int64(i)))
+			chosenRows = logic.Store(chosenRows, instances[0][h.Name], emptyRow)
 		}
+		instances[0][rows.Name] = chosenRows
 		for _, at := range freeHomeReads(given, 4) {
 			instance := map[string]*logic.Term{st.brk.Name: entry.brk}
 			for _, h := range homesChosen {

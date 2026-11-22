@@ -1005,6 +1005,29 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		spelled := spell(path.Root, path.Steps)
 		_, isPointer := pointee(found[i].typ)
 		switch {
+		case name == "fresh" && i > 0:
+			// What the first argument refers to may lie in the footprints
+			// of the others, which are interface values that have one.
+			if found[i].constant != nil || !isIface(found[i].typ) || !e.v.hasFootprint(found[i].typ) {
+				return nil, fmt.Errorf("fresh(%s, %s): %s is not an interface value whose methods write behind it, so it has no footprint for %s to lie in",
+					spell(paths[0].Root, paths[0].Steps), spelled, spelled, spell(paths[0].Root, paths[0].Steps))
+			}
+			continue
+		case name == "within" && i == 1 && found[i].constant == nil && isIface(found[i].typ):
+			// Within an interface value is within its footprint.
+			if !e.v.hasFootprint(found[i].typ) {
+				return nil, fmt.Errorf("within(%s, %s): %s is an interface value whose methods write nothing behind it, so nothing lies within it",
+					spell(paths[0].Root, paths[0].Steps), spelled, spelled)
+			}
+			if isIface(found[0].typ) {
+				return nil, fmt.Errorf("within(%s, %s): %s is an interface value, and what lies within another one's footprint can be said only of a pointer, a slice, or a map",
+					spell(paths[0].Root, paths[0].Steps), spelled, spell(paths[0].Root, paths[0].Steps))
+			}
+			continue
+		case name == "within" && i == 0 && isMap(found[i].typ) && len(paths) == 2:
+			// A map lies within a footprint, which holds it whole; whether
+			// the second path is one is checked once it is read.
+			continue
 		case name == "apart" && (found[i].constant != nil || !isSlice(found[i].typ)):
 			return nil, fmt.Errorf("apart(%s, ...): %s is not a slice; apart says that two slices share no memory", spelled, spelled)
 		case name == "apart":
@@ -1032,6 +1055,20 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		}
 		return e.v.separate(first, found[1].val, found[0].typ), nil
 	}
+	if name == "within" && isIface(found[1].typ) {
+		// Within an interface value is in its footprint as it is where the
+		// path is read: on return in an Ensures, as a value that hands out
+		// memory of its own, such as a header, may make it then.
+		rows := e.now
+		if e.post != nil {
+			rows = e.post
+		}
+		return logic.And(logic.Not(isNilRef(found[1].val)), e.v.withinRow(found[0], home(found[1].val[0]), rows)), nil
+	}
+	if name == "within" && isMap(found[0].typ) {
+		spelled := spell(paths[0].Root, paths[0].Steps)
+		return nil, fmt.Errorf("within(%s): %s is a map, and nothing lies within a map or holds one", spelled, spelled)
+	}
 	if name == "within" {
 		// Inside means inside the capacity, which is what a write through
 		// a slice, or an append to it, can reach. A slice without capacity
@@ -1042,7 +1079,13 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		outerStart, outerEnd := e.v.extent(outer, found[1].typ)
 		inside := logic.And(logic.Eq(first[0], outer[0]), logic.Le(outerStart, firstStart), logic.Le(firstEnd, outerEnd))
 		if isSlice(found[0].typ) {
-			return logic.Or(logic.Le(first[3], logic.IntLit(0)), inside), nil
+			// A slice lies in the bytes of a struct only where the struct
+			// holds an array of its elements, which Go's types allow and
+			// nothing else does.
+			if outerObject, isPointer := pointee(found[1].typ); isPointer && !holdsArrayOf(outerObject, elemType(found[0].typ)) {
+				inside = logic.False()
+			}
+			return logic.Or(logic.Le(first[3], logic.IntLit(0)), inside, e.v.withinOwned(e.sink, found[0], found[1])), nil
 		}
 		// A pointer to a struct inside a struct lies where a field of its
 		// type does: without unsafe, the bytes of the outer struct are its
@@ -1061,9 +1104,10 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 			for _, offset := range offsets {
 				at = append(at, logic.Eq(first[1], logic.Add(outer[1], logic.IntLit(offset))))
 			}
-			return logic.And(logic.Not(logic.Eq(first[0], logic.RefLit(0))), logic.Eq(first[0], outer[0]), logic.Or(at...)), nil
+			inStruct := logic.And(logic.Not(logic.Eq(first[0], logic.RefLit(0))), logic.Eq(first[0], outer[0]), logic.Or(at...))
+			return logic.Or(inStruct, e.v.withinOwned(e.sink, found[0], found[1])), nil
 		}
-		return logic.And(logic.Not(logic.Eq(first[0], logic.RefLit(0))), inside), nil
+		return logic.Or(logic.And(logic.Not(logic.Eq(first[0], logic.RefLit(0))), inside), e.v.withinOwned(e.sink, found[0], found[1])), nil
 	}
 	where := "is allowed in an Ensures, where it says what the call allocated, and in an Invariant or an Assert inside a body, " +
 		"where it says what the function allocated since it was entered"
@@ -1074,7 +1118,7 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		// Inside a body, what the path leads to now was allocated since the
 		// function was entered: the bound the check of every write uses
 		// for memory the function may write without a Modifies entry.
-		return logic.And(freshSince(e.v.entryBrk, found[0]), e.v.ownedFresh(e.sink, e.now, found[0].val, found[0].typ, e.v.entryBrk)), nil
+		return e.v.freshOf(e.sink, found[0], e.now, e.v.entryBrk, found[1:], memory{}), nil
 	case e.before == nil || e.post == nil:
 		return nil, fmt.Errorf("fresh says what was allocated since a call began, and nothing has been allocated where this annotation is read; fresh %s", where)
 	case found[0].hops == 0 && !found[0].isResult:
@@ -1085,7 +1129,7 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 	if err != nil {
 		return nil, err
 	}
-	return logic.And(freshSince(e.before, after), e.v.ownedFresh(e.sink, e.post, after.val, after.typ, e.before)), nil
+	return e.v.freshOf(e.sink, after, e.post, e.before, found[1:], e.now), nil
 }
 
 // freshSince states that what a value refers to was allocated at or past a
@@ -1561,4 +1605,20 @@ func (v *fnVerifier) targets(fn *funcInfo, args map[*types.Var]value, sink *stat
 		}
 	}
 	return list
+}
+
+// holdsArrayOf reports whether a value of type t holds, in itself and not
+// behind a pointer, an array whose elements are of type elem.
+func holdsArrayOf(t, elem types.Type) bool {
+	switch u := t.Underlying().(type) {
+	case *types.Array:
+		return types.Identical(u.Elem(), elem) || holdsArrayOf(u.Elem(), elem)
+	case *types.Struct:
+		for field := range u.Fields() {
+			if holdsArrayOf(field.Type(), elem) {
+				return true
+			}
+		}
+	}
+	return false
 }

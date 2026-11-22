@@ -321,6 +321,55 @@ trusted:
       - "within(p, ps)"
     modifies: []
 
+  guide.teeRecorder:
+    reason: Makes a recorder that records into r and into memory it makes.
+    requires:
+      - "r != nil"
+    ensures:
+      - "s != nil And fresh(s, r)"
+    keeps:
+      r: [s]
+    vouches: [s]
+    modifies: []
+
+  footprints.wrapSink:
+    reason: Test helper standing for a trusted function that makes a sink writing new memory or what the sink it keeps writes.
+    requires:
+      - "w != nil"
+    ensures:
+      - "s != nil And fresh(s, w)"
+    keeps:
+      w: [s]
+    vouches: [s]
+    modifies: []
+
+  footprints.boxIn:
+    reason: Test helper standing for a trusted function whose result is new or lies in the footprint of what it is given.
+    requires:
+      - "w != nil"
+    ensures:
+      - "p != nil And fresh(p, w)"
+    runs: [w]
+    modifies: []
+
+  footprints.tableOf:
+    reason: Test helper standing for a trusted function whose result lies in the footprint of what it is given.
+    requires:
+      - "w != nil"
+    ensures:
+      - "within(m, w)"
+    runs: [w]
+    modifies: []
+
+  footprints.spareOf:
+    reason: Test helper standing for a trusted function whose result lies in what an owner it is given owns.
+    requires:
+      - "bw != nil"
+    ensures:
+      - "within(p, bw)"
+    runs: [bw]
+    modifies: []
+
   footprints.resetWriter:
     reason: Test helper standing for a function the project trusts to write a Writer, which may make it own any memory.
     requires:

@@ -487,7 +487,10 @@ func (s *scope) call(n *Node) *Term {
 		if s.env == nil {
 			fail("%s cannot be used in a predicate definition", n.Name)
 		}
-		if want := map[string]int{"within": 2, "apart": 2}[n.Name]; len(n.Kids) != max(want, 1) {
+		if n.Name == "fresh" && len(n.Kids) == 0 {
+			fail("fresh takes one argument or more, as in fresh(result) or fresh(result, w)")
+		}
+		if want := map[string]int{"within": 2, "apart": 2}[n.Name]; n.Name != "fresh" && len(n.Kids) != max(want, 1) {
 			fail("%s takes %d argument(s), as in %s", n.Name, max(want, 1),
 				map[string]string{"old": "old(A)", "fresh": "fresh(result)", "within": "within(s.items', s.items) or within(p, s.items)",
 					"apart": "apart(A, B)"}[n.Name])

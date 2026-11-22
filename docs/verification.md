@@ -1421,6 +1421,61 @@ vego: precondition of c.Close may not hold: ~closed(c)
 
 A method writes behind its receiver only when the interface that declares it has no states. A method of an interface with states whose contract lists its receiver changes the states of the value and nothing else, as described in [Declaring a state on an interface of your own](#declaring-a-state-on-an-interface-of-your-own). An interface with states can still have a method that writes behind its receiver, from an interface without states that it embeds. Such a method keeps the states of the value it is called on. Converting a value of your own type to an interface with such a method is not supported yet, as [What a conversion checks](#what-a-conversion-checks) describes.
 
+#### New values and values made over a writer
+
+`fresh(r)` of an interface value whose methods write behind it means that the call created the value and all of its footprint. Writing through such a value writes only memory that the call made, so it needs no `Modifies`, and it keeps everything that existed before:
+
+```go
+// Recorders makes recorders whose footprints are new.
+type Recorders interface {
+	// @Ensures r != nil And fresh(r)
+	New() (r Recorder)
+}
+
+// @Requires f != nil And t != nil
+// @Ensures t.Total' = t.Total
+func LogToNew(f Recorders, t *Lines) {
+	r := f.New()
+	r.Record("start")
+}
+```
+
+A value made over a writer writes what that writer writes. `fresh(s, r)` says that everything `s` refers to was made by the call or lies in the footprint of `r`, which must be an interface value whose methods write behind it. A trusted function that wraps a recorder says so:
+
+```yaml
+trusted:
+  guide.teeRecorder:
+    reason: Makes a recorder that records into r and into memory it makes.
+    requires:
+      - "r != nil"
+    ensures:
+      - "s != nil And fresh(s, r)"
+    keeps:
+      r: [s]
+    vouches: [s]
+    modifies: []
+```
+
+A write through what it returns is then covered by `Modifies r`:
+
+```go
+// @Requires r != nil
+// @Modifies r
+// @Ensures True
+func LogThroughTee(r Recorder) {
+	s := teeRecorder(r)
+	s.Record("tee")
+}
+```
+
+Without `r` in `Modifies`, the write is reported:
+
+```text
+vego: s.Record may modify the footprint of s, which LogThroughTeeUnlisted may not modify; list it in a // @Modifies clause
+```
+
+`within(m, r)` says that a pointer, a slice, or a map lies in the footprint of `r`, as a header lies in the response writer that hands it out. `within(p, bw)` for a `*bufio.Writer` or another value that owns memory (see [Writing through a buffer](#writing-through-a-buffer)) says that `p` lies in its struct or in what it owns. A value that a contract places within an interface value or an owner may be memory that a writer writes, so it cannot be passed to a function beside that writer, as described in [Methods that write behind their receiver](#methods-that-write-behind-their-receiver).
+
 ### Interface values that call interface values
 
 Code that an interface value made by verified code runs cannot call through an interface value or a function value. The reason is the same as for function values: no contract has a `Variant`, so nothing would prove that such calls end. See [Function values that call function values](#function-values-that-call-function-values). A type that wraps another interface value cannot be converted, and its method is itself reported, since the value it wraps may be one of its own type:
@@ -2321,7 +2376,7 @@ In an `Ensures`, `fresh(x)` means that the memory `x` refers to on return was al
 
 `fresh` says only when the memory was allocated. It does not say that nothing else refers to the memory: two fresh slices may share one array, and a fresh pointer may have been stored where the caller can reach it. A proof that needs such a fact needs a clause that states it, such as `apart(a, b)` or `p != q`.
 
-`within(a, b)` means that `a` lies inside the memory of `b`. Each argument of `fresh` and `within` is a pointer or a slice, and `fresh` also takes a map or an interface value. A slice includes its whole capacity. These edge cases apply:
+`within(a, b)` means that `a` lies inside the memory of `b`. Each argument of `fresh` and `within` is a pointer or a slice, and `fresh` also takes a map or an interface value. With interface values whose methods write behind them, `fresh` takes more than one argument and `within` takes such a value second, as described in [New values and values made over a writer](#new-values-and-values-made-over-a-writer). A slice includes its whole capacity. These edge cases apply:
 
 - A slice with zero capacity has no memory, so it is `fresh` and is `within` anything.
 - A nil interface value holds nothing, so it is `fresh`.
@@ -6088,8 +6143,9 @@ Results are referred to by the names in the function's signature.
 | `Modifies m[k]` | the entry of key `k`: whether the map has it, its value, and the number of keys; for a map of pointers, slices, maps, or interface values, what the value under `k` refers to |
 | `Modifies g[from][to]` | the entry `to` of the map held under `from` |
 | `Modifies rc`, `Modifies p.f` | if `rc` or `f` is an interface value: every state of what it holds, not the variable or the field; a function value field is the field itself |
-| `fresh(x)` | in an `Ensures`, the memory `x` refers to on return was allocated by the call; in a body, it was allocated since the function was entered; true for a slice with zero capacity and a nil interface value, false for a nil pointer or map; for an interface value, what it holds was created then |
-| `within(a, b)` | `a` lies inside the memory of `b`; each is a pointer or a slice, and a slice includes its capacity |
+| `fresh(x)` | in an `Ensures`, the memory `x` refers to on return was allocated by the call; in a body, it was allocated since the function was entered; true for a slice with zero capacity and a nil interface value, false for a nil pointer or map; for an interface value, what it holds was created then, its footprint included |
+| `fresh(x, w)` | the same, except that what `x` refers to may also lie in the footprint of `w`, an interface value whose methods write behind it; more than one such value may follow |
+| `within(a, b)` | `a` lies inside the memory of `b`; each is a pointer or a slice, and a slice includes its capacity; for an interface value `b`, `a` (also a map) lies in its footprint, and for a value that owns memory, in its struct or in what it owns |
 | `apart(a, b)` | the slices `a` and `b`, of one element type, share no memory up to their capacities |
 
 ### Order of evaluation

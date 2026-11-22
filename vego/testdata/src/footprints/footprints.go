@@ -434,14 +434,14 @@ type Factory interface {
 }
 
 // MakeAndWrite relies on a new pair staying as it was across a write
-// through a new sink, which may hold it.
+// through a new sink, whose footprint is new and may hold it.
 //
 // @Requires f != nil
 // @Ensures r = 5
 func MakeAndWrite(f Factory) (r int) {
 	s, p := f.Make()
 	p.A = 5
-	s.Put(nil) // want `s.Put may modify the footprint of s, which MakeAndWrite may not modify`
+	s.Put(nil)
 	return p.A // want `postcondition may not hold: r = 5`
 }
 

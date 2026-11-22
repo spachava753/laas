@@ -66,3 +66,34 @@ func RecordThenClose(r Recorder, c io.Closer) {
 	r.Record("done")
 	c.Close() // want `precondition of c.Close may not hold: ~closed\(c\)`
 }
+
+// Recorders makes recorders whose footprints are new.
+type Recorders interface {
+	// @Ensures r != nil And fresh(r)
+	New() (r Recorder)
+}
+
+// @Requires f != nil And t != nil
+// @Ensures t.Total' = t.Total
+func LogToNew(f Recorders, t *Lines) {
+	r := f.New()
+	r.Record("start")
+}
+
+// teeRecorder makes a recorder that records into r and memory of its own.
+func teeRecorder(r Recorder) (s Recorder) { return r }
+
+// @Requires r != nil
+// @Modifies r
+// @Ensures True
+func LogThroughTee(r Recorder) {
+	s := teeRecorder(r)
+	s.Record("tee")
+}
+
+// @Requires r != nil
+// @Ensures True
+func LogThroughTeeUnlisted(r Recorder) {
+	s := teeRecorder(r)
+	s.Record("tee") // want `vego: s.Record may modify the footprint of s, which LogThroughTeeUnlisted may not modify; list it in a // @Modifies clause`
+}

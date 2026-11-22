@@ -746,21 +746,16 @@ func (v *fnVerifier) ownedSites(t types.Type, seen map[types.Type]bool) []site {
 	return sites
 }
 
-// ownedFresh states that what the owned fields of a pointer's struct refer
-// to was allocated at or past a bound, read in memory: the footprint of an
-// owner is new when all of it is. A nil pointer, a nil map, and a slice
-// without capacity refer to nothing, which is new.
-func (v *fnVerifier) ownedFresh(sink *state, mem memory, ptr value, t types.Type, before *logic.Term) *logic.Term {
-	return v.ownedFreshSeen(sink, mem, ptr, t, before, map[types.Type]bool{})
-}
-
-// ownedFreshSeen is ownedFresh for the types in seen not yet entered: a
-// type that holds itself through its owned pointers is entered once. Each
+// ownedFreshSeen states that what the owned fields of a pointer's struct
+// refer to was allocated at or past a bound, read in memory: the footprint
+// of an owner is new when all of it is. A nil pointer, a nil map, and a
+// slice without capacity refer to nothing, which is new. seen holds the
+// types entered, so that a type that holds itself through its owned
+// pointers is entered once. Each
 // owned field gives one fact, by its kind: a slice is new or has no
 // capacity, a map is new or nil, and a pointer is new or nil and what it
-// owns is new too. An interface value is what the owner was given, and
-// what it owns cannot be said new yet, so fresh of one with a footprint or
-// states is not supported.
+// owns is new too. An interface value is what the owner was given, so
+// only its footprint must be new.
 func (v *fnVerifier) ownedFreshSeen(sink *state, mem memory, ptr value, t types.Type, before *logic.Term, seen map[types.Type]bool) *logic.Term {
 	object, isPointer := pointee(t)
 	if !isPointer || seen[object] || len(v.ownedFields(object)) == 0 {
@@ -782,13 +777,11 @@ func (v *fnVerifier) ownedFreshSeen(sink *state, mem memory, ptr value, t types.
 			facts = append(facts, logic.Or(logic.Eq(val[0], zero), logic.Le(before, val[0])))
 		case isIface(ft):
 			// The value itself is what the owner was given, such as the
-			// reader of a Scanner, which is not new. What it owns is: that
-			// needs fresh of interface values to speak of their
-			// footprints, which no shipped owner needs yet, so it is
-			// refused, not approximated. Without a footprint or states, an
-			// interface value owns nothing.
-			if v.hasFootprint(ft) || v.hasStates(ft) {
-				v.unsupported(token.NoPos, fmt.Sprintf("fresh of a %s, which owns an interface value of type %s, is not supported yet", object, ft))
+			// reader of a Scanner, which is not new; its footprint is what
+			// the owner owns, and must be new (F2). An owner that keeps a
+			// writer it was given says fresh(result, w) instead.
+			if v.hasFootprint(ft) {
+				facts = append(facts, logic.Or(isNilRef(val), v.rowNewOrIn(mem, home(val[0]), before, nil, nil)))
 			}
 		default:
 			facts = append(facts, logic.Or(logic.Eq(val[0], zero), logic.And(logic.Le(before, val[0]), v.ownedFreshSeen(sink, mem, val, ft, before, seen))))
@@ -839,4 +832,130 @@ func (v *fnVerifier) ownerGrowthSeen(sink *state, before, after memory, ptr valu
 		}
 	}
 	return logic.And(facts...)
+}
+
+// freshOf states fresh(x, ys...): what x refers to, read in mem, was made
+// at or past before, cell by cell, or lies in the footprint of one of the
+// interface values ys, read in yMem, the memory on entry of the call or of
+// the function. Without ys it is fresh(x) as it always was, except for an
+// interface value with a footprint, whose footprint must then be new too
+// (F2 of the design review): its home is new, and every cell in its row
+// was made at or past before. With ys, a pointer is not nil and every cell
+// of its struct is new or in a footprint of ys, and so is every cell of
+// what it owns; a slice, a map, and an interface value likewise, cell by
+// cell, with a slice without capacity and a nil interface value counting
+// as new. A footprint can hold an old cell, so a value that writes into
+// what the writer it was given writes says fresh(result, w), as
+// bufio.NewWriter does.
+func (v *fnVerifier) freshOf(sink *state, x reached, mem memory, before *logic.Term, ys []reached, yMem memory) *logic.Term {
+	if len(ys) == 0 {
+		claim := logic.And(freshSince(before, x), v.ownedFreshSeen(sink, mem, x.val, x.typ, before, map[types.Type]bool{}))
+		if isIface(x.typ) && v.hasFootprint(x.typ) {
+			claim = logic.And(claim, logic.Or(isNilRef(x.val), v.rowNewOrIn(mem, home(x.val[0]), before, nil, nil)))
+		}
+		return claim
+	}
+	yRows := yMem.region(footprintRegion, footprintSort)
+	newOrIn := func(alloc, pos *logic.Term) *logic.Term {
+		return v.newOrIn(alloc, pos, before, ys, yRows)
+	}
+	switch {
+	case isIface(x.typ):
+		return logic.Or(isNilRef(x.val), logic.And(logic.Le(before, home(x.val[0])), v.rowNewOrIn(mem, home(x.val[0]), before, ys, yRows)))
+	case isMap(x.typ):
+		return logic.And(logic.Not(isNilRef(x.val)), newOrIn(x.val[0], logic.IntLit(0)))
+	case isSlice(x.typ):
+		lo, hi := v.extent(x.val, x.typ)
+		return logic.Or(logic.Le(x.val[3], logic.IntLit(0)), v.stretchNewOrIn(x.val[0], lo, hi, newOrIn))
+	}
+	lo, hi := v.extent(x.val, x.typ)
+	claims := []*logic.Term{logic.Not(isNilRef(x.val)), v.stretchNewOrIn(x.val[0], lo, hi, newOrIn)}
+	for _, part := range v.ownedParts(sink, mem, x.val, x.typ, map[types.Type]bool{}) {
+		switch {
+		case part.fp:
+			claims = append(claims, v.rowNewOrIn(mem, part.ref, before, ys, yRows))
+		case part.row:
+			// The states of an owned interface value are its own, which
+			// its contract governs; they are no memory x refers to.
+		case part.mapType != nil:
+			claims = append(claims, logic.Or(isNilRef(value{part.ref}), newOrIn(part.ref, logic.IntLit(0))))
+		default:
+			claims = append(claims, v.stretchNewOrIn(part.ref, part.lo, part.hi, newOrIn))
+		}
+	}
+	return logic.And(claims...)
+}
+
+// newOrIn states that a cell was made at or past before, or lies in the
+// footprint of one of the interface values ys in the rows given, with
+// what rowAt says of the cell in those rows as its premises.
+func (v *fnVerifier) newOrIn(alloc, pos, before *logic.Term, ys []reached, rows *logic.Term) *logic.Term {
+	options := []*logic.Term{logic.Le(before, alloc)}
+	var facts []*logic.Term
+	for _, y := range ys {
+		cell, known := v.rowAt(rows, home(y.val[0]), alloc, pos)
+		facts = append(facts, known...)
+		options = append(options, logic.And(logic.Not(isNilRef(y.val)), cell))
+	}
+	return logic.Implies(logic.And(facts...), logic.Or(options...))
+}
+
+// stretchNewOrIn states newOrIn of every position of an allocation from lo
+// up to hi.
+func (v *fnVerifier) stretchNewOrIn(ref, lo, hi *logic.Term, newOrIn func(alloc, pos *logic.Term) *logic.Term) *logic.Term {
+	k := v.bound("k")
+	return logic.Forall(k, logic.Implies(logic.And(logic.Le(lo, k), logic.Lt(k, hi)), newOrIn(ref, k)))
+}
+
+// rowNewOrIn states that every cell in the row at a home, read in mem, was
+// made at or past before or lies in the footprint of one of ys.
+func (v *fnVerifier) rowNewOrIn(mem memory, at, before *logic.Term, ys []reached, yRows *logic.Term) *logic.Term {
+	a, k := v.bound("a"), v.bound("k")
+	cell, facts := v.rowAt(mem.region(footprintRegion, footprintSort), at, a, k)
+	return logic.Forall(a, logic.Forall(k, logic.Implies(logic.And(append(facts, cell)...), v.newOrIn(a, k, before, ys, yRows))))
+}
+
+// withinRow states that every cell of what x refers to is in the row at a
+// home, read in mem: a map whole, every position of a slice's array up to
+// its capacity (a slice without capacity lies within anything), and every
+// position of the struct a pointer points to, which is not nil.
+func (v *fnVerifier) withinRow(x reached, at *logic.Term, mem memory) *logic.Term {
+	rows := mem.region(footprintRegion, footprintSort)
+	in := func(alloc, pos *logic.Term) *logic.Term {
+		cell, facts := v.rowAt(rows, at, alloc, pos)
+		return logic.Implies(logic.And(facts...), cell)
+	}
+	if isMap(x.typ) {
+		return logic.And(logic.Not(isNilRef(x.val)), in(x.val[0], logic.IntLit(0)))
+	}
+	lo, hi := v.extent(x.val, x.typ)
+	k := v.bound("k")
+	every := logic.Forall(k, logic.Implies(logic.And(logic.Le(lo, k), logic.Lt(k, hi)), in(x.val[0], k)))
+	if isSlice(x.typ) {
+		return logic.Or(logic.Le(x.val[3], logic.IntLit(0)), every)
+	}
+	return logic.And(logic.Not(isNilRef(x.val)), every)
+}
+
+// withinOwned states that what x refers to lies within what an owner y
+// owns, read where y was read: inside the stretch of an owned slice's
+// array, or in the footprint of an owned interface value. It is False for
+// a y that owns nothing, and where nothing can be noted (sink is nil, as
+// under a quantifier), which errs towards less.
+func (v *fnVerifier) withinOwned(sink *state, x, y reached) *logic.Term {
+	if sink == nil {
+		return logic.False()
+	}
+	lo, hi := v.extent(x.val, x.typ)
+	var options []*logic.Term
+	for _, part := range v.ownedParts(sink, y.mem, y.val, y.typ, map[types.Type]bool{}) {
+		switch {
+		case part.fp:
+			options = append(options, v.withinRow(x, part.ref, y.mem))
+		case part.row, part.mapType != nil:
+		default:
+			options = append(options, logic.And(logic.Not(isNilRef(x.val)), logic.Eq(x.val[0], part.ref), logic.Le(part.lo, lo), logic.Le(hi, part.hi)))
+		}
+	}
+	return logic.Or(options...)
 }
