@@ -70,12 +70,17 @@ func (pv *pkgVerifier) typeEntry(key string, obj *types.Func, methodOf *types.Fu
 		default:
 			if problem := fn.setReceiver(text, methodOf); problem != "" {
 				fn.defect("its receiver: %s", problem)
-			} else if !pv.hasStates(fn.receiver.Type()) {
-				fn.defect("it names the receiver %s, but %s has no states, which is all a contract can say of its receiver", text, declaringInterface(methodOf).Name())
 			}
 		}
 	}
 	pv.readEntry(fn, entry)
+	// A contract names its receiver to speak of its states, to say that
+	// the method writes behind it, or to place a result within it, as one
+	// in source does (checkReceivers).
+	if fn.receiver != nil && !pv.hasStates(fn.receiver.Type()) && !writesBehind(fn) && !placesWithin(fn) {
+		fn.defect("it names the receiver %s, but %s has no states, and the entry neither lists %s under modifies nor places a result within it",
+			fn.receiver.Name(), declaringInterface(methodOf).Name(), fn.receiver.Name())
+	}
 	// What a call through the value is handed is refused when it can
 	// carry code nobody has seen, so nothing is left for runs or calls to
 	// say.

@@ -37,12 +37,13 @@ var fmtMethods = []string{"Format", "GoString", "Error", "String"}
 // The claim is that the function formats those values as package fmt does
 // and does nothing else with them: it runs only the methods of them that
 // fmt runs, while the call lasts and on the goroutine that called it, keeps
-// none of them, and builds nothing longer than fmt would print. vego checks
-// at each call that formatting the values runs no code that is not plain,
-// in the state of the call. That state is the state in which formatting
-// runs only if nothing the function does before it changes memory a caller
-// can see, so formats goes with modifies: [] and without calls, and runs
-// may list only values whose contracts write nothing.
+// none of them, builds nothing longer than fmt would print, and formats
+// every value before it writes anything its modifies lists or runs any code
+// its runs lists, as fmt.Fprintf formats into a buffer and then calls
+// w.Write once. vego checks at each call that formatting the values runs no
+// code that is not plain, in the state of the call, which is the state in
+// which they are formatted. A function it is handed to call, under calls,
+// could run before, so formats goes without calls.
 func (pv *pkgVerifier) readFormats(fn *funcInfo, entry *trustEntry) {
 	if len(entry.formats) == 0 {
 		return
@@ -72,19 +73,12 @@ func (pv *pkgVerifier) readFormats(fn *funcInfo, entry *trustEntry) {
 	if fn.formatted == nil {
 		fn.defect("its formats lists no parameter of type any or ...any whose values it formats")
 	}
-	if len(entry.modifies) > 0 {
-		fn.defect("it lists formats and writes memory under modifies; the values are checked in the state of the call, " +
-			"which is the state in which they are formatted only if the function writes nothing a caller can see")
-	}
+	// What the function writes, and the code it runs, comes after the
+	// values are formatted, which formats claims; a function it is handed
+	// to call, under calls, may be called at any time.
 	if len(entry.calls) > 0 {
 		fn.defect("it lists formats and has calls; the values are checked in the state of the call, " +
 			"which a function it calls before it formats them could change")
-	}
-	for param := range fn.runs.all() {
-		if what := pv.writingCode(param.Type(), map[types.Type]bool{}); what != "" {
-			fn.defect("it lists formats and runs %s, which can hold %s; the values are checked in the state of the call, "+
-				"which that code could change before they are formatted", param.Name(), what)
-		}
 	}
 }
 
@@ -99,54 +93,6 @@ func isAnyParam(sig *types.Signature, param *types.Var) bool {
 	return ok && iface.Empty()
 }
 
-// writingCode names what a value of a type can hold that a trusted function
-// may run and whose contract writes memory: a function value or an
-// interface value whose type's contract lists something under Modifies, or
-// an unsafe.Pointer, which may point to one. It returns "" when there is
-// none.
-func (pv *pkgVerifier) writingCode(t types.Type, seen map[types.Type]bool) string {
-	if t == nil || seen[t] {
-		return ""
-	}
-	seen[t] = true
-	if held, replaced := heldAs(t); replaced {
-		return pv.writingCode(held, seen)
-	}
-	switch u := t.Underlying().(type) {
-	case *types.Basic:
-		if u.Kind() == types.UnsafePointer {
-			return "an unsafe.Pointer, which may point to a function value or an interface value whose contract modifies memory"
-		}
-	case *types.Signature:
-		if fn := pv.valueContract(t); fn != nil && len(fn.modifies) > 0 {
-			return "a function value of type " + t.String() + ", whose contract modifies memory"
-		}
-	case *types.Interface:
-		for method := range u.Methods() {
-			if fn := pv.methodContract(method); fn != nil && len(fn.modifies) > 0 {
-				return "an interface value whose method " + methodTitle(method) + " modifies memory"
-			}
-		}
-	case *types.Pointer:
-		return pv.writingCode(u.Elem(), seen)
-	case *types.Slice:
-		return pv.writingCode(u.Elem(), seen)
-	case *types.Array:
-		return pv.writingCode(u.Elem(), seen)
-	case *types.Map:
-		if what := pv.writingCode(u.Key(), seen); what != "" {
-			return what
-		}
-		return pv.writingCode(u.Elem(), seen)
-	case *types.Struct:
-		for field := range u.Fields() {
-			if what := pv.writingCode(field.Type(), seen); what != "" {
-				return what
-			}
-		}
-	}
-	return ""
-}
 
 // plainReason says why formatting a value of a type may run code, follow
 // pointers, or not end, or returns "" when it cannot: the type has none of

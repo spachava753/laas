@@ -352,3 +352,71 @@ func TestBoundOnFormatting(t *testing.T) {
 		}
 	})
 }
+
+// writeWatch is a writer that records whether it has been written.
+type writeWatch struct{ written bool }
+
+func (w *writeWatch) Write(p []byte) (int, error) {
+	w.written = true
+	return len(p), nil
+}
+
+// lateFormatted is an operand whose String method records whether the
+// writer it watches was written before it was formatted.
+type lateFormatted struct {
+	w    *writeWatch
+	late *bool
+}
+
+func (f lateFormatted) String() string {
+	if f.w.written {
+		*f.late = true
+	}
+	return "x"
+}
+
+// formatsFirst reports whether a function that formats its operands and
+// writes to w formatted every operand before it wrote anything.
+func formatsFirst(call func(w io.Writer, v ...any)) bool {
+	w := &writeWatch{}
+	late := false
+	call(w, lateFormatted{w, &late}, lateFormatted{w, &late})
+	return w.written && !late
+}
+
+// TestFormatsBeforeWriting holds what formats claims of a function that
+// also writes or runs something its entry lists: that it formats every
+// value before it writes anything its modifies lists or runs any code its
+// runs lists, so that the values checked in the state of the call are the
+// values formatted. Each such shipped entry has a harness here, and the
+// check is seen to fail on a function that writes first.
+func TestFormatsBeforeWriting(t *testing.T) {
+	alone(t)
+	calls := map[string]func(w io.Writer, v ...any){
+		"fmt.Fprintf":           func(w io.Writer, v ...any) { fmt.Fprintf(w, "%v %v", v...) },
+		"fmt.Fprint":            func(w io.Writer, v ...any) { fmt.Fprint(w, v...) },
+		"fmt.Fprintln":          func(w io.Writer, v ...any) { fmt.Fprintln(w, v...) },
+		"(*log.Logger).Printf":  func(w io.Writer, v ...any) { log.New(w, "p ", log.Lshortfile).Printf("%v %v", v...) },
+		"(*log.Logger).Print":   func(w io.Writer, v ...any) { log.New(w, "p ", log.Lshortfile).Print(v...) },
+		"(*log.Logger).Println": func(w io.Writer, v ...any) { log.New(w, "p ", log.Lshortfile).Println(v...) },
+	}
+	for _, file := range shippedContracts() {
+		for key, entry := range file.entries {
+			if len(entry.formats) > 0 && (len(entry.modifies) > 0 || len(entry.runs) > 0) && calls[key] == nil {
+				t.Errorf("%s formats and writes or runs what its entry lists, and no harness here checks that it formats first", key)
+			}
+		}
+	}
+	for key, call := range calls {
+		if !formatsFirst(call) {
+			t.Errorf("%s wrote to its writer before it had formatted every value", key)
+		}
+	}
+	writesFirst := func(w io.Writer, v ...any) {
+		_, _ = w.Write([]byte("first "))
+		fmt.Fprint(w, v...)
+	}
+	if formatsFirst(writesFirst) {
+		t.Error("a function that writes before it formats passed the check")
+	}
+}

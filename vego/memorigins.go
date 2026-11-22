@@ -159,19 +159,25 @@ func (v *fnVerifier) memOrigins() *memFlow {
 		}
 	}
 	// The fact before each call: before its node, with every pollution of
-	// the node itself, which may come before the call.
+	// the node itself, which may come before the call, but that of the
+	// call: what the call stores happens while it runs, which its callee
+	// accounts for.
 	for _, block := range graph.Blocks {
 		fact := in[block].clone()
 		for _, node := range block.Nodes {
 			own := fact.clone()
 			v.memTransfer(node, &own, flow.loose, true)
-			before := fact.clone()
-			before.polluted = firstReason(before.polluted, own.polluted)
 			ast.Inspect(node, func(n ast.Node) bool {
 				if _, isLit := n.(*ast.FuncLit); isLit {
 					return false
 				}
 				if call, ok := n.(*ast.CallExpr); ok {
+					others := fact.clone()
+					v.skipPollution = call
+					v.memTransfer(node, &others, flow.loose, true)
+					v.skipPollution = nil
+					before := fact.clone()
+					before.polluted = firstReason(before.polluted, others.polluted)
 					flow.at[call] = before
 				}
 				return true
@@ -597,6 +603,9 @@ func reachesCode(t types.Type, seen map[types.Type]bool) bool {
 // callPollutes returns why a call may store an unknown reference into
 // memory that an outside value reaches, or "".
 func (v *fnVerifier) callPollutes(call *ast.CallExpr, fact memFact) string {
+	if call == v.skipPollution {
+		return ""
+	}
 	if id, ok := ast.Unparen(call.Fun).(*ast.Ident); ok {
 		if builtin, isBuiltin := v.info.Uses[id].(*types.Builtin); isBuiltin {
 			if builtin.Name() == "append" && len(call.Args) > 0 {
@@ -875,21 +884,32 @@ func (v *fnVerifier) checkReachedApart(call *ast.CallExpr, fn *funcInfo, args ma
 		return
 	}
 	for _, t := range written {
-		if !t.fp || t.param == nil {
+		// The callee assumes the footprint of a parameter, and of what a
+		// parameter that owns memory owns, apart from its other
+		// parameters (enterReaches).
+		param := t.param
+		if t.part {
+			param = t.ownerParam
+		}
+		if !t.fp || param == nil {
 			continue
 		}
+		what := "the footprint of what is passed to %s as %s"
+		if t.part {
+			what = "the footprint of what is owned by what is passed to %s as %s"
+		}
 		for _, other := range fn.params {
-			if other == t.param || args[other] == nil || !holdsMemory(other.Type()) {
+			if other == param || args[other] == nil || !holdsMemory(other.Type()) {
 				continue
 			}
-			lead := fmt.Sprintf("the footprint of what is passed to %s as %s may hold memory that what is passed as %s reaches, and %s relies on it not doing so",
-				name, passed[t.param], passed[other], name)
+			lead := fmt.Sprintf(what+" may hold memory that what is passed as %s reaches, and %s relies on it not doing so",
+				name, passed[param], passed[other], name)
 			fact, placed := v.memFactAt(call)
 			if !placed {
 				v.unsupported(call.Pos(), lead+"; a caller of a function value or a method of an interface value does not show it")
 			}
-			if !v.ownFootprint(passedExpr[t.param]) {
-				v.report(call.Pos(), "%s: %s is not a parameter whose footprint %s's own Modifies lists, so nothing places it", lead, passed[t.param], v.fn.obj.Name())
+			if !v.ownFootprint(passedExpr[param]) {
+				v.report(call.Pos(), "%s: %s is not a parameter whose footprint %s's own Modifies lists, so nothing places it", lead, passed[param], v.fn.obj.Name())
 				continue
 			}
 			if expr := passedExpr[other]; expr == nil {

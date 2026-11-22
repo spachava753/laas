@@ -35,7 +35,8 @@ trusted:
       which calls its Write and no other method, under a mutex, and in
       Writer and SetOutput. No goroutine, timer, finalizer, or package-level
       variable reaches it. The bound on the prefix is one that the formatting
-      bound at the methods that print counts.
+      bound at the methods that print counts. What the Logger owns is new
+      but for what out writes, which its footprint holds.
     requires:
       - "out != nil"
       - "|prefix| <= 4096"
@@ -48,7 +49,7 @@ trusted:
     vouches: [result]
     ensures:
       - "result != nil"
-      - "fresh(result)"
+      - "fresh(result, out)"
       - "ready(result)"
 
   log.Printf:

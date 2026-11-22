@@ -182,6 +182,23 @@ type fnVerifier struct {
 	// guarantee, which mention every parameter whether or not the contract
 	// does.
 	typing map[*logic.Term]bool
+	// lazyRows is set while what a callee promises is resolved, and
+	// rowClaims holds, by footprint region, what such promises said of rows;
+	// see rowNewOrIn.
+	lazyRows  bool
+	// skipPollution is the call whose own stores the fact before it leaves
+	// out; see memOrigins.
+	skipPollution *ast.CallExpr
+	rowClaims map[string][]rowClaim
+	// stretchClaims is rowClaims for stretches of memory, and lazyStretch
+	// makes one while a promise is resolved.
+	stretchClaims map[string][]stretchClaim
+	lazyStretch   func(ref, lo, hi *logic.Term) *logic.Term
+	// claimDefs holds what each boolean of a row or a stretch claim
+	// stands for, quantified, for the one question that looks for a
+	// contradiction in a promise: assumed only at the cells read, two
+	// claims that cannot both hold would never meet.
+	claimDefs []*logic.Term
 	// misreadAs, when set, receives an annotation that cannot be resolved,
 	// in place of the diagnostic at the annotation.
 	misreadAs func(c *clause, err error)
@@ -250,7 +267,7 @@ func (pv *pkgVerifier) run(fn *funcInfo, task func(v *fnVerifier)) {
 func (pv *pkgVerifier) newVerifier(fn *funcInfo) *fnVerifier {
 	return &fnVerifier{
 		pkgVerifier: pv, fn: fn, entry: map[*types.Var]value{}, names: map[string]int{},
-		reached: map[*funcInfo]bool{}, bitTerms: map[string]*logic.Term{}, lowZeros: map[string]uint{}, bitOrigins: map[string]bitOrigin{}, forgotten: map[string]forgottenPart{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{},
+		reached: map[*funcInfo]bool{}, bitTerms: map[string]*logic.Term{}, lowZeros: map[string]uint{}, bitOrigins: map[string]bitOrigin{}, forgotten: map[string]forgottenPart{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{}, rowClaims: map[string][]rowClaim{}, stretchClaims: map[string][]stretchClaim{},
 		backgroundSeen: map[string]bool{}, targetSeen: map[string]bool{}, inlining: map[*ast.FuncLit]bool{}, joins: map[string]*joinedRegion{},
 		converting: map[ast.Expr]int{},
 		held:       map[ast.Expr]value{},

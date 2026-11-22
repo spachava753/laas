@@ -67,11 +67,12 @@ func CallsBoth(a io.Closer, b io.ReadCloser) {
 	Both(a, b)
 }
 
-// CloseOne closes the first and only reads the state of the second.
+// CloseOne closes the first and leaves the state of the second as it was,
+// which holds when the two do not share their states.
 //
 // @Requires a != nil And b != nil And ~closed(a)
 // @Modifies a
-// @Ensures closed(a')
+// @Ensures closed(a') And (closed(b') <-> closed(b))
 func CloseOne(a io.Closer, b io.ReadCloser) {
 	a.Close()
 }
@@ -143,7 +144,7 @@ func TwoStates(a io.Closer, b io.Closer) (err error) {
 // Pump reads and writes without changing a state of either value.
 //
 // @Requires r != nil And w != nil And |buf| > 0
-// @Modifies buf
+// @Modifies r, w, buf
 // @Ensures True
 func Pump(r io.ReadCloser, w io.WriteCloser, buf []byte) {
 	n, _ := r.Read(buf)
@@ -155,8 +156,26 @@ func Pump(r io.ReadCloser, w io.WriteCloser, buf []byte) {
 // Echo hands one value to Pump twice, which changes no state of either.
 //
 // @Requires rwc != nil And |buf| > 0
-// @Modifies buf
+// @Modifies rwc, buf
 // @Ensures True
 func Echo(rwc io.ReadWriteCloser, buf []byte) {
 	Pump(rwc, rwc, buf)
+}
+
+// CloseMaybe closes c when it is not nil.
+//
+// @Requires c = nil Or ~closed(c)
+// @Modifies c
+// @Ensures True
+func CloseMaybe(c io.Closer) {
+	if c != nil {
+		c.Close()
+	}
+}
+
+// NoCloser hands CloseMaybe nothing, which has no states to change.
+//
+// @Ensures True
+func NoCloser() {
+	CloseMaybe(nil)
 }

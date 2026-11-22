@@ -4,6 +4,7 @@ package r19
 import "io"
 
 // @Requires w != nil And |p| < 10
+// @Modifies w
 // @Ensures True
 func F(w io.Writer, p []byte) (err error) {
 	_, err = w.Write(p) // want `this\ call\ may\ not\ end:\ F\ calls\ w\.Write\(p\)\ at\ p\.go:\d+:\d+,\ which\ may\ run\ W\.Write,\ W\.Write\ calls\ F\ at\ p\.go:\d+:\d+`

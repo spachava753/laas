@@ -14,6 +14,7 @@ import (
 // (*bufio.Scanner).Err the entry that rests on it.
 
 // @Requires ctx != nil And cancel != nil And w != nil
+// @Modifies w
 // @Ensures True
 func Work(ctx context.Context, cancel context.CancelFunc, w io.Writer) (err error) {
 	defer cancel()
@@ -38,6 +39,7 @@ func Discard() (w io.Writer) {
 }
 
 // @Requires w != nil
+// @Modifies w
 // @Ensures True
 func Save(w io.Writer, b []byte) (err error) {
 	if _, err := w.Write(b); err != nil {
@@ -47,7 +49,7 @@ func Save(w io.Writer, b []byte) (err error) {
 }
 
 // @Requires r != nil And |buf| > 0
-// @Modifies buf
+// @Modifies r, buf
 // @Ensures err = nil -> 0 <= n <= |buf|
 func Load(r io.Reader, buf []byte) (n int, err error) {
 	n, err = r.Read(buf)
@@ -148,4 +150,11 @@ func (fresh) Read(p []byte) (n int, err error) {
 // @Ensures r != nil
 func Fresh() (r io.Reader) {
 	return fresh{}
+}
+
+// @Requires w != nil
+// @Ensures True
+func SaveUnlisted(w io.Writer, b []byte) (err error) {
+	_, err = w.Write(b) // want `vego: w.Write may modify the footprint of w, which SaveUnlisted may not modify; list it in a // @Modifies clause`
+	return err
 }

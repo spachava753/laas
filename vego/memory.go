@@ -131,6 +131,10 @@ type layer struct {
 	growth  bool
 	skipped *logic.Term
 	after   *logic.Term
+	// emptied is set for a layer of the footprint region that empties
+	// the row of one new home, as a conversion of a value whose methods
+	// write nothing makes it, and keeps every other row; see emptyRow.
+	emptied *logic.Term
 }
 
 // target is a piece of memory that may be written: a stretch of positions in
@@ -177,8 +181,10 @@ type target struct {
 	owner     value
 	ownerType types.Type
 	// part is set for a target that an owner's clause gives for what one
-	// of its owned fields refers to.
-	part bool
+	// of its owned fields refers to, and ownerParam is then the parameter
+	// the clause names, when it names one.
+	part       bool
+	ownerParam *types.Var
 	// mod is the index of the Modifies clause the target comes from: a
 	// clause that names an owner gives a target for the struct and one
 	// for what each owned field refers to.
@@ -422,7 +428,7 @@ func (v *fnVerifier) member(sink *state, mem memory, cur value, t types.Type, in
 	}
 	result := v.fetch(sink, mem, v.cellsOf(object)[lo:hi], cur[0], cur[1])
 	v.noteTyped(sink, result, field.Type())
-	v.noteReached(sink, v.cellsOf(object)[lo:hi], cur[0], cur[1], field.Type())
+	v.noteReached(sink, v.cellsOf(object)[lo:hi], cur[0], cur[1], field.Type(), object)
 	return result, field.Type(), true
 }
 
@@ -439,7 +445,7 @@ func (v *fnVerifier) element(sink *state, mem memory, header value, t types.Type
 	result := v.fetch(sink, mem, v.cellsOf(elem), header[0], v.elementAt(header, t, index))
 	if !hasBound(index) {
 		v.noteTyped(sink, result, elem)
-		v.noteReached(sink, v.cellsOf(elem), header[0], v.elementAt(header, t, index), elem)
+		v.noteReached(sink, v.cellsOf(elem), header[0], v.elementAt(header, t, index), elem, t)
 	}
 	return result, ok
 }
@@ -635,17 +641,20 @@ type returned struct {
 	unlessNew bool
 	// freshIn holds the arguments, as the caller wrote them, in whose
 	// footprints the contract says what the result refers to may lie, as
-	// fresh(result, w) does, and at is where the call is.
+	// fresh(result, w) does, and at is where the call is. spread is the
+	// slice of such values the caller handed whole, as rs in
+	// io.MultiReader(rs...), whose elements no clause can list.
 	freshIn []string
+	spread  string
 	at      token.Pos
 }
 
 // freshArguments returns the arguments, as the call wrote them, that a
 // conjunct fresh(result, w...) of the ensures of a callee names after the
-// result.
-func freshArguments(fn *funcInfo, result int, args []passedArg) []string {
+// result, each argument a call packed into a variadic slice among them, and
+// the slice a call handed whole in place of them.
+func freshArguments(fn *funcInfo, result int, args []passedArg) (found []string, spread string) {
 	name := spelledResult(fn, result)
-	var found []string
 	for _, c := range fn.ensures {
 		if c.node == nil {
 			continue
@@ -657,14 +666,22 @@ func freshArguments(fn *funcInfo, result int, args []passedArg) []string {
 			}
 			for _, kid := range conjunct.Kids[1:] {
 				for _, arg := range args {
-					if kid.Kind == logic.NIdent && arg.param.Name() == kid.Name && arg.expr != nil {
+					switch {
+					case kid.Kind != logic.NIdent || arg.param.Name() != kid.Name:
+					case arg.packed:
+						for _, e := range arg.pack {
+							found = append(found, types.ExprString(e))
+						}
+					case arg.spread:
+						spread = types.ExprString(arg.expr)
+					case arg.expr != nil:
 						found = append(found, types.ExprString(arg.expr))
 					}
 				}
 			}
 		}
 	}
-	return found
+	return found, spread
 }
 
 // withinArgument finds, in the ensures of a callee, a conjunct that places
@@ -943,7 +960,8 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 			candidates = append(candidates, i)
 		}
 	}
-	// allowed states that the write is covered without the target left out.
+	// allowed states that the write is covered without the targets of the
+	// clause left out, whose index without is, or with every target for -1.
 	allowed := func(without int) *logic.Term {
 		whole := []*logic.Term{}
 		for _, part := range w.parts {
@@ -955,7 +973,7 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 			}
 			var by, premises []*logic.Term
 			for _, i := range candidates {
-				if t := v.frame[i]; t.fp && i != without {
+				if t := v.frame[i]; t.fp && t.mod != without {
 					at := position
 					if part.lo == nil || isMapRegion(part.key) {
 						at = logic.IntLit(0)
@@ -971,7 +989,7 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 				}
 				for _, c := range covers[i] {
 					switch {
-					case i == without || c.key != part.key || (c.lo == nil) != (part.lo == nil):
+					case v.frame[i].mod == without || c.key != part.key || (c.lo == nil) != (part.lo == nil):
 					case c.lo == nil && c.entry != nil && part.entry == nil:
 						// One entry covers no write of the whole map.
 					case c.lo == nil && c.entry != nil:
@@ -1002,6 +1020,15 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 		}
 		// A Modifies entry that ends in an interface value covers the
 		// states of what it holds, and not where the value lies.
+		// The message is chosen by what Modifies lists other than
+		// footprints, which may hold any cell and so are candidates for
+		// every write.
+		var listed []int
+		for _, i := range candidates {
+			if !v.frame[i].fp {
+				listed = append(listed, i)
+			}
+		}
 		var stated *target
 		for i, t := range v.frame {
 			if t.row && slices.ContainsFunc(t.holder, func(c cell) bool {
@@ -1018,7 +1045,7 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 		// Memory that a function returned without saying that it is new
 		// may have existed when the function was called, as what
 		// bufio.NewWriter returns when it is given a large enough Writer.
-		if from, ok := v.returnedBy[w.ref.Name]; remedy == "" && len(candidates) == 0 && w.ref.Op == logic.OpConst && ok {
+		if from, ok := v.returnedBy[w.ref.Name]; remedy == "" && len(listed) == 0 && w.ref.Op == logic.OpConst && ok {
 			callee := from.fn.obj.Name()
 			remedy = fmt.Sprintf("it is memory that %s returned, and its contract does not say that this is new memory, so it may have existed when %s "+
 				"was called; take it as a parameter and list it in a // @Modifies clause", callee, v.fn.obj.Name())
@@ -1049,10 +1076,10 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 		switch {
 		case remedy != "":
 			v.report(pos, "%s, which %s may not modify; %s%s", what, v.fn.obj.Name(), remedy, limitNote(result))
-		case len(candidates) == 0 && stated != nil:
+		case len(listed) == 0 && stated != nil:
 			v.report(pos, "%s, which %s may not modify: // @Modifies %s covers the states of what the interface value %s holds, not the place that holds it; "+
 				"to assign it, list the struct that holds it%s", what, v.fn.obj.Name(), stated.text, stated.text, limitNote(result))
-		case len(candidates) == 0 && (v.fn.spelling().valueOf != nil || v.fn.spelling().methodOf != nil):
+		case len(listed) == 0 && (v.fn.spelling().valueOf != nil || v.fn.spelling().methodOf != nil):
 			// What is checked against the contract of a type cannot add to
 			// it: the clause it would need is in the contract.
 			contract := "the contract of " + v.fn.obj.Name()
@@ -1061,9 +1088,9 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 			}
 			v.report(pos, "%s, which %s may not modify; %s does not list it, so code that writes it cannot be used there%s",
 				what, v.fn.obj.Name(), contract, limitNote(result))
-		case len(candidates) == 0 && unlisted != "":
+		case len(listed) == 0 && unlisted != "":
 			v.report(pos, "%s, which %s may not modify; %s%s", what, v.fn.obj.Name(), unlisted, limitNote(result))
-		case len(candidates) == 0:
+		case len(listed) == 0:
 			v.report(pos, "%s, which %s may not modify; list it in a // @Modifies clause%s%s", what, v.fn.obj.Name(), v.parameterPath(st, guard, w), limitNote(result))
 		default:
 			// Something of the kind is listed, so telling the reader to
@@ -1077,12 +1104,37 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 	// An entry counts as needed unless the write is quickly shown to be
 	// allowed without it.
 	defer v.asking(modifiesCheck)()
-	if len(candidates) == 0 || v.quickly(st, guard, created) {
+	// Whether the write is to memory made since entry matters only for a
+	// clause not yet known to be needed.
+	if !slices.ContainsFunc(candidates, func(i int) bool { return !v.used[i] }) || v.quickly(st, guard, created) {
 		return
 	}
+	v.markNeeded(candidates, func(mod int) bool { return v.quickly(st, guard, allowed(mod)) })
+}
+
+// markNeeded records which clauses among the targets that may cover a
+// write it could not do without: once a clause, with all of its targets
+// left out together, since what is reported is whether a clause is needed
+// (an owner gives several targets, and an interface value its footprint and
+// its states), and not at all a clause already known to be needed.
+func (v *fnVerifier) markNeeded(candidates []int, coveredWithout func(mod int) bool) {
+	asked := map[int]bool{}
 	for _, i := range candidates {
-		if !v.quickly(st, guard, allowed(i)) {
-			v.used[i] = true
+		mod := v.frame[i].mod
+		if asked[mod] {
+			continue
+		}
+		asked[mod] = true
+		// A clause already known to be needed need not be asked of again.
+		if v.used[i] {
+			continue
+		}
+		if !coveredWithout(mod) {
+			for _, j := range candidates {
+				if v.frame[j].mod == mod {
+					v.used[j] = true
+				}
+			}
 		}
 	}
 }

@@ -19,6 +19,7 @@ func (f Feed) Read(b []byte) (int, error) { return q.Plain(f.r), nil }
 // q.Plain, which only an entry could narrow.
 //
 // @Requires r != nil
+// @Modifies r
 // @Ensures True
 func Through(r io.Reader) (n int, err error) {
 	return r.Read(make([]byte, 1)) // want `this call may not end: Through calls r.Read\(make\(\[\]byte, 1\)\) at p.go:\d+:\d+, which may run Feed.Read, Feed.Read hands f.r to q.Plain\(f.r\) at p.go:\d+:\d+, which may run Through; .*; cycles/claim/q.Plain has no entry that says what it finds on r; if it calls only the methods of io.Reader, give it an entry with "asserts: \{r: \[\]\}" in vego-trusted.yaml`

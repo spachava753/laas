@@ -1475,6 +1475,8 @@ vego: s.Record may modify the footprint of s, which LogThroughTeeUnlisted may no
 of r, as the contract of teeRecorder at footprints.go:97:7 says; list r in a // @Modifies clause
 ```
 
+The second argument of `fresh` may also be a variadic parameter whose elements are such values, as in `fresh(result, readers)` of `io.MultiReader`. `vego` reads that clause only where a call writes each element out as its own argument. There it says that what the result refers to is new or lies in the footprint of one of those arguments. Where a call hands a slice whole, the clause says only that the value the result holds is new. The checks of the entry itself also read it that way, so a contradiction in such a clause is reported at a call that writes the elements out (see [Wrappers in package io](#wrappers-in-package-io)).
+
 `within(m, r)` says that a pointer, a slice, or a map lies in the footprint of `r`, as a header lies in the response writer that hands it out. `within(p, bw)` for a `*bufio.Writer` or another value that owns memory (see [Writing through a buffer](#writing-through-a-buffer)) says that `p` lies in its struct or in what it owns. A value that a contract places within an interface value or an owner may be memory that a writer writes, so it cannot be passed to a function beside that writer, as described in [Methods that write behind their receiver](#methods-that-write-behind-their-receiver).
 
 ### Interface values that call interface values
@@ -2004,11 +2006,11 @@ These rules keep one meaning for each name, and each break is reported:
 laas -vego -vego.cost ./...
 ```
 
-For `Load` from [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write), under the entries shown there, in a file `foreign.go` that declares it at line 52, it prints:
+For `Load` from [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write), under the entries shown there, in a file `foreign.go` that declares it at line 54, it prints:
 
 ```text
-foreign.go:52:6: vego cost of Load: 41 problems, 4767457 resource units, 138597 bytes, 1.60 s
-	foreign.go:52:6: 2 questions of the always-fails check stopped at a limit
+foreign.go:54:6: vego cost of Load: 43 problems, 2093197 resource units, 157215 bytes, 1.60 s
+	foreign.go:54:6: 2 questions of the always-fails check stopped at a limit
 ```
 
 The first line counts the problems that `vego` handed to Z3, the work Z3 counted for them, and the size of their text. These three numbers are the same on every run with the same `laas`, Go, and Z3, unless a question ran past the time limit or out of memory, which depend on the machine (see the notes in [Helping the prover](#helping-the-prover)). The seconds are the time spent on the function. They include time spent waiting for a free Z3 process while other packages are verified at the same time, so they change with the machine and its load. They do not include the time spent on other functions, such as checking a trusted contract that the function calls, which get a line of their own.
@@ -3889,6 +3891,7 @@ Some lengths have no term in the logic: the text of an error, the strings in a s
 
 ```go
 // @Requires w != nil And l != nil And ready(l)
+// @Modifies w
 // @Ensures True
 func Inventory(w io.Writer, l *log.Logger, n int) (err error) {
 	l.Printf("%d items", n)
@@ -3952,10 +3955,11 @@ Give it a trusted contract with `formats` instead. `vego` then checks each value
 - It does nothing with those values but format them as package `fmt` does, and it uses that string only as the format.
 - It runs no method of the values other than those `fmt` runs, and only while the call lasts, on the goroutine that called it.
 - It keeps none of the values.
-- It writes nothing your code can see.
+- It writes nothing your code can see beyond what its `modifies` lists.
+- It formats every value before it writes anything that its `modifies` lists, and before it runs any code that its `runs` lists. `fmt.Fprintf` formats into a buffer and then calls `w.Write` once.
 - What it builds from them is at most 4096 bytes longer than what `fmt` prints for them, apart from what a logger adds from its own settings, such as its prefix and the name of a file.
 
-An entry with `formats` must have `modifies: []` and no `calls`. Its `runs` may list only values whose contracts write nothing. Otherwise the entry cannot be used, because `vego` checks the values in the state of the call, and what the function wrote or ran before it formatted them could change that state.
+`vego` checks the values in the state of the call, which is the state in which they are formatted because the function formats first. An entry with `formats` cannot have `calls`, because a function it is handed could run before the values are formatted. Such an entry cannot be used.
 
 ### Functions that do not return
 
@@ -5086,6 +5090,7 @@ A `bufio.Scanner` reads lines from a reader:
 
 ```go
 // @Requires r != nil And limit >= 0
+// @Modifies r
 // @Ensures 0 <= n And n <= limit
 func PrintLines(r io.Reader, limit int) (n int, err error) {
 	sc := bufio.NewScanner(r)
@@ -5107,6 +5112,7 @@ A loop needs a variant, and a reader may never end. So `for sc.Scan()` alone can
 
 ```go
 // @Requires r != nil
+// @Modifies r
 // @Ensures True
 func ReadAll(r io.Reader) {
 	sc := bufio.NewScanner(r)
@@ -5135,6 +5141,7 @@ The error that `Err` returns may be one that the reader returned. Under the ship
 
 ```go
 // @Requires r != nil And limit >= 0
+// @Modifies r
 // @Ensures 0 <= n And n <= limit
 func ReadLines(r io.Reader, limit int) (n int, err error) {
 	sc := bufio.NewScanner(r)
@@ -5178,12 +5185,27 @@ With both entries, `ReadLines` verifies. The claim of the `Err` entry rests on t
 
 #### Writing through a buffer
 
-`bufio.NewWriter` returns the writer it is given when that writer is already a large enough `*bufio.Writer`. So what it returns is not known to be new, and a function that writes through it writes memory that may have existed when it was called:
+A `*bufio.Writer` made over `w` writes what `w` writes, and memory of its own. `bufio.NewWriter` returns the writer it is given when that writer is already a large enough `*bufio.Writer`, and then what it returns is memory that `w` writes. Its entry says `fresh(result, w)` (see [New values and values made over a writer](#new-values-and-values-made-over-a-writer)), so `Modifies w` covers what the writes through it change:
+
+```go
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func WriteBuffered(w io.Writer) (err error) {
+	bw := bufio.NewWriter(w)
+	if _, err = bw.Write([]byte("done\n")); err != nil {
+		return err
+	}
+	return bw.Flush()
+}
+```
+
+Without `w` in `Modifies`, the write is reported:
 
 ```go
 // @Requires w != nil
 // @Ensures True
-func WriteBuffered(w io.Writer) (err error) {
+func WriteBufferedUnlisted(w io.Writer) (err error) {
 	bw := bufio.NewWriter(w)
 	_, err = bw.Write([]byte("done\n"))
 	return err
@@ -5191,12 +5213,11 @@ func WriteBuffered(w io.Writer) (err error) {
 ```
 
 ```text
-vego: Write may modify bw, which WriteBuffered may not modify; it is memory that NewWriter returned,
-and its contract does not say that this is new memory, so it may have existed when WriteBuffered was
-called; take it as a parameter and list it in a // @Modifies clause
+vego: Write may modify bw, which WriteBufferedUnlisted may not modify; it is memory that NewWriter returned,
+which its contract places in the footprint of w when it is not new; list w in a // @Modifies clause
 ```
 
-Until `vego` can tell memory that only an argument reaches, take the `*bufio.Writer` as a parameter and require that it is ready:
+A function can also take the `*bufio.Writer` as a parameter. It then lists the writer and requires that it is ready:
 
 ```go
 // @Requires bw != nil And ready(bw)
@@ -5212,7 +5233,7 @@ func WriteTotal(bw *bufio.Writer, total []byte) (err error) {
 
 `Write`, `WriteByte`, and `Flush` have entries. `ready(bw)` holds when the last of `bufio.NewWriter`, `bufio.NewWriterSize`, and `Reset` that set the writer's output set one that is not `nil`. `WriteString` has no entry, because it calls the `WriteString` method of the writer it wraps when that writer has one, and no entry covers that method. Write `bw.Write([]byte(s))` instead.
 
-The same holds for a `*bufio.Reader`. `bufio.NewReader` may return the reader it is given, and `ReadByte` requires `ready(br)`.
+The same holds for a `*bufio.Reader`. `bufio.NewReader` may return the reader it is given, and its entry says `fresh(result, rd)`. `ReadByte` requires `ready(br)`.
 
 Some values of the standard library own memory besides their struct. Their methods write that memory, and a `Modifies` clause that lists such a value covers it. These are the values and what each owns:
 
@@ -5259,6 +5280,7 @@ only a contract that comes with vego or a verified function says how what such a
 
 ```go
 // @Requires r != nil And log != nil
+// @Modifies r, log
 // @Ensures True
 func ReadLogged(r io.Reader, log io.Writer) (err error) {
 	rc := io.NopCloser(io.TeeReader(r, log))
@@ -5268,16 +5290,40 @@ func ReadLogged(r io.Reader, log io.Writer) (err error) {
 }
 ```
 
-Each requires that what it is given is not `nil`. `MultiReader` and `MultiWriter` require it of every element:
+Each requires that what it is given is not `nil`. A read through what they return writes what the readers and writers they keep write, so a function lists each of them, as `ReadLogged` lists `r` and `log`.
+
+Call `MultiReader` and `MultiWriter` with each reader or writer written out as its own argument. List each of those arguments:
+
+```go
+// @Requires header != nil And body != nil
+// @Modifies header, body
+// @Ensures True
+func ReadParts(header, body io.Reader) (err error) {
+	all := io.MultiReader(header, body)
+	_, err = all.Read(make([]byte, 512))
+	return err
+}
+```
+
+A `*os.File` writes nothing behind the file, so `io.MultiWriter(os.Stdout, f)` with a file `f` needs nothing listed.
+
+A slice handed whole, as in `io.MultiReader(parts...)`, is not supported yet. No `Modifies` clause can name what the readers of a slice write, so the read is refused:
 
 ```go
 // @Requires Forall i in [0, |parts|) : parts[i] != nil
 // @Ensures True
-func ReadParts(parts []io.Reader) (err error) {
+func ReadAllParts(parts []io.Reader) (err error) {
 	all := io.MultiReader(parts...)
 	_, err = all.Read(make([]byte, 512))
 	return err
 }
+```
+
+```text
+vego: all.Read may modify the footprint of all, which ReadAllParts may not modify; it is a value that
+MultiReader returned at wrappers.go:114:9, and its contract places its footprint in those of what parts
+holds, which no // @Modifies clause can list yet; pass the values written out, one argument each, and
+list each of them
 ```
 
 `NopCloser` ensures that what it returns is new and not closed, so a function can close it once. Closing it closes nothing of the reader it wraps.
@@ -5506,6 +5552,7 @@ With them, this verifies:
 
 ```go
 // @Requires ctx != nil And cancel != nil And w != nil
+// @Modifies w
 // @Ensures True
 func Work(ctx context.Context, cancel context.CancelFunc, w io.Writer) (err error) {
 	defer cancel()
@@ -5522,13 +5569,29 @@ The shipped entries state what the documentation of each type asks of every impl
 ```yaml
   (io.Writer).Write:
     reason: ...
-    modifies: []
+    receiver: w
+    modifies: [w]
     ensures:
       - "0 <= n And n <= |p|"
       - "n < |p| -> err != nil"
 ```
 
-The entry for `Read` says that `0 <= n <= |p|` and that `Read` may write all of `p`. It also requires `|p| > 0`: the documentation says only that a `Read` into an empty slice should return 0, and `iotest.DataErrReader` never returns from one. The entry for `Err` says that the error is nil, `context.Canceled`, or `context.DeadlineExceeded`, what `errors.Is` finds in each, and vouches for them. The entry for `context.CancelFunc` says that a cancel function writes nothing that verified code can see. The entry for `Close` is described in [States of interface values](#states-of-interface-values). It claims nothing of the errors that `Close` returns.
+`Write` lists its receiver, so it may write what the writer holds, as a buffer does, which is the writer's footprint (see [Methods that write behind their receiver](#methods-that-write-behind-their-receiver)). A function that writes through an `io.Writer` lists it in `Modifies`, as `Work` does. So does a function that formats into one with `fmt.Fprintf`, or that writes through a `*bufio.Writer` or a `*log.Logger` made over it. Without `w` in `Modifies`, the write is reported:
+
+```go
+// @Requires w != nil
+// @Ensures True
+func SaveUnlisted(w io.Writer, b []byte) (err error) {
+	_, err = w.Write(b)
+	return err
+}
+```
+
+```text
+vego: w.Write may modify the footprint of w, which SaveUnlisted may not modify; list it in a // @Modifies clause
+```
+
+The entry for `Read` says that `0 <= n <= |p|` and that `Read` may write all of `p` and what the reader holds, as a position or a buffer. A function that reads through an `io.Reader` lists it in `Modifies`. So does one that reads through a `*bufio.Scanner` or a `*bufio.Reader` made over it, and through what `io.NopCloser`, `io.LimitReader`, or `io.TeeReader` return. It also requires `|p| > 0`: the documentation says only that a `Read` into an empty slice should return 0, and `iotest.DataErrReader` never returns from one. The entry for `Err` says that the error is nil, `context.Canceled`, or `context.DeadlineExceeded`, what `errors.Is` finds in each, and vouches for them. The entry for `context.CancelFunc` says that a cancel function writes nothing that verified code can see. The entry for `Close` is described in [States of interface values](#states-of-interface-values). It claims nothing of the errors that `Close` returns.
 
 The documentation of `io.Reader` and `io.Writer` says nothing about a value that was closed, so their entries do not speak of `closed` and hold before and after `Close`. The tests of `vego` call `Read` and `Write` after `Close` on the closers of the standard library, and each still meets its entry.
 
@@ -5590,6 +5653,7 @@ The shipped entries for `Read` and `Write` do not vouch for errors. The document
 
 ```go
 // @Requires w != nil
+// @Modifies w
 // @Ensures True
 func Save(w io.Writer, b []byte) (err error) {
 	if _, err := w.Write(b); err != nil {
@@ -5624,7 +5688,7 @@ To wrap them, replace the shipped entry with one of your own that vouches:
 
 ```go
 // @Requires r != nil And |buf| > 0
-// @Modifies buf
+// @Modifies r, buf
 // @Ensures err = nil -> 0 <= n <= |buf|
 func Load(r io.Reader, buf []byte) (n int, err error) {
 	n, err = r.Read(buf)
@@ -5864,6 +5928,7 @@ This table lists the most common messages.
 | `x is assigned, which F may not modify; list it in a // @Modifies clause`, with `, as p.f` when a path from a parameter reaches it | No `Modifies` entry covers memory of this kind. The path stops before a field that your package cannot name, such as an unexported field of `os.File`. | Add it to `Modifies`, by the path the message names. |
 | `... which F may not modify: nothing its // @Modifies clauses list is known to cover it` | An entry covers memory of this kind, but `vego` cannot prove it is this memory. It may be another element, another struct, or a slice that was replaced after `F` was called. | Make the entry match. For a replaced slice, the callee needs a `fresh ... Or within ...` clause. |
 | `x.M may modify the footprint of x, which F may not modify; list it in a // @Modifies clause` | The method writes behind its receiver, and `F` does not list the value. | Add the value to `Modifies`. See [Methods that write behind their receiver](#methods-that-write-behind-their-receiver). |
+| `x.M may modify the footprint of x, ...; it is a value that G returned at f.go:n:c, and its contract places its footprint in those of what s holds, which no // @Modifies clause can list yet; ...` | `x` was made over a slice of readers or writers handed whole, as in `io.MultiReader(s...)`. | Pass each reader or writer as its own argument and list each one. See [Wrappers in package io](#wrappers-in-package-io). |
 | `the footprint of what is passed to G as w may hold memory that what is passed as y reaches, and G relies on it not doing so: ...` | `F` cannot show where `y` comes from, or a value of unknown origin, or a call that may store one, may have put it into memory that `y` reaches. The message says which. | Pass a value read from your own parameters or made in `F`, or one that a contract says is new or within such a value. Make the call before the one that may store. |
 | `x may be read before or after the call to F, which may change it, and Go does not fix the order` | Go may read `x` before or after `F` runs in this statement, and the two are not proved to give the same value. | Read `x` or call `F` in a statement of its own, in the order you mean. The message ends with such a statement, as in `x0 := x before it`, where one fits. See [Reads that Go may make before or after a call](#reads-that-go-may-make-before-or-after-a-call). |
 | `cannot verify F: g is called in the target of this assignment, and Go may call it before or after append writes into the array of s` | The call may run on either side of the write, and it may read or write memory. | Assign the result of `g` to a variable in a statement of its own first. See [An append beside a call](#an-append-beside-a-call). |
@@ -6013,7 +6078,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - `errors.As`, `errors.Join`, `errors.Unwrap`, and `errors.Is` on an error whose origin is not known (see [Asking errors.Is](#asking-errorsis));
 - `goto`, `fallthrough`, labelled `break` and `continue`, and `defer` inside a loop, except inside a function literal that the loop calls.
 
-Some limits are reported in other ways. A write through what `bufio.NewReader` or `bufio.NewWriter` returns is reported as `Write may modify bw, which F may not modify; it is memory that NewWriter returned, and its contract does not say that this is new memory`, since that may be memory that existed when the function was called. Take the `*bufio.Reader` or `*bufio.Writer` as a parameter, as described in [Writing through a buffer](#writing-through-a-buffer). A state can be declared only for an interface, and only as a boolean. A `State` annotation on a struct type is reported at the annotation as `a state can be declared only on a defined interface type that declares a method of its own`, and a state of a struct type in your trust file is reported in the file. A mutex or a `sync.Once` that exists when a trusted function is called cannot be used in a function literal that it calls, and its `Lock` or `Do` is reported as a precondition that may not hold, as described in [Locking in a function that a trusted function calls](#locking-in-a-function-that-a-trusted-function-calls). A formula that names an unexported field of a struct of another package is reported at the annotation, as described in [Names](#names). A method of a type that writes what its receiver points to, or relies on what it points to, cannot be used as a method of an interface. The conversion reports the obligation that fails, as described in [What a conversion checks](#what-a-conversion-checks). An entry in the trust file for a type of the module that you verify is reported in the trust file, as described in [Limits of trusted contracts](#limits-of-trusted-contracts). Two different entries for one type in packages built together are reported in every package built with both, as described in [One entry for each type in a build](#one-entry-for-each-type-in-a-build).
+Some limits are reported in other ways. A write through what `bufio.NewReader` or `bufio.NewWriter` returns, in a function that does not list the reader or the writer it was made over, is reported as `Write may modify bw, which F may not modify; it is memory that NewWriter returned, which its contract places in the footprint of w when it is not new; list w in a // @Modifies clause`. List it, as described in [Writing through a buffer](#writing-through-a-buffer). A state can be declared only for an interface, and only as a boolean. A `State` annotation on a struct type is reported at the annotation as `a state can be declared only on a defined interface type that declares a method of its own`, and a state of a struct type in your trust file is reported in the file. A mutex or a `sync.Once` that exists when a trusted function is called cannot be used in a function literal that it calls, and its `Lock` or `Do` is reported as a precondition that may not hold, as described in [Locking in a function that a trusted function calls](#locking-in-a-function-that-a-trusted-function-calls). A formula that names an unexported field of a struct of another package is reported at the annotation, as described in [Names](#names). A method of a type that writes what its receiver points to, or relies on what it points to, cannot be used as a method of an interface. The conversion reports the obligation that fails, as described in [What a conversion checks](#what-a-conversion-checks). An entry in the trust file for a type of the module that you verify is reported in the trust file, as described in [Limits of trusted contracts](#limits-of-trusted-contracts). Two different entries for one type in packages built together are reported in every package built with both, as described in [One entry for each type in a build](#one-entry-for-each-type-in-a-build).
 
 Some true contracts are not proved at the default limit. A function that writes one field through twenty-four or more different pointers has postconditions that are reported as not proved, with the note about the resource limit (see [Helping the prover](#helping-the-prover)).
 
@@ -6145,7 +6210,7 @@ Results are referred to by the names in the function's signature.
 | `Modifies g[from][to]` | the entry `to` of the map held under `from` |
 | `Modifies rc`, `Modifies p.f` | if `rc` or `f` is an interface value: every state of what it holds, not the variable or the field; a function value field is the field itself |
 | `fresh(x)` | in an `Ensures`, the memory `x` refers to on return was allocated by the call; in a body, it was allocated since the function was entered; true for a slice with zero capacity and a nil interface value, false for a nil pointer or map; for an interface value, what it holds was created then, its footprint included |
-| `fresh(x, w)` | the same, except that what `x` refers to may also lie in the footprint of `w`, an interface value whose methods write behind it; more than one such value may follow |
+| `fresh(x, w)` | the same, except that what `x` refers to may also lie in the footprint of `w`, an interface value whose methods write behind it; more than one such value may follow, and `w` may be a variadic parameter of such values, read where a call writes each one out |
 | `within(a, b)` | `a` lies inside the memory of `b`; each is a pointer or a slice, and a slice includes its capacity; for an interface value `b`, `a` (also a map) lies in its footprint, and for a value that owns memory, in its struct or in what it owns |
 | `apart(a, b)` | the slices `a` and `b`, of one element type, share no memory up to their capacities |
 

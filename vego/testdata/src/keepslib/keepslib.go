@@ -101,6 +101,11 @@ func KeepsTwice(h Handler) *Registry { return nil }
 // does.
 func Closing(r io.Reader) io.ReadCloser { return io.NopCloser(r) }
 
+// Joined keeps rs in a reader that reads them in turn, as io.MultiReader
+// does. Its entry in the trust file contradicts itself where each reader's
+// Read writes nothing behind it.
+func Joined(rs ...io.Reader) io.Reader { return io.MultiReader(rs...) }
+
 // Consume reads from rc until it fails.
 func Consume(rc io.ReadCloser) {}
 

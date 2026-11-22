@@ -606,6 +606,15 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 				if from, ok := v.returnedBy[t.ref.Args[1].Name]; ok && len(from.freshIn) > 0 {
 					remedy = fmt.Sprintf("it may lie in the footprint of %s, as the contract of %s at %s says; list %s in a // @Modifies clause",
 						strings.Join(from.freshIn, " or "), from.call, v.placeOf(from.at), strings.Join(from.freshIn, " and "))
+				} else if ok && from.spread != "" {
+					remedy = fmt.Sprintf("it is a value that %s returned at %s, and its contract places its footprint in those of what %s holds, "+
+						"which no // @Modifies clause can list yet; pass the values written out, one argument each, and list each of them",
+						from.call, v.placeOf(from.at), from.spread)
+				} else if ok {
+					remedy = fmt.Sprintf("it is a value that %s returned at %s, and its contract does not say where its footprint lies, "+
+						"as fresh(%s, w) says of a value that writes what w writes or memory it makes; "+
+						"what a value made over a slice of writers or readers writes cannot be said yet",
+						from.call, v.placeOf(from.at), spelledResult(from.fn, from.result))
 				}
 			}
 			v.checkFootprintWrite(st, guard, t, call.Pos(), fmt.Sprintf("%s may modify the footprint of %s", name, base), remedy, unlisted)
@@ -614,7 +623,13 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 				continue
 			}
 		}
-		v.checkWriteOr(st, guard, t.reach(), call.Pos(), fmt.Sprintf("%s may modify %s", name, what), remedy, unlisted)
+		// A nil interface value holds nothing, so it has no states, and a
+		// call that writes them writes nothing where it is nil.
+		writes := guard
+		if t.row && t.ref.Op == logic.OpSelect && t.ref.Args[0] == homes {
+			writes = append(slices.Clip(guard), logic.Not(isNilRef(value{t.ref.Args[1]})))
+		}
+		v.checkWriteOr(st, writes, t.reach(), call.Pos(), fmt.Sprintf("%s may modify %s", name, what), remedy, unlisted)
 		if t.owner != nil && v.reports > reportsBefore {
 			ownerRefused[t.mod] = true
 		}
@@ -675,14 +690,19 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 					if leaf.Sort == logic.Ref && leaf.Op == logic.OpConst {
 						from := returned{fn: fn, result: i, call: name, at: call.Pos()}
 						from.param, from.within, from.unlessNew = withinArgument(fn, i, bound)
-						from.freshIn = freshArguments(fn, i, bound)
+						from.freshIn, from.spread = freshArguments(fn, i, bound)
 						v.returnedBy[leaf.Name] = from
 					}
 				}
 			}
 		}
 	}
-	post := &specEnv{v: v, sink: st, fn: fn, args: args, results: results, now: before, post: st.mem, before: existed, applied: applied}
+	post := &specEnv{v: v, sink: st, fn: fn, args: args, results: results, now: before, post: st.mem, before: existed, applied: applied, packed: map[*types.Var]int{}}
+	for _, b := range bound {
+		if b.packed {
+			post.packed[b.param] = len(b.pack)
+		}
+	}
 	// What the types guarantee of everything the call took and produced.
 	// The state only holds such facts for the elements that were actually
 	// read, and both the check of a trusted promise below and the proof
@@ -718,14 +738,19 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	// Resolving the promise notes more of what the types guarantee, so that
 	// is done before the state is looked at for the first time.
 	promised := make([]*logic.Term, len(fn.ensures))
+	v.lazyRows = true
 	for i, c := range fn.ensures {
 		promised[i] = v.calleeFormula(c, post)
 	}
+	v.lazyRows = false
+	// The question for a contradiction takes what the claims stand for.
+	claimDefs := v.claimDefs
+	v.claimDefs = nil
 	dead := (fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil) || v.quickly(st, involved, logic.False())
 	for _, promise := range promised {
 		st.assume(logic.Implies(logic.And(guard...), promise))
 	}
-	if !dead && v.quickly(st, involved, logic.False()) {
+	if !dead && v.quickly(st, append(slices.Clip(involved), claimDefs...), logic.False()) {
 		what := "trusted contract of " + name
 		switch {
 		case fn.valueOf != nil:

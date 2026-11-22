@@ -11,6 +11,7 @@ import (
 // CountLines counts at most limit lines of r.
 //
 // @Requires r != nil And limit >= 0
+// @Modifies r
 // @Ensures 0 <= n And n <= limit
 func CountLines(r io.Reader, limit int) (n int, err error) {
 	sc := bufio.NewScanner(r)
@@ -25,6 +26,7 @@ func CountLines(r io.Reader, limit int) (n int, err error) {
 // LongestLine returns the length of the longest of at most limit lines.
 //
 // @Requires r != nil And limit >= 0
+// @Modifies r
 // @Ensures 0 <= longest And longest <= 65536
 func LongestLine(r io.Reader, limit int) (longest int) {
 	sc := bufio.NewScanner(r)
@@ -42,6 +44,7 @@ func LongestLine(r io.Reader, limit int) (longest int) {
 // fmt format.
 //
 // @Requires r != nil And limit >= 0
+// @Modifies r
 // @Ensures True
 func PrintLines(r io.Reader, limit int) {
 	sc := bufio.NewScanner(r)
@@ -56,6 +59,7 @@ func PrintLines(r io.Reader, limit int) {
 // does.
 //
 // @Requires r != nil
+// @Modifies r
 // @Ensures True
 func ScansForEver(r io.Reader) (n int) {
 	sc := bufio.NewScanner(r)
@@ -67,6 +71,7 @@ func ScansForEver(r io.Reader) (n int) {
 // ScansWithoutInvariant forgets in the loop that the Scanner is ready.
 //
 // @Requires r != nil And limit >= 0
+// @Modifies r
 // @Ensures True
 func ScansWithoutInvariant(r io.Reader, limit int) {
 	sc := bufio.NewScanner(r)
@@ -148,15 +153,26 @@ func Report(bw *bufio.Writer, total []byte) (err error) {
 	return bw.Flush()
 }
 
-// WritesLocally makes a Writer over w and writes to it. NewWriter may
-// return the Writer that w holds, so the write may be to memory that
-// existed when WritesLocally was called.
+// WritesLocally makes a Writer over w and writes to it, which writes what
+// w writes or memory the Writer makes.
 //
 // @Requires w != nil
+// @Modifies w
 // @Ensures True
 func WritesLocally(w io.Writer) (err error) {
 	bw := bufio.NewWriter(w)
-	return bw.Flush() // want `vego: Flush may modify bw, which WritesLocally may not modify; it is memory that NewWriter returned, and its contract does not say that this is new memory, so it may have existed when WritesLocally was called; take it as a parameter and list it in a // @Modifies clause`
+	return bw.Flush()
+}
+
+// WritesLocallyUnlisted is WritesLocally without w listed. NewWriter may
+// return the Writer that w holds, so the write may be to memory that
+// existed when it was called.
+//
+// @Requires w != nil
+// @Ensures True
+func WritesLocallyUnlisted(w io.Writer) (err error) {
+	bw := bufio.NewWriter(w)
+	return bw.Flush() // want `vego: Flush may modify bw, which WritesLocallyUnlisted may not modify; it is memory that NewWriter returned, which its contract places in the footprint of w when it is not new; list w in a // @Modifies clause`
 }
 
 // MakesWriter makes a Writer for its caller to use.

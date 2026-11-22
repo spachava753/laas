@@ -29,6 +29,7 @@ func ShowAll(values []any) {
 }
 
 // @Requires w != nil And l != nil And ready(l)
+// @Modifies w
 // @Ensures True
 func Inventory(w io.Writer, l *log.Logger, n int) (err error) {
 	l.Printf("%d items", n)

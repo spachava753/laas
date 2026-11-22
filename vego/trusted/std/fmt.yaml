@@ -62,7 +62,8 @@ trusted:
       - "w != nil"
     runs: [w]
     formats: [format, a]
-    modifies: []
+    modifies: [w]
+    vouches: [w]
     # Read from the source of Go 1.27: Fprintf calls only w.Write.
     asserts:
       w: []
@@ -77,7 +78,8 @@ trusted:
       - "w != nil"
     runs: [w]
     formats: [a]
-    modifies: []
+    modifies: [w]
+    vouches: [w]
     # Read from the source of Go 1.27: Fprint calls only w.Write.
     asserts:
       w: []
@@ -92,7 +94,8 @@ trusted:
       - "w != nil"
     runs: [w]
     formats: [a]
-    modifies: []
+    modifies: [w]
+    vouches: [w]
     # Read from the source of Go 1.27: Fprintln calls only w.Write.
     asserts:
       w: []

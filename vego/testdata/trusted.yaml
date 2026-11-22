@@ -389,6 +389,16 @@ trusted:
     runs: [w]
     modifies: []
 
+  footprints.storesInto:
+    reason: Test helper standing for a trusted function that writes b and returns a new pair.
+    requires:
+      - "b != nil"
+    runs: [b]
+    modifies: [b]
+    vouches: [b]
+    ensures:
+      - "p != nil And fresh(p)"
+
   footprints.resetWriter:
     reason: Test helper standing for a function the project trusts to write a Writer, which may make it own any memory.
     requires:
@@ -1449,10 +1459,13 @@ trusted:
       Their errors are io.EOF and io.ErrNoProgress, made by errors.New,
       os.ErrInvalid, and *fs.PathError holding a syscall.Errno, os.ErrClosed,
       or os.ErrDeadlineExceeded, a *poll.DeadlineExceededError; the methods
-      of each only read its fields; reviewed 2026-11-19.
+      of each only read its fields; reviewed 2026-11-19. Read changes the
+      position of a *bytes.Reader and the buffer of a *bufio.Reader, which is
+      the reader's footprint.
+    receiver: r
     requires: ["|p| > 0"]
     vouches: [err]
-    modifies: [p]
+    modifies: [r, p]
     ensures: ["0 <= n And n <= |p|"]
 
   # The entry the guide shows for wrapping the error of a Scanner, which
@@ -1697,13 +1710,14 @@ trusted:
     asserts:
       r: []
     vouches: [result]
-    ensures: ["result != nil", "fresh(result)"]
+    ensures: ["result != nil", "fresh(result)", "result.r = r"]
 
   (*keepslib.Box).Fill:
-    reason: Reads once from the reader in b into p, which must not be empty.
+    reason: Reads once from the reader in b into p, which must not be empty, which writes what that reader writes.
     requires: ["b != nil", "|p| > 0"]
     runs: [b]
-    modifies: [p]
+    modifies: [p, b.r]
+    vouches: [b]
     asserts:
       b: []
     ensures: ["0 <= result And result <= |p|"]
@@ -1792,7 +1806,23 @@ trusted:
     asserts:
       r: [io.WriterTo]
     vouches: [result]
-    ensures: ["result != nil", "fresh(result)", "~closed(result)"]
+    ensures: ["result != nil", "fresh(result, r)", "~closed(result)"]
+
+  keepslib.Joined:
+    reason: >-
+      A false entry, of the shape of io.MultiReader's: it says that what the
+      result's Read writes lies in the footprints of rs and also that some
+      of it is old. Its own check reads fresh(result, rs) of a slice of
+      unknown length as saying nothing of the footprint, so only a call
+      that names each reader can find the contradiction.
+    requires: ["Forall i in [0, |rs|) : rs[i] != nil"]
+    keeps:
+      rs: [result]
+    modifies: []
+    asserts:
+      rs: []
+    vouches: [result]
+    ensures: ["result != nil", "fresh(result, rs)", "~fresh(result)"]
 
   keepslib.Consume:
     reason: A test of a trusted function that runs a closer it is given; it reads from rc and leaves it open.

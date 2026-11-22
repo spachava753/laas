@@ -78,7 +78,7 @@ func Consumed(rc io.ReadCloser) (err error) {
 // @Requires r != nil
 // @Ensures True
 func ConsumedUnlisted(r io.Reader) {
-	ifacestatelib.Consume(r) // want `Consume may modify the states of r, which ConsumedUnlisted may not modify` `this\ call\ may\ not\ end:\ ConsumedUnlisted\ hands\ r\ to\ ifacestatelib\.Consume\(r\)\ at\ foreign\.go:\d+:\d+,\ which\ may\ run\ ConsumedUnlisted`
+	ifacestatelib.Consume(r) // want `Consume may modify the footprint of r, which ConsumedUnlisted may not modify` `Consume may modify the states of r, which ConsumedUnlisted may not modify` `this\ call\ may\ not\ end:\ ConsumedUnlisted\ hands\ r\ to\ ifacestatelib\.Consume\(r\)\ at\ foreign\.go:\d+:\d+,\ which\ may\ run\ ConsumedUnlisted`
 }
 
 // Record holds a closer, which verified code cannot make under the shipped

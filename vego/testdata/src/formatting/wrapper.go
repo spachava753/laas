@@ -21,7 +21,9 @@ func UsesLogfWrongly(v any) {
 // @Modifies b
 type Sink func(b []int)
 
-// The entries of these break the rules of formats, each in its own way.
+// The entries of handing, twoValues, and notAny break the rules of formats,
+// each in its own way. Those of fill and sinking write, and run code that
+// writes, after they format, which formats claims.
 
 func fill(b []int, a ...any)     {}
 func handing(f func(), a ...any) {}
@@ -33,7 +35,7 @@ func notAny(n int, a ...int)     {}
 // @Modifies b
 // @Ensures True
 func UsesFill(b []int) {
-	fill(b, 1) // want `vego:\ the\ trusted\ contract\ of\ formatting\.fill\ .*cannot\ be\ used:\ it\ lists\ formats\ and\ writes\ memory\ under\ modifies`
+	fill(b, 1)
 }
 
 // @Ensures True
@@ -43,7 +45,7 @@ func UsesHanding() {
 
 // @Ensures True
 func UsesSinking(s Sink) {
-	sinking(s, 1) // want `vego:\ the\ trusted\ contract\ of\ formatting\.sinking\ .*cannot\ be\ used:\ it\ lists\ formats\ and\ runs\ s`
+	sinking(s, 1)
 }
 
 // @Ensures True

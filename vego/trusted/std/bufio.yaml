@@ -65,7 +65,8 @@ trusted:
       Documented: "NewScanner returns a new Scanner to read from r. The
       split function defaults to ScanLines." The Scanner is new and ready.
       It keeps r in the field r of the Scanner and calls nothing; only Scan
-      reads that field, to call r.Read.
+      reads that field, to call r.Read. What the Scanner owns is new but for
+      what r writes, which its footprint holds.
     requires:
       - "r != nil"
     keeps:
@@ -77,7 +78,7 @@ trusted:
     vouches: [result]
     ensures:
       - "result != nil"
-      - "fresh(result)"
+      - "fresh(result, r)"
       - "ready(result)"
 
   (*bufio.Scanner).Scan:
@@ -146,7 +147,9 @@ trusted:
       reader in memory that an argument reaches does, which a Reader that
       reads from nil does not, since its Read panics once its buffer is
       empty. It keeps rd in the field rd of the new Reader and calls
-      nothing.
+      nothing. What the result owns is new but for what rd writes: a new
+      Reader owns a new buffer and rd, and the Reader that rd holds is what
+      rd writes.
     requires:
       - "rd != nil"
     keeps:
@@ -158,6 +161,7 @@ trusted:
     vouches: [result]
     ensures:
       - "result != nil"
+      - "fresh(result, rd)"
       - "ready(result)"
 
   (*bufio.Reader).ReadByte:
@@ -191,7 +195,9 @@ trusted:
       entry of (io.Writer).Write, as every writer in memory that an
       argument reaches does, which a Writer that writes to nil does not,
       since its Write panics once its buffer is full. It keeps w in the
-      field wr of the new Writer and calls nothing.
+      field wr of the new Writer and calls nothing. What the result owns is
+      new but for what w writes: a new Writer owns a new buffer and w, and
+      the Writer that w holds is what w writes.
     requires:
       - "w != nil"
     keeps:
@@ -203,6 +209,7 @@ trusted:
     vouches: [result]
     ensures:
       - "result != nil"
+      - "fresh(result, w)"
       - "ready(result)"
 
   (*bufio.Writer).Write:

@@ -874,6 +874,16 @@ func (v *fnVerifier) contractInstance(entry *state) (pre, post, failures []*logi
 	fn := v.fn
 	st := entry.clone()
 	for _, t := range v.frame {
+		// What the footprint of an interface value an owner owns holds
+		// is memory the contract cannot name. Forgetting it starts an
+		// epoch, which makes every region an unknown of the outcome, and
+		// the always-fails search over every such outcome is what Z3 gives
+		// up on. Keeping it only narrows the outcomes, which can make the
+		// check find success forced where it is not, and a contradiction
+		// where there is none: both are reported, never hidden.
+		if t.part && t.fp {
+			continue
+		}
 		v.havoc(st, t, nil)
 	}
 	st.brk = v.fresh("brk", logic.Ref)

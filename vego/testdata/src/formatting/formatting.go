@@ -49,12 +49,14 @@ func Prints(done, total int, name string) {
 }
 
 // @Requires w != nil
+// @Modifies w
 // @Ensures True
 func Writes(w io.Writer, n int) (err error) {
 	_, err = fmt.Fprintf(w, "%d items\n", n)
 	return err
 }
 
+// @Modifies w
 // @Ensures True
 func WritesNil(w io.Writer, n int) {
 	_, _ = fmt.Fprintln(w, n) // want `vego:\ precondition\ of\ Fprintln\ may\ not\ hold:\ w\ !=\ nil`

@@ -309,8 +309,10 @@ type sequenceCheck struct {
 	// before and after give the states, by parameter or result and name,
 	// before and after the call.
 	before, after map[*types.Var]map[string]bool
-	// fresh holds the results that the call made new.
-	fresh map[*types.Var]bool
+	// fresh holds the results that the call made new, and kept those
+	// that are what the value the call was given holds, as a large enough
+	// Writer handed to bufio.NewWriter: fresh(result, w) holds of either.
+	fresh, kept map[*types.Var]bool
 }
 
 func (c *sequenceCheck) env() *specEnv {
@@ -335,7 +337,11 @@ func (c *sequenceCheck) env() *specEnv {
 		if name != "fresh" || len(paths[0].Steps) > 0 || !isResult {
 			return nil, fmt.Errorf("the harness can tell only whether a result is fresh, not %s(%s)", name, paths[0].Root)
 		}
-		return logic.BoolLit(c.fresh[c.fn.results[index]]), nil
+		result := c.fn.results[index]
+		if len(paths) > 1 {
+			return logic.BoolLit(c.fresh[result] || c.kept[result]), nil
+		}
+		return logic.BoolLit(c.fresh[result]), nil
 	}
 	return env
 }
@@ -754,6 +760,7 @@ func checkReaderEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 		k.check()
 		c.results = []*logic.Term{reference(b == nil)}
 		c.fresh = map[*types.Var]bool{newFn.results[0]: !slices.Contains(made, b)}
+		c.kept = map[*types.Var]bool{newFn.results[0]: io.Reader(b) == rd}
 		made = append(made, b)
 		ready := true
 		c.after = map[*types.Var]map[string]bool{newFn.results[0]: {"ready": ready}}
@@ -845,6 +852,7 @@ func checkWriterEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 		k.check()
 		c.results = []*logic.Term{reference(b == nil)}
 		c.fresh = map[*types.Var]bool{newFn.results[0]: !slices.Contains(made, b)}
+		c.kept = map[*types.Var]bool{newFn.results[0]: io.Writer(b) == w}
 		made = append(made, b)
 		ready := true
 		c.after = map[*types.Var]map[string]bool{newFn.results[0]: {"ready": ready}}

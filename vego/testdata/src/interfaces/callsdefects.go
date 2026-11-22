@@ -67,6 +67,7 @@ func NoContract(p Plain) (n int) {
 // The shipped entry of Write says nothing of when it succeeds.
 //
 // @Requires w != nil
+// @Modifies w
 // @Ensures err = nil
 func Foreign(w io.Writer, b []byte) (err error) {
 	_, err = w.Write(b)

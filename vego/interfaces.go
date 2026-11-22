@@ -78,13 +78,21 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 	// with what it holds but pass it on. Each method of any other
 	// interface is checked against its contract, for the value as it is
 	// here.
+	// A value whose methods write nothing has no footprint, and can be
+	// converted to an interface whose methods may write behind their
+	// receiver; one whose methods write waits for footprints from their
+	// frames.
+	emptyFootprint := false
 	if method := v.stateSpeaker(want); method != nil && !v.hasStates(want) {
-		shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
-		v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s writes behind its receiver, "+
-			"and what the methods of %s write is not tied to the footprint of the interface value yet. Make the conversion in code that is not verified",
-			shown(from), shown(want), methodTitle(method), shown(from)))
+		if behind := v.writingImplementation(from, want); behind != nil {
+			shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
+			v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s writes behind its receiver, "+
+				"and what the methods of %s write is not tied to the footprint of the interface value yet. Make the conversion in code that is not verified",
+				shown(from), shown(want), methodTitle(behind), shown(from)))
+		}
+		emptyFootprint = true
 	}
-	if method := v.stateSpeaker(want); method != nil {
+	if method := v.stateSpeaker(want); method != nil && v.hasStates(want) {
 		shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
 		phrase, pronoun := stateNames(v.ifaceStatesOf(want))
 		v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s has %s, and the contract of %s speaks of %s; "+
@@ -107,7 +115,52 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		st.assume(logic.Ne(held, other))
 	}
 	v.converted = append(v.converted, held)
+	if emptyFootprint {
+		// Its home is new, and holds nothing in its footprint, which is
+		// all that its methods may write (the invariant of rows).
+		at := v.alloc(st, true)
+		st.assume(logic.Eq(home(held), at))
+		// A layer of the footprint region in which the row of that home
+		// holds nothing and every other row is what it was; rowAt states
+		// it of each cell it reads.
+		emptied := v.fresh("mem'"+footprintRegion, footprintSort)
+		v.layers[emptied.Name] = &layer{prev: st.mem.region(footprintRegion, footprintSort), key: footprintRegion, growth: true, emptied: at}
+		st.mem[footprintRegion] = emptied
+	}
 	return value{held}
+}
+
+// writingImplementation returns a method of the interface want that writes
+// behind its receiver and that the method of from which implements it may
+// do as well: its contract lists a path from its receiver in Modifies, or
+// it has none that can be read. It returns nil when no such method writes
+// what its receiver reaches; what one writes beyond that is checked
+// against the contract of the interface, as for any conversion.
+func (v *fnVerifier) writingImplementation(from, want types.Type) *types.Func {
+	for method := range want.Underlying().(*types.Interface).Methods() {
+		if !writesBehind(v.methodContract(method)) {
+			continue
+		}
+		selection := types.NewMethodSet(from).Lookup(method.Pkg(), method.Name())
+		if selection == nil {
+			return method
+		}
+		impl, ok := selection.Obj().(*types.Func)
+		if !ok {
+			return method
+		}
+		fn := v.contractOf(impl)
+		if fn == nil {
+			return method
+		}
+		recv := impl.Type().(*types.Signature).Recv()
+		for _, m := range fn.modifies {
+			if recv == nil || m.name == recv.Name() {
+				return method
+			}
+		}
+	}
+	return nil
 }
 
 // evalConverted evaluates an expression that Go converts to the interface

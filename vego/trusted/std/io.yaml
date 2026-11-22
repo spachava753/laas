@@ -28,8 +28,10 @@ trusted:
       (io.Copy maps a count outside them to an error). Like every entry, it
       also claims that Write returns: a Write on a pipe or a connection
       returns only when it can go on. Nothing is claimed of the errors: an
-      implementation may return any error.
-    modifies: []
+      implementation may return any error. Write may change what the writer
+      holds, as a buffer does, which is its footprint.
+    receiver: w
+    modifies: [w]
     ensures:
       - "0 <= n And n <= |p|"
       - "n < |p| -> err != nil"
@@ -52,10 +54,13 @@ trusted:
       For an empty p the documentation says only that Read should return 0,
       and iotest.DataErrReader never returns from such a call while it holds
       data, so p must not be empty. Nothing is claimed of the errors: an
-      implementation may return any error, not only io.EOF.
+      implementation may return any error, not only io.EOF. Read may change
+      what the reader holds, as a buffer or a position does, which is its
+      footprint.
+    receiver: r
     requires:
       - "|p| > 0"
-    modifies: [p]
+    modifies: [r, p]
     ensures:
       - "0 <= n And n <= |p|"
 
@@ -110,7 +115,7 @@ trusted:
     vouches: [result]
     ensures:
       - "result != nil"
-      - "fresh(result)"
+      - "fresh(result, r)"
       - "~closed(result)"
 
   io.LimitReader:
@@ -130,6 +135,7 @@ trusted:
     vouches: [result]
     ensures:
       - "result != nil"
+      - "fresh(result, r)"
 
   io.TeeReader:
     reason: >-
@@ -153,6 +159,7 @@ trusted:
     vouches: [result]
     ensures:
       - "result != nil"
+      - "fresh(result, r, w)"
 
   io.MultiReader:
     reason: >-
@@ -161,7 +168,9 @@ trusted:
       sequentially." It copies the slice, so a later change of an element
       changes nothing it reads. Its Read calls Read of one reader with p,
       so it meets the entry of (io.Reader).Read whenever they meet theirs;
-      a nil reader would panic.
+      a nil reader would panic. What its Read writes is the struct it makes
+      and what the readers' Read writes, which fresh(result, readers) says;
+      vego reads that only where a call names each reader.
     requires:
       - "Forall i in [0, |readers|) : readers[i] != nil"
     keeps:
@@ -173,6 +182,7 @@ trusted:
     vouches: [result]
     ensures:
       - "result != nil"
+      - "fresh(result, readers)"
 
   io.MultiWriter:
     reason: >-
@@ -183,7 +193,9 @@ trusted:
       slice. Its Write returns len(p) and nil only after every writer wrote
       all of p, and otherwise what the failing writer returned, or
       ErrShortWrite, so it meets the entry of (io.Writer).Write whenever
-      they meet theirs; a nil writer would panic.
+      they meet theirs; a nil writer would panic. What its Write writes is
+      what the writers' Write writes, which fresh(result, writers) says;
+      vego reads that only where a call names each writer.
     requires:
       - "Forall i in [0, |writers|) : writers[i] != nil"
     keeps:
@@ -195,3 +207,4 @@ trusted:
     vouches: [result]
     ensures:
       - "result != nil"
+      - "fresh(result, writers)"

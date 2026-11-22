@@ -82,6 +82,7 @@ func Report(name, title string, count int) (err error) {
 // after it wraps the error of os.Create; only os.Create reaches the %w.
 //
 // @Requires |name| <= 4096 And |title| <= 1000 And w != nil
+// @Modifies w
 // @Ensures True
 func ReportReused(name, title string, w io.Writer) (err error) {
 	f, err := os.Create(name)

@@ -230,7 +230,7 @@ func (v *fnVerifier) named(st *state, base string, t *logic.Term) *logic.Term {
 func (v *fnVerifier) pointedIn(sink *state, mem memory, t types.Type, pointer value) value {
 	val := v.fetch(sink, mem, v.cellsOf(t), pointer[0], pointer[1])
 	v.noteTyped(sink, val, t)
-	v.noteReached(sink, v.cellsOf(t), pointer[0], pointer[1], t)
+	v.noteReached(sink, v.cellsOf(t), pointer[0], pointer[1], t, t)
 	return val
 }
 

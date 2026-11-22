@@ -87,10 +87,10 @@ func Reassign(resp *Response, rc io.ReadCloser) {
 	resp.Body = rc // want `resp.Body is assigned, which Reassign may not modify: // @Modifies resp.Body covers the states of what the interface value resp.Body holds, not the place that holds it; to assign it, list the struct that holds it`
 }
 
-// NoStates lists a writer, which has no states.
+// NoStates lists a writer it never writes.
 //
 // @Requires w != nil
-// @Modifies w // want `in Modifies annotation: w has type io.Writer, which has no states`
+// @Modifies w // want `Modifies lists w, but NoStates never needs to modify it`
 // @Ensures True
 func NoStates(w io.Writer) {
 }
@@ -152,4 +152,12 @@ func Fresh(c io.Closer) {
 // @Requires c != nil And ~held(c) // want `held\(c\): c has type io.Closer, which has the state closed`
 // @Ensures True
 func Unknown(c io.Closer) {
+}
+
+// CloserUnlisted hands CloseMaybe a closer it does not list.
+//
+// @Requires c != nil And ~closed(c)
+// @Ensures True
+func CloserUnlisted(c io.Closer) {
+	CloseMaybe(c) // want `vego: CloseMaybe may modify the states of c, which CloserUnlisted may not modify; list it in a // @Modifies clause`
 }

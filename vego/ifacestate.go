@@ -447,11 +447,15 @@ func (pv *pkgVerifier) exportStates() {
 // pair of which the contract lists one under Modifies is such a pair: a
 // contract that lists neither changes no state of either, since a write of
 // a state it does not list is refused, so what it reads of their states
-// does not depend on whether their homes are one. One value passed as both
-// of such a pair is refused, as two overlapping slices are: a function that
-// closes both could not be verified otherwise. A call that changes the
-// states of one changes every state at its home, so two values whose types
-// have no state in common may still not share a home.
+// does not depend on whether their homes are one. And only a pair whose
+// states the contract names, of each (F5 of the design review): what the
+// body relies on of a state of a parameter must come from the contract, so
+// a contract that names no state of one relies on none, as Pump, which
+// lists its reader and writer for their footprints, does not. One value
+// passed as both of such a pair is refused, as two overlapping slices are:
+// a function that closes both could not be verified otherwise. A call that
+// changes the states of one changes every state at its home, so two values
+// whose types have no state in common may still not share a home.
 func (v *fnVerifier) sharing(fn *funcInfo) [][2]*types.Var {
 	inputs := slices.Clone(fn.params)
 	if fn.receiver != nil {
@@ -469,12 +473,35 @@ func (v *fnVerifier) sharing(fn *funcInfo) [][2]*types.Var {
 			continue
 		}
 		for _, second := range inputs[i+1:] {
-			if v.hasStates(second.Type()) && (listed[first] || listed[second]) {
+			if v.hasStates(second.Type()) && (listed[first] || listed[second]) && v.namesStateOf(fn, first) && v.namesStateOf(fn, second) {
 				pairs = append(pairs, [2]*types.Var{first, second})
 			}
 		}
 	}
 	return pairs
+}
+
+// namesStateOf reports whether a clause of a contract names a state of a
+// parameter, as closed(r) or closed(r') does.
+func (v *fnVerifier) namesStateOf(fn *funcInfo, param *types.Var) bool {
+	states := map[string]bool{}
+	for _, state := range v.ifaceStatesOf(param.Type()) {
+		states[state.name] = true
+	}
+	found := false
+	for _, clauses := range [][]*clause{fn.requires, fn.ensures} {
+		for _, c := range clauses {
+			if c.node == nil {
+				continue
+			}
+			c.node.Walk(func(n *logic.Node) {
+				if n.Kind == logic.NCall && states[n.Name] && len(n.Kids) == 1 && n.Kids[0].Kind == logic.NIdent && n.Kids[0].Name == param.Name() {
+					found = true
+				}
+			})
+		}
+	}
+	return found
 }
 
 // apartHomes states that two interface values that are not nil have homes

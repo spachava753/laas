@@ -3,6 +3,7 @@ package footprints
 import (
 	"bufio"
 	"bytes"
+	"io"
 )
 
 // ReadThenWrite reads a byte of p before it writes to bw, whose buffer p
@@ -63,4 +64,44 @@ func ResetsByProject(bw *bufio.Writer) {
 func CopiesBuffer(b *bytes.Buffer) {
 	c := *b // want `vego: cannot verify CopiesBuffer: \*b copies a value of type bytes.Buffer, which owns memory; use a pointer to it; a value that owns memory, such as a bytes.Buffer, must not be copied or overwritten, since a copy would share what the original owns, which only the methods of each may write`
 	_ = c
+}
+
+// WriteAllKeeps writes through a Writer and keeps the lines it was handed
+// beside it, which lie outside what the Writer's own writer writes.
+//
+// @Requires bw != nil And ready(bw) And |lines| > 0 And |lines[0]| = 1
+// @Modifies bw
+// @Ensures |lines'[0]| = 1
+func WriteAllKeeps(bw *bufio.Writer, lines []string) {
+	_ = bw.WriteByte('a')
+	_ = bw.WriteByte('b')
+}
+
+// KeepsBeside writes through a Writer and keeps a pair handed in beside it.
+//
+// @Requires bw != nil And ready(bw) And p != nil
+// @Modifies bw
+// @Ensures p.A' = p.A
+func KeepsBeside(bw *bufio.Writer, p *Pair) {
+	_ = bw.WriteByte('a')
+}
+
+// CallsWriteAll hands on a Writer it lists, with lines of its own.
+//
+// @Requires bw != nil And ready(bw) And |lines| > 0 And |lines[0]| = 1
+// @Modifies bw
+// @Ensures True
+func CallsWriteAll(bw *bufio.Writer, lines []string) {
+	WriteAllKeeps(bw, lines)
+}
+
+// CallsWriteAllLocal hands on a Writer it made over w, whose writer's
+// footprint nothing places apart from the lines.
+//
+// @Requires w != nil And |lines| > 0 And |lines[0]| = 1
+// @Modifies w
+// @Ensures True
+func CallsWriteAllLocal(w io.Writer, lines []string) {
+	bw := bufio.NewWriter(w)
+	WriteAllKeeps(bw, lines) // want `the footprint of what is owned by what is passed to WriteAllKeeps as bw may hold memory that what is passed as lines reaches, and WriteAllKeeps relies on it not doing so: bw is not a parameter whose footprint CallsWriteAllLocal's own Modifies lists, so nothing places it`
 }

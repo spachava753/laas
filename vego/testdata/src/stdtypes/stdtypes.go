@@ -11,6 +11,7 @@ import (
 )
 
 // @Requires w != nil
+// @Modifies w
 // @Ensures err = nil -> n = |b|
 func Save(w io.Writer, b []byte) (n int, err error) {
 	return w.Write(b)
@@ -19,6 +20,7 @@ func Save(w io.Writer, b []byte) (n int, err error) {
 // Without looking at the error, nothing says that all of b was written.
 //
 // @Requires w != nil
+// @Modifies w
 // @Ensures n = |b|
 func SaveAll(w io.Writer, b []byte) (n int) {
 	n, _ = w.Write(b)
@@ -28,6 +30,7 @@ func SaveAll(w io.Writer, b []byte) (n int) {
 // The shipped entry of Write does not vouch for its errors.
 //
 // @Requires w != nil
+// @Modifies w
 // @Ensures True
 func SaveWrapped(w io.Writer, b []byte) (err error) {
 	if _, err := w.Write(b); err != nil {
@@ -37,7 +40,7 @@ func SaveWrapped(w io.Writer, b []byte) (err error) {
 }
 
 // @Requires r != nil And |buf| > 0
-// @Modifies buf
+// @Modifies r, buf
 // @Ensures 0 <= |got| <= |buf|
 func ReadSome(r io.Reader, buf []byte) (got []byte, err error) {
 	n, err := r.Read(buf)
@@ -45,7 +48,7 @@ func ReadSome(r io.Reader, buf []byte) (got []byte, err error) {
 }
 
 // @Requires r != nil And |buf| > 0
-// @Modifies buf
+// @Modifies r, buf
 // @Ensures 0 <= n <= |buf|
 func ReadPlain(r io.Reader, buf []byte) (n int, err error) {
 	return r.Read(buf)
@@ -96,6 +99,7 @@ func CheckMaybeNil(ctx context.Context) (err error) {
 }
 
 // @Requires ctx != nil And cancel != nil And w != nil
+// @Modifies w
 // @Ensures True
 func Work(ctx context.Context, cancel context.CancelFunc, w io.Writer) (err error) {
 	defer cancel()

@@ -62,6 +62,7 @@ func Boxes() (n int) {
 // BoxesGiven keeps a reader it is given.
 //
 // @Requires r != nil
+// @Modifies r
 // @Ensures 0 <= n And n <= 1
 func BoxesGiven(r io.Reader) (n int) {
 	b := keepslib.Wrap(r)
@@ -85,6 +86,7 @@ func FillsEmpty(r io.Reader) {
 // success for no input.
 //
 // @Requires r != nil
+// @Modifies r
 // @Ensures True
 func ReadsClosing(r io.Reader) (err error) {
 	rc := keepslib.Closing(r)
@@ -96,6 +98,7 @@ func ReadsClosing(r io.Reader) (err error) {
 // so its failure depends on no call, and the check reports it.
 //
 // @Requires r != nil
+// @Modifies r
 // @Ensures True
 func AlwaysFails(r io.Reader) (err error) { // want `vego: the contract of AlwaysFails may also be met by a function that always returns an error`
 	rc := keepslib.Closing(r)
@@ -106,6 +109,7 @@ func AlwaysFails(r io.Reader) (err error) { // want `vego: the contract of Alway
 // FailsAfterRead fails on both branches after the read.
 //
 // @Requires r != nil
+// @Modifies r
 // @Ensures True
 func FailsAfterRead(r io.Reader) (err error) { // want `vego: the contract of FailsAfterRead may also be met by a function that always returns an error`
 	rc := keepslib.Closing(r)

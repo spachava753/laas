@@ -136,7 +136,7 @@ func (a Again) Read(p []byte) (n int, err error) {
 	if a.box == nil {
 		return 0, nil
 	}
-	return a.box.Fill(p), nil // want `this call may not end: Again.Read hands a.box to a.box.Fill\(p\) at defects.go:\d+:\d+, which may run Again.Read`
+	return a.box.Fill(p), nil // want `this call may not end: Again.Read hands a.box to a.box.Fill\(p\) at defects.go:\d+:\d+, which may run Again.Read` `Fill may modify the footprint of what it calls b.r, which Read may not modify` `Fill may modify the states of what it calls b.r, which Read may not modify`
 }
 
 // Cycles keeps a reader whose Read fills the box it is kept in.

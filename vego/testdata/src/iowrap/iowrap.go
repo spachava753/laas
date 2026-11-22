@@ -4,6 +4,7 @@ package iowrap
 
 import (
 	"io"
+	"os"
 
 	"keepslib"
 )
@@ -11,6 +12,7 @@ import (
 // Copies reads once from r and writes what it read to w as well.
 //
 // @Requires r != nil And w != nil
+// @Modifies r, w
 // @Ensures 0 <= n And n <= 16
 func Copies(r io.Reader, w io.Writer) (n int, err error) {
 	t := io.TeeReader(r, w)
@@ -28,6 +30,7 @@ func TeesToNothing(r io.Reader, w io.Writer) {
 // Closes reads through a closer that closes nothing and closes it.
 //
 // @Requires r != nil
+// @Modifies r
 // @Ensures True
 func Closes(r io.Reader) (err error) {
 	rc := io.NopCloser(r)
@@ -62,28 +65,70 @@ func ClosesApart(orig io.ReadCloser) {
 // Limits reads at most n bytes of r.
 //
 // @Requires r != nil
+// @Modifies r
 // @Ensures 0 <= got And got <= 8
 func Limits(r io.Reader, n int64) (got int, err error) {
 	l := io.LimitReader(r, n)
 	return l.Read(make([]byte, 8))
 }
 
-// Joins reads from two readers in turn.
+// Joins reads from two readers in turn, which writes what they write.
 //
 // @Requires a != nil And b != nil
+// @Modifies a, b
 // @Ensures 0 <= n And n <= 4
 func Joins(a, b io.Reader) (n int, err error) {
 	m := io.MultiReader(a, b)
 	return m.Read(make([]byte, 4))
 }
 
-// JoinsAll reads from the readers of a slice in turn.
+// JoinsOne is Joins with only a listed.
+//
+// @Requires a != nil And b != nil
+// @Modifies a
+// @Ensures 0 <= n And n <= 4
+func JoinsOne(a, b io.Reader) (n int, err error) {
+	m := io.MultiReader(a, b)
+	return m.Read(make([]byte, 4)) // want `m.Read may modify the footprint of m, which JoinsOne may not modify; it may lie in the footprint of a or b, as the contract of MultiReader at iowrap.go:\d+:\d+ says; list a and b in a // @Modifies clause`
+}
+
+// JoinsFiles reads from two files in turn, whose Read writes nothing
+// behind the file, so nothing is listed.
+//
+// @Requires f != nil And g != nil
+// @Ensures 0 <= n And n <= 4
+func JoinsFiles(f, g *os.File) (n int, err error) {
+	m := io.MultiReader(f, g)
+	return m.Read(make([]byte, 4))
+}
+
+// JoinsContradiction calls a reader whose entry, read where each reader is
+// named, contradicts what the files are: their Read writes nothing behind
+// them, so nothing of what the result writes can be old.
+//
+// @Requires f != nil And g != nil
+// @Ensures True
+func JoinsContradiction(f, g *os.File) {
+	_ = keepslib.Joined(f, g) // want `vego: the trusted contract of Joined cannot be true of this call: what it promises contradicts what is known here`
+}
+
+// JoinsContradictionGiven names two readers whose footprints may hold old
+// memory, and the entry does not contradict that.
+//
+// @Requires a != nil And b != nil
+// @Ensures True
+func JoinsContradictionGiven(a, b io.Reader) {
+	_ = keepslib.Joined(a, b)
+}
+
+// JoinsAll reads from the readers of a slice in turn. What it writes lies
+// in the footprints of the slice's elements, which no clause can list.
 //
 // @Requires Forall i in [0, |rs|) : rs[i] != nil
 // @Ensures True
 func JoinsAll(rs []io.Reader) (err error) {
 	m := io.MultiReader(rs...)
-	_, err = m.Read(make([]byte, 4))
+	_, err = m.Read(make([]byte, 4)) // want `m.Read may modify the footprint of m, which JoinsAll may not modify; it is a value that MultiReader returned at iowrap.go:\d+:\d+, and its contract places its footprint in those of what rs holds, which no // @Modifies clause can list yet; pass the values written out, one argument each, and list each of them`
 	return err
 }
 
@@ -97,9 +142,20 @@ func JoinsSome(rs []io.Reader) {
 // Copies2 writes p to two writers.
 //
 // @Requires w1 != nil And w2 != nil
+// @Modifies w1, w2
 // @Ensures 0 <= n And n <= |p|
 func Copies2(w1, w2 io.Writer, p []byte) (n int, err error) {
 	m := io.MultiWriter(w1, w2)
+	return m.Write(p)
+}
+
+// ToBoth writes p to standard output and a file, whose Write writes
+// nothing behind the file, so nothing is listed.
+//
+// @Requires f != nil
+// @Ensures 0 <= n And n <= |p|
+func ToBoth(f *os.File, p []byte) (n int, err error) {
+	m := io.MultiWriter(os.Stdout, f)
 	return m.Write(p)
 }
 

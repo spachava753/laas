@@ -66,10 +66,10 @@ type Sink struct {
 func logTo(s *Sink, format string, args ...any) {}
 
 // Log formats through a function that runs what s holds, which can be any
-// code, whose writes could change the values before they are formatted.
+// code, after it has formatted the values, which formats claims.
 //
 // @Requires s != nil
 // @Ensures True
 func Log(s *Sink, n int) {
-	logTo(s, "%d", n) // want `the trusted contract of unsafecycle.logTo \(vego-trusted.yaml:\d+\) cannot be used: it lists formats and runs s, which can hold an unsafe.Pointer, which may point to a function value or an interface value whose contract modifies memory`
+	logTo(s, "%d", n)
 }

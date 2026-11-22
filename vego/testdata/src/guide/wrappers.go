@@ -9,6 +9,7 @@ import (
 // The programs of the section "Wrappers of readers and writers".
 
 // @Requires r != nil And limit >= 0
+// @Modifies r
 // @Ensures 0 <= n And n <= limit
 func PrintLines(r io.Reader, limit int) (n int, err error) {
 	sc := bufio.NewScanner(r)
@@ -26,6 +27,7 @@ func PrintLines(r io.Reader, limit int) (n int, err error) {
 // the module scanerrs.
 //
 // @Requires r != nil And limit >= 0
+// @Modifies r
 // @Ensures 0 <= n And n <= limit
 func ReadLines(r io.Reader, limit int) (n int, err error) {
 	sc := bufio.NewScanner(r)
@@ -42,6 +44,7 @@ func ReadLines(r io.Reader, limit int) (n int, err error) {
 }
 
 // @Requires r != nil
+// @Modifies r
 // @Ensures True
 func ReadAll(r io.Reader) {
 	sc := bufio.NewScanner(r)
@@ -50,10 +53,21 @@ func ReadAll(r io.Reader) {
 }
 
 // @Requires w != nil
+// @Modifies w
 // @Ensures True
 func WriteBuffered(w io.Writer) (err error) {
 	bw := bufio.NewWriter(w)
-	_, err = bw.Write([]byte("done\n")) // want `vego: Write may modify bw, which WriteBuffered may not modify; it is memory that NewWriter returned, and its contract does not say that this is new memory, so it may have existed when WriteBuffered was called; take it as a parameter and list it in a // @Modifies clause`
+	if _, err = bw.Write([]byte("done\n")); err != nil {
+		return err
+	}
+	return bw.Flush()
+}
+
+// @Requires w != nil
+// @Ensures True
+func WriteBufferedUnlisted(w io.Writer) (err error) {
+	bw := bufio.NewWriter(w)
+	_, err = bw.Write([]byte("done\n")) // want `vego: Write may modify bw, which WriteBufferedUnlisted may not modify; it is memory that NewWriter returned, which its contract places in the footprint of w when it is not new; list w in a // @Modifies clause`
 	return err
 }
 
@@ -76,6 +90,7 @@ func WriteThenRead(bw *bufio.Writer, p []byte) (r byte) {
 }
 
 // @Requires r != nil And log != nil
+// @Modifies r, log
 // @Ensures True
 func ReadLogged(r io.Reader, log io.Writer) (err error) {
 	rc := io.NopCloser(io.TeeReader(r, log))
@@ -84,10 +99,19 @@ func ReadLogged(r io.Reader, log io.Writer) (err error) {
 	return err
 }
 
+// @Requires header != nil And body != nil
+// @Modifies header, body
+// @Ensures True
+func ReadParts(header, body io.Reader) (err error) {
+	all := io.MultiReader(header, body)
+	_, err = all.Read(make([]byte, 512))
+	return err
+}
+
 // @Requires Forall i in [0, |parts|) : parts[i] != nil
 // @Ensures True
-func ReadParts(parts []io.Reader) (err error) {
+func ReadAllParts(parts []io.Reader) (err error) {
 	all := io.MultiReader(parts...)
-	_, err = all.Read(make([]byte, 512))
+	_, err = all.Read(make([]byte, 512)) // want `all.Read may modify the footprint of all, which ReadAllParts may not modify; it is a value that MultiReader returned at wrappers.go:\d+:\d+, and its contract places its footprint in those of what parts holds, which no // @Modifies clause can list yet; pass the values written out, one argument each, and list each of them`
 	return err
 }

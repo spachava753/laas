@@ -36,6 +36,7 @@ func ReturnsErr(r io.Reader) (err error) {
 // without the entries the guide shows, it cannot.
 //
 // @Requires r != nil And limit >= 0
+// @Modifies r
 // @Ensures 0 <= n And n <= limit
 func ReadLines(r io.Reader, limit int) (n int, err error) {
 	sc := bufio.NewScanner(r)
@@ -46,7 +47,7 @@ func ReadLines(r io.Reader, limit int) (n int, err error) {
 		n++
 	}
 	if err := sc.Err(); err != nil {
-		return n, fmt.Errorf("read lines: %w", err) // want `^vego: cannot verify ReadLines: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, can be formatted; err is assigned sc.Err\(\) at scanerrs.go:48:12, a call whose errors nothing vouches for$`
+		return n, fmt.Errorf("read lines: %w", err) // want `^vego: cannot verify ReadLines: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, can be formatted; err is assigned sc.Err\(\) at scanerrs.go:49:12, a call whose errors nothing vouches for$`
 	}
 	return n, nil
 }
@@ -55,6 +56,7 @@ func ReadLines(r io.Reader, limit int) (n int, err error) {
 // the error of the Scanner as it is and verifies under the shipped entries.
 //
 // @Requires r != nil And limit >= 0
+// @Modifies r
 // @Ensures 0 <= n And n <= limit
 func PrintLines(r io.Reader, limit int) (n int, err error) {
 	sc := bufio.NewScanner(r)

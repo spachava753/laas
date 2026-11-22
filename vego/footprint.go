@@ -168,11 +168,33 @@ func (v *fnVerifier) rowAt(rows, home, alloc, pos *logic.Term) (*logic.Term, []*
 			continue
 		}
 		seen[at.Name] = true
+		// What a callee promised of a stretch of memory, at this cell: it
+		// lies in the row of one of the values it named.
+		for _, claim := range v.stretchClaims[at.Name] {
+			held := logic.And(claim.holds, logic.Eq(alloc, claim.ref), logic.Le(claim.lo, pos), logic.Lt(pos, claim.hi))
+			var options []*logic.Term
+			for _, y := range claim.ys {
+				options = append(options, logic.And(logic.Not(isNilRef(y.val)), logic.Select(logic.Select(logic.Select(at, logic.Select(homes, y.val[0])), alloc), pos)))
+			}
+			facts = append(facts, logic.Implies(held, logic.Or(options...)))
+		}
+		// What a callee promised of a row in this region, at this cell.
+		for _, claim := range v.rowClaims[at.Name] {
+			held := logic.And(claim.holds, logic.Eq(home, claim.home), cellOf(at))
+			options, known := v.newOrInParts(alloc, pos, claim.before, claim.ys, claim.yRows)
+			facts = append(facts, logic.Implies(held, options))
+			facts = append(facts, known...)
+		}
 		switch {
 		case at.Name == entryRegion+footprintRegion:
 			// What existed on entry held only what existed on entry; a home
 			// made since has a footprint this row does not describe.
 			facts = append(facts, logic.Implies(logic.And(logic.Lt(home, v.entryBrk), cellOf(at)), logic.And(logic.Lt(logic.IntLit(0), alloc), logic.Lt(alloc, v.entryBrk))))
+		case v.layers[at.Name] != nil && v.layers[at.Name].emptied != nil:
+			known := v.layers[at.Name]
+			facts = append(facts, logic.Implies(logic.Eq(home, known.emptied), logic.Not(cellOf(at))),
+				logic.Implies(logic.Ne(home, known.emptied), logic.Iff(cellOf(at), cellOf(known.prev))))
+			pending = append(pending, known.prev)
 		case v.layers[at.Name] != nil:
 			known := v.layers[at.Name]
 			if !known.growth {
@@ -262,6 +284,10 @@ func hasFootprintTarget(targets []target) bool {
 func (v *fnVerifier) outsideFootprint(t target, key string, ref, position *logic.Term) (*logic.Term, []*logic.Term) {
 	cell, facts := v.rowAt(t.rows, t.ref, ref, position)
 	conditions := []*logic.Term{logic.Not(cell)}
+	// A nil interface value has no footprint: none of its methods can run.
+	if t.ref.Op == logic.OpSelect && t.ref.Args[0] == homes {
+		conditions = append(conditions, isNilRef(value{t.ref.Args[1]}))
+	}
 	if key == stateRegion {
 		conditions = append(conditions, logic.Eq(ref, t.ref))
 	}
@@ -283,6 +309,46 @@ type separation struct {
 	rel    *logic.Term
 	home   *logic.Term
 	direct []passedValue
+	// reachable holds the types, by typeKey, that the other parameters
+	// reach; see reachesType.
+	reachable map[string]bool
+}
+
+// reachesType reports whether a value of type t can lie in memory that the
+// other parameters reach without going through an interface value: t is,
+// or is held by value in, a type reached from theirs through pointers,
+// slices, maps, and fields.
+func (r *separation) reachesType(t types.Type) bool {
+	if r.reachable == nil {
+		r.reachable = map[string]bool{}
+		var walk func(t types.Type)
+		walk = func(t types.Type) {
+			key := typeKey(t)
+			if r.reachable[key] {
+				return
+			}
+			r.reachable[key] = true
+			switch u := t.Underlying().(type) {
+			case *types.Pointer:
+				walk(u.Elem())
+			case *types.Slice:
+				walk(u.Elem())
+			case *types.Array:
+				walk(u.Elem())
+			case *types.Map:
+				walk(u.Key())
+				walk(u.Elem())
+			case *types.Struct:
+				for field := range u.Fields() {
+					walk(field.Type())
+				}
+			}
+		}
+		for _, d := range r.direct {
+			walk(d.t)
+		}
+	}
+	return r.reachable[typeKey(t)]
 }
 
 // passedValue is a parameter's value on entry with its type.
@@ -370,14 +436,20 @@ func (v *fnVerifier) checkFootprintWrite(st *state, guard []*logic.Term, t targe
 	for _, fact := range facts {
 		probe.assume(fact)
 	}
+	// A nil interface value has no footprint: none of its methods can run,
+	// since a call through it panics first.
+	held := cell
+	if t.ref.Op == logic.OpSelect && t.ref.Args[0] == homes {
+		held = logic.And(logic.Not(isNilRef(value{t.ref.Args[1]})), cell)
+	}
 	allowed := func(without int) *logic.Term {
 		covered := []*logic.Term{logic.Le(v.entryBrk, alloc)}
 		for _, i := range candidates {
-			if i != without {
+			if v.frame[i].mod != without {
 				covered = append(covered, framed[i])
 			}
 		}
-		return logic.Implies(cell, logic.Or(covered...))
+		return logic.Implies(held, logic.Or(covered...))
 	}
 	if result := v.attempt(probe, guard, allowed(-1)); result != solver.Proved {
 		for _, i := range candidates {
@@ -400,11 +472,7 @@ func (v *fnVerifier) checkFootprintWrite(st *state, guard []*logic.Term, t targe
 		return
 	}
 	defer v.asking(modifiesCheck)()
-	for _, i := range candidates {
-		if !v.quickly(probe, guard, allowed(i)) {
-			v.used[i] = true
-		}
-	}
+	v.markNeeded(candidates, func(mod int) bool { return v.quickly(probe, guard, allowed(mod)) })
 }
 
 // checkFootprintRanged requires that a call that writes a footprint while
@@ -482,14 +550,27 @@ func (v *fnVerifier) enterReaches(st *state) {
 	if fn.decl == nil || fn.trust != nil || fn.valueOf != nil || fn.methodOf != nil {
 		return
 	}
-	for _, t := range v.frame {
-		if !t.fp || t.param == nil || v.entry[t.param] == nil {
+	for i, t := range v.frame {
+		// The footprint of a parameter, or of an interface value that a
+		// parameter that owns memory owns, as the writer a *bufio.Writer
+		// keeps: what the other parameters reach lies outside it.
+		param, at := t.param, t.ref
+		if t.part {
+			param = t.ownerParam
+		} else if param != nil && v.entry[param] != nil {
+			at = home(v.entry[param][0])
+		}
+		if !t.fp || param == nil || v.entry[param] == nil {
 			continue
 		}
-		r := separation{param: t.param, rel: logic.Const("reach $"+t.param.Name(), reachSort), home: home(v.entry[t.param][0])}
+		name := "reach $" + param.Name()
+		if t.part {
+			name = fmt.Sprintf("reach $%s owned %d", param.Name(), i)
+		}
+		r := separation{param: param, rel: logic.Const(name, reachSort), home: at}
 		v.inputs[r.rel.Name] = true
 		for _, other := range fn.params {
-			if other != t.param && v.entry[other] != nil && holdsMemory(other.Type()) {
+			if other != param && v.entry[other] != nil && holdsMemory(other.Type()) {
 				r.direct = append(r.direct, passedValue{val: v.entry[other], t: other.Type()})
 			}
 		}
@@ -502,7 +583,7 @@ func (v *fnVerifier) enterReaches(st *state) {
 // reach is closed under what memory referred to on entry. The fact is
 // about the entry contents of the cells, which the read gives when nothing
 // wrote them since.
-func (v *fnVerifier) noteReached(sink *state, cells []cell, ref, at *logic.Term, t types.Type) {
+func (v *fnVerifier) noteReached(sink *state, cells []cell, ref, at *logic.Term, t, container types.Type) {
 	if sink == nil || len(v.reaches) == 0 || len(cells) == 0 || !holdsMemory(t) {
 		return
 	}
@@ -513,6 +594,13 @@ func (v *fnVerifier) noteReached(sink *state, cells []cell, ref, at *logic.Term,
 	}
 	holder := logic.Add(at, logic.IntLit(cells[0].off))
 	for _, r := range v.reaches {
+		// A cell holding a t, in a value of the container's type, is
+		// reached only if both can be reached from the other parameters
+		// by their types; otherwise the fact is about no state of Go, and
+		// is left out.
+		if !r.reachesType(t) || !r.reachesType(container) {
+			continue
+		}
 		fact := logic.Implies(r.reachedAt(v, ref, holder), v.reachedBy(r.rel, entry, t))
 		if note := "reached " + fact.String(); !sink.noted[note] {
 			sink.noted[note] = true
@@ -535,6 +623,9 @@ func (v *fnVerifier) noteReachedValue(sink *state, t types.Type, ref, key *logic
 		entry[i] = logic.Select(logic.Select(region, ref), mapKey(key))
 	}
 	for _, r := range v.reaches {
+		if !r.reachesType(elem) {
+			continue
+		}
 		fact := logic.Implies(r.reachedAt(v, ref, logic.IntLit(0)), v.reachedBy(r.rel, entry, elem))
 		if note := "reached " + fact.String(); !sink.noted[note] {
 			sink.noted[note] = true
@@ -859,6 +950,32 @@ func (v *fnVerifier) freshOf(sink *state, x reached, mem memory, before *logic.T
 	newOrIn := func(alloc, pos *logic.Term) *logic.Term {
 		return v.newOrIn(alloc, pos, before, ys, yRows)
 	}
+	inFootprints := func(alloc, pos *logic.Term) *logic.Term {
+		return v.newOrIn(alloc, pos, nil, ys, yRows)
+	}
+	// Assumed, a stretch's claim is stated where the rows of ys are read
+	// at a cell of it, as a row's claim is (rowNewOrIn).
+	if v.lazyRows && yRows.Op == logic.OpConst {
+		saved := v.lazyStretch
+		v.lazyStretch = func(ref, lo, hi *logic.Term) *logic.Term {
+			holds := v.fresh("stretchclaim", logic.Bool)
+			k := v.bound("k")
+			v.claimDefs = append(v.claimDefs, logic.Iff(holds, logic.Forall(k, logic.Implies(logic.And(logic.Le(lo, k), logic.Lt(k, hi)), inFootprints(ref, k)))))
+			v.stretchClaims[yRows.Name] = append(v.stretchClaims[yRows.Name], stretchClaim{holds: holds, ref: ref, lo: lo, hi: hi, ys: ys})
+			// The claim at the first cell of the stretch, so that an old
+			// allocation is refuted where the rows of ys are known to be
+			// empty, as those of a converted file are; what rowAt says of
+			// that cell is true, and is assumed.
+			first, known := v.newOrInParts(ref, lo, nil, ys, yRows)
+			if sink != nil {
+				for _, fact := range known {
+					sink.assume(fact)
+				}
+			}
+			return logic.And(holds, logic.Implies(logic.Lt(lo, hi), first))
+		}
+		defer func() { v.lazyStretch = saved }()
+	}
 	switch {
 	case isIface(x.typ):
 		return logic.Or(isNilRef(x.val), logic.And(logic.Le(before, home(x.val[0])), v.rowNewOrIn(mem, home(x.val[0]), before, ys, yRows)))
@@ -866,10 +983,10 @@ func (v *fnVerifier) freshOf(sink *state, x reached, mem memory, before *logic.T
 		return logic.And(logic.Not(isNilRef(x.val)), newOrIn(x.val[0], logic.IntLit(0)))
 	case isSlice(x.typ):
 		lo, hi := v.extent(x.val, x.typ)
-		return logic.Or(logic.Le(x.val[3], logic.IntLit(0)), v.stretchNewOrIn(x.val[0], lo, hi, newOrIn))
+		return logic.Or(logic.Le(x.val[3], logic.IntLit(0)), v.stretchNewOrIn(x.val[0], lo, hi, before, inFootprints))
 	}
 	lo, hi := v.extent(x.val, x.typ)
-	claims := []*logic.Term{logic.Not(isNilRef(x.val)), v.stretchNewOrIn(x.val[0], lo, hi, newOrIn)}
+	claims := []*logic.Term{logic.Not(isNilRef(x.val)), v.stretchNewOrIn(x.val[0], lo, hi, before, inFootprints)}
 	for _, part := range v.ownedParts(sink, mem, x.val, x.typ, map[types.Type]bool{}) {
 		switch {
 		case part.fp:
@@ -880,7 +997,7 @@ func (v *fnVerifier) freshOf(sink *state, x reached, mem memory, before *logic.T
 		case part.mapType != nil:
 			claims = append(claims, logic.Or(isNilRef(value{part.ref}), newOrIn(part.ref, logic.IntLit(0))))
 		default:
-			claims = append(claims, v.stretchNewOrIn(part.ref, part.lo, part.hi, newOrIn))
+			claims = append(claims, v.stretchNewOrIn(part.ref, part.lo, part.hi, before, inFootprints))
 		}
 	}
 	return logic.And(claims...)
@@ -888,28 +1005,72 @@ func (v *fnVerifier) freshOf(sink *state, x reached, mem memory, before *logic.T
 
 // newOrIn states that a cell was made at or past before, or lies in the
 // footprint of one of the interface values ys in the rows given, with
-// what rowAt says of the cell in those rows as its premises.
+// what rowAt says of the cell in those rows as its premises. With before
+// nil it states only the second.
 func (v *fnVerifier) newOrIn(alloc, pos, before *logic.Term, ys []reached, rows *logic.Term) *logic.Term {
-	options := []*logic.Term{logic.Le(before, alloc)}
-	var facts []*logic.Term
+	options, facts := v.newOrInParts(alloc, pos, before, ys, rows)
+	return logic.Implies(logic.And(facts...), options)
+}
+
+// newOrInParts is newOrIn apart: the disjunction, and what rowAt says of
+// the cells it reads, which are facts.
+func (v *fnVerifier) newOrInParts(alloc, pos, before *logic.Term, ys []reached, rows *logic.Term) (*logic.Term, []*logic.Term) {
+	var options, facts []*logic.Term
+	if before != nil {
+		options = append(options, logic.Le(before, alloc))
+	}
 	for _, y := range ys {
 		cell, known := v.rowAt(rows, home(y.val[0]), alloc, pos)
 		facts = append(facts, known...)
 		options = append(options, logic.And(logic.Not(isNilRef(y.val)), cell))
 	}
-	return logic.Implies(logic.And(facts...), logic.Or(options...))
+	return logic.Or(options...), facts
 }
 
 // stretchNewOrIn states newOrIn of every position of an allocation from lo
-// up to hi.
-func (v *fnVerifier) stretchNewOrIn(ref, lo, hi *logic.Term, newOrIn func(alloc, pos *logic.Term) *logic.Term) *logic.Term {
+// up to hi. Whether the allocation is new does not depend on the position,
+// so it stands outside the quantifier, which then speaks only of the
+// footprints: Z3 can settle the first without the second.
+func (v *fnVerifier) stretchNewOrIn(ref, lo, hi, before *logic.Term, inFootprints func(alloc, pos *logic.Term) *logic.Term) *logic.Term {
+	if v.lazyStretch != nil {
+		return logic.Or(logic.Le(before, ref), v.lazyStretch(ref, lo, hi))
+	}
 	k := v.bound("k")
-	return logic.Forall(k, logic.Implies(logic.And(logic.Le(lo, k), logic.Lt(k, hi)), newOrIn(ref, k)))
+	return logic.Or(logic.Le(before, ref), logic.Forall(k, logic.Implies(logic.And(logic.Le(lo, k), logic.Lt(k, hi)), inFootprints(ref, k))))
+}
+
+// stretchClaim is what a callee promised of a stretch of an allocation that
+// existed: every cell of it lies in the footprint of one of ys, in the
+// region the claim is kept for, when holds does.
+type stretchClaim struct {
+	holds, ref, lo, hi *logic.Term
+	ys                 []reached
+}
+
+// rowClaim is what a callee promised of the row at a home in one footprint
+// region, which holds when holds does: every cell in it was made at or past
+// before, or lies in the footprint of one of ys, read in yRows.
+type rowClaim struct {
+	holds, home, before *logic.Term
+	ys                  []reached
+	yRows               *logic.Term
 }
 
 // rowNewOrIn states that every cell in the row at a home, read in mem, was
 // made at or past before or lies in the footprint of one of ys.
 func (v *fnVerifier) rowNewOrIn(mem memory, at, before *logic.Term, ys []reached, yRows *logic.Term) *logic.Term {
+	rows := mem.region(footprintRegion, footprintSort)
+	if v.lazyRows && rows.Op == logic.OpConst {
+		// Assumed, as what a callee promises is: a boolean stands for the
+		// claim, which rowAt states at each cell of the row it reads.
+		v.lazyRows = false
+		claim := v.rowNewOrIn(mem, at, before, ys, yRows)
+		v.lazyRows = true
+		holds := v.fresh("rowclaim", logic.Bool)
+		v.claimDefs = append(v.claimDefs, logic.Iff(holds, claim))
+		v.rowClaims[rows.Name] = append(v.rowClaims[rows.Name], rowClaim{holds: holds, home: at, before: before, ys: ys, yRows: yRows})
+		return holds
+	}
 	a, k := v.bound("a"), v.bound("k")
 	cell, facts := v.rowAt(mem.region(footprintRegion, footprintSort), at, a, k)
 	return logic.Forall(a, logic.Forall(k, logic.Implies(logic.And(append(facts, cell)...), v.newOrIn(a, k, before, ys, yRows))))

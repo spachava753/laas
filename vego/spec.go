@@ -61,6 +61,10 @@ type specEnv struct {
 	// that its ensures applies, the sequence of what it returns for each
 	// argument; see Apply.
 	applied map[*types.Var]*logic.Term
+	// packed holds, for a variadic parameter of a call written without
+	// ..., the number of arguments its new slice holds, so that
+	// fresh(result, readers) can name each of them.
+	packed map[*types.Var]int
 }
 
 // Apply resolves f(x) in an ensures of a trusted contract, for a function
@@ -994,6 +998,7 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		return nil, fmt.Errorf("%s cannot be used here", name)
 	}
 	found := make([]reached, len(paths))
+	var spreadPaths []int
 	for i, path := range paths {
 		var err error
 		if err := e.genericPath(path.Root, path.Steps); err != nil {
@@ -1005,6 +1010,15 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		spelled := spell(path.Root, path.Steps)
 		_, isPointer := pointee(found[i].typ)
 		switch {
+		case name == "fresh" && i > 0 && found[i].constant == nil && isSlice(found[i].typ) && isIface(elemType(found[i].typ)) && e.v.hasFootprint(elemType(found[i].typ)):
+			// Of a slice of such values, as io.MultiReader keeps, it is
+			// said only where a call packs its arguments into the slice, so
+			// that the slice's elements are known: there it is a finite
+			// statement, one footprint for each.
+			if !slices.Contains(spreadPaths, i) {
+				spreadPaths = append(spreadPaths, i)
+			}
+			continue
 		case name == "fresh" && i > 0:
 			// What the first argument refers to may lie in the footprints
 			// of the others, which are interface values that have one.
@@ -1042,6 +1056,47 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		case name == "within" && isMap(found[i].typ):
 			return nil, fmt.Errorf("within(%s): %s is a map, and nothing lies within a map or holds one", spelled, spelled)
 		}
+	}
+	if len(spreadPaths) > 0 {
+		// A slice of writers or readers stands for its elements where a
+		// call packed them. Anywhere else, in the checks of the entry
+		// itself, its length is unknown, and the clause says nothing of
+		// where the footprint lies; a call that hands a slice whole sees
+		// it so too, and the write through what it returns is refused
+		// (decided by the orchestrator).
+		var ys []reached
+		known := true
+		for i := 1; i < len(found); i++ {
+			if !slices.Contains(spreadPaths, i) {
+				ys = append(ys, found[i])
+				continue
+			}
+			param := e.fn.paramNames[paths[i].Root]
+			n, packed := e.packed[param]
+			if !packed || len(paths[i].Steps) > 0 || param == nil {
+				known = false
+				break
+			}
+			for k := range n {
+				elem, err := e.locate(paths[i].Root, []logic.Step{{Index: logic.IntLit(int64(k))}}, paths[i].When)
+				if err != nil {
+					return nil, err
+				}
+				ys = append(ys, elem)
+			}
+		}
+		if e.fn == nil || e.before == nil || e.post == nil || !found[0].isResult || len(paths[0].Steps) > 0 || !isIface(found[0].typ) {
+			return nil, fmt.Errorf("fresh(%s, %s): a slice of interface values can hold the footprint only of a result that is an interface value, in an Ensures",
+				spell(paths[0].Root, paths[0].Steps), spell(paths[spreadPaths[0]].Root, paths[spreadPaths[0]].Steps))
+		}
+		if !known {
+			// What the result holds is new; where its footprint lies is
+			// not said.
+			return logic.Or(isNilRef(found[0].val), logic.Le(e.before, home(found[0].val[0]))), nil
+		}
+		// A pack of no arguments is nil, whose elements have no
+		// footprints, and the result's footprint is then new.
+		found = append(found[:1], ys...)
 	}
 	first := found[0].val
 	if name == "apart" {
@@ -1533,8 +1588,13 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 			t.ref, t.rows = home(cur.val[0]), mem.region(footprintRegion, footprintSort)
 		}
 		t.fp = true
-		// A value with states: the entry also covers every state of it.
-		if v.hasStates(final) {
+		// The entry also covers every state of what the value holds, as
+		// an entry of the trust file did before the value had a footprint
+		// (D2: no contract changes its meaning), except for the receiver
+		// of a method whose interface declares no state, which changes
+		// none (F7 (a)).
+		receiverOfMethod := fn.receiver != nil && m.name == fn.receiver.Name()
+		if v.hasStates(final) || !receiverOfMethod {
 			form.cells, form.row = []cell{stateCell}, true
 			t.row = true
 		}
@@ -1600,7 +1660,7 @@ func (v *fnVerifier) targets(fn *funcInfo, args map[*types.Var]value, sink *stat
 		t.mod = i
 		list = append(list, t)
 		for _, part := range t.owned {
-			part.mod, part.text, part.clause, part.part = i, t.text, t.clause, true
+			part.mod, part.text, part.clause, part.part, part.ownerParam = i, t.text, t.clause, true, t.param
 			list = append(list, part)
 		}
 	}
