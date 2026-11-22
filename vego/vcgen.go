@@ -318,6 +318,9 @@ func (v *fnVerifier) enter() *state {
 		typed := v.wellFormed(val, fn.receiver.Type(), st.brk)
 		v.typing[typed] = true
 		st.assume(typed)
+		// A method is never run on a nil interface value: the call
+		// panics before it.
+		st.assume(logic.Not(isNilRef(val)))
 	}
 	for _, pair := range overlapping(fn) {
 		if v.entry[pair[0]] != nil && v.entry[pair[1]] != nil {

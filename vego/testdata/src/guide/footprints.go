@@ -95,5 +95,5 @@ func LogThroughTee(r Recorder) {
 // @Ensures True
 func LogThroughTeeUnlisted(r Recorder) {
 	s := teeRecorder(r)
-	s.Record("tee") // want `vego: s.Record may modify the footprint of s, which LogThroughTeeUnlisted may not modify; list it in a // @Modifies clause`
+	s.Record("tee") // want `vego: s.Record may modify the footprint of s, which LogThroughTeeUnlisted may not modify; it may lie in the footprint of r, as the contract of teeRecorder at footprints.go:97:7 says; list r in a // @Modifies clause`
 }

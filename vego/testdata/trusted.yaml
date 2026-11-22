@@ -370,6 +370,25 @@ trusted:
     runs: [bw]
     modifies: []
 
+  footprints.grownTable:
+    reason: Test helper standing for a trusted function that writes w and returns a map in w's footprint, which it may have made.
+    requires:
+      - "w != nil"
+    runs: [w]
+    modifies: [w]
+    vouches: [w]
+    ensures:
+      - "m != nil And within(m, w)"
+
+  footprints.pairTable:
+    reason: Test helper standing for a trusted function whose result lies in the footprint of what it is given.
+    requires:
+      - "w != nil"
+    ensures:
+      - "within(m, w)"
+    runs: [w]
+    modifies: []
+
   footprints.resetWriter:
     reason: Test helper standing for a function the project trusts to write a Writer, which may make it own any memory.
     requires:

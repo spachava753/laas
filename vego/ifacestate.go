@@ -376,14 +376,32 @@ func (fn *funcInfo) setReceiver(name string, method *types.Func) string {
 	return ""
 }
 
+// placesWithin reports whether an Ensures of a contract of an interface
+// method says that something lies within the receiver, as a header lies in
+// the response writer that hands it out (F34 of the review of step 4).
+func placesWithin(fn *funcInfo) bool {
+	found := false
+	for _, c := range fn.ensures {
+		if c.node == nil {
+			continue
+		}
+		c.node.Walk(func(n *logic.Node) {
+			if n.Kind == logic.NCall && n.Name == "within" && len(n.Kids) == 2 && n.Kids[1].Kind == logic.NIdent && n.Kids[1].Name == fn.receiver.Name() {
+				found = true
+			}
+		})
+	}
+	return found
+}
+
 // checkReceivers reports, once the annotations of the package are read, a
 // receiver named for a method of an interface without states, and an
 // interface of the package with two states of one name.
 func (pv *pkgVerifier) checkReceivers() {
 	for method, fn := range pv.ifaceMethods {
-		if fn.receiver != nil && !pv.hasStates(fn.receiver.Type()) && !writesBehind(fn) {
+		if fn.receiver != nil && !pv.hasStates(fn.receiver.Type()) && !writesBehind(fn) && !placesWithin(fn) {
 			pv.report(method.Pos(), "%s names its receiver %s, but %s has no states and the contract does not list %s in Modifies; "+
-				"a contract names its receiver to speak of its states, or to say that the method writes behind it; "+
+				"a contract names its receiver to speak of its states, to say that the method writes behind it, or to place a result within it; "+
 				"remove the Receiver annotation, list %s in a // @Modifies clause, or declare a state with @State",
 				methodTitle(method), fn.receiver.Name(), declaringInterface(method).Name(), fn.receiver.Name(), fn.receiver.Name())
 			fn.broken = true

@@ -600,6 +600,14 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			unlisted = v.notListable(passedExpr[t.param], call.Pos())
 		}
 		if t.fp {
+			// A value made over a writer writes what the writer writes,
+			// which is what to list (F35 of the review of step 4).
+			if t.ref.Op == logic.OpSelect && t.ref.Args[1].Op == logic.OpConst && remedy == "" {
+				if from, ok := v.returnedBy[t.ref.Args[1].Name]; ok && len(from.freshIn) > 0 {
+					remedy = fmt.Sprintf("it may lie in the footprint of %s, as the contract of %s at %s says; list %s in a // @Modifies clause",
+						strings.Join(from.freshIn, " or "), from.call, v.placeOf(from.at), strings.Join(from.freshIn, " and "))
+				}
+			}
 			v.checkFootprintWrite(st, guard, t, call.Pos(), fmt.Sprintf("%s may modify the footprint of %s", name, base), remedy, unlisted)
 			v.checkFootprintRanged(st, guard, t, call.Pos(), name)
 			if !t.row {
@@ -662,11 +670,12 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			// A write through what a trusted function returned that the
 			// caller may not make is reported with the function's name.
 			_, isPointer := pointee(sig.Results().At(i).Type())
-			if isSlice(sig.Results().At(i).Type()) || isPointer {
+			if isSlice(sig.Results().At(i).Type()) || isPointer || isIface(sig.Results().At(i).Type()) {
 				for _, leaf := range results[i] {
 					if leaf.Sort == logic.Ref && leaf.Op == logic.OpConst {
-						from := returned{fn: fn, result: i, call: name}
+						from := returned{fn: fn, result: i, call: name, at: call.Pos()}
 						from.param, from.within, from.unlessNew = withinArgument(fn, i, bound)
+						from.freshIn = freshArguments(fn, i, bound)
 						v.returnedBy[leaf.Name] = from
 					}
 				}

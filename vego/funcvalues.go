@@ -253,8 +253,14 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 	grown := v.grow(st, entry.brk, nil)
 	grown.after = st.brk
 	rows := st.mem[footprintRegion]
+	// The homes of the footprints that Modifies lists, whose rows an
+	// outcome may grow by memory it makes.
+	var listedHomes []*logic.Term
 	for _, m := range fn.modifies {
 		_, t, err := v.locateTarget(fn, m, v.entry, st, memory{})
+		if err == nil && t.fp {
+			listedHomes = append(listedHomes, t.ref)
+		}
 		covered := coveredType(fn, m)
 		if err == nil && t.row && covered != nil {
 			// Each state the value is known to have gets a value that Z3
@@ -312,7 +318,18 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 		}
 	}
 	facts, homesChosen := v.chooseHomes(facts, v.made[mark:])
-	if len(homesChosen) > 0 {
+	// A result that holds memory may be memory the outcome makes and adds
+	// to a listed footprint, as a header that a response writer makes on
+	// the first call (F34 of the review of step 4).
+	var made []*logic.Term
+	if len(listedHomes) > 0 {
+		for i, result := range fn.results {
+			if _, isPointer := pointee(result.Type()); (isPointer || isSlice(result.Type()) || isMap(result.Type())) && results[i] != nil && results[i][0].Op == logic.OpConst {
+				made = append(made, results[i][0])
+			}
+		}
+	}
+	if len(homesChosen) > 0 || len(made) > 0 {
 		// Z3 does not find a home and a bound above it for a value by
 		// itself, so instances are offered beside the question as it is:
 		// new homes at the bound on entry, one after another, with the
@@ -320,7 +337,7 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 		// whose home the entry reads outside a quantifier, with the bound
 		// as it was. Each is an instance of the outcome, so a proof of one
 		// is a proof that some outcome exists.
-		instances := []map[string]*logic.Term{{st.brk.Name: logic.Add(entry.brk, logic.IntLit(int64(len(homesChosen))))}}
+		instances := []map[string]*logic.Term{{st.brk.Name: logic.Add(entry.brk, logic.IntLit(int64(len(homesChosen)+len(made))))}}
 		// The new homes hold nothing in their footprints, which is what a
 		// value that writes nothing behind it, or only what it creates,
 		// has: fresh(result) of an interface value asks for it (F2).
@@ -329,6 +346,13 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 		for i, h := range homesChosen {
 			instances[0][h.Name] = logic.Add(entry.brk, logic.IntLit(int64(i)))
 			chosenRows = logic.Store(chosenRows, instances[0][h.Name], emptyRow)
+		}
+		whole := logic.Fill(logic.IntLit(0), logic.True())
+		for i, ref := range made {
+			instances[0][ref.Name] = logic.Add(entry.brk, logic.IntLit(int64(len(homesChosen)+i)))
+			for _, at := range listedHomes {
+				chosenRows = logic.Store(chosenRows, at, logic.Store(logic.Select(chosenRows, at), instances[0][ref.Name], whole))
+			}
 		}
 		instances[0][rows.Name] = chosenRows
 		for _, at := range freeHomeReads(given, 4) {

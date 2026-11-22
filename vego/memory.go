@@ -633,6 +633,38 @@ type returned struct {
 	// unlessNew is set when the contract places it there only when it is
 	// not new, as in fresh(result) Or within(result, s).
 	unlessNew bool
+	// freshIn holds the arguments, as the caller wrote them, in whose
+	// footprints the contract says what the result refers to may lie, as
+	// fresh(result, w) does, and at is where the call is.
+	freshIn []string
+	at      token.Pos
+}
+
+// freshArguments returns the arguments, as the call wrote them, that a
+// conjunct fresh(result, w...) of the ensures of a callee names after the
+// result.
+func freshArguments(fn *funcInfo, result int, args []passedArg) []string {
+	name := spelledResult(fn, result)
+	var found []string
+	for _, c := range fn.ensures {
+		if c.node == nil {
+			continue
+		}
+		for _, conjunct := range c.node.Conjuncts() {
+			if conjunct.Kind != logic.NCall || conjunct.Name != "fresh" || len(conjunct.Kids) < 2 ||
+				conjunct.Kids[0].Kind != logic.NIdent || conjunct.Kids[0].Name != name {
+				continue
+			}
+			for _, kid := range conjunct.Kids[1:] {
+				for _, arg := range args {
+					if kid.Kind == logic.NIdent && arg.param.Name() == kid.Name && arg.expr != nil {
+						found = append(found, types.ExprString(arg.expr))
+					}
+				}
+			}
+		}
+	}
+	return found
 }
 
 // withinArgument finds, in the ensures of a callee, a conjunct that places
@@ -921,7 +953,7 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 			if ranged {
 				position = v.bound("k")
 			}
-			var by []*logic.Term
+			var by, premises []*logic.Term
 			for _, i := range candidates {
 				if t := v.frame[i]; t.fp && i != without {
 					at := position
@@ -930,6 +962,12 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 					}
 					cell, facts := v.rowAt(t.rows, t.ref, w.ref, at)
 					by = append(by, logic.And(append(facts, cell)...))
+					// What the row holds now, as a call may have grown it
+					// (F34 of the review of step 4): a cell in it lies in
+					// the row on entry or in memory made since, which the
+					// layers of the region say of the cell.
+					_, grown := v.rowAt(st.mem.region(footprintRegion, footprintSort), t.ref, w.ref, at)
+					premises = append(premises, grown...)
 				}
 				for _, c := range covers[i] {
 					switch {
@@ -946,6 +984,9 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 				}
 			}
 			covered := logic.Or(by...)
+			if len(premises) > 0 {
+				covered = logic.Implies(logic.And(premises...), covered)
+			}
 			if ranged {
 				inside := logic.And(logic.Le(part.lo, position), logic.Lt(position, part.hi))
 				covered = logic.Forall(position, logic.Implies(inside, covered))
@@ -981,6 +1022,10 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 			callee := from.fn.obj.Name()
 			remedy = fmt.Sprintf("it is memory that %s returned, and its contract does not say that this is new memory, so it may have existed when %s "+
 				"was called; take it as a parameter and list it in a // @Modifies clause", callee, v.fn.obj.Name())
+			if len(from.freshIn) > 0 {
+				remedy = fmt.Sprintf("it is memory that %s returned, which its contract places in the footprint of %s when it is not new; list %s in a // @Modifies clause",
+					callee, strings.Join(from.freshIn, " or "), strings.Join(from.freshIn, " and "))
+			}
 			if from.within != "" {
 				unless := ""
 				if from.unlessNew {
@@ -990,7 +1035,7 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 					callee, from.param, unless, v.fn.obj.Name(), from.within, from.param, from.within)
 			}
 			switch contract := v.contractTitle(from.fn); {
-			case from.fn.trust != nil:
+			case from.fn.trust != nil || len(from.freshIn) > 0:
 			case contract != "":
 				remedy = fmt.Sprintf("it is memory that a call of %s returned, and the contract of %s does not say that this is new memory, so it may have existed when %s "+
 					"was called; if it is new, say so in the contract of %s, with // @Ensures fresh(%s), or take it as a parameter and list it in a // @Modifies clause",
