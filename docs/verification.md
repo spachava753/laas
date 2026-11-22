@@ -1365,7 +1365,13 @@ func Start(r Recorder, t *Lines) {
 }
 ```
 
-The value passed for the footprint must be a parameter that the caller's own `Modifies` lists. A function can return memory that it got from somewhere other than its arguments, such as its own package or a call it made. So an argument that a call returned is refused, unless the contract of that call says that the result is new, with `fresh`, or lies within one of its arguments that is fine itself, with `within`:
+The value passed for the footprint must be a parameter that the caller's own `Modifies` lists. A function can return memory that it got from somewhere other than its arguments, such as its own package or a call it made. So an argument that a call returned is refused, unless one of these holds:
+
+- the contract of that call says that the result is new, with `fresh`;
+- the contract says that the result lies within one of its arguments that is fine itself, with `within`;
+- the call is of a verified function whose body returns only what its arguments reach or memory it made, and its arguments are fine. A getter such as `return u.cfg` is such a function.
+
+A call through an interface value, as here, is none of these:
 
 ```go
 // @Requires r != nil
@@ -1395,7 +1401,7 @@ Note relies on it not doing so: it comes from the call of s.Current at footprint
 say that it is new or lies within an argument
 ```
 
-The same refusal names a store when a value of unknown origin was stored into memory that the function reaches before the call, since the callee could then reach it. A call whose `Modifies` covers memory that can hold a pointer, a slice, or a map counts as such a store, since it may put there memory it got from anywhere.
+The same refusal names a store when a value of unknown origin was stored into memory that the function reaches before the call, since the callee could then reach it. A call whose `Modifies` covers memory that can hold a pointer, a slice, or a map counts as such a store, since it may put there memory it got from anywhere. A verified function whose body stores only what its arguments reach or memory it made does not, as long as its arguments are fine.
 
 The states of another interface value may lie in the footprint, so a write forgets them too. Close a value before you write through another, or require what you need again afterwards:
 

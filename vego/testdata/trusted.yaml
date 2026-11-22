@@ -313,6 +313,14 @@ trusted:
       - "(Forall k in [0, |a|) : Forall j in [0, |a[k].S|) : a[k].S[j] >= 0) -> result = nil"
     modifies: []
 
+  footprints.pick:
+    reason: Test helper standing for a trusted function whose result lies within the slice it is given.
+    requires:
+      - "|ps| > 0"
+    ensures:
+      - "within(p, ps)"
+    modifies: []
+
   footprints.current:
     reason: Test helper standing for a trusted function that returns memory its package holds.
     ensures:

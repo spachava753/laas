@@ -657,6 +657,9 @@ type pkgVerifier struct {
 	funcTypes     map[*types.TypeName]*funcInfo
 	importedTypes map[*types.TypeName]*funcInfo
 	mayCall       map[*types.Func]bool
+	// summaries holds what each verified function of the package returns
+	// and stores, by where it came from; see memSummary.
+	summaries map[*types.Func]memSummary
 	// valueReasons holds, for a function of this package that may make a
 	// call through a value, why; see valueReason.
 	valueReasons map[*types.Func]valueReason

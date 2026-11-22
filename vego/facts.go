@@ -45,6 +45,11 @@ type contractFact struct {
 	// type vouches for; see addVouches. Every package that calls through
 	// a value of the type, or makes one, reads it from here.
 	Vouches []string
+	// DerivedResults is set when every result of the function that holds
+	// memory is new or reached from its arguments, and DerivedStores when
+	// what it stores into memory is; see memSummary.
+	DerivedResults bool
+	DerivedStores  bool
 }
 
 func (*contractFact) AFact() {}
@@ -93,6 +98,8 @@ func (pv *pkgVerifier) exportContracts(excused map[*funcInfo]bool) {
 		fact := pv.contractFactOf(fn, fn.decl.Pos())
 		fact.Excused, fact.Verified, fact.KnownErrors = excused[fn], !unverified[fn], pv.knownReturns[fn]
 		fact.CallsValues = pv.mayCallValues(fn.obj)
+		summary := pv.memSummary(fn.obj)
+		fact.DerivedResults, fact.DerivedStores = summary.results, summary.stores
 		pv.pass.ExportObjectFact(fn.obj, fact)
 	}
 }

@@ -109,7 +109,7 @@ func firstOf(ps []*Pair) (p *Pair) {
 // @Ensures True
 func ByTypes(s Sink, g Peeker) {
 	ps := []*Pair{g.Peek()}
-	Touch(s, firstOf(ps)) // want `Touch relies on it not doing so: it comes from the call of firstOf at origins.go:\d+:\d+, whose contract does not say that it is new or lies within an argument`
+	Touch(s, firstOf(ps)) // want `Touch relies on it not doing so: it comes from the call of firstOf at origins.go:\d+:\d+, which returns what its arguments reach, and firstOf is handed ps, and it comes from the call of g.Peek`
 }
 
 // StoredNew stores an unknown pair into memory it made, which pollutes it.
@@ -190,7 +190,7 @@ func Put(b *Box, p *Pair) {
 // @Ensures True
 func HelperStores(s Sink, g Peeker, b *Box, q *Pair) {
 	Put(b, g.Peek())
-	Touch(s, q) // want `Touch relies on it not doing so: the call of Put at origins.go:\d+:\d+ may store into memory it may modify a reference to memory of any origin`
+	Touch(s, q) // want `Touch relies on it not doing so: the call of Put at origins.go:\d+:\d+ may store what it is handed into memory it may modify, and Put is handed g.Peek\(\)`
 }
 
 // Appends appends an unknown pair to a slice of a parameter.
@@ -439,5 +439,122 @@ type pairsOf interface {
 // @Ensures True
 func WithinUnknown(s Sink, g pairsOf) {
 	ps := g.Pairs()
-	Touch(s, first(ps)) // want `Touch relies on it not doing so: it comes from the call of first at origins.go:\d+:\d+, whose contract places it within ps, and it comes from the call of g.Pairs`
+	Touch(s, first(ps)) // want `Touch relies on it not doing so: it comes from the call of first at origins.go:\d+:\d+, which returns what its arguments reach, and first is handed ps, and it comes from the call of g.Pairs`
+}
+
+// Users holds users and a configuration.
+type Users struct {
+	users map[int]*Pair
+	cfg   *Pair
+}
+
+// @Requires u != nil
+// @Ensures True
+func (u *Users) lookup(id int) (p *Pair) {
+	return u.users[id]
+}
+
+// @Requires u != nil
+// @Ensures True
+func (u *Users) config() (p *Pair) {
+	return u.cfg
+}
+
+// Getters passes what verified getters return, which their bodies read
+// from the parameter.
+//
+// @Requires s != nil And u != nil
+// @Modifies s
+// @Ensures True
+func Getters(s Sink, u *Users, id int) {
+	Touch(s, u.lookup(id))
+	Touch(s, u.config())
+}
+
+// countDown recurses and returns what its argument reaches.
+//
+// @Requires u != nil And 0 <= n
+// @Variant n
+// @Ensures True
+func countDown(u *Users, n int) (p *Pair) {
+	if n == 0 {
+		return u.cfg
+	}
+	return countDown(u, n-1)
+}
+
+// Recursive passes what a recursive getter returns.
+//
+// @Requires s != nil And u != nil
+// @Modifies s
+// @Ensures True
+func Recursive(s Sink, u *Users) {
+	Touch(s, countDown(u, 3))
+}
+
+// countDownFrom recurses and returns what current returned.
+//
+// @Requires 0 <= n
+// @Variant n
+// @Ensures True
+func countDownFrom(n int) (p *Pair) {
+	if n == 0 {
+		return current()
+	}
+	return countDownFrom(n - 1)
+}
+
+// RecursiveForeign passes what a recursive function returns, which may be
+// memory of any origin.
+//
+// @Requires s != nil
+// @Modifies s
+// @Ensures True
+func RecursiveForeign(s Sink) {
+	Touch(s, countDownFrom(3)) // want `Touch relies on it not doing so: it comes from the call of countDownFrom at origins.go:\d+:\d+, whose contract does not say that it is new or lies within an argument`
+}
+
+// viaLater returns what later returns, which is declared after it.
+//
+// @Ensures True
+func viaLater() (p *Pair) {
+	return later()
+}
+
+// later returns what current returned.
+//
+// @Ensures True
+func later() (p *Pair) {
+	return current()
+}
+
+// ThroughLater passes what viaLater returns.
+//
+// @Requires s != nil
+// @Modifies s
+// @Ensures True
+func ThroughLater(s Sink) {
+	Touch(s, viaLater()) // want `Touch relies on it not doing so: it comes from the call of viaLater at origins.go:\d+:\d+, whose contract does not say that it is new or lies within an argument`
+}
+
+// pick returns an element of ps, and is trusted.
+func pick(ps []Pair) (p *Pair) { return &ps[0] }
+
+// PickedFrom passes what a trusted call placed within a slice it was given.
+//
+// @Requires s != nil And |ps| > 0
+// @Modifies s
+// @Ensures True
+func PickedFrom(s Sink, ps []Pair) {
+	Touch(s, pick(ps))
+}
+
+// PickedFromUnknown passes what a trusted call placed within a slice of
+// unknown origin.
+//
+// @Requires s != nil And g != nil
+// @Modifies s
+// @Ensures True
+func PickedFromUnknown(s Sink, g pairsOf) {
+	Touch(s, pick(g.Pairs())) // want `Touch relies on it not doing so: it comes from the call of pick at origins.go:\d+:\d+, whose contract places it within g.Pairs\(\), and it comes from the call of g.Pairs`
 }

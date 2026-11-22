@@ -440,6 +440,14 @@ func (v *fnVerifier) memResult(e ast.Expr, index int, fact memFact) string {
 	if promisesFresh(fn, index) && !writesFootprint(v, fn) {
 		return ""
 	}
+	if v.pkgVerifier.memSummary(fn.obj).results && fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil {
+		// A verified callee returns what its arguments reach or new
+		// memory, so the result is outside when they are.
+		if why := v.unknownArgument(call, fact); why != "" {
+			return fmt.Sprintf("it comes from the call of %s at %s, which returns what its arguments reach, and %s", name, v.placeOf(call.Pos()), why)
+		}
+		return ""
+	}
 	if arg := v.withinArg(call, fn, index); arg != nil {
 		if why := v.memOrigin(arg, fact); why != "" {
 			return fmt.Sprintf("it comes from the call of %s at %s, whose contract places it within %s, and %s", name, v.placeOf(call.Pos()), types.ExprString(arg), why)
@@ -604,15 +612,147 @@ func (v *fnVerifier) callPollutes(call *ast.CallExpr, fact memFact) string {
 		}
 	}
 	fn := v.memCallee(call)
+	if fn == nil && v.literalOf(call) == nil {
+		return fmt.Sprintf("the call of %s at %s has no contract that says what it stores", types.ExprString(call.Fun), v.placeOf(call.Pos()))
+	}
 	if fn == nil || !v.targetsHoldReferences(fn) {
 		return ""
 	}
 	// A callee may store memory it got other than through its arguments,
 	// from its package or from a call it made, into what it modifies (F28
 	// of the review of step 2), so a call whose targets can hold a
-	// reference pollutes whatever it is handed.
+	// reference pollutes, unless it is a verified function that stores
+	// only what its arguments reach or new memory, and is handed nothing
+	// unknown.
+	if v.pkgVerifier.memSummary(fn.obj).stores && fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil {
+		why := v.unknownArgument(call, fact)
+		if why == "" {
+			return ""
+		}
+		return fmt.Sprintf("the call of %s at %s may store what it is handed into memory it may modify, and %s",
+			types.ExprString(call.Fun), v.placeOf(call.Pos()), why)
+	}
 	return fmt.Sprintf("the call of %s at %s may store into memory it may modify a reference to memory of any origin",
 		types.ExprString(call.Fun), v.placeOf(call.Pos()))
+}
+
+// unknownArgument returns why an argument of a call that holds memory, or
+// its receiver, may be unknown, or "".
+func (v *fnVerifier) unknownArgument(call *ast.CallExpr, fact memFact) string {
+	operands := slices.Clone(call.Args)
+	if sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok && v.info.Selections[sel] != nil {
+		operands = append(operands, sel.X)
+	}
+	for _, arg := range operands {
+		if why := v.memOrigin(arg, fact); why != "" {
+			return fmt.Sprintf("%s is handed %s, and %s", types.ExprString(call.Fun), types.ExprString(arg), why)
+		}
+	}
+	return ""
+}
+
+// memSummary says of a verified function of the package or of another
+// whether every result that holds memory is new or reached from its
+// arguments, and whether it stores only such memory. It is a property of
+// the body, decided by the same rules from the function's own parameters,
+// and is the greatest fixed point over the functions of the package: a
+// verified function ends, so what holds of every call it makes holds by
+// induction on the depth of calls. A trusted function, a call through a
+// value, and a generic function have no summary.
+type memSummary struct{ results, stores bool }
+
+// memSummary returns the summary of a function. The first time it is asked,
+// it computes the summary of every verified function of the package: each
+// starts true, and is decided again from its body until none changes. A
+// function of another package has the summary its contract fact carries
+// when it was verified; anything else has none.
+func (pv *pkgVerifier) memSummary(obj *types.Func) memSummary {
+	origin := pv.originOf(obj)
+	if pv.summaries == nil {
+		pv.summaries = map[*types.Func]memSummary{}
+		var local []*funcInfo
+		for _, fn := range pv.order {
+			if fn.annotated() && fn.decl != nil && fn.decl.Body != nil && fn.trust == nil && !isGeneric(fn.obj) {
+				local = append(local, fn)
+				pv.summaries[fn.obj] = memSummary{results: true, stores: true}
+			}
+		}
+		for changed := true; changed; {
+			changed = false
+			for _, fn := range local {
+				next := pv.summarize(fn)
+				if next != pv.summaries[fn.obj] {
+					pv.summaries[fn.obj] = next
+					changed = true
+				}
+			}
+		}
+	}
+	if summary, known := pv.summaries[origin]; known {
+		return summary
+	}
+	if fn := pv.contractOf(origin); fn != nil && fn.imported != nil && fn.imported.Verified {
+		return memSummary{results: fn.imported.DerivedResults, stores: fn.imported.DerivedStores}
+	}
+	return memSummary{}
+}
+
+// summarize decides the summary of one verified function of the package
+// from its body, with what is known now of its callees.
+func (pv *pkgVerifier) summarize(fn *funcInfo) (summary memSummary) {
+	// A body that uses Go the verifier refuses has no summary; its own
+	// verification reports it.
+	defer func() {
+		if r := recover(); r != nil {
+			switch r.(type) {
+			case unsupported, abort:
+				summary = memSummary{}
+			default:
+				panic(r)
+			}
+		}
+	}()
+	sv := pv.newVerifier(fn)
+	sv.boxed = sv.findBoxed(fn.decl.Body)
+	sv.classifyLiterals()
+	loose := sv.memOrigins().loose
+	results := true
+	ast.Inspect(fn.decl.Body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.FuncLit:
+			// Its returns are its own.
+			return false
+		case *ast.ReturnStmt:
+			if len(n.Results) == 0 {
+				for _, result := range fn.results {
+					if loose.unknown[result] != "" && holdsMemory(result.Type()) {
+						results = false
+					}
+				}
+			}
+			for _, e := range n.Results {
+				if len(n.Results) == 1 && len(fn.results) > 1 {
+					for j := range fn.results {
+						if sv.memResult(e, j, loose) != "" {
+							results = false
+						}
+					}
+					continue
+				}
+				if sv.memOrigin(e, loose) != "" {
+					results = false
+				}
+			}
+		}
+		return true
+	})
+	// Named results that a deferred literal assigns are judged anywhere.
+	for _, result := range fn.results {
+		if loose.unknown[result] != "" && holdsMemory(result.Type()) {
+			results = false
+		}
+	}
+	return memSummary{results: results, stores: loose.polluted == ""}
 }
 
 // literalsRun returns the function literals a call runs: the one called in
