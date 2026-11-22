@@ -1,5 +1,11 @@
 version: 1
 
+owns:
+  bytes.Buffer:
+    fields: [buf]
+    reason: >-
+      The methods of a Buffer write the struct and the array its buf field holds, and grow that array only into new memory, by append. Bytes and the methods that return a slice hand out part of that array; nothing else of it is let out.
+
 trusted:
   bytes.IndexFunc:
     reason: Documented to return the byte index in s of the first code point c satisfying f(c), or -1.

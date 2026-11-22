@@ -67,6 +67,14 @@ func WriteTotal(bw *bufio.Writer, total []byte) (err error) {
 	return bw.Flush()
 }
 
+// @Requires bw != nil And ready(bw) And |p| > 0
+// @Modifies bw
+// @Ensures r = p[0]
+func WriteThenRead(bw *bufio.Writer, p []byte) (r byte) {
+	_ = bw.WriteByte('x')
+	return p[0] // want `vego: postcondition may not hold: r = p\[0\]`
+}
+
 // @Requires r != nil And log != nil
 // @Ensures True
 func ReadLogged(r io.Reader, log io.Writer) (err error) {

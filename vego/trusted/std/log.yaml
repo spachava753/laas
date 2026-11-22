@@ -1,5 +1,15 @@
 version: 1
 
+owns:
+  log.Logger:
+    fields: [out]
+    reason: >-
+      The methods of a Logger that print write the struct (its mutex and
+      atomic fields) and, through Write of the writer its out field holds,
+      what that writer owns. The buffers they format into come from a pool
+      of package log, which verified code cannot reach. SetOutput, which
+      sets out to what it is given, is not shipped.
+
 state:
   log.Logger:
     ready:

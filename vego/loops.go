@@ -28,9 +28,11 @@ type site struct {
 	lo, hi int64
 	// row is set when the site may write every state of an interface
 	// value, at the home of the value root holds, and fp when it may write
-	// the footprint of that value.
-	row bool
-	fp  bool
+	// the footprint of that value. owner is the type of the pointer root
+	// holds when it points to an owner.
+	row   bool
+	fp    bool
+	owner types.Type
 }
 
 // effects describes what a loop may change.
@@ -301,6 +303,11 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 			eff.sites = append(eff.sites, at)
 			continue
 		}
+		// What an owner's fields refer to may change too, wherever it
+		// lies: the loop forgets it by region.
+		if form.owner {
+			eff.sites = append(eff.sites, v.ownedSites(form.typ, map[types.Type]bool{})...)
+		}
 		// Only a pointer or slice passed as it is names the same object
 		// before and inside the call.
 		if arg := argument(form.param); form.direct && arg != nil {
@@ -317,6 +324,11 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 					}
 				}
 			}
+		}
+		if form.owner && at.lo == 0 {
+			// An owner held in a variable: what it owns grows only by
+			// what the loop creates; see forget.
+			at.owner = form.typ
 		}
 		eff.sites = append(eff.sites, at)
 	}
@@ -477,6 +489,15 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 		forgotten := v.fresh("mem'"+key, sort)
 		v.layers[forgotten.Name] = known
 		head.mem[key] = forgotten
+	}
+	// What an owner held in a variable the loop does not assign owns grows
+	// only by what the loop creates, since every call that changes it
+	// does; with the owner's struct forgotten, this is what keeps its
+	// fields placed.
+	for _, at := range eff.sites {
+		if val := st.vals[at.root]; at.owner != nil && val != nil && !eff.whole[at.root] {
+			head.assume(v.ownerGrowth(head, st.mem, head.mem, val, at.owner, st.brk))
+		}
 	}
 	if !writesFootprints {
 		// What an iteration creates may be part of a footprint afterwards.

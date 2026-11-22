@@ -27,13 +27,14 @@ import (
 // ssaCopies). A copy the walk misses ends the function with a message of its
 // own, so it cannot pass quietly.
 
-// holdsState returns the type with a declared state that a value of type t
-// holds in itself, not behind a pointer, a slice, or a map: t itself, a
-// field of it at any depth, or an element of an array in it.
+// holdsState returns the type with a declared state, or that owns memory
+// through its fields (see footprint.go), that a value of type t holds in
+// itself, not behind a pointer, a slice, or a map: t itself, a field of it
+// at any depth, or an element of an array in it.
 func holdsState(t types.Type) (types.Type, bool) {
 	switch u := t.Underlying().(type) {
 	case *types.Struct:
-		if len(statesOf(u)) > 0 {
+		if len(statesOf(u)) > 0 || len(ownedFieldsOf(t)) > 0 {
 			return t, true
 		}
 		for field := range u.Fields() {
@@ -53,12 +54,31 @@ func holdsState(t types.Type) (types.Type, bool) {
 func holding(t types.Type, q types.Qualifier) string {
 	inner, _ := holdsState(t)
 	if types.Identical(inner, t) {
+		if len(statesOf(t.Underlying().(*types.Struct))) == 0 {
+			return fmt.Sprintf("%s, which owns memory", types.TypeString(t, q))
+		}
 		return fmt.Sprintf("%s, which holds a state", types.TypeString(t, q))
 	}
 	return fmt.Sprintf("%s, which holds a %s", types.TypeString(t, q), types.TypeString(inner, q))
 }
 
-// copyReason is said in every refusal.
+// copyReasonFor is said in every refusal of a copy of a value of type t:
+// copyReason when what t holds has a state, and ownerCopyReason when it
+// only owns memory.
+func copyReasonFor(t types.Type) string {
+	inner, _ := holdsState(t)
+	if u, ok := inner.Underlying().(*types.Struct); ok && len(statesOf(u)) == 0 {
+		return ownerCopyReason
+	}
+	return copyReason
+}
+
+// ownerCopyReason is said in the refusal of a copy of a value that owns
+// memory and holds no state.
+const ownerCopyReason = "a value that owns memory, such as a bytes.Buffer, must not be copied or overwritten, " +
+	"since a copy would share what the original owns, which only the methods of each may write"
+
+// copyReason is said in every other refusal.
 const copyReason = "a value that holds a state, such as a sync.Mutex, must not be copied or overwritten, " +
 	"since its state changes only through its methods and sync documents that a Mutex must not be copied after first use"
 
@@ -76,7 +96,7 @@ func (v *fnVerifier) checkCopies(decl *ast.FuncDecl) {
 	}
 	if found := v.findCopies()[decl]; len(found) > 0 {
 		v.unsupported(found[0].pos, fmt.Sprintf("Go copies a value of type %s, here (%s), and no rule of vego accounts for the copy; %s; "+
-			"hold the value by pointer", holding(found[0].typ, types.RelativeTo(v.pass.Pkg)), found[0].what, copyReason))
+			"hold the value by pointer", holding(found[0].typ, types.RelativeTo(v.pass.Pkg)), found[0].what, copyReasonFor(found[0].typ)))
 	}
 }
 
@@ -86,9 +106,9 @@ func copyWalk(info *types.Info, pkg *types.Package, decl *ast.FuncDecl, conv *co
 	q := types.RelativeTo(pkg)
 	var pos token.Pos
 	msg := ""
-	refuse := func(at token.Pos, format string, args ...any) {
+	refuse := func(at token.Pos, t types.Type, format string, args ...any) {
 		if msg == "" {
-			pos, msg = at, fmt.Sprintf(format, args...)+"; "+copyReason
+			pos, msg = at, fmt.Sprintf(format, args...)+"; "+copyReasonFor(t)
 		}
 	}
 	signature := func(fields *ast.FieldList, what, of string) {
@@ -104,7 +124,7 @@ func copyWalk(info *types.Info, pkg *types.Package, decl *ast.FuncDecl, conv *co
 			if len(field.Names) > 0 {
 				name = field.Names[0].Name
 			}
-			refuse(field.Pos(), "the %s %s%s has type %s, and passing it copies the value; use a pointer to %s",
+			refuse(field.Pos(), t, "the %s %s%s has type %s, and passing it copies the value; use a pointer to %s",
 				what, name, of, holding(t, q), types.TypeString(t, q))
 		}
 	}
@@ -133,7 +153,7 @@ func copyWalk(info *types.Info, pkg *types.Package, decl *ast.FuncDecl, conv *co
 				}
 				if t := info.TypeOf(e); t != nil {
 					if _, ok := holdsState(t); ok {
-						refuse(e.Pos(), "the range variable %s copies each element, a value of type %s; range over the indices and use &s[i]",
+						refuse(e.Pos(), t, "the range variable %s copies each element, a value of type %s; range over the indices and use &s[i]",
 							types.ExprString(e), holding(t, q))
 					}
 				}
@@ -143,7 +163,7 @@ func copyWalk(info *types.Info, pkg *types.Package, decl *ast.FuncDecl, conv *co
 				for _, lhs := range init.Lhs {
 					if t := info.TypeOf(lhs); t != nil {
 						if _, ok := holdsState(t); ok {
-							refuse(lhs.Pos(), "the loop variable %s has type %s, and Go copies it into each iteration; declare it before the loop",
+							refuse(lhs.Pos(), t, "the loop variable %s has type %s, and Go copies it into each iteration; declare it before the loop",
 								types.ExprString(lhs), holding(t, q))
 						}
 					}
@@ -162,7 +182,7 @@ func copyWalk(info *types.Info, pkg *types.Package, decl *ast.FuncDecl, conv *co
 				if n.Tok == token.DEFINE && isIdent && info.Defs[id] != nil {
 					continue
 				}
-				refuse(lhs.Pos(), "%s is assigned, which overwrites a value of type %s; create the value where it is declared, "+
+				refuse(lhs.Pos(), t, "%s is assigned, which overwrites a value of type %s; create the value where it is declared, "+
 					"as in x := T{} or p := &T{}, and change it only through its methods", types.ExprString(lhs), holding(t, q))
 			}
 		case *ast.CallExpr:
@@ -171,7 +191,7 @@ func copyWalk(info *types.Info, pkg *types.Package, decl *ast.FuncDecl, conv *co
 					if t := info.TypeOf(n.Args[0]); t != nil {
 						if s, ok := t.Underlying().(*types.Slice); ok {
 							if _, holds := holdsState(s.Elem()); holds {
-								refuse(n.Pos(), "append to a slice of %s, copies every element when the slice grows; "+
+								refuse(n.Pos(), s.Elem(), "append to a slice of %s, copies every element when the slice grows; "+
 									"build the slice with its final length, as in make([]T, n), or hold the elements by pointer", holding(s.Elem(), q))
 							}
 						}
@@ -191,7 +211,7 @@ func copyWalk(info *types.Info, pkg *types.Package, decl *ast.FuncDecl, conv *co
 			}
 			if _, isPointer := recv.Type().Underlying().(*types.Pointer); !isPointer {
 				if _, ok := holdsState(recv.Type()); ok {
-					refuse(n.Sel.Pos(), "%s has a value receiver of type %s, so calling it copies the value; give the method a pointer receiver",
+					refuse(n.Sel.Pos(), recv.Type(), "%s has a value receiver of type %s, so calling it copies the value; give the method a pointer receiver",
 						selection.Obj().Name(), holding(recv.Type(), q))
 				}
 			}
@@ -209,7 +229,7 @@ func copyWalk(info *types.Info, pkg *types.Package, decl *ast.FuncDecl, conv *co
 			// method with a value receiver copies the value at each call.
 			for _, target := range conv.converted[ast.Unparen(e)] {
 				if what, ok := valueReceiverOf(tv.Type, target); ok {
-					refuse(e.Pos(), "%s is converted to %s, whose method %s has a value receiver of type %s, so each call copies the value; "+
+					refuse(e.Pos(), what.Type().(*types.Signature).Recv().Type(), "%s is converted to %s, whose method %s has a value receiver of type %s, so each call copies the value; "+
 						"give the method a pointer receiver", types.ExprString(e), types.TypeString(target, q), what.Name(), holding(what.Type().(*types.Signature).Recv().Type(), q))
 				}
 			}
@@ -217,7 +237,7 @@ func copyWalk(info *types.Info, pkg *types.Package, decl *ast.FuncDecl, conv *co
 		}
 		if call, isCall := ast.Unparen(e).(*ast.CallExpr); isCall && !tv.IsType() {
 			if fun := info.Types[call.Fun]; !fun.IsType() {
-				refuse(e.Pos(), "%s returns a value of type %s, and the call copies it; return a pointer", types.ExprString(call.Fun), holding(tv.Type, q))
+				refuse(e.Pos(), tv.Type, "%s returns a value of type %s, and the call copies it; return a pointer", types.ExprString(call.Fun), holding(tv.Type, q))
 				return true
 			}
 		}
@@ -225,11 +245,11 @@ func copyWalk(info *types.Info, pkg *types.Package, decl *ast.FuncDecl, conv *co
 			return true
 		}
 		if sel, ok := parent.(*ast.SelectorExpr); ok && sel.X == e {
-			refuse(e.Pos(), "%s cannot be addressed, so Go copies a value of type %s, to select %s from it; hold the value by pointer, "+
+			refuse(e.Pos(), tv.Type, "%s cannot be addressed, so Go copies a value of type %s, to select %s from it; hold the value by pointer, "+
 				"as in a map of pointers", types.ExprString(e), holding(tv.Type, q), sel.Sel.Name)
 			return true
 		}
-		refuse(e.Pos(), "%s copies a value of type %s; use a pointer to it", types.ExprString(e), holding(tv.Type, q))
+		refuse(e.Pos(), tv.Type, "%s copies a value of type %s; use a pointer to it", types.ExprString(e), holding(tv.Type, q))
 		return true
 	})
 	return pos, msg

@@ -57,8 +57,9 @@ type encoder struct {
 	// sorts holds the declared sorts by the sort of the logic they stand
 	// for, after references are taken for integers.
 	sorts map[logic.Sort]string
-	// keyed holds the sequence sorts whose key functions are declared.
-	keyed map[logic.Sort]bool
+	// keyed holds the sequence sorts whose key functions are declared, and
+	// spliced those whose splice is defined.
+	keyed, spliced map[logic.Sort]bool
 	// consts holds the declared constants by name, with their sorts.
 	consts     map[string]string
 	constSorts map[string]string
@@ -114,7 +115,7 @@ func (e *encoder) count(t *logic.Term) {
 	// A write is encoded with its table twice; see node. The table counts
 	// once more only after it has been visited, so that its own parts are
 	// counted too.
-	if t.Op == logic.OpWrite {
+	if t.Op == logic.OpWrite || t.Op == logic.OpSpliceAt {
 		e.uses[t.Args[0]]++
 	}
 }
@@ -614,7 +615,7 @@ func (e *encoder) node(b *strings.Builder, t *logic.Term) {
 		b.WriteByte(')')
 	case logic.OpStore:
 		apply(seqOp("store"), t.Args...)
-	case logic.OpWrite:
+	case logic.OpWrite, logic.OpSpliceAt:
 		// The table is used twice; count made it shared, so that it is
 		// written once.
 		e.node(b, logic.Expand(t))
@@ -626,6 +627,15 @@ func (e *encoder) node(b *strings.Builder, t *logic.Term) {
 		apply(seqOp("concat"), t.Args...)
 	case logic.OpSub:
 		apply(seqOp("sub"), t.Args...)
+	case logic.OpSplice:
+		// Few problems splice, so the function is defined only in those
+		// that do, after its sort.
+		name := e.sort(t.Sort)
+		if !e.spliced[plain(t.Sort)] {
+			e.spliced[plain(t.Sort)] = true
+			fmt.Fprintf(&e.out, "(define-fun %[1]s.splice ((s %[1]s) (f %[1]s) (lo Int) (hi Int)) %[1]s (%[1]s.mk (lambda ((j Int)) (ite (and (<= lo j) (< j hi)) (select (%[1]s.at f) j) (select (%[1]s.at s) j))) (%[1]s.raw s)))\n", name)
+		}
+		apply(name+".splice", t.Args...)
 	case logic.OpIsNil:
 		e.sort(logic.Err)
 		b.WriteString("(= ")
@@ -764,6 +774,11 @@ func checkSorts(t *logic.Term) {
 		ok = arity(2) && t.Args[0].Sort.IsSeq() && is(t.Args[1], t.Args[0].Sort) && is(t, t.Args[0].Sort)
 	case logic.OpSub:
 		ok = arity(3) && t.Args[0].Sort.IsSeq() && numeric(t.Args[1]) && numeric(t.Args[2]) && is(t, t.Args[0].Sort)
+	case logic.OpSplice:
+		ok = arity(4) && t.Args[0].Sort.IsSeq() && is(t.Args[1], t.Args[0].Sort) && numeric(t.Args[2]) && numeric(t.Args[3]) && is(t, t.Args[0].Sort)
+	case logic.OpSpliceAt:
+		ok = arity(5) && t.Args[0].Sort.IsSeq() && t.Args[0].Sort.Elem().IsSeq() && numeric(t.Args[1]) && is(t.Args[2], t.Args[0].Sort.Elem()) &&
+			numeric(t.Args[3]) && numeric(t.Args[4]) && is(t, t.Args[0].Sort)
 	case logic.OpIsNil:
 		ok = arity(1) && t.Sort == logic.Bool && t.Args[0].Sort == logic.Err
 	case logic.OpIs:
@@ -819,6 +834,11 @@ func (e *encoder) shiftOf(read *logic.Term, variable string) (shift, bool) {
 		base, index, cut = base.Args[0], logic.Add(base.Args[1], index), true
 	}
 	if !e.isGround(base) {
+		return shift{}, false
+	}
+	// A pattern may not read a splice, which Z3 sees as a lambda; the
+	// reads of one are reads of what it was made of, which Z3 matches.
+	if base.Op == logic.OpSplice || (base.Op == logic.OpSelect && base.Args[0].Op == logic.OpSpliceAt) {
 		return shift{}, false
 	}
 	scale, offset, ok := linear(index, variable, e.isGround)
@@ -988,6 +1008,18 @@ func reduceRead(t *logic.Term) *logic.Term {
 	case logic.OpConcat:
 		first := logic.Len(seq.Args[0])
 		return logic.Ite(logic.Lt(index, first), logic.Select(seq.Args[0], index), logic.Select(seq.Args[1], logic.Sub(index, first)))
+	case logic.OpSplice:
+		inside := logic.And(logic.Le(seq.Args[2], index), logic.Lt(index, seq.Args[3]))
+		return logic.Ite(inside, logic.Select(seq.Args[1], index), logic.Select(seq.Args[0], index))
+	case logic.OpSelect:
+		// A read of a row of a spliced table is a read of the inside or of
+		// the table, so that the lambda of the splice reaches Z3 only
+		// where a row is used whole.
+		if table := seq.Args[0]; table.Op == logic.OpSpliceAt {
+			ref := seq.Args[1]
+			inside := logic.And(logic.Eq(ref, table.Args[1]), logic.Le(table.Args[3], index), logic.Lt(index, table.Args[4]))
+			return logic.Ite(inside, logic.Select(table.Args[2], index), logic.Select(logic.Select(table.Args[0], ref), index))
+		}
 	}
 	return nil
 }

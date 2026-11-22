@@ -321,6 +321,14 @@ trusted:
       - "within(p, ps)"
     modifies: []
 
+  footprints.resetWriter:
+    reason: Test helper standing for a function the project trusts to write a Writer, which may make it own any memory.
+    requires:
+      - "bw != nil"
+    runs: [bw]
+    modifies: [bw]
+    vouches: [bw]
+
   footprints.current:
     reason: Test helper standing for a trusted function that returns memory its package holds.
     ensures:

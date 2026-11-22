@@ -415,6 +415,7 @@ func encode(facts []*logic.Term, opts Options) (e *encoder, script, remarked str
 	e = &encoder{
 		preds:      opts.Preds,
 		sorts:      map[logic.Sort]string{},
+		spliced:    map[logic.Sort]bool{},
 		keyed:      map[logic.Sort]bool{},
 		consts:     map[string]string{},
 		constSorts: map[string]string{},

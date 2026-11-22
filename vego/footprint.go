@@ -6,6 +6,8 @@ import (
 	"go/types"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
 )
@@ -176,7 +178,9 @@ func (v *fnVerifier) rowAt(rows, home, alloc, pos *logic.Term) (*logic.Term, []*
 			if !known.growth {
 				panic("vego: internal error: the footprint region has a layer that is not a growth layer")
 			}
-			kept := logic.Lt(alloc, known.bound)
+			// A home made since the bound described no value before it,
+			// so only the rows of homes that existed keep their cells.
+			kept := logic.And(logic.Lt(alloc, known.bound), logic.Lt(home, known.bound))
 			if known.skipped != nil {
 				kept = logic.Or(kept, known.skipped)
 			}
@@ -539,7 +543,6 @@ func (v *fnVerifier) noteReachedValue(sink *state, t types.Type, ref, key *logic
 	}
 }
 
-
 // growsNothing reports whether a call can make nothing it creates part of
 // a footprint: it is not written to, it modifies no footprint, and it
 // returns nothing and writes nothing that can hold an interface value. A
@@ -556,4 +559,284 @@ func (v *fnVerifier) growsNothing(fn *funcInfo) bool {
 		}
 	}
 	return !v.targetsHoldReferences(fn)
+}
+
+// ownsDecl is what a shipped file declares a struct type of another module
+// to own: the fields whose memory is part of the footprint of a value of
+// the type, with why that is true of every method of the type.
+type ownsDecl struct {
+	// pkg and typ name the type.
+	pkg, typ string
+	fields   []string
+	reason string
+	line   int
+}
+
+// addOwns reads the owns section of a file: a mapping from a struct type,
+// as in bytes.Buffer, to the fields it owns and a reason. Only the shipped
+// files may have one: the layout a declaration names is that of the
+// standard library, the same in every module.
+func (f *trustFile) addOwns(node *yaml.Node) {
+	if !f.shipped {
+		f.problem(node.Line, "owns can be declared only in the shipped files: what a type of the project owns is declared on the type, and what a type of another module owns depends on fields its module may change")
+		return
+	}
+	if node.Kind != yaml.MappingNode {
+		f.problem(node.Line, "owns must map types to the fields they own")
+		return
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		typeName, body := node.Content[i], node.Content[i+1]
+		pkg, typ, ok := splitTypeName(typeName.Value)
+		if !ok || body.Kind != yaml.MappingNode {
+			f.problem(typeName.Line, "owns: %q must be a type named by its package, mapped to its fields and a reason", typeName.Value)
+			continue
+		}
+		decl := ownsDecl{pkg: pkg, typ: typ, line: typeName.Line}
+		for k := 0; k+1 < len(body.Content); k += 2 {
+			switch field, value := body.Content[k], body.Content[k+1]; field.Value {
+			case "fields":
+				for _, name := range value.Content {
+					decl.fields = append(decl.fields, name.Value)
+				}
+			case "reason":
+				decl.reason = strings.TrimSpace(value.Value)
+			default:
+				f.problem(field.Line, "unknown field %q in owns of %s; expected fields and reason", field.Value, typeName.Value)
+			}
+		}
+		if len(decl.fields) == 0 || decl.reason == "" {
+			f.problem(typeName.Line, "owns of %s needs the fields it owns and a reason", typeName.Value)
+			continue
+		}
+		f.owns[stateKey(pkg, typ)] = decl
+	}
+}
+
+// ownedFields returns the indices of the fields of a struct type whose
+// memory a value of the type owns, by the shipped declarations. A field
+// that the declaration names and the type does not have, or that holds
+// nothing a footprint can hold, panics: TestOwnsDeclarations holds every
+// declaration against the types of the toolchain.
+func (pv *pkgVerifier) ownedFields(t types.Type) []int {
+	return ownedFieldsOf(t)
+}
+
+// ownedFieldsOf is ownedFields, which needs nothing of a package.
+func ownedFieldsOf(t types.Type) []int {
+	named, ok := types.Unalias(t).(*types.Named)
+	if !ok || named.Obj().Pkg() == nil {
+		return nil
+	}
+	u, isStruct := named.Underlying().(*types.Struct)
+	if !isStruct {
+		return nil
+	}
+	var decl ownsDecl
+	found := false
+	for _, file := range shippedContracts() {
+		if d, has := file.owns[stateKey(named.Obj().Pkg().Path(), named.Obj().Name())]; has {
+			decl, found = d, true
+		}
+	}
+	if !found {
+		return nil
+	}
+	var indices []int
+	for _, name := range decl.fields {
+		index := -1
+		for i := range u.NumFields() {
+			if u.Field(i).Name() == name {
+				index = i
+			}
+		}
+		if index < 0 {
+			panic(fmt.Sprintf("vego: internal error: the shipped declaration that %s owns %s names no field of it", named, name))
+		}
+		// A field can be owned when it holds a pointer to a struct, a
+		// slice, a map, or an interface value.
+		ft := u.Field(index).Type()
+		if _, isPointer := pointee(ft); !isPointer && !isSlice(ft) && !isMap(ft) && !isIface(ft) {
+			panic(fmt.Sprintf("vego: internal error: the shipped declaration that %s owns %s names no field that can be owned", named, name))
+		}
+		indices = append(indices, index)
+	}
+	return indices
+}
+
+// ownedParts returns, for a pointer to a struct whose type owns some of
+// its fields, a target for what each owned field refers to, read in memory:
+// the array of a slice from its start to its capacity, a map, the struct a
+// pointer points to with what it owns in turn, and the footprint and the
+// states of an interface value. seen keeps a type that owns itself through
+// its fields from unfolding for ever; the shipped declarations have none.
+func (v *fnVerifier) ownedParts(sink *state, mem memory, ptr value, t types.Type, seen map[types.Type]bool) []target {
+	object, isPointer := pointee(t)
+	if !isPointer || seen[object] {
+		return nil
+	}
+	fields := v.ownedFields(object)
+	if len(fields) == 0 {
+		return nil
+	}
+	seen[object] = true
+	defer delete(seen, object)
+	var parts []target
+	for _, index := range fields {
+		val, ft, ok := v.member(sink, mem, ptr, t, index)
+		if !ok {
+			continue
+		}
+		switch {
+		case isSlice(ft):
+			lo, hi := v.extent(val, ft)
+			parts = append(parts, target{cells: v.cellsOf(elemType(ft)), elem: elemType(ft), ref: val[0], lo: lo, hi: hi})
+		case isMap(ft):
+			parts = append(parts, target{mapType: ft, ref: val[0]})
+		case isIface(ft):
+			if v.hasFootprint(ft) {
+				parts = append(parts, target{fp: true, ref: home(val[0]), rows: mem.region(footprintRegion, footprintSort)})
+			}
+			if v.hasStates(ft) {
+				parts = append(parts, target{row: true, cells: []cell{stateCell}, ref: home(val[0])})
+			}
+		default:
+			inner, _ := pointee(ft)
+			size := v.pass.TypesSizes.Sizeof(inner)
+			parts = append(parts, target{cells: v.cellsOf(inner), ref: val[0], lo: val[1], hi: logic.Add(val[1], logic.IntLit(size)), single: true})
+			parts = append(parts, v.ownedParts(sink, mem, val, ft, seen)...)
+		}
+	}
+	return parts
+}
+
+// ownedSites returns the sites a loop may write through what the owned
+// fields of a pointer's struct refer to, with no root: the loop forgets
+// them by region.
+func (v *fnVerifier) ownedSites(t types.Type, seen map[types.Type]bool) []site {
+	object, isPointer := pointee(t)
+	if !isPointer || seen[object] {
+		return nil
+	}
+	seen[object] = true
+	defer delete(seen, object)
+	u, _ := object.Underlying().(*types.Struct)
+	var sites []site
+	for _, index := range v.ownedFields(object) {
+		ft := u.Field(index).Type()
+		switch {
+		case isSlice(ft):
+			sites = append(sites, site{cells: v.cellsOf(elemType(ft)), elem: elemType(ft)})
+		case isMap(ft):
+			sites = append(sites, site{mapType: ft})
+		case isIface(ft):
+			if v.hasFootprint(ft) {
+				sites = append(sites, site{fp: true})
+			}
+			if v.hasStates(ft) {
+				sites = append(sites, site{row: true, cells: []cell{stateCell}})
+			}
+		default:
+			inner, _ := pointee(ft)
+			lo, hi := bounds(v.cellsOf(inner))
+			sites = append(sites, site{cells: v.cellsOf(inner), lo: lo, hi: hi})
+			sites = append(sites, v.ownedSites(ft, seen)...)
+		}
+	}
+	return sites
+}
+
+// ownedFresh states that what the owned fields of a pointer's struct refer
+// to was allocated at or past a bound, read in memory: the footprint of an
+// owner is new when all of it is. A nil pointer, a nil map, and a slice
+// without capacity refer to nothing, which is new.
+func (v *fnVerifier) ownedFresh(sink *state, mem memory, ptr value, t types.Type, before *logic.Term) *logic.Term {
+	return v.ownedFreshSeen(sink, mem, ptr, t, before, map[types.Type]bool{})
+}
+
+// ownedFreshSeen is ownedFresh for the types in seen not yet entered: a
+// type that holds itself through its owned pointers is entered once. Each
+// owned field gives one fact, by its kind: a slice is new or has no
+// capacity, a map is new or nil, and a pointer is new or nil and what it
+// owns is new too. An interface value is what the owner was given, and
+// what it owns cannot be said new yet, so fresh of one with a footprint or
+// states is not supported.
+func (v *fnVerifier) ownedFreshSeen(sink *state, mem memory, ptr value, t types.Type, before *logic.Term, seen map[types.Type]bool) *logic.Term {
+	object, isPointer := pointee(t)
+	if !isPointer || seen[object] || len(v.ownedFields(object)) == 0 {
+		return logic.True()
+	}
+	seen[object] = true
+	defer delete(seen, object)
+	zero := logic.RefLit(0)
+	var facts []*logic.Term
+	for _, index := range v.ownedFields(object) {
+		val, ft, ok := v.member(sink, mem, ptr, t, index)
+		if !ok {
+			continue
+		}
+		switch {
+		case isSlice(ft):
+			facts = append(facts, logic.Or(logic.Le(val[3], logic.IntLit(0)), logic.Le(before, val[0])))
+		case isMap(ft):
+			facts = append(facts, logic.Or(logic.Eq(val[0], zero), logic.Le(before, val[0])))
+		case isIface(ft):
+			// The value itself is what the owner was given, such as the
+			// reader of a Scanner, which is not new. What it owns is: that
+			// needs fresh of interface values to speak of their
+			// footprints, which no shipped owner needs yet, so it is
+			// refused, not approximated. Without a footprint or states, an
+			// interface value owns nothing.
+			if v.hasFootprint(ft) || v.hasStates(ft) {
+				v.unsupported(token.NoPos, fmt.Sprintf("fresh of a %s, which owns an interface value of type %s, is not supported yet", object, ft))
+			}
+		default:
+			facts = append(facts, logic.Or(logic.Eq(val[0], zero), logic.And(logic.Le(before, val[0]), v.ownedFreshSeen(sink, mem, val, ft, before, seen))))
+		}
+	}
+	return logic.And(facts...)
+}
+
+// ownerGrowth states that what the owned fields of an owner hold after a
+// change lies within what they held before, or was created at or past a
+// bound: a slice in the same array and inside its old stretch, or new, or
+// without capacity; a map or a pointer the same, new, or nil, with what it
+// owns in turn; an interface value the same. That is what every shipped
+// declaration claims of its type's methods, and verified code cannot write
+// those fields, which are unexported, but through them.
+func (v *fnVerifier) ownerGrowth(sink *state, before, after memory, ptr value, t types.Type, bound *logic.Term) *logic.Term {
+	return v.ownerGrowthSeen(sink, before, after, ptr, t, bound, map[types.Type]bool{})
+}
+
+func (v *fnVerifier) ownerGrowthSeen(sink *state, before, after memory, ptr value, t types.Type, bound *logic.Term, seen map[types.Type]bool) *logic.Term {
+	object, isPointer := pointee(t)
+	if !isPointer || seen[object] {
+		return logic.True()
+	}
+	seen[object] = true
+	defer delete(seen, object)
+	zero := logic.RefLit(0)
+	var facts []*logic.Term
+	for _, index := range v.ownedFields(object) {
+		old, ft, ok := v.member(sink, before, ptr, t, index)
+		now, _, _ := v.member(sink, after, ptr, t, index)
+		if !ok {
+			continue
+		}
+		switch {
+		case isSlice(ft):
+			oldLo, oldHi := v.extent(old, ft)
+			nowLo, nowHi := v.extent(now, ft)
+			within := logic.And(logic.Eq(now[0], old[0]), logic.Le(oldLo, nowLo), logic.Le(nowHi, oldHi))
+			facts = append(facts, logic.Or(logic.Le(now[3], logic.IntLit(0)), logic.Le(bound, now[0]), within))
+		case isMap(ft):
+			facts = append(facts, logic.Or(logic.Eq(now[0], zero), logic.Eq(now[0], old[0]), logic.Le(bound, now[0])))
+		case isIface(ft):
+			facts = append(facts, logic.Eq(now[0], old[0]))
+		default:
+			same := logic.And(logic.Eq(now[0], old[0]), logic.Eq(now[1], old[1]), v.ownerGrowthSeen(sink, before, after, now, ft, bound, seen))
+			facts = append(facts, logic.Or(logic.Eq(now[0], zero), same, logic.And(logic.Le(bound, now[0]), v.ownedFreshSeen(sink, after, now, ft, bound, seen))))
+		}
+	}
+	return logic.And(facts...)
 }

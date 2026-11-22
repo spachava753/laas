@@ -1951,7 +1951,7 @@ laas -vego -vego.cost ./...
 For `Load` from [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write), under the entries shown there, in a file `foreign.go` that declares it at line 52, it prints:
 
 ```text
-foreign.go:52:6: vego cost of Load: 41 problems, 4894313 resource units, 143569 bytes, 1.60 s
+foreign.go:52:6: vego cost of Load: 41 problems, 4767457 resource units, 138597 bytes, 1.60 s
 	foreign.go:52:6: 2 questions of the always-fails check stopped at a limit
 ```
 
@@ -5158,6 +5158,45 @@ func WriteTotal(bw *bufio.Writer, total []byte) (err error) {
 
 The same holds for a `*bufio.Reader`. `bufio.NewReader` may return the reader it is given, and `ReadByte` requires `ready(br)`.
 
+Some values of the standard library own memory besides their struct. Their methods write that memory, and a `Modifies` clause that lists such a value covers it. These are the values and what each owns:
+
+- a `*bytes.Buffer` and a `*strings.Builder` own the array of their buffer;
+- a `*bufio.Writer`, a `*bufio.Reader`, and a `*bufio.Scanner` own the array of their buffer and the writer or reader they keep;
+- a `*log.Logger` owns the writer it writes to.
+
+So a write to `bw` may change a byte slice that is the writer's buffer. A slice that the function was given may be that buffer, since nothing says where its caller got it:
+
+```go
+// @Requires bw != nil And ready(bw) And |p| > 0
+// @Modifies bw
+// @Ensures r = p[0]
+func WriteThenRead(bw *bufio.Writer, p []byte) (r byte) {
+	_ = bw.WriteByte('x')
+	return p[0]
+}
+```
+
+```text
+vego: postcondition may not hold: r = p[0]
+```
+
+Read what you need before the write, or use memory that the function makes itself. The methods of the writer make the only new memory that the writer comes to own, so memory that the function makes lies apart from what the writer owns.
+
+A value that owns memory cannot be copied or overwritten, as a value that holds a mutex cannot (see [Values that hold a mutex cannot be copied or overwritten](#values-that-hold-a-mutex-cannot-be-copied-or-overwritten)). A copy would share what the original owns:
+
+```text
+vego: cannot verify CopiesBuffer: *b copies a value of type bytes.Buffer, which owns memory; use a pointer
+to it; a value that owns memory, such as a bytes.Buffer, must not be copied or overwritten, since a copy
+would share what the original owns, which only the methods of each may write
+```
+
+Only the shipped entries and verified functions may write such a value. A call of a function that your trust file gives a `modifies` over one is reported, because nothing says how what the value owns changes:
+
+```text
+vego: cannot verify ResetsByProject: resetWriter may modify bw, a *bufio.Writer, which owns memory, and
+only a contract that comes with vego or a verified function says how what such a value owns may change
+```
+
 #### Wrappers in package io
 
 `io.NopCloser`, `io.LimitReader`, `io.TeeReader`, `io.MultiReader`, and `io.MultiWriter` have shipped entries. Each keeps the readers and writers it is given in the value it returns, and that value's `Read`, `Write`, or `Close` meets the entry of its interface whenever what it keeps meets theirs:
@@ -5861,6 +5900,8 @@ This table lists the most common messages.
 | `the trust files of this build declare the states of I differently` (or `declare states of I at F, and the proofs of package P were made with none`) | Modules built together disagree about the states of one interface. | Make the declarations the same, or run `laas` with `-vego.trusted`. |
 | `precondition of Lock may not hold: ~held(m)`, or `precondition of Unlock may not hold: held(m)` | The goroutine may already hold the mutex it locks, or may not hold the one it unlocks. | Add `~held(a.mu)` to the `Requires` clauses, and unlock on every path, as with `defer a.mu.Unlock()`. See [Locks](#locks). |
 | `cannot verify F: x copies a value of type T, which holds a sync.Mutex`, and the other messages that end in `must not be copied after first use` | Go copies or overwrites a value that holds a mutex here. | Do what the message says: use a pointer, give the method a pointer receiver, or build the slice with its final length. See [Values that hold a mutex cannot be copied or overwritten](#values-that-hold-a-mutex-cannot-be-copied-or-overwritten). |
+| `cannot verify F: x copies a value of type T, which owns memory` | Go copies or overwrites a value that owns memory, such as a `bytes.Buffer`, here. | Use a pointer to it, as described in [Writing through a buffer](#writing-through-a-buffer). |
+| `cannot verify F: g may modify x, a T, which owns memory, and only a contract that comes with vego or a verified function says how what such a value owns may change` | A function that your trust file trusts writes a value that owns memory, such as a `*bufio.Writer`. | Verify the function, or write the value only through its shipped methods. |
 | `... is an unexported field of T, declared in package p, and a formula in package q cannot name it` | A contract names a private field of another package. | Name an exported field, or the state of a mutex with `held`. See [Names](#names). |
 | `cannot verify F: recover is not supported` | `recover` returns an interface. | Call `recover` in a function that is not verified. |
 | `cannot verify F: a formula built to verify it has grown beyond 1048576 nodes, which is the limit` | An expression or a run of statements builds a formula that grows faster than the code, as `x = x + x` does when repeated. | Split the function, or the expressions in it, into smaller ones. |
@@ -5927,6 +5968,7 @@ Floating-point values are supported but opaque. They can be passed around and us
 A proof by `vego` depends on the following assumptions. Each concerns something `vego` cannot see.
 
 - Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and holds no value that can hold code anywhere it was not held when the call began, unless `keeps` lists the parameter. For a parameter listed under `keeps`, it runs the code during the call only if `runs` lists the parameter too, holds it when it returns only in memory that the results and parameters listed there reach, and has started or registered nothing that runs it later: no goroutine, timer, finalizer or cleanup, callback given to another package, or package-level variable. For a parameter listed under `runs` or `keeps`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter. Where such a value runs what the function keeps, as the reader that `io.TeeReader` returns runs the reader and the writer it is given, it meets its contract whenever what the function keeps meets theirs.
+- The methods of `bytes.Buffer`, `strings.Builder`, `bufio.Writer`, `bufio.Reader`, `bufio.Scanner`, and `log.Logger` that have shipped entries write nothing that verified code can see other than the struct and the memory that the value owns, as [Writing through a buffer](#writing-through-a-buffer) lists it. After a call, the value owns only what it owned before the call and memory that the call made.
 - Code of another package runs code of the verified package only as `vego` follows it, which [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods) describes: during a call that the verified package makes, it runs only what that call hands it, through the arguments and the receiver. Code that it kept from an earlier call, a value it stored, or code that it runs on another goroutine or at another time, does not call back into a verified function while that function runs, so that the call never ends. A cycle that stays in the package, or that goes through what a call hands to another package, is found and reported.
 - A claim under `asserts` is true: the function calls nothing that the parameter holds, or that a call of what the parameter holds returns, but what the claim allows, and uses no reflection on it (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For a parameter whose footprint the contract lists in `Modifies`, they pass no other argument that reaches memory in that footprint without going through an interface value: `Log` relies on the `Lines` that `t` points to not being memory that the methods of `r` write. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one that wraps it, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method.

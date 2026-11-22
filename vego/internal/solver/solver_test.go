@@ -22,6 +22,17 @@ type seqValue struct {
 	at     func(index int64) int64
 }
 
+// spliced is what Splice means: as long as whole, inside's elements from
+// lo up to hi, and whole's everywhere else.
+func spliced(whole, inside seqValue, lo, hi int64) seqValue {
+	return seqValue{whole.length, func(index int64) int64 {
+		if lo <= index && index < hi {
+			return inside.at(index)
+		}
+		return whole.at(index)
+	}}
+}
+
 func (s seqValue) with(i, v int64) seqValue {
 	return seqValue{s.length, func(index int64) int64 {
 		if index == i {
@@ -113,6 +124,15 @@ func (m model) table(t *logic.Term) func(index int64) seqValue {
 			return m.table(t.Args[1])
 		}
 		return m.table(t.Args[2])
+	}
+	if t.Op == logic.OpSpliceAt {
+		base, ref, inside, lo, hi := m.table(t.Args[0]), m.eval(t.Args[1]), m.seq(t.Args[2]), m.eval(t.Args[3]), m.eval(t.Args[4])
+		return func(index int64) seqValue {
+			if index == ref {
+				return spliced(base(index), inside, lo, hi)
+			}
+			return base(index)
+		}
 	}
 	if t.Op == logic.OpWrite {
 		base, ref, at, written := m.table(t.Args[0]), m.eval(t.Args[1]), m.eval(t.Args[2]), m.eval(t.Args[3])
@@ -296,6 +316,8 @@ func (m model) seq(t *logic.Term) seqValue {
 	case logic.OpSub:
 		whole, lo := m.seq(t.Args[0]), value(1)
 		return seqValue{max(plus(value(2), times(-1, lo)), 0), func(index int64) int64 { return whole.at(plus(lo, index)) }}
+	case logic.OpSplice:
+		return spliced(m.seq(t.Args[0]), m.seq(t.Args[1]), value(2), value(3))
 	}
 	panic("unexpected sequence " + t.String())
 }
@@ -391,6 +413,11 @@ func (g *generator) table(depth int) *logic.Term {
 	if g.wide && depth > 0 && g.rng.IntN(2) == 0 {
 		return logic.Write(g.table(depth-1), g.intTerm(0), g.intTerm(0), g.intTerm(0))
 	}
+	// A write of a stretch of unknown values is how a call writes what
+	// an owner owns.
+	if g.wide && depth > 0 && g.rng.IntN(3) == 0 {
+		return logic.SpliceAt(g.table(depth-1), g.intTerm(0), g.seq(depth-1), g.intTerm(0), g.intTerm(0))
+	}
 	return logic.Const("M", logic.SeqOf(logic.IntSeq))
 }
 
@@ -414,6 +441,8 @@ func (g *generator) seq(depth int) *logic.Term {
 		return logic.Concat(g.seq(depth-1), g.seq(depth-1))
 	case depth > 0 && g.rng.IntN(8) == 0:
 		return logic.Subseq(g.seq(depth-1), g.intTerm(0), g.intTerm(0))
+	case g.wide && depth > 0 && g.rng.IntN(8) == 0:
+		return logic.Splice(g.seq(depth-1), g.seq(depth-1), g.intTerm(0), g.intTerm(0))
 	}
 	return base
 }
@@ -451,7 +480,9 @@ func (g *generator) intTerm(depth int) *logic.Term {
 func (g *generator) formula(depth int) *logic.Term {
 	if depth <= 0 || g.rng.IntN(3) == 0 {
 		if g.wide {
-			switch g.rng.IntN(12) {
+			switch g.rng.IntN(13) {
+			case 12:
+				return g.splicedLaw()
 			case 0:
 				return logic.Pred("pos", g.intTerm(depth))
 			case 1:
@@ -569,6 +600,45 @@ func (g *generator) formula(depth int) *logic.Term {
 		return logic.Forall(x, logic.Implies(guard, body))
 	}
 	return logic.Exists(x, logic.And(guard, body))
+}
+
+// splicedLaw states a fact about a read or the length of a splice, of a
+// sequence or of a table's sequence. About half of the generated facts are
+// the true law and the rest read past an end of the stretch, read the
+// wrong sequence, or are off by one.
+func (g *generator) splicedLaw() *logic.Term {
+	whole, inside := g.seq(1), g.seq(1)
+	j, lo, hi := g.intTerm(0), g.intTerm(0), g.intTerm(0)
+	slack := logic.IntLit(int64(g.rng.IntN(3) / 2))
+	result := logic.Splice(whole, inside, lo, hi)
+	if g.rng.IntN(2) == 0 {
+		// The same through a table, read at its row or at another.
+		table, ref, other := g.table(1), g.intTerm(0), g.intTerm(0)
+		whole = logic.Select(table, ref)
+		spliced := logic.SpliceAt(table, ref, inside, lo, hi)
+		if g.rng.IntN(3) == 0 {
+			return logic.Implies(logic.Ne(other, ref), logic.Eq(logic.Select(logic.Select(spliced, other), j), logic.Select(logic.Select(table, other), logic.Add(j, slack))))
+		}
+		result = logic.Select(spliced, ref)
+	}
+	within := logic.And(logic.Le(lo, j), logic.Lt(j, hi))
+	read := logic.Select(result, j)
+	switch g.rng.IntN(6) {
+	case 0:
+		return logic.Implies(within, logic.Eq(read, logic.Select(inside, logic.Add(j, slack))))
+	case 1:
+		return logic.Implies(logic.Not(within), logic.Eq(read, logic.Select(whole, logic.Add(j, slack))))
+	case 2:
+		return logic.Eq(logic.Len(result), logic.Add(logic.Len([]*logic.Term{whole, inside}[g.rng.IntN(2)]), slack))
+	case 3:
+		// Reads at the ends of the stretch.
+		at := []*logic.Term{lo, hi, logic.Sub(hi, logic.IntLit(1))}[g.rng.IntN(3)]
+		half := []*logic.Term{whole, inside}[g.rng.IntN(2)]
+		return logic.Implies(logic.Lt(lo, hi), logic.Eq(logic.Select(result, at), logic.Select(half, at)))
+	case 4:
+		return logic.Eq(read, logic.Select([]*logic.Term{whole, inside}[g.rng.IntN(2)], j))
+	}
+	return logic.Implies(logic.Le(hi, lo), logic.Eq(read, logic.Select(whole, logic.Add(j, slack))))
 }
 
 // readOverWrite relates a read of an updated sequence to the written value
@@ -1009,6 +1079,32 @@ func TestRules(t *testing.T) {
 		// the value it was filled with.
 		{"an element of a filled sequence", Options{}, nil, logic.Eq(logic.Select(logic.Fill(x, y), z), y), Proved},
 		{"a filled sequence does not hold zero", Options{}, nil, logic.Eq(logic.Select(logic.Fill(x, y), z), lit(0)), Refuted},
+		// Guards against a splice reading the wrong sequence, or either
+		// end of its stretch on the wrong side, and against a spliced
+		// table reaching another row or another table.
+		{"a splice holds the inside in its stretch", Options{}, []*logic.Term{logic.Le(x, z), logic.Lt(z, y)}, logic.Eq(logic.Select(logic.Splice(seqA, seqB, x, y), z), logic.Select(seqB, z)), Proved},
+		{"a splice holds the inside at the start of its stretch", Options{}, []*logic.Term{logic.Lt(x, y)}, logic.Eq(logic.Select(logic.Splice(seqA, seqB, x, y), x), logic.Select(seqB, x)), Proved},
+		{"a splice keeps the sequence at the end of its stretch", Options{}, nil, logic.Eq(logic.Select(logic.Splice(seqA, seqB, x, y), y), logic.Select(seqA, y)), Proved},
+		{"a splice does not hold the inside at the end of its stretch", Options{}, nil, logic.Eq(logic.Select(logic.Splice(seqA, seqB, x, y), y), logic.Select(seqB, y)), Refuted},
+		{"a splice keeps the sequence before its stretch", Options{}, []*logic.Term{logic.Lt(z, x)}, logic.Eq(logic.Select(logic.Splice(seqA, seqB, x, y), z), logic.Select(seqA, z)), Proved},
+		{"a splice does not keep the sequence in its stretch", Options{}, []*logic.Term{logic.Le(x, z), logic.Lt(z, y)}, logic.Eq(logic.Select(logic.Splice(seqA, seqB, x, y), z), logic.Select(seqA, z)), Refuted},
+		{"a splice is as long as the sequence", Options{}, nil, logic.Eq(logic.Len(logic.Splice(seqA, seqB, x, y)), logic.Len(seqA)), Proved},
+		{"a splice is not as long as the inside", Options{}, nil, logic.Eq(logic.Len(logic.Splice(seqA, seqB, x, y)), logic.Len(seqB)), Refuted},
+		// The same of a splice that Z3 sees whole, as under a write, where
+		// its definition is what Z3 reads rather than the reads the
+		// encoder reduces.
+		{"a written splice holds the inside in its stretch", Options{}, []*logic.Term{logic.Le(x, z), logic.Lt(z, y), logic.Lt(z, lit(10))}, logic.Eq(logic.Select(logic.Store(logic.Splice(seqA, seqB, x, y), lit(10), lit(0)), z), logic.Select(seqB, z)), Proved},
+		{"a written splice keeps the sequence at the end of its stretch", Options{}, []*logic.Term{logic.Lt(y, lit(10))}, logic.Eq(logic.Select(logic.Store(logic.Splice(seqA, seqB, x, y), lit(10), lit(0)), y), logic.Select(seqA, y)), Proved},
+		{"a written splice keeps the sequence before its stretch", Options{}, []*logic.Term{logic.Lt(z, x), logic.Lt(z, lit(10))}, logic.Eq(logic.Select(logic.Store(logic.Splice(seqA, seqB, x, y), lit(10), lit(0)), z), logic.Select(seqA, z)), Proved},
+		{"a written splice is as long as the sequence", Options{}, nil, logic.Eq(logic.Len(logic.Store(logic.Splice(seqA, seqB, x, y), lit(10), lit(0))), logic.Len(seqA)), Proved},
+		{"a written row of a spliced table holds the inside in its stretch", Options{}, []*logic.Term{logic.Le(y, lit(0)), logic.Lt(lit(0), z)}, logic.Eq(logic.Select(logic.Store(logic.Select(logic.SpliceAt(tableM, x, seqA, y, z), x), lit(10), lit(0)), lit(0)), logic.Select(seqA, lit(0))), Proved},
+		{"a written row of a spliced table keeps its other rows", Options{}, []*logic.Term{logic.Ne(x, y)}, logic.Eq(logic.Select(logic.Store(logic.Select(logic.SpliceAt(tableM, x, seqA, lit(0), z), y), lit(10), lit(0)), lit(0)), logic.Select(logic.Select(tableM, y), lit(0))), Proved},
+		{"a written row of a spliced table keeps the row at the end of the stretch", Options{}, []*logic.Term{logic.Le(lit(0), z)}, logic.Eq(logic.Select(logic.Store(logic.Select(logic.SpliceAt(tableM, x, seqA, lit(0), z), x), lit(-1), lit(0)), z), logic.Select(logic.Select(tableM, x), z)), Proved},
+		{"a spliced table holds the inside at its row", Options{}, []*logic.Term{logic.Le(y, lit(0)), logic.Lt(lit(0), z)}, logic.Eq(logic.Select(logic.Select(logic.SpliceAt(tableM, x, seqA, y, z), x), lit(0)), logic.Select(seqA, lit(0))), Proved},
+		{"a spliced table keeps its row outside the stretch", Options{}, []*logic.Term{logic.Lt(lit(0), y)}, logic.Eq(logic.Select(logic.Select(logic.SpliceAt(tableM, x, seqA, y, z), x), lit(0)), logic.Select(logic.Select(tableM, x), lit(0))), Proved},
+		{"a spliced table keeps its other rows", Options{}, []*logic.Term{logic.Ne(x, y)}, logic.Eq(logic.Select(logic.Select(logic.SpliceAt(tableM, x, seqA, lit(0), z), y), lit(0)), logic.Select(logic.Select(tableM, y), lit(0))), Proved},
+		{"a spliced table does not keep its row in the stretch", Options{}, []*logic.Term{logic.Le(y, lit(0)), logic.Lt(lit(0), z)}, logic.Eq(logic.Select(logic.Select(logic.SpliceAt(tableM, x, seqA, y, z), x), lit(0)), logic.Select(logic.Select(tableM, x), lit(0))), Refuted},
+		{"a spliced table does not hold the inside at its other rows", Options{}, []*logic.Term{logic.Ne(x, y), logic.Lt(lit(0), z)}, logic.Eq(logic.Select(logic.Select(logic.SpliceAt(tableM, x, seqA, lit(0), z), y), lit(0)), logic.Select(seqA, lit(0))), Refuted},
 		// Guards against a predicate known to be false being unfolded as
 		// if it were true.
 		{"a false predicate denies its body", pos, []*logic.Term{logic.Not(logic.Pred("pos", x))}, atMost(x), Proved},

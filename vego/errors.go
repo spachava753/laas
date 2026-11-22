@@ -892,7 +892,7 @@ func (v *fnVerifier) contractInstance(entry *state) (pre, post, failures []*logi
 	// them; without such a clause its facts are stated in memory on entry,
 	// which is part of the input, and each is true there.
 	stated := st.mem
-	if !primedEnsures(fn) && hasFootprintTarget(v.frame) {
+	if !primedEnsures(fn) && slices.ContainsFunc(v.frame, func(t target) bool { return t.fp || t.part }) {
 		stated = memory{}
 	}
 	for _, param := range fn.params {

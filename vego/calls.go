@@ -546,19 +546,53 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	}
 	v.checkRecursion(fn, pre, st, guard, call)
 	written := v.targets(fn, args, st, before)
-	v.checkReachedApart(call, fn, args, written, passed, passedExpr, name)
-	for i, t := range written {
-		what := "what it calls " + t.text
-		if t.param != nil {
-			what = passed[t.param]
+	// What an owner owns grows only by memory the call creates: the owns
+	// section claims it of the shipped contracts, and it holds of a
+	// verified function, whose own calls are such. Nothing says it of any
+	// other function, so a call of one that may write an owner is not
+	// followed.
+	if verified := fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil; !verified && (fn.trust == nil || fn.trust.file == nil || !fn.trust.file.shipped) {
+		for _, t := range written {
+			if t.owner != nil {
+				what := t.text
+				if t.param != nil {
+					what = passed[t.param]
+				}
+				v.unsupported(call.Pos(), fmt.Sprintf("%s may modify %s, a %s, which owns memory, and only a contract that comes with vego or a verified function "+
+					"says how what such a value owns may change", name, what, types.TypeString(t.ownerType, types.RelativeTo(v.pass.Pkg))))
+			}
 		}
+	}
+	v.checkReachedApart(call, fn, args, written, passed, passedExpr, name)
+	// When the struct of an owner may not be written, what it owns is not
+	// reported again.
+	ownerRefused := map[int]bool{}
+	for _, t := range written {
+		if t.part && ownerRefused[t.mod] {
+			continue
+		}
+		reportsBefore := v.reports
+		// A target is named by the argument passed for its parameter, and
+		// a part of an owner by the owner's.
+		param := t.param
+		if t.part {
+			param = fn.paramNames[fn.modifies[t.mod].name]
+		}
+		base := "what it calls " + t.text
+		if param != nil {
+			base = passed[param]
+		}
+		if t.part {
+			base = "what " + base + " owns"
+		}
+		what := base
 		if t.row {
-			what = "the states of " + what
+			what = "the states of " + base
 		}
 		// What a method writes behind the receiver of a value it is made
 		// into is something no clause of that contract can list.
 		remedy := ""
-		if v.heldReceiver != nil && fn.paramNames[fn.modifies[i].name] == v.heldReceiver {
+		if v.heldReceiver != nil && fn.paramNames[fn.modifies[t.mod].name] == v.heldReceiver {
 			remedy = v.heldRemedy
 		}
 		unlisted := ""
@@ -566,17 +600,16 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			unlisted = v.notListable(passedExpr[t.param], call.Pos())
 		}
 		if t.fp {
-			footprintOf := what
-			if t.row {
-				footprintOf = strings.TrimPrefix(what, "the states of ")
-			}
-			v.checkFootprintWrite(st, guard, t, call.Pos(), fmt.Sprintf("%s may modify the footprint of %s", name, footprintOf), remedy, unlisted)
+			v.checkFootprintWrite(st, guard, t, call.Pos(), fmt.Sprintf("%s may modify the footprint of %s", name, base), remedy, unlisted)
 			v.checkFootprintRanged(st, guard, t, call.Pos(), name)
 			if !t.row {
 				continue
 			}
 		}
 		v.checkWriteOr(st, guard, t.reach(), call.Pos(), fmt.Sprintf("%s may modify %s", name, what), remedy, unlisted)
+		if t.owner != nil && v.reports > reportsBefore {
+			ownerRefused[t.mod] = true
+		}
 	}
 	v.checkRangedCall(st, guard, written, call.Pos(), name)
 	// What a call that runs what it is handed is like at its start, before
@@ -587,6 +620,12 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	}
 	for _, t := range written {
 		v.havoc(st, t, guard)
+	}
+	// What an owner owns grows only by memory the call creates.
+	for _, t := range written {
+		if t.owner != nil {
+			st.assume(logic.Implies(logic.And(guard...), v.ownerGrowth(st, before, st.mem, t.owner, t.ownerType, existed)))
+		}
 	}
 	var applied map[*types.Var]*logic.Term
 	if fn.calls.len() > 0 {
@@ -638,17 +677,28 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	// What the types guarantee of everything the call took and produced.
 	// The state only holds such facts for the elements that were actually
 	// read, and both the check of a trusted promise below and the proof
-	// that this call succeeds may need the rest.
-	involved := slices.Clip(guard)
+	// that this call succeeds may need the rest. The proof and the search
+	// for the outcomes of the call take what the types say of the
+	// arguments in memory before the call and of the results, and not
+	// what they say of the arguments in the memory the call wrote: the
+	// questions of a search that must find a model are where Z3 gives up
+	// on quantified facts over written memory, and leaving facts out only
+	// makes a path likelier to be reached and a call likelier to be a
+	// source of failure, which is the side the always-fails check errs on.
+	// The check of the promise, which must find every contradiction,
+	// takes them all.
+	given := slices.Clip(guard)
 	for i, result := range results {
 		if result != nil {
-			involved = append(involved, v.deepFacts(st.mem, result, sig.Results().At(i).Type(), st.brk))
+			given = append(given, v.deepFacts(st.mem, result, sig.Results().At(i).Type(), st.brk))
 		}
 	}
+	involved := slices.Clip(given)
 	for _, param := range fn.params {
 		if args[param] != nil {
-			involved = append(involved, v.deepFacts(before, args[param], param.Type(), st.brk),
-				v.deepFacts(st.mem, args[param], param.Type(), st.brk))
+			typedBefore := v.deepFacts(before, args[param], param.Type(), st.brk)
+			given = append(given, typedBefore)
+			involved = append(involved, typedBefore, v.deepFacts(st.mem, args[param], param.Type(), st.brk))
 		}
 	}
 	// Nobody has proved what a trusted contract promises. If the promise
@@ -702,7 +752,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		handed.given = append(handed.given, args[param]...)
 	}
 	v.forwards = append(v.forwards, handed)
-	v.noteFailureSource(fn, results, st, involved, handed)
+	v.noteFailureSource(fn, results, st, given, handed)
 	return results
 }
 
@@ -835,6 +885,14 @@ func (v *fnVerifier) contentFacts(mem memory, val value, t types.Type, brk *logi
 	case *types.Struct:
 		var facts []*logic.Term
 		for i := range u.NumFields() {
+			// What an unexported field of a type of another package holds
+			// no formula of this package names: what its types guarantee
+			// is left unsaid, which loses nothing a proof here can use,
+			// and keeps quantified facts about a buffer that a Scanner or
+			// a Writer owns out of every question after a call of it.
+			if f := u.Field(i); !f.Exported() && f.Pkg() != v.pass.Pkg {
+				continue
+			}
 			if lo, hi, ok := fieldLeaves(t, i); ok {
 				facts = append(facts, v.contentFacts(mem, val[lo:hi], u.Field(i).Type(), brk, follow))
 			}

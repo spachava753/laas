@@ -1074,7 +1074,7 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		// Inside a body, what the path leads to now was allocated since the
 		// function was entered: the bound the check of every write uses
 		// for memory the function may write without a Modifies entry.
-		return freshSince(e.v.entryBrk, found[0]), nil
+		return logic.And(freshSince(e.v.entryBrk, found[0]), e.v.ownedFresh(e.sink, e.now, found[0].val, found[0].typ, e.v.entryBrk)), nil
 	case e.before == nil || e.post == nil:
 		return nil, fmt.Errorf("fresh says what was allocated since a call began, and nothing has been allocated where this annotation is read; fresh %s", where)
 	case found[0].hops == 0 && !found[0].isResult:
@@ -1085,7 +1085,7 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 	if err != nil {
 		return nil, err
 	}
-	return freshSince(e.before, after), nil
+	return logic.And(freshSince(e.before, after), e.v.ownedFresh(e.sink, e.post, after.val, after.typ, e.before)), nil
 }
 
 // freshSince states that what a value refers to was allocated at or past a
@@ -1306,6 +1306,10 @@ type shape struct {
 	row   bool
 	fp    bool
 	cells []cell
+	// owner is set for a pointer to a struct that owns some of its fields,
+	// and typ is the type the path ends in.
+	owner bool
+	typ   types.Type
 	// elem is set for the elements of a slice and mapType for a map; else
 	// the entry is a struct or a part of one.
 	elem    types.Type
@@ -1455,7 +1459,12 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 		form.cells, form.direct, form.hi = v.cellsOf(object), len(hops) == 0, v.pass.TypesSizes.Sizeof(object)
 		if !symbolic {
 			t.ref, t.lo, t.hi = cur.val[0], cur.val[1], logic.Add(cur.val[1], logic.IntLit(form.hi))
+			t.owned = v.ownedParts(sink, mem, cur.val, final, map[types.Type]bool{})
+			if len(t.owned) > 0 {
+				t.owner, t.ownerType = cur.val, final
+			}
 		}
+		form.owner, form.typ = len(v.ownedFields(object)) > 0, final
 		t.single = true
 	case isSlice(final):
 		form.cells, form.elem, form.direct = v.cellsOf(elemType(final)), elemType(final), len(hops) == 0
@@ -1539,12 +1548,17 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 // arguments, reading memory as it is when the function is entered.
 func (v *fnVerifier) targets(fn *funcInfo, args map[*types.Var]value, sink *state, mem memory) []target {
 	var list []target
-	for _, m := range fn.modifies {
+	for i, m := range fn.modifies {
 		_, t, err := v.locateTarget(fn, m, args, sink, mem)
 		if err != nil {
 			v.misread(m.clause, err)
 		}
+		t.mod = i
 		list = append(list, t)
+		for _, part := range t.owned {
+			part.mod, part.text, part.clause, part.part = i, t.text, t.clause, true
+			list = append(list, part)
+		}
 	}
 	return list
 }

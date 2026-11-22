@@ -1,5 +1,11 @@
 version: 1
 
+owns:
+  strings.Builder:
+    fields: [buf]
+    reason: >-
+      The methods of a Builder write the struct (copyCheck sets addr) and the array its buf field holds, and grow it only into new memory, by append and Grow. String hands out a string that shares the array, which the Builder never changes once written.
+
 trusted:
   strings.Contains:
     reason: >-

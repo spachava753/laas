@@ -170,6 +170,19 @@ type target struct {
 	fp      bool
 	rows    *logic.Term
 	skipped *logic.Term
+	// owned holds, for a struct that owns some of its fields, a target for
+	// what each owned field refers to; targets spreads them into the list.
+	// owner and ownerType are the pointer to that struct and its type.
+	owned     []target
+	owner     value
+	ownerType types.Type
+	// part is set for a target that an owner's clause gives for what one
+	// of its owned fields refers to.
+	part bool
+	// mod is the index of the Modifies clause the target comes from: a
+	// clause that names an owner gives a target for the struct and one
+	// for what each owned field refers to.
+	mod int
 }
 
 // regions calls visit for every region the target reaches into, with the
@@ -221,6 +234,13 @@ func (v *fnVerifier) bound(base string) *logic.Term {
 // reads memory, which Z3 decides less often and slows Z3 down, while facts
 // about the references read keep such problems free of quantifiers.
 func (v *fnVerifier) table(sink *state, mem memory, key string, sort logic.Sort, ref *logic.Term) *logic.Term {
+	return v.tableAt(sink, mem, key, sort, ref, nil)
+}
+
+// tableAt is table for a read of one position of the row at ref, when
+// position is not nil: what a layer keeps is then stated of that cell
+// alone, with no quantifier.
+func (v *fnVerifier) tableAt(sink *state, mem memory, key string, sort logic.Sort, ref, position *logic.Term) *logic.Term {
 	// While an evaluation unit is open, every read of memory must be a
 	// recorded read or a quiet one, whether or not it tells a state what
 	// it learns; a read made any other way is one whose order has not been
@@ -247,7 +267,7 @@ func (v *fnVerifier) table(sink *state, mem memory, key string, sort logic.Sort,
 	for pending := []*logic.Term{current}; len(pending) > 0; {
 		at := pending[len(pending)-1]
 		pending = pending[:len(pending)-1]
-		for at.Op == logic.OpStore || at.Op == logic.OpWrite {
+		for at.Op == logic.OpStore || at.Op == logic.OpWrite || at.Op == logic.OpSpliceAt {
 			at = at.Args[0]
 		}
 		if seen[at.Name] {
@@ -257,9 +277,15 @@ func (v *fnVerifier) table(sink *state, mem memory, key string, sort logic.Sort,
 		v.materialize(at.Name, at.Sort)
 		note := at.Name + "|" + ref.String()
 		if known := v.layers[at.Name]; known != nil {
-			if !sink.noted[note] {
-				sink.noted[note] = true
-				sink.assume(v.unchanged(sink, at, known, ref))
+			cellNote := note
+			if position != nil && !known.flat && !hasBound(position) {
+				cellNote = note + "@" + position.String()
+			} else {
+				position = nil
+			}
+			if !sink.noted[note] && !sink.noted[cellNote] {
+				sink.noted[cellNote] = true
+				sink.assume(v.unchanged(sink, at, known, ref, position))
 			}
 			pending = append(pending, known.prev)
 		}
@@ -277,7 +303,7 @@ func (v *fnVerifier) table(sink *state, mem memory, key string, sort logic.Sort,
 }
 
 // unchanged states what a layer preserves at one reference.
-func (v *fnVerifier) unchanged(sink *state, now *logic.Term, known *layer, ref *logic.Term) *logic.Term {
+func (v *fnVerifier) unchanged(sink *state, now *logic.Term, known *layer, ref, position *logic.Term) *logic.Term {
 	if known.growth {
 		panic("vego: internal error: the footprint region is read through table")
 	}
@@ -300,7 +326,10 @@ func (v *fnVerifier) unchanged(sink *state, now *logic.Term, known *layer, ref *
 		}
 		return fact
 	}
-	index := v.bound("k")
+	index := position
+	if index == nil {
+		index = v.bound("k")
+	}
 	var untouched []*logic.Term
 	for _, t := range known.targets {
 		switch {
@@ -340,6 +369,9 @@ func (v *fnVerifier) unchanged(sink *state, now *logic.Term, known *layer, ref *
 		// of every cell, so it stands beside the implication.
 		body = logic.And(logic.And(instances...), v.reachApart(ref, position), body)
 	}
+	if index == position {
+		return logic.Implies(existed, body)
+	}
 	return logic.Implies(existed, logic.Forall(index, body))
 }
 
@@ -358,7 +390,8 @@ func (v *fnVerifier) row(sink *state, mem memory, key string, sort logic.Sort, r
 func (v *fnVerifier) fetch(sink *state, mem memory, cells []cell, ref, at *logic.Term) value {
 	val := make(value, len(cells))
 	for i, c := range cells {
-		val[i] = logic.Select(v.row(sink, mem, c.key, c.sort, ref), logic.Add(at, logic.IntLit(c.off)))
+		position := logic.Add(at, logic.IntLit(c.off))
+		val[i] = logic.Select(logic.Select(v.tableAt(sink, mem, c.key, logic.SeqOf(logic.SeqOf(c.sort)), ref, position), ref), position)
 	}
 	return val
 }
@@ -1102,6 +1135,26 @@ func (v *fnVerifier) havoc(st *state, t target, guard []*logic.Term) {
 		t.regions(func(key string, sort logic.Sort) {
 			before := logic.Select(st.mem.region(key, logic.SeqOf(logic.SeqOf(sort))), t.ref)
 			unknown := v.fresh("written", logic.SeqOf(sort))
+			if t.part && !sort.IsSeq() {
+				// What an owner owns is written as a row that holds unknown
+				// values in the stretch and what it held everywhere else: a
+				// term, where the fact below is a quantifier, of which Z3
+				// cannot build a model in the questions of the always-fails
+				// check after a call. The row is a definition that Z3
+				// expands, so a quantified fact whose pattern reads it loses
+				// its pattern; a part is memory nothing in the caller names,
+				// so few facts read it, while a slice of the caller has
+				// facts over its elements that would.
+				hi := t.hi
+				if len(guard) > 0 {
+					hi = logic.Ite(skipped, t.lo, t.hi)
+				}
+				table := logic.SeqOf(logic.SeqOf(sort))
+				ref, lo := v.apart(st, t.ref, table), v.apart(st, t.lo, table)
+				hi = v.apart(st, hi, table)
+				st.mem[key] = logic.SpliceAt(st.mem.region(key, table), ref, unknown, lo, hi)
+				return
+			}
 			index := v.bound("k")
 			outside := logic.Or(skipped, logic.Lt(index, t.lo), logic.Le(t.hi, index))
 			st.assume(logic.Forall(index, logic.Implies(outside, v.same(logic.Select(unknown, index), logic.Select(before, index)))))

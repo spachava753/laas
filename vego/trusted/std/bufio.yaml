@@ -1,5 +1,28 @@
 version: 1
 
+owns:
+  bufio.Writer:
+    fields: [buf, wr]
+    reason: >-
+      The methods of a Writer write the struct, the array its buf field
+      holds, and through Write of the writer its wr field holds what that
+      writer owns; NewWriter and NewWriterSize make the array new. Reset,
+      which sets wr to what it is given, is not shipped.
+  bufio.Reader:
+    fields: [buf, rd]
+    reason: >-
+      The methods of a Reader write the struct, the array its buf field
+      holds, and through Read of the reader its rd field holds what that
+      reader owns; NewReader and NewReaderSize make the array new. Reset is
+      not shipped.
+  bufio.Scanner:
+    fields: [r, buf]
+    reason: >-
+      The methods of a Scanner write the struct, the array its buf field
+      holds, which Scan grows only into new memory, and through Read of the
+      reader its r field holds what that reader owns. Buffer, which hands
+      it an array of the caller's, is not shipped.
+
 state:
   bufio.Scanner:
     ready:

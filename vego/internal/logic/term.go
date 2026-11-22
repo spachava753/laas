@@ -103,6 +103,16 @@ const (
 	// table once, so that a chain of writes to one table is no larger as a
 	// tree than it is in memory.
 	OpWrite
+	// Splice(seq, inside, lo, hi): a sequence as long as seq, which holds
+	// what inside holds at the indices from lo up to, not including, hi,
+	// and what seq holds everywhere else, also outside the length of seq.
+	OpSplice
+	// SpliceAt(table, ref, inside, lo, hi): a sequence of sequences whose
+	// sequence at ref is Splice(Select(table, ref), inside, lo, hi), and
+	// which is table everywhere else, written with table once, as Write
+	// is. It is how a write of a stretch of unknown values is stated
+	// without a quantifier.
+	OpSpliceAt
 )
 
 // Term is a node of a logical term or formula. Formulas are terms of sort
@@ -236,10 +246,24 @@ func Write(table, ref, at, value *Term) *Term {
 	return node(OpWrite, table.Sort, table, ref, at, value)
 }
 
-// Expand returns what a Write equals in terms of Store and Select.
+// Expand returns what a Write or a SpliceAt equals in terms of Store,
+// Splice, and Select.
 func Expand(write *Term) *Term {
-	table, ref, at, value := write.Args[0], write.Args[1], write.Args[2], write.Args[3]
+	table, ref := write.Args[0], write.Args[1]
+	if write.Op == OpSpliceAt {
+		return Store(table, ref, Splice(Select(table, ref), write.Args[2], write.Args[3], write.Args[4]))
+	}
+	at, value := write.Args[2], write.Args[3]
 	return Store(table, ref, Store(Select(table, ref), at, value))
+}
+
+// Splice returns seq with the indices from lo up to, not including, hi
+// holding what inside holds there; see OpSplice.
+func Splice(seq, inside, lo, hi *Term) *Term { return node(OpSplice, seq.Sort, seq, inside, lo, hi) }
+
+// SpliceAt returns table with its sequence at ref spliced; see OpSpliceAt.
+func SpliceAt(table, ref, inside, lo, hi *Term) *Term {
+	return node(OpSpliceAt, table.Sort, table, ref, inside, lo, hi)
 }
 
 // Fill returns a sequence of the given length whose elements all equal value.
@@ -552,6 +576,13 @@ func (t *Term) write(b *strings.Builder) {
 		list("concat(", t.Args, ", ", ")")
 	case OpSub:
 		list("sub(", t.Args, ", ", ")")
+	case OpSplice:
+		list("splice(", t.Args, ", ", ")")
+	case OpSpliceAt:
+		t.Args[0].write(b)
+		list("[", t.Args[1:2], "", "]")
+		list("[", t.Args[3:], ":", "]")
+		list(" := ", t.Args[2:3], "", "")
 	case OpIsNil:
 		list("(", t.Args, "", " = nil)")
 	case OpIs:

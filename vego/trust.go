@@ -112,6 +112,9 @@ type trustFile struct {
 	// struct type; a project file may declare those of an interface of
 	// another module.
 	states map[string][]stateDecl
+	// owns holds, by type, the fields whose memory a value of the type
+	// owns; only the shipped files declare any. See footprint.go.
+	owns map[string]ownsDecl
 	// problems are the defects of the file itself, by line.
 	problems []trustProblem
 }
@@ -129,7 +132,7 @@ func (f *trustFile) problem(line int, format string, args ...any) {
 // understand is recorded as a problem rather than skipped, so that a
 // misspelt field cannot silently drop part of a contract.
 func parseTrustFile(path string, content []byte, shipped bool) *trustFile {
-	file := &trustFile{path: path, content: content, shipped: shipped, entries: map[string]*trustEntry{}, states: map[string][]stateDecl{}}
+	file := &trustFile{path: path, content: content, shipped: shipped, entries: map[string]*trustEntry{}, states: map[string][]stateDecl{}, owns: map[string]ownsDecl{}}
 	var document, second yaml.Node
 	decoder := yaml.NewDecoder(bytes.NewReader(content))
 	if err := decoder.Decode(&document); err != nil && !errors.Is(err, io.EOF) {
@@ -169,8 +172,15 @@ func parseTrustFile(path string, content []byte, shipped bool) *trustFile {
 			}
 		case "state":
 			file.addStates(value)
+		case "owns":
+			file.addOwns(value)
 		default:
-			file.problem(key.Line, "unknown key %q; expected version, trusted, or state", key.Value)
+			// A project file cannot declare owns, so it is not offered one.
+			expected := "version, trusted, or state"
+			if file.shipped {
+				expected = "version, trusted, state, or owns"
+			}
+			file.problem(key.Line, "unknown key %q; expected %s", key.Value, expected)
 		}
 	}
 	if !sawVersion {

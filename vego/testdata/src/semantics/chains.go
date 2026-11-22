@@ -1,5 +1,7 @@
 package semantics
 
+import "bufio"
+
 // Each function below repeats one operation 30 times. If the rule for the
 // operation put its operand into the result more than once, what the
 // verifier builds would double at each step, and the bound on the size of
@@ -987,3 +989,46 @@ func WriteChain(s Writer, q *Pair) {
 
 // Pair is two numbers.
 type Pair struct{ A, B int }
+
+// SpliceChain writes thirty bytes to a Writer it is handed, each a call
+// that writes the array the Writer owns as a splice of the row before it,
+// and reads a byte of its own after the last, through the thirty splices.
+//
+// @Requires bw != nil And ready(bw)
+// @Modifies bw
+// @Ensures r = 7
+func SpliceChain(bw *bufio.Writer) (r byte) {
+	p := make([]byte, 1)
+	p[0] = 7
+	_ = bw.WriteByte(0)
+	_ = bw.WriteByte(1)
+	_ = bw.WriteByte(2)
+	_ = bw.WriteByte(3)
+	_ = bw.WriteByte(4)
+	_ = bw.WriteByte(5)
+	_ = bw.WriteByte(6)
+	_ = bw.WriteByte(7)
+	_ = bw.WriteByte(8)
+	_ = bw.WriteByte(9)
+	_ = bw.WriteByte(10)
+	_ = bw.WriteByte(11)
+	_ = bw.WriteByte(12)
+	_ = bw.WriteByte(13)
+	_ = bw.WriteByte(14)
+	_ = bw.WriteByte(15)
+	_ = bw.WriteByte(16)
+	_ = bw.WriteByte(17)
+	_ = bw.WriteByte(18)
+	_ = bw.WriteByte(19)
+	_ = bw.WriteByte(20)
+	_ = bw.WriteByte(21)
+	_ = bw.WriteByte(22)
+	_ = bw.WriteByte(23)
+	_ = bw.WriteByte(24)
+	_ = bw.WriteByte(25)
+	_ = bw.WriteByte(26)
+	_ = bw.WriteByte(27)
+	_ = bw.WriteByte(28)
+	_ = bw.WriteByte(29)
+	return p[0]
+}

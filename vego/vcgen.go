@@ -562,10 +562,17 @@ func (v *fnVerifier) verify() {
 	} else {
 		v.tieFailures()
 	}
+	needed := map[int]bool{}
 	for i, t := range v.frame {
+		needed[t.mod] = needed[t.mod] || v.used[i]
+	}
+	reported := map[int]bool{}
+	for _, t := range v.frame {
 		// After a failure the state may hold a false assumption, under
-		// which nothing is needed.
-		if !v.used[i] && !fn.failed {
+		// which nothing is needed. A clause that names an owner gives
+		// several targets, and is needed when one of them is.
+		if !needed[t.mod] && !fn.failed && !reported[t.mod] {
+			reported[t.mod] = true
 			v.report(t.clause.pos, "Modifies lists %s, but %s never needs to modify it; "+
 				"a Modifies clause must list exactly what the function may write", t.text, fn.obj.Name())
 		}
