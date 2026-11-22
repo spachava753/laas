@@ -1,5 +1,7 @@
 package footprints
 
+import "sort"
+
 // Touch writes through s and is handed q beside it.
 //
 // @Requires s != nil
@@ -89,7 +91,7 @@ func StoresSink(s Sink, b *Box) {
 // @Modifies s
 // @Ensures True
 func FromPeek(s Sink, g Peeker) {
-	Touch(s, g.Peek()) // want `the footprint of what is passed to Touch as s may hold memory that what is passed as g.Peek\(\) reaches, and Touch relies on it not doing so: it comes from the call of g.Peek at origins.go:\d+:\d+, which is handed g, which is or holds an interface value or a function value, through which it may get memory of any origin`
+	Touch(s, g.Peek()) // want `the footprint of what is passed to Touch as s may hold memory that what is passed as g.Peek\(\) reaches, and Touch relies on it not doing so: it comes from the call of g.Peek at origins.go:\d+:\d+, whose contract does not say that it is new or lies within an argument`
 }
 
 // firstOf returns its first element.
@@ -107,7 +109,7 @@ func firstOf(ps []*Pair) (p *Pair) {
 // @Ensures True
 func ByTypes(s Sink, g Peeker) {
 	ps := []*Pair{g.Peek()}
-	Touch(s, firstOf(ps)) // want `Touch relies on it not doing so: it comes from the call of firstOf at origins.go:\d+:\d+, which is handed ps, and it comes from the call of g.Peek`
+	Touch(s, firstOf(ps)) // want `Touch relies on it not doing so: it comes from the call of firstOf at origins.go:\d+:\d+, whose contract does not say that it is new or lies within an argument`
 }
 
 // StoredNew stores an unknown pair into memory it made, which pollutes it.
@@ -118,7 +120,7 @@ func ByTypes(s Sink, g Peeker) {
 func StoredNew(s Sink, g Peeker, q *Pair) {
 	b := &Box{}
 	b.P = g.Peek()
-	Touch(s, q) // want `Touch relies on it not doing so: at origins.go:\d+:\d+ a value was stored into memory, and it comes from the call of g.Peek at origins.go:\d+:\d+, which is handed g, which is or holds an interface value or a function value, through which it may get memory of any origin`
+	Touch(s, q) // want `Touch relies on it not doing so: at origins.go:\d+:\d+ a value was stored into memory, and it comes from the call of g.Peek at origins.go:\d+:\d+, whose contract does not say that it is new or lies within an argument`
 }
 
 // InLiteral stores an unknown pair inside a literal called in place.
@@ -188,7 +190,7 @@ func Put(b *Box, p *Pair) {
 // @Ensures True
 func HelperStores(s Sink, g Peeker, b *Box, q *Pair) {
 	Put(b, g.Peek())
-	Touch(s, q) // want `Touch relies on it not doing so: the call of Put at origins.go:\d+:\d+ may store a reference into memory it may modify`
+	Touch(s, q) // want `Touch relies on it not doing so: the call of Put at origins.go:\d+:\d+ may store into memory it may modify a reference to memory of any origin`
 }
 
 // Appends appends an unknown pair to a slice of a parameter.
@@ -268,4 +270,174 @@ func AppendsInPlace(s Sink, g Peeker, b *Box, q *Pair) (n int) {
 	local = append(local, g.Peek())
 	Touch(s, q) // want `Touch relies on it not doing so: at origins.go:\d+:\d+ a value was appended to a slice`
 	return len(local)
+}
+
+// current returns a pair the package holds, and is trusted.
+func current() (p *Pair) { return shared }
+
+var shared = &Pair{}
+
+// FromGlobal passes what a trusted function returned, which may be memory
+// the package holds and s writes.
+//
+// @Requires s != nil
+// @Modifies s
+// @Ensures True
+func FromGlobal(s Sink) {
+	Touch(s, current()) // want `Touch relies on it not doing so: it comes from the call of current at origins.go:\d+:\d+, whose contract does not say that it is new or lies within an argument`
+}
+
+// get returns what current returned.
+//
+// @Ensures p != nil
+func get() (p *Pair) {
+	return current()
+}
+
+// FromVerified passes what a verified function returned.
+//
+// @Requires s != nil
+// @Modifies s
+// @Ensures True
+func FromVerified(s Sink) {
+	Touch(s, get()) // want `Touch relies on it not doing so: it comes from the call of get at origins.go:\d+:\d+, whose contract does not say that it is new or lies within an argument`
+}
+
+// fill points b.P at what current returned.
+//
+// @Requires b != nil
+// @Modifies b
+// @Ensures True
+func fill(b *Box) {
+	b.P = current()
+}
+
+// FilledThenKept passes b after a call that may have stored into it memory
+// of any origin.
+//
+// @Requires s != nil And b != nil
+// @Modifies s, b
+// @Ensures True
+func FilledThenKept(s Sink, b *Box) {
+	fill(b)
+	Touch(s, b.P) // want `Touch relies on it not doing so: the call of fill at origins.go:\d+:\d+ may store into memory it may modify a reference to memory of any origin`
+}
+
+// first returns the first element of a slice it is given.
+//
+// @Requires |ps| > 0
+// @Ensures within(p, ps)
+func first(ps []Pair) (p *Pair) {
+	return &ps[0]
+}
+
+// WithinArg passes what a call returned within an argument it was given.
+//
+// @Requires s != nil And |ps| > 0
+// @Modifies s
+// @Ensures True
+func WithinArg(s Sink, ps []Pair) {
+	Touch(s, first(ps))
+}
+
+// LitAssigns lets a literal called in place assign the pair it passes.
+//
+// @Requires s != nil And g != nil And q != nil
+// @Modifies s
+// @Ensures True
+func LitAssigns(s Sink, g Peeker, q *Pair) {
+	x := q
+	func() {
+		x = g.Peek()
+	}()
+	Touch(s, x) // want `Touch relies on it not doing so: it comes from the call of g.Peek`
+}
+
+// HandedAssigns lets a literal handed to sort.Search assign the pair.
+//
+// @Requires s != nil And g != nil And q != nil
+// @Modifies s
+// @Ensures True
+func HandedAssigns(s Sink, g Peeker, q *Pair) {
+	x := q
+	_ = sort.Search(1, func(i int) bool {
+		x = g.Peek()
+		return true
+	})
+	Touch(s, x) // want `Touch relies on it not doing so: it comes from the call of g.Peek`
+}
+
+// ViaSearch stores an unknown pair inside a literal handed to sort.Search.
+//
+// @Requires s != nil And g != nil And b != nil And q != nil
+// @Modifies s, b
+// @Ensures True
+func ViaSearch(s Sink, g Peeker, b *Box, q *Pair) {
+	_ = sort.Search(1, func(i int) bool {
+		b.P = g.Peek()
+		return true
+	})
+	Touch(s, q) // want `Touch relies on it not doing so: at origins.go:\d+:\d+ a value was stored into memory`
+}
+
+// ViaCopy stores an unknown pair into a copy of a struct and writes the
+// copy back.
+//
+// @Requires s != nil And g != nil And b != nil And q != nil
+// @Modifies s, b
+// @Ensures True
+func ViaCopy(s Sink, g Peeker, b *Box, q *Pair) {
+	t := *b
+	t.P = g.Peek()
+	*b = t
+	Touch(s, q) // want `Touch relies on it not doing so: at origins.go:\d+:\d+ a value was stored into memory`
+}
+
+// keepAll stores the pairs it is given.
+//
+// @Requires b != nil And |ps| > 0
+// @Modifies b
+// @Ensures True
+func keepAll(b *Box, ps ...*Pair) {
+	b.P = ps[0]
+}
+
+// Spreads hands a helper with targets an unknown slice with ....
+//
+// @Requires s != nil And h != nil And b != nil And q != nil
+// @Modifies s, b
+// @Ensures True
+func Spreads(s Sink, h Shelves, b *Box, q *Pair) {
+	ps := h.All()
+	if len(ps) > 0 {
+		keepAll(b, ps...)
+	}
+	Touch(s, q) // want `Touch relies on it not doing so: the call of keepAll at origins.go:\d+:\d+ may store`
+}
+
+// Packs hands a helper with targets an unknown pair in a pack.
+//
+// @Requires s != nil And g != nil And b != nil And q != nil
+// @Modifies s, b
+// @Ensures True
+func Packs(s Sink, g Peeker, b *Box, q *Pair) {
+	keepAll(b, g.Peek())
+	Touch(s, q) // want `Touch relies on it not doing so: the call of keepAll at origins.go:\d+:\d+ may store`
+}
+
+// pairsOf hands out a slice of pairs.
+type pairsOf interface {
+	// @Ensures |ps| > 0
+	Pairs() (ps []Pair)
+}
+
+// WithinUnknown passes what a call returned within an argument of unknown
+// origin.
+//
+// @Requires s != nil And g != nil
+// @Modifies s
+// @Ensures True
+func WithinUnknown(s Sink, g pairsOf) {
+	ps := g.Pairs()
+	Touch(s, first(ps)) // want `Touch relies on it not doing so: it comes from the call of first at origins.go:\d+:\d+, whose contract places it within ps, and it comes from the call of g.Pairs`
 }

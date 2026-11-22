@@ -313,6 +313,12 @@ trusted:
       - "(Forall k in [0, |a|) : Forall j in [0, |a[k].S|) : a[k].S[j] >= 0) -> result = nil"
     modifies: []
 
+  footprints.current:
+    reason: Test helper standing for a trusted function that returns memory its package holds.
+    ensures:
+      - "p != nil"
+    modifies: []
+
   memory.readyRows:
     reason: Test helper that succeeds when the slices in its slice have lengths that are not negative, which is always.
     requires:

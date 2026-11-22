@@ -56,7 +56,7 @@ type LineCounts interface {
 // @Modifies r
 // @Ensures True
 func NoteFrom(r Recorder, s LineCounts) {
-	Note(r, s.Current()) // want `the footprint of what is passed to Note as r may hold memory that what is passed as s.Current\(\) reaches, and Note relies on it not doing so: it comes from the call of s.Current at footprints.go:\d+:\d+, which is handed s, which is or holds an interface value or a function value, through which it may get memory of any origin`
+	Note(r, s.Current()) // want `the footprint of what is passed to Note as r may hold memory that what is passed as s.Current\(\) reaches, and Note relies on it not doing so: it comes from the call of s.Current at footprints.go:\d+:\d+, whose contract does not say that it is new or lies within an argument`
 }
 
 // @Requires r != nil And c != nil And ~closed(c)

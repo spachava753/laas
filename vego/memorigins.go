@@ -31,14 +31,15 @@ import (
 // A parameter that is not an interface value is outside on entry, by the
 // function's own assumption, and so is memory the function creates. A
 // value read through an outside value is outside while the function is
-// clean. A call returns outside values only when it is handed nothing that
-// could give it an unknown reference: every argument outside and none an
-// interface value, a function value, or a value whose type reaches one; or
-// when its contract says the result is new and it writes no footprint.
-// Everything else is unknown. A store of an unknown reference into memory,
-// or a call that may make one (it has targets that can hold references and
-// is handed an unknown value, an interface value, a function value, or a
-// value whose type reaches one), pollutes the function. Rows grow only by
+// clean. A callee may return or store memory it got other than
+// through its arguments, from its package or from a call it made (F28 of
+// the review of step 2), so the result of a call is outside only when it
+// holds no memory, when the contract says it is new and the call writes no
+// footprint, or when the contract places it within an argument that is
+// outside. Everything else is unknown. A store of an unknown reference into
+// memory, or a call whose targets can hold a reference, whatever it is
+// handed, pollutes the function. A variable that a function literal
+// assigns is judged by what holds anywhere (F29). Rows grow only by
 // memory created at calls through their value, which no outside value
 // reaches, so outside stays outside along the path.
 //
@@ -80,6 +81,9 @@ func (f *memFact) join(g memFact) bool {
 type memFlow struct {
 	at    map[*ast.CallExpr]memFact
 	loose memFact
+	// litAssigned holds the variables declared outside a function literal
+	// that the literal assigns.
+	litAssigned map[*types.Var]bool
 }
 
 // memOrigins returns the analysis of the declared function being verified.
@@ -87,12 +91,38 @@ func (v *fnVerifier) memOrigins() *memFlow {
 	if v.memFlowDone != nil {
 		return v.memFlowDone
 	}
-	flow := &memFlow{at: map[*ast.CallExpr]memFact{}, loose: memFact{unknown: map[*types.Var]string{}}}
+	flow := &memFlow{at: map[*ast.CallExpr]memFact{}, loose: memFact{unknown: map[*types.Var]string{}}, litAssigned: map[*types.Var]bool{}}
 	v.memFlowDone = flow
 	body := v.bodyOrigin()
 	if body == nil {
 		return flow
 	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		lit, ok := n.(*ast.FuncLit)
+		if !ok {
+			return true
+		}
+		ast.Inspect(lit.Body, func(m ast.Node) bool {
+			var targets []ast.Expr
+			switch m := m.(type) {
+			case *ast.AssignStmt:
+				targets = m.Lhs
+			case *ast.IncDecStmt:
+				targets = []ast.Expr{m.X}
+			case *ast.RangeStmt:
+				targets = []ast.Expr{m.Key, m.Value}
+			}
+			for _, target := range targets {
+				if id, ok := ast.Unparen(target).(*ast.Ident); ok && target != nil {
+					if variable, isVar := v.info.ObjectOf(id).(*types.Var); isVar && (variable.Pos() < lit.Pos() || variable.Pos() >= lit.End()) {
+						flow.litAssigned[variable] = true
+					}
+				}
+			}
+			return true
+		})
+		return true
+	})
 	// What holds anywhere: the least fixed point over every node of the
 	// body and of its literals.
 	for changed := true; changed; {
@@ -322,6 +352,12 @@ func (v *fnVerifier) memOrigin(e ast.Expr, fact memFact) string {
 		if !isVar {
 			return ""
 		}
+		// A literal may assign the variable at any call that runs it, in
+		// place or handed over, which the path does not see (F29 of the
+		// review of step 2).
+		if flow := v.memOrigins(); flow.litAssigned[variable] {
+			return firstReason(fact.unknown[variable], flow.loose.unknown[variable])
+		}
 		return fact.unknown[variable]
 	case *ast.SelectorExpr:
 		if selection := v.info.Selections[x]; selection != nil && selection.Kind() != types.FieldVal {
@@ -390,14 +426,107 @@ func (v *fnVerifier) memResult(e ast.Expr, index int, fact memFact) string {
 		}
 	}
 	name := types.ExprString(call.Fun)
-	fn := v.memCallee(call)
-	if fn != nil && promisesFresh(fn, index) && !writesFootprint(v, fn) {
+	if t := v.resultType(call, index); t != nil && !holdsMemory(t) {
 		return ""
 	}
-	if why := v.handsUnknown(call, fact); why != "" || fn == nil {
-		return fmt.Sprintf("it comes from the call of %s at %s, which %s", name, v.placeOf(call.Pos()), firstReason(why, "has no contract"))
+	fn := v.memCallee(call)
+	if fn == nil {
+		return fmt.Sprintf("it comes from the call of %s at %s, which has no contract", name, v.placeOf(call.Pos()))
 	}
-	return ""
+	// A callee may return memory it got other than through its arguments,
+	// from its package or from a call it made (F28 of the review of step
+	// 2), so only a contract can place what it returns: new, or within an
+	// argument that is outside.
+	if promisesFresh(fn, index) && !writesFootprint(v, fn) {
+		return ""
+	}
+	if arg := v.withinArg(call, fn, index); arg != nil {
+		if why := v.memOrigin(arg, fact); why != "" {
+			return fmt.Sprintf("it comes from the call of %s at %s, whose contract places it within %s, and %s", name, v.placeOf(call.Pos()), types.ExprString(arg), why)
+		}
+		return ""
+	}
+	return fmt.Sprintf("it comes from the call of %s at %s, whose contract does not say that it is new or lies within an argument", name, v.placeOf(call.Pos()))
+}
+
+// resultType returns the type of a result of a call, or nil.
+func (v *fnVerifier) resultType(call *ast.CallExpr, index int) types.Type {
+	switch t := v.info.TypeOf(call).(type) {
+	case *types.Tuple:
+		if index < t.Len() {
+			return t.At(index).Type()
+		}
+		return nil
+	default:
+		if index == 0 {
+			return t
+		}
+		return nil
+	}
+}
+
+// withinArg returns the argument that a top-level conjunct of the callee's
+// Ensures places a result within, as within(r, p) or fresh(r) Or
+// within(r, p), or nil.
+func (v *fnVerifier) withinArg(call *ast.CallExpr, fn *funcInfo, index int) ast.Expr {
+	if index >= len(fn.results) {
+		return nil
+	}
+	name := spelledResult(fn, index)
+	isResult := func(n *logic.Node) bool { return n.Kind == logic.NIdent && n.Name == name && !n.Primed }
+	for _, c := range fn.ensures {
+		if c.node == nil {
+			continue
+		}
+		for _, conjunct := range c.node.Conjuncts() {
+			if conjunct.Kind == logic.NBinary && conjunct.Op == "Or" {
+				a, b := conjunct.Kids[0], conjunct.Kids[1]
+				if b.Kind == logic.NCall && b.Name == "fresh" {
+					a, b = b, a
+				}
+				if a.Kind == logic.NCall && a.Name == "fresh" && len(a.Kids) == 1 && isResult(a.Kids[0]) {
+					conjunct = b
+				}
+			}
+			if conjunct.Kind != logic.NCall || conjunct.Name != "within" || len(conjunct.Kids) != 2 ||
+				!isResult(conjunct.Kids[0]) || conjunct.Kids[1].Kind != logic.NIdent || conjunct.Kids[1].Primed {
+				continue
+			}
+			param := fn.paramNames[conjunct.Kids[1].Name]
+			if param == nil {
+				continue
+			}
+			if arg := v.argumentFor(call, fn, param); arg != nil {
+				return arg
+			}
+		}
+	}
+	return nil
+}
+
+// argumentFor returns the expression a call passes for a parameter of its
+// callee, the receiver included, or nil.
+func (v *fnVerifier) argumentFor(call *ast.CallExpr, fn *funcInfo, param *types.Var) ast.Expr {
+	sig, _ := fn.obj.Type().(*types.Signature)
+	if sig == nil {
+		return nil
+	}
+	if (sig.Recv() != nil && param == sig.Recv()) || (len(fn.params) > 0 && param == fn.params[0] && sig.Recv() != nil) {
+		if sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok {
+			return sel.X
+		}
+		return nil
+	}
+	bound, ok := bindArgs(v.info, call, paramsOf(sig), sig.Variadic())
+	if !ok {
+		return nil
+	}
+	for _, b := range bound {
+		if b.param == param && !b.packed && !b.spread {
+			return b.expr
+		}
+	}
+	return nil
 }
 
 // memCallee returns the contract a call is checked against, or nil.
@@ -417,38 +546,6 @@ func (v *fnVerifier) memCallee(call *ast.CallExpr) *funcInfo {
 		return nil
 	}
 	return v.contractOf(callee)
-}
-
-// handsUnknown returns why a call may get an unknown reference from what it
-// is handed: an unknown value, an interface value or a function value, or
-// a value whose type reaches one; or "".
-func (v *fnVerifier) handsUnknown(call *ast.CallExpr, fact memFact) string {
-	operands := slices.Clone(call.Args)
-	if sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok {
-		if selection := v.info.Selections[sel]; selection != nil {
-			operands = append(operands, sel.X)
-		}
-	} else if _, isLit := ast.Unparen(call.Fun).(*ast.FuncLit); !isLit {
-		if _, isIdent := ast.Unparen(call.Fun).(*ast.Ident); !isIdent {
-			operands = append(operands, call.Fun)
-		}
-	}
-	if _, value := throughValue(v.info, call); value {
-		return "is a call through a function value"
-	}
-	for _, arg := range operands {
-		t := v.info.TypeOf(arg)
-		if t == nil {
-			continue
-		}
-		if why := v.memOrigin(arg, fact); why != "" {
-			return fmt.Sprintf("is handed %s, and %s", types.ExprString(arg), why)
-		}
-		if reachesCode(t, map[types.Type]bool{}) {
-			return fmt.Sprintf("is handed %s, which is or holds an interface value or a function value, through which it may get memory of any origin", types.ExprString(arg))
-		}
-	}
-	return ""
 }
 
 // reachesCode reports whether a value of a type is, or reaches through
@@ -510,11 +607,12 @@ func (v *fnVerifier) callPollutes(call *ast.CallExpr, fact memFact) string {
 	if fn == nil || !v.targetsHoldReferences(fn) {
 		return ""
 	}
-	if why := v.handsUnknown(call, fact); why != "" {
-		return fmt.Sprintf("the call of %s at %s may store a reference into memory it may modify, since it %s",
-			types.ExprString(call.Fun), v.placeOf(call.Pos()), why)
-	}
-	return ""
+	// A callee may store memory it got other than through its arguments,
+	// from its package or from a call it made, into what it modifies (F28
+	// of the review of step 2), so a call whose targets can hold a
+	// reference pollutes whatever it is handed.
+	return fmt.Sprintf("the call of %s at %s may store into memory it may modify a reference to memory of any origin",
+		types.ExprString(call.Fun), v.placeOf(call.Pos()))
 }
 
 // literalsRun returns the function literals a call runs: the one called in

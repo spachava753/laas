@@ -1365,7 +1365,7 @@ func Start(r Recorder, t *Lines) {
 }
 ```
 
-The value passed for the footprint must be a parameter that the caller's own `Modifies` lists. An argument that a call returned is refused when the call was handed an interface value, a function value, or a value that holds one, since such a call can return memory of any origin, unless its contract says that the result is new with `fresh`:
+The value passed for the footprint must be a parameter that the caller's own `Modifies` lists. A function can return memory that it got from somewhere other than its arguments, such as its own package or a call it made. So an argument that a call returned is refused, unless the contract of that call says that the result is new, with `fresh`, or lies within one of its arguments that is fine itself, with `within`:
 
 ```go
 // @Requires r != nil
@@ -1391,11 +1391,11 @@ func NoteFrom(r Recorder, s LineCounts) {
 
 ```text
 vego: the footprint of what is passed to Note as r may hold memory that what is passed as s.Current() reaches, and
-Note relies on it not doing so: it comes from the call of s.Current at footprints.go:59:10, which is handed s, which
-is or holds an interface value or a function value, through which it may get memory of any origin
+Note relies on it not doing so: it comes from the call of s.Current at footprints.go:59:10, whose contract does not
+say that it is new or lies within an argument
 ```
 
-The same refusal names a store when a value of unknown origin was stored into memory that the function reaches before the call, since the callee could then reach it.
+The same refusal names a store when a value of unknown origin was stored into memory that the function reaches before the call, since the callee could then reach it. A call whose `Modifies` covers memory that can hold a pointer, a slice, or a map counts as such a store, since it may put there memory it got from anywhere.
 
 The states of another interface value may lie in the footprint, so a write forgets them too. Close a value before you write through another, or require what you need again afterwards:
 
@@ -5761,7 +5761,7 @@ This table lists the most common messages.
 | `x is assigned, which F may not modify; list it in a // @Modifies clause`, with `, as p.f` when a path from a parameter reaches it | No `Modifies` entry covers memory of this kind. The path stops before a field that your package cannot name, such as an unexported field of `os.File`. | Add it to `Modifies`, by the path the message names. |
 | `... which F may not modify: nothing its // @Modifies clauses list is known to cover it` | An entry covers memory of this kind, but `vego` cannot prove it is this memory. It may be another element, another struct, or a slice that was replaced after `F` was called. | Make the entry match. For a replaced slice, the callee needs a `fresh ... Or within ...` clause. |
 | `x.M may modify the footprint of x, which F may not modify; list it in a // @Modifies clause` | The method writes behind its receiver, and `F` does not list the value. | Add the value to `Modifies`. See [Methods that write behind their receiver](#methods-that-write-behind-their-receiver). |
-| `the footprint of what is passed to G as w may hold memory that what is passed as y reaches, and G relies on it not doing so: ...` | `F` cannot show where `y` comes from, or a value of unknown origin was stored into memory it reaches. The message says which. | Pass a value read from your own parameters or made in `F`, or one that a contract says is new. |
+| `the footprint of what is passed to G as w may hold memory that what is passed as y reaches, and G relies on it not doing so: ...` | `F` cannot show where `y` comes from, or a value of unknown origin, or a call that may store one, may have put it into memory that `y` reaches. The message says which. | Pass a value read from your own parameters or made in `F`, or one that a contract says is new or within such a value. Make the call before the one that may store. |
 | `x may be read before or after the call to F, which may change it, and Go does not fix the order` | Go may read `x` before or after `F` runs in this statement, and the two are not proved to give the same value. | Read `x` or call `F` in a statement of its own, in the order you mean. The message ends with such a statement, as in `x0 := x before it`, where one fits. See [Reads that Go may make before or after a call](#reads-that-go-may-make-before-or-after-a-call). |
 | `cannot verify F: g is called in the target of this assignment, and Go may call it before or after append writes into the array of s` | The call may run on either side of the write, and it may read or write memory. | Assign the result of `g` to a variable in a statement of its own first. See [An append beside a call](#an-append-beside-a-call). |
 | `this may add a key to m, the map that the loop at f.go:n:c ranges over, ...` | A write in a `range` over `m` may add a key that `m` lacks. Go may or may not visit it. | Collect the new entries in another map and add them after the loop. See [Changing the map a loop ranges over](#changing-the-map-a-loop-ranges-over). |
