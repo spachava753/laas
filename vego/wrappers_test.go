@@ -453,6 +453,7 @@ func checkLoggerEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 	}
 	rng := rand.New(rand.NewSource(1))
 	checked := 0
+	arrays := &ownerArrays{}
 	var made []*log.Logger
 	for range 300 {
 		k := &keptLog{}
@@ -516,7 +517,8 @@ func checkLoggerEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 			}
 			k.written = nil
 			done := k.enter()
-			printed := loggerMethods[key](l, rng)
+			var printed int
+			arrays.checkGrowth(t, l, key, func() { printed = loggerMethods[key](l, rng) })
 			done()
 			k.check()
 			m.ensure(key)
@@ -616,9 +618,11 @@ func lengthTerm(n int) *logic.Term {
 // checkMethod checks one call of a method of a wrapper whose receiver is
 // its first parameter: the requires with the ghost before, the call, and
 // the ensures with the ghost after, which the call itself does not change.
-// It reports whether the requires held and the call was made.
+// It reports whether the requires held and the call was made. What the
+// receiver owns must change only as ownerGrowth assumes (F32 of the review
+// of step 3); arrays holds the arrays the harness has seen.
 func checkMethod(t *testing.T, pv *pkgVerifier, fn *funcInfo, k *keptLog, ready bool, given []*logic.Term,
-	call func() []*logic.Term) bool {
+	owner any, arrays *ownerArrays, call func() []*logic.Term) bool {
 	t.Helper()
 	state := map[*types.Var]map[string]bool{fn.params[0]: {"ready": ready}}
 	c := &sequenceCheck{t: t, pv: pv, fn: fn, before: state, after: state,
@@ -629,7 +633,9 @@ func checkMethod(t *testing.T, pv *pkgVerifier, fn *funcInfo, k *keptLog, ready 
 	if !c.holds(fn.requires) {
 		return false
 	}
-	within(t, k, fn.obj.FullName(), func() { c.results = call() })
+	within(t, k, fn.obj.FullName(), func() {
+		arrays.checkGrowth(t, owner, fn.obj.FullName(), func() { c.results = call() })
+	})
 	c.ensure(fn.obj.FullName())
 	return true
 }
@@ -648,6 +654,7 @@ func checkScannerEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key 
 	}
 	rng := rand.New(rand.NewSource(1))
 	checked := 0
+	arrays := &ownerArrays{}
 	var made []*bufio.Scanner
 	for range 300 {
 		k := &keptLog{}
@@ -684,7 +691,9 @@ func checkScannerEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key 
 				if name == "Split" {
 					s.Split(bufio.ScanWords)
 				} else {
-					s.Buffer(make([]byte, 16), 64)
+					given := make([]byte, 16)
+					arrays.add(given)
+					s.Buffer(given, 64)
 				}
 				ready = false
 				continue
@@ -694,7 +703,7 @@ func checkScannerEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key 
 				continue
 			}
 			fn := methods[name]
-			made := checkMethod(t, pv, fn, k, ready, nil, func() []*logic.Term {
+			made := checkMethod(t, pv, fn, k, ready, nil, s, arrays, func() []*logic.Term {
 				switch name {
 				case "Scan":
 					return []*logic.Term{logic.BoolLit(s.Scan())}
@@ -723,6 +732,7 @@ func checkReaderEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 	readByte := contractOfKey(t, pv, pkg, "(*bufio.Reader).ReadByte")
 	rng := rand.New(rand.NewSource(1))
 	checked := 0
+	arrays := &ownerArrays{}
 	var made []*bufio.Reader
 	for range 200 {
 		k := &keptLog{}
@@ -771,7 +781,7 @@ func checkReaderEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 				k.check()
 				continue
 			}
-			if checkMethod(t, pv, readByte, k, ready, nil, func() []*logic.Term {
+			if checkMethod(t, pv, readByte, k, ready, nil, b, arrays, func() []*logic.Term {
 				c, err := b.ReadByte()
 				return []*logic.Term{logic.IntLit(int64(c)), errorTerm(err)}
 			}) {
@@ -813,6 +823,7 @@ func checkWriterEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 	}
 	rng := rand.New(rand.NewSource(1))
 	checked := 0
+	arrays := &ownerArrays{}
 	var made []*bufio.Writer
 	for range 200 {
 		k := &keptLog{}
@@ -872,7 +883,8 @@ func checkWriterEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 			case "(*bufio.Writer).WriteByte":
 				args = []*logic.Term{logic.IntLit('w')}
 			}
-			if checkMethod(t, pv, contracts[name], k, ready, args, func() []*logic.Term {
+			arrays.add(p)
+			if checkMethod(t, pv, contracts[name], k, ready, args, b, arrays, func() []*logic.Term {
 				return writerMethods[name](b, p)
 			}) && name == key {
 				checked++
