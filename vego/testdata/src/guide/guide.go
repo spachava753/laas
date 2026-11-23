@@ -1006,7 +1006,7 @@ func countCall() { calls++ }
 //
 // @Ensures True
 func Counted() (result int) {
-	return calls // want `vego: cannot verify Counted: calls is assigned at guide.go:1003; package-level variables that are changed are not supported yet`
+	return calls
 }
 
 // Clear removes the keys of the map it ranges over.

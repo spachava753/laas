@@ -82,7 +82,9 @@ type epoch struct {
 // inEpoch returns the region a key has in the epoch memory is in, or nil
 // when memory is in none.
 func (m memory) inEpoch(key string, sort logic.Sort) *logic.Term {
-	if key == footprintRegion {
+	// No row holds a cell of the storage of an assigned package-level
+	// variable (V1), so an epoch keeps it.
+	if key == footprintRegion || isVarRegion(key) {
 		return nil
 	}
 	e, ok := m[epochKey]
@@ -140,6 +142,11 @@ func (v *fnVerifier) startEpoch(st *state, bound *logic.Term, targets []target) 
 	mem := memory{epochKey: e}
 	if rows, ok := st.mem[footprintRegion]; ok {
 		mem[footprintRegion] = rows
+	}
+	for key, region := range st.mem {
+		if isVarRegion(key) {
+			mem[key] = region
+		}
 	}
 	st.mem = mem
 }

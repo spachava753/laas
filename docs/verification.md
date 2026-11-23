@@ -4010,13 +4010,13 @@ Error variables follow rules of their own, described in [Errors](#errors).
 
 ### Which variables a function can read
 
-`vego` reads every file of your package and of every package it is built with. That includes code that is not verified and the standard library. A function can read a variable when none of that code changes it in one of these ways:
+`vego` reads every file of your package and of every package it is built with. That includes code that is not verified and the standard library. It finds every place that changes a variable in one of these ways:
 
 - assigns it, or a field of it, as in `x = 1`, `x.n = 1`, `x++`, or `for x = range s`;
 - takes its address, as in `&x` or `&x.n`, or selects a method with a pointer receiver on it, as in `x.Reset()` or the method value `x.Reset`;
 - names it in a `//go:linkname` directive, or refers to it in an assembly file.
 
-Reading a variable that is changed is reported:
+A function can read a variable of its own package that is only assigned, also by code that is not verified:
 
 ```go
 var served int
@@ -4034,12 +4034,9 @@ func Served() (r int) {
 }
 ```
 
-```text
-vego: cannot verify Served: served is assigned at globals.go:35; package-level variables that are changed
-are not supported yet
-```
+`Served` verifies. Nothing is known of the value of `served` when `Served` is called, apart from its type. Its initialiser gives nothing, since code may have changed the variable before the call. [Changing a variable](#changing-a-variable) shows how a verified function changes one.
 
-Pass the value as a parameter instead. For a variable of another package, the message names the package that changes it. An `init` function that assigns a variable changes it too.
+A variable whose address is taken, or that a directive or an assembly file names, cannot be read. The message names the place that takes the address or the directive. A variable of another package that is changed cannot be read yet either. For such a variable, the message names the package that changes it.
 
 The type of the variable must be one that cannot hold code. A function value, an interface value, an error, a channel, or an `unsafe.Pointer` may not appear in the type at any depth, also behind a pointer, and also in a field that the type does not export. Verified code cannot read such a field, but it can hand the variable to a trusted function that runs the code the field holds. So `*http.Client` cannot be read, and neither can `*log.Logger`:
 
@@ -4156,7 +4153,7 @@ func FirstSize() (r int) {
 
 ```text
 vego: postcondition may not hold: r = 1; the contents of sizes are not known to stay as
-initialised: the use at globals.go:49 lets a reference to them out
+initialised: the use at globals.go:50 lets a reference to them out
 ```
 
 The message names the first use that lets a reference to what the variable refers to out, here the write in `Grow`. Every message about something not proved after a function reads such a variable carries this note, also one about an index or an overflow. The length of `sizes` is still known, so `sizes[i]` needs no `Requires` for an `i` below 3.
@@ -4177,23 +4174,62 @@ An assignment in such a package to a variable that a proof relies on is reported
 
 ### Changing a variable
 
-A verified function cannot change a package-level variable, or the memory one refers to, yet:
+A verified function lists the variables of its package that it changes in a `Modifies` clause, as it lists a parameter. `x'` in an `Ensures` clause is the value on return, and `x` the value when the function is called:
 
 ```go
-// ResetServed assigns a variable.
+// ResetServed sets the count to zero.
 //
-// @Ensures True
+// @Modifies served
+// @Ensures served' = 0
 func ResetServed() {
 	served = 0
 }
 
 // SetSize writes what a variable refers to.
 //
-// @Ensures True
+// @Modifies sizes
+// @Ensures sizes'[1] = 3
 func SetSize() {
 	sizes[1] = 3
 }
+```
 
+Both verify. `Modifies served` covers the variable itself and, for a variable that holds a slice, a map, or a pointer, what it refers to, as an entry for a parameter of that type does. `Modifies sizes` therefore covers the elements of `sizes` up to its capacity. A finer entry, such as `Modifies cfg.Timeout` or `Modifies names[k]`, names a part, as for a parameter. Inside a body, `old(served)` is the value when the function was entered.
+
+A caller of a function that changes a variable changes it too, and must list it:
+
+```go
+// ResetAll calls ResetServed, and lists what it changes.
+//
+// @Modifies served
+// @Ensures served' = 0
+func ResetAll() {
+	ResetServed()
+}
+
+// ResetUnlisted assigns a variable and does not list it.
+//
+// @Ensures True
+func ResetUnlisted() {
+	served = 0
+}
+
+// CallsReset calls ResetServed and does not list what it changes.
+//
+// @Ensures True
+func CallsReset() {
+	ResetServed()
+}
+```
+
+```text
+vego: served is assigned, which ResetUnlisted may not modify; list it in a // @Modifies clause
+vego: ResetServed may modify what it calls served, which CallsReset may not modify; list it in a // @Modifies clause
+```
+
+So a function that lists no variable leaves every variable as it was, and a caller keeps what it knew of them across the call. An entry that no write needs is reported, as for a parameter:
+
+```go
 // ListsSizes names a variable in Modifies.
 //
 // @Modifies sizes
@@ -4201,14 +4237,49 @@ func ListsSizes() {}
 ```
 
 ```text
-vego: cannot verify ResetServed: served is a package-level variable, which a verified function cannot
-assign yet
-vego: cannot verify SetSize: sizes[1] writes memory that the package-level variable sizes refers to,
-which a Modifies clause cannot name yet
-vego: in Modifies annotation: sizes is a package-level variable, which a Modifies clause cannot name yet
+vego: Modifies lists sizes, but ListsSizes never needs to modify it; a Modifies clause must list exactly what the function may write
 ```
 
-A call that would write such memory, or an `append` that would write into its capacity, is reported with the same reason: `it is memory that the package-level variable sizes refers to, which a Modifies clause cannot name yet`.
+A `Requires` clause of a function that code of another package can call may not read a variable that is not exported. Such a function is exported, is a method with an exported name, or is used as a value. A caller in another package cannot name the condition, establish it, or see it fail:
+
+```go
+var nextTicket int
+
+// Ticket returns the next number, and asks too much of its callers.
+//
+// @Requires nextTicket < 1000
+// @Modifies nextTicket
+// @Ensures n = nextTicket And nextTicket' = nextTicket + 1
+func Ticket() (n int) {
+	n = nextTicket
+	nextTicket++
+	return n
+}
+```
+
+```text
+vego: the Requires clause nextTicket < 1000 reads nextTicket, a package-level variable that is not exported, and code of another package can call Ticket, where no
+caller can name the condition or see it fail; test the value in the body instead
+```
+
+Test the value in the body:
+
+```go
+// TicketChecked tests the value in the body.
+//
+// @Modifies nextTicket
+// @Ensures ok -> n = nextTicket And nextTicket' = nextTicket + 1
+func TicketChecked() (n int, ok bool) {
+	if nextTicket >= math.MaxInt {
+		return 0, false
+	}
+	n = nextTicket
+	nextTicket++
+	return n, true
+}
+```
+
+A function of the package that code of another package cannot call may require such a condition, and its callers prove it as any other `Requires` clause.
 
 ### Variables and initialisation
 
@@ -4218,7 +4289,9 @@ A variable holds its value only once the package has initialised it. `vego` reli
 
 Some code that uses package-level variables still cannot be verified:
 
-- A counter, a cache, or any other variable that is assigned, also in an `init` function, as `os.Args` is in package `os`. Pass the value as a parameter.
+- A variable of another package that is changed, also in an `init` function, as `os.Args` is in package `os`.
+- A variable whose address is taken, as `var mu sync.Mutex` with `mu.Lock()`.
+- An error variable that is changed.
 - A logger in a package-level variable, as in `var logger = log.New(os.Stderr, "app: ", 0)`. The logger keeps the writer that its initialiser gave it, and nothing checked that writer. `vego` does not know either that `log.New` returned a logger that is not nil:
 
   ```go

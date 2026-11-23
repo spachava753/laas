@@ -1057,6 +1057,32 @@ Calls through values, decided by the orchestrator:
 
 Concurrency (D5): a proof covers one goroutine. A proof of a function that changes a variable says what holds if no other goroutine reads or writes the variable while it runs. It says nothing of data races. A group invariant holds where at most one goroutine at a time runs functions of the package that touch the group. A lock discipline waits for item 11, and `held(mu)` may be required and proved as any state.
 
+Built in step 2 of part 1 (`assigned.go`): assigned variables of the package's own data types.
+
+- **Kind 2 in the function.** A variable of the package that the build changes only by assignment, outside every directive and assembly reference, is read and written as memory: the cells of its type, keyed `var <key><leafpath>`, at `varref <key>`, which is not nil and lies below the entry bound. A read is a recorded read, so the order rule sees it. A store is a write that `checkWriteOr` checks against the frame. A loop forgets what its body assigns by region, and an in-place or deferred literal writes it in place. A value made by verified code reads it from its own memory when it runs, not from the copy of what was known where it was made.
+  - **V1 in the model.** `inEpoch` returns nothing for a `var ` region, and `startEpoch` copies the regions the state holds, so a write through a footprint keeps them. A loop that writes a footprint layers no footprint target over them. `checkWriteOr` counts no footprint as covering a cell of one.
+  - **Contracts.** `Modifies v`, by `variableTarget`, covers the storage of `v` and, when its type is a slice, a map, or a pointer, what that refers to, as a target beside it (`target.also`, `shape.also`, spread by `targets` and by the loop's `callSitesOf`). A path such as `v.f` or `m[k]` follows the type from the storage, by `walkTarget`, which the walk of a parameter's path became. In an `Ensures`, `v` is the value on entry and `v'` the value on return. In a body, `old(v)` is the value on entry (`locateAssigned`).
+  - **A fixed variable's contents.** What a fixed variable of the package refers to may be written under `Modifies v`, which covers it as a parameter of its type is covered. Such a write is an escape, so those contents are ordinary memory.
+  - **The always-fails check** gives the storage of each assigned variable that the formulas read a sample value.
+  - **F12.** `checkHiddenRequires` refuses a top-level conjunct of a `Requires` that reads an unexported assigned variable, in a function that is exported, is a method with an exported name, or is named anywhere other than as the function of a call (`callableElsewhere`).
+  - **Still refused**, each with a message that says why: a variable whose address is taken (part 4), a variable named by a directive or from assembly (F3), a changed error variable (F8), a variable of a type that can hold code (part 3), and a variable of another package that is changed (the next step).
+- **Programs.** `globals/assigned.go` holds both directions:
+  - verified: a counter that saturates, a caller that lists it, a loop, a struct's fields, deferred and in-place literals, a table filled under `Modifies`, a map made and written, a write through `w` beside the counter, and a sample of the always-fails check;
+  - refused: a write not listed, a caller that does not list what its callee changes, a value read twice around a call that changes it, a loop's write, the order rule, `old`, a value's stale read, and a hidden `Requires` in an exported function and in one made into a value.
+
+  `guide/globals.go`, `globals/defects.go`, `rejected.ReadsGlobal`, and `guide.Counted` changed with the messages: what was refused as "not supported yet" now verifies or is refused by the frame.
+- **Wrong versions caught:**
+  - var regions put into epochs (`ReadAroundAnswer`, in the completeness direction);
+  - the regions not carried into an epoch (`WriteThenAnswer`);
+  - a loop that does not forget an assignment (`LoopKeeps`);
+  - a call that does not forget its var targets (`HitTwice`);
+  - the frame check skipped for var regions (the needed-entry reports);
+  - no sample (`Busy`);
+  - the hidden `Requires` check off (`Hidden`, `valued`), and a function made into a value not counted (`valued`).
+
+  Not observable: the fact that the reference lies below the entry bound. Without it no write is shown to be to new memory either.
+- **Cost:** no row of the base moved but the programs above, which now run where they were refused at once.
+
 Not built yet:
 
 - **Parts 2 and 3** are being built (above). Until each step lands, what it builds draws the messages of part 1.

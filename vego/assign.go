@@ -41,6 +41,7 @@ type lvalue struct {
 	// the struct pointed to, of the element, or of the variable. declares is
 	// set when the assignment creates the variable.
 	box          *types.Var
+	global       *types.Var
 	declares     bool
 	pointer      ast.Expr
 	slice, index ast.Expr
@@ -66,6 +67,11 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 		}
 		variable, ok := v.info.ObjectOf(e).(*types.Var)
 		switch {
+		case ok && v.isAssigned(variable):
+			// The storage of an assigned package-level variable.
+			lv.kind, lv.global, lv.typ, lv.cells = placeMem, variable, variable.Type(), v.globalCells(variable)
+			lv.leaves = mustLayout(variable.Type())
+			return lv
 		case ok && packageVariableOf(variable, "") != nil:
 			v.unsupported(e.Pos(), fmt.Sprintf("%s is a package-level variable, which a verified function cannot assign yet", e.Name))
 		case !ok || variable.Pkg() != v.pass.Pkg:
@@ -155,6 +161,9 @@ func (v *fnVerifier) lvalue(e ast.Expr, st *state, guard []*logic.Term) lvalue {
 	lv := v.place(e)
 	lv.expr = e
 	switch {
+	case lv.global != nil:
+		v.noteGlobal(st, lv.global)
+		lv.ref, lv.at = globalRef(lv.global), logic.IntLit(0)
 	case lv.box != nil:
 		// A variable that an assignment creates has no place yet.
 		if id, ok := ast.Unparen(e).(*ast.Ident); ok && v.info.Defs[id] != nil {

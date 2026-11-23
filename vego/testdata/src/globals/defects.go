@@ -12,11 +12,12 @@ var requests int
 // Handle counts requests and is not verified.
 func Handle() { requests++ }
 
-// Requests reads a variable that is changed.
+// Requests reads a variable that code which is not verified changes, of
+// which nothing is known.
 //
 // @Ensures True
 func Requests() (r int) {
-	return requests // want `vego: cannot verify Requests: requests is assigned at defects.go:13; package-level variables that are changed are not supported yet`
+	return requests
 }
 
 type counter struct{ N int }
@@ -32,7 +33,7 @@ var inc = counted.Inc
 //
 // @Ensures r = 0
 func Count() (r int) {
-	return counted.N // want `vego: cannot verify Count: counted has its address taken at defects.go:29; package-level variables that are changed are not supported yet`
+	return counted.N // want `vego: cannot verify Count: counted has its address taken at defects.go:30; package-level variables whose address is taken are not supported yet`
 }
 
 // settings has a field assigned.
@@ -44,17 +45,17 @@ func configure() { settings.Retries = 3 }
 //
 // @Ensures True
 func Settings() (r int) {
-	return settings.Retries // want `vego: cannot verify Settings: settings is assigned at defects.go:41; package-level variables that are changed are not supported yet`
+	return settings.Retries
 }
 
 // written is written below, so what it refers to is ordinary memory.
 var written = []int{1, 2}
 
-// WriteTable writes what a fixed variable refers to.
+// WriteTable writes what a fixed variable refers to, and does not list it.
 //
 // @Ensures True
 func WriteTable() {
-	written[0] = 5 // want `vego: cannot verify WriteTable: written\[0\] writes memory that the package-level variable written refers to, which a Modifies clause cannot name yet`
+	written[0] = 5 // want `^vego: written\[0\] is assigned, which WriteTable may not modify; it is memory that the package-level variable written refers to; list written in a // @Modifies clause$`
 }
 
 // WrittenFirst would be 1 if nothing wrote the array.
@@ -67,18 +68,18 @@ func WrittenFirst() (r int) {
 // removed has a key deleted below.
 var removed = map[string]int{"free": 10}
 
-// RemoveLimit deletes a key of a fixed map.
+// RemoveLimit deletes a key of a fixed map, and does not list it.
 //
 // @Ensures True
 func RemoveLimit() {
-	delete(removed, "free") // want `vego: cannot verify RemoveLimit: delete\(removed, "free"\) writes memory that the package-level variable removed refers to, which a Modifies clause cannot name yet`
+	delete(removed, "free") // want `^vego: removed is modified, which RemoveLimit may not modify; it is memory that the package-level variable removed refers to; list removed in a // @Modifies clause$`
 }
 
-// AssignField assigns a part of a variable.
+// AssignField assigns a part of a variable, and does not list it.
 //
 // @Ensures True
 func AssignField() {
-	settings.Timeout = 1 // want `vego: cannot verify AssignField: settings.Timeout is part of the package-level variable settings, which a verified function cannot assign yet`
+	settings.Timeout = 1 // want `^vego: settings.Timeout is assigned, which AssignField may not modify; list it in a // @Modifies clause$`
 }
 
 // hook can hold code.
@@ -121,7 +122,7 @@ var linked int
 //
 // @Ensures r = 0
 func Linked() (r int) {
-	return linked // want `vego: cannot verify Linked: linked is named by a go:linkname directive at defects.go:\d+; package-level variables that are changed are not supported yet`
+	return linked // want `vego: cannot verify Linked: linked is named by a go:linkname directive at defects.go:\d+; a variable that a directive or assembly names is another symbol's storage, which code writes under the other name, so it cannot be verified`
 }
 
 // Primed primes a variable that nothing changes.
@@ -261,7 +262,7 @@ var spare = make([]int, 2, 10)
 //
 // @Ensures r = 9
 func Twice() (r int) {
-	x := append(spare, 9) // want `vego: append may write into the capacity of spare, which Twice may not modify; it is memory that the package-level variable spare refers to, which a Modifies clause cannot name yet`
+	x := append(spare, 9) // want `vego: append may write into the capacity of spare, which Twice may not modify; it is memory that the package-level variable spare refers to; list spare in a // @Modifies clause`
 	y := append(spare, 8)
 	_ = y
 	return x[2]
@@ -279,19 +280,19 @@ var filled = []int{1}
 //
 // @Ensures True
 func Pass() {
-	fill(filled) // want `vego: fill may modify filled, which Pass may not modify; it is memory that the package-level variable filled refers to, which a Modifies clause cannot name yet`
+	fill(filled) // want `vego: fill may modify filled, which Pass may not modify; it is memory that the package-level variable filled refers to; list filled in a // @Modifies clause`
 }
 
-// ListsVariable names a variable in Modifies.
+// ListsVariable names a variable in Modifies that it never writes.
 //
-// @Modifies filled // want `vego: in Modifies annotation: filled is a package-level variable, which a Modifies clause cannot name yet`
+// @Modifies filled // want `^vego: Modifies lists filled, but ListsVariable never needs to modify it; a Modifies clause must list exactly what the function may write$`
 func ListsVariable() {}
 
-// Assigns assigns a variable.
+// Assigns assigns a variable, and does not list it.
 //
 // @Ensures True
 func Assigns() {
-	local = 4 // want `vego: cannot verify Assigns: local is a package-level variable, which a verified function cannot assign yet`
+	local = 4 // want `^vego: local is assigned, which Assigns may not modify; list it in a // @Modifies clause$`
 }
 
 var local int

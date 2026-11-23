@@ -48,8 +48,10 @@ func (pv *pkgVerifier) findChanges() {
 		position := pv.pass.Fset.Position(pos)
 		return fmt.Sprintf("%s:%d", filepath.Base(position.Filename), position.Line)
 	}
+	pv.changeKinds = map[*types.Var]changeKind{}
 	changed := func(variable *types.Var, what string, pos token.Pos) {
 		pv.reassigned[variable] = true
+		pv.changeKinds[variable] |= kindOfChange(what)
 		if pv.changeOf[variable] == "" {
 			pv.changeOf[variable] = what + " at " + at(pos)
 		}
@@ -101,6 +103,9 @@ func (pv *pkgVerifier) findChanges() {
 			switch use := pv.useOf(stack); {
 			case use.change != "":
 				changed(variable, use.change, use.pos)
+				if variable.Pkg() != pv.pass.Pkg || !inInitBody(stack) {
+					pv.changeKinds[variable] |= changedOutsideInit
+				}
 				escaped(variable, use.pos)
 			case use.escape:
 				escaped(variable, use.pos)
@@ -761,6 +766,9 @@ func (pv *pkgVerifier) usableFixed(variable *types.Var) (knownValue, string) {
 	var known knownValue
 	switch {
 	case variable.Pkg() == pv.pass.Pkg && pv.reassigned[variable]:
+		if why := pv.assignedWhy(variable); why != "" {
+			return knownValue{}, why
+		}
 		return knownValue{}, fmt.Sprintf("%s %s; %s", spelled, pv.ownChanges[variable], changedNotYet)
 	case variable.Pkg() == pv.pass.Pkg:
 		known = pv.fixed[variable]
@@ -1108,6 +1116,9 @@ func (v *fnVerifier) knownConstantTerm(sink *state, known knownValue, leaf *logi
 // package-level variable that is not an error.
 func (e *specEnv) locateVariable(variable *types.Var, steps []logic.Step, when logic.When) (reached, error) {
 	spelled := e.v.spelling(variable)
+	if e.v.isAssigned(variable) {
+		return e.locateAssigned(variable, steps, when)
+	}
 	if when == logic.Old {
 		return reached{}, fmt.Errorf("old(%s): %s is not a parameter", spelled, spelled)
 	}
@@ -1273,6 +1284,10 @@ func (v *fnVerifier) refuseWriteThrough(e ast.Expr) {
 // refuseWriteThroughAs is refuseWriteThrough for a write that text spells.
 func (v *fnVerifier) refuseWriteThroughAs(e ast.Expr, text string) {
 	switch root, inMemory := v.packageRoot(e); {
+	case root != nil && (v.isAssigned(root) || inMemory && root.Pkg() == v.pass.Pkg && !v.reassigned[root]):
+		// Its storage and what it refers to are memory that the frame
+		// covers like any other, as is what a fixed variable of the
+		// package refers to.
 	case root != nil && inMemory:
 		v.unsupported(e.Pos(), fmt.Sprintf("%s writes memory that the package-level variable %s refers to, which a Modifies clause cannot name yet",
 			text, v.spelling(root)))

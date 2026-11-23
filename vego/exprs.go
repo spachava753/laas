@@ -26,6 +26,9 @@ func (v *fnVerifier) variable(id *ast.Ident, st *state, guard []*logic.Term) val
 		return val
 	}
 	if variable != nil && variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope() {
+		if v.isAssigned(variable) {
+			return v.readGlobal(variable, id.Pos(), st, guard)
+		}
 		return v.packageVariable(variable, id.Pos(), st)
 	}
 	v.unsupported(id.Pos(), id.Name+" is not a local variable of a supported type")
@@ -245,7 +248,7 @@ func (v *fnVerifier) inMemory(e ast.Expr) bool {
 	switch e := ast.Unparen(e).(type) {
 	case *ast.Ident:
 		variable, ok := v.info.ObjectOf(e).(*types.Var)
-		return ok && v.boxed[variable]
+		return ok && (v.boxed[variable] || v.isAssigned(variable))
 	case *ast.StarExpr:
 		_, ok := pointee(v.info.TypeOf(e.X))
 		return ok

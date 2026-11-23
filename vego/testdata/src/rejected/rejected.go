@@ -86,7 +86,7 @@ func setGlobal() { global = 1 }
 
 // @Requires x > 0
 func ReadsGlobal(x int) (result int) {
-	return x + global // want `vego:\ cannot\ verify\ ReadsGlobal:\ global\ is\ assigned\ at\ rejected.go:85;\ package-level\ variables\ that\ are\ changed\ are\ not\ supported\ yet`
+	return x + global // want `vego: addition may overflow int`
 }
 
 // @Requires x > 0

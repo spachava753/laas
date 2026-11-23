@@ -234,6 +234,10 @@ type target struct {
 	// source gives, which C3 separates (owns.go, separateParts); what a
 	// shipped owner owns keeps part 1's separation.
 	sourcePart bool
+	// also holds, for an entry that names an assigned package-level
+	// variable, the target of what its value refers to, beside its
+	// storage, which targets spreads into the list.
+	also []target
 	// mod is the index of the Modifies clause the target comes from: a
 	// clause that names an owner gives a target for the struct and one
 	// for what each owned field refers to.
@@ -1052,7 +1056,11 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 	var candidates []int
 	for i, t := range v.frame {
 		covers[i] = t.stretches()
-		// A footprint may hold a cell of any region.
+		// A footprint may hold a cell of any region but the storage of an
+		// assigned package-level variable (V1).
+		if t.fp && slices.ContainsFunc(w.parts, func(part stretch) bool { return isVarRegion(part.key) }) {
+			continue
+		}
 		if t.fp {
 			candidates = append(candidates, i)
 			continue
@@ -1143,7 +1151,7 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 		// Memory that a package-level variable refers to cannot be
 		// listed, so telling the reader to list it would mislead.
 		if variable := v.fixedRefs[w.ref.Name]; remedy == "" && w.ref.Op == logic.OpConst && variable != "" {
-			remedy = fmt.Sprintf("it is memory that the package-level variable %s refers to, which a Modifies clause cannot name yet", variable)
+			remedy = fmt.Sprintf("it is memory that the package-level variable %s refers to; list %s in a // @Modifies clause", variable, variable)
 		}
 		// Memory that a function returned without saying that it is new
 		// may have existed when the function was called, as what

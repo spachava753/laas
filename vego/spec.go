@@ -574,6 +574,9 @@ func (e *specEnv) locateAt(name string, steps []logic.Step, when logic.When, thr
 		}
 	}
 	if when == logic.Old && e.fn == nil {
+		if variable, rest, named, err := e.packageVariable(name, steps); named && err == nil && e.v.isAssigned(variable) {
+			return e.locateAssigned(variable, rest, when)
+		}
 		// Inside a body, old(x) is the value on entry of the function being
 		// verified, which is how its own contract sees x.
 		entry := &specEnv{v: e.v, sink: e.sink, fn: e.v.fn, args: e.v.entry, now: memory{}}
@@ -1847,6 +1850,9 @@ func newModTargets(nodes []*logic.Node, c *clause) []*modTarget {
 // when the entry names what that parameter itself points to or holds.
 type shape struct {
 	param *types.Var
+	// also holds, for an entry that names an assigned package-level
+	// variable, the shape of what its value refers to, beside its storage.
+	also []shape
 	// row is set for the states of an interface value, and fp for its
 	// footprint.
 	row   bool
@@ -1888,7 +1894,7 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 	param, ok := fn.paramNames[m.name]
 	if !ok {
 		if variable := v.modifiesVariable(fn, m); variable != nil {
-			return shape{}, target{}, fmt.Errorf("%s is a package-level variable, which a Modifies clause cannot name yet", v.spelling(variable))
+			return v.variableTarget(fn, m, variable, sink, mem)
 		}
 		return shape{}, target{}, fmt.Errorf("%s is not a parameter", m.name)
 	}
@@ -1918,6 +1924,15 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 	if !symbolic && args[param] == nil {
 		return shape{}, target{}, fmt.Errorf("parameter %s has type %s, which is not supported", m.name, param.Type())
 	}
+	return v.walkTarget(fn, m, param, located{val: args[param], typ: param.Type()}, param.Type(), symbolic, args, sink, mem)
+}
+
+// walkTarget follows the path of a Modifies entry from its root: a
+// parameter, whose value is given, or the storage of an assigned
+// package-level variable, which lies in memory at root's ref and at with
+// root's cells, and then param is nil.
+func (v *fnVerifier) walkTarget(fn *funcInfo, m *modTarget, param *types.Var, root located, rootType types.Type, symbolic bool,
+	args map[*types.Var]value, sink *state, mem memory) (shape, target, error) {
 	steps := make([]logic.Step, len(m.steps))
 	for i, step := range m.steps {
 		steps[i] = logic.Step{Field: step.field}
@@ -1926,7 +1941,7 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 		}
 		// What is indexed decides what the index is: a map with strings for
 		// keys takes a string, everything else a number.
-		_, indexed, err := plan(param.Type(), steps[:i], fn.writtenIn())
+		_, indexed, err := plan(rootType, steps[:i], fn.writtenIn())
 		if err != nil {
 			return shape{}, target{}, fmt.Errorf("%s%v", m.name, err)
 		}
@@ -1947,14 +1962,14 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 			steps[i].Index = index
 		}
 	}
-	hops, final, err := plan(param.Type(), steps, fn.writtenIn())
+	hops, final, err := plan(rootType, steps, fn.writtenIn())
 	if err != nil {
 		return shape{}, target{}, fmt.Errorf("%s%v", m.name, err)
 	}
 	// Follow the hops, keeping track of where the value lies. first is set
 	// while the allocation is still the one the parameter points into.
-	cur := located{val: args[param], typ: param.Type()}
-	first, inMemory := true, false
+	cur := root
+	first, inMemory := true, root.cells != nil
 	// entry is set while the path is at a key of a map, which a path that
 	// ends there names: whether the map has the key, what it holds there,
 	// and how many keys the map has.
@@ -1970,6 +1985,9 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 	// the path reaches from cur.at.
 	var inStruct types.Type
 	var offset int64
+	if inMemory && isStructType(rootType) {
+		inStruct = rootType
+	}
 	for i, h := range hops {
 		if entry != nil {
 			entry, afterEntry = nil, true
@@ -2144,6 +2162,14 @@ func (v *fnVerifier) targets(fn *funcInfo, args map[*types.Var]value, sink *stat
 		}
 		t.mod = i
 		list = append(list, t)
+		for _, also := range t.also {
+			also.mod = i
+			list = append(list, also)
+			for _, part := range also.owned {
+				part.mod, part.text, part.clause, part.part, part.ownerParam = i, also.text, also.clause, true, nil
+				list = append(list, part)
+			}
+		}
 		for _, part := range t.owned {
 			part.mod, part.text, part.clause, part.part, part.ownerParam = i, t.text, t.clause, true, t.param
 			list = append(list, part)

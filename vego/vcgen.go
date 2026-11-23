@@ -252,6 +252,9 @@ type fnVerifier struct {
 	// fixedMet the fixed variables met; see fixedValue.
 	madeFixed []*logic.Term
 	fixedMet  map[string]fixedMet
+	// assignedMet holds, by key, the assigned package-level variables the
+	// function read, which the always-fails check samples.
+	assignedMet map[string]*types.Var
 	// tieLater is set when tieFailures was put off; see verified.
 	tieLater bool
 	// typedReads, when set, receives the values whose type facts reads
@@ -611,6 +614,7 @@ func (v *fnVerifier) verify() {
 			"so verifying it would prove nothing", fn.obj.Name())
 	} else {
 		v.checkDeclaredRequires(st)
+		v.checkHiddenRequires(st)
 	}
 	for _, refused := range v.entryOnly(st) {
 		v.report(refused.clause.pos, "%s", refused.message(fn.obj.Name()))

@@ -153,6 +153,11 @@ func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
 		}
 		lv := v.place(e)
 		switch {
+		case lv.global != nil:
+			// The storage of an assigned package-level variable, in regions
+			// of its own.
+			lo, hi := bounds(lv.cells)
+			eff.sites = append(eff.sites, site{cells: lv.cells, lo: lo, hi: hi})
 		case lv.box != nil:
 			// Creating the variable writes nothing that existed before.
 			if id, ok := ast.Unparen(e).(*ast.Ident); ok && v.info.Defs[id] != nil {
@@ -324,11 +329,30 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 		return nil
 	}
 	for _, m := range fn.modifies {
-		form, _, err := v.locateTarget(fn, m, nil, nil, nil)
+		first, _, err := v.locateTarget(fn, m, nil, nil, nil)
 		if err != nil {
 			v.misread(m.clause, err)
 		}
+		for _, form := range append([]shape{first}, first.also...) {
+			v.callSitesOf(eff, form, argument)
+		}
+	}
+}
+
+// callSitesOf adds to eff the site of one shape of a Modifies entry of a
+// call, rooted at the argument it names when one does.
+func (v *fnVerifier) callSitesOf(eff *effects, form shape, argument func(*types.Var) ast.Expr) {
+	{
 		at := site{cells: form.cells, elem: form.elem, mapType: form.mapType, lo: form.lo, hi: form.hi, row: form.row, fp: form.fp}
+		if form.param == nil {
+			// The storage of a package-level variable, or what it refers
+			// to: no argument names it.
+			if form.owner {
+				eff.sites = append(eff.sites, v.ownedSites(form.typ, map[types.Type]bool{})...)
+			}
+			eff.sites = append(eff.sites, at)
+			return
+		}
 		if form.row || form.fp {
 			// An interface value held in a variable that the loop does not
 			// assign keeps its home.
@@ -338,7 +362,7 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 				}
 			}
 			eff.sites = append(eff.sites, at)
-			continue
+			return
 		}
 		// What an owner's fields refer to may change too, wherever it
 		// lies: the loop forgets it by region.
@@ -523,7 +547,7 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 	}
 	if writesFootprints {
 		for key, region := range st.mem {
-			if key == epochKey || key == footprintRegion {
+			if key == epochKey || key == footprintRegion || isVarRegion(key) {
 				continue
 			}
 			if regions[key] == nil {

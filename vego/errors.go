@@ -1820,6 +1820,19 @@ func (v *fnVerifier) someInput(terms []*logic.Term, search func(input *witness) 
 			name: func(i int) string { return met.val[i].Name },
 		}, 0)
 	}
+	// An assigned variable is an input that callers choose by calling the
+	// functions that set it: a sample gives its storage a value.
+	for _, key := range slices.Sorted(maps.Keys(v.assignedMet)) {
+		variable := v.assignedMet[key]
+		cells, ref := v.globalCells(variable), globalRef(variable)
+		if !slices.ContainsFunc(cells, func(c cell) bool { return b.mentioned[entryRegion+c.key] }) {
+			continue
+		}
+		b.add(variable.Type(), binding{
+			set:  func(s *witness, i int, term *logic.Term) { s.storeAt(cells[i], ref, term) },
+			name: func(i int) string { return entryRegion + cells[i].key },
+		}, 0)
+	}
 	total := 1
 	for _, alternatives := range b.slots {
 		total = min(total*max(len(alternatives), 1), maxShapes+1)
