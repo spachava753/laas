@@ -33,6 +33,10 @@ type site struct {
 	row   bool
 	fp    bool
 	owner types.Type
+	// ownerOff is where the owner lies from where root points, as for
+	// &p.out of a strings.Builder held inline (F14 of the review of
+	// d32bbee).
+	ownerOff int64
 }
 
 // effects describes what a loop may change.
@@ -282,10 +286,7 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 				eff.sites = append(eff.sites, v.ownedSites(form.typ, map[types.Type]bool{})...)
 			}
 			if form.direct && fn.paramNames[m.name] == fn.params[0] {
-				at.root = v.holder(writer, form.param.Type())
-				if form.owner && at.root != nil && at.lo == 0 {
-					at.owner = form.typ
-				}
+				v.rootSite(&at, writer, form)
 			}
 			eff.sites = append(eff.sites, at)
 		}
@@ -334,26 +335,35 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 		// Only a pointer or slice passed as it is names the same object
 		// before and inside the call.
 		if arg := argument(form.param); form.direct && arg != nil {
-			at.root = v.holder(arg, form.param.Type())
-			if at.root == nil && form.elem == nil && form.mapType == nil {
-				// A pointer to a field of what a variable points to, as the
-				// receiver of h.mu.Lock() is, names that field before and
-				// inside the call.
-				if root, offset, ok := v.fieldHolder(arg, form.param.Type()); ok {
-					at.root, at.lo, at.hi = root, at.lo+offset, at.hi+offset
-					at.cells = slices.Clone(at.cells)
-					for i := range at.cells {
-						at.cells[i].off += offset
-					}
-				}
-			}
-		}
-		if form.owner && at.lo == 0 {
-			// An owner held in a variable: what it owns grows only by
-			// what the loop creates; see forget.
-			at.owner = form.typ
+			v.rootSite(&at, arg, form)
 		}
 		eff.sites = append(eff.sites, at)
+	}
+}
+
+// rootSite roots a site of a call at the variable that holds what is
+// passed for the parameter a Modifies clause names, as it is passed: the
+// pointer or slice itself, or a pointer to a field of what a variable
+// points to, as the receiver of h.mu.Lock() is, which names that field
+// before and inside the call, at its offset. An owner so rooted is
+// recorded with where it lies from the root, so that the head of the loop
+// states that what it owns grows only by what the loop creates; see
+// forget.
+func (v *fnVerifier) rootSite(at *site, arg ast.Expr, form shape) {
+	at.root = v.holder(arg, form.param.Type())
+	offset := int64(0)
+	if at.root == nil && form.elem == nil && form.mapType == nil {
+		if root, off, ok := v.fieldHolder(arg, form.param.Type()); ok {
+			offset = off
+			at.root, at.lo, at.hi = root, at.lo+offset, at.hi+offset
+			at.cells = slices.Clone(at.cells)
+			for i := range at.cells {
+				at.cells[i].off += offset
+			}
+		}
+	}
+	if form.owner && at.root != nil && at.lo == offset {
+		at.owner, at.ownerOff = form.typ, offset
 	}
 }
 
@@ -528,7 +538,8 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 	// fields placed.
 	for _, at := range eff.sites {
 		if val := st.vals[at.root]; at.owner != nil && val != nil && !eff.whole[at.root] {
-			head.assume(v.ownerGrowth(head, st.mem, head.mem, val, at.owner, st.brk))
+			owner := value{val[0], logic.Add(val[1], logic.IntLit(at.ownerOff))}
+			head.assume(v.ownerGrowth(head, st.mem, head.mem, owner, at.owner, st.brk))
 		}
 	}
 	if !writesFootprints {

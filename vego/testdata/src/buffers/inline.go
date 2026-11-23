@@ -2,6 +2,7 @@ package buffers
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 )
 
@@ -169,3 +170,71 @@ type BufferHolder struct{ b NB }
 func HolderNB(h *BufferHolder) {
 	(*bytes.Buffer)(&h.b).WriteByte('x')
 }
+
+// LoopInlineDirect writes the Builder p holds, at a non-zero offset, in a
+// loop: at the head of the loop what it owns is what it owned or new.
+//
+// @Requires p != nil And |p.out| = 0 And 0 <= k And k <= 10
+// @Modifies p
+// @Ensures |p.out'| <= 40
+func LoopInlineDirect(p *Printer, k int) {
+	// @Invariant 0 <= i And i <= k And |p.out| <= 4 * i
+	// @Variant k - i
+	for i := 0; i < k; i++ {
+		p.out.WriteString("abc,")
+	}
+}
+
+// LoopInlineField is LoopInlineDirect under Modifies p.out.
+//
+// @Requires p != nil And |p.out| = 0 And 0 <= k And k <= 10
+// @Modifies p.out
+// @Ensures |p.out'| <= 40
+func LoopInlineField(p *Printer, k int) {
+	// @Invariant 0 <= i And i <= k And |p.out| <= 4 * i
+	// @Variant k - i
+	for i := 0; i < k; i++ {
+		p.out.WriteString("abc,")
+	}
+}
+
+// LoopInlineFormats formats into the Builder p holds in a loop.
+//
+// @Requires p != nil And |p.out| = 0 And 0 <= k And k <= 10
+// @Modifies p
+// @Ensures True
+func LoopInlineFormats(p *Printer, k int) {
+	// @Invariant 0 <= i And i <= k And |p.out| <= 10000 * i
+	// @Variant k - i
+	for i := 0; i < k; i++ {
+		fmt.Fprintf(&p.out, "%d,", i)
+	}
+}
+
+// LoopInlineKeepsOther writes p's Builder in a loop and keeps the length of
+// another Printer's.
+//
+// @Requires p != nil And q != nil And p != q And |p.out| = 0 And 0 <= k And k <= 10
+// @Modifies p
+// @Ensures |q.out'| = |q.out|
+func LoopInlineKeepsOther(p, q *Printer, k int) {
+	// @Invariant 0 <= i And i <= k And |p.out| <= 4 * i And |q.out| = |old(q.out)|
+	// @Variant k - i
+	for i := 0; i < k; i++ {
+		p.out.WriteString("abc,")
+	}
+}
+
+// LoopInlineSlice writes p's Builder in a loop beside a slice that may be
+// its array, and claims the slice kept.
+//
+// @Requires p != nil And |s| > 0 And |p.out| = 0 And 0 <= k And k <= 10
+// @Modifies p
+// @Ensures s'[0] = s[0]
+func LoopInlineSlice(p *Printer, s []byte, k int) {
+	// @Invariant 0 <= i And i <= k And |p.out| <= 4 * i
+	// @Variant k - i
+	for i := 0; i < k; i++ {
+		p.out.WriteString("abc,")
+	}
+} // want `postcondition may not hold: s'\[0\] = s\[0\]`
