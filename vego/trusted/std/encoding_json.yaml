@@ -161,8 +161,10 @@ trusted:
       the call as r's own Read of a new slice, then the decoding of
       Unmarshal from at most n bytes, with the bound of Unmarshal at n. The
       error may be one r's Read returned, so it is not vouched for.
-      TestJSONEntries holds the claim against readers that record what is
-      read, in each build.
+      It calls Read only with a buffer that is not empty, during Decode, and
+      on the goroutine that called it. TestJSONEntries holds the claim
+      against readers that record what is read and how Read is called, in
+      each build.
     decodes: [v]
     vouches: [dec]
     modifies: [dec]

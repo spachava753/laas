@@ -17,6 +17,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -284,9 +285,26 @@ func checkDecode(name string, t reflect.Type, v reflect.Value, errTypes map[stri
 type readRecorder struct {
 	data []byte
 	pos  int
+	// during holds the goroutine of the Decode that may call Read, and is
+	// "" outside it; faults counts calls with an empty buffer, outside the
+	// call, or on another goroutine.
+	during string
+	faults int
+}
+
+// goroutine returns the header line of the stack of the calling goroutine,
+// which names it.
+func goroutine() string {
+	buf := make([]byte, 64)
+	buf = buf[:runtime.Stack(buf, false)]
+	line, _, _ := strings.Cut(string(buf), " [")
+	return line
 }
 
 func (r *readRecorder) Read(p []byte) (int, error) {
+	if len(p) == 0 || r.during == "" || r.during != goroutine() {
+		r.faults++
+	}
 	if r.pos == len(r.data) {
 		return 0, io.EOF
 	}
@@ -301,7 +319,9 @@ func (r *readRecorder) Close() error                     { calls.Add(1); return 
 
 // checkDecoder holds the claim of Decode's entry: a new decoder over
 // io.LimitReader(r, n) reads at most n bytes of r, decodes the first value
-// as Unmarshal does when it fits in n, and calls nothing of r but Read.
+// as Unmarshal does when it fits in n, and calls nothing of r but Read,
+// which it calls only with a buffer that is not empty, during Decode, and
+// on the goroutine that called Decode.
 func checkDecoder(name string, t reflect.Type, v reflect.Value, errTypes map[string]bool) {
 	good, err := json.Marshal(v.Interface())
 	if err != nil {
@@ -312,7 +332,12 @@ func checkDecoder(name string, t reflect.Type, v reflect.Value, errTypes map[str
 		r := &readRecorder{data: full}
 		p := reflect.New(t)
 		calls.Store(0)
+		r.during = goroutine()
 		err := json.NewDecoder(io.LimitReader(r, n)).Decode(p.Interface())
+		r.during = ""
+		if r.faults != 0 {
+			fail("%s: the decoder called Read %d times with an empty buffer, outside Decode, or on another goroutine", name, r.faults)
+		}
 		if err != nil {
 			treeTypes(err, errTypes)
 		}
