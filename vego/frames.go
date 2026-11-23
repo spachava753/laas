@@ -1256,7 +1256,7 @@ func (v *fnVerifier) framedFrom(end *state, k *loopKept, at token.Pos, c *clause
 // call: by the invariant of rows the model's row holds at least the true
 // row, so no target cell in it means none in the true row, and keeping the
 // model's row keeps it at least the true row after.
-//
+
 // growsOnlyThroughTargets returns the targets whose cells a follow could
 // start from, when GR applies to a call: the call writes no footprint and
 // runs no code it was handed (a literal handed to a trusted function runs
@@ -1273,24 +1273,30 @@ func (v *fnVerifier) growsOnlyThroughTargets(fn *funcInfo, written []target) ([]
 	apart := []target{}
 	for _, t := range written {
 		switch {
-		case t.fp || t.row:
-			return nil, false
-		case t.single:
+		case t.single && !t.fp && !t.row:
 			apart = append(apart, t)
-		case t.mapType != nil:
-			_, value := mapParts(t.mapType)
-			if holdsFollowCell(value, map[types.Type]bool{}) {
-				return nil, false
-			}
-		case t.elem != nil:
-			if holdsFollowCell(t.elem, map[types.Type]bool{}) {
-				return nil, false
-			}
+		case !followsFrom(t):
 		default:
 			return nil, false
 		}
 	}
 	return apart, true
+}
+
+// followsFrom reports whether a target that is no struct may hold a cell
+// from which a follow starts: a footprint, a row of states, or a range or a
+// map whose values hold by value an owned field or an interface value.
+func followsFrom(t target) bool {
+	switch {
+	case t.fp || t.row:
+		return true
+	case t.mapType != nil:
+		_, value := mapParts(t.mapType)
+		return holdsFollowCell(value, map[types.Type]bool{})
+	case t.elem != nil:
+		return holdsFollowCell(t.elem, map[types.Type]bool{})
+	}
+	return true
 }
 
 // holdsFollowCell reports whether a value of a type holds, by value, a
