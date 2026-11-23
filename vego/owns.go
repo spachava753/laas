@@ -215,18 +215,14 @@ func (pv *pkgVerifier) addOwns(name *types.TypeName, c *clause) {
 			_, toStruct = types.Unalias(object).Underlying().(*types.Struct)
 		}
 		switch {
-		case isIface(f.Type()):
-			pv.report(c.pos, "%s cannot be owned yet: it holds an interface value, and owning one is not supported yet", field)
-			decl.broken = true
-			continue
-		case isPointer && toStruct, isSlice(f.Type()), isMap(f.Type()):
+		case isPointer && toStruct, isSlice(f.Type()), isMap(f.Type()), isIface(f.Type()):
 		default:
 			held := types.TypeString(f.Type(), types.RelativeTo(pv.pass.Pkg))
 			article := "a"
 			if strings.ContainsRune("aeiou", rune(held[0])) {
 				article = "an"
 			}
-			pv.report(c.pos, "%s cannot be owned: it holds %s %s, and a field can be owned when it holds a pointer to a struct, a slice, or a map",
+			pv.report(c.pos, "%s cannot be owned: it holds %s %s, and a field can be owned when it holds a pointer to a struct, a slice, a map, or an interface value",
 				field, article, held)
 			decl.broken = true
 			continue
@@ -436,7 +432,7 @@ func (v *fnVerifier) ownedWithin(val, cur value, t types.Type) *logic.Term {
 		lo, hi := v.extent(val, t)
 		curLo, curHi := v.extent(cur, t)
 		return logic.And(logic.Eq(val[0], cur[0]), logic.Le(curLo, lo), logic.Le(hi, curHi))
-	case isMap(t):
+	case isMap(t), isIface(t):
 		return logic.Eq(val[0], cur[0])
 	}
 	return logic.And(logic.Eq(val[0], cur[0]), logic.Eq(val[1], cur[1]))
@@ -473,7 +469,14 @@ func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur va
 	// call that keeps nothing returns, nothing else refers to; nor new
 	// memory that the analysis of ownership finds made of tags that are
 	// all new (R1), made since the function was entered.
-	if rhs != nil && v.allocates(rhs) || call != nil && call.keepsNot && !call.verified && !v.targetsHoldReferences(call.fn) {
+	// A value converted to an interface where it is stored is a new
+	// interface value, whose footprint must be new too.
+	converted := rhs != nil && isIface(t) && !isIface(v.info.TypeOf(rhs))
+	if isIface(t) {
+		if converted || rhs != nil && v.allocates(rhs) || call != nil && call.keepsNot && !call.verified && !v.targetsHoldReferences(call.fn) {
+			options = append(options, logic.And(logic.Le(before, home(val[0])), v.rowNewOrIn(st.mem, home(val[0]), before, nil, nil)))
+		}
+	} else if rhs != nil && v.allocates(rhs) || call != nil && call.keepsNot && !call.verified && !v.targetsHoldReferences(call.fn) {
 		options = append(options, ownedMadeSince(val, before))
 	}
 	flowMade := false
@@ -481,7 +484,7 @@ func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur va
 	if fl == nil {
 		fl = &ownFlow{}
 	}
-	if key != nil && fl.made[key] {
+	if key != nil && fl.made[key] && !isIface(t) {
 		flowMade = true
 		options = append(options, ownedMadeSince(val, v.entryBrk))
 	}
@@ -500,6 +503,8 @@ func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur va
 		copied = "copy it into a struct made with " + making
 	} else if isMap(t) {
 		copied = "copy it into new memory, as maps.Clone does"
+	} else if isIface(t) {
+		making, copied = "a value made here, as &T{...}", "make the value it holds where it is stored"
 	}
 	// What is not new since the function was entered is memory the owner
 	// did not own, which no form of the store may bring in.
@@ -629,4 +634,224 @@ func (v *fnVerifier) ownedPathRoot(e ast.Expr) (*types.Var, types.Type, bool) {
 		return nil, nil, false
 	}
 	return root, v.info.TypeOf(sel.X), true
+}
+
+// partCells returns a test of the cells a structural part of an owner
+// refers to on entry: the array of a slice inside its stretch, a map, or a
+// struct; nil for a row.
+func partCells(t target) func(ref, position *logic.Term) *logic.Term {
+	switch {
+	case t.fp || t.row:
+		return nil
+	case t.mapType != nil:
+		return func(ref, position *logic.Term) *logic.Term {
+			return logic.And(logic.Ne(t.ref, logic.RefLit(0)), logic.Eq(ref, t.ref), logic.Eq(position, logic.IntLit(0)))
+		}
+	}
+	return func(ref, position *logic.Term) *logic.Term {
+		return logic.And(logic.Ne(t.ref, logic.RefLit(0)), logic.Eq(ref, t.ref), logic.Le(t.lo, position), logic.Lt(position, t.hi))
+	}
+}
+
+// separatePart completes the separation of the part of an owner that the
+// frame's target i is (C3): what the owner parameter refers to directly,
+// its struct, is reached as the other parameters are, and so are the
+// owner's other parts; and the reach does not follow the owned cells of
+// the owner's struct and of the structs it owns, which are what holds the
+// parts. Why that is the claim HI and E give: a reference to a part stored
+// in memory lies only in the owned cell that holds it, no two owned fields
+// overlap, and no parameter's value is a part of an owner a parameter
+// reaches.
+func (v *fnVerifier) separatePart(r *separation, i int, owner *types.Var) {
+	t := v.frame[i]
+	r.contains = partCells(t)
+	r.direct = append(r.direct, passedValue{val: v.entry[owner], t: owner.Type()})
+	for j, other := range v.frame {
+		if j == i || !other.part || other.mod != t.mod || !other.sourcePart {
+			continue
+		}
+		if cells := partCells(other); cells != nil {
+			r.parts = append(r.parts, cells)
+		}
+	}
+	r.cuts = v.ownedCells(v.entry[owner], owner.Type(), map[types.Type]bool{})
+}
+
+// ownedCells returns where, on entry, the owned cells of the struct a
+// pointer to an owner of the project points to lie, and those of the
+// structs it owns through owned pointer fields and holds by value.
+func (v *fnVerifier) ownedCells(ptr value, t types.Type, seen map[types.Type]bool) [][2]*logic.Term {
+	object, isPointer := pointee(t)
+	if !isPointer || seen[object] {
+		return nil
+	}
+	seen[object] = true
+	defer delete(seen, object)
+	var cuts [][2]*logic.Term
+	for _, field := range v.inlineOwners(object) {
+		cuts = append(cuts, v.ownedCells(field.at(ptr), field.ptr, seen)...)
+	}
+	cells := v.cellsOf(object)
+	for _, index := range sourceOwnedFields(object) {
+		lo, _, ok := fieldLeaves(object, index)
+		if !ok || lo >= len(cells) {
+			continue
+		}
+		cuts = append(cuts, [2]*logic.Term{ptr[0], logic.Add(ptr[1], logic.IntLit(cells[lo].off))})
+		if ft := object.Underlying().(*types.Struct).Field(index).Type(); !isIface(ft) {
+			if _, isPtr := pointee(ft); isPtr {
+				if inner, _, ok := v.member(nil, memory{}, ptr, t, index); ok {
+					cuts = append(cuts, v.ownedCells(inner, ft, seen)...)
+				}
+			}
+		}
+	}
+	return cuts
+}
+
+// hasSourcePart reports whether a layer's targets hold a part of an owner
+// of the project, at whose cells the separations are stated as for a
+// footprint.
+func hasSourcePart(targets []target) bool {
+	return slices.ContainsFunc(targets, func(t target) bool { return t.sourcePart })
+}
+
+// partApartFromParams states, on entry, the direct cases of C3 for a part
+// of an owner the function lists: the memory another parameter refers to
+// directly, as a slice's stretch, a map, or a struct of the part's type,
+// is not the part. The reach of separatePart says the same at a cell that
+// a layer is asked about; these are what a store written directly, which
+// no layer sees, needs.
+func (v *fnVerifier) partApartFromParams(st *state, t target, owner *types.Var) {
+	zero := logic.RefLit(0)
+	for _, other := range v.fn.params {
+		val := v.entry[other]
+		if other == owner || val == nil {
+			continue
+		}
+		ot := other.Type()
+		var fact *logic.Term
+		switch {
+		case t.mapType != nil:
+			if isMap(ot) && types.Identical(ot, t.mapType) {
+				fact = logic.Or(logic.Eq(val[0], zero), logic.Eq(t.ref, zero), logic.Ne(val[0], t.ref))
+			}
+		case t.fp || t.row:
+		case isSlice(ot) && t.elem != nil && types.Identical(elemType(ot), t.elem):
+			lo, hi := v.extent(val, ot)
+			fact = logic.Or(logic.Le(val[3], logic.IntLit(0)), logic.Eq(t.ref, zero), logic.Ne(val[0], t.ref), logic.Le(hi, t.lo), logic.Le(t.hi, lo))
+		default:
+			object, isPointer := pointee(ot)
+			if !isPointer || !isStructType(object) {
+				continue
+			}
+			inPart := logic.And(logic.Eq(val[0], t.ref), logic.Le(t.lo, val[1]), logic.Lt(val[1], t.hi))
+			if t.base != nil && !types.Identical(untagged(object.Underlying()), untagged(t.base.t.Underlying())) && t.elem == nil {
+				continue
+			}
+			fact = logic.Or(logic.Eq(val[0], zero), logic.Eq(t.ref, zero), logic.Not(inPart))
+		}
+		if fact != nil {
+			st.assume(fact)
+		}
+	}
+}
+
+// checkOwnArguments proves E at a call of a verified function: no argument
+// is memory that an owner owns where an owner whose parts can hold it is
+// reached by any argument, itself included (R6; F2 of the design review).
+// An argument that is outside or new, or a parameter of the caller, which
+// the caller's own E covers, is no such memory, by HI; an inside argument,
+// or one of no known origin, is refused unless the types show that no
+// argument reaches an owner whose parts can hold it.
+func (v *fnVerifier) checkOwnArguments(call *ast.CallExpr, name string) {
+	fl := v.ownOrigins()
+	if fl == nil {
+		return
+	}
+	operands := fl.operands[call]
+	owners := map[types.Type]bool{}
+	for _, op := range operands {
+		collectOwners(v.info.TypeOf(op.expr), owners, map[types.Type]bool{})
+	}
+	if len(owners) == 0 {
+		return
+	}
+	for _, op := range operands {
+		t := v.info.TypeOf(op.expr)
+		if t == nil || !holdsMemory(t) || len(op.kind.inside) == 0 && op.kind.unknown == "" {
+			continue
+		}
+		owner := ownerHolding(owners, t)
+		if owner == nil {
+			continue
+		}
+		what := "memory that an owner may own: " + op.kind.unknown
+		for root := range op.kind.inside {
+			what = "memory that " + v.rootName(root) + " owns"
+			break
+		}
+		v.report(op.expr.Pos(), "%s is %s, and %s is handed what reaches a %s, which can own it; %s assumes that nothing it is handed is what "+
+			"an owner it is handed owns: copy it, or pass it alone", types.ExprString(op.expr), what, name,
+			types.TypeString(owner, types.RelativeTo(v.pass.Pkg)), name)
+	}
+}
+
+// collectOwners adds the struct types that own memory by a declaration in
+// source and that a value of type t is or reaches, through pointers,
+// slices, maps, and fields, not through interface values.
+func collectOwners(t types.Type, owners, seen map[types.Type]bool) {
+	if t == nil || seen[t] {
+		return
+	}
+	seen[t] = true
+	if object, isPointer := pointee(t); isPointer {
+		collectOwners(object, owners, seen)
+		return
+	}
+	switch u := t.Underlying().(type) {
+	case *types.Slice:
+		collectOwners(u.Elem(), owners, seen)
+	case *types.Map:
+		collectOwners(u.Key(), owners, seen)
+		collectOwners(u.Elem(), owners, seen)
+	case *types.Struct:
+		if len(sourceOwnedFields(t)) > 0 {
+			owners[t] = true
+		}
+		for field := range u.Fields() {
+			collectOwners(field.Type(), owners, seen)
+		}
+	}
+}
+
+// ownerHolding returns an owner among owners whose parts a value of type
+// t can be or hold directly: a slice of an owned slice's type or a pointer
+// to its elements, an owned map's type, a pointer of an owned pointer's
+// type; a struct value by its fields.
+func ownerHolding(owners map[types.Type]bool, t types.Type) types.Type {
+	for owner := range owners {
+		u := owner.Underlying().(*types.Struct)
+		for _, index := range sourceOwnedFields(owner) {
+			ft := u.Field(index).Type()
+			switch {
+			case types.Identical(ft, t):
+				return owner
+			case isSlice(ft):
+				if object, isPointer := pointee(t); isPointer && types.Identical(object, elemType(ft)) {
+					return owner
+				}
+			}
+		}
+	}
+	if u, isStruct := t.Underlying().(*types.Struct); isStruct {
+		for field := range u.Fields() {
+			if holdsMemory(field.Type()) {
+				if owner := ownerHolding(owners, field.Type()); owner != nil {
+					return owner
+				}
+			}
+		}
+	}
+	return nil
 }

@@ -1,7 +1,5 @@
 package owns
 
-import "io"
-
 // Exported owns a field that other packages could assign.
 //
 // @Owns Items // want `vego: Items cannot be owned: it is exported, and a field can be owned only when it is unexported, so that only package owns can change what it refers to; unexport it, or leave it unowned`
@@ -11,7 +9,7 @@ type Exported struct {
 
 // Counted owns a number.
 //
-// @Owns n // want `vego: n cannot be owned: it holds an int, and a field can be owned when it holds a pointer to a struct, a slice, or a map`
+// @Owns n // want `vego: n cannot be owned: it holds an int, and a field can be owned when it holds a pointer to a struct, a slice, a map, or an interface value`
 type Counted struct {
 	n int
 }
@@ -35,13 +33,6 @@ type Twice struct {
 // @Owns items // want `vego: an Owns can only be declared on a struct type without type parameters`
 type Generic[T any] struct {
 	items []T
-}
-
-// Writer owns an interface value, which is not supported yet.
-//
-// @Owns out // want `vego: out cannot be owned yet: it holds an interface value, and owning one is not supported yet`
-type Writer struct {
-	out io.Writer
 }
 
 // Node would own itself through next.

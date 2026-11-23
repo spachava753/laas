@@ -180,6 +180,9 @@ type ownFlow struct {
 	// made of tags that are all new where the store stands.
 	made      map[ast.Expr]bool
 	why       map[ast.Expr]string
+	// operands holds, for each call, its operands with their kinds where
+	// the call stands, for R6 (checkOwnArguments).
+	operands map[*ast.CallExpr][]ownOperand
 	refusals  []ownRefusal
 	keeps     map[*types.Var]bool
 	results   []ownResult
@@ -239,7 +242,7 @@ func (v *fnVerifier) ownOrigins() *ownFlow {
 		v.ownFlowNone = true
 		return nil
 	}
-	fl := &ownFlow{made: map[ast.Expr]bool{}, why: map[ast.Expr]string{}, keeps: map[*types.Var]bool{}, reported: map[string]bool{}, litAssign: map[*types.Var]bool{}}
+	fl := &ownFlow{made: map[ast.Expr]bool{}, why: map[ast.Expr]string{}, operands: map[*ast.CallExpr][]ownOperand{}, keeps: map[*types.Var]bool{}, reported: map[string]bool{}, litAssign: map[*types.Var]bool{}}
 	v.ownFlowDone = fl
 	entry := ownFact{vars: map[*types.Var]ownKind{}, status: map[ownTag]tagStatus{}}
 	if v.fn != nil {
@@ -1143,6 +1146,13 @@ func (v *fnVerifier) ownResults(fl *ownFlow, e ast.Expr, count int, f *ownFact) 
 		}
 		kinds[i] = v.ownResolve(v.ownKindOf(fl, op.expr, f), f)
 	}
+	if fl.emitting {
+		recorded := make([]ownOperand, len(operands))
+		for i, op := range operands {
+			recorded[i] = ownOperand{expr: op.expr, kind: kinds[i]}
+		}
+		fl.operands[call] = recorded
+	}
 	for i, op := range operands {
 		kind := kinds[i]
 		if c.keeps(op.param) {
@@ -1522,4 +1532,10 @@ func (v *fnVerifier) ownAddress(fl *ownFlow, e ast.Expr, f *ownFact) ownKind {
 		return v.ownSite(x, f)
 	}
 	return ownKind{unknown: fmt.Sprintf("it is the address of %s", types.ExprString(e))}
+}
+
+// ownOperand is an operand of a call with its kind.
+type ownOperand struct {
+	expr ast.Expr
+	kind ownKind
 }

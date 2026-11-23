@@ -201,6 +201,10 @@ type target struct {
 	// the clause names, when it names one.
 	part       bool
 	ownerParam *types.Var
+	// sourcePart is set for a part an owned field of a declaration in
+	// source gives, which C3 separates (owns.go, separateParts); what a
+	// shipped owner owns keeps part 1's separation.
+	sourcePart bool
 	// mod is the index of the Modifies clause the target comes from: a
 	// clause that names an owner gives a target for the struct and one
 	// for what each owned field refers to.
@@ -303,10 +307,10 @@ func (v *fnVerifier) tableAt(sink *state, mem memory, key string, sort logic.Sor
 		// joins were never stated under a quantifier and are not now.
 		if sink.collecting {
 			if known := v.layers[at.Name]; known != nil {
-				if hasFootprintTarget(known.targets) {
+				if hasFootprintTarget(known.targets) || hasSourcePart(known.targets) {
 					v.distinctStructs(sink, known, key, ref, position)
 				}
-				if hasFootprintTarget(known.targets) && !sink.noted[note] {
+				if (hasFootprintTarget(known.targets) || hasSourcePart(known.targets)) && !sink.noted[note] {
 					sink.noted[note] = true
 					sink.assume(v.unchanged(sink, at, known, ref, nil))
 				}
@@ -363,7 +367,7 @@ func (v *fnVerifier) unchanged(sink *state, now *logic.Term, known *layer, ref, 
 			conditions = append(conditions, logic.Ne(ref, t.ref))
 		}
 		fact := logic.Implies(logic.And(conditions...), v.same(logic.Select(now, ref), logic.Select(known.prev, ref)))
-		if hasFootprintTarget(known.targets) {
+		if (hasFootprintTarget(known.targets) || hasSourcePart(known.targets)) {
 			fact = logic.And(fact, logic.And(instances...), v.reachApart(ref, logic.IntLit(0)))
 		}
 		return fact
@@ -402,7 +406,7 @@ func (v *fnVerifier) unchanged(sink *state, now *logic.Term, known *layer, ref, 
 	}
 	kept := v.same(logic.Select(logic.Select(now, ref), index), logic.Select(logic.Select(known.prev, ref), index))
 	body := logic.Implies(logic.And(untouched...), kept)
-	if hasFootprintTarget(known.targets) {
+	if (hasFootprintTarget(known.targets) || hasSourcePart(known.targets)) {
 		position := index
 		if isMapRegion(known.key) {
 			position = logic.IntLit(0)

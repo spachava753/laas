@@ -316,6 +316,15 @@ type separation struct {
 	rel    *logic.Term
 	home   *logic.Term
 	direct []passedValue
+	// For a part that an owned field of a declaration in source gives
+	// (C3 of ownership in source): contains tells the part's cells on
+	// entry, in place of a row; parts tells the other parts' cells, which
+	// are reached as the other parameters are; and cuts are the owned
+	// cells of the owner's struct and of the structs it owns, whose
+	// contents the reach does not follow, since they are the parts.
+	contains func(ref, position *logic.Term) *logic.Term
+	parts    []func(ref, position *logic.Term) *logic.Term
+	cuts     [][2]*logic.Term
 	// reachable holds the types, by typeKey, that the other parameters
 	// reach; see reachesType.
 	reachable map[string]bool
@@ -371,6 +380,9 @@ func (r separation) reachedAt(v *fnVerifier, ref, position *logic.Term) *logic.T
 	for _, d := range r.direct {
 		cases = append(cases, v.directlyAt(d.val, d.t, ref, position))
 	}
+	for _, part := range r.parts {
+		cases = append(cases, part(ref, position))
+	}
 	return logic.Or(cases...)
 }
 
@@ -409,8 +421,14 @@ func (v *fnVerifier) reachApart(ref, position *logic.Term) *logic.Term {
 	var facts []*logic.Term
 	for _, r := range v.reaches {
 		reached := r.reachedAt(v, ref, position)
-		inRow, rowFacts := v.rowAt(logic.Const(entryRegion+footprintRegion, footprintSort), r.home, ref, position)
-		facts = append(facts, rowFacts...)
+		var inRow *logic.Term
+		if r.contains != nil {
+			inRow = r.contains(ref, position)
+		} else {
+			var rowFacts []*logic.Term
+			inRow, rowFacts = v.rowAt(logic.Const(entryRegion+footprintRegion, footprintSort), r.home, ref, position)
+			facts = append(facts, rowFacts...)
+		}
 		facts = append(facts, logic.Implies(reached, logic.And(logic.Not(inRow), logic.Lt(logic.IntLit(0), ref), logic.Lt(ref, v.entryBrk))))
 	}
 	return logic.And(facts...)
@@ -587,7 +605,7 @@ func (v *fnVerifier) enterReaches(st *state) {
 		} else if param != nil && v.entry[param] != nil {
 			at = home(v.entry[param][0])
 		}
-		if !t.fp || param == nil || v.entry[param] == nil {
+		if !t.fp && !t.sourcePart || param == nil || v.entry[param] == nil {
 			continue
 		}
 		name := "reach $" + param.Name()
@@ -600,6 +618,10 @@ func (v *fnVerifier) enterReaches(st *state) {
 			if other != param && v.entry[other] != nil && holdsMemory(other.Type()) {
 				r.direct = append(r.direct, passedValue{val: v.entry[other], t: other.Type()})
 			}
+		}
+		if t.sourcePart {
+			v.separatePart(&r, i, param)
+			v.partApartFromParams(st, t, param)
 		}
 		v.reaches = append(v.reaches, r)
 	}
@@ -628,7 +650,17 @@ func (v *fnVerifier) noteReached(sink *state, cells []cell, ref, at *logic.Term,
 		if !r.reachesType(t) || !r.reachesType(container) {
 			continue
 		}
-		fact := logic.Implies(r.reachedAt(v, ref, holder), v.reachedBy(r.rel, entry, t))
+		reached := r.reachedAt(v, ref, holder)
+		// The reach does not follow an owned cell of the owner's struct
+		// or of a struct it owns: those cells hold the parts.
+		if len(r.cuts) > 0 {
+			var cut []*logic.Term
+			for _, c := range r.cuts {
+				cut = append(cut, logic.And(logic.Eq(ref, c[0]), logic.Eq(holder, c[1])))
+			}
+			reached = logic.And(reached, logic.Not(logic.Or(cut...)))
+		}
+		fact := logic.Implies(reached, v.reachedBy(r.rel, entry, t))
 		if note := "reached " + fact.String(); !sink.noted[note] {
 			sink.noted[note] = true
 			sink.assume(fact)
@@ -867,11 +899,13 @@ func (v *fnVerifier) ownedParts(sink *state, mem memory, ptr value, t types.Type
 	for _, field := range inline {
 		parts = append(parts, v.ownedParts(sink, mem, field.at(ptr), field.ptr, seen)...)
 	}
+	source := len(sourceOwnedFields(object)) > 0
 	for _, index := range fields {
 		val, ft, ok := v.member(sink, mem, ptr, t, index)
 		if !ok {
 			continue
 		}
+		first := len(parts)
 		switch {
 		case isSlice(ft):
 			lo, hi := v.extent(val, ft)
@@ -882,7 +916,10 @@ func (v *fnVerifier) ownedParts(sink *state, mem memory, ptr value, t types.Type
 			if v.hasFootprint(ft) {
 				parts = append(parts, target{fp: true, ref: home(val[0]), rows: mem.region(footprintRegion, footprintSort)})
 			}
-			if v.hasStates(ft) {
+			// An owner of the project owns the states of what its owned
+			// interface value holds, whatever its interface declares, as
+			// Modifies of an interface value covers them.
+			if v.hasStates(ft) || source {
 				parts = append(parts, target{row: true, cells: []cell{stateCell}, ref: home(val[0])})
 			}
 		default:
@@ -890,6 +927,11 @@ func (v *fnVerifier) ownedParts(sink *state, mem memory, ptr value, t types.Type
 			size := v.pass.TypesSizes.Sizeof(inner)
 			parts = append(parts, target{cells: v.cellsOf(inner), ref: val[0], lo: val[1], hi: logic.Add(val[1], logic.IntLit(size)), single: true,
 				base: &structValue{t: inner, ref: val[0], at: val[1]}})
+		}
+		for i := first; i < len(parts); i++ {
+			parts[i].sourcePart = source
+		}
+		if _, isPointer := pointee(ft); isPointer && !isIface(ft) {
 			parts = append(parts, v.ownedParts(sink, mem, val, ft, seen)...)
 		}
 	}
@@ -922,7 +964,7 @@ func (v *fnVerifier) ownedSites(t types.Type, seen map[types.Type]bool) []site {
 			if v.hasFootprint(ft) {
 				sites = append(sites, site{fp: true})
 			}
-			if v.hasStates(ft) {
+			if v.hasStates(ft) || len(sourceOwnedFields(object)) > 0 {
 				sites = append(sites, site{row: true, cells: []cell{stateCell}})
 			}
 		default:
@@ -993,6 +1035,14 @@ func (v *fnVerifier) ownerGrowth(sink *state, before, after memory, ptr value, t
 	return v.ownerGrowthSeen(sink, before, after, ptr, t, bound, map[types.Type]bool{})
 }
 
+// ownerGrowthSeen is ownerGrowth with the types entered: for each owner
+// held by value it recurses at its offset, and for each owned field it
+// states, by the field's kind, that the field holds nothing, what it held,
+// within the same stretch for a slice, or memory made at or past the bound;
+// for a pointer the same pointer brings the growth of what it owns, and a
+// new one that what it owns is new; an owned interface value of a shipped
+// owner stays the same, and one of the project may be nil or a new value
+// with a new footprint.
 func (v *fnVerifier) ownerGrowthSeen(sink *state, before, after memory, ptr value, t types.Type, bound *logic.Term, seen map[types.Type]bool) *logic.Term {
 	object, isPointer := pointee(t)
 	if !isPointer || seen[object] {
@@ -1019,7 +1069,13 @@ func (v *fnVerifier) ownerGrowthSeen(sink *state, before, after memory, ptr valu
 			facts = append(facts, logic.Or(logic.Le(now[3], logic.IntLit(0)), logic.Le(bound, now[0]), within))
 		case isMap(ft):
 			facts = append(facts, logic.Or(logic.Eq(now[0], zero), logic.Eq(now[0], old[0]), logic.Le(bound, now[0])))
+		case isIface(ft) && len(sourceOwnedFields(object)) > 0:
+			// The same value, nil, or a new one whose footprint is new, as
+			// a store into an owned field of the project may leave it.
+			facts = append(facts, logic.Or(logic.Eq(now[0], old[0]), isNilRef(now),
+				logic.And(logic.Le(bound, home(now[0])), v.rowNewOrIn(after, home(now[0]), bound, nil, nil))))
 		case isIface(ft):
+			// What a shipped owner keeps does not change (its owns claim).
 			facts = append(facts, logic.Eq(now[0], old[0]))
 		default:
 			same := logic.And(logic.Eq(now[0], old[0]), logic.Eq(now[1], old[1]), v.ownerGrowthSeen(sink, before, after, now, ft, bound, seen))

@@ -594,6 +594,9 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		}
 	}
 	v.checkReachedApart(call, fn, args, written, passed, passedExpr, name)
+	if fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil {
+		v.checkOwnArguments(call, name)
+	}
 	// When the struct of an owner may not be written, what it owns is not
 	// reported again.
 	ownerRefused := map[int]bool{}
