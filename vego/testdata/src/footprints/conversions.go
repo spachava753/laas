@@ -227,3 +227,82 @@ func BumpInLoop(c *Clicker, k int) {
 		i.Inc()
 	}
 }
+
+// Scores is a slice whose Inc writes its first element, held by value in an
+// interface value, whose footprint is the array up to its capacity.
+type Scores []int
+
+// @Modifies s
+// @Ensures True
+func (s Scores) Inc() {
+	if len(s) > 0 && s[0] < 1000 {
+		s[0]++
+	}
+}
+
+// GrowsAfter converts s, appends to it past its capacity, and calls through
+// the interface value, which writes the old array and not the new one.
+//
+// @Requires |s| = 1 And cap(s) = 1
+// @Modifies s
+// @Ensures r = 7
+func GrowsAfter(s Scores) (r int) {
+	var i Incr = s
+	t := append(s, 7)
+	i.Inc()
+	return t[1]
+}
+
+// KeepsOldArray is GrowsAfter reading the old array, which the call may
+// have written.
+//
+// @Requires |s| = 1 And cap(s) = 1 And s[0] = 3
+// @Modifies s
+// @Ensures r = 3
+func KeepsOldArray(s Scores) (r int) {
+	var i Incr = s
+	i.Inc()
+	return s[0] // want `vego: postcondition may not hold: r = 3`
+}
+
+// ByValue is a struct held by value whose Inc writes what its pointer
+// field points to, which is no part of its footprint.
+type ByValue struct{ p *Clicker }
+
+// @Requires b.p != nil
+// @Modifies b.p
+// @Ensures True
+func (b ByValue) Inc() {
+	b.p.Inc()
+}
+
+// BumpByValue converts a ByValue.
+//
+// @Requires c != nil
+// @Modifies c
+// @Ensures True
+func BumpByValue(c *Clicker) {
+	var i Incr = ByValue{p: c} // want `vego: Inc may modify what it calls b.p, which Incr.Inc may not modify; it is not part of the footprint of ByValue, which is empty: a value held by value is copied for each call of its methods`
+	i.Inc()
+}
+
+// BumpTwice converts c twice, and each footprint is its struct.
+//
+// @Requires c != nil
+// @Modifies c
+// @Ensures True
+func BumpTwice(c *Clicker) {
+	var i Incr = c
+	var j Incr = c
+	i.Inc()
+	j.Inc()
+}
+
+// GrowsUnlisted is GrowsAfter without s listed.
+//
+// @Requires |s| = 1 And cap(s) = 1
+// @Ensures True
+func GrowsUnlisted(s Scores) {
+	var i Incr = s
+	i.Inc() // want `vego: i.Inc may modify the footprint of i, which GrowsUnlisted may not modify; it is the array that s holds, up to its capacity, converted at conversions.go:\d+:\d+; list s in a // @Modifies clause`
+}

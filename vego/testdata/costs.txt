@@ -662,6 +662,8 @@ footprints	(*log.Logger).Println	1	5728	0
 footprints	(*os.File).Close	3	8576	0
 footprints	(*os.File).Read	7	2016732	2
 footprints	(*os.File).Write	3	18506	0
+footprints	(footprints.ByValue).Inc	6	967	0
+footprints	(footprints.Scores).Inc	11	8731	0
 footprints	bufio.NewScanner	1	11008	0
 footprints	bufio.NewWriter	1	9378	0
 footprints	fmt.Fprintf	5	14186	0
@@ -671,9 +673,11 @@ footprints	footprints.AppendsInPlace	24	215909	2
 footprints	footprints.Branches	24	50900	0
 footprints	footprints.BuildsName	1	46	0
 footprints	footprints.Bump	11	15815	0
+footprints	footprints.BumpByValue	9	5901	0
 footprints	footprints.BumpInLoop	15	24352	0
 footprints	footprints.BumpLinked	10	17957	0
 footprints	footprints.BumpLocal	13	18393	0
+footprints	footprints.BumpTwice	19	37610	0
 footprints	footprints.BumpUnlisted	9	14731	0
 footprints	footprints.ByTypes	10	10267	0
 footprints	footprints.CallsKeeps	8	5329	0
@@ -704,6 +708,8 @@ footprints	footprints.FromPeek	9	9260	0
 footprints	footprints.FromVerified	6	4549	0
 footprints	footprints.Getters	11	10611	0
 footprints	footprints.Greets	1	46	0
+footprints	footprints.GrowsAfter	17	36154	0
+footprints	footprints.GrowsUnlisted	8	16089	0
 footprints	footprints.GuardedPeek	16	24555	0
 footprints	footprints.GuardedPut	8	8924	0
 footprints	footprints.HandedAssigns	15	43581	0
@@ -716,6 +722,7 @@ footprints	footprints.KeepsBeside	13	44429	0
 footprints	footprints.KeepsDeep	8	17815	0
 footprints	footprints.KeepsHolder	13	128950	0
 footprints	footprints.KeepsMaybe	9	8929	0
+footprints	footprints.KeepsOldArray	12	26238	0
 footprints	footprints.KeptOwn	32	132660	0
 footprints	footprints.Lines	12	100142	5
 footprints	footprints.LitAssigns	9	10583	0

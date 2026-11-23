@@ -131,7 +131,15 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		}
 		if behind != nil {
 			defines = v.structuralFootprint(converted, from)
-			v.convertedAt[held.Name] = conversion{text: types.ExprString(ast.Unparen(e)), at: e.Pos()}
+			text := types.ExprString(ast.Unparen(e))
+			memory := "the memory that " + text + " points to"
+			switch {
+			case isSlice(from):
+				memory = "the array that " + text + " holds, up to its capacity"
+			case isMap(from):
+				memory = "the map " + text
+			}
+			v.convertedAt[held.Name] = conversion{text: text, memory: memory, at: e.Pos()}
 		}
 		// A layer of the footprint region in which the row of that home
 		// holds what defines says and every other row is what it was;
@@ -587,10 +595,11 @@ func (pv *pkgVerifier) fullyContracted(t types.Type) bool {
 }
 
 // conversion is where a value with a structural footprint was converted to
-// an interface value, for messages: the expression converted.
+// an interface value, for messages: the expression converted, and the
+// memory its footprint is, in words.
 type conversion struct {
-	text string
-	at   token.Pos
+	text, memory string
+	at           token.Pos
 }
 
 // placeFootprint states, in the check of a method of a value made into an
@@ -604,12 +613,22 @@ func (v *fnVerifier) placeFootprint(entry *state, T *funcInfo, kept value, from 
 		return
 	}
 	defines := v.structuralFootprint(kept, from)
+	if v.heldReceiver != nil {
+		name, shown := v.heldReceiver.Name(), types.TypeString(from, types.RelativeTo(v.pass.Pkg))
+		_, isPointer := pointee(from)
+		switch {
+		case isPointer:
+			v.heldRemedy = fmt.Sprintf("it is not part of the footprint of %s, which is the struct %s points to", shown, name)
+		case isSlice(from):
+			v.heldRemedy = fmt.Sprintf("it is not part of the footprint of %s, which is the array %s holds, up to its capacity", shown, name)
+		case isMap(from):
+			v.heldRemedy = fmt.Sprintf("it is not part of the footprint of %s, which is the map %s is", shown, name)
+		default:
+			v.heldRemedy = fmt.Sprintf("it is not part of the footprint of %s, which is empty: a value held by value is copied for each call of its methods", shown)
+		}
+	}
 	if defines == nil {
 		return
-	}
-	if v.heldReceiver != nil {
-		v.heldRemedy = fmt.Sprintf("it is not part of the footprint of %s, which is the struct %s points to",
-			types.TypeString(from, types.RelativeTo(v.pass.Pkg)), v.heldReceiver.Name())
 	}
 	a, k := v.bound("a"), v.bound("k")
 	inside, facts := defines(a, k)
