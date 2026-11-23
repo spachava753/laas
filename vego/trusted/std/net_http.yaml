@@ -163,14 +163,16 @@ trusted:
       HTTP code. It does not otherwise end the request; the caller should
       ensure no further writes are done to w." Read from the source of Go
       1.26.6 and 1.27.3: it calls w.Header() and on the map Del and Set,
-      then w.WriteHeader(code), then fmt.Fprintln(w, error), which formats
-      into a buffer as Sprintln does and calls w.Write once; so it panics
-      for a nil w and, at the first WriteHeader, for a code outside
-      100..999, and builds |error| + 1 bytes, which the formatting bound
-      covers. It calls nothing else of w (asserts) and keeps nothing.
+      then w.WriteHeader(code), then fmt.Fprintln(w, error), which appends
+      the message and a newline to a buffer of fmt's, kept by a pool at no
+      more than 64 KB, and calls w.Write once with it; so it panics for a
+      nil w and, at the first WriteHeader, for a code outside 100..999, and
+      allocates for the |error| + 1 bytes at most twice that, rounded, which
+      is the bound formatting proves of what grows by append. It calls
+      nothing else of w (asserts) and keeps nothing.
     requires:
       - "w != nil And 100 <= code <= 999"
-      - "2 * (|error| + 4097) + 65536 <= MaxAlloc"
+      - "2 * (|error| + 1) + 65536 <= MaxAlloc"
     runs: [w]
     asserts:
       w: []

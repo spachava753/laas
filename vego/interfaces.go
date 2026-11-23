@@ -572,6 +572,9 @@ func (v *fnVerifier) usableMethodContract(call *ast.CallExpr, callee *types.Func
 // depends on what the value holds: one that verified code converted was
 // checked against the contract there, and any other is taken to meet it.
 func (v *fnVerifier) callMethod(call *ast.CallExpr, callee *types.Func, st *state, guard []*logic.Term) []value {
+	if isErrorText(v.info, call) {
+		return v.errorText(call, st, guard)
+	}
 	fn, sel := v.usableMethodContract(call, callee, st, guard)
 	u := v.unit
 	operands := u.pushCeiling()
@@ -726,4 +729,50 @@ func growsUnbounded(t types.Type) string {
 			"as in b.WriteString(fmt.Sprintf(...))", named.Obj().Name())
 	}
 	return ""
+}
+
+// isErrorText reports whether a call is err.Error() on a value of type
+// error.
+func isErrorText(info *types.Info, call *ast.CallExpr) bool {
+	sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+	if !ok || len(call.Args) != 0 {
+		return false
+	}
+	selection := info.Selections[sel]
+	return selection != nil && selection.Kind() == types.MethodVal && sel.Sel.Name == "Error" && isError(selection.Recv())
+}
+
+// errorText verifies err.Error() (F28): the error must be of an origin
+// that formatting accepts, whose Error method returns and writes nothing
+// verified code can see, and not nil. The text is a string about which one
+// thing is known, what What a proof assumes says of the text of an error:
+// that it can be printed on a line of its own, 2 * (|s| + 4096) + 65536 <=
+// MaxAlloc. errors.New requires it of its text and fmt.Errorf proves it of
+// what it builds, so verified code cannot make it false where the logic
+// has a term for the length; what stays assumed is the text of errors from
+// code that is not verified and the parts of a wrapped error that have none.
+func (v *fnVerifier) errorText(call *ast.CallExpr, st *state, guard []*logic.Term) []value {
+	sel := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+	if !v.knownError(v.bodyOrigins(), sel.X, -1) {
+		v.unsupported(call.Pos(), fmt.Sprintf("calling Error on %s would run the methods of an error whose origin is not known; "+
+			"only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, "+
+			"can be asked for its text%s", types.ExprString(sel.X), v.originWhy(sel.X)))
+	}
+	u := v.unit
+	operands := u.pushCeiling()
+	err := v.eval(sel.X, st, guard)
+	u.reach(operands)
+	v.check(st, guard, logic.Not(logic.IsNil(err[0])), call.Pos(), "the error %s may be nil", types.ExprString(sel.X))
+	text := v.unknown("text of "+types.ExprString(sel.X), types.Typ[types.String], st)
+	v.noteTyped(st, text, types.Typ[types.String])
+	st.assume(errorTextFits(v, text[0]))
+	u.calls = append(u.calls, unitCall{name: types.ExprString(call.Fun), pos: call.Pos(), pure: true})
+	u.event()
+	return []value{text}
+}
+
+// errorTextFits states that a text can be printed on a line of its own:
+// 2 * (|s| + 4096) + 65536 <= MaxAlloc, the bound formatting proves.
+func errorTextFits(v *fnVerifier, s *logic.Term) *logic.Term {
+	return logic.Le(logic.Add(logic.Mul(logic.Add(logic.Len(s), logic.IntLit(fmtSlack)), logic.IntLit(2)), logic.IntLit(1<<16)), logic.BigLit(v.maxAlloc()))
 }

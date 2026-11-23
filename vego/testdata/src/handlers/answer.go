@@ -72,7 +72,7 @@ func StatusOf(w http.ResponseWriter, code int) {
 // @Modifies w
 // @Ensures True
 func Echo(w http.ResponseWriter, msg string) {
-	http.Error(w, msg, http.StatusBadRequest) // want `precondition of Error may not hold: 2 \* \(\|error\| \+ 4097\) \+ 65536 <= MaxAlloc`
+	http.Error(w, msg, http.StatusBadRequest) // want `precondition of Error may not hold: 2 \* \(\|error\| \+ 1\) \+ 65536 <= MaxAlloc`
 }
 
 // EchoShort writes a message of a bounded length.

@@ -629,6 +629,11 @@ func (v *fnVerifier) callPollutes(call *ast.CallExpr, fact memFact) string {
 			return why
 		}
 	}
+	// The Error method of an error of known origin stores nothing
+	// (errorText), and one of another origin is refused there.
+	if isErrorText(v.info, call) {
+		return ""
+	}
 	fn := v.memCallee(call)
 	if fn == nil && v.literalOf(call) == nil {
 		return fmt.Sprintf("the call of %s at %s has no contract that says what it stores", types.ExprString(call.Fun), v.placeOf(call.Pos()))

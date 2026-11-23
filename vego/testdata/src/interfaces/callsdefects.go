@@ -88,7 +88,7 @@ func Close(r *Response) {
 // @Requires err != nil
 // @Ensures True
 func ErrorMethod(err error) (s string) {
-	return err.Error() // want `cannot verify ErrorMethod: calling Error, a method of error, is not supported yet`
+	return err.Error() // want `cannot verify ErrorMethod: calling Error on err would run the methods of an error whose origin is not known`
 }
 
 type Wrapper struct {

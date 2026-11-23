@@ -6,10 +6,12 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"math/big"
 	"slices"
 	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/solver"
 	"golang.org/x/tools/go/types/typeutil"
 )
 
@@ -268,6 +270,25 @@ func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term
 	}
 	if position := v.pass.Fset.Position(call.Pos()); !slices.Contains(v.usage.Constructors, position) {
 		v.usage.Constructors = append(v.usage.Constructors, position)
+	}
+	// The text of an error can be printed on a line of its own, which What
+	// a proof assumes says of every error; errors.New stores the text it is
+	// given, whose length the logic has a term for, so it is required
+	// here (F28).
+	// A constant text is short enough whatever the platform, and asks
+	// nothing of Z3.
+	if tv := v.info.Types[call.Args[0]]; !errorf && len(call.Args) == 1 && (tv.Value == nil || tv.Value.Kind() != constant.String || len(constant.StringVal(tv.Value)) > 1<<20) {
+		goal := errorTextFits(v, values[call.Args[0]][0])
+		done := v.at(call.Pos())
+		result := v.attempt(st, guard, goal)
+		done()
+		if result != solver.Proved {
+			room := new(big.Int).Sub(v.maxAlloc(), big.NewInt(1<<16))
+			room.Rsh(room, 1).Sub(room, big.NewInt(fmtSlack))
+			v.report(call.Pos(), "precondition of errors.New may not hold: 2 * (|text| + 4096) + 65536 <= MaxAlloc, so that the text of the error can be printed; "+
+				"it holds when |%s| <= %s%s", types.ExprString(call.Args[0]), room, limitNote(result))
+		}
+		st.assume(logic.Implies(logic.And(guard...), goal))
 	}
 	if errorf {
 		for i := range runs {
