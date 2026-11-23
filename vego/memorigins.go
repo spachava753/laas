@@ -912,7 +912,7 @@ func (v *fnVerifier) checkReachedApart(call *ast.CallExpr, fn *funcInfo, args ma
 			// points to, and only what can refer to a value of its type
 			// reaches it (F21).
 			if given, object := v.convertedPointer(passedExpr[param]); object != nil && !t.part && isIface(param.Type()) {
-				if typeReaches(other.Type(), object, map[types.Type]bool{}) {
+				if typeReaches(other.Type(), object, map[string]bool{}) {
 					v.report(call.Pos(), "%s: the footprint of %s is the struct that %s points to, which a value of type %s can refer to",
 						lead, passed[param], given, types.TypeString(other.Type(), types.RelativeTo(v.pass.Pkg)))
 				}
@@ -1128,22 +1128,30 @@ func (v *fnVerifier) convertedPointer(e ast.Expr) (string, types.Type) {
 	return "", nil
 }
 
-// typeReaches reports whether a value of type from can refer to memory that
-// holds a value of type target: through a pointer, a slice, a map, or a
-// channel, at any depth, with what it refers to holding a target inline or
-// referring on. An interface value, a function value, and an unsafe.Pointer
-// can refer to anything.
-func typeReaches(from, target types.Type, seen map[types.Type]bool) bool {
-	if seen[from] {
+// typeReaches reports whether what a value of type from refers to, without
+// going through an interface value or a function value, can overlap memory
+// that holds a value of type target: through a pointer, a slice, a map, or
+// an atomic.Pointer, at any depth, to memory that holds a target inline or
+// lies inline in one, as a *Inner points into an Outer that holds an Inner
+// (F41 of the review of step 5), with types the same when Go converts
+// pointers between them (holdsInline). It stops
+// where the assumption it proves stops: a callee assumes its footprint
+// apart only from what its other parameters reach without going through an
+// interface value (reachesType), so what an interface value holds is no
+// part of it.
+func typeReaches(from, target types.Type, seen map[string]bool) bool {
+	key := typeKey(from)
+	if seen[key] {
 		return false
 	}
-	seen[from] = true
+	seen[key] = true
+	if held, replaced := heldAs(from); replaced {
+		return held != nil && typeReaches(held, target, seen)
+	}
 	referred := func(t types.Type) bool {
-		return holdsInline(t, target, map[types.Type]bool{}) || typeReaches(t, target, seen)
+		return holdsInline(t, target, map[string]bool{}) || holdsInline(target, t, map[string]bool{}) || typeReaches(t, target, seen)
 	}
 	switch u := from.Underlying().(type) {
-	case *types.Interface, *types.Signature:
-		return true
 	case *types.Basic:
 		return u.Kind() == types.UnsafePointer
 	case *types.Pointer:
@@ -1168,14 +1176,20 @@ func typeReaches(from, target types.Type, seen map[types.Type]bool) bool {
 
 // holdsInline reports whether a value of type t is, or holds in its own
 // memory as a field or an element at any depth, a value of type target.
-func holdsInline(t, target types.Type, seen map[types.Type]bool) bool {
-	if types.Identical(t, target) {
+// Two types are the same here when their underlying types are, apart from
+// struct tags: Go converts a pointer to one into a pointer to the other, as
+// (*Twin)(o) converts a *Outer.
+func holdsInline(t, target types.Type, seen map[string]bool) bool {
+	if typeKey(t.Underlying()) == typeKey(target.Underlying()) {
 		return true
 	}
-	if seen[t] {
+	if seen[typeKey(t)] {
 		return false
 	}
-	seen[t] = true
+	seen[typeKey(t)] = true
+	if _, replaced := heldAs(t); replaced {
+		return false
+	}
 	switch u := t.Underlying().(type) {
 	case *types.Array:
 		return holdsInline(u.Elem(), target, seen)

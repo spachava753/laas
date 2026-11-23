@@ -652,6 +652,7 @@ footprints	(*bufio.Writer).WriteByte	9	54742	0
 footprints	(*footprints.Clicker).Inc	9	5161	0
 footprints	(*footprints.Counter).Put	12	10810	0
 footprints	(*footprints.Linked).Inc	12	11717	0
+footprints	(*footprints.Outer).Inc	9	5161	0
 footprints	(*footprints.Quiet).Put	14	10991	0
 footprints	(*footprints.Users).config	2	474	0
 footprints	(*footprints.Users).lookup	2	572	0
@@ -670,6 +671,7 @@ footprints	fmt.Fprintf	5	14186	0
 footprints	fmt.Fprintln	5	11289	0
 footprints	footprints.Appends	30	252741	3
 footprints	footprints.AppendsInPlace	24	215909	2
+footprints	footprints.AsTwin	11	15356	0
 footprints	footprints.Branches	24	50900	0
 footprints	footprints.BuildsName	1	46	0
 footprints	footprints.Bump	11	15815	0
@@ -755,6 +757,7 @@ footprints	footprints.NotOwn	10	13973	0
 footprints	footprints.OnBranch	9	9072	0
 footprints	footprints.OverMap	12	44771	5
 footprints	footprints.OverUnplaced	15	84136	2
+footprints	footprints.Overlap	12	16125	0
 footprints	footprints.OwnNew	9	8258	0
 footprints	footprints.Packs	15	24944	0
 footprints	footprints.Passes	6	3970	0
@@ -806,6 +809,8 @@ footprints	footprints.Usage	14	49150	0
 footprints	footprints.UsesConversion	12	30826	0
 footprints	footprints.UsesConversionAlias	11	17463	0
 footprints	footprints.UsesConversionAny	10	21176	0
+footprints	footprints.UsesConversionAtomic	11	17463	0
+footprints	footprints.UsesConversionWrapped	12	16481	0
 footprints	footprints.UsesConvertedVar	12	30826	0
 footprints	footprints.UsesMaker	10	12095	0
 footprints	footprints.UsesNewConversion	10	25828	0
@@ -838,6 +843,8 @@ footprints	footprints.firstOf	3	772	0
 footprints	footprints.get	4	2012	0
 footprints	footprints.grownTable	1	3260	0
 footprints	footprints.keepAll	8	5991	0
+footprints	footprints.keepsInner	7	6667	0
+footprints	footprints.keepsTwin	7	6667	0
 footprints	footprints.later	3	1956	0
 footprints	footprints.pairTable	1	4060	0
 footprints	footprints.pairsOf.Pairs	3	7581	0
@@ -849,8 +856,10 @@ footprints	footprints.spareOf	1	6772	0
 footprints	footprints.storesInto	1	8359	0
 footprints	footprints.tableOf	1	2926	0
 footprints	footprints.useAny	7	7402	0
+footprints	footprints.useAtomic	7	5627	0
 footprints	footprints.useBoth	7	16085	0
 footprints	footprints.useWith	7	6667	0
+footprints	footprints.useWrapped	7	6667	0
 footprints	footprints.viaLater	1	46	0
 footprints	footprints.wrapSink	1	2911	0
 footprints	io.Closer.Close	5	9772	0
@@ -1545,6 +1554,7 @@ guide	guide.At	15	12918	0
 guide	guide.AtEnd	3	1038	0
 guide	guide.AtLeastSeven	2	878	0
 guide	guide.Bounded.Size	3	975	0
+guide	guide.BufferToFile	193	2548846	14
 guide	guide.Bump	9	14338	0
 guide	guide.CallsHelper	1	111	0
 guide	guide.Cell	7	9786	0
@@ -1799,6 +1809,8 @@ guide	guide.Work	139	230323	0
 guide	guide.Wrapping	7	4897	0
 guide	guide.WriteBuffered	93	1094106	4
 guide	guide.WriteBufferedUnlisted	24	260483	5
+guide	guide.WriteCount	10	39141	0
+guide	guide.WriteCountFormatted	117	1402250	9
 guide	guide.WriteReport	70	195664	0
 guide	guide.WriteThenRead	15	59490	0
 guide	guide.WriteTotal	67	539966	0

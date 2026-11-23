@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"strings"
+	"sync/atomic"
 )
 
 // The conversions of step 5: a value of the project as an interface value
@@ -209,7 +210,7 @@ func BuildsName() {
 // @Ensures True
 func WrapsWriter(w io.Writer) (err error) {
 	bw := bufio.NewWriter(w)
-	var x io.Writer = bw // want `vego: cannot verify WrapsWriter: Write may call through a function value or an interface value`
+	var x io.Writer = bw // want `vego: cannot verify WrapsWriter: converting a value of type \*bufio.Writer to io.Writer is not supported yet: its Write calls through the writer it keeps, and nothing proves yet that calls through values that wrap values end; format into a string, as with fmt.Sprintf, and pass it to the Writer's own Write as \[\]byte\(s\)`
 	_, err = x.Write([]byte("x"))
 	return err
 }
@@ -391,13 +392,69 @@ func useAny(i Incr, xs []any) {
 }
 
 // UsesConversionAny hands useAny a converted counter and values of type
-// any, which can hold the counter.
+// any. What they hold is reached through interface values, which useAny
+// does not assume apart from the counter, so only the array of xs counts.
 //
 // @Requires c != nil
 // @Modifies c
 // @Ensures True
 func UsesConversionAny(c *Clicker, xs []any) {
-	useAny(c, xs) // want `the footprint of c is the struct that c points to, which a value of type \[\]any can refer to`
+	useAny(c, xs)
+}
+
+// Inner is a counter held inline in Outer.
+type Inner struct{ x int }
+
+// Outer holds an Inner by value.
+type Outer struct{ in Inner }
+
+// @Requires o != nil
+// @Modifies o
+// @Ensures True
+func (o *Outer) Inc() {
+	if o.in.x < 1000 {
+		o.in.x++
+	}
+}
+
+// keepsInner increments i and keeps what q points to.
+//
+// @Requires i != nil And q != nil
+// @Modifies i
+// @Ensures q.x' = q.x
+func keepsInner(i Incr, q *Inner) {
+	i.Inc()
+}
+
+// Overlap hands keepsInner a converted Outer and a pointer into it (F41 of
+// the review of step 5).
+//
+// @Requires o != nil
+// @Modifies o
+// @Ensures True
+func Overlap(o *Outer) {
+	keepsInner(o, &o.in) // want `the footprint of o is the struct that o points to, which a value of type \*Inner can refer to`
+}
+
+// Twin has the fields of Outer, so Go converts a *Outer to a *Twin.
+type Twin struct{ in Inner }
+
+// keepsTwin increments i and keeps what t points to.
+//
+// @Requires i != nil And t != nil
+// @Modifies i
+// @Ensures t.in.x' = t.in.x
+func keepsTwin(i Incr, t *Twin) {
+	i.Inc()
+}
+
+// AsTwin hands keepsTwin a converted Outer and the same pointer as a *Twin.
+//
+// @Requires o != nil
+// @Modifies o
+// @Ensures True
+func AsTwin(o *Outer) {
+	keepsTwin(o, (*Twin)(o)) // want `the footprint of o is the struct that o points to, which a value of type \*Twin can refer to`
 }
 
 // UsesNewConversion converts a counter it made, which the strings cannot
@@ -407,4 +464,45 @@ func UsesConversionAny(c *Clicker, xs []any) {
 // @Ensures True
 func UsesNewConversion(log []string) {
 	useBoth(&Clicker{}, log)
+}
+
+// useAtomic increments i beside a pointer to a counter that p holds.
+//
+// @Requires i != nil And p != nil
+// @Modifies i
+// @Ensures True
+func useAtomic(i Incr, p *atomic.Pointer[Clicker]) {
+	i.Inc()
+}
+
+// UsesConversionAtomic hands useAtomic a converted counter and an
+// atomic.Pointer, which refers to a Clicker as a *Clicker does.
+//
+// @Requires c != nil And p != nil
+// @Modifies c
+// @Ensures True
+func UsesConversionAtomic(c *Clicker, p *atomic.Pointer[Clicker]) {
+	useAtomic(c, p) // want `the footprint of c is the struct that c points to, which a value of type \*sync/atomic.Pointer\[Clicker\] can refer to`
+}
+
+// Wrapped holds a Clicker by value.
+type Wrapped struct{ C Clicker }
+
+// useWrapped increments i beside a struct that holds a counter.
+//
+// @Requires i != nil And w != nil
+// @Modifies i
+// @Ensures w.C.n' = w.C.n
+func useWrapped(i Incr, w *Wrapped) {
+	i.Inc()
+}
+
+// UsesConversionWrapped hands useWrapped a converted counter that may be
+// the one the Wrapped holds.
+//
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func UsesConversionWrapped(w *Wrapped) {
+	useWrapped(&w.C, w) // want `the footprint of &w.C is the struct that &w.C points to, which a value of type \*Wrapped can refer to`
 }

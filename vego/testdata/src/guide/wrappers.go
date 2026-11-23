@@ -115,3 +115,26 @@ func ReadAllParts(parts []io.Reader) (err error) {
 	_, err = all.Read(make([]byte, 512)) // want `all.Read may modify the footprint of all, which ReadAllParts may not modify; it is a value that MultiReader returned at wrappers.go:\d+:\d+, and its contract places its footprint in those of what parts holds, which no // @Modifies clause can list yet; pass the values written out, one argument each, and list each of them`
 	return err
 }
+
+// @Requires w != nil And 0 <= n <= 1000
+// @Modifies w
+// @Ensures True
+func WriteCount(w io.Writer, n int) (err error) {
+	bw := bufio.NewWriter(w)
+	if _, err = fmt.Fprintf(bw, "%d items\n", n); err != nil { // want `vego: cannot verify WriteCount: converting a value of type \*bufio.Writer to io.Writer is not supported yet: its Write calls through the writer it keeps, and nothing proves yet that calls through values that wrap values end; format into a string, as with fmt.Sprintf, and pass it to the Writer's own Write as \[\]byte\(s\)`
+		return err
+	}
+	return bw.Flush()
+}
+
+// @Requires w != nil And 0 <= n <= 1000
+// @Modifies w
+// @Ensures True
+func WriteCountFormatted(w io.Writer, n int) (err error) {
+	bw := bufio.NewWriter(w)
+	s := fmt.Sprintf("%d items\n", n)
+	if _, err = bw.Write([]byte(s)); err != nil {
+		return err
+	}
+	return bw.Flush()
+}

@@ -5324,6 +5324,43 @@ func WriteTotal(bw *bufio.Writer, total []byte) (err error) {
 }
 ```
 
+A `*bufio.Writer` cannot be converted to an `io.Writer` yet, so it cannot be handed to `fmt.Fprintf`. Its `Write` calls through the writer it keeps, and nothing proves yet that calls through values that wrap values end:
+
+```go
+// @Requires w != nil And 0 <= n <= 1000
+// @Modifies w
+// @Ensures True
+func WriteCount(w io.Writer, n int) (err error) {
+	bw := bufio.NewWriter(w)
+	if _, err = fmt.Fprintf(bw, "%d items\n", n); err != nil {
+		return err
+	}
+	return bw.Flush()
+}
+```
+
+```text
+vego: cannot verify WriteCount: converting a value of type *bufio.Writer to io.Writer is not supported yet: its Write
+calls through the writer it keeps, and nothing proves yet that calls through values that wrap values end; format into a
+string, as with fmt.Sprintf, and pass it to the Writer's own Write as []byte(s)
+```
+
+Format into a string first and write it with the Writer's own `Write`:
+
+```go
+// @Requires w != nil And 0 <= n <= 1000
+// @Modifies w
+// @Ensures True
+func WriteCountFormatted(w io.Writer, n int) (err error) {
+	bw := bufio.NewWriter(w)
+	s := fmt.Sprintf("%d items\n", n)
+	if _, err = bw.Write([]byte(s)); err != nil {
+		return err
+	}
+	return bw.Flush()
+}
+```
+
 `Write`, `WriteByte`, and `Flush` have entries. `ready(bw)` holds when the last of `bufio.NewWriter`, `bufio.NewWriterSize`, and `Reset` that set the writer's output set one that is not `nil`. `WriteString` has no entry, because it calls the `WriteString` method of the writer it wraps when that writer has one, and no entry covers that method. Write `bw.Write([]byte(s))` instead.
 
 The same holds for a `*bufio.Reader`. `bufio.NewReader` may return the reader it is given, and its entry says `fresh(result, rd)`. `ReadByte` requires `ready(br)`.
@@ -5591,7 +5628,28 @@ func LogToFile(name, line string) (err error) {
 }
 ```
 
-A `bufio.Writer` made over the file with `bufio.NewWriter(f)` cannot be written through yet, as described in [Writing through a buffer](#writing-through-a-buffer).
+A `*bufio.Writer` made over the file with `bufio.NewWriter(f)` can be written through, as described in [Writing through a buffer](#writing-through-a-buffer). The `Write` of an `*os.File` writes nothing behind the file, so the function lists nothing:
+
+```go
+// @Requires |name| <= 4096
+// @Ensures True
+func BufferToFile(name string, line []byte) (err error) {
+	f, cerr := os.Create(name)
+	if cerr != nil {
+		return fmt.Errorf("create %s: %w", name, cerr)
+	}
+	bw := bufio.NewWriter(f)
+	if _, werr := bw.Write(line); werr != nil {
+		f.Close()
+		return werr
+	}
+	if ferr := bw.Flush(); ferr != nil {
+		f.Close()
+		return ferr
+	}
+	return f.Close()
+}
+```
 
 Every call that opens, reads, or writes a file is assumed to return. See [What a proof assumes](#what-a-proof-assumes).
 

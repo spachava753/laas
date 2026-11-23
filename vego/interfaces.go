@@ -86,6 +86,10 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 	var behind *types.Func
 	if method := v.stateSpeaker(want); method != nil && !v.hasStates(want) {
 		if behind = v.writingImplementation(from, want); behind != nil {
+			if why := wrapsKept(from); why != "" {
+				shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
+				v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s", shown(from), shown(want), why))
+			}
 			if why := growsUnbounded(from); why != "" {
 				shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
 				v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s", shown(from), shown(want), why))
@@ -643,6 +647,28 @@ func (v *fnVerifier) placeFootprint(entry *state, T *funcInfo, kept value, from 
 	inside, facts := defines(a, k)
 	cell, more := v.rowAt(entry.mem.region(footprintRegion, footprintSort), home(v.entry[T.receiver][0]), a, k)
 	entry.assume(logic.Forall(a, logic.Forall(k, logic.Implies(inside, logic.And(append(append(facts, more...), cell)...)))))
+}
+
+// wrapsKept says why a value of a shipped type that calls through what it
+// keeps cannot be converted to an interface yet, with what to write
+// instead, or returns "". Its Write or Read calls through the writer or
+// the reader it keeps, and nothing proves yet that calls through values
+// that wrap values end (item 12 of the roadmap).
+func wrapsKept(t types.Type) string {
+	object, isPointer := pointee(t)
+	named, ok := object.(*types.Named)
+	if !isPointer || !ok || named.Obj().Pkg() == nil {
+		return ""
+	}
+	switch named.Obj().Pkg().Path() + "." + named.Obj().Name() {
+	case "bufio.Writer":
+		return "its Write calls through the writer it keeps, and nothing proves yet that calls through values that wrap values end; " +
+			"format into a string, as with fmt.Sprintf, and pass it to the Writer's own Write as []byte(s)"
+	case "bufio.Reader":
+		return "its Read calls through the reader it keeps, and nothing proves yet that calls through values that wrap values end; " +
+			"read with the Reader's own methods, such as ReadByte"
+	}
+	return ""
 }
 
 // growingMethods are the methods of bytes.Buffer and strings.Builder that
