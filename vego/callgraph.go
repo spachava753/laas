@@ -612,6 +612,28 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 			if tv.IsType() || tv.IsBuiltin() {
 				break
 			}
+			// json.NewEncoder(w).Encode(v) in one expression calls w.Write
+			// and nothing else of w; what it encodes runs nothing of the
+			// package (json.go). The NewEncoder inside it is part of it.
+			if pv.isEncoderInner(n) {
+				break
+			}
+			if w := pv.encoderInPlace(n); w != nil {
+				encode := pv.staticCalleeAt(n)
+				pv.handedCode(n, encode.Type().(*types.Signature), pv.entryFor(encode.FullName()), encode.Pkg(), false, false, encode.FullName(), false, text, unresolved)
+				wt := pv.info.TypeOf(w)
+				if obj, _, _ := types.LookupFieldOrMethod(wt, true, pv.pass.Pkg, "Write"); obj != nil {
+					method := obj.(*types.Func)
+					if isIface(wt) {
+						unresolved(n, text, "", pv.methodsMatching("Write", withoutRecv(method.Type().(*types.Signature))))
+					} else if to := g.byObj[method.Origin()]; to != nil {
+						edge(to, n.Pos(), text, true)
+					}
+				}
+				// What w is, as an argument written out, is walked as any
+				// expression is.
+				return true
+			}
 			if callee := pv.staticCalleeAt(n); callee != nil {
 				if callee.Pkg() != pv.pass.Pkg {
 					// What a call of a function of another package may run of

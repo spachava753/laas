@@ -75,3 +75,25 @@ trusted:
     ensures:
       - "result2 = nil -> fresh(result1)"
       - "result2 != nil -> result1 = nil"
+
+  (*encoding/json.Encoder).Encode:
+    reason: >-
+      "Encode writes the JSON encoding of v to the stream, followed by a
+      newline character." (Go 1.26.6). vego uses this entry only for
+      json.NewEncoder(w).Encode(v) written as one expression, where the
+      encoder is new and nothing else holds it, and refuses any other call
+      of Encode or NewEncoder. Read from source, in the four builds: Encode
+      on an encoder that NewEncoder just made marshals v as Marshal does
+      (with HTML escaped, no indent, and no earlier error), and on an error
+      returns it having written nothing; otherwise it appends a newline and
+      calls w.Write once with the result, calls nothing else of w, and
+      returns the error Write returned. So vego verifies the call as the
+      walk and the bound of Marshal with one byte more, followed by w's own
+      Write of a new slice. encodes claims what Marshal's entry claims of v.
+      The error may be one w.Write returned, so it is not vouched for.
+      TestJSONEntries holds the claim against writers that record each call,
+      fail, and write short, in each build.
+    encodes: [v]
+    runs: [enc]
+    vouches: [enc]
+    modifies: [enc]

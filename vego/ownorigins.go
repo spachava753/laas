@@ -985,6 +985,9 @@ func (v *fnVerifier) ownCalleeOf(call *ast.CallExpr) *ownCallee {
 	keepAll := func(*types.Var) bool { return true }
 	unknown := func(int) ownResult { return ownResult{unknown: true} }
 	switch {
+	case v.pkgVerifier.isEncoderInner(call):
+		// The encoder lives for the one expression; see json.go.
+		return &ownCallee{name: name, keeps: func(*types.Var) bool { return false }, results: unknown}
 	case value:
 		return &ownCallee{fn: fn, name: name, keeps: keepAll, results: unknown, why: "a function value may keep what it is handed"}
 	case fn == nil:

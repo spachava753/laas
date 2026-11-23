@@ -11,6 +11,8 @@ import (
 	"strings"
 	"unicode"
 
+	"golang.org/x/tools/go/types/typeutil"
+
 	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
 )
@@ -681,8 +683,9 @@ func (v *fnVerifier) checkEncodable(call *ast.CallExpr, fn *funcInfo) {
 // encodes, that what it builds from the value can be allocated: the
 // obligations jsonWalk.clauses generates for the static type of what the
 // call hands over, read with the parameter bound to that value as it was
-// before its conversion to any.
-func (v *fnVerifier) checkEncodedAlloc(st *state, guard []*logic.Term, call *ast.CallExpr, fn *funcInfo, args map[*types.Var]value, held map[ast.Expr]value) {
+// before its conversion to any. extra is what the function builds beyond
+// what Marshal builds, as Encode's newline.
+func (v *fnVerifier) checkEncodedAlloc(st *state, guard []*logic.Term, call *ast.CallExpr, fn *funcInfo, args map[*types.Var]value, held map[ast.Expr]value, extra int64) {
 	arg := v.encodedArg(call, fn)
 	if arg == nil {
 		return
@@ -693,6 +696,7 @@ func (v *fnVerifier) checkEncodedAlloc(st *state, guard []*logic.Term, call *ast
 		// Refused before the arguments were evaluated.
 		return
 	}
+	walk.groups[0].konst += extra
 	val := held[ast.Unparen(arg)]
 	if val == nil {
 		panic(fmt.Sprintf("vego: internal error: the value %s handed to %s was not kept as it was before its conversion", types.ExprString(arg), fn.obj.Name()))
@@ -891,4 +895,170 @@ func renameJSONRoot(text, name string) string {
 
 func isIdentByte(c byte) bool {
 	return c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+// The in-place encoder (F29, step 2). json.NewEncoder(w).Encode(v),
+// written as one expression, makes an encoder that nothing else holds,
+// and both builds of Encode marshal v as Marshal does, append a newline,
+// and call w.Write once with that, before which nothing of w runs; on an
+// error of marshalling they write nothing and return it. So the call is
+// verified as the walk and the bound of Marshal, one byte more for the
+// newline, followed by w's own Write of a new slice: the method that
+// enc.w.Write dispatches to, called on the writer as it is written, with
+// no interface value made and nothing kept. The error is Marshal's or
+// what Write returned, of which nothing vouches for the second, so it is
+// of unknown origin. Any other use of an Encoder or of NewEncoder is
+// refused: an Encoder from elsewhere may indent, may not escape HTML, or
+// hold an earlier error.
+
+// jsonEncodeKey and jsonNewEncoderKey are the functions of the route.
+const (
+	jsonEncodeKey     = "(*encoding/json.Encoder).Encode"
+	jsonNewEncoderKey = "encoding/json.NewEncoder"
+)
+
+// encoderInPlace returns, for a call json.NewEncoder(w).Encode(v) written
+// as one expression, the expression w, and otherwise nil.
+func (pv *pkgVerifier) encoderInPlace(call *ast.CallExpr) ast.Expr {
+	sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Encode" {
+		return nil
+	}
+	if encode := typeutil.StaticCallee(pv.info, call); encode == nil || encode.FullName() != jsonEncodeKey {
+		return nil
+	}
+	inner, ok := ast.Unparen(sel.X).(*ast.CallExpr)
+	if !ok || len(inner.Args) != 1 {
+		return nil
+	}
+	if made := typeutil.StaticCallee(pv.info, inner); made == nil || made.FullName() != jsonNewEncoderKey {
+		return nil
+	}
+	return inner.Args[0]
+}
+
+// isEncoderInner reports whether a call is the json.NewEncoder(w) of a
+// json.NewEncoder(w).Encode(v) written as one expression: the encoder it
+// makes is handed only to that Encode, which calls only w.Write, so the
+// call keeps nothing of w.
+func (pv *pkgVerifier) isEncoderInner(call *ast.CallExpr) bool {
+	if pv.encoderInners == nil {
+		pv.encoderInners = map[*ast.CallExpr]bool{}
+		for _, file := range pv.pass.Files {
+			ast.Inspect(file, func(n ast.Node) bool {
+				if outer, ok := n.(*ast.CallExpr); ok && pv.encoderInPlace(outer) != nil {
+					pv.encoderInners[ast.Unparen(ast.Unparen(outer.Fun).(*ast.SelectorExpr).X).(*ast.CallExpr)] = true
+				}
+				return true
+			})
+		}
+	}
+	return pv.encoderInners[call]
+}
+
+// jsonEncoderUse is the message for any other use of NewEncoder or of an
+// Encoder, or "" for a function that is neither.
+func jsonEncoderUse(callee *types.Func) string {
+	switch callee.FullName() {
+	case jsonNewEncoderKey:
+		return "json.NewEncoder keeps w in the encoder it returns; write json.NewEncoder(w).Encode(v) in one expression, since an encoder held in a variable is not supported yet"
+	case jsonEncodeKey:
+		return "Encode is verified only on a new encoder, written as json.NewEncoder(w).Encode(v) in one expression: an Encoder made elsewhere may indent, may not escape HTML, or may hold an earlier error"
+	}
+	return ""
+}
+
+// callEncoder verifies json.NewEncoder(w).Encode(v) written as one
+// expression; see encoderInPlace.
+func (v *fnVerifier) callEncoder(call *ast.CallExpr, w ast.Expr, st *state, guard []*logic.Term) []value {
+	encode := typeutil.StaticCallee(v.info, call)
+	fn := v.contractOf(encode)
+	if fn == nil || fn.encoded == nil {
+		v.unsupported(call.Pos(), "json.NewEncoder(w).Encode(v) needs the entry of (*encoding/json.Encoder).Encode that comes with vego, which lists encodes")
+	}
+	fn = v.usable(call.Pos(), fn, encode.Name(), st, guard, true)
+	v.noteUse(fn, call.Pos())
+	v.checkEncodable(call, fn)
+	// The writer's own Write: through the interface it is written as, or
+	// the method of its concrete type.
+	wt := v.info.TypeOf(w)
+	obj, _, _ := types.LookupFieldOrMethod(wt, true, v.pass.Pkg, "Write")
+	method, _ := obj.(*types.Func)
+	if method == nil {
+		v.unsupported(w.Pos(), fmt.Sprintf("%s has no method Write", types.ExprString(w)))
+	}
+	var write *funcInfo
+	if isIface(wt) {
+		write = v.methodContract(method)
+	} else {
+		write = v.contractOf(method)
+	}
+	if write == nil {
+		v.unsupported(w.Pos(), fmt.Sprintf("json.NewEncoder(%s).Encode calls %s.Write, which has no contract", types.ExprString(w), types.ExprString(w)))
+	}
+	write = v.usable(call.Pos(), write, types.ExprString(w)+".Write", st, guard, true)
+	if isIface(wt) {
+		v.ifaceStatesOf(wt)
+	}
+	u := v.unit
+	operands := u.pushCeiling()
+	made := unitCall{name: encode.Name(), pos: call.Pos()}
+	// The writer is evaluated as it is: Go converts it to io.Writer for
+	// NewEncoder, and the call is verified without that interface value.
+	inner := ast.Unparen(w)
+	v.converting[inner]++
+	writer := v.eval(w, st, guard)
+	v.converting[inner]--
+	args := map[*types.Var]value{}
+	for _, b := range v.bindCall(call, encode.Type().(*types.Signature)) {
+		args[b.param] = v.evalPassed(b, st, guard)
+	}
+	u.reach(operands)
+	if isIface(wt) {
+		// NewEncoder(nil).Encode panics at the Write.
+		v.check(st, guard, logic.Ne(writer[0], logic.RefLit(0)), call.Pos(), "the writer %s handed to json.NewEncoder may be nil", types.ExprString(w))
+	}
+	v.checkEncodedAlloc(st, guard, call, fn, args, v.held, 1)
+	// A new slice of what Encode writes, whose length nothing bounds but
+	// the bound proved above, which is not a term.
+	writeSig := write.obj.Type().(*types.Signature)
+	p := writeSig.Params().At(0)
+	bytes := v.copiedBytes(st, v.fresh("encoded", logic.IntSeq), p.Type())
+	writeArgs := map[*types.Var]value{p: bytes}
+	if write.receiver != nil {
+		writeArgs[write.receiver] = writer
+	} else if recv := writeSig.Recv(); recv != nil {
+		writeArgs[recv] = writer
+	}
+	pre := &specEnv{v: v, sink: st, fn: write, args: writeArgs, now: st.mem}
+	var needs []*logic.Term
+	v.quietly(func() {
+		for _, c := range write.requires {
+			needs = append(needs, v.formula(c, c.node, pre))
+		}
+	})
+	if v.attempt(st, guard, logic.And(needs...)) != solver.Proved {
+		v.report(call.Pos(), "json.NewEncoder(%s).Encode writes to %s JSON whose length is not a term the logic has, and the Write of %s needs a bound on what it is given; "+
+			"encode with json.Marshal and write what it returns", types.ExprString(w), types.ExprString(w), types.TypeString(wt, types.RelativeTo(v.pass.Pkg)))
+		v.cut(st, guard)
+		return v.nothingKnown(encode, st)
+	}
+	shown := &ast.Ident{NamePos: call.Lparen, Name: "[]byte(json.Marshal(...) + \"\\n\")"}
+	writeCall := &ast.CallExpr{Fun: &ast.SelectorExpr{X: w, Sel: &ast.Ident{NamePos: call.Lparen, Name: "Write"}}, Lparen: call.Lparen, Args: []ast.Expr{shown}, Rparen: call.Rparen}
+	if write.trust != nil {
+		v.noteUse(write, call.Pos())
+	}
+	v.invoke(writeCall, write, writeArgs, st, guard)
+	// The error is Marshal's or what Write returned: the result of Encode's
+	// own entry, applied to the new encoder, which nothing else holds, so
+	// that a call nothing predicts decides it.
+	// What it writes of the encoder, the one thing its frame lists, is
+	// memory nothing else holds, so the frame is left out here.
+	args[fn.params[0]] = value{v.alloc(st, true), logic.IntLit(0)}
+	result := *fn
+	result.modifies = nil
+	results := v.invoke(call, &result, args, st, guard)
+	u.calls = append(u.calls, made)
+	u.event()
+	return results
 }

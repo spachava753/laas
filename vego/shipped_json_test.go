@@ -57,13 +57,17 @@ func jsonHelper(t *testing.T, b jsonBuild) string {
 
 // jsonEntries are the shipped entries of encoding/json, each held by
 // TestJSONEntries; an entry of the package not listed has no harness.
-var jsonEntries = []string{"encoding/json.Marshal", "encoding/json.MarshalIndent"}
+var jsonEntries = []string{"encoding/json.Marshal", "encoding/json.MarshalIndent", jsonEncodeKey}
 
 // checkJSONEntry reads a shipped entry of encoding/json as a call would:
 // it must be usable, encode its parameter v, and vouch for its error.
 func checkJSONEntry(t *testing.T, pv *pkgVerifier, pkg *types.Package, key string) {
 	_, name, _ := splitFuncName(key)
 	callee, ok := pkg.Scope().Lookup(name).(*types.Func)
+	if receiver, method, isMethod := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(name, "("), "*"), ")."); isMethod {
+		found, _, _ := types.LookupFieldOrMethod(types.NewPointer(pkg.Scope().Lookup(receiver).Type()), true, pkg, method)
+		callee, ok = found.(*types.Func)
+	}
 	if !ok {
 		t.Fatalf("package %s has no function %s", pkg.Path(), name)
 	}
@@ -71,8 +75,14 @@ func checkJSONEntry(t *testing.T, pv *pkgVerifier, pkg *types.Package, key strin
 	if fn == nil || len(fn.defects) > 0 {
 		t.Fatalf("the entry of %s cannot be used: %v", key, fn.defects)
 	}
-	if fn.encoded == nil || fn.encoded.Name() != "v" || !fn.vouches[1] {
-		t.Errorf("the entry of %s does not encode v and vouch for its error", key)
+	switch {
+	case fn.encoded == nil || fn.encoded.Name() != "v":
+		t.Errorf("the entry of %s does not encode v", key)
+	case key != jsonEncodeKey && !fn.vouches[1]:
+		t.Errorf("the entry of %s does not vouch for its error", key)
+	case key == jsonEncodeKey && fn.vouches[0]:
+		// What Write returned is not vouched for.
+		t.Errorf("the entry of %s vouches for its error", key)
 	}
 }
 

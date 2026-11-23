@@ -10,6 +10,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand/v2"
@@ -135,6 +136,7 @@ func main() {
 					}
 				}
 			}
+			checkEncode(c.Type, v)
 			if n := calls.Load(); n != 0 {
 				fail("%s: encoding called %d methods it must not call", c.Type, n)
 			}
@@ -170,6 +172,53 @@ func treeTypes(err error, into map[string]bool) {
 		}
 	case interface{ Unwrap() error }:
 		treeTypes(e.Unwrap(), into)
+	}
+}
+
+// --- the in-place encoder ---
+
+// recorder records what an encoder writes; its other methods fail.
+type recorder struct {
+	writes [][]byte
+	n      int // what Write reports, -1 for all
+	err    error
+}
+
+func (r *recorder) Write(p []byte) (int, error) {
+	r.writes = append(r.writes, append([]byte(nil), p...))
+	if r.n >= 0 {
+		return min(r.n, len(p)), r.err
+	}
+	return len(p), r.err
+}
+
+func (r *recorder) WriteString(string) (int, error) { calls.Add(1); return 0, nil }
+func (r *recorder) ReadFrom(any) (int64, error)     { calls.Add(1); return 0, nil }
+func (r *recorder) Close() error                    { calls.Add(1); return nil }
+
+var errWriter = errors.New("the writer failed")
+
+// checkEncode holds the claim of Encode's entry: on a new encoder, Encode
+// writes once, exactly what Marshal returns and a newline, and returns the
+// error Write returned; when Marshal fails, it writes nothing and returns
+// an error. It is run on a writer that succeeds, one that fails, and one
+// that writes short.
+func checkEncode(name string, v reflect.Value) {
+	want, merr := json.Marshal(v.Interface())
+	for _, w := range []*recorder{{n: -1}, {n: -1, err: errWriter}, {n: 1}} {
+		err := json.NewEncoder(w).Encode(v.Interface())
+		switch {
+		case merr != nil:
+			if err == nil || len(w.writes) != 0 {
+				fail("%s: Marshal failed, and Encode returned %v after %d writes", name, err, len(w.writes))
+			}
+		case len(w.writes) != 1 || string(w.writes[0]) != string(want)+"\n":
+			fail("%s: Encode wrote %d times, not once what Marshal returns and a newline", name, len(w.writes))
+		case w.err != nil && err != w.err:
+			fail("%s: Encode returned %v where Write returned %v", name, err, w.err)
+		case w.err == nil && err != nil:
+			fail("%s: Encode returned %v where Write succeeded", name, err)
+		}
 	}
 }
 

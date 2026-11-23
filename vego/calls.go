@@ -98,6 +98,10 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	if isBuiltin(v.info, call, "recover") {
 		v.unsupported(call.Pos(), recoverRefused)
 	}
+	// json.NewEncoder(w).Encode(v) in one expression; see json.go.
+	if w := v.pkgVerifier.encoderInPlace(call); w != nil {
+		return v.callEncoder(call, w, st, guard)
+	}
 	method, viaValue := throughValue(v.info, call)
 	switch {
 	case viaValue:
@@ -115,6 +119,9 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	}
 	if callee == nil {
 		v.unsupported(call.Pos(), "only calls to named functions and methods are supported")
+	}
+	if why := jsonEncoderUse(callee); why != "" {
+		v.unsupported(call.Pos(), why)
 	}
 	// The receiver and the arguments are evaluated before the call, which
 	// is an event in the order Go fixes; see order.go.
@@ -154,7 +161,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		u.reach(operands)
 		formatted := v.checkFormattedAlloc(st, guard, call, fn, args, v.held)
 		v.checkFormatRuns(call, v.formatRuns(call, fn), st, guard)
-		v.checkEncodedAlloc(st, guard, call, fn, args, v.held)
+		v.checkEncodedAlloc(st, guard, call, fn, args, v.held, 0)
 		made.pure = v.callMemoryFree(fn, callee.Type().(*types.Signature))
 		results = v.invoke(call, fn, args, st, guard)
 		// What Sprintf returns is what fmt wrote, which is no longer than

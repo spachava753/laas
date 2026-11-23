@@ -914,6 +914,8 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 	switch {
 	case v.looped[s]:
 		v.unsupported(s.Pos(), "defer inside a loop is not supported: how many calls it puts off is not known")
+	case v.pkgVerifier.encoderInPlace(s.Call) != nil:
+		v.unsupported(s.Pos(), "deferring json.NewEncoder(w).Encode(v) is not supported: what it returns would be lost, and what it encodes is checked where it is called")
 	case lit != nil:
 		// A literal is run at each return like any deferred call, with the
 		// arguments it is given here; the variables it captures are read
