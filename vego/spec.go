@@ -1689,6 +1689,9 @@ func plan(t types.Type, steps []logic.Step, from *types.Package) ([]hop, types.T
 			if !field.Exported() && (from == nil || field.Pkg() == nil || field.Pkg().Path() != from.Path()) {
 				return nil, nil, unexportedField(spelled, field, object, from)
 			}
+			if d := hiddenOf(object, index); d != nil {
+				return nil, nil, fmt.Errorf("%s: %s", spelled, hiddenReason(d, field.Name()))
+			}
 			t = field.Type()
 		}
 		if _, ok := layoutOf(t); !ok {

@@ -406,7 +406,13 @@ func (v *fnVerifier) directlyAt(val value, t types.Type, ref, position *logic.Te
 		return logic.And(logic.Ne(at, zero), logic.Eq(ref, at), logic.Le(lo, position), logic.Lt(position, hi))
 	}
 	if object, isPointer := pointee(t); isPointer {
-		return inRange(val[0], val[1], logic.Add(val[1], logic.IntLit(v.span(object))))
+		// A hidden field is not reached through the struct that holds it
+		// (scoped.go): code that is not verified writes it.
+		in := inRange(val[0], val[1], logic.Add(val[1], logic.IntLit(v.span(object))))
+		for _, off := range v.hiddenOffsets(object) {
+			in = logic.And(in, logic.Ne(position, logic.Add(val[1], logic.IntLit(off))))
+		}
+		return in
 	}
 	switch u := t.Underlying().(type) {
 	case *types.Slice:
@@ -416,6 +422,9 @@ func (v *fnVerifier) directlyAt(val value, t types.Type, ref, position *logic.Te
 	case *types.Struct:
 		var cases []*logic.Term
 		for i := range u.NumFields() {
+			if hiddenOf(t, i) != nil {
+				continue
+			}
 			if lo, hi, ok := fieldLeaves(t, i); ok && holdsMemory(u.Field(i).Type()) {
 				cases = append(cases, v.directlyAt(val[lo:hi], u.Field(i).Type(), ref, position))
 			}
@@ -550,13 +559,18 @@ func (v *fnVerifier) checkFootprintRanged(st *state, guard []*logic.Term, t targ
 // of the fields of a struct.
 func (v *fnVerifier) reachedBy(rel *logic.Term, val value, t types.Type) *logic.Term {
 	zero := logic.RefLit(0)
-	inRange := func(ref, lo, hi *logic.Term) *logic.Term {
+	inRange := func(ref, lo, hi *logic.Term, skip ...int64) *logic.Term {
 		j := v.bound("k")
 		cellOf := logic.Select(logic.Select(rel, ref), j)
-		return logic.Implies(logic.Ne(ref, zero), logic.Forall(j, logic.Implies(logic.And(logic.Le(lo, j), logic.Lt(j, hi)), cellOf)))
+		in := logic.And(logic.Le(lo, j), logic.Lt(j, hi))
+		for _, off := range skip {
+			in = logic.And(in, logic.Ne(j, logic.Add(lo, logic.IntLit(off))))
+		}
+		return logic.Implies(logic.Ne(ref, zero), logic.Forall(j, logic.Implies(in, cellOf)))
 	}
 	if object, isPointer := pointee(t); isPointer {
-		return inRange(val[0], val[1], logic.Add(val[1], logic.IntLit(v.span(object))))
+		// A hidden field is not reached through its struct (scoped.go).
+		return inRange(val[0], val[1], logic.Add(val[1], logic.IntLit(v.span(object))), v.hiddenOffsets(object)...)
 	}
 	switch u := t.Underlying().(type) {
 	case *types.Slice:
@@ -566,6 +580,9 @@ func (v *fnVerifier) reachedBy(rel *logic.Term, val value, t types.Type) *logic.
 	case *types.Struct:
 		var facts []*logic.Term
 		for i := range u.NumFields() {
+			if hiddenOf(t, i) != nil {
+				continue
+			}
 			if lo, hi, ok := fieldLeaves(t, i); ok {
 				facts = append(facts, v.reachedBy(rel, val[lo:hi], u.Field(i).Type()))
 			}
@@ -718,7 +735,9 @@ func (v *fnVerifier) growsNothing(fn *funcInfo) bool {
 			return false
 		}
 	}
-	return !v.targetsHoldReferences(fn)
+	// What an entry lists under stores receives only memory the call made,
+	// which joins no row (see the case of stores in callPollutes).
+	return !v.targetsHold(fn, true)
 }
 
 // ownsDecl is what a shipped file declares a struct type of another module

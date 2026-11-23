@@ -753,7 +753,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			// A write through what a trusted function returned that the
 			// caller may not make is reported with the function's name.
 			_, isPointer := pointee(sig.Results().At(i).Type())
-			if isSlice(sig.Results().At(i).Type()) || isPointer || isIface(sig.Results().At(i).Type()) {
+			if isSlice(sig.Results().At(i).Type()) || isPointer || isIface(sig.Results().At(i).Type()) || isMap(sig.Results().At(i).Type()) {
 				for _, leaf := range results[i] {
 					if leaf.Sort == logic.Ref && leaf.Op == logic.OpConst {
 						from := returned{fn: fn, result: i, call: name, at: call.Pos()}
@@ -762,6 +762,11 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 						withReceiver := bound
 						if sig.Recv() != nil {
 							withReceiver = append([]passedArg{{param: sig.Recv(), expr: v.receiverPath(ast.Unparen(call.Fun).(*ast.SelectorExpr))}}, bound...)
+						} else if sel, isSel := ast.Unparen(call.Fun).(*ast.SelectorExpr); isSel && fn.receiver != nil {
+							// The receiver an interface method names, as w of
+							// what (net/http.ResponseWriter).Header places
+							// within w.
+							withReceiver = append([]passedArg{{param: fn.receiver, expr: sel.X}}, bound...)
 						}
 						from.param, from.within, from.unlessNew = withinArgument(fn, i, withReceiver)
 						from.freshIn, from.spread = freshArguments(fn, i, bound)

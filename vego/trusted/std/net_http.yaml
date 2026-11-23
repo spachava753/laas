@@ -1,5 +1,30 @@
 version: 1
 
+scoped:
+  net/http.ResponseWriter:
+    reason: >-
+      "A ResponseWriter may not be used after [Handler.ServeHTTP] has
+      returned." The HTTP/2 writer panics then ("Header called after
+      Handler finished", and the same for Write and WriteHeader), and the
+      HTTP/1 writer writes into a bufio.Writer that it has returned to a
+      pool, which another connection may be using. So verified code never
+      keeps one where a later call could reach it.
+
+hidden:
+  net/http.Request:
+    fields: [Trailer]
+    reason: >-
+      The server writes Trailer while the handler runs, behind calls whose
+      entries do not list it: "While the handler is reading from Body, it
+      must not reference Trailer." Read from the source of Go 1.26.6 and
+      1.27.3: on HTTP/1, when the writer flushes the header it drains an
+      unread body under 256 KB with Close, and reading the body to its end
+      copies the trailer into the map Trailer refers to, or assigns the
+      field when it is nil (readTrailer, mergeSetHeader); on HTTP/2 the
+      connection's goroutine writes the declared keys of the map
+      (copyTrailersToHandlerRequest). The shipped harness of the writers
+      fails unless it sees the field change.
+
 trusted:
   (*net/http.Request).PathValue:
     reason: >-
@@ -39,11 +64,16 @@ trusted:
       textproto.CanonicalMIMEHeaderKey." It writes h, which must not be nil,
       since Go panics on a write to a nil map. Not said: which key it writes,
       for the reason given in the entry of Get. A Header that a ResponseWriter
-      returns is not reached this way: (net/http.ResponseWriter).Header has
-      no entry, since what it returns is memory of the writer.
+      returns is reached this way too: it lies within the writer, so
+      Modifies of the writer covers the write. Read from the source of Go
+      1.26.6 (textproto/header.go): it stores into h only a new []string of
+      one element, so stores lists h; the harness checks that every
+      reference reachable from h after the call was reachable from it
+      before or from nothing the harness held.
     requires:
       - "h != nil"
     modifies: [h]
+    stores: [h]
 
   net/http.NewServeMux:
     reason: >-
@@ -53,3 +83,111 @@ trusted:
     modifies: []
     ensures:
       - "result != nil And fresh(result)"
+
+
+  (net/http.Header).Del:
+    reason: >-
+      "Del deletes the values associated with key. The key is case
+      insensitive; it is canonicalized by [CanonicalHeaderKey]." Read from
+      the source of Go 1.26.6 (textproto/header.go): it deletes the
+      canonical key from h, which does nothing on a nil map, and stores
+      nothing into h, so stores lists h. Not said: which key, as for Get.
+    modifies: [h]
+    stores: [h]
+
+  net/http.StatusText:
+    reason: >-
+      "StatusText returns a text for the HTTP status code. It returns the
+      empty string if the code is unknown." Read from the source of Go
+      1.26.6 and 1.27.3: every text is a constant of at most 31 bytes
+      ("Network Authentication Required"); the harness enumerates every
+      code from -1000 to 2000.
+    modifies: []
+    ensures:
+      - "|result| <= 31"
+
+  (net/http.ResponseWriter).Header:
+    reason: >-
+      "Header returns the header map that will be sent by
+      [ResponseWriter.WriteHeader]." The map is memory of the writer, so a
+      write into it is a write behind the writer, which Modifies w covers.
+      Read from the source of Go 1.26.6 and 1.27.3: the HTTP/1 writer
+      returns its handlerHeader, made with the response, and sets
+      calledHeader, cloning the map when the header was written but not
+      sent; the HTTP/2 writer and httptest.ResponseRecorder make the map on
+      the first call. None returns nil. The harness checks that the map is
+      reachable from the writer's own memory and from nothing else it
+      held. A writer used after ServeHTTP returned breaks this; verified
+      code cannot keep one (scoped).
+    receiver: w
+    modifies: [w]
+    ensures:
+      - "result != nil And within(result, w)"
+
+  (net/http.ResponseWriter).WriteHeader:
+    reason: >-
+      "WriteHeader sends an HTTP response header with the provided status
+      code. ... The provided code must be a valid HTTP 1xx-5xx status
+      code." Read from the source of Go 1.26.6 and 1.27.3
+      (checkWriteHeaderCode, in the HTTP/1 and HTTP/2 writers and in
+      httptest.ResponseRecorder): a first call with a code outside 100..999
+      panics, and a later call returns at once; the HTTP/1 writer logs it,
+      to the server's ErrorLog when code that is not verified sets one,
+      or to the standard logger, which What a proof assumes covers.
+    receiver: w
+    requires:
+      - "100 <= statusCode <= 999"
+    modifies: [w]
+
+  (net/http.ResponseWriter).Write:
+    reason: >-
+      "Write writes the data to the connection as part of an HTTP reply."
+      Its parameter has no name, so the entry can say nothing of the
+      number of bytes. Read from the source of Go 1.26.6 and 1.27.3: the
+      HTTP/1 writer copies the data into its buffer or the connection and
+      returns an error for a response that allows no body, a body longer
+      than a declared Content-Length, or a hijacked connection; the HTTP/2
+      writer copies into its buffer, and hands a write larger than the
+      buffer to the connection's goroutine and waits for it, which on a
+      stream reset may return while that goroutine still reads the data,
+      writing nothing verified code can see; httptest.ResponseRecorder
+      writes its Body, a bytes.Buffer, which panics with ErrTooLarge once
+      it cannot grow, so the claim covers a recorder only while its Body
+      can grow. None keeps the data after it returns.
+    receiver: w
+    modifies: [w]
+
+  net/http.Error:
+    reason: >-
+      "Error replies to the request with the specified error message and
+      HTTP code. It does not otherwise end the request; the caller should
+      ensure no further writes are done to w." Read from the source of Go
+      1.26.6 and 1.27.3: it calls w.Header() and on the map Del and Set,
+      then w.WriteHeader(code), then fmt.Fprintln(w, error), which formats
+      into a buffer as Sprintln does and calls w.Write once; so it panics
+      for a nil w and, at the first WriteHeader, for a code outside
+      100..999, and builds |error| + 1 bytes, which the formatting bound
+      covers. It calls nothing else of w (asserts) and keeps nothing.
+    requires:
+      - "w != nil And 100 <= code <= 999"
+      - "2 * (|error| + 4097) + 65536 <= MaxAlloc"
+    runs: [w]
+    asserts:
+      w: []
+    vouches: [w]
+    modifies: [w]
+
+  net/http.NotFound:
+    reason: >-
+      "NotFound replies to the request with an HTTP 404 not found error."
+      Read from the source of Go 1.26.6 and 1.27.3: it is
+      Error(w, "404 page not found", StatusNotFound), and does not touch r,
+      so it runs and finds nothing on r.
+    requires:
+      - "w != nil"
+    runs: [w, r]
+    asserts:
+      w: []
+      r: []
+    vouches: [w]
+    modifies: [w]

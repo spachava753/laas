@@ -81,6 +81,11 @@ type ownKind struct {
 	tags    map[ownTag]bool
 	inside  map[ownRoot]bool
 	unknown string
+	// scoped, when set, says that the value is, holds, or was converted
+	// from a value of a scoped type (scoped.go), which verified code never
+	// keeps: it names the value as written, and decl is the declaration.
+	scoped string
+	decl   *scopedDecl
 }
 
 func (k ownKind) holds() bool {
@@ -89,7 +94,11 @@ func (k ownKind) holds() bool {
 
 // union returns the kind of a value that may be either.
 func (k ownKind) union(o ownKind) ownKind {
-	out := ownKind{params: maps.Clone(k.params), tags: maps.Clone(k.tags), inside: maps.Clone(k.inside), unknown: firstReason(k.unknown, o.unknown)}
+	out := ownKind{params: maps.Clone(k.params), tags: maps.Clone(k.tags), inside: maps.Clone(k.inside), unknown: firstReason(k.unknown, o.unknown),
+		scoped: k.scoped, decl: k.decl}
+	if out.scoped == "" {
+		out.scoped, out.decl = o.scoped, o.decl
+	}
 	add := func(m *map[*types.Var]bool, from map[*types.Var]bool) {
 		for key := range from {
 			if *m == nil {
@@ -115,7 +124,7 @@ func (k ownKind) union(o ownKind) ownKind {
 }
 
 func (k ownKind) equal(o ownKind) bool {
-	return maps.Equal(k.params, o.params) && maps.Equal(k.tags, o.tags) && maps.Equal(k.inside, o.inside) && k.unknown == o.unknown
+	return maps.Equal(k.params, o.params) && maps.Equal(k.tags, o.tags) && maps.Equal(k.inside, o.inside) && k.unknown == o.unknown && k.scoped == o.scoped
 }
 
 // The statuses of a tag, in the order a join takes the worse.
@@ -215,7 +224,7 @@ func (v *fnVerifier) ownsAnything(body ast.Node) bool {
 			return false
 		}
 		if e, ok := n.(ast.Expr); ok {
-			if t := v.info.TypeOf(e); t != nil && reachesSourceOwner(t, map[types.Type]bool{}) != nil {
+			if t := v.info.TypeOf(e); t != nil && (reachesSourceOwner(t, map[types.Type]bool{}) != nil || holdsScoped(t) != nil) {
 				found = true
 			}
 		}
@@ -223,7 +232,7 @@ func (v *fnVerifier) ownsAnything(body ast.Node) bool {
 	})
 	if !found && v.fn != nil {
 		for _, param := range slices.Concat(v.fn.params, v.fn.results) {
-			if reachesSourceOwner(param.Type(), map[types.Type]bool{}) != nil {
+			if reachesSourceOwner(param.Type(), map[types.Type]bool{}) != nil || holdsScoped(param.Type()) != nil {
 				found = true
 			}
 		}
@@ -447,6 +456,11 @@ func (v *fnVerifier) ownStoreMemory(fl *ownFlow, at ast.Expr, kind ownKind, f *o
 			spelled, v.rootName(root), where)
 		break
 	}
+	spelled := ""
+	if lit, isLit := at.(*ast.CompositeLit); at != nil && (!isLit || lit.Type != nil) {
+		spelled = types.ExprString(at)
+	}
+	v.refuseScoped(fl, pos, kind, where, spelled)
 	v.ownKeep(fl, kind)
 	v.ownEscape(kind, f, where)
 }
@@ -546,7 +560,7 @@ func (v *fnVerifier) rootOf(kind ownKind) ownRoot {
 
 // ownResolve turns the owned tags of a kind into inside of their roots.
 func (v *fnVerifier) ownResolve(kind ownKind, f *ownFact) ownKind {
-	out := ownKind{params: kind.params, inside: kind.inside, unknown: kind.unknown}
+	out := ownKind{params: kind.params, inside: kind.inside, unknown: kind.unknown, scoped: kind.scoped, decl: kind.decl}
 	for tag := range kind.tags {
 		if s := f.status[tag]; s.state == tagOwned {
 			inside := maps.Clone(out.inside)
@@ -598,7 +612,7 @@ func (v *fnVerifier) ownSite(site ast.Node, f *ownFact) ownKind {
 		}
 		for variable, kind := range f.vars {
 			if kind.tags[recent] {
-				next := ownKind{params: kind.params, inside: kind.inside, unknown: kind.unknown, tags: maps.Clone(kind.tags)}
+				next := ownKind{params: kind.params, inside: kind.inside, unknown: kind.unknown, tags: maps.Clone(kind.tags), scoped: kind.scoped, decl: kind.decl}
 				delete(next.tags, recent)
 				next.tags[earlier] = true
 				f.vars[variable] = next
@@ -646,10 +660,31 @@ func (v *fnVerifier) ownKindOf(fl *ownFlow, e ast.Expr, f *ownFact) ownKind {
 	}
 	t := v.info.TypeOf(e)
 	kind := v.ownKindOfAny(fl, e, f)
-	if t != nil && !refersMemory(t) {
+	// A value that is or holds a value of a scoped type, wherever it comes
+	// from, a parameter, memory, or a call, as a struct that holds an
+	// http.ResponseWriter and nothing else that refers to memory.
+	scoped := holdsScoped(t)
+	if t != nil && !refersMemory(t) && scoped == nil {
 		return ownKind{}
 	}
+	if scoped != nil && kind.scoped == "" {
+		kind.scoped, kind.decl = types.ExprString(e), scoped
+	}
 	return kind
+}
+
+// refuseScoped refuses keeping a value of a scoped kind: what was done
+// with it says where.
+func (v *fnVerifier) refuseScoped(fl *ownFlow, pos token.Pos, kind ownKind, where string, spelled ...string) {
+	if kind.scoped == "" {
+		return
+	}
+	what := kind.scoped
+	if len(spelled) > 0 && spelled[0] != "" && spelled[0] != what {
+		what = spelled[0] + ", which holds " + kind.scoped + ","
+	}
+	fl.refuse(pos, "%s is or holds a %s.%s, which must not be used after the call that received it returns, and here it is %s, where a later call could use it; "+
+		"pass it on only to calls that keep nothing of it", what, kind.decl.pkg, kind.decl.typ, where)
 }
 
 // ownKindOfAny is ownKindOf for an expression of any type. A variable has
@@ -687,7 +722,8 @@ func (v *fnVerifier) ownKindOfAny(fl *ownFlow, e ast.Expr, f *ownFact) ownKind {
 			if len(v.ownResolve(base, f).inside) > 0 {
 				fl.refuse(x.Pos(), "the method value %s holds memory that an owner owns, and a method value may keep it; call the method instead", types.ExprString(x))
 			}
-			return ownKind{unknown: "it is a method value"}
+			// A method value of a scoped value holds it.
+			return ownKind{unknown: "it is a method value", scoped: base.scoped, decl: base.decl}
 		}
 		base := v.ownResolve(v.ownKindOf(fl, x.X, f), f)
 		holder := v.info.TypeOf(x.X)
@@ -755,6 +791,14 @@ func (v *fnVerifier) ownKindOfAny(fl *ownFlow, e ast.Expr, f *ownFact) ownKind {
 		}
 		return held
 	case *ast.FuncLit:
+		// A literal bound to a variable that is only called runs where it
+		// is called, which applies its body there (ownRunLiteral); it does
+		// not outlive the call.
+		for _, bound := range v.boundLits {
+			if bound == x {
+				return ownKind{}
+			}
+		}
 		// A literal used as a value may run after the call: what it
 		// captures is kept.
 		v.ownCaptured(fl, x, f)
@@ -844,11 +888,17 @@ func (v *fnVerifier) ownCaptured(fl *ownFlow, lit *ast.FuncLit, f *ownFact) {
 		}
 		seen[variable] = true
 		kind := v.ownResolve(f.vars[variable], f)
+		// A variable whose type is or holds a scoped value, as ownKindOf
+		// marks an expression.
+		if d := holdsScoped(variable.Type()); d != nil && kind.scoped == "" {
+			kind.scoped, kind.decl = variable.Name(), d
+		}
 		for root := range kind.inside {
 			fl.refuse(lit.Pos(), "the function literal at %s captures %s, which is memory that %s owns; read what the literal needs before it "+
 				"and pass that in, or do not declare the field owned", v.placeOf(lit.Pos()), variable.Name(), v.rootName(root))
 			break
 		}
+		v.refuseScoped(fl, lit.Pos(), kind, "captured by the function literal at "+v.placeOf(lit.Pos())+", which may run after the call")
 		v.ownKeep(fl, kind)
 		v.ownEscape(kind, f, "captured by the function literal at "+v.placeOf(lit.Pos()))
 		return true
@@ -859,7 +909,7 @@ func (v *fnVerifier) ownCaptured(fl *ownFlow, lit *ast.FuncLit, f *ownFact) {
 // in place, deferred, or handed to a trusted function that only runs it
 // (F9 (c)): its statements are applied to the fact, each assignment adding
 // to what a variable may hold, until nothing changes.
-func (v *fnVerifier) ownRunLiteral(fl *ownFlow, lit *ast.FuncLit, f *ownFact) {
+func (v *fnVerifier) ownRunLiteral(fl *ownFlow, lit *ast.FuncLit, f *ownFact) (returned ownKind) {
 	for range 8 {
 		before := f.clone()
 		ast.Inspect(lit.Body, func(n ast.Node) bool {
@@ -876,7 +926,7 @@ func (v *fnVerifier) ownRunLiteral(fl *ownFlow, lit *ast.FuncLit, f *ownFact) {
 				return false
 			case *ast.ReturnStmt:
 				for _, r := range n.Results {
-					v.ownKindOf(fl, r, f)
+					returned = returned.union(v.ownKindOf(fl, r, f))
 				}
 				return false
 			case *ast.RangeStmt:
@@ -902,10 +952,11 @@ func (v *fnVerifier) ownRunLiteral(fl *ownFlow, lit *ast.FuncLit, f *ownFact) {
 				}
 			}
 			if unchanged {
-				return
+				return returned
 			}
 		}
 	}
+	return returned
 }
 
 // ownCallee is what the analysis knows of a callee: for each of its
@@ -1143,7 +1194,7 @@ func (v *fnVerifier) ownResults(fl *ownFlow, e ast.Expr, count int, f *ownFact) 
 				// The elements are copied; a copied element that refers to
 				// memory is stored.
 				if len(call.Args) == 2 && refersMemory(elemType(v.info.TypeOf(call.Args[1]))) {
-					v.ownStoreMemory(fl, call.Args[1], ownKind{unknown: kinds[1].unknown}, f, "copied")
+					v.ownStoreMemory(fl, call.Args[1], ownKind{unknown: kinds[1].unknown, scoped: kinds[1].scoped, decl: kinds[1].decl}, f, "copied")
 				}
 			}
 			return out
@@ -1153,9 +1204,10 @@ func (v *fnVerifier) ownResults(fl *ownFlow, e ast.Expr, count int, f *ownFact) 
 		for _, arg := range call.Args {
 			v.ownKindOf(fl, arg, f)
 		}
-		v.ownRunLiteral(fl, lit, f)
+		returned := v.ownRunLiteral(fl, lit, f)
 		for i := range out {
-			out[i] = ownKind{unknown: "it comes from a function literal"}
+			// What the literal returns may be a scoped value it reaches.
+			out[i] = ownKind{unknown: "it comes from a function literal", scoped: returned.scoped, decl: returned.decl}
 		}
 		return out
 	}
@@ -1200,6 +1252,7 @@ func (v *fnVerifier) ownResults(fl *ownFlow, e ast.Expr, count int, f *ownFact) 
 					c.name, v.paramName(op.param), v.rootName(root), c.why)
 				break
 			}
+			v.refuseScoped(fl, op.expr.Pos(), kind, "handed to "+c.name+" as "+v.paramName(op.param)+" ("+c.why+")", types.ExprString(op.expr))
 			v.ownKeep(fl, kind)
 			v.ownEscape(kind, f, "handed to "+c.name+", which may keep it")
 			continue
@@ -1339,6 +1392,11 @@ func (v *fnVerifier) ownReturn(fl *ownFlow, ret *ast.ReturnStmt, f *ownFact) {
 		if i < len(ret.Results) {
 			pos = ret.Results[i].Pos()
 		}
+		resultText := ""
+		if i < len(ret.Results) {
+			resultText = types.ExprString(ret.Results[i])
+		}
+		v.refuseScoped(fl, pos, kind, "returned by "+v.fn.obj.Name(), resultText)
 		if kind.unknown != "" {
 			r.unknown = true
 		}

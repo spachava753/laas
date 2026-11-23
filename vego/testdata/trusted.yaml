@@ -3,6 +3,39 @@
 version: 1
 
 trusted:
+  handlers.trailerOf:
+    reason: Test helper standing for a trusted function that returns the trailer of a request, which verified code cannot name.
+    requires:
+      - "r != nil"
+    runs: [r]
+    asserts:
+      r: []
+    modifies: []
+
+  handlers.fill:
+    reason: Test helper whose entry claims stores of h; it is handed a slice it could store, which the claim does not cover.
+    requires:
+      - "h != nil"
+    modifies: [h]
+    stores: [h]
+
+  handlers.grownBeside:
+    reason: Test helper that sets a header of h, which it lists under stores, writes s, and returns a map in the footprint of s.
+    requires:
+      - "h != nil And s != nil"
+    runs: [s]
+    modifies: [h, s]
+    stores: [h]
+    vouches: [s]
+    ensures:
+      - "m != nil And within(m, s)"
+
+  handlers.rowsOf:
+    reason: Test helper that returns rows of no known origin.
+    requires:
+      - "p != nil"
+    modifies: []
+
   # The guide's entry for os.ReadFile, which TestReadFileEntry checks
   # against the real function on regular files.
   os.ReadFile:
@@ -2152,4 +2185,5 @@ state:
   ifacestatelib.Defined: # // want `the trust file declares states of ifacestatelib.Defined, which declares no method of its own`
     gone:
       reason: Defined from Conn, whose methods it has.
+
 

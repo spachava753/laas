@@ -73,8 +73,12 @@ type trustEntry struct {
 	// prints names the writer a function that formats writes to, and the
 	// function whose result it writes; see prints.go.
 	prints []trustKeep
-	file     *trustFile
-	line     int
+	// stores names the parameters under whose memory, as modifies lists
+	// it, the function stores only memory it made during the call; see
+	// memorigins.go.
+	stores []trustFormula
+	file   *trustFile
+	line   int
 }
 
 // trustCall is one entry under calls: a function parameter, names for the
@@ -118,6 +122,11 @@ type trustFile struct {
 	// owns holds, by type, the fields whose memory a value of the type
 	// owns; only the shipped files declare any. See footprint.go.
 	owns map[string]ownsDecl
+	// scoped and hidden hold the scoped interface types and the hidden
+	// fields of struct types that the shipped files declare; see
+	// scoped.go.
+	scoped map[string]scopedDecl
+	hidden map[string]hiddenDecl
 	// problems are the defects of the file itself, by line.
 	problems []trustProblem
 }
@@ -135,7 +144,7 @@ func (f *trustFile) problem(line int, format string, args ...any) {
 // understand is recorded as a problem rather than skipped, so that a
 // misspelt field cannot silently drop part of a contract.
 func parseTrustFile(path string, content []byte, shipped bool) *trustFile {
-	file := &trustFile{path: path, content: content, shipped: shipped, entries: map[string]*trustEntry{}, states: map[string][]stateDecl{}, owns: map[string]ownsDecl{}}
+	file := &trustFile{path: path, content: content, shipped: shipped, entries: map[string]*trustEntry{}, states: map[string][]stateDecl{}, owns: map[string]ownsDecl{}, scoped: map[string]scopedDecl{}, hidden: map[string]hiddenDecl{}}
 	var document, second yaml.Node
 	decoder := yaml.NewDecoder(bytes.NewReader(content))
 	if err := decoder.Decode(&document); err != nil && !errors.Is(err, io.EOF) {
@@ -177,11 +186,15 @@ func parseTrustFile(path string, content []byte, shipped bool) *trustFile {
 			file.addStates(value)
 		case "owns":
 			file.addOwns(value)
+		case "scoped":
+			file.addScoped(value)
+		case "hidden":
+			file.addHidden(value)
 		default:
 			// A project file cannot declare owns, so it is not offered one.
 			expected := "version, trusted, or state"
 			if file.shipped {
-				expected = "version, trusted, state, or owns"
+				expected = "version, trusted, state, owns, scoped, or hidden"
 			}
 			file.problem(key.Line, "unknown key %q; expected %s", key.Value, expected)
 		}
@@ -281,6 +294,10 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			for _, item := range scalars("vouches", value) {
 				entry.vouches = append(entry.vouches, trustFormula{text: item.Value, line: item.Line, col: item.Column})
 			}
+		case "stores":
+			for _, item := range scalars("stores", value) {
+				entry.stores = append(entry.stores, trustFormula{text: item.Value, line: item.Line, col: item.Column})
+			}
 		case "formats":
 			for _, item := range scalars("formats", value) {
 				entry.formats = append(entry.formats, trustFormula{text: item.Value, line: item.Line, col: item.Column})
@@ -300,7 +317,7 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			}
 			entry.receiver = trustFormula{text: value.Value, line: value.Line, col: value.Column}
 		default:
-			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, receiver, requires, ensures, modifies, runs, keeps, asserts, vouches, formats, prints, or calls",
+			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, receiver, requires, ensures, modifies, stores, runs, keeps, asserts, vouches, formats, prints, or calls",
 				field.Value, entry.key)
 		}
 	}
@@ -779,6 +796,17 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 	}
 	for _, item := range entry.calls {
 		pv.trustedCall(fn, item)
+	}
+	// A parameter under stores claims something of memory modifies lists
+	// under it; one with none listed claims it of nothing.
+	for _, item := range entry.stores {
+		if _, ok := fn.paramNames[item.text]; !ok {
+			fn.defect("its stores %q: %s is not a parameter", item.text, item.text)
+			continue
+		}
+		if !slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.name == item.text }) {
+			fn.defect("its stores lists %s, under which its modifies lists nothing; stores says what the function stores into memory that modifies lists", item.text)
+		}
 	}
 	pv.readFormats(fn, entry)
 	pv.readPrints(fn, entry)

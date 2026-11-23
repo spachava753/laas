@@ -93,6 +93,9 @@ func (pv *pkgVerifier) typeEntry(key string, obj *types.Func, methodOf *types.Fu
 	if len(entry.calls) > 0 {
 		fn.defect("it has calls, which a contract of a type cannot have")
 	}
+	if len(entry.stores) > 0 {
+		fn.defect("it lists stores, which a contract of a type cannot have: a value of the type is any implementation, and what one stores no entry can see")
+	}
 	if len(entry.keeps) > 0 {
 		fn.defect("it lists keeps, which a contract of a type cannot have: a call through a value of the type is never handed code nobody has seen")
 	}

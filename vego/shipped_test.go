@@ -718,6 +718,16 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 		h.Set(key, value)
 		return sample{before: before, after: []any{h, key, value}}
 	},
+	"(net/http.Header).Del": func(rng *rand.Rand) sample {
+		h, key := randomHeader(rng)
+		before := snapshot(h, key)
+		h.Del(key)
+		return sample{before: before, after: []any{h, key}}
+	},
+	"net/http.StatusText": func(rng *rand.Rand) sample {
+		code := rng.Intn(3001) - 1000
+		return sample{before: []any{code}, after: []any{code}, results: []any{http.StatusText(code)}}
+	},
 	"net/http.NewServeMux": func(*rand.Rand) sample {
 		return sample{results: []any{http.NewServeMux()}}
 	},
@@ -1932,6 +1942,10 @@ func checkShipped(t *testing.T, files bool, run func(key string) bool) {
 					if _, problem := pv.assertsClaim(entry, callee.Type().(*types.Signature), callee.Pkg()); problem != "" {
 						t.Errorf("the claim under asserts cannot be read: %s", problem)
 					}
+				}
+				if slices.Contains(httpKeys, key) {
+					checkHTTPEntries(t, pv, pkg, key)
+					return
 				}
 				if fn := shippedTypeContract(pv, pkg, name); fn != nil && key == "(io.Closer).Close" {
 					checkCloseEntry(t, pv, fn)

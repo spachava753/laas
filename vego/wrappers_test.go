@@ -342,7 +342,7 @@ func (c *sequenceCheck) env() *specEnv {
 	env.givenRelation = func(name string, paths []logic.Path) (*logic.Term, error) {
 		index, isResult := c.fn.resultNames[paths[0].Root]
 		if name == "within" && c.within != nil && isResult && len(paths) == 2 && len(paths[0].Steps) == 0 && len(paths[1].Steps) == 0 &&
-			paths[1].Root == c.fn.params[0].Name() {
+			(c.fn.receiver != nil && paths[1].Root == c.fn.receiver.Name() || len(c.fn.params) > 0 && paths[1].Root == c.fn.params[0].Name()) {
 			return logic.BoolLit(c.within[c.fn.results[index]]), nil
 		}
 		if name != "fresh" || len(paths[0].Steps) > 0 || !isResult {
