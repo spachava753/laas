@@ -2081,8 +2081,11 @@ handlers	(*handlers.Server).KeepLast	18	23748	0
 handlers	(*handlers.Server).KeepSlice	6	3684	0
 handlers	(*handlers.Server).keeper	6	3663	0
 handlers	(*net/http.Request).PathValue	2	108268	2
+handlers	(*net/url.URL).Query	2	49511	2
 handlers	(net/http.Header).Del	1	6058	0
+handlers	(net/http.Header).Get	2	131099	2
 handlers	(net/http.Header).Set	1	8395	0
+handlers	(net/url.Values).Get	2	131099	2
 handlers	context.Context.Err	3	3120	0
 handlers	handlers.Answer	44	641171	18
 handlers	handlers.Assigned	0	0	0
@@ -2116,7 +2119,9 @@ handlers	handlers.Short	11	7327	0
 handlers	handlers.Sink.Put	4	1915	0
 handlers	handlers.Status	9	6382	0
 handlers	handlers.StatusOf	13	17415	0
+handlers	handlers.Tagged	55	1035081	17
 handlers	handlers.Twice	15	24453	0
+handlers	handlers.Unbounded	9	149202	4
 handlers	handlers.Unknown	2	877	0
 handlers	handlers.Unlisted	13	146690	8
 handlers	handlers.Unnamed	22	4431262	7

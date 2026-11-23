@@ -1,0 +1,32 @@
+version: 1
+
+trusted:
+  (*net/url.URL).Query:
+    reason: >-
+      "Query parses RawQuery and returns the corresponding values. It
+      silently discards malformed value pairs." Read from the source of Go
+      1.26.6 and 1.27.3 (ParseQuery, parseQuery): it makes a new map, cuts
+      RawQuery at each & and =, unescapes each key and value into a string
+      no longer than its text, and appends each value to the slice of its
+      key; so it panics for a nil u, and the largest allocation is the slice
+      of one key, at most (|RawQuery| + 1) / 2 strings of 16 bytes grown by
+      append, which the requires bounds with room for the growth and the
+      rounding of growslice on a 32-bit target. The limit of 10,000
+      parameters that GODEBUG=urlmaxqueryparams sets is not relied on, since
+      code that is not verified may lift it. The map and its slices are new.
+      Not said: which keys and values it holds.
+    requires:
+      - "u != nil"
+      - "32 * (|u.RawQuery| + 1) + 65536 <= MaxAlloc"
+    modifies: []
+    ensures:
+      - "result != nil And fresh(result)"
+
+  (net/url.Values).Get:
+    reason: >-
+      "Get gets the first value associated with the given key. If there are
+      no values associated with the key, Get returns the empty string."
+      Read from the source of Go 1.26.6: it reads v[key], also of a nil
+      map. Not said: which value, since the logic has no term for what a
+      map of slices holds at a string key here.
+    modifies: []

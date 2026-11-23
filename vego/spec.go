@@ -48,6 +48,10 @@ type specEnv struct {
 	// with a length, where given is set; the tests of the shipped entries
 	// of buffers answer it from the fields of the real value.
 	givenLength func(v *types.Var, when logic.When) *logic.Term
+	// givenPath, when set, answers a path through a parameter that the
+	// tests of a shipped entry read from the real value, as |u.RawQuery|,
+	// or returns nil to leave it to the rest.
+	givenPath func(name string, steps []logic.Step, when logic.When) *logic.Term
 	// now is the memory plain paths are read from, and post the memory
 	// primed paths and results are read from, nil where there is none.
 	now, post memory
@@ -711,6 +715,11 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 	if last := len(steps) - 1; last >= 0 && steps[last].ElemSize {
 		return e.elemSize(name, steps[:last], when)
 	}
+	if e.givenPath != nil {
+		if term := e.givenPath(name, steps, when); term != nil {
+			return term, nil
+		}
+	}
 	if _, ok := e.readyMade(name, when); ok && len(steps) == 1 && (steps[0].Keys || steps[0].Has) && e.givenSlice != nil {
 		// The keys of a map a parameter or a result holds, which the
 		// tests of shipped entries answer from the real map.
@@ -914,6 +923,20 @@ func (v *fnVerifier) growthHint(c *clause, node *logic.Node, pre *specEnv, passe
 	var visit func(n *logic.Node)
 	visit = func(n *logic.Node) {
 		switch {
+		case n.Kind == logic.NLen && len(n.Kids) == 1 && n.Kids[0].Kind == logic.NField:
+			// The length of a field reached from a parameter, as
+			// |u.RawQuery|.
+			root, path := n.Kids[0], ""
+			for root.Kind == logic.NField {
+				path, root = "."+root.Name+path, root.Kids[0]
+			}
+			if root.Kind == logic.NIdent {
+				if param, ok := pre.fn.paramNames[root.Name]; ok && !seen["|"+root.Name+path+"|"] {
+					seen["|"+root.Name+path+"|"] = true
+					names = append(names, "|"+passed[param]+path+"|")
+				}
+			}
+			return
 		case n.Kind == logic.NLen && len(n.Kids) == 1 && n.Kids[0].Kind == logic.NIdent:
 			if param, ok := pre.fn.paramNames[n.Kids[0].Name]; ok && !seen["|"+n.Kids[0].Name+"|"] {
 				seen["|"+n.Kids[0].Name+"|"] = true
@@ -980,8 +1003,12 @@ type boundedEnv struct {
 
 func (e *boundedEnv) Path(name string, steps []logic.Step, when logic.When) (*logic.Term, error) {
 	if param, ok := e.fn.paramNames[name]; ok {
+		fields := len(steps) > 1
+		for _, step := range steps[:max(len(steps)-1, 0)] {
+			fields = fields && step.Field != ""
+		}
 		switch {
-		case len(steps) == 1 && steps[0].Len:
+		case len(steps) == 1 && steps[0].Len, fields && steps[len(steps)-1].Len:
 			return e.bound, nil
 		case len(steps) == 0 && isInteger(param.Type()):
 			return e.bound, nil

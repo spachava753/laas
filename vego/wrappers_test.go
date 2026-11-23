@@ -319,6 +319,8 @@ type sequenceCheck struct {
 	// within holds the results that lie in what the receiver owns, which
 	// within(result, b) asks.
 	within map[*types.Var]bool
+	// path answers paths through parameters, as givenPath does.
+	path func(name string, steps []logic.Step, when logic.When) *logic.Term
 }
 
 func (c *sequenceCheck) env() *specEnv {
@@ -339,6 +341,7 @@ func (c *sequenceCheck) env() *specEnv {
 		return logic.BoolLit(value)
 	}
 	env.givenLength = c.length
+	env.givenPath = c.path
 	env.givenRelation = func(name string, paths []logic.Path) (*logic.Term, error) {
 		index, isResult := c.fn.resultNames[paths[0].Root]
 		if name == "within" && c.within != nil && isResult && len(paths) == 2 && len(paths[0].Steps) == 0 && len(paths[1].Steps) == 0 &&

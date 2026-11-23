@@ -17,6 +17,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -728,6 +729,15 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 		code := rng.Intn(3001) - 1000
 		return sample{before: []any{code}, after: []any{code}, results: []any{http.StatusText(code)}}
 	},
+	"(net/url.Values).Get": func(rng *rand.Rand) sample {
+		v := url.Values{"a": {"1", "2"}, "b": {}, "%": {""}}
+		if rng.Intn(3) == 0 {
+			v = nil
+		}
+		key := []string{"a", "b", "c", "", "%"}[rng.Intn(5)]
+		before := snapshot(v, key)
+		return sample{before: before, after: []any{v, key}, results: []any{v.Get(key)}}
+	},
 	"net/http.NewServeMux": func(*rand.Rand) sample {
 		return sample{results: []any{http.NewServeMux()}}
 	},
@@ -1201,6 +1211,25 @@ func randomRequest(rng *rand.Rand) (*http.Request, string) {
 		return request, name
 	}
 	return matched, name
+}
+
+// randomQuery returns the query of a URL: empty, keys with values and
+// without, repeated keys, escapes valid and not, a semicolon, and the worst
+// shape for the slice of one key, "a&a&a...".
+func randomQuery(rng *rand.Rand) string {
+	switch rng.Intn(6) {
+	case 0:
+		return ""
+	case 1:
+		return "a=1&b=2&a=3"
+	case 2:
+		return "x=%41%42&y=%zz&z=1;2&=&&k"
+	case 3:
+		return strings.Repeat("a&", rng.Intn(3000)) + "a"
+	case 4:
+		return "tag=" + strings.Repeat("t", rng.Intn(100))
+	}
+	return "q=" + url.QueryEscape(randomPathText(rng)) + "&p=%2F"
 }
 
 // randomHeader returns a header with canonical keys, one that is empty,
@@ -1953,6 +1982,10 @@ func checkShipped(t *testing.T, files bool, run func(key string) bool) {
 				}
 				if fn := shippedTypeContract(pv, pkg, name); fn != nil {
 					checkTypeContract(t, pv, key, fn)
+					return
+				}
+				if key == "(*net/url.URL).Query" {
+					checkQueryEntry(t, pv, contractOfKey(t, pv, pkg, key))
 					return
 				}
 				if key == "(*sync.Once).Do" {
