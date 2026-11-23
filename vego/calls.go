@@ -722,7 +722,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 						// (*bytes.Buffer).Bytes places within b.
 						withReceiver := bound
 						if sig.Recv() != nil {
-							withReceiver = append([]passedArg{{param: sig.Recv(), expr: ast.Unparen(call.Fun).(*ast.SelectorExpr).X}}, bound...)
+							withReceiver = append([]passedArg{{param: sig.Recv(), expr: v.receiverPath(ast.Unparen(call.Fun).(*ast.SelectorExpr))}}, bound...)
 						}
 						from.param, from.within, from.unlessNew = withinArgument(fn, i, withReceiver)
 						from.freshIn, from.spread = freshArguments(fn, i, bound)
@@ -1427,4 +1427,33 @@ func (v *fnVerifier) convertedInLoop(call *ast.CallExpr) token.Pos {
 	}
 	walk(v.bodyOrigin(), false)
 	return found
+}
+
+// receiverPath returns the expression of what a method call passes as the
+// receiver: the operand of the selector, followed by every embedded field
+// the selection goes through, as h.Buffer for h.Bytes() when Holder embeds
+// a *bytes.Buffer, so that a message names the path a Modifies clause
+// lists (F10 of the review of step 2).
+func (v *fnVerifier) receiverPath(sel *ast.SelectorExpr) ast.Expr {
+	var path ast.Expr = sel.X
+	selection := v.info.Selections[sel]
+	if selection == nil {
+		return path
+	}
+	t := selection.Recv()
+	index := selection.Index()
+	for _, i := range index[:len(index)-1] {
+		object := t
+		if target, isPointer := pointee(t); isPointer {
+			object = target
+		}
+		u, isStruct := object.Underlying().(*types.Struct)
+		if !isStruct {
+			return sel.X
+		}
+		field := u.Field(i)
+		path = &ast.SelectorExpr{X: path, Sel: ast.NewIdent(field.Name())}
+		t = field.Type()
+	}
+	return path
 }

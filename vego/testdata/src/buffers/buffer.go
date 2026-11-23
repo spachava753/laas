@@ -186,3 +186,26 @@ func WritesBytesListed(b *bytes.Buffer) {
 	p := b.Bytes()
 	p[0] = 'x'
 }
+
+// Holder embeds a pointer to a Buffer, whose methods it promotes.
+type Holder struct{ *bytes.Buffer }
+
+// Promoted writes through what the promoted Bytes returned, which lies in
+// what h.Buffer owns, without listing it.
+//
+// @Requires h != nil And h.Buffer != nil And 0 < |h.Buffer|
+// @Ensures True
+func Promoted(h *Holder) {
+	p := h.Bytes()
+	p[0] = 'x' // want `it is memory that Bytes returned, which its contract places within b, and Promoted passed h.Buffer as b; list h.Buffer in a // @Modifies clause`
+}
+
+// PromotedListedInner lists the Buffer the field points to.
+//
+// @Requires h != nil And h.Buffer != nil And 0 < |h.Buffer|
+// @Modifies h.Buffer
+// @Ensures True
+func PromotedListedInner(h *Holder) {
+	p := h.Bytes()
+	p[0] = 'x'
+}

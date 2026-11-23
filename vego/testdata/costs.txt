@@ -87,6 +87,8 @@ buffers	buffers.LengthOfInt	1	111	0
 buffers	buffers.Line	20	79441	0
 buffers	buffers.LineUnlisted	7	12399	0
 buffers	buffers.Lines	31	258339	0
+buffers	buffers.Promoted	8	25227	0
+buffers	buffers.PromotedListedInner	11	34370	0
 buffers	buffers.ReadsFrom	2	2179	0
 buffers	buffers.Record	20	85891	0
 buffers	buffers.RecordUnbounded	13	36881	0
