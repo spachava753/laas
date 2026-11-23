@@ -379,7 +379,7 @@ func AliasLiteral(s *Server) (k *Keeper) {
 // @Requires s != nil
 // @Ensures True
 func AliasValue(s *Server) (k Keeper) {
-	return Keeper{ptr: s.cfg} // want `vego: AliasValue returns memory that s owns; say so with within\(k, s\) in an Ensures, or return a copy`
+	return Keeper{ptr: s.cfg} // want `vego: AliasValue returns memory that s owns, held in a Keeper, which no contract can place within s; return a copy`
 }
 
 // AliasHeld puts it into a struct value and stores the value.

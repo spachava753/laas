@@ -1321,8 +1321,17 @@ func (v *fnVerifier) ownReturn(fl *ownFlow, ret *ast.ReturnStmt, f *ownFact) {
 				fresh = false
 				r.inside[root.param] = true
 				if v.withinParam(v.fn, i) != root.param {
-					fl.refuse(pos, "%s returns memory that %s owns; say so with within(%s, %s) in an Ensures, or return a copy",
-						v.fn.obj.Name(), root.param.Name(), spelledResult(v.fn, i), root.param.Name())
+					// within places a pointer, a slice, a map, or an
+					// interface value; a struct value that holds the part
+					// can only be a copy (F33 of the review of step 3a).
+					rt := v.fn.results[i].Type()
+					if _, isPointer := pointee(rt); isPointer || isSlice(rt) || isMap(rt) || isIface(rt) {
+						fl.refuse(pos, "%s returns memory that %s owns; say so with within(%s, %s) in an Ensures, or return a copy",
+							v.fn.obj.Name(), root.param.Name(), spelledResult(v.fn, i), root.param.Name())
+					} else {
+						fl.refuse(pos, "%s returns memory that %s owns, held in a %s, which no contract can place within %s; return a copy",
+							v.fn.obj.Name(), root.param.Name(), types.TypeString(rt, types.RelativeTo(v.pass.Pkg)), root.param.Name())
+					}
 				}
 			case root.tag.site != nil:
 				// What a local owner owns may be returned while nothing
