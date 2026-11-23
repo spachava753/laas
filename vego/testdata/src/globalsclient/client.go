@@ -2,6 +2,7 @@
 package globalsclient
 
 import (
+	"io"
 	"log"
 
 	"globalslib"
@@ -82,3 +83,29 @@ func Quiet() (r bool) {
 	}
 	return tally.N == n
 }
+
+// KeepTally keeps p across a write through w.
+//
+// @Requires p != nil And w != nil
+// @Modifies w
+// @Ensures r
+func KeepTally(w io.Writer, p *globalslib.Tally) (r bool) {
+	a := p.N
+	w.Write([]byte("x"))
+	return p.N == a
+}
+
+// HandsSink hands KeepTally a variable of another package beside its
+// writer. Before F31 it verified, and KeepTally returned false through
+// SinkTwice (F14 of the review of step 1 of F31).
+//
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func HandsSink(w io.Writer) (r bool) {
+	return KeepTally(w, globalslib.Sink) // want `^vego: the footprint of what is passed to KeepTally as w may hold memory that what is passed as globalslib.Sink reaches, and KeepTally relies on it not doing so: it is read from the package-level variable globalslib.Sink, and code elsewhere may hold a reference to what it refers to; take it as a parameter instead$`
+}
+
+// SinkTwice hands HandsSink the variable's memory as the writer, and is
+// not verified.
+func SinkTwice() bool { return HandsSink(globalslib.Sink) }

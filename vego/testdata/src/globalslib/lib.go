@@ -66,3 +66,6 @@ func (t *Tally) Write(p []byte) (int, error) {
 	t.N += len(p)
 	return len(p), nil
 }
+
+// Sink is made by its initialiser, and a client hands it in as a writer.
+var Sink = &Tally{}

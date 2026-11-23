@@ -358,7 +358,7 @@ func (v *fnVerifier) storePlace(e ast.Expr) (*types.Var, bool) {
 func (v *fnVerifier) packageOrigin(variable *types.Var) string {
 	key := errorKey(variable)
 	if _, written := v.writtenInBuild()[key]; written || isError(variable.Type()) || !v.readOnlyHere(variable) {
-		return fmt.Sprintf("it is read from the package-level variable %s, whose memory code elsewhere may refer to", v.spelling(variable))
+		return fmt.Sprintf("it is read from the package-level variable %s, and code elsewhere may hold a reference to what it refers to; take it as a parameter instead", v.spelling(variable))
 	}
 	for _, relied := range []string{key, key + contentsKey} {
 		v.reliedKeys[relied] = true

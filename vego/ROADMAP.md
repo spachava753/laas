@@ -1039,7 +1039,7 @@ The state of a package (D1, decided by the orchestrator):
 
   Either way the package must be a dependency of the contract's package at some depth, or the entry is refused (F9). Then its covers are always known where the entry is read.
 - **Clashes.** A parameter, result, or variable of that name shadows the package name, as in Go. Two packages of one name imported in different files, with neither in the contract's file, are refused at the entry, and the message lists both paths.
-- **The property that makes it usable:** a caller can always cover a write by naming a package it imports. Its argument: a write the caller must cover comes from a call. For a static call of an imported package's function, that function's frame lists the state, and the imported package's covers include it. For a call through a value of a type of a package the caller does not import, the path names the type's package's state, which is a dependency through the value's origin.
+- **The property that makes it usable:** a caller can always cover a write by naming a package it imports, or by the path of a package it depends on (F16 of the review of step 1). Its argument: a write the caller must cover comes from a call. For a static call of an imported package's function, that function's frame lists the state, and the imported package's covers include it. For a call through a value of a type of a package the caller does not import, the path names the type's package's state, which is a dependency through the value's origin.
 - **The message for a missing entry** names the variable and the shortest entry the caller's file can write:
   1. the variable's package, if the file imports it;
   2. otherwise the imported package of the callee whose state covers it;

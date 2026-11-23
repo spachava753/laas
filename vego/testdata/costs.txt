@@ -1683,8 +1683,10 @@ globals	globals.Count	1	46	0
 globals	globals.Defaults	4	2061	0
 globals	globals.Deferred	4	1455	0
 globals	globals.Enabled	2	60	0
+globals	globals.Field	8	8018	0
 globals	globals.FirstCell	4	1455	0
 globals	globals.Free	3	4755	0
+globals	globals.Get	1	46	0
 globals	globals.Hex	4	5766	0
 globals	globals.Hooked	1	46	0
 globals	globals.Index	14	14070	0
@@ -1703,6 +1705,7 @@ globals	globals.Nested	1	46	0
 globals	globals.Old	1	46	0
 globals	globals.Origin	5	3457	0
 globals	globals.Outer	7	4850	0
+globals	globals.OuterParam	7	5030	0
 globals	globals.Pages	4	1561	0
 globals	globals.Pass	3	1061	0
 globals	globals.Passed	4	1439	0
@@ -1728,6 +1731,7 @@ globals	globals.Sink	1	46	0
 globals	globals.Sliced	4	1441	0
 globals	globals.Snapshot	2	226	0
 globals	globals.Sum	35	62129	0
+globals	globals.ThroughGetter	7	4864	0
 globals	globals.Timeout	3	125	0
 globals	globals.TooHigh	1	34	0
 globals	globals.Twice	6	1477	0
@@ -1743,7 +1747,9 @@ globalsclient	(*log.Logger).Printf	1	6882	0
 globalsclient	globalsclient.AtLimit	4	233	0
 globalsclient	globalsclient.Beside	11	66648	0
 globalsclient	globalsclient.Counter	1	46	0
+globalsclient	globalsclient.HandsSink	7	4850	0
 globalsclient	globalsclient.Hidden	2	114	0
+globalsclient	globalsclient.KeepTally	9	19479	0
 globalsclient	globalsclient.Limit	3	125	0
 globalsclient	globalsclient.ListsVariable	0	0	0
 globalsclient	globalsclient.Names	2	1162	0
@@ -1751,7 +1757,7 @@ globalsclient	globalsclient.Origin	4	259	0
 globalsclient	globalsclient.OverLimit	3	201	0
 globalsclient	globalsclient.Pro	2	2356	0
 globalsclient	globalsclient.Quiet	2	106	0
-globalsclient	io.Writer.Write	3	7630	0
+globalsclient	io.Writer.Write	5	18168	0
 globalsearly	(globalsearly.T).Limit	1	46	0
 globalsearly	(globalsearly.T).Zero	2	81	0
 globalsembed	globalsembed.Greeting	2	456	0
