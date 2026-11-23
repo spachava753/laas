@@ -1302,7 +1302,7 @@ func (v *fnVerifier) withinOwned(sink *state, x, y reached) *logic.Term {
 // which stratification refuses, bytes.Buffer and strings.Builder grow
 // without a bound that can be stated, and types of the project own nothing
 // until ownership in source.
-func (v *fnVerifier) structuralFootprint(mem memory, val value, t types.Type) func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
+func (v *fnVerifier) structuralFootprint(sink *state, mem memory, val value, t types.Type) func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
 	switch {
 	case isSlice(t):
 		lo, hi := v.extent(val, t)
@@ -1322,7 +1322,7 @@ func (v *fnVerifier) structuralFootprint(mem memory, val value, t types.Type) fu
 		// An owner's footprint is its struct and what it owns, as it is
 		// then (step 4 of ownership in source).
 		return func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
-			owned, facts := v.ownerFootprintAt(mem, val, t, alloc, pos, map[types.Type]bool{})
+			owned, facts := v.ownerFootprintAt(sink, mem, val, t, alloc, pos, map[types.Type]bool{})
 			inStruct := logic.And(logic.Eq(alloc, val[0]), logic.Le(lo, pos), logic.Lt(pos, hi))
 			return logic.And(logic.Not(isNilRef(val)), logic.Or(inStruct, owned)), facts
 		}

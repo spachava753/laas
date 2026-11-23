@@ -99,6 +99,12 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 			if !isPointer {
 				object = from
 			}
+			if through := ownsIfaceThrough(object, "", map[types.Type]bool{}); through != "" {
+				shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
+				v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s owns an interface value through %s, "+
+					"and what that value writes is not yet placed in the footprint of the conversion; own the interface value in %s itself, "+
+					"or call the methods of %s on the pointer", shown(from), shown(want), shown(from), through, shown(object), shown(from)))
+			}
 			if shipped, _ := ownsDeclOf(object); v.ownsMemory(from) && shipped != nil {
 				// A shipped owner itself is not converted: the bufio types
 				// call through what they keep and the buffers grow without
@@ -150,7 +156,7 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		st.assume(logic.Eq(home(held), at))
 		var defines func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term)
 		if behind != nil {
-			defines = v.structuralFootprint(maps.Clone(st.mem), converted, from)
+			defines = v.structuralFootprint(nil, maps.Clone(st.mem), converted, from)
 			if v.ownsMemory(from) {
 				v.convertsOwner = true
 				if _, isPointer := pointee(from); isPointer {
@@ -650,7 +656,7 @@ func (v *fnVerifier) placeFootprint(entry *state, T *funcInfo, kept value, from 
 	if T == nil || T.receiver == nil || !v.hasFootprint(T.receiver.Type()) {
 		return
 	}
-	defines := v.structuralFootprint(entry.mem, kept, from)
+	defines := v.structuralFootprint(entry, entry.mem, kept, from)
 	if v.heldReceiver != nil {
 		name, shown := v.heldReceiver.Name(), types.TypeString(from, types.RelativeTo(v.pass.Pkg))
 		_, isPointer := pointee(from)

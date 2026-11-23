@@ -898,7 +898,7 @@ func (v *fnVerifier) rawMember(mem memory, ptr value, t types.Type, index int) (
 // slice, an owned map, an owned struct with what it owns, the row of an
 // owned interface value and the states of what it holds, and the same of
 // the owners it holds by value.
-func (v *fnVerifier) ownerFootprintAt(mem memory, ptr value, t types.Type, alloc, pos *logic.Term, seen map[types.Type]bool) (*logic.Term, []*logic.Term) {
+func (v *fnVerifier) ownerFootprintAt(sink *state, mem memory, ptr value, t types.Type, alloc, pos *logic.Term, seen map[types.Type]bool) (*logic.Term, []*logic.Term) {
 	object, isPointer := pointee(t)
 	if !isPointer || seen[object] {
 		return logic.False(), nil
@@ -907,15 +907,25 @@ func (v *fnVerifier) ownerFootprintAt(mem memory, ptr value, t types.Type, alloc
 	defer delete(seen, object)
 	var cases, facts []*logic.Term
 	for _, field := range v.inlineOwners(object) {
-		inner, more := v.ownerFootprintAt(mem, field.at(ptr), field.ptr, alloc, pos, seen)
+		inner, more := v.ownerFootprintAt(sink, mem, field.at(ptr), field.ptr, alloc, pos, seen)
 		cases, facts = append(cases, inner), append(facts, more...)
 	}
 	for _, index := range ownedFieldsOf(object) {
-		val, ft, ok := v.rawMember(mem, ptr, t, index)
+		// Read as the method's own targets read it, where a state is at
+		// hand outside an expression (the method check); raw, inside one
+		// (a row asked about where it is defined, at a conversion).
+		var val value
+		var ft types.Type
+		var ok bool
+		if sink != nil {
+			val, ft, ok = v.member(sink, mem, ptr, t, index)
+		} else {
+			val, ft, ok = v.rawMember(mem, ptr, t, index)
+		}
 		if !ok {
 			continue
 		}
-		in, more := v.valueFootprintAt(mem, val, ft, alloc, pos, seen)
+		in, more := v.valueFootprintAt(sink, mem, val, ft, alloc, pos, seen)
 		cases, facts = append(cases, in), append(facts, more...)
 	}
 	return logic.Or(cases...), facts
@@ -925,7 +935,7 @@ func (v *fnVerifier) ownerFootprintAt(mem memory, ptr value, t types.Type, alloc
 // field's type refers to, as a footprint holds it: a slice's stretch, a
 // map, a struct with what it owns, an interface value's row and the
 // states of what it holds.
-func (v *fnVerifier) valueFootprintAt(mem memory, val value, ft types.Type, alloc, pos *logic.Term, seen map[types.Type]bool) (*logic.Term, []*logic.Term) {
+func (v *fnVerifier) valueFootprintAt(sink *state, mem memory, val value, ft types.Type, alloc, pos *logic.Term, seen map[types.Type]bool) (*logic.Term, []*logic.Term) {
 	switch {
 	case isSlice(ft):
 		lo, hi := v.extent(val, ft)
@@ -939,7 +949,7 @@ func (v *fnVerifier) valueFootprintAt(mem memory, val value, ft types.Type, allo
 	inner, _ := pointee(ft)
 	size := v.pass.TypesSizes.Sizeof(inner)
 	inStruct := logic.And(logic.Eq(alloc, val[0]), logic.Le(val[1], pos), logic.Lt(pos, logic.Add(val[1], logic.IntLit(size))))
-	owned, facts := v.ownerFootprintAt(mem, val, ft, alloc, pos, seen)
+	owned, facts := v.ownerFootprintAt(sink, mem, val, ft, alloc, pos, seen)
 	return logic.And(logic.Not(isNilRef(val)), logic.Or(inStruct, owned)), facts
 }
 
@@ -951,13 +961,13 @@ func (v *fnVerifier) valueFootprintAt(mem memory, val value, ft types.Type, allo
 // what the owner owns now (ROADMAP, Footprints, the constraint on
 // ownership in source).
 func (v *fnVerifier) followStore(st *state, lv lvalue, val value) {
-	if !v.convertsOwner || lv.owned == nil || lv.kind != placeMem || lv.declares || len(lv.cells) == 0 {
+	if lv.owned == nil || lv.kind != placeMem || lv.declares || len(lv.cells) == 0 {
 		return
 	}
 	snapshot, ft := maps.Clone(st.mem), lv.typ
 	follow := &followLayer{ref: lv.ref, pos: logic.Add(lv.at, logic.IntLit(lv.cells[0].off)),
 		stored: func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
-			return v.valueFootprintAt(snapshot, val, ft, alloc, pos, map[types.Type]bool{})
+			return v.valueFootprintAt(nil, snapshot, val, ft, alloc, pos, map[types.Type]bool{})
 		}}
 	next := v.fresh("mem'"+footprintRegion, footprintSort)
 	v.layers[next.Name] = &layer{prev: st.mem.region(footprintRegion, footprintSort), key: footprintRegion, growth: true, follows: follow}
@@ -995,4 +1005,33 @@ func (v *fnVerifier) literalsStoreOwned(call *ast.CallExpr) bool {
 		})
 	}
 	return found
+}
+
+// ownsIfaceThrough returns the path, from a struct of the project, of an
+// owned interface value that it owns through an owned pointer field, or
+// "". Converting such an owner is not supported yet (F39 of the review of
+// step 4): its method check cannot place that value's footprint in the
+// row; one owned directly it places.
+func ownsIfaceThrough(t types.Type, path string, seen map[types.Type]bool) string {
+	u, isStruct := t.Underlying().(*types.Struct)
+	if !isStruct || seen[t] {
+		return ""
+	}
+	seen[t] = true
+	for _, index := range sourceOwnedFields(t) {
+		field := u.Field(index)
+		at := field.Name()
+		if path != "" {
+			at = path + "." + at
+		}
+		if isIface(field.Type()) && path != "" {
+			return at
+		}
+		if inner, isPointer := pointee(field.Type()); isPointer && !isIface(field.Type()) {
+			if found := ownsIfaceThrough(inner, at, seen); found != "" {
+				return found
+			}
+		}
+	}
+	return ""
 }

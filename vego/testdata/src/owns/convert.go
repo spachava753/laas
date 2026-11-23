@@ -203,7 +203,7 @@ func useTally(a Adder, xs []int) {
 // @Ensures True
 func TallyBeside() {
 	t := &Tally{items: []int{5}}
-	useTally(t, t.items) // want `vego: t.items is memory that the Tally made at convert.go:[0-9:]+ owns`
+	useTally(t, t.items) // want `vego: t.items is memory that the Tally made at convert.go:[0-9:]+ owns` `vego: the footprint of what is passed to useTally as t may hold memory that what is passed as t.items reaches`
 }
 
 // OwnsItself owns an Adder, and is one.
@@ -254,4 +254,96 @@ func CacheThrough() {
 	var i Store = c
 	i.Put("a", 1)
 	i.Put("b", 2)
+}
+
+// ConvertedBeforeLocal converts a Tally into a variable before the call and
+// hands it beside what the Tally owns (F37 of the review of step 4).
+//
+// @Ensures r
+func ConvertedBeforeLocal() (r bool) {
+	t := &Tally{items: []int{5}}
+	var a Adder = t
+	m := t.items
+	useTally(a, m) // want `vego: the footprint of what is passed to useTally as a may hold memory that what is passed as m reaches, and useTally relies on it not doing so: the footprint of a is the struct that t points to and what it owns, which a value of type \[\]int can be part of`
+	return m[0] == 5
+}
+
+// NewBoth returns a store and its conversion together (F36 of the review
+// of step 4).
+//
+// @Ensures s != nil And i != nil And fresh(s) And fresh(i)
+func NewBoth() (s *memStore, i Store) {
+	s = &memStore{}
+	i = s
+	return s, i
+}
+
+// StaleFromCallee stores a map into a store that a callee converted.
+//
+// @Ensures r
+func StaleFromCallee() (r bool) {
+	s, i := NewBoth()
+	s.m = make(map[string]int)
+	m := s.m
+	m["a"] = 1
+	i.Put("a", 2)
+	return m["a"] == 1 // want `vego: postcondition may not hold: r`
+}
+
+// StaleAtConversionLocal reads the map into a local before the conversion
+// and keeps a fact about it across a Put (F38 of the review of step 4).
+//
+// @Ensures r
+func StaleAtConversionLocal() (r bool) {
+	s := &memStore{m: map[string]int{}}
+	m := s.m
+	m["a"] = 1
+	var i Store = s
+	i.Put("a", 2)
+	return m["a"] == 1 // want `vego: postcondition may not hold: r`
+}
+
+// Inner owns an Adder.
+//
+// @Owns out
+type Inner struct {
+	out Adder
+}
+
+// Outer owns an Inner, and so the Adder through it.
+//
+// @Owns p
+type Outer struct {
+	p *Inner
+	n int
+}
+
+// Add counts.
+//
+// @Requires o != nil
+// @Modifies o
+// @Ensures True
+func (o *Outer) Add() {
+	if o.n < 1000 {
+		o.n++
+	}
+}
+
+// ConvNested converts an owner that owns an interface value through an
+// owned pointer, which is not supported yet (F39).
+//
+// @Ensures True
+func ConvNested() {
+	o := &Outer{p: &Inner{}}
+	var a Adder = o // want `vego: cannot verify ConvNested: converting a value of type \*Outer to Adder is not supported yet: \*Outer owns an interface value through p.out`
+	a.Add()
+}
+
+// ConvDirect converts an owner that owns an interface value directly.
+//
+// @Ensures True
+func ConvDirect() {
+	o := &OwnsItself{}
+	var a Adder = o
+	a.Add()
 }

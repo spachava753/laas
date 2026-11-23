@@ -912,6 +912,16 @@ func (v *fnVerifier) checkReachedApart(call *ast.CallExpr, fn *funcInfo, args ma
 			// points to, and only what can refer to a value of its type
 			// reaches it (F21).
 			if given, object := v.convertedPointer(passedExpr[param]); object != nil && !t.part && isIface(param.Type()) {
+				// The footprint of a converted owner is its struct and what
+				// it owns, which a value of the type of an owned field can
+				// be (F37 of the review of step 4).
+				owners := map[types.Type]bool{}
+				collectOwners(types.NewPointer(object), owners, map[types.Type]bool{})
+				if part := ownerHolding(owners, other.Type()); part != nil {
+					v.report(call.Pos(), "%s: the footprint of %s is the struct that %s points to and what it owns, which a value of type %s can be part of",
+						lead, passed[param], given, types.TypeString(other.Type(), types.RelativeTo(v.pass.Pkg)))
+					continue
+				}
 				if typeReaches(other.Type(), object, map[string]bool{}) {
 					v.report(call.Pos(), "%s: the footprint of %s is the struct that %s points to, which a value of type %s can refer to",
 						lead, passed[param], given, types.TypeString(other.Type(), types.RelativeTo(v.pass.Pkg)))
