@@ -116,7 +116,7 @@ func each(n int, f func(i int)) {
 // @Modifies b
 // @Ensures True
 func HandedBreak(b *Bump, n int) {
-	each(n, func(i int) { fix(b) }) // want `vego: invariant of Bump may not hold for what is passed to fix as b: 0 <= n; it was not kept from entry, in the function literal run by each`
+	each(n, func(i int) { fix(b) }) // want `vego: invariant of Bump may not hold for what is passed to fix as b: 0 <= n, in the function literal run by each`
 	if n > 0 {
 		b.n = -1
 	}

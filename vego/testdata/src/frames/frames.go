@@ -144,3 +144,26 @@ func (s *Server) Valid(w io.Writer, p []byte) {
 	w.Write(p)
 	w.Write(p)
 }
+
+// Counted is a store with a counter beside the map its invariant bounds.
+//
+// @Owns tasks
+// @Invariant tasks != nil And (Forall k in tasks : |tasks[k].Text| <= 1000 And |tasks[k].Tags| <= 10 And (Forall j in [0, |tasks[k].Tags|) : |tasks[k].Tags[j]| <= 100))
+type Counted struct {
+	tasks  map[int]Task
+	served int
+}
+
+// ServeTwice answers twice and then counts: the store into served is
+// into a field the invariant does not read, which leaves the frame over
+// tasks to be asked (F15 of the review).
+//
+// @Requires st != nil And w != nil And st.served < 1000000
+// @Modifies st.served, w
+// @Ensures True
+func (st *Counted) ServeTwice(w io.Writer, p []byte, id int) {
+	t := st.tasks[id]
+	w.Write([]byte(t.Text))
+	w.Write(p)
+	st.served++
+}

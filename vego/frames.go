@@ -214,8 +214,8 @@ type framer struct {
 	only int
 	// reads maps what a read gave in the entry's memory to how it is
 	// spelled, so that an index is spelled by the reads it was made of,
-	// and topReads holds what the reads outside every quantifier gave
-	// there, and every term on the way.
+	// and topReads holds, of each read outside every quantifier, each
+	// table of memory it read with the reference it read it at.
 	reads    map[string]string
 	topReads map[string]bool
 	// tables holds every table of memory the entry's reading read, and
@@ -273,11 +273,14 @@ func (f *framer) pair(now, then *logic.Term, label string) {
 		if f.topReads == nil {
 			f.topReads = map[string]bool{}
 		}
-		// What the read went through: a reference read on the way, as
-		// the map that has(tasks, k) reads, is one too.
+		// Each table of memory the read reads, at the reference it reads
+		// it at, as region and reference: has(tasks, k) reads the table of
+		// keys at the map, and the field tasks at the struct on the way.
 		var walk func(t *logic.Term)
 		walk = func(t *logic.Term) {
-			f.topReads[t.String()] = true
+			if t.Op == logic.OpSelect && len(t.Args) == 2 && t.Args[0].Sort.IsSeq() && t.Args[0].Sort.Elem().IsSeq() {
+				f.topReads[t.Args[0].String()+"|"+t.Args[1].String()] = true
+			}
 			for _, arg := range t.Args {
 				walk(arg)
 			}
@@ -656,20 +659,25 @@ func (v *fnVerifier) frameAnswer(st *state, entry *keptEntry, step invariantStep
 }
 
 // writtenAt reports whether some region of mem was written directly, by a
-// store, a write, or a splice of a table, at a reference among reads,
-// between its term in from and its term in mem. A region that a layer or
-// a join made is not looked through: what it keeps is for the frame to
-// ask.
+// store, a write, or a splice of a table, between its term in from and its
+// term in mem, at a reference at which a read in reads reads that region:
+// reads holds, for each, the region's table in from and the reference. A
+// store into a field of the same struct that the clause does not read is
+// not one (F15 of the review). A region that a layer or a join made is not
+// looked through: what it keeps is for the frame to ask.
 func writtenAt(from, mem memory, reads map[string]bool) bool {
 	if len(reads) == 0 {
 		return false
 	}
 	for key, now := range mem {
-		before := from[key]
-		for t := now; t != nil && t != before; {
+		if key == epochKey {
+			continue
+		}
+		before := from.region(key, now.Sort).String()
+		for t := now; t != nil && t.String() != before; {
 			switch t.Op {
 			case logic.OpStore, logic.OpWrite, logic.OpSpliceAt:
-				if t.Args[0].Sort.Elem().IsSeq() && reads[t.Args[1].String()] {
+				if t.Args[0].Sort.Elem().IsSeq() && reads[before+"|"+t.Args[1].String()] {
 					return true
 				}
 				t = t.Args[0]
@@ -749,12 +757,17 @@ func (v *fnVerifier) explainFrame(fail *frameFailure) string {
 		if changed == "" {
 			changed = read.changed
 		}
-		if changed == "" || local.every {
+		// A write through a footprint starts an epoch, after which no
+		// read of memory is the term it was; it may lose what lies in the
+		// footprint, which no read names (F16 of the review).
+		if changed == "" || local.every || w.mem[epochKey] != previous[epochKey] {
 			changed = "what it reads"
 		}
 		return fmt.Sprintf("; it was not kept from %s, since %s may have changed: %s at %s may write it", fail.entry.from, changed, w.what, v.placeOf(w.pos))
 	}
-	return fmt.Sprintf("; it was not kept from %s", fail.entry.from)
+	// No logged statement touched what the clause reads: there is nothing
+	// to say of why that a user could act on.
+	return ""
 }
 
 // guardWithin reports whether every condition of an entry's guard is one

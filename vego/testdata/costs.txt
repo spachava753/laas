@@ -1239,6 +1239,7 @@ formatting	log.Printf	1	3565	0
 formatting	log.Println	1	2741	0
 formatting	path.Join	2	33342	2
 formatting	path/filepath.Join	2	33366	2
+frames	(*frames.Counted).ServeTwice	26	971946	11
 frames	(*frames.Server).Answer	12	272972	4
 frames	(*frames.Server).AnswerAll	14	1227594	5
 frames	(*frames.Server).AnswerAllUnsaid	14	313924	5
@@ -1254,6 +1255,7 @@ frames	(*frames.Store).Rewrite	13	284715	5
 frames	(*frames.Store).Tagged	17	199657	0
 frames	frames.AfterCall	10	8118	0
 frames	frames.Bump	1	107	0
+frames	frames.Counted	1	3001	0
 frames	frames.Guarded	14	10505	0
 frames	frames.HandedBreak	16	16236	0
 frames	frames.Positive	1	128	0
