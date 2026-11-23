@@ -70,6 +70,9 @@ type trustEntry struct {
 	// receiver names the receiver of a method of an interface, so that the
 	// contract can speak of its states; see ifacestate.go.
 	receiver trustFormula
+	// prints names the writer a function that formats writes to, and the
+	// function whose result it writes; see prints.go.
+	prints []trustKeep
 	file     *trustFile
 	line     int
 }
@@ -288,6 +291,8 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			f.addKeeps(entry, value)
 		case "asserts":
 			f.addAsserts(entry, value)
+		case "prints":
+			f.addPrints(entry, value)
 		case "receiver":
 			if value.Kind != yaml.ScalarNode {
 				f.problem(value.Line, "the receiver of %s must be a name", entry.key)
@@ -295,7 +300,7 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			}
 			entry.receiver = trustFormula{text: value.Value, line: value.Line, col: value.Column}
 		default:
-			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, receiver, requires, ensures, modifies, runs, keeps, asserts, vouches, formats, or calls",
+			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, receiver, requires, ensures, modifies, runs, keeps, asserts, vouches, formats, prints, or calls",
 				field.Value, entry.key)
 		}
 	}
@@ -776,6 +781,7 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 		pv.trustedCall(fn, item)
 	}
 	pv.readFormats(fn, entry)
+	pv.readPrints(fn, entry)
 	pv.readKeeps(fn, entry)
 	pv.checkAsserts(fn, entry)
 	// The error results whose errors the author vouches for. Listing

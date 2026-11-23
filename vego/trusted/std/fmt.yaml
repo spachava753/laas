@@ -65,6 +65,10 @@ trusted:
     modifies: [w]
     vouches: [w]
     # Read from the source of Go 1.27: Fprintf calls only w.Write.
+    # Read from the source of Go 1.26.6 and 1.27.3: Fprintf formats into a
+    # buffer as Sprintf does and then calls w.Write once with it,
+    # returning what Write returned; TestPrintsClaims checks it.
+    prints: {w: fmt.Sprintf}
     asserts:
       w: []
 
@@ -81,6 +85,10 @@ trusted:
     modifies: [w]
     vouches: [w]
     # Read from the source of Go 1.27: Fprint calls only w.Write.
+    # Read from the source of Go 1.26.6 and 1.27.3: Fprint formats into a
+    # buffer as Sprint does and then calls w.Write once with it,
+    # returning what Write returned; TestPrintsClaims checks it.
+    prints: {w: fmt.Sprint}
     asserts:
       w: []
 
@@ -97,5 +105,9 @@ trusted:
     modifies: [w]
     vouches: [w]
     # Read from the source of Go 1.27: Fprintln calls only w.Write.
+    # Read from the source of Go 1.26.6 and 1.27.3: Fprintln formats into a
+    # buffer as Sprintln does and then calls w.Write once with it,
+    # returning what Write returned; TestPrintsClaims checks it.
+    prints: {w: fmt.Sprintln}
     asserts:
       w: []

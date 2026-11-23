@@ -139,6 +139,12 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 			results = v.nothingKnown(callee, st)
 			break
 		}
+		if writer, write := v.printedInto(call, fn); writer != nil {
+			// A buffer or a Writer formatted into: the Sprint function and
+			// the writer's own Write; see prints.go.
+			results = v.callPrinted(call, fn, writer, write, st, guard, func() { u.reach(operands) })
+			break
+		}
 		if fn.calls.len() > 0 {
 			// What the call runs may read and write anything the caller may.
 			results = v.callHanding(call, fn, st, guard, operands)

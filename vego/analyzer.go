@@ -413,6 +413,11 @@ type funcInfo struct {
 	// contract says it formats as package fmt does, and format the string
 	// it uses as the format, if any; see formatting.go.
 	formatted, format *types.Var
+	// prints is the writer parameter of a trusted function that formats,
+	// to which it writes, with one call of Write, what printsAs, a function
+	// of its package, returns for its other arguments; see prints.go.
+	prints   *types.Var
+	printsAs *types.Func
 	// vouchedWrites holds the parameters of a trusted function under
 	// whose memory its contract vouches for the function values and
 	// interface values it writes.

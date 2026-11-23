@@ -121,10 +121,20 @@ func ReadAllParts(parts []io.Reader) (err error) {
 // @Ensures True
 func WriteCount(w io.Writer, n int) (err error) {
 	bw := bufio.NewWriter(w)
-	if _, err = fmt.Fprintf(bw, "%d items\n", n); err != nil { // want `vego: cannot verify WriteCount: converting a value of type \*bufio.Writer to io.Writer is not supported yet: its Write calls through the writer it keeps, and nothing proves yet that calls through values that wrap values end; format into a string, as with fmt.Sprintf, and pass it to the Writer's own Write as \[\]byte\(s\)`
+	if _, err = fmt.Fprintf(bw, "%d items\n", n); err != nil {
 		return err
 	}
 	return bw.Flush()
+}
+
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func WriterAsWriter(w io.Writer) (err error) {
+	bw := bufio.NewWriter(w)
+	var x io.Writer = bw // want `vego: cannot verify WriterAsWriter: converting a value of type \*bufio.Writer to io.Writer is not supported yet: its Write calls through the writer it keeps, and nothing proves yet that calls through values that wrap values end; pass the Writer itself to fmt.Fprintf, Fprint, or Fprintln, which then calls its own Write, or format into a string, as with fmt.Sprintf, and pass it to the Writer's own Write as \[\]byte\(s\)`
+	_, err = x.Write([]byte("x"))
+	return err
 }
 
 // @Requires w != nil And 0 <= n <= 1000

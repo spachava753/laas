@@ -666,7 +666,8 @@ func wrapsKept(t types.Type) string {
 	switch named.Obj().Pkg().Path() + "." + named.Obj().Name() {
 	case "bufio.Writer":
 		return "its Write calls through the writer it keeps, and nothing proves yet that calls through values that wrap values end; " +
-			"format into a string, as with fmt.Sprintf, and pass it to the Writer's own Write as []byte(s)"
+			"pass the Writer itself to fmt.Fprintf, Fprint, or Fprintln, which then calls its own Write, or format into a string, as with fmt.Sprintf, " +
+			"and pass it to the Writer's own Write as []byte(s)"
 	case "bufio.Reader":
 		return "its Read calls through the reader it keeps, and nothing proves yet that calls through values that wrap values end; " +
 			"read with the Reader's own methods, such as ReadByte"
@@ -692,7 +693,8 @@ func growsUnbounded(t types.Type) string {
 	switch named.Obj().Pkg().Path() + "." + named.Obj().Name() {
 	case "bytes.Buffer", "strings.Builder":
 		return fmt.Sprintf("its Write may panic when the buffer is too large to grow, and the contract of (io.Writer).Write has no bound for it; "+
-			"write what you format with the %s's own WriteString, as in b.WriteString(fmt.Sprintf(...))", named.Obj().Name())
+			"pass the %s itself to fmt.Fprintf, Fprint, or Fprintln, which then calls its own Write, or write what you format with its own WriteString, "+
+			"as in b.WriteString(fmt.Sprintf(...))", named.Obj().Name())
 	}
 	return ""
 }

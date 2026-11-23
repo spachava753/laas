@@ -1557,19 +1557,31 @@ A `*bytes.Buffer` and a `*strings.Builder` cannot be converted to an `io.Writer`
 
 ```go
 // @Ensures True
+func BufferAsWriter() {
+	var b bytes.Buffer
+	var w io.Writer = &b
+	fmt.Fprintf(w, "%d items", 3)
+}
+```
+
+```text
+vego: cannot verify BufferAsWriter: converting a value of type *bytes.Buffer to io.Writer is not supported: its Write
+may panic when the buffer is too large to grow, and the contract of (io.Writer).Write has no bound for it; pass the
+Buffer itself to fmt.Fprintf, Fprint, or Fprintln, which then calls its own Write, or write what you format with its
+own WriteString, as in b.WriteString(fmt.Sprintf(...))
+```
+
+Pass the buffer itself to `fmt.Fprintf`, `fmt.Fprint`, or `fmt.Fprintln`. `vego` then checks the call as `fmt.Sprintf` followed by the buffer's own `Write` (see [Formatting into a buffer](#formatting-into-a-buffer)):
+
+```go
+// @Ensures True
 func FormatToBuffer() {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "%d items", 3)
 }
 ```
 
-```text
-vego: cannot verify FormatToBuffer: converting a value of type *bytes.Buffer to io.Writer is not supported: its Write
-may panic when the buffer is too large to grow, and the contract of (io.Writer).Write has no bound for it; write
-what you format with the Buffer's own WriteString, as in b.WriteString(fmt.Sprintf(...))
-```
-
-A `*bufio.Writer` cannot be converted to an `io.Writer` either, because its `Write` calls through the writer it keeps (see [Interface values that call interface values](#interface-values-that-call-interface-values)). Pass it as a `*bufio.Writer`.
+A `*bufio.Writer` cannot be converted to an `io.Writer` either, because its `Write` calls through the writer it keeps (see [Interface values that call interface values](#interface-values-that-call-interface-values)). Pass it as a `*bufio.Writer`, or pass it to `fmt.Fprintf` itself.
 
 ### Interface values that call interface values
 
@@ -5324,7 +5336,28 @@ func WriteTotal(bw *bufio.Writer, total []byte) (err error) {
 }
 ```
 
-A `*bufio.Writer` cannot be converted to an `io.Writer` yet, so it cannot be handed to `fmt.Fprintf`. Its `Write` calls through the writer it keeps, and nothing proves yet that calls through values that wrap values end:
+A `*bufio.Writer` cannot be converted to an `io.Writer`. Its `Write` calls through the writer it keeps, and nothing proves yet that calls through values that wrap values end:
+
+```go
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func WriterAsWriter(w io.Writer) (err error) {
+	bw := bufio.NewWriter(w)
+	var x io.Writer = bw
+	_, err = x.Write([]byte("x"))
+	return err
+}
+```
+
+```text
+vego: cannot verify WriterAsWriter: converting a value of type *bufio.Writer to io.Writer is not supported yet: its
+Write calls through the writer it keeps, and nothing proves yet that calls through values that wrap values end; pass
+the Writer itself to fmt.Fprintf, Fprint, or Fprintln, which then calls its own Write, or format into a string, as
+with fmt.Sprintf, and pass it to the Writer's own Write as []byte(s)
+```
+
+It can be handed to `fmt.Fprintf` all the same. No interface value is made: `vego` checks the call as `fmt.Sprintf` followed by the Writer's own `Write`, whose entry requires `ready(bw)` (see [Formatting into a buffer](#formatting-into-a-buffer)):
 
 ```go
 // @Requires w != nil And 0 <= n <= 1000
@@ -5339,13 +5372,7 @@ func WriteCount(w io.Writer, n int) (err error) {
 }
 ```
 
-```text
-vego: cannot verify WriteCount: converting a value of type *bufio.Writer to io.Writer is not supported yet: its Write
-calls through the writer it keeps, and nothing proves yet that calls through values that wrap values end; format into a
-string, as with fmt.Sprintf, and pass it to the Writer's own Write as []byte(s)
-```
-
-Format into a string first and write it with the Writer's own `Write`:
+Formatting into a string first and writing it with the Writer's own `Write` verifies too:
 
 ```go
 // @Requires w != nil And 0 <= n <= 1000

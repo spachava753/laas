@@ -692,16 +692,7 @@ func (v *fnVerifier) conversion(e *ast.CallExpr, st *state, guard []*logic.Term)
 		// unconditionally, so on the right of && or || the string is first
 		// replaced by one that is a string whether or not it is evaluated.
 		text := v.settled(st, guard, value{v.expr(e.Args[0], st, guard)}, from)[0]
-		only := v.cellsOf(elemType(to))[0]
-		// The length is named, so that what string(b) reads back holds the
-		// string once.
-		copied := value{v.alloc(st, true), logic.IntLit(0), v.named(st, "len", logic.Len(text)), v.fresh("cap", logic.Int)}
-		// The bytes go into a region that the string may have been read
-		// from.
-		st.storeRow(only.key, only.sort, copied[0], v.apart(st, text, logic.SeqOf(logic.SeqOf(only.sort))))
-		v.noteBorn(st, copied[0], rowKeys([]cell{only}))
-		st.assume(v.wellFormed(copied, to, st.brk))
-		return copied
+		return v.copiedBytes(st, text, to)
 	}
 	val := v.evalAs(e.Args[0], to, st, guard)
 	source, isScalar := sortOf(from)
@@ -728,4 +719,20 @@ func (v *fnVerifier) conversion(e *ast.CallExpr, st *state, guard []*logic.Term)
 	}
 	v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to a %s is not supported", from, to))
 	return nil
+}
+
+// copiedBytes is []byte(s) of a string text, for a slice type to: a new
+// array that holds the bytes of the string, with the length of the string
+// and a capacity Go does not fix.
+func (v *fnVerifier) copiedBytes(st *state, text *logic.Term, to types.Type) value {
+	only := v.cellsOf(elemType(to))[0]
+	// The length is named, so that what string(b) reads back holds the
+	// string once.
+	copied := value{v.alloc(st, true), logic.IntLit(0), v.named(st, "len", logic.Len(text)), v.fresh("cap", logic.Int)}
+	// The bytes go into a region that the string may have been read
+	// from.
+	st.storeRow(only.key, only.sort, copied[0], v.apart(st, text, logic.SeqOf(logic.SeqOf(only.sort))))
+	v.noteBorn(st, copied[0], rowKeys([]cell{only}))
+	st.assume(v.wellFormed(copied, to, st.brk))
+	return copied
 }

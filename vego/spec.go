@@ -917,7 +917,14 @@ func (v *fnVerifier) growthHint(c *clause, node *logic.Node, pre *specEnv, passe
 		case n.Kind == logic.NLen && len(n.Kids) == 1 && n.Kids[0].Kind == logic.NIdent:
 			if param, ok := pre.fn.paramNames[n.Kids[0].Name]; ok && !seen["|"+n.Kids[0].Name+"|"] {
 				seen["|"+n.Kids[0].Name+"|"] = true
-				names = append(names, "|"+passed[param]+"|")
+				// The length of what &b points to is |b|.
+				shown := passed[param]
+				if inner, ok := strings.CutPrefix(shown, "(&"); ok && strings.HasSuffix(inner, ")") {
+					shown = strings.TrimSuffix(inner, ")")
+				} else {
+					shown = strings.TrimPrefix(shown, "&")
+				}
+				names = append(names, "|"+shown+"|")
 			}
 			return
 		case n.Kind == logic.NIdent:

@@ -186,13 +186,13 @@ func Greets() {
 	b.WriteString("!")
 }
 
-// FormatsIntoBuffer converts a Buffer to an io.Writer, whose Write has no
-// bound for the Buffer's.
+// FormatsIntoBuffer formats into a Buffer, which Fprintf then writes with
+// the Buffer's own Write.
 //
 // @Ensures True
 func FormatsIntoBuffer() {
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "x") // want `vego: cannot verify FormatsIntoBuffer: converting a value of type \*bytes.Buffer to io.Writer is not supported: its Write may panic when the buffer is too large to grow, and the contract of \(io.Writer\).Write has no bound for it; write what you format with the Buffer's own WriteString, as in b.WriteString\(fmt.Sprintf\(...\)\)`
+	fmt.Fprintf(&b, "x")
 }
 
 // BuildsName writes a Builder, whose writing methods have shipped entries
@@ -212,7 +212,7 @@ func BuildsName() {
 // @Ensures True
 func WrapsWriter(w io.Writer) (err error) {
 	bw := bufio.NewWriter(w)
-	var x io.Writer = bw // want `vego: cannot verify WrapsWriter: converting a value of type \*bufio.Writer to io.Writer is not supported yet: its Write calls through the writer it keeps, and nothing proves yet that calls through values that wrap values end; format into a string, as with fmt.Sprintf, and pass it to the Writer's own Write as \[\]byte\(s\)`
+	var x io.Writer = bw // want `vego: cannot verify WrapsWriter: converting a value of type \*bufio.Writer to io.Writer is not supported yet: its Write calls through the writer it keeps, and nothing proves yet that calls through values that wrap values end; pass the Writer itself to fmt.Fprintf, Fprint, or Fprintln, which then calls its own Write, or format into a string, as with fmt.Sprintf, and pass it to the Writer's own Write as \[\]byte\(s\)`
 	_, err = x.Write([]byte("x"))
 	return err
 }
