@@ -1746,21 +1746,43 @@ func Status(resp *http.Response) (code int) {
 }
 ```
 
-`Modifies resp.Body` does not cover the field `Body` itself. To assign the field, list the struct that holds it, as in `Modifies resp`:
+`Status` keeps `resp.StatusCode` across the close because what the body of an `http.Response` writes leaves the rest of the response alone, which the shipped contracts declare of `net/http`. For the same reason, verified code does not store into the field `Body` of a response, unless it stores a value it makes there:
 
 ```go
 // @Requires resp != nil
-// @Modifies resp.Body
+// @Modifies resp
 // @Ensures True
-func Replace(resp *http.Response, body io.ReadCloser) {
+func ReplaceBody(resp *http.Response, body io.ReadCloser) {
 	resp.Body = body
 }
 ```
 
 ```text
-vego: resp.Body is assigned, which Replace may not modify: // @Modifies resp.Body covers the
-states of what the interface value resp.Body holds, not the place that holds it; to assign it,
-list the struct that holds it
+vego: cannot verify ReplaceBody: resp.Body is stored into, and what the field Body of a net/http.Response holds
+writes nothing else the Response reaches, as the notWrittenBy declaration of net/http.Response in the shipped
+files says of values from code that is not verified, and verified code does not store into it; store a value
+made here, as in resp.Body = &myBody{...}, whose methods write only what it makes
+```
+
+A clause that lists an interface field, as `Modifies j.Out`, does not cover the field itself. To assign the field, list the struct that holds it, as in `Modifies j`:
+
+```go
+// Job holds the closer it writes its output to.
+type Job struct {
+	Out io.Closer
+}
+
+// @Requires j != nil
+// @Modifies j.Out
+// @Ensures True
+func Replace(j *Job, c io.Closer) {
+	j.Out = c
+}
+```
+
+```text
+vego: j.Out is assigned, which Replace may not modify: // @Modifies j.Out covers the states of what the
+interface value j.Out holds, not the place that holds it; to assign it, list the struct that holds it
 ```
 
 #### Which values share a state
@@ -1938,7 +1960,33 @@ func CloseQuietTwice() {
 vego: precondition of c.Close may not hold: ~closed(c)
 ```
 
-Because the methods cannot read the states, a method whose `Ensures` speaks of a state before the call cannot be met. A method such as `IsClosed() (b bool)` with `// @Ensures b <-> closed(c)` is reported where the value is converted.
+Because the methods cannot read the states, a method whose `Ensures` speaks of a state before the call cannot be met, and the conversion is reported:
+
+```go
+// Knower says a state it cannot know.
+//
+// @State on
+type Knower interface {
+	// @Receiver k
+	// @Ensures b <-> on(k)
+	IsOn() (b bool)
+}
+
+type light struct{}
+
+// @Ensures b = False
+func (light) IsOn() (b bool) { return false }
+
+// @Ensures True
+func AskLight() {
+	var k Knower = light{}
+	k.IsOn()
+}
+```
+
+```text
+vego: postcondition may not hold: b <-> on(k), in light.IsOn used as a method of Knower at states.go:204:17
+```
 
 A method of an interface with states whose contract lists only its receiver changes the states and writes nothing else. Its implementation must write nothing that a caller can see. To let the method also write what the value holds, add `behind(s)` to its `Modifies`. Here the same struct converts to the second interface and not to the first:
 
@@ -2002,7 +2050,7 @@ func StopLamp() {
 ```text
 vego: Shut may modify &Lamp{}, which Shutter.Shut may not modify; the contract of Shutter.Shut lists s, which
 covers its states and nothing else; a method that also writes behind its receiver says so with behind(s) in
-Modifies, in (*Lamp).Shut used as a method of Shutter at states.go:190:18
+Modifies, in (*Lamp).Shut used as a method of Shutter at states.go:210:18
 ```
 
 The shipped contract of `(io.Closer).Close` lists `c` and `behind(c)`, since real closers flush and release what they hold. So a closer of your own whose `Close` sets a field of its struct can be passed as an `io.Closer`.
@@ -6885,6 +6933,8 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - Code of another package runs code of the verified package only as `vego` follows it, which [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods) describes: during a call that the verified package makes, it runs only what that call hands it, through the arguments and the receiver. Code that it kept from an earlier call, a value it stored, or code that it runs on another goroutine or at another time, does not call back into a verified function while that function runs, so that the call never ends. A cycle that stays in the package, or that goes through what a call hands to another package, is found and reported.
 - A claim under `asserts` is true: the function calls nothing that the parameter holds, or that a call of what the parameter holds returns, but what the claim allows, and uses no reflection on it (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For a parameter whose footprint the contract lists in `Modifies`, they pass no other argument that reaches memory in that footprint without going through an interface value: `Log` relies on the `Lines` that `t` points to not being memory that the methods of `r` write. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one whose methods change the states of the other, as one that wraps it does, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method. For a parameter whose type owns memory (see [Structs that own memory](#structs-that-own-memory)), they pass a struct whose owned memory is reached by nothing else they pass: not by the other arguments, not by the struct's other fields, and not by what its other owned fields refer to. Memory that a method returns from what its struct owns, which its contract shows with `within(result, s)`, is not stored by code that is not verified, and is not passed to a verified function together with the struct it came from or with anything that reaches that struct.
+- When the server calls a verified handler, the writer it passes writes none of the memory that the request reaches without going through an interface value, except the field `Trailer` of the `Request` and the map it refers to, which the server fills while it reads the body, also when a write to the writer drains a body the handler left unread. Verified code cannot read or write that field. Code that is not verified does not make that map reachable from anything else it hands a verified function, as `req.Trailer = req.Header` in a middleware would. Code that is not verified uses a `ResponseWriter`, and hands one to verified code as that type or as any other interface, only while the `ServeHTTP` call that received it runs, and does not hand one to a verified function that keeps that parameter.
+- The body of an `http.Response` that reaches verified code from code that is not verified writes nothing that the response reaches without going through an interface value, except the field `Trailer` of the response, which reading the body fills. Verified code cannot read or write that field, and does not store into `Body` but a value it makes there.
 - Code of a package that declares a struct that owns memory, where it is not verified, builds and changes such structs so that nothing else refers to the memory an owned field refers to, no two owned fields refer to the same memory, and an owned field comes to refer only to memory made since, or to part of what it referred to before.
 - An interface value that reaches verified code from code that is not verified meets the contracts of its methods. That includes a value passed as an argument, a value in memory that an argument reaches, a value that a call through another value returns, and a value that a trusted function returns or writes, which its entry vouches for. Called with arguments that meet the `Requires` of a method, the method returns without panicking, leaves its `Ensures` true, and writes nothing that verified code can see outside what its `Modifies` lists. When the contract lists the receiver, that is the value's footprint, and the method adds to it only memory that it creates during the call. A method whose entry lists no `keeps`, as `(io.Writer).Write` and `(io.Reader).Read`, keeps nothing it is handed once it returns, as `io.Writer` and `io.Reader` document of `p` (see [What an entry for a type claims](#what-an-entry-for-a-type-claims)). A method of an interface declared in source may keep a pointer it is handed, but no later call of the value's methods writes through it: a `Store` whose `Put(v *Value)` keeps `v` and whose `Touch()` then writes `*v` breaks this, and `vego` cannot see it. The same holds of a pointer that verified code stores into memory that the value's methods write or that the value handed out, as with `within(m, w)`: a `Sink` that hands out a table of pairs, and whose `Put` adds one to each pair in the table, breaks this. For a result that the contract of the method lists under `Vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). This holds also when the value holds a pointer to a struct that verified code holds.
 - The same holds of the methods and function types that entries of the trust file give contracts, which is what such an entry claims (see [What an entry for a type claims](#what-an-entry-for-a-type-claims)). In particular, a caller that is not verified does not pass a verified function such a value together with a pointer to memory that the value writes, as a `*bytes.Buffer` passed both as an `io.Writer` and as a `*bytes.Buffer` would be. Every call through such a value returns: a `Read` from a pipe, a terminal, or a connection returns only once data or an error arrives.

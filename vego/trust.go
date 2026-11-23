@@ -127,6 +127,10 @@ type trustFile struct {
 	// scoped.go.
 	scoped map[string]scopedDecl
 	hidden map[string]hiddenDecl
+	// notWritten holds fields that verified code reads but does not
+	// store into, whose value writes nothing else of the struct; see
+	// scoped.go.
+	notWritten map[string]hiddenDecl
 	// problems are the defects of the file itself, by line.
 	problems []trustProblem
 }
@@ -144,7 +148,7 @@ func (f *trustFile) problem(line int, format string, args ...any) {
 // understand is recorded as a problem rather than skipped, so that a
 // misspelt field cannot silently drop part of a contract.
 func parseTrustFile(path string, content []byte, shipped bool) *trustFile {
-	file := &trustFile{path: path, content: content, shipped: shipped, entries: map[string]*trustEntry{}, states: map[string][]stateDecl{}, owns: map[string]ownsDecl{}, scoped: map[string]scopedDecl{}, hidden: map[string]hiddenDecl{}}
+	file := &trustFile{path: path, content: content, shipped: shipped, entries: map[string]*trustEntry{}, states: map[string][]stateDecl{}, owns: map[string]ownsDecl{}, scoped: map[string]scopedDecl{}, hidden: map[string]hiddenDecl{}, notWritten: map[string]hiddenDecl{}}
 	var document, second yaml.Node
 	decoder := yaml.NewDecoder(bytes.NewReader(content))
 	if err := decoder.Decode(&document); err != nil && !errors.Is(err, io.EOF) {
@@ -189,12 +193,14 @@ func parseTrustFile(path string, content []byte, shipped bool) *trustFile {
 		case "scoped":
 			file.addScoped(value)
 		case "hidden":
-			file.addHidden(value)
+			file.addFields("hidden", file.hidden, value)
+		case "notWrittenBy":
+			file.addFields("notWrittenBy", file.notWritten, value)
 		default:
 			// A project file cannot declare owns, so it is not offered one.
 			expected := "version, trusted, or state"
 			if file.shipped {
-				expected = "version, trusted, state, owns, scoped, or hidden"
+				expected = "version, trusted, state, owns, scoped, hidden, or notWrittenBy"
 			}
 			file.problem(key.Line, "unknown key %q; expected %s", key.Value, expected)
 		}

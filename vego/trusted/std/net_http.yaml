@@ -24,6 +24,40 @@ hidden:
       connection's goroutine writes the declared keys of the map
       (copyTrailersToHandlerRequest). The shipped harness of the writers
       fails unless it sees the field change.
+  net/http.Response:
+    fields: [Trailer]
+    reason: >-
+      Reading the body of a response writes Trailer: "Trailer maps trailer
+      keys to values in the same format as Header. The Trailer initially
+      contains only nil values, one for each key specified in the server's
+      "Trailer" header value. Those values are not added to Header. Trailer
+      must not be accessed concurrently with Read calls on the Body." Read
+      from the source of Go 1.26.6 and 1.27.3: the HTTP/1 transport's body
+      copies the trailer into the map when its Read reaches the end, and the
+      HTTP/2 transport writes it from the connection's goroutine. The
+      harness of TestResponseBody fails unless it sees the field change.
+
+# notWrittenBy: for each struct, fields whose value, an interface value
+# with a footprint, writes nothing else of what the struct reaches without
+# going through an interface value, but its hidden fields; verified code
+# reads such a field and does not store into it, but for new memory
+# converted where it is stored. A function that lists p.f is then given
+# what p reaches apart from the footprint of p.f, and every verified caller
+# shows it (scoped.go, F28).
+notWrittenBy:
+  net/http.Response:
+    fields: [Body]
+    reason: >-
+      Read from the source of Go 1.26.6 and 1.27.3: the body of a response
+      from the HTTP/1 transport (body, bodyEOFSignal, gzipReader) and from
+      the HTTP/2 transport reads from the connection and writes its own
+      state, the transport's, and, at its end, the map Trailer refers to
+      (hidden); it writes no other field of the response, of its Request,
+      of the request's URL or headers, and no Header. The transport holds
+      the request while the body is read. TestResponseBody holds this of
+      real responses over HTTP/1 and HTTP/2, with and without trailers,
+      chunked and not, decompressed by the transport, read to the end and
+      closed early, and fails on a body that writes the response.
 
 trusted:
   (*net/http.Request).PathValue:

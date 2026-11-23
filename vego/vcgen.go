@@ -585,6 +585,7 @@ func (v *fnVerifier) verify() {
 	v.boxed = v.findBoxed(fn.decl.Body)
 	v.classifyLiterals()
 	v.checkHidden(fn.decl.Body)
+	v.checkNotWritten(fn.decl.Body)
 	v.reportOwnOrigins()
 	st := v.enter()
 	for _, variable := range slices.Concat(fn.params, fn.results) {

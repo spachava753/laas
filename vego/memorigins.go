@@ -7,6 +7,7 @@ import (
 	"go/types"
 	"maps"
 	"slices"
+	"strings"
 
 	"golang.org/x/tools/go/cfg"
 
@@ -926,7 +927,48 @@ func (v *fnVerifier) checkReachedApart(call *ast.CallExpr, fn *funcInfo, args ma
 		if t.part {
 			param = t.ownerParam
 		}
+		// And the footprint of p.Body apart from what p and the others
+		// reach: the argument for p.Body must be the caller's own p.Body,
+		// listed by it, and what is passed as p outside and the caller
+		// clean (F28).
+		var field string
+		if t.fp && param == nil && t.mod < len(fn.modifies) {
+			if root := v.notWrittenRoot(fn, fn.modifies[t.mod]); root != nil {
+				param, field = root, fn.modifies[t.mod].steps[0].field
+			}
+		}
 		if !t.fp || param == nil {
+			continue
+		}
+		if field != "" {
+			body := &ast.SelectorExpr{X: passedExpr[param], Sel: &ast.Ident{Name: field}}
+			shown := passed[param]
+			if strings.HasPrefix(shown, "&") || strings.HasPrefix(shown, "*") {
+				shown = "(" + shown + ")"
+			}
+			lead := fmt.Sprintf("the footprint of what is passed to %s as %s.%s may hold memory that the arguments reach, and %s relies on it not doing so",
+				name, shown, field, name)
+			if passedExpr[param] == nil || !v.ownFieldFootprint(body) {
+				v.report(call.Pos(), "%s: %s.%s is not a field of a parameter whose %s %s's own Modifies lists as %s.%s, so nothing places it",
+					lead, shown, field, field, v.fn.obj.Name(), shown, field)
+				continue
+			}
+			fact, placed := v.memFactAt(call)
+			if !placed {
+				v.unsupported(call.Pos(), lead+"; a caller of a function value or a method of an interface value does not show it")
+			}
+			for _, other := range fn.params {
+				if args[other] == nil || !holdsMemory(other.Type()) {
+					continue
+				}
+				if expr := passedExpr[other]; expr == nil {
+					v.report(call.Pos(), "%s: what is passed as %s is not written as one expression", lead, passed[other])
+				} else if why := v.memOrigin(expr, fact); why != "" {
+					v.report(call.Pos(), "%s: %s", lead, why)
+				} else if fact.polluted != "" {
+					v.report(call.Pos(), "%s: %s", lead, fact.polluted)
+				}
+			}
 			continue
 		}
 		what := "the footprint of what is passed to %s as %s"
@@ -1055,7 +1097,28 @@ func (v *fnVerifier) ownFootprint(e ast.Expr) bool {
 	if variable == nil || v.findReassigned(v.bodyOrigin())[variable] {
 		return false
 	}
-	return slices.ContainsFunc(v.reaches, func(r separation) bool { return r.param == variable })
+	return slices.ContainsFunc(v.reaches, func(r separation) bool { return r.param == variable && r.field == "" })
+}
+
+// ownFieldFootprint reports whether an expression p.f names the footprint
+// of a field of a parameter that the function lists as p.f, which a
+// notWrittenBy declaration covers (F28): the caller assumes it apart from
+// what p and the other parameters reach, and verified code does not store
+// into the field.
+func (v *fnVerifier) ownFieldFootprint(e ast.Expr) bool {
+	sel, ok := ast.Unparen(e).(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	id, ok := ast.Unparen(sel.X).(*ast.Ident)
+	if !ok {
+		return false
+	}
+	variable, _ := v.info.ObjectOf(id).(*types.Var)
+	if variable == nil || v.findReassigned(v.bodyOrigin())[variable] {
+		return false
+	}
+	return slices.ContainsFunc(v.reaches, func(r separation) bool { return r.param == variable && r.field == sel.Sel.Name })
 }
 
 // placedFootprint reports whether the footprint of an argument is placed:

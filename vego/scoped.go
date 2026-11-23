@@ -3,6 +3,7 @@ package vego
 import (
 	"fmt"
 	"go/ast"
+	"go/token"
 	"go/types"
 	"slices"
 	"strings"
@@ -81,22 +82,22 @@ func (f *trustFile) addScoped(node *yaml.Node) {
 	}
 }
 
-// addHidden reads the hidden section of a shipped file: a mapping from a
-// struct type to its fields and a reason.
-func (f *trustFile) addHidden(node *yaml.Node) {
+// addFields reads a section of a shipped file that maps struct types to
+// fields and a reason: hidden, or notWrittenBy.
+func (f *trustFile) addFields(section string, into map[string]hiddenDecl, node *yaml.Node) {
 	if !f.shipped {
-		f.problem(node.Line, "hidden can be declared only in the shipped files")
+		f.problem(node.Line, "%s can be declared only in the shipped files", section)
 		return
 	}
 	if node.Kind != yaml.MappingNode {
-		f.problem(node.Line, "hidden must map types to their fields and a reason")
+		f.problem(node.Line, "%s must map types to their fields and a reason", section)
 		return
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		typeName, body := node.Content[i], node.Content[i+1]
 		pkg, typ, ok := splitTypeName(typeName.Value)
 		if !ok || body.Kind != yaml.MappingNode {
-			f.problem(typeName.Line, "hidden: %q must be a type named by its package, mapped to its fields and a reason", typeName.Value)
+			f.problem(typeName.Line, "%s: %q must be a type named by its package, mapped to its fields and a reason", section, typeName.Value)
 			continue
 		}
 		decl := hiddenDecl{pkg: pkg, typ: typ, line: typeName.Line}
@@ -109,14 +110,14 @@ func (f *trustFile) addHidden(node *yaml.Node) {
 			case "reason":
 				decl.reason = strings.TrimSpace(value.Value)
 			default:
-				f.problem(field.Line, "unknown field %q in hidden of %s; expected fields and reason", field.Value, typeName.Value)
+				f.problem(field.Line, "unknown field %q in %s of %s; expected fields and reason", field.Value, section, typeName.Value)
 			}
 		}
 		if len(decl.fields) == 0 || decl.reason == "" {
-			f.problem(typeName.Line, "hidden of %s needs its fields and a reason", typeName.Value)
+			f.problem(typeName.Line, "%s of %s needs its fields and a reason", section, typeName.Value)
 			continue
 		}
-		f.hidden[stateKey(pkg, typ)] = decl
+		into[stateKey(pkg, typ)] = decl
 	}
 }
 
@@ -252,6 +253,21 @@ func holdsScoped(t types.Type) *scopedDecl {
 // hiddenOf returns the hidden declaration of a struct type that covers its
 // field at index, or nil. It is matched as ownsDeclared matches owns.
 func hiddenOf(t types.Type, index int) *hiddenDecl {
+	return fieldDeclOf(t, index, func(f *trustFile) map[string]hiddenDecl { return f.hidden })
+}
+
+// notWrittenOf returns the notWrittenBy declaration of a struct type that
+// covers its field at index, or nil: verified code reads the field and does
+// not store into it, and what the value in it holds writes nothing else of
+// what the struct reaches without going through an interface value but its
+// hidden fields.
+func notWrittenOf(t types.Type, index int) *hiddenDecl {
+	return fieldDeclOf(t, index, func(f *trustFile) map[string]hiddenDecl { return f.notWritten })
+}
+
+// fieldDeclOf finds a declaration of a field of a struct type in a section
+// of the shipped files.
+func fieldDeclOf(t types.Type, index int, section func(*trustFile) map[string]hiddenDecl) *hiddenDecl {
 	u, isStruct := types.Unalias(t).Underlying().(*types.Struct)
 	if !isStruct || index < 0 || index >= u.NumFields() {
 		return nil
@@ -268,7 +284,7 @@ func hiddenOf(t types.Type, index int) *hiddenDecl {
 	}
 	plain := untagged(u)
 	for _, file := range shippedContracts() {
-		for _, decl := range file.hidden {
+		for _, decl := range section(file) {
 			if decl.pkg != home.Path() || !slices.Contains(decl.fields, u.Field(index).Name()) {
 				continue
 			}
@@ -363,4 +379,157 @@ func (pv *pkgVerifier) hiddenOffsets(t types.Type) []int64 {
 	}
 	walk(t, 0)
 	return offsets
+}
+
+// newAtStore reports whether an expression is new memory converted where it
+// is stored: the address of a composite literal, or a composite literal,
+// possibly converted explicitly, whose footprint as an interface value is
+// what it makes.
+func (v *fnVerifier) newAtStore(e ast.Expr) bool {
+	e = ast.Unparen(e)
+	if call, ok := e.(*ast.CallExpr); ok && len(call.Args) == 1 {
+		if tv := v.info.Types[call.Fun]; tv.IsType() {
+			e = ast.Unparen(call.Args[0])
+		}
+	}
+	if u, ok := e.(*ast.UnaryExpr); ok && u.Op == token.AND {
+		_, isLit := ast.Unparen(u.X).(*ast.CompositeLit)
+		return isLit
+	}
+	_, isLit := e.(*ast.CompositeLit)
+	return isLit
+}
+
+// holdsNotWritten returns the declaration of a struct held by value in a
+// value of type t, at any depth through fields and arrays, that has a field
+// a notWrittenBy declaration covers, or nil.
+func holdsNotWritten(t types.Type) *hiddenDecl {
+	seen := map[types.Type]bool{}
+	var walk func(t types.Type) *hiddenDecl
+	walk = func(t types.Type) *hiddenDecl {
+		if t == nil || seen[t] {
+			return nil
+		}
+		seen[t] = true
+		switch u := types.Unalias(t).Underlying().(type) {
+		case *types.Array:
+			return walk(u.Elem())
+		case *types.Struct:
+			for i := range u.NumFields() {
+				if d := notWrittenOf(t, i); d != nil {
+					return d
+				}
+				if d := walk(u.Field(i).Type()); d != nil {
+					return d
+				}
+			}
+		}
+		return nil
+	}
+	return walk(t)
+}
+
+// notWrittenReason says why verified code may not store into a field that
+// a notWrittenBy declaration covers, or a whole struct that has one into
+// memory, for a message.
+func notWrittenReason(d *hiddenDecl) string {
+	return fmt.Sprintf("what the field %s of a %s.%s holds writes nothing else the %s reaches, as the notWrittenBy declaration of %s.%s in the shipped files says "+
+		"of values from code that is not verified, and verified code does not store into it",
+		d.fields[0], d.pkg, d.typ, d.typ, d.pkg, d.typ)
+}
+
+// checkNotWritten refuses, in a body, a store into a field that a
+// notWrittenBy declaration covers, unless what is stored is new memory
+// converted where it is stored, whose footprint is what it makes; a
+// composite literal that sets such a field the same way; and a store of a
+// whole struct that has one into memory, as *resp = r2, which a copy into a
+// local is not (F28).
+func (v *fnVerifier) checkNotWritten(body ast.Node) {
+	if body == nil {
+		return
+	}
+	field := func(sel *ast.SelectorExpr) *hiddenDecl {
+		selection := v.info.Selections[sel]
+		if selection == nil || selection.Kind() != types.FieldVal {
+			return nil
+		}
+		t := selection.Recv()
+		index := selection.Index()
+		for _, i := range index[:len(index)-1] {
+			object := t
+			if target, ok := pointee(t); ok {
+				object = target
+			}
+			t = object.Underlying().(*types.Struct).Field(i).Type()
+		}
+		object := t
+		if target, ok := pointee(t); ok {
+			object = target
+		}
+		return notWrittenOf(object, index[len(index)-1])
+	}
+	local := func(e ast.Expr) bool {
+		id, ok := ast.Unparen(e).(*ast.Ident)
+		if !ok {
+			return false
+		}
+		if id.Name == "_" {
+			return true
+		}
+		// A local variable is memory the function made, also when its
+		// address is taken, which no footprint holds.
+		variable, ok := v.info.ObjectOf(id).(*types.Var)
+		return ok && variable.Parent() != v.pass.Pkg.Scope()
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.AssignStmt:
+			for i, lhs := range n.Lhs {
+				var rhs ast.Expr
+				if len(n.Rhs) == len(n.Lhs) {
+					rhs = n.Rhs[i]
+				}
+				if sel, ok := ast.Unparen(lhs).(*ast.SelectorExpr); ok {
+					if d := field(sel); d != nil && (rhs == nil || !v.newAtStore(rhs)) {
+						v.unsupported(lhs.Pos(), fmt.Sprintf("%s is stored into, and %s; store a value made here, as in %s = &myBody{...}, whose methods write only what it makes",
+							types.ExprString(lhs), notWrittenReason(d), types.ExprString(lhs)))
+					}
+				}
+				if d := holdsNotWritten(v.info.TypeOf(lhs)); d != nil && !local(lhs) {
+					v.unsupported(lhs.Pos(), fmt.Sprintf("a %s.%s is stored into memory at %s, and %s; copy it into a local variable instead",
+						d.pkg, d.typ, types.ExprString(lhs), notWrittenReason(d)))
+				}
+			}
+		case *ast.CallExpr:
+			if isBuiltin(v.info, n, "append") && len(n.Args) > 1 {
+				if d := holdsNotWritten(elemType(v.info.TypeOf(n.Args[0]))); d != nil {
+					v.unsupported(n.Pos(), fmt.Sprintf("a %s.%s is appended to %s, which may store it into memory that exists, and %s; keep the values in a slice made here",
+						d.pkg, d.typ, types.ExprString(n.Args[0]), notWrittenReason(d)))
+				}
+			}
+		case *ast.CompositeLit:
+			t := v.info.TypeOf(n)
+			if t == nil {
+				return true
+			}
+			u, isStruct := t.Underlying().(*types.Struct)
+			if !isStruct {
+				return true
+			}
+			for i, element := range n.Elts {
+				index, value := i, element
+				if pair, keyed := element.(*ast.KeyValueExpr); keyed {
+					value = pair.Value
+					if id, ok := pair.Key.(*ast.Ident); ok {
+						index = slices.IndexFunc(slices.Collect(u.Fields()), func(f *types.Var) bool { return f.Name() == id.Name })
+					}
+				}
+				if d := notWrittenOf(t, index); d != nil && !v.newAtStore(value) && !v.isNil(value) {
+					v.unsupported(element.Pos(), fmt.Sprintf("the field %s of the %s.%s made at %s is set, and %s; set it to a value made here, as &myBody{...}, whose methods write only what it makes",
+						u.Field(index).Name(), d.pkg, d.typ, v.placeOf(n.Pos()), notWrittenReason(d)))
+				}
+			}
+		}
+		return true
+	})
 }

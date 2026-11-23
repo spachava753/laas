@@ -35,7 +35,7 @@ func CloseTwice(c io.Closer) {
 // @Ensures closed(resp.Body')
 func Status(resp *http.Response) (code int) {
 	defer resp.Body.Close()
-	return resp.StatusCode // want `postcondition may not hold: closed\(resp.Body'\)`
+	return resp.StatusCode
 }
 
 // ShutBoth closes two values.
@@ -185,6 +185,26 @@ func (w *Lamp) Stop() {
 	w.off = true
 }
 
+// Knower says a state it cannot know.
+//
+// @State on
+type Knower interface {
+	// @Receiver k
+	// @Ensures b <-> on(k)
+	IsOn() (b bool)
+}
+
+type light struct{}
+
+// @Ensures b = False
+func (light) IsOn() (b bool) { return false }
+
+// @Ensures True
+func AskLight() {
+	var k Knower = light{} // want `postcondition may not hold: b <-> on\(k\), in light.IsOn used as a method of Knower at states.go:\d+:\d+`
+	k.IsOn()
+}
+
 // @Ensures True
 func ShutLamp() {
 	var s Shutter = &Lamp{} // want `Shut may modify &Lamp\{\}, which Shutter.Shut may not modify; the contract of Shutter.Shut lists s, which covers its states and nothing else; a method that also writes behind its receiver says so with behind\(s\) in Modifies, in \(\*Lamp\).Shut used as a method of Shutter at states.go:\d+:\d+`
@@ -197,13 +217,27 @@ func StopLamp() {
 	s.Stop()
 }
 
-// Replace puts another body into a response.
+// Job holds the closer it writes its output to.
+type Job struct {
+	Out io.Closer
+}
+
+// Replace puts another closer into a job.
+//
+// @Requires j != nil
+// @Modifies j.Out
+// @Ensures True
+func Replace(j *Job, c io.Closer) {
+	j.Out = c // want `j.Out is assigned, which Replace may not modify: // @Modifies j.Out covers the states of what the interface value j.Out holds, not the place that holds it; to assign it, list the struct that holds it`
+}
+
+// ReplaceBody puts a body it was handed into a response.
 //
 // @Requires resp != nil
-// @Modifies resp.Body
+// @Modifies resp
 // @Ensures True
-func Replace(resp *http.Response, body io.ReadCloser) {
-	resp.Body = body // want `resp.Body is assigned, which Replace may not modify: // @Modifies resp.Body covers the states of what the interface value resp.Body holds, not the place that holds it; to assign it, list the struct that holds it`
+func ReplaceBody(resp *http.Response, body io.ReadCloser) {
+	resp.Body = body // want `cannot verify ReplaceBody: resp.Body is stored into, and what the field Body of a net/http.Response holds writes nothing else the Response reaches`
 }
 
 // Limits holds a limit.

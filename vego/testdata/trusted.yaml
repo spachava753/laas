@@ -29,6 +29,11 @@ trusted:
     vouches: [r]
     modifies: []
 
+  handlers.get:
+    reason: Test helper standing for a trusted function that makes a request and returns its response, of which nothing places the body.
+    vouches: [resp]
+    modifies: []
+
   handlers.grownBeside:
     reason: Test helper that sets a header of h, which it lists under stores, writes s, and returns a map in the footprint of s.
     requires:

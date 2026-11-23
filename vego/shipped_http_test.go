@@ -2,6 +2,8 @@ package vego
 
 import (
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -71,6 +73,8 @@ func walkStop(t reflect.Type) bool {
 
 var requestType = reflect.TypeOf(http.Request{})
 
+var responseType = reflect.TypeOf(http.Response{})
+
 // memoryWalk walks what a value reaches: pointers, slices to their
 // capacity, maps, struct fields, exported or not, and arrays. It stops at
 // interface values, function values, channels, unsafe pointers, and
@@ -84,9 +88,9 @@ type memoryWalk struct {
 	// through is set to follow interface values, as for what a value's
 	// methods may write.
 	through bool
-	objects    map[uintptr]bool
-	print      strings.Builder
-	hidden     strings.Builder
+	objects map[uintptr]bool
+	print   strings.Builder
+	hidden  strings.Builder
 }
 
 func newWalk(stop func(reflect.Type) bool, readHidden bool, roots ...any) *memoryWalk {
@@ -189,7 +193,7 @@ func (w *memoryWalk) value(out *strings.Builder, v reflect.Value, depth int) {
 		out.WriteString("{")
 		for i := range v.NumField() {
 			field := v.Type().Field(i)
-			if v.Type() == requestType && field.Name == "Trailer" {
+			if (v.Type() == requestType || v.Type() == responseType) && field.Name == "Trailer" {
 				// The hidden field: its own value always, its map only
 				// where reading it races with nothing.
 				trailer := readable(v.Field(i))
@@ -716,5 +720,101 @@ func TestErrorBound(t *testing.T) {
 				t.Errorf("Error with a message of %d bytes handed Write a slice of capacity %d, more than the %d its requires bounds", n, w.caps[0], bound)
 			}
 		}
+	}
+}
+
+// bodyWrites makes a call of a method of a response's body and reports a
+// change of what the response reaches without going through an interface
+// value, but Trailer, whose change it returns apart: the claim of the
+// notWrittenBy declaration of Response.Body.
+func bodyWrites(resp *http.Response, readHidden bool, call func()) (hidden bool, err error) {
+	before := newWalk(nil, readHidden, resp)
+	call()
+	after := newWalk(nil, readHidden, resp)
+	if before.print.String() != after.print.String() {
+		return false, fmt.Errorf("the body wrote what the response reaches:\nbefore %s\nafter  %s", before.print.String(), after.print.String())
+	}
+	return before.hidden.String() != after.hidden.String(), nil
+}
+
+// TestResponseBody holds the claim of the notWrittenBy declaration of
+// Response.Body on real responses: over HTTP/1 and HTTP/2, with and without
+// trailers, chunked and not, decompressed by the transport, read to the end
+// and closed early. Everything the response reaches but Trailer is the same
+// after every Read and Close, and some Read on HTTP/1 is seen to change
+// Trailer. It also shows the check failing on bodies that write the
+// response and its request.
+func TestResponseBody(t *testing.T) {
+	parallel(t)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/trailer":
+			w.Header().Set("Trailer", "X-Sum")
+			w.Write(bytes.Repeat([]byte("t"), 5000))
+			w.Header().Set("X-Sum", "9")
+		case "/gzip":
+			w.Header().Set("Content-Encoding", "gzip")
+			z := gzip.NewWriter(w)
+			z.Write(bytes.Repeat([]byte("z"), 5000))
+			z.Close()
+		case "/large":
+			w.Write(bytes.Repeat([]byte("l"), 300000))
+		default:
+			w.Write([]byte("short"))
+		}
+	})
+	sawHidden := false
+	for _, two := range []bool{false, true} {
+		server := httptest.NewUnstartedServer(handler)
+		server.Config.ErrorLog = log.New(io.Discard, "", 0)
+		if two {
+			server.EnableHTTP2 = true
+			server.StartTLS()
+		} else {
+			server.Start()
+		}
+		client := server.Client()
+		rng := rand.New(rand.NewSource(28))
+		for range 60 {
+			path := []string{"/", "/trailer", "/gzip", "/large"}[rng.Intn(4)]
+			resp, err := client.Get(server.URL + path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if two && resp.ProtoMajor != 2 {
+				t.Fatalf("the response came over HTTP/%d", resp.ProtoMajor)
+			}
+			readHidden := !two
+			early := rng.Intn(3) == 0
+			for i := 0; ; i++ {
+				p := make([]byte, 1+rng.Intn(4096))
+				var n int
+				var rerr error
+				hidden, err := bodyWrites(resp, readHidden, func() { n, rerr = resp.Body.Read(p) })
+				if err != nil {
+					t.Fatalf("%s over HTTP/%d, Read: %v", path, resp.ProtoMajor, err)
+				}
+				sawHidden = sawHidden || hidden
+				_ = n
+				if rerr != nil || early && i == 2 {
+					break
+				}
+			}
+			if _, err := bodyWrites(resp, readHidden, func() { resp.Body.Close() }); err != nil {
+				t.Fatalf("%s over HTTP/%d, Close: %v", path, resp.ProtoMajor, err)
+			}
+		}
+		server.Close()
+	}
+	if !sawHidden {
+		t.Errorf("no Read was seen to change Response.Trailer, which the hidden declaration is about")
+	}
+	// Bodies that break the claim.
+	resp := &http.Response{Request: httptest.NewRequest("GET", "/x", nil)}
+	if _, err := bodyWrites(resp, true, func() { resp.ContentLength++ }); err == nil {
+		t.Errorf("a body that writes the response's ContentLength passes the check")
+	}
+	if _, err := bodyWrites(resp, true, func() { resp.Request.URL.Path += "y" }); err == nil {
+		t.Errorf("a body that writes the request's URL passes the check")
 	}
 }

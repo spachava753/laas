@@ -288,3 +288,16 @@ func GrabLazy() {
 	var g Grabber = lazy{} // want `postcondition may not hold for any value of the state held of g after the call: closed\(o'\)`
 	_ = g
 }
+
+// CloseGiven converts a closer of its own and then closes one it was given,
+// whose state nothing says: the False states are stored at the new home
+// only (F16 of the review of step 4).
+//
+// @Requires c != nil
+// @Modifies c
+// @Ensures True
+func CloseGiven(c io.Closer) {
+	var q io.Closer = quiet{}
+	_ = q
+	c.Close() // want `precondition of c.Close may not hold: ~closed\(c\)`
+}

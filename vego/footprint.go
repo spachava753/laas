@@ -341,7 +341,11 @@ func (v *fnVerifier) outsideFootprint(t target, key string, ref, position *logic
 // of it, which the facts of noteReached give for what memory held on entry
 // at a reached cell. home is the home of the parameter on entry.
 type separation struct {
-	param  *types.Var
+	param *types.Var
+	// field is set for the footprint of p.field, a field that a
+	// notWrittenBy declaration covers: what p reaches is among the roots
+	// (F28).
+	field  string
 	rel    *logic.Term
 	home   *logic.Term
 	direct []passedValue
@@ -646,10 +650,18 @@ func (v *fnVerifier) enterReaches(st *state) {
 		// parameter that owns memory owns, as the writer a *bufio.Writer
 		// keeps: what the other parameters reach lies outside it.
 		param, at := t.param, t.ref
+		field := ""
 		if t.part {
 			param = t.ownerParam
 		} else if param != nil && v.entry[param] != nil {
 			at = home(v.entry[param][0])
+		} else if t.fp && t.mod < len(fn.modifies) {
+			// The footprint of p.Body, of a field that notWrittenBy
+			// covers: what p reaches lies outside it too, as the shipped
+			// declaration claims (F28).
+			if root := v.notWrittenRoot(fn, fn.modifies[t.mod]); root != nil {
+				param, field = root, fn.modifies[t.mod].steps[0].field
+			}
 		}
 		if !t.fp && !t.sourcePart || param == nil || v.entry[param] == nil {
 			continue
@@ -658,10 +670,13 @@ func (v *fnVerifier) enterReaches(st *state) {
 		if t.part {
 			name = fmt.Sprintf("reach $%s owned %d", param.Name(), i)
 		}
-		r := separation{param: param, rel: logic.Const(name, reachSort), home: at}
+		if field != "" {
+			name += "." + field
+		}
+		r := separation{param: param, field: field, rel: logic.Const(name, reachSort), home: at}
 		v.inputs[r.rel.Name] = true
 		for _, other := range fn.params {
-			if other != param && v.entry[other] != nil && holdsMemory(other.Type()) {
+			if (other != param || field != "") && v.entry[other] != nil && holdsMemory(other.Type()) {
 				r.direct = append(r.direct, passedValue{val: v.entry[other], t: other.Type()})
 			}
 		}
@@ -772,8 +787,8 @@ type ownsDecl struct {
 	// pkg and typ name the type.
 	pkg, typ string
 	fields   []string
-	reason string
-	line   int
+	reason   string
+	line     int
 	// length, when set, is what |x| of a value of the type is: a formula
 	// over the type's own fields, read in the package of the type as an
 	// invariant is, as |buf| for a strings.Builder. holds are formulas over
@@ -1427,4 +1442,31 @@ func (pv *pkgVerifier) inlineOwners(t types.Type) []inlineField {
 		}
 	}
 	return found
+}
+
+// notWrittenRoot returns the parameter p of a Modifies entry p.f, where f is
+// a field of the struct p points to that a notWrittenBy declaration covers,
+// as resp.Body of an *http.Response, or nil.
+func (v *fnVerifier) notWrittenRoot(fn *funcInfo, m *modTarget) *types.Var {
+	if m.behind || len(m.steps) != 1 || m.steps[0].field == "" {
+		return nil
+	}
+	param := fn.paramNames[m.name]
+	if param == nil {
+		return nil
+	}
+	object, isPointer := pointee(param.Type())
+	if !isPointer {
+		return nil
+	}
+	u, isStruct := object.Underlying().(*types.Struct)
+	if !isStruct {
+		return nil
+	}
+	for i := range u.NumFields() {
+		if u.Field(i).Name() == m.steps[0].field && notWrittenOf(object, i) != nil {
+			return param
+		}
+	}
+	return nil
 }
