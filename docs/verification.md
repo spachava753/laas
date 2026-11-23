@@ -6312,7 +6312,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `Invariant P` | doc comment of a struct type | `P` is true for every parameter, receiver, and result of the type at function boundaries. |
 | `Predicate name(x, y) ::= P` | top level | Names a formula over its parameters. |
 | `State name` | doc comment of a named interface type that declares a method | Declares a state of the values of the interface. |
-| `Receiver r` | doc comment of a method in a named interface type | Names the value the method is called on, so that its contract can speak of its states as `name(r)`, and list it in `Modifies` when the method writes behind it. |
+| `Receiver r` | doc comment of a method in a named interface type | Names the value the method is called on, so that its contract can speak of its states as `name(r)`, list it in `Modifies` when the method writes behind it, or place a result within it, as in `within(m, r)`. |
 
 ### Formulas
 
