@@ -115,3 +115,109 @@ func HeldPointer() (r *Report) {
 	s := &sink{}
 	return &Report{out: s}
 }
+
+// UseLocal makes a report and writes through it (F40 of the review of
+// step 5).
+//
+// @Ensures True
+func UseLocal() {
+	l := &Report{out: os.Stdout}
+	_ = l.Line(nil)
+}
+
+// newReport makes a report over standard output.
+//
+// @Ensures r != nil And r.out != nil And r.lines = 0 And fresh(r)
+func newReport() (r *Report) {
+	return &Report{out: os.Stdout}
+}
+
+// UseNew writes through a report a constructor made.
+//
+// @Ensures True
+func UseNew() {
+	l := newReport()
+	_ = l.Line(nil)
+}
+
+// Keeper2 keeps a report.
+type Keeper2 struct {
+	r *Report
+}
+
+// UseEscaped writes through a report that escaped into k first.
+//
+// @Requires k != nil
+// @Modifies k
+// @Ensures True
+func UseEscaped(k *Keeper2, data []byte) {
+	l := &Report{out: os.Stdout}
+	k.r = l
+	_ = l.Line(data) // want `vego: the footprint of what is owned by what is passed to Line as l may hold memory that what is passed as data reaches, and Line relies on it not doing so: l was stored into memory at report.go:[0-9:]+, so what it owns may be reached through that too`
+}
+
+// UseGiven writes through a report made over a writer it was handed, which
+// it cannot own (not built).
+//
+// @Requires w != nil
+// @Ensures True
+func UseGiven(w io.Writer) {
+	l := &Report{out: w} // want `vego: out of the Report made here may come to refer to memory that existed when UseGiven was called and that it did not own`
+	_ = l.Line(nil)
+}
+
+// keepReport keeps a report.
+//
+// @Requires k != nil
+// @Modifies k
+// @Ensures True
+func keepReport(k *Keeper2, r *Report) {
+	k.r = r
+}
+
+// UseHandedKeeping writes through a report it handed to a function that
+// keeps it.
+//
+// @Requires k != nil
+// @Modifies k
+// @Ensures True
+func UseHandedKeeping(k *Keeper2, data []byte) {
+	l := &Report{out: os.Stdout}
+	keepReport(k, l)
+	_ = l.Line(data) // want `vego: the footprint of what is owned by what is passed to Line as l may hold memory that what is passed as data reaches, and Line relies on it not doing so: l was handed to keepReport, which may keep it, so what it owns may be reached through that too`
+}
+
+// bytesSink writes into its own buffer.
+type bytesSink struct {
+	data []byte
+}
+
+// Write records nothing.
+//
+// @Requires s != nil
+// @Modifies s
+// @Ensures n = |p| And err = nil
+func (s *bytesSink) Write(p []byte) (n int, err error) {
+	s.data = s.data[:0]
+	return len(p), nil
+}
+
+// Mirror writes through the report and reads the sink it is handed, which
+// it assumes is not what the report's writer writes.
+//
+// @Requires r != nil And r.out != nil And s != nil
+// @Modifies r
+// @Ensures |s.data'| = |s.data|
+func (r *Report) Mirror(s *bytesSink) {
+	_, _ = r.out.Write(nil)
+}
+
+// UseInsideRow hands a report the writer it owns: a part of a new owner is
+// no other argument of the call.
+//
+// @Ensures True
+func UseInsideRow() {
+	s := &bytesSink{data: make([]byte, 1)}
+	l := &Report{out: s}
+	l.Mirror(s) // want `vego: the footprint of what is owned by what is passed to Mirror as l may hold memory that what is passed as s reaches, and Mirror relies on it not doing so: s is memory that the Report made at report.go:[0-9:]+ owns`
+}

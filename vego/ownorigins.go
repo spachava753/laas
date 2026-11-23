@@ -1177,7 +1177,18 @@ func (v *fnVerifier) ownResults(fl *ownFlow, e ast.Expr, count int, f *ownFact) 
 	if fl.emitting {
 		recorded := make([]ownOperand, len(operands))
 		for i, op := range operands {
-			recorded[i] = ownOperand{expr: op.expr, kind: kinds[i], addr: op.addr}
+			k := kinds[i]
+			fresh := len(k.tags) > 0 && len(k.params) == 0 && len(k.inside) == 0 && k.unknown == ""
+			escaped := ""
+			for tag := range k.tags {
+				if st := f.status[tag]; st.state != tagNew {
+					fresh = false
+					if st.state == tagEscaped {
+						escaped = st.why
+					}
+				}
+			}
+			recorded[i] = ownOperand{expr: op.expr, kind: k, addr: op.addr, fresh: fresh, escaped: escaped}
 		}
 		fl.operands[call] = recorded
 	}
@@ -1584,6 +1595,10 @@ type ownOperand struct {
 	kind ownKind
 	// addr is set when Go hands the operand's address.
 	addr bool
+	// fresh is set when the operand is made of tags that are all new where
+	// the call stands, and escaped says how a tag of it escaped.
+	fresh   bool
+	escaped string
 }
 
 // addressTaken reports whether Go takes the address of the operand of a

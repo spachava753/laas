@@ -1027,6 +1027,12 @@ func (v *fnVerifier) ownedFreshSeen(sink *state, mem memory, ptr value, t types.
 			if v.hasFootprint(ft) {
 				facts = append(facts, logic.Or(isNilRef(val), v.rowNewOrIn(mem, home(val[0]), before, nil, nil)))
 			}
+			// An owner of the project owns the states of what its interface
+			// value holds, which are new when its home is (F40 of the review
+			// of step 5): G lets in only a new value.
+			if len(sourceOwnedFields(object)) > 0 {
+				facts = append(facts, logic.Or(isNilRef(val), logic.Le(before, home(val[0]))))
+			}
 		default:
 			facts = append(facts, logic.Or(logic.Eq(val[0], zero), logic.And(logic.Le(before, val[0]), v.ownedFreshSeen(sink, mem, val, ft, before, seen))))
 		}

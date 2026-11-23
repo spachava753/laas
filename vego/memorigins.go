@@ -928,10 +928,37 @@ func (v *fnVerifier) checkReachedApart(call *ast.CallExpr, fn *funcInfo, args ma
 				}
 				continue
 			}
-			if !v.placedFootprint(passedExpr[param], 0) {
+			// An owner of the project that the function made, or got as new
+			// from a call, and that nothing else refers to, is placed: by
+			// HI, what it owns is reached only through it (F40 of the
+			// review of step 5, decided by the orchestrator).
+			ownerPlaced, why := false, ""
+			if t.part && t.sourcePart {
+				ownerPlaced, why = v.placedOwner(call, passedExpr[param])
+			}
+			if !ownerPlaced && !v.placedFootprint(passedExpr[param], 0) {
+				if why != "" {
+					v.report(call.Pos(), "%s: %s", lead, why)
+					continue
+				}
+				if t.part && t.sourcePart {
+					v.report(call.Pos(), "%s: %s is not a parameter whose footprint %s's own Modifies lists, a value made from such parameters by a call "+
+						"whose contract says so with fresh(result, w), or an owner made here or returned new by a call, so nothing places it",
+						lead, passed[param], v.fn.obj.Name())
+					continue
+				}
 				v.report(call.Pos(), "%s: %s is not a parameter whose footprint %s's own Modifies lists, or a value made from such parameters by a call "+
 					"whose contract says so with fresh(result, w), so nothing places it", lead, passed[param], v.fn.obj.Name())
 				continue
+			}
+			if ownerPlaced {
+				// What else the call is handed must be no part of an owner,
+				// since the row of a new owner's interface value is reached
+				// only through it.
+				if why := v.insideOperand(call, passedExpr[other]); why != "" {
+					v.report(call.Pos(), "%s: %s", lead, why)
+					continue
+				}
 			}
 			if expr := passedExpr[other]; expr == nil {
 				v.report(call.Pos(), "%s: what is passed as %s is not written as one expression", lead, passed[other])

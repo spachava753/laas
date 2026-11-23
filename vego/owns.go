@@ -1035,3 +1035,53 @@ func ownsIfaceThrough(t types.Type, path string, seen map[types.Type]bool) strin
 	}
 	return ""
 }
+
+// placedOwner reports whether an owner handed to a call is new memory
+// that nothing else refers to where the call stands: an owner the function
+// made, or got from a call that returns it new and keeps nothing of it,
+// held in a local that is never assigned again; or why not, when it is such
+// a local whose memory escaped.
+func (v *fnVerifier) placedOwner(call *ast.CallExpr, e ast.Expr) (bool, string) {
+	fl := v.ownOrigins()
+	if fl == nil || e == nil {
+		return false, ""
+	}
+	variable := v.localVar(e)
+	if variable == nil || v.boxed[variable] || v.findReassigned(v.bodyOrigin())[variable] || v.memOrigins().litAssigned[variable] {
+		return false, ""
+	}
+	for _, op := range fl.operands[call] {
+		if op.expr != e {
+			continue
+		}
+		if !op.fresh {
+			if op.escaped != "" {
+				return false, fmt.Sprintf("%s was %s, so what it owns may be reached through that too", types.ExprString(e), op.escaped)
+			}
+			return false, ""
+		}
+		return true, ""
+	}
+	return false, ""
+}
+
+// insideOperand says why an operand of a call may be memory that an owner
+// owns, by the analysis of ownership, or "".
+func (v *fnVerifier) insideOperand(call *ast.CallExpr, e ast.Expr) string {
+	fl := v.ownOrigins()
+	if fl == nil || e == nil {
+		return ""
+	}
+	for _, op := range fl.operands[call] {
+		if op.expr != e {
+			continue
+		}
+		for root := range op.kind.inside {
+			return fmt.Sprintf("%s is memory that %s owns", types.ExprString(e), v.rootName(root))
+		}
+		if op.kind.unknown != "" {
+			return types.ExprString(e) + " may be memory that an owner owns: " + op.kind.unknown
+		}
+	}
+	return ""
+}

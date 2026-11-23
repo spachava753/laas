@@ -1682,6 +1682,9 @@ guide	(*guide.Pile).Items	4	1665	0
 guide	(*guide.Pile).Push	22	48930	0
 guide	(*guide.Registry).Put	17	20929	0
 guide	(*guide.Retry).Next	7	2360	0
+guide	(*guide.Service).Rename	13	25747	0
+guide	(*guide.Service).RenameAll	19	85887	0
+guide	(*guide.Service).RenameAllForgets	17	82522	0
 guide	(*guide.Settings).Setup	15	22019	0
 guide	(*guide.Stack).Pop	15	24951	0
 guide	(*guide.Stack).Push	36	92810	0
@@ -1828,6 +1831,7 @@ guide	guide.IsEmpty	1	46	0
 guide	guide.Join	5	5717	0
 guide	guide.JoinUnbounded	11	55806	0
 guide	guide.JoinWithCommas	31	230497	0
+guide	guide.Jot	7	4883	0
 guide	guide.KeysOf	17	148962	2
 guide	guide.KeysOfUncounted	16	149039	2
 guide	guide.Labelled	1	46	0
@@ -1868,7 +1872,7 @@ guide	guide.Mid	9	4455	0
 guide	guide.MidWrong	7	3245	0
 guide	guide.Nearest	27	64171	0
 guide	guide.NewCounter	4	1080	0
-guide	guide.NewJournal	11	32978	0
+guide	guide.NewJournal	15	39589	0
 guide	guide.NewPile	11	13549	0
 guide	guide.NewStale	4	750	0
 guide	guide.Next	16	11499	0
@@ -1944,6 +1948,7 @@ guide	guide.Save	13	29339	0
 guide	guide.SaveUnlisted	13	31363	0
 guide	guide.SearchLocked	23	40864	0
 guide	guide.Served	1	46	0
+guide	guide.Service	1	917	0
 guide	guide.SetMax	7	5364	0
 guide	guide.SetSize	1	46	0
 guide	guide.Shift	9	28808	0
@@ -2064,6 +2069,9 @@ guide	strconv.Atoi	3	18026	0
 guide	strconv.Itoa	1	1310	0
 guide	strings.FieldsFunc	1	4706	0
 guide	strings.IndexFunc	1	1639	0
+guidestore	(*guidestore.Store).Set	8	10318	0
+guidestore	guidestore.New	6	2277	0
+guidestore	guidestore.Store	1	167	0
 ifacestate	(ifacestate.file).Close	6	2137	0
 ifacestate	ifacestate.AfterClose	14	13317	0
 ifacestate	ifacestate.Apart	6	4943	0
@@ -3281,6 +3289,7 @@ owns	(*owns.Page).Add	18	38138	0
 owns	(*owns.Pair).Share	21	94753	0
 owns	(*owns.Remembers).Write	11	11363	0
 owns	(*owns.Report).Line	48	122716	0
+owns	(*owns.Report).Mirror	8	13829	0
 owns	(*owns.Report).Reopen	14	48461	0
 owns	(*owns.Server).SetPort	7	9792	0
 owns	(*owns.Stack).Clip	12	111431	2
@@ -3293,6 +3302,7 @@ owns	(*owns.Stack).PushAll	30	193386	0
 owns	(*owns.Stack).Reserve	15	123850	2
 owns	(*owns.Stack).Reset	16	16716	0
 owns	(*owns.Tally).Add	14	24835	0
+owns	(*owns.bytesSink).Write	16	20999	0
 owns	(*owns.memStore).Put	17	20929	0
 owns	(*owns.memStore).Regrow	7	7958	0
 owns	(*owns.sink).Write	11	8561	0
@@ -3398,6 +3408,12 @@ owns	owns.Two	9	9692	0
 owns	owns.TwoNew	20	28508	0
 owns	owns.TwoNewServers	8	9065	0
 owns	owns.Unlisted	5	5637	0
+owns	owns.UseEscaped	20	57341	0
+owns	owns.UseGiven	9	6011	0
+owns	owns.UseHandedKeeping	20	59310	0
+owns	owns.UseInsideRow	23	55370	0
+owns	owns.UseLocal	15	39269	0
+owns	owns.UseNew	7	4002	0
 owns	owns.externalReset	1	20686	0
 owns	owns.externalStack	1	20132	0
 owns	owns.fill	6	1540	0
@@ -3405,7 +3421,9 @@ owns	owns.first	11	20745	0
 owns	owns.helper	7	3271	0
 owns	owns.helper2	8	20637	0
 owns	owns.keepIn	7	3546	0
+owns	owns.keepReport	6	1821	0
 owns	owns.newKept	6	1425	0
+owns	owns.newReport	15	39589	0
 owns	owns.peek	1	4049	0
 owns	owns.remember	8	5991	0
 owns	owns.reset	7	13899	0

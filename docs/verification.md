@@ -3104,7 +3104,7 @@ func Take(p *Pile, xs []int) {
 vego: p.items may come to refer to memory that existed when Take was called and that it did not own; an owned field may refer only to memory made since, or to part of what it referred to then; copy it into new memory, as slices.Clone does, or do not declare the field owned
 ```
 
-`p.items = slices.Clone(xs)` verifies. So do `append` to the field itself, a slice of it, `make`, a composite literal, and a variable that holds new memory nothing else refers to, as in `m := make(map[string]int); fill(m); c.m = m`.
+`p.items = slices.Clone(xs)` verifies when `xs` is short enough for the entry of `Clone`, which requires <code>&#124;xs&#124; * elemsize(xs) + 65536 <= MaxAlloc</code>. So do `append` to the field itself, a slice of it, `make`, a composite literal, and a variable that holds new memory nothing else refers to, as in `m := make(map[string]int); fill(m); c.m = m`.
 
 ### Keeping what a struct owns in one place
 
@@ -3125,7 +3125,7 @@ func Lend(p *Pile, s *Shelf) {
 ```
 
 ```text
-vego: p.items is memory that p owns, stored into memory at owns.go:66:2; it may be read and written here, but not kept elsewhere: copy it, or do not declare the field owned
+vego: p.items is memory that p owns, stored into memory at owns.go:67:2; it may be read and written here, but not kept elsewhere: copy it, or do not declare the field owned
 ```
 
 The same applies to a function literal that may run after the call and captures it, and to a callee that may keep what it is handed. A verified function keeps a parameter when it stores it, or memory it refers to, into memory. A trusted function keeps only what its entry lists under `keeps`.
@@ -3184,7 +3184,7 @@ type Journal struct {
 	lines int
 }
 
-// @Ensures r != nil And r.lines = 0
+// @Ensures r != nil And r.out != nil And r.lines = 0 And fresh(r)
 func NewJournal() (r *Journal) {
 	return &Journal{out: os.Stderr}
 }
@@ -3201,7 +3201,17 @@ func (l *Journal) Line(p []byte) (err error) {
 }
 ```
 
-`l.lines` is known after `l.out.Write(p)`. A caller of `Line` keeps what its other arguments refer to, too.
+`l.lines` is known after `l.out.Write(p)`. A caller of `Line` keeps what its other arguments refer to, too. The caller may have the journal as a parameter that it lists in `Modifies`, or it may make one, or get one from a call whose contract says `fresh(r)`:
+
+```go
+// @Ensures True
+func Jot(p []byte) {
+	l := NewJournal()
+	_ = l.Line(p)
+}
+```
+
+Such a journal must not have been stored anywhere, or handed to a function that may keep it, before the call. Otherwise the call is refused with a message that names where it went.
 
 A struct can own only a writer made for it, as `os.Stderr` converted where it is stored, or a value made in the function. A writer it is handed is memory that existed when the function was called, and storing it is refused.
 
@@ -3234,7 +3244,18 @@ func PutTwice() {
 }
 ```
 
-Here `Putter` is an interface whose `Put` lists its receiver. The memory a converted value may write grows with what the owner owns. A map stored into `x.m` after the conversion is written by `p.Put`, so nothing is known of it after the call:
+`Putter` is an interface whose `Put` writes behind its receiver:
+
+```go
+type Putter interface {
+	// @Receiver r
+	// @Modifies r
+	// @Ensures True
+	Put(k string, v int)
+}
+```
+
+The memory a converted value may write grows with what the owner owns. A map stored into `x.m` after the conversion is written by `p.Put`, so nothing is known of it after the call:
 
 ```go
 // @Ensures r
@@ -3255,7 +3276,64 @@ vego: postcondition may not hold: r
 
 ### The invariant of what a struct owns
 
-The invariant of a struct includes the invariants of the structs that its owned pointer fields point to. A function of another package can then call a method that needs them, as in [It applies only to direct parameters and results](#it-applies-only-to-direct-parameters-and-results). To say in a formula that the invariants of a value hold, write `valid(x)`: it is what a function assumes of `x` on entry, and it names no field of `x`. A loop that calls a method of a store that a server owns can keep the store's invariant with `// @Invariant valid(s)`.
+A store in package `guidestore` keeps its map under an invariant:
+
+```go
+// @Owns names
+// @Invariant names != nil
+type Store struct {
+	names map[int]string
+}
+
+// @Requires st != nil
+// @Modifies st
+// @Ensures True
+func (st *Store) Set(id int, name string) {
+	st.names[id] = name
+}
+```
+
+A struct of another package that owns a store can call `Set`:
+
+```go
+// @Owns store
+// @Invariant store != nil
+type Service struct {
+	store *guidestore.Store
+}
+
+// @Requires s != nil
+// @Modifies s
+// @Ensures True
+func (s *Service) Rename(id int, name string) {
+	s.store.Set(id, name)
+}
+```
+
+The invariant of a struct includes the invariants of the structs that its owned pointer fields point to, and of the owners it holds by value. `Rename` assumes the invariant of `s` on entry, and with it that of `s.store`. It names no field of the store, which it could not, since `names` is unexported.
+
+A loop that calls `Set` forgets the store's invariant, as [A loop does not keep it](#a-loop-does-not-keep-it) describes. Write `valid(s)` in the loop's invariant. `valid(x)` is what a function assumes of `x` on entry, and it names no field:
+
+```go
+// @Requires s != nil
+// @Modifies s
+// @Ensures True
+func (s *Service) RenameAll(names []string) {
+	// @Invariant valid(s)
+	for i := range names {
+		s.store.Set(i, names[i])
+	}
+}
+```
+
+Without it, with `// @Invariant s.store != nil` in its place, the call and the return are refused:
+
+```text
+vego: invariant of Store may not hold for what is passed to Set as st: names != nil
+vego: invariant of Store may not hold for s on return, in what it owns at store: names != nil
+```
+
+`valid(s')` in an `Ensures` speaks of the struct on return, and `valid(old(s))` in a body of the struct on entry.
 
 ## Maps
 
@@ -6674,7 +6752,16 @@ A function that uses any of the following is reported as `cannot verify`:
 - calling a method of `bytes.Buffer` or `strings.Builder` that has no shipped contract, such as `Read`, `Next`, `ReadFrom`, `WriteTo`, or `Cap`, and converting either to `io.Writer`, since its `Write` needs a bound that the contract of `(io.Writer).Write` does not give; passing one to `fmt.Fprintf`, `fmt.Fprint`, or `fmt.Fprintln` is supported (see [Building text in a buffer](#building-text-in-a-buffer) and [Formatting into a buffer](#formatting-into-a-buffer));
 - formatting into a `bytes.Buffer` or a `strings.Builder` a part whose length the bound on formatting does not count, such as the text of an error, or what a `String` method returns even when its contract bounds it;
 - converting a `*bufio.Writer` or a `*bufio.Reader` to an interface, since their methods call through the writer or the reader they keep (see [Writing through a buffer](#writing-through-a-buffer)), and converting a value of another shipped type that owns memory, such as a `*log.Logger`, to an interface whose methods write behind their receiver;
-- in a struct that owns memory (see [Structs that own memory](#structs-that-own-memory)): an exported owned field, a struct type with type parameters, and a struct that owns itself through its fields; storing into an owned field memory that something else refers to, a value it is handed, or what another field or another owner owns, so that moving owned memory from one owner or field to another is refused; returning what a local owner owns while something else refers to the owner, or a struct value that holds what an owner owns; handing what an owner owns to a method of an interface declared in source, which may keep what it is handed; converting an owner that owns an interface value through an owned pointer, or one that owns an interface value to an interface whose method is handed memory, such as `io.Writer`; and storing an owner into its own owned field;
+- in a struct that owns memory (see [Structs that own memory](#structs-that-own-memory)):
+  - an owned field made to refer to what the function was given, as `NewReport(w)` storing `w` or `NewServer(cfg)` storing `cfg`; copy it, or make the value inside;
+  - moving owned memory from one field or one owner to another, as `s.items, t.items = t.items, s.items`;
+  - an exported owned field, a struct type with type parameters, and a struct that owns itself through its fields;
+  - storing into an owned field memory that something else refers to, or what another field or another owner owns;
+  - returning what a local owner owns while something else refers to the owner, and returning a struct value that holds what an owner owns;
+  - handing what an owner owns to a method of an interface declared in source, which may keep what it is handed;
+  - converting an owner that owns an interface value through an owned pointer, and converting an owner that owns an interface value to an interface whose method is handed memory, such as `io.Writer`;
+  - storing an owner into its own owned field;
+  - what the elements of an owned slice and the values of an owned map point to, which is not owned;
 - `io.MultiReader` and `io.MultiWriter` handed a slice whole, as in `io.MultiReader(rs...)`, when what they return is read or written (see [Wrappers in package io](#wrappers-in-package-io));
 - `context.WithCancel` and the functions like it, which keep the context they are given and run it on other goroutines (see [Types without a shipped entry](#types-without-a-shipped-entry));
 - a function that keeps code it is given anywhere but in a result or in memory that a parameter reaches, such as a registry, a goroutine, or a timer, which has no true entry; making a trusted function with `keeps` into a value; and handing a function literal, a function, or a method value of a type without a contract to a parameter under `keeps` (see [Functions that keep what they are given](#functions-that-keep-what-they-are-given));
@@ -6693,7 +6780,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - handing a trusted function anything but a function literal written there, a function, a method value, or a value of a type with a contract, for a parameter with a contract under `calls`; a variable that holds a literal cannot be handed over;
 - deferring a call that hands over a function, and using a trusted function with a contract under `calls` as a value;
 - applying a function parameter in a trusted contract unless it has one integer parameter and one integer or boolean result, and a contract under `calls` for a function that is given or returns an error, an interface, or a function;
-- copying or assigning a value that holds a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once`, parameters, results, and receivers of such a type, a method with a value receiver of such a type, `append` to a slice of them, and `range` variables and loop variables of such a type (see [Values that hold a mutex cannot be copied or overwritten](#values-that-hold-a-mutex-cannot-be-copied-or-overwritten));
+- copying or assigning a value that holds a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once`, or a value that owns memory, as a `strings.Builder`, a `bytes.Buffer`, or a struct that declares `@Owns`; parameters, results, and receivers of such a type, a method with a value receiver of such a type, `append` to a slice of them, and `range` variables and loop variables of such a type (see [Values that hold a mutex cannot be copied or overwritten](#values-that-hold-a-mutex-cannot-be-copied-or-overwritten)); pass a pointer;
 - `recover`;
 - generic functions and types of your own package with annotations, a call of a generic function without a trusted contract, a generic function used as a value, methods of generic types, and type arguments that can hold code, that are not modelled, or that hold a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once` (see [Generic functions of other packages](#generic-functions-of-other-packages));
 - goroutines, channels, and `select`;
@@ -6727,7 +6814,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - A claim under `asserts` is true: the function calls nothing that the parameter holds, or that a call of what the parameter holds returns, but what the claim allows, and uses no reflection on it (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For a parameter whose footprint the contract lists in `Modifies`, they pass no other argument that reaches memory in that footprint without going through an interface value: `Log` relies on the `Lines` that `t` points to not being memory that the methods of `r` write. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one that wraps it, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method. For a parameter whose type owns memory (see [Structs that own memory](#structs-that-own-memory)), they pass a struct whose owned memory is reached by nothing else they pass: not by the other arguments, not by the struct's other fields, and not by what its other owned fields refer to. Memory that a method returns from what its struct owns, which its contract shows with `within(result, s)`, is not stored by code that is not verified, and is not passed to a verified function together with the struct it came from or with anything that reaches that struct.
 - Code of a package that declares a struct that owns memory, where it is not verified, builds and changes such structs so that nothing else refers to the memory an owned field refers to, no two owned fields refer to the same memory, and an owned field comes to refer only to memory made since, or to part of what it referred to before.
-- An interface value that reaches verified code from code that is not verified meets the contracts of its methods. That includes a value passed as an argument, a value in memory that an argument reaches, a value that a call through another value returns, and a value that a trusted function returns or writes, which its entry vouches for. Called with arguments that meet the `Requires` of a method, the method returns without panicking, leaves its `Ensures` true, and writes nothing that verified code can see outside what its `Modifies` lists. When the contract lists the receiver, that is the value's footprint, and the method adds to it only memory that it creates during the call. A method may keep a pointer it is handed, but no later call of the value's methods writes through it: a `Store` whose `Put(v *Value)` keeps `v` and whose `Touch()` then writes `*v` breaks this, and `vego` cannot see it. The same holds of a pointer that verified code stores into memory that the value's methods write or that the value handed out, as with `within(m, w)`: a `Sink` that hands out a table of pairs, and whose `Put` adds one to each pair in the table, breaks this. For a result that the contract of the method lists under `Vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). This holds also when the value holds a pointer to a struct that verified code holds.
+- An interface value that reaches verified code from code that is not verified meets the contracts of its methods. That includes a value passed as an argument, a value in memory that an argument reaches, a value that a call through another value returns, and a value that a trusted function returns or writes, which its entry vouches for. Called with arguments that meet the `Requires` of a method, the method returns without panicking, leaves its `Ensures` true, and writes nothing that verified code can see outside what its `Modifies` lists. When the contract lists the receiver, that is the value's footprint, and the method adds to it only memory that it creates during the call. A method whose entry lists no `keeps`, as `(io.Writer).Write` and `(io.Reader).Read`, keeps nothing it is handed once it returns, as `io.Writer` and `io.Reader` document of `p` (see [What an entry for a type claims](#what-an-entry-for-a-type-claims)). A method of an interface declared in source may keep a pointer it is handed, but no later call of the value's methods writes through it: a `Store` whose `Put(v *Value)` keeps `v` and whose `Touch()` then writes `*v` breaks this, and `vego` cannot see it. The same holds of a pointer that verified code stores into memory that the value's methods write or that the value handed out, as with `within(m, w)`: a `Sink` that hands out a table of pairs, and whose `Put` adds one to each pair in the table, breaks this. For a result that the contract of the method lists under `Vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). This holds also when the value holds a pointer to a struct that verified code holds.
 - The same holds of the methods and function types that entries of the trust file give contracts, which is what such an entry claims (see [What an entry for a type claims](#what-an-entry-for-a-type-claims)). In particular, a caller that is not verified does not pass a verified function such a value together with a pointer to memory that the value writes, as a `*bytes.Buffer` passed both as an `io.Writer` and as a `*bytes.Buffer` would be. Every call through such a value returns: a `Read` from a pipe, a terminal, or a connection returns only once data or an error arrives.
 - Packages that are built together give each type at most one entry, and declare the same states for an interface. `vego` reports two entries for one type, or an entry against none, and two different declarations of the states of an interface, or a declaration against none, in every package that `laas` analyses and that is built with both. A program whose main package is never given to `laas` is not checked.
 - A function value that reaches verified code from code that is not verified meets the contract of its type. That includes a value passed as an argument, a value in memory that an argument reaches, and a value made with `reflect.MakeFunc` or by generic code. Called with arguments that meet the `Requires` of its type, such a value returns without panicking, writes only what the `Modifies` of its type lists, and leaves its `Ensures` true. For a result that the contract of its type lists under `Vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns).

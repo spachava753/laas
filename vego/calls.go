@@ -638,6 +638,10 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		if owner := passedExpr[param]; t.part && remedy == "" && owner != nil && v.notListable(owner, call.Pos()) == "" {
 			shown := strings.TrimPrefix(types.ExprString(ast.Unparen(owner)), "&")
 			remedy = "list " + shown + " in a // @Modifies clause, which covers what it owns"
+			// A local cannot be listed: what it owns must be new.
+			if variable := v.localVar(owner); variable != nil && !slices.Contains(v.fn.params, variable) {
+				remedy = "what " + shown + " owns is not known to be new; make the owner here, or have the contract of the call that returns it say fresh(result)"
+			}
 			if _, element := ast.Unparen(owner).(*ast.IndexExpr); element {
 				remedy += "; a slice listed whole covers its elements, not what they own"
 			}

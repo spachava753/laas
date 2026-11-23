@@ -1,6 +1,7 @@
 package guide
 
 import (
+	"guidestore"
 	"io"
 	"os"
 )
@@ -106,7 +107,7 @@ type Journal struct {
 
 // NewJournal makes a journal over standard error.
 //
-// @Ensures r != nil And r.lines = 0
+// @Ensures r != nil And r.out != nil And r.lines = 0 And fresh(r)
 func NewJournal() (r *Journal) {
 	return &Journal{out: os.Stderr}
 }
@@ -122,6 +123,14 @@ func (l *Journal) Line(p []byte) (err error) {
 		l.lines++
 	}
 	return err
+}
+
+// Jot writes a line to a journal it makes.
+//
+// @Ensures True
+func Jot(p []byte) {
+	l := NewJournal()
+	_ = l.Line(p)
 }
 
 // Putter is an interface whose method writes behind its receiver.
@@ -173,3 +182,46 @@ func StaleRegistry() (r bool) {
 	p.Put("a", 2)
 	return m["a"] == 1 // want `vego: postcondition may not hold: r`
 }
+
+// Service owns a store of another package, so its invariant includes the
+// store's, though the store's fields cannot be named here.
+//
+// @Owns store
+// @Invariant store != nil
+type Service struct {
+	store *guidestore.Store
+}
+
+// Rename sets a name in the store the service owns.
+//
+// @Requires s != nil
+// @Modifies s
+// @Ensures True
+func (s *Service) Rename(id int, name string) {
+	s.store.Set(id, name)
+}
+
+// RenameAll sets names in a loop, which keeps the store's invariant with
+// valid(s).
+//
+// @Requires s != nil
+// @Modifies s
+// @Ensures True
+func (s *Service) RenameAll(names []string) {
+	// @Invariant valid(s)
+	for i := range names {
+		s.store.Set(i, names[i])
+	}
+}
+
+// RenameAllForgets is RenameAll without the invariant.
+//
+// @Requires s != nil
+// @Modifies s
+// @Ensures True
+func (s *Service) RenameAllForgets(names []string) {
+	// @Invariant s.store != nil
+	for i := range names {
+		s.store.Set(i, names[i]) // want `vego: invariant of Store may not hold for what is passed to Set as st: names != nil`
+	}
+} // want `vego: invariant of Store may not hold for s on return, in what it owns at store: names != nil`
