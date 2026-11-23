@@ -4965,6 +4965,7 @@ These calls have shipped contracts:
 - `http.Error`, `http.NotFound`, and `http.StatusText`.
 - `Get`, `Set`, and `Del` of `http.Header`, and `PathValue` of the request.
 - `Query` of a `*url.URL`, which requires a bound on the length of `RawQuery`, and `Get` of the `url.Values` it returns.
+- `mime.ParseMediaType`, which requires a bound on the length of its argument and vouches for its error.
 
 A `ResponseWriter` converts to `io.Writer`, so you can pass it to `fmt.Fprintf` and to functions that take an `io.Writer` and keep nothing of it. The fields of the request, such as `req.Method` and `req.URL.Path`, are read as fields, and what the request reaches is kept across the writes:
 
@@ -4980,6 +4981,36 @@ func ByTag(w http.ResponseWriter, req *http.Request) {
 	}
 	w.Write([]byte(tag))
 }
+```
+
+To check the media type of a request, bound the header before you parse it:
+
+```go
+// @Requires w != nil And req != nil And req.Header != nil
+// @Modifies w
+// @Ensures True
+func JSONOnly(w http.ResponseWriter, req *http.Request) {
+	contentType := req.Header.Get("Content-Type")
+	if len(contentType) > 1000 {
+		http.Error(w, "Content-Type too long", http.StatusBadRequest)
+		return
+	}
+	mediatype, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if mediatype != "application/json" {
+		http.Error(w, "expect application/json Content-Type", http.StatusUnsupportedMediaType)
+	}
+}
+```
+
+Without the test of its length, the call is reported:
+
+```text
+vego: precondition of ParseMediaType may not hold: 32 * (|v| + 1) + 65536 <= MaxAlloc; it holds when
+|contentType| <= 1000000000000
 ```
 
 `http.Error` formats its message with `fmt.Fprintln`, so the message needs a bound. The text that `err.Error()` returns for an error that can be formatted is assumed short enough to be printed, as [What a proof assumes](#what-a-proof-assumes) says of the text of an error. So `http.Error(w, err.Error(), code)` needs nothing more, and neither does a short prefix before the text, as in `http.Error(w, "lookup: "+err.Error(), code)`, since the assumption leaves room for about 4 KB. Two texts in one message do not fit:
@@ -5946,6 +5977,7 @@ The names in an entry are the parameter and result names from the function's sou
 - `path.Join`, `path.Clean`, `path.Dir`, `path.Base`, `path.Ext`, `path.IsAbs`, `path.Split`, `path/filepath.Join`, `path/filepath.Clean`, `path/filepath.Dir`, `path/filepath.Base`, `path/filepath.Ext`, `path/filepath.Rel`, `path/filepath.Split`. The bound `|result| <= |path| + 2` of `path/filepath.Clean` and `Dir` allows for Windows, where `Clean` can put `.\` before a path. It is read from the source for every system, and the tests check it on Unix only.
 - `regexp.Compile` and the methods `MatchString`, `Match`, `FindString`, and `FindStringSubmatch` of `*regexp.Regexp`, which say nothing of what matches
 - `(*net/http.Request).PathValue`, `(net/http.Header).Get` and `Set`, and `net/http.NewServeMux`
+- `mime.ParseMediaType`
 - the methods of `sync.Mutex` and `sync.RWMutex` that lock and unlock, and `(*sync.Once).Do`, described in [Locks](#locks)
 - `encoding/json.Marshal`, `encoding/json.MarshalIndent`, `encoding/json.Unmarshal`, `(*encoding/json.Encoder).Encode`, and `(*encoding/json.Decoder).Decode`, described in [Encoding and decoding JSON](#encoding-and-decoding-json)
 
@@ -5980,7 +6012,7 @@ Some functions of the standard library have no shipped contract, because no true
 - `(*regexp.Regexp).FindStringIndex` names its result differently in different releases of Go.
 - `regexp.MustCompile` panics on a pattern that does not compile. Call `regexp.Compile` and handle its error.
 - `Add` and `Values` of `http.Header`. `Add` appends to the slice of a key, which may write the array of a slice that the header already holds, and `Values` returns such a slice.
-- `mime.ParseMediaType`, the cookie functions of `net/http`, `http.Redirect`, and the methods of a request that read its body, such as `FormValue`.
+- The cookie functions of `net/http`, `http.Redirect`, and the methods of a request that read its body, such as `FormValue`.
 - `slices.SortFunc` and `slices.BinarySearchFunc` require that the comparison function is a strict weak ordering, which a contract cannot require of a function it is handed. See [Sorting a slice of structs](#sorting-a-slice-of-structs).
 - `maps.Keys`, `maps.Values`, and the other functions that return iterators need a range over a function.
 

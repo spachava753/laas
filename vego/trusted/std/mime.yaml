@@ -1,0 +1,24 @@
+# Contracts for package mime of the standard library.
+version: 1
+
+trusted:
+  mime.ParseMediaType:
+    reason: >-
+      Read from the source of Go 1.26 and 1.27. It lowercases and trims the
+      part of v before the first semicolon, and returns its errors as they
+      are: errNoMediaType, errNoSlashAfterFirstToken, errNoTokenAfterSlash,
+      errUnexpectedContentAfterMediaSubtype, ErrInvalidMediaParameter, and
+      errDuplicateParamName, each a package-level variable made by
+      errors.New, which meets what vouches claims. params is a map made in
+      the call when err is nil and nil otherwise. What it allocates: the
+      lowercased media type and each lowercased key, at most three bytes for
+      each byte of v, in a builder that may be given twice the room; the
+      map, whose keys and values are parts of v or of those copies; and the
+      values of RFC 2231 continuations joined in a builder, at most the
+      bytes of v. Which values it accepts is not modelled.
+    requires:
+      - "32 * (|v| + 1) + 65536 <= MaxAlloc"
+    vouches: [err]
+    modifies: []
+    ensures:
+      - "(err = nil) <-> (params != nil)"

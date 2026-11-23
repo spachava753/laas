@@ -15,6 +15,7 @@ import (
 	"math"
 	"math/big"
 	"math/rand"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -737,6 +738,15 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 		key := []string{"a", "b", "c", "", "%"}[rng.Intn(5)]
 		before := snapshot(v, key)
 		return sample{before: before, after: []any{v, key}, results: []any{v.Get(key)}}
+	},
+	"mime.ParseMediaType": func(rng *rand.Rand) sample {
+		v := []string{
+			"application/json", "text/html; charset=UTF-8", "", "text", "text/", "text/plain extra",
+			"form-data; name=a; name=b", "a/b; c", "a/b; c=d;", "A/B; X*0=a; X*1=b", "a/b; x*=utf-8''%41",
+			randomText(rng), "a/b; " + randomText(rng),
+		}[rng.Intn(13)]
+		mediatype, params, err := mime.ParseMediaType(v)
+		return sample{before: []any{v}, after: []any{v}, results: []any{mediatype, params, err}}
 	},
 	"net/http.NewServeMux": func(*rand.Rand) sample {
 		return sample{results: []any{http.NewServeMux()}}

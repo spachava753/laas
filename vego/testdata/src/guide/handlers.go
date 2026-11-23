@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -151,4 +152,43 @@ func BuildThenWrite(w http.ResponseWriter, n int) {
 		fmt.Fprintf(&b, "%d\n", i%10)
 	}
 	w.Write([]byte(b.String()))
+}
+
+// JSONOnly refuses a request whose Content-Type is not JSON, bounding the
+// header first, as the entry of mime.ParseMediaType requires.
+//
+// @Requires w != nil And req != nil And req.Header != nil
+// @Modifies w
+// @Ensures True
+func JSONOnly(w http.ResponseWriter, req *http.Request) {
+	contentType := req.Header.Get("Content-Type")
+	if len(contentType) > 1000 {
+		http.Error(w, "Content-Type too long", http.StatusBadRequest)
+		return
+	}
+	mediatype, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if mediatype != "application/json" {
+		http.Error(w, "expect application/json Content-Type", http.StatusUnsupportedMediaType)
+	}
+}
+
+// JSONUnbounded is JSONOnly without the test of the header's length.
+//
+// @Requires w != nil And req != nil And req.Header != nil
+// @Modifies w
+// @Ensures True
+func JSONUnbounded(w http.ResponseWriter, req *http.Request) {
+	contentType := req.Header.Get("Content-Type")
+	mediatype, _, err := mime.ParseMediaType(contentType) // want `vego: precondition of ParseMediaType may not hold: 32 \* \(\|v\| \+ 1\) \+ 65536 <= MaxAlloc; it holds when \|contentType\| <= 1000000000000`
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if mediatype != "application/json" {
+		http.Error(w, "expect application/json Content-Type", http.StatusUnsupportedMediaType)
+	}
 }

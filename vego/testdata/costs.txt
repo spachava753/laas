@@ -1838,6 +1838,7 @@ guide	(guide.quiet).Close	6	2137	0
 guide	(guide.stale).Load	7	3421	0
 guide	(guide.wrapping).Read	13	8416	0
 guide	(guide.zeros).Read	16	10595	0
+guide	(net/http.Header).Get	2	131099	2
 guide	(net/http.Header).Set	1	8395	0
 guide	(net/url.Values).Get	2	131099	2
 guide	bufio.NewScanner	1	11008	0
@@ -1987,6 +1988,8 @@ guide	guide.InvalidShort	11	7349	0
 guide	guide.Inventory	61	329321	0
 guide	guide.IsAdmin	2	3907	0
 guide	guide.IsEmpty	1	46	0
+guide	guide.JSONOnly	40	368087	8
+guide	guide.JSONUnbounded	32	322671	8
 guide	guide.Join	5	5717	0
 guide	guide.JoinUnbounded	11	55806	0
 guide	guide.JoinWithCommas	31	230497	0
@@ -2246,6 +2249,7 @@ guide	log.Printf	1	3565	0
 guide	log.Println	1	2741	0
 guide	maps.Copy	1	4637	0
 guide	math/rand.Intn	1	380	0
+guide	mime.ParseMediaType	8	1025368	4
 guide	net/http.Error	1	2155	0
 guide	net/http.NotFound	2	98861	2
 guide	net/http.ResponseWriter.Header	4	16082	2
@@ -2324,6 +2328,7 @@ handlers	handlers.HeaderBeside	21	129786	4
 handlers	handlers.Held	2	474	0
 handlers	handlers.Hello	18	51445	0
 handlers	handlers.InFormula	0	0	0
+handlers	handlers.JSONOnly	40	368087	8
 handlers	handlers.KeepConverted	15	25275	0
 handlers	handlers.Literal	0	0	0
 handlers	handlers.LocalCopy	3	1622	0
@@ -2362,6 +2367,7 @@ handlers	handlers.Tagged	55	1028086	18
 handlers	handlers.ThroughUnlisted	14	30728	0
 handlers	handlers.Twice	15	24473	0
 handlers	handlers.Unbounded	9	149202	4
+handlers	handlers.UnboundedMediaType	22	145052	6
 handlers	handlers.Unknown	2	877	0
 handlers	handlers.Unlisted	13	146690	8
 handlers	handlers.Unnamed	22	4431893	7
@@ -2389,6 +2395,7 @@ handlers	handlers.wrapW	1	991	0
 handlers	io.Closer.Close	5	11733	0
 handlers	io.Reader.Read	6	1014374	1
 handlers	io.Writer.Write	5	18168	0
+handlers	mime.ParseMediaType	8	1025368	4
 handlers	net/http.Error	1	2155	0
 handlers	net/http.NotFound	2	98861	2
 handlers	net/http.ResponseWriter.Header	4	16082	2
