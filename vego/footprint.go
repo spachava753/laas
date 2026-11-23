@@ -191,6 +191,16 @@ func (v *fnVerifier) rowAt(rows, home, alloc, pos *logic.Term) (*logic.Term, []*
 			// What existed on entry held only what existed on entry; a home
 			// made since has a footprint this row does not describe.
 			facts = append(facts, logic.Implies(logic.And(logic.Lt(home, v.entryBrk), cellOf(at)), logic.And(logic.Lt(logic.IntLit(0), alloc), logic.Lt(alloc, v.entryBrk))))
+		case v.layers[at.Name] != nil && v.layers[at.Name].follows != nil:
+			// A row that holds the owned field's cell follows what is
+			// stored there: the row of a converted owner grows with it.
+			known := v.layers[at.Name]
+			holds, more := v.rowAt(known.prev, home, known.follows.ref, known.follows.pos)
+			stored, more2 := known.follows.stored(alloc, pos)
+			facts = append(facts, more...)
+			facts = append(facts, more2...)
+			facts = append(facts, logic.Iff(cellOf(at), logic.Or(cellOf(known.prev), logic.And(holds, stored))))
+			pending = append(pending, known.prev)
 		case v.layers[at.Name] != nil && v.layers[at.Name].emptied != nil:
 			known := v.layers[at.Name]
 			defined := logic.False()
@@ -1292,7 +1302,7 @@ func (v *fnVerifier) withinOwned(sink *state, x, y reached) *logic.Term {
 // which stratification refuses, bytes.Buffer and strings.Builder grow
 // without a bound that can be stated, and types of the project own nothing
 // until ownership in source.
-func (v *fnVerifier) structuralFootprint(val value, t types.Type) func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
+func (v *fnVerifier) structuralFootprint(mem memory, val value, t types.Type) func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
 	switch {
 	case isSlice(t):
 		lo, hi := v.extent(val, t)
@@ -1307,10 +1317,16 @@ func (v *fnVerifier) structuralFootprint(val value, t types.Type) func(alloc, po
 	if _, isPointer := pointee(t); !isPointer {
 		return nil
 	}
-	if v.ownsMemory(t) {
-		panic("vego: internal error: a value that owns memory was converted to an interface with a footprint")
-	}
 	lo, hi := v.extent(val, t)
+	if v.ownsMemory(t) {
+		// An owner's footprint is its struct and what it owns, as it is
+		// then (step 4 of ownership in source).
+		return func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
+			owned, facts := v.ownerFootprintAt(mem, val, t, alloc, pos, map[types.Type]bool{})
+			inStruct := logic.And(logic.Eq(alloc, val[0]), logic.Le(lo, pos), logic.Lt(pos, hi))
+			return logic.And(logic.Not(isNilRef(val)), logic.Or(inStruct, owned)), facts
+		}
+	}
 	return func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
 		return logic.And(logic.Not(isNilRef(val)), logic.Eq(alloc, val[0]), logic.Le(lo, pos), logic.Lt(pos, hi)), nil
 	}

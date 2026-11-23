@@ -147,6 +147,18 @@ type layer struct {
 	// methods write nothing behind their receiver.
 	emptied *logic.Term
 	defines func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term)
+	// follows is set for a layer of the footprint region that a store into
+	// an owned field leaves (step 4 of ownership in source): a row that
+	// holds the owned field's cell now holds what the stored value's
+	// structural footprint holds too, and every row keeps its cells.
+	follows *followLayer
+}
+
+// followLayer is what a store into an owned field adds to the rows that
+// hold the field's cell.
+type followLayer struct {
+	ref, pos *logic.Term
+	stored   func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term)
 }
 
 // target is a piece of memory that may be written: a stretch of positions in

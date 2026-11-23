@@ -706,7 +706,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	// Whatever the callee created may be part of a footprint afterwards,
 	// of a value it wrote or of one it returned, whose home may be an old
 	// one; what existed before keeps its place in every footprint.
-	if !v.growsNothing(fn) && !hasFootprintTarget(written) {
+	if (!v.growsNothing(fn) || v.literalsStoreOwned(call)) && !hasFootprintTarget(written) {
 		var notRun *logic.Term
 		if len(guard) > 0 {
 			notRun = logic.Not(logic.And(guard...))
@@ -724,6 +724,14 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	for _, t := range written {
 		if t.owner != nil {
 			st.assume(logic.Implies(logic.And(guard...), v.ownerGrowth(st, before, st.mem, t.owner, t.ownerType, existed)))
+		}
+	}
+	// What a converted owner owns grows the same way across a call that
+	// writes a footprint, which may run its methods: they are verified,
+	// and so keep G, and no other code writes an owner of the project.
+	if hasFootprintTarget(written) {
+		for i, owner := range v.convertedOwners {
+			st.assume(logic.Implies(logic.And(guard...), v.ownerGrowth(st, before, st.mem, owner, v.convertedOwnerTypes[i], existed)))
 		}
 	}
 	// A footprint the call grew holds only what exists after it.

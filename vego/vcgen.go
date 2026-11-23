@@ -150,6 +150,15 @@ type fnVerifier struct {
 	ownFlowDone *ownFlow
 	ownFlowNone bool
 	ownForce    bool
+	// convertsOwner is set once the function has converted an owner to an
+	// interface value with a footprint; from then on a store into an owned
+	// field leaves a follow layer (followStore).
+	convertsOwner bool
+	// convertedOwners are the owners the function converted, whose growth
+	// a call that writes a footprint keeps: every code that may write them
+	// keeps G (ownerGrowth after footprint calls in calls.go).
+	convertedOwners []value
+	convertedOwnerTypes []types.Type
 	ranged      map[ast.Expr]*ast.RangeStmt
 	// joins holds, by the name of the constant that stands for it, each
 	// region a join of the ends of a function literal made.

@@ -1,6 +1,7 @@
 package vego
 
 import (
+	"maps"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -94,10 +95,17 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 				shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
 				v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported: %s", shown(from), shown(want), why))
 			}
-			if v.ownsMemory(from) {
-				// The row of a converted value is fixed at the conversion,
-				// and what an owner it holds owns grows through calls that
-				// do not go through the converted value.
+			object, isPointer := pointee(from)
+			if !isPointer {
+				object = from
+			}
+			if shipped, _ := ownsDeclOf(object); v.ownsMemory(from) && shipped != nil {
+				// A shipped owner itself is not converted: the bufio types
+				// call through what they keep and the buffers grow without
+				// a bound, which the refusals above say; any other shipped
+				// owner keeps this refusal. An owner of the project, and a
+				// struct of the project that holds a shipped owner by
+				// value, are converted with what they own (step 4).
 				shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
 				how := "as through a strings.Builder or a bytes.Buffer it holds"
 				if object, isPointer := pointee(from); isPointer && len(sourceOwnedFields(object)) > 0 {
@@ -142,7 +150,14 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		st.assume(logic.Eq(home(held), at))
 		var defines func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term)
 		if behind != nil {
-			defines = v.structuralFootprint(converted, from)
+			defines = v.structuralFootprint(maps.Clone(st.mem), converted, from)
+			if v.ownsMemory(from) {
+				v.convertsOwner = true
+				if _, isPointer := pointee(from); isPointer {
+					v.convertedOwners = append(v.convertedOwners, converted)
+					v.convertedOwnerTypes = append(v.convertedOwnerTypes, from)
+				}
+			}
 			if object, isPointer := pointee(from); isPointer && isStructType(object) {
 				v.convertedStructs = append(v.convertedStructs, structValue{t: object, ref: converted[0], at: converted[1]})
 			}
@@ -635,7 +650,7 @@ func (v *fnVerifier) placeFootprint(entry *state, T *funcInfo, kept value, from 
 	if T == nil || T.receiver == nil || !v.hasFootprint(T.receiver.Type()) {
 		return
 	}
-	defines := v.structuralFootprint(kept, from)
+	defines := v.structuralFootprint(entry.mem, kept, from)
 	if v.heldReceiver != nil {
 		name, shown := v.heldReceiver.Name(), types.TypeString(from, types.RelativeTo(v.pass.Pkg))
 		_, isPointer := pointee(from)

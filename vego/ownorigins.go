@@ -493,6 +493,21 @@ func (v *fnVerifier) ownStoreOwned(fl *ownFlow, target *ast.SelectorExpr, rhs as
 	if root == (ownRoot{}) {
 		root.expr = target.X
 	}
+	// An owner stored into its own owned field, or into one of what it
+	// owns, would own itself: the row of an owner converted there holds
+	// its own struct (the reviewer's program of step 4).
+	for tag := range kind.tags {
+		if base.tags[tag] || root.tag == tag {
+			fl.refuse(target.Pos(), "%s may come to hold %s itself, whose footprint would then lie in what it owns; an owner cannot own itself",
+				types.ExprString(target), types.ExprString(rhs))
+		}
+	}
+	for p := range kind.params {
+		if base.params[p] || root.param == p {
+			fl.refuse(target.Pos(), "%s may come to hold %s itself, whose footprint would then lie in what it owns; an owner cannot own itself",
+				types.ExprString(target), types.ExprString(rhs))
+		}
+	}
 	// Every tag stored there is owned by the owner from now on, also one
 	// beside what the field held, as the new array of an append.
 	for tag := range kind.tags {

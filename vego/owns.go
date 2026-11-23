@@ -2,6 +2,7 @@ package vego
 
 import (
 	"fmt"
+	"maps"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -871,4 +872,127 @@ func ownerHolding(owners map[types.Type]bool, t types.Type) types.Type {
 		}
 	}
 	return nil
+}
+
+// rawMember reads a field of the struct a pointer points to in some
+// memory, as a term of each leaf's region, with no fact stated: what the
+// footprint of a converted owner holds is read when a row is asked about,
+// which may be inside the evaluation of an expression.
+func (v *fnVerifier) rawMember(mem memory, ptr value, t types.Type, index int) (value, types.Type, bool) {
+	object, _ := pointee(t)
+	field := object.Underlying().(*types.Struct).Field(index)
+	lo, hi, ok := fieldLeaves(object, index)
+	if !ok {
+		return nil, field.Type(), false
+	}
+	var out value
+	for _, c := range v.cellsOf(object)[lo:hi] {
+		region := mem.region(c.key, logic.SeqOf(logic.SeqOf(c.sort)))
+		out = append(out, logic.Select(logic.Select(region, ptr[0]), logic.Add(ptr[1], logic.IntLit(c.off))))
+	}
+	return out, field.Type(), true
+}
+
+// ownerFootprintAt states that a cell lies in what the struct a pointer to
+// an owner points to owns, read in some memory: the stretch of an owned
+// slice, an owned map, an owned struct with what it owns, the row of an
+// owned interface value and the states of what it holds, and the same of
+// the owners it holds by value.
+func (v *fnVerifier) ownerFootprintAt(mem memory, ptr value, t types.Type, alloc, pos *logic.Term, seen map[types.Type]bool) (*logic.Term, []*logic.Term) {
+	object, isPointer := pointee(t)
+	if !isPointer || seen[object] {
+		return logic.False(), nil
+	}
+	seen[object] = true
+	defer delete(seen, object)
+	var cases, facts []*logic.Term
+	for _, field := range v.inlineOwners(object) {
+		inner, more := v.ownerFootprintAt(mem, field.at(ptr), field.ptr, alloc, pos, seen)
+		cases, facts = append(cases, inner), append(facts, more...)
+	}
+	for _, index := range ownedFieldsOf(object) {
+		val, ft, ok := v.rawMember(mem, ptr, t, index)
+		if !ok {
+			continue
+		}
+		in, more := v.valueFootprintAt(mem, val, ft, alloc, pos, seen)
+		cases, facts = append(cases, in), append(facts, more...)
+	}
+	return logic.Or(cases...), facts
+}
+
+// valueFootprintAt states that a cell lies in what a value of an owned
+// field's type refers to, as a footprint holds it: a slice's stretch, a
+// map, a struct with what it owns, an interface value's row and the
+// states of what it holds.
+func (v *fnVerifier) valueFootprintAt(mem memory, val value, ft types.Type, alloc, pos *logic.Term, seen map[types.Type]bool) (*logic.Term, []*logic.Term) {
+	switch {
+	case isSlice(ft):
+		lo, hi := v.extent(val, ft)
+		return logic.And(logic.Lt(logic.IntLit(0), val[3]), logic.Eq(alloc, val[0]), logic.Le(lo, pos), logic.Lt(pos, hi)), nil
+	case isMap(ft):
+		return logic.And(logic.Not(isNilRef(val)), logic.Eq(alloc, val[0]), logic.Eq(pos, logic.IntLit(0))), nil
+	case isIface(ft):
+		inRow, facts := v.rowAt(mem.region(footprintRegion, footprintSort), home(val[0]), alloc, pos)
+		return logic.And(logic.Not(isNilRef(val)), logic.Or(inRow, logic.Eq(alloc, home(val[0])))), facts
+	}
+	inner, _ := pointee(ft)
+	size := v.pass.TypesSizes.Sizeof(inner)
+	inStruct := logic.And(logic.Eq(alloc, val[0]), logic.Le(val[1], pos), logic.Lt(pos, logic.Add(val[1], logic.IntLit(size))))
+	owned, facts := v.ownerFootprintAt(mem, val, ft, alloc, pos, seen)
+	return logic.And(logic.Not(isNilRef(val)), logic.Or(inStruct, owned)), facts
+}
+
+// followStore leaves, after the function has converted an owner, a layer
+// of the footprint region at a store into an owned field in memory: every
+// row that holds the field's cell holds what the stored value's footprint
+// holds too. That keeps the constraint on rows defined at a conversion:
+// the row of a converted owner holds what its methods may write, which is
+// what the owner owns now (ROADMAP, Footprints, the constraint on
+// ownership in source).
+func (v *fnVerifier) followStore(st *state, lv lvalue, val value) {
+	if !v.convertsOwner || lv.owned == nil || lv.kind != placeMem || lv.declares || len(lv.cells) == 0 {
+		return
+	}
+	snapshot, ft := maps.Clone(st.mem), lv.typ
+	follow := &followLayer{ref: lv.ref, pos: logic.Add(lv.at, logic.IntLit(lv.cells[0].off)),
+		stored: func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
+			return v.valueFootprintAt(snapshot, val, ft, alloc, pos, map[types.Type]bool{})
+		}}
+	next := v.fresh("mem'"+footprintRegion, footprintSort)
+	v.layers[next.Name] = &layer{prev: st.mem.region(footprintRegion, footprintSort), key: footprintRegion, growth: true, follows: follow}
+	st.mem[footprintRegion] = next
+}
+
+// literalsStoreOwned reports whether a function literal that a call runs
+// stores into an owned field, which may make what the literal stores part
+// of a row: the call then leaves a growth layer, as a call that grows an
+// owner does (F3 of the design review).
+func (v *fnVerifier) literalsStoreOwned(call *ast.CallExpr) bool {
+	found := false
+	for _, lit := range v.literalsRun(call) {
+		ast.Inspect(lit.Body, func(n ast.Node) bool {
+			if assign, ok := n.(*ast.AssignStmt); ok {
+				for _, lhs := range assign.Lhs {
+					if sel, ok := ast.Unparen(lhs).(*ast.SelectorExpr); ok {
+						if selection := v.info.Selections[sel]; selection != nil && selection.Kind() == types.FieldVal {
+							index := selection.Index()
+							holder := selection.Recv()
+							if object, isPointer := pointee(holder); isPointer {
+								holder = object
+							}
+							for _, i := range index[:len(index)-1] {
+								if u, isStruct := holder.Underlying().(*types.Struct); isStruct {
+									holder = u.Field(i).Type()
+								}
+							}
+							found = found || ownedFieldAt(holder, index[len(index)-1])
+						}
+					}
+				}
+			}
+			return !found
+		})
+	}
+	return found
 }

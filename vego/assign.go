@@ -314,6 +314,7 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
 	case len(s.Rhs) == 1 && len(s.Lhs) == 1 && v.isAppend(s.Rhs[0]):
 		v.appendTo(ast.Unparen(s.Rhs[0]).(*ast.CallExpr), st, func(next *state, result value) {
 			v.checkOwnedTarget(next, targets[0], result, s.Rhs[0], before)
+			v.followStore(next, targets[0], result)
 			v.store(targets[0], result, next)
 			k(next)
 		})
@@ -356,6 +357,7 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
 			rhs = s.Rhs[0]
 		}
 		v.checkOwnedTarget(st, target, values[i], rhs, before)
+		v.followStore(st, target, values[i])
 		v.store(target, values[i], st)
 	}
 	k(st)

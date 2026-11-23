@@ -148,14 +148,14 @@ func (p *Printer) Note() {
 }
 
 // ConvertsPrinter converts a Printer, which owns what its Builder owns, to
-// an interface whose method writes behind its receiver: refused, as a
-// Buffer or a Builder is.
+// an interface whose method writes behind its receiver: the row of the
+// value holds the struct and what the Builder owns (F27, step 4).
 //
 // @Requires p != nil
 // @Modifies p
 // @Ensures True
 func ConvertsPrinter(p *Printer) {
-	var w Writer = p // want `converting a value of type \*Printer to Writer is not supported yet: \*Printer owns memory`
+	var w Writer = p
 	w.Note()
 }
 
