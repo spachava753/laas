@@ -1037,15 +1037,19 @@ func SpliceChain(bw *bufio.Writer) (r byte) {
 }
 
 
-// BufferLengthChain writes a Buffer thirty times and reads its length after
-// each write. The length of an owner is a formula over its fields, here
-// |buf| - off, read from one fetch of its struct, so the pointer enters
-// each read once, and the length is an integer, which no later length
-// reads.
+
+// BufferLengthChain writes a Buffer fifteen times and reads its length
+// after each write. The length of an owner is a formula over its fields,
+// here |buf| - off, read from one fetch of its struct, so the pointer
+// enters each read once, and the length is an integer, which no later
+// length reads. Fifteen writes, not thirty as elsewhere in this file: a
+// rule that doubled the term at each write would have grown it 2^15 times
+// here, far past the growth check, and each write costs more than the one
+// before it.
 //
 // @Requires b != nil And |b| = 0
 // @Modifies b
-// @Ensures n = 30
+// @Ensures n = 15
 func BufferLengthChain(b *bytes.Buffer) (n int) {
 	b.WriteByte('x')
 	// @Assert |b| = 1
@@ -1077,35 +1081,5 @@ func BufferLengthChain(b *bytes.Buffer) (n int) {
 	// @Assert |b| = 14
 	b.WriteByte('x')
 	// @Assert |b| = 15
-	b.WriteByte('x')
-	// @Assert |b| = 16
-	b.WriteByte('x')
-	// @Assert |b| = 17
-	b.WriteByte('x')
-	// @Assert |b| = 18
-	b.WriteByte('x')
-	// @Assert |b| = 19
-	b.WriteByte('x')
-	// @Assert |b| = 20
-	b.WriteByte('x')
-	// @Assert |b| = 21
-	b.WriteByte('x')
-	// @Assert |b| = 22
-	b.WriteByte('x')
-	// @Assert |b| = 23
-	b.WriteByte('x')
-	// @Assert |b| = 24
-	b.WriteByte('x')
-	// @Assert |b| = 25
-	b.WriteByte('x')
-	// @Assert |b| = 26
-	b.WriteByte('x')
-	// @Assert |b| = 27
-	b.WriteByte('x')
-	// @Assert |b| = 28
-	b.WriteByte('x')
-	// @Assert |b| = 29
-	b.WriteByte('x')
-	// @Assert |b| = 30
 	return b.Len()
 }

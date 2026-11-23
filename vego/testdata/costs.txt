@@ -3313,7 +3313,7 @@ semantics	io.Writer.Write	3	7630	0
 semantics	semantics.AfterLoop	9	2385	0
 semantics	semantics.Appends	34	42136	0
 semantics	semantics.AssignmentOrder	12	6540	0
-semantics	semantics.BufferLengthChain	298	11241897	49
+semantics	semantics.BufferLengthChain	148	3042158	19
 semantics	semantics.CallChain	153	423611	0
 semantics	semantics.CallerSeesMutation	16	35416	0
 semantics	semantics.CloseChain	287	9703707	93
