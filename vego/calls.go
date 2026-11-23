@@ -169,7 +169,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		if encoded != nil && len(results) > 0 && len(results[0]) == 4 {
 			// A slice is its array, its offset, its length, and its
 			// capacity.
-			st.assume(logic.Implies(logic.And(guard...), logic.Le(results[0][2], logic.BigLit(encoded))))
+			st.assume(logic.Implies(logic.And(guard...), logic.Le(results[0][2], encoded)))
 		}
 		// What Sprintf returns is what fmt wrote, which is no longer than
 		// the bound when the bound counts all of it.

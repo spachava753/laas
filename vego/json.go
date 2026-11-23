@@ -147,6 +147,8 @@ type jsonStep struct {
 	binder string // "i1 in [0, |v.Tags|)", or "k1 in v.M"
 	length string // "|v.Tags|"
 	guard  string // "v.P != nil"
+	// stringKeys is set on the step of a map whose keys are strings.
+	stringKeys bool
 }
 
 // A jsonGroup is the part of the output that lies under one chain of
@@ -240,25 +242,23 @@ func jsonWalkWith(wt jsonWeightTable, pkg *types.Package, sizes types.Sizes, t t
 		return why, nil
 	}
 	// A length under a quantifier over the elements of a slice or a map
-	// that is itself the value of a map: vego does not prove such a bound
-	// even from the same fact, as `Forall k in m : (Forall i in [0,
-	// |m[k]|) : |m[k][i]| <= 10000000)` from the same with 1000 (Z3 runs to
-	// its limit), so it is refused before it becomes an obligation nobody
-	// can meet.
+	// that is itself the value of a map with string keys: when the facts
+	// bound the length of the keys, vego does not prove such a bound even
+	// from the same fact, as `Forall k in m : (Forall i in [0, |m[k]|) :
+	// |m[k][i]| <= 10000000)` from the same with 1000 and a bound on |k|
+	// (Z3 runs to its limit, also with the bound on the keys in a clause of
+	// its own), so it is refused before it becomes an obligation nobody
+	// can meet. A map with integer keys has no such bound, and proves.
 	for _, l := range w.lengths() {
 		underMap := ""
 		for _, s := range l.steps {
 			switch {
 			case s.binder == "":
-			case !strings.Contains(s.binder, "[0, |"):
-				if underMap != "" {
-					return fmt.Sprintf("%s is a map inside the value of a map, and vego cannot yet bound what it holds under a quantifier over the keys of %s; "+
-						"encode a map whose values hold no slice or map with elements of unknown length", strings.TrimPrefix(s.length[1:len(s.length)-1], ""), underMap), nil
-				}
-				underMap = s.length[1 : len(s.length)-1]
 			case underMap != "":
-				return fmt.Sprintf("%s is a slice inside the value of a map, and vego cannot yet bound what its elements hold under a quantifier over the keys of %s; "+
-					"encode a map whose values hold no slice or map with elements of unknown length", s.length[1:len(s.length)-1], underMap), nil
+				return fmt.Sprintf("%s holds elements inside the value of %s, a map with string keys, and vego cannot yet bound what they hold under a quantifier "+
+					"over the keys; encode a map whose values hold no slice or map with elements of unknown length, or a map with integer keys", s.length[1:len(s.length)-1], underMap), nil
+			case s.stringKeys:
+				underMap = s.length[1 : len(s.length)-1]
 			}
 		}
 	}
@@ -449,7 +449,7 @@ func (w *jsonWalk) value(t types.Type, path, shown string, g *jsonGroup, quoted 
 		}
 		g.konst += w.wt.Null
 		k := w.name("k")
-		c := w.child(g, jsonStep{binder: fmt.Sprintf("%s in %s", k, path), length: "|" + path + "|"})
+		c := w.child(g, jsonStep{binder: fmt.Sprintf("%s in %s", k, path), length: "|" + path + "|", stringKeys: key.Kind() == types.String})
 		// The colon and the comma, and what the builds allocate for each
 		// entry to sort the keys: v1 makes a slice of a reflect.Value and a
 		// string (5 words) for each entry; v2 a slice of members, of a
@@ -779,16 +779,19 @@ func (v *fnVerifier) checkEncodable(call *ast.CallExpr, fn *funcInfo) {
 // checkEncodedAlloc proves, at a call of a function whose entry lists
 // encodes, that what it builds from the value can be allocated. Each length
 // the walk counts for the static type of what the call hands over is
-// bounded from the facts here, one at a time, read with the parameter
-// bound to the value as it was before its conversion to any: the least
-// bound of two significant digits that Z3 proves, as a formula with no
-// product. Then total multiplies and adds those bounds, and jsonFits
+// bounded from the facts here, read with the parameter bound to the value
+// as it was before its conversion to any: a power of ten that Z3 proves
+// (lengthBounds), as a formula with no product. Then total multiplies and adds those bounds, and jsonFits
 // compares the result with what can be allocated. A product of lengths
 // under quantifiers ran Z3 to its limit on ordinary shapes, such as a map
 // of slices (F15 of the review of step 1). extra is what the function
-// builds beyond what Marshal builds, as Encode's newline. It returns the
-// bound on what is built, or nil when none was proved.
-func (v *fnVerifier) checkEncodedAlloc(st *state, guard []*logic.Term, call *ast.CallExpr, fn *funcInfo, args map[*types.Var]value, held map[ast.Expr]value, extra int64) *big.Int {
+// builds beyond what Marshal builds, as Encode's newline. It returns a
+// bound on what is built, or nil when none was proved: for Marshal, the
+// part that lies under no chain and no guard as the sum of its lengths
+// with their weights, exact in the terms the caller has, and the rest as
+// the number total gives for the bounds proved; for MarshalIndent that
+// number.
+func (v *fnVerifier) checkEncodedAlloc(st *state, guard []*logic.Term, call *ast.CallExpr, fn *funcInfo, args map[*types.Var]value, held map[ast.Expr]value, extra int64) *logic.Term {
 	arg := v.encodedArg(call, fn)
 	if arg == nil {
 		return nil
@@ -828,7 +831,28 @@ func (v *fnVerifier) checkEncodedAlloc(st *state, guard []*logic.Term, call *ast
 	done()
 	total := walk.total(func(l jsonLength) *big.Int { return found[l.key()] }, indented)
 	if total != nil && jsonFits(total, v.maxAlloc(), v.pass.TypesSizes) {
-		return total
+		if indented {
+			return logic.BigLit(total)
+		}
+		// The top group in the caller's terms, and the rest as a number.
+		top := walk.groups[0]
+		rest := new(big.Int).Sub(total, big.NewInt(top.konst))
+		sum := logic.IntLit(top.konst)
+		for _, t := range top.terms {
+			rest.Sub(rest, new(big.Int).Mul(big.NewInt(t.coef), found[jsonLength{text: "|" + t.path + "|"}.key()]))
+			node, err := logic.ParseFormula("|" + t.path + "| >= 0")
+			if err != nil {
+				panic("vego: internal error: " + err.Error())
+			}
+			c := &clause{kind: "requires", text: t.path, node: node, res: v.pkgVerifier.plain}
+			var length *logic.Term
+			v.quietly(func() { length, err = v.resolverOf(c).Term(node.Kids[0], pre, logic.Int) })
+			if err != nil {
+				panic("vego: internal error: " + err.Error())
+			}
+			sum = logic.Add(sum, logic.Mul(logic.IntLit(t.coef), length))
+		}
+		return logic.Add(sum, logic.BigLit(rest))
 	}
 	v.report(call.Pos(), "what %s builds from %s may be more than can be allocated%s", fn.obj.Name(), types.ExprString(arg),
 		v.encodeHint(walk, arg, indented, found))
@@ -844,9 +868,9 @@ func (v *fnVerifier) checkEncodedAlloc(st *state, guard []*logic.Term, call *ast
 // length is at most it, which is the bound the message suggests. When that
 // fails, each length alone: at most n0 at the full limit, then lowered by
 // powers of ten while the quick budget proves it; or, not proved at n0,
-// raised by powers of ten while the quick budget does not prove it, with
-// one question at the full limit at 10^15. A length with no bound proved is
-// left out.
+// raised by powers of ten until the quick budget proves it. After the
+// first question, each bound is lowered the same way. A length with no
+// bound proved is left out.
 func (v *fnVerifier) lengthBounds(st *state, guard []*logic.Term, walk *jsonWalk, lengths []jsonLength, indented bool, pre *specEnv) map[string]*big.Int {
 	goalOf := func(l jsonLength, n *big.Int) *logic.Term {
 		text := walk.wrap(l.steps, l.text+" <= "+n.String())
@@ -876,28 +900,36 @@ func (v *fnVerifier) lengthBounds(st *state, guard []*logic.Term, walk *jsonWalk
 	for _, l := range lengths {
 		all = append(all, goalOf(l, n0))
 	}
+	// A bound proved at n0 is lowered while the quick budget proves it,
+	// so that what is stated of the result comes from the facts the
+	// caller has, not from the loosest bound that fits (F21 of the review
+	// of step 1).
+	lower := func(l jsonLength, b *big.Int) *big.Int {
+		for b.Cmp(big.NewInt(1)) > 0 {
+			lower := new(big.Int).Div(b, ten)
+			if !v.quickly(st, guard, goalOf(l, lower)) {
+				break
+			}
+			b = lower
+		}
+		return b
+	}
 	if uniform(n0) && full(logic.And(all...)) {
 		for _, l := range lengths {
-			found[l.key()] = n0
+			found[l.key()] = lower(l, new(big.Int).Set(n0))
 		}
 		return found
 	}
 	for i, l := range lengths {
 		if full(all[i]) {
-			b := new(big.Int).Set(n0)
-			for b.Cmp(big.NewInt(1)) > 0 {
-				lower := new(big.Int).Div(b, ten)
-				if !v.quickly(st, guard, goalOf(l, lower)) {
-					break
-				}
-				b = lower
-			}
-			found[l.key()] = b
+			found[l.key()] = lower(l, new(big.Int).Set(n0))
 			continue
 		}
+		// Not proved at n0: raised until the quick budget proves it. A
+		// length past n0 that only the full limit proves leaves what is
+		// built past what fits whatever else is bounded.
 		for b := new(big.Int).Mul(n0, ten); b.Cmp(top) <= 0; b.Mul(b, ten) {
-			goal := goalOf(l, b)
-			if v.quickly(st, guard, goal) || (b.Cmp(top) == 0 && full(goal)) {
+			if v.quickly(st, guard, goalOf(l, b)) {
 				found[l.key()] = new(big.Int).Set(b)
 				break
 			}
@@ -1140,7 +1172,7 @@ func (v *fnVerifier) callEncoder(call *ast.CallExpr, w ast.Expr, st *state, guar
 	p := writeSig.Params().At(0)
 	text := v.fresh("encoded", logic.IntSeq)
 	if encoded != nil {
-		st.assume(logic.Implies(logic.And(guard...), logic.Le(logic.Len(text), logic.BigLit(encoded))))
+		st.assume(logic.Implies(logic.And(guard...), logic.Le(logic.Len(text), encoded)))
 	}
 	bytes := v.copiedBytes(st, text, p.Type())
 	writeArgs := map[*types.Var]value{p: bytes}
@@ -1162,8 +1194,8 @@ func (v *fnVerifier) callEncoder(call *ast.CallExpr, w ast.Expr, st *state, guar
 			v.cut(st, guard)
 			return v.nothingKnown(encode, st)
 		}
-		v.report(call.Pos(), "precondition of %s.Write may not hold where json.NewEncoder(%s).Encode writes what it encodes, which is at most %s bytes",
-			types.ExprString(w), types.ExprString(w), encoded.String())
+		v.report(call.Pos(), "precondition of %s.Write may not hold where json.NewEncoder(%s).Encode writes what it encodes; bound the lengths of what it encodes more tightly",
+			types.ExprString(w), types.ExprString(w))
 		v.cut(st, guard)
 		return v.nothingKnown(encode, st)
 	}

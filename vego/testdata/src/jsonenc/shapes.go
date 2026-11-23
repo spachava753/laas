@@ -18,7 +18,7 @@ type RecM struct {
 // @Requires r != nil And |r.M| <= 1000 And (Forall k in r.M : |k| <= 1000 And |r.M[k]| <= 1000 And (Forall j in [0, |r.M[k]|) : |r.M[k][j]| <= 1000))
 // @Ensures True
 func MapOfSlices(r *RecM) (n int) {
-	js, _ := json.Marshal(r) // want `cannot verify MapOfSlices: Marshal encodes r, and r\.M\[k\] is a slice inside the value of a map, and vego cannot yet bound what its elements hold under a quantifi`
+	js, _ := json.Marshal(r) // want `cannot verify MapOfSlices: Marshal encodes r, and r\.M\[k\] holds elements inside the value of r\.M, a map with string keys, and vego cannot yet bound what they hold under a quantifier over the keys; enco`
 	return len(js)
 }
 
@@ -42,7 +42,7 @@ func MapOfStrings(r *RecS) (n int) {
 // @Requires |m| <= 1000 And (Forall k in m : |k| <= 1000 And |m[k]| <= 1000 And (Forall j in [0, |m[k]|) : |m[k][j]| <= 1000))
 // @Ensures True
 func TopMapOfSlices(m map[string][]string) (n int) {
-	js, _ := json.Marshal(m) // want `cannot verify TopMapOfSlices: Marshal encodes m, and m\[k\] is a slice inside the value of a map, and vego cannot yet bound what its elements hold under a quantif`
+	js, _ := json.Marshal(m) // want `cannot verify TopMapOfSlices: Marshal encodes m, and m\[k\] holds elements inside the value of m, a map with string keys, and vego cannot yet bound what they hold under a quantifier over the keys; encod`
 	return len(js)
 }
 
@@ -93,7 +93,7 @@ type Rec4 struct {
 // @Requires |r.Name| <= 1000 And |r.A| <= 1000 And |r.B| <= 1000 And |r.M| <= 1000 And (Forall i in [0, |r.A|) : |r.A[i]| <= 1000) And (Forall i in [0, |r.B|) : |r.B[i]| <= 1000) And (Forall k in r.M : |k| <= 1000 And |r.M[k]| <= 1000 And (Forall j in [0, |r.M[k]|) : |r.M[k][j]| <= 1000))
 // @Ensures True
 func Several(r Rec4) (n int) {
-	js, _ := json.Marshal(r) // want `cannot verify Several: Marshal encodes r, and r\.M\[k\] is a slice inside the value of a map, and vego cannot yet bound what its elements hold under a quantifier o`
+	js, _ := json.Marshal(r) // want `cannot verify Several: Marshal encodes r, and r\.M\[k\] holds elements inside the value of r\.M, a map with string keys, and vego cannot yet bound what they hold under a quantifier over the keys; encode a`
 	return len(js)
 }
 

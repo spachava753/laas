@@ -79,7 +79,7 @@ func Unlisted(out io.Writer, it Item) (err error) {
 // @Modifies out
 // @Ensures True
 func Held(out io.Writer, it Item) (err error) {
-	enc := json.NewEncoder(out) // want `cannot verify Held: json\.NewEncoder keeps w in the encoder it returns; write json\.NewEncoder\(w\)\.Encode\(v\) in one expression, since an encoder held in a variable`
+	enc := json.NewEncoder(out) // want `cannot verify Held: json\.NewEncoder keeps w in the encoder it returns; write json\.NewEncoder\(w\)\.Encode\(v\) in one expression, since an encoder held in a variable is not supported yet`
 	return enc.Encode(it)
 }
 
@@ -88,7 +88,7 @@ func Held(out io.Writer, it Item) (err error) {
 // @Requires enc != nil
 // @Ensures True
 func Given(enc *json.Encoder, it Item) (err error) {
-	return enc.Encode(it) // want `cannot verify Given: Encode is verified only on a new encoder, written as json\.NewEncoder\(w\)\.Encode\(v\) in one expression: an Encoder made elsewhere may indent, `
+	return enc.Encode(it) // want `cannot verify Given: Encode is verified only on a new encoder, written as json\.NewEncoder\(w\)\.Encode\(v\) in one expression: an Encoder made elsewhere may indent, may not escape HTML, or may hold an earl`
 }
 
 // EncodeDeferred would lose the error.
@@ -97,7 +97,7 @@ func Given(enc *json.Encoder, it Item) (err error) {
 // @Modifies out
 // @Ensures True
 func EncodeDeferred(out io.Writer, it Item) {
-	defer json.NewEncoder(out).Encode(it) // want `cannot verify EncodeDeferred: deferring json\.NewEncoder\(w\)\.Encode\(v\) is not supported: what it returns would be lost, and what it encodes is checked where it is`
+	defer json.NewEncoder(out).Encode(it) // want `cannot verify EncodeDeferred: deferring json\.NewEncoder\(w\)\.Encode\(v\) is not supported: what it returns would be lost, and what it encodes is checked where it is called`
 }
 
 // NilWriter hands NewEncoder a nil writer, on which Encode panics.
@@ -115,7 +115,7 @@ func NilWriter(it Item) (err error) {
 // @Ensures True
 func FormatsErr(out io.Writer, it Item) (s string) {
 	if err := json.NewEncoder(out).Encode(it); err != nil {
-		return err.Error() // want `cannot verify FormatsErr: calling Error on err would run the methods of an error whose origin is not known; only an error made by errors\.New or fmt\.Errorf, here`
+		return err.Error() // want `cannot verify FormatsErr: calling Error on err would run the methods of an error whose origin is not known; only an error made by errors\.New or fmt\.Errorf, here or in a verified function, or one that `
 	}
 	return ""
 }
@@ -129,7 +129,7 @@ type Loop struct{ N int }
 // @Modifies l
 // @Ensures 0 <= n
 func (l *Loop) Write(p []byte) (n int, err error) {
-	_ = EncodeTo(l, Item{}) // want `recursive call needs a // @Variant annotation in the doc comment of Write to prove termination; the cycle: \(\*Loop\)\.Write calls EncodeTo at encoder\.go:132:6, Enc`
+	_ = EncodeTo(l, Item{}) // want `recursive call needs a // @Variant annotation in the doc comment of Write to prove termination; the cycle: \(\*Loop\)\.Write calls EncodeTo at encoder\.go:132:6, EncodeTo calls \(\*Loop\)\.Write at encoder\.go:`
 	return 0, nil
 }
 
@@ -139,5 +139,5 @@ func (l *Loop) Write(p []byte) (n int, err error) {
 // @Modifies l
 // @Ensures True
 func EncodeTo(l *Loop, it Item) (err error) {
-	return json.NewEncoder(l).Encode(it) // want `recursive call needs a // @Variant annotation in the doc comment of EncodeTo to prove termination; the cycle: EncodeTo calls \(\*Loop\)\.Write at encoder\.go:142:25,`
+	return json.NewEncoder(l).Encode(it) // want `recursive call needs a // @Variant annotation in the doc comment of EncodeTo to prove termination; the cycle: EncodeTo calls \(\*Loop\)\.Write at encoder\.go:142:25, \(\*Loop\)\.Write calls EncodeTo at encoder`
 }
