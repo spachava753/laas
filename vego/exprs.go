@@ -527,7 +527,10 @@ func (v *fnVerifier) literal(e *ast.CompositeLit, t types.Type, st *state, guard
 			field := v.settled(st, guard, v.evalAs(initial, u.Field(index).Type(), st, guard), u.Field(index).Type())
 			// An owned field of a struct made here holds nothing yet.
 			if ownedFieldAt(t, index) {
-				v.checkOwnedStore(st, guard, field, nil, u.Field(index).Type(), initial, before, u.Field(index).Name()+" of the "+types.TypeString(t, types.RelativeTo(v.pass.Pkg))+" made here", initial.Pos())
+				shown := types.TypeString(t, types.RelativeTo(v.pass.Pkg))
+				name := u.Field(index).Name()
+				v.checkOwnedStore(st, guard, field, nil, u.Field(index).Type(), initial, before, name+" of the "+shown+" made here",
+					func(making string) string { return shown + "{" + name + ": " + making + "}" }, initial.Pos())
 			}
 			copy(val[lo:], field)
 		}

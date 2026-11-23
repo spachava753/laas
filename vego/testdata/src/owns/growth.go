@@ -6,7 +6,7 @@ package owns
 // @Modifies s
 // @Ensures True
 func Steal(s, o *Stack) {
-	s.items = o.items // want `vego: s.items may come to refer to memory that existed when Steal was called and that it did not own; an owned field may refer only to memory made since, or to part of what it referred to then`
+	s.items = o.items // want `vego: s.items may come to refer to memory that existed when Steal was called and that it did not own; an owned field may refer only to memory made since, or to part of what it referred to then; copy it into new memory, as slices.Clone does, or do not declare the field owned`
 }
 
 // FromParameter makes a stack over a slice it is handed.
@@ -109,4 +109,35 @@ func ThroughVerified(s *Stack) {
 func AppendOther(s *Stack) {
 	t := &Stack{items: make([]int, 1, 4)}
 	s.items = append(t.items, 2) // want `vego: what is stored into s.items is new memory that is not made in this statement`
+}
+
+// TwoNew stores the array one new stack owns into another (F17 of the
+// review of step 1): new memory, but not this statement's, and not within
+// what s.items held.
+//
+// @Ensures True
+func TwoNew() {
+	s := &Stack{items: make([]int, 2)}
+	t := &Stack{items: make([]int, 2)}
+	s.items = t.items // want `vego: what is stored into s.items is new memory that is not made in this statement, and storing such memory into an owned field is not supported yet; make it where it is stored, as in s.items = make\(...\), or copy it there`
+}
+
+// TwoNewServers does the same with the structs two servers own.
+//
+// @Ensures True
+func TwoNewServers() {
+	s := &Server{cfg: &Config{}}
+	t := &Server{cfg: &Config{}}
+	s.cfg = t.cfg // want `vego: what is stored into s.cfg is new memory that is not made in this statement, and storing such memory into an owned field is not supported yet; make it where it is stored, as in s.cfg = &Config\{...\}, or copy it there`
+}
+
+// LocalValue stores a parameter's slice into a local owner, which is
+// refused once: what follows is verified as if the store were allowed.
+//
+// @Requires |xs| < 10
+// @Ensures True
+func LocalValue(xs []int) {
+	var st Stack
+	st.items = xs // want `vego: st.items may come to refer to memory that existed when LocalValue was called`
+	st.Push(1)
 }

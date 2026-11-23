@@ -56,14 +56,21 @@ var sourceOwns = struct {
 func registerOwns(name *types.TypeName, fields []string) {
 	sourceOwns.Lock()
 	defer sourceOwns.Unlock()
+	// A list is never changed once it is published: a reader iterates the
+	// list it took after the lock is released, and a speculative verifier
+	// collects the package again beside it (F19 of the review of step 1).
 	list := sourceOwns.byPkg[name.Pkg()]
-	for i, known := range list {
+	next := make([]ownedType, 0, len(list)+1)
+	for _, known := range list {
 		if known.name == name {
-			list[i].fields = fields
-			return
+			if slices.Equal(known.fields, fields) {
+				return
+			}
+			continue
 		}
+		next = append(next, known)
 	}
-	sourceOwns.byPkg[name.Pkg()] = append(list, ownedType{name: name, fields: fields})
+	sourceOwns.byPkg[name.Pkg()] = append(next, ownedType{name: name, fields: fields})
 }
 
 // sourceOwnedFields returns the indices of the fields of a struct type that
@@ -184,8 +191,13 @@ func (pv *pkgVerifier) addOwns(name *types.TypeName, c *clause) {
 			continue
 		case isPointer && toStruct, isSlice(f.Type()), isMap(f.Type()):
 		default:
-			pv.report(c.pos, "%s cannot be owned: it holds a %s, and a field can be owned when it holds a pointer to a struct, a slice, or a map",
-				field, types.TypeString(f.Type(), types.RelativeTo(pv.pass.Pkg)))
+			held := types.TypeString(f.Type(), types.RelativeTo(pv.pass.Pkg))
+			article := "a"
+			if strings.ContainsRune("aeiou", rune(held[0])) {
+				article = "an"
+			}
+			pv.report(c.pos, "%s cannot be owned: it holds %s %s, and a field can be owned when it holds a pointer to a struct, a slice, or a map",
+				field, article, held)
 			decl.broken = true
 			continue
 		}
@@ -286,11 +298,11 @@ func (pv *pkgVerifier) ownsItself(start *types.TypeName) string {
 		if s.owner != nil {
 			owner = s.owner.Name()
 		}
-		verb := "owns"
-		if i > 0 {
-			verb = "which owns"
+		link := fmt.Sprintf("%s owns %s through %s", owner, types.TypeString(s.to, q), s.field)
+		if i > 0 && i == len(path)-1 {
+			link = "and " + link
 		}
-		links = append(links, fmt.Sprintf("%s %s %s through %s", owner, verb, types.TypeString(s.to, q), s.field))
+		links = append(links, link)
 	}
 	return fmt.Sprintf("%s would own itself: %s; a linked structure cannot be declared with Owns; leave one of these fields unowned",
 		start.Name(), strings.Join(links, ", "))
@@ -425,7 +437,7 @@ func ownedMadeSince(val value, bound *logic.Term) *logic.Term {
 // returns it, have been made since the statement began. cur is what the
 // field holds just before the store, and before the bound when the
 // statement began.
-func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur value, t types.Type, rhs ast.Expr, before *logic.Term, field string, pos token.Pos) {
+func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur value, t types.Type, rhs ast.Expr, before *logic.Term, field string, example func(making string) string, pos token.Pos) {
 	options := []*logic.Term{ownedNothing(val, t)}
 	call := v.storedCallOf(rhs)
 	if cur != nil && (call == nil || call.keepsNot) {
@@ -436,9 +448,20 @@ func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur va
 		options = append(options, ownedMadeSince(val, before))
 	}
 	result := v.attempt(st, guard, logic.Or(options...))
+	// What follows is verified as if the store were one of those, as after
+	// any check, so that a refused store draws no second report from what
+	// it would bring in.
+	defer st.assume(logic.Implies(logic.And(guard...), logic.Or(options...)))
 	if result == solver.Proved {
-		st.assume(logic.Implies(logic.And(guard...), logic.Or(options...)))
 		return
+	}
+	// What works today, by the kind of the field.
+	making, copied := "make(...)", "copy it into new memory, as slices.Clone does"
+	if object, isPointer := pointee(t); isPointer {
+		making = "&" + types.TypeString(object, types.RelativeTo(v.pass.Pkg)) + "{...}"
+		copied = "copy it into a struct made with " + making
+	} else if isMap(t) {
+		copied = "copy it into new memory, as maps.Clone does"
 	}
 	// What is not new since the function was entered is memory the owner
 	// did not own, which no form of the store may bring in.
@@ -453,10 +476,10 @@ func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur va
 			"is not supported yet%s", field, call.name, what, limitNote(result))
 	case old:
 		v.report(pos, "%s may come to refer to memory that existed when %s was called and that it did not own; an owned field may refer only "+
-			"to memory made since, or to part of what it referred to then%s", field, v.fn.obj.Name(), limitNote(result))
+			"to memory made since, or to part of what it referred to then; %s, or do not declare the field owned%s", field, v.fn.obj.Name(), copied, limitNote(result))
 	default:
 		v.report(pos, "what is stored into %s is new memory that is not made in this statement, and storing such memory into an owned field "+
-			"is not supported yet; make it where it is stored, as in %s = make(...), or copy it there%s", field, field, limitNote(result))
+			"is not supported yet; make it where it is stored, as in %s, or copy it there%s", field, example(making), limitNote(result))
 	}
 }
 
@@ -483,7 +506,7 @@ func (v *fnVerifier) checkOwnedTarget(st *state, lv lvalue, val value, rhs ast.E
 			cur = v.loadIn(lv, st, st.mem)
 		}
 	}
-	v.checkOwnedStore(st, nil, val, cur, lv.typ, rhs, before, lv.text, lv.pos)
+	v.checkOwnedStore(st, nil, val, cur, lv.typ, rhs, before, lv.text, func(making string) string { return lv.text + " = " + making }, lv.pos)
 }
 
 // ownerRoot returns, for a store into an owned field through a pointer

@@ -11,7 +11,7 @@ type Exported struct {
 
 // Counted owns a number.
 //
-// @Owns n // want `vego: n cannot be owned: it holds a int, and a field can be owned when it holds a pointer to a struct, a slice, or a map`
+// @Owns n // want `vego: n cannot be owned: it holds an int, and a field can be owned when it holds a pointer to a struct, a slice, or a map`
 type Counted struct {
 	n int
 }
@@ -53,7 +53,7 @@ type Node struct {
 
 // Edge and Vertex own each other.
 //
-// @Owns to // want `vego: Edge would own itself: Edge owns Vertex through to, Vertex which owns Edge through from; a linked structure cannot be declared with Owns; leave one of these fields unowned`
+// @Owns to // want `vego: Edge would own itself: Edge owns Vertex through to, and Vertex owns Edge through from; a linked structure cannot be declared with Owns; leave one of these fields unowned`
 type Edge struct {
 	to *Vertex
 }
