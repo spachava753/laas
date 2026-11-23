@@ -3252,7 +3252,10 @@ originpathclient	originpathclient.WrapsNormalised	25	13519	0
 originpathclient	originpathclient.WrapsOpens	6	2707	0
 originpathclient	originpathclient.WrapsPasses	11	3515	0
 originpathclient	originpathclient.WrapsSwitched	1	46	0
+owns	(*owns.Box).Bounded	5	7083	0
+owns	(*owns.Box).Break	15	22086	0
 owns	(*owns.Cache).Put	20	19424	0
+owns	(*owns.List).Set	8	14908	0
 owns	(*owns.Pair).Share	21	54094	0
 owns	(*owns.Server).SetPort	7	7252	0
 owns	(*owns.Stack).Clip	12	106181	2
@@ -3264,8 +3267,10 @@ owns	(*owns.Stack).Reset	16	14076	0
 owns	owns.AddToNew	9	13361	0
 owns	owns.AddTwo	15	27659	0
 owns	owns.AppendOther	22	28699	0
+owns	owns.Bag	1	654	0
 owns	owns.Converted	1	241	0
 owns	owns.Copied	0	0	0
+owns	owns.CopyList	0	0	0
 owns	owns.Fill	35	144233	0
 owns	owns.FillInner	37	278653	0
 owns	owns.FromParameter	4	2256	0
@@ -3296,6 +3301,7 @@ owns	owns.trim	7	1852	0
 owns	slices.Clip	1	4777	0
 owns	slices.Delete	1	5956	0
 owns	slices.Grow	1	5440	0
+ownserver	(*ownserver.Lazy).Drop	9	9844	0
 ownserver	(*ownserver.Plain).Clear	14	26073	0
 ownserver	(*ownserver.Server).Clear	16	29136	0
 ownserver	(*ownserver.Server).Count	24	69678	0
@@ -3304,6 +3310,7 @@ ownserver	(*ownserver.Server).Primed	16	29886	0
 ownserver	(*ownserver.Server).Repair	17	22665	0
 ownserver	(*ownserver.Server).Replace	10	14625	0
 ownserver	(*ownserver.Server).ReplaceInLoop	22	58742	0
+ownserver	(*ownserver.Server).Swapped	14	27529	0
 ownserver	ownserver.BrokenUse	0	0	0
 ownserver	ownserver.CallsExternal	4	2918	0
 ownserver	ownserver.In	0	0	0

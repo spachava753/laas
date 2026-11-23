@@ -116,6 +116,47 @@ func sourceOwnedFields(t types.Type) []int {
 	return nil
 }
 
+// ownsDeclaredBy returns the type whose Owns declaration a struct type
+// owns by, when it is not the type itself: a type with the fields of an
+// owner owns what the owner owns (F25 of the review of step 2).
+func ownsDeclaredBy(t types.Type) *ownedType {
+	u, isStruct := types.Unalias(t).Underlying().(*types.Struct)
+	if !isStruct {
+		return nil
+	}
+	var home *types.Package
+	for field := range u.Fields() {
+		if !field.Exported() && field.Pkg() != nil {
+			home = field.Pkg()
+			break
+		}
+	}
+	sourceOwns.RLock()
+	list := sourceOwns.byPkg[home]
+	sourceOwns.RUnlock()
+	named, _ := types.Unalias(t).(*types.Named)
+	for _, known := range list {
+		if types.Identical(untagged(u), untagged(known.name.Type().Underlying())) {
+			if named != nil && named.Obj() == known.name {
+				return nil
+			}
+			return &known
+		}
+	}
+	return nil
+}
+
+// ownsElsewhere says, of a struct type that owns by the declaration of
+// another type, why it owns and what to do, or "".
+func ownsElsewhere(t types.Type, q types.Qualifier) string {
+	known := ownsDeclaredBy(t)
+	if known == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s owns %s because it has the fields of %s, which declares // @Owns %s; give %s a field of its own, or use %s",
+		types.TypeString(t, q), strings.Join(known.fields, ", "), known.name.Name(), strings.Join(known.fields, ", "), types.TypeString(t, q), known.name.Name())
+}
+
 // ownsDeclSource is a declaration of this package while it is collected.
 type ownsDeclSource struct {
 	name   *types.TypeName
@@ -437,7 +478,7 @@ func ownedMadeSince(val value, bound *logic.Term) *logic.Term {
 // returns it, have been made since the statement began. cur is what the
 // field holds just before the store, and before the bound when the
 // statement began.
-func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur value, t types.Type, rhs ast.Expr, before *logic.Term, field string, example func(making string) string, pos token.Pos) {
+func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur value, t, holder types.Type, rhs ast.Expr, before *logic.Term, field string, example func(making string) string, pos token.Pos) {
 	options := []*logic.Term{ownedNothing(val, t)}
 	call := v.storedCallOf(rhs)
 	if cur != nil && (call == nil || call.keepsNot) {
@@ -475,8 +516,12 @@ func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur va
 		v.report(pos, "what is stored into %s comes from the call of %s, %s; storing the result of such a call into an owned field "+
 			"is not supported yet%s", field, call.name, what, limitNote(result))
 	case old:
+		undeclare := "or do not declare the field owned"
+		if note := ownsElsewhere(holder, types.RelativeTo(v.pass.Pkg)); note != "" {
+			undeclare = "or, since " + note
+		}
 		v.report(pos, "%s may come to refer to memory that existed when %s was called and that it did not own; an owned field may refer only "+
-			"to memory made since, or to part of what it referred to then; %s, or do not declare the field owned%s", field, v.fn.obj.Name(), copied, limitNote(result))
+			"to memory made since, or to part of what it referred to then; %s, %s%s", field, v.fn.obj.Name(), copied, undeclare, limitNote(result))
 	default:
 		v.report(pos, "what is stored into %s is new memory that is not made in this statement, and storing such memory into an owned field "+
 			"is not supported yet; make it where it is stored, as in %s, or copy it there%s", field, example(making), limitNote(result))
@@ -506,7 +551,7 @@ func (v *fnVerifier) checkOwnedTarget(st *state, lv lvalue, val value, rhs ast.E
 			cur = v.loadIn(lv, st, st.mem)
 		}
 	}
-	v.checkOwnedStore(st, nil, val, cur, lv.typ, rhs, before, lv.text, func(making string) string { return lv.text + " = " + making }, lv.pos)
+	v.checkOwnedStore(st, nil, val, cur, lv.typ, lv.owned.holder, rhs, before, lv.text, func(making string) string { return lv.text + " = " + making }, lv.pos)
 }
 
 // ownerRoot returns, for a store into an owned field through a pointer

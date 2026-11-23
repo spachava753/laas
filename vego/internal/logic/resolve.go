@@ -512,8 +512,21 @@ func (s *scope) call(n *Node) *Term {
 		}
 		var paths []Path
 		for _, kid := range n.Kids {
+			// valid(old(x)) is what a boundary assumed of x as it was on
+			// entry, inside a body.
+			if n.Name == "valid" && kid.Kind == NCall && kid.Name == "old" && len(kid.Kids) == 1 {
+				root, steps, primed := s.path(kid.Kids[0])
+				if _, bound := s.bound[root.Name]; root.Kind != NIdent || bound || primed {
+					fail("valid takes a struct or a pointer to one, a parameter or something reached from one, as in valid(ts), valid(ts.store), or valid(old(ts))")
+				}
+				paths = append(paths, Path{root.Name, steps, Old})
+				continue
+			}
 			root, steps, primed := s.path(kid)
 			if _, bound := s.bound[root.Name]; root.Kind != NIdent || bound || (primed && n.Name != "within" && n.Name != "apart" && n.Name != "valid") {
+				if n.Name == "valid" {
+					fail("valid takes a struct or a pointer to one, a parameter or something reached from one, as in valid(ts), valid(ts.store), or valid(old(ts))")
+				}
 				fail("%s takes a parameter or something reached from one, as in %s(A) or %s(s.items)", n.Name, n.Name, n.Name)
 			}
 			paths = append(paths, Path{root.Name, steps, map[bool]When{true: Primed}[primed]})

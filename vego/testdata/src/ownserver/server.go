@@ -159,3 +159,31 @@ func (s *Server) ReplaceInLoop(n int) {
 		s.store = &ownstore.Store{}
 	}
 }
+
+// Lazy owns a store it may drop: the invariant of the store is asked only
+// of a store that is there (F23 of the review of step 2).
+//
+// @Owns st
+type Lazy struct {
+	st *ownstore.Store
+}
+
+// Drop drops the store.
+//
+// @Requires l != nil
+// @Modifies l
+// @Ensures True
+func (l *Lazy) Drop() {
+	l.st = nil
+}
+
+// Swapped asserts in a body what a boundary assumed of s on entry, with
+// valid(old(s)), after it gave s a new store (F24 of the review of step 2).
+//
+// @Requires s != nil
+// @Modifies s
+// @Ensures True
+func (s *Server) Swapped() {
+	s.store = ownstore.New()
+	// @Assert valid(old(s)) And valid(s)
+}

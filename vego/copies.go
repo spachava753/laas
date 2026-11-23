@@ -55,6 +55,9 @@ func holding(t types.Type, q types.Qualifier) string {
 	inner, _ := holdsState(t)
 	if types.Identical(inner, t) {
 		if len(statesOf(t.Underlying().(*types.Struct))) == 0 {
+			if note := ownsElsewhere(t, q); note != "" {
+				return fmt.Sprintf("%s, which owns memory (%s)", types.TypeString(t, q), note)
+			}
 			return fmt.Sprintf("%s, which owns memory", types.TypeString(t, q))
 		}
 		return fmt.Sprintf("%s, which holds a state", types.TypeString(t, q))
