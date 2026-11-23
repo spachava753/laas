@@ -1654,7 +1654,11 @@ guide	(*bufio.Scanner).Text	1	5489	0
 guide	(*bufio.Writer).Flush	9	54180	0
 guide	(*bufio.Writer).Write	9	68612	0
 guide	(*bufio.Writer).WriteByte	9	54742	0
+guide	(*bytes.Buffer).Bytes	1	5122	0
+guide	(*bytes.Buffer).Reset	1	3390	0
 guide	(*bytes.Buffer).Write	4	17003	0
+guide	(*bytes.Buffer).WriteByte	4	12115	0
+guide	(*bytes.Buffer).WriteString	4	14913	0
 guide	(*guide.Account).Deposit	38	65173	0
 guide	(*guide.Account).DepositLocked	21	32992	0
 guide	(*guide.Account).DepositSum	40	68132	0
@@ -1666,6 +1670,7 @@ guide	(*guide.Hub).Add	1	1573	0
 guide	(*guide.Hub).Fire	1	1808	0
 guide	(*guide.Item).Next	9	5884	0
 guide	(*guide.Iter).Next	13	10665	0
+guide	(*guide.LineBook).Add	27	114521	0
 guide	(*guide.LineCount).Record	9	7060	0
 guide	(*guide.LineCounter).Price	10	8114	0
 guide	(*guide.Link).Loop	8	2837	0
@@ -1684,6 +1689,9 @@ guide	(*log.Logger).Println	1	5728	0
 guide	(*os.File).Close	3	8576	0
 guide	(*os.File).Read	7	2016732	2
 guide	(*os.File).Write	3	18506	0
+guide	(*strings.Builder).String	1	3351	0
+guide	(*strings.Builder).WriteByte	4	12383	0
+guide	(*strings.Builder).WriteString	4	15141	0
 guide	(*sync.Mutex).Lock	1	1652	0
 guide	(*sync.Mutex).Unlock	1	1611	0
 guide	(*sync.Once).Do	1	1800	0
@@ -1711,6 +1719,7 @@ guide	fmt.Sprintf	1	4468	0
 guide	guide.Abs	7	1250	0
 guide	guide.AbsWrong	5	871	0
 guide	guide.Account	1	225	0
+guide	guide.AddLine	20	79441	0
 guide	guide.AddTag	15	1178755	0
 guide	guide.AgeOf	5	26764	0
 guide	guide.Announce	12	187453	2
@@ -1811,6 +1820,8 @@ guide	guide.Inventory	61	329321	0
 guide	guide.IsAdmin	2	3907	0
 guide	guide.IsEmpty	1	46	0
 guide	guide.Join	5	5717	0
+guide	guide.JoinUnbounded	11	55806	0
+guide	guide.JoinWithCommas	31	230497	0
 guide	guide.KeysOf	17	148962	2
 guide	guide.KeysOfUncounted	16	149039	2
 guide	guide.Labelled	1	46	0
@@ -1860,6 +1871,7 @@ guide	guide.Oldest	5	12394	0
 guide	guide.OldestAfterSort	9	49442	0
 guide	guide.Option	3	2393	0
 guide	guide.Overwrite	8	9212	0
+guide	guide.Overwritten	28	136890	0
 guide	guide.Pack	9	5975	0
 guide	guide.Pad	13	21314	0
 guide	guide.Pages	4	1561	0
@@ -1967,6 +1979,7 @@ guide	guide.Transact	62	2079640	2
 guide	guide.Twice	11	7563	0
 guide	guide.TwiceOf	1	46	0
 guide	guide.TwoKeys	2	4437	0
+guide	guide.TwoLines	15	35327	0
 guide	guide.Tx.Begin	5	10057	0
 guide	guide.Tx.Commit	5	9688	0
 guide	guide.UsesLogf	4	19725	0
@@ -1982,6 +1995,11 @@ guide	guide.WriteBuffered	93	1119804	6
 guide	guide.WriteBufferedUnlisted	24	266133	7
 guide	guide.WriteCount	117	1432441	10
 guide	guide.WriteCountFormatted	117	1432441	10
+guide	guide.WriteFailure	6	40136	0
+guide	guide.WriteFailureBuffered	57	420012	0
+guide	guide.WriteItems	16	84401	0
+guide	guide.WriteNumbers	26	180712	0
+guide	guide.WriteNumbersTight	26	181552	0
 guide	guide.WriteReport	70	195664	0
 guide	guide.WriteThenRead	15	59781	0
 guide	guide.WriteTotal	67	555090	0

@@ -583,7 +583,7 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		// allocated, even where grown is not. The old capacity is less than
 		// grown, or the slice would not move, so the capacity picked is
 		// less than twice grown; no platform has pages of more than 64 KB.
-		v.check(next, nil, v.appendFits(grown, elem), call.Pos(), "the slice that append grows may be more than can be allocated")
+		v.check(next, nil, v.appendFits(grown, elem), call.Pos(), "the slice that append grows may be more than can be allocated, or have a capacity an int cannot hold")
 		// Copying the old elements reads them, which may happen before or
 		// after the calls of the targets.
 		v.unit = u.fork()

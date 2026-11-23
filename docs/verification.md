@@ -1274,7 +1274,7 @@ parameters refer to, so a method that writes what its receiver refers to cannot 
 method of Pricer yet, in (*LineCounter).Price used as a method of Pricer at interfaces.go:90:9
 ```
 
-So verified code cannot yet convert its own value to an interface whose methods write behind the receiver, such as a `*bytes.Buffer` to `io.Writer`, or a type to `sort.Interface`. That waits for a way to name the memory a value owns. A state of an interface value, described in [States of interface values](#states-of-interface-values), is not part of the value's memory.
+A method that writes what its receiver refers to needs an interface whose method lists its receiver, as described in [Methods that write behind their receiver](#methods-that-write-behind-their-receiver). A `*bytes.Buffer` and a `*strings.Builder` cannot be converted to `io.Writer` even so, as described in [Converting a value of your own type](#converting-a-value-of-your-own-type), and no type can be converted to `sort.Interface` yet. A state of an interface value, described in [States of interface values](#states-of-interface-values), is not part of the value's memory.
 
 A method with a pointer receiver cannot rely on what the receiver points to. A `Requires` clause that reads it, or a struct invariant of the receiver's type, cannot be proved in the check, and is reported there. A method with a value receiver gets the struct that was converted, so its invariant is proved from what is known where the value is converted. Give the method a value receiver and convert the struct, or make the conversion in code that is not verified. Through a pointer, a value receiver gets the struct as it is when the method runs, so its invariant cannot be proved there either.
 
@@ -2388,6 +2388,129 @@ func RuneString(r rune) (s string) {
 	return string(r)
 }
 ```
+
+### Building text in a buffer
+
+Verified code can write a `strings.Builder` and a `bytes.Buffer`. In a formula, `|b|` is the length of the buffer `b`, the number that `b.Len()` returns:
+
+```go
+// @Requires |parts| <= 1000 And (Forall i in [0, |parts|) : |parts[i]| <= 1000)
+// @Ensures |r| <= 1001 * |parts|
+func JoinWithCommas(parts []string) (r string) {
+	var b strings.Builder
+	// @Invariant 0 <= i And i <= |parts| And |b| <= 1001 * i
+	// @Variant |parts| - i
+	for i := 0; i < len(parts); i++ {
+		b.WriteString(parts[i])
+		b.WriteByte(',')
+	}
+	return b.String()
+}
+```
+
+For a `bytes.Buffer`, `|b|` counts the bytes that have not been read yet. It is not what was ever written, and it is not the capacity. A formula cannot name the capacity of a buffer: `cap(b)` is reported as `cap(b): b is a strings.Builder, whose capacity no contract speaks of; its length |b| is what bounds what it can grow to`.
+
+A method that writes panics when the buffer cannot grow to hold what it writes. So it requires a bound on the length of the buffer and on what it writes, as an `append` does (see [Allocation, panics, and termination](#allocation-panics-and-termination)). These methods have shipped contracts. Each also requires that `b` is not nil:
+
+| Method | Requires | Ensures |
+| --- | --- | --- |
+| `Write(p)`, `WriteString(s)` of a `Builder` | <code>2 * (&#124;b&#124; + &#124;p&#124;) + 65536</code> at most `MaxAlloc` and `MaxInt` | <code>&#124;b'&#124; = &#124;b&#124; + &#124;p&#124;</code>, with the count written and a nil error |
+| `WriteByte`, `WriteRune` of a `Builder` | the same with 1 or 4 bytes | the length grows by 1, or by the 1 to 4 bytes of the rune |
+| `Grow(n)` of a `Builder` | `0 <= n`, and <code>3 * (&#124;b&#124; + n) + 65536</code> at most `MaxAlloc` and `MaxInt` | the length is kept |
+| `Write`, `WriteString`, `WriteByte`, `WriteRune`, `Grow` of a `Buffer` | `0 <= n` for `Grow`, and for `k` the bytes written, or `n` of `Grow`, <code>3 * (&#124;b&#124; + k) + 65536 <= MaxAlloc</code> and <code>5 * (&#124;b&#124; + k) <= MaxInt</code> | as for a `Builder` |
+| `Len`, `String` | nothing more | <code>result = &#124;b&#124;</code>, <code>&#124;result&#124; = &#124;b&#124;</code> |
+| `Bytes` of a `Buffer` | nothing more | <code>&#124;result&#124; = &#124;b&#124;</code>, and the result lies within `b` |
+| `Reset` | nothing more | <code>&#124;b'&#124; = 0</code> |
+| `Truncate(n)` of a `Buffer` | <code>0 <= n <= &#124;b&#124;</code> | <code>&#124;b'&#124; = n</code> |
+
+A bound such as `|b| <= 1000000` on the buffer and one on what is written is enough. When the bound is missing, the message says what is enough on the platform:
+
+```go
+// @Ensures True
+func JoinUnbounded(parts []string) (r string) {
+	var b strings.Builder
+	for _, s := range parts {
+		b.WriteString(s)
+	}
+	return b.String()
+}
+```
+
+```text
+vego: precondition of WriteString may not hold: 2 * (|b| + |s|) + 65536 <= MaxAlloc; it holds when |b| <=
+10000000000000 and |s| <= 10000000000000
+```
+
+A function that writes a buffer it is given lists it in `Modifies`. `Modifies b` covers the struct and the array of the buffer:
+
+```go
+// @Requires b != nil And |b| <= 1000000 And |line| <= 1000
+// @Modifies b
+// @Ensures |b'| = |b| + |line| + 1
+func AddLine(b *strings.Builder, line string) {
+	b.WriteString(line)
+	b.WriteByte('\n')
+}
+
+// @Ensures |r| = 6
+func TwoLines() (r string) {
+	var b strings.Builder
+	AddLine(&b, "ab")
+	AddLine(&b, "cd")
+	return b.String()
+}
+```
+
+A struct that holds a buffer by value owns its array too. `Modifies r` of a pointer to it covers that array, and `|r.text|` is the length of the buffer:
+
+```go
+// LineBook collects lines in a Builder it holds.
+type LineBook struct {
+	lines int
+	text  strings.Builder
+}
+
+// @Requires r != nil And |r.text| <= 1000000 And |line| <= 1000 And r.lines < 1000000
+// @Modifies r
+// @Ensures |r.text'| = |r.text| + |line| + 1 And r.lines' = r.lines + 1
+func (r *LineBook) Add(line string) {
+	r.text.WriteString(line)
+	r.text.WriteByte('\n')
+	r.lines++
+}
+```
+
+An element of a slice of buffers is listed as the element, as in `Modifies bs[0]`. `Modifies bs` covers the elements but not the arrays they own.
+
+What `Bytes` returns lies in the array of the buffer. A later write may overwrite it, also after `Reset`, which keeps the array:
+
+```go
+// @Ensures r
+func Overwritten() (r bool) {
+	var b bytes.Buffer
+	b.WriteString("abc")
+	p := b.Bytes()
+	first := p[0]
+	b.Reset()
+	b.WriteByte('z')
+	return p[0] == first
+}
+```
+
+```text
+vego: postcondition may not hold: r
+```
+
+A buffer is not copied, as described in [Writing through a buffer](#writing-through-a-buffer). To format into a buffer, pass it to `fmt.Fprintf`, as described in [Formatting into a buffer](#formatting-into-a-buffer). A buffer cannot be converted to an `io.Writer`, and a struct that holds one by value cannot be converted to an interface whose methods write behind their receiver.
+
+These methods have no shipped contract, and a call of one is reported:
+
+- the methods that read, such as `Read`, `ReadByte`, `ReadString`, and `Next`;
+- `ReadFrom` and `WriteTo`, which call through the reader or writer they are given;
+- `Cap`, `Available`, and `AvailableBuffer`, which speak of the capacity;
+- `bytes.NewBuffer` and `bytes.NewBufferString`, which take over memory they are given.
+
+The contracts say how long a buffer is. They say nothing of what it holds.
 
 ## Structs and pointers
 
@@ -4036,6 +4159,69 @@ A logger that your function is handed by code that is not verified needs `ready(
 
 `fmt.Printf`, `fmt.Print`, and `fmt.Println` write to standard output, and the functions of `log` write to the standard logger. Code that is not verified chooses where those go: it can set `os.Stdout`, and it can call `log.SetOutput` or `slog.SetDefault`. A proof assumes that a write there returns and writes nothing verified code can see. If your program sets the standard logger's output to a writer of its own, it makes that claim about the writer. A writer that logs through the standard logger again never returns, because the logger holds a lock while it writes. See [What a proof assumes](#what-a-proof-assumes).
 
+### Formatting into a buffer
+
+`fmt.Fprintf`, `fmt.Fprint`, and `fmt.Fprintln` can write to a `*bytes.Buffer`, a `*strings.Builder`, or a `*bufio.Writer`. `vego` checks such a call as `fmt.Sprintf` followed by the writer's own `Write` of the formatted bytes. So the requires of that `Write` must hold, and `Modifies` must list the writer:
+
+```go
+// @Requires b != nil And |b| <= 1000000 And 0 <= n And n <= 1000
+// @Modifies b
+// @Ensures True
+func WriteItems(b *bytes.Buffer, n int) {
+	fmt.Fprintf(b, "%d items\n", n)
+}
+```
+
+The length of what is formatted comes from the bound described in [How long a formatted string can be](#how-long-a-formatted-string-can-be). The bound counts each operand at the widest it can print under its verb, so it is larger than what is printed. An invariant of a loop that formats must allow for the bound, not for the text you expect. `"%d,"` prints at most 21 bytes, and its bound is between 200 and 500:
+
+```go
+// @Requires b != nil And |b| <= 1000000 And 0 <= k And k <= 1000
+// @Modifies b
+// @Ensures True
+func WriteNumbers(b *bytes.Buffer, k int) {
+	// @Invariant 0 <= i And i <= k And |b| <= |old(b)| + 500 * i
+	// @Variant k - i
+	for i := 0; i < k; i++ {
+		fmt.Fprintf(b, "%d,", i)
+	}
+}
+```
+
+The same loop with `|b| <= |old(b)| + 21 * i` is reported as `loop invariant may not be preserved`.
+
+That bound does not count the text of an error, what a `String` or `Error` method returns, or the strings and slices inside an element of a slice. When it does not count everything, nothing bounds what `Write` is given. A buffer's `Write` needs such a bound, so the call is reported:
+
+```go
+// @Requires b != nil And |b| <= 1000000
+// @Modifies b
+// @Ensures True
+func WriteFailure(b *bytes.Buffer, err error) {
+	fmt.Fprintf(b, "failed: %v\n", errors.New("disk full"))
+}
+```
+
+```text
+vego: Fprintf writes to b text whose length is not known: it formats the text of an error, what a String or Error
+method returns, or strings or slices inside an element of a slice, whose lengths are not counted, and the Write of
+*bytes.Buffer needs a bound on what it is given; format only values whose length the bound counts
+```
+
+The `Write` of a `*bufio.Writer` needs no such bound, so the same call into one verifies:
+
+```go
+// @Requires bw != nil And ready(bw)
+// @Modifies bw
+// @Ensures True
+func WriteFailureBuffered(bw *bufio.Writer) (err error) {
+	_, err = fmt.Fprintf(bw, "failed: %v\n", errors.New("disk full"))
+	return err
+}
+```
+
+A deferred call is checked the same way when it runs. The results of the call are those of the writer's `Write`.
+
+A value converted to an `io.Writer` first, as in `var w io.Writer = &b`, is refused, as described in [Converting a value of your own type](#converting-a-value-of-your-own-type).
+
 ### Your own logging function
 
 A logging function of your own that hands its values to `fmt` or `log` cannot be verified, because it formats values that it cannot check, the elements of `args`:
@@ -4432,6 +4618,7 @@ Each entry has these fields:
 | `vouches` | no | Error results whose errors verified code may format, compare, and pass to `errors.Is`, results that hold function values or interface values verified code may call, and parameters under whose memory the function writes such values. See [Errors that a trusted function returns](#errors-that-a-trusted-function-returns) and [Function values and interface values that a trusted function returns](#function-values-and-interface-values-that-a-trusted-function-returns). |
 | `calls` | no | Function parameters that the function calls while it runs, each with what holds when it calls them. See [Functions that a trusted function calls](#functions-that-a-trusted-function-calls). |
 | `formats` | no | The parameter of type `any` or `...any` whose values the function formats as package `fmt` does, and the string it uses as the format, if any. See [Your own logging function](#your-own-logging-function). |
+| `prints` | no | For a function that formats and writes to a writer it is given, as `{w: fmt.Sprintf}`: the writer, and a function of the same package that takes the other parameters. It claims that the function formats as that one does, calls `Write` of the writer once with exactly what that one returns, and returns what `Write` returned. A call into a `*bytes.Buffer`, a `*strings.Builder`, or a `*bufio.Writer` is then checked as described in [Formatting into a buffer](#formatting-into-a-buffer). The entry may require no more than that the writer is not nil, list only the writer in `modifies`, and have no `ensures`, `keeps`, or `calls`. |
 
 Put the formulas in quotes. Several characters that formulas use have a special meaning in YAML.
 
@@ -4465,6 +4652,7 @@ The names in an entry are the parameter and result names from the function's sou
 - `fmt.Sprintf`, `fmt.Sprint`, `fmt.Sprintln`, `fmt.Printf`, `fmt.Print`, `fmt.Println`, `fmt.Fprintf`, `fmt.Fprint`, `fmt.Fprintln`, described in [Formatting and logging](#formatting-and-logging)
 - `io.NopCloser`, `io.LimitReader`, `io.TeeReader`, `io.MultiReader`, `io.MultiWriter`, described in [Wrappers in package io](#wrappers-in-package-io)
 - `bufio.NewScanner` with `Scan`, `Text`, and `Err`; `bufio.NewReader` with `ReadByte`; `bufio.NewWriter` with `Write`, `WriteByte`, and `Flush`; and the states `ready` of `bufio.Scanner`, `bufio.Reader`, and `bufio.Writer`, described in [Wrappers of readers and writers](#wrappers-of-readers-and-writers)
+- the methods `Write`, `WriteString`, `WriteByte`, `WriteRune`, `Grow`, `Len`, `String`, and `Reset` of `*strings.Builder`, and the same with `Bytes` and `Truncate` of `*bytes.Buffer`, described in [Building text in a buffer](#building-text-in-a-buffer)
 - `log.Printf`, `log.Print`, `log.Println`, `log.New`, and the methods of `*log.Logger` of the same names, with the state `ready` of `log.Logger`, described in [Writing to a writer or a logger](#writing-to-a-writer-or-a-logger)
 - `path.Join`, `path.Clean`, `path.Dir`, `path.Base`, `path.Ext`, `path.IsAbs`, `path.Split`, `path/filepath.Join`, `path/filepath.Clean`, `path/filepath.Dir`, `path/filepath.Base`, `path/filepath.Ext`, `path/filepath.Rel`, `path/filepath.Split`. The bound `|result| <= |path| + 2` of `path/filepath.Clean` and `Dir` allows for Windows, where `Clean` can put `.\` before a path. It is read from the source for every system, and the tests check it on Unix only.
 - `regexp.Compile` and the methods `MatchString`, `Match`, `FindString`, and `FindStringSubmatch` of `*regexp.Regexp`, which say nothing of what matches
@@ -4487,6 +4675,7 @@ A shipped contract states only what the documentation of its function promises, 
 - `strconv.Unquote` does not bound the length of its result. `strconv.Quote` bounds its result by `10 * |s| + 2`.
 - The functions of `math` say only that they return.
 - The functions of `os` say nothing of the files they read or write.
+- The contracts of `strings.Builder` and `bytes.Buffer` say how long the buffer is and nothing of what it holds.
 - The contracts of generic functions say only what can be read at every type argument they are used with. `slices.Clone`, `Grow`, `Clip`, `Delete`, `DeleteFunc`, `Insert`, `Reverse`, and `Compact` do not say what the elements are, and `Delete`, `DeleteFunc`, and `Compact` do not say that they set the elements they drop to zero. `slices.Sort` does not say that the elements are in order, and `cmp.Compare` does not say which of `-1` and `1` it returns. `slices.ContainsFunc` and `IndexFunc` do not say which element the function they are handed chose. The functions of `maps` say how many keys a map has and which keys it has, and nothing of what it holds under a key.
 - The documentation of `slices.Grow` says that the result has the nilness of `s`. For a nil `s` and an `n` above 0 it returns a slice that is not nil, so the contract says only that a slice that is not nil gives one that is not nil, and that a nil `s` with `n` equal to 0 gives nil.
 
@@ -4497,7 +4686,7 @@ Some functions of the standard library have no shipped contract, because no true
 - `flag.Parse` can end the program.
 - `sort.SearchStrings` needs a sorted slice of strings, and a formula cannot say that.
 - `bytes.Split` and `bytes.Fields` return slices inside their argument, which a contract cannot say of every element.
-- The methods of `bytes.Buffer` and `strings.Builder` that grow the buffer need its length, an unexported field.
+- The methods of `bytes.Buffer` and `strings.Builder` that read, `ReadFrom`, `WriteTo`, and the methods that speak of the capacity. See [Building text in a buffer](#building-text-in-a-buffer).
 - `(*regexp.Regexp).FindStringIndex` names its result differently in different releases of Go.
 - `regexp.MustCompile` panics on a pattern that does not compile. Call `regexp.Compile` and handle its error.
 - `http.Error` and the `Header` method of `http.ResponseWriter` write memory of the writer.
@@ -5394,7 +5583,7 @@ The same holds for a `*bufio.Reader`. `bufio.NewReader` may return the reader it
 
 Some values of the standard library own memory besides their struct. Their methods write that memory, and a `Modifies` clause that lists such a value covers it. These are the values and what each owns:
 
-- a `*bytes.Buffer` and a `*strings.Builder` own the array of their buffer;
+- a `*bytes.Buffer` and a `*strings.Builder` own the array of their buffer, and a struct that holds one by value owns that array too;
 - a `*bufio.Writer`, a `*bufio.Reader`, and a `*bufio.Scanner` own the array of their buffer and the writer or reader they keep;
 - a `*log.Logger` owns the writer it writes to.
 
@@ -5823,7 +6012,7 @@ func Discard() (w io.Writer) {
 }
 ```
 
-A writer of your own whose `Write` writes its own struct converts, as described in [Converting a value of your own type](#converting-a-value-of-your-own-type). Verified code cannot pass a `*bytes.Buffer` as an `io.Writer` yet, since its `Write` may panic when the buffer is too large to grow. Nor can it pass a closer of its own as an `io.Closer`, since the shipped contract of `Close` speaks of the state `closed`. See [Making a value of an interface with a state](#making-a-value-of-an-interface-with-a-state). A type whose `Write` has a contract that writes nothing behind the receiver does convert. A `net.Conn` or an `http.ResponseWriter` cannot be converted to `io.Writer` either, because each declares a `Write` of its own. See [Converting between interfaces](#converting-between-interfaces). Make such a conversion in code that is not verified.
+A writer of your own whose `Write` writes its own struct converts, as described in [Converting a value of your own type](#converting-a-value-of-your-own-type). Verified code cannot pass a `*bytes.Buffer` as an `io.Writer`, since its `Write` needs a bound that the contract of `(io.Writer).Write` does not give. It can pass it to `fmt.Fprintf` itself, as described in [Formatting into a buffer](#formatting-into-a-buffer). Nor can it pass a closer of its own as an `io.Closer`, since the shipped contract of `Close` speaks of the state `closed`. See [Making a value of an interface with a state](#making-a-value-of-an-interface-with-a-state). A type whose `Write` has a contract that writes nothing behind the receiver does convert. A `net.Conn` or an `http.ResponseWriter` cannot be converted to `io.Writer` either, because each declares a `Write` of its own. See [Converting between interfaces](#converting-between-interfaces). Make such a conversion in code that is not verified.
 
 #### Wrapping the errors of Read and Write
 
@@ -5937,14 +6126,6 @@ declared
 Write the contract in the doc comment of the method where the interface is declared, as described in [Interfaces](#interfaces). An entry for a type of another module is described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages).
 
 A function cannot have both annotations and a trusted contract. When you verify a function that you previously trusted, delete its entry.
-
-Do not write an entry for a method of `bytes.Buffer` or `strings.Builder` that writes, such as `Write`, `WriteString`, or `WriteByte`. Each panics when the buffer is too large to grow, and no formula can state the length of the buffer yet. An entry without such a bound says that the method returns when it may panic, so it is false. `vego` refuses calls of these methods with a message that says so:
-
-```text
-vego: cannot verify Greets: it calls (*bytes.Buffer).WriteString, which grows the buffer: the methods of Buffer that
-write may panic when the buffer is too large to grow, and the length of a Buffer cannot be stated yet, so no contract
-of them can say when they return. A trusted contract for it without such a bound would be false
-```
 
 `vego` knows nothing about the results of a trusted function beyond what the contract states. For example, a returned pointer or slice could refer to any memory unless the contract restricts it, for example with `fresh(result)`.
 
@@ -6184,7 +6365,13 @@ This table lists the most common messages.
 | `x.M may modify the footprint of x, ...; it is the memory that t points to, converted at f.go:n:c; list t in a // @Modifies clause` | A value of your own type was converted to an interface whose methods write behind their receiver, and the function does not list it. | Add `t` to `Modifies`. |
 | `x.M may modify the footprint of x, ...; x holds a value converted at f.go:n:c in a loop, ...` | The value was converted in a loop and called after it, and nothing is known of its footprint after the head of the loop. | Convert the value before the loop or after it. |
 | `converting a value of type *bufio.Writer to io.Writer is not supported yet: its Write calls through the writer it keeps, ...` | A `*bufio.Writer` was passed where an `io.Writer` is wanted, as to `fmt.Fprintf`. | Format into a string with `fmt.Sprintf` and pass it to the Writer's own `Write` as `[]byte(s)`. See [Writing through a buffer](#writing-through-a-buffer). |
-| `it calls (*bytes.Buffer).WriteString, which grows the buffer: ...`, and `converting a value of type *bytes.Buffer to io.Writer is not supported yet: ...` | The methods of `bytes.Buffer` and `strings.Builder` that write may panic when the buffer is too large to grow. | Build the text in code that is not verified, or with `fmt.Sprintf` and string concatenation. Do not add a trusted contract. |
+| <code>precondition of WriteString may not hold: 2 * (&#124;b&#124; + &#124;s&#124;) + 65536 <= MaxAlloc; it holds when ...</code> | The buffer may grow past what can be allocated. | Bound the length of the buffer and of what is written, as the message says. See [Building text in a buffer](#building-text-in-a-buffer). |
+| `cap(b): b is a strings.Builder, whose capacity no contract speaks of; ...` | A formula names the capacity of a buffer. | Bound its length, <code>&#124;b&#124;</code>, instead. |
+| `it calls (*bytes.Buffer).ReadFrom, which has no shipped entry: ...` | `ReadFrom` calls through the reader it is given and asserts it to other types. | Read with `Read` in a loop and write what it returns with `Write`. |
+| `converting a value of type *bytes.Buffer to io.Writer is not supported: ...` | The `Write` of a buffer needs a bound that the contract of `(io.Writer).Write` does not give. | Pass the buffer itself to `fmt.Fprintf`, `fmt.Fprint`, or `fmt.Fprintln`, or write with its own `WriteString`. See [Formatting into a buffer](#formatting-into-a-buffer). |
+| `Fprintf writes to b text whose length is not known: ...` | What is formatted has a part whose length the bound on formatting does not count, and the buffer's `Write` needs a bound. | Format only values whose length the bound counts, or write to a `*bufio.Writer`. |
+| `converting a value of type *T to I is not supported yet: *T owns memory, ...` | `T` holds a `strings.Builder` or a `bytes.Buffer` by value, and the methods of `I` write behind their receiver. | Call the methods of `*T` on the pointer. |
+| `... list bs[0] in a // @Modifies clause, which covers what it owns; ...` | A clause lists a slice of buffers, which does not cover the arrays its elements own. | List the element. |
 | `T.M has a value receiver, and the pointer that the interface value holds may be nil` | A `*T` that may be nil is converted to an interface, and `M` copies what it points to. | Convert a pointer that is not nil. |
 | `cannot verify F: comparing interface values is not supported yet` | Two interface values, or an interface value and a value of another type, are compared. | Compare with `nil` only. |
 | `cannot verify F: type assertions and type switches are not supported yet` | The type that an interface value holds is not known. | Make the assertion in code that is not verified. |
@@ -6234,8 +6421,9 @@ A function that uses any of the following is reported as `cannot verify`:
 - calls of a method of an interface that has no contract, in source or in the trust file, and converting a value to an interface with such a method (see [Interfaces](#interfaces)); of the standard library, only `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, and `(context.Context).Err` have shipped contracts (see [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages));
 - converting a value of a type that is not an interface to an interface whose contracts speak of a state, such as a closer of your own to `io.Closer` (see [Making a value of an interface with a state](#making-a-value-of-an-interface-with-a-state));
 - an entry in the trust file for a type of the module of the analysed package, or one with `runs`, `keeps`, or `calls`;
-- calling a method of `bytes.Buffer` or `strings.Builder` that writes, and converting either to `io.Writer`, since they panic when the buffer is too large to grow and no formula can state the buffer's length yet (see [Converting a value of your own type](#converting-a-value-of-your-own-type));
-- converting a `*bufio.Writer` or a `*bufio.Reader` to an interface, since their methods call through the writer or the reader they keep (see [Writing through a buffer](#writing-through-a-buffer)), and converting any other value that owns memory to an interface whose methods write behind their receiver;
+- calling a method of `bytes.Buffer` or `strings.Builder` that has no shipped contract, such as `Read`, `Next`, `ReadFrom`, `WriteTo`, or `Cap`, and converting either to `io.Writer`, since its `Write` needs a bound that the contract of `(io.Writer).Write` does not give; passing one to `fmt.Fprintf`, `fmt.Fprint`, or `fmt.Fprintln` is supported (see [Building text in a buffer](#building-text-in-a-buffer) and [Formatting into a buffer](#formatting-into-a-buffer));
+- formatting into a `bytes.Buffer` or a `strings.Builder` a part whose length the bound on formatting does not count, such as the text of an error, or what a `String` method returns even when its contract bounds it;
+- converting a `*bufio.Writer` or a `*bufio.Reader` to an interface, since their methods call through the writer or the reader they keep (see [Writing through a buffer](#writing-through-a-buffer)), and converting any other value that owns memory to an interface whose methods write behind their receiver, a struct that holds a `strings.Builder` or a `bytes.Buffer` by value included;
 - `io.MultiReader` and `io.MultiWriter` handed a slice whole, as in `io.MultiReader(rs...)`, when what they return is read or written (see [Wrappers in package io](#wrappers-in-package-io));
 - `context.WithCancel` and the functions like it, which keep the context they are given and run it on other goroutines (see [Types without a shipped entry](#types-without-a-shipped-entry));
 - a function that keeps code it is given anywhere but in a result or in memory that a parameter reaches, such as a registry, a goroutine, or a timer, which has no true entry; making a trusted function with `keeps` into a value; and handing a function literal, a function, or a method value of a type without a contract to a parameter under `keeps` (see [Functions that keep what they are given](#functions-that-keep-what-they-are-given));
@@ -6283,7 +6471,7 @@ Floating-point values are supported but opaque. They can be passed around and us
 A proof by `vego` depends on the following assumptions. Each concerns something `vego` cannot see.
 
 - Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and holds no value that can hold code anywhere it was not held when the call began, unless `keeps` lists the parameter. For a parameter listed under `keeps`, it runs the code during the call only if `runs` lists the parameter too, holds it when it returns only in memory that the results and parameters listed there reach, and has started or registered nothing that runs it later: no goroutine, timer, finalizer or cleanup, callback given to another package, or package-level variable. For a parameter listed under `runs` or `keeps`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter. Where such a value runs what the function keeps, as the reader that `io.TeeReader` returns runs the reader and the writer it is given, it meets its contract whenever what the function keeps meets theirs.
-- The methods of `bytes.Buffer`, `strings.Builder`, `bufio.Writer`, `bufio.Reader`, `bufio.Scanner`, and `log.Logger` that have shipped entries write nothing that verified code can see other than the struct and the memory that the value owns, as [Writing through a buffer](#writing-through-a-buffer) lists it. After a call, the value owns only what it owned before the call and memory that the call made.
+- The methods of `bytes.Buffer`, `strings.Builder`, `bufio.Writer`, `bufio.Reader`, `bufio.Scanner`, and `log.Logger` that have shipped entries write nothing that verified code can see other than the struct and the memory that the value owns, as [Writing through a buffer](#writing-through-a-buffer) lists it. After a call, the value owns only what it owned before the call and memory that the call made. The read position of a `bytes.Buffer` never passes the end of what was written to it. Every method of `bytes.Buffer` keeps it so, and `|b|` is the number of bytes between the two.
 - Code of another package runs code of the verified package only as `vego` follows it, which [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods) describes: during a call that the verified package makes, it runs only what that call hands it, through the arguments and the receiver. Code that it kept from an earlier call, a value it stored, or code that it runs on another goroutine or at another time, does not call back into a verified function while that function runs, so that the call never ends. A cycle that stays in the package, or that goes through what a call hands to another package, is found and reported.
 - A claim under `asserts` is true: the function calls nothing that the parameter holds, or that a call of what the parameter holds returns, but what the claim allows, and uses no reflection on it (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For a parameter whose footprint the contract lists in `Modifies`, they pass no other argument that reaches memory in that footprint without going through an interface value: `Log` relies on the `Lines` that `t` points to not being memory that the methods of `r` write. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one that wraps it, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method.
@@ -6296,7 +6484,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - No other goroutine writes memory that a verified function reads or writes while it runs, also while the function waits in `Lock`, `RLock`, or `Do`. The one exception is that other goroutines can lock and unlock a mutex that the goroutine running the function does not hold, and call `Do` on a `sync.Once` that this goroutine is not inside `Do` on, which writes that `Once`. What the function that another goroutine hands to `Do` writes is not part of the exception. Closing an interface value that the function uses counts as such a write. A proof covers one goroutine. A function that takes a lock is not proved to be safe to call from several goroutines. See [What a proof of a function that locks shows](#what-a-proof-of-a-function-that-locks-shows).
 - Every call that waits for another goroutine returns: `Lock` and `RLock` return once the other goroutines release the mutex, and `(*sync.Once).Do` returns once the function that another goroutine runs in it returns. A deadlock that the verified function takes part in breaks this.
 - No other goroutine unlocks a mutex that the goroutine running a verified function holds.
-- Code that is not verified does not copy a value that holds a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once` after it was first used, as the documentation of `sync` requires.
+- Code that is not verified does not copy a value that holds a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once` after it was first used, as the documentation of `sync` requires, or a `strings.Builder` that is not zero, as the documentation of `strings` requires. A copy of a `Builder` that has been written panics at its next write.
 - No code outside the packages that a verified package is built with changes a package-level variable that a proof relies on, or lets out a reference to what such a variable refers to when a proof relies on it being only read. No code does either through `unsafe`, `reflect`, C code of a cgo package, or an object file (`.syso`) linked into the program. `vego` reads the `//go:linkname` directives and the assembly files of the build, and counts what they name as changed. When a verified package is built with a package that makes such a change, the verified package does not rely on the variable. The change is also reported wherever it meets a proof that does rely on it.
 - `errors.New`, `fmt.Errorf`, and `errors.Is` behave as they do in the Go releases that `laas` is tested with. Each call of `errors.New` or `fmt.Errorf` returns a new pointer. The errors they return have no `Is` method. `Unwrap` returns the operand of the one `%w`. `errors.Is` finds an error, or an error it wraps, that is the target. The tests of `vego` check this against the running toolchain.
 - The compiler evaluates each statement in an order that the Go specification allows. Calls, `&&`, and `||` run from left to right, an operation runs after its operands, and an assignment assigns only after it has evaluated everything. Where the specification leaves the order open, `vego` proves that every order it allows gives the same values.
@@ -6353,6 +6541,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `MaxInt`, `MinInt`, `MaxInt8` ... `MaxUint64` | limits of the Go integer types |
 | `MaxAlloc` | the largest number of bytes in one allocation |
 | <code>&#124;A&#124;</code> | length of a slice or string, or number of keys in a map |
+| <code>&#124;b&#124;</code> | for a `strings.Builder` or a `bytes.Buffer`, or a pointer to one: what `b.Len()` returns, the bytes not yet read |
 | `A[i]`, `m[k]`, `p.f` | element, map value, field |
 | `A[lo:hi) <= x` | the comparison holds for every element from `lo` up to `hi` |
 | `Forall k in [a, b) : P`, `Exists k in [a, b] : P` | quantifiers over an interval |
@@ -6404,6 +6593,7 @@ Results are referred to by the names in the function's signature.
 | `Modifies g[from][to]` | the entry `to` of the map held under `from` |
 | `Modifies rc`, `Modifies p.f` | if `rc` or `f` is an interface value: every state of what it holds and, when its methods write behind their receiver, its footprint, the memory they may write; not the variable or the field; a function value field is the field itself |
 | `Modifies bw` | for a `*bufio.Writer`, `*bufio.Reader`, `*bufio.Scanner`, `*log.Logger`, `*bytes.Buffer`, or `*strings.Builder`: the struct and the memory it owns |
+| `Modifies p`, `Modifies p.out`, `Modifies bs[0]` | for a pointer to a struct that holds a `strings.Builder` or a `bytes.Buffer` by value, a path to one, or an element of a slice of them: also the memory the buffer owns; `Modifies bs` does not cover what the elements own |
 | `fresh(x)` | in an `Ensures`, the memory `x` refers to on return was allocated by the call; in a body, it was allocated since the function was entered; true for a slice with zero capacity and a nil interface value, false for a nil pointer or map; for an interface value, what it holds was created then, its footprint included |
 | `fresh(x, w)` | the same, except that what `x` refers to may also lie in the footprint of `w`, an interface value whose methods write behind it; more than one such value may follow, and `w` may be a variadic parameter of such values, read where a call writes each one out |
 | `within(a, b)` | `a` lies inside the memory of `b`; each is a pointer or a slice, and a slice includes its capacity; for an interface value `b`, `a` (also a map) lies in its footprint, and for a value that owns memory, in its struct or in what it owns |
