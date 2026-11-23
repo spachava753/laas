@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"maps"
 	"math/big"
 	"slices"
 	"strings"
@@ -439,16 +440,22 @@ func (v *fnVerifier) checkNilTargets(st *state, guard []*logic.Term, call *ast.C
 
 // readsReadFrame returns the text of a conjunct of the requires or the
 // ensures of a contract that reads memory the contract's Modifies lists,
-// or "": its value in the state of the call, on entry and on return
-// alike, and its value after every target of the frame is forgotten, with
-// the same results, must be proved equal. Its caller runs it quietly: what
-// it reads is read once the arguments are evaluated, as the call reads
-// them.
+// in the state on entry or in the state on return, or "". The conjunct is
+// read as one call reads it, over the state of the call and a state after
+// it in which every target of the frame is forgotten; it must be proved
+// to mean the same when the targets are forgotten again in the state of
+// the call, and, apart from that, in the state after it (F32 of the
+// review: read in one state, f.Odd' != f.Odd is false either way, and
+// passed). Its caller runs it quietly: what it reads is read once the
+// arguments are evaluated, as the call reads them.
 func (v *fnVerifier) readsReadFrame(fn *funcInfo, args map[*types.Var]value, st *state) string {
 	targets := v.targets(fn, args, st, st.mem)
 	if len(targets) == 0 {
 		return ""
 	}
+	// The layers that forgetting a footprint grows belong to the memories
+	// made here, which are dropped.
+	defer func(growing []*layer) { v.growing = growing }(v.growing)
 	for _, c := range slices.Concat(fn.requires, fn.ensures) {
 		if c.node == nil {
 			continue
@@ -459,18 +466,33 @@ func (v *fnVerifier) readsReadFrame(fn *funcInfo, args map[*types.Var]value, st 
 			for i, result := range fn.results {
 				results[i] = v.unknown("out", result.Type(), changed)
 			}
-			var then, now *logic.Term
-			var err error
-			then, err = v.resolverOf(c).Formula(conjunct, &specEnv{v: v, sink: changed, fn: fn, args: args, results: results, now: st.mem, post: st.mem, before: st.brk})
+			// Each memory is the state of the call with what the targets
+			// hold forgotten anew, so the three agree but on the targets
+			// and are unrelated on them.
+			forgotten := func() memory {
+				for _, t := range targets {
+					v.havoc(changed, t, nil)
+				}
+				return maps.Clone(changed.mem)
+			}
+			after := forgotten()
+			entryForgotten := forgotten()
+			afterForgotten := forgotten()
+			read := func(now, post memory) (*logic.Term, error) {
+				return v.resolverOf(c).Formula(conjunct, &specEnv{v: v, sink: changed, fn: fn, args: args, results: results, now: now, post: post, before: st.brk})
+			}
+			then, err := read(st.mem, after)
 			if err != nil {
 				return c.text
 			}
-			for _, t := range targets {
-				v.havoc(changed, t, nil)
-			}
-			now, err = v.resolverOf(c).Formula(conjunct, &specEnv{v: v, sink: changed, fn: fn, args: args, results: results, now: changed.mem, post: changed.mem, before: st.brk})
-			if err != nil || v.attempt(changed, nil, logic.Iff(then, now)) != solver.Proved {
-				return c.text[conjunct.Start:conjunct.End]
+			for _, other := range []func() (*logic.Term, error){
+				func() (*logic.Term, error) { return read(entryForgotten, after) },
+				func() (*logic.Term, error) { return read(st.mem, afterForgotten) },
+			} {
+				now, err := other()
+				if err != nil || v.attempt(changed, nil, logic.Iff(then, now)) != solver.Proved {
+					return c.text[conjunct.Start:conjunct.End]
+				}
 			}
 		}
 	}

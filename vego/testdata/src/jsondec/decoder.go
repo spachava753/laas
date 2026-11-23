@@ -228,6 +228,72 @@ func FromCycle(r *Cycle) {
 	_ = json.NewDecoder(io.LimitReader(r, 1000)).Decode(&rt)
 }
 
+// Flip serves its Data a byte at a time, then spaces, and flips Odd at
+// every read. Its Read relates Odd before and after a call, which holds of
+// one call and not of the many the decoder makes (F32 of the review): after
+// the eight reads of {"ID":1}, Odd is 0.
+//
+// @Invariant 0 <= Pos And Pos <= |Data| And 0 <= Odd And Odd <= 1
+type Flip struct {
+	Data []byte
+	Pos  int
+	Odd  int
+}
+
+// Read reads the next byte.
+//
+// @Requires f != nil And |p| > 0
+// @Modifies f, p
+// @Ensures f.Odd' != f.Odd And n = 1 And err = nil
+func (f *Flip) Read(p []byte) (n int, err error) {
+	f.Odd = 1 - f.Odd
+	if f.Pos == len(f.Data) {
+		p[0] = ' '
+		return 1, nil
+	}
+	p[0] = f.Data[f.Pos]
+	f.Pos = f.Pos + 1
+	return 1, nil
+}
+
+// FromFlip decodes from it and claims what one read would leave.
+//
+// @Requires f != nil And f.Odd = 0
+// @Modifies f
+// @Ensures f.Odd' = 1
+func FromFlip(f *Flip) (rt Req) {
+	_ = json.NewDecoder(io.LimitReader(f, 1000)).Decode(&rt) // want `cannot verify FromFlip: the decoder calls f\.Read as many times as it needs, and "f\.Odd' != f\.Odd" in the contract of Read reads memory that Read modifies, which each call may change; give Read a contr`
+	return rt
+}
+
+// Marker notes that it was read. Its Read says so of the state after one
+// call, which holds after the last of many calls but not after none, as
+// when the limit is 0 and the decoder never calls Read.
+type Marker struct {
+	Seen int
+}
+
+// Read reads a space.
+//
+// @Requires m != nil And |p| > 0
+// @Modifies m, p
+// @Ensures m.Seen' = 1 And n = 1 And err = nil
+func (m *Marker) Read(p []byte) (n int, err error) {
+	m.Seen = 1
+	p[0] = ' '
+	return 1, nil
+}
+
+// FromMarker decodes at most n bytes from it and claims it was read.
+//
+// @Requires m != nil And 0 <= n And n <= 1000
+// @Modifies m
+// @Ensures m.Seen' = 1
+func FromMarker(m *Marker, n int64) (rt Req) {
+	_ = json.NewDecoder(io.LimitReader(m, n)).Decode(&rt) // want `cannot verify FromMarker: the decoder calls m\.Read as many times as it needs, and "m\.Seen' = 1" in the contract of Read reads memory that Read modifies, which each call may change; give Read a contrac`
+	return rt
+}
+
 // FromFile decodes from a file, whose Read returns bytes or an error.
 //
 // @Requires f != nil
