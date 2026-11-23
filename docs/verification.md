@@ -4064,6 +4064,25 @@ A build that sets a string variable with `-ldflags "-X path.name=value"` gives i
 
 `vego` knows two things about an error value: whether it is `nil`, and which error it is. It knows that `errors.New` and `fmt.Errorf` return non-nil errors. It also knows that such an error differs from every error variable and from the other errors the function makes.
 
+`errors.New` requires that the text it is given is short enough to be printed, `2 * (|text| + 4096) + 65536 <= MaxAlloc`. A constant text always is. For a text that is not a constant, bound its length:
+
+```go
+// @Ensures ok -> err = nil
+func Invalid(ok bool, reason string) (err error) {
+	if ok {
+		return nil
+	}
+	return errors.New(reason)
+}
+```
+
+```text
+vego: precondition of errors.New may not hold: 2 * (|text| + 4096) + 65536 <= MaxAlloc, so that the text of the
+error can be printed; it holds when |reason| <= 140737488318464
+```
+
+Add `// @Requires |reason| <= 1000`, or another bound that the text meets, and the call verifies.
+
 A package-level variable of type `error` that nothing assigns after it is initialised holds the same error for as long as your code runs, as in `var ErrEmpty = errors.New("empty")`. This guide calls such a variable an error variable. The error variables of other packages count too, such as `io.EOF`. What `vego` knows of the error depends on the initialiser of the variable. [What vego knows of an error variable](#what-vego-knows-of-an-error-variable) describes the cases, and [When a package-level error is known](#when-a-package-level-error-is-known) gives the exact conditions.
 
 ### Saying when a function succeeds
@@ -4777,7 +4796,7 @@ These calls have shipped contracts:
 - `Get`, `Set`, and `Del` of `http.Header`, and `PathValue` of the request.
 - `Query` of a `*url.URL`, which requires a bound on the length of `RawQuery`, and `Get` of the `url.Values` it returns.
 
-A `ResponseWriter` converts to `io.Writer`, so you can pass it to `fmt.Fprintf` and to functions that take an `io.Writer`. Its fields of the request, such as `req.Method` and `req.URL.Path`, are read as fields, and what the request reaches is kept across the writes:
+A `ResponseWriter` converts to `io.Writer`, so you can pass it to `fmt.Fprintf` and to functions that take an `io.Writer` and keep nothing of it. The fields of the request, such as `req.Method` and `req.URL.Path`, are read as fields, and what the request reaches is kept across the writes:
 
 ```go
 // @Requires w != nil And req != nil And req.URL != nil And |req.URL.RawQuery| <= 1000000
@@ -4793,7 +4812,26 @@ func ByTag(w http.ResponseWriter, req *http.Request) {
 }
 ```
 
-`http.Error` formats its message with `fmt.Fprintln`, so the message needs a bound. The text that `err.Error()` returns for an error that can be formatted is short enough, as [What a proof assumes](#what-a-proof-assumes) says of the text of an error, so `http.Error(w, err.Error(), code)` needs nothing more. The text of an error of unknown origin cannot be read, for the reason given in [Interface values from code that is not verified](#interface-values-from-code-that-is-not-verified).
+`http.Error` formats its message with `fmt.Fprintln`, so the message needs a bound. The text that `err.Error()` returns for an error that can be formatted is assumed short enough to be printed, as [What a proof assumes](#what-a-proof-assumes) says of the text of an error. So `http.Error(w, err.Error(), code)` needs nothing more, and neither does a short prefix before the text, as in `http.Error(w, "lookup: "+err.Error(), code)`, since the assumption leaves room for about 4 KB. Two texts in one message do not fit:
+
+```go
+// @Requires w != nil And err != nil
+// @Modifies w
+// @Ensures True
+func TwoTexts(w http.ResponseWriter, err error) {
+	if err = lookupTask(-1); err != nil {
+		s := err.Error()
+		http.Error(w, s+"; "+s, http.StatusNotFound)
+	}
+}
+```
+
+```text
+vego: precondition of Error may not hold: 2 * (|error| + 1) + 65536 <= MaxAlloc; it holds when |s + "; " + s| <=
+100000000000000
+```
+
+Write one text per message. `fmt.Sprintf("%v", err)` has no bound either, since what `Sprintf` returns is bounded only when it formats nothing of unknown length; pass `err.Error()` itself. The text of an error of unknown origin cannot be read, for the reason given in [Interface values from code that is not verified](#interface-values-from-code-that-is-not-verified).
 
 Without `w` in `Modifies`, a write to the header is reported:
 
@@ -4835,7 +4873,68 @@ here it is stored into memory at handlers.go:61:2, where a later call could use 
 keep nothing of it
 ```
 
-Pass the writer to helpers that write the response and keep nothing of it. A struct of your own that wraps the writer, such as one that records the status code, cannot be used yet.
+Pass the writer to helpers that write the response and keep nothing of it. A function that keeps the writer it is given is refused the same way, also when it keeps it only in what it returns, as `bufio.NewWriter` and `log.New` do:
+
+```go
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func Buffered(w http.ResponseWriter) {
+	bw := bufio.NewWriter(w)
+	bw.Write([]byte("hello"))
+	bw.Flush()
+}
+```
+
+```text
+vego: w is or holds a net/http.ResponseWriter, which must not be used after the call that received it returns, and
+here it is handed to bufio.NewWriter as w (its entry keeps w in result), where a later call could use it; pass it
+on only to calls that keep nothing of it
+```
+
+Write to `w` directly, or format the response into a `strings.Builder` or a `bytes.Buffer` and write what it holds with one `w.Write`:
+
+```go
+// @Requires w != nil And 0 <= n <= 1000
+// @Modifies w
+// @Ensures True
+func BuildThenWrite(w http.ResponseWriter, n int) {
+	var b strings.Builder
+	// @Invariant 0 <= i <= n And |b| <= 400 * i
+	// @Variant n - i
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, "%d\n", i%10)
+	}
+	w.Write([]byte(b.String()))
+}
+```
+
+A struct of your own that wraps the writer, such as one that records the status code, is refused where it is made, since it holds the writer:
+
+```go
+// StatusWriter remembers the status a handler writes.
+type StatusWriter struct {
+	w    http.ResponseWriter
+	code int
+}
+
+// @Requires w != nil
+// @Ensures r != nil
+func Wrap(w http.ResponseWriter) (r *StatusWriter) {
+	return &StatusWriter{w: w}
+}
+```
+
+```text
+vego: w is or holds a net/http.ResponseWriter, which must not be used after the call that received it returns, and
+here it is stored into what the literal at handlers.go:122:10 makes, where a later call could use it; pass it on
+only to calls that keep nothing of it
+vego: &StatusWriter{…} is or holds a net/http.ResponseWriter, which must not be used after the call that received
+it returns, and here it is returned by Wrap, where a later call could use it; pass it on only to calls that keep
+nothing of it
+```
+
+Keep the status in a variable of the handler and pass the writer and the status to the functions that need them.
 
 ### The trailer of a request
 

@@ -1750,6 +1750,7 @@ guide	(*os.File).Close	3	8576	0
 guide	(*os.File).Read	7	2016732	2
 guide	(*os.File).Write	3	18506	0
 guide	(*strings.Builder).String	1	3351	0
+guide	(*strings.Builder).Write	4	17410	0
 guide	(*strings.Builder).WriteByte	4	12383	0
 guide	(*strings.Builder).WriteString	4	15141	0
 guide	(*sync.Mutex).Lock	1	1652	0
@@ -1802,6 +1803,8 @@ guide	guide.AtLeastSeven	2	878	0
 guide	guide.Bounded.Size	3	975	0
 guide	guide.BufferAsWriter	1	46	0
 guide	guide.BufferToFile	193	2600940	14
+guide	guide.Buffered	34	341019	4
+guide	guide.BuildThenWrite	31	184787	0
 guide	guide.Bump	9	14338	0
 guide	guide.ByTag	30	291192	12
 guide	guide.CallsHelper	1	111	0
@@ -1888,6 +1891,8 @@ guide	guide.Hit	9	14342	0
 guide	guide.HitTwice	11	41135	0
 guide	guide.IncAndRead	8	6101	0
 guide	guide.Index	9	11055	0
+guide	guide.Invalid	8	2719	0
+guide	guide.InvalidShort	11	7349	0
 guide	guide.Inventory	61	329321	0
 guide	guide.IsAdmin	2	3907	0
 guide	guide.IsEmpty	1	46	0
@@ -1968,6 +1973,7 @@ guide	guide.PopIfAny	13	20203	0
 guide	guide.PopInCondition	14	17092	0
 guide	guide.PopSum	19	163321	1
 guide	guide.Position	13	68202	0
+guide	guide.Prefixed	15	46747	0
 guide	guide.Pricer.Price	3	3758	0
 guide	guide.PrintLines	127	1838204	14
 guide	guide.Printer	1	46	0
@@ -2070,6 +2076,7 @@ guide	guide.Twice	11	7563	0
 guide	guide.TwiceOf	1	46	0
 guide	guide.TwoKeys	2	4437	0
 guide	guide.TwoLines	15	35327	0
+guide	guide.TwoTexts	18	49834	0
 guide	guide.Tx.Begin	5	10057	0
 guide	guide.Tx.Commit	5	9688	0
 guide	guide.Unlisted	13	201346	6
@@ -2081,6 +2088,7 @@ guide	guide.Warn	14	51939	0
 guide	guide.Widen	14	79430	0
 guide	guide.WithTimeout	6	1456	0
 guide	guide.Work	139	230323	0
+guide	guide.Wrap	2	1032	0
 guide	guide.Wrapping	7	4897	0
 guide	guide.WriteBuffered	93	1119804	6
 guide	guide.WriteBufferedUnlisted	24	266133	7
@@ -2107,6 +2115,7 @@ guide	guide.grow	14	8600	0
 guide	guide.isSeparator	2	153	0
 guide	guide.logNumber	3	927	0
 guide	guide.logRecord	1	743	0
+guide	guide.lookupTask	11	3765	0
 guide	guide.open	3	14391	0
 guide	guide.record	1	138	0
 guide	guide.small	2	207	0

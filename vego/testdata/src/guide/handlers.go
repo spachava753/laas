@@ -1,9 +1,12 @@
 package guide
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 // The programs of the section on writing a response.
@@ -68,4 +71,84 @@ func Trailers(w http.ResponseWriter, req *http.Request) {
 	if req.Trailer != nil { // want `cannot verify Trailers: Trailer of net/http.Request cannot be read or written by verified code`
 		w.WriteHeader(http.StatusOK)
 	}
+}
+
+// @Requires w != nil And err != nil
+// @Modifies w
+// @Ensures True
+func Prefixed(w http.ResponseWriter, err error) {
+	if err = lookupTask(-1); err != nil {
+		http.Error(w, "lookup: "+err.Error(), http.StatusNotFound)
+	}
+}
+
+// @Requires w != nil And err != nil
+// @Modifies w
+// @Ensures True
+func TwoTexts(w http.ResponseWriter, err error) {
+	if err = lookupTask(-1); err != nil {
+		s := err.Error()
+		http.Error(w, s+"; "+s, http.StatusNotFound) // want `precondition of Error may not hold: 2 \* \(\|error\| \+ 1\) \+ 65536 <= MaxAlloc; it holds when \|s \+ "; " \+ s\| <= 100000000000000`
+	}
+}
+
+// lookupTask fails for an id that is negative.
+//
+// @Ensures id >= 0 -> err = nil
+func lookupTask(id int) (err error) {
+	if id < 0 {
+		return fmt.Errorf("no task %d", id)
+	}
+	return nil
+}
+
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func Buffered(w http.ResponseWriter) {
+	bw := bufio.NewWriter(w) // want `w is or holds a net/http.ResponseWriter, which must not be used after the call that received it returns, and here it is handed to bufio.NewWriter as w \(its entry keeps w in result\), where a later call could use it; pass it on only to calls that keep nothing of it`
+	bw.Write([]byte("hello"))
+	bw.Flush()
+}
+
+// StatusWriter remembers the status a handler writes.
+type StatusWriter struct {
+	w    http.ResponseWriter
+	code int
+}
+
+// @Requires w != nil
+// @Ensures r != nil
+func Wrap(w http.ResponseWriter) (r *StatusWriter) {
+	return &StatusWriter{w: w} // want `w is or holds a net/http.ResponseWriter, which must not be used after the call that received it returns, and here it is stored into what the literal at handlers.go:\d+:\d+ makes` `&StatusWriter\{…\} is or holds a net/http.ResponseWriter, which must not be used after the call that received it returns, and here it is returned by Wrap`
+}
+
+// @Ensures ok -> err = nil
+func Invalid(ok bool, reason string) (err error) {
+	if ok {
+		return nil
+	}
+	return errors.New(reason) // want `precondition of errors.New may not hold: 2 \* \(\|text\| \+ 4096\) \+ 65536 <= MaxAlloc, so that the text of the error can be printed; it holds when \|reason\| <= 140737488318464`
+}
+
+// @Requires |reason| <= 1000
+// @Ensures ok -> err = nil
+func InvalidShort(ok bool, reason string) (err error) {
+	if ok {
+		return nil
+	}
+	return errors.New(reason)
+}
+
+// @Requires w != nil And 0 <= n <= 1000
+// @Modifies w
+// @Ensures True
+func BuildThenWrite(w http.ResponseWriter, n int) {
+	var b strings.Builder
+	// @Invariant 0 <= i <= n And |b| <= 400 * i
+	// @Variant n - i
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, "%d\n", i%10)
+	}
+	w.Write([]byte(b.String()))
 }
