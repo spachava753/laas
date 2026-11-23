@@ -781,7 +781,13 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		if len(guard) > 0 {
 			notRun = logic.Not(logic.And(guard...))
 		}
-		v.growing = append(v.growing, v.grow(st, existed, notRun))
+		grown := v.grow(st, existed, notRun)
+		// GR: a call that writes no footprint grows the row of a home
+		// that existed only by a store into a cell of that row.
+		if apart, ok := v.growsOnlyThroughTargets(fn, written); ok {
+			grown.apart = apart
+		}
+		v.growing = append(v.growing, grown)
 	}
 	// The callee may have created objects, if it ran.
 	st.brk = v.fresh("brk", logic.Ref)

@@ -1,6 +1,7 @@
 package vego
 
 import (
+	"fmt"
 	"go/ast"
 	"go/importer"
 	"go/parser"
@@ -124,4 +125,93 @@ func TestFrameEnvComplete(t *testing.T) {
 			t.Errorf("the resolver asks its environment for logic.%s, on which frameEnv takes no position: implement it in frames.go, pairing every result, and add it here", name)
 		}
 	}
+}
+
+// TestWithinListsFootprint holds case 5 of the argument for GR (frames.go):
+// a claim of a shipped entry that places memory in the footprint of an
+// interface value, within(x, w), comes with w under modifies, so that the
+// call writes that footprint and GR leaves its growth layer as it was. A
+// claim that places new memory in an old row from a call that writes no
+// footprint could not be true.
+func TestWithinListsFootprint(t *testing.T) {
+	parallel(t)
+	imports := importer.ForCompiler(token.NewFileSet(), "source", nil)
+	checked := 0
+	for _, file := range shippedContracts() {
+		for key, entry := range file.entries {
+			for _, ensures := range entry.ensures {
+				ensures.node.Walk(func(n *logic.Node) {
+					if n.Kind != logic.NCall || n.Name != "within" || len(n.Kids) != 2 || n.Kids[1].Kind != logic.NIdent {
+						return
+					}
+					holder := n.Kids[1].Name
+					typ := withinHolderType(t, imports, key, entry, holder)
+					if typ == nil || !isIface(typ) {
+						return
+					}
+					checked++
+					listed := false
+					for _, m := range entry.modifies {
+						if strings.TrimSpace(m.text) == holder {
+							listed = true
+						}
+					}
+					if !listed {
+						t.Errorf("%s: %s places memory in the footprint of %s, which modifies does not list", key, ensures.text, holder)
+					}
+				})
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("found no claim within an interface value among the shipped entries; the scan is broken")
+	}
+}
+
+// withinHolderType returns the type of the parameter or receiver of a
+// shipped entry that a within claim names, or nil.
+func withinHolderType(t *testing.T, imports types.Importer, key string, entry *trustEntry, name string) types.Type {
+	receiver, method, isMethod := strings.Cut(strings.TrimPrefix(key, "("), ").")
+	var sig *types.Signature
+	var recv types.Type
+	lookup := func(qualified string) types.Object {
+		dot := strings.LastIndex(qualified, ".")
+		pkg, err := imports.Import(strings.TrimPrefix(qualified[:dot], "*"))
+		if err != nil {
+			t.Fatalf("%s: import: %v", key, err)
+		}
+		return pkg.Scope().Lookup(qualified[dot+1:])
+	}
+	if isMethod {
+		obj, ok := lookup(receiver).(*types.TypeName)
+		if !ok {
+			return nil
+		}
+		recv = obj.Type()
+		if strings.HasPrefix(receiver, "*") {
+			recv = types.NewPointer(recv)
+		}
+		found, _, _ := types.LookupFieldOrMethod(recv, true, nil, method)
+		fn, ok := found.(*types.Func)
+		if !ok {
+			return nil
+		}
+		sig = fn.Type().(*types.Signature)
+		if entry.receiver.text == name {
+			return obj.Type()
+		}
+	} else {
+		fn, ok := lookup(key).(*types.Func)
+		if !ok {
+			return nil
+		}
+		sig = fn.Type().(*types.Signature)
+	}
+	for i := range sig.Params().Len() {
+		param := sig.Params().At(i)
+		if param.Name() == name || fmt.Sprintf("param%d", i+1) == name {
+			return param.Type()
+		}
+	}
+	return nil
 }

@@ -1235,3 +1235,104 @@ func (v *fnVerifier) framedFrom(end *state, k *loopKept, at token.Pos, c *clause
 	})
 	return held, alike
 }
+
+// GR, a refinement of part 1's growth layer of a call (footprints, F26),
+// agreed with the reviewer (F13, F14 of its review of the argument). A row
+// of a home that existed before a call grows during it only if (W) the
+// call writes that value's footprint, which is to say its methods run, or
+// (S) the call stores into a cell that lay in that row before the call,
+// where a follow layer starts. A method adds to its value's footprint only
+// memory it creates, and only a method whose contract lists its receiver,
+// by what a proof assumes of interface values; one whose contract does
+// not list it writes nothing behind it, keeping what it made included; and
+// a function value or interface value that writes no footprint may not
+// call a writer it captured, since it writes only what the Modifies of its
+// type lists. A follow layer inside a callee first writes a cell that was
+// in the row at the call, since a cell made during the call joins an old
+// row only through a follow, and the callee's frame covers that cell, so
+// a target of the call holds it. So for a call that writes no footprint,
+// a row of an old home in which no target cell lay keeps every cell, new
+// allocations' too. The condition is read in the model's row before the
+// call: by the invariant of rows the model's row holds at least the true
+// row, so no target cell in it means none in the true row, and keeping the
+// model's row keeps it at least the true row after.
+//
+// growsOnlyThroughTargets returns the targets whose cells a follow could
+// start from, when GR applies to a call: the call writes no footprint and
+// runs no code it was handed (a literal handed to a trusted function runs
+// in a state the caller does not continue, whose growth is its own), every
+// target is a struct or some of its fields, whose cells are asked one by
+// one, or a slice's elements or a map whose element or value type holds by
+// value no struct with owned fields and no interface value, from whose
+// cells no follow can start and which need nothing. Any other range or map
+// target leaves the layer as part 1 made it.
+func (v *fnVerifier) growsOnlyThroughTargets(fn *funcInfo, written []target) ([]target, bool) {
+	if writesFootprint(v, fn) || fn.calls.len() > 0 {
+		return nil, false
+	}
+	apart := []target{}
+	for _, t := range written {
+		switch {
+		case t.fp || t.row:
+			return nil, false
+		case t.single:
+			apart = append(apart, t)
+		case t.mapType != nil:
+			_, value := mapParts(t.mapType)
+			if holdsFollowCell(value, map[types.Type]bool{}) {
+				return nil, false
+			}
+		case t.elem != nil:
+			if holdsFollowCell(t.elem, map[types.Type]bool{}) {
+				return nil, false
+			}
+		default:
+			return nil, false
+		}
+	}
+	return apart, true
+}
+
+// holdsFollowCell reports whether a value of a type holds, by value, a
+// cell from which a follow layer could start: an owned field of a struct,
+// shipped or of the project, or an interface value.
+func holdsFollowCell(t types.Type, seen map[types.Type]bool) bool {
+	if isIface(t) {
+		return true
+	}
+	if seen[t] {
+		return false
+	}
+	seen[t] = true
+	switch u := t.Underlying().(type) {
+	case *types.Struct:
+		if len(ownedFieldsOf(t)) > 0 {
+			return true
+		}
+		for field := range u.Fields() {
+			if holdsFollowCell(field.Type(), seen) {
+				return true
+			}
+		}
+	case *types.Array:
+		return holdsFollowCell(u.Elem(), seen)
+	}
+	return false
+}
+
+// untouchedRow states that no cell of a GR layer's targets lay in the row
+// of home before the call, with what the layers before say of those cells.
+func (v *fnVerifier) untouchedRow(known *layer, home *logic.Term) (*logic.Term, []*logic.Term) {
+	var outside, facts []*logic.Term
+	for _, t := range known.apart {
+		for _, c := range t.cells {
+			pos := logic.Add(t.lo, logic.IntLit(c.off))
+			in, more := v.rowAt(known.prev, home, t.ref, pos)
+			// What the separation of a listed footprint says of the cell,
+			// as unchanged states it where a footprint layer is read.
+			facts = append(append(facts, more...), v.reachApart(t.ref, pos))
+			outside = append(outside, logic.Not(in))
+		}
+	}
+	return logic.And(outside...), facts
+}

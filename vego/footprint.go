@@ -230,6 +230,11 @@ func (v *fnVerifier) rowAt(rows, home, alloc, pos *logic.Term) (*logic.Term, []*
 			// A home made since the bound described no value before it,
 			// so only the rows of homes that existed keep their cells.
 			kept := logic.And(logic.Lt(alloc, known.bound), logic.Lt(home, known.bound))
+			if known.apart != nil {
+				untouched, more := v.untouchedRow(known, home)
+				facts = append(facts, more...)
+				kept = logic.Or(kept, logic.And(logic.Lt(home, known.bound), untouched))
+			}
 			if known.skipped != nil {
 				kept = logic.Or(kept, known.skipped)
 			}

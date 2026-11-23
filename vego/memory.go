@@ -152,6 +152,11 @@ type layer struct {
 	growth  bool
 	skipped *logic.Term
 	after   *logic.Term
+	// apart, when not nil, is set for the growth layer of a call that
+	// writes no footprint (GR, frames.go): the row of a home that existed
+	// before the call keeps its cells, new allocations' included, unless a
+	// cell of one of these targets lay in it before the call.
+	apart []target
 	// emptied is set for a layer of the footprint region that defines the
 	// row of one new home, as a conversion makes it, and keeps every other
 	// row. defines says which cells the row holds, with the facts that
