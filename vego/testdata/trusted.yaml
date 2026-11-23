@@ -411,6 +411,12 @@ trusted:
       - "s != nil"
     modifies: [s]
 
+  ownserver.external:
+    reason: Test helper standing for a trusted function whose contract names valid, which a trusted contract cannot.
+    requires:
+      - "valid(s)"
+    modifies: []
+
   footprints.resetWriter:
     reason: Test helper standing for a function the project trusts to write a Writer, which may make it own any memory.
     requires:

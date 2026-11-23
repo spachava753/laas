@@ -1399,6 +1399,9 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 	if e.given != nil {
 		return nil, fmt.Errorf("%s cannot be used here", name)
 	}
+	if name == "valid" {
+		return e.valid(paths[0])
+	}
 	found := make([]reached, len(paths))
 	var spreadPaths []int
 	for i, path := range paths {
@@ -2109,4 +2112,57 @@ func holdsArrayOf(t, elem types.Type) bool {
 		}
 	}
 	return false
+}
+
+// valid resolves valid(x): what a boundary assumes of x, the invariants of
+// its type and, through its owned pointer fields and the owners it holds
+// by value, of what it owns, for a pointer on condition that it is not nil.
+// The clauses are those of each type's package, read with its constants,
+// so a formula can say it of a type whose fields it cannot name. It is
+// refused in the invariant of a type, which carries the invariants of what
+// it owns already, in a trust entry, and for a type with no invariant.
+func (e *specEnv) valid(path logic.Path) (*logic.Term, error) {
+	spelled := spell(path.Root, path.Steps)
+	switch {
+	case e.self != nil:
+		return nil, fmt.Errorf("valid(%s) cannot stand in the invariant of a type: the invariant of a struct already includes those of what its owned fields point to", spelled)
+	case e.fn != nil && e.fn.trust != nil:
+		return nil, fmt.Errorf("valid(%s) cannot stand in a trusted contract; state the clauses it stands for", spelled)
+	}
+	if err := e.genericPath(path.Root, path.Steps); err != nil {
+		return nil, err
+	}
+	// valid(p') of a pointer reads the struct it points to on return, as a
+	// state of what a pointer points to is read.
+	found, err := e.locateAt(path.Root, path.Steps, path.When, true)
+	if err != nil {
+		return nil, err
+	}
+	object, isPointer := pointee(found.typ)
+	if found.constant != nil || !isStructType(found.typ) && !(isPointer && isStructType(object)) {
+		return nil, fmt.Errorf("valid(%s): %s is not a struct or a pointer to one", spelled, spelled)
+	}
+	steps := e.v.invariantSteps(found.sink, found.mem, found.val, found.typ, nil, "", map[types.Type]bool{})
+	if len(steps) == 0 {
+		if !isPointer {
+			object = found.typ
+		}
+		return nil, fmt.Errorf("valid needs a struct type with an invariant, and %s has none, neither its own nor through what it owns",
+			types.TypeString(object, types.RelativeTo(e.v.pass.Pkg)))
+	}
+	var conjuncts []*logic.Term
+	for _, step := range steps {
+		if step.set.broken {
+			why := "an Invariant annotation of " + step.set.name.Name() + " could not be read, or they contradict each other, as reported at them"
+			if step.set.name.Pkg() != e.v.pass.Pkg {
+				why = "the annotations of package " + step.set.name.Pkg().Path() + " could not all be read"
+			}
+			return nil, fmt.Errorf("valid(%s): the invariants of %s cannot be used: %s", spelled, step.set.name.Name(), why)
+		}
+		env := e.v.invariantEnv(step.set, found.sink, found.mem, step.val, step.t)
+		for _, c := range step.set.clauses {
+			conjuncts = append(conjuncts, logic.Implies(logic.And(step.guard...), e.v.formula(c, c.node, env)))
+		}
+	}
+	return logic.And(conjuncts...), nil
 }

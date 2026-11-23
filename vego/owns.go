@@ -340,11 +340,18 @@ func (v *fnVerifier) allocates(e ast.Expr) bool {
 // of the design review). Only the entry of a trusted function says that in
 // this step: a shipped function or one of the trust file, with no keeps.
 type storedCall struct {
-	fn       *funcInfo
-	name     string
-	keepsNot bool
+	fn            *funcInfo
+	name          string
+	keepsNot      bool
+	freshVerified bool
 }
 
+// storedCallOf returns the call a value stored into an owned field comes
+// from, or nil when the expression is no call or allocates where it
+// stands. A conversion is seen through to what it converts. A trusted
+// callee whose entry lists no keeps keeps nothing, and a verified callee
+// whose contract says fresh(result) is marked until step 3, which reads
+// what it keeps from its summary.
 func (v *fnVerifier) storedCallOf(e ast.Expr) *storedCall {
 	call, ok := ast.Unparen(e).(*ast.CallExpr)
 	if !ok || v.allocates(e) {
@@ -360,6 +367,15 @@ func (v *fnVerifier) storedCallOf(e ast.Expr) *storedCall {
 	sc := &storedCall{fn: fn, name: types.ExprString(call.Fun)}
 	if fn != nil && fn.trust != nil && len(fn.trust.keeps) == 0 {
 		sc.keepsNot = true
+	}
+	// Until the summaries of what a verified function keeps (step 3), the
+	// new memory a verified function returns under fresh(result) may be
+	// stored, as constructors write it, &taskServer{store: New()}: nothing
+	// in this step relies on what else refers to it, and the growth of
+	// the owner, which this step relies on, holds of it, since what is
+	// new since the call is new since the statement began.
+	if fn != nil && fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil && promisesFresh(fn, 0) {
+		sc.freshVerified = true
 	}
 	return sc
 }
@@ -389,14 +405,15 @@ func (v *fnVerifier) ownedWithin(val, cur value, t types.Type) *logic.Term {
 }
 
 // ownedMadeSince states that what a value of an owned field's type refers
-// to was allocated at or past a bound, and for a pointer to an owner, what
-// it owns too.
-func (v *fnVerifier) ownedMadeSince(sink *state, val value, t types.Type, bound *logic.Term) *logic.Term {
-	made := logic.Le(bound, val[0])
-	if _, isPointer := pointee(t); isPointer {
-		made = logic.And(made, v.ownedFreshSeen(sink, sink.mem, val, t, bound, map[types.Type]bool{}))
-	}
-	return made
+// to was allocated at or past a bound. For a pointer to an owner, what the
+// struct owns was then made at or past the bound too, by G itself: every
+// store into an owned field of a struct made since the bound stores
+// nothing, part of what the field held, or memory made since its own
+// statement began, which is past the bound, and nothing else stores into
+// an owned field of the project. So it is not read, which inside the
+// evaluation of an expression could not be.
+func ownedMadeSince(val value, bound *logic.Term) *logic.Term {
+	return logic.Le(bound, val[0])
 }
 
 // checkOwnedStore requires that what is stored into an owned field keeps
@@ -414,9 +431,9 @@ func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur va
 	if cur != nil && (call == nil || call.keepsNot) {
 		options = append(options, v.ownedWithin(val, cur, t))
 	}
-	made := rhs != nil && v.allocates(rhs) || call != nil && call.keepsNot && !v.targetsHoldReferences(call.fn)
+	made := rhs != nil && v.allocates(rhs) || call != nil && (call.keepsNot && !v.targetsHoldReferences(call.fn) || call.freshVerified)
 	if made {
-		options = append(options, v.ownedMadeSince(st, val, t, before))
+		options = append(options, ownedMadeSince(val, before))
 	}
 	result := v.attempt(st, guard, logic.Or(options...))
 	if result == solver.Proved {
@@ -425,9 +442,9 @@ func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur va
 	}
 	// What is not new since the function was entered is memory the owner
 	// did not own, which no form of the store may bring in.
-	old := !v.quickly(st, guard, logic.Or(ownedNothing(val, t), v.ownedMadeSince(st, val, t, v.entryBrk)))
+	old := !v.quickly(st, guard, logic.Or(ownedNothing(val, t), ownedMadeSince(val, v.entryBrk)))
 	switch {
-	case call != nil && !call.keepsNot:
+	case call != nil && !call.keepsNot && !call.freshVerified:
 		what := "a function whose contract does not say that it keeps nothing of what it is handed"
 		if call.fn != nil && call.fn.trust == nil && call.fn.valueOf == nil && call.fn.methodOf == nil {
 			what = "a verified function"
@@ -480,23 +497,8 @@ func (v *fnVerifier) ownerRoot(pointer ast.Expr, owned *ownedStore) (*types.Var,
 	if variable := v.localVar(pointer); variable != nil && !v.boxed[variable] {
 		return variable, types.NewPointer(owned.holder), owned.off, true
 	}
-	sel, ok := ast.Unparen(pointer).(*ast.SelectorExpr)
-	if !ok {
-		return nil, nil, 0, false
-	}
-	selection := v.info.Selections[sel]
-	if selection == nil || selection.Kind() != types.FieldVal || len(selection.Index()) != 1 {
-		return nil, nil, 0, false
-	}
-	object, viaPointer := pointee(v.info.TypeOf(sel.X))
-	if !viaPointer || !ownedFieldAt(object, selection.Index()[0]) {
-		return nil, nil, 0, false
-	}
-	root := v.localVar(sel.X)
-	if root == nil || v.boxed[root] {
-		return nil, nil, 0, false
-	}
-	return root, v.info.TypeOf(sel.X), 0, true
+	root, owner, ok := v.ownedPathRoot(pointer)
+	return root, owner, 0, ok
 }
 
 // reachesSourceOwner returns a struct type that owns memory by a
@@ -532,4 +534,28 @@ func reachesSourceOwner(t types.Type, seen map[types.Type]bool) types.Type {
 		}
 	}
 	return nil
+}
+
+// ownedPathRoot returns, for an expression that reads a pointer through an
+// owned pointer field of what a local variable points to, as s.store, the
+// variable and its type: what the expression points to is part of what the
+// variable's owner owns.
+func (v *fnVerifier) ownedPathRoot(e ast.Expr) (*types.Var, types.Type, bool) {
+	sel, ok := ast.Unparen(e).(*ast.SelectorExpr)
+	if !ok {
+		return nil, nil, false
+	}
+	selection := v.info.Selections[sel]
+	if selection == nil || selection.Kind() != types.FieldVal || len(selection.Index()) != 1 {
+		return nil, nil, false
+	}
+	object, viaPointer := pointee(v.info.TypeOf(sel.X))
+	if !viaPointer || !ownedFieldAt(object, selection.Index()[0]) {
+		return nil, nil, false
+	}
+	root := v.localVar(sel.X)
+	if root == nil || v.boxed[root] {
+		return nil, nil, false
+	}
+	return root, v.info.TypeOf(sel.X), true
 }

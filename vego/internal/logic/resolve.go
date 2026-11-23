@@ -61,7 +61,8 @@ type Env interface {
 	// slices that paths lead to: "fresh" states that what one path refers to
 	// was created during the call, "within" that the memory the first of
 	// two paths refers to lies inside that of the second, and "apart" that
-	// two slices share no memory.
+	// two slices share no memory, and "valid" that the invariants of the
+	// struct a path leads to hold.
 	Relation(name string, paths []Path) (*Term, error)
 	// Qualified returns the value of a variable named by the path of its
 	// package in quotes, as in "io/fs".ErrNotExist, followed by steps.
@@ -107,7 +108,7 @@ type PredDef struct {
 
 // Reserved lists the names of the forms of the language that look like
 // applications, which no predicate, state, or other name may take.
-var Reserved = []string{"len", "cap", "elemsize", "old", "fresh", "within", "apart", "has", "is"}
+var Reserved = []string{"len", "cap", "elemsize", "old", "fresh", "within", "apart", "has", "is", "valid"}
 
 // Resolver type-checks parsed annotations and turns them into terms.
 type Resolver struct {
@@ -497,7 +498,7 @@ func (s *scope) call(n *Node) *Term {
 			panic(resolveError{err})
 		}
 		return t
-	case "old", "fresh", "within", "apart":
+	case "old", "fresh", "within", "apart", "valid":
 		if s.env == nil {
 			fail("%s cannot be used in a predicate definition", n.Name)
 		}
@@ -507,12 +508,12 @@ func (s *scope) call(n *Node) *Term {
 		if want := map[string]int{"within": 2, "apart": 2}[n.Name]; n.Name != "fresh" && len(n.Kids) != max(want, 1) {
 			fail("%s takes %d argument(s), as in %s", n.Name, max(want, 1),
 				map[string]string{"old": "old(A)", "fresh": "fresh(result)", "within": "within(s.items', s.items) or within(p, s.items)",
-					"apart": "apart(A, B)"}[n.Name])
+					"apart": "apart(A, B)", "valid": "valid(ts)"}[n.Name])
 		}
 		var paths []Path
 		for _, kid := range n.Kids {
 			root, steps, primed := s.path(kid)
-			if _, bound := s.bound[root.Name]; root.Kind != NIdent || bound || (primed && n.Name != "within" && n.Name != "apart") {
+			if _, bound := s.bound[root.Name]; root.Kind != NIdent || bound || (primed && n.Name != "within" && n.Name != "apart" && n.Name != "valid") {
 				fail("%s takes a parameter or something reached from one, as in %s(A) or %s(s.items)", n.Name, n.Name, n.Name)
 			}
 			paths = append(paths, Path{root.Name, steps, map[bool]When{true: Primed}[primed]})

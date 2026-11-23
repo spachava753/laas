@@ -349,6 +349,13 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 		// before and inside the call.
 		if arg := argument(form.param); form.direct && arg != nil {
 			v.rootSite(&at, arg, form)
+			// An owner read through an owned pointer field of a variable,
+			// as s.store, grows within what the variable's owner owns.
+			if form.owner && at.root == nil {
+				if root, owner, ok := v.ownedPathRoot(arg); ok {
+					eff.owners = append(eff.owners, site{root: root, owner: owner})
+				}
+			}
 		}
 		eff.sites = append(eff.sites, at)
 	}

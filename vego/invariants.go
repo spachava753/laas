@@ -211,64 +211,125 @@ func (v *fnVerifier) unusableInvariants(set *invariantSet, pos token.Pos) {
 	v.report(pos, "the invariants of %s cannot be used: %s, so they are neither assumed nor proved here", set.name.Name(), why)
 }
 
-// assumeInvariants adds the invariants of a value to the state, for a
-// pointer on condition that it is not nil.
-func (v *fnVerifier) assumeInvariants(st *state, guard []*logic.Term, mem memory, val value, t types.Type) {
-	set, viaPointer := v.invariantsOf(t)
-	if set == nil {
-		return
-	}
-	if set.broken {
-		v.unusableInvariants(set, v.fn.obj.Pos())
-		return
+// invariantStep is one struct whose invariants a value's invariants
+// include: the value itself, and through each owned pointer field and
+// each owner held by value, the struct reached there (C4 of ownership in
+// source). guard holds when the struct exists: every pointer on the way is
+// not nil. through spells the owned fields on the way, empty for the value
+// itself.
+type invariantStep struct {
+	set     *invariantSet
+	val     value
+	t       types.Type
+	guard   []*logic.Term
+	through string
+}
+
+// invariantSteps returns the structs whose invariants hold of a value at
+// a boundary: its own type's, and, recursively, those of what its owned
+// pointer fields point to and of the owners it holds by value. A type that
+// owns itself is refused where it is declared, so the walk ends; seen
+// guards it anyway.
+func (v *fnVerifier) invariantSteps(sink *state, mem memory, val value, t types.Type, guard []*logic.Term, through string, seen map[types.Type]bool) []invariantStep {
+	object, viaPointer := pointee(t)
+	if !viaPointer {
+		object = t
 	}
 	if viaPointer {
 		guard = append(slices.Clip(guard), logic.Lt(logic.IntLit(0), val[0]))
 	}
-	env := v.invariantEnv(set, st, mem, val, t)
-	for _, c := range set.clauses {
-		st.assume(logic.Implies(logic.And(guard...), v.formula(c, c.node, env)))
+	var steps []invariantStep
+	if set, _ := v.invariantsOf(t); set != nil {
+		steps = append(steps, invariantStep{set: set, val: val, t: t, guard: guard, through: through})
+	}
+	u, isStruct := object.Underlying().(*types.Struct)
+	if !isStruct || seen[object] {
+		return steps
+	}
+	seen[object] = true
+	defer delete(seen, object)
+	owned := sourceOwnedFields(object)
+	for index := range u.NumFields() {
+		field := u.Field(index)
+		_, inline := field.Type().Underlying().(*types.Struct)
+		ownedPointer := slices.Contains(owned, index) && !isSlice(field.Type()) && !isMap(field.Type()) && !isIface(field.Type())
+		if !ownedPointer && !(inline && len(sourceOwnedFields(field.Type())) > 0) {
+			continue
+		}
+		at := field.Name()
+		if through != "" {
+			at = through + "." + at
+		}
+		if ownedPointer {
+			fv, ft, ok := v.member(sink, mem, val, t, index)
+			if ok {
+				steps = append(steps, v.invariantSteps(sink, mem, fv, ft, guard, at, seen)...)
+			}
+			continue
+		}
+		// An owner held by value lies inside the struct: through a
+		// pointer it is a pointer at the field's offset, and in a value
+		// the field's leaves.
+		if viaPointer {
+			inner := value{val[0], logic.Add(val[1], logic.IntLit(v.fieldOffset(object, index)))}
+			steps = append(steps, v.invariantSteps(sink, mem, inner, types.NewPointer(field.Type()), guard, at, seen)...)
+			continue
+		}
+		if lo, hi, ok := fieldLeaves(object, index); ok {
+			steps = append(steps, v.invariantSteps(sink, mem, val[lo:hi], field.Type(), guard, at, seen)...)
+		}
+	}
+	return steps
+}
+
+// assumeInvariants adds the invariants of a value to the state, for a
+// pointer on condition that it is not nil, with those of what it owns.
+func (v *fnVerifier) assumeInvariants(st *state, guard []*logic.Term, mem memory, val value, t types.Type) {
+	for _, step := range v.invariantSteps(st, mem, val, t, guard, "", map[types.Type]bool{}) {
+		if step.set.broken {
+			v.unusableInvariants(step.set, v.fn.obj.Pos())
+			continue
+		}
+		env := v.invariantEnv(step.set, st, mem, step.val, step.t)
+		for _, c := range step.set.clauses {
+			st.assume(logic.Implies(logic.And(step.guard...), v.formula(c, c.node, env)))
+		}
 	}
 }
 
 // checkInvariants proves the invariants of a value, for a pointer on
-// condition that it is not nil.
+// condition that it is not nil, with those of what it owns.
 func (v *fnVerifier) checkInvariants(st *state, guard []*logic.Term, mem memory, val value, t types.Type, pos token.Pos, what string) {
-	set, viaPointer := v.invariantsOf(t)
-	if set == nil {
-		return
-	}
-	if set.broken {
-		v.unusableInvariants(set, pos)
-		return
-	}
-	if viaPointer {
-		guard = append(slices.Clip(guard), logic.Lt(logic.IntLit(0), val[0]))
-	}
-	env := v.invariantEnv(set, st, mem, val, t)
-	for _, c := range set.clauses {
-		v.checkClause(c, env, st, guard, pos, fmt.Sprintf("invariant of %s may not hold for %s", set.name.Name(), what))
+	for _, step := range v.invariantSteps(st, mem, val, t, guard, "", map[types.Type]bool{}) {
+		if step.set.broken {
+			v.unusableInvariants(step.set, pos)
+			continue
+		}
+		env := v.invariantEnv(step.set, st, mem, step.val, step.t)
+		for _, c := range step.set.clauses {
+			// A struct reached through what the value owns is named by
+			// where it lies.
+			about := what
+			if step.through != "" {
+				about = fmt.Sprintf("%s, in what it owns at %s", what, step.through)
+			}
+			v.checkClause(c, env, st, step.guard, pos, fmt.Sprintf("invariant of %s may not hold for %s", step.set.name.Name(), about))
+		}
 	}
 }
 
-// invariantsHold reports whether the invariants of a value can be proved,
-// without reporting anything.
+// invariantsHold reports whether the invariants of a value, with those of
+// what it owns, can be proved, without reporting anything.
 func (v *fnVerifier) invariantsHold(st *state, mem memory, val value, t types.Type) bool {
-	set, viaPointer := v.invariantsOf(t)
-	if set == nil {
-		return true
-	}
-	if set.broken {
-		return false
-	}
-	var guard []*logic.Term
-	if viaPointer {
-		guard = []*logic.Term{logic.Lt(logic.IntLit(0), val[0])}
-	}
-	env := v.invariantEnv(set, st, mem, val, t)
-	for _, c := range set.clauses {
-		if !v.prove(st, guard, v.formula(c, c.node, env)) {
+	for _, step := range v.invariantSteps(st, mem, val, t, nil, "", map[types.Type]bool{}) {
+		if step.set.broken {
 			return false
+		}
+		env := v.invariantEnv(step.set, st, mem, step.val, step.t)
+		for _, c := range step.set.clauses {
+			if !v.prove(st, step.guard, v.formula(c, c.node, env)) {
+				return false
+			}
 		}
 	}
 	return true
