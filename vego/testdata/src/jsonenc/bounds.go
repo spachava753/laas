@@ -98,3 +98,41 @@ func IntKeys(m map[int][]string) (n int) {
 	js, _ := json.Marshal(m)
 	return len(js)
 }
+
+// What is stated of the result is held at its edge (F23 of the review of
+// the fixes to step 1). For T with |S| <= 10 it is 94: the braces, the
+// key N and an int of up to 20 digits, the key S and ten bytes of six
+// each in quotes, and a comma after each value.
+
+// Exactly94 states the bound.
+//
+// @Requires |t.S| <= 10
+// @Ensures err = nil -> |js| <= 94
+func Exactly94(t T) (js []byte, err error) {
+	return json.Marshal(t)
+}
+
+// Below94 states one less, which is not proved.
+//
+// @Requires |t.S| <= 10
+// @Ensures err = nil -> |js| <= 93
+func Below94(t T) (js []byte, err error) {
+	return json.Marshal(t) // want `postcondition may not hold: err = nil -> \|js\| <= 93`
+}
+
+// Exactly6312 states the bound of a chain: the braces, the key Xs, and
+// null, 12, and for each of at most 100 strings of at most 10 bytes, 63.
+//
+// @Requires |m.Xs| <= 100 And (Forall i in [0, |m.Xs|) : |m.Xs[i]| <= 10)
+// @Ensures err = nil -> |js| <= 6312
+func Exactly6312(m Many) (js []byte, err error) {
+	return json.Marshal(m)
+}
+
+// Below6312 states one less, which is not proved.
+//
+// @Requires |m.Xs| <= 100 And (Forall i in [0, |m.Xs|) : |m.Xs[i]| <= 10)
+// @Ensures err = nil -> |js| <= 6311
+func Below6312(m Many) (js []byte, err error) {
+	return json.Marshal(m) // want `postcondition may not hold: err = nil -> \|js\| <= 6311`
+}

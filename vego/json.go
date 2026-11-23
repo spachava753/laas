@@ -647,43 +647,52 @@ func (w *jsonWalk) lengths() []jsonLength {
 	return found
 }
 
-// total is what encoding builds at most when every length is at most what
-// bound gives for it: for each group, the product of the bounds of the
-// lengths of its chain, which bounds how many times the group occurs, times
-// the most one occurrence weighs, summed over the groups, and for
+// jsonAlgebra is what jsonFold computes in: numbers, for the bound a call
+// is proved against, or terms of the logic, for what is stated of the
+// result. length gives a length's value, or false when it has none.
+type jsonAlgebra[T any] struct {
+	num      func(n *big.Int) T
+	length   func(l jsonLength) (T, bool)
+	add, mul func(a, b T) T
+}
+
+// jsonFold is what encoding builds at most when every length is at most
+// what the algebra gives for it: for each group, the product of the
+// lengths of its chain, which bounds how many times the group occurs,
+// times the most one occurrence weighs, summed over the groups, and for
 // MarshalIndent times what each byte becomes, 3 + |prefix| + depth *
-// |indent|, with the bounds of prefix and indent. It is nil when bound is
-// nil for a length. This one function is what vego proves a call against
-// (checkEncodedAlloc) and what TestJSONEntries and TestEncoding386 hold
-// against the real encoders.
-func (w *jsonWalk) total(bound func(jsonLength) *big.Int, indented bool) *big.Int {
-	sum := new(big.Int)
+// |indent|. It is the one place the weights are combined: total and the
+// term stated of the result are this fold (F23 of the review of step 1).
+func jsonFold[T any](w *jsonWalk, a jsonAlgebra[T], indented bool) (T, bool) {
+	var zero T
+	sum := a.num(big.NewInt(0))
 	for _, g := range w.groups {
-		count := big.NewInt(1)
+		count := a.num(big.NewInt(1))
 		for i, s := range g.steps {
 			if s.length == "" {
 				continue
 			}
-			b := bound(jsonLength{steps: g.steps[:i], text: s.length})
-			if b == nil {
-				return nil
+			b, ok := a.length(jsonLength{steps: g.steps[:i], text: s.length})
+			if !ok {
+				return zero, false
 			}
-			count.Mul(count, b)
+			count = a.mul(count, b)
 		}
-		weight := big.NewInt(g.konst)
+		weight := a.num(big.NewInt(g.konst))
 		for _, t := range g.terms {
-			b := bound(jsonLength{steps: g.steps, text: "|" + t.path + "|"})
-			if b == nil {
-				return nil
+			b, ok := a.length(jsonLength{steps: g.steps, text: "|" + t.path + "|"})
+			if !ok {
+				return zero, false
 			}
-			weight.Add(weight, new(big.Int).Mul(big.NewInt(t.coef), b))
+			weight = a.add(weight, a.mul(a.num(big.NewInt(t.coef)), b))
 		}
-		sum.Add(sum, count.Mul(count, weight))
+		sum = a.add(sum, a.mul(count, weight))
 	}
 	if indented {
-		prefix, indent := bound(jsonLength{text: "|prefix|"}), bound(jsonLength{text: "|indent|"})
-		if prefix == nil || indent == nil {
-			return nil
+		prefix, okPrefix := a.length(jsonLength{text: "|prefix|"})
+		indent, okIndent := a.length(jsonLength{text: "|indent|"})
+		if !okPrefix || !okIndent {
+			return zero, false
 		}
 		// The deepest nesting MarshalIndent may indent: that of the type,
 		// or the limit of every build under a json.RawMessage.
@@ -691,9 +700,28 @@ func (w *jsonWalk) total(bound func(jsonLength) *big.Int, indented bool) *big.In
 		if w.raw {
 			depth = jsonDepthLimit
 		}
-		factor := new(big.Int).Add(big.NewInt(3), prefix)
-		factor.Add(factor, new(big.Int).Mul(big.NewInt(depth), indent))
-		sum.Mul(sum, factor)
+		factor := a.add(a.add(a.num(big.NewInt(3)), prefix), a.mul(a.num(big.NewInt(depth)), indent))
+		sum = a.mul(sum, factor)
+	}
+	return sum, true
+}
+
+// total is jsonFold over numbers: what encoding builds at most when every
+// length is at most what bound gives for it, or nil when bound is nil for
+// a length. It is what vego proves a call against (checkEncodedAlloc) and
+// what TestJSONEntries and TestEncoding386 hold against the real encoders.
+func (w *jsonWalk) total(bound func(jsonLength) *big.Int, indented bool) *big.Int {
+	sum, ok := jsonFold(w, jsonAlgebra[*big.Int]{
+		num: func(n *big.Int) *big.Int { return n },
+		length: func(l jsonLength) (*big.Int, bool) {
+			b := bound(l)
+			return b, b != nil
+		},
+		add: func(a, b *big.Int) *big.Int { return new(big.Int).Add(a, b) },
+		mul: func(a, b *big.Int) *big.Int { return new(big.Int).Mul(a, b) },
+	}, indented)
+	if !ok {
+		return nil
 	}
 	return sum
 }
@@ -844,25 +872,31 @@ func (v *fnVerifier) checkEncodedAlloc(st *state, guard []*logic.Term, call *ast
 		if indented {
 			return logic.BigLit(total)
 		}
-		// The top group in the caller's terms, and the rest as a number.
-		top := walk.groups[0]
-		rest := new(big.Int).Sub(total, big.NewInt(top.konst))
-		sum := logic.IntLit(top.konst)
-		for _, t := range top.terms {
-			rest.Sub(rest, new(big.Int).Mul(big.NewInt(t.coef), found[jsonLength{text: "|" + t.path + "|"}.key()]))
-			node, err := logic.ParseFormula("|" + t.path + "| >= 0")
-			if err != nil {
-				panic("vego: internal error: " + err.Error())
-			}
-			c := &clause{kind: "requires", text: t.path, node: node, res: v.pkgVerifier.plain}
-			var length *logic.Term
-			v.quietly(func() { length, err = v.resolverOf(c).Term(node.Kids[0], pre, logic.Int) })
-			if err != nil {
-				panic("vego: internal error: " + err.Error())
-			}
-			sum = logic.Add(sum, logic.Mul(logic.IntLit(t.coef), length))
-		}
-		return logic.Add(sum, logic.BigLit(rest))
+		// The same fold over terms: a length under no quantifier and no
+		// guard is the caller's own, and any other is its bound proved.
+		// Each product is a term times numbers.
+		term, _ := jsonFold(walk, jsonAlgebra[*logic.Term]{
+			num: logic.BigLit,
+			length: func(l jsonLength) (*logic.Term, bool) {
+				if len(l.steps) > 0 {
+					return logic.BigLit(found[l.key()]), true
+				}
+				node, err := logic.ParseFormula(l.text + " >= 0")
+				if err != nil {
+					panic("vego: internal error: " + err.Error())
+				}
+				c := &clause{kind: "requires", text: l.text, node: node, res: v.pkgVerifier.plain}
+				var length *logic.Term
+				v.quietly(func() { length, err = v.resolverOf(c).Term(node.Kids[0], pre, logic.Int) })
+				if err != nil {
+					panic("vego: internal error: " + err.Error())
+				}
+				return length, true
+			},
+			add: logic.Add,
+			mul: logic.Mul,
+		}, false)
+		return term
 	}
 	v.report(call.Pos(), "what %s builds from %s may be more than can be allocated%s", fn.obj.Name(), types.ExprString(arg),
 		v.encodeHint(walk, arg, indented, found))
