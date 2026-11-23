@@ -292,3 +292,17 @@ func CheckedBy(b QCheckingBook, ps []*QItem) (n int) {
 	}
 	return 0
 }
+
+// QHolder keeps a book in a field.
+type QHolder struct{ B QBook }
+
+// KeepsOneThroughField lists the footprint by a path through a field, which
+// gets no separation, so nothing the other parameters reach is kept across
+// the write, not one element (F47 of the review of O1; under Not built).
+//
+// @Requires h != nil And h.B != nil And it != nil And |it.Name| <= 100
+// @Modifies h.B
+// @Ensures |it.Name'| <= 100
+func KeepsOneThroughField(h *QHolder, it *QItem) {
+	h.B.Record("x")
+} // want `vego: postcondition may not hold: \|it.Name'\| <= 100`

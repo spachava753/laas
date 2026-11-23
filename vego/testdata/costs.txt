@@ -738,6 +738,7 @@ footprints	footprints.KeepsMapValues	10	61637	4
 footprints	footprints.KeepsMaybe	9	8929	0
 footprints	footprints.KeepsNested	10	4154811	3
 footprints	footprints.KeepsOldArray	12	26238	0
+footprints	footprints.KeepsOneThroughField	9	22067	1
 footprints	footprints.KeepsOwners	11	301322	3
 footprints	footprints.KeepsSome	11	500926	6
 footprints	footprints.KeepsSomeOf	11	500926	6
