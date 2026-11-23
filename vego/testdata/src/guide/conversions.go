@@ -65,5 +65,5 @@ func TrackForward(f *Forward) {
 // @Ensures True
 func FormatToBuffer() {
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "%d items", 3) // want `vego: cannot verify FormatToBuffer: converting a value of type \*bytes.Buffer to io.Writer is not supported yet: its Write may panic when the buffer is too large to grow, and the contract of \(io.Writer\).Write has no bound for it; write what you format with the Buffer's own WriteString, as in b.WriteString\(fmt.Sprintf\(...\)\)`
+	fmt.Fprintf(&b, "%d items", 3) // want `vego: cannot verify FormatToBuffer: converting a value of type \*bytes.Buffer to io.Writer is not supported: its Write may panic when the buffer is too large to grow, and the contract of \(io.Writer\).Write has no bound for it; write what you format with the Buffer's own WriteString, as in b.WriteString\(fmt.Sprintf\(...\)\)`
 }

@@ -92,7 +92,7 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 			}
 			if why := growsUnbounded(from); why != "" {
 				shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
-				v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s", shown(from), shown(want), why))
+				v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported: %s", shown(from), shown(want), why))
 			}
 		}
 		footprinted = true

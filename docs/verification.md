@@ -1564,9 +1564,9 @@ func FormatToBuffer() {
 ```
 
 ```text
-vego: cannot verify FormatToBuffer: converting a value of type *bytes.Buffer to io.Writer is not supported yet: its
-Write may panic when the buffer is too large to grow, and the contract of (io.Writer).Write has no bound for it;
-write what you format with the Buffer's own WriteString, as in b.WriteString(fmt.Sprintf(...))
+vego: cannot verify FormatToBuffer: converting a value of type *bytes.Buffer to io.Writer is not supported: its Write
+may panic when the buffer is too large to grow, and the contract of (io.Writer).Write has no bound for it; write
+what you format with the Buffer's own WriteString, as in b.WriteString(fmt.Sprintf(...))
 ```
 
 A `*bufio.Writer` cannot be converted to an `io.Writer` either, because its `Write` calls through the writer it keeps (see [Interface values that call interface values](#interface-values-that-call-interface-values)). Pass it as a `*bufio.Writer`.

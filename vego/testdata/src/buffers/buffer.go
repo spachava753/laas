@@ -155,3 +155,34 @@ func WritesNB(p *NB) {
 //
 // @Ensures |n| = 0 // want `n is not a slice, a string, a map, a strings.Builder, or a bytes.Buffer, and has no length`
 func LengthOfInt(n int) {}
+
+// WritesBytesUnlisted writes through what Bytes returned, which lies in
+// what b owns, without listing b.
+//
+// @Requires b != nil And 0 < |b|
+// @Ensures True
+func WritesBytesUnlisted(b *bytes.Buffer) {
+	p := b.Bytes()
+	p[0] = 'x' // want `p\[0\] is assigned, which WritesBytesUnlisted may not modify; it is memory that Bytes returned, which its contract places within b, and WritesBytesUnlisted passed b as b; list b in a // @Modifies clause`
+}
+
+// AppendsBytesUnlisted appends to what Bytes returned, into its capacity,
+// which lies in what b owns, without listing b.
+//
+// @Requires b != nil And |b| <= 1000
+// @Ensures True
+func AppendsBytesUnlisted(b *bytes.Buffer) {
+	p := b.Bytes()
+	p = append(p, 'x') // want `which AppendsBytesUnlisted may not modify; it is memory that Bytes returned, which its contract places within b, and AppendsBytesUnlisted passed b as b; list b in a // @Modifies clause`
+	_ = p
+}
+
+// WritesBytesListed is WritesBytesUnlisted with b listed.
+//
+// @Requires b != nil And 0 < |b|
+// @Modifies b
+// @Ensures True
+func WritesBytesListed(b *bytes.Buffer) {
+	p := b.Bytes()
+	p[0] = 'x'
+}

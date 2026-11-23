@@ -718,7 +718,13 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 				for _, leaf := range results[i] {
 					if leaf.Sort == logic.Ref && leaf.Op == logic.OpConst {
 						from := returned{fn: fn, result: i, call: name, at: call.Pos()}
-						from.param, from.within, from.unlessNew = withinArgument(fn, i, bound)
+						// The receiver is an argument too, as for what
+						// (*bytes.Buffer).Bytes places within b.
+						withReceiver := bound
+						if sig.Recv() != nil {
+							withReceiver = append([]passedArg{{param: sig.Recv(), expr: ast.Unparen(call.Fun).(*ast.SelectorExpr).X}}, bound...)
+						}
+						from.param, from.within, from.unlessNew = withinArgument(fn, i, withReceiver)
 						from.freshIn, from.spread = freshArguments(fn, i, bound)
 						v.returnedBy[leaf.Name] = from
 					}

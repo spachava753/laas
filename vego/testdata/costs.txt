@@ -70,6 +70,7 @@ buffers	(*strings.Builder).String	1	3351	0
 buffers	(*strings.Builder).WriteByte	4	12383	0
 buffers	(*strings.Builder).WriteRune	4	13119	0
 buffers	(*strings.Builder).WriteString	4	15141	0
+buffers	buffers.AppendsBytesUnlisted	11	35497	0
 buffers	buffers.BytesKept	16	44757	0
 buffers	buffers.BytesOverwritten	30	142526	0
 buffers	buffers.CallsLine	10	17642	0
@@ -98,6 +99,8 @@ buffers	buffers.TruncatePast	14	31268	0
 buffers	buffers.Two	40	2097833	18
 buffers	buffers.TwoParams	14	40124	0
 buffers	buffers.TwoParamsSame	13	45118	0
+buffers	buffers.WritesBytesListed	10	28509	0
+buffers	buffers.WritesBytesUnlisted	7	20505	0
 buffers	buffers.WritesMyB	13	26277	0
 buffers	buffers.WritesMyBUnlisted	7	10120	0
 buffers	buffers.WritesNB	13	30179	0
