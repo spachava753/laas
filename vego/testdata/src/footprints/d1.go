@@ -135,24 +135,57 @@ func ConvertsThenWrites(w io.Writer) {
 	_, _ = w.Write([]byte("x")) // want `w.Write may modify the footprint of w, which ConvertsThenWrites may not modify; list it in a // @Modifies clause`
 }
 
-// tally counts the bytes written to it in its own struct.
+// tally counts the writes to it in its own struct, up to a bound.
 type tally struct{ n int }
+
+// @Requires t != nil
+// @Modifies t
+// @Ensures n = |p| And err = nil
+func (t *tally) Write(p []byte) (n int, err error) {
+	if t.n < 1000000 {
+		t.n++
+	}
+	return len(p), nil
+}
+
+// CountsThenFormats formats into a counter converted to an io.Writer,
+// whose footprint is the struct t points to.
+//
+// @Requires t != nil
+// @Modifies t
+// @Ensures True
+func CountsThenFormats(t *tally) {
+	fmt.Fprintln(t, "x")
+}
+
+// CountsUnlisted is CountsThenFormats without t listed.
+//
+// @Requires t != nil
+// @Ensures True
+func CountsUnlisted(t *tally) {
+	fmt.Fprintln(t, "x") // want `vego: Fprintln may modify the footprint of t, which CountsUnlisted may not modify; it is the memory that t points to, converted at d1.go:\d+:\d+; list t in a // @Modifies clause`
+}
+
+// boundedTally has a Write whose precondition io.Writer's Write does not
+// give it.
+type boundedTally struct{ n int }
 
 // @Requires t != nil And t.n < MaxInt - |p|
 // @Modifies t
 // @Ensures n = |p| And err = nil
-func (t *tally) Write(p []byte) (n int, err error) {
+func (t *boundedTally) Write(p []byte) (n int, err error) {
 	t.n += len(p)
 	return len(p), nil
 }
 
-// CountsThenFormats formats into a counter, whose Write writes behind its
-// receiver, which a conversion cannot make into a footprint yet.
+// FormatsBounded converts a boundedTally to an io.Writer, which its Write
+// cannot meet.
 //
-// @Requires t != nil And t.n = 0
+// @Requires t != nil
+// @Modifies t
 // @Ensures True
-func CountsThenFormats(t *tally) {
-	fmt.Fprintln(t, "x") // want `converting a value of type \*tally to io.Writer is not supported yet: Writer.Write writes behind its receiver`
+func FormatsBounded(t *boundedTally) {
+	fmt.Fprintln(t, "x") // want `vego: precondition of Write may not hold: t.n < MaxInt - \|p\|, in \(\*boundedTally\).Write used as a method of io.Writer`
 }
 
 // storesInto is trusted to write b, which may store into it a reference of
@@ -188,5 +221,5 @@ func KeepsMaybe(s Sink, q *Pair) {
 // @Requires q != nil
 // @Ensures True
 func PassesNil(q *Pair) {
-	KeepsMaybe(nil, q) // want `the footprint of what is passed to KeepsMaybe as nil may hold memory that what is passed as q reaches, and KeepsMaybe relies on it not doing so: nil is not a parameter whose footprint PassesNil's own Modifies lists, so nothing places it`
+	KeepsMaybe(nil, q) // want `the footprint of what is passed to KeepsMaybe as nil may hold memory that what is passed as q reaches, and KeepsMaybe relies on it not doing so: nil is not a parameter whose footprint PassesNil's own Modifies lists, or a value made from such parameters by a call whose contract says so with fresh\(result, w\), so nothing places it`
 }

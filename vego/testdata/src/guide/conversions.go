@@ -1,0 +1,69 @@
+package guide
+
+import (
+	"bytes"
+	"fmt"
+)
+
+// The programs of the section "Converting a value of your own type".
+
+// LineCount counts the lines it is given.
+type LineCount struct{ N int }
+
+// @Requires t != nil And |line| <= 100
+// @Modifies t
+// @Ensures True
+func (t *LineCount) Record(line string) {
+	if t.N < 1000000 {
+		t.N++
+	}
+}
+
+// @Requires t != nil
+// @Modifies t
+// @Ensures True
+func Track(t *LineCount) {
+	var r Recorder = t
+	r.Record("start")
+}
+
+// @Requires t != nil
+// @Ensures True
+func TrackUnlisted(t *LineCount) {
+	var r Recorder = t
+	r.Record("start") // want `vego: r.Record may modify the footprint of r, which TrackUnlisted may not modify; it is the memory that t points to, converted at conversions.go:\d+:\d+; list t in a // @Modifies clause`
+}
+
+// @Ensures n = 0
+func TrackBack() (n int) {
+	t := &LineCount{}
+	var r Recorder = t
+	r.Record("start")
+	return t.N // want `vego: postcondition may not hold: n = 0`
+}
+
+// Forward passes each line on to the tally it points to.
+type Forward struct{ To *LineCount }
+
+// @Requires f != nil And |line| <= 100
+// @Modifies f.To
+// @Ensures True
+func (f *Forward) Record(line string) {
+	if f.To != nil {
+		f.To.Record(line)
+	}
+}
+
+// @Requires f != nil And f.To != nil
+// @Modifies f, f.To
+// @Ensures True
+func TrackForward(f *Forward) {
+	var r Recorder = f // want `vego: Record may modify what it calls f.To, which Recorder.Record may not modify; it is not part of the footprint of \*Forward, which is the struct f points to`
+	r.Record("start")
+}
+
+// @Ensures True
+func FormatToBuffer() {
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "%d items", 3) // want `vego: cannot verify FormatToBuffer: converting a value of type \*bytes.Buffer to io.Writer is not supported yet: the methods of Buffer that write may panic when the buffer is too large to grow, and the length of a Buffer cannot be stated yet, so no contract of them can say when they return`
+}

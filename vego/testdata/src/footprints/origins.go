@@ -237,7 +237,7 @@ type Shelves interface {
 // @Modifies s, b.Out
 // @Ensures True
 func NotOwn(s Sink, b *Box, q *Pair) {
-	Touch(b.Out, q) // want `b.Out is not a parameter whose footprint NotOwn's own Modifies lists, so nothing places it`
+	Touch(b.Out, q) // want `b.Out is not a parameter whose footprint NotOwn's own Modifies lists, or a value made from such parameters by a call whose contract says so with fresh\(result, w\), so nothing places it`
 }
 
 // TouchAll writes through s and is handed qs beside it.

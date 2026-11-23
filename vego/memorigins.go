@@ -908,8 +908,9 @@ func (v *fnVerifier) checkReachedApart(call *ast.CallExpr, fn *funcInfo, args ma
 			if !placed {
 				v.unsupported(call.Pos(), lead+"; a caller of a function value or a method of an interface value does not show it")
 			}
-			if !v.ownFootprint(passedExpr[param]) {
-				v.report(call.Pos(), "%s: %s is not a parameter whose footprint %s's own Modifies lists, so nothing places it", lead, passed[param], v.fn.obj.Name())
+			if !v.placedFootprint(passedExpr[param], 0) {
+				v.report(call.Pos(), "%s: %s is not a parameter whose footprint %s's own Modifies lists, or a value made from such parameters by a call "+
+					"whose contract says so with fresh(result, w), so nothing places it", lead, passed[param], v.fn.obj.Name())
 				continue
 			}
 			if expr := passedExpr[other]; expr == nil {
@@ -973,4 +974,113 @@ func (v *fnVerifier) ownFootprint(e ast.Expr) bool {
 		return false
 	}
 	return slices.ContainsFunc(v.reaches, func(r separation) bool { return r.param == variable })
+}
+
+// placedFootprint reports whether the footprint of an argument is placed:
+// it is a parameter whose footprint the function lists (ownFootprint), or a
+// variable assigned once, where it is declared, from a call whose contract
+// says that what its result refers to is new or lies in the footprints of
+// arguments that are placed in turn, as bufio.NewWriter(w) and log.New(w,
+// ...) say with fresh(result, w): the fourth case of the proof at a call.
+// What the call made is new, and another argument can reach it only
+// through a reference to the result, which is of unknown origin, so a store
+// of it pollutes the function, which the proof requires it is not. The
+// variable's address is never taken, so nothing else assigns it. depth
+// stops a chain that the shipped contracts cannot make.
+func (v *fnVerifier) placedFootprint(e ast.Expr, depth int) bool {
+	if e == nil || depth > 8 {
+		return false
+	}
+	if v.ownFootprint(e) {
+		return true
+	}
+	id, ok := ast.Unparen(e).(*ast.Ident)
+	if !ok {
+		return false
+	}
+	variable, _ := v.info.ObjectOf(id).(*types.Var)
+	if variable == nil || variable.IsField() || v.boxed[variable] || v.findReassigned(v.bodyOrigin())[variable] || v.memOrigins().litAssigned[variable] {
+		return false
+	}
+	init := v.declaredFrom(variable)
+	call, isCall := ast.Unparen(init).(*ast.CallExpr)
+	if !isCall {
+		return false
+	}
+	if method, value := throughValue(v.info, call); value || method != nil || v.literalOf(call) != nil {
+		return false
+	}
+	callee := v.pkgVerifier.calleeAt(call)
+	if callee == nil {
+		return false
+	}
+	fn := v.contractOf(callee)
+	sig, isSig := callee.Type().(*types.Signature)
+	if fn == nil || !isSig || sig.Results().Len() != 1 {
+		return false
+	}
+	bound, ok := bindArgs(v.info, call, paramsOf(sig), sig.Variadic())
+	if !ok {
+		return false
+	}
+	found := false
+	for _, c := range fn.ensures {
+		if c.node == nil {
+			continue
+		}
+		for _, conjunct := range c.node.Conjuncts() {
+			if conjunct.Kind != logic.NCall || conjunct.Name != "fresh" || len(conjunct.Kids) < 2 ||
+				conjunct.Kids[0].Kind != logic.NIdent || conjunct.Kids[0].Name != spelledResult(fn, 0) {
+				continue
+			}
+			placed := true
+			for _, kid := range conjunct.Kids[1:] {
+				for _, arg := range bound {
+					if kid.Kind != logic.NIdent || arg.param.Name() != kid.Name {
+						continue
+					}
+					switch {
+					case arg.spread:
+						placed = false
+					case arg.packed:
+						for _, each := range arg.pack {
+							placed = placed && v.placedFootprint(each, depth+1)
+						}
+					default:
+						placed = placed && v.placedFootprint(arg.expr, depth+1)
+					}
+				}
+			}
+			found = found || placed
+		}
+	}
+	return found
+}
+
+// declaredFrom returns the expression a local variable is given where it is
+// declared, as in x := f(w) or var x = f(w), or nil.
+func (v *fnVerifier) declaredFrom(variable *types.Var) ast.Expr {
+	var init ast.Expr
+	ast.Inspect(v.bodyOrigin(), func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.AssignStmt:
+			if n.Tok == token.DEFINE && len(n.Lhs) == len(n.Rhs) {
+				for i, lhs := range n.Lhs {
+					if id, ok := lhs.(*ast.Ident); ok && v.info.Defs[id] == variable {
+						init = n.Rhs[i]
+					}
+				}
+			}
+		case *ast.ValueSpec:
+			if len(n.Names) == len(n.Values) {
+				for i, name := range n.Names {
+					if v.info.Defs[name] == variable {
+						init = n.Values[i]
+					}
+				}
+			}
+		}
+		return init == nil
+	})
+	return init
 }

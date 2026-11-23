@@ -201,6 +201,13 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func, st *sta
 	// Nothing may be called on trust that is not written down: the callee
 	// is either verified against its annotations or has a trusted contract.
 	fn := v.contractOf(callee)
+	if fn == nil && sig.Recv() != nil && growingMethods[callee.Name()] && growsUnbounded(sig.Recv().Type()) != "" {
+		why := growsUnbounded(sig.Recv().Type())
+		// A contract a user might add would be false; say what it waits
+		// for instead.
+		v.unsupported(call.Pos(), fmt.Sprintf("it calls %s, which grows the buffer: %s. A trusted contract for it without such a bound would be false",
+			v.calleeName(callee), why))
+	}
 	if fn == nil {
 		v.unsupported(call.Pos(), fmt.Sprintf(
 			"it calls %s, which has no contract; annotate %s with // @ annotations so that it is verified, "+
@@ -603,7 +610,11 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			// A value made over a writer writes what the writer writes,
 			// which is what to list (F35 of the review of step 4).
 			if t.ref.Op == logic.OpSelect && t.ref.Args[1].Op == logic.OpConst && remedy == "" {
-				if from, ok := v.returnedBy[t.ref.Args[1].Name]; ok && len(from.freshIn) > 0 {
+				if conv, ok := v.convertedAt[t.ref.Args[1].Name]; ok {
+					// A value converted here writes what it holds.
+					remedy = fmt.Sprintf("it is the memory that %s points to, converted at %s; list %s in a // @Modifies clause",
+						conv.text, v.placeOf(conv.at), conv.text)
+				} else if from, ok := v.returnedBy[t.ref.Args[1].Name]; ok && len(from.freshIn) > 0 {
 					remedy = fmt.Sprintf("it may lie in the footprint of %s, as the contract of %s at %s says; list %s in a // @Modifies clause",
 						strings.Join(from.freshIn, " or "), from.call, v.placeOf(from.at), strings.Join(from.freshIn, " and "))
 				} else if ok && from.spread != "" {

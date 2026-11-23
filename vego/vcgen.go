@@ -68,6 +68,10 @@ type fnVerifier struct {
 	// conversions of concrete values in the function made; see
 	// interfaceValue.
 	converted []*logic.Term
+	// convertedAt holds, by the constant of an interface value, where a
+	// value with a structural footprint was converted to it; see
+	// conversion.
+	convertedAt map[string]conversion
 	// namedInFormulas holds the constants of slices whose capacity a
 	// formula names, and, followed by " = nil", those a formula compares
 	// with nil; see noteNamed.
@@ -267,7 +271,7 @@ func (pv *pkgVerifier) run(fn *funcInfo, task func(v *fnVerifier)) {
 func (pv *pkgVerifier) newVerifier(fn *funcInfo) *fnVerifier {
 	return &fnVerifier{
 		pkgVerifier: pv, fn: fn, entry: map[*types.Var]value{}, names: map[string]int{},
-		reached: map[*funcInfo]bool{}, bitTerms: map[string]*logic.Term{}, lowZeros: map[string]uint{}, bitOrigins: map[string]bitOrigin{}, forgotten: map[string]forgottenPart{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{}, rowClaims: map[string][]rowClaim{}, stretchClaims: map[string][]stretchClaim{},
+		reached: map[*funcInfo]bool{}, bitTerms: map[string]*logic.Term{}, lowZeros: map[string]uint{}, bitOrigins: map[string]bitOrigin{}, forgotten: map[string]forgottenPart{}, inputs: map[string]bool{}, layers: map[string]*layer{}, typing: map[*logic.Term]bool{}, rowClaims: map[string][]rowClaim{}, convertedAt: map[string]conversion{}, stretchClaims: map[string][]stretchClaim{},
 		backgroundSeen: map[string]bool{}, targetSeen: map[string]bool{}, inlining: map[*ast.FuncLit]bool{}, joins: map[string]*joinedRegion{},
 		converting: map[ast.Expr]int{},
 		held:       map[ast.Expr]value{},

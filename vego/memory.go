@@ -131,10 +131,13 @@ type layer struct {
 	growth  bool
 	skipped *logic.Term
 	after   *logic.Term
-	// emptied is set for a layer of the footprint region that empties
-	// the row of one new home, as a conversion of a value whose methods
-	// write nothing makes it, and keeps every other row; see emptyRow.
+	// emptied is set for a layer of the footprint region that defines the
+	// row of one new home, as a conversion makes it, and keeps every other
+	// row. defines says which cells the row holds, with the facts that
+	// reading other rows needs; nil, the row is empty, as for a value whose
+	// methods write nothing behind their receiver.
 	emptied *logic.Term
+	defines func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term)
 }
 
 // target is a piece of memory that may be written: a stretch of positions in

@@ -95,13 +95,56 @@ func CallsWriteAll(bw *bufio.Writer, lines []string) {
 	WriteAllKeeps(bw, lines)
 }
 
-// CallsWriteAllLocal hands on a Writer it made over w, whose writer's
-// footprint nothing places apart from the lines.
+// CallsWriteAllLocal hands on a Writer it made over w (test 5). What the
+// Writer's writer writes is new or lies in the footprint of w, as the
+// contract of NewWriter says, and the lines reach neither: the fourth case
+// of the proof at a call.
 //
 // @Requires w != nil And |lines| > 0 And |lines[0]| = 1
 // @Modifies w
 // @Ensures True
 func CallsWriteAllLocal(w io.Writer, lines []string) {
 	bw := bufio.NewWriter(w)
-	WriteAllKeeps(bw, lines) // want `the footprint of what is owned by what is passed to WriteAllKeeps as bw may hold memory that what is passed as lines reaches, and WriteAllKeeps relies on it not doing so: bw is not a parameter whose footprint CallsWriteAllLocal's own Modifies lists, so nothing places it`
+	WriteAllKeeps(bw, lines)
+}
+
+// WriterBox holds a Writer beside a number.
+type WriterBox struct {
+	W *bufio.Writer
+	N int
+}
+
+// KeepsHolder writes through bw and keeps what h holds.
+//
+// @Requires bw != nil And ready(bw) And h != nil
+// @Modifies bw
+// @Ensures h.N' = h.N
+func KeepsHolder(bw *bufio.Writer, h *WriterBox) {
+	_ = bw.WriteByte('x')
+}
+
+// StoresThenKeeps makes a Writer over w and stores it where h reaches it,
+// so h reaches memory that the Writer's writer may write.
+//
+// @Requires w != nil And h != nil
+// @Modifies w, h
+// @Ensures True
+func StoresThenKeeps(w io.Writer, h *WriterBox) {
+	bw := bufio.NewWriter(w)
+	h.W = bw
+	KeepsHolder(bw, h) // want `the footprint of what is owned by what is passed to KeepsHolder as bw may hold memory that what is passed as h reaches, and KeepsHolder relies on it not doing so: .*`
+}
+
+// Server holds the writer it answers on.
+type Server struct{ Out io.Writer }
+
+// OverUnplaced makes a Writer over a writer that a struct holds, whose
+// footprint nothing places.
+//
+// @Requires s != nil And s.Out != nil And h != nil
+// @Modifies s.Out
+// @Ensures True
+func OverUnplaced(s *Server, h *WriterBox) {
+	bw := bufio.NewWriter(s.Out)
+	KeepsHolder(bw, h) // want `bw is not a parameter whose footprint OverUnplaced's own Modifies lists, or a value made from such parameters by a call whose contract says so with fresh\(result, w\), so nothing places it`
 }

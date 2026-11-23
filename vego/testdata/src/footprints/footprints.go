@@ -421,10 +421,12 @@ func (c *Counter) Put(p []byte) (n int) {
 	return 0
 }
 
+// Conv converts a counter to a Sink, which writes nothing yet.
+//
 // @Requires c != nil
 // @Ensures s != nil
 func Conv(c *Counter) (s Sink) {
-	return c // want `cannot verify Conv: converting a value of type \*Counter to Sink is not supported yet: Sink.Put writes behind its receiver`
+	return c
 }
 
 // Factory makes a sink and a pair.

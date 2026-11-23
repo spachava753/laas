@@ -192,7 +192,13 @@ func (v *fnVerifier) rowAt(rows, home, alloc, pos *logic.Term) (*logic.Term, []*
 			facts = append(facts, logic.Implies(logic.And(logic.Lt(home, v.entryBrk), cellOf(at)), logic.And(logic.Lt(logic.IntLit(0), alloc), logic.Lt(alloc, v.entryBrk))))
 		case v.layers[at.Name] != nil && v.layers[at.Name].emptied != nil:
 			known := v.layers[at.Name]
-			facts = append(facts, logic.Implies(logic.Eq(home, known.emptied), logic.Not(cellOf(at))),
+			defined := logic.False()
+			if known.defines != nil {
+				var more []*logic.Term
+				defined, more = known.defines(alloc, pos)
+				facts = append(facts, more...)
+			}
+			facts = append(facts, logic.Implies(logic.Eq(home, known.emptied), logic.Iff(cellOf(at), defined)),
 				logic.Implies(logic.Ne(home, known.emptied), logic.Iff(cellOf(at), cellOf(known.prev))))
 			pending = append(pending, known.prev)
 		case v.layers[at.Name] != nil:
@@ -418,9 +424,14 @@ func (v *fnVerifier) checkFootprintWrite(st *state, guard []*logic.Term, t targe
 	if len(v.forbidden) > 0 {
 		v.unsupported(pos, what+", and a function handed to a trusted function cannot write the footprint of an interface value yet")
 	}
+	// A footprint the frame lists covers the cells in its row, and a
+	// stretch it lists the cells in the stretch: every position of an
+	// object is one of its leaves, so a stretch covers what a footprint
+	// holds there, as the footprint of a converted *Counter is the struct
+	// that Modifies c lists. A map it lists whole covers the map.
 	var candidates []int
 	for i, f := range v.frame {
-		if f.fp {
+		if f.fp || (!f.row && f.ref != nil && (f.mapType != nil && f.key == nil || f.mapType == nil && f.lo != nil && f.hi != nil)) {
 			candidates = append(candidates, i)
 		}
 	}
@@ -429,9 +440,17 @@ func (v *fnVerifier) checkFootprintWrite(st *state, guard []*logic.Term, t targe
 	cell, facts := v.rowAt(t.rows, t.ref, alloc, position)
 	framed := make([]*logic.Term, len(v.frame))
 	for _, i := range candidates {
-		var more []*logic.Term
-		framed[i], more = v.rowAt(v.frame[i].rows, v.frame[i].ref, alloc, position)
-		facts = append(facts, more...)
+		f := v.frame[i]
+		switch {
+		case f.fp:
+			var more []*logic.Term
+			framed[i], more = v.rowAt(f.rows, f.ref, alloc, position)
+			facts = append(facts, more...)
+		case f.mapType != nil:
+			framed[i] = logic.And(logic.Eq(alloc, f.ref), logic.Eq(position, logic.IntLit(0)))
+		default:
+			framed[i] = logic.And(logic.Eq(alloc, f.ref), logic.Le(f.lo, position), logic.Lt(position, f.hi))
+		}
 	}
 	for _, fact := range facts {
 		probe.assume(fact)
@@ -455,15 +474,22 @@ func (v *fnVerifier) checkFootprintWrite(st *state, guard []*logic.Term, t targe
 		for _, i := range candidates {
 			v.used[i] = true
 		}
+		// The message speaks of footprints the frame lists.
+		listed := 0
+		for _, i := range candidates {
+			if v.frame[i].fp {
+				listed++
+			}
+		}
 		switch {
 		case remedy != "":
 			v.report(pos, "%s, which %s may not modify; %s%s", what, v.fn.obj.Name(), remedy, limitNote(result))
-		case len(candidates) == 0 && (v.fn.spelling().valueOf != nil || v.fn.spelling().methodOf != nil):
+		case listed == 0 && (v.fn.spelling().valueOf != nil || v.fn.spelling().methodOf != nil):
 			v.report(pos, "%s, which %s may not modify; the contract of %s does not list it, so code that writes it cannot be used there%s",
 				what, v.fn.obj.Name(), v.fn.obj.Name(), limitNote(result))
-		case len(candidates) == 0 && unlisted != "":
+		case listed == 0 && unlisted != "":
 			v.report(pos, "%s, which %s may not modify; %s%s", what, v.fn.obj.Name(), unlisted, limitNote(result))
-		case len(candidates) == 0:
+		case listed == 0:
 			v.report(pos, "%s, which %s may not modify; list it in a // @Modifies clause%s", what, v.fn.obj.Name(), limitNote(result))
 		default:
 			v.report(pos, "%s, which %s may not modify: no footprint its // @Modifies clauses list is known to hold it; "+
@@ -1119,4 +1145,48 @@ func (v *fnVerifier) withinOwned(sink *state, x, y reached) *logic.Term {
 		}
 	}
 	return logic.Or(options...)
+}
+
+// structuralFootprint returns what the methods of a value converted to an
+// interface with a footprint may write behind their receiver, read in
+// memory at the conversion, as a test of a cell with the facts that reading
+// other rows needs. For a pointer it is the struct it points to, and a nil
+// pointer has none. For a slice held by value it is its array up to its
+// capacity, and for a map the map. Any other value held by value has none,
+// since a method is handed a copy of it. A value of a type that owns memory
+// is not converted in part 1: the bufio types call through what they keep,
+// which stratification refuses, bytes.Buffer and strings.Builder grow
+// without a bound that can be stated, and types of the project own nothing
+// until ownership in source.
+func (v *fnVerifier) structuralFootprint(val value, t types.Type) func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
+	switch {
+	case isSlice(t):
+		lo, hi := v.extent(val, t)
+		return func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
+			return logic.And(logic.Lt(logic.IntLit(0), val[3]), logic.Eq(alloc, val[0]), logic.Le(lo, pos), logic.Lt(pos, hi)), nil
+		}
+	case isMap(t):
+		return func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
+			return logic.And(logic.Not(isNilRef(val)), logic.Eq(alloc, val[0]), logic.Eq(pos, logic.IntLit(0))), nil
+		}
+	}
+	if _, isPointer := pointee(t); !isPointer {
+		return nil
+	}
+	if v.ownsMemory(t) {
+		panic("vego: internal error: a value that owns memory was converted to an interface with a footprint")
+	}
+	lo, hi := v.extent(val, t)
+	return func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
+		return logic.And(logic.Not(isNilRef(val)), logic.Eq(alloc, val[0]), logic.Le(lo, pos), logic.Lt(pos, hi)), nil
+	}
+}
+
+// ownsMemory reports whether a value of the type, or what a pointer of it
+// points to, owns memory by the shipped declarations.
+func (pv *pkgVerifier) ownsMemory(t types.Type) bool {
+	if object, isPointer := pointee(t); isPointer {
+		t = object
+	}
+	return len(pv.ownedFields(t)) > 0
 }

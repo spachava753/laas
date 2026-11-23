@@ -78,19 +78,20 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 	// with what it holds but pass it on. Each method of any other
 	// interface is checked against its contract, for the value as it is
 	// here.
-	// A value whose methods write nothing has no footprint, and can be
-	// converted to an interface whose methods may write behind their
-	// receiver; one whose methods write waits for footprints from their
-	// frames.
-	emptyFootprint := false
+	// A value converted to an interface whose methods may write behind
+	// their receiver gets a footprint: none for a value whose methods write
+	// nothing, and otherwise what they may write of what it holds, its
+	// structural footprint, fixed at the conversion.
+	footprinted := false
+	var behind *types.Func
 	if method := v.stateSpeaker(want); method != nil && !v.hasStates(want) {
-		if behind := v.writingImplementation(from, want); behind != nil {
-			shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
-			v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s writes behind its receiver, "+
-				"and what the methods of %s write is not tied to the footprint of the interface value yet. Make the conversion in code that is not verified",
-				shown(from), shown(want), methodTitle(behind), shown(from)))
+		if behind = v.writingImplementation(from, want); behind != nil {
+			if why := growsUnbounded(from); why != "" {
+				shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
+				v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s", shown(from), shown(want), why))
+			}
 		}
-		emptyFootprint = true
+		footprinted = true
 	}
 	if method := v.stateSpeaker(want); method != nil && v.hasStates(want) {
 		shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
@@ -115,17 +116,29 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		st.assume(logic.Ne(held, other))
 	}
 	v.converted = append(v.converted, held)
-	if emptyFootprint {
-		// Its home is new, and holds nothing in its footprint, which is
-		// all that its methods may write (the invariant of rows).
+	if footprinted {
+		// Its home is new, and its row is what its methods may write: the
+		// invariant of rows. Later the row is a row like any other: what
+		// an owner makes after the conversion is new memory, which no fact
+		// keeps out of a row.
 		at := v.alloc(st, true)
 		st.assume(logic.Eq(home(held), at))
+		var defines func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term)
+		if behind != nil && v.ownsMemory(from) {
+			v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s owns memory, and the footprint of a converted value "+
+				"is the struct it points to until ownership is modelled", types.TypeString(from, types.RelativeTo(v.pass.Pkg)),
+				types.TypeString(want, types.RelativeTo(v.pass.Pkg)), types.TypeString(from, types.RelativeTo(v.pass.Pkg))))
+		}
+		if behind != nil {
+			defines = v.structuralFootprint(converted, from)
+			v.convertedAt[held.Name] = conversion{text: types.ExprString(ast.Unparen(e)), at: e.Pos()}
+		}
 		// A layer of the footprint region in which the row of that home
-		// holds nothing and every other row is what it was; rowAt states
-		// it of each cell it reads.
-		emptied := v.fresh("mem'"+footprintRegion, footprintSort)
-		v.layers[emptied.Name] = &layer{prev: st.mem.region(footprintRegion, footprintSort), key: footprintRegion, growth: true, emptied: at}
-		st.mem[footprintRegion] = emptied
+		// holds what defines says and every other row is what it was;
+		// rowAt states it of each cell it reads.
+		defined := v.fresh("mem'"+footprintRegion, footprintSort)
+		v.layers[defined.Name] = &layer{prev: st.mem.region(footprintRegion, footprintSort), key: footprintRegion, growth: true, emptied: at, defines: defines}
+		st.mem[footprintRegion] = defined
 	}
 	return value{held}
 }
@@ -218,6 +231,7 @@ func (v *fnVerifier) madeInterface(e ast.Expr, held value, from, want types.Type
 		v.madeAs(e, fun, v.methodContract(method), concrete, "a method of "+types.TypeString(want, types.RelativeTo(v.pass.Pkg)), "an interface value", site,
 			func(sv *fnVerifier, entry *state, carry *transport) value {
 				kept := carry.value(held)
+				sv.placeFootprint(entry, v.methodContract(method), kept, from)
 				if !fromPointer || recvPointer {
 					return kept
 				}
@@ -570,4 +584,57 @@ func (pv *pkgVerifier) fullyContracted(t types.Type) bool {
 		}
 	}
 	return true
+}
+
+// conversion is where a value with a structural footprint was converted to
+// an interface value, for messages: the expression converted.
+type conversion struct {
+	text string
+	at   token.Pos
+}
+
+// placeFootprint states, in the check of a method of a value made into an
+// interface value whose contract lets it write behind its receiver, that
+// the structural footprint of what the value holds lies in the row of the
+// receiver. It holds at every call: at the conversion the row is that
+// footprint, and rows keep the cells of memory that existed then, which
+// the struct is.
+func (v *fnVerifier) placeFootprint(entry *state, T *funcInfo, kept value, from types.Type) {
+	if T == nil || T.receiver == nil || !v.hasFootprint(T.receiver.Type()) {
+		return
+	}
+	defines := v.structuralFootprint(kept, from)
+	if defines == nil {
+		return
+	}
+	if v.heldReceiver != nil {
+		v.heldRemedy = fmt.Sprintf("it is not part of the footprint of %s, which is the struct %s points to",
+			types.TypeString(from, types.RelativeTo(v.pass.Pkg)), v.heldReceiver.Name())
+	}
+	a, k := v.bound("a"), v.bound("k")
+	inside, facts := defines(a, k)
+	cell, more := v.rowAt(entry.mem.region(footprintRegion, footprintSort), home(v.entry[T.receiver][0]), a, k)
+	entry.assume(logic.Forall(a, logic.Forall(k, logic.Implies(inside, logic.And(append(append(facts, more...), cell)...)))))
+}
+
+// growingMethods are the methods of bytes.Buffer and strings.Builder that
+// may grow the buffer.
+var growingMethods = map[string]bool{"Grow": true, "ReadFrom": true, "Write": true, "WriteByte": true, "WriteRune": true, "WriteString": true}
+
+// growsUnbounded says why the writing methods of a shipped owner whose
+// buffer grows without a bound cannot be used yet, or returns "".
+func growsUnbounded(t types.Type) string {
+	if object, isPointer := pointee(t); isPointer {
+		t = object
+	}
+	named, ok := t.(*types.Named)
+	if !ok || named.Obj().Pkg() == nil {
+		return ""
+	}
+	switch named.Obj().Pkg().Path() + "." + named.Obj().Name() {
+	case "bytes.Buffer", "strings.Builder":
+		return fmt.Sprintf("the methods of %s that write may panic when the buffer is too large to grow, and the length of a %s cannot be stated yet, "+
+			"so no contract of them can say when they return", named.Obj().Name(), named.Obj().Name())
+	}
+	return ""
 }

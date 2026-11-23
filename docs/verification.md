@@ -1479,6 +1479,98 @@ The second argument of `fresh` may also be a variadic parameter whose elements a
 
 `within(m, r)` says that a pointer, a slice, or a map lies in the footprint of `r`, as a header lies in the response writer that hands it out. `within(p, bw)` for a `*bufio.Writer` or another value that owns memory (see [Writing through a buffer](#writing-through-a-buffer)) says that `p` lies in its struct or in what it owns. A value that a contract places within an interface value or an owner may be memory that a writer writes, so it cannot be passed to a function beside that writer, as described in [Methods that write behind their receiver](#methods-that-write-behind-their-receiver).
 
+#### Converting a value of your own type
+
+You can convert a pointer to a struct of your own to an interface whose methods write behind their receiver. The footprint of the interface value is the struct the pointer points to. Each method is checked against the interface's contract, and its `Modifies` must stay within that struct:
+
+```go
+// LineCount counts the lines it is given.
+type LineCount struct{ N int }
+
+// @Requires t != nil And |line| <= 100
+// @Modifies t
+// @Ensures True
+func (t *LineCount) Record(line string) {
+	if t.N < 1000000 {
+		t.N++
+	}
+}
+
+// @Requires t != nil
+// @Modifies t
+// @Ensures True
+func Track(t *LineCount) {
+	var r Recorder = t
+	r.Record("start")
+}
+```
+
+A call through `r` writes the struct that `t` points to, so `Track` lists `t`. Without it, the call is reported:
+
+```text
+vego: r.Record may modify the footprint of r, which TrackUnlisted may not modify; it is the memory that t points to,
+converted at conversions.go:33:19; list t in a // @Modifies clause
+```
+
+A struct that your function makes needs nothing listed. After a call through the interface value, the struct is not known any more, so a read of it proves nothing about what it held before:
+
+```go
+// @Ensures n = 0
+func TrackBack() (n int) {
+	t := &LineCount{}
+	var r Recorder = t
+	r.Record("start")
+	return t.N
+}
+```
+
+```text
+vego: postcondition may not hold: n = 0
+```
+
+A method that writes outside its own struct cannot be used this way. Here `Forward` writes the `LineCount` that its field points to:
+
+```go
+// Forward passes each line on to the tally it points to.
+type Forward struct{ To *LineCount }
+
+// @Requires f != nil And |line| <= 100
+// @Modifies f.To
+// @Ensures True
+func (f *Forward) Record(line string) {
+	if f.To != nil {
+		f.To.Record(line)
+	}
+}
+```
+
+```text
+vego: Record may modify what it calls f.To, which Recorder.Record may not modify; it is not part of the footprint of
+*Forward, which is the struct f points to, in (*Forward).Record used as a method of Recorder at conversions.go:61:19
+```
+
+A nil pointer converts too, and its footprint is empty.
+
+The footprint is fixed when the value is converted. A value converted in a loop and called after the loop has a footprint about which nothing is known there, so the call needs everything it may write listed, and is usually refused. Convert the value before the loop.
+
+A `*bytes.Buffer` and a `*strings.Builder` cannot be converted to an `io.Writer` yet, and their methods that write cannot be called. They panic when the buffer is too large to grow, and no contract can state the length of the buffer yet:
+
+```go
+// @Ensures True
+func FormatToBuffer() {
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "%d items", 3)
+}
+```
+
+```text
+vego: cannot verify FormatToBuffer: converting a value of type *bytes.Buffer to io.Writer is not supported yet: the
+methods of Buffer that write may panic when the buffer is too large to grow, and the length of a Buffer cannot be
+stated yet, so no contract of them can say when they return
+```
+
+A `*bufio.Writer` cannot be converted to an `io.Writer` either, because its `Write` calls through the writer it keeps (see [Interface values that call interface values](#interface-values-that-call-interface-values)). Pass it as a `*bufio.Writer`.
+
 ### Interface values that call interface values
 
 Code that an interface value made by verified code runs cannot call through an interface value or a function value. The reason is the same as for function values: no contract has a `Variant`, so nothing would prove that such calls end. See [Function values that call function values](#function-values-that-call-function-values). A type that wraps another interface value cannot be converted, and its method is itself reported, since the value it wraps may be one of its own type:
@@ -2009,7 +2101,7 @@ laas -vego -vego.cost ./...
 For `Load` from [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write), under the entries shown there, in a file `foreign.go` that declares it at line 54, it prints:
 
 ```text
-foreign.go:54:6: vego cost of Load: 43 problems, 2093197 resource units, 157215 bytes, 1.60 s
+foreign.go:54:6: vego cost of Load: 44 problems, 2094455 resource units, 162773 bytes, 1.60 s
 	foreign.go:54:6: 2 questions of the always-fails check stopped at a limit
 ```
 
@@ -3781,7 +3873,7 @@ func Announce(host string, port int, done, total int) (addr string) {
 }
 ```
 
-The shipped contracts of `fmt.Sprintf`, `fmt.Sprint`, `fmt.Sprintln`, `fmt.Printf`, `fmt.Print`, `fmt.Println`, `fmt.Fprintf`, `fmt.Fprint`, `fmt.Fprintln`, `log.Printf`, `log.Print`, `log.Println`, and of the methods `Printf`, `Print`, and `Println` of `*log.Logger` promise little. They write nothing your code can see. `vego` knows nothing of the string that `Sprintf` returns, or of the count and the error that `Println` returns. A function that returns that error can leave its success open, as described in [Functions that cannot promise success](#functions-that-cannot-promise-success).
+The shipped contracts of `fmt.Sprintf`, `fmt.Sprint`, `fmt.Sprintln`, `fmt.Printf`, `fmt.Print`, `fmt.Println`, `fmt.Fprintf`, `fmt.Fprint`, `fmt.Fprintln`, `log.Printf`, `log.Print`, `log.Println`, and of the methods `Printf`, `Print`, and `Println` of `*log.Logger` promise little. `fmt.Fprintf`, `fmt.Fprint`, and `fmt.Fprintln` write the footprint of their writer, and the methods of `*log.Logger` write the logger, so a function lists the writer or the logger it prints through (see [Writing to a writer or a logger](#writing-to-a-writer-or-a-logger)). The others write nothing your code can see. `vego` knows nothing of the string that `Sprintf` returns, or of the count and the error that `Println` returns. A function that returns that error can leave its success open, as described in [Functions that cannot promise success](#functions-that-cannot-promise-success).
 
 ### What can be formatted
 
@@ -5646,7 +5738,7 @@ func Discard() (w io.Writer) {
 }
 ```
 
-A method that writes what its receiver refers to cannot be checked against such an entry, because the entry can list only parameters. So verified code cannot pass a `*bytes.Buffer`, or a writer of its own that buffers or counts, as an `io.Writer` yet. Nor can it pass a closer of its own as an `io.Closer`, since the shipped contract of `Close` speaks of the state `closed`. See [Making a value of an interface with a state](#making-a-value-of-an-interface-with-a-state). A type whose `Write` has a contract that writes nothing behind the receiver does convert. A `net.Conn` or an `http.ResponseWriter` cannot be converted to `io.Writer` either, because each declares a `Write` of its own. See [Converting between interfaces](#converting-between-interfaces). Make such a conversion in code that is not verified.
+A writer of your own whose `Write` writes its own struct converts, as described in [Converting a value of your own type](#converting-a-value-of-your-own-type). Verified code cannot pass a `*bytes.Buffer` as an `io.Writer` yet, since its `Write` may panic when the buffer is too large to grow. Nor can it pass a closer of its own as an `io.Closer`, since the shipped contract of `Close` speaks of the state `closed`. See [Making a value of an interface with a state](#making-a-value-of-an-interface-with-a-state). A type whose `Write` has a contract that writes nothing behind the receiver does convert. A `net.Conn` or an `http.ResponseWriter` cannot be converted to `io.Writer` either, because each declares a `Write` of its own. See [Converting between interfaces](#converting-between-interfaces). Make such a conversion in code that is not verified.
 
 #### Wrapping the errors of Read and Write
 
@@ -5760,6 +5852,14 @@ declared
 Write the contract in the doc comment of the method where the interface is declared, as described in [Interfaces](#interfaces). An entry for a type of another module is described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages).
 
 A function cannot have both annotations and a trusted contract. When you verify a function that you previously trusted, delete its entry.
+
+Do not write an entry for a method of `bytes.Buffer` or `strings.Builder` that writes, such as `Write`, `WriteString`, or `WriteByte`. Each panics when the buffer is too large to grow, and no formula can state the length of the buffer yet. An entry without such a bound says that the method returns when it may panic, so it is false. `vego` refuses calls of these methods with a message that says so:
+
+```text
+vego: cannot verify Greets: it calls (*bytes.Buffer).WriteString, which grows the buffer: the methods of Buffer that
+write may panic when the buffer is too large to grow, and the length of a Buffer cannot be stated yet, so no contract
+of them can say when they return. A trusted contract for it without such a bound would be false
+```
 
 `vego` knows nothing about the results of a trusted function beyond what the contract states. For example, a returned pointer or slice could refer to any memory unless the contract restricts it, for example with `fresh(result)`.
 
@@ -5995,6 +6095,9 @@ This table lists the most common messages.
 | `cannot verify F: p.M calls I.M, which has no contract` | The method has no contract, in source or in the trust file. | Write the contract in the doc comment of the method where `I` is declared, give a method of another module an entry, or make the call in code that is not verified. See [Interfaces](#interfaces) and [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages). |
 | `..., in (*T).M used as a method of I at f.go:n:c` | The method of `T` does not meet the contract of `I.M` where a `T` is converted to `I`. | Fix the method, or the contract of `I.M`. See [What a conversion checks](#what-a-conversion-checks). |
 | `... which I.M may not modify; I.M can list only what its parameters refer to, so a method that writes what its receiver refers to cannot be used as a method of I yet` (or `the contract of T ... as a value of type T`) | The method writes behind its receiver, which the contract it is made into cannot name. | Keep the conversion, or the method value, in code that is not verified. |
+| `... which I.M may not modify; it is not part of the footprint of *T, which is the struct t points to` | The method writes memory outside its own struct, such as what a field points to, and `I.M` writes behind its receiver. | Keep what the method writes in its struct, or keep the conversion in code that is not verified. See [Converting a value of your own type](#converting-a-value-of-your-own-type). |
+| `x.M may modify the footprint of x, ...; it is the memory that t points to, converted at f.go:n:c; list t in a // @Modifies clause` | A value of your own type was converted to an interface whose methods write behind their receiver, and the function does not list it. | Add `t` to `Modifies`. |
+| `it calls (*bytes.Buffer).WriteString, which grows the buffer: ...`, and `converting a value of type *bytes.Buffer to io.Writer is not supported yet: ...` | The methods of `bytes.Buffer` and `strings.Builder` that write may panic when the buffer is too large to grow. | Build the text in code that is not verified, or with `fmt.Sprintf` and string concatenation. Do not add a trusted contract. |
 | `T.M has a value receiver, and the pointer that the interface value holds may be nil` | A `*T` that may be nil is converted to an interface, and `M` copies what it points to. | Convert a pointer that is not nil. |
 | `cannot verify F: comparing interface values is not supported yet` | Two interface values, or an interface value and a value of another type, are compared. | Compare with `nil` only. |
 | `cannot verify F: type assertions and type switches are not supported yet` | The type that an interface value holds is not known. | Make the assertion in code that is not verified. |
