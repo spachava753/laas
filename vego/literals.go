@@ -444,7 +444,11 @@ func (v *fnVerifier) returned(st *state, results []value, pos token.Pos) {
 		// What formatting runs runs now, in the state at the return, and
 		// what it reads through a pointer it reads now.
 		v.checkFormatRuns(put.call, put.runs, st, nil)
-		_ = v.checkFormattedAlloc(st, nil, put.call, put.fn, put.args, put.held)
+		formatted := v.checkFormattedAlloc(st, nil, put.call, put.fn, put.args, put.held)
+		if put.writer != nil {
+			v.applyPrinted(put.call, put.fn, put.writer, put.write, put.args, formatted, st, nil)
+			continue
+		}
 		v.invoke(put.call, put.fn, put.args, st, nil)
 	}
 	st.deferred = nil

@@ -4,8 +4,10 @@ import (
 	"go/ast"
 	"go/types"
 	"slices"
+	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/solver"
 	"gopkg.in/yaml.v3"
 )
 
@@ -69,6 +71,21 @@ func (pv *pkgVerifier) readPrints(fn *funcInfo, entry *trustEntry) {
 	case fn.formatted == nil:
 		fn.defect("its prints names a writer, but it formats nothing")
 		return
+	case len(entry.keeps) > 0 || len(entry.calls) > 0 || len(entry.ensures) > 0:
+		// A call into a writer whose conversion is refused is verified as
+		// the Sprint function and the writer's Write, which reads nothing
+		// else of the entry (F11 of the review of step 4).
+		fn.defect("it lists prints and keeps, calls, or ensures, which a call verified through prints would not read; prints is claimed only of a function that does nothing else")
+		return
+	case len(entry.modifies) != 1 || entry.modifies[0].text != item.name:
+		fn.defect("its prints names %s, and its modifies lists more than %s; prints is claimed only of a function that writes nothing but through its writer", item.name, item.name)
+		return
+	}
+	for _, r := range entry.requires {
+		if strings.Join(strings.Fields(r.text), " ") != item.name+" != nil" {
+			fn.defect("its prints names %s, and it requires %s; prints is claimed only of a function whose requires is %s != nil, which a value of a concrete type converted to it meets", item.name, r.text, item.name)
+			return
+		}
 	}
 	pkgPath, name, _ := splitFuncName(item.dests[0].text)
 	if fn.obj.Pkg() == nil || pkgPath != fn.obj.Pkg().Path() {
@@ -162,14 +179,22 @@ func (v *fnVerifier) printedInto(call *ast.CallExpr, fn *funcInfo) (ast.Expr, *f
 
 // callPrinted verifies a call of a function whose contract prints to a
 // writer that printedInto names: the arguments are evaluated, the writer as
-// the value it is and not converted, the formatting is checked as for the
-// function itself, the Sprint function its prints names is applied to the
-// other arguments, and the writer's own Write to a new slice of the bytes
-// it returned. The results are those of Write.
+// the value it is and not converted (printedArgs), the formatting is
+// checked as for the function itself, and the Sprint function and the
+// writer's own Write are applied (applyPrinted).
 func (v *fnVerifier) callPrinted(call *ast.CallExpr, fn *funcInfo, writer ast.Expr, write *funcInfo, st *state, guard []*logic.Term, reach func()) []value {
-	sig := fn.obj.Type().(*types.Signature)
+	args := v.printedArgs(call, fn, st, guard)
+	reach()
+	formatted := v.checkFormattedAlloc(st, guard, call, fn, args, v.held)
+	v.checkFormatRuns(call, v.formatRuns(call, fn), st, guard)
+	return v.applyPrinted(call, fn, writer, write, args, formatted, st, guard)
+}
+
+// printedArgs evaluates the arguments of a call that printedInto names,
+// the writer as the value it is.
+func (v *fnVerifier) printedArgs(call *ast.CallExpr, fn *funcInfo, st *state, guard []*logic.Term) map[*types.Var]value {
 	args := map[*types.Var]value{}
-	for _, b := range v.bindCall(call, sig) {
+	for _, b := range v.bindCall(call, fn.obj.Type().(*types.Signature)) {
 		if b.param == fn.prints {
 			// Go converts the writer to the interface of the parameter; the
 			// call is verified without that interface value, so the value
@@ -182,40 +207,42 @@ func (v *fnVerifier) callPrinted(call *ast.CallExpr, fn *funcInfo, writer ast.Ex
 		}
 		args[b.param] = v.evalPassed(b, st, guard)
 	}
-	reach()
-	formatted := v.checkFormattedAlloc(st, guard, call, fn, args, v.held)
-	v.checkFormatRuns(call, v.formatRuns(call, fn), st, guard)
-	if formatted == nil {
-		// What is formatted has parts whose length no formula states, so
-		// nothing bounds what Write is given, which its requires needs.
-		v.report(call.Pos(), "%s writes to %s text whose length is not known: it formats the text of an error, what a String or Error method returns, "+
-			"or strings or slices inside an element of a slice, and the Write of %s needs a bound on what it is given; format only values whose length is bounded",
-			fn.obj.Name(), types.ExprString(writer), types.TypeString(v.info.TypeOf(writer), types.RelativeTo(v.pass.Pkg)))
-		v.cut(st, guard)
-		return v.nothingKnown(fn.obj, st)
-	}
+	return args
+}
+
+// applyPrinted applies, for a call that printedInto names whose arguments
+// are evaluated and whose formatting is checked, the Sprint function its
+// prints names to the other arguments, and the writer's own Write to a new
+// slice of the bytes it returned; formatted is the bound on what is
+// formatted when that bound counts all of it, and nil otherwise. The
+// results are those of Write. When what is formatted has parts of no
+// known length and the requires of Write cannot be proved, the call is
+// reported with what makes the length unknown, which is the cause there.
+func (v *fnVerifier) applyPrinted(call *ast.CallExpr, fn *funcInfo, writer ast.Expr, write *funcInfo, args map[*types.Var]value, formatted *logic.Term, st *state, guard []*logic.Term) []value {
 	as := v.contractOf(fn.printsAs)
 	if as == nil {
 		v.unsupported(call.Pos(), "the function that the prints of "+fn.trust.key+" names has no contract")
 	}
+	sig := fn.obj.Type().(*types.Signature)
+	bound := v.bindCall(call, sig)
 	// The call of the Sprint function has the arguments of this one but
 	// the writer.
 	asArgs := map[*types.Var]value{}
 	asSig := fn.printsAs.Type().(*types.Signature)
 	var rest []ast.Expr
-	for _, b := range v.bindCall(call, sig) {
+	for i, b := range bound {
 		if b.param == fn.prints {
 			continue
 		}
-		for i := range asSig.Params().Len() {
-			if asSig.Params().At(i).Name() == b.param.Name() {
-				asArgs[asSig.Params().At(i)] = args[b.param]
+		for j := range asSig.Params().Len() {
+			if asSig.Params().At(j).Name() == b.param.Name() {
+				asArgs[asSig.Params().At(j)] = args[b.param]
 			}
 		}
-	}
-	for i, arg := range call.Args {
-		if i != slices.IndexFunc(v.bindCall(call, sig), func(b passedArg) bool { return b.param == fn.prints }) {
-			rest = append(rest, arg)
+		if b.packed {
+			rest = append(rest, b.pack...)
+		} else {
+			rest = append(rest, call.Args[i])
 		}
 	}
 	asCall := &ast.CallExpr{Fun: call.Fun, Lparen: call.Lparen, Args: rest, Ellipsis: call.Ellipsis, Rparen: call.Rparen}
@@ -227,9 +254,28 @@ func (v *fnVerifier) callPrinted(call *ast.CallExpr, fn *funcInfo, writer ast.Ex
 	// The writer's own Write of a new slice of those bytes.
 	writeSig := write.obj.Type().(*types.Signature)
 	p := writeSig.Params().At(0)
-	bytes := v.copiedBytes(st, printed, p.Type())
+	writeArgs := map[*types.Var]value{writeSig.Recv(): args[fn.prints], p: v.copiedBytes(st, printed, p.Type())}
+	if formatted == nil {
+		// Nothing bounds what is written; a Write that needs no bound,
+		// as that of a bufio.Writer, is called all the same.
+		pre := &specEnv{v: v, sink: st, fn: write, args: writeArgs, now: st.mem}
+		var needs []*logic.Term
+		v.quietly(func() {
+			for _, c := range write.requires {
+				needs = append(needs, v.formula(c, c.node, pre))
+			}
+		})
+		if v.attempt(st, guard, logic.And(needs...)) != solver.Proved {
+			v.report(call.Pos(), "%s writes to %s text whose length is not known: it formats the text of an error, what a String or Error method returns, "+
+				"or strings or slices inside an element of a slice, whose lengths are not counted, and the Write of %s needs a bound on what it is given; "+
+				"format only values whose length the bound counts",
+				fn.obj.Name(), types.ExprString(writer), types.TypeString(v.info.TypeOf(writer), types.RelativeTo(v.pass.Pkg)))
+			v.cut(st, guard)
+			return v.nothingKnown(fn.obj, st)
+		}
+	}
 	shown := &ast.Ident{NamePos: call.Lparen, Name: "[]byte(" + fn.printsAs.Name() + "(...))"}
 	writeCall := &ast.CallExpr{Fun: &ast.SelectorExpr{X: writer, Sel: &ast.Ident{NamePos: call.Lparen, Name: "Write"}}, Lparen: call.Lparen, Args: []ast.Expr{shown}, Rparen: call.Rparen}
 	v.noteUse(write, call.Pos())
-	return v.invoke(writeCall, write, map[*types.Var]value{writeSig.Recv(): args[fn.prints], p: bytes}, st, guard)
+	return v.invoke(writeCall, write, writeArgs, st, guard)
 }

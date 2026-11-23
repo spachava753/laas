@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"plog"
 	"strings"
 )
 
@@ -103,4 +104,55 @@ func ConvertsBuffer() {
 	var b bytes.Buffer
 	var w io.Writer = &b // want `converting a value of type \*bytes.Buffer to io.Writer is not supported: its Write may panic when the buffer is too large to grow`
 	_ = w
+}
+
+// ErrToBufio formats an error into a bufio.Writer, whose Write needs no
+// bound on what it is given, under the assumption about the text of an
+// error that formatting makes everywhere.
+//
+// @Requires bw != nil And ready(bw)
+// @Modifies bw
+// @Ensures True
+func ErrToBufio(bw *bufio.Writer) (err error) {
+	e := errors.New("x")
+	_, err = fmt.Fprintf(bw, "error: %v\n", e)
+	return err
+}
+
+// Deferred formats into a Builder in a deferred call, which runs at the
+// return as the Sprint function and the Builder's own Write.
+//
+// @Ensures True
+func Deferred() {
+	var b strings.Builder
+	defer fmt.Fprintf(&b, "%d", 7)
+	b.WriteByte('x')
+}
+
+// ProjectPrints formats into a Builder through a project function whose
+// entry claims prints.
+//
+// @Ensures True
+func ProjectPrints() {
+	var b strings.Builder
+	plog.Fprintf(&b, "%d items", 3)
+}
+
+// ProjectRequires formats through a project function whose entry claims
+// prints and requires more than a writer, which the route would not check:
+// the entry is refused.
+//
+// @Ensures True
+func ProjectRequires() {
+	var b strings.Builder
+	plog.Checked(&b, "0123456789abcdef") // want `prints is claimed only of a function whose requires is w != nil`
+}
+
+// ProjectModifies formats through a project function whose entry claims
+// prints and lists more than its writer: the entry is refused.
+//
+// @Ensures True
+func ProjectModifies() {
+	var b strings.Builder
+	plog.Counted(&b, "x") // want `prints is claimed only of a function that writes nothing but through its writer`
 }

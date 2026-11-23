@@ -1661,6 +1661,46 @@ trusted:
     modifies: []
 
 
+  # Functions that print to a writer, with prints; see testdata/src/plog
+  # and buffers/fprint.go.
+  plog.Fprintf:
+    reason: Formats as fmt.Fprintf does and calls w.Write once with the result.
+    requires: ["w != nil"]
+    runs: [w]
+    formats: [format, a]
+    modifies: [w]
+    vouches: [w]
+    prints: {w: plog.Sprintf}
+    asserts:
+      w: []
+
+  plog.Sprintf:
+    reason: Formats as fmt.Sprintf does.
+    formats: [format, a]
+    modifies: []
+
+  plog.Checked:
+    reason: Formats as fmt.Fprintf does, and panics on a format longer than ten bytes.
+    requires: ["w != nil", "|format| <= 10"]
+    runs: [w]
+    formats: [format, a]
+    modifies: [w]
+    vouches: [w]
+    prints: {w: plog.Sprintf}
+    asserts:
+      w: []
+
+  plog.Counted:
+    reason: Formats as fmt.Fprintf does, and claims to write the slice of its operands as well, which an entry with prints may not.
+    requires: ["w != nil"]
+    runs: [w]
+    formats: [format, a]
+    modifies: [w, a]
+    vouches: [w]
+    prints: {w: plog.Sprintf}
+    asserts:
+      w: []
+
   # Functions that keep what they are given; see testdata/src/keeps.
   keepslib.NewRegistry:
     reason: Returns a new, empty registry.

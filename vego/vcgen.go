@@ -925,13 +925,20 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 	var args map[*types.Var]value
 	var runs []fmtRun
 	var held map[ast.Expr]value
+	// A call into a buffer or a Writer formatted into is the Sprint
+	// function and the writer's own Write when it runs; see prints.go.
+	writer, write := v.printedInto(s.Call, fn)
 	v.evaluate(st, func() {
 		defer v.begin()()
-		args = v.arguments(s.Call, callee, st, nil)
+		if writer != nil {
+			args = v.printedArgs(s.Call, fn, st, nil)
+		} else {
+			args = v.arguments(s.Call, callee, st, nil)
+		}
 		runs = v.formatRuns(s.Call, fn)
 		held = v.heldOperands(s.Call, fn)
 	})
-	st.deferred = append(slices.Clip(st.deferred), deferredCall{call: s.Call, fn: fn, args: args, runs: runs, held: held})
+	st.deferred = append(slices.Clip(st.deferred), deferredCall{call: s.Call, fn: fn, args: args, runs: runs, held: held, writer: writer, write: write})
 }
 
 // branch counts one more fork in the path exploration.

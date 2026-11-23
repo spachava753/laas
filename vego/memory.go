@@ -89,6 +89,10 @@ type deferredCall struct {
 	held    map[ast.Expr]value
 	lit     *ast.FuncLit
 	litArgs []value
+	// writer and write are set for a call that printedInto names, with the
+	// writer evaluated as it is; see prints.go.
+	writer ast.Expr
+	write  *funcInfo
 }
 
 func (st *state) clone() *state {

@@ -82,7 +82,9 @@ buffers	buffers.ConvertsBuffer	1	46	0
 buffers	buffers.CopiesHoldsMyB	0	0	0
 buffers	buffers.CopiesHoldsNB	0	0	0
 buffers	buffers.CopiesMyB	0	0	0
-buffers	buffers.FormatsError	2	140	0
+buffers	buffers.Deferred	18	74292	0
+buffers	buffers.ErrToBufio	57	416487	0
+buffers	buffers.FormatsError	5	17129	0
 buffers	buffers.Grows	20	49799	0
 buffers	buffers.GrowsNegative	9	11240	0
 buffers	buffers.Items	15	65490	0
@@ -96,6 +98,9 @@ buffers	buffers.Line	20	79441	0
 buffers	buffers.LineUnlisted	7	12399	0
 buffers	buffers.Lines	31	258339	0
 buffers	buffers.NilBuffer	10	15056	0
+buffers	buffers.ProjectModifies	1	46	0
+buffers	buffers.ProjectPrints	11	43008	0
+buffers	buffers.ProjectRequires	1	46	0
 buffers	buffers.Promoted	8	25227	0
 buffers	buffers.PromotedListedInner	11	34370	0
 buffers	buffers.ReadsFrom	2	2179	0
@@ -127,6 +132,10 @@ buffers	fmt.Sprint	1	3498	0
 buffers	fmt.Sprintf	1	4468	0
 buffers	fmt.Sprintln	1	3498	0
 buffers	io.Writer.Write	3	7630	0
+buffers	plog.Checked	1	4647	0
+buffers	plog.Counted	1	5168	0
+buffers	plog.Fprintf	1	4589	0
+buffers	plog.Sprintf	1	4468	0
 callbacks	(*callbacks.box).relay	6	4798	0
 callbacks	(*callbacks.counter).bump	6	1449	0
 callbacks	(*callbacks.counter).tick	6	1219	0
