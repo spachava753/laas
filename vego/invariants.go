@@ -275,11 +275,13 @@ func (v *fnVerifier) invariantSteps(sink *state, mem memory, val value, t types.
 			steps = append(steps, v.invariantSteps(sink, mem, inner, types.NewPointer(field.Type()), guard, at, seen)...)
 			continue
 		}
-		// A struct that holds an owner is never passed, returned, or
-		// received by value, which the copy rule refuses, so its invariants
-		// are only ever asked of it through a pointer (F22 of the review of
-		// step 2).
-		panic(fmt.Sprintf("vego: internal error: the invariants of %s, which holds an owner, are asked of it by value", object))
+		// In a value, the field's leaves. Boundaries never meet one, since
+		// the copy rule refuses a struct that holds an owner by value, but
+		// the check that a type's invariants do not contradict each other
+		// asks them of a value of the type (F27 of the review of step 2).
+		if lo, hi, ok := fieldLeaves(object, index); ok {
+			steps = append(steps, v.invariantSteps(sink, mem, val[lo:hi], field.Type(), guard, at, seen)...)
+		}
 	}
 	return steps
 }

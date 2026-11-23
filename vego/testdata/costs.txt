@@ -3273,9 +3273,11 @@ owns	owns.Copied	0	0	0
 owns	owns.CopyList	0	0	0
 owns	owns.Fill	35	144233	0
 owns	owns.FillInner	37	278653	0
+owns	owns.Fine	1	755	0
 owns	owns.FromParameter	4	2256	0
 owns	owns.FromTrusted	1	46	0
 owns	owns.Held	10	10659	0
+owns	owns.Holds	1	112	0
 owns	owns.LocalValue	7	10543	0
 owns	owns.LoopReplaces	21	46941	0
 owns	owns.Made	10	1391	0

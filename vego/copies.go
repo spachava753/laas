@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"go/types"
 	"slices"
+	"strings"
 
 	"golang.org/x/tools/go/ssa"
 )
@@ -55,8 +56,12 @@ func holding(t types.Type, q types.Qualifier) string {
 	inner, _ := holdsState(t)
 	if types.Identical(inner, t) {
 		if len(statesOf(t.Underlying().(*types.Struct))) == 0 {
-			if note := ownsElsewhere(t, q); note != "" {
-				return fmt.Sprintf("%s, which owns memory (%s)", types.TypeString(t, q), note)
+			// A type with the fields of an owner owns by the owner's
+			// declaration, which the message names.
+			if known := ownsDeclaredBy(t); known != nil {
+				shown, owned := types.TypeString(t, q), strings.Join(known.fields, ", ")
+				return fmt.Sprintf("%s, which owns memory (%s owns %s because it has the fields of %s, which declares // @Owns %s; give %s a field of its own, or use %s)",
+					shown, shown, owned, known.name.Name(), owned, shown, known.name.Name())
 			}
 			return fmt.Sprintf("%s, which owns memory", types.TypeString(t, q))
 		}

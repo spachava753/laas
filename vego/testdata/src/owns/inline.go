@@ -45,7 +45,7 @@ type List struct {
 // @Modifies l
 // @Ensures True
 func (l *List) Set(xs []int) {
-	l.items = xs // want `vego: l.items may come to refer to memory that existed when Set was called and that it did not own; an owned field may refer only to memory made since, or to part of what it referred to then; copy it into new memory, as slices.Clone does, or, since List owns items because it has the fields of Stack, which declares // @Owns items; give List a field of its own, or use Stack`
+	l.items = xs // want `vego: l.items may come to refer to memory that existed when Set was called and that it did not own; an owned field may refer only to memory made since, or to part of what it referred to then; copy it into new memory, as slices.Clone does. List owns items because it has the fields of Stack, which declares // @Owns items; to store it as it is, give List a field of its own, or use Stack`
 }
 
 // CopyList copies a List.
@@ -55,4 +55,22 @@ func (l *List) Set(xs []int) {
 func CopyList(l *List) {
 	x := *l // want `vego: cannot verify CopyList: \*l copies a value of type List, which owns memory \(List owns items because it has the fields of Stack, which declares // @Owns items; give List a field of its own, or use Stack\)`
 	_ = x
+}
+
+// Holds holds a bag by value under an invariant that contradicts the bag's:
+// the check of a type's invariants takes the bag's through its leaves (F27
+// of the review of step 2).
+//
+// @Invariant |in.items| > 10 // want `vego: the invariants of Holds contradict each other, so no value of the type could exist`
+type Holds struct {
+	n  int
+	in Bag
+}
+
+// Fine holds a bag by value under an invariant of its own.
+//
+// @Invariant 0 <= n
+type Fine struct {
+	n  int
+	in Bag
 }

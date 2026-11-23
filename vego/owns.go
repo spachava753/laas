@@ -146,17 +146,6 @@ func ownsDeclaredBy(t types.Type) *ownedType {
 	return nil
 }
 
-// ownsElsewhere says, of a struct type that owns by the declaration of
-// another type, why it owns and what to do, or "".
-func ownsElsewhere(t types.Type, q types.Qualifier) string {
-	known := ownsDeclaredBy(t)
-	if known == nil {
-		return ""
-	}
-	return fmt.Sprintf("%s owns %s because it has the fields of %s, which declares // @Owns %s; give %s a field of its own, or use %s",
-		types.TypeString(t, q), strings.Join(known.fields, ", "), known.name.Name(), strings.Join(known.fields, ", "), types.TypeString(t, q), known.name.Name())
-}
-
 // ownsDeclSource is a declaration of this package while it is collected.
 type ownsDeclSource struct {
 	name   *types.TypeName
@@ -516,12 +505,15 @@ func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur va
 		v.report(pos, "what is stored into %s comes from the call of %s, %s; storing the result of such a call into an owned field "+
 			"is not supported yet%s", field, call.name, what, limitNote(result))
 	case old:
-		undeclare := "or do not declare the field owned"
-		if note := ownsElsewhere(holder, types.RelativeTo(v.pass.Pkg)); note != "" {
-			undeclare = "or, since " + note
+		undeclare := ", or do not declare the field owned"
+		if known := ownsDeclaredBy(holder); known != nil {
+			shown := types.TypeString(holder, types.RelativeTo(v.pass.Pkg))
+			owned := strings.Join(known.fields, ", ")
+			undeclare = fmt.Sprintf(". %s owns %s because it has the fields of %s, which declares // @Owns %s; to store it as it is, give %s a field of its own, or use %s",
+				shown, owned, known.name.Name(), owned, shown, known.name.Name())
 		}
 		v.report(pos, "%s may come to refer to memory that existed when %s was called and that it did not own; an owned field may refer only "+
-			"to memory made since, or to part of what it referred to then; %s, %s%s", field, v.fn.obj.Name(), copied, undeclare, limitNote(result))
+			"to memory made since, or to part of what it referred to then; %s%s%s", field, v.fn.obj.Name(), copied, undeclare, limitNote(result))
 	default:
 		v.report(pos, "what is stored into %s is new memory that is not made in this statement, and storing such memory into an owned field "+
 			"is not supported yet; make it where it is stored, as in %s, or copy it there%s", field, example(making), limitNote(result))
