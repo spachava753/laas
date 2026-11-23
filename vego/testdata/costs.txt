@@ -1776,6 +1776,9 @@ guide	(*guide.Account).Deposit	32	56775	0
 guide	(*guide.Account).DepositLocked	21	32992	0
 guide	(*guide.Account).DepositSum	34	59674	0
 guide	(*guide.Account).deposit	10	17593	0
+guide	(*guide.Board).Answer	18	469904	9
+guide	(*guide.Board).Clips	17	390316	2
+guide	(*guide.Board).Longest	6	25711	0
 guide	(*guide.Box).touch	1	241	0
 guide	(*guide.Counter).Inc	8	7245	0
 guide	(*guide.Forward).Record	9	7526	0
@@ -1870,6 +1873,7 @@ guide	guide.AskLight	5	3041	0
 guide	guide.At	15	12918	0
 guide	guide.AtEnd	3	1038	0
 guide	guide.AtLeastSeven	2	878	0
+guide	guide.Board	1	2913	0
 guide	guide.Bounded.Size	3	975	0
 guide	guide.BufferAsWriter	1	46	0
 guide	guide.BufferToFile	193	2619215	14
@@ -1890,6 +1894,7 @@ guide	guide.ClearFirst	7	3049	0
 guide	guide.ClearFront	9	22714	0
 guide	guide.ClearFrontWrong	8	17239	0
 guide	guide.Client	1	46	0
+guide	guide.Clip	1	2773	0
 guide	guide.CloneErrors	1	558	0
 guide	guide.CloseQuietTwice	15	16644	0
 guide	guide.CloseTwice	15	15895	0
@@ -1924,6 +1929,8 @@ guide	guide.Doubler.Get	3	1373	0
 guide	guide.Drain	18	25966	0
 guide	guide.DrainForgets	14	26150	0
 guide	guide.DropNegative	12	462819	2
+guide	guide.DropOneThenAnswer	17	696935	9
+guide	guide.DropThenAnswer	22	6922295	8
 guide	guide.Duplicate	12	15202	0
 guide	guide.Empty	2	746	0
 guide	guide.EmptyOf	6	1752	0
@@ -1937,6 +1944,11 @@ guide	guide.Exact.Get	3	776	0
 guide	guide.Fails	1	46	0
 guide	guide.FieldsOf	0	0	0
 guide	guide.Fill	9	20266	0
+guide	guide.FillAndCount	8	391848	1
+guide	guide.FillBelow	8	391472	1
+guide	guide.FillDeferred	8	391472	1
+guide	guide.FillIf	10	395976	1
+guide	guide.FillInLoop	11	18265	0
 guide	guide.FillUnlisted	5	1840	0
 guide	guide.Find	7	7112	0
 guide	guide.First	4	1222	0
@@ -1951,6 +1963,7 @@ guide	guide.FormatToBuffer	11	43815	0
 guide	guide.Free	0	0	0
 guide	guide.Fresh	7	4897	0
 guide	guide.FromReader	45	496911	10
+guide	guide.Gauge	1	1194	0
 guide	guide.Get	3	2025	0
 guide	guide.GetTask	61	1144942	12
 guide	guide.Greet	7	22078	0
@@ -2066,6 +2079,7 @@ guide	guide.Profile	1	963	0
 guide	guide.Pull	6	2552	0
 guide	guide.Pulled	6	2497	0
 guide	guide.Push	14	9036	0
+guide	guide.PushThenAnswer	20	299109	4
 guide	guide.PushTwice	14	44600	0
 guide	guide.PushTwo	16	52183	0
 guide	guide.PutTwice	14	58049	2
@@ -2112,6 +2126,7 @@ guide	guide.SearchLocked	21	38551	0
 guide	guide.ServeRow	41	545792	10
 guide	guide.Served	1	46	0
 guide	guide.Service	1	917	0
+guide	guide.SetBelow	10	15773	0
 guide	guide.SetMax	7	5364	0
 guide	guide.SetSize	1	46	0
 guide	guide.Shift	9	28808	0
@@ -2201,7 +2216,11 @@ guide	guide.ZeroHeadWrong	9	1836827	1
 guide	guide.Zeros	11	13337	0
 guide	guide.count	1	1216	0
 guide	guide.double	4	660	0
+guide	guide.drop	7	105583	0
+guide	guide.dropOne	8	525825	4
 guide	guide.each	1	154	0
+guide	guide.fill	9	12437	0
+guide	guide.filled	10	12998	0
 guide	guide.five	2	61	0
 guide	guide.grow	14	8600	0
 guide	guide.isSeparator	2	153	0

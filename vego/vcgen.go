@@ -1134,6 +1134,9 @@ func (v *fnVerifier) ifStmt(s *ast.IfStmt, st *state, c ctrl, k func(*state)) {
 		evaluate = v.evaluateSometimes
 	}
 	evaluate(st, func() { cond = v.expr(s.Cond, st, nil) })
+	// What the condition wrote is logged as the condition's, before the
+	// statements of the branches log their own (frames.go).
+	st.logWrite(s.Cond.Pos(), "the condition of the if statement")
 	taken, skipped := st.clone(), st.clone()
 	taken.decide(cond)
 	skipped.decide(logic.Not(cond))

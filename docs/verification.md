@@ -3175,9 +3175,37 @@ func Total(as []*Account) (result int) {
 
 A function of another package cannot state such a clause when the invariant names unexported fields, because a contract can name an unexported field only in the package that declares the struct (see [Names](#names)). It then cannot call a method that needs the invariant of a struct it reaches through a field, such as `s.store.Delete(id)` for a `store` whose invariant is `tasks != nil`, unless the struct owns that field. The invariant of a struct includes the invariants of the structs its owned pointer fields point to, and of the owners it holds by value; see [The invariant of what a struct owns](#the-invariant-of-what-a-struct-owns).
 
-### A loop does not keep it
+### What a loop keeps
 
-A loop forgets the struct invariant along with everything else about the memory it changes. If a loop calls a method on a struct, repeat the struct invariant as a loop invariant:
+A loop that writes nothing the invariant reads keeps it. This loop writes only its own result:
+
+```go
+// Board bounds every card it holds.
+//
+// @Owns cards
+// @Invariant cards != nil And (Forall k in cards : |cards[k].Text| <= 1000 And |cards[k].Tags| <= 10 And (Forall j in [0, |cards[k].Tags|) : |cards[k].Tags[j]| <= 100))
+type Board struct {
+	cards map[int]Card
+}
+
+// Longest finds the longest text, writing only its own result.
+//
+// @Requires b != nil
+// @Ensures n <= 1000
+func (b *Board) Longest() (n int) {
+	// @Invariant n <= 1000
+	for _, c := range b.cards {
+		if len(c.Text) > n {
+			n = len(c.Text)
+		}
+	}
+	return n
+}
+```
+
+`Longest` verifies with no loop invariant about `b`. [What keeps it between boundaries](#what-keeps-it-between-boundaries) says why.
+
+A loop that changes what the invariant reads forgets the invariant, along with everything else about the memory it changes. If a loop calls a method on a struct, repeat the struct invariant as a loop invariant:
 
 ```go
 // @Requires s != nil
@@ -3192,13 +3220,155 @@ func Drain(s *Stack) {
 }
 ```
 
-Without the `Invariant` line, `vego` reports `invariant of Stack may not hold for what is passed to Pop as s`. The call to `Pop` needs the invariant of `Stack` to hold. After the first iteration, nothing establishes it.
+Without the `Invariant` line, `vego` reports the call and the return:
+
+```text
+vego: invariant of Stack may not hold for what is passed to Pop as s: 0 <= n <= |items|
+vego: invariant of Stack may not hold for s on return: 0 <= n <= |items|; it was not kept from entry, since n may have changed: the loop at guide.go:768:2 may write it
+```
+
+The call to `Pop` needs the invariant of `Stack` to hold. After the first iteration, nothing establishes it.
 
 When the invariant names fields that the function cannot name, as for a struct of another package, write `valid(s)` in place of its clauses: `// @Invariant valid(s)`. `valid(x)` is true when the invariants of the struct `x` is or points to hold, with those of what it owns.
+
+A loop invariant of its own is kept the same way. Here the loop appends to `out`, and each element must satisfy the invariant of `Clip`:
+
+```go
+// @Invariant |Text| <= 1000 And |Tags| <= 10 And (Forall j in [0, |Tags|) : |Tags[j]| <= 100)
+type Clip struct {
+	ID   int
+	Text string
+	Tags []string
+}
+
+// @Requires b != nil And |b.cards| <= 1000
+// @Ensures Forall i in [0, |out|) : valid(out[i])
+func (b *Board) Clips() (out []Clip) {
+	// @Visited done
+	// @Invariant |out| <= |done| And (Forall i in [0, |out|) : valid(out[i]))
+	for k, c := range b.cards {
+		out = append(out, Clip{ID: k, Text: c.Text, Tags: c.Tags})
+	}
+	return out
+}
+```
+
+At the end of an iteration, `vego` proves the invariant only of the element the iteration appended. The elements appended before are as they were at the head of the loop, where the invariant held of them. Writing `valid(out[i])` in place of the clauses it stands for makes this cheaper to prove.
 
 ### A trusted function does not restore it
 
 After a call to a trusted function that may modify a struct, `vego` does not assume the invariant of that struct, because nothing proved it.
+
+### What keeps it between boundaries
+
+`vego` proves the invariant of a value at each return and at each call. When nothing the invariant reads has changed since a point where it held, that alone proves it. Such a point is the entry of the function, the return of a call to a verified function, or the head of a loop. This handler-like method writes through `w` twice:
+
+```go
+// @Requires b != nil And w != nil
+// @Modifies w
+// @Ensures True
+func (b *Board) Answer(w io.Writer, id int) {
+	text := []byte(b.cards[id].Text)
+	w.Write(text)
+	w.Write(text)
+}
+```
+
+The invariant of `b` reads the map, every card in it, and every tag of every card. None of that can be what the methods of `w` write, because `b` reaches it, and a function that lists `w` in `Modifies` assumes that the other parameters reach nothing its methods write (see [Methods that write behind their receiver](#methods-that-write-behind-their-receiver)). So `Answer` verifies, and its proof does not grow with the depth of the invariant.
+
+The same holds of memory that a call made, as long as the call writes nothing that the methods of `w` may write:
+
+```go
+// @Requires p != nil And w != nil And |p.items| = 0
+// @Modifies p, w
+// @Ensures |p.items'| = 1 And p.items'[0] = 5
+func PushThenAnswer(p *Pile, w io.Writer, b []byte) {
+	p.Push(5)
+	w.Write(b)
+}
+```
+
+`Push` may move `p.items` to a new array. That array is no part of what `w` writes, so the fact about it is kept across the write. A loop that pushes and then answers does not keep it yet; see [What is not supported](#what-is-not-supported).
+
+A call that lists a whole map may replace any value in it, and a write through `w` afterwards may then write what the call left:
+
+```go
+// @Requires b != nil
+// @Modifies b
+// @Ensures True
+func drop(b *Board, id int) {
+	delete(b.cards, id)
+}
+
+// @Requires b != nil And w != nil
+// @Modifies b, w
+// @Ensures True
+func DropThenAnswer(b *Board, w io.Writer, id int, p []byte) {
+	drop(b, id)
+	w.Write(p)
+}
+```
+
+```text
+vego: invariant of Board may not hold for b on return: (Forall k in cards : |cards[k].Text| <= 1000 And |cards[k].Tags| <= 10 And (Forall j in [0, |cards[k].Tags|) : |cards[k].Tags[j]| <= 100)); it was not kept from the call to drop at kept.go:154:2, since what it reads may have changed: the call to w.Write at kept.go:155:2 may write it (Z3 reached its resource limit; -vego.rlimit raises it)
+```
+
+List only the entry the call changes. The other cards are then the ones `b` held on entry, and the function verifies:
+
+```go
+// @Requires b != nil
+// @Modifies b.cards[id]
+// @Ensures ~has(b.cards', id)
+func dropOne(b *Board, id int) {
+	delete(b.cards, id)
+}
+
+// @Requires b != nil And w != nil
+// @Modifies b.cards[id], w
+// @Ensures True
+func DropOneThenAnswer(b *Board, w io.Writer, id int, p []byte) {
+	dropOne(b, id)
+	w.Write(p)
+}
+```
+
+### Why an invariant was not kept
+
+When the invariant is not proved and a point where it held exists, the message says from where, which value of the invariant may have changed, and which statement may have changed it:
+
+```go
+// Gauge keeps its first level not negative.
+//
+// @Invariant |levels| > 0 And levels[0] >= 0
+type Gauge struct {
+	levels []int
+}
+
+// @Requires g != nil
+// @Modifies g.levels
+// @Ensures True
+func SetBelow(g *Gauge) {
+	g.levels[0] = -1
+}
+```
+
+```text
+vego: invariant of Gauge may not hold for g on return: levels[0] >= 0; it was not kept from entry, since levels[0] may have changed: the assignment to g.levels[0] at kept.go:84:2 may write it
+```
+
+The statement is the first one after which what the invariant reads is no longer what it was, and the sentence says "may" because nothing in it is a proof. These are the forms it takes, each from a function of the guide corpus that breaks the invariant of `Gauge` or `Board`:
+
+| What changed the memory | How the message names it |
+| --- | --- |
+| an assignment | `the assignment to g.levels[0] at kept.go:84:2 may write it` |
+| a call | `the call to fill at kept.go:93:2 may write it` |
+| a call in an assignment | `the call to filled in the assignment to n at kept.go:102:2 may write it` |
+| a loop | `the loop at kept.go:112:2 may write it` |
+| the condition of an `if` | `the condition of the if statement at kept.go:123:5 may write it` |
+| a deferred call | `what runs at the return at kept.go:136:1 may write it` |
+| a write through an interface value | `since what it reads may have changed: the call to w.Write at kept.go:155:2 may write it` |
+
+A write through an interface value changes nothing that the invariant names, but it may write what lies in the memory its methods write. So the message names what it reads as a whole. The place where the invariant held is `entry`, `the call to F at ...` for an invariant that a verified call proved, or `the head of the loop at ...`. When no statement since that place changed what the invariant reads, the message has no such sentence.
 
 ## Structs that own memory
 
@@ -3478,7 +3648,7 @@ func (s *Service) Rename(id int, name string) {
 
 The invariant of a struct includes the invariants of the structs that its owned pointer fields point to, and of the owners it holds by value. `Rename` assumes the invariant of `s` on entry, and with it that of `s.store`. It names no field of the store, which it could not, since `names` is unexported.
 
-A loop that calls `Set` forgets the store's invariant, as [A loop does not keep it](#a-loop-does-not-keep-it) describes. Write `valid(s)` in the loop's invariant. `valid(x)` is what a function assumes of `x` on entry, and it names no field:
+A loop that calls `Set` forgets the store's invariant, as [What a loop keeps](#what-a-loop-keeps) describes. Write `valid(s)` in the loop's invariant. `valid(x)` is what a function assumes of `x` on entry, and it names no field:
 
 ```go
 // @Requires s != nil
@@ -3496,7 +3666,7 @@ Without it, with `// @Invariant s.store != nil` in its place, the call and the r
 
 ```text
 vego: invariant of Store may not hold for what is passed to Set as st: names != nil
-vego: invariant of Store may not hold for s on return, in what it owns at store: names != nil
+vego: invariant of Store may not hold for s on return, in what it owns at store: names != nil; it was not kept from entry, since names may have changed: the loop at owns.go:224:2 may write it
 ```
 
 `valid(s')` in an `Ensures` speaks of the struct on return, and `valid(old(s))` in a body of the struct on entry.
@@ -7446,6 +7616,7 @@ This table lists the most common messages.
 | `Modifies lists x, but F never needs to modify it` | The `Modifies` list allows more than the body needs. | Remove or narrow the entry. |
 | `invariant of T may not hold for what is passed to F as x` | The struct invariant is not proved at the call. | Restore it before the call. In a loop, repeat it as a loop invariant. |
 | `invariant of T may not hold for x on return` | The struct invariant is not proved at the end of the function. | Restore it before returning. |
+| `...; it was not kept from entry, since n may have changed: the assignment to g.n at f.go:12:2 may write it` | The invariant held at the place named, and the statement named changed what it reads (see [Why an invariant was not kept](#why-an-invariant-was-not-kept)). | Restore it after that statement, or have the statement change only what the invariant does not read, as a call that lists one entry of a map. |
 | `the contract of F may also be met by a function that always returns an error` | No example input was found for which the contract forces success. | Add a clause of the form `condition -> err = nil`. See [Errors](#errors). |
 | `specification of F has a hole` | Reported by `-vego.audit`. A trivial implementation satisfies the contract. | Relate the result to the input. |
 | `nothing can satisfy the Requires clauses of F` | The `Requires` clauses contradict each other or the parameter types, so no call could satisfy them. | Fix the `Requires` clauses. |
@@ -7616,6 +7787,12 @@ A function that uses any of the following is reported as `cannot verify`:
 Some limits are reported in other ways. A write through what `bufio.NewReader` or `bufio.NewWriter` returns, in a function that does not list the reader or the writer it was made over, is reported as `Write may modify bw, which F may not modify; it is memory that NewWriter returned, which its contract places in the footprint of w when it is not new; list w in a // @Modifies clause`. List it, as described in [Writing through a buffer](#writing-through-a-buffer). A state can be declared only for an interface, and only as a boolean. A `State` annotation on a struct type is reported at the annotation as `a state can be declared only on a defined interface type that declares a method of its own`, and a state of a struct type in your trust file is reported in the file. A mutex or a `sync.Once` that exists when a trusted function is called cannot be used in a function literal that it calls, and its `Lock` or `Do` is reported as a precondition that may not hold, as described in [Locking in a function that a trusted function calls](#locking-in-a-function-that-a-trusted-function-calls). A formula that names an unexported field of a struct of another package is reported at the annotation, as described in [Names](#names). A method of a type that writes what its receiver points to, or relies on what it points to, cannot be used as a method of an interface. The conversion reports the obligation that fails, as described in [What a conversion checks](#what-a-conversion-checks). An entry in the trust file for a type of the module that you verify is reported in the trust file, as described in [Limits of trusted contracts](#limits-of-trusted-contracts). Two different entries for one type in packages built together are reported in every package built with both, as described in [One entry for each type in a build](#one-entry-for-each-type-in-a-build).
 
 Some true contracts are not proved at the default limit. A function that writes one field through twenty-four or more different pointers has postconditions that are reported as not proved, with the note about the resource limit (see [Helping the prover](#helping-the-prover)).
+
+Some facts are not kept across what does not change them (see [What keeps it between boundaries](#what-keeps-it-between-boundaries)):
+
+- a fact about memory that a loop made, across a write through an interface value after the loop, as a loop that pushes onto an owned slice and then answers;
+- a quantified loop invariant over a slice that an inner loop appends to, as `for _, tag := range t.Tags { if tag == want { out = append(out, t); break } }` under `Forall i in [0, |out|) : valid(out[i])`; write the inner loop as a call, as `slices.Contains(t.Tags, want)`;
+- an invariant that reads the slices held in the values of a map or the elements of a slice, across a write into a slice of the same element type that the function was handed, as a `[]string` beside a store whose tasks hold `[]string` tags: nothing says that the slice is not one of the tags, so the invariant is proved again.
 
 Floating-point values are supported but opaque. They can be passed around and used in arithmetic, but nothing can be stated or proved about their values. An integer converted from a float can have any value of its type, so check its range in code before you use it as an index.
 
