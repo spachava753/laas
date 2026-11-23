@@ -529,7 +529,7 @@ func (v *fnVerifier) literal(e *ast.CompositeLit, t types.Type, st *state, guard
 			if ownedFieldAt(t, index) {
 				shown := types.TypeString(t, types.RelativeTo(v.pass.Pkg))
 				name := u.Field(index).Name()
-				v.checkOwnedStore(st, guard, field, nil, u.Field(index).Type(), t, initial, before, name+" of the "+shown+" made here",
+				v.checkOwnedStore(st, guard, field, nil, u.Field(index).Type(), t, initial, initial, before, name+" of the "+shown+" made here",
 					func(making string) string { return shown + "{" + name + ": " + making + "}" }, initial.Pos())
 			}
 			copy(val[lo:], field)
