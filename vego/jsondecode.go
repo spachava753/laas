@@ -442,24 +442,7 @@ func (v *fnVerifier) callDecoder(call, limit *ast.CallExpr, st *state, guard []*
 	v.checkDecodable(call, fn)
 	r, n := limit.Args[0], limit.Args[1]
 	rt := v.info.TypeOf(r)
-	obj, _, _ := types.LookupFieldOrMethod(rt, true, v.pass.Pkg, "Read")
-	method, _ := obj.(*types.Func)
-	if method == nil {
-		v.unsupported(r.Pos(), fmt.Sprintf("%s has no method Read", types.ExprString(r)))
-	}
-	var read *funcInfo
-	if isIface(rt) {
-		read = v.methodContract(method)
-	} else {
-		read = v.contractOf(method)
-	}
-	if read == nil {
-		v.unsupported(r.Pos(), fmt.Sprintf("the decoder calls %s.Read, which has no contract", types.ExprString(r)))
-	}
-	read = v.usable(call.Pos(), read, types.ExprString(r)+".Read", st, guard, true)
-	if isIface(rt) {
-		v.ifaceStatesOf(rt)
-	}
+	read, receiverOf := v.routeMethod(call, r, "Read", "io.LimitReader", st, guard)
 	u := v.unit
 	operands := u.pushCeiling()
 	made := unitCall{name: decode.Name(), pos: call.Pos()}
@@ -507,14 +490,22 @@ func (v *fnVerifier) callDecoder(call, limit *ast.CallExpr, st *state, guard []*
 		if read.receiver != nil {
 			readArgs[read.receiver] = reader
 		} else if recv := readSig.Recv(); recv != nil {
-			readArgs[recv] = reader
+			readArgs[recv] = receiverOf(reader)
 		}
 		shown := &ast.Ident{NamePos: call.Lparen, Name: "buffer"}
 		readCall := &ast.CallExpr{Fun: &ast.SelectorExpr{X: r, Sel: &ast.Ident{NamePos: call.Lparen, Name: "Read"}}, Lparen: call.Lparen, Args: []ast.Expr{shown}, Rparen: call.Rparen}
 		if read.trust != nil {
 			v.noteUse(read, call.Pos())
 		}
-		v.invoke(readCall, read, readArgs, st, guard)
+		got := v.invoke(readCall, read, readArgs, st, guard)
+		// The decoder calls Read again until it returns bytes or an error;
+		// in v1 a Read that returns neither for ever keeps it from
+		// returning, so its contract must rule that out.
+		if len(got) == 2 {
+			v.check(st, guard, logic.Or(logic.Lt(logic.IntLit(0), got[0][0]), logic.Not(logic.IsNil(got[1][0]))), call.Pos(),
+				"the decoder calls %s.Read until it returns bytes or an error, and the contract of Read allows it to return neither, so the decoder may never return; "+
+					"read the body into a buffer with a bounded loop and decode it with json.Unmarshal", types.ExprString(r))
+		}
 		// What was read: at most n bytes, none for a limit below one.
 		text := v.fresh("read", logic.IntSeq)
 		st.assume(logic.Implies(logic.And(guard...), logic.Le(logic.Len(text), logic.Ite(logic.Lt(most[0], logic.IntLit(0)), logic.IntLit(0), most[0]))))

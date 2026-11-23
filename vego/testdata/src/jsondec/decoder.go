@@ -9,16 +9,20 @@ import (
 // json.NewDecoder(io.LimitReader(r, n)).Decode(&x), written as one
 // expression (F29, D3): r's own Read, then the decoding of Unmarshal from at
 // most n bytes. Its error may be the reader's own, so it is not vouched
-// for: a handler answers with a message of its own.
+// for. The decoder calls Read until it returns bytes or an error, so a Read
+// whose contract allows neither is refused: in v1 it would loop for ever.
+// The contract of io.Reader's Read allows it.
 
-// Create decodes the body of a request, at most 1 MB of it.
+// Create decodes the body of a request, at most 1 MB of it: refused, since
+// the contract of the body's Read allows it to return no bytes and no
+// error.
 //
 // @Requires w != nil And req != nil And req.Body != nil
 // @Modifies w, req.Body
 // @Ensures True
 func Create(w http.ResponseWriter, req *http.Request) {
 	var rt Req
-	if err := json.NewDecoder(io.LimitReader(req.Body, 1<<20)).Decode(&rt); err != nil {
+	if err := json.NewDecoder(io.LimitReader(req.Body, 1<<20)).Decode(&rt); err != nil { // want `the decoder calls req\.Body\.Read until it returns bytes or an error, and the contract of Read allows it to return neither, so the decoder may never return; read the body into a buffer with a bounded lo`
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
@@ -32,7 +36,7 @@ func Create(w http.ResponseWriter, req *http.Request) {
 // @Ensures True
 func ErrText(w http.ResponseWriter, req *http.Request) {
 	var rt Req
-	if err := json.NewDecoder(io.LimitReader(req.Body, 1<<20)).Decode(&rt); err != nil {
+	if err := json.NewDecoder(io.LimitReader(req.Body, 1<<20)).Decode(&rt); err != nil { // want `the decoder calls req\.Body\.Read until it returns bytes or an error, and the contract of Read allows it to return neither, so the decoder may never return; read the body into a buffer with a bounded lo`
 		http.Error(w, err.Error(), http.StatusBadRequest) // want `cannot verify ErrText: calling Error on err would run the methods of an error whose origin is not known; only an error made by errors\.New or fmt\.Errorf, here or in a verified function, or one that a c`
 	}
 }
@@ -75,7 +79,7 @@ func GivenDecoder(dec *json.Decoder) (err error) {
 // @Ensures True
 func AnyLimit(r io.Reader, n int64) (err error) {
 	var rt Req
-	return json.NewDecoder(io.LimitReader(r, n)).Decode(&rt) // want `the decoder may read n bytes, more than can be decoded; it holds when n <= 17592186040319`
+	return json.NewDecoder(io.LimitReader(r, n)).Decode(&rt) // want `the decoder may read n bytes, more than can be decoded; it holds when n <= 17592186040319` `the decoder calls r\.Read until it returns bytes or an error, and the contract of Read allows it to return neither, so the decoder may never return; read the body into a buffer with a bounded loop and `
 }
 
 // Unlisted does not list the reader it reads.
@@ -84,5 +88,38 @@ func AnyLimit(r io.Reader, n int64) (err error) {
 // @Ensures True
 func UnlistedReader(r io.Reader) (err error) {
 	var rt Req
-	return json.NewDecoder(io.LimitReader(r, 1000)).Decode(&rt) // want `r\.Read may modify the footprint of r, which UnlistedReader may not modify; list it in a // @Modifies clause`
+	return json.NewDecoder(io.LimitReader(r, 1000)).Decode(&rt) // want `r\.Read may modify the footprint of r, which UnlistedReader may not modify; list it in a // @Modifies clause` `the decoder calls r\.Read until it returns bytes or an error, and the contract of Read allows it to return neither, so the decoder may never return; read the body into a buffer with a bounded loop and `
+}
+
+// The reader's Read is chosen as a conversion to io.Reader chooses it
+// (F24 of the review of step 2).
+
+// VR has Read on its value.
+type VR struct{ N int }
+
+// Read reads a space each time, so the decoder makes progress.
+//
+// @Requires |p| > 0
+// @Modifies p
+// @Ensures n = 1 And err = nil
+func (v VR) Read(p []byte) (n int, err error) {
+	p[0] = ' '
+	return 1, nil
+}
+
+// ValueRecvNilReader hands a pointer that may be nil.
+//
+// @Ensures True
+func ValueRecvNilReader(p *VR) (err error) {
+	var rt Req
+	return json.NewDecoder(io.LimitReader(p, 100)).Decode(&rt) // want `VR\.Read has a value receiver, and the pointer p handed to io\.LimitReader may be nil`
+}
+
+// ValueRecvReader hands a pointer that is not nil.
+//
+// @Requires p != nil
+// @Ensures True
+func ValueRecvReader(p *VR) (err error) {
+	var rt Req
+	return json.NewDecoder(io.LimitReader(p, 100)).Decode(&rt)
 }

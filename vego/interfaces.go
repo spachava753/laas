@@ -257,20 +257,10 @@ func (v *fnVerifier) madeInterface(e ast.Expr, held value, from, want types.Type
 		}
 		v.usable(e.Pos(), T, methodTitle(method), st, guard, false)
 	}
-	shown := types.TypeString(from, types.RelativeTo(v.pass.Pkg))
 	for method := range iface.Methods() {
-		selection := types.NewMethodSet(from).Lookup(method.Pkg(), method.Name())
-		concrete := selection.Obj().(*types.Func)
-		switch {
-		case isIfaceMethod(concrete):
-			// A method promoted from an embedded interface field calls
-			// through that field.
-			v.unsupported(e.Pos(), fmt.Sprintf("%s gets %s from an embedded field that holds an interface value, so it calls through that value, "+
-				"and code that an interface value runs cannot do that yet: no contract of a method of an interface has a variant, "+
-				"so nothing would prove that such calls end", shown, method.Name()))
-		case len(selection.Index()) > 1:
-			v.unsupported(e.Pos(), fmt.Sprintf("%s gets %s from an embedded field, and a promoted method cannot be used as a method of an interface yet",
-				shown, method.Name()))
+		concrete, why := concreteMethod(from, method.Pkg(), method.Name(), v.pass.Pkg)
+		if why != "" {
+			v.unsupported(e.Pos(), why)
 		}
 		recv := concrete.Type().(*types.Signature).Recv().Type()
 		_, fromPointer := from.Underlying().(*types.Pointer)
@@ -295,6 +285,34 @@ func (v *fnVerifier) madeInterface(e ast.Expr, held value, from, want types.Type
 				return read
 			}, st, guard)
 	}
+}
+
+// concreteMethod returns the method of a concrete type that a call through
+// an interface value holding a value of the type runs, or says why it
+// cannot be used as a method of an interface: one promoted from an
+// embedded field, and one promoted from an embedded field that holds an
+// interface value, which calls through that value. A conversion and the
+// routes of encoding/json that call a writer's Write or a reader's Read on
+// the value as it is (json.go, jsondecode.go) choose it here.
+func concreteMethod(from types.Type, pkg *types.Package, name string, here *types.Package) (*types.Func, string) {
+	shown := types.TypeString(from, types.RelativeTo(here))
+	selection := types.NewMethodSet(from).Lookup(pkg, name)
+	if selection == nil {
+		return nil, fmt.Sprintf("%s has no method %s", shown, name)
+	}
+	concrete := selection.Obj().(*types.Func)
+	switch {
+	case isIfaceMethod(concrete):
+		// A method promoted from an embedded interface field calls
+		// through that field.
+		return concrete, fmt.Sprintf("%s gets %s from an embedded field that holds an interface value, so it calls through that value, "+
+			"and code that an interface value runs cannot do that yet: no contract of a method of an interface has a variant, "+
+			"so nothing would prove that such calls end", shown, name)
+	case len(selection.Index()) > 1:
+		return concrete, fmt.Sprintf("%s gets %s from an embedded field, and a promoted method cannot be used as a method of an interface yet",
+			shown, name)
+	}
+	return concrete, ""
 }
 
 // methodOf names a method of a concrete type in messages, as in

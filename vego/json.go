@@ -1103,6 +1103,59 @@ func isIdentByte(c byte) bool {
 // refused: an Encoder from elsewhere may indent, may not escape HTML, or
 // hold an earlier error.
 
+// routeMethod returns the contract of the method name that a call through
+// the io.Writer or io.Reader made of e would run, chosen as a conversion
+// chooses it (concreteMethod): a method promoted from an embedded field is
+// refused with the conversion's message. receiverOf turns the value of e
+// into the receiver the method is called with: for a value receiver
+// reached through a pointer, the struct read after a proof that the
+// pointer is not nil, where Go panics (F24 of the review of step 2).
+func (v *fnVerifier) routeMethod(call *ast.CallExpr, e ast.Expr, name, maker string, st *state, guard []*logic.Term) (*funcInfo, func(value) value) {
+	t := v.info.TypeOf(e)
+	same := func(val value) value { return val }
+	if isIface(t) {
+		selection := types.NewMethodSet(t).Lookup(nil, name)
+		if selection == nil {
+			v.unsupported(e.Pos(), fmt.Sprintf("%s has no method %s", types.ExprString(e), name))
+		}
+		method := selection.Obj().(*types.Func)
+		fn := v.methodContract(method)
+		if fn == nil {
+			v.unsupported(e.Pos(), fmt.Sprintf("%s calls %s.%s, which has no contract", maker, types.ExprString(e), name))
+		}
+		fn = v.usable(call.Pos(), fn, types.ExprString(e)+"."+name, st, guard, true)
+		v.ifaceStatesOf(t)
+		return fn, same
+	}
+	concrete, why := concreteMethod(t, nil, name, v.pass.Pkg)
+	if why != "" {
+		v.unsupported(e.Pos(), why)
+	}
+	fn := v.contractOf(concrete)
+	if fn == nil {
+		v.unsupported(e.Pos(), fmt.Sprintf("%s calls %s.%s, which has no contract", maker, types.ExprString(e), name))
+	}
+	fn = v.usable(call.Pos(), fn, types.ExprString(e)+"."+name, st, guard, true)
+	_, fromPointer := t.Underlying().(*types.Pointer)
+	_, recvPointer := concrete.Type().(*types.Signature).Recv().Type().(*types.Pointer)
+	if !fromPointer || recvPointer {
+		return fn, same
+	}
+	return fn, func(held value) value {
+		// Go reads what the pointer points to when the method runs, and
+		// panics if it is nil.
+		v.check(st, guard, logic.Ne(held[0], logic.RefLit(0)), call.Pos(),
+			"%s has a value receiver, and the pointer %s handed to %s may be nil", methodOf(concrete.Type().(*types.Signature).Recv().Type(), concrete, v.pass.Pkg), types.ExprString(e), maker)
+		object := t.Underlying().(*types.Pointer).Elem()
+		var read value
+		v.quietly(func() {
+			read = v.fetch(st, st.mem, v.cellsOf(object), held[0], held[1])
+			v.noteTyped(st, read, object)
+		})
+		return read
+	}
+}
+
 // jsonEncodeKey and jsonNewEncoderKey are the functions of the route.
 const (
 	jsonEncodeKey     = "(*encoding/json.Encoder).Encode"
@@ -1183,24 +1236,7 @@ func (v *fnVerifier) callEncoder(call *ast.CallExpr, w ast.Expr, st *state, guar
 	// The writer's own Write: through the interface it is written as, or
 	// the method of its concrete type.
 	wt := v.info.TypeOf(w)
-	obj, _, _ := types.LookupFieldOrMethod(wt, true, v.pass.Pkg, "Write")
-	method, _ := obj.(*types.Func)
-	if method == nil {
-		v.unsupported(w.Pos(), fmt.Sprintf("%s has no method Write", types.ExprString(w)))
-	}
-	var write *funcInfo
-	if isIface(wt) {
-		write = v.methodContract(method)
-	} else {
-		write = v.contractOf(method)
-	}
-	if write == nil {
-		v.unsupported(w.Pos(), fmt.Sprintf("json.NewEncoder(%s).Encode calls %s.Write, which has no contract", types.ExprString(w), types.ExprString(w)))
-	}
-	write = v.usable(call.Pos(), write, types.ExprString(w)+".Write", st, guard, true)
-	if isIface(wt) {
-		v.ifaceStatesOf(wt)
-	}
+	write, receiverOf := v.routeMethod(call, w, "Write", "json.NewEncoder", st, guard)
 	u := v.unit
 	operands := u.pushCeiling()
 	made := unitCall{name: encode.Name(), pos: call.Pos()}
@@ -1232,7 +1268,7 @@ func (v *fnVerifier) callEncoder(call *ast.CallExpr, w ast.Expr, st *state, guar
 	if write.receiver != nil {
 		writeArgs[write.receiver] = writer
 	} else if recv := writeSig.Recv(); recv != nil {
-		writeArgs[recv] = writer
+		writeArgs[recv] = receiverOf(writer)
 	}
 	pre := &specEnv{v: v, sink: st, fn: write, args: writeArgs, now: st.mem}
 	var needs []*logic.Term

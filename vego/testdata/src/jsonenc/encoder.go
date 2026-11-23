@@ -141,3 +141,59 @@ func (l *Loop) Write(p []byte) (n int, err error) {
 func EncodeTo(l *Loop, it Item) (err error) {
 	return json.NewEncoder(l).Encode(it) // want `recursive call needs a // @Variant annotation in the doc comment of EncodeTo to prove termination; the cycle: EncodeTo calls \(\*Loop\)\.Write at encoder\.go:142:25, \(\*Loop\)\.Write calls EncodeTo at encoder`
 }
+
+// The writer's Write is chosen as a conversion to io.Writer chooses it
+// (F24 of the review of step 2).
+
+// VW has Write on its value.
+type VW struct{ N int }
+
+// Write writes nothing.
+//
+// @Ensures n = |p| And err = nil
+func (v VW) Write(p []byte) (n int, err error) { return len(p), nil }
+
+// ValueRecvNil hands a pointer that may be nil: Go reads what it points to
+// to call Write, and panics on nil.
+//
+// @Ensures True
+func ValueRecvNil(p *VW, it Item) (err error) {
+	return json.NewEncoder(p).Encode(it) // want `VW\.Write has a value receiver, and the pointer p handed to json\.NewEncoder may be nil`
+}
+
+// ValueRecv hands a pointer that is not nil.
+//
+// @Requires p != nil
+// @Ensures True
+func ValueRecv(p *VW, it Item) (err error) {
+	return json.NewEncoder(p).Encode(it)
+}
+
+// WithBuffer gets Write from an embedded field.
+type WithBuffer struct {
+	N int
+	bytes.Buffer
+}
+
+// Promoted encodes into it.
+//
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func Promoted(w *WithBuffer, it Item) (err error) {
+	return json.NewEncoder(w).Encode(it) // want `cannot verify Promoted: \*WithBuffer gets Write from an embedded field, and a promoted method cannot be used as a method of an interface yet`
+}
+
+// Wrap gets Write from an embedded interface value.
+type Wrap struct {
+	io.Writer
+}
+
+// ThroughWrap encodes into it.
+//
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func ThroughWrap(w *Wrap, it Item) (err error) {
+	return json.NewEncoder(w).Encode(it) // want `cannot verify ThroughWrap: \*Wrap gets Write from an embedded field that holds an interface value, so it calls through that value, and code that an interface value runs cannot do that yet: no contract `
+}
