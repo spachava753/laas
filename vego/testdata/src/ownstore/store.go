@@ -12,6 +12,7 @@ import (
 type Task struct {
 	ID   int
 	Text string
+	Tags []string
 }
 
 // Store owns its map of tasks, which is never nil.
@@ -85,6 +86,30 @@ func (st *Store) All() (all []Task) {
 		all = append(all, t)
 	}
 	return all
+}
+
+// ByTag returns the tasks that have a tag, ranging over the map and over
+// each task's tags, as the trial's GetTasksByTag does (F32 of the review
+// of step 3a): a task read from the map is outside.
+//
+// @Requires st != nil And ~held(st.Mutex) And |st.tasks| <= 1000000
+// @Modifies st.Mutex
+// @Ensures ~held(st.Mutex')
+func (st *Store) ByTag(tag string) (tasks []Task) {
+	st.Lock()
+	defer st.Unlock()
+	// @Visited done
+	// @Invariant |tasks| <= |done|
+	for _, task := range st.tasks {
+		// @Invariant |tasks| <= |done|
+		for _, taskTag := range task.Tags {
+			if taskTag == tag {
+				tasks = append(tasks, task)
+				break
+			}
+		}
+	}
+	return tasks
 }
 
 // Clear deletes every task, with a new map.

@@ -711,7 +711,7 @@ func (v *fnVerifier) ownKindOfAny(fl *ownFlow, e ast.Expr, f *ownFact) ownKind {
 	case *ast.UnaryExpr:
 		if x.Op == token.AND {
 			if lit, ok := ast.Unparen(x.X).(*ast.CompositeLit); ok {
-				v.ownLiteral(fl, lit, f)
+				v.ownLiteral(fl, lit, f, true)
 				return v.ownSite(x, f)
 			}
 			return v.ownAddress(fl, x.X, f)
@@ -723,11 +723,16 @@ func (v *fnVerifier) ownKindOfAny(fl *ownFlow, e ast.Expr, f *ownFact) ownKind {
 		v.ownKindOf(fl, x.Y, f)
 		return ownKind{}
 	case *ast.CompositeLit:
-		v.ownLiteral(fl, x, f)
+		held := v.ownLiteral(fl, x, f, false)
 		if t := v.info.TypeOf(x); isSlice(t) || isMap(t) {
 			return v.ownSite(x, f)
 		}
-		return v.ownLiteralValue(fl, x, f)
+		// An owner held by value owns its owned fields' tags.
+		if len(sourceOwnedFields(v.info.TypeOf(x))) > 0 {
+			f.status[ownTag{site: x}] = tagStatus{state: tagNew}
+			held = held.union(ownKind{tags: map[ownTag]bool{{site: x}: true}})
+		}
+		return held
 	case *ast.FuncLit:
 		// A literal used as a value may run after the call: what it
 		// captures is kept.
@@ -747,7 +752,7 @@ func (v *fnVerifier) ownKindOfAny(fl *ownFlow, e ast.Expr, f *ownFact) ownKind {
 // ownLiteral applies the stores of a composite literal's elements into the
 // memory or the value it makes; a struct literal's owned fields are stores
 // into owned fields, decided where the literal stands (madeHere).
-func (v *fnVerifier) ownLiteral(fl *ownFlow, lit *ast.CompositeLit, f *ownFact) {
+func (v *fnVerifier) ownLiteral(fl *ownFlow, lit *ast.CompositeLit, f *ownFact, inMemory bool) (held ownKind) {
 	t := v.info.TypeOf(lit)
 	object, _ := pointee(t)
 	if object == nil {
@@ -788,58 +793,18 @@ func (v *fnVerifier) ownLiteral(fl *ownFlow, lit *ast.CompositeLit, f *ownFact) 
 		}
 		if !isStruct {
 			v.ownStoreMemory(fl, value, kind, f, "stored into what the literal at "+v.placeOf(lit.Pos())+" makes")
-		}
-	}
-}
-
-// ownLiteralValue is the kind of a struct literal held as a value: what
-// its fields that are not owned hold.
-func (v *fnVerifier) ownLiteralValue(fl *ownFlow, lit *ast.CompositeLit, f *ownFact) ownKind {
-	t := v.info.TypeOf(lit)
-	u, isStruct := t.Underlying().(*types.Struct)
-	if !isStruct {
-		return ownKind{}
-	}
-	var kind ownKind
-	if len(sourceOwnedFields(t)) > 0 {
-		// An owner held by value, whose owned fields' tags it now owns.
-		kind = ownKind{tags: map[ownTag]bool{{site: lit}: true}}
-		f.status[ownTag{site: lit}] = tagStatus{state: tagNew}
-	}
-	for i, element := range lit.Elts {
-		value, index := element, i
-		if pair, keyed := element.(*ast.KeyValueExpr); keyed {
-			value = pair.Value
-			name := pair.Key.(*ast.Ident).Name
-			index = slices.IndexFunc(slices.Collect(u.Fields()), func(field *types.Var) bool { return field.Name() == name })
-		}
-		if ownedFieldAt(t, index) {
 			continue
 		}
-		// Already evaluated by ownLiteral; what it holds is part of the
-		// value. Read again without effects.
-		kind = kind.union(v.ownPeek(value, f))
-	}
-	return kind
-}
-
-// ownPeek is the kind of a simple expression without applying anything.
-func (v *fnVerifier) ownPeek(e ast.Expr, f *ownFact) ownKind {
-	switch x := ast.Unparen(e).(type) {
-	case *ast.Ident:
-		if variable, ok := v.info.ObjectOf(x).(*types.Var); ok && !v.boxed[variable] && variable.Parent() != v.pass.Pkg.Scope() {
-			return f.vars[variable]
+		// A field that is not owned holds what it is given: in a struct
+		// that &T{...} makes, a store into memory; in a value, part of
+		// the value (F29 of the review of step 3a).
+		if inMemory {
+			v.ownStoreMemory(fl, value, kind, f, "stored into what the literal at "+v.placeOf(lit.Pos())+" makes")
+			continue
 		}
-		return ownKind{}
-	case *ast.SliceExpr:
-		return v.ownPeek(x.X, f)
-	case *ast.BasicLit:
-		return ownKind{}
+		held = held.union(kind)
 	}
-	if t := v.info.TypeOf(e); t != nil && !refersMemory(t) {
-		return ownKind{}
-	}
-	return ownKind{unknown: "it is held in a struct value"}
+	return held
 }
 
 // ownCaptured applies what a function literal that may outlive the call
@@ -1292,8 +1257,22 @@ func (v *fnVerifier) ownReturn(fl *ownFlow, ret *ast.ReturnStmt, f *ownFact) {
 			kinds = append(kinds, v.ownKindOf(fl, r, f))
 		}
 	}
-	for _, lit := range fl.deferred {
-		v.ownRunLiteral(fl, lit, f)
+	// The results as the deferred calls leave them, which may assign
+	// them (F30 of the review of step 3a).
+	if len(fl.deferred) > 0 {
+		for i, result := range v.fn.results {
+			if i < len(kinds) && result.Name() != "" && result.Name() != "_" {
+				f.vars[result] = kinds[i]
+			}
+		}
+		for _, lit := range fl.deferred {
+			v.ownRunLiteral(fl, lit, f)
+		}
+		for i, result := range v.fn.results {
+			if i < len(kinds) && result.Name() != "" && result.Name() != "_" {
+				kinds[i] = f.vars[result]
+			}
+		}
 	}
 	if fl.results == nil {
 		fl.results = make([]ownResult, len(v.fn.results))
@@ -1458,27 +1437,9 @@ func (pv *pkgVerifier) ownSummarize(fn *funcInfo) (summary *ownSummary) {
 	sv.ownForce = true
 	fl := sv.ownOrigins()
 	if fl == nil {
-		// A body that meets no owner keeps what part 1's summary says it
-		// stores: a store of what a parameter reaches into memory keeps it.
-		if !pv.memSummary(fn.obj).stores {
-			for i := range summary.keeps {
-				summary.keeps[i] = true
-			}
-		}
-		if !pv.memSummary(fn.obj).results {
-			for i := range summary.results {
-				summary.results[i] = ownResultFact{unknown: true}
-			}
-		} else {
-			for i := range summary.results {
-				var from []int
-				for j := range fn.params {
-					from = append(from, j)
-				}
-				summary.results[i] = ownResultFact{from: from}
-			}
-		}
-		return summary
+		// A body that is not there has no summary; a summary runs the
+		// analysis on every body (ownForce).
+		return nil
 	}
 	for i, p := range fn.params {
 		summary.keeps[i] = fl.keeps[p]
@@ -1557,7 +1518,7 @@ func (v *fnVerifier) ownAddress(fl *ownFlow, e ast.Expr, f *ownFact) ownKind {
 	case *ast.StarExpr:
 		return v.ownKindOf(fl, x.X, f)
 	case *ast.CompositeLit:
-		v.ownLiteral(fl, x, f)
+		v.ownLiteral(fl, x, f, true)
 		return v.ownSite(x, f)
 	}
 	return ownKind{unknown: fmt.Sprintf("it is the address of %s", types.ExprString(e))}

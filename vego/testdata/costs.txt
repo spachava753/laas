@@ -3276,6 +3276,11 @@ owns	owns.AddToNew	9	13361	0
 owns	owns.AddTwo	15	27659	0
 owns	owns.AddrOfPart	9	11485	0
 owns	owns.Alias	7	6995	0
+owns	owns.AliasDeferred	2	1788	0
+owns	owns.AliasHeld	7	7019	0
+owns	owns.AliasItems	3	2169	0
+owns	owns.AliasLiteral	3	2862	0
+owns	owns.AliasValue	2	1788	0
 owns	owns.AppendOther	22	28701	0
 owns	owns.AsWriters	19	59217	0
 owns	owns.Bag	1	654	0
@@ -3286,6 +3291,7 @@ owns	owns.Constructed	3	247	0
 owns	owns.Converted	1	241	0
 owns	owns.Copied	0	0	0
 owns	owns.CopyList	0	0	0
+owns	owns.DeferredResult	2	474	0
 owns	owns.Fields	15	129179	2
 owns	owns.Fill	35	144233	0
 owns	owns.FillInner	37	278653	0
@@ -3306,6 +3312,7 @@ owns	owns.Misplaced	1	46	0
 owns	owns.NewServer	5	1635	0
 owns	owns.Overwrite	9	11031	0
 owns	owns.Peeked	11	101015	2
+owns	owns.PrevKept	28	84505	0
 owns	owns.PushTwo	14	32124	0
 owns	owns.Pusher.Push	4	2186	0
 owns	owns.PutTwo	13	13968	0
@@ -3363,11 +3370,12 @@ ownserver	ownserver.Server	1	1120	0
 ownserver	ownserver.external	0	0	0
 ownslib	(*ownslib.Bag).Add	23	42723	0
 ownslib	ownslib.Bag	1	590	0
-ownstore	(*ownstore.Store).All	38	106672	0
+ownstore	(*ownstore.Store).All	38	118880	0
 ownstore	(*ownstore.Store).Break	8	7680	0
+ownstore	(*ownstore.Store).ByTag	33	232621	2
 ownstore	(*ownstore.Store).Clear	22	38134	0
-ownstore	(*ownstore.Store).Create	37	80476	0
-ownstore	(*ownstore.Store).Get	62	154006	1
+ownstore	(*ownstore.Store).Create	37	84592	0
+ownstore	(*ownstore.Store).Get	62	180521	1
 ownstore	(*sync.Mutex).Lock	1	1652	0
 ownstore	(*sync.Mutex).Unlock	1	1611	0
 ownstore	ownstore.New	11	8053	0

@@ -364,3 +364,90 @@ func RefillPrev(t *Stack) {
 		prev = b
 	}
 }
+
+// AliasLiteral puts the struct a server owns into a literal it returns
+// (F29 of the review of step 3a).
+//
+// @Requires s != nil
+// @Ensures k != nil
+func AliasLiteral(s *Server) (k *Keeper) {
+	return &Keeper{ptr: s.cfg} // want `vego: s.cfg is memory that s owns, stored into what the literal at keeping.go:[0-9:]+ makes`
+}
+
+// AliasValue puts it into a struct value it returns.
+//
+// @Requires s != nil
+// @Ensures True
+func AliasValue(s *Server) (k Keeper) {
+	return Keeper{ptr: s.cfg} // want `vego: AliasValue returns memory that s owns; say so with within\(k, s\) in an Ensures, or return a copy`
+}
+
+// AliasHeld puts it into a struct value and stores the value.
+//
+// @Requires s != nil And b != nil
+// @Modifies b
+// @Ensures True
+func AliasHeld(s *Server, b *Box2) {
+	k := Keeper{ptr: s.cfg}
+	b.k = k // want `vego: k is memory that s owns, stored into memory at keeping.go:[0-9:]+`
+}
+
+// Box2 holds a Keeper by value.
+type Box2 struct {
+	k Keeper
+}
+
+// AliasItems puts what a stack owns into a new Keeper it returns.
+//
+// @Requires s != nil
+// @Ensures k != nil
+func AliasItems(s *Stack) (k *Keeper) {
+	k = &Keeper{kept: s.items} // want `vego: s.items is memory that s owns, stored into what the literal at keeping.go:[0-9:]+ makes`
+	return k
+}
+
+// DeferredResult leaves what s owns in its result from a deferred
+// literal (F30).
+//
+// @Requires s != nil
+// @Ensures True
+func DeferredResult(s *Stack) (r []int) {
+	defer func() { r = s.items }()
+	return nil // want `vego: DeferredResult returns memory that s owns; say so with within\(r, s\) in an Ensures, or return a copy`
+}
+
+// AliasDeferred does the same with the struct a server owns.
+//
+// @Requires s != nil
+// @Ensures True
+func AliasDeferred(s *Server) (p *Config) {
+	defer func() { p = s.cfg }()
+	return nil // want `vego: AliasDeferred returns memory that s owns; say so with within\(p, s\) in an Ensures, or return a copy`
+}
+
+// Owner owns a byte slice.
+//
+// @Owns buf
+type Owner struct {
+	buf []byte
+}
+
+// PrevKept keeps the previous iteration's buffer, which the previous
+// stack owns, past the next execution of the site, and gives it to
+// another owner after the loop (F31, the reviewer's program).
+//
+// @Ensures True
+func PrevKept() {
+	cs := []*Owner{{}, {}, {}}
+	t := &Owner{}
+	var keep, prev []byte
+	// @Invariant 0 <= i <= |cs| And fresh(keep) And fresh(prev)
+	// @Variant |cs| - i
+	for i := 0; i < len(cs); i++ {
+		keep = prev
+		b := make([]byte, 4)
+		cs[i].buf = b
+		prev = b
+	}
+	t.buf = keep // want `vego: what is stored into t.buf is new memory that something else may refer to: it is memory that cs\[i\] owns`
+}
