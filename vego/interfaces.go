@@ -801,8 +801,8 @@ func (v *fnVerifier) convertByContract(e ast.Expr, from, want types.Type, st *st
 	}
 	for _, s := range v.ifaceStatesOf(want) {
 		if !have[s.title()] {
-			v.unsupported(e.Pos(), fmt.Sprintf("converting %s, a %s, to %s is not supported: %s has the state %s, which %s does not declare, "+
-				"so nothing says what it is of the value", types.ExprString(e), shown(from), shown(want), shown(want), s.name, shown(from)))
+			v.unsupported(e.Pos(), fmt.Sprintf("converting %s, %s %s, to %s is not supported: %s has the state %s, which %s does not declare, "+
+				"so nothing says what it is of the value", types.ExprString(e), article(shown(from)), shown(from), shown(want), shown(want), s.name, shown(from)))
 		}
 	}
 	own := from.Underlying().(*types.Interface)
@@ -813,7 +813,7 @@ func (v *fnVerifier) convertByContract(e ast.Expr, from, want types.Type, st *st
 		found, _, _ := types.LookupFieldOrMethod(from, false, method.Pkg(), method.Name())
 		source, _ := found.(*types.Func)
 		if source == nil {
-			v.unsupported(e.Pos(), fmt.Sprintf("converting %s, a %s, to %s is not supported: %s has no method %s", types.ExprString(e), shown(from), shown(want), shown(from), method.Name()))
+			v.unsupported(e.Pos(), fmt.Sprintf("converting %s, %s %s, to %s is not supported: %s has no method %s", types.ExprString(e), article(shown(from)), shown(from), shown(want), shown(from), method.Name()))
 		}
 		TA, TB := v.methodContract(source), v.methodContract(method)
 		if TA == nil || TB == nil {
@@ -821,11 +821,11 @@ func (v *fnVerifier) convertByContract(e ast.Expr, from, want types.Type, st *st
 			if TB == nil {
 				missing = method
 			}
-			v.unsupported(e.Pos(), fmt.Sprintf("converting %s, a %s, to %s is not supported: %s has no contract, so nothing says that %s meets %s",
-				types.ExprString(e), shown(from), shown(want), methodTitle(missing), methodTitle(source), methodTitle(method)))
+			v.unsupported(e.Pos(), fmt.Sprintf("converting %s, %s %s, to %s is not supported: %s has no contract, so nothing says that %s meets %s",
+				types.ExprString(e), article(shown(from)), shown(from), shown(want), methodTitle(missing), methodTitle(source), methodTitle(method)))
 		}
 		if why := v.claimsNoLess(TA, TB, source, method); why != "" {
-			v.unsupported(e.Pos(), fmt.Sprintf("converting %s, a %s, to %s is not supported: %s", types.ExprString(e), shown(from), shown(want), why))
+			v.unsupported(e.Pos(), fmt.Sprintf("converting %s, %s %s, to %s is not supported: %s", types.ExprString(e), article(shown(from)), shown(from), shown(want), why))
 		}
 		v.impliesMethod(e, TA, TB, source, method, st, guard)
 	}
@@ -920,4 +920,12 @@ func (v *fnVerifier) impliesMethod(e ast.Expr, TA, TB *funcInfo, a, b *types.Fun
 	}
 	results := sv.invoke(call, TA, args, entry, nil)
 	sv.atReturn(entry, results, e.Pos())
+}
+
+// article returns the indefinite article for a word as it is spoken.
+func article(word string) string {
+	if word != "" && strings.ContainsRune("aeiouAEIOU", rune(word[0])) {
+		return "an"
+	}
+	return "a"
 }

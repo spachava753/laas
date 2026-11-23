@@ -685,6 +685,21 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 						from.call, v.placeOf(from.at), spelledResult(from.fn, from.result))
 				}
 			}
+			// A local declared from a conversion between interfaces holds
+			// the converted value, whose footprint is what to list (F18 of
+			// the review of step 5).
+			if sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok && remedy == "" && t.param == fn.receiver {
+				if variable := v.localVar(sel.X); variable != nil && !slices.Contains(v.fn.params, variable) && !v.findReassigned(v.bodyOrigin())[variable] {
+					init := ast.Unparen(v.declaredFrom(variable))
+					if conv, isCall := init.(*ast.CallExpr); isCall && len(conv.Args) == 1 && v.info.Types[conv.Fun].IsType() {
+						init = ast.Unparen(conv.Args[0])
+					}
+					if init != nil && isIface(v.info.TypeOf(init)) && !types.Identical(v.info.TypeOf(init), variable.Type()) {
+						remedy = fmt.Sprintf("%s holds %s, converted at %s; list %s in a // @Modifies clause",
+							variable.Name(), types.ExprString(init), v.placeOf(init.Pos()), types.ExprString(init))
+					}
+				}
+			}
 			before := v.reports
 			v.checkFootprintWrite(st, guard, t, call.Pos(), fmt.Sprintf("%s may modify the footprint of %s", name, base), remedy, unlisted)
 			v.checkFootprintRanged(st, guard, t, call.Pos(), name)

@@ -259,3 +259,52 @@ func GateAsUser(g Gate) {
 	var u User = g // want `g.Use may modify the states of g, which User.Use may not modify; the contract of User.Use does not list it, so code that writes it cannot be used there, in Gate.Use used as User.Use at convert.go:\d+:\d+`
 	_ = u
 }
+
+// ThroughUnlisted writes through a local that holds the converted writer.
+//
+// @Requires w != nil
+// @Ensures True
+func ThroughUnlisted(w http.ResponseWriter) {
+	out := io.Writer(w)
+	out.Write([]byte("x")) // want `out.Write may modify the footprint of out, which ThroughUnlisted may not modify; out holds w, converted at convert.go:\d+:\d+; list w in a // @Modifies clause`
+}
+
+// HeaderBeside hands the header beside the converted writer.
+//
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func HeaderBeside(w http.ResponseWriter) {
+	h := w.Header()
+	headerTo(io.Writer(w), h) // want `it comes from the call of w.Header at convert.go:\d+:\d+, whose contract places it within w, which may hold memory a writer writes`
+}
+
+// headerTo writes through w beside a header.
+//
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func headerTo(w io.Writer, h http.Header) {
+	w.Write([]byte("h"))
+}
+
+// RC is a closer whose own Read lists r only, which on an interface with
+// states covers the states.
+type RC interface {
+	io.Closer
+
+	// @Receiver r
+	// @Requires |p| > 0
+	// @Modifies r, p
+	// @Ensures 0 <= n <= |p|
+	Read(p []byte) (n int, err error)
+}
+
+// AsRC converts a reader whose Read writes behind it to RC.
+//
+// @Requires rc != nil
+// @Ensures True
+func AsRC(rc io.ReadCloser) {
+	var r RC = rc // want `the contract of RC.Read lists r, which on an interface with states covers its states only; list behind\(r\) too to let the method write behind its receiver`
+	_ = r
+}

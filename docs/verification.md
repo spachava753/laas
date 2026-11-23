@@ -4743,6 +4743,123 @@ Give it a trusted contract with `formats` instead. `vego` then checks each value
 
 `log.Fatal`, `log.Fatalf`, `log.Fatalln`, `log.Panic`, `log.Panicf`, and `log.Panicln` have no shipped contracts. A trusted contract claims that its function returns, and these do not. A call of one is reported as `cannot verify`, with the message that it has no contract.
 
+## Writing a response
+
+A handler of `net/http` writes its response through the `http.ResponseWriter` it is handed. List the writer in `Modifies`:
+
+```go
+// Tasks counts what a handler serves.
+type Tasks struct{ Served int }
+
+// @Requires w != nil And req != nil And req.URL != nil And t != nil
+// @Modifies w
+// @Ensures t.Served' = t.Served
+func GetTask(w http.ResponseWriter, req *http.Request, t *Tasks) {
+	id, err := strconv.Atoi(req.PathValue("id"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if id < 0 {
+		http.NotFound(w, req)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "task %d\n", id)
+}
+```
+
+These calls have shipped contracts:
+
+- `Header`, `WriteHeader`, and `Write` of `http.ResponseWriter`. `Header` returns a map that lies in the footprint of the writer, so `Modifies w` covers `w.Header().Set(...)` and `w.Header().Del(...)`. `WriteHeader` requires a code from 100 to 999.
+- `http.Error`, `http.NotFound`, and `http.StatusText`.
+- `Get`, `Set`, and `Del` of `http.Header`, and `PathValue` of the request.
+- `Query` of a `*url.URL`, which requires a bound on the length of `RawQuery`, and `Get` of the `url.Values` it returns.
+
+A `ResponseWriter` converts to `io.Writer`, so you can pass it to `fmt.Fprintf` and to functions that take an `io.Writer`. Its fields of the request, such as `req.Method` and `req.URL.Path`, are read as fields, and what the request reaches is kept across the writes:
+
+```go
+// @Requires w != nil And req != nil And req.URL != nil And |req.URL.RawQuery| <= 1000000
+// @Modifies w
+// @Ensures True
+func ByTag(w http.ResponseWriter, req *http.Request) {
+	tag := req.URL.Query().Get("tag")
+	if tag == "" {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	w.Write([]byte(tag))
+}
+```
+
+`http.Error` formats its message with `fmt.Fprintln`, so the message needs a bound. The text that `err.Error()` returns for an error that can be formatted is short enough, as [What a proof assumes](#what-a-proof-assumes) says of the text of an error, so `http.Error(w, err.Error(), code)` needs nothing more. The text of an error of unknown origin cannot be read, for the reason given in [Interface values from code that is not verified](#interface-values-from-code-that-is-not-verified).
+
+Without `w` in `Modifies`, a write to the header is reported:
+
+```go
+// @Requires w != nil
+// @Ensures True
+func Unlisted(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/plain")
+}
+```
+
+```text
+vego: w.Header may modify the footprint of w, which Unlisted may not modify; list it in a // @Modifies clause
+vego: Set may modify w.Header(), which Unlisted may not modify; it is memory that ResponseWriter.Header returned,
+which its contract places within w; list w in a // @Modifies clause
+```
+
+### A writer is used only during its request
+
+The documentation of `net/http` says that a `ResponseWriter` may not be used after `ServeHTTP` has returned. So verified code does not keep one. It does not store it into memory, capture it in a function literal that may run after the call, hand it to a function that keeps it, or return it. The same holds for a value that holds a writer, and for an interface value converted from one:
+
+```go
+// Server remembers the writer of the last request.
+type Server struct {
+	last http.ResponseWriter
+}
+
+// @Requires s != nil And w != nil
+// @Modifies s
+// @Ensures True
+func (s *Server) Remember(w http.ResponseWriter, req *http.Request) {
+	s.last = w
+}
+```
+
+```text
+vego: w is or holds a net/http.ResponseWriter, which must not be used after the call that received it returns, and
+here it is stored into memory at handlers.go:61:2, where a later call could use it; pass it on only to calls that
+keep nothing of it
+```
+
+Pass the writer to helpers that write the response and keep nothing of it. A struct of your own that wraps the writer, such as one that records the status code, cannot be used yet.
+
+### The trailer of a request
+
+The server writes the field `Trailer` of the request while the handler runs, when it reads the body. That happens also inside a write to the writer, which reads the rest of a body the handler did not read. So verified code cannot read or write the field:
+
+```go
+// @Requires w != nil And req != nil
+// @Modifies w
+// @Ensures True
+func Trailers(w http.ResponseWriter, req *http.Request) {
+	if req.Trailer != nil {
+		w.WriteHeader(http.StatusOK)
+	}
+}
+```
+
+```text
+vego: cannot verify Trailers: Trailer of net/http.Request cannot be read or written by verified code: code that is
+not verified writes it behind calls whose entries do not list it, as the hidden declaration of net/http.Request in
+the shipped files says
+```
+
+The field `Trailer` of an `http.Response` is treated the same way.
+
 ## Defer
 
 `vego` verifies a deferred call at the point where it runs. That is at every `return` of the function, after the results have been set. Deferred calls run in reverse order.
@@ -5105,6 +5222,7 @@ Each entry has these fields:
 | `vouches` | no | Error results whose errors verified code may format, compare, and pass to `errors.Is`, results that hold function values or interface values verified code may call, and parameters under whose memory the function writes such values. See [Errors that a trusted function returns](#errors-that-a-trusted-function-returns) and [Function values and interface values that a trusted function returns](#function-values-and-interface-values-that-a-trusted-function-returns). |
 | `calls` | no | Function parameters that the function calls while it runs, each with what holds when it calls them. See [Functions that a trusted function calls](#functions-that-a-trusted-function-calls). |
 | `formats` | no | The parameter of type `any` or `...any` whose values the function formats as package `fmt` does, and the string it uses as the format, if any. See [Your own logging function](#your-own-logging-function). |
+| `stores` | no | Parameters under whose memory, as `modifies` lists it, the function stores only slices, maps, and pointers it allocates during the call, as `[h]` for `(net/http.Header).Set`. Check that no assignment or `append` into that memory stores an argument, a global, or anything the function did not allocate in the call. A call of such a function does not count as storing memory of unknown origin, so a function that sets a header can hand the writer to a helper beside its data. |
 | `prints` | no | For a function that formats and writes to a writer it is given, as `{w: fmt.Sprintf}`: the writer, and a function of the same package that takes the other parameters. It claims that the function formats as that one does, calls `Write` of the writer once with exactly what that one returns, calls nothing else of the writer, and returns what `Write` returned. A call into a `*bytes.Buffer`, a `*strings.Builder`, or a `*bufio.Writer` is then checked as described in [Formatting into a buffer](#formatting-into-a-buffer). The entry may require no more than that the writer is not nil, list only the writer in `modifies`, and have no `ensures`, `keeps`, or `calls`. |
 
 Put the formulas in quotes. Several characters that formulas use have a special meaning in YAML.
@@ -5176,7 +5294,8 @@ Some functions of the standard library have no shipped contract, because no true
 - The methods of `bytes.Buffer` and `strings.Builder` that read, `ReadFrom`, `WriteTo`, and the methods that speak of the capacity. See [Building text in a buffer](#building-text-in-a-buffer).
 - `(*regexp.Regexp).FindStringIndex` names its result differently in different releases of Go.
 - `regexp.MustCompile` panics on a pattern that does not compile. Call `regexp.Compile` and handle its error.
-- `http.Error` and the `Header` method of `http.ResponseWriter` write memory of the writer.
+- `Add` and `Values` of `http.Header`. `Add` appends to the slice of a key, which may write the array of a slice that the header already holds, and `Values` returns such a slice.
+- `mime.ParseMediaType`, the cookie functions of `net/http`, `http.Redirect`, and the methods of a request that read its body, such as `FormValue`.
 - `slices.SortFunc` and `slices.BinarySearchFunc` require that the comparison function is a strict weak ordering, which a contract cannot require of a function it is handed. See [Sorting a slice of structs](#sorting-a-slice-of-structs).
 - `maps.Keys`, `maps.Values`, and the other functions that return iterators need a range over a function.
 
@@ -6502,7 +6621,7 @@ func Discard() (w io.Writer) {
 }
 ```
 
-A writer of your own whose `Write` writes its own struct converts, as described in [Converting a value of your own type](#converting-a-value-of-your-own-type). Verified code cannot pass a `*bytes.Buffer` as an `io.Writer`, since its `Write` needs a bound that the contract of `(io.Writer).Write` does not give. It can pass it to `fmt.Fprintf` itself, as described in [Formatting into a buffer](#formatting-into-a-buffer). Nor can it pass a closer of its own as an `io.Closer`, since the shipped contract of `Close` speaks of the state `closed`. See [Making a value of an interface with a state](#making-a-value-of-an-interface-with-a-state). A type whose `Write` has a contract that writes nothing behind the receiver does convert. A `net.Conn` or an `http.ResponseWriter` cannot be converted to `io.Writer` either, because each declares a `Write` of its own. See [Converting between interfaces](#converting-between-interfaces). Make such a conversion in code that is not verified.
+A writer of your own whose `Write` writes its own struct converts, as described in [Converting a value of your own type](#converting-a-value-of-your-own-type). Verified code cannot pass a `*bytes.Buffer` as an `io.Writer`, since its `Write` needs a bound that the contract of `(io.Writer).Write` does not give. It can pass it to `fmt.Fprintf` itself, as described in [Formatting into a buffer](#formatting-into-a-buffer). A closer of your own converts to an `io.Closer`, as described in [Making a value of an interface with a state](#making-a-value-of-an-interface-with-a-state). A type whose `Write` has a contract that writes nothing behind the receiver converts too. An `http.ResponseWriter` converts to `io.Writer`, because the contract of its `Write` implies that of `io.Writer`'s. A `net.Conn` does not, because its `Write` has no contract. See [Converting between interfaces](#converting-between-interfaces).
 
 #### Wrapping the errors of Read and Write
 
@@ -6767,6 +6886,13 @@ This table lists the most common messages.
 | --- | --- | --- |
 | `postcondition may not hold: P` | `P` is not proved at this `return`. | Follow the steps in [When a proof fails](#when-a-proof-fails). |
 | `precondition of F may not hold: P` | A `Requires` clause of `F` is not proved at this call. | Establish it before the call, or add it to your own `Requires`. |
+| `w is or holds a net/http.ResponseWriter, which must not be used after the call that received it returns, and here it is ...` | The writer, or a value that holds it, is stored, captured, handed to a function that keeps it, or returned. | Pass the writer only to calls that keep nothing of it. See [A writer is used only during its request](#a-writer-is-used-only-during-its-request). |
+| `cannot verify F: Trailer of net/http.Request cannot be read or written by verified code: ...` | The server writes the field while the handler runs. | Read trailers in code that is not verified. See [The trailer of a request](#the-trailer-of-a-request). |
+| `cannot verify F: resp.Body is stored into, and what the field Body of a net/http.Response holds writes nothing else the Response reaches, ...` | A body handed in may write the response. | Store a body made where it is stored, or build the response in code that is not verified. |
+| `precondition of errors.New may not hold: 2 * (\|text\| + 4096) + 65536 <= MaxAlloc, so that the text of the error can be printed; ...` | The text of the error has no bound. | Bound the length of the text in a `Requires`. |
+| `cannot verify F: calling Error on err would run the methods of an error whose origin is not known; ...` | The error may hold code nobody has seen. | Return the error unchanged, or vouch for it. See [Interface values from code that is not verified](#interface-values-from-code-that-is-not-verified). |
+| `cannot verify F: converting x, a A, to B is not supported: ...` | `B` has a state that `A` does not declare, or a method of `A` keeps more, vouches for less, or asserts more than the method of `B`. | See [Converting between interfaces](#converting-between-interfaces). |
+| `postcondition may not hold: P, in A.M used as B.M at ...` | The contract of the method of `A` does not imply that of `B`, or the method of a value you converted does not meet the contract of the interface. | Strengthen the contract of `A.M`, or weaken that of `B.M`. |
 | `index may be out of range` | The index is not proved to be in range. | Add a `Requires` clause or an invariant that bounds the index. |
 | `addition may overflow int`, and similar | The result is not proved to fit its type. | Bound the inputs, or rearrange the expression. |
 | `loop invariant may not hold on entry` | The invariant is not proved before the first iteration. It is usually false there. | Fix the invariant or the code before the loop. |
@@ -6932,7 +7058,10 @@ A function that uses any of the following is reported as `cannot verify`:
 - a function that keeps code it is given anywhere but in a result or in memory that a parameter reaches, such as a registry, a goroutine, or a timer, which has no true entry; making a trusted function with `keeps` into a value; and handing a function literal, a function, or a method value of a type without a contract to a parameter under `keeps` (see [Functions that keep what they are given](#functions-that-keep-what-they-are-given));
 - comparing interface values in code with anything but `nil`, type assertions, and type switches;
 - a cycle of calls that goes through a call through an interface value or a function value, or through code of another package (see [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods)), reported as `this call may not end`;
-- converting an interface value to an interface whose methods it does not have from the same declarations, other than `any`;
+- converting an interface value to an interface whose methods it does not have from the same declarations, unless the contract of each of its methods implies the target's (see [Converting between interfaces](#converting-between-interfaces));
+- keeping an `http.ResponseWriter`, or a value that holds one or was converted from one (see [A writer is used only during its request](#a-writer-is-used-only-during-its-request)), and a struct of your own that wraps a `ResponseWriter` and is passed on as one, whose `Write` calls through the writer it holds;
+- reading or writing the field `Trailer` of an `http.Request` or an `http.Response` (see [The trailer of a request](#the-trailer-of-a-request)), storing into the `Body` of an `http.Response` anything but a value made where it is stored, and storing a whole `http.Response` into memory that is not a local variable;
+- a state-changing method of an interface with states whose implementation writes what the value holds, unless its contract lists `behind(r)` (see [Making a value of an interface with a state](#making-a-value-of-an-interface-with-a-state)), and a method whose contract speaks of a state of the receiver before the call, for a value of your own;
 - interface types written in place that embed a named interface, generic interface types, and interfaces that embed `error`;
 - calls of methods promoted from an embedded interface field, method expressions such as `I.M`, and method values of interface methods;
 - calls of function values whose type has no contract, and making a function value of such a type from a function, a method, or a literal (see [A function type without a contract](#a-function-type-without-a-contract));
@@ -6973,7 +7102,7 @@ Floating-point values are supported but opaque. They can be passed around and us
 
 A proof by `vego` depends on the following assumptions. Each concerns something `vego` cannot see.
 
-- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and holds no value that can hold code anywhere it was not held when the call began, unless `keeps` lists the parameter. For a parameter listed under `keeps`, it runs the code during the call only if `runs` lists the parameter too, holds it when it returns only in memory that the results and parameters listed there reach, and has started or registered nothing that runs it later: no goroutine, timer, finalizer or cleanup, callback given to another package, or package-level variable. For a parameter listed under `prints`, the function formats as the function that `prints` names does, calls the `Write` of that parameter once with exactly what that function returns, calls nothing else of it, and returns what `Write` returned. For a parameter listed under `runs` or `keeps`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter. Where such a value runs what the function keeps, as the reader that `io.TeeReader` returns runs the reader and the writer it is given, it meets its contract whenever what the function keeps meets theirs.
+- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and holds no value that can hold code anywhere it was not held when the call began, unless `keeps` lists the parameter. For a parameter listed under `keeps`, it runs the code during the call only if `runs` lists the parameter too, holds it when it returns only in memory that the results and parameters listed there reach, and has started or registered nothing that runs it later: no goroutine, timer, finalizer or cleanup, callback given to another package, or package-level variable. For a parameter listed under `stores`, the function stores into the memory that its `modifies` lists under that parameter only memory it made during the call. For a parameter listed under `prints`, the function formats as the function that `prints` names does, calls the `Write` of that parameter once with exactly what that function returns, calls nothing else of it, and returns what `Write` returned. For a parameter listed under `runs` or `keeps`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter. Where such a value runs what the function keeps, as the reader that `io.TeeReader` returns runs the reader and the writer it is given, it meets its contract whenever what the function keeps meets theirs.
 - The methods of `bytes.Buffer`, `strings.Builder`, `bufio.Writer`, `bufio.Reader`, `bufio.Scanner`, and `log.Logger` that have shipped entries write nothing that verified code can see other than the struct and the memory that the value owns, as [Writing through a buffer](#writing-through-a-buffer) lists it. After a call, the value owns only what it owned before the call and memory that the call made. The read position of a `bytes.Buffer` never passes the end of what was written to it. Every method of `bytes.Buffer` keeps it so, and `|b|` is the number of bytes between the two.
 - Code of another package runs code of the verified package only as `vego` follows it, which [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods) describes: during a call that the verified package makes, it runs only what that call hands it, through the arguments and the receiver. Code that it kept from an earlier call, a value it stored, or code that it runs on another goroutine or at another time, does not call back into a verified function while that function runs, so that the call never ends. A cycle that stays in the package, or that goes through what a call hands to another package, is found and reported.
 - A claim under `asserts` is true: the function calls nothing that the parameter holds, or that a call of what the parameter holds returns, but what the claim allows, and uses no reflection on it (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
@@ -7003,7 +7132,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - The machine has enough memory and stack.
 - The key and the value of every entry of a map take memory of their own in the heap, as Go's runtime keeps them, and the heap spans at most `MaxAlloc` bytes. `vego` uses this to bound the number of keys of a map by the size of a key and a value, as described in [How many keys a map can have](#how-many-keys-a-map-can-have). The Go specification does not say how a map is stored; the runtime of the Go releases that `laas` is tested with stores it this way, for keys and values of size zero and for large ones kept behind a pointer. Entries of different maps take memory of their own too, though `vego` bounds one map at a time.
 - What formatting builds from parts whose length the logic has no term for is not longer than can be allocated. Those parts are:
-  - the text of an error;
+  - the text of an error, also when verified code reads it with `Error`: the string `err.Error()` returns is taken to be short enough that `2 * (|s| + 4096) + 65536 <= MaxAlloc`, which on a 32-bit target means under about 2 GB. `errors.New` requires this of the text it is given, and `fmt.Errorf` proves it of what it builds, so only the text of errors from code that is not verified, and of the parts of a wrapped error that have no length in the logic, is assumed;
   - what a `String` or `Error` method returns;
   - the strings and slices held in the elements of a slice, such as the strings of a `[]string`, when the slice is formatted;
   - the name of a file that a logger's header shows, with `log.Lshortfile` or `log.Llongfile`;
@@ -7100,6 +7229,7 @@ Results are referred to by the names in the function's signature.
 | `Modifies m[k]` | the entry of key `k`: whether the map has it, its value, and the number of keys; for a map of pointers, slices, maps, or interface values, what the value under `k` refers to |
 | `Modifies g[from][to]` | the entry `to` of the map held under `from` |
 | `Modifies rc`, `Modifies p.f` | if `rc` or `f` is an interface value: every state of what it holds and, when its methods write behind their receiver, its footprint, the memory they may write; not the variable or the field; a function value field is the field itself |
+| `Modifies r, behind(r)` | in the contract of a method of an interface with states: `r` alone is the states of the receiver and nothing else, and `behind(r)` its footprint, the memory its methods may write |
 | `Modifies bw` | for a `*bufio.Writer`, `*bufio.Reader`, `*bufio.Scanner`, `*log.Logger`, `*bytes.Buffer`, or `*strings.Builder`: the struct and the memory it owns |
 | `Modifies p`, `Modifies p.out`, `Modifies bs[0]` | for a pointer to a struct that holds a `strings.Builder` or a `bytes.Buffer` by value, a path to one, or an element of a slice of them: also the memory the buffer owns; `Modifies bs` does not cover what the elements own |
 | `Modifies p` | for a pointer to a struct that declares `@Owns`: also what it owns, the array of an owned slice up to its capacity, an owned map, an owned struct with what it owns, and the footprint and states of an owned interface value |

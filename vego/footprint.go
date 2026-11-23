@@ -545,6 +545,13 @@ func (v *fnVerifier) checkFootprintWrite(st *state, guard []*logic.Term, t targe
 		switch {
 		case remedy != "":
 			v.report(pos, "%s, which %s may not modify; %s%s", what, v.fn.obj.Name(), remedy, limitNote(result))
+		case listed == 0 && v.fn.spelling().receiver != nil && v.hasStates(v.fn.spelling().receiver.Type()) && !listsBehind(v.fn.spelling()) &&
+			slices.ContainsFunc(v.fn.spelling().modifies, func(m *modTarget) bool { return m.name == v.fn.spelling().receiver.Name() }):
+			// A method of an interface with states that lists its receiver
+			// changes its states only (D2; F18 of the review of step 5).
+			r := v.fn.spelling().receiver.Name()
+			v.report(pos, "%s, which %s may not modify; the contract of %s lists %s, which on an interface with states covers its states only; "+
+				"list behind(%s) too to let the method write behind its receiver%s", what, v.fn.obj.Name(), v.fn.obj.Name(), r, r, limitNote(result))
 		case listed == 0 && (v.fn.spelling().valueOf != nil || v.fn.spelling().methodOf != nil):
 			v.report(pos, "%s, which %s may not modify; the contract of %s does not list it, so code that writes it cannot be used there%s",
 				what, v.fn.obj.Name(), v.fn.obj.Name(), limitNote(result))

@@ -470,6 +470,12 @@ func (v *fnVerifier) memResult(e ast.Expr, index int, fact memFact) string {
 		}
 		return ""
 	}
+	// Within the receiver of an interface method, as what
+	// (net/http.ResponseWriter).Header returns: in its footprint (F18 of
+	// the review of step 5).
+	if sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok && fn.receiver != nil && placesWithin(fn) {
+		return fmt.Sprintf("it comes from the call of %s at %s, whose contract places it within %s, which may hold memory a writer writes", name, v.placeOf(call.Pos()), types.ExprString(sel.X))
+	}
 	return fmt.Sprintf("it comes from the call of %s at %s, whose contract does not say that it is new or lies within an argument", name, v.placeOf(call.Pos()))
 }
 
