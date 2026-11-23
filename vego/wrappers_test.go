@@ -313,6 +313,9 @@ type sequenceCheck struct {
 	// that are what the value the call was given holds, as a large enough
 	// Writer handed to bufio.NewWriter: fresh(result, w) holds of either.
 	fresh, kept map[*types.Var]bool
+	// length gives |b| of an owner before and after the call, by the
+	// formula its declaration gives; see buffers_test.go.
+	length func(v *types.Var, when logic.When) *logic.Term
 }
 
 func (c *sequenceCheck) env() *specEnv {
@@ -332,6 +335,7 @@ func (c *sequenceCheck) env() *specEnv {
 		}
 		return logic.BoolLit(value)
 	}
+	env.givenLength = c.length
 	env.givenRelation = func(name string, paths []logic.Path) (*logic.Term, error) {
 		index, isResult := c.fn.resultNames[paths[0].Root]
 		if name != "fresh" || len(paths[0].Steps) > 0 || !isResult {

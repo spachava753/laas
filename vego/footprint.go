@@ -687,6 +687,16 @@ type ownsDecl struct {
 	fields   []string
 	reason string
 	line   int
+	// length, when set, is what |x| of a value of the type is: a formula
+	// over the type's own fields, read in the package of the type as an
+	// invariant is, as |buf| for a strings.Builder. holds are formulas over
+	// the same fields that every value of the type satisfies, claims of
+	// the declaration that are stated wherever the length is read. The
+	// texts are kept for messages and the tests.
+	length     *logic.Node
+	lengthText string
+	holds      []*logic.Node
+	holdsText  []string
 }
 
 // addOwns reads the owns section of a file: a mapping from a struct type,
@@ -718,12 +728,32 @@ func (f *trustFile) addOwns(node *yaml.Node) {
 				}
 			case "reason":
 				decl.reason = strings.TrimSpace(value.Value)
+			case "length":
+				node, err := logic.ParseFormula(value.Value)
+				if err != nil {
+					f.problem(value.Line, "owns of %s: length %q: %v", typeName.Value, value.Value, err)
+					continue
+				}
+				decl.length, decl.lengthText = node, value.Value
+			case "holds":
+				for _, item := range value.Content {
+					node, err := logic.ParseFormula(item.Value)
+					if err != nil {
+						f.problem(item.Line, "owns of %s: holds %q: %v", typeName.Value, item.Value, err)
+						continue
+					}
+					decl.holds, decl.holdsText = append(decl.holds, node), append(decl.holdsText, item.Value)
+				}
 			default:
-				f.problem(field.Line, "unknown field %q in owns of %s; expected fields and reason", field.Value, typeName.Value)
+				f.problem(field.Line, "unknown field %q in owns of %s; expected fields, length, holds, and reason", field.Value, typeName.Value)
 			}
 		}
 		if len(decl.fields) == 0 || decl.reason == "" {
 			f.problem(typeName.Line, "owns of %s needs the fields it owns and a reason", typeName.Value)
+			continue
+		}
+		if len(decl.holds) > 0 && decl.length == nil {
+			f.problem(typeName.Line, "owns of %s: holds is stated where the length is read, so it needs a length", typeName.Value)
 			continue
 		}
 		f.owns[stateKey(pkg, typ)] = decl
@@ -741,22 +771,8 @@ func (pv *pkgVerifier) ownedFields(t types.Type) []int {
 
 // ownedFieldsOf is ownedFields, which needs nothing of a package.
 func ownedFieldsOf(t types.Type) []int {
-	named, ok := types.Unalias(t).(*types.Named)
-	if !ok || named.Obj().Pkg() == nil {
-		return nil
-	}
-	u, isStruct := named.Underlying().(*types.Struct)
-	if !isStruct {
-		return nil
-	}
-	var decl ownsDecl
-	found := false
-	for _, file := range shippedContracts() {
-		if d, has := file.owns[stateKey(named.Obj().Pkg().Path(), named.Obj().Name())]; has {
-			decl, found = d, true
-		}
-	}
-	if !found {
+	decl, u := ownsDeclOf(t)
+	if decl == nil {
 		return nil
 	}
 	var indices []int
@@ -768,17 +784,61 @@ func ownedFieldsOf(t types.Type) []int {
 			}
 		}
 		if index < 0 {
-			panic(fmt.Sprintf("vego: internal error: the shipped declaration that %s owns %s names no field of it", named, name))
+			panic(fmt.Sprintf("vego: internal error: the shipped declaration that %s owns %s names no field of it", t, name))
 		}
 		// A field can be owned when it holds a pointer to a struct, a
 		// slice, a map, or an interface value.
 		ft := u.Field(index).Type()
 		if _, isPointer := pointee(ft); !isPointer && !isSlice(ft) && !isMap(ft) && !isIface(ft) {
-			panic(fmt.Sprintf("vego: internal error: the shipped declaration that %s owns %s names no field that can be owned", named, name))
+			panic(fmt.Sprintf("vego: internal error: the shipped declaration that %s owns %s names no field that can be owned", t, name))
 		}
 		indices = append(indices, index)
 	}
 	return indices
+}
+
+// ownsDeclOf returns the shipped declaration of what a value of a struct
+// type owns, and the struct. Like a state (statesOf), a declaration is
+// found through the package of the struct's fields and matched by the
+// underlying struct, tags ignored, so that a type defined over an owner,
+// as type B strings.Builder, owns what the owner owns: it shares its
+// memory and its methods' panics, and only the name differs (F1 of the
+// design review).
+func ownsDeclOf(t types.Type) (*ownsDecl, *types.Struct) {
+	decl, u, _ := ownsDeclared(t)
+	return decl, u
+}
+
+// ownsDeclared is ownsDeclOf, which also returns the type the declaration
+// names, whose fields a formula of the declaration reads in its package.
+func ownsDeclared(t types.Type) (*ownsDecl, *types.Struct, types.Type) {
+	u, isStruct := types.Unalias(t).Underlying().(*types.Struct)
+	if !isStruct {
+		return nil, nil, nil
+	}
+	var home *types.Package
+	for field := range u.Fields() {
+		if field.Pkg() != nil {
+			home = field.Pkg()
+			break
+		}
+	}
+	if home == nil {
+		return nil, nil, nil
+	}
+	plain := untagged(u)
+	for _, file := range shippedContracts() {
+		for _, decl := range file.owns {
+			if decl.pkg != home.Path() {
+				continue
+			}
+			obj, ok := home.Scope().Lookup(decl.typ).(*types.TypeName)
+			if ok && types.Identical(plain, untagged(obj.Type().Underlying())) {
+				return &decl, u, obj.Type()
+			}
+		}
+	}
+	return nil, nil, nil
 }
 
 // ownedParts returns, for a pointer to a struct whose type owns some of

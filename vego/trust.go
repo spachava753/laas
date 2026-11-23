@@ -974,6 +974,11 @@ func (v *fnVerifier) primedPaths(fn *funcInfo) {
 			if n.Kind == logic.NCall && len(n.Kids) == 1 && v.stateNamed(n.Name) {
 				inner = n.Name
 			}
+			// The length of an owner, as |b'|, reads the fields its
+			// declaration names, where the pointer points.
+			if n.Kind == logic.NLen {
+				inner = lengthRead
+			}
 			for i, kid := range n.Kids {
 				visit(kid, !isPath || i > 0, inner)
 			}
@@ -1069,7 +1074,7 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 	}
 	// What the path leads to is read as well: the elements of a slice, the
 	// keys and values of a map, and a state where a pointer points.
-	if object, viaPointer := pointee(t); viaPointer && state != "" {
+	if object, viaPointer := pointee(t); viaPointer && state != "" && state != lengthRead {
 		if u, isStruct := object.Underlying().(*types.Struct); isStruct {
 			decls := statesOf(u)
 			if index := slices.IndexFunc(decls, func(d stateDecl) bool { return d.name == state }); index >= 0 {
@@ -1078,8 +1083,14 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 			}
 		}
 	}
+	// The length of an owner reads its struct, where a pointer points.
+	if object, viaPointer := pointee(t); viaPointer && state == lengthRead && ownerLength(object) != nil {
+		for _, c := range v.cellsOf(object) {
+			read, own = append(read, c), append(own, false)
+		}
+	}
 	// The states of an interface value lie in the row of its home.
-	if isIface(t) && state != "" {
+	if isIface(t) && state != "" && state != lengthRead {
 		read, own = append(read, stateCell), append(own, false)
 	}
 	switch {
@@ -1099,6 +1110,9 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 			"drop the prime or list what the function writes", c.text, c.text[path.Start:path.End], c.text[path.Start:path.End])
 	}
 }
+
+// lengthRead is the state checkPrimed is given for the operand of |...|.
+const lengthRead = "|length|"
 
 // noteUse records that a proof relies on a trusted contract.
 func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {

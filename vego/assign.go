@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"math/big"
 	"slices"
 
 	"github.com/spachava753/laas/vego/internal/logic"
@@ -570,10 +571,7 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		// allocated, even where grown is not. The old capacity is less than
 		// grown, or the slice would not move, so the capacity picked is
 		// less than twice grown; no platform has pages of more than 64 KB.
-		size := v.pass.TypesSizes.Sizeof(elem)
-		room := logic.Add(logic.Mul(grown, logic.IntLit(2*size)), logic.IntLit(1<<16))
-		fits := logic.And(logic.Le(room, logic.BigLit(v.maxAlloc())), v.typeFact(grown, types.Typ[types.Int]))
-		v.check(next, nil, fits, call.Pos(), "the slice that append grows may be more than can be allocated")
+		v.check(next, nil, v.appendFits(grown, elem), call.Pos(), "the slice that append grows may be more than can be allocated")
 		// Copying the old elements reads them, which may happen before or
 		// after the calls of the targets.
 		v.unit = u.fork()
@@ -746,4 +744,24 @@ func (v *fnVerifier) atReturn(st *state, results []value, pos token.Pos) {
 // body, at the given position.
 func (v *fnVerifier) bodyEnv(st *state, pos token.Pos) *specEnv {
 	return &specEnv{v: v, sink: st, st: st, pos: pos, now: st.mem}
+}
+
+// appendFits is what an append that moves its slice to a new array must
+// prove of grown, the new length: the capacity the runtime picks, less than
+// twice grown, rounded up in bytes, is something that can be allocated, and
+// is a capacity an int can hold. growslice turns the rounded size back into
+// a capacity with int(capmem / size) and checks only maxAlloc, which is
+// more than MaxInt on a 32-bit target: there, appending 838374793 bytes of
+// a full []byte of 879605573 to itself gives a slice whose cap is
+// -2147483648, and no panic (TestBuffers386). So the rounded size must also
+// be at most size * MaxInt.
+func (v *fnVerifier) appendFits(grown *logic.Term, elem types.Type) *logic.Term {
+	size := v.pass.TypesSizes.Sizeof(elem)
+	room := logic.Add(logic.Mul(grown, logic.IntLit(2*size)), logic.IntLit(1<<16))
+	fits := []*logic.Term{logic.Le(room, logic.BigLit(v.maxAlloc())), v.typeFact(grown, types.Typ[types.Int])}
+	if size > 0 {
+		_, maxInt, _ := v.intRange(types.Typ[types.Int])
+		fits = append(fits, logic.Le(room, logic.BigLit(new(big.Int).Mul(maxInt, big.NewInt(size)))))
+	}
+	return logic.And(fits...)
 }

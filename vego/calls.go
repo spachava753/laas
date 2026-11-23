@@ -549,6 +549,15 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	}
 	pre := &specEnv{v: v, sink: st, fn: fn, args: args, now: before}
 	for _, c := range fn.requires {
+		if sig.Recv() != nil && fn.trust != nil && ownerLength(sig.Recv().Type()) != nil {
+			// A bound of what a buffer can grow to: the message says
+			// what bound on each length is enough.
+			for _, node := range c.node.Conjuncts() {
+				text := strings.Join(strings.Fields(c.text[node.Start:node.End]), " ")
+				v.check(st, guard, v.formula(c, node, pre), call.Pos(), "precondition of %s may not hold: %s%s", name, text, v.growthHint(c, node, pre, passed))
+			}
+			continue
+		}
 		v.checkClause(c, pre, st, guard, call.Pos(), "precondition of "+name+" may not hold")
 	}
 	v.checkRecursion(fn, pre, st, guard, call)
@@ -660,12 +669,6 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	for _, t := range written {
 		v.havoc(st, t, guard)
 	}
-	// What an owner owns grows only by memory the call creates.
-	for _, t := range written {
-		if t.owner != nil {
-			st.assume(logic.Implies(logic.And(guard...), v.ownerGrowth(st, before, st.mem, t.owner, t.ownerType, existed)))
-		}
-	}
 	var applied map[*types.Var]*logic.Term
 	if fn.calls.len() > 0 {
 		applied = v.runHanded(call, fn, args, written, atCall, st, mark)
@@ -686,6 +689,16 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	// The callee may have created objects, if it ran.
 	st.brk = v.fresh("brk", logic.Ref)
 	st.assume(logic.Le(existed, st.brk))
+	// What an owner owns grows only by memory the call creates. It is
+	// stated once the call's bound is known: what is new lies at or past
+	// existed and below the bound after the call, which the type facts of
+	// what is read here say; stated before it, a buffer that must move,
+	// as a zero Builder must, could be nowhere.
+	for _, t := range written {
+		if t.owner != nil {
+			st.assume(logic.Implies(logic.And(guard...), v.ownerGrowth(st, before, st.mem, t.owner, t.ownerType, existed)))
+		}
+	}
 	// A footprint the call grew holds only what exists after it.
 	for _, grown := range v.growing {
 		grown.after = st.brk

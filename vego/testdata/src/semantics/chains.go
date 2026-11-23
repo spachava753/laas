@@ -1,6 +1,9 @@
 package semantics
 
-import "bufio"
+import (
+	"bufio"
+	"strings"
+)
 
 // Each function below repeats one operation 30 times. If the rule for the
 // operation put its operand into the result more than once, what the
@@ -1031,4 +1034,77 @@ func SpliceChain(bw *bufio.Writer) (r byte) {
 	_ = bw.WriteByte(28)
 	_ = bw.WriteByte(29)
 	return p[0]
+}
+
+
+// LengthChain writes a Builder it is handed thirty times and reads its
+// length after each write. The length of an owner is a formula over its
+// fields, read from one fetch of its struct, so the pointer enters each
+// read once, and the length is an integer, which no later length reads.
+//
+// @Requires b != nil And |b| = 0
+// @Modifies b
+// @Ensures n = 30
+func LengthChain(b *strings.Builder) (n int) {
+	b.WriteByte('x')
+	// @Assert |b| = 1
+	b.WriteByte('x')
+	// @Assert |b| = 2
+	b.WriteByte('x')
+	// @Assert |b| = 3
+	b.WriteByte('x')
+	// @Assert |b| = 4
+	b.WriteByte('x')
+	// @Assert |b| = 5
+	b.WriteByte('x')
+	// @Assert |b| = 6
+	b.WriteByte('x')
+	// @Assert |b| = 7
+	b.WriteByte('x')
+	// @Assert |b| = 8
+	b.WriteByte('x')
+	// @Assert |b| = 9
+	b.WriteByte('x')
+	// @Assert |b| = 10
+	b.WriteByte('x')
+	// @Assert |b| = 11
+	b.WriteByte('x')
+	// @Assert |b| = 12
+	b.WriteByte('x')
+	// @Assert |b| = 13
+	b.WriteByte('x')
+	// @Assert |b| = 14
+	b.WriteByte('x')
+	// @Assert |b| = 15
+	b.WriteByte('x')
+	// @Assert |b| = 16
+	b.WriteByte('x')
+	// @Assert |b| = 17
+	b.WriteByte('x')
+	// @Assert |b| = 18
+	b.WriteByte('x')
+	// @Assert |b| = 19
+	b.WriteByte('x')
+	// @Assert |b| = 20
+	b.WriteByte('x')
+	// @Assert |b| = 21
+	b.WriteByte('x')
+	// @Assert |b| = 22
+	b.WriteByte('x')
+	// @Assert |b| = 23
+	b.WriteByte('x')
+	// @Assert |b| = 24
+	b.WriteByte('x')
+	// @Assert |b| = 25
+	b.WriteByte('x')
+	// @Assert |b| = 26
+	b.WriteByte('x')
+	// @Assert |b| = 27
+	b.WriteByte('x')
+	// @Assert |b| = 28
+	b.WriteByte('x')
+	// @Assert |b| = 29
+	b.WriteByte('x')
+	// @Assert |b| = 30
+	return b.Len()
 }

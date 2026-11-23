@@ -7,6 +7,7 @@ import (
 	"go/types"
 	"golang.org/x/tools/go/analysis"
 	"maps"
+	"math/big"
 	"slices"
 	"strings"
 
@@ -43,6 +44,10 @@ type specEnv struct {
 	// and |m| of a map, where given is set; the tests of shipped entries
 	// answer it from the real slice or map.
 	givenSlice func(name string, last logic.Step, when logic.When) (*logic.Term, error)
+	// givenLength resolves |b| of a parameter or a result that is an owner
+	// with a length, where given is set; the tests of the shipped entries
+	// of buffers answer it from the fields of the real value.
+	givenLength func(v *types.Var, when logic.When) *logic.Term
 	// now is the memory plain paths are read from, and post the memory
 	// primed paths and results are read from, nil where there is none.
 	now, post memory
@@ -765,6 +770,11 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 		e.v.noteMap(sink, found.mem, found.typ, found.val[0], key)
 		return e.v.mapHas(found.sink, found.mem, found.typ, found.val[0], key), nil
 	}
+	if e.givenLength != nil && measured && len(steps) == 0 && e.fn != nil {
+		if param, ok := e.fn.paramNames[name]; ok && ownerLength(param.Type()) != nil {
+			return e.givenLength(param, when), nil
+		}
+	}
 	if base, ok := e.readyMade(name, when); ok {
 		if measured && len(steps) == 0 && !base.Sort.IsSeq() && e.givenSlice != nil {
 			// The number of keys of a map.
@@ -782,7 +792,7 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 		}
 		return base, nil
 	}
-	found, err := e.locate(name, steps, when)
+	found, err := e.locateAt(name, steps, when, measured)
 	switch {
 	case err != nil:
 		return nil, err
@@ -792,6 +802,8 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 		return logic.Len(found.val[0]), nil
 	case measured && found.constant == nil && isMap(found.typ):
 		return e.v.mapLen(found.sink, found.mem, found.typ, found.val[0]), nil
+	case measured && found.constant == nil && ownerLength(found.typ) != nil:
+		return e.ownerLength(found)
 	case measured:
 		return nil, fmt.Errorf("%s is not a slice or a string and has no length", spell(name, steps))
 	case found.constant != nil:
@@ -828,6 +840,210 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 			generic.Obj().Name(), types.TypeString(found.typ, types.RelativeTo(e.v.pass.Pkg)))
 	}
 	return nil, fmt.Errorf("%s is a %s; name one of its fields", spell(name, steps), found.typ)
+}
+
+// ownerLength returns the shipped declaration of what |x| is for a value
+// of type t, a struct that owns memory or a pointer to one, when the
+// declaration gives a length; nil otherwise.
+func ownerLength(t types.Type) *ownsDecl {
+	if object, isPointer := pointee(t); isPointer {
+		t = object
+	}
+	if decl, _ := ownsDeclOf(t); decl != nil && decl.length != nil {
+		return decl
+	}
+	return nil
+}
+
+// ownerLength resolves |x| of an owner, a struct or a pointer to one, by
+// the length its declaration gives: a formula over the fields of the
+// struct, read in the package of the type. The struct is read once, and
+// the formula takes its fields from that value, so the pointer is not put
+// into the term once per field read. What the declaration holds of every
+// value is stated where the length is read, of a struct a pointer that is
+// not nil points to.
+func (e *specEnv) ownerLength(found reached) (*logic.Term, error) {
+	decl := ownerLength(found.typ)
+	object, isPointer := pointee(found.typ)
+	self := found.val
+	var notNil *logic.Term
+	if isPointer {
+		self = e.v.fetch(found.sink, found.mem, e.v.cellsOf(object), found.val[0], found.val[1])
+		e.v.noteTyped(found.sink, self, object)
+		notNil = logic.Lt(logic.IntLit(0), found.val[0])
+	} else {
+		object = found.typ
+	}
+	// The formula is read as of the type the declaration names, whose
+	// fields lie as those of a type defined over it do.
+	_, _, declared := ownsDeclared(object)
+	env := &specEnv{v: e.v, sink: found.sink, fn: &funcInfo{}, now: found.mem, self: self, selfType: declared}
+	length, err := e.v.res.IntTerm(decl.length, env)
+	if err != nil {
+		panic(fmt.Sprintf("vego: internal error: the length %q of %s cannot be read: %v", decl.lengthText, object, err))
+	}
+	for i, node := range decl.holds {
+		held, err := e.v.res.Formula(node, env)
+		if err != nil {
+			panic(fmt.Sprintf("vego: internal error: %q, held by %s, cannot be read: %v", decl.holdsText[i], object, err))
+		}
+		if found.sink != nil {
+			if notNil != nil {
+				held = logic.Implies(notNil, held)
+			}
+			found.sink.assume(held)
+		}
+	}
+	return length, nil
+}
+
+// growthHint returns, for a requires of a method of a buffer that bounds
+// what it can grow to by MaxAlloc or MaxInt, a note that says what bound
+// on each length it reads, and on each integer parameter it names, is
+// enough, as in "; it holds when |b| <= 1000000000 and |s| <= 1000000000":
+// the largest power of ten at which the clause holds on this platform.
+// Nobody derives such a bound from 65536. It returns "" for any other
+// clause.
+func (v *fnVerifier) growthHint(c *clause, node *logic.Node, pre *specEnv, passed map[*types.Var]string) string {
+	text := c.text[node.Start:node.End]
+	if !strings.Contains(text, "MaxAlloc") && !strings.Contains(text, "MaxInt") {
+		return ""
+	}
+	var names []string
+	seen := map[string]bool{}
+	var visit func(n *logic.Node)
+	visit = func(n *logic.Node) {
+		switch {
+		case n.Kind == logic.NLen && len(n.Kids) == 1 && n.Kids[0].Kind == logic.NIdent:
+			if param, ok := pre.fn.paramNames[n.Kids[0].Name]; ok && !seen["|"+n.Kids[0].Name+"|"] {
+				seen["|"+n.Kids[0].Name+"|"] = true
+				names = append(names, "|"+passed[param]+"|")
+			}
+			return
+		case n.Kind == logic.NIdent:
+			if param, ok := pre.fn.paramNames[n.Name]; ok && isInteger(param.Type()) && !seen[n.Name] {
+				seen[n.Name] = true
+				names = append(names, passed[param])
+			}
+		}
+		for _, kid := range n.Kids {
+			visit(kid)
+		}
+	}
+	visit(node)
+	if len(names) == 0 {
+		return ""
+	}
+	for bound := new(big.Int).Exp(big.NewInt(10), big.NewInt(15), nil); bound.Cmp(big.NewInt(1)) > 0; bound.Div(bound, big.NewInt(10)) {
+		env := &boundedEnv{specEnv: pre, bound: logic.BigLit(new(big.Int).Set(bound))}
+		var term *logic.Term
+		var err error
+		v.quietly(func() { term, err = v.resolverOf(c).Formula(node, env) })
+		if err != nil {
+			return ""
+		}
+		if holds, known := groundHolds(term); known && holds {
+			clauses := make([]string, len(names))
+			for i, name := range names {
+				clauses[i] = fmt.Sprintf("%s <= %s", name, bound)
+			}
+			return "; it holds when " + strings.Join(clauses, " and ")
+		}
+	}
+	return ""
+}
+
+// isInteger reports whether t is an integer type.
+func isInteger(t types.Type) bool {
+	basic, ok := t.Underlying().(*types.Basic)
+	return ok && basic.Info()&types.IsInteger != 0
+}
+
+// boundedEnv reads every length of a parameter, and every integer
+// parameter, as bound, for growthHint.
+type boundedEnv struct {
+	*specEnv
+	bound *logic.Term
+}
+
+func (e *boundedEnv) Path(name string, steps []logic.Step, when logic.When) (*logic.Term, error) {
+	if param, ok := e.fn.paramNames[name]; ok {
+		switch {
+		case len(steps) == 1 && steps[0].Len:
+			return e.bound, nil
+		case len(steps) == 0 && isInteger(param.Type()):
+			return e.bound, nil
+		}
+	}
+	return e.specEnv.Path(name, steps, when)
+}
+
+// groundHolds decides a formula of integer literals, sums, products,
+// comparisons, and conjunctions; known is false for anything else.
+func groundHolds(t *logic.Term) (holds, known bool) {
+	switch t.Op {
+	case logic.OpTrue:
+		return true, true
+	case logic.OpFalse:
+		return false, true
+	case logic.OpAnd:
+		for _, arg := range t.Args {
+			if h, k := groundHolds(arg); !k || !h {
+				return false, k
+			}
+		}
+		return true, true
+	case logic.OpNot:
+		h, k := groundHolds(t.Args[0])
+		return !h, k
+	case logic.OpLe, logic.OpLt, logic.OpEq:
+		a, ka := groundValue(t.Args[0])
+		b, kb := groundValue(t.Args[1])
+		if !ka || !kb {
+			return false, false
+		}
+		switch t.Op {
+		case logic.OpLe:
+			return a.Cmp(b) <= 0, true
+		case logic.OpLt:
+			return a.Cmp(b) < 0, true
+		}
+		return a.Cmp(b) == 0, true
+	}
+	return false, false
+}
+
+// groundValue evaluates an integer term of literals, sums, negations, and
+// products.
+func groundValue(t *logic.Term) (*big.Int, bool) {
+	switch t.Op {
+	case logic.OpIntLit:
+		return t.Value(), true
+	case logic.OpNeg:
+		a, k := groundValue(t.Args[0])
+		if !k {
+			return nil, false
+		}
+		return new(big.Int).Neg(a), true
+	case logic.OpAdd, logic.OpMul:
+		sum := big.NewInt(0)
+		if t.Op == logic.OpMul {
+			sum = big.NewInt(1)
+		}
+		for _, arg := range t.Args {
+			a, k := groundValue(arg)
+			if !k {
+				return nil, false
+			}
+			if t.Op == logic.OpAdd {
+				sum.Add(sum, a)
+			} else {
+				sum.Mul(sum, a)
+			}
+		}
+		return sum, true
+	}
+	return nil, false
 }
 
 // genericAt returns, in the contract of an instantiation of a generic
@@ -933,6 +1149,13 @@ func (e *specEnv) sliceOrAddress(name string, steps []logic.Step, last logic.Ste
 	case last.Nil:
 		e.v.noteNamed(found.val[0], " = nil")
 		return isNilRef(found.val), nil
+	case last.Cap && found.constant == nil && ownerLength(found.typ) != nil:
+		owner := found.typ
+		if object, isPointer := pointee(owner); isPointer {
+			owner = object
+		}
+		return nil, fmt.Errorf("cap(%s): %s is a %s, whose capacity no contract speaks of; its length |%s| is what bounds what it can grow to",
+			what, what, types.TypeString(owner, nil), what)
 	case last.Cap && (found.constant != nil || !isSlice(found.typ)):
 		return nil, fmt.Errorf("cap(%s): %s is not a slice; only a slice has a capacity", what, what)
 	case last.Cap:

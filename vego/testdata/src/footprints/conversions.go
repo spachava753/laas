@@ -195,12 +195,13 @@ func FormatsIntoBuffer() {
 	fmt.Fprintf(&b, "x") // want `vego: cannot verify FormatsIntoBuffer: converting a value of type \*bytes.Buffer to io.Writer is not supported yet: the methods of Buffer that write may panic when the buffer is too large to grow`
 }
 
-// BuildsName writes a Builder, refused for the same reason.
+// BuildsName writes a Builder, whose writing methods have shipped entries
+// bounded by its length, which is 0 here.
 //
 // @Ensures True
 func BuildsName() {
 	var b strings.Builder
-	b.WriteByte('x') // want `vego: cannot verify BuildsName: it calls \(\*strings.Builder\).WriteByte, which grows the buffer`
+	b.WriteByte('x')
 }
 
 // WrapsWriter converts a Writer it made over w to an io.Writer, whose

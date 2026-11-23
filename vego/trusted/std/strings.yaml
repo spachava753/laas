@@ -3,10 +3,141 @@ version: 1
 owns:
   strings.Builder:
     fields: [buf]
+    length: "|buf|"
     reason: >-
-      The methods of a Builder write the struct (copyCheck sets addr) and the array its buf field holds, and grow it only into new memory, by append and Grow. String hands out a string that shares the array, which the Builder never changes once written.
+      The methods of a Builder write the struct (copyCheck sets addr) and the array its buf field holds, and grow it only into new memory, by append and Grow. String hands out a string that shares the array, which the Builder never changes once written. Its length, |b| in a formula, is len(buf), which Len returns: "Len returns the number of accumulated bytes; b.Len() == len(b.String())."
 
 trusted:
+  (*strings.Builder).Write:
+    reason: >-
+      Documented: "Write appends the contents of p to b's buffer. Write
+      always returns len(p), nil." The requires is read from the source of
+      Go 1.26.6 and 1.27.3 (builder.go, Write; runtime/slice.go, growslice
+      and nextslicecap): Write is append(b.buf, p...), which moves the
+      buffer only when its capacity is less than the new length, and then
+      to a capacity less than twice the new length, rounded up to a size
+      class or a page; growslice panics past maxAlloc. So it needs room for
+      twice |b| + |p| and the rounding. growslice makes the rounded size
+      the new capacity with an int conversion and checks only maxAlloc,
+      which is more than MaxInt on a 32-bit target, so the same must be
+      within MaxInt too, or the capacity is negative and a later Grow
+      panics. A Builder copied by value panics in
+      copyCheck; code that is not verified does not copy one that is not
+      zero, as the documentation of Builder asks.
+    requires:
+      - "b != nil"
+      - "2 * (|b| + |p|) + 65536 <= MaxAlloc"
+      - "2 * (|b| + |p|) + 65536 <= MaxInt"
+    modifies: [b]
+    ensures:
+      - "|b'| = |b| + |p|"
+      - "result1 = |p|"
+      - "result2 = nil"
+
+  (*strings.Builder).WriteString:
+    reason: >-
+      Documented: "WriteString appends the contents of s to b's buffer. It
+      returns the length of s and a nil error." The requires is read from
+      the source as for Write: WriteString is append(b.buf, s...).
+    requires:
+      - "b != nil"
+      - "2 * (|b| + |s|) + 65536 <= MaxAlloc"
+      - "2 * (|b| + |s|) + 65536 <= MaxInt"
+    modifies: [b]
+    ensures:
+      - "|b'| = |b| + |s|"
+      - "result1 = |s|"
+      - "result2 = nil"
+
+  (*strings.Builder).WriteByte:
+    reason: >-
+      Documented: "WriteByte appends the byte c to b's buffer. The returned
+      error is always nil." The requires is read from the source as for
+      Write: WriteByte is append(b.buf, c).
+    requires:
+      - "b != nil"
+      - "2 * (|b| + 1) + 65536 <= MaxAlloc"
+      - "2 * (|b| + 1) + 65536 <= MaxInt"
+    modifies: [b]
+    ensures:
+      - "|b'| = |b| + 1"
+      - "result = nil"
+
+  (*strings.Builder).WriteRune:
+    reason: >-
+      Documented in Go 1.26.6: "WriteRune appends the UTF-8 encoding of
+      Unicode code point r to b's buffer. It returns the length of r and a
+      nil error." (Go 1.27 says "the number of bytes written".) An encoding
+      takes one to four bytes, one for a code point below 128, and a value
+      that is no code point is written as U+FFFD, three bytes. The requires
+      is read from the source as for Write: WriteRune is
+      utf8.AppendRune(b.buf, r), one append of at most four bytes.
+    requires:
+      - "b != nil"
+      - "2 * (|b| + 4) + 65536 <= MaxAlloc"
+      - "2 * (|b| + 4) + 65536 <= MaxInt"
+    modifies: [b]
+    ensures:
+      - "1 <= result1 And result1 <= 4"
+      - "0 <= r And r < 128 -> result1 = 1"
+      - "|b'| = |b| + result1"
+      - "result2 = nil"
+
+  (*strings.Builder).Grow:
+    reason: >-
+      Documented: "Grow grows b's capacity, if necessary, to guarantee space
+      for another n bytes. After Grow(n), at least n bytes can be written to
+      b without another allocation. If n is negative, Grow panics." The
+      requires is read from the source of Go 1.26.6 and 1.27.3 (builder.go,
+      grow; runtime/slice.go, bytealg_MakeNoZero): when the free capacity
+      is less than n, Grow allocates 2 * cap + n bytes, and MakeNoZero
+      panics when that is more than maxAlloc or overflows an int, and,
+      through unsafe.Slice, when it rounds it up past MaxInt. The capacity
+      is then less than |b| + n, so 2 * cap + n is less than 3 * (|b| + n).
+      Grow writes no byte of the buffer and keeps its length.
+    requires:
+      - "b != nil"
+      - "0 <= n"
+      - "3 * (|b| + n) + 65536 <= MaxAlloc"
+      - "3 * (|b| + n) + 65536 <= MaxInt"
+    modifies: [b]
+    ensures:
+      - "|b'| = |b|"
+
+  (*strings.Builder).Len:
+    reason: >-
+      Documented: "Len returns the number of accumulated bytes; b.Len() ==
+      len(b.String())." It reads the length of the buffer, which is what
+      |b| is.
+    requires:
+      - "b != nil"
+    modifies: []
+    ensures:
+      - "result = |b|"
+
+  (*strings.Builder).String:
+    reason: >-
+      Documented: "String returns the accumulated string." Its length is
+      what Len returns. The string shares the buffer's array, which the
+      Builder never writes again: later writes append past it, and Reset
+      drops the array.
+    requires:
+      - "b != nil"
+    modifies: []
+    ensures:
+      - "|result| = |b|"
+
+  (*strings.Builder).Reset:
+    reason: >-
+      Documented: "Reset resets the Builder to be empty." It sets the buffer
+      to nil, so the next write allocates a new array, and clears what
+      copyCheck recorded.
+    requires:
+      - "b != nil"
+    modifies: [b]
+    ensures:
+      - "|b'| = 0"
+
   strings.Contains:
     reason: >-
       "Contains reports whether substr is within s." So when it reports true

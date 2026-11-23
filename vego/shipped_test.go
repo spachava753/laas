@@ -1963,6 +1963,9 @@ func checkShipped(t *testing.T, files bool, run func(key string) bool) {
 				case key == "bufio.NewWriter" || strings.HasPrefix(key, "(*bufio.Writer)."):
 					checkWriterEntries(t, pv, pkg, key)
 					return
+				case strings.HasPrefix(key, "(*strings.Builder)."):
+					checkBuilderEntries(t, pv, pkg, key)
+					return
 				case slices.Contains([]string{"io.NopCloser", "io.LimitReader", "io.TeeReader", "io.MultiReader", "io.MultiWriter"}, key):
 					checkIOEntries(t, pv, pkg, key)
 					return
