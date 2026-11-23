@@ -141,3 +141,53 @@ func SwapBody(req *http.Request, r io.ReadCloser) {
 func MakeRequest(r io.ReadCloser) (req *http.Request) {
 	return &http.Request{Body: r} // want `cannot verify MakeRequest: the field Body of the net/http\.Request made at decoder\.go:142:10 is set, and the progresses declaration of net/http\.Request in the shipped files says that what it holds is a`
 }
+
+// The decoder calls Read as many times as it needs (F28 of the review of
+// step 3): a contract of Read that reads its receiver is refused.
+
+// Counting counts its reads.
+type Counting struct{ Calls int }
+
+// Read reads a space and counts the call.
+//
+// @Requires c != nil And |p| > 0 And c.Calls < 1000000
+// @Modifies c, p
+// @Ensures c.Calls' = c.Calls + 1 And n = 1 And err = nil
+func (c *Counting) Read(p []byte) (n int, err error) {
+	p[0] = ' '
+	c.Calls = c.Calls + 1
+	return 1, nil
+}
+
+// OnceDecoded would rely on one call of Read.
+//
+// @Requires c != nil And c.Calls = 0
+// @Modifies c
+// @Ensures c.Calls' <= 1
+func OnceDecoded(c *Counting) {
+	var rt Req
+	_ = json.NewDecoder(io.LimitReader(c, 1000)).Decode(&rt) // want `cannot verify OnceDecoded: the decoder calls c\.Read as many times as it needs, and the contract of Read reads its receiver in "c != nil And \|p\| > 0 And c\.Calls < 1000000", which earlier calls may chan`
+}
+
+// Spaces reads spaces, whatever it was called before.
+type Spaces struct{ N int }
+
+// Read reads a space.
+//
+// @Requires s != nil And |p| > 0
+// @Modifies p
+// @Ensures n = 1 And err = nil
+func (s *Spaces) Read(p []byte) (n int, err error) {
+	p[0] = ' '
+	return 1, nil
+}
+
+// FromSpaces decodes from a reader whose contract is the same at every
+// call.
+//
+// @Requires s != nil
+// @Ensures True
+func FromSpaces(s *Spaces) {
+	var rt Req
+	_ = json.NewDecoder(io.LimitReader(s, 1000)).Decode(&rt)
+}

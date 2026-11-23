@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"go/types"
 	"math/big"
+	"slices"
 	"strings"
 
 	"golang.org/x/tools/go/types/typeutil"
@@ -435,6 +436,19 @@ func (v *fnVerifier) checkNilTargets(st *state, guard []*logic.Term, call *ast.C
 // refused: a decoder over a reader without a limit reads without one, and
 // one from elsewhere may hold what it read before.
 
+// mentionsName reports whether a formula names a variable.
+func mentionsName(n *logic.Node, name string) bool {
+	if n.Kind == logic.NIdent && n.Name == name {
+		return true
+	}
+	for _, kid := range n.Kids {
+		if mentionsName(kid, name) {
+			return true
+		}
+	}
+	return false
+}
+
 // progresses reports whether an expression is a field that a progresses
 // declaration names, as the Body of a request: a reader that the server
 // made, whose Read with a buffer that is not empty returns bytes or an
@@ -523,6 +537,27 @@ func (v *fnVerifier) callDecoder(call, limit *ast.CallExpr, st *state, guard []*
 	r, n := limit.Args[0], limit.Args[1]
 	rt := v.info.TypeOf(r)
 	read, receiverOf := v.routeMethod(call, r, "Read", "io.LimitReader", st, guard)
+	// The decoder calls Read as many times as it needs, none for a limit
+	// below one, each in a state the earlier calls left (F28 of the review
+	// of step 3). A contract whose requires and ensures read nothing of
+	// the reader that its Modifies lists means the same at every call: applied once, it forgets what
+	// any number of calls may write, and says of the buffer and the
+	// results what holds of each. Any other is refused.
+	readSig := read.obj.Type().(*types.Signature)
+	recvName := ""
+	if read.receiver != nil {
+		recvName = read.receiver.Name()
+	} else if recv := readSig.Recv(); recv != nil {
+		recvName = recv.Name()
+	}
+	written := slices.ContainsFunc(read.modifies, func(m *modTarget) bool { return m.name == recvName })
+	for _, c := range slices.Concat(read.requires, read.ensures) {
+		if written && recvName != "" && c.node != nil && mentionsName(c.node, recvName) {
+			v.unsupported(call.Pos(), fmt.Sprintf("the decoder calls %s.Read as many times as it needs, and the contract of Read reads its receiver in %q, "+
+				"which earlier calls may change; give Read a contract that speaks only of the buffer and the results, or read the body into a buffer and decode it with json.Unmarshal",
+				types.ExprString(r), c.text))
+		}
+	}
 	u := v.unit
 	operands := u.pushCeiling()
 	made := unitCall{name: decode.Name(), pos: call.Pos()}
@@ -559,7 +594,6 @@ func (v *fnVerifier) callDecoder(call, limit *ast.CallExpr, st *state, guard []*
 		}
 		// The reader's own Read of a new slice, which gives what the
 		// reads may change of r.
-		readSig := read.obj.Type().(*types.Signature)
 		p := readSig.Params().At(0)
 		// The decoder reads into a buffer with room left, of at least 512
 		// bytes.

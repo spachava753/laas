@@ -2712,8 +2712,10 @@ iowrap	iowrap.drain	1	46	0
 iowrap	keepslib.Consume	1	711	0
 iowrap	keepslib.Joined	1	5372	0
 jsondec	(*encoding/json.Decoder).Decode	1	1782	0
+jsondec	(*jsondec.Counting).Read	20	25068	0
+jsondec	(*jsondec.Spaces).Read	12	9297	0
 jsondec	(jsondec.VR).Read	12	8082	0
-jsondec	encoding/json.Decode	24	303702	0
+jsondec	encoding/json.Decode	28	354319	0
 jsondec	encoding/json.Unmarshal	159	13820826	28
 jsondec	io.Closer.Close	3	3149	0
 jsondec	io.LimitReader	1	3020	0
@@ -2730,6 +2732,7 @@ jsondec	jsondec.Embedded	10	33580	0
 jsondec	jsondec.EmptyThrough	81	651390	3
 jsondec	jsondec.Enveloped	42	1234222	1
 jsondec	jsondec.ErrText	25	227067	4
+jsondec	jsondec.FromSpaces	17	105453	4
 jsondec	jsondec.GivenDecoder	1	241	0
 jsondec	jsondec.Headers	27	497991	8
 jsondec	jsondec.HeldDecoder	2	1524	0
@@ -2750,6 +2753,7 @@ jsondec	jsondec.LocalSlice	20	120638	0
 jsondec	jsondec.MakeRequest	0	0	0
 jsondec	jsondec.Message	1	398	0
 jsondec	jsondec.NoLimit	2	1524	0
+jsondec	jsondec.OnceDecoded	1	831	0
 jsondec	jsondec.Own	1	550	0
 jsondec	jsondec.Same	22	980586	8
 jsondec	jsondec.SwapBody	0	0	0

@@ -81,9 +81,11 @@ progresses:
       TestRequestBodyProgress holds it on real HTTP/1 and HTTP/2 servers
       with an empty body, a chunked body written a byte at a time with
       pauses, Expect: 100-continue, and a client that stops early.
-      Middleware that is not verified and replaces the body with a reader
-      that can return nothing for ever breaks it, which What a proof
-      assumes says.
+      The declaration covers the Body of every request that reaches
+      verified code from code that is not verified, which What a proof
+      assumes says: a middleware that replaces the body, or a test or a
+      caller that builds a request over a reader that can return nothing for
+      ever, breaks it.
 
 trusted:
   (*net/http.Request).PathValue:
