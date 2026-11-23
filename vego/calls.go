@@ -161,9 +161,16 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		u.reach(operands)
 		formatted := v.checkFormattedAlloc(st, guard, call, fn, args, v.held)
 		v.checkFormatRuns(call, v.formatRuns(call, fn), st, guard)
-		v.checkEncodedAlloc(st, guard, call, fn, args, v.held, 0)
+		encoded := v.checkEncodedAlloc(st, guard, call, fn, args, v.held, 0)
 		made.pure = v.callMemoryFree(fn, callee.Type().(*types.Signature))
 		results = v.invoke(call, fn, args, st, guard)
+		// What Marshal returns is no longer than what it builds, which
+		// the bound counts all of (json.go).
+		if encoded != nil && len(results) > 0 && len(results[0]) == 4 {
+			// A slice is its array, its offset, its length, and its
+			// capacity.
+			st.assume(logic.Implies(logic.And(guard...), logic.Le(results[0][2], logic.BigLit(encoded))))
+		}
 		// What Sprintf returns is what fmt wrote, which is no longer than
 		// the bound when the bound counts all of it.
 		if formatted != nil && returnsFormatted(callee) {

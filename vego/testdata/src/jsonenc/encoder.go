@@ -55,13 +55,14 @@ func ToBufio(bw *bufio.Writer, it Item) (err error) {
 	return json.NewEncoder(bw).Encode(it)
 }
 
-// ToBuffer would need a bound on what Encode writes, which is no term.
+// ToBuffer encodes into a bytes.Buffer, whose Write needs a bound on what
+// it is given: the bound of what Encode writes gives it.
 //
 // @Requires b != nil And |b| <= 1000
 // @Modifies b
 // @Ensures True
 func ToBuffer(b *bytes.Buffer, it Item) (err error) {
-	return json.NewEncoder(b).Encode(it) // want `json\.NewEncoder\(b\)\.Encode writes to b JSON whose length is not a term the logic has, and the Write of \*bytes\.Buffer needs a bound on what it is given; encode wi`
+	return json.NewEncoder(b).Encode(it)
 }
 
 // Unlisted does not list the writer.
@@ -128,7 +129,7 @@ type Loop struct{ N int }
 // @Modifies l
 // @Ensures 0 <= n
 func (l *Loop) Write(p []byte) (n int, err error) {
-	_ = EncodeTo(l, Item{}) // want `recursive call needs a // @Variant annotation in the doc comment of Write to prove termination; the cycle: \(\*Loop\)\.Write calls EncodeTo at encoder\.go:131:6, Enc`
+	_ = EncodeTo(l, Item{}) // want `recursive call needs a // @Variant annotation in the doc comment of Write to prove termination; the cycle: \(\*Loop\)\.Write calls EncodeTo at encoder\.go:132:6, Enc`
 	return 0, nil
 }
 
@@ -138,5 +139,5 @@ func (l *Loop) Write(p []byte) (n int, err error) {
 // @Modifies l
 // @Ensures True
 func EncodeTo(l *Loop, it Item) (err error) {
-	return json.NewEncoder(l).Encode(it) // want `recursive call needs a // @Variant annotation in the doc comment of EncodeTo to prove termination; the cycle: EncodeTo calls \(\*Loop\)\.Write at encoder\.go:141:25,`
+	return json.NewEncoder(l).Encode(it) // want `recursive call needs a // @Variant annotation in the doc comment of EncodeTo to prove termination; the cycle: EncodeTo calls \(\*Loop\)\.Write at encoder\.go:142:25,`
 }

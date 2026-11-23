@@ -30,31 +30,30 @@ type Input struct {
 	Cases   []Case
 }
 
-// Case is one type with the bound vego generates for it.
+// Case is one type with the lengths vego bounds for it.
 type Case struct {
-	Type   string
-	Groups []Group
-	Depth  int
-	Raw    bool
-	// Want is set when the case must find a sample above the bound: the
-	// groups were made with a weight one smaller.
-	Want bool
+	Type    string
+	Lengths []Length
 }
 
-// Group is a group of the bound; see json.go.
-type Group struct {
+// Length is a length the bound counts, under the steps of its chain; see
+// json.go.
+type Length struct {
+	Key   string
 	Steps []Step
-	Konst int64
-	Terms []Term
+	Text  string
 }
 
-// Step is a quantifier or a guard of a group.
+// Step is a quantifier or a guard of a chain.
 type Step struct{ Binder, Length, Guard string }
 
-// Term is a length with its weight.
-type Term struct {
-	Coef int64
-	Path string
+// Sample is what one value gave: the length of what Marshal returned and
+// of what MarshalIndent returned under each prefix and indent of indents,
+// or -1 for an error, and the longest instance of each length.
+type Sample struct {
+	Type  string
+	Outs  []int64
+	Maxes map[string]int64
 }
 
 // Output is what the program found.
@@ -63,19 +62,20 @@ type Output struct {
 	Build string
 	// Failures holds what broke a claim.
 	Failures []string
-	// Above counts, for each case, the samples whose output passed the
-	// sum of the bound.
-	Above map[string]int
+	// Samples holds what each value gave.
+	Samples []Sample
 	// Called holds the methods of jsonMethods that the build called.
 	Called []string
 	// Errors holds the dynamic types of the errors in the trees of what
 	// the entries returned.
 	Errors []string
-	// Samples counts what was run.
-	Samples int
 }
 
-var out = Output{Above: map[string]int{}}
+var out = Output{}
+
+// indents are the prefixes and indents MarshalIndent is run with; the
+// test reads their lengths from here.
+var indents = []struct{ prefix, indent string }{{"", "  "}, {">", "\t\t\t"}, {"<<", ""}}
 
 func fail(format string, args ...any) {
 	if len(out.Failures) < 50 {
@@ -101,17 +101,15 @@ func main() {
 			v := reflect.New(t).Elem()
 			worst = rng.IntN(2) == 0
 			fill(rng, v, 0)
-			out.Samples++
-			sum := bound(c, v)
+			sample := Sample{Type: c.Type, Maxes: measure(c, v)}
 			calls.Store(0)
-			for _, indent := range []struct{ prefix, indent string }{{}, {"", "  "}, {">", "\t\t\t"}, {"<<", ""}} {
+			for i := -1; i < len(indents); i++ {
 				var b []byte
 				var err error
-				indented := indent.prefix != "" || indent.indent != ""
-				if indented {
-					b, err = json.MarshalIndent(v.Interface(), indent.prefix, indent.indent)
-				} else {
+				if i < 0 {
 					b, err = json.Marshal(v.Interface())
+				} else {
+					b, err = json.MarshalIndent(v.Interface(), indents[i].prefix, indents[i].indent)
 				}
 				if err != nil {
 					if b != nil {
@@ -119,27 +117,17 @@ func main() {
 					}
 					treeTypes(err, errTypes)
 					checkHeld(c.Type, err, v)
+					sample.Outs = append(sample.Outs, -1)
 					continue
 				}
-				limit := sum
-				if indented {
-					depth := int64(c.Depth)
-					if c.Raw {
-						depth = 10000
-					}
-					limit = sum * (3 + int64(len(indent.prefix)) + depth*int64(len(indent.indent)))
-				}
-				if int64(len(b)) > limit {
-					out.Above[c.Type]++
-					if !c.Want {
-						fail("%s: %d bytes above the bound %d (prefix %q, indent %q): %s", c.Type, len(b), limit, indent.prefix, indent.indent, clip(b))
-					}
-				}
+				checkFresh(c.Type, b, v)
+				sample.Outs = append(sample.Outs, int64(len(b)))
 			}
 			checkEncode(c.Type, v)
 			if n := calls.Load(); n != 0 {
 				fail("%s: encoding called %d methods it must not call", c.Type, n)
 			}
+			out.Samples = append(out.Samples, sample)
 		}
 	}
 	out.Called = calledMethods()
@@ -222,34 +210,26 @@ func checkEncode(name string, v reflect.Value) {
 	}
 }
 
-// --- the bound, evaluated on the value ---
+// --- the lengths, measured on the value ---
 
-// bound is the sum, over the groups and over every element on their
-// chains, of what each group counts: the sum that the clauses vego
-// generates bound, group by group. It also checks, for each group, that
-// this sum is no more than the largest product the clause of the group
-// bounds, so that the step from the clauses to the sum is checked too.
-func bound(c Case, v reflect.Value) int64 {
-	var total int64
-	for gi, g := range c.Groups {
-		var sum, most int64
+// measure returns, for each length of a case, the longest instance of it
+// in the value: the length read at every element and key of the chain it
+// lies under, where each guard holds. A length with no instance is 0.
+func measure(c Case, v reflect.Value) map[string]int64 {
+	maxes := map[string]int64{}
+	for _, l := range c.Lengths {
 		env := map[string]reflect.Value{"v": v}
-		var walk func(i int, product int64)
-		walk = func(i int, product int64) {
-			if i == len(g.Steps) {
-				w := g.Konst
-				for _, t := range g.Terms {
-					w += t.Coef * int64(lengthOf(eval(t.Path, env)))
-				}
-				sum += w
-				most = max(most, product*w)
+		var most int64
+		var walk func(i int)
+		walk = func(i int) {
+			if i == len(l.Steps) {
+				most = max(most, int64(lengthOf(eval(strings.Trim(l.Text, "|"), env))))
 				return
 			}
-			s := g.Steps[i]
+			s := l.Steps[i]
 			if s.Guard != "" {
-				p := eval(strings.TrimSuffix(s.Guard, " != nil"), env)
-				if !p.IsNil() {
-					walk(i+1, product)
+				if !eval(strings.TrimSuffix(s.Guard, " != nil"), env).IsNil() {
+					walk(i + 1)
 				}
 				return
 			}
@@ -258,25 +238,52 @@ func bound(c Case, v reflect.Value) int64 {
 				seq := eval(strings.TrimSuffix(strings.TrimPrefix(over, "[0, |"), "|)"), env)
 				for k := range seq.Len() {
 					env[name] = reflect.ValueOf(k)
-					walk(i+1, product*int64(seq.Len()))
+					walk(i + 1)
 				}
 			} else {
 				m := eval(over, env)
 				for _, k := range m.MapKeys() {
 					env[name] = k
-					walk(i+1, product*int64(m.Len()))
+					walk(i + 1)
 				}
 			}
 			delete(env, name)
 		}
-		walk(0, 1)
-		if sum > most {
-			fail("%s: group %d sums to %d, more than %d, the largest product its clause bounds", c.Type, gi, sum, most)
-		}
-		total += sum
+		walk(0)
+		maxes[l.Key] = most
 	}
-	return total
+	return maxes
 }
+
+// checkFresh fails when what an entry returned lies in memory the value
+// reaches, or in what an earlier call returned (F18 of the review).
+func checkFresh(name string, b []byte, v reflect.Value) {
+	if cap(b) == 0 {
+		return
+	}
+	lo := uintptr(unsafe.Pointer(unsafe.SliceData(b)))
+	hi := lo + uintptr(cap(b))
+	reached := map[uintptr]reflect.Type{}
+	reach(v, reached, map[uintptr]bool{})
+	for p, t := range reached {
+		if p >= lo && p < hi {
+			fail("%s: what was returned lies in memory of type %s that the value reaches", name, t)
+		}
+	}
+	for _, r := range results {
+		if lo < r[1] && r[0] < hi {
+			fail("%s: what was returned overlaps what an earlier call returned", name)
+		}
+	}
+	results = append(results, [2]uintptr{lo, hi})
+	kept = append(kept, b)
+}
+
+// results holds the stretches earlier calls returned, kept alive by kept.
+var (
+	results [][2]uintptr
+	kept    [][]byte
+)
 
 // lengthOf is |x| of a string, a slice, a map, or a key.
 func lengthOf(v reflect.Value) int {
@@ -499,7 +506,8 @@ func fillWorst(rng *rand.Rand, v reflect.Value, depth int) bool {
 			k := reflect.New(v.Type().Key()).Elem()
 			switch k.Kind() {
 			case reflect.String:
-				k.SetString(strings.Repeat("\x00", i))
+				// Keys of one length, each byte escaped.
+				k.SetString(string([]byte{byte(i % 32), byte(i / 32 % 32), 0}))
 			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 				k.SetInt(-1<<(k.Type().Bits()-1) + int64(i))
 			default:

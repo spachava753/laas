@@ -20,18 +20,25 @@ trusted:
       json.Number, whose methods were read in the four builds and write
       nothing, and the type may hold no interface value, so no method of the
       project runs; encoding/json uses reflection on v only to read it and
-      to call those methods; what it builds is bounded by the clauses vego
-      generates for the type and proves at the call, from the weights of
-      jsonWeights (an escaped byte of a string is six bytes, under the
-      option string seven, a float at most 25), each held against the four
-      builds and each made one smaller shown to fail by TestJSONEntries, and
-      from the growth of v1's bytes.Buffer (3 times and a page within
-      MaxAlloc, 5 times within MaxInt, as for the Buffer's own entries),
+      to call those methods; what it builds is at most the total vego computes
+      at the call (total in json.go): each length the type holds is bounded
+      from the facts, and the bounds are multiplied along each chain of
+      slices and maps and weighed by jsonWeights (an escaped byte of a string
+      is six bytes, under the option string seven, a float at most 25), each
+      weight held against the four builds and each made one smaller shown to
+      fail by TestJSONEntries, which computes the total of every sample's
+      own lengths with the same function; what is built must fit three
+      times and a page within MaxAlloc and five times within MaxInt, from
+      the growth of v1's bytes.Buffer (as for the Buffer's own entries),
       v2's append-grown buffer, and the slices both make to sort a map's
       keys (at most 10 words, the key, and the value for each entry), run at
-      the 32-bit edge by TestEncoding386. Read from source: the result on success
+      the 32-bit edge by TestEncoding386, where a value five times past
+      MaxInt failed in v1 (TestEdgesOfEncodingBound). What Marshal returns is
+      no longer than that total, which vego assumes after the call. Read
+      from source:      the 32-bit edge by TestEncoding386. Read from source: the result on success
       is a new slice (v1 copies the buffer; v2 clones it), and nil on an
-      error. The errors are *UnsupportedValueError (NaN and infinities),
+      error; TestJSONEntries checks that each result lies in no memory the
+      value reaches and overlaps no earlier result. The errors are *UnsupportedValueError (NaN and infinities),
       *MarshalerError over the error of a leaf's method (time.Time outside
       the years 0 to 9999, a RawMessage that is not valid JSON, read from
       time and json), and in v2 *json.SemanticError and
@@ -64,10 +71,11 @@ trusted:
       most itself, a space after a colon, a newline, the prefix, and the
       indent once for each level of nesting, which vego bounds by the
       deepest nesting of the type, or 10000, the deepest every build
-      accepts, under a json.RawMessage; the generated clause multiplies the
-      bound of Marshal by 3 + |prefix| + depth * |indent|, held by
-      TestJSONEntries with three prefixes and indents and run at the 32-bit
-      edge by TestEncoding386. The errors are those of Marshal, and in v1 a
+      accepts, under a json.RawMessage; vego multiplies the
+      total of Marshal by 3 + |prefix| + depth * |indent|, with the bounds
+      of prefix and indent proved at the call, held by TestJSONEntries with
+      three prefixes and indents and run at the 32-bit edge by
+      TestEncoding386; what it returns is no longer than that. The errors are those of Marshal, and in v1 a
       *SyntaxError of Indent, which cannot happen on what Marshal returns.
     encodes: [v]
     vouches: [result2]
@@ -89,7 +97,8 @@ trusted:
       calls w.Write once with the result, calls nothing else of w, and
       returns the error Write returned. So vego verifies the call as the
       walk and the bound of Marshal with one byte more, followed by w's own
-      Write of a new slice. encodes claims what Marshal's entry claims of v.
+      Write of a new slice no longer than Marshal's total and a newline.
+      encodes claims what Marshal's entry claims of v.
       The error may be one w.Write returned, so it is not vouched for.
       TestJSONEntries holds the claim against writers that record each call,
       fail, and write short, in each build.

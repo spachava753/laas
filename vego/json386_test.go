@@ -26,7 +26,6 @@ func TestEncoding386(t *testing.T) {
 	alone(t)
 	sizes := types.SizesFor("gc", "386")
 	maxAlloc := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 32), big.NewInt(1))
-	room := jsonRoom(maxAlloc, sizes)
 	str := types.Typ[types.String]
 	cases := []struct {
 		name     string
@@ -50,16 +49,25 @@ func TestEncoding386(t *testing.T) {
 			if why != "" {
 				t.Fatal(why)
 			}
-			// The largest n at which every group fits.
+			// The largest n at which what is built fits, every length at
+			// most n, through the same function a call is proved by;
+			// MarshalIndent with no prefix and an indent of two.
+			fits := func(n *big.Int) bool {
+				total := walk.total(func(l jsonLength) *big.Int {
+					switch l.text {
+					case "|prefix|":
+						return big.NewInt(0)
+					case "|indent|":
+						return big.NewInt(2)
+					}
+					return n
+				}, c.indented)
+				return jsonFits(total, maxAlloc, sizes)
+			}
 			lo, hi := big.NewInt(0), new(big.Int).Lsh(big.NewInt(1), 32)
 			for new(big.Int).Sub(hi, lo).Cmp(big.NewInt(1)) > 0 {
 				mid := new(big.Int).Rsh(new(big.Int).Add(lo, hi), 1)
-				// MarshalIndent with no prefix and an indent of two.
-				var factor *big.Int
-				if c.indented {
-					factor = big.NewInt(3 + 2*walk.indentDepth())
-				}
-				if walk.fitsWith(mid, room, factor) {
+				if fits(mid) {
 					lo = mid
 				} else {
 					hi = mid
@@ -77,6 +85,40 @@ func TestEncoding386(t *testing.T) {
 				continue
 			}
 			t.Logf("%s: %s at %s built %s bytes", b.name, c.name, lo, strings.TrimSpace(string(out)))
+		}
+	}
+}
+
+// TestEdgesOfEncodingBound holds the bound vego proves a call of json.Marshal
+// against, with the sizes of GOARCH=386, at values TestEncoding386 ran on
+// the real encoders: each value that returned in every build fits, and a
+// value whose encoding failed in one build does not. A string of 100
+// million NULs, 600 million bytes encoded, ran out of address space in v1
+// (Go 1.27.3 with GOEXPERIMENT=nojsonv2, 3.7 GB in use), where 90 million
+// returned; the clause 5 * total <= MaxInt is what refuses it, so a factor
+// of 3 or less fails here. The page and the factor of 3 within MaxAlloc
+// cannot be shown this way: on 386 the MaxInt clause binds first, and a
+// 64-bit edge is past this machine; they are the factors of a growing
+// bytes.Buffer derived for its entries (F26).
+func TestEdgesOfEncodingBound(t *testing.T) {
+	parallel(t)
+	sizes := types.SizesFor("gc", "386")
+	maxAlloc := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 32), big.NewInt(1))
+	str := types.Typ[types.String]
+	for _, c := range []struct {
+		t    types.Type
+		n    int64
+		fits bool
+	}{
+		{str, 71582787, true},
+		{types.NewSlice(types.Typ[types.Byte]), 214748362, true},
+		{types.NewMap(types.Typ[types.Int32], types.Typ[types.Bool]), 6607641, true},
+		{str, 100000000, false},
+	} {
+		_, walk := jsonPlainReason(nil, sizes, c.t, "v")
+		total := walk.total(func(jsonLength) *big.Int { return big.NewInt(c.n) }, false)
+		if got := jsonFits(total, maxAlloc, sizes); got != c.fits {
+			t.Errorf("%s at %d: the bound says it fits %v, and the run says %v", c.t, c.n, got, c.fits)
 		}
 	}
 }

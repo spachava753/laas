@@ -55,13 +55,21 @@ type Inner struct {
 	Tags []string
 }
 
+// Flat is what a map's value may hold: no slice or map of elements of
+// unknown length.
+type Flat struct {
+	Text string
+	N    int32
+	R    []bool
+}
+
 type Nest struct {
 	Items  []Inner
-	ByName map[string]Inner
-	ByInt  map[int8][]string
+	ByName map[string]Flat
+	ByInt  map[int8]string
 	ByU    map[uint64]bool
 	Ptr    *Inner
-	Deep   [][]map[string][]int16
+	Deep   [][]map[string]int16
 }
 
 type inner struct {
@@ -101,7 +109,7 @@ type Tags struct {
 
 type TopSlice []Inner
 
-type TopMap map[string][]Inner
+type TopMap map[string]Flat
 
 type Empty struct{}
 

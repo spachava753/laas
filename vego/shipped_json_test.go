@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"go/types"
+	"maps"
+	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -94,31 +96,33 @@ type jsonHarnessInput struct {
 }
 
 type jsonHarnessCase struct {
-	Type   string
-	Groups []jsonHarnessGroup
-	Depth  int
-	Raw    bool
-	Want   bool
+	Type    string
+	Lengths []jsonHarnessLength
 }
 
-type jsonHarnessGroup struct {
+type jsonHarnessLength struct {
+	Key   string
 	Steps []struct{ Binder, Length, Guard string }
-	Konst int64
-	Terms []struct {
-		Coef int64
-		Path string
-	}
+	Text  string
 }
 
 // jsonHarnessOutput is what the helper writes.
 type jsonHarnessOutput struct {
 	Build    string
 	Failures []string
-	Above    map[string]int
 	Called   []string
 	Errors   []string
-	Samples  int
+	Samples  []struct {
+		Type  string
+		Outs  []int64
+		Maxes map[string]int64
+	}
 }
+
+// jsonIndents are the lengths of the prefixes and indents the helper runs
+// MarshalIndent with, after Marshal: "" and two spaces, ">" and three
+// tabs, "<<" and none.
+var jsonIndents = [][2]int64{{0, 2}, {1, 3}, {2, 0}}
 
 // runJSONHelper runs a helper on an input.
 func runJSONHelper(t *testing.T, helper string, in jsonHarnessInput) jsonHarnessOutput {
@@ -176,39 +180,74 @@ func jsonHarnessTypes(t *testing.T) (*types.Package, types.Sizes, map[string]typ
 	return pkg, pkgs[0].TypesSizes, found
 }
 
-// jsonCases walks each type with a table of weights.
-func jsonCases(t *testing.T, wt jsonWeightTable, pkg *types.Package, sizes types.Sizes, found map[string]types.Type, want bool) []jsonHarnessCase {
+// jsonWalks walks each type with a table of weights.
+func jsonWalks(t *testing.T, wt jsonWeightTable, pkg *types.Package, sizes types.Sizes, found map[string]types.Type) map[string]*jsonWalk {
 	t.Helper()
-	var cases []jsonHarnessCase
-	for _, name := range slices.Sorted(func(yield func(string) bool) {
-		for name := range found {
-			if !yield(name) {
-				return
-			}
-		}
-	}) {
-		why, walk := jsonWalkWith(wt, pkg, sizes, found[name], "v")
+	walks := map[string]*jsonWalk{}
+	for name, typ := range found {
+		why, walk := jsonWalkWith(wt, pkg, sizes, typ, "v")
 		if why != "" {
 			t.Fatalf("the walk refuses %s: %s", name, why)
 		}
-		c := jsonHarnessCase{Type: name, Depth: walk.depth, Raw: walk.raw, Want: want}
-		for _, g := range walk.groups {
-			var hg jsonHarnessGroup
-			hg.Konst = g.konst
-			for _, s := range g.steps {
-				hg.Steps = append(hg.Steps, struct{ Binder, Length, Guard string }{s.binder, s.length, s.guard})
+		walks[name] = walk
+	}
+	return walks
+}
+
+// jsonCases are the cases the helper runs: each type with the lengths
+// its walk counts.
+func jsonCases(walks map[string]*jsonWalk) []jsonHarnessCase {
+	var cases []jsonHarnessCase
+	for _, name := range slices.Sorted(maps.Keys(walks)) {
+		c := jsonHarnessCase{Type: name}
+		for _, l := range walks[name].lengths() {
+			hl := jsonHarnessLength{Key: l.key(), Text: l.text}
+			for _, s := range l.steps {
+				hl.Steps = append(hl.Steps, struct{ Binder, Length, Guard string }{s.binder, s.length, s.guard})
 			}
-			for _, term := range g.terms {
-				hg.Terms = append(hg.Terms, struct {
-					Coef int64
-					Path string
-				}{term.coef, term.path})
-			}
-			c.Groups = append(c.Groups, hg)
+			c.Lengths = append(c.Lengths, hl)
 		}
 		cases = append(cases, c)
 	}
 	return cases
+}
+
+// jsonAbove counts the outputs of samples that pass the bound vego proves
+// a call against, computed by total from the longest instance of each
+// length the sample holds, as checkEncodedAlloc computes it from the
+// bounds it proves; for MarshalIndent with the lengths of the prefix and
+// the indent.
+func jsonAbove(t *testing.T, out jsonHarnessOutput, walks map[string]*jsonWalk, report bool) int {
+	above := 0
+	for _, sample := range out.Samples {
+		walk := walks[sample.Type]
+		for i, got := range sample.Outs {
+			if got < 0 {
+				continue
+			}
+			indented := i > 0
+			total := walk.total(func(l jsonLength) *big.Int {
+				switch {
+				case l.text == "|prefix|":
+					return big.NewInt(jsonIndents[i-1][0])
+				case l.text == "|indent|":
+					return big.NewInt(jsonIndents[i-1][1])
+				}
+				n, ok := sample.Maxes[l.key()]
+				if !ok {
+					t.Fatalf("%s: the helper measured no %s", sample.Type, l.key())
+				}
+				return big.NewInt(n)
+			}, indented)
+			if big.NewInt(got).Cmp(total) > 0 {
+				above++
+				if report && above <= 20 {
+					t.Errorf("%s: %s built %d bytes, more than %s, the bound of its lengths %v (call %d)", out.Build, sample.Type, got, total, sample.Maxes, i)
+				}
+			}
+		}
+	}
+	return above
 }
 
 // jsonErrorTypes are the dynamic types of the errors that the entries of
@@ -237,21 +276,20 @@ var jsonErrorTypes = map[string]bool{
 func TestJSONEntries(t *testing.T) {
 	parallel(t)
 	pkg, sizes, found := jsonHarnessTypes(t)
-	exact := jsonWeights
-	exact.NoEntryAlloc = true
-	cases := jsonCases(t, jsonWeights, pkg, sizes, found, false)
+	walks := jsonWalks(t, jsonWeights, pkg, sizes, found)
+	cases := jsonCases(walks)
 	called := map[string]bool{}
-	var helpers []string
+	var outs []jsonHarnessOutput
 	for _, b := range jsonBuilds() {
-		helper := jsonHelper(t, b)
-		helpers = append(helpers, helper)
-		out := runJSONHelper(t, helper, jsonHarnessInput{Seed: 29, Samples: 300, Cases: cases})
+		out := runJSONHelper(t, jsonHelper(t, b), jsonHarnessInput{Seed: 29, Samples: 300, Cases: cases})
+		outs = append(outs, out)
 		for _, failure := range out.Failures {
 			t.Errorf("%s: %s", out.Build, failure)
 		}
-		if out.Samples == 0 {
+		if len(out.Samples) == 0 {
 			t.Errorf("%s: no sample ran", out.Build)
 		}
+		jsonAbove(t, out, walks, true)
 		for _, name := range out.Called {
 			called[name] = true
 		}
@@ -269,6 +307,8 @@ func TestJSONEntries(t *testing.T) {
 	// Each weight one smaller passes the bound in some build. EntryExtra
 	// is checked without what a map's entries allocate, which is no part of
 	// the output.
+	exact := jsonWeights
+	exact.NoEntryAlloc = true
 	table := reflect.ValueOf(&exact).Elem()
 	for i := range table.NumField() {
 		field := table.Type().Field(i)
@@ -283,13 +323,10 @@ func TestJSONEntries(t *testing.T) {
 			} else {
 				f.SetInt(f.Int() - 1)
 			}
-			cases := jsonCases(t, mutant, pkg, sizes, found, true)
+			smaller := jsonWalks(t, mutant, pkg, sizes, found)
 			above := 0
-			for _, helper := range helpers {
-				out := runJSONHelper(t, helper, jsonHarnessInput{Seed: 31, Samples: 300, Cases: cases})
-				for _, n := range out.Above {
-					above += n
-				}
+			for _, out := range outs {
+				above += jsonAbove(t, out, smaller, false)
 			}
 			if above == 0 {
 				t.Errorf("with %s one smaller, no output in any build passed the bound", field.Name)

@@ -28,7 +28,7 @@ func UnboundedSlice(ls []Loose) (n int) {
 // @Requires |o.Name| <= 100
 // @Ensures True
 func EmbedsUnbounded(o Outer) (n int) {
-	js, _ := json.Marshal(o) // want `what Marshal builds from o may be more than can be allocated; bound what it encodes, as in // @Requires \|o\.inner\.Text\| <= 1000000 And \|o\.Name\| <= 1000000 And \|o`
+	js, _ := json.Marshal(o) // want `what Marshal builds from o may be more than can be allocated; bound what it encodes, as in // @Requires \|o\.inner\.Text\| <= 1000000 And \|o\.inner\.Tags\| <= 1000000 `
 	return len(js)
 }
 
@@ -37,7 +37,7 @@ func EmbedsUnbounded(o Outer) (n int) {
 // @Requires |ns| <= 1000 And (Forall i in [0, |ns|) : |ns[i].Label| <= 1000)
 // @Ensures True
 func PointedUnguarded(ns []Node) (n int) {
-	js, _ := json.Marshal(ns) // want `what Marshal builds from ns may be more than can be allocated; bound what it encodes, as in // @Requires \|ns\| <= 1000000 And \(Forall i in \[0, \|ns\|\) : \|ns\[i\]\.Lab`
+	js, _ := json.Marshal(ns) // want `what Marshal builds from ns may be more than can be allocated; bound what it encodes, as in // @Requires \(Forall i in \[0, \|ns\|\) : \(ns\[i\]\.Next != nil -> \|ns\[i\]\.N`
 	return len(js)
 }
 
@@ -200,4 +200,52 @@ func ownMarshal(v any) ([]byte, error) {
 // @Ensures True
 func Own() {
 	_, _ = ownMarshal(1) // want `the trusted contract of jsonenc\.ownMarshal \(trusted\.yaml:2189\) cannot be used: it lists encodes, which only the entries that come with vego can list; a function`
+}
+
+// KeyText is a key whose MarshalText encoding/json would call.
+type KeyText string
+
+func (k KeyText) MarshalText() ([]byte, error) { return []byte(k), nil }
+
+// TextKeys holds a map with such keys.
+type TextKeys struct {
+	M map[KeyText]int
+}
+
+// TextKeyed encodes it.
+//
+// @Ensures True
+func TextKeyed(t TextKeys) {
+	_, _ = json.Marshal(t) // want `cannot verify TextKeyed: Marshal encodes t, and t\.M is a map with keys of type KeyText, which has the method MarshalText; use keys of a type without methods`
+}
+
+// KeyStr is a key with a String method.
+type KeyStr string
+
+func (k KeyStr) String() string { return string(k) }
+
+// StrKeys holds a map with such keys.
+type StrKeys struct {
+	M map[KeyStr]int
+}
+
+// StrKeyed encodes it.
+//
+// @Ensures True
+func StrKeyed(s StrKeys) {
+	_, _ = json.Marshal(s) // want `cannot verify StrKeyed: Marshal encodes s, and s\.M is a map with keys of type KeyStr, which has the method String; use keys of a type without methods`
+}
+
+// Tagged has an unexported field with a json tag, which the builds treat
+// differently.
+type Tagged struct {
+	a int `json:"a"`
+	B int
+}
+
+// TaggedUnexported encodes it.
+//
+// @Ensures True
+func TaggedUnexported(t Tagged) {
+	_, _ = json.Marshal(t) // want `cannot verify TaggedUnexported: Marshal encodes t, and t\.a is not exported and has a json tag, which the builds of encoding/json treat differently; remove the t`
 }

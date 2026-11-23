@@ -107,6 +107,7 @@ type inner struct {
 
 type innerP struct {
 	X int
+	Y []string
 }
 
 // Outer embeds structs that are not exported, by value and through a
@@ -120,6 +121,7 @@ type Outer struct {
 // EmbedsBounded bounds the fields that come from the embedded struct too.
 //
 // @Requires |o.Name| <= 100 And |o.inner.Text| <= 100 And |o.inner.Tags| <= 10 And (Forall i in [0, |o.inner.Tags|) : |o.inner.Tags[i]| <= 10)
+// @Requires o.innerP != nil -> |o.innerP.Y| <= 10 And (Forall i in [0, |o.innerP.Y|) : |o.innerP.Y[i]| <= 10)
 // @Ensures True
 func EmbedsBounded(o Outer) (n int) {
 	js, _ := json.Marshal(o)
