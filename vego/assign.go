@@ -252,6 +252,18 @@ func (v *fnVerifier) store(lv lvalue, val value, st *state) {
 		} else {
 			v.checkNotForbidden(st, nil, w, lv.pos, lv.text+" is assigned")
 		}
+		var written types.Type
+		switch {
+		case lv.box != nil:
+			written = lv.box.Type()
+		case lv.pointer != nil:
+			written, _ = pointee(v.info.TypeOf(lv.pointer))
+		case lv.slice != nil:
+			written = elemType(v.info.TypeOf(lv.slice))
+		}
+		if written != nil && isStructType(written) {
+			v.noteStruct(st, structValue{t: written, ref: lv.ref, at: lv.at})
+		}
 		v.put(st, lv.cells, lv.ref, lv.at, val)
 	case placeMap:
 		v.mapStore(st, lv.mapType, lv.ref, lv.at, val, true, lv.pos, lv.text+" is assigned")

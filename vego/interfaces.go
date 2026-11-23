@@ -135,6 +135,9 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		}
 		if behind != nil {
 			defines = v.structuralFootprint(converted, from)
+			if object, isPointer := pointee(from); isPointer && isStructType(object) {
+				v.convertedStructs = append(v.convertedStructs, structValue{t: object, ref: converted[0], at: converted[1]})
+			}
 			text := types.ExprString(ast.Unparen(e))
 			memory := "the memory that " + text + " points to"
 			switch {

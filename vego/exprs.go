@@ -228,7 +228,11 @@ func (v *fnVerifier) named(st *state, base string, t *logic.Term) *logic.Term {
 
 // pointedIn reads the struct a pointer points to in some memory.
 func (v *fnVerifier) pointedIn(sink *state, mem memory, t types.Type, pointer value) value {
-	val := v.fetch(sink, mem, v.cellsOf(t), pointer[0], pointer[1])
+	var base types.Type
+	if isStructType(t) {
+		base = t
+	}
+	val := v.fetchIn(sink, mem, v.cellsOf(t), pointer[0], pointer[1], base)
 	v.noteTyped(sink, val, t)
 	v.noteReached(sink, v.cellsOf(t), pointer[0], pointer[1], t, t)
 	return val

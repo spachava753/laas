@@ -447,6 +447,15 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 			// The cells are counted from where the pointer points, which
 			// is where a single target starts.
 			t.ref, t.lo, t.hi, t.single = val[0], val[1], logic.Add(val[1], logic.IntLit(at.hi)), true
+			// The struct the root points to, or the variable whose address
+			// is taken, which lies at the root's position.
+			struct_ := at.root.Type()
+			if object, isPointer := pointee(struct_); isPointer {
+				struct_ = object
+			}
+			if isStructType(struct_) {
+				t.base = &structValue{t: struct_, ref: val[0], at: val[1]}
+			}
 		}
 		t.regions(func(key string, sort logic.Sort) {
 			if regions[key] == nil {

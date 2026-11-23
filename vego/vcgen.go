@@ -68,6 +68,17 @@ type fnVerifier struct {
 	// conversions of concrete values in the function made; see
 	// interfaceValue.
 	converted []*logic.Term
+	// convertedStructs holds the structs that pointers converted to an
+	// interface with a footprint point to, which the fact between struct
+	// values is stated against; see distinctStructs.
+	convertedStructs []structValue
+	// readBase is the struct a read of memory under way reads a cell of,
+	// or nil; see fetchIn. structsSeen holds the structs the function has
+	// read or written whose type holds two leaves in one region; see
+	// noteStruct.
+	readBase    *structValue
+	structsSeen []structValue
+	repeats     map[string]bool
 	// convertedAt holds, by the constant of an interface value, where a
 	// value with a structural footprint was converted to it; see
 	// conversion.

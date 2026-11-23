@@ -1898,6 +1898,9 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 	}
 	var entry *mapEntry
 	afterEntry := false
+	// inStruct is the type of the struct in memory at cur.at, which a path
+	// to some of its fields went through.
+	var inStruct types.Type
 	for i, h := range hops {
 		if entry != nil {
 			entry, afterEntry = nil, true
@@ -1912,6 +1915,7 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 				cur.val, _, _ = v.member(sink, mem, cur.val, h.from, h.field)
 			}
 			cur.cells = v.cellsOf(object)[lo:hi]
+			inStruct = object
 		case h.field >= 0:
 			lo, hi, _ := fieldLeaves(h.from, h.field)
 			if !symbolic {
@@ -1927,6 +1931,7 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 				cur.val, _ = v.element(sink, mem, cur.val, h.from, h.index)
 			}
 			cur.cells = v.cellsOf(elemType(h.from))
+			inStruct = elemType(h.from)
 		default:
 			// What a map has for a key is an entry of the map, and a byte
 			// of a string no place that can be written through this path.
@@ -1948,6 +1953,7 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 		form.cells, form.direct, form.hi = v.cellsOf(object), len(hops) == 0, v.pass.TypesSizes.Sizeof(object)
 		if !symbolic {
 			t.ref, t.lo, t.hi = cur.val[0], cur.val[1], logic.Add(cur.val[1], logic.IntLit(form.hi))
+			t.base = &structValue{t: object, ref: t.ref, at: t.lo}
 			t.owned = v.ownedParts(sink, mem, cur.val, final, map[types.Type]bool{})
 			if len(t.owned) > 0 {
 				t.owner, t.ownerType = cur.val, final
@@ -2021,6 +2027,9 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 		form.lo, form.hi = bounds(cur.cells)
 		if !symbolic {
 			t.ref, t.lo, t.hi = cur.ref, logic.Add(cur.at, logic.IntLit(form.lo)), logic.Add(cur.at, logic.IntLit(form.hi))
+			if inStruct != nil && isStructType(inStruct) {
+				t.base = &structValue{t: inStruct, ref: cur.ref, at: cur.at}
+			}
 			// The cells are counted from the struct, the target from its
 			// first position.
 			shifted := make([]cell, len(cur.cells))

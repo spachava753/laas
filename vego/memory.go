@@ -156,8 +156,12 @@ type target struct {
 	// lo and hi bound the positions; they are nil for a map.
 	lo, hi *logic.Term
 	// single is set when the target is one struct value at lo, whose leaves
-	// can be named one by one.
+	// can be named one by one. base, when set, is the struct value the
+	// target lies in, for the fact between struct values: the struct a
+	// pointer points to, or the one a path to some of its fields went
+	// through.
 	single bool
+	base   *structValue
 	// elem is set for the elements of a slice, and mapType for a map. key
 	// is set for one entry of a map: the number of its key.
 	elem    types.Type
@@ -295,6 +299,9 @@ func (v *fnVerifier) tableAt(sink *state, mem memory, key string, sort logic.Sor
 		// joins were never stated under a quantifier and are not now.
 		if sink.collecting {
 			if known := v.layers[at.Name]; known != nil {
+				if hasFootprintTarget(known.targets) {
+					v.distinctStructs(sink, known, key, ref, position)
+				}
 				if hasFootprintTarget(known.targets) && !sink.noted[note] {
 					sink.noted[note] = true
 					sink.assume(v.unchanged(sink, at, known, ref, nil))
@@ -307,6 +314,7 @@ func (v *fnVerifier) tableAt(sink *state, mem memory, key string, sort logic.Sor
 			continue
 		}
 		if known := v.layers[at.Name]; known != nil {
+			v.distinctStructs(sink, known, key, ref, position)
 			cellNote := note
 			if position != nil && !known.flat && !hasBound(position) {
 				cellNote = note + "@" + position.String()
@@ -418,6 +426,20 @@ func (v *fnVerifier) row(sink *state, mem memory, key string, sort logic.Sort, r
 // fetch reads the leaves with the given cells of a value stored at a
 // position of an allocation.
 func (v *fnVerifier) fetch(sink *state, mem memory, cells []cell, ref, at *logic.Term) value {
+	return v.fetchIn(sink, mem, cells, ref, at, nil)
+}
+
+// fetchIn is fetch for cells of a struct of type base at ref and at, when
+// base is not nil: each read then also states, against the struct targets
+// of the layers it meets and the structs the function converted, that two
+// struct values of one type are one or lie apart (distinctStructs).
+func (v *fnVerifier) fetchIn(sink *state, mem memory, cells []cell, ref, at *logic.Term, base types.Type) value {
+	if base != nil {
+		saved := v.readBase
+		v.readBase = &structValue{t: base, ref: ref, at: at}
+		defer func() { v.readBase = saved }()
+		v.noteStruct(sink, *v.readBase)
+	}
 	val := make(value, len(cells))
 	for i, c := range cells {
 		position := logic.Add(at, logic.IntLit(c.off))
@@ -450,7 +472,7 @@ func (v *fnVerifier) member(sink *state, mem memory, cur value, t types.Type, in
 	if !viaPointer {
 		return cur[lo:hi], field.Type(), true
 	}
-	result := v.fetch(sink, mem, v.cellsOf(object)[lo:hi], cur[0], cur[1])
+	result := v.fetchIn(sink, mem, v.cellsOf(object)[lo:hi], cur[0], cur[1], object)
 	v.noteTyped(sink, result, field.Type())
 	v.noteReached(sink, v.cellsOf(object)[lo:hi], cur[0], cur[1], field.Type(), object)
 	return result, field.Type(), true
@@ -466,7 +488,11 @@ func (v *fnVerifier) elementAt(header value, t types.Type, index *logic.Term) *l
 func (v *fnVerifier) element(sink *state, mem memory, header value, t types.Type, index *logic.Term) (value, bool) {
 	elem := elemType(t)
 	_, ok := layoutOf(elem)
-	result := v.fetch(sink, mem, v.cellsOf(elem), header[0], v.elementAt(header, t, index))
+	var base types.Type
+	if _, isStruct := elem.Underlying().(*types.Struct); isStruct {
+		base = elem
+	}
+	result := v.fetchIn(sink, mem, v.cellsOf(elem), header[0], v.elementAt(header, t, index), base)
 	// What the types say of the element, and what the other parameters
 	// reach from it, are stated of one element; under a quantifier they
 	// go to what gathers its facts.
@@ -1253,6 +1279,9 @@ func (v *fnVerifier) havoc(st *state, t target, guard []*logic.Term) {
 		kept(unknown, before)
 		st.storeRow(stateRegion, logic.Bool, t.ref, unknown)
 	case t.single:
+		if t.base != nil {
+			v.noteStruct(st, *t.base)
+		}
 		// What the types guarantee of the new values is noted where they
 		// are read.
 		before := v.fetch(nil, st.mem, t.cells, t.ref, t.lo)
@@ -1339,4 +1368,192 @@ func describe(param *types.Var) string {
 		return fmt.Sprintf("an unnamed %s", param.Type())
 	}
 	return param.Name()
+}
+
+// isStructType reports whether t is a struct type.
+func isStructType(t types.Type) bool {
+	_, isStruct := t.Underlying().(*types.Struct)
+	return isStruct
+}
+
+// structValue is a struct value in memory: its type, its allocation, and
+// its position.
+type structValue struct {
+	t       types.Type
+	ref, at *logic.Term
+}
+
+// structAt is a struct value of non-zero size that a value of a type holds:
+// the key of its type, which types that share regions share, its offset in
+// the value, and its size.
+type structAt struct {
+	key       string
+	off, size int64
+}
+
+// structsWithin returns the struct values of non-zero size that a value of
+// type t holds in itself: t, when it is a struct, at offset 0, and every
+// field of struct type at any depth at its offset.
+func (pv *pkgVerifier) structsWithin(t types.Type) []structAt {
+	u, isStruct := t.Underlying().(*types.Struct)
+	if !isStruct {
+		return nil
+	}
+	var found []structAt
+	if size := pv.pass.TypesSizes.Sizeof(t); size > 0 {
+		found = append(found, structAt{key: typeKey(u), size: size})
+	}
+	fields := slices.Collect(u.Fields())
+	offsets := pv.pass.TypesSizes.Offsetsof(fields)
+	for i, field := range fields {
+		for _, inner := range pv.structsWithin(field.Type()) {
+			inner.off += offsets[i]
+			found = append(found, inner)
+		}
+	}
+	return found
+}
+
+// statePairs states, for the struct values x and y and each pair of
+// structs they hold of one type, of every type when all is set and
+// otherwise of the types that hold two leaves in one region, that the two
+// are one value or lie apart: in one allocation, at one position or at
+// least the size of the type apart. That is true of every state Go makes
+// without unsafe: a pointer to a struct points to a value of its type, a
+// variable, a field at any depth, or an element of a slice, and two values
+// of one struct type never overlap otherwise, since one would have to hold
+// the other, and a struct type cannot hold itself; fields of one struct,
+// and elements of one array, are disjoint. Types that share regions
+// (identical underlying structs, tags ignored) have one key, so they count
+// as one type, as a conversion between them needs. A struct of size zero
+// has no identity and is never given one (structsWithin). A nil pointer
+// points to no value, so the fact holds only of an allocation other than
+// 0.
+//
+// Only a type that holds two leaves in one region, as struct{ A, B Inner }
+// does, needs it where a write of a struct target, a store, or a loop's
+// layer compares cells region by region: only then can a cell of one value
+// of the type be taken, position by position, for another cell of another.
+// The stretch of a conversion's footprint compares positions in every
+// region, so there every type needs it.
+func (v *fnVerifier) statePairs(sink *state, x, y structValue, all bool) {
+	for _, a := range v.structsWithin(x.t) {
+		if !all && !v.repeats[a.key] {
+			continue
+		}
+		for _, b := range v.structsWithin(y.t) {
+			if a.key != b.key {
+				continue
+			}
+			pa, pb := logic.Add(x.at, logic.IntLit(a.off)), logic.Add(y.at, logic.IntLit(b.off))
+			size := logic.IntLit(a.size)
+			fact := logic.Or(logic.Eq(x.ref, logic.RefLit(0)), logic.Ne(x.ref, y.ref), logic.Eq(pa, pb),
+				logic.Le(logic.Add(pa, size), pb), logic.Le(logic.Add(pb, size), pa))
+			if note := "distinct|" + fact.String(); !sink.noted[note] {
+				sink.noted[note] = true
+				sink.assume(fact)
+			}
+		}
+	}
+}
+
+// noteStruct records a struct value the function reads or writes, whose
+// type holds two leaves in one region, and states the fact between struct
+// values of it and each one recorded before, so that a read of one keeps
+// what a write of the other did not write.
+func (v *fnVerifier) noteStruct(sink *state, s structValue) {
+	if sink == nil || !v.holdsRepeated(s.t) {
+		return
+	}
+	for _, other := range v.structsSeen {
+		v.statePairs(sink, s, other, false)
+	}
+	v.structsSeen = append(v.structsSeen, s)
+}
+
+// holdsRepeated reports whether a value of type t holds, at any depth, a
+// struct whose type holds two leaves in one region, and records which
+// struct types do.
+func (v *fnVerifier) holdsRepeated(t types.Type) bool {
+	if v.repeats == nil {
+		v.repeats = map[string]bool{}
+	}
+	found := false
+	u, isStruct := t.Underlying().(*types.Struct)
+	if !isStruct {
+		return false
+	}
+	for field := range u.Fields() {
+		found = v.holdsRepeated(field.Type()) || found
+	}
+	key := typeKey(u)
+	if known, ok := v.repeats[key]; ok {
+		return known || found
+	}
+	seen := map[string]bool{}
+	repeated := false
+	for _, c := range v.cellsOf(t) {
+		repeated = repeated || seen[c.key]
+		seen[c.key] = true
+	}
+	v.repeats[key] = repeated
+	return repeated || found
+}
+
+// leafOnly states, of a cell of a region read at ref and position, that
+// it lies in the stretch of the struct value s only where the type of s
+// has a leaf in that region: a cell Go holds lies in a struct value only as
+// one of its leaves, since what lies in the bytes of a value is its fields
+// and what they hold, and a value that holds the struct has its own leaves
+// elsewhere. So the stretch a conversion's footprint is, which counts
+// positions in every region, holds of another region only its own leaves:
+// the slot of a slice of pointers, read beside the struct one of them
+// points to, never lies in it. It is a fact about where the cells of a
+// region can be, not about the row, which keeps its definition.
+func (v *fnVerifier) leafOnly(sink *state, s structValue, key string, ref, position *logic.Term) {
+	size := v.pass.TypesSizes.Sizeof(s.t)
+	if size == 0 {
+		return
+	}
+	options := []*logic.Term{logic.Ne(ref, s.ref), logic.Lt(position, s.at), logic.Le(logic.Add(s.at, logic.IntLit(size)), position)}
+	for _, c := range v.cellsOf(s.t) {
+		if c.key == key {
+			options = append(options, logic.Eq(position, logic.Add(s.at, logic.IntLit(c.off))))
+		}
+	}
+	fact := logic.Or(options...)
+	if note := "leaf|" + fact.String(); !sink.noted[note] {
+		sink.noted[note] = true
+		sink.assume(fact)
+	}
+}
+
+// distinctStructs states, for the struct the read under way reads a cell
+// of, the fact between struct values against each struct target of a layer
+// it meets, for the types that hold two leaves in one region, and, when
+// the layer writes a footprint, against each struct the function converted,
+// for every type, since the footprint of a conversion is the struct's
+// stretch of positions in every region.
+func (v *fnVerifier) distinctStructs(sink *state, known *layer, key string, ref, position *logic.Term) {
+	if sink == nil {
+		return
+	}
+	if hasFootprintTarget(known.targets) && position != nil {
+		for _, converted := range v.convertedStructs {
+			v.leafOnly(sink, converted, key, ref, position)
+		}
+	}
+	if v.readBase == nil {
+		return
+	}
+	for _, t := range known.targets {
+		if t.base != nil {
+			v.statePairs(sink, *v.readBase, *t.base, false)
+		}
+	}
+	if hasFootprintTarget(known.targets) {
+		for _, converted := range v.convertedStructs {
+			v.statePairs(sink, *v.readBase, converted, true)
+		}
+	}
 }

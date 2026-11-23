@@ -880,7 +880,8 @@ func (v *fnVerifier) ownedParts(sink *state, mem memory, ptr value, t types.Type
 		default:
 			inner, _ := pointee(ft)
 			size := v.pass.TypesSizes.Sizeof(inner)
-			parts = append(parts, target{cells: v.cellsOf(inner), ref: val[0], lo: val[1], hi: logic.Add(val[1], logic.IntLit(size)), single: true})
+			parts = append(parts, target{cells: v.cellsOf(inner), ref: val[0], lo: val[1], hi: logic.Add(val[1], logic.IntLit(size)), single: true,
+				base: &structValue{t: inner, ref: val[0], at: val[1]}})
 			parts = append(parts, v.ownedParts(sink, mem, val, ft, seen)...)
 		}
 	}
