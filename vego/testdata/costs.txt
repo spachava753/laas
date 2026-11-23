@@ -592,7 +592,7 @@ defects	defects.ReachablePanic	2	328	0
 defects	defects.RecursionGrows	6	1328	0
 defects	defects.RecursionWithoutMeasure	4	936	0
 defects	defects.SearchOutOfRange	9	8289	0
-defects	defects.SortWrongWay	47	16208142	4
+defects	defects.SortWrongWay	47	14208142	4
 defects	defects.positive	2	206	0
 defects	defects.touch	1	2893	0
 deletes	deletes.Dedup	7	15296	0
@@ -1266,7 +1266,7 @@ frames	(*sync.Mutex).Unlock	1	1611	0
 frames	frames.AddKey	14	34663	0
 frames	frames.AfterCall	10	8118	0
 frames	frames.AppendBad	19	57796	0
-frames	frames.BreakThenInner	19	8054653	2
+frames	frames.BreakThenInner	19	7054653	2
 frames	frames.Bump	1	107	0
 frames	frames.Counted	1	3001	0
 frames	frames.Elements	25	109966	1
@@ -1289,10 +1289,10 @@ frames	frames.Shrink	12	34209	0
 frames	frames.Sink.Put	4	2186	0
 frames	frames.Sorted	22	336071	0
 frames	frames.Store	1	2913	0
-frames	frames.Swap	23	8276023	4
+frames	frames.Swap	23	7276023	4
 frames	frames.TwoEnds	6	3289	0
-frames	frames.WriteByCall	14	8231065	3
-frames	frames.WriteEach	10	8021903	2
+frames	frames.WriteByCall	14	7231065	3
+frames	frames.WriteEach	10	7021903	2
 frames	frames.WriteThenPush	17	105461	1
 frames	frames.each	1	211	0
 frames	frames.fix	6	4356	0

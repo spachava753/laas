@@ -53,6 +53,12 @@ const frameMark = "%frame "
 // does not costs this much before the clauses are proved as before.
 const frameEffort = 2_000_000
 
+// splitEffort is the resource limit of the split question of a loop
+// invariant (framedLoop), three quarters of the default: the trial's
+// GetTasksByDueDate needs 2.6 M units, and a split that cannot hold costs
+// this much before the conjunct is proved as before.
+const splitEffort = 3_000_000
+
 // keptEntry is a point of a path where the invariants of a struct type
 // held of a value: one step of invariantSteps, in a memory of the path.
 type keptEntry struct {
@@ -1143,7 +1149,7 @@ type loopKept struct {
 // invariant assumed there, so only the new ones are proved. The split
 // goal is Forall i : D1(i) -> ((D0(i) And Unch(i)) Or B1(i)), with D1 and
 // B1 those of the goal and D0 and Unch read through the frame. It is asked
-// at the default limit, since it stands for the goal itself.
+// at splitEffort.
 func (v *fnVerifier) framedLoop(st *state, at token.Pos, c *clause, node *logic.Node, goal *logic.Term) bool {
 	text := node.String()
 	var heads []*loopKept
@@ -1230,7 +1236,7 @@ func (v *fnVerifier) framedFrom(end *state, k *loopKept, at token.Pos, c *clause
 		// differ, and its pairs, which the split asks only of the head's
 		// elements.
 		asked := logic.Implies(logic.And(closed(f.scratch.hyps)...), split)
-		r := v.solver().Prove(slices.Clip(end.hyps), asked, v.options(0, frameAttempt))
+		r := v.solver().Prove(slices.Clip(end.hyps), asked, v.options(splitEffort, frameAttempt))
 		return r == solver.Proved
 	})
 	return held, alike
