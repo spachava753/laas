@@ -147,9 +147,11 @@ func packageOf(pkg *types.Package, path string) *types.Package {
 var scopedCache sync.Map
 
 // scopedOf returns the scoped declaration of an interface type: one whose
-// underlying interface is that of a declared type. A declared type is
-// found among the packages its methods mention, since an identical
-// interface names the same types.
+// underlying interface is that of a declared type, or that has every
+// method of a declared type as the same declaration, as an interface that
+// embeds it does. A declared type is found among the packages its methods
+// and their signatures mention, since an identical interface names the
+// same types.
 func scopedOf(t types.Type) *scopedDecl {
 	if t == nil {
 		return nil
@@ -179,7 +181,7 @@ func scopedOf(t types.Type) *scopedDecl {
 				if home == nil {
 					continue
 				}
-				if obj, ok := home.Scope().Lookup(decl.typ).(*types.TypeName); ok && types.Identical(u, obj.Type().Underlying()) {
+				if obj, ok := home.Scope().Lookup(decl.typ).(*types.TypeName); ok && (types.Identical(u, obj.Type().Underlying()) || embeds(u, obj.Type())) {
 					d := decl
 					result = &d
 				}
@@ -189,6 +191,22 @@ func scopedOf(t types.Type) *scopedDecl {
 	}
 	scopedCache.Store(t, result)
 	return result
+}
+
+// embeds reports whether an interface has every method of a declared one
+// as the same declaration, as through embedding at any depth: a value of it
+// is a value of the declared type too (F8 of the review of step 1).
+func embeds(u *types.Interface, declared types.Type) bool {
+	want, ok := declared.Underlying().(*types.Interface)
+	if !ok || want.NumMethods() == 0 {
+		return false
+	}
+	for method := range want.Methods() {
+		if !slices.Contains(slices.Collect(u.Methods()), method) {
+			return false
+		}
+	}
+	return true
 }
 
 // holdsScoped returns the scoped declaration of a value that a value of

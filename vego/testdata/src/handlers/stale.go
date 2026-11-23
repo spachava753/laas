@@ -175,3 +175,46 @@ func HandsOn(w http.ResponseWriter) {
 	h.w = w
 	h.w.WriteHeader(http.StatusAccepted)
 }
+
+// FlushWriter is a writer that also flushes, which has the methods of
+// http.ResponseWriter from its declarations.
+type FlushWriter interface {
+	http.ResponseWriter
+	// @Receiver f
+	// @Modifies f
+	// @Ensures True
+	Flush()
+}
+
+// Keeper keeps a FlushWriter.
+type Keeper struct{ fw FlushWriter }
+
+// KeepFlush stores it, which is keeping a ResponseWriter.
+//
+// @Requires k != nil
+// @Modifies k
+// @Ensures True
+func (k *Keeper) KeepFlush(fw FlushWriter) {
+	k.fw = fw // want `fw is or holds a net/http.ResponseWriter, which must not be used after the call that received it returns, and here it is stored into memory at stale.go:\d+:2`
+}
+
+// UseFlush uses one it is given, which keeps nothing.
+//
+// @Requires fw != nil
+// @Modifies fw
+// @Ensures True
+func UseFlush(fw FlushWriter) {
+	fw.WriteHeader(http.StatusOK)
+	fw.Flush()
+}
+
+// wrapW is trusted to return a writer that keeps w.
+func wrapW(w http.ResponseWriter) (r http.ResponseWriter) { return w }
+
+// HandsToTrusted hands the writer to a trusted function that keeps it.
+//
+// @Requires w != nil
+// @Ensures True
+func HandsToTrusted(w http.ResponseWriter) {
+	_ = wrapW(w) // want `w is or holds a net/http.ResponseWriter, which must not be used after the call that received it returns, and here it is handed to wrapW as w \(its entry keeps w in r\)`
+}

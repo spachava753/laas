@@ -1142,6 +1142,10 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 				}
 				remedy = fmt.Sprintf("it is memory that %s returned, which its contract places within %s%s, and %s passed %s as %s; list %s in a // @Modifies clause",
 					callee, from.param, unless, v.fn.obj.Name(), from.within, from.param, from.within)
+				if from.within == from.param {
+					remedy = fmt.Sprintf("it is memory that %s returned, which its contract places within %s%s; list %s in a // @Modifies clause",
+						callee, from.param, unless, from.within)
+				}
 			}
 			switch contract := v.contractTitle(from.fn); {
 			case from.fn.trust != nil || len(from.freshIn) > 0:

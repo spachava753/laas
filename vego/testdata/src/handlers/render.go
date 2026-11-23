@@ -48,31 +48,19 @@ func RequestThenRender(w http.ResponseWriter, req *http.Request) {
 	render2(w, req)
 }
 
-// fill is trusted to store values it is handed into h.
-func fill(h http.Header, v []string) { h["X"] = v }
+// fillPage is trusted to set a header of h, which it lists under stores,
+// and to write p, which it does not list there.
+func fillPage(h http.Header, p *Page) {}
 
-// rowsOf is trusted to return rows from somewhere.
-func rowsOf(p *Page) (rows []string) { return p.Rows }
-
-// FillThenRender hands a project entry with stores a slice of unknown
-// origin, which it could store: stores covers only memory it makes.
+// FillThenRender calls an entry whose other target can hold a reference,
+// which stores does not cover, so the call may store memory of any origin.
 //
 // @Requires w != nil And p != nil And req != nil And req.Header != nil
-// @Modifies w, req.Header
+// @Modifies w, req.Header, p
 // @Ensures True
 func FillThenRender(w http.ResponseWriter, req *http.Request, p *Page) {
-	fill(req.Header, rowsOf(p))
-	render2(w, req) // want `the footprint of what is passed to render2 as w may hold memory that what is passed as req reaches`
-}
-
-// FillOutside hands it a slice that the function's own parameter reaches.
-//
-// @Requires w != nil And p != nil And req != nil And req.Header != nil
-// @Modifies w, req.Header
-// @Ensures True
-func FillOutside(w http.ResponseWriter, req *http.Request, p *Page) {
-	fill(req.Header, p.Rows)
-	render2(w, req)
+	fillPage(req.Header, p)
+	render2(w, req) // want `the footprint of what is passed to render2 as w may hold memory that what is passed as req reaches, and render2 relies on it not doing so: the call of fillPage at render.go:\d+:\d+ may store into memory it may modify a reference to memory of any origin`
 }
 
 // Sink writes behind its receiver.

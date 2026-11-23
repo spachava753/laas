@@ -297,7 +297,7 @@ func Unique(s []Point2) (r []Point2) {
 func GrowWrite(s []int) (r []int) {
 	r = slices.Grow(s, 1)
 	r = r[:len(r)+1]
-	r[len(r)-1] = 1 // want `r\[len\(r\) - 1\] is assigned, which GrowWrite may not modify; it is memory that Grow returned, which its contract places within s when it is not new, and GrowWrite passed s as s; list s in a // @Modifies clause`
+	r[len(r)-1] = 1 // want `r\[len\(r\) - 1\] is assigned, which GrowWrite may not modify; it is memory that Grow returned, which its contract places within s when it is not new; list s in a // @Modifies clause`
 	return r
 }
 

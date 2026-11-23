@@ -163,7 +163,7 @@ func LengthOfInt(n int) {}
 // @Ensures True
 func WritesBytesUnlisted(b *bytes.Buffer) {
 	p := b.Bytes()
-	p[0] = 'x' // want `p\[0\] is assigned, which WritesBytesUnlisted may not modify; it is memory that Bytes returned, which its contract places within b, and WritesBytesUnlisted passed b as b; list b in a // @Modifies clause`
+	p[0] = 'x' // want `p\[0\] is assigned, which WritesBytesUnlisted may not modify; it is memory that Bytes returned, which its contract places within b; list b in a // @Modifies clause`
 }
 
 // AppendsBytesUnlisted appends to what Bytes returned, into its capacity,
@@ -173,7 +173,7 @@ func WritesBytesUnlisted(b *bytes.Buffer) {
 // @Ensures True
 func AppendsBytesUnlisted(b *bytes.Buffer) {
 	p := b.Bytes()
-	p = append(p, 'x') // want `which AppendsBytesUnlisted may not modify; it is memory that Bytes returned, which its contract places within b, and AppendsBytesUnlisted passed b as b; list b in a // @Modifies clause`
+	p = append(p, 'x') // want `which AppendsBytesUnlisted may not modify; it is memory that Bytes returned, which its contract places within b; list b in a // @Modifies clause`
 	_ = p
 }
 

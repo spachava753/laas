@@ -32,7 +32,7 @@ func Answer(w http.ResponseWriter, req *http.Request, s *Store) {
 // @Requires w != nil
 // @Ensures True
 func Unlisted(w http.ResponseWriter) {
-	w.Header().Set("a", "b") // want `w.Header may modify the footprint of w, which Unlisted may not modify; list it in a // @Modifies clause` `Set may modify w.Header\(\), which Unlisted may not modify; it is memory that ResponseWriter.Header returned, which its contract places within w, and Unlisted passed w as w; list w in a // @Modifies clause`
+	w.Header().Set("a", "b") // want `w.Header may modify the footprint of w, which Unlisted may not modify; list it in a // @Modifies clause` `Set may modify w.Header\(\), which Unlisted may not modify; it is memory that ResponseWriter.Header returned, which its contract places within w; list w in a // @Modifies clause`
 }
 
 // Fail answers with errors that http.Error and http.NotFound write.
@@ -72,7 +72,7 @@ func StatusOf(w http.ResponseWriter, code int) {
 // @Modifies w
 // @Ensures True
 func Echo(w http.ResponseWriter, msg string) {
-	http.Error(w, msg, http.StatusBadRequest) // want `precondition of Error may not hold: 2 \* \(\|error\| \+ 1\) \+ 65536 <= MaxAlloc`
+	http.Error(w, msg, http.StatusBadRequest) // want `precondition of Error may not hold: 2 \* \(\|error\| \+ 1\) \+ 65536 <= MaxAlloc; it holds when \|msg\| <= 100000000000000`
 }
 
 // EchoShort writes a message of a bounded length.

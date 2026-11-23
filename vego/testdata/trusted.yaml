@@ -12,12 +12,22 @@ trusted:
       r: []
     modifies: []
 
-  handlers.fill:
-    reason: Test helper whose entry claims stores of h; it is handed a slice it could store, which the claim does not cover.
+  handlers.fillPage:
+    reason: Test helper that sets a header of h, listed under stores, and writes p, which stores does not list.
     requires:
-      - "h != nil"
-    modifies: [h]
+      - "h != nil And p != nil"
+    modifies: [h, p]
     stores: [h]
+
+  handlers.wrapW:
+    reason: Test helper that keeps the writer it is given in its result.
+    requires:
+      - "w != nil"
+    runs: [w]
+    keeps:
+      w: [r]
+    vouches: [r]
+    modifies: []
 
   handlers.grownBeside:
     reason: Test helper that sets a header of h, which it lists under stores, writes s, and returns a map in the footprint of s.
@@ -29,12 +39,6 @@ trusted:
     vouches: [s]
     ensures:
       - "m != nil And within(m, s)"
-
-  handlers.rowsOf:
-    reason: Test helper that returns rows of no known origin.
-    requires:
-      - "p != nil"
-    modifies: []
 
   # The guide's entry for os.ReadFile, which TestReadFileEntry checks
   # against the real function on regular files.

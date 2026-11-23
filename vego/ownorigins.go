@@ -1252,7 +1252,19 @@ func (v *fnVerifier) ownResults(fl *ownFlow, e ast.Expr, count int, f *ownFact) 
 					c.name, v.paramName(op.param), v.rootName(root), c.why)
 				break
 			}
-			v.refuseScoped(fl, op.expr.Pos(), kind, "handed to "+c.name+" as "+v.paramName(op.param)+" ("+c.why+")", types.ExprString(op.expr))
+			why := c.why
+			if c.trusted && op.param != nil {
+				for _, k := range c.fn.trust.keeps {
+					if k.name == op.param.Name() {
+						var dests []string
+						for _, d := range k.dests {
+							dests = append(dests, d.text)
+						}
+						why = "its entry keeps " + k.name + " in " + strings.Join(dests, " and ")
+					}
+				}
+			}
+			v.refuseScoped(fl, op.expr.Pos(), kind, "handed to "+c.name+" as "+v.paramName(op.param)+" ("+why+")", types.ExprString(op.expr))
 			v.ownKeep(fl, kind)
 			v.ownEscape(kind, f, "handed to "+c.name+", which may keep it")
 			continue

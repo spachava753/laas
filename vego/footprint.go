@@ -724,7 +724,13 @@ func (v *fnVerifier) noteReachedValue(sink *state, t types.Type, ref, key *logic
 // a footprint: it is not written to, it modifies no footprint, and it
 // returns nothing and writes nothing that can hold an interface value. A
 // call that does no such thing needs no growth layer, which keeps the chain
-// of layers short in a function that never meets a footprint.
+// of layers short in a function that never meets a footprint. A target
+// that a trusted entry lists under stores receives only memory the call
+// made, which joins no row (F28; see callPollutes): a row grows only by
+// what its value's methods create or, for a converted value, by its
+// definition and follow layers, and the methods of a value from code that
+// is not verified do not write through what another call stored into
+// memory the value handed out, by the clause F33 of part 1 added.
 func (v *fnVerifier) growsNothing(fn *funcInfo) bool {
 	if writesFootprint(v, fn) {
 		return false

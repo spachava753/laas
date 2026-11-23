@@ -645,29 +645,23 @@ func (v *fnVerifier) callPollutes(call *ast.CallExpr, fact memFact) string {
 	// which lies in no row, unless it is handed something it could store.
 	// A trusted call whose every target that can hold a reference lies
 	// under a parameter its entry lists under stores stores there only
-	// memory it made during the call (F28), which lies in no row: a row
+	// memory it made during the call (F28), and nothing else, so it stores
+	// no reference of unknown origin. That memory lies in no row: a row
 	// grows only by memory the methods of its value create, or, for a value
 	// verified code converted, by its definition at the conversion and the
 	// follow layers of stores into owned fields, and a trusted call of
 	// another package is none of these; and the methods of a value from
 	// code that is not verified do not write through what another call
 	// stored into memory the value handed out, by the clause of What a
-	// proof assumes that F33 of part 1 added. What it is handed it may
-	// still store, as a verified callee may, which keeps would say where.
+	// proof assumes that F33 of part 1 added.
 	if fn.trust != nil && len(fn.trust.stores) > 0 && !v.targetsHold(fn, true) {
-		why := v.unknownHanded(call, fn, fact)
-		if why == "" {
-			return ""
-		}
-		return fmt.Sprintf("the call of %s at %s may store what it is handed into memory it may modify, and %s",
-			types.ExprString(call.Fun), v.placeOf(call.Pos()), why)
+		return ""
 	}
 	// A callee may store memory it got other than through its arguments,
-	// from its package or from a call it made, into what it modifies (F28
-	// of the review of step 2), so a call whose targets can hold a
-	// reference pollutes, unless it is a verified function that stores
-	// only what its arguments reach or new memory, and is handed nothing
-	// unknown.
+	// from its package or from a call it made (F28 of the review of step 2),
+	// so a call whose targets can hold a reference pollutes, unless it is a
+	// verified function that stores only what its arguments reach or new
+	// memory, and is handed nothing unknown.
 	if v.pkgVerifier.memSummary(fn.obj).stores && fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil {
 		why := v.unknownArgument(call, fact)
 		if why == "" {
@@ -690,43 +684,6 @@ func (v *fnVerifier) unknownArgument(call *ast.CallExpr, fact memFact) string {
 	for _, arg := range operands {
 		if why := v.memOrigin(arg, fact); why != "" {
 			return fmt.Sprintf("%s is handed %s, and %s", types.ExprString(call.Fun), types.ExprString(arg), why)
-		}
-	}
-	return ""
-}
-
-// unknownHanded is unknownArgument for a call whose entry lists stores: a
-// parameter listed there is the memory the call writes, not something it
-// stores, unless a value of its type can hold another of its type.
-func (v *fnVerifier) unknownHanded(call *ast.CallExpr, fn *funcInfo, fact memFact) string {
-	listed := map[string]bool{}
-	for _, name := range fn.trust.stores {
-		listed[name.text] = true
-	}
-	type operand struct {
-		e    ast.Expr
-		name string
-	}
-	var operands []operand
-	offset := 0
-	if sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok {
-		if selection := v.info.Selections[sel]; selection != nil && selection.Kind() == types.MethodVal && len(fn.params) > 0 {
-			operands, offset = append(operands, operand{sel.X, fn.params[0].Name()}), 1
-		}
-	}
-	for i, arg := range call.Args {
-		name := ""
-		if offset+i < len(fn.params) {
-			name = fn.params[offset+i].Name()
-		}
-		operands = append(operands, operand{arg, name})
-	}
-	for _, op := range operands {
-		if t := v.info.TypeOf(op.e); listed[op.name] && !v.ownDeeper(t, t) {
-			continue
-		}
-		if why := v.memOrigin(op.e, fact); why != "" {
-			return fmt.Sprintf("%s is handed %s, and %s", types.ExprString(call.Fun), types.ExprString(op.e), why)
 		}
 	}
 	return ""

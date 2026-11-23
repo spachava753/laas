@@ -249,6 +249,17 @@ func (r *httpRound) around(what string, w http.ResponseWriter, req *http.Request
 	}
 }
 
+// mustPanic makes a call whose requires is false and fails unless it
+// panics, which shows that the requires is needed at its edge.
+func (r *httpRound) mustPanic(what string, call func()) {
+	defer func() {
+		if recover() == nil {
+			r.fail("%s, whose requires is false, did not panic", what)
+		}
+	}()
+	call()
+}
+
 // check evaluates the requires of the entry under test for a call with the
 // given terms, and reports whether it holds.
 func (r *httpRound) check(given map[*types.Var]*logic.Term) *sequenceCheck {
@@ -262,7 +273,9 @@ func (r *httpRound) sequence(rng *rand.Rand, w http.ResponseWriter, req *http.Re
 			r.fail("a call panicked: %v", p)
 		}
 	}()
-	wrote := false
+	// final is set once a final header has been written, after which a
+	// WriteHeader with any code returns at once.
+	final := false
 	for range 1 + rng.Intn(6) {
 		op := []string{"get", "set", "del", "(net/http.ResponseWriter).Header", "(net/http.ResponseWriter).WriteHeader",
 			"(net/http.ResponseWriter).Write", "net/http.Error", "net/http.NotFound", "read"}[rng.Intn(9)]
@@ -299,15 +312,26 @@ func (r *httpRound) sequence(rng *rand.Rand, w http.ResponseWriter, req *http.Re
 				}
 			}
 		case "(net/http.ResponseWriter).WriteHeader":
-			code := []int{100, 103, 200, 201, 204, 304, 400, 404, 500, 599, 600, 999}[rng.Intn(12)]
-			if op == r.key {
-				if !r.check(map[*types.Var]*logic.Term{r.fn.receiver: reference(false), r.fn.params[0]: logic.IntLit(int64(code))}).holds(r.fn.requires) {
+			code := []int{-1, 0, 99, 100, 103, 200, 201, 204, 304, 400, 404, 500, 599, 600, 999, 1000}[rng.Intn(16)]
+			if op != r.key {
+				if code < 100 || code > 999 {
 					continue
 				}
+			} else if !r.check(map[*types.Var]*logic.Term{r.fn.receiver: reference(false), r.fn.params[0]: logic.IntLit(int64(code))}).holds(r.fn.requires) {
+				// The requires is false: before the final header the call
+				// must panic, which is what the requires rules out.
+				if !final {
+					r.mustPanic(fmt.Sprintf("WriteHeader(%d)", code), func() { w.WriteHeader(code) })
+				}
+				continue
+			} else {
 				r.calls++
 			}
 			r.around(fmt.Sprintf("WriteHeader(%d)", code), w, req, nil, func() { w.WriteHeader(code) })
-			wrote = wrote || code >= 200
+			// The recorder takes any code as the final one; a server sends
+			// a 1xx but 101 and waits for the final one.
+			_, recorder := w.(*httptest.ResponseRecorder)
+			final = final || code >= 200 || code == 101 || recorder
 		case "(net/http.ResponseWriter).Write":
 			// Empty, small, past the 2 KB a writer buffers before it
 			// flushes its header, and past 64 KB.
@@ -316,26 +340,34 @@ func (r *httpRound) sequence(rng *rand.Rand, w http.ResponseWriter, req *http.Re
 				r.calls++
 			}
 			r.around(fmt.Sprintf("Write of %d bytes", len(p)), w, req, []any{p}, func() { w.Write(p) })
-			wrote = true
+			final = true
 		case "net/http.Error":
 			msg := strings.Repeat("e", []int{0, 10, 3000, 70000}[rng.Intn(4)])
-			code := []int{200, 400, 404, 500, 999}[rng.Intn(5)]
-			if op == r.key {
-				given := map[*types.Var]*logic.Term{r.fn.params[0]: reference(false), r.fn.params[1]: lengthTerm(len(msg)), r.fn.params[2]: logic.IntLit(int64(code))}
-				if !r.check(given).holds(r.fn.requires) {
+			code := []int{-1, 0, 99, 100, 200, 400, 404, 500, 999, 1000}[rng.Intn(10)]
+			if op != r.key {
+				if code < 100 || code > 999 {
 					continue
 				}
+			} else if given := (map[*types.Var]*logic.Term{r.fn.params[0]: reference(false), r.fn.params[1]: lengthTerm(len(msg)), r.fn.params[2]: logic.IntLit(int64(code))}); !r.check(given).holds(r.fn.requires) {
+				if !final {
+					r.mustPanic(fmt.Sprintf("Error with code %d", code), func() { http.Error(w, msg, code) })
+				}
+				continue
+			} else {
 				r.calls++
 			}
 			r.around("Error", w, req, nil, func() { http.Error(w, msg, code) })
+			// Error writes its message after the header, which writes a
+			// final header after a 1xx one.
+			final = true
 		case "net/http.NotFound":
 			if op == r.key {
 				r.calls++
 			}
 			r.around("NotFound", w, req, nil, func() { http.NotFound(w, req) })
+			final = true
 		}
 	}
-	_ = wrote
 }
 
 // randomHeaderKey returns a key a header may hold.

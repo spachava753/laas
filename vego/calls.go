@@ -555,7 +555,10 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	}
 	pre := &specEnv{v: v, sink: st, fn: fn, args: args, now: before}
 	for _, c := range fn.requires {
-		if sig.Recv() != nil && fn.trust != nil && ownerLength(sig.Recv().Type()) != nil {
+		// A bound of what a buffer can grow to, or of what a trusted
+		// function allocates: the message says what bound on each length
+		// is enough.
+		if fn.trust != nil && (sig.Recv() != nil && ownerLength(sig.Recv().Type()) != nil || strings.Contains(c.text, "MaxAlloc")) {
 			// A bound of what a buffer can grow to: the message says
 			// what bound on each length is enough.
 			for _, node := range c.node.Conjuncts() {
