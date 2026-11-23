@@ -59,7 +59,7 @@ func jsonHelper(t *testing.T, b jsonBuild) string {
 
 // jsonEntries are the shipped entries of encoding/json, each held by
 // TestJSONEntries; an entry of the package not listed has no harness.
-var jsonEntries = []string{"encoding/json.Marshal", "encoding/json.MarshalIndent", jsonEncodeKey, "encoding/json.Unmarshal"}
+var jsonEntries = []string{"encoding/json.Marshal", "encoding/json.MarshalIndent", jsonEncodeKey, "encoding/json.Unmarshal", jsonDecodeKey}
 
 // checkJSONEntry reads a shipped entry of encoding/json as a call would:
 // it must be usable, encode its parameter v, and vouch for its error.
@@ -78,6 +78,10 @@ func checkJSONEntry(t *testing.T, pv *pkgVerifier, pkg *types.Package, key strin
 		t.Fatalf("the entry of %s cannot be used: %v", key, fn.defects)
 	}
 	switch {
+	case key == jsonDecodeKey:
+		if fn.decoded == nil || fn.decoded.Name() != "v" || fn.vouches[0] {
+			t.Errorf("the entry of %s does not decode into v, or vouches for its error, which may be the reader's", key)
+		}
 	case key == "encoding/json.Unmarshal":
 		if fn.decoded == nil || fn.decoded.Name() != "v" || fn.decodedFrom == nil || !fn.vouches[0] {
 			t.Errorf("the entry of %s does not decode into v from data and vouch for its error", key)

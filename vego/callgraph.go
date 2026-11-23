@@ -634,6 +634,24 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 				// expression is.
 				return true
 			}
+			// json.NewDecoder(io.LimitReader(r, n)).Decode(v) calls r.Read
+			// and nothing else of r; what it decodes into runs nothing of
+			// the package (jsondecode.go).
+			if _, limit, limited := pv.decoderInPlace(n); limited {
+				decode := pv.staticCalleeAt(n)
+				pv.handedCode(n, decode.Type().(*types.Signature), pv.entryFor(decode.FullName()), decode.Pkg(), false, false, decode.FullName(), false, text, unresolved)
+				r := limit.Args[0]
+				rt := pv.info.TypeOf(r)
+				if obj, _, _ := types.LookupFieldOrMethod(rt, true, pv.pass.Pkg, "Read"); obj != nil {
+					method := obj.(*types.Func)
+					if isIface(rt) {
+						unresolved(n, text, "", pv.methodsMatching("Read", withoutRecv(method.Type().(*types.Signature))))
+					} else if to := g.byObj[method.Origin()]; to != nil {
+						edge(to, n.Pos(), text, true)
+					}
+				}
+				return true
+			}
 			if callee := pv.staticCalleeAt(n); callee != nil {
 				if callee.Pkg() != pv.pass.Pkg {
 					// What a call of a function of another package may run of

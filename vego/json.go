@@ -1141,6 +1141,15 @@ func (pv *pkgVerifier) isEncoderInner(call *ast.CallExpr) bool {
 				if outer, ok := n.(*ast.CallExpr); ok && pv.encoderInPlace(outer) != nil {
 					pv.encoderInners[ast.Unparen(ast.Unparen(outer.Fun).(*ast.SelectorExpr).X).(*ast.CallExpr)] = true
 				}
+				// The NewDecoder and the LimitReader of the in-place
+				// decoder too: the decoder and the limited reader live for
+				// the expression (jsondecode.go).
+				if outer, ok := n.(*ast.CallExpr); ok {
+					if made, limit, limited := pv.decoderInPlace(outer); limited {
+						pv.encoderInners[made] = true
+						pv.encoderInners[limit] = true
+					}
+				}
 				return true
 			})
 		}

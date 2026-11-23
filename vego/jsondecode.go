@@ -5,7 +5,10 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"math/big"
 	"strings"
+
+	"golang.org/x/tools/go/types/typeutil"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 )
@@ -61,9 +64,6 @@ func (pv *pkgVerifier) readDecodes(fn *funcInfo, entry *trustEntry) {
 			fn.decodedFrom = param
 		}
 	}
-	if fn.decodedFrom == nil {
-		fn.defect("it lists decodes, and has no parameter of type []byte to decode")
-	}
 	if len(entry.formats) > 0 || len(entry.calls) > 0 || len(entry.keeps) > 0 || len(entry.asserts) > 0 || len(entry.prints) > 0 || len(entry.encodes) > 0 || len(entry.runs) > 0 {
 		fn.defect("it lists decodes with formats, calls, keeps, asserts, prints, encodes, or runs; decodes says all the function runs and keeps of what it decodes into")
 	}
@@ -89,7 +89,7 @@ func (v *fnVerifier) decodeTargetOf(call *ast.CallExpr, fn *funcInfo) (ast.Expr,
 			data = b.expr
 		}
 	}
-	if into == nil || data == nil {
+	if into == nil || (data == nil && fn.decodedFrom != nil) {
 		return into, data, decodeTarget{why: "what it decodes and what it decodes into must be written out"}
 	}
 	t := v.info.TypeOf(into)
@@ -232,9 +232,16 @@ func decodeFactor(t types.Type, sizes types.Sizes, seen map[types.Type]bool) int
 
 // callDecode verifies a call of a function with decodes as the contract
 // made for it; see the comment at the top of the file.
-func (v *fnVerifier) callDecode(call *ast.CallExpr, fn *funcInfo, st *state, guard []*logic.Term, reach func()) []value {
+func (v *fnVerifier) callDecode(call *ast.CallExpr, fn *funcInfo, st *state, guard []*logic.Term, reach func(), source *decodeSource) []value {
 	_, data, target := v.decodeTargetOf(call, fn)
-	byteSlice := fn.decodedFrom.Type()
+	byteSlice := types.Type(types.NewSlice(types.Typ[types.Byte]))
+	if fn.decodedFrom != nil {
+		byteSlice = fn.decodedFrom.Type()
+	}
+	if source != nil {
+		// What the decoder reads, which no expression names.
+		data = &ast.Ident{NamePos: call.Lparen, Name: "data"}
+	}
 	params := []*types.Var{types.NewParam(data.Pos(), v.pass.Pkg, "data", byteSlice)}
 	results := []*types.Var{}
 	var modifies []string
@@ -255,7 +262,7 @@ func (v *fnVerifier) callDecode(call *ast.CallExpr, fn *funcInfo, st *state, gua
 	obj := types.NewFunc(call.Pos(), fn.obj.Pkg(), fn.obj.Name(), types.NewSignatureType(nil, nil, nil, types.NewTuple(params...), types.NewTuple(results...), false))
 	view := newFuncInfo(obj)
 	view.trust = fn.trust
-	view.vouches[len(results)-1] = true
+	view.vouches[len(results)-1] = fn.vouches[0]
 	factor := decodeFactor(target.t, v.pass.TypesSizes, map[types.Type]bool{})
 	for _, text := range []string{
 		fmt.Sprintf("%d * (|data| + 1) + 65536 <= MaxAlloc", factor),
@@ -280,7 +287,10 @@ func (v *fnVerifier) callDecode(call *ast.CallExpr, fn *funcInfo, st *state, gua
 	}
 	// The arguments, as the call evaluates them: the data, and the
 	// pointer or what the place holds now.
-	args := map[*types.Var]value{params[0]: v.eval(data, st, guard)}
+	args := map[*types.Var]value{}
+	if source == nil {
+		args[params[0]] = v.eval(data, st, guard)
+	}
 	var old value
 	if target.pointer != nil {
 		// Go converts it to any for the call, which is verified without
@@ -293,14 +303,19 @@ func (v *fnVerifier) callDecode(call *ast.CallExpr, fn *funcInfo, st *state, gua
 		old = v.eval(target.place, st, guard)
 	}
 	reach()
+	if source != nil {
+		// What the decoder read from the reader, before anything is
+		// decoded.
+		args[params[0]] = source.read()
+	}
 	shown := strings.TrimPrefix(types.ExprString(call.Args[len(call.Args)-1]), "&")
 	// What the decoder would reuse must be nil: a slice with no capacity,
 	// a nil map, a nil pointer.
 	v.checkNilTargets(st, guard, call, target, args, params, old, shown)
-	made := call
-	if target.place != nil {
-		// The made contract takes the data alone.
-		made = &ast.CallExpr{Fun: call.Fun, Lparen: call.Lparen, Args: []ast.Expr{data}, Rparen: call.Rparen}
+	// The made contract takes the data, and the pointer it writes through.
+	made := &ast.CallExpr{Fun: call.Fun, Lparen: call.Lparen, Args: []ast.Expr{data}, Rparen: call.Rparen}
+	if target.pointer != nil {
+		made.Args = append(made.Args, target.pointer)
 	}
 	out := v.invoke(made, view, args, st, guard)
 	if target.place != nil {
@@ -345,4 +360,168 @@ func (v *fnVerifier) checkNilTargets(st *state, guard []*logic.Term, call *ast.C
 		v.check(st, guard, nilled, call.Pos(), "Unmarshal may decode into memory that %s%s refers to, which the caller may hold: it appends into a slice's array, "+
 			"keeps a map's entries, and decodes through a pointer it finds; decode into a value whose slices, maps, and pointers are nil, as var x T declares it", shown, path)
 	}
+}
+
+// The in-place decoder (F29, D3). json.NewDecoder(io.LimitReader(r,
+// n)).Decode(&x), written as one expression, makes a decoder over a reader
+// that yields at most n bytes of r, and that nothing else holds. In every
+// build, Decode reads from it into a buffer until it holds the first
+// value (at most n bytes, the buffer at most twice that and a little
+// more), and decodes that value as Unmarshal does; what it did not read
+// stays in r. So the call is verified as r's own Read of a new slice,
+// which gives what the read may change of r, followed by the decoding of
+// Unmarshal from at most n bytes. Its error may be one r's Read returned,
+// so it is not vouched for. Any other use of a Decoder or of NewDecoder is
+// refused: a decoder over a reader without a limit reads without one, and
+// one from elsewhere may hold what it read before.
+
+// jsonDecodeKey and jsonNewDecoderKey are the functions of the route.
+const (
+	jsonDecodeKey     = "(*encoding/json.Decoder).Decode"
+	jsonNewDecoderKey = "encoding/json.NewDecoder"
+)
+
+// decodeSource is what the in-place decoder reads: read applies the
+// reader's own Read and returns the bytes read.
+type decodeSource struct {
+	read func() value
+}
+
+// decoderInPlace returns, for json.NewDecoder(io.LimitReader(r,
+// n)).Decode(v) written as one expression, the calls of NewDecoder and of
+// LimitReader, and otherwise nil. With limited false, the expression is
+// json.NewDecoder(r).Decode(v), whose reader has no limit.
+func (pv *pkgVerifier) decoderInPlace(call *ast.CallExpr) (made, limit *ast.CallExpr, limited bool) {
+	sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Decode" {
+		return nil, nil, false
+	}
+	if decode := typeutil.StaticCallee(pv.info, call); decode == nil || decode.FullName() != jsonDecodeKey {
+		return nil, nil, false
+	}
+	made, ok = ast.Unparen(sel.X).(*ast.CallExpr)
+	if !ok || len(made.Args) != 1 {
+		return nil, nil, false
+	}
+	if newDecoder := typeutil.StaticCallee(pv.info, made); newDecoder == nil || newDecoder.FullName() != jsonNewDecoderKey {
+		return nil, nil, false
+	}
+	limit, ok = ast.Unparen(made.Args[0]).(*ast.CallExpr)
+	if ok && len(limit.Args) == 2 {
+		if limiter := typeutil.StaticCallee(pv.info, limit); limiter != nil && limiter.FullName() == "io.LimitReader" {
+			return made, limit, true
+		}
+	}
+	return made, nil, false
+}
+
+// jsonDecoderUse is the message for any other use of NewDecoder or of a
+// Decoder, or "" for a function that is neither.
+func jsonDecoderUse(callee *types.Func) string {
+	switch callee.FullName() {
+	case jsonNewDecoderKey:
+		return "json.NewDecoder keeps r in the decoder it returns; write json.NewDecoder(io.LimitReader(r, n)).Decode(&x) in one expression, " +
+			"since a decoder held in a variable is not supported yet"
+	case jsonDecodeKey:
+		return "Decode is verified only on a new decoder over a limited reader, written as json.NewDecoder(io.LimitReader(r, n)).Decode(&x) in one expression: " +
+			"a Decoder made elsewhere may hold what it read before"
+	}
+	return ""
+}
+
+// callDecoder verifies json.NewDecoder(io.LimitReader(r, n)).Decode(v)
+// written as one expression; see decoderInPlace.
+func (v *fnVerifier) callDecoder(call, limit *ast.CallExpr, st *state, guard []*logic.Term) []value {
+	decode := typeutil.StaticCallee(v.info, call)
+	fn := v.contractOf(decode)
+	if fn == nil || fn.decoded == nil {
+		v.unsupported(call.Pos(), "json.NewDecoder(io.LimitReader(r, n)).Decode(&x) needs the entry of (*encoding/json.Decoder).Decode that comes with vego, which lists decodes")
+	}
+	fn = v.usable(call.Pos(), fn, decode.Name(), st, guard, true)
+	v.noteUse(fn, call.Pos())
+	v.checkDecodable(call, fn)
+	r, n := limit.Args[0], limit.Args[1]
+	rt := v.info.TypeOf(r)
+	obj, _, _ := types.LookupFieldOrMethod(rt, true, v.pass.Pkg, "Read")
+	method, _ := obj.(*types.Func)
+	if method == nil {
+		v.unsupported(r.Pos(), fmt.Sprintf("%s has no method Read", types.ExprString(r)))
+	}
+	var read *funcInfo
+	if isIface(rt) {
+		read = v.methodContract(method)
+	} else {
+		read = v.contractOf(method)
+	}
+	if read == nil {
+		v.unsupported(r.Pos(), fmt.Sprintf("the decoder calls %s.Read, which has no contract", types.ExprString(r)))
+	}
+	read = v.usable(call.Pos(), read, types.ExprString(r)+".Read", st, guard, true)
+	if isIface(rt) {
+		v.ifaceStatesOf(rt)
+	}
+	u := v.unit
+	operands := u.pushCeiling()
+	made := unitCall{name: decode.Name(), pos: call.Pos()}
+	// The reader is evaluated as it is: Go converts it to io.Reader for
+	// LimitReader, and the call is verified without that interface value.
+	inner := ast.Unparen(r)
+	v.converting[inner]++
+	reader := v.eval(r, st, guard)
+	v.converting[inner]--
+	most := v.eval(n, st, guard)
+	// What may be read must be something that can be decoded: the bound
+	// of Unmarshal at n.
+	if _, _, target := v.decodeTargetOf(call, fn); target.why == "" {
+		factor := decodeFactor(target.t, v.pass.TypesSizes, map[types.Type]bool{})
+		read := logic.Add(logic.Ite(logic.Lt(most[0], logic.IntLit(0)), logic.IntLit(0), most[0]), logic.IntLit(1))
+		maxInt := new(big.Int).Lsh(big.NewInt(1), uint(8*v.pass.TypesSizes.Sizeof(types.Typ[types.Int])-1))
+		maxInt.Sub(maxInt, big.NewInt(1))
+		fits := logic.And(
+			logic.Le(logic.Add(logic.Mul(logic.IntLit(factor), read), logic.IntLit(1<<16)), logic.BigLit(v.maxAlloc())),
+			logic.Le(logic.Mul(logic.IntLit(factor), read), logic.BigLit(maxInt)))
+		limit := new(big.Int).Sub(v.maxAlloc(), big.NewInt(1<<16))
+		limit.Div(limit, big.NewInt(factor))
+		if byInt := new(big.Int).Div(maxInt, big.NewInt(factor)); byInt.Cmp(limit) < 0 {
+			limit = byInt
+		}
+		limit.Sub(limit, big.NewInt(1))
+		v.check(st, guard, fits, call.Pos(), "the decoder may read %s bytes, more than can be decoded; it holds when %s <= %s",
+			types.ExprString(n), types.ExprString(n), limit)
+	}
+	source := &decodeSource{read: func() value {
+		if isIface(rt) {
+			// Read through a nil reader panics.
+			v.check(st, guard, logic.Ne(reader[0], logic.RefLit(0)), call.Pos(), "the reader %s handed to io.LimitReader may be nil", types.ExprString(r))
+		}
+		// The reader's own Read of a new slice, which gives what the
+		// reads may change of r.
+		readSig := read.obj.Type().(*types.Signature)
+		p := readSig.Params().At(0)
+		// The decoder reads into a buffer with room left, of at least 512
+		// bytes.
+		room := v.fresh("buffer", logic.IntSeq)
+		st.assume(logic.Le(logic.IntLit(1), logic.Len(room)))
+		buf := v.copiedBytes(st, room, p.Type())
+		readArgs := map[*types.Var]value{p: buf}
+		if read.receiver != nil {
+			readArgs[read.receiver] = reader
+		} else if recv := readSig.Recv(); recv != nil {
+			readArgs[recv] = reader
+		}
+		shown := &ast.Ident{NamePos: call.Lparen, Name: "buffer"}
+		readCall := &ast.CallExpr{Fun: &ast.SelectorExpr{X: r, Sel: &ast.Ident{NamePos: call.Lparen, Name: "Read"}}, Lparen: call.Lparen, Args: []ast.Expr{shown}, Rparen: call.Rparen}
+		if read.trust != nil {
+			v.noteUse(read, call.Pos())
+		}
+		v.invoke(readCall, read, readArgs, st, guard)
+		// What was read: at most n bytes, none for a limit below one.
+		text := v.fresh("read", logic.IntSeq)
+		st.assume(logic.Implies(logic.And(guard...), logic.Le(logic.Len(text), logic.Ite(logic.Lt(most[0], logic.IntLit(0)), logic.IntLit(0), most[0]))))
+		return v.copiedBytes(st, text, types.NewSlice(types.Typ[types.Byte]))
+	}}
+	results := v.callDecode(call, fn, st, guard, func() { u.reach(operands) }, source)
+	u.calls = append(u.calls, made)
+	u.event()
+	return results
 }

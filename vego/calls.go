@@ -102,6 +102,14 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	if w := v.pkgVerifier.encoderInPlace(call); w != nil {
 		return v.callEncoder(call, w, st, guard)
 	}
+	// json.NewDecoder(io.LimitReader(r, n)).Decode(v) in one expression;
+	// see jsondecode.go.
+	if made, limit, limited := v.pkgVerifier.decoderInPlace(call); limited {
+		return v.callDecoder(call, limit, st, guard)
+	} else if made != nil {
+		v.unsupported(call.Pos(), "json.NewDecoder(r).Decode reads from r without a limit, until the first value is whole, however long it is; "+
+			"write json.NewDecoder(io.LimitReader(r, n)).Decode(&x), with n the most it may read")
+	}
 	method, viaValue := throughValue(v.info, call)
 	switch {
 	case viaValue:
@@ -121,6 +129,9 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		v.unsupported(call.Pos(), "only calls to named functions and methods are supported")
 	}
 	if why := jsonEncoderUse(callee); why != "" {
+		v.unsupported(call.Pos(), why)
+	}
+	if why := jsonDecoderUse(callee); why != "" {
 		v.unsupported(call.Pos(), why)
 	}
 	// The receiver and the arguments are evaluated before the call, which
@@ -155,7 +166,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		if fn.decoded != nil {
 			// json.Unmarshal: a contract made for the call; see
 			// jsondecode.go.
-			results = v.callDecode(call, fn, st, guard, func() { u.reach(operands) })
+			results = v.callDecode(call, fn, st, guard, func() { u.reach(operands) }, nil)
 			break
 		}
 		if fn.calls.len() > 0 {

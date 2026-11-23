@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"math/rand/v2"
 	"os"
@@ -126,6 +127,7 @@ func main() {
 			}
 			checkEncode(c.Type, v)
 			checkDecode(c.Type, t, v, decodeErrTypes)
+			checkDecoder(c.Type, t, v, decodeErrTypes)
 			if n := calls.Load(); n != 0 {
 				fail("%s: encoding called %d methods it must not call", c.Type, n)
 			}
@@ -279,6 +281,62 @@ func checkDecode(name string, t reflect.Type, v reflect.Value, errTypes map[stri
 		after, _ := json.Marshal(p.Interface())
 		if string(before) != string(after) {
 			fail("%s: what Unmarshal decoded changed with the data", name)
+		}
+	}
+}
+
+// readRecorder serves data to a decoder and records how much was read;
+// its other methods fail.
+type readRecorder struct {
+	data []byte
+	pos  int
+}
+
+func (r *readRecorder) Read(p []byte) (int, error) {
+	if r.pos == len(r.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[r.pos:])
+	r.pos += n
+	return n, nil
+}
+
+func (r *readRecorder) WriteTo(io.Writer) (int64, error) { calls.Add(1); return 0, nil }
+func (r *readRecorder) ReadByte() (byte, error)          { calls.Add(1); return 0, nil }
+func (r *readRecorder) Close() error                     { calls.Add(1); return nil }
+
+// checkDecoder holds the claim of Decode's entry: a new decoder over
+// io.LimitReader(r, n) reads at most n bytes of r, decodes the first value
+// as Unmarshal does when it fits in n, and calls nothing of r but Read.
+func checkDecoder(name string, t reflect.Type, v reflect.Value, errTypes map[string]bool) {
+	good, err := json.Marshal(v.Interface())
+	if err != nil {
+		return
+	}
+	full := append(append([]byte(nil), good...), []byte(` {"after":1}`)...)
+	for _, n := range []int64{int64(len(good)) - 3, int64(len(good)), int64(len(good)) + 5, int64(len(full)) + 100, -1} {
+		r := &readRecorder{data: full}
+		p := reflect.New(t)
+		calls.Store(0)
+		err := json.NewDecoder(io.LimitReader(r, n)).Decode(p.Interface())
+		if err != nil {
+			treeTypes(err, errTypes)
+		}
+		if n >= 0 && int64(r.pos) > n || n < 0 && r.pos != 0 {
+			fail("%s: a decoder over io.LimitReader(r, %d) read %d bytes", name, n, r.pos)
+		}
+		if c := calls.Load(); c != 0 {
+			fail("%s: the decoder called %d methods of the reader or the value but Read", name, c)
+		}
+		if n >= int64(len(good)) && err == nil {
+			q := reflect.New(t)
+			if json.Unmarshal(good, q.Interface()) == nil {
+				a, _ := json.Marshal(p.Interface())
+				b, _ := json.Marshal(q.Interface())
+				if string(a) != string(b) {
+					fail("%s: the decoder decoded %s where Unmarshal decodes %s", name, clip(a), clip(b))
+				}
+			}
 		}
 	}
 }

@@ -144,3 +144,25 @@ trusted:
     decodes: [v]
     vouches: [result]
     modifies: []
+
+  (*encoding/json.Decoder).Decode:
+    reason: >-
+      "Decode reads the next JSON-encoded value from its input and stores it
+      in the value pointed to by v." (Go 1.26.6). vego uses this entry only
+      for json.NewDecoder(io.LimitReader(r, n)).Decode(&x) written as one
+      expression, where the decoder is new, nothing else holds it, and it
+      reads at most n bytes of r, and refuses any other call of Decode or
+      NewDecoder. Read from source, in the four builds: Decode on a new
+      decoder reads from its reader into a buffer that it grows to at most
+      twice what it holds and a little more, until the buffer holds the
+      first value, and decodes that value as Unmarshal does (decodes claims
+      of v what Unmarshal's entry claims); it reads nothing past what the
+      limit yields, and what it does not read stays in r. So vego verifies
+      the call as r's own Read of a new slice, then the decoding of
+      Unmarshal from at most n bytes, with the bound of Unmarshal at n. The
+      error may be one r's Read returned, so it is not vouched for.
+      TestJSONEntries holds the claim against readers that record what is
+      read, in each build.
+    decodes: [v]
+    vouches: [dec]
+    modifies: [dec]

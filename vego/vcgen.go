@@ -914,6 +914,8 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 	switch {
 	case v.looped[s]:
 		v.unsupported(s.Pos(), "defer inside a loop is not supported: how many calls it puts off is not known")
+	case func() bool { made, _, _ := v.pkgVerifier.decoderInPlace(s.Call); return made != nil }():
+		v.unsupported(s.Pos(), "deferring json.NewDecoder(io.LimitReader(r, n)).Decode(&x) is not supported: what it returns would be lost, and what it decodes into is checked where it is called")
 	case v.pkgVerifier.encoderInPlace(s.Call) != nil:
 		v.unsupported(s.Pos(), "deferring json.NewEncoder(w).Encode(v) is not supported: what it returns would be lost, and what it encodes is checked where it is called")
 	case lit != nil:
