@@ -281,6 +281,10 @@ type fnVerifier struct {
 	// and explaining the one whose clause check is proving, whose report
 	// then says why it was not kept; see explainFrame.
 	lastFrame, explaining *frameFailure
+	// lastSplit is the answer of the split question of a loop invariant
+	// that did not hold, which stands for the conjunct's own proof; see
+	// framedLoop.
+	lastSplit *solver.Result
 }
 
 // run executes one task on a function, turning the panics that abandon a
@@ -755,22 +759,28 @@ func (v *fnVerifier) checkOnly(st *state, guard []*logic.Term, goal *logic.Term,
 		done := v.at(pos)
 		result := v.attempt(st, guard, conjunct)
 		done()
-		if result != solver.Proved {
-			// What the goal rests on may be the contents of a table that a
-			// use in the build lets out, which a plain message would not say.
-			lost := ""
-			for _, note := range v.lostContents {
-				lost += "; " + note
-			}
-			if f := v.explaining; f != nil {
-				v.explaining = nil
-				lost += v.explainFrame(f)
-			}
-			v.report(pos, "%s%s%s", fmt.Sprintf(format, args...), lost, limitNote(result))
+		v.answered(st, guard, conjunct, result, assume, pos, format, args...)
+	}
+}
+
+// answered is what checkOnly does with the answer to one conjunct: it
+// reports the conjunct unless it was proved, and assumes it when told to.
+func (v *fnVerifier) answered(st *state, guard []*logic.Term, conjunct *logic.Term, result solver.Result, assume bool, pos token.Pos, format string, args ...any) {
+	if result != solver.Proved {
+		// What the goal rests on may be the contents of a table that a
+		// use in the build lets out, which a plain message would not say.
+		lost := ""
+		for _, note := range v.lostContents {
+			lost += "; " + note
 		}
-		if assume {
-			st.assume(logic.Implies(logic.And(guard...), conjunct))
+		if f := v.explaining; f != nil {
+			v.explaining = nil
+			lost += v.explainFrame(f)
 		}
+		v.report(pos, "%s%s%s", fmt.Sprintf(format, args...), lost, limitNote(result))
+	}
+	if assume {
+		st.assume(logic.Implies(logic.And(guard...), conjunct))
 	}
 }
 

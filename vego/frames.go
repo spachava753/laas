@@ -53,12 +53,6 @@ const frameMark = "%frame "
 // does not costs this much before the clauses are proved as before.
 const frameEffort = 2_000_000
 
-// splitEffort is the resource limit of the split question of a loop
-// invariant (framedLoop), three quarters of the default: the trial's
-// GetTasksByDueDate needs 2.6 M units, and a split that cannot hold costs
-// this much before the conjunct is proved as before.
-const splitEffort = 3_000_000
-
 // keptEntry is a point of a path where the invariants of a struct type
 // held of a value: one step of invariantSteps, in a memory of the path.
 type keptEntry struct {
@@ -881,9 +875,9 @@ func (v *fnVerifier) checkClauseFramed(c *clause, env logic.Env, st *state, guar
 			goal = v.formula(c, node, env)
 		}
 		done := v.at(pos)
-		v.lastFrame = nil
+		v.lastFrame, v.lastSplit = nil, nil
 		held := framed != nil && framed(node, goal)
-		failed := v.lastFrame
+		failed, split := v.lastFrame, v.lastSplit
 		var kept map[string][]*logic.Term
 		var why map[string]*frameFailure
 		if !held && len(found) == 1 {
@@ -905,7 +899,13 @@ func (v *fnVerifier) checkClauseFramed(c *clause, env logic.Env, st *state, guar
 					failed = f
 				}
 				v.explaining = failed
-				v.check(st, guard, conjunct, pos, "%s: %s", what, text)
+				if split != nil && conjunct == goal {
+					// The split asked at the full limit stands for the
+					// conjunct's own proof, whose goal implies it.
+					v.answered(st, guard, conjunct, *split, true, pos, "%s: %s", what, text)
+				} else {
+					v.check(st, guard, conjunct, pos, "%s: %s", what, text)
+				}
 				v.explaining = nil
 				continue
 			}
@@ -1149,7 +1149,13 @@ type loopKept struct {
 // invariant assumed there, so only the new ones are proved. The split
 // goal is Forall i : D1(i) -> ((D0(i) And Unch(i)) Or B1(i)), with D1 and
 // B1 those of the goal and D0 and Unch read through the frame. It is asked
-// at splitEffort.
+// at the limit of an obligation, and when it is not proved its answer
+// stands for the conjunct's own proof (v.lastSplit), which is not asked:
+// the conjunct's goal, Forall i : D1(i) -> B1(i), implies the split, so
+// asking the goal after it would pay a second limit for a conjunct that
+// does not hold (F21 of the review of step 5), and only Z3's heuristics
+// could prove the stronger goal where the weaker one failed. The trial's
+// GetTasksByDueDate needs 2.6 M units of it.
 func (v *fnVerifier) framedLoop(st *state, at token.Pos, c *clause, node *logic.Node, goal *logic.Term) bool {
 	text := node.String()
 	var heads []*loopKept
@@ -1160,8 +1166,9 @@ func (v *fnVerifier) framedLoop(st *state, at token.Pos, c *clause, node *logic.
 	}
 	// Each head by identity first, which asks nothing; then one question,
 	// from the latest head whose reading went alike, so that a conjunct
-	// that does not hold pays one limit before it is proved as before
-	// (F17 of the review).
+	// that does not hold pays one limit (F17 of the review): a split's,
+	// which stands for its proof, or a whole frame's before it is proved
+	// as before.
 	var read []*loopKept
 	for _, k := range heads {
 		held, alike := v.framedFrom(st, k, at, c, node, goal, false)
@@ -1236,7 +1243,10 @@ func (v *fnVerifier) framedFrom(end *state, k *loopKept, at token.Pos, c *clause
 		// differ, and its pairs, which the split asks only of the head's
 		// elements.
 		asked := logic.Implies(logic.And(closed(f.scratch.hyps)...), split)
-		r := v.solver().Prove(slices.Clip(end.hyps), asked, v.options(splitEffort, frameAttempt))
+		r := v.solver().Prove(slices.Clip(end.hyps), asked, v.options(0, frameAttempt))
+		if r != solver.Proved {
+			v.lastSplit = &r
+		}
 		return r == solver.Proved
 	})
 	return held, alike
