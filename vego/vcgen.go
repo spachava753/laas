@@ -277,6 +277,10 @@ type fnVerifier struct {
 	// frameNames is set while a frame is asked: names are made in its
 	// namespace, and what it materializes is dropped after; see frames.go.
 	frameNames *frameNamespace
+	// lastFrame is the last frame asked from an entry that did not hold,
+	// and explaining the one whose clause check is proving, whose report
+	// then says why it was not kept; see explainFrame.
+	lastFrame, explaining *frameFailure
 }
 
 // run executes one task on a function, turning the panics that abandon a
@@ -400,7 +404,7 @@ func (v *fnVerifier) enter() *state {
 	// Every caller has proved the invariants of what it passes.
 	for _, param := range fn.params {
 		if v.entry[param] != nil {
-			v.assumeInvariants(st, nil, memory{}, v.entry[param], param.Type(), true)
+			v.assumeInvariants(st, nil, memory{}, v.entry[param], param.Type(), "entry")
 		}
 	}
 	for _, result := range fn.results {
@@ -415,7 +419,7 @@ func (v *fnVerifier) enter() *state {
 	}
 	pre := &specEnv{v: v, sink: st, fn: fn, args: v.entry, now: memory{}}
 	for _, c := range fn.requires {
-		v.assumeKeeping(st, c, pre)
+		v.assumeKeeping(st, c, pre, "entry")
 	}
 	v.frame = v.targets(fn, v.entry, st, memory{})
 	v.used = make([]bool, len(v.frame))
@@ -758,6 +762,10 @@ func (v *fnVerifier) checkOnly(st *state, guard []*logic.Term, goal *logic.Term,
 			for _, note := range v.lostContents {
 				lost += "; " + note
 			}
+			if f := v.explaining; f != nil {
+				v.explaining = nil
+				lost += v.explainFrame(f)
+			}
 			v.report(pos, "%s%s%s", fmt.Sprintf(format, args...), lost, limitNote(result))
 		}
 		if assume {
@@ -772,6 +780,16 @@ func (v *fnVerifier) checkOnly(st *state, guard []*logic.Term, goal *logic.Term,
 // A conjunct that is valid(x) may be proved by a frame (frames.go).
 func (v *fnVerifier) checkClause(c *clause, env logic.Env, st *state, guard []*logic.Term, pos token.Pos, what string) {
 	v.checkClauseFramed(c, env, st, guard, pos, what, nil)
+}
+
+// logging returns a continuation that logs, before it goes on, whether
+// memory changed in the statement, for the message of a frame that does
+// not hold (frames.go).
+func (v *fnVerifier) logging(s ast.Stmt, k func(*state)) func(*state) {
+	return func(after *state) {
+		after.logWrite(s.Pos(), writeOf(s))
+		k(after)
+	}
 }
 
 // seq executes a statement list. Annotations between two statements are
@@ -828,9 +846,9 @@ func (v *fnVerifier) seq(list []ast.Stmt, from, to token.Pos, st *state, c ctrl,
 	rest := func(next *state) { v.seq(list[1:], list[0].End(), to, next, c, k) }
 	switch s := list[0].(type) {
 	case *ast.ForStmt:
-		v.forStmt(s, spec, nil, st, rest)
+		v.forStmt(s, spec, nil, st, v.logging(s, rest))
 	case *ast.RangeStmt:
-		v.rangeStmt(s, spec, st, rest)
+		v.rangeStmt(s, spec, st, v.logging(s, rest))
 	default:
 		v.stmt(s, st, c, rest)
 	}
@@ -840,6 +858,11 @@ func (v *fnVerifier) seq(list []ast.Stmt, from, to token.Pos, st *state, c ctrl,
 // Statements that leave the current block (return, break, continue, panic)
 // do not call k.
 func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
+	// Where memory changed is logged for the message of a frame that does
+	// not hold (frames.go).
+	if _, block := s.(*ast.BlockStmt); !block {
+		k = v.logging(s, k)
+	}
 	switch s := s.(type) {
 	case *ast.EmptyStmt:
 	case *ast.BlockStmt:

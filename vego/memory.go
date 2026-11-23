@@ -81,6 +81,9 @@ type state struct {
 	// of the path, so that a later goal can be proved by showing that
 	// nothing they read has changed since (frames.go).
 	kept []*keptEntry
+	// writes logs the statements after which memory changed on this path,
+	// for the message of a frame that did not hold (frames.go).
+	writes []loggedWrite
 }
 
 // deferredCall is a call that a defer statement put off: the call, the
@@ -110,7 +113,7 @@ func (st *state) clone() *state {
 		vals: maps.Clone(st.vals), mem: maps.Clone(st.mem), brk: st.brk,
 		hyps: slices.Clone(st.hyps), chosen: slices.Clone(st.chosen), noted: maps.Clone(st.noted),
 		deferred: slices.Clone(st.deferred), snapshots: st.snapshots, visited: st.visited,
-		kept: slices.Clip(st.kept),
+		kept: slices.Clip(st.kept), writes: slices.Clip(st.writes),
 	}
 }
 

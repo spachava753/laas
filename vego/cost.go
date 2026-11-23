@@ -29,6 +29,7 @@ const (
 	modifiesCheck
 	quickCheck
 	frameAttempt
+	frameWhy
 )
 
 // questionNames holds the name of each kind of question, in the singular and the
@@ -40,6 +41,7 @@ var questionNames = [...][2]string{
 	{"check whether a Modifies entry is needed", "checks whether a Modifies entry is needed"},
 	{"quick check", "quick checks"},
 	{"frame", "frames"},
+	{"question that names what a frame lost", "questions that name what a frame lost"},
 }
 
 // fnCost is what verifying a function asked of Z3: the problems, the

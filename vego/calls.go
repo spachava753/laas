@@ -906,7 +906,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		// result with no value is not assumed (calleeFormula), and what
 		// its reading found is not kept either.
 		if len(guard) == 0 && promise.Op != logic.OpTrue {
-			keepValid(st, fn.ensures[i], kept[i])
+			keepValid(st, fn.ensures[i], kept[i], "the call to "+name+" at "+v.placeOf(call.Pos()))
 		}
 	}
 	if !dead && v.quickly(st, append(slices.Clip(involved), claimDefs...), logic.False()) {
@@ -926,12 +926,12 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	if fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil {
 		for _, param := range fn.params {
 			if args[param] != nil {
-				v.assumeInvariants(st, guard, st.mem, args[param], param.Type(), true)
+				v.assumeInvariants(st, guard, st.mem, args[param], param.Type(), "the call to "+name+" at "+v.placeOf(call.Pos()))
 			}
 		}
 		for i, result := range results {
 			if result != nil {
-				v.assumeInvariants(st, guard, st.mem, result, sig.Results().At(i).Type(), true)
+				v.assumeInvariants(st, guard, st.mem, result, sig.Results().At(i).Type(), "the call to "+name+" at "+v.placeOf(call.Pos()))
 			}
 		}
 	}

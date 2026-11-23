@@ -15,7 +15,7 @@ func (s *Server) Scribble(w io.Writer, id int, x string, p []byte) {
 		t.Tags[0] = x
 	}
 	w.Write(p)
-} // want `vego: invariant of Store may not hold for s on return, in what it owns at store: \(Forall k in tasks : `
+} // want `vego: invariant of Store may not hold for s on return, in what it owns at store: \(Forall k in tasks : .*; it was not kept from entry, since \|tasks\[k\]\.Tags\[j\]\| may have changed: the assignment to t\.Tags\[0\] at defects\.go:15:3 may write it`
 
 // Rewrite writes every task in a loop.
 //
@@ -27,7 +27,7 @@ func (st *Store) Rewrite(x string) {
 		t.Text = x
 		st.tasks[k] = t
 	}
-} // want `vego: invariant of Store may not hold for st on return: \(Forall k in tasks : `
+} // want `vego: invariant of Store may not hold for st on return: \(Forall k in tasks : .*; it was not kept from entry, since has\(tasks, k\) may have changed: the loop at defects\.go:26:2 may write it`
 
 // overwrite writes the first element of what it is handed.
 //
@@ -48,7 +48,7 @@ func (s *Server) PassTags(id int, x string) {
 	if len(t.Tags) > 0 {
 		overwrite(t.Tags, x)
 	}
-} // want `vego: invariant of Store may not hold for s on return, in what it owns at store: \(Forall k in tasks : `
+} // want `vego: invariant of Store may not hold for s on return, in what it owns at store: \(Forall k in tasks : .*; it was not kept from entry, since \|tasks\[k\]\.Tags\[j\]\| may have changed: the call to overwrite at defects\.go:49:3 may write it`
 
 // Bump has an invariant that a call made under a condition of evaluation
 // restores; on the path where the condition is false it does not hold.
@@ -75,7 +75,7 @@ func Guarded(s *Bump, b bool) {
 		s.n = -1
 	}
 	_ = b && fix(s)
-} // want `vego: invariant of Bump may not hold for s on return: 0 <= n`
+} // want `vego: invariant of Bump may not hold for s on return: 0 <= n; it was not kept from entry, since n may have changed: the assignment to s\.n at defects\.go:75:3 may write it`
 
 // AddBad adds a task the invariant does not allow: the domain of the
 // invariant's quantifier has changed, which the frame sees.
@@ -85,7 +85,7 @@ func Guarded(s *Bump, b bool) {
 // @Ensures True
 func (st *Store) AddBad(x string) {
 	st.tasks[7] = Task{Text: x}
-} // want `vego: invariant of Store may not hold for st on return: \(Forall k in tasks : `
+} // want `vego: invariant of Store may not hold for st on return: \(Forall k in tasks : .*; it was not kept from entry, since has\(tasks, k\) may have changed: the assignment to st\.tasks\[7\] at defects\.go:87:2 may write it`
 
 // AfterCall breaks the invariant after a call that restored it, in the
 // same state: what the call's entry holds is the memory after the call,
@@ -97,7 +97,7 @@ func (st *Store) AddBad(x string) {
 func AfterCall(s *Bump) {
 	fix(s)
 	s.n = -1
-} // want `vego: invariant of Bump may not hold for s on return: 0 <= n`
+} // want `vego: invariant of Bump may not hold for s on return: 0 <= n; it was not kept from the call to fix at defects\.go:98:2, since n may have changed: the assignment to s\.n at defects\.go:99:2 may write it`
 
 // each calls f with each number below n; its entry is in the corpus's
 // trust file.
@@ -116,8 +116,8 @@ func each(n int, f func(i int)) {
 // @Modifies b
 // @Ensures True
 func HandedBreak(b *Bump, n int) {
-	each(n, func(i int) { fix(b) }) // want `vego: invariant of Bump may not hold for what is passed to fix as b: 0 <= n, in the function literal run by each`
+	each(n, func(i int) { fix(b) }) // want `vego: invariant of Bump may not hold for what is passed to fix as b: 0 <= n; it was not kept from entry, since n may have changed, in the function literal run by each`
 	if n > 0 {
 		b.n = -1
 	}
-} // want `vego: invariant of Bump may not hold for b on return: 0 <= n`
+} // want `vego: invariant of Bump may not hold for b on return: 0 <= n; it was not kept from entry, since n may have changed: the call to each at defects\.go:119:2 may write it`

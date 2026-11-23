@@ -458,6 +458,7 @@ func (v *fnVerifier) returned(st *state, results []value, pos token.Pos) {
 		}
 	}
 	if v.lit == nil {
+		st.logWrite(pos, "what runs at the return")
 		v.atReturn(st, results, pos)
 		return
 	}

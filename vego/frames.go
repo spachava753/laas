@@ -2,10 +2,13 @@ package vego
 
 import (
 	"fmt"
+	"go/ast"
 	"go/token"
 	"go/types"
 	"maps"
+	"math"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -57,6 +60,55 @@ type keptEntry struct {
 	t     types.Type
 	guard []*logic.Term
 	mem   memory
+	// from says where the invariants were assumed, for a message, and
+	// logAt how many writes the state had logged then.
+	from  string
+	logAt int
+}
+
+// loggedWrite is a statement after which a state's memory was not what it
+// was after the one before: where it is, what it is, and the memory after
+// it. A frame that fails asks these in turn to name what may have written
+// what the clause reads (explainFrame).
+type loggedWrite struct {
+	pos  token.Pos
+	what string
+	mem  memory
+}
+
+// logWrite records, after a statement, that memory changed, if it did.
+func (st *state) logWrite(pos token.Pos, what string) {
+	last := memory{}
+	if n := len(st.writes); n > 0 {
+		last = st.writes[n-1].mem
+	}
+	if maps.Equal(last, st.mem) {
+		return
+	}
+	st.writes = append(st.writes, loggedWrite{pos: pos, what: what, mem: maps.Clone(st.mem)})
+}
+
+// writeOf says what a statement is, for a message that names a write.
+func writeOf(s ast.Stmt) string {
+	switch s := s.(type) {
+	case *ast.AssignStmt:
+		return "the assignment to " + types.ExprString(s.Lhs[0])
+	case *ast.IncDecStmt:
+		return "the assignment to " + types.ExprString(s.X)
+	case *ast.ExprStmt:
+		if call, ok := ast.Unparen(s.X).(*ast.CallExpr); ok {
+			return "the call to " + types.ExprString(call.Fun)
+		}
+	case *ast.ForStmt, *ast.RangeStmt:
+		return "the loop"
+	case *ast.IfStmt:
+		return "the if statement"
+	case *ast.SwitchStmt, *ast.TypeSwitchStmt:
+		return "the switch statement"
+	case *ast.DeclStmt:
+		return "the declaration"
+	}
+	return "the statement"
 }
 
 // validFound is what a valid(x) read at the top level of a formula
@@ -79,8 +131,8 @@ type frameNamespace struct {
 
 // keep records that the invariants of a step hold in mem on the path of
 // st; see K above.
-func (st *state) keep(step invariantStep, mem memory) {
-	st.kept = append(st.kept, &keptEntry{set: step.set, val: step.val, t: step.t, guard: step.guard, mem: maps.Clone(mem)})
+func (st *state) keep(step invariantStep, mem memory, from string) {
+	st.kept = append(st.kept, &keptEntry{set: step.set, val: step.val, t: step.t, guard: step.guard, mem: maps.Clone(mem), from: from, logAt: len(st.writes)})
 }
 
 // keptFor returns the entry a frame for a step is asked from: of the same
@@ -123,8 +175,23 @@ type framer struct {
 	v       *fnVerifier
 	scratch *state
 	levels  [][]*logic.Term
-	// vars holds the variables of each quantifier being read.
-	vars [][]*logic.Term
+	// vars holds the variables of each quantifier being read, and labels
+	// the path each pair of a level reads, for a message; closed is the
+	// first label of the level a quantifier closed, which its kept pairs
+	// take.
+	vars   [][]*logic.Term
+	labels [][]string
+	closed string
+	// differs holds, for each level, the label of its last pair whose
+	// two sides are not the same term, which is the innermost read that
+	// changed of a quantifier inside it, and same, for the top level,
+	// which of its pairs are the same term.
+	differs    []string
+	same       []bool
+	closedSame bool
+	// only, when not negative, keeps of the top level the one pair at that
+	// index, for the question that names what changed.
+	only int
 	// differ is set when some pair is not the same term on both sides.
 	differ bool
 	// failed is set when the two readings did not go alike, or a form the
@@ -134,12 +201,13 @@ type framer struct {
 
 // pair records that what the goal's memory gives for a name must be what
 // the entry's gave.
-func (f *framer) pair(now, then *logic.Term) {
+func (f *framer) pair(now, then *logic.Term, label string) {
 	if now.Sort != then.Sort {
 		f.failed = true
 		return
 	}
-	if now.String() != then.String() {
+	identical := now.String() == then.String()
+	if !identical {
 		f.differ = true
 	}
 	same := f.exactly(now, then)
@@ -168,6 +236,13 @@ func (f *framer) pair(now, then *logic.Term) {
 	}
 	top := len(f.levels) - 1
 	f.levels[top] = append(f.levels[top], same)
+	f.labels[top] = append(f.labels[top], label)
+	if !identical {
+		f.differs[top] = label
+	}
+	if top == 0 {
+		f.same = append(f.same, identical)
+	}
 }
 
 // exactly states that two results are the same: a pointer by its
@@ -242,7 +317,7 @@ var (
 )
 
 // alike records the pair of two results, or that the readings went apart.
-func (e *frameEnv) alike(then, now *logic.Term, errThen, errNow error) (*logic.Term, error) {
+func (e *frameEnv) alike(then, now *logic.Term, errThen, errNow error, label string) (*logic.Term, error) {
 	switch {
 	case errThen != nil || errNow != nil:
 		if errThen == nil || errNow == nil || errThen.Error() != errNow.Error() {
@@ -255,14 +330,14 @@ func (e *frameEnv) alike(then, now *logic.Term, errThen, errNow error) (*logic.T
 		}
 		return then, nil
 	}
-	e.f.pair(now, then)
+	e.f.pair(now, then, label)
 	return then, nil
 }
 
 func (e *frameEnv) Path(root string, steps []logic.Step, when logic.When) (*logic.Term, error) {
 	then, errThen := e.then.Path(root, steps, when)
 	now, errNow := e.now.Path(root, steps, when)
-	return e.alike(then, now, errThen, errNow)
+	return e.alike(then, now, errThen, errNow, spellRead(root, steps))
 }
 
 // Relation pairs fresh, within, and apart like any read. valid inside a
@@ -273,13 +348,17 @@ func (e *frameEnv) Relation(name string, paths []logic.Path) (*logic.Term, error
 	}
 	then, errThen := e.then.Relation(name, paths)
 	now, errNow := e.now.Relation(name, paths)
-	return e.alike(then, now, errThen, errNow)
+	var spelled []string
+	for _, p := range paths {
+		spelled = append(spelled, spellRead(p.Root, p.Steps))
+	}
+	return e.alike(then, now, errThen, errNow, name+"("+strings.Join(spelled, ", ")+")")
 }
 
 func (e *frameEnv) Qualified(path, name string, steps []logic.Step, when logic.When) (*logic.Term, error) {
 	then, errThen := e.then.Qualified(path, name, steps, when)
 	now, errNow := e.now.Qualified(path, name, steps, when)
-	return e.alike(then, now, errThen, errNow)
+	return e.alike(then, now, errThen, errNow, spellRead(name, steps))
 }
 
 func (e *frameEnv) Apply(name string, args []*logic.Term) (*logic.Term, bool, error) {
@@ -291,7 +370,7 @@ func (e *frameEnv) Apply(name string, args []*logic.Term) (*logic.Term, bool, er
 	if !knownThen {
 		return then, false, errThen
 	}
-	t, err := e.alike(then, now, errThen, errNow)
+	t, err := e.alike(then, now, errThen, errNow, name)
 	return t, true, err
 }
 
@@ -307,6 +386,8 @@ func (e *frameEnv) Applies(name string) bool {
 // of each reading's facts under it.
 func (e *frameEnv) OpenBound(vars []*logic.Term) {
 	e.f.levels = append(e.f.levels, nil)
+	e.f.labels = append(e.f.labels, nil)
+	e.f.differs = append(e.f.differs, "")
 	e.f.vars = append(e.f.vars, vars)
 	e.then.OpenBound(vars)
 	e.now.OpenBound(vars)
@@ -323,6 +404,14 @@ func (e *frameEnv) CloseBound() []*logic.Term {
 	pairs := e.f.levels[top]
 	e.f.levels = e.f.levels[:top]
 	e.f.vars = e.f.vars[:len(e.f.vars)-1]
+	e.f.closed = e.f.differs[top]
+	if labels := e.f.labels[top]; e.f.closed == "" && len(labels) > 0 {
+		e.f.closed = labels[0]
+	}
+	closedSame := e.f.differs[top] == ""
+	e.f.labels = e.f.labels[:top]
+	e.f.differs = e.f.differs[:top]
+	e.f.closedSame = closedSame
 	if len(pairs) == 0 {
 		return nil
 	}
@@ -333,6 +422,13 @@ func (e *frameEnv) CloseBound() []*logic.Term {
 func (e *frameEnv) Keep(fact *logic.Term) {
 	top := len(e.f.levels) - 1
 	e.f.levels[top] = append(e.f.levels[top], fact)
+	e.f.labels[top] = append(e.f.labels[top], e.f.closed)
+	if !e.f.closedSame {
+		e.f.differs[top] = e.f.closed
+	}
+	if top == 0 {
+		e.f.same = append(e.f.same, e.f.closedSame)
+	}
 }
 
 // frameAbort stops a frame from inside a read that would report or give
@@ -409,13 +505,27 @@ func tableSizes(v *fnVerifier) map[string]int {
 // framedStep reports whether a conjunct of a clause of a step's invariants
 // holds in mem because nothing it reads has changed since an entry of the
 // path of st (see K and F above). The guard of the goal is the step's.
+// When it does not hold and an entry was there, why is v.lastFrame's.
 func (v *fnVerifier) framedStep(st *state, step invariantStep, mem memory, c *clause, node *logic.Node) bool {
 	entry := st.keptFor(step)
 	if entry == nil {
 		return false
 	}
-	return v.asFrame(func() bool {
-		f := &framer{v: v, levels: [][]*logic.Term{nil}}
+	held, _, _ := v.askFrame(st, entry, step, mem, c, node, frameEffort, frameAttempt, -1)
+	if !held {
+		v.lastFrame = &frameFailure{st: st, entry: entry, step: step, mem: mem, c: c, node: node}
+	}
+	return held
+}
+
+// askFrame asks a frame from an entry: by identity, and otherwise, for a
+// clause with a quantifier, as a question at the effort and of the kind
+// given. With only not negative, the question keeps of the top level the
+// one pair at that index, and the identity is not tried; it also returns
+// the labels of the top level.
+func (v *fnVerifier) askFrame(st *state, entry *keptEntry, step invariantStep, mem memory, c *clause, node *logic.Node, effort int, kind question, only int) (held bool, labels []string, same []bool) {
+	held = v.asFrame(func() bool {
+		f := &framer{v: v, levels: [][]*logic.Term{nil}, labels: [][]string{nil}, differs: []string{""}, only: only}
 		f.scratch = &state{vals: map[*types.Var]value{}, mem: st.mem, brk: st.brk, noted: maps.Clone(st.noted)}
 		then := v.invariantEnv(entry.set, f.scratch, entry.mem, entry.val, entry.t)
 		now := v.invariantEnv(step.set, f.scratch, mem, step.val, step.t)
@@ -425,12 +535,19 @@ func (v *fnVerifier) framedStep(st *state, step invariantStep, mem memory, c *cl
 		if _, err := apart.Formula(node, &frameEnv{f: f, then: then, now: now}); err != nil || f.failed || len(f.levels) != 1 {
 			return false
 		}
-		if !f.differ && sameTerms(entry.val, step.val) && guardWithin(entry.guard, step.guard) {
+		labels, same = f.labels[0], f.same
+		top := f.levels[0]
+		if only >= 0 {
+			if only >= len(top) {
+				return false
+			}
+			top = top[only : only+1]
+		} else if !f.differ && sameTerms(entry.val, step.val) && guardWithin(entry.guard, step.guard) {
 			return true
 		}
 		// A clause without a quantifier is proved again at little cost;
 		// the question of a frame pays only where the clause has one.
-		if !quantified(node) {
+		if only < 0 && kind == frameAttempt && !quantified(node) {
 			return false
 		}
 		// The goal's guard must give the entry's, the value must be the
@@ -439,11 +556,83 @@ func (v *fnVerifier) framedStep(st *state, step invariantStep, mem memory, c *cl
 		for i := range step.val {
 			same = append(same, v.same(step.val[i], entry.val[i]))
 		}
-		goal := logic.Implies(logic.And(step.guard...), logic.And(logic.And(entry.guard...), logic.And(same...), logic.And(f.levels[0]...)))
+		goal := logic.Implies(logic.And(step.guard...), logic.And(logic.And(entry.guard...), logic.And(same...), logic.And(top...)))
 		goal = logic.Implies(logic.And(closed(f.scratch.hyps)...), goal)
-		result := v.solver().Prove(slices.Clip(st.hyps), goal, v.options(frameEffort, frameAttempt))
+		result := v.solver().Prove(slices.Clip(st.hyps), goal, v.options(effort, kind))
 		return result == solver.Proved
 	})
+	return held, labels, same
+}
+
+// frameFailure is a frame that was asked from an entry and did not hold.
+type frameFailure struct {
+	st    *state
+	entry *keptEntry
+	step  invariantStep
+	mem   memory
+	c     *clause
+	node  *logic.Node
+}
+
+// frameWhyEffort bounds each question that names what changed.
+const frameWhyEffort = quickEffort
+
+// explainFrame says why a frame did not hold, for the message of the
+// clause it was asked for: from where, which value the clause reads may
+// have changed, and which logged write may have changed it. The writes
+// logged since the entry are searched by halves, a frame from the entry to
+// the memory after each asked at a small limit, at most six times; then
+// each pair of the clause's top level, at most four, in the memory of the
+// write found. Nothing here is a proof: the sentence says "may".
+func (v *fnVerifier) explainFrame(fail *frameFailure) string {
+	writes := fail.st.writes[min(fail.entry.logAt, len(fail.st.writes)):]
+	holds := func(mem memory) bool {
+		held, _, _ := v.askFrame(fail.st, fail.entry, fail.step, mem, fail.c, fail.node, frameWhyEffort, frameWhy, -1)
+		return held
+	}
+	// The first write after which the frame no longer holds.
+	lo, hi := 0, len(writes)
+
+	for asked := 0; lo < hi && asked < 6; asked++ {
+		mid := (lo + hi) / 2
+		if holds(writes[mid].mem) {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	written := ""
+	mem := fail.mem
+	switch {
+	case lo < hi:
+		written = fmt.Sprintf("; a write between %s at %s and %s at %s may write it",
+			writes[lo].what, v.placeOf(writes[lo].pos), writes[hi-1].what, v.placeOf(writes[hi-1].pos))
+		mem = writes[hi-1].mem
+	case lo < len(writes):
+		written = fmt.Sprintf(": %s at %s may write it", writes[lo].what, v.placeOf(writes[lo].pos))
+		mem = writes[lo].mem
+	}
+	// The value the clause reads that may have changed: of the pairs of
+	// the top level that are not the same term on both sides, the first
+	// that does not hold, asking at most four.
+	read := "what it reads"
+	_, labels, same := v.askFrame(fail.st, fail.entry, fail.step, mem, fail.c, fail.node, frameWhyEffort, frameWhy, math.MaxInt)
+	asked := 0
+	for i := range labels {
+		if i < len(same) && same[i] {
+			continue
+		}
+		if asked++; asked > 4 {
+			break
+		}
+		if held, _, _ := v.askFrame(fail.st, fail.entry, fail.step, mem, fail.c, fail.node, frameWhyEffort, frameWhy, i); !held {
+			// A bound variable of the frame's resolver is spelled as the
+			// formula names it.
+			read = frameBound.ReplaceAllString(labels[i], "$1")
+			break
+		}
+	}
+	return fmt.Sprintf("; it was not kept from %s, since %s may have changed%s", fail.entry.from, read, written)
 }
 
 // guardWithin reports whether every condition of an entry's guard is one
@@ -477,10 +666,13 @@ func (v *fnVerifier) checkClauseFramed(c *clause, env logic.Env, st *state, guar
 			goal = v.formula(c, node, env)
 		}
 		done := v.at(pos)
+		v.lastFrame = nil
 		held := framed != nil && framed(node)
+		failed := v.lastFrame
 		var kept map[string][]*logic.Term
+		var why map[string]*frameFailure
 		if !held && len(found) == 1 {
-			kept = v.framedValid(st, guard, found[0])
+			kept, why = v.framedValid(st, guard, found[0])
 		}
 		done()
 		for _, conjunct := range logic.Conjuncts(goal) {
@@ -494,7 +686,12 @@ func (v *fnVerifier) checkClauseFramed(c *clause, env logic.Env, st *state, guar
 				// clause is assumed whole, as check would assume it.
 				v.checkOnly(st, guard, logic.And(rest...), false, pos, "%s: %s", what, text)
 			default:
+				if f := why[conjunct.String()]; f != nil {
+					failed = f
+				}
+				v.explaining = failed
 				v.check(st, guard, conjunct, pos, "%s: %s", what, text)
+				v.explaining = nil
 				continue
 			}
 			st.assume(logic.Implies(logic.And(guard...), conjunct))
@@ -508,8 +705,9 @@ func (v *fnVerifier) checkClauseFramed(c *clause, env logic.Env, st *state, guar
 // guard, which have no quantifier and are proved again at little cost. A
 // clause is resolved again only for those, in the memory and with the
 // sink its whole was read with, so its reads are those already made.
-func (v *fnVerifier) framedValid(st *state, guard []*logic.Term, found validFound) map[string][]*logic.Term {
+func (v *fnVerifier) framedValid(st *state, guard []*logic.Term, found validFound) (map[string][]*logic.Term, map[string]*frameFailure) {
 	kept := map[string][]*logic.Term{}
+	why := map[string]*frameFailure{}
 	for i, step := range found.steps {
 		if step.set.broken {
 			continue
@@ -520,8 +718,14 @@ func (v *fnVerifier) framedValid(st *state, guard []*logic.Term, found validFoun
 		for j, c := range step.set.clauses {
 			var rest []*logic.Term
 			for _, node := range c.node.Conjuncts() {
+				v.lastFrame = nil
 				if v.framedStep(st, goalStep, found.mem, c, node) {
 					continue
+				}
+				if v.lastFrame != nil {
+					for _, conjunct := range logic.Conjuncts(found.terms[i][j]) {
+						why[conjunct.String()] = v.lastFrame
+					}
 				}
 				if quantified(node) {
 					continue clauses
@@ -541,7 +745,7 @@ func (v *fnVerifier) framedValid(st *state, guard []*logic.Term, found validFoun
 			}
 		}
 	}
-	return kept
+	return kept, why
 }
 
 // residue resolves a conjunct of a clause of a step that no frame proved,
@@ -575,7 +779,7 @@ func isValidCall(node *logic.Node) bool {
 // with found set, and when every valid(x) in it is a conjunct of its top
 // level, each found step is kept. A valid(x) elsewhere in the clause is
 // not kept, nor is any of the clause's, which only loses a frame.
-func keepValid(st *state, c *clause, found []validFound) {
+func keepValid(st *state, c *clause, found []validFound, from string) {
 	all, top := 0, 0
 	c.node.Walk(func(n *logic.Node) {
 		if isValidCall(n) {
@@ -593,7 +797,7 @@ func keepValid(st *state, c *clause, found []validFound) {
 	for _, f := range found {
 		for _, step := range f.steps {
 			if !step.set.broken {
-				st.keep(step, f.mem)
+				st.keep(step, f.mem, from)
 			}
 		}
 	}
@@ -601,13 +805,13 @@ func keepValid(st *state, c *clause, found []validFound) {
 
 // assumeKeeping assumes a clause resolved through env, with no condition
 // of evaluation around it, and keeps where its valid(x) conjuncts hold.
-func (v *fnVerifier) assumeKeeping(st *state, c *clause, env *specEnv) {
+func (v *fnVerifier) assumeKeeping(st *state, c *clause, env *specEnv, from string) {
 	var found []validFound
 	saved := env.validFound
 	env.validFound = &found
 	st.assume(v.formula(c, c.node, env))
 	env.validFound = saved
-	keepValid(st, c, found)
+	keepValid(st, c, found, from)
 }
 
 // quantified reports whether a formula has a quantifier.
@@ -619,4 +823,39 @@ func quantified(node *logic.Node) bool {
 		}
 	})
 	return found
+}
+
+// frameBound is how a bound variable of a frame's resolver is spelled.
+var frameBound = regexp.MustCompile(regexp.QuoteMeta(frameMark) + `([A-Za-z_][A-Za-z_0-9]*)#[0-9]+`)
+
+// spellRead spells a read as a formula writes it, for a message.
+func spellRead(root string, steps []logic.Step) string {
+	spelled := root
+	for i, step := range steps {
+		switch {
+		case step.Field != "":
+			spelled += "." + step.Field
+		case step.Len:
+			spelled = "|" + spelled + "|"
+		case step.Cap:
+			spelled = "cap(" + spelled + ")"
+		case step.State != "":
+			spelled = step.State + "(" + spelled + ")"
+		case step.Has && step.Index != nil:
+			spelled = "has(" + spelled + ", " + step.Index.String() + ")"
+		case step.Nil:
+			spelled += " = nil"
+		case step.Addr:
+			spelled = "&" + spelled
+		case step.ElemSize:
+			spelled = "elemsize(" + spelled + ")"
+		case step.Keys:
+			spelled = "the keys of " + spelled
+		case step.Index != nil:
+			spelled += "[" + step.Index.String() + "]"
+		default:
+			spelled += fmt.Sprintf("<step %d>", i)
+		}
+	}
+	return spelled
 }
