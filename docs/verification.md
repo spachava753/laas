@@ -1509,7 +1509,7 @@ A call through `r` writes the struct that `t` points to, so `Track` lists `t`. W
 
 ```text
 vego: r.Record may modify the footprint of r, which TrackUnlisted may not modify; it is the memory that t points to,
-converted at conversions.go:33:19; list t in a // @Modifies clause
+converted at conversions.go:34:19; list t in a // @Modifies clause
 ```
 
 A struct that your function makes needs nothing listed. After a call through the interface value, the struct is not known any more, so a read of it proves nothing about what it held before:
@@ -1546,7 +1546,7 @@ func (f *Forward) Record(line string) {
 
 ```text
 vego: Record may modify what it calls f.To, which Recorder.Record may not modify; it is not part of the footprint of
-*Forward, which is the struct f points to, in (*Forward).Record used as a method of Recorder at conversions.go:61:19
+*Forward, which is the struct f points to, in (*Forward).Record used as a method of Recorder at conversions.go:62:19
 ```
 
 A nil pointer converts too, and its footprint is empty.
@@ -4869,7 +4869,7 @@ func (s *Server) Remember(w http.ResponseWriter, req *http.Request) {
 
 ```text
 vego: w is or holds a net/http.ResponseWriter, which must not be used after the call that received it returns, and
-here it is stored into memory at handlers.go:61:2, where a later call could use it; pass it on only to calls that
+here it is stored into memory at handlers.go:64:2, where a later call could use it; pass it on only to calls that
 keep nothing of it
 ```
 
@@ -4927,7 +4927,7 @@ func Wrap(w http.ResponseWriter) (r *StatusWriter) {
 
 ```text
 vego: w is or holds a net/http.ResponseWriter, which must not be used after the call that received it returns, and
-here it is stored into what the literal at handlers.go:122:10 makes, where a later call could use it; pass it on
+here it is stored into what the literal at handlers.go:123:10 makes, where a later call could use it; pass it on
 only to calls that keep nothing of it
 vego: &StatusWriter{…} is or holds a net/http.ResponseWriter, which must not be used after the call that received
 it returns, and here it is returned by Wrap, where a later call could use it; pass it on only to calls that keep
