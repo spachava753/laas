@@ -677,6 +677,7 @@ footprints	footprints.BumpByValue	9	5901	0
 footprints	footprints.BumpInLoop	15	24352	0
 footprints	footprints.BumpLinked	10	17957	0
 footprints	footprints.BumpLocal	13	18393	0
+footprints	footprints.BumpPeeked	12	21716	0
 footprints	footprints.BumpTwice	19	37610	0
 footprints	footprints.BumpUnlisted	9	14731	0
 footprints	footprints.ByTypes	10	10267	0
@@ -685,11 +686,13 @@ footprints	footprints.CallsWriteAll	13	32398	0
 footprints	footprints.CallsWriteAllLocal	14	71353	0
 footprints	footprints.CloseFirst	15	31201	0
 footprints	footprints.Conv	9	18743	0
+footprints	footprints.ConvWithin	9	13977	0
 footprints	footprints.ConvertedInLoop	14	24275	0
 footprints	footprints.ConvertsThenWrites	18	65056	0
 footprints	footprints.CopiesBuffer	0	0	0
 footprints	footprints.CopyOnce	15	45197	0
 footprints	footprints.CountStdin	34	266770	2
+footprints	footprints.CounterShelf.Peek	3	1854	0
 footprints	footprints.CountsThenFormats	18	44176	0
 footprints	footprints.CountsUnlisted	15	42122	0
 footprints	footprints.Deferred	15	37618	0
@@ -800,7 +803,12 @@ footprints	footprints.Touch	8	7094	0
 footprints	footprints.TouchAll	8	9279	0
 footprints	footprints.Unlisted	6	5127	0
 footprints	footprints.Usage	14	49150	0
+footprints	footprints.UsesConversion	12	30826	0
+footprints	footprints.UsesConversionAlias	11	17463	0
+footprints	footprints.UsesConversionAny	10	21176	0
+footprints	footprints.UsesConvertedVar	12	30826	0
 footprints	footprints.UsesMaker	10	12095	0
+footprints	footprints.UsesNewConversion	10	25828	0
 footprints	footprints.ViaCopy	17	681464	7
 footprints	footprints.ViaSearch	21	50421	0
 footprints	footprints.Viewer.Peek	3	7761	0
@@ -840,6 +848,9 @@ footprints	footprints.resetWriter	1	2648	0
 footprints	footprints.spareOf	1	6772	0
 footprints	footprints.storesInto	1	8359	0
 footprints	footprints.tableOf	1	2926	0
+footprints	footprints.useAny	7	7402	0
+footprints	footprints.useBoth	7	16085	0
+footprints	footprints.useWith	7	6667	0
 footprints	footprints.viaLater	1	46	0
 footprints	footprints.wrapSink	1	2911	0
 footprints	io.Closer.Close	5	9772	0

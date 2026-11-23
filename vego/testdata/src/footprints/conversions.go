@@ -124,7 +124,7 @@ func ConvertedInLoop(c *Clicker, k int) {
 		i = c
 	}
 	if i != nil {
-		i.Inc() // want `vego: i.Inc may modify the footprint of i, which ConvertedInLoop may not modify`
+		i.Inc() // want `vego: i.Inc may modify the footprint of i, which ConvertedInLoop may not modify; i holds a value converted at conversions.go:\d+:\d+ in a loop, and at the head of the loop nothing is known of the footprint of a value converted in an earlier iteration; convert it after the loop, or before it`
 	}
 }
 
@@ -282,7 +282,7 @@ func (b ByValue) Inc() {
 // @Modifies c
 // @Ensures True
 func BumpByValue(c *Clicker) {
-	var i Incr = ByValue{p: c} // want `vego: Inc may modify what it calls b.p, which Incr.Inc may not modify; it is not part of the footprint of ByValue, which is empty: a value held by value is copied for each call of its methods`
+	var i Incr = ByValue{p: c} // want `vego: Inc may modify what it calls b.p, which Incr.Inc may not modify; it is not part of the footprint of ByValue, which is empty: a value held by value is copied for each call of its methods, and owns nothing its fields point to; keep what the method writes in a struct and convert a pointer to it, or pass what it writes as an argument`
 	i.Inc()
 }
 
@@ -305,4 +305,106 @@ func BumpTwice(c *Clicker) {
 func GrowsUnlisted(s Scores) {
 	var i Incr = s
 	i.Inc() // want `vego: i.Inc may modify the footprint of i, which GrowsUnlisted may not modify; it is the array that s holds, up to its capacity, converted at conversions.go:\d+:\d+; list s in a // @Modifies clause`
+}
+
+// useBoth increments i and keeps what log holds.
+//
+// @Requires i != nil And |log| = 1 And |log[0]| = 2
+// @Modifies i
+// @Ensures |log'[0]| = 2
+func useBoth(i Incr, log []string) {
+	i.Inc()
+}
+
+// UsesConversion hands useBoth a counter it was given, converted at the
+// call, and a slice of strings, which no value of that type can refer to a
+// Clicker through (F21).
+//
+// @Requires c != nil And |log| = 1 And |log[0]| = 2
+// @Modifies c
+// @Ensures True
+func UsesConversion(c *Clicker, log []string) {
+	useBoth(c, log)
+}
+
+// UsesConvertedVar converts c into a variable first.
+//
+// @Requires c != nil And |log| = 1 And |log[0]| = 2
+// @Modifies c
+// @Ensures True
+func UsesConvertedVar(c *Clicker, log []string) {
+	var i Incr = c
+	useBoth(i, log)
+}
+
+// useWith increments i and keeps what other points to.
+//
+// @Requires i != nil And other != nil
+// @Modifies i
+// @Ensures other.n' = other.n
+func useWith(i Incr, other *Clicker) {
+	i.Inc()
+}
+
+// UsesConversionAlias hands useWith a converted counter and a counter that
+// may be the same one.
+//
+// @Requires c != nil And d != nil
+// @Modifies c
+// @Ensures True
+func UsesConversionAlias(c *Clicker, d *Clicker) {
+	useWith(c, d) // want `vego: the footprint of what is passed to useWith as c may hold memory that what is passed as d reaches, and useWith relies on it not doing so: the footprint of c is the struct that c points to, which a value of type \*Clicker can refer to`
+}
+
+// CounterShelf hands out a counter it holds.
+type CounterShelf interface {
+	// @Ensures c != nil
+	Peek() (c *Clicker)
+}
+
+// BumpPeeked converts a counter a call returned, which may be memory of
+// the caller.
+//
+// @Requires g != nil
+// @Ensures True
+func BumpPeeked(g CounterShelf) {
+	var i Incr = g.Peek()
+	i.Inc() // want `vego: i.Inc may modify the footprint of i, which BumpPeeked may not modify; it is the memory that g.Peek\(\) points to, which the call returned without saying that it is new, so it may be memory of the caller, converted at conversions.go:\d+:\d+; take it as a parameter and list it in a // @Modifies clause, or have the contract of the call say that it is new`
+}
+
+// ConvWithin says that the counter lies in the footprint of the value it
+// was converted to, which the row defined at the conversion holds.
+//
+// @Requires c != nil
+// @Ensures i != nil And within(c, i)
+func ConvWithin(c *Clicker) (i Incr) {
+	return c
+}
+
+// useAny increments i and keeps how many values xs holds.
+//
+// @Requires i != nil
+// @Modifies i
+// @Ensures True
+func useAny(i Incr, xs []any) {
+	i.Inc()
+}
+
+// UsesConversionAny hands useAny a converted counter and values of type
+// any, which can hold the counter.
+//
+// @Requires c != nil
+// @Modifies c
+// @Ensures True
+func UsesConversionAny(c *Clicker, xs []any) {
+	useAny(c, xs) // want `the footprint of c is the struct that c points to, which a value of type \[\]any can refer to`
+}
+
+// UsesNewConversion converts a counter it made, which the strings cannot
+// reach either.
+//
+// @Requires |log| = 1 And |log[0]| = 2
+// @Ensures True
+func UsesNewConversion(log []string) {
+	useBoth(&Clicker{}, log)
 }

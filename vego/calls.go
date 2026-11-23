@@ -612,8 +612,10 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			if t.ref.Op == logic.OpSelect && t.ref.Args[1].Op == logic.OpConst && remedy == "" {
 				if conv, ok := v.convertedAt[t.ref.Args[1].Name]; ok {
 					// A value converted here writes what it holds.
-					remedy = fmt.Sprintf("it is %s, converted at %s; list %s in a // @Modifies clause",
-						conv.memory, v.placeOf(conv.at), conv.text)
+					remedy = fmt.Sprintf("it is %s, converted at %s; %s", conv.memory, v.placeOf(conv.at), conv.remedy)
+				} else if at := v.convertedInLoop(call); at.IsValid() {
+					remedy = fmt.Sprintf("%s holds a value converted at %s in a loop, and at the head of the loop nothing is known of the footprint of a value "+
+						"converted in an earlier iteration; convert it after the loop, or before it", types.ExprString(ast.Unparen(call.Fun).(*ast.SelectorExpr).X), v.placeOf(at))
 				} else if from, ok := v.returnedBy[t.ref.Args[1].Name]; ok && len(from.freshIn) > 0 {
 					remedy = fmt.Sprintf("it may lie in the footprint of %s, as the contract of %s at %s says; list %s in a // @Modifies clause",
 						strings.Join(from.freshIn, " or "), from.call, v.placeOf(from.at), strings.Join(from.freshIn, " and "))
@@ -1358,4 +1360,52 @@ func (v *fnVerifier) checkRecursion(callee *funcInfo, pre *specEnv, st *state, g
 	measure := v.intTerm(callee.measure, pre)
 	v.check(st, guard, logic.Lt(measure, v.measure), call.Pos(),
 		"variant may not decrease in recursive call: %s", callee.measure.text)
+}
+
+// convertedInLoop returns where a value was converted to an interface value
+// in a loop and assigned to the variable that a call through an interface
+// value is made on, or token.NoPos.
+func (v *fnVerifier) convertedInLoop(call *ast.CallExpr) token.Pos {
+	selector, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+	if !ok || v.bodyOrigin() == nil {
+		return token.NoPos
+	}
+	id, ok := ast.Unparen(selector.X).(*ast.Ident)
+	if !ok {
+		return token.NoPos
+	}
+	variable, _ := v.info.ObjectOf(id).(*types.Var)
+	if variable == nil || !isIface(variable.Type()) {
+		return token.NoPos
+	}
+	found := token.NoPos
+	var walk func(n ast.Node, inLoop bool)
+	walk = func(n ast.Node, inLoop bool) {
+		ast.Inspect(n, func(m ast.Node) bool {
+			switch m := m.(type) {
+			case *ast.ForStmt:
+				if m != n {
+					walk(m.Body, true)
+					return false
+				}
+			case *ast.RangeStmt:
+				if m != n {
+					walk(m.Body, true)
+					return false
+				}
+			case *ast.AssignStmt:
+				if !inLoop || len(m.Lhs) != len(m.Rhs) {
+					return true
+				}
+				for i, lhs := range m.Lhs {
+					if target, isIdent := ast.Unparen(lhs).(*ast.Ident); isIdent && v.info.ObjectOf(target) == variable && !isIface(v.info.TypeOf(m.Rhs[i])) {
+						found = m.Rhs[i].Pos()
+					}
+				}
+			}
+			return true
+		})
+	}
+	walk(v.bodyOrigin(), false)
+	return found
 }

@@ -139,7 +139,15 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 			case isMap(from):
 				memory = "the map " + text
 			}
-			v.convertedAt[held.Name] = conversion{text: text, memory: memory, at: e.Pos()}
+			remedy := "list " + text + " in a // @Modifies clause"
+			if _, isCall := ast.Unparen(e).(*ast.CallExpr); isCall {
+				// A call cannot be listed.
+				memory += ", which the call returned without saying that it is new, so it may be memory of the caller"
+				remedy = "take it as a parameter and list it in a // @Modifies clause, or have the contract of the call say that it is new"
+			} else if why := v.notListable(e, e.Pos()); why != "" {
+				remedy = why
+			}
+			v.convertedAt[held.Name] = conversion{text: text, memory: memory, remedy: remedy, at: e.Pos()}
 		}
 		// A layer of the footprint region in which the row of that home
 		// holds what defines says and every other row is what it was;
@@ -598,8 +606,8 @@ func (pv *pkgVerifier) fullyContracted(t types.Type) bool {
 // an interface value, for messages: the expression converted, and the
 // memory its footprint is, in words.
 type conversion struct {
-	text, memory string
-	at           token.Pos
+	text, memory, remedy string
+	at                   token.Pos
 }
 
 // placeFootprint states, in the check of a method of a value made into an
@@ -624,7 +632,8 @@ func (v *fnVerifier) placeFootprint(entry *state, T *funcInfo, kept value, from 
 		case isMap(from):
 			v.heldRemedy = fmt.Sprintf("it is not part of the footprint of %s, which is the map %s is", shown, name)
 		default:
-			v.heldRemedy = fmt.Sprintf("it is not part of the footprint of %s, which is empty: a value held by value is copied for each call of its methods", shown)
+			v.heldRemedy = fmt.Sprintf("it is not part of the footprint of %s, which is empty: a value held by value is copied for each call of its methods, "+
+				"and owns nothing its fields point to; keep what the method writes in a struct and convert a pointer to it, or pass what it writes as an argument", shown)
 		}
 	}
 	if defines == nil {

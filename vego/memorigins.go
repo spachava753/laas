@@ -908,6 +908,16 @@ func (v *fnVerifier) checkReachedApart(call *ast.CallExpr, fn *funcInfo, args ma
 			if !placed {
 				v.unsupported(call.Pos(), lead+"; a caller of a function value or a method of an interface value does not show it")
 			}
+			// A pointer converted here: its footprint is the struct it
+			// points to, and only what can refer to a value of its type
+			// reaches it (F21).
+			if given, object := v.convertedPointer(passedExpr[param]); object != nil && !t.part && isIface(param.Type()) {
+				if typeReaches(other.Type(), object, map[types.Type]bool{}) {
+					v.report(call.Pos(), "%s: the footprint of %s is the struct that %s points to, which a value of type %s can refer to",
+						lead, passed[param], given, types.TypeString(other.Type(), types.RelativeTo(v.pass.Pkg)))
+				}
+				continue
+			}
 			if !v.placedFootprint(passedExpr[param], 0) {
 				v.report(call.Pos(), "%s: %s is not a parameter whose footprint %s's own Modifies lists, or a value made from such parameters by a call "+
 					"whose contract says so with fresh(result, w), so nothing places it", lead, passed[param], v.fn.obj.Name())
@@ -1083,4 +1093,98 @@ func (v *fnVerifier) declaredFrom(variable *types.Var) ast.Expr {
 		return init == nil
 	})
 	return init
+}
+
+// convertedPointer returns the pointer an argument converts to an
+// interface value, as written, and the type it points to, when the
+// argument is a pointer written where an interface value is wanted, an
+// explicit conversion of one, or a variable declared from either and never
+// assigned again. The footprint of the interface value is then the struct
+// the pointer pointed to at the conversion, wherever it lies, and only a
+// value that can refer to a value of its type reaches it.
+func (v *fnVerifier) convertedPointer(e ast.Expr) (string, types.Type) {
+	if e == nil {
+		return "", nil
+	}
+	e = ast.Unparen(e)
+	if id, ok := e.(*ast.Ident); ok && isIface(v.info.TypeOf(id)) {
+		variable, _ := v.info.ObjectOf(id).(*types.Var)
+		if variable == nil || variable.IsField() || v.boxed[variable] || v.findReassigned(v.bodyOrigin())[variable] || v.memOrigins().litAssigned[variable] {
+			return "", nil
+		}
+		if init := v.declaredFrom(variable); init != nil {
+			return v.convertedPointer(init)
+		}
+		return "", nil
+	}
+	if call, ok := e.(*ast.CallExpr); ok && len(call.Args) == 1 {
+		if tv, known := v.info.Types[call.Fun]; known && tv.IsType() && isIface(tv.Type) {
+			return v.convertedPointer(call.Args[0])
+		}
+	}
+	if object, isPointer := pointee(v.info.TypeOf(e)); isPointer {
+		return types.ExprString(e), object
+	}
+	return "", nil
+}
+
+// typeReaches reports whether a value of type from can refer to memory that
+// holds a value of type target: through a pointer, a slice, a map, or a
+// channel, at any depth, with what it refers to holding a target inline or
+// referring on. An interface value, a function value, and an unsafe.Pointer
+// can refer to anything.
+func typeReaches(from, target types.Type, seen map[types.Type]bool) bool {
+	if seen[from] {
+		return false
+	}
+	seen[from] = true
+	referred := func(t types.Type) bool {
+		return holdsInline(t, target, map[types.Type]bool{}) || typeReaches(t, target, seen)
+	}
+	switch u := from.Underlying().(type) {
+	case *types.Interface, *types.Signature:
+		return true
+	case *types.Basic:
+		return u.Kind() == types.UnsafePointer
+	case *types.Pointer:
+		return referred(u.Elem())
+	case *types.Slice:
+		return referred(u.Elem())
+	case *types.Map:
+		return referred(u.Key()) || referred(u.Elem())
+	case *types.Chan:
+		return referred(u.Elem())
+	case *types.Array:
+		return typeReaches(u.Elem(), target, seen)
+	case *types.Struct:
+		for field := range u.Fields() {
+			if typeReaches(field.Type(), target, seen) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// holdsInline reports whether a value of type t is, or holds in its own
+// memory as a field or an element at any depth, a value of type target.
+func holdsInline(t, target types.Type, seen map[types.Type]bool) bool {
+	if types.Identical(t, target) {
+		return true
+	}
+	if seen[t] {
+		return false
+	}
+	seen[t] = true
+	switch u := t.Underlying().(type) {
+	case *types.Array:
+		return holdsInline(u.Elem(), target, seen)
+	case *types.Struct:
+		for field := range u.Fields() {
+			if holdsInline(field.Type(), target, seen) {
+				return true
+			}
+		}
+	}
+	return false
 }
