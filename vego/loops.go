@@ -46,6 +46,11 @@ type effects struct {
 	whole map[*types.Var]bool
 	grown map[*types.Var]bool
 	sites []site
+	// owners holds, for stores into owned fields, the owner each is rooted
+	// at, as sites with no cells whose root, owner, and ownerOff are set;
+	// they write nothing of their own, and only tell the head of the loop
+	// which owners grow (owns.go).
+	owners []site
 	// deletes holds every call of delete the loop may run, in its body or
 	// in a literal it calls.
 	deletes []*ast.CallExpr
@@ -163,6 +168,14 @@ func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
 		case lv.kind == placeMem && lv.pointer != nil:
 			lo, hi := bounds(lv.cells)
 			eff.sites = append(eff.sites, site{cells: lv.cells, root: v.localVar(lv.pointer), lo: lo, hi: hi})
+			// A store into an owned field keeps what the owner owns placed,
+			// as a call that writes an owner does: the head states it of
+			// the owner at the root.
+			if lv.owned != nil {
+				if root, owner, off, ok := v.ownerRoot(lv.pointer, lv.owned); ok {
+					eff.owners = append(eff.owners, site{root: root, owner: owner, ownerOff: off})
+				}
+			}
 		case lv.kind == placeMem:
 			eff.sites = append(eff.sites, site{cells: lv.cells, elem: elemType(v.info.TypeOf(lv.slice)), root: v.localVar(lv.slice)})
 		case lv.kind == placeMap:
@@ -536,7 +549,7 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 	// only by what the loop creates, since every call that changes it
 	// does; with the owner's struct forgotten, this is what keeps its
 	// fields placed.
-	for _, at := range eff.sites {
+	for _, at := range slices.Concat(eff.sites, eff.owners) {
 		if val := st.vals[at.root]; at.owner != nil && val != nil && !eff.whole[at.root] {
 			owner := value{val[0], logic.Add(val[1], logic.IntLit(at.ownerOff))}
 			head.assume(v.ownerGrowth(head, st.mem, head.mem, owner, at.owner, st.brk))

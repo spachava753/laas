@@ -584,6 +584,14 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 					"says how what such a value owns may change", name, what, types.TypeString(t.ownerType, types.RelativeTo(v.pass.Pkg))))
 			}
 		}
+		// Nor what such a value that it returns owns (owns.go).
+		for result := range sig.Results().Variables() {
+			if owner := reachesSourceOwner(result.Type(), map[types.Type]bool{}); owner != nil {
+				v.unsupported(call.Pos(), fmt.Sprintf("%s returns a %s, which holds a %s, which owns memory, and only a contract that comes with vego or a verified function "+
+					"says what such a value owns; verify %s", name, types.TypeString(result.Type(), types.RelativeTo(v.pass.Pkg)),
+					types.TypeString(owner, types.RelativeTo(v.pass.Pkg)), name))
+			}
+		}
 	}
 	v.checkReachedApart(call, fn, args, written, passed, passedExpr, name)
 	// When the struct of an owner may not be written, what it owns is not

@@ -145,7 +145,7 @@ type Number int
 
 // Wrong carries an annotation that does not belong on a type.
 //
-// @Requires x > 0 // want `vego: Requires annotations do not belong on a type; a type can only have Invariant annotations`
+// @Requires x > 0 // want `vego: Requires annotations do not belong on a type; a type can only have Invariant and Owns annotations`
 type Wrong struct{ x int }
 
 // Square uses the invariant of a type of another package, with that

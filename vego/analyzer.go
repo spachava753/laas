@@ -216,7 +216,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		"comma-separated words that other tools read after \"// @\", as in Summary,Param; any other unknown word there is an error",
 	)
 	analyzer.ResultType = reflect.TypeFor[*Usage]()
-	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact), new(sentinelsFact), new(sentinelWritesFact), new(sentinelRelianceFact), new(stateFact)}
+	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact), new(sentinelsFact), new(sentinelWritesFact), new(sentinelRelianceFact), new(stateFact), new(ownsFact)}
 	analyzer.Run = func(pass *analysis.Pass) (result any, err error) {
 		foreignTags, err := parseOtherTags(otherTags)
 		if err != nil {
@@ -301,6 +301,12 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		}
 		pv.checkInvariantsDeclared()
 		pv.exportInvariants()
+		// What the types of this package own, for importing packages.
+		for _, name := range pv.ownsOrder {
+			if decl := pv.ownsSource[name]; !decl.broken {
+				pv.pass.ExportObjectFact(name, &ownsFact{Fields: decl.fields})
+			}
+		}
 		pv.checkTypeContracts()
 		pv.exportTypeContracts()
 		pv.exportStates()
@@ -716,6 +722,10 @@ type pkgVerifier struct {
 	// variables that something other than their declaration assigns; see
 	// final.
 	assignedIn map[*ast.BlockStmt]map[*types.Var]bool
+	// ownsSource holds the Owns declarations of the package while it is
+	// collected, in ownsOrder; see owns.go.
+	ownsSource map[*types.TypeName]*ownsDeclSource
+	ownsOrder  []*types.TypeName
 }
 
 // report emits a diagnostic once per position and message. Symbolic execution
@@ -758,7 +768,7 @@ var (
 	clauseKinds = map[string]bool{
 		"Requires": true, "Ensures": true, "Invariant": true, "Variant": true,
 		"Predicate": true, "Assert": true, "Modifies": true, "State": true, "Receiver": true, "Snapshot": true, "Vouches": true,
-		"Visited": true,
+		"Visited": true, "Owns": true,
 	}
 	// retiredKinds are keywords that earlier versions read, with what to
 	// write now.
@@ -1175,6 +1185,9 @@ func (pv *pkgVerifier) collect() {
 			pv.unread = true
 		}
 	}()
+	pv.importOwns()
+	pv.ownsSource, pv.ownsOrder = nil, nil
+	defer pv.checkOwnsDeclared()
 	var predicates []*logic.PredDecl
 	predicateClauses := map[*logic.PredDecl]*clause{}
 	for _, file := range pv.pass.Files {
@@ -1198,7 +1211,7 @@ func (pv *pkgVerifier) collect() {
 				}
 				if c.kind == "" {
 					pv.report(c.pos, "unknown annotation %q; an annotation starts with one of "+
-						"Requires, Ensures, Modifies, Invariant, Variant, Visited, Assert, Snapshot, Predicate, State, Receiver, Vouches. "+
+						"Requires, Ensures, Modifies, Invariant, Owns, Variant, Visited, Assert, Snapshot, Predicate, State, Receiver, Vouches. "+
 						"If another tool reads this comment, declare the word with -vego.other-tags", c.text)
 					continue
 				}
@@ -1227,6 +1240,8 @@ func (pv *pkgVerifier) collect() {
 						pv.addTypeContract(name, c)
 					case c.kind == "State":
 						pv.addState(name, c)
+					case c.kind == "Owns" && name != nil:
+						pv.addOwns(name, c)
 					default:
 						pv.addInvariant(name, c)
 					}
@@ -1235,6 +1250,9 @@ func (pv *pkgVerifier) collect() {
 				switch c.kind {
 				case "State":
 					pv.report(c.pos, "a State annotation belongs in the doc comment of a defined interface type, as in // @State closed")
+					continue
+				case "Owns":
+					pv.report(c.pos, "an Owns annotation belongs in the doc comment of a struct type, where it names the fields whose memory a value of the type owns, as in // @Owns items")
 					continue
 				case "Receiver":
 					pv.report(c.pos, "a Receiver annotation belongs in the doc comment of a method in an interface type, "+

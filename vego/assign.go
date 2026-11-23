@@ -28,6 +28,8 @@ type lvalue struct {
 	// expr is the expression assigned to.
 	expr ast.Expr
 	text   string
+	// owned is set when what is assigned is an owned field (owns.go).
+	owned *ownedStore
 	// local and lo locate the leaves of a placeLocal inside its variable.
 	local *types.Var
 	lo    int
@@ -130,6 +132,10 @@ func (v *fnVerifier) fieldPlace(e *ast.SelectorExpr) lvalue {
 		lo, hi, ok := fieldLeaves(lv.typ, index)
 		if !ok {
 			v.unsupported(e.Pos(), fmt.Sprintf("field %s has unsupported type %s", field.Name(), field.Type()))
+		}
+		lv.owned = nil
+		if ownedFieldAt(lv.typ, index) {
+			lv.owned = &ownedStore{holder: lv.typ, index: index, off: lv.offset}
 		}
 		if lv.kind == placeMem {
 			lv.cells, lv.offset = lv.cells[lo:hi], lv.offset+v.fieldOffset(lv.typ, index)
@@ -275,6 +281,7 @@ func (v *fnVerifier) store(lv lvalue, val value, st *state) {
 // targets updated, in order. An append as the right-hand side continues
 // once for each way it can turn out, and ends the unit itself.
 func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
+	before := st.brk
 	v.openUnit(st)
 	targets := make([]lvalue, len(s.Lhs))
 	for i, lhs := range s.Lhs {
@@ -306,6 +313,7 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
 		values = []value{{v.binary(op, current[0], operand, v.info.TypeOf(s.Lhs[0]), s.TokPos, st, nil)}}
 	case len(s.Rhs) == 1 && len(s.Lhs) == 1 && v.isAppend(s.Rhs[0]):
 		v.appendTo(ast.Unparen(s.Rhs[0]).(*ast.CallExpr), st, func(next *state, result value) {
+			v.checkOwnedTarget(next, targets[0], result, s.Rhs[0], before)
 			v.store(targets[0], result, next)
 			k(next)
 		})
@@ -341,6 +349,13 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
 	}
 	v.closeUnit(st)
 	for i, target := range targets {
+		var rhs ast.Expr
+		if len(s.Rhs) == len(s.Lhs) {
+			rhs = s.Rhs[i]
+		} else if len(s.Rhs) == 1 && !v.isMapRead(s.Rhs[0]) {
+			rhs = s.Rhs[0]
+		}
+		v.checkOwnedTarget(st, target, values[i], rhs, before)
 		v.store(target, values[i], st)
 	}
 	k(st)

@@ -99,9 +99,13 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 				// and what an owner it holds owns grows through calls that
 				// do not go through the converted value.
 				shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
-				v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s owns memory, as through a strings.Builder or a bytes.Buffer "+
-					"it holds, and what that memory grows to is not part of the footprint fixed at the conversion; "+
-					"call the methods of %s on the pointer instead", shown(from), shown(want), shown(from), shown(from)))
+				how := "as through a strings.Builder or a bytes.Buffer it holds"
+				if object, isPointer := pointee(from); isPointer && len(sourceOwnedFields(object)) > 0 {
+					how = "as its // @Owns declaration says"
+				}
+				v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s owns memory, %s, "+
+					"and what that memory grows to is not part of the footprint fixed at the conversion; "+
+					"call the methods of %s on the pointer instead", shown(from), shown(want), shown(from), how, shown(from)))
 			}
 		}
 		footprinted = true

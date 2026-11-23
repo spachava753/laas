@@ -774,7 +774,8 @@ func (pv *pkgVerifier) ownedFields(t types.Type) []int {
 func ownedFieldsOf(t types.Type) []int {
 	decl, u := ownsDeclOf(t)
 	if decl == nil {
-		return nil
+		// Or by a declaration in source (owns.go).
+		return sourceOwnedFields(t)
 	}
 	var indices []int
 	for _, name := range decl.fields {

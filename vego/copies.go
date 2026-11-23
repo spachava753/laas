@@ -75,7 +75,7 @@ func copyReasonFor(t types.Type) string {
 
 // ownerCopyReason is said in the refusal of a copy of a value that owns
 // memory and holds no state.
-const ownerCopyReason = "a value that owns memory, such as a bytes.Buffer, must not be copied or overwritten, " +
+const ownerCopyReason = "a value that owns memory must not be copied or overwritten, " +
 	"since a copy would share what the original owns, which only the methods of each may write"
 
 // copyReason is said in every other refusal.

@@ -399,6 +399,18 @@ trusted:
     ensures:
       - "p != nil And fresh(p)"
 
+  owns.externalStack:
+    reason: Test helper standing for a function the project trusts to make a Stack, whose contract cannot say what the Stack owns.
+    modifies: []
+    ensures:
+      - "result != nil And fresh(result)"
+
+  owns.externalReset:
+    reason: Test helper standing for a function the project trusts to write a Stack, which may make it own any memory.
+    requires:
+      - "s != nil"
+    modifies: [s]
+
   footprints.resetWriter:
     reason: Test helper standing for a function the project trusts to write a Writer, which may make it own any memory.
     requires:

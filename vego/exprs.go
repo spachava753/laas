@@ -523,7 +523,13 @@ func (v *fnVerifier) literal(e *ast.CompositeLit, t types.Type, st *state, guard
 			if !ok {
 				v.unsupported(element.Pos(), fmt.Sprintf("field %s has unsupported type %s", u.Field(index).Name(), u.Field(index).Type()))
 			}
-			copy(val[lo:], v.settled(st, guard, v.evalAs(initial, u.Field(index).Type(), st, guard), u.Field(index).Type()))
+			before := st.brk
+			field := v.settled(st, guard, v.evalAs(initial, u.Field(index).Type(), st, guard), u.Field(index).Type())
+			// An owned field of a struct made here holds nothing yet.
+			if ownedFieldAt(t, index) {
+				v.checkOwnedStore(st, guard, field, nil, u.Field(index).Type(), initial, before, u.Field(index).Name()+" of the "+types.TypeString(t, types.RelativeTo(v.pass.Pkg))+" made here", initial.Pos())
+			}
+			copy(val[lo:], field)
 		}
 		return val
 	case *types.Slice:

@@ -237,6 +237,7 @@ trusted:
     modifies: []
     ensures:
       - "|result| <= |s|"
+      - "within(result, s)"
 
   bytes.TrimLeftFunc:
     reason: Documented to return a subslice of s without its leading code points c that satisfy f(c).
@@ -246,6 +247,7 @@ trusted:
     modifies: []
     ensures:
       - "|result| <= |s|"
+      - "within(result, s)"
 
   bytes.TrimRightFunc:
     reason: Documented to return a subslice of s without its trailing code points c that satisfy f(c).
@@ -255,6 +257,7 @@ trusted:
     modifies: []
     ensures:
       - "|result| <= |s|"
+      - "within(result, s)"
 
   bytes.Map:
     reason: >-

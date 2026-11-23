@@ -30,7 +30,7 @@ func Verified() (err error) {
 
 // Holder is a struct.
 //
-// @Vouches err // want `Vouches annotations do not belong on a type; a type can only have Invariant annotations`
+// @Vouches err // want `Vouches annotations do not belong on a type; a type can only have Invariant and Owns annotations`
 type Holder struct{ n int }
 
 // @Vochues err // want `unknown annotation "Vochues"`

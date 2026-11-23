@@ -23,5 +23,5 @@ func Other() (r int) {
 // Sized has a clause in its doc comment that a type cannot have. It may
 // have been meant for a function.
 //
-// @Requires False // want `vego: Requires annotations do not belong on a type; a type can only have Invariant annotations`
+// @Requires False // want `vego: Requires annotations do not belong on a type; a type can only have Invariant and Owns annotations`
 type Sized struct{ n int }

@@ -62,7 +62,7 @@ func ResetsByProject(bw *bufio.Writer) {
 // @Requires b != nil
 // @Ensures True
 func CopiesBuffer(b *bytes.Buffer) {
-	c := *b // want `vego: cannot verify CopiesBuffer: \*b copies a value of type bytes.Buffer, which owns memory; use a pointer to it; a value that owns memory, such as a bytes.Buffer, must not be copied or overwritten, since a copy would share what the original owns, which only the methods of each may write`
+	c := *b // want `vego: cannot verify CopiesBuffer: \*b copies a value of type bytes.Buffer, which owns memory; use a pointer to it; a value that owns memory must not be copied or overwritten, since a copy would share what the original owns, which only the methods of each may write`
 	_ = c
 }
 
