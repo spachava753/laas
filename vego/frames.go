@@ -1265,8 +1265,10 @@ func (v *fnVerifier) framedFrom(end *state, k *loopKept, at token.Pos, c *clause
 
 // growsOnlyThroughTargets returns the targets whose cells a follow could
 // start from, when GR applies to a call: the call writes no footprint and
-// runs no code it was handed (a literal handed to a trusted function runs
-// in a state the caller does not continue, whose growth is its own), every
+// hands a trusted function nothing under calls (a callback runHanded runs
+// in a state the caller does not continue, whose growth is its own; a
+// value it runs under runs writes only what the contract of its type
+// lists, which is in the call's targets), every
 // target is a struct or some of its fields, whose cells are asked one by
 // one, or a slice's elements or a map whose element or value type holds by
 // value no struct with owned fields and no interface value, from whose
