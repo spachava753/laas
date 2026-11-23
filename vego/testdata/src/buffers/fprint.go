@@ -35,7 +35,7 @@ func ItemsBuffer(b *bytes.Buffer, name string) {
 // @Modifies b
 // @Ensures True
 func ItemsBufferUnbounded(b *bytes.Buffer, name string) {
-	fmt.Fprintf(b, "%q\n", name) // want `precondition of Write may not hold: 3 \* \(\|b\| \+ \|p\|\) \+ 65536 <= MaxAlloc; it holds when \|b\| <= [0-9]+ and \|\[\]byte\(Sprintf\(...\)\)\| <= [0-9]+`
+	fmt.Fprintf(b, "%q\n", name) // want `precondition of Write may not hold: 3 \* \(\|b\| \+ \|p\|\) \+ 65536 <= MaxAlloc; it holds when \|b\| <= [0-9]+ and what is formatted is at most [0-9]+ bytes, which the bound on formatting gives`
 }
 
 // ItemsUnlisted formats into a Buffer it does not list.

@@ -21,8 +21,9 @@ trusted:
       (so cap < 2 * (Len + n)). Then grow panics with ErrTooLarge when
       2 * cap + n is more than MaxInt, which is less than 4 * Len + 5 * n,
       and otherwise allocates the larger of len(buf) + n and
-      2 * (cap - off), which is less than 2 * Len + 3 * n, twice (make, then
-      append, which rounds it up and panics past maxAlloc). This holds
+      2 * (cap - off), which is less than 2 * Len + 3 * n, once: make followed
+      by append is one growslice, which rounds it up to a size class or a
+      page and panics past maxAlloc. This holds
       after Reset, which keeps the capacity, after Grow, and after reads,
       which move off.
     requires:
@@ -45,8 +46,9 @@ trusted:
       (so cap < 2 * (Len + n)). Then grow panics with ErrTooLarge when
       2 * cap + n is more than MaxInt, which is less than 4 * Len + 5 * n,
       and otherwise allocates the larger of len(buf) + n and
-      2 * (cap - off), which is less than 2 * Len + 3 * n, twice (make, then
-      append, which rounds it up and panics past maxAlloc). This holds
+      2 * (cap - off), which is less than 2 * Len + 3 * n, once: make followed
+      by append is one growslice, which rounds it up to a size class or a
+      page and panics past maxAlloc. This holds
       after Reset, which keeps the capacity, after Grow, and after reads,
       which move off.
     requires:
@@ -69,8 +71,9 @@ trusted:
       (so cap < 2 * (Len + n)). Then grow panics with ErrTooLarge when
       2 * cap + n is more than MaxInt, which is less than 4 * Len + 5 * n,
       and otherwise allocates the larger of len(buf) + n and
-      2 * (cap - off), which is less than 2 * Len + 3 * n, twice (make, then
-      append, which rounds it up and panics past maxAlloc). This holds
+      2 * (cap - off), which is less than 2 * Len + 3 * n, once: make followed
+      by append is one growslice, which rounds it up to a size class or a
+      page and panics past maxAlloc. This holds
       after Reset, which keeps the capacity, after Grow, and after reads,
       which move off.
     requires:
@@ -92,8 +95,9 @@ trusted:
       (so cap < 2 * (Len + n)). Then grow panics with ErrTooLarge when
       2 * cap + n is more than MaxInt, which is less than 4 * Len + 5 * n,
       and otherwise allocates the larger of len(buf) + n and
-      2 * (cap - off), which is less than 2 * Len + 3 * n, twice (make, then
-      append, which rounds it up and panics past maxAlloc). This holds
+      2 * (cap - off), which is less than 2 * Len + 3 * n, once: make followed
+      by append is one growslice, which rounds it up to a size class or a
+      page and panics past maxAlloc. This holds
       after Reset, which keeps the capacity, after Grow, and after reads,
       which move off.
     requires:
@@ -122,8 +126,9 @@ trusted:
       (so cap < 2 * (Len + n)). Then grow panics with ErrTooLarge when
       2 * cap + n is more than MaxInt, which is less than 4 * Len + 5 * n,
       and otherwise allocates the larger of len(buf) + n and
-      2 * (cap - off), which is less than 2 * Len + 3 * n, twice (make, then
-      append, which rounds it up and panics past maxAlloc). This holds
+      2 * (cap - off), which is less than 2 * Len + 3 * n, once: make followed
+      by append is one growslice, which rounds it up to a size class or a
+      page and panics past maxAlloc. This holds
       after Reset, which keeps the capacity, after Grow, and after reads,
       which move off.
     requires:

@@ -85,7 +85,7 @@ func WriteItems(b *bytes.Buffer, n int) {
 // @Requires b != nil And |b| <= 1000000
 // @Modifies b
 // @Ensures True
-func WriteFailure(b *bytes.Buffer, err error) {
+func WriteFailure(b *bytes.Buffer) {
 	fmt.Fprintf(b, "failed: %v\n", errors.New("disk full")) // want `vego: Fprintf writes to b text whose length is not known: it formats the text of an error, what a String or Error method returns, or strings or slices inside an element of a slice, whose lengths are not counted, and the Write of \*bytes.Buffer needs a bound on what it is given; format only values whose length the bound counts`
 }
 

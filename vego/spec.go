@@ -953,6 +953,11 @@ func (v *fnVerifier) growthHint(c *clause, node *logic.Node, pre *specEnv, passe
 			clauses := make([]string, len(names))
 			for i, name := range names {
 				clauses[i] = fmt.Sprintf("%s <= %s", name, bound)
+				// What a call through prints writes is formatted, and no
+				// formula names it (see prints.go).
+				if strings.HasPrefix(name, "|[]byte(") && strings.HasSuffix(name, "(...))|") {
+					clauses[i] = fmt.Sprintf("what is formatted is at most %s bytes, which the bound on formatting gives", bound)
+				}
 			}
 			return "; it holds when " + strings.Join(clauses, " and ")
 		}
