@@ -781,6 +781,7 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 	}
 	fn := newFuncInfo(callee)
 	fn.trust = entry
+	nameUnnamed(fn, entry)
 	fn.genericTypes = pv.genericTypes(callee)
 	pv.trusted[callee] = fn
 	pv.readEntry(fn, entry)
@@ -1227,4 +1228,59 @@ func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 		sort.Slice(use.Calls, func(i, j int) bool { return use.Calls[i].String() < use.Calls[j].String() })
 	}
 	fn.use = use
+}
+
+// paramPosition reads a name param1, param2, ...
+var paramPosition = regexp.MustCompile(`\bparam([1-9][0-9]*)\b`)
+
+// nameUnnamed names each unnamed parameter of a function or method that a
+// trust entry describes by its position, param1, param2, ..., as unnamed
+// results are result1, result2 (decided by the orchestrator, F28): Go
+// declares (net/http.ResponseWriter).Write([]byte) with no name for what it
+// is handed. A name a parameter has keeps it, and an entry that writes
+// paramN for a parameter that has a name is a defect, so that nobody writes
+// param1 for p by habit.
+func nameUnnamed(fn *funcInfo, entry *trustEntry) {
+	sig := fn.obj.Type().(*types.Signature)
+	for i := range sig.Params().Len() {
+		p := sig.Params().At(i)
+		name := fmt.Sprintf("param%d", i+1)
+		if p.Name() != "" && p.Name() != "_" {
+			continue
+		}
+		// Go forbids mixing named and unnamed parameters, so the name can
+		// clash only with the receiver or a named result.
+		_, takenParam := fn.paramNames[name]
+		_, takenResult := fn.resultNames[name]
+		if takenParam || takenResult {
+			fn.defect("its parameter %d has no name, and %s, the name an entry gives it, names the receiver or a result", i+1, name)
+			continue
+		}
+		fn.paramNames[name] = p
+	}
+	var texts []string
+	for _, list := range [][]trustFormula{entry.requires, entry.ensures, entry.modifies, entry.runs, entry.vouches, entry.formats, entry.stores} {
+		for _, f := range list {
+			texts = append(texts, f.text)
+		}
+	}
+	for _, list := range [][]trustKeep{entry.keeps, entry.asserts, entry.prints} {
+		for _, k := range list {
+			texts = append(texts, k.name)
+		}
+	}
+	reported := map[string]bool{}
+	for _, text := range texts {
+		for _, match := range paramPosition.FindAllStringSubmatch(text, -1) {
+			n := 0
+			fmt.Sscan(match[1], &n)
+			if n < 1 || n > sig.Params().Len() || reported[match[0]] {
+				continue
+			}
+			if p := sig.Params().At(n - 1); p.Name() != "" && p.Name() != "_" && p.Name() != match[0] {
+				reported[match[0]] = true
+				fn.defect("it writes %s, but parameter %d has the name %s; write %s", match[0], n, p.Name(), p.Name())
+			}
+		}
+	}
 }

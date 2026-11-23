@@ -1136,6 +1136,13 @@ func (v *fnVerifier) placedFootprint(e ast.Expr, depth int) bool {
 	if e == nil || depth > 8 {
 		return false
 	}
+	// A conversion between interfaces keeps the value, so its home and its
+	// footprint (F28).
+	if call, ok := ast.Unparen(e).(*ast.CallExpr); ok && len(call.Args) == 1 {
+		if tv := v.info.Types[call.Fun]; tv.IsType() && isIface(tv.Type) && isIface(v.info.TypeOf(call.Args[0])) {
+			return v.placedFootprint(call.Args[0], depth+1)
+		}
+	}
 	if v.ownFootprint(e) {
 		return true
 	}

@@ -64,7 +64,7 @@ type Other interface {
 
 // @Ensures True
 func OwnDeclaration(s Shape) (o Other) {
-	return s // want `cannot verify OwnDeclaration: converting s, a interfaces.Shape, to interfaces.Other is not supported: Other has Area from Other.Area, and Shape has Area from Shape.Area;`
+	return s // want `cannot verify OwnDeclaration: converting s, a Shape, to Other is not supported: Other.Area has no contract, so nothing says that Shape.Area meets Other.Area`
 }
 
 type Square struct{ side int }

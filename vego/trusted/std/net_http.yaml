@@ -176,8 +176,11 @@ trusted:
   (net/http.ResponseWriter).Write:
     reason: >-
       "Write writes the data to the connection as part of an HTTP reply."
-      Its parameter has no name, so the entry can say nothing of the
-      number of bytes. Read from the source of Go 1.26.6 and 1.27.3: the
+      Its parameter has no name, so the entry calls it param1, and its
+      results result1 and result2. Read from the source of Go 1.26.6 and
+      1.27.3, which is what lets it meet the entry of (io.Writer).Write:
+      every writer returns at most the length of the data and an error
+      when it returns less, and none modifies the data: the
       HTTP/1 writer copies the data into its buffer or the connection and
       returns an error for a response that allows no body, a body longer
       than a declared Content-Length, or a hijacked connection; the HTTP/2
@@ -190,6 +193,9 @@ trusted:
       can grow. None keeps the data after it returns.
     receiver: w
     modifies: [w]
+    ensures:
+      - "0 <= result1 <= |param1|"
+      - "result1 < |param1| -> result2 != nil"
 
   net/http.Error:
     reason: >-

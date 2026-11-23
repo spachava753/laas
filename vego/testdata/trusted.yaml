@@ -34,6 +34,12 @@ trusted:
     vouches: [resp]
     modifies: []
 
+  handlers.tallyOf:
+    reason: Test helper that returns a tally of no known origin.
+    modifies: []
+    ensures:
+      - "t != nil"
+
   handlers.grownBeside:
     reason: Test helper that sets a header of h, which it lists under stores, writes s, and returns a map in the footprint of s.
     requires:

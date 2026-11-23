@@ -55,6 +55,7 @@ func (pv *pkgVerifier) typeEntry(key string, obj *types.Func, methodOf *types.Fu
 	}
 	fn := newFuncInfo(obj)
 	fn.trust, fn.methodOf, fn.valueOf = entry, methodOf, valueOf
+	nameUnnamed(fn, entry)
 	pv.typeEntries[key] = fn
 	if pv.inAnalysedModule(pkg, declared) {
 		what := "the method " + key

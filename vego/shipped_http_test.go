@@ -232,9 +232,11 @@ type httpRound struct {
 	key     string
 	fn      *funcInfo
 	failure []string
-	// calls counts the calls of the entry under test, and hidden the calls
-	// on HTTP/1 after which Trailer had changed.
-	calls, hidden int
+	// calls counts the calls of the entry under test, hidden the calls on
+	// HTTP/1 after which Trailer had changed, and short the calls of Write
+	// that wrote less than they were handed, which the second clause of
+	// its ensures is about.
+	calls, hidden, short int
 	readHidden    bool
 }
 
@@ -309,7 +311,13 @@ func (r *httpRound) sequence(rng *rand.Rand, w http.ResponseWriter, req *http.Re
 			r.around("Header().Get", w, req, nil, func() { h.Get("Content-Type") })
 		case "set":
 			h := w.Header()
-			r.around("Header().Set", w, req, nil, func() { h.Set(randomHeaderKey(rng), "text/plain") })
+			// A declared length that a later Write exceeds, which the
+			// writer refuses with ErrContentLength.
+			key, value := randomHeaderKey(rng), "text/plain"
+			if key == "Content-Length" {
+				value = "3"
+			}
+			r.around("Header().Set", w, req, nil, func() { h.Set(key, value) })
 		case "del":
 			h := w.Header()
 			r.around("Header().Del", w, req, nil, func() { h.Del(randomHeaderKey(rng)) })
@@ -354,10 +362,20 @@ func (r *httpRound) sequence(rng *rand.Rand, w http.ResponseWriter, req *http.Re
 			// Empty, small, past the 2 KB a writer buffers before it
 			// flushes its header, and past 64 KB.
 			p := make([]byte, []int{0, 5, 4096, 70000}[rng.Intn(4)])
+			var n int
+			var err error
+			r.around(fmt.Sprintf("Write of %d bytes", len(p)), w, req, []any{p}, func() { n, err = w.Write(p) })
 			if op == r.key {
 				r.calls++
+				c := r.check(map[*types.Var]*logic.Term{r.fn.receiver: reference(false), r.fn.params[0]: lengthTerm(len(p))})
+				c.results = []*logic.Term{logic.IntLit(int64(n)), errorTerm(err)}
+				if !c.holds(r.fn.ensures) {
+					r.fail("the ensures of Write is false: %d of %d bytes, %v", n, len(p), err)
+				}
+				if n < len(p) {
+					r.short++
+				}
 			}
-			r.around(fmt.Sprintf("Write of %d bytes", len(p)), w, req, []any{p}, func() { w.Write(p) })
 			final = true
 		case "net/http.Error":
 			msg := strings.Repeat("e", []int{0, 10, 3000, 70000}[rng.Intn(4)])
@@ -514,6 +532,9 @@ func checkHTTPEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key str
 	}
 	if round.calls == 0 {
 		t.Errorf("no call of %s was made", key)
+	}
+	if key == "(net/http.ResponseWriter).Write" && round.short == 0 {
+		t.Errorf("no Write wrote less than it was handed, so the second clause of its ensures is not checked")
 	}
 	if key == "(net/http.ResponseWriter).Write" && round.hidden == 0 {
 		t.Errorf("no write was seen to change Request.Trailer, which the hidden declaration is about; send bodies that the writer drains")

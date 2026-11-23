@@ -1660,7 +1660,52 @@ func AsPricer(c Catalog) (p Pricer) {
 }
 ```
 
-The converted value is nil exactly when the original is. Converting to an interface that declares a method of the same name itself is refused, because its contract may differ. An interface type written in place, such as `interface{ Pricer }` as the type of a parameter, is not supported if it embeds a declared interface. Go treats two such types as the same type whenever their methods have the same names and signatures, so a value could pass from one contract to another without a conversion. Declare a named type instead, as in `type PricerOnly interface{ Pricer }`.
+The converted value is nil exactly when the original is.
+
+An interface value can also be converted to an interface that declares a method of the same name itself, when the contract of the value's method implies the other contract. `vego` checks each such method as it checks a method of a value you convert: under the `Requires` of the target's method, it calls the value's method and must meet the target's `Ensures` and `Modifies`:
+
+```go
+// Exact returns what it is given, for numbers that are not negative.
+type Exact interface {
+	// @Requires n >= 0
+	// @Ensures r = n
+	Get(n int) (r int)
+}
+
+// Natural returns a number that is not negative.
+type Natural interface {
+	// @Requires n >= 0
+	// @Ensures r >= 0
+	Get(n int) (r int)
+}
+
+// Doubler says less of what it returns.
+type Doubler interface {
+	// @Requires n >= 0
+	// @Ensures r >= n
+	Get(n int) (r int)
+}
+
+// @Requires x != nil
+// @Ensures y != nil
+func AsNatural(x Exact) (y Natural) {
+	return x
+}
+
+// @Requires x != nil
+// @Ensures y != nil
+func AsExact(x Doubler) (y Exact) {
+	return x
+}
+```
+
+```text
+vego: postcondition may not hold: r = n, in Doubler.Get used as Exact.Get at convertby.go:36:9
+```
+
+The value is the same value after the conversion, with its footprint and its states. The conversion is refused when the target has a state that the value's interface does not declare, when the value's method may keep more of what it is handed than the target's, when it vouches for less, and when it may find more on what it is handed by a type assertion. A method of an interface declared in source may keep what it is handed, so a value of such an interface does not convert to `io.Writer`, whose `Write` keeps nothing. An `http.ResponseWriter` converts to `io.Writer`, so `fmt.Fprintf(w, ...)` can be written in a handler; see [Writing a response](#writing-a-response).
+
+An interface type written in place, such as `interface{ Pricer }` as the type of a parameter, is not supported if it embeds a declared interface. Go treats two such types as the same type whenever their methods have the same names and signatures, so a value could pass from one contract to another without a conversion. Declare a named type instead, as in `type PricerOnly interface{ Pricer }`.
 
 A value of any type that `vego` supports can be converted to `any`. An `any` can be held, passed, and compared with nil, and nothing else can be done with it. An error converted to `any` is nil exactly when the error is nil.
 
@@ -5074,7 +5119,7 @@ A function that builds a string or a slice in proportion to its arguments panics
 
 A caller proves it from a bound on every element, as in `@Requires |parts| <= 100 And Forall i in [0, |parts|) : |parts[i]| <= 100`. On a 32-bit target, where `MaxAlloc` is larger than `MaxInt`, both bounds are needed, since the length is an `int`.
 
-The names in an entry are the parameter and result names from the function's source, including the receiver. For the standard library, `go doc -src bytes.Buffer.Len` shows that the receiver is called `b`. If the function does not name its results, use `result` for a single result, or `result1`, `result2`, and so on for several. This applies only to trusted contracts, because a verified function must name its results.
+The names in an entry are the parameter and result names from the function's source, including the receiver. For the standard library, `go doc -src bytes.Buffer.Len` shows that the receiver is called `b`. If the function does not name its results, use `result` for a single result, or `result1`, `result2`, and so on for several. This applies only to trusted contracts, because a verified function must name its results. In the same way, a parameter without a name is `param1`, `param2`, and so on by its position, as in the entry of `(net/http.ResponseWriter).Write([]byte)`. An entry that writes `param2` for a parameter that has a name is reported.
 
 ### Shipped contracts
 
@@ -6934,7 +6979,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - A claim under `asserts` is true: the function calls nothing that the parameter holds, or that a call of what the parameter holds returns, but what the claim allows, and uses no reflection on it (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For a parameter whose footprint the contract lists in `Modifies`, they pass no other argument that reaches memory in that footprint without going through an interface value: `Log` relies on the `Lines` that `t` points to not being memory that the methods of `r` write. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one whose methods change the states of the other, as one that wraps it does, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method. For a parameter whose type owns memory (see [Structs that own memory](#structs-that-own-memory)), they pass a struct whose owned memory is reached by nothing else they pass: not by the other arguments, not by the struct's other fields, and not by what its other owned fields refer to. Memory that a method returns from what its struct owns, which its contract shows with `within(result, s)`, is not stored by code that is not verified, and is not passed to a verified function together with the struct it came from or with anything that reaches that struct.
 - When the server calls a verified handler, the writer it passes writes none of the memory that the request reaches without going through an interface value, except the field `Trailer` of the `Request` and the map it refers to, which the server fills while it reads the body, also when a write to the writer drains a body the handler left unread. Verified code cannot read or write that field. Code that is not verified does not make that map reachable from anything else it hands a verified function, as `req.Trailer = req.Header` in a middleware would. Code that is not verified uses a `ResponseWriter`, and hands one to verified code as that type or as any other interface, only while the `ServeHTTP` call that received it runs, and does not hand one to a verified function that keeps that parameter.
-- The body of an `http.Response` that reaches verified code from code that is not verified writes nothing that the response reaches without going through an interface value, except the field `Trailer` of the response, which reading the body fills. Verified code cannot read or write that field, and does not store into `Body` but a value it makes there.
+- The body of an `http.Response` that reaches verified code from code that is not verified writes nothing that the response reaches without going through an interface value, except the field `Trailer` of the response and the map it refers to, which reading the body fills. Verified code cannot read or write that field, and does not store into `Body` but a value it makes there. Code that is not verified does not make that map reachable from anything else it hands a verified function, as `resp.Trailer = resp.Header` would.
 - Code of a package that declares a struct that owns memory, where it is not verified, builds and changes such structs so that nothing else refers to the memory an owned field refers to, no two owned fields refer to the same memory, and an owned field comes to refer only to memory made since, or to part of what it referred to before.
 - An interface value that reaches verified code from code that is not verified meets the contracts of its methods. That includes a value passed as an argument, a value in memory that an argument reaches, a value that a call through another value returns, and a value that a trusted function returns or writes, which its entry vouches for. Called with arguments that meet the `Requires` of a method, the method returns without panicking, leaves its `Ensures` true, and writes nothing that verified code can see outside what its `Modifies` lists. When the contract lists the receiver, that is the value's footprint, and the method adds to it only memory that it creates during the call. A method whose entry lists no `keeps`, as `(io.Writer).Write` and `(io.Reader).Read`, keeps nothing it is handed once it returns, as `io.Writer` and `io.Reader` document of `p` (see [What an entry for a type claims](#what-an-entry-for-a-type-claims)). A method of an interface declared in source may keep a pointer it is handed, but no later call of the value's methods writes through it: a `Store` whose `Put(v *Value)` keeps `v` and whose `Touch()` then writes `*v` breaks this, and `vego` cannot see it. The same holds of a pointer that verified code stores into memory that the value's methods write or that the value handed out, as with `within(m, w)`: a `Sink` that hands out a table of pairs, and whose `Put` adds one to each pair in the table, breaks this. For a result that the contract of the method lists under `Vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). This holds also when the value holds a pointer to a struct that verified code holds.
 - The same holds of the methods and function types that entries of the trust file give contracts, which is what such an entry claims (see [What an entry for a type claims](#what-an-entry-for-a-type-claims)). In particular, a caller that is not verified does not pass a verified function such a value together with a pointer to memory that the value writes, as a `*bytes.Buffer` passed both as an `io.Writer` and as a `*bytes.Buffer` would be. Every call through such a value returns: a `Read` from a pipe, a terminal, or a connection returns only once data or an error arrives.

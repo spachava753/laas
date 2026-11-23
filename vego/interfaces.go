@@ -48,18 +48,11 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 	case isIface(from):
 		// The value keeps its methods, so a method of want must be one of
 		// them, the very declaration, and so with the same contract.
-		if method := v.foreignMethod(from, want); method != nil {
-			// Go lets the value be assigned only if it has a method of the
-			// name, from another declaration.
-			own := method.Name() + " from no declaration"
-			if have, _, _ := types.LookupFieldOrMethod(from, false, method.Pkg(), method.Name()); have != nil {
-				own = method.Name() + " from " + methodTitle(have.(*types.Func))
-			}
-			shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
-			v.unsupported(e.Pos(), fmt.Sprintf("converting %s, a %s, to %s is not supported: %s has %s from %s, and %s has %s; "+
-				"an interface value can be converted only to an interface whose methods are declarations it has, as through embedding, or to any",
-				types.ExprString(e), from, want, shown(want), method.Name(), methodTitle(method), shown(from), own))
-		}
+		// A method of want that is not a declaration the value has must be
+		// implied by the contract of the value's own method of the name
+		// (F28): the value keeps its reference, so its home, its footprint,
+		// and its states.
+		v.convertByContract(e, from, want, st, guard)
 		return v.eval(e, st, guard)
 	case isError(from):
 		if want.Underlying().(*types.Interface).NumMethods() > 0 {
@@ -792,4 +785,139 @@ func (v *fnVerifier) falseStates(st *state, at *logic.Term, want types.Type) {
 		st.assume(logic.Not(logic.Select(row, s.position())))
 	}
 	st.storeRow(stateRegion, logic.Bool, at, row)
+}
+
+// convertByContract checks a conversion of an interface value of type from
+// to want, an interface with methods from declarations the value does not
+// have: each such method of want must be implied by the contract of the
+// method of the same name of from, checked as a method check on one
+// receiver (impliesMethod), and want must declare no state that from does
+// not, nor claim less of keeping, vouching, and asserting (F28).
+func (v *fnVerifier) convertByContract(e ast.Expr, from, want types.Type, st *state, guard []*logic.Term) {
+	shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
+	have := map[string]bool{}
+	for _, s := range v.ifaceStatesOf(from) {
+		have[s.title()] = true
+	}
+	for _, s := range v.ifaceStatesOf(want) {
+		if !have[s.title()] {
+			v.unsupported(e.Pos(), fmt.Sprintf("converting %s, a %s, to %s is not supported: %s has the state %s, which %s does not declare, "+
+				"so nothing says what it is of the value", types.ExprString(e), shown(from), shown(want), shown(want), s.name, shown(from)))
+		}
+	}
+	own := from.Underlying().(*types.Interface)
+	for method := range want.Underlying().(*types.Interface).Methods() {
+		if slices.Contains(slices.Collect(own.Methods()), method) {
+			continue
+		}
+		found, _, _ := types.LookupFieldOrMethod(from, false, method.Pkg(), method.Name())
+		source, _ := found.(*types.Func)
+		if source == nil {
+			v.unsupported(e.Pos(), fmt.Sprintf("converting %s, a %s, to %s is not supported: %s has no method %s", types.ExprString(e), shown(from), shown(want), shown(from), method.Name()))
+		}
+		TA, TB := v.methodContract(source), v.methodContract(method)
+		if TA == nil || TB == nil {
+			missing := source
+			if TB == nil {
+				missing = method
+			}
+			v.unsupported(e.Pos(), fmt.Sprintf("converting %s, a %s, to %s is not supported: %s has no contract, so nothing says that %s meets %s",
+				types.ExprString(e), shown(from), shown(want), methodTitle(missing), methodTitle(source), methodTitle(method)))
+		}
+		if why := v.claimsNoLess(TA, TB, source, method); why != "" {
+			v.unsupported(e.Pos(), fmt.Sprintf("converting %s, a %s, to %s is not supported: %s", types.ExprString(e), shown(from), shown(want), why))
+		}
+		v.impliesMethod(e, TA, TB, source, method, st, guard)
+	}
+}
+
+// claimsNoLess says why the contract TA of a method of an interface does
+// not claim of keeping, vouching, and asserting what the contract TB of a
+// method of another interface claims, or "": A keeps no more than B,
+// vouches for no less, and asserts no more.
+func (v *fnVerifier) claimsNoLess(TA, TB *funcInfo, a, b *types.Func) string {
+	keeps := func(fn *funcInfo) (map[int]bool, bool) {
+		if fn.trust == nil {
+			// A method of an interface declared in source may keep what
+			// it is handed.
+			return nil, true
+		}
+		kept := map[int]bool{}
+		for _, k := range fn.trust.keeps {
+			for i, p := range fn.params {
+				if p.Name() == k.name || fn.paramNames[k.name] == p {
+					kept[i] = true
+				}
+			}
+		}
+		return kept, false
+	}
+	keptA, allA := keeps(TA)
+	keptB, allB := keeps(TB)
+	for i := range TA.params {
+		if !allB && (allA || keptA[i] && !keptB[i]) {
+			return fmt.Sprintf("%s may keep what it is handed as its parameter %d, and %s keeps nothing there", methodTitle(a), i+1, methodTitle(b))
+		}
+	}
+	for i := range TB.results {
+		if TB.vouches[i] && !TA.vouches[i] {
+			return fmt.Sprintf("%s vouches for the errors of its result %d, and %s does not", methodTitle(b), i+1, methodTitle(a))
+		}
+	}
+	if TB.trust != nil && len(TB.trust.asserts) > 0 {
+		if TA.trust == nil || len(TA.trust.asserts) == 0 {
+			return fmt.Sprintf("%s claims what it finds on what it is handed, under asserts, and %s claims nothing", methodTitle(b), methodTitle(a))
+		}
+		listed := map[string][]string{}
+		for _, k := range TB.trust.asserts {
+			for _, d := range k.dests {
+				listed[k.name] = append(listed[k.name], d.text)
+			}
+		}
+		for _, k := range TA.trust.asserts {
+			for _, d := range k.dests {
+				if !slices.Contains(listed[k.name], d.text) {
+					return fmt.Sprintf("%s may assert %s to %s, which %s does not allow", methodTitle(a), k.name, d.text, methodTitle(b))
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// impliesMethod checks that the contract TA of a method a of an interface
+// implies the contract TB of the method b of the interface it is converted
+// to: a verifier whose contract is TB calls a, with the same receiver and
+// arguments, and must meet TB's Ensures and frame. The receiver is the one
+// value, so its home, its footprint, and its states are the same on both
+// sides.
+func (v *fnVerifier) impliesMethod(e ast.Expr, TA, TB *funcInfo, a, b *types.Func, st *state, guard []*logic.Term) {
+	TA = v.usable(e.Pos(), TA, methodTitle(a), st, guard, false)
+	TB = v.usable(e.Pos(), TB, methodTitle(b), st, guard, false)
+	site := v.site(e.Pos(), "in %s used as %s at %s", methodTitle(a), methodTitle(b), v.placeOf(e.Pos()))
+	sv, entry, _ := v.subVerifier(TB, st, guard, site)
+	args := map[*types.Var]value{}
+	switch {
+	case TA.receiver != nil && TB.receiver == nil:
+		v.unsupported(e.Pos(), fmt.Sprintf("converting %s to the interface of %s is not supported: the contract of %s names its receiver, and that of %s does not, "+
+			"so nothing would say what %s does to the value", types.ExprString(e), methodTitle(b), methodTitle(a), methodTitle(b), methodTitle(a)))
+	case TA.receiver != nil:
+		args[TA.receiver] = sv.entry[TB.receiver]
+	}
+	call := &ast.CallExpr{Fun: &ast.SelectorExpr{X: e, Sel: &ast.Ident{NamePos: e.End(), Name: a.Name()}}, Lparen: e.End(), Rparen: e.End()}
+	if a.Type().(*types.Signature).Variadic() {
+		call.Ellipsis = e.End()
+	}
+	for i, param := range TA.params {
+		if i < len(TB.params) {
+			args[param] = sv.entry[TB.params[i]]
+			name := TB.params[i].Name()
+			if name == "" || name == "_" {
+				name = fmt.Sprintf("param%d", i+1)
+			}
+			call.Args = append(call.Args, &ast.Ident{NamePos: e.Pos(), Name: name})
+		}
+	}
+	results := sv.invoke(call, TA, args, entry, nil)
+	sv.atReturn(entry, results, e.Pos())
 }
