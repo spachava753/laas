@@ -3253,7 +3253,7 @@ func (b *Board) Clips() (out []Clip) {
 }
 ```
 
-At the end of an iteration, `vego` proves the invariant only of the element the iteration appended. The elements appended before are as they were at the head of the loop, where the invariant held of them. Writing `valid(out[i])` in place of the clauses it stands for makes this cheaper to prove.
+At the end of an iteration, `vego` proves the invariant only of the element the iteration appended. The elements appended before are as they were at the head of the loop, where the invariant held of them.
 
 ### A trusted function does not restore it
 
@@ -3274,7 +3274,7 @@ func (b *Board) Answer(w io.Writer, id int) {
 }
 ```
 
-The invariant of `b` reads the map, every card in it, and every tag of every card. None of that can be what the methods of `w` write, because `b` reaches it, and a function that lists `w` in `Modifies` assumes that the other parameters reach nothing its methods write (see [Methods that write behind their receiver](#methods-that-write-behind-their-receiver)). So `Answer` verifies, and its proof does not grow with the depth of the invariant.
+The invariant of `b` reads the map, every card in it, and every tag of every card. None of that can be what the methods of `w` write, because `b` reaches it, and a function that lists `w` in `Modifies` assumes that the other parameters reach nothing its methods write (see [Methods that write behind their receiver](#methods-that-write-behind-their-receiver)). So `Answer` verifies.
 
 The same holds of memory that a call made, as long as the call writes nothing that the methods of `w` may write:
 
@@ -3313,7 +3313,7 @@ func DropThenAnswer(b *Board, w io.Writer, id int, p []byte) {
 vego: invariant of Board may not hold for b on return: (Forall k in cards : |cards[k].Text| <= 1000 And |cards[k].Tags| <= 10 And (Forall j in [0, |cards[k].Tags|) : |cards[k].Tags[j]| <= 100)); it was not kept from the call to drop at kept.go:154:2, since what it reads may have changed: the call to w.Write at kept.go:155:2 may write it (Z3 reached its resource limit; -vego.rlimit raises it)
 ```
 
-List only the entry the call changes. The other cards are then the ones `b` held on entry, and the function verifies:
+A higher limit does not prove it. The cause is the call, which the message names. List only the entry the call changes. The other cards are then the ones `b` held on entry, and the function verifies:
 
 ```go
 // @Requires b != nil
@@ -3368,7 +3368,7 @@ The statement is the first one after which what the invariant reads is no longer
 | a deferred call | `what runs at the return at kept.go:136:1 may write it` |
 | a write through an interface value | `since what it reads may have changed: the call to w.Write at kept.go:155:2 may write it` |
 
-A write through an interface value changes nothing that the invariant names, but it may write what lies in the memory its methods write. So the message names what it reads as a whole. The place where the invariant held is `entry`, `the call to F at ...` for an invariant that a verified call proved, or `the head of the loop at ...`. When no statement since that place changed what the invariant reads, the message has no such sentence.
+A write through an interface value writes no name the invariant reads, but it may write any memory its methods write. So the message names what the invariant reads as a whole. The place where the invariant held is `entry`, `the call to F at ...` for an invariant that a verified call proved, or `the head of the loop at ...`. When no statement since that place changed what the invariant reads, the message has no such sentence.
 
 ## Structs that own memory
 
@@ -7791,8 +7791,8 @@ Some true contracts are not proved at the default limit. A function that writes 
 Some facts are not kept across what does not change them (see [What keeps it between boundaries](#what-keeps-it-between-boundaries)):
 
 - a fact about memory that a loop made, across a write through an interface value after the loop, as a loop that pushes onto an owned slice and then answers;
-- a quantified loop invariant over a slice that an inner loop appends to, as `for _, tag := range t.Tags { if tag == want { out = append(out, t); break } }` under `Forall i in [0, |out|) : valid(out[i])`; write the inner loop as a call, as `slices.Contains(t.Tags, want)`;
-- an invariant that reads the slices held in the values of a map or the elements of a slice, across a write into a slice of the same element type that the function was handed, as a `[]string` beside a store whose tasks hold `[]string` tags: nothing says that the slice is not one of the tags, so the invariant is proved again.
+- a quantified loop invariant over a slice that an inner loop appends to, as `for _, tag := range t.Tags { if tag == want { out = append(out, t); break } }` under `Forall i in [0, |out|) : valid(out[i])`. Write the inner loop as a call, as `slices.Contains(t.Tags, want)`;
+- an invariant that reads the slices held in the values of a map or the elements of a slice, across a write into a slice of the same element type that the function was handed, as a `[]string` beside a store whose tasks hold `[]string` tags. Nothing says that the slice is not one of the tags, so the invariant is proved again.
 
 Floating-point values are supported but opaque. They can be passed around and used in arithmetic, but nothing can be stated or proved about their values. An integer converted from a float can have any value of its type, so check its range in code before you use it as an index.
 
