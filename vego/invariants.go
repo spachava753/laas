@@ -325,7 +325,7 @@ func (v *fnVerifier) checkInvariants(st *state, guard []*logic.Term, mem memory,
 				about = fmt.Sprintf("%s, in what it owns at %s", what, step.through)
 			}
 			v.checkClauseFramed(c, env, st, step.guard, pos, fmt.Sprintf("invariant of %s may not hold for %s", step.set.name.Name(), about),
-				func(node *logic.Node) bool { return v.framedStep(st, step, mem, c, node) })
+				func(node *logic.Node, _ *logic.Term) bool { return v.framedStep(st, step, mem, c, node) })
 		}
 	}
 }

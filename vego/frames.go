@@ -204,7 +204,7 @@ type framer struct {
 	labels [][]string
 	closed string
 	// differs holds, for each level, the label of its first pair whose
-	// own tables of memory are not the entry's (sameTables), and same, for
+	// own tables of memory are not the entry's (tablesOf), and same, for
 	// the top level, which of its pairs are the same term.
 	differs    []string
 	same       []bool
@@ -221,6 +221,15 @@ type framer struct {
 	// tables holds every table of memory the entry's reading read, and
 	// changedTables those the goal's reading does not read.
 	tables, changedTables map[string]bool
+	// nested counts the clauses validPaired read, each with a resolver of
+	// its own, whose names it keeps apart.
+	nested int
+	// split is set to read a quantifier whose domain may grow
+	// (framedLoop): opened and fact record the variables of the
+	// quantifier at the top and the one fact CloseBound returned for it.
+	split  bool
+	opened []*logic.Term
+	fact   *logic.Term
 	// differ is set when some pair is not the same term on both sides.
 	differ bool
 	// failed is set when the two readings did not go alike, or a form the
@@ -403,11 +412,11 @@ func (e *frameEnv) Path(root string, steps []logic.Step, when logic.When) (*logi
 	return e.alike(then, now, errThen, errNow, e.f.spellRead(root, steps))
 }
 
-// Relation pairs fresh, within, and apart like any read. valid inside a
-// clause is not paired in this step: the frame does not hold.
+// Relation pairs fresh, within, and apart like any read, and valid(x)
+// through what it is made of (validPaired).
 func (e *frameEnv) Relation(name string, paths []logic.Path) (*logic.Term, error) {
-	if name == "valid" {
-		e.f.failed = true
+	if name == "valid" && len(paths) == 1 {
+		return e.validPaired(paths[0])
 	}
 	then, errThen := e.then.Relation(name, paths)
 	now, errNow := e.now.Relation(name, paths)
@@ -416,6 +425,65 @@ func (e *frameEnv) Relation(name string, paths []logic.Path) (*logic.Term, error
 		spelled = append(spelled, e.f.spellRead(p.Root, p.Steps))
 	}
 	return e.alike(then, now, errThen, errNow, name+"("+strings.Join(spelled, ", ")+")")
+}
+
+// validPaired reads valid(x) in both memories as specEnv.valid does: the
+// value x leads to and the steps of invariantSteps are paired, their nil
+// guards and values included, and the clauses of each step are read through
+// a frameEnv of their own over the same framer, so that their pairs fall
+// under the quantifiers around them. Compared as one boolean, valid(x)
+// would be the alignment a frame is there to spare Z3. It returns what
+// the entry's memory gives.
+func (e *frameEnv) validPaired(path logic.Path) (*logic.Term, error) {
+	then, errThen := e.then.locateAt(path.Root, path.Steps, path.When, true)
+	now, errNow := e.now.locateAt(path.Root, path.Steps, path.When, true)
+	label := "valid(" + e.f.spellRead(path.Root, path.Steps) + ")"
+	if errThen != nil || errNow != nil || len(then.val) != len(now.val) || then.constant != nil || now.constant != nil {
+		e.f.failed = true
+		if errThen == nil {
+			errThen = fmt.Errorf("%s cannot be read for a frame", label)
+		}
+		return nil, errThen
+	}
+	for i := range then.val {
+		e.f.pair(now.val[i], then.val[i], label)
+	}
+	v := e.f.v
+	stepsThen := v.invariantSteps(then.sink, then.mem, then.val, then.typ, nil, "", map[types.Type]bool{})
+	stepsNow := v.invariantSteps(now.sink, now.mem, now.val, now.typ, nil, "", map[types.Type]bool{})
+	if len(stepsThen) == 0 || len(stepsThen) != len(stepsNow) {
+		e.f.failed = true
+		return nil, fmt.Errorf("%s has no steps to frame", label)
+	}
+	var conjuncts []*logic.Term
+	for i, stepThen := range stepsThen {
+		stepNow := stepsNow[i]
+		if stepThen.set != stepNow.set || stepThen.set.broken || len(stepThen.val) != len(stepNow.val) || len(stepThen.guard) != len(stepNow.guard) {
+			e.f.failed = true
+			return nil, fmt.Errorf("%s steps apart", label)
+		}
+		for j := range stepThen.val {
+			e.f.pair(stepNow.val[j], stepThen.val[j], label)
+		}
+		for j := range stepThen.guard {
+			e.f.pair(stepNow.guard[j], stepThen.guard[j], label)
+		}
+		for _, c := range stepThen.set.clauses {
+			nested := &frameEnv{f: e.f,
+				then: v.invariantEnv(stepThen.set, then.sink, then.mem, stepThen.val, stepThen.t),
+				now:  v.invariantEnv(stepNow.set, now.sink, now.mem, stepNow.val, stepNow.t)}
+			e.f.nested++
+			res := v.resolverOf(c)
+			apart := &logic.Resolver{Preds: res.Preds, Prefix: res.Prefix, Mark: fmt.Sprintf("%s%d ", frameMark, e.f.nested)}
+			t, err := apart.Formula(c.node, nested)
+			if err != nil {
+				e.f.failed = true
+				return nil, err
+			}
+			conjuncts = append(conjuncts, logic.Implies(logic.And(stepThen.guard...), t))
+		}
+	}
+	return logic.And(conjuncts...), nil
 }
 
 func (e *frameEnv) Qualified(path, name string, steps []logic.Step, when logic.When) (*logic.Term, error) {
@@ -448,6 +516,9 @@ func (e *frameEnv) Applies(name string) bool {
 // OpenBound starts a level of pairs for the quantifier, and the gathering
 // of each reading's facts under it.
 func (e *frameEnv) OpenBound(vars []*logic.Term) {
+	if e.f.split && e.f.opened == nil && len(e.f.levels) == 1 {
+		e.f.opened = vars
+	}
 	e.f.levels = append(e.f.levels, nil)
 	e.f.labels = append(e.f.labels, nil)
 	e.f.differs = append(e.f.differs, "")
@@ -475,7 +546,11 @@ func (e *frameEnv) CloseBound() []*logic.Term {
 	if len(pairs) == 0 {
 		return nil
 	}
-	return []*logic.Term{logic.Implies(logic.And(learned...), logic.And(pairs...))}
+	fact := logic.Implies(logic.And(learned...), logic.And(pairs...))
+	if e.f.split && len(e.f.levels) == 1 && e.f.fact == nil {
+		e.f.fact = fact
+	}
+	return []*logic.Term{fact}
 }
 
 // Keep takes a quantifier's pairs, quantified, into the level around it.
@@ -609,7 +684,6 @@ func (v *fnVerifier) frameAnswer(st *state, entry *keptEntry, step invariantStep
 		f.scratch = &state{vals: map[*types.Var]value{}, mem: st.mem, brk: st.brk, noted: maps.Clone(st.noted)}
 		then := v.invariantEnv(entry.set, f.scratch, entry.mem, entry.val, entry.t)
 		now := v.invariantEnv(step.set, f.scratch, mem, step.val, step.t)
-		then.framed, now.framed = true, true
 		res := v.resolverOf(c)
 		apart := &logic.Resolver{Preds: res.Preds, Prefix: res.Prefix, Mark: frameMark}
 		if _, err := apart.Formula(node, &frameEnv{f: f, then: then, now: now}); err != nil || f.failed || len(f.levels) != 1 {
@@ -786,7 +860,7 @@ func guardWithin(entry, goal []*logic.Term) bool {
 // of it, it is assumed as check assumes a goal it proved, with no problem
 // of its own asked. framed, when not nil, is asked of every conjunct; a
 // conjunct that is valid(x) is asked of the steps of x.
-func (v *fnVerifier) checkClauseFramed(c *clause, env logic.Env, st *state, guard []*logic.Term, pos token.Pos, what string, framed func(node *logic.Node) bool) {
+func (v *fnVerifier) checkClauseFramed(c *clause, env logic.Env, st *state, guard []*logic.Term, pos token.Pos, what string, framed func(node *logic.Node, goal *logic.Term) bool) {
 	spec, _ := env.(*specEnv)
 	for _, node := range c.node.Conjuncts() {
 		text := strings.Join(strings.Fields(c.text[node.Start:node.End]), " ")
@@ -802,7 +876,7 @@ func (v *fnVerifier) checkClauseFramed(c *clause, env logic.Env, st *state, guar
 		}
 		done := v.at(pos)
 		v.lastFrame = nil
-		held := framed != nil && framed(node)
+		held := framed != nil && framed(node, goal)
 		failed := v.lastFrame
 		var kept map[string][]*logic.Term
 		var why map[string]*frameFailure
@@ -961,7 +1035,7 @@ func quantified(node *logic.Node) bool {
 }
 
 // frameBound is how a bound variable of a frame's resolver is spelled.
-var frameBound = regexp.MustCompile(regexp.QuoteMeta(frameMark) + `([A-Za-z_][A-Za-z_0-9]*)#[0-9]+`)
+var frameBound = regexp.MustCompile(regexp.QuoteMeta(frameMark) + `(?:[0-9]+ )?([A-Za-z_][A-Za-z_0-9]*)#[0-9]+`)
 
 // spellRead spells a read as a formula writes it, for a message: an
 // index by the reads it was made of, and never a term of the logic.
@@ -1040,4 +1114,107 @@ func tablesOf(t *logic.Term) map[string]bool {
 	}
 	walk(t)
 	return found
+}
+
+// loopKept is a head of a loop at which its invariants were assumed: the
+// state there, which the paths of its body continue, and where the
+// annotations of the loop are read.
+type loopKept struct {
+	c    *clause
+	head *state
+	at   token.Pos
+}
+
+// framedLoop reports whether a conjunct of a loop invariant holds at the
+// end of the body, or wherever it is a goal, because nothing it reads has
+// changed since a loop's head where a conjunct of the same text was
+// assumed: the loop's own head, or, after a loop nested in its body
+// whose invariant repeats it, that loop's. Read in its own scope, a
+// conjunct of the same text is the same formula over what its names
+// denote there, so pairing what the two readings give is the frame lemma
+// as for one clause. goal is the conjunct as st reads it. At most two
+// heads are tried, the latest first.
+//
+// When the conjunct is a Forall over one variable whose domain the body
+// changed, as [0, |tasks|) grows by an append, it is asked split: of every
+// element of the domain at the end, that it is an element of the domain
+// at the head whose reads are as they were there, or that the body holds
+// of it at the end. The first case holds of the head's elements by the
+// invariant assumed there, so only the new ones are proved. The split
+// goal is Forall i : D1(i) -> ((D0(i) And Unch(i)) Or B1(i)), with D1 and
+// B1 those of the goal and D0 and Unch read through the frame. It is asked
+// at the default limit, since it stands for the goal itself.
+func (v *fnVerifier) framedLoop(st *state, at token.Pos, c *clause, node *logic.Node, goal *logic.Term) bool {
+	text := node.String()
+	tried := 0
+	for i := len(st.loops) - 1; i >= 0 && tried < 2; i-- {
+		k := st.loops[i]
+		if !slices.ContainsFunc(k.c.node.Conjuncts(), func(n *logic.Node) bool { return n.String() == text }) {
+			continue
+		}
+		tried++
+		if v.framedFrom(st, k, at, c, node, goal) {
+			return true
+		}
+	}
+	return false
+}
+
+// framedFrom is framedLoop from one head.
+func (v *fnVerifier) framedFrom(end *state, k *loopKept, at token.Pos, c *clause, node *logic.Node, goal *logic.Term) bool {
+	head := k.head
+	read := func(split bool) (*framer, *logic.Term, bool) {
+		f := &framer{v: v, levels: [][]*logic.Term{nil}, labels: [][]string{nil}, differs: []string{""}, only: -1, split: split}
+		f.scratch = &state{vals: map[*types.Var]value{}, mem: end.mem, brk: end.brk, noted: maps.Clone(end.noted)}
+		then := &specEnv{v: v, sink: f.scratch, st: head, pos: k.at, now: head.mem}
+		now := &specEnv{v: v, sink: f.scratch, st: end, pos: at, now: end.mem}
+		res := v.resolverOf(c)
+		apart := &logic.Resolver{Preds: res.Preds, Prefix: res.Prefix, Mark: frameMark}
+		t, err := apart.Formula(node, &frameEnv{f: f, then: then, now: now})
+		return f, t, err == nil && !f.failed && len(f.levels) == 1
+	}
+	return v.asFrame(func() bool {
+		f, _, ok := read(false)
+		if !ok {
+			return false
+		}
+		if !f.differ {
+			return true
+		}
+		if !quantified(node) {
+			return false
+		}
+		// A Forall over one variable at the top is asked split, which
+		// holds where the whole frame would; any other conjunct whole.
+		if node.Kind != logic.NQuant || node.Op != "Forall" || len(node.Vars) != 1 || goal.Op != logic.OpForall {
+			premises := closed(f.scratch.hyps)
+			whole := logic.Implies(logic.And(premises...), logic.And(f.levels[0]...))
+			return v.solver().Prove(slices.Clip(end.hyps), whole, v.options(frameEffort, frameAttempt)) == solver.Proved
+		}
+		f, then, ok := read(true)
+		if !ok || f.fact == nil || len(f.opened) != 1 || then.Op != logic.OpForall {
+			return false
+		}
+		bound, inner := goal.Args[0], goal.Args[1]
+		thenBound, thenInner := then.Args[0], then.Args[1]
+		if inner.Op != logic.OpImplies || thenInner.Op != logic.OpImplies || thenBound.Name != f.opened[0].Name {
+			return false
+		}
+		// D0: the guards of the head's reading but the frame's own fact.
+		var domain []*logic.Term
+		for _, guard := range logic.Conjuncts(thenInner.Args[0]) {
+			if guard != f.fact {
+				domain = append(domain, guard)
+			}
+		}
+		rename := map[string]*logic.Term{thenBound.Name: bound}
+		kept := logic.Subst(logic.And(logic.And(domain...), f.fact), rename)
+		split := logic.Forall(bound, logic.Implies(inner.Args[0], logic.Or(kept, inner.Args[1])))
+		// What the top level read is the quantifier's domain, which may
+		// differ, and its pairs, which the split asks only of the head's
+		// elements.
+		asked := logic.Implies(logic.And(closed(f.scratch.hyps)...), split)
+		r := v.solver().Prove(slices.Clip(end.hyps), asked, v.options(0, frameAttempt))
+		return r == solver.Proved
+	})
 }

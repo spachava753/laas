@@ -77,11 +77,6 @@ type specEnv struct {
 	// frames holds, for each quantifier being read, the state that gathers
 	// the facts of its reads and the verifier's gatherer around it.
 	frames []boundFrame
-	// framed is set for one of the two readings of a frame (frames.go):
-	// under a quantifier it gathers what every layer and join keeps at the
-	// cells it reads, in any function, for the premises of the frame's
-	// question.
-	framed bool
 	// validFound, when set, receives the steps of each valid(x) read at
 	// the formula's top level, outside any quantifier, with the memory
 	// they are read in, for a frame (frames.go).
@@ -108,8 +103,8 @@ func (e *specEnv) OpenBound(vars []*logic.Term) {
 	// Only a function whose other parameters are assumed apart from a
 	// footprint it lists can use what is gathered, which is what a write
 	// through that footprint keeps; elsewhere it would only cost.
-	if e.sink != nil && (e.framed || e.v.listsFootprint()) {
-		frame.scratch = &state{brk: e.sink.brk, noted: map[string]bool{}, collecting: true, collectAll: e.framed}
+	if e.sink != nil && e.v.listsFootprint() {
+		frame.scratch = &state{brk: e.sink.brk, noted: map[string]bool{}, collecting: true}
 	}
 	e.frames = append(e.frames, frame)
 	e.v.boundSink = frame.scratch

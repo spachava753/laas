@@ -71,11 +71,6 @@ type state struct {
 	// takes them as premises and states them on their own (see
 	// specEnv.OpenBound).
 	collecting bool
-	// collectAll is set, with collecting, for a state that gathers the
-	// facts of reads under a quantifier for a frame (frames.go): what every
-	// layer and join keeps at the cell, not only those a write through a
-	// footprint leaves.
-	collectAll bool
 	// kept holds where the invariants of values held on this path: each
 	// entry says that a struct's invariants held of a value in a memory
 	// of the path, so that a later goal can be proved by showing that
@@ -84,6 +79,9 @@ type state struct {
 	// writes logs the statements after which memory changed on this path,
 	// for the message of a frame that did not hold (frames.go).
 	writes []loggedWrite
+	// loops holds the heads of the loops this path is inside or has left,
+	// where their invariants were assumed (frames.go).
+	loops []*loopKept
 }
 
 // deferredCall is a call that a defer statement put off: the call, the
@@ -113,7 +111,7 @@ func (st *state) clone() *state {
 		vals: maps.Clone(st.vals), mem: maps.Clone(st.mem), brk: st.brk,
 		hyps: slices.Clone(st.hyps), chosen: slices.Clone(st.chosen), noted: maps.Clone(st.noted),
 		deferred: slices.Clone(st.deferred), snapshots: st.snapshots, visited: st.visited,
-		kept: slices.Clip(st.kept), writes: slices.Clip(st.writes),
+		kept: slices.Clip(st.kept), writes: slices.Clip(st.writes), loops: slices.Clip(st.loops),
 	}
 }
 
@@ -331,7 +329,7 @@ func (v *fnVerifier) tableAt(sink *state, mem memory, key string, sort logic.Sor
 		// What gathers the facts of reads under a quantifier wants only
 		// what a write through a footprint keeps; the other layers and
 		// joins were never stated under a quantifier and are not now.
-		if sink.collecting && !sink.collectAll {
+		if sink.collecting {
 			if known := v.layers[at.Name]; known != nil {
 				if hasFootprintTarget(known.targets) || hasSourcePart(known.targets) {
 					v.distinctStructs(sink, known, key, ref, position)

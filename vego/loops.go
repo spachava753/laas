@@ -637,7 +637,9 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 	spec := shape.spec
 	checkInvariants := func(st *state, what string) {
 		for _, c := range spec.invariants {
-			v.checkClause(c, v.bodyEnv(st, at), st, nil, shape.pos, what)
+			v.checkClauseFramed(c, v.bodyEnv(st, at), st, nil, shape.pos, what, func(node *logic.Node, goal *logic.Term) bool {
+				return v.framedLoop(st, at, c, node, goal)
+			})
 		}
 	}
 	var counter *logic.Term
@@ -657,6 +659,13 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 	}
 	for _, c := range spec.invariants {
 		v.assumeKeeping(head, c, v.bodyEnv(head, at), "the head of the loop at "+v.placeOf(shape.pos))
+	}
+	// A frame may preserve them from here (framedLoop): the head is kept
+	// as it is once they are assumed, which every path of the body
+	// continues.
+	assumed := head.clone()
+	for _, c := range spec.invariants {
+		head.loops = append(head.loops, &loopKept{c: c, head: assumed, at: at})
 	}
 	// What is known of the unknowns at the head: their types, and the
 	// invariants, on every path that comes to the loop; see tieFailures.
