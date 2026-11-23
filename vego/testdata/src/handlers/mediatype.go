@@ -37,7 +37,7 @@ func JSONOnly(w http.ResponseWriter, req *http.Request) {
 // @Modifies w
 // @Ensures True
 func UnboundedMediaType(w http.ResponseWriter, req *http.Request) {
-	_, _, err := mime.ParseMediaType(req.Header.Get("Content-Type")) // want `vego: precondition of ParseMediaType may not hold: 32 \* \(\|v\| \+ 1\) \+ 65536 <= MaxAlloc`
+	_, _, err := mime.ParseMediaType(req.Header.Get("Content-Type")) // want `vego: precondition of ParseMediaType may not hold: 256 \* \(\|v\| \+ 1\) \+ 65536 <= MaxAlloc`
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}

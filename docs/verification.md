@@ -5009,7 +5009,7 @@ func JSONOnly(w http.ResponseWriter, req *http.Request) {
 Without the test of its length, the call is reported:
 
 ```text
-vego: precondition of ParseMediaType may not hold: 32 * (|v| + 1) + 65536 <= MaxAlloc; it holds when
+vego: precondition of ParseMediaType may not hold: 256 * (|v| + 1) + 65536 <= MaxAlloc; it holds when
 |contentType| <= 1000000000000
 ```
 

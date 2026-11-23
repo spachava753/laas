@@ -49,6 +49,14 @@ VEGO_386=1 VEGO_GO126=1 go test ./vego -run TestEncoding386 -count=1
 
 `TestEncoding386` runs each case in a 4G scope of its own, up to about 2 GB each, one after another; run nothing else heavy beside it. Run the three after any change to the walk of `encoding/json` in `vego/json.go`, its weights, or an entry of `encoding/json`, and on a new toolchain. `VEGO_GO126` needs the `go1.26.6` toolchain, which `GOTOOLCHAIN` downloads once.
 
+The entry of `mime.ParseMediaType` bounds what a call allocates by the length of its value. `go test` measures the costliest shapes of value on this machine (`TestMediaTypeBound`); the 32-bit edge is run only when asked:
+
+```sh
+VEGO_386=1 go test ./vego -run TestMIME386 -count=1
+```
+
+It runs each shape in a 4G scope of its own, under 1 GB each, one after another. Run it after any change to that entry, and on a new toolchain.
+
 `laas` must be built by a Go that is at least as new as the `go` command it finds when it runs. `go run` builds it with that same `go`, so the command above works on any toolchain. A `laas` binary built earlier by an older Go fails with errors about the standard library; rebuild it, or set `GOTOOLCHAIN` to the version that built it.
 
 ## Documentation

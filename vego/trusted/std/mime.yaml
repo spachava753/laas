@@ -10,14 +10,35 @@ trusted:
       errUnexpectedContentAfterMediaSubtype, ErrInvalidMediaParameter, and
       errDuplicateParamName, each a package-level variable made by
       errors.New, which meets what vouches claims. params is a map made in
-      the call when err is nil and nil otherwise. What it allocates: the
-      lowercased media type and each lowercased key, at most three bytes for
-      each byte of v, in a builder that may be given twice the room; the
-      map, whose keys and values are parts of v or of those copies; and the
-      values of RFC 2231 continuations joined in a builder, at most the
-      bytes of v. Which values it accepts is not modelled.
+      the call when err is nil and nil otherwise. What it allocates in all,
+      on a 64-bit target, for each part of v (a 32-bit target allocates
+      about half): the lowercased media type, at most three bytes for each
+      byte in a builder that may double, so at most 12 for each byte; for
+      each parameter, the lowercased name, at most its length, and an entry
+      in params. A map's entry, with what its growth copied, was measured on
+      Go 1.27.3 at every count up to 300,000 entries: at most 178 bytes for
+      a map of strings to strings and 123 for strings to maps, and a new map
+      with one entry is 336. A parameter whose name has a star costs the
+      most: its base name, before the star, gets an entry in the map of base
+      names and, if it is new, a map of its own; after the loop, the
+      stitching of each base name makes key + "*", one or two
+      fmt.Sprintf("%s*%d") with the key boxed, simplePart + "*", a builder
+      of the value, and the decoded value, each at most 16 bytes beside the
+      name, the value, and 20 digits, so at most 200 bytes and five times
+      the parameter's bytes. Such a parameter takes at least five bytes
+      (";a*=x"), so it allocates at most (336 + 123 + 178 + 200) / 5 + 6 =
+      174 bytes for each of its bytes; other parameters, at least four bytes
+      and with a distinct name, or six bytes for another piece of a base
+      name, take less. The 65536 covers fmt's printer and the first groups
+      of the maps. TestMediaTypeBound measures each shape of value that
+      costs the most from 5 bytes to 256 KB: at most 89 bytes for each byte
+      beyond 65536, for parameters with a star and distinct names.
+      TestMIME386 runs each shape at the longest value the requires
+      admits on a 32-bit target, 16 MB, which returns having allocated at
+      most 38 bytes for each byte. The source of mime is the same in Go
+      1.26.6 and 1.27.3. Which values it accepts is not modelled.
     requires:
-      - "32 * (|v| + 1) + 65536 <= MaxAlloc"
+      - "256 * (|v| + 1) + 65536 <= MaxAlloc"
     vouches: [err]
     modifies: []
     ensures:
