@@ -24,7 +24,7 @@ func FromParameter(xs []int) (r *Stack) {
 // @Ensures True
 func Share(ss []*Stack) {
 	ss[1].items = make([]int, 1)
-	ss[0].items = ss[1].items // want `vego: what is stored into ss\[0\].items is new memory that is not made in this statement`
+	ss[0].items = ss[1].items // want `vego: what is stored into ss\[0\].items is new memory that something else may refer to: it is memory that ss\[1\] owns`
 }
 
 // Pair owns two stacks through pointers.
@@ -41,10 +41,10 @@ type Pair struct {
 // @Ensures True
 func (t *Pair) Share() {
 	t.q.items = make([]int, 1)
-	t.p.items = t.q.items // want `vego: what is stored into t.p.items is new memory that is not made in this statement`
+	t.p.items = t.q.items // want `vego: what is stored into t.p.items is new memory that something else may refer to: it is memory that t owns`
 }
 
-// Held stores new memory held in a variable, which is not supported yet.
+// Held stores new memory held in a variable, which nothing else refers to.
 //
 // @Requires c != nil
 // @Modifies c
@@ -52,7 +52,7 @@ func (t *Pair) Share() {
 func Held(c *Cache) {
 	m := make(map[string]int)
 	m["a"] = 1
-	c.m = m // want `vego: what is stored into c.m is new memory that is not made in this statement, and storing such memory into an owned field is not supported yet`
+	c.m = m
 }
 
 // trim returns part of what it is handed.
@@ -63,14 +63,14 @@ func trim(xs []int) (r []int) {
 	return xs[1:]
 }
 
-// Trimmed stores what a verified function returns, which is not supported
-// until the summaries of what a function keeps.
+// Trimmed stores what a verified function returns within what it is
+// handed, which it keeps nothing of.
 //
 // @Requires s != nil And |s.items| > 0
 // @Modifies s
 // @Ensures True
 func Trimmed(s *Stack) {
-	s.items = trim(s.items) // want `vego: what is stored into s.items comes from the call of trim, a verified function; storing the result of such a call into an owned field is not supported yet`
+	s.items = trim(s.items)
 }
 
 // Unlisted writes what s owns without Modifies.
@@ -81,22 +81,29 @@ func Unlisted(s *Stack) {
 	s.items[0] = 1 // want `vego: s.items\[0\] is assigned, which Unlisted may not modify`
 }
 
-// id returns what it is handed.
+// keepIn returns what it is handed, and keeps it in h too.
 //
+// @Requires h != nil
+// @Modifies h
 // @Ensures within(r, xs) And |r| = |xs|
-func id(xs []int) (r []int) {
+func keepIn(h *Holder, xs []int) (r []int) {
+	h.data = xs
 	return xs
 }
 
-// ThroughVerified stores new memory that a verified call handed back,
-// which may have kept it: the memory is made in the statement, but not by
-// the expression stored.
+// Holder holds a slice it does not own.
+type Holder struct {
+	data []int
+}
+
+// ThroughKeeping stores new memory that a verified call handed back and
+// kept in h: the memory is new, but something else refers to it.
 //
-// @Requires s != nil
-// @Modifies s
+// @Requires s != nil And h != nil
+// @Modifies s, h
 // @Ensures True
-func ThroughVerified(s *Stack) {
-	s.items = id(make([]int, 1)) // want `vego: what is stored into s.items comes from the call of id, a verified function`
+func ThroughKeeping(s *Stack, h *Holder) {
+	s.items = keepIn(h, make([]int, 1)) // want `vego: what is stored into s.items comes from the call of keepIn, a verified function`
 }
 
 // AppendOther appends to the array another stack owns, in place: the
@@ -108,7 +115,7 @@ func ThroughVerified(s *Stack) {
 // @Ensures True
 func AppendOther(s *Stack) {
 	t := &Stack{items: make([]int, 1, 4)}
-	s.items = append(t.items, 2) // want `vego: what is stored into s.items is new memory that is not made in this statement`
+	s.items = append(t.items, 2) // want `vego: what is stored into s.items is new memory that something else may refer to: it is memory that the Stack made at growth.go:[0-9:]+ owns`
 }
 
 // TwoNew stores the array one new stack owns into another (F17 of the
@@ -119,7 +126,7 @@ func AppendOther(s *Stack) {
 func TwoNew() {
 	s := &Stack{items: make([]int, 2)}
 	t := &Stack{items: make([]int, 2)}
-	s.items = t.items // want `vego: what is stored into s.items is new memory that is not made in this statement, and storing such memory into an owned field is not supported yet; make it where it is stored, as in s.items = make\(...\), or copy it there`
+	s.items = t.items // want `vego: what is stored into s.items is new memory that something else may refer to: it is memory that the Stack made at growth.go:[0-9:]+ owns; make it where it is stored, as in s.items = make\(...\), or copy it there`
 }
 
 // TwoNewServers does the same with the structs two servers own.
@@ -128,7 +135,7 @@ func TwoNew() {
 func TwoNewServers() {
 	s := &Server{cfg: &Config{}}
 	t := &Server{cfg: &Config{}}
-	s.cfg = t.cfg // want `vego: what is stored into s.cfg is new memory that is not made in this statement, and storing such memory into an owned field is not supported yet; make it where it is stored, as in s.cfg = &Config\{...\}, or copy it there`
+	s.cfg = t.cfg // want `vego: what is stored into s.cfg is new memory that something else may refer to: it is memory that the Server made at growth.go:[0-9:]+ owns; make it where it is stored, as in s.cfg = &Config\{...\}, or copy it there`
 }
 
 // LocalValue stores a parameter's slice into a local owner, which is

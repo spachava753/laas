@@ -671,6 +671,8 @@ type pkgVerifier struct {
 	// summaries holds what each verified function of the package returns
 	// and stores, by where it came from; see memSummary.
 	summaries map[*types.Func]memSummary
+	// ownSummaries are the summaries of ownership; see ownSummaryOf.
+	ownSummaries map[*types.Func]*ownSummary
 	// valueReasons holds, for a function of this package that may make a
 	// call through a value, why; see valueReason.
 	valueReasons map[*types.Func]valueReason

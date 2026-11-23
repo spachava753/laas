@@ -417,6 +417,10 @@ trusted:
       - "valid(s)"
     modifies: []
 
+  owns.peek:
+    reason: Test helper standing for a trusted function whose result its entry does not place.
+    modifies: []
+
   footprints.resetWriter:
     reason: Test helper standing for a function the project trusts to write a Writer, which may make it own any memory.
     requires:
@@ -1219,7 +1223,7 @@ trusted:
     ensures: ["n >= 0"]
 
   (foreignlib.Filler).Fill:
-    reason: Fills what it is given.
+    reason: Fills what it is given, and keeps nothing it is handed.
     modifies: [p]
 
   (foreignlib.Ctx).Err:
@@ -1465,7 +1469,7 @@ trusted:
     modifies: [b]
 
   (foreignlib.Copier).Copy:
-    reason: Does not write the slice it copies from.
+    reason: Does not write the slice it copies from, and keeps nothing it is handed.
     modifies: []
 
   # The entry the guide shows for wrapping the errors of Read; it replaces

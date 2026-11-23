@@ -382,10 +382,10 @@ func (v *fnVerifier) allocates(e ast.Expr) bool {
 // of the design review). Only the entry of a trusted function says that in
 // this step: a shipped function or one of the trust file, with no keeps.
 type storedCall struct {
-	fn            *funcInfo
-	name          string
-	keepsNot      bool
-	freshVerified bool
+	fn       *funcInfo
+	name     string
+	keepsNot bool
+	verified bool
 }
 
 // storedCallOf returns the call a value stored into an owned field comes
@@ -410,14 +410,10 @@ func (v *fnVerifier) storedCallOf(e ast.Expr) *storedCall {
 	if fn != nil && fn.trust != nil && len(fn.trust.keeps) == 0 {
 		sc.keepsNot = true
 	}
-	// Until the summaries of what a verified function keeps (step 3), the
-	// new memory a verified function returns under fresh(result) may be
-	// stored, as constructors write it, &taskServer{store: New()}: nothing
-	// in this step relies on what else refers to it, and the growth of
-	// the owner, which this step relies on, holds of it, since what is
-	// new since the call is new since the statement began.
-	if fn != nil && fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil && promisesFresh(fn, 0) {
-		sc.freshVerified = true
+	// A verified callee keeps nothing of what it is handed when its
+	// summary says so of every parameter (R4).
+	if summary := v.pkgVerifier.ownSummaryOf(fn); summary != nil && !slices.Contains(summary.keeps, true) {
+		sc.keepsNot, sc.verified = true, true
 	}
 	return sc
 }
@@ -467,15 +463,27 @@ func ownedMadeSince(val value, bound *logic.Term) *logic.Term {
 // returns it, have been made since the statement began. cur is what the
 // field holds just before the store, and before the bound when the
 // statement began.
-func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur value, t, holder types.Type, rhs ast.Expr, before *logic.Term, field string, example func(making string) string, pos token.Pos) {
+func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur value, t, holder types.Type, rhs, key ast.Expr, before *logic.Term, field string, example func(making string) string, pos token.Pos) {
 	options := []*logic.Term{ownedNothing(val, t)}
 	call := v.storedCallOf(rhs)
 	if cur != nil && (call == nil || call.keepsNot) {
 		options = append(options, v.ownedWithin(val, cur, t))
 	}
-	made := rhs != nil && v.allocates(rhs) || call != nil && (call.keepsNot && !v.targetsHoldReferences(call.fn) || call.freshVerified)
-	if made {
+	// Memory a built-in or a literal makes in this statement, or a trusted
+	// call that keeps nothing returns, nothing else refers to; nor new
+	// memory that the analysis of ownership finds made of tags that are
+	// all new (R1), made since the function was entered.
+	if rhs != nil && v.allocates(rhs) || call != nil && call.keepsNot && !call.verified && !v.targetsHoldReferences(call.fn) {
 		options = append(options, ownedMadeSince(val, before))
+	}
+	flowMade := false
+	fl := v.ownOrigins()
+	if fl == nil {
+		fl = &ownFlow{}
+	}
+	if key != nil && fl.made[key] {
+		flowMade = true
+		options = append(options, ownedMadeSince(val, v.entryBrk))
 	}
 	result := v.attempt(st, guard, logic.Or(options...))
 	// What follows is verified as if the store were one of those, as after
@@ -497,7 +505,10 @@ func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur va
 	// did not own, which no form of the store may bring in.
 	old := !v.quickly(st, guard, logic.Or(ownedNothing(val, t), ownedMadeSince(val, v.entryBrk)))
 	switch {
-	case call != nil && !call.keepsNot && !call.freshVerified:
+	case flowMade && call != nil && !promisesFresh(call.fn, 0):
+		v.report(pos, "what is stored into %s comes from the call of %s, which returns memory nothing else refers to, but its contract does not say "+
+			"fresh(result), so it may be memory that existed; say so in the contract of %s%s", field, call.name, call.name, limitNote(result))
+	case call != nil && !call.keepsNot:
 		what := "a function whose contract does not say that it keeps nothing of what it is handed"
 		if call.fn != nil && call.fn.trust == nil && call.fn.valueOf == nil && call.fn.methodOf == nil {
 			what = "a verified function"
@@ -515,8 +526,8 @@ func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur va
 		v.report(pos, "%s may come to refer to memory that existed when %s was called and that it did not own; an owned field may refer only "+
 			"to memory made since, or to part of what it referred to then; %s%s%s", field, v.fn.obj.Name(), copied, undeclare, limitNote(result))
 	default:
-		v.report(pos, "what is stored into %s is new memory that is not made in this statement, and storing such memory into an owned field "+
-			"is not supported yet; make it where it is stored, as in %s, or copy it there%s", field, example(making), limitNote(result))
+		v.report(pos, "what is stored into %s is new memory that something else may refer to%s; make it where it is stored, as in %s, "+
+			"or copy it there%s", field, fl.why[key], example(making), limitNote(result))
 	}
 }
 
@@ -543,7 +554,7 @@ func (v *fnVerifier) checkOwnedTarget(st *state, lv lvalue, val value, rhs ast.E
 			cur = v.loadIn(lv, st, st.mem)
 		}
 	}
-	v.checkOwnedStore(st, nil, val, cur, lv.typ, lv.owned.holder, rhs, before, lv.text, func(making string) string { return lv.text + " = " + making }, lv.pos)
+	v.checkOwnedStore(st, nil, val, cur, lv.typ, lv.owned.holder, rhs, ast.Unparen(lv.expr), before, lv.text, func(making string) string { return lv.text + " = " + making }, lv.pos)
 }
 
 // ownerRoot returns, for a store into an owned field through a pointer

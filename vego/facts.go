@@ -50,6 +50,19 @@ type contractFact struct {
 	// what it stores into memory is; see memSummary.
 	DerivedResults bool
 	DerivedStores  bool
+	// OwnKeeps says, for each parameter, the receiver first, whether the
+	// function may keep it, and OwnResults what each result is, by the
+	// analysis of ownership (ownSummary). Nil when it has none.
+	OwnKeeps   []bool
+	OwnResults []OwnResultFact
+}
+
+// OwnResultFact is ownResultFact as it travels.
+type OwnResultFact struct {
+	Fresh   bool
+	From    []int
+	Inside  []int
+	Unknown bool
 }
 
 func (*contractFact) AFact() {}
@@ -100,6 +113,12 @@ func (pv *pkgVerifier) exportContracts(excused map[*funcInfo]bool) {
 		fact.CallsValues = pv.mayCallValues(fn.obj)
 		summary := pv.memSummary(fn.obj)
 		fact.DerivedResults, fact.DerivedStores = summary.results, summary.stores
+		if own := pv.ownSummaryOf(fn); own != nil {
+			fact.OwnKeeps = own.keeps
+			for _, r := range own.results {
+				fact.OwnResults = append(fact.OwnResults, OwnResultFact{Fresh: r.fresh, From: r.from, Inside: r.inside, Unknown: r.unknown})
+			}
+		}
 		pv.pass.ExportObjectFact(fn.obj, fact)
 	}
 }

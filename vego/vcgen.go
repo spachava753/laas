@@ -144,6 +144,12 @@ type fnVerifier struct {
 	// from, and ranged the range statements by their ranged expression;
 	// see memorigins.go.
 	memFlowDone *memFlow
+	// ownFlowDone is the analysis of ownership of the body, or ownFlowNone
+	// set when the body meets no owner; ownForce runs it anyway, for a
+	// summary. See ownorigins.go.
+	ownFlowDone *ownFlow
+	ownFlowNone bool
+	ownForce    bool
 	ranged      map[ast.Expr]*ast.RangeStmt
 	// joins holds, by the name of the constant that stands for it, each
 	// region a join of the ends of a function literal made.
@@ -559,6 +565,7 @@ func (v *fnVerifier) verify() {
 	v.looped = findLooped(fn.decl.Body)
 	v.boxed = v.findBoxed(fn.decl.Body)
 	v.classifyLiterals()
+	v.reportOwnOrigins()
 	st := v.enter()
 	for _, variable := range slices.Concat(fn.params, fn.results) {
 		if v.boxed[variable] && st.vals[variable] != nil {

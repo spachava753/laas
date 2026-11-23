@@ -4614,7 +4614,7 @@ Each entry has these fields:
 | `requires` | no | A list of formulas. Callers must prove each one. |
 | `ensures` | no | A list of formulas. Callers can assume each one. |
 | `runs` | no | Parameters that carry code the function may call, at any depth inside the value. See [Arguments that carry code](#arguments-that-carry-code). |
-| `keeps` | no | Parameters whose code the function keeps after it returns, each with the results and parameters it keeps it in, as in `r: [result]`. See [Functions that keep what they are given](#functions-that-keep-what-they-are-given). |
+| `keeps` | no | Parameters whose code the function keeps after it returns, each with the results and parameters it keeps it in, as in `r: [result]`. See [Functions that keep what they are given](#functions-that-keep-what-they-are-given). An entry that does not list a parameter claims that the function keeps nothing of it once it returns. For a method of an interface, that claim covers every implementation. |
 | `vouches` | no | Error results whose errors verified code may format, compare, and pass to `errors.Is`, results that hold function values or interface values verified code may call, and parameters under whose memory the function writes such values. See [Errors that a trusted function returns](#errors-that-a-trusted-function-returns) and [Function values and interface values that a trusted function returns](#function-values-and-interface-values-that-a-trusted-function-returns). |
 | `calls` | no | Function parameters that the function calls while it runs, each with what holds when it calls them. See [Functions that a trusted function calls](#functions-that-a-trusted-function-calls). |
 | `formats` | no | The parameter of type `any` or `...any` whose values the function formats as package `fmt` does, and the string it uses as the format, if any. See [Your own logging function](#your-own-logging-function). |
@@ -5981,7 +5981,10 @@ An entry for a type is a claim about every value of the type that verified code 
 - returns without panicking;
 - leaves the `ensures` true;
 - writes nothing that verified code can see, outside what `modifies` lists;
-- returns, in a result listed under `vouches`, only errors that meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns).
+- returns, in a result listed under `vouches`, only errors that meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns);
+- keeps none of the slices, pointers, and maps it is handed once the call returns, unless `keeps` lists the parameter.
+
+The last claim is what `io.Writer` and `io.Reader` document of `p`: an implementation must not retain it. `vego` relies on it when a struct hands memory it owns to a method of an interface, as a buffered writer hands its buffer to `Write`. A verified implementation is checked for it where it is converted.
 
 The first claim fails most often for real readers and writers. A `Read` from a pipe, a terminal, or a network connection returns only when data or an error arrives, and a reader that never makes progress never returns. A proof that a verified function ends assumes that every such call returns.
 

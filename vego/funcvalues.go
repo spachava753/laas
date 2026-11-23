@@ -1547,6 +1547,29 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 		return
 	}
 	fn = view.fn
+	// An entry of an interface method that lists no keeps claims that no
+	// implementation keeps what it is handed, as io.Writer and io.Reader
+	// document of p; a verified implementation must not, by its summary
+	// (F27, step 3a).
+	if T != nil && T.trust != nil {
+		kept := map[string]bool{}
+		for _, k := range T.trust.keeps {
+			kept[k.name] = true
+		}
+		if summary := v.pkgVerifier.ownSummaryOf(fn); summary != nil {
+			offset := len(fn.params) - sig.Params().Len()
+			for i := range sig.Params().Len() {
+				if at := offset + i; at >= 0 && at < len(summary.keeps) && summary.keeps[at] && i < len(T.params) && !kept[T.params[len(T.params)-sig.Params().Len()+i].Name()] {
+					name := callee.Name()
+					if recv := sig.Recv(); recv != nil {
+						name = "(" + types.TypeString(recv.Type(), types.RelativeTo(v.pass.Pkg)) + ")." + name
+					}
+					v.report(e.Pos(), "%s keeps %s, which an implementation of %s may not, since its entry lists no keeps; copy what it needs of %s",
+						name, sig.Params().At(i).Name(), as, sig.Params().At(i).Name())
+				}
+			}
+		}
+	}
 	// What a value made by verified code runs may make no call through a
 	// function value or an interface value. No contract of a function type
 	// or an interface method has a variant, so nothing would then prove
