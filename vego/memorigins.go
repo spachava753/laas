@@ -348,6 +348,26 @@ func (v *fnVerifier) storePlace(e ast.Expr) (*types.Var, bool) {
 }
 
 // memOrigin returns why a value may be unknown, or "" when it is outside.
+// packageOrigin is the origin of a package-level variable read as a
+// value that refers to memory. What it refers to is outside only while
+// the variable holds the only reference to it: its initialiser made that
+// memory and no use in the build lets a reference to it out, which the
+// proof then relies on, so that a package built later that lets one out is
+// reported. Code that is not verified and holds such a reference could
+// hand it in as the writer of a footprint (F1 of the design review of
+// package-level variables).
+func (v *fnVerifier) packageOrigin(variable *types.Var) string {
+	key := errorKey(variable)
+	if _, written := v.writtenInBuild()[key]; written || isError(variable.Type()) || !v.readOnlyHere(variable) {
+		return fmt.Sprintf("it is read from the package-level variable %s, whose memory code elsewhere may refer to", v.spelling(variable))
+	}
+	for _, relied := range []string{key, key + contentsKey} {
+		v.reliedKeys[relied] = true
+		v.reliedValues[relied] = true
+	}
+	return ""
+}
+
 func (v *fnVerifier) memOrigin(e ast.Expr, fact memFact) string {
 	t := v.info.TypeOf(e)
 	if t == nil || !holdsMemory(t) {
@@ -358,6 +378,9 @@ func (v *fnVerifier) memOrigin(e ast.Expr, fact memFact) string {
 		variable, isVar := v.info.ObjectOf(x).(*types.Var)
 		if !isVar {
 			return ""
+		}
+		if variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope() {
+			return v.packageOrigin(variable)
 		}
 		// A literal may assign the variable at any call that runs it, in
 		// place or handed over, which the path does not see (F29 of the
@@ -372,6 +395,9 @@ func (v *fnVerifier) memOrigin(e ast.Expr, fact memFact) string {
 		}
 		if selection := v.info.Selections[x]; selection == nil {
 			// A package-level variable of another package.
+			if variable, isVar := v.info.ObjectOf(x.Sel).(*types.Var); isVar {
+				return v.packageOrigin(variable)
+			}
 			return ""
 		}
 		return v.memOrigin(x.X, fact)
