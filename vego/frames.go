@@ -7,6 +7,7 @@ import (
 	"go/types"
 	"maps"
 	"math"
+	"math/big"
 	"reflect"
 	"regexp"
 	"slices"
@@ -92,12 +93,17 @@ func (st *state) logWrite(pos token.Pos, what string) {
 func writeOf(s ast.Stmt) string {
 	switch s := s.(type) {
 	case *ast.AssignStmt:
+		if len(s.Rhs) == 1 {
+			if call, ok := ast.Unparen(s.Rhs[0]).(*ast.CallExpr); ok {
+				return callOf(call) + " in the assignment to " + types.ExprString(s.Lhs[0])
+			}
+		}
 		return "the assignment to " + types.ExprString(s.Lhs[0])
 	case *ast.IncDecStmt:
 		return "the assignment to " + types.ExprString(s.X)
 	case *ast.ExprStmt:
 		if call, ok := ast.Unparen(s.X).(*ast.CallExpr); ok {
-			return "the call to " + types.ExprString(call.Fun)
+			return callOf(call)
 		}
 	case *ast.ForStmt, *ast.RangeStmt:
 		return "the loop"
@@ -106,9 +112,24 @@ func writeOf(s ast.Stmt) string {
 	case *ast.SwitchStmt, *ast.TypeSwitchStmt:
 		return "the switch statement"
 	case *ast.DeclStmt:
+		if gen, ok := s.Decl.(*ast.GenDecl); ok && len(gen.Specs) == 1 {
+			if spec, ok := gen.Specs[0].(*ast.ValueSpec); ok && len(spec.Values) == 1 {
+				if call, ok := ast.Unparen(spec.Values[0]).(*ast.CallExpr); ok {
+					return callOf(call) + " in the declaration of " + spec.Names[0].Name
+				}
+			}
+		}
 		return "the declaration"
 	}
 	return "the statement"
+}
+
+// callOf names a call for a message.
+func callOf(call *ast.CallExpr) string {
+	if _, lit := ast.Unparen(call.Fun).(*ast.FuncLit); lit {
+		return "the function literal called"
+	}
+	return "the call to " + types.ExprString(call.Fun)
 }
 
 // validFound is what a valid(x) read at the top level of a formula
@@ -182,16 +203,24 @@ type framer struct {
 	vars   [][]*logic.Term
 	labels [][]string
 	closed string
-	// differs holds, for each level, the label of its last pair whose
-	// two sides are not the same term, which is the innermost read that
-	// changed of a quantifier inside it, and same, for the top level,
-	// which of its pairs are the same term.
+	// differs holds, for each level, the label of its first pair whose
+	// own tables of memory are not the entry's (sameTables), and same, for
+	// the top level, which of its pairs are the same term.
 	differs    []string
 	same       []bool
 	closedSame bool
 	// only, when not negative, keeps of the top level the one pair at that
 	// index, for the question that names what changed.
 	only int
+	// reads maps what a read gave in the entry's memory to how it is
+	// spelled, so that an index is spelled by the reads it was made of,
+	// and topReads holds what the reads outside every quantifier gave
+	// there, and every term on the way.
+	reads    map[string]string
+	topReads map[string]bool
+	// tables holds every table of memory the entry's reading read, and
+	// changedTables those the goal's reading does not read.
+	tables, changedTables map[string]bool
 	// differ is set when some pair is not the same term on both sides.
 	differ bool
 	// failed is set when the two readings did not go alike, or a form the
@@ -237,7 +266,38 @@ func (f *framer) pair(now, then *logic.Term, label string) {
 	top := len(f.levels) - 1
 	f.levels[top] = append(f.levels[top], same)
 	f.labels[top] = append(f.labels[top], label)
-	if !identical {
+	if f.reads != nil {
+		f.reads[then.String()] = label
+	}
+	if top == 0 {
+		if f.topReads == nil {
+			f.topReads = map[string]bool{}
+		}
+		// What the read went through: a reference read on the way, as
+		// the map that has(tasks, k) reads, is one too.
+		var walk func(t *logic.Term)
+		walk = func(t *logic.Term) {
+			f.topReads[t.String()] = true
+			for _, arg := range t.Args {
+				walk(arg)
+			}
+		}
+		walk(then)
+	}
+	// The read that changed is named by the first pair whose own tables
+	// of memory are not the entry's: a read whose only difference is an
+	// index or a reference read before it inherited the change.
+	thenTables, nowTables := tablesOf(then), tablesOf(now)
+	if f.tables == nil {
+		f.tables, f.changedTables = map[string]bool{}, map[string]bool{}
+	}
+	for table := range thenTables {
+		f.tables[table] = true
+		if !nowTables[table] {
+			f.changedTables[table] = true
+		}
+	}
+	if !identical && f.differs[top] == "" && !maps.Equal(thenTables, nowTables) {
 		f.differs[top] = label
 	}
 	if top == 0 {
@@ -337,7 +397,7 @@ func (e *frameEnv) alike(then, now *logic.Term, errThen, errNow error, label str
 func (e *frameEnv) Path(root string, steps []logic.Step, when logic.When) (*logic.Term, error) {
 	then, errThen := e.then.Path(root, steps, when)
 	now, errNow := e.now.Path(root, steps, when)
-	return e.alike(then, now, errThen, errNow, spellRead(root, steps))
+	return e.alike(then, now, errThen, errNow, e.f.spellRead(root, steps))
 }
 
 // Relation pairs fresh, within, and apart like any read. valid inside a
@@ -350,7 +410,7 @@ func (e *frameEnv) Relation(name string, paths []logic.Path) (*logic.Term, error
 	now, errNow := e.now.Relation(name, paths)
 	var spelled []string
 	for _, p := range paths {
-		spelled = append(spelled, spellRead(p.Root, p.Steps))
+		spelled = append(spelled, e.f.spellRead(p.Root, p.Steps))
 	}
 	return e.alike(then, now, errThen, errNow, name+"("+strings.Join(spelled, ", ")+")")
 }
@@ -358,7 +418,7 @@ func (e *frameEnv) Relation(name string, paths []logic.Path) (*logic.Term, error
 func (e *frameEnv) Qualified(path, name string, steps []logic.Step, when logic.When) (*logic.Term, error) {
 	then, errThen := e.then.Qualified(path, name, steps, when)
 	now, errNow := e.now.Qualified(path, name, steps, when)
-	return e.alike(then, now, errThen, errNow, spellRead(name, steps))
+	return e.alike(then, now, errThen, errNow, e.f.spellRead(name, steps))
 }
 
 func (e *frameEnv) Apply(name string, args []*logic.Term) (*logic.Term, bool, error) {
@@ -405,10 +465,7 @@ func (e *frameEnv) CloseBound() []*logic.Term {
 	e.f.levels = e.f.levels[:top]
 	e.f.vars = e.f.vars[:len(e.f.vars)-1]
 	e.f.closed = e.f.differs[top]
-	if labels := e.f.labels[top]; e.f.closed == "" && len(labels) > 0 {
-		e.f.closed = labels[0]
-	}
-	closedSame := e.f.differs[top] == ""
+	closedSame := e.f.closed == ""
 	e.f.labels = e.f.labels[:top]
 	e.f.differs = e.f.differs[:top]
 	e.f.closedSame = closedSame
@@ -423,7 +480,7 @@ func (e *frameEnv) Keep(fact *logic.Term) {
 	top := len(e.f.levels) - 1
 	e.f.levels[top] = append(e.f.levels[top], fact)
 	e.f.labels[top] = append(e.f.labels[top], e.f.closed)
-	if !e.f.closedSame {
+	if !e.f.closedSame && e.f.differs[top] == "" {
 		e.f.differs[top] = e.f.closed
 	}
 	if top == 0 {
@@ -511,21 +568,41 @@ func (v *fnVerifier) framedStep(st *state, step invariantStep, mem memory, c *cl
 	if entry == nil {
 		return false
 	}
-	held, _, _ := v.askFrame(st, entry, step, mem, c, node, frameEffort, frameAttempt, -1)
+	held := v.frameAnswer(st, entry, step, mem, c, node, frameEffort, frameAttempt, -1).result == solver.Proved
 	if !held {
 		v.lastFrame = &frameFailure{st: st, entry: entry, step: step, mem: mem, c: c, node: node}
 	}
 	return held
 }
 
-// askFrame asks a frame from an entry: by identity, and otherwise, for a
-// clause with a quantifier, as a question at the effort and of the kind
+// frameAnswered is what frameAnswer found: Proved when the frame holds,
+// Refuted when Z3 showed it does not, and otherwise what stopped the
+// question; the labels of the top level and which of its pairs are the
+// same term; whether some pair was not the same term on both sides; and
+// the label of the first read whose tables changed.
+type frameAnswered struct {
+	result  solver.Result
+	labels  []string
+	same    []bool
+	differ  bool
+	changed string
+	// every is set when no table of memory the clause read is the same,
+	// as after a write through a footprint, which starts an epoch.
+	every bool
+}
+
+// frameAnswer asks a frame from an entry: by identity, and otherwise, for
+// a clause with a quantifier, as a question at the effort and of the kind
 // given. With only not negative, the question keeps of the top level the
-// one pair at that index, and the identity is not tried; it also returns
-// the labels of the top level.
-func (v *fnVerifier) askFrame(st *state, entry *keptEntry, step invariantStep, mem memory, c *clause, node *logic.Node, effort int, kind question, only int) (held bool, labels []string, same []bool) {
-	held = v.asFrame(func() bool {
-		f := &framer{v: v, levels: [][]*logic.Term{nil}, labels: [][]string{nil}, differs: []string{""}, only: only}
+// one pair at that index, and the identity is not tried; past the last
+// pair, nothing is asked.
+func (v *fnVerifier) frameAnswer(st *state, entry *keptEntry, step invariantStep, mem memory, c *clause, node *logic.Node, effort int, kind question, only int) (answer frameAnswered) {
+	result := solver.Unknown
+	var labels []string
+	var same []bool
+	defer func() { answer.result, answer.labels, answer.same = result, labels, same }()
+	v.asFrame(func() bool {
+		f := &framer{v: v, levels: [][]*logic.Term{nil}, labels: [][]string{nil}, differs: []string{""}, only: only, reads: map[string]string{}}
 		f.scratch = &state{vals: map[*types.Var]value{}, mem: st.mem, brk: st.brk, noted: maps.Clone(st.noted)}
 		then := v.invariantEnv(entry.set, f.scratch, entry.mem, entry.val, entry.t)
 		now := v.invariantEnv(step.set, f.scratch, mem, step.val, step.t)
@@ -536,6 +613,8 @@ func (v *fnVerifier) askFrame(st *state, entry *keptEntry, step invariantStep, m
 			return false
 		}
 		labels, same = f.labels[0], f.same
+		answer.differ, answer.changed = f.differ, f.differs[0]
+		answer.every = len(f.tables) > 1 && len(f.changedTables) == len(f.tables)
 		top := f.levels[0]
 		if only >= 0 {
 			if only >= len(top) {
@@ -543,12 +622,24 @@ func (v *fnVerifier) askFrame(st *state, entry *keptEntry, step invariantStep, m
 			}
 			top = top[only : only+1]
 		} else if !f.differ && sameTerms(entry.val, step.val) && guardWithin(entry.guard, step.guard) {
+			result = solver.Proved
 			return true
 		}
-		// A clause without a quantifier is proved again at little cost;
-		// the question of a frame pays only where the clause has one.
-		if only < 0 && kind == frameAttempt && !quantified(node) {
-			return false
+		if only < 0 && kind == frameAttempt {
+			// A clause without a quantifier is proved again at little
+			// cost; the question of a frame pays only where the clause
+			// has one.
+			if !quantified(node) {
+				return false
+			}
+			// A frame cannot hold where a region was written directly, in
+			// the memory since the entry, at a reference the clause reads
+			// outside every quantifier, as a store method writes its map:
+			// the question would only run to its limit (F11 of the review).
+			if writtenAt(entry.mem, mem, f.topReads) {
+				return false
+			}
+
 		}
 		// The goal's guard must give the entry's, the value must be the
 		// entry's, and every pair must hold.
@@ -558,10 +649,36 @@ func (v *fnVerifier) askFrame(st *state, entry *keptEntry, step invariantStep, m
 		}
 		goal := logic.Implies(logic.And(step.guard...), logic.And(logic.And(entry.guard...), logic.And(same...), logic.And(top...)))
 		goal = logic.Implies(logic.And(closed(f.scratch.hyps)...), goal)
-		result := v.solver().Prove(slices.Clip(st.hyps), goal, v.options(effort, kind))
+		result = v.solver().Prove(slices.Clip(st.hyps), goal, v.options(effort, kind))
 		return result == solver.Proved
 	})
-	return held, labels, same
+	return answer
+}
+
+// writtenAt reports whether some region of mem was written directly, by a
+// store, a write, or a splice of a table, at a reference among reads,
+// between its term in from and its term in mem. A region that a layer or
+// a join made is not looked through: what it keeps is for the frame to
+// ask.
+func writtenAt(from, mem memory, reads map[string]bool) bool {
+	if len(reads) == 0 {
+		return false
+	}
+	for key, now := range mem {
+		before := from[key]
+		for t := now; t != nil && t != before; {
+			switch t.Op {
+			case logic.OpStore, logic.OpWrite, logic.OpSpliceAt:
+				if t.Args[0].Sort.Elem().IsSeq() && reads[t.Args[1].String()] {
+					return true
+				}
+				t = t.Args[0]
+			default:
+				t = nil
+			}
+		}
+	}
+	return false
 }
 
 // frameFailure is a frame that was asked from an entry and did not hold.
@@ -579,60 +696,65 @@ const frameWhyEffort = quickEffort
 
 // explainFrame says why a frame did not hold, for the message of the
 // clause it was asked for: from where, which value the clause reads may
-// have changed, and which logged write may have changed it. The writes
-// logged since the entry are searched by halves, a frame from the entry to
-// the memory after each asked at a small limit, at most six times; then
-// each pair of the clause's top level, at most four, in the memory of the
-// write found. Nothing here is a proof: the sentence says "may".
+// have changed, and which logged statement may have written it.
+//
+// The statements logged since the entry are taken in order, but those
+// after which memory is the entry's or what it was after the one before.
+// For each, the clause is read in the entry's memory and in the memory
+// after it, at the entry's value, with no question asked: the first after
+// which some value the clause reads is no longer the same term as in the
+// entry's memory touched what the clause reads. A question at a small
+// limit then asks whether the frame still holds there, which a write that
+// rewrote a value with itself, or wrote beside it, passes; the search then
+// goes on, at most six questions in all. The statement found is named
+// with the last read that changed in its memory. Where no statement
+// touched what the clause reads, none is named. Nothing here is a proof:
+// the sentence says "may".
 func (v *fnVerifier) explainFrame(fail *frameFailure) string {
-	writes := fail.st.writes[min(fail.entry.logAt, len(fail.st.writes)):]
-	holds := func(mem memory) bool {
-		held, _, _ := v.askFrame(fail.st, fail.entry, fail.step, mem, fail.c, fail.node, frameWhyEffort, frameWhy, -1)
-		return held
-	}
-	// The first write after which the frame no longer holds.
-	lo, hi := 0, len(writes)
-
-	for asked := 0; lo < hi && asked < 6; asked++ {
-		mid := (lo + hi) / 2
-		if holds(writes[mid].mem) {
-			lo = mid + 1
-		} else {
-			hi = mid
+	var writes []loggedWrite
+	last := fail.entry.mem
+	for _, w := range fail.st.writes[min(fail.entry.logAt, len(fail.st.writes)):] {
+		if !maps.Equal(w.mem, last) && !maps.Equal(w.mem, fail.entry.mem) {
+			writes = append(writes, w)
+			last = w.mem
 		}
 	}
-	written := ""
-	mem := fail.mem
-	switch {
-	case lo < hi:
-		written = fmt.Sprintf("; a write between %s at %s and %s at %s may write it",
-			writes[lo].what, v.placeOf(writes[lo].pos), writes[hi-1].what, v.placeOf(writes[hi-1].pos))
-		mem = writes[hi-1].mem
-	case lo < len(writes):
-		written = fmt.Sprintf(": %s at %s may write it", writes[lo].what, v.placeOf(writes[lo].pos))
-		mem = writes[lo].mem
-	}
-	// The value the clause reads that may have changed: of the pairs of
-	// the top level that are not the same term on both sides, the first
-	// that does not hold, asking at most four.
-	read := "what it reads"
-	_, labels, same := v.askFrame(fail.st, fail.entry, fail.step, mem, fail.c, fail.node, frameWhyEffort, frameWhy, math.MaxInt)
-	asked := 0
-	for i := range labels {
-		if i < len(same) && same[i] {
+	// At the entry's value, so that the reading is about the memory
+	// alone: the step's value read after a later write is another term.
+	at := fail.step
+	at.val, at.guard = fail.entry.val, fail.entry.guard
+	questions := 0
+	before := fail.entry.mem
+	for _, w := range writes {
+		previous := before
+		before = w.mem
+		read := v.frameAnswer(fail.st, fail.entry, at, w.mem, fail.c, fail.node, 0, frameWhy, math.MaxInt)
+		if !read.differ {
 			continue
 		}
-		if asked++; asked > 4 {
-			break
+		if questions < 6 {
+			questions++
+			if v.frameAnswer(fail.st, fail.entry, at, w.mem, fail.c, fail.node, frameWhyEffort, frameWhy, -1).result == solver.Proved {
+				continue
+			}
 		}
-		if held, _, _ := v.askFrame(fail.st, fail.entry, fail.step, mem, fail.c, fail.node, frameWhyEffort, frameWhy, i); !held {
-			// A bound variable of the frame's resolver is spelled as the
-			// formula names it.
-			read = frameBound.ReplaceAllString(labels[i], "$1")
-			break
+		// The read named is the first whose tables this statement
+		// changed: read in the memory before it and after it.
+		since := *fail.entry
+		since.mem = previous
+		// A statement that changed every table the clause reads, as a
+		// write through a footprint does, says nothing of which read.
+		local := v.frameAnswer(fail.st, &since, at, w.mem, fail.c, fail.node, 0, frameWhy, math.MaxInt)
+		changed := local.changed
+		if changed == "" {
+			changed = read.changed
 		}
+		if changed == "" || local.every {
+			changed = "what it reads"
+		}
+		return fmt.Sprintf("; it was not kept from %s, since %s may have changed: %s at %s may write it", fail.entry.from, changed, w.what, v.placeOf(w.pos))
 	}
-	return fmt.Sprintf("; it was not kept from %s, since %s may have changed%s", fail.entry.from, read, written)
+	return fmt.Sprintf("; it was not kept from %s", fail.entry.from)
 }
 
 // guardWithin reports whether every condition of an entry's guard is one
@@ -828,10 +950,11 @@ func quantified(node *logic.Node) bool {
 // frameBound is how a bound variable of a frame's resolver is spelled.
 var frameBound = regexp.MustCompile(regexp.QuoteMeta(frameMark) + `([A-Za-z_][A-Za-z_0-9]*)#[0-9]+`)
 
-// spellRead spells a read as a formula writes it, for a message.
-func spellRead(root string, steps []logic.Step) string {
+// spellRead spells a read as a formula writes it, for a message: an
+// index by the reads it was made of, and never a term of the logic.
+func (f *framer) spellRead(root string, steps []logic.Step) string {
 	spelled := root
-	for i, step := range steps {
+	for _, step := range steps {
 		switch {
 		case step.Field != "":
 			spelled += "." + step.Field
@@ -842,7 +965,7 @@ func spellRead(root string, steps []logic.Step) string {
 		case step.State != "":
 			spelled = step.State + "(" + spelled + ")"
 		case step.Has && step.Index != nil:
-			spelled = "has(" + spelled + ", " + step.Index.String() + ")"
+			spelled = "has(" + spelled + ", " + f.spellTerm(step.Index) + ")"
 		case step.Nil:
 			spelled += " = nil"
 		case step.Addr:
@@ -852,10 +975,56 @@ func spellRead(root string, steps []logic.Step) string {
 		case step.Keys:
 			spelled = "the keys of " + spelled
 		case step.Index != nil:
-			spelled += "[" + step.Index.String() + "]"
-		default:
-			spelled += fmt.Sprintf("<step %d>", i)
+			spelled += "[" + f.spellTerm(step.Index) + "]"
 		}
 	}
 	return spelled
+}
+
+// spellTerm spells an index: a read by how it was spelled, a variable of a
+// quantifier by its name in the formula, a number, and sums and products
+// of those; anything else is "...".
+func (f *framer) spellTerm(t *logic.Term) string {
+	if label, ok := f.reads[t.String()]; ok {
+		return label
+	}
+	switch t.Op {
+	case logic.OpBound:
+		if m := frameBound.FindStringSubmatch(t.Name); m != nil {
+			return m[1]
+		}
+	case logic.OpIntLit:
+		return t.Value().String()
+	case logic.OpNeg:
+		return "-" + f.spellTerm(t.Args[0])
+	case logic.OpAdd:
+		if b := t.Args[1]; b.Op == logic.OpNeg {
+			return f.spellTerm(t.Args[0]) + " - " + f.spellTerm(b.Args[0])
+		}
+		if b := t.Args[1]; b.Op == logic.OpIntLit && b.Value().Sign() < 0 {
+			return f.spellTerm(t.Args[0]) + " - " + new(big.Int).Neg(b.Value()).String()
+		}
+		return f.spellTerm(t.Args[0]) + " + " + f.spellTerm(t.Args[1])
+	case logic.OpMul:
+		return f.spellTerm(t.Args[0]) + " * " + f.spellTerm(t.Args[1])
+	}
+	return "..."
+}
+
+// tablesOf returns the tables of memory a reading reads, the regions as a
+// whole, whatever their indexes.
+func tablesOf(t *logic.Term) map[string]bool {
+	found := map[string]bool{}
+	var walk func(t *logic.Term)
+	walk = func(t *logic.Term) {
+		if t.Sort.IsSeq() && t.Sort.Elem().IsSeq() {
+			found[t.String()] = true
+			return
+		}
+		for _, arg := range t.Args {
+			walk(arg)
+		}
+	}
+	walk(t)
+	return found
 }

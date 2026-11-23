@@ -116,8 +116,34 @@ func each(n int, f func(i int)) {
 // @Modifies b
 // @Ensures True
 func HandedBreak(b *Bump, n int) {
-	each(n, func(i int) { fix(b) }) // want `vego: invariant of Bump may not hold for what is passed to fix as b: 0 <= n; it was not kept from entry, since n may have changed, in the function literal run by each`
+	each(n, func(i int) { fix(b) }) // want `vego: invariant of Bump may not hold for what is passed to fix as b: 0 <= n; it was not kept from entry, in the function literal run by each`
 	if n > 0 {
 		b.n = -1
 	}
 } // want `vego: invariant of Bump may not hold for b on return: 0 <= n; it was not kept from entry, since n may have changed: the call to each at defects\.go:119:2 may write it`
+
+// Positive is a struct whose invariant holds only where n is set.
+//
+// @Invariant 0 < n
+type Positive struct{ n int }
+
+// @Requires p != nil
+// @Ensures True
+func usePositive(p *Positive) {}
+
+// TwoEnds calls a literal with two ends, of which only one holds the
+// invariant of x, after its own test (F9 of the review). The joined state
+// keeps no entry made on one end, so the second call proves the invariant
+// again, which fails when k <= 0.
+//
+// @Ensures True
+func TwoEnds(k int) {
+	x := &Positive{n: k}
+	func() {
+		if x.n > 0 {
+			usePositive(x)
+			return
+		}
+	}()
+	usePositive(x) // want `vego: invariant of Positive may not hold for what is passed to usePositive as p: 0 < n`
+}

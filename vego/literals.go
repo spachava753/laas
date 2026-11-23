@@ -508,8 +508,9 @@ func (v *fnVerifier) join(st *state, ends []litEnd, sig *types.Signature) []valu
 	case 1:
 		end := ends[0].st
 		st.vals, st.mem, st.brk, st.hyps, st.chosen, st.noted = keep(end.vals), end.mem, end.brk, end.hyps, end.chosen, end.noted
-		// The one end continues the path of st, with what it kept.
-		st.kept = end.kept
+		// The one end continues the path of st, with what it kept and
+		// the writes it logged, which the entries count from.
+		st.kept, st.writes = end.kept, end.writes
 		return ends[0].results
 	}
 	path := v.fresh("path", logic.Int)
