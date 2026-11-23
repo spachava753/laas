@@ -1,6 +1,7 @@
 package vego
 
 import (
+	"bytes"
 	"fmt"
 	"go/types"
 	"math/big"
@@ -116,6 +117,9 @@ type bufferCall struct {
 	// panics is set for a call whose requires is false and that panics,
 	// which the harness makes to show that the requires is needed.
 	panics bool
+	// within, when set, tells after the call whether its result lies in
+	// what the buffer owns.
+	within func() bool
 }
 
 // checkBufferCall checks one call: the requires with |b| before, the call
@@ -160,6 +164,9 @@ func checkBufferCall(t *testing.T, pv *pkgVerifier, fn *funcInfo, owner any, len
 	}
 	oldCap := capacity()
 	arrays.checkGrowth(t, owner, bc.key, func() { c.results = bc.call() })
+	if bc.within != nil {
+		c.within = map[*types.Var]bool{fn.results[0]: bc.within()}
+	}
 	after = declaredLength(t, pv, owner)
 	if after != int64(length()) {
 		t.Fatalf("after %s: the declared length is %d and Len is %d", bc.key, after, length())
@@ -316,4 +323,157 @@ func TestBuilderCopyPanics(t *testing.T) {
 		}
 	}()
 	again.WriteByte('b')
+}
+
+// checkBufferEntries runs the entries of the methods of bytes.Buffer, as
+// checkBuilderEntries does those of a Builder, with two more kinds of call
+// between them that code which is not verified may make: reads with Read
+// and Next, which move the read end, so that the length is less than what
+// was written and the declared length must subtract it, and what the
+// declaration holds of every Buffer is checked after each of them too.
+// Grow is also called with a negative count and Truncate outside the
+// length, which must fail their requires and panic.
+func checkBufferEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key string) {
+	names := []string{"Write", "WriteString", "WriteByte", "WriteRune", "Grow", "Len", "String", "Bytes", "Reset", "Truncate"}
+	contracts := map[string]*funcInfo{}
+	for _, name := range names {
+		contracts["(*bytes.Buffer)."+name] = contractOfKey(t, pv, pkg, "(*bytes.Buffer)."+name)
+	}
+	if contracts[key] == nil {
+		t.Fatalf("no harness calls %s; add it to checkBufferEntries", key)
+	}
+	rng := rand.New(rand.NewSource(2))
+	arrays := &ownerArrays{}
+	checked := 0
+	for range 100 {
+		b := new(bytes.Buffer)
+		for range 1 + rng.Intn(16) {
+			if rng.Intn(4) == 0 {
+				// A read, as code that is not verified may make one.
+				if rng.Intn(2) == 0 {
+					b.Next(rng.Intn(b.Len() + 2))
+				} else {
+					_, _ = b.Read(make([]byte, rng.Intn(b.Len()+2)))
+				}
+				if declaredLength(t, pv, b) != int64(b.Len()) {
+					t.Fatalf("after a read, the declared length is %d and Len is %d", declaredLength(t, pv, b), b.Len())
+				}
+				continue
+			}
+			var bc bufferCall
+			name := names[rng.Intn(len(names))]
+			if rng.Intn(2) == 0 {
+				name = strings.TrimPrefix(key, "(*bytes.Buffer).")
+			}
+			switch name {
+			case "Write":
+				p := []byte(bufferText(rng))
+				switch rng.Intn(6) {
+				case 0:
+					p = make([]byte, b.Cap()-b.Len()+1)
+				case 1:
+					b, p = worstBuffer()
+				}
+				bc = bufferCall{given: []*logic.Term{lengthTerm(len(p))}, call: func() []*logic.Term {
+					n, err := b.Write(p)
+					return []*logic.Term{logic.IntLit(int64(n)), errorTerm(err)}
+				}}
+			case "WriteString":
+				s := bufferText(rng)
+				switch rng.Intn(6) {
+				case 0:
+					s = strings.Repeat("y", b.Cap()-b.Len()+1)
+				case 1:
+					var p []byte
+					b, p = worstBuffer()
+					s = string(p)
+				}
+				bc = bufferCall{given: []*logic.Term{lengthTerm(len(s))}, call: func() []*logic.Term {
+					n, err := b.WriteString(s)
+					return []*logic.Term{logic.IntLit(int64(n)), errorTerm(err)}
+				}}
+			case "WriteByte":
+				c := byte(rng.Intn(256))
+				bc = bufferCall{given: []*logic.Term{logic.IntLit(int64(c))}, call: func() []*logic.Term {
+					return []*logic.Term{errorTerm(b.WriteByte(c))}
+				}}
+			case "WriteRune":
+				r := anyRune(rng)
+				bc = bufferCall{given: []*logic.Term{logic.IntLit(int64(r))}, call: func() []*logic.Term {
+					n, err := b.WriteRune(r)
+					return []*logic.Term{logic.IntLit(int64(n)), errorTerm(err)}
+				}}
+			case "Grow":
+				n := rng.Intn(100)
+				switch rng.Intn(6) {
+				case 0:
+					n = -1 - rng.Intn(10)
+				case 1:
+					n = 40000 + rng.Intn(40000)
+				case 2:
+					n = b.Cap() - b.Len() + 1
+				}
+				bc = bufferCall{given: []*logic.Term{logic.IntLit(int64(n))}, call: func() []*logic.Term {
+					b.Grow(n)
+					return nil
+				}, panics: n < 0}
+			case "Len":
+				bc = bufferCall{call: func() []*logic.Term { return []*logic.Term{logic.IntLit(int64(b.Len()))} }}
+			case "String":
+				bc = bufferCall{call: func() []*logic.Term { return []*logic.Term{lengthTerm(len(b.String()))} }}
+			case "Bytes":
+				var p []byte
+				bc = bufferCall{call: func() []*logic.Term {
+					p = b.Bytes()
+					return []*logic.Term{lengthTerm(len(p))}
+				}, within: func() bool {
+					// Inside the stretch of the array the Buffer owns, from
+					// its start to its capacity; an empty slice lies
+					// anywhere.
+					owned := reflect.ValueOf(b).Elem().FieldByName("buf")
+					lo, hi := span(p)
+					return hi == lo || owned.Cap() > 0 && owned.Pointer() <= lo && hi <= owned.Pointer()+uintptr(owned.Cap())
+				}}
+			case "Reset":
+				bc = bufferCall{call: func() []*logic.Term {
+					b.Reset()
+					return nil
+				}}
+			case "Truncate":
+				n := rng.Intn(b.Len() + 1)
+				switch rng.Intn(4) {
+				case 0:
+					n = -1 - rng.Intn(3)
+				case 1:
+					n = b.Len() + 1 + rng.Intn(3)
+				}
+				bc = bufferCall{given: []*logic.Term{logic.IntLit(int64(n))}, call: func() []*logic.Term {
+					b.Truncate(n)
+					return nil
+				}, panics: n < 0 || n > b.Len()}
+			}
+			bc.key = "(*bytes.Buffer)." + name
+			if checkBufferCall(t, pv, contracts[bc.key], b, b.Len, b.Cap, arrays, bc) && bc.key == key {
+				checked++
+			}
+		}
+	}
+	if checked < 50 {
+		t.Fatalf("%s was called with its requires true %d times; the harness should reach it more often", key, checked)
+	}
+}
+
+// worstBuffer returns a Buffer and what to write to it for which grow
+// allocates the most for its length and what is written: a capacity C
+// above 128 KB, all but one byte of it read, one byte unread, and C/2 + 1
+// bytes to write, which fit neither after the write end nor, slid to the
+// front, in half the capacity. grow then allocates len(buf) + n, about
+// 1.5 * C, which is near 3 * (Len + n) and past 2 * (Len + n) + 65536.
+func worstBuffer() (*bytes.Buffer, []byte) {
+	b := new(bytes.Buffer)
+	b.Grow(200000)
+	c := b.Cap()
+	b.Write(make([]byte, c-1))
+	b.Next(c - 2)
+	return b, make([]byte, c/2+1)
 }

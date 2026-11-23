@@ -2,7 +2,7 @@ package semantics
 
 import (
 	"bufio"
-	"strings"
+	"bytes"
 )
 
 // Each function below repeats one operation 30 times. If the rule for the
@@ -1037,15 +1037,16 @@ func SpliceChain(bw *bufio.Writer) (r byte) {
 }
 
 
-// LengthChain writes a Builder it is handed thirty times and reads its
-// length after each write. The length of an owner is a formula over its
-// fields, read from one fetch of its struct, so the pointer enters each
-// read once, and the length is an integer, which no later length reads.
+// BufferLengthChain writes a Buffer thirty times and reads its length after
+// each write. The length of an owner is a formula over its fields, here
+// |buf| - off, read from one fetch of its struct, so the pointer enters
+// each read once, and the length is an integer, which no later length
+// reads.
 //
 // @Requires b != nil And |b| = 0
 // @Modifies b
 // @Ensures n = 30
-func LengthChain(b *strings.Builder) (n int) {
+func BufferLengthChain(b *bytes.Buffer) (n int) {
 	b.WriteByte('x')
 	// @Assert |b| = 1
 	b.WriteByte('x')

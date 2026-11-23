@@ -202,11 +202,11 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func, st *sta
 	// is either verified against its annotations or has a trusted contract.
 	fn := v.contractOf(callee)
 	if fn == nil && sig.Recv() != nil && growingMethods[callee.Name()] && growsUnbounded(sig.Recv().Type()) != "" {
-		why := growsUnbounded(sig.Recv().Type())
-		// A contract a user might add would be false; say what it waits
-		// for instead.
-		v.unsupported(call.Pos(), fmt.Sprintf("it calls %s, which grows the buffer: %s. A trusted contract for it without such a bound would be false",
-			v.calleeName(callee), why))
+		// A contract a user might add would be false; say what to write
+		// instead.
+		v.unsupported(call.Pos(), fmt.Sprintf("it calls %s, which has no shipped entry: it reads through the io.Reader it is handed, which it "+
+			"type-asserts, and grows the buffer by what that reader returns; read with Read in a loop and write what it returns with Write",
+			v.calleeName(callee)))
 	}
 	if fn == nil {
 		v.unsupported(call.Pos(), fmt.Sprintf(

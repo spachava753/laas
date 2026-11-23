@@ -1553,7 +1553,7 @@ A nil pointer converts too, and its footprint is empty.
 
 The footprint is fixed when the value is converted. A value converted in a loop and called after the loop has a footprint about which nothing is known there, so the call needs everything it may write listed, and is usually refused. Convert the value before the loop.
 
-A `*bytes.Buffer` and a `*strings.Builder` cannot be converted to an `io.Writer` yet, and their methods that write cannot be called. They panic when the buffer is too large to grow, and no contract can state the length of the buffer yet:
+A `*bytes.Buffer` and a `*strings.Builder` cannot be converted to an `io.Writer`. Their `Write` panics when the buffer is too large to grow, and the contract of `(io.Writer).Write` has no bound for it:
 
 ```go
 // @Ensures True
@@ -1564,9 +1564,9 @@ func FormatToBuffer() {
 ```
 
 ```text
-vego: cannot verify FormatToBuffer: converting a value of type *bytes.Buffer to io.Writer is not supported yet: the
-methods of Buffer that write may panic when the buffer is too large to grow, and the length of a Buffer cannot be
-stated yet, so no contract of them can say when they return
+vego: cannot verify FormatToBuffer: converting a value of type *bytes.Buffer to io.Writer is not supported yet: its
+Write may panic when the buffer is too large to grow, and the contract of (io.Writer).Write has no bound for it;
+write what you format with the Buffer's own WriteString, as in b.WriteString(fmt.Sprintf(...))
 ```
 
 A `*bufio.Writer` cannot be converted to an `io.Writer` either, because its `Write` calls through the writer it keeps (see [Interface values that call interface values](#interface-values-that-call-interface-values)). Pass it as a `*bufio.Writer`.

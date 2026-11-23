@@ -1966,6 +1966,9 @@ func checkShipped(t *testing.T, files bool, run func(key string) bool) {
 				case strings.HasPrefix(key, "(*strings.Builder)."):
 					checkBuilderEntries(t, pv, pkg, key)
 					return
+				case strings.HasPrefix(key, "(*bytes.Buffer)."):
+					checkBufferEntries(t, pv, pkg, key)
+					return
 				case slices.Contains([]string{"io.NopCloser", "io.LimitReader", "io.TeeReader", "io.MultiReader", "io.MultiWriter"}, key):
 					checkIOEntries(t, pv, pkg, key)
 					return
@@ -1996,6 +1999,9 @@ func checkShipped(t *testing.T, files bool, run func(key string) bool) {
 				met.require(t, fn)
 			})
 		}
+	}
+	if files {
+		t.Run("the 32-bit edges of the buffer entries", func(t *testing.T) { checkBufferEdges386(t, pv, imports) })
 	}
 }
 

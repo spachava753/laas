@@ -35,44 +35,14 @@ func TestBuffers386(t *testing.T) {
 	}
 	alone(t)
 	pv, imports := shippedVerifier(t)
-	narrow := *pv
-	pass := *pv.pass
-	pass.TypesSizes = types.SizesFor("gc", "386")
-	narrow.pass = &pass
+	narrow := narrowVerifier(pv)
 	helper := filepath.Join(t.TempDir(), "buffers386")
 	build := exec.Command("go", "build", "-o", helper, "./testdata/buffers386")
 	build.Env = append(os.Environ(), "GOARCH=386")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build the helper: %v\n%s", err, out)
 	}
-	const maxInt = 1<<31 - 1
-	page := func(n int) int { return n / 8192 * 8192 }
-	type edge struct {
-		name, kind         string
-		grow0, written, rd int
-		n                  int
-		// inside is whether the requires is meant to hold.
-		inside bool
-	}
-	c := 720 << 20
-	s := maxInt / 5
-	bufferInside := page(2*s - 1)
-	n3 := 500000000
-	bufferCatch := page(2*(n3+1) - 1)
-	builderN := (maxInt - 65536) / 3
-	cases := []edge{
-		{name: "a Builder of capacity c grown by c+1", kind: "builder", grow0: c, n: c + 1},
-		{name: "the worst Builder inside the bound", kind: "builder", grow0: page(builderN - 1), n: builderN, inside: true},
-		{name: "a Buffer of capacity c grown by c+1", kind: "buffer", grow0: c, n: c + 1},
-		{name: "the worst Buffer inside the bound", kind: "buffer", grow0: bufferInside, written: bufferInside - s + 2, rd: bufferInside - s + 1, n: s - 1, inside: true},
-		{name: "a Buffer read down to one byte, grown past the check of ErrTooLarge", kind: "buffer", grow0: bufferCatch, written: bufferCatch - n3 + 1, rd: bufferCatch - n3, n: n3},
-	}
-	// An append that moves a []byte: the rule of appendFits against the
-	// capacity the runtime gives. Past MaxInt the capacity is negative.
-	appends := []edge{
-		{name: "an append whose capacity rounds past MaxInt", kind: "append", grow0: 879605573, n: 838374793},
-		{name: "the longest append inside the rule", kind: "append", grow0: 600000000, n: (maxInt-65536)/2 - 600000000, inside: true},
-	}
+	cases, appends := edges386()
 	for _, e := range appends {
 		t.Run(e.name, func(t *testing.T) {
 			run := exec.Command("systemd-run", "--user", "--scope", "--quiet", "-p", "MemoryMax=4G", "-p", "MemorySwapMax=0", "--",
@@ -87,7 +57,7 @@ func TestBuffers386(t *testing.T) {
 			if _, err := fmt.Sscanf(string(out), "len %d cap %d n %d panicked %t %q", &length, &capacity, &n, &panicked, &message); err != nil {
 				t.Fatalf("read %q: %v", out, err)
 			}
-			v := &fnVerifier{pkgVerifier: &narrow}
+			v := &fnVerifier{pkgVerifier: narrow}
 			holds, known := groundHolds(v.appendFits(logic.IntLit(int64(length+n)), types.Typ[types.Byte]))
 			t.Logf("append of %d to %d bytes: capacity %d, the rule holds %v, panicked %v %s", n, length, capacity, holds, panicked, message)
 			switch {
@@ -128,8 +98,8 @@ func TestBuffers386(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			fn := contractOfKey(t, &narrow, pkg, key)
-			check := &sequenceCheck{t: t, pv: &narrow, fn: fn, given: map[*types.Var]*logic.Term{fn.params[0]: reference(false), fn.params[1]: logic.IntLit(int64(n))},
+			fn := contractOfKey(t, narrow, pkg, key)
+			check := &sequenceCheck{t: t, pv: narrow, fn: fn, given: map[*types.Var]*logic.Term{fn.params[0]: reference(false), fn.params[1]: logic.IntLit(int64(n))},
 				length: func(*types.Var, logic.When) *logic.Term { return logic.IntLit(int64(length)) }}
 			holds := check.holds(fn.requires)
 			t.Logf("Len %d, Cap %d, Grow(%d): requires %v, panicked %v %s", length, capacity, n, holds, panicked, message)
@@ -144,5 +114,97 @@ func TestBuffers386(t *testing.T) {
 				t.Errorf("the helper ran out of memory, which says nothing of the clause")
 			}
 		})
+	}
+}
+
+// edge386 is a case of TestBuffers386: how the helper brings a buffer to
+// its state, what Grow is then asked, or for an append the length of the
+// full slice and how much of it is appended; and whether the requires, or
+// the rule of appendFits, is meant to hold.
+type edge386 struct {
+	name, kind         string
+	grow0, written, rd int
+	n                  int
+	inside             bool
+}
+
+// edges386 returns the cases of TestBuffers386, which TestBufferEdges386
+// also evaluates without running them.
+func edges386() (cases, appends []edge386) {
+	const maxInt = 1<<31 - 1
+	page := func(n int) int { return n / 8192 * 8192 }
+	c := 720 << 20
+	s := maxInt / 5
+	bufferInside := page(2*s - 1)
+	n3 := 500000000
+	bufferCatch := page(2*(n3+1) - 1)
+	builderN := (maxInt - 65536) / 3
+	cases = []edge386{
+		{name: "a Builder of capacity c grown by c+1", kind: "builder", grow0: c, n: c + 1},
+		{name: "the worst Builder inside the bound", kind: "builder", grow0: page(builderN - 1), n: builderN, inside: true},
+		{name: "a Buffer of capacity c grown by c+1", kind: "buffer", grow0: c, n: c + 1},
+		{name: "the worst Buffer inside the bound", kind: "buffer", grow0: bufferInside, written: bufferInside - s + 2, rd: bufferInside - s + 1, n: s - 1, inside: true},
+		{name: "a Buffer read down to one byte, grown past the check of ErrTooLarge", kind: "buffer", grow0: bufferCatch, written: bufferCatch - n3 + 1, rd: bufferCatch - n3, n: n3},
+	}
+	// An append that moves a []byte: the rule of appendFits against the
+	// capacity the runtime gives. Past MaxInt the capacity is negative.
+	appends = []edge386{
+		{name: "an append whose capacity rounds past MaxInt", kind: "append", grow0: 879605573, n: 838374793},
+		{name: "the longest append inside the rule", kind: "append", grow0: 600000000, n: (maxInt-65536)/2 - 600000000, inside: true},
+	}
+	return cases, appends
+}
+
+// narrowVerifier returns a copy of a verifier of the shipped entries for a
+// 32-bit target, whose MaxInt and MaxAlloc are those of GOARCH=386.
+func narrowVerifier(pv *pkgVerifier) *pkgVerifier {
+	narrow := *pv
+	pass := *pv.pass
+	pass.TypesSizes = types.SizesFor("gc", "386")
+	narrow.pass = &pass
+	return &narrow
+}
+
+// checkBufferEdges386 evaluates, with the sizes of a 32-bit target, the
+// requires of Grow of both buffers and the rule of appendFits at the cases
+// TestBuffers386 holds against the runtime, and the requires of
+// WriteString of a Builder at the cases of an append, which is what it is
+// (F7 of the review of step 1). It needs neither the helper nor memory, so
+// it runs by default, in TestShippedContracts, and a clause or a rule made
+// weaker than the runtime needs on such a target fails here; that the
+// numbers are right is what the run with VEGO_386=1 shows.
+func checkBufferEdges386(t *testing.T, pv *pkgVerifier, imports types.Importer) {
+	narrow := narrowVerifier(pv)
+	cases, appends := edges386()
+	requires := func(key string, length, n int) bool {
+		path := key[strings.Index(key, "*")+1 : strings.Index(key, ".")]
+		pkg, err := imports.Import(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fn := contractOfKey(t, narrow, pkg, key)
+		check := &sequenceCheck{t: t, pv: narrow, fn: fn, given: map[*types.Var]*logic.Term{fn.params[0]: reference(false)},
+			length: func(*types.Var, logic.When) *logic.Term { return logic.IntLit(int64(length)) }}
+		if types.Identical(fn.params[1].Type(), types.Typ[types.Int]) {
+			check.given[fn.params[1]] = logic.IntLit(int64(n))
+		} else {
+			check.given[fn.params[1]] = lengthTerm(n)
+		}
+		return check.holds(fn.requires)
+	}
+	for _, e := range cases {
+		key := map[string]string{"builder": "(*strings.Builder).Grow", "buffer": "(*bytes.Buffer).Grow"}[e.kind]
+		if holds := requires(key, e.written-e.rd, e.n); holds != e.inside {
+			t.Errorf("%s: the requires of %s is %v on a 32-bit target, and the case was built to lie %s it", e.name, key, holds, map[bool]string{true: "inside", false: "outside"}[e.inside])
+		}
+	}
+	v := &fnVerifier{pkgVerifier: narrow}
+	for _, e := range appends {
+		if holds, _ := groundHolds(v.appendFits(logic.IntLit(int64(e.grow0+e.n)), types.Typ[types.Byte])); holds != e.inside {
+			t.Errorf("%s: the rule of appendFits is %v on a 32-bit target, and the case was built to lie %s it", e.name, holds, map[bool]string{true: "inside", false: "outside"}[e.inside])
+		}
+		if holds := requires("(*strings.Builder).WriteString", e.grow0, e.n); holds != e.inside {
+			t.Errorf("%s: the requires of (*strings.Builder).WriteString, an append, is %v on a 32-bit target, and the case was built to lie %s it", e.name, holds, map[bool]string{true: "inside", false: "outside"}[e.inside])
+		}
 	}
 }

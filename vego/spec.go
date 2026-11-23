@@ -805,7 +805,7 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 	case measured && found.constant == nil && ownerLength(found.typ) != nil:
 		return e.ownerLength(found)
 	case measured:
-		return nil, fmt.Errorf("%s is not a slice or a string and has no length", spell(name, steps))
+		return nil, fmt.Errorf("%s is not a slice, a string, a map, a strings.Builder, or a bytes.Buffer, and has no length", spell(name, steps))
 	case found.constant != nil:
 		return found.constant, nil
 	}

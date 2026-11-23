@@ -164,7 +164,7 @@ func LenString(s string) (r int) {
 //
 // @Ensures True
 func LenInt(n int) (r int) {
-	return genericslib.Len(n) // want `cannot be used with E = int: in its ensures "result = \|v\|": v is not a slice or a string and has no length; write out what it does instead`
+	return genericslib.Len(n) // want `cannot be used with E = int: in its ensures "result = \|v\|": v is not a slice, a string, a map, a strings.Builder, or a bytes.Buffer, and has no length; write out what it does instead`
 }
 
 // CutInt calls Cut at an integer, which has no capacity.

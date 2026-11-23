@@ -177,22 +177,22 @@ func LogsReport(w io.Writer, items []string) {
 	report(l, items)
 }
 
-// Greets writes a Buffer, whose Write may panic when the buffer is too
-// large to grow; its length cannot be stated yet.
+// Greets writes a Buffer, whose writing methods have shipped entries
+// bounded by its length, which is 0 here.
 //
 // @Ensures True
 func Greets() {
 	var b bytes.Buffer
-	b.WriteString("!") // want `vego: cannot verify Greets: it calls \(\*bytes.Buffer\).WriteString, which grows the buffer: the methods of Buffer that write may panic when the buffer is too large to grow, and the length of a Buffer cannot be stated yet, so no contract of them can say when they return. A trusted contract for it without such a bound would be false`
+	b.WriteString("!")
 }
 
-// FormatsIntoBuffer converts a Buffer to an io.Writer, refused for the same
-// reason.
+// FormatsIntoBuffer converts a Buffer to an io.Writer, whose Write has no
+// bound for the Buffer's.
 //
 // @Ensures True
 func FormatsIntoBuffer() {
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "x") // want `vego: cannot verify FormatsIntoBuffer: converting a value of type \*bytes.Buffer to io.Writer is not supported yet: the methods of Buffer that write may panic when the buffer is too large to grow`
+	fmt.Fprintf(&b, "x") // want `vego: cannot verify FormatsIntoBuffer: converting a value of type \*bytes.Buffer to io.Writer is not supported yet: its Write may panic when the buffer is too large to grow, and the contract of \(io.Writer\).Write has no bound for it; write what you format with the Buffer's own WriteString, as in b.WriteString\(fmt.Sprintf\(...\)\)`
 }
 
 // BuildsName writes a Builder, whose writing methods have shipped entries

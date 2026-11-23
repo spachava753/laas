@@ -672,11 +672,12 @@ func wrapsKept(t types.Type) string {
 }
 
 // growingMethods are the methods of bytes.Buffer and strings.Builder that
-// may grow the buffer.
-var growingMethods = map[string]bool{"Grow": true, "ReadFrom": true, "Write": true, "WriteByte": true, "WriteRune": true, "WriteString": true}
+// may grow the buffer and have no shipped entry.
+var growingMethods = map[string]bool{"ReadFrom": true}
 
-// growsUnbounded says why the writing methods of a shipped owner whose
-// buffer grows without a bound cannot be used yet, or returns "".
+// growsUnbounded says why a buffer, a value of bytes.Buffer or
+// strings.Builder, cannot be converted to an interface whose methods write
+// behind their receiver, or returns "".
 func growsUnbounded(t types.Type) string {
 	if object, isPointer := pointee(t); isPointer {
 		t = object
@@ -687,8 +688,8 @@ func growsUnbounded(t types.Type) string {
 	}
 	switch named.Obj().Pkg().Path() + "." + named.Obj().Name() {
 	case "bytes.Buffer", "strings.Builder":
-		return fmt.Sprintf("the methods of %s that write may panic when the buffer is too large to grow, and the length of a %s cannot be stated yet, "+
-			"so no contract of them can say when they return", named.Obj().Name(), named.Obj().Name())
+		return fmt.Sprintf("its Write may panic when the buffer is too large to grow, and the contract of (io.Writer).Write has no bound for it; "+
+			"write what you format with the %s's own WriteString, as in b.WriteString(fmt.Sprintf(...))", named.Obj().Name())
 	}
 	return ""
 }

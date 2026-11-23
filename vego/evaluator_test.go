@@ -91,6 +91,11 @@ func (e *evaluator) number(t *logic.Term) *big.Int {
 		}
 		return new(big.Int).Rem(x(0), divisor)
 	case logic.OpLen:
+		if t.Args[0].Op == logic.OpFill {
+			// The length of a sequence of one repeated value, which the
+			// harnesses of buffers give lengths of up to 2 GB.
+			return e.number(t.Args[0].Args[0])
+		}
 		if t.Args[0].Sort == logic.SeqOf(logic.IntSeq) {
 			return big.NewInt(int64(len(e.rows(t.Args[0]))))
 		}
