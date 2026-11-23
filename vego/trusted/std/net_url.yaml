@@ -14,7 +14,10 @@ trusted:
       rounding of growslice on a 32-bit target. The limit of 10,000
       parameters that GODEBUG=urlmaxqueryparams sets is not relied on, since
       code that is not verified may lift it. The map and its slices are new.
-      Not said: which keys and values it holds.
+      Not said: which keys and values it holds, and that its slices are new,
+      since fresh of a map covers the map and not what its values refer to;
+      so writing an element of one of them needs it listed, which cannot be
+      done for a map a call made.
     requires:
       - "u != nil"
       - "32 * (|u.RawQuery| + 1) + 65536 <= MaxAlloc"
