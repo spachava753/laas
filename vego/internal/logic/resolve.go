@@ -81,9 +81,10 @@ type Applier interface {
 // mention its variables and hold in every state, such as what a layer of
 // memory keeps at the cell a bound variable names. A quantifier takes the
 // ones that mention its variables beside its guards, as premises of a
-// Forall and as conjuncts of an Exists, which changes neither, since they
-// are true, and hands Keep the same facts quantified on their own, so that
-// a formula that is assumed has them as facts and not only as premises.
+// Forall and conjuncts of an Exists, which changes neither, since they are
+// true, and hands Keep the same facts quantified on their own over its
+// variables under its guards, so that a formula that is assumed has them
+// as facts and not only as premises.
 type Gatherer interface {
 	OpenBound(vars []*Term)
 	CloseBound() []*Term

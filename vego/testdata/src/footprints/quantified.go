@@ -179,3 +179,116 @@ func ItemsOfBookAcross(b QBookOf) {
 	// @Assert Forall k in [0, |items|) : items[k].Qty >= 0 // want `vego: assertion may not hold: Forall k in \[0, \|items\|\) : items\[k\].Qty >= 0`
 	_ = items
 }
+
+// QChecker checks items, with a contract whose quantifier reads memory
+// on entry (F43 of the review of O1).
+type QChecker interface {
+	// @Ensures r -> (Forall k in [0, |ps|) : ps[k] != nil)
+	Check(ps []*QItem) (r bool)
+}
+
+// CountChecked uses a QChecker, whose contract the existence check accepts.
+//
+// @Requires c != nil
+// @Ensures 0 <= n And n <= 1
+func CountChecked(c QChecker, ps []*QItem) (n int) {
+	if c.Check(ps) {
+		return 1
+	}
+	return 0
+}
+
+// KeepsLengths keeps the length of every inner slice across a write, from
+// a Requires that quantifies inside over pointers (F44 of the review of
+// O1).
+//
+// @Requires b != nil And (Forall i in [0, |xss|) : |xss[i]| <= 5 And (Forall j in [0, |xss[i]|) : xss[i][j] != nil))
+// @Modifies b
+// @Ensures Forall i in [0, |xss|) : |xss'[i]| <= 5
+func KeepsLengths(b QBook, xss [][]*QItem) {
+	b.Record("x")
+}
+
+// KeepsSome keeps an Exists across a write.
+//
+// @Requires b != nil And (Exists k in [0, |items|) : items[k] != nil And items[k].Qty = 5)
+// @Modifies b
+// @Ensures Exists k in [0, |items|) : items'[k] != nil And items'[k].Qty = 5
+func KeepsSome(b QBook, items []*QItem) {
+	b.Record("x")
+}
+
+// KeepsSomeOf is KeepsSome through a book that also hands out memory
+// within it.
+//
+// @Requires b != nil And (Exists k in [0, |items|) : items[k] != nil And items[k].Qty = 5)
+// @Modifies b
+// @Ensures Exists k in [0, |items|) : items'[k] != nil And items'[k].Qty = 5
+func KeepsSomeOf(b QBookOf, items []*QItem) {
+	b.Record("x")
+}
+
+// KeepsNested keeps a fact two quantifiers deep across a write. It is true
+// and not proved at the default limit (F45 of the review of O1).
+//
+// @Requires b != nil And (Forall i in [0, |xss|) : Forall j in [0, |xss[i]|) : xss[i][j] != nil And xss[i][j].Qty >= 0)
+// @Modifies b
+// @Ensures Forall i in [0, |xss|) : Forall j in [0, |xss[i]|) : xss'[i][j].Qty >= 0
+func KeepsNested(b QBook, xss [][]*QItem) {
+	b.Record("x")
+} // want `vego: postcondition may not hold: Forall i in \[0, \|xss\|\) : Forall j in \[0, \|xss\[i\]\|\) : xss'\[i\]\[j\].Qty >= 0`
+
+// QOwners hands out items that lie in what it writes, each with an owner.
+type QOwners interface {
+	// @Receiver b
+	// @Requires |name| <= 100
+	// @Modifies b
+	// @Ensures True
+	Record(name string)
+
+	// @Receiver b
+	// @Ensures within(items, b) And (Forall k in [0, |items|) : items[k] != nil And items[k].Qty >= 0 And items[k].Owner != nil)
+	Items() (items []*QItem)
+}
+
+// ReownedAcross makes the first item's owner one the book handed out and
+// writes through the book. That every item has an owner is about the
+// items' own fields, which the write keeps; what the new owner holds may
+// change.
+//
+// @Requires b != nil And |items| > 0 And (Forall k in [0, |items|) : items[k] != nil And items[k].Owner != nil And |items[k].Owner.Name| <= 10)
+// @Modifies b, items[0]
+// @Ensures True
+func ReownedAcross(b QOwners, items []*QItem) {
+	src := b.Items()
+	if len(src) == 0 || src[0].Owner.Name != "" {
+		return
+	}
+	items[0].Owner = src[0].Owner
+	b.Record("x")
+	// @Assert Forall k in [0, |items|) : items[k].Owner != nil
+	// @Assert Forall k in [0, |items|) : |items[k].Owner.Name| <= 10 // want `vego: assertion may not hold: Forall k in \[0, \|items\|\) : \|items\[k\].Owner.Name\| <= 10`
+}
+
+// QCheckingBook checks items and writes behind its receiver, so its
+// contract lists a footprint and quantifies over memory on entry (F43 of
+// the review of O1).
+type QCheckingBook interface {
+	// @Receiver b
+	// @Modifies b
+	// @Ensures r -> (Forall k in [0, |ps|) : ps[k] != nil)
+	Check(ps []*QItem) (r bool)
+}
+
+// CheckedBy uses a QCheckingBook, whose contract the existence check
+// accepts.
+//
+// @Requires b != nil
+// @Modifies b
+// @Ensures 0 <= n And n <= 1
+func CheckedBy(b QCheckingBook, ps []*QItem) (n int) {
+	if b.Check(ps) {
+		return 1
+	}
+	return 0
+}

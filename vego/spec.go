@@ -77,16 +77,20 @@ type boundFrame struct {
 	scratch, outer *state
 }
 
-// OpenBound starts gathering the facts of reads under a quantifier: what a
-// layer of memory keeps at the cell a bound variable names, what the types
-// say of what is read there, and what the other parameters reach from it
-// (O1 of the orchestrator's review of part 1). They hold in every state, and
-// the quantifier takes them as premises, so a fact about what the elements
-// of a slice of pointers point to is kept across a write as it is at a
-// read of one element.
+// OpenBound starts gathering the facts of reads under a quantifier, in a
+// function that lists a footprint: what a layer of memory keeps at the cell
+// a bound variable names, what the types say of what is read there, and
+// what the other parameters reach from it (O1 of the orchestrator's review
+// of part 1). They hold in every state, and the quantifier takes them as
+// premises and states them quantified on their own (Keep), so a fact about
+// what the elements of a slice of pointers point to is kept across a write
+// as it is at a read of one element.
 func (e *specEnv) OpenBound(vars []*logic.Term) {
 	frame := boundFrame{vars: vars, outer: e.v.boundSink}
-	if e.sink != nil {
+	// Only a function whose other parameters are assumed apart from a
+	// footprint it lists can use what is gathered, which is what a write
+	// through that footprint keeps; elsewhere it would only cost.
+	if e.sink != nil && e.v.listsFootprint() {
 		frame.scratch = &state{brk: e.sink.brk, noted: map[string]bool{}, collecting: true}
 	}
 	e.frames = append(e.frames, frame)
@@ -143,16 +147,57 @@ func (e *specEnv) CloseBound() []*logic.Term {
 	return here
 }
 
-// Keep states a fact that a quantifier made of the facts of its reads: in
-// what gathers the facts of a quantifier around it, or where the formula
-// is read.
-func (e *specEnv) Keep(fact *logic.Term) {
-	switch {
-	case e.v.boundSink != nil:
-		e.v.boundSink.assume(fact)
-	case e.sink != nil:
-		e.sink.assume(fact)
+// listsFootprint reports whether the function being verified lists in its
+// Modifies a parameter whose footprint it writes: an interface value with a
+// footprint, or a value that owns memory.
+func (v *fnVerifier) listsFootprint() bool {
+	if v.fn == nil {
+		return false
 	}
+	for _, m := range v.fn.modifies {
+		param := v.fn.paramNames[m.name]
+		if param != nil && (isIface(param.Type()) && v.hasFootprint(param.Type()) || v.ownsMemory(param.Type())) {
+			return true
+		}
+	}
+	return false
+}
+
+// boundBefore makes what gathers the facts of reads under a quantifier
+// state them, for a read of the memory before a call, with the bound on
+// the objects that existed then, and returns what restores it. A value in
+// that memory is a value of its type there, below that bound, which is
+// true of the state before the call; with the bound after it, the fact
+// would be a goal that an outcome of the existence check must meet (F43 of
+// the review of O1), as the restatement of typedReads avoids for a read
+// outside a quantifier.
+func (e *specEnv) boundBefore(name string, when logic.When) func() {
+	scratch := e.v.boundSink
+	if scratch == nil || !scratch.collecting || e.before == nil || when == logic.Primed {
+		return func() {}
+	}
+	if e.fn != nil {
+		if _, isResult := e.fn.resultNames[name]; isResult {
+			return func() {}
+		}
+	}
+	saved := scratch.brk
+	scratch.brk = e.before
+	return func() { scratch.brk = saved }
+}
+
+// Keep states a fact that a quantifier made of the facts of its reads,
+// where the formula is read. Only the outermost quantifier's is stated: a
+// quantifier inside another has its facts as premises only, since stating
+// them on their own nests a quantified fact in every quantified formula
+// over pointers, which made a nested Requires cost past any limit (F44 of
+// the review of O1), and what it would give, a fact kept across a write
+// two quantifiers deep, is not proved at the default limit either way.
+func (e *specEnv) Keep(fact *logic.Term) {
+	if len(e.frames) > 0 || e.sink == nil {
+		return
+	}
+	e.sink.assume(fact)
 }
 
 // walkBound calls visit with the name of each bound variable a term
@@ -649,6 +694,7 @@ func (e *specEnv) locateField(name string, steps []logic.Step, when logic.When) 
 // a slice of single values yields the sequence of its elements; one that
 // ends in a struct, or in a slice of structs, has no value of its own.
 func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic.Term, error) {
+	defer e.boundBefore(name, when)()
 	if e.fn == nil && e.st != nil {
 		if c := e.v.visitedAt(name, e.pos); c != nil {
 			return e.visitedPath(c, steps, when)

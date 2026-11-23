@@ -68,7 +68,8 @@ type state struct {
 	visited map[*clause]*visitedSet
 	// collecting is set for a state that only gathers the facts of reads
 	// under a quantifier, which may mention its variables; the quantifier
-	// takes them as premises (see specEnv.OpenBound).
+	// takes them as premises and states them on their own (see
+	// specEnv.OpenBound).
 	collecting bool
 }
 
