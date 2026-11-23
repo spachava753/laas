@@ -1670,12 +1670,17 @@ guide	(*guide.Hub).Add	1	1573	0
 guide	(*guide.Hub).Fire	1	1808	0
 guide	(*guide.Item).Next	9	5884	0
 guide	(*guide.Iter).Next	13	10665	0
+guide	(*guide.Journal).Line	48	122716	0
 guide	(*guide.LineBook).Add	27	114521	0
 guide	(*guide.LineCount).Record	9	7060	0
 guide	(*guide.LineCounter).Price	10	8114	0
 guide	(*guide.Link).Loop	8	2837	0
 guide	(*guide.Lock).Acquire	6	4035	0
 guide	(*guide.Lock).Release	6	3879	0
+guide	(*guide.Pile).Append	30	193386	0
+guide	(*guide.Pile).Items	4	1665	0
+guide	(*guide.Pile).Push	22	48930	0
+guide	(*guide.Registry).Put	17	20929	0
 guide	(*guide.Retry).Next	7	2360	0
 guide	(*guide.Settings).Setup	15	22019	0
 guide	(*guide.Stack).Pop	15	24951	0
@@ -1723,6 +1728,7 @@ guide	guide.AddLine	20	79441	0
 guide	guide.AddTag	15	1178755	0
 guide	guide.AgeOf	5	26764	0
 guide	guide.Announce	12	187453	2
+guide	guide.AppendOwn	11	20511	0
 guide	guide.AppendZero	18	26778	0
 guide	guide.Apply	18	392325	2
 guide	guide.ApplyOnce	6	1233	0
@@ -1830,6 +1836,7 @@ guide	guide.Largest	26	51485	0
 guide	guide.Last	1	565	0
 guide	guide.LastZero	7	231444	2
 guide	guide.Later	6	1716	0
+guide	guide.Lend	7	5751	0
 guide	guide.Limit	3	19467	0
 guide	guide.LineCounts.Current	3	1854	0
 guide	guide.LinesTotal	15	27473	0
@@ -1861,6 +1868,8 @@ guide	guide.Mid	9	4455	0
 guide	guide.MidWrong	7	3245	0
 guide	guide.Nearest	27	64171	0
 guide	guide.NewCounter	4	1080	0
+guide	guide.NewJournal	11	32978	0
+guide	guide.NewPile	11	13549	0
 guide	guide.NewStale	4	750	0
 guide	guide.Next	16	11499	0
 guide	guide.Note	8	13232	0
@@ -1896,7 +1905,10 @@ guide	guide.Printer	1	46	0
 guide	guide.Pull	6	2552	0
 guide	guide.Pulled	6	2497	0
 guide	guide.Push	14	9036	0
+guide	guide.PushTwice	14	44600	0
 guide	guide.PushTwo	22	61008	0
+guide	guide.PutTwice	14	58049	2
+guide	guide.Putter.Put	4	3651	0
 guide	guide.Quiet	1	46	0
 guide	guide.RatedPricer	6	2406	0
 guide	guide.ReadAll	14	140073	0
@@ -1951,6 +1963,7 @@ guide	guide.Sorted3	10	6259	0
 guide	guide.SortedNames	26	40245	0
 guide	guide.Source.Next	3	961	0
 guide	guide.Stack	1	711	0
+guide	guide.StaleRegistry	18	172093	0
 guide	guide.Start	14	16693	0
 guide	guide.Status	11	14964	0
 guide	guide.Steps	10	2408	0
@@ -1958,6 +1971,7 @@ guide	guide.Subscribe	13	10187	0
 guide	guide.Sum	11	24881	0
 guide	guide.SumScores	11	237830	2
 guide	guide.Swap	14	16622	0
+guide	guide.Take	8	19534	0
 guide	guide.Tally	1	46	0
 guide	guide.TallyInMemory	12	33049	0
 guide	guide.TallyKeeps	12	24356	0
