@@ -723,6 +723,21 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 			}
 		}
 	}
+	// What a parameter under encodes is given runs no method of the
+	// package: the walk of encoding/json refuses every type whose methods
+	// encoding/json would call, but for three types of the standard
+	// library (json.go), and encoding/json uses reflection on it only to
+	// read it and to call those.
+	encoded := map[*types.Var]bool{}
+	if entry != nil {
+		for _, item := range entry.encodes {
+			for param := range sig.Params().Variables() {
+				if param.Name() == item.text {
+					encoded[param] = true
+				}
+			}
+		}
+	}
 	var operands []ast.Expr
 	paramOf := map[ast.Expr]*types.Var{}
 	if sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok && withReceiver {
@@ -734,13 +749,16 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 	// What the entry claims the function finds on what it is given; a
 	// claim that cannot be read is no claim.
 	claim, _ := pv.assertsClaim(entry, sig, from)
-	formattedArgs := map[ast.Expr]bool{}
+	formattedArgs, encodedArgs := map[ast.Expr]bool{}, map[ast.Expr]bool{}
 	// What an argument is passed as: a value converted to an interface
 	// type is one that code of the other package may assert to anything.
 	passedAs := map[ast.Expr]types.Type{}
 	for _, b := range bindArgsLoose(pv.info, call, sig) {
 		if formatted[b.param] {
 			formattedArgs[b.expr] = true
+		}
+		if encoded[b.param] {
+			encodedArgs[b.expr] = true
 		}
 		paramOf[b.expr] = b.param
 		t := b.param.Type()
@@ -760,6 +778,8 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 		case pv.knownAtCall(arg):
 			// An error of known origin holds a type of the standard
 			// library, and nothing of this package.
+		case encodedArgs[arg]:
+			// It hands nothing of the package that can run.
 		case formattedArgs[arg]:
 			// Formatting runs the methods String, Error, Format, and
 			// GoString of the value and of what it holds through exported

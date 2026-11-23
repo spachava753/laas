@@ -39,6 +39,16 @@ VEGO_386=1 go test ./vego -run TestBuffers386 -count=1
 
 It builds a 386 helper and runs each case in a 4G scope of its own, up to about 3 GB each, one after another; run nothing else heavy beside it. Run it after any change to an entry of a buffer or to the rule of `append` (`appendFits`), and on a new toolchain. From a `git archive` extract, add `GOFLAGS=-buildvcs=false`.
 
+The entries of `encoding/json` must hold of every build of the package a program can be built with. There are four: Go 1.26 and Go 1.27, each with and without `GOEXPERIMENT=jsonv2`, which replaces its code by `encoding/json/v2` and is on by default in Go 1.27. `go test` holds them against both builds of the toolchain it runs on (`TestJSONEntries` builds a helper with `GOEXPERIMENT=nojsonv2` beside the default). The 32-bit edges of their bound, and Go 1.26.6 both ways, are run only when asked:
+
+```sh
+VEGO_386=1 go test ./vego -run TestEncoding386 -count=1
+VEGO_GO126=1 go test ./vego -run TestJSONEntries -count=1
+VEGO_386=1 VEGO_GO126=1 go test ./vego -run TestEncoding386 -count=1
+```
+
+`TestEncoding386` runs each case in a 4G scope of its own, up to about 2 GB each, one after another; run nothing else heavy beside it. Run the three after any change to the walk of `encoding/json` in `vego/json.go`, its weights, or an entry of `encoding/json`, and on a new toolchain. `VEGO_GO126` needs the `go1.26.6` toolchain, which `GOTOOLCHAIN` downloads once.
+
 `laas` must be built by a Go that is at least as new as the `go` command it finds when it runs. `go run` builds it with that same `go`, so the command above works on any toolchain. A `laas` binary built earlier by an older Go fails with errors about the standard library; rebuild it, or set `GOTOOLCHAIN` to the version that built it.
 
 ## Documentation

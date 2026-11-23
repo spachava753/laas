@@ -419,6 +419,9 @@ type funcInfo struct {
 	// contract says it formats as package fmt does, and format the string
 	// it uses as the format, if any; see formatting.go.
 	formatted, format *types.Var
+	// encoded is the parameter of a trusted function whose value its
+	// contract says it encodes as package encoding/json does; see json.go.
+	encoded *types.Var
 	// prints is the writer parameter of a trusted function that formats,
 	// to which it writes, with one call of Write, what printsAs, a function
 	// of its package, returns for its other arguments; see prints.go.

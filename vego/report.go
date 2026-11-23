@@ -70,6 +70,11 @@ func TrustReport(usages []*Usage, dir string) string {
 					"that fmt runs, while the call lasts and on the goroutine that called it, keeps none of the values, and builds from them "+
 					"at most 4096 bytes more than fmt prints for them, apart from what a logger adds from its own settings\n", strings.Join(use.Formats, ", "))
 			}
+			if len(use.Encodes) > 0 {
+				fmt.Fprintf(&b, "    encodes as package encoding/json does: %s; a claim that it runs no method of what it is handed but those of time.Time, "+
+					"json.RawMessage, and json.Number that encoding/json runs, while the call lasts and on the goroutine that called it, keeps nothing "+
+					"of it, and allocates within the bound vego proves at each call\n", strings.Join(use.Encodes, ", "))
+			}
 			for _, callback := range use.Callbacks {
 				fmt.Fprintf(&b, "    calls %s\n", callback)
 			}

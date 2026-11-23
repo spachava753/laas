@@ -154,6 +154,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		u.reach(operands)
 		formatted := v.checkFormattedAlloc(st, guard, call, fn, args, v.held)
 		v.checkFormatRuns(call, v.formatRuns(call, fn), st, guard)
+		v.checkEncodedAlloc(st, guard, call, fn, args, v.held)
 		made.pure = v.callMemoryFree(fn, callee.Type().(*types.Signature))
 		results = v.invoke(call, fn, args, st, guard)
 		// What Sprintf returns is what fmt wrote, which is no longer than
@@ -239,6 +240,9 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func, st *sta
 				v.checkFormattable(arg, fn.obj.Name(), false)
 			}
 		}
+		// What a parameter under encodes is given is checked by the walk
+		// of encoding/json; see json.go.
+		v.checkEncodable(call, fn)
 	}
 	return fn, false
 }
@@ -349,7 +353,7 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 		}
 		// What a parameter under formats is given is checked by the rule
 		// for formatting; see checkFormatted.
-		if fn.runs.get(param) || fn.keeps.get(param) != nil || (param == fn.formatted && param != nil) || !holdsCode(t, map[types.Type]bool{}) {
+		if fn.runs.get(param) || fn.keeps.get(param) != nil || (param == fn.formatted && param != nil) || (param == fn.encoded && param != nil) || !holdsCode(t, map[types.Type]bool{}) {
 			continue
 		}
 		// Known origin of either kind makes every method harmless.

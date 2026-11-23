@@ -1,0 +1,77 @@
+version: 1
+
+# The entries of encoding/json (F29). Each claim holds of every build of
+# encoding/json a program can be built with: Go 1.26 and Go 1.27, each with
+# and without GOEXPERIMENT=jsonv2, which replaces the package's code by
+# encoding/json/v2 (the default in Go 1.27). TestJSONEntries holds them
+# against the two builds of the toolchain it runs on, VEGO_GO126=1 adds
+# Go 1.26.6 both ways, and TestEncoding386 (VEGO_386=1) runs the bound at its
+# edge on a 32-bit target.
+
+trusted:
+  encoding/json.Marshal:
+    reason: >-
+      "Marshal returns the JSON encoding of v. Marshal traverses the value v
+      recursively." (Go 1.26.6). encodes claims what vego checks of v at each
+      call in place of runs: the static type of what is handed over is
+      walked as encoding/json encodes it (json.go), every type whose value or
+      pointer has MarshalJSON, MarshalJSONTo, AppendText, MarshalText, or,
+      under omitzero, IsZero is refused but time.Time, json.RawMessage, and
+      json.Number, whose methods were read in the four builds and write
+      nothing, and the type may hold no interface value, so no method of the
+      project runs; encoding/json uses reflection on v only to read it and
+      to call those methods; what it builds is bounded by the clauses vego
+      generates for the type and proves at the call, from the weights of
+      jsonWeights (an escaped byte of a string is six bytes, under the
+      option string seven, a float at most 25), each held against the four
+      builds and each made one smaller shown to fail by TestJSONEntries, and
+      from the growth of v1's bytes.Buffer (3 times and a page within
+      MaxAlloc, 5 times within MaxInt, as for the Buffer's own entries),
+      v2's append-grown buffer, and the slices both make to sort a map's
+      keys (at most 10 words, the key, and the value for each entry), run at
+      the 32-bit edge by TestEncoding386. Read from source: the result on success
+      is a new slice (v1 copies the buffer; v2 clones it), and nil on an
+      error. The errors are *UnsupportedValueError (NaN and infinities),
+      *MarshalerError over the error of a leaf's method (time.Time outside
+      the years 0 to 9999, a RawMessage that is not valid JSON, read from
+      time and json), and in v2 *json.SemanticError and
+      *jsontext.SyntacticError; their Error methods build a string from
+      their fields and write nothing, and none has an Is method. On v1 the
+      Value of an UnsupportedValueError is the reflect.Value of the float it
+      met, which refers to that float in v's memory and can be set through
+      reflection; no formula reads a float, and verified code cannot call
+      reflect on what an error holds (it cannot assert an error to its
+      type), so nothing vego proves can be changed through it; on v2 it is
+      a copy or invalid. TestJSONEntries walks every error tree by
+      reflection and fails on any other reference into what v reaches, and
+      on a dynamic type outside the list of types read.
+    encodes: [v]
+    vouches: [result2]
+    modifies: []
+    ensures:
+      - "result2 = nil -> fresh(result1)"
+      - "result2 != nil -> result1 = nil"
+
+  encoding/json.MarshalIndent:
+    reason: >-
+      "MarshalIndent is like Marshal but applies Indent to format the
+      output. Each JSON element in the output will begin on a new line
+      beginning with prefix followed by one or more copies of indent
+      according to the indentation nesting." (Go 1.26.6). It calls Marshal,
+      whose entry says what is claimed of v, and indents what it returns
+      into a new slice (v1: make of twice its length, then appends; v2:
+      appendIndent into nil). Each byte of the compact output becomes at
+      most itself, a space after a colon, a newline, the prefix, and the
+      indent once for each level of nesting, which vego bounds by the
+      deepest nesting of the type, or 10000, the deepest every build
+      accepts, under a json.RawMessage; the generated clause multiplies the
+      bound of Marshal by 3 + |prefix| + depth * |indent|, held by
+      TestJSONEntries with three prefixes and indents and run at the 32-bit
+      edge by TestEncoding386. The errors are those of Marshal, and in v1 a
+      *SyntaxError of Indent, which cannot happen on what Marshal returns.
+    encodes: [v]
+    vouches: [result2]
+    modifies: []
+    ensures:
+      - "result2 = nil -> fresh(result1)"
+      - "result2 != nil -> result1 = nil"

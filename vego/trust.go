@@ -57,6 +57,9 @@ type trustEntry struct {
 	// does: one of type any or ...any whose values it formats, and at most
 	// one string that it uses as the format; see formatting.go.
 	formats []trustFormula
+	// encodes names the parameter of type any whose value the function
+	// encodes as package encoding/json does; see json.go.
+	encodes []trustFormula
 	// calls gives function parameters a contract: how the function calls
 	// what it is given there.
 	calls []trustCall
@@ -308,6 +311,10 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			for _, item := range scalars("formats", value) {
 				entry.formats = append(entry.formats, trustFormula{text: item.Value, line: item.Line, col: item.Column})
 			}
+		case "encodes":
+			for _, item := range scalars("encodes", value) {
+				entry.encodes = append(entry.encodes, trustFormula{text: item.Value, line: item.Line, col: item.Column})
+			}
 		case "calls":
 			f.addCalls(entry, value, formulas)
 		case "keeps":
@@ -323,7 +330,7 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			}
 			entry.receiver = trustFormula{text: value.Value, line: value.Line, col: value.Column}
 		default:
-			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, receiver, requires, ensures, modifies, stores, runs, keeps, asserts, vouches, formats, prints, or calls",
+			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, receiver, requires, ensures, modifies, stores, runs, keeps, asserts, vouches, formats, encodes, prints, or calls",
 				field.Value, entry.key)
 		}
 	}
@@ -493,6 +500,9 @@ type EntryUse struct {
 	// Formats names the parameters the function formats as package fmt
 	// does.
 	Formats []string
+	// Encodes names the parameter the function encodes as package
+	// encoding/json does.
+	Encodes []string
 	// Callbacks describes each function parameter given a contract under
 	// calls, as in "f(i) when: 0 <= i; i < n".
 	Callbacks []string
@@ -816,6 +826,7 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 		}
 	}
 	pv.readFormats(fn, entry)
+	pv.readEncodes(fn, entry)
 	pv.readPrints(fn, entry)
 	pv.readKeeps(fn, entry)
 	pv.checkAsserts(fn, entry)
@@ -1167,7 +1178,10 @@ func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 		return use.Key == entry.key && use.File == entry.file.path
 	})
 	if index < 0 {
-		var runs, vouches, formats []string
+		var runs, vouches, formats, encodes []string
+		for _, item := range entry.encodes {
+			encodes = append(encodes, item.text)
+		}
 		for _, item := range entry.runs {
 			runs = append(runs, item.text)
 		}
@@ -1212,7 +1226,7 @@ func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 		}
 		pv.usage.Entries = append(pv.usage.Entries, &EntryUse{
 			Key: entry.key, Reason: entry.reason, Shipped: entry.file.shipped,
-			File: entry.file.path, Line: entry.line, Runs: runs, Keeps: keepsDescribed(entry), Asserts: assertsDescribed(entry), Vouches: vouches, Formats: formats, Callbacks: callbacks,
+			File: entry.file.path, Line: entry.line, Runs: runs, Keeps: keepsDescribed(entry), Asserts: assertsDescribed(entry), Vouches: vouches, Formats: formats, Encodes: encodes, Callbacks: callbacks,
 			Every: every, Relied: []string{pv.pass.Pkg.Path()}, Fingerprint: entry.fingerprint(), States: states,
 		})
 		index = len(pv.usage.Entries) - 1
@@ -1259,7 +1273,7 @@ func nameUnnamed(fn *funcInfo, entry *trustEntry) {
 		fn.paramNames[name] = p
 	}
 	var texts []string
-	for _, list := range [][]trustFormula{entry.requires, entry.ensures, entry.modifies, entry.runs, entry.vouches, entry.formats, entry.stores} {
+	for _, list := range [][]trustFormula{entry.requires, entry.ensures, entry.modifies, entry.runs, entry.vouches, entry.formats, entry.encodes, entry.stores} {
 		for _, f := range list {
 			texts = append(texts, f.text)
 		}

@@ -2186,6 +2186,12 @@ trusted:
     modifies: []
     ensures: ["result = x"]
 
+  jsonenc.ownMarshal:
+    reason: A wrapper of json.Marshal; only shipped entries may list encodes.
+    encodes: [v]
+    vouches: [result2]
+    modifies: []
+
 # States of interfaces of another module, and contracts that speak of them.
 state:
   ifacestatelib.Conn:

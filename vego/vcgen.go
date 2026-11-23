@@ -949,6 +949,11 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 	if fn.calls.len() > 0 {
 		v.unsupported(s.Pos(), fmt.Sprintf("deferring a call of %s, which calls a function it is given, is not supported yet", callee.Name()))
 	}
+	if fn.encoded != nil {
+		// What it returns would be lost, and what it encodes is checked
+		// where it is called.
+		v.unsupported(s.Pos(), fmt.Sprintf("deferring a call of %s is not supported: what it returns would be lost, and what it encodes is checked where it is called", callee.Name()))
+	}
 	// The deferred call itself runs later, so nothing here comes before it.
 	var args map[*types.Var]value
 	var runs []fmtRun

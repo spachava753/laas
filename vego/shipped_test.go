@@ -2019,6 +2019,12 @@ func checkShipped(t *testing.T, files bool, run func(key string) bool) {
 				case slices.Contains([]string{"io.NopCloser", "io.LimitReader", "io.TeeReader", "io.MultiReader", "io.MultiWriter"}, key):
 					checkIOEntries(t, pv, pkg, key)
 					return
+				case slices.Contains(jsonEntries, key):
+					// Held against every build of encoding/json by
+					// TestJSONEntries and TestJSON386; here the entry is read
+					// as vego reads it at a call.
+					checkJSONEntry(t, pv, pkg, key)
+					return
 				}
 				callee, ok := pkg.Scope().Lookup(name).(*types.Func)
 				if receiver, method, isMethod := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(name, "("), "*"), ")."); isMethod {
