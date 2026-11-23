@@ -104,6 +104,8 @@ buffers	buffers.LengthOfInt	1	111	0
 buffers	buffers.Line	20	79441	0
 buffers	buffers.LineUnlisted	7	12399	0
 buffers	buffers.Lines	31	258339	0
+buffers	buffers.LoopInto	26	175885	0
+buffers	buffers.LoopKeepsBytes	33	230254	0
 buffers	buffers.NewPrinter	11	15172	0
 buffers	buffers.NilBuffer	10	15056	0
 buffers	buffers.PrintLoopSlice	24	126871	0

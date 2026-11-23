@@ -156,3 +156,35 @@ func ProjectModifies() {
 	var b strings.Builder
 	plog.Counted(&b, "x") // want `prints is claimed only of a function that writes nothing but through its writer`
 }
+
+// LoopInto formats into a Buffer it is handed, in a loop: the loop writes
+// what the Buffer's own Write writes, which Modifies b covers.
+//
+// @Requires b != nil And |b| <= 1000000 And 0 <= k And k <= 1000
+// @Modifies b
+// @Ensures True
+func LoopInto(b *bytes.Buffer, k int) {
+	// @Invariant 0 <= i And i <= k And |b| <= |old(b)| + 10000 * i
+	// @Variant k - i
+	for i := 0; i < k; i++ {
+		fmt.Fprintf(b, "%d\n", i)
+	}
+}
+
+// LoopKeepsBytes claims that formatting into a Buffer in a loop keeps what
+// Bytes returned before it. A Buffer that has been read slides its unread
+// bytes to the front when a write does not fit after them, so it may not.
+//
+// @Requires b != nil And 0 < |b| And |b| <= 1000 And 0 <= k And k <= 10
+// @Modifies b
+// @Ensures r
+func LoopKeepsBytes(b *bytes.Buffer, k int) (r bool) {
+	p := b.Bytes()
+	first := p[0]
+	// @Invariant 0 <= i And i <= k And |b| <= |old(b)| + 10000 * i
+	// @Variant k - i
+	for i := 0; i < k; i++ {
+		fmt.Fprint(b, "x")
+	}
+	return p[0] == first // want `postcondition may not hold: r`
+}

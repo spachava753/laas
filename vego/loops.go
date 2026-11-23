@@ -268,6 +268,29 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 	if callee != nil {
 		sig = callee.Type().(*types.Signature)
 	}
+	// A call into a buffer or a Writer formatted into writes what the
+	// writer's own Write lists, of the writer as it is; see prints.go.
+	if writer, write := v.printedInto(call, fn); writer != nil {
+		fn, sig = write, write.obj.Type().(*types.Signature)
+		for _, m := range fn.modifies {
+			form, _, err := v.locateTarget(fn, m, nil, nil, nil)
+			if err != nil {
+				v.misread(m.clause, err)
+			}
+			at := site{cells: form.cells, elem: form.elem, mapType: form.mapType, lo: form.lo, hi: form.hi}
+			if form.owner {
+				eff.sites = append(eff.sites, v.ownedSites(form.typ, map[types.Type]bool{})...)
+			}
+			if form.direct && fn.paramNames[m.name] == fn.params[0] {
+				at.root = v.holder(writer, form.param.Type())
+				if form.owner && at.root != nil && at.lo == 0 {
+					at.owner = form.typ
+				}
+			}
+			eff.sites = append(eff.sites, at)
+		}
+		return
+	}
 	argument := func(param *types.Var) ast.Expr {
 		if param == sig.Recv() || (param != nil && param == fn.receiver) {
 			sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
