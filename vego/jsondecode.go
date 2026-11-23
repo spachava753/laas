@@ -375,6 +375,26 @@ func (v *fnVerifier) checkNilTargets(st *state, guard []*logic.Term, call *ast.C
 // refused: a decoder over a reader without a limit reads without one, and
 // one from elsewhere may hold what it read before.
 
+// progresses reports whether an expression is a field that a progresses
+// declaration names, as the Body of a request: a reader that the server
+// made, whose Read with a buffer that is not empty returns bytes or an
+// error, which What a proof assumes says.
+func (v *fnVerifier) progresses(e ast.Expr) bool {
+	sel, ok := ast.Unparen(e).(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	selection := v.info.Selections[sel]
+	if selection == nil || selection.Kind() != types.FieldVal || len(selection.Index()) != 1 {
+		return false
+	}
+	object := selection.Recv()
+	if target, ok := pointee(object); ok {
+		object = target
+	}
+	return progressOf(object, selection.Index()[0]) != nil
+}
+
 // jsonDecodeKey and jsonNewDecoderKey are the functions of the route.
 const (
 	jsonDecodeKey     = "(*encoding/json.Decoder).Decode"
@@ -501,7 +521,7 @@ func (v *fnVerifier) callDecoder(call, limit *ast.CallExpr, st *state, guard []*
 		// The decoder calls Read again until it returns bytes or an error;
 		// in v1 a Read that returns neither for ever keeps it from
 		// returning, so its contract must rule that out.
-		if len(got) == 2 {
+		if len(got) == 2 && !v.progresses(r) {
 			v.check(st, guard, logic.Or(logic.Lt(logic.IntLit(0), got[0][0]), logic.Not(logic.IsNil(got[1][0]))), call.Pos(),
 				"the decoder calls %s.Read until it returns bytes or an error, and the contract of Read allows it to return neither, so the decoder may never return; "+
 					"read the body into a buffer with a bounded loop and decode it with json.Unmarshal", types.ExprString(r))

@@ -261,6 +261,12 @@ func hiddenOf(t types.Type, index int) *hiddenDecl {
 // not store into it, and what the value in it holds writes nothing else of
 // what the struct reaches without going through an interface value but its
 // hidden fields.
+func progressOf(t types.Type, index int) *hiddenDecl {
+	return fieldDeclOf(t, index, func(f *trustFile) map[string]hiddenDecl { return f.progresses })
+}
+
+// notWrittenOf finds the notWrittenBy declaration of a field of a struct
+// type, or nil.
 func notWrittenOf(t types.Type, index int) *hiddenDecl {
 	return fieldDeclOf(t, index, func(f *trustFile) map[string]hiddenDecl { return f.notWritten })
 }
@@ -448,7 +454,7 @@ func (v *fnVerifier) checkNotWritten(body ast.Node) {
 	if body == nil {
 		return
 	}
-	field := func(sel *ast.SelectorExpr) *hiddenDecl {
+	fieldOf := func(sel *ast.SelectorExpr, decl func(types.Type, int) *hiddenDecl) *hiddenDecl {
 		selection := v.info.Selections[sel]
 		if selection == nil || selection.Kind() != types.FieldVal {
 			return nil
@@ -466,8 +472,9 @@ func (v *fnVerifier) checkNotWritten(body ast.Node) {
 		if target, ok := pointee(t); ok {
 			object = target
 		}
-		return notWrittenOf(object, index[len(index)-1])
+		return decl(object, index[len(index)-1])
 	}
+	field := func(sel *ast.SelectorExpr) *hiddenDecl { return fieldOf(sel, notWrittenOf) }
 	local := func(e ast.Expr) bool {
 		id, ok := ast.Unparen(e).(*ast.Ident)
 		if !ok {
@@ -490,6 +497,10 @@ func (v *fnVerifier) checkNotWritten(body ast.Node) {
 					rhs = n.Rhs[i]
 				}
 				if sel, ok := ast.Unparen(lhs).(*ast.SelectorExpr); ok {
+					if d := fieldOf(sel, progressOf); d != nil {
+						v.unsupported(lhs.Pos(), fmt.Sprintf("%s is stored into, and the progresses declaration of %s.%s in the shipped files says that what it holds is "+
+							"a reader that the server made, whose Read makes progress; keep the request's own body", types.ExprString(lhs), d.pkg, d.typ))
+					}
 					if d := field(sel); d != nil && (rhs == nil || !v.newAtStore(rhs)) {
 						v.unsupported(lhs.Pos(), fmt.Sprintf("%s is stored into, and %s; store a value made here, as in %s = &myBody{...}, whose methods write only what it makes",
 							types.ExprString(lhs), notWrittenReason(d), types.ExprString(lhs)))
@@ -523,6 +534,11 @@ func (v *fnVerifier) checkNotWritten(body ast.Node) {
 					if id, ok := pair.Key.(*ast.Ident); ok {
 						index = slices.IndexFunc(slices.Collect(u.Fields()), func(f *types.Var) bool { return f.Name() == id.Name })
 					}
+				}
+				if d := progressOf(t, index); d != nil && !v.isNil(value) {
+					v.unsupported(element.Pos(), fmt.Sprintf("the field %s of the %s.%s made at %s is set, and the progresses declaration of %s.%s in the shipped files says "+
+						"that what it holds is a reader that the server made, whose Read makes progress; a request verified code makes has no body",
+						u.Field(index).Name(), d.pkg, d.typ, v.placeOf(n.Pos()), d.pkg, d.typ))
 				}
 				if d := notWrittenOf(t, index); d != nil && !v.newAtStore(value) && !v.isNil(value) {
 					v.unsupported(element.Pos(), fmt.Sprintf("the field %s of the %s.%s made at %s is set, and %s; set it to a value made here, as &myBody{...}, whose methods write only what it makes",

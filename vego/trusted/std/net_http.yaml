@@ -59,6 +59,32 @@ notWrittenBy:
       chunked and not, decompressed by the transport, read to the end and
       closed early, and fails on a body that writes the response.
 
+# progresses: for each struct, fields whose value, a reader that code which
+# is not verified made, returns bytes or an error from every Read with a
+# buffer that is not empty, so that a loop of reads that stops at an error
+# ends; verified code does not store into such a field (jsondecode.go,
+# F29).
+progresses:
+  net/http.Request:
+    fields: [Body]
+    reason: >-
+      Read from the source of Go 1.26.6 and 1.27.3. The server gives a
+      handler http.NoBody for a request without a body, whose Read returns
+      0 and io.EOF. Over HTTP/1, the body (body in transfer.go) reads from
+      an io.LimitedReader or a chunked reader over the connection's
+      bufio.Reader, and bufio.Reader.Read with a buffer that is not empty
+      returns bytes, an error, or io.ErrNoProgress after 100 reads of the
+      connection that return nothing; a net.Conn returns bytes or an error.
+      Over HTTP/2, the body (requestBody) reads from a pipe that waits until
+      data arrives or the stream ends with an error. A run cannot show that
+      no connection ever makes a Read return nothing and no error;
+      TestRequestBodyProgress holds it on real HTTP/1 and HTTP/2 servers
+      with an empty body, a chunked body written a byte at a time with
+      pauses, Expect: 100-continue, and a client that stops early.
+      Middleware that is not verified and replaces the body with a reader
+      that can return nothing for ever breaks it, which What a proof
+      assumes says.
+
 trusted:
   (*net/http.Request).PathValue:
     reason: >-

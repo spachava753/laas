@@ -137,6 +137,11 @@ type trustFile struct {
 	// store into, whose value writes nothing else of the struct; see
 	// scoped.go.
 	notWritten map[string]hiddenDecl
+	// progresses holds fields of a struct whose value, a reader that code
+	// which is not verified made, returns bytes or an error from every Read
+	// with a buffer that is not empty; verified code does not store into
+	// them (jsondecode.go).
+	progresses map[string]hiddenDecl
 	// problems are the defects of the file itself, by line.
 	problems []trustProblem
 }
@@ -154,7 +159,7 @@ func (f *trustFile) problem(line int, format string, args ...any) {
 // understand is recorded as a problem rather than skipped, so that a
 // misspelt field cannot silently drop part of a contract.
 func parseTrustFile(path string, content []byte, shipped bool) *trustFile {
-	file := &trustFile{path: path, content: content, shipped: shipped, entries: map[string]*trustEntry{}, states: map[string][]stateDecl{}, owns: map[string]ownsDecl{}, scoped: map[string]scopedDecl{}, hidden: map[string]hiddenDecl{}, notWritten: map[string]hiddenDecl{}}
+	file := &trustFile{path: path, content: content, shipped: shipped, entries: map[string]*trustEntry{}, states: map[string][]stateDecl{}, owns: map[string]ownsDecl{}, scoped: map[string]scopedDecl{}, hidden: map[string]hiddenDecl{}, notWritten: map[string]hiddenDecl{}, progresses: map[string]hiddenDecl{}}
 	var document, second yaml.Node
 	decoder := yaml.NewDecoder(bytes.NewReader(content))
 	if err := decoder.Decode(&document); err != nil && !errors.Is(err, io.EOF) {
@@ -202,11 +207,13 @@ func parseTrustFile(path string, content []byte, shipped bool) *trustFile {
 			file.addFields("hidden", file.hidden, value)
 		case "notWrittenBy":
 			file.addFields("notWrittenBy", file.notWritten, value)
+		case "progresses":
+			file.addFields("progresses", file.progresses, value)
 		default:
 			// A project file cannot declare owns, so it is not offered one.
 			expected := "version, trusted, or state"
 			if file.shipped {
-				expected = "version, trusted, state, owns, scoped, hidden, or notWrittenBy"
+				expected = "version, trusted, state, owns, scoped, hidden, notWrittenBy, or progresses"
 			}
 			file.problem(key.Line, "unknown key %q; expected %s", key.Value, expected)
 		}

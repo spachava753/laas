@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"go/types"
 	"io"
@@ -20,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/spachava753/laas/vego/internal/logic"
@@ -237,7 +239,7 @@ type httpRound struct {
 	// that wrote less than they were handed, which the second clause of
 	// its ensures is about.
 	calls, hidden, short int
-	readHidden    bool
+	readHidden           bool
 }
 
 func (r *httpRound) fail(format string, args ...any) {
@@ -837,5 +839,85 @@ func TestResponseBody(t *testing.T) {
 	}
 	if _, err := bodyWrites(resp, true, func() { resp.Request.URL.Path += "y" }); err == nil {
 		t.Errorf("a body that writes the request's URL passes the check")
+	}
+}
+
+// TestRequestBodyProgress holds the progresses declaration of the body of
+// a request (net_http.yaml, F29): on real HTTP/1 and HTTP/2 servers, every
+// Read of the body a handler is given, with a buffer that is not empty,
+// returns bytes or an error. The bodies: none, a short one, a chunked one
+// written a byte at a time with pauses, one sent after Expect:
+// 100-continue, and one whose client stops sending half-way.
+func TestRequestBodyProgress(t *testing.T) {
+	parallel(t)
+	var mu sync.Mutex
+	reads, stalls := 0, 0
+	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		for i := 1; ; i++ {
+			p := make([]byte, 1+i%7)
+			n, err := req.Body.Read(p)
+			mu.Lock()
+			reads++
+			if n == 0 && err == nil {
+				stalls++
+			}
+			mu.Unlock()
+			if err != nil {
+				break
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+	for _, two := range []bool{false, true} {
+		server := httptest.NewUnstartedServer(handler)
+		server.Config.ErrorLog = log.New(io.Discard, "", 0)
+		if two {
+			server.EnableHTTP2 = true
+			server.StartTLS()
+		} else {
+			server.Start()
+		}
+		client := server.Client()
+		send := func(body io.Reader, expect bool) {
+			req, err := http.NewRequest(http.MethodPost, server.URL, body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if expect {
+				req.Header.Set("Expect", "100-continue")
+			}
+			if resp, err := client.Do(req); err == nil {
+				io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+			}
+		}
+		send(nil, false)
+		send(strings.NewReader(`{"a":1}`), false)
+		send(strings.NewReader(strings.Repeat("x", 5000)), true)
+		// A byte at a time, with pauses, and no length, so chunked.
+		slow, w := io.Pipe()
+		go func() {
+			for range 20 {
+				w.Write([]byte("y"))
+				time.Sleep(time.Millisecond)
+			}
+			w.Close()
+		}()
+		send(slow, false)
+		// A client that stops sending half-way.
+		broken, bw := io.Pipe()
+		go func() {
+			bw.Write([]byte("half"))
+			time.Sleep(5 * time.Millisecond)
+			bw.CloseWithError(errors.New("the client stops"))
+		}()
+		send(broken, false)
+		server.Close()
+	}
+	if reads == 0 {
+		t.Fatal("no Read of a body ran")
+	}
+	if stalls > 0 {
+		t.Errorf("%d of %d reads of a request's body returned no bytes and no error", stalls, reads)
 	}
 }

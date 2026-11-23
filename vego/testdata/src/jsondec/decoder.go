@@ -11,18 +11,18 @@ import (
 // most n bytes. Its error may be the reader's own, so it is not vouched
 // for. The decoder calls Read until it returns bytes or an error, so a Read
 // whose contract allows neither is refused: in v1 it would loop for ever.
-// The contract of io.Reader's Read allows it.
+// The contract of io.Reader's Read allows it; the body of a request, which
+// the server makes, returns bytes or an error, as the progresses
+// declaration in the shipped files says.
 
-// Create decodes the body of a request, at most 1 MB of it: refused, since
-// the contract of the body's Read allows it to return no bytes and no
-// error.
+// Create decodes the body of a request, at most 1 MB of it.
 //
 // @Requires w != nil And req != nil And req.Body != nil
 // @Modifies w, req.Body
 // @Ensures True
 func Create(w http.ResponseWriter, req *http.Request) {
 	var rt Req
-	if err := json.NewDecoder(io.LimitReader(req.Body, 1<<20)).Decode(&rt); err != nil { // want `the decoder calls req\.Body\.Read until it returns bytes or an error, and the contract of Read allows it to return neither, so the decoder may never return; read the body into a buffer with a bounded lo`
+	if err := json.NewDecoder(io.LimitReader(req.Body, 1<<20)).Decode(&rt); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
@@ -36,7 +36,7 @@ func Create(w http.ResponseWriter, req *http.Request) {
 // @Ensures True
 func ErrText(w http.ResponseWriter, req *http.Request) {
 	var rt Req
-	if err := json.NewDecoder(io.LimitReader(req.Body, 1<<20)).Decode(&rt); err != nil { // want `the decoder calls req\.Body\.Read until it returns bytes or an error, and the contract of Read allows it to return neither, so the decoder may never return; read the body into a buffer with a bounded lo`
+	if err := json.NewDecoder(io.LimitReader(req.Body, 1<<20)).Decode(&rt); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest) // want `cannot verify ErrText: calling Error on err would run the methods of an error whose origin is not known; only an error made by errors\.New or fmt\.Errorf, here or in a verified function, or one that a c`
 	}
 }
@@ -122,4 +122,22 @@ func ValueRecvNilReader(p *VR) (err error) {
 func ValueRecvReader(p *VR) (err error) {
 	var rt Req
 	return json.NewDecoder(io.LimitReader(p, 100)).Decode(&rt)
+}
+
+// SwapBody replaces the body of a request, which is refused: what the
+// decoder reads must be the server's.
+//
+// @Requires req != nil
+// @Modifies req
+// @Ensures True
+func SwapBody(req *http.Request, r io.ReadCloser) {
+	req.Body = r // want `cannot verify SwapBody: req\.Body is stored into, and the progresses declaration of net/http\.Request in the shipped files says that what it holds is a reader that the server made, whose Read makes prog`
+}
+
+// MakeRequest makes a request with a body of its own, refused the same way.
+//
+// @Requires r != nil
+// @Ensures True
+func MakeRequest(r io.ReadCloser) (req *http.Request) {
+	return &http.Request{Body: r} // want `cannot verify MakeRequest: the field Body of the net/http\.Request made at decoder\.go:142:10 is set, and the progresses declaration of net/http\.Request in the shipped files says that what it holds is a`
 }
