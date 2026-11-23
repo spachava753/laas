@@ -1706,6 +1706,8 @@ guide	(*bytes.Buffer).Reset	1	3390	0
 guide	(*bytes.Buffer).Write	4	17003	0
 guide	(*bytes.Buffer).WriteByte	4	12115	0
 guide	(*bytes.Buffer).WriteString	4	14913	0
+guide	(*encoding/json.Decoder).Decode	1	1782	0
+guide	(*encoding/json.Encoder).Encode	3	16623	0
 guide	(*guide.Account).Deposit	38	65173	0
 guide	(*guide.Account).DepositLocked	21	32992	0
 guide	(*guide.Account).DepositSum	40	68132	0
@@ -1776,6 +1778,10 @@ guide	bufio.NewWriter	1	9378	0
 guide	cmp.Compare	1	482	0
 guide	context.CancelFunc	3	255	0
 guide	context.Context.Err	9	20720	0
+guide	encoding/json.Decode	18	4711962	3
+guide	encoding/json.Marshal	3	17316	0
+guide	encoding/json.MarshalIndent	3	22551	0
+guide	encoding/json.Unmarshal	29	3334322	2
 guide	fmt.Fprintf	5	14186	0
 guide	fmt.Fprintln	5	11289	0
 guide	fmt.Println	3	11344	0
@@ -1840,6 +1846,10 @@ guide	guide.CountThenPop	15	124606	1
 guide	guide.CountVotes	5	16269	0
 guide	guide.Counted	1	46	0
 guide	guide.CountingPricer	7	2405	0
+guide	guide.CreateRow	53	1070003	13
+guide	guide.CreateRowErr	34	346888	4
+guide	guide.CreateRowNoLimit	2	1524	0
+guide	guide.CreateRowText	116	2430654	22
 guide	guide.Different	12	14231	0
 guide	guide.Discard	7	5800	0
 guide	guide.Display	1	497	0
@@ -1856,6 +1866,8 @@ guide	guide.EmptyOf	6	1752	0
 guide	guide.EmptyRange	2	2180	0
 guide	guide.EmptyRangeFull	2	1029	0
 guide	guide.EmptyRangeTrue	2	2192	0
+guide	guide.Entry	1	439	0
+guide	guide.EntryJSON	37	75432	0
 guide	guide.Event	3	558	0
 guide	guide.Exact.Get	3	776	0
 guide	guide.Fails	1	46	0
@@ -1874,6 +1886,7 @@ guide	guide.Forgot	6	11929	0
 guide	guide.FormatToBuffer	11	43815	0
 guide	guide.Free	0	0	0
 guide	guide.Fresh	7	4897	0
+guide	guide.FromReader	45	496911	10
 guide	guide.Get	3	2025	0
 guide	guide.GetTask	61	1143698	12
 guide	guide.Greet	7	22078	0
@@ -1886,6 +1899,7 @@ guide	guide.HasName	4	26189	0
 guide	guide.HasRole	5	43611	2
 guide	guide.Head	14	12238	0
 guide	guide.HeadWeak	12	22874	0
+guide	guide.HeldEncoder	2	4975	0
 guide	guide.Hex	4	5766	0
 guide	guide.Hit	9	14342	0
 guide	guide.HitTwice	11	41135	0
@@ -1910,11 +1924,15 @@ guide	guide.Last	1	565	0
 guide	guide.LastZero	7	231444	2
 guide	guide.Later	6	1716	0
 guide	guide.Lend	7	5751	0
+guide	guide.LevelJSON	1	111	0
 guide	guide.Limit	3	19467	0
 guide	guide.LineCounts.Current	3	1854	0
 guide	guide.LinesTotal	15	27473	0
 guide	guide.ListsSizes	0	0	0
 guide	guide.Load	44	2094455	2
+guide	guide.LoadAll	17	455488	2
+guide	guide.LoadCache	2	895	0
+guide	guide.LoadRows	32	485074	2
 guide	guide.LoadSettings	29	74941	0
 guide	guide.LoadVouched	33	26532	0
 guide	guide.LoadWrapped	10	6184	0
@@ -1936,6 +1954,7 @@ guide	guide.MakeSink	1	46	0
 guide	guide.Mapper	3	1546	0
 guide	guide.Max	7	784	0
 guide	guide.MaxWrong	5	607	0
+guide	guide.MemoJSON	40	77962	0
 guide	guide.MergeEach	8	15405	0
 guide	guide.Mid	9	4455	0
 guide	guide.MidWrong	7	3245	0
@@ -1961,6 +1980,8 @@ guide	guide.Pages	4	1561	0
 guide	guide.PagesChecked	3	283	0
 guide	guide.Pair	6	3502	0
 guide	guide.ParsePort	31	68776	0
+guide	guide.ParseProfile	38	120303	0
+guide	guide.ParseProfileUnchecked	21	62948	0
 guide	guide.ParseQuantity	34	152161	0
 guide	guide.Peek	16	12777	0
 guide	guide.PeekLabelled	20	37679	0
@@ -1977,6 +1998,7 @@ guide	guide.Prefixed	15	46747	0
 guide	guide.Pricer.Price	3	3758	0
 guide	guide.PrintLines	127	1838204	14
 guide	guide.Printer	1	46	0
+guide	guide.Profile	1	963	0
 guide	guide.Pull	6	2552	0
 guide	guide.Pulled	6	2497	0
 guide	guide.Push	14	9036	0
@@ -1989,7 +2011,7 @@ guide	guide.RatedPricer	6	2406	0
 guide	guide.ReadAll	14	140073	0
 guide	guide.ReadAllParts	27	100930	0
 guide	guide.ReadAndBump	6	1118	0
-guide	guide.ReadConfig	193	544318	0
+guide	guide.ReadConfig	193	528449	0
 guide	guide.ReadLines	135	1934035	14
 guide	guide.ReadLogged	87	297639	12
 guide	guide.ReadOnce	48	1174902	2
@@ -1999,17 +2021,21 @@ guide	guide.Recorder.Record	4	3654	0
 guide	guide.Recorders.New	3	7675	0
 guide	guide.Refill	12	23954	0
 guide	guide.RefillFirst	17	37488	0
+guide	guide.RefillMemo	21	145778	4
 guide	guide.RefillOrdered	17	38366	0
 guide	guide.Remove	19	24370	0
 guide	guide.RemoveIfPresent	52	92589	0
 guide	guide.Replace	4	5505	0
 guide	guide.ReplaceBody	0	0	0
 guide	guide.Report	3	589	0
+guide	guide.ReportJSON	39	374662	3
 guide	guide.ReportOnce	36	121702	0
 guide	guide.Reserve	13	1620	0
 guide	guide.Reset	12	9299	0
 guide	guide.ResetServed	1	46	0
 guide	guide.Rounds	12	8683	0
+guide	guide.Row	1	3115	0
+guide	guide.RowJSON	42	1075617	0
 guide	guide.RuneString	3	5162	0
 guide	guide.Runs	35	51336	0
 guide	guide.SafeOnly	3	833	0
@@ -2019,6 +2045,7 @@ guide	guide.SamePricer	1	744	0
 guide	guide.Save	13	29339	0
 guide	guide.SaveUnlisted	13	31363	0
 guide	guide.SearchLocked	23	40864	0
+guide	guide.ServeRow	43	552803	10
 guide	guide.Served	1	46	0
 guide	guide.Service	1	917	0
 guide	guide.SetMax	7	5364	0
@@ -2094,6 +2121,7 @@ guide	guide.WriteBuffered	93	1119804	6
 guide	guide.WriteBufferedUnlisted	24	266133	7
 guide	guide.WriteCount	117	1432441	10
 guide	guide.WriteCountFormatted	117	1432441	10
+guide	guide.WriteEntries	42	470728	2
 guide	guide.WriteFailure	6	40136	0
 guide	guide.WriteFailureBuffered	57	420012	0
 guide	guide.WriteItems	16	84401	0
@@ -2124,6 +2152,7 @@ guide	guide.tell	1	70	0
 guide	guide.value	3	869	0
 guide	guide.zero	9	19438	0
 guide	io.Closer.Close	5	11733	0
+guide	io.LimitReader	1	3020	0
 guide	io.MultiReader	1	4321	0
 guide	io.NopCloser	1	3411	0
 guide	io.Reader.Read	6	1014374	1

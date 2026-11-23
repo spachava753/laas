@@ -145,5 +145,5 @@ type Hidden struct {
 // @Ensures True
 func IntoHidden(data []byte) (err error) {
 	var h Hidden
-	return json.Unmarshal(data, &h) // want `cannot verify IntoHidden: Unmarshal decodes into &h, and its field seen is a slice that Unmarshal leaves as it was, which vego cannot yet state; give the field a json tag that it decodes, or keep it o`
+	return json.Unmarshal(data, &h) // want `cannot verify IntoHidden: Unmarshal decodes into &h, and its field seen is a slice that Unmarshal leaves as it was, which vego cannot yet state; decode into a type without the field, and copy from it what you need`
 }

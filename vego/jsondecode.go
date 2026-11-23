@@ -251,7 +251,7 @@ func keptFields(t types.Type, pkg *types.Package) ([]string, string) {
 		case l.part == partHidden || l.part == partState:
 			return nil, fmt.Sprintf("its field %s keeps its value, and vego does not model its type", strings.TrimPrefix(path, "."))
 		case l.part == partRef || l.part == partOff || l.part == partLen || l.part == partCap:
-			return nil, fmt.Sprintf("its field %s is a slice that Unmarshal leaves as it was, which vego cannot yet state; give the field a json tag that it decodes, or keep it out of the type", strings.TrimPrefix(path, "."))
+			return nil, fmt.Sprintf("its field %s is a slice that Unmarshal leaves as it was, which vego cannot yet state; decode into a type without the field, and copy from it what you need", strings.TrimPrefix(path, "."))
 		}
 		kept = append(kept, path)
 	}

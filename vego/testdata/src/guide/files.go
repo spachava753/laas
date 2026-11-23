@@ -23,7 +23,7 @@ func ReadConfig(name string) (data []byte, err error) {
 	for n < len(buf) {
 		m, rerr := f.Read(buf[n:])
 		n += m
-		if rerr == io.EOF || m == 0 {
+		if rerr == io.EOF {
 			break
 		}
 		if rerr != nil {

@@ -4959,6 +4959,421 @@ the shipped files says
 
 The field `Trailer` of an `http.Response` is treated the same way.
 
+## Encoding and decoding JSON
+
+`vego` verifies these calls of `encoding/json`:
+
+- `json.Marshal(v)` and `json.MarshalIndent(v, prefix, indent)`;
+- `json.NewEncoder(w).Encode(v)`, written as one expression;
+- `json.Unmarshal(data, &x)`;
+- `json.NewDecoder(io.LimitReader(r, n)).Decode(&x)`, written as one expression.
+
+At each call, `vego` follows what `encoding/json` does with the type of the value. It checks that no method of your code runs inside `encoding/json`, and that what the call allocates fits in memory. Go 1.26 builds the package from its own code, and Go 1.27 builds it from `encoding/json/v2` by default. What `vego` checks holds for both.
+
+### Encoding a value
+
+Give the type an invariant that bounds the strings and slices it holds:
+
+```go
+// Row is a row of a report, whose lengths its invariant bounds.
+//
+// @Invariant |Name| <= 100 And |Tags| <= 10 And (Forall j in [0, |Tags|) : |Tags[j]| <= 100)
+type Row struct {
+	ID   int       `json:"id"`
+	Name string    `json:"name"`
+	Tags []string  `json:"tags,omitempty"`
+	At   time.Time `json:"at"`
+}
+
+// @Ensures True
+func RowJSON(r Row) (js []byte, err error) {
+	return json.Marshal(r)
+}
+```
+
+`RowJSON` needs no `Requires`. The invariant of `Row` holds for the parameter `r`, so `vego` knows the most that each string and slice in it can hold. From those bounds it computes the most that `Marshal` can build, and proves that three times that, and 64 KB more, fits in one allocation. `encoding/json` grows its buffer by copying it into a larger one, so it needs that much room. Each byte of a string counts as six bytes of output, since `encoding/json` may write it as an escape such as `<`.
+
+For a slice of rows, bound its length and state the invariant of each element with `valid`:
+
+```go
+// @Requires |rows| <= 1000 And (Forall i in [0, |rows|) : valid(rows[i]))
+// @Ensures True
+func ReportJSON(rows []Row) (js []byte, err error) {
+	return json.MarshalIndent(rows, "", "  ")
+}
+```
+
+`MarshalIndent` writes the prefix and the indent at every level of nesting, and `vego` counts them too.
+
+Without bounds, the call is reported:
+
+```go
+// Memo has no invariant.
+type Memo struct {
+	Text string
+	Tags []string
+}
+
+// @Ensures True
+func MemoJSON(n Memo) (js []byte, err error) {
+	return json.Marshal(n)
+}
+```
+
+```text
+vego: what Marshal builds from n may be more than can be allocated; bound what it encodes, as in // @Requires
+|n.Text| <= 1000000 And |n.Tags| <= 1000000 And (Forall i in [0, |n.Tags|) : |n.Tags[i]| <= 1000000)
+```
+
+The clause in the message is one set of bounds that is enough. Use bounds that fit your data, in an invariant of the type or in a `Requires`. Smaller bounds also give a smaller bound on the result.
+
+### What is known of the result
+
+On success, `Marshal` and `MarshalIndent` return a new slice that is no longer than the bound `vego` computed at the call. On an error they return `nil`. The error is vouched for, so you can wrap it with `%w` or read its text with `Error`. Nothing else is known of the bytes.
+
+```go
+// Entry is a line of a log.
+//
+// @Invariant |Text| <= 100
+type Entry struct {
+	ID   int    `json:"id"`
+	Text string `json:"text"`
+}
+
+// @Ensures err = nil -> |js| <= 700
+func EntryJSON(e Entry) (js []byte, err error) {
+	return json.Marshal(e)
+}
+```
+
+The bound on the result is what lets you append it to a buffer:
+
+```go
+// @Requires b != nil And |b| = 0 And |rows| <= 1000 And (Forall i in [0, |rows|) : valid(rows[i]))
+// @Modifies b
+// @Ensures True
+func WriteEntries(b *bytes.Buffer, rows []Entry) {
+	// @Invariant 0 <= i <= |rows| And |b| <= 1000 * i
+	// @Variant |rows| - i
+	for i := 0; i < len(rows); i++ {
+		js, err := json.Marshal(rows[i])
+		if err != nil {
+			return
+		}
+		b.Write(js)
+	}
+}
+```
+
+### Types that can be encoded
+
+`encoding/json` calls the `MarshalJSON` and `MarshalText` methods of the values it encodes, and the implementation from `encoding/json/v2` also calls `MarshalJSONTo` and `AppendText`. `vego` does not follow those calls. It reports a type that has one of these methods, on the value or on a pointer to it:
+
+```go
+// Level has a method that encoding/json would call.
+type Level int
+
+func (s Level) MarshalJSON() ([]byte, error) { return []byte(`"ok"`), nil }
+
+// @Ensures True
+func LevelJSON(s Level) (js []byte, err error) {
+	return json.Marshal(s)
+}
+```
+
+```text
+vego: cannot verify LevelJSON: Marshal encodes s, and s is of type Level, which has the method MarshalJSON, and
+encoding/json would call it; no method of a value runs under the contract of encoding/json in vego but those of
+time.Time, json.RawMessage, and json.Number; encode a type without it
+```
+
+The methods of `time.Time`, `json.RawMessage`, and `json.Number` were read in every build of `encoding/json`, and they write nothing. Values of these types can be encoded.
+
+These types can be encoded:
+
+- integers, floats, booleans, strings, and `[]byte`;
+- slices, and maps whose keys are strings or integers of a type without methods;
+- structs, and pointers to structs;
+- `time.Time`, `json.RawMessage`, and `json.Number`.
+
+These are reported:
+
+- interface values, including `any`, since `vego` does not know the dynamic type;
+- pointers to anything but a struct, and arrays;
+- a type that holds itself, such as `type Node struct{ Next *Node }`;
+- a type that holds a `sync.Mutex` or another value with a state;
+- a map with string keys whose values are slices or maps of strings, slices, or maps, such as `map[string][]string`. A map with integer keys can hold them, and a map with string keys can hold strings, numbers, and slices of numbers. The keys of a map with string keys need a bound, as in `Forall k in m : |k| <= 100`.
+
+A json tag may use the options `omitempty`, `omitzero`, and `string`. A field with `omitzero` whose type has an `IsZero` method is reported, since `encoding/json` would call it. These tags are also reported, because the builds of `encoding/json` read them differently:
+
+- a name with punctuation other than `` !#$%&()*+-./:;<=>?@[]^_{|}~ ``;
+- any other option, such as `inline`;
+- a tag on a field that is not exported, or on an embedded field.
+
+### Writing JSON to a writer
+
+`json.NewEncoder(w).Encode(v)`, written as one expression, encodes `v` as `Marshal` does, adds a newline, and calls `w.Write` once with the result:
+
+```go
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func ServeRow(w http.ResponseWriter, r Row) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(r)
+}
+```
+
+`vego` checks `v` as for `Marshal`, and then checks the call as a call of the `Write` of `w` with a new slice. The writer can be an `http.ResponseWriter`, an `io.Writer`, an `*os.File`, a `*bufio.Writer`, a `*bytes.Buffer`, or a value of your own type whose `Write` has a contract. The contract of that `Write` applies. List `w` in `Modifies` when that `Write` modifies it, as the `Write` of an `http.ResponseWriter` does. A `*bytes.Buffer` needs room for what `Encode` writes, which the bound of `Marshal` gives. The error that `Encode` returns may come from `w.Write`, so it is not vouched for.
+
+An encoder kept in a variable is reported, since it could write more than one value or be changed by `SetIndent` between calls:
+
+```go
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func HeldEncoder(w io.Writer, r Row) (err error) {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(r)
+}
+```
+
+```text
+vego: cannot verify HeldEncoder: json.NewEncoder keeps w in the encoder it returns; write
+json.NewEncoder(w).Encode(v) in one expression, since an encoder held in a variable is not supported yet
+```
+
+To indent, call `MarshalIndent` and write what it returns.
+
+### Decoding a value
+
+Decode into `&x` for a variable `x`, or into a pointer to a struct. Bound the length of the data:
+
+```go
+// @Requires |data| <= 1000000
+// @Ensures True
+func LoadRows(data []byte) (n int, err error) {
+	var rows []Row
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return 0, fmt.Errorf("loading rows: %w", err)
+	}
+	return len(rows), nil
+}
+```
+
+The error of `Unmarshal` is vouched for, so it can be wrapped. Without a bound on the data, the call is reported:
+
+```go
+// @Ensures True
+func LoadAll(data []byte) (n int, err error) {
+	var rows []Row
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return 0, err
+	}
+	return len(rows), nil
+}
+```
+
+```text
+vego: precondition of Unmarshal may not hold: 72 * (|data| + 1) + 65536 <= MaxAlloc; it holds when |data| <=
+1000000000000
+```
+
+The factor depends on the type. A slice can hold an element for every two bytes of data, and `Unmarshal` grows it by doubling, so the factor is at least the size of an element. A `Row` takes 72 bytes.
+
+`Unmarshal` appends into the array of a slice that has capacity, keeps the entries of a map that is not `nil`, and decodes through a pointer that is not `nil`. That would write memory the caller may also hold. So `vego` requires every slice, map, and pointer in what `Unmarshal` decodes into to be `nil`:
+
+```go
+// @Requires p != nil And |data| <= 100000
+// @Modifies p
+// @Ensures True
+func RefillMemo(data []byte, p *Memo) (err error) {
+	return json.Unmarshal(data, p)
+}
+```
+
+```text
+vego: Unmarshal may decode into memory that p.Tags refers to, which the caller may hold: it appends into a slice's
+array, keeps a map's entries, and decodes through a pointer it finds; decode into a value whose slices, maps, and
+pointers are nil, as var x T declares it
+```
+
+Declare a new variable with `var x T`, decode into it, and copy what you need.
+
+### What is known after decoding
+
+After `Unmarshal`, `vego` knows only the types of the values it decoded. The fields that `Unmarshal` never writes keep their values: fields that are not exported, and fields tagged `json:"-"`. Check what an invariant or a contract needs before you rely on it:
+
+```go
+// Profile is decoded from a file and checked.
+//
+// @Invariant |Name| <= 100
+type Profile struct {
+	Name  string   `json:"name"`
+	Hosts []string `json:"hosts"`
+}
+
+// @Requires |data| <= 100000
+// @Ensures True
+func ParseProfile(data []byte) (s Profile, err error) {
+	var got Profile
+	if err = json.Unmarshal(data, &got); err != nil {
+		return Profile{}, err
+	}
+	if len(got.Name) > 100 {
+		return Profile{}, errors.New("name too long")
+	}
+	return got, nil
+}
+```
+
+Without the check, the invariant of the result is not proved:
+
+```text
+vego: invariant of Profile may not hold for the result s: |Name| <= 100
+```
+
+`vego` cannot yet state that a slice keeps its value. A struct with such a field cannot be decoded into:
+
+```go
+// Cache remembers the hosts it has seen, in a field json does not decode.
+type Cache struct {
+	Name string
+	seen []string
+}
+
+// @Requires c != nil And |data| <= 100000
+// @Modifies c
+// @Ensures True
+func LoadCache(data []byte, c *Cache) (err error) {
+	return json.Unmarshal(data, c)
+}
+```
+
+```text
+vego: cannot verify LoadCache: Unmarshal decodes into c, and its field seen is a slice that Unmarshal leaves as it
+was, which vego cannot yet state; decode into a type without the field, and copy from it what you need
+```
+
+### Decoding the body of a request
+
+`json.NewDecoder(io.LimitReader(r, n)).Decode(&x)`, written as one expression, reads at most `n` bytes of `r` and decodes the first value as `Unmarshal` does:
+
+```go
+// @Requires w != nil And req != nil And req.Body != nil
+// @Modifies w, req.Body
+// @Ensures True
+func CreateRow(w http.ResponseWriter, req *http.Request) {
+	var r Row
+	if err := json.NewDecoder(io.LimitReader(req.Body, 1<<20)).Decode(&r); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+}
+```
+
+`vego` checks the call as a call of the `Read` of `r` followed by `Unmarshal` of at most `n` bytes. List `r` in `Modifies` when its `Read` modifies it, as the `Read` of the body does. `n` needs the bound that `Unmarshal` needs of the length of the data. What `Decode` decodes into must be `nil` in the same way.
+
+The decoder calls `Read` again until it has a whole value. A `Read` that returns no bytes and no error makes it call again, without end. So the contract of `Read` must say that a read into a buffer that is not empty returns bytes or an error. The `Read` of an `*os.File` says so, and the body of a request does, as [What a proof assumes](#what-a-proof-assumes) states. The contract of `(io.Reader).Read` does not:
+
+```go
+// @Requires r != nil
+// @Modifies r
+// @Ensures True
+func FromReader(r io.Reader) (err error) {
+	var row Row
+	return json.NewDecoder(io.LimitReader(r, 1<<20)).Decode(&row)
+}
+```
+
+```text
+vego: the decoder calls r.Read until it returns bytes or an error, and the contract of Read allows it to return
+neither, so the decoder may never return; read the body into a buffer with a bounded loop and decode it with
+json.Unmarshal
+```
+
+A reader of your own type can be decoded from when its `Read` has a contract that says so, such as `@Ensures 0 <= n And n <= |p| And (n > 0 Or err != nil)` with `@Requires |p| > 0`. `vego` uses that contract once for all the calls the decoder makes. So the contract must not read what `Read` modifies of the reader, before or after the call. A clause such as `r.calls < 1000000` is reported with a message that quotes it.
+
+The error that `Decode` returns may come from `Read`, so it is not vouched for, and its text cannot be read:
+
+```go
+// @Requires w != nil And req != nil And req.Body != nil
+// @Modifies w, req.Body
+// @Ensures True
+func CreateRowErr(w http.ResponseWriter, req *http.Request) {
+	var r Row
+	if err := json.NewDecoder(io.LimitReader(req.Body, 1<<20)).Decode(&r); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
+}
+```
+
+```text
+vego: cannot verify CreateRowErr: calling Error on err would run the methods of an error whose origin is not known;
+only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for,
+can be asked for its text; err is assigned json.NewDecoder(io.LimitReader(req.Body, 1 << 20)).Decode(&r) at
+json.go:206:12, a call whose errors nothing vouches for
+```
+
+To answer with the text of the error, read the body into a buffer and decode it with `Unmarshal`, whose error is vouched for:
+
+```go
+// @Requires w != nil And req != nil And req.Body != nil
+// @Modifies w, req.Body
+// @Ensures True
+func CreateRowText(w http.ResponseWriter, req *http.Request) {
+	body := req.Body
+	buf := make([]byte, 1<<20)
+	n := 0
+	// @Invariant 0 <= n And n <= 1048576 And |buf| = 1048576 And fresh(buf)
+	// @Variant 1048576 - n
+	for n < len(buf) {
+		m, rerr := body.Read(buf[n:])
+		n += m
+		if rerr != nil || m == 0 {
+			break
+		}
+	}
+	var r Row
+	if err := json.Unmarshal(buf[:n], &r); err != nil {
+		http.Error(w, "bad row: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+}
+```
+
+The loop reads through the variable `body`. Inside the loop, `vego` does not know that `req.Body` still holds the reader that `Modifies` lists, and it reports `req.Body.Read`.
+
+A decoder without a limit is reported:
+
+```go
+// @Requires req != nil And req.Body != nil
+// @Modifies req.Body
+// @Ensures True
+func CreateRowNoLimit(req *http.Request) (err error) {
+	var r Row
+	return json.NewDecoder(req.Body).Decode(&r)
+}
+```
+
+```text
+vego: cannot verify CreateRowNoLimit: json.NewDecoder(r).Decode reads from r without a limit, until the first value
+is whole, however long it is; write json.NewDecoder(io.LimitReader(r, n)).Decode(&x), with n the most it may read
+```
+
+### What is not supported in encoding/json
+
+- An encoder or a decoder kept in a variable, and with it `SetIndent`, `SetEscapeHTML`, `DisallowUnknownFields`, `UseNumber`, and decoding several values from one stream.
+- Methods of your own types that `encoding/json` calls, such as `MarshalJSON`, `UnmarshalJSON`, `MarshalText`, and `IsZero` under `omitzero`.
+- A map with string keys whose values are slices or maps of strings, slices, or maps.
+- Decoding into a struct that holds a slice that `Unmarshal` does not write, a field of a type `vego` does not model, or a field that is not exported of a struct of another package.
+- Decoding with the in-place decoder from a reader whose `Read` does not say that it returns bytes or an error, such as `(io.Reader).Read`. A `*bufio.Reader` has no shipped contract for `Read`, so decoding from one is reported as `io.LimitReader calls b.Read, which has no contract`.
+- Entries of your own that list `encodes` or `decodes`. Only the shipped entries of `encoding/json` can list them.
+- Deferring a call of these functions, and using them as function values.
+
 ## Defer
 
 `vego` verifies a deferred call at the point where it runs. That is at every `return` of the function, after the results have been set. Deferred calls run in reverse order.
@@ -5362,6 +5777,7 @@ The names in an entry are the parameter and result names from the function's sou
 - `regexp.Compile` and the methods `MatchString`, `Match`, `FindString`, and `FindStringSubmatch` of `*regexp.Regexp`, which say nothing of what matches
 - `(*net/http.Request).PathValue`, `(net/http.Header).Get` and `Set`, and `net/http.NewServeMux`
 - the methods of `sync.Mutex` and `sync.RWMutex` that lock and unlock, and `(*sync.Once).Do`, described in [Locks](#locks)
+- `encoding/json.Marshal`, `encoding/json.MarshalIndent`, `encoding/json.Unmarshal`, `(*encoding/json.Encoder).Encode`, and `(*encoding/json.Decoder).Decode`, described in [Encoding and decoding JSON](#encoding-and-decoding-json)
 
 It also includes contracts for generic functions of `slices`, `maps`, and `cmp`, described in [Generic functions of other packages](#generic-functions-of-other-packages), and for `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, `(context.Context).Err`, and `context.CancelFunc`, which are described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages), and the state `closed` of `io.Closer`, described in [States of interface values](#states-of-interface-values).
 
@@ -6428,7 +6844,7 @@ func ReadConfig(name string) (data []byte, err error) {
 	for n < len(buf) {
 		m, rerr := f.Read(buf[n:])
 		n += m
-		if rerr == io.EOF || m == 0 {
+		if rerr == io.EOF {
 			break
 		}
 		if rerr != nil {
@@ -6443,7 +6859,7 @@ func ReadConfig(name string) (data []byte, err error) {
 }
 ```
 
-The loop stops when a read returns no bytes, since the contract of `Read` allows a read of none without an error, and then the `Variant` would not decrease.
+The `Variant` decreases because the contract of `Read` says that a read into a buffer that is not empty returns at least one byte or an error. The buffer `buf[n:]` is not empty while `n < len(buf)`.
 
 If your program reads only files that it controls, you can give `os.ReadFile` an entry of your own. The entry claims something about the files your program reads, so its reason must say what they are:
 
@@ -6851,7 +7267,7 @@ The report has three lists:
 - the shipped contracts that the proofs use;
 - the entries in your trust file that no proof uses.
 
-An entry that lists parameters under `runs` or `keeps`, or results under `vouches`, shows them in the lines `runs code held by:`, `keeps code held by:`, and `vouches for the errors and function values in:`, and each contract under `calls` in a line such as `calls f(i) when: 0 <= i < n`. Each is a claim about code that `vego` does not read. See [Arguments that carry code](#arguments-that-carry-code) and [Errors that a trusted function returns](#errors-that-a-trusted-function-returns).
+An entry that lists parameters under `runs` or `keeps`, or results under `vouches`, shows them in the lines `runs code held by:`, `keeps code held by:`, and `vouches for the errors and function values in:`, and each contract under `calls` in a line such as `calls f(i) when: 0 <= i < n`. The entries of `encoding/json` show what they claim of the value in a line `encodes as package encoding/json does:` or `decodes as package encoding/json does into:`. Each is a claim about code that `vego` does not read. See [Arguments that carry code](#arguments-that-carry-code) and [Errors that a trusted function returns](#errors-that-a-trusted-function-returns).
 
 An entry for a method of an interface or a function type shows the reach of its claim in a line such as:
 
@@ -7130,7 +7546,12 @@ This table lists the most common messages.
 | `DIR is not empty and is not an answer cache; give -vego.cache a new or empty directory` | The `-vego.cache` directory holds files and was not made by `-vego.cache`. | Give a new or empty directory, such as `$HOME/.cache/vego`. |
 | `the answer cache needs the Z3 binary itself, and P runs Q` | `-vego.z3` names a script or a link to another program, and `-vego.cache` is set. | Name the Z3 binary with `-vego.z3`, or run without `-vego.cache`. |
 | `internal error of vego: ...; run again with -vego.speculate=false, and report it at https://github.com/spachava753/laas/issues` | `vego` found a defect in itself while it asked Z3, such as a question handed to a Z3 process that had been stopped. The package fails, and so does every later package of the run. | Run again with `-vego.speculate=false`, and report the message. |
-
+| `what Marshal builds from v may be more than can be allocated; bound what it encodes, as in // @Requires ...` | Nothing bounds a string or a slice in the value. | Bound them in an invariant of the type or in a `Requires`. See [Encoding a value](#encoding-a-value). |
+| `cannot verify F: Marshal encodes v, and ... which has the method MarshalJSON, and encoding/json would call it; ...` | `encoding/json` would run a method of your code. | Encode a type without the method. See [Types that can be encoded](#types-that-can-be-encoded). |
+| `Unmarshal may decode into memory that p.f refers to, which the caller may hold: ...` | A slice, map, or pointer in the target may not be `nil`. | Decode into a new variable declared with `var x T`. See [Decoding a value](#decoding-a-value). |
+| `cannot verify F: json.NewDecoder(r).Decode reads from r without a limit, ...` | The decoder could read without end. | Write `json.NewDecoder(io.LimitReader(r, n)).Decode(&x)`. See [Decoding the body of a request](#decoding-the-body-of-a-request). |
+| `the decoder calls r.Read until it returns bytes or an error, and the contract of Read allows it to return neither, ...` | The decoder may call `Read` without end. | Decode from a reader whose `Read` returns bytes or an error, or read into a buffer and call `Unmarshal`. |
+| `cannot verify F: json.NewEncoder keeps w in the encoder it returns; ...` | An encoder or decoder is kept in a variable. | Write the call as one expression. |
 ## What is not supported
 
 `vego` supports functions and methods over these types: the integer types, `bool`, `string`, `error`, the float types, structs, pointers to structs, slices, maps with integer, string, or boolean keys, function types, and interface types. In the body it supports assignments, `if`, `switch`, `for` and `range` loops with `break` and `continue`, `return`, `defer`, calls to named functions and methods, function literals that are called or deferred where they are written or bound to a variable that is only called, function values of named function types with a contract (see [Function values](#function-values)), calls through interface values of methods with a contract (see [Interfaces](#interfaces)), functions handed to a trusted function that calls them while it runs (see [Functions that a trusted function calls](#functions-that-a-trusted-function-calls)), and recursion. The built-ins `len`, `cap`, `min`, `max`, `new`, `make`, `append`, and `delete` are supported, and so are composite literals, slicing, and the arithmetic, comparison, shift, and bitwise operators.
@@ -7181,6 +7602,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - pointers to anything other than a struct;
 - reading a package-level variable that something in the build changes, or whose type can hold a function value, an interface value, an error, a channel, or an `unsafe.Pointer`; assigning a package-level variable, writing what one refers to, and naming one in `Modifies` (see [Package-level variables](#package-level-variables));
 - `copy`;
+- in `encoding/json`, anything but `Marshal`, `MarshalIndent`, `Unmarshal`, and `json.NewEncoder(w).Encode(v)` and `json.NewDecoder(io.LimitReader(r, n)).Decode(&x)` written as one expression, and values that hold an interface value, a method that `encoding/json` would call, or one of the other types listed in [What is not supported in encoding/json](#what-is-not-supported-in-encodingjson);
 - annotations on a type declared inside a function body, such as an invariant on a local struct or a contract on a local interface;
 - formatting a value whose type has a method `Format`, `GoString`, `Error`, or `String`, a pointer, a map, an interface value other than an error of known origin, a function value, or a value of a type that holds itself, with `fmt.Errorf` or a function whose entry lists it under `formats`, and passing such a function a slice with `...` for the values it formats (see [What can be formatted](#what-can-be-formatted));
 - a logger in a package-level variable, and `log.Default()`;
@@ -7201,13 +7623,13 @@ Floating-point values are supported but opaque. They can be passed around and us
 
 A proof by `vego` depends on the following assumptions. Each concerns something `vego` cannot see.
 
-- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and holds no value that can hold code anywhere it was not held when the call began, unless `keeps` lists the parameter. For a parameter listed under `keeps`, it runs the code during the call only if `runs` lists the parameter too, holds it when it returns only in memory that the results and parameters listed there reach, and has started or registered nothing that runs it later: no goroutine, timer, finalizer or cleanup, callback given to another package, or package-level variable. For a parameter listed under `stores`, the function stores into the memory that its `modifies` lists under that parameter only memory it made during the call. For a parameter listed under `prints`, the function formats as the function that `prints` names does, calls the `Write` of that parameter once with exactly what that function returns, calls nothing else of it, and returns what `Write` returned. For a parameter listed under `runs` or `keeps`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter. Where such a value runs what the function keeps, as the reader that `io.TeeReader` returns runs the reader and the writer it is given, it meets its contract whenever what the function keeps meets theirs.
+- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and holds no value that can hold code anywhere it was not held when the call began, unless `keeps` lists the parameter. For a parameter listed under `keeps`, it runs the code during the call only if `runs` lists the parameter too, holds it when it returns only in memory that the results and parameters listed there reach, and has started or registered nothing that runs it later: no goroutine, timer, finalizer or cleanup, callback given to another package, or package-level variable. For a parameter listed under `stores`, the function stores into the memory that its `modifies` lists under that parameter only memory it made during the call. For a parameter listed under `prints`, the function formats as the function that `prints` names does, calls the `Write` of that parameter once with exactly what that function returns, calls nothing else of it, and returns what `Write` returned. For a parameter listed under `encodes`, the function encodes the value as package `encoding/json` does, runs no method of it but those of `time.Time`, `json.RawMessage`, and `json.Number` that `encoding/json` runs, only while the call lasts and on the goroutine that called it, keeps nothing of it, and allocates within the bound `vego` proves at the call. For a parameter listed under `decodes`, the function decodes into the value as `encoding/json` does: it writes only the exported fields that `encoding/json` writes, stores into them only memory it makes, runs no method of the value but those of `time.Time`, `json.RawMessage`, and `json.Number`, keeps nothing of what it is handed, and allocates within the bound `vego` proves at the call. For a parameter listed under `runs` or `keeps`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter. Where such a value runs what the function keeps, as the reader that `io.TeeReader` returns runs the reader and the writer it is given, it meets its contract whenever what the function keeps meets theirs.
 - The methods of `bytes.Buffer`, `strings.Builder`, `bufio.Writer`, `bufio.Reader`, `bufio.Scanner`, and `log.Logger` that have shipped entries write nothing that verified code can see other than the struct and the memory that the value owns, as [Writing through a buffer](#writing-through-a-buffer) lists it. After a call, the value owns only what it owned before the call and memory that the call made. The read position of a `bytes.Buffer` never passes the end of what was written to it. Every method of `bytes.Buffer` keeps it so, and `|b|` is the number of bytes between the two.
 - Code of another package runs code of the verified package only as `vego` follows it, which [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods) describes: during a call that the verified package makes, it runs only what that call hands it, through the arguments and the receiver. Code that it kept from an earlier call, a value it stored, or code that it runs on another goroutine or at another time, does not call back into a verified function while that function runs, so that the call never ends. A cycle that stays in the package, or that goes through what a call hands to another package, is found and reported.
 - A claim under `asserts` is true: the function calls nothing that the parameter holds, or that a call of what the parameter holds returns, but what the claim allows, and uses no reflection on it (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For a parameter whose footprint the contract lists in `Modifies`, they pass no other argument that reaches memory in that footprint without going through an interface value: `Log` relies on the `Lines` that `t` points to not being memory that the methods of `r` write. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one whose methods change the states of the other, as one that wraps it does, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method. For a parameter whose type owns memory (see [Structs that own memory](#structs-that-own-memory)), they pass a struct whose owned memory is reached by nothing else they pass: not by the other arguments, not by the struct's other fields, and not by what its other owned fields refer to. Memory that a method returns from what its struct owns, which its contract shows with `within(result, s)`, is not stored by code that is not verified, and is not passed to a verified function together with the struct it came from or with anything that reaches that struct.
 - When the server calls a verified handler, the writer it passes writes none of the memory that the request reaches without going through an interface value, except the field `Trailer` of the `Request` and the map it refers to, which the server fills while it reads the body, also when a write to the writer drains a body the handler left unread. Verified code cannot read or write that field. Code that is not verified does not make that map reachable from anything else it hands a verified function, as `req.Trailer = req.Header` in a middleware would. Code that is not verified uses a `ResponseWriter`, and hands one to verified code as that type or as any other interface, only while the `ServeHTTP` call that received it runs, and does not hand one to a verified function that keeps that parameter.
-- The body of every request that reaches verified code from code that is not verified makes progress: a `Read` of it with a buffer that is not empty returns bytes or an error. The server's bodies do. Verified code cannot store into the field `Body` of a request. A middleware that is not verified and replaces the body with a reader that can return no bytes and no error for ever breaks this, and so does a test or a caller that builds a request over such a reader, as `httptest.NewRequest` can; `json.NewDecoder(io.LimitReader(req.Body, n)).Decode(&x)` in a verified function it calls may then never return.
+- The body of every request that reaches verified code from code that is not verified makes progress: a `Read` of it with a buffer that is not empty returns bytes or an error. The server's bodies do. Verified code cannot store into the field `Body` of a request. A middleware that is not verified and replaces the body with a reader that can return no bytes and no error for ever breaks this, and so does a test or a caller that builds a request over such a reader, as `httptest.NewRequest` can. `json.NewDecoder(io.LimitReader(req.Body, n)).Decode(&x)` in a verified function it calls may then never return.
 - The body of an `http.Response` that reaches verified code from code that is not verified writes nothing that the response reaches without going through an interface value, except the field `Trailer` of the response and the map it refers to, which reading the body fills. Verified code cannot read or write that field, and does not store into `Body` but a value it makes there. Code that is not verified does not make that map reachable from anything else it hands a verified function, as `resp.Trailer = resp.Header` would.
 - Code of a package that declares a struct that owns memory, where it is not verified, builds and changes such structs so that nothing else refers to the memory an owned field refers to, no two owned fields refer to the same memory, and an owned field comes to refer only to memory made since, or to part of what it referred to before.
 - An interface value that reaches verified code from code that is not verified meets the contracts of its methods. That includes a value passed as an argument, a value in memory that an argument reaches, a value that a call through another value returns, and a value that a trusted function returns or writes, which its entry vouches for. Called with arguments that meet the `Requires` of a method, the method returns without panicking, leaves its `Ensures` true, and writes nothing that verified code can see outside what its `Modifies` lists. When the contract lists the receiver, that is the value's footprint, and the method adds to it only memory that it creates during the call. A method whose entry lists no `keeps`, as `(io.Writer).Write` and `(io.Reader).Read`, keeps nothing it is handed once it returns, as `io.Writer` and `io.Reader` document of `p` (see [What an entry for a type claims](#what-an-entry-for-a-type-claims)). A method of an interface declared in source may keep a pointer it is handed, but no later call of the value's methods writes through it: a `Store` whose `Put(v *Value)` keeps `v` and whose `Touch()` then writes `*v` breaks this, and `vego` cannot see it. The same holds of a pointer that verified code stores into memory that the value's methods write or that the value handed out, as with `within(m, w)`: a `Sink` that hands out a table of pairs, and whose `Put` adds one to each pair in the table, breaks this. For a result that the contract of the method lists under `Vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). This holds also when the value holds a pointer to a struct that verified code holds.
