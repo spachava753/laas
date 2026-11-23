@@ -12,6 +12,7 @@ import (
 	"golang.org/x/tools/go/types/typeutil"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/solver"
 )
 
 // Decoding JSON (F29, step 3). A shipped entry with decodes, json.Unmarshal,
@@ -436,17 +437,44 @@ func (v *fnVerifier) checkNilTargets(st *state, guard []*logic.Term, call *ast.C
 // refused: a decoder over a reader without a limit reads without one, and
 // one from elsewhere may hold what it read before.
 
-// mentionsName reports whether a formula names a variable.
-func mentionsName(n *logic.Node, name string) bool {
-	if n.Kind == logic.NIdent && n.Name == name {
-		return true
+// readsReadFrame returns the text of a conjunct of the requires or the
+// ensures of a contract that reads memory the contract's Modifies lists,
+// or "": its value in the state of the call, on entry and on return
+// alike, and its value after every target of the frame is forgotten, with
+// the same results, must be proved equal. Its caller runs it quietly: what
+// it reads is read once the arguments are evaluated, as the call reads
+// them.
+func (v *fnVerifier) readsReadFrame(fn *funcInfo, args map[*types.Var]value, st *state) string {
+	targets := v.targets(fn, args, st, st.mem)
+	if len(targets) == 0 {
+		return ""
 	}
-	for _, kid := range n.Kids {
-		if mentionsName(kid, name) {
-			return true
+	for _, c := range slices.Concat(fn.requires, fn.ensures) {
+		if c.node == nil {
+			continue
+		}
+		for _, conjunct := range c.node.Conjuncts() {
+			changed := st.clone()
+			results := make([]value, len(fn.results))
+			for i, result := range fn.results {
+				results[i] = v.unknown("out", result.Type(), changed)
+			}
+			var then, now *logic.Term
+			var err error
+			then, err = v.resolverOf(c).Formula(conjunct, &specEnv{v: v, sink: changed, fn: fn, args: args, results: results, now: st.mem, post: st.mem, before: st.brk})
+			if err != nil {
+				return c.text
+			}
+			for _, t := range targets {
+				v.havoc(changed, t, nil)
+			}
+			now, err = v.resolverOf(c).Formula(conjunct, &specEnv{v: v, sink: changed, fn: fn, args: args, results: results, now: changed.mem, post: changed.mem, before: st.brk})
+			if err != nil || v.attempt(changed, nil, logic.Iff(then, now)) != solver.Proved {
+				return c.text[conjunct.Start:conjunct.End]
+			}
 		}
 	}
-	return false
+	return ""
 }
 
 // progresses reports whether an expression is a field that a progresses
@@ -537,27 +565,7 @@ func (v *fnVerifier) callDecoder(call, limit *ast.CallExpr, st *state, guard []*
 	r, n := limit.Args[0], limit.Args[1]
 	rt := v.info.TypeOf(r)
 	read, receiverOf := v.routeMethod(call, r, "Read", "io.LimitReader", st, guard)
-	// The decoder calls Read as many times as it needs, none for a limit
-	// below one, each in a state the earlier calls left (F28 of the review
-	// of step 3). A contract whose requires and ensures read nothing of
-	// the reader that its Modifies lists means the same at every call: applied once, it forgets what
-	// any number of calls may write, and says of the buffer and the
-	// results what holds of each. Any other is refused.
 	readSig := read.obj.Type().(*types.Signature)
-	recvName := ""
-	if read.receiver != nil {
-		recvName = read.receiver.Name()
-	} else if recv := readSig.Recv(); recv != nil {
-		recvName = recv.Name()
-	}
-	written := slices.ContainsFunc(read.modifies, func(m *modTarget) bool { return m.name == recvName })
-	for _, c := range slices.Concat(read.requires, read.ensures) {
-		if written && recvName != "" && c.node != nil && mentionsName(c.node, recvName) {
-			v.unsupported(call.Pos(), fmt.Sprintf("the decoder calls %s.Read as many times as it needs, and the contract of Read reads its receiver in %q, "+
-				"which earlier calls may change; give Read a contract that speaks only of the buffer and the results, or read the body into a buffer and decode it with json.Unmarshal",
-				types.ExprString(r), c.text))
-		}
-	}
 	u := v.unit
 	operands := u.pushCeiling()
 	made := unitCall{name: decode.Name(), pos: call.Pos()}
@@ -608,6 +616,21 @@ func (v *fnVerifier) callDecoder(call, limit *ast.CallExpr, st *state, guard []*
 		}
 		shown := &ast.Ident{NamePos: call.Lparen, Name: "buffer"}
 		readCall := &ast.CallExpr{Fun: &ast.SelectorExpr{X: r, Sel: &ast.Ident{NamePos: call.Lparen, Name: "Read"}}, Lparen: call.Lparen, Args: []ast.Expr{shown}, Rparen: call.Rparen}
+		// The decoder calls Read as many times as it needs, none for a
+		// limit below one, each in a state the earlier calls left (F28 of
+		// the review of step 3). A contract none of whose clauses reads
+		// memory that Read's frame lists means the same at every call:
+		// applied once, it forgets what any number of calls may write, and
+		// says of the buffer and the results what holds of each. Whether a
+		// clause reads such memory is decided by proof, as for an Ensures
+		// that speaks of the entry state (entryonly.go, F30).
+		var c string
+		v.quietly(func() { c = v.readsReadFrame(read, readArgs, st) })
+		if c != "" {
+			v.unsupported(call.Pos(), fmt.Sprintf("the decoder calls %s.Read as many times as it needs, and %q in the contract of Read reads memory that Read modifies, "+
+				"which each call may change; give Read a contract that says nothing of what it modifies of the reader, or read the body into a buffer and decode it with json.Unmarshal",
+				types.ExprString(r), c))
+		}
 		if read.trust != nil {
 			v.noteUse(read, call.Pos())
 		}

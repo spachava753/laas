@@ -37,11 +37,37 @@ func ReadConfig(name string) (data []byte, err error) {
 	return buf[:n], nil
 }
 
-// ReadForever does not stop when a read returns nothing.
+// CountBytes reads a file until a read fails or a megabyte is read. A read
+// of a file into a buffer with room returns bytes or an error, as the entry
+// of (*os.File).Read says, so the loop ends.
 //
 // @Requires |name| <= 4096
 // @Ensures True
-func ReadForever(name string) (n int, err error) {
+func CountBytes(name string) (n int, err error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return 0, err
+	}
+	buf := make([]byte, 64)
+	// @Invariant 0 <= n And n <= 1048576 + 64
+	// @Variant 1048576 + 64 - n
+	for n < 1<<20 {
+		m, rerr := f.Read(buf)
+		if rerr != nil {
+			break
+		}
+		n += m
+	}
+	f.Close()
+	return n, nil
+}
+
+// ReadForever does not stop when a read returns nothing, which a read into
+// an empty buffer may, and its count may overflow.
+//
+// @Requires |name| <= 4096 And 0 <= k And k <= 64
+// @Ensures True
+func ReadForever(name string, k int) (n int, err error) {
 	f, err := os.Open(name)
 	if err != nil {
 		return 0, err
@@ -50,7 +76,7 @@ func ReadForever(name string) (n int, err error) {
 	// @Invariant 0 <= n
 	// @Variant MaxInt - n
 	for { // want `loop variant may not decrease: MaxInt - n`
-		m, rerr := f.Read(buf)
+		m, rerr := f.Read(buf[:k])
 		if rerr != nil {
 			break
 		}

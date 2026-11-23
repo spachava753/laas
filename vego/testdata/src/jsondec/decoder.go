@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 )
 
 // json.NewDecoder(io.LimitReader(r, n)).Decode(&x), written as one
@@ -139,7 +140,7 @@ func SwapBody(req *http.Request, r io.ReadCloser) {
 // @Requires r != nil
 // @Ensures True
 func MakeRequest(r io.ReadCloser) (req *http.Request) {
-	return &http.Request{Body: r} // want `cannot verify MakeRequest: the field Body of the net/http\.Request made at decoder\.go:142:10 is set, and the progresses declaration of net/http\.Request in the shipped files says that what it holds is a`
+	return &http.Request{Body: r} // want `cannot verify MakeRequest: the field Body of the net/http\.Request made at decoder\.go:143:10 is set, and the progresses declaration of net/http\.Request in the shipped files says that what it holds is a`
 }
 
 // The decoder calls Read as many times as it needs (F28 of the review of
@@ -166,7 +167,7 @@ func (c *Counting) Read(p []byte) (n int, err error) {
 // @Ensures c.Calls' <= 1
 func OnceDecoded(c *Counting) {
 	var rt Req
-	_ = json.NewDecoder(io.LimitReader(c, 1000)).Decode(&rt) // want `cannot verify OnceDecoded: the decoder calls c\.Read as many times as it needs, and the contract of Read reads its receiver in "c != nil And \|p\| > 0 And c\.Calls < 1000000", which earlier calls may chan`
+	_ = json.NewDecoder(io.LimitReader(c, 1000)).Decode(&rt) // want `cannot verify OnceDecoded: the decoder calls c\.Read as many times as it needs, and "c\.Calls < 1000000" in the contract of Read reads memory that Read modifies, which each call may change; give Read a `
 }
 
 // Spaces reads spaces, whatever it was called before.
@@ -190,4 +191,48 @@ func (s *Spaces) Read(p []byte) (n int, err error) {
 func FromSpaces(s *Spaces) {
 	var rt Req
 	_ = json.NewDecoder(io.LimitReader(s, 1000)).Decode(&rt)
+}
+
+// Cycle reads what it holds over and over, keeping its place (F30 of the
+// review of the decoder): its Read modifies it and requires only that it is
+// not nil, and its contract reads nothing of what Read modifies, so it means
+// the same at every call.
+//
+// @Invariant 0 <= pos And pos < |data|
+type Cycle struct {
+	data []byte
+	pos  int
+}
+
+// Read reads the next byte.
+//
+// @Requires r != nil And |p| > 0
+// @Modifies r, p
+// @Ensures n = 1 And err = nil
+func (r *Cycle) Read(p []byte) (n int, err error) {
+	p[0] = r.data[r.pos]
+	r.pos = r.pos + 1
+	if r.pos == len(r.data) {
+		r.pos = 0
+	}
+	return 1, nil
+}
+
+// FromCycle decodes from it.
+//
+// @Requires r != nil
+// @Modifies r
+// @Ensures True
+func FromCycle(r *Cycle) {
+	var rt Req
+	_ = json.NewDecoder(io.LimitReader(r, 1000)).Decode(&rt)
+}
+
+// FromFile decodes from a file, whose Read returns bytes or an error.
+//
+// @Requires f != nil
+// @Ensures True
+func FromFile(f *os.File) (err error) {
+	var rt Req
+	return json.NewDecoder(io.LimitReader(f, 1<<20)).Decode(&rt)
 }

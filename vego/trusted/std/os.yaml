@@ -177,9 +177,15 @@ trusted:
       can name); see above for its errors. Not said: how many bytes it
       reads. Like every call that waits on the system, it is assumed to
       return: a read from a FIFO, a terminal, or a pipe waits for data.
+      Read from the source of Go 1.26.6 and 1.27.3: a read of a buffer that
+      is not empty returns bytes or an error, io.EOF for none (Unix and
+      Windows: poll's eofError, with ZeroReadIsEOF set for every File of
+      os; Plan 9: File.read itself), so a loop of reads that stops at an
+      error ends (F29, for the in-place decoder of encoding/json).
     vouches: [err]
     modifies: [b]
     ensures:
+      - "|b| > 0 -> (n > 0 Or err != nil)"
       - "0 <= n And n <= |b|"
       - "err = io.EOF -> n = 0"
 
