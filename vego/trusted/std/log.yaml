@@ -83,7 +83,8 @@ trusted:
     reason: >-
       Documented to call l.Output to print to the logger, with the
       arguments handled in the manner of fmt.Printf. It writes to the writer l holds, which it runs, and calls only its
-      Write method. A nil l panics, and so does a Logger whose output is
+      Write method, so it writes the struct and what l owns, and leaves the
+      output and the prefix as they were. A nil l panics, and so does a Logger whose output is
       nil, which ready rules out. The prefix it prints is at most 4096 bytes
       long while ready holds.
     requires:
@@ -91,16 +92,20 @@ trusted:
       - "ready(l)"
     runs: [l]
     formats: [format, v]
-    modifies: []
+    modifies: [l]
     # Read from the source of Go 1.27: The Logger calls only Write of its output.
     asserts:
       l: []
+    vouches: [l]
+    ensures:
+      - "ready(l')"
 
   (*log.Logger).Print:
     reason: >-
       Documented to call l.Output to print to the logger, with the
       arguments handled in the manner of fmt.Print. It writes to the writer l holds, which it runs, and calls only its
-      Write method. A nil l panics, and so does a Logger whose output is
+      Write method, so it writes the struct and what l owns, and leaves the
+      output and the prefix as they were. A nil l panics, and so does a Logger whose output is
       nil, which ready rules out. The prefix it prints is at most 4096 bytes
       long while ready holds.
     requires:
@@ -108,16 +113,20 @@ trusted:
       - "ready(l)"
     runs: [l]
     formats: [v]
-    modifies: []
+    modifies: [l]
     # Read from the source of Go 1.27: The Logger calls only Write of its output.
     asserts:
       l: []
+    vouches: [l]
+    ensures:
+      - "ready(l')"
 
   (*log.Logger).Println:
     reason: >-
       Documented to call l.Output to print to the logger, with the
       arguments handled in the manner of fmt.Println. It writes to the writer l holds, which it runs, and calls only its
-      Write method. A nil l panics, and so does a Logger whose output is
+      Write method, so it writes the struct and what l owns, and leaves the
+      output and the prefix as they were. A nil l panics, and so does a Logger whose output is
       nil, which ready rules out. The prefix it prints is at most 4096 bytes
       long while ready holds.
     requires:
@@ -125,7 +134,10 @@ trusted:
       - "ready(l)"
     runs: [l]
     formats: [v]
-    modifies: []
+    modifies: [l]
     # Read from the source of Go 1.27: The Logger calls only Write of its output.
     asserts:
       l: []
+    vouches: [l]
+    ensures:
+      - "ready(l')"

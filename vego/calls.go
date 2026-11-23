@@ -617,9 +617,12 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 						from.call, v.placeOf(from.at), spelledResult(from.fn, from.result))
 				}
 			}
+			before := v.reports
 			v.checkFootprintWrite(st, guard, t, call.Pos(), fmt.Sprintf("%s may modify the footprint of %s", name, base), remedy, unlisted)
 			v.checkFootprintRanged(st, guard, t, call.Pos(), name)
-			if !t.row {
+			// A value whose footprint may not be written is reported once,
+			// not again for its states, which the same entry would list.
+			if !t.row || v.reports > before {
 				continue
 			}
 		}
@@ -743,7 +746,11 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		promised[i] = v.calleeFormula(c, post)
 	}
 	v.lazyRows = false
-	// The question for a contradiction takes what the claims stand for.
+	// The question for a contradiction takes what the claims of this
+	// promise stand for. Claims that earlier calls left stay lazy in it, so
+	// a promise that contradicts an earlier call's fresh is not found here;
+	// what those claims say is less than their promises, so nothing false
+	// follows from them either.
 	claimDefs := v.claimDefs
 	v.claimDefs = nil
 	dead := (fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil) || v.quickly(st, involved, logic.False())

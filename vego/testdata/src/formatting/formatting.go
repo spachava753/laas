@@ -63,6 +63,7 @@ func WritesNil(w io.Writer, n int) {
 }
 
 // @Requires l != nil And ready(l)
+// @Modifies l
 // @Ensures True
 func Logs(l *log.Logger, n int) {
 	l.Printf("%d", n)
@@ -71,6 +72,7 @@ func Logs(l *log.Logger, n int) {
 }
 
 // @Requires ready(l)
+// @Modifies l
 // @Ensures True
 func LogsNil(l *log.Logger, n int) {
 	l.Print(n) // want `vego:\ precondition\ of\ Print\ may\ not\ hold:\ l\ !=\ nil`
@@ -80,6 +82,7 @@ func LogsNil(l *log.Logger, n int) {
 // output. A logger made as a zero value has none, and Print panics on it.
 //
 // @Requires l != nil
+// @Modifies l
 // @Ensures True
 func LogsUnready(l *log.Logger, n int) {
 	l.Print(n) // want `vego:\ precondition\ of\ Print\ may\ not\ hold:\ ready\(l\)`
@@ -97,6 +100,7 @@ func LogsToZero() {
 // LogsToNew makes a logger with log.New and prints to it.
 //
 // @Requires w != nil
+// @Modifies w
 // @Ensures True
 func LogsToNew(w io.Writer, n int) {
 	l := log.New(w, "app: ", log.LstdFlags)
@@ -123,6 +127,7 @@ func LogsToNil() {
 // method of a logger formats is lower than the one for log.Println.
 //
 // @Requires l != nil And ready(l) And |msg| <= 140737488318401
+// @Modifies l
 // @Ensures True
 func LoggerPrintsLong(l *log.Logger, msg string) {
 	l.Println(msg) // want `vego:\ what\ Println\ builds\ from\ what\ it\ formats\ may\ be\ more\ than\ can\ be\ allocated;\ bound\ what\ it\ formats,\ as\ in\ .*Requires\ \|msg\|\ <=\ 140737488314305`
@@ -131,6 +136,7 @@ func LoggerPrintsLong(l *log.Logger, msg string) {
 // The bound that the message of LoggerPrintsLong suggests is enough.
 //
 // @Requires l != nil And ready(l) And |msg| <= 140737488314305
+// @Modifies l
 // @Ensures True
 func LoggerPrintsAsSuggested(l *log.Logger, msg string) {
 	l.Println(msg)

@@ -3887,11 +3887,11 @@ Some lengths have no term in the logic: the text of an error, the strings in a s
 
 ### Writing to a writer or a logger
 
-`fmt.Fprintf`, `fmt.Fprint`, and `fmt.Fprintln` require a writer that is not `nil`. They call its `Write` method, which is described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages). The methods of `*log.Logger` that print require a logger that is not `nil` and whose state `ready` holds, and call the `Write` method of the writer the logger holds:
+`fmt.Fprintf`, `fmt.Fprint`, and `fmt.Fprintln` require a writer that is not `nil`. They call its `Write` method, which is described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages). The methods of `*log.Logger` that print require a logger that is not `nil` and whose state `ready` holds. They call the `Write` method of the writer the logger holds, so a function that prints through `l` lists `l`, as it lists `w`:
 
 ```go
 // @Requires w != nil And l != nil And ready(l)
-// @Modifies w
+// @Modifies w, l
 // @Ensures True
 func Inventory(w io.Writer, l *log.Logger, n int) (err error) {
 	l.Printf("%d items", n)
@@ -3914,10 +3914,11 @@ func LogsToZero() {
 vego: precondition of Printf may not hold: ready(l)
 ```
 
-`log.New` returns a logger whose state `ready` holds. It requires a writer that is not `nil` and a prefix of at most 4096 bytes. The logger keeps the writer, and its methods call the writer's `Write` later, as described in [Functions that keep what they are given](#functions-that-keep-what-they-are-given):
+`log.New` returns a logger whose state `ready` holds. It requires a writer that is not `nil` and a prefix of at most 4096 bytes. The logger keeps the writer, and its methods call the writer's `Write` later, as described in [Functions that keep what they are given](#functions-that-keep-what-they-are-given). What they write is what the writer writes, so a function that prints through a logger made over `w` lists `w`:
 
 ```go
 // @Requires w != nil
+// @Modifies w
 // @Ensures True
 func LogsTo(w io.Writer, n int) {
 	l := log.New(w, "app: ", log.LstdFlags)

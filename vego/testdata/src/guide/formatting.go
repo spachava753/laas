@@ -29,7 +29,7 @@ func ShowAll(values []any) {
 }
 
 // @Requires w != nil And l != nil And ready(l)
-// @Modifies w
+// @Modifies w, l
 // @Ensures True
 func Inventory(w io.Writer, l *log.Logger, n int) (err error) {
 	l.Printf("%d items", n)
@@ -100,6 +100,7 @@ func LogsToZero() {
 }
 
 // @Requires w != nil
+// @Modifies w
 // @Ensures True
 func LogsTo(w io.Writer, n int) {
 	l := log.New(w, "app: ", log.LstdFlags)

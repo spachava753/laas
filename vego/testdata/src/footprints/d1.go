@@ -35,6 +35,27 @@ func Relay(w io.Writer, rc io.ReadCloser, buf []byte) {
 	_ = rc.Close() // want `precondition of rc.Close may not hold: ~closed\(c\)`
 }
 
+// LogThenClose logs a line through a logger over w and then closes rc,
+// which the logger's write through w may have closed, as with Relay (F36 of
+// the review of step 4).
+//
+// @Requires w != nil And rc != nil And ~closed(rc)
+// @Modifies w, rc
+// @Ensures True
+func LogThenClose(w io.Writer, rc io.ReadCloser) {
+	l := log.New(w, "", 0)
+	l.Println("x")
+	_ = rc.Close() // want `precondition of rc.Close may not hold: ~closed\(c\)`
+}
+
+// LogsUnlisted prints through a logger it does not list.
+//
+// @Requires l != nil And ready(l)
+// @Ensures True
+func LogsUnlisted(l *log.Logger) {
+	l.Println("x") // want `vego: Println may modify l, which LogsUnlisted may not modify; list it in a // @Modifies clause, as l`
+}
+
 // CloseFirst closes rc before it writes, which keeps what it needs.
 //
 // @Requires w != nil And rc != nil And ~closed(rc)
@@ -145,7 +166,7 @@ func storesInto(b *Box) (p *Pair) { return &Pair{} }
 // @Modifies s, b
 // @Ensures True
 func PollutesInArgument(s Sink, b *Box) {
-	Touch(s, storesInto(b)) // want `the footprint of what is passed to Touch as s may hold memory that what is passed as storesInto\(b\) reaches, and Touch relies on it not doing so: the call of storesInto at d1.go:148:11 may store into memory it may modify a reference to memory of any origin`
+	Touch(s, storesInto(b)) // want `the footprint of what is passed to Touch as s may hold memory that what is passed as storesInto\(b\) reaches, and Touch relies on it not doing so: the call of storesInto at d1.go:\d+:\d+ may store into memory it may modify a reference to memory of any origin`
 }
 
 // KeepsMaybe writes through s when it is not nil, and keeps what q points
