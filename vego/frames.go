@@ -1146,22 +1146,37 @@ type loopKept struct {
 // at the default limit, since it stands for the goal itself.
 func (v *fnVerifier) framedLoop(st *state, at token.Pos, c *clause, node *logic.Node, goal *logic.Term) bool {
 	text := node.String()
-	tried := 0
-	for i := len(st.loops) - 1; i >= 0 && tried < 2; i-- {
-		k := st.loops[i]
-		if !slices.ContainsFunc(k.c.node.Conjuncts(), func(n *logic.Node) bool { return n.String() == text }) {
-			continue
-		}
-		tried++
-		if v.framedFrom(st, k, at, c, node, goal) {
-			return true
+	var heads []*loopKept
+	for i := len(st.loops) - 1; i >= 0 && len(heads) < 2; i-- {
+		if k := st.loops[i]; slices.ContainsFunc(k.c.node.Conjuncts(), func(n *logic.Node) bool { return n.String() == text }) {
+			heads = append(heads, k)
 		}
 	}
-	return false
+	// Each head by identity first, which asks nothing; then one question,
+	// from the latest head whose reading went alike, so that a conjunct
+	// that does not hold pays one limit before it is proved as before
+	// (F17 of the review).
+	var read []*loopKept
+	for _, k := range heads {
+		held, alike := v.framedFrom(st, k, at, c, node, goal, false)
+		if held {
+			return true
+		}
+		if alike {
+			read = append(read, k)
+		}
+	}
+	if len(read) == 0 {
+		return false
+	}
+	held, _ := v.framedFrom(st, read[0], at, c, node, goal, true)
+	return held
 }
 
-// framedFrom is framedLoop from one head.
-func (v *fnVerifier) framedFrom(end *state, k *loopKept, at token.Pos, c *clause, node *logic.Node, goal *logic.Term) bool {
+// framedFrom is framedLoop from one head: by identity, and with ask by a
+// question too. It reports whether the frame held and whether the two
+// readings went alike.
+func (v *fnVerifier) framedFrom(end *state, k *loopKept, at token.Pos, c *clause, node *logic.Node, goal *logic.Term, ask bool) (held, alike bool) {
 	head := k.head
 	read := func(split bool) (*framer, *logic.Term, bool) {
 		f := &framer{v: v, levels: [][]*logic.Term{nil}, labels: [][]string{nil}, differs: []string{""}, only: -1, split: split}
@@ -1173,15 +1188,16 @@ func (v *fnVerifier) framedFrom(end *state, k *loopKept, at token.Pos, c *clause
 		t, err := apart.Formula(node, &frameEnv{f: f, then: then, now: now})
 		return f, t, err == nil && !f.failed && len(f.levels) == 1
 	}
-	return v.asFrame(func() bool {
+	held = v.asFrame(func() bool {
 		f, _, ok := read(false)
 		if !ok {
 			return false
 		}
+		alike = true
 		if !f.differ {
 			return true
 		}
-		if !quantified(node) {
+		if !ask || !quantified(node) {
 			return false
 		}
 		// A Forall over one variable at the top is asked split, which
@@ -1217,4 +1233,5 @@ func (v *fnVerifier) framedFrom(end *state, k *loopKept, at token.Pos, c *clause
 		r := v.solver().Prove(slices.Clip(end.hyps), asked, v.options(0, frameAttempt))
 		return r == solver.Proved
 	})
+	return held, alike
 }
