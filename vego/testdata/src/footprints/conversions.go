@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"strings"
 	"sync/atomic"
 )
@@ -505,4 +506,111 @@ func useWrapped(i Incr, w *Wrapped) {
 // @Ensures True
 func UsesConversionWrapped(w *Wrapped) {
 	useWrapped(&w.C, w) // want `the footprint of &w.C is the struct that &w.C points to, which a value of type \*Wrapped can refer to`
+}
+
+// Store keeps what it is given in memory of its own.
+type Store interface {
+	// @Receiver s
+	// @Modifies s
+	// @Ensures True
+	Put(key string)
+}
+
+// Repo counts what is put into it.
+type Repo struct{ puts int }
+
+// @Requires r != nil
+// @Modifies r
+// @Ensures True
+func (r *Repo) Put(key string) {
+	if r.puts < 1000000 {
+		r.puts++
+	}
+}
+
+// handle puts into s what the request names.
+//
+// @Requires s != nil And req != nil
+// @Modifies s
+// @Ensures True
+func handle(s Store, req *http.Request) {
+	s.Put("x")
+}
+
+// Serve hands handle a repository converted at the call beside a request,
+// whose type reaches no Repo without going through an interface value.
+//
+// @Requires repo != nil And req != nil
+// @Modifies repo
+// @Ensures True
+func Serve(repo *Repo, req *http.Request) {
+	handle(repo, req)
+}
+
+// UsesNewBesideSame hands useWith a counter the function made beside a
+// counter it was given. The new one cannot be the other, but the types
+// alone cannot show it: that needs F20's rule for new memory that has not
+// escaped, which is not built.
+//
+// @Requires d != nil
+// @Ensures True
+func UsesNewBesideSame(d *Clicker) {
+	useWith(&Clicker{}, d) // want `the footprint of &Clicker\{\} is the struct that &Clicker\{\} points to, which a value of type \*Clicker can refer to`
+}
+
+// keepsInts increments i and keeps the first of xs.
+//
+// @Requires i != nil And |xs| > 0
+// @Modifies i
+// @Ensures xs'[0] = xs[0]
+func keepsInts(i Incr, xs []int) {
+	i.Inc()
+}
+
+// IntsBesideCounter hands keepsInts a converted counter, whose int is a
+// field and not an array, and a slice of ints, whose array cannot be it.
+//
+// @Requires c != nil And |xs| > 0
+// @Modifies c
+// @Ensures True
+func IntsBesideCounter(c *Clicker, xs []int) {
+	keepsInts(c, xs)
+}
+
+// keepsMap increments i beside a map.
+//
+// @Requires i != nil
+// @Modifies i
+// @Ensures True
+func keepsMap(i Incr, m map[string]Clicker) {
+	i.Inc()
+}
+
+// MapBesideCounter hands keepsMap a converted counter and a map of
+// counters by value, which the map holds in memory no pointer reaches.
+//
+// @Requires c != nil
+// @Modifies c
+// @Ensures True
+func MapBesideCounter(c *Clicker, m map[string]Clicker) {
+	keepsMap(c, m)
+}
+
+// keepsPointers increments i beside a map of pointers to counters.
+//
+// @Requires i != nil
+// @Modifies i
+// @Ensures True
+func keepsPointers(i Incr, m map[string]*Clicker) {
+	i.Inc()
+}
+
+// PointersBesideCounter hands keepsPointers a converted counter and a map
+// whose values may point to it.
+//
+// @Requires c != nil
+// @Modifies c
+// @Ensures True
+func PointersBesideCounter(c *Clicker, m map[string]*Clicker) {
+	keepsPointers(c, m) // want `the footprint of c is the struct that c points to, which a value of type map\[string\]\*Clicker can refer to`
 }

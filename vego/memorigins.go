@@ -1148,20 +1148,23 @@ func typeReaches(from, target types.Type, seen map[string]bool) bool {
 	if held, replaced := heldAs(from); replaced {
 		return held != nil && typeReaches(held, target, seen)
 	}
-	referred := func(t types.Type) bool {
-		return holdsInline(t, target, map[string]bool{}) || holdsInline(target, t, map[string]bool{}) || typeReaches(t, target, seen)
-	}
+	// A pointer may point to a value that holds the struct, or into the
+	// struct, at a field or an element. A slice's array may hold the
+	// struct, or be an array the struct holds, which s.a[:] makes of a
+	// field a, but never a field that is not an array. What a map or a
+	// channel holds lies in memory of its own that no pointer reaches, so
+	// they only lead on to what their keys and values refer to.
 	switch u := from.Underlying().(type) {
 	case *types.Basic:
 		return u.Kind() == types.UnsafePointer
 	case *types.Pointer:
-		return referred(u.Elem())
+		return holdsInline(u.Elem(), target, map[string]bool{}) || holdsInline(target, u.Elem(), map[string]bool{}) || typeReaches(u.Elem(), target, seen)
 	case *types.Slice:
-		return referred(u.Elem())
+		return holdsInline(u.Elem(), target, map[string]bool{}) || holdsArrayInline(target, u.Elem(), map[string]bool{}) || typeReaches(u.Elem(), target, seen)
 	case *types.Map:
-		return referred(u.Key()) || referred(u.Elem())
+		return typeReaches(u.Key(), target, seen) || typeReaches(u.Elem(), target, seen)
 	case *types.Chan:
-		return referred(u.Elem())
+		return typeReaches(u.Elem(), target, seen)
 	case *types.Array:
 		return typeReaches(u.Elem(), target, seen)
 	case *types.Struct:
@@ -1196,6 +1199,30 @@ func holdsInline(t, target types.Type, seen map[string]bool) bool {
 	case *types.Struct:
 		for field := range u.Fields() {
 			if holdsInline(field.Type(), target, seen) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// holdsArrayInline reports whether a value of type t holds in its own
+// memory, at any depth, an array whose elements have type elem, with types
+// the same as holdsInline takes them.
+func holdsArrayInline(t, elem types.Type, seen map[string]bool) bool {
+	if seen[typeKey(t)] {
+		return false
+	}
+	seen[typeKey(t)] = true
+	if _, replaced := heldAs(t); replaced {
+		return false
+	}
+	switch u := t.Underlying().(type) {
+	case *types.Array:
+		return typeKey(u.Elem().Underlying()) == typeKey(elem.Underlying()) || holdsArrayInline(u.Elem(), elem, seen)
+	case *types.Struct:
+		for field := range u.Fields() {
+			if holdsArrayInline(field.Type(), elem, seen) {
 				return true
 			}
 		}

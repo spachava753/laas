@@ -654,6 +654,7 @@ footprints	(*footprints.Counter).Put	12	10810	0
 footprints	(*footprints.Linked).Inc	12	11717	0
 footprints	(*footprints.Outer).Inc	9	5161	0
 footprints	(*footprints.Quiet).Put	14	10991	0
+footprints	(*footprints.Repo).Put	9	6586	0
 footprints	(*footprints.Users).config	2	474	0
 footprints	(*footprints.Users).lookup	2	572	0
 footprints	(*footprints.boundedTally).Write	13	17450	0
@@ -722,6 +723,7 @@ footprints	footprints.HelperStores	14	23705	0
 footprints	footprints.InLiteral	8	13630	0
 footprints	footprints.InLoop	16	16835	0
 footprints	footprints.Incr.Inc	4	1915	0
+footprints	footprints.IntsBesideCounter	11	20432	0
 footprints	footprints.Keeps	8	17429	0
 footprints	footprints.KeepsBeside	13	44429	0
 footprints	footprints.KeepsDeep	8	17815	0
@@ -746,6 +748,7 @@ footprints	footprints.MakeAndWrite	14	39563	1
 footprints	footprints.MakeOld	13	17621	0
 footprints	footprints.Maker.New	3	4584	0
 footprints	footprints.Maker.Touch	4	1915	0
+footprints	footprints.MapBesideCounter	10	17608	0
 footprints	footprints.MapStores	15	32982	0
 footprints	footprints.MayBeSame	11	21673	0
 footprints	footprints.MayFail	25	33549	0
@@ -767,6 +770,7 @@ footprints	footprints.Peeked	14	20359	0
 footprints	footprints.Peeker.Peek	3	1980	0
 footprints	footprints.PickedFrom	9	41445	0
 footprints	footprints.PickedFromUnknown	12	52965	0
+footprints	footprints.PointersBesideCounter	10	17608	0
 footprints	footprints.PollutesInArgument	15	459491	4
 footprints	footprints.Put	6	1821	0
 footprints	footprints.PutN	8	6763	0
@@ -785,6 +789,7 @@ footprints	footprints.RepointField	20	45128	0
 footprints	footprints.RepointMap	20	4044388	1
 footprints	footprints.ResetsByProject	3	3067	0
 footprints	footprints.Reuser.Make	3	6597	0
+footprints	footprints.Serve	11	19716	0
 footprints	footprints.Shelf.Items	3	1801	0
 footprints	footprints.Shelves.All	3	5479	0
 footprints	footprints.Sink.Put	3	6615	0
@@ -792,6 +797,7 @@ footprints	footprints.SinkMaker	3	7675	0
 footprints	footprints.Sliced	13	17986	0
 footprints	footprints.Spreads	18	34438	0
 footprints	footprints.StateLost	15	26626	0
+footprints	footprints.Store.Put	4	3352	0
 footprints	footprints.StoreThenPut	14	31301	0
 footprints	footprints.StoredNew	12	13545	0
 footprints	footprints.StoresInTable	9	15465	0
@@ -813,6 +819,7 @@ footprints	footprints.UsesConversionAtomic	11	17463	0
 footprints	footprints.UsesConversionWrapped	12	16481	0
 footprints	footprints.UsesConvertedVar	12	30826	0
 footprints	footprints.UsesMaker	10	12095	0
+footprints	footprints.UsesNewBesideSame	9	15261	0
 footprints	footprints.UsesNewConversion	10	25828	0
 footprints	footprints.ViaCopy	17	681464	7
 footprints	footprints.ViaSearch	21	50421	0
@@ -842,8 +849,12 @@ footprints	footprints.first	7	1824	0
 footprints	footprints.firstOf	3	772	0
 footprints	footprints.get	4	2012	0
 footprints	footprints.grownTable	1	3260	0
+footprints	footprints.handle	7	7613	0
 footprints	footprints.keepAll	8	5991	0
 footprints	footprints.keepsInner	7	6667	0
+footprints	footprints.keepsInts	7	10478	0
+footprints	footprints.keepsMap	7	4957	0
+footprints	footprints.keepsPointers	7	4957	0
 footprints	footprints.keepsTwin	7	6667	0
 footprints	footprints.later	3	1956	0
 footprints	footprints.pairTable	1	4060	0
