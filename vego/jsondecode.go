@@ -134,6 +134,9 @@ func (v *fnVerifier) checkDecodable(call *ast.CallExpr, fn *funcInfo) {
 	if target.why == "" {
 		target.why, _ = jsonPlainReason(v.pass.Pkg, v.pass.TypesSizes, target.t, strings.TrimPrefix(types.ExprString(into), "&"))
 	}
+	if target.why == "" && target.pointer != nil {
+		_, target.why = keptFields(target.t, v.pass.Pkg)
+	}
 	if target.why != "" {
 		v.unsupported(at, fmt.Sprintf("%s decodes into %s, and %s", fn.obj.Name(), types.ExprString(into), target.why))
 	}
@@ -204,6 +207,54 @@ func decodedLeafIn(t types.Type, path string) (string, bool) {
 	return written, false
 }
 
+// keptFields returns the paths of the fields of a struct of type t that
+// encoding/json does not write, at any depth through structs held by value,
+// each a field whose value a formula of the package compares whole: a
+// number, a boolean, a string, an error, an interface value, a map, or a
+// pointer. It says why the type is refused when such a field is a slice,
+// whose array a formula cannot compare, a field of a type vego does not
+// model, or an unexported field of a struct of another package, which a
+// formula here cannot name.
+func keptFields(t types.Type, pkg *types.Package) ([]string, string) {
+	leaves, _ := layoutOf(t)
+	var kept []string
+	seen := map[string]bool{}
+	for _, l := range leaves {
+		if written, _ := decodedLeaf(t, l.path); written {
+			continue
+		}
+		path := strings.SplitN(l.path, "#", 2)[0]
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
+		// Every step must be a field a formula here can name.
+		cur := t
+		for _, name := range strings.Split(strings.TrimPrefix(path, "."), ".") {
+			st, ok := cur.Underlying().(*types.Struct)
+			if !ok {
+				break
+			}
+			for field := range st.Fields() {
+				if field.Name() == name {
+					if !field.Exported() && field.Pkg() != pkg {
+						return nil, fmt.Sprintf("its field %s of package %s keeps its value, which a formula here cannot name", strings.TrimPrefix(path, "."), field.Pkg().Path())
+					}
+					cur = field.Type()
+				}
+			}
+		}
+		switch {
+		case l.part == partHidden || l.part == partState:
+			return nil, fmt.Sprintf("its field %s keeps its value, and vego does not model its type", strings.TrimPrefix(path, "."))
+		case l.part == partRef || l.part == partOff || l.part == partLen || l.part == partCap:
+			return nil, fmt.Sprintf("its field %s is a slice that Unmarshal leaves as it was, which vego cannot yet state; give the field a json tag that it decodes, or keep it out of the type", strings.TrimPrefix(path, "."))
+		}
+		kept = append(kept, path)
+	}
+	return kept, ""
+}
+
 // decodeFactor bounds, for each byte of the data, what one allocation of
 // the decoder may take: a string grows to three times the data (an invalid
 // byte becomes U+FFFD) in a buffer that doubles, a slice holds an element
@@ -244,17 +295,15 @@ func (v *fnVerifier) callDecode(call *ast.CallExpr, fn *funcInfo, st *state, gua
 	}
 	params := []*types.Var{types.NewParam(data.Pos(), v.pass.Pkg, "data", byteSlice)}
 	results := []*types.Var{}
-	var modifies []string
+	var modifies, kept []string
 	if target.pointer != nil {
+		// The frame is the struct p points to, every field of it (F25 of
+		// the review of step 3: a path to a field that holds a reference
+		// names what it refers to, not the field), and what json does not
+		// write keeps its value, said in the caller's terms (F26).
 		params = append(params, types.NewParam(target.pointer.Pos(), v.pass.Pkg, "p", types.NewPointer(target.t)))
-		leaves, _ := layoutOf(target.t)
-		seen := map[string]bool{}
-		for _, l := range leaves {
-			if written, path := decodedLeaf(target.t, l.path); written && path != "" && !seen[path] {
-				seen[path] = true
-				modifies = append(modifies, "p"+path)
-			}
-		}
+		modifies = []string{"p"}
+		kept, _ = keptFields(target.t, v.pass.Pkg)
 	} else {
 		results = append(results, types.NewParam(target.place.Pos(), v.pass.Pkg, "r", target.t))
 	}
@@ -262,6 +311,9 @@ func (v *fnVerifier) callDecode(call *ast.CallExpr, fn *funcInfo, st *state, gua
 	obj := types.NewFunc(call.Pos(), fn.obj.Pkg(), fn.obj.Name(), types.NewSignatureType(nil, nil, nil, types.NewTuple(params...), types.NewTuple(results...), false))
 	view := newFuncInfo(obj)
 	view.trust = fn.trust
+	// Its formulas are the caller's: they name the fields of what it
+	// decodes into, which may be unexported in the caller's package (F26).
+	view.spelled = newFuncInfo(types.NewFunc(call.Pos(), v.pass.Pkg, fn.obj.Name(), obj.Type().(*types.Signature)))
 	view.vouches[len(results)-1] = fn.vouches[0]
 	factor := decodeFactor(target.t, v.pass.TypesSizes, map[types.Type]bool{})
 	for _, text := range []string{
@@ -283,7 +335,15 @@ func (v *fnVerifier) callDecode(call *ast.CallExpr, fn *funcInfo, st *state, gua
 		if err != nil {
 			panic("vego: internal error: " + err.Error())
 		}
-		view.modifies = append(view.modifies, newModTargets(targets, &clause{kind: "modifies", text: text, pos: call.Pos(), res: v.pkgVerifier.plain})...)
+		view.modifies = append(view.modifies, newModTargets(targets, &clause{kind: "modifies", text: text, pos: call.Pos()})...)
+	}
+	for _, path := range kept {
+		text := "p" + path + "' = p" + path
+		node, err := logic.ParseFormula(text)
+		if err != nil {
+			panic("vego: internal error: " + err.Error())
+		}
+		view.ensures = append(view.ensures, &clause{kind: "ensures", text: text, node: node, pos: call.Pos()})
 	}
 	// The arguments, as the call evaluates them: the data, and the
 	// pointer or what the place holds now.

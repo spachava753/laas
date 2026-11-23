@@ -51,8 +51,9 @@ type Leaves struct {
 }
 
 type Inner struct {
-	Text string
-	Tags []string
+	Text   string
+	Tags   []string
+	secret int
 }
 
 // Flat is what a map's value may hold: no slice or map of elements of
@@ -73,8 +74,9 @@ type Nest struct {
 }
 
 type inner struct {
-	Tags []string
-	Text string
+	Tags   []string
+	Text   string
+	hidden string
 }
 
 type innerP struct {

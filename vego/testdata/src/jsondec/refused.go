@@ -18,7 +18,7 @@ func IntoUsed(data []byte, p *Req) (err error) {
 // @Requires p != nil And |data| <= 1000000 And cap(p.Tags) = 0
 // @Ensures True
 func IntoUnlisted(data []byte, p *Req) (err error) {
-	return json.Unmarshal(data, p) // want `Unmarshal may modify what it calls p\.Text, which IntoUnlisted may not modify; list it in a // @Modifies clause, as p\.Text`
+	return json.Unmarshal(data, p) // want `Unmarshal may modify p, which IntoUnlisted may not modify; list it in a // @Modifies clause, as p\.Text`
 }
 
 // Unbounded decodes data of any length.

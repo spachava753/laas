@@ -234,20 +234,11 @@ func checkDecode(name string, t reflect.Type, v reflect.Value, errTypes map[stri
 	for _, in := range inputs {
 		data := append([]byte(nil), in...)
 		p := reflect.New(t)
-		// Unexported fields get values, which must be kept.
+		// Unexported fields get values at every depth the value holds by
+		// value, embedded structs included, which must be kept (F27).
 		var kept []reflect.Value
 		var copies []any
-		if p.Elem().Kind() == reflect.Struct {
-			for i := range p.Elem().NumField() {
-				f := p.Elem().Type().Field(i)
-				if !f.IsExported() && !f.Anonymous {
-					fv := settable(p.Elem().Field(i))
-					fill(rand.New(rand.NewPCG(uint64(i), 3)), fv, 3)
-					kept = append(kept, fv)
-					copies = append(copies, reflect.ValueOf(fv.Interface()).Interface())
-				}
-			}
-		}
+		plant(p.Elem(), &kept, &copies)
 		calls.Store(0)
 		err := json.Unmarshal(data, p.Interface())
 		if err != nil {
@@ -264,6 +255,9 @@ func checkDecode(name string, t reflect.Type, v reflect.Value, errTypes map[stri
 				fail("%s: Unmarshal wrote an unexported field", name)
 			}
 		}
+		// What it allocated behind a pointer has its unexported fields
+		// zero.
+		zeroBehind(name, p.Elem(), false)
 		// Nothing decoded lies in the data's array.
 		reached := map[uintptr]reflect.Type{}
 		reach(p.Elem(), reached, map[uintptr]bool{})
@@ -337,6 +331,56 @@ func checkDecoder(name string, t reflect.Type, v reflect.Value, errTypes map[str
 					fail("%s: the decoder decoded %s where Unmarshal decodes %s", name, clip(a), clip(b))
 				}
 			}
+		}
+	}
+}
+
+// plant fills every unexported field of what v holds by value, at any
+// depth through structs, and records each with a copy of its value.
+func plant(v reflect.Value, kept *[]reflect.Value, copies *[]any) {
+	if v.Kind() != reflect.Struct || v.Type() == timeType {
+		return
+	}
+	for i := range v.NumField() {
+		f := v.Type().Field(i)
+		fv := settable(v.Field(i))
+		if !f.IsExported() && !f.Anonymous {
+			fill(rand.New(rand.NewPCG(uint64(len(*kept)), 3)), fv, 3)
+			*kept = append(*kept, fv)
+			*copies = append(*copies, reflect.ValueOf(fv.Interface()).Interface())
+			continue
+		}
+		plant(fv, kept, copies)
+	}
+}
+
+// zeroBehind fails when a struct that Unmarshal allocated behind a pointer
+// has an unexported field that is not zero.
+func zeroBehind(name string, v reflect.Value, allocated bool) {
+	switch v.Kind() {
+	case reflect.Pointer:
+		if !v.IsNil() {
+			zeroBehind(name, v.Elem(), true)
+		}
+	case reflect.Slice:
+		for i := range v.Len() {
+			zeroBehind(name, v.Index(i), true)
+		}
+	case reflect.Map:
+		for _, k := range v.MapKeys() {
+			zeroBehind(name, v.MapIndex(k), true)
+		}
+	case reflect.Struct:
+		if v.Type() == timeType {
+			return
+		}
+		for i := range v.NumField() {
+			f := v.Type().Field(i)
+			fv := v.Field(i)
+			if allocated && !f.IsExported() && !f.Anonymous && !fv.IsZero() {
+				fail("%s: what Unmarshal allocated has the unexported field %s set", name, f.Name)
+			}
+			zeroBehind(name, fv, allocated)
 		}
 	}
 }
