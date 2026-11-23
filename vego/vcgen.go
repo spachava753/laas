@@ -274,6 +274,9 @@ type fnVerifier struct {
 	trees      []errorTree
 	isTargets  []*logic.Term
 	targetSeen map[string]bool
+	// frameNames is set while a frame is asked: names are made in its
+	// namespace, and what it materializes is dropped after; see frames.go.
+	frameNames *frameNamespace
 }
 
 // run executes one task on a function, turning the panics that abandon a
@@ -397,7 +400,7 @@ func (v *fnVerifier) enter() *state {
 	// Every caller has proved the invariants of what it passes.
 	for _, param := range fn.params {
 		if v.entry[param] != nil {
-			v.assumeInvariants(st, nil, memory{}, v.entry[param], param.Type())
+			v.assumeInvariants(st, nil, memory{}, v.entry[param], param.Type(), true)
 		}
 	}
 	for _, result := range fn.results {
@@ -412,7 +415,7 @@ func (v *fnVerifier) enter() *state {
 	}
 	pre := &specEnv{v: v, sink: st, fn: fn, args: v.entry, now: memory{}}
 	for _, c := range fn.requires {
-		st.assume(v.formula(c, c.node, pre))
+		v.assumeKeeping(st, c, pre)
 	}
 	v.frame = v.targets(fn, v.entry, st, memory{})
 	v.used = make([]bool, len(v.frame))
@@ -686,6 +689,12 @@ func (v *fnVerifier) fresh(base string, sort logic.Sort) *logic.Term {
 	if strings.HasPrefix(base, transportMark) {
 		panic("vego: internal error: a name is made in the namespace of renamed states")
 	}
+	// A frame makes its names in a namespace of its own, which nothing
+	// outside it sees; see frames.go.
+	if f := v.frameNames; f != nil {
+		f.count++
+		return logic.Const(fmt.Sprintf("%s%s@%d", frameMark, base, f.count), sort)
+	}
 	v.names[base]++
 	name := fmt.Sprintf("%s@%d", base, v.names[base])
 	v.made = append(v.made, name)
@@ -730,6 +739,11 @@ func (v *fnVerifier) intTerm(c *clause, env logic.Env) *logic.Term {
 // proof fails. The goal is assumed afterwards either way so that one failure
 // is reported once instead of cascading.
 func (v *fnVerifier) check(st *state, guard []*logic.Term, goal *logic.Term, pos token.Pos, format string, args ...any) {
+	v.checkOnly(st, guard, goal, true, pos, format, args...)
+}
+
+// checkOnly is check, which assumes the goal afterwards only when told to.
+func (v *fnVerifier) checkOnly(st *state, guard []*logic.Term, goal *logic.Term, assume bool, pos token.Pos, format string, args ...any) {
 	for _, conjunct := range logic.Conjuncts(goal) {
 		if conjunct.Op == logic.OpTrue {
 			continue
@@ -746,17 +760,18 @@ func (v *fnVerifier) check(st *state, guard []*logic.Term, goal *logic.Term, pos
 			}
 			v.report(pos, "%s%s%s", fmt.Sprintf(format, args...), lost, limitNote(result))
 		}
-		st.assume(logic.Implies(logic.And(guard...), conjunct))
+		if assume {
+			st.assume(logic.Implies(logic.And(guard...), conjunct))
+		}
 	}
 }
 
 // checkClause checks every conjunct of an annotation separately so that the
 // diagnostic can quote the part that failed.
+//
+// A conjunct that is valid(x) may be proved by a frame (frames.go).
 func (v *fnVerifier) checkClause(c *clause, env logic.Env, st *state, guard []*logic.Term, pos token.Pos, what string) {
-	for _, node := range c.node.Conjuncts() {
-		text := strings.Join(strings.Fields(c.text[node.Start:node.End]), " ")
-		v.check(st, guard, v.formula(c, node, env), pos, "%s: %s", what, text)
-	}
+	v.checkClauseFramed(c, env, st, guard, pos, what, nil)
 }
 
 // seq executes a statement list. Annotations between two statements are

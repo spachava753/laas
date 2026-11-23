@@ -175,7 +175,7 @@ func (pv *pkgVerifier) checkInvariantsDeclared() {
 			}
 			st := &state{vals: map[*types.Var]value{}, mem: memory{}, brk: logic.Const("brk", logic.Ref), noted: map[string]bool{}}
 			self := v.unknown("self", name.Type(), st)
-			v.assumeInvariants(st, nil, st.mem, self, name.Type())
+			v.assumeInvariants(st, nil, st.mem, self, name.Type(), false)
 			if pv.contradictory(st.hyps) {
 				set.broken = true
 				pv.report(set.clauses[0].pos, "the invariants of %s contradict each other, so no value of the type could exist", name.Name())
@@ -288,7 +288,10 @@ func (v *fnVerifier) invariantSteps(sink *state, mem memory, val value, t types.
 
 // assumeInvariants adds the invariants of a value to the state, for a
 // pointer on condition that it is not nil, with those of what it owns.
-func (v *fnVerifier) assumeInvariants(st *state, guard []*logic.Term, mem memory, val value, t types.Type) {
+//
+// With keep, a point where the path of st assumes them with no condition
+// of evaluation around them, each step is kept for a frame (frames.go).
+func (v *fnVerifier) assumeInvariants(st *state, guard []*logic.Term, mem memory, val value, t types.Type, keep bool) {
 	for _, step := range v.invariantSteps(st, mem, val, t, guard, "", map[types.Type]bool{}) {
 		if step.set.broken {
 			v.unusableInvariants(step.set, v.fn.obj.Pos())
@@ -297,6 +300,9 @@ func (v *fnVerifier) assumeInvariants(st *state, guard []*logic.Term, mem memory
 		env := v.invariantEnv(step.set, st, mem, step.val, step.t)
 		for _, c := range step.set.clauses {
 			st.assume(logic.Implies(logic.And(step.guard...), v.formula(c, c.node, env)))
+		}
+		if keep && len(guard) == 0 {
+			st.keep(step, mem)
 		}
 	}
 }
@@ -317,7 +323,8 @@ func (v *fnVerifier) checkInvariants(st *state, guard []*logic.Term, mem memory,
 			if step.through != "" {
 				about = fmt.Sprintf("%s, in what it owns at %s", what, step.through)
 			}
-			v.checkClause(c, env, st, step.guard, pos, fmt.Sprintf("invariant of %s may not hold for %s", step.set.name.Name(), about))
+			v.checkClauseFramed(c, env, st, step.guard, pos, fmt.Sprintf("invariant of %s may not hold for %s", step.set.name.Name(), about),
+				func(node *logic.Node) bool { return v.framedStep(st, step, mem, c, node) })
 		}
 	}
 }

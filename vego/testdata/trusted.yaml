@@ -2198,6 +2198,14 @@ trusted:
     vouches: [result2]
     modifies: []
 
+  frames.each:
+    reason: Test helper that calls f with each number below n.
+    runs: [f]
+    calls:
+      f(i):
+        requires: ["0 <= i < n"]
+    modifies: []
+
 # States of interfaces of another module, and contracts that speak of them.
 state:
   ifacestatelib.Conn:

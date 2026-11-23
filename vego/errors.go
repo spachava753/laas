@@ -922,12 +922,12 @@ func (v *fnVerifier) contractInstance(entry *state) (pre, post, failures []*logi
 	if fn.trust == nil {
 		for _, param := range fn.params {
 			if v.entry[param] != nil {
-				v.assumeInvariants(st, nil, st.mem, v.entry[param], param.Type())
+				v.assumeInvariants(st, nil, st.mem, v.entry[param], param.Type(), false)
 			}
 		}
 		for i, result := range fn.results {
 			if results[i] != nil {
-				v.assumeInvariants(st, nil, st.mem, results[i], result.Type())
+				v.assumeInvariants(st, nil, st.mem, results[i], result.Type(), false)
 			}
 		}
 	}

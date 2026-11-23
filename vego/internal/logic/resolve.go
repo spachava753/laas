@@ -118,7 +118,11 @@ type Resolver struct {
 	// Prefix keeps the predicates of different packages apart when their
 	// terms meet in one proof.
 	Prefix string
-	fresh  int
+	// Mark, when set, starts the name of every bound variable the
+	// resolver makes, so that the names of a resolver kept apart from
+	// another never meet that one's.
+	Mark  string
+	fresh int
 }
 
 // NewResolver returns a resolver with no predicates defined.
@@ -144,7 +148,7 @@ type comparedKey struct {
 
 func (r *Resolver) newBound(name string, sort Sort) *Term {
 	r.fresh++
-	return Bound(fmt.Sprintf("%s#%d", name, r.fresh), sort)
+	return Bound(fmt.Sprintf("%s%s#%d", r.Mark, name, r.fresh), sort)
 }
 
 // Formula resolves a parsed clause that must be a formula.

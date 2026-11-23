@@ -71,6 +71,16 @@ type state struct {
 	// takes them as premises and states them on their own (see
 	// specEnv.OpenBound).
 	collecting bool
+	// collectAll is set, with collecting, for a state that gathers the
+	// facts of reads under a quantifier for a frame (frames.go): what every
+	// layer and join keeps at the cell, not only those a write through a
+	// footprint leaves.
+	collectAll bool
+	// kept holds where the invariants of values held on this path: each
+	// entry says that a struct's invariants held of a value in a memory
+	// of the path, so that a later goal can be proved by showing that
+	// nothing they read has changed since (frames.go).
+	kept []*keptEntry
 }
 
 // deferredCall is a call that a defer statement put off: the call, the
@@ -100,6 +110,7 @@ func (st *state) clone() *state {
 		vals: maps.Clone(st.vals), mem: maps.Clone(st.mem), brk: st.brk,
 		hyps: slices.Clone(st.hyps), chosen: slices.Clone(st.chosen), noted: maps.Clone(st.noted),
 		deferred: slices.Clone(st.deferred), snapshots: st.snapshots, visited: st.visited,
+		kept: slices.Clip(st.kept),
 	}
 }
 
@@ -317,7 +328,7 @@ func (v *fnVerifier) tableAt(sink *state, mem memory, key string, sort logic.Sor
 		// What gathers the facts of reads under a quantifier wants only
 		// what a write through a footprint keeps; the other layers and
 		// joins were never stated under a quantifier and are not now.
-		if sink.collecting {
+		if sink.collecting && !sink.collectAll {
 			if known := v.layers[at.Name]; known != nil {
 				if hasFootprintTarget(known.targets) || hasSourcePart(known.targets) {
 					v.distinctStructs(sink, known, key, ref, position)
@@ -352,7 +363,11 @@ func (v *fnVerifier) tableAt(sink *state, mem memory, key string, sort logic.Sor
 				sink.noted[note] = true
 				fact := v.joinedAt(at, joined, ref)
 				sink.assume(fact)
-				v.forwards[joined.forward].facts = append(v.forwards[joined.forward].facts, fact)
+				// What a frame reads is a premise of its own question
+				// only, and no failure is tied through it.
+				if v.frameNames == nil {
+					v.forwards[joined.forward].facts = append(v.forwards[joined.forward].facts, fact)
+				}
 			}
 			pending = append(pending, joined.alternatives...)
 		}

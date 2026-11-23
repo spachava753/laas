@@ -507,6 +507,8 @@ func (v *fnVerifier) join(st *state, ends []litEnd, sig *types.Signature) []valu
 	case 1:
 		end := ends[0].st
 		st.vals, st.mem, st.brk, st.hyps, st.chosen, st.noted = keep(end.vals), end.mem, end.brk, end.hyps, end.chosen, end.noted
+		// The one end continues the path of st, with what it kept.
+		st.kept = end.kept
 		return ends[0].results
 	}
 	path := v.fresh("path", logic.Int)
@@ -660,6 +662,9 @@ func (v *fnVerifier) joinedAt(now *logic.Term, joined *joinedRegion, ref *logic.
 // executed says through which calls it was reached, since the body is
 // verified at each of them.
 func (v *fnVerifier) report(pos token.Pos, format string, args ...any) {
+	if v.frameNames != nil {
+		panic(frameAbort{})
+	}
 	if len(v.sites) > 0 {
 		var through []string
 		for _, site := range v.sites {

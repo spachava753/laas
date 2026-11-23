@@ -656,7 +656,7 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 		shape.bind(head, counter)
 	}
 	for _, c := range spec.invariants {
-		head.assume(v.formula(c, c.node, v.bodyEnv(head, at)))
+		v.assumeKeeping(head, c, v.bodyEnv(head, at))
 	}
 	// What is known of the unknowns at the head: their types, and the
 	// invariants, on every path that comes to the loop; see tieFailures.

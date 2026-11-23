@@ -114,11 +114,21 @@ func (v *fnVerifier) materialize(name string, sort logic.Sort) {
 		joined := *e.joined
 		joined.alternatives = alternatives
 		v.joins[name] = &joined
+		if v.frameNames != nil {
+			// A frame reads it before the function does: it is made again,
+			// the same, when the function first reads it, so that
+			// everything after the frame is what it was without it.
+			v.frameNames.materialized = append(v.frameNames.materialized, name)
+			return
+		}
 		v.forwards[joined.forward].produced = append(v.forwards[joined.forward].produced, name)
 		return
 	}
 	flat := !sort.Elem().IsSeq()
 	v.layers[name] = &layer{prev: e.before.region(key, sort), bound: e.bound, targets: e.targets, key: key, flat: flat}
+	if v.frameNames != nil {
+		v.frameNames.materialized = append(v.frameNames.materialized, name)
+	}
 }
 
 // startEpoch makes every region of memory, also one not yet in the map, a

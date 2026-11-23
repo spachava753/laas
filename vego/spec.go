@@ -77,6 +77,15 @@ type specEnv struct {
 	// frames holds, for each quantifier being read, the state that gathers
 	// the facts of its reads and the verifier's gatherer around it.
 	frames []boundFrame
+	// framed is set for one of the two readings of a frame (frames.go):
+	// under a quantifier it gathers what every layer and join keeps at the
+	// cells it reads, in any function, for the premises of the frame's
+	// question.
+	framed bool
+	// validFound, when set, receives the steps of each valid(x) read at
+	// the formula's top level, outside any quantifier, with the memory
+	// they are read in, for a frame (frames.go).
+	validFound *[]validFound
 }
 
 // boundFrame is what OpenBound saves for one quantifier: its variables, the
@@ -99,8 +108,8 @@ func (e *specEnv) OpenBound(vars []*logic.Term) {
 	// Only a function whose other parameters are assumed apart from a
 	// footprint it lists can use what is gathered, which is what a write
 	// through that footprint keeps; elsewhere it would only cost.
-	if e.sink != nil && e.v.listsFootprint() {
-		frame.scratch = &state{brk: e.sink.brk, noted: map[string]bool{}, collecting: true}
+	if e.sink != nil && (e.framed || e.v.listsFootprint()) {
+		frame.scratch = &state{brk: e.sink.brk, noted: map[string]bool{}, collecting: true, collectAll: e.framed}
 	}
 	e.frames = append(e.frames, frame)
 	e.v.boundSink = frame.scratch
@@ -2193,6 +2202,7 @@ func (e *specEnv) valid(path logic.Path) (*logic.Term, error) {
 		return nil, fmt.Errorf("valid(%s): %s is not a struct or a pointer to one", spelled, spelled)
 	}
 	steps := e.v.invariantSteps(found.sink, found.mem, found.val, found.typ, nil, "", map[types.Type]bool{})
+
 	if len(steps) == 0 {
 		if !isPointer {
 			object = found.typ
@@ -2201,6 +2211,7 @@ func (e *specEnv) valid(path logic.Path) (*logic.Term, error) {
 			types.TypeString(object, types.RelativeTo(e.v.pass.Pkg)))
 	}
 	var conjuncts []*logic.Term
+	var clauses [][]*logic.Term
 	for _, step := range steps {
 		if step.set.broken {
 			why := "an Invariant annotation of " + step.set.name.Name() + " could not be read, or they contradict each other, as reported at them"
@@ -2210,9 +2221,16 @@ func (e *specEnv) valid(path logic.Path) (*logic.Term, error) {
 			return nil, fmt.Errorf("valid(%s): the invariants of %s cannot be used: %s", spelled, step.set.name.Name(), why)
 		}
 		env := e.v.invariantEnv(step.set, found.sink, found.mem, step.val, step.t)
+		var terms []*logic.Term
 		for _, c := range step.set.clauses {
-			conjuncts = append(conjuncts, logic.Implies(logic.And(step.guard...), e.v.formula(c, c.node, env)))
+			term := logic.Implies(logic.And(step.guard...), e.v.formula(c, c.node, env))
+			conjuncts = append(conjuncts, term)
+			terms = append(terms, term)
 		}
+		clauses = append(clauses, terms)
+	}
+	if e.validFound != nil && found.sink == e.sink && len(e.frames) == 0 {
+		*e.validFound = append(*e.validFound, validFound{steps: steps, mem: found.mem, terms: clauses})
 	}
 	return logic.And(conjuncts...), nil
 }

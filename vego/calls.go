@@ -883,9 +883,12 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	// Resolving the promise notes more of what the types guarantee, so that
 	// is done before the state is looked at for the first time.
 	promised := make([]*logic.Term, len(fn.ensures))
+	kept := make([][]validFound, len(fn.ensures))
 	v.lazyRows = true
 	for i, c := range fn.ensures {
+		post.validFound = &kept[i]
 		promised[i] = v.calleeFormula(c, post)
+		post.validFound = nil
 	}
 	v.lazyRows = false
 	// The question for a contradiction takes what the claims of this
@@ -896,8 +899,15 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	claimDefs := v.claimDefs
 	v.claimDefs = nil
 	dead := (fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil) || v.quickly(st, involved, logic.False())
-	for _, promise := range promised {
+	for i, promise := range promised {
 		st.assume(logic.Implies(logic.And(guard...), promise))
+		// Where the promise says valid(x) with no condition around it,
+		// a frame may start from it (frames.go). A clause that names a
+		// result with no value is not assumed (calleeFormula), and what
+		// its reading found is not kept either.
+		if len(guard) == 0 && promise.Op != logic.OpTrue {
+			keepValid(st, fn.ensures[i], kept[i])
+		}
 	}
 	if !dead && v.quickly(st, append(slices.Clip(involved), claimDefs...), logic.False()) {
 		what := "trusted contract of " + name
@@ -916,12 +926,12 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	if fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil {
 		for _, param := range fn.params {
 			if args[param] != nil {
-				v.assumeInvariants(st, guard, st.mem, args[param], param.Type())
+				v.assumeInvariants(st, guard, st.mem, args[param], param.Type(), true)
 			}
 		}
 		for i, result := range results {
 			if result != nil {
-				v.assumeInvariants(st, guard, st.mem, result, sig.Results().At(i).Type())
+				v.assumeInvariants(st, guard, st.mem, result, sig.Results().At(i).Type(), true)
 			}
 		}
 	}
