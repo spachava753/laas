@@ -484,9 +484,16 @@ func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur va
 	if fl == nil {
 		fl = &ownFlow{}
 	}
-	if key != nil && fl.made[key] && !isIface(t) {
+	if key != nil && fl.made[key] {
 		flowMade = true
-		options = append(options, ownedMadeSince(val, v.entryBrk))
+		if isIface(t) {
+			// A value converted from new memory nothing else refers to,
+			// here or into a variable, has a new home and a new row (F34
+			// of the review of step 3b).
+			options = append(options, logic.And(logic.Le(v.entryBrk, home(val[0])), v.rowNewOrIn(st.mem, home(val[0]), v.entryBrk, nil, nil)))
+		} else {
+			options = append(options, ownedMadeSince(val, v.entryBrk))
+		}
 	}
 	result := v.attempt(st, guard, logic.Or(options...))
 	// What follows is verified as if the store were one of those, as after
@@ -508,7 +515,11 @@ func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur va
 	}
 	// What is not new since the function was entered is memory the owner
 	// did not own, which no form of the store may bring in.
-	old := !v.quickly(st, guard, logic.Or(ownedNothing(val, t), ownedMadeSince(val, v.entryBrk)))
+	newSinceEntry := ownedMadeSince(val, v.entryBrk)
+	if isIface(t) {
+		newSinceEntry = logic.And(logic.Le(v.entryBrk, home(val[0])), v.rowNewOrIn(st.mem, home(val[0]), v.entryBrk, nil, nil))
+	}
+	old := !v.quickly(st, guard, logic.Or(ownedNothing(val, t), newSinceEntry))
 	switch {
 	case flowMade && call != nil && !promisesFresh(call.fn, 0):
 		v.report(pos, "what is stored into %s comes from the call of %s, which returns memory nothing else refers to, but its contract does not say "+
@@ -771,14 +782,20 @@ func (v *fnVerifier) checkOwnArguments(call *ast.CallExpr, name string) {
 	}
 	operands := fl.operands[call]
 	owners := map[types.Type]bool{}
+	typeOf := func(op ownOperand) types.Type {
+		if t := v.info.TypeOf(op.expr); op.addr && t != nil {
+			return types.NewPointer(t)
+		}
+		return v.info.TypeOf(op.expr)
+	}
 	for _, op := range operands {
-		collectOwners(v.info.TypeOf(op.expr), owners, map[types.Type]bool{})
+		collectOwners(typeOf(op), owners, map[types.Type]bool{})
 	}
 	if len(owners) == 0 {
 		return
 	}
 	for _, op := range operands {
-		t := v.info.TypeOf(op.expr)
+		t := typeOf(op)
 		if t == nil || !holdsMemory(t) || len(op.kind.inside) == 0 && op.kind.unknown == "" {
 			continue
 		}

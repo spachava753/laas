@@ -666,6 +666,9 @@ func (v *fnVerifier) ownKindOfAny(fl *ownFlow, e ast.Expr, f *ownFact) ownKind {
 		}
 		if selection.Kind() != types.FieldVal {
 			base := v.ownKindOf(fl, x.X, f)
+			if v.addressTaken(selection, x.X) {
+				base = v.ownAddress(fl, x.X, f)
+			}
 			if len(v.ownResolve(base, f).inside) > 0 {
 				fl.refuse(x.Pos(), "the method value %s holds memory that an owner owns, and a method value may keep it; call the method instead", types.ExprString(x))
 			}
@@ -1012,20 +1015,25 @@ func (v *fnVerifier) withinParam(fn *funcInfo, index int) *types.Var {
 }
 
 // ownOperands pairs the operands of a call with the callee's parameters,
-// the receiver first. An operand that is not paired is handed to nil.
+// the receiver first. An operand that is not paired is handed to nil. addr
+// is set for a receiver whose address Go takes, for a pointer method on an
+// addressable operand (F35 of the review of step 3b).
 func (v *fnVerifier) ownOperands(call *ast.CallExpr, c *ownCallee) []struct {
 	param *types.Var
 	expr  ast.Expr
+	addr  bool
 } {
 	var out []struct {
 		param *types.Var
 		expr  ast.Expr
+		addr  bool
 	}
 	add := func(param *types.Var, e ast.Expr) {
 		out = append(out, struct {
 			param *types.Var
 			expr  ast.Expr
-		}{param, e})
+			addr  bool
+		}{param, e, false})
 	}
 	method, value := throughValue(v.info, call)
 	sig, _ := v.info.TypeOf(call.Fun).(*types.Signature)
@@ -1036,6 +1044,7 @@ func (v *fnVerifier) ownOperands(call *ast.CallExpr, c *ownCallee) []struct {
 				recv = c.fn.params[0]
 			}
 			add(recv, sel.X)
+			out[len(out)-1].addr = v.addressTaken(selection, sel.X)
 		}
 	}
 	if sig == nil {
@@ -1144,12 +1153,16 @@ func (v *fnVerifier) ownResults(fl *ownFlow, e ast.Expr, count int, f *ownFact) 
 			v.ownRunLiteral(fl, lit, f)
 			continue
 		}
+		if op.addr {
+			kinds[i] = v.ownResolve(v.ownAddress(fl, op.expr, f), f)
+			continue
+		}
 		kinds[i] = v.ownResolve(v.ownKindOf(fl, op.expr, f), f)
 	}
 	if fl.emitting {
 		recorded := make([]ownOperand, len(operands))
 		for i, op := range operands {
-			recorded[i] = ownOperand{expr: op.expr, kind: kinds[i]}
+			recorded[i] = ownOperand{expr: op.expr, kind: kinds[i], addr: op.addr}
 		}
 		fl.operands[call] = recorded
 	}
@@ -1539,6 +1552,13 @@ func (v *fnVerifier) ownAddress(fl *ownFlow, e ast.Expr, f *ownFact) ownKind {
 	case *ast.CompositeLit:
 		v.ownLiteral(fl, x, f, true)
 		return v.ownSite(x, f)
+	case *ast.Ident:
+		// A variable that lives in memory is never a part: R1 refuses
+		// its address in an owned field, which is no allocation where it
+		// stands and no tag.
+		if variable, ok := v.info.ObjectOf(x).(*types.Var); ok && v.boxed[variable] {
+			return ownKind{}
+		}
 	}
 	return ownKind{unknown: fmt.Sprintf("it is the address of %s", types.ExprString(e))}
 }
@@ -1547,4 +1567,23 @@ func (v *fnVerifier) ownAddress(fl *ownFlow, e ast.Expr, f *ownFact) ownKind {
 type ownOperand struct {
 	expr ast.Expr
 	kind ownKind
+	// addr is set when Go hands the operand's address.
+	addr bool
+}
+
+// addressTaken reports whether Go takes the address of the operand of a
+// method selection: a method with a pointer receiver selected on an
+// operand that is not a pointer, as l.items[0].M() hands M &l.items[0].
+func (v *fnVerifier) addressTaken(selection *types.Selection, operand ast.Expr) bool {
+	method, ok := selection.Obj().(*types.Func)
+	if !ok {
+		return false
+	}
+	sig, _ := method.Type().(*types.Signature)
+	if sig == nil || sig.Recv() == nil {
+		return false
+	}
+	_, pointerRecv := sig.Recv().Type().(*types.Pointer)
+	_, operandPointer := pointee(v.info.TypeOf(operand))
+	return pointerRecv && !operandPointer
 }

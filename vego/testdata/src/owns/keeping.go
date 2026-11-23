@@ -451,3 +451,71 @@ func PrevKept() {
 	}
 	t.buf = keep // want `vego: what is stored into t.buf is new memory that something else may refer to: it is memory that cs\[i\] owns`
 }
+
+// Elem is an element of a list held by value.
+type Elem struct {
+	v int
+}
+
+// Elems owns an array of nodes.
+//
+// @Owns items
+type Elems struct {
+	items []Elem
+}
+
+// Touch writes the list's first node, assuming n is not part of it.
+//
+// @Requires n != nil And l != nil And |l.items| > 0 And l.items[0].v < 100
+// @Modifies l
+// @Ensures n.v' = n.v
+func (n *Elem) Touch(l *Elems) {
+	l.items[0].v = l.items[0].v + 1
+}
+
+// TouchFirst calls Touch on the list's own first node, whose address Go
+// takes for the pointer receiver (F35 of the review of step 3b).
+//
+// @Requires l != nil And |l.items| > 0 And l.items[0].v < 100
+// @Modifies l
+// @Ensures True
+func TouchFirst(l *Elems) {
+	l.items[0].Touch(l) // want `vego: l.items\[0\] is memory that l owns, and Touch is handed what reaches a Elems, which can own it`
+}
+
+// NodeHolder keeps a node.
+type NodeHolder struct {
+	n *Elem
+}
+
+// Keep keeps its receiver.
+//
+// @Requires n != nil And h != nil
+// @Modifies h
+// @Ensures True
+func (n *Elem) Keep(h *NodeHolder) {
+	h.n = n
+}
+
+// KeepFirst hands the address of the list's first node to Keep.
+//
+// @Requires l != nil And h != nil And |l.items| > 0
+// @Modifies h
+// @Ensures True
+func KeepFirst(l *Elems, h *NodeHolder) {
+	l.items[0].Keep(h) // want `vego: what is handed to l.items\[0\].Keep as n is memory that l owns, and it may keep what it is handed`
+}
+
+// Funcs holds a function.
+type Funcs struct {
+	f func(h *NodeHolder)
+}
+
+// KeepValue takes a method value of the list's first node.
+//
+// @Requires l != nil And b != nil And |l.items| > 0
+// @Modifies b
+// @Ensures True
+func KeepValue(l *Elems, b *Funcs) {
+	b.f = l.items[0].Keep // want `vego: the method value l.items\[0\].Keep holds memory that an owner owns` `vego: cannot verify KeepValue: l.items\[0\].Keep is used as a value`
+}

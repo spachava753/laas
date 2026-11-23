@@ -3257,6 +3257,8 @@ owns	(*owns.Box).Bounded	5	7083	0
 owns	(*owns.Box).Break	15	27694	0
 owns	(*owns.Cache).Put	20	25544	0
 owns	(*owns.Copies).Write	11	8561	0
+owns	(*owns.Elem).Keep	6	2056	0
+owns	(*owns.Elem).Touch	13	31001	0
 owns	(*owns.Linked).Link	6	1219	0
 owns	(*owns.List).Set	8	19534	0
 owns	(*owns.Pair).Share	21	94753	0
@@ -3273,6 +3275,7 @@ owns	(*owns.Stack).Push	22	48930	0
 owns	(*owns.Stack).PushAll	30	193386	0
 owns	(*owns.Stack).Reserve	15	123850	2
 owns	(*owns.Stack).Reset	16	16716	0
+owns	(*owns.sink).Write	11	8561	0
 owns	bytes.FieldsFunc	1	9710	0
 owns	bytes.TrimFunc	1	4556	0
 owns	fmt.Fprint	5	11289	0
@@ -3280,7 +3283,7 @@ owns	io.Writer.Write	5	18168	0
 owns	owns.AddToNew	9	13361	0
 owns	owns.AddTwo	15	38602	0
 owns	owns.AddrOfPart	9	11485	0
-owns	owns.Adopt	8	10257	0
+owns	owns.Adopt	8	10928	0
 owns	owns.Alias	7	6995	0
 owns	owns.AliasDeferred	2	1788	0
 owns	owns.AliasHeld	7	7019	0
@@ -3311,9 +3314,13 @@ owns	owns.FromKeeping	11	13403	0
 owns	owns.FromParameter	4	2256	0
 owns	owns.FromTrusted	1	46	0
 owns	owns.Held	10	11022	0
+owns	owns.HeldPointer	12	36124	0
+owns	owns.HeldWriter	12	32538	0
 owns	owns.Helped	7	11161	0
 owns	owns.Holds	1	112	0
 owns	owns.InPlace	2	474	0
+owns	owns.KeepFirst	10	10801	0
+owns	owns.KeepValue	3	4000	0
 owns	owns.Keeps	7	13565	0
 owns	owns.KeepsBeside	11	23429	0
 owns	owns.Leak	14	543638	2
@@ -3345,6 +3352,7 @@ owns	owns.Steal	9	281142	0
 owns	owns.StoreElsewhere	7	5751	0
 owns	owns.ThroughKeeping	17	28727	0
 owns	owns.ToSink	7	91928	2
+owns	owns.TouchFirst	15	26209	0
 owns	owns.Trimmed	9	14983	0
 owns	owns.TrimmedInto	11	107391	2
 owns	owns.Two	9	9692	0
