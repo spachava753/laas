@@ -1906,8 +1906,10 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 	var entry *mapEntry
 	afterEntry := false
 	// inStruct is the type of the struct in memory at cur.at, which a path
-	// to some of its fields went through.
+	// to some of its fields went through, and offset the position of what
+	// the path reaches from cur.at.
 	var inStruct types.Type
+	var offset int64
 	for i, h := range hops {
 		if entry != nil {
 			entry, afterEntry = nil, true
@@ -1923,11 +1925,13 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 			}
 			cur.cells = v.cellsOf(object)[lo:hi]
 			inStruct = object
+			offset = v.pass.TypesSizes.Offsetsof(slices.Collect(object.Underlying().(*types.Struct).Fields()))[h.field]
 		case h.field >= 0:
 			lo, hi, _ := fieldLeaves(h.from, h.field)
 			if !symbolic {
 				cur.val = cur.val[lo:hi]
 			}
+			offset += v.pass.TypesSizes.Offsetsof(slices.Collect(h.from.Underlying().(*types.Struct).Fields()))[h.field]
 			if inMemory {
 				cur.cells = cur.cells[lo:hi]
 			}
@@ -1939,6 +1943,7 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 			}
 			cur.cells = v.cellsOf(elemType(h.from))
 			inStruct = elemType(h.from)
+			offset = 0
 		default:
 			// What a map has for a key is an entry of the map, and a byte
 			// of a string no place that can be written through this path.
@@ -1966,7 +1971,7 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 				t.owner, t.ownerType = cur.val, final
 			}
 		}
-		form.owner, form.typ = len(v.ownedFields(object)) > 0, final
+		form.owner, form.typ = v.ownsMemory(object), final
 		t.single = true
 	case isSlice(final):
 		form.cells, form.elem, form.direct = v.cellsOf(elemType(final)), elemType(final), len(hops) == 0
@@ -2032,10 +2037,22 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 	default:
 		form.cells, form.direct = cur.cells, first
 		form.lo, form.hi = bounds(cur.cells)
+		if v.ownsMemory(final) && isStructType(final) {
+			form.owner, form.typ = true, types.NewPointer(final)
+		}
 		if !symbolic {
 			t.ref, t.lo, t.hi = cur.ref, logic.Add(cur.at, logic.IntLit(form.lo)), logic.Add(cur.at, logic.IntLit(form.hi))
 			if inStruct != nil && isStructType(inStruct) {
 				t.base = &structValue{t: inStruct, ref: cur.ref, at: cur.at}
+			}
+			// A path that ends at an owner held by value, a field or an
+			// element, names what it owns too (F6 of the review of step 1).
+			if v.ownsMemory(final) && isStructType(final) {
+				owner := value{cur.ref, logic.Add(cur.at, logic.IntLit(offset))}
+				t.owned = v.ownedParts(sink, mem, owner, types.NewPointer(final), map[types.Type]bool{})
+				if len(t.owned) > 0 {
+					t.owner, t.ownerType = owner, types.NewPointer(final)
+				}
 			}
 			// The cells are counted from the struct, the target from its
 			// first position.

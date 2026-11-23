@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/token"
 	"go/types"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -853,12 +854,18 @@ func (v *fnVerifier) ownedParts(sink *state, mem memory, ptr value, t types.Type
 		return nil
 	}
 	fields := v.ownedFields(object)
-	if len(fields) == 0 {
+	inline := v.inlineOwners(object)
+	if len(fields) == 0 && len(inline) == 0 {
 		return nil
 	}
 	seen[object] = true
 	defer delete(seen, object)
 	var parts []target
+	// What an owner held by value owns, as a strings.Builder in a field
+	// of a struct of the project, the struct owns through it (D7).
+	for _, field := range inline {
+		parts = append(parts, v.ownedParts(sink, mem, field.at(ptr), field.ptr, seen)...)
+	}
 	for _, index := range fields {
 		val, ft, ok := v.member(sink, mem, ptr, t, index)
 		if !ok {
@@ -900,6 +907,9 @@ func (v *fnVerifier) ownedSites(t types.Type, seen map[types.Type]bool) []site {
 	defer delete(seen, object)
 	u, _ := object.Underlying().(*types.Struct)
 	var sites []site
+	for _, field := range v.inlineOwners(object) {
+		sites = append(sites, v.ownedSites(field.ptr, seen)...)
+	}
 	for _, index := range v.ownedFields(object) {
 		ft := u.Field(index).Type()
 		switch {
@@ -936,13 +946,16 @@ func (v *fnVerifier) ownedSites(t types.Type, seen map[types.Type]bool) []site {
 // only its footprint must be new.
 func (v *fnVerifier) ownedFreshSeen(sink *state, mem memory, ptr value, t types.Type, before *logic.Term, seen map[types.Type]bool) *logic.Term {
 	object, isPointer := pointee(t)
-	if !isPointer || seen[object] || len(v.ownedFields(object)) == 0 {
+	if !isPointer || seen[object] || !v.ownsMemory(object) {
 		return logic.True()
 	}
 	seen[object] = true
 	defer delete(seen, object)
 	zero := logic.RefLit(0)
 	var facts []*logic.Term
+	for _, field := range v.inlineOwners(object) {
+		facts = append(facts, v.ownedFreshSeen(sink, mem, field.at(ptr), field.ptr, before, seen))
+	}
 	for _, index := range v.ownedFields(object) {
 		val, ft, ok := v.member(sink, mem, ptr, t, index)
 		if !ok {
@@ -988,6 +1001,9 @@ func (v *fnVerifier) ownerGrowthSeen(sink *state, before, after memory, ptr valu
 	defer delete(seen, object)
 	zero := logic.RefLit(0)
 	var facts []*logic.Term
+	for _, field := range v.inlineOwners(object) {
+		facts = append(facts, v.ownerGrowthSeen(sink, before, after, field.at(ptr), field.ptr, bound, seen))
+	}
 	for _, index := range v.ownedFields(object) {
 		old, ft, ok := v.member(sink, before, ptr, t, index)
 		now, _, _ := v.member(sink, after, ptr, t, index)
@@ -1249,5 +1265,43 @@ func (pv *pkgVerifier) ownsMemory(t types.Type) bool {
 	if object, isPointer := pointee(t); isPointer {
 		t = object
 	}
-	return len(pv.ownedFields(t)) > 0
+	if len(pv.ownedFields(t)) > 0 {
+		return true
+	}
+	return len(pv.inlineOwners(t)) > 0
+}
+
+// inlineField is a field of a struct held by value whose type owns memory,
+// or holds such a field in turn: its offset, and the type of a pointer to
+// it, through which what it owns is read.
+type inlineField struct {
+	off int64
+	ptr types.Type
+}
+
+// at returns a pointer to the field, for a pointer to the struct.
+func (f inlineField) at(ptr value) value {
+	return value{ptr[0], logic.Add(ptr[1], logic.IntLit(f.off))}
+}
+
+// inlineOwners returns the fields of a struct type held by value, not
+// behind a pointer, a slice, or a map, whose type owns memory or holds such
+// a field: a strings.Builder or a bytes.Buffer in a struct of the project,
+// or a named type over one. What such a field owns, the struct owns (D7 of
+// the design review): a write of it through the struct writes memory that
+// the struct reaches, and only the methods of the field may write it.
+func (pv *pkgVerifier) inlineOwners(t types.Type) []inlineField {
+	u, isStruct := t.Underlying().(*types.Struct)
+	if !isStruct {
+		return nil
+	}
+	fields := slices.Collect(u.Fields())
+	offsets := pv.pass.TypesSizes.Offsetsof(fields)
+	var found []inlineField
+	for i, field := range fields {
+		if _, inner := field.Type().Underlying().(*types.Struct); inner && pv.ownsMemory(field.Type()) {
+			found = append(found, inlineField{off: offsets[i], ptr: types.NewPointer(field.Type())})
+		}
+	}
+	return found
 }

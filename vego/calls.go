@@ -621,6 +621,16 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		if t.param != nil && passedExpr[t.param] != nil {
 			unlisted = v.notListable(passedExpr[t.param], call.Pos())
 		}
+		// What an owner owns is covered by a clause that lists the owner,
+		// or a struct that holds it, and not by a slice that holds it
+		// (F6 of the review of step 1).
+		if owner := passedExpr[param]; t.part && remedy == "" && owner != nil && v.notListable(owner, call.Pos()) == "" {
+			shown := strings.TrimPrefix(types.ExprString(ast.Unparen(owner)), "&")
+			remedy = "list " + shown + " in a // @Modifies clause, which covers what it owns"
+			if _, element := ast.Unparen(owner).(*ast.IndexExpr); element {
+				remedy += "; a slice listed whole covers its elements, not what they own"
+			}
+		}
 		if t.fp {
 			// A value made over a writer writes what the writer writes,
 			// which is what to list (F35 of the review of step 4).

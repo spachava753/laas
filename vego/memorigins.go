@@ -460,7 +460,7 @@ func (v *fnVerifier) memResult(e ast.Expr, index int, fact memFact) string {
 		// writer may write, whatever the argument's own origin.
 		if t := v.info.TypeOf(arg); t != nil {
 			object, isPointer := pointee(t)
-			if isIface(t) || (isPointer && len(v.ownedFields(object)) > 0) {
+			if isIface(t) || (isPointer && v.ownsMemory(object)) {
 				return fmt.Sprintf("it comes from the call of %s at %s, whose contract places it within %s, which may hold memory a writer writes", name, v.placeOf(call.Pos()), types.ExprString(arg))
 			}
 		}
