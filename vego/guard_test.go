@@ -51,12 +51,12 @@ func costEnv() string {
 
 // collectCosts gathers the cost of every function that the analyzer
 // verifies, by its package and name, until the returned function is called,
-// which returns them, and what -vego.cost prints for the function of the
-// guide that the guide quotes; see checkGuideCost.
-func collectCosts(analyzer *analysis.Analyzer) func() (map[string]costLine, string) {
+// which returns them, and what -vego.cost prints for each function of the
+// guide that the guide quotes, by name; see checkGuideCost.
+func collectCosts(analyzer *analysis.Analyzer) func() (map[string]costLine, map[string]string) {
 	var mu sync.Mutex
 	costs := map[string]costLine{}
-	var quoted string
+	quoted := map[string]string{}
 	stop := observe(analyzer, &observer{costs: func(pass *analysis.Pass, records []*fnCost) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -67,15 +67,15 @@ func collectCosts(analyzer *analysis.Analyzer) func() (map[string]costLine, stri
 			line.effort += c.effort
 			line.limits += c.open
 			costs[key] = line
-			if key == guideCostKey {
+			if name, ok := strings.CutPrefix(key, "guide\tguide."); ok && slices.Contains(guideCostQuotes, name) {
 				// The guide quotes a run without the answer cache.
 				plain := *c
 				plain.stored = 0
-				quoted += costText(pass.Fset, &plain)
+				quoted[name] += costText(pass.Fset, &plain)
 			}
 		}
 	}})
-	return func() (map[string]costLine, string) {
+	return func() (map[string]costLine, map[string]string) {
 		stop()
 		mu.Lock()
 		defer mu.Unlock()
@@ -90,16 +90,17 @@ func observe(analyzer *analysis.Analyzer, o *observer) func() {
 	return func() { observers.Delete(analyzer) }
 }
 
-// guideCostKey is the function whose -vego.cost output the guide quotes,
-// in "Finding out where the time goes".
-const guideCostKey = "guide\tguide.Load"
+// guideCostQuotes are the functions of package guide whose -vego.cost
+// output the guide quotes, in "Finding out where the time goes".
+var guideCostQuotes = []string{"Load", "DropThenAnswer"}
 
 // checkGuideCost compares the output of -vego.cost that the guide quotes
-// with what verifying the function in the corpus printed, with file names
-// without their directories and the seconds left out, which depend on the
-// machine. Like the table, the numbers hold for one toolchain and Z3, so
-// with another nothing is compared.
-func checkGuideCost(t *testing.T, printed string) {
+// for each of guideCostQuotes with what verifying the function in the
+// corpus printed, with file names without their directories and the
+// seconds left out, which depend on the machine. Like the table, the
+// numbers hold for one toolchain and Z3, so with another nothing is
+// compared.
+func checkGuideCost(t *testing.T, printed map[string]string) {
 	t.Helper()
 	if _, env, err := readCosts(filepath.Join("testdata", costsFile)); err != nil || env != costEnv() {
 		t.Logf("the output of -vego.cost that the guide quotes is not compared on %s", costEnv())
@@ -109,18 +110,23 @@ func checkGuideCost(t *testing.T, printed string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var quoted string
-	for block := range strings.SplitSeq(string(guide), "```text\n") {
-		if strings.Contains(block, "vego cost of Load:") {
-			quoted, _, _ = strings.Cut(block, "```")
+	for _, name := range guideCostQuotes {
+		var quoted string
+		for block := range strings.SplitSeq(string(guide), "```text\n") {
+			if strings.Contains(block, "vego cost of "+name+":") {
+				quoted, _, _ = strings.Cut(block, "```")
+			}
 		}
-	}
-	seconds := regexp.MustCompile(`, [0-9]+\.[0-9]{2} s\n`)
-	dirs := regexp.MustCompile(`(?m)^(\t?)[^\t]*/`)
-	want := seconds.ReplaceAllString(quoted, ", s\n")
-	got := seconds.ReplaceAllString(dirs.ReplaceAllString(printed, "$1"), ", s\n")
-	if got != want {
-		t.Errorf("the guide quotes -vego.cost for Load as\n%s\nbut it prints\n%s", quoted, dirs.ReplaceAllString(printed, "$1"))
+		if quoted == "" {
+			t.Errorf("the guide quotes no output of -vego.cost for %s", name)
+		}
+		seconds := regexp.MustCompile(`, [0-9]+\.[0-9]{2} s\n`)
+		dirs := regexp.MustCompile(`(?m)^(\t?)[^\t]*/`)
+		want := seconds.ReplaceAllString(quoted, ", s\n")
+		got := seconds.ReplaceAllString(dirs.ReplaceAllString(printed[name], "$1"), ", s\n")
+		if got != want {
+			t.Errorf("the guide quotes -vego.cost for %s as\n%s\nbut it prints\n%s", name, quoted, dirs.ReplaceAllString(printed[name], "$1"))
+		}
 	}
 }
 

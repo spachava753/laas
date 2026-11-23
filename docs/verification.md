@@ -2291,7 +2291,9 @@ Each indented line gives a place in the function and a kind of question that sto
 - a question of the always-fails check, which looks for an input on which the contract makes the function succeed (see [Saying when a function succeeds](#saying-when-a-function-succeeds));
 - a contradiction check, which asks whether what is known at a place, such as after a call of a trusted function, contradicts itself;
 - a check whether a `Modifies` entry is needed;
-- a quick check, such as whether an `append` writes in place.
+- a quick check, such as whether an `append` writes in place;
+- a frame, which asks whether an invariant with a quantifier still holds because nothing it reads has changed since a point where it held (see [What keeps it between boundaries](#what-keeps-it-between-boundaries) and [What a loop keeps](#what-a-loop-keeps));
+- a question that names what a frame lost, which looks for the statement to name in the message of an invariant that was not kept (see [Why an invariant was not kept](#why-an-invariant-was-not-kept)).
 
 The work each is allowed:
 
@@ -2302,12 +2304,28 @@ The work each is allowed:
 | contradiction check | 200000 units, and `-vego.rlimit` for the check of a trusted contract, of a contract of a type, and of the invariants of a type; each is first asked with a tenth of that, at most 200000 units |
 | check whether a `Modifies` entry is needed | 200000 units |
 | quick check | 200000 units |
+| frame | 2000000 units, and `-vego.rlimit` for a loop invariant of the form `Forall i in D : B(i)` |
+| question that names what a frame lost | 200000 units, at most six for one message |
 
 With `-vego.cache`, a function whose answers came from the cache has a clause at the end of its first line, such as `, 13 answered from the answer cache on disk`. See [Keeping answers between runs](#keeping-answers-between-runs).
 
 A contradiction check is first asked of Z3 with a different search, at a tenth of the check's limit. That search settles some checks that the usual one leaves open, and leaves open some that the usual one settles. When that search does not settle the question, the check is asked again in full, so a function can count two problems for one check.
 
-A proof obligation that stops at a limit draws a message with the note. So does the always-fails check when it reports a contract and a question of its search stopped at a limit. Other questions draw no message of their own. When one of them stops at a limit, `vego` goes on as when a proof fails: a path counts as possible, a `Modifies` entry counts as needed, an outcome counts as one that may depend on a call, a contradiction counts as not found, and an input that the search did not find counts as not found, which can make `vego` report the contract.
+A proof obligation that stops at a limit draws a message with the note. So does the always-fails check when it reports a contract and a question of its search stopped at a limit.
+
+A frame that stops at its limit draws no message. `vego` then proves the invariant as it would without the frame. When that proof stops at its limit too, the function counts a frame and a proof obligation at the same place. For `DropThenAnswer` in [What keeps it between boundaries](#what-keeps-it-between-boundaries), in a file `kept.go`, it prints:
+
+```text
+kept.go:153:6: vego cost of DropThenAnswer: 22 problems, 6922295 resource units, 1145862 bytes, 1.75 s
+	kept.go:155:2: 2 contradiction checks stopped at a limit
+	kept.go:155:2: 1 question that names what a frame lost stopped at a limit
+	kept.go:156:1: 1 proof obligation stopped at a limit
+	kept.go:156:1: 1 frame stopped at a limit
+```
+
+A loop invariant `Forall i in D : B(i)` is different. Its frame asks, of each `i` in the domain at the end of the body, that `i` was in the domain at the head and nothing `B(i)` reads changed, or that `B(i)` holds. That goal follows from the invariant itself, so when the frame is not proved, `vego` does not ask the invariant again. The message of the loop invariant comes from the frame's answer, with the note when the frame stopped at its limit, and the function counts only the frame.
+
+Other questions draw no message of their own. When one of them stops at a limit, `vego` goes on as when a proof fails: a path counts as possible, a `Modifies` entry counts as needed, an outcome counts as one that may depend on a call, a contradiction counts as not found, and an input that the search did not find counts as not found, which can make `vego` report the contract. A question that names what a frame lost changes only the sentence of a message that names a statement. When it stops at its limit, the message names the statement it was asked about.
 
 ### Using the idle Z3 processes
 
