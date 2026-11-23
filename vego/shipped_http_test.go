@@ -8,6 +8,7 @@ import (
 	"go/types"
 	"io"
 	"log"
+	"math/big"
 	"math/rand"
 	"net"
 	"net/http"
@@ -538,7 +539,9 @@ func TestHTTPHarnessCatches(t *testing.T) {
 		name string
 		w    func(req *http.Request) http.ResponseWriter
 	}{
-		{"keeps p", func(*http.Request) http.ResponseWriter { return &keepingWriter{ResponseRecorder: httptest.NewRecorder()} }},
+		{"keeps p", func(*http.Request) http.ResponseWriter {
+			return &keepingWriter{ResponseRecorder: httptest.NewRecorder()}
+		}},
 		{"writes req", func(req *http.Request) http.ResponseWriter { return &touchingWriter{httptest.NewRecorder(), req} }},
 	} {
 		req := httptest.NewRequest("GET", "/a", nil)
@@ -642,6 +645,63 @@ func TestStoresClaims(t *testing.T) {
 	} {
 		if checkStores(rand.New(rand.NewSource(1)), run) == nil {
 			t.Errorf("a function that %s passes the check of stores", name)
+		}
+	}
+}
+
+// capWriter records the capacity of the slice each Write is handed.
+type capWriter struct {
+	header http.Header
+	caps   []int
+}
+
+func (c *capWriter) Header() http.Header         { return c.header }
+func (c *capWriter) WriteHeader(int)             {}
+func (c *capWriter) Write(p []byte) (int, error) { c.caps = append(c.caps, cap(p)); return len(p), nil }
+
+// errorAllocation returns the left side of http.Error's requires bounded by
+// MaxAlloc, evaluated for a message of n bytes.
+func errorAllocation(t *testing.T, pv *pkgVerifier, fn *funcInfo, n int) int64 {
+	c := &sequenceCheck{t: t, pv: pv, fn: fn, given: map[*types.Var]*logic.Term{fn.params[0]: reference(false), fn.params[1]: lengthTerm(n), fn.params[2]: logic.IntLit(404)}}
+	for _, cl := range fn.requires {
+		for _, node := range cl.node.Conjuncts() {
+			if node.Kind == logic.NCompare && len(node.Ops) == 1 && node.Ops[0] == "<=" && node.Kids[1].Kind == logic.NIdent && node.Kids[1].Name == "MaxAlloc" {
+				bound, err := pv.res.IntTerm(node.Kids[0], c.env())
+				if err != nil {
+					t.Fatal(err)
+				}
+				eval := &evaluator{bindings: map[string]*big.Int{}, errors: standIn}
+				return eval.number(bound).Int64()
+			}
+		}
+	}
+	t.Fatalf("the requires of http.Error has no clause bounded by MaxAlloc")
+	return 0
+}
+
+// TestErrorBound holds the bound of http.Error's requires against what
+// Fprintln allocates: the capacity of the slice it hands Write, for
+// messages past 256 KB at multiples of a page, where the newline makes the
+// buffer grow, and beside them (F13 of the review of step 2).
+func TestErrorBound(t *testing.T) {
+	parallel(t)
+	pv, imports := shippedVerifier(t)
+	pkg, err := imports.Import("net/http")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn := contractOfKey(t, pv, pkg, "net/http.Error")
+	for _, pages := range []int{32, 33, 64, 100, 257, 1024} {
+		for _, delta := range []int{-1, 0, 1} {
+			n := pages*8192 + delta
+			w := &capWriter{header: http.Header{}}
+			http.Error(w, strings.Repeat("e", n), http.StatusNotFound)
+			if len(w.caps) != 1 {
+				t.Fatalf("Error with a message of %d bytes wrote %d times", n, len(w.caps))
+			}
+			if bound := errorAllocation(t, pv, fn, n); int64(w.caps[0]) > bound {
+				t.Errorf("Error with a message of %d bytes handed Write a slice of capacity %d, more than the %d its requires bounds", n, w.caps[0], bound)
+			}
 		}
 	}
 }

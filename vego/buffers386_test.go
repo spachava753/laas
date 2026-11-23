@@ -198,6 +198,24 @@ func checkBufferEdges386(t *testing.T, pv *pkgVerifier, imports types.Importer) 
 			t.Errorf("%s: the requires of %s is %v on a 32-bit target, and the case was built to lie %s it", e.name, key, holds, map[bool]string{true: "inside", false: "outside"}[e.inside])
 		}
 	}
+	// http.Error's bound: the longest message it admits on a 32-bit target,
+	// and one of MaxInt bytes, whose newline makes a length an int cannot
+	// hold, so that append panics.
+	httpPkg, err := imports.Import("net/http")
+	if err != nil {
+		t.Fatal(err)
+	}
+	errorFn := contractOfKey(t, narrow, httpPkg, "net/http.Error")
+	for _, e := range []struct {
+		n      int
+		inside bool
+	}{{2147450878, true}, {2147450879, false}, {1<<31 - 1, false}} {
+		check := &sequenceCheck{t: t, pv: narrow, fn: errorFn, given: map[*types.Var]*logic.Term{
+			errorFn.params[0]: reference(false), errorFn.params[1]: lengthTerm(e.n), errorFn.params[2]: logic.IntLit(404)}}
+		if holds := check.holds(errorFn.requires); holds != e.inside {
+			t.Errorf("a message of %d bytes: the requires of http.Error is %v on a 32-bit target, and the case lies %s it", e.n, holds, map[bool]string{true: "inside", false: "outside"}[e.inside])
+		}
+	}
 	v := &fnVerifier{pkgVerifier: narrow}
 	for _, e := range appends {
 		if holds, _ := groundHolds(v.appendFits(logic.IntLit(int64(e.grow0+e.n)), types.Typ[types.Byte])); holds != e.inside {
