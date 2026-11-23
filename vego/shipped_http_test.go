@@ -81,13 +81,20 @@ var requestType = reflect.TypeOf(http.Request{})
 type memoryWalk struct {
 	stop       func(reflect.Type) bool
 	readHidden bool
+	// through is set to follow interface values, as for what a value's
+	// methods may write.
+	through bool
 	objects    map[uintptr]bool
 	print      strings.Builder
 	hidden     strings.Builder
 }
 
 func newWalk(stop func(reflect.Type) bool, readHidden bool, roots ...any) *memoryWalk {
-	w := &memoryWalk{stop: stop, readHidden: readHidden, objects: map[uintptr]bool{}}
+	return walkFrom(&memoryWalk{stop: stop, readHidden: readHidden, objects: map[uintptr]bool{}}, roots...)
+}
+
+// walkFrom walks from roots with the settings w has.
+func walkFrom(w *memoryWalk, roots ...any) *memoryWalk {
 	for _, root := range roots {
 		v := reflect.ValueOf(root)
 		if !v.IsValid() {
@@ -115,7 +122,13 @@ func (w *memoryWalk) value(out *strings.Builder, v reflect.Value, depth int) {
 	}
 	v = readable(v)
 	switch v.Kind() {
-	case reflect.Interface, reflect.Func, reflect.Chan, reflect.UnsafePointer:
+	case reflect.Interface:
+		if w.through && !v.IsNil() {
+			w.value(out, v.Elem(), depth+1)
+			return
+		}
+		fmt.Fprintf(out, "<%s>", v.Kind())
+	case reflect.Func, reflect.Chan, reflect.UnsafePointer:
 		// Not followed; a change of what it holds is not a write of the
 		// memory the separation is about.
 		fmt.Fprintf(out, "<%s>", v.Kind())

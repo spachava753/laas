@@ -35,7 +35,7 @@ func CloseTwice(c io.Closer) {
 // @Ensures closed(resp.Body')
 func Status(resp *http.Response) (code int) {
 	defer resp.Body.Close()
-	return resp.StatusCode
+	return resp.StatusCode // want `postcondition may not hold: closed\(resp.Body'\)`
 }
 
 // ShutBoth closes two values.
@@ -132,7 +132,69 @@ func (quiet) Close() (err error) {
 
 // @Ensures c != nil
 func Quiet() (c io.Closer) {
-	return quiet{} // want `cannot verify Quiet: converting a value of type quiet to io.Closer is not supported yet: io.Closer has the state closed, and the contract of Closer.Close speaks of it; nothing ties a state to what the methods of quiet do until the memory a value owns is modelled, the next part of interfaces. Make the conversion in code that is not verified`
+	return quiet{}
+}
+
+// @Ensures True
+func CloseQuietTwice() {
+	var c io.Closer = quiet{}
+	c.Close()
+	c.Close() // want `precondition of c.Close may not hold: ~closed\(c\)`
+}
+
+// Shutter is shut once.
+//
+// @State shut
+type Shutter interface {
+	// Shut changes the state and nothing else.
+	//
+	// @Receiver s
+	// @Requires ~shut(s)
+	// @Modifies s
+	// @Ensures shut(s')
+	Shut()
+}
+
+// Stopper is stopped once.
+//
+// @State stopped
+type Stopper interface {
+	// Stop changes the state and may write what the value holds.
+	//
+	// @Receiver s
+	// @Requires ~stopped(s)
+	// @Modifies s, behind(s)
+	// @Ensures stopped(s')
+	Stop()
+}
+
+// Lamp remembers that it was turned off.
+type Lamp struct{ off bool }
+
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func (w *Lamp) Shut() {
+	w.off = true
+}
+
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func (w *Lamp) Stop() {
+	w.off = true
+}
+
+// @Ensures True
+func ShutLamp() {
+	var s Shutter = &Lamp{} // want `Shut may modify &Lamp\{\}, which Shutter.Shut may not modify; the contract of Shutter.Shut lists s, which covers its states and nothing else; a method that also writes behind its receiver says so with behind\(s\) in Modifies, in \(\*Lamp\).Shut used as a method of Shutter at states.go:\d+:\d+`
+	s.Shut()
+}
+
+// @Ensures True
+func StopLamp() {
+	var s Stopper = &Lamp{}
+	s.Stop()
 }
 
 // Replace puts another body into a response.

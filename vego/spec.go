@@ -1797,6 +1797,9 @@ func hasBound(t *logic.Term) bool {
 // modTarget is one entry of a Modifies clause.
 type modTarget struct {
 	name string // the parameter the path starts from
+	// behind is set for behind(r), the footprint of the receiver r of a
+	// method of an interface with states (F28).
+	behind bool
 	// steps holds, for each step of the path, the name of a field or the
 	// index of an element.
 	steps  []modStep
@@ -1814,6 +1817,11 @@ func newModTargets(nodes []*logic.Node, c *clause) []*modTarget {
 	var list []*modTarget
 	for _, node := range nodes {
 		target := &modTarget{text: c.text[node.Start:node.End], clause: c}
+		if node.Kind == logic.NCall && node.Name == "behind" {
+			target.name, target.behind = node.Kids[0].Name, true
+			list = append(list, target)
+			continue
+		}
 		for n := node; ; n = n.Kids[0] {
 			if n.Kind == logic.NIdent {
 				target.name = n.Name
@@ -1879,6 +1887,16 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 			return shape{}, target{}, fmt.Errorf("%s is a package-level variable, which a Modifies clause cannot name yet", v.spelling(variable))
 		}
 		return shape{}, target{}, fmt.Errorf("%s is not a parameter", m.name)
+	}
+	if m.behind {
+		switch {
+		case fn.receiver == nil || param != fn.receiver:
+			return shape{}, target{}, fmt.Errorf("behind(%s) names the footprint of the receiver of a method of an interface with states, "+
+				"and %s is not the receiver of such a method; list %s itself", m.name, m.name, m.name)
+		case !v.hasStates(param.Type()):
+			return shape{}, target{}, fmt.Errorf("behind(%s): %s has no states, so Modifies %s names its footprint already; write Modifies %s",
+				m.name, param.Type(), m.name, m.name)
+		}
 	}
 	if generic := fn.genericTypes[param]; generic != nil {
 		steps := make([]logic.Step, len(m.steps))
@@ -2022,7 +2040,7 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 		if !symbolic {
 			t.ref = cur.val[0]
 		}
-	case isIface(final) && v.hasFootprint(final):
+	case isIface(final) && v.hasFootprint(final) && (m.behind || fn.receiver == nil || m.name != fn.receiver.Name() || !v.hasStates(final)):
 		// The footprint of what the interface value holds, which lies in
 		// the row of its home in the footprint region; see footprint.go.
 		// The value itself, a field or an element, is not part of it.
@@ -2038,9 +2056,11 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 		// an entry of the trust file did before the value had a footprint
 		// (D2: no contract changes its meaning), except for the receiver
 		// of a method whose interface declares no state, which changes
-		// none (F7 (a)).
+		// none (F7 (a)), and for behind(r), the footprint alone, beside r,
+		// which names the states of the receiver of a method of an
+		// interface with states and nothing else (F28).
 		receiverOfMethod := fn.receiver != nil && m.name == fn.receiver.Name()
-		if v.hasStates(final) || !receiverOfMethod {
+		if !m.behind && (v.hasStates(final) || !receiverOfMethod) {
 			form.cells, form.row = []cell{stateCell}, true
 			t.row = true
 		}

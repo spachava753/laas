@@ -90,7 +90,7 @@ type Response struct {
 // @Ensures closed(resp.Body') And c = resp.Status
 func Done(resp *Response) (c int) {
 	defer resp.Body.Close()
-	return resp.Status
+	return resp.Status // want `postcondition may not hold: closed\(resp.Body'\)`
 }
 
 // InLoop closes each value of a slice once, the loop forgetting each.

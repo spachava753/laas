@@ -280,6 +280,19 @@ func ParseTargets(src string) ([]*Node, error) {
 	_, err := parse(src, func(p *parser) *Node {
 		for {
 			target := p.postfix()
+			// behind(r) names the footprint of the receiver r of a method
+			// of an interface with states, beside r, which names its states
+			// there (F28).
+			if target.Kind == NCall && target.Name == "behind" {
+				if len(target.Kids) != 1 || target.Kids[0].Kind != NIdent || target.Kids[0].Primed {
+					panic(&SyntaxError{target.Start, "behind takes the receiver of the method, as in behind(c)"})
+				}
+				targets = append(targets, target)
+				if !p.accept(",") {
+					return target
+				}
+				continue
+			}
 			for n := target; ; n = n.Kids[0] {
 				if (n.Kind != NIdent && n.Kind != NField && n.Kind != NIndex) || n.Primed {
 					panic(&SyntaxError{target.Start, "a Modifies clause lists what is reached from the parameters, as in \"A, s.items, cs[0]\""})

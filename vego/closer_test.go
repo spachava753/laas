@@ -29,6 +29,10 @@ type closable struct {
 	r       io.Reader
 	w       io.Writer
 	release func()
+	// held is memory the harness holds besides, which a Close may write
+	// only where the closer reaches it, as the buffer a gzip writer
+	// flushes into.
+	held []any
 }
 
 // closers lists implementations of io.Closer in the standard library, and
@@ -94,12 +98,14 @@ var closers = []struct {
 		return closable{c: r, r: r}
 	}},
 	{"*gzip.Writer", func(*rand.Rand) closable {
-		w := gzip.NewWriter(new(bytes.Buffer))
-		return closable{c: w, w: w}
+		b := new(bytes.Buffer)
+		w := gzip.NewWriter(b)
+		return closable{c: w, w: w, held: []any{b}}
 	}},
 	{"zlib writer", func(*rand.Rand) closable {
-		w := zlib.NewWriter(new(bytes.Buffer))
-		return closable{c: w, w: w}
+		b := new(bytes.Buffer)
+		w := zlib.NewWriter(b)
+		return closable{c: w, w: w, held: []any{b}}
 	}},
 	{"flate reader", func(rng *rand.Rand) closable {
 		var packed bytes.Buffer
@@ -110,8 +116,9 @@ var closers = []struct {
 		return closable{c: r, r: r}
 	}},
 	{"*flate.Writer", func(*rand.Rand) closable {
-		w, _ := flate.NewWriter(new(bytes.Buffer), flate.BestSpeed)
-		return closable{c: w, w: w}
+		b := new(bytes.Buffer)
+		w, _ := flate.NewWriter(b, flate.BestSpeed)
+		return closable{c: w, w: w, held: []any{b}}
 	}},
 	{"io.NopCloser", func(rng *rand.Rand) closable {
 		r := io.NopCloser(bytes.NewReader(randomBytes(rng)))
@@ -237,7 +244,13 @@ func checkCloseEntry(t *testing.T, pv *pkgVerifier, fn *funcInfo) {
 						if !holds(fn.requires, env) {
 							t.Fatal("the requires does not hold of a value that is not closed")
 						}
-						bounded(t, "Close", func() { value.c.Close() })
+						bystander := &struct {
+							n int
+							b []byte
+						}{7, []byte("kept")}
+						if err := closeWrites(value.c, append(value.held, bystander), func() { bounded(t, "Close", func() { value.c.Close() }) }); err != nil {
+							t.Fatal(err)
+						}
 						closed = true
 						checked++
 						env.givenState = func(p *types.Var, s string, when logic.When) *logic.Term {
@@ -273,5 +286,62 @@ func checkCloseEntry(t *testing.T, pv *pkgVerifier, fn *funcInfo) {
 			}
 			t.Logf("a second Close %s", strings.Join(second, "; "))
 		})
+	}
+}
+
+// closeWrites makes a Close and reports what the entry of Close does not
+// allow it: a change to memory the harness holds that the closer does not
+// reach, and a reference after the call to memory the harness held that
+// the closer did not reach before. Close may write behind its receiver,
+// which is what the closer reaches, as a gzip writer writes the buffer it
+// flushes into (F3 of the review of F28).
+func closeWrites(c io.Closer, held []any, call func()) error {
+	behind := func() map[uintptr]bool {
+		return walkFrom(&memoryWalk{stop: walkStop, readHidden: true, through: true, objects: map[uintptr]bool{}}, c).objects
+	}
+	before := behind()
+	prints := make([]string, len(held))
+	reached := make([]bool, len(held))
+	heldObjects := newWalk(nil, true, held...).objects
+	for i, h := range held {
+		w := newWalk(nil, true, h)
+		prints[i] = w.print.String()
+		for at := range w.objects {
+			reached[i] = reached[i] || before[at]
+		}
+	}
+	call()
+	for i, h := range held {
+		if !reached[i] && newWalk(nil, true, h).print.String() != prints[i] {
+			return fmt.Errorf("Close wrote memory the harness holds and the closer does not reach: %T", h)
+		}
+	}
+	for at := range behind() {
+		if !before[at] && heldObjects[at] {
+			return fmt.Errorf("Close made the closer reach memory the harness held")
+		}
+	}
+	return nil
+}
+
+// victim is memory that a closer which breaks the entry writes.
+var victim = &struct{ n int }{}
+
+type victimCloser struct{}
+
+func (victimCloser) Close() error { victim.n++; return nil }
+
+// TestCloseHarnessCatches shows closeWrites failing on a closer that writes
+// memory it does not reach, and passing a gzip writer that writes the
+// buffer it holds.
+func TestCloseHarnessCatches(t *testing.T) {
+	alone(t)
+	if closeWrites(victimCloser{}, []any{victim}, func() { victimCloser{}.Close() }) == nil {
+		t.Errorf("a closer that writes memory it does not reach passes the harness")
+	}
+	b := new(bytes.Buffer)
+	w := gzip.NewWriter(b)
+	if err := closeWrites(w, []any{b}, func() { w.Close() }); err != nil {
+		t.Errorf("a gzip writer over a buffer it holds fails the harness: %v", err)
 	}
 }

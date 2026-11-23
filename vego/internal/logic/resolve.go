@@ -108,7 +108,7 @@ type PredDef struct {
 
 // Reserved lists the names of the forms of the language that look like
 // applications, which no predicate, state, or other name may take.
-var Reserved = []string{"len", "cap", "elemsize", "old", "fresh", "within", "apart", "has", "is", "valid"}
+var Reserved = []string{"len", "cap", "elemsize", "old", "fresh", "within", "apart", "has", "is", "valid", "behind"}
 
 // Resolver type-checks parsed annotations and turns them into terms.
 type Resolver struct {

@@ -5,8 +5,10 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"maps"
 	"math/big"
 	"slices"
+	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 )
@@ -27,7 +29,7 @@ type lvalue struct {
 	pos    token.Pos
 	// expr is the expression assigned to.
 	expr ast.Expr
-	text   string
+	text string
 	// owned is set when what is assigned is an owned field (owns.go).
 	owned *ownedStore
 	// local and lo locate the leaves of a placeLocal inside its variable.
@@ -741,8 +743,12 @@ func (v *fnVerifier) atReturn(st *state, results []value, pos token.Pos) {
 		v.successes = append(v.successes, outcome)
 	}
 	env := &specEnv{v: v, sink: st, fn: v.fn, args: v.entry, results: results, now: memory{}, post: st.mem, before: v.entryBrk}
-	for _, c := range v.fn.ensures {
-		v.checkClause(c, env, st, nil, pos, "postcondition may not hold")
+	if v.chooseStates != nil {
+		v.chosenEnsures(st, results, pos)
+	} else {
+		for _, c := range v.fn.ensures {
+			v.checkClause(c, env, st, nil, pos, "postcondition may not hold")
+		}
 	}
 	// The caller gets back what it passed by pointer, and the results,
 	// with their invariants intact.
@@ -793,4 +799,39 @@ func (v *fnVerifier) appendFits(grown *logic.Term, elem types.Type) *logic.Term 
 		fits = append(fits, logic.Le(room, logic.BigLit(new(big.Int).Mul(maxInt, big.NewInt(size)))))
 	}
 	return logic.And(fits...)
+}
+
+// chosenEnsures proves the Ensures of the contract of an interface method
+// for a value verified code made, whose states are ghost: the method check
+// chooses the states of the receiver after the call, so the Ensures is
+// proved with the states of the receiver in the memory on return given each
+// of their values, joined by Or. The choice is made for each outcome, after
+// the results; the states before the call are what the caller's state says,
+// of which the implementation knows nothing (F28).
+func (v *fnVerifier) chosenEnsures(st *state, results []value, pos token.Pos) {
+	states := v.ifaceStatesOf(v.chooseStates.Type())
+	at := home(v.entry[v.chooseStates][0])
+	before := v.row(nil, st.mem, stateRegion, logic.Bool, at)
+	var cases []*logic.Term
+	for choice := range 1 << len(states) {
+		row := before
+		for i, s := range states {
+			row = logic.Store(row, s.position(), logic.BoolLit(choice&(1<<i) != 0))
+		}
+		mem := maps.Clone(st.mem)
+		mem[stateRegion] = logic.Store(st.mem.region(stateRegion, logic.SeqOf(logic.BoolSeq)), at, row)
+		env := &specEnv{v: v, sink: st, fn: v.fn, args: v.entry, results: results, now: memory{}, post: mem, before: v.entryBrk}
+		var all []*logic.Term
+		for _, c := range v.fn.ensures {
+			all = append(all, v.formula(c, c.node, env))
+		}
+		cases = append(cases, logic.And(all...))
+	}
+	var texts []string
+	for _, c := range v.fn.ensures {
+		texts = append(texts, strings.Join(strings.Fields(c.text), " "))
+	}
+	phrase, _ := stateNames(states)
+	v.check(st, nil, logic.Or(cases...), pos, "postcondition may not hold for any value of %s of %s after the call: %s; the states of a value that verified code made "+
+		"are ghost, so its method can only choose them after the call, and cannot know them before it", phrase, v.chooseStates.Name(), strings.Join(texts, " And "))
 }

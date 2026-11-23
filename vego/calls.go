@@ -538,9 +538,21 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	}
 	for _, pair := range v.sharing(fn) {
 		if args[pair[0]] != nil && args[pair[1]] != nil {
+			reported := v.reports
 			v.check(st, guard, apartHomes(args[pair[0]][0], args[pair[1]][0]), call.Pos(),
 				"the interface values passed to %s as %s and %s may share their states: they may be one value, hold one value, or hold a value "+
 					"and one that wraps it, and %s may rely on them not doing so", name, describe(pair[0]), describe(pair[1]), name)
+			premises, claims := v.statesOutside(st.mem.region(footprintRegion, footprintSort), args[pair[0]], args[pair[1]], pair[0].Type(), pair[1].Type())
+			// One report for a pair: values that may be one value may also
+			// change each other's states.
+			if len(claims) > 0 && v.reports == reported {
+				for _, fact := range premises {
+					st.assume(fact)
+				}
+				v.check(st, guard, logic.And(claims...), call.Pos(),
+					"the interface values passed to %s as %s and %s may change each other's states: one may wrap the other, and %s may rely on "+
+						"the methods of each not changing the states of the other", name, describe(pair[0]), describe(pair[1]), name)
+			}
 		}
 	}
 	// The contract speaks about memory as it is now, before the call.

@@ -47,7 +47,7 @@ func ThroughConversion(rc io.ReadCloser) {
 // @Ensures True
 func Elements(rs []io.Closer) {
 	rs[0].Close()
-	rs[1].Close() // want `precondition of rs\[1\].Close may not hold: ~closed\(c\)`
+	rs[1].Close() // want `precondition of rs\[1\].Close may not hold: ~closed\(c\)` `the interface value rs\[1\] may be nil` `rs\[1\].Close may modify the states of rs\[1\], which Elements may not modify` `rs\[1\].Close may modify the footprint of rs\[1\], which Elements may not modify`
 }
 
 // FieldAndParam closes a parameter and then a body that may be the same.
@@ -137,7 +137,7 @@ func (file) Close() (err error) {
 //
 // @Ensures True
 func Make() (c io.Closer) {
-	return file{} // want `cannot verify Make: converting a value of type file to io.Closer is not supported yet: io.Closer has the state closed, and the contract of Closer.Close speaks of it`
+	return file{}
 }
 
 // Fresh says a parameter is new.
@@ -159,5 +159,5 @@ func Unknown(c io.Closer) {
 // @Requires c != nil And ~closed(c)
 // @Ensures True
 func CloserUnlisted(c io.Closer) {
-	CloseMaybe(c) // want `vego: CloseMaybe may modify the states of c, which CloserUnlisted may not modify; list it in a // @Modifies clause`
+	CloseMaybe(c) // want `vego: CloseMaybe may modify the footprint of c, which CloserUnlisted may not modify; list it in a // @Modifies clause`
 }

@@ -27,7 +27,7 @@ func GetStale() (status int, err error) {
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close() // want `resp.Body.Close may modify the states of resp.Body, which GetStale may not modify`
+	defer resp.Body.Close() // want `resp.Body.Close may modify the states of resp.Body, which GetStale may not modify` `resp.Body.Close may modify the footprint of resp.Body, which GetStale may not modify`
 	return resp.Status, nil
 }
 

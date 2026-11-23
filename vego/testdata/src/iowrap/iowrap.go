@@ -45,13 +45,15 @@ func Closes(r io.Reader) (err error) {
 // @Ensures True
 func ClosesTwice(r io.Reader) {
 	rc := io.NopCloser(r)
-	_ = rc.Close()
+	_ = rc.Close() // want `rc.Close may modify the footprint of rc, which ClosesTwice may not modify; it may lie in the footprint of r`
 	_ = rc.Close() // want `vego: precondition of rc.Close may not hold: ~closed\(c\)`
 }
 
 // ClosesApart closes a closer over a reader that is itself a closer, and
-// closes that one too: the closer NopCloser returns is new, so closing it
-// leaves the other open.
+// closes that one too. The closer NopCloser returns is new, but what it
+// writes behind it may lie in the footprint of orig, its states included,
+// since Close may write behind its receiver (F28): an entry cannot say that
+// one method of a wrapper writes nothing of what it keeps.
 //
 // @Requires orig != nil And ~closed(orig)
 // @Modifies orig
@@ -59,7 +61,7 @@ func ClosesTwice(r io.Reader) {
 func ClosesApart(orig io.ReadCloser) {
 	rc := io.NopCloser(orig)
 	_ = rc.Close()
-	_ = orig.Close()
+	_ = orig.Close() // want `precondition of orig.Close may not hold: ~closed\(c\)`
 }
 
 // Limits reads at most n bytes of r.

@@ -239,20 +239,6 @@ func (pv *pkgVerifier) stateDeclProblem(owner *types.TypeName) string {
 	return ""
 }
 
-// makeable reports whether verified code can make a value of an interface
-// type by converting a value of a type that is not an interface: every
-// method has a contract that can be used, and no contract in use names its
-// receiver, which is the only way a contract can speak of a state. A value
-// made by verified code would have to keep the states of the interface true
-// to what its methods do, and nothing ties a state to an implementation
-// yet. Stratification counts exactly the interfaces this admits.
-func (pv *pkgVerifier) makeable(t types.Type) bool {
-	if !pv.fullyContracted(t) {
-		return false
-	}
-	return pv.stateSpeaker(t) == nil
-}
-
 // stateSpeaker returns a method of an interface whose contract in use names
 // its receiver, or nil.
 func (pv *pkgVerifier) stateSpeaker(t types.Type) *types.Func {
@@ -510,4 +496,27 @@ func (v *fnVerifier) namesStateOf(fn *funcInfo, param *types.Var) bool {
 func apartHomes(a, b *logic.Term) *logic.Term {
 	zero := logic.RefLit(0)
 	return logic.Or(logic.Eq(a, zero), logic.Eq(b, zero), logic.Ne(home(a), home(b)))
+}
+
+// statesOutside states, of two interface values whose homes are apart,
+// that the states of each lie outside the footprint of the other in the
+// footprint region rows: an unverified caller does not pass a value and
+// one whose methods change the states of the other, as one that wraps it
+// does (What a proof assumes; F28). It is stated of the states each type
+// declares, and of a value without a footprint states nothing. It returns
+// the facts rowAt gives, which hold, and the claims.
+func (v *fnVerifier) statesOutside(rows *logic.Term, a, b value, at, bt types.Type) (premises, claims []*logic.Term) {
+	for _, pair := range [][2]int{{0, 1}, {1, 0}} {
+		vals, typs := [2]value{a, b}, [2]types.Type{at, bt}
+		x, y := vals[pair[0]], vals[pair[1]]
+		if !v.hasFootprint(typs[pair[0]]) {
+			continue
+		}
+		for _, s := range v.ifaceStatesOf(typs[pair[1]]) {
+			cell, facts := v.rowAt(rows, home(x[0]), home(y[0]), s.position())
+			premises = append(premises, facts...)
+			claims = append(claims, logic.Or(isNilRef(x), isNilRef(y), logic.Not(cell)))
+		}
+	}
+	return premises, claims
 }

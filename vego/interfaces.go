@@ -85,7 +85,7 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 	// structural footprint, fixed at the conversion.
 	footprinted := false
 	var behind *types.Func
-	if method := v.stateSpeaker(want); method != nil && !v.hasStates(want) {
+	if method := v.stateSpeaker(want); method != nil && (!v.hasStates(want) || v.hasFootprint(want)) {
 		if behind = v.writingImplementation(from, want); behind != nil {
 			if why := wrapsKept(from); why != "" {
 				shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
@@ -124,14 +124,10 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		}
 		footprinted = true
 	}
-	if method := v.stateSpeaker(want); method != nil && v.hasStates(want) {
-		shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
-		phrase, pronoun := stateNames(v.ifaceStatesOf(want))
-		v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s has %s, and the contract of %s speaks of %s; "+
-			"nothing ties a state to what the methods of %s do until the memory a value owns is modelled, the next part of interfaces. "+
-			"Make the conversion in code that is not verified",
-			shown(from), shown(want), shown(want), phrase, methodTitle(method), pronoun, shown(from)))
-	}
+	// The states of a value verified code makes are ghost: no method of it
+	// reads them, and the method check chooses the state after a call that
+	// changes them (madeAs). They start False (F28).
+	ghost := v.stateSpeaker(want) != nil && v.hasStates(want)
 	converted := v.evalConverted(e, want, st, guard)
 	v.held[ast.Unparen(e)] = converted
 	if want.Underlying().(*types.Interface).NumMethods() > 0 {
@@ -147,6 +143,12 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		st.assume(logic.Ne(held, other))
 	}
 	v.converted = append(v.converted, held)
+	if ghost && !footprinted {
+		// A home of its own, at which its states lie.
+		at := v.alloc(st, true)
+		st.assume(logic.Eq(home(held), at))
+		v.falseStates(st, at, want)
+	}
 	if footprinted {
 		// Its home is new, and its row is what its methods may write: the
 		// invariant of rows. Later the row is a row like any other: what
@@ -154,6 +156,9 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		// keeps out of a row.
 		at := v.alloc(st, true)
 		st.assume(logic.Eq(home(held), at))
+		if ghost {
+			v.falseStates(st, at, want)
+		}
 		var defines func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term)
 		if behind != nil {
 			defines = v.structuralFootprint(nil, maps.Clone(st.mem), converted, from)
@@ -203,7 +208,7 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 // against the contract of the interface, as for any conversion.
 func (v *fnVerifier) writingImplementation(from, want types.Type) *types.Func {
 	for method := range want.Underlying().(*types.Interface).Methods() {
-		if !writesBehind(v.methodContract(method)) {
+		if !v.footprintMethod(method) {
 			continue
 		}
 		selection := types.NewMethodSet(from).Lookup(method.Pkg(), method.Name())
@@ -775,4 +780,16 @@ func (v *fnVerifier) errorText(call *ast.CallExpr, st *state, guard []*logic.Ter
 // 2 * (|s| + 4096) + 65536 <= MaxAlloc, the bound formatting proves.
 func errorTextFits(v *fnVerifier, s *logic.Term) *logic.Term {
 	return logic.Le(logic.Add(logic.Mul(logic.Add(logic.Len(s), logic.IntLit(fmtSlack)), logic.IntLit(2)), logic.IntLit(1<<16)), logic.BigLit(v.maxAlloc()))
+}
+
+// falseStates writes the states of a value converted to an interface with
+// states at its new home: each is False, as an allocation zeroes the
+// states of a struct (F9 of the design of footprints), and the row of
+// every other home is what it was.
+func (v *fnVerifier) falseStates(st *state, at *logic.Term, want types.Type) {
+	row := v.fresh("states", logic.BoolSeq)
+	for _, s := range v.ifaceStatesOf(want) {
+		st.assume(logic.Not(logic.Select(row, s.position())))
+	}
+	st.storeRow(stateRegion, logic.Bool, at, row)
 }

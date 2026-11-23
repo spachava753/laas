@@ -1608,6 +1608,13 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 	if sig.Recv() != nil {
 		args[fn.params[0]] = receive(sv, entry, carry)
 		inputs = fn.params[1:]
+		// A method of an interface with states whose contract lists its
+		// receiver but not behind it changes the states only (D2), so the
+		// method may write nothing behind its receiver.
+		if T.receiver != nil && v.hasStates(T.receiver.Type()) && !listsBehind(T) {
+			sv.heldRemedy = fmt.Sprintf("the contract of %s lists %s, which covers its states and nothing else; a method that also writes behind its receiver "+
+				"says so with behind(%s) in Modifies", T.obj.Name(), T.receiver.Name(), T.receiver.Name())
+		}
 	} else {
 		inputs = fn.params
 	}
@@ -1660,6 +1667,12 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 		}
 	}
 	results := sv.invoke(call, fn, args, entry, nil)
+	// A method of an interface with states whose contract lists its
+	// receiver changes the states of a value verified code made, which are
+	// ghost: the check chooses them after the call (F28).
+	if T.receiver != nil && v.hasStates(T.receiver.Type()) && slices.ContainsFunc(T.modifies, func(m *modTarget) bool { return !m.behind && m.name == T.receiver.Name() }) {
+		sv.chooseStates = T.receiver
+	}
 	sv.atReturn(entry, results, e.Pos())
 }
 

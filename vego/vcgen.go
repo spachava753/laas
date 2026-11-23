@@ -107,9 +107,9 @@ type fnVerifier struct {
 	lit       *litFrame
 	// ranges holds the ranges over maps whose bodies are being verified,
 	// innermost last; see visited.go.
-	ranges []*activeRange
-	inlining  map[*ast.FuncLit]bool
-	sites     []inlineSite
+	ranges   []*activeRange
+	inlining map[*ast.FuncLit]bool
+	sites    []inlineSite
 	// captured holds, with a number of its own, every variable that a
 	// function literal assigns and that is declared outside it, and that
 	// does not live in memory. A call of the literal can change it, so
@@ -150,6 +150,10 @@ type fnVerifier struct {
 	ownFlowDone *ownFlow
 	ownFlowNone bool
 	ownForce    bool
+	// chooseStates is, in the check of a method of a value verified code
+	// made, the receiver of the interface method whose states the check
+	// chooses after the call (chosenEnsures).
+	chooseStates *types.Var
 	// convertsOwner is set once the function has converted an owner to an
 	// interface value with a footprint; from then on a store into an owned
 	// field leaves a follow layer (followStore).
@@ -157,9 +161,9 @@ type fnVerifier struct {
 	// convertedOwners are the owners the function converted, whose growth
 	// a call that writes a footprint keeps: every code that may write them
 	// keeps G (ownerGrowth after footprint calls in calls.go).
-	convertedOwners []value
+	convertedOwners     []value
 	convertedOwnerTypes []types.Type
-	ranged      map[ast.Expr]*ast.RangeStmt
+	ranged              map[ast.Expr]*ast.RangeStmt
 	// joins holds, by the name of the constant that stands for it, each
 	// region a join of the ends of a function literal made.
 	joins    map[string]*joinedRegion
@@ -215,11 +219,11 @@ type fnVerifier struct {
 	// lazyRows is set while what a callee promises is resolved, and
 	// rowClaims holds, by footprint region, what such promises said of rows;
 	// see rowNewOrIn.
-	lazyRows  bool
+	lazyRows bool
 	// skipPollution is the call whose own stores the fact before it leaves
 	// out; see memOrigins.
 	skipPollution *ast.CallExpr
-	rowClaims map[string][]rowClaim
+	rowClaims     map[string][]rowClaim
 	// stretchClaims is rowClaims for stretches of memory, and lazyStretch
 	// makes one while a promise is resolved.
 	stretchClaims map[string][]stretchClaim
@@ -382,6 +386,12 @@ func (v *fnVerifier) enter() *state {
 	for _, pair := range v.sharing(fn) {
 		if v.entry[pair[0]] != nil && v.entry[pair[1]] != nil {
 			st.assume(apartHomes(v.entry[pair[0]][0], v.entry[pair[1]][0]))
+			// And the states of each lie outside the footprint of the
+			// other (F28).
+			premises, claims := v.statesOutside(logic.Const(entryRegion+footprintRegion, footprintSort), v.entry[pair[0]], v.entry[pair[1]], pair[0].Type(), pair[1].Type())
+			for _, fact := range append(premises, claims...) {
+				st.assume(fact)
+			}
 		}
 	}
 	// Every caller has proved the invariants of what it passes.

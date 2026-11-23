@@ -213,7 +213,7 @@ func SetInLoopKnown(p *P, n int) {
 // @Ensures closed(cs'[0])
 func CloseFirst(cs ...io.Closer) {
 	_ = cs[0].Close()
-}
+} // want `postcondition may not hold: closed\(cs'\[0\]\)`
 
 // @Requires c != nil And ~closed(c)
 // @Modifies c

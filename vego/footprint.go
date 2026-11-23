@@ -255,12 +255,31 @@ func (pv *pkgVerifier) hasFootprint(t types.Type) bool {
 	// footprints (D2, decided by the orchestrator: no contract that is
 	// legal changes its meaning).
 	for method := range t.Underlying().(*types.Interface).Methods() {
-		owner := declaringInterface(method)
-		if owner != nil && !pv.hasStates(owner.Type()) && writesBehind(pv.methodContract(method)) {
+		if pv.footprintMethod(method) {
 			return true
 		}
 	}
 	return false
+}
+
+// footprintMethod reports whether a method of an interface writes behind
+// its receiver: its contract lists the receiver and its interface has no
+// states, or it lists behind(r) of its receiver r (F28), on an interface
+// with states, where r alone names the states.
+func (pv *pkgVerifier) footprintMethod(method *types.Func) bool {
+	fn := pv.methodContract(method)
+	if owner := declaringInterface(method); owner != nil && !pv.hasStates(owner.Type()) && writesBehind(fn) {
+		return true
+	}
+	return listsBehind(fn)
+}
+
+// listsBehind reports whether a contract lists behind(r) of its receiver.
+func listsBehind(fn *funcInfo) bool {
+	if fn == nil || fn.receiver == nil {
+		return false
+	}
+	return slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.behind && m.name == fn.receiver.Name() })
 }
 
 // writesBehind reports whether the contract of a method of an interface
