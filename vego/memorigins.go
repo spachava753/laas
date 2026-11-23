@@ -347,7 +347,6 @@ func (v *fnVerifier) storePlace(e ast.Expr) (*types.Var, bool) {
 	}
 }
 
-// memOrigin returns why a value may be unknown, or "" when it is outside.
 // packageOrigin is the origin of a package-level variable read as a
 // value that refers to memory. What it refers to is outside only while
 // the variable holds the only reference to it: its initialiser made that
@@ -368,6 +367,7 @@ func (v *fnVerifier) packageOrigin(variable *types.Var) string {
 	return ""
 }
 
+// memOrigin returns why a value may be unknown, or "" when it is outside.
 func (v *fnVerifier) memOrigin(e ast.Expr, fact memFact) string {
 	t := v.info.TypeOf(e)
 	if t == nil || !holdsMemory(t) {
