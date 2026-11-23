@@ -241,14 +241,20 @@ func jsonWalkWith(wt jsonWeightTable, pkg *types.Package, sizes types.Sizes, t t
 	if why := w.value(t, name, name, top, false, 0); why != "" {
 		return why, nil
 	}
-	// A length under a quantifier over the elements of a slice or a map
-	// that is itself the value of a map with string keys: when the facts
-	// bound the length of the keys, vego does not prove such a bound even
-	// from the same fact, as `Forall k in m : (Forall i in [0, |m[k]|) :
-	// |m[k][i]| <= 10000000)` from the same with 1000 and a bound on |k|
-	// (Z3 runs to its limit, also with the bound on the keys in a clause of
-	// its own), so it is refused before it becomes an obligation nobody
-	// can meet. A map with integer keys has no such bound, and proves.
+	return "", w
+}
+
+// mapValueReason says why the bound of encoding a type cannot be proved,
+// or returns "": a length under a quantifier over the elements of a slice
+// or a map that is itself the value of a map with string keys. When the
+// facts bound the length of the keys, vego does not prove such a bound
+// even from the same fact, as `Forall k in m : (Forall i in [0, |m[k]|) :
+// |m[k][i]| <= 10000000)` from the same with 1000 and a bound on |k| (Z3
+// runs to its limit, also with the bound on the keys in a clause of its
+// own), so encoding it is refused before it becomes an obligation nobody
+// can meet. A map with integer keys has no such bound, and proves.
+// Decoding counts no length, and is not refused.
+func (w *jsonWalk) mapValueReason() string {
 	for _, l := range w.lengths() {
 		underMap := ""
 		for _, s := range l.steps {
@@ -256,13 +262,13 @@ func jsonWalkWith(wt jsonWeightTable, pkg *types.Package, sizes types.Sizes, t t
 			case s.binder == "":
 			case underMap != "":
 				return fmt.Sprintf("%s holds elements inside the value of %s, a map with string keys, and vego cannot yet bound what they hold under a quantifier "+
-					"over the keys; encode a map whose values hold no slice or map with elements of unknown length, or a map with integer keys", s.length[1:len(s.length)-1], underMap), nil
+					"over the keys; encode a map whose values hold no slice or map with elements of unknown length, or a map with integer keys", s.length[1:len(s.length)-1], underMap)
 			case s.stringKeys:
 				underMap = s.length[1 : len(s.length)-1]
 			}
 		}
 	}
-	return "", w
+	return ""
 }
 
 // shown spells a type relative to the package.
@@ -488,7 +494,7 @@ func (w *jsonWalk) value(t types.Type, path, shown string, g *jsonGroup, quoted 
 		}
 		return w.object(t, path, shown, g, depth)
 	case *types.Interface:
-		return fmt.Sprintf("%s is an interface value of type %s, whose dynamic type vego does not know; encode a value of a concrete type", shown, w.shown(t))
+		return fmt.Sprintf("%s is an interface value of type %s, whose dynamic type vego does not know; use a value of a concrete type", shown, w.shown(t))
 	default:
 		return fmt.Sprintf("%s is of type %s, which encoding/json cannot encode or vego does not support", shown, w.shown(t))
 	}
@@ -771,7 +777,11 @@ func (v *fnVerifier) checkEncodable(call *ast.CallExpr, fn *funcInfo) {
 	if arg == nil {
 		return
 	}
-	if why, _ := jsonPlainReason(v.pass.Pkg, v.pass.TypesSizes, v.info.TypeOf(arg), types.ExprString(arg)); why != "" {
+	why, walk := jsonPlainReason(v.pass.Pkg, v.pass.TypesSizes, v.info.TypeOf(arg), types.ExprString(arg))
+	if why == "" {
+		why = walk.mapValueReason()
+	}
+	if why != "" {
 		v.unsupported(arg.Pos(), fmt.Sprintf("%s encodes %s, and %s", fn.obj.Name(), types.ExprString(arg), why))
 	}
 }
@@ -798,7 +808,7 @@ func (v *fnVerifier) checkEncodedAlloc(st *state, guard []*logic.Term, call *ast
 	}
 	t := v.info.TypeOf(arg)
 	why, walk := jsonPlainReason(v.pass.Pkg, v.pass.TypesSizes, t, "v")
-	if why != "" {
+	if why != "" || walk.mapValueReason() != "" {
 		// Refused before the arguments were evaluated.
 		return nil
 	}

@@ -97,14 +97,14 @@ type WithAny struct{ X any }
 //
 // @Ensures True
 func Anys(x WithAny) {
-	_, _ = json.Marshal(x) // want `cannot verify Anys: Marshal encodes x, and x\.X is an interface value of type any, whose dynamic type vego does not know; encode a value of a concrete type`
+	_, _ = json.Marshal(x) // want `cannot verify Anys: Marshal encodes x, and x\.X is an interface value of type any, whose dynamic type vego does not know; use a value of a concrete type`
 }
 
 // Forwards hands on a value of type any.
 //
 // @Ensures True
 func Forwards(v any) {
-	_, _ = json.Marshal(v) // want `cannot verify Forwards: Marshal encodes v, and v is an interface value of type any, whose dynamic type vego does not know; encode a value of a concrete type`
+	_, _ = json.Marshal(v) // want `cannot verify Forwards: Marshal encodes v, and v is an interface value of type any, whose dynamic type vego does not know; use a value of a concrete type`
 }
 
 // Chain holds itself.
@@ -199,7 +199,7 @@ func ownMarshal(v any) ([]byte, error) {
 //
 // @Ensures True
 func Own() {
-	_, _ = ownMarshal(1) // want `the trusted contract of jsonenc\.ownMarshal \(trusted\.yaml:2189\) cannot be used: it lists encodes, which only the entries that come with vego can list; a function of your own that encodes a value it is `
+	_, _ = ownMarshal(1) // want `the trusted contract of jsonenc\.ownMarshal \(trusted\.yaml:2195\) cannot be used: it lists encodes, which only the entries that come with vego can list; a function of your own that encodes a value it is `
 }
 
 // KeyText is a key whose MarshalText encoding/json would call.

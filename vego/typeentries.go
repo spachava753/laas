@@ -88,7 +88,7 @@ func (pv *pkgVerifier) typeEntry(key string, obj *types.Func, methodOf *types.Fu
 	if len(entry.runs) > 0 {
 		fn.defect("it lists runs, which a contract of a type cannot have: a call through a value of the type is never handed code nobody has seen")
 	}
-	if len(entry.encodes) > 0 {
+	if len(entry.encodes) > 0 || len(entry.decodes) > 0 {
 		fn.defect("it lists encodes, which a contract of a type cannot have: only the entries that come with vego list it")
 	}
 	if len(entry.formats) > 0 {

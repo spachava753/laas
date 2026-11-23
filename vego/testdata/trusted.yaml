@@ -2186,6 +2186,12 @@ trusted:
     modifies: []
     ensures: ["result = x"]
 
+  jsondec.ownUnmarshal:
+    reason: A wrapper of json.Unmarshal; only shipped entries may list decodes.
+    decodes: [v]
+    vouches: [result]
+    modifies: []
+
   jsonenc.ownMarshal:
     reason: A wrapper of json.Marshal; only shipped entries may list encodes.
     encodes: [v]

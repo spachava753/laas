@@ -152,6 +152,12 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 			results = v.callPrinted(call, fn, writer, write, st, guard, func() { u.reach(operands) })
 			break
 		}
+		if fn.decoded != nil {
+			// json.Unmarshal: a contract made for the call; see
+			// jsondecode.go.
+			results = v.callDecode(call, fn, st, guard, func() { u.reach(operands) })
+			break
+		}
 		if fn.calls.len() > 0 {
 			// What the call runs may read and write anything the caller may.
 			results = v.callHanding(call, fn, st, guard, operands)
@@ -257,6 +263,7 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func, st *sta
 		// What a parameter under encodes is given is checked by the walk
 		// of encoding/json; see json.go.
 		v.checkEncodable(call, fn)
+		v.checkDecodable(call, fn)
 	}
 	return fn, false
 }
@@ -367,7 +374,7 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 		}
 		// What a parameter under formats is given is checked by the rule
 		// for formatting; see checkFormatted.
-		if fn.runs.get(param) || fn.keeps.get(param) != nil || (param == fn.formatted && param != nil) || (param == fn.encoded && param != nil) || !holdsCode(t, map[types.Type]bool{}) {
+		if fn.runs.get(param) || fn.keeps.get(param) != nil || (param == fn.formatted && param != nil) || (param == fn.encoded && param != nil) || (param == fn.decoded && param != nil) || !holdsCode(t, map[types.Type]bool{}) {
 			continue
 		}
 		// Known origin of either kind makes every method harmless.

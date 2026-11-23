@@ -422,6 +422,10 @@ type funcInfo struct {
 	// encoded is the parameter of a trusted function whose value its
 	// contract says it encodes as package encoding/json does; see json.go.
 	encoded *types.Var
+	// decoded is the parameter of a trusted function into which its
+	// contract says it decodes as package encoding/json does, and
+	// decodedFrom the []byte it decodes; see jsondecode.go.
+	decoded, decodedFrom *types.Var
 	// prints is the writer parameter of a trusted function that formats,
 	// to which it writes, with one call of Write, what printsAs, a function
 	// of its package, returns for its other arguments; see prints.go.

@@ -67,8 +67,9 @@ type Output struct {
 	// Called holds the methods of jsonMethods that the build called.
 	Called []string
 	// Errors holds the dynamic types of the errors in the trees of what
-	// the entries returned.
-	Errors []string
+	// the entries returned, and DecodeErrors those Unmarshal returned.
+	Errors       []string
+	DecodeErrors []string
 }
 
 var out = Output{}
@@ -90,7 +91,7 @@ func main() {
 	}
 	out.Build = build()
 	rng := rand.New(rand.NewPCG(in.Seed, 29))
-	errTypes := map[string]bool{}
+	errTypes, decodeErrTypes := map[string]bool{}, map[string]bool{}
 	for _, c := range in.Cases {
 		t, ok := registry[c.Type]
 		if !ok {
@@ -124,6 +125,7 @@ func main() {
 				sample.Outs = append(sample.Outs, int64(len(b)))
 			}
 			checkEncode(c.Type, v)
+			checkDecode(c.Type, t, v, decodeErrTypes)
 			if n := calls.Load(); n != 0 {
 				fail("%s: encoding called %d methods it must not call", c.Type, n)
 			}
@@ -135,6 +137,10 @@ func main() {
 		out.Errors = append(out.Errors, t)
 	}
 	sort.Strings(out.Errors)
+	for t := range decodeErrTypes {
+		out.DecodeErrors = append(out.DecodeErrors, t)
+	}
+	sort.Strings(out.DecodeErrors)
 	if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
 		panic(err)
 	}
@@ -206,6 +212,73 @@ func checkEncode(name string, v reflect.Value) {
 			fail("%s: Encode returned %v where Write returned %v", name, err, w.err)
 		case w.err == nil && err != nil:
 			fail("%s: Encode returned %v where Write succeeded", name, err)
+		}
+	}
+}
+
+// --- decoding ---
+
+// checkDecode holds the claim of Unmarshal's entry, decoding into a zero
+// value of the type (what vego requires: every slice, map, and pointer
+// nil) from what Marshal returns for v and from broken forms of it: the
+// unexported fields keep their values, the data is unchanged, nothing
+// decoded refers into the data or changes when the data does afterwards,
+// no method of jsonMethods' complement runs, and every error has a type
+// that was read.
+func checkDecode(name string, t reflect.Type, v reflect.Value, errTypes map[string]bool) {
+	good, _ := json.Marshal(v.Interface())
+	inputs := [][]byte{good, good[:len(good)/2], []byte(strings.Replace(string(good), `"`, `1`, 1)),
+		[]byte(`{"` + "\xff\xfe" + `":1, "B":"` + "\xff" + `"}`), []byte(`[` + "\"\xff\xff\"" + `]`), []byte(`{"n":"!!!!"}`), []byte(`"AA="`)}
+	for _, in := range inputs {
+		data := append([]byte(nil), in...)
+		p := reflect.New(t)
+		// Unexported fields get values, which must be kept.
+		var kept []reflect.Value
+		var copies []any
+		if p.Elem().Kind() == reflect.Struct {
+			for i := range p.Elem().NumField() {
+				f := p.Elem().Type().Field(i)
+				if !f.IsExported() && !f.Anonymous {
+					fv := settable(p.Elem().Field(i))
+					fill(rand.New(rand.NewPCG(uint64(i), 3)), fv, 3)
+					kept = append(kept, fv)
+					copies = append(copies, reflect.ValueOf(fv.Interface()).Interface())
+				}
+			}
+		}
+		calls.Store(0)
+		err := json.Unmarshal(data, p.Interface())
+		if err != nil {
+			treeTypes(err, errTypes)
+		}
+		if n := calls.Load(); n != 0 {
+			fail("%s: decoding called %d methods it must not call", name, n)
+		}
+		if string(data) != string(in) {
+			fail("%s: Unmarshal changed the data", name)
+		}
+		for i, fv := range kept {
+			if !reflect.DeepEqual(fv.Interface(), copies[i]) {
+				fail("%s: Unmarshal wrote an unexported field", name)
+			}
+		}
+		// Nothing decoded lies in the data's array.
+		reached := map[uintptr]reflect.Type{}
+		reach(p.Elem(), reached, map[uintptr]bool{})
+		lo := uintptr(unsafe.Pointer(unsafe.SliceData(data)))
+		for addr, typ := range reached {
+			if addr >= lo && addr < lo+uintptr(cap(data)) {
+				fail("%s: what Unmarshal decoded, of type %s, lies in the data", name, typ)
+			}
+		}
+		// Nothing decoded changes when the data does.
+		before, _ := json.Marshal(p.Interface())
+		for i := range data {
+			data[i] = 'x'
+		}
+		after, _ := json.Marshal(p.Interface())
+		if string(before) != string(after) {
+			fail("%s: what Unmarshal decoded changed with the data", name)
 		}
 	}
 }

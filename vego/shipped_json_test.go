@@ -59,7 +59,7 @@ func jsonHelper(t *testing.T, b jsonBuild) string {
 
 // jsonEntries are the shipped entries of encoding/json, each held by
 // TestJSONEntries; an entry of the package not listed has no harness.
-var jsonEntries = []string{"encoding/json.Marshal", "encoding/json.MarshalIndent", jsonEncodeKey}
+var jsonEntries = []string{"encoding/json.Marshal", "encoding/json.MarshalIndent", jsonEncodeKey, "encoding/json.Unmarshal"}
 
 // checkJSONEntry reads a shipped entry of encoding/json as a call would:
 // it must be usable, encode its parameter v, and vouch for its error.
@@ -78,6 +78,10 @@ func checkJSONEntry(t *testing.T, pv *pkgVerifier, pkg *types.Package, key strin
 		t.Fatalf("the entry of %s cannot be used: %v", key, fn.defects)
 	}
 	switch {
+	case key == "encoding/json.Unmarshal":
+		if fn.decoded == nil || fn.decoded.Name() != "v" || fn.decodedFrom == nil || !fn.vouches[0] {
+			t.Errorf("the entry of %s does not decode into v from data and vouch for its error", key)
+		}
 	case fn.encoded == nil || fn.encoded.Name() != "v":
 		t.Errorf("the entry of %s does not encode v", key)
 	case key != jsonEncodeKey && !fn.vouches[1]:
@@ -108,11 +112,12 @@ type jsonHarnessLength struct {
 
 // jsonHarnessOutput is what the helper writes.
 type jsonHarnessOutput struct {
-	Build    string
-	Failures []string
-	Called   []string
-	Errors   []string
-	Samples  []struct {
+	Build        string
+	Failures     []string
+	Called       []string
+	Errors       []string
+	DecodeErrors []string
+	Samples      []struct {
 		Type  string
 		Outs  []int64
 		Maxes map[string]int64
@@ -266,6 +271,24 @@ var jsonErrorTypes = map[string]bool{
 	"*time.ParseError":            true,
 }
 
+// jsonDecodeErrorTypes are the dynamic types of the errors Unmarshal was
+// seen to return, in any build, whose methods were read against what
+// vouches claims: each Error builds a string from the error's own fields
+// (the message of a SyntaxError, the type and field of an
+// UnmarshalTypeError, the quoted value of a time.ParseError, the offset of
+// a base64.CorruptInputError), and none writes, panics, or has an Is
+// method. CorruptInputError is an int64, so == on it compares values, as
+// on the syscall.Errno inside the vouched errors of os.
+var jsonDecodeErrorTypes = map[string]bool{
+	"*errors.errorString":         true,
+	"*json.SyntaxError":           true,
+	"*json.UnmarshalTypeError":    true,
+	"*time.ParseError":            true,
+	"base64.CorruptInputError":    true,
+	"*jsontext.SyntacticError":    true,
+	"*json.InvalidUnmarshalError": true,
+}
+
 // TestJSONEntries holds the entries of json.Marshal and json.MarshalIndent
 // against every build: what they write stays within the bound vego
 // generates for the type, every method they call is one jsonMethods lists
@@ -292,6 +315,11 @@ func TestJSONEntries(t *testing.T) {
 		jsonAbove(t, out, walks, true)
 		for _, name := range out.Called {
 			called[name] = true
+		}
+		for _, name := range out.DecodeErrors {
+			if !jsonDecodeErrorTypes[name] {
+				t.Errorf("%s: Unmarshal returned an error of type %s, whose methods were not read", out.Build, name)
+			}
 		}
 		for _, name := range out.Errors {
 			if !jsonErrorTypes[name] {

@@ -1631,6 +1631,10 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 		v.unsupported(e.Pos(), fmt.Sprintf("%s keeps code it is given, and cannot be used as %s: "+
 			"what it would be given would come from whoever calls the value, and a value of a type has no place to say what it keeps", callee.Name(), as))
 	}
+	if fn.trust != nil && fn.decoded != nil {
+		v.unsupported(e.Pos(), fmt.Sprintf("%s decodes into what it is given as encoding/json does, and cannot be used as %s: "+
+			"what it is given is checked at each call written out, and a value is called with what nobody checks. Call %s directly", callee.Name(), as, callee.Name()))
+	}
 	if fn.trust != nil && fn.encoded != nil {
 		v.unsupported(e.Pos(), fmt.Sprintf("%s encodes what it is given as encoding/json does, and cannot be used as %s: "+
 			"what it is given is checked at each call written out, and a value is called with what nobody checks. Call %s directly", callee.Name(), as, callee.Name()))

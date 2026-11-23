@@ -752,7 +752,7 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 	// read it and to call those.
 	encoded := map[*types.Var]bool{}
 	if entry != nil {
-		for _, item := range entry.encodes {
+		for _, item := range slices.Concat(entry.encodes, entry.decodes) {
 			for param := range sig.Params().Variables() {
 				if param.Name() == item.text {
 					encoded[param] = true

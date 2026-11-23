@@ -75,6 +75,11 @@ func TrustReport(usages []*Usage, dir string) string {
 					"json.RawMessage, and json.Number that encoding/json runs, while the call lasts and on the goroutine that called it, keeps nothing "+
 					"of it, and allocates within the bound vego proves at each call\n", strings.Join(use.Encodes, ", "))
 			}
+			if len(use.Decodes) > 0 {
+				fmt.Fprintf(&b, "    decodes as package encoding/json does into: %s; a claim that it writes only the exported fields encoding/json writes, "+
+					"stores into them only memory it makes, runs no method of what it decodes into but those of time.Time, json.RawMessage, and json.Number, "+
+					"keeps nothing of what it is handed, and allocates within the bound vego proves at each call\n", strings.Join(use.Decodes, ", "))
+			}
 			for _, callback := range use.Callbacks {
 				fmt.Fprintf(&b, "    calls %s\n", callback)
 			}

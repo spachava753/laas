@@ -106,3 +106,41 @@ trusted:
     runs: [enc]
     vouches: [enc]
     modifies: [enc]
+
+  encoding/json.Unmarshal:
+    reason: >-
+      "Unmarshal parses the JSON-encoded data and stores the result in the
+      value pointed to by v." (Go 1.26.6). decodes claims what vego checks
+      of v at each call (jsondecode.go): v is &x for a variable, a field, or
+      an element, or a pointer to a struct, of a type the walk of
+      encoding/json accepts (json.go), so no method of the project runs
+      and the only methods run are UnmarshalJSON or UnmarshalText of
+      time.Time and json.RawMessage, read in the four builds; the decoder
+      writes only the exported fields it finds and the exported fields of
+      embedded structs, and keeps the others, on success and on an error
+      alike (a type error writes the fields before and after it); it
+      appends into the array of a slice with capacity, keeps the entries of
+      a non-nil map, and decodes through a non-nil pointer, so vego
+      requires each of these nil in what it decodes into, and with that,
+      everything it stores is memory it makes; it keeps nothing of data
+      (RawMessage copies it; strings are copied). Read from source: data
+      is validated before anything is written in v1, and is not written; a
+      string grows to at most three times the data (an invalid byte becomes
+      U+FFFD) in a buffer that doubles, a slice holds at most an element for
+      every two bytes in an array grown by doubling, a map an entry for
+      every six, so one allocation is at most decodeFactor (the largest of
+      8, an element of a slice, and twice a map's key and value and 16)
+      times the data, held at the 32-bit edge by TestEncoding386 for a
+      string of invalid bytes, a slice of 1 KB structs, and a map. The
+      errors are *SyntaxError, *UnmarshalTypeError, *time.ParseError,
+      base64.CorruptInputError, an errors.New error of time, and in v2
+      *jsontext.SyntacticError; their Error methods build a string from
+      their fields, none writes or has an Is method, and == on
+      CorruptInputError compares integers. TestJSONEntries decodes, in each
+      build, what Marshal returns and broken forms of it into zero values,
+      and fails when an unexported field changes, the data changes, what
+      was decoded lies in the data or changes with it, a method outside the
+      list runs, or an error's type is not one read.
+    decodes: [v]
+    vouches: [result]
+    modifies: []

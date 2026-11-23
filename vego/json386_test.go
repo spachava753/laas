@@ -86,6 +86,39 @@ func TestEncoding386(t *testing.T) {
 			}
 			t.Logf("%s: %s at %s built %s bytes", b.name, c.name, lo, strings.TrimSpace(string(out)))
 		}
+		// Decoding: the largest data at which the bound Unmarshal requires
+		// holds, decodeFactor * (|data| + 1) + 65536 <= MaxAlloc and
+		// decodeFactor * (|data| + 1) <= MaxInt, for a string of invalid
+		// bytes, a slice of 1 KB structs, and a map with integer keys.
+		maxInt := big.NewInt(1<<31 - 1)
+		for _, d := range []struct {
+			name string
+			t    types.Type
+		}{
+			{"dstring", str},
+			{"dslice", types.NewSlice(types.NewStruct([]*types.Var{types.NewField(0, nil, "A", types.NewArray(types.Typ[types.Int64], 128), false)}, nil))},
+			{"dmap", types.NewMap(types.Typ[types.Int32], types.Typ[types.Bool])},
+		} {
+			factor := big.NewInt(decodeFactor(d.t, sizes, map[types.Type]bool{}))
+			n := new(big.Int).Sub(maxAlloc, big.NewInt(1<<16))
+			n.Div(n, factor)
+			if byInt := new(big.Int).Div(maxInt, factor); byInt.Cmp(n) < 0 {
+				n = byInt
+			}
+			n.Sub(n, big.NewInt(1))
+			run := exec.Command("systemd-run", "--user", "--scope", "--quiet", "-p", "MemoryMax=4G", "-p", "MemorySwapMax=0", "--",
+				"timeout", "300", helper, d.name, n.String())
+			out, err := run.CombinedOutput()
+			if err != nil {
+				shown := string(out)
+				if len(shown) > 2000 {
+					shown = shown[:2000]
+				}
+				t.Errorf("%s: %s of %s bytes, inside the bound, did not return: %v\n%s", b.name, d.name, n, err, shown)
+				continue
+			}
+			t.Logf("%s: %s of %s bytes decoded %s", b.name, d.name, n, strings.Fields(string(out))[0])
+		}
 	}
 }
 
