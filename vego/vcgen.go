@@ -203,6 +203,9 @@ type fnVerifier struct {
 	// contradiction in a promise: assumed only at the cells read, two
 	// claims that cannot both hold would never meet.
 	claimDefs []*logic.Term
+	// boundSink, while a quantifier of a formula is read, gathers the
+	// facts of reads under it; see specEnv.OpenBound.
+	boundSink *state
 	// misreadAs, when set, receives an annotation that cannot be resolved,
 	// in place of the diagnostic at the annotation.
 	misreadAs func(c *clause, err error)

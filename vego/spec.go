@@ -65,6 +65,117 @@ type specEnv struct {
 	// ..., the number of arguments its new slice holds, so that
 	// fresh(result, readers) can name each of them.
 	packed map[*types.Var]int
+	// frames holds, for each quantifier being read, the state that gathers
+	// the facts of its reads and the verifier's gatherer around it.
+	frames []boundFrame
+}
+
+// boundFrame is what OpenBound saves for one quantifier: its variables, the
+// state that gathers the facts of its reads, and the gatherer around it.
+type boundFrame struct {
+	vars           []*logic.Term
+	scratch, outer *state
+}
+
+// OpenBound starts gathering the facts of reads under a quantifier: what a
+// layer of memory keeps at the cell a bound variable names, what the types
+// say of what is read there, and what the other parameters reach from it
+// (O1 of the orchestrator's review of part 1). They hold in every state, and
+// the quantifier takes them as premises, so a fact about what the elements
+// of a slice of pointers point to is kept across a write as it is at a
+// read of one element.
+func (e *specEnv) OpenBound(vars []*logic.Term) {
+	frame := boundFrame{vars: vars, outer: e.v.boundSink}
+	if e.sink != nil {
+		frame.scratch = &state{brk: e.sink.brk, noted: map[string]bool{}, collecting: true}
+	}
+	e.frames = append(e.frames, frame)
+	e.v.boundSink = frame.scratch
+}
+
+// CloseBound ends the gathering OpenBound started and returns the facts
+// that mention the quantifier's variables. A fact that mentions only those
+// of quantifiers around it goes to the one that binds them, and one that
+// mentions none holds where the formula is read. A fact that mentions a
+// variable no formula's quantifier binds, as one of the verifier's own
+// quantifiers over the elements of a slice does, is left out: no
+// quantifier here could hold it, and stating less is sound.
+func (e *specEnv) CloseBound() []*logic.Term {
+	frame := e.frames[len(e.frames)-1]
+	e.frames = e.frames[:len(e.frames)-1]
+	e.v.boundSink = frame.outer
+	if frame.scratch == nil {
+		return nil
+	}
+	outer := map[string]bool{}
+	for _, f := range e.frames {
+		for _, v := range f.vars {
+			outer[v.Name] = true
+		}
+	}
+	mine := map[string]bool{}
+	for _, v := range frame.vars {
+		mine[v.Name] = true
+	}
+	var here []*logic.Term
+	for _, fact := range frame.scratch.hyps {
+		ownBound, outerBound, stray := false, false, false
+		walkBound(fact, func(name string) {
+			switch {
+			case mine[name]:
+				ownBound = true
+			case outer[name]:
+				outerBound = true
+			default:
+				stray = true
+			}
+		})
+		switch {
+		case stray:
+		case ownBound:
+			here = append(here, fact)
+		case outerBound:
+			frame.outer.assume(fact)
+		case e.sink != nil:
+			e.sink.assume(fact)
+		}
+	}
+	return here
+}
+
+// Keep states a fact that a quantifier made of the facts of its reads: in
+// what gathers the facts of a quantifier around it, or where the formula
+// is read.
+func (e *specEnv) Keep(fact *logic.Term) {
+	switch {
+	case e.v.boundSink != nil:
+		e.v.boundSink.assume(fact)
+	case e.sink != nil:
+		e.sink.assume(fact)
+	}
+}
+
+// walkBound calls visit with the name of each bound variable a term
+// mentions that it does not bind itself.
+func walkBound(t *logic.Term, visit func(name string)) {
+	var walk func(t *logic.Term, inside map[string]bool)
+	walk = func(t *logic.Term, inside map[string]bool) {
+		if t.Op == logic.OpBound && !inside[t.Name] {
+			visit(t.Name)
+		}
+		if (t.Op == logic.OpForall || t.Op == logic.OpExists) && len(t.Args) > 0 && t.Args[0].Op == logic.OpBound {
+			inner := maps.Clone(inside)
+			inner[t.Args[0].Name] = true
+			for _, arg := range t.Args[1:] {
+				walk(arg, inner)
+			}
+			return
+		}
+		for _, arg := range t.Args {
+			walk(arg, inside)
+		}
+	}
+	walk(t, map[string]bool{})
 }
 
 // Apply resolves f(x) in an ensures of a trusted contract, for a function
@@ -481,6 +592,9 @@ func (e *specEnv) locateAt(name string, steps []logic.Step, when logic.When, thr
 	}
 	cur, ground := e.v.follow(e.sink, mem, val, hops)
 	found := reached{val: cur, typ: final, mem: mem, isResult: isResult, hops: len(hops), start: val, path: hops}
+	if !ground {
+		found.sink = e.v.boundSink
+	}
 	if ground {
 		found.sink = e.sink
 	}
@@ -593,7 +707,14 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 		}
 		sink := found.sink
 		if hasBound(key) {
+			// Under a quantifier over the keys, what holds of the map goes
+			// to what gathers the quantifier's facts only for a map whose
+			// values refer to memory, which a write through a footprint
+			// may keep; see mapValue.
 			sink = nil
+			if _, elem := mapParts(found.typ); holdsMemory(elem) {
+				sink = e.v.boundSink
+			}
 		}
 		e.v.noteMap(sink, found.mem, found.typ, found.val[0], key)
 		return e.v.mapHas(found.sink, found.mem, found.typ, found.val[0], key), nil
@@ -813,7 +934,7 @@ func (e *specEnv) address(what string, found reached) (*logic.Term, error) {
 	for i, h := range found.path {
 		reads := e.sink
 		if !ground {
-			reads = nil
+			reads = e.v.boundSink
 		}
 		object, viaPointer := pointee(h.from)
 		switch {
@@ -1322,14 +1443,14 @@ func (v *fnVerifier) follow(sink *state, mem memory, cur value, hops []hop) (val
 	for _, h := range hops {
 		reads := sink
 		if !ground {
-			reads = nil
+			reads = v.boundSink
 		}
 		switch {
 		case h.field >= 0:
 			cur, _, _ = v.member(reads, mem, cur, h.from, h.field)
 		case isMap(h.from):
 			if !ground {
-				reads = nil
+				reads = v.boundSink
 			}
 			cur = v.mapValue(reads, mem, h.from, cur[0], h.index)
 			ground = ground && !hasBound(h.index)

@@ -66,6 +66,10 @@ type state struct {
 	// the path is inside, where the range has come to; see visited.go. A
 	// map is never changed once a state holds it.
 	visited map[*clause]*visitedSet
+	// collecting is set for a state that only gathers the facts of reads
+	// under a quantifier, which may mention its variables; the quantifier
+	// takes them as premises (see specEnv.OpenBound).
+	collecting bool
 }
 
 // deferredCall is a call that a defer statement put off: the call, the
@@ -285,6 +289,22 @@ func (v *fnVerifier) tableAt(sink *state, mem memory, key string, sort logic.Sor
 		seen[at.Name] = true
 		v.materialize(at.Name, at.Sort)
 		note := at.Name + "|" + ref.String()
+		// What gathers the facts of reads under a quantifier wants only
+		// what a write through a footprint keeps; the other layers and
+		// joins were never stated under a quantifier and are not now.
+		if sink.collecting {
+			if known := v.layers[at.Name]; known != nil {
+				if hasFootprintTarget(known.targets) && !sink.noted[note] {
+					sink.noted[note] = true
+					sink.assume(v.unchanged(sink, at, known, ref, nil))
+				}
+				pending = append(pending, known.prev)
+			}
+			if joined := v.joins[at.Name]; joined != nil {
+				pending = append(pending, joined.alternatives...)
+			}
+			continue
+		}
 		if known := v.layers[at.Name]; known != nil {
 			cellNote := note
 			if position != nil && !known.flat && !hasBound(position) {
@@ -446,9 +466,16 @@ func (v *fnVerifier) element(sink *state, mem memory, header value, t types.Type
 	elem := elemType(t)
 	_, ok := layoutOf(elem)
 	result := v.fetch(sink, mem, v.cellsOf(elem), header[0], v.elementAt(header, t, index))
-	if !hasBound(index) {
-		v.noteTyped(sink, result, elem)
-		v.noteReached(sink, v.cellsOf(elem), header[0], v.elementAt(header, t, index), elem, t)
+	// What the types say of the element, and what the other parameters
+	// reach from it, are stated of one element; under a quantifier they
+	// go to what gathers its facts.
+	notes := sink
+	if hasBound(index) && (sink == nil || !sink.collecting) {
+		notes = v.boundSink
+	}
+	if notes != nil {
+		v.noteTyped(notes, result, elem)
+		v.noteReached(notes, v.cellsOf(elem), header[0], v.elementAt(header, t, index), elem, t)
 	}
 	return result, ok
 }
@@ -463,14 +490,19 @@ type typedRead struct {
 // guarantees. Everything in memory is a value of its type, whether or not
 // the read that found it was a sensible one, so this holds unconditionally.
 func (v *fnVerifier) noteTyped(sink *state, val value, t types.Type) {
-	if sink == nil || len(val) == 0 {
+	// Under a quantifier only what a value that refers to memory is
+	// matters to what a write through a footprint keeps; the range of a
+	// number read there is what quantified facts said before.
+	if sink == nil || len(val) == 0 || sink.collecting && !holdsMemory(t) {
 		return
 	}
 	fact := v.wellFormed(val, t, sink.brk)
 	if note := "typed " + fact.String(); !sink.noted[note] {
 		sink.noted[note] = true
 		sink.assume(fact)
-		if v.typedReads != nil {
+		// A read under a quantifier is restated nowhere else: its value
+		// mentions the quantifier's variable.
+		if v.typedReads != nil && !sink.collecting {
 			*v.typedReads = append(*v.typedReads, typedRead{val: val, t: t})
 		}
 	}

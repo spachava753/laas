@@ -109,9 +109,21 @@ func (v *fnVerifier) mapValue(sink *state, mem memory, t types.Type, ref, key *l
 		val[i] = logic.Select(v.row(sink, mem, mapOwner(t)+"#val"+lf.path, lf.sort, ref), mapKey(key))
 	}
 	v.noteMap(sink, mem, t, ref, key)
-	if !hasBound(key) {
+	switch {
+	case !hasBound(key) && (sink == nil || !sink.collecting):
 		v.noteTyped(sink, val, elem)
 		v.noteReachedValue(sink, t, ref, key)
+	case holdsMemory(elem):
+		// Under a quantifier over the keys, what a value that refers to
+		// memory is, and what the other parameters reach from it, go to
+		// what gathers the quantifier's facts, as for an element.
+		notes := v.boundSink
+		if sink != nil && sink.collecting {
+			notes = sink
+		}
+		v.noteMap(notes, mem, t, ref, key)
+		v.noteTyped(notes, val, elem)
+		v.noteReachedValue(notes, t, ref, key)
 	}
 	return val
 }
@@ -129,7 +141,7 @@ func (v *fnVerifier) mapValue(sink *state, mem memory, t types.Type, ref, key *l
 // takes a byte too). That is an assumption about the runtime, stated in the
 // guide's "What a proof assumes".
 func (v *fnVerifier) noteMap(sink *state, mem memory, t types.Type, ref, key *logic.Term) {
-	if sink == nil || hasBound(ref) || (key != nil && hasBound(key)) {
+	if sink == nil || !sink.collecting && (hasBound(ref) || (key != nil && hasBound(key))) {
 		return
 	}
 	count := v.cell(nil, mem, mapOwner(t)+countLeaf.path, countLeaf, ref)

@@ -77,6 +77,19 @@ type Applier interface {
 	Applies(name string) bool
 }
 
+// Gatherer is an Env whose reads under a quantifier make facts that may
+// mention its variables and hold in every state, such as what a layer of
+// memory keeps at the cell a bound variable names. A quantifier takes the
+// ones that mention its variables beside its guards, as premises of a
+// Forall and as conjuncts of an Exists, which changes neither, since they
+// are true, and hands Keep the same facts quantified on their own, so that
+// a formula that is assumed has them as facts and not only as premises.
+type Gatherer interface {
+	OpenBound(vars []*Term)
+	CloseBound() []*Term
+	Keep(fact *Term)
+}
+
 // Path is a path together with the state it is read in.
 type Path struct {
 	Root  string
@@ -830,7 +843,28 @@ func (s *scope) quantifier(n *Node) *Term {
 		}
 		inner.compared[v.Name].scope = known
 	}
+	gatherer, gathers := s.env.(Gatherer)
+	if gathers {
+		gatherer.OpenBound(vars)
+	}
+	closed := false
+	defer func() {
+		if gathers && !closed {
+			gatherer.CloseBound()
+		}
+	}()
 	result := inner.expect(n.Kids[len(n.Kids)-1], Bool)
+	if gathers {
+		closed = true
+		if facts := gatherer.CloseBound(); len(facts) > 0 {
+			side := Implies(And(guards...), And(facts...))
+			for i := len(vars) - 1; i >= 0; i-- {
+				side = Forall(vars[i], side)
+			}
+			gatherer.Keep(side)
+			guards = append(guards, facts...)
+		}
+	}
 	// The key of a string is the same as that of another exactly when the
 	// two strings are equal, which the solver states only of strings keyed
 	// outside quantifiers. For each string the body compares a bound key
