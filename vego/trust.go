@@ -44,6 +44,12 @@ type trustFormula struct {
 type trustEntry struct {
 	key    string
 	reason string
+	// initialiserOnly marks an entry whose claims hold only for a call that
+	// the initialiser of a package-level variable makes itself, outside
+	// every function: a panic there stops the program, or the plugin that
+	// holds the package, before any code reads the variable (D4 of F31, F5
+	// of the design review of F32).
+	initialiserOnly bool
 	// isolated is the claim that the function runs no code but what the
 	// call hands it through its arguments and receiver, and reaches no code
 	// through memory that another call set, also not through any function
@@ -362,6 +368,12 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 				continue
 			}
 			entry.isolated = true
+		case "initialiserOnly":
+			if value.Kind != yaml.ScalarNode || value.Value != "true" {
+				f.problem(value.Line, "initialiserOnly of %s must be true, or left out", entry.key)
+				continue
+			}
+			entry.initialiserOnly = true
 		case "receiver":
 			if value.Kind != yaml.ScalarNode {
 				f.problem(value.Line, "the receiver of %s must be a name", entry.key)
@@ -369,7 +381,7 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			}
 			entry.receiver = trustFormula{text: value.Value, line: value.Line, col: value.Column}
 		default:
-			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, receiver, requires, ensures, modifies, stores, runs, keeps, asserts, vouches, formats, encodes, decodes, prints, calls, or isolated",
+			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, receiver, requires, ensures, modifies, stores, runs, keeps, asserts, vouches, formats, encodes, decodes, prints, calls, isolated, or initialiserOnly",
 				field.Value, entry.key)
 		}
 	}

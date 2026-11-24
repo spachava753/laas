@@ -568,6 +568,10 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	if fn.valueOf != nil || fn.methodOf != nil {
 		name = types.ExprString(call.Fun)
 	}
+	// An entry that holds only in an initialiser is refused anywhere else.
+	if fn.trust != nil && fn.trust.initialiserOnly && !v.inInitialiser {
+		v.unsupported(call.Pos(), initialiserOnlyWhy(callee))
+	}
 	for _, pair := range overlapping(fn) {
 		v.check(st, guard, v.separate(args[pair[0]], args[pair[1]], pair[0].Type()), call.Pos(),
 			"the slices passed to %s as %s and %s may overlap", name, describe(pair[0]), describe(pair[1]))

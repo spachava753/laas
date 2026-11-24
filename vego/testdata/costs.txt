@@ -4108,6 +4108,15 @@ memory	memory.zero	9	19643	0
 mime	(*sync.Mutex).Lock	1	1652	0
 mime	(*sync.Mutex).Unlock	1	1611	0
 mime	(*sync.Once).Do	1	1800	0
+mustcompile	(*regexp.Regexp).MatchString	1	6576	0
+mustcompile	mustcompile.compileHere	1	368	0
+mustcompile	mustcompile.init	2	1384	0
+mustcompile	mustcompile.isKept	4	18419	0
+mustcompile	mustcompile.isWord	4	17517	0
+mustcompile	mustcompile.keep	3	358	0
+mustcompile	mustcompile.the initialiser of kept	3	15452	0
+mustcompile	mustcompile.the initialiser of word	2	22554	0
+mustcompile	regexp.MustCompile	1	6620	0
 net	(*sync.Mutex).Lock	1	1652	0
 net	(*sync.Mutex).Unlock	1	1611	0
 net	(*sync.Once).Do	1	1800	0

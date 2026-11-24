@@ -786,6 +786,17 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 		re, err := regexp.Compile(expr)
 		return sample{before: []any{expr}, results: []any{re, err}}
 	},
+	// The entries of MustCompile claim only what holds when it returns;
+	// TestMustCompilePanics holds that it does not return on a pattern
+	// that does not compile.
+	"regexp.MustCompile": func(rng *rand.Rand) sample {
+		expr := []string{"a+b", "^x$", "(a)(b)?", "[a-z]+", "", ".*", "é|世", "(?P<n>a)"}[rng.Intn(8)]
+		return sample{before: []any{expr}, results: []any{regexp.MustCompile(expr)}}
+	},
+	"regexp.MustCompilePOSIX": func(rng *rand.Rand) sample {
+		expr := []string{"a+b", "^x$", "(a)(b)?", "[a-z]+", "", ".*", "é|世"}[rng.Intn(7)]
+		return sample{before: []any{expr}, results: []any{regexp.MustCompilePOSIX(expr)}}
+	},
 	"(*regexp.Regexp).MatchString": func(rng *rand.Rand) sample {
 		re, s := randomRegexp(rng), utf8Text(rng)
 		before := snapshot(re, s)
@@ -2578,5 +2589,39 @@ func osPredicate(predicate func(error) bool, timeout bool) func(rng *rand.Rand) 
 		done()
 		k.check()
 		return sample{before: before, after: []any{err}, results: []any{result}}
+	}
+}
+
+// TestMustCompilePanics holds that regexp.MustCompile and MustCompilePOSIX
+// do not return on a pattern that does not compile, which is what lets
+// their entries claim a result that is not nil where an initialiser calls
+// them.
+func TestMustCompilePanics(t *testing.T) {
+	parallel(t)
+	type pair struct {
+		must    func(string) *regexp.Regexp
+		compile func(string) (*regexp.Regexp, error)
+	}
+	pairs := map[string]pair{"MustCompile": {regexp.MustCompile, regexp.Compile}, "MustCompilePOSIX": {regexp.MustCompilePOSIX, regexp.CompilePOSIX}}
+	failed := 0
+	for _, expr := range []string{"(", "a{1001}", "[z-a]", "\\q", "x**", "a+b", strings.Repeat("(", 1001) + strings.Repeat(")", 1001)} {
+		for name, p := range pairs {
+			_, err := p.compile(expr)
+			if err == nil {
+				continue
+			}
+			failed++
+			func() {
+				defer func() {
+					if recover() == nil {
+						t.Errorf("regexp.%s(%q) returned, where the function without Must fails", name, expr)
+					}
+				}()
+				p.must(expr)
+			}()
+		}
+	}
+	if failed < 10 {
+		t.Errorf("only %d of the patterns fail to compile", failed)
 	}
 }

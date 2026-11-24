@@ -56,6 +56,9 @@ func (pv *pkgVerifier) runInitialiser(init *types.Initializer) {
 				pv.report(call.Pos(), "%s is called in a function literal in the initialiser of a package-level variable, where its Requires is not checked; "+
 					"call it from a function with a contract of its own", callee.Name())
 			}
+			if entry := pv.entryFor(pv.originOf(callee).FullName()); entry != nil && entry.initialiserOnly {
+				pv.report(call.Pos(), "%s", initialiserOnlyWhy(callee))
+			}
 			return true
 		})
 		return
@@ -200,4 +203,14 @@ func knownComplete(known knownValue) bool {
 		return !slices.ContainsFunc(known.Parts, func(part knownValue) bool { return !knownComplete(part) })
 	}
 	return true
+}
+
+// initialiserOnlyWhy says why a call of an entry marked initialiserOnly
+// cannot stand where it stands: outside the initialiser of a
+// package-level variable, its panic can be recovered and the code after it
+// run.
+func initialiserOnlyWhy(callee *types.Func) string {
+	return callee.Name() + " panics when it fails, and its trusted contract holds only where the initialiser of a package-level variable calls it, " +
+		"outside every function: a panic there stops the program, or the plugin that holds the package, before any code reads the variable; " +
+		"elsewhere call a function that returns an error and check it, as regexp.Compile"
 }

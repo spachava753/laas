@@ -382,6 +382,9 @@ func (entry *trustEntry) fingerprint() string {
 	if entry.isIsolated() {
 		parts = append(parts, "isolated")
 	}
+	if entry.initialiserOnly {
+		parts = append(parts, "initialiserOnly")
+	}
 	for _, call := range entry.calls {
 		parts = append(parts, fmt.Sprintf("calls %s(%s) %v", call.name, strings.Join(call.params, ", "), call.deterministic))
 		list("calls requires", call.requires)

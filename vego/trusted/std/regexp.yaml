@@ -28,6 +28,38 @@ trusted:
     ensures:
       - "result2 = nil -> result1 != nil And fresh(result1)"
 
+  regexp.MustCompile:
+    reason: >-
+      "MustCompile is like Compile but panics if the expression cannot be
+      parsed. It simplifies safe initialization of global variables holding
+      compiled regular expressions." Read from the source of Go 1.26.6 and
+      1.27.3: it calls Compile and panics with what Compile's error says,
+      or returns the Regexp Compile made, which is new memory. So when it
+      returns, its result is not nil. The claim holds only where the
+      initialiser of a package-level variable calls it, outside every
+      function (initialiserOnly): a panic there is not recovered by the
+      package, and stops the program before any code reads the variable;
+      when the package is a plugin, plugin.Open may recover it, and then
+      nothing of the plugin can be reached without the *Plugin it did not
+      return, unless an earlier initialiser handed code of the package
+      out, which vego refuses as hidden initialisation code.
+    initialiserOnly: true
+    modifies: []
+    ensures:
+      - "result != nil And fresh(result)"
+
+  regexp.MustCompilePOSIX:
+    reason: >-
+      "MustCompilePOSIX is like CompilePOSIX but panics if the expression
+      cannot be parsed." Read from the source of Go 1.26.6 and 1.27.3: it
+      calls CompilePOSIX and panics with what its error says, or returns the
+      new Regexp. The claim holds only where the initialiser of a
+      package-level variable calls it, as for MustCompile.
+    initialiserOnly: true
+    modifies: []
+    ensures:
+      - "result != nil And fresh(result)"
+
   (*regexp.Regexp).MatchString:
     reason: >-
       "MatchString reports whether the string s contains any match of the
