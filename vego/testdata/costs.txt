@@ -5052,13 +5052,17 @@ varinv	io.Writer.Write	5	18168	0
 varinv	varinv.Divide	3	1666	0
 varinv	varinv.Hits	2	1087	0
 varinv	varinv.Size	2	1712	0
+varinv	varinv.Steps	3	1632	0
 varinv	varinv.askThenPut	15	15397	0
 varinv	varinv.forget	10	14438	0
 varinv	varinv.hit	9	6182	0
+varinv	varinv.init	12	7274	0
 varinv	varinv.init of cache, size	2	1207	0
+varinv	varinv.init of depth	1	417	0
 varinv	varinv.init of hits	1	417	0
 varinv	varinv.init of limit	1	425	0
 varinv	varinv.init of ready	1	599	0
+varinv	varinv.init of step	1	425	0
 varinv	varinv.put	15	27922	0
 varinv	varinv.putThenAsk	16	31204	0
 varinv	varinv.reset	6	3757	0

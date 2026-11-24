@@ -1137,7 +1137,7 @@ Built in step 1 of part 2 (`varinv.go`): invariants of package-level variables.
   - a frame of the invariant, which is proved again by Z3, with the same terms where nothing changed;
   - the reach rule's allowance for a verified callee that keeps nothing;
   - initialisers that call functions;
-  - `init` functions with a contract, which are verified as any function of the package and so must assume the invariant on entry, which the declarations give (to be tested).
+  - (built and tested since) an `init` with a contract is verified as any writer of the group: it assumes the invariant on entry, which the declarations give, and proves it on return (`varinv/init.go`).
 - **Programs:**
   - `varinv`, both directions: a cache and its size, a counter, a limit used as a divisor, a broken writer, a call while broken, a write through a writer that reads the counter while broken, and an invariant the declaration does not give;
   - `varinvbad`, the refusals;
