@@ -2125,7 +2125,7 @@ func LoadWrapped(l Loader) (n int, err error) {
 ```
 
 ```text
-vego: cannot verify LoadWrapped: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, can be formatted; err is assigned l.Load() at trial.go:127:11, a call whose errors nothing vouches for
+vego: cannot verify LoadWrapped: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, one that a contract vouches for, or one that holds a value of a type whose errors have a known origin, can be formatted; err is assigned l.Load() at trial.go:127:11, a call whose errors nothing vouches for
 ```
 
 Return the error unchanged, or vouch for the errors of the method in its contract with `Vouches`:
@@ -5242,8 +5242,8 @@ func IsEmpty(err error) (result bool) {
 ```text
 vego: cannot verify IsEmpty: errors.Is would run the Is and Unwrap methods of err, an
 error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or
-in a verified function, or one that a contract vouches for, can be its first
-argument
+in a verified function, one that a contract vouches for, or one that holds a value of a
+type whose errors have a known origin, can be its first argument
 ```
 
 An error that a trusted function returns has no known origin unless the contract of the function vouches for it. See [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). Without that, `errors.Is(err, io.EOF)` on it is reported. You can compare it with `==` instead, as in `err == io.EOF`, which runs no method. That comparison is true only when the function returned `io.EOF` itself, and not when it returned an error that wraps `io.EOF`.
@@ -5350,7 +5350,8 @@ func Labelled(cause error) (err error) {
 ```text
 vego: cannot verify Labelled: formatting cause would run the methods of an error whose
 origin is not known; only an error made by errors.New or fmt.Errorf, here or in a
-verified function, or one that a contract vouches for, can be formatted
+verified function, one that a contract vouches for, or one that holds a value of a
+type whose errors have a known origin, can be formatted
 ```
 
 Return the error unchanged, or wrap an error of your own:
@@ -6345,9 +6346,10 @@ func CreateRowErr(w http.ResponseWriter, req *http.Request) {
 
 ```text
 vego: cannot verify CreateRowErr: calling Error on err would run the methods of an error whose origin is not known;
-only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for,
-can be asked for its text; err is assigned json.NewDecoder(io.LimitReader(req.Body, 1 << 20)).Decode(&r) at
-json.go:206:12, a call whose errors nothing vouches for
+only an error made by errors.New or fmt.Errorf, here or in a verified function, one that a contract vouches for, or
+one that holds a value of a type whose errors have a known origin, can be asked for its text; err is assigned
+json.NewDecoder(io.LimitReader(req.Body, 1 << 20)).Decode(&r) at json.go:206:12, a call whose errors nothing
+vouches for
 ```
 
 To answer with the text of the error, read the body into a buffer and decode it with `Unmarshal`, whose error is vouched for:
@@ -7682,8 +7684,9 @@ func ReadLines(r io.Reader, limit int) (n int, err error) {
 
 ```text
 vego: cannot verify ReadLines: formatting err would run the methods of an error whose origin is
-not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one
-that a contract vouches for, can be formatted
+not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, one
+that a contract vouches for, or one that holds a value of a type whose errors have a known
+origin, can be formatted
 ```
 
 To wrap it, your trust file needs an entry for `(io.Reader).Read` that vouches for the errors of the readers your callers pass, as described in [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write). It also needs an entry for `Err` that vouches for what it returns:
@@ -8041,10 +8044,10 @@ func ReportOnce(name, title string) (err error) {
 
 ```text
 vego: cannot verify ReportOnce: formatting err would run the methods of an error whose origin is not
-known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a
-contract vouches for, can be formatted; err may hold here the error assigned fmt.Fprintln(f, title) at
-files.go:75:12, a call whose errors nothing vouches for, on a path that reaches this use; give that
-error a variable of its own
+known; only an error made by errors.New or fmt.Errorf, here or in a verified function, one that a
+contract vouches for, or one that holds a value of a type whose errors have a known origin, can be
+formatted; err may hold here the error assigned fmt.Fprintln(f, title) at files.go:75:12, a call whose
+errors nothing vouches for, on a path that reaches this use; give that error a variable of its own
 ```
 
 Wrap the error of `os.Create` where it is returned, as `WriteReport` does, and return the error of `fmt.Fprintln` unwrapped. A loop counts as a path too. An error assigned at the end of one iteration reaches a `%w` at the start of the next.
@@ -8263,8 +8266,9 @@ func Save(w io.Writer, b []byte) (err error) {
 
 ```text
 vego: cannot verify Save: formatting err would run the methods of an error whose origin is not
-known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that
-a contract vouches for, can be formatted
+known; only an error made by errors.New or fmt.Errorf, here or in a verified function, one that a
+contract vouches for, or one that holds a value of a type whose errors have a known origin, can be
+formatted
 ```
 
 To wrap them, replace the shipped entry with one of your own that vouches:
@@ -8751,7 +8755,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - The methods of `bytes.Buffer`, `strings.Builder`, `bufio.Writer`, `bufio.Reader`, `bufio.Scanner`, and `log.Logger` that have shipped entries write nothing that verified code can see other than the struct and the memory that the value owns, as [Writing through a buffer](#writing-through-a-buffer) lists it. After a call, the value owns only what it owned before the call and memory that the call made. The read position of a `bytes.Buffer` never passes the end of what was written to it. Every method of `bytes.Buffer` keeps it so, and `|b|` is the number of bytes between the two.
 - Code of another package that is not verified runs code of the verified package only as `vego` follows it, which [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods) describes: during a call that the verified package makes, it runs only what that call hands it, through the arguments and the receiver. Code that it kept from an earlier call, a value it stored, or code that it runs on another goroutine or at another time, does not call back into a verified function while that function runs, so that the call never ends. A cycle that stays in the package, or that goes through what a call hands to another package, is found and reported.
 - A claim under `asserts` is true: the function calls nothing that the parameter holds, or that a call of what the parameter holds returns, but what the claim allows, and uses no reflection on it (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
-- Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For a parameter whose footprint the contract lists in `Modifies`, they pass no other argument that reaches memory in that footprint without going through an interface value: `Log` relies on the `Lines` that `t` points to not being memory that the methods of `r` write. The same holds for a package-level variable of an interface type that the contract lists in `Modifies` by itself: they pass no argument that reaches memory in the footprint of the value the variable holds when the call begins, as `printLines` relies on its lines not being memory that the writer in `logOut` writes. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one whose methods change the states of the other, as one that wraps it does, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method. For a parameter whose type owns memory (see [Structs that own memory](#structs-that-own-memory)), they pass a struct whose owned memory is reached by nothing else they pass: not by the other arguments, not by the struct's other fields, and not by what its other owned fields refer to. Memory that a method returns from what its struct owns, which its contract shows with `within(result, s)`, is not stored by code that is not verified, and is not passed to a verified function together with the struct it came from or with anything that reaches that struct.
+- Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For a parameter whose footprint the contract lists in `Modifies`, they pass no other argument that reaches memory in that footprint without going through an interface value: `Log` relies on the `Lines` that `t` points to not being memory that the methods of `r` write. The same holds for a package-level variable of an interface type that the contract lists in `Modifies` by itself: they pass no argument that reaches memory in the footprint of the value the variable holds when the call begins, as `printLines` relies on its lines not being memory that the writer in `logOut` writes. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one whose methods change the states of the other, as one that wraps it does, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method. For a parameter whose type owns memory (see [Structs that own memory](#structs-that-own-memory)), they pass a struct whose owned memory is reached by nothing else they pass: not by the other arguments, not by the struct's other fields, and not by what its other owned fields refer to. Memory that a method returns from what its struct owns, which its contract shows with `within(result, s)`, is not stored by code that is not verified, and is not passed to a verified function together with the struct it came from or with anything that reaches that struct. The same holds of what code that is not verified takes out of an error that a verified function returns, by a type assertion or reflection, when the error came from a call made on what a struct it was handed owns, as the error of `fmt.Fprint(r.out, ...)` may hold what `r.out` holds: no contract can say that an error lies within a struct.
 - When the server calls a verified handler, the writer it passes writes none of the memory that the request reaches without going through an interface value, except the field `Trailer` of the `Request` and the map it refers to, which the server fills while it reads the body, also when a write to the writer drains a body the handler left unread. Verified code cannot read or write that field. Code that is not verified does not make that map reachable from anything else it hands a verified function, as `req.Trailer = req.Header` in a middleware would. Code that is not verified uses a `ResponseWriter`, and hands one to verified code as that type or as any other interface, only while the `ServeHTTP` call that received it runs, and does not hand one to a verified function that keeps that parameter.
 - The body of every request that reaches verified code from code that is not verified makes progress: a `Read` of it with a buffer that is not empty returns bytes or an error. The server's bodies do. Verified code cannot store into the field `Body` of a request. A middleware that is not verified and replaces the body with a reader that can return no bytes and no error for ever breaks this, and so does a test or a caller that builds a request over such a reader, as `httptest.NewRequest` can. `json.NewDecoder(io.LimitReader(req.Body, n)).Decode(&x)` in a verified function it calls may then never return.
 - The body of an `http.Response` that reaches verified code from code that is not verified writes nothing that the response reaches without going through an interface value, except the field `Trailer` of the response and the map it refers to, which reading the body fills. Verified code cannot read or write that field, and does not store into `Body` but a value it makes there. Code that is not verified does not make that map reachable from anything else it hands a verified function, as `resp.Trailer = resp.Header` would.

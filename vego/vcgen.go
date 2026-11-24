@@ -252,6 +252,9 @@ type fnVerifier struct {
 	// those on which == is identity, in the order met (dyntypes.go).
 	typedMet   bool
 	typedTypes []types.Type
+	// isPairs holds the applications of is met, error and target, which
+	// a type met later states what errors.Is reports of (typedTrees).
+	isPairs [][2]*logic.Term
 	// madeFixed holds the references of the fixed variables met whose
 	// initialisers made an allocation with a size, which are apart, and
 	// fixedMet the fixed variables met; see fixedValue.

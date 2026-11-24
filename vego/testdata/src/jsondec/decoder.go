@@ -38,7 +38,7 @@ func Create(w http.ResponseWriter, req *http.Request) {
 func ErrText(w http.ResponseWriter, req *http.Request) {
 	var rt Req
 	if err := json.NewDecoder(io.LimitReader(req.Body, 1<<20)).Decode(&rt); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest) // want `cannot verify ErrText: calling Error on err would run the methods of an error whose origin is not known; only an error made by errors\.New or fmt\.Errorf, here or in a verified function, or one that a c`
+		http.Error(w, err.Error(), http.StatusBadRequest) // want `cannot verify ErrText: calling Error on err would run the methods of an error whose origin is not known; only an error made by errors\.New or fmt\.Errorf, here or in a verified function, one that a c`
 	}
 }
 

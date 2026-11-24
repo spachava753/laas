@@ -660,6 +660,11 @@ func (pv *pkgVerifier) knownErrorIn(o *origins, e ast.Expr, index int, s *search
 	if pv.info.Types[e].IsNil() {
 		return true
 	}
+	// A value of a concrete type that Go converts to error here: the
+	// typed origin (S4 of F33).
+	if t := pv.concreteErrorType(e, index); t != nil {
+		return pv.typedOriginWhy(t) == ""
+	}
 	switch e := e.(type) {
 	case *ast.CallExpr:
 		callee := pv.staticCalleeAt(e)

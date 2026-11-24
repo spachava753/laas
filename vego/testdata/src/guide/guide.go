@@ -956,7 +956,7 @@ func ParseQuantity(line string) (n int, err error) {
 //
 // @Ensures err != nil
 func Labelled(cause error) (err error) {
-	return fmt.Errorf("load: %w", cause) // want `vego: cannot verify Labelled: formatting cause would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, can be formatted`
+	return fmt.Errorf("load: %w", cause) // want `vego: cannot verify Labelled: formatting cause would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, one that a contract vouches for, or one that holds a value of a type whose errors have a known origin, can be formatted`
 }
 
 // Nearest gives the int nearest to a number that does not fit in one.
@@ -994,7 +994,7 @@ func LabelledOwn() (err error) { // want `vego: the contract of LabelledOwn may 
 //
 // @Ensures True
 func IsEmpty(err error) (result bool) {
-	return errors.Is(err, ErrEmpty) // want `vego: cannot verify IsEmpty: errors.Is would run the Is and Unwrap methods of err, an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, can be its first argument`
+	return errors.Is(err, ErrEmpty) // want `vego: cannot verify IsEmpty: errors.Is would run the Is and Unwrap methods of err, an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, one that a contract vouches for, or one that holds a value of a type whose errors have a known origin, can be its first argument`
 }
 
 var calls int

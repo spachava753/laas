@@ -126,7 +126,7 @@ type Loader interface {
 func LoadWrapped(l Loader) (n int, err error) {
 	n, err = l.Load()
 	if err != nil {
-		return 0, fmt.Errorf("load: %w", err) // want `cannot verify LoadWrapped: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, can be formatted; err is assigned l.Load\(\) at trial.go:127:11, a call whose errors nothing vouches for$`
+		return 0, fmt.Errorf("load: %w", err) // want `cannot verify LoadWrapped: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, one that a contract vouches for, or one that holds a value of a type whose errors have a known origin, can be formatted; err is assigned l.Load\(\) at trial.go:127:11, a call whose errors nothing vouches for$`
 	}
 	return n, nil
 }

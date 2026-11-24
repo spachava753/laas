@@ -153,7 +153,9 @@ func (pv *pkgVerifier) callWraps(call *ast.CallExpr) (wrapping, ast.Expr) {
 	errs := make([]bool, len(operands))
 	for i, operand := range operands {
 		t := pv.info.TypeOf(operand)
-		errs[i] = t != nil && isError(t)
+		// A value of a concrete type that implements error is an error to
+		// %w, which asserts its operand to error (F33).
+		errs[i] = t != nil && (isError(t) || pv.concreteErrorType(operand, -1) != nil)
 	}
 	tree, index := formatWraps(format, errs)
 	if tree != wrapsOperand {
@@ -215,7 +217,7 @@ func (v *fnVerifier) errorsIs(call *ast.CallExpr, st *state, guard []*logic.Term
 	// known only of a made error, from noteTree.
 	if !v.knownError(v.bodyOrigins(), err, -1) {
 		v.unsupported(err.Pos(), fmt.Sprintf("errors.Is would run the Is and Unwrap methods of %s, an error whose origin is not known; "+
-			"only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, "+
+			"only an error made by errors.New or fmt.Errorf, here or in a verified function, one that a contract vouches for, or one that holds a value of a type whose errors have a known origin, "+
 			"can be its first argument%s",
 			types.ExprString(err), v.originWhy(err)))
 	}
@@ -265,6 +267,11 @@ func (v *fnVerifier) assignedWhere(from source) (where, what string) {
 	what = "an error whose origin is not known"
 	if _, isCall := ast.Unparen(from.expr).(*ast.CallExpr); isCall {
 		what = "a call whose errors nothing vouches for"
+	}
+	if t := v.concreteErrorType(from.expr, from.index); t != nil {
+		// Which condition of the typed origin the type fails, and what
+		// to change (the orchestrator's condition on S4).
+		what = fmt.Sprintf("a value of type %s, whose errors have no known origin: %s", types.TypeString(t, types.RelativeTo(v.pass.Pkg)), v.typedOriginWhy(t))
 	}
 	return where, what
 }

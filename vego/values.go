@@ -312,7 +312,12 @@ func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term
 	case wrapsNothing:
 		v.noteTree(st, errorTree{err: created})
 	case wrapsOperand:
-		v.noteTree(st, errorTree{err: created, wraps: values[wrapped][0]})
+		wraps := values[wrapped][0]
+		if t := v.concreteErrorType(wrapped, -1); t != nil {
+			// What %w wraps is the error that holds the value (F33).
+			wraps = v.typedError(wrapped, t, values[wrapped], st, guard)
+		}
+		v.noteTree(st, errorTree{err: created, wraps: wraps})
 	}
 	return created
 }

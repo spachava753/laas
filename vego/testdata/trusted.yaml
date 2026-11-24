@@ -2302,6 +2302,10 @@ trusted:
       - "err = InvalidByteError(n)"
     modifies: []
 
+  typedowns.fail:
+    reason: Test helper standing for a call on what a struct owns, whose error may hold it.
+    modifies: []
+
   typederrorsclient.find:
     reason: Test helper standing for a trusted function that returns a typed error, whose entry names the type by the path of its package.
     ensures:

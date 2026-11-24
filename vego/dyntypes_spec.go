@@ -389,7 +389,7 @@ func (e *specEnv) TypedEquals(t logic.TypeName, err, v *logic.Term) (*logic.Term
 	}
 	tag, _ := typeTag(target)
 	ref := logic.ErrRef(err)
-	e.v.meetType(target)
+	e.v.meetType(e.sink, target)
 	return logic.And(logic.Not(logic.IsNil(err)), logic.Eq(dynTag(ref), tag), eqLeaf(logic.Select(heldTable(name, 0, layout[0]), ref), leaves[0])), nil
 }
 
@@ -459,7 +459,7 @@ func (e *specEnv) noteCanonical(err *logic.Term, t types.Type, leaves value) {
 	for _, made := range e.v.distinct {
 		e.v.noteMadeTag(sink, made)
 	}
-	e.v.meetType(t)
+	e.v.meetType(sink, t)
 	e.v.fact(sink, fact)
 }
 
@@ -519,7 +519,7 @@ func (e *specEnv) holdsPath(name string, steps []logic.Step, t *logic.TypeName, 
 	if !ok {
 		return nil, fmt.Errorf("holds(%s, %s): %s is declared inside a function, and nothing tells it apart from another type there", spell(name, steps), t, t)
 	}
-	e.v.meetType(target)
+	e.v.meetType(e.sink, target)
 	return logic.And(logic.Not(logic.IsNil(err2)), logic.Eq(errorTag(err2), tag)), nil
 }
 

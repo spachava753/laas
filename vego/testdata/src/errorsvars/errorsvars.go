@@ -256,7 +256,7 @@ func SameNamed(e error) (same bool) {
 //
 // @Ensures err != nil
 func FormatsCode() (err error) {
-	return fmt.Errorf("x: %w", ErrCode) // want `vego: cannot verify FormatsCode: formatting ErrCode would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, can be formatted; ErrCode is not initialised with errors.New or fmt.Errorf, so nothing is known of its methods`
+	return fmt.Errorf("x: %w", ErrCode) // want `vego: cannot verify FormatsCode: formatting ErrCode would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, one that a contract vouches for, or one that holds a value of a type whose errors have a known origin, can be formatted; ErrCode is not initialised with errors.New or fmt.Errorf, so nothing is known of its methods`
 }
 
 // FormatsNotExist formats os.ErrNotExist, which holds a sentinel.

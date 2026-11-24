@@ -115,7 +115,7 @@ func NilWriter(it Item) (err error) {
 // @Ensures True
 func FormatsErr(out io.Writer, it Item) (s string) {
 	if err := json.NewEncoder(out).Encode(it); err != nil {
-		return err.Error() // want `cannot verify FormatsErr: calling Error on err would run the methods of an error whose origin is not known; only an error made by errors\.New or fmt\.Errorf, here or in a verified function, or one that `
+		return err.Error() // want `cannot verify FormatsErr: calling Error on err would run the methods of an error whose origin is not known; only an error made by errors\.New or fmt\.Errorf, here or in a verified function, one that `
 	}
 	return ""
 }

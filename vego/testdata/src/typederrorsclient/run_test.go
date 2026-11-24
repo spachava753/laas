@@ -1,6 +1,7 @@
 package typederrorsclient
 
 import (
+	"errors"
 	"testing"
 
 	"typederrors"
@@ -30,5 +31,13 @@ func TestClaims(t *testing.T) {
 	}
 	if err := ForwardByte([]byte{9}); err != typederrors.InvalidByteError(9) {
 		t.Errorf("ForwardByte = %v", err)
+	}
+}
+
+func TestWraps(t *testing.T) {
+	for n := -1; n <= 1; n++ {
+		if err := Wraps(n); (err == nil) != (n >= 0) || n < 0 && !errors.Is(err, typederrors.ErrSyntax) {
+			t.Errorf("Wraps(%d) = %v", n, err)
+		}
 	}
 }

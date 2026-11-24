@@ -14,7 +14,7 @@ func LoopBack(n int) (err error) {
 	// @Variant n - i
 	for i := 0; i < n; i++ {
 		if err != nil {
-			return fmt.Errorf("looped: %w", err) // want `formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, can be formatted; err may hold here the error assigned unvouched\(\) at defects.go:19:9, a call whose errors nothing vouches for, in an earlier iteration of the loop; declare err inside the loop, or give that error a variable of its own`
+			return fmt.Errorf("looped: %w", err) // want `formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, one that a contract vouches for, or one that holds a value of a type whose errors have a known origin, can be formatted; err may hold here the error assigned unvouched\(\) at defects.go:19:9, a call whose errors nothing vouches for, in an earlier iteration of the loop; declare err inside the loop, or give that error a variable of its own`
 		}
 		err = unvouched()
 	}

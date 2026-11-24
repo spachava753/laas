@@ -368,15 +368,20 @@ func (v *fnVerifier) noteHeld(st *state, err *logic.Term, t types.Type, leaves v
 	for i, lf := range layout {
 		v.fact(st, eqLeaf(logic.Select(heldTable(name, i, lf), ref), leaves[i]))
 	}
-	v.meetType(t)
+	v.meetType(st, t)
 }
 
 // meetType records a type of the values errors hold that the function
 // meets, when == on it is identity; see sameTyped and holdsIdentityEq.
-func (v *fnVerifier) meetType(t types.Type) {
+func (v *fnVerifier) meetType(sink *state, t types.Type) {
 	if layout, ok := layoutOf(t); ok && v.identityEq(t) && capturesValue(layout) &&
 		!slices.ContainsFunc(v.typedTypes, func(known types.Type) bool { return types.Identical(known, t) }) {
 		v.typedTypes = append(v.typedTypes, t)
+	}
+	// What errors.Is reports of an error that holds a value of the type,
+	// for every application of is met so far.
+	for _, pair := range v.isPairs {
+		v.typedTrees(sink, pair[0], pair[1])
 	}
 }
 
@@ -675,7 +680,7 @@ func (v *fnVerifier) meetAssertion(st *state, t types.Type) {
 	for _, made := range v.distinct {
 		v.noteMadeTag(st, made)
 	}
-	v.meetType(t)
+	v.meetType(st, t)
 }
 
 // checkAssertion proves that a one-result assertion does not panic.
@@ -809,4 +814,86 @@ func (pv *pkgVerifier) switchVars(n ast.Node) ([]*types.Var, ast.Expr) {
 		}
 	}
 	return vars, assign.Rhs[0].(*ast.TypeAssertExpr).X
+}
+
+// typedOriginWhy says why the errors a conversion of a value of a concrete
+// type makes have no known origin, or "" when they have one (S4 of F33):
+// the third known origin, typed, beside made and vouched. It is decided
+// from the declarations alone, before anything is verified (F5 of the
+// design review): == on the type is identity; no method that errors.Is,
+// errors.As, or fmt would run but Error, which has a contract; and what
+// the type holds is plain, since fmt prints it for verbs that do not call
+// Error. What every method may do is checked at each conversion
+// (checkedMethods), which is refused where it fails, so an error of this
+// origin runs, through any method, nothing that writes or asks.
+func (pv *pkgVerifier) typedOriginWhy(t types.Type) string {
+	shown := types.TypeString(t, types.RelativeTo(pv.pass.Pkg))
+	if _, named := canonicalName(t); !named {
+		return fmt.Sprintf("%s is declared inside a function", shown)
+	}
+	layout, ok := layoutOf(t)
+	if !ok || !pv.identityEq(t) || !capturesValue(layout) {
+		return fmt.Sprintf("== on values of %s is not identity", shown)
+	}
+	methods := types.NewMethodSet(t)
+	for _, name := range []string{"Unwrap", "Is", "As", "Format", "GoString"} {
+		if methods.Lookup(nil, name) != nil {
+			return fmt.Sprintf("%s has a method %s, which errors.Is, errors.As, or fmt would run", shown, name)
+		}
+	}
+	selection := methods.Lookup(nil, "Error")
+	if selection == nil {
+		return fmt.Sprintf("%s has no method Error", shown)
+	}
+	if pv.contractOf(selection.Obj().(*types.Func)) == nil {
+		return fmt.Sprintf("its method Error has no contract")
+	}
+	base := t
+	if object, isPointer := pointee(t); isPointer {
+		base = object
+	}
+	if why := plainReason(base.Underlying(), map[types.Type]bool{}); why != "" {
+		return fmt.Sprintf("fmt prints what %s holds for verbs that do not call Error, where %s", shown, why)
+	}
+	return ""
+}
+
+// concreteErrorType returns the type of an expression, or of one result of
+// a call, when it is a concrete type that implements error, which Go
+// converts where an error is wanted; nil otherwise.
+func (pv *pkgVerifier) concreteErrorType(e ast.Expr, index int) types.Type {
+	t := pv.info.TypeOf(e)
+	if tuple, ok := t.(*types.Tuple); ok {
+		if index < 0 || index >= tuple.Len() {
+			return nil
+		}
+		t = tuple.At(index).Type()
+	}
+	if t == nil || types.IsInterface(t) || pv.info.Types[e].IsNil() || !types.Implements(t, errorType) {
+		return nil
+	}
+	return t
+}
+
+// typedTrees states what errors.Is reports of an error that holds a value
+// of a type met in the function on which == is identity and that has no Is
+// and no Unwrap method: errors.Is compares the error with the target, as
+// isComparable && err == target, and finds nothing below it, so is(e, t) is
+// e = t (S4 of F33).
+func (v *fnVerifier) typedTrees(sink *state, err, target *logic.Term) {
+	if sink == nil || hasBound(err) || hasBound(target) {
+		return
+	}
+	for _, t := range v.typedTypes {
+		methods := types.NewMethodSet(t)
+		if methods.Lookup(nil, "Is") != nil || methods.Lookup(nil, "Unwrap") != nil {
+			continue
+		}
+		tag, _ := typeTag(t)
+		fact := logic.Implies(logic.And(logic.Not(logic.IsNil(err)), logic.Eq(errorTag(err), tag)), logic.Iff(logic.Is(err, target), logic.Eq(err, target)))
+		if note := "typed tree " + fact.String(); !sink.noted[note] {
+			sink.noted[note] = true
+			v.fact(sink, fact)
+		}
+	}
 }

@@ -39,12 +39,14 @@ func KeepsInUnlisted(reg *keepslib.Registry) {
 	keepslib.KeepsInUnlisted(reg, show) // want `its keeps lists h as kept in reg, which its modifies does not list`
 }
 
-// KeepsInError keeps a handler in an error, through which a later call
-// would run it without being counted as one that may call through a value.
+// KeepsInError keeps a handler in an error. Since F33 an error counts as
+// what can hold code that verified code made, so a later call handed the
+// error is counted as one that may call through a value, and the entry is
+// no longer a defect.
 //
 // @Ensures True
 func KeepsInError() {
-	_ = keepslib.KeepsInError(show) // want `its keeps lists h as kept in result, whose type error can hold no function value and no value of an interface whose methods all have contracts. But h can hold a function value of type keepslib.Handler, and a call handed result would run that code without being counted as one that may call through a value`
+	_ = keepslib.KeepsInError(show)
 }
 
 // @Ensures True

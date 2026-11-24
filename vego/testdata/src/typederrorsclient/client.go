@@ -2,7 +2,11 @@
 // formulas name its types and constants, from another package (S2 of F33).
 package typederrorsclient
 
-import "typederrors"
+import (
+	"fmt"
+
+	"typederrors"
+)
 
 // @Ensures r <-> n < 0
 func Failed(n int) (r bool) {
@@ -60,4 +64,13 @@ func Found(n int) (line int) {
 // @Ensures n < 0 -> err.(*typederrors.PE).Line = n
 func ForwardFound(n int) (err error) {
 	return find(n)
+}
+
+// @Ensures err = nil <-> n >= 0
+// @Ensures is(err, typederrors.ErrSyntax) <-> n < 0
+func Wraps(n int) (err error) {
+	if err := typederrors.Parse(n); err != nil {
+		return fmt.Errorf("client: %w", err)
+	}
+	return nil
 }

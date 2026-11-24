@@ -1046,7 +1046,9 @@ func holdsCallable(pv *pkgVerifier, t types.Type, seen map[types.Type]bool) bool
 		// interface value that verified code made.
 		return u.Kind() == types.UnsafePointer
 	case *types.Interface:
-		return pv.fullyContracted(t)
+		// An error may hold a value verified code converted, whose methods
+		// are verified code (F33, O4 of the design review).
+		return pv.fullyContracted(t) || isError(t)
 	case *types.Pointer:
 		return holdsCallable(pv, u.Elem(), seen)
 	case *types.Slice:
@@ -1371,6 +1373,9 @@ func (pv *pkgVerifier) callableIn(t types.Type, seen map[types.Type]bool) string
 	case *types.Interface:
 		if pv.fullyContracted(t) {
 			return fmt.Sprintf("a value of %s, whose methods all have contracts, so that it can hold code that verified code made", t)
+		}
+		if isError(t) {
+			return "an error, which can hold a value that verified code converted, whose methods are verified code"
 		}
 	case *types.Pointer:
 		return pv.callableIn(u.Elem(), seen)

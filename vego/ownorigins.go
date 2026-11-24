@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"golang.org/x/tools/go/cfg"
+	"golang.org/x/tools/go/types/typeutil"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 )
@@ -997,6 +998,24 @@ func (v *fnVerifier) ownCalleeOf(call *ast.CallExpr) *ownCallee {
 	fn := v.memCallee(call)
 	keepAll := func(*types.Var) bool { return true }
 	unknown := func(int) ownResult { return ownResult{unknown: true} }
+	if callee := typeutil.StaticCallee(v.info, call); errorConstructor(callee) {
+		// errors.New and fmt.Errorf keep nothing but what %w wraps, which
+		// the error they make holds: its kind is that of the operands
+		// (F33).
+		sig := callee.Type().(*types.Signature)
+		var params []*types.Var
+		for param := range sig.Params().Variables() {
+			params = append(params, param)
+		}
+		return &ownCallee{name: name, params: params, keeps: func(*types.Var) bool { return false },
+			results: func(int) ownResult {
+				from := map[*types.Var]bool{}
+				for _, p := range params {
+					from[p] = true
+				}
+				return ownResult{fresh: true, from: from}
+			}}
+	}
 	switch {
 	case v.pkgVerifier.isEncoderInner(call):
 		// The encoder lives for the one expression; see json.go.
@@ -1144,6 +1163,10 @@ func (v *fnVerifier) ownOperands(call *ast.CallExpr, c *ownCallee) []struct {
 	}
 	byName := func(p *types.Var) *types.Var {
 		if c.fn == nil {
+			// errors.New and fmt.Errorf, whose parameters are their own.
+			if slices.Contains(c.params, p) {
+				return p
+			}
 			return nil
 		}
 		for _, q := range c.fn.params {
@@ -1374,6 +1397,81 @@ func (v *fnVerifier) paramName(p *types.Var) string {
 	return p.Name()
 }
 
+// returnedAt returns the expression a return statement gives result i, or
+// for a bare return the named result itself.
+func (v *fnVerifier) returnedAt(ret *ast.ReturnStmt, i int) ast.Expr {
+	if len(ret.Results) == len(v.fn.results) {
+		return ret.Results[i]
+	}
+	if len(ret.Results) == 0 && i < len(v.fn.results) && v.fn.results[i].Name() != "" {
+		return &ast.Ident{Name: v.fn.results[i].Name(), NamePos: ret.Pos()}
+	}
+	return nil
+}
+
+// errorFromCalls reports whether an error that a function returns can only
+// be one that calls returned: a call, or a variable of the function that
+// every assignment gives one (F19 of the review of S3 of F33). Such an
+// error may hold memory that a struct the function was handed owns, when
+// the call was made on that memory, as the error of fmt.Fprint(r.out, ...)
+// may; one the function made itself by a conversion holds what it was
+// given, and a copy is the remedy.
+func (v *fnVerifier) errorFromCalls(e ast.Expr, seen map[*types.Var]bool) bool {
+	if e == nil {
+		return false
+	}
+	e = ast.Unparen(e)
+	if v.info.Types[e].IsNil() {
+		return true
+	}
+	if call, ok := e.(*ast.CallExpr); ok {
+		if errorConstructor(typeutil.StaticCallee(v.info, call)) {
+			// An error the function makes holds what it wraps.
+			for _, arg := range call.Args {
+				if t := v.info.TypeOf(arg); t != nil && (isError(t) || v.concreteErrorType(arg, -1) != nil) && !v.errorFromCalls(arg, seen) {
+					return false
+				}
+			}
+			return true
+		}
+		return !v.info.Types[call.Fun].IsType() && v.concreteErrorType(call, -1) == nil
+	}
+	id, ok := e.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	var variable *types.Var
+	if obj, isVar := v.info.ObjectOf(id).(*types.Var); isVar {
+		variable = obj
+	} else {
+		for _, result := range v.fn.results {
+			if result.Name() == id.Name {
+				variable = result
+			}
+		}
+	}
+	if variable == nil || seen[variable] {
+		return variable != nil
+	}
+	seen[variable] = true
+	o := v.bodyOrigins()
+	if o.unknown[variable] || v.isParameter[variable] || len(o.sources[variable]) == 0 {
+		return false
+	}
+	for _, from := range o.sources[variable] {
+		if call, isCall := ast.Unparen(from.expr).(*ast.CallExpr); isCall && from.index >= 0 {
+			if v.concreteErrorType(call, from.index) != nil {
+				return false
+			}
+			continue
+		}
+		if !v.errorFromCalls(from.expr, seen) {
+			return false
+		}
+	}
+	return true
+}
+
 // ownReturn applies a return statement: what each result is, for the
 // summary, and R5.
 func (v *fnVerifier) ownReturn(fl *ownFlow, ret *ast.ReturnStmt, f *ownFact) {
@@ -1456,7 +1554,7 @@ func (v *fnVerifier) ownReturn(fl *ownFlow, ret *ast.ReturnStmt, f *ownFact) {
 				// asserts what it holds gets a part of the owner, which it
 				// may not keep (F7 of the design review of F33), and only
 				// an assertion reaches it. No contract can place an error.
-				if isError(v.fn.results[i].Type()) {
+				if isError(v.fn.results[i].Type()) && v.errorFromCalls(v.returnedAt(ret, i), map[*types.Var]bool{}) {
 					continue
 				}
 				if v.withinParam(v.fn, i) != root.param {
@@ -1468,8 +1566,9 @@ func (v *fnVerifier) ownReturn(fl *ownFlow, ret *ast.ReturnStmt, f *ownFact) {
 						fl.refuse(pos, "%s returns memory that %s owns; say so with within(%s, %s) in an Ensures, or return a copy",
 							v.fn.obj.Name(), root.param.Name(), spelledResult(v.fn, i), root.param.Name())
 					} else {
-						fl.refuse(pos, "%s returns memory that %s owns, held in a %s, which no contract can place within %s; return a copy",
-							v.fn.obj.Name(), root.param.Name(), types.TypeString(rt, types.RelativeTo(v.pass.Pkg)), root.param.Name())
+						held := types.TypeString(rt, types.RelativeTo(v.pass.Pkg))
+						fl.refuse(pos, "%s returns memory that %s owns, held in %s %s, which no contract can place within %s; return a copy",
+							v.fn.obj.Name(), root.param.Name(), article(held), held, root.param.Name())
 					}
 				}
 			case root.tag.site != nil:

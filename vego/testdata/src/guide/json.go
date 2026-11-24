@@ -204,7 +204,7 @@ func CreateRow(w http.ResponseWriter, req *http.Request) {
 func CreateRowErr(w http.ResponseWriter, req *http.Request) {
 	var r Row
 	if err := json.NewDecoder(io.LimitReader(req.Body, 1<<20)).Decode(&r); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest) // want `cannot verify CreateRowErr: calling Error on err would run the methods of an error whose origin is not known; only an error made by errors\.New or fmt\.Errorf, here or in a verified function, or one tha`
+		http.Error(w, err.Error(), http.StatusBadRequest) // want `cannot verify CreateRowErr: calling Error on err would run the methods of an error whose origin is not known; only an error made by errors\.New or fmt\.Errorf, here or in a verified function, one tha`
 	}
 }
 

@@ -76,7 +76,7 @@ func ReportOnce(name, title string) (err error) {
 		f.Close()
 	}
 	if err != nil {
-		return fmt.Errorf("report %s: %w", name, err) // want `cannot verify ReportOnce: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, can be formatted; err may hold here the error assigned fmt.Fprintln\(f, title\) at files.go:75:12, a call whose errors nothing vouches for, on a path that reaches this use; give that error a variable of its own`
+		return fmt.Errorf("report %s: %w", name, err) // want `cannot verify ReportOnce: formatting err would run the methods of an error whose origin is not known; only an error made by errors.New or fmt.Errorf, here or in a verified function, one that a contract vouches for, or one that holds a value of a type whose errors have a known origin, can be formatted; err may hold here the error assigned fmt.Fprintln\(f, title\) at files.go:75:12, a call whose errors nothing vouches for, on a path that reaches this use; give that error a variable of its own`
 	}
 	return nil
 }

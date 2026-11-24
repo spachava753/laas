@@ -1,6 +1,9 @@
 package typederrors
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 // TestClaims runs the functions of the package whose contracts vego proves
 // and checks what they claim against Go: each canonical-term equality the
@@ -137,5 +140,27 @@ func TestAssertionClaims(t *testing.T) {
 func TestAssertionZero(t *testing.T) {
 	if !ZeroWhenNot(0) || MadeNotTyped() {
 		t.Error("ZeroWhenNot or MadeNotTyped")
+	}
+}
+
+// TestOriginClaims checks what the contracts of origin.go say against the
+// real errors.Is and fmt.Errorf.
+func TestOriginClaims(t *testing.T) {
+	for n := -2; n <= 2; n++ {
+		if IsSyntax(n) != (n < 0) || IsRange(n) || DirectIs(n) != (n < 0) {
+			t.Errorf("IsSyntax, IsRange, or DirectIs(%d)", n)
+		}
+		if (Chained(n) == nil) != (n == 0) {
+			t.Errorf("Chained(%d)", n)
+		}
+	}
+	if Text(-1) == "" || WrapsByte(nil) != nil || WrapsByte([]byte{1}) == nil {
+		t.Error("Text or WrapsByte")
+	}
+}
+
+func TestWrapsByteIs(t *testing.T) {
+	if !errors.Is(WrapsByteIs([]byte{7}), InvalidByteError(7)) || WrapsByteIs(nil) != nil {
+		t.Error("WrapsByteIs")
 	}
 }

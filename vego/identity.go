@@ -472,6 +472,10 @@ func (v *fnVerifier) noteIs(sink *state, t *logic.Term) {
 			for _, tree := range v.trees {
 				v.treeInstance(sink, tree, target)
 			}
+			if !hasBound(t) {
+				v.isPairs = append(v.isPairs, [2]*logic.Term{err, target})
+			}
+			v.typedTrees(sink, err, target)
 			// errors.Is begins with err == nil || target == nil, so it
 			// finds nil only in nil and nothing in nil. That is stated of
 			// the error and the target, and of nil and the target, which

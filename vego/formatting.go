@@ -228,7 +228,7 @@ func (v *fnVerifier) checkFormattable(arg ast.Expr, who string, errorf bool) *fm
 		// either kind makes harmless.
 		if !v.knownError(v.bodyOrigins(), arg, -1) {
 			v.unsupported(arg.Pos(), fmt.Sprintf("formatting %s would run the methods of an error whose origin is not known; "+
-				"only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, "+
+				"only an error made by errors.New or fmt.Errorf, here or in a verified function, one that a contract vouches for, or one that holds a value of a type whose errors have a known origin, "+
 				"can be formatted%s", types.ExprString(arg), v.originWhy(arg)))
 		}
 		return nil
@@ -244,11 +244,12 @@ func (v *fnVerifier) checkFormattable(arg ast.Expr, who string, errorf bool) *fm
 		return nil
 	}
 	name := run.method.Name()
-	if errorf && types.Implements(t, errorType) {
+	if why := v.typedOriginWhy(t); errorf && types.Implements(t, errorType) && why != "" {
 		// %w would keep it in the tree of the new error, whose methods
-		// would then not be the standard library's.
+		// would then not be the standard library's, unless they are those
+		// of a type whose errors have a known origin (S4 of F33).
 		v.unsupported(arg.Pos(), fmt.Sprintf("fmt.Errorf formats %s, a value of type %s, which is an error that %%w would wrap; "+
-			"only an error of type error whose origin is known can be wrapped", types.ExprString(arg), t))
+			"only an error of known origin can be wrapped, and errors of this type have none: %s", types.ExprString(arg), t, why))
 	}
 	fn := v.contractOf(run.method)
 	if fn == nil {

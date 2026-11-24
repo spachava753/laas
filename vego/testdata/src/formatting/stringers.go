@@ -53,8 +53,10 @@ func ShowsBoth(b Both) (s string) {
 	return fmt.Sprint(b)
 }
 
-// CodeError is an error that fmt.Errorf would wrap with %w, though its
-// static type is not error.
+// CodeError is an error that fmt.Errorf wraps with %w, though its static
+// type is not error. Its errors have a known origin, typed, so it may be
+// wrapped, and errors.Is finds in the result only what it finds in a
+// CodeError, which is a CodeError (F33).
 type CodeError struct{ code int }
 
 // @Ensures True
@@ -64,7 +66,7 @@ var ErrC error = errors.New("c")
 
 // @Ensures r = False
 func Found() (r bool) {
-	err := fmt.Errorf("x: %w", CodeError{1}) // want `vego:\ cannot\ verify\ Found:\ fmt\.Errorf\ formats\ CodeError\{…\},\ a\ value\ of\ type\ formatting\.CodeError,\ which\ is\ an\ error\ that\ %w\ would\ wrap`
+	err := fmt.Errorf("x: %w", CodeError{1})
 	return errors.Is(err, ErrC)
 }
 

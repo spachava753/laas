@@ -771,7 +771,7 @@ func (v *fnVerifier) errorText(call *ast.CallExpr, st *state, guard []*logic.Ter
 	sel := ast.Unparen(call.Fun).(*ast.SelectorExpr)
 	if !v.knownError(v.bodyOrigins(), sel.X, -1) {
 		v.unsupported(call.Pos(), fmt.Sprintf("calling Error on %s would run the methods of an error whose origin is not known; "+
-			"only an error made by errors.New or fmt.Errorf, here or in a verified function, or one that a contract vouches for, "+
+			"only an error made by errors.New or fmt.Errorf, here or in a verified function, one that a contract vouches for, or one that holds a value of a type whose errors have a known origin, "+
 			"can be asked for its text%s", types.ExprString(sel.X), v.originWhy(sel.X)))
 	}
 	u := v.unit
