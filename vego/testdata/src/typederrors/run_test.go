@@ -45,3 +45,57 @@ func TestNotContradictory(t *testing.T) {
 		t.Error("two errors of two types are equal")
 	}
 }
+
+// TestFormulaClaims checks what the contracts of formulas.go say of the
+// errors the functions return.
+func TestFormulaClaims(t *testing.T) {
+	for n := -2; n <= 2; n++ {
+		err := Parse(n)
+		if (err == nil) != (n >= 0) || n < 0 && err != ErrSyntax {
+			t.Errorf("Parse(%d) = %v", n, err)
+		}
+		if ParseFailed(n) != (n < 0) || CallerDiffers(n) {
+			t.Errorf("ParseFailed or CallerDiffers(%d)", n)
+		}
+		located := Located(n)
+		if pe, ok := located.(*PE); (located == nil) != (n == 0) || n != 0 && (!ok || pe.Line != n) {
+			t.Errorf("Located(%d) = %v", n, located)
+		}
+	}
+	if _, ok := NotLocated().(*PE); ok {
+		t.Error("NotLocated holds a *PE")
+	}
+	for _, src := range [][]byte{nil, {7}, {1, 200}} {
+		first, some := FirstByte(src), SomeByte(src)
+		if (first == nil) != (len(src) == 0) || len(src) > 0 && first != InvalidByteError(src[0]) {
+			t.Errorf("FirstByte(%v) = %v", src, first)
+		}
+		found := false
+		for _, b := range src {
+			found = found || some == InvalidByteError(b)
+		}
+		if (some == nil) != (len(src) == 0) || len(src) > 0 && !found {
+			t.Errorf("SomeByte(%v) = %v", src, some)
+		}
+		if !SomeByteNotSyntax(src) {
+			t.Errorf("SomeByteNotSyntax(%v)", src)
+		}
+	}
+	for _, s := range []string{"", "x"} {
+		if err := Named(s); (err == nil) != (s == "") || s != "" && err != SErr(s) {
+			t.Errorf("Named(%q) = %v", s, err)
+		}
+	}
+	if !VariableHolds() || ReturnsVariable() != ErrVar {
+		t.Error("ErrVar does not hold the error that holds ErrSyntax")
+	}
+	if !ReadsHeld(ErrSyntax) || ReadsHeld(ErrRange) || PassRange(ErrRange) != nil || PassRange(ErrSyntax) == nil {
+		t.Error("ReadsHeld or PassRange")
+	}
+}
+
+func TestLabelIsNotNamed(t *testing.T) {
+	if LabelIsNotNamed("x") == SErr("x") {
+		t.Error("a Label is an SErr")
+	}
+}

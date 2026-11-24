@@ -29,7 +29,36 @@ const (
 	NField            // Kids[0].Name, possibly Primed
 	NStr              // a string literal; Name holds its value
 	NAddr             // &Kids[0]: the address of a struct reached through memory
+	NAssert           // Kids[0].(Type): what an error holds when it holds a Type
+	NConvert          // Type(Kids[0]) for a qualified Type, as hex.InvalidByteError(c)
 )
+
+// TypeName is a type named in a formula: a defined type, qualified by the
+// name of its package or, in a trust file, by its path in quotes, or a
+// pointer to one. Resolved is set by an Env that returns a type it found
+// itself, which it then reads instead of the name.
+type TypeName struct {
+	Qualifier string
+	Quoted    bool
+	Name      string
+	Pointer   bool
+	Resolved  any
+}
+
+// String spells the type as a formula writes it.
+func (t TypeName) String() string {
+	text := t.Name
+	switch {
+	case t.Quoted:
+		text = strconv.Quote(t.Qualifier) + "." + text
+	case t.Qualifier != "":
+		text = t.Qualifier + "." + text
+	}
+	if t.Pointer {
+		text = "*" + text
+	}
+	return text
+}
 
 // Walk calls visit for the node and everything below it.
 func (n *Node) Walk(visit func(*Node)) {
@@ -57,8 +86,11 @@ type Node struct {
 	HiOpen bool
 	Closed bool
 	Kids   []*Node
-	Start  int
-	End    int
+	// Type is the type of NAssert, NConvert, and of the applications
+	// holds(x, T) and as(err, T).
+	Type  *TypeName
+	Start int
+	End   int
 }
 
 // Conjuncts returns the top-level conjuncts of a parsed formula so that each
@@ -101,6 +133,9 @@ func (n *Node) String() string {
 		for i, arg := range n.Kids {
 			args[i] = arg.String()
 		}
+		if n.Type != nil {
+			args = append(args, n.Type.String())
+		}
 		return n.Name + "(" + strings.Join(args, ", ") + ")"
 	case NIndex:
 		return kid(0) + "[" + n.Kids[1].String() + "]"
@@ -126,6 +161,10 @@ func (n *Node) String() string {
 		return n.Op + " " + strings.Join(n.Vars, ", ") + " : " + n.Kids[len(n.Kids)-1].String()
 	case NNil:
 		return "nil"
+	case NAssert:
+		return kid(0) + ".(" + n.Type.String() + ")"
+	case NConvert:
+		return n.Type.String() + "(" + n.Kids[0].String() + ")"
 	}
 	return strconv.Quote(n.Name)
 }
@@ -600,9 +639,25 @@ func (p *parser) postfix() *Node {
 	n := p.primary()
 	for {
 		if p.accept(".") {
+			if p.accept("(") {
+				// x.(T): what x holds as a T.
+				t := p.typeName()
+				p.expect(")")
+				n = &Node{Kind: NAssert, Kids: []*Node{n}, Type: t, Start: n.Start, End: p.end()}
+				continue
+			}
 			n = &Node{Kind: NField, Name: p.ident(), Kids: []*Node{n}, Start: n.Start}
 			n.Primed = p.accept("'")
 			n.End = p.end()
+			if inner := n.Kids[0]; !n.Primed && (inner.Kind == NIdent && !inner.Primed || inner.Kind == NStr) && p.is("(") {
+				// pkg.T(v) and "path".T(v): a conversion to a type of
+				// another package.
+				p.expect("(")
+				arg := p.formula()
+				p.expect(")")
+				t := &TypeName{Qualifier: inner.Name, Quoted: inner.Kind == NStr, Name: n.Name}
+				n = &Node{Kind: NConvert, Kids: []*Node{arg}, Type: t, Start: n.Start, End: p.end()}
+			}
 			continue
 		}
 		if !p.accept("[") {
@@ -624,6 +679,28 @@ func (p *parser) postfix() *Node {
 			Start: n.Start, End: p.end(),
 		}
 	}
+}
+
+// typeName parses a type named in a formula: an optional *, then a name,
+// a package name and a name, or a path in quotes and a name.
+func (p *parser) typeName() *TypeName {
+	t := &TypeName{Pointer: p.accept("*")}
+	tok := p.peek()
+	switch tok.kind {
+	case 's':
+		p.pos++
+		t.Qualifier, t.Quoted = tok.text, true
+		p.expect(".")
+		t.Name = p.ident()
+	case 'i':
+		t.Name = p.ident()
+		if p.accept(".") {
+			t.Qualifier, t.Name = t.Name, p.ident()
+		}
+	default:
+		p.fail("expected a type, as in T, *T, pkg.T, or \"path\".T")
+	}
+	return t
 }
 
 // primary parses literals, names, predicate applications, parenthesised
@@ -654,7 +731,14 @@ func (p *parser) primary() *Node {
 	case tok.kind == 'i':
 		p.pos++
 		n.Kind, n.Name = NIdent, tok.text
-		if p.accept("(") {
+		if (tok.text == "holds" || tok.text == "as") && p.accept("(") {
+			// holds(x, T) and as(err, T) take a value and a type.
+			n.Kind = NCall
+			n.Kids = []*Node{p.formula()}
+			p.expect(",")
+			n.Type = p.typeName()
+			p.expect(")")
+		} else if p.accept("(") {
 			n.Kind = NCall
 			for !p.accept(")") {
 				if len(n.Kids) > 0 {

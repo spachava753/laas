@@ -29,6 +29,7 @@ func TestFrameEnvComplete(t *testing.T) {
 	_, implemented["Env"] = env.(logic.Env)
 	_, implemented["Applier"] = env.(logic.Applier)
 	_, implemented["Gatherer"] = env.(logic.Gatherer)
+	_, implemented["Typer"] = env.(logic.Typer)
 
 	names, err := filepath.Glob(filepath.Join("internal", "logic", "*.go"))
 	if err != nil {

@@ -28,7 +28,7 @@ func TestCorpusClaims(t *testing.T) {
 	for _, file := range found {
 		packages[filepath.Base(filepath.Dir(file))] = true
 	}
-	if !packages["typederrors"] {
+	if !packages["typederrors"] || !packages["typederrorsclient"] {
 		t.Fatalf("no package of the corpus holds claims: %v", found)
 	}
 	// GOPATH mode does not switch toolchains, so the go command of the

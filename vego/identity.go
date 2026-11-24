@@ -74,6 +74,12 @@ type sentinelInfo struct {
 	// wraps when it wraps one.
 	Tree  wrapping
 	Wraps string
+	// TypedKey and TypedValue are set of an opaque variable whose
+	// initialiser converts a constant of a defined type to error, as in
+	// var ErrX error = Error(1): the key of the type (typeKeyOf) and the
+	// constant. The variable then holds the error that holds the constant,
+	// which code and formulas read as one term (F12 of the design review).
+	TypedKey, TypedValue string
 }
 
 func (*sentinelsFact) AFact() {}
@@ -363,6 +369,7 @@ func (v *fnVerifier) sentinelTerm(sink *state, variable *types.Var) (*logic.Term
 	sentinel := logic.Const(sentinelName+errorKey(r.final), logic.Err)
 	if info.Kind != stableMade {
 		v.noteOpaque(sink, sentinel, info.NonNil)
+		v.noteTypedVariable(sink, sentinel, info)
 		return sentinel, ""
 	}
 	v.noteError(sink, sentinel)

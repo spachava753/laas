@@ -3,6 +3,7 @@ package vego
 import (
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/token"
 	"go/types"
 	"maps"
@@ -108,6 +109,9 @@ func (pv *pkgVerifier) findSentinels() {
 			info := sentinelInfo{Kind: stableOpaque}
 			if d.value != nil {
 				info.NonNil, info.Comparable = concreteError(pv.pass.TypesSizes, pv.info.Types[d.value], d.index)
+			}
+			if tv := pv.info.Types[d.value]; d.index < 0 && d.value != nil && tv.Value != nil && tv.Value.Kind() == constant.Int && typeKeyOf(tv.Type) != "" {
+				info.TypedKey, info.TypedValue = typeKeyOf(tv.Type), tv.Value.ExactString()
 			}
 			pv.candidates[variable] = info
 		}
@@ -1074,7 +1078,7 @@ func (v *fnVerifier) unsampled(t *logic.Term) []*logic.Term {
 			return
 		}
 		seen[t] = true
-		if t.Op == logic.OpConst && t != logic.NilErr() && !isSampleError(t) && !isFixedTerm(t) && !strings.HasPrefix(t.Name, sampleName) && !names[t.Name] {
+		if t.Op == logic.OpConst && t != logic.NilErr() && !isSampleError(t) && !isFixedTerm(t) && !isDynTable(t) && !strings.HasPrefix(t.Name, sampleName) && !names[t.Name] {
 			names[t.Name] = true
 			found = append(found, t)
 		}
@@ -1091,7 +1095,7 @@ func (v *fnVerifier) unsampled(t *logic.Term) []*logic.Term {
 // the nil error, a sentinel, or another package-level variable that keeps
 // its value, which are the same for every input.
 func (v *fnVerifier) isInput(t *logic.Term) bool {
-	return t == logic.NilErr() || isFixedTerm(t) || v.inputs[t.Name] || strings.HasPrefix(t.Name, entryRegion) || strings.HasPrefix(t.Name, sampleName)
+	return t == logic.NilErr() || isFixedTerm(t) || isDynTable(t) || v.inputs[t.Name] || strings.HasPrefix(t.Name, entryRegion) || strings.HasPrefix(t.Name, sampleName)
 }
 
 // canReach reports whether there is evidence that execution can arrive at
@@ -1758,6 +1762,14 @@ func (v *fnVerifier) someInput(terms []*logic.Term, search func(input *witness) 
 		case isSentinelTerm(t) && !b.mentioned[t.Name]:
 			b.mentioned[t.Name] = true
 			sentinels = append(sentinels, t)
+		case isCanonicalError(t):
+			// An error that holds a constant value of a type, as err =
+			// ErrSyntax gives, is offered as an error variable is.
+			if key := sampleKey(t); !b.mentioned[key] {
+				b.mentioned[key] = true
+				sentinels = append(sentinels, t)
+			}
+			return
 		case t.Op == logic.OpConst:
 			b.mentioned[t.Name] = true
 		case t.Op == logic.OpPush && len(b.literals) < 8:
@@ -1907,6 +1919,10 @@ func (v *fnVerifier) tiedToInputs(terms, sentinels []*logic.Term) []*logic.Term 
 				return
 			}
 			seen[t] = true
+			if isCanonicalError(t) {
+				names = append(names, sampleKey(t))
+				return
+			}
 			if t.Op == logic.OpConst && t != logic.NilErr() && holdsError(t.Sort) {
 				names = append(names, t.Name)
 				if v.isInput(t) && !isSentinelTerm(t) {
@@ -1928,11 +1944,44 @@ func (v *fnVerifier) tiedToInputs(terms, sentinels []*logic.Term) []*logic.Term 
 	}
 	var offered []*logic.Term
 	for _, sentinel := range sentinels {
-		if tied[find(sentinel.Name)] {
+		if tied[find(sampleKey(sentinel))] {
 			offered = append(offered, sentinel)
 		}
 	}
 	return offered
+}
+
+// isCanonicalError reports whether a term is the error that holds a
+// constant value of a type (canonicalError), which mentions nothing of the
+// input and nothing a quantifier binds.
+func isCanonicalError(t *logic.Term) bool {
+	if t.Sort != logic.Err || t.Op != logic.OpSelect {
+		return false
+	}
+	table := t
+	var indices []*logic.Term
+	for table.Op == logic.OpSelect {
+		indices = append(indices, table.Args[1])
+		table = table.Args[0]
+	}
+	if table.Op != logic.OpConst || !strings.HasPrefix(table.Name, "mkerr ") {
+		return false
+	}
+	for _, index := range indices {
+		if _, ground := groundValue(index); !ground {
+			return false
+		}
+	}
+	return true
+}
+
+// sampleKey names an error a sample may hold: an error variable by its
+// name, and an error that holds a constant by its text.
+func sampleKey(t *logic.Term) string {
+	if t.Op == logic.OpConst {
+		return t.Name
+	}
+	return "held " + t.String()
 }
 
 // proposeFor asks Z3 for values of the constants of a sample that satisfy

@@ -39,6 +39,11 @@ type Step struct {
 	// nothing.
 	ElemSize bool
 	Keys     bool
+	// Assert reads what an error holds as a value of the type, as in
+	// err.(*ParseError), and Holds, as the last step, whether it holds one,
+	// as in holds(err, *ParseError).
+	Assert *TypeName
+	Holds  *TypeName
 }
 
 // NotSlice is what an Env returns for a path with a last step Nil that does
@@ -67,6 +72,32 @@ type Env interface {
 	// Qualified returns the value of a variable named by the path of its
 	// package in quotes, as in "io/fs".ErrNotExist, followed by steps.
 	Qualified(path, name string, steps []Step, when When) (*Term, error)
+}
+
+// Typer is an Env that knows the types of the program (F33): what a name
+// in a formula that is a type means, and what errors hold.
+type Typer interface {
+	// IsType reports whether a name is a type where the formula stands,
+	// and Convertible whether it is one whose values a formula can convert
+	// to, as in T(v): an integer, string, or boolean type.
+	IsType(t TypeName) bool
+	Convertible(t TypeName) bool
+	// Convert returns the value of the conversion T(v) of an integer, a
+	// string, or a boolean, for v the term arg and, when arg is a path, its
+	// Go type argType; it refuses one that may not fit T.
+	Convert(t TypeName, arg *Term, argType any) (*Term, error)
+	// PathType returns the Go type of what a path leads to, or nil.
+	PathType(root string, steps []Step, when When) any
+	// ErrorType returns the type of what a path leads to when it is a
+	// concrete type that implements error, which Go converts to error
+	// beside an error, with Resolved set; ok is false otherwise.
+	ErrorType(root string, steps []Step, when When) (t TypeName, ok bool)
+	// TypedEquals returns the formula err = error(T(v)): Go's == of err and
+	// the error that holds v.
+	TypedEquals(t TypeName, err, v *Term) (*Term, error)
+	// TypedError returns the error that holds v, an Err term, for a type
+	// that has one.
+	TypedError(t TypeName, v *Term) (*Term, error)
 }
 
 // Applier is an Env that gives a meaning to some applications, as f(i) for
@@ -108,7 +139,7 @@ type PredDef struct {
 
 // Reserved lists the names of the forms of the language that look like
 // applications, which no predicate, state, or other name may take.
-var Reserved = []string{"len", "cap", "elemsize", "old", "fresh", "within", "apart", "has", "is", "valid", "behind"}
+var Reserved = []string{"len", "cap", "elemsize", "old", "fresh", "within", "apart", "has", "is", "valid", "behind", "holds", "as"}
 
 // Resolver type-checks parsed annotations and turns them into terms.
 type Resolver struct {
@@ -271,8 +302,10 @@ func (s *scope) term(n *Node) *Term {
 		return Bytes(n.Name)
 	case NBool:
 		return BoolLit(n.Val == 1)
-	case NIdent, NField, NIndex:
+	case NIdent, NField, NIndex, NAssert:
 		return s.access(n, Now)
+	case NConvert:
+		return s.conversion(*n.Type, n.Kids[0])
 	case NCall:
 		return s.call(n)
 	case NLen:
@@ -334,6 +367,9 @@ func (s *scope) path(n *Node) (root *Node, steps []Step, primed bool) {
 		// What may index depends on what is indexed: a number for a slice,
 		// and for a map whatever its keys are.
 		return root, append(steps, Step{Index: s.term(n.Kids[1])}), primed
+	case NAssert:
+		root, steps, primed = s.path(n.Kids[0])
+		return root, append(steps, Step{Assert: n.Type}), primed
 	}
 	return n, nil, n.Kind == NIdent && n.Primed
 }
@@ -366,7 +402,7 @@ func (s *scope) pathOf(n *Node) (root string, steps []Step, when When, ok bool) 
 	if n.Kind == NCall && n.Name == "old" && len(n.Kids) == 1 {
 		n, when = n.Kids[0], Old
 	}
-	if n.Kind != NIdent && n.Kind != NField && n.Kind != NIndex {
+	if n.Kind != NIdent && n.Kind != NField && n.Kind != NIndex && n.Kind != NAssert {
 		return "", nil, Now, false
 	}
 	start, steps, primed := s.path(n)
@@ -410,6 +446,9 @@ func (s *scope) access(n *Node, when When) *Term {
 			base = s.bound[root.Name]
 		}
 		for _, step := range steps {
+			if step.Assert != nil {
+				fail("%s.(%s) takes an error reached from a variable", root, step.Assert)
+			}
 			if step.Field != "" {
 				fail("%s has no field %s", root, step.Field)
 			}
@@ -451,7 +490,23 @@ func (s *scope) call(n *Node) *Term {
 		if len(n.Kids) != 2 {
 			fail("is takes two errors, as in is(err, ErrEmpty)")
 		}
-		return Is(s.expect(n.Kids[0], Err), s.expect(n.Kids[1], Err))
+		return Is(s.expect(n.Kids[0], Err), s.errorOperand(n.Kids[1]))
+	case "holds":
+		// holds(x, T): whether the error x holds a value of type T.
+		if s.env == nil || n.Type == nil || len(n.Kids) != 1 {
+			fail("holds takes an error and a type, as in holds(err, *ParseError), and cannot be used in a predicate definition")
+		}
+		root, steps, when, ok := s.pathOf(n.Kids[0])
+		if !ok {
+			fail("holds takes an error reached from a variable, as in holds(err, *ParseError) or holds(old(err), Error)")
+		}
+		t, err := s.env.Path(root, append(steps, Step{Holds: n.Type}), when)
+		if err != nil {
+			panic(resolveError{err})
+		}
+		return t
+	case "as":
+		fail("as(err, T) is not supported yet: it comes with errors.As")
 	case "has":
 		// has(m, k): whether map m has key k.
 		if s.env == nil || len(n.Kids) != 2 {
@@ -543,6 +598,18 @@ func (s *scope) call(n *Node) *Term {
 			panic(resolveError{err})
 		}
 		return t
+	}
+	_, predicate := s.r.Preds[s.r.Prefix+n.Name]
+	if typer, ok := s.env.(Typer); ok && s.env != nil && typer.IsType(TypeName{Name: n.Name}) && (!predicate || typer.Convertible(TypeName{Name: n.Name})) {
+		// A type that a formula cannot convert to leaves its name to a
+		// predicate of that name.
+		if predicate {
+			fail("%s is both a type and a predicate here; rename the predicate", n.Name)
+		}
+		if len(n.Kids) != 1 {
+			fail("the conversion %s takes one value, as in %s(c)", n.Name, n.Name)
+		}
+		return s.conversion(TypeName{Name: n.Name}, n.Kids[0])
 	}
 	state, isState, missing := s.state(n)
 	applier, _ := s.env.(Applier)
@@ -676,12 +743,22 @@ func (s *scope) compare(op string, left, right *Node) *Term {
 		return t
 	}
 	a, b := operand(left), operand(right)
-	// nil is written the same for an error and for a pointer.
+	// nil is written the same for an error and for a pointer. Only nil as
+	// written is a nil pointer: an error that is nil, as a result an
+	// outcome chose, beside a pointer is compared as Go compares them,
+	// converting the pointer to error (F33).
 	switch {
-	case a == NilErr() && b.Sort == Ref:
+	case a == NilErr() && b.Sort == Ref && left.Kind == NNil:
 		a = RefLit(0)
-	case b == NilErr() && a.Sort == Ref:
+	case b == NilErr() && a.Sort == Ref && right.Kind == NNil:
 		b = RefLit(0)
+	}
+	if a.Sort != b.Sort && len(vars) == 0 {
+		// An error beside a value of a concrete type that implements
+		// error, which Go converts.
+		if t := s.typedCompare(op, a, b, left, right); t != nil {
+			return t
+		}
 	}
 	if a.Sort != b.Sort {
 		failSort("cannot compare %s (%s) with %s (%s)", plain(left), kindOf(a), plain(right), kindOf(b))
@@ -695,6 +772,93 @@ func (s *scope) compare(op string, left, right *Node) *Term {
 		result = Forall(vars[i], result)
 	}
 	return result
+}
+
+// typedType returns the type of a node that is a value of a concrete type
+// that implements error, which Go converts to error beside an error: a
+// conversion T(v) to such a type, or a path to such a value, such as a
+// constant ErrSyntax of a type Error.
+func (s *scope) typedType(n *Node) (TypeName, bool) {
+	typer, isTyper := s.env.(Typer)
+	if !isTyper || s.env == nil {
+		return TypeName{}, false
+	}
+	switch {
+	case n.Kind == NConvert:
+		return *n.Type, true
+	case n.Kind == NCall && len(n.Kids) == 1 && typer.IsType(TypeName{Name: n.Name}):
+		return TypeName{Name: n.Name}, true
+	}
+	root, steps, when, isPath := s.pathOf(n)
+	if !isPath {
+		return TypeName{}, false
+	}
+	return typer.ErrorType(root, steps, when)
+}
+
+// typedCompare resolves err = v and err != v for an error err and a value
+// v of a concrete type that Go converts to error, as Go's == of err and the
+// error that holds v. It returns nil when neither side is such a value.
+func (s *scope) typedCompare(op string, a, b *Term, left, right *Node) *Term {
+	e, v, other := a, b, right
+	if b.Sort == Err {
+		e, v, other = b, a, left
+	}
+	if e.Sort != Err {
+		return nil
+	}
+	t, ok := s.typedType(other)
+	if !ok {
+		return nil
+	}
+	if op != "=" && op != "!=" {
+		failSort("operator %s cannot be applied to errors; compare them with = or !=", op)
+	}
+	eq, err := s.env.(Typer).TypedEquals(t, e, v)
+	if err != nil {
+		panic(resolveError{err})
+	}
+	if op == "!=" {
+		return Not(eq)
+	}
+	return eq
+}
+
+// errorOperand resolves an operand that must be an error, where a value of
+// a concrete type that implements error is converted, as the target of
+// is(err, ErrSyntax).
+func (s *scope) errorOperand(n *Node) *Term {
+	v := s.term(n)
+	if v.Sort == Err {
+		return v
+	}
+	if t, ok := s.typedType(n); ok {
+		e, err := s.env.(Typer).TypedError(t, v)
+		if err != nil {
+			panic(resolveError{err})
+		}
+		return e
+	}
+	failSort("expected an error but %s has type %s", n, kindOf(v))
+	return nil
+}
+
+// conversion resolves T(v) of an integer, a string, or a boolean v.
+func (s *scope) conversion(t TypeName, arg *Node) *Term {
+	typer, ok := s.env.(Typer)
+	if !ok || s.env == nil {
+		fail("a conversion %s(...) cannot be used here", t)
+	}
+	v := s.term(arg)
+	var argType any
+	if root, steps, when, isPath := s.pathOf(arg); isPath {
+		argType = typer.PathType(root, steps, when)
+	}
+	converted, err := typer.Convert(t, v, argType)
+	if err != nil {
+		panic(resolveError{err})
+	}
+	return converted
 }
 
 // nilSlice resolves A = nil and A != nil for a slice A, which has no value

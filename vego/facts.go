@@ -38,6 +38,12 @@ type contractFact struct {
 	// Packages holds, by the name the contract's file imports it as, the
 	// path of each package whose state a Modifies clause names.
 	Packages map[string]string
+	// Types holds, by how the contract spells them, the keys of the types
+	// it names (see typeKeyOf), and under "const " and the name the types
+	// of the constants it mentions that have a defined type, so that
+	// holds(err, ParseError) and err = ErrSyntax mean the same in every
+	// package that reads it.
+	Types map[string]string
 	// CallsValues is set when running the function may make a call through
 	// a function value, itself or in what it calls; see mayCallValues.
 	CallsValues bool
@@ -130,16 +136,50 @@ func (pv *pkgVerifier) exportContracts(excused map[*funcInfo]bool) {
 // as a fact, with the values of the constants they mention and the keys of
 // the error variables, as they are seen at a position.
 func (pv *pkgVerifier) contractFactOf(fn *funcInfo, at token.Pos) *contractFact {
-	fact := &contractFact{Consts: map[string]string{}, Errors: map[string]string{}, Packages: map[string]string{}}
+	fact := &contractFact{Consts: map[string]string{}, Errors: map[string]string{}, Packages: map[string]string{}, Types: map[string]string{}}
 	// The constants a contract mentions are recorded with their
 	// values, and the error variables with their keys.
 	scope := pv.pass.Pkg.Scope().Innermost(at)
+	// typeNamed records the key of a type the contract names.
+	typeNamed := func(t *logic.TypeName) {
+		var obj types.Object
+		switch {
+		case t.Quoted:
+			return
+		case t.Qualifier != "":
+			if _, pkg := scope.LookupParent(t.Qualifier, at); pkg != nil {
+				if name, ok := pkg.(*types.PkgName); ok {
+					obj = name.Imported().Scope().Lookup(t.Name)
+				}
+			}
+		default:
+			_, obj = scope.LookupParent(t.Name, at)
+		}
+		if name, ok := obj.(*types.TypeName); ok {
+			if key := typeKeyOf(name.Type()); key != "" {
+				spelled := t.Name
+				if t.Qualifier != "" {
+					spelled = t.Qualifier + "." + t.Name
+				}
+				fact.Types[spelled] = key
+			}
+		}
+	}
 	var visit func(n *logic.Node)
 	visit = func(n *logic.Node) {
 		if constant, ok := pv.pass.Pkg.Scope().Lookup(n.Name).(*types.Const); ok && n.Kind == logic.NIdent {
 			if literal, ok := literalOf(constant.Val()); ok {
 				fact.Consts[n.Name] = literal.String()
 			}
+			if key := typeKeyOf(constant.Type()); key != "" {
+				fact.Types["const "+n.Name] = key
+			}
+		}
+		if n.Type != nil {
+			typeNamed(n.Type)
+		}
+		if n.Kind == logic.NCall {
+			typeNamed(&logic.TypeName{Name: n.Name})
 		}
 		if _, obj := scope.LookupParent(n.Name, at); n.Kind == logic.NIdent && obj != nil {
 			if variable := packageVariableOf(obj, ""); variable != nil {
@@ -151,6 +191,17 @@ func (pv *pkgVerifier) contractFactOf(fn *funcInfo, at token.Pos) *contractFact 
 		}
 		if n.Kind == logic.NField && n.Kids[0].Kind == logic.NIdent {
 			if _, obj := scope.LookupParent(n.Kids[0].Name, at); obj != nil {
+				if pkg, ok := obj.(*types.PkgName); ok {
+					if constant, ok := pkg.Imported().Scope().Lookup(n.Name).(*types.Const); ok && constant.Exported() {
+						spelled := n.Kids[0].Name + "." + n.Name
+						if literal, ok := literalOf(constant.Val()); ok {
+							fact.Consts[spelled] = literal.String()
+						}
+						if key := typeKeyOf(constant.Type()); key != "" {
+							fact.Types["const "+spelled] = key
+						}
+					}
+				}
 				if variable := packageVariableOf(obj, n.Name); variable != nil {
 					fact.Errors[n.Kids[0].Name+"."+n.Name] = errorKey(variable)
 				}

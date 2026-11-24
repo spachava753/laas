@@ -618,6 +618,15 @@ func (e *specEnv) locateAt(name string, steps []logic.Step, when logic.When, thr
 		}
 		return e.locateVariable(variable, rest, when)
 	}
+	if len(steps) > 0 && steps[0].Field != "" {
+		// A constant of another package, as in s2.ErrSyntax.
+		if constant, _, ok := e.qualifiedConst(name, steps[0].Field); ok {
+			if len(steps) > 1 || when != logic.Now {
+				return reached{}, fmt.Errorf("%s.%s is a constant and has no fields or elements, and cannot be primed or put in old()", name, steps[0].Field)
+			}
+			return reached{constant: constant}, nil
+		}
+	}
 	val, t, isResult, constant, err := e.root(name)
 	switch {
 	case err != nil:
@@ -714,6 +723,13 @@ func (e *specEnv) locateField(name string, steps []logic.Step, when logic.When) 
 // ends in a struct, or in a slice of structs, has no value of its own.
 func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic.Term, error) {
 	defer e.boundBefore(name, when)()
+	steps, err := e.resolveSteps(steps)
+	if err != nil {
+		return nil, err
+	}
+	if last := len(steps) - 1; last >= 0 && steps[last].Holds != nil {
+		return e.holdsPath(name, steps[:last], steps[last].Holds, when)
+	}
 	if e.fn == nil && e.st != nil {
 		if c := e.v.visitedAt(name, e.pos); c != nil {
 			return e.visitedPath(c, steps, when)
@@ -1658,9 +1674,11 @@ func spell(name string, steps []logic.Step) string {
 // hop is one step of a path through values and memory: the selection of a
 // field, by its index in the struct, or of an element.
 type hop struct {
-	from  types.Type // the type the step applies to: a struct, a pointer to one, a slice, or a string
+	from  types.Type // the type the step applies to: a struct, a pointer to one, a slice, a string, or an error
 	field int        // -1 for an element
 	index *logic.Term
+	// assert is the type whose value an error holds, for err.(T).
+	assert types.Type
 }
 
 // plan checks a path against the type it starts from, and returns its hops
@@ -1672,6 +1690,29 @@ func plan(t types.Type, steps []logic.Step, from *types.Package) ([]hop, types.T
 	var hops []hop
 	spelled := ""
 	for _, step := range steps {
+		if step.Assert != nil {
+			target, resolved := step.Assert.Resolved.(types.Type)
+			switch {
+			case !resolved:
+				return nil, nil, fmt.Errorf("%s.(%s) cannot be used here", spelled, step.Assert)
+			case isIface(t):
+				return nil, nil, fmt.Errorf("%s.(%s): what an interface value other than an error holds cannot be named yet", spelled, step.Assert)
+			case !isError(t):
+				return nil, nil, fmt.Errorf("%s.(%s): a %s is not an error", spelled, step.Assert, t)
+			case types.IsInterface(target):
+				return nil, nil, fmt.Errorf("%s.(%s): %s is an interface, and naming an error as another interface is not supported yet", spelled, step.Assert, step.Assert)
+			}
+			if _, named := canonicalName(target); !named {
+				return nil, nil, fmt.Errorf("%s.(%s): %s is declared inside a function, and nothing tells it apart from another type there", spelled, step.Assert, step.Assert)
+			}
+			if _, ok := layoutOf(target); !ok {
+				return nil, nil, fmt.Errorf("%s.(%s): values of %s are not supported", spelled, step.Assert, step.Assert)
+			}
+			hops = append(hops, hop{from: t, field: -1, assert: target})
+			spelled += ".(" + step.Assert.String() + ")"
+			t = target
+			continue
+		}
 		if step.Field == "" {
 			keyed := isMap(t) && mapModelled(t)
 			want := logic.Int
@@ -1770,6 +1811,9 @@ func (v *fnVerifier) follow(sink *state, mem memory, cur value, hops []hop) (val
 			reads = v.boundSink
 		}
 		switch {
+		case h.assert != nil:
+			cur = v.heldRead(reads, cur[0], h.assert)
+			ground = ground && !hasBound(cur[0])
 		case h.field >= 0:
 			cur, _, _ = v.member(reads, mem, cur, h.from, h.field)
 		case isMap(h.from):

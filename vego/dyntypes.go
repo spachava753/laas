@@ -39,6 +39,15 @@ import (
 // dynTypes is the table of the tags of dynamic types, read at a reference.
 var dynTypes = logic.Const("dyntype", logic.IntSeq)
 
+// isDynTable reports whether a term is one of the tables of what errors
+// hold: dyntype, a held table, or a table of canonical errors. They are
+// one function for the whole program, never written, which the facts of
+// conversions constrain, so the always-fails check takes them as part of
+// every input, as it takes a fixed variable.
+func isDynTable(t *logic.Term) bool {
+	return t.Op == logic.OpConst && (t == dynTypes || t.Name == dynTypes.Name || strings.HasPrefix(t.Name, "held ") || strings.HasPrefix(t.Name, "mkerr "))
+}
+
 // dynTag returns the tag of the dynamic type of what is read at a
 // reference.
 func dynTag(ref *logic.Term) *logic.Term {
@@ -297,11 +306,7 @@ func capturesValue(layout []leaf) bool {
 }
 
 // typedError returns the error that converting a value of a concrete type
-// gives, and states what it holds. For a type on which == is identity and
-// whose value is one integer or a pointer, the error is a term of the
-// value (canonical), so two conversions of equal values are one error
-// with no fact needed; for any other type it is a new error. Either way it
-// is not nil, its tag is the type's, and it holds the value.
+// gives, and states what it holds; see canonicalError and noteHeld.
 func (v *fnVerifier) typedError(e ast.Expr, from types.Type, val value, st *state, guard []*logic.Term) *logic.Term {
 	layout, ok := layoutOf(from)
 	if !ok {
@@ -309,42 +314,69 @@ func (v *fnVerifier) typedError(e ast.Expr, from types.Type, val value, st *stat
 	}
 	v.checkedMethods(e, from, val, st, guard)
 	leaves := v.goLeaves(st, layout, val)
-	name, named := canonicalName(from)
-	identity := v.identityEq(from) && capturesValue(layout)
-	var err *logic.Term
-	switch {
-	case named && identity && len(layout) == 1 && layout[0].sort == logic.Int:
-		err = logic.Select(logic.Const("mkerr "+name, logic.SeqOf(logic.Err)), leaves[0])
-	case named && identity && len(layout) == 2 && layout[0].part == partPtr:
-		err = logic.Select(logic.Select(logic.Const("mkerr "+name, logic.SeqOf(logic.SeqOf(logic.Err))), leaves[0]), leaves[1])
-	default:
+	err := v.canonicalError(from, leaves)
+	if err == nil {
 		err = v.fresh("typed error", logic.Err)
 	}
-	// The function meets an error a conversion made: every made error met
-	// so far, and every one met later (noteError), holds a type of package
-	// errors or fmt, so that such errors are told apart from errors of the
-	// project's types. A function that meets none states nothing.
+	v.noteHeld(st, err, from, leaves)
+	return err
+}
+
+// canonicalError returns the error that holds a value of a type as a term
+// of the value, for a type on which == is identity whose value is one
+// integer or a pointer, so that two conversions of equal values are one
+// error with no fact needed; nil for any other type, whose conversions are
+// errors of their own. leaves are the value's as goLeaves gives them.
+func (v *fnVerifier) canonicalError(t types.Type, leaves value) *logic.Term {
+	layout, ok := layoutOf(t)
+	name, named := canonicalName(t)
+	if !ok || !named || !v.identityEq(t) || !capturesValue(layout) {
+		return nil
+	}
+	switch {
+	case len(layout) == 1 && layout[0].sort == logic.Int:
+		return logic.Select(logic.Const("mkerr "+name, logic.SeqOf(logic.Err)), leaves[0])
+	case len(layout) == 2 && layout[0].part == partPtr:
+		return logic.Select(logic.Select(logic.Const("mkerr "+name, logic.SeqOf(logic.SeqOf(logic.Err))), leaves[0]), leaves[1])
+	}
+	return nil
+}
+
+// noteHeld states that an error holds a value of a type: it is not nil,
+// its tag is the type's, and its held leaves are the value's. The function
+// then meets an error a conversion made: every made error met so far, and
+// every one met later (noteError), holds a type of package errors or fmt,
+// so that such errors are told apart from errors of the project's types. A
+// function that meets none states nothing. A type with no canonical name,
+// one declared in a function, has no known tag, and nothing can tell it
+// apart from another.
+func (v *fnVerifier) noteHeld(st *state, err *logic.Term, t types.Type, leaves value) {
 	v.typedMet = true
 	for _, made := range v.distinct {
 		v.noteMadeTag(st, made)
 	}
 	v.fact(st, logic.Not(logic.IsNil(err)))
+	name, named := canonicalName(t)
 	if !named {
-		// A type with no canonical name has no known tag: it is a type
-		// declared in a function, which nothing can tell apart from
-		// another.
-		return err
+		return
 	}
-	tag, _ := typeTag(from)
+	layout, _ := layoutOf(t)
+	tag, _ := typeTag(t)
 	ref := logic.ErrRef(err)
 	v.fact(st, logic.Eq(dynTag(ref), tag))
 	for i, lf := range layout {
 		v.fact(st, eqLeaf(logic.Select(heldTable(name, i, lf), ref), leaves[i]))
 	}
-	if identity && !slices.ContainsFunc(v.typedTypes, func(t types.Type) bool { return types.Identical(t, from) }) {
-		v.typedTypes = append(v.typedTypes, from)
+	v.meetType(t)
+}
+
+// meetType records a type of the values errors hold that the function
+// meets, when == on it is identity; see sameTyped and holdsIdentityEq.
+func (v *fnVerifier) meetType(t types.Type) {
+	if layout, ok := layoutOf(t); ok && v.identityEq(t) && capturesValue(layout) &&
+		!slices.ContainsFunc(v.typedTypes, func(known types.Type) bool { return types.Identical(known, t) }) {
+		v.typedTypes = append(v.typedTypes, t)
 	}
-	return err
 }
 
 // eqLeaf says that two leaves of one sort are equal: a string by its
@@ -491,4 +523,33 @@ func methodsReached(t types.Type, seen map[types.Type]bool, top bool) types.Type
 		}
 	}
 	return nil
+}
+
+// noteTypedVariable states of an error variable whose initialiser converts
+// a constant of a defined type to error that it is the error that holds
+// the constant, the term code builds for the conversion (F12 of the design
+// review), wherever the variable is read: in code and in formulas alike.
+func (v *fnVerifier) noteTypedVariable(sink *state, variable *logic.Term, info sentinelInfo) {
+	if sink == nil || info.TypedKey == "" {
+		return
+	}
+	named, ok := v.objectByKey(info.TypedKey).(*types.TypeName)
+	if !ok {
+		return
+	}
+	number, ok := new(big.Int).SetString(info.TypedValue, 10)
+	if !ok {
+		return
+	}
+	leaves := value{logic.BigLit(number)}
+	canonical := v.canonicalError(named.Type(), leaves)
+	if canonical == nil {
+		return
+	}
+	if note := "typed variable " + variable.Name; sink.noted[note] {
+		return
+	}
+	sink.noted["typed variable "+variable.Name] = true
+	v.fact(sink, logic.Eq(variable, canonical))
+	v.noteHeld(sink, canonical, named.Type(), leaves)
 }

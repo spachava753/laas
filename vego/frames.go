@@ -386,7 +386,74 @@ var (
 	_ logic.Env      = (*frameEnv)(nil)
 	_ logic.Applier  = (*frameEnv)(nil)
 	_ logic.Gatherer = (*frameEnv)(nil)
+	_ logic.Typer    = (*frameEnv)(nil)
 )
+
+// The types a formula names, and the errors that hold a value, read no
+// memory, so both readings must give the same; each is still asked of
+// both, so that what an error that holds a value is noted is noted in the
+// facts of both states, and a difference fails the frame. What a path
+// leads to is read through Path, which pairs it.
+
+func (e *frameEnv) IsType(t logic.TypeName) bool {
+	then := e.then.IsType(t)
+	if then != e.now.IsType(t) {
+		e.f.failed = true
+	}
+	return then
+}
+
+func (e *frameEnv) Convertible(t logic.TypeName) bool {
+	then := e.then.Convertible(t)
+	if then != e.now.Convertible(t) {
+		e.f.failed = true
+	}
+	return then
+}
+
+func (e *frameEnv) Convert(t logic.TypeName, arg *logic.Term, argType any) (*logic.Term, error) {
+	then, errThen := e.then.Convert(t, arg, argType)
+	now, errNow := e.now.Convert(t, arg, argType)
+	return e.same(then, now, errThen, errNow)
+}
+
+func (e *frameEnv) PathType(root string, steps []logic.Step, when logic.When) any {
+	then := e.then.PathType(root, steps, when)
+	if now := e.now.PathType(root, steps, when); fmt.Sprint(then) != fmt.Sprint(now) {
+		e.f.failed = true
+	}
+	return then
+}
+
+func (e *frameEnv) ErrorType(root string, steps []logic.Step, when logic.When) (logic.TypeName, bool) {
+	then, okThen := e.then.ErrorType(root, steps, when)
+	now, okNow := e.now.ErrorType(root, steps, when)
+	if okThen != okNow || then.String() != now.String() {
+		e.f.failed = true
+	}
+	return then, okThen
+}
+
+func (e *frameEnv) TypedEquals(t logic.TypeName, err, v *logic.Term) (*logic.Term, error) {
+	then, errThen := e.then.TypedEquals(t, err, v)
+	now, errNow := e.now.TypedEquals(t, err, v)
+	return e.same(then, now, errThen, errNow)
+}
+
+func (e *frameEnv) TypedError(t logic.TypeName, v *logic.Term) (*logic.Term, error) {
+	then, errThen := e.then.TypedError(t, v)
+	now, errNow := e.now.TypedError(t, v)
+	return e.same(then, now, errThen, errNow)
+}
+
+// same returns what two readings that read no memory gave, and fails the
+// frame when they differ.
+func (e *frameEnv) same(then, now *logic.Term, errThen, errNow error) (*logic.Term, error) {
+	if (errThen == nil) != (errNow == nil) || then != nil && now != nil && then.String() != now.String() {
+		e.f.failed = true
+	}
+	return then, errThen
+}
 
 // alike records the pair of two results, or that the readings went apart.
 func (e *frameEnv) alike(then, now *logic.Term, errThen, errNow error, label string) (*logic.Term, error) {
