@@ -988,7 +988,8 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 	case *ast.DeferStmt:
 		v.deferStmt(s, st)
 	case *ast.TypeSwitchStmt:
-		v.unsupported(s.Pos(), ifaceAsserted)
+		v.typeSwitch(s, st, c, k)
+		return
 	default:
 		kind := strings.TrimSuffix(strings.TrimPrefix(fmt.Sprintf("%T", s), "*ast."), "Stmt")
 		v.unsupported(s.Pos(), strings.ToLower(kind)+" statements are not supported yet")

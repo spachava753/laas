@@ -206,6 +206,27 @@ func copyWalk(info *types.Info, pkg *types.Package, decl *ast.FuncDecl, conv *co
 					}
 				}
 			}
+		case *ast.TypeAssertExpr:
+			// x.(T) copies what the interface value holds (F33).
+			if n.Type != nil {
+				if t := info.TypeOf(n.Type); t != nil {
+					if _, ok := holdsState(t); ok {
+						refuse(n.Pos(), t, "the type assertion %s copies what %s holds, a value of type %s; hold a pointer to it in the error instead",
+							types.ExprString(n), types.ExprString(n.X), holding(t, q))
+					}
+				}
+			}
+		case *ast.TypeSwitchStmt:
+			for _, clause := range n.Body.List {
+				for _, e := range clause.(*ast.CaseClause).List {
+					if t := info.TypeOf(e); t != nil {
+						if _, ok := holdsState(t); ok {
+							refuse(e.Pos(), t, "the case %s of the type switch copies what the operand holds, a value of type %s; hold a pointer to it in the error instead",
+								types.ExprString(e), holding(t, q))
+						}
+					}
+				}
+			}
 		case *ast.SelectorExpr:
 			selection := info.Selections[n]
 			if selection == nil || selection.Kind() == types.FieldVal {

@@ -165,7 +165,7 @@ func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 	case *ast.CallExpr:
 		return v.callExpr(e, st, guard)
 	case *ast.TypeAssertExpr:
-		v.unsupported(e.Pos(), ifaceAsserted)
+		return v.assertion(e, st, guard, false)[0]
 	case *ast.FuncLit:
 		v.unsupported(e.Pos(), "a function literal is supported only where it is called or deferred, as the value that declares "+
 			"a new variable which is only ever called, or where it is given a function type with a contract")

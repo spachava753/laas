@@ -114,3 +114,28 @@ func TestRefusedWouldFail(t *testing.T) {
 	}()
 	NilRuns()
 }
+
+// TestAssertionClaims checks what the contracts of assert.go say.
+func TestAssertionClaims(t *testing.T) {
+	for n := -2; n <= 2; n++ {
+		if LineOf(n) != n || NotAnError(n) || AsError(n) != (n != 0) {
+			t.Errorf("LineOf, NotAnError, or AsError(%d)", n)
+		}
+		if n != 0 && MustLineOf(n) != n {
+			t.Errorf("MustLineOf(%d)", n)
+		}
+		k := Kind(n)
+		if (k == 0) != (n == 0) || n < 0 && k != 2 || n > 0 && k != 1 {
+			t.Errorf("Kind(%d) = %d", n, k)
+		}
+		if (KindWithin(n) == 0) != (n == 0) {
+			t.Errorf("KindWithin(%d)", n)
+		}
+	}
+}
+
+func TestAssertionZero(t *testing.T) {
+	if !ZeroWhenNot(0) || MadeNotTyped() {
+		t.Error("ZeroWhenNot or MadeNotTyped")
+	}
+}

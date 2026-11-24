@@ -429,8 +429,16 @@ func (v *fnVerifier) isAppend(e ast.Expr) bool {
 // follow.
 func (v *fnVerifier) callResults(e ast.Expr, st *state, wants []types.Type) []value {
 	call, ok := ast.Unparen(e).(*ast.CallExpr)
-	if _, asserted := ast.Unparen(e).(*ast.TypeAssertExpr); asserted {
-		v.unsupported(e.Pos(), ifaceAsserted)
+	if assert, asserted := ast.Unparen(e).(*ast.TypeAssertExpr); asserted {
+		// v, ok := x.(T): each result must have the type it is assigned
+		// to, as for a call.
+		values := v.assertion(assert, st, nil, true)
+		for i, want := range wants[:min(len(wants), 2)] {
+			if have := []types.Type{v.info.TypeOf(assert.Type), types.Typ[types.Bool]}[i]; want != nil && !types.Identical(have, want) {
+				v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to a %s is not supported here; assign the value to a variable of its own type first", have, want))
+			}
+		}
+		return values
 	}
 	if !ok {
 		v.unsupported(e.Pos(), "multi-value expressions other than function calls are not supported")

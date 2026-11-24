@@ -1194,3 +1194,81 @@ func HopChain(ps []*Hop) (same bool) {
 	last = e
 	return same
 }
+
+// Link is an error that holds a pointer.
+type Link struct{ next *Link }
+
+// @Ensures True
+func (l *Link) Error() (s string) { return "link" }
+
+// LinkChain converts a pointer to error and takes it out again thirty
+// times, each conversion handed what the last assertion gave: the
+// allocation a conversion reads twice, for the position of a nil pointer
+// (goLeaves), is named first, so the terms do not double.
+//
+// @Ensures True
+func LinkChain(p *Link) (q *Link) {
+	var e error
+	q = p
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	e = q
+	q = e.(*Link)
+	return q
+}

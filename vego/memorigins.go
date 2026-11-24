@@ -250,6 +250,14 @@ func (v *fnVerifier) memTransfer(n ast.Node, fact *memFact, loose memFact, local
 			fact.polluted = fmt.Sprintf("at %s a value was stored into memory, and %s", v.placeOf(lhs.Pos()), why)
 		}
 	}
+	if vars, _ := v.switchVars(n); vars != nil {
+		// The variable of each clause of a type switch comes from what an
+		// error held, whose origin is not known (F7 of the design review).
+		for _, variable := range vars {
+			fact.unknown[variable] = "it comes from a type assertion"
+		}
+		return
+	}
 	switch n := n.(type) {
 	case *ast.AssignStmt:
 		if len(n.Lhs) == len(n.Rhs) {
@@ -430,6 +438,10 @@ func (v *fnVerifier) memOrigin(e ast.Expr, fact memFact) string {
 		return ""
 	case *ast.CallExpr:
 		return v.memResult(x, 0, fact)
+	case *ast.TypeAssertExpr:
+		// What an error holds is reached only through it (F7 of the
+		// design review of F33).
+		return "it comes from a type assertion"
 	}
 	return fmt.Sprintf("its origin at %s is not known", v.placeOf(e.Pos()))
 }
@@ -439,6 +451,14 @@ func (v *fnVerifier) memResult(e ast.Expr, index int, fact memFact) string {
 	call, ok := ast.Unparen(e).(*ast.CallExpr)
 	if !ok {
 		if index == 0 {
+			// The value of a map read, a receive, or v, ok := x.(T), whose
+			// type is that of the first result.
+			if assert, isAssert := ast.Unparen(e).(*ast.TypeAssertExpr); isAssert {
+				if t := v.info.TypeOf(assert.Type); t != nil && holdsMemory(t) {
+					return "it comes from a type assertion"
+				}
+				return ""
+			}
 			return v.memOrigin(e, fact)
 		}
 		// A map read or a receive with its second result.

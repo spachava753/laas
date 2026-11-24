@@ -3,6 +3,7 @@ package vego
 import (
 	"fmt"
 	"go/ast"
+	"go/token"
 	"go/types"
 	"math/big"
 	"slices"
@@ -615,4 +616,197 @@ func (v *fnVerifier) noteTypedVariable(sink *state, variable *logic.Term, info s
 	sink.noted["typed variable "+variable.Name] = true
 	v.fact(sink, logic.Eq(variable, canonical))
 	v.noteHeld(sink, canonical, named.Type(), leaves)
+}
+
+// assertion evaluates x.(T) for an error x (S3 of F33). For a concrete T
+// it is what the error holds as a T, read from the tables (heldRead), when
+// the error is not nil and its tag is T's: the one-result form proves that
+// and reports where it may not hold, since Go panics there; the two-result
+// form gives the held value or the zero value of T, and whether it holds
+// one. x.(error) is x itself, which is not nil. An interface value other
+// than an error, and an interface T other than error, wait for part 2.
+func (v *fnVerifier) assertion(e *ast.TypeAssertExpr, st *state, guard []*logic.Term, commaOk bool) []value {
+	from, target := v.info.TypeOf(e.X), v.info.TypeOf(e.Type)
+	if !isError(from) {
+		v.unsupported(e.Pos(), ifaceAsserted)
+	}
+	shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
+	x := v.expr(e.X, st, guard)
+	text := types.ExprString(e)
+	if isError(target) {
+		holds := logic.Not(logic.IsNil(x))
+		if commaOk {
+			return []value{{x}, {holds}}
+		}
+		v.checkAssertion(st, guard, holds, e, text, "x is nil")
+		return []value{{x}}
+	}
+	if types.IsInterface(target) {
+		v.unsupported(e.Pos(), fmt.Sprintf("asserting an error to %s is not supported yet: only a concrete type, or error itself, can be asserted to", shown(target)))
+	}
+	tag, named := typeTag(target)
+	if !named {
+		v.unsupported(e.Pos(), fmt.Sprintf("asserting an error to %s is not supported: it is declared inside a function, and nothing tells it apart from another type there", shown(target)))
+	}
+	layout, ok := layoutOf(target)
+	if !ok {
+		v.unsupported(e.Pos(), fmt.Sprintf("asserting an error to %s is not supported: values of its type are not modelled", shown(target)))
+	}
+	v.meetAssertion(st, target)
+	holds := logic.And(logic.Not(logic.IsNil(x)), logic.Eq(errorTag(x), tag))
+	held := v.heldRead(st, x, target)
+	if !commaOk {
+		v.checkAssertion(st, guard, holds, e, text, fmt.Sprintf("%s may not hold a %s", types.ExprString(e.X), shown(target)))
+		return []value{held}
+	}
+	zero := zeroValue(target)
+	got := make(value, len(layout))
+	for i := range layout {
+		got[i] = logic.Ite(holds, held[i], zero[i])
+	}
+	return []value{got, {holds}}
+}
+
+// meetAssertion records that the function asks what an error holds: the
+// made errors it meets hold types of package errors and fmt, which tells
+// them apart from the type asked for.
+func (v *fnVerifier) meetAssertion(st *state, t types.Type) {
+	v.typedMet = true
+	for _, made := range v.distinct {
+		v.noteMadeTag(st, made)
+	}
+	v.meetType(t)
+}
+
+// checkAssertion proves that a one-result assertion does not panic.
+func (v *fnVerifier) checkAssertion(st *state, guard []*logic.Term, holds *logic.Term, e *ast.TypeAssertExpr, text, why string) {
+	done := v.at(e.Pos())
+	defer done()
+	v.check(st, guard, holds, e.Pos(), "the type assertion %s may panic: %s; use the form v, ok := %s, or say what the error holds with holds(%s, T)",
+		text, why, text, types.ExprString(e.X))
+}
+
+// typeSwitch executes a type switch on an error (S3 of F33). The operand
+// is evaluated once; each case is a path, taken when one of its types
+// matches and no case before it did: a concrete type when the error holds
+// one, nil when the error is nil, and error when it is not. In a clause
+// with one concrete type the variable is what the error holds as that
+// type; in any other clause it is the error itself, as Go has it.
+func (v *fnVerifier) typeSwitch(s *ast.TypeSwitchStmt, st *state, c ctrl, k func(*state)) {
+	if s.Init != nil {
+		init := s.Init
+		v.stmt(init, st, c, func(next *state) {
+			without := *s
+			without.Init = nil
+			v.typeSwitch(&without, next, c, k)
+		})
+		return
+	}
+	var assert *ast.TypeAssertExpr
+	switch a := s.Assign.(type) {
+	case *ast.ExprStmt:
+		assert = a.X.(*ast.TypeAssertExpr)
+	case *ast.AssignStmt:
+		assert = a.Rhs[0].(*ast.TypeAssertExpr)
+	}
+	if !isError(v.info.TypeOf(assert.X)) {
+		v.unsupported(s.Pos(), ifaceAsserted)
+	}
+	shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
+	var x *logic.Term
+	v.evaluate(st, func() { x = v.expr(assert.X, st, nil) })
+	inner := ctrl{brk: k, cont: c.cont}
+	var failed []*logic.Term
+	var fallback *ast.CaseClause
+	fallbackEnd := token.NoPos
+	for i, clause := range s.Body.List {
+		clause := clause.(*ast.CaseClause)
+		implicit, _ := v.info.Implicits[clause].(*types.Var)
+		if clause.List == nil {
+			fallback, fallbackEnd = clause, clauseEnd(s.Body, i)
+			continue
+		}
+		var alternatives []*logic.Term
+		var single types.Type
+		for _, e := range clause.List {
+			t := v.info.TypeOf(e)
+			switch {
+			case v.isNil(e):
+				alternatives = append(alternatives, logic.IsNil(x))
+			case isError(t):
+				alternatives = append(alternatives, logic.Not(logic.IsNil(x)))
+			case types.IsInterface(t):
+				v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch on an error is not supported yet: only a concrete type, nil, or error itself can be a case", shown(t)))
+			default:
+				tag, named := typeTag(t)
+				if !named {
+					v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch is not supported: it is declared inside a function, and nothing tells it apart from another type there", shown(t)))
+				}
+				if _, ok := layoutOf(t); !ok {
+					v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch is not supported: values of its type are not modelled", shown(t)))
+				}
+				v.meetAssertion(st, t)
+				alternatives = append(alternatives, logic.And(logic.Not(logic.IsNil(x)), logic.Eq(errorTag(x), tag)))
+				if len(clause.List) == 1 {
+					single = t
+				}
+			}
+		}
+		matched := logic.Or(alternatives...)
+		v.branch(clause.Pos())
+		taken := st.clone()
+		taken.decide(logic.And(append(slices.Clip(failed), matched)...))
+		if implicit != nil {
+			if single != nil {
+				v.bind(taken, implicit, v.heldRead(taken, x, single))
+			} else {
+				v.bind(taken, implicit, value{x})
+			}
+		}
+		v.seq(clause.Body, clause.Colon, clauseEnd(s.Body, i), taken, inner, k)
+		failed = append(failed, logic.Not(matched))
+	}
+	st.decide(logic.And(failed...))
+	if fallback == nil {
+		k(st)
+		return
+	}
+	if implicit, ok := v.info.Implicits[fallback].(*types.Var); ok {
+		v.bind(st, implicit, value{x})
+	}
+	v.seq(fallback.Body, fallback.Colon, fallbackEnd, st, inner, k)
+}
+
+// switchVars returns, for the guard of a type switch, x := e.(type), the
+// variables of its clauses, and the operand e; nil for any other node.
+// go/cfg puts the guard once before the clauses, and the variables have no
+// node of their own, so the analyses over the graph give them their facts
+// there (F7 of the design review).
+func (pv *pkgVerifier) switchVars(n ast.Node) ([]*types.Var, ast.Expr) {
+	if pv.typeSwitches == nil {
+		pv.typeSwitches = map[ast.Node]*ast.TypeSwitchStmt{}
+		for _, file := range pv.pass.Files {
+			ast.Inspect(file, func(m ast.Node) bool {
+				if s, ok := m.(*ast.TypeSwitchStmt); ok && s.Assign != nil {
+					pv.typeSwitches[s.Assign] = s
+				}
+				return true
+			})
+		}
+	}
+	s := pv.typeSwitches[n]
+	if s == nil {
+		return nil, nil
+	}
+	assign, ok := s.Assign.(*ast.AssignStmt)
+	if !ok {
+		return nil, nil
+	}
+	var vars []*types.Var
+	for _, clause := range s.Body.List {
+		if implicit, ok := pv.info.Implicits[clause].(*types.Var); ok {
+			vars = append(vars, implicit)
+		}
+	}
+	return vars, assign.Rhs[0].(*ast.TypeAssertExpr).X
 }

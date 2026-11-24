@@ -196,11 +196,11 @@ func ClosesBound() (err error) {
 }
 
 // TypeSwitched returns the variable of a type switch, which holds what it
-// was given.
+// was given. Its origin is not known (F20), which nothing here needs.
 //
-// @Ensures True
+// @Ensures err = nil <-> e = nil
 func TypeSwitched(e error) (err error) {
-	switch x := e.(type) { // want `type switches are not supported`
+	switch x := e.(type) {
 	case error:
 		return x
 	}

@@ -307,6 +307,15 @@ func (v *fnVerifier) ownOrigins() *ownFlow {
 
 // ownTransfer applies what one node of the graph does.
 func (v *fnVerifier) ownTransfer(fl *ownFlow, n ast.Node, f *ownFact) {
+	if vars, operand := v.switchVars(n); vars != nil {
+		// The variable of each clause of a type switch holds the operand,
+		// or what it holds: what the operand is.
+		kind := v.ownKindOf(fl, operand, f)
+		for _, variable := range vars {
+			f.vars[variable] = kind
+		}
+		return
+	}
 	switch n := n.(type) {
 	case *ast.AssignStmt:
 		if len(n.Lhs) == len(n.Rhs) {
@@ -645,7 +654,9 @@ func refersMemory(t types.Type) bool {
 	if t == nil {
 		return false
 	}
-	if holdsMemory(t) || isIface(t) {
+	// An error may hold a value that a conversion made, as part of an
+	// owner may be (F33): it refers to memory as any interface value does.
+	if holdsMemory(t) || isIface(t) || isError(t) {
 		return true
 	}
 	_, isFunc := t.Underlying().(*types.Signature)
@@ -804,8 +815,10 @@ func (v *fnVerifier) ownKindOfAny(fl *ownFlow, e ast.Expr, f *ownFact) ownKind {
 		v.ownCaptured(fl, x, f)
 		return ownKind{unknown: "it is a function literal"}
 	case *ast.TypeAssertExpr:
-		v.ownKindOf(fl, x.X, f)
-		return ownKind{unknown: "it comes from a type assertion"}
+		// What an error holds is part of it: the result is what the
+		// operand is, so a part of an owner taken out of an error is still
+		// inside (F7 of the design review).
+		return v.ownKindOf(fl, x.X, f)
 	case *ast.CallExpr:
 		return v.ownResults(fl, x, 1, f)[0]
 	case *ast.BasicLit, *ast.KeyValueExpr:
@@ -1161,6 +1174,12 @@ func (v *fnVerifier) ownOperands(call *ast.CallExpr, c *ownCallee) []struct {
 // is handed.
 func (v *fnVerifier) ownResults(fl *ownFlow, e ast.Expr, count int, f *ownFact) []ownKind {
 	out := make([]ownKind, count)
+	if assert, ok := ast.Unparen(e).(*ast.TypeAssertExpr); ok {
+		// v, ok := x.(T): the value is what x is (F7 of the design
+		// review).
+		out[0] = v.ownKindOf(fl, assert.X, f)
+		return out
+	}
 	call, ok := ast.Unparen(e).(*ast.CallExpr)
 	if !ok {
 		// A map read or a receive with its second result.
@@ -1432,6 +1451,14 @@ func (v *fnVerifier) ownReturn(fl *ownFlow, ret *ast.ReturnStmt, f *ownFact) {
 			case root.param != nil:
 				fresh = false
 				r.inside[root.param] = true
+				// An error that holds a part of an owner is returned with
+				// the summary saying so (r.inside): a verified caller that
+				// asserts what it holds gets a part of the owner, which it
+				// may not keep (F7 of the design review of F33), and only
+				// an assertion reaches it. No contract can place an error.
+				if isError(v.fn.results[i].Type()) {
+					continue
+				}
 				if v.withinParam(v.fn, i) != root.param {
 					// within places a pointer, a slice, a map, or an
 					// interface value; a struct value that holds the part

@@ -536,6 +536,8 @@ func (f *funcInfo) annotated() bool {
 }
 
 type pkgVerifier struct {
+	// typeSwitches holds each type switch by its guard; see switchVars.
+	typeSwitches map[ast.Node]*ast.TypeSwitchStmt
 	pass     *analysis.Pass
 	info     *types.Info
 	res      *logic.Resolver
