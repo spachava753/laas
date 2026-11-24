@@ -314,8 +314,11 @@ func (pv *pkgVerifier) addressUseWhy(stack []ast.Node) string {
 			if callee == nil {
 				return "its address is handed to a call that is not of a named function at " + pv.placeOfPos(parent.Pos())
 			}
+			// A method called on a value has its receiver first among the
+			// parameters of its entry; a method expression is handed it as
+			// its first argument (F16 of the review of step 3).
 			index := k
-			if callee.Type().(*types.Signature).Recv() != nil {
+			if callee.Type().(*types.Signature).Recv() != nil && !pv.methodExpression(c) {
 				index++
 			}
 			return pv.sinkWhy(callee, index, pv.info.TypeOf(parent), parent.Pos(), 0)
@@ -339,8 +342,8 @@ func (pv *pkgVerifier) sinkWhy(callee *types.Func, index int, addr types.Type, p
 	if fn == nil {
 		return fmt.Sprintf("its address is handed to %s at %s, which is not a trusted function, and verified code could convert it", callee.Name(), where)
 	}
-	if len(fn.params) == 0 {
-		return fmt.Sprintf("its address is handed to %s at %s", callee.Name(), where)
+	if len(fn.params) == 0 || len(fn.defects) > 0 {
+		return fmt.Sprintf("its address is handed to %s at %s, whose trusted contract cannot be used", callee.Name(), where)
 	}
 	p := fn.params[min(index, len(fn.params)-1)]
 	fail := func(why string) string {
@@ -362,39 +365,51 @@ func (pv *pkgVerifier) sinkWhy(callee *types.Func, index int, addr types.Type, p
 			return fail("returns a value that can hold memory")
 		}
 	}
-	for _, cb := range fn.calls.all() {
-		for param := range cb.sig.Params().Variables() {
-			if !memoryFree(param.Type()) {
-				return fail(fmt.Sprintf("calls %s with a value that can hold memory", cb.param.Name()))
+	// An entry describes what the function's own code does, and says
+	// nothing of code that a parameter it does not run carries; so no other
+	// parameter may carry code that could be handed the address (F15 of the
+	// review of step 3). A function under calls that is handed only values
+	// that hold no memory, as once.Do's f, the values it formats, and the
+	// writer it prints to are what the entry describes.
+	for _, q := range fn.params {
+		if q == p || !holdsCode(q.Type(), map[types.Type]bool{}) {
+			continue
+		}
+		if cb := fn.calls.get(q); cb != nil {
+			for param := range cb.sig.Params().Variables() {
+				if !memoryFree(param.Type()) {
+					return fail(fmt.Sprintf("calls %s with a value that can hold memory", q.Name()))
+				}
 			}
-		}
-	}
-	for run := range fn.runs.all() {
-		if run == p || run == fn.prints {
 			continue
 		}
-		// A function it calls under its calls clause is handed what that
-		// clause gives it, which the loop above checked.
-		if fn.calls.get(run) != nil {
+		if q == fn.formatted || q == fn.prints {
 			continue
 		}
-		return fail(fmt.Sprintf("runs %s, which could be handed it", run.Name()))
+		return fail(fmt.Sprintf("takes %s, which can carry code that could be handed it", q.Name()))
 	}
-	run := fn.runs.get(p) || fn.prints == p
-	switch {
-	case !run:
+	if !holdsCode(p.Type(), map[types.Type]bool{}) {
 		return ""
-	case addr == nil || !isIface(p.Type()) || depth > 0:
-		return fail("runs it")
 	}
-	// It runs the converted address itself: each method of it that the
-	// interface takes must be a sink of its receiver.
-	iface, _ := p.Type().Underlying().(*types.Interface)
-	for m := range iface.Methods() {
-		obj, _, _ := types.LookupFieldOrMethod(addr, true, m.Pkg(), m.Name())
-		method, ok := obj.(*types.Func)
+	if addr == nil || depth > 0 {
+		return fail("could run code it holds")
+	}
+	// The address converted to an interface may be asserted to any other
+	// and any method of its type run, whether or not the entry runs it;
+	// only what prints claims limits that, to Write. So every method that
+	// takes its receiver's address must be a sink of it (F15).
+	methods := types.NewMethodSet(addr)
+	for i := range methods.Len() {
+		method, ok := methods.At(i).Obj().(*types.Func)
 		if !ok {
-			return fail("runs a method of it that cannot be found")
+			continue
+		}
+		if p == fn.prints && method.Name() != "Write" {
+			continue
+		}
+		if _, pointerRecv := method.Type().(*types.Signature).Recv().Type().(*types.Pointer); !pointerRecv {
+			// A value receiver gets a copy of the struct, not its address.
+			continue
 		}
 		if why := pv.sinkWhy(method, 0, nil, pos, depth+1); why != "" {
 			return why
@@ -468,4 +483,15 @@ func (pv *pkgVerifier) foreignBoxedWhy(variable *types.Var) string {
 	return fmt.Sprintf("%s is a struct variable of package %s whose address is taken, and reading or naming one of another package "+
 		"is not supported yet; a function of package %s can read it, and a contract here covers what such a function changes "+
 		"by listing the state of package %s", pv.spelling(variable), variable.Pkg().Path(), variable.Pkg().Name(), variable.Pkg().Name())
+}
+
+// methodExpression reports whether a call is of a method expression, as
+// (*T).M(x, y), which hands the receiver as the first argument.
+func (pv *pkgVerifier) methodExpression(call *ast.CallExpr) bool {
+	sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	selection := pv.info.Selections[sel]
+	return selection != nil && selection.Kind() == types.MethodExpr
 }

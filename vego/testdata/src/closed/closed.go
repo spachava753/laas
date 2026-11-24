@@ -8,6 +8,8 @@ import (
 	"io"
 	"strings"
 	"sync"
+
+	"closedq"
 )
 
 var sb strings.Builder
@@ -166,3 +168,101 @@ func lockedSpawn(w io.Writer) {
 	fmt.Fprint(w, "y")
 	mu3.Unlock() // want `vego: precondition of Unlock may not hold: held\(m\)`
 }
+
+// Counter counts what is written to it.
+type Counter struct{ n int }
+
+// Write counts, and is verified.
+//
+// @Requires c != nil
+// @Modifies c
+// @Ensures n = |b| And err = nil
+func (c *Counter) Write(b []byte) (n int, err error) {
+	if c.n < 1000000 {
+		c.n++
+	}
+	return len(b), nil
+}
+
+// keeper holds what it is handed, and is not verified.
+type keeper struct {
+	held   any
+	shared *closedq.Shared
+}
+
+// Hold keeps v.
+func (k *keeper) Hold(v any) { k.held = v }
+
+// Take keeps v.
+func (k *keeper) Take(v *closedq.Shared) { k.shared = v }
+
+var shown Counter
+
+// LeakShown hands &shown to Show, which may assert it to a writer and keep
+// it, beside a keeper: Show is no sink, as its x can carry code.
+func LeakShown() any {
+	k := &keeper{}
+	closedq.Show(&shown, k)
+	return k.held
+}
+
+// keepShown loses shown.n across the write through w.
+//
+// @Requires w != nil
+// @Modifies w
+// @Ensures shown.n' = shown.n
+func keepShown(w io.Writer) {
+	fmt.Fprint(w, "x")
+} // want `vego: postcondition may not hold: shown\.n' = shown\.n`
+
+var ran closedq.Shared
+
+// LeakRan hands &ran to Run beside a keeper, which may be handed it.
+func LeakRan() *closedq.Shared {
+	k := &keeper{}
+	closedq.Run(&ran, k)
+	return k.shared
+}
+
+// keepRan loses ran.N across the write through w.
+//
+// @Requires w != nil
+// @Modifies w
+// @Ensures ran.N' = ran.N
+func keepRan(w io.Writer) {
+	fmt.Fprint(w, "x")
+} // want `vego: postcondition may not hold: ran\.N' = ran\.N`
+
+var built strings.Builder
+
+// BuildExpr writes built through a method expression of its own method,
+// which hands the address as the receiver and keeps it closed; it is not
+// verified.
+func BuildExpr() {
+	(*strings.Builder).WriteString(&built, "x")
+}
+
+// noteBuilt keeps the length of built across the write through w.
+//
+// @Requires w != nil And |built| <= 100
+// @Modifies built, w
+// @Ensures |built'| = |built| + 1
+func noteBuilt(w io.Writer) {
+	built.WriteString("x")
+	fmt.Fprint(w, "y")
+}
+
+var poked Counter
+
+// LeakPoked hands &poked to Poke as an any, which may assert it to a writer
+// and run its Write, a verified method that is handed the address.
+func LeakPoked() { closedq.Poke(&poked) }
+
+// keepPoked loses poked.n across the write through w.
+//
+// @Requires w != nil
+// @Modifies w
+// @Ensures poked.n' = poked.n
+func keepPoked(w io.Writer) {
+	fmt.Fprint(w, "x")
+} // want `vego: postcondition may not hold: poked\.n' = poked\.n`

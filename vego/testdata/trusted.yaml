@@ -2244,6 +2244,18 @@ trusted:
     vouches: [b]
     modifies: []
 
+  closedq.Show:
+    reason: Test helper that hands v to a method of x; it writes only what x reaches, and its entry says nothing of the code x carries.
+    modifies: [x]
+
+  closedq.Run:
+    reason: Test helper that hands v to a method of x; it writes only what x reaches.
+    modifies: [x]
+
+  closedq.Poke:
+    reason: Test helper that writes to v when it is a writer; it runs none of the code v carries by its entry, which says nothing of it.
+    modifies: [v]
+
 # States of interfaces of another module, and contracts that speak of them.
 state:
   ifacestatelib.Conn:
