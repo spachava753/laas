@@ -2149,6 +2149,7 @@ guide	(*net/url.URL).Query	2	49511	2
 guide	(*os.File).Close	3	8576	0
 guide	(*os.File).Read	7	2017092	2
 guide	(*os.File).Write	3	18506	0
+guide	(*regexp.Regexp).MatchString	1	6576	0
 guide	(*strings.Builder).String	1	3351	0
 guide	(*strings.Builder).Write	4	17410	0
 guide	(*strings.Builder).WriteByte	4	12383	0
@@ -2181,6 +2182,7 @@ guide	encoding/json.Decode	18	4711962	3
 guide	encoding/json.Marshal	3	17316	0
 guide	encoding/json.MarshalIndent	3	22551	0
 guide	encoding/json.Unmarshal	29	3334322	2
+guide	fmt.Fprint	5	11289	0
 guide	fmt.Fprintf	5	14186	0
 guide	fmt.Fprintln	5	11289	0
 guide	fmt.Println	3	11344	0
@@ -2207,6 +2209,7 @@ guide	guide.AtEnd	3	1038	0
 guide	guide.AtLeastSeven	2	878	0
 guide	guide.Board	1	2913	0
 guide	guide.Bounded.Size	3	975	0
+guide	guide.Bounds	2	1237	0
 guide	guide.BufferAsWriter	1	46	0
 guide	guide.BufferToFile	193	2619215	14
 guide	guide.Buffered	34	345323	5
@@ -2565,6 +2568,7 @@ guide	guide.addRoot	6	4895	0
 guide	guide.addRootKept	7	5782	0
 guide	guide.addTwo	8	7076	0
 guide	guide.addTwoKept	8	7090	0
+guide	guide.buildPrimes	2	66	0
 guide	guide.count	1	1216	0
 guide	guide.countHit	8	5133	0
 guide	guide.double	4	660	0
@@ -2575,9 +2579,15 @@ guide	guide.fill	9	12437	0
 guide	guide.filled	10	12998	0
 guide	guide.five	2	61	0
 guide	guide.grow	14	8600	0
+guide	guide.half	4	2017	0
+guide	guide.init of low, high	1	521	0
 guide	guide.init of tagsSeen, tagCount	2	1207	0
 guide	guide.isSeparator	2	153	0
+guide	guide.isWord	4	17789	0
+guide	guide.isWordHere	1	429	0
+guide	guide.largestPrime	3	592	0
 guide	guide.listsSizes	1	453	0
+guide	guide.loadQuota	6	4349	0
 guide	guide.logNumber	3	927	0
 guide	guide.logRecord	1	743	0
 guide	guide.lookupTask	11	3765	0
@@ -2588,10 +2598,16 @@ guide	guide.open	3	14391	0
 guide	guide.printLine	9	21330	0
 guide	guide.printLines	11	93175	4
 guide	guide.printTwice	15	42887	0
+guide	guide.raise	12	15862	0
+guide	guide.raiseLogged	13	10840	0
 guide	guide.record	1	138	0
+guide	guide.recordLine	22	101517	0
+guide	guide.recordScratch	22	101206	0
 guide	guide.redirect	5	5004	0
 guide	guide.resetAll	5	2937	0
+guide	guide.setupQuota	6	3919	0
 guide	guide.small	2	207	0
+guide	guide.spend	7	5584	0
 guide	guide.stamped	4	1049	0
 guide	guide.teeRecorder	1	2911	0
 guide	guide.tell	1	70	0
@@ -2602,14 +2618,17 @@ guide	guide.the initialiser of ErrRange	0	0	0
 guide	guide.the initialiser of ErrTooMany	0	0	0
 guide	guide.the initialiser of digits	0	0	0
 guide	guide.the initialiser of errOut	7	29294	0
+guide	guide.the initialiser of halfOfSeven	1	164	0
 guide	guide.the initialiser of limits	4	2271	0
 guide	guide.the initialiser of logOut	7	29294	0
 guide	guide.the initialiser of logger	11	53473	0
 guide	guide.the initialiser of now	2	878	0
 guide	guide.the initialiser of pageSize	0	0	0
+guide	guide.the initialiser of primes	0	0	0
 guide	guide.the initialiser of routes	0	0	0
 guide	guide.the initialiser of sizes	0	0	0
 guide	guide.the initialiser of tagsSeen	0	0	0
+guide	guide.the initialiser of word	2	22554	0
 guide	guide.value	3	869	0
 guide	guide.warn	5	11761	0
 guide	guide.warnChecked	6	13308	0
@@ -2622,6 +2641,7 @@ guide	io.Reader.Read	6	1014374	1
 guide	io.TeeReader	1	3789	0
 guide	io.Writer.Write	5	18168	0
 guide	log.New	1	8948	0
+guide	log.Print	1	2741	0
 guide	log.Printf	1	3565	0
 guide	log.Println	1	2741	0
 guide	maps.Copy	1	4637	0
@@ -2637,6 +2657,7 @@ guide	os.Create	7	2009962	2
 guide	os.Open	7	2009962	2
 guide	os.ReadFile	3	20273	0
 guide	os.Remove	3	7754	0
+guide	regexp.MustCompile	1	6620	0
 guide	slices.Clone	1	1549	0
 guide	slices.Contains	1	6408	0
 guide	slices.ContainsFunc	1	7429	0
@@ -2649,8 +2670,18 @@ guide	strconv.Atoi	3	18026	0
 guide	strconv.Itoa	1	1310	0
 guide	strings.FieldsFunc	1	4706	0
 guide	strings.IndexFunc	1	1639	0
+guide	strings.ToUpper	1	2096	0
 guide	time.Now	1	373	0
 guidehandler	guidehandler.Serve	5	2848	0
+guidelocks	(*sync.Mutex).Lock	1	1652	0
+guidelocks	(*sync.Mutex).Unlock	1	1611	0
+guidelocks	guidelocks.AddView	7	5849	0
+guidelocks	guidelocks.Hook	3	471	0
+guidelocks	guidelocks.View	19	30415	0
+guidelocks	guidelocks.ViewThen	22	34047	0
+guidelocks	guidelocks.Views	15	22923	0
+guidelocks	guidelocks.addView	10	13100	0
+guidelocks	guidelocks.init of viewsMu, pageViews	2	1927	0
 guidestats	guidestats.Count	2	411	0
 guidestats	guidestats.Hit	8	5133	0
 guidestore	(*guidestore.Store).Set	7	9008	0

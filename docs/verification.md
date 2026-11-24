@@ -4036,7 +4036,7 @@ func Served() (r int) {
 
 `Served` verifies. Nothing is known of the value of `served` when `Served` is called, apart from its type. Its initialiser gives nothing, since code may have changed the variable before the call. [Changing a variable](#changing-a-variable) shows how a verified function changes one.
 
-A variable whose address is taken, or that a directive or an assembly file names, cannot be read. The message names the place that takes the address or the directive. A variable of another package that is assigned can be read the same way, as `os.Args` can in `main`. [Variables of other packages](#variables-of-other-packages) shows how a function lists what it changes there.
+A variable that a directive or an assembly file names cannot be read. Neither can a variable whose address is taken, unless it is a struct, as described in [A struct variable whose address is taken](#a-struct-variable-whose-address-is-taken). The message names the place that takes the address or the directive. A variable of another package that is assigned can be read the same way, as `os.Args` can in `main`. [Variables of other packages](#variables-of-other-packages) shows how a function lists what it changes there.
 
 The type of the variable must be one that cannot hold code. A function value, an interface value, an error, a channel, or an `unsafe.Pointer` may not appear in the type at any depth, also behind a pointer, and also in a field that the type does not export. The variable's own type may be an interface type, or a named function type with a contract, as described in [Variables that hold a writer or a function](#variables-that-hold-a-writer-or-a-function). Verified code cannot read such a field, but it can hand the variable to a trusted function that runs the code the field holds. So `*http.Client` cannot be read, and neither can `*log.Logger`:
 
@@ -4067,7 +4067,7 @@ Two types of the standard library are counted by what their package lets them ho
 - The initialiser is a slice or map literal, `make`, `new`, `&T{...}`, or `[]byte` or `[]rune` of a constant string. The variable is not nil. A slice has the length that the literal, the constant arguments of `make`, or the string gives, and the capacity of a literal or of `make` with constant arguments.
 - The initialiser is another package-level variable that a function can read. The variable holds the same value.
 
-Anything else gives a value of the type of which nothing more is known. That includes a call, as in `var pageSize = os.Getpagesize()`, arithmetic on other variables, and a variable that a `//go:embed` directive fills.
+For any other initialiser, `vego` runs the initialiser as code and knows what that shows, as described in [Initialisers that call functions](#initialisers-that-call-functions). A call of a function whose contract promises nothing of its result, as in `var pageSize = os.Getpagesize()`, gives a value of which nothing more is known. So does a variable that a `//go:embed` directive fills.
 
 `vego` does not know that such a value is what your code expects. A `Requires` clause cannot state it either, since no caller chooses the value of a package-level variable, and a caller in another package may not be able to name it. So a clause that reads package-level variables and nothing else must follow from what their declarations give:
 
@@ -4107,6 +4107,88 @@ func PagesChecked(n int) (r int) {
 A clause that relates a parameter to a variable, such as `@Requires n < defaultTimeout`, is a condition on callers as usual. The check that a contract does not allow a function to always fail, described in [Saying when a function succeeds](#saying-when-a-function-succeeds), counts a variable as part of the input. Its declaration narrows the values that the check tries.
 
 In an `Ensures` clause, a prime on a variable that reads no memory is reported, as in `defaultTimeout'`, since the variable holds the same value on return. A primed path that reads memory, as in `sizes'[0]`, is the memory on return, as for a parameter. `old(defaultTimeout)` is reported. A struct invariant, and the contract of a function type or of a method of an interface, cannot name a package-level variable yet.
+
+### Initialisers that call functions
+
+`vego` runs the initialiser of every package-level variable as code, in the order in which Go initialises the variables. A call there is checked as a call in a verified function. What the run shows of a variable that nothing changes is known wherever it is read:
+
+```go
+// buildPrimes makes the first primes.
+//
+// @Ensures |p| = 4
+func buildPrimes() (p []int) {
+	return []int{2, 3, 5, 7}
+}
+
+var primes = buildPrimes()
+
+// largestPrime reads the last element, which the Ensures of buildPrimes
+// bounds.
+//
+// @Ensures True
+func largestPrime() (r int) {
+	return primes[3]
+}
+```
+
+`largestPrime` verifies. The `Ensures` clause of `buildPrimes` tells `vego` that `primes` has four elements. What the run shows of memory, such as the elements themselves, is not known to a reader, since code may have written that memory since. A variable of another package that is read the same way gives the same facts.
+
+A call of a verified function in an initialiser must meet the function's `Requires`. The function is proved to write only what it lists under that condition, so a call that may not meet it is reported where it stands, whether or not anything reads the variable:
+
+```go
+// half halves an even number.
+//
+// @Requires k % 2 = 0
+// @Ensures r * 2 = k
+func half(k int) (r int) { return k / 2 }
+
+var halfOfSeven = half(7)
+```
+
+```text
+vego: precondition of half may not hold in an initialiser, where a verified function relies on it for what it writes: k % 2 = 0
+```
+
+The same holds of a call through a function value or an interface value, which may run a verified function. Any other obligation that the run does not prove, such as an index, is not reported. The variable then gets no facts.
+
+An initialiser that holds a function literal is not run. Its variable gets no facts, and a call in the literal of a verified function that has a `Requires` clause is reported, since nothing checks it.
+
+#### Compiling a pattern in an initialiser
+
+`regexp.MustCompile` panics when its pattern does not compile. Its shipped contract holds only where the initialiser of a package-level variable calls it:
+
+```go
+var word = regexp.MustCompile("^[a-z]+$")
+
+// isWord matches with a pattern that is not nil.
+//
+// @Requires |s| <= 100
+// @Ensures True
+func isWord(s string) (ok bool) {
+	return word.MatchString(s)
+}
+```
+
+`isWord` verifies. A panic in such an initialiser stops the program before any code reads the variable. If the package is a plugin, `plugin.Open` can recover the panic. Nothing of the plugin can be reached then, since `Open` did not return the plugin, unless an earlier initialiser handed out code of the package. `vego` refuses such hidden initialisation code, as described in [When a package-level error is known](#when-a-package-level-error-is-known). In a function, a deferred `recover` could catch the panic and go on, so a call there is refused:
+
+```go
+// isWordHere compiles inside a function.
+//
+// @Requires |s| <= 100
+// @Ensures True
+func isWordHere(s string) (ok bool) {
+	re := regexp.MustCompile("^[a-z]+$")
+	return re.MatchString(s)
+}
+```
+
+```text
+vego: cannot verify isWordHere: MustCompile panics when it fails, and its trusted contract holds only where the initialiser of a
+package-level variable calls it, outside every function: a panic there stops the program, or the plugin that holds the package,
+before any code reads the variable; elsewhere call a function that returns an error and check it, as regexp.Compile
+```
+
+An `init` function is a function too, so a call there is refused in the same way. In a function, call `regexp.Compile` and check its error.
 
 ### What a variable refers to
 
@@ -4372,6 +4454,102 @@ func TicketChecked() (n int, ok bool) {
 
 A function of the package that code of another package cannot call may require such a condition, and its callers prove it as any other `Requires` clause.
 
+### A struct variable whose address is taken
+
+A variable of a struct type can have its address taken, as `&quota` does, and can call methods with a pointer receiver. It lives in memory of its own, which existed before any function was called:
+
+```go
+// Quota holds a limit.
+type Quota struct {
+	limit int
+	used  int
+}
+
+var quota Quota
+
+// loadQuota sets the limit of what q points to.
+//
+// @Requires q != nil
+// @Modifies q.limit
+// @Ensures q.limit' = n
+func loadQuota(q *Quota, n int) {
+	q.limit = n
+}
+
+// setupQuota loads the package's quota through its address.
+//
+// @Modifies quota
+// @Ensures quota.limit' = 100
+func setupQuota() {
+	loadQuota(&quota, 100)
+}
+
+// spend writes a field of the variable by its name.
+//
+// @Requires quota.used < quota.limit
+// @Modifies quota.used
+// @Ensures quota.used' = quota.used + 1
+func spend() {
+	quota.used++
+}
+```
+
+Both functions verify. `Modifies quota` covers the struct, and `Modifies quota.used` one field of it, as for what a pointer parameter points to. A pointer parameter of type `*Quota` may point to `quota`, so `vego` considers both cases. A function that writes `p.limit` for a parameter `p` may write `quota.limit`.
+
+`var mu sync.Mutex`, `var buf bytes.Buffer`, and `var b strings.Builder` are struct variables too, and their methods take their address. A variable of another type whose address is taken, as `&n` of an `int`, cannot be read, since pointers to anything but a struct are not supported yet.
+
+#### When the address stays in place
+
+A write through a writer may write any memory that the writer's footprint holds. By default, `vego` cannot rule out that this includes a struct variable whose address is taken. It can rule it out when the address of the variable is closed. That means every use of the address in the build hands it to a trusted function that keeps nothing of it, returns nothing that can hold memory, and runs no code that could be handed it. The methods of `sync.Mutex`, `strings.Builder`, and `bytes.Buffer` that ship are such functions, and so is `fmt.Fprintf(&b, ...)`:
+
+```go
+var transcript strings.Builder
+
+// recordLine writes a line into the builder and a line through w, and
+// keeps the length of the builder across the write through w.
+//
+// @Requires w != nil And |transcript| <= 1000
+// @Modifies transcript, w
+// @Ensures |transcript'| = |transcript| + 4
+func recordLine(w io.Writer) {
+	transcript.WriteString("ok.\n")
+	fmt.Fprint(w, "ok\n")
+}
+```
+
+`recordLine` verifies. The same function over a builder whose address is let out is not proved:
+
+```go
+var scratch strings.Builder
+
+// scratchWriter hands out the address of scratch, so a writer may hold it.
+func scratchWriter() io.Writer { return &scratch }
+
+// recordScratch loses the length of scratch across the write through w.
+//
+// @Requires w != nil And |scratch| <= 1000
+// @Modifies scratch, w
+// @Ensures |scratch'| = |scratch| + 4
+func recordScratch(w io.Writer) {
+	scratch.WriteString("ok.\n")
+	fmt.Fprint(w, "ok\n")
+}
+```
+
+```text
+vego: postcondition may not hold: |scratch'| = |scratch| + 4
+```
+
+These uses leave the address open:
+
+- returning it, storing it, or putting it in a composite literal;
+- a method value, as `mu.Lock` without a call;
+- a call in a `go` statement;
+- handing it to a verified function, as `loadQuota(&quota, 100)` does, since that function could convert it to an interface;
+- handing it to a trusted function that keeps it, returns memory of it, as `buf.Bytes()` does, or takes another argument that can carry code.
+
+A variable whose address is open still works. A write through a footprint makes a function forget what it knew of the variable, and the variable cannot be in a group with an invariant. When another package of the build lets out the address of a variable that a proof relies on being closed, that use is reported where it stands.
+
 ### Variables that hold a writer or a function
 
 A variable may hold an interface value, such as a writer, or a value of a named function type with a contract. A call through it is a call of the contract of its type, as through a parameter:
@@ -4619,6 +4797,111 @@ The invariant can be relied on only when nothing else changes the variables. It 
 
 A test that resets such a variable calls a verified function of the package that does it.
 
+### A mutex beside what it guards
+
+A mutex in a package-level variable can be in a group with the variables it guards. The invariant of the group says that no function holds the mutex between calls:
+
+```go
+// Page names a page.
+type Page struct{ id int }
+
+// @Invariant ~held(viewsMu) And 0 <= pageViews
+var (
+	viewsMu   sync.Mutex
+	pageViews int
+)
+
+// View counts a page view under the lock.
+//
+// @Modifies viewsMu, pageViews
+// @Ensures True
+func View(p Page) {
+	viewsMu.Lock()
+	defer viewsMu.Unlock()
+	addView()
+}
+
+// addView runs while View holds the lock.
+//
+// @Requires held(viewsMu)
+// @Modifies pageViews
+// @Ensures held(viewsMu)
+func addView() {
+	if pageViews < math.MaxInt {
+		pageViews++
+	}
+}
+
+// Views reads the count, which the invariant keeps not negative.
+//
+// @Modifies viewsMu
+// @Ensures n >= 0
+func Views(p Page) (n int) {
+	viewsMu.Lock()
+	n = pageViews
+	viewsMu.Unlock()
+	return n
+}
+```
+
+All three verify. `~held(viewsMu)` is a lock clause, a clause of the invariant that speaks only of the state of a mutex of the group. It is treated differently from the rest of the invariant:
+
+- A function that code outside the package's verified code can call assumes it on entry and proves it on return. That is an exported function, a method with an exported name, an `init` function, or a function used as a value.
+- Every other function relies on its own `Requires` clause for the mutex, as `addView` does with `held(viewsMu)`.
+- Before a call that may reach a function of the first kind, the lock clause is proved.
+
+The rest of the invariant, `0 <= pageViews` here, is assumed and proved as for any group. A function that runs under the lock must not be callable from outside:
+
+```go
+// AddView requires the lock and is exported.
+//
+// @Requires held(viewsMu)
+// @Modifies pageViews
+// @Ensures True
+func AddView(p Page) {
+	if pageViews < math.MaxInt {
+		pageViews++
+	}
+}
+```
+
+```text
+vego: code outside the package's verified code can call AddView (it is exported), so it assumes ~held(viewsMu), a lock clause of the
+invariant of viewsMu, pageViews, on entry, which its Requires contradicts; keep a function that runs under the lock unexported, and do not
+use it as a value
+```
+
+A call under the lock that may come back into `View` is reported, since `View` would wait for itself:
+
+```go
+// Hook is called with the lock held.
+//
+// @Ensures True
+type Hook func(p Page)
+
+// ViewThen calls h under the lock, which may be View.
+//
+// @Requires h != nil
+// @Modifies viewsMu, pageViews
+// @Ensures True
+func ViewThen(h Hook, p Page) {
+	viewsMu.Lock()
+	defer viewsMu.Unlock()
+	h(p)
+}
+```
+
+```text
+vego: invariant of viewsMu, pageViews may not hold before the call to h, which may assume it: ~held(viewsMu); it was not kept from entry,
+since held(viewsMu) may have changed: the call to viewsMu.Lock at locks.go:72:2 may write it
+```
+
+A call into another package under the lock is reported in the same way, unless the function's entry claims to be isolated, as the methods of `sync.Mutex`, `strings.Builder`, and the functions of `strings` and `fmt` do (see [Isolated functions](#isolated-functions)). `fmt.Fprintln(w, ...)` under the lock is reported, since `w` may be a writer of your package that locks the mutex. Write through the writer after `Unlock`.
+
+The mutex must be closed, as described in [When the address stays in place](#when-the-address-stays-in-place). A function that is not verified must not lock it, and a `sync.Once` cannot be in a group, since `Do` runs a function while it holds the `Once`.
+
+The two kinds of clause hold under different conditions. `~held(viewsMu)` is about the goroutine that runs the function, so it holds however many goroutines call `View`. `0 <= pageViews` holds only where at most one goroutine at a time runs functions of the package that touch the group, as for any group (see [Variables and goroutines](#variables-and-goroutines)). The lock does not give that in `vego`'s model, because the proof of `View` assumes that no other goroutine writes `pageViews` while `View` waits in `Lock`. `vego` does not show that every function takes `viewsMu` before it touches `pageViews`.
+
 ### Variables of other packages
 
 A function lists what it changes in another package by naming the state of that package. Package `guidestats` keeps a counter that it does not export:
@@ -4714,7 +4997,7 @@ func countHit() {
 }
 ```
 
-`countHit` verifies. The proof says what one call does when no other goroutine reads or writes `hits` while it runs. It does not say that the program counts correctly. An HTTP server runs each handler on a goroutine of its own. Two handlers that call `countHit` at once may both read the same value and both write the same result, so one request is lost, and `go test -race` reports a data race. `vego` does not check that a mutex guards a variable. Guard it yourself, and run the race detector.
+`countHit` verifies. The proof says what one call does when no other goroutine reads or writes `hits` while it runs. It does not say that the program counts correctly. An HTTP server runs each handler on a goroutine of its own. Two handlers that call `countHit` at once may both read the same value and both write the same result, so one request is lost, and `go test -race` reports a data race. `vego` does not check that a mutex guards a variable, also not for a mutex in a group (see [A mutex beside what it guards](#a-mutex-beside-what-it-guards)). A rule that ties a variable to the mutex that guards it waits for goroutines, which `vego` does not support yet. Guard it yourself, and run the race detector.
 
 An invariant of variables is proved under the same condition. It holds only where at most one goroutine at a time runs functions of the package that name its variables. Two handlers that change the group at once may leave it broken, and a third may then read it while `vego` assumed that it held.
 
@@ -4722,15 +5005,21 @@ An invariant of variables is proved under the same condition. It holds only wher
 
 A variable holds its value only once the package has initialised it. `vego` relies on Go's order of initialisation, under the same conditions as for an error variable. Code that Go's ordering does not see can run during initialisation, as described in [When a package-level error is known](#when-a-package-level-error-is-known). Then a variable with an initialiser cannot be read, and the message has the form shown there: `x is not known to have its value yet when this runs: ...`. A variable without an initialiser is zero before any code runs, so it can still be read.
 
+The initialisers themselves are run as code, as described in [Initialisers that call functions](#initialisers-that-call-functions). Each reads only variables that Go initialised before it, so the rule above does not apply to them.
+
 ### What this does not cover yet
 
 Some code that uses package-level variables still cannot be verified:
 
-- A variable whose address is taken, as `var mu sync.Mutex` with `mu.Lock()`.
+- A variable whose address is taken, other than a struct, as `&n` of an `int`.
+- A struct variable whose address is taken, of another package, read or named directly, as `lib.Mu.Lock()` in a verified function or `@Modifies lib.Cfg`. List the state of its package instead, as `@Modifies lib`.
+- A struct variable whose address a verified function is handed, as `loadQuota(&quota, 100)`, kept apart from what writers write. A write through a footprint forgets it.
+- A function that runs under a lock and leaves a clause about the data of the group broken for its caller to restore. Only the state of the mutex can be left to the caller, as `addView` does.
 - An error variable that is changed.
-- `log.Default()`, which has no shipped contract.
+- `log.Default()`, which has no shipped contract, a logger in an exported variable or in a variable of another package, and a logger used in other ways than with `Printf`, `Print`, and `Println`.
+- `template.Must`, since `text/template` has no shipped contracts.
 - `flag` variables. `flag.Int` returns an `*int`, and pointers to anything but a struct are not supported. `flag.StringVar(&s, ...)` takes the address of `s`.
-- A variable of a type that holds code other than an interface type or a named function type with a contract, as `*log.Logger`.
+- A variable of a type that holds code other than an interface type, a named function type with a contract, or `*log.Logger`.
 
 A build that sets a string variable with `-ldflags "-X path.name=value"` gives it a value that `vego` does not see. A proof that relies on the value of such a variable, typically a version, does not hold for that build. See [What a proof assumes](#what-a-proof-assumes).
 
@@ -5574,7 +5863,7 @@ func (s *Server) Remember(w http.ResponseWriter, req *http.Request) {
 
 ```text
 vego: w is or holds a net/http.ResponseWriter, which must not be used after the call that received it returns, and
-here it is stored into memory at handlers.go:64:2, where a later call could use it; pass it on only to calls that
+here it is stored into memory at handlers.go:65:2, where a later call could use it; pass it on only to calls that
 keep nothing of it
 ```
 
@@ -5632,7 +5921,7 @@ func Wrap(w http.ResponseWriter) (r *StatusWriter) {
 
 ```text
 vego: w is or holds a net/http.ResponseWriter, which must not be used after the call that received it returns, and
-here it is stored into what the literal at handlers.go:123:10 makes, where a later call could use it; pass it on
+here it is stored into what the literal at handlers.go:124:10 makes, where a later call could use it; pass it on
 only to calls that keep nothing of it
 vego: &StatusWriter{…} is or holds a net/http.ResponseWriter, which must not be used after the call that received
 it returns, and here it is returned by Wrap, where a later call could use it; pass it on only to calls that keep
@@ -6314,6 +6603,8 @@ func (t *Switch) Step() {
 
 A proof about several goroutines needs goroutines and channels, which `vego` does not support yet.
 
+A mutex in a package-level variable, with the variables it guards in a group, is described in [A mutex beside what it guards](#a-mutex-beside-what-it-guards).
+
 #### Values that hold a mutex cannot be copied or overwritten
 
 `sync` documents that a mutex and a `Once` must not be copied after first use. `vego` refuses every copy and every assignment of a value that holds a mutex: a `sync.Mutex`, a `sync.RWMutex`, a `sync.Once`, or a struct with one as a field at any depth. Such a value can only be created, used through a pointer, and changed through the methods of the mutex.
@@ -6442,6 +6733,8 @@ Each entry has these fields:
 | `calls` | no | Function parameters that the function calls while it runs, each with what holds when it calls them. See [Functions that a trusted function calls](#functions-that-a-trusted-function-calls). |
 | `formats` | no | The parameter of type `any` or `...any` whose values the function formats as package `fmt` does, and the string it uses as the format, if any. See [Your own logging function](#your-own-logging-function). |
 | `stores` | no | Parameters under whose memory, as `modifies` lists it, the function stores only slices, maps, and pointers it allocates during the call, as `[h]` for `(net/http.Header).Set`. Check that no assignment or `append` into that memory stores an argument, a global, or anything the function did not allocate in the call. A call of such a function does not count as storing memory of unknown origin, so a function that sets a header can hand the writer to a helper beside its data. |
+| `isolated` | no | `true` claims that the function runs no code but what the call hands it through its arguments and receiver, and reaches no code through memory that another call set, also not through any function it calls. Check it against the source: the function must read no hook that another call can set, as `log.Printf` reads the output of the standard logger. See [Isolated functions](#isolated-functions). |
+| `initialiserOnly` | no | `true` says that the contract holds only where the initialiser of a package-level variable calls the function, outside every function, because the function panics when it fails, as `regexp.MustCompile` does. A call anywhere else is refused. See [Compiling a pattern in an initialiser](#compiling-a-pattern-in-an-initialiser). |
 | `prints` | no | For a function that formats and writes to a writer it is given, as `{w: fmt.Sprintf}`: the writer, and a function of the same package that takes the other parameters. It claims that the function formats as that one does, calls `Write` of the writer once with exactly what that one returns, calls nothing else of the writer, and returns what `Write` returned. A call into a `*bytes.Buffer`, a `*strings.Builder`, or a `*bufio.Writer` is then checked as described in [Formatting into a buffer](#formatting-into-a-buffer). The entry may require no more than that the writer is not nil, list only the writer in `modifies`, and have no `ensures`, `keeps`, or `calls`. |
 
 Put the formulas in quotes. Several characters that formulas use have a special meaning in YAML.
@@ -6519,6 +6812,75 @@ Some functions of the standard library have no shipped contract, because no true
 - The cookie functions of `net/http`, `http.Redirect`, and the methods of a request that read its body, such as `FormValue`.
 - `slices.SortFunc` and `slices.BinarySearchFunc` require that the comparison function is a strict weak ordering, which a contract cannot require of a function it is handed. See [Sorting a slice of structs](#sorting-a-slice-of-structs).
 - `maps.Keys`, `maps.Values`, and the other functions that return iterators need a range over a function.
+
+### Isolated functions
+
+A call into another package may run code of your package that another call registered there earlier. `log.Printf` writes to the output of the standard logger, which code that is not verified may set with `log.SetOutput` to a writer of your package. So `vego` proves the invariant of a group before such a call, also while a function has the invariant broken. A function whose entry claims to be isolated runs no code but what the call hands it, so a call of it that is handed no code needs nothing of the group:
+
+```go
+// @Invariant low <= high
+var (
+	low  int
+	high int
+)
+
+// Bounds returns the bounds.
+//
+// @Ensures l <= h
+func Bounds() (l, h int) {
+	return low, high
+}
+
+// raise breaks the invariant around a call of strings.ToUpper, which runs
+// no code of the package.
+//
+// @Requires |s| <= 100
+// @Modifies low
+// @Ensures True
+func raise(s string) (r string) {
+	if high == math.MaxInt {
+		return s
+	}
+	low = high + 1
+	r = strings.ToUpper(s)
+	low = high
+	return r
+}
+
+// raiseLogged breaks it around a call of log.Print, which writes to the
+// output that code that is not verified set.
+//
+// @Modifies low
+// @Ensures True
+func raiseLogged() {
+	if high == math.MaxInt {
+		return
+	}
+	low = high + 1
+	log.Print("raised")
+	low = high
+}
+```
+
+`raise` verifies. `raiseLogged` is reported:
+
+```text
+vego: invariant of low, high may not hold before the call to Print, which may assume it: low <= high; it was not kept from entry, since
+low may have changed: the assignment to low at addressed.go:156:2 may write it
+```
+
+A call hands code when an argument or the receiver can hold code, as a function value, an interface value, or `any` can, or when an argument is converted to an interface and its type has a method that is not isolated. `fmt.Sprint(v)` of a value whose `String` method is your code hands that method to `fmt`.
+
+These shipped entries are isolated: every function and method of `fmt`, `bytes`, `strings`, `strconv`, `unicode`, `unicode/utf8`, and `math`, and the methods of `sync.Mutex` and `sync.RWMutex` that lock and unlock. The functions of `log`, `net/http`, and `os`, and `(*sync.Once).Do`, are not. The trust report prints the claim, with what was read to support it.
+
+An entry of your trust file can make the claim with `isolated: true`. A trust file can make it for every function and method of its package with this at its top:
+
+```yaml
+isolated:
+  reason: What you read to know that the package keeps no hook that another call can set.
+```
+
+Make the claim only when you have read the function's source, and the source of every function it calls, and found that it calls nothing that another call can set.
 
 ### Generic functions of other packages
 
@@ -8122,6 +8484,12 @@ This table lists the most common messages.
 | `variant may not decrease in recursive call`, `variant of the function may be negative` | The same, for the `Variant` of a recursive function. | Use a different `Variant`, or strengthen the `Requires`. |
 | `the contract of F cannot be used: its Ensures annotation at f.go:n:c cannot be read (...)` | A clause of the callee's contract cannot be read; it is also reported where it is written. The message ends with what the call relies on until it is fixed. | Fix the clause. See [Calls](#calls). |
 | `this call may not end: F calls x.M() at f.go:n:c, which may run T.M, ...` | A cycle of calls goes through a call with no static callee, or through code of another package. The message names the cycle. | Break the cycle. See [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods). |
+| `precondition of F may not hold in an initialiser, where a verified function relies on it for what it writes: P` | An initialiser calls a verified function, or a function value or an interface value, outside its `Requires`. | Change the arguments, or check them in a function with a contract. See [Initialisers that call functions](#initialisers-that-call-functions). |
+| `cannot verify F: M panics when it fails, and its trusted contract holds only where the initialiser of a package-level variable calls it, ...` | A function such as `regexp.MustCompile` is called in a function, or in a function literal of an initialiser. | Call it in the initialiser of a package-level variable, or call the function that returns an error, as `regexp.Compile`, and check it. |
+| `code outside the package's verified code can call F (...), so it assumes ~held(mu), a lock clause of the invariant of ..., on entry, which its Requires contradicts; ...` | A function that runs under a lock is exported, a method with an exported name, or used as a value. | Keep it unexported, and call it only by name. See [A mutex beside what it guards](#a-mutex-beside-what-it-guards). |
+| `cannot verify F: x has its address taken at f.go:n; only a package-level variable of a struct type may have its address taken, ...` | `&x` of a variable that is not a struct. | Keep the value in a struct, or pass it by value. |
+| `cannot verify F: lib.V is a struct variable of package lib whose address is taken, and reading or naming one of another package is not supported yet; ...` | A function reads or names such a variable of another package. | Call a function of that package, and list its state, as `@Modifies lib`. |
+| `the address of lib.V is let out here, but proofs in package lib rely on it being handed only to trusted functions that neither keep it nor run code that could be handed it` | A package of the build lets out the address of a struct variable whose address a proof relies on being closed. | Hand the address only to such trusted functions. See [When the address stays in place](#when-the-address-stays-in-place). |
 | `F has annotations, so each of its results needs a name` | A verified function has an unnamed or blank result. | Name every result in the signature. |
 | `an annotation is written "// @Keyword ...", with one space before the @ and none after it` (or `with nothing but one space`) | The comment looks like an annotation but has different spacing, or something stands before the `@`. | Write `// @Keyword ...`. |
 | `a comment directly after an annotation is not read as part of it` | An ordinary comment follows an annotation in the same comment group. | Start the line with `// @` to continue the annotation, or put an empty `//` line before the comment. |
@@ -8311,12 +8679,12 @@ A function that uses any of the following is reported as `cannot verify`:
 - goroutines, channels, and `select`;
 - arrays, and structs that contain an array;
 - pointers to anything other than a struct;
-- reading or changing a package-level variable whose address the build takes, that a directive or an assembly file names, that is an error variable that something changes, or whose type can hold a function value, an interface value, an error, a channel, or an `unsafe.Pointer` (see [Package-level variables](#package-level-variables));
+- reading or changing a package-level variable whose address the build takes and that is not a struct, a struct variable of another package whose address is taken, a variable that a directive or an assembly file names, an error variable that something changes, or a variable whose type can hold a function value, an interface value, an error, a channel, or an `unsafe.Pointer`, but for an interface type, a named function type with a contract, and a logger made by `log.New` (see [Package-level variables](#package-level-variables));
 - `copy`;
 - in `encoding/json`, anything but `Marshal`, `MarshalIndent`, `Unmarshal`, and `json.NewEncoder(w).Encode(v)` and `json.NewDecoder(io.LimitReader(r, n)).Decode(&x)` written as one expression, and values that hold an interface value, a method that `encoding/json` would call, or one of the other types listed in [What is not supported in encoding/json](#what-is-not-supported-in-encodingjson);
 - annotations on a type declared inside a function body, such as an invariant on a local struct or a contract on a local interface;
 - formatting a value whose type has a method `Format`, `GoString`, `Error`, or `String`, a pointer, a map, an interface value other than an error of known origin, a function value, or a value of a type that holds itself, with `fmt.Errorf` or a function whose entry lists it under `formats`, and passing such a function a slice with `...` for the values it formats (see [What can be formatted](#what-can-be-formatted));
-- a logger in a package-level variable, and `log.Default()`;
+- a logger in an exported package-level variable, or one used other than to print with `Printf`, `Print`, and `Println`, and `log.Default()`;
 - a call in the target of an assignment whose right-hand side is an `append` that may write into the array of its slice, unless the call modifies nothing and refers to no memory or a call among the operands of the `append` orders it (see [An append beside a call](#an-append-beside-a-call));
 - a call with several results as the arguments of another call, as in `g(f())`;
 - comparing structs with `==`;
@@ -8340,7 +8708,7 @@ Floating-point values are supported but opaque. They can be passed around and us
 
 A proof by `vego` depends on the following assumptions. Each concerns something `vego` cannot see.
 
-- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and holds no value that can hold code anywhere it was not held when the call began, unless `keeps` lists the parameter. For a parameter listed under `keeps`, it runs the code during the call only if `runs` lists the parameter too, holds it when it returns only in memory that the results and parameters listed there reach, and has started or registered nothing that runs it later: no goroutine, timer, finalizer or cleanup, callback given to another package, or package-level variable. For a parameter listed under `stores`, the function stores into the memory that its `modifies` lists under that parameter only memory it made during the call. For a parameter listed under `prints`, the function formats as the function that `prints` names does, calls the `Write` of that parameter once with exactly what that function returns, calls nothing else of it, and returns what `Write` returned. For a parameter listed under `encodes`, the function encodes the value as package `encoding/json` does. It runs no method of the value but those of `time.Time`, `json.RawMessage`, and `json.Number` that `encoding/json` runs, only while the call lasts and on the goroutine that called it, and it allocates within the bound `vego` proves at the call. It keeps nothing of the value, with one exception. Built without `GOEXPERIMENT=jsonv2`, it returns for a NaN or an infinity a `*json.UnsupportedValueError` whose field `Value` is a `reflect.Value` of that float in the memory of the value, which reflection could set. No proof depends on it. No formula reads a float, and verified code cannot assert an error to its type to reach the field. For a parameter listed under `decodes`, the function decodes into the value as `encoding/json` does. It writes only the exported fields that `encoding/json` writes, runs no method of the value but those of `time.Time`, `json.RawMessage`, and `json.Number`, keeps nothing of what it is handed, and allocates within the bound `vego` proves at the call. When every slice, map, and pointer in what it decodes into is `nil`, which `vego` requires at each call, everything it stores there is memory it made during the call. `(*json.Encoder).Encode`, called on the encoder that `json.NewEncoder(w)` makes in the same expression, encodes its argument as `Marshal` does. When that fails, it returns the error of `Marshal` and calls nothing of `w`. Otherwise it calls `w.Write` once, with exactly what `Marshal` returns followed by a newline, calls nothing else of `w`, and returns the error that `Write` returned. `(*json.Decoder).Decode`, called on the decoder that `json.NewDecoder(io.LimitReader(r, n))` makes in the same expression, calls nothing of `r` but its `Read`. It calls `Read` any number of times, each time with a buffer that is not empty, only while `Decode` lasts and on the goroutine that called it, and reads at most `n` bytes in all. It decodes the first value it reads as `Unmarshal` does, and leaves what follows that value unread in `r` or drops it with the decoder. Nothing holds the decoder after the expression, and nothing it starts keeps `r`. For a parameter listed under `runs` or `keeps`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter. Where such a value runs what the function keeps, as the reader that `io.TeeReader` returns runs the reader and the writer it is given, it meets its contract whenever what the function keeps meets theirs.
+- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and holds no value that can hold code anywhere it was not held when the call began, unless `keeps` lists the parameter. For a parameter listed under `keeps`, it runs the code during the call only if `runs` lists the parameter too, holds it when it returns only in memory that the results and parameters listed there reach, and has started or registered nothing that runs it later: no goroutine, timer, finalizer or cleanup, callback given to another package, or package-level variable. For a parameter listed under `stores`, the function stores into the memory that its `modifies` lists under that parameter only memory it made during the call. For a parameter listed under `prints`, the function formats as the function that `prints` names does, calls the `Write` of that parameter once with exactly what that function returns, calls nothing else of it, and returns what `Write` returned. For a parameter listed under `encodes`, the function encodes the value as package `encoding/json` does. It runs no method of the value but those of `time.Time`, `json.RawMessage`, and `json.Number` that `encoding/json` runs, only while the call lasts and on the goroutine that called it, and it allocates within the bound `vego` proves at the call. It keeps nothing of the value, with one exception. Built without `GOEXPERIMENT=jsonv2`, it returns for a NaN or an infinity a `*json.UnsupportedValueError` whose field `Value` is a `reflect.Value` of that float in the memory of the value, which reflection could set. No proof depends on it. No formula reads a float, and verified code cannot assert an error to its type to reach the field. For a parameter listed under `decodes`, the function decodes into the value as `encoding/json` does. It writes only the exported fields that `encoding/json` writes, runs no method of the value but those of `time.Time`, `json.RawMessage`, and `json.Number`, keeps nothing of what it is handed, and allocates within the bound `vego` proves at the call. When every slice, map, and pointer in what it decodes into is `nil`, which `vego` requires at each call, everything it stores there is memory it made during the call. `(*json.Encoder).Encode`, called on the encoder that `json.NewEncoder(w)` makes in the same expression, encodes its argument as `Marshal` does. When that fails, it returns the error of `Marshal` and calls nothing of `w`. Otherwise it calls `w.Write` once, with exactly what `Marshal` returns followed by a newline, calls nothing else of `w`, and returns the error that `Write` returned. `(*json.Decoder).Decode`, called on the decoder that `json.NewDecoder(io.LimitReader(r, n))` makes in the same expression, calls nothing of `r` but its `Read`. It calls `Read` any number of times, each time with a buffer that is not empty, only while `Decode` lasts and on the goroutine that called it, and reads at most `n` bytes in all. It decodes the first value it reads as `Unmarshal` does, and leaves what follows that value unread in `r` or drops it with the decoder. Nothing holds the decoder after the expression, and nothing it starts keeps `r`. For a parameter listed under `runs` or `keeps`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter. Where such a value runs what the function keeps, as the reader that `io.TeeReader` returns runs the reader and the writer it is given, it meets its contract whenever what the function keeps meets theirs. A function whose entry says `isolated: true`, or whose trust file says `isolated` at its top, runs no code but what the call hands it through its arguments and receiver, and reaches no code through memory that another call set, also not through any function it calls. `log.Printf` is not isolated, since it writes to the output that `log.SetOutput` set. A function whose entry says `initialiserOnly: true` meets its contract when it returns. Where it fails it panics, and the initialiser of a package-level variable is the only place `vego` allows a call of it.
 - The methods of `bytes.Buffer`, `strings.Builder`, `bufio.Writer`, `bufio.Reader`, `bufio.Scanner`, and `log.Logger` that have shipped entries write nothing that verified code can see other than the struct and the memory that the value owns, as [Writing through a buffer](#writing-through-a-buffer) lists it. After a call, the value owns only what it owned before the call and memory that the call made. The read position of a `bytes.Buffer` never passes the end of what was written to it. Every method of `bytes.Buffer` keeps it so, and `|b|` is the number of bytes between the two.
 - Code of another package that is not verified runs code of the verified package only as `vego` follows it, which [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods) describes: during a call that the verified package makes, it runs only what that call hands it, through the arguments and the receiver. Code that it kept from an earlier call, a value it stored, or code that it runs on another goroutine or at another time, does not call back into a verified function while that function runs, so that the call never ends. A cycle that stays in the package, or that goes through what a call hands to another package, is found and reported.
 - A claim under `asserts` is true: the function calls nothing that the parameter holds, or that a call of what the parameter holds returns, but what the claim allows, and uses no reflection on it (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
@@ -8360,7 +8728,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - No other goroutine unlocks a mutex that the goroutine running a verified function holds.
 - Code that is not verified does not copy a value that holds a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once` after it was first used, as the documentation of `sync` requires, or a `strings.Builder` that is not zero, as the documentation of `strings` requires. A copy of a `Builder` that has been written panics at its next write.
 - A function value or an interface value that code which is not verified made changes no package-level variable that the contract of its type does not list, also not by calling a function that does. A plugin whose `Write` calls your package's `Hit`, which increments a counter, breaks this: a verified function that wrote through it would be proved to leave the counter unchanged. Code of your own package that such a call may run is found and counted, as described in [Changing a variable](#changing-a-variable).
-- No code outside the packages that a verified package is built with changes a package-level variable that a proof relies on, or lets out a reference to what such a variable refers to when a proof relies on it being only read. No code does either through `unsafe`, `reflect`, C code of a cgo package, or an object file (`.syso`) linked into the program. `vego` reads the `//go:linkname` directives and the assembly files of the build, and counts what they name as changed. When a verified package is built with a package that makes such a change, the verified package does not rely on the variable. The change is also reported wherever it meets a proof that does rely on it.
+- No code outside the packages that a verified package is built with changes a package-level variable that a proof relies on, lets out a reference to what such a variable refers to when a proof relies on it being only read, or lets out the address of a struct variable when a proof relies on it being closed. No code does any of these through `unsafe`, `reflect`, C code of a cgo package, or an object file (`.syso`) linked into the program. `vego` reads the `//go:linkname` directives and the assembly files of the build, and counts what they name as changed. When a verified package is built with a package that makes such a change, the verified package does not rely on the variable. The change is also reported wherever it meets a proof that does rely on it.
 - `errors.New`, `fmt.Errorf`, and `errors.Is` behave as they do in the Go releases that `laas` is tested with. Each call of `errors.New` or `fmt.Errorf` returns a new pointer. The errors they return have no `Is` method. `Unwrap` returns the operand of the one `%w`. `errors.Is` finds an error, or an error it wraps, that is the target. The tests of `vego` check this against the running toolchain.
 - The compiler evaluates each statement in an order that the Go specification allows. Calls, `&&`, and `||` run from left to right, an operation runs after its operands, and an assignment assigns only after it has evaluated everything. Where the specification leaves the order open, `vego` proves that every order it allows gives the same values.
 - The program runs on the platform `laas` was run for. The sizes of `int`, `uint`, and pointers, the layout of structs, and `MaxAlloc` are those of the `GOOS` and `GOARCH` that `laas` runs with. A proof for a 64-bit target does not hold for a 32-bit target.
