@@ -448,35 +448,33 @@ func (pv *pkgVerifier) exportWrites() {
 			return true
 		})
 	}
-	// What a call with no static callee may reach.
+	// What a call with no static callee may reach, indexed once by
+	// signature and in the order of the source.
+	funcs := slices.SortedFunc(maps.Keys(byFunc), func(a, b *types.Func) int { return int(a.Pos() - b.Pos()) })
+	lits := slices.SortedFunc(maps.Keys(byLit), func(a, b *ast.FuncLit) int { return int(a.Pos() - b.Pos()) })
+	byValueSig := map[string][]*writes{}
+	byMethod := map[string][]*writes{}
+	for _, obj := range funcs {
+		objSig := obj.Type().(*types.Signature)
+		key := sigKey(objSig)
+		if objSig.Recv() != nil {
+			byMethod[obj.Name()+" "+key] = append(byMethod[obj.Name()+" "+key], byFunc[obj])
+		}
+		if asValue[obj] || obj.Exported() && objSig.Recv() == nil {
+			byValueSig[key] = append(byValueSig[key], byFunc[obj])
+		}
+	}
+	for _, lit := range lits {
+		if litSig, ok := pv.info.TypeOf(lit).(*types.Signature); ok {
+			key := sigKey(litSig)
+			byValueSig[key] = append(byValueSig[key], byLit[lit])
+		}
+	}
 	reachValue := func(sig *types.Signature) []*writes {
-		var found []*writes
-		for _, obj := range slices.SortedFunc(maps.Keys(byFunc), func(a, b *types.Func) int { return int(a.Pos() - b.Pos()) }) {
-			w := byFunc[obj]
-			objSig := obj.Type().(*types.Signature)
-			if (asValue[obj] || obj.Exported() && objSig.Recv() == nil) && types.Identical(withoutRecv(objSig), withoutRecv(sig)) {
-				found = append(found, w)
-			}
-		}
-		for _, lit := range slices.SortedFunc(maps.Keys(byLit), func(a, b *ast.FuncLit) int { return int(a.Pos() - b.Pos()) }) {
-			w := byLit[lit]
-			if litSig, ok := pv.info.TypeOf(lit).(*types.Signature); ok && types.Identical(litSig, withoutRecv(sig)) {
-				found = append(found, w)
-			}
-		}
-		return found
+		return byValueSig[sigKey(sig)]
 	}
 	reachMethod := func(method *types.Func) []*writes {
-		var found []*writes
-		sig := withoutRecv(method.Type().(*types.Signature))
-		for _, obj := range slices.SortedFunc(maps.Keys(byFunc), func(a, b *types.Func) int { return int(a.Pos() - b.Pos()) }) {
-			w := byFunc[obj]
-			objSig := obj.Type().(*types.Signature)
-			if objSig.Recv() != nil && obj.Name() == method.Name() && types.Identical(withoutRecv(objSig), sig) {
-				found = append(found, w)
-			}
-		}
-		return found
+		return byMethod[method.Name()+" "+sigKey(method.Type().(*types.Signature))]
 	}
 	// To a fixed point; a call of a function of another package brings
 	// what its fact says.
@@ -499,10 +497,10 @@ func (pv *pkgVerifier) exportWrites() {
 	// In the order of the source, so that where a write is said to be is
 	// the same in every run.
 	var everyone []*writes
-	for _, obj := range slices.SortedFunc(maps.Keys(byFunc), func(a, b *types.Func) int { return int(a.Pos() - b.Pos()) }) {
+	for _, obj := range funcs {
 		everyone = append(everyone, byFunc[obj])
 	}
-	for _, lit := range slices.SortedFunc(maps.Keys(byLit), func(a, b *ast.FuncLit) int { return int(a.Pos() - b.Pos()) }) {
+	for _, lit := range lits {
 		everyone = append(everyone, byLit[lit])
 	}
 	for changed := true; changed; {
@@ -779,4 +777,25 @@ func (pv *pkgVerifier) handedLocals(body *ast.BlockStmt, handed map[*types.Var]b
 			return true
 		})
 	}
+}
+
+// sigKey spells a signature without its receiver and the names of its
+// parameters and results, so that signatures that types.Identical takes
+// for one spell the same.
+func sigKey(sig *types.Signature) string {
+	var b strings.Builder
+	tuple := func(t *types.Tuple) {
+		b.WriteString("(")
+		for i := range t.Len() {
+			b.WriteString(types.TypeString(t.At(i).Type(), nil))
+			b.WriteString(";")
+		}
+		b.WriteString(")")
+	}
+	tuple(sig.Params())
+	tuple(sig.Results())
+	if sig.Variadic() {
+		b.WriteString("...")
+	}
+	return b.String()
 }

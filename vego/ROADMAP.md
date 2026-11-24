@@ -1155,7 +1155,7 @@ Step 2 of part 2, with the repairs after the review of step 1 (F29 to F32), at t
 - **F31.** A `Modifies` path through a variable, as `entries[k]` with a parameter `k`, reads the parameter: `variableTarget` takes the arguments. Programs: `globals.putEntry` verifies, and `putOther` is refused.
 - **F32.** The guide says what is built: a function that names the variables assumes the invariant. It also gives D5's condition for invariants, that at most one goroutine at a time runs functions of the package that name the group.
 - **Wrong versions caught:** what the package lets out ignored (`letoutp.Bump` verifies), and the names of an invariant outside its group not checked (`lo` accepted).
-- **The writes fact in order.** `exportWrites` walks functions and literals in source order, so which write a message names is the same in every run. Before, map order picked it.
+- **The writes fact in order.** `exportWrites` walks functions and literals in source order, so which write a message names is the same in every run. Before, map order picked it. Sorting at every call through a value cost 13 to 14 s of `go test -count=1 ./vego` (159 s and 160 s against 146 s at the base), since `exportWrites` runs on every package of the build, `runtime` included. The functions are now sorted once and indexed by signature (`sigKey`, which leaves out the names, as `types.Identical` does), and the time at the end of part 2 is 145 s against 140 s at the base, back to back under a load of 5 to 6.
 
 Not built yet:
 
