@@ -3,10 +3,10 @@ package vego
 import (
 	"errors"
 	"fmt"
-	"maps"
 	"go/ast"
 	"go/token"
 	"go/types"
+	"maps"
 	"slices"
 	"strings"
 

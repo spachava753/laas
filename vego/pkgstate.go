@@ -455,7 +455,6 @@ func (v *fnVerifier) checkTrustedWrites(call *ast.CallExpr, fn *funcInfo, writte
 	}
 }
 
-
 // notImported says, for a Modifies entry that starts with the name of a
 // package the contract's package depends on but no file of it imports,
 // what to write instead (F23 of the review of step 3).
