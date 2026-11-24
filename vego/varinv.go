@@ -154,10 +154,8 @@ func (pv *pkgVerifier) checkVarGroups() {
 				continue
 			}
 			for _, init := range pv.info.InitOrder {
-				if len(init.Lhs) == 1 && init.Lhs[0] == variable {
-					if known := pv.knownOf(init.Rhs, variable.Type(), true); known.Kind != knownMade && known.Kind != knownZero && !pv.info.Types[init.Rhs].IsNil() {
-						refuse("the initialiser of %s does not make what it refers to, so something else may hold it", variable.Name())
-					}
+				if len(init.Lhs) == 1 && init.Lhs[0] == variable && !pv.madeHere(init.Rhs) {
+					refuse("the initialiser of %s does not make what it refers to, so something else may hold it", variable.Name())
 				}
 			}
 			if g.refused != "" {
@@ -290,13 +288,34 @@ func (pv *pkgVerifier) assignedFresh(stack []ast.Node) bool {
 // where it stands, or refers to none: a composite literal, its address,
 // make, new, or nil.
 func (pv *pkgVerifier) madeHere(e ast.Expr) bool {
+	// A value that refers to no memory is made wherever it is.
+	if t := pv.info.TypeOf(e); t != nil && !holdsMemory(t) {
+		return true
+	}
 	switch rhs := ast.Unparen(e).(type) {
 	case *ast.CompositeLit:
+		// Everything the literal holds must be made here too, at every
+		// depth (F37 of the review of part 2).
+		for _, elt := range rhs.Elts {
+			if kv, ok := elt.(*ast.KeyValueExpr); ok {
+				if _, isMap := pv.info.TypeOf(rhs).Underlying().(*types.Map); isMap && !pv.madeHere(kv.Key) {
+					return false
+				}
+				elt = kv.Value
+			}
+			if !pv.madeHere(elt) {
+				return false
+			}
+		}
 		return true
 	case *ast.UnaryExpr:
-		_, lit := ast.Unparen(rhs.X).(*ast.CompositeLit)
-		return rhs.Op == token.AND && lit
+		lit, ok := ast.Unparen(rhs.X).(*ast.CompositeLit)
+		return rhs.Op == token.AND && ok && pv.madeHere(lit)
 	case *ast.CallExpr:
+		if tv := pv.info.Types[rhs.Fun]; tv.IsType() && len(rhs.Args) == 1 {
+			// []byte or []rune of a constant string.
+			return pv.info.Types[rhs.Args[0]].Value != nil
+		}
 		id, ok := ast.Unparen(rhs.Fun).(*ast.Ident)
 		builtin, isBuiltin := pv.info.Uses[id].(*types.Builtin)
 		return ok && isBuiltin && (builtin.Name() == "make" || builtin.Name() == "new")

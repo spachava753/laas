@@ -3293,6 +3293,11 @@ lockslib	(*lockslib.Vault).Put	10	14191	0
 lockslib	lockslib.Held	2	1618	0
 lockspred	lockspred.Ambiguous	0	0	0
 lockspred	lockspred.Number	1	163	0
+madehere	madehere.init of d	1	744	0
+madehere	madehere.linkA	6	5033	0
+madehere	madehere.relinkB	5	4957	0
+madehere	madehere.relinkFresh	6	1600	0
+madehere	madehere.spoilShared	7	1567	0
 manywrites	manywrites.Set	587	67402205	23
 mapping	(*mapping.Registry).Register	17	25280	0
 mapping	(*mapping.store).drop	5	4196	0
