@@ -4240,7 +4240,7 @@ func listsSizes() {}
 vego: Modifies lists sizes, but listsSizes never needs to modify it; a Modifies clause must list exactly what the function may write
 ```
 
-`Modifies routes` also covers the variable itself, so a caller of a function that lists `routes` no longer knows which map `routes` holds after the call. A write into the map after such a call is then not covered:
+`Modifies routes` also covers the variable itself. A caller still knows which map `routes` holds after a call of a function that never assigns `routes`, neither in its body nor in anything it calls:
 
 ```go
 var routes = map[string]int{}
@@ -4262,30 +4262,31 @@ func addTwo() {
 }
 ```
 
-```text
-vego: routes["/a"] is assigned, which addTwo may not modify: nothing its // @Modifies clauses list is known to cover it; a clause
-covers what its path referred to when addTwo was called; routes may have been assigned since, by a statement or by a call that
-lists it, so it may no longer refer to that; a call that keeps it can say so in its contract with routes' = routes
-```
-
-When the callee keeps the map, say so in its `Ensures` clause:
+`addTwo` verifies. `addRoot` writes into the map and does not assign `routes`, so `routes` holds the same map after the call. After a call of a function that assigns `routes`, the caller no longer knows which map it holds, and a write into the map is not covered:
 
 ```go
-// @Requires routes != nil
+// newRoutes gives routes a new map.
+//
 // @Modifies routes
-// @Ensures routes' = routes And routes'["/"] = 1
-func addRootKept() { routes["/"] = 1 }
+// @Ensures routes' != nil
+func newRoutes() { routes = map[string]int{} }
 
 // @Requires routes != nil
 // @Modifies routes
 // @Ensures True
-func addTwoKept() {
-	addRootKept()
+func addAfterNew() {
+	newRoutes()
 	routes["/a"] = 2
 }
 ```
 
-`addTwoKept` verifies.
+```text
+vego: routes["/a"] is assigned, which addAfterNew may not modify: nothing its // @Modifies clauses list is known to cover it; a clause
+covers what its path referred to when addAfterNew was called; routes may have been assigned since, by a statement or by a call that
+lists it, so it may no longer refer to that; a call that keeps it can say so in its contract with routes' = routes
+```
+
+A function that assigns the variable and gives it back its value can say so with `routes' = routes` in its `Ensures` clause. `vego` counts as an assignment one in the function's body, in a function literal there, in a function it calls, and in a call through a value or of a trusted function whose contract lists the variable or the state of its package.
 
 A call through a function value or an interface value may run code of your package. Any function of the package that is used as a value of that type, and any exported function or method of the right signature, may be what the value holds, since another package can make a value of it. `vego` finds that code, verified or not, and the call may change every variable that code changes. The caller must list those variables too:
 
@@ -4440,7 +4441,7 @@ func Now() (t time.Time) {
 }
 ```
 
-`Now` is reported with `this call may not end: Now calls now() at globals.go:358:9, which may run Now`, followed by why. Another package can store `Now` in `now`, since `Now` is exported and has the type of `Clock`. No `Variant` can be checked across a call through a value, so the cycle cannot be shown to end. Give the wrapper another signature, or keep it unexported and do not use it as a value.
+`Now` is reported with `this call may not end: Now calls now() at globals.go:372:9, which may run Now`, followed by why. Another package can store `Now` in `now`, since `Now` is exported and has the type of `Clock`. No `Variant` can be checked across a call through a value, so the cycle cannot be shown to end. Give the wrapper another signature, or keep it unexported and do not use it as a value.
 
 Some things cannot be stored in such a variable:
 
@@ -4597,7 +4598,7 @@ func SeenCount() (n int) {
 
 ```text
 vego: invariant of tagsSeen, tagCount may not hold on return: tagCount = |tagsSeen|; it was not kept from entry, since |tagsSeen| may
-have changed: the assignment to tagsSeen[name] at globals.go:279:3 may write it
+have changed: the assignment to tagsSeen[name] at globals.go:293:3 may write it
 ```
 
 `vego` assumes the invariant when a function that names one of the variables, in its body or its contract, is called, and after a call that may have changed them. `vego` proves the invariant in three places:

@@ -982,9 +982,12 @@ func (pv *pkgVerifier) readable(variable *types.Var) bool {
 func (pv *pkgVerifier) checkValueInitialisers() {
 	pv.initWhy, pv.inert, pv.initFacts = map[*types.Var]string{}, map[*types.Var]bool{}, map[*types.Var][]*logic.Term{}
 	pv.loggerMade, pv.loggerInert, pv.loggerUse = map[*types.Var]bool{}, map[*types.Var]bool{}, map[*types.Var]string{}
-	// A package with no function to verify is code that is not verified,
-	// its initialisers included.
-	if !slices.ContainsFunc(pv.order, func(fn *funcInfo) bool { return fn.annotated() }) {
+	// A package with no function to verify and no contract on a type of
+	// its own is code that is not verified, its initialisers included. One
+	// with a contract on a type has values of it that verified code of
+	// another package calls, so what its initialisers make is checked (S3
+	// of F31's coder, built in F32).
+	if !slices.ContainsFunc(pv.order, func(fn *funcInfo) bool { return fn.annotated() }) && len(pv.funcTypes) == 0 && len(pv.ifaceMethods) == 0 {
 		return
 	}
 	check := func(variable *types.Var, task func(v *fnVerifier) bool) {

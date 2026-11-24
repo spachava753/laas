@@ -303,6 +303,13 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		pv.checkInvariantsDeclared()
 		pv.checkGroupsInitialised()
 		pv.checkValueInitialisers()
+		if sp != nil {
+			// What the initialisers showed, for the speculative verifiers,
+			// which take it instead of asking Z3 the same again.
+			sp.inits = &initResults{why: maps.Clone(pv.initWhy), inert: maps.Clone(pv.inert), facts: maps.Clone(pv.initFacts),
+				loggerMade: maps.Clone(pv.loggerMade), loggerInert: maps.Clone(pv.loggerInert)}
+			close(sp.initialised)
+		}
 		pv.exportInvariants()
 		// What the types of this package own, for importing packages.
 		for _, name := range pv.ownsOrder {

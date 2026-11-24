@@ -640,6 +640,8 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	}
 	v.checkRecursion(fn, pre, st, guard, call)
 	written := v.targets(fn, args, st, before)
+	// What the callee never assigns it leaves as it was (S1).
+	written = v.keepUnassigned(fn, written)
 	_, reached := v.reachedTargets(call, fn, st, before)
 	written = append(written, reached...)
 	written = v.dropInert(fn, args, written)

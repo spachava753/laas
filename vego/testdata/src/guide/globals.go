@@ -192,7 +192,21 @@ func addRoot() { routes["/"] = 1 }
 // @Ensures True
 func addTwo() {
 	addRoot()
-	routes["/a"] = 2 // want `^vego: routes\["/a"\] is assigned, which addTwo may not modify: nothing its // @Modifies clauses list is known to cover it; a clause covers what its path referred to when addTwo was called; routes may have been assigned since, by a statement or by a call that lists it, so it may no longer refer to that; a call that keeps it can say so in its contract with routes' = routes$`
+	routes["/a"] = 2
+}
+
+// newRoutes gives routes a new map.
+//
+// @Modifies routes
+// @Ensures routes' != nil
+func newRoutes() { routes = map[string]int{} }
+
+// @Requires routes != nil
+// @Modifies routes
+// @Ensures True
+func addAfterNew() {
+	newRoutes()
+	routes["/a"] = 2 // want `^vego: routes\["/a"\] is assigned, which addAfterNew may not modify: nothing its // @Modifies clauses list is known to cover it; a clause covers what its path referred to when addAfterNew was called; routes may have been assigned since, by a statement or by a call that lists it, so it may no longer refer to that; a call that keeps it can say so in its contract with routes' = routes$`
 }
 
 // @Requires routes != nil
@@ -278,7 +292,7 @@ func markUncounted(name string) {
 	if _, ok := tagsSeen[name]; !ok {
 		tagsSeen[name] = true
 	}
-} // want `^vego: invariant of tagsSeen, tagCount may not hold on return: tagCount = \|tagsSeen\|; it was not kept from entry, since \|tagsSeen\| may have changed: the assignment to tagsSeen\[name\] at globals.go:279:3 may write it$`
+} // want `^vego: invariant of tagsSeen, tagCount may not hold on return: tagCount = \|tagsSeen\|; it was not kept from entry, since \|tagsSeen\| may have changed: the assignment to tagsSeen\[name\] at globals.go:293:3 may write it$`
 
 // SeenCount is not negative.
 //

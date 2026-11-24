@@ -2562,10 +2562,11 @@ guide	guide.YoungestFirst	9	48969	0
 guide	guide.ZeroHead	9	7645	0
 guide	guide.ZeroHeadWrong	9	1836827	1
 guide	guide.Zeros	11	13337	0
+guide	guide.addAfterNew	10	9139	0
 guide	guide.addRoot	6	4895	0
 guide	guide.addRootKept	7	5782	0
-guide	guide.addTwo	11	11553	0
-guide	guide.addTwoKept	11	9931	0
+guide	guide.addTwo	8	7076	0
+guide	guide.addTwoKept	8	7090	0
 guide	guide.count	1	1216	0
 guide	guide.countHit	8	5133	0
 guide	guide.double	4	660	0
@@ -2584,10 +2585,11 @@ guide	guide.logRecord	1	743	0
 guide	guide.lookupTask	11	3765	0
 guide	guide.markSeen	13	25266	0
 guide	guide.markUncounted	8	14305	0
+guide	guide.newRoutes	5	3518	0
 guide	guide.open	3	14391	0
 guide	guide.printLine	9	21330	0
 guide	guide.printLines	11	93175	4
-guide	guide.printTwice	20	98656	0
+guide	guide.printTwice	15	42887	0
 guide	guide.record	1	138	0
 guide	guide.redirect	5	5004	0
 guide	guide.resetAll	5	2937	0
@@ -3500,6 +3502,22 @@ keeps	keepslib.KeepsTwice	1	1640	0
 keeps	keepslib.KeepsUnknown	1	70	0
 keeps	keepslib.Wrap	1	1814	0
 keepslib	keepslib.Handler	3	558	0
+keepsvars	fmt.Fprintln	5	11289	0
+keepsvars	io.Writer.Write	3	7630	0
+keepsvars	keepsvars.Resetter	4	4278	0
+keepsvars	keepsvars.afterDeferred	10	9139	0
+keepsvars	keepsvars.afterHelper	10	9139	0
+keepsvars	keepsvars.afterValue	11	10264	0
+keepsvars	keepsvars.bump	6	4517	0
+keepsvars	keepsvars.bumpTwice	8	6218	0
+keepsvars	keepsvars.deferred	5	3518	0
+keepsvars	keepsvars.printLine	9	21352	0
+keepsvars	keepsvars.printTwice	11	10828	0
+keepsvars	keepsvars.renew	5	3518	0
+keepsvars	keepsvars.setOut	5	5004	0
+keepsvars	keepsvars.the initialiser of counts	0	0	0
+keepsvars	keepsvars.viaHelper	8	5520	0
+keepsvars	keepsvars.viaValue	11	9727	0
 layers	(*sync.Mutex).Lock	1	1652	0
 layers	(*sync.Mutex).Unlock	1	1611	0
 layers	layers.Behind	17	27175	0
@@ -5400,6 +5418,11 @@ trustedwritesclient	trustedwritesclient.Same	4	1866	0
 trustedwritesclient	trustedwritesclient.State	13	21252	0
 trustedwritesclient	trustedwritesclient.StateUnlisted	5	10114	0
 trustedwritesclient	trustedwritesclient.Ticked	3	188	0
+typeonlyclient	typeonlyclient.Positive	1	111	0
+typeonlyclient	typeonlyclient.PositiveGood	6	856	0
+typeonlylib	typeonlylib.Clock	3	1025	0
+typeonlylib	typeonlylib.the initialiser of Good	1	33	0
+typeonlylib	typeonlylib.the initialiser of Now	1	139	0
 unread	unread.Other	2	61	0
 unread	unread.Value	2	61	0
 unsafeuse	unsafelib.Run	1	384	0
@@ -5545,12 +5568,12 @@ varcode	varcode.fires	12	10553	0
 varcode	varcode.firesUnlisted	6	2631	0
 varcode	varcode.keep	5	4747	0
 varcode	varcode.keeps	8	18255	0
-varcode	varcode.literalKeeps	11	10650	0
+varcode	varcode.literalKeeps	7	6989	0
 varcode	varcode.one	2	69	0
 varcode	varcode.pick	2	784	0
 varcode	varcode.printAll	17	118383	4
-varcode	varcode.printNames	13	60393	0
-varcode	varcode.printOwn	20	104214	0
+varcode	varcode.printNames	9	32076	0
+varcode	varcode.printOwn	15	45208	0
 varcode	varcode.printTo	14	91448	2
 varcode	varcode.printUnlisted	5	13648	0
 varcode	varcode.println	9	21330	0
@@ -5560,7 +5583,7 @@ varcode	varcode.readMore	1	46	0
 varcode	varcode.readPb	1	46	0
 varcode	varcode.readTicks	6	813	0
 varcode	varcode.readTicksExact	6	1082	0
-varcode	varcode.redirectThenKeep	21	52696	0
+varcode	varcode.redirectThenKeep	20	52092	0
 varcode	varcode.setGets	10	2039	0
 varcode	varcode.setMore	13	15017	0
 varcode	varcode.setNames	5	7541	0

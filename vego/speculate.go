@@ -4,15 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"go/types"
+	"maps"
 	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/tools/go/analysis"
-
+	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
+	"golang.org/x/tools/go/analysis"
 )
 
 // The functions of a package are verified one after another, so a run of
@@ -96,6 +97,33 @@ type speculation struct {
 	late    bool
 	ended   *sync.Cond
 	z3      atomic.Pointer[solver.Solver]
+	// initialised is closed once the verification has run the
+	// initialisers of the package, and inits holds what that found, which
+	// a speculative verifier takes instead of asking Z3 the same questions
+	// again (initcalls.go).
+	initialised chan struct{}
+	inits       *initResults
+}
+
+// initResults is what checkValueInitialisers found.
+type initResults struct {
+	why                     map[*types.Var]string
+	inert                   map[*types.Var]bool
+	facts                   map[*types.Var][]*logic.Term
+	loggerMade, loggerInert map[*types.Var]bool
+}
+
+// takeInits gives a speculative verifier what the verification found of the
+// initialisers, once it has, or stops it when the verification ends first.
+func (sp *speculation) takeInits(pv *pkgVerifier) {
+	select {
+	case <-sp.initialised:
+	case <-sp.stop:
+		panic(stopped{})
+	}
+	in := sp.inits
+	pv.initWhy, pv.inert, pv.initFacts = maps.Clone(in.why), maps.Clone(in.inert), maps.Clone(in.facts)
+	pv.loggerMade, pv.loggerInert, pv.loggerUse = maps.Clone(in.loggerMade), maps.Clone(in.loggerInert), map[*types.Var]string{}
 }
 
 // begin registers a speculative verifier, unless the verification of the
@@ -272,7 +300,7 @@ func speculate(pass *analysis.Pass, verifier func(*analysis.Pass) *pkgVerifier, 
 		return listed
 	}
 
-	sp := &speculation{stop: make(chan struct{})}
+	sp := &speculation{stop: make(chan struct{}), initialised: make(chan struct{})}
 	sp.ended = sync.NewCond(&sp.mu)
 	sp.at.Store(-1)
 	for range maxSpeculative {
@@ -309,7 +337,7 @@ func speculate(pass *analysis.Pass, verifier func(*analysis.Pass) *pkgVerifier, 
 			sp.once.Do(func() { sp.next.Store(int64(len(pv.order))) })
 			pv.checkInvariantsDeclared()
 			pv.checkGroupsInitialised()
-			pv.checkValueInitialisers()
+			sp.takeInits(pv)
 			pv.exportInvariants()
 			pv.checkTypeContracts()
 			pv.exportTypeContracts()
