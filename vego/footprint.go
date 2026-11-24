@@ -208,6 +208,11 @@ func (v *fnVerifier) rowAt(rows, home, alloc, pos *logic.Term) (*logic.Term, []*
 			// What existed on entry held only what existed on entry; a home
 			// made since has a footprint this row does not describe.
 			facts = append(facts, logic.Implies(logic.And(logic.Lt(home, v.entryBrk), cellOf(at)), logic.And(logic.Lt(logic.IntLit(0), alloc), logic.Lt(alloc, v.entryBrk))))
+			// No row holds a cell of a struct variable whose address is
+			// closed (K1).
+			if apart := v.apartFromClosed(alloc); apart != nil {
+				facts = append(facts, logic.Implies(cellOf(at), apart))
+			}
 		case v.layers[at.Name] != nil && v.layers[at.Name].follows != nil:
 			// A row that holds the owned field's cell follows what is
 			// stored there: the row of a converted owner grows with it.
@@ -248,6 +253,10 @@ func (v *fnVerifier) rowAt(rows, home, alloc, pos *logic.Term) (*logic.Term, []*
 			facts = append(facts, logic.Implies(kept, logic.Iff(cellOf(at), cellOf(known.prev))))
 			if known.after != nil {
 				facts = append(facts, logic.Implies(cellOf(at), logic.And(logic.Lt(logic.IntLit(0), alloc), logic.Lt(alloc, known.after))))
+			}
+			// Nor does the row of a value the call made (K1).
+			if apart := v.apartFromClosed(alloc); apart != nil {
+				facts = append(facts, logic.Implies(logic.And(logic.Le(known.bound, home), cellOf(at)), apart))
 			}
 			pending = append(pending, known.prev)
 		case v.joins[at.Name] != nil:

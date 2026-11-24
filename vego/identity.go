@@ -590,12 +590,23 @@ func (pv *pkgVerifier) reportSentinelWrites() {
 		which := "package " + strings.Join(slices.Compact(packages), " and package ")
 		relied := "it being the error it was declared with"
 		switch {
+		case strings.HasSuffix(write.Key, closedKey):
+			relied = "it being handed only to trusted functions that neither keep it nor run code that could be handed it"
 		case strings.HasSuffix(write.Key, contentsKey):
 			relied = "what it refers to being only read"
 		case strings.HasSuffix(write.Key, addressKey):
 			relied = "its address never being taken and no directive naming it"
 		case values[write.Key]:
 			relied = "it holding the value it was declared with"
+		}
+		if strings.HasSuffix(write.Key, closedKey) {
+			if write.pos.IsValid() {
+				pv.report(write.pos, "the address of %s is let out here, but proofs in %s rely on %s", write.Name, which, relied)
+				continue
+			}
+			pv.report(pv.pass.Files[0].Package, "the address of %s is let out at %s in package %s, which this package is built with, but proofs in %s rely on %s",
+				write.Name, write.At, write.Package, which, relied)
+			continue
 		}
 		if write.pos.IsValid() {
 			pv.report(write.pos, "%s may be changed here, but proofs in %s rely on %s", write.Name, which, relied)

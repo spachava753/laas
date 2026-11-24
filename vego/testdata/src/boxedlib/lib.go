@@ -3,7 +3,10 @@
 package boxedlib
 
 import (
+	"fmt"
+	"io"
 	"math"
+	"strings"
 	"sync"
 )
 
@@ -53,4 +56,19 @@ func set(c *Config, n int) {
 // @Ensures r = Cfg.N
 func Get() (r int) {
 	return Cfg.N
+}
+
+// Buf is exported and written by its own methods, so its address is
+// closed in this package.
+var Buf strings.Builder
+
+// NoteBuf keeps the length of Buf across the write through w, relying on
+// no writer's footprint holding it.
+//
+// @Requires w != nil And |Buf| <= 100
+// @Modifies Buf, w
+// @Ensures |Buf'| = |Buf| + 1
+func NoteBuf(w io.Writer) {
+	Buf.WriteString("x")
+	fmt.Fprint(w, "y")
 }

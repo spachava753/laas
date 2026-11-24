@@ -639,6 +639,9 @@ type pkgVerifier struct {
 	// addressSite holds, for each variable whose address the package
 	// takes, where it first does.
 	addressSite map[*types.Var]string
+	// openAt holds, for each variable whose address the package takes in
+	// a way that is not closed, why, at the first such use.
+	openAt map[*types.Var]string
 	changeOf   map[*types.Var]string
 	ownChanges map[*types.Var]string
 	escapes    map[*types.Var]string

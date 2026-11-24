@@ -1,7 +1,11 @@
 // Package boxedclient covers what boxedlib changes through its state.
 package boxedclient
 
-import "boxedlib"
+import (
+	"io"
+
+	"boxedlib"
+)
 
 // Listed covers Set through the state of boxedlib.
 //
@@ -51,4 +55,10 @@ func Reads() (r int) {
 // @Ensures True
 func Names() {
 	boxedlib.Set(3)
+}
+
+// Leak lets the address of boxedlib.Buf out, which boxedlib relies on not
+// happening.
+func Leak() io.Writer {
+	return &boxedlib.Buf // want `vego: the address of boxedlib\.Buf is let out here, but proofs in package boxedlib rely on it being handed only to trusted functions that neither keep it nor run code that could be handed it`
 }
