@@ -4064,6 +4064,11 @@ ownstore	ownstore.Store	1	375	0
 paper	paper.Divide	16	5858	0
 paper	paper.SumLoop	20	78975	0
 paper	paper.SumRec	18	88261	0
+pathstore	io.Writer.Write	5	18168	0
+pathstore	pathstore.across	12	23063	0
+pathstore	pathstore.link	6	4970	0
+pathstore	pathstore.relink	6	1295	0
+pathstore	pathstore.spoil	6	1219	0
 reachclient	io.Writer.Write	5	18168	0
 reachclient	reachclient.Around	7	8617	0
 reachclient	reachclient.AroundListed	11	21935	0
@@ -5073,6 +5078,7 @@ varinv	varinv.Blank	6	2939	0
 varinv	varinv.Divide	3	1678	0
 varinv	varinv.Hits	2	1093	0
 varinv	varinv.NamesCount	2	644	0
+varinv	varinv.Peek	6	4716	0
 varinv	varinv.Size	2	1722	0
 varinv	varinv.Steps	3	1644	0
 varinv	varinv.askThenPut	9	11140	0
@@ -5085,6 +5091,7 @@ varinv	varinv.init	13	8204	0
 varinv	varinv.init of cache, size	2	1207	0
 varinv	varinv.init of cache2	2	1521	0
 varinv	varinv.init of depth	1	417	0
+varinv	varinv.init of head	3	5063	0
 varinv	varinv.init of hits	1	417	0
 varinv	varinv.init of limit	1	425	0
 varinv	varinv.init of names	1	686	0
@@ -5093,6 +5100,7 @@ varinv	varinv.init of ready	1	599	0
 varinv	varinv.init of step	1	425	0
 varinv	varinv.put	13	25659	0
 varinv	varinv.putThenAsk	14	29061	0
+varinv	varinv.relink	8	8823	0
 varinv	varinv.reprice	11	21537	0
 varinv	varinv.reset	7	4663	0
 varinv	varinv.setLimit	6	4068	0

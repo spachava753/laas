@@ -243,3 +243,34 @@ func writeNegative(w io.Writer) {
 	cache2["a"] = -1
 	w.Write([]byte("x"))
 } // want `^vego: invariant of cache2 may not hold on return: \(Forall k in cache2 : cache2\[k\] >= 0\)`
+
+type node struct {
+	n    int
+	next *node
+}
+
+// @Invariant head != nil And head.next != nil And head.next.n >= 0
+var head = &node{next: &node{n: 1}}
+
+// relink stores, through head's path, memory made where it stands, which
+// keeps the group's memory reached only through head (F36 of the review of
+// part 2).
+//
+// @Requires n >= 0
+// @Modifies head
+// @Ensures True
+func relink(n int) {
+	if head != nil {
+		head.next = &node{n: n}
+	}
+}
+
+// Peek is not negative, by the invariant.
+//
+// @Ensures r >= 0
+func Peek() (r int) {
+	if head == nil || head.next == nil {
+		return 0
+	}
+	return head.next.n
+}

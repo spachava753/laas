@@ -253,6 +253,10 @@ func (pv *pkgVerifier) groupEscape(g *varGroup) string {
 				return true
 			}
 			use := pv.useOf(stack)
+			if pathWritten(pv.info, stack) && !pv.pathStoreFresh(stack) {
+				found = fmt.Sprintf("the store through %s at %s puts there a reference to memory that it did not make where it stands, which something else may hold", variable.Name(), pv.placeOfPos(id.Pos()))
+				return true
+			}
 			if !use.escape || use.change == "is assigned" && pv.assignedFresh(stack) || pathWritten(pv.info, stack) || pv.handedToReader(stack) {
 				return true
 			}
@@ -275,24 +279,69 @@ func (pv *pkgVerifier) assignedFresh(stack []ast.Node) bool {
 		return false
 	}
 	for i, lhs := range assign.Lhs {
-		if lhs != stack[len(stack)-1] {
-			continue
-		}
-		switch rhs := ast.Unparen(assign.Rhs[i]).(type) {
-		case *ast.CompositeLit:
-			return true
-		case *ast.UnaryExpr:
-			_, lit := ast.Unparen(rhs.X).(*ast.CompositeLit)
-			return rhs.Op == token.AND && lit
-		case *ast.CallExpr:
-			id, ok := ast.Unparen(rhs.Fun).(*ast.Ident)
-			builtin, isBuiltin := pv.info.Uses[id].(*types.Builtin)
-			return ok && isBuiltin && (builtin.Name() == "make" || builtin.Name() == "new")
-		case *ast.Ident:
-			return pv.info.Types[rhs].IsNil()
+		if lhs == stack[len(stack)-1] {
+			return pv.madeHere(assign.Rhs[i])
 		}
 	}
 	return false
+}
+
+// madeHere reports whether an expression makes the memory it refers to
+// where it stands, or refers to none: a composite literal, its address,
+// make, new, or nil.
+func (pv *pkgVerifier) madeHere(e ast.Expr) bool {
+	switch rhs := ast.Unparen(e).(type) {
+	case *ast.CompositeLit:
+		return true
+	case *ast.UnaryExpr:
+		_, lit := ast.Unparen(rhs.X).(*ast.CompositeLit)
+		return rhs.Op == token.AND && lit
+	case *ast.CallExpr:
+		id, ok := ast.Unparen(rhs.Fun).(*ast.Ident)
+		builtin, isBuiltin := pv.info.Uses[id].(*types.Builtin)
+		return ok && isBuiltin && (builtin.Name() == "make" || builtin.Name() == "new")
+	case *ast.Ident:
+		return pv.info.Types[rhs].IsNil()
+	}
+	return false
+}
+
+// pathStoreFresh reports, for a use that is the root of a path a statement
+// writes, whether what the statement stores there refers to no memory or
+// to memory made where it stands (F36 of the review of part 2): a store of
+// a reference to memory that something else holds would let a write
+// through that reference reach the group's memory.
+func (pv *pkgVerifier) pathStoreFresh(stack []ast.Node) bool {
+	for i := len(stack) - 2; i >= 0; i-- {
+		if r, ok := stack[i].(*ast.RangeStmt); ok {
+			for _, target := range []ast.Expr{r.Key, r.Value} {
+				if target != nil && slices.Contains(stack, ast.Node(target)) {
+					t := pv.info.TypeOf(target)
+					return t == nil || !holdsMemory(t)
+				}
+			}
+			continue
+		}
+		assign, ok := stack[i].(*ast.AssignStmt)
+		if !ok {
+			continue
+		}
+		if len(assign.Lhs) != len(assign.Rhs) {
+			return false
+		}
+		for j, lhs := range assign.Lhs {
+			if !slices.Contains(stack, ast.Node(lhs)) {
+				continue
+			}
+			if t := pv.info.TypeOf(lhs); t == nil || !holdsMemory(t) {
+				return true
+			}
+			return pv.madeHere(assign.Rhs[j])
+		}
+		return true
+	}
+	// An increment, a delete, or a range target stores no reference.
+	return true
 }
 
 // placeOfPos spells a position as file:line.
