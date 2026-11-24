@@ -21,3 +21,20 @@ var Table = []int{1}
 
 // Poke has an entry that lists nothing, though it writes Table[0].
 func Poke() { Table[0] = 5 }
+
+var handedOnly int
+
+// SetHanded sets handedOnly, and is not verified; a value of type
+// func(int) may be it.
+func SetHanded(k int) { handedOnly = k }
+
+// Apply runs f once, under an entry that lists f under runs and writes
+// nothing itself. What f writes is counted at each call, so the entry is
+// not reported for it (F27 of the review of the end of part 1).
+func Apply(f func(k int)) { f(1) }
+
+var tickHook = func() { Ticks++ }
+
+// TickHook runs a hook of its package, under an entry that lists nothing;
+// the hook is no code a caller hands it, so the entry is reported.
+func TickHook() { tickHook() }

@@ -4177,19 +4177,19 @@ An assignment in such a package to a variable that a proof relies on is reported
 A verified function lists the variables of its package that it changes in a `Modifies` clause, as it lists a parameter. `x'` in an `Ensures` clause is the value on return, and `x` the value when the function is called:
 
 ```go
-// setServed sets the count.
+// SetServed sets the count.
 //
 // @Modifies served
 // @Ensures served' = n
-func setServed(n int) {
+func SetServed(n int) {
 	served = n
 }
 
-// setSize writes what a variable refers to.
+// SetSize writes what a variable refers to.
 //
 // @Modifies sizes
 // @Ensures sizes'[1] = n
-func setSize(n int) {
+func SetSize(n int) {
 	sizes[1] = n
 }
 ```
@@ -4199,32 +4199,32 @@ Both verify. `Modifies served` covers the variable itself and, for a variable th
 A caller of a function that changes a variable changes it too, and must list it:
 
 ```go
-// resetAll calls setServed, and lists what it changes.
+// resetAll calls SetServed, and lists what it changes.
 //
 // @Modifies served
 // @Ensures served' = 0
 func resetAll() {
-	setServed(0)
+	SetServed(0)
 }
 
-// resetUnlisted assigns a variable and does not list it.
+// ResetUnlisted assigns a variable and does not list it.
 //
 // @Ensures True
-func resetUnlisted() {
+func ResetUnlisted() {
 	served = 0
 }
 
-// callsReset calls setServed and does not list what it changes.
+// CallsReset calls SetServed and does not list what it changes.
 //
 // @Ensures True
-func callsReset() {
-	setServed(0)
+func CallsReset() {
+	SetServed(0)
 }
 ```
 
 ```text
-vego: served is assigned, which resetUnlisted may not modify; list it in a // @Modifies clause
-vego: setServed may modify served, which callsReset may not modify; list it in a // @Modifies clause
+vego: served is assigned, which ResetUnlisted may not modify; list it in a // @Modifies clause
+vego: SetServed may modify served, which CallsReset may not modify; list it in a // @Modifies clause
 ```
 
 So a function that lists no variable leaves every variable as it was, and a caller keeps what it knew of them across the call. An entry that no write needs is reported, as for a parameter:
@@ -4330,7 +4330,7 @@ vego: f may modify visits, which Walk may not modify; code of this package that 
 
 What code of another package does through a value is not seen. `vego` assumes that a function value or an interface value made by code that is not verified changes no package-level variable that the contract of its type does not list, also not by calling a function that does. See [What a proof assumes](#what-a-proof-assumes).
 
-A `Requires` clause of a function that code of another package can call may not read a variable that is not exported. Such a function is exported, is a method with an exported name, or is used as a value. A caller in another package cannot name the condition, establish it, or see it fail:
+A `Requires` clause of a function that code of another package can call may not read a variable that is not exported. Such a function is exported, is a method with an exported name, or is used as a value. A caller in another package cannot name the condition, establish it, or see it fail. State such a property as an invariant of the variable instead, as described in [An invariant of variables](#an-invariant-of-variables):
 
 ```go
 var nextTicket int
@@ -4370,6 +4370,70 @@ func TicketChecked() (n int, ok bool) {
 ```
 
 A function of the package that code of another package cannot call may require such a condition, and its callers prove it as any other `Requires` clause.
+
+### An invariant of variables
+
+An `Invariant` annotation in the doc comment of a `var` declaration states a property of the variables that the declaration declares. A parenthesised block declares a group of variables that go together:
+
+```go
+// @Invariant 0 <= tagCount And tagCount = |tagsSeen|
+var (
+	tagsSeen = map[string]bool{}
+	tagCount int
+)
+
+// markSeen records a tag and counts it.
+//
+// @Requires tagCount < 1000000
+// @Modifies tagsSeen, tagCount
+// @Ensures True
+func markSeen(name string) {
+	if _, ok := tagsSeen[name]; ok {
+		return
+	}
+	tagsSeen[name] = true
+	tagCount++
+}
+
+// markUncounted records a tag and does not count it.
+//
+// @Modifies tagsSeen
+// @Ensures True
+func markUncounted(name string) {
+	if _, ok := tagsSeen[name]; !ok {
+		tagsSeen[name] = true
+	}
+}
+
+// SeenCount is not negative.
+//
+// @Ensures n >= 0
+func SeenCount() (n int) {
+	return tagCount
+}
+```
+
+`markSeen` and `SeenCount` verify. `SeenCount` relies on the invariant for `n >= 0`. `markUncounted` is reported:
+
+```text
+vego: invariant of tagsSeen, tagCount may not hold on return: 0 <= tagCount And tagCount = |tagsSeen|
+```
+
+`vego` assumes the invariant when a function that touches the variables is called. Such a function tagsSeen one of them, in its body or its contract, or calls a function that does. `vego` proves the invariant in three places:
+
+- when the package is initialised, from what the declarations give the variables;
+- on return of every function whose `Modifies` covers one of the variables;
+- before every call that may reach a function that touches them, also through a function value or an interface value.
+
+Between those points the invariant may be broken, as it is in `markSeen` between the two writes.
+
+The invariant can be relied on only when nothing else changes the variables. It is refused, with a message at the annotation, in these cases:
+
+- a variable of the group is exported;
+- a function that is not verified changes one, also a test or an `init` function without a contract;
+- a use lets a reference to what one refers to out of it, as returning the map or passing it to a function does. A write through that reference could break the invariant without naming the variable.
+
+A test that resets such a variable calls a verified function of the package that does it.
 
 ### Variables of other packages
 

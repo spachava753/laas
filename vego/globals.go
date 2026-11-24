@@ -919,7 +919,7 @@ func (v *fnVerifier) fixedValue(sink *state, variable *types.Var) (value, string
 	}
 	v.fixedMet[errorKey(final)] = fixedMet{val: val, typ: variable.Type()}
 	readOnly := v.readOnlyHere(final)
-	if !readOnly && known.Contents {
+	if !readOnly && known.Contents && !v.groupReading && v.groupOf[final] == nil {
 		v.noteLostContents(final)
 	}
 	if readOnly {
@@ -1128,7 +1128,7 @@ func (v *fnVerifier) knownConstantTerm(sink *state, known knownValue, leaf *logi
 // package-level variable that is not an error.
 func (e *specEnv) locateVariable(variable *types.Var, steps []logic.Step, when logic.When) (reached, error) {
 	spelled := e.v.spelling(variable)
-	if e.v.isAssigned(variable) {
+	if e.v.isAssigned(variable) || e.v.initStorage[variable] {
 		return e.locateAssigned(variable, steps, when)
 	}
 	if when == logic.Old {
@@ -1344,7 +1344,6 @@ type fixedMet struct {
 	val value
 	typ types.Type
 }
-
 
 // modifiesVariableOf returns the package-level variable that the path of a
 // Modifies entry starts from, as the function's file spells it, or nil.

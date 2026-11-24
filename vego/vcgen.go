@@ -258,6 +258,11 @@ type fnVerifier struct {
 	// writesOf holds what each node of the call graph writes of the
 	// package-level variables of the package; see nodeWrites.
 	writesOf map[*callNode][]*types.Var
+	// initStorage holds the variables that the check of a group's
+	// initialisation reads from storage, fixed ones too (varinv.go).
+	initStorage map[*types.Var]bool
+	// groupReading is set while the invariants of a group are read.
+	groupReading bool
 	// tieLater is set when tieFailures was put off; see verified.
 	tieLater bool
 	// typedReads, when set, receives the values whose type facts reads
@@ -430,6 +435,15 @@ func (v *fnVerifier) enter() *state {
 	pre := &specEnv{v: v, sink: st, fn: fn, args: v.entry, now: memory{}}
 	for _, c := range fn.requires {
 		v.assumeKeeping(st, c, pre, "entry")
+	}
+	// The invariants of the groups the function names hold when it is
+	// called (V3). One it reaches only through calls it cannot break, since
+	// its frame covers none of the group's variables, so it needs nothing of
+	// them.
+	for _, g := range v.groupsNamed(fn) {
+		for _, t := range v.groupHolds(g, st, memory{}) {
+			st.assume(t)
+		}
 	}
 	v.frame = v.targets(fn, v.entry, st, memory{})
 	v.used = make([]bool, len(v.frame))

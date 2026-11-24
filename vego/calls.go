@@ -783,8 +783,20 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	if fn.calls.len() > 0 {
 		atCall = st.clone()
 	}
+	// The invariants of the groups the call may assume hold before it, and
+	// those of the groups it may change hold after it (V3).
+	v.proveGroups(st, guard, v.groupsCovered(v.frame, v.callGroups(call, fn)), call.Pos(), "before the call to "+name+", which may assume it")
 	for _, t := range written {
 		v.havoc(st, t, guard)
+	}
+	if changed := v.groupsCovered(written, v.varGroups); len(changed) > 0 {
+		for _, g := range changed {
+			if g.refused == "" {
+				for _, t := range v.groupHolds(g, st, st.mem) {
+					st.assume(logic.Implies(logic.And(guard...), t))
+				}
+			}
+		}
 	}
 	var applied map[*types.Var]*logic.Term
 	if fn.calls.len() > 0 {

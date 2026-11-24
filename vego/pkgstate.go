@@ -359,6 +359,11 @@ func (pv *pkgVerifier) exportWrites() {
 		var stack []ast.Node
 		var current []*writes
 		owner := map[ast.Node]bool{}
+		// The parameters of the enclosing declared function that its
+		// trusted entry lists under runs: the code they carry is the
+		// caller's, which the caller counts at the call (F27 of the review
+		// of the end of part 1).
+		var handed map[*types.Var]bool
 		ast.Inspect(file, func(n ast.Node) bool {
 			if n == nil {
 				if owner[stack[len(stack)-1]] {
@@ -375,6 +380,22 @@ func (pv *pkgVerifier) exportWrites() {
 					byFunc[obj] = w
 					current = append(current, w)
 					owner[n] = true
+					handed = map[*types.Var]bool{}
+					if entry := pv.entryFor(obj.FullName()); entry != nil {
+						sig := obj.Type().(*types.Signature)
+						params := slices.Collect(sig.Params().Variables())
+						if sig.Recv() != nil {
+							params = append(params, sig.Recv())
+						}
+						for _, item := range entry.runs {
+							for _, param := range params {
+								if param.Name() == item.text {
+									handed[param] = true
+								}
+							}
+						}
+						pv.handedLocals(n.Body, handed)
+					}
 				}
 			case *ast.FuncLit:
 				// A literal's writes are its function's too, and its own as
@@ -392,6 +413,9 @@ func (pv *pkgVerifier) exportWrites() {
 					case callee != nil:
 						w.calls = append(w.calls, callee.Origin())
 					default:
+						if root := pv.rootVar(n.Fun); root != nil && handed[root] {
+							break
+						}
 						if tv, ok := pv.info.Types[n.Fun]; ok && !tv.IsType() && !tv.IsBuiltin() {
 							if sig, ok := tv.Type.Underlying().(*types.Signature); ok {
 								w.values = append(w.values, sig)
@@ -676,4 +700,72 @@ func (v *fnVerifier) fixedVariableAt(ref *logic.Term) *types.Var {
 		}
 	}
 	return nil
+}
+
+// rootVar returns the variable a path of fields, elements, and pointers
+// starts from, or nil.
+func (pv *pkgVerifier) rootVar(e ast.Expr) *types.Var {
+	for {
+		switch x := ast.Unparen(e).(type) {
+		case *ast.Ident:
+			variable, _ := pv.info.Uses[x].(*types.Var)
+			return variable
+		case *ast.SelectorExpr:
+			e = x.X
+		case *ast.IndexExpr:
+			e = x.X
+		case *ast.StarExpr:
+			e = x.X
+		default:
+			return nil
+		}
+	}
+}
+
+// handedLocals adds to handed the local variables of a body that hold
+// what is read from a handed variable: assigned or ranged from a path that
+// starts at one, to a fixed point.
+func (pv *pkgVerifier) handedLocals(body *ast.BlockStmt, handed map[*types.Var]bool) {
+	local := func(e ast.Expr) *types.Var {
+		id, ok := ast.Unparen(e).(*ast.Ident)
+		if !ok {
+			return nil
+		}
+		variable, _ := pv.info.ObjectOf(id).(*types.Var)
+		if variable == nil || variable.Parent() == nil || variable.Pkg() == nil || variable.Parent() == variable.Pkg().Scope() {
+			return nil
+		}
+		return variable
+	}
+	for changed := true; changed; {
+		changed = false
+		mark := func(target ast.Expr) {
+			if variable := local(target); variable != nil && !handed[variable] {
+				handed[variable] = true
+				changed = true
+			}
+		}
+		ast.Inspect(body, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.AssignStmt:
+				if len(n.Lhs) == len(n.Rhs) {
+					for i, rhs := range n.Rhs {
+						if root := pv.rootVar(rhs); root != nil && handed[root] {
+							mark(n.Lhs[i])
+						}
+					}
+				}
+			case *ast.RangeStmt:
+				if root := pv.rootVar(n.X); root != nil && handed[root] {
+					if n.Key != nil {
+						mark(n.Key)
+					}
+					if n.Value != nil {
+						mark(n.Value)
+					}
+				}
+			}
+			return true
+		})
+	}
 }

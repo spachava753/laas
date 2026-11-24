@@ -68,3 +68,17 @@ func Poked() (same bool) {
 	trustedwrites.Poke() // want `^vego: the trusted contract of Poke does not list trustedwrites.Table, which its body writes at lib.go:\d+; an entry lists what its function changes, as in modifies: \[Table\]$`
 	return trustedwrites.Table[0] == a
 }
+
+// Applies hands Apply a literal that writes nothing; Apply's entry is true.
+//
+// @Ensures True
+func Applies() {
+	trustedwrites.Apply(func(k int) {})
+}
+
+// Hooked calls TickHook, whose entry does not list what its hook writes.
+//
+// @Ensures True
+func Hooked() {
+	trustedwrites.TickHook() // want `^vego: the trusted contract of TickHook does not list trustedwrites.Table, which its body writes at lib.go:\d+ in code that a call through a value may run; an entry lists what its function changes, as in modifies: \[Table\]$` `^vego: the trusted contract of TickHook does not list trustedwrites.Ticks, which its body writes at lib.go:\d+ in code that a call through a value may run; an entry lists what its function changes, as in modifies: \[Ticks\]$`
+}

@@ -2222,6 +2222,18 @@ trusted:
     reason: Test helper whose entry is false on purpose; it writes Table[0].
     modifies: []
 
+  trustedwrites.TickHook:
+    reason: Test helper whose entry is false on purpose; its hook writes Ticks.
+    modifies: []
+
+  trustedwrites.Apply:
+    reason: Test helper that runs f once and writes nothing itself.
+    runs: [f]
+    calls:
+      f(k):
+        requires: ["True"]
+    modifies: []
+
 # States of interfaces of another module, and contracts that speak of them.
 state:
   ifacestatelib.Conn:

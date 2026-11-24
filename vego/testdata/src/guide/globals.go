@@ -106,42 +106,42 @@ func Client() (r bool) {
 	return http.DefaultClient != nil // want `vego: cannot verify Client: http.DefaultClient has type \*net/http.Client, which can hold a function value, an interface value, an error, a channel, or an unsafe.Pointer; package-level variables of such types are not supported yet`
 }
 
-// setServed sets the count.
+// SetServed sets the count.
 //
 // @Modifies served
 // @Ensures served' = n
-func setServed(n int) {
+func SetServed(n int) {
 	served = n
 }
 
-// setSize writes what a variable refers to.
+// SetSize writes what a variable refers to.
 //
 // @Modifies sizes
 // @Ensures sizes'[1] = n
-func setSize(n int) {
+func SetSize(n int) {
 	sizes[1] = n
 }
 
-// resetAll calls setServed, and lists what it changes.
+// resetAll calls SetServed, and lists what it changes.
 //
 // @Modifies served
 // @Ensures served' = 0
 func resetAll() {
-	setServed(0)
+	SetServed(0)
 }
 
-// resetUnlisted assigns a variable and does not list it.
+// ResetUnlisted assigns a variable and does not list it.
 //
 // @Ensures True
-func resetUnlisted() {
-	served = 0 // want `^vego: served is assigned, which resetUnlisted may not modify; list it in a // @Modifies clause$`
+func ResetUnlisted() {
+	served = 0 // want `^vego: served is assigned, which ResetUnlisted may not modify; list it in a // @Modifies clause$`
 }
 
-// callsReset calls setServed and does not list what it changes.
+// CallsReset calls SetServed and does not list what it changes.
 //
 // @Ensures True
-func callsReset() {
-	setServed(0) // want `^vego: setServed may modify served, which callsReset may not modify; list it in a // @Modifies clause$`
+func CallsReset() {
+	SetServed(0) // want `^vego: SetServed may modify served, which CallsReset may not modify; list it in a // @Modifies clause$`
 }
 
 // listsSizes names a variable in Modifies.
@@ -247,4 +247,40 @@ func countHit() {
 	if hits < math.MaxInt {
 		hits++
 	}
+}
+
+// @Invariant 0 <= tagCount And tagCount = |tagsSeen|
+var (
+	tagsSeen = map[string]bool{}
+	tagCount int
+)
+
+// markSeen records a tag and counts it.
+//
+// @Requires tagCount < 1000000
+// @Modifies tagsSeen, tagCount
+// @Ensures True
+func markSeen(name string) {
+	if _, ok := tagsSeen[name]; ok {
+		return
+	}
+	tagsSeen[name] = true
+	tagCount++
+}
+
+// markUncounted records a tag and does not count it.
+//
+// @Modifies tagsSeen
+// @Ensures True
+func markUncounted(name string) {
+	if _, ok := tagsSeen[name]; !ok {
+		tagsSeen[name] = true
+	}
+} // want `^vego: invariant of tagsSeen, tagCount may not hold on return: 0 <= tagCount And tagCount = \|tagsSeen\|$`
+
+// SeenCount is not negative.
+//
+// @Ensures n >= 0
+func SeenCount() (n int) {
+	return tagCount
 }

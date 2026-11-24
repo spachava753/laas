@@ -1954,6 +1954,7 @@ guide	guide.BuildThenWrite	31	184787	0
 guide	guide.Bump	9	14338	0
 guide	guide.ByTag	30	291192	12
 guide	guide.CallsHelper	1	111	0
+guide	guide.CallsReset	2	744	0
 guide	guide.Cell	7	9786	0
 guide	guide.CheckEach	3	128	0
 guide	guide.Clamp	7	799	0
@@ -2186,6 +2187,7 @@ guide	guide.ReportJSON	39	374662	3
 guide	guide.ReportOnce	36	121706	0
 guide	guide.Reserve	13	1620	0
 guide	guide.Reset	12	9299	0
+guide	guide.ResetUnlisted	2	237	0
 guide	guide.Rounds	12	8683	0
 guide	guide.Row	1	3115	0
 guide	guide.RowJSON	39	1067946	0
@@ -2198,11 +2200,14 @@ guide	guide.SamePricer	1	744	0
 guide	guide.Save	13	29339	0
 guide	guide.SaveUnlisted	13	31363	0
 guide	guide.SearchLocked	21	38551	0
+guide	guide.SeenCount	2	1712	0
 guide	guide.ServeRow	41	545792	10
 guide	guide.Served	1	46	0
 guide	guide.Service	1	917	0
 guide	guide.SetBelow	10	15773	0
 guide	guide.SetMax	7	5364	0
+guide	guide.SetServed	5	3144	0
+guide	guide.SetSize	7	2744	0
 guide	guide.Shift	9	28808	0
 guide	guide.Show	1	514	0
 guide	guide.ShowAll	1	521	0
@@ -2297,7 +2302,6 @@ guide	guide.addRoot	6	4895	0
 guide	guide.addRootKept	7	5782	0
 guide	guide.addTwo	11	11553	0
 guide	guide.addTwoKept	11	9931	0
-guide	guide.callsReset	2	744	0
 guide	guide.count	1	1216	0
 guide	guide.countHit	8	5133	0
 guide	guide.double	4	660	0
@@ -2308,17 +2312,17 @@ guide	guide.fill	9	12437	0
 guide	guide.filled	10	12998	0
 guide	guide.five	2	61	0
 guide	guide.grow	14	8600	0
+guide	guide.init of tagsSeen, tagCount	2	1207	0
 guide	guide.isSeparator	2	153	0
 guide	guide.listsSizes	1	453	0
 guide	guide.logNumber	3	927	0
 guide	guide.logRecord	1	743	0
 guide	guide.lookupTask	11	3765	0
+guide	guide.markSeen	15	27487	0
+guide	guide.markUncounted	10	14204	0
 guide	guide.open	3	14391	0
 guide	guide.record	1	138	0
 guide	guide.resetAll	5	2937	0
-guide	guide.resetUnlisted	2	237	0
-guide	guide.setServed	5	3144	0
-guide	guide.setSize	7	2744	0
 guide	guide.small	2	207	0
 guide	guide.teeRecorder	1	2911	0
 guide	guide.tell	1	70	0
@@ -4837,16 +4841,20 @@ trust	trust.usesPredicate	0	0	0
 trust	trust.writesSixtyFive	5	15990	2
 trust	trust.wrongModifies	0	0	0
 trust	trust.wrongName	0	0	0
+trustedwritesclient	trustedwrites.Apply	1	139	0
 trustedwritesclient	trustedwrites.Poke	1	70	0
 trustedwritesclient	trustedwrites.Tick	1	70	0
+trustedwritesclient	trustedwrites.TickHook	1	70	0
 trustedwritesclient	trustedwrites.TickListed	1	724	0
-trustedwritesclient	trustedwrites.TickState	1	2087	0
+trustedwritesclient	trustedwrites.TickState	1	2510	0
+trustedwritesclient	trustedwritesclient.Applies	3	238	0
 trustedwritesclient	trustedwritesclient.AroundTicked	2	421	0
+trustedwritesclient	trustedwritesclient.Hooked	3	188	0
 trustedwritesclient	trustedwritesclient.Listed	7	4882	0
 trustedwritesclient	trustedwritesclient.Poked	9	4706	0
 trustedwritesclient	trustedwritesclient.Same	4	1866	0
-trustedwritesclient	trustedwritesclient.State	10	14370	0
-trustedwritesclient	trustedwritesclient.StateUnlisted	4	6427	0
+trustedwritesclient	trustedwritesclient.State	13	21252	0
+trustedwritesclient	trustedwritesclient.StateUnlisted	5	10114	0
 trustedwritesclient	trustedwritesclient.Ticked	3	188	0
 unread	unread.Other	2	61	0
 unread	unread.Value	2	61	0
@@ -5040,6 +5048,23 @@ variadic	variadic.bump	10	7277	0
 variadic	variadic.countAll	2	607	0
 variadic	variadic.join	1	4825	0
 variadic	variadic.report	1	736	0
+varinv	io.Writer.Write	5	18168	0
+varinv	varinv.Divide	3	1666	0
+varinv	varinv.Hits	2	1087	0
+varinv	varinv.Size	2	1712	0
+varinv	varinv.askThenPut	15	15397	0
+varinv	varinv.forget	10	14438	0
+varinv	varinv.hit	9	6182	0
+varinv	varinv.init of cache, size	2	1207	0
+varinv	varinv.init of hits	1	417	0
+varinv	varinv.init of limit	1	425	0
+varinv	varinv.init of ready	1	599	0
+varinv	varinv.put	15	27922	0
+varinv	varinv.putThenAsk	16	31204	0
+varinv	varinv.reset	6	3757	0
+varinv	varinv.setLimit	6	4044	0
+varinv	varinv.writeBroken	12	12740	0
+varinvbad	varinvbad.Table	1	46	0
 vouched	vouched.AtEnd	5	7101	0
 vouched	vouched.AtEndUnvouched	4	5537	0
 vouched	vouched.AtEndWrong	5	7445	0

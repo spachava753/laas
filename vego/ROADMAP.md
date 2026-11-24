@@ -1115,10 +1115,36 @@ Repairs after the review of step 3 (F20 to F23), and step 4 of part 1: trusted e
 - **F24 and F25 (review of step 4).**
   - **F24.** The check of a trusted entry reports at every use, for every variable a proof can read whose storage the body or a callee assigns, or whose memory it writes through the variable's path (`pathWritten`: `Table[0] = 5`, `cfg.n++`, `delete(m, k)`). It no longer asks that the calling function read the variable. A use that only hands a reference on is not counted. Programs: `trustedwritesclient.Ticked` and `Poked`.
   - **F25.** `exportWrites` follows the calls without a static callee by the call graph's rule, computed from the package's own declarations: a call through a function value reaches every function, method value, and literal of the package used as a value of an identical signature and every exported function of it; a call of an interface method reaches every method of that name and signature of the package. Closed across packages by the facts, as before. Giving such a call what the whole package writes was tried first: through `runtime`, it made every shipped entry of `fmt` write `runtime.MemProfileRate`. Programs: `dynlib`, `dynhook`, and `dyniface`. Wrong versions caught: calls through values not followed (`dynhook.Around` verifies), interface methods not followed (`dyniface.Around`), and writes through a path not counted (`Poked`); the closure over callees dropped was caught by the reviewer (`Same`).
-  - **What F24 cost the guide.** Its trusted `count` and `Fire` run callbacks, which could be any exported writer of matching signature, so the guide's `SetServed`, `SetSize`, `ResetUnlisted`, and `CallsReset` became unexported.
+  - **F27 (review of the end of part 1).** The writes a trusted function's body publishes leave out its calls through a parameter that its entry lists under `runs`. That code is the caller's, which the caller counts at the call from the call's sites. Before, the guide's trusted `count` and `Fire` were reported as writing what any exported `func(int)` of the guide writes, and the guide's setters had been made unexported to hide that. They are back. Program: `trustedwritesclient.Applies`, a true entry that is not reported.
 - **The trial and the time at the end of part 1.**
   - **The trial:** 74 of 152, as before. The one diagnostic that changed is `laascmd.main`, which reads `os.Args` now and stops at `os.Args[1:]`'s bound and at `os.Exit` (item 8). `nodelist.println`, `allpaths`, and the `digraph` command wait for part 3: `stdout` and `stdin` are interface values.
   - **The time:** `go test -count=1 ./vego/...` back to back on an idle machine took 161 s at the base and 163 s at the end of step 4.
+
+Built in step 1 of part 2 (`varinv.go`): invariants of package-level variables.
+
+- **The declaration.** An `Invariant` in the doc comment of a `var` declaration holds of the variables of that declaration: the spec, or the parenthesised block, which is the group (`varDocumented`, `addVarInvariant`).
+- **Refused at the declaration** (`checkVarGroups`), each with a message that says why:
+  - a variable that is exported;
+  - one whose address is taken, that a directive names, or that is an error;
+  - one that a function that is not verified changes, an `init` or a test without a contract included, or code outside every function (`unverifiedWriter`, D2);
+  - one that refers to memory and has a use that lets a reference to it out, as returning it or handing it to a call (`groupEscape`). Reads, writes through its path, and assignments of memory made where it stands are allowed. That is narrower than the design's rule, which would allow handing it to a verified callee that keeps nothing; it is not built.
+  - a group with an initialiser in a package with hidden init code.
+- **Initialisation** (`checkGroupsInitialised`, run beside `checkInvariantsDeclared` by the verification and by speculative verifiers alike). Each variable of the group holds what its initialiser evaluates to, run as code by the verifier, or its zero value, and the invariant must hold of that. While it runs, a fixed variable of the group is read from storage (`initStorage`).
+- **Where the invariant is assumed and proved.**
+  - **Assumed** on entry of a function that names a variable of the group in its body or contract (`groupsNamed`), and after a call whose targets cover one.
+  - **Proved** on return of a function whose frame covers one (`atReturn`), and before a call that may reach a function that touches the group (`callGroups`: a static callee of the package that touches it, by the call graph's closure, or what the call graph's edges of a call through a value, an interface method, or code handed to a trusted function reach), when the calling function's frame covers the group. A function whose frame covers none of the group's variables cannot break the invariant, so it needs neither the assumption on entry nor the proofs before calls. Proving them there made every function of the guide whose calls reach the guide's exported getter assume the invariant, at up to 27 times the cost.
+- **Not built:**
+  - a frame of the invariant, which is proved again by Z3, with the same terms where nothing changed;
+  - the reach rule's allowance for a verified callee that keeps nothing;
+  - initialisers that call functions;
+  - `init` functions with a contract, which are verified as any function of the package and so must assume the invariant on entry, which the declarations give (to be tested).
+- **Programs:**
+  - `varinv`, both directions: a cache and its size, a counter, a limit used as a divisor, a broken writer, a call while broken, a write through a writer that reads the counter while broken, and an invariant the declaration does not give;
+  - `varinvbad`, the refusals;
+  - the guide's `markSeen` and `markUncounted`.
+
+  The note on lost contents is not added for a variable of a group, whose contents are reached only through it.
+- **Cost:** no row of the base moved.
 
 Not built yet:
 

@@ -740,6 +740,9 @@ func (v *fnVerifier) returnStmt(s *ast.ReturnStmt, st *state) {
 // atReturn checks the postcondition in a final state, once the results
 // have been assigned and the deferred calls have run.
 func (v *fnVerifier) atReturn(st *state, results []value, pos token.Pos) {
+	// A function that may have changed a group restores its invariants
+	// (V3).
+	v.proveGroups(st, nil, v.groupsCovered(v.frame, v.varGroups), pos, "on return")
 	// The return is recorded with the branches taken to get here, as a
 	// possible failure, a possible success, or both; see tieFailures.
 	// A return fails if any of its errors is one and succeeds if none is.

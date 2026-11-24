@@ -300,6 +300,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			sp = speculate(pass, verifier, trustPath)
 		}
 		pv.checkInvariantsDeclared()
+		pv.checkGroupsInitialised()
 		pv.exportInvariants()
 		// What the types of this package own, for importing packages.
 		for _, name := range pv.ownsOrder {
@@ -645,6 +646,13 @@ type pkgVerifier struct {
 	asValues map[types.Object]bool
 	// ownCovers is what the state of the package covers; see covers.
 	ownCovers []string
+	// varGroups are the groups of package-level variables with invariants,
+	// groupOf the group of each variable, and touched the groups each
+	// function touches (varinv.go).
+	varGroups []*varGroup
+	groupOf   map[*types.Var]*varGroup
+	touched   map[*funcInfo][]*varGroup
+	touchedAt map[*callNode]map[*varGroup]bool
 	// fixed holds what is known of the package-level variables of the
 	// package that are not errors and that nothing changes, fixedOf what
 	// other packages published of theirs, and hidden the code that may run
@@ -1280,6 +1288,10 @@ func (pv *pkgVerifier) collect() {
 						"where it names the receiver for the contract of the method, as in // @Receiver c")
 					continue
 				}
+				if gen, spec, vars, ok := pv.varDocumented(file, group); ok {
+					pv.addVarInvariant(gen, spec, vars, c)
+					continue
+				}
 				owner := pv.place(file, group, c)
 				if c.kind == "Predicate" {
 					decl, err := logic.ParsePredicate(c.text)
@@ -1336,6 +1348,7 @@ func (pv *pkgVerifier) collect() {
 	pv.checkReceivers()
 	pv.findSentinels()
 	pv.findFixed()
+	pv.checkVarGroups()
 	pv.exportCovers()
 	pv.findKnownReturns()
 	// A contract speaks of the results by the names the function gives
