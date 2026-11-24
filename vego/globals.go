@@ -973,7 +973,11 @@ func (v *fnVerifier) fixedValue(sink *state, variable *types.Var) (value, string
 	v.noteKnown(sink, val, variable.Type(), known)
 	// What the run of its initialiser showed of a variable of the package
 	// (initcalls.go).
-	for _, fact := range v.initFacts[final] {
+	facts := v.initFacts[final]
+	if final.Pkg() != v.pass.Pkg {
+		facts = v.publishedInitFacts(final)
+	}
+	for _, fact := range facts {
 		v.declared(sink, fact)
 	}
 	if readOnly && known.Contents {

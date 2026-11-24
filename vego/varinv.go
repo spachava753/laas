@@ -1077,7 +1077,19 @@ func (pv *pkgVerifier) checkValueInitialisers() {
 			fact.Inert[variable.Name()] = true
 		}
 	}
-	if len(fact.Why) > 0 || len(fact.Inert) > 0 {
+	for variable, facts := range pv.initFacts {
+		var size int64
+		for _, fact := range facts {
+			size += fact.Size()
+		}
+		if variable.Exported() && size <= maxPublishedFacts {
+			if fact.Facts == nil {
+				fact.Facts = map[string][]*logic.Term{}
+			}
+			fact.Facts[variable.Name()] = facts
+		}
+	}
+	if len(fact.Why) > 0 || len(fact.Inert) > 0 || len(fact.Facts) > 0 {
 		pv.pass.ExportPackageFact(fact)
 	}
 }
@@ -1089,6 +1101,10 @@ func (pv *pkgVerifier) checkValueInitialisers() {
 type initialisersFact struct {
 	Why   map[string]string
 	Inert map[string]bool
+	// Facts holds what the run of the initialiser of each exported fixed
+	// variable shows of its value (initcalls.go), over constants whose
+	// names are the same in every package.
+	Facts map[string][]*logic.Term
 }
 
 func (*initialisersFact) AFact() {}

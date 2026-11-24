@@ -692,6 +692,9 @@ type pkgVerifier struct {
 	// initialiser runs as code, what the run shows of its value; see
 	// initcalls.go.
 	initFacts map[*types.Var][]*logic.Term
+	// initFactsOf holds what other packages published of the initialisers
+	// of their variables, rebuilt; see publishedInitFacts.
+	initFactsOf map[*types.Var][]*logic.Term
 	// initRunning is set while an initialiser runs as code, which reads
 	// only variables Go initialised before it, whatever hidden init code
 	// may run.

@@ -249,3 +249,50 @@ func initialiserOnlyWhy(callee *types.Func) string {
 		"outside every function: a panic there stops the program, or the plugin that holds the package, before any code reads the variable; " +
 		"elsewhere call a function that returns an error and check it, as regexp.Compile"
 }
+
+// maxPublishedFacts bounds the size, as trees, of what a package publishes
+// of an initialiser, since a fact is encoded as a tree.
+const maxPublishedFacts = 4096
+
+// rebuiltTerm returns a term decoded from a fact as the logic builds it:
+// nil, True, and False as the logic's own values, which it compares by
+// identity, and every node with its size.
+func rebuiltTerm(t *logic.Term) *logic.Term {
+	switch {
+	case t.Op == logic.OpTrue:
+		return logic.True()
+	case t.Op == logic.OpFalse:
+		return logic.False()
+	case t.Op == logic.OpConst && t.Sort == logic.Err && t.Name == logic.NilErr().Name:
+		return logic.NilErr()
+	case len(t.Args) == 0:
+		return logic.WithArgs(t, nil)
+	}
+	args := make([]*logic.Term, len(t.Args))
+	for i, arg := range t.Args {
+		args[i] = rebuiltTerm(arg)
+	}
+	return logic.WithArgs(t, args)
+}
+
+// publishedInitFacts returns what the package of a fixed variable of
+// another package published of the run of its initialiser.
+func (pv *pkgVerifier) publishedInitFacts(variable *types.Var) []*logic.Term {
+	pv.initialiserWhy(variable)
+	fact := pv.initOf[variable.Pkg()]
+	if fact == nil {
+		return nil
+	}
+	if pv.initFactsOf == nil {
+		pv.initFactsOf = map[*types.Var][]*logic.Term{}
+	}
+	if facts, done := pv.initFactsOf[variable]; done {
+		return facts
+	}
+	var facts []*logic.Term
+	for _, t := range fact.Facts[variable.Name()] {
+		facts = append(facts, rebuiltTerm(t))
+	}
+	pv.initFactsOf[variable] = facts
+	return facts
+}

@@ -2891,6 +2891,18 @@ initcalls	initcalls.the initialiser of six	2	119	0
 initcalls	initcalls.the initialiser of table	0	0	0
 initcalls	initcalls.the initialiser of tooMuch	2	78	0
 initcalls	initcalls.third	3	592	0
+initcallsclient	(*regexp.Regexp).MatchString	1	6576	0
+initcallsclient	initcallsclient.Fourth	3	1745	0
+initcallsclient	initcallsclient.IsWord	4	17517	0
+initcallsclient	initcallsclient.NotEight	2	213	0
+initcallsclient	initcallsclient.ReadSeven	2	128	0
+initcallsclient	initcallsclient.Third	3	592	0
+initcallslib	initcallslib.buildTable	2	66	0
+initcallslib	initcallslib.mk	2	141	0
+initcallslib	initcallslib.the initialiser of Seven	0	0	0
+initcallslib	initcallslib.the initialiser of Table	0	0	0
+initcallslib	initcallslib.the initialiser of Word	2	22554	0
+initcallslib	regexp.MustCompile	1	6620	0
 initvalues	(initvalues.impl).Set	6	3773	0
 initvalues	initvalues.Get	2	1093	0
 initvalues	initvalues.Sets.Set	4	3683	0
