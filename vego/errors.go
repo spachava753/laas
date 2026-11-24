@@ -85,6 +85,7 @@ func (pv *pkgVerifier) findSentinels() {
 		}
 	}
 	pv.findChanges()
+	pv.exportWrites()
 	// Each stable variable is of one kind, read from its initialiser.
 	made := map[*types.Var]*ast.CallExpr{}
 	aliases := map[*types.Var]*types.Var{}

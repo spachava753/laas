@@ -3,6 +3,7 @@ package vego
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -168,12 +169,12 @@ func (v *fnVerifier) readGlobal(variable *types.Var, pos token.Pos, st *state, g
 // variable refers to.
 func (v *fnVerifier) variableTarget(fn *funcInfo, m *modTarget, variable *types.Var, sink *state, mem memory) (shape, target, error) {
 	spelled := v.spelling(variable)
-	if fn.spelling().trust != nil || fn.spelling().valueOf != nil || fn.spelling().methodOf != nil {
-		return shape{}, target{}, fmt.Errorf("%s is a package-level variable, which a Modifies clause of a trusted contract or of a type cannot name yet", spelled)
+	if fn.spelling().valueOf != nil || fn.spelling().methodOf != nil {
+		return shape{}, target{}, fmt.Errorf("%s is a package-level variable, which a Modifies clause of a type cannot name yet", spelled)
 	}
 	// A contract names a variable of another package only when it is
 	// exported; the state of that package covers the others (D1).
-	if home := fn.spelling().obj.Pkg(); home != nil && variable.Pkg() != home && !variable.Exported() {
+	if home := fn.spelling().obj.Pkg(); home != nil && variable.Pkg() != home && !variable.Exported() && fn.spelling().trust == nil {
 		return shape{}, target{}, fmt.Errorf("%s is not exported; list the state of package %s, as // @Modifies %s", spelled, variable.Pkg().Path(), variable.Pkg().Name())
 	}
 	if _, rest := v.modifiesPath(fn, m); len(rest) != len(m.steps) {
@@ -381,9 +382,9 @@ func (v *fnVerifier) checkHiddenRequires(st *state) {
 // function may reach, closed under the calls that code makes (F7 of the
 // design review). Each is a target of the call, so the caller forgets it
 // and its frame must cover it.
-func (v *fnVerifier) reachedWrites(call *ast.CallExpr, fn *funcInfo) []*types.Var {
+func (v *fnVerifier) reachedWrites(call *ast.CallExpr, fn *funcInfo) ([]*types.Var, []*types.Package) {
 	if call == nil || fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil {
-		return nil
+		return nil, nil
 	}
 	seen := map[*callNode]bool{}
 	var work []*callNode
@@ -400,21 +401,59 @@ func (v *fnVerifier) reachedWrites(call *ast.CallExpr, fn *funcInfo) []*types.Va
 		}
 	}
 	found := map[*types.Var]bool{}
+	states := map[*types.Package]bool{}
+	// frameOf adds what a contract's frame names: variables of any
+	// package, and the states of packages (F20 of the review of step 3).
+	frameOf := func(contract *funcInfo) {
+		for _, m := range contract.modifies {
+			if pkg, named, err := v.modifiesPackage(contract, m); named {
+				if err == nil {
+					states[pkg] = true
+				}
+				continue
+			}
+			if variable := v.modifiesVariableOf(contract, m); variable != nil {
+				found[variable] = true
+			}
+		}
+	}
 	for len(work) > 0 {
 		node := work[len(work)-1]
 		work = work[:len(work)-1]
 		// A verified function writes what its frame covers, which covers
 		// what it calls.
 		if node.fn != nil && node.fn.annotated() && node.fn.trust == nil {
-			for _, m := range node.fn.modifies {
-				if variable := v.modifiesVariableOf(node.fn, m); variable != nil && variable.Pkg() == v.pass.Pkg {
-					found[variable] = true
-				}
-			}
+			frameOf(node.fn)
 			continue
 		}
 		for _, variable := range v.nodeWrites(node) {
 			found[variable] = true
+		}
+		// A call by name into another package writes what the callee's
+		// body, and what it calls by name, writes, as its package
+		// publishes it (writesFact).
+		for _, callee := range v.nodeCallsOut(node) {
+			fact := new(writesFact)
+			if !v.pass.ImportObjectFact(callee.Origin(), fact) {
+				continue
+			}
+			// Only a variable that a proof can read matters: one of this
+			// package, an exported one, or one of a package with functions
+			// that have annotations, whose contracts may speak of it. An
+			// unexported variable of a package with none is read by no
+			// proof, as what errors.New writes of package runtime.
+			readable := func(variable *types.Var) bool {
+				if variable.Pkg() == v.pass.Pkg || variable.Exported() {
+					return true
+				}
+				covers := new(coversFact)
+				return v.pass.ImportPackageFact(variable.Pkg(), covers) && covers.Verified
+			}
+			for _, key := range slices.Concat(slices.Sorted(maps.Keys(fact.Keys)), slices.Sorted(maps.Keys(fact.Through))) {
+				if variable := v.lookupKey(key); variable != nil && readable(variable) {
+					found[variable] = true
+				}
+			}
 		}
 		for _, e := range node.edges {
 			if !seen[e.to] {
@@ -423,13 +462,53 @@ func (v *fnVerifier) reachedWrites(call *ast.CallExpr, fn *funcInfo) []*types.Va
 			}
 		}
 	}
-	return slices.SortedFunc(func(yield func(*types.Var) bool) {
+	vars := slices.SortedFunc(func(yield func(*types.Var) bool) {
 		for variable := range found {
 			if !yield(variable) {
 				return
 			}
 		}
-	}, func(a, b *types.Var) int { return int(a.Pos() - b.Pos()) })
+	}, func(a, b *types.Var) int {
+		if c := strings.Compare(a.Pkg().Path(), b.Pkg().Path()); c != 0 {
+			return c
+		}
+		return int(a.Pos() - b.Pos())
+	})
+	pkgs := slices.SortedFunc(func(yield func(*types.Package) bool) {
+		for pkg := range states {
+			if !yield(pkg) {
+				return
+			}
+		}
+	}, func(a, b *types.Package) int { return strings.Compare(a.Path(), b.Path()) })
+	return vars, pkgs
+}
+
+// nodeCallsOut returns the functions of other packages that the body of a
+// node of the call graph calls by name.
+func (v *fnVerifier) nodeCallsOut(node *callNode) []*types.Func {
+	var body *ast.BlockStmt
+	switch {
+	case node.lit != nil:
+		body = node.lit.Body
+	case node.fn != nil && node.fn.decl != nil:
+		body = node.fn.decl.Body
+	}
+	var out []*types.Func
+	if body == nil {
+		return nil
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if callee := v.calleeAt(call); callee != nil && callee.Pkg() != nil && callee.Pkg() != v.pass.Pkg && !slices.Contains(out, callee) {
+			out = append(out, callee)
+		}
+		return true
+	})
+	return out
 }
 
 // nodeWrites returns the package-level variables of this package that the
@@ -482,18 +561,7 @@ func (v *fnVerifier) nodeWrites(node *callNode) []*types.Var {
 func (v *fnVerifier) reachedTargets(call *ast.CallExpr, fn *funcInfo, sink *state, mem memory) ([]shape, []target) {
 	var forms []shape
 	var targets []target
-	for _, variable := range v.reachedWrites(call, fn) {
-		if !v.isAssigned(variable) && (v.reassigned[variable] || !holdsMemory(variable.Type())) {
-			continue
-		}
-		if _, why := v.usableFixed(variable); !v.isAssigned(variable) && why != "" {
-			continue
-		}
-		m := &modTarget{name: variable.Name(), text: variable.Name()}
-		form, t, err := v.variableTargetAny(v.fn, m, variable, sink, mem)
-		if err != nil {
-			continue
-		}
+	add := func(form shape, t target) {
 		forms = append(forms, append([]shape{form}, form.also...)...)
 		for _, each := range append([]target{t}, t.also...) {
 			each.also, each.mod, each.reached = nil, -1, true
@@ -503,6 +571,39 @@ func (v *fnVerifier) reachedTargets(call *ast.CallExpr, fn *funcInfo, sink *stat
 				targets = append(targets, part)
 			}
 		}
+	}
+	vars, pkgs := v.reachedWrites(call, fn)
+	for _, variable := range vars {
+		if !v.isAssigned(variable) && (v.reassigned[variable] || !holdsMemory(variable.Type()) || isError(variable.Type())) {
+			continue
+		}
+		if _, why := v.usableFixed(variable); !v.isAssigned(variable) && why != "" {
+			continue
+		}
+		m := &modTarget{name: variable.Name(), text: v.spelling(variable)}
+		form, t, err := v.variableTargetAny(v.fn, m, variable, sink, mem)
+		if err != nil {
+			// What the call may write cannot be named, so it cannot be
+			// forgotten: the call is not followed (F20).
+			v.unsupported(call.Pos(), fmt.Sprintf("code that the call may run writes %s, which cannot be followed: %v", v.spelling(variable), err))
+		}
+		add(form, t)
+	}
+	for _, pkg := range pkgs {
+		if pkg == v.pass.Pkg {
+			continue
+		}
+		m := &modTarget{text: pkg.Name(), pkgPath: pkg.Path()}
+		form, t, err := v.stateTarget(v.fn, m, pkg, sink, mem)
+		if err != nil {
+			v.unsupported(call.Pos(), fmt.Sprintf("code that the call may run changes the state of package %s, which cannot be followed: %v", pkg.Path(), err))
+		}
+		// A state with no variable that verified code can write changes
+		// nothing a proof reads.
+		if len(t.cells) == 0 && t.mapType == nil && len(t.also) == 0 {
+			continue
+		}
+		add(form, t)
 	}
 	return forms, targets
 }

@@ -43,3 +43,11 @@ func NotDependency() {}
 // @Modifies "chainapp" // want `^vego: in Modifies annotation: "chainapp" is the package of OwnState, whose variables a Modifies clause names one by one$`
 // @Ensures True
 func OwnState() {}
+
+// RunUnexported names a variable of a package its files do not import.
+//
+// @Modifies chainstats.requests // want `^vego: in Modifies annotation: chainstats is not imported by the files of package chainapp; name the state of a package it imports whose state covers it, or write the import path, as // @Modifies "chainstats"$`
+// @Ensures True
+func RunUnexported() {
+	chainhandler.Serve()
+}

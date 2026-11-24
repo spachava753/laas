@@ -4036,7 +4036,7 @@ func Served() (r int) {
 
 `Served` verifies. Nothing is known of the value of `served` when `Served` is called, apart from its type. Its initialiser gives nothing, since code may have changed the variable before the call. [Changing a variable](#changing-a-variable) shows how a verified function changes one.
 
-A variable whose address is taken, or that a directive or an assembly file names, cannot be read. The message names the place that takes the address or the directive. A variable of another package that is changed cannot be read yet either. For such a variable, the message names the package that changes it.
+A variable whose address is taken, or that a directive or an assembly file names, cannot be read. The message names the place that takes the address or the directive. A variable of another package that is assigned can be read the same way, as `os.Args` can in `main`. [Variables of other packages](#variables-of-other-packages) shows how a function lists what it changes there.
 
 The type of the variable must be one that cannot hold code. A function value, an interface value, an error, a channel, or an `unsafe.Pointer` may not appear in the type at any depth, also behind a pointer, and also in a field that the type does not export. Verified code cannot read such a field, but it can hand the variable to a trusted function that runs the code the field holds. So `*http.Client` cannot be read, and neither can `*log.Logger`:
 
@@ -4371,6 +4371,83 @@ func TicketChecked() (n int, ok bool) {
 
 A function of the package that code of another package cannot call may require such a condition, and its callers prove it as any other `Requires` clause.
 
+### Variables of other packages
+
+A function lists what it changes in another package by naming the state of that package. Package `guidestats` keeps a counter that it does not export:
+
+```go
+import "math"
+
+var requests int
+
+// Hit counts a request.
+//
+// @Modifies requests
+// @Ensures requests < MaxInt -> requests' = requests + 1
+func Hit() {
+	if requests < math.MaxInt {
+		requests++
+	}
+}
+
+// Count returns the count.
+//
+// @Ensures r = requests
+func Count() (r int) {
+	return requests
+}
+```
+
+Package `guidehandler` calls `Hit`. It cannot name `requests`, so it names the state of `guidestats`, by the name its file imports the package as:
+
+```go
+// Serve counts a request.
+//
+// @Modifies guidestats
+// @Ensures True
+func Serve() {
+	guidestats.Hit()
+}
+```
+
+The state of a package covers every variable the package declares, what those variables refer to, and the states that the package's own functions list. So a caller that does not import `guidestats` covers the change by naming `guidehandler`:
+
+```go
+// Handle serves a request named path.
+//
+// @Modifies guidehandler
+// @Ensures True
+func Handle(path string) {
+	guidehandler.Serve()
+}
+
+// HandleByPath lists the state of guidestats by its import path.
+//
+// @Modifies "guidestats"
+// @Ensures True
+func HandleByPath(path string) {
+	guidehandler.Serve()
+}
+
+// HandleUnlisted does not list what Serve changes.
+//
+// @Ensures True
+func HandleUnlisted(path string) {
+	guidehandler.Serve()
+}
+```
+
+`Handle` and `HandleByPath` verify. `HandleByPath` writes the import path in quotes, which names the same state. The message for `HandleUnlisted` gives the shortest entry that its file can write:
+
+```text
+vego: Serve may modify the state of package guidestats (guidestats.requests), which HandleUnlisted may not modify; list guidehandler, whose
+state includes it, in a // @Modifies clause
+```
+
+An exported variable of another package can also be named on its own, as in `@Modifies lib.Verbose`. A variable that is not exported cannot. The entry is refused with a message that names the state to list instead. A package that the function's package does not depend on, and the function's own package, cannot be named as a state.
+
+A function of a third package that reads `guidestats.Count()` before and after a call of `Handle` does not keep the count across it, since `Handle` lists the state of `guidehandler`. Across a call that lists no state, it keeps it.
+
 ### Variables and goroutines
 
 A proof covers one goroutine. This counter is proved:
@@ -4399,7 +4476,6 @@ A variable holds its value only once the package has initialised it. `vego` reli
 
 Some code that uses package-level variables still cannot be verified:
 
-- A variable of another package that is changed, also in an `init` function, as `os.Args` is in package `os`.
 - A variable whose address is taken, as `var mu sync.Mutex` with `mu.Lock()`.
 - An error variable that is changed.
 - A logger in a package-level variable, as in `var logger = log.New(os.Stderr, "app: ", 0)`. The logger keeps the writer that its initialiser gave it, and nothing checked that writer. `vego` does not know either that `log.New` returned a logger that is not nil:

@@ -1380,6 +1380,13 @@ func (v *pkgVerifier) modifiesPath(fn *funcInfo, m *modTarget) (*types.Var, []mo
 		}
 	case spelled.obj != nil && spelled.obj.Pkg() != nil:
 		obj = spelled.obj.Pkg().Scope().Lookup(m.name)
+		// A trusted contract names a variable of another package by the
+		// package's name or path, as it names an error variable.
+		if pkg := v.lookupPackage(m.name); obj == nil && spelled.trust != nil && pkg != nil && len(m.steps) > 0 && m.steps[0].field != "" {
+			if variable := packageVariableOf(pkg.Scope().Lookup(m.steps[0].field), ""); variable != nil {
+				return variable, m.steps[1:]
+			}
+		}
 	}
 	field := ""
 	if len(m.steps) > 0 {

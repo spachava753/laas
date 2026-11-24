@@ -2206,6 +2206,18 @@ trusted:
         requires: ["0 <= i < n"]
     modifies: []
 
+  trustedwrites.Tick:
+    reason: Test helper whose entry is false on purpose; bump assigns Ticks.
+    modifies: []
+
+  trustedwrites.TickListed:
+    reason: Test helper that assigns Ticks, which the entry lists.
+    modifies: [Ticks]
+
+  trustedwrites.TickState:
+    reason: Test helper that assigns Ticks, which the state of its package covers.
+    modifies: ['"trustedwrites"']
+
 # States of interfaces of another module, and contracts that speak of them.
 state:
   ifacestatelib.Conn:

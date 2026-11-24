@@ -1,0 +1,43 @@
+// Package trustedwritesclient calls the functions of trustedwrites under
+// their entries (F10 of the design review of package-level variables).
+package trustedwritesclient
+
+import "trustedwrites"
+
+// Same keeps Ticks across a call whose entry lists nothing, which the
+// body of the function shows to be false.
+//
+// @Ensures same
+func Same() (same bool) {
+	a := trustedwrites.Ticks
+	trustedwrites.Tick() // want `^vego: the trusted contract of Tick does not list trustedwrites.Ticks, which its body assigns at lib.go:8 in bump; an entry lists what its function changes, as in modifies: \[Ticks\]$`
+	return trustedwrites.Ticks == a
+}
+
+// Listed forgets Ticks across a call whose entry lists it.
+//
+// @Modifies trustedwrites.Ticks
+// @Ensures same
+func Listed() (same bool) {
+	a := trustedwrites.Ticks
+	trustedwrites.TickListed()
+	return trustedwrites.Ticks == a // want `^vego: postcondition may not hold: same$`
+}
+
+// State forgets Ticks across a call whose entry lists the state of its
+// package.
+//
+// @Modifies trustedwrites
+// @Ensures same
+func State() (same bool) {
+	a := trustedwrites.Ticks
+	trustedwrites.TickState()
+	return trustedwrites.Ticks == a // want `^vego: postcondition may not hold: same$`
+}
+
+// StateUnlisted does not list what the entry changes.
+//
+// @Ensures True
+func StateUnlisted() {
+	trustedwrites.TickState() // want `^vego: TickState may modify the state of package trustedwrites \(trustedwrites.Ticks\), which StateUnlisted may not modify; list trustedwrites in a // @Modifies clause$`
+}

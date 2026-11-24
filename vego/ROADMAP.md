@@ -1020,13 +1020,11 @@ The invariants the design rests on:
   - every writer is a verified function of the package and restores it on return;
   - it is proved before every call that may reach a function that touches the group;
   - what it reads is reached only through the group's variables.
-- **V4, rows and origins.** What a variable refers to lies outside every footprint row only while the variable holds the only reference to it. That needs four reliances, each published and met by every package built with the relier (F1, F2):
-  - its initialiser made the memory;
-  - no use in the build lets a reference to it out;
-  - for an assigned variable, every store into it stores a value of outside origin;
-  - its memory is never converted to an interface whose methods write behind their receiver.
+- **V4, rows and origins.** What a variable refers to lies outside every footprint row only while the variable holds the only reference to it. As built (`packageOrigin`, F1, F21 of the review of step 3), a read of a package-level variable that refers to memory is outside only when two reliances hold, each published and met by every package built with the relier:
+  - its initialiser made the memory, and no use in the build lets a reference to it out (part 1's read-only contents, `contentsKey`);
+  - nothing in the build writes the variable (its value key).
 
-  Otherwise a read of the variable is of unknown origin. Before F31 a read of any package-level variable counted as outside, which was unsound (F1 of the review; `globals/origins.go`).
+  Otherwise the read is of unknown origin. That covers every assigned variable, so the design's two other reliances are not built and not needed now: that every store into the variable stores an outside value, and that its memory is never converted. Every use that brings a memory-holding read of a variable to the origin analysis, by handing it to a call or storing it, is itself an escape. So the outside case is reached by no program today. A later change that stops counting some use as an escape, or lets an assigned variable read as outside, owes those two reliances, published and met as the others are. Before F31 a read of any package-level variable counted as outside, which was unsound (F1 of the review; `globals/origins.go`).
 - **V5, initialisation.** Code of an importer of P runs only after P's initialisation is complete. Go initialises a package after what it imports, and code that runs before P's init cannot name an importer of P. Hidden init code and linkname are refused, as part 1 refuses them. This is what makes kind 4 fixed for importers.
 
 The state of a package (D1, decided by the orchestrator):
@@ -1097,6 +1095,23 @@ Repairs after the review of step 2 (F17 to F19), and step 3 of part 1 (`pkgstate
   - **What it covers.** `coversFact` publishes `covers(P)`. `stateTarget` gives a target for every variable of every covered package that verified code can write: the storage of an assigned one and what it refers to, and what a fixed one refers to.
   - **The message for a missing entry** at a call (`stateRemedy`) names the variable as `the state of package P (P.v)` and the shortest entry the file can write: P, or the imported package of the callee whose state covers it, or the path.
   - **Programs:** `chainstats` ← `chainhandler` ← `chainapp` ← `chainreport`, in both directions: a caller three calls up covers the write by naming the package it imports, a third package forgets the counter across a call that lists the state, and keeps it across one that does not.
+
+Repairs after the review of step 3 (F20 to F23), and step 4 of part 1: trusted entries.
+
+- **F20.** What a call through a value may reach no longer stops at the package's own variables.
+  - **A verified node reached** adds every variable and package state that its frame names, of any package.
+  - **Code that is not verified** adds what each function of another package that it calls by name writes, as that package publishes it in `writesFact`. That fact holds, for every function with a body in every package of the build, the variables its body assigns (`Keys`, with where) and those that refer to memory and that a use lets a reference out of (`Through`), each closed over the calls it makes by name, into other packages by their facts. A function with no fact writes nothing that its body shows: one written in assembly can only change a variable that assembly names, which is refused.
+  - **What no proof reads.** A variable of another package counts only when a proof can read it (`readable` in `reachedWrites`): it is exported, or its package has a function with annotations (`coversFact.Verified`). An unexported variable of a package with none, such as what `errors.New` and `fmt.Errorf` write of package `runtime`, is read by no proof.
+  - **A target that cannot be built** makes the call `cannot verify`, where it was dropped before.
+  - **A state that covers no variable** verified code can write gives no target.
+  - **Programs:** `reachclient`. `Around` is refused, and `AroundListed`, `Fires`, and `FiresTock` forget the count. Wrong versions caught: the own-package filter on what a callee writes (`Around`), and on what a verified node's frame names (`FiresTock`).
+- **F21.** V4 now says what is built and why the other two reliances are not needed.
+- **F22.** The guide has a section on variables of other packages (`guide/others.go`, `guidestats`, `guidehandler`), and no longer says that a changed variable of another package cannot be read.
+- **F23.** An entry that starts with the name of a package that the contract's package depends on but no file of it imports is refused with what to write instead: a package whose state covers it, or the import path.
+- **Trusted entries.** A trusted entry may list, under `modifies`, a variable of its function's package by name, one of another package as `pkg.V` (resolved as an error variable of another package is), and the state of a package by its import path in quotes. That includes its own package's state, since an entry cannot name what that package does not export.
+  - **F10's check** (`checkTrustedWrites`). At a call of a trusted function, every variable that the call's `writesFact` says its body, or a function it calls by name, assigns is reported when the calling function reads it and no target of the call covers it: "the trusted contract of Tick does not list trustedwrites.Ticks, which its body assigns at lib.go:8 in bump; an entry lists what its function changes, as in modifies: [Ticks]". It reads assignments only, not what a body lets out of a variable, so that an entry is not reported for passing a table along. It is a check of what source shows, not a proof of the entry.
+  - **Programs:** `trustedwrites` and `trustedwritesclient`, with entries at the end of the trust file of the tests. Wrong version caught: the check off (`Same`).
+- **Facts registered.** `fixedFact`, `coversFact`, and `writesFact` are in `Analyzer.FactTypes`. `fixedFact` had been exported without being registered since part 1, which a driver that encodes facts, as `go vet -vettool` does, would refuse.
 
 Not built yet:
 
