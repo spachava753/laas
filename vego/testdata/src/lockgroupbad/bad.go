@@ -19,7 +19,7 @@ var (
 // @Requires held(mu)
 // @Modifies hits
 // @Ensures True
-func Bump() { // want `vego: nothing can satisfy the Requires clauses of Bump together with what the types of its parameters guarantee, so verifying it would prove nothing`
+func Bump() { // want `vego: code outside the package's verified code can call Bump \(it is exported\), so it assumes ~held\(mu\), a lock clause of the invariant of mu, hits, on entry, which its Requires contradicts; keep a function that runs under the lock unexported, and do not use it as a value`
 	if hits < math.MaxInt {
 		hits++
 	}
@@ -31,7 +31,7 @@ func Bump() { // want `vego: nothing can satisfy the Requires clauses of Bump to
 // @Requires held(mu)
 // @Modifies hits
 // @Ensures True
-func bumpValue() { // want `vego: nothing can satisfy the Requires clauses of bumpValue together with what the types of its parameters guarantee, so verifying it would prove nothing`
+func bumpValue() { // want `vego: code outside the package's verified code can call bumpValue \(it is used as a value or let out of the package\), so it assumes ~held\(mu\), a lock clause of the invariant of mu, hits, on entry, which its Requires contradicts; keep a function that runs under the lock unexported, and do not use it as a value`
 	if hits < math.MaxInt {
 		hits++
 	}
@@ -65,3 +65,26 @@ var testMu sync.Mutex
 
 // lockForTest locks testMu, and is not verified.
 func lockForTest() { testMu.Lock() }
+
+// helper is unexported, and its method has an exported name.
+type helper struct{}
+
+// Run requires the lock.
+//
+// @Requires held(mu)
+// @Modifies hits
+// @Ensures True
+func (helper) Run() { // want `vego: code outside the package's verified code can call Run \(it is a method with an exported name\), so it assumes ~held\(mu\), a lock clause of the invariant of mu, hits, on entry, which its Requires contradicts; keep a function that runs under the lock unexported, and do not use it as a value`
+	if hits < math.MaxInt {
+		hits++
+	}
+}
+
+// Hit locks mu, so that its address is taken and closed.
+//
+// @Modifies mu
+// @Ensures True
+func Hit() {
+	mu.Lock()
+	mu.Unlock()
+}

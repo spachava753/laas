@@ -643,8 +643,12 @@ func (v *fnVerifier) verify() {
 	// A precondition that nothing satisfies would make every claim about
 	// the function provable.
 	if v.quickly(st, nil, logic.False()) {
-		v.report(fn.decl.Name.Pos(), "nothing can satisfy the Requires clauses of %s together with what the types of its parameters guarantee, "+
-			"so verifying it would prove nothing", fn.obj.Name())
+		if why := v.lockContradiction(fn); why != "" {
+			v.report(fn.decl.Name.Pos(), "%s", why)
+		} else {
+			v.report(fn.decl.Name.Pos(), "nothing can satisfy the Requires clauses of %s together with what the types of its parameters guarantee, "+
+				"so verifying it would prove nothing", fn.obj.Name())
+		}
 	} else {
 		v.checkDeclaredRequires(st)
 		v.checkHiddenRequires(st)

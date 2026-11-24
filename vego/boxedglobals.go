@@ -95,7 +95,9 @@ func (pv *pkgVerifier) addressAt(variable *types.Var) string {
 // kind-3 variable: it is not nil, it existed on entry, and it is apart from
 // that of every other kind-3 variable the function met.
 func (v *fnVerifier) noteBoxed(st *state, variable *types.Var) {
-	if st == nil {
+	// A frame asks after terms and notes nothing (F20 of the review of
+	// step 4); what it reads is the same constant.
+	if st == nil || v.frameNames != nil {
 		return
 	}
 	if v.boxedMet == nil {
@@ -157,7 +159,14 @@ func (e *specEnv) locateBoxed(variable *types.Var, steps []logic.Step, when logi
 		mem = e.post
 	}
 	pointer := e.v.boxedPointer(e.sink, variable)
-	val := e.v.fetchIn(e.sink, mem, e.v.cellsOf(variable.Type()), pointer[0], pointer[1], variable.Type())
+	// The fact between struct values is noted where the function reads
+	// the variable; a frame that asks after an annotation notes nothing
+	// (F20 of the review of step 4).
+	var base types.Type
+	if e.v.frameNames == nil {
+		base = variable.Type()
+	}
+	val := e.v.fetchIn(e.sink, mem, e.v.cellsOf(variable.Type()), pointer[0], pointer[1], base)
 	e.v.noteTyped(e.sink, val, variable.Type())
 	cur, ground := e.v.follow(e.sink, mem, val, hops)
 	found := reached{val: cur, typ: final, mem: mem, hops: len(hops)}

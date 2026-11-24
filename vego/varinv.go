@@ -1275,3 +1275,53 @@ func (v *fnVerifier) callLockGroups(call *ast.CallExpr, fn *funcInfo) []*varGrou
 	}
 	return found
 }
+
+// lockContradiction says, for a function whose Requires nothing can
+// satisfy, when that comes from a lock clause it assumes because code
+// outside the package's verified code can enter it, and its Requires names
+// a state of the same variable, as a helper that requires held(mu) and is
+// exported (F21 of the review of step 4 of F32); otherwise "".
+func (v *fnVerifier) lockContradiction(fn *funcInfo) string {
+	if fn.obj == nil || !v.lockBoundary(fn) {
+		return ""
+	}
+	named := map[string]bool{}
+	for _, c := range fn.requires {
+		if c.node != nil {
+			c.node.Walk(func(n *logic.Node) {
+				if n.Kind == logic.NIdent {
+					named[n.Name] = true
+				}
+			})
+		}
+	}
+	why := "it is exported"
+	switch {
+	case fn.obj.Name() == "init":
+		why = "it is an init function"
+	case fn.obj.Type().(*types.Signature).Recv() != nil && fn.obj.Exported():
+		why = "it is a method with an exported name"
+	case !fn.obj.Exported():
+		why = "it is used as a value or let out of the package"
+	}
+	for _, g := range v.groupsNamed(fn) {
+		for _, c := range g.clauses {
+			for _, node := range c.node.Conjuncts() {
+				if !v.lockConjunct(g, node) {
+					continue
+				}
+				root := node
+				for root.Kind != logic.NIdent && len(root.Kids) > 0 {
+					root = root.Kids[0]
+				}
+				if !named[root.Name] {
+					continue
+				}
+				text := strings.Join(strings.Fields(c.text[node.Start:node.End]), " ")
+				return fmt.Sprintf("code outside the package's verified code can call %s (%s), so it assumes %s, a lock clause of the invariant of %s, on entry, "+
+					"which its Requires contradicts; keep a function that runs under the lock unexported, and do not use it as a value", fn.obj.Name(), why, text, v.groupName(g))
+			}
+		}
+	}
+	return ""
+}
