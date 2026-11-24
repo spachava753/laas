@@ -28,3 +28,19 @@ func Bump() {
 	tick() // want `vego: invariant of count, total may not hold before the call to tick, which may assume it: count < total; it was not kept from entry, since count may have changed: the assignment to count at p\.go:27:2 may write it`
 	count = total - 1
 }
+
+// mid calls tick, two calls away from Tick.
+//
+// @Ensures True
+func mid() { tick() }
+
+// BumpDeep breaks the invariant around a call of mid, which reaches Tick
+// through tick (F18 of the review of F10).
+//
+// @Modifies count
+// @Ensures True
+func BumpDeep() {
+	count = total
+	mid() // want `vego: invariant of count, total may not hold before the call to mid, which may assume it: count < total`
+	count = total - 1
+}

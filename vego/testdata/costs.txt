@@ -892,8 +892,10 @@ exportedp	exportedp.Bump	13	8829	0
 exportedp	exportedp.Check	5	3691	0
 exportedp	exportedp.init of count, total	2	1059	0
 exportedp2	exportedp2.Bump	13	8829	0
+exportedp2	exportedp2.BumpDeep	13	8829	0
 exportedp2	exportedp2.Check	5	3691	0
 exportedp2	exportedp2.init of count, total	2	1059	0
+exportedp2	exportedp2.mid	1	46	0
 exportedp2	exportedp2.tick	1	46	0
 footprints	(*bufio.Scanner).Scan	1	5236	0
 footprints	(*bufio.Writer).Flush	9	54180	0
