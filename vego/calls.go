@@ -647,7 +647,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			}
 		}
 	}
-	v.checkReachedApart(call, fn, args, written, passed, passedExpr, name)
+	v.checkReachedApart(st, guard, call, fn, args, written, passed, passedExpr, name)
 	if fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil {
 		v.checkOwnArguments(call, name)
 	}

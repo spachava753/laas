@@ -298,6 +298,29 @@ func printLine(s string) {
 	fmt.Fprintln(logOut, s)
 }
 
+// printLines writes each line through the variable.
+//
+// @Requires logOut != nil And |lines| <= 1000
+// @Requires Forall i in [0, |lines|) : |lines[i]| <= 100
+// @Modifies logOut
+// @Ensures logOut' = logOut
+func printLines(lines []string) {
+	for _, s := range lines {
+		fmt.Fprintln(logOut, s)
+	}
+}
+
+// printTwice hands printLines its own parameter, twice.
+//
+// @Requires logOut != nil And |lines| <= 1000
+// @Requires Forall i in [0, |lines|) : |lines[i]| <= 100
+// @Modifies logOut
+// @Ensures True
+func printTwice(lines []string) {
+	printLines(lines)
+	printLines(lines)
+}
+
 // redirect replaces the writer, as a test does.
 //
 // @Requires w != nil

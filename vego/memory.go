@@ -238,6 +238,11 @@ type target struct {
 	// variable, the target of what its value refers to, beside its
 	// storage, which targets spreads into the list.
 	also []target
+	// fromVar is set on the footprint of what an interface variable that
+	// an entry names by itself holds: the variable whose value it is. A
+	// declared function assumes what its parameters reach apart from it
+	// (enterReaches), and a caller proves it (checkReachedApart).
+	fromVar *types.Var
 	// reached is set for a target that code of the package a call may run
 	// writes, which no Modifies clause of the callee lists (F7).
 	reached bool

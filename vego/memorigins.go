@@ -946,12 +946,22 @@ func promisesFresh(fn *funcInfo, result int) bool {
 // footprint argument must be a parameter of the caller whose footprint the
 // caller's own Modifies lists, which the caller assumes the same of; the
 // other argument must be outside, and the caller clean.
-func (v *fnVerifier) checkReachedApart(call *ast.CallExpr, fn *funcInfo, args map[*types.Var]value, written []target,
+func (v *fnVerifier) checkReachedApart(st *state, guard []*logic.Term, call *ast.CallExpr, fn *funcInfo, args map[*types.Var]value, written []target,
 	passed map[*types.Var]string, passedExpr map[*types.Var]ast.Expr, name string) {
 	if fn.trust != nil || fn.valueOf != nil || fn.methodOf != nil {
 		return
 	}
 	for _, t := range written {
+		// The callee assumes what its parameters reach apart from the
+		// footprint of what an interface variable it lists by itself holds
+		// (enterReaches). The caller assumes the same of the value the
+		// variable held when it was entered, so it must list the variable
+		// by itself too, the variable must hold that value still, and each
+		// argument must come from the caller's parameters or be made here.
+		if t.fp && t.fromVar != nil && !t.reached {
+			v.checkVariableApart(st, guard, call, fn, args, t, passed, passedExpr, name)
+			continue
+		}
 		// The callee assumes the footprint of a parameter, and of what a
 		// parameter that owns memory owns, apart from its other
 		// parameters (enterReaches).
@@ -1076,6 +1086,50 @@ func (v *fnVerifier) checkReachedApart(call *ast.CallExpr, fn *funcInfo, args ma
 			} else if fact.polluted != "" {
 				v.report(call.Pos(), "%s: %s", lead, fact.polluted)
 			}
+		}
+	}
+}
+
+// checkVariableApart is checkReachedApart for the footprint of what an
+// interface variable the callee lists by itself holds.
+func (v *fnVerifier) checkVariableApart(st *state, guard []*logic.Term, call *ast.CallExpr, fn *funcInfo, args map[*types.Var]value, t target,
+	passed map[*types.Var]string, passedExpr map[*types.Var]ast.Expr, name string) {
+	spelled := v.spelling(t.fromVar)
+	// The caller's own entry for the variable, which enterReaches gives
+	// the separation of when the caller has parameters that hold memory.
+	own := -1
+	if v.fn.decl != nil && v.fn.trust == nil && v.fn.valueOf == nil && v.fn.methodOf == nil && v.lit == nil {
+		own = slices.IndexFunc(v.frame, func(f target) bool { return f.fp && f.fromVar == t.fromVar })
+	}
+	for _, other := range fn.params {
+		if args[other] == nil || !holdsMemory(other.Type()) {
+			continue
+		}
+		lead := fmt.Sprintf("the footprint of what %s holds may hold memory that what is passed to %s as %s reaches, and %s relies on it not doing so",
+			spelled, name, passed[other], name)
+		if own < 0 && v.lit != nil {
+			v.report(call.Pos(), "%s: a function literal places no footprint", lead)
+			continue
+		}
+		if own < 0 {
+			v.report(call.Pos(), "%s: %s's own Modifies does not list %s by itself, so nothing places that footprint", lead, v.fn.obj.Name(), spelled)
+			continue
+		}
+		if !v.prove(st, guard, logic.Eq(t.ref, v.frame[own].ref)) {
+			v.report(call.Pos(), "%s: %s may hold here a value other than the one it held when %s was entered, whose footprint %s's own Modifies places",
+				lead, spelled, v.fn.obj.Name(), v.fn.obj.Name())
+			continue
+		}
+		fact, placed := v.memFactAt(call)
+		if !placed {
+			v.unsupported(call.Pos(), lead+"; a caller of a function value or a method of an interface value does not show it")
+		}
+		if expr := passedExpr[other]; expr == nil {
+			v.report(call.Pos(), "%s: what is passed as %s is not written as one expression", lead, passed[other])
+		} else if why := v.memOrigin(expr, fact); why != "" {
+			v.report(call.Pos(), "%s: %s", lead, why)
+		} else if fact.polluted != "" {
+			v.report(call.Pos(), "%s: %s", lead, fact.polluted)
 		}
 	}
 }

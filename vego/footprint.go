@@ -363,7 +363,10 @@ func (v *fnVerifier) outsideFootprint(t target, key string, ref, position *logic
 // of it, which the facts of noteReached give for what memory held on entry
 // at a reached cell. home is the home of the parameter on entry.
 type separation struct {
-	param *types.Var
+	// param is the parameter whose footprint it is, or variable the
+	// interface variable whose value on entry has it.
+	param    *types.Var
+	variable *types.Var
 	// field is set for the footprint of p.field, a field that a
 	// notWrittenBy declaration covers: what p reaches is among the roots
 	// (F28).
@@ -675,6 +678,30 @@ func (v *fnVerifier) enterReaches(st *state) {
 		return
 	}
 	for i, t := range v.frame {
+		// The footprint of what an interface variable the function lists
+		// by itself holds on entry: what the parameters reach lies outside
+		// it, which every verified caller proves (checkReachedApart) and
+		// "What a proof assumes" states of the others. A write through the
+		// variable after it was assigned is a write through another value,
+		// which this says nothing of.
+		if t.fp && t.fromVar != nil {
+			key := t.fromVar.Name()
+			if t.fromVar.Pkg() != nil {
+				key = t.fromVar.Pkg().Path() + "." + key
+			}
+			r := separation{variable: t.fromVar, rel: logic.Const("reach var "+key, reachSort), home: t.ref}
+			for _, param := range fn.params {
+				if v.entry[param] != nil && holdsMemory(param.Type()) {
+					r.direct = append(r.direct, passedValue{val: v.entry[param], t: param.Type()})
+				}
+			}
+			r.direct = append(r.direct, v.groupRoots(st)...)
+			if len(r.direct) > 0 {
+				v.inputs[r.rel.Name] = true
+				v.reaches = append(v.reaches, r)
+			}
+			continue
+		}
 		// The footprint of a parameter, or of an interface value that a
 		// parameter that owns memory owns, as the writer a *bufio.Writer
 		// keeps: what the other parameters reach lies outside it.

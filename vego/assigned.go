@@ -254,6 +254,9 @@ func (v *fnVerifier) variableTargetAny(fn *funcInfo, m *modTarget, variable *typ
 		if err != nil {
 			return shape{}, target{}, err
 		}
+		if ct.fp {
+			ct.fromVar = variable
+		}
 		form.also, whole.also = []shape{cform}, []target{ct}
 	}
 	return form, whole, nil
@@ -583,7 +586,7 @@ func (v *fnVerifier) reachedTargets(call *ast.CallExpr, fn *funcInfo, sink *stat
 	add := func(form shape, t target) {
 		forms = append(forms, append([]shape{form}, form.also...)...)
 		for _, each := range append([]target{t}, t.also...) {
-			each.also, each.mod, each.reached = nil, -1, true
+			each.also, each.mod, each.reached, each.fromVar = nil, -1, true, nil
 			targets = append(targets, each)
 			for _, part := range each.owned {
 				part.mod, part.text, part.part, part.reached = -1, each.text, true, true

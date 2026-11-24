@@ -240,7 +240,9 @@ func (v *fnVerifier) stateTarget(fn *funcInfo, m *modTarget, pkg *types.Package,
 		return shape{}, target{text: m.text, clause: m.clause}, nil
 	}
 	for i := range targets {
-		targets[i].text, targets[i].clause, targets[i].also = m.text, m.clause, nil
+		// The state of a package covers its variables, and names none of
+		// them by itself.
+		targets[i].text, targets[i].clause, targets[i].also, targets[i].fromVar = m.text, m.clause, nil, nil
 	}
 	for i := range forms {
 		forms[i].also = nil
