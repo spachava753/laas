@@ -5625,10 +5625,12 @@ typedowns	typedowns.StoreError	7	10550	0
 typedowns	typedowns.StoreOneResult	9	13243	0
 typedowns	typedowns.StoreSwitched	7	11763	0
 typedowns	typedowns.StoreWrapped	8	12256	0
+typedowns	typedowns.ViaConstructor	10	11911	0
 typedowns	typedowns.ViaIdentity	9	16459	0
 typedowns	typedowns.ViaVariable	9	16459	0
 typedowns	typedowns.fail	3	5816	0
 typedowns	typedowns.identity	7	3741	0
+typedowns	typedowns.wrapChild	9	15863	0
 typedowns	typedowns.write	12	12299	0
 typeonlyclient	typeonlyclient.Positive	1	111	0
 typeonlyclient	typeonlyclient.PositiveGood	6	856	0

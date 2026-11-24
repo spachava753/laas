@@ -224,3 +224,21 @@ func ViaVariable(s *S) (err error) {
 func PassesOnTwice(r *Report) (err error) {
 	return PassesOn(r) // want `PassesOnTwice returns memory that r owns, held in an error, which no contract can place within r; return a copy`
 }
+
+// wrapChild puts what it is handed into the error it makes.
+//
+// @Requires p != nil
+// @Ensures err != nil
+func wrapChild(p *Child) (err error) { // want `the contract of wrapChild may also be met by a function that always returns an error`
+	return PartErr{p: p}
+}
+
+// ViaConstructor returns what wrapChild made of a part of s: wrapChild's
+// summary says its result flows from what it is handed, so the part is
+// the function's own to copy (F19 of the review of 38f0288).
+//
+// @Requires s != nil And s.child != nil
+// @Ensures True
+func ViaConstructor(s *S) (err error) {
+	return wrapChild(s.child) // want `ViaConstructor returns memory that s owns, held in an error, which no contract can place within s; return a copy`
+}

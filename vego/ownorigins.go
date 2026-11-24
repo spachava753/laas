@@ -1379,8 +1379,13 @@ func (v *fnVerifier) ownResults(fl *ownFlow, e ast.Expr, count int, f *ownFact) 
 			if op.param != nil && r.from[op.param] {
 				from := kinds[j]
 				// An error result of a call handed what an owner owns,
-				// other than as an error, holds it only through the call.
-				if t := v.info.TypeOf(op.expr); isError(callResultType(v.info, call, i)) && t != nil && !isError(t) && v.concreteErrorType(op.expr, -1) == nil && len(from.inside) > 0 {
+				// other than as an error, holds it only through the call,
+				// when nothing says how the result relates to it: a
+				// trusted function, an interface method, or a function
+				// value. A verified callee's summary says that its result
+				// flows from the argument, which its own code may have put
+				// into the error, so that kind keeps no mark.
+				if t := v.info.TypeOf(op.expr); !c.verified && isError(callResultType(v.info, call, i)) && t != nil && !isError(t) && v.concreteErrorType(op.expr, -1) == nil && len(from.inside) > 0 {
 					from.throughCall = maps.Clone(from.inside)
 				}
 				kind = kind.union(from)
