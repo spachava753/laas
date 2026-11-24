@@ -923,6 +923,12 @@ func (v *fnVerifier) fixedValue(sink *state, variable *types.Var) (value, string
 		}
 	}
 	v.fixedMet[errorKey(final)] = fixedMet{val: val, typ: variable.Type()}
+	if final == variable && len(val) == 1 && v.inertFixed(variable) {
+		if v.inertVals == nil {
+			v.inertVals = map[string]bool{}
+		}
+		v.inertVals[val[0].Name] = true
+	}
 	readOnly := v.readOnlyHere(final)
 	if !readOnly && known.Contents && !v.groupReading && v.groupOf[final] == nil {
 		v.noteLostContents(final)
@@ -1409,3 +1415,29 @@ func (v *pkgVerifier) modifiesPath(fn *funcInfo, m *modTarget) (*types.Var, []mo
 	}
 	return nil, nil
 }
+
+// dropInert leaves out of what a call writes the footprint and the states
+// of the value of an inert fixed variable (inertFixed) that the call runs
+// only the methods of: a function whose entry prints to it, which calls
+// nothing of the writer but its Write, and a method of an interface called
+// on it. Those methods of the value's type list no receiver, so they write
+// nothing behind it and change no state of it (O1 of the orchestrator).
+// Any other call that lists the value may run other methods of its type,
+// and the caller lists the variable, as for any interface value.
+func (v *fnVerifier) dropInert(fn *funcInfo, args map[*types.Var]value, written []target) []target {
+	var only *types.Var
+	switch {
+	case fn.prints != nil:
+		only = fn.prints
+	case fn.methodOf != nil && fn.receiver != nil:
+		only = fn.receiver
+	default:
+		return written
+	}
+	val := args[only]
+	if len(val) != 1 || val[0].Op != logic.OpConst || !v.inertVals[val[0].Name] {
+		return written
+	}
+	return slices.DeleteFunc(slices.Clone(written), func(t target) bool { return t.param == only && (t.fp || t.row) })
+}
+

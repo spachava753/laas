@@ -621,6 +621,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	written := v.targets(fn, args, st, before)
 	_, reached := v.reachedTargets(call, fn, st, before)
 	written = append(written, reached...)
+	written = v.dropInert(fn, args, written)
 	v.checkTrustedWrites(call, fn, written)
 	// What an owner owns grows only by memory the call creates: the owns
 	// section claims it of the shipped contracts, and it holds of a

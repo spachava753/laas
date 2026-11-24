@@ -347,3 +347,33 @@ func stamped() (ok bool) {
 	_ = now()
 	return true
 }
+
+// Now returns the time from the clock, with the type of Clock.
+//
+// @Ensures True
+func Now() (t time.Time) {
+	if now == nil {
+		return time.Time{}
+	}
+	return now() // want `^vego: this call may not end: Now calls now\(\) at globals.go:\d+:\d+, which may run Now; `
+}
+
+var errOut io.Writer = os.Stderr
+
+// warn writes through a variable that nothing assigns.
+//
+// @Ensures True
+func warn() {
+	if errOut == nil {
+		return
+	}
+	fmt.Fprintln(errOut, "warning")
+}
+
+// warnChecked asks its caller for what the declaration does not show.
+//
+// @Requires errOut != nil // want `^vego: the Requires clause errOut != nil reads only package-level variables, and their declarations do not show that it holds; test the value in the body instead$`
+// @Ensures True
+func warnChecked() {
+	fmt.Fprintln(errOut, "warning")
+}

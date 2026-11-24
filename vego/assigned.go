@@ -219,7 +219,9 @@ func (v *fnVerifier) variableTargetAny(fn *funcInfo, m *modTarget, variable *typ
 		if v.reassigned[variable] || variable.Pkg() == v.pass.Pkg && v.changeKinds[variable] != 0 {
 			return shape{}, target{}, errors.New(v.assignedWhy(variable))
 		}
-		if !holdsMemory(t) || isError(t) {
+		// An interface value has a footprint and states, which the entry
+		// covers, as for an assigned variable (O1 of the orchestrator).
+		if !holdsMemory(t) && !isIface(t) || isError(t) {
 			return shape{}, target{}, fmt.Errorf("%s is a package-level variable that nothing changes, and what it holds refers to no memory, so there is nothing to modify", spelled)
 		}
 		if _, why := v.usableFixed(variable); why != "" {

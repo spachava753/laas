@@ -252,6 +252,9 @@ type fnVerifier struct {
 	// fixedMet the fixed variables met; see fixedValue.
 	madeFixed []*logic.Term
 	fixedMet  map[string]fixedMet
+	// inertVals holds the names of the values of the inert fixed variables
+	// met; see inertFixed and dropInert.
+	inertVals map[string]bool
 	// assignedMet holds, by key, the assigned package-level variables the
 	// function read, which the always-fails check samples.
 	assignedMet map[string]*types.Var

@@ -4426,6 +4426,22 @@ All three functions verify. `Modifies logOut` covers the variable and the footpr
 
 A failed check is reported where a verified function reads the variable, not at the declaration. A variable that no verified function reads draws no report. The read is reported with `cannot verify F: v cannot be relied on: its initialiser does not verify`, followed by the position in the initialiser and the reason. A read in another package is reported the same way.
 
+A function of the type of a hook that calls the hook may be run by that call:
+
+```go
+// Now returns the time from the clock, with the type of Clock.
+//
+// @Ensures True
+func Now() (t time.Time) {
+	if now == nil {
+		return time.Time{}
+	}
+	return now()
+}
+```
+
+`Now` is reported with `this call may not end: Now calls now() at globals.go:358:9, which may run Now`, followed by why. Another package can store `Now` in `now`, since `Now` is exported and has the type of `Clock`. No `Variant` can be checked across a call through a value, so the cycle cannot be shown to end. Give the wrapper another signature, or keep it unexported and do not use it as a value.
+
 Some things cannot be stored in such a variable:
 
 - a `ResponseWriter`, or a value that holds one, which must not be used after its request ends;
@@ -4461,6 +4477,51 @@ func printTwice(lines []string) {
 Both verify. Each `Fprintln` needs the bound of the line it formats, and `printLines` still knows the bounds of the later lines after it has written the first. A verified caller proves the assumption at each call. It must list the variable by itself too, the variable must still hold the writer it held when the caller was entered, and each argument must come from the caller's parameters or be made in the caller. `printTwice` meets all three, and `logOut' = logOut` tells it that `logOut` still holds the same writer at the second call. A call that fails one of them is reported with `the footprint of what logOut holds may hold memory that what is passed to printLines as lines reaches, and printLines relies on it not doing so`, followed by the reason.
 
 The assumption is about the writer the variable holds on entry. After a function assigns the variable, a write through it writes the footprint of the value it was given. `vego` then keeps what it knew only as far as that value allows, as for a writer that is a parameter the function lists.
+
+#### A writer that nothing assigns
+
+A variable that nothing assigns holds the value its declaration gives it for as long as the program runs. When that value is a file, a function can write through the variable with nothing listed:
+
+```go
+var errOut io.Writer = os.Stderr
+
+// warn writes through a variable that nothing assigns.
+//
+// @Ensures True
+func warn() {
+	if errOut == nil {
+		return
+	}
+	fmt.Fprintln(errOut, "warning")
+}
+```
+
+`warn` verifies. The methods of `*os.File` that `io.Writer` takes write nothing behind their receiver, and `io.Writer` has no states. So a call that runs only those methods changes nothing a caller can see. These calls do:
+
+- a call of a method of the interface on the variable, as `errOut.Write(p)`;
+- a call of a function whose entry prints to the writer, as `fmt.Fprintln(errOut, ...)`;
+- `json.NewEncoder(errOut).Encode(v)`, which calls only the writer's `Write`.
+
+A call of another function that takes the variable may run other methods of the value, so the function must list the variable. If `warn` lists `errOut` anyway, it is reported with `Modifies lists errOut, but warn never needs to modify it`.
+
+Other values need the variable listed, as for a variable that is assigned:
+
+- a value whose methods write behind their receiver, as in `var sink io.Writer = &Counter{}`;
+- a value whose methods change a state, as `Close` changes `closed` in `var in io.Closer = os.Stdin`.
+
+`warn` tests `errOut` in its body. Its caller cannot be asked for `errOut != nil`:
+
+```go
+// warnChecked asks its caller for what the declaration does not show.
+//
+// @Requires errOut != nil
+// @Ensures True
+func warnChecked() {
+	fmt.Fprintln(errOut, "warning")
+}
+```
+
+This is reported with `the Requires clause errOut != nil reads only package-level variables, and their declarations do not show that it holds; test the value in the body instead`. The declaration does not show that `os.Stderr` is not nil.
 
 ### An invariant of variables
 

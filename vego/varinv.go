@@ -895,19 +895,25 @@ func (pv *pkgVerifier) readable(variable *types.Var) bool {
 // code reports it (F42): readGlobal, usableFixed, and in another package
 // initialisersFact.
 func (pv *pkgVerifier) checkValueInitialisers() {
-	pv.initWhy = map[*types.Var]string{}
+	pv.initWhy, pv.inert = map[*types.Var]string{}, map[*types.Var]bool{}
 	// A package with no function to verify is code that is not verified,
 	// its initialisers included.
 	if !slices.ContainsFunc(pv.order, func(fn *funcInfo) bool { return fn.annotated() }) {
 		return
 	}
-	check := func(variable *types.Var, task func(v *fnVerifier)) {
+	check := func(variable *types.Var, task func(v *fnVerifier) bool) {
 		var captured []string
 		saved := pv.capturing
 		pv.capturing = &captured
-		pv.run(&funcInfo{obj: types.NewFunc(variable.Pos(), pv.pass.Pkg, "the initialiser of "+variable.Name(), types.NewSignatureType(nil, nil, nil, nil, nil, false))}, task)
+		inert := false
+		pv.run(&funcInfo{obj: types.NewFunc(variable.Pos(), pv.pass.Pkg, "the initialiser of "+variable.Name(), types.NewSignatureType(nil, nil, nil, nil, nil, false))}, func(v *fnVerifier) {
+			inert = task(v)
+		})
 		pv.capturing = saved
 		if len(captured) == 0 {
+			if inert && !pv.isAssigned(variable) {
+				pv.inert[variable] = true
+			}
 			return
 		}
 		at, msg, _ := strings.Cut(captured[0], "\x00")
@@ -921,9 +927,10 @@ func (pv *pkgVerifier) checkValueInitialisers() {
 		if len(init.Lhs) > 1 {
 			for _, variable := range init.Lhs {
 				if variable != nil && pv.readable(variable) {
-					check(variable, func(v *fnVerifier) {
+					check(variable, func(v *fnVerifier) bool {
 						v.unsupported(init.Rhs.Pos(), variable.Name()+" is given one result of a call with several, and a variable of an interface type or of a function type with a contract "+
 							"must be given a value of its own, which is checked where it is made")
+						return false
 					})
 				}
 			}
@@ -933,7 +940,7 @@ func (pv *pkgVerifier) checkValueInitialisers() {
 			continue
 		}
 		variable := init.Lhs[0]
-		check(variable, func(v *fnVerifier) {
+		check(variable, func(v *fnVerifier) bool {
 			// A conversion that go/ssa makes and the walk does not list is
 			// checked nowhere, as in a function (vcgen); one go/ssa gives
 			// no position may be in this initialiser.
@@ -941,7 +948,7 @@ func (pv *pkgVerifier) checkValueInitialisers() {
 				if !at.IsValid() || init.Rhs.Pos() <= at && at < init.Rhs.End() {
 					v.unsupported(init.Rhs.Pos(), "Go converts a value to an interface type in the initialiser of "+variable.Name()+
 						", and which expression it converts could not be told, so the conversion cannot be checked; give the value a variable of its own type first")
-					return
+					return false
 				}
 			}
 			st := &state{vals: map[*types.Var]value{}, mem: memory{}, brk: logic.Const("brk", logic.Ref), noted: map[string]bool{}}
@@ -950,25 +957,42 @@ func (pv *pkgVerifier) checkValueInitialisers() {
 			v.openUnit(st)
 			v.evalAs(init.Rhs, variable.Type(), st, nil)
 			v.closeUnit(st)
+			// The value is inert when the initialiser converts a value of
+			// a concrete type none of whose methods the interface takes
+			// writes behind its receiver, and the interface has no states:
+			// its footprint is empty when it is made, as at any such
+			// conversion (convert), and no call of its methods adds to it
+			// or changes a state of it, so it stays so (O1).
+			from := v.info.TypeOf(init.Rhs)
+			want := variable.Type()
+			return isIface(want) && from != nil && !isIface(from) && !v.info.Types[init.Rhs].IsNil() &&
+				!v.hasStates(want) && v.writingImplementation(from, want) == nil
 		})
 	}
 	// What importers read of the exported ones.
-	published := map[string]string{}
+	fact := &initialisersFact{Why: map[string]string{}, Inert: map[string]bool{}}
 	for variable, why := range pv.initWhy {
 		if variable.Exported() {
-			published[variable.Name()] = why
+			fact.Why[variable.Name()] = why
 		}
 	}
-	if len(published) > 0 {
-		pv.pass.ExportPackageFact(&initialisersFact{Why: published})
+	for variable := range pv.inert {
+		if variable.Exported() {
+			fact.Inert[variable.Name()] = true
+		}
+	}
+	if len(fact.Why) > 0 || len(fact.Inert) > 0 {
+		pv.pass.ExportPackageFact(fact)
 	}
 }
 
 // initialisersFact holds, for each exported variable of a package whose
 // initialiser checkValueInitialisers found wanting, why; a read of it in
-// another package reports it.
+// another package reports it. Inert holds the exported variables that
+// inertFixed is true of.
 type initialisersFact struct {
-	Why map[string]string
+	Why   map[string]string
+	Inert map[string]bool
 }
 
 func (*initialisersFact) AFact() {}
@@ -1001,4 +1025,20 @@ func (pv *pkgVerifier) initialiserWhy(variable *types.Var) string {
 		return ""
 	}
 	return fact.Why[variable.Name()]
+}
+
+// inertFixed reports whether a fixed variable of an interface type holds a
+// value whose footprint is empty and stays so, and that has no states, as
+// checkValueInitialisers found of its initialiser.
+func (pv *pkgVerifier) inertFixed(variable *types.Var) bool {
+	pkg := variable.Pkg()
+	if pkg == nil || variable.Parent() != pkg.Scope() {
+		return false
+	}
+	if pkg == pv.pass.Pkg {
+		return pv.inert[variable]
+	}
+	pv.initialiserWhy(variable)
+	fact := pv.initOf[pkg]
+	return fact != nil && fact.Inert[variable.Name()]
 }

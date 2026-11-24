@@ -2,7 +2,11 @@
 // package may try to set.
 package varcodelib
 
-import "context"
+import (
+	"context"
+	"io"
+	"os"
+)
 
 // Event runs when something happens.
 //
@@ -26,3 +30,7 @@ var Started Event = func() {}
 //
 // @Ensures True
 func Ping() {}
+
+// Log holds a file, which writing through changes nothing an importer can
+// see.
+var Log io.Writer = os.Stderr
