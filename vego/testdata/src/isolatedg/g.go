@@ -84,3 +84,39 @@ func Plain(b *isolatedq.Plain) {
 	isolatedq.Look(b)
 	count = total - 1
 }
+
+// Shown formats by dividing by what the invariant keeps positive.
+type Shown struct{}
+
+// String reads the group.
+//
+// @Ensures True
+func (Shown) String() (s string) {
+	_ = 10 / (total - count)
+	return "shown"
+}
+
+// FormatsShown formats a Shown while the invariant is broken; fmt runs its
+// String, a method of this package that assumes the invariant.
+//
+// @Modifies count
+// @Ensures True
+func FormatsShown() (r string) {
+	count = total
+	r = fmt.Sprint(Shown{}) // want `vego: invariant of count, total may not hold before the call to Sprint, which may assume it: count < total`
+	count = total - 1
+	return r
+}
+
+// Builds formats into a builder of its own while the invariant is broken;
+// every method of a strings.Builder is isolated.
+//
+// @Modifies count
+// @Ensures True
+func Builds() (r string) {
+	var b strings.Builder
+	count = total
+	fmt.Fprintf(&b, "%d", 1)
+	count = total - 1
+	return b.String()
+}

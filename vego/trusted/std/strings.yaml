@@ -1,6 +1,7 @@
 version: 1
 
-# Every entry of this file is isolated: read from the source of Go 1.26.6 and
+# The package is isolated as a whole, every function and method of it and not
+# only the entries of this file: read from the source of Go 1.26.6 and
 # 1.27.3, package strings has no exported variable and no package-level
 # variable that holds code. The functions that take a function call only that
 # function, and the methods of Builder run nothing.

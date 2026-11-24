@@ -3050,9 +3050,17 @@ iowrap	iowrap.ToBoth	49	290235	0
 iowrap	iowrap.drain	1	46	0
 iowrap	keepslib.Consume	1	711	0
 iowrap	keepslib.Joined	1	5372	0
+isolatedg	(*strings.Builder).String	1	3351	0
+isolatedg	(*strings.Builder).Write	4	17410	0
+isolatedg	(isolatedg.Shown).String	5	3691	0
+isolatedg	fmt.Fprintf	1	4589	0
 isolatedg	fmt.Sprint	1	3498	0
+isolatedg	fmt.Sprintf	1	4468	0
+isolatedg	io.Writer.Write	3	7630	0
+isolatedg	isolatedg.Builds	23	78630	0
 isolatedg	isolatedg.Check	5	3691	0
 isolatedg	isolatedg.Formats	15	10837	0
+isolatedg	isolatedg.FormatsShown	15	10381	0
 isolatedg	isolatedg.Hands	16	12383	0
 isolatedg	isolatedg.Logs	15	11245	0
 isolatedg	isolatedg.Plain	13	11234	0

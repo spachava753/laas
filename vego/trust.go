@@ -1350,3 +1350,31 @@ func nameUnnamed(fn *funcInfo, entry *trustEntry) {
 func (entry *trustEntry) isIsolated() bool {
 	return entry.isolated || entry.file != nil && entry.file.isolated
 }
+
+// isolatedPackages returns the packages that a shipped file claims, at its
+// top, to be isolated as a whole: every function and method of the package
+// runs no code but what its call hands it. TestIsolatedHooks holds the
+// claim against the hooks each package exposes.
+func isolatedPackages() map[string]bool {
+	isolatedOnce.Do(func() {
+		isolatedPkgs = map[string]bool{}
+		for _, file := range shippedContracts() {
+			if !file.isolated {
+				continue
+			}
+			for key := range file.entries {
+				name := key
+				if strings.HasPrefix(key, "(") {
+					name = strings.TrimPrefix(key[1:strings.Index(key, ")")], "*")
+				}
+				isolatedPkgs[name[:strings.LastIndex(name, ".")]] = true
+			}
+		}
+	})
+	return isolatedPkgs
+}
+
+var (
+	isolatedOnce sync.Once
+	isolatedPkgs map[string]bool
+)

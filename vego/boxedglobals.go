@@ -505,6 +505,41 @@ func (pv *pkgVerifier) isolatedCall(call *ast.CallExpr, callee *types.Func) bool
 			return false
 		}
 	}
+	// An argument converted to an interface hands the callee the methods of
+	// its type, which it may run, as fmt runs String and the Write of the
+	// writer it prints to: each must be isolated too.
+	sig := callee.Type().(*types.Signature)
+	for i, arg := range call.Args {
+		param := sig.Params().Len() - 1
+		if i < param || !sig.Variadic() {
+			param = min(i, sig.Params().Len()-1)
+		}
+		if param < 0 {
+			break
+		}
+		want := sig.Params().At(param).Type()
+		if sig.Variadic() && param == sig.Params().Len()-1 && !call.Ellipsis.IsValid() {
+			want = want.(*types.Slice).Elem()
+		}
+		t := pv.info.TypeOf(arg)
+		if !isIface(want) || t == nil || isIface(t) {
+			continue
+		}
+		methods := types.NewMethodSet(t)
+		for j := range methods.Len() {
+			method, ok := methods.At(j).Obj().(*types.Func)
+			// Code of another package cannot call an unexported method.
+			if !ok || !method.Exported() && method.Pkg() != callee.Pkg() {
+				continue
+			}
+			if isolatedPackages()[method.Pkg().Path()] {
+				continue
+			}
+			if entry := pv.entryFor(pv.originOf(method).FullName()); entry == nil || !entry.isIsolated() {
+				return false
+			}
+		}
+	}
 	return true
 }
 
