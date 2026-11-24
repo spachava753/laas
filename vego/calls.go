@@ -789,13 +789,9 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	for _, t := range written {
 		v.havoc(st, t, guard)
 	}
-	if changed := v.groupsCovered(written, v.varGroups); len(changed) > 0 {
-		for _, g := range changed {
-			if g.refused == "" {
-				for _, t := range v.groupHolds(g, st, st.mem) {
-					st.assume(logic.Implies(logic.And(guard...), t))
-				}
-			}
+	for _, g := range v.groupsCovered(written, v.varGroups) {
+		if g.refused == "" {
+			v.assumeGroup(st, guard, st.mem, g, "the call to "+name+" at "+v.placeOf(call.Pos()))
 		}
 	}
 	var applied map[*types.Var]*logic.Term

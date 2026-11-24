@@ -4416,14 +4416,15 @@ func SeenCount() (n int) {
 `markSeen` and `SeenCount` verify. `SeenCount` relies on the invariant for `n >= 0`. `markUncounted` is reported:
 
 ```text
-vego: invariant of tagsSeen, tagCount may not hold on return: 0 <= tagCount And tagCount = |tagsSeen|
+vego: invariant of tagsSeen, tagCount may not hold on return: tagCount = |tagsSeen|; it was not kept from entry, since |tagsSeen| may
+have changed: the assignment to tagsSeen[name] at globals.go:277:3 may write it
 ```
 
-`vego` assumes the invariant when a function that touches the variables is called. Such a function tagsSeen one of them, in its body or its contract, or calls a function that does. `vego` proves the invariant in three places:
+`vego` assumes the invariant when a function that names one of the variables, in its body or its contract, is called, and after a call that may have changed them. `vego` proves the invariant in three places:
 
 - when the package is initialised, from what the declarations give the variables;
 - on return of every function whose `Modifies` covers one of the variables;
-- before every call that may reach a function that touches them, also through a function value or an interface value.
+- before every call that may reach a function that names them, also through a function value or an interface value, or through code of the package that the package stored into memory it did not make.
 
 Between those points the invariant may be broken, as it is in `markSeen` between the two writes.
 
@@ -4431,7 +4432,8 @@ The invariant can be relied on only when nothing else changes the variables. It 
 
 - a variable of the group is exported;
 - a function that is not verified changes one, also a test or an `init` function without a contract;
-- a use lets a reference to what one refers to out of it, as returning the map or passing it to a function does. A write through that reference could break the invariant without naming the variable.
+- a use lets a reference to what one refers to out of it, as returning the map does, or passing it to a function that may keep it or write through it. A write through that reference could break the invariant without naming the variable. A verified function that keeps nothing of what it is handed and writes nothing through it, and a trusted one whose entry neither keeps nor modifies it, may be handed the variable;
+- the invariant names a variable outside its group that the build changes. Declare such variables in the same `var` declaration.
 
 A test that resets such a variable calls a verified function of the package that does it.
 
@@ -4531,6 +4533,8 @@ func countHit() {
 ```
 
 `countHit` verifies. The proof says what one call does when no other goroutine reads or writes `hits` while it runs. It does not say that the program counts correctly. An HTTP server runs each handler on a goroutine of its own. Two handlers that call `countHit` at once may both read the same value and both write the same result, so one request is lost, and `go test -race` reports a data race. `vego` does not check that a mutex guards a variable. Guard it yourself, and run the race detector.
+
+An invariant of variables is proved under the same condition. It holds only where at most one goroutine at a time runs functions of the package that name its variables. Two handlers that change the group at once may leave it broken, and a third may then read it while `vego` assumed that it held.
 
 ### Variables and initialisation
 

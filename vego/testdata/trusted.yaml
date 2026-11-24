@@ -2234,6 +2234,16 @@ trusted:
         requires: ["True"]
     modifies: []
 
+  letoutq.current:
+    reason: Test helper that returns the package's box.
+    vouches: [b]
+    modifies: []
+
+  letoutq.Slot:
+    reason: Test helper that returns the package's box.
+    vouches: [b]
+    modifies: []
+
 # States of interfaces of another module, and contracts that speak of them.
 state:
   ifacestatelib.Conn:

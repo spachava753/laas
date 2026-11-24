@@ -276,7 +276,7 @@ func markUncounted(name string) {
 	if _, ok := tagsSeen[name]; !ok {
 		tagsSeen[name] = true
 	}
-} // want `^vego: invariant of tagsSeen, tagCount may not hold on return: 0 <= tagCount And tagCount = \|tagsSeen\|$`
+} // want `^vego: invariant of tagsSeen, tagCount may not hold on return: tagCount = \|tagsSeen\|; it was not kept from entry, since \|tagsSeen\| may have changed: the assignment to tagsSeen\[name\] at globals.go:277:3 may write it$`
 
 // SeenCount is not negative.
 //

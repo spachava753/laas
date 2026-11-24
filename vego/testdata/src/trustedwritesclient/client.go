@@ -80,5 +80,5 @@ func Applies() {
 //
 // @Ensures True
 func Hooked() {
-	trustedwrites.TickHook() // want `^vego: the trusted contract of TickHook does not list trustedwrites.Table, which its body writes at lib.go:\d+ in code that a call through a value may run; an entry lists what its function changes, as in modifies: \[Table\]$` `^vego: the trusted contract of TickHook does not list trustedwrites.Ticks, which its body writes at lib.go:\d+ in code that a call through a value may run; an entry lists what its function changes, as in modifies: \[Ticks\]$`
+	trustedwrites.TickHook() // want `^vego: the trusted contract of TickHook does not list trustedwrites.Table, which its body writes at lib.go:\d+ in code that a call through a value may run; an entry lists what its function changes, as in modifies: \[Table\]$` `^vego: the trusted contract of TickHook does not list trustedwrites.Ticks, which its body writes at lib.go:8 in bump in code that a call through a value may run; an entry lists what its function changes, as in modifies: \[Ticks\]$`
 }

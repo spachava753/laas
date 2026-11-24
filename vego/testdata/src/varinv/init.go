@@ -21,7 +21,7 @@ var depth int
 // @Ensures True
 func init() {
 	depth = -1
-} // want `^vego: invariant of depth may not hold on return: 0 <= depth$`
+} // want `^vego: invariant of depth may not hold on return: 0 <= depth; it was not kept from entry, since depth may have changed: the assignment to depth at init.go:23:2 may write it$`
 
 // Steps relies on step.
 //

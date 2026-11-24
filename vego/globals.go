@@ -1128,6 +1128,9 @@ func (v *fnVerifier) knownConstantTerm(sink *state, known knownValue, leaf *logi
 // package-level variable that is not an error.
 func (e *specEnv) locateVariable(variable *types.Var, steps []logic.Step, when logic.When) (reached, error) {
 	spelled := e.v.spelling(variable)
+	if e.v.groupNames != nil {
+		e.v.groupNames[variable] = true
+	}
 	if e.v.isAssigned(variable) || e.v.initStorage[variable] {
 		return e.locateAssigned(variable, steps, when)
 	}

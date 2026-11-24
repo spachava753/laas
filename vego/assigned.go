@@ -167,7 +167,7 @@ func (v *fnVerifier) readGlobal(variable *types.Var, pos token.Pos, st *state, g
 // that storage and what an entry of a parameter of its type covers, as
 // also. For a fixed variable, whose value is a constant, it covers what the
 // variable refers to.
-func (v *fnVerifier) variableTarget(fn *funcInfo, m *modTarget, variable *types.Var, sink *state, mem memory) (shape, target, error) {
+func (v *fnVerifier) variableTarget(fn *funcInfo, m *modTarget, variable *types.Var, args map[*types.Var]value, sink *state, mem memory) (shape, target, error) {
 	spelled := v.spelling(variable)
 	if fn.spelling().valueOf != nil || fn.spelling().methodOf != nil {
 		return shape{}, target{}, fmt.Errorf("%s is a package-level variable, which a Modifies clause of a type cannot name yet", spelled)
@@ -182,12 +182,12 @@ func (v *fnVerifier) variableTarget(fn *funcInfo, m *modTarget, variable *types.
 		trimmed.steps = rest
 		m = &trimmed
 	}
-	return v.variableTargetAny(fn, m, variable, sink, mem)
+	return v.variableTargetAny(fn, m, variable, args, sink, mem)
 }
 
 // variableTargetAny is variableTarget for a variable of any package, as the
 // state of a package covers them.
-func (v *fnVerifier) variableTargetAny(fn *funcInfo, m *modTarget, variable *types.Var, sink *state, mem memory) (shape, target, error) {
+func (v *fnVerifier) variableTargetAny(fn *funcInfo, m *modTarget, variable *types.Var, args map[*types.Var]value, sink *state, mem memory) (shape, target, error) {
 	spelled := v.spelling(variable)
 	symbolic := mem == nil
 	t := variable.Type()
@@ -209,7 +209,7 @@ func (v *fnVerifier) variableTargetAny(fn *funcInfo, m *modTarget, variable *typ
 			}
 			root.val = val
 		}
-		return v.walkTarget(fn, m, nil, root, t, symbolic, nil, sink, mem)
+		return v.walkTarget(fn, m, nil, root, t, symbolic, args, sink, mem)
 	}
 	cells, ref := v.globalCells(variable), globalRef(variable)
 	root := located{typ: t, ref: ref, at: logic.IntLit(0), cells: cells}
@@ -219,7 +219,7 @@ func (v *fnVerifier) variableTargetAny(fn *funcInfo, m *modTarget, variable *typ
 		v.noteTyped(sink, root.val, t)
 	}
 	if len(m.steps) > 0 {
-		return v.walkTarget(fn, m, nil, root, t, symbolic, nil, sink, mem)
+		return v.walkTarget(fn, m, nil, root, t, symbolic, args, sink, mem)
 	}
 	// The storage itself.
 	lo, hi := bounds(cells)
@@ -581,7 +581,7 @@ func (v *fnVerifier) reachedTargets(call *ast.CallExpr, fn *funcInfo, sink *stat
 			continue
 		}
 		m := &modTarget{name: variable.Name(), text: v.spelling(variable)}
-		form, t, err := v.variableTargetAny(v.fn, m, variable, sink, mem)
+		form, t, err := v.variableTargetAny(v.fn, m, variable, nil, sink, mem)
 		if err != nil {
 			// What the call may write cannot be named, so it cannot be
 			// forgotten: the call is not followed (F20).

@@ -270,3 +270,28 @@ func ReadAroundAnswer(w io.Writer) (r bool) {
 	w.Write([]byte("x"))
 	return a == hits
 }
+
+var entries = map[int]int{}
+
+// resetEntries makes entries an assigned variable.
+//
+// @Modifies entries
+// @Ensures True
+func resetEntries() { entries = map[int]int{} }
+
+// putEntry writes the entry of a parameter key of an assigned map, which
+// Modifies names as for a parameter (F31 of the review of step 1 of part 2).
+//
+// @Requires entries != nil
+// @Modifies entries[k]
+// @Ensures True
+func putEntry(k int) { entries[k] = 1 }
+
+// putOther writes another key.
+//
+// @Requires entries != nil And k < 100
+// @Modifies entries[k]
+// @Ensures True
+func putOther(k int) {
+	entries[k+1] = 1 // want `entries\[k \+ 1\] is assigned, which putOther may not modify`
+}

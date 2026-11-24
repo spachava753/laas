@@ -228,7 +228,7 @@ func (v *fnVerifier) stateTarget(fn *funcInfo, m *modTarget, pkg *types.Package,
 				}
 			}
 			whole := &modTarget{name: name, text: m.text, clause: m.clause}
-			form, t, err := v.variableTargetAny(fn, whole, variable, sink, mem)
+			form, t, err := v.variableTargetAny(fn, whole, variable, nil, sink, mem)
 			if err != nil {
 				continue
 			}
@@ -451,13 +451,15 @@ func (pv *pkgVerifier) exportWrites() {
 	// What a call with no static callee may reach.
 	reachValue := func(sig *types.Signature) []*writes {
 		var found []*writes
-		for obj, w := range byFunc {
+		for _, obj := range slices.SortedFunc(maps.Keys(byFunc), func(a, b *types.Func) int { return int(a.Pos() - b.Pos()) }) {
+			w := byFunc[obj]
 			objSig := obj.Type().(*types.Signature)
 			if (asValue[obj] || obj.Exported() && objSig.Recv() == nil) && types.Identical(withoutRecv(objSig), withoutRecv(sig)) {
 				found = append(found, w)
 			}
 		}
-		for lit, w := range byLit {
+		for _, lit := range slices.SortedFunc(maps.Keys(byLit), func(a, b *ast.FuncLit) int { return int(a.Pos() - b.Pos()) }) {
+			w := byLit[lit]
 			if litSig, ok := pv.info.TypeOf(lit).(*types.Signature); ok && types.Identical(litSig, withoutRecv(sig)) {
 				found = append(found, w)
 			}
@@ -467,7 +469,8 @@ func (pv *pkgVerifier) exportWrites() {
 	reachMethod := func(method *types.Func) []*writes {
 		var found []*writes
 		sig := withoutRecv(method.Type().(*types.Signature))
-		for obj, w := range byFunc {
+		for _, obj := range slices.SortedFunc(maps.Keys(byFunc), func(a, b *types.Func) int { return int(a.Pos() - b.Pos()) }) {
+			w := byFunc[obj]
 			objSig := obj.Type().(*types.Signature)
 			if objSig.Recv() != nil && obj.Name() == method.Name() && types.Identical(withoutRecv(objSig), sig) {
 				found = append(found, w)
@@ -493,7 +496,15 @@ func (pv *pkgVerifier) exportWrites() {
 		}
 		return changed
 	}
-	everyone := slices.Concat(slices.Collect(maps.Values(byFunc)), slices.Collect(maps.Values(byLit)))
+	// In the order of the source, so that where a write is said to be is
+	// the same in every run.
+	var everyone []*writes
+	for _, obj := range slices.SortedFunc(maps.Keys(byFunc), func(a, b *types.Func) int { return int(a.Pos() - b.Pos()) }) {
+		everyone = append(everyone, byFunc[obj])
+	}
+	for _, lit := range slices.SortedFunc(maps.Keys(byLit), func(a, b *ast.FuncLit) int { return int(a.Pos() - b.Pos()) }) {
+		everyone = append(everyone, byLit[lit])
+	}
 	for changed := true; changed; {
 		changed = false
 		for _, w := range everyone {

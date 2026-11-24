@@ -1908,7 +1908,7 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 			return v.stateTarget(fn, m, pkg, sink, mem)
 		}
 		if variable := v.modifiesVariableOf(fn, m); variable != nil {
-			return v.variableTarget(fn, m, variable, sink, mem)
+			return v.variableTarget(fn, m, variable, args, sink, mem)
 		}
 		if why := v.notImported(fn, m); why != "" {
 			return shape{}, target{}, errors.New(why)

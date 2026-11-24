@@ -21,3 +21,24 @@ func Table() (r []int) { return table }
 var m int
 
 func init() { m = 1 }
+
+// @Invariant lo = 0 Or lo < hi // want `^vego: the invariant of lo cannot be relied on: it names hi, which is not a variable of its group and which the build changes; declare hi in the same var declaration$`
+var lo int
+
+var hi = 10
+
+// setLo sets lo below hi.
+//
+// @Modifies lo
+// @Ensures True
+func setLo() {
+	if hi > 5 {
+		lo = 5
+	}
+}
+
+// setHi changes hi, which is not of lo's group.
+//
+// @Modifies hi
+// @Ensures True
+func setHi() { hi = 1 }

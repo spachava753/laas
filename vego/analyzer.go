@@ -653,6 +653,10 @@ type pkgVerifier struct {
 	groupOf   map[*types.Var]*varGroup
 	touched   map[*funcInfo][]*varGroup
 	touchedAt map[*callNode]map[*varGroup]bool
+	// letOutNodes are the code of the package that it lets out into memory
+	// it did not make; see letOut.
+	letOutNodes []*callNode
+	letOutDone  bool
 	// fixed holds what is known of the package-level variables of the
 	// package that are not errors and that nothing changes, fixedOf what
 	// other packages published of theirs, and hidden the code that may run

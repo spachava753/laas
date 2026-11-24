@@ -1790,7 +1790,10 @@ globals	globals.hidden2	1	745	0
 globals	globals.hitOnce	7	5241	0
 globals	globals.miss	8	6014	0
 globals	globals.ordered	8	6113	0
+globals	globals.putEntry	6	9292	0
+globals	globals.putOther	6	10608	0
 globals	globals.reader	3	804	0
+globals	globals.resetEntries	5	3475	0
 globals	globals.setHits	5	2848	0
 globals	globals.usesHidden2	6	3298	0
 globals	globals.valued	1	745	0
@@ -2200,7 +2203,7 @@ guide	guide.SamePricer	1	744	0
 guide	guide.Save	13	29339	0
 guide	guide.SaveUnlisted	13	31363	0
 guide	guide.SearchLocked	21	38551	0
-guide	guide.SeenCount	2	1712	0
+guide	guide.SeenCount	2	1722	0
 guide	guide.ServeRow	41	545792	10
 guide	guide.Served	1	46	0
 guide	guide.Service	1	917	0
@@ -2318,8 +2321,8 @@ guide	guide.listsSizes	1	453	0
 guide	guide.logNumber	3	927	0
 guide	guide.logRecord	1	743	0
 guide	guide.lookupTask	11	3765	0
-guide	guide.markSeen	15	27487	0
-guide	guide.markUncounted	10	14204	0
+guide	guide.markSeen	13	25266	0
+guide	guide.markUncounted	8	14305	0
 guide	guide.open	3	14391	0
 guide	guide.record	1	138	0
 guide	guide.resetAll	5	2937	0
@@ -3167,6 +3170,14 @@ leetcode	leetcode.SearchStagnates	25	86247	0
 leetcode	leetcode.SelectionSort	49	241407	0
 leetcode	leetcode.TwoSum	33	153483	0
 leetcode	leetcode.TwoSumSameIndex	25	71382	0
+letoutp	letoutp.Bump	13	8829	0
+letoutp	letoutp.Install	6	1219	0
+letoutp	letoutp.check	5	3691	0
+letoutp	letoutp.init of count, total	2	1059	0
+letoutq	letoutq.Hook	3	255	0
+letoutq	letoutq.Slot	1	261	0
+letoutq	letoutq.Tick	8	4254	0
+letoutq	letoutq.current	1	261	0
 lib	(*lib.Account).Deposit	8	7515	0
 lib	(*lib.Account).Reset	9	5750	0
 lib	lib.Broken	2	238	0
@@ -5049,26 +5060,38 @@ variadic	variadic.countAll	2	607	0
 variadic	variadic.join	1	4825	0
 variadic	variadic.report	1	736	0
 varinv	io.Writer.Write	5	18168	0
-varinv	varinv.Divide	3	1666	0
-varinv	varinv.Hits	2	1087	0
-varinv	varinv.Size	2	1712	0
-varinv	varinv.Steps	3	1632	0
-varinv	varinv.askThenPut	15	15397	0
-varinv	varinv.forget	10	14438	0
-varinv	varinv.hit	9	6182	0
-varinv	varinv.init	12	7274	0
+varinv	varinv.Blank	6	2939	0
+varinv	varinv.Divide	3	1678	0
+varinv	varinv.Hits	2	1093	0
+varinv	varinv.NamesCount	2	644	0
+varinv	varinv.Size	2	1722	0
+varinv	varinv.Steps	3	1644	0
+varinv	varinv.askThenPut	9	11140	0
+varinv	varinv.blank	7	3292	0
+varinv	varinv.count	2	607	0
+varinv	varinv.discount	10	27630	0
+varinv	varinv.forget	8	14519	0
+varinv	varinv.hit	8	5827	0
+varinv	varinv.init	13	8204	0
 varinv	varinv.init of cache, size	2	1207	0
 varinv	varinv.init of depth	1	417	0
 varinv	varinv.init of hits	1	417	0
 varinv	varinv.init of limit	1	425	0
+varinv	varinv.init of names	1	686	0
+varinv	varinv.init of prices	1	894	0
 varinv	varinv.init of ready	1	599	0
 varinv	varinv.init of step	1	425	0
-varinv	varinv.put	15	27922	0
-varinv	varinv.putThenAsk	16	31204	0
-varinv	varinv.reset	6	3757	0
-varinv	varinv.setLimit	6	4044	0
-varinv	varinv.writeBroken	12	12740	0
+varinv	varinv.put	13	25659	0
+varinv	varinv.putThenAsk	14	29061	0
+varinv	varinv.reprice	11	21537	0
+varinv	varinv.reset	7	4663	0
+varinv	varinv.setLimit	6	4068	0
+varinv	varinv.setPrice	7	11580	0
+varinv	varinv.writeBroken	13	14563	0
 varinvbad	varinvbad.Table	1	46	0
+varinvbad	varinvbad.init of lo	0	0	0
+varinvbad	varinvbad.setHi	5	2848	0
+varinvbad	varinvbad.setLo	5	3585	0
 vouched	vouched.AtEnd	5	7101	0
 vouched	vouched.AtEndUnvouched	4	5537	0
 vouched	vouched.AtEndWrong	5	7445	0

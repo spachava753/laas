@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -31,6 +32,9 @@ type varGroup struct {
 	// refused says why the invariants cannot be used, as reported at the
 	// declaration; nothing is assumed of the group then.
 	refused string
+	// set holds the clauses as the frame reads invariants: a set with no
+	// value, whose names are the group's variables.
+	set *invariantSet
 }
 
 // varDocumented returns the var declaration whose doc comment a comment
@@ -82,6 +86,7 @@ func (pv *pkgVerifier) addVarInvariant(gen *ast.GenDecl, spec *ast.ValueSpec, va
 	}
 	if group == nil {
 		group = &varGroup{vars: vars, gen: gen, spec: spec}
+		group.set = &invariantSet{owner: &funcInfo{}, group: group}
 		pv.varGroups = append(pv.varGroups, group)
 		if pv.groupOf == nil {
 			pv.groupOf = map[*types.Var]*varGroup{}
@@ -98,6 +103,7 @@ func (pv *pkgVerifier) addVarInvariant(gen *ast.GenDecl, spec *ast.ValueSpec, va
 	}
 	c.node = node
 	group.clauses = append(group.clauses, c)
+	group.set.clauses = group.clauses
 }
 
 // groupName spells the variables of a group.
@@ -227,7 +233,7 @@ func (pv *pkgVerifier) groupEscape(g *varGroup) string {
 				return true
 			}
 			use := pv.useOf(stack)
-			if !use.escape || use.change == "is assigned" && pv.assignedFresh(stack) || pathWritten(pv.info, stack) {
+			if !use.escape || use.change == "is assigned" && pv.assignedFresh(stack) || pathWritten(pv.info, stack) || pv.handedToReader(stack) {
 				return true
 			}
 			found = fmt.Sprintf("the use of %s at %s lets a reference to what it refers to out of it", variable.Name(), pv.placeOfPos(id.Pos()))
@@ -394,9 +400,29 @@ func (v *fnVerifier) groupHolds(g *varGroup, sink *state, mem memory) []*logic.T
 // return of a function that may have changed them.
 func (v *fnVerifier) proveGroups(st *state, guard []*logic.Term, groups []*varGroup, pos token.Pos, where string) {
 	for _, g := range groups {
-		for i, t := range v.groupHolds(g, st, st.mem) {
-			v.check(st, guard, t, pos, "invariant of %s may not hold %s: %s", v.groupName(g), where, g.clauses[i].text)
+		// A clause is kept by frame where nothing it reads changed since a
+		// point where it held, as a type's invariant is (Invariants kept by
+		// frame).
+		step := invariantStep{set: g.set}
+		saved := v.groupReading
+		v.groupReading = true
+		env := v.invariantEnv(g.set, st, st.mem, nil, nil)
+		for _, c := range g.clauses {
+			v.checkClauseFramed(c, env, st, guard, pos, fmt.Sprintf("invariant of %s may not hold %s", v.groupName(g), where),
+				func(node *logic.Node, _ *logic.Term) bool { return v.framedStep(st, step, st.mem, c, node) })
 		}
+		v.groupReading = saved
+	}
+}
+
+// assumeGroup assumes the invariants of a group read in mem, and keeps
+// where they held for a frame, when they hold with no condition.
+func (v *fnVerifier) assumeGroup(st *state, guard []*logic.Term, mem memory, g *varGroup, from string) {
+	for _, t := range v.groupHolds(g, st, mem) {
+		st.assume(logic.Implies(logic.And(guard...), t))
+	}
+	if len(guard) == 0 {
+		st.keep(invariantStep{set: g.set}, mem, from)
 	}
 }
 
@@ -405,6 +431,9 @@ func (v *fnVerifier) proveGroups(st *state, guard []*logic.Term, groups []*varGr
 func (v *fnVerifier) groupsCovered(targets []target, among []*varGroup) []*varGroup {
 	var found []*varGroup
 	for _, g := range among {
+		if g.refused != "" {
+			continue
+		}
 		for _, variable := range g.vars {
 			var covers func(t target) bool
 			if v.isAssigned(variable) {
@@ -449,7 +478,25 @@ func (pv *pkgVerifier) checkGroupsInitialised() {
 				v.noteGlobal(st, variable)
 				v.put(st, v.globalCells(variable), globalRef(variable), logic.IntLit(0), val)
 			}
-			for i, t := range v.groupHolds(g, st, st.mem) {
+			v.groupNames = map[*types.Var]bool{}
+			holds := v.groupHolds(g, st, st.mem)
+			// An invariant reads only the variables of its group, and
+			// variables that nothing in the build changes: a writer of any
+			// other would not know to restore it (F29 of the review of
+			// step 1 of part 2).
+			for _, variable := range slices.SortedFunc(maps.Keys(v.groupNames), func(a, b *types.Var) int { return int(a.Pos() - b.Pos()) }) {
+				_, written := pv.writtenInBuild()[errorKey(variable)]
+				if !slices.Contains(g.vars, variable) && (pv.reassigned[variable] || written || pv.isAssigned(variable)) {
+					g.refused = fmt.Sprintf("it names %s, which is not a variable of its group and which the build changes; declare %s in the same var declaration", v.spelling(variable), v.spelling(variable))
+					pv.report(g.clauses[0].pos, "the invariant of %s cannot be relied on: %s", pv.groupName(g), g.refused)
+					break
+				}
+			}
+			v.groupNames = nil
+			if g.refused != "" {
+				return
+			}
+			for i, t := range holds {
 				v.check(st, nil, t, g.clauses[i].pos, "invariant of %s may not hold when the package is initialised: %s; "+
 					"it must follow from what the declarations give the variables", pv.groupName(g), g.clauses[i].text)
 			}
@@ -473,9 +520,18 @@ func (v *fnVerifier) callGroups(call *ast.CallExpr, fn *funcInfo) []*varGroup {
 	if fn.trust != nil {
 		edges = v.callGraph().sites[call]
 	}
+	reached := []*callNode{}
 	for _, e := range edges {
+		reached = append(reached, e.to)
+	}
+	// A call into code of another package may run what the package let
+	// out into memory it did not make (F13).
+	if fn.obj == nil || fn.obj.Pkg() != v.pass.Pkg || fn.trust != nil || fn.valueOf != nil || fn.methodOf != nil {
+		reached = append(reached, v.letOut()...)
+	}
+	for _, node := range reached {
 		for _, g := range v.varGroups {
-			if v.touchedAt[e.to][g] && g.refused == "" && !slices.Contains(found, g) {
+			if v.touchedAt[node][g] && g.refused == "" && !slices.Contains(found, g) {
 				found = append(found, g)
 			}
 		}
@@ -500,5 +556,156 @@ func (pv *pkgVerifier) groupsNamed(fn *funcInfo) []*varGroup {
 			found = append(found, g)
 		}
 	}
+	return found
+}
+
+// handedToReader reports whether the use at the end of stack is an argument
+// of a call of a function that keeps nothing of it and writes nothing
+// through it: a verified function whose summary keeps nothing of the
+// parameter and whose Modifies does not name it, or a trusted function
+// whose entry neither keeps nor modifies it. Such a callee only reads what
+// the variable refers to while it runs, so the memory is still reached only
+// through the variable, and a callee that writes nothing of it cannot break
+// the invariant it does not know of.
+func (pv *pkgVerifier) handedToReader(stack []ast.Node) bool {
+	if len(stack) < 2 {
+		return false
+	}
+	arg := stack[len(stack)-1].(ast.Expr)
+	call, ok := stack[len(stack)-2].(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	index := slices.IndexFunc(call.Args, func(e ast.Expr) bool { return e == arg })
+	callee := pv.calleeAt(call)
+	if index < 0 || callee == nil || call.Ellipsis.IsValid() {
+		return false
+	}
+	sig := callee.Type().(*types.Signature)
+	if index >= sig.Params().Len() || sig.Variadic() && index >= sig.Params().Len()-1 {
+		return false
+	}
+	param := sig.Params().At(index)
+	fn := pv.contractOf(callee)
+	switch {
+	case fn == nil:
+		return false
+	case fn.trust != nil:
+		return !slices.ContainsFunc(fn.trust.keeps, func(item trustKeep) bool { return item.name == param.Name() }) &&
+			!slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.name == param.Name() })
+	}
+	summary := pv.ownSummaryOf(fn)
+	at := slices.IndexFunc(fn.params, func(p *types.Var) bool { return p.Name() == param.Name() })
+	return summary != nil && at >= 0 && at < len(summary.keeps) && !summary.keeps[at] &&
+		!slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.name == param.Name() })
+}
+
+// letOut returns the nodes of the call graph, functions, methods, and
+// literals of the package, that the package lets out into memory it did
+// not make: stored through a pointer, a field, or an element, or into a
+// variable of another package, or handed to a function of another package
+// that may keep what it is handed. Code of another package can run them
+// at any later call, so a call of a function of another package counts as
+// reaching each of them (F13 of the design review, F30 of the review of
+// step 1 of part 2).
+func (pv *pkgVerifier) letOut() []*callNode {
+	if pv.letOutDone {
+		return pv.letOutNodes
+	}
+	pv.letOutDone = true
+	g := pv.callGraph()
+	var found []*callNode
+	add := func(e ast.Expr) {
+		var visit func(e ast.Expr)
+		visit = func(e ast.Expr) {
+			switch x := ast.Unparen(e).(type) {
+			case *ast.FuncLit:
+				if node := g.lits[x]; node != nil && !slices.Contains(found, node) {
+					found = append(found, node)
+				}
+			case *ast.Ident:
+				if named, ok := pv.info.Uses[x].(*types.Func); ok && named.Pkg() == pv.pass.Pkg {
+					if node := g.byObj[named.Origin()]; node != nil && !slices.Contains(found, node) {
+						found = append(found, node)
+					}
+				}
+			case *ast.SelectorExpr:
+				if selection := pv.info.Selections[x]; selection != nil && selection.Kind() == types.MethodVal {
+					if method, ok := selection.Obj().(*types.Func); ok && method.Pkg() == pv.pass.Pkg {
+						if node := g.byObj[method.Origin()]; node != nil && !slices.Contains(found, node) {
+							found = append(found, node)
+						}
+					}
+				}
+			case *ast.CompositeLit:
+				for _, elt := range x.Elts {
+					if kv, ok := elt.(*ast.KeyValueExpr); ok {
+						elt = kv.Value
+					}
+					visit(elt)
+				}
+			case *ast.UnaryExpr:
+				visit(x.X)
+			}
+		}
+		visit(e)
+	}
+	intoMemory := func(lhs ast.Expr) bool {
+		switch x := ast.Unparen(lhs).(type) {
+		case *ast.Ident:
+			variable, ok := pv.info.ObjectOf(x).(*types.Var)
+			return ok && variable.Pkg() != nil && variable.Pkg() != pv.pass.Pkg && variable.Parent() == variable.Pkg().Scope()
+		case *ast.SelectorExpr:
+			if id, ok := x.X.(*ast.Ident); ok {
+				if _, isPkg := pv.info.Uses[id].(*types.PkgName); isPkg {
+					return true
+				}
+			}
+			return true
+		case *ast.IndexExpr, *ast.StarExpr:
+			return true
+		}
+		return false
+	}
+	for _, file := range pv.pass.Files {
+		ast.Inspect(file, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.AssignStmt:
+				if len(n.Lhs) == len(n.Rhs) {
+					for i, lhs := range n.Lhs {
+						if intoMemory(lhs) {
+							add(n.Rhs[i])
+						}
+					}
+				}
+			case *ast.CallExpr:
+				callee := pv.calleeAt(n)
+				if callee == nil || callee.Pkg() == pv.pass.Pkg {
+					break
+				}
+				fn := pv.contractOf(callee)
+				sig := callee.Type().(*types.Signature)
+				for i, arg := range n.Args {
+					keeps := fn == nil
+					if fn != nil && i < sig.Params().Len() {
+						name := sig.Params().At(i).Name()
+						switch {
+						case fn.trust != nil:
+							keeps = slices.ContainsFunc(fn.trust.keeps, func(item trustKeep) bool { return item.name == name })
+						default:
+							summary := pv.ownSummaryOf(fn)
+							at := slices.IndexFunc(fn.params, func(p *types.Var) bool { return p.Name() == name })
+							keeps = summary == nil || at < 0 || at >= len(summary.keeps) || summary.keeps[at]
+						}
+					}
+					if keeps {
+						add(arg)
+					}
+				}
+			}
+			return true
+		})
+	}
+	pv.letOutNodes = found
 	return found
 }

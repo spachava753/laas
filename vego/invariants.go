@@ -25,6 +25,10 @@ type invariantSet struct {
 	// broken is set when a declaration could not be read. Nothing can then
 	// be verified about the type, here or in a package that imports it.
 	broken bool
+	// group is set for the invariants of a group of package-level
+	// variables, which no value carries: the frame pairs their reads as
+	// it pairs a type's (varinv.go).
+	group *varGroup
 }
 
 // invariantFact carries the invariants of a type to importing packages.
@@ -188,6 +192,9 @@ func (pv *pkgVerifier) checkInvariantsDeclared() {
 // value it is stated of, which is self when the value is a struct and what
 // self points to when it is a pointer.
 func (v *fnVerifier) invariantEnv(set *invariantSet, sink *state, mem memory, self value, t types.Type) *specEnv {
+	if set.group != nil {
+		return &specEnv{v: v, sink: sink, now: mem, pos: set.group.clauses[0].pos}
+	}
 	return &specEnv{v: v, sink: sink, fn: set.owner, now: mem, self: self, selfType: t}
 }
 

@@ -263,6 +263,9 @@ type fnVerifier struct {
 	initStorage map[*types.Var]bool
 	// groupReading is set while the invariants of a group are read.
 	groupReading bool
+	// groupNames collects, while the initialisation of a group is
+	// checked, the package-level variables its invariants read.
+	groupNames map[*types.Var]bool
 	// tieLater is set when tieFailures was put off; see verified.
 	tieLater bool
 	// typedReads, when set, receives the values whose type facts reads
@@ -441,9 +444,7 @@ func (v *fnVerifier) enter() *state {
 	// its frame covers none of the group's variables, so it needs nothing of
 	// them.
 	for _, g := range v.groupsNamed(fn) {
-		for _, t := range v.groupHolds(g, st, memory{}) {
-			st.assume(t)
-		}
+		v.assumeGroup(st, nil, memory{}, g, "entry")
 	}
 	v.frame = v.targets(fn, v.entry, st, memory{})
 	v.used = make([]bool, len(v.frame))
