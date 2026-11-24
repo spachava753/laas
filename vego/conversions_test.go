@@ -89,7 +89,7 @@ func checkConversionLists(t *testing.T, loaded []*packages.Package, strict bool)
 		}
 		candidate := map[ast.Expr]bool{}
 		var problems []string
-		for _, conversion := range conversionsIn(buildSSA(pkg.Fset, pkg.Types, pkg.Syntax, pkg.TypesInfo), pkg.Syntax, pkg.TypesInfo) {
+		for _, conversion := range conversionsIn(buildSSA(pkg.Fset, pkg.Types, pkg.Syntax, pkg.TypesInfo), pkg.Types, pkg.Syntax, pkg.TypesInfo) {
 			for _, e := range conversion.candidates {
 				candidate[e] = true
 			}
@@ -101,8 +101,12 @@ func checkConversionLists(t *testing.T, loaded []*packages.Package, strict bool)
 				// form gives, or an element that a range assigns: what
 				// go/ssa extracts, or loads from where the range keeps it.
 				if !strings.HasPrefix(conversion.what, "extract ") && !strings.HasPrefix(conversion.what, "*") {
+					in := "in the initialisers of the package"
+					if conversion.fn != nil {
+						in = "in the function at " + pkg.Fset.Position(conversion.fn.Pos()).String()
+					}
 					problems = append(problems, pkg.Fset.Position(conversion.at).String()+": go/ssa converts "+conversion.what+
-						" here, in the function at "+pkg.Fset.Position(conversion.fn.Pos()).String()+", and it has no expression")
+						" here, "+in+", and it has no expression")
 				}
 			case !slices.ContainsFunc(conversion.candidates, func(e ast.Expr) bool { return walked[e] }):
 				problems = append(problems, pkg.Fset.Position(conversion.at).String()+": go/ssa converts "+conversion.what+
@@ -110,7 +114,11 @@ func checkConversionLists(t *testing.T, loaded []*packages.Package, strict bool)
 			}
 		}
 		for e := range walked {
-			if pkg.TypesInfo.Types[e].Value != nil || candidate[e] {
+			// go/ssa folds a conversion of nil to a type, as (*T)(nil),
+			// into a constant, and so gives it no expression.
+			call, isCall := ast.Unparen(e).(*ast.CallExpr)
+			nilConversion := isCall && len(call.Args) == 1 && pkg.TypesInfo.Types[call.Fun].IsType() && pkg.TypesInfo.Types[ast.Unparen(call.Args[0])].IsNil()
+			if pkg.TypesInfo.Types[e].Value != nil || candidate[e] || nilConversion {
 				continue
 			}
 			problem := pkg.Fset.Position(e.Pos()).String() + ": the walk lists it, and go/ssa converts no value it is an expression of"
@@ -127,3 +135,4 @@ func checkConversionLists(t *testing.T, loaded []*packages.Package, strict bool)
 	}
 	return checked
 }
+

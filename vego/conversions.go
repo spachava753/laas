@@ -47,8 +47,11 @@ type conversions struct {
 	converted map[ast.Expr][]types.Type
 	// unplaced holds, for the function declaration around it, the position
 	// of each conversion that go/ssa makes and that no expression the walk
-	// lists accounts for.
+	// lists accounts for. inInit holds the positions of those in the
+	// initialisers of package-level variables, outside every function
+	// declaration; a position is not valid when go/ssa gives none.
 	unplaced map[*ast.FuncDecl][]token.Pos
+	inInit   []token.Pos
 }
 
 // findConversions lists the conversions of the package.
@@ -62,20 +65,25 @@ func (pv *pkgVerifier) findConversions() *conversions {
 			found.converted[e] = append(found.converted[e], targets...)
 		}
 	}
-	for _, conversion := range conversionsIn(pv.ssaProgram(), pv.pass.Files, pv.info) {
+	for _, conversion := range conversionsIn(pv.ssaProgram(), pv.pass.Pkg, pv.pass.Files, pv.info) {
 		if conversion.constant || slices.ContainsFunc(conversion.candidates, func(e ast.Expr) bool { return found.converted[e] != nil }) {
 			continue
 		}
 		at := conversion.at
-		if !at.IsValid() {
+		if !at.IsValid() && conversion.fn != nil {
 			at = conversion.fn.Pos()
 		}
+		inDecl := false
 		for _, file := range pv.pass.Files {
 			for _, decl := range file.Decls {
-				if fd, ok := decl.(*ast.FuncDecl); ok && fd.Pos() <= conversion.fn.Pos() && conversion.fn.Pos() < fd.End() {
+				if fd, ok := decl.(*ast.FuncDecl); ok && conversion.fn != nil && fd.Pos() <= conversion.fn.Pos() && conversion.fn.Pos() < fd.End() {
 					found.unplaced[fd] = append(found.unplaced[fd], at)
+					inDecl = true
 				}
 			}
+		}
+		if !inDecl {
+			found.inInit = append(found.inInit, at)
 		}
 	}
 	pv.conversions = found
@@ -93,7 +101,8 @@ func (pv *pkgVerifier) ssaProgram() *ssa.Program {
 // ssaConversion is a MakeInterface instruction of go/ssa: the function or
 // literal it is in, the nearest position the instructions up to it give,
 // what it converts, and the expressions whose DebugRef names its operand
-// before it in its block. A constant has no DebugRef.
+// before it in its block. A constant has no DebugRef. fn is nil in the
+// function go/ssa makes of the initialisers of package-level variables.
 type ssaConversion struct {
 	fn         ast.Node
 	at         token.Pos
@@ -143,8 +152,10 @@ func ssaFunctions(prog *ssa.Program, files []*ast.File, info *types.Info, visit 
 }
 
 // conversionsIn returns the conversions to interface types of a package
-// built in go/ssa.
-func conversionsIn(prog *ssa.Program, files []*ast.File, info *types.Info) []ssaConversion {
+// built in go/ssa: in its function declarations and in the initialisers of
+// its package-level variables, which go/ssa puts in the init function it
+// makes.
+func conversionsIn(prog *ssa.Program, pkg *types.Package, files []*ast.File, info *types.Info) []ssaConversion {
 	var found []ssaConversion
 	var walk func(fn *ssa.Function)
 	walk = func(fn *ssa.Function) {
@@ -168,6 +179,9 @@ func conversionsIn(prog *ssa.Program, files []*ast.File, info *types.Info) []ssa
 		}
 	}
 	ssaFunctions(prog, files, info, func(_ *ast.FuncDecl, fn *ssa.Function) { walk(fn) })
+	if init := prog.Package(pkg).Func("init"); init != nil {
+		walk(init)
+	}
 	return found
 }
 
@@ -274,6 +288,12 @@ func syntacticConversions(info *types.Info, root ast.Node) map[ast.Expr][]types.
 					walk(fd.Body, obj.Type().(*types.Signature).Results())
 				}
 			}
+			return false
+		}
+		// The initialisers of package-level variables, which
+		// checkValueInitialisers checks as verified code.
+		if gen, ok := n.(*ast.GenDecl); ok && gen.Tok == token.VAR {
+			walk(gen, nil)
 			return false
 		}
 		return true

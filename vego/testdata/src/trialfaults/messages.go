@@ -35,7 +35,7 @@ func usage() {}
 
 // @Ensures True
 func SetsUsage() {
-	flag.Usage = usage // want `cannot verify SetsUsage: flag.Usage is a package-level variable of package flag, and assigning one is not supported yet`
+	flag.Usage = usage // want `cannot verify SetsUsage: flag.Usage is a variable of package flag that holds code, and code of this package stored there would be run by that package at times no contract describes; keeping code to run later is not supported yet`
 }
 
 type lazybuf struct{ s string }

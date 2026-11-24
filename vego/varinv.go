@@ -866,3 +866,73 @@ func (v *fnVerifier) groupRoots(st *state) []passedValue {
 	}
 	return roots
 }
+
+// readable reports whether a package-level variable of the package is of an
+// interface type or of a named function type with a contract, and verified
+// code can read it: it is assigned, or fixed with a value a read can use. A
+// variable no verified code can read is relied on by none, as _ or one whose
+// value is known only after code of the package has run.
+func (pv *pkgVerifier) readable(variable *types.Var) bool {
+	if variable.Name() == "_" || !pv.valueVariable(variable.Type()) {
+		return false
+	}
+	if pv.isAssigned(variable) {
+		return true
+	}
+	_, why := pv.usableFixed(variable)
+	return why == ""
+}
+
+// checkValueInitialisers checks the initialiser of each package-level
+// variable of the package whose type is an interface type or a named
+// function type with a contract, as verified code that assigns it would be
+// checked: a value made there is checked against the contract of its type
+// (madeAs), and a conversion by the conversion check (F41 of the review of
+// part 3). The initialiser is code the verifier reads, so what it stores
+// is not taken on trust.
+func (pv *pkgVerifier) checkValueInitialisers() {
+	// A package with no function to verify is code that is not verified,
+	// its initialisers included.
+	if !slices.ContainsFunc(pv.order, func(fn *funcInfo) bool { return fn.annotated() }) {
+		return
+	}
+	for _, init := range pv.info.InitOrder {
+		// Variables given by one call with several results are given
+		// values no expression of their own makes, which nothing here
+		// checks.
+		if len(init.Lhs) > 1 {
+			for _, variable := range init.Lhs {
+				if variable != nil && pv.readable(variable) {
+					pv.run(&funcInfo{obj: types.NewFunc(variable.Pos(), pv.pass.Pkg, "the initialiser of "+variable.Name(), types.NewSignatureType(nil, nil, nil, nil, nil, false))}, func(v *fnVerifier) {
+						v.unsupported(init.Rhs.Pos(), variable.Name()+" is given one result of a call with several, and a variable of an interface type or of a function type with a contract "+
+							"must be given a value of its own, which is checked where it is made")
+					})
+					break
+				}
+			}
+			continue
+		}
+		if init.Lhs[0] == nil || !pv.readable(init.Lhs[0]) {
+			continue
+		}
+		variable := init.Lhs[0]
+		pv.run(&funcInfo{obj: types.NewFunc(variable.Pos(), pv.pass.Pkg, "the initialiser of "+variable.Name(), types.NewSignatureType(nil, nil, nil, nil, nil, false))}, func(v *fnVerifier) {
+			// A conversion that go/ssa makes and the walk does not list is
+			// checked nowhere, as in a function (vcgen); one go/ssa gives
+			// no position may be in this initialiser.
+			for _, at := range pv.findConversions().inInit {
+				if !at.IsValid() || init.Rhs.Pos() <= at && at < init.Rhs.End() {
+					v.unsupported(init.Rhs.Pos(), "Go converts a value to an interface type in the initialiser of "+variable.Name()+
+						", and which expression it converts could not be told, so the conversion cannot be checked; give the value a variable of its own type first")
+					return
+				}
+			}
+			st := &state{vals: map[*types.Var]value{}, mem: memory{}, brk: logic.Const("brk", logic.Ref), noted: map[string]bool{}}
+			v.entryBrk = st.brk
+			st.assume(logic.Le(logic.IntLit(1), st.brk))
+			v.openUnit(st)
+			v.evalAs(init.Rhs, variable.Type(), st, nil)
+			v.closeUnit(st)
+		})
+	}
+}

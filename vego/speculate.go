@@ -309,6 +309,7 @@ func speculate(pass *analysis.Pass, verifier func(*analysis.Pass) *pkgVerifier, 
 			sp.once.Do(func() { sp.next.Store(int64(len(pv.order))) })
 			pv.checkInvariantsDeclared()
 			pv.checkGroupsInitialised()
+			pv.checkValueInitialisers()
 			pv.exportInvariants()
 			pv.checkTypeContracts()
 			pv.exportTypeContracts()

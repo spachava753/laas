@@ -1185,9 +1185,19 @@ Part 3 (`valueVariable` in `assigned.go`): variables of interface types and of n
 - **`Modifies v` of an interface variable** covers its storage and the footprint and states of the value it holds on entry, as an entry of a parameter does (the contents target, which `variableTargetAny` now gives for an interface type too).
 - **Refused:**
   - a `ResponseWriter` stored into a variable, by `refuseScoped`, since a variable is memory;
-  - code of the package stored into a variable of another package of a type that holds code, as `flag.Usage = usage` or `lib.OnEvent = func() {...}`, with D3's message ("keeping code to run later is not supported yet");
-  - storing such code through memory another package made, which was F13 for invariants and is part of item 11 otherwise.
-- **Wrong version caught:** the refusal of a store of code into a variable of another package off (`setsOther` accepted).
+  - every store into a variable of another package whose type can hold code, named or not, contracted or not, as `flag.Usage = usage` (of type `func()`) or `lib.OnEvent = func() {...}`, with D3's message ("keeping code to run later is not supported yet"; F39, which found `flag.Usage` drawing part 1's message).
+- **Not refused:** storing such code through memory another package made. The proof of an invariant counts it (F13); otherwise it is not built, and waits on item 11.
+- **The initialiser** of a variable of an interface type or of a named function type with a contract is checked where it is declared, as code of the package (`checkValueInitialisers`, F41): a function literal against the type's contract, and a conversion to an interface as any conversion in verified code. Before F41 it was taken on trust, and a run-time test showed the false proof.
+  - The walk of conversions now covers the initialisers of package-level variables, and go/ssa's side of it the init function go/ssa makes of them (`conversionsIn`), so `TestConversionLists` checks them too. A conversion go/ssa makes there that the walk does not list refuses the initialiser, as one in a function refuses the function (`conversions.inInit`). The test treats `(*T)(nil)`, which go/ssa folds into a constant, as a constant.
+  - Variables given one call with several results, as `var a, b Pos = f()`, are refused when one of them is such a variable: no expression of its own makes the value.
+  - Which initialisers: those of the variables verified code can read (`readable`): assigned, or fixed with a value a read can use (`usableFixed`). A fixed variable whose initialiser calls a function is readable, as `var made = mk()` with `mk` not verified: a verified `M` that calls `made` verifies, so the initialiser must be refused, and is. `_` and a variable whose value is known only after code of the package has run (the `early` packages) are read by no verified code and are not checked. So `settled`'s `var Root = context.Background()` is now refused, since `Background` has no contract, though nothing in `settled` reads it.
+  - Programs: `varcode/inits.go`. `getBad`, `wBad`, `wMulti` (`pick(two())`), and `pa, pb` are refused; `getGood` and `wGood` verify.
+- **Wrong versions caught:**
+  - the refusal of a store of code into a variable of another package off: `setsOther` accepted;
+  - the refusal limited to named types with a contract, as before F39: `setUsage` draws part 1's message;
+  - the initialisers not checked: `getBad` and `wBad` accepted, and the reviewer's `hook` fails its `go test`;
+  - several variables from one call not refused: `pa, pb` accepted, and a scratch module whose `usePa` calls `pa` verifies and fails its `go test`;
+  - the unlisted conversion in an initialiser not refused: `wMulti` is then refused only by the rule against a call with several results as the arguments of another, so the guard stands behind that rule in the corpus.
 - **Time at the end of part 3** (b38ee19): `go test -count=1 ./vego`, cold and back to back, alternating: 146 s, 147 s at the base, 141 s at the base, and 147 s. That is about 3 s over the base on average, and 7.5 s in the worst pair.
 - **The remedy of the orchestrator's ruling on calls through values.** A contract of a function type, or of a method of an interface, may list assigned variables of its package under `Modifies`. A call through such a value forgets them and they are in the caller's frame; a value made in verified code is checked against them.
 - **Programs:**

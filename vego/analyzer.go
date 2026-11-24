@@ -301,6 +301,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		}
 		pv.checkInvariantsDeclared()
 		pv.checkGroupsInitialised()
+		pv.checkValueInitialisers()
 		pv.exportInvariants()
 		// What the types of this package own, for importing packages.
 		for _, name := range pv.ownsOrder {

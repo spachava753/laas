@@ -2336,6 +2336,8 @@ guide	guide.small	2	207	0
 guide	guide.stamped	4	1049	0
 guide	guide.teeRecorder	1	2911	0
 guide	guide.tell	1	70	0
+guide	guide.the initialiser of logOut	7	29294	0
+guide	guide.the initialiser of now	2	878	0
 guide	guide.value	3	869	0
 guide	guide.zero	9	19643	0
 guide	io.Closer.Close	5	11733	0
@@ -2373,6 +2375,7 @@ guide	strconv.Atoi	3	18026	0
 guide	strconv.Itoa	1	1310	0
 guide	strings.FieldsFunc	1	4706	0
 guide	strings.IndexFunc	1	1639	0
+guide	time.Now	1	373	0
 guidehandler	guidehandler.Serve	5	2848	0
 guidestats	guidestats.Count	2	411	0
 guidestats	guidestats.Hit	8	5133	0
@@ -4237,6 +4240,8 @@ sentinellib	sentinellib.End	12	3311	0
 sentinellib	sentinellib.Find	14	4503	0
 sentinellib	sentinellib.Hidden	12	3311	0
 settled	settled.Ok	3	153	0
+settled	settled.the initialiser of Root	0	0	0
+settled	settled.the initialiser of Sub	0	0	0
 settled	slices.Sort	1	5294	0
 shapes	(*shapes.Rect).Area	7	7584	0
 shapes	shapes.New	8	3662	0
@@ -5008,22 +5013,41 @@ values	values.pair	4	351	0
 values	values.partner	24	16769	0
 values	values.passes	7	3199	0
 values	values.stat	3	9528	0
+varcode	(*os.File).Write	3	18506	0
 varcode	fmt.Fprintln	5	11289	0
 varcode	io.Writer.Write	5	18168	0
 varcode	net/http.ResponseWriter.Header	4	16082	2
 varcode	net/http.ResponseWriter.Write	3	7630	0
 varcode	net/http.ResponseWriter.WriteHeader	3	2185	0
+varcode	time.Now	1	373	0
 varcode	varcode.Clock	3	1763	0
 varcode	varcode.Hook	4	2540	0
+varcode	varcode.Positive	3	1025	0
 varcode	varcode.countFire	7	4616	0
 varcode	varcode.fires	12	10553	0
 varcode	varcode.firesUnlisted	6	2631	0
 varcode	varcode.keep	5	4747	0
+varcode	varcode.one	2	69	0
+varcode	varcode.pick	2	784	0
 varcode	varcode.printUnlisted	5	13648	0
 varcode	varcode.println	9	21330	0
+varcode	varcode.setGets	10	2039	0
+varcode	varcode.setMore	13	15017	0
 varcode	varcode.setOut	5	5004	0
+varcode	varcode.setUsage	1	46	0
+varcode	varcode.setWs	8	11153	0
 varcode	varcode.setsOther	2	283	0
 varcode	varcode.stamp	4	1049	0
+varcode	varcode.the initialiser of getBad	1	139	0
+varcode	varcode.the initialiser of getGood	1	33	0
+varcode	varcode.the initialiser of now	2	878	0
+varcode	varcode.the initialiser of pa	0	0	0
+varcode	varcode.the initialiser of stdout	7	29294	0
+varcode	varcode.the initialiser of wBad	0	0	0
+varcode	varcode.the initialiser of wGood	7	29294	0
+varcode	varcode.the initialiser of wMulti	0	0	0
+varcode	varcode.two	2	88	0
+varcode	varcode.useGets	9	6907	0
 varcode	varcode.uses	12	10339	0
 varcode	varcode.writesOther	10	8663	0
 varcodelib	varcodelib.Event	3	255	0
