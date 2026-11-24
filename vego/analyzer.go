@@ -654,6 +654,10 @@ type pkgVerifier struct {
 	// is where the use being classified does.
 	addressRuns map[*types.Var]string
 	runsAt      string
+	// addressUses holds the uses of addresses that findChanges found, which
+	// classifyAddressUses decides once the package is collected.
+	addressUses       []addressUse
+	addressClassified bool
 	changeOf   map[*types.Var]string
 	ownChanges map[*types.Var]string
 	escapes    map[*types.Var]string
@@ -1408,6 +1412,15 @@ func (pv *pkgVerifier) collect() {
 	pv.checkReceivers()
 	pv.findSentinels()
 	pv.findFixed()
+	// The uses of addresses are classified once the package's contracts
+	// are known; one of a variable of another package that is not closed
+	// is a write the package publishes with the others.
+	if before := len(pv.writes); !pv.addressClassified {
+		pv.classifyAddressUses()
+		if len(pv.writes) > before {
+			pv.pass.ExportPackageFact(&sentinelWritesFact{Writes: pv.writes})
+		}
+	}
 	pv.checkVarGroups()
 	pv.exportCovers()
 	pv.findKnownReturns()

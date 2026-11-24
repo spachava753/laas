@@ -442,6 +442,34 @@ func (pv *pkgVerifier) noteAddressUse(variable *types.Var, stack []ast.Node, pos
 	if fact := pv.publishedFixed(variable); variable.Pkg() != pv.pass.Pkg && (fact == nil || !fact.Boxed[variable.Name()]) {
 		return
 	}
+	// The use is classified once the package is collected: the trusted
+	// contracts it reads must not be asked for while findChanges runs, in
+	// the middle of collecting.
+	pv.addressUses = append(pv.addressUses, addressUse{variable: variable, stack: slices.Clone(stack), pos: pos})
+}
+
+// addressUse is a use of a variable's address that findChanges found.
+type addressUse struct {
+	variable *types.Var
+	stack    []ast.Node
+	pos      token.Pos
+}
+
+// classifyAddressUses decides, once, for every use of an address that
+// findChanges found, whether it is closed; see noteAddressUse.
+func (pv *pkgVerifier) classifyAddressUses() {
+	if pv.addressClassified {
+		return
+	}
+	pv.addressClassified = true
+	for _, use := range pv.addressUses {
+		pv.classifyAddressUse(use.variable, use.stack, use.pos)
+	}
+}
+
+// classifyAddressUse records a use of a variable's address that is not
+// closed, and publishes one of a variable of another package.
+func (pv *pkgVerifier) classifyAddressUse(variable *types.Var, stack []ast.Node, pos token.Pos) {
 	pv.runsAt = ""
 	why := pv.addressUseWhy(stack)
 	if why == "" {
@@ -467,6 +495,7 @@ func (pv *pkgVerifier) noteAddressUse(variable *types.Var, stack []ast.Node, pos
 // closedWhy says why the address of a kind-3 variable of this package is
 // not closed, or "" when it is.
 func (pv *pkgVerifier) closedWhy(variable *types.Var) string {
+	pv.classifyAddressUses()
 	if why := pv.openAt[variable]; why != "" {
 		return why
 	}

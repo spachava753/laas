@@ -141,6 +141,12 @@ func (pv *pkgVerifier) callGraph() *callGraph {
 
 // buildGraph builds the call graph of the package.
 func (pv *pkgVerifier) buildGraph() {
+	// The graph reads what findSentinels and findFixed decide of the
+	// package's variables, as which error variables are sentinels; one
+	// built before them would be kept with what they had not decided.
+	if pv.fixed == nil {
+		panic("vego: internal error: the call graph is built before the package's variables are decided")
+	}
 	g := &callGraph{byObj: map[*types.Func]*callNode{}, lits: map[*ast.FuncLit]*callNode{}, sites: map[*ast.CallExpr][]callEdge{}}
 	pv.graph = g
 	for _, fn := range pv.order {

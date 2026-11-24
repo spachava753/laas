@@ -210,11 +210,40 @@ func (pv *pkgVerifier) trustedRuns(call *ast.CallExpr, callee *types.Func) func(
 	if isGeneric(callee) || callee.Origin() != callee {
 		return nil
 	}
-	fn := pv.trustedContract(callee)
-	if fn == nil || fn.trust == nil || len(fn.defects) > 0 {
+	// The entry is read as it is written: building the contract would verify
+	// it, which hiddenInitCode must not ask for before the package's
+	// variables are decided.
+	entry := pv.entryFor(callee.FullName())
+	if entry == nil {
 		return nil
 	}
-	recv := callee.Type().(*types.Signature).Recv() != nil && !pv.methodExpression(call)
+	names := func(list []trustFormula) []string {
+		var out []string
+		for _, item := range list {
+			out = append(out, item.text)
+		}
+		return out
+	}
+	var kept, run []string
+	for _, keep := range entry.keeps {
+		kept = append(kept, keep.name)
+	}
+	run = append(run, names(entry.runs)...)
+	run = append(run, names(entry.formats)...)
+	run = append(run, names(entry.encodes)...)
+	for _, c := range entry.calls {
+		run = append(run, c.name)
+	}
+	for _, p := range entry.prints {
+		run = append(run, p.name)
+	}
+	sig := callee.Type().(*types.Signature)
+	var params []*types.Var
+	if sig.Recv() != nil {
+		params = append(params, sig.Recv())
+	}
+	params = append(params, slices.Collect(sig.Params().Variables())...)
+	recv := sig.Recv() != nil && !pv.methodExpression(call)
 	return func(i, args int) bool {
 		index := i
 		switch {
@@ -223,10 +252,10 @@ func (pv *pkgVerifier) trustedRuns(call *ast.CallExpr, callee *types.Func) func(
 		case recv:
 			index = i + 1
 		}
-		if len(fn.params) == 0 {
+		if len(params) == 0 {
 			return true
 		}
-		p := fn.params[min(index, len(fn.params)-1)]
-		return len(fn.keeps.get(p)) == 0 || fn.runs.get(p) || fn.calls.get(p) != nil || p == fn.formatted || p == fn.prints || p == fn.encoded
+		name := params[min(index, len(params)-1)].Name()
+		return !slices.Contains(kept, name) || slices.Contains(run, name)
 	}
 }
