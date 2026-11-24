@@ -145,10 +145,16 @@ type ValueErr struct{ n int }
 // @Ensures True
 func (v ValueErr) Error() (s string) { return "value" }
 
-// @Ensures err != nil
-func NilValueReceiver() (err error) {
+// NilValueReceiver converts a nil pointer whose type's Error has a value
+// receiver, under a contract that is otherwise met.
+//
+// @Ensures err = nil <-> n <= 0
+func NilValueReceiver(n int) (err error) {
 	var p *ValueErr
-	return p // want `ValueErr.Error has a value receiver, and the pointer converted to error may be nil, so the method would panic when it runs; convert a pointer that is not nil, or the value it points to`
+	if n > 0 {
+		return p // want `ValueErr.Error has a value receiver, and the pointer converted to error may be nil, so the method would panic when it runs; convert a pointer that is not nil, or the value it points to`
+	}
+	return nil
 }
 
 // Count has a method, which reflection reaches through CountErr.C.

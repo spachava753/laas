@@ -5483,6 +5483,7 @@ typederrors	typederrors.Differ	2	1026	0
 typederrors	typederrors.DifferTypes	2	1087	0
 typederrors	typederrors.FirstByte	25	45832	0
 typederrors	typederrors.Floats	1	46	0
+typederrors	typederrors.HeldNotNil	2	995	0
 typederrors	typederrors.HitsError	1	46	0
 typederrors	typederrors.Hook	3	2076	0
 typederrors	typederrors.HookError	1	46	0
@@ -5496,7 +5497,7 @@ typederrors	typederrors.Named	12	21933	0
 typederrors	typederrors.NilPointerIsNotNil	7	11194	0
 typederrors	typederrors.NilPointers	3	1618	0
 typederrors	typederrors.NilRuns	1	46	0
-typederrors	typederrors.NilValueReceiver	5	1485	0
+typederrors	typederrors.NilValueReceiver	8	1974	0
 typederrors	typederrors.NotContradictory	7	2851	0
 typederrors	typederrors.NotDifferent	7	2325	0
 typederrors	typederrors.NotLocated	12	14833	0
@@ -5535,10 +5536,13 @@ typederrors	typederrors.the initialiser of ErrEmpty	0	0	0
 typederrors	typederrors.the initialiser of ErrVar	0	0	0
 typederrors	typederrors.the initialiser of hook	0	0	0
 typederrorsbad	(*typederrorsbad.Empty).Error	1	182	0
+typederrorsbad	(typederrorsbad.B).Error	1	107	0
 typederrorsbad	(typederrorsbad.Error).Error	1	111	0
 typederrorsbad	(typederrorsbad.FErr).Error	1	46	0
 typederrorsbad	(typederrorsbad.InvalidByteError).Error	1	107	0
 typederrorsbad	(typederrorsbad.Other).Error	1	111	0
+typederrorsbad	(typederrorsbad.SErr).Error	1	368	0
+typederrorsbad	typederrorsbad.Accent	2	496	0
 typederrorsbad	typederrorsbad.AsInFormula	3	98	0
 typederrorsbad	typederrorsbad.Both.Get	2	1031	0
 typederrorsbad	typederrorsbad.Fine.Get	5	9245	0
@@ -5551,9 +5555,16 @@ typederrorsbad	typederrorsbad.TypedNilNotNil	4	1678	0
 typederrorsbad	typederrorsbad.UnknownType	3	98	0
 typederrorsbad	typederrorsbad.Untyped	3	98	0
 typederrorsbad	typederrorsbad.UseFine	29	37625	0
+typederrorsbad	typederrorsbad.UsesBig	1	46	0
+typederrorsbad	typederrorsbad.UsesTwo	1	46	0
+typederrorsbad	typederrorsbad.UsesWide	1	111	0
 typederrorsbad	typederrorsbad.WiderValue	3	237	0
 typederrorsbad	typederrorsbad.ZeroSizeFormula	3	385	0
+typederrorsbad	typederrorsbad.big	1	232	0
 typederrorsbad	typederrorsbad.the initialiser of _	0	0	0
+typederrorsbad	typederrorsbad.two	1	985	0
+typederrorsbad	typederrorsbad.wide	0	0	0
+typederrorsbad	typederrorsbad.wrapRunes	0	0	0
 typederrorsclient	typederrorsclient.Failed	2	1415	0
 typederrorsclient	typederrorsclient.Forward	8	8493	0
 typederrorsclient	typederrorsclient.ForwardByte	17	44294	0

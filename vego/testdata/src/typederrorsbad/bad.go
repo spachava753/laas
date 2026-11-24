@@ -128,3 +128,55 @@ func ZeroSizeFormula(p *Empty) (err error) {
 func TypedNilNotNil(p *typederrors.PE) (err error) {
 	return nil // want `postcondition may not hold: err = p`
 }
+
+// SErr is a string error.
+type SErr string
+
+// @Ensures True
+func (e SErr) Error() (s string) { return string(e) }
+
+// wrapRunes converts runes to a string error, which Go encodes as UTF-8:
+// its entry reads the runes as bytes, which a formula refuses (F16 of the
+// review of S2).
+func wrapRunes(rs []rune) (err error) { return SErr(rs) }
+
+// @Ensures ~r
+func Accent() (r bool) {
+	err := wrapRunes([]rune{233}) // want `the trusted contract of typederrorsbad.wrapRunes \(trusted.yaml:\d+\) cannot be used: .*SErr\(...\) converts a string or a \[\]byte`
+	return err == SErr("é")
+}
+
+// B is a byte error.
+type B byte
+
+// @Ensures True
+func (e B) Error() (s string) { return "b" }
+
+func two() (err error) { return Error(1) }
+
+func big() (err error) { return B(1) }
+
+func wide(n int) (err error) { return InvalidByteError(n) }
+
+// UsesTwo calls a trusted function whose entry contradicts itself.
+//
+// @Ensures True
+func UsesTwo() (r bool) {
+	return two() == nil // want `the trusted contract of typederrorsbad.two \(trusted.yaml:\d+\) cannot be used: .*contradicts itself`
+}
+
+// UsesBig calls a trusted function whose entry says what a byte error
+// cannot hold.
+//
+// @Ensures True
+func UsesBig() (r bool) {
+	return big() == nil // want `the trusted contract of typederrorsbad.big \(trusted.yaml:\d+\) cannot be used: .*contradicts itself`
+}
+
+// UsesWide calls a trusted function whose entry converts an int to a
+// byte error, which may not fit.
+//
+// @Ensures True
+func UsesWide(n int) (r bool) {
+	return wide(n) == nil // want `the trusted contract of typederrorsbad.wide \(trusted.yaml:\d+\) cannot be used: .*InvalidByteError\(...\) of a value of type int, which may not fit InvalidByteError`
+}

@@ -2278,6 +2278,30 @@ trusted:
     runs: [e]
     modifies: []
 
+  typederrorsbad.wrapRunes:
+    reason: Test helper whose entry reads runes as bytes, which Go encodes as UTF-8 (F16 of the review of S2 of F33).
+    ensures:
+      - "err = SErr(rs)"
+    modifies: []
+
+  typederrorsbad.two:
+    reason: Test helper whose entry says the error is two errors at once.
+    ensures:
+      - "err = Error(1) And err = Error(2)"
+    modifies: []
+
+  typederrorsbad.big:
+    reason: Test helper whose entry says a byte error holds 300.
+    ensures:
+      - "holds(err, B) And err.(B) = 300"
+    modifies: []
+
+  typederrorsbad.wide:
+    reason: Test helper whose entry converts an int to a byte error.
+    ensures:
+      - "err = InvalidByteError(n)"
+    modifies: []
+
   typederrorsclient.find:
     reason: Test helper standing for a trusted function that returns a typed error, whose entry names the type by the path of its package.
     ensures:

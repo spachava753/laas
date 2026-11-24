@@ -266,18 +266,25 @@ func (e *specEnv) ErrorType(root string, steps []logic.Step, when logic.When) (l
 // integer when every value v can have is a value of T. A constant must lie in T's range, and a path must
 // have an integer type whose range lies in T's; anything else may not fit,
 // and Go would then wrap it, which a formula does not.
-func (e *specEnv) Convert(t logic.TypeName, arg *logic.Term, argType any) (*logic.Term, error) {
+func (e *specEnv) Convert(t logic.TypeName, arg *logic.Term, argType any, literal bool) (*logic.Term, error) {
 	target, err := e.resolveType(t)
 	if err != nil {
 		return nil, err
 	}
-	if basic, isBasic := target.Underlying().(*types.Basic); isBasic && basic.Info()&(types.IsString|types.IsBoolean) != 0 {
-		want := logic.IntSeq
-		if basic.Info()&types.IsBoolean != 0 {
-			want = logic.Bool
+	from, _ := argType.(types.Type)
+	if basic, isBasic := target.Underlying().(*types.Basic); isBasic && basic.Info()&types.IsString != 0 {
+		// Go converts a string or a []byte to a string by its bytes; a
+		// slice of runes or of other integers it converts otherwise, or
+		// not at all (F16 of the review of S2).
+		ok := arg.Sort == logic.IntSeq && (literal || from != nil && (isString(from) || isSlice(from) && types.Identical(elemType(from).Underlying(), types.Typ[types.Uint8])))
+		if !ok {
+			return nil, fmt.Errorf("%s(...) converts a string or a []byte, as a formula reads their bytes; Go converts a value of another type otherwise", t)
 		}
-		if arg.Sort != want {
-			return nil, fmt.Errorf("%s(...) converts a %s, and is given a %s", t, want, arg.Sort)
+		return arg, nil
+	}
+	if basic, isBasic := target.Underlying().(*types.Basic); isBasic && basic.Info()&types.IsBoolean != 0 {
+		if arg.Sort != logic.Bool {
+			return nil, fmt.Errorf("%s(...) converts a boolean, and is given a %s", t, arg.Sort)
 		}
 		return arg, nil
 	}

@@ -411,9 +411,9 @@ func (e *frameEnv) Convertible(t logic.TypeName) bool {
 	return then
 }
 
-func (e *frameEnv) Convert(t logic.TypeName, arg *logic.Term, argType any) (*logic.Term, error) {
-	then, errThen := e.then.Convert(t, arg, argType)
-	now, errNow := e.now.Convert(t, arg, argType)
+func (e *frameEnv) Convert(t logic.TypeName, arg *logic.Term, argType any, literal bool) (*logic.Term, error) {
+	then, errThen := e.then.Convert(t, arg, argType, literal)
+	now, errNow := e.now.Convert(t, arg, argType, literal)
 	return e.same(then, now, errThen, errNow)
 }
 

@@ -84,8 +84,9 @@ type Typer interface {
 	Convertible(t TypeName) bool
 	// Convert returns the value of the conversion T(v) of an integer, a
 	// string, or a boolean, for v the term arg and, when arg is a path, its
-	// Go type argType; it refuses one that may not fit T.
-	Convert(t TypeName, arg *Term, argType any) (*Term, error)
+	// Go type argType, or a literal; it refuses one that may not fit T, and
+	// one whose value Go converts otherwise.
+	Convert(t TypeName, arg *Term, argType any, literal bool) (*Term, error)
 	// PathType returns the Go type of what a path leads to, or nil.
 	PathType(root string, steps []Step, when When) any
 	// ErrorType returns the type of what a path leads to when it is a
@@ -854,7 +855,7 @@ func (s *scope) conversion(t TypeName, arg *Node) *Term {
 	if root, steps, when, isPath := s.pathOf(arg); isPath {
 		argType = typer.PathType(root, steps, when)
 	}
-	converted, err := typer.Convert(t, v, argType)
+	converted, err := typer.Convert(t, v, argType, arg.Kind == NStr || arg.Kind == NInt)
 	if err != nil {
 		panic(resolveError{err})
 	}

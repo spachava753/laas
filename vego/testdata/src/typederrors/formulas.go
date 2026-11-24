@@ -141,3 +141,12 @@ func (e Label) Error() (s string) { return string(e) }
 func LabelIsNotNamed(s string) (err error) { // want `the contract of LabelIsNotNamed may also be met by a function that always returns an error`
 	return Label(s)
 }
+
+// HeldNotNil says what its parameter holds is a pointer that is not nil,
+// which a formula compares with nil (F17 of the review of S2).
+//
+// @Requires holds(err, *PE) And err.(*PE) != nil
+// @Ensures r
+func HeldNotNil(err error) (r bool) {
+	return err != nil
+}

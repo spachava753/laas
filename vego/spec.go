@@ -1662,9 +1662,12 @@ func freshSince(before *logic.Term, found reached) *logic.Term {
 // spell writes a path the way an annotation does.
 func spell(name string, steps []logic.Step) string {
 	for _, step := range steps {
-		if step.Field != "" {
+		switch {
+		case step.Assert != nil:
+			name += ".(" + step.Assert.String() + ")"
+		case step.Field != "":
 			name += "." + step.Field
-		} else {
+		case step.Index != nil:
 			name += "[" + step.Index.String() + "]"
 		}
 	}
