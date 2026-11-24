@@ -395,19 +395,42 @@ func (pv *pkgVerifier) groupsTouched(fn *funcInfo) []*varGroup {
 			direct[node] = pv.nodeGroups(node)
 		}
 		pv.touchedAt = direct
-		for changed := true; changed; {
-			changed = false
-			for _, node := range nodes {
-				for _, e := range node.edges {
-					for group := range direct[e.to] {
-						if !direct[node][group] {
-							direct[node][group] = true
-							changed = true
+		close := func() {
+			for changed := true; changed; {
+				changed = false
+				for _, node := range nodes {
+					for _, e := range node.edges {
+						for group := range direct[e.to] {
+							if !direct[node][group] {
+								direct[node][group] = true
+								changed = true
+							}
 						}
 					}
 				}
 			}
 		}
+		close()
+		// A node that calls out of the package may run what such a call
+		// reaches: what the package let out, and every exported function
+		// and method with an exported name (F33), so a static call of it
+		// reaches that too, transitively (F10 of the review of the design
+		// of F32). One more closure settles it: what is added is already
+		// what those nodes reach.
+		outward := map[*varGroup]bool{}
+		for _, node := range pv.outwardNodes() {
+			for group := range direct[node] {
+				outward[group] = true
+			}
+		}
+		for _, node := range nodes {
+			if node.out {
+				for group := range outward {
+					direct[node][group] = true
+				}
+			}
+		}
+		close()
 		for _, node := range nodes {
 			if node.fn == nil {
 				continue
@@ -619,17 +642,7 @@ func (v *fnVerifier) callGroups(call *ast.CallExpr, fn *funcInfo) []*varGroup {
 	// A call into code of another package may run what the package let
 	// out into memory it did not make (F13).
 	if fn.obj == nil || fn.obj.Pkg() != v.pass.Pkg || fn.trust != nil || fn.valueOf != nil || fn.methodOf != nil {
-		reached = append(reached, v.letOut()...)
-		// And every exported function and method with an exported name,
-		// of which any package can make a value and keep it (F33 of the
-		// review of step 2 of part 2), as the call graph says of a call
-		// through a value.
-		g := v.callGraph()
-		for obj, node := range g.byObj {
-			if obj.Exported() {
-				reached = append(reached, node)
-			}
-		}
+		reached = append(reached, v.outwardNodes()...)
 	}
 	for _, node := range reached {
 		for _, g := range v.varGroups {
@@ -1041,4 +1054,19 @@ func (pv *pkgVerifier) inertFixed(variable *types.Var) bool {
 	pv.initialiserWhy(variable)
 	fact := pv.initOf[pkg]
 	return fact != nil && fact.Inert[variable.Name()]
+}
+
+// outwardNodes returns what a call out of the package may run of it: what
+// the package let out into memory it did not make (F13), and every exported
+// function and method with an exported name, of which any package can make
+// a value and keep it (F33 of the review of step 2 of part 2), as the call
+// graph says of a call through a value.
+func (pv *pkgVerifier) outwardNodes() []*callNode {
+	found := slices.Clone(pv.letOut())
+	for obj, node := range pv.callGraph().byObj {
+		if obj.Exported() {
+			found = append(found, node)
+		}
+	}
+	return found
 }

@@ -64,6 +64,11 @@ type callNode struct {
 	fn    *funcInfo
 	lit   *ast.FuncLit
 	edges []callEdge
+	// out is set when the body calls a function of another package, or
+	// calls through a value or an interface value: such a call may run
+	// what F33 says a call out of the package reaches (F10 of the review
+	// of the design of F32).
+	out bool
 }
 
 // callEdge is a call or a use of a function in a body.
@@ -619,6 +624,7 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 				break
 			}
 			if w := pv.encoderInPlace(n); w != nil {
+				node.out = true
 				encode := pv.staticCalleeAt(n)
 				pv.handedCode(n, encode.Type().(*types.Signature), pv.entryFor(encode.FullName()), encode.Pkg(), false, false, encode.FullName(), false, text, unresolved)
 				wt := pv.info.TypeOf(w)
@@ -638,6 +644,7 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 			// and nothing else of r; what it decodes into runs nothing of
 			// the package (jsondecode.go).
 			if _, limit, limited := pv.decoderInPlace(n); limited {
+				node.out = true
 				decode := pv.staticCalleeAt(n)
 				pv.handedCode(n, decode.Type().(*types.Signature), pv.entryFor(decode.FullName()), decode.Pkg(), false, false, decode.FullName(), false, text, unresolved)
 				r := limit.Args[0]
@@ -654,6 +661,7 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 			}
 			if callee := pv.staticCalleeAt(n); callee != nil {
 				if callee.Pkg() != pv.pass.Pkg {
+					node.out = true
 					// What a call of a function of another package may run of
 					// the code its arguments and receiver hold.
 					origin := pv.originOf(callee)
@@ -675,6 +683,7 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 					return true
 				}
 			}
+			node.out = true
 			pv.valueCallArguments(n, text, unresolved)
 			if method, _ := throughValue(pv.info, n); method != nil {
 				unresolved(n, text, "", pv.methodsMatching(method.Name(), withoutRecv(method.Type().(*types.Signature))))
