@@ -75,11 +75,30 @@ func (pv *pkgVerifier) assignedWhy(variable *types.Var) string {
 	if _, ok := layoutOf(t); !ok {
 		return fmt.Sprintf("%s has type %s, which is not supported%s", spelled, t, unsupportedHint(t))
 	}
-	if !pv.dataType(t, map[types.Type]bool{}) {
+	if !pv.dataType(t, map[types.Type]bool{}) && !pv.valueVariable(t) {
 		return fmt.Sprintf("%s has type %s, which can hold a function value, an interface value, an error, a channel, or an unsafe.Pointer; "+
-			"package-level variables of such types that are changed are not supported yet", spelled, t)
+			"package-level variables of such types that are changed are not supported yet, but for an interface type and a named function type with a contract", spelled, t)
 	}
 	return ""
+}
+
+// valueVariable reports whether a package-level variable of type t holds a
+// value whose calls go through contracts (part 3): an interface value, or a
+// value of a named function type with a contract. A call through it is a
+// call of the contract of its type, as through any value; what it holds was
+// made by verified code, checked where it was made, or by code that is not
+// verified, assumed to meet the contract.
+func (pv *pkgVerifier) valueVariable(t types.Type) bool {
+	if isError(t) {
+		return false
+	}
+	if isIface(t) {
+		return true
+	}
+	if _, ok := t.(*types.Named); ok && isFunc(t.Underlying()) {
+		return pv.valueContract(t) != nil
+	}
+	return false
 }
 
 // isAssigned reports whether a package-level variable is an assigned
@@ -169,8 +188,8 @@ func (v *fnVerifier) readGlobal(variable *types.Var, pos token.Pos, st *state, g
 // variable refers to.
 func (v *fnVerifier) variableTarget(fn *funcInfo, m *modTarget, variable *types.Var, args map[*types.Var]value, sink *state, mem memory) (shape, target, error) {
 	spelled := v.spelling(variable)
-	if fn.spelling().valueOf != nil || fn.spelling().methodOf != nil {
-		return shape{}, target{}, fmt.Errorf("%s is a package-level variable, which a Modifies clause of a type cannot name yet", spelled)
+	if (fn.spelling().valueOf != nil || fn.spelling().methodOf != nil) && !v.isAssigned(variable) {
+		return shape{}, target{}, fmt.Errorf("%s is a package-level variable that is not assigned, which a Modifies clause of a type cannot name", spelled)
 	}
 	// A contract names a variable of another package only when it is
 	// exported; the state of that package covers the others (D1).
@@ -229,7 +248,7 @@ func (v *fnVerifier) variableTargetAny(fn *funcInfo, m *modTarget, variable *typ
 		whole.ref, whole.lo, whole.hi = ref, logic.IntLit(lo), logic.IntLit(hi)
 	}
 	// And what its value refers to, as for a parameter of its type.
-	if holdsMemory(t) && !isStructType(t) {
+	if (holdsMemory(t) || isIface(t)) && !isStructType(t) {
 		contents := located{typ: t, val: root.val}
 		cform, ct, err := v.walkTarget(fn, m, nil, contents, t, symbolic, nil, sink, mem)
 		if err != nil {

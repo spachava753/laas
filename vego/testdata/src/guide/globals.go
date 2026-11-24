@@ -2,10 +2,12 @@ package guide
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"net/http"
 	"os"
+	"time"
 )
 
 var digits = "0123456789abcdef"
@@ -54,7 +56,7 @@ func growSizes() {
 //
 // @Ensures r = 1
 func FirstSize() (r int) {
-	return sizes[0] // want `^vego: postcondition may not hold: r = 1; the contents of sizes are not known to stay as initialised: the use at globals.go:50 lets a reference to them out$`
+	return sizes[0] // want `^vego: postcondition may not hold: r = 1; the contents of sizes are not known to stay as initialised: the use at globals.go:52 lets a reference to them out$`
 }
 
 var pageSize = os.Getpagesize()
@@ -276,11 +278,49 @@ func markUncounted(name string) {
 	if _, ok := tagsSeen[name]; !ok {
 		tagsSeen[name] = true
 	}
-} // want `^vego: invariant of tagsSeen, tagCount may not hold on return: tagCount = \|tagsSeen\|; it was not kept from entry, since \|tagsSeen\| may have changed: the assignment to tagsSeen\[name\] at globals.go:277:3 may write it$`
+} // want `^vego: invariant of tagsSeen, tagCount may not hold on return: tagCount = \|tagsSeen\|; it was not kept from entry, since \|tagsSeen\| may have changed: the assignment to tagsSeen\[name\] at globals.go:279:3 may write it$`
 
 // SeenCount is not negative.
 //
 // @Ensures n >= 0
 func SeenCount() (n int) {
 	return tagCount
+}
+
+var logOut io.Writer = os.Stdout
+
+// printLine writes a line through the variable.
+//
+// @Requires |s| <= 100 And logOut != nil
+// @Modifies logOut
+// @Ensures True
+func printLine(s string) {
+	fmt.Fprintln(logOut, s)
+}
+
+// redirect replaces the writer, as a test does.
+//
+// @Requires w != nil
+// @Modifies logOut
+// @Ensures logOut' = w
+func redirect(w io.Writer) {
+	logOut = w
+}
+
+// Clock returns the time.
+//
+// @Ensures True
+type Clock func() (t time.Time)
+
+var now Clock = time.Now
+
+// stamped reads the clock that a test may replace.
+//
+// @Ensures True
+func stamped() (ok bool) {
+	if now == nil {
+		return false
+	}
+	_ = now()
+	return true
 }

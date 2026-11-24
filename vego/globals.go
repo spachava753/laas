@@ -771,7 +771,7 @@ func (pv *pkgVerifier) usableFixed(variable *types.Var) (knownValue, string) {
 	if _, ok := layoutOf(t); !ok {
 		return knownValue{}, fmt.Sprintf("%s has type %s, which is not supported%s", spelled, t, unsupportedHint(t))
 	}
-	if !pv.dataType(t, map[types.Type]bool{}) {
+	if !pv.dataType(t, map[types.Type]bool{}) && !pv.valueVariable(t) {
 		return knownValue{}, fmt.Sprintf("%s has type %s, which can hold a function value, an interface value, an error, a channel, or an unsafe.Pointer; "+
 			"package-level variables of such types are not supported yet", spelled, t)
 	}

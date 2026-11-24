@@ -4038,7 +4038,7 @@ func Served() (r int) {
 
 A variable whose address is taken, or that a directive or an assembly file names, cannot be read. The message names the place that takes the address or the directive. A variable of another package that is assigned can be read the same way, as `os.Args` can in `main`. [Variables of other packages](#variables-of-other-packages) shows how a function lists what it changes there.
 
-The type of the variable must be one that cannot hold code. A function value, an interface value, an error, a channel, or an `unsafe.Pointer` may not appear in the type at any depth, also behind a pointer, and also in a field that the type does not export. Verified code cannot read such a field, but it can hand the variable to a trusted function that runs the code the field holds. So `*http.Client` cannot be read, and neither can `*log.Logger`:
+The type of the variable must be one that cannot hold code. A function value, an interface value, an error, a channel, or an `unsafe.Pointer` may not appear in the type at any depth, also behind a pointer, and also in a field that the type does not export. The variable's own type may be an interface type, or a named function type with a contract, as described in [Variables that hold a writer or a function](#variables-that-hold-a-writer-or-a-function). Verified code cannot read such a field, but it can hand the variable to a trusted function that runs the code the field holds. So `*http.Client` cannot be read, and neither can `*log.Logger`:
 
 ```go
 // Client reads a variable whose type can hold code.
@@ -4153,7 +4153,7 @@ func FirstSize() (r int) {
 
 ```text
 vego: postcondition may not hold: r = 1; the contents of sizes are not known to stay as
-initialised: the use at globals.go:50 lets a reference to them out
+initialised: the use at globals.go:52 lets a reference to them out
 ```
 
 The message names the first use that lets a reference to what the variable refers to out, here the write in `growSizes`. Every message about something not proved after a function reads such a variable carries this note, also one about an index or an overflow. The length of `sizes` is still known, so `sizes[i]` needs no `Requires` for an `i` below 3.
@@ -4371,6 +4371,59 @@ func TicketChecked() (n int, ok bool) {
 
 A function of the package that code of another package cannot call may require such a condition, and its callers prove it as any other `Requires` clause.
 
+### Variables that hold a writer or a function
+
+A variable may hold an interface value, such as a writer, or a value of a named function type with a contract. A call through it is a call of the contract of its type, as through a parameter:
+
+```go
+var logOut io.Writer = os.Stdout
+
+// printLine writes a line through the variable.
+//
+// @Requires |s| <= 100 And logOut != nil
+// @Modifies logOut
+// @Ensures True
+func printLine(s string) {
+	fmt.Fprintln(logOut, s)
+}
+
+// redirect replaces the writer, as a test does.
+//
+// @Requires w != nil
+// @Modifies logOut
+// @Ensures logOut' = w
+func redirect(w io.Writer) {
+	logOut = w
+}
+
+// Clock returns the time.
+//
+// @Ensures True
+type Clock func() (t time.Time)
+
+var now Clock = time.Now
+
+// stamped reads the clock that a test may replace.
+//
+// @Ensures True
+func stamped() (ok bool) {
+	if now == nil {
+		return false
+	}
+	_ = now()
+	return true
+}
+```
+
+All three functions verify. `Modifies logOut` covers the variable and the footprint of the writer it holds, so `printLine` may write through it and `redirect` may replace it. A test may assign `logOut` or `now` before it calls these functions. `vego` assumes that a value that code which is not verified made meets the contract of its type, as for a parameter. A value that a verified function makes and stores in such a variable is checked against that contract where it is made.
+
+Some things cannot be stored in such a variable:
+
+- a `ResponseWriter`, or a value that holds one, which must not be used after its request ends;
+- code of your package stored into a variable of another package, as `flag.Usage = usage`, which that package runs at times no contract describes. This is reported as not supported yet.
+
+`vego` does not assume that what the parameters of `printLine` refer to lies outside the writer that `logOut` holds, as it assumes for a writer that is a parameter. After a write through `logOut`, `printLine` forgets what it knew of the memory of its parameters.
+
 ### An invariant of variables
 
 An `Invariant` annotation in the doc comment of a `var` declaration states a property of the variables that the declaration declares. A parenthesised block declares a group of variables that go together:
@@ -4417,7 +4470,7 @@ func SeenCount() (n int) {
 
 ```text
 vego: invariant of tagsSeen, tagCount may not hold on return: tagCount = |tagsSeen|; it was not kept from entry, since |tagsSeen| may
-have changed: the assignment to tagsSeen[name] at globals.go:277:3 may write it
+have changed: the assignment to tagsSeen[name] at globals.go:279:3 may write it
 ```
 
 `vego` assumes the invariant when a function that names one of the variables, in its body or its contract, is called, and after a call that may have changed them. `vego` proves the invariant in three places:
@@ -4572,7 +4625,7 @@ Some code that uses package-level variables still cannot be verified:
   Take the logger as a parameter.
 - `log.Default()`, which has no shipped contract.
 - `flag` variables. `flag.Int` returns an `*int`, and pointers to anything but a struct are not supported. `flag.StringVar(&s, ...)` takes the address of `s`.
-- A variable of a function type or an interface type.
+- A variable of a type that holds code other than an interface type or a named function type with a contract, as `*log.Logger`.
 
 A build that sets a string variable with `-ldflags "-X path.name=value"` gives it a value that `vego` does not see. A proof that relies on the value of such a variable, typically a version, does not hold for that build. See [What a proof assumes](#what-a-proof-assumes).
 
