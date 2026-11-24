@@ -171,6 +171,11 @@ func (v *fnVerifier) noteGlobal(st *state, variable *types.Var) {
 
 // readGlobal reads the value of an assigned variable where it is now.
 func (v *fnVerifier) readGlobal(variable *types.Var, pos token.Pos, st *state, guard []*logic.Term) value {
+	// A read relies on the value the initialiser gave, unless something
+	// assigned it since, which a read cannot tell (F42).
+	if why := v.initialiserWhy(variable); why != "" {
+		v.unsupported(pos, v.spelling(variable)+" cannot be relied on: "+why)
+	}
 	v.noteGlobal(st, variable)
 	cells, ref := v.globalCells(variable), globalRef(variable)
 	return v.readAt(st, guard, v.unit.start(), v.spelling(variable), pos, func(sink *state, mem memory) value {

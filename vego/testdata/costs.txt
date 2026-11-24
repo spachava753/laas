@@ -4241,8 +4241,10 @@ sentinelfarther	sentinelfarther.Short	7	4234	0
 sentinellib	sentinellib.End	12	3311	0
 sentinellib	sentinellib.Find	14	4503	0
 sentinellib	sentinellib.Hidden	12	3311	0
+settled	context.CancelFunc	3	255	0
 settled	settled.Ok	3	153	0
 settled	settled.the initialiser of Root	0	0	0
+settled	settled.the initialiser of Stop	0	0	0
 settled	settled.the initialiser of Sub	0	0	0
 settled	slices.Sort	1	5294	0
 shapes	(*shapes.Rect).Area	7	7584	0
@@ -5041,6 +5043,10 @@ varcode	varcode.printOwn	20	104214	0
 varcode	varcode.printTo	14	91448	2
 varcode	varcode.printUnlisted	5	13648	0
 varcode	varcode.println	9	21330	0
+varcode	varcode.readLibRoot	1	46	0
+varcode	varcode.readLibStarted	1	46	0
+varcode	varcode.readMore	1	46	0
+varcode	varcode.readPb	1	46	0
 varcode	varcode.redirectThenKeep	21	52696	0
 varcode	varcode.setGets	10	2039	0
 varcode	varcode.setMore	13	15017	0
@@ -5051,19 +5057,27 @@ varcode	varcode.setUsage	1	46	0
 varcode	varcode.setWs	8	11153	0
 varcode	varcode.setsOther	2	283	0
 varcode	varcode.stamp	4	1049	0
+varcode	varcode.the initialiser of background	0	0	0
 varcode	varcode.the initialiser of getBad	1	139	0
 varcode	varcode.the initialiser of getGood	1	33	0
 varcode	varcode.the initialiser of now	2	878	0
 varcode	varcode.the initialiser of pa	0	0	0
+varcode	varcode.the initialiser of pb	0	0	0
 varcode	varcode.the initialiser of stdout	7	29294	0
 varcode	varcode.the initialiser of wBad	0	0	0
 varcode	varcode.the initialiser of wGood	7	29294	0
 varcode	varcode.the initialiser of wMulti	0	0	0
 varcode	varcode.two	2	88	0
-varcode	varcode.useGets	9	6907	0
+varcode	varcode.useBad	1	46	0
+varcode	varcode.useGood	6	2973	0
 varcode	varcode.uses	12	10339	0
+varcode	varcode.writeBad	2	1392	0
+varcode	varcode.writeGood	7	15251	0
 varcode	varcode.writesOther	10	8663	0
 varcodelib	varcodelib.Event	3	255	0
+varcodelib	varcodelib.Ping	1	46	0
+varcodelib	varcodelib.the initialiser of Root	0	0	0
+varcodelib	varcodelib.the initialiser of Started	0	0	0
 variadic	(variadic.badTally).Count	2	607	0
 variadic	(variadic.tally).Count	2	607	0
 variadic	io.Closer.Close	5	11733	0

@@ -49,13 +49,13 @@ var Limit = func() int {
 	return n * 2
 }()
 
-// Root is what another package returned, and Sub is made from it. Verified
-// code may read a variable of an interface type, so its initialiser is
-// checked as verified code: Background has no contract here.
-var Root = context.Background() // want `^vego: cannot verify the initialiser of Root: it calls Background, which has no contract`
+// Root is what another package returned, and Sub is made from it. No
+// verified function reads either, so what their initialisers do is not
+// reported (F42).
+var Root = context.Background()
 
-// Sub and Stop come from Root, one call with several results.
-var Sub, Stop = context.WithCancel(Root) // want `^vego: cannot verify the initialiser of Sub: Sub is given one result of a call with several`
+// Sub and Stop come from Root.
+var Sub, Stop = context.WithCancel(Root)
 
 // Count is computed by a generic function that ranges over what its type
 // parameter says is a slice.

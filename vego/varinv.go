@@ -885,16 +885,34 @@ func (pv *pkgVerifier) readable(variable *types.Var) bool {
 
 // checkValueInitialisers checks the initialiser of each package-level
 // variable of the package whose type is an interface type or a named
-// function type with a contract, as verified code that assigns it would be
-// checked: a value made there is checked against the contract of its type
-// (madeAs), and a conversion by the conversion check (F41 of the review of
-// part 3). The initialiser is code the verifier reads, so what it stores
-// is not taken on trust.
+// function type with a contract, and that verified code can read, as
+// verified code that assigns it would be checked: a value made there is
+// checked against the contract of its type (madeAs), and a conversion by
+// the conversion check (F41 of the review of part 3). The initialiser is
+// code the verifier reads, so what it stores is not taken on trust. What
+// the check finds is not reported where the variable is declared, since
+// nothing may rely on it, but kept, and a read of the variable in verified
+// code reports it (F42): readGlobal, usableFixed, and in another package
+// initialisersFact.
 func (pv *pkgVerifier) checkValueInitialisers() {
+	pv.initWhy = map[*types.Var]string{}
 	// A package with no function to verify is code that is not verified,
 	// its initialisers included.
 	if !slices.ContainsFunc(pv.order, func(fn *funcInfo) bool { return fn.annotated() }) {
 		return
+	}
+	check := func(variable *types.Var, task func(v *fnVerifier)) {
+		var captured []string
+		saved := pv.capturing
+		pv.capturing = &captured
+		pv.run(&funcInfo{obj: types.NewFunc(variable.Pos(), pv.pass.Pkg, "the initialiser of "+variable.Name(), types.NewSignatureType(nil, nil, nil, nil, nil, false))}, task)
+		pv.capturing = saved
+		if len(captured) == 0 {
+			return
+		}
+		at, msg, _ := strings.Cut(captured[0], "\x00")
+		msg = strings.TrimPrefix(msg, "cannot verify the initialiser of "+variable.Name()+": ")
+		pv.initWhy[variable] = fmt.Sprintf("its initialiser does not verify, at %s: %s", at, msg)
 	}
 	for _, init := range pv.info.InitOrder {
 		// Variables given by one call with several results are given
@@ -903,11 +921,10 @@ func (pv *pkgVerifier) checkValueInitialisers() {
 		if len(init.Lhs) > 1 {
 			for _, variable := range init.Lhs {
 				if variable != nil && pv.readable(variable) {
-					pv.run(&funcInfo{obj: types.NewFunc(variable.Pos(), pv.pass.Pkg, "the initialiser of "+variable.Name(), types.NewSignatureType(nil, nil, nil, nil, nil, false))}, func(v *fnVerifier) {
+					check(variable, func(v *fnVerifier) {
 						v.unsupported(init.Rhs.Pos(), variable.Name()+" is given one result of a call with several, and a variable of an interface type or of a function type with a contract "+
 							"must be given a value of its own, which is checked where it is made")
 					})
-					break
 				}
 			}
 			continue
@@ -916,7 +933,7 @@ func (pv *pkgVerifier) checkValueInitialisers() {
 			continue
 		}
 		variable := init.Lhs[0]
-		pv.run(&funcInfo{obj: types.NewFunc(variable.Pos(), pv.pass.Pkg, "the initialiser of "+variable.Name(), types.NewSignatureType(nil, nil, nil, nil, nil, false))}, func(v *fnVerifier) {
+		check(variable, func(v *fnVerifier) {
 			// A conversion that go/ssa makes and the walk does not list is
 			// checked nowhere, as in a function (vcgen); one go/ssa gives
 			// no position may be in this initialiser.
@@ -935,4 +952,53 @@ func (pv *pkgVerifier) checkValueInitialisers() {
 			v.closeUnit(st)
 		})
 	}
+	// What importers read of the exported ones.
+	published := map[string]string{}
+	for variable, why := range pv.initWhy {
+		if variable.Exported() {
+			published[variable.Name()] = why
+		}
+	}
+	if len(published) > 0 {
+		pv.pass.ExportPackageFact(&initialisersFact{Why: published})
+	}
+}
+
+// initialisersFact holds, for each exported variable of a package whose
+// initialiser checkValueInitialisers found wanting, why; a read of it in
+// another package reports it.
+type initialisersFact struct {
+	Why map[string]string
+}
+
+func (*initialisersFact) AFact() {}
+
+func (f *initialisersFact) String() string { return fmt.Sprintf("initialisers(%d)", len(f.Why)) }
+
+// initialiserWhy returns why a read of a variable cannot rely on the value
+// its initialiser gave it, or "" when it can: the initialiser was checked
+// and holds, or the variable is not one whose initialiser is checked.
+func (pv *pkgVerifier) initialiserWhy(variable *types.Var) string {
+	pkg := variable.Pkg()
+	if pkg == nil || variable.Parent() != pkg.Scope() {
+		return ""
+	}
+	if pkg == pv.pass.Pkg {
+		return pv.initWhy[variable]
+	}
+	if pv.initOf == nil {
+		pv.initOf = map[*types.Package]*initialisersFact{}
+	}
+	fact, done := pv.initOf[pkg]
+	if !done {
+		fact = new(initialisersFact)
+		if !pv.pass.ImportPackageFact(pkg, fact) {
+			fact = nil
+		}
+		pv.initOf[pkg] = fact
+	}
+	if fact == nil {
+		return ""
+	}
+	return fact.Why[variable.Name()]
 }

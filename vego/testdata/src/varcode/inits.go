@@ -1,9 +1,12 @@
 package varcode
 
 import (
+	"context"
 	"flag"
 	"io"
 	"os"
+
+	"varcodelib"
 )
 
 // Positive returns a positive number.
@@ -12,12 +15,15 @@ import (
 type Positive func() (r int)
 
 // The initialiser of a variable of a type with a contract is held to the
-// contract where it is declared: getBad's breaks it, getGood's keeps it.
-var getBad Positive = func() (r int) { return -1 } // want `^vego: postcondition may not hold: r > 0, in the function literal used as a value of type Positive at inits.go:\d+:\d+$`
+// contract, and a read of the variable in verified code relies on it:
+// getBad's breaks it, getGood's keeps it. What is wrong with an initialiser
+// is reported at the reads, not where the variable is declared, which
+// nothing may read.
+var getBad Positive = func() (r int) { return -1 }
 
 var getGood Positive = func() (r int) { return 1 }
 
-// setGets makes both assigned.
+// setGets makes both assigned, and reads neither.
 //
 // @Modifies getBad, getGood
 // @Ensures True
@@ -30,15 +36,24 @@ func setGets() {
 // @Ensures r > 0
 func one() (r int) { return 1 }
 
-// useGets relies on the contract of Positive for both.
+// useBad relies on the contract of Positive for getBad.
 //
 // @Ensures r > 0
-func useGets() (r int) {
-	if getBad == nil || getGood == nil {
+func useBad() (r int) {
+	if getBad == nil { // want `^vego: cannot verify useBad: getBad cannot be relied on: its initialiser does not verify, at inits.go:\d+:\d+: postcondition may not hold: r > 0, in the function literal used as a value of type Positive at inits.go:\d+:\d+$`
 		return 1
 	}
-	_ = getGood()
 	return getBad()
+}
+
+// useGood relies on it for getGood.
+//
+// @Ensures r > 0
+func useGood() (r int) {
+	if getGood == nil {
+		return 1
+	}
+	return getGood()
 }
 
 // bad claims to have written more than it was handed, and is not verified.
@@ -46,9 +61,9 @@ type bad struct{}
 
 func (bad) Write(p []byte) (int, error) { return len(p) + 5, nil }
 
-// The initialiser of an interface variable is converted where it is
-// declared, and a method with no contract cannot stand behind io.Writer.
-var wBad io.Writer = bad{} // want `^vego: cannot verify the initialiser of wBad: it uses Write as a method of io.Writer, and Write has no contract`
+// The initialiser of an interface variable converts its value, and a
+// method with no contract cannot stand behind io.Writer.
+var wBad io.Writer = bad{}
 
 var wGood io.Writer = os.Stdout
 
@@ -59,6 +74,24 @@ var wGood io.Writer = os.Stdout
 // @Ensures True
 func setWs(x io.Writer) {
 	wBad, wGood = x, x
+}
+
+// writeBad writes through wBad.
+//
+// @Requires wBad != nil
+// @Modifies wBad
+// @Ensures True
+func writeBad() {
+	wBad.Write([]byte("x")) // want `^vego: cannot verify writeBad: wBad cannot be relied on: its initialiser does not verify, at inits.go:\d+:\d+: it uses Write as a method of io.Writer, and Write has no contract`
+}
+
+// writeGood writes through wGood.
+//
+// @Requires wGood != nil
+// @Modifies wGood
+// @Ensures True
+func writeGood() {
+	wGood.Write([]byte("x"))
 }
 
 // usage would be run by package flag at times no contract describes.
@@ -83,14 +116,14 @@ func pick(w io.Writer, n int) (r io.Writer) { return w }
 
 // The conversion of the first result of two to io.Writer has no
 // expression of its own, so nothing would check it.
-var wMulti io.Writer = pick(two()) // want `^vego: cannot verify the initialiser of wMulti: Go converts a value to an interface type in the initialiser of wMulti, and which expression it converts could not be told`
+var wMulti io.Writer = pick(two())
 
 // twoPositive is not verified, and what it returns breaks the contract.
 func twoPositive() (a, b Positive) { return func() int { return -1 }, one }
 
 // Variables given one call with several results, which no expression of
 // their own makes.
-var pa, pb Positive = twoPositive() // want `^vego: cannot verify the initialiser of pa: pa is given one result of a call with several`
+var pa, pb Positive = twoPositive()
 
 // setMore makes them assigned.
 //
@@ -99,4 +132,38 @@ var pa, pb Positive = twoPositive() // want `^vego: cannot verify the initialise
 // @Ensures True
 func setMore(w io.Writer) {
 	wMulti, pa, pb = w, one, one
+}
+
+// readMore reads them.
+//
+// @Ensures r
+func readMore() (r bool) {
+	_ = wMulti != nil // want `^vego: cannot verify readMore: wMulti cannot be relied on: its initialiser does not verify, at inits.go:\d+:\d+: Go converts a value to an interface type in the initialiser of wMulti, and which expression it converts could not be told`
+	return pb != nil || true
+}
+
+// readPb reads pb.
+//
+// @Ensures r
+func readPb() (r bool) {
+	return pb != nil || true // want `^vego: cannot verify readPb: pb cannot be relied on: its initialiser does not verify, at inits.go:\d+:\d+: pb is given one result of a call with several`
+}
+
+// A fixed variable whose initialiser calls a function with no contract,
+// which nothing here reads, is not reported.
+var background = context.Background()
+
+// readLibRoot reads a variable of another package whose initialiser does
+// not verify, which that package publishes.
+//
+// @Ensures r
+func readLibRoot() (r bool) {
+	return varcodelib.Root != nil || true // want `^vego: cannot verify readLibRoot: varcodelib.Root cannot be relied on: its initialiser does not verify, at lib.go:\d+:\d+: it calls Background, which has no contract`
+}
+
+// readLibStarted reads one whose initialiser verifies.
+//
+// @Ensures r
+func readLibStarted() (r bool) {
+	return varcodelib.Started != nil || true
 }

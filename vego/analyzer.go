@@ -100,6 +100,7 @@ import (
 	"go/types"
 	"iter"
 	"maps"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
@@ -216,7 +217,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		"comma-separated words that other tools read after \"// @\", as in Summary,Param; any other unknown word there is an error",
 	)
 	analyzer.ResultType = reflect.TypeFor[*Usage]()
-	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact), new(sentinelsFact), new(sentinelWritesFact), new(sentinelRelianceFact), new(stateFact), new(ownsFact), new(fixedFact), new(coversFact), new(writesFact)}
+	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact), new(sentinelsFact), new(sentinelWritesFact), new(sentinelRelianceFact), new(stateFact), new(ownsFact), new(fixedFact), new(coversFact), new(writesFact), new(initialisersFact)}
 	analyzer.Run = func(pass *analysis.Pass) (result any, err error) {
 		foreignTags, err := parseOtherTags(otherTags)
 		if err != nil {
@@ -658,6 +659,13 @@ type pkgVerifier struct {
 	// it did not make; see letOut.
 	letOutNodes []*callNode
 	letOutDone  bool
+	// initWhy holds, for each variable whose initialiser checkValueInitialisers
+	// checked and found wanting, why, which a read of the variable reports;
+	// initOf what other packages published of theirs. capturing, when set,
+	// takes the reports of such a check in place of the pass.
+	initWhy   map[*types.Var]string
+	initOf    map[*types.Package]*initialisersFact
+	capturing *[]string
 	// fixed holds what is known of the package-level variables of the
 	// package that are not errors and that nothing changes, fixedOf what
 	// other packages published of theirs, and hidden the code that may run
@@ -765,6 +773,11 @@ type pkgVerifier struct {
 // report emits a diagnostic once per position and message. Symbolic execution
 // visits a statement once per path, so the same failure can be found often.
 func (pv *pkgVerifier) report(pos token.Pos, format string, args ...any) {
+	if pv.capturing != nil {
+		at := pv.pass.Fset.Position(pos)
+		*pv.capturing = append(*pv.capturing, fmt.Sprintf("%s:%d:%d\x00%s", filepath.Base(at.Filename), at.Line, at.Column, fmt.Sprintf(format, args...)))
+		return
+	}
 	pv.reports++
 	if pv.current != nil {
 		pv.current.failed = true

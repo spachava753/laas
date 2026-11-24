@@ -4415,7 +4415,16 @@ func stamped() (ok bool) {
 }
 ```
 
-All three functions verify. `Modifies logOut` covers the variable and the footprint of the writer it holds, so `printLine` may write through it and `redirect` may replace it. A test may assign `logOut` or `now` before it calls these functions. `vego` assumes that a value that code which is not verified made meets the contract of its type, as for a parameter. A value that a verified function makes and stores in such a variable is checked against that contract where it is made. So is the value its declaration gives it, such as `time.Now` for `now`: a function literal there must meet the contract of `Clock`, a value converted to `io.Writer` there must have a `Write` that is verified or trusted, and a function called there must have a contract. A declaration that gives such a variable one result of a call with several, as `var ctx, cancel = context.WithCancel(root)`, is reported as not supported.
+All three functions verify. `Modifies logOut` covers the variable and the footprint of the writer it holds, so `printLine` may write through it and `redirect` may replace it. A test may assign `logOut` or `now` before it calls these functions. `vego` assumes that a value that code which is not verified made meets the contract of its type, as for a parameter. A value that a verified function makes and stores in such a variable is checked against that contract where it is made.
+
+`vego` also checks the value that the declaration gives the variable, such as `time.Now` for `now`. The check is the one that verified code gets:
+
+- A function literal there must meet the contract of the type.
+- A value converted to `io.Writer` there must have a `Write` that is verified or trusted.
+- A function called there must have a contract.
+- The value must not be one result of a call with several, as in `var ctx, cancel = context.WithCancel(root)`.
+
+A failed check is reported where a verified function reads the variable, not at the declaration. A variable that no verified function reads draws no report. The read is reported with `cannot verify F: v cannot be relied on: its initialiser does not verify`, followed by the position in the initialiser and the reason. A read in another package is reported the same way.
 
 Some things cannot be stored in such a variable:
 

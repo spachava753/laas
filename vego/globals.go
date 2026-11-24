@@ -803,6 +803,11 @@ func (pv *pkgVerifier) usableFixed(variable *types.Var) (knownValue, string) {
 	if write, changed := pv.writtenInBuild()[errorKey(variable)]; changed {
 		return knownValue{}, fmt.Sprintf("%s is changed at %s in package %s, which this package is built with; %s", spelled, write.At, write.Package, changedNotYet)
 	}
+	// What the initialiser gives is checked when the variable can hold
+	// code, and a read relies on it (F42).
+	if why := pv.initialiserWhy(variable); why != "" {
+		return knownValue{}, spelled + " cannot be relied on: " + why
+	}
 	return known, ""
 }
 
