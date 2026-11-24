@@ -980,7 +980,7 @@ func (pv *pkgVerifier) readable(variable *types.Var) bool {
 // code reports it (F42): readGlobal, usableFixed, and in another package
 // initialisersFact.
 func (pv *pkgVerifier) checkValueInitialisers() {
-	pv.initWhy, pv.inert = map[*types.Var]string{}, map[*types.Var]bool{}
+	pv.initWhy, pv.inert, pv.initFacts = map[*types.Var]string{}, map[*types.Var]bool{}, map[*types.Var][]*logic.Term{}
 	// A package with no function to verify is code that is not verified,
 	// its initialisers included.
 	if !slices.ContainsFunc(pv.order, func(fn *funcInfo) bool { return fn.annotated() }) {
@@ -1006,6 +1006,13 @@ func (pv *pkgVerifier) checkValueInitialisers() {
 		pv.initWhy[variable] = fmt.Sprintf("its initialiser does not verify, at %s: %s", at, msg)
 	}
 	for _, init := range pv.info.InitOrder {
+		// Every other initialiser is run as code too, so that a call of a
+		// verified function whose Requires may not hold is reported (F1),
+		// and so that what it shows of a fixed variable is known to its
+		// readers (initcalls.go).
+		if len(init.Lhs) > 1 || init.Lhs[0] == nil || !pv.readable(init.Lhs[0]) {
+			pv.runInitialiser(init)
+		}
 		// Variables given by one call with several results are given
 		// values no expression of their own makes, which nothing here
 		// checks.

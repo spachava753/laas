@@ -258,6 +258,12 @@ type fnVerifier struct {
 	// assignedMet holds, by key, the assigned package-level variables the
 	// function read, which the always-fails check samples.
 	assignedMet map[string]*types.Var
+	// inInitialiser is set while an initialiser of a package-level
+	// variable is run as code (initcalls.go).
+	inInitialiser bool
+	// initFailed is set when such a run reported a call outside its
+	// Requires.
+	initFailed bool
 	// skipConjunct, when set, leaves a conjunct out of the clauses that
 	// checkClauseFramed proves: a lock clause where it is not proved.
 	skipConjunct func(*logic.Node) bool

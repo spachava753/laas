@@ -51,6 +51,8 @@ boxed	boxed.run	7	4543	0
 boxed	boxed.setM	6	3824	0
 boxed	boxed.setup	6	3919	0
 boxed	boxed.startedZero	2	100	0
+boxed	boxed.the initialiser of errBusy	0	0	0
+boxed	boxed.the initialiser of started	0	0	0
 boxed	boxed.twice	13	14873	0
 boxed	boxed.unlisted	2	237	0
 boxed	boxed.walk	4	1441	0
@@ -384,6 +386,7 @@ callbacks	strings.Map	1	2195	0
 callbacks	strings.TrimFunc	1	2276	0
 callbacksinit	callbacksinit.Known	1	46	0
 callbacksinit	callbacksinit.each	1	211	0
+callbacksinit	callbacksinit.the initialiser of ErrX	0	0	0
 chainapp	chainapp.NotDependency	0	0	0
 chainapp	chainapp.OwnState	0	0	0
 chainapp	chainapp.Run	5	2848	0
@@ -392,6 +395,7 @@ chainapp	chainapp.RunPath	5	2848	0
 chainapp	chainapp.RunUnexported	0	0	0
 chainapp	chainapp.RunUnlisted	2	744	0
 chainclash	chainclash.Clash	0	0	0
+chainclash	chainclash.the initialiser of _	0	0	0
 chainclash	math/rand.Int	1	183	0
 chainhandler	chainhandler.NamesHidden	0	0	0
 chainhandler	chainhandler.Serve	5	3782	0
@@ -442,6 +446,7 @@ closed	closed.noteBytes	22	101691	0
 closed	closed.noteFormatted	25	139637	0
 closed	closed.noteOpen	22	93286	0
 closed	closed.onced	17	45964	0
+closed	closed.the initialiser of Lock2	0	0	0
 closed	closedq.Poke	1	667	0
 closed	closedq.Run	1	1241	0
 closed	closedq.Show	1	1117	0
@@ -534,6 +539,8 @@ closures	closures.closeAll	7	4682	0
 closures	closures.closeAllBound	7	4682	0
 closures	closures.closeIt	3	3620	0
 closures	closures.closeKnown	7	4451	0
+closures	closures.the initialiser of ErrBase	0	0	0
+closures	closures.the initialiser of ErrClosed	0	0	0
 compress/flate	(*sync.Once).Do	1	1800	0
 crypto/des	(*sync.Once).Do	1	1800	0
 crypto/elliptic	(*sync.Once).Do	1	1800	0
@@ -560,6 +567,7 @@ cycles/e1	cycles/e1.F	4	516	0
 cycles/e1	cycles/e1.Fn	3	804	0
 cycles/e2	cycles/e2.F	4	516	0
 cycles/e2	cycles/e2.Fn	3	804	0
+cycles/e2	cycles/e2.the initialiser of table	0	0	0
 cycles/e3/p	cycles/e3/p.F	4	516	0
 cycles/e3/p	cycles/e3/p.Fn	3	804	0
 cycles/e4	cycles/e4.F	4	516	0
@@ -744,14 +752,42 @@ early	(early.T).Ok	1	46	0
 early	early.Aliased	1	46	0
 early	early.Concrete	1	46	0
 early	early.Named	3	98	0
+early	early.the initialiser of ErrAliasX	0	0	0
+early	early.the initialiser of ErrConcreteX	0	0	0
+early	early.the initialiser of ErrOpaqueX	0	0	0
+early	early.the initialiser of ErrX	1	51	0
+early	early.the initialiser of First	0	0	0
+early	early.the initialiser of checker	0	0	0
 earlyalias	earlyalias.Get	1	46	0
+earlyalias	earlyalias.the initialiser of ErrA	0	0	0
+earlyalias	earlyalias.the initialiser of ErrS	0	0	0
+earlyalias	earlyalias.the initialiser of _	0	0	0
+earlyalias	earlyalias.the initialiser of errV	0	0	0
 earlyaliasok	earlyaliasok.Get	7	5943	0
+earlyaliasok	earlyaliasok.the initialiser of ErrA	0	0	0
+earlyaliasok	earlyaliasok.the initialiser of ErrB	0	0	0
+earlyaliasok	earlyaliasok.the initialiser of ErrC	0	0	0
+earlyaliasok	earlyaliasok.the initialiser of ErrS	0	0	0
+earlyaliasok	earlyaliasok.the initialiser of _	0	0	0
 earlybox	(earlybox.T).Check	1	46	0
+earlybox	earlybox.the initialiser of ErrX	0	0	0
+earlybox	earlybox.the initialiser of First	0	0	0
 earlycarrier	(earlycarrier.T).Check	1	46	0
+earlycarrier	earlycarrier.the initialiser of ErrX	0	0	0
+earlycarrier	earlycarrier.the initialiser of First	0	0	0
 earlyloop	(earlyloop.T).Check	1	46	0
+earlyloop	earlyloop.the initialiser of ErrX	0	0	0
+earlyloop	earlyloop.the initialiser of First	0	0	0
 earlypanic	(earlypanic.T).Error	1	46	0
+earlypanic	earlypanic.the initialiser of ErrX	0	0	0
+earlypanic	earlypanic.the initialiser of First	0	0	0
 earlyrange	(earlyrange.T).Ok	1	46	0
+earlyrange	earlyrange.the initialiser of ErrX	0	0	0
+earlyrange	earlyrange.the initialiser of First	0	0	0
+earlyrange	earlyrange.the initialiser of s	0	0	0
 earlytype	(earlytype.T).Ready	1	46	0
+earlytype	earlytype.the initialiser of ErrX	0	0	0
+earlytype	earlytype.the initialiser of First	0	0	0
 effects	effects.AnnotatedHelpers	6	783	0
 effects	effects.ArgumentMutation	6	4869	0
 effects	effects.AssignmentPanics	11	647234	1
@@ -850,6 +886,13 @@ errorsid	errorsid.WeakDistinct	7	6765	0
 errorsid	errorsid.Wrapped	3	1691	0
 errorsid	errorsid.WrappedFull	2	940	0
 errorsid	errorsid.WrapsNil	13	5772	0
+errorsid	errorsid.the initialiser of ErrBadNumber	0	0	0
+errorsid	errorsid.the initialiser of ErrEmpty	0	0	0
+errorsid	errorsid.the initialiser of ErrFull	0	0	0
+errorsid	errorsid.the initialiser of ErrNegative	0	0	0
+errorsid	errorsid.the initialiser of ErrOdd	1	1103	0
+errorsid	errorsid.the initialiser of ErrWrapped	1	69	0
+errorsid	errorsid.the initialiser of oddFormat	0	0	0
 errorsid	strconv.Atoi	3	18026	0
 errorsvars	errorsvars.Addressed	1	46	0
 errorsvars	errorsvars.AliasNamed	4	188	0
@@ -884,6 +927,29 @@ errorsvars	errorsvars.SearchesWrapsCtx	1	46	0
 errorsvars	errorsvars.SelfNaN	1	46	0
 errorsvars	errorsvars.TwoDiffers	2	212	0
 errorsvars	errorsvars.TwoSlices	1	46	0
+errorsvars	errorsvars.the initialiser of ErrA	0	0	0
+errorsvars	errorsvars.the initialiser of ErrAddr	0	0	0
+errorsvars	errorsvars.the initialiser of ErrAlias	0	0	0
+errorsvars	errorsvars.the initialiser of ErrChain	0	0	0
+errorsvars	errorsvars.the initialiser of ErrCode	0	0	0
+errorsvars	errorsvars.the initialiser of ErrD	0	0	0
+errorsvars	errorsvars.the initialiser of ErrE	0	0	0
+errorsvars	errorsvars.the initialiser of ErrEOF	0	0	0
+errorsvars	errorsvars.the initialiser of ErrF	0	0	0
+errorsvars	errorsvars.the initialiser of ErrFallback	0	0	0
+errorsvars	errorsvars.the initialiser of ErrFloatField	0	0	0
+errorsvars	errorsvars.the initialiser of ErrID	0	0	0
+errorsvars	errorsvars.the initialiser of ErrMine	0	0	0
+errorsvars	errorsvars.the initialiser of ErrMissing	0	0	0
+errorsvars	errorsvars.the initialiser of ErrNaN	0	0	0
+errorsvars	errorsvars.the initialiser of ErrNamed	0	0	0
+errorsvars	errorsvars.the initialiser of ErrNilPtr	0	0	0
+errorsvars	errorsvars.the initialiser of ErrPtr	0	0	0
+errorsvars	errorsvars.the initialiser of ErrSlice	0	0	0
+errorsvars	errorsvars.the initialiser of ErrSlice2	0	0	0
+errorsvars	errorsvars.the initialiser of ErrTwo	0	0	0
+errorsvars	errorsvars.the initialiser of ErrWrapsCtx	0	0	0
+errorsvars	errorsvars.the initialiser of ErrWrapsNotExist	1	69	0
 errorsvarsclient	errorsvarsclient.Aliases	4	166	0
 errorsvarsclient	errorsvarsclient.Code	2	75	0
 errorsvarsclient	errorsvarsclient.Named	2	165	0
@@ -891,11 +957,13 @@ errorsvarsclient	errorsvarsclient.SameSlice	1	46	0
 exportedp	exportedp.Bump	13	8829	0
 exportedp	exportedp.Check	5	3691	0
 exportedp	exportedp.init of count, total	2	1059	0
+exportedp	exportedp.the initialiser of total	0	0	0
 exportedp2	exportedp2.Bump	13	8829	0
 exportedp2	exportedp2.BumpDeep	13	8829	0
 exportedp2	exportedp2.Check	5	3691	0
 exportedp2	exportedp2.init of count, total	2	1059	0
 exportedp2	exportedp2.mid	1	46	0
+exportedp2	exportedp2.the initialiser of total	0	0	0
 exportedp2	exportedp2.tick	1	46	0
 footprints	(*bufio.Scanner).Scan	1	5236	0
 footprints	(*bufio.Writer).Flush	9	54180	0
@@ -1150,6 +1218,7 @@ footprints	footprints.resetWriter	1	2648	0
 footprints	footprints.spareOf	1	6772	0
 footprints	footprints.storesInto	1	8359	0
 footprints	footprints.tableOf	1	2926	0
+footprints	footprints.the initialiser of shared	0	0	0
 footprints	footprints.useAny	7	7402	0
 footprints	footprints.useAtomic	7	5627	0
 footprints	footprints.useBoth	7	16085	0
@@ -1240,6 +1309,7 @@ foreign	foreign.pingCtx	1	667	0
 foreign	foreign.refill	1	1067	0
 foreign	foreign.refillUnclaimed	1	1067	0
 foreign	foreign.sinkOf	1	620	0
+foreign	foreign.the initialiser of ErrFull	0	0	0
 foreign	foreign.vouchedSink	1	620	0
 foreign	foreign.vouchesNothing	1	772	0
 foreign	foreignlib.Copier.Copy	3	4205	0
@@ -1357,6 +1427,7 @@ formatting	formatting.makeShow	2	57	0
 formatting	formatting.notAny	1	2463	0
 formatting	formatting.showCalls	4	10031	0
 formatting	formatting.sinking	1	2741	0
+formatting	formatting.the initialiser of ErrC	0	0	0
 formatting	formatting.twoValues	1	3305	0
 formatting	io.Writer.Write	3	7630	0
 formatting	log.New	1	8948	0
@@ -1604,26 +1675,36 @@ funcvaluesclient	funcvaluesclient.WrongStop	5	701	0
 funcvaluesclient	funcvaluesclient.helper	11	1757	0
 funcvaluesclient	funcvaluesclient.idStep	3	261	0
 funcvaluesclient	funcvaluesclient.loop	2	207	0
+funcvaluesclient	funcvaluesclient.the initialiser of ErrStop	0	0	0
 funcvaluesclient	funcvaluesclient.viaRunA	10	971	0
 funcvaluesclient	funcvaluesclient.viaRunB	10	971	0
 funcvaluesinit	funcvaluesinit.Configure	10	22077	0
 funcvaluesinit	funcvaluesinit.Known	1	46	0
 funcvaluesinit	funcvaluesinit.Option	3	2008	0
+funcvaluesinit	funcvaluesinit.the initialiser of ErrX	0	0	0
+funcvaluesinit	funcvaluesinit.the initialiser of cfg	3	946	0
 funcvaluesinitdefer	funcvaluesinitdefer.Close	3	255	0
 funcvaluesinitdefer	funcvaluesinitdefer.Finish	5	395	0
 funcvaluesinitdefer	funcvaluesinitdefer.Known	1	46	0
+funcvaluesinitdefer	funcvaluesinitdefer.the initialiser of ErrX	0	0	0
+funcvaluesinitdefer	funcvaluesinitdefer.the initialiser of finished	0	0	0
 funcvaluesinitlit	funcvaluesinitlit.Known	1	46	0
 funcvaluesinitlit	funcvaluesinitlit.Run	7	790	0
 funcvaluesinitlit	funcvaluesinitlit.Step	3	1476	0
+funcvaluesinitlit	funcvaluesinitlit.the initialiser of ErrX	0	0	0
 funcvaluesinitmethod	(funcvaluesinitmethod.stepper).Step	3	261	0
 funcvaluesinitmethod	funcvaluesinitmethod.Known	1	46	0
+funcvaluesinitmethod	funcvaluesinitmethod.the initialiser of ErrX	0	0	0
+funcvaluesinitmethod	funcvaluesinitmethod.the initialiser of stepped	0	0	0
 funcvaluesinitok	funcvaluesinitok.Configure	10	22077	0
 funcvaluesinitok	funcvaluesinitok.Known	3	126	0
 funcvaluesinitok	funcvaluesinitok.Option	3	2008	0
+funcvaluesinitok	funcvaluesinitok.the initialiser of ErrX	0	0	0
 funcvalueslib	funcvalueslib.Count	4	740	0
 funcvalueslib	funcvalueslib.Run	8	1440	0
 funcvalueslib	funcvalueslib.Step	3	1679	0
 funcvalueslib	funcvalueslib.Stop	3	1102	0
+funcvalueslib	funcvalueslib.the initialiser of ErrStop	0	0	0
 funcvaluesoldloop	funcvaluesoldloop.Loop	9	33196	0
 funcvaluesoldloop	funcvaluesoldloop.Mapper	3	1546	0
 funcvaluesunread	funcvaluesunread.Op	3	1024	0
@@ -1856,7 +1937,7 @@ globals	globals.Pointed	3	1013	0
 globals	globals.Pow10	5	3792	0
 globals	globals.Primed	1	46	0
 globals	globals.Probe	12	12095	0
-globals	globals.ProbeCfg	8	6466	0
+globals	globals.ProbeCfg	8	8693	0
 globals	globals.ProbeMade	11	12090	0
 globals	globals.Ranged	8	8245	0
 globals	globals.Ratio	1	46	0
@@ -1898,6 +1979,64 @@ globals	globals.putOther	6	10608	0
 globals	globals.reader	3	804	0
 globals	globals.resetEntries	5	3475	0
 globals	globals.setHits	5	2848	0
+globals	globals.the initialiser of ErrTooBig	0	0	0
+globals	globals.the initialiser of _	0	0	0
+globals	globals.the initialiser of accented	0	0	0
+globals	globals.the initialiser of addressed	0	0	0
+globals	globals.the initialiser of alias	0	0	0
+globals	globals.the initialiser of appended	9	509	0
+globals	globals.the initialiser of assignedTo	0	0	0
+globals	globals.the initialiser of box	0	0	0
+globals	globals.the initialiser of buffer	6	259	0
+globals	globals.the initialiser of byName	0	0	0
+globals	globals.the initialiser of captured	0	0	0
+globals	globals.the initialiser of cells	0	0	0
+globals	globals.the initialiser of cfg2	0	0	0
+globals	globals.the initialiser of compared	0	0	0
+globals	globals.the initialiser of computed	0	0	0
+globals	globals.the initialiser of copied	0	0	0
+globals	globals.the initialiser of defaultTimeout	0	0	0
+globals	globals.the initialiser of defaults	0	0	0
+globals	globals.the initialiser of defaults2	0	0	0
+globals	globals.the initialiser of deferred	0	0	0
+globals	globals.the initialiser of digits	0	0	0
+globals	globals.the initialiser of entries	0	0	0
+globals	globals.the initialiser of errBusy	0	0	0
+globals	globals.the initialiser of filled	0	0	0
+globals	globals.the initialiser of first	0	0	0
+globals	globals.the initialiser of holder	0	0	0
+globals	globals.the initialiser of inc	0	0	0
+globals	globals.the initialiser of indexed	0	0	0
+globals	globals.the initialiser of keep	6	259	0
+globals	globals.the initialiser of levels	0	0	0
+globals	globals.the initialiser of limits	4	2271	0
+globals	globals.the initialiser of literal	0	0	0
+globals	globals.the initialiser of made2	0	0	0
+globals	globals.the initialiser of magic	0	0	0
+globals	globals.the initialiser of mutable	0	0	0
+globals	globals.the initialiser of nested	0	0	0
+globals	globals.the initialiser of one	0	0	0
+globals	globals.the initialiser of origin	0	0	0
+globals	globals.the initialiser of other	0	0	0
+globals	globals.the initialiser of pageSize	0	0	0
+globals	globals.the initialiser of passed	0	0	0
+globals	globals.the initialiser of plans	2	156	0
+globals	globals.the initialiser of pointed	0	0	0
+globals	globals.the initialiser of ratio	0	0	0
+globals	globals.the initialiser of received	0	0	0
+globals	globals.the initialiser of removed	2	156	0
+globals	globals.the initialiser of runes	0	0	0
+globals	globals.the initialiser of second	0	0	0
+globals	globals.the initialiser of sink	0	0	0
+globals	globals.the initialiser of sinkBuf	0	0	0
+globals	globals.the initialiser of sliced	0	0	0
+globals	globals.the initialiser of snapshot	0	0	0
+globals	globals.the initialiser of spare	9	509	0
+globals	globals.the initialiser of table	0	0	0
+globals	globals.the initialiser of table2	0	0	0
+globals	globals.the initialiser of view	4	518	0
+globals	globals.the initialiser of weights	0	0	0
+globals	globals.the initialiser of written	0	0	0
 globals	globals.usesHidden2	6	3298	0
 globals	globals.valued	1	745	0
 globals	io.Writer.Write	5	18168	0
@@ -1915,18 +2054,33 @@ globalsclient	globalsclient.Origin	4	259	0
 globalsclient	globalsclient.OverLimit	3	201	0
 globalsclient	globalsclient.Pro	2	2356	0
 globalsclient	globalsclient.Quiet	2	106	0
+globalsclient	globalsclient.the initialiser of logger	0	0	0
+globalsclient	globalsclient.the initialiser of tally	0	0	0
 globalsclient	io.Writer.Write	5	18168	0
+globalsclient	log.New	1	8948	0
 globalsearly	(globalsearly.T).Limit	1	46	0
 globalsearly	(globalsearly.T).Zero	2	81	0
+globalsearly	globalsearly.the initialiser of First	0	0	0
+globalsearly	globalsearly.the initialiser of limit	0	0	0
+globalsearly	globalsearly.the initialiser of limiter	0	0	0
 globalsembed	globalsembed.Greeting	2	456	0
 globalsembed	globalsembed.InBlock	2	456	0
 globalsembed	globalsembed.Spaced	2	456	0
 globalsleakclient	globalsleakclient.Pro	2	1886	0
+globalsleakclient	globalsleakclient.the initialiser of _	0	0	0
 globalslib	globalslib.AtLimit	4	909	0
 globalslib	globalslib.First	4	1488	0
 globalslib	globalslib.FreeLimit	2	2398	0
 globalslib	globalslib.Hidden	2	81	0
 globalslib	globalslib.IsDev	2	669	0
+globalslib	globalslib.the initialiser of Limit	0	0	0
+globalslib	globalslib.the initialiser of Names	0	0	0
+globalslib	globalslib.the initialiser of Origin	0	0	0
+globalslib	globalslib.the initialiser of Plans	4	2271	0
+globalslib	globalslib.the initialiser of Sink	0	0	0
+globalslib	globalslib.the initialiser of Table	0	0	0
+globalslib	globalslib.the initialiser of Version	0	0	0
+globalslib	globalslib.the initialiser of hidden	0	0	0
 globalsvalues	globalsvalues.Around	11	21935	0
 globalsvalues	globalsvalues.AroundListed	11	20160	0
 globalsvalues	globalsvalues.AroundUnlisted	7	7826	0
@@ -2439,9 +2593,21 @@ guide	guide.small	2	207	0
 guide	guide.stamped	4	1049	0
 guide	guide.teeRecorder	1	2911	0
 guide	guide.tell	1	70	0
+guide	guide.the initialiser of ErrEmpty	0	0	0
+guide	guide.the initialiser of ErrLong	0	0	0
+guide	guide.the initialiser of ErrMissing	0	0	0
+guide	guide.the initialiser of ErrRange	0	0	0
+guide	guide.the initialiser of ErrTooMany	0	0	0
+guide	guide.the initialiser of digits	0	0	0
 guide	guide.the initialiser of errOut	7	29294	0
+guide	guide.the initialiser of limits	4	2271	0
 guide	guide.the initialiser of logOut	7	29294	0
+guide	guide.the initialiser of logger	11	53473	0
 guide	guide.the initialiser of now	2	878	0
+guide	guide.the initialiser of pageSize	0	0	0
+guide	guide.the initialiser of routes	0	0	0
+guide	guide.the initialiser of sizes	0	0	0
+guide	guide.the initialiser of tagsSeen	0	0	0
 guide	guide.value	3	869	0
 guide	guide.warn	5	11761	0
 guide	guide.warnChecked	6	13308	0
@@ -2689,6 +2855,33 @@ ifacestate	ifacestatelib.Wrapped.Ping	3	255	0
 ifacestate	io.Closer.Close	5	11733	0
 ifacestate	io.Reader.Read	6	1014374	1
 ifacestate	io.Writer.Write	5	18168	0
+initcalls	initcalls.Get	2	1093	0
+initcalls	initcalls.buildTable	2	66	0
+initcalls	initcalls.double	4	660	0
+initcalls	initcalls.five	2	61	0
+initcalls	initcalls.fourth	3	1745	0
+initcalls	initcalls.init of n	1	417	0
+initcalls	initcalls.newBox	3	170	0
+initcalls	initcalls.pick	4	1612	0
+initcalls	initcalls.poke	3	1327	0
+initcalls	initcalls.pokeListed	6	2897	0
+initcalls	initcalls.readCfg	2	128	0
+initcalls	initcalls.readDoubled	2	187	0
+initcalls	initcalls.readSix	2	161	0
+initcalls	initcalls.readTooMuch	2	226	0
+initcalls	initcalls.set	6	3773	0
+initcalls	initcalls.the initialiser of _	2	372	0
+initcalls	initcalls.the initialiser of box	0	0	0
+initcalls	initcalls.the initialiser of cfg	0	0	0
+initcalls	initcalls.the initialiser of doubled	2	89	0
+initcalls	initcalls.the initialiser of later	0	0	0
+initcalls	initcalls.the initialiser of past	5	2486	0
+initcalls	initcalls.the initialiser of setOne	2	722	0
+initcalls	initcalls.the initialiser of short	0	0	0
+initcalls	initcalls.the initialiser of six	2	119	0
+initcalls	initcalls.the initialiser of table	0	0	0
+initcalls	initcalls.the initialiser of tooMuch	2	78	0
+initcalls	initcalls.third	3	592	0
 integers	integers.Accumulate	7	60457	0
 integers	integers.Allocate	8	918	0
 integers	integers.AndNotAfterAnd	2	3144	0
@@ -2970,18 +3163,28 @@ interfaces	interfaces.pricesThrough	8	2921	0
 interfaces	interfaces.same	2	141	0
 interfaces	interfaces.takesLiterals	1	772	0
 interfaces	interfaces.takesLiteralsUnclaimed	1	772	0
+interfaces	interfaces.the initialiser of errNoShape	0	0	0
+interfaces	interfaces.the initialiser of errTag	0	0	0
 interfaces	interfaceslib.Measure	1	809	0
 interfaces	io.Closer.Close	5	11733	0
 interfaces	io.Writer.Write	5	18168	0
 interfacesinitcall	(interfacesinitcall.Small).Size	3	85	0
 interfacesinitcall	interfacesinitcall.Known	1	46	0
 interfacesinitcall	interfacesinitcall.Sizer.Size	3	1129	0
+interfacesinitcall	interfacesinitcall.the initialiser of ErrX	0	0	0
+interfacesinitcall	interfacesinitcall.the initialiser of size	0	0	0
+interfacesinitcall	interfacesinitcall.the initialiser of sizer	2	127	0
 interfacesinithand	(interfacesinithand.Small).Size	3	85	0
 interfacesinithand	interfacesinithand.Known	1	46	0
+interfacesinithand	interfacesinithand.the initialiser of ErrX	0	0	0
+interfacesinithand	interfacesinithand.the initialiser of measured	4	1626	0
+interfacesinithand	interfaceslib.Measure	1	809	0
 interfacesinitok	(*interfacesinitok.Box).Name	1	182	0
 interfacesinitok	(interfacesinitok.Level).Name	1	111	0
 interfacesinitok	interfacesinitok.Known	3	126	0
 interfacesinitok	interfacesinitok.Namer.Name	3	2076	0
+interfacesinitok	interfacesinitok.the initialiser of ErrX	0	0	0
+interfacesinitok	interfacesinitok.the initialiser of _	0	0	0
 interfaceslib	interfaceslib.Pricer.Price	3	3758	0
 interfaceslib	interfaceslib.Sizer.Size	3	1129	0
 interfacesunread	interfacesunread.Counter.Count	3	961	0
@@ -3066,6 +3269,8 @@ isolatedg	isolatedg.Logs	15	11245	0
 isolatedg	isolatedg.Plain	13	11234	0
 isolatedg	isolatedg.Upper	13	17095	0
 isolatedg	isolatedg.init of count, total	2	1059	0
+isolatedg	isolatedg.the initialiser of errCheck	1	51	0
+isolatedg	isolatedg.the initialiser of total	0	0	0
 isolatedg	isolatedq.Hand	1	384	0
 isolatedg	isolatedq.Look	1	1014	0
 isolatedg	log.Print	1	2741	0
@@ -3317,10 +3522,12 @@ letoutp	letoutp.Bump	13	8829	0
 letoutp	letoutp.Install	6	1219	0
 letoutp	letoutp.check	5	3691	0
 letoutp	letoutp.init of count, total	2	1059	0
+letoutp	letoutp.the initialiser of total	0	0	0
 letoutq	letoutq.Hook	3	255	0
 letoutq	letoutq.Slot	1	261	0
 letoutq	letoutq.Tick	8	4254	0
 letoutq	letoutq.current	1	261	0
+letoutq	letoutq.the initialiser of box	0	0	0
 lib	(*lib.Account).Deposit	8	7515	0
 lib	(*lib.Account).Reset	9	5750	0
 lib	lib.Broken	2	238	0
@@ -3334,6 +3541,8 @@ lib	lib.SafeDivide	4	1444	0
 lib	lib.Smallest	5	12516	0
 lib	lib.Touch	7	8669	0
 lib	lib.Wrap	2	174	0
+lib	lib.the initialiser of ErrGone	0	0	0
+lib	lib.the initialiser of errEmpty	0	0	0
 lockgroup	(*strings.Builder).Len	1	2269	0
 lockgroup	(*strings.Builder).WriteString	4	15141	0
 lockgroup	(*sync.Mutex).Lock	1	1652	0
@@ -3359,6 +3568,8 @@ lockgroupbad	lockgroupbad.Bump	7	3236	0
 lockgroupbad	lockgroupbad.Run	9	11129	0
 lockgroupbad	lockgroupbad.bumpValue	7	3236	0
 lockgroupbad	lockgroupbad.init of mu, hits	2	1927	0
+lockgroupbad	lockgroupbad.the initialiser of Later	0	0	0
+lockgroupbad	lockgroupbad.the initialiser of OpenLock	0	0	0
 locks	(*locks.Account).AddTwice	33	54097	0
 locks	(*locks.Account).Deposit	33	54027	0
 locks	(*locks.Account).Unlocked	10	9633	0
@@ -3451,6 +3662,8 @@ locks	locks.Unlisted	12	12246	0
 locks	locks.Upgrade	15	16797	0
 locks	locks.Write	16	22577	0
 locks	locks.take2	1	439	0
+locks	locks.the initialiser of ErrLow	0	0	0
+locks	locks.the initialiser of ErrShort	0	0	0
 locks	sort.Search	1	2237	0
 locksclient	locksclient.Twice	19	23366	0
 locksclient	locksclient.Unheld	11	11160	0
@@ -3463,6 +3676,11 @@ madehere	madehere.linkA	6	5033	0
 madehere	madehere.relinkB	5	4957	0
 madehere	madehere.relinkFresh	6	1600	0
 madehere	madehere.spoilShared	7	1567	0
+madehere	madehere.the initialiser of a	0	0	0
+madehere	madehere.the initialiser of b	0	0	0
+madehere	madehere.the initialiser of c	0	0	0
+madehere	madehere.the initialiser of d	0	0	0
+madehere	madehere.the initialiser of shared	0	0	0
 manywrites	manywrites.Set	587	67402205	23
 mapping	(*mapping.Registry).Register	17	25280	0
 mapping	(*mapping.store).drop	5	4196	0
@@ -3619,6 +3837,8 @@ mapping	mapping.readyBytes	5	11265	0
 mapping	mapping.removeZero	5	1572	0
 mapping	mapping.setEntry	1	5536	0
 mapping	mapping.setTwo	12	28450	0
+mapping	mapping.the initialiser of errMissing	0	0	0
+mapping	mapping.the initialiser of table	6	5014	0
 mapping	mapping.touchEntry	6	7942	0
 mapping	mapping.twoBytes	7	4253	0
 mapping	mapping.twoKeys	1	1963	0
@@ -3872,6 +4092,7 @@ memory	memory.readyNamed	4	14494	0
 memory	memory.readyRows	4	164404	0
 memory	memory.readySmall	4	9040	0
 memory	memory.setIfPresent	7	4392	0
+memory	memory.the initialiser of errEmptyQueue	0	0	0
 memory	memory.zero	9	19643	0
 mime	(*sync.Mutex).Lock	1	1652	0
 mime	(*sync.Mutex).Unlock	1	1611	0
@@ -4047,6 +4268,8 @@ originpath	originpath.VarInLoop	105	69922	0
 originpath	originpath.closeIt	3	3620	0
 originpath	originpath.later	10	2967	0
 originpath	originpath.log	1	70	0
+originpath	originpath.the initialiser of ErrFailed	0	0	0
+originpath	originpath.the initialiser of errA	0	0	0
 originpath	originpath.unvouched	3	3620	0
 originpath	originpath.vouched	3	3620	0
 originpathclient	originpathclient.WrapsLoad	25	13519	0
@@ -4257,6 +4480,7 @@ pathstore	pathstore.across	12	23063	0
 pathstore	pathstore.link	6	4970	0
 pathstore	pathstore.relink	6	1295	0
 pathstore	pathstore.spoil	6	1219	0
+pathstore	pathstore.the initialiser of e	0	0	0
 reachclient	io.Writer.Write	5	18168	0
 reachclient	reachclient.Around	7	8617	0
 reachclient	reachclient.AroundListed	11	21935	0
@@ -4264,6 +4488,7 @@ reachclient	reachclient.Fires	8	5619	0
 reachclient	reachclient.FiresTock	8	5667	0
 reachclient	reachclient.Hook	3	255	0
 reachclient	reachclient.Tock	3	471	0
+reachclient	reachclient.the initialiser of _	2	1623	0
 reachclient	reachclient.tick	5	2848	0
 reachclient	reachclient.tock	5	3069	0
 reachlib	reachlib.IncV	7	4616	0
@@ -4272,6 +4497,7 @@ readerbad	readerbad.poke	8	9530	0
 readerbad	readerbad.same	3	1584	0
 readerbad	readerbad.stash	6	20080	0
 readerbad	readerbad.stashClip	10	102286	2
+readerbad	readerbad.the initialiser of items	0	0	0
 readerbad	slices.Clip	1	4777	0
 reflect	(*sync.Mutex).Lock	1	1652	0
 reflect	(*sync.Mutex).Unlock	1	1611	0
@@ -4412,18 +4638,37 @@ sentinelclient	sentinelclient.NotOwn	2	657	0
 sentinelclient	sentinelclient.OddTree	2	531	0
 sentinelclient	sentinelclient.Short	13	7715	0
 sentinelclient	sentinelclient.Trees	4	4994	0
+sentinelclient	sentinelclient.the initialiser of ErrGone	0	0	0
 sentinelfar	sentinelfar.End	7	3362	0
 sentinelfarther	sentinelfarther.Look	7	4158	0
 sentinelfarther	sentinelfarther.Short	7	4234	0
 sentinellib	sentinellib.End	12	3311	0
 sentinellib	sentinellib.Find	14	4503	0
 sentinellib	sentinellib.Hidden	12	3311	0
+sentinellib	sentinellib.the initialiser of ErrChanged	0	0	0
+sentinellib	sentinellib.the initialiser of ErrGone	0	0	0
+sentinellib	sentinellib.the initialiser of ErrLost	1	69	0
+sentinellib	sentinellib.the initialiser of ErrOdd	1	1103	0
+sentinellib	sentinellib.the initialiser of ErrShort	1	69	0
+sentinellib	sentinellib.the initialiser of errHidden	0	0	0
+sentinellib	sentinellib.the initialiser of oddFormat	0	0	0
+settled	(*os.File).Write	3	18506	0
+settled	bufio.NewWriter	1	9378	0
 settled	context.CancelFunc	3	255	0
+settled	io.Writer.Write	3	7630	0
 settled	settled.Ok	3	153	0
+settled	settled.the initialiser of Count	0	0	0
+settled	settled.the initialiser of ErrWrapped	1	69	0
+settled	settled.the initialiser of ErrY	0	0	0
+settled	settled.the initialiser of Joined	6	104760	4
+settled	settled.the initialiser of Name	0	0	0
+settled	settled.the initialiser of Names	0	0	0
+settled	settled.the initialiser of Out	11	76369	2
 settled	settled.the initialiser of Root	0	0	0
 settled	settled.the initialiser of Stop	0	0	0
 settled	settled.the initialiser of Sub	0	0	0
 settled	slices.Sort	1	5294	0
+settled	strings.Join	2	38450	2
 shapes	(*shapes.Rect).Area	7	7584	0
 shapes	shapes.New	8	3662	0
 shapes	shapes.Rect	1	221	0
@@ -4886,6 +5131,8 @@ trialfaults	trialfaults.grow	14	8600	0
 trialfaults	trialfaults.mk	8	391	0
 trialfaults	trialfaults.newCloser	1	1983	0
 trialfaults	trialfaults.set	7	2992	0
+trialfaults	trialfaults.the initialiser of errBad	0	0	0
+trialfaults	trialfaults.the initialiser of n	0	0	0
 trialfaults	trialfaults.unpredictable	3	3620	0
 trialfaults	trialfaults.writes	0	0	0
 trialfaults	trialfaults.writesOK	0	0	0
@@ -5064,6 +5311,8 @@ trust	trust.take	0	0	0
 trust	trust.takeAny	0	0	0
 trust	trust.tell	1	70	0
 trust	trust.tellAny	1	70	0
+trust	trust.the initialiser of errAlways	0	0	0
+trust	trust.the initialiser of errOther	0	0	0
 trust	trust.translate	10	3451	0
 trust	trust.twoPlain	3	6954	0
 trust	trust.usesPredicate	0	0	0
@@ -5203,6 +5452,8 @@ values	values.pair	4	351	0
 values	values.partner	24	16769	0
 values	values.passes	7	3199	0
 values	values.stat	3	9528	0
+values	values.the initialiser of ErrReassigned	0	0	0
+values	values.the initialiser of errOutOfRange	0	0	0
 varcode	(*encoding/json.Encoder).Encode	3	16623	0
 varcode	(*os.File).Close	3	8576	0
 varcode	(*os.File).Write	3	18506	0
@@ -5396,6 +5647,14 @@ varinv	varinv.reprice	11	21537	0
 varinv	varinv.reset	7	4663	0
 varinv	varinv.setLimit	6	4068	0
 varinv	varinv.setPrice	7	11580	0
+varinv	varinv.the initialiser of cache	0	0	0
+varinv	varinv.the initialiser of cache2	0	0	0
+varinv	varinv.the initialiser of head	0	0	0
+varinv	varinv.the initialiser of limit	0	0	0
+varinv	varinv.the initialiser of names	0	0	0
+varinv	varinv.the initialiser of prices	0	0	0
+varinv	varinv.the initialiser of step	0	0	0
+varinv	varinv.the initialiser of tags	0	0	0
 varinv	varinv.touchThenWrite	21	145880	0
 varinv	varinv.writeBroken	13	14563	0
 varinv	varinv.writeNegative	16	266262	0
@@ -5404,6 +5663,10 @@ varinvbad	varinvbad.Table	1	46	0
 varinvbad	varinvbad.init of lo	0	0	0
 varinvbad	varinvbad.setHi	5	2848	0
 varinvbad	varinvbad.setLo	5	3585	0
+varinvbad	varinvbad.the initialiser of alias	0	0	0
+varinvbad	varinvbad.the initialiser of hi	0	0	0
+varinvbad	varinvbad.the initialiser of source	0	0	0
+varinvbad	varinvbad.the initialiser of table	0	0	0
 vendor/golang.org/x/net/http2/hpack	(*sync.Once).Do	1	1800	0
 vendor/golang.org/x/text/unicode/norm	(*sync.Once).Do	1	1800	0
 vouched	vouched.AtEnd	5	7101	0
@@ -5439,6 +5702,7 @@ vouched	vouched.namesQuotedShort	0	0	0
 vouched	vouched.next	4	8334	0
 vouched	vouched.nextUnvouched	4	8334	0
 vouched	vouched.open	4	10562	0
+vouched	vouched.the initialiser of errHidden	0	0	0
 vouched	vouched.two	3	4122	0
 vouched	vouched.vouchesInt	1	154	0
 vouched	vouched.vouchesParam	1	70	0
@@ -5450,6 +5714,7 @@ vouchedcapture	vouched.lib.FailQuoted	4	3468	0
 vouchedcapture	vouchedcapture.FakeEnd	4	682	0
 vouchedcapture	vouchedcapture.Ours	4	1723	0
 vouchedcapture	vouchedcapture.Theirs	7	4395	0
+vouchedcapture	vouchedcapture.the initialiser of ErrBad	0	0	0
 vouchedclient	vouchedclient.AtEnd	3	1955	0
 vouchedclient	vouchedclient.Wraps	14	17385	0
 vouchsrc	(vouchsrc.memory).Read	10	6555	0
@@ -5485,3 +5750,11 @@ wrapped	wrapped.TellsNumbers	3	396	0
 wrapped	wrapped.TellsOnTop	1	46	0
 wrapped	wrapped.TellsOwn	7	2128	0
 wrapped	wrapped.tell	1	70	0
+wrapped	wrapped.the initialiser of errBase	0	0	0
+wrapped	wrapped.the initialiser of errCounted	1	87	0
+wrapped	wrapped.the initialiser of errEOF	1	69	0
+wrapped	wrapped.the initialiser of errForeign	0	0	0
+wrapped	wrapped.the initialiser of errNested	0	0	0
+wrapped	wrapped.the initialiser of errNumbers	1	82	0
+wrapped	wrapped.the initialiser of errOnTop	0	0	0
+wrapped	wrapped.the initialiser of errOver	1	69	0

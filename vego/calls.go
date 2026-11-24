@@ -615,6 +615,19 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			}
 			continue
 		}
+		// A verified function called from an initialiser outside its
+		// Requires may write what its frame proof excluded, as a group's
+		// variables: reported where it stands, whatever reads the variable
+		// (F1 of the design review of F32).
+		if v.inInitialiser && fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil {
+			saved, before := v.capturing, v.reports
+			v.capturing = nil
+			v.checkClause(c, pre, st, guard, call.Pos(), "precondition of "+name+" may not hold in an initialiser, where a verified function relies on it for what it writes")
+			v.capturing = saved
+			// Such a run shows nothing of the variable either.
+			v.initFailed = v.initFailed || v.reports != before
+			continue
+		}
 		v.checkClause(c, pre, st, guard, call.Pos(), "precondition of "+name+" may not hold")
 	}
 	v.checkRecursion(fn, pre, st, guard, call)

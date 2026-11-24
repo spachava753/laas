@@ -681,6 +681,10 @@ type pkgVerifier struct {
 	initWhy   map[*types.Var]string
 	initOf    map[*types.Package]*initialisersFact
 	capturing *[]string
+	// initFacts holds, for each fixed variable of the package whose
+	// initialiser runs as code, what the run shows of its value; see
+	// initcalls.go.
+	initFacts map[*types.Var][]*logic.Term
 	// inert holds the variables whose checked initialiser converts a value
 	// whose footprint stays empty and that has no states; see inertFixed.
 	inert map[*types.Var]bool

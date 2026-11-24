@@ -965,6 +965,11 @@ func (v *fnVerifier) fixedValue(sink *state, variable *types.Var) (value, string
 	sink.noted["fixed "+errorKey(final)] = true
 	v.declared(sink, v.wellFormed(val, variable.Type(), v.entryBrk))
 	v.noteKnown(sink, val, variable.Type(), known)
+	// What the run of its initialiser showed of a variable of the package
+	// (initcalls.go).
+	for _, fact := range v.initFacts[final] {
+		v.declared(sink, fact)
+	}
 	if readOnly && known.Contents {
 		v.noteContents(sink, errorKey(final), val[0], variable.Type(), known)
 	}
