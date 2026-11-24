@@ -24,7 +24,7 @@ func linkA(p *Entry) {
 	}
 }
 
-// @Invariant b != nil And b.next != nil And b.next.n >= 0 // want `^vego: the invariant of b cannot be relied on: the use of b at m.go:\d+ lets a reference to what it refers to out of it, so a write through another reference could break the invariant without naming the variable$`
+// @Invariant b != nil And b.next != nil And b.next.n >= 0 // want `^vego: the invariant of b cannot be relied on: the assignment to b at m.go:\d+ puts there a reference to memory that it did not make where it stands, which something else may hold, so a write through another reference could break the invariant without naming the variable$`
 var b = &Entry{next: &Entry{n: 1}}
 
 // relinkB assigns b a new entry that holds p.

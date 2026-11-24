@@ -255,7 +255,11 @@ func (pv *pkgVerifier) groupEscape(g *varGroup) string {
 				found = fmt.Sprintf("the store through %s at %s puts there a reference to memory that it did not make where it stands, which something else may hold", variable.Name(), pv.placeOfPos(id.Pos()))
 				return true
 			}
-			if !use.escape || use.change == "is assigned" && pv.assignedFresh(stack) || pathWritten(pv.info, stack) || pv.handedToReader(stack) {
+			if use.change == "is assigned" && !pv.assignedFresh(stack) && !pathWritten(pv.info, stack) {
+				found = fmt.Sprintf("the assignment to %s at %s puts there a reference to memory that it did not make where it stands, which something else may hold", variable.Name(), pv.placeOfPos(id.Pos()))
+				return true
+			}
+			if !use.escape || use.change == "is assigned" || pathWritten(pv.info, stack) || pv.handedToReader(stack) {
 				return true
 			}
 			found = fmt.Sprintf("the use of %s at %s lets a reference to what it refers to out of it", variable.Name(), pv.placeOfPos(id.Pos()))
