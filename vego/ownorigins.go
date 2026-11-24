@@ -87,6 +87,14 @@ type ownKind struct {
 	// keeps: it names the value as written, and decl is the declaration.
 	scoped string
 	decl   *scopedDecl
+	// throughCall holds the roots of inside that an error holds only
+	// because a call made on what the owner owns returned it, on every
+	// path: the error of fmt.Fprint(r.out, ...) may hold what r.out holds.
+	// A root that verified code put into an error, by a conversion, a
+	// literal, or errors.New and fmt.Errorf, also through a verified call
+	// that hands its argument back, is not one (F19 of the reviews of S3
+	// and S4 of F33).
+	throughCall map[ownRoot]bool
 }
 
 func (k ownKind) holds() bool {
@@ -121,11 +129,22 @@ func (k ownKind) union(o ownKind) ownKind {
 		}
 		out.inside[r] = true
 	}
+	// A root is through a call in the union only when it is on each side
+	// that holds it.
+	for r := range out.inside {
+		if (!k.inside[r] || k.throughCall[r]) && (!o.inside[r] || o.throughCall[r]) {
+			if out.throughCall == nil {
+				out.throughCall = map[ownRoot]bool{}
+			}
+			out.throughCall[r] = true
+		}
+	}
 	return out
 }
 
 func (k ownKind) equal(o ownKind) bool {
-	return maps.Equal(k.params, o.params) && maps.Equal(k.tags, o.tags) && maps.Equal(k.inside, o.inside) && k.unknown == o.unknown && k.scoped == o.scoped
+	return maps.Equal(k.params, o.params) && maps.Equal(k.tags, o.tags) && maps.Equal(k.inside, o.inside) && k.unknown == o.unknown && k.scoped == o.scoped &&
+		maps.Equal(k.throughCall, o.throughCall)
 }
 
 // The statuses of a tag, in the order a join takes the worse.
@@ -570,7 +589,7 @@ func (v *fnVerifier) rootOf(kind ownKind) ownRoot {
 
 // ownResolve turns the owned tags of a kind into inside of their roots.
 func (v *fnVerifier) ownResolve(kind ownKind, f *ownFact) ownKind {
-	out := ownKind{params: kind.params, inside: kind.inside, unknown: kind.unknown, scoped: kind.scoped, decl: kind.decl}
+	out := ownKind{params: kind.params, inside: kind.inside, unknown: kind.unknown, scoped: kind.scoped, decl: kind.decl, throughCall: kind.throughCall}
 	for tag := range kind.tags {
 		if s := f.status[tag]; s.state == tagOwned {
 			inside := maps.Clone(out.inside)
@@ -622,7 +641,7 @@ func (v *fnVerifier) ownSite(site ast.Node, f *ownFact) ownKind {
 		}
 		for variable, kind := range f.vars {
 			if kind.tags[recent] {
-				next := ownKind{params: kind.params, inside: kind.inside, unknown: kind.unknown, tags: maps.Clone(kind.tags), scoped: kind.scoped, decl: kind.decl}
+				next := ownKind{params: kind.params, inside: kind.inside, unknown: kind.unknown, tags: maps.Clone(kind.tags), scoped: kind.scoped, decl: kind.decl, throughCall: kind.throughCall}
 				delete(next.tags, recent)
 				next.tags[earlier] = true
 				f.vars[variable] = next
@@ -990,6 +1009,21 @@ type ownCallee struct {
 	why      string
 }
 
+// callResultType returns the type of result i of a call, or nil.
+func callResultType(info *types.Info, call *ast.CallExpr, i int) types.Type {
+	t := info.TypeOf(call)
+	if tuple, ok := t.(*types.Tuple); ok {
+		if i < tuple.Len() {
+			return tuple.At(i).Type()
+		}
+		return nil
+	}
+	if i == 0 {
+		return t
+	}
+	return nil
+}
+
 // ownCalleeOf returns what is known of the callee of a call, or nil for a
 // built-in, a conversion, or a literal called in place.
 func (v *fnVerifier) ownCalleeOf(call *ast.CallExpr) *ownCallee {
@@ -1343,7 +1377,13 @@ func (v *fnVerifier) ownResults(fl *ownFlow, e ast.Expr, count int, f *ownFact) 
 		}
 		for j, op := range operands {
 			if op.param != nil && r.from[op.param] {
-				kind = kind.union(kinds[j])
+				from := kinds[j]
+				// An error result of a call handed what an owner owns,
+				// other than as an error, holds it only through the call.
+				if t := v.info.TypeOf(op.expr); isError(callResultType(v.info, call, i)) && t != nil && !isError(t) && v.concreteErrorType(op.expr, -1) == nil && len(from.inside) > 0 {
+					from.throughCall = maps.Clone(from.inside)
+				}
+				kind = kind.union(from)
 			}
 			if op.param != nil && r.inside[op.param] {
 				kind = kind.union(ownKind{inside: map[ownRoot]bool{v.rootOf(kinds[j]): true}})
@@ -1395,81 +1435,6 @@ func (v *fnVerifier) paramName(p *types.Var) string {
 		return "an argument"
 	}
 	return p.Name()
-}
-
-// returnedAt returns the expression a return statement gives result i, or
-// for a bare return the named result itself.
-func (v *fnVerifier) returnedAt(ret *ast.ReturnStmt, i int) ast.Expr {
-	if len(ret.Results) == len(v.fn.results) {
-		return ret.Results[i]
-	}
-	if len(ret.Results) == 0 && i < len(v.fn.results) && v.fn.results[i].Name() != "" {
-		return &ast.Ident{Name: v.fn.results[i].Name(), NamePos: ret.Pos()}
-	}
-	return nil
-}
-
-// errorFromCalls reports whether an error that a function returns can only
-// be one that calls returned: a call, or a variable of the function that
-// every assignment gives one (F19 of the review of S3 of F33). Such an
-// error may hold memory that a struct the function was handed owns, when
-// the call was made on that memory, as the error of fmt.Fprint(r.out, ...)
-// may; one the function made itself by a conversion holds what it was
-// given, and a copy is the remedy.
-func (v *fnVerifier) errorFromCalls(e ast.Expr, seen map[*types.Var]bool) bool {
-	if e == nil {
-		return false
-	}
-	e = ast.Unparen(e)
-	if v.info.Types[e].IsNil() {
-		return true
-	}
-	if call, ok := e.(*ast.CallExpr); ok {
-		if errorConstructor(typeutil.StaticCallee(v.info, call)) {
-			// An error the function makes holds what it wraps.
-			for _, arg := range call.Args {
-				if t := v.info.TypeOf(arg); t != nil && (isError(t) || v.concreteErrorType(arg, -1) != nil) && !v.errorFromCalls(arg, seen) {
-					return false
-				}
-			}
-			return true
-		}
-		return !v.info.Types[call.Fun].IsType() && v.concreteErrorType(call, -1) == nil
-	}
-	id, ok := e.(*ast.Ident)
-	if !ok {
-		return false
-	}
-	var variable *types.Var
-	if obj, isVar := v.info.ObjectOf(id).(*types.Var); isVar {
-		variable = obj
-	} else {
-		for _, result := range v.fn.results {
-			if result.Name() == id.Name {
-				variable = result
-			}
-		}
-	}
-	if variable == nil || seen[variable] {
-		return variable != nil
-	}
-	seen[variable] = true
-	o := v.bodyOrigins()
-	if o.unknown[variable] || v.isParameter[variable] || len(o.sources[variable]) == 0 {
-		return false
-	}
-	for _, from := range o.sources[variable] {
-		if call, isCall := ast.Unparen(from.expr).(*ast.CallExpr); isCall && from.index >= 0 {
-			if v.concreteErrorType(call, from.index) != nil {
-				return false
-			}
-			continue
-		}
-		if !v.errorFromCalls(from.expr, seen) {
-			return false
-		}
-	}
-	return true
 }
 
 // ownReturn applies a return statement: what each result is, for the
@@ -1554,7 +1519,7 @@ func (v *fnVerifier) ownReturn(fl *ownFlow, ret *ast.ReturnStmt, f *ownFact) {
 				// asserts what it holds gets a part of the owner, which it
 				// may not keep (F7 of the design review of F33), and only
 				// an assertion reaches it. No contract can place an error.
-				if isError(v.fn.results[i].Type()) && v.errorFromCalls(v.returnedAt(ret, i), map[*types.Var]bool{}) {
+				if isError(v.fn.results[i].Type()) && kind.throughCall[root] {
 					continue
 				}
 				if v.withinParam(v.fn, i) != root.param {

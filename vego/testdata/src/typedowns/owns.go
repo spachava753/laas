@@ -192,3 +192,35 @@ func FormatsPart(b *Box) (r bool) {
 	var e error = b.cell
 	return fmt.Errorf("part: %v", e) != nil
 }
+
+// identity hands its error back.
+//
+// @Ensures err = e
+func identity(e error) (err error) { return e }
+
+// ViaIdentity puts a part of s into an error itself and returns it
+// through a verified call that hands it back: still the function's own
+// (F19 of the review of S4).
+//
+// @Requires s != nil
+// @Ensures True
+func ViaIdentity(s *S) (err error) {
+	return identity(PartErr{p: s.child}) // want `ViaIdentity returns memory that s owns, held in an error, which no contract can place within s; return a copy`
+}
+
+// @Requires s != nil
+// @Ensures True
+func ViaVariable(s *S) (err error) {
+	e := identity(PartErr{p: s.child})
+	return e // want `ViaVariable returns memory that s owns, held in an error, which no contract can place within s; return a copy`
+}
+
+// PassesOnTwice returns what PassesOn returns, which is the error of a
+// call on what r owns: its summary says only that it is inside r, so it is
+// refused here, the conservative side.
+//
+// @Requires r != nil
+// @Ensures True
+func PassesOnTwice(r *Report) (err error) {
+	return PassesOn(r) // want `PassesOnTwice returns memory that r owns, held in an error, which no contract can place within r; return a copy`
+}

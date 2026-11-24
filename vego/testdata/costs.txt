@@ -5617,6 +5617,7 @@ typedowns	typedowns.FormatsPart	4	3511	0
 typedowns	typedowns.KeepsReturned	7	8668	0
 typedowns	typedowns.MadeThenPassed	14	17595	0
 typedowns	typedowns.PassesOn	29	46739	0
+typedowns	typedowns.PassesOnTwice	9	10970	0
 typedowns	typedowns.ReturnsPart	5	5422	0
 typedowns	typedowns.ReturnsWrapped	5	5910	0
 typedowns	typedowns.StoreAsserted	7	11763	0
@@ -5624,7 +5625,10 @@ typedowns	typedowns.StoreError	7	10550	0
 typedowns	typedowns.StoreOneResult	9	13243	0
 typedowns	typedowns.StoreSwitched	7	11763	0
 typedowns	typedowns.StoreWrapped	8	12256	0
+typedowns	typedowns.ViaIdentity	9	16459	0
+typedowns	typedowns.ViaVariable	9	16459	0
 typedowns	typedowns.fail	3	5816	0
+typedowns	typedowns.identity	7	3741	0
 typedowns	typedowns.write	12	12299	0
 typeonlyclient	typeonlyclient.Positive	1	111	0
 typeonlyclient	typeonlyclient.PositiveGood	6	856	0
