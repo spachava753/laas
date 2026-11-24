@@ -199,8 +199,13 @@ func (v *fnVerifier) loggerCall(call *ast.CallExpr, fn *funcInfo, pre *specEnv, 
 }
 
 // trustedRuns returns, for a call of a trusted function, which of its
-// operands, the arguments and then the receiver, the entry says it may run
-// the code of during the call, or nil when the callee is not trusted.
+// operands, the arguments and then the receiver, it may run the code of
+// during the call, or nil when the callee is not trusted. An entry claims
+// nothing of the code a parameter carries unless runs lists it, so only a
+// parameter under keeps and under nothing that runs it, as log.New's out,
+// is not run during the call: keeps claims that the function runs the
+// code during the call only if runs lists the parameter too (F23 of the
+// review of step 7 of F32).
 func (pv *pkgVerifier) trustedRuns(call *ast.CallExpr, callee *types.Func) func(i, args int) bool {
 	if isGeneric(callee) || callee.Origin() != callee {
 		return nil
@@ -222,6 +227,6 @@ func (pv *pkgVerifier) trustedRuns(call *ast.CallExpr, callee *types.Func) func(
 			return true
 		}
 		p := fn.params[min(index, len(fn.params)-1)]
-		return fn.runs.get(p) || fn.calls.get(p) != nil || p == fn.formatted || p == fn.prints || p == fn.encoded
+		return len(fn.keeps.get(p)) == 0 || fn.runs.get(p) || fn.calls.get(p) != nil || p == fn.formatted || p == fn.prints || p == fn.encoded
 	}
 }

@@ -4545,7 +4545,7 @@ func Notify(msg string) {
 
 - Nothing assigns it, and it is not exported.
 - Its initialiser is a call of `log.New` that verifies.
-- Every use of it in the package is a comparison with `nil` or a call of its `Printf`, `Print`, or `Println`.
+- Every use of it in the package is a comparison with `nil` or a call of its `Printf`, `Print`, or `Println` that is not in a `go` statement.
 
 The three methods keep the logger's output and its prefix, so `ready` holds wherever none of them is running. A use of the variable in any other way, such as `logger.SetPrefix("x")` in a function that is not verified, makes it unreadable, and the message names the use.
 

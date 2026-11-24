@@ -2269,6 +2269,10 @@ trusted:
     isolated: true
     modifies: []
 
+  hiddenlookq.Look:
+    reason: Test helper that calls Init of x when it has one, and writes nothing a caller can see; its entry says nothing of the code x carries.
+    modifies: []
+
 # States of interfaces of another module, and contracts that speak of them.
 state:
   ifacestatelib.Conn:
