@@ -3563,13 +3563,24 @@ lockgroup	lockgroup.init of lmu, log	2	2777	0
 lockgroup	lockgroup.init of mu, hits	2	1927	0
 lockgroup	lockgroup.notify	1	46	0
 lockgroupbad	(*sync.Mutex).Lock	1	1652	0
+lockgroupbad	(*sync.Mutex).Unlock	1	1611	0
 lockgroupbad	(*sync.Once).Do	1	1800	0
-lockgroupbad	lockgroupbad.Bump	7	3236	0
+lockgroupbad	(lockgroupbad.helper).Run	7	5768	0
+lockgroupbad	lockgroupbad.Bump	7	5768	0
+lockgroupbad	lockgroupbad.Hit	15	21827	0
 lockgroupbad	lockgroupbad.Run	9	11129	0
-lockgroupbad	lockgroupbad.bumpValue	7	3236	0
+lockgroupbad	lockgroupbad.bumpValue	7	5768	0
 lockgroupbad	lockgroupbad.init of mu, hits	2	1927	0
 lockgroupbad	lockgroupbad.the initialiser of Later	0	0	0
 lockgroupbad	lockgroupbad.the initialiser of OpenLock	0	0	0
+lockgrouprw	(*sync.RWMutex).Lock	1	2663	0
+lockgrouprw	(*sync.RWMutex).RLock	1	2663	0
+lockgrouprw	(*sync.RWMutex).RUnlock	1	2546	0
+lockgrouprw	(*sync.RWMutex).Unlock	1	2546	0
+lockgrouprw	lockgrouprw.Lonely	21	45633	0
+lockgrouprw	lockgrouprw.Read	17	38172	0
+lockgrouprw	lockgrouprw.Upgrade	28	54820	0
+lockgrouprw	lockgrouprw.init of rw, reads	3	4041	0
 locks	(*locks.Account).AddTwice	33	54097	0
 locks	(*locks.Account).Deposit	33	54027	0
 locks	(*locks.Account).Unlocked	10	9633	0
