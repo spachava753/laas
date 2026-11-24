@@ -981,6 +981,7 @@ func (pv *pkgVerifier) readable(variable *types.Var) bool {
 // initialisersFact.
 func (pv *pkgVerifier) checkValueInitialisers() {
 	pv.initWhy, pv.inert, pv.initFacts = map[*types.Var]string{}, map[*types.Var]bool{}, map[*types.Var][]*logic.Term{}
+	pv.loggerMade, pv.loggerInert, pv.loggerUse = map[*types.Var]bool{}, map[*types.Var]bool{}, map[*types.Var]string{}
 	// A package with no function to verify is code that is not verified,
 	// its initialisers included.
 	if !slices.ContainsFunc(pv.order, func(fn *funcInfo) bool { return fn.annotated() }) {

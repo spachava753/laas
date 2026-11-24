@@ -1,9 +1,11 @@
 package vego
 
 import (
+	"fmt"
 	"go/ast"
 	"go/types"
 	"slices"
+	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 )
@@ -84,7 +86,7 @@ func (pv *pkgVerifier) runInitialiser(init *types.Initializer) {
 	saved := pv.capturing
 	pv.capturing = &captured
 	var facts []*logic.Term
-	failed := false
+	failed, made, inert := false, false, false
 	name := "_"
 	if len(init.Lhs) > 0 && init.Lhs[0] != nil {
 		name = init.Lhs[0].Name()
@@ -112,11 +114,25 @@ func (pv *pkgVerifier) runInitialiser(init *types.Initializer) {
 		v.closeUnit(st)
 		facts = pv.initialiserFacts(init, vals, st)
 		failed = v.initFailed
+		made, inert = v.loggerInitialiser(init)
 	})
 	pv.capturing = saved
-	// A run that did not verify shows nothing.
+	// A run that did not verify shows nothing; a logger in a variable
+	// whose initialiser did not verify cannot be read, and its reads say
+	// why, as those of a variable that holds code do (F42).
 	if len(captured) > 0 || failed {
+		if len(init.Lhs) == 1 && init.Lhs[0] != nil && isLoggerType(init.Lhs[0].Type()) {
+			why := "its initialiser calls a verified function outside its Requires"
+			if len(captured) > 0 {
+				at, msg, _ := strings.Cut(captured[0], "\x00")
+				why = fmt.Sprintf("its initialiser does not verify, at %s: %s", at, strings.TrimPrefix(msg, "cannot verify the initialiser of "+name+": "))
+			}
+			pv.initWhy[init.Lhs[0]] = why
+		}
 		return
+	}
+	if made {
+		pv.loggerMade[init.Lhs[0]], pv.loggerInert[init.Lhs[0]] = true, inert
 	}
 	// What part 1 reads from an initialiser of its forms is already known,
 	// more cheaply.

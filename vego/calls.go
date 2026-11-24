@@ -606,6 +606,8 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		}
 	}
 	pre := &specEnv{v: v, sink: st, fn: fn, args: args, now: before}
+	// A logger in a variable is ready outside its own calls (loggers.go).
+	inertLogger := v.loggerCall(call, fn, pre, st)
 	for _, c := range fn.requires {
 		// A bound of what a buffer can grow to, or of what a trusted
 		// function allocates: the message says what bound on each length
@@ -641,6 +643,12 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	_, reached := v.reachedTargets(call, fn, st, before)
 	written = append(written, reached...)
 	written = v.dropInert(fn, args, written)
+	// A call of one of the methods that print on an inert logger in a
+	// variable changes nothing a caller can see (loggers.go).
+	if inertLogger {
+		recv := fn.params[0]
+		written = slices.DeleteFunc(slices.Clone(written), func(t target) bool { return t.param == recv || t.part && t.ownerParam == recv })
+	}
 	v.checkTrustedWrites(call, fn, written)
 	// What an owner owns grows only by memory the call creates: the owns
 	// section claims it of the shipped contracts, and it holds of a

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"go/types"
 	"maps"
 	"path/filepath"
-	"go/types"
 	"slices"
 	"strings"
 

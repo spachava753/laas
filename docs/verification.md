@@ -4523,6 +4523,34 @@ func warnChecked() {
 
 This is reported with `the Requires clause errOut != nil reads only package-level variables, and their declarations do not show that it holds; test the value in the body instead`. The declaration does not show that `os.Stderr` is not nil.
 
+#### A logger in a variable
+
+A function can print through a logger that a package-level variable holds:
+
+```go
+var logger = log.New(os.Stderr, "app: ", 0)
+
+// Notify writes to a package-level logger.
+//
+// @Requires |msg| <= 1000
+// @Ensures True
+func Notify(msg string) {
+	if logger != nil {
+		logger.Printf("report: %s", msg)
+	}
+}
+```
+
+`Notify` verifies, and it lists nothing. `vego` runs the initialiser as code, so it knows that `log.New` returned a logger that is not `nil` and whose state `ready` holds. The variable must meet these conditions:
+
+- Nothing assigns it, and it is not exported.
+- Its initialiser is a call of `log.New` that verifies.
+- Every use of it in the package is a comparison with `nil` or a call of its `Printf`, `Print`, or `Println`.
+
+The three methods keep the logger's output and its prefix, so `ready` holds wherever none of them is running. A use of the variable in any other way, such as `logger.SetPrefix("x")` in a function that is not verified, makes it unreadable, and the message names the use.
+
+When the writer the logger is given writes nothing behind its receiver, as `os.Stderr` does, printing changes nothing a caller can see, and a function lists nothing. Over a writer of your own that writes memory, as a counter does, a function that prints through the logger lists the logger, and so do its callers, as for a writer that is a parameter.
+
 ### An invariant of variables
 
 An `Invariant` annotation in the doc comment of a `var` declaration states a property of the variables that the declaration declares. A parenthesised block declares a group of variables that go together:
@@ -4699,29 +4727,6 @@ Some code that uses package-level variables still cannot be verified:
 
 - A variable whose address is taken, as `var mu sync.Mutex` with `mu.Lock()`.
 - An error variable that is changed.
-- A logger in a package-level variable, as in `var logger = log.New(os.Stderr, "app: ", 0)`. The logger keeps the writer that its initialiser gave it, and nothing checked that writer. `vego` does not know either that `log.New` returned a logger that is not nil:
-
-  ```go
-  var logger = log.New(os.Stderr, "app: ", 0)
-
-  // Notify writes to a package-level logger.
-  //
-  // @Requires |msg| <= 1000
-  // @Ensures True
-  func Notify(msg string) {
-  	if logger != nil {
-  		logger.Printf("report: %s", msg)
-  	}
-  }
-  ```
-
-  ```text
-  vego: cannot verify Notify: logger has type *log.Logger, which can hold a function value, an interface
-  value, an error, a channel, or an unsafe.Pointer; package-level variables of such types are not
-  supported yet
-  ```
-
-  Take the logger as a parameter.
 - `log.Default()`, which has no shipped contract.
 - `flag` variables. `flag.Int` returns an `*int`, and pointers to anything but a struct are not supported. `flag.StringVar(&s, ...)` takes the address of `s`.
 - A variable of a type that holds code other than an interface type or a named function type with a contract, as `*log.Logger`.
@@ -5329,7 +5334,7 @@ func LogsTo(w io.Writer, n int) {
 
 A logger that your function is handed by code that is not verified needs `ready(l)` in its `Requires`, as `Inventory` has.
 
-`log.Default()` and a logger in a package-level variable are reported as `cannot verify`, as described in [What this does not cover yet](#what-this-does-not-cover-yet). Use `fmt.Printf` or `log.Printf`, or take the writer or the logger as a parameter.
+`log.Default()` is reported as `cannot verify`, as described in [What this does not cover yet](#what-this-does-not-cover-yet). A logger in a package-level variable is described in [A logger in a variable](#a-logger-in-a-variable).
 
 `fmt.Printf`, `fmt.Print`, and `fmt.Println` write to standard output, and the functions of `log` write to the standard logger. Code that is not verified chooses where those go: it can set `os.Stdout`, and it can call `log.SetOutput` or `slog.SetDefault`. A proof assumes that a write there returns and writes nothing verified code can see. If your program sets the standard logger's output to a writer of its own, it makes that claim about the writer. A writer that logs through the standard logger again never returns, because the logger holds a lock while it writes. See [What a proof assumes](#what-a-proof-assumes).
 

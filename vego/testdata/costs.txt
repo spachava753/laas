@@ -554,6 +554,7 @@ crypto/x509	(*sync.RWMutex).Lock	1	2663	0
 crypto/x509	(*sync.RWMutex).RLock	1	2663	0
 crypto/x509	(*sync.RWMutex).RUnlock	1	2546	0
 crypto/x509	(*sync.RWMutex).Unlock	1	2546	0
+crypto/x509	fmt.Sprintf	1	4468	0
 cycles/claim/p	cycles/claim/p.Narrow	4	2383	0
 cycles/claim/p	cycles/claim/p.Wide	4	2383	0
 cycles/claim/p	cycles/claim/q.Use	1	805	0
@@ -950,6 +951,7 @@ errorsvars	errorsvars.the initialiser of ErrSlice2	0	0	0
 errorsvars	errorsvars.the initialiser of ErrTwo	0	0	0
 errorsvars	errorsvars.the initialiser of ErrWrapsCtx	0	0	0
 errorsvars	errorsvars.the initialiser of ErrWrapsNotExist	1	69	0
+errorsvars	math.NaN	1	70	0
 errorsvarsclient	errorsvarsclient.Aliases	4	166	0
 errorsvarsclient	errorsvarsclient.Code	2	75	0
 errorsvarsclient	errorsvarsclient.Named	2	165	0
@@ -2382,7 +2384,7 @@ guide	guide.NewStale	4	750	0
 guide	guide.Next	16	11499	0
 guide	guide.Note	8	13232	0
 guide	guide.NoteFrom	9	8960	0
-guide	guide.Notify	1	429	0
+guide	guide.Notify	6	35453	0
 guide	guide.Now	4	1049	0
 guide	guide.Offset	6	2033	0
 guide	guide.Oldest	5	12394	0
@@ -3691,6 +3693,31 @@ lockslib	(*lockslib.Vault).Put	10	14191	0
 lockslib	lockslib.Held	2	1618	0
 lockspred	lockspred.Ambiguous	0	0	0
 lockspred	lockspred.Number	1	163	0
+log	(*sync.Mutex).Lock	1	1652	0
+log	(*sync.Mutex).Unlock	1	1611	0
+loggervar	(*log.Logger).Print	1	5728	0
+loggervar	(*log.Logger).Printf	1	6882	0
+loggervar	(*log.Logger).Println	1	5728	0
+loggervar	(*loggervar.Tally).Write	17	17965	0
+loggervar	(*os.File).Write	3	18506	0
+loggervar	(loggervar.Echo).Write	1	513	0
+loggervar	io.Writer.Write	3	7630	0
+loggervar	log.New	1	8948	0
+loggervar	loggervar.Notify	6	35485	0
+loggervar	loggervar.count	11	40485	0
+loggervar	loggervar.countUnlisted	6	9154	0
+loggervar	loggervar.echo	1	46	0
+loggervar	loggervar.notifyBroken	1	46	0
+loggervar	loggervar.notifyExported	1	46	0
+loggervar	loggervar.notifyListed	7	24587	0
+loggervar	loggervar.notifyRenamed	1	46	0
+loggervar	loggervar.notifyTwice	11	43853	0
+loggervar	loggervar.the initialiser of Exported	11	45274	0
+loggervar	loggervar.the initialiser of broken	3	1023	0
+loggervar	loggervar.the initialiser of counted	13	44741	0
+loggervar	loggervar.the initialiser of echoed	0	0	0
+loggervar	loggervar.the initialiser of logger	11	53473	0
+loggervar	loggervar.the initialiser of renamed	11	45274	0
 madehere	madehere.init of d	1	744	0
 madehere	madehere.linkA	6	5033	0
 madehere	madehere.relinkB	5	4957	0
@@ -4131,9 +4158,13 @@ net	(*sync.Mutex).Unlock	1	1611	0
 net	(*sync.Once).Do	1	1800	0
 net	(*sync.RWMutex).RLock	1	2663	0
 net	(*sync.RWMutex).RUnlock	1	2546	0
+net	time.Date	1	4870	0
 net/http	(*sync.Mutex).Lock	1	1652	0
 net/http	(*sync.Mutex).Unlock	1	1611	0
 net/http	(*sync.Once).Do	1	1800	0
+net/http	io.NopCloser	1	3411	0
+net/http	time.Unix	1	487	0
+net/http/internal/http2	os.Getenv	1	2096	0
 net/http/internal/httpcommon	(*sync.Once).Do	1	1800	0
 net/textproto	(*sync.Once).Do	1	1800	0
 ordering	(*ordering.Box).Grow	8	6365	0
@@ -4698,6 +4729,7 @@ settled	settled.the initialiser of Stop	0	0	0
 settled	settled.the initialiser of Sub	0	0	0
 settled	slices.Sort	1	5294	0
 settled	strings.Join	2	38450	2
+settled	strings.ToUpper	1	2096	0
 shapes	(*shapes.Rect).Area	7	7584	0
 shapes	shapes.New	8	3662	0
 shapes	shapes.Rect	1	221	0

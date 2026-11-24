@@ -88,7 +88,7 @@ var logger = log.New(os.Stderr, "app: ", 0)
 // @Requires |msg| <= 1000
 // @Ensures True
 func Notify(msg string) {
-	if logger != nil { // want `vego: cannot verify Notify: logger has type \*log.Logger, which can hold a function value, an interface value, an error, a channel, or an unsafe.Pointer; package-level variables of such types are not supported yet`
+	if logger != nil {
 		logger.Printf("report: %s", msg)
 	}
 }

@@ -78,7 +78,7 @@ var logger = log.New(tally, "", 0)
 // @Ensures r
 func Quiet() (r bool) {
 	n := tally.N
-	if logger != nil { // want `vego: cannot verify Quiet: logger has type \*log.Logger, which can hold a function value, an interface value, an error, a channel, or an unsafe.Pointer; package-level variables of such types are not supported yet`
+	if logger != nil { // want `vego: cannot verify Quiet: logger cannot be relied on: its initialiser does not verify, at client.go:\d+:\d+: it uses Write as a method of io.Writer, and Write has no co`
 		logger.Printf("x")
 	}
 	return tally.N == n

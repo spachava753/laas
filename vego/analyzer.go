@@ -689,6 +689,12 @@ type pkgVerifier struct {
 	// only variables Go initialised before it, whatever hidden init code
 	// may run.
 	initRunning bool
+	// loggerMade, loggerInert, and loggerUse hold, for each logger in a
+	// variable, that its initialiser is a call of log.New that verified,
+	// whether the writer it gives is inert, and why it cannot be read; see
+	// loggers.go.
+	loggerMade, loggerInert map[*types.Var]bool
+	loggerUse               map[*types.Var]string
 	// inert holds the variables whose checked initialiser converts a value
 	// whose footprint stays empty and that has no states; see inertFixed.
 	inert map[*types.Var]bool

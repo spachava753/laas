@@ -560,7 +560,15 @@ func (pv *pkgVerifier) hiddenInitCode() string {
 					if sel, ok := ast.Unparen(n.Fun).(*ast.SelectorExpr); ok && pv.info.Selections[sel] != nil {
 						operands = append(operands, sel.X)
 					}
-					for _, operand := range operands {
+					// A trusted function runs during the call only the
+					// code its entry lists, as log.New keeps its writer and
+					// runs nothing; a later call that runs it hands what
+					// keeps it, and is scanned as such (step 7 of F32).
+					runs := pv.trustedRuns(n, callee)
+					for i, operand := range operands {
+						if runs != nil && !runs(i, len(n.Args)) {
+							continue
+						}
 						if !inert(operand) {
 							found = at(operand.Pos(), fmt.Sprintf("%s is handed to %s.%s, which may call back into this package",
 								types.ExprString(operand), callee.Pkg().Name(), callee.Name()))
