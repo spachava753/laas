@@ -685,6 +685,10 @@ type pkgVerifier struct {
 	// initialiser runs as code, what the run shows of its value; see
 	// initcalls.go.
 	initFacts map[*types.Var][]*logic.Term
+	// initRunning is set while an initialiser runs as code, which reads
+	// only variables Go initialised before it, whatever hidden init code
+	// may run.
+	initRunning bool
 	// inert holds the variables whose checked initialiser converts a value
 	// whose footprint stays empty and that has no states; see inertFixed.
 	inert map[*types.Var]bool

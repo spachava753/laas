@@ -2882,6 +2882,15 @@ initcalls	initcalls.the initialiser of six	2	119	0
 initcalls	initcalls.the initialiser of table	0	0	0
 initcalls	initcalls.the initialiser of tooMuch	2	78	0
 initcalls	initcalls.third	3	592	0
+initvalues	(initvalues.impl).Set	6	3773	0
+initvalues	initvalues.Get	2	1093	0
+initvalues	initvalues.Sets.Set	4	3683	0
+initvalues	initvalues.Setter	4	3683	0
+initvalues	initvalues.init of n	1	417	0
+initvalues	initvalues.set	6	3773	0
+initvalues	initvalues.the initialiser of _	15	5058	0
+initvalues	initvalues.the initialiser of sets	5	3526	0
+initvalues	initvalues.the initialiser of setter	5	3526	0
 integers	integers.Accumulate	7	60457	0
 integers	integers.Allocate	8	918	0
 integers	integers.AndNotAfterAnd	2	3144	0
@@ -3172,7 +3181,7 @@ interfacesinitcall	(interfacesinitcall.Small).Size	3	85	0
 interfacesinitcall	interfacesinitcall.Known	1	46	0
 interfacesinitcall	interfacesinitcall.Sizer.Size	3	1129	0
 interfacesinitcall	interfacesinitcall.the initialiser of ErrX	0	0	0
-interfacesinitcall	interfacesinitcall.the initialiser of size	0	0	0
+interfacesinitcall	interfacesinitcall.the initialiser of size	3	1857	0
 interfacesinitcall	interfacesinitcall.the initialiser of sizer	2	127	0
 interfacesinithand	(interfacesinithand.Small).Size	3	85	0
 interfacesinithand	interfacesinithand.Known	1	46	0

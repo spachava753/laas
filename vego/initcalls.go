@@ -49,12 +49,29 @@ func (pv *pkgVerifier) runInitialiser(init *types.Initializer) {
 				return true
 			}
 			callee := pv.calleeAt(call)
+			// A call through a value, or of a method of an interface, may
+			// run a verified function of the package too (F22).
+			var contract *funcInfo
+			name := types.ExprString(call.Fun)
+			switch {
+			case callee == nil:
+				if tv := pv.info.Types[call.Fun]; !tv.IsType() && !tv.IsBuiltin() {
+					contract = pv.valueContract(pv.info.TypeOf(call.Fun))
+				}
+			case isGeneric(callee):
+			case callee.Type().(*types.Signature).Recv() != nil && isIface(callee.Type().(*types.Signature).Recv().Type()):
+				contract = pv.methodContract(callee)
+			default:
+				if fn := pv.contractOf(callee); fn != nil && fn.trust == nil {
+					contract, name = fn, callee.Name()
+				}
+			}
+			if contract != nil && len(contract.requires) > 0 {
+				pv.report(call.Pos(), "%s is called in a function literal in the initialiser of a package-level variable, where its Requires is not checked; "+
+					"call it from a function with a contract of its own", name)
+			}
 			if callee == nil || isGeneric(callee) {
 				return true
-			}
-			if fn := pv.contractOf(callee); fn != nil && fn.trust == nil && len(fn.requires) > 0 {
-				pv.report(call.Pos(), "%s is called in a function literal in the initialiser of a package-level variable, where its Requires is not checked; "+
-					"call it from a function with a contract of its own", callee.Name())
 			}
 			if entry := pv.entryFor(pv.originOf(callee).FullName()); entry != nil && entry.initialiserOnly {
 				pv.report(call.Pos(), "%s", initialiserOnlyWhy(callee))
@@ -72,6 +89,8 @@ func (pv *pkgVerifier) runInitialiser(init *types.Initializer) {
 	if len(init.Lhs) > 0 && init.Lhs[0] != nil {
 		name = init.Lhs[0].Name()
 	}
+	pv.initRunning = true
+	defer func() { pv.initRunning = false }()
 	pv.run(&funcInfo{obj: types.NewFunc(init.Rhs.Pos(), pv.pass.Pkg, "the initialiser of "+name, types.NewSignatureType(nil, nil, nil, nil, nil, false))}, func(v *fnVerifier) {
 		v.inInitialiser = true
 		st := &state{vals: map[*types.Var]value{}, mem: memory{}, brk: logic.Const("brk", logic.Ref), noted: map[string]bool{}}

@@ -805,7 +805,9 @@ func (pv *pkgVerifier) usableFixed(variable *types.Var) (knownValue, string) {
 		return knownValue{}, fmt.Sprintf("%s %s; %s", spelled, pv.ownChanges[variable], changedNotYet)
 	case variable.Pkg() == pv.pass.Pkg:
 		known = pv.fixed[variable]
-		if pv.hidden != "" && known.Kind != knownZero {
+		// The run of an initialiser reads only what Go initialised before
+		// it (F22 of the review of step 5 of F32).
+		if pv.hidden != "" && known.Kind != knownZero && !pv.initRunning {
 			return knownValue{}, fmt.Sprintf("%s is not known to have its value yet when this runs: %s while the variables of the package are "+
 				"initialised, which may run this function first", spelled, pv.hidden)
 		}

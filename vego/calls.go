@@ -622,8 +622,10 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		// A verified function called from an initialiser outside its
 		// Requires may write what its frame proof excluded, as a group's
 		// variables: reported where it stands, whatever reads the variable
-		// (F1 of the design review of F32).
-		if v.inInitialiser && fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil {
+		// (F1 of the design review of F32). So may what a value or an
+		// interface value runs, which may be a verified function of the
+		// package checked against the contract of its type (F22).
+		if v.inInitialiser && (fn.trust == nil || fn.valueOf != nil || fn.methodOf != nil) {
 			saved, before := v.capturing, v.reports
 			v.capturing = nil
 			v.checkClause(c, pre, st, guard, call.Pos(), "precondition of "+name+" may not hold in an initialiser, where a verified function relies on it for what it writes")
