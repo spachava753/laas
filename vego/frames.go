@@ -863,6 +863,9 @@ func guardWithin(entry, goal []*logic.Term) bool {
 func (v *fnVerifier) checkClauseFramed(c *clause, env logic.Env, st *state, guard []*logic.Term, pos token.Pos, what string, framed func(node *logic.Node, goal *logic.Term) bool) {
 	spec, _ := env.(*specEnv)
 	for _, node := range c.node.Conjuncts() {
+		if v.skipConjunct != nil && v.skipConjunct(node) {
+			continue
+		}
 		text := strings.Join(strings.Fields(c.text[node.Start:node.End]), " ")
 		var found []validFound
 		var goal *logic.Term

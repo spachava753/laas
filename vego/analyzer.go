@@ -642,6 +642,11 @@ type pkgVerifier struct {
 	// openAt holds, for each variable whose address the package takes in
 	// a way that is not closed, why, at the first such use.
 	openAt map[*types.Var]string
+	// addressRuns holds, for a variable whose address is closed, where a
+	// sink runs a function it is handed while it has the address; runsAt
+	// is where the use being classified does.
+	addressRuns map[*types.Var]string
+	runsAt      string
 	changeOf   map[*types.Var]string
 	ownChanges map[*types.Var]string
 	escapes    map[*types.Var]string
@@ -661,6 +666,10 @@ type pkgVerifier struct {
 	groupOf   map[*types.Var]*varGroup
 	touched   map[*funcInfo][]*varGroup
 	touchedAt map[*callNode]map[*varGroup]bool
+	// touchedAtBoundary holds, for each node, the groups that a function it
+	// may reach touches, of those that code outside the package's verified
+	// code can enter; see lockBoundary.
+	touchedAtBoundary map[*callNode]map[*varGroup]bool
 	// letOutNodes are the code of the package that it lets out into memory
 	// it did not make; see letOut.
 	letOutNodes []*callNode

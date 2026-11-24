@@ -51,6 +51,7 @@ func (pv *pkgVerifier) findChanges() {
 	pv.changeKinds = map[*types.Var]changeKind{}
 	pv.addressSite = map[*types.Var]string{}
 	pv.openAt = map[*types.Var]string{}
+	pv.addressRuns = map[*types.Var]string{}
 	changed := func(variable *types.Var, what string, pos token.Pos) {
 		pv.reassigned[variable] = true
 		pv.changeKinds[variable] |= kindOfChange(what)

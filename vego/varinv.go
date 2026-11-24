@@ -131,6 +131,13 @@ func (pv *pkgVerifier) checkVarGroups() {
 			switch {
 			case variable.Exported():
 				refuse("%s is exported, and code of another package may assign it; an invariant holds only of variables that only the package changes", variable.Name())
+			case pv.isBoxedGlobal(variable) && pv.closedWhy(variable) != "":
+				refuse("%s is a struct variable whose address is taken, and %s; one can be in a group only when its address is handed only to trusted functions "+
+					"that neither keep it nor run code that could be handed it", variable.Name(), pv.closedWhy(variable))
+			case pv.isBoxedGlobal(variable) && pv.addressRuns[variable] != "":
+				refuse("%s is a struct variable whose address is taken, and %s, which could see the invariant broken", variable.Name(), pv.addressRuns[variable])
+			case pv.isBoxedGlobal(variable):
+				// Its address is closed: nothing else reaches it (K2).
 			case pv.changeKinds[variable]&^changeAssigned != 0 || isError(variable.Type()):
 				refuse("%s", pv.assignedWhy(variable))
 			case pv.reassigned[variable] && pv.assignedWhy(variable) != "":
@@ -260,6 +267,13 @@ func (pv *pkgVerifier) groupEscape(g *varGroup) string {
 				return true
 			}
 			if !use.escape || use.change == "is assigned" || pathWritten(pv.info, stack) || pv.handedToReader(stack) {
+				return true
+			}
+			// The closed address of a struct variable is handed only to a
+			// trusted function that keeps nothing of it and returns nothing
+			// that holds memory; the writer that hands it covers the
+			// variable and restores the invariant.
+			if kindOfChange(use.change) == changeAddress && pv.isBoxedGlobal(variable) && pv.closedWhy(variable) == "" {
 				return true
 			}
 			found = fmt.Sprintf("the use of %s at %s lets a reference to what it refers to out of it", variable.Name(), pv.placeOfPos(id.Pos()))
@@ -395,7 +409,20 @@ func (pv *pkgVerifier) groupsTouched(fn *funcInfo) []*varGroup {
 			direct[node] = pv.nodeGroups(node)
 		}
 		pv.touchedAt = direct
-		close := func() {
+		// What a node may reach of the functions that code outside the
+		// package's verified code can enter, which assume and prove a
+		// group's lock clauses (F4 of the design review of F32).
+		boundary := map[*callNode]map[*varGroup]bool{}
+		for _, node := range nodes {
+			boundary[node] = map[*varGroup]bool{}
+			if pv.nodeIsBoundary(node) {
+				for group := range direct[node] {
+					boundary[node][group] = true
+				}
+			}
+		}
+		pv.touchedAtBoundary = boundary
+		closeOver := func(direct map[*callNode]map[*varGroup]bool) {
 			for changed := true; changed; {
 				changed = false
 				for _, node := range nodes {
@@ -410,6 +437,7 @@ func (pv *pkgVerifier) groupsTouched(fn *funcInfo) []*varGroup {
 				}
 			}
 		}
+		close := func() { closeOver(direct); closeOver(boundary) }
 		close()
 		// A node that calls out of the package may run what such a call
 		// reaches: what the package let out, and every exported function
@@ -417,16 +445,22 @@ func (pv *pkgVerifier) groupsTouched(fn *funcInfo) []*varGroup {
 		// reaches that too, transitively (F10 of the review of the design
 		// of F32). One more closure settles it: what is added is already
 		// what those nodes reach.
-		outward := map[*varGroup]bool{}
+		outward, outwardBoundary := map[*varGroup]bool{}, map[*varGroup]bool{}
 		for _, node := range pv.outwardNodes() {
 			for group := range direct[node] {
 				outward[group] = true
+			}
+			for group := range boundary[node] {
+				outwardBoundary[group] = true
 			}
 		}
 		for _, node := range nodes {
 			if node.out {
 				for group := range outward {
 					direct[node][group] = true
+				}
+				for group := range outwardBoundary {
+					boundary[node][group] = true
 				}
 			}
 		}
@@ -496,7 +530,7 @@ func (pv *pkgVerifier) nodeGroups(node *callNode) map[*varGroup]bool {
 
 // groupHolds returns the conjunction of the invariants of a group read in
 // mem.
-func (v *fnVerifier) groupHolds(g *varGroup, sink *state, mem memory) []*logic.Term {
+func (v *fnVerifier) groupHolds(g *varGroup, sink *state, mem memory, withLock bool) []*logic.Term {
 	// Reading the invariant reads the variables; it is not the function's
 	// own reading, which the note on lost contents speaks of.
 	saved := v.groupReading
@@ -505,7 +539,14 @@ func (v *fnVerifier) groupHolds(g *varGroup, sink *state, mem memory) []*logic.T
 	env := &specEnv{v: v, sink: sink, now: mem, pos: g.clauses[0].pos}
 	var terms []*logic.Term
 	for _, c := range g.clauses {
-		terms = append(terms, v.formula(c, c.node, env))
+		// One term for each clause, of the conjuncts it keeps.
+		var kept []*logic.Term
+		for _, node := range c.node.Conjuncts() {
+			if withLock || !v.lockConjunct(g, node) {
+				kept = append(kept, v.formula(c, node, env))
+			}
+		}
+		terms = append(terms, logic.And(kept...))
 	}
 	return terms
 }
@@ -513,8 +554,19 @@ func (v *fnVerifier) groupHolds(g *varGroup, sink *state, mem memory) []*logic.T
 // proveGroups proves the invariants of the groups, read in the state's
 // memory, where they must hold: before a call that may assume them, and on
 // return of a function that may have changed them.
-func (v *fnVerifier) proveGroups(st *state, guard []*logic.Term, groups []*varGroup, pos token.Pos, where string) {
+func (v *fnVerifier) proveGroups(st *state, guard []*logic.Term, groups []*varGroup, pos token.Pos, where string, withLock func(*varGroup) bool) {
 	for _, g := range groups {
+		// A lock clause is proved only where code outside the package's
+		// verified code can enter (F4 of the design review of F32).
+		if !withLock(g) {
+			saved := v.skipConjunct
+			v.skipConjunct = func(node *logic.Node) bool { return v.lockConjunct(g, node) }
+			defer func() { v.skipConjunct = saved }()
+		} else {
+			saved := v.skipConjunct
+			v.skipConjunct = nil
+			defer func() { v.skipConjunct = saved }()
+		}
 		// A clause is kept by frame where nothing it reads changed since a
 		// point where it held, as a type's invariant is (Invariants kept by
 		// frame).
@@ -532,8 +584,8 @@ func (v *fnVerifier) proveGroups(st *state, guard []*logic.Term, groups []*varGr
 
 // assumeGroup assumes the invariants of a group read in mem, and keeps
 // where they held for a frame, when they hold with no condition.
-func (v *fnVerifier) assumeGroup(st *state, guard []*logic.Term, mem memory, g *varGroup, from string) {
-	for _, t := range v.groupHolds(g, st, mem) {
+func (v *fnVerifier) assumeGroup(st *state, guard []*logic.Term, mem memory, g *varGroup, from string, withLock bool) {
+	for _, t := range v.groupHolds(g, st, mem, withLock) {
 		st.assume(logic.Implies(logic.And(guard...), t))
 	}
 	if len(guard) == 0 {
@@ -551,10 +603,16 @@ func (v *fnVerifier) groupsCovered(targets []target, among []*varGroup) []*varGr
 		}
 		for _, variable := range g.vars {
 			var covers func(t target) bool
-			if v.isAssigned(variable) {
+			switch {
+			case v.isBoxedGlobal(variable):
+				// A struct variable whose address is closed is written only
+				// through its own reference (K2).
+				ref := boxRef(variable)
+				covers = func(t target) bool { return t.ref != nil && t.ref.Op == logic.OpConst && t.ref.Name == ref.Name }
+			case v.isAssigned(variable):
 				key := v.globalCells(variable)[0].key
 				covers = func(t target) bool { return slices.ContainsFunc(t.cells, func(c cell) bool { return c.key == key }) }
-			} else {
+			default:
 				// What a fixed variable refers to, at its reference.
 				covers = func(t target) bool { return v.fixedVariableAt(t.ref) == variable }
 			}
@@ -590,11 +648,16 @@ func (pv *pkgVerifier) checkGroupsInitialised() {
 						v.closeUnit(st)
 					}
 				}
+				if v.isBoxedGlobal(variable) {
+					pointer := v.boxedPointer(st, variable)
+					v.put(st, v.cellsOf(variable.Type()), pointer[0], pointer[1], val)
+					continue
+				}
 				v.noteGlobal(st, variable)
 				v.put(st, v.globalCells(variable), globalRef(variable), logic.IntLit(0), val)
 			}
 			v.groupNames = map[*types.Var]bool{}
-			holds := v.groupHolds(g, st, st.mem)
+			holds := v.groupHolds(g, st, st.mem, true)
 			// An invariant reads only the variables of its group, and
 			// variables that nothing in the build changes: a writer of any
 			// other would not know to restore it (F29 of the review of
@@ -864,6 +927,12 @@ func (v *fnVerifier) groupRoots(st *state) []passedValue {
 				continue
 			}
 			var val value
+			if v.isBoxedGlobal(variable) {
+				// What a struct variable whose address is closed refers to,
+				// from its allocation; its own cells K1 keeps out of rows.
+				roots = append(roots, passedValue{val: v.boxedPointer(st, variable), t: types.NewPointer(t)})
+				continue
+			}
 			if v.isAssigned(variable) {
 				v.noteGlobal(st, variable)
 				val = v.fetch(nil, memory{}, v.globalCells(variable), globalRef(variable), logic.IntLit(0))
@@ -1069,6 +1138,132 @@ func (pv *pkgVerifier) outwardNodes() []*callNode {
 	for obj, node := range pv.callGraph().byObj {
 		if obj.Exported() {
 			found = append(found, node)
+		}
+	}
+	return found
+}
+
+// Lock clauses (F4 of the design review of F32). A top-level conjunct of a
+// group's invariant that reads only states of the group's struct variables
+// whose address is closed, as ~held(mu), is assumed on entry of, proved on
+// return of, and proved before a call that may reach, only a function that
+// code outside the package's verified code can enter: one another package
+// can call, init, or one the package lets out. Every other function of the
+// package relies on its Requires for the state of the mutex, as a helper
+// whose Requires is held(mu) and that runs under the lock. held is about the
+// goroutine that runs the function, and only its calls change it; every
+// writer of the variable is verified; and a function in between that may
+// reach a boundary function under the lock must prove the clause there.
+
+// lockConjunct reports whether a top-level conjunct of a group's invariant
+// is a lock clause: S(p) or ~S(p), for a state S of the struct a path p
+// that starts at a closed struct variable of the group reaches.
+func (pv *pkgVerifier) lockConjunct(g *varGroup, node *logic.Node) bool {
+	if node.Kind == logic.NUnary && node.Op == "~" {
+		node = node.Kids[0]
+	}
+	if node.Kind != logic.NCall || len(node.Kids) != 1 {
+		return false
+	}
+	var fields []string
+	path := node.Kids[0]
+	for path.Kind == logic.NField && !path.Primed {
+		fields = append([]string{path.Name}, fields...)
+		path = path.Kids[0]
+	}
+	if path.Kind != logic.NIdent || path.Primed {
+		return false
+	}
+	var root *types.Var
+	for _, variable := range g.vars {
+		if variable.Name() == path.Name {
+			root = variable
+		}
+	}
+	if root == nil || !pv.isBoxedGlobal(root) || pv.closedWhy(root) != "" {
+		return false
+	}
+	t := root.Type()
+	for _, name := range fields {
+		u, ok := t.Underlying().(*types.Struct)
+		if !ok {
+			return false
+		}
+		found := false
+		for field := range u.Fields() {
+			if field.Name() == name {
+				t, found = field.Type(), true
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	u, ok := t.Underlying().(*types.Struct)
+	if !ok {
+		return false
+	}
+	return slices.ContainsFunc(statesOf(u), func(decl stateDecl) bool { return decl.name == node.Name })
+}
+
+// lockBoundary reports whether code outside the package's verified code
+// can enter a function: another package can call it, it is an init
+// function, or the package lets it out.
+func (pv *pkgVerifier) lockBoundary(fn *funcInfo) bool {
+	if fn == nil || fn.obj == nil {
+		return true
+	}
+	if node := pv.callGraph().byObj[pv.originOf(fn.obj)]; node != nil {
+		return pv.nodeIsBoundary(node)
+	}
+	return pv.callableElsewhere(fn.obj)
+}
+
+// nodeIsBoundary is lockBoundary for a node of the call graph: a literal
+// used as a value is always one.
+func (pv *pkgVerifier) nodeIsBoundary(node *callNode) bool {
+	if node.fn == nil || node.fn.obj == nil {
+		return true
+	}
+	obj := node.fn.obj
+	if pv.callableElsewhere(obj) || obj.Name() == "init" && obj.Type().(*types.Signature).Recv() == nil {
+		return true
+	}
+	return slices.Contains(pv.letOut(), node)
+}
+
+// callLockGroups returns the groups whose lock clauses a call may assume:
+// those a boundary function it may reach touches, by the call graph, as
+// callGroups does for every clause.
+func (v *fnVerifier) callLockGroups(call *ast.CallExpr, fn *funcInfo) []*varGroup {
+	if len(v.varGroups) == 0 || call == nil {
+		return nil
+	}
+	v.groupsTouched(v.fn)
+	var reached []*callNode
+	if fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil && fn.obj != nil && fn.obj.Pkg() == v.pass.Pkg {
+		if node := v.callGraph().byObj[v.originOf(fn.obj)]; node != nil {
+			reached = append(reached, node)
+		}
+	} else {
+		edges := v.callEdges(call, fn)
+		if fn.trust != nil {
+			edges = v.callGraph().sites[call]
+		}
+		for _, e := range edges {
+			reached = append(reached, e.to)
+		}
+		isolated := fn.trust != nil && fn.obj != nil && v.isolatedCall(call, fn.obj)
+		if !isolated && (fn.obj == nil || fn.obj.Pkg() != v.pass.Pkg || fn.trust != nil || fn.valueOf != nil || fn.methodOf != nil) {
+			reached = append(reached, v.outwardNodes()...)
+		}
+	}
+	var found []*varGroup
+	for _, node := range reached {
+		for _, g := range v.varGroups {
+			if v.touchedAtBoundary[node][g] && g.refused == "" && !slices.Contains(found, g) {
+				found = append(found, g)
+			}
 		}
 	}
 	return found

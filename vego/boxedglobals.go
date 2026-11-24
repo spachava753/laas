@@ -388,6 +388,9 @@ func (pv *pkgVerifier) sinkWhy(callee *types.Func, index int, addr types.Type, p
 		}
 		return fail(fmt.Sprintf("takes %s, which can carry code that could be handed it", q.Name()))
 	}
+	if fn.calls.len() > 0 && depth == 0 {
+		pv.runsAt = fmt.Sprintf("%s at %s runs a function it is handed while it has the address", callee.Name(), where)
+	}
 	if !holdsCode(p.Type(), map[types.Type]bool{}) {
 		return ""
 	}
@@ -430,8 +433,14 @@ func (pv *pkgVerifier) noteAddressUse(variable *types.Var, stack []ast.Node, pos
 	if fact := pv.publishedFixed(variable); variable.Pkg() != pv.pass.Pkg && (fact == nil || !fact.Boxed[variable.Name()]) {
 		return
 	}
+	pv.runsAt = ""
 	why := pv.addressUseWhy(stack)
 	if why == "" {
+		// A sink that runs code while it has the address, as once.Do, keeps
+		// it closed but out of a group (F4 of the design of F32).
+		if pv.runsAt != "" && pv.addressRuns[variable] == "" {
+			pv.addressRuns[variable] = pv.runsAt
+		}
 		return
 	}
 	if pv.openAt[variable] == "" {
@@ -509,7 +518,12 @@ func (pv *pkgVerifier) isolatedCall(call *ast.CallExpr, callee *types.Func) bool
 	// its type, which it may run, as fmt runs String and the Write of the
 	// writer it prints to: each must be isolated too.
 	sig := callee.Type().(*types.Signature)
-	for i, arg := range call.Args {
+	args := call.Args
+	if pv.methodExpression(call) && len(args) > 0 {
+		// The receiver is the first argument, and no parameter.
+		args = args[1:]
+	}
+	for i, arg := range args {
 		param := sig.Params().Len() - 1
 		if i < param || !sig.Variadic() {
 			param = min(i, sig.Params().Len()-1)

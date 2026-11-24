@@ -3061,7 +3061,7 @@ isolatedg	isolatedg.Builds	23	78630	0
 isolatedg	isolatedg.Check	5	3691	0
 isolatedg	isolatedg.Formats	15	10837	0
 isolatedg	isolatedg.FormatsShown	15	10381	0
-isolatedg	isolatedg.Hands	16	12383	0
+isolatedg	isolatedg.Hands	16	12307	0
 isolatedg	isolatedg.Logs	15	11245	0
 isolatedg	isolatedg.Plain	13	11234	0
 isolatedg	isolatedg.Upper	13	17095	0
@@ -3334,6 +3334,31 @@ lib	lib.SafeDivide	4	1444	0
 lib	lib.Smallest	5	12516	0
 lib	lib.Touch	7	8669	0
 lib	lib.Wrap	2	174	0
+lockgroup	(*strings.Builder).Len	1	2269	0
+lockgroup	(*strings.Builder).WriteString	4	15141	0
+lockgroup	(*sync.Mutex).Lock	1	1652	0
+lockgroup	(*sync.Mutex).Unlock	1	1611	0
+lockgroup	fmt.Fprintln	5	11289	0
+lockgroup	io.Writer.Write	3	7630	0
+lockgroup	lockgroup.Count	15	22308	0
+lockgroup	lockgroup.Hit	19	29640	0
+lockgroup	lockgroup.HitNotify	22	33150	0
+lockgroup	lockgroup.HitTick	16	22562	0
+lockgroup	lockgroup.LeaveLocked	11	16686	0
+lockgroup	lockgroup.Note	64	741190	8
+lockgroup	lockgroup.NoteUnder	25	65328	0
+lockgroup	lockgroup.Notify	3	255	0
+lockgroup	lockgroup.Unlocked	5	5616	0
+lockgroup	lockgroup.bump	10	13100	0
+lockgroup	lockgroup.init of lmu, log	2	2777	0
+lockgroup	lockgroup.init of mu, hits	2	1927	0
+lockgroup	lockgroup.notify	1	46	0
+lockgroupbad	(*sync.Mutex).Lock	1	1652	0
+lockgroupbad	(*sync.Once).Do	1	1800	0
+lockgroupbad	lockgroupbad.Bump	7	3236	0
+lockgroupbad	lockgroupbad.Run	9	11129	0
+lockgroupbad	lockgroupbad.bumpValue	7	3236	0
+lockgroupbad	lockgroupbad.init of mu, hits	2	1927	0
 locks	(*locks.Account).AddTwice	33	54097	0
 locks	(*locks.Account).Deposit	33	54027	0
 locks	(*locks.Account).Unlocked	10	9633	0

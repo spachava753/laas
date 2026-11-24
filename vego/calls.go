@@ -786,13 +786,22 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	}
 	// The invariants of the groups the call may assume hold before it, and
 	// those of the groups it may change hold after it (V3).
-	v.proveGroups(st, guard, v.groupsCovered(v.frame, v.callGroups(call, fn)), call.Pos(), "before the call to "+name+", which may assume it")
+	lockGroups := v.callLockGroups(call, fn)
+	v.proveGroups(st, guard, v.groupsCovered(v.frame, v.callGroups(call, fn)), call.Pos(), "before the call to "+name+", which may assume it",
+		func(g *varGroup) bool { return slices.Contains(lockGroups, g) })
 	for _, t := range written {
 		v.havoc(st, t, guard)
 	}
-	for _, g := range v.groupsCovered(written, v.varGroups) {
-		if g.refused == "" {
-			v.assumeGroup(st, guard, st.mem, g, "the call to "+name+" at "+v.placeOf(call.Pos()))
+	// A verified callee restores the invariants it may change, and a lock
+	// clause where it is a function outside code can enter; a trusted one
+	// restores nothing, as Lock leaves a mutex held, so what is known of
+	// the group after it is what its contract and the frame say.
+	if fn.trust == nil {
+		withLock := fn.valueOf != nil || fn.methodOf != nil || fn.obj == nil || fn.obj.Pkg() != v.pass.Pkg || v.lockBoundary(fn)
+		for _, g := range v.groupsCovered(written, v.varGroups) {
+			if g.refused == "" {
+				v.assumeGroup(st, guard, st.mem, g, "the call to "+name+" at "+v.placeOf(call.Pos()), withLock)
+			}
 		}
 	}
 	var applied map[*types.Var]*logic.Term

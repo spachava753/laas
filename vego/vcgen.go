@@ -258,6 +258,9 @@ type fnVerifier struct {
 	// assignedMet holds, by key, the assigned package-level variables the
 	// function read, which the always-fails check samples.
 	assignedMet map[string]*types.Var
+	// skipConjunct, when set, leaves a conjunct out of the clauses that
+	// checkClauseFramed proves: a lock clause where it is not proved.
+	skipConjunct func(*logic.Node) bool
 	// boxedMet holds, by key, the kind-3 variables the function met; see
 	// noteBoxed.
 	boxedMet map[string]*types.Var
@@ -450,7 +453,7 @@ func (v *fnVerifier) enter() *state {
 	// its frame covers none of the group's variables, so it needs nothing of
 	// them.
 	for _, g := range v.groupsNamed(fn) {
-		v.assumeGroup(st, nil, memory{}, g, "entry")
+		v.assumeGroup(st, nil, memory{}, g, "entry", v.lockBoundary(fn))
 	}
 	v.frame = v.targets(fn, v.entry, st, memory{})
 	v.used = make([]bool, len(v.frame))
