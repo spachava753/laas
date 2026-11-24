@@ -619,6 +619,8 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	}
 	v.checkRecursion(fn, pre, st, guard, call)
 	written := v.targets(fn, args, st, before)
+	_, reached := v.reachedTargets(call, fn, st, before)
+	written = append(written, reached...)
 	// What an owner owns grows only by memory the call creates: the owns
 	// section claims it of the shipped contracts, and it holds of a
 	// verified function, whose own calls are such. Nothing says it of any
@@ -659,12 +661,16 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		// A target is named by the argument passed for its parameter, and
 		// a part of an owner by the owner's.
 		param := t.param
-		if t.part {
+		if t.part && t.mod >= 0 {
 			param = fn.paramNames[fn.modifies[t.mod].name]
 		}
 		base := "what it calls " + t.text
 		if param != nil {
 			base = passed[param]
+		}
+		// A package-level variable has the same name in the caller.
+		if t.reached || v.variableOfCells(t.cells) != nil {
+			base = t.text
 		}
 		if t.part {
 			base = "what " + base + " owns"
@@ -676,12 +682,15 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		// What a method writes behind the receiver of a value it is made
 		// into is something no clause of that contract can list.
 		remedy := ""
-		if v.heldReceiver != nil && fn.paramNames[fn.modifies[t.mod].name] == v.heldReceiver {
+		if v.heldReceiver != nil && t.mod >= 0 && fn.paramNames[fn.modifies[t.mod].name] == v.heldReceiver {
 			remedy = v.heldRemedy
 		}
 		unlisted := ""
 		if t.param != nil && passedExpr[t.param] != nil {
 			unlisted = v.notListable(passedExpr[t.param], call.Pos())
+		}
+		if t.reached {
+			unlisted = "code of this package that the call may run writes it; list it in a // @Modifies clause"
 		}
 		// What an owner owns is covered by a clause that lists the owner,
 		// or a struct that holds it, and not by a slice that holds it
@@ -750,6 +759,11 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		writes := guard
 		if t.row && t.ref.Op == logic.OpSelect && t.ref.Args[0] == homes {
 			writes = append(slices.Clip(guard), logic.Not(isNilRef(value{t.ref.Args[1]})))
+		}
+		// A variable of another package is part of the state of its
+		// package, which the caller covers by naming a package (D1).
+		if variable := v.variableOfCells(t.cells); variable != nil && variable.Pkg() != v.pass.Pkg && remedy == "" {
+			what, unlisted = v.stateRemedy(variable, fn)
 		}
 		v.checkWriteOr(st, writes, t.reach(), call.Pos(), fmt.Sprintf("%s may modify %s", name, what), remedy, unlisted)
 		if t.owner != nil && v.reports > reportsBefore {

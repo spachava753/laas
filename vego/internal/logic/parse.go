@@ -293,6 +293,14 @@ func ParseTargets(src string) ([]*Node, error) {
 				}
 				continue
 			}
+			// An import path names the state of a package.
+			if target.Kind == NStr {
+				targets = append(targets, target)
+				if !p.accept(",") {
+					return target
+				}
+				continue
+			}
 			for n := target; ; n = n.Kids[0] {
 				if (n.Kind != NIdent && n.Kind != NField && n.Kind != NIndex) || n.Primed {
 					panic(&SyntaxError{target.Start, "a Modifies clause lists what is reached from the parameters, as in \"A, s.items, cs[0]\""})

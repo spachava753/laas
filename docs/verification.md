@@ -4021,8 +4021,8 @@ A function can read a variable of its own package that is only assigned, also by
 ```go
 var served int
 
-// Serve counts requests, and is not verified.
-func Serve() {
+// serve counts requests, and is not verified.
+func serve() {
 	served++
 }
 
@@ -4138,8 +4138,8 @@ Otherwise the memory is like memory that a parameter refers to. Nothing is known
 ```go
 var sizes = []int{1, 2, 4}
 
-// Grow writes the table, and is not verified.
-func Grow() {
+// growSizes writes the table, and is not verified.
+func growSizes() {
 	sizes[0] = 8
 }
 
@@ -4156,7 +4156,7 @@ vego: postcondition may not hold: r = 1; the contents of sizes are not known to 
 initialised: the use at globals.go:50 lets a reference to them out
 ```
 
-The message names the first use that lets a reference to what the variable refers to out, here the write in `Grow`. Every message about something not proved after a function reads such a variable carries this note, also one about an index or an overflow. The length of `sizes` is still known, so `sizes[i]` needs no `Requires` for an `i` below 3.
+The message names the first use that lets a reference to what the variable refers to out, here the write in `growSizes`. Every message about something not proved after a function reads such a variable carries this note, also one about an index or an overflow. The length of `sizes` is still known, so `sizes[i]` needs no `Requires` for an `i` below 3.
 
 A package that is built with yours may let out a reference to a variable that a proof relies on. The use is then reported where it is, and in every package `laas` analyses that is built with both:
 
@@ -4177,20 +4177,20 @@ An assignment in such a package to a variable that a proof relies on is reported
 A verified function lists the variables of its package that it changes in a `Modifies` clause, as it lists a parameter. `x'` in an `Ensures` clause is the value on return, and `x` the value when the function is called:
 
 ```go
-// ResetServed sets the count to zero.
+// SetServed sets the count.
 //
 // @Modifies served
-// @Ensures served' = 0
-func ResetServed() {
-	served = 0
+// @Ensures served' = n
+func SetServed(n int) {
+	served = n
 }
 
 // SetSize writes what a variable refers to.
 //
 // @Modifies sizes
-// @Ensures sizes'[1] = 3
-func SetSize() {
-	sizes[1] = 3
+// @Ensures sizes'[1] = n
+func SetSize(n int) {
+	sizes[1] = n
 }
 ```
 
@@ -4199,12 +4199,12 @@ Both verify. `Modifies served` covers the variable itself and, for a variable th
 A caller of a function that changes a variable changes it too, and must list it:
 
 ```go
-// ResetAll calls ResetServed, and lists what it changes.
+// resetAll calls SetServed, and lists what it changes.
 //
 // @Modifies served
 // @Ensures served' = 0
-func ResetAll() {
-	ResetServed()
+func resetAll() {
+	SetServed(0)
 }
 
 // ResetUnlisted assigns a variable and does not list it.
@@ -4214,31 +4214,121 @@ func ResetUnlisted() {
 	served = 0
 }
 
-// CallsReset calls ResetServed and does not list what it changes.
+// CallsReset calls SetServed and does not list what it changes.
 //
 // @Ensures True
 func CallsReset() {
-	ResetServed()
+	SetServed(0)
 }
 ```
 
 ```text
 vego: served is assigned, which ResetUnlisted may not modify; list it in a // @Modifies clause
-vego: ResetServed may modify what it calls served, which CallsReset may not modify; list it in a // @Modifies clause
+vego: SetServed may modify served, which CallsReset may not modify; list it in a // @Modifies clause
 ```
 
 So a function that lists no variable leaves every variable as it was, and a caller keeps what it knew of them across the call. An entry that no write needs is reported, as for a parameter:
 
 ```go
-// ListsSizes names a variable in Modifies.
+// listsSizes names a variable in Modifies.
 //
 // @Modifies sizes
-func ListsSizes() {}
+func listsSizes() {}
 ```
 
 ```text
-vego: Modifies lists sizes, but ListsSizes never needs to modify it; a Modifies clause must list exactly what the function may write
+vego: Modifies lists sizes, but listsSizes never needs to modify it; a Modifies clause must list exactly what the function may write
 ```
+
+`Modifies routes` also covers the variable itself, so a caller of a function that lists `routes` no longer knows which map `routes` holds after the call. A write into the map after such a call is then not covered:
+
+```go
+var routes = map[string]int{}
+
+// resetRoutes gives routes a new map, and is not verified.
+func resetRoutes() { routes = map[string]int{} }
+
+// @Requires routes != nil
+// @Modifies routes
+// @Ensures routes'["/"] = 1
+func addRoot() { routes["/"] = 1 }
+
+// @Requires routes != nil
+// @Modifies routes
+// @Ensures True
+func addTwo() {
+	addRoot()
+	routes["/a"] = 2
+}
+```
+
+```text
+vego: routes["/a"] is assigned, which addTwo may not modify: nothing its // @Modifies clauses list is known to cover it; a clause
+covers what its path referred to when addTwo was called; routes may have been assigned since, by a statement or by a call that
+lists it, so it may no longer refer to that; a call that keeps it can say so in its contract with routes' = routes
+```
+
+When the callee keeps the map, say so in its `Ensures` clause:
+
+```go
+// @Requires routes != nil
+// @Modifies routes
+// @Ensures routes' = routes And routes'["/"] = 1
+func addRootKept() { routes["/"] = 1 }
+
+// @Requires routes != nil
+// @Modifies routes
+// @Ensures True
+func addTwoKept() {
+	addRootKept()
+	routes["/a"] = 2
+}
+```
+
+`addTwoKept` verifies.
+
+A call through a function value or an interface value may run code of your package. Any function of the package that is used as a value of that type, and any exported function or method of the right signature, may be what the value holds, since another package can make a value of it. `vego` finds that code, verified or not, and the call may change every variable that code changes. The caller must list those variables too:
+
+```go
+var visits int
+
+// CountVisit counts a visit, and is not verified.
+func CountVisit(name string, depth int) {
+	if visits < 1000 {
+		visits++
+	}
+}
+
+// Visit is called for each name a walk meets.
+//
+// @Ensures True
+type Visit func(name string, depth int)
+
+// Walk calls f once.
+//
+// @Requires f != nil
+// @Ensures True
+func Walk(f Visit) {
+	f("a", 1)
+}
+
+// WalkListed lists what f may change.
+//
+// @Requires f != nil
+// @Modifies visits
+// @Ensures True
+func WalkListed(f Visit) {
+	f("a", 1)
+}
+```
+
+```text
+vego: f may modify visits, which Walk may not modify; code of this package that the call may run writes it; list it in a // @Modifies clause
+```
+
+`WalkListed` verifies. So a package that exports a function that changes a variable makes every call through a value of that function's type list the variable.
+
+What code of another package does through a value is not seen. `vego` assumes that a function value or an interface value made by code that is not verified changes no package-level variable that the contract of its type does not list, also not by calling a function that does. See [What a proof assumes](#what-a-proof-assumes).
 
 A `Requires` clause of a function that code of another package can call may not read a variable that is not exported. Such a function is exported, is a method with an exported name, or is used as a value. A caller in another package cannot name the condition, establish it, or see it fail:
 
@@ -4280,6 +4370,26 @@ func TicketChecked() (n int, ok bool) {
 ```
 
 A function of the package that code of another package cannot call may require such a condition, and its callers prove it as any other `Requires` clause.
+
+### Variables and goroutines
+
+A proof covers one goroutine. This counter is proved:
+
+```go
+var hits int
+
+// countHit counts a request.
+//
+// @Modifies hits
+// @Ensures hits < MaxInt -> hits' = hits + 1
+func countHit() {
+	if hits < math.MaxInt {
+		hits++
+	}
+}
+```
+
+`countHit` verifies. The proof says what one call does when no other goroutine reads or writes `hits` while it runs. It does not say that the program counts correctly. An HTTP server runs each handler on a goroutine of its own. Two handlers that call `countHit` at once may both read the same value and both write the same result, so one request is lost, and `go test -race` reports a data race. `vego` does not check that a mutex guards a variable. Guard it yourself, and run the race detector.
 
 ### Variables and initialisation
 
@@ -7938,10 +8048,11 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - A function value that reaches verified code from code that is not verified meets the contract of its type. That includes a value passed as an argument, a value in memory that an argument reaches, and a value made with `reflect.MakeFunc` or by generic code. Called with arguments that meet the `Requires` of its type, such a value returns without panicking, writes only what the `Modifies` of its type lists, and leaves its `Ensures` true. For a result that the contract of its type lists under `Vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns).
 - Unverified code respects Go's type system. It does not use `unsafe`, `reflect`, or cgo to give one piece of memory two types or to change a string. It uses `unsafe.Pointer` only in the patterns that the documentation of package `unsafe` allows, so it turns a `uintptr` back into a pointer only where those patterns say. A `uintptr` that a function keeps or passes on and later converts back to a pointer, as in `lib.RunAt(uintptr(unsafe.Pointer(&hook)))` followed by a call through `*(*func())(unsafe.Pointer(a))`, breaks this: an integer carries no code, so `vego` does not follow the call, and `go vet` reports it as a possible misuse of `unsafe.Pointer`.
 - A declaration of a state, shipped, in a trust file, or in source, is true of every value of the interface that verified code gets from code that is not verified. Every method whose contract does not list the receiver in `Modifies` leaves every state of the value unchanged. For the shipped state `closed` of `io.Closer`, this means that `Read` and `Write` on an `io.ReadCloser`, an `io.WriteCloser`, or an `io.ReadWriteCloser` never close the value, which the documentation does not say. A method declared on an interface with states whose contract lists only its receiver, as `Shutter.Shut` above, changes the states of the value and writes nothing that verified code can see. One that also lists `behind(r)`, as `(io.Closer).Close` does, writes the footprint of the value too: a `gzip.Writer` flushes into the writer it wraps when it is closed. Code that is not verified does not change a state of a value that verified code holds while a verified function runs, other than through calls that the function makes.
-- No other goroutine writes memory that a verified function reads or writes while it runs, also while the function waits in `Lock`, `RLock`, or `Do`. The one exception is that other goroutines can lock and unlock a mutex that the goroutine running the function does not hold, and call `Do` on a `sync.Once` that this goroutine is not inside `Do` on, which writes that `Once`. What the function that another goroutine hands to `Do` writes is not part of the exception. Closing an interface value that the function uses counts as such a write. A proof covers one goroutine. A function that takes a lock is not proved to be safe to call from several goroutines. See [What a proof of a function that locks shows](#what-a-proof-of-a-function-that-locks-shows).
+- No other goroutine writes memory that a verified function reads or writes while it runs, also while the function waits in `Lock`, `RLock`, or `Do`. The one exception is that other goroutines can lock and unlock a mutex that the goroutine running the function does not hold, and call `Do` on a `sync.Once` that this goroutine is not inside `Do` on, which writes that `Once`. What the function that another goroutine hands to `Do` writes is not part of the exception. Closing an interface value that the function uses counts as such a write. A proof covers one goroutine. A function that takes a lock is not proved to be safe to call from several goroutines, and a function that changes a package-level variable is not proved free of data races; see [Variables and goroutines](#variables-and-goroutines). See [What a proof of a function that locks shows](#what-a-proof-of-a-function-that-locks-shows).
 - Every call that waits for another goroutine returns: `Lock` and `RLock` return once the other goroutines release the mutex, and `(*sync.Once).Do` returns once the function that another goroutine runs in it returns. A deadlock that the verified function takes part in breaks this.
 - No other goroutine unlocks a mutex that the goroutine running a verified function holds.
 - Code that is not verified does not copy a value that holds a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once` after it was first used, as the documentation of `sync` requires, or a `strings.Builder` that is not zero, as the documentation of `strings` requires. A copy of a `Builder` that has been written panics at its next write.
+- A function value or an interface value that code which is not verified made changes no package-level variable that the contract of its type does not list, also not by calling a function that does. A plugin whose `Write` calls your package's `Hit`, which increments a counter, breaks this: a verified function that wrote through it would be proved to leave the counter unchanged. Code of your own package that such a call may run is found and counted, as described in [Changing a variable](#changing-a-variable).
 - No code outside the packages that a verified package is built with changes a package-level variable that a proof relies on, or lets out a reference to what such a variable refers to when a proof relies on it being only read. No code does either through `unsafe`, `reflect`, C code of a cgo package, or an object file (`.syso`) linked into the program. `vego` reads the `//go:linkname` directives and the assembly files of the build, and counts what they name as changed. When a verified package is built with a package that makes such a change, the verified package does not rely on the variable. The change is also reported wherever it meets a proof that does rely on it.
 - `errors.New`, `fmt.Errorf`, and `errors.Is` behave as they do in the Go releases that `laas` is tested with. Each call of `errors.New` or `fmt.Errorf` returns a new pointer. The errors they return have no `Is` method. `Unwrap` returns the operand of the one `%w`. `errors.Is` finds an error, or an error it wraps, that is the target. The tests of `vego` check this against the running toolchain.
 - The compiler evaluates each statement in an order that the Go specification allows. Calls, `&&`, and `||` run from left to right, an operation runs after its operands, and an assignment assigns only after it has evaluated everything. Where the specification leaves the order open, `vego` proves that every order it allows gives the same values.

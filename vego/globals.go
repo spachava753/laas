@@ -61,6 +61,12 @@ func (pv *pkgVerifier) findChanges() {
 		// A proof in another package may rest on the value of a variable
 		// of another package.
 		_, sentinel := pv.foreignSentinel(variable)
+		if fact := pv.publishedFixed(variable); fact != nil && fact.Assigned[variable.Name()] && kindOfChange(what) != changeAssigned {
+			pv.writes = append(pv.writes, sentinelWrite{
+				Key: errorKey(variable) + addressKey, Name: variable.Pkg().Name() + "." + variable.Name(), Package: pv.pass.Pkg.Path(),
+				At: at(pos), pos: pos,
+			})
+		}
 		if _, fixed := pv.foreignFixed(variable); sentinel || fixed {
 			pv.writes = append(pv.writes, sentinelWrite{
 				Key: errorKey(variable), Name: variable.Pkg().Name() + "." + variable.Name(), Package: pv.pass.Pkg.Path(),
@@ -103,9 +109,6 @@ func (pv *pkgVerifier) findChanges() {
 			switch use := pv.useOf(stack); {
 			case use.change != "":
 				changed(variable, use.change, use.pos)
-				if variable.Pkg() != pv.pass.Pkg || !inInitBody(stack) {
-					pv.changeKinds[variable] |= changedOutsideInit
-				}
 				escaped(variable, use.pos)
 			case use.escape:
 				escaped(variable, use.pos)
@@ -442,6 +445,9 @@ type fixedFact struct {
 	// ReadOnly holds those of Vars whose contents are only read; see
 	// readOnly.
 	ReadOnly map[string]bool
+	// Assigned holds those of Changed that are assigned variables, which
+	// another package reads and writes as memory (assigned.go).
+	Assigned map[string]bool
 }
 
 func (*fixedFact) AFact() {}
@@ -514,6 +520,12 @@ func (pv *pkgVerifier) findFixed() {
 					}
 					if pv.reassigned[variable] {
 						fact.Changed[variable.Name()] = pv.ownChanges[variable]
+						if pv.assignedWhy(variable) == "" {
+							if fact.Assigned == nil {
+								fact.Assigned = map[string]bool{}
+							}
+							fact.Assigned[variable.Name()] = true
+						}
 						continue
 					}
 					known := knownValue{Kind: knownZero}
@@ -1284,7 +1296,7 @@ func (v *fnVerifier) refuseWriteThrough(e ast.Expr) {
 // refuseWriteThroughAs is refuseWriteThrough for a write that text spells.
 func (v *fnVerifier) refuseWriteThroughAs(e ast.Expr, text string) {
 	switch root, inMemory := v.packageRoot(e); {
-	case root != nil && (v.isAssigned(root) || inMemory && root.Pkg() == v.pass.Pkg && !v.reassigned[root]):
+	case root != nil && (v.isAssigned(root) || inMemory && !v.reassigned[root]):
 		// Its storage and what it refers to are memory that the frame
 		// covers like any other, as is what a fixed variable of the
 		// package refers to.
@@ -1333,10 +1345,33 @@ type fixedMet struct {
 	typ types.Type
 }
 
-// modifiesVariable returns the package-level variable that the path of a
+
+// modifiesVariableOf returns the package-level variable that the path of a
 // Modifies entry starts from, as the function's file spells it, or nil.
-func (v *fnVerifier) modifiesVariable(fn *funcInfo, m *modTarget) *types.Var {
+func (v *pkgVerifier) modifiesVariableOf(fn *funcInfo, m *modTarget) *types.Var {
+	variable, _ := v.modifiesPath(fn, m)
+	return variable
+}
+
+// modifiesPath returns the package-level variable that the path of a
+// Modifies entry starts from, or nil, and the steps of the path after it:
+// for a variable of another package, as in lib.V.f, the steps after V.
+func (v *pkgVerifier) modifiesPath(fn *funcInfo, m *modTarget) (*types.Var, []modStep) {
 	spelled := fn.spelling()
+	if imported := spelled.imported; imported != nil {
+		if len(m.steps) > 0 && m.steps[0].field != "" {
+			if key, ok := imported.Errors[m.name+"."+m.steps[0].field]; ok {
+				if variable := v.lookupKey(key); variable != nil {
+					return variable, m.steps[1:]
+				}
+			}
+		}
+		if key, ok := imported.Errors[m.name]; ok {
+			if variable := v.lookupKey(key); variable != nil {
+				return variable, m.steps
+			}
+		}
+	}
 	var obj types.Object
 	switch {
 	case spelled.decl != nil && spelled.obj.Pkg() == v.pass.Pkg:
@@ -1351,10 +1386,12 @@ func (v *fnVerifier) modifiesVariable(fn *funcInfo, m *modTarget) *types.Var {
 		field = m.steps[0].field
 	}
 	if variable := packageVariableOf(obj, ""); variable != nil {
-		return variable
+		return variable, m.steps
 	}
 	if _, isPackage := obj.(*types.PkgName); isPackage {
-		return packageVariableOf(obj, field)
+		if variable := packageVariableOf(obj, field); variable != nil {
+			return variable, m.steps[1:]
+		}
 	}
-	return nil
+	return nil, nil
 }

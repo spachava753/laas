@@ -35,6 +35,9 @@ type contractFact struct {
 	// Errors holds, by how the contract spells them, the keys of the
 	// package-level variables it mentions, errors and others; see errorKey.
 	Errors map[string]string
+	// Packages holds, by the name the contract's file imports it as, the
+	// path of each package whose state a Modifies clause names.
+	Packages map[string]string
 	// CallsValues is set when running the function may make a call through
 	// a function value, itself or in what it calls; see mayCallValues.
 	CallsValues bool
@@ -127,7 +130,7 @@ func (pv *pkgVerifier) exportContracts(excused map[*funcInfo]bool) {
 // as a fact, with the values of the constants they mention and the keys of
 // the error variables, as they are seen at a position.
 func (pv *pkgVerifier) contractFactOf(fn *funcInfo, at token.Pos) *contractFact {
-	fact := &contractFact{Consts: map[string]string{}, Errors: map[string]string{}}
+	fact := &contractFact{Consts: map[string]string{}, Errors: map[string]string{}, Packages: map[string]string{}}
 	// The constants a contract mentions are recorded with their
 	// values, and the error variables with their keys.
 	scope := pv.pass.Pkg.Scope().Innermost(at)
@@ -141,6 +144,9 @@ func (pv *pkgVerifier) contractFactOf(fn *funcInfo, at token.Pos) *contractFact 
 		if _, obj := scope.LookupParent(n.Name, at); n.Kind == logic.NIdent && obj != nil {
 			if variable := packageVariableOf(obj, ""); variable != nil {
 				fact.Errors[n.Name] = errorKey(variable)
+			}
+			if name, ok := obj.(*types.PkgName); ok {
+				fact.Packages[n.Name] = name.Imported().Path()
 			}
 		}
 		if n.Kind == logic.NField && n.Kids[0].Kind == logic.NIdent {
@@ -168,6 +174,12 @@ func (pv *pkgVerifier) contractFactOf(fn *funcInfo, at token.Pos) *contractFact 
 	}
 	for _, m := range fn.modifies {
 		fact.Modifies = append(fact.Modifies, m.text)
+		// The root of a path may be a package or a variable of one.
+		root := &logic.Node{Kind: logic.NIdent, Name: m.name}
+		visit(root)
+		if len(m.steps) > 0 && m.steps[0].field != "" {
+			visit(&logic.Node{Kind: logic.NField, Name: m.steps[0].field, Kids: []*logic.Node{root}})
+		}
 		// The indices of a path may mention constants too.
 		for _, step := range m.steps {
 			if step.index != nil {

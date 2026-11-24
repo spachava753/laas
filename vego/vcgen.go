@@ -255,6 +255,9 @@ type fnVerifier struct {
 	// assignedMet holds, by key, the assigned package-level variables the
 	// function read, which the always-fails check samples.
 	assignedMet map[string]*types.Var
+	// writesOf holds what each node of the call graph writes of the
+	// package-level variables of the package; see nodeWrites.
+	writesOf map[*callNode][]*types.Var
 	// tieLater is set when tieFailures was put off; see verified.
 	tieLater bool
 	// typedReads, when set, receives the values whose type facts reads

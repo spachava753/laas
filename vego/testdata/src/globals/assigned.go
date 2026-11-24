@@ -67,7 +67,7 @@ func HitsKept() (r bool) {
 //
 // @Ensures True
 func CallsHit() {
-	Hit() // want `^vego: Hit may modify what it calls hits, which CallsHit may not modify; list it in a // @Modifies clause$`
+	Hit() // want `^vego: Hit may modify hits, which CallsHit may not modify; list it in a // @Modifies clause$`
 }
 
 // HitLoop calls Hit in a loop.

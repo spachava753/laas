@@ -238,6 +238,9 @@ type target struct {
 	// variable, the target of what its value refers to, beside its
 	// storage, which targets spreads into the list.
 	also []target
+	// reached is set for a target that code of the package a call may run
+	// writes, which no Modifies clause of the callee lists (F7).
+	reached bool
 	// mod is the index of the Modifies clause the target comes from: a
 	// clause that names an owner gives a target for the struct and one
 	// for what each owned field refers to.
@@ -1209,9 +1212,25 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 			v.report(pos, "%s, which %s may not modify; list it in a // @Modifies clause%s%s", what, v.fn.obj.Name(), v.parameterPath(st, guard, w), limitNote(result))
 		default:
 			// Something of the kind is listed, so telling the reader to
-			// list it would send them in a circle.
+			// list it would send them in a circle. A listed variable that
+			// refers to memory may have been assigned since entry, by the
+			// function or by a call that lists it (F19 of the review of
+			// step 2 of package-level variables).
+			hint := ""
+			for _, t := range v.frame {
+				variable := v.variableOfCells(t.cells)
+				if variable == nil || !t.single || !holdsMemory(variable.Type()) || isStructType(variable.Type()) {
+					continue
+				}
+				if _, written := st.mem[t.cells[0].key]; written {
+					name := v.spelling(variable)
+					hint = fmt.Sprintf("; %s may have been assigned since, by a statement or by a call that lists it, so it may no longer refer to that; "+
+						"a call that keeps it can say so in its contract with %s' = %s", name, name, name)
+					break
+				}
+			}
 			v.report(pos, "%s, which %s may not modify: nothing its // @Modifies clauses list is known to cover it; "+
-				"a clause covers what its path referred to when %s was called%s", what, v.fn.obj.Name(), v.fn.obj.Name(), limitNote(result))
+				"a clause covers what its path referred to when %s was called%s%s", what, v.fn.obj.Name(), v.fn.obj.Name(), hint, limitNote(result))
 		}
 		st.assume(logic.Implies(logic.And(guard...), goal))
 		return

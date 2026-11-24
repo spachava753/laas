@@ -124,6 +124,9 @@ func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 	case *ast.SelectorExpr:
 		if x, ok := e.X.(*ast.Ident); ok && v.isPackageName(x) {
 			if variable, isVar := v.info.Uses[e.Sel].(*types.Var); isVar {
+				if v.isAssigned(variable) {
+					return v.readGlobal(variable, e.Pos(), st, guard)
+				}
 				return v.packageVariable(variable, e.Pos(), st)
 			}
 		}

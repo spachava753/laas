@@ -286,6 +286,11 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 		return
 	}
 	fn = view.fn
+	// What code of the package the call may run writes (F7).
+	forms, _ := v.reachedTargets(call, fn, nil, nil)
+	for _, form := range forms {
+		v.callSitesOf(eff, form, nil)
+	}
 	sig := fn.obj.Type().(*types.Signature)
 	if callee != nil {
 		sig = callee.Type().(*types.Signature)

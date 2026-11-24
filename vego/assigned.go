@@ -31,10 +31,6 @@ const (
 	changeAssigned changeKind = 1 << iota
 	changeAddress
 	changeLinked
-	// changedOutsideInit is set when some change stands outside the body
-	// of an init function of the variable's own package, or inside a
-	// function literal or a go statement there, which may run later.
-	changedOutsideInit
 )
 
 // kindOfChange reads the kind from what findChanges says of a change.
@@ -47,21 +43,6 @@ func kindOfChange(what string) changeKind {
 	default:
 		return changeLinked
 	}
-}
-
-// inInitBody reports whether the use at the end of stack lies in the body
-// of a function init of the package itself, outside every function literal
-// and go statement, so that it runs while the package is initialised.
-func inInitBody(stack []ast.Node) bool {
-	for i := len(stack) - 1; i >= 0; i-- {
-		switch n := stack[i].(type) {
-		case *ast.FuncLit, *ast.GoStmt:
-			return false
-		case *ast.FuncDecl:
-			return n.Recv == nil && n.Name.Name == "init"
-		}
-	}
-	return false
 }
 
 // varRegion begins the key of a region that holds a leaf of the storage of
@@ -103,9 +84,31 @@ func (pv *pkgVerifier) assignedWhy(variable *types.Var) string {
 // isAssigned reports whether a package-level variable is an assigned
 // variable of this package that a verified function can read and write.
 func (pv *pkgVerifier) isAssigned(variable *types.Var) bool {
-	return variable != nil && variable.Pkg() == pv.pass.Pkg && variable.Parent() == variable.Pkg().Scope() &&
-		pv.reassigned[variable] && pv.assignedWhy(variable) == ""
+	if variable == nil || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
+		return false
+	}
+	if variable.Pkg() == pv.pass.Pkg {
+		return pv.reassigned[variable] && pv.assignedWhy(variable) == ""
+	}
+	fact := pv.publishedFixed(variable)
+	if fact == nil || pv.changeKinds[variable]&(changeAddress|changeLinked) != 0 {
+		return false
+	}
+	// A variable that its package leaves alone and that this package
+	// assigns is assigned in this build; a proof of its package that relies
+	// on its value meets the write (reportSentinelWrites).
+	_, fixed := fact.Vars[variable.Name()]
+	if !fact.Assigned[variable.Name()] && !(fixed && pv.reassigned[variable] && pv.assignedWhy(variable) == "") {
+		return false
+	}
+	_, taken := pv.writtenInBuild()[errorKey(variable)+addressKey]
+	return !taken
 }
+
+// addressKey ends the key under which a proof relies on the address of an
+// assigned variable never being taken, and under which a package publishes
+// a use that takes it (F2 of the design review).
+const addressKey = "&"
 
 // globalCells returns the cells of the storage of an assigned variable:
 // those of its type, each in a region of its own.
@@ -134,6 +137,9 @@ func (v *fnVerifier) noteGlobal(st *state, variable *types.Var) {
 		v.assignedMet = map[string]*types.Var{}
 	}
 	v.assignedMet[errorKey(variable)] = variable
+	// A package built later that takes its address or names it in a
+	// directive meets this.
+	v.reliedKeys[errorKey(variable)+addressKey] = true
 	note := "var " + errorKey(variable)
 	if st.noted[note] {
 		return
@@ -162,15 +168,32 @@ func (v *fnVerifier) readGlobal(variable *types.Var, pos token.Pos, st *state, g
 // variable refers to.
 func (v *fnVerifier) variableTarget(fn *funcInfo, m *modTarget, variable *types.Var, sink *state, mem memory) (shape, target, error) {
 	spelled := v.spelling(variable)
-	symbolic := mem == nil
-	t := variable.Type()
 	if fn.spelling().trust != nil || fn.spelling().valueOf != nil || fn.spelling().methodOf != nil {
 		return shape{}, target{}, fmt.Errorf("%s is a package-level variable, which a Modifies clause of a trusted contract or of a type cannot name yet", spelled)
 	}
-	if variable.Pkg() != v.pass.Pkg {
-		return shape{}, target{}, fmt.Errorf("%s is a package-level variable of another package, which a Modifies clause cannot name yet", spelled)
+	// A contract names a variable of another package only when it is
+	// exported; the state of that package covers the others (D1).
+	if home := fn.spelling().obj.Pkg(); home != nil && variable.Pkg() != home && !variable.Exported() {
+		return shape{}, target{}, fmt.Errorf("%s is not exported; list the state of package %s, as // @Modifies %s", spelled, variable.Pkg().Path(), variable.Pkg().Name())
 	}
-	if !v.reassigned[variable] {
+	if _, rest := v.modifiesPath(fn, m); len(rest) != len(m.steps) {
+		trimmed := *m
+		trimmed.steps = rest
+		m = &trimmed
+	}
+	return v.variableTargetAny(fn, m, variable, sink, mem)
+}
+
+// variableTargetAny is variableTarget for a variable of any package, as the
+// state of a package covers them.
+func (v *fnVerifier) variableTargetAny(fn *funcInfo, m *modTarget, variable *types.Var, sink *state, mem memory) (shape, target, error) {
+	spelled := v.spelling(variable)
+	symbolic := mem == nil
+	t := variable.Type()
+	if !v.isAssigned(variable) {
+		if v.reassigned[variable] || variable.Pkg() == v.pass.Pkg && v.changeKinds[variable] != 0 {
+			return shape{}, target{}, errors.New(v.assignedWhy(variable))
+		}
 		if !holdsMemory(t) || isError(t) {
 			return shape{}, target{}, fmt.Errorf("%s is a package-level variable that nothing changes, and what it holds refers to no memory, so there is nothing to modify", spelled)
 		}
@@ -186,9 +209,6 @@ func (v *fnVerifier) variableTarget(fn *funcInfo, m *modTarget, variable *types.
 			root.val = val
 		}
 		return v.walkTarget(fn, m, nil, root, t, symbolic, nil, sink, mem)
-	}
-	if why := v.assignedWhy(variable); why != "" {
-		return shape{}, target{}, errors.New(why)
 	}
 	cells, ref := v.globalCells(variable), globalRef(variable)
 	root := located{typ: t, ref: ref, at: logic.IntLit(0), cells: cells}
@@ -352,4 +372,137 @@ func (v *fnVerifier) checkHiddenRequires(st *state) {
 				"where no caller can name the condition or see it fail; test the value in the body instead", conjunct, hidden.Name(), v.fn.obj.Name())
 		}
 	}
+}
+
+// reachedWrites returns the package-level variables of this package that
+// code of the package a call may run, other than through the frame of a
+// verified callee, may write: what the call graph says a call through a
+// value, a call of an interface method, or code handed to a trusted
+// function may reach, closed under the calls that code makes (F7 of the
+// design review). Each is a target of the call, so the caller forgets it
+// and its frame must cover it.
+func (v *fnVerifier) reachedWrites(call *ast.CallExpr, fn *funcInfo) []*types.Var {
+	if call == nil || fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil {
+		return nil
+	}
+	seen := map[*callNode]bool{}
+	var work []*callNode
+	edges := v.callEdges(call, fn)
+	if fn.trust != nil {
+		// What a trusted function does itself its entry says; what it is
+		// handed may run.
+		edges = v.callGraph().sites[call]
+	}
+	for _, e := range edges {
+		if !seen[e.to] {
+			seen[e.to] = true
+			work = append(work, e.to)
+		}
+	}
+	found := map[*types.Var]bool{}
+	for len(work) > 0 {
+		node := work[len(work)-1]
+		work = work[:len(work)-1]
+		// A verified function writes what its frame covers, which covers
+		// what it calls.
+		if node.fn != nil && node.fn.annotated() && node.fn.trust == nil {
+			for _, m := range node.fn.modifies {
+				if variable := v.modifiesVariableOf(node.fn, m); variable != nil && variable.Pkg() == v.pass.Pkg {
+					found[variable] = true
+				}
+			}
+			continue
+		}
+		for _, variable := range v.nodeWrites(node) {
+			found[variable] = true
+		}
+		for _, e := range node.edges {
+			if !seen[e.to] {
+				seen[e.to] = true
+				work = append(work, e.to)
+			}
+		}
+	}
+	return slices.SortedFunc(func(yield func(*types.Var) bool) {
+		for variable := range found {
+			if !yield(variable) {
+				return
+			}
+		}
+	}, func(a, b *types.Var) int { return int(a.Pos() - b.Pos()) })
+}
+
+// nodeWrites returns the package-level variables of this package that the
+// body of a node of the call graph changes, or may write what it refers to
+// through: every use that changes one, or that lets a reference to what one
+// that refers to memory holds out of it, which may be a write.
+func (v *fnVerifier) nodeWrites(node *callNode) []*types.Var {
+	if v.writesOf == nil {
+		v.writesOf = map[*callNode][]*types.Var{}
+	}
+	if found, done := v.writesOf[node]; done {
+		return found
+	}
+	var body *ast.BlockStmt
+	switch {
+	case node.lit != nil:
+		body = node.lit.Body
+	case node.fn != nil && node.fn.decl != nil:
+		body = node.fn.decl.Body
+	}
+	var found []*types.Var
+	if body != nil {
+		var stack []ast.Node
+		ast.Inspect(body, func(n ast.Node) bool {
+			if n == nil {
+				stack = stack[:len(stack)-1]
+				return true
+			}
+			stack = append(stack, n)
+			id, ok := n.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			variable, ok := v.info.Uses[id].(*types.Var)
+			if !ok || variable.Pkg() != v.pass.Pkg || variable.Parent() != v.pass.Pkg.Scope() || slices.Contains(found, variable) {
+				return true
+			}
+			if use := v.useOf(stack); use.change != "" || use.escape && holdsMemory(variable.Type()) {
+				found = append(found, variable)
+			}
+			return true
+		})
+	}
+	v.writesOf[node] = found
+	return found
+}
+
+// reachedTargets returns the targets of what reachedWrites finds, read in
+// mem, and their shapes.
+func (v *fnVerifier) reachedTargets(call *ast.CallExpr, fn *funcInfo, sink *state, mem memory) ([]shape, []target) {
+	var forms []shape
+	var targets []target
+	for _, variable := range v.reachedWrites(call, fn) {
+		if !v.isAssigned(variable) && (v.reassigned[variable] || !holdsMemory(variable.Type())) {
+			continue
+		}
+		if _, why := v.usableFixed(variable); !v.isAssigned(variable) && why != "" {
+			continue
+		}
+		m := &modTarget{name: variable.Name(), text: variable.Name()}
+		form, t, err := v.variableTargetAny(v.fn, m, variable, sink, mem)
+		if err != nil {
+			continue
+		}
+		forms = append(forms, append([]shape{form}, form.also...)...)
+		for _, each := range append([]target{t}, t.also...) {
+			each.also, each.mod, each.reached = nil, -1, true
+			targets = append(targets, each)
+			for _, part := range each.owned {
+				part.mod, part.text, part.part, part.reached = -1, each.text, true, true
+				targets = append(targets, part)
+			}
+		}
+	}
+	return forms, targets
 }

@@ -31,8 +31,8 @@ func Limit(plan string) (n int, ok bool) {
 
 var served int
 
-// Serve counts requests, and is not verified.
-func Serve() {
+// serve counts requests, and is not verified.
+func serve() {
 	served++
 }
 
@@ -45,8 +45,8 @@ func Served() (r int) {
 
 var sizes = []int{1, 2, 4}
 
-// Grow writes the table, and is not verified.
-func Grow() {
+// growSizes writes the table, and is not verified.
+func growSizes() {
 	sizes[0] = 8
 }
 
@@ -106,28 +106,28 @@ func Client() (r bool) {
 	return http.DefaultClient != nil // want `vego: cannot verify Client: http.DefaultClient has type \*net/http.Client, which can hold a function value, an interface value, an error, a channel, or an unsafe.Pointer; package-level variables of such types are not supported yet`
 }
 
-// ResetServed sets the count to zero.
+// SetServed sets the count.
 //
 // @Modifies served
-// @Ensures served' = 0
-func ResetServed() {
-	served = 0
+// @Ensures served' = n
+func SetServed(n int) {
+	served = n
 }
 
 // SetSize writes what a variable refers to.
 //
 // @Modifies sizes
-// @Ensures sizes'[1] = 3
-func SetSize() {
-	sizes[1] = 3
+// @Ensures sizes'[1] = n
+func SetSize(n int) {
+	sizes[1] = n
 }
 
-// ResetAll calls ResetServed, and lists what it changes.
+// resetAll calls SetServed, and lists what it changes.
 //
 // @Modifies served
 // @Ensures served' = 0
-func ResetAll() {
-	ResetServed()
+func resetAll() {
+	SetServed(0)
 }
 
 // ResetUnlisted assigns a variable and does not list it.
@@ -137,17 +137,17 @@ func ResetUnlisted() {
 	served = 0 // want `^vego: served is assigned, which ResetUnlisted may not modify; list it in a // @Modifies clause$`
 }
 
-// CallsReset calls ResetServed and does not list what it changes.
+// CallsReset calls SetServed and does not list what it changes.
 //
 // @Ensures True
 func CallsReset() {
-	ResetServed() // want `^vego: ResetServed may modify what it calls served, which CallsReset may not modify; list it in a // @Modifies clause$`
+	SetServed(0) // want `^vego: SetServed may modify served, which CallsReset may not modify; list it in a // @Modifies clause$`
 }
 
-// ListsSizes names a variable in Modifies.
+// listsSizes names a variable in Modifies.
 //
-// @Modifies sizes // want `^vego: Modifies lists sizes, but ListsSizes never needs to modify it; a Modifies clause must list exactly what the function may write$`
-func ListsSizes() {}
+// @Modifies sizes // want `^vego: Modifies lists sizes, but listsSizes never needs to modify it; a Modifies clause must list exactly what the function may write$`
+func listsSizes() {}
 
 var nextTicket int
 
@@ -173,4 +173,78 @@ func TicketChecked() (n int, ok bool) {
 	n = nextTicket
 	nextTicket++
 	return n, true
+}
+
+var routes = map[string]int{}
+
+// resetRoutes gives routes a new map, and is not verified.
+func resetRoutes() { routes = map[string]int{} }
+
+// @Requires routes != nil
+// @Modifies routes
+// @Ensures routes'["/"] = 1
+func addRoot() { routes["/"] = 1 }
+
+// @Requires routes != nil
+// @Modifies routes
+// @Ensures True
+func addTwo() {
+	addRoot()
+	routes["/a"] = 2 // want `^vego: routes\["/a"\] is assigned, which addTwo may not modify: nothing its // @Modifies clauses list is known to cover it; a clause covers what its path referred to when addTwo was called; routes may have been assigned since, by a statement or by a call that lists it, so it may no longer refer to that; a call that keeps it can say so in its contract with routes' = routes$`
+}
+
+// @Requires routes != nil
+// @Modifies routes
+// @Ensures routes' = routes And routes'["/"] = 1
+func addRootKept() { routes["/"] = 1 }
+
+// @Requires routes != nil
+// @Modifies routes
+// @Ensures True
+func addTwoKept() {
+	addRootKept()
+	routes["/a"] = 2
+}
+
+var visits int
+
+// CountVisit counts a visit, and is not verified.
+func CountVisit(name string, depth int) {
+	if visits < 1000 {
+		visits++
+	}
+}
+
+// Visit is called for each name a walk meets.
+//
+// @Ensures True
+type Visit func(name string, depth int)
+
+// Walk calls f once.
+//
+// @Requires f != nil
+// @Ensures True
+func Walk(f Visit) {
+	f("a", 1) // want `^vego: f may modify visits, which Walk may not modify; code of this package that the call may run writes it; list it in a // @Modifies clause$`
+}
+
+// WalkListed lists what f may change.
+//
+// @Requires f != nil
+// @Modifies visits
+// @Ensures True
+func WalkListed(f Visit) {
+	f("a", 1)
+}
+
+var hits int
+
+// countHit counts a request.
+//
+// @Modifies hits
+// @Ensures hits < MaxInt -> hits' = hits + 1
+func countHit() {
+	if hits < math.MaxInt {
+		hits++
+	}
 }

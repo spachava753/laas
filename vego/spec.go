@@ -1804,6 +1804,9 @@ func hasBound(t *logic.Term) bool {
 // modTarget is one entry of a Modifies clause.
 type modTarget struct {
 	name string // the parameter the path starts from
+	// pkgPath is set for an entry that is an import path, which names the
+	// state of that package (pkgstate.go).
+	pkgPath string
 	// behind is set for behind(r), the footprint of the receiver r of a
 	// method of an interface with states (F28).
 	behind bool
@@ -1824,6 +1827,11 @@ func newModTargets(nodes []*logic.Node, c *clause) []*modTarget {
 	var list []*modTarget
 	for _, node := range nodes {
 		target := &modTarget{text: c.text[node.Start:node.End], clause: c}
+		if node.Kind == logic.NStr {
+			target.pkgPath = node.Name
+			list = append(list, target)
+			continue
+		}
 		if node.Kind == logic.NCall && node.Name == "behind" {
 			target.name, target.behind = node.Kids[0].Name, true
 			list = append(list, target)
@@ -1893,7 +1901,13 @@ type located struct {
 func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Var]value, sink *state, mem memory) (shape, target, error) {
 	param, ok := fn.paramNames[m.name]
 	if !ok {
-		if variable := v.modifiesVariable(fn, m); variable != nil {
+		if pkg, named, err := v.modifiesPackage(fn, m); named {
+			if err != nil {
+				return shape{}, target{}, err
+			}
+			return v.stateTarget(fn, m, pkg, sink, mem)
+		}
+		if variable := v.modifiesVariableOf(fn, m); variable != nil {
 			return v.variableTarget(fn, m, variable, sink, mem)
 		}
 		return shape{}, target{}, fmt.Errorf("%s is not a parameter", m.name)

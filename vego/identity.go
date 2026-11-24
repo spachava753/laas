@@ -592,6 +592,8 @@ func (pv *pkgVerifier) reportSentinelWrites() {
 		switch {
 		case strings.HasSuffix(write.Key, contentsKey):
 			relied = "what it refers to being only read"
+		case strings.HasSuffix(write.Key, addressKey):
+			relied = "its address never being taken and no directive naming it"
 		case values[write.Key]:
 			relied = "it holding the value it was declared with"
 		}

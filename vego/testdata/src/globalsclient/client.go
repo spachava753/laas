@@ -45,7 +45,7 @@ func OverLimit() (r int) {
 //
 // @Ensures True
 func Counter() (r int) {
-	return globalslib.Counter // want `vego: cannot verify Counter: globalslib.Counter is assigned at lib.go:24 in package globalslib; package-level variables that are changed are not supported yet`
+	return globalslib.Counter
 }
 
 // Beside calls a function of another package whose contract reads memory
@@ -64,7 +64,7 @@ func Pro() (r int) { return globalslib.Plans["pro"] }
 
 // ListsVariable names a variable of another package in Modifies.
 //
-// @Modifies globalslib.Limit // want `vego: in Modifies annotation: globalslib.Limit is a package-level variable of another package, which a Modifies clause cannot name yet`
+// @Modifies globalslib.Limit // want `vego: in Modifies annotation: globalslib.Limit is a package-level variable that nothing changes, and what it holds refers to no memory, so there is nothing to modify`
 func ListsVariable() {}
 
 // tally and logger are arranged by two initialisers: the logger holds a

@@ -115,6 +115,12 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 // struct x points to, or part of wherever the struct x itself is stored.
 func (v *fnVerifier) fieldPlace(e *ast.SelectorExpr) lvalue {
 	selection := v.info.Selections[e]
+	if variable, ok := v.info.Uses[e.Sel].(*types.Var); ok && selection == nil && v.isAssigned(variable) {
+		lv := lvalue{pos: e.Pos(), text: types.ExprString(e), expr: e}
+		lv.kind, lv.global, lv.typ, lv.cells = placeMem, variable, variable.Type(), v.globalCells(variable)
+		lv.leaves = mustLayout(variable.Type())
+		return lv
+	}
 	if variable, ok := v.info.Uses[e.Sel].(*types.Var); ok && selection == nil && variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope() {
 		v.unsupported(e.Pos(), fmt.Sprintf("%s is a package-level variable of package %s, and assigning one is not supported yet",
 			types.ExprString(e), variable.Pkg().Path()))

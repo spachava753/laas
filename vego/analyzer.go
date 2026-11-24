@@ -638,12 +638,13 @@ type pkgVerifier struct {
 	escapes    map[*types.Var]string
 	// changeKinds holds, for each package-level variable the build
 	// changes, how: assigned, its address taken, named by a directive or
-	// from assembly, and whether a change stands outside the body of an
-	// init function of its own package (see assigned.go).
+	// from assembly (see assigned.go).
 	changeKinds map[*types.Var]changeKind
 	// asValues holds the functions of the package named other than as the
 	// function of a call; see callableElsewhere.
 	asValues map[types.Object]bool
+	// ownCovers is what the state of the package covers; see covers.
+	ownCovers []string
 	// fixed holds what is known of the package-level variables of the
 	// package that are not errors and that nothing changes, fixedOf what
 	// other packages published of theirs, and hidden the code that may run
@@ -1335,6 +1336,7 @@ func (pv *pkgVerifier) collect() {
 	pv.checkReceivers()
 	pv.findSentinels()
 	pv.findFixed()
+	pv.exportCovers()
 	pv.findKnownReturns()
 	// A contract speaks of the results by the names the function gives
 	// them, so a verified function has to give each of them one.
