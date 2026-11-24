@@ -1318,6 +1318,8 @@ Not built yet:
   - **`@Inside v`**, below.
   - **An exported logger, a logger of another package, a logger used in other ways** (`SetPrefix`, `SetOutput`, a copy), **and the separation of a logger's writer** from what a function's parameters reach, as F40 gives an interface variable.
   - **`template.Must`**, for want of `text/template` entries.
+  - **A group whose initialiser makes its memory by a call** whose `Ensures` says `fresh(result)`: F37's "made where it stands" still refuses it, as `var cache = newCache()` in a group.
+  - **A `*bufio.Writer` in a package-level variable**, as `var out = bufio.NewWriter(os.Stdout)`: it holds code, and is not one of the loggers that step 7 admits.
   - **S2 of F31's coder**, the separation of a writer variable for callers that cover it through the state of a package (O-c).
   - **Facts of what an initialiser shows of memory**: a reader knows only the facts of the run that read no memory, as `|t| = 3`, not the elements.
   - **An initialiser with a function literal** is not run: it gives no facts, and a call in the literal of a verified function with a `Requires` is reported.

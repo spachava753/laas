@@ -4110,7 +4110,7 @@ In an `Ensures` clause, a prime on a variable that reads no memory is reported, 
 
 ### Initialisers that call functions
 
-`vego` runs the initialiser of every package-level variable as code, in the order in which Go initialises the variables. A call there is checked as a call in a verified function. What the run shows of a variable that nothing changes is known wherever it is read:
+In a package with annotations, or with a contract on a type of its own, `vego` runs the initialiser of every package-level variable as code, in the order in which Go initialises the variables. In any other package nothing is run, and its variables give no facts. A call there is checked as a call in a verified function. What the run shows of a variable that nothing changes is known wherever it is read:
 
 ```go
 // buildPrimes makes the first primes.
@@ -4131,7 +4131,7 @@ func largestPrime() (r int) {
 }
 ```
 
-`largestPrime` verifies. The `Ensures` clause of `buildPrimes` tells `vego` that `primes` has four elements. What the run shows of memory, such as the elements themselves, is not known to a reader, since code may have written that memory since. A variable of another package that is read the same way gives the same facts.
+`largestPrime` verifies. The `Ensures` clause of `buildPrimes` tells `vego` that `primes` has four elements. What the run shows of memory, such as the elements themselves, is not known to a reader, since code may have written that memory since. A variable of another package gives the same facts when it is exported and its package is one whose initialisers `vego` runs.
 
 A call of a verified function in an initialiser must meet the function's `Requires`. The function is proved to write only what it lists under that condition, so a call that may not meet it is reported where it stands, whether or not anything reads the variable:
 
@@ -4494,13 +4494,13 @@ func spend() {
 }
 ```
 
-Both functions verify. `Modifies quota` covers the struct, and `Modifies quota.used` one field of it, as for what a pointer parameter points to. A pointer parameter of type `*Quota` may point to `quota`, so `vego` considers both cases. A function that writes `p.limit` for a parameter `p` may write `quota.limit`.
+All three functions verify. `Modifies quota` covers the struct, and `Modifies quota.used` one field of it, as for what a pointer parameter points to. A pointer parameter of type `*Quota` may point to `quota`, so `vego` considers both cases. A function that writes `p.limit` for a parameter `p` may write `quota.limit`.
 
 `var mu sync.Mutex`, `var buf bytes.Buffer`, and `var b strings.Builder` are struct variables too, and their methods take their address. A variable of another type whose address is taken, as `&n` of an `int`, cannot be read, since pointers to anything but a struct are not supported yet.
 
 #### When the address stays in place
 
-A write through a writer may write any memory that the writer's footprint holds. By default, `vego` cannot rule out that this includes a struct variable whose address is taken. It can rule it out when the address of the variable is closed. That means every use of the address in the build hands it to a trusted function that keeps nothing of it, returns nothing that can hold memory, and runs no code that could be handed it. The methods of `sync.Mutex`, `strings.Builder`, and `bytes.Buffer` that ship are such functions, and so is `fmt.Fprintf(&b, ...)`:
+A write through a writer may write any memory that the writer's footprint holds. By default, `vego` cannot rule out that this includes a struct variable whose address is taken. It can rule it out when the address of the variable is closed. That means every use of the address in the build hands it to a trusted function that keeps nothing of it, returns nothing that can hold memory, and runs no code that could be handed it. The methods of `sync.Mutex` and `strings.Builder` that ship are such functions, and so are those of `bytes.Buffer` but `Bytes`, and `fmt.Fprintf(&b, ...)`:
 
 ```go
 var transcript strings.Builder
