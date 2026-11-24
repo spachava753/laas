@@ -468,13 +468,13 @@ func (e *specEnv) noteCanonical(err *logic.Term, t types.Type, leaves value) {
 func (e *specEnv) resolveSteps(steps []logic.Step) ([]logic.Step, error) {
 	var out []logic.Step
 	for i, step := range steps {
-		if step.Assert == nil && step.Holds == nil {
+		if step.Assert == nil && step.Holds == nil && step.As == nil {
 			continue
 		}
 		if out == nil {
 			out = slices.Clone(steps)
 		}
-		for _, named := range []**logic.TypeName{&out[i].Assert, &out[i].Holds} {
+		for _, named := range []**logic.TypeName{&out[i].Assert, &out[i].Holds, &out[i].As} {
 			if *named == nil || (*named).Resolved != nil {
 				continue
 			}
@@ -547,4 +547,37 @@ func (v *fnVerifier) heldRead(sink *state, err *logic.Term, t types.Type) value 
 		}
 	}
 	return held
+}
+
+// asPath resolves as(err, T): whether errors.As finds a value of the
+// concrete type T in err, read from the table of errors.As, with what is
+// known of it noted (S5 of F33).
+func (e *specEnv) asPath(name string, steps []logic.Step, t *logic.TypeName, when logic.When) (*logic.Term, error) {
+	found, err := e.locate(name, steps, when)
+	switch {
+	case err != nil:
+		return nil, err
+	case found.constant != nil && found.constant.Sort != logic.Err, found.constant == nil && !isError(found.typ):
+		return nil, fmt.Errorf("as(%s, ...): %s is not an error", spell(name, steps), spell(name, steps))
+	}
+	x := found.constant
+	if x == nil {
+		x = found.val[0]
+	}
+	target := t.Resolved.(types.Type)
+	switch {
+	case types.IsInterface(target):
+		return nil, fmt.Errorf("as(%s, %s): %s is an interface, and what errors.As finds of an interface is not supported yet", spell(name, steps), t, t)
+	case !types.Implements(target, errorType):
+		return nil, fmt.Errorf("as(%s, %s): %s does not implement error, so errors.As would panic on it", spell(name, steps), t, t)
+	}
+	if _, named := canonicalName(target); !named {
+		return nil, fmt.Errorf("as(%s, %s): %s is declared inside a function, and nothing tells it apart from another type there", spell(name, steps), t, t)
+	}
+	if e.sink != nil {
+		e.v.meetAssertion(e.sink, target)
+		e.v.noteAs(e.sink, x, target, asAssignable)
+	}
+	is, _ := asRead(asAssignable, target, x)
+	return is, nil
 }

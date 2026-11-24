@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"golang.org/x/tools/go/cfg"
+	"golang.org/x/tools/go/types/typeutil"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 )
@@ -214,6 +215,18 @@ func (v *fnVerifier) memTransfer(n ast.Node, fact *memFact, loose memFact, local
 			// fixed point over every node, and by the call that runs it.
 			return false
 		case *ast.CallExpr:
+			if kind, isAs := isErrorsAs(typeutil.StaticCallee(v.info, m)); isAs && kind == asAssignable && len(m.Args) == 2 {
+				// What errors.As stores into its target comes from what an
+				// error holds, whose origin is not known (F33).
+				if addr, isAddr := ast.Unparen(m.Args[1]).(*ast.UnaryExpr); isAddr {
+					if id, isIdent := ast.Unparen(addr.X).(*ast.Ident); isIdent {
+						if variable, isVar := v.info.ObjectOf(id).(*types.Var); isVar && holdsMemory(variable.Type()) {
+							fact.unknown[variable] = "it comes from errors.As"
+						}
+					}
+				}
+				return true
+			}
 			if why := v.callPollutes(m, judge); why != "" && fact.polluted == "" {
 				fact.polluted = why
 			}

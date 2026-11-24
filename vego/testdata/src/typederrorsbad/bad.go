@@ -83,9 +83,9 @@ func TypeAndPredicate() (err error) {
 	return nil
 }
 
-// @Ensures as(err, *Empty) // want `as\(err, T\) is not supported yet: it comes with errors.As`
+// @Ensures as(err, *Empty)
 func AsInFormula() (err error) {
-	return nil
+	return nil // want `postcondition may not hold: as\(err, \*Empty\)`
 }
 
 // Getter has a contract no value of its type can meet: what an error

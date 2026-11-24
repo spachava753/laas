@@ -164,3 +164,20 @@ func TestWrapsByteIs(t *testing.T) {
 		t.Error("WrapsByteIs")
 	}
 }
+
+// TestAsClaims checks what the contracts of as.go say against the real
+// errors.As and errors.AsType.
+func TestAsClaims(t *testing.T) {
+	for n := -2; n <= 2; n++ {
+		if AsLine(n) != n || AsWrapped(n) != n || AsTypeLine(n) != n || AsOtherType(n) || AsCode(n) != (n < 0) {
+			t.Errorf("AsLine, AsWrapped, AsTypeLine, AsOtherType, or AsCode(%d)", n)
+		}
+		var pe *PE
+		if (SaysAs(n) == nil) != (n == 0) || n != 0 && !errors.As(SaysAs(n), &pe) || ReadsSaysAs(n) != (n != 0) {
+			t.Errorf("SaysAs or ReadsSaysAs(%d)", n)
+		}
+	}
+	if AsMade() || ValueHasNoIs() || ValueAsOther() || AsKeepsTarget() != 5 {
+		t.Error("AsMade, ValueHasNoIs, or ValueAsOther")
+	}
+}

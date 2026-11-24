@@ -41,3 +41,9 @@ func TestWraps(t *testing.T) {
 		}
 	}
 }
+
+func TestUnnamed(t *testing.T) {
+	if !AsUnnamed() || AsTypeUnnamed() {
+		t.Errorf("AsUnnamed %v, AsTypeUnnamed %v", AsUnnamed(), AsTypeUnnamed())
+	}
+}

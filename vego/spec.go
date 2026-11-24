@@ -730,6 +730,9 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 	if last := len(steps) - 1; last >= 0 && steps[last].Holds != nil {
 		return e.holdsPath(name, steps[:last], steps[last].Holds, when)
 	}
+	if last := len(steps) - 1; last >= 0 && steps[last].As != nil {
+		return e.asPath(name, steps[:last], steps[last].As, when)
+	}
 	if e.fn == nil && e.st != nil {
 		if c := e.v.visitedAt(name, e.pos); c != nil {
 			return e.visitedPath(c, steps, when)

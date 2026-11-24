@@ -4,6 +4,7 @@
 package typedowns
 
 import (
+	"errors"
 	"fmt"
 	"io"
 )
@@ -241,4 +242,49 @@ func wrapChild(p *Child) (err error) { // want `the contract of wrapChild may al
 // @Ensures True
 func ViaConstructor(s *S) (err error) {
 	return wrapChild(s.child) // want `ViaConstructor returns memory that s owns, held in an error, which no contract can place within s; return a copy`
+}
+
+// CellHolder keeps a cell.
+type CellHolder struct{ C *Cell }
+
+// StoreFound takes a part of b out of an error with errors.As, whose
+// target is then a part of b, as an assertion's result is.
+//
+// @Requires b != nil And h != nil
+// @Modifies h
+// @Ensures True
+func StoreFound(b *Box, h *CellHolder) {
+	var e error = b.cell
+	var c *Cell
+	if errors.As(e, &c) {
+		h.C = c // want `c is memory that b owns, stored into memory at owns.go:\d+:\d+`
+	}
+}
+
+// @Requires b != nil And h != nil
+// @Modifies h
+// @Ensures True
+func StoreFoundType(b *Box, h *CellHolder) {
+	var e error = b.cell
+	if c, ok := errors.AsType[*Cell](e); ok {
+		h.C = c // want `c is memory that b owns, stored into memory at owns.go:\d+:\d+`
+	}
+}
+
+// @Ensures err != nil
+func located() (err error) { // want `the contract of located may also be met by a function that always returns an error`
+	return &PE{Line: 1}
+}
+
+// BesideAs hands what errors.As found beside a writer: it comes from what
+// an error holds, reached only through an interface value.
+//
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func BesideAs(w io.Writer) {
+	var pe *PE
+	if errors.As(located(), &pe) && pe != nil {
+		write(w, pe) // want `the footprint of what is passed to write as w may hold memory that what is passed as pe reaches, and write relies on it not doing so: it comes from errors.As` `write may modify pe, which BesideAs may not modify`
+	}
 }

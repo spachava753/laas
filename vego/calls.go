@@ -149,6 +149,11 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		results = []value{{v.errorsIs(call, st, guard)}}
 		u.reach(operands)
 		made.pure = true
+	case isAsCall(callee):
+		kind, _ := isErrorsAs(callee)
+		results = v.errorsAs(call, kind, st, guard)
+		u.reach(operands)
+		made.pure = true
 	default:
 		fn, cut := v.contractFor(call, callee, st, guard)
 		if cut {

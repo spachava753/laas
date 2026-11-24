@@ -186,6 +186,9 @@ func (v *fnVerifier) noteTree(sink *state, tree errorTree) {
 	for _, target := range v.isTargets {
 		v.treeInstance(sink, tree, target)
 	}
+	for _, pair := range v.asPairs {
+		v.asFacts(sink, pair, map[string]bool{})
+	}
 }
 
 // treeInstance states what errors.Is reports for an error whose tree is

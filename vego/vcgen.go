@@ -255,6 +255,9 @@ type fnVerifier struct {
 	// isPairs holds the applications of is met, error and target, which
 	// a type met later states what errors.Is reports of (typedTrees).
 	isPairs [][2]*logic.Term
+	// asPairs holds the walks of errors.As and errors.AsType asked; see
+	// noteAs.
+	asPairs []asPair
 	// madeFixed holds the references of the fixed variables met whose
 	// initialisers made an allocation with a size, which are apart, and
 	// fixedMet the fixed variables met; see fixedValue.
@@ -1043,6 +1046,8 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 		v.unsupported(s.Pos(), "deferring a call that only makes an error is not supported")
 	case isErrorsIs(callee):
 		v.unsupported(s.Pos(), "deferring errors.Is is not supported: its result would be lost")
+	case isAsCall(callee):
+		v.unsupported(s.Pos(), "deferring errors.As is not supported: what it finds would be stored after the function's checks")
 	}
 	fn, cut := v.contractFor(s.Call, callee, st, nil)
 	if cut {

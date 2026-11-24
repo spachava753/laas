@@ -383,6 +383,9 @@ func (v *fnVerifier) meetType(sink *state, t types.Type) {
 	for _, pair := range v.isPairs {
 		v.typedTrees(sink, pair[0], pair[1])
 	}
+	for _, pair := range v.asPairs {
+		v.asFacts(sink, pair, map[string]bool{})
+	}
 }
 
 // eqLeaf says that two leaves of one sort are equal: a string by its

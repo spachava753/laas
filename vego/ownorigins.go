@@ -1237,6 +1237,27 @@ func (v *fnVerifier) ownResults(fl *ownFlow, e ast.Expr, count int, f *ownFact) 
 		out[0] = v.ownKindOf(fl, assert.X, f)
 		return out
 	}
+	if call, ok := ast.Unparen(e).(*ast.CallExpr); ok && isAsCall(typeutil.StaticCallee(v.info, call)) {
+		// What errors.As and errors.AsType find in an error is part of it,
+		// as what an assertion takes out is (F7 of the design review).
+		kind := v.ownKindOf(fl, call.Args[0], f)
+		if len(call.Args) < 2 {
+			out[0] = kind
+			return out
+		}
+		if addr, isAddr := ast.Unparen(call.Args[1]).(*ast.UnaryExpr); isAddr {
+			if id, isIdent := ast.Unparen(addr.X).(*ast.Ident); isIdent {
+				if variable, isVar := v.info.ObjectOf(id).(*types.Var); isVar {
+					if v.boxed[variable] {
+						v.ownStoreMemory(fl, call.Args[0], kind, f, "stored by errors.As into "+id.Name+", which lives in memory")
+					} else {
+						f.vars[variable] = f.vars[variable].union(kind)
+					}
+				}
+			}
+		}
+		return out
+	}
 	call, ok := ast.Unparen(e).(*ast.CallExpr)
 	if !ok {
 		// A map read or a receive with its second result.

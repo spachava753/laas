@@ -2306,6 +2306,13 @@ trusted:
     reason: Test helper standing for a call on what a struct owns, whose error may hold it.
     modifies: []
 
+  typederrorsclient.wrapped:
+    reason: Test helper that returns a typederrors.Wrap, whose methods are those of the *PE it embeds.
+    ensures:
+      - 'holds(err, "typederrors".Wrap)'
+    modifies: []
+    vouches: [err]
+
   typederrorsclient.find:
     reason: Test helper standing for a trusted function that returns a typed error, whose entry names the type by the path of its package.
     ensures:

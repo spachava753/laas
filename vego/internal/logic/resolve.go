@@ -44,6 +44,9 @@ type Step struct {
 	// as in holds(err, *ParseError).
 	Assert *TypeName
 	Holds  *TypeName
+	// As, as the last step, is whether errors.As finds a value of the
+	// type in the error, as in as(err, *ParseError).
+	As *TypeName
 }
 
 // NotSlice is what an Env returns for a path with a last step Nil that does
@@ -507,7 +510,19 @@ func (s *scope) call(n *Node) *Term {
 		}
 		return t
 	case "as":
-		fail("as(err, T) is not supported yet: it comes with errors.As")
+		// as(err, T): whether errors.As finds a value of type T in err.
+		if s.env == nil || n.Type == nil || len(n.Kids) != 1 {
+			fail("as takes an error and a type, as in as(err, *ParseError), and cannot be used in a predicate definition")
+		}
+		root, steps, when, ok := s.pathOf(n.Kids[0])
+		if !ok {
+			fail("as takes an error reached from a variable, as in as(err, *ParseError) or as(old(err), Error)")
+		}
+		t, err := s.env.Path(root, append(steps, Step{As: n.Type}), when)
+		if err != nil {
+			panic(resolveError{err})
+		}
+		return t
 	case "has":
 		// has(m, k): whether map m has key k.
 		if s.env == nil || len(n.Kids) != 2 {

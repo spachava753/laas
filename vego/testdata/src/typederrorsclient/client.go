@@ -3,6 +3,7 @@
 package typederrorsclient
 
 import (
+	"errors"
 	"fmt"
 
 	"typederrors"
@@ -73,4 +74,26 @@ func Wraps(n int) (err error) {
 		return fmt.Errorf("client: %w", err)
 	}
 	return nil
+}
+
+// wrapped stands for a trusted function that returns a typederrors.Wrap,
+// which embeds a *PE; its entry says what the error holds.
+func wrapped() (err error) { return typederrors.Wrap{PE: &typederrors.PE{Line: 1}} }
+
+// AsUnnamed asks errors.As for an unnamed struct that a Wrap is assignable
+// to, which it finds (F3 of the design review).
+//
+// @Ensures r
+func AsUnnamed() (r bool) {
+	var v struct{ *typederrors.PE }
+	return errors.As(wrapped(), &v)
+}
+
+// AsTypeUnnamed asks errors.AsType for the same, which tests identity and
+// finds nothing.
+//
+// @Ensures ~r
+func AsTypeUnnamed() (r bool) {
+	_, r = errors.AsType[struct{ *typederrors.PE }](wrapped())
+	return r
 }

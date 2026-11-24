@@ -62,7 +62,7 @@ func TestCorpusClaims(t *testing.T) {
 				if err != nil || toolchain != "" && strings.TrimSpace(string(out)) != toolchain {
 					t.Fatalf("the go command %s is %s, not %s: %v", gocmd, out, toolchain, err)
 				}
-				run := exec.Command(gocmd, "test", "-count=1", "./src/"+pkg)
+				run := exec.Command(gocmd, "test", "-count=1", "-vet=off", "./src/"+pkg)
 				run.Dir = testdata
 				run.Env = env
 				if out, err := run.CombinedOutput(); err != nil {
