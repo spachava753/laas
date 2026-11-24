@@ -99,3 +99,18 @@ func TestLabelIsNotNamed(t *testing.T) {
 		t.Error("a Label is an SErr")
 	}
 }
+
+// TestRefusedWouldFail runs functions whose conversions are refused, and
+// shows what a proof of them would have claimed falsely: consume runs the
+// code the errors hold under an entry that modifies nothing.
+func TestRefusedWouldFail(t *testing.T) {
+	if ThroughAny() != 1 || ThroughHidden() != 1 {
+		t.Error("consume did not bump the counter an error holds")
+	}
+	defer func() {
+		if recover() == nil {
+			t.Error("NilRuns did not panic")
+		}
+	}()
+	NilRuns()
+}

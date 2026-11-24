@@ -2273,6 +2273,11 @@ trusted:
     reason: Test helper that calls Init of x when it has one, and writes nothing a caller can see; its entry says nothing of the code x carries.
     modifies: []
 
+  typederrors.consume:
+    reason: Test helper that runs the code an error holds; it stands for a trusted function to which the conversions of typederrors/unchecked.go would hand code nobody checked.
+    runs: [e]
+    modifies: []
+
   typederrorsclient.find:
     reason: Test helper standing for a trusted function that returns a typed error, whose entry names the type by the path of its package.
     ensures:

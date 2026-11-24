@@ -437,19 +437,28 @@ func (v *fnVerifier) sameTyped(st *state, a, b *logic.Term) {
 // asserts it. So every method of the type's method set must have a usable
 // contract that modifies nothing, asks nothing, names no variable of a
 // group with an invariant, makes no call through a value, and is declared
-// on the type itself; the type has no invariant; and nothing the type
-// reaches through exported fields has methods, which reflection reaches. A
-// value receiver reached through the converted pointer is read when the
-// method runs, so the pointer is proved not nil here, where it is fixed.
-// (S1 of F33; values.BoxedImplicitly is what this keeps out.)
+// on the type itself; the type has no invariant; nothing the type reaches
+// through exported fields has methods, which reflection reaches; and
+// nothing it holds, in any field at any depth, can carry code nobody
+// checked: an any, an interface with a method that has no contract, or a
+// function type without one (F13 of the review of S1). A value receiver
+// reached through the converted pointer is read when the method runs, so
+// the pointer is proved not nil here, where it is fixed. (S1 of F33;
+// values.BoxedImplicitly and typederrors.ThroughAny are what this keeps
+// out.)
 func (v *fnVerifier) checkedMethods(e ast.Expr, from types.Type, val value, st *state, guard []*logic.Term) {
-	shown := types.TypeString(from, types.RelativeTo(v.pass.Pkg))
-	refuse := func(why string) {
-		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to an error is not supported: %s; code that is not verified may run any method "+
-			"of an error at any time, so each method of a type converted to error must have a contract that modifies nothing and has no Requires", shown, why))
+	shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
+	code := "code that is not verified may run any method of an error at any time"
+	refuse := func(why, remedy string) {
+		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to an error is not supported: %s; %s, so %s", shown(from), why, code, remedy))
 	}
 	if set, _ := v.invariantsOf(from); set != nil {
-		refuse(fmt.Sprintf("%s has an invariant, which a method run at any time could not assume", shown))
+		refuse(fmt.Sprintf("%s has an invariant, which a method run at any time could not assume", shown(from)),
+			"a type converted to error must have no invariant")
+	}
+	if held, path := uncheckedHeld(v.pkgVerifier, from, "", map[types.Type]bool{}); held != nil {
+		refuse(fmt.Sprintf("it holds%s a value of type %s, which can carry code that nothing checks", path, shown(held)),
+			"a type converted to error may hold an error, an interface whose methods all have contracts, or a function type with a contract, and no other code")
 	}
 	_, fromPointer := from.Underlying().(*types.Pointer)
 	methods := types.NewMethodSet(from)
@@ -457,35 +466,89 @@ func (v *fnVerifier) checkedMethods(e ast.Expr, from types.Type, val value, st *
 		method := selection.Obj().(*types.Func)
 		name := methodOf(method.Type().(*types.Signature).Recv().Type(), method, v.pass.Pkg)
 		if len(selection.Index()) > 1 {
-			refuse(fmt.Sprintf("its method %s is promoted from an embedded field", method.Name()))
+			refuse(fmt.Sprintf("its method %s is promoted from an embedded field", method.Name()),
+				fmt.Sprintf("declare %s on %s itself", method.Name(), shown(from)))
 		}
 		fn := v.contractOf(method)
 		if fn == nil {
-			refuse(fmt.Sprintf("%s has no contract", name))
+			refuse(fmt.Sprintf("%s has no contract", name), "each method of a type converted to error must have a contract that modifies nothing and has no Requires")
 		}
 		view := v.viewOf(fn)
 		switch {
 		case view.cut || len(view.problems) > 0:
-			refuse(fmt.Sprintf("the contract of %s cannot be used", name))
+			refuse(fmt.Sprintf("the contract of %s cannot be used", name), "fix the contract")
 		case len(fn.modifies) > 0:
-			refuse(fmt.Sprintf("%s modifies memory", name))
+			refuse(fmt.Sprintf("%s modifies memory", name), "each method of a type converted to error must modify nothing")
 		case len(fn.requires) > 0:
-			refuse(fmt.Sprintf("%s has a Requires clause", name))
+			refuse(fmt.Sprintf("%s has a Requires clause, which a call made at any time may not meet", name), "each method of a type converted to error must have no Requires")
 		case v.pkgVerifier.mayCallValues(method):
-			refuse(fmt.Sprintf("%s may call through a function value or an interface value", name))
+			refuse(fmt.Sprintf("%s may call through a function value or an interface value", name), "each method of a type converted to error must call no code through a value")
 		case len(v.pkgVerifier.groupsTouched(fn)) > 0:
-			refuse(fmt.Sprintf("%s names a variable of a group with an invariant", name))
+			refuse(fmt.Sprintf("%s names a variable of a group with an invariant, which a call made at any time could not assume", name),
+				"each method of a type converted to error must name no such variable")
 		}
 		if _, recvPointer := method.Type().(*types.Signature).Recv().Type().(*types.Pointer); fromPointer && !recvPointer {
 			done := v.at(e.Pos())
 			v.check(st, guard, logic.Ne(val[0], logic.RefLit(0)), e.Pos(),
-				"%s has a value receiver, and the pointer converted to error may be nil, so the method would panic when it runs", name)
+				"%s has a value receiver, and the pointer converted to error may be nil, so the method would panic when it runs; convert a pointer that is not nil, or the value it points to", name)
 			done()
 		}
 	}
 	if reached := methodsReached(from, map[types.Type]bool{}, true); reached != nil {
-		refuse(fmt.Sprintf("it holds through an exported field a value of type %s, which has methods", types.TypeString(reached, types.RelativeTo(v.pass.Pkg))))
+		refuse(fmt.Sprintf("it holds through an exported field a value of type %s, which has methods", shown(reached)),
+			"nothing a type converted to error holds through an exported field may have methods")
 	}
+}
+
+// uncheckedHeld returns a type that a value of type t holds, in any field
+// at any depth, exported or not, through pointers, slices, arrays, maps,
+// and channels, that can carry code nothing checks where verified code
+// makes it: an any, an interface with a method that has no contract, or a
+// function type without one; nil when there is none. path says where.
+func uncheckedHeld(pv *pkgVerifier, t types.Type, path string, seen map[types.Type]bool) (types.Type, string) {
+	if seen[t] {
+		return nil, ""
+	}
+	seen[t] = true
+	if held, replaced := heldAs(t); replaced {
+		return uncheckedHeld(pv, held, path, seen)
+	}
+	switch u := t.Underlying().(type) {
+	case *types.Interface:
+		if isError(t) || pv.fullyContracted(t) {
+			return nil, ""
+		}
+		return t, path
+	case *types.Signature:
+		if pv.valueContract(t) != nil {
+			return nil, ""
+		}
+		return t, path
+	case *types.Basic:
+		if u.Kind() == types.UnsafePointer {
+			return t, path
+		}
+	case *types.Pointer:
+		return uncheckedHeld(pv, u.Elem(), path, seen)
+	case *types.Slice:
+		return uncheckedHeld(pv, u.Elem(), path, seen)
+	case *types.Array:
+		return uncheckedHeld(pv, u.Elem(), path, seen)
+	case *types.Chan:
+		return uncheckedHeld(pv, u.Elem(), path, seen)
+	case *types.Map:
+		if found, where := uncheckedHeld(pv, u.Key(), path, seen); found != nil {
+			return found, where
+		}
+		return uncheckedHeld(pv, u.Elem(), path, seen)
+	case *types.Struct:
+		for field := range u.Fields() {
+			if found, where := uncheckedHeld(pv, field.Type(), path+" in field "+field.Name(), seen); found != nil {
+				return found, where
+			}
+		}
+	}
+	return nil, ""
 }
 
 // methodsReached returns a type with methods that reflection reaches from a

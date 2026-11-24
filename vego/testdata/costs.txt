@@ -5456,15 +5456,26 @@ trustedwritesclient	trustedwritesclient.Same	4	1866	0
 trustedwritesclient	trustedwritesclient.State	13	21252	0
 trustedwritesclient	trustedwritesclient.StateUnlisted	5	10114	0
 trustedwritesclient	trustedwritesclient.Ticked	3	188	0
+typederrors	(*typederrors.Count).Value	3	869	0
 typederrors	(*typederrors.Empty).Error	1	182	0
+typederrors	(*typederrors.Logged).Error	9	5348	0
 typederrors	(*typederrors.PE).Error	1	182	0
+typederrors	(*typederrors.Positive).Error	1	841	0
+typederrors	(*typederrors.ReqErr).Error	2	474	0
+typederrors	(typederrors.CallsHook).Error	4	2603	0
+typederrors	(typederrors.CountErr).Error	1	182	0
+typederrors	(typederrors.CountsHits).Error	1	181	0
 typederrors	(typederrors.Error).Error	1	111	0
 typederrors	(typederrors.FErr).Error	1	46	0
+typederrors	(typederrors.HeldAny).Error	1	497	0
+typederrors	(typederrors.Inner).Error	1	111	0
 typederrors	(typederrors.InvalidByteError).Error	1	107	0
 typederrors	(typederrors.Label).Error	1	368	0
 typederrors	(typederrors.Other).Error	1	111	0
 typederrors	(typederrors.Pair).Error	1	163	0
 typederrors	(typederrors.SErr).Error	1	368	0
+typederrors	(typederrors.ValueErr).Error	1	111	0
+typederrors	(typederrors.heldHidden).Error	1	497	0
 typederrors	typederrors.As	1	46	0
 typederrors	typederrors.AsType	1	46	0
 typederrors	typederrors.CallerDiffers	2	1493	0
@@ -5472,13 +5483,20 @@ typederrors	typederrors.Differ	2	1026	0
 typederrors	typederrors.DifferTypes	2	1087	0
 typederrors	typederrors.FirstByte	25	45832	0
 typederrors	typederrors.Floats	1	46	0
+typederrors	typederrors.HitsError	1	46	0
+typederrors	typederrors.Hook	3	2076	0
+typederrors	typederrors.HookError	1	46	0
+typederrors	typederrors.InvariantError	1	46	0
 typederrors	typederrors.LabelIsNotNamed	29	272288	0
 typederrors	typederrors.Located	24	43213	1
 typederrors	typederrors.MadeAfter	2	1180	0
 typederrors	typederrors.MadeDiffers	2	965	0
+typederrors	typederrors.ModifiesError	1	46	0
 typederrors	typederrors.Named	12	21933	0
 typederrors	typederrors.NilPointerIsNotNil	7	11194	0
 typederrors	typederrors.NilPointers	3	1618	0
+typederrors	typederrors.NilRuns	1	46	0
+typederrors	typederrors.NilValueReceiver	5	1485	0
 typederrors	typederrors.NotContradictory	7	2851	0
 typederrors	typederrors.NotDifferent	7	2325	0
 typederrors	typederrors.NotLocated	12	14833	0
@@ -5489,6 +5507,9 @@ typederrors	typederrors.Pairs	3	1694	0
 typederrors	typederrors.Parse	12	8299	0
 typederrors	typederrors.ParseFailed	2	1415	0
 typederrors	typederrors.PassRange	10	12847	0
+typederrors	typederrors.Positive	1	128	0
+typederrors	typederrors.PromotedError	1	46	0
+typederrors	typederrors.ReachedError	1	46	0
 typederrors	typederrors.ReadsHeld	2	1500	0
 typederrors	typederrors.Ret	7	9393	0
 typederrors	typederrors.ReturnsVariable	7	12323	0
@@ -5500,13 +5521,19 @@ typederrors	typederrors.SomeByteNotSyntax	2	4122	0
 typederrors	typederrors.Strings	3	6810	0
 typederrors	typederrors.StringsDiffer	2	7923	0
 typederrors	typederrors.Switch	6	3672	0
+typederrors	typederrors.ThroughAny	1	46	0
+typederrors	typederrors.ThroughHidden	1	46	0
 typederrors	typederrors.Unknown	1	46	0
 typederrors	typederrors.VariableHolds	2	959	0
 typederrors	typederrors.Wrapped	8	3739	0
 typederrors	typederrors.ZeroSize	1	46	0
 typederrors	typederrors.ZeroSizeVariable	1	46	0
+typederrors	typederrors.consume	1	70	0
+typederrors	typederrors.init of hits	1	417	0
+typederrors	typederrors.plainHook	1	46	0
 typederrors	typederrors.the initialiser of ErrEmpty	0	0	0
 typederrors	typederrors.the initialiser of ErrVar	0	0	0
+typederrors	typederrors.the initialiser of hook	0	0	0
 typederrorsbad	(*typederrorsbad.Empty).Error	1	182	0
 typederrorsbad	(typederrorsbad.Error).Error	1	111	0
 typederrorsbad	(typederrorsbad.FErr).Error	1	46	0

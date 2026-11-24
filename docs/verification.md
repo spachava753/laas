@@ -5411,8 +5411,15 @@ contract; code that is not verified may run any method of an error at any time, 
 converted to error must have a contract that modifies nothing and has no Requires
 ```
 
-The same holds of the methods of what the type holds in exported fields, which reflection reaches. A method promoted from an embedded field, a method that makes a call through a function value or an interface value, and a type with an invariant are reported too.
+These are reported at the conversion too, each with what to change:
 
+- a method promoted from an embedded field;
+- a method that makes a call through a function value or an interface value;
+- a method that names a package-level variable of a group with an invariant;
+- a type with an invariant;
+- a type that holds, in any field, a value of type `any`, of an interface with a method that has no contract, or of a function type without a contract;
+- a type that holds, through an exported field, a value of a type that has methods, which reflection reaches;
+- a `nil` pointer converted to error when its type has `Error` with a value receiver, since calling it would panic.
 
 ### When a package-level error is known
 
