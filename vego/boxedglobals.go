@@ -461,3 +461,11 @@ func (v *fnVerifier) apartFromClosed(alloc *logic.Term) *logic.Term {
 	}
 	return logic.And(apart...)
 }
+
+// foreignBoxedWhy says why a kind-3 variable of another package cannot be
+// read or named here (O-d of the design of F32).
+func (pv *pkgVerifier) foreignBoxedWhy(variable *types.Var) string {
+	return fmt.Sprintf("%s is a struct variable of package %s whose address is taken, and reading or naming one of another package "+
+		"is not supported yet; a function of package %s can read it, and a contract here covers what such a function changes "+
+		"by listing the state of package %s", pv.spelling(variable), variable.Pkg().Path(), variable.Pkg().Name(), variable.Pkg().Name())
+}

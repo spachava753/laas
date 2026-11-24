@@ -72,3 +72,10 @@ func NoteBuf(w io.Writer) {
 	Buf.WriteString("x")
 	fmt.Fprint(w, "y")
 }
+
+// Zero reports whether c holds nothing.
+//
+// @Ensures r <-> c.N = 0
+func (c Config) Zero() (r bool) {
+	return c.N == 0
+}

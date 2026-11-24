@@ -42,6 +42,7 @@ boxed	boxed.keepsAcross	5	3403	0
 boxed	boxed.literal	5	3339	0
 boxed	boxed.load	6	4069	0
 boxed	boxed.loop	13	12582	0
+boxed	boxed.loopKeeps	15	13982	0
 boxed	boxed.lostAcross	6	7241	0
 boxed	boxed.note	13	32161	0
 boxed	boxed.readN	1	46	0
@@ -56,15 +57,18 @@ boxed	boxed.walk	4	1441	0
 boxed	boxed.walkListed	8	5700	0
 boxed	fmt.Fprint	5	11289	0
 boxed	io.Writer.Write	3	7630	0
+boxedclient	boxedclient.Address	1	46	0
 boxedclient	boxedclient.Kept	2	851	0
 boxedclient	boxedclient.Listed	5	11523	0
 boxedclient	boxedclient.Lost	5	15892	0
 boxedclient	boxedclient.Names	0	0	0
 boxedclient	boxedclient.Reads	1	46	0
+boxedclient	boxedclient.Receiver	1	46	0
 boxedclient	boxedclient.Unlisted	2	744	0
 boxedlib	(*strings.Builder).WriteString	4	15141	0
 boxedlib	(*sync.Mutex).Lock	1	1652	0
 boxedlib	(*sync.Mutex).Unlock	1	1611	0
+boxedlib	(boxedlib.Config).Zero	2	145	0
 boxedlib	boxedlib.Get	2	411	0
 boxedlib	boxedlib.Hit	24	36814	0
 boxedlib	boxedlib.NoteBuf	22	93597	0

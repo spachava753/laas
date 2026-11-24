@@ -131,6 +131,9 @@ func (v *fnVerifier) fieldPlace(e *ast.SelectorExpr) lvalue {
 		lv.leaves = mustLayout(variable.Type())
 		return lv
 	}
+	if variable, ok := v.info.Uses[e.Sel].(*types.Var); ok && selection == nil && v.isBoxedGlobal(variable) {
+		v.unsupported(e.Pos(), v.foreignBoxedWhy(variable))
+	}
 	if variable, ok := v.info.Uses[e.Sel].(*types.Var); ok && selection == nil && variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope() {
 		v.unsupported(e.Pos(), fmt.Sprintf("%s is a package-level variable of package %s, and assigning one is not supported yet",
 			types.ExprString(e), variable.Pkg().Path()))

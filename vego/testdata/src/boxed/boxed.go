@@ -238,3 +238,16 @@ func walk(f Visit) {
 func walkListed(f Visit) {
 	f()
 }
+
+// loopKeeps claims cfg.n is left as it was, but the loop writes it.
+//
+// @Requires k = 3 And cfg.n = 0
+// @Modifies cfg.n
+// @Ensures cfg.n' = 0
+func loopKeeps(k int) {
+	// @Invariant 0 <= i And i <= k
+	// @Variant k - i
+	for i := 0; i < k; i++ {
+		cfg.n = i + 1
+	}
+} // want `vego: postcondition may not hold: cfg\.n' = 0`

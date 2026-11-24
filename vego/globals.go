@@ -795,6 +795,8 @@ func (pv *pkgVerifier) usableFixed(variable *types.Var) (knownValue, string) {
 	}
 	var known knownValue
 	switch {
+	case variable.Pkg() != pv.pass.Pkg && pv.isBoxedGlobal(variable):
+		return knownValue{}, pv.foreignBoxedWhy(variable)
 	case variable.Pkg() == pv.pass.Pkg && pv.reassigned[variable]:
 		if why := pv.assignedWhy(variable); why != "" {
 			return knownValue{}, why
@@ -812,11 +814,6 @@ func (pv *pkgVerifier) usableFixed(variable *types.Var) (knownValue, string) {
 		var published bool
 		known, published = pv.foreignFixed(variable)
 		if !published {
-			if fact := pv.publishedFixed(variable); fact != nil && fact.Boxed[variable.Name()] {
-				return knownValue{}, fmt.Sprintf("%s is a struct variable of package %s whose address is taken, and reading or naming one of another package "+
-					"is not supported yet; a function of package %s can read it, and a contract here covers what such a function changes "+
-					"by listing the state of package %s", spelled, variable.Pkg().Path(), variable.Pkg().Name(), variable.Pkg().Name())
-			}
 			if fact := pv.publishedFixed(variable); fact != nil && fact.Changed[variable.Name()] != "" {
 				return knownValue{}, fmt.Sprintf("%s %s in package %s; %s", spelled, fact.Changed[variable.Name()], variable.Pkg().Path(), changedNotYet)
 			}

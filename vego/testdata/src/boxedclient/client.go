@@ -62,3 +62,18 @@ func Names() {
 func Leak() io.Writer {
 	return &boxedlib.Buf // want `vego: the address of boxedlib\.Buf is let out here, but proofs in package boxedlib rely on it being handed only to trusted functions that neither keep it nor run code that could be handed it`
 }
+
+// Receiver calls a value method on the variable of the other package.
+//
+// @Ensures True
+func Receiver() (r bool) {
+	return boxedlib.Cfg.Zero() // want `vego: cannot verify Receiver: boxedlib\.Cfg is a struct variable of package boxedlib whose address is taken, and reading or naming one of another package is not supported yet; a function of package boxedlib can read it, and a contract here covers what such a function changes by listing the state of package boxedlib`
+}
+
+// Address takes its address.
+//
+// @Ensures True
+func Address() (r bool) {
+	p := &boxedlib.Cfg // want `vego: cannot verify Address: boxedlib\.Cfg is a struct variable of package boxedlib whose address is taken, and reading or naming one of another package is not supported yet; a function of package boxedlib can read it, and a contract here covers what such a function changes by listing the state of package boxedlib`
+	return p != nil
+}
