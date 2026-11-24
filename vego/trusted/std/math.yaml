@@ -1,10 +1,11 @@
 version: 1
 
-# The package is isolated as a whole, every function and method of it and not
-# only the entries of this file: read from the source of Go 1.26.6 and
-# 1.27.3, package math has no package-level variable that holds code and calls
-# nothing that can be set.
-isolated: true
+isolated:
+  reason: >-
+    The package is isolated as a whole, every function and method of it and
+    not only the entries of this file: read from the source of Go 1.26.6 and
+    1.27.3, package math has no package-level variable that holds code and
+    calls nothing that can be set.
 
 # Floats are opaque to vego: no formula can say anything of a float's value.
 # Each entry says only what is true whatever the value: the function returns

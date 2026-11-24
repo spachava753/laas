@@ -125,9 +125,11 @@ type trustFile struct {
 	path    string
 	content []byte
 	shipped bool
-	// isolated is set when the file claims of every entry it holds what
-	// isolated claims of one; see trustEntry.isolated.
-	isolated bool
+	// isolated is set when the file claims of every function and method of
+	// the package it covers what isolated claims of one entry, and
+	// isolatedReason says what supports it; see trustEntry.isolated.
+	isolated       bool
+	isolatedReason string
 	entries map[string]*trustEntry
 	// states holds the states the file declares, by the type they belong
 	// to, as in sync.Mutex. Only the shipped files may declare one of a
@@ -219,11 +221,13 @@ func parseTrustFile(path string, content []byte, shipped bool) *trustFile {
 		case "progresses":
 			file.addFields("progresses", file.progresses, value)
 		case "isolated":
-			if value.Kind != yaml.ScalarNode || value.Value != "true" {
-				file.problem(value.Line, "isolated must be true, or left out")
+			// A claim of the whole package, with what supports it, which
+			// the trust report prints.
+			if value.Kind != yaml.MappingNode || len(value.Content) != 2 || value.Content[0].Value != "reason" || strings.TrimSpace(value.Content[1].Value) == "" {
+				file.problem(value.Line, "isolated must be a mapping with a reason that says what was read to support the claim")
 				continue
 			}
-			file.isolated = true
+			file.isolated, file.isolatedReason = true, strings.TrimSpace(value.Content[1].Value)
 		default:
 			// A project file cannot declare owns, so it is not offered one.
 			expected := "version, trusted, state, or isolated"
@@ -517,8 +521,10 @@ type EntryUse struct {
 	Reason  string
 	Shipped bool
 	// Isolated is set when the entry claims that the function runs no code
-	// but what the call hands it (trustEntry.isolated).
-	Isolated bool
+	// but what the call hands it (trustEntry.isolated), and IsolatedReason
+	// holds what supports a claim its file makes of the whole package.
+	Isolated       bool
+	IsolatedReason string
 	File    string
 	Line    int
 	// Unpredictable is set when the function returns an error and its
@@ -1271,7 +1277,7 @@ func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 			}
 		}
 		pv.usage.Entries = append(pv.usage.Entries, &EntryUse{
-			Key: entry.key, Reason: entry.reason, Shipped: entry.file.shipped, Isolated: entry.isIsolated(),
+			Key: entry.key, Reason: entry.reason, Shipped: entry.file.shipped, Isolated: entry.isIsolated(), IsolatedReason: entry.file.isolatedReason,
 			File: entry.file.path, Line: entry.line, Runs: runs, Keeps: keepsDescribed(entry), Asserts: assertsDescribed(entry), Vouches: vouches, Formats: formats, Encodes: encodes, Decodes: decodes, Callbacks: callbacks,
 			Every: every, Relied: []string{pv.pass.Pkg.Path()}, Fingerprint: entry.fingerprint(), States: states,
 		})

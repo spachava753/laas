@@ -1,10 +1,11 @@
 version: 1
 
-# The package is isolated as a whole, every function and method of it and not
-# only the entries of this file: read from the source of Go 1.26.6 and
-# 1.27.3, the functions of package unicode read its tables, which hold no
-# code, and call nothing that can be set.
-isolated: true
+isolated:
+  reason: >-
+    The package is isolated as a whole, every function and method of it and
+    not only the entries of this file: read from the source of Go 1.26.6 and
+    1.27.3, the functions of package unicode read its tables, which hold no
+    code, and call nothing that can be set.
 
 # The predicates of package unicode are defined by Unicode's tables. Each
 # entry says what they report for ASCII, whose categories Unicode keeps

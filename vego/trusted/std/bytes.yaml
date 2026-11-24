@@ -1,13 +1,14 @@
 version: 1
 
-# The package is isolated as a whole, every function and method of it and not
-# only the entries of this file: read from the source of Go 1.26.6 and
-# 1.27.3, package bytes has no package-level variable that holds code and no
-# function that stores one; its only exported variable is the error
-# ErrTooLarge, whose methods it never calls. The functions that take a
-# function (IndexFunc, Map, FieldsFunc, and the others) call only that
-# function, and the methods of Buffer run nothing.
-isolated: true
+isolated:
+  reason: >-
+    The package is isolated as a whole, every function and method of it and
+    not only the entries of this file: read from the source of Go 1.26.6 and
+    1.27.3, package bytes has no package-level variable that holds code and
+    no function that stores one; its only exported variable is the error
+    ErrTooLarge, whose methods it never calls. The functions that take a
+    function (IndexFunc, Map, FieldsFunc, and the others) call only that
+    function, and the methods of Buffer run nothing.
 
 owns:
   bytes.Buffer:
