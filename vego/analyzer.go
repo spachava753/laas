@@ -636,6 +636,9 @@ type pkgVerifier struct {
 	// the same for those of the package; escapes says where a use first
 	// does more than read a value out of a variable. See findChanges.
 	reassigned map[*types.Var]bool
+	// addressSite holds, for each variable whose address the package
+	// takes, where it first does.
+	addressSite map[*types.Var]string
 	changeOf   map[*types.Var]string
 	ownChanges map[*types.Var]string
 	escapes    map[*types.Var]string

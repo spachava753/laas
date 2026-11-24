@@ -1834,6 +1834,23 @@ func (v *fnVerifier) someInput(terms []*logic.Term, search func(input *witness) 
 			name: func(i int) string { return entryRegion + cells[i].key },
 		}, 0)
 	}
+	// A struct variable whose address is taken is an input as an assigned
+	// one is: a sample gives it an allocation of its own and its cells a
+	// value.
+	for _, key := range slices.Sorted(maps.Keys(v.boxedMet)) {
+		variable := v.boxedMet[key]
+		cells, name := v.cellsOf(variable.Type()), boxRef(variable).Name
+		if !b.mentioned[name] && !slices.ContainsFunc(cells, func(c cell) bool { return b.mentioned[entryRegion+c.key] }) {
+			continue
+		}
+		b.refs++
+		ref := logic.RefLit(b.refs)
+		b.slots = append(b.slots, slot{func(s *witness) { s.consts[name] = ref }})
+		b.add(variable.Type(), binding{
+			set:  func(s *witness, i int, term *logic.Term) { s.storeAt(cells[i], ref, term) },
+			name: func(i int) string { return entryRegion + cells[i].key },
+		}, 1)
+	}
 	total := 1
 	for _, alternatives := range b.slots {
 		total = min(total*max(len(alternatives), 1), maxShapes+1)

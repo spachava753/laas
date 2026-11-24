@@ -42,6 +42,7 @@ type lvalue struct {
 	// set when the assignment creates the variable.
 	box          *types.Var
 	global       *types.Var
+	boxGlobal    *types.Var
 	declares     bool
 	pointer      ast.Expr
 	slice, index ast.Expr
@@ -67,6 +68,11 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 		}
 		variable, ok := v.info.ObjectOf(e).(*types.Var)
 		switch {
+		case ok && variable.Pkg() == v.pass.Pkg && v.isBoxedGlobal(variable):
+			// A struct variable whose address is taken, at its allocation.
+			lv.kind, lv.boxGlobal, lv.typ, lv.cells = placeMem, variable, variable.Type(), v.cellsOf(variable.Type())
+			lv.leaves = mustLayout(variable.Type())
+			return lv
 		case ok && v.isAssigned(variable):
 			// The storage of an assigned package-level variable.
 			lv.kind, lv.global, lv.typ, lv.cells = placeMem, variable, variable.Type(), v.globalCells(variable)
@@ -174,6 +180,9 @@ func (v *fnVerifier) lvalue(e ast.Expr, st *state, guard []*logic.Term) lvalue {
 	case lv.global != nil:
 		v.noteGlobal(st, lv.global)
 		lv.ref, lv.at = globalRef(lv.global), logic.IntLit(0)
+	case lv.boxGlobal != nil:
+		pointer := v.boxedPointer(st, lv.boxGlobal)
+		lv.ref, lv.at = pointer[0], pointer[1]
 	case lv.box != nil:
 		// A variable that an assignment creates has no place yet.
 		if id, ok := ast.Unparen(e).(*ast.Ident); ok && v.info.Defs[id] != nil {
@@ -283,6 +292,8 @@ func (v *fnVerifier) store(lv lvalue, val value, st *state) {
 		switch {
 		case lv.box != nil:
 			written = lv.box.Type()
+		case lv.boxGlobal != nil:
+			written = lv.boxGlobal.Type()
 		case lv.pointer != nil:
 			written, _ = pointee(v.info.TypeOf(lv.pointer))
 		case lv.slice != nil:

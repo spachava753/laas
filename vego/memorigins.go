@@ -409,6 +409,12 @@ func (v *fnVerifier) memOrigin(e ast.Expr, fact memFact) string {
 		return v.memOrigin(x.X, fact)
 	case *ast.UnaryExpr:
 		if x.Op == token.AND {
+			// The address of a package-level variable, or of a field of
+			// one: code elsewhere may hold it (F2 of the design review of
+			// F32).
+			if root := v.addressRoot(x.X); root != nil {
+				return fmt.Sprintf("it is the address of the package-level variable %s, which code elsewhere may hold; take it as a parameter instead", v.spelling(root))
+			}
 			return v.memOrigin(x.X, fact)
 		}
 		return ""

@@ -219,7 +219,7 @@ func (v *fnVerifier) stateTarget(fn *funcInfo, m *modTarget, pkg *types.Package,
 			if !ok || isError(variable.Type()) {
 				continue
 			}
-			if !v.isAssigned(variable) {
+			if !v.isAssigned(variable) && !v.isBoxedGlobal(variable) {
 				if v.reassigned[variable] || !holdsMemory(variable.Type()) {
 					continue
 				}

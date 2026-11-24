@@ -49,9 +49,13 @@ func (pv *pkgVerifier) findChanges() {
 		return fmt.Sprintf("%s:%d", filepath.Base(position.Filename), position.Line)
 	}
 	pv.changeKinds = map[*types.Var]changeKind{}
+	pv.addressSite = map[*types.Var]string{}
 	changed := func(variable *types.Var, what string, pos token.Pos) {
 		pv.reassigned[variable] = true
 		pv.changeKinds[variable] |= kindOfChange(what)
+		if kindOfChange(what) == changeAddress && pv.addressSite[variable] == "" {
+			pv.addressSite[variable] = what + " at " + at(pos)
+		}
 		if pv.changeOf[variable] == "" {
 			pv.changeOf[variable] = what + " at " + at(pos)
 		}
@@ -448,6 +452,10 @@ type fixedFact struct {
 	// Assigned holds those of Changed that are assigned variables, which
 	// another package reads and writes as memory (assigned.go).
 	Assigned map[string]bool
+	// Boxed holds those of Changed that are struct variables whose address
+	// is taken (boxedglobals.go), which another package covers through the
+	// state of the package.
+	Boxed map[string]bool
 }
 
 func (*fixedFact) AFact() {}
@@ -520,6 +528,12 @@ func (pv *pkgVerifier) findFixed() {
 					}
 					if pv.reassigned[variable] {
 						fact.Changed[variable.Name()] = pv.ownChanges[variable]
+						if pv.isBoxedGlobal(variable) {
+							if fact.Boxed == nil {
+								fact.Boxed = map[string]bool{}
+							}
+							fact.Boxed[variable.Name()] = true
+						}
 						if pv.assignedWhy(variable) == "" {
 							if fact.Assigned == nil {
 								fact.Assigned = map[string]bool{}
@@ -794,6 +808,11 @@ func (pv *pkgVerifier) usableFixed(variable *types.Var) (knownValue, string) {
 		var published bool
 		known, published = pv.foreignFixed(variable)
 		if !published {
+			if fact := pv.publishedFixed(variable); fact != nil && fact.Boxed[variable.Name()] {
+				return knownValue{}, fmt.Sprintf("%s is a struct variable of package %s whose address is taken, and reading or naming one of another package "+
+					"is not supported yet; a function of package %s can read it, and a contract here covers what such a function changes "+
+					"by listing the state of package %s", spelled, variable.Pkg().Path(), variable.Pkg().Name(), variable.Pkg().Name())
+			}
 			if fact := pv.publishedFixed(variable); fact != nil && fact.Changed[variable.Name()] != "" {
 				return knownValue{}, fmt.Sprintf("%s %s in package %s; %s", spelled, fact.Changed[variable.Name()], variable.Pkg().Path(), changedNotYet)
 			}
@@ -1142,6 +1161,11 @@ func (e *specEnv) locateVariable(variable *types.Var, steps []logic.Step, when l
 	if e.v.groupNames != nil {
 		e.v.groupNames[variable] = true
 	}
+	// A kind-3 variable of another package is read only by a contract of
+	// its own package (O-d of the design of F32).
+	if e.v.isBoxedGlobal(variable) && (variable.Pkg() == e.v.pass.Pkg || e.fn != nil && e.fn.writtenIn() == variable.Pkg()) {
+		return e.locateBoxed(variable, steps, when)
+	}
 	if e.v.isAssigned(variable) || e.v.initStorage[variable] {
 		return e.locateAssigned(variable, steps, when)
 	}
@@ -1310,7 +1334,7 @@ func (v *fnVerifier) refuseWriteThrough(e ast.Expr) {
 // refuseWriteThroughAs is refuseWriteThrough for a write that text spells.
 func (v *fnVerifier) refuseWriteThroughAs(e ast.Expr, text string) {
 	switch root, inMemory := v.packageRoot(e); {
-	case root != nil && (v.isAssigned(root) || inMemory && !v.reassigned[root]):
+	case root != nil && (v.isAssigned(root) || root.Pkg() == v.pass.Pkg && v.isBoxedGlobal(root) || inMemory && !v.reassigned[root]):
 		// Its storage and what it refers to are memory that the frame
 		// covers like any other, as is what a fixed variable of the
 		// package refers to.

@@ -29,11 +29,12 @@ var counted counter
 
 var inc = counted.Inc
 
-// Count would be 0 if nothing changed counted.
+// Count would be 0 if nothing changed counted, but the method value inc
+// may have.
 //
 // @Ensures r = 0
 func Count() (r int) {
-	return counted.N // want `vego: cannot verify Count: counted has its address taken at defects.go:30; package-level variables whose address is taken are not supported yet`
+	return counted.N // want `vego: postcondition may not hold: r = 0`
 }
 
 // settings has a field assigned.

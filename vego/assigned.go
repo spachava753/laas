@@ -68,7 +68,10 @@ func (pv *pkgVerifier) assignedWhy(variable *types.Var) string {
 		return fmt.Sprintf("%s %s; a variable that a directive or assembly names is another symbol's storage, which code writes under the other name, "+
 			"so it cannot be verified", spelled, pv.changeOf[variable])
 	case kinds&changeAddress != 0:
-		return fmt.Sprintf("%s %s; package-level variables whose address is taken are not supported yet", spelled, pv.ownChanges[variable])
+		if why := pv.boxedWhy(variable); why != "" {
+			return why
+		}
+		return fmt.Sprintf("%s %s; it is a struct variable whose address is taken, which is read and written as memory, not as an assigned variable", spelled, pv.addressAt(variable))
 	case isError(t):
 		return fmt.Sprintf("%s %s; package-level error variables that are changed are not supported yet", spelled, pv.ownChanges[variable])
 	}
@@ -198,6 +201,10 @@ func (v *fnVerifier) variableTarget(fn *funcInfo, m *modTarget, variable *types.
 	}
 	// A contract names a variable of another package only when it is
 	// exported; the state of that package covers the others (D1).
+	if home := fn.spelling().obj.Pkg(); home != nil && variable.Pkg() != home && v.isBoxedGlobal(variable) {
+		return shape{}, target{}, fmt.Errorf("%s is a struct variable of package %s whose address is taken, which a contract of another package cannot name yet; "+
+			"list the state of package %s, as // @Modifies %s", spelled, variable.Pkg().Path(), variable.Pkg().Path(), variable.Pkg().Name())
+	}
 	if home := fn.spelling().obj.Pkg(); home != nil && variable.Pkg() != home && !variable.Exported() && fn.spelling().trust == nil {
 		return shape{}, target{}, fmt.Errorf("%s is not exported; list the state of package %s, as // @Modifies %s", spelled, variable.Pkg().Path(), variable.Pkg().Name())
 	}
@@ -215,6 +222,9 @@ func (v *fnVerifier) variableTargetAny(fn *funcInfo, m *modTarget, variable *typ
 	spelled := v.spelling(variable)
 	symbolic := mem == nil
 	t := variable.Type()
+	if v.isBoxedGlobal(variable) {
+		return v.boxedTarget(fn, m, variable, args, sink, mem)
+	}
 	if !v.isAssigned(variable) {
 		if v.reassigned[variable] || variable.Pkg() == v.pass.Pkg && v.changeKinds[variable] != 0 {
 			return shape{}, target{}, errors.New(v.assignedWhy(variable))
@@ -378,6 +388,10 @@ func (v *fnVerifier) checkHiddenRequires(st *state) {
 				for _, c := range v.globalCells(variable) {
 					regions[entryRegion+c.key] = variable
 				}
+			}
+			// A kind-3 variable lies in shared regions, at its reference.
+			for _, variable := range v.boxedMet {
+				regions[boxRef(variable).Name] = variable
 			}
 			var hidden *types.Var
 			seen := map[*logic.Term]bool{}
@@ -603,10 +617,11 @@ func (v *fnVerifier) reachedTargets(call *ast.CallExpr, fn *funcInfo, sink *stat
 	}
 	vars, pkgs := v.reachedWrites(call, fn)
 	for _, variable := range vars {
-		if !v.isAssigned(variable) && (v.reassigned[variable] || !holdsMemory(variable.Type()) || isError(variable.Type())) {
+		kept := v.isAssigned(variable) || v.isBoxedGlobal(variable)
+		if !kept && (v.reassigned[variable] || !holdsMemory(variable.Type()) || isError(variable.Type())) {
 			continue
 		}
-		if _, why := v.usableFixed(variable); !v.isAssigned(variable) && why != "" {
+		if _, why := v.usableFixed(variable); !kept && why != "" {
 			continue
 		}
 		m := &modTarget{name: variable.Name(), text: v.spelling(variable)}

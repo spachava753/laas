@@ -158,6 +158,11 @@ func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
 			// of its own.
 			lo, hi := bounds(lv.cells)
 			eff.sites = append(eff.sites, site{cells: lv.cells, lo: lo, hi: hi})
+		case lv.boxGlobal != nil:
+			// A struct variable whose address is taken lies in the regions
+			// of its struct, at an allocation that no local holds.
+			lo, hi := bounds(lv.cells)
+			eff.sites = append(eff.sites, site{cells: lv.cells, lo: lo, hi: hi})
 		case lv.box != nil:
 			// Creating the variable writes nothing that existed before.
 			if id, ok := ast.Unparen(e).(*ast.Ident); ok && v.info.Defs[id] != nil {

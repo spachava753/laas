@@ -577,6 +577,9 @@ func (e *specEnv) locateAt(name string, steps []logic.Step, when logic.When, thr
 		if variable, rest, named, err := e.packageVariable(name, steps); named && err == nil && e.v.isAssigned(variable) {
 			return e.locateAssigned(variable, rest, when)
 		}
+		if variable, rest, named, err := e.packageVariable(name, steps); named && err == nil && variable.Pkg() == e.v.pass.Pkg && e.v.isBoxedGlobal(variable) {
+			return e.locateBoxed(variable, rest, when)
+		}
 		// Inside a body, old(x) is the value on entry of the function being
 		// verified, which is how its own contract sees x.
 		entry := &specEnv{v: e.v, sink: e.sink, fn: e.v.fn, args: e.v.entry, now: memory{}}

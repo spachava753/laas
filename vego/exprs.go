@@ -26,6 +26,13 @@ func (v *fnVerifier) variable(id *ast.Ident, st *state, guard []*logic.Term) val
 		return val
 	}
 	if variable != nil && variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope() {
+		if variable.Pkg() == v.pass.Pkg && v.isBoxedGlobal(variable) {
+			// A struct variable whose address is taken, at its allocation.
+			pointer := v.boxedPointer(st, variable)
+			return v.readAt(st, guard, v.unit.start(), id.Name, id.Pos(), func(sink *state, mem memory) value {
+				return v.pointedIn(sink, mem, variable.Type(), pointer)
+			})
+		}
 		if v.isAssigned(variable) {
 			return v.readGlobal(variable, id.Pos(), st, guard)
 		}
@@ -251,7 +258,7 @@ func (v *fnVerifier) inMemory(e ast.Expr) bool {
 	switch e := ast.Unparen(e).(type) {
 	case *ast.Ident:
 		variable, ok := v.info.ObjectOf(e).(*types.Var)
-		return ok && (v.boxed[variable] || v.isAssigned(variable))
+		return ok && (v.boxed[variable] || v.isAssigned(variable) || variable.Pkg() == v.pass.Pkg && v.isBoxedGlobal(variable))
 	case *ast.StarExpr:
 		_, ok := pointee(v.info.TypeOf(e.X))
 		return ok

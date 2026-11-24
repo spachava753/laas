@@ -258,6 +258,9 @@ type fnVerifier struct {
 	// assignedMet holds, by key, the assigned package-level variables the
 	// function read, which the always-fails check samples.
 	assignedMet map[string]*types.Var
+	// boxedMet holds, by key, the kind-3 variables the function met; see
+	// noteBoxed.
+	boxedMet map[string]*types.Var
 	// writesOf holds what each node of the call graph writes of the
 	// package-level variables of the package; see nodeWrites.
 	writesOf map[*callNode][]*types.Var

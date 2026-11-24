@@ -671,7 +671,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			base = passed[param]
 		}
 		// A package-level variable has the same name in the caller.
-		if t.reached || v.variableOfCells(t.cells) != nil {
+		if t.reached || v.variableOfTarget(t) != nil {
 			base = t.text
 		}
 		if t.part {
@@ -764,7 +764,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		}
 		// A variable of another package is part of the state of its
 		// package, which the caller covers by naming a package (D1).
-		if variable := v.variableOfCells(t.cells); variable != nil && variable.Pkg() != v.pass.Pkg && remedy == "" {
+		if variable := v.variableOfTarget(t); variable != nil && variable.Pkg() != v.pass.Pkg && remedy == "" {
 			what, unlisted = v.stateRemedy(variable, fn)
 		}
 		// So is what a fixed variable of another package refers to.
@@ -1008,7 +1008,12 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 	path := selection.Index()
 	_, wantPointer := recv.Type().Underlying().(*types.Pointer)
 	start, what := v.unit.start(), "the receiver of "+types.ExprString(sel)
-	if _, isStruct := t.Underlying().(*types.Struct); isStruct && v.place(sel.X).kind == placeMem {
+	// A struct that a fixed package-level variable holds, or a field of
+	// one, is a value: a method with a value receiver gets a copy of it, as
+	// s := v would (F9 of the design review of F32).
+	root := v.addressRoot(sel.X)
+	fixed := root != nil && !v.isAssigned(root) && !v.isBoxedGlobal(root)
+	if _, isStruct := t.Underlying().(*types.Struct); isStruct && !fixed && v.place(sel.X).kind == placeMem {
 		// The struct is followed by its position, and only the embedded
 		// pointers on the way are read.
 		lv := v.lvalue(sel.X, st, guard)
