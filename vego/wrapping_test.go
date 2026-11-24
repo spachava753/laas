@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -137,6 +139,11 @@ func TestErrorsAsModelled(t *testing.T) {
 			}
 			if a == b {
 				t.Fatal("two calls returned the same error")
+			}
+			// noteMadeTag states that a made error holds one of these types.
+			elem := reflect.TypeOf(a).Elem()
+			if name := "*" + strconv.Quote(elem.PkgPath()) + "." + elem.Name(); !slices.Contains(madeErrorTypes, name) {
+				t.Fatalf("the error has type %s, which madeErrorTypes does not list", name)
 			}
 			if _, has := a.(interface{ Is(error) bool }); has {
 				t.Fatal("the error has an Is method")

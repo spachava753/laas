@@ -81,6 +81,7 @@ const (
 	OpSub      // Sub(seq, lo, hi): the elements of seq from lo up to hi
 	OpIsNil    // IsNil(err): whether an error value is nil
 	OpIs       // Is(err, target): whether errors.Is(err, target) reports true
+	OpErrRef   // ErrRef(err): the reference at which the type and value an error holds are read
 	OpKey      // Key(seq): a number that identifies a sequence by its contents
 	OpPair     // Pair(ref, at): a pointer, which only ever occurs as an operand of RefEq
 	OpFuncVal  // FuncVal(ref): a function value, which only ever occurs as an operand of RefEq
@@ -299,6 +300,13 @@ func IsNil(err *Term) *Term {
 // errors; what it is for a particular error is told by the facts the
 // verifier adds.
 func Is(err, target *Term) *Term { return node(OpIs, Bool, err, target) }
+
+// ErrRef returns the reference at which the dynamic type of an error and
+// the value it holds are read, from tables that nothing writes. The logic
+// knows of it only that it is a function of the error: equal errors hold
+// the same value. Two errors may have one reference, as two interface
+// values may have one home; nothing says it is injective.
+func ErrRef(err *Term) *Term { return node(OpErrRef, Ref, err) }
 
 // Pair returns a pointer into an allocation at a position. It is not a term
 // the solver knows; RefEq takes it apart. A nil position marks a pointer
@@ -587,6 +595,8 @@ func (t *Term) write(b *strings.Builder) {
 		list("(", t.Args, "", " = nil)")
 	case OpIs:
 		list("is(", t.Args, ", ", ")")
+	case OpErrRef:
+		list("ref(", t.Args, "", ")")
 	case OpKey:
 		list("key(", t.Args, "", ")")
 	case OpPair:

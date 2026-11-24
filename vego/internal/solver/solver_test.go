@@ -219,6 +219,11 @@ func (m model) eval(t *logic.Term) int64 {
 		return truth(arg(0) == 0)
 	case logic.OpIs:
 		return truth(m.is(arg(0), arg(1)))
+	case logic.OpErrRef:
+		// The reference at which the model reads what an error holds: a
+		// function of the error that maps several errors to one
+		// reference, as nothing says it is injective.
+		return (arg(0)*arg(0) + m.relation) % 3
 	case logic.OpPred:
 		def := m.preds[t.Name]
 		saved := make([]int64, len(t.Args))
@@ -393,8 +398,12 @@ func (g *generator) errorOverWrite() *logic.Term {
 	return fact
 }
 
-// ref picks a reference: one of two named ones or nil.
+// ref picks a reference: one of two named ones, nil, or the reference at
+// which what an error holds is read.
 func (g *generator) ref() *logic.Term {
+	if g.rng.IntN(5) == 0 {
+		return logic.ErrRef(g.failure(0))
+	}
 	return []*logic.Term{logic.Const("r", logic.Ref), logic.Const("s", logic.Ref), logic.RefLit(0)}[g.rng.IntN(3)]
 }
 
@@ -1351,6 +1360,17 @@ func TestTranslation(t *testing.T) {
 		{"is is a function of its target", Options{}, []*logic.Term{logic.Eq(eb, ec), logic.Is(ea, eb)}, logic.Is(ea, ec), Proved},
 		{"is depends on its target", Options{}, []*logic.Term{logic.Is(ea, eb)}, logic.Is(ea, ec), Refuted},
 		{"is depends on the error", Options{}, []*logic.Term{logic.Is(ea, eb)}, logic.Is(ec, eb), Refuted},
+		// Guards against the reference of an error being anything but a
+		// function of it: a constant, which would make every error hold the
+		// same value; injective, which would make two errors that hold equal
+		// values differ; or the same function as is.
+		{"the reference of an error is a function of it", Options{}, []*logic.Term{logic.Eq(ea, eb)}, logic.Eq(logic.ErrRef(ea), logic.ErrRef(eb)), Proved},
+		{"two errors may have two references", Options{}, nil, logic.Eq(logic.ErrRef(ea), logic.ErrRef(eb)), Refuted},
+		{"two errors may have one reference", Options{}, []*logic.Term{logic.Not(logic.Eq(ea, eb))}, logic.Ne(logic.ErrRef(ea), logic.ErrRef(eb)), Refuted},
+		{"two references tell two errors apart", Options{}, []*logic.Term{logic.Ne(logic.ErrRef(ea), logic.ErrRef(eb))}, logic.Not(logic.Eq(ea, eb)), Proved},
+		{"the reference of nil is not known", Options{}, nil, logic.Eq(logic.ErrRef(logic.NilErr()), logic.RefLit(0)), Refuted},
+		{"a table read at the reference of an error follows the error", Options{}, []*logic.Term{logic.Eq(ea, eb), logic.Eq(logic.Select(A, logic.ErrRef(ea)), lit(3))},
+			logic.Eq(logic.Select(A, logic.ErrRef(eb)), lit(3)), Proved},
 		// Guards against a predicate written out in place capturing a
 		// variable bound around its application.
 		{"an inlined predicate does not capture", Options{Preds: map[string]*logic.PredDef{"some": {Name: "some", Params: []*logic.Term{n2}, Body: logic.Exists(k, logic.Lt(n2, k))}}},

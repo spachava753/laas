@@ -941,7 +941,7 @@ errorsvars	errorsvars.the initialiser of ErrFloatField	0	0	0
 errorsvars	errorsvars.the initialiser of ErrID	0	0	0
 errorsvars	errorsvars.the initialiser of ErrMine	0	0	0
 errorsvars	errorsvars.the initialiser of ErrMissing	0	0	0
-errorsvars	errorsvars.the initialiser of ErrNaN	0	0	0
+errorsvars	errorsvars.the initialiser of ErrNaN	2	144	0
 errorsvars	errorsvars.the initialiser of ErrNamed	0	0	0
 errorsvars	errorsvars.the initialiser of ErrNilPtr	0	0	0
 errorsvars	errorsvars.the initialiser of ErrPtr	0	0	0
@@ -950,6 +950,7 @@ errorsvars	errorsvars.the initialiser of ErrSlice2	0	0	0
 errorsvars	errorsvars.the initialiser of ErrTwo	0	0	0
 errorsvars	errorsvars.the initialiser of ErrWrapsCtx	0	0	0
 errorsvars	errorsvars.the initialiser of ErrWrapsNotExist	1	69	0
+errorsvars	math.NaN	1	70	0
 errorsvarsclient	errorsvarsclient.Aliases	4	166	0
 errorsvarsclient	errorsvarsclient.Code	2	75	0
 errorsvarsclient	errorsvarsclient.Named	2	165	0
@@ -2157,6 +2158,7 @@ guide	(*strings.Builder).WriteString	4	15141	0
 guide	(*sync.Mutex).Lock	1	1652	0
 guide	(*sync.Mutex).Unlock	1	1611	0
 guide	(*sync.Once).Do	1	1800	0
+guide	(guide.CodeError).Error	1	111	0
 guide	(guide.Flat).Price	3	1429	0
 guide	(guide.Logging).Price	7	7417	0
 guide	(guide.Rated).Price	5	3026	0
@@ -2199,7 +2201,6 @@ guide	guide.AppendZero	18	26778	0
 guide	guide.Apply	18	392492	2
 guide	guide.ApplyOnce	6	1233	0
 guide	guide.AsAny	2	709	0
-guide	guide.AsError	1	46	0
 guide	guide.AsExact	6	3758	0
 guide	guide.AsNatural	6	3565	0
 guide	guide.AsPricer	2	709	0
@@ -2219,6 +2220,8 @@ guide	guide.ByTag	30	291192	12
 guide	guide.CallsHelper	1	111	0
 guide	guide.CallsReset	2	744	0
 guide	guide.Cell	7	9786	0
+guide	guide.Check	10	4736	0
+guide	guide.CheckBare	1	111	0
 guide	guide.CheckEach	3	128	0
 guide	guide.Clamp	7	799	0
 guide	guide.Clear	6	8966	0
@@ -2667,7 +2670,6 @@ guide	slices.Max	1	3860	0
 guide	slices.Sort	1	5294	0
 guide	sort.Search	1	2237	0
 guide	strconv.Atoi	3	18026	0
-guide	strconv.Itoa	1	1310	0
 guide	strings.FieldsFunc	1	4706	0
 guide	strings.IndexFunc	1	1639	0
 guide	strings.ToUpper	1	2096	0
@@ -4699,6 +4701,7 @@ rejected	rejected.write	10	10047	0
 semantics	(*bufio.Writer).WriteByte	9	54742	0
 semantics	(*bytes.Buffer).Len	1	2333	0
 semantics	(*bytes.Buffer).WriteByte	4	12115	0
+semantics	(*semantics.Hop).Error	1	182	0
 semantics	io.Writer.Write	3	7630	0
 semantics	semantics.AfterLoop	9	2385	0
 semantics	semantics.Appends	34	42136	0
@@ -4714,6 +4717,7 @@ semantics	semantics.CutChain	92	900024	0
 semantics	semantics.EagerOr	3	1955	0
 semantics	semantics.EntryChain	62	445339	0
 semantics	semantics.Gate.Shut	3	3125	0
+semantics	semantics.HopChain	90	715097	0
 semantics	semantics.Increment	13	131165	2
 semantics	semantics.IndexChain	154	872566	0
 semantics	semantics.InfiniteLoop	10	2997	0
@@ -5452,6 +5456,38 @@ trustedwritesclient	trustedwritesclient.Same	4	1866	0
 trustedwritesclient	trustedwritesclient.State	13	21252	0
 trustedwritesclient	trustedwritesclient.StateUnlisted	5	10114	0
 trustedwritesclient	trustedwritesclient.Ticked	3	188	0
+typederrors	(*typederrors.Empty).Error	1	182	0
+typederrors	(*typederrors.PE).Error	1	182	0
+typederrors	(typederrors.Error).Error	1	111	0
+typederrors	(typederrors.FErr).Error	1	46	0
+typederrors	(typederrors.Other).Error	1	111	0
+typederrors	(typederrors.Pair).Error	1	163	0
+typederrors	(typederrors.SErr).Error	1	368	0
+typederrors	typederrors.As	1	46	0
+typederrors	typederrors.AsType	1	46	0
+typederrors	typederrors.Differ	2	1026	0
+typederrors	typederrors.DifferTypes	2	1087	0
+typederrors	typederrors.Floats	1	46	0
+typederrors	typederrors.MadeAfter	2	1180	0
+typederrors	typederrors.MadeDiffers	2	965	0
+typederrors	typederrors.NilPointerIsNotNil	7	7610	0
+typederrors	typederrors.NilPointers	3	1618	0
+typederrors	typederrors.NotContradictory	7	2851	0
+typederrors	typederrors.NotDifferent	7	2325	0
+typederrors	typederrors.NotSame	7	2930	0
+typederrors	typederrors.OtherPointer	3	3251	0
+typederrors	typederrors.Pairs	3	1694	0
+typederrors	typederrors.Ret	7	7003	0
+typederrors	typederrors.Same	3	889	0
+typederrors	typederrors.SamePointer	3	1459	0
+typederrors	typederrors.SameThroughAlias	2	479	0
+typederrors	typederrors.Strings	3	6810	0
+typederrors	typederrors.StringsDiffer	2	7923	0
+typederrors	typederrors.Switch	6	3672	0
+typederrors	typederrors.Unknown	1	46	0
+typederrors	typederrors.ZeroSize	1	46	0
+typederrors	typederrors.ZeroSizeVariable	1	46	0
+typederrors	typederrors.the initialiser of ErrEmpty	0	0	0
 typeonlyclient	typeonlyclient.Positive	1	111	0
 typeonlyclient	typeonlyclient.PositiveGood	6	856	0
 typeonlylib	typeonlylib.Clock	3	1025	0

@@ -217,6 +217,17 @@ func signatureMemoryFree(sig *types.Signature) bool {
 	return true
 }
 
+// noEntryCan says, for a function of the standard library that verified
+// code calls in a form of its own or not at all, why no trusted contract
+// for it can be true. The message for a function without a contract would
+// otherwise advise writing one.
+var noEntryCan = map[string]string{
+	"errors.As": "it stores what it finds through the pointer it is handed and runs the As and Unwrap methods of the errors it searches, " +
+		"so no trusted contract for it can be true; compare with an error variable, or use errors.Is",
+	"errors.AsType": "it runs the As and Unwrap methods of the errors it searches, so no trusted contract for it can be true; " +
+		"compare with an error variable, or use errors.Is",
+}
+
 // contractFor returns the contract a call is checked against, after making
 // sure that the callee is one vego can call and that its contract is usable.
 //
@@ -245,6 +256,11 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func, st *sta
 		v.unsupported(call.Pos(), fmt.Sprintf("it calls %s, which has no shipped entry: it reads through the io.Reader it is handed, which it "+
 			"type-asserts, and grows the buffer by what that reader returns; read with Read in a loop and write what it returns with Write",
 			v.calleeName(callee)))
+	}
+	if why := noEntryCan[callee.FullName()]; fn == nil && why != "" {
+		// A contract a user might add could not be true; say why, and
+		// what to write instead.
+		v.unsupported(call.Pos(), fmt.Sprintf("it calls %s, which is not supported yet: %s", v.calleeName(callee), why))
 	}
 	if fn == nil {
 		v.unsupported(call.Pos(), fmt.Sprintf(

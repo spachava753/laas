@@ -77,6 +77,8 @@ type encoder struct {
 	scopes   []map[string]string
 	division bool
 	names    int
+	// errorRefs says that error-ref is declared.
+	errorRefs bool
 	// universal holds the constants that stand for bound variables of the
 	// quantifier around the whole problem, by name.
 	universal map[string]string
@@ -644,6 +646,17 @@ func (e *encoder) node(b *strings.Builder, t *logic.Term) {
 	case logic.OpIs:
 		e.sort(logic.Err)
 		apply("error-is", t.Args...)
+	case logic.OpErrRef:
+		// The reference at which the type and the value an error holds
+		// are read is a function of the error and nothing more. Few
+		// problems read it, so it is declared only in those that do, and
+		// a problem without typed errors is the text it was before F33.
+		e.sort(logic.Err)
+		if !e.errorRefs {
+			e.errorRefs = true
+			e.out.WriteString("(declare-fun error-ref (Err) Int)\n")
+		}
+		apply("error-ref", t.Args...)
 	case logic.OpKey:
 		e.key(b, t)
 	case logic.OpIte:
@@ -783,6 +796,8 @@ func checkSorts(t *logic.Term) {
 		ok = arity(1) && t.Sort == logic.Bool && t.Args[0].Sort == logic.Err
 	case logic.OpIs:
 		ok = arity(2) && t.Sort == logic.Bool && t.Args[0].Sort == logic.Err && t.Args[1].Sort == logic.Err
+	case logic.OpErrRef:
+		ok = arity(1) && t.Sort == logic.Ref && t.Args[0].Sort == logic.Err
 	case logic.OpKey:
 		ok = arity(1) && numeric(t) && t.Args[0].Sort.IsSeq()
 	case logic.OpIte:

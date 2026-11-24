@@ -107,7 +107,7 @@ func (pv *pkgVerifier) findSentinels() {
 		default:
 			info := sentinelInfo{Kind: stableOpaque}
 			if d.value != nil {
-				info.NonNil, info.Comparable = concreteError(pv.info.Types[d.value], d.index)
+				info.NonNil, info.Comparable = concreteError(pv.pass.TypesSizes, pv.info.Types[d.value], d.index)
 			}
 			pv.candidates[variable] = info
 		}
@@ -319,7 +319,7 @@ func (pv *pkgVerifier) namedErrorVariable(e ast.Expr) *types.Var {
 // that, == on values of the type is identity and cannot panic, comparing
 // the variable with any error cannot panic either. index is the result of a
 // call that gives several, or -1.
-func concreteError(tv types.TypeAndValue, index int) (nonNil, comparable bool) {
+func concreteError(sizes types.Sizes, tv types.TypeAndValue, index int) (nonNil, comparable bool) {
 	t := tv.Type
 	if tuple, ok := t.(*types.Tuple); ok {
 		if index < 0 || index >= tuple.Len() {
@@ -335,36 +335,7 @@ func concreteError(tv types.TypeAndValue, index int) (nonNil, comparable bool) {
 	if basic, ok := t.(*types.Basic); ok && basic.Kind() == types.UntypedNil {
 		return false, false
 	}
-	return true, identityComparable(t, map[types.Type]bool{})
-}
-
-// identityComparable reports whether == on two values of a type cannot panic
-// and holds exactly when the values are the same: the type is a pointer,
-// integer, string, or boolean type, or an array or struct type made only of
-// these. An interface may hold an uncomparable value, and for a float or
-// complex number == is not identity: NaN differs from itself, and 0 equals
-// -0.
-func identityComparable(t types.Type, seen map[types.Type]bool) bool {
-	if seen[t] {
-		return true
-	}
-	seen[t] = true
-	switch u := t.Underlying().(type) {
-	case *types.Basic:
-		return u.Info()&(types.IsFloat|types.IsComplex) == 0 && u.Kind() != types.UntypedNil
-	case *types.Pointer:
-		return true
-	case *types.Array:
-		return identityComparable(u.Elem(), seen)
-	case *types.Struct:
-		for field := range u.Fields() {
-			if !identityComparable(field.Type(), seen) {
-				return false
-			}
-		}
-		return true
-	}
-	return false
+	return true, identityEqIn(sizes, t, map[types.Type]bool{})
 }
 
 // hiddenInitCode looks for code that runs while the package-level variables

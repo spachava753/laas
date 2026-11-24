@@ -187,11 +187,11 @@ func (v *fnVerifier) evalAs(e ast.Expr, want types.Type, st *state, guard []*log
 		v.unsupported(e.Pos(), fmt.Sprintf("values of type %s are not supported%s", want, unsupportedHint(want)))
 	}
 	if !v.isNil(e) {
-		// An error value is only ever an error, nil, or the result of a
-		// call. Converting anything else to an error would hide a value
-		// behind an interface whose methods are not verified.
-		if isError(want) && !isError(v.info.TypeOf(e)) {
-			v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to an error is not supported", v.info.TypeOf(e)))
+		// A value of a concrete type converted to an error is an error
+		// that holds it (dyntypes.go). Its origin is not known: what its
+		// methods do is decided where the error is used.
+		if from := v.info.TypeOf(e); isError(want) && !isError(from) {
+			return value{v.typedError(e, from, v.evalConverted(e, want, st, guard), st, guard)}
 		}
 		return v.eval(e, st, guard)
 	}

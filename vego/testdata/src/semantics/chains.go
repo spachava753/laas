@@ -1083,3 +1083,114 @@ func BufferLengthChain(b *bytes.Buffer) (n int) {
 	// @Assert |b| = 15
 	return b.Len()
 }
+
+// Hop is an error held through a pointer.
+type Hop struct{ n int }
+
+// @Ensures True
+func (h *Hop) Error() (s string) { return "hop" }
+
+// HopChain converts thirty pointers read from a slice to error, and
+// compares each error with the one before: a conversion reads the
+// allocation of its pointer twice, for the position of a nil pointer
+// (goLeaves), and names it first. In this step no conversion is handed
+// what another made, so the chain where a conversion's result is read
+// again comes with type assertions.
+//
+// @Requires |ps| >= 30
+// @Ensures True
+func HopChain(ps []*Hop) (same bool) {
+	var e, last error
+	same = true
+	e = ps[0]
+	same = same && e != last
+	last = e
+	e = ps[1]
+	same = same && e != last
+	last = e
+	e = ps[2]
+	same = same && e != last
+	last = e
+	e = ps[3]
+	same = same && e != last
+	last = e
+	e = ps[4]
+	same = same && e != last
+	last = e
+	e = ps[5]
+	same = same && e != last
+	last = e
+	e = ps[6]
+	same = same && e != last
+	last = e
+	e = ps[7]
+	same = same && e != last
+	last = e
+	e = ps[8]
+	same = same && e != last
+	last = e
+	e = ps[9]
+	same = same && e != last
+	last = e
+	e = ps[10]
+	same = same && e != last
+	last = e
+	e = ps[11]
+	same = same && e != last
+	last = e
+	e = ps[12]
+	same = same && e != last
+	last = e
+	e = ps[13]
+	same = same && e != last
+	last = e
+	e = ps[14]
+	same = same && e != last
+	last = e
+	e = ps[15]
+	same = same && e != last
+	last = e
+	e = ps[16]
+	same = same && e != last
+	last = e
+	e = ps[17]
+	same = same && e != last
+	last = e
+	e = ps[18]
+	same = same && e != last
+	last = e
+	e = ps[19]
+	same = same && e != last
+	last = e
+	e = ps[20]
+	same = same && e != last
+	last = e
+	e = ps[21]
+	same = same && e != last
+	last = e
+	e = ps[22]
+	same = same && e != last
+	last = e
+	e = ps[23]
+	same = same && e != last
+	last = e
+	e = ps[24]
+	same = same && e != last
+	last = e
+	e = ps[25]
+	same = same && e != last
+	last = e
+	e = ps[26]
+	same = same && e != last
+	last = e
+	e = ps[27]
+	same = same && e != last
+	last = e
+	e = ps[28]
+	same = same && e != last
+	last = e
+	e = ps[29]
+	same = same && e != last
+	last = e
+	return same
+}

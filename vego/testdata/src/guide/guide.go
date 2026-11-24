@@ -440,7 +440,7 @@ func AtEnd(s string, i int) (end bool) {
 //
 // @Ensures True
 func SameError(a, b error) (same bool) {
-	return a == b // want `vego: cannot verify SameError: comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, an error made by errors.New or fmt.Errorf or vouched for by a trusted contract, or a package-level error variable that holds such an error or a pointer, integer, string, or boolean, or an array or struct of these`
+	return a == b // want `vego: cannot verify SameError: comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, an error made by errors.New or fmt.Errorf or vouched for by a trusted contract, a package-level error variable that holds such an error or a pointer, integer, string, or boolean, or an array or struct of these, or an error converted here from a value of such a type; a pointer to a value of size zero does not count, since two of them may or may not be equal`
 }
 
 // PeekLabelled wraps the error of Peek, so that errors.Is still finds
@@ -1146,15 +1146,34 @@ func ClearCountedKept(b *Buffer) (result []int) {
 	return count
 }
 
-// CodeError is an error type of its own, which verified code cannot
-// convert to error.
+// CodeError is an error type of its own, which verified code converts to
+// error.
 type CodeError struct{ code int }
 
-func (e CodeError) Error() string { return "code " + strconv.Itoa(e.code) }
+// @Ensures True
+func (e CodeError) Error() (s string) { return "bad code" }
 
-// AsError returns a CodeError as an error.
+// Check returns a CodeError as an error.
 //
-// @Ensures err != nil
-func AsError() (err error) {
-	return CodeError{code: 1} // want `vego: cannot verify AsError: converting a guide.CodeError to an error is not supported`
+// @Ensures err = nil <-> code = 0
+func Check(code int) (err error) {
+	if code != 0 {
+		return CodeError{code: code}
+	}
+	return nil
+}
+
+// BareError has an Error method without a contract.
+type BareError struct{ code int }
+
+func (e BareError) Error() string { return "bad code" }
+
+// CheckBare returns a BareError as an error.
+//
+// @Ensures err = nil <-> code = 0
+func CheckBare(code int) (err error) {
+	if code != 0 {
+		return BareError{code: code} // want `vego: cannot verify CheckBare: converting a BareError to an error is not supported: BareError.Error has no contract; code that is not verified may run any method of an error at any time, so each method of a type converted to error must have a contract that modifies nothing and has no Requires`
+	}
+	return nil
 }

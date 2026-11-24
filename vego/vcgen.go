@@ -247,6 +247,11 @@ type fnVerifier struct {
 	// opaqueErrors holds the opaque error variables met, and madeHere the
 	// errors made in the body; see noteOpaque.
 	opaqueErrors, madeHere []*logic.Term
+	// typedMet says that the function met an error a conversion of a
+	// value of a concrete type made, and typedTypes holds the types of
+	// those on which == is identity, in the order met (dyntypes.go).
+	typedMet   bool
+	typedTypes []types.Type
 	// madeFixed holds the references of the fixed variables met whose
 	// initialisers made an allocation with a size, which are apart, and
 	// fixedMet the fixed variables met; see fixedValue.
@@ -1102,6 +1107,10 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 				tagType, caseType := v.info.TypeOf(s.Tag), v.info.TypeOf(e)
 				switch {
 				case v.isNil(e) || types.IsInterface(tagType) == types.IsInterface(caseType):
+				case isError(caseType) && !isError(tagType):
+					// Go would convert the tag for this case alone.
+					v.unsupported(e.Pos(), fmt.Sprintf("a switch on a value of type %s with a case that is an error is not supported; "+
+						"convert the tag to error, as in switch error(x)", tagType))
 				case isError(tagType) || isError(caseType):
 					v.bothErrors(s.Tag, e, e.Pos())
 				default:
@@ -1136,7 +1145,7 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 				case v.isNil(e) && tag.Sort == logic.Ref:
 					value = logic.Eq(tag, logic.RefLit(0))
 				case tag.Sort == logic.Err:
-					value = v.errorsEqual(s.Tag, e, tag, v.expr(e, st, guard), e.Pos())
+					value = v.errorsEqual(s.Tag, e, tag, v.errorOperand(e, st, guard), e.Pos(), st, guard)
 				case isIface(v.info.TypeOf(s.Tag)) || isIface(v.info.TypeOf(e)):
 					v.unsupported(e.Pos(), ifaceCompared)
 				default:

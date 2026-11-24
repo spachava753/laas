@@ -180,7 +180,7 @@ func (codeError) Error() string { return "code" }
 // @Ensures True
 func SwitchOnErrorCase(err error) (n int) {
 	switch err {
-	case codeError(1): // want `cannot verify SwitchOnErrorCase: comparing an error with a value of type interfaces.codeError is not supported`
+	case codeError(1): // want `cannot verify SwitchOnErrorCase: converting a codeError to an error is not supported: codeError.Error has no contract`
 		return 1
 	}
 	return 0
@@ -193,7 +193,7 @@ func ComparedWithConcrete(p Pricer, f Flat) (same bool) {
 
 // @Ensures True
 func ErrorComparedWithConcrete(err error) (same bool) {
-	return err == codeError(2) // want `cannot verify ErrorComparedWithConcrete: comparing an error with a value of type interfaces.codeError is not supported`
+	return err == codeError(2) // want `cannot verify ErrorComparedWithConcrete: converting a codeError to an error is not supported: codeError.Error has no contract`
 }
 
 func two() (f Flat, t *Table) { return 0, nil }

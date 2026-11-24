@@ -1,0 +1,494 @@
+package vego
+
+import (
+	"fmt"
+	"go/ast"
+	"go/types"
+	"math/big"
+	"slices"
+	"strconv"
+	"strings"
+
+	"github.com/spachava753/laas/vego/internal/logic"
+)
+
+// Dynamic types (F33, see Dynamic types and typed errors in ROADMAP.md).
+//
+// An error is a Go error value, up to Go's == where == is identity of what
+// it holds: two errors are equal in the logic when they are the same error,
+// and for a dynamic type on which == is identity (identityEq) two errors
+// that hold equal values of it are the same error. For any other dynamic
+// type an error stands for one conversion, which its copies share.
+//
+// What an error holds is read at its reference, ErrRef(e), from tables
+// that nothing writes, as the home of an interface value is read:
+//
+//   - dyntype at the reference is the tag of the dynamic type, a number
+//     made from a name that two types share exactly when types.Identical
+//     holds of them (canonicalName);
+//   - "held T.path" at the reference is one leaf of the value of type T
+//     that the error holds, meaningful when the tag is T's.
+//
+// Invariants (TI and HV of the roadmap): the tag of a non-nil error is the
+// tag of its dynamic type, or unknown; no fact gives a known tag but at a
+// conversion. The held value of an error read under its tag is the value
+// converted, which never changes, since Go copies it into the interface.
+// The leaves of a pointer are read as Go has them: a nil pointer has
+// position zero, whatever position the logic gave it (goLeaves).
+
+// dynTypes is the table of the tags of dynamic types, read at a reference.
+var dynTypes = logic.Const("dyntype", logic.IntSeq)
+
+// dynTag returns the tag of the dynamic type of what is read at a
+// reference.
+func dynTag(ref *logic.Term) *logic.Term {
+	return logic.Select(dynTypes, ref)
+}
+
+// errorTag returns the tag of the dynamic type of an error.
+func errorTag(err *logic.Term) *logic.Term {
+	return dynTag(logic.ErrRef(err))
+}
+
+// canonicalName returns a name of a type that two types share exactly when
+// types.Identical holds of them, and false for a type that has no such
+// name here: one declared inside a function, one that holds such a type, a
+// type parameter, and an untyped type. A defined type is named by the path
+// of its package and its name, with its type arguments; an alias is the
+// type it stands for; byte is uint8 and rune int32; the rest is written
+// out, with the package of each unexported field or method name and the
+// tag of each field, which types.Identical compares. Paths and tags are
+// quoted, so no two types share a name.
+func canonicalName(t types.Type) (string, bool) {
+	var b strings.Builder
+	ok := writeCanonical(&b, t, map[types.Type]bool{})
+	return b.String(), ok
+}
+
+// writeCanonical writes the canonical name of a type to b and reports
+// whether it has one. Each kind of type is written by a case of its own:
+// a defined type by its package and name, with type arguments; a basic
+// type by the name of its kind; pointers, slices, arrays, maps, channels,
+// and signatures from their parts; a struct by its fields, each with its
+// name qualified by its package when unexported, its type, and its tag;
+// and an interface by its methods sorted by their unique names. A type
+// declared inside a function, a generic type without arguments, an
+// untyped or invalid type, and a constraint have no name.
+func writeCanonical(b *strings.Builder, t types.Type, seen map[types.Type]bool) bool {
+	t = types.Unalias(t)
+	qualified := func(pkg *types.Package, name string, exported bool) {
+		if !exported && pkg != nil {
+			b.WriteString(strconv.Quote(pkg.Path()))
+			b.WriteByte('.')
+		}
+		b.WriteString(name)
+	}
+	tuple := func(vars *types.Tuple, variadic bool) bool {
+		b.WriteByte('(')
+		for i := range vars.Len() {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			if variadic && i == vars.Len()-1 {
+				b.WriteString("...")
+			}
+			if !writeCanonical(b, vars.At(i).Type(), seen) {
+				return false
+			}
+		}
+		b.WriteByte(')')
+		return true
+	}
+	switch t := t.(type) {
+	case *types.Named:
+		obj := t.Obj()
+		if obj.Pkg() == nil {
+			// error and comparable.
+			b.WriteString(obj.Name())
+			return true
+		}
+		if obj.Pkg().Scope().Lookup(obj.Name()) != obj {
+			// Declared inside a function: two such declarations may have
+			// one name.
+			return false
+		}
+		b.WriteString(strconv.Quote(obj.Pkg().Path()))
+		b.WriteByte('.')
+		b.WriteString(obj.Name())
+		if args := t.TypeArgs(); args != nil {
+			b.WriteByte('[')
+			for i := range args.Len() {
+				if i > 0 {
+					b.WriteByte(',')
+				}
+				if !writeCanonical(b, args.At(i), seen) {
+					return false
+				}
+			}
+			b.WriteByte(']')
+		} else if t.TypeParams() != nil {
+			return false
+		}
+		return true
+	case *types.Basic:
+		if t.Info()&types.IsUntyped != 0 || t.Kind() == types.Invalid {
+			return false
+		}
+		// The name of the kind, so that byte is uint8.
+		b.WriteString(types.Typ[t.Kind()].Name())
+		return true
+	case *types.Pointer:
+		b.WriteByte('*')
+		return writeCanonical(b, t.Elem(), seen)
+	case *types.Slice:
+		b.WriteString("[]")
+		return writeCanonical(b, t.Elem(), seen)
+	case *types.Array:
+		fmt.Fprintf(b, "[%d]", t.Len())
+		return writeCanonical(b, t.Elem(), seen)
+	case *types.Map:
+		b.WriteString("map[")
+		if !writeCanonical(b, t.Key(), seen) {
+			return false
+		}
+		b.WriteByte(']')
+		return writeCanonical(b, t.Elem(), seen)
+	case *types.Chan:
+		fmt.Fprintf(b, "chan%d ", t.Dir())
+		return writeCanonical(b, t.Elem(), seen)
+	case *types.Signature:
+		if t.TypeParams() != nil || t.RecvTypeParams() != nil {
+			return false
+		}
+		b.WriteString("func")
+		if !tuple(t.Params(), t.Variadic()) {
+			return false
+		}
+		return tuple(t.Results(), false)
+	case *types.Struct:
+		b.WriteString("struct{")
+		for i := range t.NumFields() {
+			field := t.Field(i)
+			if field.Embedded() {
+				b.WriteByte('!')
+			}
+			qualified(field.Pkg(), field.Name(), field.Exported())
+			b.WriteByte(' ')
+			if !writeCanonical(b, field.Type(), seen) {
+				return false
+			}
+			b.WriteByte(' ')
+			b.WriteString(strconv.Quote(t.Tag(i)))
+			b.WriteByte(';')
+		}
+		b.WriteByte('}')
+		return true
+	case *types.Interface:
+		if !t.IsMethodSet() {
+			return false
+		}
+		// The methods of an interface, embedded ones included, sorted by
+		// their unique names.
+		methods := make([]*types.Func, t.NumMethods())
+		for i := range methods {
+			methods[i] = t.Method(i)
+		}
+		slices.SortFunc(methods, func(a, b *types.Func) int { return strings.Compare(a.Id(), b.Id()) })
+		b.WriteString("interface{")
+		for _, method := range methods {
+			qualified(method.Pkg(), method.Name(), method.Exported())
+			sig := method.Type().(*types.Signature)
+			if !tuple(sig.Params(), sig.Variadic()) || !tuple(sig.Results(), false) {
+				return false
+			}
+			b.WriteByte(';')
+		}
+		b.WriteByte('}')
+		return true
+	}
+	return false
+}
+
+// typeTag returns the tag of a dynamic type: the number whose digits in
+// base 256 are the bytes of its canonical name, which holds no zero byte,
+// so that two names give two numbers. It is not zero, which no dynamic
+// type has: zero is the tag nil has in the intended model.
+func typeTag(t types.Type) (*logic.Term, bool) {
+	name, ok := canonicalName(t)
+	if !ok {
+		return nil, false
+	}
+	return logic.BigLit(new(big.Int).SetBytes([]byte(name))), true
+}
+
+// The types of the errors errors.New and fmt.Errorf return, as their
+// packages declare them: what TestErrorsAsModelled checks of the running
+// toolchain, and what noteMadeTag states of a made error.
+var madeErrorTypes = []string{`*"errors".errorString`, `*"fmt".wrapError`, `*"fmt".wrapErrors`}
+
+// heldTable returns the table of one leaf of the values of a dynamic type,
+// read at a reference.
+func heldTable(name string, index int, lf leaf) *logic.Term {
+	return logic.Const(fmt.Sprintf("held %s %d%s", name, index, lf.path), logic.SeqOf(lf.sort))
+}
+
+// goLeaves returns the leaves of a value as Go has them: the position of
+// a nil pointer is zero, so that two nil pointers of one type are one
+// value, as Go's == says (F2 of the design review). The allocation of a
+// pointer is read twice there, so one that is not a name or a number is
+// named first, which keeps a chain of conversions from doubling.
+func (v *fnVerifier) goLeaves(st *state, layout []leaf, val value) value {
+	out := slices.Clone(val)
+	for i, lf := range layout {
+		if lf.part == partAt && i > 0 && layout[i-1].part == partPtr {
+			ptr := out[i-1]
+			if ptr.Op != logic.OpConst && ptr.Op != logic.OpIntLit {
+				named := v.fresh("pointer", logic.Ref)
+				st.assume(logic.Eq(named, ptr))
+				ptr = named
+				out[i-1] = named
+			}
+			out[i] = logic.Ite(logic.Eq(ptr, logic.RefLit(0)), logic.IntLit(0), val[i])
+		}
+	}
+	return out
+}
+
+// identityEq reports whether Go's == on two values of a type cannot panic
+// and holds exactly when the values are the same: integers, strings,
+// booleans, pointers to values that do not have size zero, and arrays and
+// structs of these. Floats are left out (NaN differs from itself, 0 equals
+// -0), and so are pointers to values of size zero, which Go may or may not
+// give one address (F1 of the design review). Interfaces, slices, maps,
+// and functions are not comparable or may panic. It is the one rule for
+// where a comparison of errors in code is equality in the logic: an opaque
+// error variable is comparable by it, and so is an error a conversion made.
+func (pv *pkgVerifier) identityEq(t types.Type) bool {
+	return identityEqIn(pv.pass.TypesSizes, t, map[types.Type]bool{})
+}
+
+func identityEqIn(sizes types.Sizes, t types.Type, seen map[types.Type]bool) bool {
+	if seen[t] {
+		return true
+	}
+	seen[t] = true
+	switch u := t.Underlying().(type) {
+	case *types.Basic:
+		return u.Info()&(types.IsInteger|types.IsString|types.IsBoolean) != 0 && u.Info()&types.IsUntyped == 0
+	case *types.Pointer:
+		return sizes.Sizeof(u.Elem()) != 0
+	case *types.Array:
+		return identityEqIn(sizes, u.Elem(), seen)
+	case *types.Struct:
+		for field := range u.Fields() {
+			if !identityEqIn(sizes, field.Type(), seen) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// capturesValue reports whether the leaves of a layout are the whole value
+// as == compares it: no field is hidden, and no state is part of it.
+func capturesValue(layout []leaf) bool {
+	return !slices.ContainsFunc(layout, func(lf leaf) bool { return lf.part == partHidden || lf.part == partState })
+}
+
+// typedError returns the error that converting a value of a concrete type
+// gives, and states what it holds. For a type on which == is identity and
+// whose value is one integer or a pointer, the error is a term of the
+// value (canonical), so two conversions of equal values are one error
+// with no fact needed; for any other type it is a new error. Either way it
+// is not nil, its tag is the type's, and it holds the value.
+func (v *fnVerifier) typedError(e ast.Expr, from types.Type, val value, st *state, guard []*logic.Term) *logic.Term {
+	layout, ok := layoutOf(from)
+	if !ok {
+		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to an error is not supported: values of its type are not modelled", from))
+	}
+	v.checkedMethods(e, from, val, st, guard)
+	leaves := v.goLeaves(st, layout, val)
+	name, named := canonicalName(from)
+	identity := v.identityEq(from) && capturesValue(layout)
+	var err *logic.Term
+	switch {
+	case named && identity && len(layout) == 1 && layout[0].sort == logic.Int:
+		err = logic.Select(logic.Const("mkerr "+name, logic.SeqOf(logic.Err)), leaves[0])
+	case named && identity && len(layout) == 2 && layout[0].part == partPtr:
+		err = logic.Select(logic.Select(logic.Const("mkerr "+name, logic.SeqOf(logic.SeqOf(logic.Err))), leaves[0]), leaves[1])
+	default:
+		err = v.fresh("typed error", logic.Err)
+	}
+	// The function meets an error a conversion made: every made error met
+	// so far, and every one met later (noteError), holds a type of package
+	// errors or fmt, so that such errors are told apart from errors of the
+	// project's types. A function that meets none states nothing.
+	v.typedMet = true
+	for _, made := range v.distinct {
+		v.noteMadeTag(st, made)
+	}
+	v.fact(st, logic.Not(logic.IsNil(err)))
+	if !named {
+		// A type with no canonical name has no known tag: it is a type
+		// declared in a function, which nothing can tell apart from
+		// another.
+		return err
+	}
+	tag, _ := typeTag(from)
+	ref := logic.ErrRef(err)
+	v.fact(st, logic.Eq(dynTag(ref), tag))
+	for i, lf := range layout {
+		v.fact(st, eqLeaf(logic.Select(heldTable(name, i, lf), ref), leaves[i]))
+	}
+	if identity && !slices.ContainsFunc(v.typedTypes, func(t types.Type) bool { return types.Identical(t, from) }) {
+		v.typedTypes = append(v.typedTypes, from)
+	}
+	return err
+}
+
+// eqLeaf says that two leaves of one sort are equal: a string by its
+// bytes, through the number Key gives a sequence, anything else by =.
+func eqLeaf(a, b *logic.Term) *logic.Term {
+	if a.Sort.IsSeq() {
+		return logic.Eq(logic.Key(a), logic.Key(b))
+	}
+	if a.Sort == logic.Bool {
+		return logic.Iff(a, b)
+	}
+	return logic.Eq(a, b)
+}
+
+// noteMadeTag states once in a state that a made error holds one of the
+// types of package errors and fmt that errors.New and fmt.Errorf return.
+func (v *fnVerifier) noteMadeTag(st *state, made *logic.Term) {
+	if st == nil || !v.typedMet {
+		return
+	}
+	if note := "made tag " + made.Name; !st.noted[note] {
+		st.noted[note] = true
+		var options []*logic.Term
+		for _, name := range madeErrorTypes {
+			options = append(options, logic.Eq(errorTag(made), logic.BigLit(new(big.Int).SetBytes([]byte(name)))))
+		}
+		v.fact(st, logic.Or(options...))
+	}
+}
+
+// sameTyped states, for two errors that code compares, that they are one
+// error when they hold equal values of a type met in a conversion on which
+// == is identity: Go's == on them.
+func (v *fnVerifier) sameTyped(st *state, a, b *logic.Term) {
+	if a == b {
+		return
+	}
+	for _, t := range v.typedTypes {
+		name, _ := canonicalName(t)
+		tag, _ := typeTag(t)
+		layout, _ := layoutOf(t)
+		ra, rb := logic.ErrRef(a), logic.ErrRef(b)
+		same := []*logic.Term{
+			logic.Not(logic.IsNil(a)), logic.Not(logic.IsNil(b)),
+			logic.Eq(dynTag(ra), tag), logic.Eq(dynTag(rb), tag),
+		}
+		for i, lf := range layout {
+			same = append(same, eqLeaf(logic.Select(heldTable(name, i, lf), ra), logic.Select(heldTable(name, i, lf), rb)))
+		}
+		v.fact(st, logic.Implies(logic.And(same...), logic.Eq(a, b)))
+	}
+}
+
+// checkedMethods refuses a conversion to error of a value whose methods
+// may do what verified code cannot account for. An error can reach code
+// that is not verified, which may run any method of what it holds at any
+// time: a trusted function that runs an error, fmt, or a caller that type-
+// asserts it. So every method of the type's method set must have a usable
+// contract that modifies nothing, asks nothing, names no variable of a
+// group with an invariant, makes no call through a value, and is declared
+// on the type itself; the type has no invariant; and nothing the type
+// reaches through exported fields has methods, which reflection reaches. A
+// value receiver reached through the converted pointer is read when the
+// method runs, so the pointer is proved not nil here, where it is fixed.
+// (S1 of F33; values.BoxedImplicitly is what this keeps out.)
+func (v *fnVerifier) checkedMethods(e ast.Expr, from types.Type, val value, st *state, guard []*logic.Term) {
+	shown := types.TypeString(from, types.RelativeTo(v.pass.Pkg))
+	refuse := func(why string) {
+		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to an error is not supported: %s; code that is not verified may run any method "+
+			"of an error at any time, so each method of a type converted to error must have a contract that modifies nothing and has no Requires", shown, why))
+	}
+	if set, _ := v.invariantsOf(from); set != nil {
+		refuse(fmt.Sprintf("%s has an invariant, which a method run at any time could not assume", shown))
+	}
+	_, fromPointer := from.Underlying().(*types.Pointer)
+	methods := types.NewMethodSet(from)
+	for selection := range methods.Methods() {
+		method := selection.Obj().(*types.Func)
+		name := methodOf(method.Type().(*types.Signature).Recv().Type(), method, v.pass.Pkg)
+		if len(selection.Index()) > 1 {
+			refuse(fmt.Sprintf("its method %s is promoted from an embedded field", method.Name()))
+		}
+		fn := v.contractOf(method)
+		if fn == nil {
+			refuse(fmt.Sprintf("%s has no contract", name))
+		}
+		view := v.viewOf(fn)
+		switch {
+		case view.cut || len(view.problems) > 0:
+			refuse(fmt.Sprintf("the contract of %s cannot be used", name))
+		case len(fn.modifies) > 0:
+			refuse(fmt.Sprintf("%s modifies memory", name))
+		case len(fn.requires) > 0:
+			refuse(fmt.Sprintf("%s has a Requires clause", name))
+		case v.pkgVerifier.mayCallValues(method):
+			refuse(fmt.Sprintf("%s may call through a function value or an interface value", name))
+		case len(v.pkgVerifier.groupsTouched(fn)) > 0:
+			refuse(fmt.Sprintf("%s names a variable of a group with an invariant", name))
+		}
+		if _, recvPointer := method.Type().(*types.Signature).Recv().Type().(*types.Pointer); fromPointer && !recvPointer {
+			done := v.at(e.Pos())
+			v.check(st, guard, logic.Ne(val[0], logic.RefLit(0)), e.Pos(),
+				"%s has a value receiver, and the pointer converted to error may be nil, so the method would panic when it runs", name)
+			done()
+		}
+	}
+	if reached := methodsReached(from, map[types.Type]bool{}, true); reached != nil {
+		refuse(fmt.Sprintf("it holds through an exported field a value of type %s, which has methods", types.TypeString(reached, types.RelativeTo(v.pass.Pkg))))
+	}
+}
+
+// methodsReached returns a type with methods that reflection reaches from a
+// value of type t through exported fields, pointers, slices, and maps, or
+// nil. The type itself is not counted when top is set.
+func methodsReached(t types.Type, seen map[types.Type]bool, top bool) types.Type {
+	if seen[t] {
+		return nil
+	}
+	seen[t] = true
+	if !top && (types.NewMethodSet(t).Len() > 0 || types.NewMethodSet(types.NewPointer(t)).Len() > 0) {
+		if _, isPointer := t.Underlying().(*types.Pointer); !isPointer {
+			return t
+		}
+	}
+	switch u := t.Underlying().(type) {
+	case *types.Pointer:
+		return methodsReached(u.Elem(), seen, top)
+	case *types.Slice:
+		return methodsReached(u.Elem(), seen, false)
+	case *types.Array:
+		return methodsReached(u.Elem(), seen, false)
+	case *types.Map:
+		if found := methodsReached(u.Key(), seen, false); found != nil {
+			return found
+		}
+		return methodsReached(u.Elem(), seen, false)
+	case *types.Struct:
+		for field := range u.Fields() {
+			if field.Exported() {
+				if found := methodsReached(field.Type(), seen, false); found != nil {
+					return found
+				}
+			}
+		}
+	}
+	return nil
+}

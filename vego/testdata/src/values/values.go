@@ -344,7 +344,7 @@ func DescribeWrongly(err error) (code int) {
 // @Ensures True
 func DescribeOther(err, other error) (code int) {
 	switch err {
-	case other: // want `vego: cannot verify DescribeOther: comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, an error made by errors.New or fmt.Errorf or vouched for by a trusted contract, or a package-level error variable that holds such an error or a pointer, integer, string, or boolean, or an array or struct of these`
+	case other: // want `vego: cannot verify DescribeOther: comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, an error made by errors.New or fmt.Errorf or vouched for by a trusted contract, a package-level error variable that holds such an error or a pointer, integer, string, or boolean, or an array or struct of these, or an error converted here from a value of such a type; a pointer to a value of size zero does not count, since two of them may or may not be equal`
 		return 1
 	}
 	return 2
@@ -467,7 +467,7 @@ func BoxedExplicitly(a failing) (result int) {
 // @Requires |a| = 1 And a[0] = 0
 // @Ensures result = 0
 func BoxedImplicitly(a failing) (result int) {
-	consume(a) // want `vego:\ cannot\ verify\ BoxedImplicitly:\ converting\ a\ values\.failing\ to\ an\ error\ is\ not\ supported`
+	consume(a) // want `vego: cannot verify BoxedImplicitly: converting a failing to an error is not supported: failing.Error has no contract; code that is not verified may run any method of an error at any time`
 	return a[0]
 }
 
@@ -815,7 +815,7 @@ func SameFloatCount(A []float64) (result []float64) {
 // @Requires t != nil
 // @Ensures True
 func PtrCmp(t *ptrError, err error) (b bool) {
-	return t == err // want `vego: cannot verify PtrCmp: comparing an error with a value of type \*values.ptrError is not supported`
+	return t == err // want `vego: cannot verify PtrCmp: converting a \*ptrError to an error is not supported: \(\*ptrError\).Error has no contract`
 }
 
 type ptrError struct{ code int }

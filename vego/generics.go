@@ -435,6 +435,9 @@ func (v *fnVerifier) checkGenericCallee(call *ast.CallExpr, callee *types.Func, 
 
 	}
 	entry := v.pkgVerifier.entryFor(origin.FullName())
+	if why := noEntryCan[origin.FullName()]; entry == nil && why != "" {
+		v.unsupported(call.Pos(), fmt.Sprintf("it calls %s, which is not supported yet: %s", name, why))
+	}
 	if entry == nil {
 		v.unsupported(call.Pos(), fmt.Sprintf("it calls %s, a generic function, which has no trusted contract; generic functions cannot be verified yet, "+
 			"so a call of one needs a trusted contract: %s", name, strings.TrimPrefix(v.addEntryAdvice(origin.FullName()), "or ")))

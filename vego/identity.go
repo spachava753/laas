@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/solver"
 )
 
 // Which error an error is.
@@ -394,6 +395,7 @@ func (v *fnVerifier) noteError(sink *state, made *logic.Term) {
 	}
 	sink.noted["error "+made.Name] = true
 	v.fact(sink, logic.Not(logic.IsNil(made)))
+	v.noteMadeTag(sink, made)
 	for _, other := range v.distinct {
 		if other.Name != made.Name {
 			v.fact(sink, logic.Not(logic.Eq(made, other)))
@@ -497,6 +499,12 @@ func (v *fnVerifier) comparableError(e ast.Expr) bool {
 	if v.isNil(e) || v.knownError(v.bodyOrigins(), e, -1) {
 		return true
 	}
+	// A value of a concrete type that Go converts to error to compare it
+	// holds a value of that type, on which == is identity.
+	if t := v.info.TypeOf(e); t != nil && !isError(t) && !types.IsInterface(t) {
+		layout, ok := layoutOf(t)
+		return ok && v.identityEq(t) && capturesValue(layout)
+	}
 	variable := v.namedErrorVariable(e)
 	if variable == nil {
 		return false
@@ -508,7 +516,7 @@ func (v *fnVerifier) comparableError(e ast.Expr) bool {
 // compareErrors evaluates x == y or x != y on two errors.
 func (v *fnVerifier) compareErrors(x, y ast.Expr, op token.Token, st *state, guard []*logic.Term, pos token.Pos) *logic.Term {
 	v.bothErrors(x, y, pos)
-	same := v.errorsEqual(x, y, v.expr(x, st, guard), v.expr(y, st, guard), pos)
+	same := v.errorsEqual(x, y, v.errorOperand(x, st, guard), v.errorOperand(y, st, guard), pos, st, guard)
 	if op == token.NEQ {
 		return logic.Not(same)
 	}
@@ -521,20 +529,57 @@ func (v *fnVerifier) compareErrors(x, y ast.Expr, op token.Token, st *state, gua
 // compares what the two interface values hold.
 func (v *fnVerifier) bothErrors(x, y ast.Expr, pos token.Pos) {
 	for _, side := range []ast.Expr{x, y} {
-		if !v.isNil(side) && !isError(v.info.TypeOf(side)) {
-			v.unsupported(pos, fmt.Sprintf("comparing an error with a value of type %s is not supported", v.info.TypeOf(side)))
+		if t := v.info.TypeOf(side); !v.isNil(side) && !isError(t) && !v.convertsToError(t) {
+			v.unsupported(pos, fmt.Sprintf("comparing an error with a value of type %s is not supported", t))
 		}
 	}
 }
 
+// convertsToError reports whether a value of a type beside an error in a
+// comparison is converted to error by Go: a concrete type that implements
+// error. The comparison is then of the error that holds the value.
+func (v *fnVerifier) convertsToError(t types.Type) bool {
+	return t != nil && !types.IsInterface(t) && types.AssignableTo(t, types.Universe.Lookup("error").Type())
+}
+
+// holdsIdentityEq reports whether an error is proved to be nil or to hold
+// a value of a type met in a conversion on which == is identity, so that
+// comparing it with any error cannot panic.
+func (v *fnVerifier) holdsIdentityEq(st *state, guard []*logic.Term, err *logic.Term, pos token.Pos) bool {
+	if len(v.typedTypes) == 0 {
+		return false
+	}
+	options := []*logic.Term{logic.IsNil(err)}
+	for _, t := range v.typedTypes {
+		tag, _ := typeTag(t)
+		options = append(options, logic.Eq(errorTag(err), tag))
+	}
+	done := v.at(pos)
+	defer done()
+	return v.attempt(st, guard, logic.Or(options...)) == solver.Proved
+}
+
+// errorOperand evaluates an operand of a comparison with an error: an
+// error, nil, or a value of a concrete type that Go converts to error.
+func (v *fnVerifier) errorOperand(e ast.Expr, st *state, guard []*logic.Term) *logic.Term {
+	if t := v.info.TypeOf(e); !v.isNil(e) && v.convertsToError(t) {
+		return v.evalAs(e, types.Universe.Lookup("error").Type(), st, guard)[0]
+	}
+	return v.expr(e, st, guard)
+}
+
 // errorsEqual returns whether two evaluated errors are equal, after making
 // sure that Go's == on them is equality and cannot panic.
-func (v *fnVerifier) errorsEqual(x, y ast.Expr, a, b *logic.Term, pos token.Pos) *logic.Term {
+func (v *fnVerifier) errorsEqual(x, y ast.Expr, a, b *logic.Term, pos token.Pos, st *state, guard []*logic.Term) *logic.Term {
 	v.bothErrors(x, y, pos)
-	if !v.comparableError(x) && !v.comparableError(y) {
+	if !v.comparableError(x) && !v.comparableError(y) && !v.holdsIdentityEq(st, guard, a, pos) && !v.holdsIdentityEq(st, guard, b, pos) {
 		v.unsupported(pos, "comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, "+
-			"an error made by errors.New or fmt.Errorf or vouched for by a trusted contract, or a package-level error variable that holds such an error or a pointer, "+
-			"integer, string, or boolean, or an array or struct of these")
+			"an error made by errors.New or fmt.Errorf or vouched for by a trusted contract, a package-level error variable that holds such an error or a pointer, "+
+			"integer, string, or boolean, or an array or struct of these, or an error converted here from a value of such a type; a pointer to a value of size zero does not count, "+
+			"since two of them may or may not be equal")
+	}
+	if v.typedMet {
+		v.sameTyped(st, a, b)
 	}
 	return logic.Eq(a, b)
 }

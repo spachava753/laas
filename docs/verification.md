@@ -5158,7 +5158,10 @@ Go's `==` on two error values panics when both hold the same type and that type 
 - an error made by `errors.New` or `fmt.Errorf`, here or in a verified function that returns nothing else;
 - an error that a trusted contract vouches for, as described in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns);
 - an error variable, of this package or another, that holds such an error;
-- an error variable whose initialiser has a pointer, integer, string, or boolean type, or an array or struct type made only of these, as described in [What vego knows of an error variable](#what-vego-knows-of-an-error-variable).
+- an error variable whose initialiser has a pointer, integer, string, or boolean type, or an array or struct type made only of these, as described in [What vego knows of an error variable](#what-vego-knows-of-an-error-variable);
+- an error that the function made by converting a value of such a type, as in `var e error = ErrSyntax` for a constant `ErrSyntax` of a type `Error int` with an `Error` method.
+
+A pointer to a value of size zero, such as a pointer to a struct with no fields, does not count. Go may or may not give two such pointers the same address.
 
 A comparison with `nil` cannot panic. The errors that `errors.New` and `fmt.Errorf` make are pointers, so a comparison with them cannot panic either. Comparing two errors of which nothing is known is reported:
 
@@ -5172,8 +5175,10 @@ func SameError(a, b error) (same bool) {
 ```text
 vego: cannot verify SameError: comparing two errors can panic when both hold the same
 uncomparable type; one of them must be nil, an error made by errors.New or fmt.Errorf or
-vouched for by a trusted contract, or a package-level error variable that holds such an
-error or a pointer, integer, string, or boolean, or an array or struct of these
+vouched for by a trusted contract, a package-level error variable that holds such an error
+or a pointer, integer, string, or boolean, or an array or struct of these, or an error
+converted here from a value of such a type; a pointer to a value of size zero does not
+count, since two of them may or may not be equal
 ```
 
 Compare one of them with an error variable instead.
@@ -5365,22 +5370,49 @@ These are not supported, and a function that uses one is reported as `cannot ver
 
 A struct invariant cannot name an error variable.
 
-Only an error or `nil` can be converted to `error`. A value of another type is rejected even if it has an `Error` method:
+A value of a type with an `Error` method can be converted to `error`:
 
 ```go
 type CodeError struct{ code int }
 
-func (e CodeError) Error() string { return "code " + strconv.Itoa(e.code) }
+// @Ensures True
+func (e CodeError) Error() (s string) { return "bad code" }
 
-// @Ensures err != nil
-func AsError() (err error) {
-	return CodeError{code: 1}
+// @Ensures err = nil <-> code = 0
+func Check(code int) (err error) {
+	if code != 0 {
+		return CodeError{code: code}
+	}
+	return nil
+}
+```
+
+`vego` knows that such an error is not `nil` and which value it holds. Two such errors can be compared when their type is an integer, string, boolean, or pointer type, or a struct of these, as described in [Comparing errors](#comparing-errors). The error cannot be formatted or searched with `errors.Is`.
+
+Code that is not verified may run any method of an error at any time, for example in a trusted function that runs it. So each method of the type must have a contract that modifies nothing and has no `Requires` clause. A type without one is reported where it is converted:
+
+```go
+type BareError struct{ code int }
+
+func (e BareError) Error() string { return "bad code" }
+
+// @Ensures err = nil <-> code = 0
+func CheckBare(code int) (err error) {
+	if code != 0 {
+		return BareError{code: code}
+	}
+	return nil
 }
 ```
 
 ```text
-vego: cannot verify AsError: converting a guide.CodeError to an error is not supported
+vego: cannot verify CheckBare: converting a BareError to an error is not supported: BareError.Error has no
+contract; code that is not verified may run any method of an error at any time, so each method of a type
+converted to error must have a contract that modifies nothing and has no Requires
 ```
+
+The same holds of the methods of what the type holds in exported fields, which reflection reaches. A method promoted from an embedded field, a method that makes a call through a function value or an interface value, and a type with an invariant are reported too.
+
 
 ### When a package-level error is known
 
@@ -5451,7 +5483,7 @@ The second is another error variable, as in `var ErrNotFound = os.ErrNotExist`. 
 The third is anything else, such as `var DeadlineExceeded error = deadlineExceededError{}` in package `context`. `vego` knows only that the variable holds the same error each time it is read. Such a variable can be the target of `errors.Is`, and a contract can name it. It cannot be formatted, and it cannot be the first argument of `errors.Is`, because its methods are not known. Two more facts come from the type of the initialiser:
 
 - If the type is not an interface type, the variable is not nil. This is true even of a nil pointer of a concrete type, which makes a non-nil error.
-- If the type is a pointer, integer, string, or boolean type, or an array or struct type made only of these, the variable can be compared with any error. On such a type `==` cannot panic, and it reports true exactly when the two values are the same. Other types are excluded. On an interface, slice, map, or function type `==` can panic, and on a float type it reports false for a NaN compared with itself.
+- If the type is a pointer, integer, string, or boolean type, or an array or struct type made only of these, the variable can be compared with any error. On such a type `==` cannot panic, and it reports true exactly when the two values are the same. Other types are excluded, and so is a pointer to a value of size zero, since two such pointers may or may not be equal. On an interface, slice, map, or function type `==` can panic, and on a float type it reports false for a NaN compared with itself.
 
 `context.DeadlineExceeded` is not nil and can be compared with any error. An error made in the body of the function being verified differs from it, because a new error is new memory, which no variable held before. `vego` does not know that an error that a call returned differs from it.
 
@@ -8537,7 +8569,7 @@ This table lists the most common messages.
 | `the Requires clause P reads only package-level variables, and their declarations do not show that it holds` | No caller can choose the values the clause is about. | Test the value in the body. See [What vego knows of the value](#what-vego-knows-of-the-value). |
 | `x may be changed here, but proofs in package p rely on it holding the value it was declared with`, or `... rely on what it refers to being only read` | A package in the build changes a variable, or lets out a reference to what it refers to, and a proof relies on it. | Remove the change, or the proof that relies on the variable. See [What a variable refers to](#what-a-variable-refers-to). |
 | `cannot verify F: formatting err would run the methods of an error whose origin is not known` | `fmt.Errorf` is given an error whose origin is not known, such as one from a parameter or from a trusted function whose contract does not vouch for it. The message names an assignment to `err` on a path to the use that gives it no known origin. | Return the error unchanged, or wrap your own error. If the error comes from a trusted function, see [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). If the message says to give that error a variable of its own, do so, as in [Reading and writing files](#reading-and-writing-files). |
-| `cannot verify F: comparing two errors can panic when both hold the same uncomparable type` | Neither error is `nil`, an error made by `errors.New` or `fmt.Errorf`, or an error variable that holds one or holds a pointer, integer, string, or boolean, or an array or struct of these. | Compare one of them with an error variable instead. See [Comparing errors](#comparing-errors). |
+| `cannot verify F: comparing two errors can panic when both hold the same uncomparable type` | Neither error is `nil`, an error made by `errors.New` or `fmt.Errorf`, an error variable that holds one or holds a pointer, integer, string, or boolean, or an array or struct of these, or an error converted in the function from a value of such a type. | Compare one of them with an error variable instead. See [Comparing errors](#comparing-errors). |
 | `cannot verify F: errors.Is would run the Is and Unwrap methods of err, an error whose origin is not known` | `errors.Is` is asked about an error from a parameter, or from a trusted function whose contract does not vouch for it. | Compare it with an error variable using `==`. See [Asking errors.Is](#asking-errorsis). |
 | `E is assigned at f.go:n, so it is not known to hold the error it was declared with`, or `x.E is assigned at f.go:n in package x` | The package of the error variable assigns it, or takes its address. | Remove the assignment, or pass the error as a parameter. |
 | `x.E is changed at f.go:n in package p, which this package is built with` | A package in the build assigns the error variable, or one that went into it. | Remove the assignment. See [When a package-level error is known](#when-a-package-level-error-is-known). |
@@ -8688,7 +8720,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - a call in the target of an assignment whose right-hand side is an `append` that may write into the array of its slice, unless the call modifies nothing and refers to no memory or a call among the operands of the `append` orders it (see [An append beside a call](#an-append-beside-a-call));
 - a call with several results as the arguments of another call, as in `g(f())`;
 - comparing structs with `==`;
-- comparing two errors with `==` when neither is `nil`, an error made by `errors.New` or `fmt.Errorf`, an error that a trusted contract vouches for, or an error variable that holds one or holds a pointer, integer, string, or boolean, or an array or struct of these (see [Comparing errors](#comparing-errors));
+- comparing two errors with `==` when neither is `nil`, an error made by `errors.New` or `fmt.Errorf`, an error that a trusted contract vouches for, an error variable that holds one or holds a pointer, integer, string, or boolean, or an array or struct of these, or an error converted in the function from a value of such a type (see [Comparing errors](#comparing-errors));
 - `errors.As`, `errors.Join`, `errors.Unwrap`, and `errors.Is` on an error whose origin is not known (see [Asking errors.Is](#asking-errorsis));
 - `goto`, `fallthrough`, labelled `break` and `continue`, and `defer` inside a loop, except inside a function literal that the loop calls.
 
