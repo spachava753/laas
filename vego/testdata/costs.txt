@@ -642,6 +642,10 @@ distinct	distinct.TwinOfPair	6	3724	0
 distinct	distinct.Zeroer.Zero	4	1915	0
 distinct	distinct.reset	8	1498	0
 distinct	distinct.setInner	6	1219	0
+dynhook	dynhook.Around	7	8617	0
+dynhook	io.Writer.Write	5	18168	0
+dyniface	dyniface.Around	7	8617	0
+dyniface	io.Writer.Write	5	18168	0
 early	(early.T).Ok	1	46	0
 early	early.Aliased	1	46	0
 early	early.Concrete	1	46	0
@@ -1950,7 +1954,6 @@ guide	guide.BuildThenWrite	31	184787	0
 guide	guide.Bump	9	14338	0
 guide	guide.ByTag	30	291192	12
 guide	guide.CallsHelper	1	111	0
-guide	guide.CallsReset	2	744	0
 guide	guide.Cell	7	9786	0
 guide	guide.CheckEach	3	128	0
 guide	guide.Clamp	7	799	0
@@ -2183,7 +2186,6 @@ guide	guide.ReportJSON	39	374662	3
 guide	guide.ReportOnce	36	121706	0
 guide	guide.Reserve	13	1620	0
 guide	guide.Reset	12	9299	0
-guide	guide.ResetUnlisted	2	237	0
 guide	guide.Rounds	12	8683	0
 guide	guide.Row	1	3115	0
 guide	guide.RowJSON	39	1067946	0
@@ -2201,8 +2203,6 @@ guide	guide.Served	1	46	0
 guide	guide.Service	1	917	0
 guide	guide.SetBelow	10	15773	0
 guide	guide.SetMax	7	5364	0
-guide	guide.SetServed	5	3144	0
-guide	guide.SetSize	7	2744	0
 guide	guide.Shift	9	28808	0
 guide	guide.Show	1	514	0
 guide	guide.ShowAll	1	521	0
@@ -2297,6 +2297,7 @@ guide	guide.addRoot	6	4895	0
 guide	guide.addRootKept	7	5782	0
 guide	guide.addTwo	11	11553	0
 guide	guide.addTwoKept	11	9931	0
+guide	guide.callsReset	2	744	0
 guide	guide.count	1	1216	0
 guide	guide.countHit	8	5133	0
 guide	guide.double	4	660	0
@@ -2315,6 +2316,9 @@ guide	guide.lookupTask	11	3765	0
 guide	guide.open	3	14391	0
 guide	guide.record	1	138	0
 guide	guide.resetAll	5	2937	0
+guide	guide.resetUnlisted	2	237	0
+guide	guide.setServed	5	3144	0
+guide	guide.setSize	7	2744	0
 guide	guide.small	2	207	0
 guide	guide.teeRecorder	1	2911	0
 guide	guide.tell	1	70	0
@@ -4833,13 +4837,17 @@ trust	trust.usesPredicate	0	0	0
 trust	trust.writesSixtyFive	5	15990	2
 trust	trust.wrongModifies	0	0	0
 trust	trust.wrongName	0	0	0
+trustedwritesclient	trustedwrites.Poke	1	70	0
 trustedwritesclient	trustedwrites.Tick	1	70	0
 trustedwritesclient	trustedwrites.TickListed	1	724	0
-trustedwritesclient	trustedwrites.TickState	1	724	0
+trustedwritesclient	trustedwrites.TickState	1	2087	0
+trustedwritesclient	trustedwritesclient.AroundTicked	2	421	0
 trustedwritesclient	trustedwritesclient.Listed	7	4882	0
+trustedwritesclient	trustedwritesclient.Poked	9	4706	0
 trustedwritesclient	trustedwritesclient.Same	4	1866	0
-trustedwritesclient	trustedwritesclient.State	7	4882	0
-trustedwritesclient	trustedwritesclient.StateUnlisted	3	1137	0
+trustedwritesclient	trustedwritesclient.State	10	14370	0
+trustedwritesclient	trustedwritesclient.StateUnlisted	4	6427	0
+trustedwritesclient	trustedwritesclient.Ticked	3	188	0
 unread	unread.Other	2	61	0
 unread	unread.Value	2	61	0
 unsafeuse	unsafelib.Run	1	384	0

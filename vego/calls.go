@@ -766,6 +766,11 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		if variable := v.variableOfCells(t.cells); variable != nil && variable.Pkg() != v.pass.Pkg && remedy == "" {
 			what, unlisted = v.stateRemedy(variable, fn)
 		}
+		// So is what a fixed variable of another package refers to.
+		if variable := v.fixedVariableAt(t.ref); variable != nil && variable.Pkg() != v.pass.Pkg && remedy == "" {
+			_, remedy = v.stateRemedy(variable, fn)
+			what = fmt.Sprintf("what %s refers to, part of the state of package %s", v.spelling(variable), variable.Pkg().Path())
+		}
 		v.checkWriteOr(st, writes, t.reach(), call.Pos(), fmt.Sprintf("%s may modify %s", name, what), remedy, unlisted)
 		if t.owner != nil && v.reports > reportsBefore {
 			ownerRefused[t.mod] = true

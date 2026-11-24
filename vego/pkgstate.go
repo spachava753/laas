@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"golang.org/x/tools/go/types/typeutil"
+
+	"github.com/spachava753/laas/vego/internal/logic"
 )
 
 // The state of a package (D1 of package-level variables). A Modifies entry
@@ -331,127 +333,303 @@ func (*writesFact) AFact() {}
 func (f *writesFact) String() string { return fmt.Sprintf("writes(%d)", len(f.Keys)) }
 
 // exportWrites publishes, for every function of the package with a body,
-// the package-level variables it assigns, directly or through the functions
-// it calls by name, in this package or, by their facts, in others.
+// the package-level variables it assigns, directly, through their paths,
+// or through the functions it calls by name, in this package or, by their
+// facts, in others. A call with no static callee reaches what the call
+// graph's rule says it may (F25 of the review of step 4): a call through a
+// function value, every function, method value, and literal of the package
+// used as a value of an identical signature, and every exported function
+// of it; a call of an interface method, every method of that name and
+// signature of the package.
 func (pv *pkgVerifier) exportWrites() {
-	direct := map[*types.Func]map[string]string{}
-	through := map[*types.Func]map[string]bool{}
-	calls := map[*types.Func][]*types.Func{}
+	type writes struct {
+		keys    map[string]string
+		through map[string]bool
+		calls   []*types.Func
+		// values and methods are the signatures of the calls with no
+		// static callee, through a value and of a method by name.
+		values  []*types.Signature
+		methods []*types.Func
+	}
+	newWrites := func() *writes { return &writes{keys: map[string]string{}, through: map[string]bool{}} }
+	byFunc := map[*types.Func]*writes{}
+	byLit := map[*ast.FuncLit]*writes{}
+	asValue := map[*types.Func]bool{}
 	for _, file := range pv.pass.Files {
-		for _, decl := range file.Decls {
-			fd, ok := decl.(*ast.FuncDecl)
-			if !ok || fd.Body == nil {
-				continue
-			}
-			obj, _ := pv.info.Defs[fd.Name].(*types.Func)
-			if obj == nil {
-				continue
-			}
-			found := map[string]string{}
-			let := map[string]bool{}
-			var stack []ast.Node
-			ast.Inspect(fd.Body, func(n ast.Node) bool {
-				if n == nil {
-					stack = stack[:len(stack)-1]
-					return true
+		var stack []ast.Node
+		var current []*writes
+		owner := map[ast.Node]bool{}
+		ast.Inspect(file, func(n ast.Node) bool {
+			if n == nil {
+				if owner[stack[len(stack)-1]] {
+					current = current[:len(current)-1]
 				}
-				stack = append(stack, n)
-				switch n := n.(type) {
-				case *ast.CallExpr:
-					if callee, ok := typeutil.Callee(pv.info, n).(*types.Func); ok {
-						calls[obj] = append(calls[obj], callee.Origin())
+				stack = stack[:len(stack)-1]
+				return true
+			}
+			stack = append(stack, n)
+			switch n := n.(type) {
+			case *ast.FuncDecl:
+				if obj, ok := pv.info.Defs[n.Name].(*types.Func); ok && n.Body != nil {
+					w := newWrites()
+					byFunc[obj] = w
+					current = append(current, w)
+					owner[n] = true
+				}
+			case *ast.FuncLit:
+				// A literal's writes are its function's too, and its own as
+				// a value a call may reach.
+				w := newWrites()
+				byLit[n] = w
+				current = append(current, w)
+				owner[n] = true
+			case *ast.CallExpr:
+				callee, _ := typeutil.Callee(pv.info, n).(*types.Func)
+				for _, w := range current {
+					switch {
+					case callee != nil && isIfaceMethod(callee):
+						w.methods = append(w.methods, callee)
+					case callee != nil:
+						w.calls = append(w.calls, callee.Origin())
+					default:
+						if tv, ok := pv.info.Types[n.Fun]; ok && !tv.IsType() && !tv.IsBuiltin() {
+							if sig, ok := tv.Type.Underlying().(*types.Signature); ok {
+								w.values = append(w.values, sig)
+							}
+						}
 					}
-				case *ast.Ident:
-					variable, ok := pv.info.Uses[n].(*types.Var)
-					if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
-						break
-					}
-					switch use := pv.useOf(stack); {
-					case use.change != "":
-						if _, seen := found[errorKey(variable)]; !seen {
-							position := pv.pass.Fset.Position(use.pos)
-							found[errorKey(variable)] = fmt.Sprintf("%s:%d", filepath.Base(position.Filename), position.Line)
+				}
+			case *ast.Ident:
+				if named, ok := pv.info.Uses[n].(*types.Func); ok && !calledAt(stack) {
+					asValue[named.Origin()] = true
+				}
+				variable, ok := pv.info.Uses[n].(*types.Var)
+				if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
+					break
+				}
+				use := pv.useOf(stack)
+				key := errorKey(variable)
+				for _, w := range current {
+					switch {
+					case use.change != "" || pathWritten(pv.info, stack):
+						if _, seen := w.keys[key]; !seen {
+							position := pv.pass.Fset.Position(n.Pos())
+							w.keys[key] = fmt.Sprintf("%s:%d", filepath.Base(position.Filename), position.Line)
 						}
 					case use.escape && holdsMemory(variable.Type()) && !isError(variable.Type()):
-						let[errorKey(variable)] = true
+						w.through[key] = true
 					}
 				}
-				return true
-			})
-			direct[obj] = found
-			through[obj] = let
+			}
+			return true
+		})
+	}
+	// What a call with no static callee may reach.
+	reachValue := func(sig *types.Signature) []*writes {
+		var found []*writes
+		for obj, w := range byFunc {
+			objSig := obj.Type().(*types.Signature)
+			if (asValue[obj] || obj.Exported() && objSig.Recv() == nil) && types.Identical(withoutRecv(objSig), withoutRecv(sig)) {
+				found = append(found, w)
+			}
 		}
+		for lit, w := range byLit {
+			if litSig, ok := pv.info.TypeOf(lit).(*types.Signature); ok && types.Identical(litSig, withoutRecv(sig)) {
+				found = append(found, w)
+			}
+		}
+		return found
 	}
-	// What the functions called by name write, to a fixed point.
-	all := map[*types.Func]map[string]string{}
-	allThrough := map[*types.Func]map[string]bool{}
-	for obj, found := range direct {
-		all[obj] = maps.Clone(found)
-		allThrough[obj] = maps.Clone(through[obj])
+	reachMethod := func(method *types.Func) []*writes {
+		var found []*writes
+		sig := withoutRecv(method.Type().(*types.Signature))
+		for obj, w := range byFunc {
+			objSig := obj.Type().(*types.Signature)
+			if objSig.Recv() != nil && obj.Name() == method.Name() && types.Identical(withoutRecv(objSig), sig) {
+				found = append(found, w)
+			}
+		}
+		return found
 	}
+	// To a fixed point; a call of a function of another package brings
+	// what its fact says.
+	merge := func(into *writes, keys map[string]string, through map[string]bool, via string) bool {
+		changed := false
+		for key, at := range keys {
+			if _, seen := into.keys[key]; !seen {
+				into.keys[key] = at + via
+				changed = true
+			}
+		}
+		for key := range through {
+			if !into.through[key] {
+				into.through[key] = true
+				changed = true
+			}
+		}
+		return changed
+	}
+	everyone := slices.Concat(slices.Collect(maps.Values(byFunc)), slices.Collect(maps.Values(byLit)))
 	for changed := true; changed; {
 		changed = false
-		for obj := range direct {
-			for _, callee := range calls[obj] {
-				var theirs map[string]string
-				var theirsThrough map[string]bool
+		for _, w := range everyone {
+			for _, callee := range w.calls {
 				if callee.Pkg() == pv.pass.Pkg {
-					theirs, theirsThrough = all[callee], allThrough[callee]
-				} else if fact := new(writesFact); pv.pass.ImportObjectFact(callee, fact) {
-					theirs, theirsThrough = fact.Keys, fact.Through
+					if theirs := byFunc[callee]; theirs != nil && merge(w, theirs.keys, theirs.through, " in "+callee.Name()) {
+						changed = true
+					}
+				} else if fact := new(writesFact); pv.pass.ImportObjectFact(callee, fact) && merge(w, fact.Keys, fact.Through, " in "+callee.Name()) {
+					changed = true
 				}
-				for key := range theirsThrough {
-					if !allThrough[obj][key] {
-						allThrough[obj][key] = true
+			}
+			for _, sig := range w.values {
+				for _, theirs := range reachValue(sig) {
+					if theirs != w && merge(w, theirs.keys, theirs.through, " in code that a call through a value may run") {
 						changed = true
 					}
 				}
-				for key, at := range theirs {
-					if _, seen := all[obj][key]; !seen {
-						all[obj][key] = at + " in " + callee.Name()
+			}
+			for _, method := range w.methods {
+				for _, theirs := range reachMethod(method) {
+					if theirs != w && merge(w, theirs.keys, theirs.through, " in a method "+method.Name()+" that a call may run") {
 						changed = true
 					}
 				}
 			}
 		}
 	}
-	for obj, found := range all {
-		if len(found) > 0 || len(allThrough[obj]) > 0 {
-			pv.pass.ExportObjectFact(obj, &writesFact{Keys: found, Through: allThrough[obj]})
+	for obj, w := range byFunc {
+		if len(w.keys) > 0 || len(w.through) > 0 {
+			pv.pass.ExportObjectFact(obj, &writesFact{Keys: w.keys, Through: w.through})
 		}
 	}
 }
 
+// calledAt reports whether the name at the end of stack is the function of
+// a call, as opposed to a function used as a value.
+func calledAt(stack []ast.Node) bool {
+	var cur ast.Node = stack[len(stack)-1]
+	for i := len(stack) - 2; i >= 0; i-- {
+		switch parent := stack[i].(type) {
+		case *ast.SelectorExpr:
+			if parent.Sel != cur {
+				return false
+			}
+			cur = parent
+		case *ast.ParenExpr, *ast.IndexExpr, *ast.IndexListExpr:
+			cur = parent
+		case *ast.CallExpr:
+			return parent.Fun == cur
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+// pathWritten reports whether the use at the end of stack is the root of a
+// path that a statement writes, as in table[0] = 5, cfg.n++, or
+// delete(m, k): a write of what the variable refers to, as distinct from a
+// use that hands a reference on.
+func pathWritten(info *types.Info, stack []ast.Node) bool {
+	cur := stack[len(stack)-1].(ast.Expr)
+	i := len(stack) - 2
+	if i >= 0 {
+		if sel, ok := stack[i].(*ast.SelectorExpr); ok && sel.Sel == cur {
+			cur, i = sel, i-1
+		}
+	}
+	moved := false
+	for ; i >= 0; i-- {
+		switch parent := stack[i].(type) {
+		case *ast.ParenExpr:
+			cur = parent
+			continue
+		case *ast.SelectorExpr:
+			if parent.X != cur {
+				return false
+			}
+			cur, moved = parent, true
+			continue
+		case *ast.IndexExpr:
+			if parent.X != cur {
+				return false
+			}
+			cur, moved = parent, true
+			continue
+		case *ast.StarExpr:
+			cur, moved = parent, true
+			continue
+		case *ast.AssignStmt:
+			return moved && slices.Contains(parent.Lhs, cur)
+		case *ast.IncDecStmt:
+			return moved && parent.X == cur
+		case *ast.RangeStmt:
+			return moved && (parent.Key == cur || parent.Value == cur)
+		case *ast.CallExpr:
+			id, ok := ast.Unparen(parent.Fun).(*ast.Ident)
+			if builtin, isBuiltin := info.Uses[id].(*types.Builtin); ok && isBuiltin && (builtin.Name() == "delete" || builtin.Name() == "clear") {
+				return len(parent.Args) > 0 && parent.Args[0] == cur
+			}
+			return false
+		default:
+			return false
+		}
+	}
+	return false
+}
+
 // checkTrustedWrites reports a call of a trusted function whose body, or
-// a function it calls by name, assigns a package-level variable that the
-// caller reads or lists, when the entry's modifies does not cover it: the
-// entry would be false of what the call does (F10 of the design review).
+// a function it calls by name, assigns a package-level variable that a
+// proof can read, or writes through its path, when the entry's modifies
+// does not cover it: the entry would be false of what the call does, and
+// every caller above would keep the variable (F10 of the design review,
+// F24 of the review of step 4). It reports at every use of the entry.
 func (v *fnVerifier) checkTrustedWrites(call *ast.CallExpr, fn *funcInfo, written []target) {
 	if fn.trust == nil || fn.obj == nil {
 		return
 	}
 	fact := new(writesFact)
-	if !v.pass.ImportObjectFact(fn.obj.Origin(), fact) && fn.obj.Pkg() != v.pass.Pkg {
+	if !v.pass.ImportObjectFact(fn.obj.Origin(), fact) {
 		return
 	}
-	keys := fact.Keys
-	for _, key := range slices.Sorted(maps.Keys(keys)) {
-		variable := v.assignedMet[key]
-		if variable == nil {
+	for _, key := range slices.Sorted(maps.Keys(fact.Keys)) {
+		variable := v.lookupKey(key)
+		if variable == nil || isError(variable.Type()) {
 			continue
 		}
-		cells := v.globalCells(variable)
-		if slices.ContainsFunc(written, func(t target) bool {
-			return slices.ContainsFunc(t.cells, func(c cell) bool { return c.key == cells[0].key })
-		}) {
+		if variable.Pkg() != v.pass.Pkg && !variable.Exported() {
+			covers := new(coversFact)
+			if !v.pass.ImportPackageFact(variable.Pkg(), covers) || !covers.Verified {
+				continue
+			}
+		}
+		var covered func(t target) bool
+		switch {
+		case v.isAssigned(variable):
+			key := v.globalCells(variable)[0].key
+			covered = func(t target) bool { return slices.ContainsFunc(t.cells, func(c cell) bool { return c.key == key }) }
+		default:
+			// A fixed variable whose memory the body writes through its
+			// path: a target at its reference covers it.
+			if _, why := v.usableFixed(variable); why != "" || !holdsMemory(variable.Type()) {
+				continue
+			}
+			val, why := v.fixedValue(nil, variable)
+			if why != "" {
+				continue
+			}
+			covered = func(t target) bool { return t.ref != nil && t.ref.Op == logic.OpConst && t.ref.Name == val[0].Name }
+		}
+		if slices.ContainsFunc(written, covered) {
 			continue
 		}
 		entry := strconv.Quote(strconv.Quote(variable.Pkg().Path()))
 		if variable.Pkg() == fn.obj.Pkg() {
 			entry = variable.Name()
 		}
-		v.report(call.Pos(), "the trusted contract of %s does not list %s, which its body assigns at %s; an entry lists what its function changes, "+
-			"as in modifies: [%s]", fn.obj.Name(), v.spelling(variable), keys[key], entry)
+		v.report(call.Pos(), "the trusted contract of %s does not list %s, which its body writes at %s; an entry lists what its function changes, "+
+			"as in modifies: [%s]", fn.obj.Name(), v.spelling(variable), fact.Keys[key], entry)
 	}
 }
 
@@ -484,4 +662,18 @@ func (pv *pkgVerifier) notImported(fn *funcInfo, m *modTarget) string {
 	}
 	return fmt.Sprintf("%s is not imported by the files of package %s; name the state of a package it imports whose state covers it, or write the import path, as // @Modifies %s",
 		m.name, home.Path(), strconv.Quote(found[0].Path()))
+}
+
+// fixedVariableAt returns the fixed variable whose value is the reference,
+// or nil.
+func (v *fnVerifier) fixedVariableAt(ref *logic.Term) *types.Var {
+	if ref == nil || ref.Op != logic.OpConst {
+		return nil
+	}
+	for key, met := range v.fixedMet {
+		if len(met.val) > 0 && met.val[0].Name == ref.Name {
+			return v.lookupKey(key)
+		}
+	}
+	return nil
 }

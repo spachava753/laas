@@ -10,7 +10,7 @@ import "trustedwrites"
 // @Ensures same
 func Same() (same bool) {
 	a := trustedwrites.Ticks
-	trustedwrites.Tick() // want `^vego: the trusted contract of Tick does not list trustedwrites.Ticks, which its body assigns at lib.go:8 in bump; an entry lists what its function changes, as in modifies: \[Ticks\]$`
+	trustedwrites.Tick() // want `^vego: the trusted contract of Tick does not list trustedwrites.Ticks, which its body writes at lib.go:8 in bump; an entry lists what its function changes, as in modifies: \[Ticks\]$`
 	return trustedwrites.Ticks == a
 }
 
@@ -39,5 +39,32 @@ func State() (same bool) {
 //
 // @Ensures True
 func StateUnlisted() {
-	trustedwrites.TickState() // want `^vego: TickState may modify the state of package trustedwrites \(trustedwrites.Ticks\), which StateUnlisted may not modify; list trustedwrites in a // @Modifies clause$`
+	trustedwrites.TickState() // want `^vego: TickState may modify what trustedwrites.Table refers to, part of the state of package trustedwrites, which StateUnlisted may not modify; list trustedwrites in a // @Modifies clause$`
+}
+
+// Ticked uses the entry of Tick one call down from where Ticks is read
+// (F24 of the review of step 4).
+//
+// @Ensures True
+func Ticked() {
+	trustedwrites.Tick() // want `^vego: the trusted contract of Tick does not list trustedwrites.Ticks, which its body writes at lib.go:8 in bump; an entry lists what its function changes, as in modifies: \[Ticks\]$`
+}
+
+// AroundTicked relies on Ticks across Ticked.
+//
+// @Ensures same
+func AroundTicked() (same bool) {
+	a := trustedwrites.Ticks
+	Ticked()
+	return trustedwrites.Ticks == a
+}
+
+// Poked keeps Table's contents across a call whose body writes them.
+//
+// @Requires |trustedwrites.Table| > 0
+// @Ensures same
+func Poked() (same bool) {
+	a := trustedwrites.Table[0]
+	trustedwrites.Poke() // want `^vego: the trusted contract of Poke does not list trustedwrites.Table, which its body writes at lib.go:\d+; an entry lists what its function changes, as in modifies: \[Table\]$`
+	return trustedwrites.Table[0] == a
 }

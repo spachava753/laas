@@ -4177,19 +4177,19 @@ An assignment in such a package to a variable that a proof relies on is reported
 A verified function lists the variables of its package that it changes in a `Modifies` clause, as it lists a parameter. `x'` in an `Ensures` clause is the value on return, and `x` the value when the function is called:
 
 ```go
-// SetServed sets the count.
+// setServed sets the count.
 //
 // @Modifies served
 // @Ensures served' = n
-func SetServed(n int) {
+func setServed(n int) {
 	served = n
 }
 
-// SetSize writes what a variable refers to.
+// setSize writes what a variable refers to.
 //
 // @Modifies sizes
 // @Ensures sizes'[1] = n
-func SetSize(n int) {
+func setSize(n int) {
 	sizes[1] = n
 }
 ```
@@ -4199,32 +4199,32 @@ Both verify. `Modifies served` covers the variable itself and, for a variable th
 A caller of a function that changes a variable changes it too, and must list it:
 
 ```go
-// resetAll calls SetServed, and lists what it changes.
+// resetAll calls setServed, and lists what it changes.
 //
 // @Modifies served
 // @Ensures served' = 0
 func resetAll() {
-	SetServed(0)
+	setServed(0)
 }
 
-// ResetUnlisted assigns a variable and does not list it.
+// resetUnlisted assigns a variable and does not list it.
 //
 // @Ensures True
-func ResetUnlisted() {
+func resetUnlisted() {
 	served = 0
 }
 
-// CallsReset calls SetServed and does not list what it changes.
+// callsReset calls setServed and does not list what it changes.
 //
 // @Ensures True
-func CallsReset() {
-	SetServed(0)
+func callsReset() {
+	setServed(0)
 }
 ```
 
 ```text
-vego: served is assigned, which ResetUnlisted may not modify; list it in a // @Modifies clause
-vego: SetServed may modify served, which CallsReset may not modify; list it in a // @Modifies clause
+vego: served is assigned, which resetUnlisted may not modify; list it in a // @Modifies clause
+vego: setServed may modify served, which callsReset may not modify; list it in a // @Modifies clause
 ```
 
 So a function that lists no variable leaves every variable as it was, and a caller keeps what it knew of them across the call. An entry that no write needs is reported, as for a parameter:
@@ -4437,7 +4437,7 @@ func HandleUnlisted(path string) {
 }
 ```
 
-`Handle` and `HandleByPath` verify. `HandleByPath` writes the import path in quotes, which names the same state. The message for `HandleUnlisted` gives the shortest entry that its file can write:
+`Handle` and `HandleByPath` verify. `HandleByPath` names the state of `guidestats` by its import path in quotes. That is not the state that `Handle` names: the state of `guidehandler` covers the state of `guidestats` and the variables of `guidehandler` itself. Both cover what `Serve` changes. The message for `HandleUnlisted` gives the shortest entry that its file can write:
 
 ```text
 vego: Serve may modify the state of package guidestats (guidestats.requests), which HandleUnlisted may not modify; list guidehandler, whose
@@ -7813,7 +7813,7 @@ func At(A []int, i int) (x int, err error) {
 }
 ```
 
-The second is that a verified function can read only package-level variables that nothing changes, as described in [Package-level variables](#package-level-variables). A function that reads a counter, a cache, or another variable that is assigned must receive the value as a parameter instead.
+The second is that a verified function that changes a package-level variable lists it, and so does every function that calls it, as described in [Changing a variable](#changing-a-variable). A caller in another package lists the state of the package instead, as described in [Variables of other packages](#variables-of-other-packages).
 
 ### For one core component
 
@@ -7932,9 +7932,13 @@ This table lists the most common messages.
 | `the slices passed to F as a and b may overlap` | Two slice arguments with the same element type are not proved to be separate memory. | Pass two slice parameters of your own function, or a slice that the function allocated. For a slice stored in a struct, state `apart(s.items, A)` in the `Requires`. See [Slices that share no memory](#slices-that-share-no-memory). |
 | `cannot verify F: it calls G, which has no contract` | `G` is neither verified nor trusted. | Annotate `G`, or add it to the trust file. |
 | `cannot verify F: parameter x has unsupported type T` | `T` is outside the supported subset. | Keep `T` out of the signatures of verified functions. |
-| `cannot verify F: x is assigned at f.go:n; package-level variables that are changed are not supported yet` | `F` reads a package-level variable that something in the build assigns, takes the address of, or names in a `//go:linkname` directive or in assembly. | Pass the value as a parameter. See [Which variables a function can read](#which-variables-a-function-can-read). |
+| `cannot verify F: x has its address taken at f.go:n; package-level variables whose address is taken are not supported yet`, or `x is named by a go:linkname directive at f.go:n; ...` | `F` reads a package-level variable whose address the build takes, or that a directive or an assembly file names. | Pass the value as a parameter. See [Which variables a function can read](#which-variables-a-function-can-read). |
 | `cannot verify F: x has type T, which can hold a function value, an interface value, an error, a channel, or an unsafe.Pointer` | `F` reads a package-level variable of such a type. | Pass the value as a parameter. |
-| `cannot verify F: x is a package-level variable, which a verified function cannot assign yet`, or `x[i] writes memory that the package-level variable x refers to, which a Modifies clause cannot name yet` | `F` changes a package-level variable or what one refers to. | Leave the change to code that is not verified, or pass the memory as a parameter. See [Changing a variable](#changing-a-variable). |
+| `x is assigned, which F may not modify; list it in a // @Modifies clause`, or `G may modify x, which F may not modify; ...` | `F` changes a package-level variable, or calls a function that does, and does not list it. | Add `x` to the `Modifies` clause of `F`. See [Changing a variable](#changing-a-variable). |
+| `G may modify the state of package p (p.x), which F may not modify; list q in a // @Modifies clause` | A call changes a variable of another package, which `F` covers by naming a package state. | List the package the message names. See [Variables of other packages](#variables-of-other-packages). |
+| `f may modify x, which F may not modify; code of this package that the call may run writes it; ...` | A call through a function value or an interface value may run code of the package that changes `x`. | List `x`. See [Changing a variable](#changing-a-variable). |
+| `the Requires clause P reads x, a package-level variable that is not exported, and code of another package can call F, ...` | No caller in another package can name or establish the condition. | Test the value in the body. See [Changing a variable](#changing-a-variable). |
+| `the trusted contract of F does not list x, which its body writes at f.go:n; ...` | The source of a trusted function shows a write that its entry does not list. | List the variable, or the state of its package, under `modifies` in the entry. |
 | `the Requires clause P reads only package-level variables, and their declarations do not show that it holds` | No caller can choose the values the clause is about. | Test the value in the body. See [What vego knows of the value](#what-vego-knows-of-the-value). |
 | `x may be changed here, but proofs in package p rely on it holding the value it was declared with`, or `... rely on what it refers to being only read` | A package in the build changes a variable, or lets out a reference to what it refers to, and a proof relies on it. | Remove the change, or the proof that relies on the variable. See [What a variable refers to](#what-a-variable-refers-to). |
 | `cannot verify F: formatting err would run the methods of an error whose origin is not known` | `fmt.Errorf` is given an error whose origin is not known, such as one from a parameter or from a trusted function whose contract does not vouch for it. The message names an assignment to `err` on a path to the use that gives it no known origin. | Return the error unchanged, or wrap your own error. If the error comes from a trusted function, see [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). If the message says to give that error a variable of its own, do so, as in [Reading and writing files](#reading-and-writing-files). |
@@ -8080,7 +8084,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - goroutines, channels, and `select`;
 - arrays, and structs that contain an array;
 - pointers to anything other than a struct;
-- reading a package-level variable that something in the build changes, or whose type can hold a function value, an interface value, an error, a channel, or an `unsafe.Pointer`; assigning a package-level variable, writing what one refers to, and naming one in `Modifies` (see [Package-level variables](#package-level-variables));
+- reading or changing a package-level variable whose address the build takes, that a directive or an assembly file names, that is an error variable that something changes, or whose type can hold a function value, an interface value, an error, a channel, or an `unsafe.Pointer` (see [Package-level variables](#package-level-variables));
 - `copy`;
 - in `encoding/json`, anything but `Marshal`, `MarshalIndent`, `Unmarshal`, and `json.NewEncoder(w).Encode(v)` and `json.NewDecoder(io.LimitReader(r, n)).Decode(&x)` written as one expression, and values that hold an interface value, a method that `encoding/json` would call, or one of the other types listed in [What is not supported in encoding/json](#what-is-not-supported-in-encodingjson);
 - annotations on a type declared inside a function body, such as an invariant on a local struct or a contract on a local interface;
@@ -8242,6 +8246,9 @@ Results are referred to by the names in the function's signature.
 | `Modifies bw` | for a `*bufio.Writer`, `*bufio.Reader`, `*bufio.Scanner`, `*log.Logger`, `*bytes.Buffer`, or `*strings.Builder`: the struct and the memory it owns |
 | `Modifies p`, `Modifies p.out`, `Modifies bs[0]` | for a pointer to a struct that holds a `strings.Builder` or a `bytes.Buffer` by value, a path to one, or an element of a slice of them: also the memory the buffer owns; `Modifies bs` does not cover what the elements own |
 | `Modifies p` | for a pointer to a struct that declares `@Owns`: also what it owns, the array of an owned slice up to its capacity, an owned map, an owned struct with what it owns, and the footprint and states of an owned interface value |
+| `Modifies v` | for a package-level variable of the package: the variable and, for a slice, a map, or a pointer, what it refers to |
+| `Modifies lib.V` | an exported package-level variable of another package, as above |
+| `Modifies lib`, `Modifies "example.com/lib"` | the state of another package: its variables, what they refer to, and the states its functions list |
 | `fresh(x)` | in an `Ensures`, the memory `x` refers to on return was allocated by the call; in a body, it was allocated since the function was entered; true for a slice with zero capacity and a nil interface value, false for a nil pointer or map; for an interface value, what it holds was created then, its footprint included |
 | `fresh(x, w)` | the same, except that what `x` refers to may also lie in the footprint of `w`, an interface value whose methods write behind it; more than one such value may follow, and `w` may be a variadic parameter of such values, read where a call writes each one out |
 | `within(a, b)` | `a` lies inside the memory of `b`; each is a pointer or a slice, and a slice includes its capacity; for an interface value `b`, `a` (also a map) lies in its footprint, and for a value that owns memory, in its struct or in what it owns |

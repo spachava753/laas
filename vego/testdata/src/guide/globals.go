@@ -106,42 +106,42 @@ func Client() (r bool) {
 	return http.DefaultClient != nil // want `vego: cannot verify Client: http.DefaultClient has type \*net/http.Client, which can hold a function value, an interface value, an error, a channel, or an unsafe.Pointer; package-level variables of such types are not supported yet`
 }
 
-// SetServed sets the count.
+// setServed sets the count.
 //
 // @Modifies served
 // @Ensures served' = n
-func SetServed(n int) {
+func setServed(n int) {
 	served = n
 }
 
-// SetSize writes what a variable refers to.
+// setSize writes what a variable refers to.
 //
 // @Modifies sizes
 // @Ensures sizes'[1] = n
-func SetSize(n int) {
+func setSize(n int) {
 	sizes[1] = n
 }
 
-// resetAll calls SetServed, and lists what it changes.
+// resetAll calls setServed, and lists what it changes.
 //
 // @Modifies served
 // @Ensures served' = 0
 func resetAll() {
-	SetServed(0)
+	setServed(0)
 }
 
-// ResetUnlisted assigns a variable and does not list it.
+// resetUnlisted assigns a variable and does not list it.
 //
 // @Ensures True
-func ResetUnlisted() {
-	served = 0 // want `^vego: served is assigned, which ResetUnlisted may not modify; list it in a // @Modifies clause$`
+func resetUnlisted() {
+	served = 0 // want `^vego: served is assigned, which resetUnlisted may not modify; list it in a // @Modifies clause$`
 }
 
-// CallsReset calls SetServed and does not list what it changes.
+// callsReset calls setServed and does not list what it changes.
 //
 // @Ensures True
-func CallsReset() {
-	SetServed(0) // want `^vego: SetServed may modify served, which CallsReset may not modify; list it in a // @Modifies clause$`
+func callsReset() {
+	setServed(0) // want `^vego: setServed may modify served, which callsReset may not modify; list it in a // @Modifies clause$`
 }
 
 // listsSizes names a variable in Modifies.

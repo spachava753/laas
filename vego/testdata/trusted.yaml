@@ -2218,6 +2218,10 @@ trusted:
     reason: Test helper that assigns Ticks, which the state of its package covers.
     modifies: ['"trustedwrites"']
 
+  trustedwrites.Poke:
+    reason: Test helper whose entry is false on purpose; it writes Table[0].
+    modifies: []
+
 # States of interfaces of another module, and contracts that speak of them.
 state:
   ifacestatelib.Conn:

@@ -15,3 +15,9 @@ func TickListed() { Ticks++ }
 
 // TickState has an entry that lists the state of its package.
 func TickState() { Ticks++ }
+
+// Table is written through its path by Poke.
+var Table = []int{1}
+
+// Poke has an entry that lists nothing, though it writes Table[0].
+func Poke() { Table[0] = 5 }
