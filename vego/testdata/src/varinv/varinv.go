@@ -204,3 +204,42 @@ func Blank() {
 		blank(tags)
 	}
 }
+
+// @Invariant cache2 != nil And (Forall k in cache2 : cache2[k] >= 0)
+var cache2 = map[string]int{}
+
+// touchThenWrite may set one entry, then writes through w; the invariant
+// is kept by frame across the write, since no footprint holds what cache2
+// refers to (F35 of the review of step 2 of part 2).
+//
+// @Requires w != nil
+// @Modifies cache2, w
+// @Ensures True
+func touchThenWrite(w io.Writer, c bool) {
+	if c {
+		cache2["a"] = 1
+	}
+	w.Write([]byte("x"))
+}
+
+// writeThenReset writes through w and may replace the map.
+//
+// @Requires w != nil
+// @Modifies cache2, w
+// @Ensures True
+func writeThenReset(w io.Writer) {
+	w.Write([]byte("x"))
+	if len(cache2) > 1000000 {
+		cache2 = map[string]int{}
+	}
+}
+
+// writeNegative breaks it before the write.
+//
+// @Requires w != nil
+// @Modifies cache2, w
+// @Ensures True
+func writeNegative(w io.Writer) {
+	cache2["a"] = -1
+	w.Write([]byte("x"))
+} // want `^vego: invariant of cache2 may not hold on return: \(Forall k in cache2 : cache2\[k\] >= 0\)`

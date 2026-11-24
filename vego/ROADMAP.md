@@ -1155,6 +1155,20 @@ Step 2 of part 2, with the repairs after the review of step 1 (F29 to F32), at t
 - **F31.** A `Modifies` path through a variable, as `entries[k]` with a parameter `k`, reads the parameter: `variableTarget` takes the arguments. Programs: `globals.putEntry` verifies, and `putOther` is refused.
 - **F32.** The guide says what is built: a function that names the variables assumes the invariant. It also gives D5's condition for invariants, that at most one goroutine at a time runs functions of the package that name the group.
 - **Wrong versions caught:** what the package lets out ignored (`letoutp.Bump` verifies), and the names of an invariant outside its group not checked (`lo` accepted).
+
+Repairs after the review of step 2 of part 2 (F33 to F35).
+
+- **F33.** For a call into another package, a trusted call, and a call through a value or an interface method, `callGroups` also counts every exported function and every method with an exported name of the package. Any package can make a value of one and keep it, as the call graph says of a call through a value. Program: `exportedp.Bump` is refused, with `exportedmain` as the unverified form. The assumption under Cycles in "What a proof assumes" now speaks of code of another package that is not verified, as the orchestrator ruled on F6. What verified code of another package runs is what the call graph and `letOut` follow.
+- **F34.** The reader allowance also asks that no result of the callee can hold the parameter's memory or memory derived from it.
+  - **A verified callee:** no result of its ownership summary flows from the parameter, lies inside it, or is unknown.
+  - **A trusted one:** no result holds memory at all, since an unplaced result may be any argument's (F14 of ownership in source).
+
+  Program: `readerbad` (`same` and `slices.Clip` handing `items` back) is refused at the declaration.
+- **F35.** What a variable of a group refers to lies outside every footprint row. Each separation of a listed footprint takes the values on entry of the groups' variables beside the other parameters (`groupRoots` in `enterReaches`), so a footprint layer keeps it.
+  - **Why it is true.** The rules of a group make that memory reached only through its variable: every use reads it, writes through its path, assigns it memory made where it stands, or hands it to a callee that neither keeps nor returns it, and no code that is not verified writes it. So nothing could have converted it into a writer, stored it where a writer reaches, or placed it in a row.
+  - **A rule this needed.** Its initialiser must make what it refers to (`knownMade`, the zero value, or nil), since memory that came from elsewhere may be held by a writer. Program: `varinvbad.alias` is refused.
+  - **Programs:** `varinv.touchThenWrite` and `writeThenReset` verify, the orchestrator's case: a quantified invariant over a map kept across a write through a writer the function lists. `writeNegative` is refused.
+- **Wrong versions caught:** the exported functions left out of `callGroups` (`exportedp.Bump` verifies), the results of a verified reader not checked (`readerbad` refused only at `slices.Clip`, line 36, where it is refused at `same`, line 29), and the group roots left out of the separation (`touchThenWrite` and `writeThenReset` refused). The separation takes the roots only in a function that names a variable of the group: taking them in every function with a listed footprint changed the guide's quoted costs of `Load` and `DropThenAnswer`.
 - **The writes fact in order.** `exportWrites` walks functions and literals in source order, so which write a message names is the same in every run. Before, map order picked it. Sorting at every call through a value cost 13 to 14 s of `go test -count=1 ./vego` (159 s and 160 s against 146 s at the base), since `exportWrites` runs on every package of the build, `runtime` included. The functions are now sorted once and indexed by signature (`sigKey`, which leaves out the names, as `types.Identical` does), and the time at the end of part 2 is 145 s against 140 s at the base, back to back under a load of 5 to 6.
 
 Not built yet:

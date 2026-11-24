@@ -709,6 +709,10 @@ func (v *fnVerifier) enterReaches(st *state) {
 				r.direct = append(r.direct, passedValue{val: v.entry[other], t: other.Type()})
 			}
 		}
+		// What a variable of a group refers to is reached only through the
+		// variable, so it lies outside every footprint too (F35 of the review
+		// of step 2 of part 2).
+		r.direct = append(r.direct, v.groupRoots(st)...)
 		if t.sourcePart {
 			v.separatePart(&r, i, param)
 			v.partApartFromParams(st, t, param)

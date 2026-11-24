@@ -794,6 +794,9 @@ errorsvarsclient	errorsvarsclient.Aliases	4	166	0
 errorsvarsclient	errorsvarsclient.Code	2	75	0
 errorsvarsclient	errorsvarsclient.Named	2	165	0
 errorsvarsclient	errorsvarsclient.SameSlice	1	46	0
+exportedp	exportedp.Bump	13	8829	0
+exportedp	exportedp.Check	5	3691	0
+exportedp	exportedp.init of count, total	2	1059	0
 footprints	(*bufio.Scanner).Scan	1	5236	0
 footprints	(*bufio.Writer).Flush	9	54180	0
 footprints	(*bufio.Writer).Write	1	8078	0
@@ -4071,6 +4074,12 @@ reachclient	reachclient.Tock	3	471	0
 reachclient	reachclient.tick	5	2848	0
 reachclient	reachclient.tock	5	3069	0
 reachlib	reachlib.IncV	7	4616	0
+readerbad	readerbad.grow	5	5477	0
+readerbad	readerbad.poke	8	9530	0
+readerbad	readerbad.same	3	1584	0
+readerbad	readerbad.stash	6	20080	0
+readerbad	readerbad.stashClip	10	102286	2
+readerbad	slices.Clip	1	4777	0
 rejected	rejected.AfterBrace	1	163	0
 rejected	rejected.BadTarget	0	0	0
 rejected	rejected.BlockAfter	2	141	0
@@ -5074,6 +5083,7 @@ varinv	varinv.forget	8	14519	0
 varinv	varinv.hit	8	5827	0
 varinv	varinv.init	13	8204	0
 varinv	varinv.init of cache, size	2	1207	0
+varinv	varinv.init of cache2	2	1521	0
 varinv	varinv.init of depth	1	417	0
 varinv	varinv.init of hits	1	417	0
 varinv	varinv.init of limit	1	425	0
@@ -5087,7 +5097,10 @@ varinv	varinv.reprice	11	21537	0
 varinv	varinv.reset	7	4663	0
 varinv	varinv.setLimit	6	4068	0
 varinv	varinv.setPrice	7	11580	0
+varinv	varinv.touchThenWrite	21	145880	0
 varinv	varinv.writeBroken	13	14563	0
+varinv	varinv.writeNegative	16	266262	0
+varinv	varinv.writeThenReset	14	55391	0
 varinvbad	varinvbad.Table	1	46	0
 varinvbad	varinvbad.init of lo	0	0	0
 varinvbad	varinvbad.setHi	5	2848	0

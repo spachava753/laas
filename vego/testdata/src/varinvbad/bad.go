@@ -42,3 +42,8 @@ func setLo() {
 // @Modifies hi
 // @Ensures True
 func setHi() { hi = 1 }
+
+var source = map[string]int{}
+
+// @Invariant |alias| >= 0 // want `^vego: the invariant of alias cannot be relied on: the initialiser of alias does not make what it refers to, so something else may hold it$`
+var alias = source

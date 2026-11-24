@@ -147,6 +147,26 @@ func (pv *pkgVerifier) checkVarGroups() {
 			refuse("%s; every change of a variable with an invariant must be made by a function of the package that is verified, which restores it, so call one", where)
 			continue
 		}
+		// What a variable of the group refers to must be made by its
+		// initialiser, so that nothing else held it before either.
+		for _, variable := range g.vars {
+			if !holdsMemory(variable.Type()) {
+				continue
+			}
+			for _, init := range pv.info.InitOrder {
+				if len(init.Lhs) == 1 && init.Lhs[0] == variable {
+					if known := pv.knownOf(init.Rhs, variable.Type(), true); known.Kind != knownMade && known.Kind != knownZero && !pv.info.Types[init.Rhs].IsNil() {
+						refuse("the initialiser of %s does not make what it refers to, so something else may hold it", variable.Name())
+					}
+				}
+			}
+			if g.refused != "" {
+				break
+			}
+		}
+		if g.refused != "" {
+			continue
+		}
 		if where := pv.groupEscape(g); where != "" {
 			refuse("%s, so a write through another reference could break the invariant without naming the variable", where)
 			continue
@@ -528,6 +548,16 @@ func (v *fnVerifier) callGroups(call *ast.CallExpr, fn *funcInfo) []*varGroup {
 	// out into memory it did not make (F13).
 	if fn.obj == nil || fn.obj.Pkg() != v.pass.Pkg || fn.trust != nil || fn.valueOf != nil || fn.methodOf != nil {
 		reached = append(reached, v.letOut()...)
+		// And every exported function and method with an exported name,
+		// of which any package can make a value and keep it (F33 of the
+		// review of step 2 of part 2), as the call graph says of a call
+		// through a value.
+		g := v.callGraph()
+		for obj, node := range g.byObj {
+			if obj.Exported() {
+				reached = append(reached, node)
+			}
+		}
 	}
 	for _, node := range reached {
 		for _, g := range v.varGroups {
@@ -591,13 +621,30 @@ func (pv *pkgVerifier) handedToReader(stack []ast.Node) bool {
 	case fn == nil:
 		return false
 	case fn.trust != nil:
+		// A result that holds memory may be any argument's, unless the
+		// entry says it is new (F34 of the review of step 2 of part 2).
+		for result := range sig.Results().Variables() {
+			if holdsMemory(result.Type()) {
+				return false
+			}
+		}
 		return !slices.ContainsFunc(fn.trust.keeps, func(item trustKeep) bool { return item.name == param.Name() }) &&
 			!slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.name == param.Name() })
 	}
 	summary := pv.ownSummaryOf(fn)
 	at := slices.IndexFunc(fn.params, func(p *types.Var) bool { return p.Name() == param.Name() })
-	return summary != nil && at >= 0 && at < len(summary.keeps) && !summary.keeps[at] &&
-		!slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.name == param.Name() })
+	if summary == nil || at < 0 || at >= len(summary.keeps) || summary.keeps[at] ||
+		slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.name == param.Name() }) {
+		return false
+	}
+	// No result may hold what the parameter refers to, or memory derived
+	// from it (F34).
+	for _, result := range summary.results {
+		if result.unknown || slices.Contains(result.from, at) || slices.Contains(result.inside, at) {
+			return false
+		}
+	}
+	return true
 }
 
 // letOut returns the nodes of the call graph, functions, methods, and
@@ -708,4 +755,42 @@ func (pv *pkgVerifier) letOut() []*callNode {
 	}
 	pv.letOutNodes = found
 	return found
+}
+
+// groupRoots returns the values on entry of the variables of the groups of
+// the package that refer to memory. The rules of a group (checkVarGroups)
+// make that memory reached only through its variable: its initialiser or
+// an assignment made it, every use reads it, writes through its path, or
+// hands it to a callee that neither keeps nor returns it, so nothing could
+// have converted it into a writer or stored it where a writer reaches. So
+// it lies outside every footprint row, as what the parameters reach does
+// by the function's own assumption.
+func (v *fnVerifier) groupRoots(st *state) []passedValue {
+	var roots []passedValue
+	// Only a function that names a variable of a group can read what it
+	// refers to: no callee hands it back.
+	for _, g := range v.groupsNamed(v.fn) {
+		for _, variable := range g.vars {
+			t := variable.Type()
+			if !holdsMemory(t) {
+				continue
+			}
+			var val value
+			if v.isAssigned(variable) {
+				v.noteGlobal(st, variable)
+				val = v.fetch(nil, memory{}, v.globalCells(variable), globalRef(variable), logic.IntLit(0))
+			} else {
+				saved := v.groupReading
+				v.groupReading = true
+				fixed, why := v.fixedValue(st, variable)
+				v.groupReading = saved
+				if why != "" {
+					continue
+				}
+				val = fixed
+			}
+			roots = append(roots, passedValue{val: val, t: t})
+		}
+	}
+	return roots
 }
