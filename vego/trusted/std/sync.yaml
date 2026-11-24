@@ -40,6 +40,10 @@ state:
 # method on a nil pointer dereferences it and panics.
 trusted:
   (*sync.Mutex).Lock:
+    # Isolated: read from the source of Go 1.26.6 and 1.27.3, it calls only the
+    # runtime's semaphore functions and the race detector's hooks, which run no
+    # code of a program.
+    isolated: true
     reason: >-
       Documented: "If the lock is already in use, the calling goroutine blocks
       until the mutex is available." A goroutine that does not hold m gets it
@@ -49,6 +53,10 @@ trusted:
     modifies: [m]
     ensures: ["held(m')"]
   (*sync.Mutex).TryLock:
+    # Isolated: read from the source of Go 1.26.6 and 1.27.3, it calls only the
+    # runtime's semaphore functions and the race detector's hooks, which run no
+    # code of a program.
+    isolated: true
     reason: >-
       Documented: "TryLock tries to lock m and reports whether it succeeded."
       It never waits. When it reports true, the calling goroutine holds m,
@@ -58,6 +66,10 @@ trusted:
     modifies: [m]
     ensures: ["result -> ~held(m) And held(m')", "~result -> (held(m') <-> held(m))"]
   (*sync.Mutex).Unlock:
+    # Isolated: read from the source of Go 1.26.6 and 1.27.3, it calls only the
+    # runtime's semaphore functions and the race detector's hooks, which run no
+    # code of a program.
+    isolated: true
     reason: >-
       Documented: "It is a run-time error if m is not locked on entry to
       Unlock." A goroutine that holds m has it locked, so Unlock returns and
@@ -66,6 +78,10 @@ trusted:
     modifies: [m]
     ensures: ["~held(m')"]
   (*sync.RWMutex).Lock:
+    # Isolated: read from the source of Go 1.26.6 and 1.27.3, it calls only the
+    # runtime's semaphore functions and the race detector's hooks, which run no
+    # code of a program.
+    isolated: true
     reason: >-
       Documented: "If the lock is already locked for reading or writing, Lock
       blocks until the lock is available." The calling goroutine must hold
@@ -74,6 +90,10 @@ trusted:
     modifies: [rw]
     ensures: ["held(rw')", "~rheld(rw')"]
   (*sync.RWMutex).TryLock:
+    # Isolated: read from the source of Go 1.26.6 and 1.27.3, it calls only the
+    # runtime's semaphore functions and the race detector's hooks, which run no
+    # code of a program.
+    isolated: true
     reason: >-
       Documented: "TryLock tries to lock rw for writing and reports whether it
       succeeds." It never waits, and fails while any lock is held, the
@@ -85,6 +105,10 @@ trusted:
       - "~result -> (held(rw') <-> held(rw))"
       - "rheld(rw') <-> rheld(rw)"
   (*sync.RWMutex).Unlock:
+    # Isolated: read from the source of Go 1.26.6 and 1.27.3, it calls only the
+    # runtime's semaphore functions and the race detector's hooks, which run no
+    # code of a program.
+    isolated: true
     reason: >-
       Documented: "It is a run-time error if rw is not locked for writing on
       entry to Unlock." A goroutine that holds the write lock has it locked.
@@ -93,6 +117,10 @@ trusted:
     modifies: [rw]
     ensures: ["~held(rw')", "rheld(rw') <-> rheld(rw)"]
   (*sync.RWMutex).RLock:
+    # Isolated: read from the source of Go 1.26.6 and 1.27.3, it calls only the
+    # runtime's semaphore functions and the race detector's hooks, which run no
+    # code of a program.
+    isolated: true
     reason: >-
       Documented: it "should not be used for recursive read locking; a blocked
       Lock call excludes new readers from acquiring the lock", and RLock waits
@@ -103,6 +131,10 @@ trusted:
     modifies: [rw]
     ensures: ["rheld(rw')", "~held(rw')"]
   (*sync.RWMutex).TryRLock:
+    # Isolated: read from the source of Go 1.26.6 and 1.27.3, it calls only the
+    # runtime's semaphore functions and the race detector's hooks, which run no
+    # code of a program.
+    isolated: true
     reason: >-
       Documented: "TryRLock tries to lock rw for reading and reports whether
       it succeeds." It never waits. The calling goroutine must not hold a read
@@ -115,6 +147,10 @@ trusted:
       - "~result -> ~rheld(rw')"
       - "held(rw') <-> held(rw)"
   (*sync.RWMutex).RUnlock:
+    # Isolated: read from the source of Go 1.26.6 and 1.27.3, it calls only the
+    # runtime's semaphore functions and the race detector's hooks, which run no
+    # code of a program.
+    isolated: true
     reason: >-
       Documented: "It is a run-time error if rw is not locked for reading on
       entry to RUnlock." A goroutine that holds a read lock has rw locked for

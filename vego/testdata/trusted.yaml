@@ -2256,6 +2256,19 @@ trusted:
     reason: Test helper that writes to v when it is a writer; it runs none of the code v carries by its entry, which says nothing of it.
     modifies: [v]
 
+  isolatedq.Hand:
+    reason: Test helper that runs what b holds, and nothing else.
+    requires: ["b != nil"]
+    runs: [b]
+    isolated: true
+    modifies: []
+
+  isolatedq.Look:
+    reason: Test helper that reads b and runs nothing.
+    requires: ["b != nil"]
+    isolated: true
+    modifies: []
+
 # States of interfaces of another module, and contracts that speak of them.
 state:
   ifacestatelib.Conn:

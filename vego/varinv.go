@@ -641,7 +641,10 @@ func (v *fnVerifier) callGroups(call *ast.CallExpr, fn *funcInfo) []*varGroup {
 	}
 	// A call into code of another package may run what the package let
 	// out into memory it did not make (F13).
-	if fn.obj == nil || fn.obj.Pkg() != v.pass.Pkg || fn.trust != nil || fn.valueOf != nil || fn.methodOf != nil {
+	// A call of an isolated trusted function that is handed no code runs
+	// nothing of the package (F11 of the review of the design of F32).
+	isolated := fn.trust != nil && fn.obj != nil && v.isolatedCall(call, fn.obj)
+	if !isolated && (fn.obj == nil || fn.obj.Pkg() != v.pass.Pkg || fn.trust != nil || fn.valueOf != nil || fn.methodOf != nil) {
 		reached = append(reached, v.outwardNodes()...)
 	}
 	for _, node := range reached {

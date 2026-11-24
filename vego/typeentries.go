@@ -379,6 +379,9 @@ func (entry *trustEntry) fingerprint() string {
 	list("vouches", entry.vouches)
 	list("runs", entry.runs)
 	list("formats", entry.formats)
+	if entry.isIsolated() {
+		parts = append(parts, "isolated")
+	}
 	for _, call := range entry.calls {
 		parts = append(parts, fmt.Sprintf("calls %s(%s) %v", call.name, strings.Join(call.params, ", "), call.deterministic))
 		list("calls requires", call.requires)

@@ -661,7 +661,7 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 			}
 			if callee := pv.staticCalleeAt(n); callee != nil {
 				if callee.Pkg() != pv.pass.Pkg {
-					node.out = true
+					node.out = node.out || !pv.isolatedCall(n, callee)
 					// What a call of a function of another package may run of
 					// the code its arguments and receiver hold.
 					origin := pv.originOf(callee)

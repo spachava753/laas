@@ -1,5 +1,13 @@
 version: 1
 
+# Every entry of this file is isolated: read from the source of Go 1.26.6 and
+# 1.27.3, package fmt keeps no hook that another call can set. Its only
+# package-level state is the pool of printers it fills itself; Print, Printf,
+# and Println write os.Stdout, an *os.File, which holds no code. What fmt runs
+# is the Format, GoString, Error, and String methods of the values it is
+# handed, and Write of the writer it is handed.
+isolated: true
+
 trusted:
   fmt.Sprintf:
     reason: >-

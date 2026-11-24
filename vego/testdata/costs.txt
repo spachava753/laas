@@ -3048,6 +3048,18 @@ iowrap	iowrap.ToBoth	49	290235	0
 iowrap	iowrap.drain	1	46	0
 iowrap	keepslib.Consume	1	711	0
 iowrap	keepslib.Joined	1	5372	0
+isolatedg	fmt.Sprint	1	3498	0
+isolatedg	isolatedg.Check	5	3691	0
+isolatedg	isolatedg.Formats	15	10837	0
+isolatedg	isolatedg.Hands	16	12383	0
+isolatedg	isolatedg.Logs	15	11245	0
+isolatedg	isolatedg.Plain	13	11234	0
+isolatedg	isolatedg.Upper	13	17095	0
+isolatedg	isolatedg.init of count, total	2	1059	0
+isolatedg	isolatedq.Hand	1	384	0
+isolatedg	isolatedq.Look	1	1014	0
+isolatedg	log.Print	1	2741	0
+isolatedg	strings.ToUpper	1	2096	0
 jsondec	(*encoding/json.Decoder).Decode	1	1782	0
 jsondec	(*jsondec.Counting).Read	20	25068	0
 jsondec	(*jsondec.Cycle).Read	34	66652	0

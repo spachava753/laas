@@ -42,8 +42,14 @@ type trustFormula struct {
 // cannot follow it. Callers must prove what it requires and may assume what
 // it ensures.
 type trustEntry struct {
-	key      string
-	reason   string
+	key    string
+	reason string
+	// isolated is the claim that the function runs no code but what the
+	// call hands it through its arguments and receiver, and reaches no code
+	// through memory that another call set, also not through any function
+	// it calls (F11 of the review of the design of F32). A call of it that
+	// is handed no code reaches no code of the calling package.
+	isolated bool
 	requires []trustFormula
 	ensures  []trustFormula
 	modifies []trustFormula
@@ -119,6 +125,9 @@ type trustFile struct {
 	path    string
 	content []byte
 	shipped bool
+	// isolated is set when the file claims of every entry it holds what
+	// isolated claims of one; see trustEntry.isolated.
+	isolated bool
 	entries map[string]*trustEntry
 	// states holds the states the file declares, by the type they belong
 	// to, as in sync.Mutex. Only the shipped files may declare one of a
@@ -209,11 +218,17 @@ func parseTrustFile(path string, content []byte, shipped bool) *trustFile {
 			file.addFields("notWrittenBy", file.notWritten, value)
 		case "progresses":
 			file.addFields("progresses", file.progresses, value)
+		case "isolated":
+			if value.Kind != yaml.ScalarNode || value.Value != "true" {
+				file.problem(value.Line, "isolated must be true, or left out")
+				continue
+			}
+			file.isolated = true
 		default:
 			// A project file cannot declare owns, so it is not offered one.
-			expected := "version, trusted, or state"
+			expected := "version, trusted, state, or isolated"
 			if file.shipped {
-				expected = "version, trusted, state, owns, scoped, hidden, notWrittenBy, or progresses"
+				expected = "version, trusted, state, isolated, owns, scoped, hidden, notWrittenBy, or progresses"
 			}
 			file.problem(key.Line, "unknown key %q; expected %s", key.Value, expected)
 		}
@@ -337,6 +352,12 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			f.addAsserts(entry, value)
 		case "prints":
 			f.addPrints(entry, value)
+		case "isolated":
+			if value.Kind != yaml.ScalarNode || value.Value != "true" {
+				f.problem(value.Line, "isolated of %s must be true, or left out", entry.key)
+				continue
+			}
+			entry.isolated = true
 		case "receiver":
 			if value.Kind != yaml.ScalarNode {
 				f.problem(value.Line, "the receiver of %s must be a name", entry.key)
@@ -344,7 +365,7 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			}
 			entry.receiver = trustFormula{text: value.Value, line: value.Line, col: value.Column}
 		default:
-			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, receiver, requires, ensures, modifies, stores, runs, keeps, asserts, vouches, formats, encodes, decodes, prints, or calls",
+			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, receiver, requires, ensures, modifies, stores, runs, keeps, asserts, vouches, formats, encodes, decodes, prints, calls, or isolated",
 				field.Value, entry.key)
 		}
 	}
@@ -495,6 +516,9 @@ type EntryUse struct {
 	Key     string
 	Reason  string
 	Shipped bool
+	// Isolated is set when the entry claims that the function runs no code
+	// but what the call hands it (trustEntry.isolated).
+	Isolated bool
 	File    string
 	Line    int
 	// Unpredictable is set when the function returns an error and its
@@ -1247,7 +1271,7 @@ func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 			}
 		}
 		pv.usage.Entries = append(pv.usage.Entries, &EntryUse{
-			Key: entry.key, Reason: entry.reason, Shipped: entry.file.shipped,
+			Key: entry.key, Reason: entry.reason, Shipped: entry.file.shipped, Isolated: entry.isIsolated(),
 			File: entry.file.path, Line: entry.line, Runs: runs, Keeps: keepsDescribed(entry), Asserts: assertsDescribed(entry), Vouches: vouches, Formats: formats, Encodes: encodes, Decodes: decodes, Callbacks: callbacks,
 			Every: every, Relied: []string{pv.pass.Pkg.Path()}, Fingerprint: entry.fingerprint(), States: states,
 		})
@@ -1319,4 +1343,10 @@ func nameUnnamed(fn *funcInfo, entry *trustEntry) {
 			}
 		}
 	}
+}
+
+// isIsolated reports whether an entry, or the file that holds it, claims
+// that the function runs no code but what the call hands it.
+func (entry *trustEntry) isIsolated() bool {
+	return entry.isolated || entry.file != nil && entry.file.isolated
 }

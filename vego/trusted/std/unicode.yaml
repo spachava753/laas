@@ -1,5 +1,10 @@
 version: 1
 
+# Every entry of this file is isolated: read from the source of Go 1.26.6 and
+# 1.27.3, the functions of package unicode read its tables, which hold no
+# code, and call nothing that can be set.
+isolated: true
+
 # The predicates of package unicode are defined by Unicode's tables. Each
 # entry says what they report for ASCII, whose categories Unicode keeps
 # fixed, and for a value that is no code point; it says nothing of any

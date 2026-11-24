@@ -485,6 +485,29 @@ func (pv *pkgVerifier) foreignBoxedWhy(variable *types.Var) string {
 		"by listing the state of package %s", pv.spelling(variable), variable.Pkg().Path(), variable.Pkg().Name(), variable.Pkg().Name())
 }
 
+// isolatedCall reports whether a call is of a trusted function whose entry
+// claims that it runs no code but what the call hands it, and hands it
+// none: no argument and no receiver can hold code (F11 of the review of the
+// design of F32). Such a call reaches no code of the package.
+func (pv *pkgVerifier) isolatedCall(call *ast.CallExpr, callee *types.Func) bool {
+	entry := pv.entryFor(pv.originOf(callee).FullName())
+	if entry == nil || !entry.isIsolated() {
+		return false
+	}
+	operands := slices.Clone(call.Args)
+	if sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok {
+		if selection := pv.info.Selections[sel]; selection != nil && selection.Kind() == types.MethodVal {
+			operands = append(operands, sel.X)
+		}
+	}
+	for _, e := range operands {
+		if holdsCode(pv.info.TypeOf(e), map[types.Type]bool{}) {
+			return false
+		}
+	}
+	return true
+}
+
 // methodExpression reports whether a call is of a method expression, as
 // (*T).M(x, y), which hands the receiver as the first argument.
 func (pv *pkgVerifier) methodExpression(call *ast.CallExpr) bool {

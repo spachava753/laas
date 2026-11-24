@@ -1,5 +1,10 @@
 version: 1
 
+# Every entry of this file is isolated: read from the source of Go 1.26.6 and
+# 1.27.3, package unicode/utf8 has no package-level variable that holds code
+# and calls nothing that can be set.
+isolated: true
+
 trusted:
   unicode/utf8.RuneCountInString:
     reason: Documented to return the number of runes in s; every rune occupies at least one byte.

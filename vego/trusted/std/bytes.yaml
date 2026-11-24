@@ -1,5 +1,13 @@
 version: 1
 
+# Every entry of this file is isolated: read from the source of Go 1.26.6 and
+# 1.27.3, package bytes has no package-level variable that holds code and no
+# function that stores one; its only exported variable is the error
+# ErrTooLarge, whose methods it never calls. The functions that take a
+# function (IndexFunc, Map, FieldsFunc, and the others) call only that
+# function, and the methods of Buffer run nothing.
+isolated: true
+
 owns:
   bytes.Buffer:
     fields: [buf]

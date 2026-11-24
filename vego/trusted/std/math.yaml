@@ -1,5 +1,10 @@
 version: 1
 
+# Every entry of this file is isolated: read from the source of Go 1.26.6 and
+# 1.27.3, package math has no package-level variable that holds code and calls
+# nothing that can be set.
+isolated: true
+
 # Floats are opaque to vego: no formula can say anything of a float's value.
 # Each entry says only what is true whatever the value: the function returns
 # for every argument, panicking for none, and writes nothing. That is what

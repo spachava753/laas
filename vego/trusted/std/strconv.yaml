@@ -1,5 +1,11 @@
 version: 1
 
+# Every entry of this file is isolated: read from the source of Go 1.26.6 and
+# 1.27.3, package strconv calls no function value and no method of an
+# interface; its exported variables are the errors ErrRange and ErrSyntax,
+# which it stores in a *NumError and whose methods it never calls.
+isolated: true
+
 trusted:
   strconv.Itoa:
     reason: Documented to return the decimal representation of i, which has at least one digit.
