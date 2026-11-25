@@ -195,6 +195,19 @@ func (pv *pkgVerifier) oTypedBy(s types.Type) *types.TypeName {
 	return byContract
 }
 
+// hasMethodsOf reports whether s has each method of x, from x's
+// declaration or under a contract, as oTypedBy asks of a member of O_S.
+func (pv *pkgVerifier) hasMethodsOf(s types.Type, x *types.TypeName) bool {
+	for method := range x.Type().Underlying().(*types.Interface).Methods() {
+		own, _, _ := types.LookupFieldOrMethod(s, false, method.Pkg(), method.Name())
+		fn, ok := own.(*types.Func)
+		if !ok || !types.Identical(fn.Type(), method.Type()) || fn != method && pv.methodContract(fn) == nil {
+			return false
+		}
+	}
+	return true
+}
+
 // oTypedByDeclaration reports whether s is O-typed by a member X of O_S
 // each of whose methods s has from X's declaration, which needs no proof.
 func (pv *pkgVerifier) oTypedByDeclaration(s types.Type) bool {
@@ -293,10 +306,43 @@ func (pv *pkgVerifier) optionalSourceWhy(from, want types.Type) string {
 	}
 	shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(pv.pass.Pkg)) }
 	if !pv.oTyped(from) {
-		return fmt.Sprintf("code given %s %s may assert it to %s and the other interfaces whose every method has a trust entry, as io.WriteString asserts its writer to io.StringWriter, "+
-			"and %s does not have every method of such an interface from its declaration or under a contract that implies the entry, so its values were never checked, assumed, "+
-			"or vouched for against them",
-			article(shown(want)), shown(want), shown(pv.oShapedFor(want)[0].Type()), shown(from))
+		// What code given a want may assert it to and use, beyond want's
+		// own methods.
+		own := slices.Collect(want.Underlying().(*types.Interface).Methods())
+		var beyond []string
+		for _, x := range pv.optionalOf(want) {
+			for method := range x.Type().Underlying().(*types.Interface).Methods() {
+				if !slices.Contains(own, method) {
+					beyond = append(beyond, shown(x.Type()))
+					break
+				}
+			}
+		}
+		asserted := "the interfaces whose every method has a trust entry"
+		if len(beyond) > 0 {
+			asserted = strings.Join(beyond, " and ")
+		}
+		// A source that has the methods of a member of O, from its
+		// declaration or under a contract, whose O lacks it: the member's
+		// package is not in the build of the package that declares it (F18
+		// of the review of S1).
+		for _, key := range slices.Sorted(maps.Keys(pv.optionalSet())) {
+			x := pv.optional[key]
+			if slices.Contains(pv.optionalOf(from), x) || !pv.hasMethodsOf(from, x) {
+				continue
+			}
+			named, ok := types.Unalias(from).(*types.Named)
+			if !ok || named.Obj().Pkg() == nil {
+				break
+			}
+			return fmt.Sprintf("code given %s %s may assert it to %s and use what it finds, and %s has the methods of %s, but package %s, which declares %s, does not have package %s in its build, "+
+				"so the values of %s were never checked against what %s is checked against", article(shown(want)), shown(want), asserted, shown(from), shown(x.Type()),
+				named.Obj().Pkg().Path(), shown(from), x.Pkg().Path(), shown(from), shown(want))
+		}
+		return fmt.Sprintf("code given %s %s may assert it to %s and use what it finds, as io.WriteString asserts its writer to io.StringWriter, "+
+			"and %s does not have every method of an interface whose every method has a trust entry from its declaration or under a contract that implies the entry, so its values "+
+			"were never checked, assumed, or vouched for against them",
+			article(shown(want)), shown(want), asserted, shown(from))
 	}
 	have := pv.optionalOf(from)
 	for _, x := range pv.optionalOf(want) {
@@ -321,7 +367,7 @@ func (pv *pkgVerifier) optionalFinder(x *types.TypeName) string {
 		for key, entry := range file.entries {
 			for _, item := range entry.asserts {
 				for _, dest := range item.dests {
-					if dest.text == optionalKey(x) || strings.TrimSuffix(dest.text, "") == x.Pkg().Name()+"."+x.Name() {
+					if dest.text == optionalKey(x) || dest.text == x.Pkg().Name()+"."+x.Name() {
 						finders = append(finders, key)
 					}
 				}
@@ -331,7 +377,18 @@ func (pv *pkgVerifier) optionalFinder(x *types.TypeName) string {
 	if len(finders) == 0 {
 		return "code that asserts it to " + x.Pkg().Name() + "." + x.Name()
 	}
-	sort.Strings(finders)
+	// The function of io whose name says what it does first, then a
+	// function of a package before a method.
+	if slices.Contains(finders, "io.WriteString") {
+		return "io.WriteString"
+	}
+	sort.Slice(finders, func(i, j int) bool {
+		a, b := strings.HasPrefix(finders[i], "("), strings.HasPrefix(finders[j], "(")
+		if a != b {
+			return b
+		}
+		return finders[i] < finders[j]
+	})
 	return finders[0]
 }
 

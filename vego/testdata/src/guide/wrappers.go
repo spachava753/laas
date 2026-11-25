@@ -147,3 +147,31 @@ func WriteCountFormatted(w io.Writer, n int) (err error) {
 	}
 	return bw.Flush()
 }
+
+// CopySome copies from src to dst in at most 1000 reads of 4096 bytes.
+//
+// @Requires dst != nil And src != nil
+// @Modifies dst, src
+// @Ensures 0 <= written <= 4096000
+func CopySome(dst io.Writer, src io.Reader) (written int, err error) {
+	buf := make([]byte, 4096)
+	// @Invariant 0 <= i And i <= 1000 And 0 <= written And written <= 4096 * i
+	// @Variant 1000 - i
+	for i := 0; i < 1000; i++ {
+		n, rerr := src.Read(buf)
+		if n > 0 {
+			m, werr := dst.Write(buf[:n])
+			written += m
+			if werr != nil {
+				return written, werr
+			}
+		}
+		if rerr == io.EOF {
+			return written, nil
+		}
+		if rerr != nil {
+			return written, rerr
+		}
+	}
+	return written, nil
+}

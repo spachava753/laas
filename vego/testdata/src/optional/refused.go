@@ -1,7 +1,10 @@
 package optional
 
 import (
+	"bufio"
+	"fmt"
 	"io"
+	"strings"
 
 	"optionalc"
 )
@@ -157,4 +160,85 @@ func KeepsAcrossWrite() (r int) {
 	var w io.Writer = q
 	_, _ = w.Write([]byte("x"))
 	return q.N // want `postcondition may not hold: r = 0`
+}
+
+// KeepsNThroughWriteString hands q to io.WriteString, which finds its
+// WriteString: q.N is not proved unchanged (attack 1 of the design).
+//
+// @Requires q != nil
+// @Modifies q
+// @Ensures r
+func KeepsNThroughWriteString(q *Quiet) (r bool) {
+	before := q.N
+	_, _ = io.WriteString(q, "x")
+	return q.N == before // want `postcondition may not hold: r`
+}
+
+// bufferLong writes a long string through a buffered writer over w, which
+// hands it to w's WriteString when w has one.
+//
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func bufferLong(w io.Writer) {
+	bw := bufio.NewWriter(w)
+	_, _ = bw.WriteString(strings.Repeat("x", 5000))
+}
+
+// KeepsNBuffered hands q to bufferLong: q.N is not proved unchanged.
+//
+// @Requires q != nil
+// @Modifies q
+// @Ensures r
+func KeepsNBuffered(q *Quiet) (r bool) {
+	before := q.N
+	bufferLong(q)
+	return q.N == before // want `postcondition may not hold: r`
+}
+
+// putLit is trusted; its entry lists an interface literal with the method
+// set of io.StringWriter, whose WriteString is no method of a member of O.
+func putLit(w io.Writer, s string) {
+	if sw, ok := w.(interface{ WriteString(string) (int, error) }); ok {
+		sw.WriteString(s)
+	}
+}
+
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func UsesPutLit(w io.Writer) {
+	putLit(w, "x") // want `the trusted contract of optional.putLit \(trusted.yaml:\d+\) cannot be used: its asserts lists interface\{ WriteString\(string\) \(int, error\) \} for w, an interface with the method WriteString, and what it holds may hold a value of io.Writer, which lacks it`
+}
+
+// putAny is trusted; its entry lists io.Writer over an any, which is not
+// O-typed.
+func putAny(x any) {
+	if w, ok := x.(io.Writer); ok {
+		w.Write([]byte("x"))
+	}
+}
+
+// @Requires x != nil
+// @Ensures True
+func UsesPutAny(x any) {
+	putAny(x) // want `the trusted contract of optional.putAny \(trusted.yaml:\d+\) cannot be used: its asserts lists io.Writer for x, an interface with the method Write, and what it holds may hold a value of any, which lacks it`
+}
+
+// Pair holds a writer and a stringer: the second is not O-typed.
+type Pair struct {
+	W io.Writer
+	S fmt.Stringer
+}
+
+// putPair is trusted; its entry lists io.StringWriter over a Pair, which
+// reaches a fmt.Stringer, which lacks WriteString and is not O-typed (the
+// shape of runsclaims.HandsTwo).
+func putPair(p Pair) {}
+
+// @Requires p.W != nil
+// @Modifies p.W
+// @Ensures True
+func UsesPutPair(p Pair) {
+	putPair(p) // want `the trusted contract of optional.putPair \(trusted.yaml:\d+\) cannot be used: its asserts lists io.StringWriter for p, an interface with the method WriteString, and what it holds may hold a value of fmt.Stringer, which lacks it`
 }

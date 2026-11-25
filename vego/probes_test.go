@@ -54,6 +54,8 @@ var probedBy = map[string]string{
 	"(*bufio.Writer).Write":           "checkWriterEntries, with a keptWriter",
 	"(*bufio.Writer).WriteByte":       "checkWriterEntries, with a keptWriter",
 	"(*bufio.Writer).Flush":           "checkWriterEntries, with a keptWriter",
+	"(*bufio.Writer).WriteString":     "checkWriterEntries, with a keptWriter",
+	"io.WriteString":                  "checkHTTPEntries, with a probedWriter whose WriteString is the writer's",
 	"(*encoding/json.Encoder).Encode": "TestJSONEntries, with the recorder of testdata/jsonharness",
 	"fmt.Fprintf":                     "keptFormatting, with a keptWriter",
 	"fmt.Fprint":                      "keptFormatting, with a keptWriter",

@@ -1320,6 +1320,35 @@ trusted:
     requires: ["~ended(c)"]
     modifies: [c]
     ensures: ["ended(c')"]
+  optionalio.put:
+    reason: Writes s to w, through WriteString when w has one, and calls nothing else of w.
+    requires: ["w != nil"]
+    runs: [w]
+    asserts:
+      w: [io.StringWriter]
+    modifies: [w]
+    vouches: [w]
+  optional.putLit:
+    reason: A test of an entry that lists an interface literal with the methods of io.StringWriter.
+    requires: ["w != nil"]
+    runs: [w]
+    asserts:
+      w: ["interface{ WriteString(string) (int, error) }"]
+    modifies: [w]
+    vouches: [w]
+  optional.putAny:
+    reason: A test of an entry that lists io.Writer over an any.
+    runs: [x]
+    asserts:
+      x: [io.Writer]
+    modifies: []
+  optional.putPair:
+    reason: A test of an entry that lists io.StringWriter over a struct that reaches a fmt.Stringer.
+    runs: [p]
+    asserts:
+      p: [io.StringWriter]
+    modifies: [p.W]
+    vouches: [p]
   optional.getAny:
     reason: Returns a new value of its own, made over nothing of w; it vouches for nothing, which an any result does not need.
     requires: ["w != nil"]

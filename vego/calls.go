@@ -231,6 +231,26 @@ var noEntryCan = map[string]string{
 		"so no trusted contract for it can be true; compare with an error variable, or use errors.Is",
 	"errors.AsType": "it runs the As and Unwrap methods of the errors it searches, so no trusted contract for it can be true; " +
 		"compare with an error variable, or use errors.Is",
+	// Each reads until its reader ends, which a reader that never ends
+	// or never makes progress breaks, and an entry claims that its
+	// function returns (D2 of F35; ReadFile and ReadString for the same
+	// reason).
+	"io.Copy": copyRemedy("it reads from src until src returns io.EOF, so it does not return from a reader that never ends, and it calls the ReadFrom of dst " +
+		"or the WriteTo of src, which no entry covers, since they too read or write until the end"),
+	"io.CopyBuffer": copyRemedy("it reads from src until src returns io.EOF, so it does not return from a reader that never ends, and it calls the ReadFrom of dst " +
+		"or the WriteTo of src, which no entry covers, since they too read or write until the end"),
+	"io.CopyN": copyRemedy("it loops for ever over a reader that returns no bytes and no error, which the documentation of io.Reader allows, and it calls the ReadFrom of dst, " +
+		"which no entry covers"),
+	"io.ReadAll":               copyRemedy("it reads until the reader returns io.EOF, growing its buffer, so a reader that never ends makes it fail for want of memory"),
+	"(*bufio.Writer).ReadFrom": copyRemedy("it reads from r until r returns io.EOF, so it does not return from a reader that never ends"),
+	"(*bufio.Reader).WriteTo":  copyRemedy("it reads from the reader it keeps until that returns io.EOF, so it does not return from a reader that never ends"),
+}
+
+// copyRemedy completes the message of noEntryCan for a function that
+// reads until its reader ends.
+func copyRemedy(why string) string {
+	return why + "; an entry claims that its function returns, so none ships; copy with a loop that calls Read at most a number of times you choose " +
+		"and writes what each Read returned with Write, under a // @Variant annotation, as the guide shows under Copying from a reader to a writer"
 }
 
 // contractFor returns the contract a call is checked against, after making

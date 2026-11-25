@@ -57,7 +57,8 @@ state:
 # from a package-level variable. None is. The methods shipped here call
 # Read or Write of the kept value and nothing else of it: the type
 # assertions to io.WriterTo, io.ReaderFrom, and io.StringWriter of the kept
-# value are on WriteTo, ReadFrom, and WriteString, which have no entry, and
+# value are on WriteTo and ReadFrom, which have no entry, and on WriteString,
+# whose entry lists it under asserts, and
 # the assertions to *Reader and *Writer in the constructors call nothing.
 trusted:
   bufio.NewScanner:
@@ -203,9 +204,12 @@ trusted:
     keeps:
       w: [result]
     modifies: []
-    # Read from the source of Go 1.27: NewWriterSize asserts w to *Writer, whose writer it then uses, and calls nothing.
+    # Read from the source of Go 1.27: NewWriterSize asserts w to *Writer,
+    # whose writer it then uses, and calls nothing. The WriteString of the
+    # Writer it returns asserts w to io.StringWriter (see below), which this
+    # claim covers since that method has an entry.
     asserts:
-      w: []
+      w: [io.StringWriter]
     vouches: [result]
     ensures:
       - "result != nil"
@@ -225,7 +229,7 @@ trusted:
       - "ready(b)"
     runs: [b]
     modifies: [b]
-    # Read from the source of Go 1.27: Write calls only Write of the writer it keeps; WriteString and ReadFrom, which assert, are not shipped.
+    # Read from the source of Go 1.27: Write calls only Write of the writer it keeps; ReadFrom, which asserts, is not shipped.
     asserts:
       b: []
     vouches: [b]
@@ -233,6 +237,35 @@ trusted:
       - "ready(b')"
       - "0 <= nn And nn <= |p|"
       - "nn < |p| -> err != nil"
+
+  (*bufio.Writer).WriteString:
+    reason: >-
+      Documented: "WriteString writes a string. It returns the number of
+      bytes written. If the count is less than len(s), it also returns an
+      error explaining why the write is short." Read from the source of Go
+      1.26.6 and 1.27.3: while s does not fit in what is free of the
+      buffer and no error was met, it hands s to the WriteString of the
+      writer b writes to when the buffer is empty and that writer has one,
+      and otherwise fills the buffer and flushes it through that writer's
+      Write; then it copies the rest into the buffer. The loop ends, and s
+      is sliced within its bounds, because WriteString meets the entry of
+      (io.StringWriter).WriteString and Write that of (io.Writer).Write.
+    requires:
+      - "b != nil"
+      - "ready(b)"
+    runs: [b]
+    modifies: [b]
+    # Read from the source of Go 1.26.6 and 1.27.3: WriteString asserts the
+    # writer it keeps to io.StringWriter, once, when its buffer is empty and
+    # s does not fit, and calls that WriteString or the writer's Write,
+    # through Flush, and nothing else of it.
+    asserts:
+      b: [io.StringWriter]
+    vouches: [b]
+    ensures:
+      - "ready(b')"
+      - "0 <= result1 And result1 <= |s|"
+      - "result1 < |s| -> result2 != nil"
 
   (*bufio.Writer).WriteByte:
     reason: >-

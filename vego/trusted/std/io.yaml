@@ -29,7 +29,10 @@ trusted:
       also claims that Write returns: a Write on a pipe or a connection
       returns only when it can go on. Nothing is claimed of the errors: an
       implementation may return any error. Write may change what the writer
-      holds, as a buffer does, which is its footprint.
+      holds, as a buffer does, which is its footprint. Such a value's
+      methods of the other interfaces checked at conversions, as
+      WriteString of io.StringWriter, meet their entries too; see What a
+      proof assumes.
     receiver: w
     modifies: [w]
     ensures:
@@ -56,7 +59,8 @@ trusted:
       data, so p must not be empty. Nothing is claimed of the errors: an
       implementation may return any error, not only io.EOF. Read may change
       what the reader holds, as a buffer or a position does, which is its
-      footprint.
+      footprint. Such a value's methods of the other interfaces checked at
+      conversions meet their entries too; see What a proof assumes.
     receiver: r
     requires:
       - "|p| > 0"
@@ -115,13 +119,38 @@ trusted:
     ensures:
       - "closed(c')"
 
+  io.WriteString:
+    reason: >-
+      Documented: "WriteString writes the contents of the string s to w,
+      which accepts a slice of bytes. If w implements StringWriter,
+      StringWriter.WriteString is invoked directly. Otherwise, Writer.Write
+      is called exactly once." So it returns what WriteString or Write
+      returns, and each meets its entry whenever w does; see What a proof
+      assumes for a w that code which is not verified hands in, and the
+      check at conversions for one that verified code converts. A nil w
+      panics.
+    requires:
+      - "w != nil"
+    runs: [w]
+    modifies: [w]
+    vouches: [w]
+    # Read from the source of Go 1.26.6 and 1.27.3: WriteString asserts w
+    # to StringWriter and calls its WriteString once, or calls w.Write once
+    # with []byte(s), and returns what that call returned; it calls nothing
+    # else of w, and keeps nothing.
+    asserts:
+      w: [io.StringWriter]
+    ensures:
+      - "0 <= n And n <= |s|"
+      - "n < |s| -> err != nil"
+
   # Functions that keep the readers and writers they are given. What was
   # read in io.go and multi.go of Go 1.27.3: each stores what it is given in
   # the value it returns (MultiReader and MultiWriter copy the slice). The
   # methods of that value read it again only while they are called: Read,
   # Write, and Close, and also the WriteTo of a NopCloser of an io.WriterTo
-  # and of a MultiReader, and the WriteString of a MultiWriter, which have
-  # no entry. No goroutine, timer, finalizer, cleanup, callback, or
+  # and of a MultiReader, which have no entry, and the WriteString of a
+  # MultiWriter, which meets the entry of (io.StringWriter).WriteString. No goroutine, timer, finalizer, cleanup, callback, or
   # package-level variable reaches it. The Read and Write of the values
   # returned call only Read and Write of what they keep. NopCloser asserts r
   # to io.WriterTo and calls nothing; see its entry.
@@ -235,9 +264,16 @@ trusted:
     keeps:
       writers: [result]
     modifies: []
-    # Read from the source of Go 1.27: MultiWriter asserts the writers only to its own *multiWriter; its Write calls their Write. Its WriteString, which asserts StringWriter, runs only when code asserts the result.
+    # Read from the source of Go 1.26.6 and 1.27.3: MultiWriter asserts the
+    # writers only to its own *multiWriter; its Write calls their Write, and
+    # its WriteString, which code that asserts the result to StringWriter
+    # finds, asserts each writer to StringWriter and calls its WriteString,
+    # or its Write with the bytes of s, and returns len(s) and nil only
+    # after each wrote all of it, and otherwise what the failing one
+    # returned, or ErrShortWrite; so it meets the entry of
+    # (io.StringWriter).WriteString whenever the writers meet theirs.
     asserts:
-      writers: []
+      writers: [io.StringWriter]
     vouches: [result]
     ensures:
       - "result != nil"

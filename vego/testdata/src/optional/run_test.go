@@ -26,6 +26,12 @@ func TestRefusedWouldFail(t *testing.T) {
 	if KeepsN(&Quiet{}) {
 		t.Error("KeepsN = true; put calls WriteString, which counts")
 	}
+	if KeepsNThroughWriteString(&Quiet{}) {
+		t.Error("KeepsNThroughWriteString = true; io.WriteString calls WriteString, which counts")
+	}
+	if KeepsNBuffered(&Quiet{}) {
+		t.Error("KeepsNBuffered = true; the buffered writer hands the long string to WriteString, which counts")
+	}
 	if w, ok := PipeAsReader().(io.Writer); !ok {
 		t.Error("Pipe is no writer")
 	} else if n, _ := w.Write([]byte("x")); n >= 0 {

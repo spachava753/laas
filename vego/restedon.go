@@ -34,7 +34,7 @@ var restedOn = map[string]string{
 	"(io.Writer).Write":                     "(*bufio.Writer).Write calls it on the writer it keeps",
 	"(io.Reader).Read":                      "bufio.NewScanner keeps a reader whose Read the Scanner calls",
 	"(io.Closer).Close":                     "io.NopCloser vouches that the Close of its result meets it",
-	"(io.StringWriter).WriteString":         "(*bufio.Writer).Write runs its receiver, a value that has WriteString",
+	"(io.StringWriter).WriteString":         "io.WriteString calls it on the writer it is handed",
 	"(net/http.ResponseWriter).Header":      "net/http.Error calls it on its writer",
 	"(net/http.ResponseWriter).Write":       "net/http.Error calls it on its writer through fmt.Fprintln",
 	"(net/http.ResponseWriter).WriteHeader": "net/http.Error calls it on its writer",

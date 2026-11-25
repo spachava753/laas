@@ -42,6 +42,58 @@ type keptLog struct {
 	problems  []string
 	// written holds the length of what each call of Write was given.
 	written []int
+	// strings is set while a call whose entry lists io.StringWriter under
+	// asserts is active, during which a kept writer's WriteString may run
+	// (F35); stringsWritten counts those runs.
+	strings        bool
+	stringsWritten int
+}
+
+// listsStringWriter reports whether an entry lists io.StringWriter under
+// asserts, which lets what the function is handed have its WriteString
+// called.
+func listsStringWriter(fn *funcInfo) bool {
+	if fn == nil || fn.trust == nil {
+		return false
+	}
+	for _, item := range fn.trust.asserts {
+		for _, dest := range item.dests {
+			if dest.text == "io.StringWriter" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// entryListsStringWriter reports whether the shipped entry of a key lists
+// io.StringWriter under asserts.
+func entryListsStringWriter(key string) bool {
+	entry := shippedEntry(key)
+	if entry == nil {
+		return false
+	}
+	for _, item := range entry.asserts {
+		for _, dest := range item.dests {
+			if dest.text == "io.StringWriter" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// allowStrings lets the WriteString of a kept writer run, until the
+// function it returns is called.
+func (k *keptLog) allowStrings() func() {
+	k.mu.Lock()
+	k.strings = true
+	k.mu.Unlock()
+	return func() {
+		k.mu.Lock()
+		k.strings = false
+		k.mu.Unlock()
+	}
 }
 
 // enter marks a call of a method of the wrapper as active on the calling
@@ -112,9 +164,25 @@ func (w *keptWriter) Write(p []byte) (int, error) {
 	return n, w.log.wrap(err)
 }
 
+// WriteString writes the bytes of s through inner's Write, so it meets the
+// entry of (io.StringWriter).WriteString whenever inner meets that of
+// (io.Writer).Write. It may run only during a call whose entry lists
+// io.StringWriter under asserts.
 func (w *keptWriter) WriteString(s string) (int, error) {
-	w.log.refuse("WriteString of a kept writer")
-	return w.inner.Write([]byte(s))
+	w.log.mu.Lock()
+	allowed := w.log.strings
+	if allowed {
+		w.log.stringsWritten++
+		w.log.written = append(w.log.written, len(s))
+	}
+	w.log.mu.Unlock()
+	if !allowed {
+		w.log.refuse("WriteString of a kept writer")
+	} else {
+		w.log.ran("WriteString")
+	}
+	n, err := w.inner.Write([]byte(s))
+	return n, w.log.wrap(err)
 }
 
 func (w *keptWriter) ReadFrom(r io.Reader) (int64, error) {
@@ -126,6 +194,15 @@ func (w *keptWriter) WriteTo(io.Writer) (int64, error) {
 	w.log.refuse("WriteTo of a kept writer")
 	return 0, nil
 }
+
+// plainKept is a kept writer without WriteString, so that what finds
+// WriteString by assertion calls its Write; its other optional methods are
+// those of the kept writer, which refuse.
+type plainKept struct{ w *keptWriter }
+
+func (p plainKept) Write(b []byte) (int, error)         { return p.w.Write(b) }
+func (p plainKept) ReadFrom(r io.Reader) (int64, error) { return p.w.ReadFrom(r) }
+func (p plainKept) WriteTo(w io.Writer) (int64, error)  { return p.w.WriteTo(w) }
 
 // keptReader reads from inner, which meets the entry of (io.Reader).Read,
 // and records each call in log, with a problem for an empty p, which that
@@ -840,6 +917,10 @@ var writerMethods = map[string]func(b *bufio.Writer, p []byte) []*logic.Term{
 	"(*bufio.Writer).Flush": func(b *bufio.Writer, p []byte) []*logic.Term {
 		return []*logic.Term{errorTerm(b.Flush())}
 	},
+	"(*bufio.Writer).WriteString": func(b *bufio.Writer, p []byte) []*logic.Term {
+		n, err := b.WriteString(string(p))
+		return []*logic.Term{logic.IntLit(int64(n)), errorTerm(err)}
+	},
 }
 
 // checkWriterEntries runs the entries of bufio.NewWriter and the methods of
@@ -858,7 +939,7 @@ func checkWriterEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 	checked := 0
 	arrays := &ownerArrays{}
 	var made []*bufio.Writer
-	for range 200 {
+	for range 300 {
 		k := &keptLog{}
 		var w io.Writer
 		switch rng.Intn(8) {
@@ -867,6 +948,10 @@ func checkWriterEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 			own := bufio.NewWriterSize(randomKeptWriter(rng, k), 8192)
 			made = append(made, own)
 			w = own
+		case 2:
+			// A kept writer without WriteString, through whose Write
+			// WriteString then writes.
+			w = plainKept{randomKeptWriter(rng, k)}
 		default:
 			w = randomKeptWriter(rng, k)
 		}
@@ -906,7 +991,7 @@ func checkWriterEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 				k.check()
 				continue
 			}
-			name := []string{"(*bufio.Writer).Write", "(*bufio.Writer).WriteByte", "(*bufio.Writer).Flush"}[rng.Intn(3)]
+			name := []string{"(*bufio.Writer).Write", "(*bufio.Writer).WriteByte", "(*bufio.Writer).Flush", "(*bufio.Writer).WriteString"}[rng.Intn(4)]
 			p := make([]byte, []int{0, 1, 100, 4096, 10000}[rng.Intn(5)])
 			rng.Read(p)
 			var args []*logic.Term
@@ -916,9 +1001,16 @@ func checkWriterEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 				given, copies = append(given, p), append(copies, slices.Clone(p))
 			case "(*bufio.Writer).WriteByte":
 				args = []*logic.Term{logic.IntLit('w')}
+			case "(*bufio.Writer).WriteString":
+				args = []*logic.Term{lengthTerm(len(p))}
 			}
 			arrays.add(p)
 			if checkMethod(t, pv, contracts[name], k, ready, args, b, arrays, func() []*logic.Term {
+				// Only WriteString may run the WriteString of what the
+				// Writer keeps (its entry lists io.StringWriter).
+				if listsStringWriter(contracts[name]) {
+					defer k.allowStrings()()
+				}
 				return writerMethods[name](b, p)
 			}) && name == key {
 				checked++
@@ -1052,6 +1144,7 @@ func checkIOEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key strin
 	read := shippedTypeContract(pv, pkg, "(Reader).Read")
 	write := shippedTypeContract(pv, pkg, "(Writer).Write")
 	closer := shippedTypeContract(pv, pkg, "(Closer).Close")
+	writeString := shippedTypeContract(pv, pkg, "(StringWriter).WriteString")
 	rng := rand.New(rand.NewSource(1))
 	checked := 0
 	var earlier []any
@@ -1115,6 +1208,21 @@ func checkIOEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key strin
 			case io.Writer:
 				p := make([]byte, rng.Intn(65))
 				rng.Read(p)
+				// The WriteString of what MultiWriter returns, which code
+				// that asserts the result to io.StringWriter finds, runs
+				// the WriteString of what it keeps (F35).
+				if sw, ok := value.(io.StringWriter); ok && rng.Intn(2) == 0 {
+					s := string(p)
+					checkTypeCall(t, pv, writeString, k, nil, nil, map[*types.Var]*logic.Term{writeString.params[0]: lengthTerm(len(s))},
+						func() []*logic.Term {
+							if listsStringWriter(fn) {
+								defer k.allowStrings()()
+							}
+							n, err := sw.WriteString(s)
+							return []*logic.Term{logic.IntLit(int64(n)), errorTerm(err)}
+						})
+					continue
+				}
 				before := slices.Clone(p)
 				checkTypeCall(t, pv, write, k, nil, nil, map[*types.Var]*logic.Term{write.params[0]: lengthTerm(len(p))},
 					func() []*logic.Term {

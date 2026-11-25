@@ -58,7 +58,7 @@ import (
 // httpKeys are the entries checkHTTPEntries runs.
 var httpKeys = []string{
 	"(net/http.ResponseWriter).Header", "(net/http.ResponseWriter).WriteHeader", "(net/http.ResponseWriter).Write",
-	"net/http.Error", "net/http.NotFound",
+	"net/http.Error", "net/http.NotFound", "io.WriteString",
 }
 
 // walkStop reports whether the walk of a writer stops at a pointer to a
@@ -282,6 +282,33 @@ type probedWriter struct {
 	round *httpRound
 }
 
+// stringProbed is a probedWriter whose WriteString is the writer's own, for
+// io.WriteString, whose entry lists io.StringWriter under asserts; its other
+// optional methods fail the round as a probedWriter's do.
+type stringProbed struct{ probedWriter }
+
+func (p stringProbed) WriteString(s string) (int, error) {
+	if !entryListsStringWriter("io.WriteString") {
+		p.refuse("WriteString")
+	}
+	if sw, ok := p.ResponseWriter.(io.StringWriter); ok {
+		return sw.WriteString(s)
+	}
+	return p.ResponseWriter.Write([]byte(s))
+}
+
+// writeOnly has the methods of a ResponseWriter and no WriteString, and
+// counts the calls of its Write.
+type writeOnly struct {
+	http.ResponseWriter
+	writes int
+}
+
+func (w *writeOnly) Write(p []byte) (int, error) {
+	w.writes++
+	return w.ResponseWriter.Write(p)
+}
+
 // probed wraps a writer in a probedWriter.
 func (r *httpRound) probed(w http.ResponseWriter) http.ResponseWriter {
 	return probedWriter{ResponseWriter: w, round: r}
@@ -347,7 +374,7 @@ func (r *httpRound) sequence(rng *rand.Rand, w http.ResponseWriter, req *http.Re
 	final := false
 	for range 1 + rng.Intn(6) {
 		op := []string{"get", "set", "del", "(net/http.ResponseWriter).Header", "(net/http.ResponseWriter).WriteHeader",
-			"(net/http.ResponseWriter).Write", "net/http.Error", "net/http.NotFound", "read"}[rng.Intn(9)]
+			"(net/http.ResponseWriter).Write", "net/http.Error", "net/http.NotFound", "read", "io.WriteString"}[rng.Intn(10)]
 		if rng.Intn(3) == 0 {
 			op = r.key
 		}
@@ -444,6 +471,34 @@ func (r *httpRound) sequence(rng *rand.Rand, w http.ResponseWriter, req *http.Re
 			r.around("Error", w, req, nil, func() { http.Error(r.probed(w), msg, code) })
 			// Error writes its message after the header, which writes a
 			// final header after a 1xx one.
+			final = true
+		case "io.WriteString":
+			// Through the writer's own WriteString, which the server's
+			// writers and the recorder have, or through Write alone (F35).
+			s := strings.Repeat("s", []int{0, 5, 4096, 70000}[rng.Intn(4)])
+			var n int
+			var err error
+			plain := rng.Intn(2) == 0
+			var target io.Writer = stringProbed{probedWriter{ResponseWriter: w, round: r}}
+			only := &writeOnly{ResponseWriter: w}
+			if plain {
+				target = only
+			}
+			r.around(fmt.Sprintf("WriteString of %d bytes", len(s)), w, req, nil, func() { n, err = io.WriteString(target, s) })
+			if plain && only.writes != 1 {
+				r.fail("io.WriteString called Write of a writer without WriteString %d times, not once", only.writes)
+			}
+			if op == r.key {
+				r.calls++
+				c := r.check(map[*types.Var]*logic.Term{r.fn.params[0]: reference(false), r.fn.params[1]: lengthTerm(len(s))})
+				c.results = []*logic.Term{logic.IntLit(int64(n)), errorTerm(err)}
+				if !c.holds(r.fn.ensures) {
+					r.fail("the ensures of io.WriteString is false: %d of %d bytes, %v", n, len(s), err)
+				}
+				if n < len(s) {
+					r.short++
+				}
+			}
 			final = true
 		case "net/http.NotFound":
 			if op == r.key {
@@ -592,6 +647,9 @@ func checkHTTPEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key str
 	}
 	if round.calls == 0 {
 		t.Errorf("no call of %s was made", key)
+	}
+	if key == "io.WriteString" && round.short == 0 {
+		t.Errorf("no io.WriteString wrote less than it was handed, so the second clause of its ensures is not checked")
 	}
 	if key == "(net/http.ResponseWriter).Write" && round.short == 0 {
 		t.Errorf("no Write wrote less than it was handed, so the second clause of its ensures is not checked")

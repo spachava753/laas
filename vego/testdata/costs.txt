@@ -649,6 +649,7 @@ cycles/r32	cycles/r32.G	8	3993	0
 cycles/r32	cycles/r32.H	7	3540	0
 cycles/r32	cycles/r32.Store.Read	3	804	0
 cycles/r33	(*bufio.Writer).Flush	9	54180	0
+cycles/r33	(*bufio.Writer).WriteString	1	6397	0
 cycles/r33	bufio.NewWriter	1	9378	0
 cycles/r33	cycles/r33.F	18	80474	0
 cycles/r33	io.Writer.Write	3	7630	0
@@ -2415,6 +2416,7 @@ guide	guide.CopyAppend	14	22808	0
 guide	guide.CopyFile	0	0	0
 guide	guide.CopyFresh	10	18382	0
 guide	guide.CopyListed	0	0	0
+guide	guide.CopySome	151	438049	0
 guide	guide.CopyThrough	7	12737	0
 guide	guide.Count	19	29462	0
 guide	guide.CountDeleting	15	175192	1
@@ -4459,6 +4461,7 @@ net/http	(*sync.Mutex).Unlock	1	1611	0
 net/http	(*sync.Once).Do	1	1800	0
 net/http/internal/httpcommon	(*sync.Once).Do	1	1800	0
 net/textproto	(*sync.Once).Do	1	1800	0
+optional	(*bufio.Writer).WriteString	9	65187	0
 optional	(*optional.Counter).Write	21	20143	0
 optional	(*optional.Counts).Write	9	6802	0
 optional	(*optional.Counts).WriteString	26	37069	0
@@ -4493,9 +4496,11 @@ optional	(optional.badWriteErr).Write	7	5018	0
 optional	(optional.inner).WriteString	9	5235	0
 optional	(optionalc.Over).Write	3	13103	0
 optional	(optionalc.Over).WriteString	3	9841	0
+optional	bufio.NewWriter	1	9378	0
 optional	io.Closer.Close	3	3885	0
 optional	io.Reader.Read	3	7449	0
 optional	io.StringWriter.WriteString	5	13130	0
+optional	io.WriteString	5	13480	0
 optional	io.Writer.Write	5	18168	0
 optional	optional.(*optionalc.Rec).WriteString as a method of io.StringWriter	11	39431	0
 optional	optional.(*os.File).Read as a method of io.Reader	10	43053	0
@@ -4514,6 +4519,8 @@ optional	optional.FromAny	4	5446	0
 optional	optional.FromSink	1	46	0
 optional	optional.KeepsAcrossWrite	22	52470	0
 optional	optional.KeepsN	23	51739	0
+optional	optional.KeepsNBuffered	23	51373	0
+optional	optional.KeepsNThroughWriteString	25	57632	0
 optional	optional.Local	24	48388	0
 optional	optional.LoggedAsWriter	14	13405	0
 optional	optional.LooseLift	2	746	0
@@ -4527,11 +4534,15 @@ optional	optional.RecMaybeNil	19	66964	0
 optional	optional.SinkAsserted	1	514	0
 optional	optional.Through	6	5616	0
 optional	optional.ToFiles	25	88210	0
+optional	optional.UsesPutAny	1	514	0
+optional	optional.UsesPutLit	2	731	0
+optional	optional.UsesPutPair	2	1043	0
 optional	optional.ViaError	1	46	0
 optional	optional.ViaTrusted	1	46	0
 optional	optional.ViaTrustedOver	1	514	0
 optional	optional.VouchedThroughAny	3	296	0
 optional	optional.WCAsWriter	9	9207	0
+optional	optional.bufferLong	22	164444	6
 optional	optional.getAny	1	3166	0
 optional	optional.getErr	3	3794	0
 optional	optional.getVouched	3	3794	0
@@ -4539,14 +4550,55 @@ optional	optional.getW	1	622	0
 optional	optional.getWOver	1	3166	0
 optional	optional.optionalc.Over.WriteString as a method of io.StringWriter	7	11569	0
 optional	optional.put	14	26331	0
+optional	optional.putAny	1	667	0
+optional	optional.putLit	1	1812	0
+optional	optional.putPair	1	1117	0
 optional	optionalc.Sizer.Size	3	961	0
 optional	optionalsink.Sink.Write	3	7630	0
 optional	optionalwc.WC.Close	3	3861	0
 optional	optionalwc.WC.Write	3	8444	0
+optional	strings.Repeat	1	2550	0
 optionala	(*optionala.T).Put	9	5161	0
 optionala	(*optionala.T).Write	7	5921	0
 optionala	optionala.Make	8	14882	0
 optionala	optionala.Sink.Put	4	1915	0
+optionalio	(*bufio.Writer).Flush	9	54180	0
+optionalio	(*bufio.Writer).WriteString	9	65187	0
+optionalio	(*optionalio.Lines).Write	21	20143	0
+optionalio	(*optionalio.Tally).Write	21	20143	0
+optionalio	(*optionalio.Tally).WriteString	17	14595	0
+optionalio	(*os.File).Close	1	1691	0
+optionalio	(*os.File).Read	7	2017092	2
+optionalio	(*os.File).Write	3	18506	0
+optionalio	(*os.File).WriteString	3	16320	0
+optionalio	bufio.NewWriter	1	9378	0
+optionalio	io.Closer.Close	3	3885	0
+optionalio	io.MultiWriter	1	4805	0
+optionalio	io.Reader.Read	6	1014374	1
+optionalio	io.StringWriter.WriteString	5	13130	0
+optionalio	io.WriteString	5	13480	0
+optionalio	io.Writer.Write	5	18168	0
+optionalio	net/http.ResponseWriter.Header	4	16082	2
+optionalio	net/http.ResponseWriter.Write	5	18168	0
+optionalio	net/http.ResponseWriter.WriteHeader	3	2185	0
+optionalio	optionalio.(*os.File).Read as a method of io.Reader	10	43053	0
+optionalio	optionalio.(*os.File).Write as a method of io.Writer	7	29294	0
+optionalio	optionalio.(*os.File).WriteString as a method of io.StringWriter	7	24313	0
+optionalio	optionalio.Both	75	240368	0
+optionalio	optionalio.Buffered	91	953604	6
+optionalio	optionalio.BufferedTally	46	114966	0
+optionalio	optionalio.CopySome	151	438049	0
+optionalio	optionalio.Echo	23	47168	0
+optionalio	optionalio.Fan	69	252061	0
+optionalio	optionalio.Faster	14	26331	0
+optionalio	optionalio.Files	49	144996	0
+optionalio	optionalio.Greet	71	153929	0
+optionalio	optionalio.Handle	17	34856	0
+optionalio	optionalio.Kept	39	238998	0
+optionalio	optionalio.ToFile	140	1905154	12
+optionalio	optionalio.ToStderr	35	93658	0
+optionalio	optionalio.UsesPut	26	57762	0
+optionalio	optionalio.put	1	1812	0
 ordering	(*ordering.Box).Grow	8	6365	0
 ordering	(*ordering.Box).TryPush	13	10665	0
 ordering	(*ordering.Counter).Inc	10	7281	0
