@@ -205,6 +205,7 @@ arraystructs	arraystructs.InSliceWide	1	527	0
 arraystructs	arraystructs.KeepsCount	7	6038	0
 arraystructs	arraystructs.Length	2	256	0
 arraystructs	arraystructs.Literal	8	1524	0
+arraystructs	arraystructs.Marshal	1	367	0
 arraystructs	arraystructs.Nested	0	0	0
 arraystructs	arraystructs.PutEdge	8	2321	0
 arraystructs	arraystructs.PutThenCount	12	42465	0
@@ -235,6 +236,7 @@ arraystructs	arraystructs.setElementTrusted	1	5767	0
 arraystructs	arraystructs.setInner	8	6040	0
 arraystructs	arraystructs.setInnerTrusted	1	1923	0
 arraystructs	arraystructs.setLast	1	1644	0
+arraystructs	encoding/json.Marshal	1	3404	0
 arraystructs	fmt.Sprint	1	3498	0
 arraystructs	io.Writer.Write	5	18168	0
 assignedlib	assignedlib.Bump	8	7213	0
@@ -2697,6 +2699,7 @@ guide	guide.CreateRowNoLimit	2	1807	0
 guide	guide.CreateRowText	110	2452390	23
 guide	guide.Describe	16	6481	0
 guide	guide.Different	12	14231	0
+guide	guide.DigitValue	4	7515	0
 guide	guide.Discard	7	5813	0
 guide	guide.Display	1	497	0
 guide	guide.Divide	14	5563	0
@@ -2860,6 +2863,8 @@ guide	guide.Pad	13	21314	0
 guide	guide.Pages	4	1561	0
 guide	guide.PagesChecked	3	283	0
 guide	guide.Pair	6	3502	0
+guide	guide.Pairs	41	2807987	1
+guide	guide.PairsAsserted	42	221011	0
 guide	guide.ParseDigit	18	11471	0
 guide	guide.ParseLine	12	10934	0
 guide	guide.ParsePort	31	68776	0
@@ -3109,6 +3114,7 @@ guide	guide.the initialiser of logger	11	53831	0
 guide	guide.the initialiser of now	2	878	0
 guide	guide.the initialiser of pageSize	0	0	0
 guide	guide.the initialiser of primes	0	0	0
+guide	guide.the initialiser of reverse	0	0	0
 guide	guide.the initialiser of routes	0	0	0
 guide	guide.the initialiser of sizes	0	0	0
 guide	guide.the initialiser of tagsSeen	0	0	0
@@ -5947,6 +5953,21 @@ syscall	(*sync.RWMutex).Lock	1	2663	0
 syscall	(*sync.RWMutex).RLock	1	2663	0
 syscall	(*sync.RWMutex).RUnlock	1	2546	0
 syscall	(*sync.RWMutex).Unlock	1	2546	0
+tables	tables.Digit	5	8871	0
+tables	tables.First	4	2542	0
+tables	tables.Inited	1	46	0
+tables	tables.Pointed	9	12218	0
+tables	tables.PointedWrong	5	7984	0
+tables	tables.Square	4	3898	0
+tables	tables.Tested	4	2234	0
+tables	tables.Valid	13	248540	0
+tables	tables.Value	5	195043	0
+tables	tables.ValueWrong	4	693427	0
+tables	tables.the initialiser of Table	0	0	0
+tables	tables.the initialiser of fixedPointer	0	0	0
+tables	tables.the initialiser of reverse	0	0	0
+tables	tables.the initialiser of squares	0	0	0
+tables	tables.the initialiser of tested	0	0	0
 time	(*sync.Once).Do	1	1800	0
 trialfaults	(*trialfaults.R).Caller	5	3906	0
 trialfaults	(*trialfaults.R).Deferred	5	3996	0

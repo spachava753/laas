@@ -1,6 +1,7 @@
 package arraystructs
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 )
@@ -100,3 +101,15 @@ func Shared() (r byte) {
 }
 
 func takeShared() *buffer { return &shared }
+
+type encoded struct {
+	A [4]byte
+	N int
+}
+
+// encoding/json does not walk an array yet.
+//
+// @Ensures True
+func Marshal(j encoded) (b []byte, err error) {
+	return json.Marshal(j) // want `cannot verify Marshal: Marshal encodes j, and j.A is of type \[4\]byte, which encoding/json cannot encode or vego does not support`
+}

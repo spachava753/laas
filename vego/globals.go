@@ -487,6 +487,10 @@ const (
 	knownMade
 	// knownAlias: the value of the variable with key Alias.
 	knownAlias
+	// knownArray: an array of numbers or booleans of length Len whose
+	// elements at the positions Indices are the constants Elems, and zero
+	// everywhere else, as a literal of constants gives it.
+	knownArray
 )
 
 // knownValue is what is known of a value from the initialiser of a fixed
@@ -643,6 +647,30 @@ func (pv *pkgVerifier) knownOf(e ast.Expr, t types.Type, top bool) knownValue {
 			}
 			made.Len, made.Cap, made.Sized = length, length, length > 0 && sized(u.Elem())
 			return made
+		case *types.Array:
+			// A literal of constants, which is the whole array.
+			if _, plain := plainElem(u.Elem()); !plain || len(e.Elts) > maxKnownElems {
+				return knownValue{}
+			}
+			array := knownValue{Kind: knownArray, Len: u.Len()}
+			next := int64(0)
+			for _, elt := range e.Elts {
+				value := elt
+				if kv, ok := elt.(*ast.KeyValueExpr); ok {
+					index, exact := constant.Int64Val(constant.ToInt(pv.info.Types[kv.Key].Value))
+					if !exact {
+						return knownValue{}
+					}
+					next, value = index, kv.Value
+				}
+				element := pv.knownOf(value, u.Elem(), false)
+				if element.Kind != knownConstant {
+					return knownValue{}
+				}
+				array.Elems, array.Indices = append(array.Elems, element), append(array.Indices, next)
+				next++
+			}
+			return array
 		case *types.Map:
 			made := knownValue{Kind: knownMade, Len: -1, Cap: -1, Sized: true, Contents: top && len(e.Elts) <= maxKnownElems}
 			for _, elt := range e.Elts {
@@ -1048,6 +1076,11 @@ func (v *fnVerifier) noteContents(sink *state, variable string, ref *logic.Term,
 		cells := v.cellsOf(object)
 		val := make(value, len(cells))
 		for i, c := range cells {
+			if c.isRun() {
+				// The run of an array is a cut of its row.
+				val[i] = logic.Subseq(row(c.key, c.sort), c.start(start), c.end(start))
+				continue
+			}
 			val[i] = logic.Select(row(c.key, c.sort), logic.Add(start, logic.IntLit(c.off)))
 		}
 		return val
@@ -1120,6 +1153,17 @@ func (v *fnVerifier) noteKnown(sink *state, val value, t types.Type, known known
 				v.noteKnown(sink, val[lo:hi], u.Field(i).Type(), part)
 			}
 		}
+	case knownArray:
+		// The literal, element by element, on the zero array.
+		array := zeroValue(t)[0]
+		for i, element := range known.Elems {
+			term := v.knownConstantTerm(sink, element, logic.Select(array, logic.IntLit(0)))
+			if term == nil {
+				return
+			}
+			array = logic.Store(array, logic.IntLit(known.Indices[i]), term)
+		}
+		v.declared(sink, v.same(val[0], array))
 	case knownMade:
 		ref := val[0]
 		v.declared(sink, logic.Lt(logic.IntLit(0), ref))

@@ -23,6 +23,9 @@
 # The recorded cost of verifying the corpus; see vego/guard_test.go.
 !/vego/testdata/costs.txt
 
+# Problems captured from Z3 that the ROADMAP's records under The prover cite.
+!/vego/testdata/prover/*.smt2
+
 # Test packages that stand for other modules have a go.mod of their own,
 # which the loader of the tests ignores and vego reads.
 !/vego/testdata/src/*/go.mod

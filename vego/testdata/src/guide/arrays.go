@@ -139,3 +139,14 @@ func Name() (name [16]byte, n int) {
 	n = copy(name[:], "hello")
 	return name, n
 }
+
+// reverse gives the value of a decimal digit, and 0 for any other byte.
+var reverse = [256]byte{
+	'0': 0, '1': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9,
+}
+
+// @Requires '0' <= c <= '9'
+// @Ensures r = c - 48
+func DigitValue(c byte) (r byte) {
+	return reverse[c]
+}

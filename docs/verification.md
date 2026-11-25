@@ -4684,6 +4684,7 @@ Two types of the standard library are counted by what their package lets them ho
 - There is no initialiser and no `//go:embed` directive. The variable holds the zero value of its type, unless the build sets it with `-ldflags -X`, as described at the end of this section.
 - The initialiser is a constant, as in `var defaultTimeout = 30`. The variable holds that constant. A float constant is one value, but nothing is known of it, as for every float.
 - The initialiser is a struct literal, as in `var defaults = Config{Timeout: 30}`. Each field holds what the literal gives it, by these same rules.
+- The initialiser is an array literal whose elements are constants, as in `var reverse = [256]byte{0xff, ...}`. The array holds those elements, and zero at every index the literal leaves out. Such an array can be a table that a loop reads, as in `reverse[src[i]]`. An array that anything changes, `init` and a test of the package included, cannot be read yet.
 - The initialiser is a slice or map literal, `make`, `new`, `&T{...}`, or `[]byte` or `[]rune` of a constant string. The variable is not nil. A slice has the length that the literal, the constant arguments of `make`, or the string gives, and the capacity of a literal or of `make` with constant arguments.
 - The initialiser is another package-level variable that a function can read. The variable holds the same value.
 
@@ -9462,7 +9463,54 @@ Work through these steps in order.
 8. If it involves an error variable, check what `vego` knows of it. A variable that is not initialised with `errors.New` or `fmt.Errorf` may not be known to be not nil, or to differ from another error. See [What vego knows of an error variable](#what-vego-knows-of-an-error-variable).
 9. Otherwise, help the prover. Put the fact in an `Assert` just before the failure. If the `Assert` is proved but the failure remains, assert a smaller intermediate step. If the `Assert` is not proved, move it earlier until it is.
 
-One problem often produces several messages. Fix the first one and run again.
+One problem often produces several messages.
+
+### A Forall that is false at a return
+
+A postcondition such as `ok <-> Forall k in [0, |src|) : digit(src[k])` can fail at a return where the function has found a byte that is not a digit:
+
+```go
+// @Requires |src| / 2 <= |dst|
+// @Modifies dst
+// @Ensures ok <-> (|src| % 2 = 0 And Forall k in [0, |src|) : digit(src[k]))
+func Pairs(dst, src []byte) (ok bool) {
+	i, j := 0, 0
+	// @Invariant 0 <= i And j = 2 * i And j <= |src|
+	// @Invariant Forall k in [0, j) : digit(src[k])
+	// @Variant |src| - j
+	for ; j < len(src)-1; j += 2 {
+		a, b := src[j], src[j+1]
+		if a < '0' || a > '9' {
+			return false
+		}
+		if b < '0' || b > '9' {
+			return false
+		}
+		dst[i] = (a-'0')*10 + (b - '0')
+		i++
+	}
+	if len(src)%2 == 1 {
+		return false
+	}
+	return true
+}
+```
+
+```text
+vego: postcondition may not hold: ok <-> (|src| % 2 = 0 And Forall k in [0, |src|) : digit(src[k]))
+```
+
+The message is at the second `return false`. There the `Forall` is false, because `src[j+1]` is not a digit, but the proof has to find that element. Assert the negated `Forall` just before the return:
+
+```go
+		if b < '0' || b > '9' {
+			// @Assert ~(Forall k in [0, |src|) : digit(src[k]))
+			return false
+		}
+```
+
+`vego` proves the assertion where `src[j+1]` was just read, and the postcondition then follows from it. With the assertion the function verifies. Asserting only the element, as in `~digit(src[j+1])`, is proved too, but does not help the postcondition.
+ Fix the first one and run again.
 
 A message that starts with `cannot verify` is different. `vego` did not attempt a proof, and the text after the function name gives the reason. There are three kinds:
 
