@@ -4470,7 +4470,7 @@ optional	(*optional.Tally).Write	21	20143	0
 optional	(*optional.Tally).WriteString	21	17719	0
 optional	(*optionalc.Rec).Write	3	14948	0
 optional	(*optionalc.Rec).WriteString	5	16059	0
-optional	(*os.File).Close	1	1691	0
+optional	(*os.File).Close	1	932	0
 optional	(*os.File).Read	7	2017092	2
 optional	(*os.File).Write	3	18506	0
 optional	(*os.File).WriteString	3	16320	0
@@ -4482,8 +4482,12 @@ optional	(optional.Odd).Write	9	5331	0
 optional	(optional.Outer).Write	9	5331	0
 optional	(optional.Pipe).Read	7	5217	0
 optional	(optional.Pipe).Write	7	5018	0
+optional	(optional.T).Close	6	2137	0
 optional	(optional.T).Write	7	5006	0
 optional	(optional.T).WriteString	7	4490	0
+optional	(optional.badErr).Error	3	1035	0
+optional	(optional.badErr).Size	2	65	0
+optional	(optional.badErr).Write	7	5006	0
 optional	(optional.badWriteErr).Error	1	46	0
 optional	(optional.badWriteErr).Write	7	5018	0
 optional	(optional.inner).WriteString	9	5235	0
@@ -4508,9 +4512,12 @@ optional	optional.ErrThroughStringer	4	713	0
 optional	optional.ErrorAsWriter	1	46	0
 optional	optional.FromAny	4	5446	0
 optional	optional.FromSink	1	46	0
+optional	optional.KeepsAcrossWrite	22	52470	0
 optional	optional.KeepsN	23	51739	0
 optional	optional.Local	24	48388	0
 optional	optional.LoggedAsWriter	14	13405	0
+optional	optional.LooseLift	2	746	0
+optional	optional.LooseW.Write	4	6714	0
 optional	optional.OddAsks	7	3654	0
 optional	optional.OuterAsWriter	6	3206	0
 optional	optional.OverAsWriter	16	26020	0
@@ -4520,14 +4527,22 @@ optional	optional.RecMaybeNil	19	66964	0
 optional	optional.SinkAsserted	1	514	0
 optional	optional.Through	6	5616	0
 optional	optional.ToFiles	25	88210	0
+optional	optional.ViaError	1	46	0
+optional	optional.ViaTrusted	1	46	0
+optional	optional.ViaTrustedOver	1	514	0
 optional	optional.VouchedThroughAny	3	296	0
+optional	optional.WCAsWriter	9	9207	0
 optional	optional.getAny	1	3166	0
 optional	optional.getErr	3	3794	0
 optional	optional.getVouched	3	3794	0
+optional	optional.getW	1	622	0
+optional	optional.getWOver	1	3166	0
 optional	optional.optionalc.Over.WriteString as a method of io.StringWriter	7	11569	0
 optional	optional.put	14	26331	0
 optional	optionalc.Sizer.Size	3	961	0
 optional	optionalsink.Sink.Write	3	7630	0
+optional	optionalwc.WC.Close	3	3861	0
+optional	optionalwc.WC.Write	3	8444	0
 optionala	(*optionala.T).Put	9	5161	0
 optionala	(*optionala.T).Write	7	5921	0
 optionala	optionala.Make	8	14882	0

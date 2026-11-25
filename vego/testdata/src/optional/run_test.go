@@ -39,6 +39,10 @@ func TestRefusedWouldFail(t *testing.T) {
 		"VouchedThroughAny":  VouchedThroughAny,
 		"ErrThroughStringer": ErrThroughStringer,
 		"ErrorAsWriter":      ErrorAsWriter,
+		"ViaError":           ViaError,
+		"ViaTrusted":         ViaTrusted,
+		"ViaTrustedOver":     func() int { return ViaTrustedOver(io.Discard) },
+		"WCAsWriter":         WCAsWriter,
 	}
 	for name, f := range checks {
 		if n := f(); n >= 0 {

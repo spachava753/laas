@@ -802,9 +802,6 @@ type pkgVerifier struct {
 	// members answered once in the package (optional.go).
 	optional         map[string]*types.TypeName
 	optionalPassedAt map[optionalPair]bool
-	// optionalUses records, by static type, which members of O
-	// conversions to it were checked against and lifts relied on.
-	optionalUses map[string]OptionalUse
 	// importedStateNames holds the names of the states that the facts of
 	// other packages declare.
 	importedStateNames map[string]bool

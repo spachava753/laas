@@ -205,7 +205,6 @@ func (v *fnVerifier) usedIfaceWhy(from, target types.Type, what string, shown fu
 			// converted, and those of code that is not verified are
 			// assumed to meet them (F35).
 			if v.oTyped(from) && v.optionalMember(from, m) != nil {
-				v.noteOptional(from)
 				continue
 			}
 			lift := fmt.Sprintf("; the value of an assertion of an interface value may use a method its static type lacks only when the method belongs to an interface whose every method "+
@@ -213,8 +212,8 @@ func (v *fnVerifier) usedIfaceWhy(from, target types.Type, what string, shown fu
 				"since values of that type are checked against those interfaces where they are converted; %s is not such a method of %s", m.Name(), shown(from))
 			if isIface(from) && !v.oTyped(from) {
 				lift = fmt.Sprintf("; the value of an assertion of an interface value may use a method its static type lacks only when the static type has every method of an interface "+
-					"whose every method has an entry in the trust files, as io.Writer does, since only values of such types are checked against the interfaces that code may assert them to; "+
-					"%s has none", shown(from))
+					"whose every method has an entry in the trust files, as io.Writer does, from its declaration or under a contract that implies the entry, since only values of such types "+
+					"are checked against the interfaces that code may assert them to; %s has none", shown(from))
 				if from.Underlying().(*types.Interface).NumMethods() > 0 {
 					lift += ", and an interface whose contracts are in source is not one, since a conversion in one package is not checked against an interface declared in another"
 				}
@@ -253,6 +252,11 @@ func (v *fnVerifier) usedIfaceWhy(from, target types.Type, what string, shown fu
 func (v *fnVerifier) assertedIface(e ast.Expr, x *logic.Term, from, target types.Type, holds *logic.Term, st *state, guard []*logic.Term) value {
 	if !isError(from) {
 		v.convertByContract(e, "asserting", from, target, st, guard)
+		// A lift, or an O-shaped target, leans on from being O-typed
+		// (F14 of the review of S1).
+		if v.oShaped(target) || v.oTyped(from) && !types.Implements(from, target.Underlying().(*types.Interface)) {
+			v.proveOTyped(e, from, target, st, guard)
+		}
 		if v.hasStates(from) && !v.hasStates(target) {
 			v.keyedFact(st, logic.Implies(logic.Ne(x, logic.RefLit(0)), logic.Select(keyedByHeld, x)))
 		}

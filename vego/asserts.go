@@ -189,8 +189,9 @@ func (pv *pkgVerifier) beyondStatic(param types.Type, listed []types.Type) (int,
 					}
 					// A value of an O-typed type was checked against the
 					// interfaces of its O where it was converted (F35).
-					if pv.oTyped(from) && pv.optionalMember(from, method) != nil {
-						pv.noteOptional(from)
+					// Over an entry, where nothing can be proved, only a
+					// type O-typed by declaration counts (F14).
+					if pv.oTypedByDeclaration(from) && pv.optionalMember(from, method) != nil {
 						continue
 					}
 					return i, fmt.Sprintf("an interface with the method %s, and what it holds may hold a value of %s, which lacks it", method.Name(), from)

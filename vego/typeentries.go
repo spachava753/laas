@@ -451,34 +451,32 @@ func (pv *pkgVerifier) reportTwoEntries(total *Usage) {
 			"against one can reach verified code that relies on the other. Make the entries the same, or run laas with -vego.trusted naming one file",
 			use.Key, a, b)
 	}
-	// Two packages that count different interfaces of O for one static
-	// type (optional.go, D5 of the design of F35).
+	// Two packages whose trust files give entries to different interfaces
+	// (D5 of the design of F35, F16 of the review of S1): a key one has and
+	// the other lacks, unless either resolves it to a type that is not an
+	// interface, whose entries put nothing in O.
 	optional := slices.Clone(total.Optional)
-	slices.SortFunc(optional, func(a, b OptionalUse) int { return strings.Compare(a.Target+" "+a.Package, b.Target+" "+b.Package) })
-	firstOf := map[string]OptionalUse{}
-	for _, use := range optional {
-		first, ok := firstOf[use.Target]
-		if !ok {
-			firstOf[use.Target] = use
-			continue
-		}
-		if slices.Equal(first.Members, use.Members) || reported["optional "+use.Target] {
-			continue
-		}
-		reported["optional "+use.Target] = true
-		var differ []string
-		lacks := func(a, b OptionalUse) {
-			for i, member := range a.Members {
-				if !slices.Contains(b.Members, member) {
-					differ = append(differ, fmt.Sprintf("package %s counts %s, from the entries at %s, and package %s does not", a.Package, member, a.Files[i], b.Package))
+	slices.SortFunc(optional, func(a, b OptionalUse) int { return strings.Compare(a.Package, b.Package) })
+	for i, a := range optional {
+		for _, b := range optional[i+1:] {
+			var differ []string
+			lacks := func(a, b OptionalUse) {
+				for at, key := range a.Keys {
+					if !slices.Contains(b.Keys, key) && !slices.Contains(a.Concrete, key) && !slices.Contains(b.Concrete, key) {
+						differ = append(differ, fmt.Sprintf("the proofs of package %s count %s, which %s gives entries, and those of package %s do not", a.Package, key, a.Files[at], b.Package))
+					}
 				}
 			}
+			lacks(a, b)
+			lacks(b, a)
+			if len(differ) == 0 || reported["optional "+a.Package+" "+b.Package] {
+				continue
+			}
+			reported["optional "+a.Package+" "+b.Package] = true
+			pv.report(pv.pass.Files[0].Package, "the trust files of this build give entries to different interfaces, against which values are checked where they are converted: %s; "+
+				"a value that verified code checked against fewer can reach verified code that asserts it to one of the others. Make the entries the same, "+
+				"or run laas with -vego.trusted naming one file", strings.Join(differ, "; "))
 		}
-		lacks(first, use)
-		lacks(use, first)
-		pv.report(pv.pass.Files[0].Package, "the trust files of this build give entries to different interfaces that values of %s are checked against where they are converted: %s; "+
-			"a value that verified code checked against fewer can reach verified code that asserts it to one of the others. Make the entries the same, "+
-			"or run laas with -vego.trusted naming one file", use.Target, strings.Join(differ, "; "))
 	}
 	// A proof made with no entry for a type waived what an entry asks
 	// for, such as vouches on a trusted function that returns a value of
@@ -528,7 +526,5 @@ func (pv *pkgVerifier) noteLookups() {
 	for _, key := range slices.Sorted(maps.Keys(pv.unentered)) {
 		pv.usage.Unentered = append(pv.usage.Unentered, Unentered{Key: key, Package: pv.pass.Pkg.Path(), Own: pv.unentered[key]})
 	}
-	for _, key := range slices.Sorted(maps.Keys(pv.optionalUses)) {
-		pv.usage.Optional = append(pv.usage.Optional, pv.optionalUses[key])
-	}
+	pv.usage.Optional = append(pv.usage.Optional, pv.optionalUse())
 }

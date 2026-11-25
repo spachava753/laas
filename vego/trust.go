@@ -513,23 +513,26 @@ type Usage struct {
 	// AnswerCaches lists the cache directories that answers of Z3 the
 	// proofs rest on were read from; see -vego.cache.
 	AnswerCaches []string
-	// Optional records, for each static type that conversions of the
-	// package were checked at or that an assertion or an entry leaned
-	// on, the interfaces of O it counted (optional.go).
+	// Optional records, for each package with proofs, the types to whose
+	// methods its trust files give entries (optional.go).
 	Optional []OptionalUse
 }
 
-// OptionalUse says which interfaces of O a package counted for a static
-// type, the interfaces it checked conversions to the type against and
-// those an assertion of a value of the type or an entry over it relied
-// on. Two packages built together that count different ones let a value
-// checked against fewer reach code that relies on more (D5 of the design
-// of F35). Files names, for each member, the trust file of its entries.
+// OptionalUse records, for a package with proofs, the types to whose
+// methods the trust files it reads give entries, by their keys as written
+// (Keys), with the file that gives each (Files), and those of them that
+// resolve in the package's build to a type that is not an interface
+// (Concrete). The interfaces among them whose every method has an entry
+// are what conversions are checked against (O, optional.go), so two
+// packages built together that read different ones let a value checked
+// against fewer reach code that relies on more (D5 of the design of F35,
+// and F16 of the review of S1: keys of the files, not the types a package
+// meets, so that no route between the two packages is missed).
 type OptionalUse struct {
-	Target  string
-	Members []string
-	Files   []string
-	Package string
+	Package  string
+	Keys     []string
+	Files    []string
+	Concrete []string
 }
 
 // Unentered is a type, by the key its entry would have, that the proofs of
@@ -608,9 +611,7 @@ func (u *Usage) add(other *Usage) {
 		u.ProjectKeys[file] = keys
 	}
 	for _, use := range other.Optional {
-		if !slices.ContainsFunc(u.Optional, func(known OptionalUse) bool {
-			return known.Target == use.Target && known.Package == use.Package && slices.Equal(known.Members, use.Members)
-		}) {
+		if !slices.ContainsFunc(u.Optional, func(known OptionalUse) bool { return known.Package == use.Package }) {
 			u.Optional = append(u.Optional, use)
 		}
 	}

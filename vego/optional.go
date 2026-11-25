@@ -128,19 +128,28 @@ func (pv *pkgVerifier) optionalOf(s types.Type) []*types.TypeName {
 	return members
 }
 
-// oTyped reports whether a static type is O-typed: for some X in O_S it
-// has a method of the name and the signature of each method of X, from
-// X's declaration or another. A method from another declaration need not
-// imply X's here: what O-typed decides is which conversions are checked
-// and which assertions lean on the check, and counting more types checks
-// more conversions.
-func (pv *pkgVerifier) oTyped(s types.Type) bool {
-	return len(pv.oTypedFor(s)) > 0
+// Two notions decide what F35 does with a static type S (F14 of the review
+// of S1). S is O-shaped when it has, for some X in O_S, a method of the
+// name and signature of each method of X: a conversion to an O-shaped type
+// is checked against O_S, and checking more conversions loses nothing. S
+// is O-typed, as ruled, when for some X in O_S each method of X is S's own
+// method from X's declaration, or S's method of the name has a contract
+// that implies X's, which is proved where it is relied on (proveOTyped):
+// the lifts, the source of a conversion between interfaces (F7), and the
+// assumption about values from code that is not verified lean on it. So an
+// O-typed type has a contracted method that is not Error, which AC refuses
+// as the target of an error and which makes a trusted result or written
+// memory of it need vouches. An interface without contracts of the shape
+// of io.Writer is O-shaped and not O-typed.
+
+// oShaped reports whether a static type is O-shaped.
+func (pv *pkgVerifier) oShaped(s types.Type) bool {
+	return len(pv.oShapedFor(s)) > 0
 }
 
-// oTypedFor returns the members X of O_S whose every method s has by name
+// oShapedFor returns the members X of O_S whose every method s has by name
 // and signature.
-func (pv *pkgVerifier) oTypedFor(s types.Type) []*types.TypeName {
+func (pv *pkgVerifier) oShapedFor(s types.Type) []*types.TypeName {
 	var found []*types.TypeName
 	for _, x := range pv.optionalOf(s) {
 		all := true
@@ -154,6 +163,81 @@ func (pv *pkgVerifier) oTypedFor(s types.Type) []*types.TypeName {
 		}
 	}
 	return found
+}
+
+// oTyped reports whether a static type is O-typed: for some X in O_S, each
+// method of X is s's own from X's declaration, or s's method of the name
+// has a contract, which proveOTyped then shows implies X's.
+func (pv *pkgVerifier) oTyped(s types.Type) bool {
+	return pv.oTypedBy(s) != nil
+}
+
+// oTypedBy returns the first member X of O_S by which s is O-typed, or nil.
+// One whose every method is s's own from X's declaration comes first,
+// since it needs no proof.
+func (pv *pkgVerifier) oTypedBy(s types.Type) *types.TypeName {
+	var byContract *types.TypeName
+	for _, x := range pv.oShapedFor(s) {
+		same, contracted := true, true
+		for method := range x.Type().Underlying().(*types.Interface).Methods() {
+			own, _, _ := types.LookupFieldOrMethod(s, false, method.Pkg(), method.Name())
+			fn, _ := own.(*types.Func)
+			same = same && fn == method
+			contracted = contracted && (fn == method || pv.methodContract(fn) != nil)
+		}
+		switch {
+		case same:
+			return x
+		case contracted && byContract == nil:
+			byContract = x
+		}
+	}
+	return byContract
+}
+
+// oTypedByDeclaration reports whether s is O-typed by a member X of O_S
+// each of whose methods s has from X's declaration, which needs no proof.
+func (pv *pkgVerifier) oTypedByDeclaration(s types.Type) bool {
+	x := pv.oTypedBy(s)
+	if x == nil {
+		return false
+	}
+	for method := range x.Type().Underlying().(*types.Interface).Methods() {
+		own, _, _ := types.LookupFieldOrMethod(s, false, method.Pkg(), method.Name())
+		if own != method {
+			return false
+		}
+	}
+	return true
+}
+
+// proveOTyped proves, where a lift or a conversion leans on s being
+// O-typed by a member X whose method s has from another declaration, that
+// the contract of s's method implies X's entry, as a conversion by
+// contract proves it (convertByContract); a method of covered is proved
+// there already. A failure is reported where it is relied on.
+func (v *fnVerifier) proveOTyped(e ast.Expr, s types.Type, covered types.Type, st *state, guard []*logic.Term) {
+	x := v.oTypedBy(s)
+	if x == nil {
+		return
+	}
+	var already []*types.Func
+	if covered != nil {
+		already = slices.Collect(covered.Underlying().(*types.Interface).Methods())
+	}
+	for method := range x.Type().Underlying().(*types.Interface).Methods() {
+		own, _, _ := types.LookupFieldOrMethod(s, false, method.Pkg(), method.Name())
+		source, _ := own.(*types.Func)
+		if source == method || slices.Contains(already, method) {
+			continue
+		}
+		TA, TB := v.methodContract(source), v.methodContract(method)
+		if why := v.claimsNoLess(TA, TB, source, method); why != "" {
+			v.unsupported(e.Pos(), fmt.Sprintf("%s, %s %s, is taken to have the methods of %s, which is not supported: %s",
+				types.ExprString(e), article(v.shown(s)), v.shown(s), v.shown(x.Type()), why))
+		}
+		v.impliesMethod(e, TA, TB, source, method, st, guard)
+	}
 }
 
 // optionalMember returns the member of O_S that declares a method, or nil.
@@ -178,7 +262,7 @@ type optionalCheck struct {
 // O-typed want, each method of each member of O_want that from implements
 // and that want does not have as the same method.
 func (pv *pkgVerifier) optionalChecks(from, want types.Type) []optionalCheck {
-	if !pv.oTyped(want) {
+	if !pv.oShaped(want) {
 		return nil
 	}
 	own := slices.Collect(want.Underlying().(*types.Interface).Methods())
@@ -204,13 +288,15 @@ func (pv *pkgVerifier) optionalChecks(from, want types.Type) []optionalCheck {
 // nobody checked against what want's users may assert it to (F7 of the
 // design review of F35).
 func (pv *pkgVerifier) optionalSourceWhy(from, want types.Type) string {
-	if !pv.oTyped(want) {
+	if !pv.oShaped(want) {
 		return ""
 	}
 	shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(pv.pass.Pkg)) }
 	if !pv.oTyped(from) {
-		return fmt.Sprintf("%s has the methods of %s, and %s does not, so its values were never checked against the interfaces that code given %s %s may assert them to, "+
-			"as io.WriteString asserts its writer to io.StringWriter", shown(want), shown(pv.oTypedFor(want)[0].Type()), shown(from), article(shown(want)), shown(want))
+		return fmt.Sprintf("code given %s %s may assert it to %s and the other interfaces whose every method has a trust entry, as io.WriteString asserts its writer to io.StringWriter, "+
+			"and %s does not have every method of such an interface from its declaration or under a contract that implies the entry, so its values were never checked, assumed, "+
+			"or vouched for against them",
+			article(shown(want)), shown(want), shown(pv.oShapedFor(want)[0].Type()), shown(from))
 	}
 	have := pv.optionalOf(from)
 	for _, x := range pv.optionalOf(want) {
@@ -368,29 +454,43 @@ func (pv *pkgVerifier) precheckOne(e ast.Expr, from types.Type, c optionalCheck)
 	return len(captured) == 0
 }
 
-// noteOptional records the members of O a package counts for a static
-// type, where it checks a conversion to it or relies on the check.
-func (pv *pkgVerifier) noteOptional(s types.Type) {
-	key := types.TypeString(s, nil)
-	if pv.optionalUses == nil {
-		pv.optionalUses = map[string]OptionalUse{}
-	}
-	if _, done := pv.optionalUses[key]; done {
-		return
-	}
-	use := OptionalUse{Target: key, Package: pv.pass.Pkg.Path()}
-	for _, x := range pv.optionalOf(s) {
-		use.Members = append(use.Members, optionalKey(x))
-		file := "?"
-		for method := range x.Type().Underlying().(*types.Interface).Methods() {
-			if entry := pv.entryFor(method.FullName()); entry != nil {
-				file = fmt.Sprintf("%s:%d", entry.file.path, entry.line)
-				break
+// optionalUse is what the package records of the trust files it reads for
+// D5: the keys of every type to whose methods an entry gives a contract,
+// by receiver as written, with the file of each, and those that resolve in
+// the build to a type that is not an interface.
+func (pv *pkgVerifier) optionalUse() OptionalUse {
+	use := OptionalUse{Package: pv.pass.Pkg.Path()}
+	files := map[string]string{}
+	collect := func(file *trustFile, name string) {
+		for key := range file.entries {
+			receiver, _, isMethod := strings.Cut(strings.TrimPrefix(key, "("), ").")
+			if isMethod && strings.HasPrefix(key, "(") && !strings.HasPrefix(receiver, "*") {
+				if _, done := files[receiver]; !done {
+					files[receiver] = name
+				}
 			}
 		}
-		use.Files = append(use.Files, file)
 	}
-	pv.optionalUses[key] = use
+	for _, file := range shippedContracts() {
+		collect(file, "the shipped files")
+	}
+	if pv.projectTrust != nil {
+		collect(pv.projectTrust, pv.projectTrust.path)
+	}
+	for _, key := range slices.Sorted(maps.Keys(files)) {
+		use.Keys = append(use.Keys, key)
+		use.Files = append(use.Files, files[key])
+		dot := strings.LastIndex(key, ".")
+		if dot < 0 {
+			continue
+		}
+		if pkg := packageOf(pv.pass.Pkg, strings.Trim(key[:dot], `"`)); pkg != nil {
+			if name, ok := pkg.Scope().Lookup(key[dot+1:]).(*types.TypeName); ok && !types.IsInterface(name.Type()) {
+				use.Concrete = append(use.Concrete, key)
+			}
+		}
+	}
+	return use
 }
 
 // shown writes a type as messages of the package do.

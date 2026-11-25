@@ -143,3 +143,18 @@ func RecMaybeNil(r *optionalc.Rec) (w io.Writer) {
 func OverAsWriter() (w io.Writer) {
 	return optionalc.Over{} // want `postcondition may not hold: n <= \|s\|, in optionalc.Over.WriteString used as a method of io.StringWriter`
 }
+
+// KeepsAcrossWrite writes through q's Write, which writes nothing, and
+// claims that q.N is what it was, which is true. It is not proved: the
+// footprint of the conversion is what every method checked at it may
+// write, WriteString's included, and Write lists the footprint (F15 of the
+// review of S1, a narrowing accepted by the orchestrator; a footprint per
+// method would lift it).
+//
+// @Ensures r = 0
+func KeepsAcrossWrite() (r int) {
+	q := &Quiet{}
+	var w io.Writer = q
+	_, _ = w.Write([]byte("x"))
+	return q.N // want `postcondition may not hold: r = 0`
+}

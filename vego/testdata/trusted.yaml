@@ -1295,6 +1295,31 @@ trusted:
     reason: The corpus's claim about every Sizer.
     modifies: []
     ensures: ["n >= 0"]
+  optional.getW:
+    reason: Returns a writer of an interface without contracts, which needs no vouches.
+    modifies: []
+    ensures: ["result != nil"]
+  optional.getWOver:
+    reason: Returns a writer of an interface without contracts, made over nothing of x.
+    requires: ["x != nil"]
+    runs: [x]
+    modifies: []
+    ensures:
+      - "result != nil"
+      - "fresh(result, x)"
+  (optionalwc.WC).Write:
+    reason: The corpus's claim about every WC, the same as io.Writer's.
+    receiver: w
+    modifies: ["behind(w)"]
+    ensures:
+      - "0 <= n And n <= |p|"
+      - "n < |p| -> err != nil"
+  (optionalwc.WC).Close:
+    reason: Closes the value once.
+    receiver: c
+    requires: ["~ended(c)"]
+    modifies: [c]
+    ensures: ["ended(c')"]
   optional.getAny:
     reason: Returns a new value of its own, made over nothing of w; it vouches for nothing, which an any result does not need.
     requires: ["w != nil"]
@@ -2463,6 +2488,9 @@ trusted:
 
 # States of interfaces of another module, and contracts that speak of them.
 state:
+  optionalwc.WC:
+    ended:
+      reason: True once Close has been called on the value.
   ifacestatelib.Conn:
     started:
       reason: True between a Start that returned nil and the next Finish.

@@ -38,6 +38,16 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 	case types.Identical(from, want):
 		return v.eval(e, st, guard)
 	case isIface(from):
+		// A value comes to an O-shaped type only from one checked,
+		// assumed, or vouched under the same interfaces of O (F7 of F35),
+		// on every branch of a conversion between interfaces (F17 of the
+		// review of S1).
+		if why := v.optionalSourceWhy(from, want); why != "" {
+			v.unsupported(e.Pos(), fmt.Sprintf("converting %s, %s %s, to %s is not supported: %s", types.ExprString(e), article(v.shown(from)), v.shown(from), v.shown(want), why))
+		}
+		if v.oShaped(want) {
+			v.proveOTyped(e, from, want, st, guard)
+		}
 		// A value with states keeps them in want too, and they are those
 		// of the pointer it may hold (F11 of the design review of F34).
 		if v.hasStates(from) && !v.hasStates(want) {
@@ -46,12 +56,6 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 			v.keyedFact(st, logic.Implies(logic.Ne(val[0], logic.RefLit(0)), logic.Select(keyedByHeld, val[0])))
 			return val
 		}
-		// A value comes to an O-typed type only from one checked, assumed,
-		// or vouched under the same interfaces of O (F7 of F35).
-		if why := v.optionalSourceWhy(from, want); why != "" {
-			v.unsupported(e.Pos(), fmt.Sprintf("converting %s, %s %s, to %s is not supported: %s", types.ExprString(e), article(v.shown(from)), v.shown(from), v.shown(want), why))
-		}
-		v.noteOptional(want)
 		// The value keeps its methods, so a method of want must be one of
 		// them, the very declaration, and so with the same contract.
 		// A method of want that is not a declaration the value has must be
@@ -152,7 +156,6 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 	v.held[ast.Unparen(e)] = converted
 	if want.Underlying().(*types.Interface).NumMethods() > 0 {
 		v.madeInterface(e, converted, from, want, st, guard)
-		v.noteOptional(want)
 		v.checkOptional(e, converted, from, want, checks, st, guard)
 	}
 	held := v.fresh("iface", logic.Ref)

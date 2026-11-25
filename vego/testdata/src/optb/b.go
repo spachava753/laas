@@ -17,3 +17,12 @@ func (Negative) Size() int { return -1 }
 func Make() (w optlib.W) {
 	return Negative{}
 }
+
+// S2 is an io.Writer of package optb, whose build holds optlibx through
+// optlib.
+type S2 interface{ optlib.W }
+
+// @Ensures s != nil
+func Make2() (s S2) {
+	return Negative{}
+}
