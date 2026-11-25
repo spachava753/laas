@@ -874,7 +874,9 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	// contract lists an interface value with states, is not named: its
 	// writes are not why the states count as another value's.
 	if !slices.ContainsFunc(written, func(t target) bool { return t.row }) {
-		v.epochBy = fmt.Sprintf("%s at %s", name, v.placeOf(call.Pos()))
+		// The call as written, with its receiver: bw.WriteString, not
+		// WriteString.
+		v.epochBy = fmt.Sprintf("%s at %s", types.ExprString(call.Fun), v.placeOf(call.Pos()))
 	}
 	for _, t := range written {
 		v.havoc(st, t, guard)

@@ -561,10 +561,11 @@ func (pv *pkgVerifier) shown(t types.Type) string {
 // claims that the call writes the footprint of what p holds and changes
 // none of its states. It may be claimed only where the entry's runs and
 // asserts confine the calls on p to methods that change no state: p must
-// be an interface value whose type has no states, listed under runs, and
-// every method of its type and of the types listed for it under asserts
-// must belong to an interface without states, as Write, Read, and
-// WriteString do. What the function calls is the author's claim, held by
+// be an interface value whose type has no states, listed under runs, the
+// types listed for it under asserts must be interfaces, and every method
+// of every interface that they and p's type reach must belong to an
+// interface without states, as Write, Read, and WriteString do; nothing
+// reached may be a function value or a pointer with states. What the function calls is the author's claim, held by
 // the harness of each shipped entry, whose probes refuse Close and every
 // other method the entry does not declare (TestBehindParams).
 func (v *fnVerifier) behindParamWhy(fn *funcInfo, param *types.Var) string {
@@ -591,15 +592,42 @@ func (v *fnVerifier) behindParamWhy(fn *funcInfo, param *types.Var) string {
 			}
 		}
 	}
-	for _, t := range called {
-		iface, ok := t.Underlying().(*types.Interface)
-		if !ok {
+	for _, t := range called[1:] {
+		if !isIface(t) {
 			return fmt.Sprintf("behind(%s) claims that the function changes no state of what %s holds, and its asserts lists %s for %s, a type whose methods it may call; list %s itself", name, name, shown(t), name, name)
 		}
-		for method := range iface.Methods() {
+	}
+	// runs lets the function call the methods of every interface and the
+	// function types that what p holds reaches, through fields, elements,
+	// pointers, and the results of methods, as beyondStatic walks them
+	// (F22 of the review of S2 of F35): each must change no state, and no
+	// pointer reached may have states that its own methods change.
+	var r reachedTypes
+	seen := map[types.Type]bool{}
+	for _, t := range called {
+		r.walk(t, seen)
+	}
+	for _, t := range r.ifaces {
+		for method := range t.Underlying().(*types.Interface).Methods() {
 			if owner := declaringInterface(method); owner == nil || v.hasStates(owner.Type()) {
+				if !types.Identical(t, param.Type()) {
+					return fmt.Sprintf("behind(%s) claims that the function changes no state of what %s holds, and what %s holds reaches %s, whose method %s it may call, a method of an interface with states; list %s itself",
+						name, name, name, shown(t), method.Name(), name)
+				}
 				return fmt.Sprintf("behind(%s) claims that the function changes no state of what %s holds, and it may call %s, a method of an interface with states; list %s itself",
 					name, name, methodTitle(method), name)
+			}
+		}
+	}
+	if len(r.funcs) > 0 {
+		return fmt.Sprintf("behind(%s) claims that the function changes no state of what %s holds, and what %s holds reaches a function value of type %s, which it may call; list %s itself",
+			name, name, name, shown(r.funcs[0]), name)
+	}
+	for _, t := range r.others {
+		for _, ptr := range []types.Type{t, types.NewPointer(t)} {
+			if _, isPtr := ptr.Underlying().(*types.Pointer); isPtr && len(v.pointerStateOwners(ptr)) > 0 {
+				return fmt.Sprintf("behind(%s) claims that the function changes no state of what %s holds, and what %s holds reaches %s, which has states; list %s itself",
+					name, name, name, shown(ptr), name)
 			}
 		}
 	}

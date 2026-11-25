@@ -349,7 +349,7 @@ func BufferedThenClose(wc io.WriteCloser) (err error) {
 	bw := bufio.NewWriter(wc)
 	_, _ = bw.WriteString("x")
 	_ = bw.Flush()
-	return wc.Close() // want `precondition of wc.Close may not hold: ~closed\(c\); the state may have been changed by WriteString at io.go:\d+:\d+, which writes through what it is handed or what a value it is handed keeps`
+	return wc.Close() // want `precondition of wc.Close may not hold: ~closed\(c\); the state may have been changed by bw.WriteString at io.go:\d+:\d+, which writes through what it is handed or what a value it is handed keeps`
 }
 
 // @Requires wc != nil And ~closed(wc)
@@ -358,7 +358,7 @@ func BufferedThenClose(wc io.WriteCloser) (err error) {
 func LoggedThenClose(wc io.WriteCloser) (err error) {
 	l := log.New(wc, "", 0)
 	l.Printf("x")
-	return wc.Close() // want `precondition of wc.Close may not hold: ~closed\(c\); the state may have been changed by Printf at io.go:\d+:\d+`
+	return wc.Close() // want `precondition of wc.Close may not hold: ~closed\(c\); the state may have been changed by l.Printf at io.go:\d+:\d+`
 }
 
 // @Requires rc != nil And ~closed(rc)
@@ -367,7 +367,7 @@ func LoggedThenClose(wc io.WriteCloser) (err error) {
 func ScannedThenClose(rc io.ReadCloser) (err error) {
 	sc := bufio.NewScanner(rc)
 	_ = sc.Scan()
-	return rc.Close() // want `precondition of rc.Close may not hold: ~closed\(c\); the state may have been changed by Scan at io.go:\d+:\d+`
+	return rc.Close() // want `precondition of rc.Close may not hold: ~closed\(c\); the state may have been changed by sc.Scan at io.go:\d+:\d+`
 }
 
 // @Requires rc != nil And ~closed(rc)
@@ -396,4 +396,104 @@ func closeAll(wc io.WriteCloser) { wc.Close() }
 // @Ensures True
 func UsesCloseAll(wc io.WriteCloser) {
 	closeAll(wc) // want `the trusted contract of optionalio.closeAll \(trusted.yaml:\d+\) cannot be used: .*behind\(wc\) claims that the function changes no state of what wc holds, and io.WriteCloser has states`
+}
+
+// Interfaces without states that reach values with states (F22 of the
+// review of S2 of F35): an entry over them cannot claim behind, since runs
+// lets the function call what it reaches.
+
+// Handing is written to and hands out a closer.
+type Handing interface {
+	io.Writer
+	// @Ensures True
+	Closer() (c io.Closer)
+}
+
+// HandingCloser is a Handing that is also closed.
+type HandingCloser interface {
+	Handing
+	io.Closer
+}
+
+// flushAll is trusted: it closes what Closer returns.
+func flushAll(p Handing) {
+	if c := p.Closer(); c != nil {
+		_ = c.Close()
+	}
+}
+
+// @Requires x != nil And ~closed(x)
+// @Modifies x
+// @Ensures True
+func UsesFlushAll(x HandingCloser) (err error) {
+	flushAll(x) // want `the trusted contract of optionalio.flushAll \(trusted.yaml:\d+\) cannot be used: in its modifies "behind\(p\)": behind\(p\) claims that the function changes no state of what p holds, and what p holds reaches io.Closer, whose method Close it may call, a method of an interface with states; list p itself`
+	return x.Close()
+}
+
+// Hooked is written to and hands out a function.
+type Hooked interface {
+	io.Writer
+	// @Ensures True
+	Hook() (f func())
+}
+
+// runHook is trusted: it calls the hook.
+func runHook(p Hooked) {
+	if f := p.Hook(); f != nil {
+		f()
+	}
+}
+
+// @Requires x != nil
+// @Modifies x
+// @Ensures True
+func UsesRunHook(x Hooked) {
+	runHook(x) // want `behind\(p\) claims that the function changes no state of what p holds, and what p holds reaches a function value of type func\(\), which it may call; list p itself`
+}
+
+// Filed is written to and hands out a file.
+type Filed interface {
+	io.Writer
+	// @Ensures True
+	File() (f *os.File)
+}
+
+// closeFile is trusted: it closes the file.
+func closeFile(p Filed) {
+	if f := p.File(); f != nil {
+		_ = f.Close()
+	}
+}
+
+// @Requires x != nil
+// @Modifies x
+// @Ensures True
+func UsesCloseFile(x Filed) {
+	closeFile(x) // want `behind\(p\) claims that the function changes no state of what p holds, and what p holds reaches \*os.File, which has states; list p itself`
+}
+
+// Named is written to and has a name: what it reaches has no states.
+type Named interface {
+	io.Writer
+	// @Ensures True
+	Name() (s string)
+}
+
+// NamedCloser is a Named that is also closed.
+type NamedCloser interface {
+	Named
+	io.Closer
+}
+
+// writeName is trusted: it writes the name.
+func writeName(p Named) { _, _ = io.WriteString(p, p.Name()) }
+
+// UsesWriteName closes after writeName, whose entry claims behind(p).
+//
+// @Requires x != nil And ~closed(x)
+// @Modifies x
+// @Ensures True
+func UsesWriteName(x NamedCloser) (err error) {
+	writeName(x)
+	return x.Close()
 }

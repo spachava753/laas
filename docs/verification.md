@@ -2244,7 +2244,7 @@ func BufferThenClose(wc io.WriteCloser, s string) (err error) {
 ```
 
 ```text
-vego: precondition of wc.Close may not hold: ~closed(c); the state may have been changed by WriteString at
+vego: precondition of wc.Close may not hold: ~closed(c); the state may have been changed by bw.WriteString at
 behind.go:24:9, which writes through what it is handed or what a value it is handed keeps, and nothing says
 that what it writes through is not this value, so its states count as those of another value, which a write
 may change; close or use the value only where nothing was written through what keeps it since its state was
@@ -2253,7 +2253,7 @@ known, or write to the value itself
 
 The same holds after a write through a `log.Logger`, a read through a `bufio.Scanner`, and a call through the result of `io.LimitReader` or `io.MultiWriter`. The message names the latest call before which the state was known. It names no call whose contract lists the value itself, since such a call may change its state directly. To close the value, write to it directly, as `WriteThenClose` does.
 
-A trusted function of your own can list `behind(w)` in its entry only when the type of `w` has no states. Its entry must also list `w` under `runs`. An entry that lists `behind(wc)` for an `io.WriteCloser` is refused at each call:
+A trusted function of your own can list `behind(w)` in its entry only when the type of `w` has no states. Its entry must also list `w` under `runs`. What `w` reaches through the results of its methods, through fields, and through elements must have no states either, and must not include a function value, since `runs` lets the function call them. An entry that lists `behind(wc)` for an `io.WriteCloser` is refused at each call:
 
 ```yaml
   example.com/files.closeAll:
@@ -9411,7 +9411,7 @@ This table lists the most common messages.
 | `cannot verify F: Go converts a value to an interface type here, and which expression it converts could not be told` | A value without an expression of its own, such as one result of a call with several, is converted to an interface. | Assign the value to a variable of its own type first. |
 | `cannot verify F: f holds a function literal and is used here other than by calling it` | The variable that holds the literal is passed, compared, or assigned again. | Only call the variable. |
 | `precondition of c.Close may not hold: ~closed(c)` | The value may have been closed already, by an earlier `Close` or by the caller. | Add `~closed(c)` to the `Requires` clauses, and close each value once. See [States of interface values](#states-of-interface-values). |
-| `precondition of wc.Close may not hold: ~closed(c); the state may have been changed by WriteString at ..., which writes through what it is handed or what a value it is handed keeps, ...` | A call wrote through a value that keeps a writer, such as a `bufio.Writer`, since the state of `wc` was known. `vego` does not know which value it keeps. | Close or use `wc` only where nothing was written through what keeps it since its state was known, or write to `wc` directly. See [Functions that write through what they are handed](#functions-that-write-through-what-they-are-handed). |
+| `precondition of wc.Close may not hold: ~closed(c); the state may have been changed by bw.WriteString at ..., which writes through what it is handed or what a value it is handed keeps, ...` | A call wrote through a value that keeps a writer, such as a `bufio.Writer`, since the state of `wc` was known. `vego` does not know which value it keeps. | Close or use `wc` only where nothing was written through what keeps it since its state was known, or write to `wc` directly. See [Functions that write through what they are handed](#functions-that-write-through-what-they-are-handed). |
 | `... in its modifies "behind(wc)": behind(wc) claims that the function changes no state of what wc holds, and io.WriteCloser has states, which its methods change; list wc itself` | The entry of a trusted function lists `behind` of a parameter whose type has states. | List `wc` itself in `modifies`. |
 | `the interface values passed to F as a and b may share their states` | `F` lists one of the two in `Modifies`, and they may be one value or hold one value. | Pass two interface parameters of your own function whose contract lists one of them, or a value that a call created with `fresh`. |
 | `... covers the states of what the interface value p.f holds, not the place that holds it; to assign it, list the struct that holds it` | `Modifies p.f` for an interface field does not cover the field. | List `p` in `Modifies`. |

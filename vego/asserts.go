@@ -211,6 +211,8 @@ func (pv *pkgVerifier) beyondStatic(param types.Type, listed []types.Type) (int,
 type reachedTypes struct {
 	ifaces []types.Type
 	funcs  []*types.Signature
+	// others are the rest of the types reached, in the order reached.
+	others []types.Type
 }
 
 // walk collects what a value of type t can lead code to: the interfaces
@@ -235,6 +237,9 @@ func (r *reachedTypes) walk(t types.Type, seen map[types.Type]bool) {
 		}
 	}
 	if _, isIface := t.Underlying().(*types.Interface); !isIface {
+		if _, isSig := t.Underlying().(*types.Signature); !isSig {
+			r.others = append(r.others, t)
+		}
 		for _, set := range []*types.MethodSet{types.NewMethodSet(t), types.NewMethodSet(types.NewPointer(t))} {
 			for selection := range set.Methods() {
 				results(selection.Obj().Type().(*types.Signature))

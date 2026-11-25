@@ -1336,6 +1336,30 @@ trusted:
       wc: []
     modifies: ["behind(wc)"]
     vouches: [wc]
+  optionalio.flushAll:
+    reason: A test of behind over an interface that reaches io.Closer through a result.
+    requires: ["p != nil"]
+    runs: [p]
+    modifies: ["behind(p)"]
+    vouches: [p]
+  optionalio.runHook:
+    reason: A test of behind over an interface that reaches a function value.
+    requires: ["p != nil"]
+    runs: [p]
+    modifies: ["behind(p)"]
+    vouches: [p]
+  optionalio.closeFile:
+    reason: A test of behind over an interface that reaches an *os.File.
+    requires: ["p != nil"]
+    runs: [p]
+    modifies: ["behind(p)"]
+    vouches: [p]
+  optionalio.writeName:
+    reason: Writes the name of p through p and changes no state of it.
+    requires: ["p != nil"]
+    runs: [p]
+    modifies: ["behind(p)"]
+    vouches: [p]
   optionalio.closeAll:
     reason: A test of behind over a parameter whose type has states, which an entry cannot claim.
     requires: ["wc != nil"]

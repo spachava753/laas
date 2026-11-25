@@ -205,12 +205,6 @@ func (pv *pkgVerifier) pointerStates(t types.Type) []ifaceState {
 	return states
 }
 
-// hasPointerStates reports whether what a pointer of type t points to has
-// states.
-func (pv *pkgVerifier) hasPointerStates(t types.Type) bool {
-	return len(pv.pointerStateOwners(t)) > 0
-}
-
 // stateChangers returns the methods of a pointer type that implement a
 // method of an interface with states whose contract lists its receiver,
 // which change the states of the object.

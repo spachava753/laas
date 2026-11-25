@@ -1,6 +1,10 @@
-package guide
+package guideclaims
 
-import "testing"
+import (
+	"testing"
+
+	"guide"
+)
 
 // closesOnce panics on a second Close.
 type closesOnce struct{ closed bool }
@@ -15,13 +19,14 @@ func (c *closesOnce) Close() error {
 	return nil
 }
 
-// TestShutThenClose shows that the entry of shutWriter is false:
-// ShutThenClose, proved under it, closes its writer twice.
+// TestShutThenClose shows that the entry of shutWriter in the corpus trust
+// file is false: guide.ShutThenClose, proved under it, closes its writer
+// twice.
 func TestShutThenClose(t *testing.T) {
 	defer func() {
 		if recover() == nil {
 			t.Fatal("ShutThenClose closed its writer once")
 		}
 	}()
-	ShutThenClose(&closesOnce{})
+	guide.ShutThenClose(&closesOnce{})
 }

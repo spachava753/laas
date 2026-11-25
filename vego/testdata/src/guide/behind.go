@@ -23,7 +23,7 @@ func BufferThenClose(wc io.WriteCloser, s string) (err error) {
 	bw := bufio.NewWriter(wc)
 	_, _ = bw.WriteString(s)
 	_ = bw.Flush()
-	return wc.Close() // want `precondition of wc.Close may not hold: ~closed\(c\); the state may have been changed by WriteString at behind.go:\d+:\d+, which writes through what it is handed or what a value it is handed keeps, and nothing says that what it writes through is not this value, so its states count as those of another value, which a write may change; close or use the value only where nothing was written through what keeps it since its state was known, or write to the value itself`
+	return wc.Close() // want `precondition of wc.Close may not hold: ~closed\(c\); the state may have been changed by bw.WriteString at behind.go:\d+:\d+, which writes through what it is handed or what a value it is handed keeps, and nothing says that what it writes through is not this value, so its states count as those of another value, which a write may change; close or use the value only where nothing was written through what keeps it since its state was known, or write to the value itself`
 }
 
 // closeAll is trusted, and its entry is refused.
@@ -46,7 +46,7 @@ func shutWriter(w io.Writer) {
 }
 
 // ShutThenClose is proved under that entry, and it closes wc twice, as
-// run_test.go shows.
+// guideclaims/run_test.go shows.
 //
 // @Requires wc != nil And ~closed(wc)
 // @Modifies wc
