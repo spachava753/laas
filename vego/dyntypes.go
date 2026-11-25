@@ -49,7 +49,7 @@ var dynTypes = logic.Const("dyntype", logic.IntSeq)
 // conversions constrain, so the always-fails check takes them as part of
 // every input, as it takes a fixed variable.
 func isDynTable(t *logic.Term) bool {
-	return t.Op == logic.OpConst && (t == dynTypes || t.Name == dynTypes.Name || strings.HasPrefix(t.Name, "held ") || strings.HasPrefix(t.Name, "mkerr ") || strings.HasPrefix(t.Name, "implements ") ||
+	return t.Op == logic.OpConst && (t == dynTypes || t.Name == dynTypes.Name || strings.HasPrefix(t.Name, "held ") || strings.HasPrefix(t.Name, "mkerr ") || strings.HasPrefix(t.Name, "implements ") || t.Name == eqPanics.Name ||
 		t.Name == pkeys.Name)
 }
 
@@ -1374,6 +1374,9 @@ func (v *fnVerifier) heldTypeFacts(st *state, t types.Type) {
 			if c.err != nil {
 				v.sameHeld(st, c, t)
 			}
+		}
+		for _, p := range v.eqPairs {
+			v.eqTypeFact(st, p, t)
 		}
 	}
 }

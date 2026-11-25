@@ -1711,7 +1711,7 @@ A value of any type that `vego` supports can be converted to `any`. An `any` can
 
 ### Comparing interface values
 
-An interface value can be compared only with `nil`. `==` on two interface values compares the types and values they hold, which `vego` does not know, and panics when both hold the same type and that type is not comparable:
+`==` on two interface values is true when both are nil, or when both hold values of one type that are equal. It panics when both hold values of one type on which `==` panics, such as a slice or a struct that holds one. `vego` proves that it does not panic, and it cannot prove that of two values it knows nothing of:
 
 ```go
 // @Ensures same
@@ -1721,10 +1721,21 @@ func SamePricer(p, q Pricer) (same bool) {
 ```
 
 ```text
-vego: cannot verify SamePricer: comparing interface values is not supported yet: == compares the
-types and values they hold, which are not known, and panics when both hold the same type and it
-is not comparable; compare with nil instead
+vego: p == q may panic: p and q may hold values of one type on which == panics, such as a slice or a struct that holds one; say what they hold, as a contract does with holds(p, T), or assert them first
+vego: postcondition may not hold: same
 ```
+
+Say what the values hold, and the comparison verifies:
+
+```go
+// @Requires holds(a, int) And holds(b, int)
+// @Ensures r <-> a.(int) = b.(int)
+func SameInt(a, b any) (r bool) {
+	return a == b
+}
+```
+
+A value of a concrete type beside an interface value is compared as Go compares it, so `v == 3` is true exactly when `v` holds the `int` 3. Its type must be one on which `==` cannot panic. A type that holds an interface value is refused, since that value may hold a slice. A `switch` on an interface value compares it with each case by `==`, and so does a `switch` on a concrete value with a case that is an interface value.
 
 A type assertion and a type switch take a value of a concrete type out of an interface value, as they do out of an error, and a formula says what a value holds with `holds(x, T)` and `x.(T)`; see [Asking what an error holds](#asking-what-an-error-holds).
 
@@ -1765,7 +1776,21 @@ vego: cannot verify Label: using the value of v.(fmt.Stringer) is not supported:
 
 Write `_, ok := v.(fmt.Stringer)` instead, or a case of `fmt.Stringer` whose clause does not use its variable.
 
-A formula can compare two interface values. `a = b` says that they are the same value: one was copied from the other, by an assignment, a conversion to another interface type, or a call that hands it on. It is not Go's `==`. Two conversions of one concrete value are two values, so a function that returns `any(p), any(p)` proves `a != b`, although `a == b` is true in Go. A contract that says a function hands back what it was given, or that a field keeps its value, uses this form:
+A formula can compare two interface values. `a = b` says that they are the same value: one was copied from the other, by an assignment, a conversion to another interface type, or a call that hands it on. It is not Go's `==`, wherever it is written. Two conversions of one concrete value are two values, although `==` on them is true in Go. No Go code can tell whether two interface values are the same value, so a formula cannot say that they are not:
+
+```go
+// @Requires p != nil
+// @Ensures a != b
+func TwoConversions(p *Link) (a, b any) {
+	return p, p
+}
+```
+
+```text
+vego: in Ensures annotation: a != b between two interface values that are not nil is not supported: = says that they are the same value, copied from one another, and not Go's ==, so its negation says nothing that code can observe; ...
+```
+
+`~(a = b)` written directly is refused the same way. To say what Go's `==` says, state what the values hold, as in `holds(a, int) And holds(b, int) And a.(int) != b.(int)`. A contract that says a function hands back what it was given, or that a field keeps its value, uses `=`:
 
 ```go
 // @Requires a != nil And b != nil And a != b
@@ -9060,7 +9085,9 @@ This table lists the most common messages.
 | `converting a value of type *T to I is not supported yet: *T owns an interface value through p.out, ...` | `T` owns, through an owned pointer, a struct that owns an interface value, and the methods of `I` write behind their receiver. | Own the interface value in `T` itself, or call the methods of `*T` on the pointer. |
 | `... list bs[0] in a // @Modifies clause, which covers what it owns; ...` | A clause lists a slice of buffers, which does not cover the arrays its elements own. | List the element. |
 | `T.M has a value receiver, and the pointer that the interface value holds may be nil` | A `*T` that may be nil is converted to an interface, and `M` copies what it points to. | Convert a pointer that is not nil. |
-| `cannot verify F: comparing interface values is not supported yet` | Two interface values, or an interface value and a value of another type, are compared. | Compare with `nil` only. |
+| `a == b may panic: a and b may hold values of one type on which == panics, ...` | Two interface values are compared, and they may hold values of one type on which `==` panics, such as a slice. | Say what they hold, as `holds(a, int)` in a `Requires`, or assert them to a concrete type first. See [Comparing interface values](#comparing-interface-values). |
+| `cannot verify F: comparing an interface value with a value of type T is not supported: == on two values of T may panic, ...` | `T` holds an interface value, a slice, a map, or a function value. | Compare what the interface value holds after an assertion. |
+| `in Ensures annotation: a != b between two interface values that are not nil is not supported: ...` | A formula says that two interface values are not the same value, which no code can observe. The same message is given for `~(a = b)`. | State what Go's `==` says, through what the values hold. See [Comparing interface values](#comparing-interface-values). |
 | `cannot verify F: using the value of X.(I) is not supported: I has the method M, which T does not have, ...` | The value of an assertion to an interface is used, and the operand's type `T` lacks a method of `I`. The same message starts `using the variable of the case I` for a case whose clause uses its variable. | Ask only whether it holds one, with `_, ok := X.(I)` or a case whose clause does not use its variable, or assert to a concrete type. |
 | `cannot verify F: using the value of err.(I) is not supported: the method M of I has a contract, ...` | An error is asserted to an interface with a contracted method other than `Error`. A target with states gives a message of its own. | Ask only whether it holds one, or assert to a concrete type. |
 | `cannot verify F: asserting x, a T, to I is not supported: ...` | The operand's type has a method of the target's name from another declaration, and nothing says that its contract implies the target's. | Give both methods contracts so that one implies the other, or use one interface. |
@@ -9140,7 +9167,8 @@ A function that uses any of the following is reported as `cannot verify`:
 - `io.MultiReader` and `io.MultiWriter` handed a slice whole, as in `io.MultiReader(rs...)`, when what they return is read or written (see [Wrappers in package io](#wrappers-in-package-io));
 - `context.WithCancel` and the functions like it, which keep the context they are given and run it on other goroutines (see [Types without a shipped entry](#types-without-a-shipped-entry));
 - a function that keeps code it is given anywhere but in a result or in memory that a parameter reaches, such as a registry, a goroutine, or a timer, which has no true entry; making a trusted function with `keeps` into a value; and handing a function literal, a function, or a method value of a type without a contract to a parameter under `keeps` (see [Functions that keep what they are given](#functions-that-keep-what-they-are-given));
-- comparing interface values in code with anything but `nil`;
+- comparing an interface value with a value of a type on which `==` may panic or of a type declared inside a function, and a `switch` on a value of a struct type with a case that is an interface value;
+- in a formula, `!=` between two interface values that are not nil, and `~(a = b)` of them (see [Comparing interface values](#comparing-interface-values));
 - using the value of a type assertion or a case to an interface type whose methods the operand's type does not have, unless the operand is an error and no method of the target but `Error` has a contract or a state; `error` as such a target of a value that is not an error; and an interface type declared inside a function as a target;
 - `errors.As` and `errors.AsType` with a target of an interface type (see [Asking what an error holds](#asking-what-an-error-holds));
 - taking out of an error or another interface value, by an assertion, a case of a type switch whose clause uses its variable, or `errors.As`, a value of a type that holds a function value of a type with a contract or an interface value with a method that has one, or that is a function type with a contract (see [Asking what an error holds](#asking-what-an-error-holds));

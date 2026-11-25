@@ -21,3 +21,17 @@ func Label(v any) (n int) {
 	}
 	return 0
 }
+
+// == on interface values (S3 of F34).
+
+// @Requires holds(a, int) And holds(b, int)
+// @Ensures r <-> a.(int) = b.(int)
+func SameInt(a, b any) (r bool) {
+	return a == b
+}
+
+// @Requires p != nil
+// @Ensures a != b // want `vego: in Ensures annotation: a != b between two interface values that are not nil is not supported: = says that they are the same value, copied from one another, and not Go's ==, so its negation says nothing that code can observe; `
+func TwoConversions(p *Link) (a, b any) {
+	return p, p
+}

@@ -50,10 +50,11 @@ func Widen(s Sink) (a any) {
 }
 
 // Two conversions of one pointer are two values, although == on them in
-// Go is true.
+// Go is true. Saying so is refused, since nothing in Go can observe it
+// (O4 of the design of F34).
 
 // @Requires p != nil
-// @Ensures a != b
+// @Ensures a != b // want `in Ensures annotation: a != b between two interface values that are not nil is not supported`
 func Twice(p *Node) (a, b any) {
 	return p, p
 }

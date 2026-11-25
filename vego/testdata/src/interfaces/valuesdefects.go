@@ -22,18 +22,18 @@ func ErrorIsNotNil(err error) (a any) {
 
 // @Ensures same
 func Compared(s, t Shape) (same bool) {
-	return s == t // want `cannot verify Compared: comparing interface values is not supported yet`
+	return s == t // want `s == t may panic: s and t may hold values of one type on which == panics` `postcondition may not hold: same`
 }
 
 // @Ensures True
 func ComparedWithValue(a any) (same bool) {
-	return a == 3 // want `cannot verify ComparedWithValue: comparing interface values is not supported yet`
+	return a == 3
 }
 
 // @Ensures True
 func SwitchedOn(a any, s Shape) (n int) {
 	switch a {
-	case s: // want `cannot verify SwitchedOn: comparing interface values is not supported yet`
+	case s: // want `a == s may panic: a and s may hold values of one type on which == panics`
 		return 1
 	}
 	return 0
@@ -157,8 +157,8 @@ var errTag = errors.New("tag")
 // @Ensures ~b
 func SentinelTag(x any) (b bool) {
 	switch errTag {
-	case x: // want `cannot verify SentinelTag: comparing an error with a value of type any is not supported`
-		return true
+	case x:
+		return true // want `postcondition may not hold: ~b`
 	}
 	return false
 }
@@ -166,8 +166,8 @@ func SentinelTag(x any) (b bool) {
 // @Ensures ~b
 func MadeTag(x any) (b bool) {
 	switch errors.New("made") {
-	case x: // want `cannot verify MadeTag: comparing an error with a value of type any is not supported`
-		return true
+	case x:
+		return true // want `postcondition may not hold: ~b`
 	}
 	return false
 }
@@ -175,8 +175,8 @@ func MadeTag(x any) (b bool) {
 // @Ensures ~b
 func ParameterTag(err error, s interface{ Error() string }) (b bool) {
 	switch err {
-	case s: // want `cannot verify ParameterTag: comparing an error with a value of type interface\{Error\(\) string\} is not supported`
-		return true
+	case s: // want `err == s may panic: err and s may hold values of one type on which == panics`
+		return true // want `postcondition may not hold: ~b`
 	}
 	return false
 }

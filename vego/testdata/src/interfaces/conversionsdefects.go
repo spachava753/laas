@@ -167,7 +167,7 @@ func LoopBack(qty int) (cents int, ok bool) {
 // @Ensures True
 func SwitchOnConcrete(f Flat, p Pricer) (n int) {
 	switch f {
-	case p: // want `cannot verify SwitchOnConcrete: comparing interface values is not supported yet`
+	case p:
 		return 1
 	}
 	return 0
@@ -188,7 +188,7 @@ func SwitchOnErrorCase(err error) (n int) {
 
 // @Ensures True
 func ComparedWithConcrete(p Pricer, f Flat) (same bool) {
-	return p == f // want `cannot verify ComparedWithConcrete: comparing interface values is not supported yet`
+	return p == f
 }
 
 // @Ensures True

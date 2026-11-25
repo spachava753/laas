@@ -1562,3 +1562,55 @@ func SwitchChain(p *Link) (q *Link) {
 	}
 	return q
 }
+
+// EqChain compares interface values twenty times, each comparison of the
+// result of an assertion of the last one's operand (S3 of F34): the
+// references == reads several times are named first, so the terms do not
+// double.
+//
+// @Requires holds(v, int)
+// @Ensures True
+func EqChain(v any) (r bool) {
+	a := v
+	r = a == 1
+	a = any(a.(int))
+	r = a == 1
+	a = any(a.(int))
+	r = a == 1
+	a = any(a.(int))
+	r = a == 1
+	a = any(a.(int))
+	r = a == 1
+	a = any(a.(int))
+	r = a == 1
+	a = any(a.(int))
+	r = a == 1
+	a = any(a.(int))
+	r = a == 1
+	a = any(a.(int))
+	r = a == 1
+	a = any(a.(int))
+	r = a == 1
+	a = any(a.(int))
+	r = a == 1
+	a = any(a.(int))
+	r = a == 1
+	a = any(a.(int))
+	r = a == 1
+	a = any(a.(int))
+	r = a == 1
+	a = any(a.(int))
+	r = a == 1
+	a = any(a.(int))
+	r = a == 1
+	a = any(a.(int))
+	r = a == 1
+	a = any(a.(int))
+	r = a == 1
+	a = any(a.(int))
+	r = a == 1
+	a = any(a.(int))
+	r = a == 1
+	a = any(a.(int))
+	return r
+}

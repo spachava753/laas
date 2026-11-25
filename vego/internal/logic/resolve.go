@@ -171,6 +171,9 @@ type scope struct {
 	// the strings that the body of its quantifier compares it with; see
 	// quantifier.
 	compared map[string]*comparedKey
+	// negated is the comparison that a ~ is written directly on, whose =
+	// between two interface values is refused as != is (O4 of F34).
+	negated *Node
 }
 
 // comparedKey is what the body of a quantifier over string keys compares
@@ -318,13 +321,18 @@ func (s *scope) term(n *Node) *Term {
 		if n.Op == "-" {
 			return Neg(s.expect(n.Kids[0], Int))
 		}
+		if n.Kids[0].Kind == NCompare {
+			s.negated = n.Kids[0]
+		}
 		return Not(s.expect(n.Kids[0], Bool))
 	case NBinary:
 		return s.binary(n)
 	case NCompare:
+		negated := s.negated == n
+		s.negated = nil
 		var parts []*Term
 		for i, op := range n.Ops {
-			parts = append(parts, s.compare(op, n.Kids[i], n.Kids[i+1]))
+			parts = append(parts, s.compare(op, n.Kids[i], n.Kids[i+1], negated && len(n.Ops) == 1))
 		}
 		return And(parts...)
 	case NQuant:
@@ -739,7 +747,7 @@ func (s *scope) binary(n *Node) *Term {
 // compare resolves one link of a comparison chain. An operand written as a
 // slice range, such as A[0:j), stands for every element of the range, so the
 // comparison becomes a bounded universal quantifier over the range.
-func (s *scope) compare(op string, left, right *Node) *Term {
+func (s *scope) compare(op string, left, right *Node, negated bool) *Term {
 	var guards []*Term
 	var vars []*Term
 	operand := func(n *Node) *Term {
@@ -778,6 +786,18 @@ func (s *scope) compare(op string, left, right *Node) *Term {
 	}
 	if a.Sort != b.Sort {
 		failSort("cannot compare %s (%s) with %s (%s)", plain(left), kindOf(a), plain(right), kindOf(b))
+	}
+	if a.Op == OpIfaceVal && b.Op == OpIfaceVal && (op == "!=" || op == "=" && negated) {
+		// That two interface values are not the same value is not what
+		// Go's != says of them, and nothing in Go can observe it (O4 of
+		// F34).
+		written := "a != b"
+		if op == "=" {
+			written = "~(a = b)"
+		}
+		failSort("%s between two interface values that are not nil is not supported: = says that they are the same value, copied from one another, "+
+			"and not Go's ==, so its negation says nothing that code can observe; to say what Go's == says, state what they hold, "+
+			"as in holds(%s, T) And holds(%s, T) And %s.(T) != %s.(T)", written, plain(left), plain(right), plain(left), plain(right))
 	}
 	result := s.relation(op, a, b)
 	if len(vars) == 0 {

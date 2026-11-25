@@ -133,7 +133,7 @@ func AsAny(p Pricer) (a any) {
 
 // @Ensures same
 func SamePricer(p, q Pricer) (same bool) {
-	return p == q // want `cannot verify SamePricer: comparing interface values is not supported yet: == compares the types and values they hold, which are not known, and panics when both hold the same type and it is not comparable; compare with nil instead`
+	return p == q // want `vego: p == q may panic: p and q may hold values of one type on which == panics, such as a slice or a struct that holds one; say what they hold, as a contract does with holds\(p, T\), or assert them first` `postcondition may not hold: same`
 }
 
 // Logging wraps a pricer.

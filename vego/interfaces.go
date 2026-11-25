@@ -30,11 +30,6 @@ import (
 // not nil. Converting one interface value to another keeps the reference,
 // so the nil interface stays nil.
 
-// ifaceCompared is the message for == and != on interface values with
-// anything but nil.
-const ifaceCompared = "comparing interface values is not supported yet: == compares the types and values they hold, " +
-	"which are not known, and panics when both hold the same type and it is not comparable; compare with nil instead"
-
 // interfaceValue evaluates an expression that is assigned to something of
 // an interface type other than error, where Go converts it to that type.
 func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guard []*logic.Term) value {

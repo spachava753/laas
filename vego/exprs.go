@@ -383,11 +383,11 @@ func (v *fnVerifier) binaryExpr(e *ast.BinaryExpr, st *state, guard []*logic.Ter
 		}
 		return isNil
 	}
+	if (isIface(v.info.TypeOf(e.X)) || isIface(v.info.TypeOf(e.Y))) && (e.Op == token.EQL || e.Op == token.NEQ) {
+		return v.compareIfaces(e.X, e.Y, e.Op, st, guard, e.Pos())
+	}
 	if (isError(v.info.TypeOf(e.X)) || isError(v.info.TypeOf(e.Y))) && (e.Op == token.EQL || e.Op == token.NEQ) {
 		return v.compareErrors(e.X, e.Y, e.Op, st, guard, e.Pos())
-	}
-	if (isIface(v.info.TypeOf(e.X)) || isIface(v.info.TypeOf(e.Y))) && (e.Op == token.EQL || e.Op == token.NEQ) {
-		v.unsupported(e.Pos(), ifaceCompared)
 	}
 	if object, isPointer := pointee(v.info.TypeOf(e.X)); isPointer {
 		if v.pass.TypesSizes.Sizeof(object) == 0 {

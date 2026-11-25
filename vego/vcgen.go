@@ -277,6 +277,9 @@ type fnVerifier struct {
 	// ifaceTargets the interfaces it asserts to; see noteTagged.
 	taggedTypes  []types.Type
 	ifaceTargets []types.Type
+	// eqPairs holds the comparisons of two interface values made so far;
+	// see ifacesEqual.
+	eqPairs []eqPair
 	// madeFixed holds the references of the fixed variables met whose
 	// initialisers made an allocation with a size, which are apart, and
 	// fixedMet the fixed variables met; see fixedValue.
@@ -1137,8 +1140,8 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 	var tag *logic.Term
 	if s.Tag != nil {
 		// Where the tag or a case is an interface and the other is not,
-		// Go converts the other one to compare them. That is refused
-		// before either is evaluated.
+		// Go converts the other one to compare them. What cannot be
+		// compared so is refused before either is evaluated.
 		for _, clause := range s.Body.List {
 			for _, e := range clause.(*ast.CaseClause).List {
 				tagType, caseType := v.info.TypeOf(s.Tag), v.info.TypeOf(e)
@@ -1150,12 +1153,34 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 						"convert the tag to error, as in switch error(x)", tagType))
 				case isError(tagType) || isError(caseType):
 					v.bothErrors(s.Tag, e, e.Pos())
+				case isIface(caseType):
+					// A concrete tag is compared as one value of its type.
+					if layout, ok := layoutOf(types.Default(tagType)); ok && len(layout) != 1 {
+						v.unsupported(e.Pos(), fmt.Sprintf("a switch on a value of type %s with a case that is an interface value is not supported; compare them with == instead", tagType))
+					}
+					v.checkEqSide(tagType, e.Pos())
 				default:
-					v.unsupported(e.Pos(), ifaceCompared)
+					v.checkEqSide(caseType, e.Pos())
 				}
 			}
 		}
-		v.evaluate(st, func() { tag = v.expr(s.Tag, st, nil) })
+		// A concrete tag beside a case that is an interface value is
+		// converted for that case; it is evaluated once, as it is.
+		var ifaceCase types.Type
+		for _, clause := range s.Body.List {
+			for _, e := range clause.(*ast.CaseClause).List {
+				if t := v.info.TypeOf(e); ifaceCase == nil && !v.isNil(e) && types.IsInterface(t) && !types.IsInterface(v.info.TypeOf(s.Tag)) {
+					ifaceCase = t
+				}
+			}
+		}
+		v.evaluate(st, func() {
+			if ifaceCase != nil {
+				tag = v.evalCompared(s.Tag, ifaceCase, st, nil)[0]
+				return
+			}
+			tag = v.expr(s.Tag, st, nil)
+		})
 	}
 	inner := ctrl{brk: k, cont: c.cont}
 	var failed []*logic.Term
@@ -1181,10 +1206,12 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 					value = logic.IsNil(tag)
 				case v.isNil(e) && tag.Sort == logic.Ref:
 					value = logic.Eq(tag, logic.RefLit(0))
+				case isIface(v.info.TypeOf(s.Tag)) || isIface(v.info.TypeOf(e)):
+					tagType, caseType := v.info.TypeOf(s.Tag), v.info.TypeOf(e)
+					tagSide := v.eqSide(st, tagType, []*logic.Term{tag})
+					value = v.ifacesEqual(tagSide, v.eqSide(st, caseType, v.evalCompared(e, tagType, st, guard)), types.ExprString(s.Tag), types.ExprString(e), st, guard, e.Pos())
 				case tag.Sort == logic.Err:
 					value = v.errorsEqual(s.Tag, e, tag, v.errorOperand(e, st, guard), e.Pos(), st, guard)
-				case isIface(v.info.TypeOf(s.Tag)) || isIface(v.info.TypeOf(e)):
-					v.unsupported(e.Pos(), ifaceCompared)
 				default:
 					// A case matches when Go's == holds, which for floats,
 					// strings, and errors is not plain equality of terms.

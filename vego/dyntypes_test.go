@@ -8,6 +8,7 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -178,4 +179,92 @@ func TestErrorfTypes(t *testing.T) {
 	if got := strings.ReplaceAll(madeErrorTypes[0], `"`, ""); fmt.Sprintf("%T", errors.New("x")) != got {
 		t.Errorf("errors.New gives a %T, not %s", errors.New("x"), got)
 	}
+}
+
+// TestNoPanicEq checks which types == on two interface values that hold
+// them may panic on, against Go itself (S3 of F34).
+func TestNoPanicEq(t *testing.T) {
+	type blank struct {
+		A int
+		_ []int
+	}
+	type holder struct{ X any }
+	type plain struct {
+		A int
+		B *int
+		C [2]string
+		D chan int
+		E float64
+	}
+	cases := []struct {
+		value  any
+		panics bool
+	}{
+		{1, false}, {"s", false}, {1.5, false}, {new(int), false}, {make(chan int), false},
+		{[2]int{}, false}, {plain{}, false},
+		{[]int{}, true}, {map[int]int{}, true}, {func() {}, true}, {blank{}, true}, {holder{}, true},
+	}
+	for _, c := range cases {
+		typ := reflect.TypeOf(c.value)
+		goPanics := func() (p bool) {
+			defer func() { p = recover() != nil }()
+			_ = c.value == reflect.New(typ).Elem().Interface()
+			return false
+		}()
+		// A holder of an int does not panic, so the check is of the type,
+		// which holds an interface value that may hold anything.
+		if typ.Name() == "holder" {
+			goPanics = func() (p bool) {
+				defer func() { p = recover() != nil }()
+				_ = any(holder{X: []int{}}) == any(holder{X: []int{}})
+				return false
+			}()
+		}
+		got := noPanicWhy(goType(t, c.value), map[types.Type]bool{}) != ""
+		if got != c.panics || goPanics != c.panics {
+			t.Errorf("%T: noPanicWhy says %v, Go panics %v, want %v", c.value, got, goPanics, c.panics)
+		}
+	}
+}
+
+// goType returns the go/types type of a value of one of the shapes
+// TestNoPanicEq uses.
+func goType(t *testing.T, value any) types.Type {
+	t.Helper()
+	field := func(name string, typ types.Type) *types.Var {
+		return types.NewField(token.NoPos, nil, name, typ, false)
+	}
+	anyType := types.Universe.Lookup("any").Type()
+	intT, strT, floatT := types.Typ[types.Int], types.Typ[types.String], types.Typ[types.Float64]
+	switch reflect.TypeOf(value).Name() {
+	case "blank":
+		return types.NewStruct([]*types.Var{field("A", intT), field("_", types.NewSlice(intT))}, nil)
+	case "holder":
+		return types.NewStruct([]*types.Var{field("X", anyType)}, nil)
+	case "plain":
+		return types.NewStruct([]*types.Var{field("A", intT), field("B", types.NewPointer(intT)), field("C", types.NewArray(strT, 2)),
+			field("D", types.NewChan(types.SendRecv, intT)), field("E", floatT)}, nil)
+	}
+	switch value.(type) {
+	case int:
+		return intT
+	case string:
+		return strT
+	case float64:
+		return floatT
+	case *int:
+		return types.NewPointer(intT)
+	case chan int:
+		return types.NewChan(types.SendRecv, intT)
+	case [2]int:
+		return types.NewArray(intT, 2)
+	case []int:
+		return types.NewSlice(intT)
+	case map[int]int:
+		return types.NewMap(intT, intT)
+	case func():
+		return types.NewSignatureType(nil, nil, nil, nil, nil, false)
+	}
+	t.Fatalf("no type for %T", value)
+	return nil
 }

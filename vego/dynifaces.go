@@ -100,6 +100,9 @@ func (v *fnVerifier) noteTagged(st *state, t types.Type) {
 			v.stateImplements(st, name, target, types.Implements(t, target.Underlying().(*types.Interface)))
 		}
 	}
+	if metEqIn(st) {
+		v.stateEqPanics(st, name, noPanicWhy(t, map[types.Type]bool{}) != "")
+	}
 }
 
 // metIfaceIn reports whether the path of a state has met an interface as
