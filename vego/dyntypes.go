@@ -685,6 +685,9 @@ func (v *fnVerifier) assertion(e *ast.TypeAssertExpr, st *state, guard []*logic.
 	if why := reflectHeld(target, "", map[types.Type]bool{}); why != "" {
 		v.unsupported(e.Pos(), fmt.Sprintf("asserting an error to %s is not supported: %s", shown(target), why))
 	}
+	if why := v.contractedReason(target); why != "" {
+		v.unsupported(e.Pos(), fmt.Sprintf("asserting an error to %s is not supported: %s", shown(target), why))
+	}
 	v.meetAssertion(st, target)
 	holds := logic.And(logic.Not(logic.IsNil(x)), logic.Eq(errorTag(x), tag))
 	held := v.heldRead(st, x, target)
@@ -740,6 +743,70 @@ func reflectHeld(t types.Type, path string, seen map[types.Type]bool) string {
 		}
 	}
 	return ""
+}
+
+// contractedHeld says where a value of type t holds, at any depth through
+// fields, pointers, slices, arrays, and maps, a function value of a type with
+// a contract or an interface value with a method that has one, in words
+// that follow "it holds"; "" when there is none. Taking a value of such a
+// type out of an interface value is refused (R1 of F34): what an interface
+// value holds may have been made by code that is not verified, under no
+// claim that it meets the contract, as a trusted function that returns an
+// error vouches for nothing it holds. The holdsContractedValue rule of
+// trusted results counts no error, and a value taken out would be called
+// under the contract (S0 of F34, typederrors/contracted.go).
+func contractedHeld(pv *pkgVerifier, t types.Type, path string, seen map[types.Type]bool) string {
+	if seen[t] {
+		return ""
+	}
+	seen[t] = true
+	if held, replaced := heldAs(t); replaced {
+		return contractedHeld(pv, held, path, seen)
+	}
+	shown := types.TypeString(t, types.RelativeTo(pv.pass.Pkg))
+	switch u := t.Underlying().(type) {
+	case *types.Signature:
+		if pv.valueContract(t) != nil {
+			return fmt.Sprintf("%s a function value of type %s, which has a contract", path, shown)
+		}
+	case *types.Interface:
+		if isIface(t) {
+			for method := range u.Methods() {
+				if pv.methodContract(method) != nil {
+					return fmt.Sprintf("%s a value of type %s, whose method %s has a contract", path, shown, method.Name())
+				}
+			}
+		}
+	case *types.Pointer:
+		return contractedHeld(pv, u.Elem(), path, seen)
+	case *types.Slice:
+		return contractedHeld(pv, u.Elem(), path, seen)
+	case *types.Array:
+		return contractedHeld(pv, u.Elem(), path, seen)
+	case *types.Map:
+		if found := contractedHeld(pv, u.Key(), path, seen); found != "" {
+			return found
+		}
+		return contractedHeld(pv, u.Elem(), path, seen)
+	case *types.Struct:
+		for field := range u.Fields() {
+			if found := contractedHeld(pv, field.Type(), path+" in field "+field.Name(), seen); found != "" {
+				return found
+			}
+		}
+	}
+	return ""
+}
+
+// contractedReason says why a value of type t cannot be taken out of an
+// interface value because of what it holds (contractedHeld), or "".
+func (v *fnVerifier) contractedReason(t types.Type) string {
+	found := contractedHeld(v.pkgVerifier, t, "", map[types.Type]bool{})
+	if found == "" {
+		return ""
+	}
+	return "it holds" + found + ", and nothing claims that a value taken out of an interface value meets that contract: " +
+		"code that is not verified may have made it"
 }
 
 // meetAssertion records that the function asks what an error holds: the
@@ -821,6 +888,9 @@ func (v *fnVerifier) typeSwitch(s *ast.TypeSwitchStmt, st *state, c ctrl, k func
 					v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch is not supported: values of its type are not modelled", shown(t)))
 				}
 				if why := reflectHeld(t, "", map[types.Type]bool{}); why != "" {
+					v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch is not supported: %s", shown(t), why))
+				}
+				if why := v.contractedReason(t); why != "" {
 					v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch is not supported: %s", shown(t), why))
 				}
 				v.meetAssertion(st, t)

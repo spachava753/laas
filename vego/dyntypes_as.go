@@ -200,6 +200,9 @@ func (v *fnVerifier) asTarget(call *ast.CallExpr, t types.Type, who string) {
 	if why := reflectHeld(t, "", map[types.Type]bool{}); why != "" {
 		v.unsupported(call.Pos(), fmt.Sprintf("%s with a target of %s is not supported: %s", who, shown, why))
 	}
+	if why := v.contractedReason(t); why != "" {
+		v.unsupported(call.Pos(), fmt.Sprintf("%s with a target of %s is not supported: %s", who, shown, why))
+	}
 }
 
 // errorsAs evaluates errors.As(err, &v), which is supported only in that

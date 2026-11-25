@@ -170,3 +170,21 @@ func ReportCause() (err error) {
 	var cause error = WithCause{code: 1}
 	return fmt.Errorf("report: %w", cause) // want `vego: cannot verify ReportCause: formatting cause would run the methods of an error whose origin is not known; .*cause is assigned WithCause\{…\} at typed.go:\d+:\d+, a value of type WithCause, whose errors have no known origin: WithCause has a method Unwrap, which errors.Is, errors.As, or fmt would run`
 }
+
+// NonNeg maps an integer to one that is not negative.
+//
+// @Ensures y >= 0
+type NonNeg func(x int) (y int)
+
+type HookError struct{ Fix NonNeg }
+
+// @Ensures True
+func (e *HookError) Error() (s string) { return "hook failed" }
+
+// @Ensures r >= 0
+func Repair(err error) (r int) {
+	if he, ok := err.(*HookError); ok && he != nil && he.Fix != nil { // want `cannot verify Repair: asserting an error to \*HookError is not supported: it holds in field Fix a function value of type NonNeg, which has a contract, and nothing claims that a value taken out of an interface value meets that contract: code that is not verified may have made it`
+		return he.Fix(0)
+	}
+	return 0
+}

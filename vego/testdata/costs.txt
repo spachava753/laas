@@ -2114,6 +2114,7 @@ guide	(*guide.Board).Longest	6	25711	0
 guide	(*guide.Box).touch	1	241	0
 guide	(*guide.Counter).Inc	8	7245	0
 guide	(*guide.Forward).Record	9	7526	0
+guide	(*guide.HookError).Error	1	182	0
 guide	(*guide.Hub).Add	1	1573	0
 guide	(*guide.Hub).Fire	1	1808	0
 guide	(*guide.Item).Next	9	5884	0
@@ -2401,6 +2402,7 @@ guide	guide.NewJournal	15	39589	0
 guide	guide.NewPile	11	13549	0
 guide	guide.NewStale	4	750	0
 guide	guide.Next	16	11499	0
+guide	guide.NonNeg	3	1181	0
 guide	guide.Note	8	13232	0
 guide	guide.NoteFrom	9	8960	0
 guide	guide.Notify	6	35453	0
@@ -2466,6 +2468,7 @@ guide	guide.RefillMemo	21	145778	4
 guide	guide.RefillOrdered	17	38366	0
 guide	guide.Remove	19	24370	0
 guide	guide.RemoveIfPresent	52	92589	0
+guide	guide.Repair	1	46	0
 guide	guide.Replace	4	5505	0
 guide	guide.ReplaceBody	0	0	0
 guide	guide.Report	3	589	0
@@ -5693,6 +5696,18 @@ typederrorsclient	typederrorsclient.Wraps	13	16005	0
 typederrorsclient	typederrorsclient.WrongForward	5	3980	0
 typederrorsclient	typederrorsclient.find	7	14618	0
 typederrorsclient	typederrorsclient.wrapped	7	9157	0
+typederrorspos	(*typederrorspos.HookErr).Error	1	182	0
+typederrorspos	(*typederrorspos.PosErr).Error	1	182	0
+typederrorspos	(*typederrorspos.PosList).Error	1	182	0
+typederrorspos	typederrorspos.FindsPos	1	46	0
+typederrorspos	typederrorspos.FindsPosType	1	46	0
+typederrorspos	typederrorspos.HoldsAnError	3	622	0
+typederrorspos	typederrorspos.Pos	3	1181	0
+typederrorspos	typederrorspos.UsesPos	3	190	0
+typederrorspos	typederrorspos.UsesPosList	1	46	0
+typederrorspos	typederrorspos.UsesPosMust	3	190	0
+typederrorspos	typederrorspos.UsesPosSwitch	3	190	0
+typederrorspos	typederrorspos.handsPos	3	3620	0
 typedowns	(*typedowns.Cell).Error	1	182	0
 typedowns	(*typedowns.PE).Error	1	182	0
 typedowns	(typedowns.PartErr).Error	1	182	0

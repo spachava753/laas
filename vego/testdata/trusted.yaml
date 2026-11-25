@@ -2397,6 +2397,10 @@ trusted:
     reason: Test helper standing for a call on what a struct owns, whose error may hold it.
     modifies: []
 
+  typederrorspos.handsPos:
+    reason: Test helper standing for a trusted function whose error holds a function value with a contract that code which is not verified made; its entry vouches for nothing (S0 of F34).
+    modifies: []
+
   typederrorsclient.wrapped:
     reason: Test helper that returns a typederrors.Wrap, whose methods are those of the *PE it embeds.
     ensures:

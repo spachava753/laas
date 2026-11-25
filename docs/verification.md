@@ -5493,6 +5493,36 @@ holds(err, T)
 
 The type must be a concrete type, or `error` itself. An assertion to another interface type is not supported yet.
 
+A type whose values hold a function value of a type with a contract, or an interface value with a method that has a contract, cannot be taken out of an error. Code that is not verified may have made the error, and nothing claims that what it holds meets the contract:
+
+```go
+// NonNeg maps an integer to one that is not negative.
+//
+// @Ensures y >= 0
+type NonNeg func(x int) (y int)
+
+type HookError struct{ Fix NonNeg }
+
+// @Ensures True
+func (e *HookError) Error() (s string) { return "hook failed" }
+
+// @Ensures r >= 0
+func Repair(err error) (r int) {
+	if he, ok := err.(*HookError); ok && he != nil && he.Fix != nil {
+		return he.Fix(0)
+	}
+	return 0
+}
+```
+
+```text
+vego: cannot verify Repair: asserting an error to *HookError is not supported: it holds in field Fix
+a function value of type NonNeg, which has a contract, and nothing claims that a value taken out of
+an interface value meets that contract: code that is not verified may have made it
+```
+
+The same holds for a case of a type switch and for the target of `errors.As` and `errors.AsType`.
+
 #### Finding an error with errors.As
 
 `errors.As` and `errors.AsType` find a value of a type in an error and in the errors it wraps. In a formula, `as(err, T)` says that `errors.As` finds one:
@@ -8925,6 +8955,7 @@ This table lists the most common messages.
 | `cannot verify F: comparing interface values is not supported yet` | Two interface values, or an interface value and a value of another type, are compared. | Compare with `nil` only. |
 | `cannot verify F: type assertions and type switches are not supported yet` | The type that an interface value holds is not known. | Make the assertion in code that is not verified. On an error, assert to a concrete type or to `error`. |
 | `the type assertion X.(T) may panic: X may not hold a T; ...` | The form with one result is used where the error may hold another type. | Use `v, ok := X.(T)`, or show that it holds one with `holds(err, T)`. See [Asking what an error holds](#asking-what-an-error-holds). |
+| `cannot verify F: asserting an error to T is not supported: it holds in field f a function value of type G, which has a contract, ...` | `T` can hold a value with a contract, which code that is not verified may have made. The same message covers a case of a type switch and the target of `errors.As`. | Keep the function value or the interface value out of the error type, or take it out in code that is not verified. |
 | `cannot verify F: converting a T to an error is not supported: ...` | A method of `T`, or what `T` holds or returns, could do what code that is not verified cannot account for. The message says which. | See [What the methods of the type may do](#what-the-methods-of-the-type-may-do). |
 | `cannot verify F: errors.As panics here: the target has type T, which is not an interface and does not implement error` | The target of `errors.As` is not an error type. | Use a target whose type implements `error`. See [Finding an error with errors.As](#finding-an-error-with-errorsas). |
 | `cannot verify F: errors.As is supported only as errors.As(err, &v) for a local variable v` | The second argument is another expression. | Declare a local variable and pass its address. |
@@ -8997,6 +9028,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - a function that keeps code it is given anywhere but in a result or in memory that a parameter reaches, such as a registry, a goroutine, or a timer, which has no true entry; making a trusted function with `keeps` into a value; and handing a function literal, a function, or a method value of a type without a contract to a parameter under `keeps` (see [Functions that keep what they are given](#functions-that-keep-what-they-are-given));
 - comparing interface values in code with anything but `nil`, and type assertions and type switches on interface values other than errors;
 - a type assertion of an error to an interface type other than `error`, and `errors.As` and `errors.AsType` with a target of an interface type (see [Asking what an error holds](#asking-what-an-error-holds));
+- taking out of an error, by an assertion, a case of a type switch, or `errors.As`, a value of a type that holds a function value of a type with a contract or an interface value with a method that has one (see [Asking what an error holds](#asking-what-an-error-holds));
 - errors of your own types whose methods do what code that is not verified could not account for (see [What the methods of the type may do](#what-the-methods-of-the-type-may-do)), and errors of types with `Unwrap`, `Is`, `As`, `Format`, or `GoString` methods formatted, wrapped, or searched (see [Formatting and wrapping errors of your own types](#formatting-and-wrapping-errors-of-your-own-types));
 - a trusted entry whose `asserts` lists, over a parameter that is not an error, an interface with a method that an interface the parameter reaches lacks (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed));
 - a cycle of calls that goes through a call through an interface value or a function value, or through code of another package (see [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods)), reported as `this call may not end`;
