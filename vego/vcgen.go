@@ -270,6 +270,9 @@ type fnVerifier struct {
 	ifaceConversions []ifaceConversion
 	metTypes         []types.Type
 	keyedFacts       []*logic.Term
+	// madeTypes holds, by the name of an error a call of errors.New or
+	// fmt.Errorf made, the canonical name of its type when it is known.
+	madeTypes map[string]string
 	// taggedTypes holds the types whose tags the function may state, and
 	// ifaceTargets the interfaces it asserts to; see noteTagged.
 	taggedTypes  []types.Type

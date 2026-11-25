@@ -4,6 +4,7 @@ package dynifaces
 
 import (
 	"errors"
+	"fmt"
 	"io"
 )
 
@@ -241,4 +242,17 @@ func ErrParamInAny(err error) (ok bool) {
 	var v any = err
 	_, ok = v.(error)
 	return ok
+}
+
+// Whether a made error wraps is decided by its call (F17 of the review of
+// S2).
+//
+// @Ensures ~a And b And c And ~d
+func MadeUnwrap() (a, b, c, d bool) {
+	inner := errors.New("inner")
+	_, a = inner.(interface{ Unwrap() error })
+	_, b = fmt.Errorf("w: %w", inner).(interface{ Unwrap() error })
+	_, c = fmt.Errorf("%w and %w", inner, inner).(interface{ Unwrap() []error })
+	_, d = fmt.Errorf("x %d", 1).(interface{ Unwrap() error })
+	return a, b, c, d
 }

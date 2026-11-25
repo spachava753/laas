@@ -1,12 +1,15 @@
 package vego
 
 import (
+	"errors"
+	"fmt"
 	"go/ast"
 	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
 	"slices"
+	"strings"
 	"testing"
 
 	"golang.org/x/tools/go/packages"
@@ -135,5 +138,44 @@ func TestMadeErrorTypes(t *testing.T) {
 	want := slices.Sorted(slices.Values(madeErrorTypes))
 	if !slices.Equal(names, want) {
 		t.Fatalf("the types are %q, and madeErrorTypes lists %q", names, want)
+	}
+}
+
+// TestErrorfTypes checks the type madeErrorType says each call
+// of errors.New and fmt.Errorf gives, by the count of %w verbs that
+// wrapVerbs reads, against the errors the running toolchain makes (F17 of
+// the review of S2 of F34).
+func TestErrorfTypes(t *testing.T) {
+	inner := errors.New("inner")
+	cases := []struct {
+		format string
+		args   []any
+	}{
+		{"plain", nil},
+		{"%%w", nil},
+		{"%d", []any{1}},
+		{"%w", nil},
+		{"w: %w", []any{inner}},
+		{"w: %w", []any{3}},
+		{"%v %w", []any{1, inner}},
+		{"%v %w", []any{inner}},
+		{"%5.2w", []any{inner}},
+		{"%w %w", []any{inner, inner}},
+		{"%w %d %w", []any{inner, 1}},
+	}
+	for _, c := range cases {
+		err := fmt.Errorf(c.format, c.args...)
+		count, ok := wrapVerbs(c.format, len(c.args))
+		if !ok {
+			t.Errorf("wrapVerbs(%q) does not read it", c.format)
+			continue
+		}
+		want := madeErrorTypes[min(count, 2)]
+		if got := strings.ReplaceAll(want, `"`, ""); fmt.Sprintf("%T", err) != got {
+			t.Errorf("fmt.Errorf(%q) gives a %T, and %d %%w verbs say %s", c.format, err, count, got)
+		}
+	}
+	if got := strings.ReplaceAll(madeErrorTypes[0], `"`, ""); fmt.Sprintf("%T", errors.New("x")) != got {
+		t.Errorf("errors.New gives a %T, not %s", errors.New("x"), got)
 	}
 }

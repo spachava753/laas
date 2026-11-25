@@ -1741,7 +1741,12 @@ func PricerOrNot() (ok, ok2 bool) {
 }
 ```
 
-The value such an assertion gives can be used only in two cases. The first is an interface value whose type already has every method of the target, as an `io.ReadWriter` asserted to `io.Reader`. The second is an error asserted to an interface whose methods, other than `Error`, have no contract. Otherwise the value may be one your code made without checking it against the target's methods:
+The value such an assertion gives can be used only in two cases:
+
+- The operand's type has each method of the target, from the same declaration, as an `io.ReadWriter` asserted to `io.Reader`, or with a contract that implies the target's. A method of the same name from another declaration, without such a contract, is refused with `asserting x, a T, to I is not supported` (see the table of messages).
+- The operand is an error, and no method of the target other than `Error` has a contract.
+
+In any other case the value may be one your code made without checking it against the target's methods:
 
 ```go
 // @Ensures True

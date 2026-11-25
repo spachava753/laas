@@ -51,6 +51,9 @@ func TestClaims(t *testing.T) {
 	if !ErrParamInAny(errors.New("x")) || ErrParamInAny(nil) {
 		t.Error("ErrParamInAny")
 	}
+	if a, b, c, d := MadeUnwrap(); a || !b || !c || d {
+		t.Error("MadeUnwrap")
+	}
 	if IsCoder(errors.New("x")) || IsCloser(errors.New("x")) {
 		t.Error("IsCoder or IsCloser")
 	}

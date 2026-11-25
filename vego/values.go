@@ -302,6 +302,12 @@ func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term
 		_ = v.checkFormatAlloc(st, guard, call, "fmt.Errorf", fmtSlack, call.Args[0], values[call.Args[0]], operands)
 	}
 	created := v.fresh("error", logic.Err)
+	if made := v.madeErrorType(call, errorf); made != "" {
+		if v.madeTypes == nil {
+			v.madeTypes = map[string]string{}
+		}
+		v.madeTypes[created.Name] = made
+	}
 	v.noteError(st, created)
 	// It differs from every opaque variable; see noteOpaque.
 	v.madeHere = append(v.madeHere, created)

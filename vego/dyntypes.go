@@ -3,12 +3,14 @@ package vego
 import (
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/token"
 	"go/types"
 	"math/big"
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 )
@@ -404,7 +406,9 @@ func eqLeaf(a, b *logic.Term) *logic.Term {
 }
 
 // noteMadeTag states once in a state that a made error holds one of the
-// types of package errors and fmt that errors.New and fmt.Errorf return.
+// types of package errors and fmt that errors.New and fmt.Errorf return:
+// the one its call gives, when that is known (madeTypes), and otherwise
+// one of the three.
 func (v *fnVerifier) noteMadeTag(st *state, made *logic.Term) {
 	if st == nil || !v.typedMet {
 		return
@@ -413,10 +417,91 @@ func (v *fnVerifier) noteMadeTag(st *state, made *logic.Term) {
 		st.noted[note] = true
 		var options []*logic.Term
 		for _, name := range madeErrorTypes {
-			options = append(options, logic.Eq(errorTag(made), logic.BigLit(new(big.Int).SetBytes([]byte(name)))))
+			if known := v.madeTypes[made.Name]; known == "" || known == name {
+				options = append(options, logic.Eq(errorTag(made), logic.BigLit(new(big.Int).SetBytes([]byte(name)))))
+			}
 		}
 		v.fact(st, logic.Or(options...))
 	}
+}
+
+// madeErrorType returns the canonical name of the type of the error a call
+// of errors.New or fmt.Errorf makes, or "" when it is not known: errors.New
+// and fmt.Errorf with no %w that takes an operand give an
+// *errors.errorString, fmt.Errorf with one a *fmt.wrapError, whatever the
+// operand is, and with more a *fmt.wrapErrors (fmt's errorf, which
+// TestErrorfTypes checks against the running toolchain).
+func (v *fnVerifier) madeErrorType(call *ast.CallExpr, errorf bool) string {
+	if !errorf {
+		return madeErrorTypes[0]
+	}
+	if call.Ellipsis.IsValid() {
+		return ""
+	}
+	value := v.info.Types[call.Args[0]].Value
+	if value == nil || value.Kind() != constant.String {
+		return ""
+	}
+	count, ok := wrapVerbs(constant.StringVal(value), len(call.Args)-1)
+	switch {
+	case !ok:
+		return ""
+	case count == 0:
+		return madeErrorTypes[0]
+	case count == 1:
+		return madeErrorTypes[1]
+	}
+	return madeErrorTypes[2]
+}
+
+// wrapVerbs counts the %w verbs of a format that take one of n operands,
+// by the rules formatWraps reads, and reports false for a format it does
+// not read.
+func wrapVerbs(text string, n int) (int, bool) {
+	operand, count := 0, 0
+	for i := 0; i < len(text); {
+		if text[i] != '%' {
+			i++
+			continue
+		}
+		i++
+		for i < len(text) && (text[i] == '#' || text[i] == '0' || text[i] == '+' || text[i] == '-' || text[i] == ' ') {
+			i++
+		}
+		digits := func() bool {
+			start := i
+			for i < len(text) && '0' <= text[i] && text[i] <= '9' {
+				i++
+			}
+			return i-start <= maxFormatDigits
+		}
+		if i < len(text) && (text[i] == '[' || text[i] == '*') || !digits() {
+			return 0, false
+		}
+		if i < len(text) && text[i] == '.' {
+			i++
+			if i < len(text) && (text[i] == '[' || text[i] == '*') || !digits() {
+				return 0, false
+			}
+		}
+		if i >= len(text) {
+			break
+		}
+		verb, size := utf8.DecodeRuneInString(text[i:])
+		i += size
+		switch verb {
+		case '%':
+			continue
+		case '[':
+			return 0, false
+		case 'w':
+			if operand < n {
+				count++
+			}
+		}
+		operand++
+	}
+	return count, true
 }
 
 // sameTyped states, for two errors that code compares, that they are one
