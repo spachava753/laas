@@ -10,10 +10,12 @@ state:
         Close is ruled out by the entry for Close, which requires that the
         value is not closed. Declaring the state also claims that every
         method of a value with it whose contract does not list the receiver
-        leaves it unchanged: Read of io.Reader and Write of io.Writer, on an
-        io.ReadCloser, an io.WriteCloser, or an io.ReadWriteCloser, never
-        close the value. The documentation does not say that, and it goes
-        beyond it; the shipped implementations were tested for it.
+        leaves it unchanged: Read of io.Reader, Write of io.Writer, and
+        WriteString of io.StringWriter, on an io.ReadCloser, an
+        io.WriteCloser, or an io.ReadWriteCloser, never close the value.
+        The documentation does not say that, and it goes beyond it; the
+        shipped implementations were tested for it, WriteString directly and
+        through io.WriteString included.
 
 trusted:
   (io.Writer).Write:

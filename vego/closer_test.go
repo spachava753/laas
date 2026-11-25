@@ -162,6 +162,12 @@ func (c *anyCloser) Close() error {
 func (c *anyCloser) Read(p []byte) (int, error)  { return anyReader{c.rng}.Read(p) }
 func (c *anyCloser) Write(p []byte) (int, error) { return anyWriter{c.rng}.Write(p) }
 
+// WriteString does what Write does, which the entry of
+// (io.StringWriter).WriteString allows, and never closes the value: the
+// declaration of closed claims that of every method whose contract does
+// not cover the states (F19 of the review of S2 of F35).
+func (c *anyCloser) WriteString(s string) (int, error) { return anyWriter{c.rng}.WriteString(s) }
+
 // checkCloseEntry runs the entry of (io.Closer).Close against each closer:
 // random sequences of Read, Write, and Close on one value, Close only while
 // what the harness knows says the value is not closed, which is the
@@ -223,7 +229,7 @@ func checkCloseEntry(t *testing.T, pv *pkgVerifier, fn *funcInfo) {
 				value := impl.open(rng)
 				closed := false
 				for range 1 + rng.Intn(6) {
-					switch op := rng.Intn(3); {
+					switch op := rng.Intn(5); {
 					case op == 0 && value.r != nil:
 						p := make([]byte, 1+rng.Intn(64))
 						var n int
@@ -239,7 +245,23 @@ func checkCloseEntry(t *testing.T, pv *pkgVerifier, fn *funcInfo) {
 						if n < 0 || n > len(p) || (n < len(p) && err == nil) {
 							t.Fatalf("Write returned %d, %v for %d bytes, closed %v", n, err, len(p), closed)
 						}
-					case op == 2 && !closed:
+					case op == 3 && value.w != nil:
+						// WriteString, directly where the value has it and
+						// through io.WriteString, must meet its entry and
+						// leave the value as Write does: a Close after it is
+						// a first Close.
+						s := string(randomBytes(rng))
+						var n int
+						var err error
+						if sw, ok := value.w.(io.StringWriter); ok && rng.Intn(2) == 0 {
+							bounded(t, "WriteString", func() { n, err = sw.WriteString(s) })
+						} else {
+							bounded(t, "io.WriteString", func() { n, err = io.WriteString(value.w, s) })
+						}
+						if n < 0 || n > len(s) || (n < len(s) && err == nil) {
+							t.Fatalf("WriteString returned %d, %v for %d bytes, closed %v", n, err, len(s), closed)
+						}
+					case op >= 2 && !closed:
 						env := &specEnv{v: &fnVerifier{pkgVerifier: pv, fn: fn}, fn: fn, givenState: ghost(closed)}
 						if !holds(fn.requires, env) {
 							t.Fatal("the requires does not hold of a value that is not closed")
