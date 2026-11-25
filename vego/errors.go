@@ -1544,8 +1544,9 @@ func (b *sampler) addStates(t types.Type, to binding) {
 				}
 			}
 			s.consts[homes.Name] = table
-			// The states of a sample lie at its home (S0b of F34).
+			// The states of a sample lie at its home (S0b of F34), its own.
 			s.consts[skeys.Name] = table
+			s.consts[keyedByHeld.Name] = logic.Fill(logic.IntLit(0), logic.True())
 		}})
 	}
 	if !b.v.hasStates(t) {

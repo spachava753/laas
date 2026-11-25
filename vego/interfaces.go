@@ -1,11 +1,11 @@
 package vego
 
 import (
-	"maps"
 	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
+	"maps"
 	"slices"
 	"strings"
 
@@ -35,9 +35,6 @@ import (
 const ifaceCompared = "comparing interface values is not supported yet: == compares the types and values they hold, " +
 	"which are not known, and panics when both hold the same type and it is not comparable; compare with nil instead"
 
-// ifaceAsserted is the message for type assertions and type switches.
-const ifaceAsserted = "type assertions and type switches are not supported yet: the type an interface value holds is not known"
-
 // interfaceValue evaluates an expression that is assigned to something of
 // an interface type other than error, where Go converts it to that type.
 func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guard []*logic.Term) value {
@@ -46,6 +43,14 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 	case types.Identical(from, want):
 		return v.eval(e, st, guard)
 	case isIface(from):
+		// A value with states keeps them in want too, and they are those
+		// of the pointer it may hold (F11 of the design review of F34).
+		if v.hasStates(from) && !v.hasStates(want) {
+			v.convertByContract(e, from, want, st, guard)
+			val := v.eval(e, st, guard)
+			v.keyedFact(st, logic.Implies(logic.Ne(val[0], logic.RefLit(0)), logic.Select(keyedByHeld, val[0])))
+			return val
+		}
 		// The value keeps its methods, so a method of want must be one of
 		// them, the very declaration, and so with the same contract.
 		// A method of want that is not a declaration the value has must be
@@ -64,6 +69,7 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		v.held[ast.Unparen(e)] = value{err}
 		held := v.fresh("iface", logic.Ref)
 		st.assume(logic.Iff(logic.Eq(held, logic.RefLit(0)), logic.IsNil(err)))
+		v.recordConversion(st, ifaceConversion{ref: held, err: err})
 		return value{held}
 	case types.IsInterface(from):
 		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported", from, want))
@@ -142,12 +148,14 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		st.assume(logic.Ne(held, other))
 	}
 	v.converted = append(v.converted, held)
+	v.recordConversion(st, ifaceConversion{ref: held, t: from, val: converted})
 	// The key of its states: the pointer's, or a new one with every state
 	// False for a value, which the conversion copies.
 	keyAt := func(at *logic.Term, fresh bool) {
 		if pointerKeyed {
 			v.notePointerKey(st, converted)
 			st.assume(logic.Eq(skey(held), pkey(converted)))
+			v.keyedFact(st, logic.Select(keyedByHeld, held))
 			return
 		}
 		st.assume(logic.Eq(skey(held), at))

@@ -501,11 +501,8 @@ func (e *specEnv) holdsPath(name string, steps []logic.Step, t *logic.TypeName, 
 		return nil, err
 	case found.constant != nil && found.constant.Sort != logic.Err:
 		return nil, fmt.Errorf("holds(%s, ...): %s is not an error", spell(name, steps), spell(name, steps))
-	case found.constant == nil && !isError(found.typ):
-		if isIface(found.typ) {
-			return nil, fmt.Errorf("holds(%s, ...) of an interface value other than an error is not supported yet", spell(name, steps))
-		}
-		return nil, fmt.Errorf("holds(%s, ...): %s is not an error", spell(name, steps), spell(name, steps))
+	case found.constant == nil && !isError(found.typ) && !isIface(found.typ):
+		return nil, fmt.Errorf("holds(%s, ...): %s is not an error or an interface value", spell(name, steps), spell(name, steps))
 	}
 	err2 := found.constant
 	if err2 == nil {
@@ -513,22 +510,35 @@ func (e *specEnv) holdsPath(name string, steps []logic.Step, t *logic.TypeName, 
 	}
 	target := t.Resolved.(types.Type)
 	if types.IsInterface(target) {
-		return nil, fmt.Errorf("holds(%s, %s): %s is an interface, and asking whether an error holds a value that implements one is not supported yet", spell(name, steps), t, t)
+		return nil, fmt.Errorf("holds(%s, %s): %s is an interface, and asking whether a value holds a value that implements one is not supported yet", spell(name, steps), t, t)
 	}
 	tag, ok := typeTag(target)
 	if !ok {
 		return nil, fmt.Errorf("holds(%s, %s): %s is declared inside a function, and nothing tells it apart from another type there", spell(name, steps), t, t)
 	}
+	ref, isNil := refOf(err2)
+	if err2.Sort != logic.Err {
+		e.v.meetDynamic(e.sink)
+		e.v.meetHeldType(e.sink, target)
+		// What a held pointer's states are (F11 of the design review).
+		if e.sink != nil && !hasBound(err2) {
+			if _, layoutOK := layoutOf(target); layoutOK {
+				holds := logic.And(logic.Not(isNil), logic.Eq(dynTag(ref), tag))
+				e.v.keyHeldPointer(e.sink, err2, found.typ, target, e.v.heldRead(e.sink, err2, target), holds)
+			}
+		}
+	}
 	e.v.meetType(e.sink, target)
-	return logic.And(logic.Not(logic.IsNil(err2)), logic.Eq(errorTag(err2), tag)), nil
+	return logic.And(logic.Not(isNil), logic.Eq(dynTag(ref), tag)), nil
 }
 
-// heldRead returns the leaves of what an error holds as a value of a type,
-// with what the type guarantees of them noted (F8 of the design review).
+// heldRead returns the leaves of what an error or an interface value
+// holds as a value of a type, with what the type guarantees of them noted
+// (F8 of the design review).
 func (v *fnVerifier) heldRead(sink *state, err *logic.Term, t types.Type) value {
 	name, _ := canonicalName(t)
 	layout, _ := layoutOf(t)
-	ref := logic.ErrRef(err)
+	ref, _ := refOf(err)
 	held := make(value, len(layout))
 	for i, lf := range layout {
 		held[i] = logic.Select(heldTable(name, i, lf), ref)

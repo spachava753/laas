@@ -69,10 +69,19 @@ func skey(ref *logic.Term) *logic.Term {
 	return logic.Select(skeys, ref)
 }
 
+// keyedByHeld names the function from the reference of an interface value
+// to whether its states are those of the pointer it holds, when it holds a
+// pointer whose type has states (F11 of the design review of F34): true of
+// every value whose type has states, by A3 for a conversion made here and by
+// the definition of the state for a value from elsewhere, and left open for
+// a conversion to an interface without states, whose states are its own and
+// which no value with states can share the reference of.
+var keyedByHeld = logic.Const("pointer states", logic.BoolSeq)
+
 // isKeyRead reports whether a term reads the table of homes or of keys of
 // states at a reference, and returns the reference.
 func isKeyRead(t *logic.Term) (*logic.Term, bool) {
-	if t.Op == logic.OpSelect && t.Args[0].Op == logic.OpConst && (t.Args[0].Name == homes.Name || t.Args[0].Name == skeys.Name) {
+	if t.Op == logic.OpSelect && t.Args[0].Op == logic.OpConst && (t.Args[0].Name == homes.Name || t.Args[0].Name == skeys.Name || t.Args[0].Name == keyedByHeld.Name) {
 		return t.Args[1], true
 	}
 	return nil, false

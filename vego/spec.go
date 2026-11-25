@@ -1722,12 +1722,10 @@ func plan(t types.Type, steps []logic.Step, from *types.Package) ([]hop, types.T
 			switch {
 			case !resolved:
 				return nil, nil, fmt.Errorf("%s.(%s) cannot be used here", spelled, step.Assert)
-			case isIface(t):
-				return nil, nil, fmt.Errorf("%s.(%s): what an interface value other than an error holds cannot be named yet", spelled, step.Assert)
-			case !isError(t):
-				return nil, nil, fmt.Errorf("%s.(%s): a %s is not an error", spelled, step.Assert, t)
+			case !isError(t) && !isIface(t):
+				return nil, nil, fmt.Errorf("%s.(%s): a %s is not an error or an interface value", spelled, step.Assert, t)
 			case types.IsInterface(target):
-				return nil, nil, fmt.Errorf("%s.(%s): %s is an interface, and naming an error as another interface is not supported yet", spelled, step.Assert, step.Assert)
+				return nil, nil, fmt.Errorf("%s.(%s): %s is an interface, and naming what a value holds as another interface is not supported yet", spelled, step.Assert, step.Assert)
 			}
 			if _, named := canonicalName(target); !named {
 				return nil, nil, fmt.Errorf("%s.(%s): %s is declared inside a function, and nothing tells it apart from another type there", spelled, step.Assert, step.Assert)
@@ -1839,6 +1837,10 @@ func (v *fnVerifier) follow(sink *state, mem memory, cur value, hops []hop) (val
 		}
 		switch {
 		case h.assert != nil:
+			if !isError(h.from) {
+				v.meetDynamic(sink)
+				v.meetHeldType(sink, h.assert)
+			}
 			cur = v.heldRead(reads, cur[0], h.assert)
 			ground = ground && !hasBound(cur[0])
 		case h.field >= 0:

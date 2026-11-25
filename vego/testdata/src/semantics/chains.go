@@ -1036,8 +1036,6 @@ func SpliceChain(bw *bufio.Writer) (r byte) {
 	return p[0]
 }
 
-
-
 // BufferLengthChain writes a Buffer fifteen times and reads its length
 // after each write. The length of an owner is a formula over its fields,
 // here |buf| - off, read from one fetch of its struct, so the pointer
@@ -1270,5 +1268,297 @@ func LinkChain(p *Link) (q *Link) {
 	q = e.(*Link)
 	e = q
 	q = e.(*Link)
+	return q
+}
+
+// AnyChain converts a pointer to any and takes it out again thirty times,
+// each conversion handed what the last assertion gave (S1 of F34): the
+// reference an assertion reads twice is named first, as the allocation a
+// conversion reads twice is, so the terms do not double.
+//
+// @Ensures True
+func AnyChain(p *Link) (q *Link) {
+	var a any
+	q = p
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	a = q
+	q = a.(*Link)
+	return q
+}
+
+// SwitchChain does the same through a type switch, whose cases read the
+// reference each; the other case returns, so the paths do not double.
+//
+// @Ensures True
+func SwitchChain(p *Link) (q *Link) {
+	var a any
+	q = p
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
+	a = q
+	switch x := a.(type) {
+	case *Link:
+		q = x
+	default:
+		return nil
+	}
 	return q
 }

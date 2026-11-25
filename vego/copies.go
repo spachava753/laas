@@ -225,18 +225,25 @@ func copyWalk(info *types.Info, pkg *types.Package, decl *ast.FuncDecl, conv *co
 			if n.Type != nil {
 				if t := info.TypeOf(n.Type); t != nil {
 					if _, ok := holdsState(t); ok {
-						refuse(n.Pos(), t, "the type assertion %s copies what %s holds, a value of type %s; hold a pointer to it in the error instead",
-							types.ExprString(n), types.ExprString(n.X), holding(t, q))
+						refuse(n.Pos(), t, "the type assertion %s copies what %s holds, a value of type %s; hold a pointer to it in the %s instead",
+							types.ExprString(n), types.ExprString(n.X), holding(t, q), holderWord(info, n.X))
 					}
 				}
 			}
 		case *ast.TypeSwitchStmt:
+			var operand ast.Expr
+			switch a := n.Assign.(type) {
+			case *ast.ExprStmt:
+				operand = a.X.(*ast.TypeAssertExpr).X
+			case *ast.AssignStmt:
+				operand = a.Rhs[0].(*ast.TypeAssertExpr).X
+			}
 			for _, clause := range n.Body.List {
 				for _, e := range clause.(*ast.CaseClause).List {
 					if t := info.TypeOf(e); t != nil {
 						if _, ok := holdsState(t); ok {
-							refuse(e.Pos(), t, "the case %s of the type switch copies what the operand holds, a value of type %s; hold a pointer to it in the error instead",
-								types.ExprString(e), holding(t, q))
+							refuse(e.Pos(), t, "the case %s of the type switch copies what the operand holds, a value of type %s; hold a pointer to it in the %s instead",
+								types.ExprString(e), holding(t, q), holderWord(info, operand))
 						}
 					}
 				}
@@ -567,4 +574,13 @@ func ssaCopiesOf(fn *ssa.Function, holds func(types.Type) (types.Type, bool)) []
 		found = append(found, ssaCopiesOf(anon, holds)...)
 	}
 	return found
+}
+
+// holderWord names what an operand of an assertion or a type switch is, for
+// the remedy of a copy: an error, or another interface value.
+func holderWord(info *types.Info, x ast.Expr) string {
+	if x != nil && isError(info.TypeOf(x)) {
+		return "error"
+	}
+	return "interface value"
 }

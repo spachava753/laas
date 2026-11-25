@@ -41,12 +41,12 @@ func SwitchedOn(a any, s Shape) (n int) {
 
 // @Ensures True
 func Asserted(a any) (n int) {
-	return a.(int) // want `cannot verify Asserted: type assertions and type switches are not supported yet`
+	return a.(int) // want `the type assertion a.\(int\) may panic: a may not hold an int`
 }
 
 // @Ensures True
 func TypeSwitched(a any) (n int) {
-	switch a.(type) { // want `cannot verify TypeSwitched: type assertions and type switches are not supported yet`
+	switch a.(type) {
 	case int:
 		return 1
 	}
@@ -183,13 +183,13 @@ func ParameterTag(err error, s interface{ Error() string }) (b bool) {
 
 // @Ensures True
 func CommaOk(x any) (ok bool) {
-	_, ok = x.(int) // want `cannot verify CommaOk: type assertions and type switches are not supported yet`
+	_, ok = x.(int)
 	return ok
 }
 
 // @Ensures True
 func CommaOkDefine(x any) (n int) {
-	m, ok := x.(int) // want `cannot verify CommaOkDefine: type assertions and type switches are not supported yet`
+	m, ok := x.(int)
 	if ok {
 		return m
 	}
@@ -198,7 +198,7 @@ func CommaOkDefine(x any) (n int) {
 
 // @Ensures True
 func CommaOkIf(x any) (n int) {
-	if s, ok := x.(Shape); ok { // want `cannot verify CommaOkIf: type assertions and type switches are not supported yet`
+	if s, ok := x.(Shape); ok { // want `cannot verify CommaOkIf: asserting an interface value to Shape is not supported yet`
 		_ = s
 		return 1
 	}
@@ -207,7 +207,7 @@ func CommaOkIf(x any) (n int) {
 
 // @Ensures True
 func CommaOkVar(x any) (n int) {
-	var m, ok = x.(int) // want `cannot verify CommaOkVar: type assertions and type switches are not supported yet`
+	var m, ok = x.(int)
 	if ok {
 		return m
 	}

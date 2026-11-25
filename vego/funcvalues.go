@@ -662,6 +662,10 @@ func replaceHomes(t *logic.Term, by, keys map[string]*logic.Term, memo map[*logi
 	switch {
 	case isHomeRead(t) && t.Args[1].Op == logic.OpConst && t.Args[0].Name == skeys.Name && keys[t.Args[1].Name] != nil:
 		result = keys[t.Args[1].Name]
+	case isHomeRead(t) && t.Args[1].Op == logic.OpConst && t.Args[0].Name == keyedByHeld.Name && keys[t.Args[1].Name] != nil:
+		// A produced value with states has the states of what it holds,
+		// as every such value has.
+		result = logic.True()
 	case isHomeRead(t) && t.Args[1].Op == logic.OpConst && t.Args[0].Name == homes.Name && by[t.Args[1].Name] != nil:
 		result = by[t.Args[1].Name]
 	case len(t.Args) > 0:

@@ -30,8 +30,8 @@ type site struct {
 	// value, at the home of the value root holds, and fp when it may write
 	// the footprint of that value. owner is the type of the pointer root
 	// holds when it points to an owner.
-	row   bool
-	fp    bool
+	row bool
+	fp  bool
 	// pointer is set, beside row, when the row is that of the states of
 	// what the pointer root holds points to, at lo from it (A5 of S0b of
 	// F34).
@@ -348,6 +348,11 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 			v.misread(m.clause, err)
 		}
 		for _, form := range append([]shape{first}, first.also...) {
+			if fn.prints != nil && form.param == fn.prints && form.fp {
+				// A function that prints writes its writer only through the
+				// writer's own Write, which changes no state (printsStates).
+				form.row = false
+			}
 			v.callSitesOf(eff, form, argument)
 		}
 	}

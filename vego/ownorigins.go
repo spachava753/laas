@@ -207,11 +207,11 @@ type ownResult struct {
 type ownFlow struct {
 	// made holds the right-hand sides of stores into owned fields that are
 	// made of tags that are all new where the store stands.
-	made      map[ast.Expr]bool
-	why       map[ast.Expr]string
+	made map[ast.Expr]bool
+	why  map[ast.Expr]string
 	// operands holds, for each call, its operands with their kinds where
 	// the call stands, for R6 (checkOwnArguments).
-	operands map[*ast.CallExpr][]ownOperand
+	operands  map[*ast.CallExpr][]ownOperand
 	refusals  []ownRefusal
 	keeps     map[*types.Var]bool
 	results   []ownResult
@@ -679,8 +679,23 @@ func refersMemory(t types.Type) bool {
 	if holdsMemory(t) || isIface(t) || isError(t) {
 		return true
 	}
-	_, isFunc := t.Underlying().(*types.Signature)
-	return isFunc
+	switch u := t.Underlying().(type) {
+	case *types.Signature:
+		return true
+	case *types.Struct:
+		// A struct that holds an interface value, an error, or a function
+		// value by value refers to what that holds (S1 of F34, F6 of the
+		// design review: a Holder{W: w} handed to a callee that stores
+		// h.W kept the writer w without the callee counting as keeping h).
+		for field := range u.Fields() {
+			if refersMemory(field.Type()) {
+				return true
+			}
+		}
+	case *types.Array:
+		return refersMemory(u.Elem())
+	}
+	return false
 }
 
 // ownKindOf returns the kind of the value of an expression, applying what
