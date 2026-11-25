@@ -738,6 +738,39 @@ closures	closures.closeKnown	7	4451	0
 closures	closures.the initialiser of ErrBase	0	0	0
 closures	closures.the initialiser of ErrClosed	0	0	0
 compress/flate	(*sync.Once).Do	1	1800	0
+copies	(*copies.decoder).Refill	12	30622	0
+copies	copies.AThenB	10	44495	0
+copies	copies.BThenA	10	44509	0
+copies	copies.BesideCall	4	4268	0
+copies	copies.Copy	5	13608	0
+copies	copies.Count	7	20532	0
+copies	copies.CountSourceWrong	5	12614	0
+copies	copies.CountWrong	5	12481	0
+copies	copies.Fill	9	17297	0
+copies	copies.FromString	7	17331	0
+copies	copies.InLoop	23	93654	0
+copies	copies.InLoopWrong	25	3902684	0
+copies	copies.Inside	2	1959	0
+copies	copies.LoopForgets	21	45807	0
+copies	copies.Nil	3	4582	0
+copies	copies.NilWrong	3	2180	0
+copies	copies.Pointers	2	2013	0
+copies	copies.Points	2	1960	0
+copies	copies.RefillOverlap	17	14778	0
+copies	copies.RefillOverlapCall	9	4536	0
+copies	copies.RefillOverlapWrong	17	20872	0
+copies	copies.SameArray	16	10093	0
+copies	copies.SameArrayWrong	13	8349	0
+copies	copies.Shift	10	13634	0
+copies	copies.ShiftUp	12	19604	0
+copies	copies.ShiftUpWrong	9	10960	0
+copies	copies.ShiftWrong	9	2389768	1
+copies	copies.Shorter	7	15531	0
+copies	copies.ShorterWrong	5	21461	0
+copies	copies.Strings	2	2248	0
+copies	copies.Twice	6	2568	0
+copies	copies.Unlisted	3	3820	0
+copies	copies.zero	2	61	0
 crypto/des	(*sync.Once).Do	1	1800	0
 crypto/elliptic	(*sync.Once).Do	1	1800	0
 crypto/internal/fips140/edwards25519	(*sync.Once).Do	1	1800	0
@@ -834,7 +867,7 @@ cycles/r29b	fmt.Sprint	1	3498	0
 cycles/r3	cycles/r3.F	4	516	0
 cycles/r3	cycles/r3.Fn	3	804	0
 cycles/r30	cycles/r30.Fn	3	804	0
-cycles/r30	cycles/r30.G	2	2493	0
+cycles/r30	cycles/r30.G	2	2793	0
 cycles/r30	cycles/r30.H	5	4002	0
 cycles/r31/p	cycles/r31/p.F	1	46	0
 cycles/r31/p	cycles/r31/q.Run	1	745	0
@@ -2778,6 +2811,7 @@ guide	guide.Mid	9	4455	0
 guide	guide.MidWrong	7	3245	0
 guide	guide.MustLine	4	3391	0
 guide	guide.MustSize	3	1598	0
+guide	guide.Name	8	8861	0
 guide	guide.Names	1	46	0
 guide	guide.Natural.Get	3	1278	0
 guide	guide.Nearest	27	64171	0
@@ -2894,6 +2928,8 @@ guide	guide.SetMax	7	5364	0
 guide	guide.SetServed	5	3144	0
 guide	guide.SetSize	7	2744	0
 guide	guide.Shift	9	28808	0
+guide	guide.ShiftDown	10	13634	0
+guide	guide.ShiftUpWrong	9	10960	0
 guide	guide.Show	1	514	0
 guide	guide.ShowAll	1	521	0
 guide	guide.ShowAnyTemperature	5	21509	0
@@ -5439,6 +5475,7 @@ semantics	semantics.CallChain	153	423611	0
 semantics	semantics.CallerSeesMutation	16	35416	0
 semantics	semantics.CloseChain	301	15520107	124
 semantics	semantics.ConvChain	2	54654	0
+semantics	semantics.CopyBuiltinChain	37	2327572	0
 semantics	semantics.CopyChain	155	426660	0
 semantics	semantics.CountPositive	26	28432	0
 semantics	semantics.CutChain	92	900024	0
@@ -5910,7 +5947,7 @@ trialfaults	os.IsNotExist	1	209	0
 trialfaults	trialfaults.BothNil	8	19576	2
 trialfaults	trialfaults.CallsOp	8	4997	0
 trialfaults	trialfaults.Closes.Pick	4	35957	1
-trialfaults	trialfaults.Copies	2	1959	0
+trialfaults	trialfaults.Copies	2	2291	0
 trialfaults	trialfaults.DeclaredInCase	4	879	0
 trialfaults	trialfaults.Deep	6	2623	0
 trialfaults	trialfaults.Digest	0	0	0

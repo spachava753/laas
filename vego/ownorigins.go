@@ -1308,7 +1308,7 @@ func (v *fnVerifier) ownResults(fl *ownFlow, e ast.Expr, count int, f *ownFact) 
 			case "copy":
 				// The elements are copied; a copied element that refers to
 				// memory is stored.
-				if len(call.Args) == 2 && refersMemory(elemType(v.info.TypeOf(call.Args[1]))) {
+				if len(call.Args) == 2 && isSlice(v.info.TypeOf(call.Args[1])) && refersMemory(elemType(v.info.TypeOf(call.Args[1]))) {
 					v.ownStoreMemory(fl, call.Args[1], ownKind{unknown: kinds[1].unknown, scoped: kinds[1].scoped, decl: kinds[1].decl}, f, "copied")
 				}
 			}

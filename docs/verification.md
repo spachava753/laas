@@ -2891,7 +2891,40 @@ func Remove(A []int, i int) (result []int) {
 }
 ```
 
-Slice expressions `A[i:j]` and `A[i:j:k]`, `len`, `cap`, `make`, and slice literals are supported. A nil slice has length and capacity 0, so after `if a == nil` the function knows that `len(a)` is 0. `copy` is not supported yet: write the copy as a loop that assigns each element, or, when the two slices have the same length, as `dst = append(dst[:0], src...)`.
+Slice expressions `A[i:j]` and `A[i:j:k]`, `len`, `cap`, `make`, and slice literals are supported. A nil slice has length and capacity 0, so after `if a == nil` the function knows that `len(a)` is 0.
+
+### Copying between slices
+
+`copy(dst, src)` copies the first `min(len(dst), len(src))` elements of `src` to the start of `dst`, and returns how many it copied. The function must list `dst` in `Modifies`. The two may overlap. The elements written are what `src` held before the copy, as in Go, so moving a buffer down over itself verifies:
+
+```go
+// @Requires 0 <= n <= |buf|
+// @Modifies buf
+// @Ensures r = |buf| - n
+// @Ensures Forall k in [0, |buf| - n) : buf'[k] = buf[k + n]
+func ShiftDown(buf []byte, n int) (r int) {
+	return copy(buf, buf[n:])
+}
+```
+
+A copy up over itself is not a loop that copies forward. Each element gets what the one before it held:
+
+```go
+// @Requires |buf| = 4
+// @Modifies buf
+// @Ensures buf'[3] = buf[0]
+func ShiftUpWrong(buf []byte) {
+	copy(buf[1:], buf)
+}
+```
+
+```text
+vego: postcondition may not hold: buf'[3] = buf[0]
+```
+
+With `buf'[3] = buf[2]` the function verifies. `copy` of a string into a `[]byte` is supported too, as in `n = copy(name[:], "hello")` for an array `name`.
+
+`copy` is supported for slices of numbers and booleans, as a statement, as the whole right-hand side of an assignment whose target calls nothing, and as a returned value. For slices of other element types, such as strings or structs, write the copy as a loop that assigns each element, or, when the two slices have the same length, as `dst = append(dst[:0], src...)`.
 
 ### Capacity and nil in a formula
 
@@ -9691,7 +9724,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - arrays of anything but numbers and booleans, structs that contain an array of elements larger than a byte, and the other uses of arrays listed in [What arrays do not support yet](#what-arrays-do-not-support-yet);
 - pointers to anything other than a struct;
 - reading or changing a package-level variable whose address the build takes and that is not a struct, a struct variable of another package whose address is taken, a variable that a directive or an assembly file names, an error variable that something changes, or a variable whose type can hold a function value, an interface value, an error, a channel, or an `unsafe.Pointer`, but for an interface type, a named function type with a contract, and a logger made by `log.New` (see [Package-level variables](#package-level-variables));
-- `copy`;
+- `copy` of slices of anything but numbers and booleans, and `copy` inside a larger expression (see [Copying between slices](#copying-between-slices));
 - in `encoding/json`, anything but `Marshal`, `MarshalIndent`, `Unmarshal`, and `json.NewEncoder(w).Encode(v)` and `json.NewDecoder(io.LimitReader(r, n)).Decode(&x)` written as one expression, and values that hold an interface value, a method that `encoding/json` would call, or one of the other types listed in [What is not supported in encoding/json](#what-is-not-supported-in-encodingjson);
 - annotations on a type declared inside a function body, such as an invariant on a local struct or a contract on a local interface;
 - formatting a value whose type has a method `Format`, `GoString`, `Error`, or `String`, a pointer, a map, an interface value other than an error of known origin, a function value, or a value of a type that holds itself, with `fmt.Errorf` or a function whose entry lists it under `formats`, and passing such a function a slice with `...` for the values it formats (see [What can be formatted](#what-can-be-formatted));

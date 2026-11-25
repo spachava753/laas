@@ -7,8 +7,8 @@ import "flag"
 // @Requires |dst| >= |src|
 // @Modifies dst
 // @Ensures True
-func Copies(dst, src []byte) {
-	copy(dst, src) // want `cannot verify Copies: the built-in function copy is not supported yet; write the copy as a loop that assigns each element, or, when the two have the same length, as dst = append\(dst\[:0\], src...\)`
+func Copies(dst, src []string) {
+	copy(dst, src) // want `cannot verify Copies: copy of a slice of string is not supported yet; copy is supported for slices of numbers and booleans, and from a string into a \[\]byte; write the copy as a loop that assigns each element`
 }
 
 // encoder holds an array of elements larger than a byte.

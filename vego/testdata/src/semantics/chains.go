@@ -1735,3 +1735,42 @@ func ArrayCopyChain() (r int) {
 	a = b
 	return a[0]
 }
+
+// CopyBuiltinChain copies two slices into each other thirty times with
+// copy, each copy a layer on the region of their elements.
+//
+// @Requires |a| = 4 And |b| = 4 And a[0] = 1
+// @Modifies a, b
+// @Ensures a'[0] = 1
+func CopyBuiltinChain(a, b []int) {
+	copy(b, a)
+	copy(a, b)
+	copy(b, a)
+	copy(a, b)
+	copy(b, a)
+	copy(a, b)
+	copy(b, a)
+	copy(a, b)
+	copy(b, a)
+	copy(a, b)
+	copy(b, a)
+	copy(a, b)
+	copy(b, a)
+	copy(a, b)
+	copy(b, a)
+	copy(a, b)
+	copy(b, a)
+	copy(a, b)
+	copy(b, a)
+	copy(a, b)
+	copy(b, a)
+	copy(a, b)
+	copy(b, a)
+	copy(a, b)
+	copy(b, a)
+	copy(a, b)
+	copy(b, a)
+	copy(a, b)
+	copy(b, a)
+	copy(a, b)
+}

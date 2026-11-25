@@ -9,13 +9,13 @@ type Fn func() (n int)
 // Box holds a value.
 type Box struct{ f Fn }
 
-// G cannot be verified (copy), and makes a literal after that.
+// G cannot be verified (copy of strings), and makes a literal after that.
 //
 // @Requires b != nil And |d| = 1 And |s| = 1
 // @Modifies b, d
 // @Ensures True
-func G(b *Box, d, s []int) {
-	copy(d, s) // want `cannot\ verify\ G:\ the\ built\-in\ function\ copy\ is\ not\ supported\ yet;\ write\ the\ copy\ as\ a\ loop\ that\ assigns\ each\ element,\ or,\ when\ the\ two\ have\ the\ same\ l`
+func G(b *Box, d, s []string) {
+	copy(d, s) // want `cannot verify G: copy of a slice of string is not supported yet`
 	b.f = func() (n int) { return H(b) }
 }
 
@@ -30,6 +30,6 @@ func H(b *Box) (n int) {
 // wire is not verified.
 func wire() {
 	b := &Box{}
-	G(b, []int{0}, []int{1})
+	G(b, []string{"a"}, []string{"b"})
 	H(b)
 }

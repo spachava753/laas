@@ -231,6 +231,11 @@ func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
 			if lit := v.literalOf(n); lit != nil && !walked[lit] {
 				ast.Inspect(lit, visit)
 			}
+			if isBuiltin(v.info, n, "copy") && isSlice(v.info.TypeOf(n.Args[0])) {
+				// copy writes the elements of its destination.
+				t := v.info.TypeOf(n.Args[0])
+				eff.sites = append(eff.sites, site{cells: v.cellsOf(elemType(t)), elem: elemType(t), root: v.localVar(n.Args[0])})
+			}
 			if isBuiltin(v.info, n, "delete") && isMap(v.info.TypeOf(n.Args[0])) {
 				eff.sites = append(eff.sites, site{mapType: v.info.TypeOf(n.Args[0]), root: v.localVar(n.Args[0])})
 				eff.deletes = append(eff.deletes, n)

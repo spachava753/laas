@@ -118,3 +118,24 @@ type histogram struct {
 func (h *histogram) Total() (n int) { // want `cannot verify Total: parameter h has unsupported type \*guide.histogram; guide.histogram holds an array of int in field counts, and arrays in structs are supported only for elements of one byte yet`
 	return 0
 }
+
+// @Requires 0 <= n <= |buf|
+// @Modifies buf
+// @Ensures r = |buf| - n
+// @Ensures Forall k in [0, |buf| - n) : buf'[k] = buf[k + n]
+func ShiftDown(buf []byte, n int) (r int) {
+	return copy(buf, buf[n:])
+}
+
+// @Requires |buf| = 4
+// @Modifies buf
+// @Ensures buf'[3] = buf[0]
+func ShiftUpWrong(buf []byte) {
+	copy(buf[1:], buf)
+} // want `postcondition may not hold: buf'\[3\] = buf\[0\]`
+
+// @Ensures n = 5 And name[0] = 'h'
+func Name() (name [16]byte, n int) {
+	n = copy(name[:], "hello")
+	return name, n
+}

@@ -987,6 +987,10 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 			v.check(st, nil, logic.False(), s.Pos(), "panic may be reachable")
 			return
 		}
+		if isBuiltin(v.info, call, "copy") {
+			v.evaluate(st, func() { v.copyInto(call, st) })
+			break
+		}
 		if isBuiltin(v.info, call, "delete") {
 			v.refuseWriteThroughAs(&ast.IndexExpr{X: call.Args[0], Index: call.Args[1]}, types.ExprString(call))
 			v.deleteKey(call, st)

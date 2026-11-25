@@ -123,7 +123,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	if builtin, ok := typeutil.Callee(v.info, call).(*types.Builtin); ok && callee == nil {
 		advice := ""
 		if builtin.Name() == "copy" {
-			advice = "; write the copy as a loop that assigns each element, or, when the two have the same length, as dst = append(dst[:0], src...)"
+			advice = " here; copy is supported as a statement or as the whole right-hand side of an assignment"
 		}
 		v.unsupported(call.Pos(), fmt.Sprintf("the built-in function %s is not supported yet%s", builtin.Name(), advice))
 	}

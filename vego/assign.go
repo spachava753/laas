@@ -412,6 +412,13 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
 			v.unsupported(s.Pos(), fmt.Sprintf("operator %s is not supported here", s.Tok))
 		}
 		values = []value{{v.binary(op, current[0], operand, v.info.TypeOf(s.Lhs[0]), s.TokPos, st, nil)}}
+	case len(s.Rhs) == 1 && len(s.Lhs) == 1 && v.isCopy(s.Rhs[0]):
+		// Nothing orders the write of copy after a call in the target.
+		if len(v.unit.calls) > 0 {
+			v.unsupported(s.Pos(), "copy is supported as the whole right-hand side of an assignment only when its target calls nothing; "+
+				"assign to a local variable first")
+		}
+		values = []value{v.copyInto(ast.Unparen(s.Rhs[0]).(*ast.CallExpr), st)}
 	case len(s.Rhs) == 1 && len(s.Lhs) == 1 && v.isAppend(s.Rhs[0]):
 		v.appendTo(ast.Unparen(s.Rhs[0]).(*ast.CallExpr), st, func(next *state, result value) {
 			v.checkOwnedTarget(next, targets[0], result, s.Rhs[0], before)
@@ -755,6 +762,66 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 	}
 }
 
+// isCopy reports whether an expression is a call of the built-in copy.
+func (v *fnVerifier) isCopy(e ast.Expr) bool {
+	call, ok := ast.Unparen(e).(*ast.CallExpr)
+	return ok && isBuiltin(v.info, call, "copy")
+}
+
+// copyInto evaluates copy(dst, src) for slices of numbers or booleans, or
+// for a string copied into a []byte, as a statement or the whole
+// right-hand side of an assignment. It copies min(len(dst), len(src))
+// elements to the start of dst, as memmove does: what it writes is what
+// src held before the write, also when the two share an array. The write
+// must be one the function may make, of the elements of dst it covers.
+func (v *fnVerifier) copyInto(call *ast.CallExpr, st *state) value {
+	dstType, srcType := v.info.TypeOf(call.Args[0]), v.info.TypeOf(call.Args[1])
+	elem := elemType(dstType)
+	if _, plain := plainElem(elem); !plain {
+		v.unsupported(call.Pos(), fmt.Sprintf("copy of a slice of %s is not supported yet; copy is supported for slices of numbers and booleans, "+
+			"and from a string into a []byte; write the copy as a loop that assigns each element", elem))
+	}
+	defer v.begin()()
+	u := v.unit
+	start := u.start()
+	dst := v.eval(call.Args[0], st, nil)
+	src := v.eval(call.Args[1], st, nil)
+	fromString := isString(srcType)
+	srcLen := logic.Len(src[0])
+	if !fromString {
+		srcLen = src[2]
+	}
+	n := v.named(st, "copied", logic.Ite(logic.Le(dst[2], srcLen), dst[2], srcLen))
+	c := v.cellsOf(elem)[0]
+	at, end := dst[1], logic.Add(dst[1], n)
+	what := types.ExprString(call.Args[0])
+	v.checkWriteOr(st, nil, written{ref: dst[0], parts: []stretch{{key: c.key, lo: at, hi: end}}}, call.Pos(),
+		"copy writes the elements of "+what, "", "")
+	// What is copied is read before anything is written.
+	copied := src[0]
+	if !fromString {
+		before := u.pushCeiling()
+		copied = v.readAt(st, nil, start, "the elements of "+types.ExprString(call.Args[1])+" that copy reads", call.Pos(),
+			func(sink *state, mem memory) value {
+				return value{logic.Subseq(v.row(sink, mem, c.key, c.sort, src[0]), src[1], logic.Add(src[1], n))}
+			})[0]
+		u.reach(before)
+	}
+	// The region gets a new value of which a layer says that everything
+	// outside the stretch written is as it was, read where it is read, and
+	// one fact says what the stretch holds; see writeRun.
+	table := logic.SeqOf(logic.SeqOf(c.sort))
+	now := v.fresh("copied "+c.key, table)
+	v.layers[now.Name] = &layer{prev: st.mem.region(c.key, table), bound: st.brk, key: c.key,
+		targets: []target{{cells: []cell{c}, ref: dst[0], lo: at, hi: end, elem: elem}}}
+	inner := v.bound("k")
+	inside := logic.And(logic.Le(logic.IntLit(0), inner), logic.Lt(inner, n))
+	st.assume(logic.Forall(inner, logic.Implies(inside, v.same(logic.Select(logic.Select(now, dst[0]), logic.Add(at, inner)), logic.Select(copied, inner)))))
+	st.mem[c.key] = now
+	u.wrote(st, "the write of copy into the array of "+what)
+	return value{n}
+}
+
 // declare executes a local var declaration: variables without an initial
 // value get the zero value of their type, the others are assigned like an
 // ordinary assignment. Local constants need no state.
@@ -826,6 +893,8 @@ func (v *fnVerifier) returnStmt(s *ast.ReturnStmt, st *state) {
 			v.returned(next, []value{result}, s.Pos())
 		})
 		return
+	case len(s.Results) == 1 && v.isCopy(s.Results[0]):
+		results[0] = v.copyInto(ast.Unparen(s.Results[0]).(*ast.CallExpr), st)
 	default:
 		for i, e := range s.Results {
 			results[i] = v.evalAs(e, vars[i].Type(), st, nil)
