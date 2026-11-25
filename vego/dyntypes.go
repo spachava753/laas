@@ -317,6 +317,9 @@ func (v *fnVerifier) typedError(e ast.Expr, from types.Type, val value, st *stat
 	if why := heldReason(from); why != "" {
 		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to an error is not supported: %s", from, why))
 	}
+	if pointsToArray(from) {
+		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to an error is not supported yet: what it points to holds an array", from))
+	}
 	v.checkedMethods(e, from, val, st, guard)
 	leaves := v.goLeaves(st, layout, val)
 	err := v.canonicalError(from, leaves)

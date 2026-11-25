@@ -80,6 +80,11 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported", from, want))
 	case holdsArrayValue(from):
 		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: an interface value or an error cannot hold an array yet", v.shown(from), v.shown(want)))
+	case pointsToArray(from):
+		// The footprint of a converted value is the stretch of its struct
+		// in every region, which the run of an array in it would need to
+		// be told apart in (F36).
+		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported yet: what it points to holds an array, and the footprint of such a value is not modelled", v.shown(from), v.shown(want)))
 	}
 	// An interface without methods can hold anything. Nothing can be done
 	// with what it holds but pass it on. Each method of any other

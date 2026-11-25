@@ -1217,6 +1217,12 @@ func (s *witness) storeAt(c cell, ref, written *logic.Term) {
 		region = logic.Const(name, logic.SeqOf(logic.SeqOf(c.sort)))
 	}
 	row := logic.Store(logic.Select(region, ref), logic.IntLit(c.off), written)
+	if c.isRun() {
+		// An array of the sample, whose struct lies at position 0.
+		start := c.start(logic.IntLit(0))
+		moved := logic.Concat(logic.Fill(start, zeroLeaf(leaf{sort: c.sort})), written)
+		row = logic.Splice(logic.Select(region, ref), moved, start, c.end(logic.IntLit(0)))
+	}
 	s.consts[name] = logic.Store(region, ref, row)
 }
 
@@ -1592,7 +1598,7 @@ func (b *sampler) addStates(t types.Type, to binding) {
 // the formulas mention are offered as contents too.
 func (b *sampler) addSlice(t types.Type, to binding) {
 	elem := elemType(t)
-	leaves, ok := fieldLayout(elem)
+	leaves, ok := elemLayout(elem)
 	if !ok {
 		return
 	}

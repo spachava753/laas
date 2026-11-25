@@ -773,6 +773,10 @@ func (v *fnVerifier) noteReached(sink *state, cells []cell, ref, at *logic.Term,
 	entry := make(value, len(cells))
 	for i, c := range cells {
 		region := logic.Const(entryRegion+c.key, logic.SeqOf(logic.SeqOf(c.sort)))
+		if c.isRun() {
+			entry[i] = logic.Subseq(logic.Select(region, ref), c.start(at), c.end(at))
+			continue
+		}
 		entry[i] = logic.Select(logic.Select(region, ref), logic.Add(at, logic.IntLit(c.off)))
 	}
 	holder := logic.Add(at, logic.IntLit(cells[0].off))

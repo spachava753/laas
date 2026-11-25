@@ -104,8 +104,8 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 		t := v.info.TypeOf(e.X)
 		if isArray(t) {
 			lv = v.place(e.X)
-			if lv.element != nil || !(lv.kind == placeLocal || lv.kind == placeMem && lv.box != nil) {
-				v.unsupported(e.Pos(), fmt.Sprintf("only elements of arrays that local variables hold can be assigned, not those of %s", types.ExprString(e.X)))
+			if lv.element != nil || !(lv.kind == placeLocal || lv.kind == placeMem) || lv.global != nil || lv.boxGlobal != nil {
+				v.unsupported(e.Pos(), fmt.Sprintf("only elements of arrays that local variables hold or that lie in a struct can be assigned, not those of %s", types.ExprString(e.X)))
 			}
 			lv.pos, lv.text, lv.element, lv.typ = e.Pos(), types.ExprString(e), e.Index, t.Underlying().(*types.Array).Elem()
 			break
@@ -237,6 +237,25 @@ func (v *fnVerifier) lvalue(e ast.Expr, st *state, guard []*logic.Term) lvalue {
 	return lv
 }
 
+// noteHolder notes the struct an assignment target in memory lies in, for
+// the fact between struct values of one type (noteStruct).
+func (v *fnVerifier) noteHolder(st *state, lv lvalue) {
+	var holder types.Type
+	switch {
+	case lv.box != nil:
+		holder = lv.box.Type()
+	case lv.boxGlobal != nil:
+		holder = lv.boxGlobal.Type()
+	case lv.pointer != nil:
+		holder, _ = pointee(v.info.TypeOf(lv.pointer))
+	case lv.slice != nil:
+		holder = elemType(v.info.TypeOf(lv.slice))
+	}
+	if holder != nil && isStructType(holder) {
+		v.noteStruct(st, structValue{t: holder, ref: lv.ref, at: lv.at})
+	}
+}
+
 // bounds returns the positions the cells of a place cover, counted like the
 // cells themselves.
 func bounds(cells []cell) (lo, hi int64) {
@@ -307,11 +326,17 @@ func (v *fnVerifier) store(lv lvalue, val value, st *state) {
 		v.unsupported(lv.pos, fmt.Sprintf("a value of this type cannot be assigned to %s", lv.text))
 	}
 	if lv.kind == placeMem && lv.element != nil {
-		// An element of an array in a variable whose address is taken,
-		// which the function made.
+		// An element of an array in memory: in a variable whose address
+		// is taken, which the function made, or in a struct.
 		c := lv.cells[0]
 		at := logic.Add(c.start(lv.at), lv.elementIndex)
-		v.checkNotForbidden(st, nil, written{ref: lv.ref, parts: []stretch{{key: c.key, lo: at, hi: logic.Add(at, logic.IntLit(1)), one: true}}}, lv.pos, lv.text+" is assigned")
+		w := written{ref: lv.ref, parts: []stretch{{key: c.key, lo: at, hi: logic.Add(at, logic.IntLit(1)), one: true}}}
+		if lv.box == nil {
+			v.checkWriteOr(st, nil, w, lv.pos, lv.text+" is assigned", "", v.notListable(lv.expr, lv.pos))
+		} else {
+			v.checkNotForbidden(st, nil, w, lv.pos, lv.text+" is assigned")
+		}
+		v.noteHolder(st, lv)
 		v.writeAt(st, c.key, c.sort, lv.ref, at, val[0])
 		return
 	}
@@ -345,20 +370,7 @@ func (v *fnVerifier) store(lv lvalue, val value, st *state) {
 		} else {
 			v.checkNotForbidden(st, nil, w, lv.pos, lv.text+" is assigned")
 		}
-		var written types.Type
-		switch {
-		case lv.box != nil:
-			written = lv.box.Type()
-		case lv.boxGlobal != nil:
-			written = lv.boxGlobal.Type()
-		case lv.pointer != nil:
-			written, _ = pointee(v.info.TypeOf(lv.pointer))
-		case lv.slice != nil:
-			written = elemType(v.info.TypeOf(lv.slice))
-		}
-		if written != nil && isStructType(written) {
-			v.noteStruct(st, structValue{t: written, ref: lv.ref, at: lv.at})
-		}
+		v.noteHolder(st, lv)
 		v.put(st, lv.cells, lv.ref, lv.at, val)
 	case placeMap:
 		v.mapStore(st, lv.mapType, lv.ref, lv.at, val, true, lv.pos, lv.text+" is assigned")
@@ -538,7 +550,7 @@ func wanted(targets []lvalue) []types.Type {
 func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, value)) {
 	t := v.info.TypeOf(call)
 	elem := elemType(t)
-	if _, ok := fieldLayout(elem); !ok {
+	if _, ok := elemLayout(elem); !ok {
 		v.unsupported(call.Pos(), fmt.Sprintf("slices of %s are not supported", elem))
 	}
 	spread := call.Ellipsis.IsValid()

@@ -472,7 +472,7 @@ func (v *fnVerifier) indexExpr(e *ast.IndexExpr, st *state, guard []*logic.Term)
 		start := v.unit.start()
 		header, index := v.eval(e.X, st, guard), v.expr(e.Index, st, guard)
 		v.checkIndex(st, guard, header[2], index, e.Pos())
-		if _, ok := fieldLayout(elemType(t)); !ok {
+		if _, ok := elemLayout(elemType(t)); !ok {
 			break
 		}
 		return v.readAt(st, guard, start, types.ExprString(e), e.Pos(), func(sink *state, mem memory) value {
@@ -518,14 +518,16 @@ func (v *fnVerifier) sliceExpr(e *ast.SliceExpr, st *state, guard []*logic.Term)
 
 // memArray reports whether an array lies in memory, where a slice of it
 // can point: a local variable that the function slices or takes the
-// address of (findBoxed).
+// address of (findBoxed), or a field of a struct that lies in memory.
 func (v *fnVerifier) memArray(e ast.Expr) bool {
-	id, ok := ast.Unparen(e).(*ast.Ident)
-	if !ok {
-		return false
+	switch x := ast.Unparen(e).(type) {
+	case *ast.Ident:
+		variable, ok := v.info.ObjectOf(x).(*types.Var)
+		return ok && v.boxed[variable]
+	case *ast.SelectorExpr:
+		return v.inMemory(x)
 	}
-	variable, ok := v.info.ObjectOf(id).(*types.Var)
-	return ok && v.boxed[variable]
+	return false
 }
 
 // arrayHeader returns the slice of the whole of an array that lies in
@@ -624,7 +626,7 @@ func (v *fnVerifier) literal(e *ast.CompositeLit, t types.Type, st *state, guard
 		}
 		return value{array}
 	case *types.Slice:
-		if _, ok := fieldLayout(u.Elem()); !ok {
+		if _, ok := elemLayout(u.Elem()); !ok {
 			v.unsupported(e.Pos(), fmt.Sprintf("slices of %s are not supported", u.Elem()))
 		}
 		var elements []value
@@ -732,7 +734,7 @@ func (v *fnVerifier) makeSlice(e *ast.CallExpr, st *state, guard []*logic.Term) 
 	if !isSlice(t) || len(e.Args) < 2 {
 		v.unsupported(e.Pos(), "make is only supported for slices with a length")
 	}
-	if _, ok := fieldLayout(elemType(t)); !ok {
+	if _, ok := elemLayout(elemType(t)); !ok {
 		v.unsupported(e.Pos(), fmt.Sprintf("slices of %s are not supported", elemType(t)))
 	}
 	length := v.expr(e.Args[1], st, guard)

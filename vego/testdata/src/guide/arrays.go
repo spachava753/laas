@@ -75,3 +75,46 @@ func Names() (r string) {
 	names := [2]string{"a", "b"} // want `cannot verify Names: names has unsupported type \[2\]string; \[2\]string is an array of string, and only arrays of numbers and booleans are supported yet; use a slice of string instead`
 	return names[0]
 }
+
+// line holds a buffer of bytes and how many of them are used.
+type line struct {
+	used int
+	buf  [80]byte
+}
+
+// @Requires l != nil And 0 <= l.used < 80
+// @Modifies l
+// @Ensures l.used' = l.used + 1 And l.buf'[l.used] = c
+func (l *line) Add(c byte) {
+	l.buf[l.used] = c
+	l.used++
+}
+
+// @Requires l != nil And |p| <= 80
+// @Requires apart(p, l.buf)
+// @Modifies l
+// @Ensures Forall k in [0, |p|) : l.buf'[k] = p[k]
+func (l *line) Load(p []byte) {
+	// @Invariant 0 <= i <= |p|
+	// @Invariant Forall k in [0, i) : l.buf[k] = p[k]
+	for i := range p {
+		l.buf[i] = p[i]
+	}
+}
+
+// @Requires l != nil
+// @Modifies l
+// @Ensures True
+func (l *line) Reload() {
+	l.Load(l.buf[:8]) // want `precondition of Load may not hold: apart\(p, l.buf\)`
+}
+
+type histogram struct {
+	counts [256]int
+}
+
+// @Requires h != nil
+// @Ensures True
+func (h *histogram) Total() (n int) { // want `cannot verify Total: parameter h has unsupported type \*guide.histogram; guide.histogram holds an array of int in field counts, and arrays in structs are supported only for elements of one byte yet`
+	return 0
+}

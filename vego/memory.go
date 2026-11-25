@@ -606,7 +606,7 @@ func (v *fnVerifier) elementAt(header value, t types.Type, index *logic.Term) *l
 func (v *fnVerifier) element(sink *state, mem memory, header value, t types.Type, index *logic.Term) (value, bool) {
 	noArrayElements(t)
 	elem := elemType(t)
-	_, ok := fieldLayout(elem)
+	_, ok := elemLayout(elem)
 	var base types.Type
 	if _, isStruct := elem.Underlying().(*types.Struct); isStruct {
 		base = elem
@@ -967,6 +967,9 @@ func (v *fnVerifier) parameterPath(st *state, guard []*logic.Term, w written) st
 				continue
 			}
 			at := logic.And(logic.Eq(w.ref, entry[0]), logic.Eq(part.lo, logic.Add(entry[1], logic.IntLit(c.off))))
+			if c.isRun() {
+				at = logic.And(logic.Eq(w.ref, entry[0]), logic.Le(c.start(entry[1]), part.lo), logic.Lt(part.lo, c.end(entry[1])))
+			}
 			if v.quickly(st, guard, at) {
 				path, _, _ := strings.Cut(leaves[i].path, "#")
 				return ", as " + param.Name() + v.nameablePrefix(object, path)
@@ -1459,7 +1462,13 @@ func (v *fnVerifier) havoc(st *state, t target, guard []*logic.Term) {
 		before := v.fetch(nil, st.mem, t.cells, t.ref, t.lo)
 		unknown := make(value, len(t.cells))
 		for i, c := range t.cells {
-			unknown[i] = v.fresh("written", c.sort)
+			// The run of an array is one leaf, a sequence, which put
+			// splices over the run.
+			sort := c.sort
+			if c.isRun() {
+				sort = logic.SeqOf(sort)
+			}
+			unknown[i] = v.fresh("written", sort)
 			if len(guard) > 0 {
 				st.assume(logic.Implies(skipped, v.same(unknown[i], before[i])))
 			}
@@ -1640,7 +1649,12 @@ func (v *fnVerifier) noteStruct(sink *state, s structValue) {
 	for _, other := range v.structsSeen {
 		v.statePairs(sink, s, other, false)
 	}
-	v.structsSeen = append(v.structsSeen, s)
+	// A frame is a question of its own and changes no table of the
+	// verifier; a struct it reads is paired with those seen before it,
+	// and later reads are not paired with it.
+	if v.frameNames == nil {
+		v.structsSeen = append(v.structsSeen, s)
+	}
 }
 
 // holdsRepeated reports whether a value of type t holds, at any depth, a
@@ -1665,7 +1679,8 @@ func (v *fnVerifier) holdsRepeated(t types.Type) bool {
 	seen := map[string]bool{}
 	repeated := false
 	for _, c := range v.cellsOf(t) {
-		repeated = repeated || seen[c.key]
+		// The run of an array is many cells of one region.
+		repeated = repeated || seen[c.key] || c.run > 1
 		seen[c.key] = true
 	}
 	v.repeats[key] = repeated

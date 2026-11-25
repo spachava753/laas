@@ -888,6 +888,10 @@ func (v *fnVerifier) rawMember(mem memory, ptr value, t types.Type, index int) (
 	var out value
 	for _, c := range v.cellsOf(object)[lo:hi] {
 		region := mem.region(c.key, logic.SeqOf(logic.SeqOf(c.sort)))
+		if c.isRun() {
+			out = append(out, logic.Subseq(logic.Select(region, ptr[0]), c.start(ptr[1]), c.end(ptr[1])))
+			continue
+		}
 		out = append(out, logic.Select(logic.Select(region, ptr[0]), logic.Add(ptr[1], logic.IntLit(c.off))))
 	}
 	return out, field.Type(), true

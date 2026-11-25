@@ -11,15 +11,15 @@ func Copies(dst, src []byte) {
 	copy(dst, src) // want `cannot verify Copies: the built-in function copy is not supported yet; write the copy as a loop that assigns each element, or, when the two have the same length, as dst = append\(dst\[:0\], src...\)`
 }
 
-// encoder holds an array.
+// encoder holds an array of elements larger than a byte.
 type encoder struct {
 	n   int
-	out [4]byte
+	out [4]int16
 }
 
 // @Requires e != nil
 // @Ensures True
-func Encodes(e *encoder) { // want `cannot verify Encodes: parameter e has unsupported type \*trialfaults.encoder; trialfaults.encoder holds an array in field out, and arrays are not supported yet`
+func Encodes(e *encoder) { // want `cannot verify Encodes: parameter e has unsupported type \*trialfaults.encoder; trialfaults.encoder holds an array of int16 in field out, and arrays in structs are supported only for elements of one byte yet`
 }
 
 // inner holds an array two structs down.
@@ -28,7 +28,7 @@ type inner struct{ buf [2]int }
 type outer struct{ in inner }
 
 // @Ensures True
-func Nested(o outer) { // want `outer holds an array in field in.buf`
+func Nested(o outer) { // want `outer holds an array of int in field in.buf, and arrays in structs are supported only for elements of one byte yet`
 }
 
 func usage() {}

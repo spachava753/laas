@@ -1420,6 +1420,12 @@ func (v *fnVerifier) untouchedRow(known *layer, home *logic.Term) (*logic.Term, 
 	var outside, facts []*logic.Term
 	for _, t := range known.apart {
 		for _, c := range t.cells {
+			// The run of an array of numbers or booleans holds no cell
+			// from which a follow starts, as the elements of a slice of
+			// them hold none (growsOnlyThroughTargets).
+			if c.isRun() {
+				continue
+			}
 			pos := logic.Add(t.lo, logic.IntLit(c.off))
 			in, more := v.rowAt(known.prev, home, t.ref, pos)
 			// What the separation of a listed footprint says of the cell,

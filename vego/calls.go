@@ -1238,7 +1238,7 @@ func (v *fnVerifier) contentFacts(mem memory, val value, t types.Type, brk *logi
 		if !mapModelled(t) {
 			break
 		}
-		leaves, _ := fieldLayout(u.Elem())
+		leaves, _ := elemLayout(u.Elem())
 		index := v.bound("k")
 		held := make(value, len(leaves))
 		for i, lf := range leaves {
@@ -1248,7 +1248,7 @@ func (v *fnVerifier) contentFacts(mem memory, val value, t types.Type, brk *logi
 	case *types.Slice:
 		// Every element is a complete value of the element type: numbers in
 		// range, pointers to something that exists, slices that are slices.
-		leaves, ok := fieldLayout(u.Elem())
+		leaves, ok := elemLayout(u.Elem())
 		if !ok {
 			break
 		}

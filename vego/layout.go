@@ -250,15 +250,49 @@ func isArray(t types.Type) bool {
 // arrayLen returns the length of an array type.
 func arrayLen(t types.Type) int64 { return t.Underlying().(*types.Array).Len() }
 
-// fieldLayout is layoutOf for the type of a struct field, of the element
-// of a slice, or of what a map holds: an array there is not modelled yet,
-// since only arrays that are values or lie in an allocation of their own
-// are.
-func fieldLayout(t types.Type) ([]leaf, bool) {
+// elemLayout is layoutOf for the element of a slice or what a map holds:
+// an array there is not modelled yet. An element of a slice of arrays
+// would lie in a region of its own, while a slice of the element reaches
+// the same bytes through the region of the array's elements.
+func elemLayout(t types.Type) ([]leaf, bool) {
 	if isArray(t) {
 		return nil, false
 	}
 	return layoutOf(t)
+}
+
+// fieldLayout is layoutOf for the type of a struct field. An array there is
+// modelled when its elements take one byte (byteArray), and not otherwise.
+func fieldLayout(t types.Type) ([]leaf, bool) {
+	if isArray(t) && !byteArray(t) {
+		return nil, false
+	}
+	return layoutOf(t)
+}
+
+// byteArray reports whether a type is an array of numbers or booleans of
+// one byte each: byte, uint8, int8, and bool, which take one byte on every
+// target. Such an array may lie in a struct: in the region of its elements
+// the position of a cell is then its byte address, as in the region of a
+// field, so every test that compares positions with the bytes a struct
+// covers holds of it. An array of larger elements lies at the floor of its
+// address over the size of an element, and those tests would have to be
+// made per region, the footprints of conversions among them (F1 of the
+// design review of F36); it is not modelled inside a struct.
+func byteArray(t types.Type) bool {
+	array, ok := t.Underlying().(*types.Array)
+	if !ok {
+		return false
+	}
+	basic, ok := array.Elem().Underlying().(*types.Basic)
+	if !ok {
+		return false
+	}
+	switch basic.Kind() {
+	case types.Uint8, types.Int8, types.Bool:
+		return true
+	}
+	return false
 }
 
 // holdsArrayValue reports whether a value of the type is an array or holds
@@ -277,6 +311,13 @@ func holdsArrayValue(t types.Type) bool {
 	return false
 }
 
+// pointsToArray reports whether a type is a pointer to a struct that holds
+// an array by value.
+func pointsToArray(t types.Type) bool {
+	object, ok := pointee(t)
+	return ok && holdsArrayValue(object)
+}
+
 // heldReason says why an interface value or an error cannot hold a value
 // of a type, or returns "": its values are not modelled, or it holds an
 // array, which no interface value is modelled to hold yet.
@@ -291,13 +332,15 @@ func heldReason(t types.Type) string {
 }
 
 // holdsArray reports whether a value of the type has an array with elements
-// inside it: it is one, or a struct with such a field. A slice of the array
-// is a second view of that memory, which a hidden leaf would not show, so
-// such a struct is not modelled at all. A blank field cannot be sliced.
+// inside it that a struct cannot hold as a run of cells: it is one, or a
+// struct with such a field. A slice of the array is a second view of that
+// memory, which a hidden leaf would not show, so such a struct is not
+// modelled at all. An array of one-byte elements is modelled in a struct
+// (byteArray). A blank field cannot be sliced.
 func holdsArray(t types.Type) bool {
 	switch u := t.Underlying().(type) {
 	case *types.Array:
-		return u.Len() != 0
+		return u.Len() != 0 && !byteArray(t)
 	case *types.Struct:
 		for field := range u.Fields() {
 			if field.Name() != "_" && holdsArray(field.Type()) {
@@ -428,6 +471,14 @@ func (pv *pkgVerifier) cellsOf(t types.Type) []cell {
 		}
 		if !ok {
 			cells = append(cells, cell{key: typeKey(u) + "." + field.Name(), sort: logic.Int, off: offsets[i]})
+			continue
+		}
+		if isArray(field.Type()) {
+			// The run of the array, in the region of its elements, from
+			// the field's offset.
+			run := pv.cellsOf(field.Type())[0]
+			run.off += offsets[i]
+			cells = append(cells, run)
 			continue
 		}
 		if _, nested := field.Type().Underlying().(*types.Struct); nested {

@@ -1029,7 +1029,7 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 			}
 		}
 	case isSlice(ranged):
-		if _, ok := fieldLayout(elemType(ranged)); !ok && element != nil {
+		if _, ok := elemLayout(elemType(ranged)); !ok && element != nil {
 			v.unsupported(s.X.Pos(), fmt.Sprintf("slices of %s are not supported", elemType(ranged)))
 		}
 		header := v.eval(s.X, st, nil)

@@ -16,7 +16,7 @@ This guide shows how to write Go that `vego` can verify. Read it from top to bot
 
 `vego` never reports a function as correct when it is not. If it cannot handle a piece of Go, it reports `cannot verify` and names the construct. If it cannot find a proof, it reports `may not hold`. That means "not proved". The code may be wrong, the contract may be wrong, or both may be right and the prover needs a hint. Much of this guide is about working out which.
 
-`vego` is experimental and supports only part of Go. It does not yet support calls through interfaces whose methods have no contract (which includes the interfaces of the standard library), methods of an interface that write what the interface value holds, calls of function values whose type has no contract, generic code, goroutines, arrays of anything but numbers and booleans, arrays inside structs, or package-level variables that are changed. [What is not supported](#what-is-not-supported) lists the main gaps. Code that does I/O usually runs into these limits. The usual approach is to verify the logic and leave the code around it unverified. [Adopting it](#adopting-it) describes how.
+`vego` is experimental and supports only part of Go. It does not yet support calls through interfaces whose methods have no contract (which includes the interfaces of the standard library), methods of an interface that write what the interface value holds, calls of function values whose type has no contract, generic code, goroutines, arrays of anything but numbers and booleans, arrays of elements larger than a byte inside structs, or package-level variables that are changed. [What is not supported](#what-is-not-supported) lists the main gaps. Code that does I/O usually runs into these limits. The usual approach is to verify the logic and leave the code around it unverified. [Adopting it](#adopting-it) describes how.
 
 ## Running it
 
@@ -2944,7 +2944,7 @@ A slice with no capacity shares no memory with anything. `apart` takes two slice
 
 ## Arrays
 
-An array of numbers or booleans can be a local variable, a parameter, or a result, as in `[16]int`, `[512]byte`, or `[32]byte`. Its length comes from its type, so an index is checked against it without a `Requires`. In a formula, `|a|` is the length and `a[i]` an element:
+An array of numbers or booleans can be a local variable, a parameter, a result, or a field of a struct, as in `[16]int`, `[512]byte`, or `[32]byte`. Its length comes from its type, so an index is checked against it without a `Requires`. In a formula, `|a|` is the length and `a[i]` an element:
 
 ```go
 // @Requires Forall k in [0, |data|) : data[k] < 16
@@ -3030,9 +3030,79 @@ func Fingerprint(data []byte) (result string) {
 
 `sha256.Sum256`, `md5.Sum`, and `hex.EncodeToString` have shipped contracts.
 
+### Arrays in structs
+
+A struct can hold an array whose elements take one byte: `byte`, `uint8`, `int8`, or `bool`. `Modifies l` covers the array, and a write of an element changes no other field:
+
+```go
+type line struct {
+	used int
+	buf  [80]byte
+}
+
+// @Requires l != nil And 0 <= l.used < 80
+// @Modifies l
+// @Ensures l.used' = l.used + 1 And l.buf'[l.used] = c
+func (l *line) Add(c byte) {
+	l.buf[l.used] = c
+	l.used++
+}
+```
+
+`Modifies l.buf` names the array alone. A slice of the array, such as `l.buf[:n]`, shares its memory, as for an array in a local variable. A copy of the struct copies the array.
+
+A method that fills the struct's array from a slice it is handed needs to know that the slice is not part of the array. `apart(p, l.buf)` says so, with the array standing for the slice of the whole array:
+
+```go
+// @Requires l != nil And |p| <= 80
+// @Requires apart(p, l.buf)
+// @Modifies l
+// @Ensures Forall k in [0, |p|) : l.buf'[k] = p[k]
+func (l *line) Load(p []byte) {
+	// @Invariant 0 <= i <= |p|
+	// @Invariant Forall k in [0, i) : l.buf[k] = p[k]
+	for i := range p {
+		l.buf[i] = p[i]
+	}
+}
+
+// @Requires l != nil
+// @Modifies l
+// @Ensures True
+func (l *line) Reload() {
+	l.Load(l.buf[:8])
+}
+```
+
+```text
+vego: precondition of Load may not hold: apart(p, l.buf)
+```
+
+`within(s, l.buf)` says that a slice lies in the array, in the same way.
+
+A struct that holds an array of larger elements, such as `[256]int`, is not supported yet:
+
+```go
+type histogram struct {
+	counts [256]int
+}
+
+// @Requires h != nil
+// @Ensures True
+func (h *histogram) Total() (n int) {
+	return 0
+}
+```
+
+```text
+vego: cannot verify Total: parameter h has unsupported type *guide.histogram; guide.histogram holds an array of int in field counts, and arrays in structs are supported only for elements of one byte yet
+```
+
+Keep such an array in a local variable, or use a slice.
+
 ### What arrays do not support yet
 
-An array of anything but numbers and booleans is not supported, and neither is a struct that holds an array:
+An array of anything but numbers and booleans is not supported:
 
 ```go
 // @Ensures True
@@ -3049,6 +3119,7 @@ vego: cannot verify Names: names has unsupported type [2]string; [2]string is an
 These are not supported yet either, each with a message that names it:
 
 - a pointer to an array, as in `p := &buf`; slice the array instead;
+- converting a pointer to a struct that holds an array to an interface or an error, as in `var w io.Writer = &line{}`;
 - reading or writing an element of a slice of arrays, as in `xs[0][0]` of a `[][4]byte`; holding such a slice, its length, and slicing it are supported;
 - an array or a value that holds one in an interface value or an error, an assertion or a type switch to such a type, and `errors.As` with such a target;
 - a function type or a method of an interface whose parameters or results hold an array;
@@ -9616,7 +9687,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - `recover`;
 - generic functions and types of your own package with annotations, a call of a generic function without a trusted contract, a generic function used as a value, methods of generic types, and type arguments that can hold code, that are not modelled, or that hold a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once` (see [Generic functions of other packages](#generic-functions-of-other-packages));
 - goroutines, channels, and `select`;
-- arrays of anything but numbers and booleans, structs that contain an array, and the other uses of arrays listed in [What arrays do not support yet](#what-arrays-do-not-support-yet);
+- arrays of anything but numbers and booleans, structs that contain an array of elements larger than a byte, and the other uses of arrays listed in [What arrays do not support yet](#what-arrays-do-not-support-yet);
 - pointers to anything other than a struct;
 - reading or changing a package-level variable whose address the build takes and that is not a struct, a struct variable of another package whose address is taken, a variable that a directive or an assembly file names, an error variable that something changes, or a variable whose type can hold a function value, an interface value, an error, a channel, or an `unsafe.Pointer`, but for an interface type, a named function type with a contract, and a logger made by `log.New` (see [Package-level variables](#package-level-variables));
 - `copy`;
@@ -9774,7 +9845,7 @@ Results are referred to by the names in the function's signature.
 | Form | Meaning |
 | --- | --- |
 | `Modifies p` | every field of the struct that `p` points to |
-| `Modifies p.n` | the field `n`, if it holds a number, boolean, string, or struct |
+| `Modifies p.n` | the field `n`, if it holds a number, boolean, string, array, or struct |
 | `Modifies p.f` | if `f` is a pointer, slice, or map: what `f` refers to, not the field itself |
 | `Modifies A`, `Modifies s.items` | the elements of a slice, up to its capacity |
 | `Modifies ps[0]` | one element of a slice of structs; for a slice of pointers, the struct the element points to |
@@ -9793,7 +9864,7 @@ Results are referred to by the names in the function's signature.
 | `fresh(x)` | in an `Ensures`, the memory `x` refers to on return was allocated by the call; in a body, it was allocated since the function was entered; true for a slice with zero capacity and a nil interface value, false for a nil pointer or map; for an interface value, what it holds was created then, its footprint included |
 | `fresh(x, w)` | the same, except that what `x` refers to may also lie in the footprint of `w`, an interface value whose methods write behind it; more than one such value may follow, and `w` may be a variadic parameter of such values, read where a call writes each one out |
 | `within(a, b)` | `a` lies inside the memory of `b`; each is a pointer or a slice, and a slice includes its capacity; for an interface value `b`, `a` (also a map) lies in its footprint, and for a value that owns memory, in its struct or in what it owns |
-| `apart(a, b)` | the slices `a` and `b`, of one element type, share no memory up to their capacities |
+| `apart(a, b)` | the slices `a` and `b`, of one element type, share no memory up to their capacities; an array field stands for the slice of the whole array |
 
 ### Order of evaluation
 

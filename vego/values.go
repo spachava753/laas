@@ -101,10 +101,10 @@ func unsupportedHint(t types.Type) string {
 	if hint := arrayHint(t); hint != "" {
 		return hint
 	}
-	if path, holder := arrayField(t, map[types.Type]bool{}); path == "itself" {
+	if path, holder, array := arrayField(t, map[types.Type]bool{}); path == "itself" {
 		return fmt.Sprintf("; %s is an array, and arrays are not supported yet", holder)
 	} else if path != "" {
-		return fmt.Sprintf("; %s holds an array in %s, and arrays are not supported yet", holder, path)
+		return fmt.Sprintf("; %s holds an array of %s in %s, and arrays in structs are supported only for elements of one byte yet", holder, array.Underlying().(*types.Array).Elem(), path)
 	}
 	if !embedsDeclared(t) {
 		return ""
@@ -130,12 +130,13 @@ func arrayHint(t types.Type) string {
 }
 
 // arrayField returns the field at any depth through which a type holds an
-// array, as field out or field e.buf, with the type that holds it, or ""
-// for a type that holds none where a value of it lies: in itself, in what
-// a pointer points to, or in the elements of a slice.
-func arrayField(t types.Type, seen map[types.Type]bool) (path string, holder types.Type) {
+// array that a struct cannot hold, as field out or field e.buf, with the
+// type that holds it and the type of the array, or "" for a type that holds
+// none where a value of it lies: in itself, in what a pointer points to, or
+// in the elements of a slice.
+func arrayField(t types.Type, seen map[types.Type]bool) (path string, holder, array types.Type) {
 	if seen[t] {
-		return "", nil
+		return "", nil, nil
 	}
 	seen[t] = true
 	switch u := t.Underlying().(type) {
@@ -145,7 +146,7 @@ func arrayField(t types.Type, seen map[types.Type]bool) (path string, holder typ
 		return arrayField(u.Elem(), seen)
 	case *types.Array:
 		if u.Len() != 0 {
-			return "itself", t
+			return "itself", t, t
 		}
 	case *types.Struct:
 		for field := range u.Fields() {
@@ -153,14 +154,14 @@ func arrayField(t types.Type, seen map[types.Type]bool) (path string, holder typ
 				continue
 			}
 			if _, isArray := field.Type().Underlying().(*types.Array); isArray && holdsArray(field.Type()) {
-				return "field " + field.Name(), t
+				return "field " + field.Name(), t, field.Type()
 			}
-			if inner, _ := arrayField(field.Type(), seen); inner != "" && holdsArray(field.Type()) {
-				return "field " + field.Name() + "." + strings.TrimPrefix(inner, "field "), t
+			if inner, _, array := arrayField(field.Type(), seen); inner != "" && holdsArray(field.Type()) {
+				return "field " + field.Name() + "." + strings.TrimPrefix(inner, "field "), t, array
 			}
 		}
 	}
-	return "", nil
+	return "", nil, nil
 }
 
 // holdsCodeRef reports whether a type is one whose values are a single

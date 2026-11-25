@@ -1274,10 +1274,25 @@ func (e *specEnv) address(what string, found reached) (*logic.Term, error) {
 	if found.constant != nil || !isStruct {
 		return nil, fmt.Errorf("&%s: %s has type %s, and & gives only pointers to structs", what, what, found.typ)
 	}
+	ref, at, inMemory := e.location(found)
+	if !inMemory {
+		return nil, fmt.Errorf("&%s: %s is not reached through a pointer or an element of a slice, so it has no address a formula can name", what, what)
+	}
+	if e.v.pass.TypesSizes.Sizeof(found.typ) == 0 {
+		// Two pointers to values without size may or may not be equal, as
+		// for a pointer read from memory.
+		return logic.Pair(ref, nil), nil
+	}
+	return logic.Pair(ref, at), nil
+}
+
+// location returns the allocation and the byte position of what a path
+// leads to, and reports whether it lies in memory: reached through a
+// pointer or an element of a slice.
+func (e *specEnv) location(found reached) (ref, position *logic.Term, inMemory bool) {
 	cur, ground := found.start, true
-	var ref, at *logic.Term
+	var at *logic.Term
 	var offset int64
-	inMemory := false
 	for i, h := range found.path {
 		reads := e.sink
 		if !ground {
@@ -1301,14 +1316,26 @@ func (e *specEnv) address(what string, found reached) (*logic.Term, error) {
 		}
 	}
 	if !inMemory {
-		return nil, fmt.Errorf("&%s: %s is not reached through a pointer or an element of a slice, so it has no address a formula can name", what, what)
+		return nil, nil, false
 	}
-	if e.v.pass.TypesSizes.Sizeof(found.typ) == 0 {
-		// Two pointers to values without size may or may not be equal, as
-		// for a pointer read from memory.
-		return logic.Pair(ref, nil), nil
+	return ref, logic.Add(at, logic.IntLit(offset)), true
+}
+
+// arraySlice turns an operand of apart or within that is an array in
+// memory, a field of a struct reached through a pointer or an element of
+// a slice, into the slice of the whole array, which shares its cells.
+func (e *specEnv) arraySlice(found reached, spelled string) (reached, error) {
+	if found.constant != nil || !isArray(found.typ) {
+		return found, nil
 	}
-	return logic.Pair(ref, logic.Add(at, logic.IntLit(offset))), nil
+	ref, at, inMemory := e.location(found)
+	if !inMemory {
+		return found, fmt.Errorf("%s is an array that is not reached through a pointer or an element of a slice, so no slice shares its memory", spelled)
+	}
+	run := e.v.cellsOf(found.typ)[0]
+	n := logic.IntLit(run.run)
+	found.val, found.typ = value{ref, run.start(at), n, n}, types.NewSlice(found.typ.Underlying().(*types.Array).Elem())
+	return found, nil
 }
 
 // state resolves name(x) for a state of a struct, read from the value x or
@@ -1500,6 +1527,11 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 			return nil, err
 		}
 		spelled := spell(path.Root, path.Steps)
+		if name == "apart" || name == "within" {
+			if found[i], err = e.arraySlice(found[i], spelled); err != nil {
+				return nil, err
+			}
+		}
 		_, isPointer := pointee(found[i].typ)
 		switch {
 		case name == "fresh" && i > 0 && found[i].constant == nil && isSlice(found[i].typ) && isIface(elemType(found[i].typ)) && e.v.hasFootprint(elemType(found[i].typ)):
@@ -1764,7 +1796,7 @@ func plan(t types.Type, steps []logic.Step, from *types.Package) ([]hop, types.T
 			case isSlice(t):
 				hops = append(hops, hop{from: t, field: -1, index: step.Index})
 				t = elemType(t)
-				if _, ok := fieldLayout(t); !ok {
+				if _, ok := elemLayout(t); !ok {
 					return nil, nil, fmt.Errorf("%s has type %s, which is not supported", spelled, t)
 				}
 			case isString(t):
@@ -2138,6 +2170,12 @@ func (v *fnVerifier) walkTarget(fn *funcInfo, m *modTarget, param *types.Var, ro
 			cur.cells = v.cellsOf(elemType(h.from))
 			inStruct = elemType(h.from)
 			offset = 0
+		case isArray(h.from):
+			whole := m.text
+			if at := strings.LastIndex(whole, "["); at > 0 {
+				whole = whole[:at]
+			}
+			return shape{}, target{}, fmt.Errorf("%s is an element of an array; Modifies names the array, %s", m.text, whole)
 		default:
 			// What a map has for a key is an entry of the map, and a byte
 			// of a string no place that can be written through this path.
