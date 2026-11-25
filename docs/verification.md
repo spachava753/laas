@@ -2895,7 +2895,7 @@ Slice expressions `A[i:j]` and `A[i:j:k]`, `len`, `cap`, `make`, and slice liter
 
 ### Copying between slices
 
-`copy(dst, src)` copies the first `min(len(dst), len(src))` elements of `src` to the start of `dst`, and returns how many it copied. The function must list `dst` in `Modifies`. The two may overlap. The elements written are what `src` held before the copy, as in Go, so moving a buffer down over itself verifies:
+`copy(dst, src)` copies the first `min(len(dst), len(src))` elements of `src` to the start of `dst`, and returns how many it copied. A function that copies into memory its caller can see, such as a slice parameter, must list it in `Modifies`; one that copies into a slice or an array it made needs no entry. The two may overlap. The elements written are what `src` held before the copy, as in Go, so moving a buffer down over itself verifies:
 
 ```go
 // @Requires 0 <= n <= |buf|
@@ -3360,7 +3360,7 @@ The first, third, fourth, and fifth rows apply wherever the path ends. A path th
 
 To assign a field that holds a slice, pointer, map, or interface value, list the struct that contains it. A method that assigns `s.n` and writes `s.items[i]` needs `Modifies s.n, s.items`. A method that assigns `s.items` needs `Modifies s`.
 
-A struct can have a field of a type that `vego` does not support, such as a channel. Verified code cannot read or assign that field, but it is still part of the struct. Assigning the whole struct writes that field too. For a pointer `h` to such a struct, `*h = H{}` needs `Modifies h`, and entries for the other fields are not enough. A struct with an array field is the exception. It is not supported at all.
+A struct can have a field of a type that `vego` does not support, such as a channel. Verified code cannot read or assign that field, but it is still part of the struct. Assigning the whole struct writes that field too. For a pointer `h` to such a struct, `*h = H{}` needs `Modifies h`, and entries for the other fields are not enough. A struct with a field that is an array of elements larger than a byte is the exception. It is not supported at all (see [Arrays in structs](#arrays-in-structs)).
 
 ### Types declared inside a function
 

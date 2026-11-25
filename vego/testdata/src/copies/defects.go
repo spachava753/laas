@@ -86,7 +86,7 @@ func Twice(a []int) {
 // @Modifies dst
 // @Ensures True
 func Inside(dst, src []int) (n int) {
-	return 1 + copy(dst, src) // want `cannot verify Inside: the built-in function copy is not supported yet here; copy is supported as a statement or as the whole right-hand side of an assignment`
+	return 1 + copy(dst, src) // want `cannot verify Inside: the built-in function copy is not supported yet here; copy is supported as a statement, as the whole right-hand side of an assignment, or as a returned value`
 }
 
 // Nor beside a call in the target.
