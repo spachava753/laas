@@ -157,7 +157,7 @@ func typeKeyOf(t types.Type) string {
 
 // resolveType finds the type a formula names: a defined type of the
 // package, of an imported package by its name, or of any package in the
-// build by its path in quotes, or a pointer to one.
+// build by its path in quotes, or pointers to and slices of one.
 func (e *specEnv) resolveType(t logic.TypeName) (types.Type, error) {
 	if found, ok := t.Resolved.(types.Type); ok {
 		return found, nil
@@ -185,8 +185,12 @@ func (e *specEnv) resolveType(t logic.TypeName) (types.Type, error) {
 		return nil, fmt.Errorf("%s is not a type here", t)
 	}
 	found := name.Type()
-	if t.Pointer {
-		found = types.NewPointer(found)
+	for i := len(t.Prefix) - 1; i >= 0; i-- {
+		if t.Prefix[i] == '[' {
+			found = types.NewSlice(found)
+		} else {
+			found = types.NewPointer(found)
+		}
 	}
 	return found, nil
 }

@@ -704,7 +704,7 @@ func (v *fnVerifier) assertion(e *ast.TypeAssertExpr, st *state, guard []*logic.
 	held := v.heldRead(st, x, target)
 	v.keyHeldPointer(st, x, from, target, held, holds)
 	if !commaOk {
-		v.checkAssertion(st, guard, holds, e, types.ExprString(e), fmt.Sprintf("%s may not hold %s", types.ExprString(e.X), withArticle(shown(target))))
+		v.checkAssertion(st, guard, holds, e, types.ExprString(e), fmt.Sprintf("%s may not hold %s %s", types.ExprString(e.X), article(shown(target)), shown(target)))
 		return []value{held}
 	}
 	zero := zeroValue(target)
@@ -1244,11 +1244,3 @@ func refOf(x *logic.Term) (ref, isNil *logic.Term) {
 	return x, logic.Eq(x, logic.RefLit(0))
 }
 
-// withArticle puts "a" or "an" before the name of a type, by its first
-// letter: "an int", "a *PE".
-func withArticle(name string) string {
-	if name != "" && strings.ContainsRune("aeiouAEIOU", rune(name[0])) {
-		return "an " + name
-	}
-	return "a " + name
-}

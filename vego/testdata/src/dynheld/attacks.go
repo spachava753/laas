@@ -167,3 +167,55 @@ func CopiesLockedCase(v any) (n int) {
 	}
 	return 0
 }
+
+// A field rewritten after it was read, and claims about the wrong field
+// or element (F14 of the review of S1).
+//
+// @Ensures n = 2
+func Rewritten() (n int) {
+	e := &Event{}
+	e.Payload = any(1)
+	old := e.Payload
+	e.Payload = any(2)
+	return old.(int) // want `postcondition may not hold: n = 2`
+}
+
+// @Ensures n = 1
+func RewrittenHonest() (n int) {
+	e := &Event{}
+	e.Payload = any(1)
+	old := e.Payload
+	e.Payload = any(2)
+	return old.(int)
+}
+
+// @Requires |xs| > 1 And holds(xs[1], int)
+// @Ensures n = xs[0].(int)
+func WrongElement(xs []any) (n int) {
+	if m, ok := xs[0].(int); ok {
+		return m
+	}
+	return 0 // want `postcondition may not hold: n = xs\[0\].\(int\)`
+}
+
+// @Requires |xs| > 0
+// @Ensures True
+func Undescribed(xs []any) (n int) {
+	return xs[0].(int) // want `the type assertion xs\[0\].\(int\) may panic: xs\[0\] may not hold an int`
+}
+
+// @Requires e != nil And holds(e.Payload, string)
+// @Ensures True
+func WrongField(e *Event) (n int) {
+	return e.Payload.(int) // want `the type assertion e.Payload.\(int\) may panic: e.Payload may not hold an int`
+}
+
+// A slice of the wrong element type.
+//
+// @Ensures holds(v, []byte) -> n = 0
+func WrongSlice(v any) (n int) {
+	if b, ok := v.([]byte); ok {
+		return len(b) // want `postcondition may not hold: holds\(v, \[\]byte\) -> n = 0`
+	}
+	return 0
+}

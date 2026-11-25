@@ -15,6 +15,7 @@ type Point struct{ X, Y int }
 
 // @Ensures holds(v, int) -> k = 1
 // @Ensures holds(v, string) -> k = 2
+// @Ensures holds(v, []byte) -> k = 3
 // @Ensures holds(v, Point) -> k = 4
 // @Ensures v = nil -> k = 0
 func Classify(v any) (k int) {
@@ -31,6 +32,23 @@ func Classify(v any) (k int) {
 		return 0
 	}
 	return 5
+}
+
+// A slice taken out has the length it was converted with.
+//
+// @Ensures holds(v, []byte) -> n = |v.([]byte)|
+// @Ensures ~holds(v, []byte) -> n = -1
+func BytesLen(v any) (n int) {
+	if b, ok := v.([]byte); ok {
+		return len(b)
+	}
+	return -1
+}
+
+// @Ensures n = 3 And k = 3
+func TwoBytes() (n, k int) {
+	b := []byte("abc")
+	return BytesLen(b), Classify(b)
 }
 
 // @Ensures holds(v, string) -> n = |v.(string)|
@@ -138,4 +156,19 @@ func CodeMade() (c int) {
 		return e.Code
 	}
 	return 0
+}
+
+// A slice of pointers named in a formula.
+//
+// @Ensures holds(v, []*Point) -> n = |v.([]*Point)|
+func PointsLen(v any) (n int) {
+	if ps, ok := v.([]*Point); ok {
+		return len(ps)
+	}
+	return 0
+}
+
+// @Ensures n = 2
+func TwoPoints() (n int) {
+	return PointsLen([]*Point{{X: 1}, nil})
 }

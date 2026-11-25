@@ -41,8 +41,10 @@ type TypeName struct {
 	Qualifier string
 	Quoted    bool
 	Name      string
-	Pointer   bool
-	Resolved  any
+	// Prefix holds what is written before the name, outermost first: '*'
+	// for a pointer and '[' for a slice, so "[*" is []*T.
+	Prefix   string
+	Resolved any
 }
 
 // String spells the type as a formula writes it.
@@ -54,8 +56,12 @@ func (t TypeName) String() string {
 	case t.Qualifier != "":
 		text = t.Qualifier + "." + text
 	}
-	if t.Pointer {
-		text = "*" + text
+	for i := len(t.Prefix) - 1; i >= 0; i-- {
+		if t.Prefix[i] == '[' {
+			text = "[]" + text
+		} else {
+			text = "*" + text
+		}
 	}
 	return text
 }
@@ -681,10 +687,22 @@ func (p *parser) postfix() *Node {
 	}
 }
 
-// typeName parses a type named in a formula: an optional *, then a name,
-// a package name and a name, or a path in quotes and a name.
+// typeName parses a type named in a formula: any number of * and [],
+// then a name, a package name and a name, or a path in quotes and a name.
 func (p *parser) typeName() *TypeName {
-	t := &TypeName{Pointer: p.accept("*")}
+	t := &TypeName{}
+	for {
+		if p.accept("*") {
+			t.Prefix += "*"
+			continue
+		}
+		if p.accept("[") {
+			p.expect("]")
+			t.Prefix += "["
+			continue
+		}
+		break
+	}
 	tok := p.peek()
 	switch tok.kind {
 	case 's':
@@ -698,7 +716,7 @@ func (p *parser) typeName() *TypeName {
 			t.Qualifier, t.Name = t.Name, p.ident()
 		}
 	default:
-		p.fail("expected a type, as in T, *T, pkg.T, or \"path\".T")
+		p.fail("expected a type, as in T, *T, []T, pkg.T, or \"path\".T")
 	}
 	return t
 }
