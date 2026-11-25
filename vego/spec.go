@@ -1338,7 +1338,10 @@ func (e *specEnv) state(name string, steps []logic.Step, state string, when logi
 		decls = statesOf(u)
 	}
 	index := slices.IndexFunc(decls, func(d stateDecl) bool { return d.name == state })
-	if index < 0 && viaPointer && e.v.pointerKeyed(found.typ) {
+	if index < 0 && viaPointer && e.v.pointerReceiverChanger(found.typ) {
+		if why := e.v.pointerStatesWhy(found.typ); why != "" {
+			return nil, fmt.Errorf("%s(%s): the states of what %s points to are not kept: %s", state, what, what, why)
+		}
 		// A state that an interface the pointer's type implements declares,
 		// which is about what the pointer points to (S0b of F34).
 		var named []ifaceState
@@ -1351,9 +1354,6 @@ func (e *specEnv) state(name string, steps []logic.Step, state string, when logi
 		case len(named) > 1:
 			return nil, fmt.Errorf("%s(%s) is ambiguous: %s has the state %s of %s and of %s", state, what, found.typ,
 				state, named[0].owner.Name(), named[1].owner.Name())
-		case len(named) == 1 && e.v.sharesAddress(found.typ) != nil:
-			return nil, fmt.Errorf("%s(%s): the first field of what %s points to holds a %s, whose states lie at the same address, so nothing tells the states of the two apart",
-				state, what, what, e.v.sharesAddress(found.typ))
 		case len(named) == 1:
 			e.v.notePointerKey(found.sink, found.val)
 			return e.v.fetch(found.sink, found.mem, []cell{stateCell}, pkey(found.val), named[0].position())[0], nil

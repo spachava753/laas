@@ -2397,6 +2397,10 @@ trusted:
     reason: Test helper standing for a call on what a struct owns, whose error may hold it.
     modifies: []
 
+  (*ptrlib.Quiet).Close:
+    reason: Test helper for a library type whose Close has an entry that lists nothing, so the states of what its pointer points to are not kept (F12 of the review of S0b of F34).
+    modifies: []
+
   (*ptrlib.Conn).Close:
     reason: Test helper for a library type whose Close closes the file it holds in an exported field, so the states of a connection are about that file (F10 of the design review of S0b of F34).
     modifies: [c]

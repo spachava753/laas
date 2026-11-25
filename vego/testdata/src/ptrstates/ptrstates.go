@@ -285,3 +285,57 @@ func AliasClosed(f, g *os.File) {
 	var c io.Closer = f
 	c.Close()
 } // want `postcondition may not hold: ~closed\(g'\)`
+
+// A pointer whose method that changes its states does not list its receiver
+// has no states: a call of it would not be known to change them (F12 of
+// the review of S0b).
+
+// Q is a closer of the project whose Close lists nothing.
+type Q struct{ n int }
+
+// @Requires q != nil
+// @Ensures err = nil
+func (q *Q) Close() (err error) { return nil }
+
+// @Ensures result != nil And ~closed(result) // want `closed\(result\): the states of what result points to are not kept: \(\*Q\).Close changes its states, and its contract does not list its receiver q in Modifies`
+func ClosedGhost() (result *Q) {
+	q := &Q{}
+	q.Close()
+	return q
+}
+
+// @Requires c != nil And ~closed(c) // want `closed\(c\): the states of what c points to are not kept: \(\*ptrlib.Quiet\).Close changes its states, and its contract does not list its receiver`
+// @Ensures ~closed(c')
+func StillOpen(c *ptrlib.Quiet) (err error) {
+	return c.Close()
+}
+
+// @Ensures True
+func ConvertQ() {
+	var c io.Closer = &Q{} // want `cannot verify ConvertQ: converting a \*Q to io.Closer is not supported: \(\*Q\).Close changes its states, and its contract does not list its receiver q in Modifies`
+	c.Close()
+}
+
+// A range over files by value copies each, and so does a struct that holds
+// one.
+
+// @Requires |fs| <= 10
+// @Ensures True
+func RangeCopies(fs []os.File) {
+	for _, f := range fs { // want `cannot verify RangeCopies: Go copies a value of type os.File, here \(the range over fs\)`
+		_ = f
+	}
+}
+
+// Holder holds a file by value.
+type Holder struct {
+	n int
+	F os.File
+}
+
+// @Requires h != nil
+// @Ensures True
+func HolderCopy(h *Holder) {
+	g := *h // want `cannot verify HolderCopy: Go copies a value of type Holder, which holds an os.File, here \(\*h\)`
+	_ = g
+}

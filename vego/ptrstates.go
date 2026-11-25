@@ -1,6 +1,7 @@
 package vego
 
 import (
+	"fmt"
 	"go/types"
 	"slices"
 
@@ -213,15 +214,62 @@ func (pv *pkgVerifier) stateChangers(t types.Type) []*types.Func {
 	return changers
 }
 
-// pointerKeyed reports whether the states of a pointer type are those of
-// the object it points to: one of the methods that change them has a
-// pointer receiver. When none has, each conversion has states of its own,
-// as a value does (checkStateChangers).
-func (pv *pkgVerifier) pointerKeyed(t types.Type) bool {
+// pointerReceiverChanger reports whether one of the methods of a pointer
+// type that change states has a pointer receiver, so that the states would
+// be those of the object it points to. When none has, each conversion has
+// states of its own, as a value does (checkStateChangers).
+func (pv *pkgVerifier) pointerReceiverChanger(t types.Type) bool {
 	return slices.ContainsFunc(pv.stateChangers(t), func(method *types.Func) bool {
 		_, pointer := method.Type().(*types.Signature).Recv().Type().(*types.Pointer)
 		return pointer
 	})
+}
+
+// pointerKeyed reports whether a pointer type has states, those of the
+// object it points to: one of its methods that change them has a pointer
+// receiver, and the model can keep them (pointerStatesWhy). It is the one
+// predicate wherever the states of a pointer are read, written, or assumed
+// (F12 of the review of S0b).
+func (pv *pkgVerifier) pointerKeyed(t types.Type) bool {
+	return pv.pointerReceiverChanger(t) && pv.pointerStatesWhy(t) == ""
+}
+
+// pointerStatesWhy says why the states of what a pointer of type t points
+// to cannot be kept, for a type whose method that changes them has a
+// pointer receiver, or returns "": every such method must have a pointer
+// receiver and list it in Modifies, so that a call of it in any package
+// covers the struct and forgets the states; the object must not have size
+// zero, since two pointers to one may or may not be one; and it must not
+// start with a field whose type has states of its own, at the same address.
+func (pv *pkgVerifier) pointerStatesWhy(t types.Type) string {
+	shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(pv.pass.Pkg)) }
+	object, isPointer := pointee(t)
+	if !isPointer {
+		return ""
+	}
+	if pv.pass.TypesSizes.Sizeof(object) == 0 {
+		return "it points to a value of size zero, and two such pointers may or may not be one, so nothing tells their states apart"
+	}
+	if inner := pv.sharesAddress(t); inner != nil {
+		return fmt.Sprintf("its first field holds %s %s, whose states are its own and lie at the same address, so nothing tells the states of the two apart; put another field first",
+			article(shown(inner)), shown(inner))
+	}
+	for _, method := range pv.stateChangers(t) {
+		recv := method.Type().(*types.Signature).Recv()
+		title := methodOf(recv.Type(), method, pv.pass.Pkg)
+		if _, pointer := recv.Type().(*types.Pointer); !pointer {
+			return fmt.Sprintf("%s changes its states and has a value receiver, so a call of it would not be known to change the states of what the pointer points to; give it a pointer receiver", title)
+		}
+		fn := pv.contractOf(method)
+		if fn == nil {
+			return fmt.Sprintf("%s changes its states and has no contract", title)
+		}
+		if !slices.ContainsFunc(fn.modifies, func(m *modTarget) bool { return m.name == recv.Name() && len(m.steps) == 0 }) {
+			return fmt.Sprintf("%s changes its states, and its contract does not list its receiver %s in Modifies, so a call of it would not be known to change them; list %s in its Modifies",
+				title, recv.Name(), recv.Name())
+		}
+	}
+	return ""
 }
 
 // sharesAddress returns a type with states of its own that lies at the

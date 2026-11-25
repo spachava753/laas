@@ -111,10 +111,10 @@ func (v *fnVerifier) checkCopies(decl *ast.FuncDecl) {
 		shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
 		what := shown(found[0].typ)
 		if !types.Identical(inner, found[0].typ) {
-			what += ", which holds a " + shown(inner)
+			what += ", which holds " + article(shown(inner)) + " " + shown(inner)
 		}
 		v.unsupported(found[0].pos, fmt.Sprintf("Go copies a value of type %s, here (%s); the states of %s %s are changed by trusted methods and are about what it refers to, "+
-			"which a copy would share, so %s %s is never copied; hold it by pointer", what, found[0].what, article(shown(inner)), shown(inner), article(shown(inner)), shown(inner)))
+			"which a copy would share, so %s %s is never copied; hold it by pointer", what, v.copySource(decl, found[0]), article(shown(inner)), shown(inner), article(shown(inner)), shown(inner)))
 	}
 	if found := v.findCopies()[decl]; len(found) > 0 {
 		v.unsupported(found[0].pos, fmt.Sprintf("Go copies a value of type %s, here (%s), and no rule of vego accounts for the copy; %s; "+
@@ -404,6 +404,40 @@ func (pv *pkgVerifier) findCopies() map[*ast.FuncDecl][]ssaCopy {
 		pv.copies[fd] = ssaCopiesOf(fn, holdsState)
 	})
 	return pv.copies
+}
+
+// copySource names, for a message, the expression where go/ssa found a
+// copy (F13 of the review of S0b of F34): the dereference or the expression
+// at its position, the range whose iteration copies an element, or what
+// ssaCopiesOf said of a parameter, a result, or a receiver.
+func (v *fnVerifier) copySource(decl *ast.FuncDecl, c ssaCopy) string {
+	if strings.HasPrefix(c.what, "the ") {
+		return c.what
+	}
+	found := ""
+	var ranged *ast.RangeStmt
+	ast.Inspect(decl, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.RangeStmt:
+			if n.Pos() <= c.pos && c.pos < n.Body.Pos() {
+				ranged = n
+			}
+		case ast.Expr:
+			if found == "" && n.Pos() == c.pos {
+				if t := v.info.TypeOf(n); t != nil && types.Identical(t, c.typ) {
+					found = types.ExprString(n)
+				}
+			}
+		}
+		return true
+	})
+	switch {
+	case found != "":
+		return found
+	case ranged != nil:
+		return "the range over " + types.ExprString(ranged.X)
+	}
+	return "a copy that go/ssa found"
 }
 
 // findSharedCopies is findCopies for the structs whose states trusted

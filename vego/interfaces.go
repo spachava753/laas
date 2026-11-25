@@ -227,11 +227,10 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 // A method of the value that implements a method whose contract lists its
 // receiver changes the states. When one of a pointer's such methods has a
 // pointer receiver, the states are those of the object, at the pointer's
-// key: every such method must then have a pointer receiver and list it in
-// Modifies, so that a static call of it in any package covers the struct
-// and so forgets the states of every interface value that holds the
-// pointer, and the object must not have size zero, since two pointers to
-// one may or may not be one. Otherwise each conversion has states of its
+// key, and the conversion is refused unless the model can keep them: the
+// conditions of pointerStatesWhy, over every interface with states the
+// type implements, the one predicate that formulas, allocations, and the
+// forgetting of calls use too (F12 of the review of S0b). Otherwise each conversion has states of its
 // own, as a value does: verified methods that act on a copy keep ghost
 // states that are what calls on that interface value did. A trusted such
 // method of a value acts on something the value refers to, which every
@@ -243,7 +242,6 @@ func (v *fnVerifier) checkStateChangers(e ast.Expr, from, want types.Type) bool 
 	type changer struct {
 		method, concrete *types.Func
 		recv             *types.Var
-		pointerRecv      bool
 		fn               *funcInfo
 	}
 	var changers []changer
@@ -261,34 +259,22 @@ func (v *fnVerifier) checkStateChangers(e ast.Expr, from, want types.Type) bool 
 			continue
 		}
 		recv := concrete.Type().(*types.Signature).Recv()
-		_, pointerRecv := recv.Type().(*types.Pointer)
-		changers = append(changers, changer{method: method, concrete: concrete, recv: recv, pointerRecv: pointerRecv, fn: v.contractOf(concrete)})
+		changers = append(changers, changer{method: method, concrete: concrete, recv: recv, fn: v.contractOf(concrete)})
 	}
-	object, isPointer := pointee(from)
-	pointerKeyed := isPointer && v.pointerKeyed(from)
-	if inner := v.sharesAddress(from); pointerKeyed && inner != nil {
-		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: its first field holds a %s, whose states are its own and lie at the same address, "+
-			"so nothing tells the states of the two apart; put another field first", shown(from), shown(want), shown(inner)))
-	}
-	if pointerKeyed && v.pass.TypesSizes.Sizeof(object) == 0 {
-		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: it points to a value of size zero, and two such pointers may or may not be one, "+
-			"so nothing tells their states apart", shown(from), shown(want)))
+	_, isPointer := pointee(from)
+	pointerKeyed := isPointer && v.pointerReceiverChanger(from)
+	if pointerKeyed {
+		if why := v.pointerStatesWhy(from); why != "" {
+			v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: %s", shown(from), shown(want), why))
+		}
+		return true
 	}
 	for _, c := range changers {
-		title := methodOf(c.recv.Type(), c.concrete, v.pass.Pkg)
-		switch {
-		case !pointerKeyed && c.fn != nil && c.fn.trust != nil:
+		if c.fn != nil && c.fn.trust != nil {
+			title := methodOf(c.recv.Type(), c.concrete, v.pass.Pkg)
 			v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: %s changes the states of %s and is trusted, so the states are about what it acts on, "+
 				"which every copy of the value shares, and a copy cannot start with states of its own; convert a pointer to the value, whose states are its own",
 				shown(from), shown(want), title, methodTitle(c.method)))
-		case !pointerKeyed:
-		case !c.pointerRecv:
-			v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: %s changes the states of %s and has a value receiver, so a call of it on the pointer "+
-				"would not be known to change the states of what the pointer points to; give it a pointer receiver", shown(from), shown(want), title, methodTitle(c.method)))
-		case c.fn != nil && !slices.ContainsFunc(c.fn.modifies, func(m *modTarget) bool { return m.name == c.recv.Name() && len(m.steps) == 0 }):
-			v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: %s changes the states of %s, and its contract does not list its receiver %s in Modifies, "+
-				"so a call of it on the pointer would not be known to change the states of what the pointer points to; list %s in its // @Modifies clause",
-				shown(from), shown(want), title, methodTitle(c.method), c.recv.Name(), c.recv.Name()))
 		}
 	}
 	return pointerKeyed

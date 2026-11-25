@@ -3314,6 +3314,7 @@ invariants	invariants.TakesNever	2	230	0
 invariants	invariants.UsesNew	8	2411	0
 invariants	invariants.Widen	8	7932	0
 invariants	invariants.count	6	5653	0
+iowrap	(*os.File).Close	1	1681	0
 iowrap	(*os.File).Read	7	2017092	2
 iowrap	(*os.File).Write	3	18506	0
 iowrap	(iowrap.Drained).Read	10	4003	0
@@ -3371,6 +3372,7 @@ jsondec	(*jsondec.Cycle).Read	34	66652	0
 jsondec	(*jsondec.Flip).Read	44	97037	0
 jsondec	(*jsondec.Marker).Read	17	13296	0
 jsondec	(*jsondec.Spaces).Read	12	9297	0
+jsondec	(*os.File).Close	1	1681	0
 jsondec	(*os.File).Read	7	2017092	2
 jsondec	(jsondec.VR).Read	12	8082	0
 jsondec	encoding/json.Decode	36	455553	0
@@ -3439,6 +3441,7 @@ jsonenc	(*bytes.Buffer).Write	4	17003	0
 jsonenc	(*encoding/json.Encoder).Encode	23	140463	0
 jsonenc	(*jsonenc.Loop).Write	14	14003	0
 jsonenc	(*jsonenc.Server).Dump	38	65825	0
+jsonenc	(*os.File).Close	1	1681	0
 jsonenc	(*os.File).Write	3	18506	0
 jsonenc	(jsonenc.Leaf).Again	2	728	0
 jsonenc	(jsonenc.VW).Write	7	5238	0
@@ -3793,6 +3796,7 @@ loggervar	(*log.Logger).Print	1	5728	0
 loggervar	(*log.Logger).Printf	1	6882	0
 loggervar	(*log.Logger).Println	1	5728	0
 loggervar	(*loggervar.Tally).Write	17	17965	0
+loggervar	(*os.File).Close	1	1681	0
 loggervar	(*os.File).Write	3	18506	0
 loggervar	(loggervar.Echo).Write	1	513	0
 loggervar	io.Closer.Close	3	3885	0
@@ -4430,6 +4434,7 @@ originpathclient	originpathclient.WrapsPasses	11	3515	0
 originpathclient	originpathclient.WrapsSwitched	1	46	0
 os	(*sync.Mutex).Lock	1	1652	0
 os	(*sync.Mutex).Unlock	1	1611	0
+owns	(*os.File).Close	1	1681	0
 owns	(*os.File).Write	3	18506	0
 owns	(*owns.Box).Bounded	3	5504	0
 owns	(*owns.Box).Break	16	33421	0
@@ -4635,21 +4640,26 @@ pathstore	pathstore.spoil	6	1219	0
 pathstore	pathstore.the initialiser of e	0	0	0
 ptrstates	(*os.File).Close	5	11803	0
 ptrstates	(*ptrlib.Conn).Close	5	10267	0
-ptrstates	(*ptrstates.Outer).Close	15	17991	0
+ptrstates	(*ptrlib.Quiet).Close	1	1012	0
+ptrstates	(*ptrstates.Outer).Close	15	11447	0
 ptrstates	(*ptrstates.P).Close	15	17519	0
+ptrstates	(*ptrstates.Q).Close	6	3600	0
 ptrstates	io.Closer.Close	5	12999	0
 ptrstates	os.Open	16	63825	1
 ptrstates	ptrstates.AliasClosed	21	96513	0
 ptrstates	ptrstates.CloseFileKeepCloser	8	24028	0
 ptrstates	ptrstates.CloseOnce	26	119391	0
 ptrstates	ptrstates.ClosedBeforeConversion	36	138305	0
+ptrstates	ptrstates.ClosedGhost	3	193	0
 ptrstates	ptrstates.ClosedProject	29	91707	0
 ptrstates	ptrstates.ClosedThenReturned	16	31706	0
+ptrstates	ptrstates.ConvertQ	1	46	0
 ptrstates	ptrstates.CopyAfterClose	0	0	0
 ptrstates	ptrstates.FileClosedThenReturned	36	140093	0
 ptrstates	ptrstates.FirstField	1	46	0
 ptrstates	ptrstates.FromParam	21	81739	0
 ptrstates	ptrstates.FromParamOpen	21	88282	0
+ptrstates	ptrstates.HolderCopy	0	0	0
 ptrstates	ptrstates.LoopClose	44	173917	0
 ptrstates	ptrstates.NoSuchState	0	0	0
 ptrstates	ptrstates.OneOfTwo	24	158687	10
@@ -4657,6 +4667,8 @@ ptrstates	ptrstates.OpenAndConvert	52	236397	0
 ptrstates	ptrstates.OpenThenClose	51	205344	0
 ptrstates	ptrstates.PassesSame	23	93148	0
 ptrstates	ptrstates.PassesTwo	30	187297	10
+ptrstates	ptrstates.RangeCopies	0	0	0
+ptrstates	ptrstates.StillOpen	0	0	0
 ptrstates	ptrstates.StoreCopy	0	0	0
 ptrstates	ptrstates.TwoConns	35	151902	0
 ptrstates	ptrstates.TwoConversions	49	278456	1
@@ -4875,6 +4887,7 @@ sentinellib	sentinellib.the initialiser of ErrOdd	1	1103	0
 sentinellib	sentinellib.the initialiser of ErrShort	1	69	0
 sentinellib	sentinellib.the initialiser of errHidden	0	0	0
 sentinellib	sentinellib.the initialiser of oddFormat	0	0	0
+settled	(*os.File).Close	1	1681	0
 settled	(*os.File).Write	3	18506	0
 settled	bufio.NewWriter	1	9378	0
 settled	context.CancelFunc	3	255	0
@@ -5994,6 +6007,7 @@ varcode	varcode.warnListed	6	11222	0
 varcode	varcode.writeBad	2	1392	0
 varcode	varcode.writeGood	7	15251	0
 varcode	varcode.writesOther	10	8663	0
+varcodelib	(*os.File).Close	1	1681	0
 varcodelib	(*os.File).Write	3	18506	0
 varcodelib	io.Closer.Close	3	3885	0
 varcodelib	io.Writer.Write	3	7630	0
