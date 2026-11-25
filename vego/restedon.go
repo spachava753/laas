@@ -17,7 +17,11 @@ import (
 // delivers: a replacement that promises more breaks it.
 //
 // So a project entry for one of these keys must be the shipped entry
-// itself; its reason may differ, and nothing else (projectReplaces). Adding
+// itself; its reason may differ, and nothing else (projectReplaces). One
+// that differs is reported at its line of the trust file in every package
+// that reads the file, and the shipped entry is used in its place
+// (entryFor), so that no shipped entry rests on it unseen and no other
+// entry draws a defect from it (F11 and F12 of the review of S0). Adding
 // vouches alone, with each shipped wrapper saying which keys the errors of
 // its result are drawn from, is the way to let a project vouch for the
 // errors of Read and Write, and is not built (see the roadmap).
@@ -71,8 +75,8 @@ func projectReplaces(entry *trustEntry) string {
 		}
 		return strings.ReplaceAll(text, "\n", "; ")
 	}
-	return fmt.Sprintf("it replaces the shipped entry of %s, on which shipped entries rest (%s), and it differs from it; "+
+	return fmt.Sprintf("the entry of %s replaces the shipped entry, on which shipped entries rest (%s), and it differs from it; "+
 		"those entries are true only of values whose method meets the shipped entry, and of an entry that promises no more than the code they vouch for delivers, "+
-		"so a replacement must be the shipped entry itself, with a reason of its own; it says %s, and the shipped entry says %s",
+		"so a replacement must be the shipped entry itself, with a reason of its own, and the shipped entry is used in its place; it says %s, and the shipped entry says %s",
 		entry.key, resting, said(mine), said(theirs))
 }

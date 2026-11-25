@@ -1,7 +1,7 @@
 version: 1
 
 trusted:
-  (io.Closer).Close:
+  (io.Closer).Close: # // want `the entry of \(io.Closer\).Close replaces the shipped entry, on which shipped entries rest \(io.NopCloser vouches that the Close of its result meets it\), and it differs from it`
     reason: >-
       The bodies our callers pass are those of net/http, whose Close returns
       without panicking and writes nothing a caller can see, also when it is

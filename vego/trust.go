@@ -677,6 +677,13 @@ func (pv *pkgVerifier) loadTrust(explicit string) {
 	for _, problem := range pv.projectTrust.problems {
 		pv.report(pv.trustPos(pv.projectTrust, problem.line, 1), "%s", problem.msg)
 	}
+	// Whether or not this package looks the key up, shipped entries it
+	// uses may rest on it (F11 of the review of S0 of F35).
+	for _, key := range keys {
+		if why := projectReplaces(pv.projectTrust.entries[key]); why != "" {
+			pv.report(pv.trustPos(pv.projectTrust, pv.projectTrust.entries[key].line, 1), "%s", why)
+		}
+	}
 	visible := map[string]*types.Package{}
 	var visit func(pkg *types.Package)
 	visit = func(pkg *types.Package) {
@@ -769,7 +776,10 @@ func declares(pkg *types.Package, name string) bool {
 // project entry replaces a shipped one.
 func (pv *pkgVerifier) entryFor(key string) *trustEntry {
 	if pv.projectTrust != nil {
-		if entry := pv.projectTrust.entries[key]; entry != nil {
+		// A replacement of an entry that shipped entries rest on that
+		// differs from it is reported, and the shipped entry stands
+		// (restedon.go).
+		if entry := pv.projectTrust.entries[key]; entry != nil && projectReplaces(entry) == "" {
 			return entry
 		}
 	}

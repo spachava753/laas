@@ -1,0 +1,10 @@
+version: 1
+
+# A replacement of (io.Reader).Read alone, which says nothing of n (F11 and
+# F12 of the review of S0 of F35).
+trusted:
+  (io.Reader).Read: # // want `the entry of \(io.Reader\).Read replaces the shipped entry, on which shipped entries rest \(bufio.NewScanner keeps a reader whose Read the Scanner calls\), and it differs from it; .* it says receiver r; requires \|p\| > 0; modifies r; modifies p, and the shipped entry says receiver r; requires \|p\| > 0; ensures 0 <= n And n <= \|p\|; modifies r; modifies p`
+    reason: The project's weaker reading of io.Reader, which says nothing of n.
+    receiver: r
+    requires: ["|p| > 0"]
+    modifies: [r, p]

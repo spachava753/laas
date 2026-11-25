@@ -237,7 +237,7 @@ func TestAnalyzer(t *testing.T) {
 	})
 	// Modules that replace shipped entries other shipped entries rest on,
 	// by the same entry and by ones that differ (S0 of F35).
-	for _, root := range []string{"replaceda", "replacedb"} {
+	for _, root := range []string{"replaceda", "replacedb", "replacedc"} {
 		t.Run("replaces rested-on entries in "+root, func(t *testing.T) {
 			parallel(t)
 			runCorpus(t, newAnalyzer(), root)

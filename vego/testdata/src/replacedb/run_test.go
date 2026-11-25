@@ -16,6 +16,18 @@ func TestFlushesPanics(t *testing.T) {
 	_ = Flushes()
 }
 
+// TestFlushesParamPanics shows what the replacement of Write, resting
+// unseen under the shipped (*bufio.Writer).Write, would have let through: a
+// writer that meets the replacement makes FlushesParam panic.
+func TestFlushesParamPanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("FlushesParam returned; the run should show the panic the replacement allows")
+		}
+	}()
+	_ = FlushesParam(Over{})
+}
+
 var on bool
 
 // flip is an error whose Is answers differently each time.

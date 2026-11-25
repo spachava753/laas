@@ -8235,7 +8235,7 @@ that a contract vouches for, or one that holds a value of a type whose errors ha
 origin, can be formatted
 ```
 
-No trust file can give such an error a known origin, as described in [The errors of Read and Write](#the-errors-of-read-and-write). Return it as it is, as `PrintLines` does.
+The shipped entries give it no known origin. Return it as it is, as `PrintLines` does.
 
 #### Writing through a buffer
 
@@ -8821,17 +8821,17 @@ func Load(r io.Reader, buf []byte) (n int, err error) {
 }
 ```
 
-A trust file cannot give these errors a known origin. Other shipped entries rest on the entries of `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, and the methods of `net/http.ResponseWriter`, in two ways. Some call the method on what they are handed, as `(*bufio.Writer).Write` calls `Write` of the writer it keeps. Their claims hold only of a value whose method meets the shipped entry. Others vouch that a value they return meets the entry, as `io.TeeReader` vouches for the `Read` of what it returns. Their claims hold only of an entry that promises no more than their code delivers. The `Read` of a tee returns the errors of its writer's `Write`, so an entry for `Read` that vouches for its errors would make the claim of `TeeReader` false. So an entry in your trust file for one of these keys must be the shipped entry itself, with a reason of your own. Any other entry is reported where it is used:
+A trust file cannot give these errors a known origin. Other shipped entries rest on the entries of `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, and the methods of `net/http.ResponseWriter`, in two ways. Some call the method on what they are handed, as `(*bufio.Writer).Write` calls `Write` of the writer it keeps. Their claims hold only of a value whose method meets the shipped entry. Others vouch that a value they return meets the entry, as `io.TeeReader` vouches for the `Read` of what it returns. Their claims hold only of an entry that promises no more than their code delivers. The `Read` of a tee returns the errors of its writer's `Write`, so an entry for `Read` that vouches for its errors would make the claim of `TeeReader` false. So an entry in your trust file for one of these keys must be the shipped entry itself, with a reason of your own. Any other entry is reported at its line of the trust file, in every package that reads the file, and the shipped entry is used in its place:
 
 ```text
-vego: the trusted contract of (io.Reader).Read (vego-trusted.yaml:17) cannot be used: it replaces
-the shipped entry of (io.Reader).Read, on which shipped entries rest (bufio.NewScanner keeps a
-reader whose Read the Scanner calls), and it differs from it; those entries are true only of
-values whose method meets the shipped entry, and of an entry that promises no more than the code
-they vouch for delivers, so a replacement must be the shipped entry itself, with a reason of its
-own; it says receiver r; requires |p| > 0; ensures 0 <= n And n <= |p|; modifies r; modifies p;
-vouches err, and the shipped entry says receiver r; requires |p| > 0; ensures 0 <= n And n <=
-|p|; modifies r; modifies p
+vego-trusted.yaml:17:1: vego: the entry of (io.Reader).Read replaces the shipped entry, on which
+shipped entries rest (bufio.NewScanner keeps a reader whose Read the Scanner calls), and it
+differs from it; those entries are true only of values whose method meets the shipped entry, and
+of an entry that promises no more than the code they vouch for delivers, so a replacement must be
+the shipped entry itself, with a reason of its own, and the shipped entry is used in its place; it
+says receiver r; requires |p| > 0; ensures 0 <= n And n <= |p|; modifies r; modifies p; vouches
+err, and the shipped entry says receiver r; requires |p| > 0; ensures 0 <= n And n <= |p|;
+modifies r; modifies p
 ```
 
 A trust file also cannot declare a state on an interface whose methods have shipped entries, since the state would change what those entries cover.
@@ -9129,7 +9129,7 @@ This table lists the most common messages.
 | `F is called with E = T, and F may run the method ..., which a value of that type reaches; ... asserts: {E: []}` | The entry of the generic function does not claim that it runs no method of its type argument. | If the function runs none, add the claim to its entry. See [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function). |
 | `the trusted contract of F cannot be true of this call` | The contract contradicts what is known at the call. | The entry is wrong, or it needs a `requires` clause. |
 | `the trusted contract ... cannot be used` | The entry in the trust file is invalid. The message says why. | Fix the entry. Check the parameter names. |
-| `the trusted contract of (io.Reader).Read (f.yaml:n) cannot be used: it replaces the shipped entry of (io.Reader).Read, on which shipped entries rest (...), and it differs from it; ...` | Your trust file replaces the shipped entry of a method that other shipped entries rest on, and says something else. The message quotes both entries. | Make the entry the shipped entry, with a reason of your own, or remove it. See [The errors of Read and Write](#the-errors-of-read-and-write). |
+| `the entry of (io.Reader).Read replaces the shipped entry, on which shipped entries rest (...), and it differs from it; ...` | Your trust file replaces the shipped entry of a method that other shipped entries rest on, and says something else. The shipped entry is used in its place. The message quotes both entries. | Make the entry the shipped entry, with a reason of your own, or remove it. See [The errors of Read and Write](#the-errors-of-read-and-write). |
 | `..., in the function literal called at f.go:n:c`, or `..., in the function literal deferred at f.go:n:c and run at the return at f.go:n:c` (or `at the end of the function at`, or `at the end of the function literal at`) | The problem is in the body of a function literal, at the call named at the end. For a deferred literal, the message names the `defer` statement and where the literal runs. | Fix the body, or what holds at that call. See [Function literals](#function-literals). |
 | `cannot verify F: the function literal is used as a value of type T, which has no contract` | The literal is passed, returned, or stored as a value of a function type that has no contract. | Declare a named function type with a contract and use it there. |
 | `the function value f may be nil` | A call through `f` is not proved to have a value to call. | Add `f != nil` to the `Requires` clauses, or check `f` before the call. |

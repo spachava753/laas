@@ -9,12 +9,12 @@ state:
       reason: True once Read has returned io.EOF.
 
 trusted:
-  (io.Writer).Write:
+  (io.Writer).Write: # // want `the entry of \(io.Writer\).Write replaces the shipped entry, on which shipped entries rest \(\(\*bufio.Writer\).Write calls it on the writer it keeps\), and it differs from it`
     reason: The project's weaker reading of io.Writer, which says nothing of n.
     receiver: w
     modifies: [w]
 
-  (io.Reader).Read:
+  (io.Reader).Read: # // want `the entry of \(io.Reader\).Read replaces the shipped entry`
     reason: >-
       The corpus's replacement before S0 of F35, which vouches for the
       errors of Read.

@@ -75,11 +75,6 @@ func (pv *pkgVerifier) typeEntry(key string, obj *types.Func, methodOf *types.Fu
 		}
 	}
 	pv.readEntry(fn, entry)
-	// Shipped entries rest on some type entries, which a project may
-	// therefore not change (restedon.go).
-	if why := projectReplaces(entry); why != "" {
-		fn.defect("%s", why)
-	}
 	// A contract names its receiver to speak of its states, to say that
 	// the method writes behind it, or to place a result within it, as one
 	// in source does (checkReceivers).

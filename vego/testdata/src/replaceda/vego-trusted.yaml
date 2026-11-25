@@ -12,7 +12,7 @@ trusted:
       - "0 <= n And n <= |p|"
       - "n < |p| -> err != nil"
 
-  (io.Reader).Read:
+  (io.Reader).Read: # // want `the entry of \(io.Reader\).Read replaces the shipped entry, on which shipped entries rest \(bufio.NewScanner keeps a reader whose Read the Scanner calls\), and it differs from it`
     reason: >-
       The project's readers fill the buffer unless they fail. This promises
       more than the shipped entry, and asks no more.
