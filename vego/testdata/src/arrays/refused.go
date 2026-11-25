@@ -88,7 +88,7 @@ func (a ArrayError) Error() (s string) { return "array" }
 
 // @Ensures True
 func ToError() (err error) {
-	return ArrayError{1, 2} // want `cannot verify ToError: converting a arrays.ArrayError to an error is not supported: an interface value or an error cannot hold an array yet`
+	return ArrayError{1, 2} // want `cannot verify ToError: converting an ArrayError to an error is not supported: an interface value or an error cannot hold an array yet`
 }
 
 // @Requires x != nil
@@ -147,7 +147,7 @@ func Pointer() (r int) {
 
 // @Ensures True
 func Grid() (r int) {
-	var g [4][4]int // want `cannot verify Grid: g has unsupported type \[4\]\[4\]int; \[4\]\[4\]int is an array of \[4\]int, and only arrays of numbers and booleans are supported yet; use a slice of \[4\]int instead`
+	var g [4][4]int // want `cannot verify Grid: g has unsupported type \[4\]\[4\]int; \[4\]\[4\]int is an array of \[4\]int, and only arrays of numbers and booleans are supported yet; use one array of 16 elements indexed i\*4 \+ j, or a slice of slices, instead`
 	return g[1][2]
 }
 
@@ -182,4 +182,23 @@ func WriteTable() {
 // @Ensures True
 func ReadTable() (r int) {
 	return table[1] // want `cannot verify ReadTable: table is assigned at refused.go:\d+; package-level arrays that are changed are not supported yet`
+}
+
+// No slice of *int can be read either, so the message offers none.
+//
+// @Ensures True
+func Pointers() (r int) {
+	var ps [2]*int // want `cannot verify Pointers: ps has unsupported type \[2\]\*int; \[2\]\*int is an array of \*int, and only arrays of numbers and booleans are supported yet$`
+	return len(ps)
+}
+
+// A switch on an array is not supported; == is.
+//
+// @Ensures True
+func Switch2(a [2]int) (r int) {
+	switch a { // want `cannot verify Switch2: a switch on an array of type \[2\]int is not supported yet; compare the array with == in an if`
+	case [2]int{1, 2}:
+		return 1
+	}
+	return 0
 }

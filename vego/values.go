@@ -123,10 +123,32 @@ func arrayHint(t types.Type) string {
 		}
 	case *types.Array:
 		if _, plain := plainElem(u.Elem()); !plain && u.Len() != 0 {
-			return fmt.Sprintf("; %s is an array of %s, and only arrays of numbers and booleans are supported yet; use a slice of %s instead", t, u.Elem(), u.Elem())
+			instead := ""
+			switch elem := u.Elem(); {
+			case isArray(elem):
+				// A slice of arrays cannot be indexed either.
+				instead = fmt.Sprintf("; use one array of %d elements indexed i*%d + j, or a slice of slices, instead", u.Len()*arrayLen(elem), arrayLen(elem))
+			case readableElem(elem):
+				instead = fmt.Sprintf("; use a slice of %s instead", elem)
+			}
+			return fmt.Sprintf("; %s is an array of %s, and only arrays of numbers and booleans are supported yet%s", t, u.Elem(), instead)
 		}
 	}
 	return ""
+}
+
+// readableElem reports whether the elements of a slice of the type can be
+// read: the type is modelled as an element, and a pointer in it points to
+// a struct.
+func readableElem(t types.Type) bool {
+	if _, ok := elemLayout(t); !ok {
+		return false
+	}
+	if _, isPointer := t.Underlying().(*types.Pointer); isPointer {
+		_, ok := pointee(t)
+		return ok
+	}
+	return true
 }
 
 // arrayField returns the field at any depth through which a type holds an

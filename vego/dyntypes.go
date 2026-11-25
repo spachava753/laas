@@ -314,6 +314,9 @@ func capturesValue(layout []leaf) bool {
 // gives, and states what it holds; see canonicalError and noteHeld.
 func (v *fnVerifier) typedError(e ast.Expr, from types.Type, val value, st *state, guard []*logic.Term) *logic.Term {
 	layout, _ := layoutOf(from)
+	if _, ok := layoutOf(from); ok && holdsArrayValue(from) {
+		v.unsupported(e.Pos(), fmt.Sprintf("converting %s %s to an error is not supported: %s", article(v.shown(from)), v.shown(from), heldReason(from)))
+	}
 	if why := heldReason(from); why != "" {
 		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to an error is not supported: %s", from, why))
 	}

@@ -57,6 +57,14 @@ VEGO_386=1 go test ./vego -run TestMIME386 -count=1
 
 It runs each shape in a 4G scope of its own, under 1 GB each, one after another. Run it after any change to that entry, and on a new toolchain.
 
+The entry of `hex.EncodeToString` requires `2 * |src| <= MaxInt`, since `EncodedLen` wraps on a 32-bit target at `1 << 30` bytes. `go test` evaluates the requires at that edge with the sizes of `GOARCH=386` (`TestEncodedLenEdge`); the edge against the runtime is run only when asked:
+
+```sh
+VEGO_386=1 go test ./vego -run TestHex386 -count=1
+```
+
+It runs a 386 helper in a 4G scope of its own, up to about 3 GB, twice. Run it after any change to that entry, and on a new toolchain.
+
 `laas` must be built by a Go that is at least as new as the `go` command it finds when it runs. `go run` builds it with that same `go`, so the command above works on any toolchain. A `laas` binary built earlier by an older Go fails with errors about the standard library; rebuild it, or set `GOTOOLCHAIN` to the version that built it.
 
 ## Documentation

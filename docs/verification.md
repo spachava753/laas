@@ -3124,6 +3124,7 @@ These are not supported yet either, each with a message that names it:
 - an array or a value that holds one in an interface value or an error, an assertion or a type switch to such a type, and `errors.As` with such a target;
 - a function type or a method of an interface whose parameters or results hold an array;
 - formatting an array with `fmt`; format a slice of it, as in `h[:]`;
+- a `switch` on an array; compare the array with `==` in an `if`;
 - an array as a key or as the value of a map;
 - a package-level array that is changed or sliced;
 - a type that holds an array and is larger than one allocation can be on the target, which Go compiles and then cannot make.
@@ -9453,7 +9454,7 @@ This table lists the most common messages.
 | `postcondition may not hold: P, in A.M used as B.M at ...` | The contract of the method of `A` does not imply that of `B`, or the method of a value you converted does not meet the contract of the interface. | Strengthen the contract of `A.M`, or weaken that of `B.M`. |
 | `index may be out of range` | The index is not proved to be in range. | Add a `Requires` clause or an invariant that bounds the index. |
 | `the conversion may panic: p may be shorter than [4]byte` | `[4]byte(p)` is not proved to have enough elements to copy. | Add a `Requires` clause that bounds `\|p\|`. See [Arrays](#arrays). |
-| `cannot verify F: x has unsupported type [2]string; [2]string is an array of string, and only arrays of numbers and booleans are supported yet; ...` | An array of another element type. | Use a slice, as the message says. See [What arrays do not support yet](#what-arrays-do-not-support-yet). |
+| `cannot verify F: x has unsupported type [2]string; [2]string is an array of string, and only arrays of numbers and booleans are supported yet; ...` | An array of another element type. | Use what the message suggests: a slice of the element type, or for an array of arrays one array indexed `i*N + j`. See [What arrays do not support yet](#what-arrays-do-not-support-yet). |
 | `addition may overflow int`, and similar | The result is not proved to fit its type. | Bound the inputs, or rearrange the expression. |
 | `loop invariant may not hold on entry` | The invariant is not proved before the first iteration. It is usually false there. | Fix the invariant or the code before the loop. |
 | `loop invariant may not be preserved` | An iteration may break the invariant, or the invariant is too weak. | Add the clause that the invariant depends on. |

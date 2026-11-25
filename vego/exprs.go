@@ -659,6 +659,11 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) v
 			v.unsupported(e.Pos(), "cap of a map is not supported")
 		case isString(v.info.TypeOf(e.Args[0])):
 			return value{logic.Len(operand[0])}
+		case isArray(v.info.TypeOf(e.Args[0])):
+			// An operand that Go does not fold, as one with a call, is
+			// evaluated for what it calls and checks; its length is the
+			// array's, also as its capacity.
+			return value{logic.IntLit(arrayLen(v.info.TypeOf(e.Args[0])))}
 		case builtin("len"):
 			return value{operand[2]}
 		}

@@ -172,3 +172,46 @@ func ZeroSlice() (r bool) {
 	var z [0]byte
 	return z[:] != nil
 }
+
+// mk makes an array, for a positive x.
+//
+// @Requires x > 0
+// @Ensures r[0] = x
+func mk(x int) (r [4]int) {
+	r[0] = x
+	return r
+}
+
+// len and cap of an array that a call returns call it.
+//
+// @Requires x > 0
+// @Ensures r = 4 And s = 4
+func LenOfCall(x int) (r, s int) {
+	return len(mk(x)), cap(mk(x))
+}
+
+// A range over a call with no value variable calls it.
+//
+// @Requires x > 0
+// @Ensures r = 4
+func RangeOverCall(x int) (r int) {
+	// @Invariant 0 <= i <= 4
+	// @Invariant r = i
+	for i := range mk(x) {
+		_ = i
+		r++
+	}
+	return r
+}
+
+// The first and the last element of an array in memory after a copy from
+// another one.
+//
+// @Ensures r = 1 And s = 2
+func CopyEnds() (r, s int) {
+	a := [2]int{1, 2}
+	b := [2]int{0, 0}
+	_, _ = peekInts(a[:]), peekInts(b[:])
+	b = a
+	return b[0], b[1]
+}

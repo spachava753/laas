@@ -324,3 +324,55 @@ func StoreEdgeBoxed(i int) {
 	_ = peek(buf[:])
 	buf[i] = 1 // want `index may be out of range`
 }
+
+// len and cap of an array that a call returns call it, so its
+// precondition must hold (F11 of the review of S1).
+//
+// @Ensures r = 4
+func LenOfCallWrong(x int) (r int) {
+	return len(mk(x)) // want `precondition of mk may not hold: x > 0`
+}
+
+// @Ensures r = 4
+func CapOfCallWrong(x int) (r int) {
+	return cap(mk(x)) // want `precondition of mk may not hold: x > 0`
+}
+
+// A range over a call with no value variable calls it (F13).
+//
+// @Ensures True
+func RangeOverCallWrong(x int) (r int) {
+	for i := range mk(x) { // want `precondition of mk may not hold: x > 0`
+		_ = i
+	}
+	return 0
+}
+
+// The copy writes the last element too (F12).
+//
+// @Ensures r = 0
+func CopyLastWrong() (r int) {
+	a := [2]int{1, 2}
+	b := [2]int{0, 0}
+	_, _ = peekInts(a[:]), peekInts(b[:])
+	b = a
+	return b[1] // want `postcondition may not hold: r = 0`
+}
+
+// @Ensures r = 0
+func CopyFirstWrong() (r int) {
+	a := [2]int{1, 2}
+	b := [2]int{0, 0}
+	_, _ = peekInts(a[:]), peekInts(b[:])
+	b = a
+	return b[0] // want `postcondition may not hold: r = 0`
+}
+
+// @Ensures False
+func CopyLastFalse() {
+	a := [2]int{1, 2}
+	b := [2]int{0, 0}
+	_, _ = peekInts(a[:]), peekInts(b[:])
+	b = a
+	_ = b[1]
+} // want `postcondition may not hold: False`

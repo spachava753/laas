@@ -1155,6 +1155,9 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 		return
 	}
 	var tag *logic.Term
+	if s.Tag != nil && isArray(v.info.TypeOf(s.Tag)) {
+		v.unsupported(s.Tag.Pos(), fmt.Sprintf("a switch on an array of type %s is not supported yet; compare the array with == in an if", v.info.TypeOf(s.Tag)))
+	}
 	if s.Tag != nil {
 		// Where the tag or a case is an interface and the other is not,
 		// Go converts the other one to compare them. What cannot be
