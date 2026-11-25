@@ -73,6 +73,9 @@ type epoch struct {
 	before  memory
 	bound   *logic.Term
 	targets []target
+	// by names the call that started it, for the message of a state that
+	// a check finds unknown after it (F20 of the review of S2 of F35).
+	by string
 	// join is set for an epoch that a join of the ends of a function
 	// literal made: each end's memory, which joined chooses between.
 	ends   []memory
@@ -138,7 +141,7 @@ func (v *fnVerifier) materialize(name string, sort logic.Sort) {
 // region itself is not part of it; see grow.
 func (v *fnVerifier) startEpoch(st *state, bound *logic.Term, targets []target) {
 	e := v.fresh("epoch", logic.Int)
-	v.epochs[e.Name] = &epoch{before: st.mem, bound: bound, targets: targets}
+	v.epochs[e.Name] = &epoch{before: st.mem, bound: bound, targets: targets, by: v.epochBy}
 	mem := memory{epochKey: e}
 	if rows, ok := st.mem[footprintRegion]; ok {
 		mem[footprintRegion] = rows

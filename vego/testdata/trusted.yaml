@@ -1328,6 +1328,30 @@ trusted:
       w: [io.StringWriter]
     modifies: [w]
     vouches: [w]
+  guide.closeAll:
+    reason: The entry the guide shows refused, of behind over an io.WriteCloser.
+    requires: ["wc != nil"]
+    runs: [wc]
+    asserts:
+      wc: []
+    modifies: ["behind(wc)"]
+    vouches: [wc]
+  optionalio.closeAll:
+    reason: A test of behind over a parameter whose type has states, which an entry cannot claim.
+    requires: ["wc != nil"]
+    runs: [wc]
+    asserts:
+      wc: []
+    modifies: ["behind(wc)"]
+    vouches: [wc]
+  guide.shutWriter:
+    reason: A false entry, for the guide; the function closes what it is handed by an assertion it does not list.
+    requires: ["w != nil"]
+    runs: [w]
+    asserts:
+      w: []
+    modifies: ["behind(w)"]
+    vouches: [w]
   optional.putLit:
     reason: A test of an entry that lists an interface literal with the methods of io.StringWriter.
     requires: ["w != nil"]

@@ -72,7 +72,7 @@ trusted:
       - "w != nil"
     runs: [w]
     formats: [format, a]
-    modifies: [w]
+    modifies: ["behind(w)"]
     vouches: [w]
     # Read from the source of Go 1.27: Fprintf calls only w.Write.
     # Read from the source of Go 1.26.6 and 1.27.3: Fprintf formats into a
@@ -92,7 +92,7 @@ trusted:
       - "w != nil"
     runs: [w]
     formats: [a]
-    modifies: [w]
+    modifies: ["behind(w)"]
     vouches: [w]
     # Read from the source of Go 1.27: Fprint calls only w.Write.
     # Read from the source of Go 1.26.6 and 1.27.3: Fprint formats into a
@@ -112,7 +112,7 @@ trusted:
       - "w != nil"
     runs: [w]
     formats: [a]
-    modifies: [w]
+    modifies: ["behind(w)"]
     vouches: [w]
     # Read from the source of Go 1.27: Fprintln calls only w.Write.
     # Read from the source of Go 1.26.6 and 1.27.3: Fprintln formats into a

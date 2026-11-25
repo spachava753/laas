@@ -134,7 +134,7 @@ trusted:
     requires:
       - "w != nil"
     runs: [w]
-    modifies: [w]
+    modifies: ["behind(w)"]
     vouches: [w]
     # Read from the source of Go 1.26.6 and 1.27.3: WriteString asserts w
     # to StringWriter and calls its WriteString once, or calls w.Write once

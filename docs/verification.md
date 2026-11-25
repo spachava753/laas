@@ -1484,7 +1484,11 @@ func RecordThenClose(r Recorder, c io.Closer) {
 ```
 
 ```text
-vego: precondition of c.Close may not hold: ~closed(c)
+vego: precondition of c.Close may not hold: ~closed(c); the state may have been changed by r.Record at
+footprints.go:66:2, which writes through what it is handed or what a value it is handed keeps, and nothing says
+that what it writes through is not this value, so its states count as those of another value, which a write may
+change; close or use the value only where nothing was written through what keeps it since its state was known,
+or write to the value itself
 ```
 
 A method of an interface with states whose contract lists only its receiver changes the states of the value and nothing else, as described in [Declaring a state on an interface of your own](#declaring-a-state-on-an-interface-of-your-own). Such a method writes behind its receiver too when its `Modifies` also lists `behind(r)`, as the shipped `(io.Closer).Close` does. An interface with states can also have a method that writes behind its receiver from an interface without states that it embeds. Such a method keeps the states of the value it is called on.
@@ -2208,6 +2212,89 @@ func FirstByte(name string) (b byte, err error) {
 ```
 
 `FirstByte` needs no `Modifies` for `rc`, because a value that the call created is not memory that a caller can see. Without `fresh(rc)`, `rc` may hold a value that the caller holds, and closing it is reported as a change that `FirstByte` may not make. The result is listed under `vouches`, which claims that its methods meet their contracts. See [Function values and interface values that a trusted function returns](#function-values-and-interface-values-that-a-trusted-function-returns).
+
+#### Functions that write through what they are handed
+
+Some shipped functions write through the value they are handed and never change its states. `io.WriteString` and the functions of `fmt` that print to a writer are among them. After such a call, a value that was not closed is still not closed:
+
+```go
+// @Requires wc != nil And ~closed(wc)
+// @Modifies wc
+// @Ensures closed(wc')
+func WriteThenClose(wc io.WriteCloser, s string) (err error) {
+	_, _ = io.WriteString(wc, s)
+	return wc.Close()
+}
+```
+
+The shipped entries of these functions list `behind(w)` in `modifies`. In the entry of a function, `behind(w)` claims that the function writes only the footprint of what `w` holds, the memory its methods may write, and changes none of its states. The functions with such an entry are `io.WriteString`, `fmt.Fprint`, `fmt.Fprintf`, `fmt.Fprintln`, `net/http.Error`, and `net/http.NotFound`. A function whose entry lists `w` itself may change every state of what `w` holds.
+
+A value that keeps the writer, such as a `bufio.Writer`, writes through it later. `vego` does not know which value a `bufio.Writer` keeps. So a call that writes through the `bufio.Writer` may change the state of any value with states that its writer may reach, `wc` among them:
+
+```go
+// @Requires wc != nil And ~closed(wc)
+// @Modifies wc
+// @Ensures True
+func BufferThenClose(wc io.WriteCloser, s string) (err error) {
+	bw := bufio.NewWriter(wc)
+	_, _ = bw.WriteString(s)
+	_ = bw.Flush()
+	return wc.Close()
+}
+```
+
+```text
+vego: precondition of wc.Close may not hold: ~closed(c); the state may have been changed by WriteString at
+behind.go:24:9, which writes through what it is handed or what a value it is handed keeps, and nothing says
+that what it writes through is not this value, so its states count as those of another value, which a write
+may change; close or use the value only where nothing was written through what keeps it since its state was
+known, or write to the value itself
+```
+
+The same holds after a write through a `log.Logger`, a read through a `bufio.Scanner`, and a call through the result of `io.LimitReader` or `io.MultiWriter`. The message names the latest call before which the state was known. It names no call whose contract lists the value itself, since such a call may change its state directly. To close the value, write to it directly, as `WriteThenClose` does.
+
+A trusted function of your own can list `behind(w)` in its entry only when the type of `w` has no states. Its entry must also list `w` under `runs`. An entry that lists `behind(wc)` for an `io.WriteCloser` is refused at each call:
+
+```yaml
+  example.com/files.closeAll:
+    reason: closeAll closes wc.
+    requires: ["wc != nil"]
+    runs: [wc]
+    asserts:
+      wc: []
+    modifies: ["behind(wc)"]
+    vouches: [wc]
+```
+
+```text
+vego: the trusted contract of guide.closeAll (trusted.yaml:1331) cannot be used: in its modifies
+"behind(wc)": behind(wc) claims that the function changes no state of what wc holds, and io.WriteCloser has
+states, which its methods change; list wc itself
+```
+
+For a parameter whose type has no states, such as an `io.Writer`, the claim is about the value the caller passes, which may have states. `vego` cannot check that claim against the code of the function. This entry is false:
+
+```go
+// shutWriter closes what it is handed, by a type assertion that its entry does not list.
+func shutWriter(w io.Writer) {
+	if c, ok := w.(io.Closer); ok {
+		c.Close()
+	}
+}
+```
+
+```yaml
+  example.com/files.shutWriter:
+    reason: shutWriter writes nothing but what w writes.
+    requires: ["w != nil"]
+    runs: [w]
+    asserts:
+      w: []
+    modifies: ["behind(w)"]
+    vouches: [w]
+```
+
+Under it, a function that calls `shutWriter(wc)` and then `wc.Close()` is proved, and at run time it closes `wc` twice. The entry is false because `shutWriter` calls `Close` on what it finds by a type assertion. Its `asserts` lists nothing for `w`, so the entry also claims that `shutWriter` finds nothing on `w`. List `behind(w)` only for a function that calls no method that changes a state, such as `Close`, on what it is handed or on what it finds there. The harnesses of the shipped entries that list `behind(w)` hand each function values whose `Close` fails the test.
 
 #### Declaring a state on an interface of your own
 
@@ -7322,7 +7409,7 @@ Each entry has these fields:
 | --- | --- | --- |
 | key | yes | The full name of the function as Go prints it, such as `sort.Ints`, `example.com/pkg.Func`, or `(*bytes.Buffer).Len`. For a method of an interface or a function type of another module, the method or the type, such as `(io.Writer).Write` or `context.CancelFunc`; see [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages). |
 | `reason` | yes | Why you believe the contract. |
-| `modifies` | yes | What the function may write, in the form of a `Modifies` clause. `[x]` is the elements of slice `x`, `[b]` is the struct `b` points to, and `[b.count]` is one field. For an interface value, `[r]` is every state of what `r` holds, for an `io.Reader` or an `any` too. Write `modifies: []` if it writes nothing a caller can see and changes no state of an interface value. |
+| `modifies` | yes | What the function may write, in the form of a `Modifies` clause. `[x]` is the elements of slice `x`, `[b]` is the struct `b` points to, and `[b.count]` is one field. For an interface value, `[r]` is every state of what `r` holds, for an `io.Reader` or an `any` too. Write `modifies: []` if it writes nothing a caller can see and changes no state of an interface value. For a parameter `w` under `runs` whose type has no states, `["behind(w)"]` is the footprint of what `w` holds and none of its states. See [Functions that write through what they are handed](#functions-that-write-through-what-they-are-handed). |
 | `receiver` | no | For a method of an interface, the name that the contract uses for the value the method is called on. See [States of interface values](#states-of-interface-values). |
 | `requires` | no | A list of formulas. Callers must prove each one. |
 | `ensures` | no | A list of formulas. Callers can assume each one. |
@@ -9324,6 +9411,8 @@ This table lists the most common messages.
 | `cannot verify F: Go converts a value to an interface type here, and which expression it converts could not be told` | A value without an expression of its own, such as one result of a call with several, is converted to an interface. | Assign the value to a variable of its own type first. |
 | `cannot verify F: f holds a function literal and is used here other than by calling it` | The variable that holds the literal is passed, compared, or assigned again. | Only call the variable. |
 | `precondition of c.Close may not hold: ~closed(c)` | The value may have been closed already, by an earlier `Close` or by the caller. | Add `~closed(c)` to the `Requires` clauses, and close each value once. See [States of interface values](#states-of-interface-values). |
+| `precondition of wc.Close may not hold: ~closed(c); the state may have been changed by WriteString at ..., which writes through what it is handed or what a value it is handed keeps, ...` | A call wrote through a value that keeps a writer, such as a `bufio.Writer`, since the state of `wc` was known. `vego` does not know which value it keeps. | Close or use `wc` only where nothing was written through what keeps it since its state was known, or write to `wc` directly. See [Functions that write through what they are handed](#functions-that-write-through-what-they-are-handed). |
+| `... in its modifies "behind(wc)": behind(wc) claims that the function changes no state of what wc holds, and io.WriteCloser has states, which its methods change; list wc itself` | The entry of a trusted function lists `behind` of a parameter whose type has states. | List `wc` itself in `modifies`. |
 | `the interface values passed to F as a and b may share their states` | `F` lists one of the two in `Modifies`, and they may be one value or hold one value. | Pass two interface parameters of your own function whose contract lists one of them, or a value that a call created with `fresh`. |
 | `... covers the states of what the interface value p.f holds, not the place that holds it; to assign it, list the struct that holds it` | `Modifies p.f` for an interface field does not cover the field. | List `p` in `Modifies`. |
 | `x has type T, which has no states` | A formula or a `Modifies` entry speaks of a state of an interface value whose type has none. | Name a state that the type has, or declare one. A `Modifies` entry for an interface value without states covers nothing; to assign it, list what holds it. |
@@ -9575,6 +9664,7 @@ Results are referred to by the names in the function's signature.
 | `Modifies g[from][to]` | the entry `to` of the map held under `from` |
 | `Modifies rc`, `Modifies p.f` | if `rc` or `f` is an interface value: every state of what it holds and, when its methods write behind their receiver, its footprint, the memory they may write; not the variable or the field; a function value field is the field itself |
 | `Modifies r, behind(r)` | in the contract of a method of an interface with states: `r` alone is the states of the receiver and nothing else, and `behind(r)` its footprint, the memory its methods may write |
+| `modifies: ["behind(w)"]` | in the entry of a trusted function, for a parameter `w` under `runs` whose type has no states: the footprint of what `w` holds, and none of its states; see [Functions that write through what they are handed](#functions-that-write-through-what-they-are-handed) |
 | `Modifies bw` | for a `*bufio.Writer`, `*bufio.Reader`, `*bufio.Scanner`, `*log.Logger`, `*bytes.Buffer`, or `*strings.Builder`: the struct and the memory it owns |
 | `Modifies p`, `Modifies p.out`, `Modifies bs[0]` | for a pointer to a struct that holds a `strings.Builder` or a `bytes.Buffer` by value, a path to one, or an element of a slice of them: also the memory the buffer owns; `Modifies bs` does not cover what the elements own |
 | `Modifies p` | for a pointer to a struct that declares `@Owns`: also what it owns, the array of an owned slice up to its capacity, an owned map, an owned struct with what it owns, and the footprint and states of an owned interface value |

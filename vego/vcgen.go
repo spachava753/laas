@@ -294,6 +294,11 @@ type fnVerifier struct {
 	// inInitialiser is set while an initialiser of a package-level
 	// variable is run as code (initcalls.go).
 	inInitialiser bool
+	// epochBy names the call whose targets are being forgotten, and
+	// stateNote ends the message of a check that fails while it is set;
+	// see stateHint.
+	epochBy   string
+	stateNote func(st *state, guard []*logic.Term, conjunct *logic.Term) string
 	// initFailed is set when such a run reported a call outside its
 	// Requires.
 	initFailed bool
@@ -855,6 +860,11 @@ func (v *fnVerifier) answered(st *state, guard []*logic.Term, conjunct *logic.Te
 		lost := ""
 		for _, note := range v.lostContents {
 			lost += "; " + note
+		}
+		if note := v.stateNote; note != nil {
+			v.stateNote = nil
+			lost += note(st, guard, conjunct)
+			v.stateNote = note
 		}
 		if f := v.explaining; f != nil {
 			v.explaining = nil

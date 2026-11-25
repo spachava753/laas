@@ -226,3 +226,45 @@ func TestProjectReplaces(t *testing.T) {
 		t.Errorf("a replacement of an entry nothing rests on: %q", why)
 	}
 }
+
+// TestBehindParams holds the claim of behind(p) in a function entry (F20
+// of the review of S2 of F35): that the function writes the footprint of
+// what p holds and changes none of its states. Each shipped entry that
+// makes it lists p under runs, and its harness, named in probedBy, hands
+// it probes that refuse Close and every other method the entry does not
+// declare, so a function that closed what it is handed would fail there.
+func TestBehindParams(t *testing.T) {
+	parallel(t)
+	found := 0
+	for _, file := range shippedContracts() {
+		for key, entry := range file.entries {
+			if strings.HasPrefix(key, "(") && !strings.HasPrefix(key, "(*") && strings.Count(key, ")") == 1 {
+				// The receiver of a method of an interface names behind
+				// for its own footprint.
+				continue
+			}
+			for _, m := range entry.modifies {
+				name, ok := strings.CutPrefix(m.text, "behind(")
+				if !ok {
+					continue
+				}
+				name = strings.TrimSuffix(name, ")")
+				found++
+				if !slices.ContainsFunc(entry.runs, func(f trustFormula) bool { return f.text == name }) {
+					t.Errorf("%s lists behind(%s) and does not list %s under runs", key, name, name)
+				}
+				if probedBy[key] == "" {
+					t.Errorf("%s lists behind(%s), and no harness of probedBy hands it values whose Close and other undeclared methods fail", key, name)
+				}
+			}
+		}
+	}
+	if found < 6 {
+		t.Errorf("only %d shipped entries list behind of a parameter", found)
+	}
+	for _, method := range []string{"Close", "Flush"} {
+		if !slices.Contains(lookedFor, method) {
+			t.Errorf("the probes do not refuse %s", method)
+		}
+	}
+}

@@ -77,7 +77,7 @@ func (pv *pkgVerifier) readPrints(fn *funcInfo, entry *trustEntry) {
 		// else of the entry (F11 of the review of step 4).
 		fn.defect("it lists prints and keeps, calls, or ensures, which a call verified through prints would not read; prints is claimed only of a function that does nothing else")
 		return
-	case len(entry.modifies) != 1 || entry.modifies[0].text != item.name:
+	case len(entry.modifies) != 1 || entry.modifies[0].text != item.name && entry.modifies[0].text != "behind("+item.name+")":
 		fn.defect("its prints names %s, and its modifies lists more than %s; prints is claimed only of a function that writes nothing but through its writer", item.name, item.name)
 		return
 	}

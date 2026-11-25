@@ -1993,6 +1993,13 @@ func (v *fnVerifier) locateTarget(fn *funcInfo, m *modTarget, args map[*types.Va
 	}
 	if m.behind {
 		switch {
+		case (fn.receiver == nil || param != fn.receiver) && fn.trust != nil && fn.methodOf == nil && fn.valueOf == nil:
+			// A function entry may name the footprint of a parameter
+			// alone, a claim that it changes none of its states (F20 of
+			// the review of S2 of F35).
+			if why := v.behindParamWhy(fn, param); why != "" {
+				return shape{}, target{}, errors.New(why)
+			}
 		case fn.receiver == nil || param != fn.receiver:
 			return shape{}, target{}, fmt.Errorf("behind(%s) names the footprint of the receiver of a method of an interface with states, "+
 				"and %s is not the receiver of such a method; list %s itself", m.name, m.name, m.name)

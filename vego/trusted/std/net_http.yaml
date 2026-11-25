@@ -245,7 +245,7 @@ trusted:
     asserts:
       w: []
     vouches: [w]
-    modifies: [w]
+    modifies: ["behind(w)"]
 
   net/http.NotFound:
     reason: >-
@@ -260,4 +260,4 @@ trusted:
       w: []
       r: []
     vouches: [w]
-    modifies: [w]
+    modifies: ["behind(w)"]

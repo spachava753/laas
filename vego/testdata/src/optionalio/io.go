@@ -7,7 +7,10 @@ package optionalio
 
 import (
 	"bufio"
+	"encoding/json"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 )
@@ -231,4 +234,166 @@ func Files(from, to *os.File) (err error) {
 // @Ensures True
 func Echo(w http.ResponseWriter, req *http.Request) {
 	_, _ = CopySome(w, req.Body)
+}
+
+// The programs of F20 of the review of S2 of F35: a WriteCloser written and
+// then closed, whichever way the write is spelled.
+
+// @Requires wc != nil And ~closed(wc)
+// @Modifies wc
+// @Ensures True
+func ByWrite(wc io.WriteCloser) (err error) {
+	_, _ = wc.Write([]byte("x"))
+	return wc.Close()
+}
+
+// @Requires wc != nil And ~closed(wc)
+// @Modifies wc
+// @Ensures True
+func ByWriteString(wc io.WriteCloser) (err error) {
+	_, _ = io.WriteString(wc, "x")
+	return wc.Close()
+}
+
+// @Requires wc != nil And ~closed(wc) And 0 <= n <= 1000
+// @Modifies wc
+// @Ensures True
+func ByFprintf(wc io.WriteCloser, n int) (err error) {
+	_, _ = fmt.Fprintf(wc, "%d\n", n)
+	return wc.Close()
+}
+
+// @Requires wc != nil And ~closed(wc)
+// @Modifies wc
+// @Ensures True
+func Deferred(wc io.WriteCloser) {
+	defer wc.Close()
+	_, _ = io.WriteString(wc, "x")
+}
+
+// Encoded encodes into wc in place and closes it: the encoder keeps the
+// states of what it writes through.
+//
+// @Requires wc != nil And ~closed(wc) And 0 <= n <= 1000
+// @Modifies wc
+// @Ensures True
+func Encoded(wc io.WriteCloser, n int) (err error) {
+	_ = json.NewEncoder(wc).Encode(n)
+	return wc.Close()
+}
+
+// TwoClosers writes two closers in one order and closes them in the other.
+//
+// @Requires a != nil And b != nil And ~closed(a) And ~closed(b)
+// @Modifies a, b
+// @Ensures True
+func TwoClosers(a, b io.WriteCloser) {
+	_, _ = io.WriteString(a, "a")
+	_, _ = fmt.Fprintf(b, "%d", 1)
+	_ = b.Close()
+	_, _ = io.WriteString(a, "again")
+	_ = a.Close()
+}
+
+// TwoClosersSwapped does it the other way.
+//
+// @Requires a != nil And b != nil And ~closed(a) And ~closed(b)
+// @Modifies a, b
+// @Ensures True
+func TwoClosersSwapped(a, b io.WriteCloser) {
+	_, _ = fmt.Fprintf(b, "%d", 1)
+	_, _ = io.WriteString(a, "a")
+	_ = a.Close()
+	_, _ = io.WriteString(b, "again")
+	_ = b.Close()
+}
+
+// CloseTwice closes across an io.WriteString.
+//
+// @Requires wc != nil And ~closed(wc)
+// @Modifies wc
+// @Ensures True
+func CloseTwice(wc io.WriteCloser) {
+	_ = wc.Close()
+	_, _ = io.WriteString(wc, "x")
+	_ = wc.Close() // want `precondition of wc.Close may not hold: ~closed\(c\)$`
+}
+
+// shut closes rc; its contract lists rc, so it may change the states of
+// rc itself.
+//
+// @Requires rc != nil And ~closed(rc)
+// @Modifies rc
+// @Ensures True
+func shut(rc io.ReadCloser) { _ = rc.Close() }
+
+// ShutTwice closes after a call that may have closed: the message names no
+// call, since shut changes the state of rc itself.
+//
+// @Requires rc != nil And ~closed(rc)
+// @Modifies rc
+// @Ensures True
+func ShutTwice(rc io.ReadCloser) {
+	shut(rc)
+	_ = rc.Close() // want `precondition of rc.Close may not hold: ~closed\(c\)$`
+}
+
+// The values that are kept: the state of what they keep is not known after
+// a call through them (following the kept writer into the result is not
+// built; see the roadmap).
+
+// @Requires wc != nil And ~closed(wc)
+// @Modifies wc
+// @Ensures True
+func BufferedThenClose(wc io.WriteCloser) (err error) {
+	bw := bufio.NewWriter(wc)
+	_, _ = bw.WriteString("x")
+	_ = bw.Flush()
+	return wc.Close() // want `precondition of wc.Close may not hold: ~closed\(c\); the state may have been changed by WriteString at io.go:\d+:\d+, which writes through what it is handed or what a value it is handed keeps`
+}
+
+// @Requires wc != nil And ~closed(wc)
+// @Modifies wc
+// @Ensures True
+func LoggedThenClose(wc io.WriteCloser) (err error) {
+	l := log.New(wc, "", 0)
+	l.Printf("x")
+	return wc.Close() // want `precondition of wc.Close may not hold: ~closed\(c\); the state may have been changed by Printf at io.go:\d+:\d+`
+}
+
+// @Requires rc != nil And ~closed(rc)
+// @Modifies rc
+// @Ensures True
+func ScannedThenClose(rc io.ReadCloser) (err error) {
+	sc := bufio.NewScanner(rc)
+	_ = sc.Scan()
+	return rc.Close() // want `precondition of rc.Close may not hold: ~closed\(c\); the state may have been changed by Scan at io.go:\d+:\d+`
+}
+
+// @Requires rc != nil And ~closed(rc)
+// @Modifies rc
+// @Ensures True
+func LimitedThenClose(rc io.ReadCloser) (err error) {
+	_, _ = io.LimitReader(rc, 10).Read(make([]byte, 4))
+	return rc.Close() // want `precondition of rc.Close may not hold: ~closed\(c\); the state may have been changed by io.LimitReader\(rc, 10\).Read at io.go:\d+:\d+`
+}
+
+// @Requires a != nil And b != nil And ~closed(a) And ~closed(b)
+// @Modifies a, b
+// @Ensures True
+func MultiThenClose(a, b io.WriteCloser) {
+	_, _ = io.MultiWriter(a, b).Write([]byte("x"))
+	_ = a.Close() // want `precondition of a.Close may not hold: ~closed\(c\); the state may have been changed by io.MultiWriter\(a, b\).Write at io.go:\d+:\d+`
+	_ = b.Close() // want `precondition of b.Close may not hold: ~closed\(c\); the state may have been changed by io.MultiWriter\(a, b\).Write at io.go:\d+:\d+`
+}
+
+// closeAll is trusted; its entry claims behind(wc) of an io.WriteCloser,
+// whose Close changes a state, which the entry cannot claim.
+func closeAll(wc io.WriteCloser) { wc.Close() }
+
+// @Requires wc != nil And ~closed(wc)
+// @Modifies wc
+// @Ensures True
+func UsesCloseAll(wc io.WriteCloser) {
+	closeAll(wc) // want `the trusted contract of optionalio.closeAll \(trusted.yaml:\d+\) cannot be used: .*behind\(wc\) claims that the function changes no state of what wc holds, and io.WriteCloser has states`
 }

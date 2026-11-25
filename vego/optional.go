@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"github.com/spachava753/laas/vego/internal/solver"
 )
 
 // Optional interfaces (F35). Functions of the standard library find a
@@ -553,4 +554,108 @@ func (pv *pkgVerifier) optionalUse() OptionalUse {
 // shown writes a type as messages of the package do.
 func (pv *pkgVerifier) shown(t types.Type) string {
 	return types.TypeString(t, types.RelativeTo(pv.pass.Pkg))
+}
+
+// behindParamWhy says why a function entry cannot list behind(p) for a
+// parameter, or "" when it can (F20 of the review of S2 of F35). behind(p)
+// claims that the call writes the footprint of what p holds and changes
+// none of its states. It may be claimed only where the entry's runs and
+// asserts confine the calls on p to methods that change no state: p must
+// be an interface value whose type has no states, listed under runs, and
+// every method of its type and of the types listed for it under asserts
+// must belong to an interface without states, as Write, Read, and
+// WriteString do. What the function calls is the author's claim, held by
+// the harness of each shipped entry, whose probes refuse Close and every
+// other method the entry does not declare (TestBehindParams).
+func (v *fnVerifier) behindParamWhy(fn *funcInfo, param *types.Var) string {
+	shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
+	name := param.Name()
+	switch {
+	case !isIface(param.Type()):
+		return fmt.Sprintf("behind(%s) names the footprint of an interface value, and %s has type %s; list %s itself", name, name, shown(param.Type()), name)
+	case v.hasStates(param.Type()):
+		return fmt.Sprintf("behind(%s) claims that the function changes no state of what %s holds, and %s has states, which its methods change; list %s itself", name, name, shown(param.Type()), name)
+	case !fn.runs.get(param):
+		return fmt.Sprintf("behind(%s) claims what the function calls on %s, which only an entry that lists %s under runs can claim; list %s itself", name, name, name, name)
+	}
+	called := []types.Type{param.Type()}
+	if fn.trust != nil {
+		for _, item := range fn.trust.asserts {
+			if item.name != name {
+				continue
+			}
+			for _, dest := range item.dests {
+				if t, problem := resolveListed(v.pass.Pkg, dest.text); problem == "" {
+					called = append(called, t)
+				}
+			}
+		}
+	}
+	for _, t := range called {
+		iface, ok := t.Underlying().(*types.Interface)
+		if !ok {
+			return fmt.Sprintf("behind(%s) claims that the function changes no state of what %s holds, and its asserts lists %s for %s, a type whose methods it may call; list %s itself", name, name, shown(t), name, name)
+		}
+		for method := range iface.Methods() {
+			if owner := declaringInterface(method); owner == nil || v.hasStates(owner.Type()) {
+				return fmt.Sprintf("behind(%s) claims that the function changes no state of what %s holds, and it may call %s, a method of an interface with states; list %s itself",
+					name, name, methodTitle(method), name)
+			}
+		}
+	}
+	return ""
+}
+
+// stateHint says, for a clause of a callee's Requires that reads a state of
+// what an argument holds, which call may have changed the state when the
+// memory is in an epoch that a call started: a call that writes a
+// footprint forgets the states of every other value that may lie in it,
+// and what a wrapper keeps is not known to be the value it was given
+// (Footprints, Not built: following the kept writer into the result). The
+// call named is the latest one before which the clause held, found by
+// reading it in the memory each epoch started from, walking back; when it
+// held before none of them, or the state is known to be the other one, as
+// after a Close, nothing is said. The message ends with it only if the
+// check fails.
+func (v *fnVerifier) stateHint(c *clause, fn *funcInfo, args map[*types.Var]value, st *state) func(*state, []*logic.Term, *logic.Term) string {
+	reads := false
+	params := slices.Clone(fn.params)
+	if fn.receiver != nil {
+		params = append(params, fn.receiver)
+	}
+	for _, param := range params {
+		if args[param] == nil {
+			continue
+		}
+		for _, s := range v.ifaceStatesOf(param.Type()) {
+			reads = reads || strings.Contains(c.text, s.name+"(")
+		}
+	}
+	if e := st.mem[epochKey]; !reads || e == nil || v.epochs[e.Name] == nil {
+		return nil
+	}
+	return func(st *state, guard []*logic.Term, conjunct *logic.Term) string {
+		if v.attempt(st, guard, logic.Not(conjunct)) == solver.Proved {
+			return ""
+		}
+		// A few epochs back at most: the hint is for the call just before.
+		e := st.mem[epochKey]
+		for range 8 {
+			if e == nil || v.epochs[e.Name] == nil {
+				return ""
+			}
+			ep := v.epochs[e.Name]
+			then := st.clone()
+			if v.attempt(then, guard, v.formula(c, c.node, &specEnv{v: v, sink: then, fn: fn, args: args, now: ep.before})) == solver.Proved {
+				if ep.by == "" {
+					return ""
+				}
+				return fmt.Sprintf("; the state may have been changed by %s, which writes through what it is handed or what a value it is handed keeps, and nothing says that "+
+					"what it writes through is not this value, so its states count as those of another value, which a write may change; close or use the value "+
+					"only where nothing was written through what keeps it since its state was known, or write to the value itself", ep.by)
+			}
+			e = ep.before[epochKey]
+		}
+		return ""
+	}
 }

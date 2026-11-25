@@ -681,7 +681,9 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			v.initFailed = v.initFailed || v.reports != before
 			continue
 		}
+		v.stateNote = v.stateHint(c, fn, args, st)
 		v.checkClause(c, pre, st, guard, call.Pos(), "precondition of "+name+" may not hold")
+		v.stateNote = nil
 	}
 	v.checkRecursion(fn, pre, st, guard, call)
 	written := v.targets(fn, args, st, before)
@@ -868,9 +870,16 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	lockGroups := v.callLockGroups(call, fn)
 	v.proveGroups(st, guard, v.groupsCovered(v.frame, v.callGroups(call, fn)), call.Pos(), "before the call to "+name+", which may assume it",
 		func(g *varGroup) bool { return slices.Contains(lockGroups, g) })
+	// A call that may change the states of a value itself, as one whose
+	// contract lists an interface value with states, is not named: its
+	// writes are not why the states count as another value's.
+	if !slices.ContainsFunc(written, func(t target) bool { return t.row }) {
+		v.epochBy = fmt.Sprintf("%s at %s", name, v.placeOf(call.Pos()))
+	}
 	for _, t := range written {
 		v.havoc(st, t, guard)
 	}
+	v.epochBy = ""
 	// A verified callee restores the invariants it may change, and a lock
 	// clause where it is a function outside code can enter; a trusted one
 	// restores nothing, as Lock leaves a mutex held, so what is known of
