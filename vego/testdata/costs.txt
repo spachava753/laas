@@ -2284,10 +2284,13 @@ guide	(*guide.LineBook).Add	25	107191	0
 guide	(*guide.LineCount).Record	9	7060	0
 guide	(*guide.LineCounter).Price	10	8114	0
 guide	(*guide.LineError).Error	1	182	0
+guide	(*guide.LineOdometer).Write	21	20143	0
 guide	(*guide.Link).Loop	8	2837	0
 guide	(*guide.Lock).Acquire	6	4035	0
 guide	(*guide.Lock).Release	6	3879	0
 guide	(*guide.Meter).Ping	1	182	0
+guide	(*guide.Odometer).Write	21	20143	0
+guide	(*guide.Odometer).WriteString	21	17719	0
 guide	(*guide.Pile).Append	28	177172	0
 guide	(*guide.Pile).Items	4	1665	0
 guide	(*guide.Pile).Push	20	43748	0
@@ -2556,6 +2559,8 @@ guide	guide.MakeSink	1	46	0
 guide	guide.Mapper	3	1546	0
 guide	guide.Max	7	784	0
 guide	guide.MaxWrong	5	607	0
+guide	guide.Measure	26	65490	0
+guide	guide.MeasureLines	11	23406	0
 guide	guide.MemoJSON	40	77962	0
 guide	guide.MergeEach	8	15405	0
 guide	guide.Mid	9	4455	0
@@ -2750,6 +2755,7 @@ guide	guide.WithTimeout	6	1456	0
 guide	guide.Work	139	230339	0
 guide	guide.Wrap	2	1032	0
 guide	guide.Wrapping	7	4910	0
+guide	guide.WriteAny	1	514	0
 guide	guide.WriteBuffered	93	1114892	5
 guide	guide.WriteBufferedUnlisted	24	259346	3
 guide	guide.WriteCount	117	1428611	10
@@ -2757,6 +2763,7 @@ guide	guide.WriteCountFormatted	117	1428611	10
 guide	guide.WriteEntries	40	438329	2
 guide	guide.WriteFailure	6	40136	0
 guide	guide.WriteFailureBuffered	55	409788	0
+guide	guide.WriteFast	14	26331	0
 guide	guide.WriteItems	14	74547	0
 guide	guide.WriteNumbers	24	163540	0
 guide	guide.WriteNumbersTight	24	164380	0
@@ -2844,8 +2851,9 @@ guide	io.LimitReader	1	3284	0
 guide	io.MultiReader	1	4805	0
 guide	io.NopCloser	1	3835	0
 guide	io.Reader.Read	6	1014374	1
-guide	io.StringWriter.WriteString	3	5354	0
+guide	io.StringWriter.WriteString	5	13130	0
 guide	io.TeeReader	1	4121	0
+guide	io.WriteString	5	13480	0
 guide	io.Writer.Write	5	18168	0
 guide	log.New	1	8948	0
 guide	log.Print	1	2741	0

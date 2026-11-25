@@ -1306,6 +1306,74 @@ vego: Rated.Price has a value receiver, and the pointer that the interface value
 nil, in Rated.Price used as a method of Pricer at interfaces.go:109:9
 ```
 
+### Methods that other code finds by a type assertion
+
+Some functions of the standard library find a faster method of a value by asserting it to another interface. `io.WriteString` asserts its writer to `io.StringWriter` and calls `WriteString` in place of `Write`. The `WriteString` of a `*bufio.Writer` does the same with the writer it keeps, and so does the `WriteString` of what `io.MultiWriter` returns. So where your code converts a value to `io.Writer`, `vego` checks its `WriteString` too, against the entry of `(io.StringWriter).WriteString`. That entry says what the entry of `(io.Writer).Write` says, for the string:
+
+```go
+// Odometer counts what it is written, by Write and by WriteString.
+type Odometer struct{ N int }
+
+// @Requires t != nil
+// @Modifies t
+// @Ensures 0 <= n <= |p| And (n < |p| -> err != nil) And err = nil
+func (t *Odometer) Write(p []byte) (n int, err error) {
+	if t.N < 1000000 {
+		t.N++
+	}
+	return len(p), nil
+}
+
+// @Requires t != nil
+// @Modifies t
+// @Ensures 0 <= n <= |s| And (n < |s| -> err != nil) And err = nil
+func (t *Odometer) WriteString(s string) (n int, err error) {
+	if t.N < 1000000 {
+		t.N++
+	}
+	return len(s), nil
+}
+
+// @Requires t != nil
+// @Modifies t
+// @Ensures True
+func Measure(t *Odometer) {
+	_, _ = io.WriteString(t, "one line\n")
+}
+```
+
+A method of that name with no contract, or one that does not meet the entry, is refused where the value is converted:
+
+```go
+// WriteString has no contract.
+func (l *LineOdometer) WriteString(s string) (n int, err error) {
+	return l.Write([]byte(s))
+}
+
+// @Requires l != nil
+// @Modifies l
+// @Ensures True
+func MeasureLines(l *LineOdometer) {
+	_, _ = io.WriteString(l, "one line\n")
+}
+```
+
+```text
+vego: cannot verify MeasureLines: converting a *LineOdometer to io.Writer is not supported: *LineOdometer
+implements io.StringWriter, whose method WriteString has an entry that io.WriteString relies on of every
+value it finds it on, and a value converted to io.Writer may be handed to it; (*LineOdometer).WriteString
+has no contract; annotate it with // @ annotations that meet the entry of (io.StringWriter).WriteString, or
+rename it
+```
+
+Annotate the method so that it meets the entry, or rename it. A method of another signature, such as `WriteString(s string) int`, does not implement `io.StringWriter`. Nothing checks it, and `io.WriteString` calls `Write`.
+
+The interfaces checked this way are those of other modules each of whose methods has an entry, that have no states and are not scoped. Of the shipped entries, these are `io.Writer`, `io.Reader`, and `io.StringWriter`, so a conversion to `io.Writer` also checks the `Read` of a value that has one, against the entry of `(io.Reader).Read`. An entry in your trust file for each method of an interface of another module adds that interface. Every conversion of a type that implements it is then checked against your entry. `io.Closer`, whose values have the state `closed`, and `http.ResponseWriter`, which is scoped, are not checked this way.
+
+The check is made at a conversion to an interface that has the methods of one of these interfaces, such as `io.Writer`, `io.ReadWriter`, `http.ResponseWriter`, or an interface of yours that embeds `io.Writer`. It is not made at a conversion to `any`, to `error`, or to another interface, and a value of those types cannot be used as one of these interfaces (see [Asking what an interface value holds](#asking-what-an-interface-value-holds)). A method of a type of another module, such as `(*os.File).WriteString`, is compared with its entry once in each package, and again at a conversion where that first comparison fails. A method that the type gets from an embedded field is refused at the conversion, since a promoted method cannot be used as a method of an interface yet.
+
+What the value's methods may write behind their receiver is one footprint for all of them, as [Converting a value of your own type](#converting-a-value-of-your-own-type) describes.
+
 ### Methods that write behind their receiver
 
 A method of an interface can write memory that the value it is called on holds, as a buffer writes its contents. Say so with a `Receiver` annotation and the receiver in `Modifies`:
@@ -1808,6 +1876,23 @@ The value such an assertion gives can be used only in two cases:
 
 - The operand's type has each method of the target, from the same declaration, as an `io.ReadWriter` asserted to `io.Reader`, or with a contract that implies the target's. A method of the same name from another declaration, without such a contract, is refused with `asserting x, a T, to I is not supported` (see the table of messages).
 - The operand is an error, and no method of the target other than `Error` has a contract.
+- The operand's type has every method of an interface that is checked at conversions, as described in [Methods that other code finds by a type assertion](#methods-that-other-code-finds-by-a-type-assertion), from that interface's declaration or under a contract that implies its entry, and each method of the target that the operand's type lacks belongs to such an interface. `io.Writer` and `http.ResponseWriter` are such types. Every value of them that your code converted was checked against those interfaces.
+
+The third case lets a function do what `io.WriteString` does:
+
+```go
+// @Requires w != nil
+// @Modifies w
+// @Ensures 0 <= n <= |s|
+func WriteFast(w io.Writer, s string) (n int) {
+	if sw, ok := w.(io.StringWriter); ok {
+		n, _ = sw.WriteString(s)
+		return n
+	}
+	n, _ = w.Write([]byte(s))
+	return n
+}
+```
 
 In any other case the value may be one your code made without checking it against the target's methods:
 
@@ -1826,7 +1911,7 @@ func Label(v any) (n int) {
 vego: cannot verify Label: using the value of v.(fmt.Stringer) is not supported: fmt.Stringer has the method String, which any does not have, so the value held may be one verified code made without checking it against fmt.Stringer, and code it is handed could call String under no contract; the value of an assertion of an interface value may use a method its static type lacks only when the static type has every method of an interface whose every method has an entry in the trust files, as io.Writer does, from its declaration or under a contract that implies the entry, since only values of such types are checked against the interfaces that code may assert them to; any has none; write it as _, ok := v.(fmt.Stringer), or as a case of fmt.Stringer whose clause does not use its variable
 ```
 
-Write `_, ok := v.(fmt.Stringer)` instead, or a case of `fmt.Stringer` whose clause does not use its variable.
+Write `_, ok := v.(fmt.Stringer)` instead, or a case of `fmt.Stringer` whose clause does not use its variable. The same holds for `v.(io.Writer)` of an `any`: a conversion to `any` is not checked. An interface whose contracts are in your source is never checked at conversions, since a conversion in one package is not checked against an interface declared in a package it does not import, so an assertion to it from an `any` stays refused.
 
 ### Comparing interface values
 
@@ -7279,11 +7364,11 @@ The names in an entry are the parameter and result names from the function's sou
 - `strconv.Itoa`, `strconv.Atoi`, `strconv.ParseInt`, `strconv.ParseUint`, `strconv.ParseBool`, `strconv.FormatInt`, `strconv.AppendInt`, `strconv.Quote`, `strconv.Unquote`
 - `math.Sqrt`, `math.Min`, `math.Max`, `math.Abs`, `math.Floor`, `math.Ceil`, `math.Trunc`, `math.Round`, `math.Pow`, `math.Mod`, `math.Log`, `math.Exp`, `math.Inf`, `math.NaN`, `math.IsNaN`, `math.IsInf`, which say only that they return and write nothing, since nothing can be stated of a float
 - the methods `Date`, `Year`, `Month`, `Day`, `Hour`, `Minute`, `Second`, `Nanosecond`, `Weekday`, `YearDay`, `Unix`, `UnixMilli`, `Add`, `AddDate`, `Sub`, `Before`, `After`, `Equal`, and `IsZero` of `time.Time`, `time.Now`, `time.Since`, `time.Until`, `time.Unix`, `time.Date`, and the methods `Seconds`, `Milliseconds`, and `Nanoseconds` of `time.Duration`
-- `os.Remove`, `os.Open`, `os.Create`, `os.WriteFile`, `os.MkdirAll`, `os.Getenv`, `os.LookupEnv`, `os.Getwd`, and the methods `Read`, `Write`, and `Close` of `*os.File`, described in [Reading and writing files](#reading-and-writing-files)
+- `os.Remove`, `os.Open`, `os.Create`, `os.WriteFile`, `os.MkdirAll`, `os.Getenv`, `os.LookupEnv`, `os.Getwd`, and the methods `Read`, `Write`, `WriteString`, and `Close` of `*os.File`, described in [Reading and writing files](#reading-and-writing-files)
 - `math/rand.Intn`, `math/rand.Int`
 - `fmt.Sprintf`, `fmt.Sprint`, `fmt.Sprintln`, `fmt.Printf`, `fmt.Print`, `fmt.Println`, `fmt.Fprintf`, `fmt.Fprint`, `fmt.Fprintln`, described in [Formatting and logging](#formatting-and-logging)
-- `io.NopCloser`, `io.LimitReader`, `io.TeeReader`, `io.MultiReader`, `io.MultiWriter`, described in [Wrappers in package io](#wrappers-in-package-io)
-- `bufio.NewScanner` with `Scan`, `Text`, and `Err`; `bufio.NewReader` with `ReadByte`; `bufio.NewWriter` with `Write`, `WriteByte`, and `Flush`; and the states `ready` of `bufio.Scanner`, `bufio.Reader`, and `bufio.Writer`, described in [Wrappers of readers and writers](#wrappers-of-readers-and-writers)
+- `io.NopCloser`, `io.LimitReader`, `io.TeeReader`, `io.MultiReader`, `io.MultiWriter`, and `io.WriteString`, described in [Wrappers in package io](#wrappers-in-package-io)
+- `bufio.NewScanner` with `Scan`, `Text`, and `Err`; `bufio.NewReader` with `ReadByte`; `bufio.NewWriter` with `Write`, `WriteString`, `WriteByte`, and `Flush`; and the states `ready` of `bufio.Scanner`, `bufio.Reader`, and `bufio.Writer`, described in [Wrappers of readers and writers](#wrappers-of-readers-and-writers)
 - the methods `Write`, `WriteString`, `WriteByte`, `WriteRune`, `Grow`, `Len`, `String`, and `Reset` of `*strings.Builder`, and the same with `Bytes` and `Truncate` of `*bytes.Buffer`, described in [Building text in a buffer](#building-text-in-a-buffer)
 - `log.Printf`, `log.Print`, `log.Println`, `log.New`, and the methods of `*log.Logger` of the same names, with the state `ready` of `log.Logger`, described in [Writing to a writer or a logger](#writing-to-a-writer-or-a-logger)
 - `path.Join`, `path.Clean`, `path.Dir`, `path.Base`, `path.Ext`, `path.IsAbs`, `path.Split`, `path/filepath.Join`, `path/filepath.Clean`, `path/filepath.Dir`, `path/filepath.Base`, `path/filepath.Ext`, `path/filepath.Rel`, `path/filepath.Split`. The bound `|result| <= |path| + 2` of `path/filepath.Clean` and `Dir` allows for Windows, where `Clean` can put `.\` before a path. It is read from the source for every system, and the tests check it on Unix only.
@@ -7293,7 +7378,7 @@ The names in an entry are the parameter and result names from the function's sou
 - the methods of `sync.Mutex` and `sync.RWMutex` that lock and unlock, and `(*sync.Once).Do`, described in [Locks](#locks)
 - `encoding/json.Marshal`, `encoding/json.MarshalIndent`, `encoding/json.Unmarshal`, `(*encoding/json.Encoder).Encode`, and `(*encoding/json.Decoder).Decode`, described in [Encoding and decoding JSON](#encoding-and-decoding-json)
 
-It also includes contracts for generic functions of `slices`, `maps`, and `cmp`, described in [Generic functions of other packages](#generic-functions-of-other-packages), and for `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, `(context.Context).Err`, and `context.CancelFunc`, which are described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages), and the state `closed` of `io.Closer`, described in [States of interface values](#states-of-interface-values).
+It also includes contracts for generic functions of `slices`, `maps`, and `cmp`, described in [Generic functions of other packages](#generic-functions-of-other-packages), and for `(io.Writer).Write`, `(io.Reader).Read`, `(io.StringWriter).WriteString`, `(io.Closer).Close`, `(context.Context).Err`, and `context.CancelFunc`, which are described in [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages), and the state `closed` of `io.Closer`, described in [States of interface values](#states-of-interface-values).
 
 A function of package `bytes` with two slice parameters cannot be given one slice twice, or two slices that may share memory. `bytes.Equal(a, a)` is reported as `the slices passed to Equal as a and b may overlap`, as for any function with two slice parameters of one element type (see [Slices that share no memory](#slices-that-share-no-memory)).
 
@@ -8123,7 +8208,7 @@ claim it; only over an error, each method of which is checked where the error is
 more
 ```
 
-A value converted to an interface is checked against the methods of that interface only. The function may assert any interface value it reaches from the parameter, through fields, elements, and pointers, and through what the methods it can call return. So over a parameter that is not of type `error`, a listed interface may have only methods that each of those interface types has. A listed function type must be one that the parameter's type reaches. That holds even when the method has a contract. A function like `use` has no entry that verified code can rely on. Call it from code that is not verified.
+A value converted to an interface is checked against the methods of that interface, and against the interfaces described in [Methods that other code finds by a type assertion](#methods-that-other-code-finds-by-a-type-assertion) when the interface has the methods of one of them. The function may assert any interface value it reaches from the parameter, through fields, elements, and pointers, and through what the methods it can call return. So over a parameter that is not of type `error`, a listed interface may have only methods that each of those interface types has, or methods of an interface checked at conversions when the interface type reached has every method of such an interface from its declaration. The shipped entry of `io.WriteString` lists `io.StringWriter` over its `io.Writer` that way. A listed function type must be one that the parameter's type reaches. That holds even when the method has a contract. A function like `use` has no entry that verified code can rely on. Call it from code that is not verified.
 
 Over a parameter of type `error`, `asserts` may list any type. Each method of a value converted to `error` is checked where it is converted. Such a value holds no interface value other than an error, and its methods return none (see [What the methods of the type may do](#what-the-methods-of-the-type-may-do)).
 
@@ -8135,7 +8220,7 @@ An entry with `asserts` cannot be used when any of these holds:
 
 - A listed name is not a parameter, or its type can hold no code.
 - A listed type does not resolve, holds no code, or is an interface written by its methods with a type that is not predeclared.
-- The parameter is not of type `error`, and a listed interface has a method that an interface type the parameter reaches lacks, or a listed function type is one the parameter does not reach.
+- The parameter is not of type `error`, and a listed interface has a method that an interface type the parameter reaches lacks, unless that interface type has every method of an interface checked at conversions from its declaration and the method belongs to such an interface; or a listed function type is one the parameter does not reach. An interface written by its methods, as `"interface{ WriteString(string) (int, error) }"`, is not `io.StringWriter`: list `io.StringWriter` by its name.
 - The parameter is listed under `formats`, which says already what the function runs of it.
 - The parameter of a function is listed under neither `runs` nor `keeps`.
 
@@ -8339,7 +8424,7 @@ func WriteCountFormatted(w io.Writer, n int) (err error) {
 }
 ```
 
-`Write`, `WriteByte`, and `Flush` have entries. `ready(bw)` holds when the last of `bufio.NewWriter`, `bufio.NewWriterSize`, and `Reset` that set the writer's output set one that is not `nil`. `WriteString` has no entry, because it calls the `WriteString` method of the writer it wraps when that writer has one, and no entry covers that method. Write `bw.Write([]byte(s))` instead.
+`Write`, `WriteString`, `WriteByte`, and `Flush` have entries. `ready(bw)` holds when the last of `bufio.NewWriter`, `bufio.NewWriterSize`, and `Reset` that set the writer's output set one that is not `nil`. `WriteString` calls the `WriteString` of the writer it wraps when that writer has one, which every value converted to `io.Writer` was checked to meet (see [Methods that other code finds by a type assertion](#methods-that-other-code-finds-by-a-type-assertion)). `ReadFrom` has no entry (see [Copying from a reader to a writer](#copying-from-a-reader-to-a-writer)).
 
 The same holds for a `*bufio.Reader`. `bufio.NewReader` may return the reader it is given, and its entry says `fresh(result, rd)`. `ReadByte` requires `ready(br)`.
 
@@ -8384,7 +8469,7 @@ only a contract that comes with vego or a verified function says how what such a
 
 #### Wrappers in package io
 
-`io.NopCloser`, `io.LimitReader`, `io.TeeReader`, `io.MultiReader`, and `io.MultiWriter` have shipped entries. Each keeps the readers and writers it is given in the value it returns, and that value's `Read`, `Write`, or `Close` meets the entry of its interface whenever what it keeps meets theirs:
+`io.NopCloser`, `io.LimitReader`, `io.TeeReader`, `io.MultiReader`, and `io.MultiWriter` have shipped entries. Each keeps the readers and writers it is given in the value it returns, and that value's `Read`, `Write`, or `Close` meets the entry of its interface whenever what it keeps meets theirs. So does the `WriteString` of what `io.MultiWriter` returns, which `io.WriteString` finds. `io.WriteString` has a shipped entry too: it writes `s` to `w` through `WriteString` when `w` has one, and through one `Write` otherwise.
 
 ```go
 // @Requires r != nil And log != nil
@@ -8795,6 +8880,8 @@ The entry does not cover two kinds of values. A value that verified code makes i
 
 An entry for a type may also list `asserts` for the parameters of the method or the function type, as an entry for a function does. It then claims, for every value of the type, what its call finds on what it is handed (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)).
 
+When your entries give a contract to every method of an interface of another module that has no states, the interface is also checked at conversions, as `io.StringWriter` is (see [Methods that other code finds by a type assertion](#methods-that-other-code-finds-by-a-type-assertion)). Every conversion of a type that implements it, to an interface that has its methods, is then checked against your entry. An entry for `(fmt.Stringer).String`, for example, would check the `String` method of every type with one that your code converts to such an interface. Packages built together whose trust files give entries to different interfaces of this kind are reported, as two entries for one type are (see [One entry for each type in a build](#one-entry-for-each-type-in-a-build)).
+
 The trust report shows an entry for a type with a line that states this claim.
 
 #### Making a value of such a type
@@ -9169,6 +9256,10 @@ This table lists the most common messages.
 | `F is called with E = T, and F may run the method ..., which a value of that type reaches; ... asserts: {E: []}` | The entry of the generic function does not claim that it runs no method of its type argument. | If the function runs none, add the claim to its entry. See [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function). |
 | `the trusted contract of F cannot be true of this call` | The contract contradicts what is known at the call. | The entry is wrong, or it needs a `requires` clause. |
 | `the trusted contract ... cannot be used` | The entry in the trust file is invalid. The message says why. | Fix the entry. Check the parameter names. |
+| `converting a *T to io.Writer is not supported: *T implements io.StringWriter, whose method WriteString has an entry that io.WriteString relies on ...` | A method of the type that another function finds by a type assertion has no contract, or comes from an embedded field. | Annotate the method so that it meets the entry, or rename it. See [Methods that other code finds by a type assertion](#methods-that-other-code-finds-by-a-type-assertion). |
+| `... in T.WriteString used as a method of io.StringWriter at f.go:n:c, which T implements: io.WriteString finds WriteString by a type assertion; ...` | The method does not meet the entry of the interface that another function finds it through. | Make the method meet the entry, or rename it. |
+| `converting x, a S, to io.Writer is not supported: code given an io.Writer may assert it to io.Reader and io.StringWriter and use what it finds, ...` | A value converted between interfaces was never checked against the interfaces that the target's users may assert it to. | Convert the concrete value to the target directly, or declare the source interface in a package whose build has the target's package. |
+| `it calls Copy, which is not supported yet: it reads from src until src returns io.EOF, ...` | `io.Copy` and its kin read until their reader ends, so no entry can claim they return. | Copy in a loop with a bound. See [Copying from a reader to a writer](#copying-from-a-reader-to-a-writer). |
 | `the entry of (io.Reader).Read replaces the shipped entry, on which shipped entries rest (...), and it differs from it; ...` | Your trust file replaces the shipped entry of a method that other shipped entries rest on, and says something else. The shipped entry is used in its place. The message quotes both entries. | Make the entry the shipped entry, with a reason of your own, or remove it. See [The errors of Read and Write](#the-errors-of-read-and-write). |
 | `..., in the function literal called at f.go:n:c`, or `..., in the function literal deferred at f.go:n:c and run at the return at f.go:n:c` (or `at the end of the function at`, or `at the end of the function literal at`) | The problem is in the body of a function literal, at the call named at the end. For a deferred literal, the message names the `defer` statement and where the literal runs. | Fix the body, or what holds at that call. See [Function literals](#function-literals). |
 | `cannot verify F: the function literal is used as a value of type T, which has no contract` | The literal is passed, returned, or stored as a value of a function type that has no contract. | Declare a named function type with a contract and use it there. |
@@ -9287,13 +9378,15 @@ A function that uses any of the following is reported as `cannot verify`:
 - a function that keeps code it is given anywhere but in a result or in memory that a parameter reaches, such as a registry, a goroutine, or a timer, which has no true entry; making a trusted function with `keeps` into a value; and handing a function literal, a function, or a method value of a type without a contract to a parameter under `keeps` (see [Functions that keep what they are given](#functions-that-keep-what-they-are-given));
 - comparing an interface value with a value of a type on which `==` may panic or of a type declared inside a function, and a `switch` on a value of a struct type with a case that is an interface value;
 - in a formula, `!=` between two interface values that are not nil, and `~(a = b)` of them (see [Comparing interface values](#comparing-interface-values));
-- using the value of a type assertion or a case to an interface type whose methods the operand's type does not have, unless the operand is an error and no method of the target but `Error` has a contract or a state; `error` as such a target of a value that is not an error; and an interface type declared inside a function as a target;
+- using the value of a type assertion or a case to an interface type whose methods the operand's type does not have, unless the operand's type has the methods of an interface checked at conversions and the methods it lacks belong to such interfaces, or the operand is an error and no method of the target but `Error` has a contract or a state; `error` as such a target of a value that is not an error; and an interface type declared inside a function as a target;
+- converting a value of your own type to an interface with the methods of `io.Writer`, `io.Reader`, or another interface checked at conversions, when a method of such an interface that the type implements has no contract, does not meet its entry, or comes from an embedded field (see [Methods that other code finds by a type assertion](#methods-that-other-code-finds-by-a-type-assertion));
+- `io.Copy`, `io.CopyBuffer`, `io.CopyN`, `io.ReadAll`, the `ReadFrom` of a `*bufio.Writer`, and the `WriteTo` of a `*bufio.Reader`, which read until their reader ends (see [Copying from a reader to a writer](#copying-from-a-reader-to-a-writer));
 - `errors.As` and `errors.AsType` with a target of an interface type (see [Asking what an error holds](#asking-what-an-error-holds));
 - writing, through a pointer taken out of an interface value or an error, memory that the function did not make, since no `Modifies` clause names memory reached through an assertion (see [Asking what an interface value holds](#asking-what-an-interface-value-holds));
 - taking out of an error or another interface value, by an assertion, a case of a type switch whose clause uses its variable, or `errors.As`, a value of a type that holds a function value of a type with a contract or an interface value with a method that has one, or that is a function type with a contract (see [Asking what an interface value holds](#asking-what-an-interface-value-holds));
 - converting to an interface with states a pointer to a value of size zero, a pointer to a struct whose first field has states of its own, a pointer whose method that changes a state has a value receiver beside one with a pointer receiver or does not list its receiver in `Modifies`, or a value that is not a pointer whose method that changes a state is trusted; and copying a struct whose states trusted methods change, such as an `os.File` (see [The states of what a pointer points to](#the-states-of-what-a-pointer-points-to));
 - errors of your own types whose methods do what code that is not verified could not account for (see [What the methods of the type may do](#what-the-methods-of-the-type-may-do)), and errors of types with `Unwrap`, `Is`, `As`, `Format`, or `GoString` methods formatted, wrapped, or searched (see [Formatting and wrapping errors of your own types](#formatting-and-wrapping-errors-of-your-own-types));
-- a trusted entry whose `asserts` lists, over a parameter that is not an error, an interface with a method that an interface the parameter reaches lacks (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed));
+- a trusted entry whose `asserts` lists, over a parameter that is not an error, an interface with a method that an interface the parameter reaches lacks, unless the reached interface has every method of an interface checked at conversions from its declaration and the method belongs to such an interface (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed));
 - a cycle of calls that goes through a call through an interface value or a function value, or through code of another package (see [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods)), reported as `this call may not end`;
 - converting an interface value to an interface whose methods it does not have from the same declarations, unless the contract of each of its methods implies the target's (see [Converting between interfaces](#converting-between-interfaces));
 - keeping an `http.ResponseWriter`, or a value that holds one or was converted from one (see [A writer is used only during its request](#a-writer-is-used-only-during-its-request)), and a struct of your own that wraps a `ResponseWriter` and is passed on as one, whose `Write` calls through the writer it holds;
