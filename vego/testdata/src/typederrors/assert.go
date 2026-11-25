@@ -29,7 +29,7 @@ func MustLineOf(n int) (line int) {
 
 // @Ensures True
 func MayPanic(n int) (line int) {
-	return Placed(n).(*PE).Line // want `the type assertion Placed\(n\).\(\*PE\) may panic: Placed\(n\) may not hold a \*PE; use the form v, ok := Placed\(n\).\(\*PE\), or say what the error holds with holds\(Placed\(n\), T\)`
+	return Placed(n).(*PE).Line // want `the type assertion Placed\(n\).\(\*PE\) may panic: Placed\(n\) may not hold a \*PE; use the form v, ok := Placed\(n\).\(\*PE\), or show that it holds one, as a contract does with holds\(err, T\)`
 }
 
 // @Ensures ~r

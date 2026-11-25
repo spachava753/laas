@@ -2124,6 +2124,7 @@ guide	(*guide.Lamp).Stop	6	1219	0
 guide	(*guide.LineBook).Add	27	114521	0
 guide	(*guide.LineCount).Record	9	7060	0
 guide	(*guide.LineCounter).Price	10	8114	0
+guide	(*guide.LineError).Error	1	182	0
 guide	(*guide.Link).Loop	8	2837	0
 guide	(*guide.Lock).Acquire	6	4035	0
 guide	(*guide.Lock).Release	6	3879	0
@@ -2159,13 +2160,17 @@ guide	(*strings.Builder).WriteString	4	15141	0
 guide	(*sync.Mutex).Lock	1	1652	0
 guide	(*sync.Mutex).Unlock	1	1611	0
 guide	(*sync.Once).Do	1	1800	0
+guide	(guide.ByteError).Error	1	107	0
 guide	(guide.CodeError).Error	1	111	0
 guide	(guide.Flat).Price	3	1429	0
 guide	(guide.Logging).Price	7	7417	0
 guide	(guide.Rated).Price	5	3026	0
 guide	(guide.RatedLogging).Price	4	1343	0
 guide	(guide.Stepper).Next	1	111	0
+guide	(guide.SyntaxError).Error	1	111	0
 guide	(guide.Temperature).String	1	142	0
+guide	(guide.WithCause).Error	1	111	0
+guide	(guide.WithCause).Unwrap	6	2400	0
 guide	(guide.discard).Write	7	5006	0
 guide	(guide.fresh).Read	12	7820	0
 guide	(guide.light).IsOn	2	61	0
@@ -2223,6 +2228,7 @@ guide	guide.CallsReset	2	744	0
 guide	guide.Cell	7	9786	0
 guide	guide.Check	10	6460	0
 guide	guide.CheckBare	1	111	0
+guide	guide.CheckBytes	30	1066792	1
 guide	guide.CheckEach	3	128	0
 guide	guide.Clamp	7	799	0
 guide	guide.Clear	6	8966	0
@@ -2260,6 +2266,7 @@ guide	guide.CreateRow	53	1079585	13
 guide	guide.CreateRowErr	34	346888	4
 guide	guide.CreateRowNoLimit	2	1524	0
 guide	guide.CreateRowText	114	2438153	22
+guide	guide.Describe	16	6499	0
 guide	guide.Different	12	14231	0
 guide	guide.Discard	7	5800	0
 guide	guide.Display	1	497	0
@@ -2282,6 +2289,7 @@ guide	guide.Entry	1	439	0
 guide	guide.EntryJSON	36	74931	0
 guide	guide.Event	3	558	0
 guide	guide.Exact.Get	3	776	0
+guide	guide.FailingLine	4	2887	0
 guide	guide.Fails	1	46	0
 guide	guide.FieldsOf	0	0	0
 guide	guide.Fill	9	20266	0
@@ -2331,6 +2339,7 @@ guide	guide.Invalid	8	2719	0
 guide	guide.InvalidShort	11	7349	0
 guide	guide.Inventory	61	329321	0
 guide	guide.IsAdmin	2	3907	0
+guide	guide.IsBadDigit	2	1663	0
 guide	guide.IsEmpty	1	46	0
 guide	guide.JSONOnly	40	368087	8
 guide	guide.JSONUnbounded	32	322671	8
@@ -2351,10 +2360,13 @@ guide	guide.Lend	7	5751	0
 guide	guide.LevelJSON	1	111	0
 guide	guide.Limit	3	19467	0
 guide	guide.LineCounts.Current	3	1854	0
+guide	guide.LineOf	2	629	0
+guide	guide.LineOfType	2	1882	0
 guide	guide.LinesTotal	15	27473	0
 guide	guide.Load	44	2094455	2
 guide	guide.LoadAll	17	455488	2
 guide	guide.LoadCache	2	895	0
+guide	guide.LoadLine	20	28023	0
 guide	guide.LoadRows	32	485074	2
 guide	guide.LoadSettings	29	74941	0
 guide	guide.LoadVouched	33	26532	0
@@ -2381,6 +2393,7 @@ guide	guide.MemoJSON	40	77962	0
 guide	guide.MergeEach	8	15405	0
 guide	guide.Mid	9	4455	0
 guide	guide.MidWrong	7	3245	0
+guide	guide.MustLine	4	3391	0
 guide	guide.Natural.Get	3	1278	0
 guide	guide.Nearest	27	64171	0
 guide	guide.NewCounter	4	1080	0
@@ -2403,6 +2416,8 @@ guide	guide.Pad	13	21314	0
 guide	guide.Pages	4	1561	0
 guide	guide.PagesChecked	3	283	0
 guide	guide.Pair	6	3502	0
+guide	guide.ParseDigit	18	11471	0
+guide	guide.ParseLine	12	10934	0
 guide	guide.ParsePort	31	68776	0
 guide	guide.ParseProfile	38	120303	0
 guide	guide.ParseProfileUnchecked	21	62948	0
@@ -2454,6 +2469,7 @@ guide	guide.RemoveIfPresent	52	92589	0
 guide	guide.Replace	4	5505	0
 guide	guide.ReplaceBody	0	0	0
 guide	guide.Report	3	589	0
+guide	guide.ReportCause	1	46	0
 guide	guide.ReportJSON	39	374662	3
 guide	guide.ReportOnce	36	121706	0
 guide	guide.Reserve	13	1620	0
@@ -2513,6 +2529,7 @@ guide	guide.Tally	1	46	0
 guide	guide.TallyInMemory	12	33049	0
 guide	guide.TallyKeeps	11	23575	0
 guide	guide.TallyLoses	10	24938	0
+guide	guide.TargetNotError	1	111	0
 guide	guide.Tell	1	186	0
 guide	guide.TellMade	5	646	0
 guide	guide.TellsUnknown	1	46	0
@@ -5528,6 +5545,7 @@ typederrors	(typederrors.WithUnwrap).Error	1	111	0
 typederrors	(typederrors.WithUnwrap).Unwrap	6	2400	0
 typederrors	(typederrors.heldHidden).Error	1	497	0
 typederrors	(typederrors.hiddenCounter).Error	1	182	0
+typederrors	encoding/json.Marshal	3	17316	0
 typederrors	typederrors.AsCode	4	4141	0
 typederrors	typederrors.AsError	2	610	0
 typederrors	typederrors.AsField	1	46	0
@@ -5549,6 +5567,7 @@ typederrors	typederrors.CopyOut	0	0	0
 typederrors	typederrors.Differ	2	1026	0
 typederrors	typederrors.DifferTypes	2	1087	0
 typederrors	typederrors.DirectIs	2	1554	0
+typederrors	typederrors.FindsUnsupported	4	6460	0
 typederrors	typederrors.FirstByte	25	45832	0
 typederrors	typederrors.Floats	1	46	0
 typederrors	typederrors.FormatsPointerHolder	1	46	0
@@ -5596,6 +5615,7 @@ typederrors	typederrors.PromotedError	1	46	0
 typederrors	typederrors.ReachedError	1	46	0
 typederrors	typederrors.ReadsHeld	2	1500	0
 typederrors	typederrors.ReadsSaysAs	2	1469	0
+typederrors	typederrors.ReadsStr	4	6460	0
 typederrors	typederrors.Ret	7	9393	0
 typederrors	typederrors.ReturnsVariable	7	12323	0
 typederrors	typederrors.Same	2	479	0
@@ -5608,6 +5628,7 @@ typederrors	typederrors.Strings	2	5948	0
 typederrors	typederrors.StringsDiffer	2	7923	0
 typederrors	typederrors.Switch	6	3672	0
 typederrors	typederrors.SwitchMayMiss	4	3785	0
+typederrors	typederrors.SwitchesUnsupported	4	6460	0
 typederrors	typederrors.Text	3	1174	0
 typederrors	typederrors.ThroughAny	1	46	0
 typederrors	typederrors.ThroughHidden	1	46	0

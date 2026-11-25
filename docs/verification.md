@@ -1726,7 +1726,7 @@ types and values they hold, which are not known, and panics when both hold the s
 is not comparable; compare with nil instead
 ```
 
-Type assertions and type switches are not supported either.
+Type assertions and type switches on interface values are not supported either. On an error they are, to a concrete type or to `error`; see [Asking what an error holds](#asking-what-an-error-holds).
 
 A formula can compare two interface values. `a = b` says that they are the same value: one was copied from the other, by an assignment, a conversion to another interface type, or a call that hands it on. It is not Go's `==`. Two conversions of one concrete value are two values, so a function that returns `any(p), any(p)` proves `a != b`, although `a == b` is true in Go. A contract that says a function hands back what it was given, or that a field keeps its value, uses this form:
 
@@ -5360,35 +5360,186 @@ Return the error unchanged, or wrap an error of your own:
 return fmt.Errorf("load: %w", ErrMissing)
 ```
 
-### Other limits
+### Errors of your own types
 
-These are not supported, and a function that uses one is reported as `cannot verify`:
-
-- `errors.As`, which needs typed errors;
-- `errors.Join` and `errors.Unwrap`;
-- `errors.Is` on an error that came from a parameter, or from a trusted function whose contract does not vouch for it;
-- an error variable that its package assigns or takes the address of.
-
-A struct invariant cannot name an error variable.
-
-A value of a type with an `Error` method can be converted to `error`:
+A value of a type with an `Error` method can be returned as an error:
 
 ```go
-type CodeError struct{ code int }
+type SyntaxError int
 
 // @Ensures True
-func (e CodeError) Error() (s string) { return "bad code" }
+func (e SyntaxError) Error() (s string) { return "syntax error" }
 
-// @Ensures err = nil <-> code = 0
-func Check(code int) (err error) {
-	if code != 0 {
-		return CodeError{code: code}
+const (
+	ErrBadDigit SyntaxError = 1
+	ErrTooLong  SyntaxError = 2
+)
+
+// @Ensures err = nil <-> 48 <= c <= 57
+// @Ensures err = nil -> d = c - 48
+// @Ensures err != nil -> err = ErrBadDigit
+func ParseDigit(c byte) (d int, err error) {
+	if c < '0' || c > '9' {
+		return 0, ErrBadDigit
+	}
+	return int(c - '0'), nil
+}
+
+// @Ensures bad <-> ~(48 <= c <= 57)
+func IsBadDigit(c byte) (bad bool) {
+	_, err := ParseDigit(c)
+	return err == ErrBadDigit
+}
+```
+
+In a formula, `err = ErrBadDigit` means what `err == ErrBadDigit` means in Go, where Go converts the constant to an error: `err` holds a `SyntaxError` whose value is 1. A conversion can be written in a formula too, as in `err = ByteError(s[k])`. Its value must be a constant of the type, or a value whose Go type fits the type, since a formula does not wrap numbers. A string type converts a string or a `[]byte`, and nothing else.
+
+```go
+type ByteError byte
+
+// @Ensures True
+func (e ByteError) Error() (s string) { return "bad byte" }
+
+// @Ensures err = nil <-> (Forall k in [0, |s|) : 97 <= s[k] <= 122)
+// @Ensures err != nil -> (Exists k in [0, |s|) : err = ByteError(s[k]))
+func CheckBytes(s []byte) (err error) {
+	// @Invariant 0 <= i <= |s|
+	// @Invariant Forall k in [0, i) : 97 <= s[k] <= 122
+	// @Variant |s| - i
+	for i := 0; i < len(s); i++ {
+		if s[i] < 'a' || s[i] > 'z' {
+			return ByteError(s[i])
+		}
 	}
 	return nil
 }
 ```
 
-`vego` knows that such an error is not `nil` and which value it holds. Two such errors can be compared when their type is an integer, string, boolean, or pointer type, or a struct of these, as described in [Comparing errors](#comparing-errors). The error cannot be formatted or searched with `errors.Is`.
+`vego` knows that such an error is not `nil` and which value it holds. Two such errors are equal when they hold equal values of one type. This holds for integer, string, boolean, and pointer types, and for arrays and structs of these. It does not hold for a pointer to a value of size zero, since two such pointers may or may not be equal. For other types, such as a type of floats, `=` in a formula says only that one error was copied from the other, and `==` in code is refused, as described in [Comparing errors](#comparing-errors).
+
+#### Saying what an error holds
+
+`holds(err, T)` says that `err` is not nil and holds a value of type `T`, which is what `_, ok := err.(T)` reports. `err.(T)` is the value it holds, and it can be followed by fields:
+
+```go
+type LineError struct{ Line int }
+
+// @Ensures True
+func (e *LineError) Error() (s string) { return "error at a line" }
+
+// @Ensures err = nil <-> n <= 0
+// @Ensures err != nil -> holds(err, *LineError) And err.(*LineError) != nil And err.(*LineError).Line = n
+func ParseLine(n int) (err error) {
+	if n > 0 {
+		return &LineError{Line: n}
+	}
+	return nil
+}
+```
+
+`err.(T)` means something only where `holds(err, T)` is true. Write the two together, as `ParseLine` does. A type is named as in Go, as `T`, `*T`, or `pkg.T`. A trusted contract names a type by the path of its package, as in `*"io/fs".PathError`.
+
+#### Asking what an error holds
+
+A type assertion and a type switch take the value out of an error:
+
+```go
+// @Ensures line = n Or (n <= 0 And line = 0)
+func FailingLine(n int) (line int) {
+	if le, ok := ParseLine(n).(*LineError); ok {
+		return le.Line
+	}
+	return 0
+}
+
+// @Ensures k = 0 <-> n = 0
+func Describe(n int) (k int) {
+	var err error
+	if n < 0 {
+		err = ErrTooLong
+	} else if n > 0 {
+		err = ParseLine(n)
+	}
+	switch e := err.(type) {
+	case nil:
+		return 0
+	case SyntaxError:
+		if e == ErrTooLong {
+			return 1
+		}
+		return 2
+	case *LineError:
+		return 3
+	default:
+		return 4
+	}
+}
+```
+
+The form with one result panics when the error does not hold a value of the type, so `vego` must prove that it does:
+
+```go
+// @Ensures True
+func MustLine(n int) (line int) {
+	return ParseLine(n).(*LineError).Line
+}
+```
+
+```text
+vego: the type assertion ParseLine(n).(*LineError) may panic: ParseLine(n) may not hold a *LineError;
+use the form v, ok := ParseLine(n).(*LineError), or show that it holds one, as a contract does with
+holds(err, T)
+```
+
+The type must be a concrete type, or `error` itself. An assertion to another interface type is not supported yet.
+
+#### Finding an error with errors.As
+
+`errors.As` and `errors.AsType` find a value of a type in an error and in the errors it wraps. In a formula, `as(err, T)` says that `errors.As` finds one:
+
+```go
+// @Ensures err = nil <-> n <= 0
+// @Ensures n > 0 -> as(err, *LineError)
+func LoadLine(n int) (err error) {
+	if err := ParseLine(n); err != nil {
+		return fmt.Errorf("load: %w", err)
+	}
+	return nil
+}
+
+// @Ensures n > 0 -> found
+func LineOf(n int) (found bool) {
+	var le *LineError
+	return errors.As(LoadLine(n), &le)
+}
+
+// @Ensures found <-> n > 0
+func LineOfType(n int) (found bool) {
+	_, found = errors.AsType[*LineError](ParseLine(n))
+	return found
+}
+```
+
+`errors.As` is supported only as `errors.As(err, &v)` for a local variable `v`. `errors.As` stops at an error whose type can be assigned to the type of `v`, and `errors.AsType` only at one of that very type, so `as(err, T)` says nothing of `errors.AsType`. Both run the `As` and `Unwrap` methods of the errors they search, so the first argument must have a known origin, as that of `errors.Is` must.
+
+The target must be a concrete type that implements `error`. For any other type, `errors.As` panics:
+
+```go
+// @Ensures True
+func TargetNotError(n int) (found bool) {
+	var line int
+	return errors.As(LoadLine(n), &line)
+}
+```
+
+```text
+vego: cannot verify TargetNotError: errors.As panics here: the target has type int, which is not an
+interface and does not implement error
+```
+
+A target of an interface type is not supported yet.
+
+#### What the methods of the type may do
 
 Code that is not verified may run any method of an error at any time, for example in a trusted function that runs it. So each method of the type must have a contract that modifies nothing and has no `Requires` clause. A type without one is reported where it is converted:
 
@@ -5422,6 +5573,69 @@ These are reported at the conversion too, each with what to change:
 - a method that returns such a value, for the same reason;
 - a type that holds, through an exported field, a value of a type that has methods, which reflection reaches;
 - a `nil` pointer converted to error when its type has `Error` with a value receiver, since calling it would panic.
+
+#### Formatting and wrapping errors of your own types
+
+An error of your own type has a known origin, as described in [Wrapping errors](#wrapping-errors), when its type meets all of these conditions:
+
+- `==` on it reports whether two values are the same: an integer, string, boolean, or pointer type, or a struct of these;
+- it has no `Unwrap`, `Is`, `As`, `Format`, or `GoString` method, which `errors.Is`, `errors.As`, and `fmt` would run;
+- its `Error` method has a contract;
+- what it holds can be formatted, since `fmt` prints the value instead of calling `Error` for verbs such as `%d`.
+
+Such an error can be formatted, wrapped with `%w`, asked for its text with `Error`, and searched with `errors.Is`. `errors.Is` finds in it only the error itself, as `==` does. `ParseDigit`, `CheckBytes`, and `ParseLine` above return such errors, and so does `Check`:
+
+```go
+type CodeError struct{ code int }
+
+// @Ensures True
+func (e CodeError) Error() (s string) { return "bad code" }
+
+// @Ensures err = nil <-> code = 0
+func Check(code int) (err error) {
+	if code != 0 {
+		return CodeError{code: code}
+	}
+	return nil
+}
+```
+
+An error of a type that fails a condition can be returned and compared with `nil`. Where it is formatted or searched, the message says which condition the type fails:
+
+```go
+type WithCause struct{ code int }
+
+// @Ensures True
+func (w WithCause) Error() (s string) { return "with cause" }
+
+// @Ensures e = nil
+func (w WithCause) Unwrap() (e error) { return nil }
+
+// @Ensures err != nil
+func ReportCause() (err error) {
+	var cause error = WithCause{code: 1}
+	return fmt.Errorf("report: %w", cause)
+}
+```
+
+```text
+vego: cannot verify ReportCause: formatting cause would run the methods of an error whose origin is not
+known; only an error made by errors.New or fmt.Errorf, here or in a verified function, one that a contract
+vouches for, or one that holds a value of a type whose errors have a known origin, can be formatted; cause
+is assigned WithCause{…} at typed.go:170:20, a value of type WithCause, whose errors have no known origin:
+WithCause has a method Unwrap, which errors.Is, errors.As, or fmt would run
+```
+
+### Other limits
+
+These are not supported, and a function that uses one is reported as `cannot verify`:
+
+- `errors.Join` and `errors.Unwrap`;
+- `errors.Is` on an error that came from a parameter, or from a trusted function whose contract does not vouch for it;
+- an error variable that its package assigns or takes the address of;
+- a type assertion of an error to an interface type other than `error`, and `errors.As` with a target of an interface type.
+
+A struct invariant cannot name an error variable.
 
 ### When a package-level error is known
 
@@ -7653,7 +7867,7 @@ more
 
 A value converted to an interface is checked against the methods of that interface only. The function may assert any interface value it reaches from the parameter, through fields, elements, and pointers, and through what the methods it can call return. So over a parameter that is not of type `error`, a listed interface may have only methods that each of those interface types has. A listed function type must be one that the parameter's type reaches. That holds even when the method has a contract. A function like `use` has no entry that verified code can rely on. Call it from code that is not verified.
 
-Over a parameter of type `error`, `asserts` may list any type. Each method of a value converted to `error` is checked where it is converted. Such a value holds no interface value other than an error, and its methods return none (see [Other limits](#other-limits)).
+Over a parameter of type `error`, `asserts` may list any type. Each method of a value converted to `error` is checked where it is converted. Such a value holds no interface value other than an error, and its methods return none (see [What the methods of the type may do](#what-the-methods-of-the-type-may-do)).
 
 `asserts` also affects which cycles `vego` reports. Without `asserts` for a parameter, `vego` counts every method with an exported name and every function value of your package as code the call may run, as for a function with no entry (see [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods)). With it, only what the claim names counts.
 
@@ -7999,11 +8213,12 @@ Without a claim in its contract, `vego` knows nothing about the methods of an er
 
 With `vouches: [err]`, an error that the function returns in `err` has a known origin. Verified code can format it, wrap it with `%w`, ask `errors.Is` about it, compare it with any error, and pass it to another trusted function. A verified function that returns it passes the claim on to its callers. `vego` knows what `errors.Is` finds in the error only from what the contract says, as in `err = io.EOF` above.
 
-`vouches` is a claim about code that `vego` does not read. Before you make it, read the source of the function and of every error type it can return. The claim is about every non-nil error that the function returns in a listed result. It covers every error in the tree of that error, which is what `Unwrap` returns from it, and from that again. It also covers every value that these errors hold. You claim three things:
+`vouches` is a claim about code that `vego` does not read. Before you make it, read the source of the function and of every error type it can return. The claim is about every non-nil error that the function returns in a listed result. It covers every error in the tree of that error, which is what `Unwrap` returns from it, and from that again. It also covers every value that these errors hold. You claim four things:
 
 - Every method of these values returns without panicking and writes nothing that a caller can see, whatever arguments it is passed. This covers `Error`, `Is`, `Unwrap`, and the methods that `fmt` calls when it formats a value. An `Is` method must not call a method of its argument, because the argument can be any error.
 - `==` on these errors cannot panic, and it reports true only for two errors that are the same. Every one of them equals itself. `errors.Is` reports the same for two such errors that `==` reports equal, and the same for two targets that `==` reports equal.
 - What `errors.Is` reports for one of these errors and a given target does not change after the function returns.
+- The tree is finite: following `Unwrap` from the error reaches an error without a further one. `errors.Is` and `errors.As` walk the tree, and on a tree that leads back to itself they do not return.
 
 A pointer to a struct meets these conditions when its methods only read its fields and call the same methods of the errors it holds, those errors meet the conditions themselves, and nothing writes the fields after the function returns. The function must not keep the pointer and change the struct later. An integer type whose `Is` method only compares its argument with error variables, such as `syscall.Errno`, also meets them. A type with a float in it does not, because `==` reports false for a NaN compared with itself. An `Is` method that calls `target.Error()` does not either.
 
@@ -8708,7 +8923,12 @@ This table lists the most common messages.
 | `... list bs[0] in a // @Modifies clause, which covers what it owns; ...` | A clause lists a slice of buffers, which does not cover the arrays its elements own. | List the element. |
 | `T.M has a value receiver, and the pointer that the interface value holds may be nil` | A `*T` that may be nil is converted to an interface, and `M` copies what it points to. | Convert a pointer that is not nil. |
 | `cannot verify F: comparing interface values is not supported yet` | Two interface values, or an interface value and a value of another type, are compared. | Compare with `nil` only. |
-| `cannot verify F: type assertions and type switches are not supported yet` | The type that an interface value holds is not known. | Make the assertion in code that is not verified. |
+| `cannot verify F: type assertions and type switches are not supported yet` | The type that an interface value holds is not known. | Make the assertion in code that is not verified. On an error, assert to a concrete type or to `error`. |
+| `the type assertion X.(T) may panic: X may not hold a T; ...` | The form with one result is used where the error may hold another type. | Use `v, ok := X.(T)`, or show that it holds one with `holds(err, T)`. See [Asking what an error holds](#asking-what-an-error-holds). |
+| `cannot verify F: converting a T to an error is not supported: ...` | A method of `T`, or what `T` holds or returns, could do what code that is not verified cannot account for. The message says which. | See [What the methods of the type may do](#what-the-methods-of-the-type-may-do). |
+| `cannot verify F: errors.As panics here: the target has type T, which is not an interface and does not implement error` | The target of `errors.As` is not an error type. | Use a target whose type implements `error`. See [Finding an error with errors.As](#finding-an-error-with-errorsas). |
+| `cannot verify F: errors.As is supported only as errors.As(err, &v) for a local variable v` | The second argument is another expression. | Declare a local variable and pass its address. |
+| `... a value of type T, whose errors have no known origin: T has a method Unwrap, ...` | An error of your own type is formatted, wrapped, or searched, and its type fails a condition of a known origin. The message names the condition. | See [Formatting and wrapping errors of your own types](#formatting-and-wrapping-errors-of-your-own-types). |
 | `cannot verify F: converting x, a J, to I is not supported: I has M from I.M, and J has M from J.M` | `I` has a method from a declaration that `J` does not have. | Make `I` embed the interface that declares the method. See [Converting between interfaces](#converting-between-interfaces). |
 | `the contract of B.M is not part of this interface` | The interface gets a method of one name from two declarations, and Go keeps the other one. | Declare the method once, with its contract. |
 | `a contract can only be declared on a method of a defined interface type at package level without type parameters` | The contract is on a method of an interface type written in place, of an alias, or of a generic type. | Declare a named interface type at package level. |
@@ -8775,7 +8995,10 @@ A function that uses any of the following is reported as `cannot verify`:
 - `io.MultiReader` and `io.MultiWriter` handed a slice whole, as in `io.MultiReader(rs...)`, when what they return is read or written (see [Wrappers in package io](#wrappers-in-package-io));
 - `context.WithCancel` and the functions like it, which keep the context they are given and run it on other goroutines (see [Types without a shipped entry](#types-without-a-shipped-entry));
 - a function that keeps code it is given anywhere but in a result or in memory that a parameter reaches, such as a registry, a goroutine, or a timer, which has no true entry; making a trusted function with `keeps` into a value; and handing a function literal, a function, or a method value of a type without a contract to a parameter under `keeps` (see [Functions that keep what they are given](#functions-that-keep-what-they-are-given));
-- comparing interface values in code with anything but `nil`, type assertions, and type switches;
+- comparing interface values in code with anything but `nil`, and type assertions and type switches on interface values other than errors;
+- a type assertion of an error to an interface type other than `error`, and `errors.As` and `errors.AsType` with a target of an interface type (see [Asking what an error holds](#asking-what-an-error-holds));
+- errors of your own types whose methods do what code that is not verified could not account for (see [What the methods of the type may do](#what-the-methods-of-the-type-may-do)), and errors of types with `Unwrap`, `Is`, `As`, `Format`, or `GoString` methods formatted, wrapped, or searched (see [Formatting and wrapping errors of your own types](#formatting-and-wrapping-errors-of-your-own-types));
+- a trusted entry whose `asserts` lists, over a parameter that is not an error, an interface with a method that an interface the parameter reaches lacks (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed));
 - a cycle of calls that goes through a call through an interface value or a function value, or through code of another package (see [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods)), reported as `this call may not end`;
 - converting an interface value to an interface whose methods it does not have from the same declarations, unless the contract of each of its methods implies the target's (see [Converting between interfaces](#converting-between-interfaces));
 - keeping an `http.ResponseWriter`, or a value that holds one or was converted from one (see [A writer is used only during its request](#a-writer-is-used-only-during-its-request)), and a struct of your own that wraps a `ResponseWriter` and is passed on as one, whose `Write` calls through the writer it holds;
@@ -8828,7 +9051,7 @@ Floating-point values are supported but opaque. They can be passed around and us
 
 A proof by `vego` depends on the following assumptions. Each concerns something `vego` cannot see.
 
-- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and holds no value that can hold code anywhere it was not held when the call began, unless `keeps` lists the parameter. For a parameter listed under `keeps`, it runs the code during the call only if `runs` lists the parameter too, holds it when it returns only in memory that the results and parameters listed there reach, and has started or registered nothing that runs it later: no goroutine, timer, finalizer or cleanup, callback given to another package, or package-level variable. For a parameter listed under `stores`, the function stores into the memory that its `modifies` lists under that parameter only memory it made during the call. For a parameter listed under `prints`, the function formats as the function that `prints` names does, calls the `Write` of that parameter once with exactly what that function returns, calls nothing else of it, and returns what `Write` returned. For a parameter listed under `encodes`, the function encodes the value as package `encoding/json` does. It runs no method of the value but those of `time.Time`, `json.RawMessage`, and `json.Number` that `encoding/json` runs, only while the call lasts and on the goroutine that called it, and it allocates within the bound `vego` proves at the call. It keeps nothing of the value, with one exception. Built without `GOEXPERIMENT=jsonv2`, it returns for a NaN or an infinity a `*json.UnsupportedValueError` whose field `Value` is a `reflect.Value` of that float in the memory of the value, which reflection could set. No proof depends on it. No formula reads a float, and verified code cannot assert an error to its type to reach the field. For a parameter listed under `decodes`, the function decodes into the value as `encoding/json` does. It writes only the exported fields that `encoding/json` writes, runs no method of the value but those of `time.Time`, `json.RawMessage`, and `json.Number`, keeps nothing of what it is handed, and allocates within the bound `vego` proves at the call. When every slice, map, and pointer in what it decodes into is `nil`, which `vego` requires at each call, everything it stores there is memory it made during the call. `(*json.Encoder).Encode`, called on the encoder that `json.NewEncoder(w)` makes in the same expression, encodes its argument as `Marshal` does. When that fails, it returns the error of `Marshal` and calls nothing of `w`. Otherwise it calls `w.Write` once, with exactly what `Marshal` returns followed by a newline, calls nothing else of `w`, and returns the error that `Write` returned. `(*json.Decoder).Decode`, called on the decoder that `json.NewDecoder(io.LimitReader(r, n))` makes in the same expression, calls nothing of `r` but its `Read`. It calls `Read` any number of times, each time with a buffer that is not empty, only while `Decode` lasts and on the goroutine that called it, and reads at most `n` bytes in all. It decodes the first value it reads as `Unmarshal` does, and leaves what follows that value unread in `r` or drops it with the decoder. Nothing holds the decoder after the expression, and nothing it starts keeps `r`. For a parameter listed under `runs` or `keeps`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter. Where such a value runs what the function keeps, as the reader that `io.TeeReader` returns runs the reader and the writer it is given, it meets its contract whenever what the function keeps meets theirs. A function whose entry says `isolated: true`, or whose trust file says `isolated` at its top, runs no code but what the call hands it through its arguments and receiver, and reaches no code through memory that another call set, also not through any function it calls. `log.Printf` is not isolated, since it writes to the output that `log.SetOutput` set. A function whose entry says `initialiserOnly: true` meets its contract when it returns. Where it fails it panics, and the initialiser of a package-level variable is the only place `vego` allows a call of it.
+- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and holds no value that can hold code anywhere it was not held when the call began, unless `keeps` lists the parameter. For a parameter listed under `keeps`, it runs the code during the call only if `runs` lists the parameter too, holds it when it returns only in memory that the results and parameters listed there reach, and has started or registered nothing that runs it later: no goroutine, timer, finalizer or cleanup, callback given to another package, or package-level variable. For a parameter listed under `stores`, the function stores into the memory that its `modifies` lists under that parameter only memory it made during the call. For a parameter listed under `prints`, the function formats as the function that `prints` names does, calls the `Write` of that parameter once with exactly what that function returns, calls nothing else of it, and returns what `Write` returned. For a parameter listed under `encodes`, the function encodes the value as package `encoding/json` does. It runs no method of the value but those of `time.Time`, `json.RawMessage`, and `json.Number` that `encoding/json` runs, only while the call lasts and on the goroutine that called it, and it allocates within the bound `vego` proves at the call. It keeps nothing of the value, with one exception. Built without `GOEXPERIMENT=jsonv2`, it returns for a NaN or an infinity a `*json.UnsupportedValueError` whose field `Value` is a `reflect.Value` of that float in the memory of the value, which reflection could set. No proof depends on it. No formula reads a float, and verified code cannot take the value out of such an error: a type assertion, a case of a type switch, and `errors.As` are refused for a type that holds a `reflect.Value`. For a parameter listed under `decodes`, the function decodes into the value as `encoding/json` does. It writes only the exported fields that `encoding/json` writes, runs no method of the value but those of `time.Time`, `json.RawMessage`, and `json.Number`, keeps nothing of what it is handed, and allocates within the bound `vego` proves at the call. When every slice, map, and pointer in what it decodes into is `nil`, which `vego` requires at each call, everything it stores there is memory it made during the call. `(*json.Encoder).Encode`, called on the encoder that `json.NewEncoder(w)` makes in the same expression, encodes its argument as `Marshal` does. When that fails, it returns the error of `Marshal` and calls nothing of `w`. Otherwise it calls `w.Write` once, with exactly what `Marshal` returns followed by a newline, calls nothing else of `w`, and returns the error that `Write` returned. `(*json.Decoder).Decode`, called on the decoder that `json.NewDecoder(io.LimitReader(r, n))` makes in the same expression, calls nothing of `r` but its `Read`. It calls `Read` any number of times, each time with a buffer that is not empty, only while `Decode` lasts and on the goroutine that called it, and reads at most `n` bytes in all. It decodes the first value it reads as `Unmarshal` does, and leaves what follows that value unread in `r` or drops it with the decoder. Nothing holds the decoder after the expression, and nothing it starts keeps `r`. For a parameter listed under `runs` or `keeps`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter. Where such a value runs what the function keeps, as the reader that `io.TeeReader` returns runs the reader and the writer it is given, it meets its contract whenever what the function keeps meets theirs. A function whose entry says `isolated: true`, or whose trust file says `isolated` at its top, runs no code but what the call hands it through its arguments and receiver, and reaches no code through memory that another call set, also not through any function it calls. `log.Printf` is not isolated, since it writes to the output that `log.SetOutput` set. A function whose entry says `initialiserOnly: true` meets its contract when it returns. Where it fails it panics, and the initialiser of a package-level variable is the only place `vego` allows a call of it.
 - The methods of `bytes.Buffer`, `strings.Builder`, `bufio.Writer`, `bufio.Reader`, `bufio.Scanner`, and `log.Logger` that have shipped entries write nothing that verified code can see other than the struct and the memory that the value owns, as [Writing through a buffer](#writing-through-a-buffer) lists it. After a call, the value owns only what it owned before the call and memory that the call made. The read position of a `bytes.Buffer` never passes the end of what was written to it. Every method of `bytes.Buffer` keeps it so, and `|b|` is the number of bytes between the two.
 - Code of another package that is not verified runs code of the verified package only as `vego` follows it, which [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods) describes: during a call that the verified package makes, it runs only what that call hands it, through the arguments and the receiver. Code that it kept from an earlier call, a value it stored, or code that it runs on another goroutine or at another time, does not call back into a verified function while that function runs, so that the call never ends. A cycle that stays in the package, or that goes through what a call hands to another package, is found and reported.
 - For a parameter listed under `runs` or `keeps`, the function calls through an interface value or a function value nothing that the parameter holds, or that a call of what the parameter holds returns, but the methods of the interfaces and the function types that the parameter's type reaches and those of the types listed under `asserts`, and it uses no reflection to call what the parameter holds (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). Verified code answers for the methods that the parameter's type has, each checked where the value is converted. The author of the entry answers for the rest. An entry such as that of `use(p Pinger)` with `runs: [p]` and no `asserts`, for a function that asserts `p` to an interface with `Bump` and calls it, is false, and a proof that relies on it is worthless. For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
@@ -8921,7 +9144,11 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `ErrEmpty`, `io.EOF` | an error variable of the package, or of an imported package |
 | `limit`, `lib.Limit`, `table[i]` | in the contract of a verified function, a package-level variable that nothing changes, of the package or of an imported package |
 | `"io/fs".ErrNotExist` | in a trusted contract, an error variable named by the path of its package |
-| `err = ErrEmpty` | the two are the same error |
+| `err = ErrEmpty` | the two are the same error; for errors that hold values of integer, string, boolean, or pointer types, or arrays and structs of these, what `==` reports in Go |
+| `err = ByteError(s[k])`, `err = ErrBadDigit` | `err` holds the value converted to the error type, as Go converts it; a conversion of a constant of the type, or of a value whose Go type fits it |
+| `holds(err, *LineError)` | `err` is not nil and holds a value of that type, as `_, ok := err.(*LineError)` reports |
+| `err.(*LineError).Line` | the value `err` holds, with its fields; it means something only where `holds(err, *LineError)` is true |
+| `as(err, *LineError)` | `errors.As` finds a value of that type in `err` or in what it wraps |
 | `x = y` | for two interface values: the same value, one copied from the other; not Go's `==` |
 | `is(err, target)` | `errors.Is(err, target)` reports true |
 | `valid(x)`, `valid(s.store')`, `valid(old(s))` | the invariants of the struct `x` is or points to hold, with those of what it owns |

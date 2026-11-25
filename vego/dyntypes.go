@@ -682,6 +682,9 @@ func (v *fnVerifier) assertion(e *ast.TypeAssertExpr, st *state, guard []*logic.
 	if !ok {
 		v.unsupported(e.Pos(), fmt.Sprintf("asserting an error to %s is not supported: values of its type are not modelled", shown(target)))
 	}
+	if why := reflectHeld(target, "", map[types.Type]bool{}); why != "" {
+		v.unsupported(e.Pos(), fmt.Sprintf("asserting an error to %s is not supported: %s", shown(target), why))
+	}
 	v.meetAssertion(st, target)
 	holds := logic.And(logic.Not(logic.IsNil(x)), logic.Eq(errorTag(x), tag))
 	held := v.heldRead(st, x, target)
@@ -695,6 +698,48 @@ func (v *fnVerifier) assertion(e *ast.TypeAssertExpr, st *state, guard []*logic.
 		got[i] = logic.Ite(holds, held[i], zero[i])
 	}
 	return []value{got, {holds}}
+}
+
+// reflectHeld says where a value of type t holds, through pointers and
+// fields at any depth, a reflect.Value or an unsafe.Pointer, which an error
+// of the standard library can hold of memory it was handed: built without
+// GOEXPERIMENT=jsonv2, json.Marshal returns for a NaN a
+// *json.UnsupportedValueError whose Value refers to the float in the
+// memory of what it was given, which reflection could set. Taking such a
+// value out of an error is refused, so verified code never holds one; ""
+// when there is none.
+func reflectHeld(t types.Type, path string, seen map[types.Type]bool) string {
+	if seen[t] {
+		return ""
+	}
+	seen[t] = true
+	if named, ok := types.Unalias(t).(*types.Named); ok && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "reflect" && named.Obj().Name() == "Value" {
+		return "it holds" + path + " a reflect.Value, through which reflection could set the memory it refers to"
+	}
+	switch u := t.Underlying().(type) {
+	case *types.Basic:
+		if u.Kind() == types.UnsafePointer {
+			return "it holds" + path + " an unsafe.Pointer, through which the memory it refers to could be set"
+		}
+	case *types.Pointer:
+		return reflectHeld(u.Elem(), path, seen)
+	case *types.Array:
+		return reflectHeld(u.Elem(), path, seen)
+	case *types.Slice:
+		return reflectHeld(u.Elem(), path, seen)
+	case *types.Map:
+		if why := reflectHeld(u.Key(), path, seen); why != "" {
+			return why
+		}
+		return reflectHeld(u.Elem(), path, seen)
+	case *types.Struct:
+		for field := range u.Fields() {
+			if why := reflectHeld(field.Type(), path+" in field "+field.Name(), seen); why != "" {
+				return why
+			}
+		}
+	}
+	return ""
 }
 
 // meetAssertion records that the function asks what an error holds: the
@@ -712,8 +757,8 @@ func (v *fnVerifier) meetAssertion(st *state, t types.Type) {
 func (v *fnVerifier) checkAssertion(st *state, guard []*logic.Term, holds *logic.Term, e *ast.TypeAssertExpr, text, why string) {
 	done := v.at(e.Pos())
 	defer done()
-	v.check(st, guard, holds, e.Pos(), "the type assertion %s may panic: %s; use the form v, ok := %s, or say what the error holds with holds(%s, T)",
-		text, why, text, types.ExprString(e.X))
+	v.check(st, guard, holds, e.Pos(), "the type assertion %s may panic: %s; use the form v, ok := %s, or show that it holds one, as a contract does with holds(err, T)",
+		text, why, text)
 }
 
 // typeSwitch executes a type switch on an error (S3 of F33). The operand
@@ -774,6 +819,9 @@ func (v *fnVerifier) typeSwitch(s *ast.TypeSwitchStmt, st *state, c ctrl, k func
 				}
 				if _, ok := layoutOf(t); !ok {
 					v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch is not supported: values of its type are not modelled", shown(t)))
+				}
+				if why := reflectHeld(t, "", map[types.Type]bool{}); why != "" {
+					v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch is not supported: %s", shown(t), why))
 				}
 				v.meetAssertion(st, t)
 				alternatives = append(alternatives, logic.And(logic.Not(logic.IsNil(x)), logic.Eq(errorTag(x), tag)))
