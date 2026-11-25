@@ -428,6 +428,12 @@ func (v *fnVerifier) isAppend(e ast.Expr) bool {
 // pointer or struct that becomes an error is a value the verifier does not
 // follow.
 func (v *fnVerifier) callResults(e ast.Expr, st *state, wants []types.Type) []value {
+	if len(wants) > 1 && wants[0] == nil {
+		if v.discarded == nil {
+			v.discarded = map[ast.Expr]bool{}
+		}
+		v.discarded[ast.Unparen(e)] = true
+	}
 	call, ok := ast.Unparen(e).(*ast.CallExpr)
 	if assert, asserted := ast.Unparen(e).(*ast.TypeAssertExpr); asserted {
 		// v, ok := x.(T): each result must have the type it is assigned

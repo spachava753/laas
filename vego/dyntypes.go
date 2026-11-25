@@ -685,7 +685,7 @@ func (v *fnVerifier) assertion(e *ast.TypeAssertExpr, st *state, guard []*logic.
 	if why := reflectHeld(target, "", map[types.Type]bool{}); why != "" {
 		v.unsupported(e.Pos(), fmt.Sprintf("asserting an error to %s is not supported: %s", shown(target), why))
 	}
-	if why := v.contractedReason(target); why != "" {
+	if why := v.contractedReason(target); why != "" && !(commaOk && v.discarded[e]) {
 		v.unsupported(e.Pos(), fmt.Sprintf("asserting an error to %s is not supported: %s", shown(target), why))
 	}
 	v.meetAssertion(st, target)
@@ -754,7 +754,10 @@ func reflectHeld(t types.Type, path string, seen map[types.Type]bool) string {
 // claim that it meets the contract, as a trusted function that returns an
 // error vouches for nothing it holds. The holdsContractedValue rule of
 // trusted results counts no error, and a value taken out would be called
-// under the contract (S0 of F34, typederrors/contracted.go).
+// under the contract (S0 of F34, typederrorspos/contracted.go). Only a
+// value taken out is refused: the forms _, ok := x.(T), errors.AsType
+// whose value is discarded, and a case whose clause does not use its
+// variable give nothing to verified code (F7 of the review of S0).
 func contractedHeld(pv *pkgVerifier, t types.Type, path string, seen map[types.Type]bool) string {
 	if seen[t] {
 		return ""
@@ -805,8 +808,25 @@ func (v *fnVerifier) contractedReason(t types.Type) string {
 	if found == "" {
 		return ""
 	}
-	return "it holds" + found + ", and nothing claims that a value taken out of an interface value meets that contract: " +
+	holds := "it holds" + found
+	if _, isSignature := t.Underlying().(*types.Signature); isSignature {
+		// The type itself is the function type with a contract.
+		holds = "it is" + found
+	}
+	return holds + ", and nothing claims that a value taken out of an interface value meets that contract: " +
 		"code that is not verified may have made it"
+}
+
+// usesObject reports whether a node uses an object.
+func usesObject(n ast.Node, info *types.Info, obj types.Object) bool {
+	used := false
+	ast.Inspect(n, func(m ast.Node) bool {
+		if id, ok := m.(*ast.Ident); ok && info.Uses[id] == obj {
+			used = true
+		}
+		return !used
+	})
+	return used
 }
 
 // meetAssertion records that the function asks what an error holds: the
@@ -890,7 +910,7 @@ func (v *fnVerifier) typeSwitch(s *ast.TypeSwitchStmt, st *state, c ctrl, k func
 				if why := reflectHeld(t, "", map[types.Type]bool{}); why != "" {
 					v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch is not supported: %s", shown(t), why))
 				}
-				if why := v.contractedReason(t); why != "" {
+				if why := v.contractedReason(t); why != "" && len(clause.List) == 1 && implicit != nil && usesObject(clause, v.info, implicit) {
 					v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch is not supported: %s", shown(t), why))
 				}
 				v.meetAssertion(st, t)

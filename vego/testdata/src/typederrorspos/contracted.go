@@ -75,8 +75,8 @@ func FindsPos() (r bool) {
 
 // @Ensures ~r
 func FindsPosType() (r bool) {
-	_, r = errors.AsType[*PosErr](errors.New("x")) // want `cannot verify FindsPosType: errors.AsType with a target of \*PosErr is not supported: it holds in field F a function value of type Pos`
-	return r
+	p, _ := errors.AsType[*PosErr](errors.New("x")) // want `cannot verify FindsPosType: errors.AsType with a target of \*PosErr is not supported: it holds in field F a function value of type Pos`
+	return p != nil
 }
 
 // A type that holds a function value of a type without a contract is not
@@ -95,4 +95,127 @@ func HoldsAnError(err error) (r bool) {
 		return false
 	}
 	return err == nil
+}
+
+// Forms that take nothing out of the error verify (F7 of the review of S0):
+// whether it holds a type, and a case whose clause does not use its
+// variable.
+
+// @Ensures ok <-> err != nil And holds(err, *PosErr)
+func IsPosErr(err error) (ok bool) {
+	_, ok = err.(*PosErr)
+	return ok
+}
+
+// @Ensures k = 1 <-> err != nil And holds(err, *PosErr)
+func Classify(err error) (k int) {
+	switch err.(type) {
+	case *PosErr:
+		return 1
+	}
+	return 0
+}
+
+// @Ensures k = 1 <-> err != nil And holds(err, *PosErr)
+func ClassifyUnused(err error) (k int) {
+	switch e := err.(type) {
+	case *PosErr:
+		return 1
+	case *HookErr:
+		if e != nil {
+			return 2
+		}
+		return 3
+	}
+	return 0
+}
+
+// @Ensures ~ok
+func FindsNoPos() (ok bool) {
+	_, ok = errors.AsType[*PosErr](errors.New("x"))
+	return ok
+}
+
+// A clause with two types gives the variable the error itself, so it takes
+// nothing out.
+//
+// @Ensures True
+func ClassifyTwo(err error) (k int) {
+	switch e := err.(type) {
+	case *PosErr, *PosList:
+		if e != nil {
+			return 1
+		}
+	}
+	return 0
+}
+
+// An interface value with a contract held in the error (F8 of the review of
+// S0): Sizer's Size is called under its contract.
+
+// Sizer reports a size.
+type Sizer interface {
+	// @Ensures n >= 0
+	Size() (n int)
+}
+
+// SizerErr holds a Sizer.
+type SizerErr struct{ S Sizer }
+
+// @Ensures True
+func (e *SizerErr) Error() (s string) { return "sizer" }
+
+type negative struct{}
+
+func (negative) Size() (n int) { return -1 }
+
+// handsSizer is trusted: its entry says nothing of what the error holds.
+func handsSizer() error { return &SizerErr{S: negative{}} }
+
+// @Ensures n >= 0
+func SizeOf() (n int) {
+	if e, ok := handsSizer().(*SizerErr); ok && e != nil && e.S != nil { // want `cannot verify SizeOf: asserting an error to \*SizerErr is not supported: it holds in field S a value of type Sizer, whose method Size has a contract`
+		return e.S.Size()
+	}
+	return 0
+}
+
+// PosMap holds Pos values in a map.
+type PosMap struct{ M map[string]Pos }
+
+// @Ensures True
+func (e *PosMap) Error() (s string) { return "pos map" }
+
+// handsMap is trusted: its entry says nothing of what the error holds.
+func handsMap() error {
+	return &PosMap{M: map[string]Pos{"a": func(x int) (y int) { return -1 }}}
+}
+
+// @Ensures r >= 0
+func FromMap() (r int) {
+	if e, ok := handsMap().(*PosMap); ok && e != nil { // want `cannot verify FromMap: asserting an error to \*PosMap is not supported: it holds in field M a function value of type Pos`
+		if f, found := e.M["a"]; found && f != nil {
+			return f(1)
+		}
+	}
+	return 0
+}
+
+// PosFunc is an error that is itself a function with a contract.
+//
+// @Ensures y >= 0
+type PosFunc func(x int) (y int)
+
+// @Ensures True
+func (f PosFunc) Error() (s string) { return "pos func" }
+
+// handsPosFunc is trusted: its entry says nothing of what the error holds.
+func handsPosFunc() error { return PosFunc(func(x int) (y int) { return -1 }) }
+
+// @Ensures r >= 0
+func CallsPosFunc() (r int) {
+	if f, ok := handsPosFunc().(PosFunc); ok && f != nil { // want `cannot verify CallsPosFunc: asserting an error to PosFunc is not supported: it is a function value of type PosFunc, which has a contract, and nothing claims`
+		return f(1)
+	}
+	return 0
 }

@@ -5521,7 +5521,7 @@ a function value of type NonNeg, which has a contract, and nothing claims that a
 an interface value meets that contract: code that is not verified may have made it
 ```
 
-The same holds for a case of a type switch and for the target of `errors.As` and `errors.AsType`.
+The same holds for a case of a type switch whose clause uses its variable, for the target of `errors.As`, and for `errors.AsType`. The forms that take nothing out still verify: `_, ok := err.(*HookError)`, `_, ok = errors.AsType[*HookError](err)`, and a case whose clause does not use its variable.
 
 #### Finding an error with errors.As
 

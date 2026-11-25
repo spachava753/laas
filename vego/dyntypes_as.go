@@ -179,7 +179,7 @@ func isErrorsAs(callee *types.Func) (asKind, bool) {
 // asTarget checks the type a walk is asked for: one that errors.As does not
 // panic on, a concrete type that implements error, whose value can be
 // copied out of an error, and that the tables can name.
-func (v *fnVerifier) asTarget(call *ast.CallExpr, t types.Type, who string) {
+func (v *fnVerifier) asTarget(call *ast.CallExpr, t types.Type, who string, taken bool) {
 	shown := types.TypeString(t, types.RelativeTo(v.pass.Pkg))
 	switch {
 	case types.IsInterface(t):
@@ -200,7 +200,7 @@ func (v *fnVerifier) asTarget(call *ast.CallExpr, t types.Type, who string) {
 	if why := reflectHeld(t, "", map[types.Type]bool{}); why != "" {
 		v.unsupported(call.Pos(), fmt.Sprintf("%s with a target of %s is not supported: %s", who, shown, why))
 	}
-	if why := v.contractedReason(t); why != "" {
+	if why := v.contractedReason(t); why != "" && taken {
 		v.unsupported(call.Pos(), fmt.Sprintf("%s with a target of %s is not supported: %s", who, shown, why))
 	}
 }
@@ -231,7 +231,9 @@ func (v *fnVerifier) errorsAs(call *ast.CallExpr, kind asKind, st *state, guard 
 		sig := v.info.TypeOf(call.Fun).(*types.Signature)
 		target = sig.Results().At(0).Type()
 	}
-	v.asTarget(call, target, who)
+	// errors.As stores what it finds; errors.AsType gives it, unless its
+	// first result is discarded.
+	v.asTarget(call, target, who, kind == asAssignable || !v.discarded[call])
 	err := call.Args[0]
 	if !v.knownError(v.bodyOrigins(), err, -1) {
 		v.unsupported(err.Pos(), fmt.Sprintf("%s would run the As and Unwrap methods of %s, an error whose origin is not known; "+

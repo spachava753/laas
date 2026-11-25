@@ -2397,6 +2397,18 @@ trusted:
     reason: Test helper standing for a call on what a struct owns, whose error may hold it.
     modifies: []
 
+  typederrorspos.handsSizer:
+    reason: Test helper whose error holds a Sizer that code which is not verified made, whose Size returns -1; its entry vouches for nothing (F8 of the review of S0 of F34).
+    modifies: []
+
+  typederrorspos.handsMap:
+    reason: Test helper whose error holds Pos values in a map that code which is not verified made; its entry vouches for nothing (F8 of the review of S0 of F34).
+    modifies: []
+
+  typederrorspos.handsPosFunc:
+    reason: Test helper whose error is a PosFunc that code which is not verified made; its entry vouches for nothing (F9 of the review of S0 of F34).
+    modifies: []
+
   typederrorspos.handsPos:
     reason: Test helper standing for a trusted function whose error holds a function value with a contract that code which is not verified made; its entry vouches for nothing (S0 of F34).
     modifies: []

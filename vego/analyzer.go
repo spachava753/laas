@@ -538,6 +538,10 @@ func (f *funcInfo) annotated() bool {
 type pkgVerifier struct {
 	// typeSwitches holds each type switch by its guard; see switchVars.
 	typeSwitches map[ast.Node]*ast.TypeSwitchStmt
+	// discarded holds each type assertion and call with several results
+	// whose first result is assigned to the blank identifier; see
+	// discardsFirst.
+	discarded map[ast.Expr]bool
 	pass     *analysis.Pass
 	info     *types.Info
 	res      *logic.Resolver
