@@ -263,14 +263,17 @@ type fnVerifier struct {
 	asPairs []asPair
 	// ifaceConversions holds the conversions to interfaces other than
 	// error made so far, whose tags and held values are stated once the
-	// function meets dynamic types (dynMet), and metTypes the types whose
+	// path meets dynamic types (dynMetIn), and metTypes the types whose
 	// held values an error converted to an interface shares (F34).
 	// keyedFacts holds what conversions say of keyedByHeld, which only
 	// what an interface value holds is read with, stated with the rest.
 	ifaceConversions []ifaceConversion
-	dynMet           bool
 	metTypes         []types.Type
 	keyedFacts       []*logic.Term
+	// taggedTypes holds the types whose tags the function may state, and
+	// ifaceTargets the interfaces it asserts to; see noteTagged.
+	taggedTypes  []types.Type
+	ifaceTargets []types.Type
 	// madeFixed holds the references of the fixed variables met whose
 	// initialisers made an allocation with a size, which are apart, and
 	// fixedMet the fixed variables met; see fixedValue.

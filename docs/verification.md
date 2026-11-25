@@ -1726,7 +1726,39 @@ types and values they hold, which are not known, and panics when both hold the s
 is not comparable; compare with nil instead
 ```
 
-A type assertion and a type switch take a value of a concrete type out of an interface value, as they do out of an error, and a formula says what a value holds with `holds(x, T)` and `x.(T)`; see [Asking what an error holds](#asking-what-an-error-holds). An assertion to an interface type is not supported yet.
+A type assertion and a type switch take a value of a concrete type out of an interface value, as they do out of an error, and a formula says what a value holds with `holds(x, T)` and `x.(T)`; see [Asking what an error holds](#asking-what-an-error-holds).
+
+An assertion to an interface type, and a case of one, tell whether the value holds a value that implements it:
+
+```go
+// @Ensures ok And ~ok2
+func PricerOrNot() (ok, ok2 bool) {
+	var a any = Flat{}
+	var b any = 7
+	_, ok = a.(Pricer)
+	_, ok2 = b.(Pricer)
+	return ok, ok2
+}
+```
+
+The value such an assertion gives can be used only in two cases. The first is an interface value whose type already has every method of the target, as an `io.ReadWriter` asserted to `io.Reader`. The second is an error asserted to an interface whose methods, other than `Error`, have no contract. Otherwise the value may be one your code made without checking it against the target's methods:
+
+```go
+// @Ensures True
+func Label(v any) (n int) {
+	if s, ok := v.(fmt.Stringer); ok {
+		_ = s
+		return 1
+	}
+	return 0
+}
+```
+
+```text
+vego: cannot verify Label: using the value of v.(fmt.Stringer) is not supported: fmt.Stringer has the method String, which any does not have, so the value held may be one verified code made without checking it against fmt.Stringer, ...
+```
+
+Write `_, ok := v.(fmt.Stringer)` instead, or a case of `fmt.Stringer` whose clause does not use its variable.
 
 A formula can compare two interface values. `a = b` says that they are the same value: one was copied from the other, by an assignment, a conversion to another interface type, or a call that hands it on. It is not Go's `==`. Two conversions of one concrete value are two values, so a function that returns `any(p), any(p)` proves `a != b`, although `a == b` is true in Go. A contract that says a function hands back what it was given, or that a field keeps its value, uses this form:
 
@@ -5734,7 +5766,7 @@ These are not supported, and a function that uses one is reported as `cannot ver
 - `errors.Join` and `errors.Unwrap`;
 - `errors.Is` on an error that came from a parameter, or from a trusted function whose contract does not vouch for it;
 - an error variable that its package assigns or takes the address of;
-- a type assertion of an error to an interface type other than `error`, and `errors.As` with a target of an interface type.
+- using the value of a type assertion of an error to an interface type with a method that has a contract or with states, and `errors.As` with a target of an interface type.
 
 A struct invariant cannot name an error variable.
 
@@ -9024,7 +9056,10 @@ This table lists the most common messages.
 | `... list bs[0] in a // @Modifies clause, which covers what it owns; ...` | A clause lists a slice of buffers, which does not cover the arrays its elements own. | List the element. |
 | `T.M has a value receiver, and the pointer that the interface value holds may be nil` | A `*T` that may be nil is converted to an interface, and `M` copies what it points to. | Convert a pointer that is not nil. |
 | `cannot verify F: comparing interface values is not supported yet` | Two interface values, or an interface value and a value of another type, are compared. | Compare with `nil` only. |
-| `cannot verify F: asserting an interface value to I is not supported yet: ...` | The target of an assertion or a case of a type switch is an interface type. | Assert to a concrete type, or make the assertion in code that is not verified. On an error, `error` itself can be a target. |
+| `cannot verify F: using the value of X.(I) is not supported: I has the method M, which T does not have, ...` | The value of an assertion to an interface is used, and the operand's type `T` lacks a method of `I`. The same message starts `using the variable of the case I` for a case whose clause uses its variable. | Ask only whether it holds one, with `_, ok := X.(I)` or a case whose clause does not use its variable, or assert to a concrete type. |
+| `cannot verify F: using the value of err.(I) is not supported: the method M of I has a contract, ...` | An error is asserted to an interface with a contracted method other than `Error`. A target with states gives a message of its own. | Ask only whether it holds one, or assert to a concrete type. |
+| `cannot verify F: asserting x, a T, to I is not supported: ...` | The operand's type has a method of the target's name from another declaration, and nothing says that its contract implies the target's. | Give both methods contracts so that one implies the other, or use one interface. |
+| `the type assertion X.(I) may panic: X may not hold a value that implements I; ...` | The form with one result is used to an interface where the value may be nil or hold a type that does not implement it. | Use `v, ok := X.(I)`, or show that `X` is not nil. |
 | `the type assertion X.(T) may panic: X may not hold a T; ...` | The form with one result is used where the value may hold another type. | Use `v, ok := X.(T)`, or show that it holds one with `holds(x, T)`. See [Asking what an error holds](#asking-what-an-error-holds). |
 | `cannot verify F: asserting an error to T is not supported: it holds in field f a function value of type G, which has a contract, ...` | `T` can hold a value with a contract, which code that is not verified may have made. The same message, with `an interface value` in place of `an error`, is given for any other interface value, and it covers a case of a type switch whose clause uses its variable and the target of `errors.As`. | Keep the function value or the interface value out of the type, ask only whether the value holds one with `_, ok := x.(T)`, or take it out in code that is not verified. |
 | `cannot verify F: Go copies a value of type os.File, here (...); the states of an os.File are changed by trusted methods ...` | A struct whose states trusted methods change is copied, and the copy would share what the states are about. | Hold it by pointer. |
@@ -9100,8 +9135,9 @@ A function that uses any of the following is reported as `cannot verify`:
 - `io.MultiReader` and `io.MultiWriter` handed a slice whole, as in `io.MultiReader(rs...)`, when what they return is read or written (see [Wrappers in package io](#wrappers-in-package-io));
 - `context.WithCancel` and the functions like it, which keep the context they are given and run it on other goroutines (see [Types without a shipped entry](#types-without-a-shipped-entry));
 - a function that keeps code it is given anywhere but in a result or in memory that a parameter reaches, such as a registry, a goroutine, or a timer, which has no true entry; making a trusted function with `keeps` into a value; and handing a function literal, a function, or a method value of a type without a contract to a parameter under `keeps` (see [Functions that keep what they are given](#functions-that-keep-what-they-are-given));
-- comparing interface values in code with anything but `nil`, and type assertions and cases of type switches to an interface type, other than `error` on an error;
-- a type assertion of an error to an interface type other than `error`, and `errors.As` and `errors.AsType` with a target of an interface type (see [Asking what an error holds](#asking-what-an-error-holds));
+- comparing interface values in code with anything but `nil`;
+- using the value of a type assertion or a case to an interface type whose methods the operand's type does not have, unless the operand is an error and no method of the target but `Error` has a contract or a state; `error` as such a target of a value that is not an error; and an interface type declared inside a function as a target;
+- `errors.As` and `errors.AsType` with a target of an interface type (see [Asking what an error holds](#asking-what-an-error-holds));
 - taking out of an error or another interface value, by an assertion, a case of a type switch whose clause uses its variable, or `errors.As`, a value of a type that holds a function value of a type with a contract or an interface value with a method that has one, or that is a function type with a contract (see [Asking what an error holds](#asking-what-an-error-holds));
 - converting to an interface with states a pointer to a value of size zero, a pointer to a struct whose first field has states of its own, a pointer whose method that changes a state has a value receiver beside one with a pointer receiver or does not list its receiver in `Modifies`, or a value that is not a pointer whose method that changes a state is trusted; and copying a struct whose states trusted methods change, such as an `os.File` (see [The states of what a pointer points to](#the-states-of-what-a-pointer-points-to));
 - errors of your own types whose methods do what code that is not verified could not account for (see [What the methods of the type may do](#what-the-methods-of-the-type-may-do)), and errors of types with `Unwrap`, `Is`, `As`, `Format`, or `GoString` methods formatted, wrapped, or searched (see [Formatting and wrapping errors of your own types](#formatting-and-wrapping-errors-of-your-own-types));

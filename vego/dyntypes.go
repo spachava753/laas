@@ -47,7 +47,7 @@ var dynTypes = logic.Const("dyntype", logic.IntSeq)
 // conversions constrain, so the always-fails check takes them as part of
 // every input, as it takes a fixed variable.
 func isDynTable(t *logic.Term) bool {
-	return t.Op == logic.OpConst && (t == dynTypes || t.Name == dynTypes.Name || strings.HasPrefix(t.Name, "held ") || strings.HasPrefix(t.Name, "mkerr ") ||
+	return t.Op == logic.OpConst && (t == dynTypes || t.Name == dynTypes.Name || strings.HasPrefix(t.Name, "held ") || strings.HasPrefix(t.Name, "mkerr ") || strings.HasPrefix(t.Name, "implements ") ||
 		t.Name == pkeys.Name)
 }
 
@@ -376,6 +376,7 @@ func (v *fnVerifier) noteHeld(st *state, err *logic.Term, t types.Type, leaves v
 // meetType records a type of the values errors hold that the function
 // meets, when == on it is identity; see sameTyped and holdsIdentityEq.
 func (v *fnVerifier) meetType(sink *state, t types.Type) {
+	v.noteTagged(sink, t)
 	if layout, ok := layoutOf(t); ok && v.identityEq(t) && capturesValue(layout) &&
 		!slices.ContainsFunc(v.typedTypes, func(known types.Type) bool { return types.Identical(known, t) }) {
 		v.typedTypes = append(v.typedTypes, t)
@@ -656,8 +657,8 @@ func (v *fnVerifier) noteTypedVariable(sink *state, variable *logic.Term, info s
 // the one-result form proves that and reports where it may not hold, since
 // Go panics there; the two-result form gives the held value or the zero
 // value of T, and whether it holds one. x.(error) of an error is x itself,
-// which is not nil. An interface T other than error, and error for an
-// operand that is not an error, wait for S2 of F34.
+// which is not nil. An interface T is asserted to by assertIface (S2 of
+// F34).
 func (v *fnVerifier) assertion(e *ast.TypeAssertExpr, st *state, guard []*logic.Term, commaOk bool) []value {
 	from, target := v.info.TypeOf(e.X), v.info.TypeOf(e.Type)
 	operand := "an error"
@@ -675,7 +676,7 @@ func (v *fnVerifier) assertion(e *ast.TypeAssertExpr, st *state, guard []*logic.
 		return []value{{x}}
 	}
 	if types.IsInterface(target) {
-		v.unsupported(e.Pos(), fmt.Sprintf("asserting %s to %s is not supported yet: only a concrete type, or error itself on an error, can be asserted to", operand, shown(target)))
+		return v.assertIface(e, st, guard, commaOk)
 	}
 	tag, named := typeTag(target)
 	if !named {
@@ -896,12 +897,16 @@ func (v *fnVerifier) checkAssertion(st *state, guard []*logic.Term, holds *logic
 		text, why, text, example)
 }
 
-// typeSwitch executes a type switch on an error (S3 of F33). The operand
-// is evaluated once; each case is a path, taken when one of its types
-// matches and no case before it did: a concrete type when the error holds
-// one, nil when the error is nil, and error when it is not. In a clause
-// with one concrete type the variable is what the error holds as that
-// type; in any other clause it is the error itself, as Go has it.
+// typeSwitch executes a type switch on an error (S3 of F33) or another
+// interface value (S1 and S2 of F34). The operand is evaluated once; each
+// case is a path, taken when one of its types matches and no case before
+// it did: a concrete type when the operand holds one, nil when it is nil,
+// error on an error when it is not, and an interface when it holds a value
+// that implements it (ifaceCase). In a clause with one concrete type the
+// variable is what the operand holds as that type, and in a clause with
+// one interface type that uses it, the value of the assertion to it
+// (ifaceCaseVar); in any other clause it is the operand itself, as Go has
+// it.
 func (v *fnVerifier) typeSwitch(s *ast.TypeSwitchStmt, st *state, c ctrl, k func(*state)) {
 	if s.Init != nil {
 		init := s.Init
@@ -919,7 +924,8 @@ func (v *fnVerifier) typeSwitch(s *ast.TypeSwitchStmt, st *state, c ctrl, k func
 	case *ast.AssignStmt:
 		assert = a.Rhs[0].(*ast.TypeAssertExpr)
 	}
-	onError := isError(v.info.TypeOf(assert.X))
+	from := v.info.TypeOf(assert.X)
+	onError := isError(from)
 	shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
 	var x *logic.Term
 	v.evaluate(st, func() { x = v.expr(assert.X, st, nil) })
@@ -941,7 +947,8 @@ func (v *fnVerifier) typeSwitch(s *ast.TypeSwitchStmt, st *state, c ctrl, k func
 			continue
 		}
 		var alternatives []*logic.Term
-		var single types.Type
+		var single, singleIface types.Type
+		var singleExpr ast.Expr
 		for _, e := range clause.List {
 			t := v.info.TypeOf(e)
 			switch {
@@ -949,10 +956,11 @@ func (v *fnVerifier) typeSwitch(s *ast.TypeSwitchStmt, st *state, c ctrl, k func
 				alternatives = append(alternatives, isNil)
 			case isError(t) && onError:
 				alternatives = append(alternatives, logic.Not(isNil))
-			case types.IsInterface(t) && onError:
-				v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch on an error is not supported yet: only a concrete type, nil, or error itself can be a case", shown(t)))
 			case types.IsInterface(t):
-				v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch is not supported yet: only a concrete type or nil can be a case", shown(t)))
+				alternatives = append(alternatives, v.ifaceCase(e, x, from, t, st))
+				if len(clause.List) == 1 {
+					singleIface, singleExpr = t, e
+				}
 			default:
 				tag, named := typeTag(t)
 				if !named {
@@ -982,11 +990,19 @@ func (v *fnVerifier) typeSwitch(s *ast.TypeSwitchStmt, st *state, c ctrl, k func
 		taken := st.clone()
 		taken.decide(logic.And(append(slices.Clip(failed), matched)...))
 		if implicit != nil {
-			if single != nil {
+			switch {
+			case singleIface != nil && usesObject(clause, v.info, implicit):
+				v.bind(taken, implicit, v.ifaceCaseVar(singleExpr, assert.X, x, from, singleIface, matched, taken))
+			case singleIface != nil && isError(singleIface):
+				// The clause does not use it.
+				v.bind(taken, implicit, value{logic.NilErr()})
+			case singleIface != nil:
+				v.bind(taken, implicit, value{logic.RefLit(0)})
+			case single != nil:
 				held := v.heldRead(taken, x, single)
-				v.keyHeldPointer(taken, x, v.info.TypeOf(assert.X), single, held, matched)
+				v.keyHeldPointer(taken, x, from, single, held, matched)
 				v.bind(taken, implicit, held)
-			} else {
+			default:
 				v.bind(taken, implicit, value{x})
 			}
 		}
@@ -1140,41 +1156,66 @@ type ifaceConversion struct {
 	t   types.Type
 	val value
 	err *logic.Term
+	// when, for an error, is when the interface value holds it, if not
+	// whenever the error is not nil: an assertion of the error to an
+	// interface holds it only when it implements the interface.
+	when *logic.Term
+}
+
+// holds returns when an interface value made from an error holds it.
+func (c ifaceConversion) holds() *logic.Term {
+	if c.when != nil {
+		return c.when
+	}
+	return logic.Not(logic.IsNil(c.err))
 }
 
 // recordConversion records a conversion, and states its facts at once
 // when the function has met dynamic types.
 func (v *fnVerifier) recordConversion(st *state, c ifaceConversion) {
 	v.ifaceConversions = append(v.ifaceConversions, c)
-	if v.dynMet {
+	if c.t != nil {
+		v.noteTagged(st, c.t)
+	}
+	if dynMetIn(st) {
 		v.stateConversion(st, c)
 	}
 }
 
-// meetDynamic records that the function asks what an interface value
-// holds, and states what every conversion so far holds.
+// dynMetIn reports whether the path of a state has met dynamic types. It
+// is a note of the state, not of the function, since paths are followed
+// one after another: a path that split off before another met them has
+// not, and gets the facts where it meets them itself.
+func dynMetIn(st *state) bool {
+	return st != nil && st.noted["dynamic types met"]
+}
+
+// meetDynamic records that the path of a state asks what an interface
+// value holds, and states there what every conversion so far holds.
 func (v *fnVerifier) meetDynamic(st *state) {
-	if v.dynMet || st == nil {
+	if st == nil || dynMetIn(st) {
 		return
 	}
-	v.dynMet = true
+	st.noted["dynamic types met"] = true
 	for _, c := range v.ifaceConversions {
 		v.stateConversion(st, c)
 	}
 	for _, f := range v.keyedFacts {
 		v.fact(st, f)
 	}
+	for _, t := range v.metTypes {
+		v.heldTypeFacts(st, t)
+	}
 }
 
-// keyedFact states a fact of keyedByHeld at once when the function has
-// met dynamic types, and otherwise when it meets them, so that a function
+// keyedFact states a fact of keyedByHeld at once when the path has met
+// dynamic types, and otherwise where it meets them, so that a function
 // that meets none asks what it asked before them.
 func (v *fnVerifier) keyedFact(st *state, f *logic.Term) {
-	if v.dynMet {
-		v.fact(st, f)
-		return
-	}
 	v.keyedFacts = append(v.keyedFacts, f)
+	if dynMetIn(st) {
+		v.fact(st, f)
+	}
 }
 
 // stateConversion states what a conversion holds: the tag and the leaves
@@ -1182,9 +1223,14 @@ func (v *fnVerifier) keyedFact(st *state, f *logic.Term) {
 // error, its tag and, for every type met, its leaves.
 func (v *fnVerifier) stateConversion(st *state, c ifaceConversion) {
 	if c.err != nil {
-		v.fact(st, logic.Implies(logic.Not(logic.IsNil(c.err)), logic.Eq(dynTag(c.ref), errorTag(c.err))))
+		v.fact(st, logic.Implies(c.holds(), logic.Eq(dynTag(c.ref), errorTag(c.err))))
 		for _, t := range v.metTypes {
-			v.sameHeld(st, c, t)
+			if name, _ := canonicalName(t); st.noted["held type "+name] {
+				v.sameHeld(st, c, t)
+			}
+		}
+		if metIfaceIn(st, types.Universe.Lookup("error").Type()) {
+			v.errorImplements(st, c)
 		}
 		return
 	}
@@ -1210,7 +1256,7 @@ func (v *fnVerifier) sameHeld(st *state, c ifaceConversion, t types.Type) {
 	ref := logic.ErrRef(c.err)
 	for i, lf := range layout {
 		table := heldTable(name, i, lf)
-		v.fact(st, logic.Implies(logic.Not(logic.IsNil(c.err)), eqLeaf(logic.Select(table, c.ref), logic.Select(table, ref))))
+		v.fact(st, logic.Implies(c.holds(), eqLeaf(logic.Select(table, c.ref), logic.Select(table, ref))))
 	}
 }
 
@@ -1218,19 +1264,31 @@ func (v *fnVerifier) sameHeld(st *state, c ifaceConversion, t types.Type) {
 // to hold, and states for every error converted to an interface that the
 // interface value holds what the error holds as a value of it.
 func (v *fnVerifier) meetHeldType(st *state, t types.Type) {
-	if _, named := canonicalName(t); !named || slices.ContainsFunc(v.metTypes, func(known types.Type) bool { return types.Identical(known, t) }) {
+	if _, named := canonicalName(t); !named {
 		return
 	}
 	if _, ok := layoutOf(t); !ok {
 		return
 	}
-	v.metTypes = append(v.metTypes, t)
-	if !v.dynMet {
-		return
+	if !slices.ContainsFunc(v.metTypes, func(known types.Type) bool { return types.Identical(known, t) }) {
+		v.metTypes = append(v.metTypes, t)
 	}
-	for _, c := range v.ifaceConversions {
-		if c.err != nil {
-			v.sameHeld(st, c, t)
+	v.noteTagged(st, t)
+	if dynMetIn(st) {
+		v.heldTypeFacts(st, t)
+	}
+}
+
+// heldTypeFacts states, once in a state, that every interface value made
+// from an error holds what the error holds as a value of t.
+func (v *fnVerifier) heldTypeFacts(st *state, t types.Type) {
+	name, _ := canonicalName(t)
+	if note := "held type " + name; !st.noted[note] {
+		st.noted[note] = true
+		for _, c := range v.ifaceConversions {
+			if c.err != nil {
+				v.sameHeld(st, c, t)
+			}
 		}
 	}
 }
@@ -1243,4 +1301,3 @@ func refOf(x *logic.Term) (ref, isNil *logic.Term) {
 	}
 	return x, logic.Eq(x, logic.RefLit(0))
 }
-

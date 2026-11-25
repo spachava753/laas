@@ -109,11 +109,25 @@ func TestMadeErrorTypes(t *testing.T) {
 	for _, pkg := range loaded {
 		for _, name := range []string{"errorString", "wrapError", "wrapErrors"} {
 			if obj := pkg.Types.Scope().Lookup(name); obj != nil {
-				canon, ok := canonicalName(types.NewPointer(obj.Type()))
+				ptr := types.NewPointer(obj.Type())
+				canon, ok := canonicalName(ptr)
 				if !ok {
 					t.Fatalf("%s.%s has no canonical name", pkg.PkgPath, name)
 				}
 				names = append(names, canon)
+				// The methods madeImplements decides by (S2 of F34).
+				methods := types.NewMethodSet(ptr)
+				listed := madeErrorMethods[canon]
+				if methods.Len() != len(listed) {
+					t.Errorf("%s has %d methods, and madeErrorMethods lists %d", canon, methods.Len(), len(listed))
+				}
+				for _, m := range listed {
+					sel := methods.Lookup(nil, m.name)
+					want := types.NewSignatureType(nil, nil, nil, types.NewTuple(), types.NewTuple(types.NewVar(token.NoPos, nil, "", m.result)), false)
+					if sel == nil || !types.Identical(sel.Type(), want) {
+						t.Errorf("%s has no method %s of type %s", canon, m.name, want)
+					}
+				}
 			}
 		}
 	}

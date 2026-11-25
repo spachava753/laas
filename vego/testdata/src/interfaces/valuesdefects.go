@@ -198,7 +198,7 @@ func CommaOkDefine(x any) (n int) {
 
 // @Ensures True
 func CommaOkIf(x any) (n int) {
-	if s, ok := x.(Shape); ok { // want `cannot verify CommaOkIf: asserting an interface value to Shape is not supported yet`
+	if s, ok := x.(Shape); ok { // want `cannot verify CommaOkIf: using the value of x.\(Shape\) is not supported: Shape has the method Area, which any does not have`
 		_ = s
 		return 1
 	}
