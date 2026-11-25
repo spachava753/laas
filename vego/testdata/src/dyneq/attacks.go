@@ -124,3 +124,20 @@ func NaNErr() (r bool) {
 	var a, b any = err, err
 	return a == b // want `postcondition may not hold: r`
 }
+
+// The refusal names the operands as written (F20 of the review of S3).
+//
+// @Requires |xs| = 2
+// @Ensures Forall i in [0, 2) : xs[i] != a // want `in Ensures annotation: xs\[i\] != a between two interface values that are not nil is not supported`
+func NotAmong(xs []any) (a any) {
+	return any(1)
+}
+
+// A negation that is not written directly on = still means that the
+// values are not the same value, which two conversions are not.
+//
+// @Requires p != nil
+// @Ensures (a = b) -> False
+func TwoConversionsImply(p *Circle) (a, b any) {
+	return p, p
+}

@@ -791,9 +791,9 @@ func (s *scope) compare(op string, left, right *Node, negated bool) *Term {
 		// That two interface values are not the same value is not what
 		// Go's != says of them, and nothing in Go can observe it (O4 of
 		// F34).
-		written := "a != b"
+		written := plain(left) + " != " + plain(right)
 		if op == "=" {
-			written = "~(a = b)"
+			written = "~(" + plain(left) + " = " + plain(right) + ")"
 		}
 		failSort("%s between two interface values that are not nil is not supported: = says that they are the same value, copied from one another, "+
 			"and not Go's ==, so its negation says nothing that code can observe; to say what Go's == says, state what they hold, "+

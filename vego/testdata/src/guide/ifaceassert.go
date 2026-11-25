@@ -1,6 +1,9 @@
 package guide
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 // Assertions to interface types (S2 of F34).
 
@@ -34,4 +37,25 @@ func SameInt(a, b any) (r bool) {
 // @Ensures a != b // want `vego: in Ensures annotation: a != b between two interface values that are not nil is not supported: = says that they are the same value, copied from one another, and not Go's ==, so its negation says nothing that code can observe; `
 func TwoConversions(p *Link) (a, b any) {
 	return p, p
+}
+
+// @Ensures a = b
+func OneNaN() (a, b any, r bool) {
+	a = any(math.NaN())
+	b = a
+	return a, b, a == b
+}
+
+// @Ensures r
+func OneNaNEqual() (a, b any, r bool) {
+	a = any(math.NaN())
+	b = a
+	return a, b, a == b // want `vego: postcondition may not hold: r`
+}
+
+// @Ensures ~r
+func OneNaNUnequal() (a, b any, r bool) {
+	a = any(math.NaN())
+	b = a
+	return a, b, a == b // want `vego: postcondition may not hold: ~r`
 }

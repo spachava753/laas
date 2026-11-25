@@ -769,6 +769,7 @@ dyneq	dyneq.Name	13	15106	0
 dyneq	dyneq.NameOfTwo	2	1685	0
 dyneq	dyneq.Names	3	6794	0
 dyneq	dyneq.Nils	5	2278	0
+dyneq	dyneq.NotAmong	1	585	0
 dyneq	dyneq.NotSame	1	241	0
 dyneq	dyneq.NotZero	2	1857	0
 dyneq	dyneq.OtherErr	3	1608	0
@@ -781,6 +782,7 @@ dyneq	dyneq.Shape.Area	3	961	0
 dyneq	dyneq.Shapes	7	3549	0
 dyneq	dyneq.ShapesSwapped	5	1518	0
 dyneq	dyneq.Slices	2	5172	0
+dyneq	dyneq.TwoConversionsImply	2	502	0
 dyneq	dyneq.TwoPathsEq	5	2736	0
 dyneq	math.NaN	1	70	0
 dynheld	(*bytes.Buffer).Len	1	2333	0
@@ -2562,6 +2564,9 @@ guide	guide.Now	4	1049	0
 guide	guide.Offset	6	2033	0
 guide	guide.Oldest	5	12394	0
 guide	guide.OldestAfterSort	9	49442	0
+guide	guide.OneNaN	5	1446	0
+guide	guide.OneNaNEqual	5	2142	0
+guide	guide.OneNaNUnequal	5	2134	0
 guide	guide.OpenThenCloseTwice	26	127021	0
 guide	guide.Option	3	2393	0
 guide	guide.Overwrite	8	9212	0
@@ -2828,6 +2833,7 @@ guide	log.Print	1	2741	0
 guide	log.Printf	1	3565	0
 guide	log.Println	1	2741	0
 guide	maps.Copy	1	4637	0
+guide	math.NaN	1	70	0
 guide	math/rand.Intn	1	380	0
 guide	mime.ParseMediaType	8	1025368	4
 guide	net/http.Error	1	2155	0

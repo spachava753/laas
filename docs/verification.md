@@ -1790,7 +1790,22 @@ func TwoConversions(p *Link) (a, b any) {
 vego: in Ensures annotation: a != b between two interface values that are not nil is not supported: = says that they are the same value, copied from one another, and not Go's ==, so its negation says nothing that code can observe; ...
 ```
 
-`~(a = b)` written directly is refused the same way. To say what Go's `==` says, state what the values hold, as in `holds(a, int) And holds(b, int) And a.(int) != b.(int)`. A contract that says a function hands back what it was given, or that a field keeps its value, uses `=`:
+`~(a = b)` written directly is refused the same way. A negation elsewhere is not refused, and `=` keeps its meaning there: `(a = b) -> False` says that `a` and `b` are not the same value, and a function that returns `any(p), any(p)` proves it.
+
+The two meanings also differ the other way. One value that holds a NaN is the same value as itself, and `==` on it is false in Go:
+
+```go
+// @Ensures a = b
+func OneNaN() (a, b any, r bool) {
+	a = any(math.NaN())
+	b = a
+	return a, b, a == b
+}
+```
+
+`OneNaN` verifies. `vego` proves neither `r` nor `~r` of it, since it says nothing of `==` on floats.
+
+To say what Go's `==` says, state what the values hold, as in `holds(a, int) And holds(b, int) And a.(int) != b.(int)`. A contract that says a function hands back what it was given, or that a field keeps its value, uses `=`:
 
 ```go
 // @Requires a != nil And b != nil And a != b
