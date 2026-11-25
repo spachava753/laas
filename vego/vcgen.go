@@ -68,6 +68,9 @@ type fnVerifier struct {
 	// conversions of concrete values in the function made; see
 	// interfaceValue.
 	converted []*logic.Term
+	// keyedPointers holds the pointers whose keys of states the function
+	// reads, kept apart pairwise (S0b of F34).
+	keyedPointers []value
 	// convertedStructs holds the structs that pointers converted to an
 	// interface with a footprint point to, which the fact between struct
 	// values is stated against; see distinctStructs.
@@ -445,7 +448,7 @@ func (v *fnVerifier) enter() *state {
 	// their own, which every caller has shown.
 	for _, pair := range v.sharing(fn) {
 		if v.entry[pair[0]] != nil && v.entry[pair[1]] != nil {
-			st.assume(apartHomes(v.entry[pair[0]][0], v.entry[pair[1]][0]))
+			st.assume(v.apartHomes(v.entry[pair[0]], pair[0].Type(), v.entry[pair[1]], pair[1].Type()))
 			// And the states of each lie outside the footprint of the
 			// other (F28).
 			premises, claims := v.statesOutside(logic.Const(entryRegion+footprintRegion, footprintSort), v.entry[pair[0]], v.entry[pair[1]], pair[0].Type(), pair[1].Type())

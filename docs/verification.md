@@ -1862,6 +1862,77 @@ not doing so
 
 `ShutWithBody` cannot show it. Its caller may pass `resp.Body` as `c`. Passing one value as both `a` and `b` is refused too, since `ShutBoth` would close it twice. Interface values in memory, such as the bodies of two responses or the elements of a slice, and the values that calls return, are not assumed to share no state. Closing one of them makes the state of the others unknown.
 
+#### The states of what a pointer points to
+
+When an interface value holds a pointer, its state is the state of what the pointer points to. Every interface value made from the pointer has that state, and a call of a method on the pointer changes it as a call through any of them does. A formula can name the state of the pointer itself, as in `closed(f)` for an `*os.File`. Such a name stands for a state that an interface the pointer's type implements declares.
+
+A file that a caller passes may be closed already:
+
+```go
+// @Requires f != nil
+// @Modifies f
+// @Ensures True
+func CloseFile(f *os.File) {
+	var c io.Closer = f
+	c.Close()
+}
+```
+
+```text
+vego: precondition of c.Close may not hold: ~closed(c)
+```
+
+Say in the contract that the file is open:
+
+```go
+// @Requires f != nil And ~closed(f)
+// @Modifies f
+// @Ensures closed(f')
+func CloseOpenFile(f *os.File) {
+	var c io.Closer = f
+	c.Close()
+}
+```
+
+The shipped contracts of `os.Open` and `os.Create` say that the file they return is not closed. `Modifies f` covers the state of the file as well as the struct it points to. A call of `Close` on the file itself writes the file, so after it the state is not known, also through an interface value made before:
+
+```go
+// @Requires 0 < |name| <= 1000
+// @Ensures True
+func OpenThenCloseTwice(name string) {
+	f, err := os.Open(name)
+	if err != nil {
+		return
+	}
+	var c io.Closer = f
+	f.Close()
+	c.Close()
+}
+```
+
+```text
+vego: precondition of c.Close may not hold: ~closed(c)
+```
+
+The states of an `os.File` are about the descriptor it refers to, which `vego` does not see. A copy of the struct would share the descriptor, so a value of `os.File` is never copied:
+
+```go
+// @Requires f != nil
+// @Ensures True
+func CopyFile(f *os.File) {
+	g := *f
+	_ = g
+}
+```
+
+```text
+vego: cannot verify CopyFile: Go copies a value of type os.File, here (*f); the states of an os.File are
+changed by trusted methods and are about what it refers to, which a copy would share, so an os.File is
+never copied; hold it by pointer
+```
+
+A pointer of a type of your own has the states of the interfaces it implements in the same way when a method that changes a state, such as `Close`, has a pointer receiver. Every such method must then have a pointer receiver and list the receiver in `Modifies`, and the struct must not start with a field whose type has states of its own, which would lie at the same address. When every such method has a value receiver, each conversion has states of its own, as a conversion of a value that is not a pointer has.
+
 #### Values that a trusted function returns
 
 A trusted function can say that the interface value it returns is new and not closed. `fresh(rc)` for an interface value means that the call created what `rc` holds, so that it shares no state with anything that existed before the call:
@@ -8956,6 +9027,9 @@ This table lists the most common messages.
 | `cannot verify F: type assertions and type switches are not supported yet` | The type that an interface value holds is not known. | Make the assertion in code that is not verified. On an error, assert to a concrete type or to `error`. |
 | `the type assertion X.(T) may panic: X may not hold a T; ...` | The form with one result is used where the error may hold another type. | Use `v, ok := X.(T)`, or show that it holds one with `holds(err, T)`. See [Asking what an error holds](#asking-what-an-error-holds). |
 | `cannot verify F: asserting an error to T is not supported: it holds in field f a function value of type G, which has a contract, ...` | `T` can hold a value with a contract, which code that is not verified may have made. The same message covers a case of a type switch and the target of `errors.As`. | Keep the function value or the interface value out of the error type, or take it out in code that is not verified. |
+| `cannot verify F: Go copies a value of type os.File, here (...); the states of an os.File are changed by trusted methods ...` | A struct whose states trusted methods change is copied, and the copy would share what the states are about. | Hold it by pointer. |
+| `cannot verify F: converting a *T to I is not supported: ...` with `points to a value of size zero`, `its first field holds a S`, `has a value receiver`, or `does not list its receiver` | The states of what the pointer points to cannot be kept for this type. | Give the method a pointer receiver that it lists in `Modifies`, put another field first, or give the struct a field. |
+| `the interface value and the pointer passed to F as c and f may share their states: the interface value may hold the pointer, ...` | The contract of `F` lists one of them, and the caller may pass a pointer and an interface value that holds it. | Pass values that hold different objects. |
 | `cannot verify F: converting a T to an error is not supported: ...` | A method of `T`, or what `T` holds or returns, could do what code that is not verified cannot account for. The message says which. | See [What the methods of the type may do](#what-the-methods-of-the-type-may-do). |
 | `cannot verify F: errors.As panics here: the target has type T, which is not an interface and does not implement error` | The target of `errors.As` is not an error type. | Use a target whose type implements `error`. See [Finding an error with errors.As](#finding-an-error-with-errorsas). |
 | `cannot verify F: errors.As is supported only as errors.As(err, &v) for a local variable v` | The second argument is another expression. | Declare a local variable and pass its address. |
@@ -9029,6 +9103,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - comparing interface values in code with anything but `nil`, and type assertions and type switches on interface values other than errors;
 - a type assertion of an error to an interface type other than `error`, and `errors.As` and `errors.AsType` with a target of an interface type (see [Asking what an error holds](#asking-what-an-error-holds));
 - taking out of an error, by an assertion, a case of a type switch, or `errors.As`, a value of a type that holds a function value of a type with a contract or an interface value with a method that has one (see [Asking what an error holds](#asking-what-an-error-holds));
+- converting to an interface with states a pointer to a value of size zero, a pointer to a struct whose first field has states of its own, a pointer whose method that changes a state has a value receiver beside one with a pointer receiver or does not list its receiver in `Modifies`, or a value that is not a pointer whose method that changes a state is trusted; and copying a struct whose states trusted methods change, such as an `os.File` (see [The states of what a pointer points to](#the-states-of-what-a-pointer-points-to));
 - errors of your own types whose methods do what code that is not verified could not account for (see [What the methods of the type may do](#what-the-methods-of-the-type-may-do)), and errors of types with `Unwrap`, `Is`, `As`, `Format`, or `GoString` methods formatted, wrapped, or searched (see [Formatting and wrapping errors of your own types](#formatting-and-wrapping-errors-of-your-own-types));
 - a trusted entry whose `asserts` lists, over a parameter that is not an error, an interface with a method that an interface the parameter reaches lacks (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed));
 - a cycle of calls that goes through a call through an interface value or a function value, or through code of another package (see [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods)), reported as `this call may not end`;
@@ -9087,7 +9162,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - The methods of `bytes.Buffer`, `strings.Builder`, `bufio.Writer`, `bufio.Reader`, `bufio.Scanner`, and `log.Logger` that have shipped entries write nothing that verified code can see other than the struct and the memory that the value owns, as [Writing through a buffer](#writing-through-a-buffer) lists it. After a call, the value owns only what it owned before the call and memory that the call made. The read position of a `bytes.Buffer` never passes the end of what was written to it. Every method of `bytes.Buffer` keeps it so, and `|b|` is the number of bytes between the two.
 - Code of another package that is not verified runs code of the verified package only as `vego` follows it, which [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods) describes: during a call that the verified package makes, it runs only what that call hands it, through the arguments and the receiver. Code that it kept from an earlier call, a value it stored, or code that it runs on another goroutine or at another time, does not call back into a verified function while that function runs, so that the call never ends. A cycle that stays in the package, or that goes through what a call hands to another package, is found and reported.
 - For a parameter listed under `runs` or `keeps`, the function calls through an interface value or a function value nothing that the parameter holds, or that a call of what the parameter holds returns, but the methods of the interfaces and the function types that the parameter's type reaches and those of the types listed under `asserts`, and it uses no reflection to call what the parameter holds (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). Verified code answers for the methods that the parameter's type has, each checked where the value is converted. The author of the entry answers for the rest. An entry such as that of `use(p Pinger)` with `runs: [p]` and no `asserts`, for a function that asserts `p` to an interface with `Bump` and calls it, is false, and a proof that relies on it is worthless. For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
-- Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For a parameter whose footprint the contract lists in `Modifies`, they pass no other argument that reaches memory in that footprint without going through an interface value: `Log` relies on the `Lines` that `t` points to not being memory that the methods of `r` write. The same holds for a package-level variable of an interface type that the contract lists in `Modifies` by itself: they pass no argument that reaches memory in the footprint of the value the variable holds when the call begins, as `printLines` relies on its lines not being memory that the writer in `logOut` writes. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one whose methods change the states of the other, as one that wraps it does, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method. For a parameter whose type owns memory (see [Structs that own memory](#structs-that-own-memory)), they pass a struct whose owned memory is reached by nothing else they pass: not by the other arguments, not by the struct's other fields, and not by what its other owned fields refer to. Memory that a method returns from what its struct owns, which its contract shows with `within(result, s)`, is not stored by code that is not verified, and is not passed to a verified function together with the struct it came from or with anything that reaches that struct. The same holds of what code that is not verified takes out of an error that a verified function returns, by a type assertion or reflection, when the error came from a call made on what a struct it was handed owns, as the error of `fmt.Fprint(r.out, ...)` may hold what `r.out` holds: no contract can say that an error lies within a struct.
+- Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For a parameter whose footprint the contract lists in `Modifies`, they pass no other argument that reaches memory in that footprint without going through an interface value: `Log` relies on the `Lines` that `t` points to not being memory that the methods of `r` write. The same holds for a package-level variable of an interface type that the contract lists in `Modifies` by itself: they pass no argument that reaches memory in the footprint of the value the variable holds when the call begins, as `printLines` relies on its lines not being memory that the writer in `logOut` writes. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one whose methods change the states of the other, as one that wraps it does, unless one of them is nil. For an interface parameter with states and a pointer parameter whose type has states, of which the contract lists one, they do not pass an interface value that holds the pointer. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method. For a parameter whose type owns memory (see [Structs that own memory](#structs-that-own-memory)), they pass a struct whose owned memory is reached by nothing else they pass: not by the other arguments, not by the struct's other fields, and not by what its other owned fields refer to. Memory that a method returns from what its struct owns, which its contract shows with `within(result, s)`, is not stored by code that is not verified, and is not passed to a verified function together with the struct it came from or with anything that reaches that struct. The same holds of what code that is not verified takes out of an error that a verified function returns, by a type assertion or reflection, when the error came from a call made on what a struct it was handed owns, as the error of `fmt.Fprint(r.out, ...)` may hold what `r.out` holds: no contract can say that an error lies within a struct.
 - When the server calls a verified handler, the writer it passes writes none of the memory that the request reaches without going through an interface value, except the field `Trailer` of the `Request` and the map it refers to, which the server fills while it reads the body, also when a write to the writer drains a body the handler left unread. Verified code cannot read or write that field. Code that is not verified does not make that map reachable from anything else it hands a verified function, as `req.Trailer = req.Header` in a middleware would. Code that is not verified uses a `ResponseWriter`, and hands one to verified code as that type or as any other interface, only while the `ServeHTTP` call that received it runs, and does not hand one to a verified function that keeps that parameter.
 - The body of every request that reaches verified code from code that is not verified makes progress: a `Read` of it with a buffer that is not empty returns bytes or an error. The server's bodies do. Verified code cannot store into the field `Body` of a request. A middleware that is not verified and replaces the body with a reader that can return no bytes and no error for ever breaks this, and so does a test or a caller that builds a request over such a reader, as `httptest.NewRequest` can. `json.NewDecoder(io.LimitReader(req.Body, n)).Decode(&x)` in a verified function it calls may then never return.
 - The body of an `http.Response` that reaches verified code from code that is not verified writes nothing that the response reaches without going through an interface value, except the field `Trailer` of the response and the map it refers to, which reading the body fills. Verified code cannot read or write that field, and does not store into `Body` but a value it makes there. Code that is not verified does not make that map reachable from anything else it hands a verified function, as `resp.Trailer = resp.Header` would.

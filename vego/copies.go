@@ -25,7 +25,7 @@ import (
 // found from the syntax (copyWalk), and go/ssa confirms that nothing else
 // copies one: in debug mode every copy of a value is an SSA value of its
 // type, and the only one allowed is the value of a composite literal (see
-// ssaCopies). A copy the walk misses ends the function with a message of its
+// ssaCopiesOf). A copy the walk misses ends the function with a message of its
 // own, so it cannot pass quietly.
 
 // holdsState returns the type with a declared state, or that owns memory
@@ -101,6 +101,20 @@ func (v *fnVerifier) checkCopies(decl *ast.FuncDecl) {
 		if pos, msg := copyWalk(v.info, v.pass.Pkg, decl, v.findConversions()); msg != "" {
 			v.unsupported(pos, msg)
 		}
+	}
+	// A struct whose states trusted methods change is never copied: the
+	// states are about what it refers to, which a copy shares (F10 of the
+	// design review of S0b of F34). Only go/ssa is asked: every copy of a
+	// value is an SSA value of its type.
+	if found := v.findSharedCopies()[decl]; len(found) > 0 {
+		inner, _ := v.sharesStates(found[0].typ)
+		shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
+		what := shown(found[0].typ)
+		if !types.Identical(inner, found[0].typ) {
+			what += ", which holds a " + shown(inner)
+		}
+		v.unsupported(found[0].pos, fmt.Sprintf("Go copies a value of type %s, here (%s); the states of %s %s are changed by trusted methods and are about what it refers to, "+
+			"which a copy would share, so %s %s is never copied; hold it by pointer", what, found[0].what, article(shown(inner)), shown(inner), article(shown(inner)), shown(inner)))
 	}
 	if found := v.findCopies()[decl]; len(found) > 0 {
 		v.unsupported(found[0].pos, fmt.Sprintf("Go copies a value of type %s, here (%s), and no rule of vego accounts for the copy; %s; "+
@@ -377,7 +391,7 @@ type ssaCopy struct {
 }
 
 // findCopies lists, for each function declaration, the copies go/ssa makes
-// of values that hold a state; see ssaCopies.
+// of values that hold a state; see ssaCopiesOf.
 func (pv *pkgVerifier) findCopies() map[*ast.FuncDecl][]ssaCopy {
 	if pv.copies != nil {
 		return pv.copies
@@ -387,9 +401,45 @@ func (pv *pkgVerifier) findCopies() map[*ast.FuncDecl][]ssaCopy {
 		return pv.copies
 	}
 	ssaFunctions(pv.ssaProgram(), pv.pass.Files, pv.info, func(fd *ast.FuncDecl, fn *ssa.Function) {
-		pv.copies[fd] = ssaCopies(fn)
+		pv.copies[fd] = ssaCopiesOf(fn, holdsState)
 	})
 	return pv.copies
+}
+
+// findSharedCopies is findCopies for the structs whose states trusted
+// methods change (sharesStates).
+func (pv *pkgVerifier) findSharedCopies() map[*ast.FuncDecl][]ssaCopy {
+	if pv.sharedCopies != nil {
+		return pv.sharedCopies
+	}
+	pv.sharedCopies = map[*ast.FuncDecl][]ssaCopy{}
+	if len(pv.stateInterfaces()) == 0 {
+		return pv.sharedCopies
+	}
+	ssaFunctions(pv.ssaProgram(), pv.pass.Files, pv.info, func(fd *ast.FuncDecl, fn *ssa.Function) {
+		pv.sharedCopies[fd] = ssaCopiesOf(fn, pv.sharesStates)
+	})
+	return pv.sharedCopies
+}
+
+// sharesStates returns the struct type, t itself, a field of it at any
+// depth, or an element of an array in it, held by value and not behind a
+// pointer, whose pointer has states that a trusted method changes.
+func (pv *pkgVerifier) sharesStates(t types.Type) (types.Type, bool) {
+	switch u := t.Underlying().(type) {
+	case *types.Struct:
+		if pointer := types.NewPointer(t); pv.pointerKeyed(pointer) && !pv.ghostPointer(pointer) {
+			return t, true
+		}
+		for field := range u.Fields() {
+			if inner, ok := pv.sharesStates(field.Type()); ok {
+				return inner, true
+			}
+		}
+	case *types.Array:
+		return pv.sharesStates(u.Elem())
+	}
+	return nil, false
 }
 
 // holdsStates reports whether any struct type of the package or of what it
@@ -426,15 +476,16 @@ func (pv *pkgVerifier) holdsStates() bool {
 	return false
 }
 
-// ssaCopies returns the values of a function and of the literals in it
+// ssaCopiesOf returns the values of a function and of the literals in it
 // whose type holds a state and that are not the value of a composite
 // literal: a load from the local Alloc that go/ssa makes for the literal,
 // which carries the DebugRef of that literal. A parameter of such a type
 // counts as a copy too, since the caller copied it.
-func ssaCopies(fn *ssa.Function) []ssaCopy {
+// Which types hold a state is what holds says.
+func ssaCopiesOf(fn *ssa.Function, holds func(types.Type) (types.Type, bool)) []ssaCopy {
 	var found []ssaCopy
 	add := func(value ssa.Value, at token.Pos) {
-		if _, ok := holdsState(value.Type()); ok {
+		if _, ok := holds(value.Type()); ok {
 			found = append(found, ssaCopy{pos: at, typ: value.Type(), what: value.String()})
 		}
 	}
@@ -443,7 +494,7 @@ func ssaCopies(fn *ssa.Function) []ssaCopy {
 	}
 	// A result is copied to the caller.
 	for result := range fn.Signature.Results().Variables() {
-		if _, ok := holdsState(result.Type()); ok {
+		if _, ok := holds(result.Type()); ok {
 			found = append(found, ssaCopy{pos: fn.Pos(), typ: result.Type(), what: "the result " + result.Name()})
 		}
 	}
@@ -479,7 +530,7 @@ func ssaCopies(fn *ssa.Function) []ssaCopy {
 		// A constant is the zero value, which is no copy of anything used.
 	}
 	for _, anon := range fn.AnonFuncs {
-		found = append(found, ssaCopies(anon)...)
+		found = append(found, ssaCopiesOf(anon, holds)...)
 	}
 	return found
 }

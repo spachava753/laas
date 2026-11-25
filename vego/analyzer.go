@@ -542,6 +542,14 @@ type pkgVerifier struct {
 	// whose first result is assigned to the blank identifier; see
 	// discardsFirst.
 	discarded map[ast.Expr]bool
+	// stateIfaces holds the interfaces with states the package can name;
+	// see stateInterfaces.
+	stateIfaces *[]*types.TypeName
+	// pointerOwners caches pointerStateOwners by what the pointer points to.
+	pointerOwners map[types.Type][]*types.TypeName
+	// sharedCopies holds the copies of structs whose states trusted
+	// methods change; see findSharedCopies.
+	sharedCopies map[*ast.FuncDecl][]ssaCopy
 	pass     *analysis.Pass
 	info     *types.Info
 	res      *logic.Resolver

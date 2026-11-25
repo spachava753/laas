@@ -53,6 +53,11 @@ type sample struct {
 	// arguments, what they would be had only that function written them,
 	// to the capacity of each slice.
 	unwritten []any
+	// ghost answers what the harness knows of a state of a parameter or a
+	// result, before the call or after it, as the states of a file it
+	// opened or closed itself (S0b of F34); known is false where it knows
+	// nothing, and an entry that reads such a state fails.
+	ghost func(name, state string, primed bool) (holds, known bool)
 }
 
 // table returns a function that answers what a random table says, the
@@ -651,12 +656,12 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 	"os.Open": func(rng *rand.Rand) sample {
 		name := randomPath(rng)
 		f, err := os.Open(name)
-		return sample{before: []any{name}, results: []any{f, err}}
+		return sample{before: []any{name}, results: []any{f, err}, ghost: openFile}
 	},
 	"os.Create": func(rng *rand.Rand) sample {
 		name := randomPath(rng)
 		f, err := os.Create(name)
-		return sample{before: []any{name}, results: []any{f, err}}
+		return sample{before: []any{name}, results: []any{f, err}, ghost: openFile}
 	},
 	"os.WriteFile": func(rng *rand.Rand) sample {
 		name, data, perm := randomPath(rng), roomyBytes(rng), []os.FileMode{0o600, 0o644, 0o400, 0}[rng.Intn(4)]
@@ -673,7 +678,16 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 	"(*os.File).Close": func(rng *rand.Rand) sample {
 		f := randomFile(rng)
 		before := snapshot(f)
-		return sample{before: before, after: []any{f}, results: []any{f.Close()}}
+		// closed is true of a file the harness closed, and true after Close
+		// whatever it returned.
+		wasClosed := closedFiles[f]
+		ghost := func(name, state string, primed bool) (bool, bool) {
+			if name != "f" || state != "closed" {
+				return false, false
+			}
+			return primed || wasClosed, true
+		}
+		return sample{before: before, after: []any{f}, results: []any{f.Close()}, ghost: ghost}
 	},
 	"(*os.File).Read": func(rng *rand.Rand) sample {
 		f, b := randomFile(rng), roomyBytes(rng)
@@ -1102,6 +1116,15 @@ var keptOpen []*os.File
 // for reading, for writing, or both, at its end, closed, nil, a directory,
 // the ends of a pipe, a pipe whose reader is closed, and a pipe with a
 // deadline that has passed.
+// closedFiles holds the files randomFile closed itself.
+var closedFiles = map[*os.File]bool{}
+
+// openFile is the ghost of the states of a file that os.Open or os.Create
+// returned: Close has not been called on it.
+func openFile(name, state string, primed bool) (bool, bool) {
+	return false, name == "result1" && state == "closed"
+}
+
 func randomFile(rng *rand.Rand) *os.File {
 	name := filepath.Join(scratch, fmt.Sprintf("file%d", rng.Int63()))
 	if err := os.WriteFile(name, []byte("contents of a file\n"), 0o600); err != nil {
@@ -1139,6 +1162,7 @@ func randomFile(rng *rand.Rand) *os.File {
 	case 4:
 		f := open(os.O_RDWR)
 		f.Close()
+		closedFiles[f] = true
 		return f
 	case 5:
 		return nil
@@ -2170,6 +2194,21 @@ func checkContract(t *testing.T, pv *pkgVerifier, key string, fn *funcInfo, harn
 		}
 		env.givenRelation = func(name string, paths []logic.Path) (*logic.Term, error) {
 			return logic.BoolLit(relation(t, fn, call, earlier, name, paths)), nil
+		}
+		env.givenState = func(v *types.Var, state string, when logic.When) *logic.Term {
+			name := v.Name()
+			for i, result := range fn.results {
+				if result == v {
+					name = spelledResult(fn, i)
+				}
+			}
+			if call.ghost != nil {
+				if holds, known := call.ghost(name, state, when == logic.Primed); known {
+					return logic.BoolLit(holds)
+				}
+			}
+			t.Fatalf("the harness of %s says nothing of the state %s of %s", key, state, v.Name())
+			return nil
 		}
 		env.givenSlice = givenSliceOf(t, fn, call, eval)
 		satisfied := true

@@ -1338,6 +1338,27 @@ func (e *specEnv) state(name string, steps []logic.Step, state string, when logi
 		decls = statesOf(u)
 	}
 	index := slices.IndexFunc(decls, func(d stateDecl) bool { return d.name == state })
+	if index < 0 && viaPointer && e.v.pointerKeyed(found.typ) {
+		// A state that an interface the pointer's type implements declares,
+		// which is about what the pointer points to (S0b of F34).
+		var named []ifaceState
+		for _, s := range e.v.pointerStates(found.typ) {
+			if s.name == state {
+				named = append(named, s)
+			}
+		}
+		switch {
+		case len(named) > 1:
+			return nil, fmt.Errorf("%s(%s) is ambiguous: %s has the state %s of %s and of %s", state, what, found.typ,
+				state, named[0].owner.Name(), named[1].owner.Name())
+		case len(named) == 1 && e.v.sharesAddress(found.typ) != nil:
+			return nil, fmt.Errorf("%s(%s): the first field of what %s points to holds a %s, whose states lie at the same address, so nothing tells the states of the two apart",
+				state, what, what, e.v.sharesAddress(found.typ))
+		case len(named) == 1:
+			e.v.notePointerKey(found.sink, found.val)
+			return e.v.fetch(found.sink, found.mem, []cell{stateCell}, pkey(found.val), named[0].position())[0], nil
+		}
+	}
 	if index < 0 {
 		has := "no states"
 		if len(decls) == 1 {
@@ -2246,7 +2267,22 @@ func (v *fnVerifier) targets(fn *funcInfo, args map[*types.Var]value, sink *stat
 			list = append(list, part)
 		}
 	}
-	return list
+	return v.withPointerStates(list, sink)
+}
+
+// withPointerStates adds, after each target that is a struct a pointer of
+// a type with states points to, the target of the row of its states (A5 of
+// S0b of F34).
+func (v *fnVerifier) withPointerStates(list []target, sink *state) []target {
+	var out []target
+	for _, t := range list {
+		out = append(out, t)
+		if states, ok := v.pointerStatesTarget(t); ok {
+			v.notePointerKey(sink, value{t.base.ref, t.base.at})
+			out = append(out, states)
+		}
+	}
+	return out
 }
 
 // splitStates gives a target that covers both the footprint of an

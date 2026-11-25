@@ -32,7 +32,11 @@ type site struct {
 	// holds when it points to an owner.
 	row   bool
 	fp    bool
-	owner types.Type
+	// pointer is set, beside row, when the row is that of the states of
+	// what the pointer root holds points to, at lo from it (A5 of S0b of
+	// F34).
+	pointer bool
+	owner   types.Type
 	// ownerOff is where the owner lies from where root points, as for
 	// &p.out of a strings.Builder held inline (F14 of the review of
 	// d32bbee).
@@ -361,6 +365,7 @@ func (v *fnVerifier) callSitesOf(eff *effects, form shape, argument func(*types.
 				eff.sites = append(eff.sites, v.ownedSites(form.typ, map[types.Type]bool{})...)
 			}
 			eff.sites = append(eff.sites, at)
+			eff.sites = append(eff.sites, v.pointerStatesSites(form, at)...)
 			return
 		}
 		if form.row || form.fp {
@@ -392,7 +397,25 @@ func (v *fnVerifier) callSitesOf(eff *effects, form shape, argument func(*types.
 			}
 		}
 		eff.sites = append(eff.sites, at)
+		eff.sites = append(eff.sites, v.pointerStatesSites(form, at)...)
 	}
+}
+
+// pointerStatesSites returns, for the site of a struct that a pointer of a
+// type with states points to, the site of the row of its states, which a
+// call whose frame covers the struct changes (A5 of S0b of F34).
+func (v *fnVerifier) pointerStatesSites(form shape, at site) []site {
+	if form.row || form.fp || form.elem != nil || form.mapType != nil || form.typ == nil {
+		return nil
+	}
+	object := form.typ
+	if inner, isPointer := pointee(object); isPointer {
+		object = inner
+	}
+	if !isStructType(object) || !v.pointerKeyed(types.NewPointer(object)) {
+		return nil
+	}
+	return []site{{cells: []cell{stateCell}, row: true, pointer: true, root: at.root, lo: at.lo}}
 }
 
 // rootSite roots a site of a call at the variable that holds what is
@@ -523,6 +546,10 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 		t := target{cells: at.cells, elem: at.elem, mapType: at.mapType, row: at.row}
 		switch {
 		case !precise:
+		case at.row && at.pointer:
+			ptr := value{val[0], logic.Add(val[1], logic.IntLit(at.lo))}
+			v.notePointerKey(st, ptr)
+			t.ref, t.row = pkey(ptr), true
 		case at.row:
 			t.ref, t.row = skey(val[0]), true
 		case at.mapType != nil:

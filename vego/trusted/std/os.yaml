@@ -134,6 +134,7 @@ trusted:
     modifies: []
     ensures:
       - "result2 = nil -> result1 != nil And fresh(result1)"
+      - "result2 = nil -> ~closed(result1)"
 
   os.Create:
     reason: >-
@@ -150,6 +151,7 @@ trusted:
     modifies: []
     ensures:
       - "result2 = nil -> result1 != nil And fresh(result1)"
+      - "result2 = nil -> ~closed(result1)"
 
   (*os.File).Close:
     reason: >-
@@ -161,7 +163,11 @@ trusted:
       entry needs a state that says the File is closed. Read from the
       source: Close of a nil *File returns ErrInvalid; it writes the File
       (its descriptor and what it holds), which modifies lists; see above
-      for its errors. Not said: when it fails.
+      for its errors. Not said: when it fails. Its modifies covers the
+      states of the File, which are those of every interface value that
+      holds it, so after it what they are is not known; closed(f') would
+      say it, and was left out because it makes the check that the entry
+      says when Close succeeds stop at its limit (S0b of F34).
     vouches: [result]
     modifies: [f]
 

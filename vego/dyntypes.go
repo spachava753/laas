@@ -41,12 +41,14 @@ import (
 var dynTypes = logic.Const("dyntype", logic.IntSeq)
 
 // isDynTable reports whether a term is one of the tables of what errors
-// hold: dyntype, a held table, or a table of canonical errors. They are
+// hold: dyntype, a held table, or a table of canonical errors, or the table
+// of the keys of the states of pointers inside an allocation. They are
 // one function for the whole program, never written, which the facts of
 // conversions constrain, so the always-fails check takes them as part of
 // every input, as it takes a fixed variable.
 func isDynTable(t *logic.Term) bool {
-	return t.Op == logic.OpConst && (t == dynTypes || t.Name == dynTypes.Name || strings.HasPrefix(t.Name, "held ") || strings.HasPrefix(t.Name, "mkerr "))
+	return t.Op == logic.OpConst && (t == dynTypes || t.Name == dynTypes.Name || strings.HasPrefix(t.Name, "held ") || strings.HasPrefix(t.Name, "mkerr ") ||
+		t.Name == pkeys.Name)
 }
 
 // dynTag returns the tag of the dynamic type of what is read at a

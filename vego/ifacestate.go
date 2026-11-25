@@ -472,17 +472,21 @@ func (v *fnVerifier) sharing(fn *funcInfo) [][2]*types.Var {
 	}
 	listed := map[*types.Var]bool{}
 	for _, m := range fn.modifies {
-		if form, _, err := v.locateTarget(fn, m, nil, nil, nil); err == nil && form.row && form.direct && len(m.steps) == 0 {
+		if form, _, err := v.locateTarget(fn, m, nil, nil, nil); err == nil && form.direct && len(m.steps) == 0 && form.param != nil && (form.row || v.pointerKeyed(form.param.Type())) {
 			listed[form.param] = true
 		}
 	}
+	// An interface value with states, or a pointer whose type has states
+	// that are the object's (S0b of F34).
+	stated := func(t types.Type) bool { return v.hasStates(t) || v.pointerKeyed(t) }
 	var pairs [][2]*types.Var
 	for i, first := range inputs {
-		if !v.hasStates(first.Type()) {
+		if !stated(first.Type()) {
 			continue
 		}
 		for _, second := range inputs[i+1:] {
-			if v.hasStates(second.Type()) && (listed[first] || listed[second]) && v.namesStateOf(fn, first) && v.namesStateOf(fn, second) {
+			if stated(second.Type()) && (listed[first] || listed[second]) && v.namesStateOf(fn, first) && v.namesStateOf(fn, second) &&
+				(v.hasStates(first.Type()) || v.hasStates(second.Type())) {
 				pairs = append(pairs, [2]*types.Var{first, second})
 			}
 		}
@@ -494,7 +498,7 @@ func (v *fnVerifier) sharing(fn *funcInfo) [][2]*types.Var {
 // parameter, as closed(r) or closed(r') does.
 func (v *fnVerifier) namesStateOf(fn *funcInfo, param *types.Var) bool {
 	states := map[string]bool{}
-	for _, state := range v.ifaceStatesOf(param.Type()) {
+	for _, state := range append(v.ifaceStatesOf(param.Type()), v.pointerStates(param.Type())...) {
 		states[state.name] = true
 	}
 	found := false
@@ -516,10 +520,21 @@ func (v *fnVerifier) namesStateOf(fn *funcInfo, param *types.Var) bool {
 // apartHomes states that two interface values that are not nil have homes
 // of their own, and states of their own (S0b of F34: the key of the states
 // is kept apart from the home). The nil interface has a home too, and two
-// nil values share it.
-func apartHomes(a, b *logic.Term) *logic.Term {
+// nil values share it. Of a pointer, whose states are those of what it
+// points to, it states that its key is apart from the other's.
+func (v *fnVerifier) apartHomes(a value, at types.Type, b value, bt types.Type) *logic.Term {
 	zero := logic.RefLit(0)
-	return logic.Or(logic.Eq(a, zero), logic.Eq(b, zero), logic.And(logic.Ne(home(a), home(b)), logic.Ne(skey(a), skey(b))))
+	key := func(x value, t types.Type) *logic.Term {
+		if isIface(t) {
+			return skey(x[0])
+		}
+		return pkey(x)
+	}
+	parts := []*logic.Term{logic.Ne(key(a, at), key(b, bt))}
+	if isIface(at) && isIface(bt) {
+		parts = append(parts, logic.Ne(home(a[0]), home(b[0])))
+	}
+	return logic.Or(logic.Eq(a[0], zero), logic.Eq(b[0], zero), logic.And(parts...))
 }
 
 // statesOutside states, of two interface values whose homes are apart,
@@ -533,11 +548,15 @@ func (v *fnVerifier) statesOutside(rows *logic.Term, a, b value, at, bt types.Ty
 	for _, pair := range [][2]int{{0, 1}, {1, 0}} {
 		vals, typs := [2]value{a, b}, [2]types.Type{at, bt}
 		x, y := vals[pair[0]], vals[pair[1]]
-		if !v.hasFootprint(typs[pair[0]]) {
+		if !v.hasFootprint(typs[pair[0]]) || !isIface(typs[pair[0]]) {
 			continue
 		}
-		for _, s := range v.ifaceStatesOf(typs[pair[1]]) {
-			cell, facts := v.rowAt(rows, home(x[0]), skey(y[0]), s.position())
+		key, states := skey(y[0]), v.ifaceStatesOf(typs[pair[1]])
+		if !isIface(typs[pair[1]]) {
+			key, states = pkey(y), v.pointerStates(typs[pair[1]])
+		}
+		for _, s := range states {
+			cell, facts := v.rowAt(rows, home(x[0]), key, s.position())
 			premises = append(premises, facts...)
 			claims = append(claims, logic.Or(isNilRef(x), isNilRef(y), logic.Not(cell)))
 		}

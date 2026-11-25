@@ -227,6 +227,9 @@ type target struct {
 	// besideFootprint is set for the states of an entry whose footprint is
 	// a target of its own, the one before it in the list.
 	besideFootprint bool
+	// besideStruct is set for the states of what a pointer points to, of
+	// an entry whose struct is the target before it (A5 of S0b of F34).
+	besideStruct bool
 	// owned holds, for a struct that owns some of its fields, a target for
 	// what each owned field refers to; targets spreads them into the list.
 	// owner and ownerType are the pointer to that struct and its type.

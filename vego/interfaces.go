@@ -121,6 +121,12 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 	// reads them, and the method check chooses the state after a call that
 	// changes them (madeAs). They start False (F28).
 	ghost := v.stateSpeaker(want) != nil && v.hasStates(want)
+	// A pointer converted to an interface with states gives the value the
+	// states of what it points to (S0b of F34).
+	pointerKeyed := false
+	if v.hasStates(want) {
+		pointerKeyed = v.checkStateChangers(e, from, want)
+	}
 	converted := v.evalConverted(e, want, st, guard)
 	v.held[ast.Unparen(e)] = converted
 	if want.Underlying().(*types.Interface).NumMethods() > 0 {
@@ -136,12 +142,30 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		st.assume(logic.Ne(held, other))
 	}
 	v.converted = append(v.converted, held)
+	// The key of its states: the pointer's, or a new one with every state
+	// False for a value, which the conversion copies.
+	keyAt := func(at *logic.Term, fresh bool) {
+		if pointerKeyed {
+			v.notePointerKey(st, converted)
+			st.assume(logic.Eq(skey(held), pkey(converted)))
+			return
+		}
+		st.assume(logic.Eq(skey(held), at))
+		if fresh {
+			// Its states start False, as an allocation zeroes the states
+			// of a struct (F9 of the design of footprints).
+			row := v.fresh("states", logic.BoolSeq)
+			for _, s := range v.ifaceStatesOf(want) {
+				st.assume(logic.Not(logic.Select(row, s.position())))
+			}
+			st.storeRow(stateRegion, logic.Bool, at, row)
+		}
+	}
 	if ghost && !footprinted {
 		// A home of its own, at which its states lie.
 		at := v.alloc(st, true)
 		st.assume(logic.Eq(home(held), at))
-		st.assume(logic.Eq(skey(held), at))
-		v.falseStates(st, at, want)
+		keyAt(at, true)
 	}
 	if footprinted {
 		// Its home is new, and its row is what its methods may write: the
@@ -151,11 +175,9 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		at := v.alloc(st, true)
 		st.assume(logic.Eq(home(held), at))
 		// The key of its states is the new home too, so that what a call
-		// writes of them is memory the function made.
-		st.assume(logic.Eq(skey(held), at))
-		if ghost {
-			v.falseStates(st, at, want)
-		}
+		// writes of them is memory the function made, unless it is a
+		// pointer's.
+		keyAt(at, ghost)
 		var defines func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term)
 		if behind != nil {
 			defines = v.structuralFootprint(nil, maps.Clone(st.mem), converted, from)
@@ -195,6 +217,81 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		st.mem[footprintRegion] = defined
 	}
 	return value{held}
+}
+
+// checkStateChangers decides where the states of a value converted to an
+// interface with states lie, and refuses a conversion whose methods cannot
+// carry them as the model does (S0b of F34). It reports whether they are
+// the states of what a pointer points to.
+//
+// A method of the value that implements a method whose contract lists its
+// receiver changes the states. When one of a pointer's such methods has a
+// pointer receiver, the states are those of the object, at the pointer's
+// key: every such method must then have a pointer receiver and list it in
+// Modifies, so that a static call of it in any package covers the struct
+// and so forgets the states of every interface value that holds the
+// pointer, and the object must not have size zero, since two pointers to
+// one may or may not be one. Otherwise each conversion has states of its
+// own, as a value does: verified methods that act on a copy keep ghost
+// states that are what calls on that interface value did. A trusted such
+// method of a value acts on something the value refers to, which every
+// copy shares, so a state that starts False at the conversion would be a
+// claim nobody made, and the conversion is refused (F10 of the design
+// review).
+func (v *fnVerifier) checkStateChangers(e ast.Expr, from, want types.Type) bool {
+	shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
+	type changer struct {
+		method, concrete *types.Func
+		recv             *types.Var
+		pointerRecv      bool
+		fn               *funcInfo
+	}
+	var changers []changer
+	for method := range want.Underlying().(*types.Interface).Methods() {
+		T := v.methodContract(method)
+		if T == nil || T.receiver == nil || !slices.ContainsFunc(T.modifies, func(m *modTarget) bool { return m.name == T.receiver.Name() }) {
+			continue
+		}
+		selection := types.NewMethodSet(from).Lookup(method.Pkg(), method.Name())
+		if selection == nil {
+			continue
+		}
+		concrete, ok := selection.Obj().(*types.Func)
+		if !ok {
+			continue
+		}
+		recv := concrete.Type().(*types.Signature).Recv()
+		_, pointerRecv := recv.Type().(*types.Pointer)
+		changers = append(changers, changer{method: method, concrete: concrete, recv: recv, pointerRecv: pointerRecv, fn: v.contractOf(concrete)})
+	}
+	object, isPointer := pointee(from)
+	pointerKeyed := isPointer && v.pointerKeyed(from)
+	if inner := v.sharesAddress(from); pointerKeyed && inner != nil {
+		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: its first field holds a %s, whose states are its own and lie at the same address, "+
+			"so nothing tells the states of the two apart; put another field first", shown(from), shown(want), shown(inner)))
+	}
+	if pointerKeyed && v.pass.TypesSizes.Sizeof(object) == 0 {
+		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: it points to a value of size zero, and two such pointers may or may not be one, "+
+			"so nothing tells their states apart", shown(from), shown(want)))
+	}
+	for _, c := range changers {
+		title := methodOf(c.recv.Type(), c.concrete, v.pass.Pkg)
+		switch {
+		case !pointerKeyed && c.fn != nil && c.fn.trust != nil:
+			v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: %s changes the states of %s and is trusted, so the states are about what it acts on, "+
+				"which every copy of the value shares, and a copy cannot start with states of its own; convert a pointer to the value, whose states are its own",
+				shown(from), shown(want), title, methodTitle(c.method)))
+		case !pointerKeyed:
+		case !c.pointerRecv:
+			v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: %s changes the states of %s and has a value receiver, so a call of it on the pointer "+
+				"would not be known to change the states of what the pointer points to; give it a pointer receiver", shown(from), shown(want), title, methodTitle(c.method)))
+		case c.fn != nil && !slices.ContainsFunc(c.fn.modifies, func(m *modTarget) bool { return m.name == c.recv.Name() && len(m.steps) == 0 }):
+			v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: %s changes the states of %s, and its contract does not list its receiver %s in Modifies, "+
+				"so a call of it on the pointer would not be known to change the states of what the pointer points to; list %s in its // @Modifies clause",
+				shown(from), shown(want), title, methodTitle(c.method), c.recv.Name(), c.recv.Name()))
+		}
+	}
+	return pointerKeyed
 }
 
 // writingImplementation returns a method of the interface want that writes
@@ -276,6 +373,12 @@ func (v *fnVerifier) madeInterface(e ast.Expr, held value, from, want types.Type
 			func(sv *fnVerifier, entry *state, carry *transport) value {
 				kept := carry.value(held)
 				sv.placeFootprint(entry, v.methodContract(method), kept, from)
+				// The states of the receiver are those of what the pointer
+				// points to (S0b of F34).
+				if T := v.methodContract(method); T != nil && T.receiver != nil && sv.entry[T.receiver] != nil && v.hasStates(want) && v.pointerKeyed(from) {
+					sv.notePointerKey(entry, kept)
+					entry.assume(logic.Eq(skey(sv.entry[T.receiver][0]), pkey(kept)))
+				}
 				if !fromPointer || recvPointer {
 					return kept
 				}
@@ -795,18 +898,6 @@ func (v *fnVerifier) errorText(call *ast.CallExpr, st *state, guard []*logic.Ter
 // 2 * (|s| + 4096) + 65536 <= MaxAlloc, the bound formatting proves.
 func errorTextFits(v *fnVerifier, s *logic.Term) *logic.Term {
 	return logic.Le(logic.Add(logic.Mul(logic.Add(logic.Len(s), logic.IntLit(fmtSlack)), logic.IntLit(2)), logic.IntLit(1<<16)), logic.BigLit(v.maxAlloc()))
-}
-
-// falseStates writes the states of a value converted to an interface with
-// states at its new home: each is False, as an allocation zeroes the
-// states of a struct (F9 of the design of footprints), and the row of
-// every other home is what it was.
-func (v *fnVerifier) falseStates(st *state, at *logic.Term, want types.Type) {
-	row := v.fresh("states", logic.BoolSeq)
-	for _, s := range v.ifaceStatesOf(want) {
-		st.assume(logic.Not(logic.Select(row, s.position())))
-	}
-	st.storeRow(stateRegion, logic.Bool, at, row)
 }
 
 // convertByContract checks a conversion of an interface value of type from

@@ -1071,6 +1071,11 @@ func (v *fnVerifier) primedPaths(fn *funcInfo) {
 			target{cells: form.cells, mapType: form.mapType}.regions(func(key string, _ logic.Sort) {
 				changed[key] = append(changed[key], whose)
 			})
+			// A struct that a pointer of a type with states points to
+			// comes with the row of its states (A5 of S0b of F34).
+			if len(v.pointerStatesSites(form, site{})) > 0 {
+				changed[stateRegion] = append(changed[stateRegion], nil)
+			}
 		}
 	}
 	for _, c := range fn.ensures {
@@ -1194,6 +1199,12 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 				read, own = append(read, cells[len(cells)-len(decls)+index]), append(own, false)
 			}
 		}
+	}
+	// A state that an interface the pointer's type implements declares
+	// lies in the region of states, at the pointer's key.
+	if _, viaPointer := pointee(t); viaPointer && state != "" && state != lengthRead && v.pointerKeyed(t) &&
+		slices.ContainsFunc(v.pointerStates(t), func(s ifaceState) bool { return s.name == state }) {
+		read, own = append(read, stateCell), append(own, false)
 	}
 	// The length of an owner reads its struct, where a pointer points.
 	if object, viaPointer := pointee(t); viaPointer && state == lengthRead && ownerLength(object) != nil {

@@ -300,6 +300,7 @@ func (v *fnVerifier) newObject(st *state, t types.Type, val value) value {
 	ref := v.alloc(st, v.pass.TypesSizes.Sizeof(t) > 0)
 	v.put(st, v.cellsOf(t), ref, logic.IntLit(0), val)
 	v.noteBorn(st, ref, rowKeys(v.cellsOf(t)))
+	v.newPointerStates(st, t, value{ref, logic.IntLit(0)})
 	return value{ref, logic.IntLit(0)}
 }
 

@@ -1451,6 +1451,35 @@ func (b *sampler) add(t types.Type, to binding, depth int) {
 		b.refs++
 		ref := logic.RefLit(b.refs)
 		b.choose(slot{pointTo(ref), pointTo(logic.RefLit(0))}, to.name(0))
+		// The states of what it points to, when its type has some, lie at
+		// its allocation, the key of a pointer to the start of one (S0b of
+		// F34); each gets a value that Z3 chooses.
+		if states := b.v.pointerStates(t); len(states) > 0 && b.v.pointerKeyed(t) {
+			// The table of keys of pointers inside an allocation, which
+			// the facts of a key read at the pointer: its allocation,
+			// which existed on entry.
+			b.slots = append(b.slots, slot{func(s *witness) {
+				table, ok := s.consts[pkeys.Name]
+				if !ok {
+					table = logic.Fill(logic.IntLit(0), logic.Fill(logic.IntLit(0), logic.RefLit(1)))
+				}
+				s.consts[pkeys.Name] = logic.Store(table, ref, logic.Fill(logic.IntLit(0), ref))
+			}})
+		}
+		for _, state := range b.v.pointerStates(t) {
+			if !b.v.pointerKeyed(t) {
+				break
+			}
+			choice, position := b.boolean(), state.position()
+			b.choose(slot{func(s *witness) {
+				name := entryRegion + stateRegion
+				region, ok := s.consts[name]
+				if !ok {
+					region = logic.Const(name, logic.SeqOf(logic.BoolSeq))
+				}
+				s.consts[name] = logic.Store(region, ref, logic.Store(logic.Select(region, ref), position, choice))
+			}}, entryRegion+stateRegion)
+		}
 		cells := b.v.cellsOf(object)
 		b.add(object, binding{
 			set:  func(s *witness, i int, term *logic.Term) { s.storeAt(cells[i], ref, term) },

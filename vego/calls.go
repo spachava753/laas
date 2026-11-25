@@ -600,9 +600,13 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	for _, pair := range v.sharing(fn) {
 		if args[pair[0]] != nil && args[pair[1]] != nil {
 			reported := v.reports
-			v.check(st, guard, apartHomes(args[pair[0]][0], args[pair[1]][0]), call.Pos(),
-				"the interface values passed to %s as %s and %s may share their states: they may be one value, hold one value, or hold a value "+
-					"and one that wraps it, and %s may rely on them not doing so", name, describe(pair[0]), describe(pair[1]), name)
+			why := "they may be one value, hold one value, or hold a value and one that wraps it"
+			what := "the interface values"
+			if !isIface(pair[0].Type()) || !isIface(pair[1].Type()) {
+				why, what = "the interface value may hold the pointer", "the interface value and the pointer"
+			}
+			v.check(st, guard, v.apartHomes(args[pair[0]], pair[0].Type(), args[pair[1]], pair[1].Type()), call.Pos(),
+				"%s passed to %s as %s and %s may share their states: %s, and %s may rely on them not doing so", what, name, describe(pair[0]), describe(pair[1]), why, name)
 			premises, claims := v.statesOutside(st.mem.region(footprintRegion, footprintSort), args[pair[0]], args[pair[1]], pair[0].Type(), pair[1].Type())
 			// One report for a pair: values that may be one value may also
 			// change each other's states.

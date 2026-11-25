@@ -277,10 +277,21 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 		if err != nil || !t.single || covered == nil {
 			continue
 		}
+		pointer := covered
 		if object, isPointer := pointee(covered); isPointer {
 			covered = object
 		}
 		v.put(st, t.cells, t.ref, t.lo, v.unknown("out", covered, st))
+		// The states of what a pointer of a type with states points to,
+		// which the entry covers with the struct, get values that Z3
+		// chooses too (S0b of F34).
+		if states, ok := v.pointerStatesTarget(t); ok {
+			v.notePointerKey(st, value{t.base.ref, t.base.at})
+			for _, state := range v.pointerStates(types.NewPointer(covered)) {
+				v.put(st, []cell{stateCell}, states.ref, state.position(), value{v.fresh("out", logic.Bool)})
+			}
+			_ = pointer
+		}
 	}
 	results := make([]value, len(fn.results))
 	for i, result := range fn.results {
@@ -321,7 +332,7 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 			given = append(given, fact)
 		}
 	}
-	facts, homesChosen := v.chooseHomes(facts, v.made[mark:])
+	facts, homesChosen, keysChosen := v.chooseHomes(facts, v.made[mark:])
 	// A result that holds memory may be memory the outcome makes and adds
 	// to a listed footprint, as a header that a response writer makes on
 	// the first call (F34 of the review of step 4).
@@ -349,6 +360,8 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 		chosenRows := grown.prev
 		for i, h := range homesChosen {
 			instances[0][h.Name] = logic.Add(entry.brk, logic.IntLit(int64(i)))
+			// Its states are new too, at the same new row.
+			instances[0][keysChosen[i].Name] = instances[0][h.Name]
 			chosenRows = logic.Store(chosenRows, instances[0][h.Name], emptyRow)
 		}
 		whole := logic.Fill(logic.IntLit(0), logic.True())
@@ -361,8 +374,9 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 		instances[0][rows.Name] = chosenRows
 		for _, at := range freeHomeReads(given, 4) {
 			instance := map[string]*logic.Term{st.brk.Name: entry.brk}
-			for _, h := range homesChosen {
+			for i, h := range homesChosen {
 				instance[h.Name] = home(at)
+				instance[keysChosen[i].Name] = skey(at)
 			}
 			instances = append(instances, instance)
 		}
@@ -406,7 +420,7 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 // the home the table gives it.
 //
 // It also returns the homes it made, in order.
-func (v *fnVerifier) chooseHomes(facts []*logic.Term, made []string) ([]*logic.Term, []*logic.Term) {
+func (v *fnVerifier) chooseHomes(facts []*logic.Term, made []string) ([]*logic.Term, []*logic.Term, []*logic.Term) {
 	produced := map[string]bool{}
 	for _, name := range made {
 		produced[name] = true
@@ -451,13 +465,18 @@ func (v *fnVerifier) chooseHomes(facts []*logic.Term, made []string) ([]*logic.T
 	}
 	order = slices.DeleteFunc(order, func(ref *logic.Term) bool { return pinned[ref.Name] })
 	if len(order) == 0 {
-		return facts, nil
+		return facts, nil, nil
 	}
-	chosen := map[string]*logic.Term{}
-	var homesMade []*logic.Term
+	// Each produced value gets a home and a key of its states of its own,
+	// two constants, so that an instance can give it what another value
+	// has of each (S0b of F34).
+	chosen, chosenKeys := map[string]*logic.Term{}, map[string]*logic.Term{}
+	var homesMade, keysMade []*logic.Term
 	for _, ref := range order {
 		chosen[ref.Name] = v.fresh("outhome", logic.Ref)
+		chosenKeys[ref.Name] = v.fresh("outkey", logic.Ref)
 		homesMade = append(homesMade, chosen[ref.Name])
+		keysMade = append(keysMade, chosenKeys[ref.Name])
 	}
 	zero := logic.RefLit(0)
 	// Each subset of the produced references is a choice of which are nil.
@@ -480,23 +499,23 @@ func (v *fnVerifier) chooseHomes(facts []*logic.Term, made []string) ([]*logic.T
 	}
 	var cases []*logic.Term
 	for _, nils := range subsets {
-		asZero, asHome := map[string]*logic.Term{}, map[string]*logic.Term{}
+		asZero, asHome, asKey := map[string]*logic.Term{}, map[string]*logic.Term{}, map[string]*logic.Term{}
 		var conditions []*logic.Term
 		for i, ref := range order {
 			if nils[i] {
 				asZero[ref.Name] = zero
 				continue
 			}
-			asHome[ref.Name] = chosen[ref.Name]
+			asHome[ref.Name], asKey[ref.Name] = chosen[ref.Name], chosenKeys[ref.Name]
 			conditions = append(conditions, logic.Ne(ref, zero))
 		}
 		homeMemo, zeroMemo := map[*logic.Term]*logic.Term{}, map[*logic.Term]*logic.Term{}
 		for _, fact := range facts {
-			conditions = append(conditions, substituteConsts(replaceHomes(fact, asHome, homeMemo), asZero, zeroMemo))
+			conditions = append(conditions, substituteConsts(replaceHomes(fact, asHome, asKey, homeMemo), asZero, zeroMemo))
 		}
 		cases = append(cases, logic.And(conditions...))
 	}
-	return []*logic.Term{logic.Or(cases...)}, homesMade
+	return []*logic.Term{logic.Or(cases...)}, homesMade, keysMade
 }
 
 // freeHomeReads returns up to limit references, in the order met, whose
@@ -511,7 +530,7 @@ func freeHomeReads(facts []*logic.Term, limit int) []*logic.Term {
 			return
 		}
 		seen[t] = true
-		if t.Op == logic.OpSelect && t.Args[0].Op == logic.OpConst && t.Args[0].Name == homes.Name {
+		if _, read := isKeyRead(t); read {
 			if key := t.Args[1].String(); !listed[key] {
 				listed[key] = true
 				found = append(found, t.Args[1])
@@ -633,20 +652,23 @@ func liftHomes(t *logic.Term, memo map[*logic.Term]*logic.Term) *logic.Term {
 }
 
 // replaceHomes replaces the home of each reference that by names with the
-// constant given for it.
-func replaceHomes(t *logic.Term, by map[string]*logic.Term, memo map[*logic.Term]*logic.Term) *logic.Term {
+// constant given for it, and the key of its states with the one keys
+// gives.
+func replaceHomes(t *logic.Term, by, keys map[string]*logic.Term, memo map[*logic.Term]*logic.Term) *logic.Term {
 	if done, ok := memo[t]; ok {
 		return done
 	}
 	result := t
 	switch {
-	case isHomeRead(t) && t.Args[1].Op == logic.OpConst && by[t.Args[1].Name] != nil:
+	case isHomeRead(t) && t.Args[1].Op == logic.OpConst && t.Args[0].Name == skeys.Name && keys[t.Args[1].Name] != nil:
+		result = keys[t.Args[1].Name]
+	case isHomeRead(t) && t.Args[1].Op == logic.OpConst && t.Args[0].Name == homes.Name && by[t.Args[1].Name] != nil:
 		result = by[t.Args[1].Name]
 	case len(t.Args) > 0:
 		args := make([]*logic.Term, len(t.Args))
 		changed := false
 		for i, arg := range t.Args {
-			args[i] = replaceHomes(arg, by, memo)
+			args[i] = replaceHomes(arg, by, keys, memo)
 			changed = changed || args[i] != arg
 		}
 		if changed {

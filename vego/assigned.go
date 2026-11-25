@@ -649,5 +649,5 @@ func (v *fnVerifier) reachedTargets(call *ast.CallExpr, fn *funcInfo, sink *stat
 		}
 		add(form, t)
 	}
-	return forms, targets
+	return forms, v.withPointerStates(targets, sink)
 }

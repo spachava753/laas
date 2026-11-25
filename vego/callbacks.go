@@ -820,6 +820,7 @@ func (v *fnVerifier) handedSites(arg ast.Expr, contract *funcInfo, eff *effects)
 			at.root = v.holder(sel.X, recv.Type())
 		}
 		eff.sites = append(eff.sites, at)
+		eff.sites = append(eff.sites, v.pointerStatesSites(form, at)...)
 	}
 }
 
