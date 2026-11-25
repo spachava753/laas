@@ -339,3 +339,90 @@ func HolderCopy(h *Holder) {
 	g := *h // want `cannot verify HolderCopy: Go copies a value of type Holder, which holds an os.File, here \(\*h\)`
 	_ = g
 }
+
+// Two files that two calls returned, each converted and closed through its
+// interface value, keep their states apart (O1 of the checkpoint of S0b):
+// the key of an object that exists exists too, so a call does not create
+// it, and no footprint that the call grows holds it.
+
+// @Requires 0 < |n1| <= 100 And 0 < |n2| <= 100
+// @Ensures True
+func TwoFiles(n1, n2 string) {
+	f1, err := os.Open(n1)
+	if err != nil {
+		return
+	}
+	var c1 io.Closer = f1
+	f2, err := os.Create(n2)
+	if err != nil {
+		c1.Close()
+		return
+	}
+	var c2 io.Closer = f2
+	c1.Close()
+	c2.Close()
+}
+
+// @Requires 0 < |n1| <= 100 And 0 < |n2| <= 100
+// @Ensures True
+func TwoOpened(n1, n2 string) {
+	f1, err := os.Open(n1)
+	if err != nil {
+		return
+	}
+	f2, err := os.Open(n2)
+	if err != nil {
+		return
+	}
+	var c1 io.Closer = f1
+	var c2 io.Closer = f2
+	c2.Close()
+	c1.Close()
+}
+
+// @Requires 0 < |n1| <= 100 And 0 < |n2| <= 100
+// @Ensures True
+func OneConverted(n1, n2 string) {
+	f1, err := os.Open(n1)
+	if err != nil {
+		return
+	}
+	f2, err := os.Open(n2)
+	if err != nil {
+		return
+	}
+	var c1 io.Closer = f1
+	c1.Close()
+	// @Assert ~closed(f2)
+	f2.Close()
+}
+
+// NewP makes a closer of the project.
+//
+// @Ensures result != nil And fresh(result) And ~closed(result)
+func NewP() (result *P) {
+	return &P{}
+}
+
+// @Ensures True
+func TwoConstructed() {
+	p1 := NewP()
+	p2 := NewP()
+	var c1 io.Closer = p1
+	var c2 io.Closer = p2
+	c1.Close()
+	c2.Close()
+}
+
+// newTrustedP is trusted: its entry says the closer is new and not closed.
+func newTrustedP() (result *P) { return &P{} }
+
+// @Ensures True
+func TwoTrusted() {
+	p1 := newTrustedP()
+	p2 := newTrustedP()
+	var c1 io.Closer = p1
+	var c2 io.Closer = p2
+	c1.Close()
+	c2.Close()
+}

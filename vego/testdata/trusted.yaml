@@ -2397,6 +2397,12 @@ trusted:
     reason: Test helper standing for a call on what a struct owns, whose error may hold it.
     modifies: []
 
+  ptrstates.newTrustedP:
+    reason: Test helper standing for a trusted constructor of a closer of the project, which returns a new one that nobody has closed (O1 of the checkpoint of S0b of F34).
+    modifies: []
+    ensures:
+      - "result != nil And fresh(result) And ~closed(result)"
+
   (*ptrlib.Quiet).Close:
     reason: Test helper for a library type whose Close has an entry that lists nothing, so the states of what its pointer points to are not kept (F12 of the review of S0b of F34).
     modifies: []

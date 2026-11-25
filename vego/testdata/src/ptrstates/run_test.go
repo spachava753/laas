@@ -70,6 +70,12 @@ func TestClaims(t *testing.T) {
 	if err := g.Close(); err != nil {
 		t.Errorf("OneOfTwo closed g: %v", err)
 	}
+	file2 := filepath.Join(t.TempDir(), "g")
+	TwoFiles(file, file2)
+	TwoOpened(file, file)
+	OneConverted(file, file)
+	TwoConstructed()
+	TwoTrusted()
 	if p := ClosedProject().(*P); p.n != 1 {
 		t.Errorf("ClosedProject: Close was called %d times", p.n)
 	}

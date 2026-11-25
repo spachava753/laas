@@ -3,6 +3,7 @@ package vego
 import (
 	"fmt"
 	"go/types"
+	"math/big"
 	"slices"
 
 	"github.com/spachava753/laas/vego/internal/logic"
@@ -81,11 +82,20 @@ func (v *fnVerifier) notePointerKey(sink *state, ptr value) {
 	inside := pkey(ptr)
 	zero := logic.RefLit(0)
 	existed := logic.Lt(ptr[0], v.entryBrk)
+	// The key of an object that exists exists too, as its allocation
+	// does: below the bound where it is read, so that memory a later call
+	// creates is not it (O1 of the checkpoint of S0b of F34). Every fact
+	// about the states of what a pointer points to comes from a read of
+	// its key, which states this with the bound of that moment, and every
+	// later call creates memory above it.
+	exists := logic.Implies(logic.And(logic.Ne(ptr[0], zero), logic.Lt(ptr[0], sink.brk)),
+		logic.And(logic.Lt(logic.IntLit(0), inside), logic.Lt(inside, sink.brk)))
 	fact := logic.And(
 		logic.Implies(logic.Eq(ptr[0], zero), logic.Eq(inside, zero)),
 		logic.Implies(logic.And(logic.Ne(ptr[0], zero), logic.Eq(ptr[1], logic.IntLit(0))), logic.Eq(inside, ptr[0])),
 		logic.Implies(logic.And(logic.Ne(ptr[0], zero), existed), logic.And(logic.Lt(logic.IntLit(0), inside), logic.Lt(inside, v.entryBrk))),
-		logic.Implies(logic.Not(existed), logic.Le(v.entryBrk, inside)))
+		logic.Implies(logic.Not(existed), logic.Le(v.entryBrk, inside)),
+		exists)
 	if note := "pointer key " + fact.String(); !sink.noted[note] {
 		sink.noted[note] = true
 		sink.assume(fact)
@@ -114,6 +124,14 @@ func (pv *pkgVerifier) stateInterfaces() []*types.TypeName {
 			}
 			if pv.mayDeclareStates(owner) {
 				found = append(found, owner)
+				// A struct's cells are told apart from the states of an
+				// object at the same row by position: no cell of memory lies
+				// above twice MaxAlloc, and every state does.
+				for _, s := range pv.declaredStates(owner) {
+					if s.position().Value().Cmp(new(big.Int).Lsh(pv.maxAlloc(), 1)) <= 0 {
+						panic("internal error: the position of the state " + s.title() + " lies within memory")
+					}
+				}
 			}
 		}
 		for _, imported := range pkg.Imports() {
