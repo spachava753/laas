@@ -3,6 +3,21 @@
 version: 1
 
 trusted:
+  arraystructs.setLast:
+    reason: Test helper standing for a trusted function that writes the last element of an array field (F16 of the review of S2 of F36).
+    requires:
+      - "b != nil"
+    modifies: [b.out]
+  arraystructs.setInnerTrusted:
+    reason: Test helper standing for a trusted function that writes the array of a struct held in a field.
+    requires:
+      - "o != nil"
+    modifies: [o.in]
+  arraystructs.setElementTrusted:
+    reason: Test helper standing for a trusted function that writes the array of an element of a slice of structs.
+    requires:
+      - "0 <= i < |bs|"
+    modifies: ["bs[i]"]
   handlers.trailerOf:
     reason: Test helper standing for a trusted function that returns the trailer of a request, which verified code cannot name.
     requires:

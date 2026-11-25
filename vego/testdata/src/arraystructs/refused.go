@@ -1,6 +1,9 @@
 package arraystructs
 
-import "io"
+import (
+	"fmt"
+	"io"
+)
 
 // A struct that holds an array of elements larger than a byte is not
 // modelled, as at the base, whatever else it holds and wherever it lies:
@@ -80,3 +83,20 @@ type owner struct {
 	data [8]byte
 	n    int
 }
+
+// Formatting a struct that holds an array.
+//
+// @Ensures True
+func Format(b buffer) (s string) {
+	return fmt.Sprint(b) // want `cannot verify Format: Sprint formats b, a value of type arraystructs.buffer, and that may run code nobody has checked: arraystructs.buffer holds an array in field out, which verified code cannot format yet`
+}
+
+// A package-level struct that holds an array, whose address is taken.
+var shared buffer
+
+// @Ensures True
+func Shared() (r byte) {
+	return shared.out[0] // want `cannot verify Shared: shared has its address taken at refused.go:\d+; package-level structs that hold an array and whose address is taken are not supported yet`
+}
+
+func takeShared() *buffer { return &shared }

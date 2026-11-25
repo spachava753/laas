@@ -2293,7 +2293,9 @@ func (v *fnVerifier) walkTarget(fn *funcInfo, m *modTarget, param *types.Var, ro
 			// first position.
 			shifted := make([]cell, len(cur.cells))
 			for i, c := range cur.cells {
-				shifted[i] = cell{key: c.key, sort: c.sort, off: c.off - form.lo}
+				// A run keeps its length and the size of its elements.
+				shifted[i] = c
+				shifted[i].off = c.off - form.lo
 			}
 			form.cells = shifted
 		}

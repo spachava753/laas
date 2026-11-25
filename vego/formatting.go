@@ -131,6 +131,9 @@ func plainReason(t types.Type, visiting map[types.Type]bool) string {
 		return plainReason(u.Elem(), visiting)
 	case *types.Struct:
 		for field := range u.Fields() {
+			if isArray(field.Type()) {
+				return fmt.Sprintf("%s holds an array in field %s, which verified code cannot format yet", t, field.Name())
+			}
 			if why := plainReason(field.Type(), visiting); why != "" {
 				return why
 			}
