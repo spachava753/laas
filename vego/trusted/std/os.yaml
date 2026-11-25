@@ -213,6 +213,21 @@ trusted:
       - "0 <= n And n <= |b|"
       - "n != |b| -> err != nil"
 
+  (*os.File).WriteString:
+    reason: >-
+      "WriteString is like Write, but writes the contents of string s rather
+      than a slice of bytes." Read from the source of Go 1.26.6 and 1.27.3:
+      it calls f.Write with the bytes of s, without copying them, so what
+      is said of Write holds: a nil *File returns ErrInvalid, it writes
+      nothing of the File a formula can name, and it returns a non-nil error
+      when n != len(s); see above for its errors. Like every call that
+      waits on the system, it is assumed to return.
+    vouches: [err]
+    modifies: []
+    ensures:
+      - "0 <= n And n <= |s|"
+      - "n != |s| -> err != nil"
+
   os.WriteFile:
     reason: >-
       "WriteFile writes data to the named file, creating it if necessary. If

@@ -46,6 +46,12 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 			v.keyedFact(st, logic.Implies(logic.Ne(val[0], logic.RefLit(0)), logic.Select(keyedByHeld, val[0])))
 			return val
 		}
+		// A value comes to an O-typed type only from one checked, assumed,
+		// or vouched under the same interfaces of O (F7 of F35).
+		if why := v.optionalSourceWhy(from, want); why != "" {
+			v.unsupported(e.Pos(), fmt.Sprintf("converting %s, %s %s, to %s is not supported: %s", types.ExprString(e), article(v.shown(from)), v.shown(from), v.shown(want), why))
+		}
+		v.noteOptional(want)
 		// The value keeps its methods, so a method of want must be one of
 		// them, the very declaration, and so with the same contract.
 		// A method of want that is not a declaration the value has must be
@@ -79,8 +85,22 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 	// structural footprint, fixed at the conversion.
 	footprinted := false
 	var behind *types.Func
-	if method := v.stateSpeaker(want); method != nil && (!v.hasStates(want) || v.hasFootprint(want)) {
-		if behind = v.writingImplementation(from, want); behind != nil {
+	// The methods of the interfaces of O that the value is checked
+	// against write behind its receiver as want's do (F35): its row is
+	// what all of them may write.
+	checks := v.optionalChecks(from, want)
+	optionalWrites := false
+	for _, c := range checks {
+		optionalWrites = optionalWrites || v.footprintMethod(c.method)
+	}
+	if method := v.stateSpeaker(want); optionalWrites || method != nil && (!v.hasStates(want) || v.hasFootprint(want)) {
+		behind = v.writingImplementation(from, want)
+		for _, c := range checks {
+			if behind == nil && v.footprintMethod(c.method) {
+				behind = v.writingMethod(from, c.method)
+			}
+		}
+		if behind != nil {
 			if why := wrapsKept(from); why != "" {
 				shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
 				v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s", shown(from), shown(want), why))
@@ -132,6 +152,8 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 	v.held[ast.Unparen(e)] = converted
 	if want.Underlying().(*types.Interface).NumMethods() > 0 {
 		v.madeInterface(e, converted, from, want, st, guard)
+		v.noteOptional(want)
+		v.checkOptional(e, converted, from, want, checks, st, guard)
 	}
 	held := v.fresh("iface", logic.Ref)
 	st.assume(logic.Ne(held, logic.RefLit(0)))
@@ -316,6 +338,31 @@ func (v *fnVerifier) writingImplementation(from, want types.Type) *types.Func {
 	return nil
 }
 
+// writingMethod returns method, a method that writes behind its receiver,
+// when the method of from that implements it may do as well, as
+// writingImplementation decides for each method of an interface.
+func (v *fnVerifier) writingMethod(from types.Type, method *types.Func) *types.Func {
+	selection := types.NewMethodSet(from).Lookup(method.Pkg(), method.Name())
+	if selection == nil {
+		return method
+	}
+	impl, ok := selection.Obj().(*types.Func)
+	if !ok {
+		return method
+	}
+	fn := v.contractOf(impl)
+	if fn == nil {
+		return method
+	}
+	recv := impl.Type().(*types.Signature).Recv()
+	for _, m := range fn.modifies {
+		if recv == nil || m.name == recv.Name() {
+			return method
+		}
+	}
+	return nil
+}
+
 // evalConverted evaluates an expression that Go converts to the interface
 // type target here; see conversions.go. The walk that lists the
 // conversions must have listed this one with that target.
@@ -348,39 +395,47 @@ func (v *fnVerifier) madeInterface(e ast.Expr, held value, from, want types.Type
 		v.usable(e.Pos(), T, methodTitle(method), st, guard, false)
 	}
 	for method := range iface.Methods() {
-		concrete, why := concreteMethod(from, method.Pkg(), method.Name(), v.pass.Pkg)
-		if why != "" {
-			v.unsupported(e.Pos(), why)
-		}
-		recv := concrete.Type().(*types.Signature).Recv().Type()
-		_, fromPointer := from.Underlying().(*types.Pointer)
-		_, recvPointer := recv.(*types.Pointer)
-		title := methodOf(recv, concrete, v.pass.Pkg)
-		site := v.site(e.Pos(), "in %s used as a method of %s at %s", title, types.TypeString(want, types.RelativeTo(v.pass.Pkg)), v.placeOf(e.Pos()))
-		fun := &ast.SelectorExpr{X: e, Sel: &ast.Ident{NamePos: e.End(), Name: concrete.Name()}}
-		v.madeAs(e, fun, v.methodContract(method), concrete, "a method of "+types.TypeString(want, types.RelativeTo(v.pass.Pkg)), "an interface value", site,
-			func(sv *fnVerifier, entry *state, carry *transport) value {
-				kept := carry.value(held)
-				sv.placeFootprint(entry, v.methodContract(method), kept, from)
-				// The states of the receiver are those of what the pointer
-				// points to (S0b of F34).
-				if T := v.methodContract(method); T != nil && T.receiver != nil && sv.entry[T.receiver] != nil && v.hasStates(want) && v.pointerKeyed(from) {
-					sv.notePointerKey(entry, kept)
-					entry.assume(logic.Eq(skey(sv.entry[T.receiver][0]), pkey(kept)))
-				}
-				if !fromPointer || recvPointer {
-					return kept
-				}
-				// Go reads what the pointer points to each time the method
-				// runs, and panics if it is nil.
-				sv.check(entry, nil, logic.Ne(kept[0], logic.RefLit(0)), e.Pos(),
-					"%s has a value receiver, and the pointer that the interface value holds may be nil", title)
-				object := from.Underlying().(*types.Pointer).Elem()
-				read := sv.fetch(entry, entry.mem, sv.cellsOf(object), kept[0], kept[1])
-				sv.noteTyped(entry, read, object)
-				return read
-			}, st, guard)
+		v.madeMethod(e, held, from, want, method, "", st, guard)
 	}
+}
+
+// madeMethod checks the method of the concrete type from that implements
+// method, a method of the interface want, against method's contract, for
+// a value held as the interface value holds it (madeInterface); more ends
+// the text of the site in messages.
+func (v *fnVerifier) madeMethod(e ast.Expr, held value, from, want types.Type, method *types.Func, more string, st *state, guard []*logic.Term) {
+	concrete, why := concreteMethod(from, method.Pkg(), method.Name(), v.pass.Pkg)
+	if why != "" {
+		v.unsupported(e.Pos(), why)
+	}
+	recv := concrete.Type().(*types.Signature).Recv().Type()
+	_, fromPointer := from.Underlying().(*types.Pointer)
+	_, recvPointer := recv.(*types.Pointer)
+	title := methodOf(recv, concrete, v.pass.Pkg)
+	site := v.site(e.Pos(), "in %s used as a method of %s at %s%s", title, types.TypeString(want, types.RelativeTo(v.pass.Pkg)), v.placeOf(e.Pos()), more)
+	fun := &ast.SelectorExpr{X: e, Sel: &ast.Ident{NamePos: e.End(), Name: concrete.Name()}}
+	v.madeAs(e, fun, v.methodContract(method), concrete, "a method of "+types.TypeString(want, types.RelativeTo(v.pass.Pkg)), "an interface value", site,
+		func(sv *fnVerifier, entry *state, carry *transport) value {
+			kept := carry.value(held)
+			sv.placeFootprint(entry, v.methodContract(method), kept, from)
+			// The states of the receiver are those of what the pointer
+			// points to (S0b of F34).
+			if T := v.methodContract(method); T != nil && T.receiver != nil && sv.entry[T.receiver] != nil && v.hasStates(want) && v.pointerKeyed(from) {
+				sv.notePointerKey(entry, kept)
+				entry.assume(logic.Eq(skey(sv.entry[T.receiver][0]), pkey(kept)))
+			}
+			if !fromPointer || recvPointer {
+				return kept
+			}
+			// Go reads what the pointer points to each time the method
+			// runs, and panics if it is nil.
+			sv.check(entry, nil, logic.Ne(kept[0], logic.RefLit(0)), e.Pos(),
+				"%s has a value receiver, and the pointer that the interface value holds may be nil", title)
+			object := from.Underlying().(*types.Pointer).Elem()
+			read := sv.fetch(entry, entry.mem, sv.cellsOf(object), kept[0], kept[1])
+			sv.noteTyped(entry, read, object)
+			return read
+		}, st, guard)
 }
 
 // concreteMethod returns the method of a concrete type that a call through
@@ -914,6 +969,12 @@ func (v *fnVerifier) convertByContract(e ast.Expr, verb string, from, want types
 		}
 		found, _, _ := types.LookupFieldOrMethod(from, false, method.Pkg(), method.Name())
 		source, _ := found.(*types.Func)
+		// The value of an assertion of an O-typed value may lack a method
+		// of an interface of its O, which was checked where the value was
+		// converted (F35; usedIfaceWhy).
+		if source == nil && verb == "asserting" && v.oTyped(from) && v.optionalMember(from, method) != nil {
+			continue
+		}
 		if source == nil {
 			v.unsupported(e.Pos(), fmt.Sprintf("%s %s, %s %s, to %s is not supported: %s has no method %s", verb, types.ExprString(e), article(shown(from)), shown(from), shown(want), shown(from), method.Name()))
 		}

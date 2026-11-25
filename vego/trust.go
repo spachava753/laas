@@ -513,6 +513,23 @@ type Usage struct {
 	// AnswerCaches lists the cache directories that answers of Z3 the
 	// proofs rest on were read from; see -vego.cache.
 	AnswerCaches []string
+	// Optional records, for each static type that conversions of the
+	// package were checked at or that an assertion or an entry leaned
+	// on, the interfaces of O it counted (optional.go).
+	Optional []OptionalUse
+}
+
+// OptionalUse says which interfaces of O a package counted for a static
+// type, the interfaces it checked conversions to the type against and
+// those an assertion of a value of the type or an entry over it relied
+// on. Two packages built together that count different ones let a value
+// checked against fewer reach code that relies on more (D5 of the design
+// of F35). Files names, for each member, the trust file of its entries.
+type OptionalUse struct {
+	Target  string
+	Members []string
+	Files   []string
+	Package string
 }
 
 // Unentered is a type, by the key its entry would have, that the proofs of
@@ -589,6 +606,13 @@ func (u *Usage) add(other *Usage) {
 			u.ProjectKeys = map[string][]string{}
 		}
 		u.ProjectKeys[file] = keys
+	}
+	for _, use := range other.Optional {
+		if !slices.ContainsFunc(u.Optional, func(known OptionalUse) bool {
+			return known.Target == use.Target && known.Package == use.Package && slices.Equal(known.Members, use.Members)
+		}) {
+			u.Optional = append(u.Optional, use)
+		}
 	}
 	for _, dir := range other.AnswerCaches {
 		if !slices.Contains(u.AnswerCaches, dir) {

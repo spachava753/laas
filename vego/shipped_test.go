@@ -701,6 +701,12 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 		n, err := f.Write(b)
 		return sample{before: before, after: []any{f, b}, results: []any{n, err}}
 	},
+	"(*os.File).WriteString": func(rng *rand.Rand) sample {
+		f, s := randomFile(rng), string(roomyBytes(rng))
+		before := snapshot(f, s)
+		n, err := f.WriteString(s)
+		return sample{before: before, after: []any{f, s}, results: []any{n, err}}
+	},
 	"os.Getenv": func(rng *rand.Rand) sample {
 		key := randomEnvKey(rng)
 		return sample{before: []any{key}, results: []any{os.Getenv(key)}}
@@ -2510,14 +2516,15 @@ func TestFileOutcomes(t *testing.T) {
 		return err.Error()
 	}
 	for key, want := range map[string][]string{
-		"os.Open":          {"success", syscall.ENOENT.Error(), syscall.EACCES.Error(), syscall.ENOTDIR.Error(), syscall.EINVAL.Error(), syscall.ENAMETOOLONG.Error()},
-		"os.Create":        {"success", syscall.EISDIR.Error(), syscall.EACCES.Error(), syscall.ENOTDIR.Error()},
-		"os.WriteFile":     {"success", syscall.EACCES.Error(), syscall.EISDIR.Error()},
-		"os.MkdirAll":      {"success", syscall.ENOTDIR.Error(), syscall.EACCES.Error()},
-		"(*os.File).Close": {"success", os.ErrClosed.Error(), os.ErrInvalid.Error()},
-		"(*os.File).Read":  {"success", io.EOF.Error(), os.ErrClosed.Error(), os.ErrInvalid.Error(), syscall.EISDIR.Error(), syscall.EBADF.Error(), "deadline"},
-		"(*os.File).Write": {"success", os.ErrClosed.Error(), os.ErrInvalid.Error(), syscall.EBADF.Error(), syscall.EPIPE.Error(), "deadline"},
-		"os.Getwd":         {"success", syscall.ENOENT.Error()},
+		"os.Open":                {"success", syscall.ENOENT.Error(), syscall.EACCES.Error(), syscall.ENOTDIR.Error(), syscall.EINVAL.Error(), syscall.ENAMETOOLONG.Error()},
+		"os.Create":              {"success", syscall.EISDIR.Error(), syscall.EACCES.Error(), syscall.ENOTDIR.Error()},
+		"os.WriteFile":           {"success", syscall.EACCES.Error(), syscall.EISDIR.Error()},
+		"os.MkdirAll":            {"success", syscall.ENOTDIR.Error(), syscall.EACCES.Error()},
+		"(*os.File).Close":       {"success", os.ErrClosed.Error(), os.ErrInvalid.Error()},
+		"(*os.File).Read":        {"success", io.EOF.Error(), os.ErrClosed.Error(), os.ErrInvalid.Error(), syscall.EISDIR.Error(), syscall.EBADF.Error(), "deadline"},
+		"(*os.File).Write":       {"success", os.ErrClosed.Error(), os.ErrInvalid.Error(), syscall.EBADF.Error(), syscall.EPIPE.Error(), "deadline"},
+		"(*os.File).WriteString": {"success", os.ErrClosed.Error(), os.ErrInvalid.Error(), syscall.EBADF.Error(), syscall.EPIPE.Error(), "deadline"},
+		"os.Getwd":               {"success", syscall.ENOENT.Error()},
 	} {
 		seen := map[string]bool{}
 		rng := rand.New(rand.NewSource(1))

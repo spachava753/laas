@@ -1,0 +1,145 @@
+package optional
+
+import (
+	"io"
+
+	"optionalc"
+)
+
+// Counter has a WriteString with no contract.
+type Counter struct{ n int }
+
+// @Requires c != nil
+// @Modifies c
+// @Ensures 0 <= n <= |p| And (n < |p| -> err != nil) And err = nil
+func (c *Counter) Write(p []byte) (n int, err error) {
+	if c.n < 1000000 {
+		c.n++
+	}
+	return len(p), nil
+}
+
+// WriteString has no contract.
+func (c *Counter) WriteString(s string) (n int, err error) { return -1, nil }
+
+// @Requires c != nil
+// @Modifies c
+// @Ensures True
+func CounterAsWriter(c *Counter) (n int) {
+	var w io.Writer = c // want `cannot verify CounterAsWriter: converting a \*Counter to io.Writer is not supported: \*Counter implements io.StringWriter, whose method WriteString has an entry that .* relies on of every value it finds it on, and a value converted to io.Writer may be handed to it; \(\*Counter\).WriteString has no contract; annotate it with // @ annotations that meet the entry of \(io.StringWriter\).WriteString, or rename it`
+	n, _ = w.Write([]byte("x"))
+	return n
+}
+
+// @Ensures w != nil
+func BadAsWriter() (w io.Writer) {
+	return Bad{} // want `postcondition may not hold: n <= \|s\|, in Bad.WriteString used as a method of io.StringWriter at refused.go:\d+:\d+, which Bad implements: .* finds WriteString by a type assertion; meet the entry of \(io.StringWriter\).WriteString, or rename the method`
+}
+
+// inner has a WriteString that Outer gets from it.
+type inner struct{}
+
+// @Ensures 0 <= n <= |s| And (n < |s| -> err != nil) And err = nil
+func (inner) WriteString(s string) (n int, err error) { return len(s), nil }
+
+// Outer has a Write of its own and a promoted WriteString.
+type Outer struct {
+	inner
+}
+
+// @Ensures 0 <= n <= |p| And (n < |p| -> err != nil) And err = nil
+func (Outer) Write(p []byte) (n int, err error) { return len(p), nil }
+
+// @Ensures w != nil
+func OuterAsWriter() (w io.Writer) {
+	return Outer{} // want `cannot verify OuterAsWriter: converting an Outer to io.Writer is not supported: Outer implements io.StringWriter, .*; Outer gets WriteString from an embedded field, and a promoted method cannot be used as a method of an interface yet; rename the method, or give Outer a method WriteString of its own that meets the entry`
+}
+
+// Hits counts.
+type Hits struct{ N int }
+
+// Logged counts what WriteString is given in a Hits it points to, outside
+// what a value of it holds.
+type Logged struct{ hits *Hits }
+
+// @Ensures 0 <= n <= |p| And (n < |p| -> err != nil) And err = nil
+func (Logged) Write(p []byte) (n int, err error) { return len(p), nil }
+
+// @Requires l.hits != nil
+// @Modifies l.hits
+// @Ensures 0 <= n <= |s| And (n < |s| -> err != nil) And err = nil
+func (l Logged) WriteString(s string) (n int, err error) {
+	if l.hits.N < 100 {
+		l.hits.N++
+	}
+	return len(s), nil
+}
+
+// @Requires hits != nil
+// @Ensures w != nil
+func LoggedAsWriter(hits *Hits) (w io.Writer) {
+	return Logged{hits: hits} // want `in Logged.WriteString used as a method of io.StringWriter`
+}
+
+// Quiet writes nothing behind its receiver in Write, and its WriteString
+// counts (F5 of the design review: the footprint of a conversion is what
+// every checked method may write).
+type Quiet struct{ N int }
+
+// @Requires q != nil
+// @Ensures n = |p| And err = nil
+func (q *Quiet) Write(p []byte) (n int, err error) { return len(p), nil }
+
+// @Requires q != nil
+// @Modifies q
+// @Ensures 0 <= n <= |s| And (n < |s| -> err != nil) And err = nil
+func (q *Quiet) WriteString(s string) (n int, err error) {
+	if q.N < 100 {
+		q.N++
+	}
+	return len(s), nil
+}
+
+// KeepsN converts q, writes a string through it, and claims that q.N is
+// what it was. It is not proved: put finds WriteString.
+//
+// @Requires q != nil
+// @Modifies q
+// @Ensures r
+func KeepsN(q *Quiet) (r bool) {
+	before := q.N
+	_ = put(q, "x")
+	return q.N == before // want `postcondition may not hold: r`
+}
+
+// Pipe reads and writes; its Write breaks the entry of (io.Writer).Write,
+// so converting it to io.Reader, which does not have Write, is refused.
+type Pipe struct{}
+
+// @Requires |p| > 0
+// @Ensures n = 0 And err = nil
+func (Pipe) Read(p []byte) (n int, err error) { return 0, nil }
+
+// @Ensures n = -1 And err = nil
+func (Pipe) Write(p []byte) (n int, err error) { return -1, nil }
+
+// @Ensures r != nil
+func PipeAsReader() (r io.Reader) {
+	return Pipe{} // want `postcondition may not hold: 0 <= n, in Pipe.Write used as a method of io.Writer`
+}
+
+// RecMaybeNil converts a Rec that may be nil: the check fails once in the
+// package and again here.
+//
+// @Ensures True
+func RecMaybeNil(r *optionalc.Rec) (w io.Writer) {
+	return r // want `precondition of WriteString may not hold: r != nil, in \(\*optionalc.Rec\).WriteString used as a method of io.StringWriter`
+}
+
+// OverAsWriter converts a writer of another module whose WriteString
+// breaks the entry of io.StringWriter.
+//
+// @Ensures w != nil
+func OverAsWriter() (w io.Writer) {
+	return optionalc.Over{} // want `postcondition may not hold: n <= \|s\|, in optionalc.Over.WriteString used as a method of io.StringWriter`
+}

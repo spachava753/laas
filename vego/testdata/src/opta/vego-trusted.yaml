@@ -1,0 +1,7 @@
+version: 1
+
+trusted:
+  (optlibx.Sizer).Size:
+    reason: Every sizer of this module reports a size that is not negative.
+    modifies: []
+    ensures: ["n >= 0"]

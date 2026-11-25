@@ -10,6 +10,7 @@ import (
 	"go/types"
 	"io"
 	"math/rand"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -53,6 +54,27 @@ var typeHarnesses = map[string][]implementation{
 		{"*gzip.Writer", writerHarness(func() io.Writer { return gzip.NewWriter(new(bytes.Buffer)) })},
 		{"any writer the documentation allows", func(rng *rand.Rand) sample {
 			return writerHarness(func() io.Writer { return anyWriter{rng} })(rng)
+		}},
+	},
+	"(io.StringWriter).WriteString": {
+		{"*bytes.Buffer", stringWriterHarness(func() io.StringWriter { return new(bytes.Buffer) })},
+		{"*strings.Builder", stringWriterHarness(func() io.StringWriter { return new(strings.Builder) })},
+		{"*bufio.Writer of 16 bytes over a closed file", stringWriterHarness(func() io.StringWriter { return bufio.NewWriterSize(closedFile(), 16) })},
+		{"*bufio.Writer of 16 bytes over a buffer", stringWriterHarness(func() io.StringWriter { return bufio.NewWriterSize(new(bytes.Buffer), 16) })},
+		{"*bufio.Writer of 16 bytes over a truncating writer", stringWriterHarness(func() io.StringWriter {
+			return bufio.NewWriterSize(iotest.TruncateWriter(new(bytes.Buffer), 20), 16)
+		})},
+		{"*os.File", stringWriterHarness(func() io.StringWriter { return scratchFile() })},
+		{"closed *os.File", stringWriterHarness(func() io.StringWriter { return closedFile() })},
+		{"io.MultiWriter", stringWriterHarness(func() io.StringWriter {
+			return io.MultiWriter(new(bytes.Buffer), sha256.New()).(io.StringWriter)
+		})},
+		{"io.MultiWriter over a closed file", stringWriterHarness(func() io.StringWriter {
+			return io.MultiWriter(new(strings.Builder), closedFile()).(io.StringWriter)
+		})},
+		{"*httptest.ResponseRecorder", stringWriterHarness(func() io.StringWriter { return httptest.NewRecorder() })},
+		{"any string writer the entry allows", func(rng *rand.Rand) sample {
+			return stringWriterHarness(func() io.StringWriter { return anyWriter{rng} })(rng)
 		}},
 	},
 	"(io.Reader).Read": {
@@ -182,6 +204,13 @@ func (w anyWriter) Write(p []byte) (n int, err error) {
 	return n, io.ErrShortWrite
 }
 
+// WriteString does what Write does: any count up to |s|, with an error
+// whenever it is short, which is what the entry of (io.StringWriter).
+// WriteString allows (D1 of F35).
+func (w anyWriter) WriteString(s string) (n int, err error) {
+	return w.Write(make([]byte, len(s)))
+}
+
 // anyReader uses all of p as scratch and reads any count, 0 with no error
 // included, with or without an error of any type.
 type anyReader struct{ rng *rand.Rand }
@@ -236,6 +265,24 @@ func writerHarness(open func() io.Writer) func(rng *rand.Rand) sample {
 			f.Close()
 		}
 		return sample{before: before, after: []any{p}, results: []any{n, err}}
+	}
+}
+
+// stringWriterHarness calls WriteString of a new string writer with a
+// random string, after up to three earlier writes. The servers' writers of
+// net/http are run by the harness of io.WriteString (shipped_http_test.go).
+func stringWriterHarness(open func() io.StringWriter) func(rng *rand.Rand) sample {
+	return func(rng *rand.Rand) sample {
+		w := open()
+		for range rng.Intn(4) {
+			w.WriteString(string(randomBytes(rng)))
+		}
+		s := string(randomBytes(rng))
+		n, err := w.WriteString(s)
+		if f, ok := w.(*os.File); ok {
+			f.Close()
+		}
+		return sample{before: []any{s}, after: []any{s}, results: []any{n, err}}
 	}
 }
 

@@ -64,6 +64,34 @@ trusted:
     ensures:
       - "0 <= n And n <= |p|"
 
+  (io.StringWriter).WriteString:
+    reason: >-
+      A claim about every value that verified code gets from code that is
+      not verified under a type that has the methods of io.Writer, or of
+      another interface checked at conversions, and whose dynamic type has
+      WriteString; see What a proof assumes. The documentation of
+      io.StringWriter says only that it is the interface that wraps the
+      WriteString method, so this entry says more than its documentation
+      (ruled D1 of F35): the bounds of (io.Writer).Write, for the string.
+      They rest on the documentation of io.WriteString, which writes the
+      contents of s to w through WriteString in place of Write, and on the
+      standard library's own callers, which break on a value that does not
+      behave so: (*bufio.Writer).WriteString slices s[n:], which panics on
+      n > len(s), and spins on a count of 0 with no error. Every
+      implementation in the standard library documents or does it:
+      *os.File ("like Write"), *bufio.Writer ("If the count is less than
+      len(s), it also returns an error"), *bytes.Buffer and
+      *strings.Builder (the length of s and a nil error), io.MultiWriter's
+      result, and the writers of net/http. The harness runs it on each.
+      Like every entry, it also claims that WriteString returns. Nothing is
+      claimed of the errors. WriteString may change what the writer holds,
+      which is its footprint, as Write does.
+    receiver: w
+    modifies: [w]
+    ensures:
+      - "0 <= n And n <= |s|"
+      - "n < |s| -> err != nil"
+
   (io.Closer).Close:
     reason: >-
       A claim about every io.Closer that verified code gets from code that

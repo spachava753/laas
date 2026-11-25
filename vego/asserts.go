@@ -144,7 +144,7 @@ func (pv *pkgVerifier) assertsClaim(entry *trustEntry, sig *types.Signature, fro
 			listed = append(listed, t)
 		}
 		if !isError(param.Type()) {
-			if i, beyond := beyondStatic(param.Type(), listed); beyond != "" {
+			if i, beyond := pv.beyondStatic(param.Type(), listed); beyond != "" {
 				return nil, "its asserts lists " + item.dests[i].text + " for " + item.name + ", " + beyond +
 					": nothing checks a value converted to an interface against another interface it is later asserted to, " +
 					"so a function that calls what it finds that way runs code nobody checked, and no entry can claim it; " +
@@ -167,7 +167,7 @@ func (pv *pkgVerifier) assertsClaim(entry *trustEntry, sig *types.Signature, fro
 // method that one of those types lacks. A listed function type must be one
 // that they reach. A listed concrete type adds what it reaches, since the
 // function's own code may call its methods.
-func beyondStatic(param types.Type, listed []types.Type) (int, string) {
+func (pv *pkgVerifier) beyondStatic(param types.Type, listed []types.Type) (int, string) {
 	var r reachedTypes
 	seen := map[types.Type]bool{}
 	r.walk(param, seen)
@@ -182,8 +182,18 @@ func beyondStatic(param types.Type, listed []types.Type) (int, string) {
 		switch u := t.Underlying().(type) {
 		case *types.Interface:
 			for _, from := range r.ifaces {
-				if missing, _ := types.MissingMethod(from, u, true); missing != nil {
-					return i, fmt.Sprintf("an interface with the method %s, and what it holds may hold a value of %s, which lacks it", missing.Name(), from)
+				for method := range u.Methods() {
+					found, _, _ := types.LookupFieldOrMethod(from, false, method.Pkg(), method.Name())
+					if own, ok := found.(*types.Func); ok && types.Identical(own.Type(), method.Type()) {
+						continue
+					}
+					// A value of an O-typed type was checked against the
+					// interfaces of its O where it was converted (F35).
+					if pv.oTyped(from) && pv.optionalMember(from, method) != nil {
+						pv.noteOptional(from)
+						continue
+					}
+					return i, fmt.Sprintf("an interface with the method %s, and what it holds may hold a value of %s, which lacks it", method.Name(), from)
 				}
 			}
 		case *types.Signature:

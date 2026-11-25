@@ -451,6 +451,35 @@ func (pv *pkgVerifier) reportTwoEntries(total *Usage) {
 			"against one can reach verified code that relies on the other. Make the entries the same, or run laas with -vego.trusted naming one file",
 			use.Key, a, b)
 	}
+	// Two packages that count different interfaces of O for one static
+	// type (optional.go, D5 of the design of F35).
+	optional := slices.Clone(total.Optional)
+	slices.SortFunc(optional, func(a, b OptionalUse) int { return strings.Compare(a.Target+" "+a.Package, b.Target+" "+b.Package) })
+	firstOf := map[string]OptionalUse{}
+	for _, use := range optional {
+		first, ok := firstOf[use.Target]
+		if !ok {
+			firstOf[use.Target] = use
+			continue
+		}
+		if slices.Equal(first.Members, use.Members) || reported["optional "+use.Target] {
+			continue
+		}
+		reported["optional "+use.Target] = true
+		var differ []string
+		lacks := func(a, b OptionalUse) {
+			for i, member := range a.Members {
+				if !slices.Contains(b.Members, member) {
+					differ = append(differ, fmt.Sprintf("package %s counts %s, from the entries at %s, and package %s does not", a.Package, member, a.Files[i], b.Package))
+				}
+			}
+		}
+		lacks(first, use)
+		lacks(use, first)
+		pv.report(pv.pass.Files[0].Package, "the trust files of this build give entries to different interfaces that values of %s are checked against where they are converted: %s; "+
+			"a value that verified code checked against fewer can reach verified code that asserts it to one of the others. Make the entries the same, "+
+			"or run laas with -vego.trusted naming one file", use.Target, strings.Join(differ, "; "))
+	}
 	// A proof made with no entry for a type waived what an entry asks
 	// for, such as vouches on a trusted function that returns a value of
 	// it, and a value it lets through can reach a proof that relies on
@@ -498,5 +527,8 @@ func (pv *pkgVerifier) noteLookups() {
 	}
 	for _, key := range slices.Sorted(maps.Keys(pv.unentered)) {
 		pv.usage.Unentered = append(pv.usage.Unentered, Unentered{Key: key, Package: pv.pass.Pkg.Path(), Own: pv.unentered[key]})
+	}
+	for _, key := range slices.Sorted(maps.Keys(pv.optionalUses)) {
+		pv.usage.Optional = append(pv.usage.Optional, pv.optionalUses[key])
 	}
 }

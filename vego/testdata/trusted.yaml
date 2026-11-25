@@ -1258,6 +1258,61 @@ trusted:
     runs: [r]
     modifies: []
 
+  # Interfaces of other modules that the entries here put in O, the
+  # interfaces checked at conversions (F35); see optional/.
+  (optionalsink.Sink).Write:
+    reason: The corpus's claim about every Sink, the same as that of io.Writer.
+    receiver: w
+    modifies: [w]
+    ensures:
+      - "0 <= n And n <= |p|"
+      - "n < |p| -> err != nil"
+  (*optionalc.Rec).Write:
+    reason: A writer of the corpus that writes nothing a formula names.
+    modifies: []
+    ensures:
+      - "0 <= result1 And result1 <= |p|"
+      - "result1 < |p| -> result2 != nil"
+  (*optionalc.Rec).WriteString:
+    reason: A writer of the corpus whose WriteString needs a receiver that is not nil.
+    requires: ["r != nil"]
+    modifies: [r]
+    ensures:
+      - "0 <= result1 And result1 <= |s|"
+      - "result1 < |s| -> result2 != nil"
+  (optionalc.Over).Write:
+    reason: A writer of the corpus.
+    modifies: []
+    ensures:
+      - "0 <= result1 And result1 <= |p|"
+      - "result1 < |p| -> result2 != nil"
+  (optionalc.Over).WriteString:
+    reason: A writer of the corpus whose WriteString reports a byte too many.
+    modifies: []
+    ensures:
+      - "result1 = |s| + 1"
+  (optionalc.Sizer).Size:
+    reason: The corpus's claim about every Sizer.
+    modifies: []
+    ensures: ["n >= 0"]
+  optional.getAny:
+    reason: Returns a new value of its own, made over nothing of w; it vouches for nothing, which an any result does not need.
+    requires: ["w != nil"]
+    runs: [w]
+    modifies: []
+    ensures:
+      - "result != nil"
+      - "fresh(result, w)"
+  optional.getErr:
+    reason: Returns an error.
+    modifies: []
+    ensures: ["result != nil"]
+  optional.getVouched:
+    reason: Returns an error whose methods write nothing.
+    modifies: []
+    vouches: [result]
+    ensures: ["result != nil"]
+
   # Contracts of types of another module; see foreign/.
   (foreignlib.Sink).Put:
     reason: Every sink of the tests takes a small number and returns at most twice it.

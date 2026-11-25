@@ -197,11 +197,36 @@ func (v *fnVerifier) usedIfaceWhy(from, target types.Type, what string, shown fu
 		iface := target.Underlying().(*types.Interface)
 		for m := range iface.Methods() {
 			found, _, _ := types.LookupFieldOrMethod(from, false, m.Pkg(), m.Name())
-			if _, ok := found.(*types.Func); !ok {
-				return fmt.Sprintf("%s has the method %s, which %s does not have, so the value held may be one verified code made without checking it against %s, "+
-					"and code it is handed could call %s under no contract%s; checking each conversion against the interfaces of trust entries, "+
-					"which would lift this for them, is not built yet", shown(target), m.Name(), shown(from), shown(target), m.Name(), discard)
+			if _, ok := found.(*types.Func); ok {
+				continue
 			}
+			// Values of an O-typed static type were checked against the
+			// interfaces of O its package builds with where they were
+			// converted, and those of code that is not verified are
+			// assumed to meet them (F35).
+			if v.oTyped(from) && v.optionalMember(from, m) != nil {
+				v.noteOptional(from)
+				continue
+			}
+			lift := fmt.Sprintf("; the value of an assertion of an interface value may use a method its static type lacks only when the method belongs to an interface whose every method "+
+				"has an entry in the trust files, with no states, as io.StringWriter does, and the static type has every method of such an interface, as io.Writer has, "+
+				"since values of that type are checked against those interfaces where they are converted; %s is not such a method of %s", m.Name(), shown(from))
+			if isIface(from) && !v.oTyped(from) {
+				lift = fmt.Sprintf("; the value of an assertion of an interface value may use a method its static type lacks only when the static type has every method of an interface "+
+					"whose every method has an entry in the trust files, as io.Writer does, since only values of such types are checked against the interfaces that code may assert them to; "+
+					"%s has none", shown(from))
+				if from.Underlying().(*types.Interface).NumMethods() > 0 {
+					lift += ", and an interface whose contracts are in source is not one, since a conversion in one package is not checked against an interface declared in another"
+				}
+			}
+			if isError(target) {
+				lift = ""
+			}
+			return fmt.Sprintf("%s has the method %s, which %s does not have, so the value held may be one verified code made without checking it against %s, "+
+				"and code it is handed could call %s under no contract%s%s", shown(target), m.Name(), shown(from), shown(target), m.Name(), lift, discard)
+		}
+		if why := v.optionalSourceWhy(from, target); why != "" {
+			return why + discard
 		}
 		if isError(target) {
 			return fmt.Sprintf("an error made from a value of %s is not followed as an error%s", shown(from), discard)

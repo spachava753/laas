@@ -207,6 +207,7 @@ buffers	fmt.Fprintln	1	3608	0
 buffers	fmt.Sprint	1	3498	0
 buffers	fmt.Sprintf	1	4468	0
 buffers	fmt.Sprintln	1	3498	0
+buffers	io.Reader.Read	3	7449	0
 buffers	io.Writer.Write	3	7630	0
 buffers	plog.Checked	1	4647	0
 buffers	plog.Counted	1	5168	0
@@ -1138,6 +1139,7 @@ footprints	(*log.Logger).Println	1	5728	0
 footprints	(*os.File).Close	5	11813	0
 footprints	(*os.File).Read	7	2017092	2
 footprints	(*os.File).Write	3	18506	0
+footprints	(*os.File).WriteString	3	16320	0
 footprints	(*strings.Builder).WriteByte	4	12383	0
 footprints	(footprints.ByValue).Inc	6	967	0
 footprints	(footprints.Scores).Inc	11	8731	0
@@ -1146,6 +1148,9 @@ footprints	bufio.NewWriter	1	9378	0
 footprints	fmt.Fprintf	5	14186	0
 footprints	fmt.Fprintln	5	11289	0
 footprints	fmt.Sprintf	1	4468	0
+footprints	footprints.(*os.File).Read as a method of io.Reader	10	43053	0
+footprints	footprints.(*os.File).Write as a method of io.Writer	7	29294	0
+footprints	footprints.(*os.File).WriteString as a method of io.StringWriter	7	24313	0
 footprints	footprints.Appends	31	258623	3
 footprints	footprints.AppendsInPlace	25	221773	2
 footprints	footprints.AsTwin	11	15505	0
@@ -1380,6 +1385,7 @@ footprints	footprints.viaLater	1	46	0
 footprints	footprints.wrapSink	1	3167	0
 footprints	io.Closer.Close	5	12999	0
 footprints	io.Reader.Read	6	1014374	1
+footprints	io.StringWriter.WriteString	3	5354	0
 footprints	io.Writer.Write	5	18168	0
 footprints	log.New	1	8948	0
 footprints	os.Create	16	67709	1
@@ -2304,6 +2310,7 @@ guide	(*net/url.URL).Query	2	49511	2
 guide	(*os.File).Close	5	11813	0
 guide	(*os.File).Read	7	2017092	2
 guide	(*os.File).Write	3	18506	0
+guide	(*os.File).WriteString	3	16320	0
 guide	(*regexp.Regexp).MatchString	1	6576	0
 guide	(*strings.Builder).String	1	3351	0
 guide	(*strings.Builder).Write	4	17410	0
@@ -2347,6 +2354,8 @@ guide	fmt.Fprintf	5	14186	0
 guide	fmt.Fprintln	5	11289	0
 guide	fmt.Println	3	11344	0
 guide	fmt.Sprintf	1	4468	0
+guide	guide.(*os.File).Read as a method of io.Reader	10	43053	0
+guide	guide.(*os.File).WriteString as a method of io.StringWriter	7	24313	0
 guide	guide.Abs	7	1250	0
 guide	guide.AbsWrong	5	871	0
 guide	guide.Account	1	225	0
@@ -2833,6 +2842,7 @@ guide	io.LimitReader	1	3284	0
 guide	io.MultiReader	1	4805	0
 guide	io.NopCloser	1	3835	0
 guide	io.Reader.Read	6	1014374	1
+guide	io.StringWriter.WriteString	3	5354	0
 guide	io.TeeReader	1	4121	0
 guide	io.Writer.Write	5	18168	0
 guide	log.New	1	8948	0
@@ -3481,6 +3491,7 @@ invariants	invariants.count	6	5653	0
 iowrap	(*os.File).Close	1	1691	0
 iowrap	(*os.File).Read	7	2017092	2
 iowrap	(*os.File).Write	3	18506	0
+iowrap	(*os.File).WriteString	3	16320	0
 iowrap	(iowrap.Drained).Read	10	4003	0
 iowrap	io.Closer.Close	5	12999	0
 iowrap	io.LimitReader	1	3284	0
@@ -3488,8 +3499,12 @@ iowrap	io.MultiReader	1	4805	0
 iowrap	io.MultiWriter	1	4805	0
 iowrap	io.NopCloser	1	3835	0
 iowrap	io.Reader.Read	6	1014374	1
+iowrap	io.StringWriter.WriteString	3	5354	0
 iowrap	io.TeeReader	1	4121	0
 iowrap	io.Writer.Write	5	18168	0
+iowrap	iowrap.(*os.File).Read as a method of io.Reader	10	43053	0
+iowrap	iowrap.(*os.File).Write as a method of io.Writer	7	29294	0
+iowrap	iowrap.(*os.File).WriteString as a method of io.StringWriter	7	24313	0
 iowrap	iowrap.Closes	59	171378	0
 iowrap	iowrap.ClosesApart	20	64634	2
 iowrap	iowrap.ClosesTwice	15	26271	0
@@ -3538,12 +3553,18 @@ jsondec	(*jsondec.Marker).Read	17	13296	0
 jsondec	(*jsondec.Spaces).Read	12	9297	0
 jsondec	(*os.File).Close	1	1691	0
 jsondec	(*os.File).Read	7	2017092	2
+jsondec	(*os.File).Write	3	18506	0
+jsondec	(*os.File).WriteString	3	16320	0
 jsondec	(jsondec.VR).Read	12	8082	0
 jsondec	encoding/json.Decode	36	455553	0
 jsondec	encoding/json.Unmarshal	159	13820826	28
 jsondec	io.Closer.Close	3	3885	0
 jsondec	io.LimitReader	1	3284	0
 jsondec	io.Reader.Read	6	1014374	1
+jsondec	io.StringWriter.WriteString	3	5354	0
+jsondec	io.Writer.Write	3	7630	0
+jsondec	jsondec.(*os.File).Write as a method of io.Writer	7	29294	0
+jsondec	jsondec.(*os.File).WriteString as a method of io.StringWriter	7	24313	0
 jsondec	jsondec.AnyLimit	42	359949	8
 jsondec	jsondec.Anys	1	550	0
 jsondec	jsondec.AsValue	1	46	0
@@ -3606,14 +3627,20 @@ jsonenc	(*encoding/json.Encoder).Encode	23	140463	0
 jsonenc	(*jsonenc.Loop).Write	14	14003	0
 jsonenc	(*jsonenc.Server).Dump	38	65825	0
 jsonenc	(*os.File).Close	1	1691	0
+jsonenc	(*os.File).Read	7	2017092	2
 jsonenc	(*os.File).Write	3	18506	0
+jsonenc	(*os.File).WriteString	3	16320	0
 jsonenc	(jsonenc.Leaf).Again	2	728	0
 jsonenc	(jsonenc.VW).Write	7	5238	0
 jsonenc	(net/http.Header).Set	1	8395	0
 jsonenc	encoding/json.Marshal	3	17316	0
 jsonenc	encoding/json.MarshalIndent	3	22551	0
 jsonenc	io.Closer.Close	3	3885	0
+jsonenc	io.Reader.Read	3	7449	0
+jsonenc	io.StringWriter.WriteString	3	5354	0
 jsonenc	io.Writer.Write	5	18168	0
+jsonenc	jsonenc.(*os.File).Read as a method of io.Reader	10	43053	0
+jsonenc	jsonenc.(*os.File).WriteString as a method of io.StringWriter	7	24313	0
 jsonenc	jsonenc.All	27	3289571	9
 jsonenc	jsonenc.Anys	1	497	0
 jsonenc	jsonenc.AsValue	1	46	0
@@ -3961,11 +3988,17 @@ loggervar	(*log.Logger).Printf	1	6882	0
 loggervar	(*log.Logger).Println	1	5728	0
 loggervar	(*loggervar.Tally).Write	17	17965	0
 loggervar	(*os.File).Close	1	1691	0
+loggervar	(*os.File).Read	7	2017092	2
 loggervar	(*os.File).Write	3	18506	0
+loggervar	(*os.File).WriteString	3	16320	0
 loggervar	(loggervar.Echo).Write	1	513	0
 loggervar	io.Closer.Close	3	3885	0
+loggervar	io.Reader.Read	3	7449	0
+loggervar	io.StringWriter.WriteString	3	5354	0
 loggervar	io.Writer.Write	3	7630	0
 loggervar	log.New	1	8948	0
+loggervar	loggervar.(*os.File).Read as a method of io.Reader	10	43053	0
+loggervar	loggervar.(*os.File).WriteString as a method of io.StringWriter	7	24313	0
 loggervar	loggervar.Notify	6	35485	0
 loggervar	loggervar.count	11	40485	0
 loggervar	loggervar.countUnlisted	6	9154	0
@@ -4426,6 +4459,79 @@ net/http	(*sync.Mutex).Unlock	1	1611	0
 net/http	(*sync.Once).Do	1	1800	0
 net/http/internal/httpcommon	(*sync.Once).Do	1	1800	0
 net/textproto	(*sync.Once).Do	1	1800	0
+optional	(*optional.Counter).Write	21	20143	0
+optional	(*optional.Counts).Write	9	6802	0
+optional	(*optional.Counts).WriteString	26	37069	0
+optional	(*optional.Lines).Write	21	20143	0
+optional	(*optional.Lines).WriteString	21	17719	0
+optional	(*optional.Quiet).Write	7	5909	0
+optional	(*optional.Quiet).WriteString	21	17719	0
+optional	(*optional.Tally).Write	21	20143	0
+optional	(*optional.Tally).WriteString	21	17719	0
+optional	(*optionalc.Rec).Write	3	14948	0
+optional	(*optionalc.Rec).WriteString	5	16059	0
+optional	(*os.File).Close	1	1691	0
+optional	(*os.File).Read	7	2017092	2
+optional	(*os.File).Write	3	18506	0
+optional	(*os.File).WriteString	3	16320	0
+optional	(optional.Bad).Write	9	5331	0
+optional	(optional.Bad).WriteString	9	5599	0
+optional	(optional.Logged).Write	9	6125	0
+optional	(optional.Logged).WriteString	21	17719	0
+optional	(optional.Odd).Write	9	5331	0
+optional	(optional.Outer).Write	9	5331	0
+optional	(optional.Pipe).Read	7	5217	0
+optional	(optional.Pipe).Write	7	5018	0
+optional	(optional.T).Write	7	5006	0
+optional	(optional.T).WriteString	7	4490	0
+optional	(optional.badWriteErr).Error	1	46	0
+optional	(optional.badWriteErr).Write	7	5018	0
+optional	(optional.inner).WriteString	9	5235	0
+optional	(optionalc.Over).Write	3	13103	0
+optional	(optionalc.Over).WriteString	3	9841	0
+optional	io.Closer.Close	3	3885	0
+optional	io.Reader.Read	3	7449	0
+optional	io.StringWriter.WriteString	5	13130	0
+optional	io.Writer.Write	5	18168	0
+optional	optional.(*optionalc.Rec).WriteString as a method of io.StringWriter	11	39431	0
+optional	optional.(*os.File).Read as a method of io.Reader	10	43053	0
+optional	optional.(*os.File).WriteString as a method of io.StringWriter	7	24313	0
+optional	optional.BadAsWriter	12	9034	0
+optional	optional.BadToAny	2	66	0
+optional	optional.Both	50	132340	0
+optional	optional.BothSwapped	50	130131	0
+optional	optional.CountTwice	23	74021	3
+optional	optional.CounterAsWriter	11	23421	0
+optional	optional.ErrDirect	1	46	0
+optional	optional.ErrThroughAny	3	296	0
+optional	optional.ErrThroughStringer	4	713	0
+optional	optional.ErrorAsWriter	1	46	0
+optional	optional.FromAny	4	5446	0
+optional	optional.FromSink	1	46	0
+optional	optional.KeepsN	23	51739	0
+optional	optional.Local	24	48388	0
+optional	optional.LoggedAsWriter	14	13405	0
+optional	optional.OddAsks	7	3654	0
+optional	optional.OuterAsWriter	6	3206	0
+optional	optional.OverAsWriter	16	26020	0
+optional	optional.PipeAsReader	12	7619	0
+optional	optional.RecAsWriter	20	63818	0
+optional	optional.RecMaybeNil	19	66964	0
+optional	optional.SinkAsserted	1	514	0
+optional	optional.Through	6	5616	0
+optional	optional.ToFiles	25	88210	0
+optional	optional.VouchedThroughAny	3	296	0
+optional	optional.getAny	1	3166	0
+optional	optional.getErr	3	3794	0
+optional	optional.getVouched	3	3794	0
+optional	optional.optionalc.Over.WriteString as a method of io.StringWriter	7	11569	0
+optional	optional.put	14	26331	0
+optional	optionalc.Sizer.Size	3	961	0
+optional	optionalsink.Sink.Write	3	7630	0
+optionala	(*optionala.T).Put	9	5161	0
+optionala	(*optionala.T).Write	7	5921	0
+optionala	optionala.Make	8	14882	0
+optionala	optionala.Sink.Put	4	1915	0
 ordering	(*ordering.Box).Grow	8	6365	0
 ordering	(*ordering.Box).TryPush	13	10665	0
 ordering	(*ordering.Counter).Inc	10	7281	0
@@ -4599,7 +4705,9 @@ originpathclient	originpathclient.WrapsSwitched	1	46	0
 os	(*sync.Mutex).Lock	1	1652	0
 os	(*sync.Mutex).Unlock	1	1611	0
 owns	(*os.File).Close	1	1691	0
+owns	(*os.File).Read	7	2017092	2
 owns	(*os.File).Write	3	18506	0
+owns	(*os.File).WriteString	3	16320	0
 owns	(*owns.Box).Bounded	3	5504	0
 owns	(*owns.Box).Break	16	33421	0
 owns	(*owns.Cache).Put	17	21104	0
@@ -4637,7 +4745,11 @@ owns	bytes.FieldsFunc	1	9710	0
 owns	bytes.TrimFunc	1	4556	0
 owns	fmt.Fprint	5	11289	0
 owns	io.Closer.Close	3	3885	0
+owns	io.Reader.Read	3	7449	0
+owns	io.StringWriter.WriteString	3	5354	0
 owns	io.Writer.Write	5	18168	0
+owns	owns.(*os.File).Read as a method of io.Reader	10	43053	0
+owns	owns.(*os.File).WriteString as a method of io.StringWriter	7	24313	0
 owns	owns.AddToNew	8	11576	0
 owns	owns.AddTwo	10	25311	0
 owns	owns.Adder.Add	4	1915	0
@@ -5063,11 +5175,17 @@ sentinellib	sentinellib.the initialiser of ErrShort	1	69	0
 sentinellib	sentinellib.the initialiser of errHidden	0	0	0
 sentinellib	sentinellib.the initialiser of oddFormat	0	0	0
 settled	(*os.File).Close	1	1691	0
+settled	(*os.File).Read	7	2017092	2
 settled	(*os.File).Write	3	18506	0
+settled	(*os.File).WriteString	3	16320	0
 settled	bufio.NewWriter	1	9378	0
 settled	context.CancelFunc	3	255	0
 settled	io.Closer.Close	3	3885	0
+settled	io.Reader.Read	3	7449	0
+settled	io.StringWriter.WriteString	3	5354	0
 settled	io.Writer.Write	3	7630	0
+settled	settled.(*os.File).Read as a method of io.Reader	10	43053	0
+settled	settled.(*os.File).WriteString as a method of io.StringWriter	7	24313	0
 settled	settled.Ok	3	153	0
 settled	settled.the initialiser of Count	0	0	0
 settled	settled.the initialiser of ErrWrapped	1	69	0
@@ -5187,6 +5305,7 @@ stdentries	(*net/http.Request).PathValue	2	154328	2
 stdentries	(*os.File).Close	5	11813	0
 stdentries	(*os.File).Read	7	2017092	2
 stdentries	(*os.File).Write	3	18506	0
+stdentries	(*os.File).WriteString	3	16320	0
 stdentries	(*regexp.Regexp).FindString	2	16105	2
 stdentries	(*regexp.Regexp).FindStringSubmatch	1	12607	0
 stdentries	(*regexp.Regexp).MatchString	1	6576	0
@@ -5205,6 +5324,7 @@ stdentries	fmt.Fprintf	5	14186	0
 stdentries	fmt.Fprintln	5	11289	0
 stdentries	io.Closer.Close	3	3885	0
 stdentries	io.Reader.Read	3	7449	0
+stdentries	io.StringWriter.WriteString	3	5354	0
 stdentries	io.Writer.Write	5	18168	0
 stdentries	maps.Clone	3	156173	2
 stdentries	maps.Copy	2	9169	0
@@ -5244,6 +5364,8 @@ stdentries	slices.Max	1	3860	0
 stdentries	slices.Reverse	1	5294	0
 stdentries	slices.Sort	2	8187	0
 stdentries	sort.Strings	1	9160	0
+stdentries	stdentries.(*os.File).Read as a method of io.Reader	10	43053	0
+stdentries	stdentries.(*os.File).WriteString as a method of io.StringWriter	7	24313	0
 stdentries	stdentries.AppendEncode	55	164046	0
 stdentries	stdentries.BeforeColon	10	14238	0
 stdentries	stdentries.Blank	6	2679	0
@@ -6104,18 +6226,24 @@ values	values.the initialiser of ErrReassigned	0	0	0
 values	values.the initialiser of errOutOfRange	0	0	0
 varcode	(*encoding/json.Encoder).Encode	3	16623	0
 varcode	(*os.File).Close	5	11813	0
+varcode	(*os.File).Read	7	2017092	2
 varcode	(*os.File).Write	3	18506	0
+varcode	(*os.File).WriteString	3	16320	0
 varcode	(*varcode.counter).Write	17	17965	0
 varcode	(*varcode.tally).Write	17	17965	0
 varcode	(varcode.nopShut).Shut	1	46	0
 varcode	fmt.Fprint	5	11289	0
 varcode	fmt.Fprintln	5	11289	0
 varcode	io.Closer.Close	5	12999	0
+varcode	io.Reader.Read	3	7449	0
+varcode	io.StringWriter.WriteString	3	5354	0
 varcode	io.Writer.Write	5	18168	0
 varcode	net/http.ResponseWriter.Header	4	16082	2
 varcode	net/http.ResponseWriter.Write	3	7630	0
 varcode	net/http.ResponseWriter.WriteHeader	3	2185	0
 varcode	time.Now	1	373	0
+varcode	varcode.(*os.File).Read as a method of io.Reader	10	43053	0
+varcode	varcode.(*os.File).WriteString as a method of io.StringWriter	7	24313	0
 varcode	varcode.Clock	3	1763	0
 varcode	varcode.Hook	4	2540	0
 varcode	varcode.Positive	3	1025	0
@@ -6183,9 +6311,15 @@ varcode	varcode.writeBad	2	1392	0
 varcode	varcode.writeGood	7	15251	0
 varcode	varcode.writesOther	10	8663	0
 varcodelib	(*os.File).Close	1	1691	0
+varcodelib	(*os.File).Read	7	2017092	2
 varcodelib	(*os.File).Write	3	18506	0
+varcodelib	(*os.File).WriteString	3	16320	0
 varcodelib	io.Closer.Close	3	3885	0
+varcodelib	io.Reader.Read	3	7449	0
+varcodelib	io.StringWriter.WriteString	3	5354	0
 varcodelib	io.Writer.Write	3	7630	0
+varcodelib	varcodelib.(*os.File).Read as a method of io.Reader	10	43053	0
+varcodelib	varcodelib.(*os.File).WriteString as a method of io.StringWriter	7	24313	0
 varcodelib	varcodelib.Event	3	255	0
 varcodelib	varcodelib.Ping	1	46	0
 varcodelib	varcodelib.the initialiser of Log	7	29294	0

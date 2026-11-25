@@ -302,6 +302,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		}
 		pv.checkInvariantsDeclared()
 		pv.checkGroupsInitialised()
+		pv.precheckOptional()
 		pv.checkValueInitialisers()
 		if sp != nil {
 			// What the initialisers showed, for the speculative verifiers,
@@ -796,6 +797,14 @@ type pkgVerifier struct {
 	// ifacestate.go.
 	ownStates map[*types.TypeName][]ifaceState
 	stateUses []*EntryUse
+	// optional is O as the package sees it, and optionalPassedAt what
+	// the checks of methods of types of other modules against its
+	// members answered once in the package (optional.go).
+	optional         map[string]*types.TypeName
+	optionalPassedAt map[optionalPair]bool
+	// optionalUses records, by static type, which members of O
+	// conversions to it were checked against and lifts relied on.
+	optionalUses map[string]OptionalUse
 	// importedStateNames holds the names of the states that the facts of
 	// other packages declare.
 	importedStateNames map[string]bool
