@@ -2549,6 +2549,7 @@ guide	guide.MergeEach	8	15405	0
 guide	guide.Mid	9	4455	0
 guide	guide.MidWrong	7	3245	0
 guide	guide.MustLine	4	3391	0
+guide	guide.MustSize	3	1598	0
 guide	guide.Natural.Get	3	1278	0
 guide	guide.Nearest	27	64171	0
 guide	guide.NewCounter	4	1080	0
@@ -2595,6 +2596,7 @@ guide	guide.PopInCondition	8	11905	0
 guide	guide.PopSum	13	154822	1
 guide	guide.Position	13	68202	0
 guide	guide.Prefixed	15	46801	0
+guide	guide.PricedOf	1	497	0
 guide	guide.Pricer.Price	3	3758	0
 guide	guide.PricerOrNot	4	1452	0
 guide	guide.PrintLines	127	1829202	14
@@ -2668,6 +2670,7 @@ guide	guide.ShutLamp	11	9891	0
 guide	guide.ShutWithBody	17	31705	0
 guide	guide.Shutter.Shut	3	3861	0
 guide	guide.Sink	3	471	0
+guide	guide.Size	10	4806	0
 guide	guide.Sized.Size	3	961	0
 guide	guide.Small	6	1195	0
 guide	guide.Smallest	4	13770	0

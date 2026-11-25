@@ -1709,35 +1709,57 @@ An interface type written in place, such as `interface{ Pricer }` as the type of
 
 A value of any type that `vego` supports can be converted to `any`. An `any` can be held, passed, and compared with nil, and nothing else can be done with it. An error converted to `any` is nil exactly when the error is nil.
 
-### Comparing interface values
+### Asking what an interface value holds
 
-`==` on two interface values is true when both are nil, or when both hold values of one type that are equal. It panics when both hold values of one type on which `==` panics, such as a slice or a struct that holds one. `vego` proves that it does not panic, and it cannot prove that of two values it knows nothing of:
+A type assertion and a type switch take a value of a concrete type out of an interface value, as they do out of an error. A formula says what a value holds with `holds(x, T)`, and names the value it holds with `x.(T)`, which means something only where `holds(x, T)` is true:
 
 ```go
-// @Ensures same
-func SamePricer(p, q Pricer) (same bool) {
-	return p == q
+// @Ensures holds(v, int) -> n = v.(int)
+// @Ensures holds(v, string) -> n = |v.(string)|
+// @Ensures v = nil -> n = 0
+func Size(v any) (n int) {
+	switch x := v.(type) {
+	case int:
+		return x
+	case string:
+		return len(x)
+	}
+	return 0
+}
+```
+
+`vego` knows what an interface value holds where the function converted it, and where a contract says it with `holds`. A type is named as in [Asking what an error holds](#asking-what-an-error-holds), so `holds(v, []byte)` and `|v.([]byte)|` speak of a slice. The form with one result panics when the value holds another type, and `vego` reports it where it may:
+
+```go
+// @Ensures True
+func MustSize(v any) (n int) {
+	return v.(int)
 }
 ```
 
 ```text
-vego: p == q may panic: p and q may hold values of one type on which == panics, such as a slice or a struct that holds one; say what they hold, as a contract does with holds(p, T), or assert them first
-vego: postcondition may not hold: same
+vego: the type assertion v.(int) may panic: v may not hold an int; use the form v, ok := v.(int), or show that it holds one, as a contract does with holds(x, T)
 ```
 
-Say what the values hold, and the comparison verifies:
+A value taken out of an interface value may have been made by code that is not verified. So `vego` refuses to take out a value of a type that holds a function value of a type with a contract, or an interface value with a method that has one. Nothing claims that such a value meets its contract:
 
 ```go
-// @Requires holds(a, int) And holds(b, int)
-// @Ensures r <-> a.(int) = b.(int)
-func SameInt(a, b any) (r bool) {
-	return a == b
+// Priced holds a Pricer, whose method has a contract.
+type Priced struct{ P Pricer }
+
+// @Ensures True
+func PricedOf(v any) (ok bool) {
+	p, ok := v.(Priced)
+	_ = p
+	return ok
 }
 ```
 
-A value of a concrete type beside an interface value is compared as Go compares it, so `v == 3` is true exactly when `v` holds the `int` 3. Its type must be one on which `==` cannot panic. A type that holds an interface value is refused, since that value may hold a slice. A `switch` on an interface value compares it with each case by `==`, and so does a `switch` on a concrete value with a case that is an interface value.
+```text
+vego: cannot verify PricedOf: asserting an interface value to Priced is not supported: it holds in field P a value of type Pricer, whose method Price has a contract, and nothing claims that a value taken out of an interface value meets that contract: code that is not verified may have made it
+```
 
-A type assertion and a type switch take a value of a concrete type out of an interface value, as they do out of an error, and a formula says what a value holds with `holds(x, T)` and `x.(T)`; see [Asking what an error holds](#asking-what-an-error-holds).
+The forms that only ask whether the value holds one are supported: `_, ok := v.(Priced)`, and a case of `Priced` whose clause does not use its variable. A pointer taken out of an interface value may point to any memory, so a write through it must be listed in `Modifies`, as for a pointer read from memory.
 
 An assertion to an interface type, and a case of one, tell whether the value holds a value that implements it:
 
@@ -1775,6 +1797,34 @@ vego: cannot verify Label: using the value of v.(fmt.Stringer) is not supported:
 ```
 
 Write `_, ok := v.(fmt.Stringer)` instead, or a case of `fmt.Stringer` whose clause does not use its variable.
+
+### Comparing interface values
+
+`==` on two interface values is true when both are nil, or when both hold values of one type that are equal. It panics when both hold values of one type on which `==` panics, such as a slice or a struct that holds one. `vego` proves that it does not panic, and it cannot prove that of two values it knows nothing of:
+
+```go
+// @Ensures same
+func SamePricer(p, q Pricer) (same bool) {
+	return p == q
+}
+```
+
+```text
+vego: p == q may panic: p and q may hold values of one type on which == panics, such as a slice or a struct that holds one; say what they hold, as a contract does with holds(p, T), or assert them first
+vego: postcondition may not hold: same
+```
+
+Say what the values hold, and the comparison verifies:
+
+```go
+// @Requires holds(a, int) And holds(b, int)
+// @Ensures r <-> a.(int) = b.(int)
+func SameInt(a, b any) (r bool) {
+	return a == b
+}
+```
+
+A value of a concrete type beside an interface value is compared as Go compares it, so `v == 3` is true exactly when `v` holds the `int` 3. Its type must be one on which `==` cannot panic. A type that holds an interface value is refused, since that value may hold a slice. A `switch` on an interface value compares it with each case by `==`, and so does a `switch` on a concrete value with a case that is an interface value.
 
 A formula can compare two interface values. `a = b` says that they are the same value: one was copied from the other, by an assignment, a conversion to another interface type, or a call that hands it on. It is not Go's `==`, wherever it is written. Two conversions of one concrete value are two values, although `==` on them is true in Go. No Go code can tell whether two interface values are the same value, so a formula cannot say that they are not:
 
@@ -9186,7 +9236,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - in a formula, `!=` between two interface values that are not nil, and `~(a = b)` of them (see [Comparing interface values](#comparing-interface-values));
 - using the value of a type assertion or a case to an interface type whose methods the operand's type does not have, unless the operand is an error and no method of the target but `Error` has a contract or a state; `error` as such a target of a value that is not an error; and an interface type declared inside a function as a target;
 - `errors.As` and `errors.AsType` with a target of an interface type (see [Asking what an error holds](#asking-what-an-error-holds));
-- taking out of an error or another interface value, by an assertion, a case of a type switch whose clause uses its variable, or `errors.As`, a value of a type that holds a function value of a type with a contract or an interface value with a method that has one, or that is a function type with a contract (see [Asking what an error holds](#asking-what-an-error-holds));
+- taking out of an error or another interface value, by an assertion, a case of a type switch whose clause uses its variable, or `errors.As`, a value of a type that holds a function value of a type with a contract or an interface value with a method that has one, or that is a function type with a contract (see [Asking what an interface value holds](#asking-what-an-interface-value-holds));
 - converting to an interface with states a pointer to a value of size zero, a pointer to a struct whose first field has states of its own, a pointer whose method that changes a state has a value receiver beside one with a pointer receiver or does not list its receiver in `Modifies`, or a value that is not a pointer whose method that changes a state is trusted; and copying a struct whose states trusted methods change, such as an `os.File` (see [The states of what a pointer points to](#the-states-of-what-a-pointer-points-to));
 - errors of your own types whose methods do what code that is not verified could not account for (see [What the methods of the type may do](#what-the-methods-of-the-type-may-do)), and errors of types with `Unwrap`, `Is`, `As`, `Format`, or `GoString` methods formatted, wrapped, or searched (see [Formatting and wrapping errors of your own types](#formatting-and-wrapping-errors-of-your-own-types));
 - a trusted entry whose `asserts` lists, over a parameter that is not an error, an interface with a method that an interface the parameter reaches lacks (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed));
@@ -9247,7 +9297,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - Code of another package that is not verified runs code of the verified package only as `vego` follows it, which [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods) describes: during a call that the verified package makes, it runs only what that call hands it, through the arguments and the receiver. Code that it kept from an earlier call, a value it stored, or code that it runs on another goroutine or at another time, does not call back into a verified function while that function runs, so that the call never ends. A cycle that stays in the package, or that goes through what a call hands to another package, is found and reported.
 - For a parameter listed under `runs` or `keeps`, the function calls through an interface value or a function value nothing that the parameter holds, or that a call of what the parameter holds returns, but the methods of the interfaces and the function types that the parameter's type reaches and those of the types listed under `asserts`, and it uses no reflection to call what the parameter holds (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). Verified code answers for the methods that the parameter's type has, each checked where the value is converted. The author of the entry answers for the rest. An entry such as that of `use(p Pinger)` with `runs: [p]` and no `asserts`, for a function that asserts `p` to an interface with `Bump` and calls it, is false, and a proof that relies on it is worthless. For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For a parameter whose footprint the contract lists in `Modifies`, they pass no other argument that reaches memory in that footprint without going through an interface value: `Log` relies on the `Lines` that `t` points to not being memory that the methods of `r` write. The same holds for a package-level variable of an interface type that the contract lists in `Modifies` by itself: they pass no argument that reaches memory in the footprint of the value the variable holds when the call begins, as `printLines` relies on its lines not being memory that the writer in `logOut` writes. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one whose methods change the states of the other, as one that wraps it does, unless one of them is nil. For an interface parameter with states and a pointer parameter whose type has states, of which the contract lists one, they do not pass an interface value that holds the pointer. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method. For a parameter whose type owns memory (see [Structs that own memory](#structs-that-own-memory)), they pass a struct whose owned memory is reached by nothing else they pass: not by the other arguments, not by the struct's other fields, and not by what its other owned fields refer to. Memory that a method returns from what its struct owns, which its contract shows with `within(result, s)`, is not stored by code that is not verified, and is not passed to a verified function together with the struct it came from or with anything that reaches that struct. The same holds of what code that is not verified takes out of an error that a verified function returns, by a type assertion or reflection, when the error came from a call made on what a struct it was handed owns, as the error of `fmt.Fprint(r.out, ...)` may hold what `r.out` holds: no contract can say that an error lies within a struct.
-- When the server calls a verified handler, the writer it passes writes none of the memory that the request reaches without going through an interface value, except the field `Trailer` of the `Request` and the map it refers to, which the server fills while it reads the body, also when a write to the writer drains a body the handler left unread. Verified code cannot read or write that field. Code that is not verified does not make that map reachable from anything else it hands a verified function, as `req.Trailer = req.Header` in a middleware would. Code that is not verified uses a `ResponseWriter`, and hands one to verified code as that type or as any other interface, only while the `ServeHTTP` call that received it runs, and does not hand one to a verified function that keeps that parameter.
+- When the server calls a verified handler, the writer it passes writes none of the memory that the request reaches without going through an interface value, except the field `Trailer` of the `Request` and the map it refers to, which the server fills while it reads the body, also when a write to the writer drains a body the handler left unread. Verified code cannot read or write that field. Code that is not verified does not make that map reachable from anything else it hands a verified function, as `req.Trailer = req.Header` in a middleware would. Code that is not verified uses a `ResponseWriter`, and hands one to verified code as that type or as any other interface, only while the `ServeHTTP` call that received it runs, and does not hand one, or a value that holds one at any depth, to a verified function that keeps that parameter.
 - The body of every request that reaches verified code from code that is not verified makes progress: a `Read` of it with a buffer that is not empty returns bytes or an error. The server's bodies do. Verified code cannot store into the field `Body` of a request. A middleware that is not verified and replaces the body with a reader that can return no bytes and no error for ever breaks this, and so does a test or a caller that builds a request over such a reader, as `httptest.NewRequest` can. `json.NewDecoder(io.LimitReader(req.Body, n)).Decode(&x)` in a verified function it calls may then never return.
 - The body of an `http.Response` that reaches verified code from code that is not verified writes nothing that the response reaches without going through an interface value, except the field `Trailer` of the response and the map it refers to, which reading the body fills. Verified code cannot read or write that field, and does not store into `Body` but a value it makes there. Code that is not verified does not make that map reachable from anything else it hands a verified function, as `resp.Trailer = resp.Header` would.
 - Code of a package that declares a struct that owns memory, where it is not verified, builds and changes such structs so that nothing else refers to the memory an owned field refers to, no two owned fields refer to the same memory, and an owned field comes to refer only to memory made since, or to part of what it referred to before.
@@ -9337,10 +9387,10 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `"io/fs".ErrNotExist` | in a trusted contract, an error variable named by the path of its package |
 | `err = ErrEmpty` | the two are the same error; for errors that hold values of integer, string, boolean, or pointer types, or structs of these, what `==` reports in Go |
 | `err = ByteError(s[k])`, `err = ErrBadDigit` | `err` holds the value converted to the error type, as Go converts it; a conversion of a constant of the type, or of a value whose Go type fits it |
-| `holds(err, *LineError)` | `err` is not nil and holds a value of that type, as `_, ok := err.(*LineError)` reports |
-| `err.(*LineError).Line` | the value `err` holds, with its fields; it means something only where `holds(err, *LineError)` is true |
+| `holds(err, *LineError)`, `holds(v, []byte)` | the error or interface value is not nil and holds a value of that type, as `_, ok := err.(*LineError)` reports |
+| `err.(*LineError).Line`, <code>&#124;v.([]byte)&#124;</code> | the value it holds, with its fields; it means something only where `holds` of the type is true |
 | `as(err, *LineError)` | `errors.As` finds a value of that type in `err` or in what it wraps |
-| `x = y` | for two interface values: the same value, one copied from the other; not Go's `==` |
+| `x = y` | for two interface values: the same value, one copied from the other; not Go's `==`, and `x != y` is refused |
 | `is(err, target)` | `errors.Is(err, target)` reports true |
 | `valid(x)`, `valid(s.store')`, `valid(old(s))` | the invariants of the struct `x` is or points to hold, with those of what it owns |
 | `has(m, k)` | the map contains the key |
