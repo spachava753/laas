@@ -48,15 +48,17 @@ func Save(w io.Writer, b []byte) (err error) {
 	return nil
 }
 
+// Load reads into buf, and takes the end of what r holds for success.
+//
 // @Requires r != nil And |buf| > 0
 // @Modifies r, buf
 // @Ensures err = nil -> 0 <= n <= |buf|
 func Load(r io.Reader, buf []byte) (n int, err error) {
 	n, err = r.Read(buf)
-	if err != nil {
-		return 0, fmt.Errorf("load: %w", err)
+	if err == io.EOF {
+		return n, nil
 	}
-	return n, nil
+	return n, err
 }
 
 // ErrLong is what a reader returns for a slice it will not fill.

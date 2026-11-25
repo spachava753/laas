@@ -79,13 +79,13 @@ boxedlib	boxedlib.set	6	4349	0
 boxedlib	fmt.Fprint	5	11289	0
 boxedlib	io.Writer.Write	3	7630	0
 buffered	(*bufio.Reader).ReadByte	9	68389	0
-buffered	(*bufio.Scanner).Err	5	19452	0
+buffered	(*bufio.Scanner).Err	5	17321	0
 buffered	(*bufio.Scanner).Scan	1	5236	0
 buffered	(*bufio.Scanner).Text	1	5489	0
 buffered	(*bufio.Writer).Flush	9	54180	0
 buffered	(*bufio.Writer).Write	9	68612	0
 buffered	(*bufio.Writer).WriteByte	9	54742	0
-buffered	buffered.CountLines	103	1407580	2
+buffered	buffered.CountLines	102	1376215	2
 buffered	buffered.FirstByte	36	212898	0
 buffered	buffered.LongestLine	43	519262	6
 buffered	buffered.MakesWriter	6	23942	0
@@ -98,7 +98,7 @@ buffered	buffered.ScansNil	3	858	0
 buffered	buffered.ScansReady	11	38521	0
 buffered	buffered.ScansWithoutInvariant	22	239458	0
 buffered	buffered.ScansZero	7	4324	0
-buffered	buffered.WrapsErr	56	220555	0
+buffered	buffered.WrapsErr	18	82727	0
 buffered	buffered.WritesLocally	55	386442	0
 buffered	buffered.WritesLocallyUnlisted	22	140840	0
 buffered	bufio.NewScanner	1	11008	0
@@ -2242,7 +2242,7 @@ globalsvalues	globalsvalues.Direct	8	5667	0
 globalsvalues	globalsvalues.Fire	3	471	0
 globalsvalues	globalsvalues.Twice	6	4062	0
 globalsvalues	io.Writer.Write	5	18168	0
-guide	(*bufio.Scanner).Err	5	19452	0
+guide	(*bufio.Scanner).Err	5	17321	0
 guide	(*bufio.Scanner).Scan	1	5236	0
 guide	(*bufio.Scanner).Text	1	5489	0
 guide	(*bufio.Writer).Flush	9	54180	0
@@ -2519,7 +2519,7 @@ guide	guide.LineCounts.Current	3	1854	0
 guide	guide.LineOf	2	629	0
 guide	guide.LineOfType	2	1882	0
 guide	guide.LinesTotal	15	27473	0
-guide	guide.Load	44	2094455	2
+guide	guide.Load	43	2097415	2
 guide	guide.LoadAll	17	455488	2
 guide	guide.LoadCache	2	895	0
 guide	guide.LoadLine	20	27846	0
@@ -2601,7 +2601,7 @@ guide	guide.Prefixed	15	46801	0
 guide	guide.PricedOf	1	497	0
 guide	guide.Pricer.Price	3	3758	0
 guide	guide.PricerOrNot	4	1452	0
-guide	guide.PrintLines	127	1829202	14
+guide	guide.PrintLines	126	1807010	14
 guide	guide.Printer	1	46	0
 guide	guide.Profile	1	963	0
 guide	guide.Pull	6	2552	0
@@ -2618,7 +2618,7 @@ guide	guide.ReadAll	14	140042	0
 guide	guide.ReadAllParts	27	103062	0
 guide	guide.ReadAndBump	6	1118	0
 guide	guide.ReadConfig	194	838362	2
-guide	guide.ReadLines	135	1916373	14
+guide	guide.ReadLines	37	384699	2
 guide	guide.ReadLogged	87	327511	12
 guide	guide.ReadOnce	48	1179914	2
 guide	guide.ReadParts	60	205695	0

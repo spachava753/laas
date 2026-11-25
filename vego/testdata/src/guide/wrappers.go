@@ -22,9 +22,8 @@ func PrintLines(r io.Reader, limit int) (n int, err error) {
 	return n, sc.Err()
 }
 
-// ReadLines verifies under the entry of the tests for (*bufio.Scanner).Err
-// that the guide shows; under the shipped entries it is refused, as in
-// the module scanerrs.
+// ReadLines wraps the error of Err, which may be one the reader returned,
+// whose origin nothing can make known (S0 of F35): it is refused.
 //
 // @Requires r != nil And limit >= 0
 // @Modifies r
@@ -38,7 +37,7 @@ func ReadLines(r io.Reader, limit int) (n int, err error) {
 		n++
 	}
 	if err := sc.Err(); err != nil {
-		return n, fmt.Errorf("read lines: %w", err)
+		return n, fmt.Errorf("read lines: %w", err) // want `cannot verify ReadLines: formatting err would run the methods of an error whose origin is not known`
 	}
 	return n, nil
 }

@@ -75,6 +75,11 @@ func (pv *pkgVerifier) typeEntry(key string, obj *types.Func, methodOf *types.Fu
 		}
 	}
 	pv.readEntry(fn, entry)
+	// Shipped entries rest on some type entries, which a project may
+	// therefore not change (restedon.go).
+	if why := projectReplaces(entry); why != "" {
+		fn.defect("%s", why)
+	}
 	// A contract names its receiver to speak of its states, to say that
 	// the method writes behind it, or to place a result within it, as one
 	// in source does (checkReceivers).
@@ -392,6 +397,22 @@ func (entry *trustEntry) fingerprint() string {
 	for _, kept := range keepsDescribed(entry) {
 		parts = append(parts, "keeps "+kept)
 	}
+	// Every other field an entry reads, so that two entries that differ in
+	// any claim are told apart (F35, S0).
+	lists := func(kind string, items []trustKeep) {
+		for _, item := range items {
+			var dests []string
+			for _, dest := range item.dests {
+				dests = append(dests, dest.text)
+			}
+			parts = append(parts, fmt.Sprintf("%s %s: [%s]", kind, item.name, strings.Join(dests, ", ")))
+		}
+	}
+	lists("asserts", entry.asserts)
+	lists("prints", entry.prints)
+	list("stores", entry.stores)
+	list("encodes", entry.encodes)
+	list("decodes", entry.decodes)
 	return strings.Join(parts, "\n")
 }
 

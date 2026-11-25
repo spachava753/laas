@@ -102,7 +102,7 @@ func ownUnmarshal(data []byte, v any) error {
 // @Ensures True
 func Own(data []byte) {
 	var rt Req
-	_ = ownUnmarshal(data, &rt) // want `the trusted contract of jsondec\.ownUnmarshal \(trusted\.yaml:2189\) cannot be used: it lists decodes, which only the entries that come with vego can list; a function of your own that decodes into a value`
+	_ = ownUnmarshal(data, &rt) // want `the trusted contract of jsondec\.ownUnmarshal \(trusted\.yaml:2154\) cannot be used: it lists decodes, which only the entries that come with vego can list; a function of your own that decodes into a value`
 }
 
 // B holds bytes that decode from base64.

@@ -1,5 +1,11 @@
-// Package closer closes the body of a response under a project entry for
-// (io.Closer).Close, which vego does not ship.
+// Package closer replaces the shipped entry of (io.Closer).Close by one that
+// says nothing of the state closed. io.NopCloser vouches that the Close of
+// its result meets the entry of Close, so shipped entries rest on it, and a
+// replacement must be the shipped entry itself (S0 of F35). This one keeps
+// every shipped entry true, since NopCloser's Close writes nothing, and is
+// refused all the same until what each wrapper delivers is computed (see
+// the roadmap). What the programs here tested before is tested under the
+// shipped entry in ifacestate, ghost, and the guide.
 package closer
 
 import (
@@ -10,7 +16,7 @@ import (
 // @Requires resp != nil And resp.Body != nil
 // @Ensures True
 func Done(resp *http.Response) (c int) {
-	defer resp.Body.Close()
+	defer resp.Body.Close() // want `the trusted contract of \(io.Closer\).Close \(vego-trusted.yaml:4\) cannot be used: it replaces the shipped entry of \(io.Closer\).Close, on which shipped entries rest \(io.NopCloser vouches that the Close of its result meets it\), and it differs from it`
 	return resp.StatusCode
 }
 
@@ -26,7 +32,7 @@ func (file) Close() (err error) {
 
 // @Ensures c != nil
 func Make() (c io.Closer) {
-	return file{}
+	return file{} // want `the trusted contract of \(io.Closer\).Close \(vego-trusted.yaml:4\) cannot be used: it replaces the shipped entry of \(io.Closer\).Close, on which shipped entries rest \(io.NopCloser vouches that the Close of its result meets it\), and it differs from it`
 }
 
 // Record holds a closer.
@@ -49,12 +55,13 @@ func logNumber(x int) {
 	logCloser(r)
 }
 
-// Verified code can make an io.Closer here, so a trusted function that runs
-// what a Record holds may run code that verified code made.
+// The entry of Close cannot be used here, so verified code makes no
+// io.Closer, and a trusted function that runs what a Record holds runs no
+// code that verified code made.
 //
 // @Ensures s != nil
 func MakeSink() (s Sink) {
-	return logNumber // want `cannot verify MakeSink: logNumber may call through a function value or an interface value.*a value of io.Closer, whose methods all have contracts, so that it can hold code that verified code made`
+	return logNumber
 }
 
 // @Requires a != nil And b != nil
@@ -67,5 +74,5 @@ func two(a, b io.Closer) {}
 // @Requires c != nil
 // @Ensures True
 func Two(c io.Closer) {
-	two(c, file{})
+	two(c, file{}) // want `the trusted contract of \(io.Closer\).Close \(vego-trusted.yaml:4\) cannot be used: it replaces the shipped entry of \(io.Closer\).Close, on which shipped entries rest \(io.NopCloser vouches that the Close of its result meets it\), and it differs from it`
 }

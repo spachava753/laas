@@ -1520,41 +1520,6 @@ trusted:
     reason: Does not write the slice it copies from, and keeps nothing it is handed.
     modifies: []
 
-  # The entry the guide shows for wrapping the errors of Read; it replaces
-  # the shipped one for the tests.
-  (io.Reader).Read:
-    reason: >-
-      The readers our callers pass are *os.File, *bytes.Reader, and
-      *bufio.Reader over those. Read returns the bytes read, 0 <= n <= len(p).
-      Their errors are io.EOF and io.ErrNoProgress, made by errors.New,
-      os.ErrInvalid, and *fs.PathError holding a syscall.Errno, os.ErrClosed,
-      or os.ErrDeadlineExceeded, a *poll.DeadlineExceededError; the methods
-      of each only read its fields; reviewed 2026-11-19. Read changes the
-      position of a *bytes.Reader and the buffer of a *bufio.Reader, which is
-      the reader's footprint.
-    receiver: r
-    requires: ["|p| > 0"]
-    vouches: [err]
-    modifies: [r, p]
-    ensures: ["0 <= n And n <= |p|"]
-
-  # The entry the guide shows for wrapping the error of a Scanner, which
-  # rests on the entry above for the errors of Read.
-  (*bufio.Scanner).Err:
-    reason: >-
-      Err returns nil, an error that the reader returned other than io.EOF,
-      or an error of bufio or io made by errors.New (ErrTooLong,
-      ErrNegativeAdvance, ErrAdvanceTooFar, ErrBadReadCount, io.ErrNoProgress).
-      A ready Scanner splits with ScanLines, which returns no error. Our entry
-      for (io.Reader).Read vouches for the errors of every reader; reviewed
-      2026-11-20.
-    requires: ["s != nil", "ready(s)"]
-    runs: [s]
-    vouches: [result]
-    modifies: []
-    asserts:
-      s: []
-
   guide.logRecord:
     reason: Formats the number of a record and writes it to the writer the record holds, whatever writer that is.
     runs: [r]

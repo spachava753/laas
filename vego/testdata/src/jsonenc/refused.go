@@ -199,7 +199,7 @@ func ownMarshal(v any) ([]byte, error) {
 //
 // @Ensures True
 func Own() {
-	_, _ = ownMarshal(1) // want `the trusted contract of jsonenc\.ownMarshal \(trusted\.yaml:2195\) cannot be used: it lists encodes, which only the entries that come with vego can list; a function of your own that encodes a value it is `
+	_, _ = ownMarshal(1) // want `the trusted contract of jsonenc\.ownMarshal \(trusted\.yaml:2160\) cannot be used: it lists encodes, which only the entries that come with vego can list; a function of your own that encodes a value it is `
 }
 
 // KeyText is a key whose MarshalText encoding/json would call.

@@ -1,0 +1,25 @@
+version: 1
+
+# Replacements that differ from shipped entries other shipped entries rest
+# on, and a state on an interface whose method has a shipped entry (S0 of
+# F35).
+state:
+  io.Reader: # // want `the trust file declares states of io.Reader, which is an interface whose method \(io.Reader\).Read has an entry shipped with vego`
+    drained:
+      reason: True once Read has returned io.EOF.
+
+trusted:
+  (io.Writer).Write:
+    reason: The project's weaker reading of io.Writer, which says nothing of n.
+    receiver: w
+    modifies: [w]
+
+  (io.Reader).Read:
+    reason: >-
+      The corpus's replacement before S0 of F35, which vouches for the
+      errors of Read.
+    receiver: r
+    requires: ["|p| > 0"]
+    vouches: [err]
+    modifies: [r, p]
+    ensures: ["0 <= n And n <= |p|"]

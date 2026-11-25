@@ -234,6 +234,17 @@ func (pv *pkgVerifier) fileStateProblem(owner *types.TypeName, key string) strin
 			return "the contracts shipped with vego declare; remove the declaration"
 		}
 	}
+	// A state changes what the entries of the interface's methods cover,
+	// and so what the shipped entries that rest on them claim (S0 of
+	// F35).
+	if iface, ok := owner.Type().Underlying().(*types.Interface); ok {
+		for method := range iface.Methods() {
+			if shippedEntry(method.FullName()) != nil {
+				return fmt.Sprintf("is an interface whose method %s has an entry shipped with vego; a state declared here would change what that entry, "+
+					"and the shipped entries that rest on it, cover, so no trust file may declare one; remove the declaration", method.FullName())
+			}
+		}
+	}
 	return pv.stateDeclProblem(owner)
 }
 

@@ -115,16 +115,19 @@ func ScansZero() (more bool) {
 	return sc.Scan() // want `vego: precondition of Scan may not hold: ready\(s\)`
 }
 
-// WrapsErr wraps the error of a Scanner, which the entry of the tests for
-// (*bufio.Scanner).Err vouches for; the module scanerrs, which has no such
-// entry, cannot.
+// WrapsErr wraps the error of a Scanner, which may be one its reader
+// returned. Until S0 of F35 the corpus trust file vouched for the errors of
+// (io.Reader).Read and of (*bufio.Scanner).Err, and it verified; a
+// replacement of Read that vouches makes the shipped wrappers' vouches
+// false (replacedb.Twice), so neither entry is left, and it is refused, as
+// in the module scanerrs.
 //
 // @Requires r != nil
 // @Ensures True
 func WrapsErr(r io.Reader) (err error) {
 	sc := bufio.NewScanner(r)
 	if err := sc.Err(); err != nil {
-		return fmt.Errorf("scan: %w", err)
+		return fmt.Errorf("scan: %w", err) // want `cannot verify WrapsErr: formatting err would run the methods of an error whose origin is not known`
 	}
 	return nil
 }

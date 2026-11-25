@@ -271,6 +271,11 @@ func (v *fnVerifier) assignedWhere(from source) (where, what string) {
 	if _, isCall := ast.Unparen(from.expr).(*ast.CallExpr); isCall {
 		what = "a call whose errors nothing vouches for"
 	}
+	if key := v.restedOnCall(from.expr); key != "" {
+		// No project entry can vouch for these errors (restedon.go).
+		what = fmt.Sprintf("the error of a call of %s through an interface value, which has no known origin: shipped entries rest on the entry of %s, "+
+			"so no trust file can vouch for its errors; return the error as it is, or compare it with == to a sentinel, as in err == io.EOF", key, key)
+	}
 	if t := v.concreteErrorType(from.expr, from.index); t != nil {
 		// Which condition of the typed origin the type fails, and what
 		// to change (the orchestrator's condition on S4).
@@ -553,4 +558,30 @@ func (v *fnVerifier) originWhy(e ast.Expr) string {
 		return fmt.Sprintf("; %s is not initialised with errors.New or fmt.Errorf, so nothing is known of its methods", v.spelling(variable))
 	}
 	return ""
+}
+
+// restedOnCall returns the key of the method a call of e makes through an
+// interface value when shipped entries rest on its entry, so that no trust
+// file can vouch for its errors (restedon.go), or "".
+func (v *fnVerifier) restedOnCall(e ast.Expr) string {
+	call, ok := ast.Unparen(e).(*ast.CallExpr)
+	if !ok {
+		return ""
+	}
+	sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+	if !ok {
+		return ""
+	}
+	selection := v.info.Selections[sel]
+	if selection == nil || selection.Kind() != types.MethodVal || !isIface(selection.Recv()) {
+		return ""
+	}
+	method, ok := selection.Obj().(*types.Func)
+	if !ok {
+		return ""
+	}
+	if _, rested := restedOn[method.FullName()]; !rested {
+		return ""
+	}
+	return method.FullName()
 }

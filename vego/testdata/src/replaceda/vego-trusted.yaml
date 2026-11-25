@@ -1,0 +1,25 @@
+version: 1
+
+# Replacements of shipped entries that other shipped entries rest on (S0 of
+# F35). The first is the shipped entry itself with a reason of its own,
+# which is accepted; the second promises more than the shipped entry.
+trusted:
+  (io.Writer).Write:
+    reason: The shipped entry, with the reason of this module.
+    receiver: w
+    modifies: [w]
+    ensures:
+      - "0 <= n And n <= |p|"
+      - "n < |p| -> err != nil"
+
+  (io.Reader).Read:
+    reason: >-
+      The project's readers fill the buffer unless they fail. This promises
+      more than the shipped entry, and asks no more.
+    receiver: r
+    requires:
+      - "|p| > 0"
+    modifies: [r, p]
+    ensures:
+      - "0 <= n And n <= |p|"
+      - "n = |p| Or err != nil"

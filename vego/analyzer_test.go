@@ -229,11 +229,20 @@ func TestAnalyzer(t *testing.T) {
 		parallel(t)
 		runCorpus(t, newAnalyzer(), "scanerrs")
 	})
-	// A module that gives (io.Closer).Close an entry of its own.
-	t.Run("closes a body under a project entry", func(t *testing.T) {
+	// A module that gives (io.Closer).Close an entry of its own, which
+	// shipped entries rest on (S0 of F35).
+	t.Run("refuses a replacement of Close", func(t *testing.T) {
 		parallel(t)
 		runCorpus(t, newAnalyzer(), "closer")
 	})
+	// Modules that replace shipped entries other shipped entries rest on,
+	// by the same entry and by ones that differ (S0 of F35).
+	for _, root := range []string{"replaceda", "replacedb"} {
+		t.Run("replaces rested-on entries in "+root, func(t *testing.T) {
+			parallel(t)
+			runCorpus(t, newAnalyzer(), root)
+		})
+	}
 	// A module with entries of its own for methods of sync's mutexes.
 	t.Run("reads states in project entries", func(t *testing.T) {
 		parallel(t)

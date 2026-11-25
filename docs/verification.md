@@ -2385,7 +2385,7 @@ fmt.Errorf, or vouched for, in stale.Load used as a method of VouchedLoader at t
 
 Of every value that comes from code that is not verified, the claim is assumed, as the rest of the contract is (see [What a proof assumes](#what-a-proof-assumes)). Read the code that makes such values before you write the annotation. The contract of a function type can vouch for its errors in the same way.
 
-A `Vouches` annotation adds to a contract, so a method with no other clause is reported. It belongs only in these two places. In the doc comment of a function it is reported, because the errors of a verified function are judged from its body, and those of a trusted function are vouched for in the trust file. For an interface of another module, an entry in the trust file can vouch for the errors of a method, as described in [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write).
+A `Vouches` annotation adds to a contract, so a method with no other clause is reported. It belongs only in these two places. In the doc comment of a function it is reported, because the errors of a verified function are judged from its body, and those of a trusted function are vouched for in the trust file. For an interface of another module, an entry in the trust file can vouch for the errors of a method (see [What an entry for a type claims](#what-an-entry-for-a-type-claims)), unless shipped entries rest on its shipped entry, as described in [The errors of Read and Write](#the-errors-of-read-and-write).
 
 ## Predicates
 
@@ -2502,11 +2502,11 @@ These rules keep one meaning for each name, and each break is reported:
 laas -vego -vego.cost ./...
 ```
 
-For `Load` from [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write), under the entries shown there, in a file `foreign.go` that declares it at line 54, it prints:
+For `Load` from [The errors of Read and Write](#the-errors-of-read-and-write), in a file `foreign.go` that declares it at line 56, it prints:
 
 ```text
-foreign.go:54:6: vego cost of Load: 44 problems, 2094455 resource units, 162773 bytes, 1.60 s
-	foreign.go:54:6: 2 questions of the always-fails check stopped at a limit
+foreign.go:56:6: vego cost of Load: 43 problems, 2097415 resource units, 159709 bytes, 1.70 s
+	foreign.go:56:6: 2 questions of the always-fails check stopped at a limit
 ```
 
 The first line counts the problems that `vego` handed to Z3, the work Z3 counted for them, and the size of their text. These three numbers are the same on every run with the same `laas`, Go, and Z3, unless a question ran past the time limit or out of memory, which depend on the machine (see the notes in [Helping the prover](#helping-the-prover)). The seconds are the time spent on the function. They include time spent waiting for a free Z3 process while other packages are verified at the same time, so they change with the machine and its load. They do not include the time spent on other functions, such as checking a trusted contract that the function calls, which get a line of their own.
@@ -7295,7 +7295,7 @@ It also includes contracts for generic functions of `slices`, `maps`, and `cmp`,
 
 A function of package `bytes` with two slice parameters cannot be given one slice twice, or two slices that may share memory. `bytes.Equal(a, a)` is reported as `the slices passed to Equal as a and b may overlap`, as for any function with two slice parameters of one element type (see [Slices that share no memory](#slices-that-share-no-memory)).
 
-The contracts are in `vego/trusted/std` in the source of `laas`. They state only behaviour that the function's documentation promises, read from the documentation of the oldest Go that `laas` builds with. A clause that the documentation does not give, such as `fresh` of a result, a `requires` that keeps an allocation within bounds, or a claim under `vouches`, rests on reading the function's source, and the reason of the entry says what was read. The tests of `vego` check each contract against the real function. For a function that calls a function it is given, the tests also check that it calls it only with arguments that its contract under `calls` allows. The contracts of `strconv.Atoi`, `strconv.ParseInt`, `strconv.ParseUint`, `strconv.ParseBool`, `strconv.Unquote`, `path/filepath.Rel`, `regexp.Compile`, `(context.Context).Err`, and the functions of `os` that return an error vouch for their errors. For those, the tests also check that every error in the tree of a returned error has a type whose methods were read against what `vouches` claims. A contract for a method of an interface or a function type is tested against several implementations from the standard library, and against one that does at random everything the documentation of the type allows. An entry in your own file with the same key replaces the shipped contract.
+The contracts are in `vego/trusted/std` in the source of `laas`. They state only behaviour that the function's documentation promises, read from the documentation of the oldest Go that `laas` builds with. A clause that the documentation does not give, such as `fresh` of a result, a `requires` that keeps an allocation within bounds, or a claim under `vouches`, rests on reading the function's source, and the reason of the entry says what was read. The tests of `vego` check each contract against the real function. For a function that calls a function it is given, the tests also check that it calls it only with arguments that its contract under `calls` allows. The contracts of `strconv.Atoi`, `strconv.ParseInt`, `strconv.ParseUint`, `strconv.ParseBool`, `strconv.Unquote`, `path/filepath.Rel`, `regexp.Compile`, `(context.Context).Err`, and the functions of `os` that return an error vouch for their errors. For those, the tests also check that every error in the tree of a returned error has a type whose methods were read against what `vouches` claims. A contract for a method of an interface or a function type is tested against several implementations from the standard library, and against one that does at random everything the documentation of the type allows. An entry in your own file with the same key replaces the shipped contract. The entries of `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, and the methods of `net/http.ResponseWriter` are an exception: other shipped entries rest on them, so a replacement must be the shipped entry itself, as described in [The errors of Read and Write](#the-errors-of-read-and-write).
 
 ### What the shipped contracts do not say
 
@@ -8235,24 +8235,7 @@ that a contract vouches for, or one that holds a value of a type whose errors ha
 origin, can be formatted
 ```
 
-To wrap it, your trust file needs an entry for `(io.Reader).Read` that vouches for the errors of the readers your callers pass, as described in [Wrapping the errors of Read and Write](#wrapping-the-errors-of-read-and-write). It also needs an entry for `Err` that vouches for what it returns:
-
-```yaml
-  (*bufio.Scanner).Err:
-    reason: >-
-      Err returns nil, an error that the reader returned other than io.EOF,
-      or an error of bufio or io made by errors.New (ErrTooLong,
-      ErrNegativeAdvance, ErrAdvanceTooFar, ErrBadReadCount, io.ErrNoProgress).
-      A ready Scanner splits with ScanLines, which returns no error. Our entry
-      for (io.Reader).Read vouches for the errors of every reader; reviewed
-      2026-11-20.
-    requires: ["s != nil", "ready(s)"]
-    runs: [s]
-    vouches: [result]
-    modifies: []
-```
-
-With both entries, `ReadLines` verifies. The claim of the `Err` entry rests on the claim of the `Read` entry. If the `Read` entry is false for some reader, so is this one.
+No trust file can give such an error a known origin, as described in [The errors of Read and Write](#the-errors-of-read-and-write). Return it as it is, as `PrintLines` does.
 
 #### Writing through a buffer
 
@@ -8795,9 +8778,9 @@ func Discard() (w io.Writer) {
 
 A writer of your own whose `Write` writes its own struct converts, as described in [Converting a value of your own type](#converting-a-value-of-your-own-type). Verified code cannot pass a `*bytes.Buffer` as an `io.Writer`, since its `Write` needs a bound that the contract of `(io.Writer).Write` does not give. It can pass it to `fmt.Fprintf` itself, as described in [Formatting into a buffer](#formatting-into-a-buffer). A closer of your own converts to an `io.Closer`, as described in [Making a value of an interface with a state](#making-a-value-of-an-interface-with-a-state). A type whose `Write` has a contract that writes nothing behind the receiver converts too. An `http.ResponseWriter` converts to `io.Writer`, because the contract of its `Write` implies that of `io.Writer`'s. A `net.Conn` does not, because its `Write` has no contract. See [Converting between interfaces](#converting-between-interfaces).
 
-#### Wrapping the errors of Read and Write
+#### The errors of Read and Write
 
-The shipped entries for `Read` and `Write` do not vouch for errors. The documentation of `io.Reader` and `io.Writer` says nothing about the errors an implementation returns, so verified code can return such an error and compare it with `nil`, but cannot wrap it:
+The shipped entries for `Read` and `Write` do not vouch for errors. The documentation of `io.Reader` and `io.Writer` says nothing about the errors an implementation returns. So verified code can return such an error and compare it with `nil` or with `==` to a sentinel, but cannot format it, wrap it with `%w`, or ask `errors.Is` of it:
 
 ```go
 // @Requires w != nil
@@ -8815,42 +8798,43 @@ func Save(w io.Writer, b []byte) (err error) {
 vego: cannot verify Save: formatting err would run the methods of an error whose origin is not
 known; only an error made by errors.New or fmt.Errorf, here or in a verified function, one that a
 contract vouches for, or one that holds a value of a type whose errors have a known origin, can be
-formatted
+formatted; err is assigned w.Write(b) at foreign.go:45:15, the error of a call of
+(io.Writer).Write through an interface value, which has no known origin: shipped entries rest on
+the entry of (io.Writer).Write, so no trust file can vouch for its errors; return the error as it
+is, or compare it with == to a sentinel, as in err == io.EOF
 ```
 
-To wrap them, replace the shipped entry with one of your own that vouches:
-
-```yaml
-  (io.Reader).Read:
-    reason: >-
-      The readers our callers pass are *os.File, *bytes.Reader, and
-      *bufio.Reader over those. Read returns the bytes read, 0 <= n <= len(p).
-      Their errors are io.EOF and io.ErrNoProgress, made by errors.New,
-      os.ErrInvalid, and *fs.PathError holding a syscall.Errno, os.ErrClosed,
-      or os.ErrDeadlineExceeded, a *poll.DeadlineExceededError; the methods
-      of each only read its fields; reviewed 2026-11-19.
-    requires: ["|p| > 0"]
-    vouches: [err]
-    modifies: [p]
-    ensures: ["0 <= n And n <= |p|"]
-```
+Return the error as it is, or compare it with a sentinel:
 
 ```go
+// Load reads into buf, and takes the end of what r holds for success.
+//
 // @Requires r != nil And |buf| > 0
 // @Modifies r, buf
 // @Ensures err = nil -> 0 <= n <= |buf|
 func Load(r io.Reader, buf []byte) (n int, err error) {
 	n, err = r.Read(buf)
-	if err != nil {
-		return 0, fmt.Errorf("load: %w", err)
+	if err == io.EOF {
+		return n, nil
 	}
-	return n, nil
+	return n, err
 }
 ```
 
-With `vouches: [err]`, you claim that every reader that verified code in the module gets from code that is not verified returns only errors that meet the conditions of `vouches`: their methods return without panicking and write nothing a caller can see, `==` on them is identity, and what `errors.Is` reports of them does not change. Before you write the entry, list the readers that the callers of your verified code pass, and read the source of the errors each returns and of every error in their trees. A reader that wraps another returns the errors of the reader it wraps.
+A trust file cannot give these errors a known origin. Other shipped entries rest on the entries of `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, and the methods of `net/http.ResponseWriter`, in two ways. Some call the method on what they are handed, as `(*bufio.Writer).Write` calls `Write` of the writer it keeps. Their claims hold only of a value whose method meets the shipped entry. Others vouch that a value they return meets the entry, as `io.TeeReader` vouches for the `Read` of what it returns. Their claims hold only of an entry that promises no more than their code delivers. The `Read` of a tee returns the errors of its writer's `Write`, so an entry for `Read` that vouches for its errors would make the claim of `TeeReader` false. So an entry in your trust file for one of these keys must be the shipped entry itself, with a reason of your own. Any other entry is reported where it is used:
 
-A type of your own that is converted to `io.Reader` under such an entry must return only errors of known origin, such as errors made by `errors.New` or `fmt.Errorf` and error variables that hold one. It can wrap an error of known origin with `fmt.Errorf`, as in `fmt.Errorf("read: %w", ErrLong)`.
+```text
+vego: the trusted contract of (io.Reader).Read (vego-trusted.yaml:17) cannot be used: it replaces
+the shipped entry of (io.Reader).Read, on which shipped entries rest (bufio.NewScanner keeps a
+reader whose Read the Scanner calls), and it differs from it; those entries are true only of
+values whose method meets the shipped entry, and of an entry that promises no more than the code
+they vouch for delivers, so a replacement must be the shipped entry itself, with a reason of its
+own; it says receiver r; requires |p| > 0; ensures 0 <= n And n <= |p|; modifies r; modifies p;
+vouches err, and the shipped entry says receiver r; requires |p| > 0; ensures 0 <= n And n <=
+|p|; modifies r; modifies p
+```
+
+A trust file also cannot declare a state on an interface whose methods have shipped entries, since the state would change what those entries cover.
 
 #### Types without a shipped entry
 
@@ -9126,7 +9110,7 @@ This table lists the most common messages.
 | `the trusted contract of F does not list x, which its body writes at f.go:n; ...` | The source of a trusted function shows a write that its entry does not list. | List the variable, or the state of its package, under `modifies` in the entry. |
 | `the Requires clause P reads only package-level variables, and their declarations do not show that it holds` | No caller can choose the values the clause is about. | Test the value in the body. See [What vego knows of the value](#what-vego-knows-of-the-value). |
 | `x may be changed here, but proofs in package p rely on it holding the value it was declared with`, or `... rely on what it refers to being only read` | A package in the build changes a variable, or lets out a reference to what it refers to, and a proof relies on it. | Remove the change, or the proof that relies on the variable. See [What a variable refers to](#what-a-variable-refers-to). |
-| `cannot verify F: formatting err would run the methods of an error whose origin is not known` | `fmt.Errorf` is given an error whose origin is not known, such as one from a parameter or from a trusted function whose contract does not vouch for it. The message names an assignment to `err` on a path to the use that gives it no known origin. | Return the error unchanged, or wrap your own error. If the error comes from a trusted function, see [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). If the message says to give that error a variable of its own, do so, as in [Reading and writing files](#reading-and-writing-files). |
+| `cannot verify F: formatting err would run the methods of an error whose origin is not known` | `fmt.Errorf` is given an error whose origin is not known, such as one from a parameter or from a trusted function whose contract does not vouch for it. The message names an assignment to `err` on a path to the use that gives it no known origin. | Return the error unchanged, or wrap your own error. If the error comes from a trusted function, see [Errors that a trusted function returns](#errors-that-a-trusted-function-returns). If the message says to give that error a variable of its own, do so, as in [Reading and writing files](#reading-and-writing-files). If it names a call of `Read` or `Write` through an interface value, no entry can vouch for the error: see [The errors of Read and Write](#the-errors-of-read-and-write). |
 | `cannot verify F: comparing two errors can panic when both hold the same uncomparable type` | Neither error is `nil`, an error made by `errors.New` or `fmt.Errorf`, an error variable that holds one or holds a pointer, integer, string, or boolean, or an array or struct of these, or an error converted in the function from a value of such a type. | Compare one of them with an error variable instead. See [Comparing errors](#comparing-errors). |
 | `cannot verify F: errors.Is would run the Is and Unwrap methods of err, an error whose origin is not known` | `errors.Is` is asked about an error from a parameter, or from a trusted function whose contract does not vouch for it. | Compare it with an error variable using `==`. See [Asking errors.Is](#asking-errorsis). |
 | `E is assigned at f.go:n, so it is not known to hold the error it was declared with`, or `x.E is assigned at f.go:n in package x` | The package of the error variable assigns it, or takes its address. | Remove the assignment, or pass the error as a parameter. |
@@ -9145,6 +9129,7 @@ This table lists the most common messages.
 | `F is called with E = T, and F may run the method ..., which a value of that type reaches; ... asserts: {E: []}` | The entry of the generic function does not claim that it runs no method of its type argument. | If the function runs none, add the claim to its entry. See [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function). |
 | `the trusted contract of F cannot be true of this call` | The contract contradicts what is known at the call. | The entry is wrong, or it needs a `requires` clause. |
 | `the trusted contract ... cannot be used` | The entry in the trust file is invalid. The message says why. | Fix the entry. Check the parameter names. |
+| `the trusted contract of (io.Reader).Read (f.yaml:n) cannot be used: it replaces the shipped entry of (io.Reader).Read, on which shipped entries rest (...), and it differs from it; ...` | Your trust file replaces the shipped entry of a method that other shipped entries rest on, and says something else. The message quotes both entries. | Make the entry the shipped entry, with a reason of your own, or remove it. See [The errors of Read and Write](#the-errors-of-read-and-write). |
 | `..., in the function literal called at f.go:n:c`, or `..., in the function literal deferred at f.go:n:c and run at the return at f.go:n:c` (or `at the end of the function at`, or `at the end of the function literal at`) | The problem is in the body of a function literal, at the call named at the end. For a deferred literal, the message names the `defer` statement and where the literal runs. | Fix the body, or what holds at that call. See [Function literals](#function-literals). |
 | `cannot verify F: the function literal is used as a value of type T, which has no contract` | The literal is passed, returned, or stored as a value of a function type that has no contract. | Declare a named function type with a contract and use it there. |
 | `the function value f may be nil` | A call through `f` is not proved to have a value to call. | Add `f != nil` to the `Requires` clauses, or check `f` before the call. |
