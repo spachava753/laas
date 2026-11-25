@@ -126,7 +126,7 @@ func ThroughGrow(A []int) (out []int) {
 }
 
 // @Ensures True
-func Digest(hash [4]byte) { // want `cannot verify Digest: parameter hash has unsupported type \[4\]byte; \[4\]byte is an array, and arrays are not supported yet`
+func Digest(hash [4]string) { // want `cannot verify Digest: parameter hash has unsupported type \[4\]string; \[4\]string is an array of string, and only arrays of numbers and booleans are supported yet; use a slice of string instead`
 }
 
 // set writes the first element.

@@ -1255,7 +1255,7 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 	case isMap(t) && mapModelled(t):
 		target{mapType: t}.regions(func(key string, _ logic.Sort) { read, own = append(read, cell{key: key}), append(own, false) })
 	case isSlice(t):
-		if _, modelled := layoutOf(elemType(t)); modelled {
+		if _, modelled := fieldLayout(elemType(t)); modelled {
 			elements(elemType(t), len(steps.steps) == 0)
 		}
 	}

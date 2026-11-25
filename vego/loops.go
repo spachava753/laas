@@ -449,6 +449,29 @@ func (v *fnVerifier) rootSite(at *site, arg ast.Expr, form shape) {
 	}
 }
 
+// constantLen reports whether len of an array expression is a constant, as
+// the spec has it: the expression has no function calls and no channel
+// receives. A range over such an expression with no value variable does
+// not evaluate it.
+func constantLen(info *types.Info, e ast.Expr) bool {
+	constant := true
+	ast.Inspect(e, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.CallExpr:
+			// A conversion is not a call.
+			if !info.Types[n.Fun].IsType() {
+				constant = false
+			}
+		case *ast.UnaryExpr:
+			if n.Op == token.ARROW {
+				constant = false
+			}
+		}
+		return constant
+	})
+	return constant
+}
+
 // freshEachIteration reports whether the loop at a position gives each
 // iteration variables of its own, as Go does from version 1.22 on. The
 // version is that of the file, set by go.mod or a build constraint; a file
@@ -983,7 +1006,32 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 			outer(st)
 			v.ranges = saved
 		}
+	case isArray(ranged):
+		// The range expression is evaluated, and so copied, before the
+		// first iteration, unless only the index is asked for and the
+		// length is a constant (a range expression without calls).
+		n := logic.IntLit(arrayLen(ranged))
+		var array *logic.Term
+		if element != nil || !constantLen(v.info, s.X) {
+			array = v.eval(s.X, st, nil)[0]
+		}
+		v.closeUnit(st)
+		shape.limit = n
+		elem := ranged.Underlying().(*types.Array).Elem()
+		shape.bind = func(st *state, counter *logic.Term) {
+			if key != nil {
+				v.bind(st, key, value{counter})
+			}
+			if element != nil {
+				current := logic.Select(array, counter)
+				st.assume(v.typeFact(current, elem))
+				v.bind(st, element, value{current})
+			}
+		}
 	case isSlice(ranged):
+		if _, ok := fieldLayout(elemType(ranged)); !ok && element != nil {
+			v.unsupported(s.X.Pos(), fmt.Sprintf("slices of %s are not supported", elemType(ranged)))
+		}
 		header := v.eval(s.X, st, nil)
 		v.closeUnit(st)
 		shape.limit = header[2]

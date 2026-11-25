@@ -70,6 +70,20 @@ func (pv *pkgVerifier) maxAlloc() *big.Int {
 	return limit
 }
 
+// refuseTooLarge reports a value of a type that holds an array and is
+// larger than one allocation can be. Go compiles such a type, and the
+// program dies when it is made, with a fatal error and not a panic.
+func (v *fnVerifier) refuseTooLarge(pos token.Pos, t types.Type) {
+	if !holdsArrayValue(t) {
+		return
+	}
+	size := big.NewInt(v.pass.TypesSizes.Sizeof(t))
+	if size.Cmp(v.maxAlloc()) > 0 {
+		v.unsupported(pos, fmt.Sprintf("%s is %s bytes, more than one allocation can be (MaxAlloc, %s bytes), so no program can make it",
+			types.TypeString(t, types.RelativeTo(v.pass.Pkg)), size, v.maxAlloc()))
+	}
+}
+
 // checkAlloc requires an array of count elements of the given type to be
 // one the runtime will allocate.
 func (v *fnVerifier) checkAlloc(st *state, guard []*logic.Term, count *logic.Term, elem types.Type, pos token.Pos, what string) {

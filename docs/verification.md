@@ -16,7 +16,7 @@ This guide shows how to write Go that `vego` can verify. Read it from top to bot
 
 `vego` never reports a function as correct when it is not. If it cannot handle a piece of Go, it reports `cannot verify` and names the construct. If it cannot find a proof, it reports `may not hold`. That means "not proved". The code may be wrong, the contract may be wrong, or both may be right and the prover needs a hint. Much of this guide is about working out which.
 
-`vego` is experimental and supports only part of Go. It does not yet support calls through interfaces whose methods have no contract (which includes the interfaces of the standard library), methods of an interface that write what the interface value holds, calls of function values whose type has no contract, generic code, goroutines, arrays, or package-level variables that are changed. [What is not supported](#what-is-not-supported) lists the main gaps. Code that does I/O usually runs into these limits. The usual approach is to verify the logic and leave the code around it unverified. [Adopting it](#adopting-it) describes how.
+`vego` is experimental and supports only part of Go. It does not yet support calls through interfaces whose methods have no contract (which includes the interfaces of the standard library), methods of an interface that write what the interface value holds, calls of function values whose type has no contract, generic code, goroutines, arrays of anything but numbers and booleans, arrays inside structs, or package-level variables that are changed. [What is not supported](#what-is-not-supported) lists the main gaps. Code that does I/O usually runs into these limits. The usual approach is to verify the logic and leave the code around it unverified. [Adopting it](#adopting-it) describes how.
 
 ## Running it
 
@@ -2941,6 +2941,121 @@ func ClearFront(h *Halves) {
 Without `apart(h.front, h.back)` in the `Requires`, `vego` reports `postcondition may not hold: h.back'[0] = h.back[0]`, because `h.back[0]` may be the element that the function writes.
 
 A slice with no capacity shares no memory with anything. `apart` takes two slices of one element type. Slices of two element types never share memory, and `apart` of them is reported.
+
+## Arrays
+
+An array of numbers or booleans can be a local variable, a parameter, or a result, as in `[16]int`, `[512]byte`, or `[32]byte`. Its length comes from its type, so an index is checked against it without a `Requires`. In a formula, `|a|` is the length and `a[i]` an element:
+
+```go
+// @Requires Forall k in [0, |data|) : data[k] < 16
+// @Requires |data| <= 1000
+// @Ensures Forall v in [0, 16) : 0 <= counts[v] <= |data|
+func Counts(data []byte) (counts [16]int) {
+	// @Invariant 0 <= i <= |data|
+	// @Invariant Forall v in [0, 16) : 0 <= counts[v] <= i
+	for i := range data {
+		counts[data[i]]++
+	}
+	return counts
+}
+```
+
+An array is a value. Assigning it, passing it, and returning it copy the elements, so a write to the copy leaves the original as it was:
+
+```go
+// @Ensures r = 9
+func CopyIsAValueWrong() (r int) {
+	a := [3]int{1, 2, 3}
+	b := a
+	b[0] = 9
+	return a[0]
+}
+```
+
+```text
+vego: postcondition may not hold: r = 9
+```
+
+With `@Ensures r = 1` the function verifies. A `range` over an array ranges over a copy taken before the first iteration, as in Go, so a write to the array in the body does not change the elements the loop yields. `==` compares two arrays element by element. For arrays of floats nothing is proved about `==`, as for floats.
+
+Array literals such as `[4]int{1, 2, 3, 4}`, `[...]byte{'a', 'b'}`, and `[8]int{3: 1}` are supported, and so is the zero value. `[4]byte(p)` copies the first four elements of the slice `p`. Go panics when `p` is shorter, so `vego` checks the length:
+
+```go
+// @Ensures True
+func HeaderShort(p []byte) (r [4]byte) {
+	return [4]byte(p)
+}
+```
+
+```text
+vego: the conversion may panic: p may be shorter than [4]byte
+```
+
+With `@Requires |p| >= 4` the function verifies.
+
+### Slices of an array
+
+A slice of an array, such as `buf[:]` or `buf[:n]`, shares the array's memory. A write through the slice is seen through the array, and the other way round. This is how you hand a buffer on the stack to a function that fills it:
+
+```go
+// @Requires r != nil
+// @Modifies r
+// @Ensures 0 <= n <= 512
+func ReadBlock(r io.Reader) (n int, err error) {
+	var buf [512]byte
+	return r.Read(buf[:])
+}
+```
+
+The array needs no `Modifies` entry, since it is a local variable. The capacity of a slice of an array runs to the end of the array, so an `append` writes into the array until it is full, and then moves to a new array:
+
+```go
+// @Ensures r = 5 And s = 4
+func AppendIntoArray() (r byte, s int) {
+	var buf [4]byte
+	t := append(buf[:1], 5)
+	return buf[1], cap(t)
+}
+```
+
+A function may return a slice of a local array. Go moves the array to the heap, and `fresh` holds of the slice. A hash from `crypto/sha256` is printed through a slice of it:
+
+```go
+// @Ensures |result| = 64
+func Fingerprint(data []byte) (result string) {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+```
+
+`sha256.Sum256`, `md5.Sum`, and `hex.EncodeToString` have shipped contracts.
+
+### What arrays do not support yet
+
+An array of anything but numbers and booleans is not supported, and neither is a struct that holds an array:
+
+```go
+// @Ensures True
+func Names() (r string) {
+	names := [2]string{"a", "b"}
+	return names[0]
+}
+```
+
+```text
+vego: cannot verify Names: names has unsupported type [2]string; [2]string is an array of string, and only arrays of numbers and booleans are supported yet; use a slice of string instead
+```
+
+These are not supported yet either, each with a message that names it:
+
+- a pointer to an array, as in `p := &buf`; slice the array instead;
+- reading or writing an element of a slice of arrays, as in `xs[0][0]` of a `[][4]byte`; holding such a slice, its length, and slicing it are supported;
+- an array or a value that holds one in an interface value or an error, an assertion or a type switch to such a type, and `errors.As` with such a target;
+- a function type or a method of an interface whose parameters or results hold an array;
+- formatting an array with `fmt`; format a slice of it, as in `h[:]`;
+- an array as a key or as the value of a map;
+- a package-level array that is changed or sliced;
+- a type that holds an array and is larger than one allocation can be on the target, which Go compiles and then cannot make.
 
 ## Strings
 
@@ -7462,6 +7577,7 @@ The names in an entry are the parameter and result names from the function's sou
 - `regexp.Compile` and the methods `MatchString`, `Match`, `FindString`, and `FindStringSubmatch` of `*regexp.Regexp`, which say nothing of what matches
 - `(*net/http.Request).PathValue`, `(net/http.Header).Get` and `Set`, and `net/http.NewServeMux`
 - `mime.ParseMediaType`
+- `crypto/sha256.Sum256`, `crypto/md5.Sum`, and `encoding/hex.EncodeToString`, described in [Slices of an array](#slices-of-an-array)
 - the methods of `sync.Mutex` and `sync.RWMutex` that lock and unlock, and `(*sync.Once).Do`, described in [Locks](#locks)
 - `encoding/json.Marshal`, `encoding/json.MarshalIndent`, `encoding/json.Unmarshal`, `(*encoding/json.Encoder).Encode`, and `(*encoding/json.Decoder).Decode`, described in [Encoding and decoding JSON](#encoding-and-decoding-json)
 
@@ -9265,6 +9381,8 @@ This table lists the most common messages.
 | `cannot verify F: converting x, a A, to B is not supported: ...` | `B` has a state that `A` does not declare, or a method of `A` keeps more, vouches for less, or asserts more than the method of `B`. | See [Converting between interfaces](#converting-between-interfaces). |
 | `postcondition may not hold: P, in A.M used as B.M at ...` | The contract of the method of `A` does not imply that of `B`, or the method of a value you converted does not meet the contract of the interface. | Strengthen the contract of `A.M`, or weaken that of `B.M`. |
 | `index may be out of range` | The index is not proved to be in range. | Add a `Requires` clause or an invariant that bounds the index. |
+| `the conversion may panic: p may be shorter than [4]byte` | `[4]byte(p)` is not proved to have enough elements to copy. | Add a `Requires` clause that bounds `\|p\|`. See [Arrays](#arrays). |
+| `cannot verify F: x has unsupported type [2]string; [2]string is an array of string, and only arrays of numbers and booleans are supported yet; ...` | An array of another element type. | Use a slice, as the message says. See [What arrays do not support yet](#what-arrays-do-not-support-yet). |
 | `addition may overflow int`, and similar | The result is not proved to fit its type. | Bound the inputs, or rearrange the expression. |
 | `loop invariant may not hold on entry` | The invariant is not proved before the first iteration. It is usually false there. | Fix the invariant or the code before the loop. |
 | `loop invariant may not be preserved` | An iteration may break the invariant, or the invariant is too weak. | Add the clause that the invariant depends on. |
@@ -9443,7 +9561,7 @@ This table lists the most common messages.
 | `cannot verify F: json.NewEncoder keeps w in the encoder it returns; ...` | An encoder or decoder is kept in a variable. | Write the call as one expression. |
 ## What is not supported
 
-`vego` supports functions and methods over these types: the integer types, `bool`, `string`, `error`, the float types, structs, pointers to structs, slices, maps with integer, string, or boolean keys, function types, and interface types. In the body it supports assignments, `if`, `switch`, `for` and `range` loops with `break` and `continue`, `return`, `defer`, calls to named functions and methods, function literals that are called or deferred where they are written or bound to a variable that is only called, function values of named function types with a contract (see [Function values](#function-values)), calls through interface values of methods with a contract (see [Interfaces](#interfaces)), functions handed to a trusted function that calls them while it runs (see [Functions that a trusted function calls](#functions-that-a-trusted-function-calls)), and recursion. The built-ins `len`, `cap`, `min`, `max`, `new`, `make`, `append`, and `delete` are supported, and so are composite literals, slicing, and the arithmetic, comparison, shift, and bitwise operators.
+`vego` supports functions and methods over these types: the integer types, `bool`, `string`, `error`, the float types, arrays of numbers and booleans, structs, pointers to structs, slices, maps with integer, string, or boolean keys, function types, and interface types. In the body it supports assignments, `if`, `switch`, `for` and `range` loops with `break` and `continue`, `return`, `defer`, calls to named functions and methods, function literals that are called or deferred where they are written or bound to a variable that is only called, function values of named function types with a contract (see [Function values](#function-values)), calls through interface values of methods with a contract (see [Interfaces](#interfaces)), functions handed to a trusted function that calls them while it runs (see [Functions that a trusted function calls](#functions-that-a-trusted-function-calls)), and recursion. The built-ins `len`, `cap`, `min`, `max`, `new`, `make`, `append`, and `delete` are supported, and so are composite literals, slicing, and the arithmetic, comparison, shift, and bitwise operators.
 
 A function that uses any of the following is reported as `cannot verify`:
 
@@ -9498,7 +9616,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - `recover`;
 - generic functions and types of your own package with annotations, a call of a generic function without a trusted contract, a generic function used as a value, methods of generic types, and type arguments that can hold code, that are not modelled, or that hold a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once` (see [Generic functions of other packages](#generic-functions-of-other-packages));
 - goroutines, channels, and `select`;
-- arrays, and structs that contain an array;
+- arrays of anything but numbers and booleans, structs that contain an array, and the other uses of arrays listed in [What arrays do not support yet](#what-arrays-do-not-support-yet);
 - pointers to anything other than a struct;
 - reading or changing a package-level variable whose address the build takes and that is not a struct, a struct variable of another package whose address is taken, a variable that a directive or an assembly file names, an error variable that something changes, or a variable whose type can hold a function value, an interface value, an error, a channel, or an `unsafe.Pointer`, but for an interface type, a named function type with a contract, and a logger made by `log.New` (see [Package-level variables](#package-level-variables));
 - `copy`;
@@ -9606,9 +9724,10 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `+`, `-`, `*`, `/`, `%` | arithmetic on mathematical integers; `/` and `%` round as in Go |
 | `MaxInt`, `MinInt`, `MaxInt8` ... `MaxUint64` | limits of the Go integer types |
 | `MaxAlloc` | the largest number of bytes in one allocation |
-| <code>&#124;A&#124;</code> | length of a slice or string, or number of keys in a map |
+| <code>&#124;A&#124;</code> | length of a slice, an array, or a string, or number of keys in a map |
 | <code>&#124;b&#124;</code> | for a `strings.Builder` or a `bytes.Buffer`, or a pointer to one: what `b.Len()` returns, the bytes not yet read |
 | `A[i]`, `m[k]`, `p.f` | element, map value, field |
+| `a = b` | for two arrays of numbers or booleans: the same elements; refused for arrays of floats |
 | `A[lo:hi) <= x` | the comparison holds for every element from `lo` up to `hi` |
 | `Forall k in [a, b) : P`, `Exists k in [a, b] : P` | quantifiers over an interval |
 | `Forall k in Z : P` | quantifier over all integers |

@@ -74,6 +74,8 @@ func (pv *pkgVerifier) assignedWhy(variable *types.Var) string {
 		return fmt.Sprintf("%s %s; it is a struct variable whose address is taken, which is read and written as memory, not as an assigned variable", spelled, pv.addressAt(variable))
 	case isError(t):
 		return fmt.Sprintf("%s %s; package-level error variables that are changed are not supported yet", spelled, pv.ownChanges[variable])
+	case holdsArrayValue(t):
+		return fmt.Sprintf("%s %s; package-level arrays that are changed are not supported yet", spelled, pv.ownChanges[variable])
 	}
 	if _, ok := layoutOf(t); !ok {
 		return fmt.Sprintf("%s has type %s, which is not supported%s", spelled, t, unsupportedHint(t))

@@ -313,9 +313,9 @@ func capturesValue(layout []leaf) bool {
 // typedError returns the error that converting a value of a concrete type
 // gives, and states what it holds; see canonicalError and noteHeld.
 func (v *fnVerifier) typedError(e ast.Expr, from types.Type, val value, st *state, guard []*logic.Term) *logic.Term {
-	layout, ok := layoutOf(from)
-	if !ok {
-		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to an error is not supported: values of its type are not modelled", from))
+	layout, _ := layoutOf(from)
+	if why := heldReason(from); why != "" {
+		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to an error is not supported: %s", from, why))
 	}
 	v.checkedMethods(e, from, val, st, guard)
 	leaves := v.goLeaves(st, layout, val)
@@ -767,9 +767,9 @@ func (v *fnVerifier) assertion(e *ast.TypeAssertExpr, st *state, guard []*logic.
 	if !named {
 		v.unsupported(e.Pos(), fmt.Sprintf("asserting %s to %s is not supported: it is declared inside a function, and nothing tells it apart from another type there", operand, shown(target)))
 	}
-	layout, ok := layoutOf(target)
-	if !ok {
-		v.unsupported(e.Pos(), fmt.Sprintf("asserting %s to %s is not supported: values of its type are not modelled", operand, shown(target)))
+	layout, _ := layoutOf(target)
+	if why := heldReason(target); why != "" {
+		v.unsupported(e.Pos(), fmt.Sprintf("asserting %s to %s is not supported: %s", operand, shown(target), why))
 	}
 	if why := reflectHeld(v.pass.Pkg, target, "", map[types.Type]bool{}); why != "" {
 		v.unsupported(e.Pos(), fmt.Sprintf("asserting %s to %s is not supported: %s", operand, shown(target), why))
@@ -1051,8 +1051,8 @@ func (v *fnVerifier) typeSwitch(s *ast.TypeSwitchStmt, st *state, c ctrl, k func
 				if !named {
 					v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch is not supported: it is declared inside a function, and nothing tells it apart from another type there", shown(t)))
 				}
-				if _, ok := layoutOf(t); !ok {
-					v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch is not supported: values of its type are not modelled", shown(t)))
+				if why := heldReason(t); why != "" {
+					v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch is not supported: %s", shown(t), why))
 				}
 				if why := reflectHeld(v.pass.Pkg, t, "", map[types.Type]bool{}); why != "" {
 					v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch is not supported: %s", shown(t), why))

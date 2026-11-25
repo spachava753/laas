@@ -177,8 +177,8 @@ func (v *fnVerifier) checkEqSide(t types.Type, pos token.Pos) {
 	if _, named := canonicalName(t); !named {
 		v.unsupported(pos, fmt.Sprintf("comparing an interface value with a value of type %s is not supported: it is declared inside a function, and nothing tells it apart from another type there", shown))
 	}
-	if _, ok := layoutOf(t); !ok {
-		v.unsupported(pos, fmt.Sprintf("comparing an interface value with a value of type %s is not supported: values of its type are not modelled", shown))
+	if why := heldReason(t); why != "" {
+		v.unsupported(pos, fmt.Sprintf("comparing an interface value with a value of type %s is not supported: %s", shown, why))
 	}
 	if why := noPanicWhy(t, map[types.Type]bool{}); why != "" {
 		v.unsupported(pos, fmt.Sprintf("comparing an interface value with a value of type %s is not supported: == on two values of %s may panic, since %s", shown, shown, why))

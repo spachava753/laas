@@ -3,6 +3,9 @@ package vego
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"go/importer"
@@ -232,6 +235,21 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 	"strings.ToLower": func(rng *rand.Rand) sample {
 		s := randomText(rng)
 		return sample{before: []any{s}, results: []any{strings.ToLower(s)}}
+	},
+	"crypto/sha256.Sum256": func(rng *rand.Rand) sample {
+		data := []byte(randomText(rng))
+		before := snapshot(data)
+		return sample{before: before, after: []any{data}, results: []any{sha256.Sum256(data)}}
+	},
+	"crypto/md5.Sum": func(rng *rand.Rand) sample {
+		data := []byte(randomText(rng))
+		before := snapshot(data)
+		return sample{before: before, after: []any{data}, results: []any{md5.Sum(data)}}
+	},
+	"encoding/hex.EncodeToString": func(rng *rand.Rand) sample {
+		src := []byte(randomText(rng))
+		before := snapshot(src)
+		return sample{before: before, after: []any{src}, results: []any{hex.EncodeToString(src)}}
 	},
 	"strconv.Itoa": func(rng *rand.Rand) sample {
 		i := rng.Intn(2001) - 1000
@@ -1829,6 +1847,10 @@ func (g *grounder) groundTerm(value any) *logic.Term {
 		return logic.IntLit(value)
 	case uint64:
 		return logic.BigLit(new(big.Int).SetUint64(value))
+	case [32]byte:
+		return g.groundTerm(value[:])
+	case [16]byte:
+		return g.groundTerm(value[:])
 	case [][]byte:
 		seq := logic.Fill(logic.IntLit(0), logic.Fill(logic.IntLit(0), logic.IntLit(0)))
 		for _, element := range value {

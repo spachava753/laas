@@ -54,6 +54,12 @@ type lvalue struct {
 	// ref is the allocation or the map, and at the position of the struct
 	// or element, or the key, once the target has been evaluated.
 	ref, at *logic.Term
+	// element is set for an element of an array that a local variable
+	// holds or that lies in a variable whose address is taken: the index
+	// expression, and once the target has been evaluated its value. The
+	// other fields locate the whole array.
+	element      ast.Expr
+	elementIndex *logic.Term
 }
 
 // place determines what kind of storage an assignment target is, without
@@ -96,6 +102,14 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 		lv.kind, lv.pointer, lv.typ, lv.cells = placeMem, e.X, object, v.cellsOf(object)
 	case *ast.IndexExpr:
 		t := v.info.TypeOf(e.X)
+		if isArray(t) {
+			lv = v.place(e.X)
+			if lv.element != nil || !(lv.kind == placeLocal || lv.kind == placeMem && lv.box != nil) {
+				v.unsupported(e.Pos(), fmt.Sprintf("only elements of arrays that local variables hold can be assigned, not those of %s", types.ExprString(e.X)))
+			}
+			lv.pos, lv.text, lv.element, lv.typ = e.Pos(), types.ExprString(e), e.Index, t.Underlying().(*types.Array).Elem()
+			break
+		}
 		if isMap(t) && mapModelled(t) {
 			_, elem := mapParts(t)
 			lv.kind, lv.slice, lv.index, lv.mapType, lv.typ = placeMap, e.X, e.Index, t, elem
@@ -103,6 +117,9 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 		}
 		if !isSlice(t) {
 			v.unsupported(e.Pos(), fmt.Sprintf("only elements of slices can be assigned, not those of a %s", t))
+		}
+		if isArray(elemType(t)) {
+			v.unsupported(e.Pos(), fmt.Sprintf("assigning an element of a %s is not supported: slices of arrays are not supported yet", t))
 		}
 		lv.kind, lv.slice, lv.index, lv.typ, lv.cells = placeMem, e.X, e.Index, elemType(t), v.cellsOf(elemType(t))
 	case *ast.SelectorExpr:
@@ -114,6 +131,7 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 	if lv.leaves, ok = layoutOf(lv.typ); !ok {
 		v.unsupported(lv.pos, fmt.Sprintf("%s has unsupported type %s%s", lv.text, lv.typ, unsupportedHint(lv.typ)))
 	}
+	v.refuseTooLarge(lv.pos, lv.typ)
 	return lv
 }
 
@@ -211,6 +229,11 @@ func (v *fnVerifier) lvalue(e ast.Expr, st *state, guard []*logic.Term) lvalue {
 		keyType, _ := mapParts(lv.mapType)
 		lv.ref, lv.at = v.expr(lv.slice, st, guard), v.evalAs(lv.index, keyType, st, guard)[0]
 	}
+	if lv.element != nil {
+		lv.elementIndex = v.expr(lv.element, st, guard)
+		n := arrayLen(v.info.TypeOf(ast.Unparen(e).(*ast.IndexExpr).X))
+		v.checkIndex(st, guard, logic.IntLit(n), lv.elementIndex, lv.pos)
+	}
 	return lv
 }
 
@@ -221,7 +244,8 @@ func bounds(cells []cell) (lo, hi int64) {
 		if i == 0 || c.off < lo {
 			lo = c.off
 		}
-		hi = max(hi, c.off+1)
+		// The run of an array covers its bytes.
+		hi = max(hi, c.off+max(c.run*c.unit, 1))
 	}
 	return lo, hi
 }
@@ -236,6 +260,15 @@ func (v *fnVerifier) loadRecorded(lv lvalue, st *state, guard []*logic.Term, sta
 		whole := st.vals[lv.local]
 		if whole == nil {
 			v.unsupported(lv.pos, "this operand cannot be read and updated in place")
+		}
+		if lv.element != nil {
+			array := whole[lv.lo]
+			if _, captured := v.captured[lv.local]; captured {
+				array = v.readCapturedPart(st, guard, start, lv.local, lv.lo, 1, lv.text, lv.pos)[0]
+			}
+			element := logic.Select(array, lv.elementIndex)
+			st.assume(logic.Implies(logic.And(guard...), v.typeFact(element, lv.typ)))
+			return value{element}
 		}
 		if _, captured := v.captured[lv.local]; captured {
 			return v.readCapturedPart(st, guard, start, lv.local, lv.lo, len(lv.leaves), lv.text, lv.pos)
@@ -255,6 +288,11 @@ func (v *fnVerifier) loadIn(lv lvalue, sink *state, mem memory) value {
 	if lv.kind == placeMap {
 		return v.mapValue(sink, mem, lv.mapType, lv.ref, lv.at)
 	}
+	if lv.element != nil {
+		header := value{lv.ref, lv.cells[0].start(lv.at), logic.IntLit(lv.cells[0].run), logic.IntLit(lv.cells[0].run)}
+		val, _ := v.element(sink, mem, header, types.NewSlice(lv.typ), lv.elementIndex)
+		return val
+	}
 	val := v.fetch(sink, mem, lv.cells, lv.ref, lv.at)
 	v.noteTyped(sink, val, lv.typ)
 	v.noteReached(sink, lv.cells, lv.ref, lv.at, lv.typ, lv.typ)
@@ -268,6 +306,15 @@ func (v *fnVerifier) store(lv lvalue, val value, st *state) {
 	if lv.kind != placeBlank && len(val) != len(lv.leaves) {
 		v.unsupported(lv.pos, fmt.Sprintf("a value of this type cannot be assigned to %s", lv.text))
 	}
+	if lv.kind == placeMem && lv.element != nil {
+		// An element of an array in a variable whose address is taken,
+		// which the function made.
+		c := lv.cells[0]
+		at := logic.Add(c.start(lv.at), lv.elementIndex)
+		v.checkNotForbidden(st, nil, written{ref: lv.ref, parts: []stretch{{key: c.key, lo: at, hi: logic.Add(at, logic.IntLit(1)), one: true}}}, lv.pos, lv.text+" is assigned")
+		v.writeAt(st, c.key, c.sort, lv.ref, at, val[0])
+		return
+	}
 	switch lv.kind {
 	case placeLocal:
 		// Values are shared between states, so the variable gets a new one.
@@ -275,7 +322,14 @@ func (v *fnVerifier) store(lv lvalue, val value, st *state) {
 		if whole == nil {
 			whole = zeroValue(lv.local.Type())
 		}
-		copy(whole[lv.lo:], val)
+		if lv.element != nil {
+			// What is written, and where, may have been read from the
+			// array, as in a[i] = a[i-1] + 1; see apart.
+			array := whole[lv.lo]
+			whole[lv.lo] = logic.Store(array, v.apart(st, lv.elementIndex, array.Sort), v.apart(st, val[0], array.Sort))
+		} else {
+			copy(whole[lv.lo:], val)
+		}
 		st.vals[lv.local] = whole
 	case placeMem:
 		if lv.declares {
@@ -484,7 +538,7 @@ func wanted(targets []lvalue) []types.Type {
 func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, value)) {
 	t := v.info.TypeOf(call)
 	elem := elemType(t)
-	if _, ok := layoutOf(elem); !ok {
+	if _, ok := fieldLayout(elem); !ok {
 		v.unsupported(call.Pos(), fmt.Sprintf("slices of %s are not supported", elem))
 	}
 	spread := call.Ellipsis.IsValid()

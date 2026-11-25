@@ -431,6 +431,7 @@ func (v *fnVerifier) enter() *state {
 			}
 			v.unsupported(param.Pos(), fmt.Sprintf("%s has unsupported type %s%s", what, param.Type(), unsupportedHint(param.Type())))
 		}
+		v.refuseTooLarge(param.Pos(), param.Type())
 		// Every parameter is its own unknown, including blank ones, which
 		// all share the name "_".
 		name := param.Name()
@@ -495,6 +496,7 @@ func (v *fnVerifier) enter() *state {
 		if !ok {
 			v.unsupported(fn.obj.Pos(), fmt.Sprintf("result type %s is not supported%s", result.Type(), unsupportedHint(result.Type())))
 		}
+		v.refuseTooLarge(result.Pos(), result.Type())
 		st.vals[result] = zeroValue(result.Type())
 	}
 	pre := &specEnv{v: v, sink: st, fn: fn, args: v.entry, now: memory{}}
@@ -556,6 +558,11 @@ func (v *fnVerifier) findBoxed(body *ast.BlockStmt) map[*types.Var]bool {
 			if root := v.localRoot(n.X); n.Op == token.AND && root != nil {
 				boxed[root] = true
 			}
+		case *ast.SliceExpr:
+			// Slicing an array takes its address.
+			if root := v.localRoot(n.X); root != nil && isArray(v.info.TypeOf(n.X)) {
+				boxed[root] = true
+			}
 		case *ast.SelectorExpr:
 			// A call of a method with a pointer receiver, and a method
 			// value of one, take the address of the receiver.
@@ -602,7 +609,7 @@ func (v *fnVerifier) localRoot(e ast.Expr) *types.Var {
 				return nil
 			}
 			_, isStruct := variable.Type().Underlying().(*types.Struct)
-			if _, modelled := layoutOf(variable.Type()); !isStruct || !modelled {
+			if _, modelled := layoutOf(variable.Type()); !(isStruct || isArray(variable.Type())) || !modelled {
 				return nil
 			}
 			return variable

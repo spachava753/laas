@@ -140,6 +140,10 @@ func plainReason(t types.Type, visiting map[types.Type]bool) string {
 		return fmt.Sprintf("%s is a pointer, which fmt would follow", t)
 	case *types.Interface:
 		return fmt.Sprintf("%s is an interface, which can hold a value with methods that fmt would call", t)
+	case *types.Array:
+		// The size of what fmt writes for an array is not bounded yet; a
+		// slice of it is.
+		return fmt.Sprintf("%s is an array, which verified code cannot format yet; format a slice of it, as in a[:]", t)
 	}
 	return fmt.Sprintf("%s cannot be formatted by verified code", t)
 }

@@ -98,6 +98,9 @@ func embedsDeclared(t types.Type) bool {
 // interface is not supported, and what to do instead. It returns "" for any
 // other type.
 func unsupportedHint(t types.Type) string {
+	if hint := arrayHint(t); hint != "" {
+		return hint
+	}
 	if path, holder := arrayField(t, map[types.Type]bool{}); path == "itself" {
 		return fmt.Sprintf("; %s is an array, and arrays are not supported yet", holder)
 	} else if path != "" {
@@ -108,6 +111,22 @@ func unsupportedHint(t types.Type) string {
 	}
 	return "; an interface literal that embeds a declared interface is the same type as any other with methods of " +
 		"the same names and signatures, whose contracts may differ, so declare a defined interface type, as in type D interface{ A }, and use it here"
+}
+
+// arrayHint says why an array type, or a pointer to one, is not supported,
+// and what to write instead, or returns "".
+func arrayHint(t types.Type) string {
+	switch u := t.Underlying().(type) {
+	case *types.Pointer:
+		if isArray(u.Elem()) {
+			return fmt.Sprintf("; %s points to an array, and pointers to arrays are not supported yet; use a slice of the array, as in a[:]", t)
+		}
+	case *types.Array:
+		if _, plain := plainElem(u.Elem()); !plain && u.Len() != 0 {
+			return fmt.Sprintf("; %s is an array of %s, and only arrays of numbers and booleans are supported yet; use a slice of %s instead", t, u.Elem(), u.Elem())
+		}
+	}
+	return ""
 }
 
 // arrayField returns the field at any depth through which a type holds an

@@ -455,13 +455,18 @@ func (v *fnVerifier) unchanged(sink *state, now *logic.Term, known *layer, ref, 
 			untouched = append(untouched, logic.Ne(ref, t.ref))
 		case t.single:
 			// One struct value, or some of its fields: what may change is
-			// the position of each of its cells in this region, as havoc
-			// writes them, and nothing between them.
+			// the position of each of its cells in this region, and each
+			// position of the run of an array, as havoc writes them, and
+			// nothing between them.
 			for _, c := range t.cells {
-				if c.key == known.key {
-					at := logic.Add(t.lo, logic.IntLit(c.off))
-					untouched = append(untouched, logic.Not(logic.And(logic.Eq(ref, t.ref), logic.Le(at, index), logic.Lt(index, logic.Add(at, logic.IntLit(1))))))
+				if c.key != known.key {
+					continue
 				}
+				lo, hi := c.start(t.lo), c.end(t.lo)
+				if !c.isRun() {
+					hi = logic.Add(lo, logic.IntLit(1))
+				}
+				untouched = append(untouched, logic.Not(logic.And(logic.Eq(ref, t.ref), logic.Le(lo, index), logic.Lt(index, hi))))
 			}
 		default:
 			untouched = append(untouched, logic.Not(logic.And(logic.Eq(ref, t.ref), logic.Le(t.lo, index), logic.Lt(index, t.hi))))
@@ -513,7 +518,13 @@ func (v *fnVerifier) fetchIn(sink *state, mem memory, cells []cell, ref, at *log
 	}
 	val := make(value, len(cells))
 	for i, c := range cells {
-		position := logic.Add(at, logic.IntLit(c.off))
+		if c.isRun() {
+			// An array is the cut of the row its run lies in.
+			row := logic.Select(v.table(sink, mem, c.key, logic.SeqOf(logic.SeqOf(c.sort)), ref), ref)
+			val[i] = logic.Subseq(row, c.start(at), c.end(at))
+			continue
+		}
+		position := c.start(at)
 		val[i] = logic.Select(logic.Select(v.tableAt(sink, mem, c.key, logic.SeqOf(logic.SeqOf(c.sort)), ref, position), ref), position)
 	}
 	return val
@@ -524,8 +535,44 @@ func (v *fnVerifier) fetchIn(sink *state, mem memory, cells []cell, ref, at *log
 func (v *fnVerifier) put(st *state, cells []cell, ref, at *logic.Term, val value) {
 	checkGrowth(val)
 	for i, c := range cells {
-		v.writeAt(st, c.key, c.sort, ref, logic.Add(at, logic.IntLit(c.off)), val[i])
+		if c.isRun() {
+			v.writeRun(st, c, ref, at, val[i])
+			continue
+		}
+		v.writeAt(st, c.key, c.sort, ref, c.start(at), val[i])
 	}
+}
+
+// writeRun writes an array into the run of cells it lies in: position
+// start + k of the row at ref gets element k. The array is moved to the
+// positions of the run by a concatenation after a fill as long as the
+// start, so that the splice reads it at the same positions it writes.
+func (v *fnVerifier) writeRun(st *state, c cell, ref, at, array *logic.Term) {
+	table := logic.SeqOf(logic.SeqOf(c.sort))
+	start := c.start(at)
+	inside := array
+	if start.Op != logic.OpIntLit || start.Value().Sign() != 0 {
+		inside = logic.Concat(logic.Fill(start, zeroLeaf(leaf{sort: c.sort})), array)
+	}
+	ref, start = v.apart(st, ref, table), v.apart(st, start, table)
+	if !holdsSort(inside, table) {
+		st.mem[c.key] = logic.SpliceAt(st.mem.region(c.key, table), ref, inside, start, logic.Add(start, logic.IntLit(c.run)))
+		return
+	}
+	// An array read from the region it is written to, as a copy from one
+	// array in memory to another is. A splice would read the region twice
+	// at every copy, and a name for the array would restate every earlier
+	// copy in its fact, so the region gets a new value of which a layer
+	// says that everything outside the run is as it was, and one fact
+	// says what the run holds.
+	prev := st.mem.region(c.key, table)
+	now := v.fresh("copied "+c.key, table)
+	v.layers[now.Name] = &layer{prev: prev, bound: st.brk, key: c.key,
+		targets: []target{{cells: []cell{c}, ref: ref, lo: at, hi: c.end(at), single: true}}}
+	k := v.bound("k")
+	inRun := logic.And(logic.Le(logic.IntLit(0), k), logic.Lt(k, logic.IntLit(c.run)))
+	st.assume(logic.Forall(k, logic.Implies(inRun, logic.Eq(logic.Select(logic.Select(now, ref), logic.Add(start, k)), logic.Select(array, k)))))
+	st.mem[c.key] = now
 }
 
 // member reads field index of a struct value, or of the struct a pointer
@@ -557,8 +604,9 @@ func (v *fnVerifier) elementAt(header value, t types.Type, index *logic.Term) *l
 // element reads the element at index of a slice. It reports false when the
 // element type is not modelled.
 func (v *fnVerifier) element(sink *state, mem memory, header value, t types.Type, index *logic.Term) (value, bool) {
+	noArrayElements(t)
 	elem := elemType(t)
-	_, ok := layoutOf(elem)
+	_, ok := fieldLayout(elem)
 	var base types.Type
 	if _, isStruct := elem.Underlying().(*types.Struct); isStruct {
 		base = elem
@@ -576,6 +624,17 @@ func (v *fnVerifier) element(sink *state, mem memory, header value, t types.Type
 		v.noteReached(notes, v.cellsOf(elem), header[0], v.elementAt(header, t, index), elem, t)
 	}
 	return result, ok
+}
+
+// noArrayElements panics for a slice type whose elements are arrays. An
+// element of one would lie in a region of its own while a slice of it
+// reaches the same bytes through the region of the array's elements, two
+// views of one memory; every operation that reaches an element of such a
+// slice is refused before it gets here.
+func noArrayElements(t types.Type) {
+	if isArray(elemType(t)) {
+		panic("vego: internal error: an element of a slice of arrays is reached")
+	}
 }
 
 // typedRead is a value read from memory with its type; see canBeMet.
@@ -639,6 +698,14 @@ func (v *fnVerifier) writeAt(st *state, key string, sort logic.Sort, ref, at, wr
 // the region it writes; if those held the region, as A[0] = A[1] does, a
 // run of such writes would double the region at every step.
 func (v *fnVerifier) apart(st *state, t *logic.Term, region logic.Sort) *logic.Term {
+	if !holdsSort(t, region) {
+		return t
+	}
+	return v.named(st, "written", t)
+}
+
+// holdsSort reports whether a term has a part of the given sort.
+func holdsSort(t *logic.Term, sort logic.Sort) bool {
 	seen := map[*logic.Term]bool{}
 	var holds func(t *logic.Term) bool
 	holds = func(t *logic.Term) bool {
@@ -646,15 +713,12 @@ func (v *fnVerifier) apart(st *state, t *logic.Term, region logic.Sort) *logic.T
 			return false
 		}
 		seen[t] = true
-		if t.Sort == region {
+		if t.Sort == sort {
 			return true
 		}
 		return slices.ContainsFunc(t.Args, holds)
 	}
-	if !holds(t) {
-		return t
-	}
-	return v.named(st, "written", t)
+	return holds(t)
 }
 
 // storeRow replaces the sequence a region has for a reference.
@@ -682,6 +746,7 @@ func (v *fnVerifier) alloc(st *state, sized bool) *logic.Term {
 // holds zero values, puts the given elements at its start, and returns a
 // slice of the array with the given length and capacity.
 func (v *fnVerifier) allocSlice(st *state, elem types.Type, elements []value, length, capacity *logic.Term) value {
+	noArrayElements(types.NewSlice(elem))
 	// An array of elements without size takes no memory and need not be
 	// apart from any other.
 	ref := v.alloc(st, v.pass.TypesSizes.Sizeof(elem) > 0)
@@ -753,7 +818,7 @@ func (t target) stretches() []stretch {
 func stretchesOf(cells []cell, at *logic.Term) []stretch {
 	parts := make([]stretch, len(cells))
 	for i, c := range cells {
-		parts[i] = stretch{key: c.key, lo: logic.Add(at, logic.IntLit(c.off)), hi: logic.Add(at, logic.IntLit(c.off+1)), one: true}
+		parts[i] = stretch{key: c.key, lo: c.start(at), hi: c.end(at), one: !c.isRun()}
 	}
 	return parts
 }

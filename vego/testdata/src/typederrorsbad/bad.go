@@ -181,9 +181,10 @@ func UsesWide(n int) (r bool) {
 	return wide(n) == nil // want `the trusted contract of typederrorsbad.wide \(trusted.yaml:\d+\) cannot be used: .*InvalidByteError\(...\) of a value of type int, which may not fit InvalidByteError`
 }
 
-// AE is an array error, whose receiver has no name: arrays are not
-// supported, and the message names the receiver (F21 of the review of S6).
-type AE [2]int
+// AE is an array error, whose receiver has no name: arrays of pointers are
+// not supported, and the message names the receiver (F21 of the review of
+// S6).
+type AE [2]*int
 
 // @Ensures True
 func (AE) Error() (s string) { return "array" } // want `cannot verify Error: the receiver, which has no name, has unsupported type typederrorsbad.AE`

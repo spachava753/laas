@@ -1614,3 +1614,124 @@ func EqChain(v any) (r bool) {
 	a = any(a.(int))
 	return r
 }
+
+// ArrayChain writes each element of an array value from the one before it.
+//
+// @Ensures r = 30
+func ArrayChain() (r int) {
+	var a [31]int
+	a[1] = a[0] + 1
+	a[2] = a[1] + 1
+	a[3] = a[2] + 1
+	a[4] = a[3] + 1
+	a[5] = a[4] + 1
+	a[6] = a[5] + 1
+	a[7] = a[6] + 1
+	a[8] = a[7] + 1
+	a[9] = a[8] + 1
+	a[10] = a[9] + 1
+	a[11] = a[10] + 1
+	a[12] = a[11] + 1
+	a[13] = a[12] + 1
+	a[14] = a[13] + 1
+	a[15] = a[14] + 1
+	a[16] = a[15] + 1
+	a[17] = a[16] + 1
+	a[18] = a[17] + 1
+	a[19] = a[18] + 1
+	a[20] = a[19] + 1
+	a[21] = a[20] + 1
+	a[22] = a[21] + 1
+	a[23] = a[22] + 1
+	a[24] = a[23] + 1
+	a[25] = a[24] + 1
+	a[26] = a[25] + 1
+	a[27] = a[26] + 1
+	a[28] = a[27] + 1
+	a[29] = a[28] + 1
+	a[30] = a[29] + 1
+	return a[30]
+}
+
+// @Ensures r = |p|
+func peekInts(p []int) (r int) { return len(p) }
+
+// ArrayBoxedChain is ArrayChain with the array in memory.
+//
+// @Ensures r = 30
+func ArrayBoxedChain() (r int) {
+	var a [31]int
+	_ = peekInts(a[:])
+	a[1] = a[0] + 1
+	a[2] = a[1] + 1
+	a[3] = a[2] + 1
+	a[4] = a[3] + 1
+	a[5] = a[4] + 1
+	a[6] = a[5] + 1
+	a[7] = a[6] + 1
+	a[8] = a[7] + 1
+	a[9] = a[8] + 1
+	a[10] = a[9] + 1
+	a[11] = a[10] + 1
+	a[12] = a[11] + 1
+	a[13] = a[12] + 1
+	a[14] = a[13] + 1
+	a[15] = a[14] + 1
+	a[16] = a[15] + 1
+	a[17] = a[16] + 1
+	a[18] = a[17] + 1
+	a[19] = a[18] + 1
+	a[20] = a[19] + 1
+	a[21] = a[20] + 1
+	a[22] = a[21] + 1
+	a[23] = a[22] + 1
+	a[24] = a[23] + 1
+	a[25] = a[24] + 1
+	a[26] = a[25] + 1
+	a[27] = a[26] + 1
+	a[28] = a[27] + 1
+	a[29] = a[28] + 1
+	a[30] = a[29] + 1
+	return a[30]
+}
+
+// ArrayCopyChain copies two arrays in memory into each other, each copy
+// a cut of one row spliced into another.
+//
+// @Ensures r = 1
+func ArrayCopyChain() (r int) {
+	var a, b [8]int
+	_, _ = peekInts(a[:]), peekInts(b[:])
+	a[0] = 1
+	b = a
+	a = b
+	b = a
+	a = b
+	b = a
+	a = b
+	b = a
+	a = b
+	b = a
+	a = b
+	b = a
+	a = b
+	b = a
+	a = b
+	b = a
+	a = b
+	b = a
+	a = b
+	b = a
+	a = b
+	b = a
+	a = b
+	b = a
+	a = b
+	b = a
+	a = b
+	b = a
+	a = b
+	b = a
+	a = b
+	return a[0]
+}

@@ -129,7 +129,7 @@ func (v *fnVerifier) evalPassed(a passedArg, st *state, guard []*logic.Term) val
 		return zeroValue(t)
 	}
 	elem := elemType(t)
-	if _, ok := layoutOf(elem); !ok {
+	if _, ok := fieldLayout(elem); !ok {
 		v.unsupported(a.pack[0].Pos(), fmt.Sprintf("arguments of type %s are not supported", elem))
 	}
 	elements := make([]value, len(a.pack))

@@ -254,6 +254,12 @@ func (v *fnVerifier) assignedLocal(e ast.Expr) *types.Var {
 				return nil
 			}
 			e = x.X
+		case *ast.IndexExpr:
+			// An element of an array is part of the variable.
+			if !isArray(v.info.TypeOf(x.X)) {
+				return nil
+			}
+			e = x.X
 		default:
 			return nil
 		}

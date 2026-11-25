@@ -1,0 +1,18 @@
+# Contracts for package encoding/hex of the standard library.
+version: 1
+
+trusted:
+  encoding/hex.EncodeToString:
+    reason: >-
+      Read from the source of Go 1.26.6 and 1.27.3, which is the same: it
+      makes a slice of EncodedLen(len(src)) = 2 * len(src) bytes, writes two
+      hexadecimal digits of each byte of src into it, which only reads src,
+      and returns the string of that slice. make panics when the length is
+      more than one allocation can hold, which the requires rules out; on a
+      32-bit target 2 * len(src) fits an int whenever it is at most
+      MaxAlloc. Which digits it writes is not modelled.
+    requires:
+      - "2 * |src| <= MaxAlloc"
+    ensures:
+      - "|result| = 2 * |src|"
+    modifies: []

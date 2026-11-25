@@ -23,7 +23,9 @@ func (v *fnVerifier) binary(op token.Token, x, y *logic.Term, t types.Type, pos 
 		// such as a slice type with an Error method, panic when compared.
 		v.unsupported(pos, "comparing two errors can panic when they hold an uncomparable type; "+
 			"compare with nil")
-	case x.Sort == logic.Float:
+	case x.Sort == logic.Float || x.Sort == logic.FloatSeq:
+		// Floats, and arrays of them, compare by value, and a NaN is
+		// not equal to itself.
 		return v.opaque(op, x)
 	case x.Sort == logic.Ref && op == token.EQL:
 		return logic.Eq(x, y)
@@ -1236,7 +1238,7 @@ func (v *fnVerifier) contentFacts(mem memory, val value, t types.Type, brk *logi
 		if !mapModelled(t) {
 			break
 		}
-		leaves, _ := layoutOf(u.Elem())
+		leaves, _ := fieldLayout(u.Elem())
 		index := v.bound("k")
 		held := make(value, len(leaves))
 		for i, lf := range leaves {
@@ -1246,7 +1248,7 @@ func (v *fnVerifier) contentFacts(mem memory, val value, t types.Type, brk *logi
 	case *types.Slice:
 		// Every element is a complete value of the element type: numbers in
 		// range, pointers to something that exists, slices that are slices.
-		leaves, ok := layoutOf(u.Elem())
+		leaves, ok := fieldLayout(u.Elem())
 		if !ok {
 			break
 		}

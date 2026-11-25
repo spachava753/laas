@@ -3,6 +3,7 @@ package vego
 import (
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/token"
 	"go/types"
 	"slices"
@@ -100,6 +101,7 @@ func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 	if _, ok := layoutOf(t); !ok {
 		v.unsupported(e.Pos(), fmt.Sprintf("expressions of type %s are not supported", t))
 	}
+	v.refuseTooLarge(e.Pos(), t)
 	if tv := v.info.Types[e]; tv.Value != nil {
 		sort, _ := sortOf(t)
 		return value{v.constant(tv.Value, sort, e, st)}
@@ -421,6 +423,11 @@ func (v *fnVerifier) binaryExpr(e *ast.BinaryExpr, st *state, guard []*logic.Ter
 		}
 		return logic.Or(left, v.expr(e.Y, st, append(slices.Clip(guard), logic.Not(left))))
 	}
+	if t := v.info.TypeOf(e.X); isArray(t) {
+		// Two arrays are equal when their elements are; see binary.
+		left := v.eval(e.X, st, guard)[0]
+		return v.binary(e.Op, left, v.evalAs(e.Y, t, st, guard)[0], v.info.TypeOf(e), e.OpPos, st, guard)
+	}
 	left := v.expr(e.X, st, guard)
 	return v.binary(e.Op, left, v.expr(e.Y, st, guard), v.info.TypeOf(e), e.OpPos, st, guard)
 }
@@ -444,11 +451,28 @@ func (v *fnVerifier) indexExpr(e *ast.IndexExpr, st *state, guard []*logic.Term)
 		char := logic.Select(text, index)
 		st.assume(logic.Implies(logic.And(guard...), v.typeFact(char, v.info.TypeOf(e))))
 		return value{char}
+	case isArray(t) && v.memArray(e.X):
+		// An element of an array in memory is an element of the slice of
+		// the whole array.
+		start := v.unit.start()
+		header, index := v.arrayHeader(e.X, st, guard), v.expr(e.Index, st, guard)
+		v.checkIndex(st, guard, header[2], index, e.Pos())
+		slice := types.NewSlice(t.Underlying().(*types.Array).Elem())
+		return v.readAt(st, guard, start, types.ExprString(e), e.Pos(), func(sink *state, mem memory) value {
+			element, _ := v.element(sink, mem, header, slice, index)
+			return element
+		})
+	case isArray(t):
+		array, index := v.eval(e.X, st, guard)[0], v.expr(e.Index, st, guard)
+		v.checkIndex(st, guard, logic.IntLit(arrayLen(t)), index, e.Pos())
+		element := logic.Select(array, index)
+		st.assume(logic.Implies(logic.And(guard...), v.typeFact(element, v.info.TypeOf(e))))
+		return value{element}
 	case isSlice(t):
 		start := v.unit.start()
 		header, index := v.eval(e.X, st, guard), v.expr(e.Index, st, guard)
 		v.checkIndex(st, guard, header[2], index, e.Pos())
-		if _, ok := layoutOf(elemType(t)); !ok {
+		if _, ok := fieldLayout(elemType(t)); !ok {
 			break
 		}
 		return v.readAt(st, guard, start, types.ExprString(e), e.Pos(), func(sink *state, mem memory) value {
@@ -468,10 +492,18 @@ func (v *fnVerifier) sliceExpr(e *ast.SliceExpr, st *state, guard []*logic.Term)
 	if isString(t) {
 		return value{v.substring(e, st, guard)}
 	}
-	if !isSlice(t) {
+	var header value
+	switch {
+	case isArray(t) && v.memArray(e.X):
+		// Slicing an array takes its address, so the array lies in
+		// memory (findBoxed); the slice is one of its run of cells.
+		header = v.arrayHeader(e.X, st, guard)
+		t = types.NewSlice(t.Underlying().(*types.Array).Elem())
+	case !isSlice(t):
 		v.unsupported(e.Pos(), fmt.Sprintf("slicing a %s is not supported", t))
+	default:
+		header = v.eval(e.X, st, guard)
 	}
-	header := v.eval(e.X, st, guard)
 	bound := func(e ast.Expr, missing *logic.Term) *logic.Term {
 		if e == nil {
 			return missing
@@ -482,6 +514,28 @@ func (v *fnVerifier) sliceExpr(e *ast.SliceExpr, st *state, guard []*logic.Term)
 	within := logic.And(logic.Le(logic.IntLit(0), lo), logic.Le(lo, hi), logic.Le(hi, limit), logic.Le(limit, header[3]))
 	v.check(st, guard, within, e.Pos(), "slice bounds may be out of range")
 	return value{header[0], v.elementAt(header, t, lo), logic.Sub(hi, lo), logic.Sub(limit, lo)}
+}
+
+// memArray reports whether an array lies in memory, where a slice of it
+// can point: a local variable that the function slices or takes the
+// address of (findBoxed).
+func (v *fnVerifier) memArray(e ast.Expr) bool {
+	id, ok := ast.Unparen(e).(*ast.Ident)
+	if !ok {
+		return false
+	}
+	variable, ok := v.info.ObjectOf(id).(*types.Var)
+	return ok && v.boxed[variable]
+}
+
+// arrayHeader returns the slice of the whole of an array that lies in
+// memory: its allocation, the position of its first element, and its
+// length as length and capacity. Nothing is read.
+func (v *fnVerifier) arrayHeader(e ast.Expr, st *state, guard []*logic.Term) value {
+	lv := v.lvalue(e, st, guard)
+	run := lv.cells[0]
+	n := logic.IntLit(run.run)
+	return value{lv.ref, run.start(lv.at), n, n}
 }
 
 // fields follows a path of field indices from a value. A step through a
@@ -549,8 +603,28 @@ func (v *fnVerifier) literal(e *ast.CompositeLit, t types.Type, st *state, guard
 			copy(val[lo:], field)
 		}
 		return val
+	case *types.Array:
+		// The zero array, with each element the literal gives stored at
+		// its index: the one its key names, or the one after the element
+		// before it.
+		array := zeroValue(t)[0]
+		next := int64(0)
+		for _, element := range e.Elts {
+			initial := element
+			if pair, keyed := element.(*ast.KeyValueExpr); keyed {
+				key, exact := constant.Int64Val(v.info.Types[pair.Key].Value)
+				if !exact {
+					v.unsupported(pair.Key.Pos(), "this index of an array literal is not supported")
+				}
+				next, initial = key, pair.Value
+			}
+			field := v.settled(st, guard, v.evalAs(initial, u.Elem(), st, guard), u.Elem())
+			array = logic.Store(array, logic.IntLit(next), field[0])
+			next++
+		}
+		return value{array}
 	case *types.Slice:
-		if _, ok := layoutOf(u.Elem()); !ok {
+		if _, ok := fieldLayout(u.Elem()); !ok {
 			v.unsupported(e.Pos(), fmt.Sprintf("slices of %s are not supported", u.Elem()))
 		}
 		var elements []value
@@ -658,7 +732,7 @@ func (v *fnVerifier) makeSlice(e *ast.CallExpr, st *state, guard []*logic.Term) 
 	if !isSlice(t) || len(e.Args) < 2 {
 		v.unsupported(e.Pos(), "make is only supported for slices with a length")
 	}
-	if _, ok := layoutOf(elemType(t)); !ok {
+	if _, ok := fieldLayout(elemType(t)); !ok {
 		v.unsupported(e.Pos(), fmt.Sprintf("slices of %s are not supported", elemType(t)))
 	}
 	length := v.expr(e.Args[1], st, guard)
@@ -708,6 +782,17 @@ func (v *fnVerifier) conversion(e *ast.CallExpr, st *state, guard []*logic.Term)
 		return v.readAt(st, guard, start, "the elements of "+types.ExprString(e.Args[0]), e.Pos(), func(sink *state, mem memory) value {
 			text, _ := v.view(sink, mem, header, from)
 			return value{text}
+		})
+	case isSlice(from) && isArray(to):
+		// [N]T(s) copies the first N elements of s, and panics when s
+		// has fewer.
+		start := v.unit.start()
+		header := v.eval(e.Args[0], st, guard)
+		n := logic.IntLit(arrayLen(to))
+		v.check(st, guard, logic.Le(n, header[2]), e.Pos(), "the conversion may panic: %s may be shorter than %s", types.ExprString(e.Args[0]), types.TypeString(to, types.RelativeTo(v.pass.Pkg)))
+		return v.readAt(st, guard, start, "the elements of "+types.ExprString(e.Args[0]), e.Pos(), func(sink *state, mem memory) value {
+			elements, _ := v.view(sink, mem, header, from)
+			return value{logic.Subseq(elements, logic.IntLit(0), n)}
 		})
 	case isString(from) && bytes(to):
 		// Go does not say how much capacity the new array has. The bytes go

@@ -838,6 +838,8 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 		return found.val[2], nil
 	case measured && found.constant == nil && isString(found.typ):
 		return logic.Len(found.val[0]), nil
+	case measured && found.constant == nil && isArray(found.typ):
+		return logic.IntLit(arrayLen(found.typ)), nil
 	case measured && found.constant == nil && isMap(found.typ):
 		return e.v.mapLen(found.sink, found.mem, found.typ, found.val[0]), nil
 	case measured && found.constant == nil && ownerLength(found.typ) != nil:
@@ -857,6 +859,14 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 		return logic.IfaceVal(found.val[0]), nil
 	}
 	if _, single := sortOf(found.typ); single {
+		return found.val[0], nil
+	}
+	if isArray(found.typ) {
+		// An array is the sequence of its elements, compared element by
+		// element; floats are not, since == of floats is not equality.
+		if found.val[0].Sort == logic.FloatSeq {
+			return nil, fmt.Errorf("%s is an array of floats, which a formula cannot compare or use as a whole; name its elements", spell(name, steps))
+		}
 		return found.val[0], nil
 	}
 	if object, isPointer := pointee(found.typ); isPointer {
@@ -1730,7 +1740,7 @@ func plan(t types.Type, steps []logic.Step, from *types.Package) ([]hop, types.T
 			if _, named := canonicalName(target); !named {
 				return nil, nil, fmt.Errorf("%s.(%s): %s is declared inside a function, and nothing tells it apart from another type there", spelled, step.Assert, step.Assert)
 			}
-			if _, ok := layoutOf(target); !ok {
+			if _, ok := layoutOf(target); !ok || holdsArrayValue(target) {
 				return nil, nil, fmt.Errorf("%s.(%s): values of %s are not supported", spelled, step.Assert, step.Assert)
 			}
 			hops = append(hops, hop{from: t, field: -1, assert: target})
@@ -1754,12 +1764,18 @@ func plan(t types.Type, steps []logic.Step, from *types.Package) ([]hop, types.T
 			case isSlice(t):
 				hops = append(hops, hop{from: t, field: -1, index: step.Index})
 				t = elemType(t)
-				if _, ok := layoutOf(t); !ok {
+				if _, ok := fieldLayout(t); !ok {
 					return nil, nil, fmt.Errorf("%s has type %s, which is not supported", spelled, t)
 				}
 			case isString(t):
 				hops = append(hops, hop{from: t, field: -1, index: step.Index})
 				t = types.Typ[types.Uint8]
+			case isArray(t):
+				if _, ok := layoutOf(t); !ok {
+					return nil, nil, fmt.Errorf("%s has type %s, which is not supported", spelled, t)
+				}
+				hops = append(hops, hop{from: t, field: -1, index: step.Index})
+				t = t.Underlying().(*types.Array).Elem()
 			default:
 				return nil, nil, fmt.Errorf("%s: a %s cannot be indexed", spelled, t)
 			}

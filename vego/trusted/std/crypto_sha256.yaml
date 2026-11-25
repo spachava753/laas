@@ -1,0 +1,14 @@
+# Contracts for package crypto/sha256 of the standard library.
+version: 1
+
+trusted:
+  crypto/sha256.Sum256:
+    reason: >-
+      Read from the source of Go 1.26.6 and 1.27.3, which is the same: it
+      makes a digest of its own (with BoringCrypto, a hash of its own), writes
+      data into it, which only reads data, and returns the checksum as an
+      array by value, whose length is that of its type. It writes nothing
+      that the caller can reach, does not panic, and allocates a fixed
+      amount whatever the length of data. Which bytes it returns is not
+      modelled.
+    modifies: []

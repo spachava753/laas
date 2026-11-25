@@ -1487,6 +1487,13 @@ func (b *sampler) add(t types.Type, to binding, depth int) {
 		}, depth+1)
 	case isSlice(t):
 		b.addSlice(t, to)
+	case isArray(t):
+		// An array whose elements are all alike, as those of a sample
+		// slice are.
+		elem := t.Underlying().(*types.Array).Elem()
+		if elemSort, _ := plainElem(elem); elemSort != logic.Float {
+			scalar([]*logic.Term{logic.Fill(logic.IntLit(arrayLen(t)), b.scalarOf(elem))})
+		}
 	case isMap(t):
 		b.addMap(t, to, depth)
 	case isString(t):
@@ -1585,7 +1592,7 @@ func (b *sampler) addStates(t types.Type, to binding) {
 // the formulas mention are offered as contents too.
 func (b *sampler) addSlice(t types.Type, to binding) {
 	elem := elemType(t)
-	leaves, ok := layoutOf(elem)
+	leaves, ok := fieldLayout(elem)
 	if !ok {
 		return
 	}

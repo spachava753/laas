@@ -3,6 +3,7 @@ package vego
 import (
 	"fmt"
 	"go/token"
+	"go/types"
 	"path/filepath"
 	"slices"
 
@@ -59,6 +60,14 @@ func (pv *pkgVerifier) viewOf(fn *funcInfo) *contractView {
 		pv.views = map[*funcInfo]*contractView{}
 	}
 	pv.views[fn] = view
+	if (fn.valueOf != nil || fn.methodOf != nil) && signatureHoldsArray(fn.obj.Type().(*types.Signature)) {
+		// Every call and every value of such a type would pass arrays
+		// through code no verified caller sees, which is not built.
+		view.problems = []string{"its signature takes or returns an array, and function types and methods of interfaces whose signatures hold arrays are not supported yet"}
+		view.cut = true
+		view.fn = blank(fn)
+		return view
+	}
 	own := fn.decl != nil && fn.trust == nil && fn.imported == nil && fn.valueOf == nil && fn.methodOf == nil && fn.annotated()
 	switch {
 	case own && fn.broken:
@@ -153,6 +162,19 @@ func (pv *pkgVerifier) viewOf(fn *funcInfo) *contractView {
 		view.fn = blank(fn)
 	}
 	return view
+}
+
+// signatureHoldsArray reports whether a parameter or a result of a
+// signature holds an array by value.
+func signatureHoldsArray(sig *types.Signature) bool {
+	for _, tuple := range []*types.Tuple{sig.Params(), sig.Results()} {
+		for variable := range tuple.Variables() {
+			if holdsArrayValue(variable.Type()) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // declaredHere reports whether a contract is that of a function type or of

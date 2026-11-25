@@ -103,14 +103,14 @@ func Sink() (r bool) {
 	return sink != nil // want `vego: cannot verify Sink: sink has type \*struct\{W io.Writer\}, which can hold a function value`
 }
 
-// buf is an array, which is not modelled.
+// buf is an array that nothing writes, so it holds its zero value.
 var buf [4]byte
 
 // Buf reads it.
 //
-// @Ensures True
+// @Ensures r = 0
 func Buf() (r byte) {
-	return buf[0] // want `vego: cannot verify Buf: indexing a \[4\]byte is not supported`
+	return buf[0]
 }
 
 // linked has no initialiser and nothing assigns it, but a directive gives

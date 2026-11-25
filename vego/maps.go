@@ -60,7 +60,7 @@ func keyPlaceholder(t types.Type) *logic.Term {
 // itself as its value type.
 func mapModelled(t types.Type) bool {
 	_, elem := mapParts(t)
-	_, ok := layoutOf(elem)
+	_, ok := fieldLayout(elem)
 	return ok && mapKeyed(t)
 }
 

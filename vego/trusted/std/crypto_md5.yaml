@@ -1,0 +1,13 @@
+# Contracts for package crypto/md5 of the standard library.
+version: 1
+
+trusted:
+  crypto/md5.Sum:
+    reason: >-
+      Read from the source of Go 1.26.6 and 1.27.3, which is the same: it
+      writes data into a digest that is a local variable, which only reads
+      data, and returns the checksum as an array by value, whose length is
+      that of its type. It writes nothing that the caller can reach, does
+      not panic, and allocates nothing that depends on the length of data.
+      Which bytes it returns is not modelled.
+    modifies: []

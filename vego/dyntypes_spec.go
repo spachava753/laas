@@ -520,6 +520,9 @@ func (e *specEnv) holdsPath(name string, steps []logic.Step, t *logic.TypeName, 
 	if !ok {
 		return nil, fmt.Errorf("holds(%s, %s): %s is declared inside a function, and nothing tells it apart from another type there", spell(name, steps), t, t)
 	}
+	if holdsArrayValue(target) {
+		return nil, fmt.Errorf("holds(%s, %s): %s holds an array, and an interface value or an error cannot hold an array yet", spell(name, steps), t, t)
+	}
 	ref, isNil := refOf(err2)
 	if err2.Sort != logic.Err {
 		e.v.meetDynamic(e.sink)

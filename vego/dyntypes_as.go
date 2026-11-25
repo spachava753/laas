@@ -194,8 +194,8 @@ func (v *fnVerifier) asTarget(call *ast.CallExpr, t types.Type, who string, take
 	if _, named := canonicalName(t); !named {
 		v.unsupported(call.Pos(), fmt.Sprintf("%s with a target of %s is not supported: it is declared inside a function, and nothing tells it apart from another type there", who, shown))
 	}
-	if _, ok := layoutOf(t); !ok {
-		v.unsupported(call.Pos(), fmt.Sprintf("%s with a target of %s is not supported: values of its type are not modelled", who, shown))
+	if why := heldReason(t); why != "" {
+		v.unsupported(call.Pos(), fmt.Sprintf("%s with a target of %s is not supported: %s", who, shown, why))
 	}
 	if why := reflectHeld(v.pass.Pkg, t, "", map[types.Type]bool{}); why != "" {
 		v.unsupported(call.Pos(), fmt.Sprintf("%s with a target of %s is not supported: %s", who, shown, why))

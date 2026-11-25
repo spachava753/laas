@@ -28,6 +28,11 @@ const (
 	// whether the calling goroutine holds a sync.Mutex; see stateDecl. No Go
 	// code can read or write it.
 	partState
+	// partArray is an array of single values that refer to nothing (see
+	// plainElem): a sequence of its length, whose element k is element k
+	// of the array. It is not a single value, so nothing that takes a
+	// sequence leaf for a string takes it for one.
+	partArray
 )
 
 // leaf is one indivisible component of a Go value. A number, a boolean, a
@@ -175,6 +180,10 @@ func layoutOf(t types.Type) ([]leaf, bool) {
 		if isFunc(t) {
 			return one(logic.Ref)
 		}
+	case *types.Array:
+		if sort, ok := plainElem(u.Elem()); ok {
+			return []leaf{{sort: logic.SeqOf(sort), typ: t, part: partArray}}, true
+		}
 	case *types.Slice:
 		return []leaf{
 			{"#ref", logic.Ref, t, partRef}, {"#off", logic.Int, t, partOff},
@@ -187,7 +196,7 @@ func layoutOf(t types.Type) ([]leaf, bool) {
 		var leaves []leaf
 		for i := range u.NumFields() {
 			field := u.Field(i)
-			inner, ok := layoutOf(field.Type())
+			inner, ok := fieldLayout(field.Type())
 			if field.Name() == "_" {
 				continue
 			}
@@ -207,6 +216,78 @@ func layoutOf(t types.Type) ([]leaf, bool) {
 		return leaves, true
 	}
 	return nil, false
+}
+
+// plainElem reports whether values of a type can be the elements of an
+// array that is modelled, and gives their sort: numbers and booleans, which
+// are single values that refer to nothing and hold no state. An array of
+// anything else is not modelled.
+func plainElem(t types.Type) (logic.Sort, bool) {
+	u, ok := t.Underlying().(*types.Basic)
+	if !ok {
+		return 0, false
+	}
+	switch info := u.Info(); {
+	case info&types.IsInteger != 0 && u.Kind() != types.Uintptr:
+		return logic.Int, true
+	case info&types.IsBoolean != 0:
+		return logic.Bool, true
+	case info&types.IsFloat != 0:
+		return logic.Float, true
+	}
+	return 0, false
+}
+
+// isArray reports whether a type is an array type.
+func isArray(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	_, ok := t.Underlying().(*types.Array)
+	return ok
+}
+
+// arrayLen returns the length of an array type.
+func arrayLen(t types.Type) int64 { return t.Underlying().(*types.Array).Len() }
+
+// fieldLayout is layoutOf for the type of a struct field, of the element
+// of a slice, or of what a map holds: an array there is not modelled yet,
+// since only arrays that are values or lie in an allocation of their own
+// are.
+func fieldLayout(t types.Type) ([]leaf, bool) {
+	if isArray(t) {
+		return nil, false
+	}
+	return layoutOf(t)
+}
+
+// holdsArrayValue reports whether a value of the type is an array or holds
+// one by value, in a field at any depth through structs.
+func holdsArrayValue(t types.Type) bool {
+	switch u := t.Underlying().(type) {
+	case *types.Array:
+		return true
+	case *types.Struct:
+		for field := range u.Fields() {
+			if field.Name() != "_" && holdsArrayValue(field.Type()) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// heldReason says why an interface value or an error cannot hold a value
+// of a type, or returns "": its values are not modelled, or it holds an
+// array, which no interface value is modelled to hold yet.
+func heldReason(t types.Type) string {
+	if _, ok := layoutOf(t); !ok {
+		return "values of its type are not modelled"
+	}
+	if holdsArrayValue(t) {
+		return "an interface value or an error cannot hold an array yet"
+	}
+	return ""
 }
 
 // holdsArray reports whether a value of the type has an array with elements
@@ -248,7 +329,7 @@ func sortOf(t types.Type) (logic.Sort, bool) {
 func fieldLeaves(t types.Type, index int) (lo, hi int, ok bool) {
 	u := t.Underlying().(*types.Struct)
 	for i := range u.NumFields() {
-		inner, modelled := layoutOf(u.Field(i).Type())
+		inner, modelled := fieldLayout(u.Field(i).Type())
 		switch {
 		case u.Field(i).Name() == "_" && i == index:
 			return 0, 0, false
@@ -278,17 +359,58 @@ func fieldLeaves(t types.Type, index int) (lo, hi int, ok bool) {
 // slice, lies in the region of its type at offset zero. Go's types guarantee
 // that a piece of memory is only ever used at one type, so no two regions
 // describe the same memory.
+//
+// An array lies in a run of cells, one for each element, in the region of
+// its element type, the region the elements of a slice of that type use:
+// run is its length. Element k of an array at byte A of its allocation is
+// at position ⌊A/unit⌋ + k, where unit is the size of the element; see
+// start. A cell that is not a run has run 0 and unit 0.
 type cell struct {
 	key  string
 	sort logic.Sort
 	off  int64
+	run  int64
+	unit int64
 }
+
+// start returns the position of a cell of a value stored at position at:
+// the cell itself, or the first element of a run.
+func (c cell) start(at *logic.Term) *logic.Term {
+	if !c.isRun() {
+		return logic.Add(at, logic.IntLit(c.off))
+	}
+	// An array of its own starts at a known position.
+	if at.Op == logic.OpIntLit && at.Big == nil {
+		return logic.IntLit((at.Val + c.off) / max(c.unit, 1))
+	}
+	pos := logic.Add(at, logic.IntLit(c.off))
+	if c.unit > 1 {
+		pos = logic.Div(pos, logic.IntLit(c.unit))
+	}
+	return pos
+}
+
+// end returns the position after the last one a cell covers.
+func (c cell) end(at *logic.Term) *logic.Term {
+	if !c.isRun() {
+		return logic.Add(at, logic.IntLit(c.off+1))
+	}
+	return logic.Add(c.start(at), logic.IntLit(c.run))
+}
+
+// isRun reports whether a cell is the run of an array.
+func (c cell) isRun() bool { return c.unit > 0 }
 
 // cellsOf returns the cells of the leaves of a type, in the order of
 // layoutOf.
 func (pv *pkgVerifier) cellsOf(t types.Type) []cell {
 	u, isStruct := t.Underlying().(*types.Struct)
 	leaves, _ := layoutOf(t)
+	if array, ok := t.Underlying().(*types.Array); ok {
+		elem := pv.cellsOf(array.Elem())[0]
+		elem.run, elem.unit = array.Len(), pv.pass.TypesSizes.Sizeof(array.Elem())
+		return []cell{elem}
+	}
 	if !isStruct {
 		cells := make([]cell, len(leaves))
 		for i, lf := range leaves {
@@ -300,7 +422,7 @@ func (pv *pkgVerifier) cellsOf(t types.Type) []cell {
 	offsets := pv.pass.TypesSizes.Offsetsof(fields)
 	var cells []cell
 	for i, field := range fields {
-		inner, ok := layoutOf(field.Type())
+		inner, ok := fieldLayout(field.Type())
 		if field.Name() == "_" {
 			continue
 		}
@@ -371,6 +493,10 @@ func (pv *pkgVerifier) fieldOffset(t types.Type, index int) int64 {
 // zeroLeaf returns the zero value of one leaf.
 func zeroLeaf(lf leaf) *logic.Term {
 	switch {
+	case lf.part == partArray:
+		array := lf.typ.Underlying().(*types.Array)
+		elem := mustLayout(array.Elem())[0]
+		return logic.Fill(logic.IntLit(array.Len()), zeroLeaf(elem))
 	case lf.sort == logic.Ref:
 		return logic.RefLit(0)
 	case lf.sort == logic.Int:
@@ -432,6 +558,11 @@ func (pv *pkgVerifier) wellFormed(val value, t types.Type, brk *logic.Term) *log
 				logic.Le(end, logic.BigLit(pv.maxAlloc())), pv.typeFact(capacity, types.Typ[types.Int]))
 		case lf.part == partPtr:
 			facts = append(facts, exists(val[i]), logic.Le(zero, val[i+1]), logic.Le(val[i+1], logic.BigLit(pv.maxAlloc())))
+		case lf.part == partArray:
+			// An array has the length of its type. What the type of its
+			// elements says of each is stated where an element is read,
+			// as for the bytes of a string.
+			facts = append(facts, logic.Eq(logic.Len(val[i]), logic.IntLit(arrayLen(lf.typ))))
 		case lf.part != partValue:
 		case lf.sort == logic.Ref && isIface(lf.typ):
 			// The reference of an interface value is not the address of

@@ -68,6 +68,8 @@ func (pv *pkgVerifier) boxedWhy(variable *types.Var) string {
 			"so it cannot be verified", spelled, pv.changeOf[variable])
 	case isError(t):
 		return fmt.Sprintf("%s %s; package-level error variables that are changed are not supported yet", spelled, pv.ownChanges[variable])
+	case holdsArrayValue(t):
+		return fmt.Sprintf("%s %s; package-level arrays that are changed or sliced are not supported yet", spelled, pv.addressAt(variable))
 	case !isStructType(t):
 		return fmt.Sprintf("%s %s; only a package-level variable of a struct type may have its address taken, since pointers to anything "+
 			"but a struct are not supported yet", spelled, pv.addressAt(variable))
