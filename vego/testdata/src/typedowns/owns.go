@@ -111,7 +111,7 @@ func Beside(w io.Writer, err error) {
 	switch pe := err.(type) {
 	case *PE:
 		if pe != nil {
-			write(w, pe) // want `the footprint of what is passed to write as w may hold memory that what is passed as pe reaches, and write relies on it not doing so: it comes from a type assertion` `write may modify pe, which Beside may not modify`
+			write(w, pe) // want `the footprint of what is passed to write as w may hold memory that what is passed as pe reaches, and write relies on it not doing so: it comes from a type assertion` `write may modify pe, which Beside may not modify; it is memory that a pointer taken out of an error points to, and a // @Modifies clause cannot name memory reached through an assertion`
 		}
 	}
 }

@@ -1181,6 +1181,13 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 		if variable := v.fixedRefs[w.ref.Name]; remedy == "" && w.ref.Op == logic.OpConst && variable != "" {
 			remedy = fmt.Sprintf("it is memory that the package-level variable %s refers to; list %s in a // @Modifies clause", variable, variable)
 		}
+		// Memory that a pointer taken out of an interface value points to
+		// cannot be named by a Modifies clause (F21 of the review of the
+		// guide step of F34).
+		if from := heldPointer(w.ref); remedy == "" && len(listed) == 0 && from != "" {
+			remedy = fmt.Sprintf("it is memory that a pointer taken out of %s points to, and a // @Modifies clause cannot name memory reached through an assertion; "+
+				"such a pointer can be written only where it points to memory %s made; to write memory of the caller, take the pointer as a parameter of its own type and list it", from, v.fn.obj.Name())
+		}
 		// Memory that a function returned without saying that it is new
 		// may have existed when the function was called, as what
 		// bufio.NewWriter returns when it is given a large enough Writer.
@@ -1656,4 +1663,23 @@ func (v *fnVerifier) distinctStructs(sink *state, known *layer, key string, ref,
 			v.statePairs(sink, *v.readBase, converted, true)
 		}
 	}
+}
+
+// heldPointer says whether a reference is read from what an interface
+// value or an error holds, directly or in a branch of a choice, as the
+// form with two results gives it: "an error", "an interface value", or "".
+func heldPointer(t *logic.Term) string {
+	switch {
+	case t.Op == logic.OpSelect && t.Args[0].Op == logic.OpConst && strings.HasPrefix(t.Args[0].Name, "held "):
+		if t.Args[1].Op == logic.OpErrRef {
+			return "an error"
+		}
+		return "an interface value"
+	case t.Op == logic.OpIte:
+		if from := heldPointer(t.Args[1]); from != "" {
+			return from
+		}
+		return heldPointer(t.Args[2])
+	}
+	return ""
 }

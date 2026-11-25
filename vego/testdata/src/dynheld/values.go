@@ -172,3 +172,13 @@ func PointsLen(v any) (n int) {
 func TwoPoints() (n int) {
 	return PointsLen([]*Point{{X: 1}, nil})
 }
+
+// A pointer taken out of a value the function made writes that memory.
+//
+// @Ensures r = 5
+func WritesMade() (r int) {
+	p := &Point{}
+	var v any = p
+	v.(*Point).X = 5
+	return p.X
+}

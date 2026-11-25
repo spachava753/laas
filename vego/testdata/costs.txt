@@ -838,6 +838,7 @@ dynheld	dynheld.TwoValuesSwapped	5	6373	0
 dynheld	dynheld.Undescribed	5	4210	0
 dynheld	dynheld.Width	4	1614	0
 dynheld	dynheld.WriteThrough	5	3446	0
+dynheld	dynheld.WritesMade	7	4429	0
 dynheld	dynheld.WrongElement	5	8620	0
 dynheld	dynheld.WrongField	4	5078	0
 dynheld	dynheld.WrongSlice	3	2296	0
@@ -2572,6 +2573,7 @@ guide	guide.OpenThenCloseTwice	26	127021	0
 guide	guide.Option	3	2393	0
 guide	guide.Overwrite	8	9212	0
 guide	guide.Overwritten	28	136890	0
+guide	guide.OwnPriced	1	46	0
 guide	guide.Pack	9	5975	0
 guide	guide.Pad	13	21314	0
 guide	guide.Pages	4	1561	0
@@ -2657,6 +2659,8 @@ guide	guide.ServeRow	41	545792	10
 guide	guide.Served	1	46	0
 guide	guide.Service	1	917	0
 guide	guide.SetBelow	10	15773	0
+guide	guide.SetDial	5	3446	0
+guide	guide.SetDialOf	6	1615	0
 guide	guide.SetMax	7	5364	0
 guide	guide.SetServed	5	3144	0
 guide	guide.SetSize	7	2744	0

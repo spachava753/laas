@@ -1711,7 +1711,7 @@ A value of any type that `vego` supports can be converted to `any`. An `any` can
 
 ### Asking what an interface value holds
 
-A type assertion and a type switch take a value of a concrete type out of an interface value, as they do out of an error. A formula says what a value holds with `holds(x, T)`, and names the value it holds with `x.(T)`, which means something only where `holds(x, T)` is true:
+A type assertion and a type switch take a value of a concrete type out of an interface value, as they do out of an error. A formula says what a value holds with `holds(x, T)`, and names the value it holds with `x.(T)`. The second means something only where the first is true:
 
 ```go
 // @Ensures holds(v, int) -> n = v.(int)
@@ -1741,7 +1741,7 @@ func MustSize(v any) (n int) {
 vego: the type assertion v.(int) may panic: v may not hold an int; use the form v, ok := v.(int), or show that it holds one, as a contract does with holds(x, T)
 ```
 
-A value taken out of an interface value may have been made by code that is not verified. So `vego` refuses to take out a value of a type that holds a function value of a type with a contract, or an interface value with a method that has one. Nothing claims that such a value meets its contract:
+A value taken out of an interface value may have been made by code that is not verified. So `vego` refuses to take out a value of a type that holds a function value of a type with a contract, or an interface value with a method that has one. Nothing claims that such a value meets its contract. The refusal also applies where the function converted the value itself, as `var v any = Priced{}` before the assertion, since `vego` does not follow which conversion an interface value came from:
 
 ```go
 // Priced holds a Pricer, whose method has a contract.
@@ -1759,7 +1759,35 @@ func PricedOf(v any) (ok bool) {
 vego: cannot verify PricedOf: asserting an interface value to Priced is not supported: it holds in field P a value of type Pricer, whose method Price has a contract, and nothing claims that a value taken out of an interface value meets that contract: code that is not verified may have made it
 ```
 
-The forms that only ask whether the value holds one are supported: `_, ok := v.(Priced)`, and a case of `Priced` whose clause does not use its variable. A pointer taken out of an interface value may point to any memory, so a write through it must be listed in `Modifies`, as for a pointer read from memory.
+The forms that only ask whether the value holds one are supported: `_, ok := v.(Priced)`, and a case of `Priced` whose clause does not use its variable.
+
+A pointer taken out of an interface value may point to memory of the caller, and a `Modifies` clause cannot name memory reached through an assertion. A write through such a pointer is accepted only where it points to memory the function made:
+
+```go
+// Dial holds a number.
+type Dial struct{ N int }
+
+// @Requires holds(v, *Dial) And v.(*Dial) != nil
+// @Ensures True
+func SetDial(v any) {
+	v.(*Dial).N = 1
+}
+```
+
+```text
+vego: v.(*Dial).N is assigned, which SetDial may not modify; it is memory that a pointer taken out of an interface value points to, and a // @Modifies clause cannot name memory reached through an assertion; such a pointer can be written only where it points to memory SetDial made; to write memory of the caller, take the pointer as a parameter of its own type and list it
+```
+
+Take the pointer as a parameter of its own type instead:
+
+```go
+// @Requires b != nil
+// @Modifies b
+// @Ensures b.N' = 1
+func SetDialOf(b *Dial) {
+	b.N = 1
+}
+```
 
 An assertion to an interface type, and a case of one, tell whether the value holds a value that implements it:
 
@@ -1793,7 +1821,7 @@ func Label(v any) (n int) {
 ```
 
 ```text
-vego: cannot verify Label: using the value of v.(fmt.Stringer) is not supported: fmt.Stringer has the method String, which any does not have, so the value held may be one verified code made without checking it against fmt.Stringer, ...
+vego: cannot verify Label: using the value of v.(fmt.Stringer) is not supported: fmt.Stringer has the method String, which any does not have, so the value held may be one verified code made without checking it against fmt.Stringer, and code it is handed could call String under no contract; write it as _, ok := v.(fmt.Stringer), or as a case of fmt.Stringer whose clause does not use its variable; checking each conversion against the interfaces of trust entries, which would lift this for them, is not built yet
 ```
 
 Write `_, ok := v.(fmt.Stringer)` instead, or a case of `fmt.Stringer` whose clause does not use its variable.
@@ -1837,7 +1865,7 @@ func TwoConversions(p *Link) (a, b any) {
 ```
 
 ```text
-vego: in Ensures annotation: a != b between two interface values that are not nil is not supported: = says that they are the same value, copied from one another, and not Go's ==, so its negation says nothing that code can observe; ...
+vego: in Ensures annotation: a != b between two interface values that are not nil is not supported: = says that they are the same value, copied from one another, and not Go's ==, so its negation says nothing that code can observe; to say what Go's == says, state what they hold, as in holds(a, T) And holds(b, T) And a.(T) != b.(T)
 ```
 
 `~(a = b)` written directly is refused the same way. A negation elsewhere is not refused, and `=` keeps its meaning there: `(a = b) -> False` says that `a` and `b` are not the same value, and a function that returns `any(p), any(p)` proves it.
@@ -9236,6 +9264,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - in a formula, `!=` between two interface values that are not nil, and `~(a = b)` of them (see [Comparing interface values](#comparing-interface-values));
 - using the value of a type assertion or a case to an interface type whose methods the operand's type does not have, unless the operand is an error and no method of the target but `Error` has a contract or a state; `error` as such a target of a value that is not an error; and an interface type declared inside a function as a target;
 - `errors.As` and `errors.AsType` with a target of an interface type (see [Asking what an error holds](#asking-what-an-error-holds));
+- writing, through a pointer taken out of an interface value or an error, memory that the function did not make, since no `Modifies` clause names memory reached through an assertion (see [Asking what an interface value holds](#asking-what-an-interface-value-holds));
 - taking out of an error or another interface value, by an assertion, a case of a type switch whose clause uses its variable, or `errors.As`, a value of a type that holds a function value of a type with a contract or an interface value with a method that has one, or that is a function type with a contract (see [Asking what an interface value holds](#asking-what-an-interface-value-holds));
 - converting to an interface with states a pointer to a value of size zero, a pointer to a struct whose first field has states of its own, a pointer whose method that changes a state has a value receiver beside one with a pointer receiver or does not list its receiver in `Modifies`, or a value that is not a pointer whose method that changes a state is trusted; and copying a struct whose states trusted methods change, such as an `os.File` (see [The states of what a pointer points to](#the-states-of-what-a-pointer-points-to));
 - errors of your own types whose methods do what code that is not verified could not account for (see [What the methods of the type may do](#what-the-methods-of-the-type-may-do)), and errors of types with `Unwrap`, `Is`, `As`, `Format`, or `GoString` methods formatted, wrapped, or searched (see [Formatting and wrapping errors of your own types](#formatting-and-wrapping-errors-of-your-own-types));

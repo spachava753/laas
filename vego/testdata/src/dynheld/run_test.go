@@ -85,6 +85,9 @@ func TestRefusedWouldFail(t *testing.T) {
 	if Rewritten() != 1 || RewrittenHonest() != 1 || WrongElement([]any{5, 1}) != 5 || WrongSlice([]byte("a")) != 1 {
 		t.Error("Rewritten, WrongElement, or WrongSlice")
 	}
+	if WritesMade() != 5 {
+		t.Error("WritesMade")
+	}
 	if n, k := TwoBytes(); n != 3 || k != 3 || BytesLen("abc") != -1 || Classify([]byte("x")) != 3 || TwoPoints() != 2 {
 		t.Error("TwoBytes, BytesLen, or Classify of a []byte")
 	}

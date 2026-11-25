@@ -35,6 +35,33 @@ func PricedOf(v any) (ok bool) {
 	return ok
 }
 
+// Dial holds a number.
+type Dial struct{ N int }
+
+// @Requires holds(v, *Dial) And v.(*Dial) != nil
+// @Ensures True
+func SetDial(v any) {
+	v.(*Dial).N = 1 // want `vego: v.\(\*Dial\).N is assigned, which SetDial may not modify; it is memory that a pointer taken out of an interface value points to, and a // @Modifies clause cannot name memory reached through an assertion; such a pointer can be written only where it points to memory SetDial made; to write memory of the caller, take the pointer as a parameter of its own type and list it`
+}
+
+// @Requires b != nil
+// @Modifies b
+// @Ensures b.N' = 1
+func SetDialOf(b *Dial) {
+	b.N = 1
+}
+
+// A struct that holds a Pricer cannot be taken out of a value the function
+// converted either.
+//
+// @Ensures True
+func OwnPriced() (ok bool) {
+	var v any = Priced{}
+	p, ok := v.(Priced) // want `vego: cannot verify OwnPriced: asserting an interface value to Priced is not supported: it holds in field P a value of type Pricer, whose method Price has a contract`
+	_ = p
+	return ok
+}
+
 // Assertions to interface types (S2 of F34).
 
 // @Ensures ok And ~ok2

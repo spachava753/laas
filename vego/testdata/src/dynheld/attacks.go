@@ -73,13 +73,14 @@ func Instances() (ok bool) {
 	return ok
 }
 
-// A pointer taken out writes memory the function must list.
+// A pointer taken out may point to memory of the caller, which no
+// Modifies clause can name (F21 of the review of the guide step).
 //
 // @Requires holds(v, *Point) And v.(*Point) != nil
 // @Ensures True
 func WriteThrough(v any) {
 	p := v.(*Point)
-	p.X = 1 // want `p.X is assigned, which WriteThrough may not modify`
+	p.X = 1 // want `p.X is assigned, which WriteThrough may not modify; it is memory that a pointer taken out of an interface value points to, and a // @Modifies clause cannot name memory reached through an assertion; such a pointer can be written only where it points to memory WriteThrough made`
 }
 
 // What a value taken out reaches is not known apart from what the other
