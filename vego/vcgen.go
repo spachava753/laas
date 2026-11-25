@@ -393,7 +393,16 @@ func (v *fnVerifier) enter() *state {
 			continue
 		}
 		if !ok {
-			v.unsupported(param.Pos(), fmt.Sprintf("parameter %s has unsupported type %s%s", param.Name(), param.Type(), unsupportedHint(param.Type())))
+			// A receiver or a parameter without a name is still named in
+			// the message, which would otherwise read "parameter  has".
+			what := "parameter " + param.Name()
+			if param.Name() == "" {
+				what = "a parameter without a name"
+				if fn.obj != nil && fn.obj.Type().(*types.Signature).Recv() == param {
+					what = "the receiver, which has no name,"
+				}
+			}
+			v.unsupported(param.Pos(), fmt.Sprintf("%s has unsupported type %s%s", what, param.Type(), unsupportedHint(param.Type())))
 		}
 		// Every parameter is its own unknown, including blank ones, which
 		// all share the name "_".

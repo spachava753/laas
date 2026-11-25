@@ -5650,6 +5650,7 @@ typederrors	typederrors.the initialiser of ErrEmpty	0	0	0
 typederrors	typederrors.the initialiser of ErrVar	0	0	0
 typederrors	typederrors.the initialiser of hook	0	0	0
 typederrorsbad	(*typederrorsbad.Empty).Error	1	182	0
+typederrorsbad	(typederrorsbad.AE).Error	0	0	0
 typederrorsbad	(typederrorsbad.B).Error	1	107	0
 typederrorsbad	(typederrorsbad.Error).Error	1	111	0
 typederrorsbad	(typederrorsbad.FErr).Error	1	46	0

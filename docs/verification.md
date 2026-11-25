@@ -5415,7 +5415,7 @@ func CheckBytes(s []byte) (err error) {
 }
 ```
 
-`vego` knows that such an error is not `nil` and which value it holds. Two such errors are equal when they hold equal values of one type. This holds for integer, string, boolean, and pointer types, and for arrays and structs of these. It does not hold for a pointer to a value of size zero, since two such pointers may or may not be equal. For other types, such as a type of floats, `=` in a formula says only that one error was copied from the other, and `==` in code is refused, as described in [Comparing errors](#comparing-errors).
+`vego` knows that such an error is not `nil` and which value it holds. Two such errors are equal when they hold equal values of one type. This holds for integer, string, boolean, and pointer types, and for structs of these. It does not hold for a pointer to a value of size zero, since two such pointers may or may not be equal. For other types, such as a type of floats, `=` in a formula says only that one error was copied from the other, and `==` in code is refused, as described in [Comparing errors](#comparing-errors).
 
 #### Saying what an error holds
 
@@ -5578,7 +5578,7 @@ These are reported at the conversion too, each with what to change:
 
 An error of your own type has a known origin, as described in [Wrapping errors](#wrapping-errors), when its type meets all of these conditions:
 
-- `==` on it reports whether two values are the same: an integer, string, boolean, or pointer type, or a struct of these;
+- `==` on it reports whether two values are the same: an integer, string, boolean, or pointer type, or a struct of these, but not a pointer to a value of size zero;
 - it has no `Unwrap`, `Is`, `As`, `Format`, or `GoString` method, which `errors.Is`, `errors.As`, and `fmt` would run;
 - its `Error` method has a contract;
 - what it holds can be formatted, since `fmt` prints the value instead of calling `Error` for verbs such as `%d`.
@@ -9144,7 +9144,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `ErrEmpty`, `io.EOF` | an error variable of the package, or of an imported package |
 | `limit`, `lib.Limit`, `table[i]` | in the contract of a verified function, a package-level variable that nothing changes, of the package or of an imported package |
 | `"io/fs".ErrNotExist` | in a trusted contract, an error variable named by the path of its package |
-| `err = ErrEmpty` | the two are the same error; for errors that hold values of integer, string, boolean, or pointer types, or arrays and structs of these, what `==` reports in Go |
+| `err = ErrEmpty` | the two are the same error; for errors that hold values of integer, string, boolean, or pointer types, or structs of these, what `==` reports in Go |
 | `err = ByteError(s[k])`, `err = ErrBadDigit` | `err` holds the value converted to the error type, as Go converts it; a conversion of a constant of the type, or of a value whose Go type fits it |
 | `holds(err, *LineError)` | `err` is not nil and holds a value of that type, as `_, ok := err.(*LineError)` reports |
 | `err.(*LineError).Line` | the value `err` holds, with its fields; it means something only where `holds(err, *LineError)` is true |
