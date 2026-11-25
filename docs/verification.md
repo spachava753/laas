@@ -2316,7 +2316,7 @@ A proof obligation that stops at a limit draws a message with the note. So does 
 A frame that stops at its limit draws no message. `vego` then proves the invariant as it would without the frame. When that proof stops at its limit too, the function counts a frame and a proof obligation at the same place. For `DropThenAnswer` in [What keeps it between boundaries](#what-keeps-it-between-boundaries), in a file `kept.go`, it prints:
 
 ```text
-kept.go:153:6: vego cost of DropThenAnswer: 22 problems, 6922295 resource units, 1145862 bytes, 1.75 s
+kept.go:153:6: vego cost of DropThenAnswer: 21 problems, 6871655 resource units, 1107347 bytes, 1.89 s
 	kept.go:155:2: 2 contradiction checks stopped at a limit
 	kept.go:155:2: 1 question that names what a frame lost stopped at a limit
 	kept.go:156:1: 1 proof obligation stopped at a limit

@@ -264,9 +264,13 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 		covered := coveredType(fn, m)
 		if err == nil && t.row && covered != nil {
 			// Each state the value is known to have gets a value that Z3
-			// chooses.
+			// chooses, at the key of its states.
+			at := t.ref
+			if t.fp {
+				at = t.skey
+			}
 			for _, state := range v.ifaceStatesOf(covered) {
-				v.put(st, []cell{stateCell}, t.ref, state.position(), value{v.fresh("out", logic.Bool)})
+				v.put(st, []cell{stateCell}, at, state.position(), value{v.fresh("out", logic.Bool)})
 			}
 			continue
 		}
@@ -523,9 +527,12 @@ func freeHomeReads(facts []*logic.Term, limit int) []*logic.Term {
 	return found
 }
 
-// isHomeRead reports whether a term reads the table of homes.
+// isHomeRead reports whether a term reads the table of homes, or that of
+// the keys of states: a produced value is given one new row, its home and
+// the key of its states alike (S0b of F34).
 func isHomeRead(t *logic.Term) bool {
-	return t.Op == logic.OpSelect && t.Args[0].Op == logic.OpConst && t.Args[0].Name == homes.Name
+	_, read := isKeyRead(t)
+	return read
 }
 
 // isZeroRef reports whether a term is the reference 0.
@@ -612,7 +619,8 @@ func liftHomes(t *logic.Term, memo map[*logic.Term]*logic.Term) *logic.Term {
 	switch {
 	case isHomeRead(result) && result.Args[1].Op == logic.OpIte:
 		choice := result.Args[1]
-		result = logic.Ite(choice.Args[0], liftHomes(home(choice.Args[1]), memo), liftHomes(home(choice.Args[2]), memo))
+		table := result.Args[0]
+		result = logic.Ite(choice.Args[0], liftHomes(logic.Select(table, choice.Args[1]), memo), liftHomes(logic.Select(table, choice.Args[2]), memo))
 	case result.Op == logic.OpEq && result.Args[0].Sort == logic.Ref && result.Args[0].Op == logic.OpIte:
 		choice := result.Args[0]
 		result = logic.Ite(choice.Args[0], liftHomes(logic.Eq(choice.Args[1], result.Args[1]), memo), liftHomes(logic.Eq(choice.Args[2], result.Args[1]), memo))
@@ -632,8 +640,7 @@ func replaceHomes(t *logic.Term, by map[string]*logic.Term, memo map[*logic.Term
 	}
 	result := t
 	switch {
-	case t.Op == logic.OpSelect && t.Args[0].Op == logic.OpConst && t.Args[0].Name == homes.Name &&
-		t.Args[1].Op == logic.OpConst && by[t.Args[1].Name] != nil:
+	case isHomeRead(t) && t.Args[1].Op == logic.OpConst && by[t.Args[1].Name] != nil:
 		result = by[t.Args[1].Name]
 	case len(t.Args) > 0:
 		args := make([]*logic.Term, len(t.Args))

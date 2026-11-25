@@ -475,7 +475,7 @@ func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur va
 	converted := rhs != nil && isIface(t) && !isIface(v.info.TypeOf(rhs))
 	if isIface(t) {
 		if converted || rhs != nil && v.allocates(rhs) || call != nil && call.keepsNot && !call.verified && !v.targetsHoldReferences(call.fn) {
-			options = append(options, logic.And(logic.Le(before, home(val[0])), v.rowNewOrIn(st.mem, home(val[0]), before, nil, nil)))
+			options = append(options, logic.And(logic.Le(before, home(val[0])), logic.Le(before, skey(val[0])), v.rowNewOrIn(st.mem, home(val[0]), before, nil, nil)))
 		}
 	} else if rhs != nil && v.allocates(rhs) || call != nil && call.keepsNot && !call.verified && !v.targetsHoldReferences(call.fn) {
 		options = append(options, ownedMadeSince(val, before))
@@ -491,7 +491,7 @@ func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur va
 			// A value converted from new memory nothing else refers to,
 			// here or into a variable, has a new home and a new row (F34
 			// of the review of step 3b).
-			options = append(options, logic.And(logic.Le(v.entryBrk, home(val[0])), v.rowNewOrIn(st.mem, home(val[0]), v.entryBrk, nil, nil)))
+			options = append(options, logic.And(logic.Le(v.entryBrk, home(val[0])), logic.Le(v.entryBrk, skey(val[0])), v.rowNewOrIn(st.mem, home(val[0]), v.entryBrk, nil, nil)))
 		} else {
 			options = append(options, ownedMadeSince(val, v.entryBrk))
 		}
@@ -518,7 +518,7 @@ func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur va
 	// did not own, which no form of the store may bring in.
 	newSinceEntry := ownedMadeSince(val, v.entryBrk)
 	if isIface(t) {
-		newSinceEntry = logic.And(logic.Le(v.entryBrk, home(val[0])), v.rowNewOrIn(st.mem, home(val[0]), v.entryBrk, nil, nil))
+		newSinceEntry = logic.And(logic.Le(v.entryBrk, home(val[0])), logic.Le(v.entryBrk, skey(val[0])), v.rowNewOrIn(st.mem, home(val[0]), v.entryBrk, nil, nil))
 	}
 	old := !v.quickly(st, guard, logic.Or(ownedNothing(val, t), newSinceEntry))
 	switch {
@@ -944,7 +944,8 @@ func (v *fnVerifier) valueFootprintAt(sink *state, mem memory, val value, ft typ
 		return logic.And(logic.Not(isNilRef(val)), logic.Eq(alloc, val[0]), logic.Eq(pos, logic.IntLit(0))), nil
 	case isIface(ft):
 		inRow, facts := v.rowAt(mem.region(footprintRegion, footprintSort), home(val[0]), alloc, pos)
-		return logic.And(logic.Not(isNilRef(val)), logic.Or(inRow, logic.Eq(alloc, home(val[0])))), facts
+		// The states of what it holds lie at their own key (S0b of F34).
+		return logic.And(logic.Not(isNilRef(val)), logic.Or(inRow, logic.Eq(alloc, skey(val[0])))), facts
 	}
 	inner, _ := pointee(ft)
 	size := v.pass.TypesSizes.Sizeof(inner)

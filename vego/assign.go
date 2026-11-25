@@ -861,7 +861,7 @@ func (v *fnVerifier) appendFits(grown *logic.Term, elem types.Type) *logic.Term 
 // of which the implementation knows nothing (F28).
 func (v *fnVerifier) chosenEnsures(st *state, results []value, pos token.Pos) {
 	states := v.ifaceStatesOf(v.chooseStates.Type())
-	at := home(v.entry[v.chooseStates][0])
+	at := skey(v.entry[v.chooseStates][0])
 	before := v.row(nil, st.mem, stateRegion, logic.Bool, at)
 	var cases []*logic.Term
 	for choice := range 1 << len(states) {

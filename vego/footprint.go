@@ -355,8 +355,9 @@ func (v *fnVerifier) outsideFootprint(t target, key string, ref, position *logic
 	if t.ref.Op == logic.OpSelect && t.ref.Args[0] == homes {
 		conditions = append(conditions, isNilRef(value{t.ref.Args[1]}))
 	}
-	if key == stateRegion {
-		conditions = append(conditions, logic.Eq(ref, t.ref))
+	if key == stateRegion && t.skey != nil {
+		// The value's own states, which its contract governs.
+		conditions = append(conditions, logic.Eq(ref, t.skey))
 	}
 	if t.skipped != nil {
 		conditions = append(conditions, t.skipped)
@@ -567,7 +568,7 @@ func (v *fnVerifier) checkFootprintWrite(st *state, guard []*logic.Term, t targe
 	}
 	if result := v.attempt(probe, guard, allowed(-1)); result != solver.Proved {
 		for _, i := range candidates {
-			v.used[i] = true
+			v.markClause(i)
 		}
 		// The message speaks of footprints the frame lists.
 		listed := 0
@@ -1052,13 +1053,13 @@ func (v *fnVerifier) ownedParts(sink *state, mem memory, ptr value, t types.Type
 			parts = append(parts, target{mapType: ft, ref: val[0]})
 		case isIface(ft):
 			if v.hasFootprint(ft) {
-				parts = append(parts, target{fp: true, ref: home(val[0]), rows: mem.region(footprintRegion, footprintSort)})
+				parts = append(parts, target{fp: true, ref: home(val[0]), skey: skey(val[0]), rows: mem.region(footprintRegion, footprintSort)})
 			}
 			// An owner of the project owns the states of what its owned
 			// interface value holds, whatever its interface declares, as
 			// Modifies of an interface value covers them.
 			if v.hasStates(ft) || source {
-				parts = append(parts, target{row: true, cells: []cell{stateCell}, ref: home(val[0])})
+				parts = append(parts, target{row: true, cells: []cell{stateCell}, ref: skey(val[0])})
 			}
 		default:
 			inner, _ := pointee(ft)
@@ -1157,9 +1158,10 @@ func (v *fnVerifier) ownedFreshSeen(sink *state, mem memory, ptr value, t types.
 			}
 			// An owner of the project owns the states of what its interface
 			// value holds, which are new when its home is (F40 of the review
-			// of step 5): G lets in only a new value.
+			// of step 5): G lets in only a new value, whose states are new
+			// too (S0b of F34).
 			if len(sourceOwnedFields(object)) > 0 {
-				facts = append(facts, logic.Or(isNilRef(val), logic.Le(before, home(val[0]))))
+				facts = append(facts, logic.Or(isNilRef(val), logic.And(logic.Le(before, home(val[0])), logic.Le(before, skey(val[0])))))
 			}
 		default:
 			facts = append(facts, logic.Or(logic.Eq(val[0], zero), logic.And(logic.Le(before, val[0]), v.ownedFreshSeen(sink, mem, val, ft, before, seen))))
@@ -1282,7 +1284,7 @@ func (v *fnVerifier) freshOf(sink *state, x reached, mem memory, before *logic.T
 	}
 	switch {
 	case isIface(x.typ):
-		return logic.Or(isNilRef(x.val), logic.And(logic.Le(before, home(x.val[0])), v.rowNewOrIn(mem, home(x.val[0]), before, ys, yRows)))
+		return logic.Or(isNilRef(x.val), logic.And(logic.Le(before, home(x.val[0])), logic.Le(before, skey(x.val[0])), v.rowNewOrIn(mem, home(x.val[0]), before, ys, yRows)))
 	case isMap(x.typ):
 		return logic.And(logic.Not(isNilRef(x.val)), newOrIn(x.val[0], logic.IntLit(0)))
 	case isSlice(x.typ):

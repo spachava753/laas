@@ -1553,7 +1553,7 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		if !known {
 			// What the result holds is new; where its footprint lies is
 			// not said.
-			return logic.Or(isNilRef(found[0].val), logic.Le(e.before, home(found[0].val[0]))), nil
+			return logic.Or(isNilRef(found[0].val), logic.And(logic.Le(e.before, home(found[0].val[0])), logic.Le(e.before, skey(found[0].val[0])))), nil
 		}
 		// A pack of no arguments is nil, whose elements have no
 		// footprints, and the result's footprint is then new.
@@ -1655,7 +1655,7 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 func freshSince(before *logic.Term, found reached) *logic.Term {
 	switch {
 	case isIface(found.typ):
-		return logic.Or(isNilRef(found.val), logic.Le(before, home(found.val[0])))
+		return logic.Or(isNilRef(found.val), logic.And(logic.Le(before, home(found.val[0])), logic.Le(before, skey(found.val[0]))))
 	case isSlice(found.typ):
 		return logic.Or(logic.Le(found.val[3], logic.IntLit(0)), logic.Le(before, found.val[0]))
 	}
@@ -2142,6 +2142,7 @@ func (v *fnVerifier) walkTarget(fn *funcInfo, m *modTarget, param *types.Var, ro
 		}
 		if !symbolic {
 			t.ref, t.rows = home(cur.val[0]), mem.region(footprintRegion, footprintSort)
+			t.skey = skey(cur.val[0])
 		}
 		t.fp = true
 		// The entry also covers every state of what the value holds, as
@@ -2169,7 +2170,7 @@ func (v *fnVerifier) walkTarget(fn *funcInfo, m *modTarget, param *types.Var, ro
 			t.holder = cur.cells
 		}
 		if !symbolic {
-			t.ref = home(cur.val[0])
+			t.ref = skey(cur.val[0])
 		}
 		t.row = true
 	case entry != nil:
@@ -2231,10 +2232,10 @@ func (v *fnVerifier) targets(fn *funcInfo, args map[*types.Var]value, sink *stat
 			v.misread(m.clause, err)
 		}
 		t.mod = i
-		list = append(list, t)
+		list = append(list, splitStates(t)...)
 		for _, also := range t.also {
 			also.mod = i
-			list = append(list, also)
+			list = append(list, splitStates(also)...)
 			for _, part := range also.owned {
 				part.mod, part.text, part.clause, part.part, part.ownerParam = i, also.text, also.clause, true, nil
 				list = append(list, part)
@@ -2246,6 +2247,23 @@ func (v *fnVerifier) targets(fn *funcInfo, args map[*types.Var]value, sink *stat
 		}
 	}
 	return list
+}
+
+// splitStates gives a target that covers both the footprint of an
+// interface value and its states two targets: the footprint lies at the
+// home of the value and its states at their own key (S0b of F34).
+func splitStates(t target) []target {
+	if !t.fp || !t.row {
+		return []target{t}
+	}
+	if t.skey == nil {
+		panic("internal error: a footprint target that covers states has no key of its states")
+	}
+	states := t
+	states.fp, states.rows, states.ref, states.skey = false, nil, t.skey, nil
+	states.cells, states.owned, states.also, states.besideFootprint = []cell{stateCell}, nil, nil, true
+	t.row = false
+	return []target{t, states}
 }
 
 // holdsArrayOf reports whether a value of type t holds, in itself and not

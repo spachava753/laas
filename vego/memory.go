@@ -206,7 +206,7 @@ type target struct {
 	// parameter holds.
 	param *types.Var
 	// row is set when the target is every state of an interface value:
-	// the whole row of its home in the region of states, which ref is.
+	// the whole row of its key in the region of states, which ref is.
 	// lo and hi are nil, as for a map. holder is set to the cells of the
 	// interface value when it lies in memory, which the target does not
 	// cover; see checkWriteOr.
@@ -219,6 +219,14 @@ type target struct {
 	fp      bool
 	rows    *logic.Term
 	skipped *logic.Term
+	// skey is, for the footprint of an interface value, the key of the
+	// value's states, whose row the footprint's epoch keeps; and, for an
+	// entry that covers both, the row of states that targets spreads into
+	// a target of its own (S0b of F34).
+	skey *logic.Term
+	// besideFootprint is set for the states of an entry whose footprint is
+	// a target of its own, the one before it in the list.
+	besideFootprint bool
 	// owned holds, for a struct that owns some of its fields, a target for
 	// what each owned field refers to; targets spreads them into the list.
 	// owner and ownerType are the pointer to that struct and its type.
@@ -409,6 +417,10 @@ func (v *fnVerifier) unchanged(sink *state, now *logic.Term, known *layer, ref, 
 				instances = append(instances, facts...)
 				continue
 			}
+			if t.row && known.key != stateRegion {
+				// A row of states lies in the region of states alone.
+				continue
+			}
 			conditions = append(conditions, logic.Ne(ref, t.ref))
 		}
 		fact := logic.Implies(logic.And(conditions...), v.same(logic.Select(now, ref), logic.Select(known.prev, ref)))
@@ -432,6 +444,9 @@ func (v *fnVerifier) unchanged(sink *state, now *logic.Term, known *layer, ref, 
 			outside, facts := v.outsideFootprint(t, known.key, ref, position)
 			untouched = append(untouched, outside)
 			instances = append(instances, facts...)
+		case t.row && known.key != stateRegion:
+			// A row of states lies in the region of states alone (S0b of
+			// F34, where a row's key stopped being a home).
 		case t.lo == nil:
 			// A map is written as a whole.
 			untouched = append(untouched, logic.Ne(ref, t.ref))
@@ -1135,7 +1150,7 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 	goal := allowed(-1)
 	if result := v.attempt(st, guard, goal); result != solver.Proved {
 		for _, i := range candidates {
-			v.used[i] = true
+			v.markClause(i)
 		}
 		// A Modifies entry that ends in an interface value covers the
 		// states of what it holds, and not where the value lies.
@@ -1144,7 +1159,9 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 		// every write.
 		var listed []int
 		for _, i := range candidates {
-			if !v.frame[i].fp {
+			// The states of an entry whose footprint is listed count as
+			// the footprint does (S0b of F34).
+			if !v.frame[i].fp && !v.frame[i].besideFootprint {
 				listed = append(listed, i)
 			}
 		}
@@ -1269,11 +1286,19 @@ func (v *fnVerifier) markNeeded(candidates []int, coveredWithout func(mod int) b
 			continue
 		}
 		if !coveredWithout(mod) {
-			for _, j := range candidates {
-				if v.frame[j].mod == mod {
-					v.used[j] = true
-				}
-			}
+			v.markClause(i)
+		}
+	}
+}
+
+// markClause records that the clause of a target of the frame is needed:
+// every target it gives, the footprint of an interface value and its states
+// alike, which since S0b of F34 are two targets of one clause.
+func (v *fnVerifier) markClause(i int) {
+	mod := v.frame[i].mod
+	for j, t := range v.frame {
+		if j == i || mod >= 0 && t.mod == mod {
+			v.used[j] = true
 		}
 	}
 }
@@ -1316,12 +1341,7 @@ func (v *fnVerifier) havoc(st *state, t target, guard []*logic.Term) {
 		}
 		v.growing = append(v.growing, v.grow(st, st.brk, notRun))
 		if t.row {
-			// The states of the value itself, which the epoch keeps, are
-			// what its contract governs.
-			before := v.row(nil, st.mem, stateRegion, logic.Bool, t.ref)
-			unknown := v.fresh("written", logic.BoolSeq)
-			kept(unknown, before)
-			st.storeRow(stateRegion, logic.Bool, t.ref, unknown)
+			panic("internal error: a footprint target that covers states too; targets gives them a target of their own")
 		}
 	case t.mapType != nil && t.key != nil:
 		v.havocEntry(st, t, skipped, len(guard) > 0)

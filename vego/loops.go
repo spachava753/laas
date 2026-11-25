@@ -511,7 +511,7 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 			preciseFootprints = false
 			continue
 		}
-		footprints = append(footprints, target{fp: true, ref: home(val[0]), rows: st.mem.region(footprintRegion, footprintSort)})
+		footprints = append(footprints, target{fp: true, ref: home(val[0]), skey: skey(val[0]), rows: st.mem.region(footprintRegion, footprintSort)})
 	}
 	writesFootprints := !preciseFootprints || len(footprints) > 0
 	for _, at := range eff.sites {
@@ -524,7 +524,7 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 		switch {
 		case !precise:
 		case at.row:
-			t.ref, t.row = home(val[0]), true
+			t.ref, t.row = skey(val[0]), true
 		case at.mapType != nil:
 			t.ref = val[0]
 		case at.elem != nil:

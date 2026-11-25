@@ -55,6 +55,29 @@ func home(ref *logic.Term) *logic.Term {
 	return logic.Select(homes, ref)
 }
 
+// skeys names the function from the reference of an interface value to the
+// key of its states: the row of the region of states where they lie. It is
+// kept apart from the home, which is the row of the value's footprint
+// (S0b of F34): a state is about what the value holds, so the interface
+// values that hold one pointer share it, while each conversion has a
+// footprint row of its own, defined where it is made. Like homes, it is a
+// sequence that nothing writes.
+var skeys = logic.Const("state key", logic.SeqOf(logic.Ref))
+
+// skey returns the key of the states of an interface value.
+func skey(ref *logic.Term) *logic.Term {
+	return logic.Select(skeys, ref)
+}
+
+// isKeyRead reports whether a term reads the table of homes or of keys of
+// states at a reference, and returns the reference.
+func isKeyRead(t *logic.Term) (*logic.Term, bool) {
+	if t.Op == logic.OpSelect && t.Args[0].Op == logic.OpConst && (t.Args[0].Name == homes.Name || t.Args[0].Name == skeys.Name) {
+		return t.Args[1], true
+	}
+	return nil, false
+}
+
 // ifaceState is a state that an interface type declares.
 type ifaceState struct {
 	owner  *types.TypeName // the interface that declares it
@@ -285,7 +308,7 @@ func (e *specEnv) ifaceState(what string, typ types.Type, ref *logic.Term, sink 
 		phrase, _ := stateNames(states)
 		return nil, &logic.NoState{Msg: fmt.Sprintf("%s(%s): %s has type %s, which has %s", name, what, what, typ, phrase)}
 	}
-	return e.v.fetch(sink, mem, []cell{stateCell}, home(ref), found[0].position())[0], nil
+	return e.v.fetch(sink, mem, []cell{stateCell}, skey(ref), found[0].position())[0], nil
 }
 
 // reservedStateNames are the names that mean something of their own in
@@ -491,11 +514,12 @@ func (v *fnVerifier) namesStateOf(fn *funcInfo, param *types.Var) bool {
 }
 
 // apartHomes states that two interface values that are not nil have homes
-// of their own. The nil interface has a home too, and two nil values share
-// it.
+// of their own, and states of their own (S0b of F34: the key of the states
+// is kept apart from the home). The nil interface has a home too, and two
+// nil values share it.
 func apartHomes(a, b *logic.Term) *logic.Term {
 	zero := logic.RefLit(0)
-	return logic.Or(logic.Eq(a, zero), logic.Eq(b, zero), logic.Ne(home(a), home(b)))
+	return logic.Or(logic.Eq(a, zero), logic.Eq(b, zero), logic.And(logic.Ne(home(a), home(b)), logic.Ne(skey(a), skey(b))))
 }
 
 // statesOutside states, of two interface values whose homes are apart,
@@ -513,7 +537,7 @@ func (v *fnVerifier) statesOutside(rows *logic.Term, a, b value, at, bt types.Ty
 			continue
 		}
 		for _, s := range v.ifaceStatesOf(typs[pair[1]]) {
-			cell, facts := v.rowAt(rows, home(x[0]), home(y[0]), s.position())
+			cell, facts := v.rowAt(rows, home(x[0]), skey(y[0]), s.position())
 			premises = append(premises, facts...)
 			claims = append(claims, logic.Or(isNilRef(x), isNilRef(y), logic.Not(cell)))
 		}

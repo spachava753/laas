@@ -438,8 +438,12 @@ func (pv *pkgVerifier) wellFormed(val value, t types.Type, brk *logic.Term) *log
 			// what it holds; its home, where its states lie, exists, as
 			// what it holds does. The nil interface holds nothing and has
 			// no home. See ifacestate.go.
-			facts = append(facts, logic.Or(logic.Eq(val[i], logic.RefLit(0)),
-				logic.And(exists(home(val[i])), logic.Lt(logic.IntLit(0), home(val[i])))))
+			known := []*logic.Term{exists(home(val[i])), logic.Lt(logic.IntLit(0), home(val[i]))}
+			if pv.hasStates(lf.typ) {
+				// So does the row of its states (S0b of F34).
+				known = append(known, exists(skey(val[i])), logic.Lt(logic.IntLit(0), skey(val[i])))
+			}
+			facts = append(facts, logic.Or(logic.Eq(val[i], logic.RefLit(0)), logic.And(known...)))
 		case lf.sort == logic.Ref && holdsCodeRef(lf.typ):
 			// A function value refers to no allocation, and the reference
 			// of an interface value is not the address of what it holds.

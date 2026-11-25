@@ -1148,7 +1148,7 @@ func (v *fnVerifier) canReach(path []*logic.Term) bool {
 // readsLaterHome reports whether a term reads the home of an interface
 // value whose reference is not one of the input; see canReach.
 func (v *fnVerifier) readsLaterHome(t *logic.Term) bool {
-	if t.Op == logic.OpSelect && t.Args[0].Op == logic.OpConst && t.Args[0].Name == homes.Name && !v.inputsOnly(t.Args[1]) {
+	if ref, read := isKeyRead(t); read && !v.inputsOnly(ref) {
 		return true
 	}
 	return slices.ContainsFunc(t.Args, v.readsLaterHome)
@@ -1515,6 +1515,8 @@ func (b *sampler) addStates(t types.Type, to binding) {
 				}
 			}
 			s.consts[homes.Name] = table
+			// The states of a sample lie at its home (S0b of F34).
+			s.consts[skeys.Name] = table
 		}})
 	}
 	if !b.v.hasStates(t) {

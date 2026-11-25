@@ -140,6 +140,7 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		// A home of its own, at which its states lie.
 		at := v.alloc(st, true)
 		st.assume(logic.Eq(home(held), at))
+		st.assume(logic.Eq(skey(held), at))
 		v.falseStates(st, at, want)
 	}
 	if footprinted {
@@ -149,6 +150,9 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		// keeps out of a row.
 		at := v.alloc(st, true)
 		st.assume(logic.Eq(home(held), at))
+		// The key of its states is the new home too, so that what a call
+		// writes of them is memory the function made.
+		st.assume(logic.Eq(skey(held), at))
 		if ghost {
 			v.falseStates(st, at, want)
 		}

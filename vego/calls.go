@@ -705,8 +705,14 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	// When the struct of an owner may not be written, what it owns is not
 	// reported again.
 	ownerRefused := map[int]bool{}
+	footprintRefused := map[int]bool{}
 	for _, t := range written {
 		if t.part && ownerRefused[t.mod] {
+			continue
+		}
+		// A value whose footprint may not be written is reported once,
+		// not again for its states, which the same entry lists.
+		if t.besideFootprint && footprintRefused[t.mod] {
 			continue
 		}
 		reportsBefore := v.reports
@@ -800,17 +806,16 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			before := v.reports
 			v.checkFootprintWrite(st, guard, t, call.Pos(), fmt.Sprintf("%s may modify the footprint of %s", name, base), remedy, unlisted)
 			v.checkFootprintRanged(st, guard, t, call.Pos(), name)
-			// A value whose footprint may not be written is reported once,
-			// not again for its states, which the same entry would list.
-			if !t.row || v.reports > before {
-				continue
+			if v.reports > before {
+				footprintRefused[t.mod] = true
 			}
+			continue
 		}
 		// A nil interface value holds nothing, so it has no states, and a
 		// call that writes them writes nothing where it is nil.
 		writes := guard
-		if t.row && t.ref.Op == logic.OpSelect && t.ref.Args[0] == homes {
-			writes = append(slices.Clip(guard), logic.Not(isNilRef(value{t.ref.Args[1]})))
+		if ref, read := isKeyRead(t.ref); t.row && read {
+			writes = append(slices.Clip(guard), logic.Not(isNilRef(value{ref})))
 		}
 		// A variable of another package is part of the state of its
 		// package, which the caller covers by naming a package (D1).
