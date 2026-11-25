@@ -2127,6 +2127,7 @@ guide	(*guide.LineCounter).Price	10	8114	0
 guide	(*guide.Link).Loop	8	2837	0
 guide	(*guide.Lock).Acquire	6	4035	0
 guide	(*guide.Lock).Release	6	3879	0
+guide	(*guide.Meter).Ping	1	182	0
 guide	(*guide.Pile).Append	30	193386	0
 guide	(*guide.Pile).Items	4	1665	0
 guide	(*guide.Pile).Push	22	48930	0
@@ -2313,6 +2314,7 @@ guide	guide.Half	3	1455	0
 guide	guide.Handle	5	3446	0
 guide	guide.HandleByPath	5	3446	0
 guide	guide.HandleUnlisted	2	1238	0
+guide	guide.Hands	3	376	0
 guide	guide.HasComma	4	5207	0
 guide	guide.HasMember	1	949	0
 guide	guide.HasName	4	26189	0
@@ -2411,6 +2413,7 @@ guide	guide.PeekLabelledWrong	15	23642	0
 guide	guide.PeekOrZero	3	3180	0
 guide	guide.PeekWhichOnly	14	27257	0
 guide	guide.Percent	4	292	0
+guide	guide.Pinger.Ping	3	255	0
 guide	guide.PopAndCount	11	258884	1
 guide	guide.PopIfAny	11	18932	0
 guide	guide.PopInCondition	8	11905	0
@@ -2632,6 +2635,7 @@ guide	guide.the initialiser of routes	0	0	0
 guide	guide.the initialiser of sizes	0	0	0
 guide	guide.the initialiser of tagsSeen	0	0	0
 guide	guide.the initialiser of word	2	22554	0
+guide	guide.use	1	667	0
 guide	guide.value	3	869	0
 guide	guide.warn	5	11761	0
 guide	guide.warnChecked	6	13308	0
@@ -4698,6 +4702,46 @@ rejected	rejected.ZNamed	0	0	0
 rejected	rejected.ZeroWidth	2	238	0
 rejected	rejected.unverified	1	4097	0
 rejected	rejected.write	10	10047	0
+runsclaims	(*runsclaims.Counter).Ping	1	182	0
+runsclaims	(*runsclaims.Door).Ping	1	182	0
+runsclaims	(*runsclaims.Latch).Shut	1	182	0
+runsclaims	(runsclaims.Hook).Ping	1	46	0
+runsclaims	(runsclaims.LatchErr).Error	1	182	0
+runsclaims	(runsclaims.LatchErr).Latch	1	182	0
+runsclaims	(runsclaims.PingErr).Error	1	497	0
+runsclaims	(runsclaims.Spring).Next	1	182	0
+runsclaims	(runsclaims.Spring).Ping	1	182	0
+runsclaims	(runsclaims.TimeoutErr).Error	1	111	0
+runsclaims	(runsclaims.TimeoutErr).Timeout	2	153	0
+runsclaims	runsclaims.AskTimeout	3	1512	0
+runsclaims	runsclaims.BoxedAny	4	2350	0
+runsclaims	runsclaims.Hands	5	2059	0
+runsclaims	runsclaims.HandsBump	3	376	0
+runsclaims	runsclaims.HandsHolder	5	3082	0
+runsclaims	runsclaims.HandsHook	3	376	0
+runsclaims	runsclaims.HandsInError	1	46	0
+runsclaims	runsclaims.HandsLatch	1	46	0
+runsclaims	runsclaims.HandsNext	3	376	0
+runsclaims	runsclaims.HandsPing	5	2059	0
+runsclaims	runsclaims.HandsShut	3	376	0
+runsclaims	runsclaims.HandsTwo	3	376	0
+runsclaims	runsclaims.Latcher.Latch	3	1019	0
+runsclaims	runsclaims.Pinger.Ping	3	255	0
+runsclaims	runsclaims.Shutter.Shut	3	255	0
+runsclaims	runsclaims.Source.Next	3	1019	0
+runsclaims	runsclaims.Source.Ping	3	255	0
+runsclaims	runsclaims.consumeAny	1	667	0
+runsclaims	runsclaims.consumeErr	1	70	0
+runsclaims	runsclaims.consumeLatch	1	70	0
+runsclaims	runsclaims.isTimeout	1	70	0
+runsclaims	runsclaims.use	1	667	0
+runsclaims	runsclaims.useBump	1	667	0
+runsclaims	runsclaims.useHolder	1	1174	0
+runsclaims	runsclaims.useHook	1	667	0
+runsclaims	runsclaims.useNext	1	667	0
+runsclaims	runsclaims.usePing	1	667	0
+runsclaims	runsclaims.useShut	1	667	0
+runsclaims	runsclaims.useTwo	1	1506	0
 semantics	(*bufio.Writer).WriteByte	9	54742	0
 semantics	(*bytes.Buffer).Len	1	2333	0
 semantics	(*bytes.Buffer).WriteByte	4	12115	0

@@ -5418,7 +5418,8 @@ These are reported at the conversion too, each with what to change:
 - a method that makes a call through a function value or an interface value;
 - a method that names a package-level variable of a group with an invariant;
 - a type with an invariant;
-- a type that holds, in any field, a value of type `any`, of an interface with a method that has no contract, or of a function type without a contract;
+- a type that holds, in any field, a value of an interface type other than `error`, or of a function type without a contract. A value converted to an interface is checked against the methods of that interface only, and code given the error may assert what it holds to another interface (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed));
+- a method that returns such a value, for the same reason;
 - a type that holds, through an exported field, a value of a type that has methods, which reflection reaches;
 - a `nil` pointer converted to error when its type has `Error` with a value receiver, since calling it would panic.
 
@@ -6768,7 +6769,8 @@ Each entry has these fields:
 | `receiver` | no | For a method of an interface, the name that the contract uses for the value the method is called on. See [States of interface values](#states-of-interface-values). |
 | `requires` | no | A list of formulas. Callers must prove each one. |
 | `ensures` | no | A list of formulas. Callers can assume each one. |
-| `runs` | no | Parameters that carry code the function may call, at any depth inside the value. See [Arguments that carry code](#arguments-that-carry-code). |
+| `runs` | no | Parameters that carry code the function may call, at any depth inside the value. See [Arguments that carry code](#arguments-that-carry-code). The function calls through an interface value or a function value only the methods of the interfaces and the function types that the parameter's type reaches, and those of the types under `asserts`. |
+| `asserts` | no | For a parameter under `runs` or `keeps`, the types the function may find on what it holds by a type assertion, as in `err: ["interface{ Timeout() bool }"]`. Without it, the entry claims that the function finds nothing more. Over a parameter that is not of type `error`, a listed interface may have only methods that every interface type the parameter reaches has. See [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed). |
 | `keeps` | no | Parameters whose code the function keeps after it returns, each with the results and parameters it keeps it in, as in `r: [result]`. See [Functions that keep what they are given](#functions-that-keep-what-they-are-given). An entry that does not list a parameter claims that the function keeps nothing of it once it returns. For a method of an interface, that claim covers every implementation. |
 | `vouches` | no | Error results whose errors verified code may format, compare, and pass to `errors.Is`, results that hold function values or interface values verified code may call, and parameters under whose memory the function writes such values. See [Errors that a trusted function returns](#errors-that-a-trusted-function-returns) and [Function values and interface values that a trusted function returns](#function-values-and-interface-values-that-a-trusted-function-returns). |
 | `calls` | no | Function parameters that the function calls while it runs, each with what holds when it calls them. See [Functions that a trusted function calls](#functions-that-a-trusted-function-calls). |
@@ -7261,6 +7263,8 @@ The third is to list the parameter under `runs` in the trusted contract:
 
 The claim is false for a function that calls the methods of an `error` when unverified callers can pass any error. Do not add `runs` in that case just to remove the message. The contract would be false, and every proof that uses it would be worthless.
 
+`runs` also claims that the function finds nothing on the value by a type assertion beyond what the entry lists under `asserts`. It calls through an interface value only the methods that the parameter's type has, and those of the listed types. See [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed).
+
 `runs` also claims three things about when the function runs the code it receives, whatever kind of code that is:
 
 - It runs the code only before it returns.
@@ -7565,29 +7569,101 @@ func NewPrefetcher(r io.Reader) *Prefetcher {
 
 #### What a function finds on what it is handed
 
-A function of another package that is handed an interface value may assert it to another type, or use reflection, and call what it finds. `vego` then counts every method with an exported name and every function value of your package as code the call may run (see [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods)). An entry may claim more, under `asserts`, for each parameter that can hold code, the receiver of a method included:
+A function of another package that is handed an interface value may assert it to another type and call what it finds. An entry that lists a parameter under `runs` or `keeps` makes a claim about this. While the call lasts, and when what the function returns or keeps is called later through the entries of the methods of what it returns, the function calls through an interface value or a function value nothing that the parameter holds, at any depth, except these:
+
+- the methods of the interfaces and the function types that the parameter's type reaches through fields, elements, and pointers, and through what those methods return;
+- the methods of the interfaces and the function types that the types listed under `asserts` reach.
+
+The function also uses no reflection to call what the parameter holds. A call of a method of a concrete type on what the parameter holds is part of the function's own code, and its contract covers that call.
+
+The field `asserts` lists, for a parameter, the types that the function may find on it by a type assertion. The receiver of a method counts as a parameter. The entry of `os.IsTimeout` lists one interface:
 
 ```yaml
-  io.NopCloser:
+  os.IsTimeout:
+    runs: [err]
     asserts:
-      r: [io.WriterTo]
+      err: ["interface{ Timeout() bool }"]
 ```
 
-By listing a parameter under `asserts`, you claim all of this about the function, while the call lasts, and when what it returns or keeps is called later through the entries of the methods of what it returns:
+An entry without `asserts` for a parameter, or with an empty list such as `err: []`, claims that the function finds nothing more on it. Write an interface that has no name by its methods, as in `"interface{ Timeout() bool }"`. Such an interface may use only predeclared types.
 
-- It calls nothing that the parameter holds, or that a call of what the parameter holds returns, at any depth, but the methods of the interfaces and the function values of the function types that the parameter's type reaches through fields, elements, and pointers, and those of the listed types.
-- It finds the listed types, and no others that hold code, by a type assertion, and uses no reflection to call what the parameter holds.
+Verified code answers for the methods that can be called through the parameter's type. `vego` checks each of them where a value is converted to that type. You answer for everything else. Only the function's source shows it, as only the source shows what the function keeps. Read the source before you write the entry. Every type assertion on the value, or on what it is stored in, and every call of what it holds, must be within the claim. An assertion to a concrete type of another package, such as `bufio`'s `w.(*Writer)` in `NewWriterSize`, needs no listing when what it leads to calls only methods that the parameter's type already has.
 
-An empty list, `r: []`, claims that it asserts the value to nothing that holds code. A method of a concrete type of another package that holds no code, such as `syscall.Errno`, runs only its own code and need not be listed. Write an interface that cannot be named by its methods, as `"interface{ Timeout() bool }"`, which may use only predeclared types. The claim affects only which cycles `vego` reports.
+Take a trusted function `use`, which pings what it is handed and bumps it when it can:
 
-Read the source to check the claim. Every type assertion on the value, or on what it is stored in, and every call of what it holds, has to be within the list. An assertion to a concrete type of another package, such as `bufio`'s `w.(*Writer)` in `NewWriterSize`, needs no listing when what it leads to calls only methods the parameter's type already has.
+```go
+// Pinger has a method with a contract.
+type Pinger interface {
+	// @Ensures True
+	Ping()
+}
 
-The shipped entries with `asserts` are tested by a harness whose readers and writers also have the methods of the other optional interfaces of `io` and `fmt` and return errors that record their calls. A call of one of those methods fails the test. The harness catches only the interfaces it has methods of, so the claim rests on reading the source, as `keeps` does.
+// Meter counts.
+type Meter struct{ n int }
+
+// @Ensures True
+func (t *Meter) Ping() {}
+
+// Bump has no contract.
+func (t *Meter) Bump() { t.n++ }
+
+// use is trusted.
+func use(p Pinger) {
+	if b, ok := p.(interface{ Bump() }); ok {
+		b.Bump()
+	}
+}
+
+// @Ensures r = 0
+func Hands() (r int) {
+	t := &Meter{}
+	use(t)
+	return t.n
+}
+```
+
+This entry for `use` is false:
+
+```yaml
+  example.com/shop.use:
+    reason: Pings p.
+    runs: [p]
+    modifies: []
+```
+
+It has no `asserts` for `p`, so it claims that `use` calls nothing of `p` but `Ping`. `use` calls `Bump` too, and nothing checked `Bump` where the `*Meter` was converted to `Pinger`. With this entry `Hands` is proved, and it returns 1.
+
+The true entry lists what `use` finds:
+
+```yaml
+    asserts:
+      p: ["interface{ Bump() }"]
+```
+
+`vego` reports that entry as a defect at every call:
+
+```text
+vego: the trusted contract of guide.use (trusted.yaml:2283) cannot be used: its asserts lists interface{
+Bump() } for p, an interface with the method Bump, and what it holds may hold a value of guide.Pinger,
+which lacks it: nothing checks a value converted to an interface against another interface it is later
+asserted to, so a function that calls what it finds that way runs code nobody checked, and no entry can
+claim it; only over an error, each method of which is checked where the error is made, may asserts list
+more
+```
+
+A value converted to an interface is checked against the methods of that interface only. The function may assert any interface value it reaches from the parameter, through fields, elements, and pointers, and through what the methods it can call return. So over a parameter that is not of type `error`, a listed interface may have only methods that each of those interface types has. A listed function type must be one that the parameter's type reaches. That holds even when the method has a contract. A function like `use` has no entry that verified code can rely on. Call it from code that is not verified.
+
+Over a parameter of type `error`, `asserts` may list any type. Each method of a value converted to `error` is checked where it is converted. Such a value holds no interface value other than an error, and its methods return none (see [Other limits](#other-limits)).
+
+`asserts` also affects which cycles `vego` reports. Without `asserts` for a parameter, `vego` counts every method with an exported name and every function value of your package as code the call may run, as for a function with no entry (see [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods)). With it, only what the claim names counts.
+
+The shipped entries are tested by harnesses that hand each function values with more methods than the parameter's type has. Those values have every method that the standard library is known to look for by a type assertion: `String`, `Error`, `Format`, `GoString`, `WriteString`, `ReadFrom`, `WriteTo`, `Unwrap`, `Is`, `As`, `Timeout`, `Temporary`, `Close`, and `Flush`, and those of the optional interfaces of `net/http` for a `ResponseWriter`. A call of a method that the entry does not declare fails the test. The harnesses catch only the methods the values have, so the claim also rests on reading the source, as `keeps` does.
 
 An entry with `asserts` cannot be used when any of these holds:
 
 - A listed name is not a parameter, or its type can hold no code.
 - A listed type does not resolve, holds no code, or is an interface written by its methods with a type that is not predeclared.
+- The parameter is not of type `error`, and a listed interface has a method that an interface type the parameter reaches lacks, or a listed function type is one the parameter does not reach.
 - The parameter is listed under `formats`, which says already what the function runs of it.
 - The parameter of a function is listed under neither `runs` nor `keeps`.
 
@@ -8586,6 +8662,7 @@ This table lists the most common messages.
 | `x.E is changed at f.go:n in package p, which this package is built with` | A package in the build assigns the error variable, or one that went into it. | Remove the assignment. See [When a package-level error is known](#when-a-package-level-error-is-known). |
 | `x is passed to F, which is trusted, and is an error whose origin is not known` (or `a value of type T, which is or holds an interface value`, or a function value, a channel, or an `unsafe.Pointer`) | The trusted function `F` could call code that `x` carries. | See [Arguments that carry code](#arguments-that-carry-code), and [Functions that keep what they are given](#functions-that-keep-what-they-are-given) for a function that keeps it. |
 | `the trusted contract of F ... cannot be used: its keeps lists h ...` | The entry's `keeps` names no destination, a destination that cannot hold the code, or a parameter that `modifies` does not cover. The message says which. | See [What vego checks in an entry with keeps](#what-vego-checks-in-an-entry-with-keeps). |
+| `the trusted contract of F ... cannot be used: its asserts lists T for p, an interface with the method M, and what it holds may hold a value of I, which lacks it: ...` | The entry claims that the function finds on what `p` holds an interface with a method that nothing checked where a value was converted to `I`. | Call the function from code that is not verified. See [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed). |
 | `cannot verify F: G keeps code it is given, and cannot be used as a value` | A trusted function with `keeps` is used as a function value or a method of an interface value. | Call it directly. |
 | `... which F may not modify; it is memory that G returned, which its contract places within s, and F passed b as s; list b in a // @Modifies clause` | `F` writes a slice that a trusted function returned inside the memory of an argument, as `bytes.TrimSpace` and `bytes.Cut` do. | List the argument under `Modifies`. |
 | `... which F may not modify; it is memory that G returned, and its contract does not say that this is new memory` | `F` writes through what a trusted function returned, such as `bufio.NewWriter`, which may return memory that existed when `F` was called. | Take the value as a parameter and list it under `Modifies`. See [Writing through a buffer](#writing-through-a-buffer). |
@@ -8754,7 +8831,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and holds no value that can hold code anywhere it was not held when the call began, unless `keeps` lists the parameter. For a parameter listed under `keeps`, it runs the code during the call only if `runs` lists the parameter too, holds it when it returns only in memory that the results and parameters listed there reach, and has started or registered nothing that runs it later: no goroutine, timer, finalizer or cleanup, callback given to another package, or package-level variable. For a parameter listed under `stores`, the function stores into the memory that its `modifies` lists under that parameter only memory it made during the call. For a parameter listed under `prints`, the function formats as the function that `prints` names does, calls the `Write` of that parameter once with exactly what that function returns, calls nothing else of it, and returns what `Write` returned. For a parameter listed under `encodes`, the function encodes the value as package `encoding/json` does. It runs no method of the value but those of `time.Time`, `json.RawMessage`, and `json.Number` that `encoding/json` runs, only while the call lasts and on the goroutine that called it, and it allocates within the bound `vego` proves at the call. It keeps nothing of the value, with one exception. Built without `GOEXPERIMENT=jsonv2`, it returns for a NaN or an infinity a `*json.UnsupportedValueError` whose field `Value` is a `reflect.Value` of that float in the memory of the value, which reflection could set. No proof depends on it. No formula reads a float, and verified code cannot assert an error to its type to reach the field. For a parameter listed under `decodes`, the function decodes into the value as `encoding/json` does. It writes only the exported fields that `encoding/json` writes, runs no method of the value but those of `time.Time`, `json.RawMessage`, and `json.Number`, keeps nothing of what it is handed, and allocates within the bound `vego` proves at the call. When every slice, map, and pointer in what it decodes into is `nil`, which `vego` requires at each call, everything it stores there is memory it made during the call. `(*json.Encoder).Encode`, called on the encoder that `json.NewEncoder(w)` makes in the same expression, encodes its argument as `Marshal` does. When that fails, it returns the error of `Marshal` and calls nothing of `w`. Otherwise it calls `w.Write` once, with exactly what `Marshal` returns followed by a newline, calls nothing else of `w`, and returns the error that `Write` returned. `(*json.Decoder).Decode`, called on the decoder that `json.NewDecoder(io.LimitReader(r, n))` makes in the same expression, calls nothing of `r` but its `Read`. It calls `Read` any number of times, each time with a buffer that is not empty, only while `Decode` lasts and on the goroutine that called it, and reads at most `n` bytes in all. It decodes the first value it reads as `Unmarshal` does, and leaves what follows that value unread in `r` or drops it with the decoder. Nothing holds the decoder after the expression, and nothing it starts keeps `r`. For a parameter listed under `runs` or `keeps`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter. Where such a value runs what the function keeps, as the reader that `io.TeeReader` returns runs the reader and the writer it is given, it meets its contract whenever what the function keeps meets theirs. A function whose entry says `isolated: true`, or whose trust file says `isolated` at its top, runs no code but what the call hands it through its arguments and receiver, and reaches no code through memory that another call set, also not through any function it calls. `log.Printf` is not isolated, since it writes to the output that `log.SetOutput` set. A function whose entry says `initialiserOnly: true` meets its contract when it returns. Where it fails it panics, and the initialiser of a package-level variable is the only place `vego` allows a call of it.
 - The methods of `bytes.Buffer`, `strings.Builder`, `bufio.Writer`, `bufio.Reader`, `bufio.Scanner`, and `log.Logger` that have shipped entries write nothing that verified code can see other than the struct and the memory that the value owns, as [Writing through a buffer](#writing-through-a-buffer) lists it. After a call, the value owns only what it owned before the call and memory that the call made. The read position of a `bytes.Buffer` never passes the end of what was written to it. Every method of `bytes.Buffer` keeps it so, and `|b|` is the number of bytes between the two.
 - Code of another package that is not verified runs code of the verified package only as `vego` follows it, which [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods) describes: during a call that the verified package makes, it runs only what that call hands it, through the arguments and the receiver. Code that it kept from an earlier call, a value it stored, or code that it runs on another goroutine or at another time, does not call back into a verified function while that function runs, so that the call never ends. A cycle that stays in the package, or that goes through what a call hands to another package, is found and reported.
-- A claim under `asserts` is true: the function calls nothing that the parameter holds, or that a call of what the parameter holds returns, but what the claim allows, and uses no reflection on it (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
+- For a parameter listed under `runs` or `keeps`, the function calls through an interface value or a function value nothing that the parameter holds, or that a call of what the parameter holds returns, but the methods of the interfaces and the function types that the parameter's type reaches and those of the types listed under `asserts`, and it uses no reflection to call what the parameter holds (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). Verified code answers for the methods that the parameter's type has, each checked where the value is converted. The author of the entry answers for the rest. An entry such as that of `use(p Pinger)` with `runs: [p]` and no `asserts`, for a function that asserts `p` to an interface with `Bump` and calls it, is false, and a proof that relies on it is worthless. For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For a parameter whose footprint the contract lists in `Modifies`, they pass no other argument that reaches memory in that footprint without going through an interface value: `Log` relies on the `Lines` that `t` points to not being memory that the methods of `r` write. The same holds for a package-level variable of an interface type that the contract lists in `Modifies` by itself: they pass no argument that reaches memory in the footprint of the value the variable holds when the call begins, as `printLines` relies on its lines not being memory that the writer in `logOut` writes. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one whose methods change the states of the other, as one that wraps it does, unless one of them is nil. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method. For a parameter whose type owns memory (see [Structs that own memory](#structs-that-own-memory)), they pass a struct whose owned memory is reached by nothing else they pass: not by the other arguments, not by the struct's other fields, and not by what its other owned fields refer to. Memory that a method returns from what its struct owns, which its contract shows with `within(result, s)`, is not stored by code that is not verified, and is not passed to a verified function together with the struct it came from or with anything that reaches that struct. The same holds of what code that is not verified takes out of an error that a verified function returns, by a type assertion or reflection, when the error came from a call made on what a struct it was handed owns, as the error of `fmt.Fprint(r.out, ...)` may hold what `r.out` holds: no contract can say that an error lies within a struct.
 - When the server calls a verified handler, the writer it passes writes none of the memory that the request reaches without going through an interface value, except the field `Trailer` of the `Request` and the map it refers to, which the server fills while it reads the body, also when a write to the writer drains a body the handler left unread. Verified code cannot read or write that field. Code that is not verified does not make that map reachable from anything else it hands a verified function, as `req.Trailer = req.Header` in a middleware would. Code that is not verified uses a `ResponseWriter`, and hands one to verified code as that type or as any other interface, only while the `ServeHTTP` call that received it runs, and does not hand one to a verified function that keeps that parameter.
 - The body of every request that reaches verified code from code that is not verified makes progress: a `Read` of it with a buffer that is not empty returns bytes or an error. The server's bodies do. Verified code cannot store into the field `Body` of a request. A middleware that is not verified and replaces the body with a reader that can return no bytes and no error for ever breaks this, and so does a test or a caller that builds a request over such a reader, as `httptest.NewRequest` can. `json.NewDecoder(io.LimitReader(req.Body, n)).Decode(&x)` in a verified function it calls may then never return.

@@ -449,8 +449,11 @@ func (v *fnVerifier) sameTyped(st *state, a, b *logic.Term) {
 // on the type itself; the type has no invariant; nothing the type reaches
 // through exported fields has methods, which reflection reaches; and
 // nothing it holds, in any field at any depth, can carry code nobody
-// checked: an any, an interface with a method that has no contract, or a
-// function type without one (F13 of the review of S1). A value receiver
+// checked: an interface other than error, or a function type without a
+// contract (F13 of the review of S1; an interface whose methods all have
+// contracts is refused too since the runs step, as a trusted function
+// may assert what it holds to another interface), and no method returns
+// such a value. A value receiver
 // reached through the converted pointer is read when the method runs, so
 // the pointer is proved not nil here, where it is fixed. (S1 of F33;
 // values.BoxedImplicitly and typederrors.ThroughAny are what this keeps
@@ -466,8 +469,16 @@ func (v *fnVerifier) checkedMethods(e ast.Expr, from types.Type, val value, st *
 			"a type converted to error must have no invariant")
 	}
 	if held, path := uncheckedHeld(v.pkgVerifier, from, "", map[types.Type]bool{}); held != nil {
-		refuse(fmt.Sprintf("it holds%s a value of type %s, which can carry code that nothing checks", path, shown(held)),
-			"a type converted to error may hold an error, an interface whose methods all have contracts, or a function type with a contract, and no other code")
+		why := fmt.Sprintf("it holds%s a value of type %s, which can carry code that nothing checks", path, shown(held))
+		if types.IsInterface(held) && v.pkgVerifier.fullyContracted(held) {
+			// A value converted to the interface was checked against its
+			// methods only, and code given the error may assert it to
+			// another interface: a trusted function whose entry lists
+			// that interface under asserts over an error (asserts.go).
+			why = fmt.Sprintf("it holds%s a value of type %s, which was checked only against the methods of %s where it was made, and code given the error may find other methods on it by a type assertion",
+				path, shown(held), shown(held))
+		}
+		refuse(why, "a type converted to error may hold an error or a function type with a contract, and no other code")
 	}
 	_, fromPointer := from.Underlying().(*types.Pointer)
 	methods := types.NewMethodSet(from)
@@ -496,6 +507,15 @@ func (v *fnVerifier) checkedMethods(e ast.Expr, from types.Type, val value, st *
 			refuse(fmt.Sprintf("%s names a variable of a group with an invariant, which a call made at any time could not assume", name),
 				"each method of a type converted to error must name no such variable")
 		}
+		// What a method returns is what code given the error can assert
+		// next, as what the value holds is.
+		for result := range method.Type().(*types.Signature).Results().Variables() {
+			if held, path := uncheckedHeld(v.pkgVerifier, result.Type(), "", map[types.Type]bool{}); held != nil {
+				refuse(fmt.Sprintf("%s returns%s a value of type %s, which can carry code that nothing checked against all that code given the error may call on it",
+					name, path, shown(held)),
+					"the methods of a type converted to error may return an error or a function type with a contract, and no other code")
+			}
+		}
 		if _, recvPointer := method.Type().(*types.Signature).Recv().Type().(*types.Pointer); fromPointer && !recvPointer {
 			done := v.at(e.Pos())
 			v.check(st, guard, logic.Ne(val[0], logic.RefLit(0)), e.Pos(),
@@ -512,8 +532,10 @@ func (v *fnVerifier) checkedMethods(e ast.Expr, from types.Type, val value, st *
 // uncheckedHeld returns a type that a value of type t holds, in any field
 // at any depth, exported or not, through pointers, slices, arrays, maps,
 // and channels, that can carry code nothing checks where verified code
-// makes it: an any, an interface with a method that has no contract, or a
-// function type without one; nil when there is none. path says where.
+// makes it: an interface other than error, since a value converted to one
+// is checked against its methods only and code given the error may assert
+// it to another; or a function type without a contract; nil when there is
+// none. path says where.
 func uncheckedHeld(pv *pkgVerifier, t types.Type, path string, seen map[types.Type]bool) (types.Type, string) {
 	if seen[t] {
 		return nil, ""
@@ -524,7 +546,7 @@ func uncheckedHeld(pv *pkgVerifier, t types.Type, path string, seen map[types.Ty
 	}
 	switch u := t.Underlying().(type) {
 	case *types.Interface:
-		if isError(t) || pv.fullyContracted(t) {
+		if isError(t) {
 			return nil, ""
 		}
 		return t, path

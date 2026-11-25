@@ -96,7 +96,7 @@ trusted:
   # no entry. No goroutine, timer, finalizer, cleanup, callback, or
   # package-level variable reaches it. The Read and Write of the values
   # returned call only Read and Write of what they keep. NopCloser asserts r
-  # to io.WriterTo and calls nothing.
+  # to io.WriterTo and calls nothing; see its entry.
   io.NopCloser:
     reason: >-
       Documented: "NopCloser returns a ReadCloser with a no-op Close method
@@ -108,9 +108,16 @@ trusted:
     keeps:
       r: [result]
     modifies: []
-    # Read from the source of Go 1.27: NopCloser asserts r to WriterTo, and its result has a WriteTo that calls r.WriteTo.
+    # Read from the source of Go 1.26.6 and 1.27.3: NopCloser asserts r to
+    # io.WriterTo only to choose the type of its result, and calls nothing
+    # of r. The result's Read calls r.Read and its Close nothing. When r is
+    # a WriterTo the result has a WriteTo too, which calls r.WriteTo; that
+    # method is found only by asserting the result, an io.ReadCloser, to
+    # io.WriterTo, which verified code does not do and no entry may claim
+    # (asserts.go), so the claim is about Read and Close only.
+    # TestShippedContracts hands it a reader whose other methods fail.
     asserts:
-      r: [io.WriterTo]
+      r: []
     vouches: [result]
     ensures:
       - "result != nil"

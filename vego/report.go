@@ -68,8 +68,9 @@ func TrustReport(usages []*Usage, dir string) string {
 					"holds it afterwards only in what it is kept in, and starts or registers nothing that runs it later\n", strings.Join(use.Keeps, "; "))
 			}
 			if len(use.Asserts) > 0 {
-				fmt.Fprintf(&b, "    asserts what it is handed to: %s; a claim that it calls nothing these parameters hold, or that a call of what they hold returns, "+
-					"but the methods of the interfaces and the function values that their types reach and those of the types listed, and uses no reflection on them\n",
+				fmt.Fprintf(&b, "    asserts what it is handed to: %s; a claim that it calls through an interface value or a function value nothing these parameters hold, "+
+					"or that a call of what they hold returns, but the methods of the interfaces and the function types that their types reach and those of the types listed, "+
+					"and uses no reflection on them; a parameter under runs or keeps that asserts does not list makes the same claim with an empty list\n",
 					strings.Join(use.Asserts, "; "))
 			}
 			if len(use.Formats) > 0 {

@@ -271,6 +271,53 @@ func (r *httpRound) around(what string, w http.ResponseWriter, req *http.Request
 	}
 }
 
+// probedWriter is a writer that http.Error and http.NotFound are handed:
+// its Header, WriteHeader, and Write are those of the writer it holds, and
+// it has every method of lookedFor (probes_test.go) and of the optional
+// interfaces of net/http, each of which fails the round when called. The
+// entries list w under runs with nothing under asserts, which claims that
+// the functions call nothing of w but the methods of ResponseWriter.
+type probedWriter struct {
+	http.ResponseWriter
+	round *httpRound
+}
+
+// probed wraps a writer in a probedWriter.
+func (r *httpRound) probed(w http.ResponseWriter) http.ResponseWriter {
+	return probedWriter{ResponseWriter: w, round: r}
+}
+
+func (p probedWriter) refuse(method string) {
+	p.round.fail("%s of the writer was called, which the entry does not declare under asserts", method)
+}
+
+func (p probedWriter) String() string                    { p.refuse("String"); return "" }
+func (p probedWriter) Error() string                     { p.refuse("Error"); return "" }
+func (p probedWriter) Format(fmt.State, rune)            { p.refuse("Format") }
+func (p probedWriter) GoString() string                  { p.refuse("GoString"); return "" }
+func (p probedWriter) WriteString(string) (int, error)   { p.refuse("WriteString"); return 0, nil }
+func (p probedWriter) ReadFrom(io.Reader) (int64, error) { p.refuse("ReadFrom"); return 0, nil }
+func (p probedWriter) WriteTo(io.Writer) (int64, error)  { p.refuse("WriteTo"); return 0, nil }
+
+// Unwrap has the signature http.ResponseController looks for, which go
+// vet's stdmethods, not run by go test, would have be that of errors.
+func (p probedWriter) Unwrap() http.ResponseWriter { p.refuse("Unwrap"); return p.ResponseWriter }
+func (p probedWriter) Is(error) bool               { p.refuse("Is"); return false }
+func (p probedWriter) As(any) bool                 { p.refuse("As"); return false }
+func (p probedWriter) Timeout() bool               { p.refuse("Timeout"); return false }
+func (p probedWriter) Temporary() bool             { p.refuse("Temporary"); return false }
+func (p probedWriter) Close() error                { p.refuse("Close"); return nil }
+func (p probedWriter) Flush()                      { p.refuse("Flush") }
+func (p probedWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	p.refuse("Hijack")
+	return nil, nil, errors.New("not hijacked")
+}
+func (p probedWriter) CloseNotify() <-chan bool             { p.refuse("CloseNotify"); return nil }
+func (p probedWriter) Push(string, *http.PushOptions) error { p.refuse("Push"); return nil }
+func (p probedWriter) SetReadDeadline(time.Time) error      { p.refuse("SetReadDeadline"); return nil }
+func (p probedWriter) SetWriteDeadline(time.Time) error     { p.refuse("SetWriteDeadline"); return nil }
+func (p probedWriter) EnableFullDuplex() error              { p.refuse("EnableFullDuplex"); return nil }
+
 // mustPanic makes a call whose requires is false and fails unless it
 // panics, which shows that the requires is needed at its edge.
 func (r *httpRound) mustPanic(what string, call func()) {
@@ -394,7 +441,7 @@ func (r *httpRound) sequence(rng *rand.Rand, w http.ResponseWriter, req *http.Re
 			} else {
 				r.calls++
 			}
-			r.around("Error", w, req, nil, func() { http.Error(w, msg, code) })
+			r.around("Error", w, req, nil, func() { http.Error(r.probed(w), msg, code) })
 			// Error writes its message after the header, which writes a
 			// final header after a 1xx one.
 			final = true
@@ -402,7 +449,18 @@ func (r *httpRound) sequence(rng *rand.Rand, w http.ResponseWriter, req *http.Re
 			if op == r.key {
 				r.calls++
 			}
-			r.around("NotFound", w, req, nil, func() { http.NotFound(w, req) })
+			k := &keptLog{}
+			probedReq := probedRequest(req, k)
+			r.around("NotFound", w, req, nil, func() {
+				done := k.enter()
+				http.NotFound(r.probed(w), probedReq)
+				done()
+			})
+			k.mu.Lock()
+			if len(k.problems) > 0 {
+				r.fail("NotFound: %s", strings.Join(k.problems, "; "))
+			}
+			k.mu.Unlock()
 			final = true
 		}
 	}

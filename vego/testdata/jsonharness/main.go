@@ -87,6 +87,11 @@ func fail(format string, args ...any) {
 }
 
 func main() {
+	for _, method := range recorderMethods {
+		if _, ok := reflect.TypeOf(&recorder{}).MethodByName(method); !ok {
+			fail("the recorder has no method %s", method)
+		}
+	}
 	var in Input
 	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
 		panic(err)
@@ -189,9 +194,29 @@ func (r *recorder) Write(p []byte) (int, error) {
 	return len(p), r.err
 }
 
-func (r *recorder) WriteString(string) (int, error) { calls.Add(1); return 0, nil }
-func (r *recorder) ReadFrom(any) (int64, error)     { calls.Add(1); return 0, nil }
-func (r *recorder) Close() error                    { calls.Add(1); return nil }
+// The other methods are those that the standard library is known to look
+// for by a type assertion (lookedFor in probes_test.go), each of which
+// counts as a call that Encode's entry, with enc under runs and nothing
+// under asserts, says it does not make.
+func (r *recorder) WriteString(string) (int, error)   { calls.Add(1); return 0, nil }
+func (r *recorder) ReadFrom(io.Reader) (int64, error) { calls.Add(1); return 0, nil }
+func (r *recorder) WriteTo(io.Writer) (int64, error)  { calls.Add(1); return 0, nil }
+func (r *recorder) Close() error                      { calls.Add(1); return nil }
+func (r *recorder) Flush() error                      { calls.Add(1); return nil }
+func (r *recorder) String() string                    { calls.Add(1); return "" }
+func (r *recorder) Error() string                     { calls.Add(1); return "" }
+func (r *recorder) Format(fmt.State, rune)            { calls.Add(1) }
+func (r *recorder) GoString() string                  { calls.Add(1); return "" }
+func (r *recorder) Unwrap() error                     { calls.Add(1); return nil }
+func (r *recorder) Is(error) bool                     { calls.Add(1); return false }
+func (r *recorder) As(any) bool                       { calls.Add(1); return false }
+func (r *recorder) Timeout() bool                     { calls.Add(1); return false }
+func (r *recorder) Temporary() bool                   { calls.Add(1); return false }
+
+// recorderMethods are the methods the recorder must have, which main
+// checks.
+var recorderMethods = []string{"String", "Error", "Format", "GoString", "WriteString", "ReadFrom", "WriteTo",
+	"Unwrap", "Is", "As", "Timeout", "Temporary", "Close", "Flush"}
 
 var errWriter = errors.New("the writer failed")
 

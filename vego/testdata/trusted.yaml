@@ -1456,7 +1456,7 @@ trusted:
     reason: A test of an interface listed by its methods.
     runs: [r]
     asserts:
-      r: ["interface{ Timeout() bool }"]
+      r: ["interface{ Read([]byte) (int, error) }"]
     modifies: []
 
   trialfaults.assertsLiteralBad:
@@ -1914,7 +1914,7 @@ trusted:
       r: [result]
     modifies: []
     asserts:
-      r: [io.WriterTo]
+      r: []
     vouches: [result]
     ensures: ["result != nil", "fresh(result, r)", "~closed(result)"]
 
@@ -2274,8 +2274,99 @@ trusted:
     modifies: []
 
   typederrors.consume:
-    reason: Test helper that runs the code an error holds; it stands for a trusted function to which the conversions of typederrors/unchecked.go would hand code nobody checked.
+    reason: Test helper that runs the code an error holds; it stands for a trusted function to which the conversions of typederrors/unchecked.go would hand code nobody checked. It asserts e to HeldAny and heldHidden and what they hold to an interface with Bump, which asserts declares, as it may over an error.
     runs: [e]
+    asserts:
+      e: [typederrors.HeldAny, typederrors.heldHidden, "interface{ Bump() }"]
+    modifies: []
+
+  guide.use:
+    reason: The guide's example of a trusted function that asserts what it is handed to an interface that the parameter's type does not have.
+    runs: [p]
+    asserts:
+      p: ["interface{ Bump() }"]
+    modifies: []
+
+  runsclaims.use:
+    reason: Test helper whose entry is false, kept to show what such an entry lets through; use asserts p to an interface with Bump and calls it, which an entry without asserts for p says it does not.
+    runs: [p]
+    modifies: []
+
+  runsclaims.useBump:
+    reason: Test helper that asserts p to an interface with Bump and calls it, as its asserts says, which is a defect.
+    runs: [p]
+    asserts:
+      p: ["interface{ Bump() }"]
+    modifies: []
+
+  runsclaims.useShut:
+    reason: Test helper that asserts p to Shutter and calls Shut, as its asserts says, which is a defect.
+    runs: [p]
+    asserts:
+      p: [runsclaims.Shutter]
+    modifies: []
+
+  runsclaims.usePing:
+    reason: Test helper that asserts p to an interface with Ping and calls it.
+    runs: [p]
+    asserts:
+      p: ["interface{ Ping() }"]
+    modifies: []
+
+  runsclaims.consumeAny:
+    reason: Test helper that asserts x to error and calls Error, as its asserts says, which is a defect.
+    runs: [x]
+    asserts:
+      x: [error]
+    modifies: []
+
+  runsclaims.consumeErr:
+    reason: Test helper that asserts e to PingErr and what it holds to an interface with Bump, and calls Bump.
+    runs: [e]
+    asserts:
+      e: [runsclaims.PingErr, "interface{ Bump() }"]
+    modifies: []
+
+  runsclaims.useHolder:
+    reason: Test helper that asserts what h holds to an interface with Ping and calls it.
+    runs: [h]
+    asserts:
+      h: ["interface{ Ping() }"]
+    modifies: []
+
+  runsclaims.useHook:
+    reason: Test helper that asserts p to Hook and calls it, as its asserts says, which is a defect.
+    runs: [p]
+    asserts:
+      p: [runsclaims.Hook]
+    modifies: []
+
+  runsclaims.useTwo:
+    reason: Test helper that asserts what h holds to an interface with Ping and calls it, as its asserts says, which is a defect.
+    runs: [h]
+    asserts:
+      h: ["interface{ Ping() }"]
+    modifies: []
+
+  runsclaims.useNext:
+    reason: Test helper that asserts what p's Next returns to an interface with Ping and calls it, as its asserts says, which is a defect.
+    runs: [p]
+    asserts:
+      p: ["interface{ Ping() }"]
+    modifies: []
+
+  runsclaims.consumeLatch:
+    reason: Test helper that asserts e to Latcher, and what Latch returns to one with Ping, and calls it.
+    runs: [e]
+    asserts:
+      e: [runsclaims.Latcher, "interface{ Ping() }"]
+    modifies: []
+
+  runsclaims.isTimeout:
+    reason: Test helper that asserts err to an interface with Timeout and calls it.
+    runs: [err]
+    asserts:
+      err: ["interface{ Timeout() bool }"]
     modifies: []
 
   typederrorsbad.wrapRunes:

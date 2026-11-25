@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/token"
 	"go/types"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -13,20 +14,43 @@ import (
 // on what a parameter holds, the receiver of a method included:
 //
 //	asserts:
-//	  r: [io.WriterTo]
+//	  err: [interface{ Timeout() bool }]
 //
-// The claim: while the call lasts, and when what the function returns or
-// keeps is called later through the entries of the methods of what it
-// returns, it calls nothing that the parameter holds, at any depth, but
-// the methods of the interface types and the function values of the
-// function types that the parameter's type reaches through fields,
-// elements, and pointers, and those that the listed types reach, which it
+// An entry that lists a parameter under runs or keeps claims: while the
+// call lasts, and when what the function returns or keeps is called later
+// through the entries of the methods of what it returns, it calls through
+// an interface value or a function value nothing that the parameter holds,
+// at any depth, but the methods of the interfaces and the function types
+// that the parameter's type reaches through fields, elements, and
+// pointers, and those that the types listed under asserts reach, which it
 // may find by a type assertion. It uses no reflection to call what the
-// parameter holds. An empty list claims that it asserts the value to
-// nothing. Without the key nothing is claimed, and the call graph counts
-// every method with an exported name and every function value of the
-// package as reachable from an interface value handed over; see
-// callgraph.go. The claim narrows only the call graph.
+// parameter holds. An entry with no asserts for the parameter, or an empty
+// list, claims that it finds nothing more. Static calls of methods of a
+// concrete type on what the parameter holds, one listed or one of its own
+// package, are the function's own code, which its contract covers.
+// Verified code answers for the methods that can be called through the
+// parameter's type, each of which is checked where the value is made; the
+// author of the entry answers for everything else, which only the
+// function's source shows, as it shows what the function keeps.
+//
+// Nothing checks a value converted to an interface against another
+// interface it is later asserted to, and the list does not say which
+// interface value reached from the parameter the function asserts. So
+// over a parameter that is not of type error, listing an interface with a
+// method that one of the interface types the parameter reaches lacks, or a
+// function type it does not reach, is a defect (beyondStatic; the runs
+// step of F33): a function that calls what it finds that way can have no
+// true entry. Over an error any type may be listed: each method of a value
+// converted to error is checked where it is converted, and such a value
+// holds no interface value other than an error, and its methods return
+// none (checkedMethods). This holds until optional interfaces are checked
+// where values are converted to an interface.
+//
+// The call graph does not lean on the claim that an entry without asserts
+// makes: it counts every method with an exported name and every function
+// value of the package as reachable from an interface value handed over,
+// as for a function with no entry; see callgraph.go. An asserts key
+// narrows it to what the claim names.
 //
 // For a generic function, a key may also name a type parameter, with the
 // empty list only, as in asserts: {E: []}. The claim: the function runs no
@@ -119,9 +143,118 @@ func (pv *pkgVerifier) assertsClaim(entry *trustEntry, sig *types.Signature, fro
 			}
 			listed = append(listed, t)
 		}
+		if !isError(param.Type()) {
+			if i, beyond := beyondStatic(param.Type(), listed); beyond != "" {
+				return nil, "its asserts lists " + item.dests[i].text + " for " + item.name + ", " + beyond +
+					": nothing checks a value converted to an interface against another interface it is later asserted to, " +
+					"so a function that calls what it finds that way runs code nobody checked, and no entry can claim it; " +
+					"only over an error, each method of which is checked where the error is made, may asserts list more"
+			}
+		}
 		claim[param] = listed
 	}
 	return claim, ""
+}
+
+// beyondStatic describes why a type listed under asserts over a parameter
+// would let the function call, through an interface value or a function
+// value, code that nobody checked, or returns "". The interface values that
+// the function can reach from what the parameter holds are those of the
+// interface types that the parameter's type, and each concrete type
+// listed, reach (reachedCode): a value of each was checked where it was
+// converted against the methods of its type only. The function may assert
+// any of them to a listed interface, so a listed interface must have no
+// method that one of those types lacks. A listed function type must be one
+// that they reach. A listed concrete type adds what it reaches, since the
+// function's own code may call its methods.
+func beyondStatic(param types.Type, listed []types.Type) (int, string) {
+	var r reachedTypes
+	seen := map[types.Type]bool{}
+	r.walk(param, seen)
+	for _, t := range listed {
+		switch t.Underlying().(type) {
+		case *types.Interface, *types.Signature:
+		default:
+			r.walk(t, seen)
+		}
+	}
+	for i, t := range listed {
+		switch u := t.Underlying().(type) {
+		case *types.Interface:
+			for _, from := range r.ifaces {
+				if missing, _ := types.MissingMethod(from, u, true); missing != nil {
+					return i, fmt.Sprintf("an interface with the method %s, and what it holds may hold a value of %s, which lacks it", missing.Name(), from)
+				}
+			}
+		case *types.Signature:
+			if !slices.ContainsFunc(r.funcs, func(sig *types.Signature) bool { return types.Identical(sig, withoutRecv(u)) }) {
+				return i, "a function type that nothing it holds has"
+			}
+		}
+	}
+	return 0, ""
+}
+
+// reachedTypes collects the interface types other than error, and the function
+// types, that a type reaches.
+type reachedTypes struct {
+	ifaces []types.Type
+	funcs  []*types.Signature
+}
+
+// walk collects what a value of type t can lead code to: the interfaces
+// and the function types that t reaches through fields, elements, and
+// pointers, and through the results of the methods of the types it
+// reaches, concrete or not, and of the function types. An error leads to
+// nothing more: each method of a value converted to error is checked where
+// it is converted, and what it holds and returns has no interface value
+// but errors (checkedMethods).
+func (r *reachedTypes) walk(t types.Type, seen map[types.Type]bool) {
+	if t == nil || seen[t] || isError(t) {
+		return
+	}
+	seen[t] = true
+	if held, replaced := heldAs(t); replaced {
+		r.walk(held, seen)
+		return
+	}
+	results := func(sig *types.Signature) {
+		for result := range sig.Results().Variables() {
+			r.walk(result.Type(), seen)
+		}
+	}
+	if _, isIface := t.Underlying().(*types.Interface); !isIface {
+		for _, set := range []*types.MethodSet{types.NewMethodSet(t), types.NewMethodSet(types.NewPointer(t))} {
+			for selection := range set.Methods() {
+				results(selection.Obj().Type().(*types.Signature))
+			}
+		}
+	}
+	switch u := t.Underlying().(type) {
+	case *types.Signature:
+		r.funcs = append(r.funcs, withoutRecv(u))
+		results(u)
+	case *types.Interface:
+		r.ifaces = append(r.ifaces, t)
+		for method := range u.Methods() {
+			results(method.Type().(*types.Signature))
+		}
+	case *types.Pointer:
+		r.walk(u.Elem(), seen)
+	case *types.Slice:
+		r.walk(u.Elem(), seen)
+	case *types.Array:
+		r.walk(u.Elem(), seen)
+	case *types.Chan:
+		r.walk(u.Elem(), seen)
+	case *types.Map:
+		r.walk(u.Key(), seen)
+		r.walk(u.Elem(), seen)
+	case *types.Struct:
+		for field := range u.Fields() {
+			r.walk(field.Type(), seen)
+		}
+	}
 }
 
 // assertsDescribed describes the claims under asserts for the trust report.
@@ -147,10 +280,10 @@ func quote(s string) string { return "\"" + s + "\"" }
 // resolveListed reads a type an entry lists under asserts: a qualified name
 // of a type of the package of the function or of one it imports at any
 // depth, as io.WriterTo or *bufio.Writer, or an interface written by its
-// methods, as interface{ Timeout() bool }, which is read in the universe
-// scope and so may use only predeclared types.
+// methods, as interface{ Timeout() bool }, or error, which are read in the
+// universe scope and so may use only predeclared types.
 func resolveListed(from *types.Package, text string) (types.Type, string) {
-	if strings.HasPrefix(strings.TrimSpace(text), "interface") {
+	if strings.HasPrefix(strings.TrimSpace(text), "interface") || strings.TrimSpace(text) == "error" {
 		tv, err := types.Eval(token.NewFileSet(), nil, token.NoPos, text)
 		if err != nil || !tv.IsType() {
 			return nil, "which is not an interface type written with predeclared types only (" + fmt.Sprint(err) + "); an interface whose methods use other types must be named"

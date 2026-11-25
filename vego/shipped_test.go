@@ -702,8 +702,20 @@ var harnesses = map[string]func(rng *rand.Rand) sample{
 	},
 	"(*net/http.Request).PathValue": func(rng *rand.Rand) sample {
 		r, name := randomRequest(rng)
+		// The entry lists r under runs with nothing under asserts: what
+		// the request holds is called while the call lasts only through
+		// the methods of the interfaces its type reaches, and PathValue
+		// calls none of them (probes_test.go).
+		k := &keptLog{}
+		if rng.Intn(2) == 0 {
+			r = probedRequest(r, k)
+		}
 		before := snapshot(r, name)
-		return sample{before: before, after: []any{r, name}, results: []any{r.PathValue(name)}}
+		done := k.enter()
+		value := r.PathValue(name)
+		done()
+		k.check()
+		return sample{before: before, after: []any{r, name}, results: []any{value}}
 	},
 	"(net/http.Header).Get": func(rng *rand.Rand) sample {
 		h, key := randomHeader(rng)
@@ -2525,8 +2537,8 @@ func TestReadFileEntry(t *testing.T) {
 // recordingError is an error whose methods fail the test when called while
 // the call it is handed to is active: the entries of the os predicates
 // claim under asserts that they call no method of what err holds, but for
-// IsTimeout its Timeout. It also has Unwrap, Is, and the methods of fmt,
-// which an assertion could find.
+// IsTimeout its Timeout. It also has every other method of lookedFor
+// (probes_test.go), which an assertion could find.
 type recordingError struct {
 	log      *keptLog
 	timeout  bool
@@ -2552,6 +2564,50 @@ func (e recordingError) Is(error) bool {
 func (e recordingError) String() string {
 	e.log.called("String of the error handed to an os predicate")
 	return ""
+}
+
+func (e recordingError) As(any) bool {
+	e.log.called("As of the error handed to an os predicate")
+	return false
+}
+
+func (e recordingError) Temporary() bool {
+	e.log.called("Temporary of the error handed to an os predicate")
+	return false
+}
+
+func (e recordingError) GoString() string {
+	e.log.called("GoString of the error handed to an os predicate")
+	return ""
+}
+
+func (e recordingError) Format(fmt.State, rune) {
+	e.log.called("Format of the error handed to an os predicate")
+}
+
+func (e recordingError) WriteString(string) (int, error) {
+	e.log.called("WriteString of the error handed to an os predicate")
+	return 0, nil
+}
+
+func (e recordingError) ReadFrom(io.Reader) (int64, error) {
+	e.log.called("ReadFrom of the error handed to an os predicate")
+	return 0, nil
+}
+
+func (e recordingError) WriteTo(io.Writer) (int64, error) {
+	e.log.called("WriteTo of the error handed to an os predicate")
+	return 0, nil
+}
+
+func (e recordingError) Close() error {
+	e.log.called("Close of the error handed to an os predicate")
+	return nil
+}
+
+func (e recordingError) Flush() error {
+	e.log.called("Flush of the error handed to an os predicate")
+	return nil
 }
 
 func (e recordingError) Timeout() bool {

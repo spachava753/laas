@@ -193,7 +193,19 @@ func (r *keptReader) GoString() string       { r.log.refuse("GoString of a kept 
 func (r *keptReader) Format(fmt.State, rune) { r.log.refuse("Format of a kept reader") }
 func (r *keptReader) Flush() error           { r.log.refuse("Flush of a kept reader"); return nil }
 
-func (w *keptWriter) Close() error { w.log.refuse("Close of a kept writer"); return nil }
+func (r *keptReader) Error() string   { r.log.refuse("Error of a kept reader"); return "" }
+func (r *keptReader) Unwrap() error   { r.log.refuse("Unwrap of a kept reader"); return nil }
+func (r *keptReader) Is(error) bool   { r.log.refuse("Is of a kept reader"); return false }
+func (r *keptReader) As(any) bool     { r.log.refuse("As of a kept reader"); return false }
+func (r *keptReader) Timeout() bool   { r.log.refuse("Timeout of a kept reader"); return false }
+func (r *keptReader) Temporary() bool { r.log.refuse("Temporary of a kept reader"); return false }
+func (w *keptWriter) Error() string   { w.log.refuse("Error of a kept writer"); return "" }
+func (w *keptWriter) Unwrap() error   { w.log.refuse("Unwrap of a kept writer"); return nil }
+func (w *keptWriter) Is(error) bool   { w.log.refuse("Is of a kept writer"); return false }
+func (w *keptWriter) As(any) bool     { w.log.refuse("As of a kept writer"); return false }
+func (w *keptWriter) Timeout() bool   { w.log.refuse("Timeout of a kept writer"); return false }
+func (w *keptWriter) Temporary() bool { w.log.refuse("Temporary of a kept writer"); return false }
+func (w *keptWriter) Close() error    { w.log.refuse("Close of a kept writer"); return nil }
 func (w *keptWriter) WriteByte(byte) error {
 	w.log.refuse("WriteByte of a kept writer")
 	return nil
