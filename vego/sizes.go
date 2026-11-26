@@ -568,11 +568,17 @@ func declaredText(text string, memory *big.Int) string {
 // declared memory, the clauses its entry declares for that case: what it
 // reserves by a number must keep the bound on the array of every slice,
 // given that what it copies is at most the memory (class N).
-func (v *fnVerifier) checkDeclaredClauses(fn *funcInfo, name string, pre *specEnv, st *state, guard []*logic.Term, pos token.Pos) {
+//
+// It reports whether every declared clause was proved: with I's bounds a
+// declared clause implies the size conjuncts of its entry, so when one is
+// not proved those conjuncts are assumed and not reported beside it, with
+// a hint that does not meet the declaration (F22 of the review of 2c).
+func (v *fnVerifier) checkDeclaredClauses(fn *funcInfo, name string, pre *specEnv, st *state, guard []*logic.Term, pos token.Pos) bool {
 	decl := v.sizesOf()
 	if decl == nil || fn.trust == nil {
-		return
+		return true
 	}
+	held := v.reports
 	for _, formula := range fn.trust.declared {
 		text := declaredText(formula.text, decl.memory)
 		node, err := logic.ParseFormula(text)
@@ -584,4 +590,5 @@ func (v *fnVerifier) checkDeclaredClauses(fn *funcInfo, name string, pre *specEn
 			"precondition of %s may not hold under the declared memory: %s, with Memory the %s declared; what it reserves by a number "+
 				"is not bounded by what the machines hold, so bound it", name, strings.Join(strings.Fields(formula.text), " "), decl.written)
 	}
+	return v.reports == held
 }

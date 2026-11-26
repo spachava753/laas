@@ -664,6 +664,11 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	self := v.callGraph().byObj[v.fn.obj]
 	recursive := len(fn.requires) > 0 && self != nil && v.fn.decl != nil && v.fn.spelled == nil && v.fn.measure != nil &&
 		v.cycleThrough(self, v.callEdges(call, fn), true) != nil
+	// Under a declared memory the clauses an entry declares for it come
+	// first; when one is not proved, it is reported alone (F22 of the
+	// review of step 2c).
+	declaredHeld := true
+	v.uncaptured(func() { declaredHeld = v.checkDeclaredClauses(fn, name, pre, st, guard, call.Pos()) })
 	for _, c := range fn.requires {
 		// A bound of what a buffer can grow to, or of what a trusted
 		// function allocates: the message says what bound on each length
@@ -673,6 +678,10 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			// what bound on each length is enough.
 			for _, node := range c.node.Conjuncts() {
 				text := strings.Join(strings.Fields(c.text[node.Start:node.End]), " ")
+				if !declaredHeld && (strings.Contains(text, "MaxAlloc") || strings.Contains(text, "MaxInt")) {
+					st.assume(logic.Implies(logic.And(guard...), v.formula(c, node, pre)))
+					continue
+				}
 				if !strings.Contains(text, "MaxAlloc") {
 					v.check(st, guard, v.formula(c, node, pre), call.Pos(), "precondition of %s may not hold: %s%s", name, text, v.growthHint(c, node, pre, passed))
 					continue
@@ -749,7 +758,6 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		}
 		v.stateNote = nil
 	}
-	v.uncaptured(func() { v.checkDeclaredClauses(fn, name, pre, st, guard, call.Pos()) })
 	v.checkRecursion(fn, pre, st, guard, call)
 	written := v.targets(fn, args, st, before)
 	// What the callee never assigns it leaves as it was (S1).

@@ -261,3 +261,22 @@ func GrowsForTwo(a, b string) (r string) {
 	r = w.String()
 	return r
 }
+
+// A declared clause not proved is reported alone: it implies the size
+// conjuncts of its entry, whose hint would not meet the declaration (F22
+// of the review of step 2c).
+// @Requires n >= 0
+// @Ensures True
+func GrowsAnyBuilder(n int) (r string) {
+	var b strings.Builder
+	b.Grow(n) // want `vego: precondition of Grow may not hold under the declared memory: n <= Memory`
+	r = b.String()
+	return r
+}
+
+// @Requires n >= 0
+// @Ensures True
+func GrowsAnySlice(s []byte, n int) (r []byte) {
+	r = slices.Grow(s, n) // want `vego: precondition of Grow may not hold under the declared memory: n \* elemsize\(s\) <= Memory`
+	return r
+}
