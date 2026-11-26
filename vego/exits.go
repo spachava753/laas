@@ -141,6 +141,11 @@ func (v *fnVerifier) checkExitAllowed(pos token.Pos, callee string) {
 			"says so with // @Exits in its doc comment, as any function does", callee, v.placeOf(v.pkgVerifier.mainReference()))
 		return
 	}
+	if v.fn.obj.Type().(*types.Signature).Recv() != nil {
+		v.report(pos, "%s calls %s, which may end the process, and a method cannot end the process yet; return an error, "+
+			"or end the process in a function that calls %s", v.fn.obj.Name(), callee, v.fn.obj.Name())
+		return
+	}
 	v.report(pos, "%s calls %s, which may end the process; add // @Exits to the doc comment of %s if it may end the process, "+
 		"or call something that returns", v.fn.obj.Name(), callee, v.fn.obj.Name())
 }

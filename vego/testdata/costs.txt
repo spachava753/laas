@@ -1384,6 +1384,7 @@ exits	log.Fatalln	1	521	0
 exits	log.Print	1	2741	0
 exits	os.Exit	1	111	0
 exitsbad	(*exitslib.T).Halt	1	39	0
+exitsbad	(exitsbad.T).Fail	2	583	0
 exitsbad	exitsbad.AfterExit	2	482	0
 exitsbad	exitsbad.AsValue	1	46	0
 exitsbad	exitsbad.BeforeExit	3	1185	0
@@ -1391,6 +1392,7 @@ exitsbad	exitsbad.Calls	2	355	0
 exitsbad	exitsbad.Deferred	1	46	0
 exitsbad	exitsbad.DeferredBound	1	46	0
 exitsbad	exitsbad.DeferredLiteral	1	46	0
+exitsbad	exitsbad.GetNever	2	339	0
 exitsbad	exitsbad.Handed	1	558	0
 exitsbad	exitsbad.HandedNamed	1	46	0
 exitsbad	exitsbad.LiteralCalled	1	46	0
@@ -1410,6 +1412,8 @@ exitsbad	exitsbad.UsesHalt	1	241	0
 exitsbad	exitsbad.UsesMayStop	4	899	0
 exitsbad	exitsbad.UsesStop	2	158	0
 exitsbad	exitsbad.stopAt	1	111	0
+exitsbad	exitsbad.stopInt	1	46	0
+exitsbad	exitsbad.the initialiser of never	0	0	0
 exitsbad	exitslib.Both	1	28	0
 exitsbad	exitslib.ExitCode	1	182	0
 exitsbad	exitslib.ExitNever	1	195	0
@@ -1420,6 +1424,10 @@ exitsbad	log.Fatal	1	521	0
 exitsbad	os.Exit	1	111	0
 exitsbad	slices.ContainsFunc	1	2588	0
 exitsbad	sort.Search	1	2237	0
+exitsinit	exitsinit.UsesLimit	2	144	0
+exitsinit	exitsinit.init	2	1504	0
+exitsinit	exitsinit.the initialiser of limit	0	0	0
+exitsinit	log.Fatal	1	521	0
 exitsmain	exitsmain.count	12	11492	0
 exitsmain	exitsmain.main	12	30216	0
 exitsmain	exitsmain.usage	4	12015	0

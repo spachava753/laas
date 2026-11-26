@@ -28,6 +28,10 @@ type exitCase struct {
 	stderr   string
 	panics   bool
 	deferred bool // whether the call the child deferred ran
+	// probed is set for a case that formats the operands of
+	// TestPlainFormatting: what it writes is not checked, and no method of
+	// a probe may run (F13 of the review of step 1 of F37).
+	probed bool
 }
 
 // exitCases holds, for each entry, the runs that show what it claims: that
@@ -45,14 +49,17 @@ var exitCases = map[string][]exitCase{
 	"log.Fatal": {
 		{name: "fatal", status: 1, stderr: fmt.Sprint("at", 1, "and", 2) + "\n"},
 		{name: "fatal", panicOnExit0: true, status: 1, stderr: fmt.Sprint("at", 1, "and", 2) + "\n"},
+		{name: "fatalprobe", status: 1, probed: true},
 	},
 	"log.Fatalf": {
 		{name: "fatalf", status: 1, stderr: fmt.Sprintf("%d-%s", 4, "x") + "\n"},
 		{name: "fatalf", panicOnExit0: true, status: 1, stderr: fmt.Sprintf("%d-%s", 4, "x") + "\n"},
+		{name: "fatalfprobe", status: 1, probed: true},
 	},
 	"log.Fatalln": {
-		{name: "fatalln", status: 1, stderr: fmt.Sprintln("at", 1) + ""},
+		{name: "fatalln", status: 1, stderr: fmt.Sprintln("at", 1)},
 		{name: "fatalln", panicOnExit0: true, status: 1, stderr: fmt.Sprintln("at", 1)},
+		{name: "fatallnprobe", status: 1, probed: true},
 	},
 }
 
@@ -70,7 +77,16 @@ func TestChildCase(t *testing.T) {
 	defer fmt.Println(deferredMark)
 	log.SetFlags(0)
 	log.SetOutput(os.Stderr)
+	probeMarks = true
+	// Every verb and flag of probeFormat, over every operand.
+	verbs := "%v %+v %#v %s %x %X %q %d %T %p %w %z %[1]v %[1]s %6.2v % x %-8q %[2]d %*d %.*s %! % %% text "
 	switch which {
+	case "fatalprobe":
+		log.Fatal(plainOperands()...)
+	case "fatalfprobe":
+		log.Fatalf(strings.Repeat(verbs, 3), plainOperands()...)
+	case "fatallnprobe":
+		log.Fatalln(plainOperands()...)
 	case "exit3":
 		os.Exit(3)
 	case "exit0":
@@ -119,11 +135,40 @@ func checkExitEntry(t *testing.T, pv *pkgVerifier, pkg *types.Package, key strin
 		if ran := strings.Contains(stdout.String(), deferredMark); ran != c.deferred {
 			t.Errorf("%s: the deferred call ran: %v, not %v", what, ran, c.deferred)
 		}
+		if strings.Contains(stdout.String(), probeMark) {
+			t.Errorf("%s ran a method of a probe", what)
+		}
 		switch {
+		case c.probed:
 		case c.panics && !strings.Contains(stderr.String(), c.stderr):
 			t.Errorf("%s did not panic with %q: %s", what, c.stderr, stderr.String())
 		case !c.panics && stderr.String() != c.stderr:
 			t.Errorf("%s wrote %q to standard error, not %q", what, stderr.String(), c.stderr)
+		}
+	}
+}
+
+// TestExitsInReport checks what the trust report says of an entry that
+// never returns and of one that may end the process and returns otherwise
+// (F15 of the review of step 1 of F37).
+func TestExitsInReport(t *testing.T) {
+	parallel(t)
+	report := TrustReport([]*Usage{{
+		ProjectKeys: map[string][]string{"/work/vego-trusted.yaml": {"example.com/app.Stop", "example.com/app.Must"}},
+		Entries: []*EntryUse{
+			{Key: "example.com/app.Stop", Reason: "Calls os.Exit.", File: "/work/vego-trusted.yaml", Line: 3, Exits: true, Never: true},
+			{Key: "example.com/app.Must", Reason: "Calls os.Exit on a failure.", File: "/work/vego-trusted.yaml", Line: 9, Exits: true},
+		},
+	}}, "/work")
+	never := "exits: a claim that the function ends the process as os.Exit does, without returning and without running deferred calls; nothing after a call of it is checked"
+	may := "exits: a claim that the function may end the process as os.Exit does, without returning and without running deferred calls; nothing is checked on the path where it does, and where it returns its ensures hold"
+	for key, want := range map[string]string{"example.com/app.Stop": never, "example.com/app.Must": may} {
+		_, after, found := strings.Cut(report, key)
+		if !found {
+			t.Fatalf("the report does not name %s:\n%s", key, report)
+		}
+		if line, _, _ := strings.Cut(strings.SplitN(after, "\n", 3)[2], "\n"); strings.TrimSpace(line) != want {
+			t.Errorf("the report says of %s %q, not %q", key, strings.TrimSpace(line), want)
 		}
 	}
 }

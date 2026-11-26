@@ -284,3 +284,31 @@ func BeforeExit(xs []int) {
 func ReadyClaims(ready bool) (result bool) {
 	return ready || exits.Stop() // want `vego: postcondition may not hold: ~result`
 }
+
+// stopInt never returns.
+//
+// @Exits
+// @Ensures False
+func stopInt() (r int) {
+	os.Exit(1)
+	return 0
+}
+
+// never is never set: its initialiser ends the process.
+var never = stopInt()
+
+// GetNever reads never, of which nothing is known (F14 of the review of
+// step 1).
+//
+// @Ensures r = 1
+func GetNever() (r int) {
+	return never // want `vego: postcondition may not hold: r = 1`
+}
+
+// Fail is a method that ends the process, which a method cannot do yet
+// (F16 of the review of step 1).
+//
+// @Ensures True
+func (T) Fail() {
+	log.Fatal("failed") // want `vego: Fail calls log\.Fatal, which may end the process, and a method cannot end the process yet; return an error, or end the process in a function that calls Fail`
+}

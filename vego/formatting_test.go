@@ -22,14 +22,30 @@ import (
 // probeCalls counts the calls of the methods of fmtProbe.
 var probeCalls int
 
+// probeMarks is set in a child process of checkExitEntry, where a count is
+// lost when the process ends: a method of a probe then writes probeMark to
+// standard output at once (F13 of the review of step 1 of F37).
+var probeMarks bool
+
+// probeMark is what a probe writes when probeMarks is set.
+const probeMark = "a method of a probe ran"
+
+// ran counts a call of a method fmt must not call, and writes the mark.
+func ran(count *int) {
+	*count++
+	if probeMarks {
+		fmt.Fprintln(os.Stdout, probeMark)
+	}
+}
+
 // fmtProbe has every method fmt calls, all of them on the pointer, so its
 // own method set is empty and vego counts it as plain.
 type fmtProbe struct{ n int }
 
-func (p *fmtProbe) String() string                { probeCalls++; return "probe" }
-func (p *fmtProbe) Error() string                 { probeCalls++; return "probe" }
-func (p *fmtProbe) GoString() string              { probeCalls++; return "probe" }
-func (p *fmtProbe) Format(f fmt.State, verb rune) { probeCalls++ }
+func (p *fmtProbe) String() string                { ran(&probeCalls); return "probe" }
+func (p *fmtProbe) Error() string                 { ran(&probeCalls); return "probe" }
+func (p *fmtProbe) GoString() string              { ran(&probeCalls); return "probe" }
+func (p *fmtProbe) Format(f fmt.State, verb rune) { ran(&probeCalls) }
 
 // withProbes holds probes in exported and unexported fields.
 type withProbes struct {
@@ -63,7 +79,7 @@ func (v valueString) String() string { return "value" }
 type both struct{ N int }
 
 func (b both) Error() string  { return "error" }
-func (b both) String() string { badCalls++; return "string" }
+func (b both) String() string { ran(&badCalls); return "string" }
 
 // nilSafe has String on the pointer and answers for nil.
 type nilSafe struct{ N int }
@@ -92,6 +108,23 @@ func probeFormat(rng *rand.Rand) string {
 	return b.String()
 }
 
+// plainOperands returns values of every shape the rule calls plain, each
+// of which holds a probe or is a named type, and errors of known origin.
+func plainOperands() []any {
+	return []any{
+		0, -1, 1 << 62, uint8(200), true, 2.5, "", "text", "\xff\x00", []byte("hi"), []int{1, 2}, []string{"a", ""},
+		fmtProbe{3}, withProbes{N: 1, S: "s"}, []withProbes{{N: 2}}, [][]withProbes{{{N: 3}}, nil},
+		probeNest{Ws: []withProbes{{}}, Wss: [][]withProbes{{{}}}},
+		probeName("x"), []probeName{"a", "b"}, struct {
+			A int
+			B string
+		}{1, "x"},
+		nil, errors.New("made"), fmt.Errorf("wrapped: %w", io.EOF),
+		// Values whose String or Error method the rule checks.
+		valueString{1}, &valueString{2}, (*valueString)(nil), both{3}, &both{4}, &nilSafe{5}, (*nilSafe)(nil), &nilPanics{6}, (*nilPanics)(nil),
+	}
+}
+
 // TestPlainFormatting checks what the rule for formatting claims of package
 // fmt, on which the shipped entries with formats and fmt.Errorf rest:
 // formatting a value of a type that the rule calls plain runs none of the
@@ -105,18 +138,7 @@ func TestPlainFormatting(t *testing.T) {
 	scratch = t.TempDir()
 	// Values of every shape the rule calls plain, each of which holds a
 	// probe or is a named type, and errors of known origin.
-	operands := []any{
-		0, -1, 1 << 62, uint8(200), true, 2.5, "", "text", "\xff\x00", []byte("hi"), []int{1, 2}, []string{"a", ""},
-		fmtProbe{3}, withProbes{N: 1, S: "s"}, []withProbes{{N: 2}}, [][]withProbes{{{N: 3}}, nil},
-		probeNest{Ws: []withProbes{{}}, Wss: [][]withProbes{{{}}}},
-		probeName("x"), []probeName{"a", "b"}, struct {
-			A int
-			B string
-		}{1, "x"},
-		nil, errors.New("made"), fmt.Errorf("wrapped: %w", io.EOF),
-		// Values whose String or Error method the rule checks.
-		valueString{1}, &valueString{2}, (*valueString)(nil), both{3}, &both{4}, &nilSafe{5}, (*nilSafe)(nil), &nilPanics{6}, (*nilPanics)(nil),
-	}
+	operands := plainOperands()
 	// A logger whose output is io.Discard formats nothing, so it writes
 	// to a buffer.
 	logger := log.New(&bytes.Buffer{}, "p ", log.Lshortfile)
@@ -148,6 +170,15 @@ func TestPlainFormatting(t *testing.T) {
 		"(*log.Logger).Printf":  func(format string, a []any) { logger.Printf(format, a...) },
 		"(*log.Logger).Print":   func(_ string, a []any) { logger.Print(a...) },
 		"(*log.Logger).Println": func(_ string, a []any) { logger.Println(a...) },
+	}
+	// Every shipped entry with formats is run here, or, when it ends the
+	// process, in a child process (exitCases).
+	for _, file := range shippedContracts() {
+		for key, entry := range file.entries {
+			if _, run := calls[key]; len(entry.formats) > 0 && !run && !slices.Contains(exitKeys, key) {
+				t.Errorf("%s is shipped with formats, and neither this test nor a child process of checkExitEntry runs it", key)
+			}
+		}
 	}
 	rng := rand.New(rand.NewSource(1))
 	for range 3000 {

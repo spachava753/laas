@@ -569,8 +569,10 @@ type EntryUse struct {
 	Isolated       bool
 	IsolatedReason string
 	// Exits is set when the entry claims that the function may end the
-	// process (trustEntry.exits).
+	// process (trustEntry.exits), and Never when it claims that it always
+	// does.
 	Exits bool
+	Never bool
 	File  string
 	Line  int
 	// Unpredictable is set when the function returns an error and its
@@ -1366,7 +1368,7 @@ func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 		}
 		pv.usage.Entries = append(pv.usage.Entries, &EntryUse{
 			Key: entry.key, Reason: entry.reason, Shipped: entry.file.shipped, Isolated: entry.isIsolated(), IsolatedReason: entry.file.isolatedReason,
-			Exits: entry.exits, File: entry.file.path, Line: entry.line, Runs: runs, Keeps: keepsDescribed(entry), Asserts: assertsDescribed(entry), Vouches: vouches, Formats: formats, Encodes: encodes, Decodes: decodes, Callbacks: callbacks,
+			Exits: entry.exits, Never: neverReturns(fn), File: entry.file.path, Line: entry.line, Runs: runs, Keeps: keepsDescribed(entry), Asserts: assertsDescribed(entry), Vouches: vouches, Formats: formats, Encodes: encodes, Decodes: decodes, Callbacks: callbacks,
 			Every: every, Relied: []string{pv.pass.Pkg.Path()}, Fingerprint: entry.fingerprint(), States: states,
 		})
 		index = len(pv.usage.Entries) - 1
