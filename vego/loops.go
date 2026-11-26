@@ -729,11 +729,22 @@ type loopShape struct {
 func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 	at := shape.body.Lbrace + 1
 	spec := shape.spec
+	// The invariants of a loop with a Variant may not rest on the facts
+	// that only memory makes true, or they would carry them to the head,
+	// where the Variant is asked (F1 of F38). A loop without one, a range,
+	// ends by what it ranges over.
 	checkInvariants := func(st *state, what string) {
-		for _, c := range spec.invariants {
-			v.checkClauseFramed(c, v.bodyEnv(st, at), st, nil, shape.pos, what, func(node *logic.Node, goal *logic.Term) bool {
-				return v.framedLoop(st, at, c, node, goal)
-			})
+		check := func() {
+			for _, c := range spec.invariants {
+				v.checkClauseFramed(c, v.bodyEnv(st, at), st, nil, shape.pos, what, func(node *logic.Node, goal *logic.Term) bool {
+					return v.framedLoop(st, at, c, node, goal)
+				})
+			}
+		}
+		if spec.variant != nil {
+			v.withoutMemory(check)
+		} else {
+			check()
 		}
 	}
 	var counter *logic.Term

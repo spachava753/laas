@@ -687,7 +687,14 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			continue
 		}
 		v.stateNote = v.stateHint(c, fn, args, st)
-		v.checkClause(c, pre, st, guard, call.Pos(), "precondition of "+name+" may not hold")
+		if v.recursiveCall(fn, call) {
+			// The precondition of a call that recurses carries what it
+			// says to the function's entry, where its Variant is asked, as
+			// an invariant carries it to a loop's head (F1 of F38).
+			v.withoutMemory(func() { v.checkClause(c, pre, st, guard, call.Pos(), "precondition of "+name+" may not hold") })
+		} else {
+			v.checkClause(c, pre, st, guard, call.Pos(), "precondition of "+name+" may not hold")
+		}
 		v.stateNote = nil
 	}
 	v.checkRecursion(fn, pre, st, guard, call)
@@ -1601,6 +1608,17 @@ func (v *fnVerifier) calleeFormula(c *clause, env *specEnv) *logic.Term {
 	}
 	v.noteIs(env.sink, t)
 	return t
+}
+
+// recursiveCall reports whether a call may lead back to the function under
+// verification through calls that name their callee, the cycles whose
+// Variant checkRecursion asks.
+func (v *fnVerifier) recursiveCall(callee *funcInfo, call *ast.CallExpr) bool {
+	self := v.callGraph().byObj[v.fn.obj]
+	if self == nil || v.fn.decl == nil || v.fn.spelled != nil || v.fn.measure == nil {
+		return false
+	}
+	return v.cycleThrough(self, v.callEdges(call, callee), true) != nil
 }
 
 // checkRecursion looks at every call for a way back to the function under

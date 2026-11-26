@@ -4464,7 +4464,7 @@ mapping	mapping.AbsentHoldsOne	5	6901	0
 mapping	mapping.AbsentHoldsZero	5	5289	0
 mapping	mapping.AbsentKeysHoldZero	2	4444	0
 mapping	mapping.AddsCountedSame	8	10523	0
-mapping	mapping.AddsForever	12	21324	0
+mapping	mapping.AddsForever	12	21023	0
 mapping	mapping.AddsKeys	10	25784	0
 mapping	mapping.AddsThroughHanded	14	22966	0
 mapping	mapping.AddsThroughLiteral	10	25253	0
@@ -4482,14 +4482,17 @@ mapping	mapping.BothFlags	8	6015	0
 mapping	mapping.BoxesValue	1	46	0
 mapping	mapping.Bump	16	481691	2
 mapping	mapping.BumpEntry	9	14342	0
+mapping	mapping.ByInt	10	15611	0
+mapping	mapping.ByInvariant	11	18669	0
+mapping	mapping.ByRequires	13	23489	0
 mapping	mapping.CallerLoses	6	10517	0
 mapping	mapping.Clear	11	428110	2
 mapping	mapping.ClearCountedNothing	9	13526	0
 mapping	mapping.ClearCountedOld	11	428110	2
 mapping	mapping.ClearsAnother	3	13689	0
 mapping	mapping.ClearsOne	6	10857	0
-mapping	mapping.ClearsSlices	17	40218	0
-mapping	mapping.ClearsSlicesWrong	14	42177	0
+mapping	mapping.ClearsSlices	17	39942	0
+mapping	mapping.ClearsSlicesWrong	14	41659	0
 mapping	mapping.CopiesFromRanged	12	53497	4
 mapping	mapping.CopiesIntoRanged	9	14713	0
 mapping	mapping.CopiesMaybeRanged	12	54941	4
@@ -4498,8 +4501,8 @@ mapping	mapping.CopyKeysCountedTwice	9	31339	0
 mapping	mapping.CountFlags	7	10861	0
 mapping	mapping.CountFlagsOne	7	10987	0
 mapping	mapping.CountKept	7	11022	0
-mapping	mapping.Counts	9	14974	0
-mapping	mapping.CountsInput	14	17283	0
+mapping	mapping.Counts	9	14962	0
+mapping	mapping.CountsInput	14	17091	0
 mapping	mapping.DeferredAfterLoop	7	7236	0
 mapping	mapping.DeleteOne	5	6254	0
 mapping	mapping.DeleteOthersKept	5	6224	0
@@ -4515,7 +4518,7 @@ mapping	mapping.FieldOfEntry	0	0	0
 mapping	mapping.FlipsWhileRanging	8	11334	0
 mapping	mapping.Floats	0	0	0
 mapping	mapping.ForcedKeys	4	12528	0
-mapping	mapping.Forever	9	18886	0
+mapping	mapping.Forever	9	18874	0
 mapping	mapping.Found	2	4317	0
 mapping	mapping.FoundNowhere	2	1587	0
 mapping	mapping.Fresh	12	12666	0
@@ -6017,7 +6020,7 @@ stdentries	stdentries.CountBytes	83	362095	1
 stdentries	stdentries.Dashes	6	12220	0
 stdentries	stdentries.DeleteFirst	12	479488	4
 stdentries	stdentries.DigitValue	13	4148	0
-stdentries	stdentries.Drop	24	709489	6
+stdentries	stdentries.Drop	24	709297	6
 stdentries	stdentries.DropEmpty	7	6936	0
 stdentries	stdentries.DropInPlace	7	476686	4
 stdentries	stdentries.DropKeys	7	8677	0

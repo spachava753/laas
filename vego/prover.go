@@ -1,7 +1,6 @@
 package vego
 
 import (
-	"slices"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
@@ -89,13 +88,13 @@ func (pv *pkgVerifier) contradictory(facts []*logic.Term) bool {
 
 // quickly is prove with a small budget.
 func (v *fnVerifier) quickly(st *state, guard []*logic.Term, goal *logic.Term) bool {
-	return v.proves(append(slices.Clip(st.hyps), guard...), goal, quickEffort)
+	return v.proves(append(v.hypsFor(st.hyps), guard...), goal, quickEffort)
 }
 
 // attempt tries to prove a goal from the facts of a state together with the
 // conditions under which the current expression is evaluated.
 func (v *fnVerifier) attempt(st *state, guard []*logic.Term, goal *logic.Term) solver.Result {
-	return v.solver().Prove(append(slices.Clip(st.hyps), guard...), goal, v.options(0, obligation))
+	return v.solver().Prove(append(v.hypsFor(st.hyps), guard...), goal, v.options(0, obligation))
 }
 
 // limitNote returns what a report of an obligation that was not proved adds
@@ -117,5 +116,5 @@ func limitNote(result solver.Result) string {
 // prove reports whether a goal follows from the facts of a state together
 // with the conditions under which the current expression is evaluated.
 func (v *fnVerifier) prove(st *state, guard []*logic.Term, goal *logic.Term) bool {
-	return v.proves(append(slices.Clip(st.hyps), guard...), goal, 0)
+	return v.proves(append(v.hypsFor(st.hyps), guard...), goal, 0)
 }

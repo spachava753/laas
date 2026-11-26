@@ -48,6 +48,14 @@ type loopSpec struct {
 type fnVerifier struct {
 	*pkgVerifier
 	fn *funcInfo
+	// unmarked, while set, holds the marks of the facts that the goals
+	// being asked may not rest on: those of a Variant and of a loop
+	// invariant (sizes.go). The proofs of attempt, quickly, and prove
+	// leave them out, and unmarkedHit records whether any was left out.
+	// dropped caches what withoutMarked makes of each hypothesis.
+	unmarked    map[*logic.Term]bool
+	unmarkedHit bool
+	dropped     map[*logic.Term]*logic.Term
 	// converting counts, for each expression that Go converts to an
 	// interface type, the evaluations of it under way that check the
 	// conversion; see converted.
@@ -902,6 +910,7 @@ func (v *fnVerifier) answered(st *state, guard []*logic.Term, conjunct *logic.Te
 			v.explaining = nil
 			lost += v.explainFrame(f)
 		}
+		lost += v.memoryNote(st, guard, conjunct)
 		v.report(pos, "%s%s%s", fmt.Sprintf(format, args...), lost, limitNote(result))
 	}
 	if assume {

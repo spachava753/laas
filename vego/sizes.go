@@ -3,6 +3,7 @@ package vego
 import (
 	"go/token"
 	"go/types"
+	"slices"
 	"sync"
 
 	"github.com/spachava753/laas/vego/internal/logic"
@@ -114,43 +115,74 @@ func holdsMark(t *logic.Term, marks map[*logic.Term]bool) bool {
 	return false
 }
 
-// withoutMarked returns the hypotheses with every marked bound dropped: an
-// atom Le(t, mark) where it stands only to weaken becomes True, and a
-// hypothesis that holds a mark anywhere else is left out. What follows from
-// the result follows from the hypotheses.
-func withoutMarked(hyps []*logic.Term, marks map[*logic.Term]bool) (out []*logic.Term, changed bool) {
-	out = make([]*logic.Term, 0, len(hyps))
+// hypsFor returns the hypotheses a proof of the goal being asked uses:
+// all of them, clipped, or, while unmarked is set, each with the marked
+// bounds dropped (an atom Le(t, mark) where it stands only to weaken
+// becomes True, and a hypothesis that holds a mark anywhere else is left
+// out). What follows from the result follows from the hypotheses. Without
+// a mark among them the result is the hypotheses themselves.
+func (v *fnVerifier) hypsFor(hyps []*logic.Term) []*logic.Term {
+	v.unmarkedHit = false
+	if v.unmarked == nil {
+		return slices.Clip(hyps)
+	}
+	if v.dropped == nil {
+		v.dropped = map[*logic.Term]*logic.Term{}
+	}
+	out := make([]*logic.Term, 0, len(hyps))
 	for _, hyp := range hyps {
-		rewritten, ok := rewriteMarked(hyp, marks, func(*logic.Term) *logic.Term { return logic.True() })
-		changed = changed || !ok || rewritten != hyp
-		if ok {
+		rewritten, seen := v.dropped[hyp]
+		if !seen {
+			var ok bool
+			rewritten, ok = rewriteMarked(hyp, v.unmarked, func(*logic.Term) *logic.Term { return logic.True() })
+			if !ok {
+				rewritten = nil
+			}
+			v.dropped[hyp] = rewritten
+		}
+		if rewritten != hyp {
+			v.unmarkedHit = true
+		}
+		if rewritten != nil {
 			out = append(out, rewritten)
 		}
 	}
-	return out, changed
+	return out
 }
 
-// checkVariant proves a goal of a Variant, bounded below or decreasing,
-// without the facts that only memory makes true (memoryBacked). Proved so,
-// it is assumed, as check assumes a goal. Not proved so but proved with
-// them, the Variant holds only because a run cannot hold more than memory,
-// and that is what the report says. Without a mark among the hypotheses the
-// problem is the one check would ask.
-func (v *fnVerifier) checkVariant(st *state, guard []*logic.Term, goal *logic.Term, pos token.Pos, format string, args ...any) {
-	hyps, changed := withoutMarked(st.hyps, v.memoryBacked())
-	done := v.at(pos)
-	result := v.solver().Prove(append(hyps, guard...), goal, v.options(0, obligation))
-	done()
-	if result != solver.Proved && changed {
-		done := v.at(pos)
-		plain := v.attempt(st, guard, goal)
-		done()
-		if plain == solver.Proved {
-			v.report(pos, format+"; it holds only because a map cannot have more keys than memory can hold, and a loop or a recursion that adds keys "+
-				"until memory runs out does not end; the Variant must decrease for another reason, such as a count of what is left to do", args...)
-			st.assume(logic.Implies(logic.And(guard...), goal))
-			return
-		}
+// withoutMemory runs check, which asks goals of a Variant or a loop
+// invariant, with the facts that only memory makes true left out of every
+// proof it makes (memoryBacked): a loop that grows a map until memory runs
+// out would otherwise be proved to end, directly or through an invariant
+// that carries the bound to the head (F1 of the design review of F38).
+func (v *fnVerifier) withoutMemory(check func()) {
+	saved, savedHit := v.unmarked, v.unmarkedHit
+	v.unmarked, v.unmarkedHit = v.memoryBacked(), false
+	defer func() { v.unmarked, v.unmarkedHit = saved, savedHit }()
+	check()
+}
+
+// memoryNote is what the report of a goal that withoutMemory did not prove
+// adds when the goal holds with the facts it left out: that the goal holds
+// only because a run cannot hold more than memory. It asks the plain
+// problem only when a fact was left out.
+func (v *fnVerifier) memoryNote(st *state, guard []*logic.Term, goal *logic.Term) string {
+	if v.unmarked == nil || !v.unmarkedHit {
+		return ""
 	}
-	v.answered(st, guard, goal, result, true, pos, format, args...)
+	saved := v.unmarked
+	v.unmarked = nil
+	plain := v.attempt(st, guard, goal)
+	v.unmarked = saved
+	if plain != solver.Proved {
+		return ""
+	}
+	return "; it holds only because a map cannot have more keys than memory can hold, which does not show that a loop or a recursion ends: " +
+		"one that adds keys until memory runs out does not end"
+}
+
+// checkVariant proves a goal of a Variant, bounded below or decreasing, as
+// check does, with the facts that only memory makes true left out.
+func (v *fnVerifier) checkVariant(st *state, guard []*logic.Term, goal *logic.Term, pos token.Pos, format string, args ...any) {
+	v.withoutMemory(func() { v.check(st, guard, goal, pos, format, args...) })
 }
