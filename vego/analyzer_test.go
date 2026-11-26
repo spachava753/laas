@@ -203,11 +203,8 @@ func TestAnalyzer(t *testing.T) {
 		runCorpus(t, newAnalyzer(), "tworoot")
 	})
 	// The same, for two entries that differ only in rewinds (F17 of the
-	// review of step 5 of F39).
-	t.Run("tells apart entries that differ in rewinds", func(t *testing.T) {
-		parallel(t)
-		runCorpus(t, newAnalyzer(), "rewindsroot")
-	})
+	// review of step 5 of F39), runs with the programs that read until
+	// their inputs end, below.
 	// A module whose proofs were made with no entry for a type, and one
 	// that declares the type and has proofs that rest on it having none,
 	// against a module that gives it an entry.
@@ -268,12 +265,21 @@ func TestAnalyzer(t *testing.T) {
 		runCorpus(t, newAnalyzer(), "lockentries")
 	})
 	// Programs under a declared memory and the same without it (F38).
-	for _, root := range []string{"sizes", "nosizes", "sizesbad", "sizesbig", "guidesizes", "inputs", "noinputs", "inputspred", "inputssizes", "inputsbig", "guideinputs", "inputsrewinds", "rewindsplain", "inputsrewound"} {
+	for _, root := range []string{"sizes", "nosizes", "sizesbad", "sizesbig", "guidesizes"} {
 		t.Run("proves what fits under a declared memory in "+root, func(t *testing.T) {
 			parallel(t)
 			runCorpus(t, newAnalyzer(), root)
 		})
 	}
+	// Programs that read until their inputs end, under the declaration and
+	// without it (F39, part B), in one load: each is a module of its own,
+	// with a trust file of its own, and none imports another, so what one
+	// reports does not depend on the others; a load of its own for each
+	// cost the cold run of the package about ten seconds.
+	t.Run("proves that reading ends under declared inputs", func(t *testing.T) {
+		parallel(t)
+		runCorpus(t, newAnalyzer(), "inputs", "noinputs", "inputspred", "inputssizes", "inputsbig", "guideinputs", "inputsrewinds", "rewindsplain", "inputsrewound", "rewindsroot")
+	})
 	// Verified packages built together declare one memory (F13 of the
 	// review of F38), in both directions, and the same verifies.
 	for _, root := range []string{"memnone", "memdecl", "memsame", "inputsdecl"} {
