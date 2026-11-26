@@ -374,7 +374,15 @@ func (v *fnVerifier) tableAt(sink *state, mem memory, key string, sort logic.Sor
 			continue
 		}
 		if known := v.layers[at.Name]; known != nil {
-			v.distinctStructs(sink, known, key, ref, position)
+			// A position under a quantifier, of a read in a formula that no
+			// gatherer collects, is stated nothing of: a fact with its bound
+			// variable on the path would be out of the quantifier's scope
+			// (found by step 5 of F38, after a buffer was converted).
+			placed := position
+			if placed != nil && hasBound(placed) {
+				placed = nil
+			}
+			v.distinctStructs(sink, known, key, ref, placed)
 			cellNote := note
 			if position != nil && !known.flat && !hasBound(position) {
 				cellNote = note + "@" + position.String()

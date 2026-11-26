@@ -299,3 +299,19 @@ func LengthAfter() (r int) {
 	r = b.Len()
 	return r
 }
+
+// @Requires Forall i in [0, |l|) : |l[i]| <= 100
+// @Ensures True
+func short(l []string) {}
+
+// A formula read under a quantifier after a buffer was converted states
+// nothing of a position with its bound variable on the path (found by the
+// trial in step 5: the solver refused the bound variable out of scope).
+// @Ensures True
+func ReadAfterConversion(s string) (err error) {
+	var b bytes.Buffer
+	err = emit(&b, "x")
+	lines := strings.SplitAfter(b.String(), "\n")
+	short(lines) // want `vego: precondition of short may not hold: Forall i in \[0, \|l\|\) : \|l\[i\]\| <= 100`
+	return err
+}
