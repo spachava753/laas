@@ -708,3 +708,27 @@ type Rewinder func(r io.Reader)
 func RewindValue() (g Rewinder) {
 	return rewindFile // want `rewindFile .*it may make a reader yield again`
 }
+
+// out is standard output as a writer, set where the package is initialised,
+// as the trial's digraph does it.
+var out io.Writer = os.Stdout
+
+// PrintOut writes a line to out. The conversion in out's initialiser is no
+// write of a file the declaration covers: os.Stdout holds no such file when
+// it holds one, and writes nothing when it is nil (F19).
+//
+// @Modifies out
+// @Ensures True
+func PrintOut() {
+	if out != nil {
+		_, _ = io.WriteString(out, "line\n")
+	}
+}
+
+// ToStdout converts standard output to a writer inside a function, which
+// may be nil.
+//
+// @Ensures True
+func ToStdout() (w io.Writer) {
+	return os.Stdout
+}

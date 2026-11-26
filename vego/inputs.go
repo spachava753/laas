@@ -391,12 +391,21 @@ func writesThrough(t types.Type) (string, bool) {
 // through which code is about to write, is no reader the declaration
 // covers: reading such a reader to its end while writing the same file
 // through one value would not end, and the declaration does not cover
-// what the program writes (F5 of the design review of F39, and N1).
-func (v *fnVerifier) refuseFileWrite(st *state, guard []*logic.Term, key *logic.Term, pos token.Pos, how string) {
+// what the program writes (F5 of the design review of F39, and N1). A
+// *os.File may instead be nil, given as file, since every method of
+// *os.File that writes returns ErrInvalid for a nil file and writes
+// nothing (checkValid), and os.Stdout and os.Stderr are not known to hold
+// a file; file is nil for an interface value, which the caller knows holds
+// one.
+func (v *fnVerifier) refuseFileWrite(st *state, guard []*logic.Term, file, key *logic.Term, pos token.Pos, how string) {
 	if v.inputsOf() == nil {
 		return
 	}
-	v.check(st, guard, logic.Not(logic.Select(endsOfKeys, key)), pos,
+	goal := logic.Not(logic.Select(endsOfKeys, key))
+	if file != nil {
+		goal = logic.Or(logic.Eq(file, logic.RefLit(0)), goal)
+	}
+	v.check(st, guard, goal, pos,
 		"%s may write a file that is read under the declaration that inputs end; reading and writing one file through one value is not supported yet, "+
 			"so open the file to write it apart, with os.Create, or, for a file or a reader a parameter holds that is not read to its end, "+
 			"say so with // @Requires ~ends(f) of that parameter", how)
@@ -415,7 +424,7 @@ func (v *fnVerifier) checkWrittenFiles(fn *funcInfo, name string, args map[*type
 	sig := fn.obj.Type().(*types.Signature)
 	if recv := sig.Recv(); recv != nil && fileWriters[fn.obj.Name()] {
 		if object, isPointer := pointee(recv.Type()); isPointer && isOSFile(object) && len(args[recv]) >= 2 {
-			v.refuseFileWrite(st, guard, pkey(args[recv]), pos, name)
+			v.refuseFileWrite(st, guard, args[recv][0], pkey(args[recv]), pos, name)
 			return
 		}
 	}
@@ -428,7 +437,7 @@ func (v *fnVerifier) checkWrittenFiles(fn *funcInfo, name string, args map[*type
 			continue
 		}
 		if object, isPointer := pointee(param.Type()); isPointer && isOSFile(object) && len(args[param]) >= 2 {
-			v.refuseFileWrite(st, guard, pkey(args[param]), pos, name+", which lists "+param.Name()+" under modifies,")
+			v.refuseFileWrite(st, guard, args[param][0], pkey(args[param]), pos, name+", which lists "+param.Name()+" under modifies,")
 		}
 	}
 }

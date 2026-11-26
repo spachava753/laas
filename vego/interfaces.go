@@ -190,7 +190,7 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 	v.noteConverted(st, held, from, converted)
 	if object, isPointer := pointee(from); isPointer && isOSFile(object) {
 		if method, writes := writesThrough(want); writes {
-			v.refuseFileWrite(st, guard, pkey(converted), e.Pos(), fmt.Sprintf("converting %s to %s, whose %s", types.ExprString(ast.Unparen(e)), v.shown(want), method))
+			v.refuseFileWrite(st, guard, converted[0], pkey(converted), e.Pos(), fmt.Sprintf("converting %s to %s, whose %s", types.ExprString(ast.Unparen(e)), v.shown(want), method))
 		}
 	}
 	// The key of its states: the pointer's, or a new one with every state
