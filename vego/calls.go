@@ -669,6 +669,8 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	// review of step 2c).
 	declaredHeld := true
 	v.uncaptured(func() { declaredHeld = v.checkDeclaredClauses(fn, name, pre, st, guard, call.Pos()) })
+	v.checkCalleeEnds(fn, name, args, st, guard, call.Pos())
+	v.checkWrittenFiles(fn, name, args, st, guard, call.Pos())
 	for _, c := range fn.requires {
 		// A bound of what a buffer can grow to, or of what a trusted
 		// function allocates: the message says what bound on each length
@@ -911,6 +913,12 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			if v.reports > before {
 				footprintRefused[t.mod] = true
 			}
+			continue
+		}
+		// The rows of ends and unread of a bufio.Reader or a Scanner change
+		// only with its struct, the target before them, which the frame
+		// check covers (inputs.go).
+		if t.row && t.besideStruct && slices.ContainsFunc(t.cells, func(c cell) bool { return c.key == unreadRegion }) {
 			continue
 		}
 		// A nil interface value holds nothing, so it has no states, and a

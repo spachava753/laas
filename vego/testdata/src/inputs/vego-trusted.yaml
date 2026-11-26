@@ -1,0 +1,22 @@
+version: 1
+
+# The corpus of F39, part B: programs that read until their inputs end,
+# under the declaration that they do.
+inputs:
+  bytes: 1TB
+  reason: >-
+    The files and streams of this corpus are its tests' own, each far
+    smaller than a terabyte.
+
+
+trusted:
+  inputs.rewind:
+    reason: >-
+      Stands for code that is not verified and makes r yield again what it
+      yielded, as a seek back to the start does; it calls nothing of r.
+    requires: ["r != nil"]
+    runs: [r]
+    asserts: {r: []}
+    vouches: [r]
+    modifies: [r]
+    ensures: ["True"]

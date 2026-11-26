@@ -428,8 +428,8 @@ func (v *fnVerifier) unchanged(sink *state, now *logic.Term, known *layer, ref, 
 				instances = append(instances, facts...)
 				continue
 			}
-			if t.row && known.key != stateRegion {
-				// A row of states lies in the region of states alone.
+			if t.row && !inRowRegions(t.cells, known.key) {
+				// A row of states lies in the regions of its cells alone.
 				continue
 			}
 			conditions = append(conditions, logic.Ne(ref, t.ref))
@@ -455,7 +455,7 @@ func (v *fnVerifier) unchanged(sink *state, now *logic.Term, known *layer, ref, 
 			outside, facts := v.outsideFootprint(t, known.key, ref, position)
 			untouched = append(untouched, outside)
 			instances = append(instances, facts...)
-		case t.row && known.key != stateRegion:
+		case t.row && !inRowRegions(t.cells, known.key):
 			// A row of states lies in the region of states alone (S0b of
 			// F34, where a row's key stopped being a home).
 		case t.lo == nil:
@@ -1463,11 +1463,14 @@ func (v *fnVerifier) havoc(st *state, t target, guard []*logic.Term) {
 		empty := logic.And(logic.Eq(count, logic.IntLit(0)), logic.Forall(index, logic.Not(logic.Select(has, index))))
 		st.assume(logic.Implies(logic.And(append(slices.Clip(guard), logic.Eq(t.ref, logic.RefLit(0)))...), empty))
 	case t.row:
-		// Every state of the value, whoever declared it, may change.
-		before := v.row(nil, st.mem, stateRegion, logic.Bool, t.ref)
-		unknown := v.fresh("written", logic.BoolSeq)
-		kept(unknown, before)
-		st.storeRow(stateRegion, logic.Bool, t.ref, unknown)
+		// Every state of the value, whoever declared it, may change, and
+		// so may what else lies in its row (inputs.go).
+		for _, c := range rowRegions(t.cells) {
+			before := v.row(nil, st.mem, c.key, c.sort, t.ref)
+			unknown := v.fresh("written", logic.SeqOf(c.sort))
+			kept(unknown, before)
+			st.storeRow(c.key, c.sort, t.ref, unknown)
+		}
 	case t.single:
 		if t.base != nil {
 			v.noteStruct(st, *t.base)

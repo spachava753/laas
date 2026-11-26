@@ -187,6 +187,12 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 	}
 	v.converted = append(v.converted, held)
 	v.recordConversion(st, ifaceConversion{ref: held, t: from, val: converted})
+	v.noteConverted(st, held, from, converted)
+	if object, isPointer := pointee(from); isPointer && isOSFile(object) {
+		if method, writes := writesThrough(want); writes {
+			v.refuseFileWrite(st, guard, pkey(converted), e.Pos(), fmt.Sprintf("converting %s to %s, whose %s", types.ExprString(ast.Unparen(e)), v.shown(want), method))
+		}
+	}
 	// The key of its states: the pointer's, or a new one with every state
 	// False for a value, which the conversion copies.
 	keyAt := func(at *logic.Term, fresh bool) {

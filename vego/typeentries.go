@@ -427,6 +427,7 @@ func (pv *pkgVerifier) reportTwoEntries(total *Usage) {
 	var keys []string
 	reported := map[string]bool{}
 	pv.reportTwoMemories(total)
+	pv.reportTwoInputs(total)
 	for _, use := range total.Entries {
 		if use.Every == "" {
 			continue

@@ -1341,6 +1341,9 @@ func (e *specEnv) arraySlice(found reached, spelled string) (reached, error) {
 // state resolves name(x) for a state of a struct, read from the value x or
 // where the pointer x points; see stateDecl.
 func (e *specEnv) state(name string, steps []logic.Step, state string, when logic.When) (*logic.Term, error) {
+	if (state == "ends" || state == "unread") && !e.v.stateNamed(state) {
+		return e.readerGhost(name, steps, state, when)
+	}
 	if !e.v.stateNamed(state) {
 		return nil, &logic.NoState{}
 	}
@@ -2274,7 +2277,7 @@ func (v *fnVerifier) walkTarget(fn *funcInfo, m *modTarget, param *types.Var, ro
 		// interface with states and nothing else (F28).
 		receiverOfMethod := fn.receiver != nil && m.name == fn.receiver.Name()
 		if !m.behind && (v.hasStates(final) || !receiverOfMethod) {
-			form.cells, form.row = []cell{stateCell}, true
+			form.cells, form.row = v.rowCells(), true
 			t.row = true
 		}
 	case isIface(final):
@@ -2285,7 +2288,7 @@ func (v *fnVerifier) walkTarget(fn *funcInfo, m *modTarget, param *types.Var, ro
 			return shape{}, target{}, fmt.Errorf("%s has type %s, which has no states; an entry for an interface value covers the states of what it holds, "+
 				"and to assign %s itself, list what holds it", m.text, final, m.text)
 		}
-		form.cells, form.direct, form.row = []cell{stateCell}, len(hops) == 0, true
+		form.cells, form.direct, form.row = v.rowCells(), len(hops) == 0, true
 		if inMemory {
 			t.holder = cur.cells
 		}
@@ -2354,10 +2357,10 @@ func (v *fnVerifier) targets(fn *funcInfo, args map[*types.Var]value, sink *stat
 			v.misread(m.clause, err)
 		}
 		t.mod = i
-		list = append(list, splitStates(t)...)
+		list = append(list, splitStates(t, v.rowCells())...)
 		for _, also := range t.also {
 			also.mod = i
-			list = append(list, splitStates(also)...)
+			list = append(list, splitStates(also, v.rowCells())...)
 			for _, part := range also.owned {
 				part.mod, part.text, part.clause, part.part, part.ownerParam = i, also.text, also.clause, true, nil
 				list = append(list, part)
@@ -2382,6 +2385,10 @@ func (v *fnVerifier) withPointerStates(list []target, sink *state) []target {
 			v.notePointerKey(sink, value{t.base.ref, t.base.at})
 			out = append(out, states)
 		}
+		if rows, ok := v.readerTarget(t); ok {
+			v.notePointerKey(sink, value{t.base.ref, t.base.at})
+			out = append(out, rows)
+		}
 	}
 	return out
 }
@@ -2389,7 +2396,7 @@ func (v *fnVerifier) withPointerStates(list []target, sink *state) []target {
 // splitStates gives a target that covers both the footprint of an
 // interface value and its states two targets: the footprint lies at the
 // home of the value and its states at their own key (S0b of F34).
-func splitStates(t target) []target {
+func splitStates(t target, cells []cell) []target {
 	if !t.fp || !t.row {
 		return []target{t}
 	}
@@ -2398,7 +2405,7 @@ func splitStates(t target) []target {
 	}
 	states := t
 	states.fp, states.rows, states.ref, states.skey = false, nil, t.skey, nil
-	states.cells, states.owned, states.also, states.besideFootprint = []cell{stateCell}, nil, nil, true
+	states.cells, states.owned, states.also, states.besideFootprint = cells, nil, nil, true
 	t.row = false
 	return []target{t, states}
 }

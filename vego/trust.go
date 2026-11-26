@@ -63,6 +63,9 @@ type trustEntry struct {
 	// See exits.go.
 	exits    bool
 	requires []trustFormula
+	// inputs holds what a call also ensures under the declaration that
+	// inputs end, in the shipped files only (inputs.go).
+	inputs []trustFormula
 	// declared holds what a call must also meet under a declared memory,
 	// formulas that may name Memory, the bytes declared; only the shipped
 	// files have it, for the functions that reserve by a number (sizes.go).
@@ -149,6 +152,9 @@ type trustFile struct {
 	// sizes is the file's declaration of the memory of the machines the
 	// program runs on, or nil; see sizes.go.
 	sizes   *sizesDecl
+	// inputs is the file's declaration that inputs end, or nil; see
+	// inputs.go.
+	inputs *inputsDecl
 	entries map[string]*trustEntry
 	// states holds the states the file declares, by the type they belong
 	// to, as in sync.Mutex. Only the shipped files may declare one of a
@@ -251,9 +257,12 @@ func parseTrustFile(path string, content []byte, shipped bool) *trustFile {
 			// An assumption of the project about the machines it runs on
 			// (sizes.go), which no shipped file can make for it.
 			file.addSizes(key, value)
+		case "inputs":
+			// An assumption of the project about what it reads (inputs.go).
+			file.addInputs(key, value)
 		default:
 			// A project file cannot declare owns, so it is not offered one.
-			expected := "version, trusted, state, isolated, or sizes"
+			expected := "version, trusted, state, isolated, sizes, or inputs"
 			if file.shipped {
 				expected = "version, trusted, state, isolated, owns, scoped, hidden, notWrittenBy, or progresses"
 			}
@@ -356,6 +365,12 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			}
 		case "ensures":
 			entry.ensures = formulas("ensures", value)
+		case "inputs":
+			if !f.shipped {
+				f.problem(field.Line, "inputs of %s may be written only in the shipped files of vego", entry.key)
+				continue
+			}
+			entry.inputs = formulas("inputs", value)
 		case "modifies":
 			for _, item := range scalars("modifies", value) {
 				entry.modifies = append(entry.modifies, trustFormula{text: item.Value, line: item.Line, col: item.Column})
@@ -560,6 +575,9 @@ type Usage struct {
 	// memory its module's trust file declares, so that two built together
 	// that declare differently are reported (reportTwoMemories).
 	Memories []MemoryUse
+	// Inputs records, for each package with verified functions, the
+	// declaration that inputs end of its module's trust file (inputs.go).
+	Inputs []InputsUse
 }
 
 // OptionalUse records, for a package with proofs, the types to whose
@@ -667,6 +685,11 @@ func (u *Usage) add(other *Usage) {
 	for _, use := range other.Memories {
 		if !slices.ContainsFunc(u.Memories, func(known MemoryUse) bool { return known.Package == use.Package }) {
 			u.Memories = append(u.Memories, use)
+		}
+	}
+	for _, use := range other.Inputs {
+		if !slices.ContainsFunc(u.Inputs, func(known InputsUse) bool { return known.Package == use.Package }) {
+			u.Inputs = append(u.Inputs, use)
 		}
 	}
 	for _, use := range other.Sizes {
@@ -897,6 +920,14 @@ func (pv *pkgVerifier) readEntry(fn *funcInfo, entry *trustEntry) {
 		return list
 	}
 	fn.requires, fn.ensures = clauses("requires", entry.requires), clauses("ensures", entry.ensures)
+	// What the entry ensures of readers that end holds only under the
+	// declaration, and only there is it read at all.
+	if pv.inputsOf() != nil {
+		for _, c := range clauses("ensures", entry.inputs) {
+			c.inputs = true
+			fn.ensures = append(fn.ensures, c)
+		}
+	}
 	// A requires is read in one state, so old(x) there could only mean x;
 	// it is refused rather than given that meaning without notice.
 	for _, c := range fn.requires {
@@ -1201,6 +1232,12 @@ func (v *fnVerifier) primedPaths(fn *funcInfo) {
 			inner := ""
 			if n.Kind == logic.NCall && len(n.Kids) == 1 && v.stateNamed(n.Name) {
 				inner = n.Name
+			}
+			// ends and unread of a reader lie in rows that the targets of
+			// its states cover (inputs.go), and are said of the shipped
+			// entries only.
+			if n.Kind == logic.NCall && len(n.Kids) == 1 && (n.Name == "ends" || n.Name == "unread") && !v.stateNamed(n.Name) {
+				return
 			}
 			// The length of an owner, as |b'|, reads the fields its
 			// declaration names, where the pointer points.

@@ -300,6 +300,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		pv.loadTrust(trustPath)
 		pv.collect()
 		pv.noteMemory()
+		pv.noteInputs()
 		var sp *speculation
 		if ahead && countFuncs(pv.order, func(fn *funcInfo) bool { return fn.annotated() && !fn.broken }) >= 2 {
 			sp = speculate(pass, verifier, trustPath)
@@ -408,6 +409,10 @@ type clause struct {
 	// res is set for a clause written in another package, which has its
 	// own predicates.
 	res *logic.Resolver
+	// inputs is set for an ensures of a shipped entry that holds only
+	// under the declaration that inputs end (inputs.go): it is assumed at
+	// a call and never proved of a value verified code makes.
+	inputs bool
 }
 
 // funcInfo is a function declaration together with its bound annotations.

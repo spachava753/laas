@@ -133,10 +133,14 @@ func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 	case *ast.SelectorExpr:
 		if x, ok := e.X.(*ast.Ident); ok && v.isPackageName(x) {
 			if variable, isVar := v.info.Uses[e.Sel].(*types.Var); isVar {
+				var val value
 				if v.isAssigned(variable) {
-					return v.readGlobal(variable, e.Pos(), st, guard)
+					val = v.readGlobal(variable, e.Pos(), st, guard)
+				} else {
+					val = v.packageVariable(variable, e.Pos(), st)
 				}
-				return v.packageVariable(variable, e.Pos(), st)
+				v.noteStream(st, variable, val)
+				return val
 			}
 		}
 		// The field selection x.f follows a pointer where x is one, which
@@ -157,11 +161,15 @@ func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 		}
 		if v.inMemory(e) && !hopsPointer(v.info.TypeOf(e.X), selection.Index()) {
 			lv := v.lvalue(e, st, guard)
-			return v.readAt(st, guard, start, types.ExprString(e), e.Pos(), func(sink *state, mem memory) value {
+			val := v.readAt(st, guard, start, types.ExprString(e), e.Pos(), func(sink *state, mem memory) value {
 				return v.loadIn(lv, sink, mem)
 			})
+			v.noteBody(st, e, val)
+			return val
 		}
-		return v.fields(v.eval(e.X, st, guard), v.info.TypeOf(e.X), selection.Index(), st, guard, e.Sel.Pos(), start, types.ExprString(e))
+		val := v.fields(v.eval(e.X, st, guard), v.info.TypeOf(e.X), selection.Index(), st, guard, e.Sel.Pos(), start, types.ExprString(e))
+		v.noteBody(st, e, val)
+		return val
 	case *ast.CompositeLit:
 		return v.literal(e, t, st, guard)
 	case *ast.CallExpr:

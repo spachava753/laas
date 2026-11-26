@@ -1,0 +1,5 @@
+version: 1
+
+inputs:
+  bytes: 1TB
+  reason: The inputs of this corpus are its own.

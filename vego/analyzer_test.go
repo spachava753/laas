@@ -262,7 +262,7 @@ func TestAnalyzer(t *testing.T) {
 		runCorpus(t, newAnalyzer(), "lockentries")
 	})
 	// Programs under a declared memory and the same without it (F38).
-	for _, root := range []string{"sizes", "nosizes", "sizesbad", "sizesbig", "guidesizes"} {
+	for _, root := range []string{"sizes", "nosizes", "sizesbad", "sizesbig", "guidesizes", "inputs", "noinputs", "inputspred"} {
 		t.Run("proves what fits under a declared memory in "+root, func(t *testing.T) {
 			parallel(t)
 			runCorpus(t, newAnalyzer(), root)
@@ -270,7 +270,7 @@ func TestAnalyzer(t *testing.T) {
 	}
 	// Verified packages built together declare one memory (F13 of the
 	// review of F38), in both directions, and the same verifies.
-	for _, root := range []string{"memnone", "memdecl", "memsame"} {
+	for _, root := range []string{"memnone", "memdecl", "memsame", "inputsdecl"} {
 		t.Run("compares the declared memories in "+root, func(t *testing.T) {
 			parallel(t)
 			runCorpus(t, newAnalyzer(), root)

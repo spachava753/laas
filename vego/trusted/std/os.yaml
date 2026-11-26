@@ -152,6 +152,10 @@ trusted:
     ensures:
       - "result2 = nil -> result1 != nil And fresh(result1)"
       - "result2 = nil -> ~closed(result1)"
+    # Under the declaration that inputs end: a file opened for reading
+    # only is one the declaration covers.
+    inputs:
+      - "result2 = nil -> ends(result1)"
 
   os.Create:
     reason: >-
@@ -169,6 +173,10 @@ trusted:
     ensures:
       - "result2 = nil -> result1 != nil And fresh(result1)"
       - "result2 = nil -> ~closed(result1)"
+    # Under the declaration that inputs end: a file the program writes is
+    # not one it reads under the declaration.
+    inputs:
+      - "result2 = nil -> ~ends(result1)"
 
   (*os.File).Close:
     reason: >-

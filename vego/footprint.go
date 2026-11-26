@@ -1073,7 +1073,7 @@ func (v *fnVerifier) ownedParts(sink *state, mem memory, ptr value, t types.Type
 			// interface value holds, whatever its interface declares, as
 			// Modifies of an interface value covers them.
 			if v.hasStates(ft) || source {
-				parts = append(parts, target{row: true, cells: []cell{stateCell}, ref: skey(val[0])})
+				parts = append(parts, target{row: true, cells: v.rowCells(), ref: skey(val[0])})
 			}
 		default:
 			inner, _ := pointee(ft)
@@ -1118,7 +1118,7 @@ func (v *fnVerifier) ownedSites(t types.Type, seen map[types.Type]bool) []site {
 				sites = append(sites, site{fp: true})
 			}
 			if v.hasStates(ft) || len(sourceOwnedFields(object)) > 0 {
-				sites = append(sites, site{row: true, cells: []cell{stateCell}})
+				sites = append(sites, site{row: true, cells: v.rowCells()})
 			}
 		default:
 			inner, _ := pointee(ft)

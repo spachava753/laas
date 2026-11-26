@@ -81,6 +81,10 @@ trusted:
       - "result != nil"
       - "fresh(result, r)"
       - "ready(result)"
+    # Under the declaration that inputs end: a Scanner over a reader the
+    # declaration covers is covered, and reads only through it.
+    inputs:
+      - "ends(r) -> ends(result)"
 
   (*bufio.Scanner).Scan:
     reason: >-
@@ -106,6 +110,18 @@ trusted:
     vouches: [s]
     ensures:
       - "ready(s')"
+    # Under the declaration that inputs end, read from scan.go of Go
+    # 1.26.6 and 1.27.3: Scan returns true only for a token the split
+    # function advanced over, and ScanLines, which ready says is the split
+    # function, advances at least one byte for every token (to the newline,
+    # or to the end of the data at the end of the input); so a true Scan
+    # consumes a byte of what the Scanner reads, at most the declared
+    # amount for a reader that ends, and a false Scan consumes none that
+    # unread would count again.
+    inputs:
+      - "ends(s') = ends(s)"
+      - "ends(s) And result -> unread(s') < unread(s)"
+      - "ends(s) -> unread(s') <= unread(s)"
 
   (*bufio.Scanner).Text:
     reason: >-
@@ -164,6 +180,11 @@ trusted:
       - "result != nil"
       - "fresh(result, rd)"
       - "ready(result)"
+    # Under the declaration that inputs end: a Reader over a reader the
+    # declaration covers, or the Reader that rd holds when NewReader
+    # returns it, reads only from what rd reads.
+    inputs:
+      - "ends(rd) -> ends(result)"
 
   (*bufio.Reader).ReadByte:
     reason: >-
@@ -185,6 +206,11 @@ trusted:
     vouches: [b]
     ensures:
       - "ready(b')"
+    # Under the declaration that inputs end: a nil error is a byte read.
+    inputs:
+      - "ends(b') = ends(b)"
+      - "ends(b) And result2 = nil -> unread(b') < unread(b)"
+      - "ends(b) -> unread(b') <= unread(b)"
 
   bufio.NewWriter:
     reason: >-

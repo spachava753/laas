@@ -795,6 +795,7 @@ func (v *fnVerifier) assertion(e *ast.TypeAssertExpr, st *state, guard []*logic.
 	holds := logic.And(logic.Not(isNil), logic.Eq(dynTag(ref), tag))
 	held := v.heldRead(st, x, target)
 	v.keyHeldPointer(st, x, from, target, held, holds)
+	v.noteAssertedFile(st, x, from, target, held, holds)
 	if !commaOk {
 		v.checkAssertion(st, guard, holds, e, types.ExprString(e), fmt.Sprintf("%s may not hold %s %s", types.ExprString(e.X), article(shown(target)), shown(target)))
 		return []value{held}

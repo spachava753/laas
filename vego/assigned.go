@@ -612,7 +612,7 @@ func (v *fnVerifier) reachedTargets(call *ast.CallExpr, fn *funcInfo, sink *stat
 		forms = append(forms, append([]shape{form}, form.also...)...)
 		for _, each := range append([]target{t}, t.also...) {
 			each.also, each.mod, each.reached, each.fromVar = nil, -1, true, nil
-			targets = append(targets, splitStates(each)...)
+			targets = append(targets, splitStates(each, v.rowCells())...)
 			for _, part := range each.owned {
 				part.mod, part.text, part.part, part.reached = -1, each.text, true, true
 				targets = append(targets, part)

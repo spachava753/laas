@@ -139,6 +139,7 @@ func TrustReport(usages []*Usage, dir string) string {
 			"  without them.\n\n")
 	}
 	b.WriteString(sizesReport(total.Sizes, relative))
+	b.WriteString(inputsReport(total.Inputs, relative))
 	section("Project contracts in use", false)
 	section("Shipped contracts in use", true)
 	// A state means what its declaration says; every entry that speaks of

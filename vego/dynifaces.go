@@ -294,6 +294,10 @@ func (v *fnVerifier) assertIface(e *ast.TypeAssertExpr, st *state, guard []*logi
 		v.meetDynamic(st)
 	}
 	holds := v.ifaceHolds(st, x, from, target)
+	if method, writes := writesThrough(target); used && writes && !isError(from) {
+		// The value keeps the reference, and so the key of the reader.
+		v.refuseFileWrite(st, append(slices.Clip(guard), holds), skey(x), e.Pos(), fmt.Sprintf("using the value of %s, whose %s,", types.ExprString(e), method))
+	}
 	var got value
 	if used {
 		got = v.assertedIface(e.X, x, from, target, holds, st, guard)

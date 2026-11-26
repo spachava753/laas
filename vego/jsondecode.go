@@ -459,7 +459,9 @@ func (v *fnVerifier) readsReadFrame(fn *funcInfo, args map[*types.Var]value, st 
 	// made here, which are dropped.
 	defer func(growing []*layer) { v.growing = growing }(v.growing)
 	for _, c := range slices.Concat(fn.requires, fn.ensures) {
-		if c.node == nil {
+		// What Read ensures of a reader that ends is about each call
+		// alone: the decoder applies the contract once (inputs.go).
+		if c.node == nil || c.inputs {
 			continue
 		}
 		for _, conjunct := range c.node.Conjuncts() {

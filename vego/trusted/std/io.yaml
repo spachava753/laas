@@ -69,6 +69,13 @@ trusted:
     modifies: [r, p]
     ensures:
       - "0 <= n And n <= |p|"
+    # Under the declaration that inputs end, of a reader it covers: a Read
+    # into a buffer that is not empty returns a byte or an error, and what
+    # it returns is read through r. Not checked where verified code makes a
+    # reader, which the declaration does not cover (inputs.go).
+    inputs:
+      - "ends(r) And |p| > 0 And err = nil -> 1 <= n"
+      - "ends(r) -> unread(r') <= unread(r) - n"
 
   (io.StringWriter).WriteString:
     reason: >-
@@ -182,6 +189,9 @@ trusted:
       - "result != nil"
       - "fresh(result, r)"
       - "~closed(result)"
+    # Under the declaration that inputs end: its Read is r's.
+    inputs:
+      - "ends(r) -> ends(result)"
 
   io.LimitReader:
     reason: >-
@@ -201,6 +211,10 @@ trusted:
     ensures:
       - "result != nil"
       - "fresh(result, r)"
+    # Under the declaration that inputs end: its Read returns io.EOF once
+    # n bytes were read, and calls r.Read with what is left of p before.
+    inputs:
+      - "ends(r) -> ends(result)"
 
   io.TeeReader:
     reason: >-
@@ -225,6 +239,10 @@ trusted:
     ensures:
       - "result != nil"
       - "fresh(result, r, w)"
+    # Under the declaration that inputs end: its Read is r's, followed by
+    # a Write of what was read.
+    inputs:
+      - "ends(r) -> ends(result)"
 
   io.MultiReader:
     reason: >-

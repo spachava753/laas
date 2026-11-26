@@ -1,3 +1,3 @@
-badkeys.lookup: # // want `unknown key "badkeys.lookup"; expected version, trusted, state, isolated, or sizes` `missing "version: 1"`
+badkeys.lookup: # // want `unknown key "badkeys.lookup"; expected version, trusted, state, isolated, sizes, or inputs` `missing "version: 1"`
   reason: written at the top level instead of under trusted
   modifies: []

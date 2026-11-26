@@ -961,6 +961,12 @@ func (v *fnVerifier) atReturn(st *state, results []value, pos token.Pos) {
 		v.chosenEnsures(st, results, pos)
 	} else {
 		for _, c := range v.fn.ensures {
+			// What an entry ensures under the declaration that inputs end
+			// is the declaration's claim, and is not proved of a value
+			// verified code makes (inputs.go).
+			if c.inputs {
+				continue
+			}
 			v.checkClause(c, env, st, nil, pos, "postcondition may not hold")
 		}
 	}
@@ -1037,6 +1043,9 @@ func (v *fnVerifier) chosenEnsures(st *state, results []value, pos token.Pos) {
 		env := &specEnv{v: v, sink: st, fn: v.fn, args: v.entry, results: results, now: memory{}, post: mem, before: v.entryBrk}
 		var all []*logic.Term
 		for _, c := range v.fn.ensures {
+			if c.inputs {
+				continue
+			}
 			all = append(all, v.formula(c, c.node, env))
 		}
 		cases = append(cases, logic.And(all...))
