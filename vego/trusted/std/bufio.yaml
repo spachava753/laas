@@ -225,7 +225,8 @@ trusted:
       same (bufio.go): collectFragments calls ReadSlice until it finds
       delim or meets an error, copying each full buffer and appending it
       to a slice of slices, 24 bytes for each buffer of at least 16 bytes,
-      which grows to at most three times the bytes read and a page; then a
+      which growslice grows by at most a quarter once it holds 256, so to
+      less than twice the bytes read, rounded to a page; then a
       Builder grown to the total. So what it returns is what it consumed,
       at least the delimiter when the error is nil. It calls only Read of
       the reader b keeps.
@@ -234,7 +235,7 @@ trusted:
       - "ready(b)"
       - "ends(b)"
       - "Inputs < MaxInt"
-      - "3 * Inputs + 65536 <= MaxAlloc"
+      - "2 * Inputs <= MaxAlloc"
     runs: [b]
     modifies: [b]
     asserts:
@@ -261,7 +262,7 @@ trusted:
       - "ready(b)"
       - "ends(b)"
       - "Inputs < MaxInt"
-      - "3 * Inputs + 65536 <= MaxAlloc"
+      - "2 * Inputs <= MaxAlloc"
     runs: [b]
     modifies: [b]
     asserts:

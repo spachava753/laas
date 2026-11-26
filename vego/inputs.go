@@ -169,7 +169,8 @@ func inputsReport(uses []InputsUse, relative func(string) string) string {
 		fmt.Fprintf(&b, "  %s:%d\n", relative(file), first.Line)
 		fmt.Fprintf(&b, "    claims:  through any one reader of a file, a pipe, a terminal, a socket, or standard input that the program reads, "+
 			"and of a reader handed to it where ends is required, at most %s (%s bytes) arrive before Read returns an error, and a Read into "+
-			"a buffer that is not empty returns a byte or an error; the program does not write, through one open file, a file it reads through another; "+
+			"a buffer that is not empty returns a byte or an error; a regular file the program reads reports with Stat a size of at most that; "+
+			"a directory it lists holds at most that many entries while it lists it; the program does not write, through one open file, a file it reads through another; "+
 			"os.Stdout and os.Stderr do not hold the file os.Stdin holds\n", first.Written, first.Bytes)
 		fmt.Fprintf(&b, "    reason:  %s\n", first.Reason)
 		var packages []string
