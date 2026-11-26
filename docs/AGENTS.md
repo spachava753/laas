@@ -80,7 +80,7 @@ Also avoid:
 Documentation in this repository is reviewed like code. A wrong sentence in the guide costs a reader more than a missing one.
 
 - Run the tool before you describe what it does. Do not write what the tool should do or what you remember it doing.
-- Every program in `docs/verification.md` must also be in `vego/testdata/src/guide`, with the messages it produces as `// want` expectations. When you change an example in the guide, change the corpus in the same commit, and the other way round.
+- Every program in `docs/verification.md` must also be in `vego/testdata/src/guide`, with the messages it produces as `// want` expectations. A program that needs a trust file of its own goes into a module of its own beside it, as the programs under a declared memory are in `vego/testdata/src/guidesizes`, whose `vego-trusted.yaml` declares the memory; the corpus of `guide` runs with one trust file for every package, which cannot declare one. When you change an example in the guide, change the corpus in the same commit, and the other way round.
 - Do not recommend something you have not tried. This applies most of all to entries in the trust file. A recipe for a trusted contract is a claim about someone else's code, and two such recipes were removed from the guide because the contracts were false.
 - Say "not proved" when the tool could not prove something. Do not say "false" or "wrong" unless it is.
 - State limits plainly and in the place the reader will hit them. If something is unsupported, say so, show the message, and say what to do instead.

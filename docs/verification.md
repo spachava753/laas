@@ -397,7 +397,7 @@ vego: precondition of ToUpper may not hold: 6 * |s| + 65544 <= MaxAlloc; it hold
 vego: the slice that append grows may be more than can be allocated, or have a capacity an int cannot hold; or, if the machines the program runs on never hold 256GB of its data at once, declare that under sizes in vego-trusted.yaml, which proves this
 ```
 
-`strings.ToUpper` and `append` panic when what they build is more than one allocation can be. On a 64-bit machine that limit, `MaxAlloc`, is 2^48 bytes. Nothing in the function says how long `xs` and its strings may be, so both are reported. There are two ways to deal with this.
+`strings.ToUpper` and `append` panic when what they build is more than one allocation can be. On a 64-bit machine that limit, `MaxAlloc`, is 2^48 bytes. Nothing in the function says how long `xs` and its strings may be, so both are reported.
 
 The first way is to bound the lengths in the contract:
 
@@ -422,7 +422,7 @@ sizes:
 
 With it, `Upper` verifies as it is written, and so do its callers. The declaration says that the machines the program runs on never hold 256 GB of its data at once, in memory and swap together, however it is stored. A run that would hold more runs out of memory, which ends the program with a fatal error, and no proof covers such a run. From this, `vego` takes every string and the entries of every map to be at most 256 GB, and the array of every slice to be at most five times that and a page. Then it proves that growing what exists fits in one allocation: an `append`, a concatenation, a conversion, formatting, `strings.ToUpper`, `strings.Split`, writing to a `strings.Builder` or a `bytes.Buffer`, and encoding JSON.
 
-Write in `memory` the most of the program's data that the machines can hold at once, as a whole number with one of the units `B`, `KB`, `MB`, `GB`, `TB` (powers of 1000) or `KiB`, `MiB`, `GiB`, `TiB` (powers of 1024). Declare what the machines can hold, not what is installed: compressed swap, such as zram, holds more than its size. The `reason` is required. The declaration holds for every verified package of the module, and verified packages built together must declare the same memory or none.
+Write in `memory` the most of the program's data that the machines can hold at once, as a whole number with one of the units `B`, `KB`, `MB`, `GB`, `TB` (powers of 1000) or `KiB`, `MiB`, `GiB`, `TiB` (powers of 1024). Declare what the machines can hold, not what is installed: compressed swap, such as zram, holds more than its size. The `reason` is required. The declaration holds for every verified package of the module. Verified packages built together must all declare the same memory, or none of them declare one.
 
 The declaration does not cover a size that a number gives. `make` is still checked, now against the bound on arrays:
 
@@ -490,7 +490,7 @@ func Forever() (r []byte) {
 vego: loop variant may be negative: MaxAlloc - |r|; it holds only because a map cannot have more keys, and a string or the array of a slice cannot be longer, than memory can hold, which does not show that a loop or a recursion ends: one that grows a value until memory runs out does not end
 ```
 
-On a 32-bit target one allocation is at most 4 GB, so a declared memory proves nothing there, and every size is checked as without it. The trust report says so.
+A declared memory proves something only where five times it and a page is below one allocation. On a 64-bit target that holds up to about 56 TB. On a 32-bit target one allocation is at most 4 GB, so it holds only for a memory below about 859 MB; 256GB proves nothing there, and every size is checked as without it. The trust report says which.
 
 The trust report prints the declaration with what it bounds, what it leaves to prove, its reason, and how many obligations of each package only it proved:
 
@@ -10012,7 +10012,7 @@ This table lists the most common messages.
 | `cannot verify F: T is N bytes, more than the declared memory allows a value to reserve ...` | Under a declared memory, a type that holds an array larger than five times the memory is not verified. | Use a smaller array, or a slice made with a bounded length. |
 | `the verified packages of this build declare different memories under sizes: ...` | Two verified packages built together declare different memories, or one declares and the other does not. | Declare the same memory in both trust files, or none in either, or run `laas` with `-vego.trusted` naming one file. |
 | `sizes must be a mapping with a memory, ...` | The declaration in the trust file is malformed. | Write `memory` and `reason`, as in [Bounding what grows](#bounding-what-grows). |
-| `loop variant may be negative: ...; it holds only because a map cannot have more keys ... than memory can hold, ...` | The `Variant`, an invariant of its loop, or the precondition of a recursive call holds only because memory is finite. | Write a `Variant` over what is left to do. See [How many keys a map can have](#how-many-keys-a-map-can-have). |
+| `...; it holds only because a map cannot have more keys ... than memory can hold, which does not show that a loop or a recursion ends: ...` | Added to `loop variant may be negative`, `loop variant may not decrease`, `loop invariant may not be preserved`, or `precondition of F may not hold`: the `Variant`, an invariant of its loop, or the precondition of a recursive call holds only because memory is finite. | Write a `Variant` over what is left to do. See [How many keys a map can have](#how-many-keys-a-map-can-have). |
 | `cannot verify F: calling Error on err would run the methods of an error whose origin is not known; ...` | The error may hold code nobody has seen. | Return the error unchanged, or vouch for it. See [Interface values from code that is not verified](#interface-values-from-code-that-is-not-verified). |
 | `cannot verify F: converting x, a A, to B is not supported: ...` | `B` has a state that `A` does not declare, or a method of `A` keeps more, vouches for less, or asserts more than the method of `B`. | See [Converting between interfaces](#converting-between-interfaces). |
 | `postcondition may not hold: P, in A.M used as B.M at ...` | The contract of the method of `A` does not imply that of `B`, or the method of a value you converted does not meet the contract of the interface. | Strengthen the contract of `A.M`, or weaken that of `B.M`. |
