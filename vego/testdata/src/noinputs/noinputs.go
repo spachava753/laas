@@ -5,6 +5,7 @@ package noinputs
 
 import (
 	"bufio"
+	"embed"
 	"fmt"
 	"io"
 	"os"
@@ -66,4 +67,40 @@ func Config(path string) (data []byte, err error) {
 func All() (n int) {
 	data, _ := io.ReadAll(os.Stdin) // want `the trusted contract of io.ReadAll .*cannot be used: io.ReadAll returns only for an input that ends`
 	return len(data)
+}
+
+// Dirs lists a directory without the declaration.
+//
+// @Requires |dir| <= 4096
+// @Ensures True
+func Dirs(dir string) (n int) {
+	entries, _ := os.ReadDir(dir) // want `the trusted contract of os.ReadDir .*cannot be used: os.ReadDir returns only for an input that ends`
+	return len(entries)
+}
+
+//go:embed files
+var files embed.FS
+
+// Embedded reads what the binary holds, which needs no declaration.
+//
+// @Ensures n >= 0
+func Embedded() (n int, err error) {
+	entries, err := files.ReadDir("files")
+	if err != nil {
+		return 0, err
+	}
+	// @Invariant 0 <= n And n <= i
+	for i := range entries {
+		if !entries[i].IsDir() {
+			n++
+		}
+	}
+	data, err := files.ReadFile("files/c.txt")
+	if err != nil {
+		return 0, err
+	}
+	if len(data) == 0 {
+		return 0, nil
+	}
+	return n, nil
 }

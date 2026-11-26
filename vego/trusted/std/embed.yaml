@@ -1,0 +1,38 @@
+version: 1
+
+# The methods of embed.FS that read what the binary holds (F39, part B),
+# read from embed.go of Go 1.26.6 and 1.27.3, which is the same. They need
+# no declaration that inputs end: what they read is in the binary.
+trusted:
+  (embed.FS).ReadFile:
+    reason: >-
+      Documented: "ReadFile reads and returns the content of the named
+      file." It looks the name up in the sorted list of the files the
+      compiler embedded, by binary search, with fs.ValidPath first, and
+      returns []byte of the file's data, a new copy; for a name it does not
+      find it returns a *fs.PathError holding fs.ErrNotExist, and for a
+      directory one holding an error made by errors.New, so vouches holds.
+      The copy is of a string the binary maps, which is shorter than
+      MaxAlloc by more than a page on every target, since the binary also
+      holds the program, so the conversion does not panic.
+    vouches: [result2]
+    modifies: []
+    ensures:
+      - "result2 = nil -> fresh(result1)"
+
+  (embed.FS).ReadDir:
+    reason: >-
+      Documented: "ReadDir reads and returns the entire named directory."
+      It opens the directory as ReadFile looks a name up, and makes a slice
+      of an fs.DirEntry for each of its files, which is shorter than the
+      list of files the binary holds, each of which is larger than an
+      interface value, and fills it with pointers to them, whose Name,
+      IsDir, and Type return what split finds in the name and write
+      nothing, as the entries of fs.DirEntry claim; its errors are those
+      of ReadFile's lookup, or a *fs.PathError holding an error made by
+      errors.New for a file that is not a directory.
+    vouches: [result1, result2]
+    modifies: []
+    ensures:
+      - "fresh(result1)"
+      - "Forall i in [0, |result1|) : result1[i] != nil"

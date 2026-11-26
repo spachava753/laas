@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -210,6 +211,49 @@ func TestReadersEnd(t *testing.T) {
 			}
 		}
 	})
+	t.Run("ReadDir", func(t *testing.T) {
+		dir := t.TempDir()
+		for i := range 300 {
+			if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%03d", 299-i)), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.Mkdir(filepath.Join(dir, "sub"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil || len(entries) != 301 {
+			t.Fatalf("%d entries, %v", len(entries), err)
+		}
+		for i, e := range entries {
+			if i > 0 && entries[i-1].Name() >= e.Name() || e.IsDir() != (e.Name() == "sub") || e.Type().IsDir() != e.IsDir() {
+				t.Fatalf("entry %d: %s, a directory %v, type %v", i, e.Name(), e.IsDir(), e.Type())
+			}
+		}
+		for _, name := range []string{filepath.Join(dir, "f000"), filepath.Join(dir, "absent")} {
+			_, err := os.ReadDir(name)
+			var pathErr *fs.PathError
+			if err == nil || !errors.As(err, &pathErr) {
+				t.Fatalf("ReadDir(%s): %v, not a *PathError", name, err)
+			}
+		}
+	})
+	t.Run("EmbedReadDir", func(t *testing.T) {
+		// (embed.FS).ReadDir, whose entries the harnesses of
+		// TestShippedContracts cannot compare with nil.
+		for _, name := range embeddedNames {
+			entries, err := embedded.ReadDir(name)
+			var pathErr *fs.PathError
+			if err != nil && !errors.As(err, &pathErr) {
+				t.Fatalf("ReadDir(%q): %v, not a *PathError", name, err)
+			}
+			for i, e := range entries {
+				if e == nil || i > 0 && entries[i-1].Name() >= e.Name() {
+					t.Fatalf("ReadDir(%q): entry %d is nil or out of order", name, i)
+				}
+			}
+		}
+	})
 	t.Run("ReadFile", func(t *testing.T) {
 		dir := t.TempDir()
 		for i, text := range readerInputs()[:40] {
@@ -244,6 +288,14 @@ var inputsEntries = map[string]string{
 	"io.ReadAll":                 "TestReadersEnd/ReadAll",
 	"(*bufio.Reader).ReadString": "TestReadersEnd/ReadString",
 	"(*bufio.Reader).ReadBytes":  "TestReadersEnd/ReadBytes",
+	"os.ReadDir":                 "TestReadersEnd/ReadDir",
+}
+
+// heldElsewhere are shipped entries that need no declaration and whose
+// ensures the harnesses of TestShippedContracts cannot evaluate, with the
+// test that holds each against the real function.
+var heldElsewhere = map[string]string{
+	"(embed.FS).ReadDir": "TestReadersEnd/EmbedReadDir",
 }
 
 // checkInputsEntry reads an entry of inputsEntries as a package that
@@ -253,13 +305,26 @@ func checkInputsEntry(t *testing.T, pv *pkgVerifier, pkg *types.Package, key str
 	if fn := contractOfKeyQuiet(pv, pkg, key); fn == nil || !slices.ContainsFunc(fn.defects, func(d string) bool { return strings.Contains(d, "returns only for an input that ends") }) {
 		t.Errorf("the entry of %s can be used without the declaration that inputs end", key)
 	}
-	declared, _ := shippedVerifier(t)
-	declared.projectTrust = parseTrustFile("vego-trusted.yaml", []byte("version: 1\ninputs:\n  bytes: 1TB\n  reason: a test\n"), false)
+	declaredOnce.Do(func() {
+		declared, _ = shippedVerifier(t)
+		declared.projectTrust = parseTrustFile("vego-trusted.yaml", []byte("version: 1\ninputs:\n  bytes: 1TB\n  reason: a test\n"), false)
+	})
 	if problems := declared.projectTrust.problems; len(problems) > 0 {
 		t.Fatalf("the declaration of the test cannot be read: %v", problems)
 	}
+	declaredMu.Lock()
+	defer declaredMu.Unlock()
 	contractOfKey(t, declared, pkg, key)
 }
+
+// declared is the shipped verifier of a package that declares inputs,
+// made once: making one imports the packages the shipped contracts name
+// from source.
+var (
+	declared     *pkgVerifier
+	declaredOnce sync.Once
+	declaredMu   sync.Mutex
+)
 
 // contractOfKeyQuiet returns the shipped contract of a key, or nil.
 func contractOfKeyQuiet(pv *pkgVerifier, pkg *types.Package, key string) *funcInfo {
@@ -274,4 +339,19 @@ func contractOfKeyQuiet(pv *pkgVerifier, pkg *types.Package, key string) *funcIn
 		return nil
 	}
 	return pv.trustedContract(callee)
+}
+
+// checkHeldEntry reads an entry of heldElsewhere as a package reads it, and
+// fails if it cannot be used.
+func checkHeldEntry(t *testing.T, pv *pkgVerifier, pkg *types.Package, key string) {
+	_, name, _ := splitFuncName(key)
+	receiver, method, _ := strings.Cut(strings.TrimPrefix(strings.TrimPrefix(name, "("), "*"), ").")
+	found, _, _ := types.LookupFieldOrMethod(types.NewPointer(pkg.Scope().Lookup(receiver).Type()), true, pkg, method)
+	callee, ok := found.(*types.Func)
+	if !ok {
+		t.Fatalf("package %s has no method %s", pkg.Path(), name)
+	}
+	if fn := pv.trustedContract(callee); fn == nil || len(fn.defects) > 0 {
+		t.Fatalf("the entry of %s cannot be used: %v", key, fn.defects)
+	}
 }

@@ -87,7 +87,7 @@ var shippedClasses = map[string][]string{
 		"log.New", "net/http.NewServeMux", "os.Create", "os.Open",
 	},
 	"O": {
-		"bytes.Map",
+		"bytes.Map", "(embed.FS).ReadDir",
 	},
 	"W": {
 		"strconv.Atoi", "strconv.ParseBool", "strconv.ParseInt", "strconv.ParseUint",
@@ -105,10 +105,11 @@ var shippedClasses = map[string][]string{
 		"strconv.AppendInt", "strconv.FormatInt", "strconv.Itoa", "strconv.Quote", "strconv.Unquote", "strings.Fields", "strings.FieldsFunc",
 		"strings.Join", "strings.Map", "strings.Repeat", "strings.Replace", "strings.ReplaceAll", "strings.Split", "strings.SplitAfter",
 		"strings.ToLower", "strings.ToUpper", "unicode/utf8.AppendRune",
-		"io.ReadAll", "(*bufio.Reader).ReadString", "(*bufio.Reader).ReadBytes",
+		"io.ReadAll", "(*bufio.Reader).ReadString", "(*bufio.Reader).ReadBytes", "os.ReadDir", "(embed.FS).ReadFile",
 	},
 	"none": {
-		"(*bytes.Buffer).Read",
+		"(*bytes.Buffer).Read", "(io/fs.DirEntry).Name", "(io/fs.DirEntry).IsDir", "(io/fs.DirEntry).Type", "(io/fs.FileMode).IsDir",
+		"(io/fs.FileMode).IsRegular", "(io/fs.FileMode).Type",
 		"(*bufio.Reader).ReadByte", "(*bufio.Scanner).Err", "(*bufio.Writer).Flush", "(*bufio.Writer).Write", "(*bufio.Writer).WriteByte",
 		"(*bufio.Writer).WriteString", "(*bytes.Buffer).Bytes", "(*bytes.Buffer).Len", "(*bytes.Buffer).Reset", "(*bytes.Buffer).Truncate",
 		"(*net/http.Request).PathValue", "(*os.File).Close", "(*os.File).Read", "(*os.File).Write", "(*os.File).WriteString",

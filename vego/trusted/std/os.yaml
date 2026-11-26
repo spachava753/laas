@@ -304,6 +304,36 @@ trusted:
       - "fresh(result1)"
       - "|result1| <= Inputs"
 
+  os.ReadDir:
+    reason: >-
+      "ReadDir reads the named directory, returning all its directory
+      entries sorted by filename. If an error occurs reading the directory,
+      ReadDir returns the entries it was able to read before the error,
+      along with the error." Usable only under the declaration that inputs
+      end: a directory the program lists holds at most the declared number
+      of entries while it lists it. Read from the source of Go 1.26.6 and
+      1.27.3, which is the same (dir.go, dir_unix.go): it opens the
+      directory, reads its entries with ReadDirent into a pooled buffer and
+      appends an fs.DirEntry, 16 bytes, for each name but . and .., which
+      growslice grows by at most a quarter and 192 elements once it holds 256,
+      so to at most 20 bytes for each entry, rounded to a page, sorts them in place, and closes the
+      directory. The entries are os's unixDirent, whose Name, IsDir, and
+      Type return fields, as the entries of fs.DirEntry claim. Its errors
+      are *PathError of the open and of ReadDirent, or what Lstat returns
+      for an entry, which the entry of Stat's errors covers. Its name is
+      copied as in the entry of Open.
+    requires:
+      - "|name| < MaxInt"
+      - "4 * |name| + 65536 <= MaxAlloc"
+      - "Inputs < MaxInt"
+      - "20 * Inputs <= MaxAlloc"
+    vouches: [result1, result2]
+    modifies: []
+    ensures:
+      - "fresh(result1)"
+      - "|result1| <= Inputs"
+      - "Forall i in [0, |result1|) : result1[i] != nil"
+
   os.MkdirAll:
     reason: >-
       "MkdirAll creates a directory named path, along with any necessary

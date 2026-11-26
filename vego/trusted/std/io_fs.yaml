@@ -1,0 +1,59 @@
+version: 1
+
+# The methods of io/fs that reading a directory needs (F39, part B). Read
+# from the source of Go 1.26.6 and 1.27.3 for the implementations that the
+# shipped functions return: os's unixDirent (dir_unix.go, file_unix.go)
+# and embed's file (embed.go), whose methods return a field or what split
+# finds in one and write nothing. Info is left without an entry, so that
+# no value of the project converts to a DirEntry and the interface is not
+# one checked at conversions.
+trusted:
+  (io/fs.DirEntry).Name:
+    reason: >-
+      A claim about every fs.DirEntry that verified code gets from code that
+      is not verified, other than from a trusted function, whose own vouches
+      covers what it returns. Documented: "Name returns the name of the file
+      (or subdirectory) described by the entry. This name is only the final
+      element of the path (the base name), not the entire path." It writes
+      nothing. Not claimed: how long the name is.
+    modifies: []
+    ensures: ["True"]
+
+  (io/fs.DirEntry).IsDir:
+    reason: >-
+      A claim about every fs.DirEntry as for Name. Documented: "IsDir
+      reports whether the entry describes a directory." It writes nothing.
+    modifies: []
+    ensures: ["True"]
+
+  (io/fs.DirEntry).Type:
+    reason: >-
+      A claim about every fs.DirEntry as for Name. Documented: "Type returns
+      the type bits for the entry. The type bits are a subset of the usual
+      FileMode bits, those returned by the FileMode.Type method." It writes
+      nothing.
+    modifies: []
+    ensures: ["True"]
+
+  (io/fs.FileMode).IsDir:
+    reason: >-
+      Documented: "IsDir reports whether m describes a directory. That is,
+      it tests for the ModeDir bit being set in m." A test of a bit, which
+      writes nothing.
+    modifies: []
+    ensures: ["True"]
+
+  (io/fs.FileMode).IsRegular:
+    reason: >-
+      Documented: "IsRegular reports whether m describes a regular file.
+      That is, it tests that no mode type bits are set." A test of bits,
+      which writes nothing.
+    modifies: []
+    ensures: ["True"]
+
+  (io/fs.FileMode).Type:
+    reason: >-
+      Documented: "Type returns type bits in m (m & ModeType)." It writes
+      nothing.
+    modifies: []
+    ensures: ["True"]

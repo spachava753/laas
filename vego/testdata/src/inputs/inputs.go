@@ -563,3 +563,21 @@ func rewindFile(r io.Reader) {
 		_, _ = f.Seek(0, io.SeekStart)
 	}
 }
+
+// Dirs counts the directories in a directory.
+//
+// @Requires |dir| <= 4096
+// @Ensures n >= 0
+func Dirs(dir string) (n int, err error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, err
+	}
+	// @Invariant 0 <= n And n <= i
+	for i := range entries {
+		if entries[i].IsDir() {
+			n++
+		}
+	}
+	return n, nil
+}

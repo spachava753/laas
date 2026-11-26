@@ -83,13 +83,6 @@ func (t platform) grow(newLen, oldCap, size int64) (int64, bool) {
 	return capacity, false
 }
 
-// makeNoZero is bytealg.MakeNoZero, which strings.Builder's Grow calls: it
-// panics for a length past maxAlloc, and rounds the length up to what the
-// allocator gives, of which unsafe.Slice panics past MaxInt.
-func (t platform) makeNoZero(n int64) bool {
-	return n < 0 || n > t.maxAlloc || roundup(n) > t.maxInt()
-}
-
 // make is makeslice of bytes: whether it panics.
 func (t platform) make(n int64) bool {
 	return n < 0 || n > t.maxAlloc
@@ -170,7 +163,10 @@ func readStringFits(tg platform, n int64) string {
 	if why := fragmentsFit(tg, n); why != "" {
 		return why
 	}
-	if tg.wrap(n) != n || tg.makeNoZero(n) {
+	// bytealg.MakeNoZero, which Grow calls, panics for a length past
+	// maxAlloc, and rounds the length up to what the allocator gives, of
+	// which unsafe.Slice panics past MaxInt.
+	if tg.wrap(n) != n || n > tg.maxAlloc || roundup(n) > tg.maxInt() {
 		return fmt.Sprintf("the Builder grown to %d bytes panics", n)
 	}
 	return ""
@@ -217,6 +213,20 @@ var inputsEdges = map[string]func(platform, int64) string{
 	"io.ReadAll":                 readAllFits,
 	"(*bufio.Reader).ReadString": readStringFits,
 	"(*bufio.Reader).ReadBytes":  readBytesFits,
+	"os.ReadDir": func(tg platform, n int64) string {
+		length, capacity := int64(0), int64(0)
+		for length < n {
+			if length == capacity {
+				grown, panics := tg.grow(tg.wrap(length+1), capacity, 16)
+				if panics {
+					return fmt.Sprintf("the entries of %d names panic", length+1)
+				}
+				capacity = grown
+			}
+			length = min(capacity, n)
+		}
+		return ""
+	},
 }
 
 // TestInputsEdges holds the constants of the requires that name Inputs

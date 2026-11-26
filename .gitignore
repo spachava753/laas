@@ -34,8 +34,10 @@
 # Assembly of a test package, which vego reads for references to variables.
 !/vego/testdata/src/*/*.s
 
-# A file that a test package embeds.
+# Files that test packages embed.
 !/vego/testdata/src/globalsembed/hello.txt
+!/vego/testdata/src/inputssizes/files/*.txt
+!/vego/testdata/src/noinputs/files/*.txt
 
 # The check that repeated runs of laas print the same; see the script.
 !/vego/repeat.sh
