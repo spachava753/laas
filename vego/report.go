@@ -138,6 +138,7 @@ func TrustReport(usages []*Usage, dir string) string {
 		b.WriteString("  A proof that rests on them holds only if nothing but vego wrote there; run without -vego.cache to prove\n" +
 			"  without them.\n\n")
 	}
+	b.WriteString(sizesReport(total.Sizes, relative))
 	section("Project contracts in use", false)
 	section("Shipped contracts in use", true)
 	// A state means what its declaration says; every entry that speaks of

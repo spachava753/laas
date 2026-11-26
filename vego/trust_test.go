@@ -61,6 +61,19 @@ trusted:
 		{"rejects a destination that is not a list", "version: 1\ntrusted:\n  bufio.NewScanner:\n    reason: r\n    keeps:\n      r: result\n    modifies: []\n", "r must map to a list of results and parameters"},
 		{"rejects a destination that is not a name", "version: 1\ntrusted:\n  bufio.NewScanner:\n    reason: r\n    keeps:\n      r: [[result]]\n    modifies: []\n", "r must map to a list of names"},
 		{"rejects a parameter kept twice", "version: 1\ntrusted:\n  io.TeeReader:\n    reason: r\n    keeps:\n      r: [result]\n      r: [result]\n    modifies: []\n", "occurs more than once"},
+		{"accepts a declared memory", "version: 1\nsizes:\n  memory: 256GB\n  reason: Our servers have 64 GB.\n", ""},
+		{"accepts a memory in bytes", "version: 1\nsizes:\n  memory: \"1000000\"\n  reason: r\n", ""},
+		{"accepts a memory in GiB", "version: 1\nsizes:\n  memory: 64 GiB\n  reason: r\n", ""},
+		{"requires a reason for sizes", "version: 1\nsizes:\n  memory: 256GB\n", "sizes must be a mapping with a memory"},
+		{"requires a memory for sizes", "version: 1\nsizes:\n  reason: r\n", "sizes must be a mapping with a memory"},
+		{"rejects sizes that is not a mapping", "version: 1\nsizes: true\n", "sizes must be a mapping with a memory"},
+		{"rejects an empty reason for sizes", "version: 1\nsizes:\n  memory: 1GB\n  reason: \" \"\n", "sizes must be a mapping with a memory"},
+		{"rejects an unknown field of sizes", "version: 1\nsizes:\n  memory: 1GB\n  bound: 4GB\n  reason: r\n", `unknown field "bound" of sizes`},
+		{"rejects an unknown unit", "version: 1\nsizes:\n  memory: 1Gb\n  reason: r\n", `has the unit "Gb"`},
+		{"rejects a memory that is not a number", "version: 1\nsizes:\n  memory: lots\n  reason: r\n", "must be a whole number of bytes"},
+		{"rejects a fraction of a unit", "version: 1\nsizes:\n  memory: 1.5TB\n  reason: r\n", "must be a whole number of bytes"},
+		{"rejects no memory", "version: 1\nsizes:\n  memory: 0GB\n  reason: r\n", "must be more than 0 bytes"},
+		{"rejects sizes declared twice", "version: 1\nsizes:\n  memory: 1GB\n  reason: r\nsizes:\n  memory: 1GB\n  reason: r\n", "occurs more than once"},
 		{"explains an unquoted formula", "version: 1\ntrusted:\n  sort.Ints:\n    reason: r\n    ensures:\n      - Forall i in [0, |x|) : x'[i] >= 0\n", "must be quoted"},
 	}
 	for _, test := range tests {
@@ -77,6 +90,62 @@ trusted:
 				t.Fatalf("problems %v do not mention %q", problems, test.want)
 			}
 		})
+	}
+}
+
+// TestMemoryUnits checks the units of a declared memory, and that no
+// shipped file may declare one, which only a project can know.
+func TestMemoryUnits(t *testing.T) {
+	parallel(t)
+	file := parseTrustFile("vego/trusted/std/x.yaml", []byte("version: 1\nsizes:\n  memory: 1GB\n  reason: r\n"), true)
+	if len(file.problems) != 1 || !strings.Contains(file.problems[0].msg, "only in the trust file of a project") || file.sizes != nil {
+		t.Fatalf("a shipped file declares sizes: %+v", file.problems)
+	}
+	for text, want := range map[string]string{
+		"256GB": "256000000000", "64GiB": "68719476736", "1 TB": "1000000000000", "7": "7", "12B": "12", "3KiB": "3072", "2MB": "2000000",
+	} {
+		got, err := parseMemory(text)
+		if err != nil || got.String() != want {
+			t.Errorf("parseMemory(%q) = %v, %v; want %s", text, got, err, want)
+		}
+	}
+	for _, text := range []string{"", "GB", "-1GB", "1.5GB", "1e9", "0x10", "10 gigabytes"} {
+		if got, err := parseMemory(text); err == nil {
+			t.Errorf("parseMemory(%q) = %v, want an error", text, got)
+		}
+	}
+}
+
+// TestSizesReport checks what the trust report says of a declared memory:
+// the claim with M and R, the reason, the count of obligations by package,
+// and, on a platform where the bound on arrays is not below one
+// allocation, that it proves nothing there (F6 of the design review).
+func TestSizesReport(t *testing.T) {
+	parallel(t)
+	file := parseTrustFile("/work/vego-trusted.yaml", []byte("version: 1\nsizes:\n  memory: 256GB\n  reason: Our machines have 64 GB.\n"), false)
+	if len(file.problems) > 0 {
+		t.Fatal(file.problems)
+	}
+	uses := func(goarch string) []SizesUse {
+		pv := &pkgVerifier{pass: &analysis.Pass{Pkg: types.NewPackage("example.com/"+goarch, goarch), TypesSizes: types.SizesFor("gc", goarch)},
+			projectTrust: file, usage: &Usage{}}
+		pv.noteSizes(file.path)
+		return pv.usage.Sizes
+	}
+	wide := uses("amd64")
+	wide[0].Proved = 3
+	report := TrustReport([]*Usage{{Sizes: wide}, {Sizes: uses("386")}}, "/work")
+	for _, want := range []string{
+		"Memory declared in sizes: 1\n  vego-trusted.yaml:2\n",
+		"claims:  the machines the program runs on never hold 256GB (256000000000 bytes) of its data at once, in memory and swap together, however it is stored",
+		"every string, and the entries of every map, take at most 256000000000 bytes, and the array of every slice at most 1024000065536 bytes\n",
+		"    reason:  Our machines have 64 GB.\n",
+		"    obligations only it proved: none in example.com/386: it proves nothing on this platform, where one allocation is at most 4294967295 bytes, " +
+			"less than the 1024000065536 bytes it would bound an array by; 3 in example.com/amd64\n",
+	} {
+		if !strings.Contains(report, want) {
+			t.Errorf("the report does not say %q:\n%s", want, report)
+		}
 	}
 }
 

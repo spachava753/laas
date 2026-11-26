@@ -1,0 +1,7 @@
+version: 1
+
+sizes:
+  memory: 256GB
+  reason: >-
+    The corpus of F13 of the review of F38: the machines it runs on never
+    hold 256 GB of its data at once.

@@ -141,6 +141,9 @@ type trustFile struct {
 	// isolatedReason says what supports it; see trustEntry.isolated.
 	isolated       bool
 	isolatedReason string
+	// sizes is the file's declaration of the memory of the machines the
+	// program runs on, or nil; see sizes.go.
+	sizes   *sizesDecl
 	entries map[string]*trustEntry
 	// states holds the states the file declares, by the type they belong
 	// to, as in sync.Mutex. Only the shipped files may declare one of a
@@ -239,9 +242,13 @@ func parseTrustFile(path string, content []byte, shipped bool) *trustFile {
 				continue
 			}
 			file.isolated, file.isolatedReason = true, strings.TrimSpace(value.Content[1].Value)
+		case "sizes":
+			// An assumption of the project about the machines it runs on
+			// (sizes.go), which no shipped file can make for it.
+			file.addSizes(key, value)
 		default:
 			// A project file cannot declare owns, so it is not offered one.
-			expected := "version, trusted, state, or isolated"
+			expected := "version, trusted, state, isolated, or sizes"
 			if file.shipped {
 				expected = "version, trusted, state, isolated, owns, scoped, hidden, notWrittenBy, or progresses"
 			}
@@ -527,6 +534,14 @@ type Usage struct {
 	// Optional records, for each package with proofs, the types to whose
 	// methods its trust files give entries (optional.go).
 	Optional []OptionalUse
+	// Sizes records, for each package whose trust file declares that
+	// sizes fit, the declaration and how many obligations of the package
+	// only it proved (sizes.go).
+	Sizes []SizesUse
+	// Memories records, for each package with verified functions, the
+	// memory its module's trust file declares, so that two built together
+	// that declare differently are reported (reportTwoMemories).
+	Memories []MemoryUse
 }
 
 // OptionalUse records, for a package with proofs, the types to whose
@@ -631,6 +646,16 @@ func (u *Usage) add(other *Usage) {
 			u.Optional = append(u.Optional, use)
 		}
 	}
+	for _, use := range other.Memories {
+		if !slices.ContainsFunc(u.Memories, func(known MemoryUse) bool { return known.Package == use.Package }) {
+			u.Memories = append(u.Memories, use)
+		}
+	}
+	for _, use := range other.Sizes {
+		if !slices.ContainsFunc(u.Sizes, func(known SizesUse) bool { return known.Package == use.Package }) {
+			u.Sizes = append(u.Sizes, use)
+		}
+	}
 	for _, dir := range other.AnswerCaches {
 		if !slices.Contains(u.AnswerCaches, dir) {
 			u.AnswerCaches = append(u.AnswerCaches, dir)
@@ -715,6 +740,7 @@ func (pv *pkgVerifier) loadTrust(explicit string) {
 	}
 	keys := slices.Sorted(maps.Keys(pv.projectTrust.entries))
 	pv.usage.ProjectKeys = map[string][]string{path: keys}
+	pv.noteSizes(path)
 	for _, problem := range pv.projectTrust.problems {
 		pv.report(pv.trustPos(pv.projectTrust, problem.line, 1), "%s", problem.msg)
 	}

@@ -107,6 +107,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -273,6 +274,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 				foreign:         map[*types.Package]*logic.Resolver{},
 				plain:           logic.NewResolver(),
 				trustSources:    map[*trustFile]*token.File{},
+				sizedProved:     new(atomic.Int64),
 				z3Path:          z3Path,
 				cacheDir:        cacheDir,
 				effort:          effort,
@@ -296,6 +298,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		}
 		pv.loadTrust(trustPath)
 		pv.collect()
+		pv.noteMemory()
 		var sp *speculation
 		if ahead && countFuncs(pv.order, func(fn *funcInfo) bool { return fn.annotated() && !fn.broken }) >= 2 {
 			sp = speculate(pass, verifier, trustPath)
@@ -370,6 +373,11 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		}
 		// The proofs of this package also rest on whatever the packages it
 		// depends on took on trust.
+		for i := range pv.usage.Sizes {
+			if pv.usage.Sizes[i].Package == pass.Pkg.Path() {
+				pv.usage.Sizes[i].Proved = int(pv.sizedProved.Load())
+			}
+		}
 		pass.ExportPackageFact(&usageFact{Usage: *pv.usage})
 		total := &Usage{}
 		total.add(pv.usage)
@@ -539,6 +547,9 @@ func (f *funcInfo) annotated() bool {
 }
 
 type pkgVerifier struct {
+	// sizedProved counts the obligations that only the declared memory
+	// proved (sizes.go).
+	sizedProved *atomic.Int64
 	// mainRef is where package main refers to its function main; see
 	// findMainReference.
 	mainRef token.Pos

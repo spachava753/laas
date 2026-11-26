@@ -261,6 +261,14 @@ func TestAnalyzer(t *testing.T) {
 		parallel(t)
 		runCorpus(t, newAnalyzer(), "lockentries")
 	})
+	// Verified packages built together declare one memory (F13 of the
+	// review of F38), in both directions, and the same verifies.
+	for _, root := range []string{"memnone", "memdecl", "memsame"} {
+		t.Run("compares the declared memories in "+root, func(t *testing.T) {
+			parallel(t)
+			runCorpus(t, newAnalyzer(), root)
+		})
+	}
 	for _, root := range []string{"twoa", "twob", "twoc"} {
 		t.Run("uses one entry for a type in "+root, func(t *testing.T) {
 			parallel(t)

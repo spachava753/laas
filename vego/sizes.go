@@ -1,13 +1,18 @@
 package vego
 
 import (
+	"fmt"
 	"go/token"
 	"go/types"
+	"maps"
+	"math/big"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
+	"gopkg.in/yaml.v3"
 )
 
 // The facts that a value fits in memory are bounds whose right side is a
@@ -39,16 +44,6 @@ func (pv *pkgVerifier) marks() *limitMarks {
 // platformMarks holds the marks of each platform, by its MaxInt and
 // MaxAlloc.
 var platformMarks sync.Map
-
-// memoryBacked returns the marks of the facts that are true only because a
-// run cannot hold more than memory, with no obligation behind them where a
-// value grows. A Variant may not rest on them: a loop that adds a key on
-// every pass would otherwise be proved to end by the bound on the number of
-// keys, and Go never returns from it (F1 of the design review of F38).
-func (pv *pkgVerifier) memoryBacked() map[*logic.Term]bool {
-	m := pv.marks()
-	return map[*logic.Term]bool{m.mapCount: true, m.mapBytes: true}
-}
 
 // rewriteMarked rewrites each atom Le(t, mark) of a hypothesis, for a mark
 // in marks, by with, where the atom stands only under And, Or, the
@@ -152,12 +147,15 @@ func (v *fnVerifier) hypsFor(hyps []*logic.Term) []*logic.Term {
 
 // withoutMemory runs check, which asks goals of a Variant or a loop
 // invariant, with the facts that only memory makes true left out of every
-// proof it makes (memoryBacked): a loop that grows a map until memory runs
-// out would otherwise be proved to end, directly or through an invariant
-// that carries the bound to the head (F1 of the design review of F38).
+// proof it makes: those with no obligation behind them where a value grows,
+// the marked bounds on the keys of a map. A loop that grows a map until
+// memory runs out would otherwise be proved to end, directly or through an
+// invariant that carries the bound to the head, and Go never returns from
+// it (F1 of the design review of F38).
 func (v *fnVerifier) withoutMemory(check func()) {
 	saved, savedHit := v.unmarked, v.unmarkedHit
-	v.unmarked, v.unmarkedHit = v.memoryBacked(), false
+	m := v.marks()
+	v.unmarked, v.unmarkedHit = map[*logic.Term]bool{m.mapCount: true, m.mapBytes: true}, false
 	defer func() { v.unmarked, v.unmarkedHit = saved, savedHit }()
 	check()
 }
@@ -185,4 +183,233 @@ func (v *fnVerifier) memoryNote(st *state, guard []*logic.Term, goal *logic.Term
 // check does, with the facts that only memory makes true left out.
 func (v *fnVerifier) checkVariant(st *state, guard []*logic.Term, goal *logic.Term, pos token.Pos, format string, args ...any) {
 	v.withoutMemory(func() { v.check(st, guard, goal, pos, format, args...) })
+}
+
+// sizesDecl is a project's declaration that the machines the program runs
+// on never hold memory bytes of its data at once, in memory and swap
+// together, however it is stored, as its trust file states it under sizes.
+type sizesDecl struct {
+	memory *big.Int
+	// written is the memory as the file writes it, as in 256GB.
+	written string
+	reason  string
+	line    int
+}
+
+// sizesSlack is what the bound on the array of a slice adds to four times
+// the memory: the page that growslice may round a new array up by.
+const sizesSlack = 1 << 16
+
+// arrayBound is R, the most bytes the array of a slice takes under the
+// declaration: 4 * M + 65536 (see Slices, The bound on every value under a
+// declared memory, in the ROADMAP).
+func (d *sizesDecl) arrayBound() *big.Int {
+	r := new(big.Int).Mul(d.memory, big.NewInt(4))
+	return r.Add(r, big.NewInt(sizesSlack))
+}
+
+// addSizes reads the declaration of the memory of the machines.
+func (f *trustFile) addSizes(key, value *yaml.Node) {
+	if f.shipped {
+		f.problem(key.Line, "sizes may be declared only in the trust file of a project")
+		return
+	}
+	const shape = "sizes must be a mapping with a memory, the most memory, RAM and swap together, of the machines the program runs on, " +
+		"as in 256GB, and a reason, which says why the program never runs on a machine with more"
+	if value.Kind != yaml.MappingNode {
+		f.problem(value.Line, shape)
+		return
+	}
+	decl := &sizesDecl{line: key.Line}
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		field, text := value.Content[i], value.Content[i+1]
+		if text.Kind != yaml.ScalarNode {
+			f.problem(text.Line, "%s of sizes must be text", field.Value)
+			return
+		}
+		switch field.Value {
+		case "memory":
+			memory, err := parseMemory(text.Value)
+			if err != nil {
+				f.problem(text.Line, "the memory of sizes %s", err)
+				return
+			}
+			decl.memory, decl.written = memory, strings.TrimSpace(text.Value)
+		case "reason":
+			decl.reason = strings.TrimSpace(text.Value)
+		default:
+			f.problem(field.Line, "unknown field %q of sizes; expected memory and reason", field.Value)
+			return
+		}
+	}
+	switch {
+	case decl.memory == nil || decl.reason == "":
+		f.problem(value.Line, shape)
+	default:
+		f.sizes = decl
+	}
+}
+
+// memoryUnits are the units a declared memory may be written in.
+var memoryUnits = map[string]int64{
+	"": 1, "B": 1,
+	"KB": 1e3, "MB": 1e6, "GB": 1e9, "TB": 1e12,
+	"KiB": 1 << 10, "MiB": 1 << 20, "GiB": 1 << 30, "TiB": 1 << 40,
+}
+
+// parseMemory reads a number of bytes with an optional unit, as 256GB or
+// 64GiB or 1000000000.
+func parseMemory(text string) (*big.Int, error) {
+	text = strings.TrimSpace(text)
+	digits := strings.TrimRightFunc(text, func(r rune) bool { return r < '0' || r > '9' })
+	unit, known := memoryUnits[strings.TrimSpace(text[len(digits):])]
+	n, ok := new(big.Int).SetString(digits, 10)
+	switch {
+	case digits == "" || !ok || strings.IndexFunc(digits, func(r rune) bool { return r < '0' || r > '9' }) >= 0:
+		return nil, fmt.Errorf("must be a whole number of bytes with an optional unit, as 256GB or 64GiB, not %q", text)
+	case !known:
+		return nil, fmt.Errorf("has the unit %q; write B, KB, MB, GB, TB, KiB, MiB, GiB, or TiB", strings.TrimSpace(text[len(digits):]))
+	case n.Sign() <= 0:
+		return nil, fmt.Errorf("must be more than 0 bytes")
+	}
+	return n.Mul(n, big.NewInt(unit)), nil
+}
+
+// SizesUse records a package whose trust file declares the memory of the
+// machines: the declaration, as the file writes it, and the number of
+// obligations of the package that only the declaration proved. Unused says
+// why the declaration proves nothing on the platform, or is empty.
+type SizesUse struct {
+	File    string
+	Line    int
+	Memory  string
+	Bytes   string
+	Bound   string
+	Reason  string
+	Package string
+	Proved  int
+	Unused  string
+}
+
+// noteSizes records the declaration of the project's file in the usage of
+// the package, which the trust report shows with the count of what only
+// it proved (countSized).
+func (pv *pkgVerifier) noteSizes(path string) {
+	decl := pv.projectTrust.sizes
+	if decl == nil {
+		return
+	}
+	use := SizesUse{File: path, Line: decl.line, Memory: decl.written, Bytes: decl.memory.String(), Bound: decl.arrayBound().String(),
+		Reason: decl.reason, Package: pv.pass.Pkg.Path()}
+	// Where the bound on arrays is not below what one allocation can be,
+	// every fact it would bound is bounded more tightly by the platform,
+	// and it proves nothing more.
+	if decl.arrayBound().Cmp(pv.maxAlloc()) >= 0 {
+		use.Unused = fmt.Sprintf("it proves nothing on this platform, where one allocation is at most %s bytes, less than the %s bytes it would bound an array by",
+			pv.maxAlloc(), decl.arrayBound())
+	}
+	pv.usage.Sizes = append(pv.usage.Sizes, use)
+}
+
+// countSized counts an obligation that only the declaration proved.
+func (pv *pkgVerifier) countSized() {
+	if pv.sizedProved != nil {
+		pv.sizedProved.Add(1)
+	}
+}
+
+// sizesReport renders the section of the trust report on the declared
+// memory: for each file that declares it, the claim, the reason, and how
+// many obligations of each package only it proved.
+func sizesReport(uses []SizesUse, relative func(string) string) string {
+	if len(uses) == 0 {
+		return ""
+	}
+	byFile := map[string][]SizesUse{}
+	for _, use := range uses {
+		byFile[use.File] = append(byFile[use.File], use)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Memory declared in sizes: %d\n", len(byFile))
+	for _, file := range slices.Sorted(maps.Keys(byFile)) {
+		listed := byFile[file]
+		slices.SortFunc(listed, func(a, b SizesUse) int { return strings.Compare(a.Package, b.Package) })
+		first := listed[0]
+		fmt.Fprintf(&b, "  %s:%d\n", relative(file), first.Line)
+		fmt.Fprintf(&b, "    claims:  the machines the program runs on never hold %s (%s bytes) of its data at once, in memory and swap together, "+
+			"however it is stored; a run that would hold more runs out of memory, which no proof covers; so every string, and the entries "+
+			"of every map, take at most %s bytes, and the array of every slice at most %s bytes\n", first.Memory, first.Bytes, first.Bytes, first.Bound)
+		fmt.Fprintf(&b, "    reason:  %s\n", first.Reason)
+		var counts []string
+		for _, use := range listed {
+			if use.Unused != "" {
+				counts = append(counts, fmt.Sprintf("none in %s: %s", use.Package, use.Unused))
+				continue
+			}
+			counts = append(counts, fmt.Sprintf("%d in %s", use.Proved, use.Package))
+		}
+		fmt.Fprintf(&b, "    obligations only it proved: %s\n", strings.Join(counts, "; "))
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// MemoryUse records the memory that the trust file of a package with
+// verified functions declares under sizes: File is the trust file, or
+// empty, and Memory and Bytes are empty when it declares none.
+type MemoryUse struct {
+	Package string
+	File    string
+	Memory  string
+	Bytes   string
+}
+
+// noteMemory records the declared memory of a package with verified
+// functions. A package with none is code that is not verified, and what it
+// hands over is assumed within the bound.
+func (pv *pkgVerifier) noteMemory() {
+	if !slices.ContainsFunc(pv.order, func(fn *funcInfo) bool { return fn.annotated() }) {
+		return
+	}
+	use := MemoryUse{Package: pv.pass.Pkg.Path()}
+	if pv.projectTrust != nil {
+		use.File = pv.projectTrust.path
+		if decl := pv.projectTrust.sizes; decl != nil {
+			use.Memory, use.Bytes = decl.written, decl.memory.String()
+		}
+	}
+	pv.usage.Memories = append(pv.usage.Memories, use)
+}
+
+// reportTwoMemories reports two packages with verified functions, built
+// together, whose trust files declare different memories, or of which one
+// declares and the other does not (F13 of the review of F38). The bound on
+// every value holds only if every reservation by a number in verified code
+// was checked against one bound, so a value that one of them made can
+// break what the other assumes. It is reported in every package that the
+// two are built with.
+func (pv *pkgVerifier) reportTwoMemories(total *Usage) {
+	uses := slices.Clone(total.Memories)
+	slices.SortFunc(uses, func(a, b MemoryUse) int { return strings.Compare(a.Package, b.Package) })
+	said := func(use MemoryUse) string {
+		file := "no trust file"
+		if use.File != "" {
+			file = use.File
+		}
+		if use.Bytes == "" {
+			return fmt.Sprintf("package %s (%s) declares no memory", use.Package, file)
+		}
+		return fmt.Sprintf("package %s (%s) declares %s", use.Package, file, use.Memory)
+	}
+	for i, a := range uses {
+		for _, b := range uses[i+1:] {
+			if a.Bytes == b.Bytes {
+				continue
+			}
+			pv.report(pv.pass.Files[0].Package, "the verified packages of this build declare different memories under sizes: %s, and %s; "+
+				"a reservation that the proofs of one checked against its bound can break what the proofs of the other assume of every value. "+
+				"Declare the same memory in both trust files, or none in either, or run laas with -vego.trusted naming one file", said(a), said(b))
+			return
+		}
+	}
 }
