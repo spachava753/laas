@@ -755,7 +755,14 @@ func (v *fnVerifier) allocSlice(st *state, elem types.Type, elements []value, le
 	for i, c := range cells {
 		if !zeroed[c.key] {
 			zeroed[c.key] = true
-			st.storeRow(c.key, c.sort, ref, logic.Fill(logic.IntLit(0), zeroLeaf(leaves[i])))
+			// The run of an array of a struct lies in the region of its
+			// elements, one position per element, whose zero is the
+			// element's and not the array's.
+			zero := zeroLeaf(leaves[i])
+			if c.isRun() {
+				zero = zeroLeaf(leaf{sort: c.sort})
+			}
+			st.storeRow(c.key, c.sort, ref, logic.Fill(logic.IntLit(0), zero))
 		}
 	}
 	for i, element := range elements {

@@ -171,6 +171,8 @@ arraystructs	(*arraystructs.plain).Write	10	8396	0
 arraystructs	(*arraystructs.seen).Mark	8	2031	0
 arraystructs	arraystructs.Aligned	0	0	0
 arraystructs	arraystructs.AppendInto	13	3560	0
+arraystructs	arraystructs.Assign	8	7360	0
+arraystructs	arraystructs.AssignWrong	7	5705	0
 arraystructs	arraystructs.Beside	1	46	0
 arraystructs	arraystructs.CallSet15	6	3843	0
 arraystructs	arraystructs.CallSet15Wrong	6	6417	0
@@ -205,6 +207,14 @@ arraystructs	arraystructs.InSliceWide	1	527	0
 arraystructs	arraystructs.KeepsCount	7	6038	0
 arraystructs	arraystructs.Length	2	256	0
 arraystructs	arraystructs.Literal	8	1524	0
+arraystructs	arraystructs.MakeAppend	14	14521	0
+arraystructs	arraystructs.MakeAppendWrong	12	16350	0
+arraystructs	arraystructs.MakeHolder	4	2893	0
+arraystructs	arraystructs.MakeHolderWrong	2	1466	0
+arraystructs	arraystructs.MakeLiteral	4	2162	0
+arraystructs	arraystructs.MakeLiteralWrong	2	1166	0
+arraystructs	arraystructs.MakeMake	9	1828	0
+arraystructs	arraystructs.MakeMakeWrong	8	1935	0
 arraystructs	arraystructs.Marshal	1	367	0
 arraystructs	arraystructs.Nested	0	0	0
 arraystructs	arraystructs.PutEdge	8	2321	0
