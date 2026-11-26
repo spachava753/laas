@@ -280,3 +280,55 @@ func useOwner(o *Owner, p *int) {
 func HandOwned(o *Owner) {
 	useOwner(o, (*int)(o.c)) // want `vego: \(\*int\)\(o\.c\) is memory that o owns, and useOwner is handed what reaches a Owner, which can own it; useOwner assumes that nothing it is handed is what an owner it is handed owns: copy it, or pass it alone`
 }
+
+// bumpOther is trusted with an entry that describes what p points to on
+// return, which its modifies does not list.
+func bumpOther(p *int) { *p = *p + 1 }
+
+// UsesBumpOther calls it.
+//
+// @Requires p != nil
+// @Modifies p
+// @Ensures True
+func UsesBumpOther(p *int) {
+	bumpOther(p) // want `vego: the trusted contract of ptrvalsbad\.bumpOther \(trusted\.yaml:\d+\) cannot be used: its ensures "\*p' = \*p \+ 1" describes \*p' after the call, but nothing its modifies lists is memory that \*p' reads, so the call cannot have changed it; drop the prime or list what the function writes` `vego: the trusted contract of ptrvalsbad\.bumpOther \(trusted\.yaml:\d+\) cannot be used: it contradicts itself, so anything could be proved from it`
+}
+
+// SetOnly forgets the prime of what p points to on return.
+//
+// @Requires p != nil
+// @Modifies p
+// @Ensures *p = 7 // want `vego: the Ensures clause "\*p = 7" names no result and nothing on return, so it speaks of the state when SetOnly is called, and it reads memory that SetOnly may modify; write a prime for the value on return, as in \*p', or move the clause to a Requires`
+func SetOnly(p *int) {
+	*p = 7
+} // want `vego: postcondition may not hold: \*p = 7`
+
+// Limited owns the int its field points to.
+//
+// @Owns limit
+type Limited struct {
+	limit *int
+}
+
+// SetLimit stores a pointer to a parameter into the owned field.
+//
+// @Requires l != nil
+// @Modifies l
+// @Ensures True
+func SetLimit(l *Limited, n *int) {
+	l.limit = n // want `vego: l\.limit may come to refer to memory that existed when SetLimit was called and that it did not own; an owned field may refer only to memory made since, or to part of what it referred to then; copy the value into one made with new\(int\), or do not declare the field owned`
+}
+
+// WithinStructPointer asks whether a struct lies in what p points to.
+//
+// @Requires p != nil And s != nil
+// @Ensures within(s, p) // want `vego: in Ensures annotation: within\(s, p\): p points to a value of type int, in which nothing lies but what points to it`
+func WithinStructPointer(p *int, s *S) {
+}
+
+// ValidOfNumber asks for the invariant of what p points to.
+//
+// @Requires p != nil And valid(p) // want `vego: in Requires annotation: valid\(p\): p is not a struct or a pointer to one`
+// @Ensures True
+func ValidOfNumber(p *int) {
+}

@@ -55,4 +55,7 @@ func TestClaims(t *testing.T) {
 	if DeferredResult() != 2 || SwitchedAddress(1) != 3 || TwoResults() != 3 || Captured() != 4 {
 		t.Errorf("a function of boxed variables returned what its contract does not say")
 	}
+	if CountTrusted() != 2 {
+		t.Errorf("CountTrusted is proved to return 2")
+	}
 }

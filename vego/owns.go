@@ -509,6 +509,12 @@ func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur va
 	if object, isPointer := pointee(t); isPointer {
 		making = "&" + types.TypeString(object, types.RelativeTo(v.pass.Pkg)) + "{...}"
 		copied = "copy it into a struct made with " + making
+		// A box is named by the type it holds (F20 of the review of step
+		// 2 of F37).
+		if held, boxed := isBox(object); boxed {
+			making = "new(" + types.TypeString(held, types.RelativeTo(v.pass.Pkg)) + ")"
+			copied = "copy the value into one made with " + making
+		}
 	} else if isMap(t) {
 		copied = "copy it into new memory, as maps.Clone does"
 	} else if isIface(t) {

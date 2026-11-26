@@ -5519,6 +5519,7 @@ ptrvals	(*ptrvals.Counter).Inc	8	6301	0
 ptrvals	ptrvals.Add	10	11224	0
 ptrvals	ptrvals.Captured	3	629	0
 ptrvals	ptrvals.Converted	7	4833	0
+ptrvals	ptrvals.CountTrusted	12	7586	0
 ptrvals	ptrvals.CountTwice	8	3278	0
 ptrvals	ptrvals.DeferredResult	7	2298	0
 ptrvals	ptrvals.Inc	9	6762	0
@@ -5536,6 +5537,7 @@ ptrvals	ptrvals.SwitchedAddress	5	2287	0
 ptrvals	ptrvals.Toggle	7	2023	0
 ptrvals	ptrvals.TwoResults	7	3027	0
 ptrvals	ptrvals.WriteThrough	4	674	0
+ptrvals	ptrvals.bumpTrusted	1	1216	0
 ptrvals	ptrvals.pair	3	85	0
 ptrvals	ptrvals.useOwner	16	28568	0
 ptrvalsbad	(*ptrvalsbad.Counter).Bump	8	6301	0
@@ -5556,6 +5558,8 @@ ptrvalsbad	ptrvalsbad.KeepsOther	7	6757	0
 ptrvalsbad	ptrvalsbad.NoCheck	2	398	0
 ptrvalsbad	ptrvalsbad.NotAPointer	1	111	0
 ptrvalsbad	ptrvalsbad.PromotedMethod	3	2010	0
+ptrvalsbad	ptrvalsbad.SetLimit	8	13357	0
+ptrvalsbad	ptrvalsbad.SetOnly	7	3126	0
 ptrvalsbad	ptrvalsbad.StaleRead	3	796	0
 ptrvalsbad	ptrvalsbad.StructWhole	1	241	0
 ptrvalsbad	ptrvalsbad.SwapWrong	13	11655	0
@@ -5563,8 +5567,12 @@ ptrvalsbad	ptrvalsbad.TimesDeref	2	1219	0
 ptrvalsbad	ptrvalsbad.TimesPointer	1	241	0
 ptrvalsbad	ptrvalsbad.Twice	1	241	0
 ptrvalsbad	ptrvalsbad.Unlisted	4	848	0
+ptrvalsbad	ptrvalsbad.UsesBumpOther	2	292	0
+ptrvalsbad	ptrvalsbad.ValidOfNumber	0	0	0
 ptrvalsbad	ptrvalsbad.WithinSlice	1	747	0
 ptrvalsbad	ptrvalsbad.WithinStruct	1	439	0
+ptrvalsbad	ptrvalsbad.WithinStructPointer	1	439	0
+ptrvalsbad	ptrvalsbad.bumpOther	1	422	0
 ptrvalsbad	ptrvalsbad.useOwner	15	23837	0
 ptrvalsclient	ptrvalsclient.Local	5	1553	0
 ptrvalsclient	ptrvalsclient.Stale	7	5575	0

@@ -2650,6 +2650,23 @@ trusted:
       - "fresh(result) And |result| = 1"
     modifies: []
 
+  ptrvals.bumpTrusted:
+    reason: Test helper that increments what p points to (F19 of the review of step 2 of F37).
+    requires:
+      - "p != nil"
+      - "*p < 1000"
+    modifies: [p]
+    ensures:
+      - "*p' = *p + 1"
+
+  ptrvalsbad.bumpOther:
+    reason: An entry that describes what p points to after the call, which its modifies does not list.
+    requires:
+      - "p != nil"
+    modifies: []
+    ensures:
+      - "*p' = *p + 1"
+
 # States of interfaces of another module, and contracts that speak of them.
 state:
   optionalwc.WC:

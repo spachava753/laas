@@ -1655,7 +1655,16 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		// points nowhere, and so lies within nothing.
 		outer := found[1].val
 		// A pointer to a number, a boolean, or a string points to a box,
-		// which lies in no slice and no struct (ptrvalues.go).
+		// which lies in no slice and no struct, and in which nothing lies
+		// but what points to it (ptrvalues.go, F20).
+		if object, isPointer := pointee(found[1].typ); isPointer && !types.Identical(found[0].typ.Underlying(), found[1].typ.Underlying()) {
+			if _, boxed := isBox(object); boxed {
+				spelled := spell(paths[1].Root, paths[1].Steps)
+				return nil, fmt.Errorf("within(%s, %s): %s points to a value of type %s, in which nothing lies but what points to it",
+					spell(paths[0].Root, paths[0].Steps), spelled, spelled,
+					types.TypeString(found[1].typ.Underlying().(*types.Pointer).Elem(), types.RelativeTo(e.v.pass.Pkg)))
+			}
+		}
 		if object, isPointer := pointee(found[0].typ); isPointer {
 			if _, boxed := isBox(object); boxed && !types.Identical(found[0].typ.Underlying(), found[1].typ.Underlying()) {
 				spelled := spell(paths[0].Root, paths[0].Steps)
@@ -2435,6 +2444,9 @@ func (e *specEnv) valid(path logic.Path) (*logic.Term, error) {
 		return nil, err
 	}
 	object, isPointer := pointee(found.typ)
+	if _, boxed := isBox(object); isPointer && boxed {
+		isPointer = false
+	}
 	if found.constant != nil || !isStructType(found.typ) && !(isPointer && isStructType(object)) {
 		return nil, fmt.Errorf("valid(%s): %s is not a struct or a pointer to one", spelled, spelled)
 	}

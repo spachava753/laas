@@ -241,3 +241,17 @@ func useOwner(o *Owner, p *int) {
 	Inc(p)
 	o.c = o.c
 }
+
+// bumpTrusted is trusted: it increments what p points to.
+func bumpTrusted(p *int) { *p = *p + 1 }
+
+// CountTrusted increments a local twice through a trusted function whose
+// entry says what p points to on return.
+//
+// @Ensures r = 2
+func CountTrusted() (r int) {
+	x := 0
+	bumpTrusted(&x)
+	bumpTrusted(&x)
+	return x
+}

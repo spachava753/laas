@@ -137,7 +137,7 @@ func primedExample(text string, n *logic.Node) string {
 			return
 		}
 		switch n.Kind {
-		case logic.NField, logic.NIndex:
+		case logic.NField, logic.NIndex, logic.NDeref:
 			path = n
 			return
 		case logic.NIdent:
@@ -151,6 +151,9 @@ func primedExample(text string, n *logic.Node) string {
 	}
 	visit(n)
 	switch {
+	case path != nil && path.Kind == logic.NDeref:
+		// *p on return is *p', with the prime on what * follows.
+		return text[path.Start:path.End] + "'"
 	case path != nil && path.Kind == logic.NIndex:
 		base := path.Kids[0]
 		return text[base.Start:base.End] + "'" + text[base.End:path.End]

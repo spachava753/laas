@@ -1148,7 +1148,7 @@ func (v *fnVerifier) primedPaths(fn *funcInfo) {
 	for _, c := range fn.ensures {
 		var visit func(n *logic.Node, whole bool, state string)
 		visit = func(n *logic.Node, whole bool, state string) {
-			isPath := n.Kind == logic.NIdent || n.Kind == logic.NField || n.Kind == logic.NIndex
+			isPath := n.Kind == logic.NIdent || n.Kind == logic.NField || n.Kind == logic.NIndex || n.Kind == logic.NDeref
 			if isPath && whole {
 				v.checkPrimed(fn, c, n, changed, state)
 			}
@@ -1178,6 +1178,15 @@ func (v *fnVerifier) primedPaths(fn *funcInfo) {
 // A path it cannot follow is left to the checks that read the clause. With
 // state set, the path is the argument of that state, which is read too.
 func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, changed map[string][]*types.Var, state string) {
+	// *p reads the box p points to, where the rest of the path leads
+	// (F19 of the review of step 2 of F37).
+	whole, derefs := path, 0
+	for path.Kind == logic.NDeref {
+		path, derefs = path.Kids[0], derefs+1
+	}
+	if derefs > 1 {
+		return
+	}
 	primed := false
 	for n := path; ; n = n.Kids[0] {
 		primed = primed || n.Primed
@@ -1256,8 +1265,14 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 			t = fields.Field(index).Type()
 		}
 	}
-	// What the path leads to is read as well: the elements of a slice, the
-	// keys and values of a map, and a state where a pointer points.
+	// What the path leads to is read as well: what *p reads, the elements
+	// of a slice, the keys and values of a map, and a state where a pointer
+	// points.
+	if object, viaPointer := pointee(t); viaPointer && derefs == 1 {
+		for _, c := range v.cellsOf(object) {
+			read, own = append(read, c), append(own, false)
+		}
+	}
 	if object, viaPointer := pointee(t); viaPointer && state != "" && state != lengthRead {
 		if u, isStruct := object.Underlying().(*types.Struct); isStruct {
 			decls := statesOf(u)
@@ -1297,7 +1312,7 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 	}
 	if !reached {
 		fn.typeDefect("its ensures %q describes %s after the call, but nothing its modifies lists is memory that %s reads, so the call cannot have changed it; "+
-			"drop the prime or list what the function writes", c.text, c.text[path.Start:path.End], c.text[path.Start:path.End])
+			"drop the prime or list what the function writes", c.text, c.text[whole.Start:whole.End], c.text[whole.Start:whole.End])
 	}
 }
 
