@@ -1054,15 +1054,18 @@ func (pv *pkgVerifier) holdsContractedValue(t types.Type, seen map[types.Type]bo
 // which speaks of a state (see makeable). For those,
 // runs claims only that the contract holds for values that meet their
 // contracts, which a cycle back through code that verified code made would
-// make circular. Verified code makes no value of an interface with a method
-// that has no contract: a conversion to one is refused, and a conversion
-// between interfaces keeps the methods of the value. So no such value holds
-// code that verified code made, and nothing is circular; for it, as for an
-// interface without contracts, any, and an error, runs claims that the
-// contract holds whatever code arrives, and a cycle would make that claim
-// false, which is on the author of the entry. Until type assertions are
-// built, verified code also makes no value that such an interface holds and
-// that it could call; they must be counted once it does.
+// make circular. Verified code makes a value of an interface with a method
+// that has no contract only of a type of another module whose method of the
+// name nobody verified (F39), and only when that type cannot hold what this
+// function counts (checkUnseenHolds): the methods of the other module could
+// run it under no claim. A value of a type of the project is refused there,
+// and a conversion between interfaces keeps the methods of the value. So no
+// such value holds code that verified code made, and nothing is circular;
+// for it, as for an interface without contracts, any, and an error, runs
+// claims that the contract holds whatever code arrives, the methods nobody
+// verified that the function runs included, and a cycle would make that
+// claim false, which is on the author of the entry. What an any inside such
+// a value holds is as what an any handed under runs holds.
 func holdsCallable(pv *pkgVerifier, t types.Type, seen map[types.Type]bool) bool {
 	if t == nil || seen[t] {
 		return false

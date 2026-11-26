@@ -104,7 +104,10 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 	for _, c := range checks {
 		optionalWrites = optionalWrites || v.footprintMethod(c.method)
 	}
-	if method := v.stateSpeaker(want); optionalWrites || method != nil && (!v.hasStates(want) || v.hasFootprint(want)) {
+	// A value with a method nobody verified (A1 of F39) may write anything
+	// behind its receiver: it has a footprint, and its row is unknown.
+	unseen := v.hasUnseen(from, want)
+	if method := v.stateSpeaker(want); optionalWrites || unseen || method != nil && (!v.hasStates(want) || v.hasFootprint(want)) {
 		behind = v.writingImplementation(from, want)
 		for _, c := range checks {
 			if behind == nil && v.footprintMethod(c.method) {
@@ -222,7 +225,22 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		// pointer's.
 		keyAt(at, ghost)
 		var defines func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term)
-		if behind != nil {
+		if unseen {
+			// What a method nobody verified writes is not known, so the row
+			// of the new home is a row of which nothing is known: F18's
+			// invariant, that no fact makes a row smaller than what the
+			// value's methods may write, holds of it (F1 of the design
+			// review of F39). Not the structural row, which is what verified
+			// methods were shown to write.
+			row := v.fresh("unseen row", logic.SeqOf(logic.SeqOf(logic.Bool)))
+			defines = func(alloc, pos *logic.Term) (*logic.Term, []*logic.Term) {
+				return logic.Select(logic.Select(row, alloc), pos), nil
+			}
+			text := types.ExprString(ast.Unparen(e))
+			v.convertedAt[held.Name] = conversion{text: text, at: e.Pos(),
+				memory: fmt.Sprintf("a %s converted to %s, whose method for %s is code of another module that nobody verified, so nothing is known of what it writes", v.shown(from), v.shown(want), v.unseenTitle(from, want)),
+				remedy: "hand the value only to functions whose contracts do not write it"}
+		} else if behind != nil {
 			defines = v.structuralFootprint(nil, maps.Clone(st.mem), converted, from)
 			if v.ownsMemory(from) {
 				v.convertsOwner = true
@@ -404,17 +422,78 @@ func (v *fnVerifier) evalConverted(e ast.Expr, target types.Type, st *state, gua
 // runs, from memory the check knows nothing about.
 func (v *fnVerifier) madeInterface(e ast.Expr, held value, from, want types.Type, st *state, guard []*logic.Term) {
 	iface := want.Underlying().(*types.Interface)
+	unseen := false
 	for method := range iface.Methods() {
 		T := v.methodContract(method)
 		if T == nil {
+			if ok, why := v.unseenMethod(from, want, method); ok {
+				unseen = true
+				continue
+			} else if why != "" {
+				v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: its method %s has no contract, and %s", from, want, methodTitle(method), why))
+			}
 			v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: its method %s has no contract, so nothing would say "+
 				"what code that calls it may rely on%s", from, want, methodTitle(method), v.entryHint(method.Pkg(), method.Pos(), method.FullName())))
 		}
 		v.usable(e.Pos(), T, methodTitle(method), st, guard, false)
 	}
+	// What the value holds that can be code verified code made could be
+	// run by the methods of the other module, under no claim that
+	// stratification counts, so a cycle back into verified code would not
+	// be seen (F2 of the design review of F39). It is decided by the type,
+	// at any depth, as holdsCallable decides it, so what verified code
+	// stores into the value after the conversion is covered too.
+	if where := callablePath(v.pkgVerifier, from, v.shown(from), map[types.Type]bool{}); unseen && where != "" {
+		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: %s has no contract, and its implementation is code of another module "+
+			"that could run what the value holds, under no claim; %s, which can be code that verified code made",
+			v.shown(from), v.shown(want), v.unseenTitle(from, want), where))
+	}
 	for method := range iface.Methods() {
+		if v.methodContract(method) == nil {
+			// An unseen method: no verified code calls it (A1 of F39).
+			continue
+		}
 		v.madeMethod(e, held, from, want, method, "", st, guard)
 	}
+}
+
+// unseenMethod reports whether the method of the concrete type from that
+// implements method, a method of an interface that has no contract, is a
+// method nobody verified that verified code never calls (A1 of the design
+// of F39): one that a type of another module declares itself. Verified
+// code cannot call a method without a contract through an interface
+// value, so such a method runs only in code that is not verified, under
+// the claims of what runs it (What a proof assumes). A method of a type of
+// the project is verified code, which code that is not verified would call
+// with arguments nobody checked, so it still needs a contract; and so does
+// a method promoted from an embedded field, which is the project's type's.
+// When it is not such a method, why says so for a reason of its own, or is
+// empty for the ordinary message.
+func (v *fnVerifier) unseenMethod(from, want types.Type, method *types.Func) (ok bool, why string) {
+	selection := types.NewMethodSet(from).Lookup(method.Pkg(), method.Name())
+	if selection == nil || len(selection.Index()) > 1 {
+		return false, ""
+	}
+	concrete, isFunc := selection.Obj().(*types.Func)
+	if !isFunc || isIfaceMethod(concrete) || concrete.Pkg() == nil {
+		return false, ""
+	}
+	if v.inAnalysedModule(concrete.Pkg(), concrete.Pos()) {
+		return false, ""
+	}
+	base := from
+	if elem, isPointer := pointee(from); isPointer {
+		base = elem
+	}
+	if named, isNamed := types.Unalias(base).(*types.Named); isNamed && named.TypeArgs().Len() > 0 {
+		return false, fmt.Sprintf("%s is an instance of a generic type of another module, whose methods may run methods of its type arguments; "+
+			"a value of an instance of a generic type cannot be converted to an interface with a method nobody verified yet", v.shown(from))
+	}
+	if v.hasStates(want) {
+		return false, "the interface has states, which a method nobody verified could change under no claim; " +
+			"a value cannot be converted to an interface with states and a method nobody verified yet"
+	}
+	return true, ""
 }
 
 // madeMethod checks the method of the concrete type from that implements
@@ -639,6 +718,10 @@ func (pv *pkgVerifier) methodContract(method *types.Func) *funcInfo {
 		return fn
 	}
 	pv.importedMethods[method] = nil
+	// While the contract is made, a method that asks for it finds none,
+	// which is not that it has none (footprintMethod).
+	pv.pendingMethods[method] = true
+	defer delete(pv.pendingMethods, method)
 	fact := &contractFact{}
 	if method.Pkg() == nil || !pv.pass.ImportObjectFact(method, fact) {
 		fn := pv.entryMethod(method)
@@ -1109,4 +1192,80 @@ func article(word string) string {
 		return "an"
 	}
 	return "a"
+}
+
+// unseenTitle names a method of want without a contract that from
+// implements, for messages.
+func (v *fnVerifier) unseenTitle(from, want types.Type) string {
+	for method := range want.Underlying().(*types.Interface).Methods() {
+		if v.methodContract(method) == nil {
+			return methodTitle(method)
+		}
+	}
+	return "a method"
+}
+
+// callablePath returns where a value of type t can hold what holdsCallable
+// counts, in words, as in "its field F holds a value of type KHook", or ""
+// when it can hold none. what names the value of type t.
+func callablePath(pv *pkgVerifier, t types.Type, what string, seen map[types.Type]bool) string {
+	if t == nil || seen[t] {
+		return ""
+	}
+	seen[t] = true
+	if held, replaced := heldAs(t); replaced {
+		return callablePath(pv, held, what, seen)
+	}
+	shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(pv.pass.Pkg)) }
+	switch u := t.Underlying().(type) {
+	case *types.Signature:
+		return what + " is a function value"
+	case *types.Basic:
+		if u.Kind() == types.UnsafePointer {
+			return what + " is an unsafe.Pointer"
+		}
+	case *types.Interface:
+		if isError(t) {
+			return what + " is an error"
+		}
+		if pv.fullyContracted(t) {
+			return what + " is an interface value of " + shown(t) + ", whose methods all have contracts"
+		}
+	case *types.Pointer:
+		return callablePath(pv, u.Elem(), "what "+what+" points to", seen)
+	case *types.Slice:
+		return callablePath(pv, u.Elem(), "an element of "+what, seen)
+	case *types.Array:
+		return callablePath(pv, u.Elem(), "an element of "+what, seen)
+	case *types.Map:
+		if p := callablePath(pv, u.Key(), "a key of "+what, seen); p != "" {
+			return p
+		}
+		return callablePath(pv, u.Elem(), "a value of "+what, seen)
+	case *types.Struct:
+		for field := range u.Fields() {
+			if p := callablePath(pv, field.Type(), "its field "+field.Name()+" ("+shown(field.Type())+")", seen); p != "" {
+				return p
+			}
+		}
+	}
+	return ""
+}
+
+// hasUnseen reports whether a conversion of a value of type from to want
+// leaves a method of want unverified: one without a contract that a type of
+// another module implements itself (unseenMethod).
+func (v *fnVerifier) hasUnseen(from, want types.Type) bool {
+	iface, ok := want.Underlying().(*types.Interface)
+	if !ok || types.IsInterface(from) {
+		return false
+	}
+	for method := range iface.Methods() {
+		if v.methodContract(method) == nil {
+			if ok, _ := v.unseenMethod(from, want, method); ok {
+				return true
+			}
+		}
+	}
+	return false
 }

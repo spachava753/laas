@@ -266,6 +266,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 				importedTypes:   map[*types.TypeName]*funcInfo{},
 				ifaceMethods:    map[*types.Func]*funcInfo{},
 				importedMethods: map[*types.Func]*funcInfo{},
+				pendingMethods:  map[*types.Func]bool{},
 				typeEntries:     map[string]*funcInfo{},
 				unentered:       map[string]bool{},
 				ownStates:       map[*types.TypeName][]ifaceState{},
@@ -798,6 +799,9 @@ type pkgVerifier struct {
 	// nil for a method known to have none. See interfaces.go.
 	ifaceMethods    map[*types.Func]*funcInfo
 	importedMethods map[*types.Func]*funcInfo
+	// pendingMethods holds the methods of importedMethods whose contract
+	// is being made.
+	pendingMethods map[*types.Func]bool
 	// typeEntries holds the contracts that the trust files give methods of
 	// interface types and function types, by key, nil for a key with none;
 	// see typeentries.go.

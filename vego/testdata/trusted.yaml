@@ -3,6 +3,56 @@
 version: 1
 
 trusted:
+  # F39, part A: functions of unseensdk, which run methods of the SDK that
+  # nobody verified. Each entry answers for what the methods it runs do.
+  unseensdk.Send:
+    reason: >-
+      Encodes r with encoding/json, which runs the MarshalJSON of each
+      content; those of unseensdk read the text and write nothing.
+    requires: ["r != nil"]
+    runs: [r]
+    asserts: {r: []}
+    modifies: []
+    ensures: ["True"]
+  unseensdk.Run:
+    reason: Runs b.Bump, which writes what b holds, its footprint.
+    requires: ["b != nil"]
+    runs: [b]
+    asserts: {b: []}
+    modifies: [b]
+    ensures: ["True"]
+  unseensdk.WrapIO:
+    reason: >-
+      Keeps b in a writer whose Write runs b.Bump, which writes the
+      footprint of b.
+    requires: ["b != nil"]
+    runs: [b]
+    keeps:
+      b: [result]
+    asserts:
+      b: []
+    vouches: [result]
+    modifies: []
+    ensures: ["result != nil", "fresh(result, b)"]
+  unseensdk.KHook:
+    reason: A hook of the corpus, called with a count that is not negative.
+    requires: ["k >= 0"]
+    modifies: []
+    ensures: ["True"]
+  unseensdk.FireAll:
+    reason: Runs f.Fire, which reads what f holds.
+    requires: ["f != nil"]
+    runs: [f]
+    asserts: {f: []}
+    modifies: []
+    ensures: ["True"]
+  unseensdk.Fill:
+    reason: Runs s.Put, which writes what s holds.
+    requires: ["s != nil"]
+    runs: [s]
+    asserts: {s: []}
+    modifies: [s]
+    ensures: ["True"]
   arraystructs.setLast:
     reason: Test helper standing for a trusted function that writes the last element of an array field (F16 of the review of S2 of F36).
     requires:
@@ -2669,6 +2719,9 @@ trusted:
 
 # States of interfaces of another module, and contracts that speak of them.
 state:
+  unseensdk.Shutter:
+    latched:
+      reason: True once Shut has been called on the value.
   optionalwc.WC:
     ended:
       reason: True once Close has been called on the value.

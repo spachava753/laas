@@ -299,9 +299,16 @@ func (pv *pkgVerifier) hasFootprint(t types.Type) bool {
 // footprintMethod reports whether a method of an interface writes behind
 // its receiver: its contract lists the receiver and its interface has no
 // states, or it lists behind(r) of its receiver r (F28), on an interface
-// with states, where r alone names the states.
+// with states, where r alone names the states. A method without a contract
+// may write anything behind its receiver (F1 of the design review of F39):
+// since F39 verified code converts to such an interface a value of another
+// module whose method of the name nobody verified, and what that method
+// writes is the footprint, which a Modifies of the value then covers.
 func (pv *pkgVerifier) footprintMethod(method *types.Func) bool {
 	fn := pv.methodContract(method)
+	if fn == nil && !pv.pendingMethods[method] {
+		return true
+	}
 	if owner := declaringInterface(method); owner != nil && !pv.hasStates(owner.Type()) && writesBehind(fn) {
 		return true
 	}

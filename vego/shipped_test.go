@@ -1955,6 +1955,7 @@ func shippedVerifier(t *testing.T) (*pkgVerifier, types.Importer) {
 		typeEntries:  map[string]*funcInfo{},
 		// What the entries under formats run is looked up by method.
 		importedMethods: map[*types.Func]*funcInfo{},
+		pendingMethods:  map[*types.Func]bool{},
 		ifaceMethods:    map[*types.Func]*funcInfo{},
 		importedTypes:   map[*types.TypeName]*funcInfo{},
 		funcTypes:       map[*types.TypeName]*funcInfo{},
