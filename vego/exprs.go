@@ -755,7 +755,13 @@ func (v *fnVerifier) makeSlice(e *ast.CallExpr, st *state, guard []*logic.Term) 
 		v.check(st, guard, logic.Le(length, capacity), e.Args[2].Pos(), "make capacity may be less than the length")
 		v.checkFits(st, guard, capacity, types.Typ[types.Int], e.Args[2].Pos(), "make capacity")
 	}
-	v.checkAlloc(st, guard, capacity, elemType(t), e.Pos(), "the slice made")
+	// What an initialiser reserves is reported like any other (F12 of the
+	// review of F38): a variable whose array is larger than a declared
+	// memory allows would break the bound every read of it states.
+	v.uncaptured(func() {
+		v.checkAlloc(st, guard, capacity, elemType(t), e.Pos(), "the slice made")
+		v.checkReserved(st, guard, capacity, elemType(t), e.Pos(), "the slice made")
+	})
 	return v.allocSlice(st, elemType(t), nil, length, capacity)
 }
 

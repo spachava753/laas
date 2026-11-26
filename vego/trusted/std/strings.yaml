@@ -102,12 +102,17 @@ trusted:
       panics when that is more than maxAlloc or overflows an int, and,
       through unsafe.Slice, when it rounds it up past MaxInt. The capacity
       is then less than |b| + n, so 2 * cap + n is less than 3 * (|b| + n).
-      Grow writes no byte of the buffer and keeps its length.
+      Grow writes no byte of the buffer and keeps its length. Under a declared memory (sizes) what it reserves and does not write is
+      also bounded: the new capacity is below 2 * len + 3 * n and a page, with
+      len written, so it keeps the bound on arrays, 4 * Memory and a page,
+      when 3 * n <= 2 * Memory.
     requires:
       - "b != nil"
       - "0 <= n"
       - "3 * (|b| + n) + 65536 <= MaxAlloc"
       - "3 * (|b| + n) + 65536 <= MaxInt"
+    declared:
+      - "3 * n <= 2 * Memory"
     modifies: [b]
     ensures:
       - "|b'| = |b|"

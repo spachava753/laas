@@ -673,11 +673,22 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			// what bound on each length is enough.
 			for _, node := range c.node.Conjuncts() {
 				text := strings.Join(strings.Fields(c.text[node.Start:node.End]), " ")
-				check := v.check
-				if strings.Contains(text, "MaxAlloc") {
-					check = v.checkSized
+				if !strings.Contains(text, "MaxAlloc") {
+					v.check(st, guard, v.formula(c, node, pre), call.Pos(), "precondition of %s may not hold: %s%s", name, text, v.growthHint(c, node, pre, passed))
+					continue
 				}
-				check(st, guard, v.formula(c, node, pre), call.Pos(), "precondition of %s may not hold: %s%s", name, text, v.growthHint(c, node, pre, passed))
+				check := func() {
+					v.checkSized(st, guard, v.formula(c, node, pre), call.Pos(), "precondition of %s may not hold: %s%s", name, text, v.growthHint(c, node, pre, passed))
+				}
+				// What an initialiser reserves by a number, at a call of
+				// an entry of class N, is reported where it stands (F12 of
+				// the review of F38); what it builds from what exists is
+				// as before.
+				if len(fn.trust.declared) > 0 {
+					v.uncaptured(check)
+				} else {
+					check()
+				}
 			}
 			continue
 		}
@@ -738,6 +749,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		}
 		v.stateNote = nil
 	}
+	v.uncaptured(func() { v.checkDeclaredClauses(fn, name, pre, st, guard, call.Pos()) })
 	v.checkRecursion(fn, pre, st, guard, call)
 	written := v.targets(fn, args, st, before)
 	// What the callee never assigns it leaves as it was (S1).

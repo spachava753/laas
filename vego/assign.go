@@ -731,7 +731,23 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		// not asked for it (F3 of the design review of F38).
 		made, isCall := ast.Unparen(call.Args[len(call.Args)-1]).(*ast.CallExpr)
 		if spread && isCall && isBuiltin(v.info, made, "make") {
-			v.check(next, nil, v.appendFits(grown, elem), call.Pos(), "the slice that append grows may be more than can be allocated, or have a capacity an int cannot hold")
+			// What it adds is reserved by a number and may stay fresh
+			// pages; the copied elements are written, at most M, and the
+			// capacity is at most 2 * (len(s) + n) * size and a page, so
+			// keeping the bound on arrays needs n * size <= M (class N).
+			// With that asked, the request, at most 2 * (R + M) and a
+			// page, is a size goal like any other; without the
+			// declaration, or before it, the made slice's bound is not
+			// true of the run, so it gets no second try (F3).
+			if decl := v.sizesOf(); decl != nil {
+				added := logic.Mul(count, logic.IntLit(v.pass.TypesSizes.Sizeof(elem)))
+				v.checkDeclared(next, nil, logic.Le(added, logic.BigLit(decl.memory)), call.Pos(),
+					"what append adds from make may reserve more than the declared memory allows: %s, the memory declared; a size that a number gives "+
+						"is not bounded by what the machines hold, so bound it", decl.written)
+				v.checkSized(next, nil, v.appendFits(grown, elem), call.Pos(), "the slice that append grows may be more than can be allocated, or have a capacity an int cannot hold")
+			} else {
+				v.check(next, nil, v.appendFits(grown, elem), call.Pos(), "the slice that append grows may be more than can be allocated, or have a capacity an int cannot hold")
+			}
 		} else {
 			v.checkSized(next, nil, v.appendFits(grown, elem), call.Pos(), "the slice that append grows may be more than can be allocated, or have a capacity an int cannot hold")
 		}

@@ -117,11 +117,19 @@ trusted:
       capacity, rounded up by at most a page, and otherwise it is s; the
       requires keeps the allocation within the largest one, and the length
       within an int, which bounds it alone for elements of size zero.
+      Under a declared memory (sizes) what it reserves and does not write is
+      also bounded: append(s[:cap(s)], make(S, k)...) copies cap(s)
+      elements, which are written, and adds k <= n that may stay fresh
+      pages, so the new capacity is at most 2 * (cap(s) + k) * elemsize(s)
+      and a page, which keeps the bound on arrays, 4 * Memory and a page,
+      when n * elemsize(s) <= Memory.
     asserts: {S: [], E: []}
     requires:
       - "n >= 0"
       - "|s| + n <= MaxInt"
       - "2 * (|s| + n) * elemsize(s) + 65536 <= MaxAlloc"
+    declared:
+      - "n * elemsize(s) <= Memory"
     modifies: []
     ensures:
       - "|result| = |s|"

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -142,3 +143,10 @@ func Doubles(s []byte) (r []byte) {
 	}
 	return r
 }
+
+// A reservation in an initialiser is reported where it stands (F12 of the
+// review of F38), as in a function; before, a failure there only kept the
+// variable from being known.
+var reserved = make([]byte, 1<<49) // want `vego: the slice made may be more than can be allocated`
+
+var grown = slices.Grow([]byte(nil), 1<<48) // want `vego: precondition of Grow may not hold: 2 \* \(\|s\| \+ n\) \* elemsize\(s\) \+ 65536 <= MaxAlloc`

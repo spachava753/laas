@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"maps"
+	"math/big"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -62,6 +63,10 @@ type trustEntry struct {
 	// See exits.go.
 	exits    bool
 	requires []trustFormula
+	// declared holds what a call must also meet under a declared memory,
+	// formulas that may name Memory, the bytes declared; only the shipped
+	// files have it, for the functions that reserve by a number (sizes.go).
+	declared []trustFormula
 	ensures  []trustFormula
 	modifies []trustFormula
 	// runs names the parameters whose code the function may run: methods
@@ -336,6 +341,19 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			entry.reason = strings.TrimSpace(value.Value)
 		case "requires":
 			entry.requires = formulas("requires", value)
+		case "declared":
+			if !f.shipped {
+				f.problem(field.Line, "declared of %s may be written only in the shipped files of vego", entry.key)
+				continue
+			}
+			for _, item := range scalars("declared", value) {
+				parsed, err := logic.ParseFormula(declaredText(item.Value, big.NewInt(1)))
+				if err != nil {
+					f.problem(item.Line, "syntax error in declared of %s: %v", entry.key, err)
+					continue
+				}
+				entry.declared = append(entry.declared, trustFormula{item.Value, item.Line, item.Column, parsed})
+			}
 		case "ensures":
 			entry.ensures = formulas("ensures", value)
 		case "modifies":

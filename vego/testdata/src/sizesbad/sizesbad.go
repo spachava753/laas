@@ -7,13 +7,14 @@ package sizesbad
 import (
 	"bytes"
 	"io"
+	"slices"
 	"strings"
 )
 
 // @Requires n >= 0
 // @Ensures True
 func Made(n int) (r []byte) {
-	r = make([]byte, n) // want `vego: the slice made may be more than can be allocated`
+	r = make([]byte, n) // want `vego: the slice made may be more than can be allocated` `vego: the slice made may reserve more than the declared memory allows a value to`
 	return r
 }
 
@@ -36,12 +37,13 @@ func Replaced(s, old, new string) (r string) {
 	return r
 }
 
-// The make of a spread append never exists, so its length is a number.
+// The make of a spread append never exists, so its length is a number,
+// held against the memory itself.
 // @Requires 0 <= n And n <= MaxAlloc
 // @Modifies s
 // @Ensures True
 func Extended(s []byte, n int) (r []byte) {
-	r = append(s, make([]byte, n)...) // want `vego: the slice that append grows may be more than can be allocated`
+	r = append(s, make([]byte, n)...) // want `vego: the slice made may reserve more than the declared memory allows a value to` `vego: what append adds from make may reserve more than the declared memory allows: 256GB, the memory declared`
 	return r
 }
 
@@ -49,7 +51,7 @@ func Extended(s []byte, n int) (r []byte) {
 // @Modifies s
 // @Ensures True
 func ExtendedParens(s []byte, n int) (r []byte) {
-	r = append(s, (make([]byte, n))...) // want `vego: the slice that append grows may be more than can be allocated`
+	r = append(s, (make([]byte, n))...) // want `vego: the slice made may reserve more than the declared memory allows a value to` `vego: what append adds from make may reserve more than the declared memory allows: 256GB, the memory declared`
 	return r
 }
 
@@ -57,7 +59,7 @@ func ExtendedParens(s []byte, n int) (r []byte) {
 // @Requires 0 <= k And k <= 1000000
 // @Ensures True
 func Scaled(s string, k int) (r []byte) {
-	r = make([]byte, len(s)*k) // want `vego: multiplication may overflow int` `vego: the slice made may be more than can be allocated`
+	r = make([]byte, len(s)*k) // want `vego: multiplication may overflow int` `vego: the slice made may be more than can be allocated` `vego: the slice made may reserve more than the declared memory allows a value to`
 	return r
 }
 
@@ -134,7 +136,7 @@ func CallsShort(s string) (r string) {
 // @Requires 0 <= n And n <= MaxAlloc
 // @Ensures True
 func Reserves(n int) (r []int64) {
-	r = make([]int64, n) // want `vego: the slice made may be more than can be allocated`
+	r = make([]int64, n) // want `vego: the slice made may be more than can be allocated` `vego: the slice made may reserve more than the declared memory allows a value to`
 	return r
 }
 
@@ -153,7 +155,7 @@ func Leaks(s []byte) (r []byte) {
 // @Modifies s
 // @Ensures True
 func ExtendedByLength(s, t []byte) (r []byte) {
-	r = append(s, make([]byte, len(t))...) // want `vego: the slice that append grows may be more than can be allocated`
+	r = append(s, make([]byte, len(t))...) // want `vego: what append adds from make may reserve more than the declared memory allows: 256GB, the memory declared`
 	return r
 }
 
@@ -173,7 +175,7 @@ func GrowsForeverByRecursion(s []byte) (r []byte) {
 // @Requires 300 * |p| + 65536 <= MaxAlloc
 // @Ensures True
 func Big(p []byte) (r []byte) {
-	r = make([]byte, 300*len(p))
+	r = p
 	return r
 }
 
@@ -181,4 +183,69 @@ func Big(p []byte) (r []byte) {
 func HandsBig(p []byte) (r []byte) {
 	r = Big(p) // want `vego: precondition of Big may not hold: 300 \* \|p\| \+ 65536 <= MaxAlloc`
 	return r
+}
+
+// What a make reserves by a number is held against the bound on arrays
+// (class N of the bound on every value): below MaxAlloc is not enough.
+// @Requires 0 <= n And n <= 70368744177664
+// @Ensures True
+func MadeBelowMaxAlloc(n int) (r []byte) {
+	r = make([]byte, n) // want `vego: the slice made may reserve more than the declared memory allows a value to: at most 1024000065536 bytes`
+	return r
+}
+
+// Eight bytes for each byte of a string is more than an array may take.
+// @Ensures True
+func MadeEightFold(s string) (r []int64) {
+	r = make([]int64, len(s)) // want `vego: the slice made may reserve more than the declared memory allows a value to`
+	return r
+}
+
+// @Requires 0 <= n And n <= 1000
+// @Modifies s
+// @Ensures True
+func ExtendedSmall(s []byte, n int) (r []byte) {
+	r = append(s, make([]byte, n)...)
+	return r
+}
+
+// @Requires 0 <= n And n <= 1099511627776
+// @Ensures True
+func GrowsBuilder(n int) (r string) {
+	var b strings.Builder
+	b.Grow(n) // want `vego: precondition of Grow may not hold under the declared memory: 3 \* n <= 2 \* Memory`
+	r = b.String()
+	return r
+}
+
+// @Requires 0 <= n And n <= 1099511627776
+// @Ensures True
+func GrowsSlice(s []byte, n int) (r []byte) {
+	r = slices.Grow(s, n) // want `vego: precondition of Grow may not hold under the declared memory: n \* elemsize\(s\) <= Memory`
+	return r
+}
+
+// A value whose type reserves more than an array may take.
+type Holder struct {
+	B [2000000000000]byte
+}
+
+// @Ensures r != nil
+func NewHolder() (r *Holder) { // want `vego: cannot verify NewHolder: Holder is 2000000000000 bytes, more than the declared memory allows a value to reserve`
+	return &Holder{}
+}
+
+// What an initialiser reserves is checked like any other (F12).
+var reserved = make([]byte, 1<<45) // want `vego: the slice made may reserve more than the declared memory allows a value to`
+
+// @Ensures r >= 0
+func Reserved() (r int) {
+	return len(reserved)
+}
+
+var grown = slices.Grow([]byte(nil), 1<<45) // want `vego: precondition of Grow may not hold under the declared memory: n \* elemsize\(s\) <= Memory`
+
+// @Ensures r >= 0
+func Grown() (r int) {
+	return cap(grown)
 }

@@ -6,6 +6,7 @@ import (
 	"go/types"
 	"maps"
 	"math/big"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -430,11 +431,6 @@ func (pv *pkgVerifier) reportTwoMemories(total *Usage) {
 	}
 }
 
-// sizesReady holds the declared memory back from every proof until the
-// checks that make it stricter are in (step 2c of F38): without them a
-// reservation by a number can make an array larger than R, which the
-// second try assumes no array is. The tests of the second try set it.
-var sizesReady = false
 
 // sizesOf returns the declaration in effect for the package, or nil: the
 // project's, when its bound on arrays is below what one allocation can be
@@ -442,7 +438,7 @@ var sizesReady = false
 // tightly by the platform, and it proves nothing more.
 func (pv *pkgVerifier) sizesOf() *sizesDecl {
 	decl := pv.projectTrust
-	if !sizesReady || decl == nil || decl.sizes == nil || decl.sizes.arrayBound().Cmp(pv.maxAlloc()) >= 0 {
+	if decl == nil || decl.sizes == nil || decl.sizes.arrayBound().Cmp(pv.maxAlloc()) >= 0 {
 		return nil
 	}
 	return decl.sizes
@@ -526,5 +522,66 @@ func (v *fnVerifier) checkSized(st *state, guard []*logic.Term, goal *logic.Term
 		if !declared {
 			v.answered(st, guard, conjunct, result, true, pos, format, args...)
 		}
+	}
+}
+
+// checkDeclared asks a goal that only a declared memory makes, a bound on
+// what a reservation by a number may reserve. It may be proved from the
+// hypotheses as they are or with the declared bounds (replacedHyps), since
+// it is asked only under the declaration; one that is not proved is
+// reported and then assumed, as check assumes a goal, and one proved is not
+// assumed, since it may hold only under the declaration.
+func (v *fnVerifier) checkDeclared(st *state, guard []*logic.Term, goal *logic.Term, pos token.Pos, format string, args ...any) {
+	done := v.at(pos)
+	result, _ := v.sizedAttempt(st, guard, goal, pos)
+	done()
+	if result != solver.Proved {
+		v.answered(st, guard, goal, result, true, pos, format, args...)
+	}
+}
+
+// uncaptured runs check with the reports of an initialiser not captured:
+// what an initialiser reserves is reported where it stands, while the rest
+// of what an initialiser that does not verify draws only keeps its variable
+// from being known (F12 of the review of F38).
+func (v *fnVerifier) uncaptured(check func()) {
+	if !v.inInitialiser {
+		check()
+		return
+	}
+	saved := v.capturing
+	v.capturing = nil
+	defer func() { v.capturing = saved }()
+	check()
+}
+
+// declaredMemory is the name the declared clauses of the shipped files
+// give the memory declared.
+var declaredMemory = regexp.MustCompile(`\bMemory\b`)
+
+// declaredText returns a declared clause with the memory written out.
+func declaredText(text string, memory *big.Int) string {
+	return declaredMemory.ReplaceAllString(text, memory.String())
+}
+
+// checkDeclaredClauses asks, at a call of a trusted function under a
+// declared memory, the clauses its entry declares for that case: what it
+// reserves by a number must keep the bound on the array of every slice,
+// given that what it copies is at most the memory (class N).
+func (v *fnVerifier) checkDeclaredClauses(fn *funcInfo, name string, pre *specEnv, st *state, guard []*logic.Term, pos token.Pos) {
+	decl := v.sizesOf()
+	if decl == nil || fn.trust == nil {
+		return
+	}
+	for _, formula := range fn.trust.declared {
+		text := declaredText(formula.text, decl.memory)
+		node, err := logic.ParseFormula(text)
+		if err != nil {
+			panic("vego: internal error: a declared clause cannot be read: " + err.Error())
+		}
+		c := &clause{kind: "requires", text: text, node: node, pos: pos}
+		v.checkDeclared(st, guard, v.formula(c, node, pre), pos,
+			"precondition of %s may not hold under the declared memory: %s, with Memory the %s declared; what it reserves by a number "+
+				"is not bounded by what the machines hold, so bound it", name, strings.Join(strings.Fields(formula.text), " "), decl.written)
 	}
 }

@@ -71,7 +71,16 @@ func (pv *pkgVerifier) maxAlloc() *big.Int {
 // refuseTooLarge reports a value of a type that holds an array and is
 // larger than one allocation can be. Go compiles such a type, and the
 // program dies when it is made, with a fatal error and not a panic.
+//
+// Under a declared memory a value of such a type, or what a pointer to one
+// points to, is reserved by its type and may never be written, so one larger
+// than R, the bound on the array of every slice, would let a slice of its
+// array break that bound (class N of the bound on every value, sizes.go).
 func (v *fnVerifier) refuseTooLarge(pos token.Pos, t types.Type) {
+	decl := v.sizesOf()
+	if object, isPointer := pointee(t); isPointer && decl != nil {
+		t = object
+	}
 	if !holdsArrayValue(t) {
 		return
 	}
@@ -79,6 +88,10 @@ func (v *fnVerifier) refuseTooLarge(pos token.Pos, t types.Type) {
 	if size.Cmp(v.maxAlloc()) > 0 {
 		v.unsupported(pos, fmt.Sprintf("%s is %s bytes, more than one allocation can be (MaxAlloc, %s bytes), so no program can make it",
 			types.TypeString(t, types.RelativeTo(v.pass.Pkg)), size, v.maxAlloc()))
+	}
+	if decl != nil && size.Cmp(decl.arrayBound()) > 0 {
+		v.unsupported(pos, fmt.Sprintf("%s is %s bytes, more than the declared memory allows a value to reserve (%s bytes, four times the %s declared, "+
+			"and a page), since it may be reserved and never written", types.TypeString(t, types.RelativeTo(v.pass.Pkg)), size, decl.arrayBound(), decl.written))
 	}
 }
 
@@ -91,6 +104,21 @@ func (v *fnVerifier) checkAlloc(st *state, guard []*logic.Term, count *logic.Ter
 	bytes := logic.Mul(count, logic.IntLit(size))
 	fits := logic.And(logic.Le(bytes, logic.BigLit(v.maxAlloc())), v.typeFact(count, types.Typ[types.Int]))
 	v.checkSized(st, guard, fits, pos, "%s may be more than can be allocated", what)
+}
+
+// checkReserved requires what a make reserves by a number, count elements
+// of the given type that it does not write, to keep the bound on the array
+// of every slice under a declared memory: count * size <= R (class N of the
+// bound on every value, sizes.go). Without the declaration it asks nothing.
+func (v *fnVerifier) checkReserved(st *state, guard []*logic.Term, count *logic.Term, elem types.Type, pos token.Pos, what string) {
+	decl := v.sizesOf()
+	if decl == nil {
+		return
+	}
+	bytes := logic.Mul(count, logic.IntLit(v.pass.TypesSizes.Sizeof(elem)))
+	v.checkDeclared(st, guard, logic.Le(bytes, logic.BigLit(decl.arrayBound())), pos,
+		"%s may reserve more than the declared memory allows a value to: at most %s bytes, four times the %s declared, and a page; "+
+			"a size that a number gives is not bounded by what the machines hold, so bound it", what, decl.arrayBound(), decl.written)
 }
 
 // checkFits requires the mathematical result of an operation to be a value of
