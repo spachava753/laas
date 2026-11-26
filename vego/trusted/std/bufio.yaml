@@ -227,14 +227,16 @@ trusted:
       to a slice of slices, 24 bytes for each buffer of at least 16 bytes,
       which growslice grows by at most a quarter once it holds 256, so to
       less than twice the bytes read, rounded to a page; then a
-      Builder grown to the total. So what it returns is what it consumed,
+      Builder grown to the total, whose Grow rounds the length up to a page
+      and makes a slice of that capacity, which must stay an int (F15 of the
+      review of step 3 of F39). So what it returns is what it consumed,
       at least the delimiter when the error is nil. It calls only Read of
       the reader b keeps.
     requires:
       - "b != nil"
       - "ready(b)"
       - "ends(b)"
-      - "Inputs < MaxInt"
+      - "Inputs + 65536 <= MaxInt"
       - "2 * Inputs <= MaxAlloc"
     runs: [b]
     modifies: [b]

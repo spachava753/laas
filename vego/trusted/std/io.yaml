@@ -173,13 +173,15 @@ trusted:
       a slice that is not empty, and asserts r to nothing; it fills chunks
       of 512, 256, and then half again more each time, and at the end makes
       one slice of the total and copies into it, so each allocation is at
-      most the bytes read, rounded to a page, which MaxAlloc is a multiple of,
-      and the result is new memory of what
+      most the bytes read, rounded to a page, which MaxAlloc is a multiple of
+      on 64-bit targets; growslice gives a slice of one-byte elements the
+      rounded size as its capacity, which must stay an int, so the total and a
+      page are at most MaxInt (F15 of the review of step 3 of F39); and the result is new memory of what
       was read through r. Its errors are r's.
     requires:
       - "r != nil"
       - "ends(r)"
-      - "Inputs < MaxInt"
+      - "Inputs + 65536 <= MaxInt"
       - "Inputs <= MaxAlloc"
     runs: [r]
     asserts:

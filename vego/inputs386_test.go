@@ -61,7 +61,12 @@ func (t platform) nextslicecap(newLen, oldCap int64) int64 {
 }
 
 // grow is growslice: it reports the capacity of the new array and whether
-// the runtime panics, for a newLen computed in the platform's ints.
+// the runtime panics, for a newLen computed in the platform's ints, or makes
+// a slice whose capacity, the rounded size divided by the element's, is
+// not an int (F15 of the review of step 3: for elements of one byte the
+// runtime sets newcap = int(capmem), which on 386 is negative for a rounded
+// size past MaxInt, and what is sliced of it next panics), as appendFits
+// counts it.
 func (t platform) grow(newLen, oldCap, size int64) (int64, bool) {
 	if newLen < 0 {
 		return 0, true
@@ -71,7 +76,18 @@ func (t platform) grow(newLen, oldCap, size int64) (int64, bool) {
 	if !mem.IsInt64() || roundup(mem.Int64()) > t.maxAlloc {
 		return 0, true
 	}
-	return roundup(mem.Int64()) / size, false
+	capacity := roundup(mem.Int64()) / size
+	if capacity > t.maxInt() {
+		return 0, true
+	}
+	return capacity, false
+}
+
+// makeNoZero is bytealg.MakeNoZero, which strings.Builder's Grow calls: it
+// panics for a length past maxAlloc, and rounds the length up to what the
+// allocator gives, of which unsafe.Slice panics past MaxInt.
+func (t platform) makeNoZero(n int64) bool {
+	return n < 0 || n > t.maxAlloc || roundup(n) > t.maxInt()
 }
 
 // make is makeslice of bytes: whether it panics.
@@ -147,10 +163,36 @@ func readAllFits(tg platform, n int64) string {
 	return ""
 }
 
-// readStringFits replays ReadString and ReadBytes of n bytes through a
-// Reader of the smallest buffer, 16 bytes: a slice header of 24 bytes for
-// each full buffer, appended one at a time, and one slice of the total.
+// readStringFits replays ReadString of n bytes through a Reader of the
+// smallest buffer: the headers of collectFragments, and a Builder grown to
+// the total.
 func readStringFits(tg platform, n int64) string {
+	if why := fragmentsFit(tg, n); why != "" {
+		return why
+	}
+	if tg.wrap(n) != n || tg.makeNoZero(n) {
+		return fmt.Sprintf("the Builder grown to %d bytes panics", n)
+	}
+	return ""
+}
+
+// readBytesFits replays ReadBytes of n bytes: the headers of
+// collectFragments, and a slice of the total made by make, which does not
+// round.
+func readBytesFits(tg platform, n int64) string {
+	if why := fragmentsFit(tg, n); why != "" {
+		return why
+	}
+	if tg.wrap(n) != n || tg.make(n) {
+		return fmt.Sprintf("the slice of %d bytes panics", n)
+	}
+	return ""
+}
+
+// fragmentsFit replays collectFragments over n bytes through a Reader of
+// the smallest buffer, 16 bytes: a slice header of 24 bytes for each full
+// buffer, appended one at a time.
+func fragmentsFit(tg platform, n int64) string {
 	count := n / 16
 	length, capacity := int64(0), int64(0)
 	for length < count {
@@ -165,9 +207,6 @@ func readStringFits(tg platform, n int64) string {
 		// Every append up to the capacity is free; jump to it.
 		length = min(capacity, count)
 	}
-	if tg.wrap(n) != n || tg.make(n) {
-		return fmt.Sprintf("the line of %d bytes panics", n)
-	}
 	return ""
 }
 
@@ -177,7 +216,7 @@ var inputsEdges = map[string]func(platform, int64) string{
 	"os.ReadFile":                readFileFits,
 	"io.ReadAll":                 readAllFits,
 	"(*bufio.Reader).ReadString": readStringFits,
-	"(*bufio.Reader).ReadBytes":  readStringFits,
+	"(*bufio.Reader).ReadBytes":  readBytesFits,
 }
 
 // TestInputsEdges holds the constants of the requires that name Inputs
@@ -229,16 +268,11 @@ func TestInputsEdges(t *testing.T) {
 					}
 				}
 				if !failed && weaker != nil {
-					t.Errorf("%s: weakening %d of %q still fits on both targets", key, j, clauseText(clause))
+					t.Errorf("%s: weakening %d of %q still fits on both targets", key, j, strings.TrimSpace(fmt.Sprint(clause)))
 				}
 			}
 		}
 	}
-}
-
-// clauseText spells a clause for messages.
-func clauseText(n *logic.Node) string {
-	return strings.TrimSpace(fmt.Sprint(n))
 }
 
 // largestInputs is the largest Inputs below 2^62 at which every clause
