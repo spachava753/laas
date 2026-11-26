@@ -2718,6 +2718,7 @@ guide	guide.Account	1	225	0
 guide	guide.AddLine	18	73047	0
 guide	guide.AddTag	15	1178755	0
 guide	guide.AddressOfField	1	46	0
+guide	guide.AddsKeys	9	14962	0
 guide	guide.AgeOf	5	26764	0
 guide	guide.Announce	12	187453	2
 guide	guide.AppendIntoArray	12	1966	0
@@ -2742,6 +2743,7 @@ guide	guide.BufferToFile	196	2900056	14
 guide	guide.Buffered	34	345323	5
 guide	guide.BuildThenWrite	31	184787	0
 guide	guide.Bump	9	14338	0
+guide	guide.ByInt	10	15611	0
 guide	guide.ByTag	29	289396	12
 guide	guide.CallsHelper	1	111	0
 guide	guide.CallsReset	2	744	0
@@ -3124,6 +3126,8 @@ guide	guide.TwoTexts	19	54053	0
 guide	guide.Tx.Begin	5	11323	0
 guide	guide.Tx.Commit	5	10924	0
 guide	guide.Unlisted	13	201346	6
+guide	guide.Upper	38	155571	12
+guide	guide.UpperBounded	32	163387	5
 guide	guide.Usage	4	10815	0
 guide	guide.UsesLogf	4	19725	0
 guide	guide.Visit	3	2116	0

@@ -354,7 +354,7 @@ Code that overflows on purpose, such as a hash function, cannot be verified. Nei
 
 ### Allocation, panics, and termination
 
-`make`, an `append` that grows the slice, and string concatenation must be proved to stay under the largest allocation the platform allows. This usually means bounding sizes. The length passed to `make` must also be proved not to be negative. If it is not, `vego` reports `make length may be negative`.
+`make`, an `append` that grows the slice, and string concatenation must be proved to stay under the largest allocation the platform allows. This usually means bounding sizes, or declaring once how much data the machines your program runs on can hold, as [Bounding what grows](#bounding-what-grows) describes. The length passed to `make` must also be proved not to be negative. If it is not, `vego` reports `make length may be negative`.
 
 A reachable call to `panic` is an error.
 
@@ -375,6 +375,135 @@ func SafeOnly(A []int, i int) (result int) {
 ```
 
 This is a good first step when you add `vego` to existing code.
+
+### Bounding what grows
+
+This function appends to a slice in a loop:
+
+```go
+// @Ensures |out| = |xs|
+func Upper(xs []string) (out []string) {
+	// @Invariant 0 <= i <= |xs| And |out| = i
+	// @Variant |xs| - i
+	for i := 0; i < len(xs); i++ {
+		out = append(out, strings.ToUpper(xs[i]))
+	}
+	return out
+}
+```
+
+```text
+vego: precondition of ToUpper may not hold: 6 * |s| + 65544 <= MaxAlloc; it holds when |xs[i]| <= 10000000000000; or, if the machines the program runs on never hold 256GB of its data at once, declare that under sizes in vego-trusted.yaml, which proves this
+vego: the slice that append grows may be more than can be allocated, or have a capacity an int cannot hold; or, if the machines the program runs on never hold 256GB of its data at once, declare that under sizes in vego-trusted.yaml, which proves this
+```
+
+`strings.ToUpper` and `append` panic when what they build is more than one allocation can be. On a 64-bit machine that limit, `MaxAlloc`, is 2^48 bytes. Nothing in the function says how long `xs` and its strings may be, so both are reported. There are two ways to deal with this.
+
+The first way is to bound the lengths in the contract:
+
+```go
+// @Requires |xs| <= 1000000
+// @Requires Forall i in [0, |xs|) : |xs[i]| <= 1000000
+// @Ensures |out| = |xs|
+func UpperBounded(xs []string) (out []string) {
+```
+
+This proves that `UpperBounded` never panics, on any machine and any target. Every caller must then prove the bounds too, up to the code that reads the input.
+
+The second way is to declare, once for the module, how much of the program's data its machines can hold. Add this to the trust file `vego-trusted.yaml` next to `go.mod`:
+
+```yaml
+sizes:
+  memory: 256GB
+  reason: >-
+    The service runs on machines with 64 GB of memory and 64 GB of swap,
+    which is not compressed.
+```
+
+With it, `Upper` verifies as it is written, and so do its callers. The declaration says that the machines the program runs on never hold 256 GB of its data at once, in memory and swap together, however it is stored. A run that would hold more runs out of memory, which ends the program with a fatal error, and no proof covers such a run. From this, `vego` takes every string and the entries of every map to be at most 256 GB, and the array of every slice to be at most five times that and a page. Then it proves that growing what exists fits in one allocation: an `append`, a concatenation, a conversion, formatting, `strings.ToUpper`, `strings.Split`, writing to a `strings.Builder` or a `bytes.Buffer`, and encoding JSON.
+
+Write in `memory` the most of the program's data that the machines can hold at once, as a whole number with one of the units `B`, `KB`, `MB`, `GB`, `TB` (powers of 1000) or `KiB`, `MiB`, `GiB`, `TiB` (powers of 1024). Declare what the machines can hold, not what is installed: compressed swap, such as zram, holds more than its size. The `reason` is required. The declaration holds for every verified package of the module, and verified packages built together must declare the same memory or none.
+
+The declaration does not cover a size that a number gives. `make` is still checked, now against the bound on arrays:
+
+```go
+// @Requires n >= 0
+// @Ensures |r| = n
+func Zeros(n int) (r []byte) {
+	r = make([]byte, n)
+	return r
+}
+```
+
+```text
+vego: the slice made may reserve more than the declared memory allows a value to: at most 1280000065536 bytes, five times the 256GB declared, and a page; a size that a number gives is not bounded by what the machines hold, so bound it
+```
+
+A length read from the input and handed to `make` is a defect that the declaration does not hide. The same goes for `Grow(n)` of a builder or a buffer, `slices.Grow(s, n)`, the count of `strings.Repeat`, and `append(s, make([]T, n)...)`. `b.Grow(len(s))` of a string verifies, since a string is at most the memory declared. `b.Grow(len(a) + len(b))` does not, since the two may be the same string, so grow by each in turn.
+
+The declaration does not cover a product of lengths either. `strings.Join` over a slice adds up the lengths of all its elements and reserves the total at once. A slice that holds the same long string a million times makes it panic on a small machine:
+
+```go
+// @Ensures True
+func Lines(xs []string) (r string) {
+	r = strings.Join(xs, "\n")
+	return r
+}
+```
+
+```text
+vego: precondition of Join may not hold: Forall i in [0, |elems|) : |elems| * (|elems[i]| + |sep| + 1) <= MaxInt
+vego: precondition of Join may not hold: Forall i in [0, |elems|) : |elems| * (|elems[i]| + |sep| + 1) <= MaxAlloc; the declared memory does not cover this: what it asks for depends on a number, a product of lengths, or a bound that the memory declared does not give
+```
+
+Bound the number of elements and their lengths for such a call, or build the text with a `strings.Builder`. `strings.Replace` with a `new` of unknown length is the same.
+
+Growth that the program makes itself is no longer checked under the declaration. This function verifies, and on any input that is not empty it runs out of memory:
+
+```go
+// @Modifies s
+// @Ensures True
+func Doubles(s []byte) (r []byte) {
+	r = s
+	// @Invariant 0 <= i <= 64
+	// @Variant 64 - i
+	for i := 0; i < 64; i++ {
+		r = append(r, r...)
+	}
+	return r
+}
+```
+
+A loop must still end for a reason of its own. A `Variant` that holds only because a value cannot grow past what memory can hold is reported:
+
+```go
+// @Ensures True
+func Forever() (r []byte) {
+	// @Variant MaxAlloc - |r|
+	for {
+		r = append(r, 1)
+	}
+}
+```
+
+```text
+vego: loop variant may be negative: MaxAlloc - |r|; it holds only because a map cannot have more keys, and a string or the array of a slice cannot be longer, than memory can hold, which does not show that a loop or a recursion ends: one that grows a value until memory runs out does not end
+```
+
+On a 32-bit target one allocation is at most 4 GB, so a declared memory proves nothing there, and every size is checked as without it. The trust report says so.
+
+The trust report prints the declaration with what it bounds, what it leaves to prove, its reason, and how many obligations of each package only it proved:
+
+```text
+Memory declared in sizes: 1
+  vego-trusted.yaml:3
+    claims:  the machines the program runs on never hold 256GB (256000000000 bytes) of its data at once, in memory and swap together, however it is stored; a run that would hold more runs out of memory, which no proof covers; so every string, and the entries of every map, take at most 256000000000 bytes, and the array of every slice at most 1280000065536 bytes
+    leaves:  every size that a number gives, as the length of make, Grow, slices.Grow, and the count of Repeat, and every product of lengths, as strings.Join and Replace over a slice, to be proved; a Variant may not rest on it
+    reason:  The service runs on machines with 64 GB of memory and 64 GB of swap, which is not compressed.
+    obligations only it proved: 10 in guidesizes
+```
+
+Choose between the two ways by what you want proved. The bounds prove that the function never panics, on every machine. The declaration proves that it does not panic on the machines you name, as long as they never hold more than you declared, and leaves out the bounds that only memory makes true. The rest of this guide shows bounds where a function needs them. With the memory declared, the bounds that exist only for sizes can be left out.
 
 ## Loops
 
@@ -1807,7 +1936,7 @@ A nil pointer converts too, and its footprint is empty.
 
 The footprint is fixed when the value is converted. A value converted in a loop and called after the loop has a footprint about which nothing is known there, so the call needs everything it may write listed, and is usually refused. Convert the value before the loop.
 
-A `*bytes.Buffer` and a `*strings.Builder` cannot be converted to an `io.Writer`. Their `Write` panics when the buffer is too large to grow, and the contract of `(io.Writer).Write` has no bound for it:
+Without a declared memory, a `*bytes.Buffer` and a `*strings.Builder` cannot be converted to an `io.Writer`. Their `Write` panics when the buffer is too large to grow, and the contract of `(io.Writer).Write` has no bound for it:
 
 ```go
 // @Ensures True
@@ -1822,8 +1951,31 @@ func BufferAsWriter() {
 vego: cannot verify BufferAsWriter: converting a value of type *bytes.Buffer to io.Writer is not supported: its Write
 may panic when the buffer is too large to grow, and the contract of (io.Writer).Write has no bound for it; pass the
 Buffer itself to fmt.Fprintf, Fprint, or Fprintln, which then calls its own Write, or write what you format with its
-own WriteString, as in b.WriteString(fmt.Sprintf(...))
+own WriteString, as in b.WriteString(fmt.Sprintf(...)); or, if the machines the program runs on never hold 256GB of
+its data at once, declare that under sizes in vego-trusted.yaml, under which a buffer converts
 ```
+
+With the memory of the machines declared, as [Bounding what grows](#bounding-what-grows) describes, the conversion is allowed. A buffer then goes where an `io.Writer` is wanted, to a helper of your own, to `log.New`, or to `bufio.NewWriter`:
+
+```go
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func emit(w io.Writer, s string) (err error) {
+	_, err = io.WriteString(w, s)
+	return err
+}
+
+// @Ensures True
+func Emitted(s string) (r string, err error) {
+	var b bytes.Buffer
+	err = emit(&b, s)
+	r = b.String()
+	return r, err
+}
+```
+
+After `emit` writes through the interface value, nothing is known of the buffer's length. An `Assert` that `|b| = 1` after `emit(&b, "x")` is not proved. Formatting into the buffer directly keeps what it knows, as below.
 
 Pass the buffer itself to `fmt.Fprintf`, `fmt.Fprint`, or `fmt.Fprintln`. `vego` then checks the call as `fmt.Sprintf` followed by the buffer's own `Write` (see [Formatting into a buffer](#formatting-into-a-buffer)):
 
@@ -3485,7 +3637,7 @@ func Overwritten() (r bool) {
 vego: postcondition may not hold: r
 ```
 
-A buffer is not copied, as described in [Writing through a buffer](#writing-through-a-buffer). To format into a buffer, pass it to `fmt.Fprintf`, as described in [Formatting into a buffer](#formatting-into-a-buffer). A buffer cannot be converted to an `io.Writer`, and a struct that holds one by value cannot be converted to an interface whose methods write behind their receiver.
+A buffer is not copied, as described in [Writing through a buffer](#writing-through-a-buffer). To format into a buffer, pass it to `fmt.Fprintf`, as described in [Formatting into a buffer](#formatting-into-a-buffer). A buffer cannot be converted to an `io.Writer` without a declared memory (see [Bounding what grows](#bounding-what-grows)), and a struct that holds one by value cannot be converted to an interface whose methods write behind their receiver.
 
 These methods have no shipped contract, and a call of one is reported:
 
@@ -4674,6 +4826,27 @@ The body can compare a string key with another string, as in `k = node`. That co
 - Every key and value takes memory of its own, so `|m|` times the size of a key and a value is at most `MaxAlloc`.
 
 The second bound lets a function make a slice with `len(m)` elements of the key type or the value type without a `Requires`. It does not bound a slice that grows by `append` one key at a time, because an `append` that moves needs twice the length. Such a loop needs a `Requires` on `|m|`, or a slice made with room for every key, as in `make([]T, 0, len(m))`.
+
+The second bound holds only because memory is finite. Nothing is checked where a key is added, so a loop that adds a key on every pass runs until memory runs out. A `Variant` may not rest on that bound, or on the bound of the number of keys by `MaxInt`, which holds for the same reason:
+
+```go
+// @Ensures n >= 0
+func AddsKeys() (n int) {
+	m := map[int]bool{}
+	// @Invariant Forall k in m : 0 <= k And k < |m|
+	// @Variant MaxInt - |m|
+	for len(m) >= 0 {
+		m[len(m)] = true
+	}
+	return len(m)
+}
+```
+
+```text
+vego: loop variant may be negative: MaxInt - |m|; it holds only because a map cannot have more keys than memory can hold, which does not show that a loop or a recursion ends: one that adds keys until memory runs out does not end
+```
+
+The same goes for the invariants of a loop that has a `Variant`, and for the precondition of a call that recurses, which would carry the bound to where the `Variant` is asked. Write a `Variant` over what is left to do, as `|xs| - i` for a loop over `xs`. [What a proof assumes](#what-a-proof-assumes) lists the ways the bound still reaches a `Variant` through other facts.
 
 Outside a range over the map, `vego` does not tie the number of keys to the keys it knows of. This true contract is not proved:
 
@@ -7216,10 +7389,14 @@ func MemoJSON(n Memo) (js []byte, err error) {
 
 ```text
 vego: what Marshal builds from n may be more than can be allocated; bound what it encodes, as in // @Requires
-|n.Text| <= 1000000 And |n.Tags| <= 1000000 And (Forall i in [0, |n.Tags|) : |n.Tags[i]| <= 1000000)
+|n.Text| <= 1000000 And |n.Tags| <= 1000000 And (Forall i in [0, |n.Tags|) : |n.Tags[i]| <= 1000000); or, if the
+machines the program runs on never hold 256GB of its data at once, declare that under sizes in vego-trusted.yaml,
+under which encoding fits whatever it builds
 ```
 
 The clause in the message is one set of bounds that is enough. Use bounds that fit your data, in an invariant of the type or in a `Requires`. Smaller bounds also give a smaller bound on the result.
+
+With the memory of the machines declared, as [Bounding what grows](#bounding-what-grows) describes, `MemoJSON` verifies as it is written. Encoding grows its output step by step, and each allocation it makes is a small multiple of what already exists, so what it builds fits whatever its total. Nothing is then known of the length of the result. A map with string keys whose values hold slices, as `map[string][]string`, is encoded under the declaration too.
 
 ### What is known of the result
 
@@ -7296,7 +7473,7 @@ These are reported:
 - pointers to anything but a struct, and arrays;
 - a type that holds itself, such as `type Node struct{ Next *Node }`;
 - a type that holds a `sync.Mutex` or another value with a state;
-- a map with string keys whose values are slices or maps of strings, slices, or maps, such as `map[string][]string`. A map with integer keys can hold them, and a map with string keys can hold strings, numbers, and slices of numbers. The keys of a map with string keys need a bound, as in `Forall k in m : |k| <= 100`.
+- without a declared memory (see [Bounding what grows](#bounding-what-grows)), a map with string keys whose values are slices or maps of strings, slices, or maps, such as `map[string][]string`. A map with integer keys can hold them, and a map with string keys can hold strings, numbers, and slices of numbers. The keys of a map with string keys need a bound, as in `Forall k in m : |k| <= 100`.
 
 A json tag may use the options `omitempty`, `omitzero`, and `string`. A field with `omitzero` whose type has an `IsZero` method is reported, since `encoding/json` would call it. These tags are also reported, because the builds of `encoding/json` read them differently:
 
@@ -7563,7 +7740,7 @@ is whole, however long it is; write json.NewDecoder(io.LimitReader(r, n)).Decode
 
 - An encoder or a decoder kept in a variable, and with it `SetIndent`, `SetEscapeHTML`, `DisallowUnknownFields`, `UseNumber`, and decoding several values from one stream.
 - Methods of your own types that `encoding/json` calls, such as `MarshalJSON`, `UnmarshalJSON`, `MarshalText`, and `IsZero` under `omitzero`.
-- A map with string keys whose values are slices or maps of strings, slices, or maps.
+- Without a declared memory, a map with string keys whose values are slices or maps of strings, slices, or maps.
 - Decoding into a struct that holds a slice that `Unmarshal` does not write, a field of a type `vego` does not model, or a field that is not exported of a struct of another package.
 - Decoding with the in-place decoder from a reader whose `Read` does not say that it returns bytes or an error, such as `(io.Reader).Read`. A `*bufio.Reader` has no shipped contract for `Read`, so decoding from one is reported as `io.LimitReader calls b.Read, which has no contract`.
 - Entries of your own that list `encodes` or `decodes`. Only the shipped entries of `encoding/json` can list them.
@@ -9639,6 +9816,8 @@ The report has three lists:
 - the shipped contracts that the proofs use;
 - the entries in your trust file that no proof uses.
 
+When the trust file declares the memory of the machines, the report starts with that declaration, what it bounds, what it leaves to prove, its reason, and how many obligations of each package only it proved, as [Bounding what grows](#bounding-what-grows) shows. On a platform where it proves nothing, the report says so.
+
 An entry that lists parameters under `runs` or `keeps`, or results under `vouches`, shows them in the lines `runs code held by:`, `keeps code held by:`, and `vouches for the errors and function values in:`, and each contract under `calls` in a line such as `calls f(i) when: 0 <= i < n`. The entries of `encoding/json` show what they claim of the value in a line `encodes as package encoding/json does:` or `decodes as package encoding/json does into:`. Each is a claim about code that `vego` does not read. See [Arguments that carry code](#arguments-that-carry-code) and [Errors that a trusted function returns](#errors-that-a-trusted-function-returns).
 
 An entry for a method of an interface or a function type shows the reach of its claim in a line such as:
@@ -9823,7 +10002,17 @@ This table lists the most common messages.
 | `w is or holds a net/http.ResponseWriter, which must not be used after the call that received it returns, and here it is ...` | The writer, or a value that holds it, is stored, captured, handed to a function that keeps it, or returned. | Pass the writer only to calls that keep nothing of it. See [A writer is used only during its request](#a-writer-is-used-only-during-its-request). |
 | `cannot verify F: Trailer of net/http.Request cannot be read or written by verified code: ...` | The server writes the field while the handler runs. | Read trailers in code that is not verified. See [The trailer of a request](#the-trailer-of-a-request). |
 | `cannot verify F: resp.Body is stored into, and what the field Body of a net/http.Response holds writes nothing else the Response reaches, ...` | A body handed in may write the response. | Store a body made where it is stored, or build the response in code that is not verified. |
-| `precondition of errors.New may not hold: 2 * (\|text\| + 4096) + 65536 <= MaxAlloc, so that the text of the error can be printed; ...` | The text of the error has no bound. | Bound the length of the text in a `Requires`. |
+| `precondition of errors.New may not hold: 2 * (\|text\| + 4096) + 65536 <= MaxAlloc, so that the text of the error can be printed; ...` | The text of the error has no bound. | Bound the length of the text in a `Requires`, or declare the memory of the machines (see [Bounding what grows](#bounding-what-grows)). |
+| `...; or, if the machines the program runs on never hold 256GB of its data at once, declare that under sizes in vego-trusted.yaml, which proves this` | Added to a message about a size when declaring the memory of the machines would prove it. | Bound the lengths, or declare the memory. See [Bounding what grows](#bounding-what-grows). |
+| `...; the declared memory does not cover this: what it asks for depends on a number, a product of lengths, or a bound that the memory declared does not give` | Added to a message about a size under a declared memory: the size is a number, as the length of `make`, or a product, as in `strings.Join` over a slice. | Bound the number or the lengths in a `Requires`. |
+| `the slice made may reserve more than the declared memory allows a value to: ...` | Under a declared memory, `make` reserves by a number, which the memory does not bound. | Bound the length or the capacity. |
+| `what append adds from make may reserve more than the declared memory allows: ...` | Under a declared memory, `append(s, make([]T, n)...)` reserves `n` elements by a number. | Bound `n`. |
+| `precondition of Grow may not hold under the declared memory: n <= Memory, ...` | Under a declared memory, `Grow(n)` reserves by a number. | Bound `n`, or grow by the length of a string the buffer will hold. |
+| `what is known here contradicts the declared memory: ...` | A string, a map, or a slice here would be larger than the declaration allows, so it proves nothing here. | Bound what is passed in, or declare more memory. |
+| `cannot verify F: T is N bytes, more than the declared memory allows a value to reserve ...` | Under a declared memory, a type that holds an array larger than five times the memory is not verified. | Use a smaller array, or a slice made with a bounded length. |
+| `the verified packages of this build declare different memories under sizes: ...` | Two verified packages built together declare different memories, or one declares and the other does not. | Declare the same memory in both trust files, or none in either, or run `laas` with `-vego.trusted` naming one file. |
+| `sizes must be a mapping with a memory, ...` | The declaration in the trust file is malformed. | Write `memory` and `reason`, as in [Bounding what grows](#bounding-what-grows). |
+| `loop variant may be negative: ...; it holds only because a map cannot have more keys ... than memory can hold, ...` | The `Variant`, an invariant of its loop, or the precondition of a recursive call holds only because memory is finite. | Write a `Variant` over what is left to do. See [How many keys a map can have](#how-many-keys-a-map-can-have). |
 | `cannot verify F: calling Error on err would run the methods of an error whose origin is not known; ...` | The error may hold code nobody has seen. | Return the error unchanged, or vouch for it. See [Interface values from code that is not verified](#interface-values-from-code-that-is-not-verified). |
 | `cannot verify F: converting x, a A, to B is not supported: ...` | `B` has a state that `A` does not declare, or a method of `A` keeps more, vouches for less, or asserts more than the method of `B`. | See [Converting between interfaces](#converting-between-interfaces). |
 | `postcondition may not hold: P, in A.M used as B.M at ...` | The contract of the method of `A` does not imply that of `B`, or the method of a value you converted does not meet the contract of the interface. | Strengthen the contract of `A.M`, or weaken that of `B.M`. |
@@ -10019,7 +10208,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - a call that may end the process in a function literal used as a value, in a function handed to a trusted function, or in a deferred call, and a function value made of a function that may end the process (see [Functions that end the process](#functions-that-end-the-process));
 - calls of a method of an interface that has no contract, in source or in the trust file, and converting a value to an interface with such a method (see [Interfaces](#interfaces)); of the standard library, only `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, and `(context.Context).Err` have shipped contracts (see [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages));
 - an entry in the trust file for a type of the module of the analysed package, or one with `runs`, `keeps`, or `calls`;
-- calling a method of `bytes.Buffer` or `strings.Builder` that has no shipped contract, such as `Read`, `Next`, `ReadFrom`, `WriteTo`, or `Cap`, and converting either to `io.Writer`, since its `Write` needs a bound that the contract of `(io.Writer).Write` does not give; passing one to `fmt.Fprintf`, `fmt.Fprint`, or `fmt.Fprintln` is supported (see [Building text in a buffer](#building-text-in-a-buffer) and [Formatting into a buffer](#formatting-into-a-buffer));
+- calling a method of `bytes.Buffer` or `strings.Builder` that has no shipped contract, such as `Next`, `ReadFrom`, `WriteTo`, or `Cap`, and, without a declared memory (see [Bounding what grows](#bounding-what-grows)), converting either to `io.Writer`, since its `Write` needs a bound that the contract of `(io.Writer).Write` does not give; passing one to `fmt.Fprintf`, `fmt.Fprint`, or `fmt.Fprintln` is supported (see [Building text in a buffer](#building-text-in-a-buffer) and [Formatting into a buffer](#formatting-into-a-buffer));
 - formatting into a `bytes.Buffer` or a `strings.Builder` a part whose length the bound on formatting does not count, such as the text of an error, or what a `String` method returns even when its contract bounds it;
 - converting a `*bufio.Writer` or a `*bufio.Reader` to an interface, since their methods call through the writer or the reader they keep (see [Writing through a buffer](#writing-through-a-buffer)), and converting a value of another shipped type that owns memory, such as a `*log.Logger`, to an interface whose methods write behind their receiver;
 - in a struct that owns memory (see [Structs that own memory](#structs-that-own-memory)):
@@ -10131,7 +10320,26 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - A call that opens, reads, or writes a file returns. This covers `os.Open`, `os.Create`, `os.WriteFile`, `os.MkdirAll`, `os.Getwd`, and `Read`, `Write`, and `Close` of an `*os.File`, also one that code that is not verified passes in. Opening a FIFO waits for its other end, reading a FIFO, a pipe, or a terminal waits for data, writing a pipe that nobody reads waits, and a file system that does not answer, such as a network mount that is gone, waits for ever. A write to standard output or standard error through a broken pipe ends the program, as above.
 - The output of the standard logger writes nothing that verified code can see, and returns. Code that is not verified sets that output with `log.SetOutput`, or with `slog.SetDefault` to a `slog.Handler`. A program that sets it to a writer or a handler of its own makes this claim about that code. A writer or a handler that logs through the standard logger again never returns, because the logger holds a lock while it writes. The same goes for a writer made by verified code whose `Write` calls something that logs.
 - A function that may call `os.Exit(0)` is not run by a binary that `go test` built and runs with `-test.paniconexit0`, which `go test` passes by default. In such a binary `os.Exit(0)` panics instead of ending the process, and deferred calls then run. `os.Exit` with any other code, and `log.Fatal`, `log.Fatalf`, and `log.Fatalln`, which call `os.Exit(1)`, end the process there too.
-- The machine has enough memory and stack.
+- The machine has enough memory and stack. A proof says nothing of a run that runs out of either, which ends the program with a fatal error. So a loop that grows a value until memory runs out may be proved to end, though every run of it runs out of memory first. `vego` refuses a `Variant` that uses the bound that memory puts on the keys of a map, or under a declared memory on the length of a string or a slice, directly or through the invariants of its loop or the precondition of a recursive call (see [How many keys a map can have](#how-many-keys-a-map-can-have)). It does not follow that bound through other facts. This verifies, and never ends:
+
+  ```go
+  // @Ensures r >= 0
+  func ByInt() (r int) {
+  	m := map[int]bool{}
+  	n := 0
+  	// @Invariant Forall k in m : 0 <= k And k < |m|
+  	// @Invariant n = |m|
+  	// @Variant MaxInt - n
+  	for n >= 0 {
+  		m[n] = true
+  		n = len(m)
+  	}
+  	return n
+  }
+  ```
+
+  So does a loop that ends only when `len(m)` reaches `math.MaxInt`, and one whose `Variant` rests on an `Assert`, on the overflow check of `len(m) + 1`, on the invariant of an inner loop without a `Variant`, or on a helper's `Ensures |m'| <= MaxInt`, each of which `vego` proved from that bound and then assumed.
+- With `sizes` declared in the trust file, the machines the program runs on never hold more of its data at once than the memory declared, in memory and swap together, however it is stored. A run that would hold more runs out of memory, as above. `vego` uses this for every string and the entries of every map, which it takes to be at most the memory declared, and for the array of every slice, which it takes to be at most five times that and 65536 bytes, at the goals that what an operation allocates fits in one allocation. Code that is not verified hands a verified function only such values, as an argument, in memory that an argument reaches, or as what a call through an interface value or a function value returns. A trusted function returns and writes only such values: a project entry for a function that reserves by a parameter, as `bufio.NewReaderSize(r, size)` with `requires: "size <= MaxAlloc"`, breaks this, so its entry must bound what it reserves. `encoding/json` encodes, under the declaration, with no single allocation larger than three times the bound on arrays, 81 bytes for each entry a map may have, and 2^20 bytes, as the releases that `laas` is tested with do. See [Bounding what grows](#bounding-what-grows).
 - The key and the value of every entry of a map take memory of their own in the heap, as Go's runtime keeps them, and the heap spans at most `MaxAlloc` bytes. `vego` uses this to bound the number of keys of a map by the size of a key and a value, as described in [How many keys a map can have](#how-many-keys-a-map-can-have). The Go specification does not say how a map is stored; the runtime of the Go releases that `laas` is tested with stores it this way, for keys and values of size zero and for large ones kept behind a pointer. Entries of different maps take memory of their own too, though `vego` bounds one map at a time.
 - What formatting builds from parts whose length the logic has no term for is not longer than can be allocated. Those parts are:
   - the text of an error, also when verified code reads it with `Error`: the string `err.Error()` returns is taken to be short enough that `2 * (|s| + 4096) + 65536 <= MaxAlloc`, which on a 32-bit target means under about 2 GB. `errors.New` requires this of the text it is given, and `fmt.Errorf` proves it of what it builds, so only the text of errors from code that is not verified, and of the parts of a wrapped error that have no length in the logic, is assumed;
@@ -10214,6 +10422,13 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `name(x)` | the state `name` of the interface value `x`, declared with a `State` annotation or in the trust file |
 | `name(x, y)` | a predicate |
 | `f(x)` | in the `ensures` of a trusted contract, what the function parameter `f` returns for `x` |
+
+### In the trust file
+
+| Key | Meaning |
+| --- | --- |
+| `sizes: {memory: 256GB, reason: ...}` | The machines the program runs on never hold more of its data at once than `memory`. Sizes that grow from what exists are then proved to fit; sizes that a number gives are held against five times the memory. See [Bounding what grows](#bounding-what-grows). |
+| `isolated: {reason: ...}` | Every function and method of the package runs no code but what a call hands it. See [Isolated functions](#isolated-functions). |
 
 ### Before and after
 

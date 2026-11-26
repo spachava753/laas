@@ -262,7 +262,7 @@ func TestAnalyzer(t *testing.T) {
 		runCorpus(t, newAnalyzer(), "lockentries")
 	})
 	// Programs under a declared memory and the same without it (F38).
-	for _, root := range []string{"sizes", "nosizes", "sizesbad", "sizesbig"} {
+	for _, root := range []string{"sizes", "nosizes", "sizesbad", "sizesbig", "guidesizes"} {
 		t.Run("proves what fits under a declared memory in "+root, func(t *testing.T) {
 			parallel(t)
 			runCorpus(t, newAnalyzer(), root)
