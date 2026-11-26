@@ -844,23 +844,22 @@ func collectOwners(t types.Type, owners, seen map[types.Type]bool) {
 }
 
 // ownerHolding returns an owner among owners whose parts a value of type
-// t can be or hold directly: a slice or a map that can be an owned slice
-// or map, a pointer that can point to the elements of an owned slice, a
-// pointer that can be an owned pointer; a struct value by its fields. Go
-// converts between types whose memory is the same, so what decides is the
-// memory and not the type (see sameStorage).
+// t can be, as a callee that lists the owner assumes it is not: the same
+// pointer, slice, or map (sameStorage), or a pointer into the elements of
+// an owned slice, to an element or to a struct held inside one at any
+// depth, as &r.items[0].point is, since partApartFromParams states that no
+// struct pointer lies in the owned stretch (A9 of the adversarial review
+// of F37); or a struct value that holds such a value in a field.
 func ownerHolding(owners map[types.Type]bool, t types.Type) types.Type {
 	for owner := range owners {
 		u := owner.Underlying().(*types.Struct)
 		for _, index := range sourceOwnedFields(owner) {
 			ft := u.Field(index).Type()
-			switch {
-			case sameStorage(ft, t):
+			if sameStorage(ft, t) {
 				return owner
-			case isSlice(ft):
-				if object, isPointer := pointee(t); isPointer && sameRegions(object, elemType(ft)) {
-					return owner
-				}
+			}
+			if object, isPointer := pointee(t); isPointer && isSlice(ft) && holdsInline(elemType(ft), object, map[string]bool{}) {
+				return owner
 			}
 		}
 	}
@@ -890,7 +889,9 @@ func sameStorage(a, b types.Type) bool {
 	objectA, pointerA := pointee(a)
 	objectB, pointerB := pointee(b)
 	if pointerA || pointerB {
-		return pointerA && pointerB && sameRegions(objectA, objectB)
+		// Values of the pointees lie in the same regions when their
+		// underlying types are identical, tags ignored.
+		return pointerA && pointerB && types.IdenticalIgnoreTags(objectA.Underlying(), objectB.Underlying())
 	}
 	switch a.Underlying().(type) {
 	case *types.Slice, *types.Map:
@@ -899,10 +900,31 @@ func sameStorage(a, b types.Type) bool {
 	return false
 }
 
-// sameRegions reports whether values of two types lie in the same regions
-// of memory: their underlying types are identical, tags ignored.
-func sameRegions(a, b types.Type) bool {
-	return types.IdenticalIgnoreTags(a.Underlying(), b.Underlying())
+// mayLieIn reports whether a value of type t can be what a value of type
+// ft refers to, or point into it: the same pointer, slice, or map (see
+// sameStorage); a pointer to the elements of a slice of type ft, or to the
+// struct a pointer of type ft points to, or to a struct held inside either
+// at any depth, as &xs[0].point is; or a slice of an array held there, as
+// xs[0].buf[:] is (A10 of the adversarial review of F37).
+func mayLieIn(ft, t types.Type) bool {
+	if sameStorage(ft, t) {
+		return true
+	}
+	var memory types.Type
+	if isSlice(ft) {
+		memory = elemType(ft)
+	} else if object, isPointer := pointee(ft); isPointer {
+		memory = object
+	}
+	switch object, isPointer := pointee(t); {
+	case memory == nil:
+		return false
+	case isPointer:
+		return holdsInline(memory, object, map[string]bool{})
+	case isSlice(t):
+		return holdsArrayInline(memory, elemType(t), map[string]bool{})
+	}
+	return false
 }
 
 // rawMember reads a field of the struct a pointer points to in some

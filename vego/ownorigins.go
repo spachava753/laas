@@ -1438,19 +1438,22 @@ func (v *fnVerifier) ownResults(fl *ownFlow, e ast.Expr, count int, f *ownFact) 
 // ownDeeper reports whether a value of type result can hold, below its
 // top level, a reference into memory of type arg: an element, a field, or
 // what a pointer points to that is of a type that refers to such memory,
-// or an interface value. A type that Go converts to arg's refers to the
-// same memory (sameStorage).
+// or an interface value: a value that can lie inside what arg refers to
+// (mayLieIn), as a *Point does inside a []Item that holds Points (A10). A
+// nested occurrence is tested before the walk passes over a type it has
+// seen, so that a type that holds itself, as type List []List does, is
+// found below its top (A11).
 func (v *fnVerifier) ownDeeper(result, arg types.Type) bool {
 	seen := map[types.Type]bool{}
 	var walk func(t types.Type, top bool) bool
 	walk = func(t types.Type, top bool) bool {
+		if !top && (mayLieIn(arg, t) || isIface(t)) {
+			return true
+		}
 		if seen[t] {
 			return false
 		}
 		seen[t] = true
-		if !top && (sameStorage(t, arg) || isIface(t)) {
-			return true
-		}
 		if object, isPointer := pointee(t); isPointer {
 			return walk(object, false)
 		}
