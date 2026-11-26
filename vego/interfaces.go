@@ -116,7 +116,9 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 				shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
 				v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s", shown(from), shown(want), why))
 			}
-			if why := growsUnbounded(from); why != "" {
+			// Under the declared memory a buffer's Write cannot fail to
+			// grow, and what refuses the conversion is what it owns, below.
+			if why := growsUnbounded(from); why != "" && v.sizesOf() == nil {
 				shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
 				v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported: %s", shown(from), shown(want), why))
 			}

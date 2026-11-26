@@ -1,0 +1,8 @@
+version: 1
+
+# The corpus of F38: what a declared memory does not make provable.
+sizes:
+  memory: 256GB
+  reason: >-
+    The machines of this corpus never hold 256 GB of its data at once; it
+    is a test.

@@ -35,11 +35,9 @@ func (pv *pkgVerifier) intRange(t types.Type) (lo, hi *big.Int, ok bool) {
 // and than an int can count, whichever is less on the platform.
 func (pv *pkgVerifier) typeFact(value *logic.Term, t types.Type) *logic.Term {
 	if value.Sort.IsSeq() {
-		longest := pv.maxAlloc()
-		if _, most, _ := pv.intRange(types.Typ[types.Int]); most.Cmp(longest) < 0 {
-			longest = most
-		}
-		return logic.Le(logic.Len(value), logic.BigLit(longest))
+		// The bound is marked: the declared memory bounds it more tightly
+		// in the second try of a size goal (sizes.go).
+		return logic.Le(logic.Len(value), pv.marks().strLen)
 	}
 	lo, hi, ok := pv.intRange(t)
 	if !ok || value.Sort != logic.Int {
@@ -92,7 +90,7 @@ func (v *fnVerifier) checkAlloc(st *state, guard []*logic.Term, count *logic.Ter
 	size := v.pass.TypesSizes.Sizeof(elem)
 	bytes := logic.Mul(count, logic.IntLit(size))
 	fits := logic.And(logic.Le(bytes, logic.BigLit(v.maxAlloc())), v.typeFact(count, types.Typ[types.Int]))
-	v.check(st, guard, fits, pos, "%s may be more than can be allocated", what)
+	v.checkSized(st, guard, fits, pos, "%s may be more than can be allocated", what)
 }
 
 // checkFits requires the mathematical result of an operation to be a value of

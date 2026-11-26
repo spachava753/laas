@@ -56,6 +56,8 @@ type fnVerifier struct {
 	unmarked    map[*logic.Term]bool
 	unmarkedHit bool
 	dropped     map[*logic.Term]*logic.Term
+	// replaced caches what replacedHyps makes of each hypothesis.
+	replaced map[*logic.Term]*logic.Term
 	// converting counts, for each expression that Go converts to an
 	// interface type, the evaluations of it under way that check the
 	// conversion; see converted.

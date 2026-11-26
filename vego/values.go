@@ -322,7 +322,7 @@ func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term
 	if tv := v.info.Types[call.Args[0]]; !errorf && len(call.Args) == 1 && (tv.Value == nil || tv.Value.Kind() != constant.String || len(constant.StringVal(tv.Value)) > 1<<20) {
 		goal := errorTextFits(v, values[call.Args[0]][0])
 		done := v.at(call.Pos())
-		result := v.attempt(st, guard, goal)
+		result, declared := v.sizedAttempt(st, guard, goal, call.Pos())
 		done()
 		if result != solver.Proved {
 			room := new(big.Int).Sub(v.maxAlloc(), big.NewInt(1<<16))
@@ -330,7 +330,10 @@ func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term
 			v.report(call.Pos(), "precondition of errors.New may not hold: 2 * (|text| + 4096) + 65536 <= MaxAlloc, so that the text of the error can be printed; "+
 				"it holds when |%s| <= %s%s", types.ExprString(call.Args[0]), room, limitNote(result))
 		}
-		st.assume(logic.Implies(logic.And(guard...), goal))
+		// A goal that only the declared memory proved is not assumed.
+		if !declared {
+			st.assume(logic.Implies(logic.And(guard...), goal))
+		}
 	}
 	if errorf {
 		for i := range runs {

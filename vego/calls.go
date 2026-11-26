@@ -673,8 +673,35 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			// what bound on each length is enough.
 			for _, node := range c.node.Conjuncts() {
 				text := strings.Join(strings.Fields(c.text[node.Start:node.End]), " ")
-				v.check(st, guard, v.formula(c, node, pre), call.Pos(), "precondition of %s may not hold: %s%s", name, text, v.growthHint(c, node, pre, passed))
+				check := v.check
+				if strings.Contains(text, "MaxAlloc") {
+					check = v.checkSized
+				}
+				check(st, guard, v.formula(c, node, pre), call.Pos(), "precondition of %s may not hold: %s%s", name, text, v.growthHint(c, node, pre, passed))
 			}
+			continue
+		}
+		// A conjunct of a verified function's precondition that names
+		// MaxAlloc is a size goal; the rest of the clause is checked as
+		// any other.
+		if fn.trust == nil && !v.inInitialiser && strings.Contains(c.text, "MaxAlloc") {
+			sized := func(node *logic.Node) bool { return strings.Contains(c.text[node.Start:node.End], "MaxAlloc") }
+			for _, node := range c.node.Conjuncts() {
+				if sized(node) {
+					text := strings.Join(strings.Fields(c.text[node.Start:node.End]), " ")
+					v.checkSized(st, guard, v.formula(c, node, pre), call.Pos(), "precondition of %s may not hold: %s", name, text)
+				}
+			}
+			saved := v.skipConjunct
+			v.skipConjunct = func(node *logic.Node) bool { return sized(node) || saved != nil && saved(node) }
+			v.stateNote = v.stateHint(c, fn, args, st)
+			if recursive {
+				v.withoutMemory(func() { v.checkClause(c, pre, st, guard, call.Pos(), "precondition of "+name+" may not hold") })
+			} else {
+				v.checkClause(c, pre, st, guard, call.Pos(), "precondition of "+name+" may not hold")
+			}
+			v.stateNote = nil
+			v.skipConjunct = saved
 			continue
 		}
 		// A verified function called from an initialiser outside its

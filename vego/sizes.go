@@ -26,6 +26,12 @@ type limitMarks struct {
 	// bounds what the entries of a map take by MaxAlloc (noteMap). Both
 	// rest on memory alone: no obligation is asked where a key is added.
 	mapCount, mapBytes *logic.Term
+	// strLen bounds the length of a string by MaxAlloc or MaxInt, the
+	// smaller (typeFact), and arrayEnd bounds the array of a slice, from
+	// the start of its allocation to the end of its capacity, by MaxAlloc
+	// (wellFormed). Each rests on the checks of what grows strings and
+	// slices, which the declared memory discharges (sizesOf).
+	strLen, arrayEnd *logic.Term
 }
 
 // marks returns the marked limits of the package's platform. They are made
@@ -37,7 +43,12 @@ func (pv *pkgVerifier) marks() *limitMarks {
 	if found, ok := platformMarks.Load(key); ok {
 		return found.(*limitMarks)
 	}
-	found, _ := platformMarks.LoadOrStore(key, &limitMarks{mapCount: logic.BigLit(maxInt), mapBytes: logic.BigLit(pv.maxAlloc())})
+	longest := pv.maxAlloc()
+	if maxInt.Cmp(longest) < 0 {
+		longest = maxInt
+	}
+	found, _ := platformMarks.LoadOrStore(key, &limitMarks{mapCount: logic.BigLit(maxInt), mapBytes: logic.BigLit(pv.maxAlloc()),
+		strLen: logic.BigLit(longest), arrayEnd: logic.BigLit(pv.maxAlloc())})
 	return found.(*limitMarks)
 }
 
@@ -156,6 +167,12 @@ func (v *fnVerifier) withoutMemory(check func()) {
 	saved, savedHit := v.unmarked, v.unmarkedHit
 	m := v.marks()
 	v.unmarked, v.unmarkedHit = map[*logic.Term]bool{m.mapCount: true, m.mapBytes: true}, false
+	// Under the declared memory the checks of what grows strings and
+	// slices are discharged by it, so their bounds rest on memory alone
+	// too (F5 of the design review of F38).
+	if v.sizesOf() != nil {
+		v.unmarked[m.strLen], v.unmarked[m.arrayEnd] = true, true
+	}
 	defer func() { v.unmarked, v.unmarkedHit = saved, savedHit }()
 	check()
 }
@@ -174,6 +191,10 @@ func (v *fnVerifier) memoryNote(st *state, guard []*logic.Term, goal *logic.Term
 	v.unmarked = saved
 	if plain != solver.Proved {
 		return ""
+	}
+	if v.sizesOf() != nil {
+		return "; it holds only because a map cannot have more keys, and a string or the array of a slice cannot be longer, than memory can hold, " +
+			"which does not show that a loop or a recursion ends: one that grows a value until memory runs out does not end"
 	}
 	return "; it holds only because a map cannot have more keys than memory can hold, which does not show that a loop or a recursion ends: " +
 		"one that adds keys until memory runs out does not end"
@@ -311,13 +332,6 @@ func (pv *pkgVerifier) noteSizes(path string) {
 	pv.usage.Sizes = append(pv.usage.Sizes, use)
 }
 
-// countSized counts an obligation that only the declaration proved.
-func (pv *pkgVerifier) countSized() {
-	if pv.sizedProved != nil {
-		pv.sizedProved.Add(1)
-	}
-}
-
 // sizesReport renders the section of the trust report on the declared
 // memory: for each file that declares it, the claim, the reason, and how
 // many obligations of each package only it proved.
@@ -412,6 +426,101 @@ func (pv *pkgVerifier) reportTwoMemories(total *Usage) {
 				"a reservation that the proofs of one checked against its bound can break what the proofs of the other assume of every value. "+
 				"Declare the same memory in both trust files, or none in either, or run laas with -vego.trusted naming one file", said(a), said(b))
 			return
+		}
+	}
+}
+
+// sizesReady holds the declared memory back from every proof until the
+// checks that make it stricter are in (step 2c of F38): without them a
+// reservation by a number can make an array larger than R, which the
+// second try assumes no array is. The tests of the second try set it.
+var sizesReady = false
+
+// sizesOf returns the declaration in effect for the package, or nil: the
+// project's, when its bound on arrays is below what one allocation can be
+// on the platform. Above that, every fact it would bound is bounded more
+// tightly by the platform, and it proves nothing more.
+func (pv *pkgVerifier) sizesOf() *sizesDecl {
+	decl := pv.projectTrust
+	if !sizesReady || decl == nil || decl.sizes == nil || decl.sizes.arrayBound().Cmp(pv.maxAlloc()) >= 0 {
+		return nil
+	}
+	return decl.sizes
+}
+
+// replacedHyps returns the hypotheses with each marked bound on a size made
+// the declared one: a string and the entries of a map at most M bytes, the
+// array of a slice at most R. A bound is replaced only where a smaller bound
+// gives a stronger hypothesis (rewriteMarked); a hypothesis with a mark
+// anywhere else is kept as it is. What follows from the result follows from
+// the hypotheses together with the declaration.
+func (v *fnVerifier) replacedHyps(hyps []*logic.Term, decl *sizesDecl) []*logic.Term {
+	m := v.marks()
+	memory, bound := logic.BigLit(decl.memory), logic.BigLit(decl.arrayBound())
+	marks := map[*logic.Term]bool{m.strLen: true, m.mapBytes: true, m.arrayEnd: true}
+	with := func(atom *logic.Term) *logic.Term {
+		if atom.Args[1] == m.arrayEnd {
+			return logic.Le(atom.Args[0], bound)
+		}
+		return logic.Le(atom.Args[0], memory)
+	}
+	if v.replaced == nil {
+		v.replaced = map[*logic.Term]*logic.Term{}
+	}
+	out := make([]*logic.Term, len(hyps))
+	for i, hyp := range hyps {
+		rewritten, seen := v.replaced[hyp]
+		if !seen {
+			rewritten, _ = rewriteMarked(hyp, marks, with)
+			v.replaced[hyp] = rewritten
+		}
+		out[i] = rewritten
+	}
+	return out
+}
+
+// sizedAttempt proves a size goal: a goal that what an operation allocates
+// can be allocated. It is asked as today; when that fails and the package
+// declares the memory of its machines, it is asked once more on the
+// hypotheses with the declared bounds (replacedHyps). declared reports a
+// goal that only the declaration proved, which is then neither reported
+// nor assumed: what it rests on holds only under the declaration, and no
+// other goal may see it. A goal proved so on hypotheses that the
+// declaration contradicts is reported where it stands, since there the
+// declaration was used against what the path knows.
+func (v *fnVerifier) sizedAttempt(st *state, guard []*logic.Term, goal *logic.Term, pos token.Pos) (result solver.Result, declared bool) {
+	result = v.attempt(st, guard, goal)
+	decl := v.sizesOf()
+	if result == solver.Proved || decl == nil {
+		return result, false
+	}
+	hyps := append(v.replacedHyps(st.hyps, decl), guard...)
+	if v.solver().Prove(hyps, goal, v.options(0, obligation)) != solver.Proved {
+		return result, false
+	}
+	if v.sizedProved != nil {
+		v.sizedProved.Add(1)
+	}
+	if v.proves(hyps, logic.False(), quickEffort) {
+		v.report(pos, "what is known here contradicts the declared memory: a string, the entries of a map, or the array of a slice here would be larger than "+
+			"the declaration allows (%s bytes for a string or the entries of a map, %s for the array of a slice), so the declaration proves nothing here; "+
+			"bound what is passed here, or declare more memory", decl.memory, decl.arrayBound())
+	}
+	return solver.Proved, true
+}
+
+// checkSized is check for size goals: each conjunct is asked by
+// sizedAttempt, and one that only the declaration proved is not assumed.
+func (v *fnVerifier) checkSized(st *state, guard []*logic.Term, goal *logic.Term, pos token.Pos, format string, args ...any) {
+	for _, conjunct := range logic.Conjuncts(goal) {
+		if conjunct.Op == logic.OpTrue {
+			continue
+		}
+		done := v.at(pos)
+		result, declared := v.sizedAttempt(st, guard, conjunct, pos)
+		done()
+		if !declared {
+			v.answered(st, guard, conjunct, result, true, pos, format, args...)
 		}
 	}
 }

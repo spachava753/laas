@@ -724,7 +724,17 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 		// allocated, even where grown is not. The old capacity is less than
 		// grown, or the slice would not move, so the capacity picked is
 		// less than twice grown; no platform has pages of more than 64 KB.
-		v.check(next, nil, v.appendFits(grown, elem), call.Pos(), "the slice that append grows may be more than can be allocated, or have a capacity an int cannot hold")
+		// The form append(s, make([]T, n)...), through parentheses, with or
+		// without a capacity, may be one growslice of the two lengths,
+		// whose make never exists, whatever flags the build has; the made
+		// slice's bound is not true of the run, and the declared memory is
+		// not asked for it (F3 of the design review of F38).
+		made, isCall := ast.Unparen(call.Args[len(call.Args)-1]).(*ast.CallExpr)
+		if spread && isCall && isBuiltin(v.info, made, "make") {
+			v.check(next, nil, v.appendFits(grown, elem), call.Pos(), "the slice that append grows may be more than can be allocated, or have a capacity an int cannot hold")
+		} else {
+			v.checkSized(next, nil, v.appendFits(grown, elem), call.Pos(), "the slice that append grows may be more than can be allocated, or have a capacity an int cannot hold")
+		}
 		// Copying the old elements reads them, which may happen before or
 		// after the calls of the targets.
 		v.unit = u.fork()

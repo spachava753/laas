@@ -672,7 +672,7 @@ func (pv *pkgVerifier) wellFormed(val value, t types.Type, brk *logic.Term) *log
 			// length and no capacity: without unsafe nothing else makes one.
 			nilEmpty := logic.Implies(logic.Eq(ref, logic.RefLit(0)), logic.Eq(capacity, zero))
 			facts = append(facts, exists(ref), nilEmpty, logic.Le(zero, off), logic.Le(zero, length), logic.Le(length, capacity),
-				logic.Le(end, logic.BigLit(pv.maxAlloc())), pv.typeFact(capacity, types.Typ[types.Int]))
+				logic.Le(end, pv.marks().arrayEnd), pv.typeFact(capacity, types.Typ[types.Int]))
 		case lf.part == partPtr:
 			facts = append(facts, exists(val[i]), logic.Le(zero, val[i+1]), logic.Le(val[i+1], logic.BigLit(pv.maxAlloc())))
 		case lf.part == partArray:
