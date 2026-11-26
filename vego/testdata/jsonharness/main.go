@@ -941,40 +941,40 @@ func calledMethods() []string {
 // that Marshal, MarshalIndent, and Encode make while they run (F8 of the
 // review of F38): every request of the encoder is to be at most a small
 // multiple of what exists, the output so far or one value the encoded value
-// holds. Half the samples have their strings and byte slices made one long
-// value shared by every place that holds one, so that the output is far
-// longer than anything the value holds.
+// holds. Each sample has its strings and byte slices made one long value
+// shared by every place that holds one, so that the output is far longer
+// than anything the value holds; small samples would show only the page.
 func allocs(rng *rand.Rand, in Input) {
-	runtime.MemProfileRate = 1
 	shared := strings.Repeat("a<\x00é\"", 40000)
 	// A map of short keys and empty values, whose output is short for each
 	// entry, so that what sorting its keys allocates is above three times
 	// the output (F24 of the review of step 3 of F38).
+	// Only Marshal: the term shows there, and the map is large (F27).
 	sorted := map[uint32]struct{}{}
-	for k := range uint32(1000000) {
+	for k := range uint32(400000) {
 		sorted[k] = struct{}{}
 	}
-	measureCalls("map[uint32]struct{}", reflect.ValueOf(sorted))
+	// Every allocation from here on is recorded; the map is made before.
+	runtime.MemProfileRate = 1
+	measureCalls("map[uint32]struct{}", reflect.ValueOf(sorted), "Marshal")
 	for _, c := range in.Cases {
 		t := registry[c.Type]
-		for i := range in.Samples {
+		for range in.Samples {
 			v := reflect.New(t).Elem()
 			worst = rng.IntN(2) == 0
 			fill(rng, v, 0)
-			if i%2 == 1 {
-				lengthen(v, shared, map[uintptr]bool{})
-			}
-			measureCalls(c.Type, v)
+			lengthen(v, shared, map[uintptr]bool{})
+			measureCalls(c.Type, v, "Marshal", "MarshalIndent", "Encode")
 		}
 	}
 }
 
-// measureCalls records the largest single allocation of Marshal,
-// MarshalIndent, and Encode of v.
-func measureCalls(name string, v reflect.Value) {
+// measureCalls records the largest single allocation of each of the calls
+// named, of Marshal, MarshalIndent, and Encode, of v.
+func measureCalls(name string, v reflect.Value, calls ...string) {
 	held := heldBytes(v, map[uintptr]bool{})
 	entries := mostEntries(v, map[uintptr]bool{})
-	for _, call := range []string{"Marshal", "MarshalIndent", "Encode"} {
+	for _, call := range calls {
 		var n int64
 		var failed bool
 		largest := largestAllocation(func() {
@@ -1008,14 +1008,15 @@ func (c *counter) Write(p []byte) (int, error) { c.n += int64(len(p)); return le
 
 // largestAllocation returns the size of the largest single object that f
 // allocated. The memory profile keeps one record for each stack and size
-// of object, and is complete only after a few collections.
+// of object, and is complete only after two collections.
 func largestAllocation(f func()) int64 {
 	type key struct {
 		stack [32]uintptr
 		size  int64
 	}
 	snapshot := func() map[key]int64 {
-		for range 3 {
+		// The profile may be up to two collections old.
+		for range 2 {
 			runtime.GC()
 		}
 		n, _ := runtime.MemProfile(nil, true)

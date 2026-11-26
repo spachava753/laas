@@ -329,7 +329,7 @@ func TestJSONEntries(t *testing.T) {
 		// bound on what it builds, on the reading that each allocation it
 		// makes is at most three times what exists, the output or one
 		// value held, and a page (F8 of the review of F38).
-		for _, a := range runJSONHelper(t, helper, jsonHarnessInput{Seed: 31, Samples: 2, Cases: cases, Allocs: true}).Allocs {
+		for _, a := range runJSONHelper(t, helper, jsonHarnessInput{Seed: 31, Samples: 1, Cases: cases, Allocs: true}).Allocs {
 			exists := max(a.Out, a.Held)
 			// What an encoding call may allocate at once, read from the
 			// four builds of encoding/json (see Sizes under a declared
@@ -338,11 +338,11 @@ func TestJSONEntries(t *testing.T) {
 			// of a map whose keys it sorts (v2's members of 80 bytes and
 			// the key and the value of each), and 2^20 for the stacks of
 			// its states, which grow with the depth of the value.
-			if a.Largest > 3*exists+81*a.Entries+1<<20 {
+			if a.Largest > 3*exists+jsonEntryAlloc*a.Entries+1<<20 {
 				t.Errorf("%s: %s of a %s allocated %d bytes at once, more than three times the %d bytes it wrote or the value holds, "+
 					"81 bytes for each of the %d entries of its largest map, and 2^20", b.name, a.Call, a.Type, a.Largest, exists, a.Entries)
 			}
-			sharper = sharper || a.Largest > exists+81*a.Entries+1<<20
+			sharper = sharper || a.Largest > exists+jsonEntryAlloc*a.Entries+1<<20
 			sorts = sorts || a.Largest > 3*exists+1<<20
 		}
 		out := runJSONHelper(t, helper, jsonHarnessInput{Seed: 29, Samples: 300, Cases: cases})

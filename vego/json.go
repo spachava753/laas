@@ -817,6 +817,12 @@ func (v *fnVerifier) checkEncodable(call *ast.CallExpr, fn *funcInfo) {
 	}
 }
 
+// jsonEntryAlloc is what encoding allocates at once for each entry of a
+// map whose keys it sorts, at most: v2's member of 80 bytes and the key and
+// the value, whose entries the declared memory bounds together; the test
+// of the largest allocation reads it.
+const jsonEntryAlloc = 81
+
 // encodesDeclared reports whether a declared memory makes every encoding
 // call fit, whatever it builds: encoding grows its output step by step, and
 // each allocation it makes is at most three times what exists, the output
@@ -832,7 +838,7 @@ func (v *fnVerifier) encodesDeclared() bool {
 		return false
 	}
 	request := new(big.Int).Mul(decl.arrayBound(), big.NewInt(3))
-	request.Add(request, new(big.Int).Mul(decl.memory, big.NewInt(81)))
+	request.Add(request, new(big.Int).Mul(decl.memory, big.NewInt(jsonEntryAlloc)))
 	return request.Add(request, big.NewInt(1<<20)).Cmp(v.maxAlloc()) <= 0
 }
 
