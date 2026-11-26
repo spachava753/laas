@@ -317,11 +317,12 @@ func TestJSONEntries(t *testing.T) {
 	cases := jsonCases(walks)
 	called := map[string]bool{}
 	var outs []jsonHarnessOutput
-	// The factor is seen to be needed: some call allocated more than once
-	// what exists. The term for the entries of a map is the reading's
-	// (v2 sorts the members of a map with keys that are not strings in a
-	// slice of 80 bytes each), which no sample here reached.
-	sharper := false
+	// Each term is seen to be needed: some call allocated more than once
+	// what exists, and some more than three times it, which only the term
+	// for the entries of a map covers (v2 sorts the members of a map with
+	// keys that are not strings in a slice of 80 bytes each; the harness's
+	// map of a million short keys reaches it, F24 of the review of step 3).
+	sharper, sorts := false, false
 	for _, b := range jsonBuilds() {
 		helper := jsonHelper(t, b)
 		// Under a declared memory an encoding call is accepted with no
@@ -342,6 +343,7 @@ func TestJSONEntries(t *testing.T) {
 					"81 bytes for each of the %d entries of its largest map, and 2^20", b.name, a.Call, a.Type, a.Largest, exists, a.Entries)
 			}
 			sharper = sharper || a.Largest > exists+81*a.Entries+1<<20
+			sorts = sorts || a.Largest > 3*exists+1<<20
 		}
 		out := runJSONHelper(t, helper, jsonHarnessInput{Seed: 29, Samples: 300, Cases: cases})
 		outs = append(outs, out)
@@ -365,6 +367,9 @@ func TestJSONEntries(t *testing.T) {
 				t.Errorf("%s: an entry of encoding/json returned an error of type %s, whose methods were not read", out.Build, name)
 			}
 		}
+	}
+	if !sorts {
+		t.Errorf("no encoding call allocated more than three times what exists: the term for the entries of a map is not seen to be needed")
 	}
 	if !sharper {
 		t.Errorf("no encoding call allocated more than once what it wrote or the value holds: the factor of three is not seen to be needed, nor the measure to work")

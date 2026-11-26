@@ -187,3 +187,15 @@ func Sent(w io.Writer, t Task) (err error) {
 	err = json.NewEncoder(w).Encode(t) // want `vego: what Encode builds from t may be more than can be allocated`
 	return err
 }
+
+// @Ensures True
+func Params(values map[string][]string) (r []byte, err error) {
+	r, err = json.Marshal(values) // want `vego: cannot verify Params: Marshal encodes values, and values\[k\] holds elements inside the value of values, a map with string keys`
+	return r, err
+}
+
+// @Ensures True
+func Nested(byOwner map[string][]Task) (r []byte, err error) {
+	r, err = json.MarshalIndent(byOwner, "", "  ") // want `vego: cannot verify Nested: MarshalIndent encodes byOwner, and byOwner\[k\] holds elements inside the value of byOwner, a map with string keys`
+	return r, err
+}

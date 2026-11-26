@@ -947,6 +947,14 @@ func calledMethods() []string {
 func allocs(rng *rand.Rand, in Input) {
 	runtime.MemProfileRate = 1
 	shared := strings.Repeat("a<\x00é\"", 40000)
+	// A map of short keys and empty values, whose output is short for each
+	// entry, so that what sorting its keys allocates is above three times
+	// the output (F24 of the review of step 3 of F38).
+	sorted := map[uint32]struct{}{}
+	for k := range uint32(1000000) {
+		sorted[k] = struct{}{}
+	}
+	measureCalls("map[uint32]struct{}", reflect.ValueOf(sorted))
 	for _, c := range in.Cases {
 		t := registry[c.Type]
 		for i := range in.Samples {
@@ -956,33 +964,39 @@ func allocs(rng *rand.Rand, in Input) {
 			if i%2 == 1 {
 				lengthen(v, shared, map[uintptr]bool{})
 			}
-			held := heldBytes(v, map[uintptr]bool{})
-			entries := mostEntries(v, map[uintptr]bool{})
-			for _, call := range []string{"Marshal", "MarshalIndent", "Encode"} {
-				var n int64
-				var failed bool
-				largest := largestAllocation(func() {
-					var b []byte
-					var err error
-					switch call {
-					case "Marshal":
-						b, err = json.Marshal(v.Interface())
-					case "MarshalIndent":
-						b, err = json.MarshalIndent(v.Interface(), "", "  ")
-					default:
-						w := &counter{}
-						err = json.NewEncoder(w).Encode(v.Interface())
-						n = w.n
-					}
-					if call != "Encode" {
-						n = int64(len(b))
-					}
-					failed = err != nil
-				})
-				if !failed {
-					out.Allocs = append(out.Allocs, Alloc{Type: c.Type, Call: call, Largest: largest, Out: n, Held: held, Entries: entries})
-				}
+			measureCalls(c.Type, v)
+		}
+	}
+}
+
+// measureCalls records the largest single allocation of Marshal,
+// MarshalIndent, and Encode of v.
+func measureCalls(name string, v reflect.Value) {
+	held := heldBytes(v, map[uintptr]bool{})
+	entries := mostEntries(v, map[uintptr]bool{})
+	for _, call := range []string{"Marshal", "MarshalIndent", "Encode"} {
+		var n int64
+		var failed bool
+		largest := largestAllocation(func() {
+			var b []byte
+			var err error
+			switch call {
+			case "Marshal":
+				b, err = json.Marshal(v.Interface())
+			case "MarshalIndent":
+				b, err = json.MarshalIndent(v.Interface(), "", "  ")
+			default:
+				w := &counter{}
+				err = json.NewEncoder(w).Encode(v.Interface())
+				n = w.n
 			}
+			if call != "Encode" {
+				n = int64(len(b))
+			}
+			failed = err != nil
+		})
+		if !failed {
+			out.Allocs = append(out.Allocs, Alloc{Type: name, Call: call, Largest: largest, Out: n, Held: held, Entries: entries})
 		}
 	}
 }

@@ -217,3 +217,18 @@ func Sent(w io.Writer, t Task) (err error) {
 	err = json.NewEncoder(w).Encode(t)
 	return err
 }
+
+// A map with string keys whose values hold slices: the walk cannot state
+// its bound, which the declared memory does not ask for (F25 of the review
+// of step 3).
+// @Ensures True
+func Params(values map[string][]string) (r []byte, err error) {
+	r, err = json.Marshal(values)
+	return r, err
+}
+
+// @Ensures True
+func Nested(byOwner map[string][]Task) (r []byte, err error) {
+	r, err = json.MarshalIndent(byOwner, "", "  ")
+	return r, err
+}
