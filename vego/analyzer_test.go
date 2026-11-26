@@ -274,15 +274,17 @@ func TestAnalyzer(t *testing.T) {
 	// Programs that read until their inputs end, under the declaration and
 	// without it (F39, part B), in one load: each is a module of its own,
 	// with a trust file of its own, and none imports another, so what one
-	// reports does not depend on the others; a load of its own for each
-	// cost the cold run of the package about ten seconds.
+	// reports does not depend on the others. inputsdecl, which imports a
+	// package of another module that declares no inputs, is compared only
+	// with what it imports, as the packages of the loop below are. A load
+	// of its own for each cost the cold run of the package ten seconds.
 	t.Run("proves that reading ends under declared inputs", func(t *testing.T) {
 		parallel(t)
-		runCorpus(t, newAnalyzer(), "inputs", "noinputs", "inputspred", "inputssizes", "inputsbig", "guideinputs", "inputsrewinds", "rewindsplain", "inputsrewound", "rewindsroot")
+		runCorpus(t, newAnalyzer(), "inputs", "noinputs", "inputspred", "inputssizes", "inputsbig", "guideinputs", "inputsrewinds", "rewindsplain", "inputsrewound", "rewindsroot", "inputsdecl")
 	})
 	// Verified packages built together declare one memory (F13 of the
 	// review of F38), in both directions, and the same verifies.
-	for _, root := range []string{"memnone", "memdecl", "memsame", "inputsdecl"} {
+	for _, root := range []string{"memnone", "memdecl", "memsame"} {
 		t.Run("compares the declared memories in "+root, func(t *testing.T) {
 			parallel(t)
 			runCorpus(t, newAnalyzer(), root)
