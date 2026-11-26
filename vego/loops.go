@@ -790,7 +790,7 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 	}
 	head.decide(cond)
 	if before != nil {
-		v.check(head, nil, logic.Le(logic.IntLit(0), before), shape.pos,
+		v.checkVariant(head, nil, logic.Le(logic.IntLit(0), before), shape.pos,
 			"loop variant may be negative: %s", spec.variant.text)
 	}
 	finish := func(end *state) {
@@ -819,7 +819,7 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 		}
 		checkInvariants(end, "loop invariant may not be preserved")
 		if before != nil {
-			v.check(end, nil, logic.Lt(v.intTerm(spec.variant, v.bodyEnv(end, at)), before), shape.pos,
+			v.checkVariant(end, nil, logic.Lt(v.intTerm(spec.variant, v.bodyEnv(end, at)), before), shape.pos,
 				"loop variant may not decrease: %s", spec.variant.text)
 		}
 	}

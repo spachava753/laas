@@ -1661,7 +1661,7 @@ func (v *fnVerifier) checkRecursion(callee *funcInfo, pre *specEnv, st *state, g
 		}
 	}
 	measure := v.intTerm(callee.measure, pre)
-	v.check(st, guard, logic.Lt(measure, v.measure), call.Pos(),
+	v.checkVariant(st, guard, logic.Lt(measure, v.measure), call.Pos(),
 		"variant may not decrease in recursive call: %s", callee.measure.text)
 }
 

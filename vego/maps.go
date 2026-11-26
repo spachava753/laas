@@ -158,8 +158,15 @@ func (v *fnVerifier) noteMap(sink *state, mem memory, t types.Type, ref, key *lo
 	if isBool(keyType) {
 		most = big.NewInt(2)
 	}
+	// The bound by MaxInt and the bound by memory are marked: they rest on
+	// memory alone, and a Variant may not use them (checkVariant). The
+	// bound by the key type does not.
+	countLimit := logic.BigLit(most)
+	if _, maxInt, _ := v.intRange(types.Typ[types.Int]); most.Cmp(maxInt) == 0 {
+		countLimit = v.marks().mapCount
+	}
 	facts := []*logic.Term{logic.Le(logic.IntLit(0), count), logic.Implies(isNil, logic.Eq(count, logic.IntLit(0))),
-		logic.Le(count, logic.BigLit(most)), logic.Le(logic.Mul(count, logic.IntLit(max(entry, 1))), logic.BigLit(v.maxAlloc()))}
+		logic.Le(count, countLimit), logic.Le(logic.Mul(count, logic.IntLit(max(entry, 1))), v.marks().mapBytes)}
 	if key != nil {
 		present := logic.Select(v.row(nil, mem, mapOwner(t)+hasLeaf.path, hasLeaf.sort, ref), mapKey(key))
 		facts = append(facts, logic.Implies(present, logic.Le(logic.IntLit(1), count)), logic.Implies(isNil, logic.Not(present)))
