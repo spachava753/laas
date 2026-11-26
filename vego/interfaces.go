@@ -132,7 +132,12 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 					"and what that value writes is not yet placed in the footprint of the conversion; own the interface value in %s itself, "+
 					"or call the methods of %s on the pointer", shown(from), shown(want), shown(from), through, shown(object), shown(from)))
 			}
-			if shipped, _ := ownsDeclOf(object); v.ownsMemory(from) && shipped != nil {
+			// Under the declared memory a buffer or a builder converts with
+			// what it owns, as an owner of the project does (step 3b of
+			// F38): its writes cannot fail to grow, and every exported
+			// method of the two types keeps what it owns growing only into
+			// new memory (TestBufferMethodsGrowth).
+			if shipped, _ := ownsDeclOf(object); v.ownsMemory(from) && shipped != nil && !(v.sizesOf() != nil && growsUnbounded(from) != "") {
 				// A shipped owner itself is not converted: the bufio types
 				// call through what they keep and the buffers grow without
 				// a bound, which the refusals above say; any other shipped
@@ -904,8 +909,9 @@ func growsUnbounded(t types.Type) string {
 	switch named.Obj().Pkg().Path() + "." + named.Obj().Name() {
 	case "bytes.Buffer", "strings.Builder":
 		return fmt.Sprintf("its Write may panic when the buffer is too large to grow, and the contract of (io.Writer).Write has no bound for it; "+
+			"declare the memory of the machines the program runs on under sizes in %s, under which a buffer converts, or "+
 			"pass the %s itself to fmt.Fprintf, Fprint, or Fprintln, which then calls its own Write, or write what you format with its own WriteString, "+
-			"as in b.WriteString(fmt.Sprintf(...))", named.Obj().Name())
+			"as in b.WriteString(fmt.Sprintf(...))", TrustFileName, named.Obj().Name())
 	}
 	return ""
 }

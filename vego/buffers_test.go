@@ -334,7 +334,7 @@ func TestBuilderCopyPanics(t *testing.T) {
 // Grow is also called with a negative count and Truncate outside the
 // length, which must fail their requires and panic.
 func checkBufferEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key string) {
-	names := []string{"Write", "WriteString", "WriteByte", "WriteRune", "Grow", "Len", "String", "Bytes", "Reset", "Truncate"}
+	names := []string{"Write", "WriteString", "WriteByte", "WriteRune", "Grow", "Len", "String", "Bytes", "Reset", "Truncate", "Read"}
 	contracts := map[string]*funcInfo{}
 	for _, name := range names {
 		contracts["(*bytes.Buffer)."+name] = contractOfKey(t, pv, pkg, "(*bytes.Buffer)."+name)
@@ -438,6 +438,13 @@ func checkBufferEntries(t *testing.T, pv *pkgVerifier, pkg *types.Package, key s
 				bc = bufferCall{call: func() []*logic.Term {
 					b.Reset()
 					return nil
+				}}
+			case "Read":
+				p := make([]byte, rng.Intn(b.Len()+3))
+				arrays.add(p)
+				bc = bufferCall{given: []*logic.Term{lengthTerm(len(p))}, call: func() []*logic.Term {
+					n, err := b.Read(p)
+					return []*logic.Term{logic.IntLit(int64(n)), errorTerm(err)}
 				}}
 			case "Truncate":
 				n := rng.Intn(b.Len() + 1)

@@ -109,11 +109,11 @@ func Squared(s string) (r int) {
 // @Ensures True
 func Writer(w io.Writer) {}
 
-// A buffer as an io.Writer is still refused, for what it owns.
+// A buffer as an io.Writer converts under the declared memory (step 3b).
 // @Ensures True
 func Buffered() {
 	var b bytes.Buffer
-	Writer(&b) // want `vego: cannot verify Buffered: converting a value of type \*bytes.Buffer to io.Writer is not supported yet: \*bytes.Buffer owns memory`
+	Writer(&b)
 }
 
 // A bound that a contract states for its own reasons is still owed by the
@@ -278,5 +278,24 @@ func GrowsAnyBuilder(n int) (r string) {
 // @Ensures True
 func GrowsAnySlice(s []byte, n int) (r []byte) {
 	r = slices.Grow(s, n) // want `vego: precondition of Grow may not hold under the declared memory: n \* elemsize\(s\) <= Memory`
+	return r
+}
+
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func emit(w io.Writer, s string) (err error) {
+	_, err = io.WriteString(w, s)
+	return err
+}
+
+// After a callee wrote through the interface value, nothing is known of
+// the buffer's length (step 3b).
+// @Ensures True
+func LengthAfter() (r int) {
+	var b bytes.Buffer
+	_ = emit(&b, "x")
+	// @Assert |b| = 1 // want `vego: assertion may not hold: \|b\| = 1`
+	r = b.Len()
 	return r
 }

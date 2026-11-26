@@ -217,6 +217,26 @@ trusted:
     ensures:
       - "|b'| = n"
 
+  (*bytes.Buffer).Read:
+    reason: >-
+      Documented: "Read reads the next len(p) bytes from the buffer or until
+      the buffer is drained. The return value n is the number of bytes read.
+      If the buffer has no data to return, err is io.EOF (unless len(p) is
+      zero); otherwise it is nil." Read from the source of Go 1.26.6 and
+      1.27.3 (buffer.go): an empty buffer is Reset, which keeps the array,
+      and otherwise n = copy(p, buf[off:]) and off moves by n, so the length
+      the buffer reports drops by n and the array is the one it had; it
+      writes p and the buffer and nothing else. Shipped so that a buffer
+      converted to an interface that has io.Writer's methods is checked
+      against io.Reader's entry too, which every *bytes.Buffer implements
+      (F35, step 3b of F38).
+    requires:
+      - "b != nil"
+    modifies: [b, p]
+    ensures:
+      - "0 <= n And n <= |p| And n <= |b|"
+      - "|b'| = |b| - n"
+
   bytes.IndexFunc:
     reason: Documented to return the byte index in s of the first code point c satisfying f(c), or -1.
     runs: [f]

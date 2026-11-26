@@ -105,6 +105,7 @@ var shippedClasses = map[string][]string{
 		"strings.ToLower", "strings.ToUpper", "unicode/utf8.AppendRune",
 	},
 	"none": {
+		"(*bytes.Buffer).Read",
 		"(*bufio.Reader).ReadByte", "(*bufio.Scanner).Err", "(*bufio.Writer).Flush", "(*bufio.Writer).Write", "(*bufio.Writer).WriteByte",
 		"(*bufio.Writer).WriteString", "(*bytes.Buffer).Bytes", "(*bytes.Buffer).Len", "(*bytes.Buffer).Reset", "(*bytes.Buffer).Truncate",
 		"(*net/http.Request).PathValue", "(*os.File).Close", "(*os.File).Read", "(*os.File).Write", "(*os.File).WriteString",

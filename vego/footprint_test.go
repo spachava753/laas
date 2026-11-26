@@ -8,6 +8,8 @@ import (
 	"go/token"
 	"go/types"
 	"io"
+	"maps"
+	"math/rand"
 	"reflect"
 	"slices"
 	"strings"
@@ -218,4 +220,105 @@ func TestGrowthCheck(t *testing.T) {
 	}
 	long := bufio.NewScanner(strings.NewReader(strings.Repeat("x", 10000) + "\n"))
 	a.checkGrowth(t, long, "Scan", func() { long.Scan() })
+}
+
+// TestBufferMethodsGrowth holds the owns claim of bytes.Buffer and
+// strings.Builder, that what a value owns grows only into memory the call
+// made, for every exported method of the two types, shipped or not: code
+// that is not verified and holds a buffer converted to an interface may
+// assert it back and call any of them (condition (1) of the orchestrator's
+// ruling on D6 of F38). A method of a newer Go that no case calls fails the
+// test, so that it is read before the claim stays.
+func TestBufferMethodsGrowth(t *testing.T) {
+	parallel(t)
+	rng := rand.New(rand.NewSource(7))
+	text := func() []byte { return bytes.Repeat([]byte("ab\n"), rng.Intn(3000)) }
+	t.Run("bytes.Buffer", func(t *testing.T) {
+		calls := map[string]func(b *bytes.Buffer, a *ownerArrays){
+			"Available":       func(b *bytes.Buffer, _ *ownerArrays) { b.Available() },
+			"AvailableBuffer": func(b *bytes.Buffer, _ *ownerArrays) { b.AvailableBuffer() },
+			"Bytes":           func(b *bytes.Buffer, _ *ownerArrays) { b.Bytes() },
+			"Cap":             func(b *bytes.Buffer, _ *ownerArrays) { b.Cap() },
+			"Grow":            func(b *bytes.Buffer, _ *ownerArrays) { b.Grow(rng.Intn(100000)) },
+			"Len":             func(b *bytes.Buffer, _ *ownerArrays) { b.Len() },
+			"Next":            func(b *bytes.Buffer, _ *ownerArrays) { b.Next(rng.Intn(b.Len() + 2)) },
+			// Peek is new in Go 1.27, and called through reflection so that
+			// the test builds with Go 1.26 too.
+			"Peek": func(b *bytes.Buffer, _ *ownerArrays) {
+				if m := reflect.ValueOf(b).MethodByName("Peek"); m.IsValid() {
+					m.Call([]reflect.Value{reflect.ValueOf(rng.Intn(b.Len() + 2))})
+				}
+			},
+			"Read": func(b *bytes.Buffer, a *ownerArrays) {
+				p := make([]byte, rng.Intn(b.Len()+3))
+				a.add(p)
+				b.Read(p)
+			},
+			"ReadByte":  func(b *bytes.Buffer, _ *ownerArrays) { b.ReadByte() },
+			"ReadBytes": func(b *bytes.Buffer, _ *ownerArrays) { b.ReadBytes('\n') },
+			"ReadFrom": func(b *bytes.Buffer, a *ownerArrays) {
+				p := text()
+				a.add(p)
+				b.ReadFrom(bytes.NewReader(p))
+			},
+			"ReadRune":   func(b *bytes.Buffer, _ *ownerArrays) { b.ReadRune() },
+			"ReadString": func(b *bytes.Buffer, _ *ownerArrays) { b.ReadString('\n') },
+			"Reset":      func(b *bytes.Buffer, _ *ownerArrays) { b.Reset() },
+			"String":     func(b *bytes.Buffer, _ *ownerArrays) { _ = b.String() },
+			"Truncate":   func(b *bytes.Buffer, _ *ownerArrays) { b.Truncate(rng.Intn(b.Len() + 1)) },
+			"UnreadByte": func(b *bytes.Buffer, _ *ownerArrays) { b.UnreadByte() },
+			"UnreadRune": func(b *bytes.Buffer, _ *ownerArrays) { b.UnreadRune() },
+			"Write": func(b *bytes.Buffer, a *ownerArrays) {
+				p := text()
+				a.add(p)
+				b.Write(p)
+			},
+			"WriteByte":   func(b *bytes.Buffer, _ *ownerArrays) { b.WriteByte('x') },
+			"WriteRune":   func(b *bytes.Buffer, _ *ownerArrays) { b.WriteRune('é') },
+			"WriteString": func(b *bytes.Buffer, _ *ownerArrays) { b.WriteString(string(text())) },
+			"WriteTo":     func(b *bytes.Buffer, _ *ownerArrays) { b.WriteTo(io.Discard) },
+		}
+		checkAllMethods(t, reflect.TypeOf(&bytes.Buffer{}), calls, func() *bytes.Buffer { return new(bytes.Buffer) })
+	})
+	t.Run("strings.Builder", func(t *testing.T) {
+		calls := map[string]func(b *strings.Builder, a *ownerArrays){
+			"Cap":  func(b *strings.Builder, _ *ownerArrays) { b.Cap() },
+			"Grow": func(b *strings.Builder, _ *ownerArrays) { b.Grow(rng.Intn(100000)) },
+			"Len":  func(b *strings.Builder, _ *ownerArrays) { b.Len() },
+			"Reset": func(b *strings.Builder, _ *ownerArrays) {
+				b.Reset()
+			},
+			"String": func(b *strings.Builder, _ *ownerArrays) { _ = b.String() },
+			"Write": func(b *strings.Builder, a *ownerArrays) {
+				p := text()
+				a.add(p)
+				b.Write(p)
+			},
+			"WriteByte":   func(b *strings.Builder, _ *ownerArrays) { b.WriteByte('x') },
+			"WriteRune":   func(b *strings.Builder, _ *ownerArrays) { b.WriteRune('é') },
+			"WriteString": func(b *strings.Builder, _ *ownerArrays) { b.WriteString(string(text())) },
+		}
+		checkAllMethods(t, reflect.TypeOf(&strings.Builder{}), calls, func() *strings.Builder { return new(strings.Builder) })
+	})
+}
+
+// checkAllMethods calls the methods of a buffer type at random, each round
+// a fresh value, around the check of owner growth, and fails for an
+// exported method that calls has no case for.
+func checkAllMethods[B any](t *testing.T, typ reflect.Type, calls map[string]func(B, *ownerArrays), fresh func() B) {
+	for i := range typ.NumMethod() {
+		if name := typ.Method(i).Name; calls[name] == nil {
+			t.Fatalf("%s has a method %s that no case calls; read whether it keeps what the type owns growing only into new memory, and add it", typ, name)
+		}
+	}
+	names := slices.Sorted(maps.Keys(calls))
+	rng := rand.New(rand.NewSource(11))
+	for range 200 {
+		b := fresh()
+		arrays := &ownerArrays{}
+		for range 1 + rng.Intn(20) {
+			name := names[rng.Intn(len(names))]
+			arrays.checkGrowth(t, any(b), name, func() { calls[name](b, arrays) })
+		}
+	}
 }
