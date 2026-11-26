@@ -12,9 +12,15 @@ trusted:
       returns []byte of the file's data, a new copy; for a name it does not
       find it returns a *fs.PathError holding fs.ErrNotExist, and for a
       directory one holding an error made by errors.New, so vouches holds.
-      The copy is of a string the binary maps, which is shorter than
-      MaxAlloc by more than a page on every target, since the binary also
-      holds the program, so the conversion does not panic.
+      The copy goes through rawbyteslice (runtime/string.go:331), which
+      rounds the size up to what the allocator gives and sets the capacity
+      with int(cap), negative for a string longer than MaxInt less a page on
+      a 32-bit target, with no panic. An embedded file is below that: the
+      linker refuses a data section of more than cutoff = 2e9 bytes
+      (cmd/link/internal/ld/data.go:1452, checkdatsize and checkSectSize,
+      the same in Go 1.26.6 and 1.27.3), so a copy rounded to a page stays
+      below MaxInt on every target, and below MaxAlloc (F16 of the review of
+      step 4 of F39).
     vouches: [result2]
     modifies: []
     ensures:
