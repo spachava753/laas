@@ -170,9 +170,10 @@ func AsWriter(path string) {
 	fmt.Fprintln(f, "x") // want `converting f to io.Writer, whose Write may write a file that is read under the declaration that inputs end`
 }
 
-// Poke writes through what it is handed, if it is a writer.
+// Poke writes through what it is handed, if it is a writer, which it may
+// since its caller says the reader is not read under the declaration.
 //
-// @Requires r != nil
+// @Requires r != nil And ~ends(r)
 // @Modifies r
 // @Ensures True
 func Poke(r io.Reader) {
@@ -205,7 +206,7 @@ func DrainPoked(r io.Reader) {
 		if err != nil {
 			return
 		}
-		Poke(r) // want `what is passed to Poke as r may be a reader read under the declaration that inputs end`
+		Poke(r) // want `precondition of Poke may not hold: ~ends\(r\)`
 	}
 }
 
@@ -220,10 +221,10 @@ func AsFile(r io.Reader) {
 	}
 }
 
-// AsFileUnread does the same with a reader it does not read under the
-// declaration.
+// AsFileUnread does the same with a reader that its caller says is not
+// read under the declaration.
 //
-// @Requires r != nil
+// @Requires r != nil And ~ends(r)
 // @Ensures True
 func AsFileUnread(r io.Reader) {
 	if f, ok := r.(*os.File); ok {
@@ -306,8 +307,8 @@ func Rewound(r io.Reader) {
 func rewind(r io.Reader) {}
 
 // Appended scans a file and hands it to appendTo, which writes it, after
-// each line: a write to a file writes no memory, so only the proof at the
-// call that the file is not read under the declaration refuses it.
+// each line: a write to a file writes no memory, so only appendTo's
+// requirement that the file is not read under the declaration refuses it.
 //
 // @Requires |path| <= 4096
 // @Ensures True
@@ -321,13 +322,14 @@ func Appended(path string) {
 	// @Invariant ready(sc) And ends(sc)
 	// @Variant unread(sc)
 	for sc.Scan() {
-		appendTo(f) // want `what is passed to appendTo as f may be a reader read under the declaration that inputs end`
+		appendTo(f) // want `precondition of appendTo may not hold: ~ends\(f\)`
 	}
 }
 
-// appendTo writes a byte to a file it is handed.
+// appendTo writes a byte to a file it is handed, which is not read under
+// the declaration.
 //
-// @Requires f != nil
+// @Requires f != nil And ~ends(f)
 // @Ensures True
 func appendTo(f *os.File) {
 	_, _ = f.WriteString("x")
@@ -457,4 +459,107 @@ func Fields2(rd io.Reader) (total int) {
 func AllBuffer() {
 	var r io.Reader = ones{}
 	_, _ = io.ReadAll(r) // want `precondition of ReadAll may not hold: ends\(r\)`
+}
+
+// IsStdin says whether f is standard input (F11 of the review of step 2).
+//
+// @Requires f != nil
+// @Ensures ~r
+func IsStdin(f *os.File) (r bool) {
+	return f == os.Stdin // want `postcondition may not hold: ~r`
+}
+
+// BothNil looks at a request's body and a reader.
+//
+// @Requires req != nil
+// @Ensures x = 0
+func BothNil(req *http.Request, r io.Reader) (x int) {
+	if req.Body == nil && r == nil {
+		return 1 // want `postcondition may not hold: x = 0`
+	}
+	return 0
+}
+
+// FromStdin asks whether a reader holds standard input.
+//
+// @Requires r != nil
+// @Ensures x = 0
+func FromStdin(r io.Reader) (x int) {
+	if f, ok := r.(*os.File); ok && f == os.Stdin {
+		return 1 // want `postcondition may not hold: x = 0`
+	}
+	return 0
+}
+
+// Sink holds a writer.
+type Sink struct{ W io.Writer }
+
+// put writes a byte to a writer it is handed.
+//
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func put(w io.Writer) (err error) {
+	_, err = w.Write([]byte("x"))
+	return err
+}
+
+// ToBoth writes to two writers through MultiWriter.
+//
+// @Requires a != nil And b != nil
+// @Modifies a, b
+// @Ensures True
+func ToBoth(a, b io.Writer) (err error) {
+	return put(io.MultiWriter(a, b))
+}
+
+// ToField writes to the writer of a sink.
+//
+// @Requires s != nil And s.W != nil
+// @Modifies s.W
+// @Ensures True
+func ToField(s *Sink) (err error) {
+	return put(s.W)
+}
+
+// maybe takes a writer that may be nil.
+//
+// @Ensures True
+func maybe(w io.Writer) {
+}
+
+// ToNil hands it nil.
+//
+// @Ensures True
+func ToNil() {
+	maybe(nil)
+}
+
+// RewoundFile reads a file through an io.Reader and has rewindFile seek it
+// back after each read (F12 of the review of step 2): a call that lists a
+// value forgets what it has left, by its footprint.
+//
+// @Requires |name| <= 4096
+// @Ensures True
+func RewoundFile(name string) {
+	f, err := os.Open(name)
+	if err != nil {
+		return
+	}
+	r := io.Reader(f)
+	buf := make([]byte, 512)
+	// @Invariant ends(r)
+	// @Variant unread(r)
+	for { // want `loop variant may not decrease: unread\(r\)`
+		if _, err := r.Read(buf); err != nil {
+			return
+		}
+		rewindFile(r)
+	}
+}
+
+func rewindFile(r io.Reader) {
+	if f, ok := r.(*os.File); ok {
+		_, _ = f.Seek(0, io.SeekStart)
+	}
 }

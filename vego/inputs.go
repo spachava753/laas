@@ -365,90 +365,6 @@ func (v *fnVerifier) noteConverted(st *state, held *logic.Term, from types.Type,
 	st.assume(logic.Not(ends))
 }
 
-// requiresEnds reports whether the Requires of a contract names ends of a
-// parameter, as in ends(r), or of something reached from it.
-func requiresEnds(fn *funcInfo, param *types.Var) bool {
-	found := false
-	var visit func(n *logic.Node)
-	visit = func(n *logic.Node) {
-		if n == nil || found {
-			return
-		}
-		if n.Kind == logic.NCall && n.Name == "ends" && len(n.Kids) == 1 {
-			root := n.Kids[0]
-			for len(root.Kids) > 0 && root.Kind != logic.NIdent {
-				root = root.Kids[0]
-			}
-			if root.Kind == logic.NIdent && fn.paramNames[root.Name] == param {
-				found = true
-				return
-			}
-		}
-		for _, kid := range n.Kids {
-			visit(kid)
-		}
-	}
-	for _, c := range fn.requires {
-		visit(c.node)
-	}
-	return found
-}
-
-// endsKey returns the key at which ends of a value of type t lies, or nil
-// for a type the declaration says nothing of: an interface value's state
-// key, and a *os.File's pointer key.
-func endsKey(t types.Type, val value) *logic.Term {
-	if isIface(t) && !isError(t) && len(val) == 1 {
-		return skey(val[0])
-	}
-	if object, isPointer := pointee(t); isPointer && isOSFile(object) && len(val) >= 2 {
-		return pkey(val)
-	}
-	return nil
-}
-
-// noteEntryEnds states, under the declaration, on entry to a verified
-// function, that a parameter that is an interface value or a *os.File is
-// not a reader the declaration covers unless its Requires names ends of it:
-// code that is not verified hands a reader to be read under the declaration
-// only where the contract requires it (What a proof assumes), and a
-// verified caller proves it (checkCalleeEnds).
-func (v *fnVerifier) noteEntryEnds(st *state) {
-	fn := v.fn
-	if v.inputsOf() == nil || fn.decl == nil || fn.spelled != nil {
-		return
-	}
-	for _, param := range fn.params {
-		if key := endsKey(param.Type(), v.entry[param]); key != nil && !requiresEnds(fn, param) {
-			st.assume(logic.Not(logic.Select(endsOfKeys, key)))
-		}
-	}
-}
-
-// checkCalleeEnds proves, at a call of a verified function under the
-// declaration, that what is passed for each of its parameters that are
-// interface values or *os.File values is not a reader the declaration
-// covers, unless the callee requires it: the callee assumes that, and could
-// write through what it is handed, by a method, a conversion, or an
-// assertion (N2 of the design review of F39).
-func (v *fnVerifier) checkCalleeEnds(fn *funcInfo, name string, args map[*types.Var]value, st *state, guard []*logic.Term, pos token.Pos) {
-	// A function value or a method of an interface value runs code checked
-	// against the contract of its type, which assumes nothing of ends.
-	if v.inputsOf() == nil || fn.trust != nil || fn.valueOf != nil || fn.methodOf != nil {
-		return
-	}
-	for _, param := range fn.params {
-		key := endsKey(param.Type(), args[param])
-		if key == nil || requiresEnds(fn, param) {
-			continue
-		}
-		v.check(st, guard, logic.Not(logic.Select(endsOfKeys, key)), pos,
-			"what is passed to %s as %s may be a reader read under the declaration that inputs end, and %s does not require ends(%s), so it may write "+
-				"through it while a loop reads it; add // @Requires ends(%s) to %s, or pass a reader that is not read to its end",
-			name, describe(param), name, param.Name(), param.Name(), name)
-	}
-}
-
 // fileWriters are the methods through which what a *os.File reads can be
 // written or read again: a write, and a seek or a truncation, after which a
 // read yields again what it yielded.
@@ -480,7 +396,8 @@ func (v *fnVerifier) refuseFileWrite(st *state, guard []*logic.Term, key *logic.
 	}
 	v.check(st, guard, logic.Not(logic.Select(endsOfKeys, key)), pos,
 		"%s may write a file that is read under the declaration that inputs end; reading and writing one file through one value is not supported yet, "+
-			"so open the file to write it apart, with os.Create, or read it without the declaration", how)
+			"so open the file to write it apart, with os.Create, or, for a file or a reader a parameter holds that is not read to its end, "+
+			"say so with // @Requires ~ends(f) of that parameter", how)
 }
 
 // checkWrittenFiles checks, at a call of a trusted function under the
@@ -536,7 +453,8 @@ func (v *fnVerifier) noteBody(st *state, e ast.Expr, val value) {
 	if v.inputsOf() == nil || len(val) != 1 || !isIface(v.info.TypeOf(e)) || !v.progresses(e) {
 		return
 	}
-	st.assume(logic.Select(endsOfKeys, skey(val[0])))
+	// A nil body holds nothing to read (F11 of the review of step 2).
+	st.assume(logic.Implies(logic.Ne(val[0], logic.RefLit(0)), logic.Select(endsOfKeys, skey(val[0]))))
 }
 
 // inputsWord is the word of a shipped clause that stands for the bytes

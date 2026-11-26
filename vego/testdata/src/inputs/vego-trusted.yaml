@@ -20,3 +20,13 @@ trusted:
     vouches: [r]
     modifies: [r]
     ensures: ["True"]
+  inputs.rewindFile:
+    reason: >-
+      Seeks the file r holds back to its start; the assertion to *os.File
+      is to a concrete type and Seek is the function's own call.
+    requires: ["r != nil"]
+    runs: [r]
+    asserts: {r: []}
+    vouches: [r]
+    modifies: [r]
+    ensures: ["True"]

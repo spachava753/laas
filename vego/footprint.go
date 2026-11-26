@@ -369,6 +369,17 @@ func (v *fnVerifier) outsideFootprint(t target, key string, ref, position *logic
 		// The value's own states, which its contract governs.
 		conditions = append(conditions, logic.Eq(ref, t.skey))
 	}
+	if key == unreadRegion {
+		// What a reader yields is not memory: a call that acts on the
+		// value, by its footprint, may change it, as a seek does, whether
+		// or not its interface has states (F12 of the review of step 2 of
+		// F39). Of a value whose key is not known, nothing is kept.
+		if t.skey == nil {
+			conditions[0] = logic.False()
+		} else {
+			conditions[0] = logic.And(conditions[0], logic.Ne(ref, t.skey))
+		}
+	}
 	if t.skipped != nil {
 		conditions = append(conditions, t.skipped)
 	}

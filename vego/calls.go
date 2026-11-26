@@ -669,7 +669,6 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	// review of step 2c).
 	declaredHeld := true
 	v.uncaptured(func() { declaredHeld = v.checkDeclaredClauses(fn, name, pre, st, guard, call.Pos()) })
-	v.checkCalleeEnds(fn, name, args, st, guard, call.Pos())
 	v.checkWrittenFiles(fn, name, args, st, guard, call.Pos())
 	for _, c := range fn.requires {
 		// A bound of what a buffer can grow to, or of what a trusted

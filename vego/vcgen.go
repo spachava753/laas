@@ -525,7 +525,6 @@ func (v *fnVerifier) enter() *state {
 		v.refuseTooLarge(result.Pos(), result.Type())
 		st.vals[result] = zeroValue(result.Type())
 	}
-	v.noteEntryEnds(st)
 	pre := &specEnv{v: v, sink: st, fn: fn, args: v.entry, now: memory{}}
 	for _, c := range fn.requires {
 		v.assumeKeeping(st, c, pre, "entry")
