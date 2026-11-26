@@ -199,3 +199,23 @@ func Nested(byOwner map[string][]Task) (r []byte, err error) {
 	r, err = json.MarshalIndent(byOwner, "", "  ") // want `vego: cannot verify Nested: MarshalIndent encodes byOwner, and byOwner\[k\] holds elements inside the value of byOwner, a map with string keys`
 	return r, err
 }
+
+// The hint to declare a memory is not given where the declaration would
+// refuse the same site for what it reserves by a number (F29 of the review
+// of step 4): eight bytes for each byte of a slice is more than an array
+// may take, and two lengths may be one string twice.
+// @Ensures True
+func Wider(p []byte) (r []int64) {
+	r = make([]int64, len(p)) // want `vego: the slice made may be more than can be allocated$`
+	return r
+}
+
+// @Ensures True
+func Two(a, b string) (r string) {
+	var w strings.Builder
+	w.Grow(len(a) + len(b)) // want `vego: precondition of Grow may not hold: 3 \* \(\|b\| \+ n\) \+ 65536 <= MaxAlloc; it holds when \|w\| <= 10000000000000 and len\(a\) \+ len\(b\) <= 10000000000000$`
+	w.WriteString(a)
+	w.WriteString(b)
+	r = w.String()
+	return r
+}

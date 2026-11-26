@@ -106,6 +106,18 @@ func (v *fnVerifier) checkAlloc(st *state, guard []*logic.Term, count *logic.Ter
 	v.checkSized(st, guard, fits, pos, "%s may be more than can be allocated", what)
 }
 
+// checkMade is checkAlloc for a make, which reserves by a number: the hint
+// to declare a memory is given only where the declaration would also keep
+// what it reserves within the bound on arrays (F29 of the review of 4).
+func (v *fnVerifier) checkMade(st *state, guard []*logic.Term, count *logic.Term, elem types.Type, pos token.Pos, what string) {
+	saved := v.alsoDeclared
+	v.alsoDeclared = func(decl *sizesDecl) *logic.Term {
+		return logic.Le(logic.Mul(count, logic.IntLit(v.pass.TypesSizes.Sizeof(elem))), logic.BigLit(decl.arrayBound()))
+	}
+	defer func() { v.alsoDeclared = saved }()
+	v.checkAlloc(st, guard, count, elem, pos, what)
+}
+
 // checkReserved requires what a make reserves by a number, count elements
 // of the given type that it does not write, to keep the bound on the array
 // of every slice under a declared memory: count * size <= R and count an

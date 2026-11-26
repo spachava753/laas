@@ -450,7 +450,7 @@ func (pv *pkgVerifier) sizesOf() *sizesDecl {
 // gives a stronger hypothesis (rewriteMarked); a hypothesis with a mark
 // anywhere else is kept as it is. What follows from the result follows from
 // the hypotheses together with the declaration.
-func (v *fnVerifier) replacedHyps(hyps []*logic.Term, decl *sizesDecl) []*logic.Term {
+func (v *fnVerifier) replacedHyps(hyps []*logic.Term, decl *sizesDecl) (replaced []*logic.Term, changed bool) {
 	m := v.marks()
 	memory, bound := logic.BigLit(decl.memory), logic.BigLit(decl.arrayBound())
 	marks := map[*logic.Term]bool{m.strLen: true, m.mapBytes: true, m.arrayEnd: true}
@@ -471,8 +471,9 @@ func (v *fnVerifier) replacedHyps(hyps []*logic.Term, decl *sizesDecl) []*logic.
 			v.replaced[hyp] = rewritten
 		}
 		out[i] = rewritten
+		changed = changed || rewritten != hyp
 	}
-	return out
+	return out, changed
 }
 
 // sizedAttempt proves a size goal: a goal that what an operation allocates
@@ -494,7 +495,12 @@ func (v *fnVerifier) sizedAttempt(st *state, guard []*logic.Term, goal *logic.Te
 	if result == solver.Proved || decl == nil || v.unmarked != nil {
 		return result, false
 	}
-	hyps := append(v.replacedHyps(st.hyps, decl), guard...)
+	// Where no bound is replaced, the second problem is the first.
+	replaced, changed := v.replacedHyps(st.hyps, decl)
+	if !changed {
+		return result, false
+	}
+	hyps := append(replaced, guard...)
 	if v.solver().Prove(hyps, goal, v.options(0, obligation)) != solver.Proved {
 		return result, false
 	}
@@ -553,9 +559,21 @@ func (v *fnVerifier) sizeNote(st *state, guard []*logic.Term, goal *logic.Term) 
 	if !v.wouldDeclare() {
 		return v.idleNote()
 	}
-	hyps := append(v.replacedHyps(st.hyps, exampleMemory), guard...)
+	replaced, changed := v.replacedHyps(st.hyps, exampleMemory)
+	if !changed {
+		return ""
+	}
+	hyps := append(replaced, guard...)
 	if v.solver().Prove(hyps, goal, v.options(0, obligation)) != solver.Proved || v.proves(hyps, logic.False(), quickEffort) {
 		return ""
+	}
+	// What the declaration would ask at the same site beside the goal, of
+	// class N, must hold too, or the hint points at a declaration whose
+	// first message is another refusal (F29 of the review of step 4).
+	if v.alsoDeclared != nil {
+		if also := v.alsoDeclared(exampleMemory); also != nil && v.solver().Prove(hyps, also, v.options(0, obligation)) != solver.Proved {
+			return ""
+		}
 	}
 	return v.declareOffer("which proves this")
 }
@@ -654,4 +672,24 @@ func (v *fnVerifier) checkDeclaredClauses(fn *funcInfo, name string, pre *specEn
 				"is not bounded by what the machines hold, so bound it", name, strings.Join(strings.Fields(formula.text), " "), decl.written)
 	}
 	return v.reports == held
+}
+
+// declaredClauses returns the clauses an entry declares for a memory, as
+// they read with that memory, or nil for an entry with none.
+func (v *fnVerifier) declaredClauses(fn *funcInfo, pre *specEnv, decl *sizesDecl) *logic.Term {
+	if fn.trust == nil || len(fn.trust.declared) == 0 {
+		return nil
+	}
+	var all []*logic.Term
+	for _, formula := range fn.trust.declared {
+		text := declaredText(formula.text, decl.memory)
+		node, err := logic.ParseFormula(text)
+		if err != nil {
+			panic("vego: internal error: a declared clause cannot be read: " + err.Error())
+		}
+		var goal *logic.Term
+		v.quietly(func() { goal = v.formula(&clause{kind: "requires", text: text, node: node}, node, pre) })
+		all = append(all, goal)
+	}
+	return logic.And(all...)
 }

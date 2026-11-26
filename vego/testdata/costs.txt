@@ -967,7 +967,7 @@ defects	defects.InvariantNotPreserved	9	3888	0
 defects	defects.MinWrong	2	585	0
 defects	defects.ModSign	4	1384	0
 defects	defects.NegativeIndex	3	1411	0
-defects	defects.NegativeMake	9	1028	0
+defects	defects.NegativeMake	8	813	0
 defects	defects.NoVariant	5	1488	0
 defects	defects.NonlinearGap	4	1487	0
 defects	defects.RangeClaimsTooMuch	6	3805	0
@@ -3555,7 +3555,7 @@ initvalues	initvalues.the initialiser of _	15	5058	0
 initvalues	initvalues.the initialiser of sets	5	3526	0
 initvalues	initvalues.the initialiser of setter	5	3526	0
 integers	integers.Accumulate	7	60457	0
-integers	integers.Allocate	9	1156	0
+integers	integers.Allocate	8	918	0
 integers	integers.AndNotAfterAnd	2	3144	0
 integers	integers.AndNotAllLeft	2	196	0
 integers	integers.AndNotAllRight	2	184	0
@@ -3580,7 +3580,7 @@ integers	integers.GrowsUnbounded	13	6708	0
 integers	integers.Half	3	465	0
 integers	integers.HalfDown	4	2224	0
 integers	integers.HalfWrong	3	1437	0
-integers	integers.Huge	9	461	0
+integers	integers.Huge	8	372	0
 integers	integers.Increment	4	650	0
 integers	integers.IncrementUnbounded	4	504	0
 integers	integers.Inverse	3	297	0
@@ -3600,7 +3600,7 @@ integers	integers.OrAgain	2	3134	0
 integers	integers.OrAllLeft	2	176	0
 integers	integers.OrAllRight	2	176	0
 integers	integers.OrSelf	2	166	0
-integers	integers.Oversize	10	896	0
+integers	integers.Oversize	9	743	0
 integers	integers.Pack	9	5975	0
 integers	integers.Pack4	19	67920	0
 integers	integers.PackWrong	9	6372	0
@@ -4611,7 +4611,7 @@ mapping	mapping.TwoMapsApart	6	5442	0
 mapping	mapping.TwoMapsOneKeyEach	12	25455	0
 mapping	mapping.TwoMapsTwo	11	21522	0
 mapping	mapping.Uses	12	15329	0
-mapping	mapping.Widen	9	3562	0
+mapping	mapping.Widen	10	4157	0
 mapping	mapping.Widened	15	84410	0
 mapping	mapping.WidenedOneLess	13	912161	1
 mapping	mapping.WritesAnother	4	8756	0
@@ -4842,7 +4842,7 @@ memory	memory.SwapPoints	16	18564	0
 memory	memory.TagsShare	7	856	0
 memory	memory.TagsShareWrong	7	1044	0
 memory	memory.Tail	8	2297	0
-memory	memory.TooManyNothings	14	1806	0
+memory	memory.TooManyNothings	13	1477	0
 memory	memory.TooMuch	5	4142	0
 memory	memory.Twice	14	9491	0
 memory	memory.Undeclared	4	848	0
@@ -6385,7 +6385,7 @@ trust	trust.FirstSuccessWins	38	27762	0
 trust	trust.Flushes	1	831	0
 trust	trust.FlushesDeclared	5	4148	0
 trust	trust.ForwardsThroughLoops	54	45960	0
-trust	trust.HugeRepeat	7	4043	0
+trust	trust.HugeRepeat	6	3379	0
 trust	trust.IgnoresFailure	14	17831	0
 trust	trust.IgnoresRange	15	28063	0
 trust	trust.ImpossibleLiteral	13	39198	0
@@ -6411,7 +6411,7 @@ trust	trust.Port	9	12356	0
 trust	trust.PortExactly	10	5262	0
 trust	trust.PossibleLiteral	13	23306	0
 trust	trust.ReadsTrustedSlice	6	6680	0
-trust	trust.RepeatBeyondMemory	7	1850	0
+trust	trust.RepeatBeyondMemory	6	1473	0
 trust	trust.ReportsBothWays	28	13996	0
 trust	trust.Roll	8	1608	0
 trust	trust.RollZero	3	137	0

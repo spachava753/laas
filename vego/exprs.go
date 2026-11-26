@@ -760,7 +760,7 @@ func (v *fnVerifier) makeSlice(e *ast.CallExpr, st *state, guard []*logic.Term) 
 	// memory allows would break the bound every read of it states.
 	v.uncaptured(func() {
 		if !v.checkReserved(st, guard, capacity, elemType(t), e.Pos(), "the slice made") {
-			v.checkAlloc(st, guard, capacity, elemType(t), e.Pos(), "the slice made")
+			v.checkMade(st, guard, capacity, elemType(t), e.Pos(), "the slice made")
 		}
 	})
 	return v.allocSlice(st, elemType(t), nil, length, capacity)

@@ -687,7 +687,10 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 					continue
 				}
 				check := func() {
+					saved := v.alsoDeclared
+					v.alsoDeclared = func(decl *sizesDecl) *logic.Term { return v.declaredClauses(fn, pre, decl) }
 					v.checkSized(st, guard, v.formula(c, node, pre), call.Pos(), "precondition of %s may not hold: %s%s", name, text, v.growthHint(c, node, pre, passed))
+					v.alsoDeclared = saved
 				}
 				// What an initialiser reserves by a number, at a call of
 				// an entry of class N, is reported where it stands (F12 of

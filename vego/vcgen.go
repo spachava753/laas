@@ -58,6 +58,10 @@ type fnVerifier struct {
 	dropped     map[*logic.Term]*logic.Term
 	// replaced caches what replacedHyps makes of each hypothesis.
 	replaced map[*logic.Term]*logic.Term
+	// alsoDeclared, while set, gives what a declared memory would ask at
+	// the site of the size goal being asked beside it, of class N, for the
+	// hint of sizeNote.
+	alsoDeclared func(decl *sizesDecl) *logic.Term
 	// converting counts, for each expression that Go converts to an
 	// interface type, the evaluations of it under way that check the
 	// conversion; see converted.
