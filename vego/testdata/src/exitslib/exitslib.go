@@ -27,3 +27,9 @@ type T struct{}
 
 // Halt ends the process.
 func (*T) Halt() { os.Exit(1) }
+
+// ExitCode ends the process with a code that is not 0.
+func ExitCode(code int) { os.Exit(code) }
+
+// ExitNever is given an entry whose requires contradict each other.
+func ExitNever(code int) { os.Exit(code) }

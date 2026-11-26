@@ -30,6 +30,15 @@ func TestReturns(t *testing.T) {
 	if got := Deferred(1); got != 1 {
 		t.Errorf("Deferred is proved to return 1, returned %d", got)
 	}
+	if got := DeadExitDeferred(); got != 7 {
+		t.Errorf("DeadExitDeferred is proved to return 7, returned %d", got)
+	}
+	if got := UnevaluatedExitDeferred(); got != 7 {
+		t.Errorf("UnevaluatedExitDeferred is proved to return 7, returned %d", got)
+	}
+	if !Ready(true) {
+		t.Errorf("Ready(true) is proved to return true")
+	}
 	Check(nil)
 	RunFormatted("x")
 	Loop([]int{0, 1, 2})

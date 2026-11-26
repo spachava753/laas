@@ -161,7 +161,7 @@ func Deferred() {
 func DeferredLiteral(err error) {
 	defer func() {
 		if err != nil {
-			log.Fatal("failed") // want `vego: cannot verify DeferredLiteral: deferring a function literal that may end the process is not supported yet`
+			log.Fatal("failed") // want `vego: cannot verify DeferredLiteral: it calls log\.Fatal, which may end the process, in a deferred call; a deferred call that may end the process is not supported yet`
 		}
 	}()
 }
@@ -226,4 +226,61 @@ func UsesFalseOnly() {
 // @Ensures True
 func UsesHalt(t *exitslib.T) {
 	t.Halt() // want `vego: the trusted contract of \(\*exitslib\.T\)\.Halt \(trusted\.yaml:\d+\) cannot be used: exits is allowed only in the entry of a package-level function: fmt, errors, and conversions to interfaces call methods and values of function types where no call is written, and a run that ends the process there would not be seen` `vego: the trusted contract of \(\*exitslib\.T\)\.Halt \(trusted\.yaml:\d+\) cannot be used: it contradicts itself, so anything could be proved from it`
+}
+
+// DeferredBound defers a literal that calls a bound literal that may end
+// the process (A6 of the review of step 1).
+//
+// @Exits
+// @Ensures True
+func DeferredBound(stop bool) {
+	f := func() {
+		if stop {
+			os.Exit(2) // want `vego: cannot verify DeferredBound: it calls os\.Exit, which may end the process, in a deferred call; a deferred call that may end the process is not supported yet`
+		}
+	}
+	defer func() { f() }()
+}
+
+// UsesExitCode ends the process with a code its entry allows.
+//
+// @Exits
+// @Ensures False
+func UsesExitCode() {
+	exitslib.ExitCode(2)
+}
+
+// UsesExitCodeZero ends the process with a code its entry does not allow;
+// that the call never returns does not excuse its requires.
+//
+// @Exits
+// @Ensures False
+func UsesExitCodeZero() {
+	exitslib.ExitCode(0) // want `vego: precondition of ExitCode may not hold: code != 0`
+}
+
+// UsesExitNever calls an entry whose requires contradict each other.
+//
+// @Exits
+// @Ensures False
+func UsesExitNever() {
+	exitslib.ExitNever(1) // want `vego: the trusted contract of exitslib\.ExitNever \(trusted\.yaml:\d+\) cannot be used: it contradicts itself, so anything could be proved from it`
+}
+
+// BeforeExit indexes before it ends the process; the index is checked.
+//
+// @Exits
+// @Ensures False
+func BeforeExit(xs []int) {
+	x := xs[3] // want `vego: index may be out of range`
+	os.Exit(x)
+}
+
+// ReadyClaims claims what does not hold where Stop is not called: the arm
+// that returns ready is a real return.
+//
+// @Exits
+// @Ensures ~result
+func ReadyClaims(ready bool) (result bool) {
+	return ready || exits.Stop() // want `vego: postcondition may not hold: ~result`
 }

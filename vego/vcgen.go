@@ -297,6 +297,9 @@ type fnVerifier struct {
 	// exitReached is set once a call that may end the process has been
 	// made in the function's own frame; see verify.
 	exitReached bool
+	// deferring counts the deferred calls being run at a return; a call
+	// that may end the process is refused while it is not zero.
+	deferring int
 	// epochBy names the call whose targets are being forgotten, and
 	// stateNote ends the message of a check that fails while it is set;
 	// see stateHint.
@@ -1085,8 +1088,6 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 		v.unsupported(s.Pos(), "deferring json.NewDecoder(io.LimitReader(r, n)).Decode(&x) is not supported: what it returns would be lost, and what it decodes into is checked where it is called")
 	case v.pkgVerifier.encoderInPlace(s.Call) != nil:
 		v.unsupported(s.Pos(), "deferring json.NewEncoder(w).Encode(v) is not supported: what it returns would be lost, and what it encodes is checked where it is called")
-	case lit != nil && v.exitingCallIn(lit.Body) != nil:
-		v.unsupported(v.exitingCallIn(lit.Body).Pos(), "deferring a function literal that may end the process is not supported yet")
 	case lit != nil:
 		// A literal is run at each return like any deferred call, with the
 		// arguments it is given here; the variables it captures are read

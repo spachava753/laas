@@ -2,7 +2,6 @@ package vego
 
 import (
 	"fmt"
-	"go/ast"
 	"go/token"
 	"go/types"
 	"strings"
@@ -122,6 +121,9 @@ func (v *fnVerifier) checkExitAllowed(pos token.Pos, callee string) {
 	case v.fn.spelled != nil:
 		v.unsupported(pos, fmt.Sprintf("it calls %s, which may end the process, in a function literal used as a value of type %s; "+
 			"a call of a function value is assumed to return, since a function type cannot have an Exits annotation yet", callee, v.fn.spelled.obj.Name()))
+	case v.deferring > 0:
+		v.unsupported(pos, fmt.Sprintf("it calls %s, which may end the process, in a deferred call; a deferred call that may end the process "+
+			"is not supported yet", callee))
 	case v.inInitialiser:
 		return
 	case v.fn.decl == nil:
@@ -141,21 +143,4 @@ func (v *fnVerifier) checkExitAllowed(pos token.Pos, callee string) {
 	}
 	v.report(pos, "%s calls %s, which may end the process; add // @Exits to the doc comment of %s if it may end the process, "+
 		"or call something that returns", v.fn.obj.Name(), callee, v.fn.obj.Name())
-}
-
-// exitingCallIn returns a call in a body, function literals called there
-// included, of something that may end the process, or nil.
-func (v *fnVerifier) exitingCallIn(body ast.Node) *ast.CallExpr {
-	var found *ast.CallExpr
-	ast.Inspect(body, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok || found != nil {
-			return found == nil
-		}
-		if callee := v.pkgVerifier.calleeAt(call); callee != nil && mayExit(v.contractOf(callee)) {
-			found = call
-		}
-		return found == nil
-	})
-	return found
 }

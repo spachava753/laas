@@ -2617,6 +2617,25 @@ trusted:
     reason: Test helper whose result holds what it is handed below its top level, which its entry does not place.
     modifies: []
 
+  exitslib.ExitCode:
+    reason: It calls os.Exit with a code that is not 0 (A7 of the review of step 1 of F37).
+    exits: true
+    requires:
+      - "code != 0"
+    modifies: []
+    ensures:
+      - "False"
+
+  exitslib.ExitNever:
+    reason: Requires that contradict each other beside exits.
+    exits: true
+    requires:
+      - "code > 0"
+      - "code < 0"
+    modifies: []
+    ensures:
+      - "False"
+
 # States of interfaces of another module, and contracts that speak of them.
 state:
   optionalwc.WC:

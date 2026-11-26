@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"os"
+	"unsafe"
 )
 
 // ErrEmpty is returned for an empty name.
@@ -189,4 +190,45 @@ func Loop(xs []int) {
 			os.Exit(1)
 		}
 	}
+}
+
+// DeadExitDeferred defers a literal whose call of os.Exit is never run: it
+// stands after a return (A6 of the review of step 1).
+//
+// @Ensures result = 7
+func DeadExitDeferred() (result int) {
+	defer func() {
+		return
+		os.Exit(1)
+	}()
+	return 7
+}
+
+// UnevaluatedExitDeferred defers a literal whose call of os.Exit is in an
+// operand of unsafe.Sizeof, which is not evaluated.
+//
+// @Ensures result = 7
+func UnevaluatedExitDeferred() (result int) {
+	defer func() {
+		_ = int(unsafe.Sizeof(func() int { os.Exit(2); return 0 }()))
+	}()
+	return 7
+}
+
+// Ready returns true when ready is true, and ends the process otherwise:
+// Stop runs only when ready is false (A8 of the review of step 1).
+//
+// @Exits
+// @Ensures result And ready
+func Ready(ready bool) (result bool) {
+	return ready || Stop()
+}
+
+// Stop ends the process.
+//
+// @Exits
+// @Ensures False
+func Stop() (result bool) {
+	os.Exit(1)
+	return false
 }

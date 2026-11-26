@@ -440,6 +440,10 @@ func (v *fnVerifier) returned(st *state, results []value, pos token.Pos) {
 	saved := v.ranges
 	v.ranges = slices.DeleteFunc(slices.Clone(v.ranges), func(r *activeRange) bool { return r.frame == v.lit })
 	defer func() { v.ranges = saved }()
+	// What runs here runs as a deferred call, which may not end the process
+	// (exits.go).
+	v.deferring++
+	defer func() { v.deferring-- }()
 	for _, put := range slices.Backward(st.deferred) {
 		// A deferred call is a statement of its own, so it may modify
 		// memory; what it returns is dropped.
