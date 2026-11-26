@@ -1,0 +1,9 @@
+version: 1
+
+# Inputs that end and a declared memory together (F39, part B).
+sizes:
+  memory: 64GB
+  reason: The machines of this corpus never hold 64 GB of its data at once.
+inputs:
+  bytes: 256GB
+  reason: The inputs of this corpus are its own.

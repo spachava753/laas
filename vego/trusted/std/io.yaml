@@ -163,6 +163,32 @@ trusted:
   # package-level variable reaches it. The Read and Write of the values
   # returned call only Read and Write of what they keep. NopCloser asserts r
   # to io.WriterTo and calls nothing; see its entry.
+  io.ReadAll:
+    reason: >-
+      "ReadAll reads from r until an error or EOF and returns the data it
+      read. A successful call returns err == nil, not err == EOF." Usable
+      only under the declaration that inputs end, for a reader it covers,
+      from which it returns. Read from the source of Go 1.26.6 and 1.27.3,
+      which is the same (io.go): it calls only r.Read, into the free part of
+      a slice that is not empty, and asserts r to nothing; it fills chunks
+      of 512, 256, and then half again more each time, and at the end makes
+      one slice of the total and copies into it, so each allocation is at
+      most the bytes read and a page, and the result is new memory of what
+      was read through r. Its errors are r's.
+    requires:
+      - "r != nil"
+      - "ends(r)"
+      - "Inputs < MaxInt"
+      - "Inputs + 65536 <= MaxAlloc"
+    runs: [r]
+    asserts:
+      r: []
+    vouches: [r]
+    modifies: [r]
+    ensures:
+      - "fresh(result1)"
+      - "|result1| <= unread(r) - unread(r')"
+
   io.NopCloser:
     reason: >-
       Documented: "NopCloser returns a ReadCloser with a no-op Close method

@@ -51,3 +51,19 @@ func Fields(w *Words) (r int) {
 	}
 	return w.unread
 }
+
+// Config reads a whole file without the declaration.
+//
+// @Requires |path| <= 4096
+// @Ensures True
+func Config(path string) (data []byte, err error) {
+	return os.ReadFile(path) // want `the trusted contract of os.ReadFile .*cannot be used: os.ReadFile returns only for an input that ends, which is known only where the trust file declares that inputs end; declare inputs in vego-trusted.yaml, or read with a loop of a bounded number of reads`
+}
+
+// All reads all of standard input without the declaration.
+//
+// @Ensures True
+func All() (n int) {
+	data, _ := io.ReadAll(os.Stdin) // want `the trusted contract of io.ReadAll .*cannot be used: io.ReadAll returns only for an input that ends`
+	return len(data)
+}

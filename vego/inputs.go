@@ -7,6 +7,7 @@ import (
 	"go/types"
 	"maps"
 	"math/big"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -536,4 +537,58 @@ func (v *fnVerifier) noteBody(st *state, e ast.Expr, val value) {
 		return
 	}
 	st.assume(logic.Select(endsOfKeys, skey(val[0])))
+}
+
+// inputsWord is the word of a shipped clause that stands for the bytes
+// declared under inputs, as Memory stands for the memory declared, and
+// readerWords the words of a clause that speaks of inputs that end.
+var (
+	inputsWord  = regexp.MustCompile(`\bInputs\b`)
+	readerWords = regexp.MustCompile(`\bInputs\b|\b(ends|unread)\s*\(`)
+)
+
+// withInputs returns the formulas of a shipped entry with Inputs written
+// as the bytes declared. An entry that names Inputs is one of a function
+// that returns only for an input that ends, as os.ReadFile, so without the
+// declaration it cannot be used, and the defect says what to do.
+func (pv *pkgVerifier) withInputs(fn *funcInfo, entry *trustEntry, formulas []trustFormula) []trustFormula {
+	// An entry whose requires or ensures name Inputs is of a function that
+	// returns only for an input that ends, as os.ReadFile.
+	if !entry.file.shipped || !slices.ContainsFunc(slices.Concat(entry.requires, entry.ensures), func(f trustFormula) bool { return inputsWord.MatchString(f.text) }) {
+		return formulas
+	}
+	decl := pv.inputsOf()
+	if decl == nil {
+		if !slices.ContainsFunc(fn.defects, func(d string) bool { return strings.Contains(d, "returns only for an input that ends") }) {
+			fn.defect("%s returns only for an input that ends, which is known only where the trust file declares that inputs end; "+
+				"declare inputs in vego-trusted.yaml, or read with a loop of a bounded number of reads", entry.key)
+		}
+		// The clauses that speak of inputs mean nothing here, and the entry
+		// is not used: one defect says why, whichever clause is read first.
+		return slices.DeleteFunc(slices.Clone(formulas), func(f trustFormula) bool { return readerWords.MatchString(f.text) })
+	}
+	out := make([]trustFormula, len(formulas))
+	for i, f := range formulas {
+		if !inputsWord.MatchString(f.text) {
+			out[i] = f
+			continue
+		}
+		text := inputsWord.ReplaceAllString(f.text, decl.bytes.String())
+		node, err := logic.ParseFormula(text)
+		if err != nil {
+			panic("vego: internal error: a clause with Inputs cannot be read: " + err.Error())
+		}
+		out[i] = trustFormula{text, f.line, f.col, node}
+	}
+	return out
+}
+
+// withInputsText writes Inputs in the text of a declared clause as the
+// bytes declared under inputs; an entry that names it is used only under
+// that declaration (withInputs).
+func (pv *pkgVerifier) withInputsText(text string) string {
+	if decl := pv.inputsOf(); decl != nil {
+		return inputsWord.ReplaceAllString(text, decl.bytes.String())
+	}
+	return text
 }

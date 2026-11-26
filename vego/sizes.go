@@ -661,7 +661,7 @@ func (v *fnVerifier) checkDeclaredClauses(fn *funcInfo, name string, pre *specEn
 	}
 	held := v.reports
 	for _, formula := range fn.trust.declared {
-		text := declaredText(formula.text, decl.memory)
+		text := v.withInputsText(declaredText(formula.text, decl.memory))
 		node, err := logic.ParseFormula(text)
 		if err != nil {
 			panic("vego: internal error: a declared clause cannot be read: " + err.Error())
@@ -682,7 +682,7 @@ func (v *fnVerifier) declaredClauses(fn *funcInfo, pre *specEnv, decl *sizesDecl
 	}
 	var all []*logic.Term
 	for _, formula := range fn.trust.declared {
-		text := declaredText(formula.text, decl.memory)
+		text := v.withInputsText(declaredText(formula.text, decl.memory))
 		node, err := logic.ParseFormula(text)
 		if err != nil {
 			panic("vego: internal error: a declared clause cannot be read: " + err.Error())

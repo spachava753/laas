@@ -79,7 +79,7 @@ func containsTerm(t, sub *logic.Term) bool {
 // their input (F23 of the review of step 2c).
 var shippedClasses = map[string][]string{
 	"N": {
-		"(*bytes.Buffer).Grow", "(*strings.Builder).Grow", "slices.Grow",
+		"(*bytes.Buffer).Grow", "(*strings.Builder).Grow", "slices.Grow", "os.ReadFile",
 	},
 	"C": {
 		"(*bufio.Scanner).Scan", "(*regexp.Regexp).Match", "(*regexp.Regexp).MatchString", "bufio.NewReader", "bufio.NewScanner",
@@ -105,6 +105,7 @@ var shippedClasses = map[string][]string{
 		"strconv.AppendInt", "strconv.FormatInt", "strconv.Itoa", "strconv.Quote", "strconv.Unquote", "strings.Fields", "strings.FieldsFunc",
 		"strings.Join", "strings.Map", "strings.Repeat", "strings.Replace", "strings.ReplaceAll", "strings.Split", "strings.SplitAfter",
 		"strings.ToLower", "strings.ToUpper", "unicode/utf8.AppendRune",
+		"io.ReadAll", "(*bufio.Reader).ReadString", "(*bufio.Reader).ReadBytes",
 	},
 	"none": {
 		"(*bytes.Buffer).Read",

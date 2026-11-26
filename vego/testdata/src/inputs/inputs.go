@@ -378,3 +378,83 @@ func Fetched(resp *http.Response) {
 func DrainLimited() {
 	_ = Drain(io.LimitReader(os.Stdin, 1024))
 }
+
+// Config reads a whole file.
+//
+// @Requires |path| <= 4096
+// @Ensures err = nil -> |data| <= 1000000000000
+func Config(path string) (data []byte, err error) {
+	data, err = os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	return data, nil
+}
+
+// All reads all of standard input.
+//
+// @Ensures True
+func All() (n int, err error) {
+	data, err := io.ReadAll(os.Stdin)
+	return len(data), err
+}
+
+// AllOf reads all of a reader it is handed that ends.
+//
+// @Requires r != nil And ends(r)
+// @Modifies r
+// @Ensures err = nil -> |data| <= 1000000000000
+func AllOf(r io.Reader) (data []byte, err error) {
+	return io.ReadAll(r)
+}
+
+// Lines counts the lines of a reader with ReadString until io.EOF.
+//
+// @Requires rd != nil And ends(rd)
+// @Modifies rd
+// @Ensures n >= 0
+func Lines(rd io.Reader) (n int, err error) {
+	in := bufio.NewReader(rd)
+	// @Snapshot l0 = unread(in)
+	// @Invariant ready(in) And ends(in) And 0 <= n And n <= l0 - unread(in)
+	// @Variant unread(in)
+	for {
+		line, err := in.ReadString('\n')
+		if err == io.EOF {
+			return n, nil
+		}
+		if err != nil {
+			return n, err
+		}
+		if len(line) > 1 {
+			n++
+		}
+	}
+}
+
+// Words reads words separated by spaces with ReadBytes.
+//
+// @Requires rd != nil And ends(rd)
+// @Modifies rd
+// @Ensures True
+func Fields2(rd io.Reader) (total int) {
+	in := bufio.NewReader(rd)
+	// @Snapshot l0 = unread(in)
+	// @Invariant ready(in) And ends(in) And 0 <= total And total <= l0 - unread(in)
+	// @Variant unread(in)
+	for {
+		word, err := in.ReadBytes(' ')
+		total += len(word)
+		if err != nil {
+			return total
+		}
+	}
+}
+
+// AllBuffer reads all of a reader the declaration does not cover.
+//
+// @Ensures True
+func AllBuffer() {
+	var r io.Reader = ones{}
+	_, _ = io.ReadAll(r) // want `precondition of ReadAll may not hold: ends\(r\)`
+}

@@ -2087,6 +2087,9 @@ func checkShipped(t *testing.T, files bool, run func(key string) bool) {
 					return
 				}
 				switch {
+				case inputsEntries[key] != "":
+					checkInputsEntry(t, pv, pkg, key)
+					return
 				case key == "bufio.NewScanner" || strings.HasPrefix(key, "(*bufio.Scanner)."):
 					checkScannerEntries(t, pv, pkg, key)
 					return

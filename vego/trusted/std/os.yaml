@@ -271,6 +271,39 @@ trusted:
     vouches: [result]
     modifies: []
 
+  os.ReadFile:
+    reason: >-
+      "ReadFile reads the named file and returns the contents. A successful
+      call returns err == nil, not err == EOF." Usable only under the
+      declaration that inputs end: a file the program reads yields at most
+      the declared bytes and reports a size of at most that, so the call
+      returns. Read from the source of Go 1.26.6 and 1.27.3, which is the
+      same (file.go): it opens the file as Open does, takes the size Stat
+      reports, makes a slice of that size and one byte, at least 512, reads
+      into it with (*File).Read until an error, and grows it by
+      slices.Grow(data, 512) when it is full, which asks at most twice what
+      it holds and a page; it closes the file. So its result is new memory
+      of at most the declared bytes, each allocation is at most twice the
+      declared bytes and 66048, and its errors are those of Open and of
+      (*File).Read, which those entries vouch for; io.EOF ends it with a nil
+      error. Its name is copied as in the entry of Open. A directory gives
+      an error; a file that does not end, such as /dev/zero, breaks the
+      declaration.
+    requires:
+      - "|name| < MaxInt"
+      - "4 * |name| + 65536 <= MaxAlloc"
+      - "Inputs < MaxInt"
+      - "2 * Inputs + 66048 <= MaxAlloc"
+    # Under a declared memory: the slice it makes by the size Stat reports
+    # keeps the bound on arrays (class N).
+    declared:
+      - "Inputs + 1 <= 5 * Memory + 65536"
+    vouches: [result2]
+    modifies: []
+    ensures:
+      - "fresh(result1)"
+      - "|result1| <= Inputs"
+
   os.MkdirAll:
     reason: >-
       "MkdirAll creates a directory named path, along with any necessary

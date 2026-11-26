@@ -911,7 +911,7 @@ func (pv *pkgVerifier) readEntry(fn *funcInfo, entry *trustEntry) {
 	}
 	clauses := func(kind string, formulas []trustFormula) []*clause {
 		var list []*clause
-		for _, formula := range formulas {
+		for _, formula := range pv.withInputs(fn, entry, formulas) {
 			list = append(list, &clause{
 				kind: kind, text: formula.text, node: formula.node,
 				pos: pv.trustPos(entry.file, formula.line, formula.col),

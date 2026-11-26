@@ -212,6 +212,69 @@ trusted:
       - "ends(b) And result2 = nil -> unread(b') < unread(b)"
       - "ends(b) -> unread(b') <= unread(b)"
 
+  (*bufio.Reader).ReadString:
+    reason: >-
+      "ReadString reads until the first occurrence of delim in the input,
+      returning a string containing the data up to and including the
+      delimiter. If ReadString encounters an error before finding a
+      delimiter, it returns the data read before the error and the error
+      itself (often io.EOF). ReadString returns err != nil if and only if
+      the returned data does not end in delim." Usable only under the
+      declaration that inputs end, for a Reader it covers, from which it
+      returns. Read from the source of Go 1.26.6 and 1.27.3, which is the
+      same (bufio.go): collectFragments calls ReadSlice until it finds
+      delim or meets an error, copying each full buffer and appending it
+      to a slice of slices, 24 bytes for each buffer of at least 16 bytes,
+      which grows to at most three times the bytes read and a page; then a
+      Builder grown to the total. So what it returns is what it consumed,
+      at least the delimiter when the error is nil. It calls only Read of
+      the reader b keeps.
+    requires:
+      - "b != nil"
+      - "ready(b)"
+      - "ends(b)"
+      - "Inputs < MaxInt"
+      - "3 * Inputs + 65536 <= MaxAlloc"
+    runs: [b]
+    modifies: [b]
+    asserts:
+      b: []
+    vouches: [b]
+    ensures:
+      - "ready(b')"
+      - "ends(b')"
+      - "result2 = nil -> 1 <= |result1| And result1[|result1| - 1] = delim"
+      - "|result1| <= unread(b) - unread(b')"
+      - "result2 = nil -> unread(b') < unread(b)"
+
+  (*bufio.Reader).ReadBytes:
+    reason: >-
+      "ReadBytes reads until the first occurrence of delim in the input,
+      returning a slice containing the data up to and including the
+      delimiter. If ReadBytes encounters an error before finding a
+      delimiter, it returns the data read before the error and the error
+      itself (often io.EOF). ReadBytes returns err != nil if and only if the
+      returned data does not end in delim." As ReadString, with a new slice
+      of the total in place of the Builder.
+    requires:
+      - "b != nil"
+      - "ready(b)"
+      - "ends(b)"
+      - "Inputs < MaxInt"
+      - "3 * Inputs + 65536 <= MaxAlloc"
+    runs: [b]
+    modifies: [b]
+    asserts:
+      b: []
+    vouches: [b]
+    ensures:
+      - "ready(b')"
+      - "ends(b')"
+      - "fresh(result1)"
+      - "result2 = nil -> 1 <= |result1| And result1[|result1| - 1] = delim"
+      - "|result1| <= unread(b) - unread(b')"
+      - "result2 = nil -> unread(b') < unread(b)"
+
   bufio.NewWriter:
     reason: >-
       Documented: "NewWriter returns a new Writer whose buffer has the
