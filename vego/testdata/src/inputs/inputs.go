@@ -296,11 +296,11 @@ func Fields(w *Words) (r int) {
 func Rewound(r io.Reader) {
 	buf := make([]byte, 512)
 	// @Variant unread(r)
-	for { // want `loop variant may not decrease: unread\(r\)`
+	for {
 		if _, err := r.Read(buf); err != nil {
 			return
 		}
-		rewind(r)
+		rewind(r) // want `the trusted contract of inputs.rewind .*cannot be used: it may make a reader yield again what it already yielded, through r, as its rewinds says`
 	}
 }
 
@@ -550,11 +550,11 @@ func RewoundFile(name string) {
 	buf := make([]byte, 512)
 	// @Invariant ends(r)
 	// @Variant unread(r)
-	for { // want `loop variant may not decrease: unread\(r\)`
+	for {
 		if _, err := r.Read(buf); err != nil {
 			return
 		}
-		rewindFile(r)
+		rewindFile(r) // want `the trusted contract of inputs.rewindFile .*cannot be used: it may make a reader yield again`
 	}
 }
 
@@ -626,4 +626,85 @@ func CopyAll(dst io.Writer, src io.Reader) (written int, err error) {
 // @Ensures True
 func CopyOver(rw io.ReadWriter) {
 	_, _ = CopyAll(rw, rw) // want `what is passed to CopyAll as src, a reader it requires to end, and as dst may be one value`
+}
+
+// RewoundTwo reads a file through one conversion and rewinds it through
+// another (F17 of the review): rewindFile says that it rewinds, so it is
+// refused under the declaration.
+//
+// @Requires |name| <= 4096
+// @Ensures True
+func RewoundTwo(name string) {
+	f, err := os.Open(name)
+	if err != nil {
+		return
+	}
+	r1, r2 := io.Reader(f), io.Reader(f)
+	buf := make([]byte, 512)
+	// @Invariant ends(r1)
+	// @Variant unread(r1)
+	for {
+		if _, err := r1.Read(buf); err != nil {
+			return
+		}
+		rewindFile(r2) // want `the trusted contract of inputs.rewindFile .*cannot be used: it may make a reader yield again`
+	}
+}
+
+// Inner reads r and rewinds x after each read.
+//
+// @Requires r != nil And x != nil And ends(r)
+// @Modifies r, x
+// @Ensures True
+func Inner(r, x io.Reader) {
+	buf := make([]byte, 512)
+	// @Variant unread(r)
+	for {
+		if _, err := r.Read(buf); err != nil {
+			return
+		}
+		rewindFile(x) // want `the trusted contract of inputs.rewindFile .*cannot be used: it may make a reader yield again`
+	}
+}
+
+// Outer hands Inner two conversions of one file.
+//
+// @Requires |name| <= 4096
+// @Ensures True
+func Outer(name string) {
+	f, err := os.Open(name)
+	if err != nil {
+		return
+	}
+	Inner(io.Reader(f), io.Reader(f))
+}
+
+// DeferRewound reads a file with a rewind deferred: a deferred call of an
+// entry that rewinds is refused as a call is.
+//
+// @Requires |name| <= 4096
+// @Ensures True
+func DeferRewound(name string) {
+	f, err := os.Open(name)
+	if err != nil {
+		return
+	}
+	r := io.Reader(f)
+	defer rewindFile(r) // want `the trusted contract of inputs.rewindFile .*cannot be used: it may make a reader yield again`
+	buf := make([]byte, 512)
+	_, _ = r.Read(buf)
+}
+
+// Rewinder is what rewinds a reader.
+//
+// @Requires r != nil
+// @Modifies r
+// @Ensures True
+type Rewinder func(r io.Reader)
+
+// RewindValue makes a function value of rewindFile.
+//
+// @Ensures True
+func RewindValue() (g Rewinder) {
+	return rewindFile // want `rewindFile .*it may make a reader yield again`
 }

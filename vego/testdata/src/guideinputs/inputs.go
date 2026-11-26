@@ -163,3 +163,54 @@ func Copy(dst io.Writer, src io.Reader) (written int, err error) {
 		}
 	}
 }
+
+// CopyOver hands Copy one value as the reader and the writer.
+//
+// @Requires rw != nil And ends(rw)
+// @Modifies rw
+// @Ensures True
+func CopyOver(rw io.ReadWriter) {
+	_, _ = Copy(rw, rw) // want `what is passed to Copy as src, a reader it requires to end, and as dst may be one value`
+}
+
+// ReadTwice reads a file, seeks it back to its start, and reads it again.
+//
+// @Requires |name| <= 4096
+// @Ensures True
+func ReadTwice(name string) (first, second []byte, err error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return nil, nil, err
+	}
+	if first, err = io.ReadAll(f); err != nil {
+		return nil, nil, err
+	}
+	rewind(f) // want `the trusted contract of guideinputs.rewind .*cannot be used: it may make a reader yield again what it already yielded, through f`
+	second, err = io.ReadAll(f)
+	return first, second, err
+}
+
+func rewind(f *os.File) {
+	_, _ = f.Seek(0, io.SeekStart)
+}
+
+// ones is a reader of the program that never ends.
+type ones struct{}
+
+// Read fills one byte.
+//
+// @Requires |p| > 0
+// @Modifies p
+// @Ensures n = 1 And err = nil
+func (ones) Read(p []byte) (n int, err error) {
+	p[0] = 1
+	return 1, nil
+}
+
+// WordsOfOnes hands Words a reader of its own type.
+//
+// @Ensures True
+func WordsOfOnes() (n int) {
+	n, _ = Words(ones{}) // want `precondition of Words may not hold: ends\(r\)`
+	return n
+}

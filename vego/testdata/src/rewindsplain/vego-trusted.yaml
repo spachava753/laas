@@ -1,0 +1,38 @@
+version: 1
+
+# The entries of inputsrewinds without the declaration that inputs end:
+# rewinds then claims nothing a proof uses, and only a conversion that
+# would let a value whose entry rewinds stand where an entry says it does
+# not is refused.
+
+trusted:
+  (rewindlib.Rewinder).Rewind:
+    reason: Says that Rewind makes the source yield again what it yielded.
+    receiver: s
+    rewinds: [s]
+    modifies: [s]
+    ensures: ["True"]
+  (rewindlib.Resetter).Rewind:
+    reason: Says nothing of Rewind but what it writes.
+    receiver: s
+    modifies: [s]
+    ensures: ["True"]
+  (*rewindlib.File).Rewind:
+    reason: Starts the reading of f again.
+    requires: ["f != nil"]
+    rewinds: [f]
+    modifies: [f]
+    ensures: ["True"]
+  rewindlib.Restart:
+    reason: Starts the reading of f again.
+    requires: ["f != nil"]
+    rewinds: [f]
+    modifies: [f]
+    ensures: ["True"]
+  rewindsplain.each:
+    reason: Calls g once.
+    runs: [g]
+    calls:
+      g(): {}
+    modifies: []
+    ensures: ["True"]

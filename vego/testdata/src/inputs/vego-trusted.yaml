@@ -17,6 +17,7 @@ trusted:
     requires: ["r != nil"]
     runs: [r]
     asserts: {r: []}
+    rewinds: [r]
     vouches: [r]
     modifies: [r]
     ensures: ["True"]
@@ -27,6 +28,7 @@ trusted:
     requires: ["r != nil"]
     runs: [r]
     asserts: {r: []}
+    rewinds: [r]
     vouches: [r]
     modifies: [r]
     ensures: ["True"]

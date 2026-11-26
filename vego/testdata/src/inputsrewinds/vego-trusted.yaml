@@ -1,0 +1,46 @@
+version: 1
+
+# Entries that say they rewind, under the declaration that inputs end:
+# every use of one by verified code is refused (F17 of the review of step
+# 5 of F39). rewindsplain has the same entries without the declaration.
+inputs:
+  bytes: 1TB
+  reason: The programs of this corpus read nothing; they only use entries that rewind.
+
+trusted:
+  (rewindlib.Rewinder).Rewind:
+    reason: Says that Rewind makes the source yield again what it yielded.
+    receiver: s
+    rewinds: [s]
+    modifies: [s]
+    ensures: ["True"]
+  (rewindlib.Resetter).Rewind:
+    reason: Says nothing of Rewind but what it writes.
+    receiver: s
+    modifies: [s]
+    ensures: ["True"]
+  (*rewindlib.File).Rewind:
+    reason: Starts the reading of f again.
+    requires: ["f != nil"]
+    rewinds: [f]
+    modifies: [f]
+    ensures: ["True"]
+  rewindlib.Restart:
+    reason: Starts the reading of f again.
+    requires: ["f != nil"]
+    rewinds: [f]
+    modifies: [f]
+    ensures: ["True"]
+  inputsrewinds.each:
+    reason: Calls g once.
+    runs: [g]
+    calls:
+      g(): {}
+    modifies: []
+    ensures: ["True"]
+  inputsrewinds.misnamed:
+    reason: Names under rewinds what is not a parameter.
+    requires: ["f != nil"]
+    rewinds: [q]
+    modifies: [f]
+    ensures: ["True"]

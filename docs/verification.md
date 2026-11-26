@@ -8109,6 +8109,7 @@ Each entry has these fields:
 | `asserts` | no | For a parameter under `runs` or `keeps`, the types the function may find on what it holds by a type assertion, as in `err: ["interface{ Timeout() bool }"]`. Without it, the entry claims that the function finds nothing more. Over a parameter that is not of type `error`, a listed interface may have only methods that every interface type the parameter reaches has. See [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed). |
 | `keeps` | no | Parameters whose code the function keeps after it returns, each with the results and parameters it keeps it in, as in `r: [result]`. See [Functions that keep what they are given](#functions-that-keep-what-they-are-given). An entry that does not list a parameter claims that the function keeps nothing of it once it returns. For a method of an interface, that claim covers every implementation. |
 | `vouches` | no | Error results whose errors verified code may format, compare, and pass to `errors.Is`, results that hold function values or interface values verified code may call, and parameters under whose memory the function writes such values. See [Errors that a trusted function returns](#errors-that-a-trusted-function-returns) and [Function values and interface values that a trusted function returns](#function-values-and-interface-values-that-a-trusted-function-returns). |
+| `rewinds` | no | Parameters, or the receiver of a method of an interface, through which the function may make a reader yield again bytes it already yielded, as a seek back to the start does. An entry that lists none claims that the function makes no reader do that, through any value. Verified code cannot call a function that rewinds where the trust file declares that inputs end. See [Readers that rewind](#readers-that-rewind). |
 | `calls` | no | Function parameters that the function calls while it runs, each with what holds when it calls them. See [Functions that a trusted function calls](#functions-that-a-trusted-function-calls). |
 | `formats` | no | The parameter of type `any` or `...any` whose values the function formats as package `fmt` does, and the string it uses as the format, if any. See [Your own logging function](#your-own-logging-function). |
 | `stores` | no | Parameters under whose memory, as `modifies` lists it, the function stores only slices, maps, and pointers it allocates during the call, as `[h]` for `(net/http.Header).Set`. Check that no assignment or `append` into that memory stores an argument, a global, or anything the function did not allocate in the call. A call of such a function does not count as storing memory of unknown origin, so a function that sets a header can hand the writer to a helper beside its data. |
@@ -9063,14 +9064,11 @@ vego: loop needs a // @Variant annotation to prove that it terminates
 vego: precondition of Scan may not hold: ready(s)
 ```
 
-Bound the number of lines, as `PrintLines` does.
+Bound the number of lines, as `PrintLines` does, or declare that your inputs end and use the measure that gives (see [Inputs that end](#inputs-that-end)).
 
 A scanner that code which is not verified hands your function may have another split function. Require the state in the contract, `@Requires sc != nil And ready(sc)`, and list the scanner under `@Modifies`.
 
-`ReadString`, `ReadBytes`, `ReadLine`, `ReadSlice`, and `(*bufio.Scanner).Bytes` have no entries:
-
-- `ReadString` and `ReadBytes` do not return from a reader that never sends the delimiter. They grow their buffer until the program runs out of memory. Use a `Scanner`, whose buffer is bounded.
-- `ReadLine`, `ReadSlice`, and `Bytes` return a slice of the buffer that the next call overwrites. No entry can name that memory.
+`ReadString` and `ReadBytes` have entries only where the trust file declares that inputs end (see [Inputs that end](#inputs-that-end)). Without that, they do not return from a reader that never sends the delimiter, since they grow their buffer until the program runs out of memory; use a `Scanner`, whose buffer is bounded. `ReadLine`, `ReadSlice`, and `(*bufio.Scanner).Bytes` have no entries: they return a slice of the buffer that the next call overwrites, and no entry can name that memory.
 
 #### Errors that pass through
 
@@ -9303,9 +9301,9 @@ list each of them
 
 #### Copying from a reader to a writer
 
-`io.Copy`, `io.CopyBuffer`, `io.CopyN`, and `io.ReadAll` have no entries. `io.Copy` and `io.ReadAll` read until the reader returns `io.EOF`, so they do not return from a reader that never ends, such as a file over `/dev/zero`. `io.CopyN` loops for ever over a reader that returns no bytes and no error, which the documentation of `io.Reader` allows. An entry claims that its function returns, so none ships, and a call of one is refused with a message that says so. The same holds for the `ReadFrom` of a `*bufio.Writer` and the `WriteTo` of a `*bufio.Reader`.
+`io.Copy`, `io.CopyBuffer`, and `io.CopyN` have no entries, and `io.ReadAll` has one only where the trust file declares that inputs end (see [Inputs that end](#inputs-that-end)). `io.Copy` and `io.ReadAll` read until the reader returns `io.EOF`, so they do not return from a reader that never ends, such as a file over `/dev/zero`. `io.CopyN` loops for ever over a reader that returns no bytes and no error, which the documentation of `io.Reader` allows. An entry claims that its function returns, so none ships, and a call of one is refused with a message that says so. The same holds for the `ReadFrom` of a `*bufio.Writer` and the `WriteTo` of a `*bufio.Reader`.
 
-Copy with a loop that reads at most a number of times you choose:
+Under the declaration that inputs end, copy a reader that ends with a loop until `io.EOF` (see [Copying from a reader that ends](#copying-from-a-reader-that-ends)). Without it, copy with a loop that reads at most a number of times you choose:
 
 ```go
 // CopySome copies from src to dst in at most 1000 reads of 4096 bytes.
@@ -9370,7 +9368,7 @@ If the function returns an error that it was given, the claim covers that error 
 
 ### Reading and writing files
 
-The shipped contracts of `os.Open`, `os.Create`, and the `Read`, `Write`, and `Close` methods of `*os.File` vouch for their errors, so you can wrap them with `%w`. `os.ReadFile` has no shipped contract. It does not return for a file that never ends, such as `/dev/zero`, or for one larger than can be allocated, and a shipped contract cannot know which files your program reads. Read a file with a loop that stops at a bound:
+The shipped contracts of `os.Open`, `os.Create`, and the `Read`, `Write`, and `Close` methods of `*os.File` vouch for their errors, so you can wrap them with `%w`. `os.ReadFile` has a shipped contract that can be used only where the trust file declares that inputs end (see [Inputs that end](#inputs-that-end)). It does not return for a file that never ends, such as `/dev/zero`, and only the project can say that its files end. Without the declaration, read a file with a loop that stops at a bound:
 
 ```go
 // ReadConfig reads at most 4096 bytes of a file.
@@ -9406,7 +9404,7 @@ func ReadConfig(name string) (data []byte, err error) {
 
 The `Variant` decreases because the contract of `Read` says that a read into a buffer that is not empty returns at least one byte or an error. The buffer `buf[n:]` is not empty while `n < len(buf)`.
 
-If your program reads only files that it controls, you can give `os.ReadFile` an entry of your own. The entry claims something about the files your program reads, so its reason must say what they are:
+If your program reads only files that it controls and does not declare that its inputs end, you can give `os.ReadFile` an entry of your own, which replaces the shipped one. The entry claims something about the files your program reads, so its reason must say what they are:
 
 ```yaml
   os.ReadFile:
@@ -9534,6 +9532,341 @@ func BufferToFile(name string, line []byte) (err error) {
 ```
 
 Every call that opens, reads, or writes a file is assumed to return. See [What a proof assumes](#what-a-proof-assumes).
+
+### Inputs that end
+
+A command reads a file to its end, or every line of standard input. `vego` cannot prove that such a loop ends, because a file, a pipe, or a socket may never end. If what your program reads always ends, say so in the trust file:
+
+```yaml
+inputs:
+  bytes: 1TB
+  reason: >-
+    The tool reads configuration files, directories of results, and
+    standard input from a pipe that its caller closes; none of them yields
+    a terabyte, and the program never writes a file it reads.
+```
+
+`bytes` is the most that any one reader of your program yields before it ends, as `sizes` declares a memory: a whole number with B, KB, MB, GB, TB, KiB, MiB, GiB, or TiB. The `reason` says why your inputs end. The declaration is an assumption about what your files and peers hold, which `vego` cannot see. [What a proof assumes](#what-a-proof-assumes) states it in full. Without it, nothing in this section applies, and `os.ReadFile`, `io.ReadAll`, `ReadString`, `ReadBytes`, and `os.ReadDir` cannot be called.
+
+Packages built together must declare the same inputs, as they must declare the same memory. Two that differ are reported in every package built with both.
+
+#### Reading a whole file or reader
+
+Under the declaration, `os.ReadFile` and `io.ReadAll` have entries:
+
+```go
+// @Requires |name| <= 4096
+// @Ensures True
+func LoadConfig(name string) (data []byte, err error) {
+	data, err = os.ReadFile(name)
+	if err != nil {
+		return nil, fmt.Errorf("load %s: %w", name, err)
+	}
+	return data, nil
+}
+```
+
+`os.ReadFile` returns at most the declared bytes, as new memory, and vouches for its errors. `io.ReadAll(r)` requires that `r` is a reader the declaration covers, which the next sections describe.
+
+What they allocate must fit in memory. Without a declared memory, each entry requires that the declared bytes fit: `os.ReadFile` asks `2 * Inputs + 66048 <= MaxAlloc`, where `Inputs` is the declared bytes. On a 64-bit target that holds for any amount up to about 140 TB. On a 32-bit target it allows about 2 GB. With `sizes` declared beside `inputs`, `os.ReadFile` also requires that the declared bytes are at most five times the memory, since it reserves a slice of the size the file reports:
+
+```text
+vego: precondition of ReadFile may not hold under the declared memory: Inputs + 1 <= 5 * Memory
++ 65536, with Memory the 64GB declared; what it reserves by a number is not bounded by what the
+machines hold, so bound it
+```
+
+A project that reads files usually wants both declarations: `inputs` so that reading ends, and `sizes` so that what it builds from what it read is bounded (see [Bounding what grows](#bounding-what-grows)).
+
+#### Reading line by line
+
+A loop over the lines of a reader needs a `Variant`. Under the declaration, `unread(sc)` is one:
+
+```go
+// @Ensures n >= 0
+func CountLines() (n int) {
+	sc := bufio.NewScanner(os.Stdin)
+	// @Snapshot start = unread(sc)
+	// @Invariant ready(sc) And ends(sc) And 0 <= n And n <= start - unread(sc)
+	// @Variant unread(sc)
+	for sc.Scan() {
+		fmt.Println(sc.Text())
+		n++
+	}
+	return n
+}
+```
+
+`ends(sc)` says that the declaration covers what the Scanner reads. `unread(sc)` is the declared bytes less what was read through `sc`. It is never negative, and every `Scan` that returns `true` makes it smaller. So it is a `Variant` for a loop that calls `Scan`. Like `ready(sc)`, `ends(sc)` must be in the invariant, since a loop forgets what its calls may change.
+
+The counter `n` grows by one each time `Scan` returns `true`. The snapshot `start` and the invariant `n <= start - unread(sc)` bound it by the declared bytes, which keeps `n++` from overflowing.
+
+`ReadString` and `ReadBytes` of a `*bufio.Reader` work the same way, with `unread(in)`:
+
+```go
+// @Requires r != nil And ends(r)
+// @Modifies r
+// @Ensures n >= 0
+func Words(r io.Reader) (n int, err error) {
+	in := bufio.NewReader(r)
+	// @Snapshot start = unread(in)
+	// @Invariant ready(in) And ends(in) And 0 <= n And n <= start - unread(in)
+	// @Variant unread(in)
+	for {
+		word, err := in.ReadString(' ')
+		if len(word) > 1 {
+			n++
+		}
+		if err == io.EOF {
+			return n, nil
+		}
+		if err != nil {
+			return n, err
+		}
+	}
+}
+```
+
+A loop that calls `Read` until it returns an error uses `unread(r)` of the reader itself. A `Read` into a buffer that is not empty that returns no error has read at least one byte.
+
+Without the declaration, or without the `Variant`, the loop is reported:
+
+```go
+// @Ensures True
+func ScanAll() {
+	sc := bufio.NewScanner(os.Stdin)
+	// @Invariant ready(sc)
+	for sc.Scan() {
+		fmt.Println(sc.Text())
+	}
+}
+```
+
+```text
+vego: loop needs a // @Variant annotation to prove that it terminates
+```
+
+#### Which readers end
+
+`ends(r)` holds of these:
+
+- a file from `os.Open`, and every reader made from it;
+- `os.Stdin`;
+- the `Body` of an `http.Request`;
+- a reader that a `Requires` says ends, as `@Requires ends(r)`;
+- what `bufio.NewScanner`, `bufio.NewReader`, `io.LimitReader`, `io.TeeReader`, and `io.NopCloser` make over a reader that ends.
+
+A caller of `Words` proves `ends` of what it passes. `Words(os.Stdin)` verifies.
+
+`ends` does not hold of a reader that your code makes from its own types or from a buffer, such as an `io.Reader` that holds a `*bytes.Buffer` or a `*strings.Reader`. Such a reader ends by what your code does, which the declaration does not claim. Nor does it hold of a file from `os.Create`, or of the `Body` of an `http.Response`.
+
+So verified code cannot hand a reader of your own type to a function that requires `ends`:
+
+```go
+// ones is a reader of the program that never ends.
+type ones struct{}
+
+// @Requires |p| > 0
+// @Modifies p
+// @Ensures n = 1 And err = nil
+func (ones) Read(p []byte) (n int, err error) {
+	p[0] = 1
+	return 1, nil
+}
+
+// @Ensures True
+func WordsOfOnes() (n int) {
+	n, _ = Words(ones{})
+	return n
+}
+```
+
+```text
+vego: precondition of Words may not hold: ends(r)
+```
+
+A proof of `Words` therefore covers no reader of your own type. The contract of `Read` says nothing of how much is left, and `vego` does not check that such a reader ever returns `io.EOF`. Only a caller that is not verified can hand one to `Words`, and that caller breaks the assumption that callers satisfy the `Requires` clauses (see [What a proof assumes](#what-a-proof-assumes)).
+
+`unread(r)` belongs to one value, not to the file. Two readers made from one file have one each, and each counts what was read through it. So a `Requires` that bounds `unread(r)` from above, as `unread(r) <= 4096` written to say that a body is small, is met by no reader through which nothing has been read. Bound what you read with `io.LimitReader` instead.
+
+Without the declaration, `ends(r)` and `unread(r)` are not words of the language. A formula that applies them is reported, and a predicate, field, or variable of that name keeps its meaning:
+
+```text
+vego: in Variant annotation: unread(sc) speaks of a reader that ends, which is known only where
+the trust file declares that inputs end; declare inputs in vego-trusted.yaml, or bound the number
+of reads
+```
+
+#### Writing what you read
+
+Reading a file to its end while you write the same file through the same value would never end. A write through a file or a reader that the declaration covers is refused:
+
+```go
+// @Requires |name| <= 4096
+// @Ensures True
+func Append(name string) (err error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := io.ReadAll(f); err != nil {
+		return err
+	}
+	_, err = f.WriteString("done\n")
+	return err
+}
+```
+
+```text
+vego: WriteString may write a file that is read under the declaration that inputs end; reading
+and writing one file through one value is not supported yet, so open the file to write it apart,
+with os.Create, or, for a file or a reader a parameter holds that is not read to its end, say so
+with // @Requires ~ends(f) of that parameter
+```
+
+The same holds for converting such a file to an `io.Writer`, as `fmt.Fprintln(f, ...)` and `bufio.NewWriter(f)` do, and for asserting such a reader to `io.Writer`. A function that writes a file it is handed says that the file is not read under the declaration:
+
+```go
+// @Requires f != nil And ~ends(f)
+// @Ensures True
+func Log(f *os.File, line string) (err error) {
+	_, err = f.WriteString(line)
+	return err
+}
+```
+
+Two different values that are one file, as two opens of one path or a redirection of standard output onto the file standard input reads, are the declaration's claim, not something `vego` checks.
+
+#### Copying from a reader that ends
+
+`io.Copy` has no entry. Copy with a loop:
+
+```go
+// @Requires dst != nil And src != nil And ends(src)
+// @Modifies dst, src
+// @Ensures written >= 0
+func Copy(dst io.Writer, src io.Reader) (written int, err error) {
+	buf := make([]byte, 4096)
+	// @Snapshot start = unread(src)
+	// @Invariant 0 <= written And written <= start - unread(src)
+	// @Variant unread(src)
+	for {
+		n, rerr := src.Read(buf)
+		if n > 0 {
+			m, werr := dst.Write(buf[:n])
+			written += m
+			if werr != nil {
+				return written, werr
+			}
+		}
+		if rerr == io.EOF {
+			return written, nil
+		}
+		if rerr != nil {
+			return written, rerr
+		}
+	}
+}
+```
+
+A verified caller cannot pass one value as both `dst` and `src`, since the loop would then read what it writes:
+
+```go
+// @Requires rw != nil And ends(rw)
+// @Modifies rw
+// @Ensures True
+func CopyOver(rw io.ReadWriter) {
+	_, _ = Copy(rw, rw)
+}
+```
+
+```text
+vego: what is passed to Copy as src, a reader it requires to end, and as dst may be one value,
+and Copy relies on dst not writing what src reads; pass a writer apart from the reader
+```
+
+A caller that is not verified is assumed not to pass, beside a reader that `ends` is required of, a writer that writes what the reader reads.
+
+#### Readers that rewind
+
+A seek back to the start makes a file yield again what it already yielded. `unread(r)` would then count bytes that are not left, and a loop under `Variant unread(r)` could be proved to end when it does not. `vego` cannot see a seek in code that is not verified, so an entry for a function that rewinds a reader must say so under `rewinds`:
+
+```yaml
+trusted:
+  guideinputs.rewind:
+    reason: Seeks f back to its start, so that it yields again what it yielded.
+    requires: ["f != nil"]
+    rewinds: [f]
+    modifies: [f]
+    ensures: ["True"]
+```
+
+Where the trust file declares that inputs end, verified code cannot call such a function:
+
+```go
+// @Requires |name| <= 4096
+// @Ensures True
+func ReadTwice(name string) (first, second []byte, err error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return nil, nil, err
+	}
+	if first, err = io.ReadAll(f); err != nil {
+		return nil, nil, err
+	}
+	rewind(f)
+	second, err = io.ReadAll(f)
+	return first, second, err
+}
+```
+
+```text
+vego: the trusted contract of guideinputs.rewind (vego-trusted.yaml:12) cannot be used: it may
+make a reader yield again what it already yielded, through f, as its rewinds says, which verified
+code may not do under the declaration that inputs end; open the file again, which gives a new value
+with a budget of its own
+```
+
+Open the file again with `os.Open` instead. The new value has a budget of its own. The same message is reported for every other use of the entry:
+
+- a deferred call;
+- a call through an interface value whose entry lists `rewinds`;
+- a function value or a method value made of the function;
+- a function handed to a trusted function under `calls`;
+- a conversion whose methods are checked against the entry.
+
+An entry that lists no `rewinds` claims that the function makes no reader yield again what it already yielded, through any value, including what the function calls. So a trusted function of your project whose body calls one that rewinds must list `rewinds` too. Read the body before you leave the field out. With an entry for `rewind` that lists no `rewinds`, a loop that reads a file through one `io.Reader` under `Variant unread`, and rewinds the file through another after each read, verifies and runs for ever.
+
+No shipped entry rewinds. None of `Seek`, the `UnreadByte`, `UnreadRune`, `Peek`, and `Reset` of a `bufio.Reader`, and the `Buffer` of a `bufio.Scanner` has an entry.
+
+#### Reading a directory
+
+Under the declaration, `os.ReadDir` has an entry, and so do `Name`, `IsDir`, and `Type` of the `fs.DirEntry` values it returns:
+
+```go
+// @Requires |dir| <= 4096
+// @Ensures n >= 0
+func Results(dir string) (n int, err error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, err
+	}
+	// @Invariant 0 <= n And n <= i
+	for i := range entries {
+		if entries[i].IsDir() {
+			n++
+		}
+	}
+	return n, nil
+}
+```
+
+`os.ReadDir` returns at most the declared number of entries, none of them `nil`. `Info` has no entry.
+
+`ReadFile` and `ReadDir` of an `embed.FS` have entries too, and need no declaration, since what they read is in the binary.
+
+`filepath.WalkDir` has no entry yet. It hands the function you give it an `fs.DirEntry` and an error, and takes an error back, which a function handed to a trusted function cannot do yet (see [What can be handed over](#what-can-be-handed-over)).
 
 ### Function values and interface values that a trusted function returns
 
@@ -9663,6 +9996,8 @@ An entry for a type may also list `asserts` for the parameters of the method or 
 When your entries give a contract to every method of an interface of another module that has no states, the interface is also checked at conversions, as `io.StringWriter` is (see [Methods that other code finds by a type assertion](#methods-that-other-code-finds-by-a-type-assertion)). Every conversion of a type that implements it, to an interface that has its methods, is then checked against your entry. An entry for `(fmt.Stringer).String`, for example, would check the `String` method of every type with one that your code converts to such an interface. Packages built together whose trust files give entries to different interfaces of this kind are reported, as two entries for one type are (see [One entry for each type in a build](#one-entry-for-each-type-in-a-build)).
 
 The trust report shows an entry for a type with a line that states this claim.
+
+Where the trust file declares that inputs end, one more claim binds all code that is not verified, not only the values an entry covers. No code that is not verified makes a reader yield again bytes already read from its source, through any value, while a verified function runs, except through a call of an entry that lists `rewinds`. Verified code makes no such call (see [Readers that rewind](#readers-that-rewind)). The claim covers a `Write` of a writer that a caller passes beside a reader of the same file and seeks that file back, a function value from a caller, code that a trusted function runs under `runs`, and another goroutine.
 
 #### Making a value of such a type
 
@@ -10038,6 +10373,13 @@ This table lists the most common messages.
 | `precondition of Grow may not hold under the declared memory: n <= Memory, ...` | Under a declared memory, `Grow(n)` reserves by a number. | Bound `n`, or grow by the length of a string the buffer will hold. |
 | `what is known here contradicts the declared memory: ...` | A string, a map, or a slice here would be larger than the declaration allows, so it proves nothing here. | Bound what is passed in, or declare more memory. |
 | `cannot verify F: T is N bytes, more than the declared memory allows a value to reserve ...` | Under a declared memory, a type that holds an array larger than five times the memory is not verified. | Use a smaller array, or a slice made with a bounded length. |
+| `... speaks of a reader that ends, which is known only where the trust file declares that inputs end; ...` | `ends` or `unread` is used without the declaration that inputs end. | Declare inputs in the trust file, or bound the number of reads. See [Inputs that end](#inputs-that-end). |
+| `the trusted contract of F cannot be used: F returns only for an input that ends, ...` | `os.ReadFile`, `io.ReadAll`, `ReadString`, `ReadBytes`, or `os.ReadDir` is called without the declaration. | Declare inputs, or read with a bounded loop. |
+| `W may write a file that is read under the declaration that inputs end; ...` | A file or a reader that is read under the declaration is written through. | Open the file to write it apart, or require `~ends` of the parameter. See [Writing what you read](#writing-what-you-read). |
+| `what is passed to F as r, a reader it requires to end, and as w may be one value, ...` | One value is passed as a reader under `ends` and as a writer. | Pass a writer apart from the reader. |
+| `the trusted contract of F ... cannot be used: it may make a reader yield again what it already yielded, through r, as its rewinds says, ...` | The entry of `F` lists `rewinds`, and the trust file declares that inputs end. The call, a value made of `F`, or a conversion checked against its entry is refused. | Open the file again with `os.Open`, which gives a new value with a budget of its own. See [Readers that rewind](#readers-that-rewind). |
+| `converting s, a T, to U is not supported: T.M may make a reader yield again what it already yielded, through ..., as its rewinds says, and U.M does not` | The entry of `T.M` lists `rewinds`, and the entry of `U.M` does not, so the value would stand where an entry claims it does not rewind. | Give the two entries the same `rewinds`, or keep the conversion in code that is not verified. |
+| `the verified packages of this build declare different inputs: ...` | Two verified packages built together declare different inputs, or one declares and the other does not. | Declare the same inputs in both trust files, or none in either. |
 | `the verified packages of this build declare different memories under sizes: ...` | Two verified packages built together declare different memories, or one declares and the other does not. | Declare the same memory in both trust files, or none in either, or run `laas` with `-vego.trusted` naming one file. |
 | `sizes must be a mapping with a memory, ...` | The declaration in the trust file is malformed. | Write `memory` and `reason`, as in [Bounding what grows](#bounding-what-grows). |
 | `...; it holds only because a map cannot have more keys ... than memory can hold, which does not show that a loop or a recursion ends: ...` | Added to a goal of a `Variant` of a loop or a function, of an invariant of a loop that has a `Variant`, or of the precondition of a recursive call, as `loop variant may be negative` and `precondition of F may not hold`: the goal holds only because memory is finite. | Write a `Variant` over what is left to do. See [How many keys a map can have](#how-many-keys-a-map-can-have). |
@@ -10260,7 +10602,9 @@ A function that uses any of the following is reported as `cannot verify`:
 - using the value of a type assertion or a case to an interface type whose methods the operand's type does not have, unless the operand's type has the methods of an interface checked at conversions and the methods it lacks belong to such interfaces, or the operand is an error and no method of the target but `Error` has a contract or a state; `error` as such a target of a value that is not an error; and an interface type declared inside a function as a target;
 - converting a value of your own type to an interface with the methods of `io.Writer`, `io.Reader`, or another interface checked at conversions, when a method of such an interface that the type implements has no contract, does not meet its entry, or comes from an embedded field (see [Methods that other code finds by a type assertion](#methods-that-other-code-finds-by-a-type-assertion));
 - converting an interface value to an interface with the methods of `io.Writer`, `io.Reader`, or another interface checked at conversions, from an interface whose values were not checked against the same interfaces: one declared in a package whose build does not have the package of such an interface, or one that does not have the methods of such an interface from its declaration or under a contract that implies its entry (see [Methods that other code finds by a type assertion](#methods-that-other-code-finds-by-a-type-assertion));
-- `io.Copy`, `io.CopyBuffer`, `io.CopyN`, `io.ReadAll`, the `ReadFrom` of a `*bufio.Writer`, and the `WriteTo` of a `*bufio.Reader`, which read until their reader ends (see [Copying from a reader to a writer](#copying-from-a-reader-to-a-writer));
+- `io.Copy`, `io.CopyBuffer`, `io.CopyN`, the `ReadFrom` of a `*bufio.Writer`, and the `WriteTo` of a `*bufio.Reader`, which read until their reader ends (see [Copying from a reader to a writer](#copying-from-a-reader-to-a-writer)); and `os.ReadFile`, `io.ReadAll`, `ReadString`, `ReadBytes`, and `os.ReadDir` without the declaration that inputs end (see [Inputs that end](#inputs-that-end));
+- under the declaration that inputs end, a call of a trusted function whose entry lists `rewinds`, and every value or conversion made of one (see [Readers that rewind](#readers-that-rewind));
+- under that declaration: a loop that reads to its end a file from `os.Create` or `os.OpenFile`, or a reader that your code makes, such as one that holds a `*bytes.Buffer`; the `Body` of an `http.Response`; `io.MultiReader` and decompressors, which yield more than one reader's bytes; writing through a file or a reader that is read under the declaration; `filepath.WalkDir`; and `Info` of an `fs.DirEntry`;
 - `errors.As` and `errors.AsType` with a target of an interface type (see [Asking what an error holds](#asking-what-an-error-holds));
 - writing, through a pointer taken out of an interface value or an error, memory that the function did not make, since no `Modifies` clause names memory reached through an assertion (see [Asking what an interface value holds](#asking-what-an-interface-value-holds));
 - taking out of an error or another interface value, by an assertion, a case of a type switch whose clause uses its variable, or `errors.As`, a value of a type that holds a function value of a type with a contract or an interface value with a method that has one, or that is a function type with a contract (see [Asking what an interface value holds](#asking-what-an-interface-value-holds));
@@ -10323,7 +10667,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - The methods of `bytes.Buffer`, `strings.Builder`, `bufio.Writer`, `bufio.Reader`, `bufio.Scanner`, and `log.Logger` that have shipped entries write nothing that verified code can see other than the struct and the memory that the value owns, as [Writing through a buffer](#writing-through-a-buffer) lists it. After a call, the value owns only what it owned before the call and memory that the call made. The read position of a `bytes.Buffer` never passes the end of what was written to it. Every method of `bytes.Buffer` keeps it so, and `|b|` is the number of bytes between the two.
 - Code of another package that is not verified runs code of the verified package only as `vego` follows it, which [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods) describes: during a call that the verified package makes, it runs only what that call hands it, through the arguments and the receiver. Code that it kept from an earlier call, a value it stored, or code that it runs on another goroutine or at another time, does not call back into a verified function while that function runs, so that the call never ends. A cycle that stays in the package, or that goes through what a call hands to another package, is found and reported.
 - For a parameter listed under `runs` or `keeps`, the function calls through an interface value or a function value nothing that the parameter holds, or that a call of what the parameter holds returns, but the methods of the interfaces and the function types that the parameter's type reaches and those of the types listed under `asserts`, and it uses no reflection to call what the parameter holds (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). Verified code answers for the methods that the parameter's type has, each checked where the value is converted. The author of the entry answers for the rest. The rest includes a method that a type of another module declares and that verified code converted to an interface whose method of that name has no contract, as `*mcp.TextContent` to `mcp.Content`: when the function runs such a method, what the method writes is within the function's `modifies`, and what it calls, through an interface value, a function value, or reflection, is within this claim (see [Values of another module's types](#values-of-another-modules-types)). An entry such as that of `use(p Pinger)` with `runs: [p]` and no `asserts`, for a function that asserts `p` to an interface with `Bump` and calls it, is false, and a proof that relies on it is worthless. For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
-- Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For a parameter whose footprint the contract lists in `Modifies`, they pass no other argument that reaches memory in that footprint without going through an interface value: `Log` relies on the `Lines` that `t` points to not being memory that the methods of `r` write. The same holds for a package-level variable of an interface type that the contract lists in `Modifies` by itself: they pass no argument that reaches memory in the footprint of the value the variable holds when the call begins, as `printLines` relies on its lines not being memory that the writer in `logOut` writes. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one whose methods change the states of the other, as one that wraps it does, unless one of them is nil. For an interface parameter with states and a pointer parameter whose type has states, of which the contract lists one, they do not pass an interface value that holds the pointer. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method. For a parameter whose type owns memory (see [Structs that own memory](#structs-that-own-memory)), they pass a struct whose owned memory is reached by nothing else they pass: not by the other arguments, not by the struct's other fields, and not by what its other owned fields refer to. Memory that a method returns from what its struct owns, which its contract shows with `within(result, s)`, is not stored by code that is not verified, and is not passed to a verified function together with the struct it came from or with anything that reaches that struct. The same holds of what code that is not verified takes out of an error that a verified function returns, by a type assertion or reflection, when the error came from a call made on what a struct it was handed owns, as the error of `fmt.Fprint(r.out, ...)` may hold what `r.out` holds: no contract can say that an error lies within a struct.
+- Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For a parameter whose footprint the contract lists in `Modifies`, they pass no other argument that reaches memory in that footprint without going through an interface value: `Log` relies on the `Lines` that `t` points to not being memory that the methods of `r` write. The same holds for a package-level variable of an interface type that the contract lists in `Modifies` by itself: they pass no argument that reaches memory in the footprint of the value the variable holds when the call begins, as `printLines` relies on its lines not being memory that the writer in `logOut` writes. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one whose methods change the states of the other, as one that wraps it does, unless one of them is nil. For an interface parameter with states and a pointer parameter whose type has states, of which the contract lists one, they do not pass an interface value that holds the pointer. Beside a reader that the contract requires to end, they pass no writer that writes what the reader reads: not the same value, and not another value over the same file or buffer. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method. For a parameter whose type owns memory (see [Structs that own memory](#structs-that-own-memory)), they pass a struct whose owned memory is reached by nothing else they pass: not by the other arguments, not by the struct's other fields, and not by what its other owned fields refer to. Memory that a method returns from what its struct owns, which its contract shows with `within(result, s)`, is not stored by code that is not verified, and is not passed to a verified function together with the struct it came from or with anything that reaches that struct. The same holds of what code that is not verified takes out of an error that a verified function returns, by a type assertion or reflection, when the error came from a call made on what a struct it was handed owns, as the error of `fmt.Fprint(r.out, ...)` may hold what `r.out` holds: no contract can say that an error lies within a struct.
 - A pointer to a number, a boolean, or a string that code which is not verified hands to verified code points to a value of its own: a variable whose address was taken, or what `new` made. It does not point to a field of a struct, an element of a slice or an array, or a package-level variable that the verified function can reach in another way: through another argument, a package-level variable, or memory that these reach. This holds of every way such a pointer arrives: a parameter or a receiver, a field of memory that existed on entry, an element of a `[]*T` or a value of a `map[K]*T`, what an interface value holds, what a trusted function returns or writes under its `modifies`, an argument that a trusted function passes to a function under `calls`, and a package-level variable of type `*T`. A caller that is not verified and passes `&s.f` and `s` to `func F(p *int, s *S)` breaks this. Passing `&s.f` alone to `func Increment(p *int)` does not, since `Increment` reaches nothing else of `s`. Verified code cannot make such a pointer: `vego` refuses `&s.f`, `&xs[i]`, `&a[i]`, and `&g` for them.
 - When the server calls a verified handler, the writer it passes writes none of the memory that the request reaches without going through an interface value, except the field `Trailer` of the `Request` and the map it refers to, which the server fills while it reads the body, also when a write to the writer drains a body the handler left unread. Verified code cannot read or write that field. Code that is not verified does not make that map reachable from anything else it hands a verified function, as `req.Trailer = req.Header` in a middleware would. Code that is not verified uses a `ResponseWriter`, and hands one to verified code as that type or as any other interface, only while the `ServeHTTP` call that received it runs, and does not hand one, or a value that holds one at any depth, to a verified function that keeps that parameter.
 - The body of every request that reaches verified code from code that is not verified makes progress: a `Read` of it with a buffer that is not empty returns bytes or an error. The server's bodies do. Verified code cannot store into the field `Body` of a request. A middleware that is not verified and replaces the body with a reader that can return no bytes and no error for ever breaks this, and so does a test or a caller that builds a request over such a reader, as `httptest.NewRequest` can. `json.NewDecoder(io.LimitReader(req.Body, n)).Decode(&x)` in a verified function it calls may then never return.
@@ -10371,6 +10715,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 
   So does a loop that ends only when `len(m)` reaches `math.MaxInt`, and one whose `Variant` rests on an `Assert`, on the overflow check of `len(m) + 1`, on the invariant of an inner loop without a `Variant`, or on a helper's `Ensures |m'| <= MaxInt`, each of which `vego` proved from that bound and then assumed.
 - With `sizes` declared in the trust file, the machines the program runs on never hold more of its data at once than the memory declared, in memory and swap together, however it is stored. A run that would hold more runs out of memory, as above. `vego` uses this for every string and the entries of every map, which it takes to be at most the memory declared, and for the array of every slice, which it takes to be at most five times that and 65536 bytes, at the goals that what an operation allocates fits in one allocation. Code that is not verified hands a verified function only such values, as an argument, in memory that an argument reaches, or as what a call through an interface value or a function value returns. A trusted function returns and writes only such values: a project entry for a function that reserves by a parameter, as `bufio.NewReaderSize(r, size)` with `requires: "size <= MaxAlloc"`, breaks this, so its entry must bound what it reserves. `encoding/json` encodes, under the declaration, with no single allocation larger than three times the bound on arrays, 81 bytes for each entry a map may have, and 2^20 bytes, as the releases that `laas` is tested with do. See [Bounding what grows](#bounding-what-grows).
+- With `inputs` declared in the trust file, what the program reads ends. Through any one reader of a file, a pipe, a terminal, a socket, or standard input that the program reads, and of a reader handed to a verified function where its contract requires `ends`, at most the declared bytes arrive before `Read` returns an error, `io.EOF` or another. Every `Read` into a buffer that is not empty returns at least one byte or an error. A regular file the program reads reports with `Stat` a size of at most the declared bytes, and a directory it lists holds at most that many entries while it is listed. The program does not write, through one open file, a file it reads through another: two opens of one path, a hard or symbolic link to it, or a redirection of standard output onto the file standard input reads breaks this. `os.Stdin` holds a file, not `nil`, and `os.Stdout` and `os.Stderr` do not hold that file. A trusted function changes what a reader or a file yields, as a seek, a truncation, or a `dup2` over its descriptor does, only if its entry lists the reader or the file under `modifies`. No code that is not verified makes a reader yield again bytes already read from its source, through any value, while a verified function runs, except through a call of an entry that lists `rewinds`, which verified code does not make. A file over `/dev/zero`, a pipe whose writer never stops, a socket that streams for ever, and a FIFO that is never closed break the declaration. What verified code writes through the value it reads is not assumed: `vego` refuses it (see [Writing what you read](#writing-what-you-read)).
 - The key and the value of every entry of a map take memory of their own in the heap, as Go's runtime keeps them, and the heap spans at most `MaxAlloc` bytes. `vego` uses this to bound the number of keys of a map by the size of a key and a value, as described in [How many keys a map can have](#how-many-keys-a-map-can-have). The Go specification does not say how a map is stored; the runtime of the Go releases that `laas` is tested with stores it this way, for keys and values of size zero and for large ones kept behind a pointer. Entries of different maps take memory of their own too, though `vego` bounds one map at a time.
 - What formatting builds from parts whose length the logic has no term for is not longer than can be allocated. Those parts are:
   - the text of an error, also when verified code reads it with `Error`: the string `err.Error()` returns is taken to be short enough that `2 * (|s| + 4096) + 65536 <= MaxAlloc`, which on a 32-bit target means under about 2 GB. `errors.New` requires this of the text it is given, and `fmt.Errorf` proves it of what it builds, so only the text of errors from code that is not verified, and of the parts of a wrapped error that have no length in the logic, is assumed;
@@ -10432,6 +10777,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `'/'`, `'\n'` | the number of a character, as in Go |
 | `cap(A)` | the capacity of a slice |
 | `elemsize(A)` | the number of bytes of an element of a slice; 0 for values of size zero |
+| `ends(r)`, `unread(r)` | under the declaration that inputs end: the declaration covers the reader `r`; the declared bytes less what was read through `r` (see [Inputs that end](#inputs-that-end)) |
 | `A = nil`, `A != nil` | for a slice: whether it is nil, which <code>&#124;A&#124; = 0</code> is not |
 | `&p.f`, `&s[i]` | the address of a struct reached through a pointer or an element of a slice; nil when that pointer is nil |
 | `ErrEmpty`, `io.EOF` | an error variable of the package, or of an imported package |
@@ -10460,6 +10806,8 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | --- | --- |
 | `sizes: {memory: 256GB, reason: ...}` | The machines the program runs on never hold more of its data at once than `memory`. Sizes that grow from what exists are then proved to fit; sizes that a number gives are held against five times the memory. See [Bounding what grows](#bounding-what-grows). |
 | `isolated: {reason: ...}` | Every function and method of the package runs no code but what a call hands it. See [Isolated functions](#isolated-functions). |
+| `inputs: {bytes: 1TB, reason: ...}` | What the program reads ends after at most `bytes` through any one reader. Gives `ends(r)` and `unread(r)`, and the entries of `os.ReadFile`, `io.ReadAll`, `ReadString`, `ReadBytes`, and `os.ReadDir`. See [Inputs that end](#inputs-that-end). |
+| `rewinds: [r]` in an entry | The function may make the reader `r` yield again what it already yielded. Under `inputs`, verified code cannot call it. See [Readers that rewind](#readers-that-rewind). |
 
 ### Before and after
 

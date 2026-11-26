@@ -1102,10 +1102,38 @@ func (v *fnVerifier) convertByContract(e ast.Expr, verb string, from, want types
 }
 
 // claimsNoLess says why the contract TA of a method of an interface does
-// not claim of keeping, vouching, and asserting what the contract TB of a
-// method of another interface claims, or "": A keeps no more than B,
-// vouches for no less, and asserts no more.
+// not claim of keeping, vouching, asserting, and rewinding what the
+// contract TB of a method of another interface claims, or "": A keeps no
+// more than B, vouches for no less, asserts no more, and rewinds a source
+// only where B does.
 func (v *fnVerifier) claimsNoLess(TA, TB *funcInfo, a, b *types.Func) string {
+	rewound := func(fn *funcInfo) map[int]bool {
+		at := map[int]bool{}
+		if fn.trust == nil {
+			return at
+		}
+		for _, item := range fn.trust.rewinds {
+			if fn.receiver != nil && fn.receiver.Name() == item.text {
+				at[-1] = true
+			}
+			for i, p := range fn.params {
+				if fn.paramNames[item.text] == p {
+					at[i] = true
+				}
+			}
+		}
+		return at
+	}
+	rewoundB := rewound(TB)
+	for i := range rewound(TA) {
+		if !rewoundB[i] {
+			through := "its receiver"
+			if i >= 0 {
+				through = fmt.Sprintf("its parameter %d", i+1)
+			}
+			return fmt.Sprintf("%s may make a reader yield again what it already yielded, through %s, as its rewinds says, and %s does not", methodTitle(a), through, methodTitle(b))
+		}
+	}
 	keeps := func(fn *funcInfo) (map[int]bool, bool) {
 		if fn.trust == nil {
 			// A method of an interface declared in source may keep what

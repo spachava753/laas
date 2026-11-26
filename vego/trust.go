@@ -66,6 +66,9 @@ type trustEntry struct {
 	// inputs holds what a call also ensures under the declaration that
 	// inputs end, in the shipped files only (inputs.go).
 	inputs []trustFormula
+	// rewinds lists the parameters through which the function may make a
+	// source yield again bytes already read from it (inputs.go).
+	rewinds []trustFormula
 	// declared holds what a call must also meet under a declared memory,
 	// formulas that may name Memory, the bytes declared; only the shipped
 	// files have it, for the functions that reserve by a number (sizes.go).
@@ -374,6 +377,10 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 		case "modifies":
 			for _, item := range scalars("modifies", value) {
 				entry.modifies = append(entry.modifies, trustFormula{text: item.Value, line: item.Line, col: item.Column})
+			}
+		case "rewinds":
+			for _, item := range scalars("rewinds", value) {
+				entry.rewinds = append(entry.rewinds, trustFormula{text: item.Value, line: item.Line, col: item.Column})
 			}
 		case "runs":
 			for _, item := range scalars("runs", value) {
@@ -909,6 +916,7 @@ func (pv *pkgVerifier) readEntry(fn *funcInfo, entry *trustEntry) {
 	for _, problem := range entry.file.problems {
 		fn.defect("%s:%d: %s", filepath.Base(entry.file.path), problem.line, problem.msg)
 	}
+	pv.readRewinds(fn, entry)
 	clauses := func(kind string, formulas []trustFormula) []*clause {
 		var list []*clause
 		for _, formula := range pv.withInputs(fn, entry, formulas) {

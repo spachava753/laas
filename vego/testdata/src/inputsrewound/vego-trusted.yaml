@@ -1,0 +1,23 @@
+version: 1
+
+# A false entry, on purpose: rewindFile seeks the file back to its start,
+# and its entry does not list rewinds, so it claims that it makes no
+# source yield again what it yielded. The proofs below rest on that claim
+# and are wrong; run_test.go runs them and shows a loop proved to end that
+# does not (F17 of the review of step 5 of F39). With rewinds: [r] every
+# call of the entry is refused, as the corpus inputs shows.
+inputs:
+  bytes: 1TB
+  reason: The files of this corpus are its test's own, a few bytes each.
+
+trusted:
+  inputsrewound.rewindFile:
+    reason: >-
+      False on purpose: it seeks the file r holds back to its start, and
+      does not say so under rewinds.
+    requires: ["r != nil"]
+    runs: [r]
+    asserts: {r: []}
+    vouches: [r]
+    modifies: [r, rewound]
+    ensures: ["True"]

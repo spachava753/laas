@@ -381,6 +381,7 @@ func (entry *trustEntry) fingerprint() string {
 	list("modifies", entry.modifies)
 	list("vouches", entry.vouches)
 	list("runs", entry.runs)
+	list("rewinds", entry.rewinds)
 	list("formats", entry.formats)
 	if entry.isIsolated() {
 		parts = append(parts, "isolated")

@@ -1,0 +1,15 @@
+version: 1
+
+# The entry of rewindsplain for Rewinder's method without its rewinds: the
+# two differ only there, and rewindsroot, built with both, is told so.
+trusted:
+  (rewindlib.Rewinder).Rewind:
+    reason: Says that Rewind makes no source yield again what it yielded.
+    receiver: s
+    modifies: [s]
+    ensures: ["True"]
+  (rewindlib.Resetter).Rewind:
+    reason: Says nothing of Rewind but what it writes.
+    receiver: s
+    modifies: [s]
+    ensures: ["True"]

@@ -376,7 +376,7 @@ func (v *fnVerifier) callSitesOf(eff *effects, form shape, argument func(*types.
 			}
 			eff.sites = append(eff.sites, at)
 			eff.sites = append(eff.sites, v.pointerStatesSites(form, at)...)
-		eff.sites = append(eff.sites, v.readerSites(form, at)...)
+			eff.sites = append(eff.sites, v.readerSites(form, at)...)
 			return
 		}
 		if form.row || form.fp {

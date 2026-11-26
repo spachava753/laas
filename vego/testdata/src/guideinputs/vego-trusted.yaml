@@ -7,3 +7,11 @@ inputs:
     The tool reads configuration files, directories of results, and
     standard input from a pipe that its caller closes; none of them yields
     a terabyte, and the program never writes a file it reads.
+
+trusted:
+  guideinputs.rewind:
+    reason: Seeks f back to its start, so that it yields again what it yielded.
+    requires: ["f != nil"]
+    rewinds: [f]
+    modifies: [f]
+    ensures: ["True"]

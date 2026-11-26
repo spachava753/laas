@@ -202,6 +202,12 @@ func TestAnalyzer(t *testing.T) {
 		parallel(t)
 		runCorpus(t, newAnalyzer(), "tworoot")
 	})
+	// The same, for two entries that differ only in rewinds (F17 of the
+	// review of step 5 of F39).
+	t.Run("tells apart entries that differ in rewinds", func(t *testing.T) {
+		parallel(t)
+		runCorpus(t, newAnalyzer(), "rewindsroot")
+	})
 	// A module whose proofs were made with no entry for a type, and one
 	// that declares the type and has proofs that rest on it having none,
 	// against a module that gives it an entry.
@@ -262,7 +268,7 @@ func TestAnalyzer(t *testing.T) {
 		runCorpus(t, newAnalyzer(), "lockentries")
 	})
 	// Programs under a declared memory and the same without it (F38).
-	for _, root := range []string{"sizes", "nosizes", "sizesbad", "sizesbig", "guidesizes", "inputs", "noinputs", "inputspred", "inputssizes", "inputsbig", "guideinputs"} {
+	for _, root := range []string{"sizes", "nosizes", "sizesbad", "sizesbig", "guidesizes", "inputs", "noinputs", "inputspred", "inputssizes", "inputsbig", "guideinputs", "inputsrewinds", "rewindsplain", "inputsrewound"} {
 		t.Run("proves what fits under a declared memory in "+root, func(t *testing.T) {
 			parallel(t)
 			runCorpus(t, newAnalyzer(), root)

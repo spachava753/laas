@@ -171,7 +171,8 @@ func inputsReport(uses []InputsUse, relative func(string) string) string {
 			"and of a reader handed to it where ends is required, at most %s (%s bytes) arrive before Read returns an error, and a Read into "+
 			"a buffer that is not empty returns a byte or an error; a regular file the program reads reports with Stat a size of at most that; "+
 			"a directory it lists holds at most that many entries while it lists it; the program does not write, through one open file, a file it reads through another; "+
-			"os.Stdout and os.Stderr do not hold the file os.Stdin holds\n", first.Written, first.Bytes)
+			"os.Stdout and os.Stderr do not hold the file os.Stdin holds; no code that is not verified makes a reader yield again bytes already read "+
+			"from its source, through any value, while a verified function runs, except through a call of an entry that lists rewinds\n", first.Written, first.Bytes)
 		fmt.Fprintf(&b, "    reason:  %s\n", first.Reason)
 		var packages []string
 		for _, use := range listed {
@@ -594,5 +595,31 @@ func (v *fnVerifier) checkEndsPairs(fn *funcInfo, name string, args map[*types.V
 		v.check(st, guard, v.apartReaderWriter(r[0], w[0]), pos,
 			"what is passed to %s as %s, a reader it requires to end, and as %s may be one value, and %s relies on %s not writing what %s reads; pass a writer apart from the reader",
 			name, pair[0].Name(), pair[1].Name(), name, pair[1].Name(), pair[0].Name())
+	}
+}
+
+// readRewinds reads the rewinds of an entry: the parameters, or the
+// receiver of a method of an interface, through which the function may make
+// a source yield again bytes already read from it, as a seek back or an
+// UnreadByte does. Every other entry claims that it does not, of any source
+// through any value (What a proof assumes). Under the declaration that
+// inputs end an entry that rewinds cannot be used by verified code, whose
+// budgets of what is left to read the call would make wrong: the defect
+// stops a call of it, a deferred call, a call through a value of its type,
+// a value made of it, and a conversion checked against it alike, since
+// every use goes through usable (F17 of the review of step 5 of F39, as the
+// orchestrator narrowed it).
+func (pv *pkgVerifier) readRewinds(fn *funcInfo, entry *trustEntry) {
+	var named []string
+	for _, item := range entry.rewinds {
+		if fn.paramNames[item.text] == nil && (fn.receiver == nil || fn.receiver.Name() != item.text) {
+			fn.defect("its rewinds %q: %s is not a parameter", item.text, item.text)
+			continue
+		}
+		named = append(named, item.text)
+	}
+	if len(named) > 0 && pv.inputsOf() != nil {
+		fn.defect("it may make a reader yield again what it already yielded, through %s, as its rewinds says, "+
+			"which verified code may not do under the declaration that inputs end; open the file again, which gives a new value with a budget of its own", strings.Join(named, " and "))
 	}
 }
