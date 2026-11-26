@@ -687,8 +687,9 @@ func (pv *pkgVerifier) wellFormed(val value, t types.Type, brk *logic.Term) *log
 			// what it holds does. The nil interface holds nothing and has
 			// no home. See ifacestate.go.
 			known := []*logic.Term{exists(home(val[i])), logic.Lt(logic.IntLit(0), home(val[i]))}
-			if pv.hasStates(lf.typ) {
-				// So does the row of its states (S0b of F34).
+			if pv.hasStates(lf.typ) || pv.inputsOf() != nil {
+				// So does the row of its states (S0b of F34), and, under
+				// the declaration that inputs end, of its unread (F39).
 				known = append(known, exists(skey(val[i])), logic.Lt(logic.IntLit(0), skey(val[i])))
 			}
 			facts = append(facts, logic.Or(logic.Eq(val[i], logic.RefLit(0)), logic.And(known...)))

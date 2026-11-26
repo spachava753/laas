@@ -581,3 +581,49 @@ func Dirs(dir string) (n int, err error) {
 	}
 	return n, nil
 }
+
+// Copied copies with io.Copy, which has no entry.
+//
+// @Requires dst != nil And src != nil And ends(src)
+// @Modifies dst, src
+// @Ensures True
+func Copied(dst io.Writer, src io.Reader) {
+	_, _ = io.Copy(dst, src) // want `cannot verify Copied: .*io.Copy.*under the declaration that inputs end, read a reader it covers with io.ReadAll and write what that returns, or copy with a loop that calls Read until it returns an error`
+}
+
+// CopyAll copies a reader that ends to a writer, as io.Copy would.
+//
+// @Requires dst != nil And src != nil And ends(src)
+// @Modifies dst, src
+// @Ensures written >= 0
+func CopyAll(dst io.Writer, src io.Reader) (written int, err error) {
+	buf := make([]byte, 4096)
+	// @Snapshot start = unread(src)
+	// @Invariant 0 <= written And written <= start - unread(src)
+	// @Variant unread(src)
+	for {
+		n, rerr := src.Read(buf)
+		if n > 0 {
+			if _, werr := dst.Write(buf[:n]); werr != nil {
+				return written, werr
+			}
+			written += n
+		}
+		if rerr == io.EOF {
+			return written, nil
+		}
+		if rerr != nil {
+			return written, rerr
+		}
+	}
+}
+
+// CopyOver hands CopyAll one value as the reader and as the writer, which
+// would read what it writes for ever.
+//
+// @Requires rw != nil And ends(rw)
+// @Modifies rw
+// @Ensures True
+func CopyOver(rw io.ReadWriter) {
+	_, _ = CopyAll(rw, rw) // want `what is passed to CopyAll as src, a reader it requires to end, and as dst may be one value`
+}

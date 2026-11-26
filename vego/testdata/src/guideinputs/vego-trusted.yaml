@@ -1,0 +1,9 @@
+version: 1
+
+# The guide's programs that read until their inputs end (Inputs that end).
+inputs:
+  bytes: 1TB
+  reason: >-
+    The tool reads configuration files, directories of results, and
+    standard input from a pipe that its caller closes; none of them yields
+    a terabyte, and the program never writes a file it reads.

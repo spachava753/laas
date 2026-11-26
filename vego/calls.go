@@ -246,7 +246,6 @@ var noEntryCan = map[string]string{
 		"or the WriteTo of src, which no entry covers, since they too read or write until the end"),
 	"io.CopyN": copyRemedy("it loops for ever over a reader that returns no bytes and no error, which the documentation of io.Reader allows, and it calls the ReadFrom of dst, " +
 		"which no entry covers"),
-	"io.ReadAll":               copyRemedy("it reads until the reader returns io.EOF, growing its buffer, so a reader that never ends makes it fail for want of memory"),
 	"(*bufio.Writer).ReadFrom": copyRemedy("it reads from r until r returns io.EOF, so it does not return from a reader that never ends"),
 	"(*bufio.Reader).WriteTo":  copyRemedy("it reads from the reader it keeps until that returns io.EOF, so it does not return from a reader that never ends"),
 }
@@ -254,8 +253,10 @@ var noEntryCan = map[string]string{
 // copyRemedy completes the message of noEntryCan for a function that
 // reads until its reader ends.
 func copyRemedy(why string) string {
-	return why + "; an entry claims that its function returns, so none ships; copy with a loop that calls Read at most a number of times you choose " +
-		"and writes what each Read returned with Write, under a // @Variant annotation, as the guide shows under Copying from a reader to a writer"
+	return why + "; an entry claims that its function returns, so none ships; under the declaration that inputs end, read a reader it covers " +
+		"with io.ReadAll and write what that returns, or copy with a loop that calls Read until it returns an error and writes what each Read returned, " +
+		"under // @Variant unread(r); without the declaration, copy with such a loop that calls Read at most a number of times you choose; " +
+		"the guide shows both under Copying from a reader to a writer"
 }
 
 // contractFor returns the contract a call is checked against, after making
@@ -670,6 +671,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	declaredHeld := true
 	v.uncaptured(func() { declaredHeld = v.checkDeclaredClauses(fn, name, pre, st, guard, call.Pos()) })
 	v.checkWrittenFiles(fn, name, args, st, guard, call.Pos())
+	v.checkEndsPairs(fn, name, args, st, guard, call.Pos())
 	for _, c := range fn.requires {
 		// A bound of what a buffer can grow to, or of what a trusted
 		// function allocates: the message says what bound on each length

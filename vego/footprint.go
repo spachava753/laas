@@ -370,14 +370,20 @@ func (v *fnVerifier) outsideFootprint(t target, key string, ref, position *logic
 		conditions = append(conditions, logic.Eq(ref, t.skey))
 	}
 	if key == unreadRegion {
-		// What a reader yields is not memory: a call that acts on the
-		// value, by its footprint, may change it, as a seek does, whether
-		// or not its interface has states (F12 of the review of step 2 of
-		// F39). Of a value whose key is not known, nothing is kept.
+		// What a reader yields is not memory, and no row holds it: a call
+		// that acts on the value, by its footprint, may change its own, as
+		// a seek does, whether or not its interface has states (F12 of the
+		// review of step 2 of F39), and nothing else's. That a write
+		// through one value makes another yield more is what the
+		// declaration and the callers' assumption exclude (one file read
+		// and written through two values, or a writer handed beside a
+		// reader under ends that writes what it reads), and what verified
+		// code does to one file through one value is refused (N1). Of a
+		// value whose key is not known, nothing is kept.
 		if t.skey == nil {
 			conditions[0] = logic.False()
 		} else {
-			conditions[0] = logic.And(conditions[0], logic.Ne(ref, t.skey))
+			conditions[0] = logic.Ne(ref, t.skey)
 		}
 	}
 	if t.skipped != nil {

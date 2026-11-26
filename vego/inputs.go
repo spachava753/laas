@@ -511,3 +511,88 @@ func (pv *pkgVerifier) withInputsText(text string) string {
 	}
 	return text
 }
+
+// requiresEnds reports whether the Requires of a contract names ends of a
+// parameter itself, as in ends(r).
+func requiresEnds(fn *funcInfo, param *types.Var) bool {
+	found := false
+	var visit func(n *logic.Node)
+	visit = func(n *logic.Node) {
+		if n == nil || found {
+			return
+		}
+		if n.Kind == logic.NCall && n.Name == "ends" && len(n.Kids) == 1 && n.Kids[0].Kind == logic.NIdent && fn.paramNames[n.Kids[0].Name] == param {
+			found = true
+			return
+		}
+		for _, kid := range n.Kids {
+			visit(kid)
+		}
+	}
+	for _, c := range fn.requires {
+		visit(c.node)
+	}
+	return found
+}
+
+// endsPairs returns the pairs of parameters of a verified function that
+// N2's assumption keeps apart: a reader the Requires says ends, and every
+// other parameter that is an interface value, through which the function
+// may write. Callers do not pass, beside a reader under ends, a writer that
+// writes what it reads: not one value twice, which keys tell apart, and,
+// from code that is not verified, not two values over one file or buffer.
+func endsPairs(fn *funcInfo) [][2]*types.Var {
+	var pairs [][2]*types.Var
+	for _, r := range fn.params {
+		if !isIface(r.Type()) || !requiresEnds(fn, r) {
+			continue
+		}
+		for _, w := range fn.params {
+			if w != r && isIface(w.Type()) && !isError(w.Type()) {
+				pairs = append(pairs, [2]*types.Var{r, w})
+			}
+		}
+	}
+	return pairs
+}
+
+// noteEndsPairs states N2's assumption on entry to a verified function:
+// the reader under ends and each other interface parameter are not one
+// value, unless one of them is nil.
+func (v *fnVerifier) noteEndsPairs(st *state) {
+	fn := v.fn
+	if v.inputsOf() == nil || fn.decl == nil || fn.spelled != nil {
+		return
+	}
+	for _, pair := range endsPairs(fn) {
+		r, w := v.entry[pair[0]], v.entry[pair[1]]
+		if r == nil || w == nil {
+			continue
+		}
+		st.assume(v.apartReaderWriter(r[0], w[0]))
+	}
+}
+
+// apartReaderWriter says that two interface values are not one value at
+// the key of the reader's budget, unless one is nil.
+func (v *fnVerifier) apartReaderWriter(r, w *logic.Term) *logic.Term {
+	return logic.Or(logic.Eq(r, logic.RefLit(0)), logic.Eq(w, logic.RefLit(0)), logic.Ne(skey(r), skey(w)))
+}
+
+// checkEndsPairs proves N2's assumption at a call of a verified function
+// under the declaration: what is passed for its reader under ends and for
+// each other interface parameter are not one value.
+func (v *fnVerifier) checkEndsPairs(fn *funcInfo, name string, args map[*types.Var]value, st *state, guard []*logic.Term, pos token.Pos) {
+	if v.inputsOf() == nil || fn.trust != nil || fn.valueOf != nil || fn.methodOf != nil {
+		return
+	}
+	for _, pair := range endsPairs(fn) {
+		r, w := args[pair[0]], args[pair[1]]
+		if len(r) != 1 || len(w) != 1 {
+			continue
+		}
+		v.check(st, guard, v.apartReaderWriter(r[0], w[0]), pos,
+			"what is passed to %s as %s, a reader it requires to end, and as %s may be one value, and %s relies on %s not writing what %s reads; pass a writer apart from the reader",
+			name, pair[0].Name(), pair[1].Name(), name, pair[1].Name(), pair[0].Name())
+	}
+}

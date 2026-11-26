@@ -1562,7 +1562,10 @@ func (b *sampler) addStates(t types.Type, to binding) {
 			s.consts[keyedByHeld.Name] = logic.Fill(logic.IntLit(0), logic.True())
 		}})
 	}
-	if !b.v.hasStates(t) {
+	// Under the declaration that inputs end, a sample's interface values
+	// have keys of their own too, so that a reader required to end and a
+	// writer beside it can be told apart, as callers do (endsPairs).
+	if !b.v.hasStates(t) && b.v.inputsOf() == nil {
 		b.choose(slot{func(s *witness) { to.set(s, 0, logic.RefLit(0)) }, func(s *witness) { to.set(s, 0, logic.RefLit(1)) }}, to.name(0))
 		return
 	}

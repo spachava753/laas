@@ -306,8 +306,19 @@ func checkInputsEntry(t *testing.T, pv *pkgVerifier, pkg *types.Package, key str
 		t.Errorf("the entry of %s can be used without the declaration that inputs end", key)
 	}
 	declaredOnce.Do(func() {
-		declared, _ = shippedVerifier(t)
-		declared.projectTrust = parseTrustFile("vego-trusted.yaml", []byte("version: 1\ninputs:\n  bytes: 1TB\n  reason: a test\n"), false)
+		// A copy of the shipped verifier with caches of its own: making
+		// another would import the packages again and wait for the slot
+		// of the heavy tests.
+		copied := *pv
+		copied.trusted = map[*types.Func]*funcInfo{}
+		copied.typeEntries = map[string]*funcInfo{}
+		copied.importedMethods = map[*types.Func]*funcInfo{}
+		copied.pendingMethods = map[*types.Func]bool{}
+		copied.reported = map[string]bool{}
+		copied.reliedKeys = map[string]bool{}
+		copied.usage = &Usage{}
+		copied.projectTrust = parseTrustFile("vego-trusted.yaml", []byte("version: 1\ninputs:\n  bytes: 1TB\n  reason: a test\n"), false)
+		declared = &copied
 	})
 	if problems := declared.projectTrust.problems; len(problems) > 0 {
 		t.Fatalf("the declaration of the test cannot be read: %v", problems)
