@@ -487,11 +487,15 @@ func (v *fnVerifier) replacedHyps(hyps []*logic.Term, decl *sizesDecl) []*logic.
 // nor assumed: what it rests on holds only under the declaration, and no
 // other goal may see it. A goal proved so on hypotheses that the
 // declaration contradicts is reported where it stands, since there the
-// declaration was used against what the path knows.
+// declaration was used against what the path knows. While unmarked is set
+// it is asked only as before.
 func (v *fnVerifier) sizedAttempt(st *state, guard []*logic.Term, goal *logic.Term, pos token.Pos) (result solver.Result, declared bool) {
 	result = v.attempt(st, guard, goal)
 	decl := v.sizesOf()
-	if result == solver.Proved || decl == nil {
+	// A goal whose proof a Variant may rest on gets no second try: what
+	// only the declaration proves holds only because a value cannot grow
+	// past what the machines hold (F18 of the review of step 2a).
+	if result == solver.Proved || decl == nil || v.unmarked != nil {
 		return result, false
 	}
 	hyps := append(v.replacedHyps(st.hyps, decl), guard...)

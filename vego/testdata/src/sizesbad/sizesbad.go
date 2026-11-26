@@ -156,3 +156,29 @@ func ExtendedByLength(s, t []byte) (r []byte) {
 	r = append(s, make([]byte, len(t))...) // want `vego: the slice that append grows may be more than can be allocated`
 	return r
 }
+
+// A recursive precondition that only the declaration would prove gives a
+// Variant nothing (F18 of the review of step 2a).
+// @Requires 2 * |s| + 65536 <= MaxAlloc
+// @Modifies s
+// @Variant MaxAlloc - |s|
+// @Ensures True
+func GrowsForeverByRecursion(s []byte) (r []byte) {
+	s = append(s, 0)
+	return GrowsForeverByRecursion(s) // want `vego: precondition of GrowsForeverByRecursion may not hold: 2 \* \|s\| \+ 65536 <= MaxAlloc`
+}
+
+// A bound between the memory and four times it: what the array of a slice
+// may take is R, not M (F19 of the review of step 2a).
+// @Requires 300 * |p| + 65536 <= MaxAlloc
+// @Ensures True
+func Big(p []byte) (r []byte) {
+	r = make([]byte, 300*len(p))
+	return r
+}
+
+// @Ensures True
+func HandsBig(p []byte) (r []byte) {
+	r = Big(p) // want `vego: precondition of Big may not hold: 300 \* \|p\| \+ 65536 <= MaxAlloc`
+	return r
+}

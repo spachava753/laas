@@ -144,3 +144,18 @@ func Doubles(s []byte) (r []byte) {
 	}
 	return r
 }
+
+// A string is at most the memory itself, so the same bound on a string
+// holds (F19 of the review of step 2a).
+// @Requires 300 * |s| + 65536 <= MaxAlloc
+// @Ensures True
+func BigText(s string) (r []byte) {
+	r = make([]byte, 300*len(s))
+	return r
+}
+
+// @Ensures True
+func HandsBigText(s string) (r []byte) {
+	r = BigText(s)
+	return r
+}

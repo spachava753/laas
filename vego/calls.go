@@ -687,9 +687,17 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		if fn.trust == nil && !v.inInitialiser && strings.Contains(c.text, "MaxAlloc") {
 			sized := func(node *logic.Node) bool { return strings.Contains(c.text[node.Start:node.End], "MaxAlloc") }
 			for _, node := range c.node.Conjuncts() {
-				if sized(node) {
-					text := strings.Join(strings.Fields(c.text[node.Start:node.End]), " ")
-					v.checkSized(st, guard, v.formula(c, node, pre), call.Pos(), "precondition of %s may not hold: %s", name, text)
+				if !sized(node) {
+					continue
+				}
+				text := strings.Join(strings.Fields(c.text[node.Start:node.End]), " ")
+				check := func() { v.checkSized(st, guard, v.formula(c, node, pre), call.Pos(), "precondition of %s may not hold: %s", name, text) }
+				// At a call that recurses, as for every conjunct (F18 of
+				// the review of step 2a).
+				if recursive {
+					v.withoutMemory(check)
+				} else {
+					check()
 				}
 			}
 			saved := v.skipConjunct

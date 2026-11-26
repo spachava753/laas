@@ -4465,6 +4465,7 @@ mapping	mapping.AbsentHoldsZero	5	5289	0
 mapping	mapping.AbsentKeysHoldZero	2	4444	0
 mapping	mapping.AddsCountedSame	8	10523	0
 mapping	mapping.AddsForever	12	21023	0
+mapping	mapping.AddsForeverBounded	13	24027	0
 mapping	mapping.AddsKeys	10	25784	0
 mapping	mapping.AddsThroughHanded	14	22966	0
 mapping	mapping.AddsThroughLiteral	10	25253	0

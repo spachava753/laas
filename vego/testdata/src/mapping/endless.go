@@ -188,3 +188,17 @@ func ByInnerRange(xs []int) (n int) {
 	}
 	return len(m)
 }
+
+// A precondition that names MaxAlloc is a size goal, and at a call that
+// recurses it is asked as every other conjunct is, without the bounds of
+// the keys (F18 of the review of step 2a of F38).
+// @Requires m != nil
+// @Requires |m| * 9 <= MaxAlloc
+// @Requires Forall k in m : 0 <= k And k < |m|
+// @Modifies m
+// @Variant MaxAlloc - |m|
+// @Ensures True
+func AddsForeverBounded(m map[int]bool) {
+	m[len(m)] = true
+	AddsForeverBounded(m) // want `vego: precondition of AddsForeverBounded may not hold: \|m\| \* 9 <= MaxAlloc; it holds only because a map cannot have more keys than memory can hold`
+}
