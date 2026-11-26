@@ -218,6 +218,10 @@ func (pv *pkgVerifier) statementAfter(fn *funcInfo, c *clause) ast.Stmt {
 		}
 		return n != nil && found == nil
 	})
+	// A label stands in front of the statement it labels (F37, step 3).
+	for labelled, ok := found.(*ast.LabeledStmt); ok; labelled, ok = found.(*ast.LabeledStmt) {
+		found = labelled.Stmt
+	}
 	if pv.below == nil {
 		pv.below = map[*clause]ast.Stmt{}
 	}

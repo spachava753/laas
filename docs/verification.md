@@ -494,7 +494,83 @@ func Index(A []int, x int) (result int) {
 
 A common way to find an invariant is to take the postcondition and replace the upper bound with the loop index. Above, `[0, |A|)` in the postcondition became `[0, i)` in the invariant.
 
-`break`, `continue`, and `return` work inside loops. A `return` inside a loop must establish the postcondition using only the invariant and the conditions on the path to the `return`.
+`break`, `continue`, and `return` work inside loops, and `break` and `continue` can name a label, as described in [Labelled break and continue](#labelled-break-and-continue). A `return` inside a loop must establish the postcondition using only the invariant and the conditions on the path to the `return`.
+
+### Labelled break and continue
+
+`break` and `continue` can name the label of an enclosing loop, and `break` the label of an enclosing `switch`. Write the annotations of a labelled loop above its label:
+
+```go
+// @Requires |a| <= 100
+// @Ensures found -> 0 <= fi < |a| And 0 <= fj < |a[fi]| And a[fi][fj] = x
+// @Ensures ~found -> Forall k in [0, |a|) : Forall m in [0, |a[k]|) : a[k][m] != x
+func FindCell(a [][]int, x int) (fi, fj int, found bool) {
+	// @Invariant ~found
+	// @Invariant Forall k in [0, i) : Forall m in [0, |a[k]|) : a[k][m] != x
+outer:
+	for i := range a {
+		// @Invariant ~found
+		// @Invariant Forall m in [0, j) : a[i][m] != x
+		for j := range a[i] {
+			if a[i][j] == x {
+				fi, fj, found = i, j, true
+				break outer
+			}
+		}
+	}
+	return fi, fj, found
+}
+```
+
+`break outer` leaves both loops. What follows the outer loop is checked in the state at the `break`, as for an unlabelled `break`.
+
+`continue outer` ends an iteration of the outer loop from inside the inner one. There the invariants of the outer loop must hold, and its `Variant` must have decreased since the start of the iteration. The post statement of a `for` loop runs first, as Go runs it. The invariants of the inner loop need not hold, since the inner loop is left. A `Variant` that only the skipped rest of the iteration decreases is reported:
+
+```go
+// @Requires 0 <= n <= 100
+// @Ensures True
+func SkipsTail(n int) {
+	// @Invariant 0 <= i <= n
+	// @Variant n - i
+outer:
+	for i := 0; i < n; {
+		for j := range 2 {
+			if j == 1 {
+				continue outer
+			}
+		}
+		i++
+	}
+}
+```
+
+```text
+vego: loop variant may not decrease: n - i
+```
+
+An annotation between a label and its loop is reported, because it stands between no two statements. `goto` is not supported, and neither is a label of a `select` statement.
+
+### Fallthrough
+
+A `fallthrough` at the end of a clause of a `switch` runs the body of the next clause in the source, without testing it, as in Go. The next clause can be `default`, wherever it stands:
+
+```go
+// @Ensures n = 0 -> r = 2
+// @Ensures n = 1 -> r = 1
+// @Ensures n != 0 And n != 1 -> r = 10
+func Fall(n int) (r int) {
+	switch n {
+	case 0:
+		r = 1
+		fallthrough
+	case 1:
+		r = r + 1
+	default:
+		r = 10
+	}
+	return r
+}
+```
 
 ### A condition that modifies memory
 
@@ -9935,7 +10011,7 @@ This table lists the most common messages.
 | `cannot verify F: json.NewEncoder keeps w in the encoder it returns; ...` | An encoder or decoder is kept in a variable. | Write the call as one expression. |
 ## What is not supported
 
-`vego` supports functions and methods over these types: the integer types, `bool`, `string`, `error`, the float types, arrays of numbers and booleans, structs, pointers to structs, to numbers, to booleans, and to strings, slices, maps with integer, string, or boolean keys, function types, and interface types. In the body it supports assignments, `if`, `switch`, `for` and `range` loops with `break` and `continue`, `return`, `defer`, calls to named functions and methods, function literals that are called or deferred where they are written or bound to a variable that is only called, function values of named function types with a contract (see [Function values](#function-values)), calls through interface values of methods with a contract (see [Interfaces](#interfaces)), functions handed to a trusted function that calls them while it runs (see [Functions that a trusted function calls](#functions-that-a-trusted-function-calls)), and recursion. The built-ins `len`, `cap`, `min`, `max`, `new`, `make`, `append`, and `delete` are supported, and so are composite literals, slicing, and the arithmetic, comparison, shift, and bitwise operators.
+`vego` supports functions and methods over these types: the integer types, `bool`, `string`, `error`, the float types, arrays of numbers and booleans, structs, pointers to structs, to numbers, to booleans, and to strings, slices, maps with integer, string, or boolean keys, function types, and interface types. In the body it supports assignments, `if`, `switch` with `fallthrough`, `for` and `range` loops with `break` and `continue`, also with a label, `return`, `defer`, calls to named functions and methods, function literals that are called or deferred where they are written or bound to a variable that is only called, function values of named function types with a contract (see [Function values](#function-values)), calls through interface values of methods with a contract (see [Interfaces](#interfaces)), functions handed to a trusted function that calls them while it runs (see [Functions that a trusted function calls](#functions-that-a-trusted-function-calls)), and recursion. The built-ins `len`, `cap`, `min`, `max`, `new`, `make`, `append`, and `delete` are supported, and so are composite literals, slicing, and the arithmetic, comparison, shift, and bitwise operators.
 
 A function that uses any of the following is reported as `cannot verify`:
 
@@ -10005,7 +10081,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - comparing structs with `==`;
 - comparing two errors with `==` when neither is `nil`, an error made by `errors.New` or `fmt.Errorf`, an error that a trusted contract vouches for, an error variable that holds one or holds a pointer, integer, string, or boolean, or an array or struct of these, or an error converted in the function from a value of such a type (see [Comparing errors](#comparing-errors));
 - `errors.As`, `errors.Join`, `errors.Unwrap`, and `errors.Is` on an error whose origin is not known (see [Asking errors.Is](#asking-errorsis));
-- `goto`, `fallthrough`, labelled `break` and `continue`, and `defer` inside a loop, except inside a function literal that the loop calls.
+- `goto`, a label of a `select` statement, and `defer` inside a loop, except inside a function literal that the loop calls.
 
 Some limits are reported in other ways. A write through what `bufio.NewReader` or `bufio.NewWriter` returns, in a function that does not list the reader or the writer it was made over, is reported as `Write may modify bw, which F may not modify; it is memory that NewWriter returned, which its contract places in the footprint of w when it is not new; list w in a // @Modifies clause`. List it, as described in [Writing through a buffer](#writing-through-a-buffer). A state can be declared only for an interface, and only as a boolean. A `State` annotation on a struct type is reported at the annotation as `a state can be declared only on a defined interface type that declares a method of its own`, and a state of a struct type in your trust file is reported in the file. A mutex or a `sync.Once` that exists when a trusted function is called cannot be used in a function literal that it calls, and its `Lock` or `Do` is reported as a precondition that may not hold, as described in [Locking in a function that a trusted function calls](#locking-in-a-function-that-a-trusted-function-calls). A formula that names an unexported field of a struct of another package is reported at the annotation, as described in [Names](#names). A method of a type that writes what its receiver points to, or relies on what it points to, cannot be used as a method of an interface. The conversion reports the obligation that fails, as described in [What a conversion checks](#what-a-conversion-checks). An entry in the trust file for a type of the module that you verify is reported in the trust file, as described in [Limits of trusted contracts](#limits-of-trusted-contracts). Two different entries for one type in packages built together are reported in every package built with both, as described in [One entry for each type in a build](#one-entry-for-each-type-in-a-build).
 

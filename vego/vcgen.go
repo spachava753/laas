@@ -40,6 +40,9 @@ type loopSpec struct {
 	// visited is the Visited clause of a range over a map, which
 	// checkVisited has placed.
 	visited *clause
+	// label is the label of the loop, which break and continue may name
+	// (labels.go).
+	label *types.Label
 }
 
 type fnVerifier struct {
@@ -294,6 +297,9 @@ type fnVerifier struct {
 	// inInitialiser is set while an initialiser of a package-level
 	// variable is run as code (initcalls.go).
 	inInitialiser bool
+	// labels holds where break and continue with a label go while the
+	// statement the label labels is verified; see labels.go.
+	labels map[*types.Label]*labelTarget
 	// exitReached is set once a call that may end the process has been
 	// made in the function's own frame; see verify.
 	exitReached bool
@@ -955,9 +961,15 @@ func (v *fnVerifier) seq(list []ast.Stmt, from, to token.Pos, st *state, c ctrl,
 	}
 	var loop ast.Stmt
 	if len(list) > 0 {
-		switch list[0].(type) {
+		switch first := list[0].(type) {
 		case *ast.ForStmt, *ast.RangeStmt:
 			loop = list[0]
+		case *ast.LabeledStmt:
+			// The annotations of a labelled loop stand above its label.
+			switch first.Stmt.(type) {
+			case *ast.ForStmt, *ast.RangeStmt:
+				loop = first.Stmt
+			}
 		}
 	}
 	if loop == nil {
@@ -978,6 +990,8 @@ func (v *fnVerifier) seq(list []ast.Stmt, from, to token.Pos, st *state, c ctrl,
 		v.forStmt(s, spec, nil, st, v.logging(s, rest))
 	case *ast.RangeStmt:
 		v.rangeStmt(s, spec, st, v.logging(s, rest))
+	case *ast.LabeledStmt:
+		v.labeled(s, spec, st, c, rest)
 	default:
 		v.stmt(s, st, c, rest)
 	}
@@ -1063,8 +1077,14 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 			c.brk(st)
 		case s.Label == nil && s.Tok == token.CONTINUE && c.cont != nil:
 			c.cont(st)
+		case s.Label != nil && (s.Tok == token.BREAK || s.Tok == token.CONTINUE):
+			v.jump(s, st)
+		case s.Tok == token.FALLTHROUGH:
+			// switchStmt runs the next clause in its place; one that it
+			// did not take is not a fallthrough Go allows.
+			v.unsupported(s.Pos(), "fallthrough is supported only as the last statement of a clause of an expression switch")
 		default:
-			v.unsupported(s.Pos(), "goto, fallthrough, and labeled branches are not supported")
+			v.unsupported(s.Pos(), "goto is not supported")
 		}
 		return
 	case *ast.DeferStmt:
@@ -1234,13 +1254,26 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 		})
 	}
 	inner := ctrl{brk: k, cont: c.cont}
+	// A clause runs its body, and one that ends in fallthrough goes on to
+	// the body of the next clause in the source, default included, without
+	// testing it.
+	var run func(i int, st *state)
+	run = func(i int, st *state) {
+		clause := s.Body.List[i].(*ast.CaseClause)
+		if n := len(clause.Body); n > 0 {
+			if last, ok := clause.Body[n-1].(*ast.BranchStmt); ok && last.Tok == token.FALLTHROUGH {
+				v.seq(clause.Body[:n-1], clause.Colon, last.Pos(), st, inner, func(next *state) { run(i+1, next) })
+				return
+			}
+		}
+		v.seq(clause.Body, clause.Colon, clauseEnd(s.Body, i), st, inner, k)
+	}
 	var failed []*logic.Term
-	var fallback *ast.CaseClause
-	fallbackEnd := token.NoPos
+	fallback := -1
 	for i, clause := range s.Body.List {
 		clause := clause.(*ast.CaseClause)
 		if clause.List == nil {
-			fallback, fallbackEnd = clause, clauseEnd(s.Body, i)
+			fallback = i
 			continue
 		}
 		var alternatives []*logic.Term
@@ -1275,15 +1308,15 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 		v.branch(clause.Pos())
 		taken := st.clone()
 		taken.decide(logic.And(append(slices.Clip(failed), matched)...))
-		v.seq(clause.Body, clause.Colon, clauseEnd(s.Body, i), taken, inner, k)
+		run(i, taken)
 		failed = append(failed, logic.Not(matched))
 	}
 	st.decide(logic.And(failed...))
-	if fallback == nil {
+	if fallback < 0 {
 		k(st)
 		return
 	}
-	v.seq(fallback.Body, fallback.Colon, fallbackEnd, st, inner, k)
+	run(fallback, st)
 }
 
 func (v *fnVerifier) ifStmt(s *ast.IfStmt, st *state, c ctrl, k func(*state)) {

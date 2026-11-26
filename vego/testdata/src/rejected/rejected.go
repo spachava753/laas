@@ -103,9 +103,12 @@ func Goes(x int) {
 	go Goes(x) // want `vego:\ cannot\ verify\ Goes:\ go\ statements\ are\ not\ supported\ yet`
 }
 
+// Labeled verifies since labelled break and continue are supported (F37).
+//
 // @Requires n >= 0
 func Labeled(n int) {
-outer: // want `vego:\ cannot\ verify\ Labeled:\ labeled\ statements\ are\ not\ supported\ yet`
+	// @Variant n - i
+outer:
 	for i := 0; i < n; i++ {
 		continue outer
 	}

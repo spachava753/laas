@@ -852,6 +852,11 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 		shape.enter(head)
 		defer shape.leave()
 	}
+	// break and continue with the loop's label go where the unlabelled ones
+	// of its body go (labels.go).
+	if spec.label != nil {
+		defer v.withLabel(spec.label, &labelTarget{brk: k, cont: after, ranges: v.ranges})()
+	}
 	v.seq(shape.body.List, shape.body.Lbrace, shape.body.Rbrace, head, ctrl{brk: k, cont: after}, after)
 }
 

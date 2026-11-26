@@ -2811,6 +2811,7 @@ guide	guide.Event	3	558	0
 guide	guide.Exact.Get	3	776	0
 guide	guide.FailingLine	4	2887	0
 guide	guide.Fails	2	601	0
+guide	guide.Fall	14	1081	0
 guide	guide.FieldsOf	0	0	0
 guide	guide.Fill	9	20266	0
 guide	guide.FillAndCount	8	391848	1
@@ -2820,6 +2821,7 @@ guide	guide.FillIf	10	395976	1
 guide	guide.FillInLoop	11	18265	0
 guide	guide.FillUnlisted	5	1840	0
 guide	guide.Find	7	7112	0
+guide	guide.FindCell	15	70379	0
 guide	guide.Fingerprint	12	19522	0
 guide	guide.First	4	1222	0
 guide	guide.FirstArg	6	3217	0
@@ -3060,6 +3062,7 @@ guide	guide.Shutter.Shut	3	3861	0
 guide	guide.Sink	3	471	0
 guide	guide.Size	10	4806	0
 guide	guide.Sized.Size	3	961	0
+guide	guide.SkipsTail	10	4625	0
 guide	guide.Small	6	1195	0
 guide	guide.Smallest	4	13770	0
 guide	guide.Snapshot	0	0	0
@@ -4176,6 +4179,29 @@ keepsvars	keepsvars.setOut	5	5004	0
 keepsvars	keepsvars.the initialiser of counts	0	0	0
 keepsvars	keepsvars.viaHelper	6	3872	0
 keepsvars	keepsvars.viaValue	9	7937	0
+labels	labels.BreakThenWrite	11	17282	0
+labels	labels.Counted	28	16193	0
+labels	labels.Fall	14	1081	0
+labels	labels.FallIntoDefault	10	468	0
+labels	labels.FallThenBreak	6	352	0
+labels	labels.Find	15	70379	0
+labels	labels.FirstZero	6	1933	0
+labels	labels.Inner	12	12247	0
+labels	labels.InnerMap	14	272914	2
+labels	labels.Keys	12	38244	0
+labels	labels.PerIteration	42	78956	0
+labels	labels.RowsWithNegative	17	17556	0
+labels	labels.Sign	7	1636	0
+labelsbad	labelsbad.BreakFromSwitch	9	7677	0
+labelsbad	labelsbad.BreaksInvariant	9	6981	0
+labelsbad	labelsbad.FallTested	4	328	0
+labelsbad	labelsbad.Goto	1	111	0
+labelsbad	labelsbad.LeavesEarly	13	13423	0
+labelsbad	labelsbad.OnSwitch	1	111	0
+labelsbad	labelsbad.SharedIteration	40	57292	0
+labelsbad	labelsbad.SkipsTail	10	4625	0
+labelsbad	labelsbad.next	8	5283	0
+labelsbad	labelsbad.tagOnce	8	5921	0
 layers	(*sync.Mutex).Lock	1	1652	0
 layers	(*sync.Mutex).Unlock	1	1611	0
 layers	layers.Behind	17	27175	0
@@ -5587,7 +5613,7 @@ rejected	rejected.KeysOfPointer	0	0	0
 rejected	rejected.KeysOfSlice	0	0	0
 rejected	rejected.KeysOfString	0	0	0
 rejected	rejected.KeysOfSum	0	0	0
-rejected	rejected.Labeled	1	138	0
+rejected	rejected.Labeled	5	1476	0
 rejected	rejected.LenCall	0	0	0
 rejected	rejected.LocalTrue	0	0	0
 rejected	rejected.MisplacedInvariant	1	111	0
