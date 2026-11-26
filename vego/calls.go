@@ -658,6 +658,12 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	pre := &specEnv{v: v, sink: st, fn: fn, args: args, now: before}
 	// A logger in a variable is ready outside its own calls (loggers.go).
 	inertLogger := v.loggerCall(call, fn, pre, st)
+	// A call that may lead back to the function under verification through
+	// calls that name their callee, the cycles whose Variant checkRecursion
+	// asks.
+	self := v.callGraph().byObj[v.fn.obj]
+	recursive := len(fn.requires) > 0 && self != nil && v.fn.decl != nil && v.fn.spelled == nil && v.fn.measure != nil &&
+		v.cycleThrough(self, v.callEdges(call, fn), true) != nil
 	for _, c := range fn.requires {
 		// A bound of what a buffer can grow to, or of what a trusted
 		// function allocates: the message says what bound on each length
@@ -687,7 +693,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			continue
 		}
 		v.stateNote = v.stateHint(c, fn, args, st)
-		if v.recursiveCall(fn, call) {
+		if recursive {
 			// The precondition of a call that recurses carries what it
 			// says to the function's entry, where its Variant is asked, as
 			// an invariant carries it to a loop's head (F1 of F38).
@@ -1608,17 +1614,6 @@ func (v *fnVerifier) calleeFormula(c *clause, env *specEnv) *logic.Term {
 	}
 	v.noteIs(env.sink, t)
 	return t
-}
-
-// recursiveCall reports whether a call may lead back to the function under
-// verification through calls that name their callee, the cycles whose
-// Variant checkRecursion asks.
-func (v *fnVerifier) recursiveCall(callee *funcInfo, call *ast.CallExpr) bool {
-	self := v.callGraph().byObj[v.fn.obj]
-	if self == nil || v.fn.decl == nil || v.fn.spelled != nil || v.fn.measure == nil {
-		return false
-	}
-	return v.cycleThrough(self, v.callEdges(call, callee), true) != nil
 }
 
 // checkRecursion looks at every call for a way back to the function under

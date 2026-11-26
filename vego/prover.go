@@ -1,7 +1,6 @@
 package vego
 
 import (
-
 	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
 )

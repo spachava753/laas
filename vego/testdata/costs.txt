@@ -4482,8 +4482,13 @@ mapping	mapping.BothFlags	8	6015	0
 mapping	mapping.BoxesValue	1	46	0
 mapping	mapping.Bump	16	481691	2
 mapping	mapping.BumpEntry	9	14342	0
+mapping	mapping.ByAssert	11	15097	0
+mapping	mapping.ByCondition	8	13673	0
+mapping	mapping.ByEnsures	12	14791	0
+mapping	mapping.ByInnerRange	10	17804	0
 mapping	mapping.ByInt	10	15611	0
 mapping	mapping.ByInvariant	11	18669	0
+mapping	mapping.ByOverflow	16	24772	0
 mapping	mapping.ByRequires	13	23489	0
 mapping	mapping.CallerLoses	6	10517	0
 mapping	mapping.Clear	11	428110	2
@@ -4607,6 +4612,7 @@ mapping	mapping.WidenedOneLess	13	912161	1
 mapping	mapping.WritesAnother	4	8756	0
 mapping	mapping.WritesWhole	4	5336	0
 mapping	mapping.WrongStringKeys	6	10250	0
+mapping	mapping.addKey	8	15592	0
 mapping	mapping.bumpTo	8	10488	0
 mapping	mapping.dropEntry	5	6556	0
 mapping	mapping.keyed.Keys	3	4490	0
