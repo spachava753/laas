@@ -68,10 +68,13 @@ func containsTerm(t, sub *logic.Term) bool {
 // shippedClasses is the class of every shipped entry in the bound on every
 // value under a declared memory (sizes.go, and the ROADMAP's Sizes under a
 // declared memory), each read from the source of Go 1.26.6 and 1.27.3:
-// what it exposes of new memory is written (W), it reserves by a number
-// and its entry declares what keeps the bound (N), it reserves a constant
-// (C), or it exposes no memory it made (none: a part of what it is handed,
-// a number, a boolean, or nothing).
+// what it exposes of new memory is written (W), it reserves at most the
+// array of an operand, which keeps the bound by the operand's (O), it
+// reserves by a number and its entry declares what keeps the bound (N), it
+// reserves a constant (C), or it exposes no memory it made (none: a part
+// of what it is handed, a number, a boolean, or nothing). The parsers of
+// strconv are W: on an error they return a *NumError that holds a copy of
+// their input (F23 of the review of step 2c).
 var shippedClasses = map[string][]string{
 	"N": {
 		"(*bytes.Buffer).Grow", "(*strings.Builder).Grow", "slices.Grow",
@@ -81,12 +84,16 @@ var shippedClasses = map[string][]string{
 		"bufio.NewWriter", "crypto/md5.Sum", "crypto/sha256.Sum256", "io.LimitReader", "io.MultiWriter", "io.NopCloser", "io.TeeReader",
 		"log.New", "net/http.NewServeMux", "os.Create", "os.Open",
 	},
+	"O": {
+		"bytes.Map",
+	},
 	"W": {
+		"strconv.Atoi", "strconv.ParseBool", "strconv.ParseInt", "strconv.ParseUint",
 		"(*bufio.Scanner).Text", "(*bytes.Buffer).String", "(*bytes.Buffer).Write", "(*bytes.Buffer).WriteByte", "(*bytes.Buffer).WriteRune",
 		"(*bytes.Buffer).WriteString", "(*encoding/json.Decoder).Decode", "(*encoding/json.Encoder).Encode", "(*log.Logger).Print",
 		"(*log.Logger).Printf", "(*log.Logger).Println", "(*net/url.URL).Query", "(*regexp.Regexp).FindStringSubmatch",
 		"(*strings.Builder).Write", "(*strings.Builder).WriteByte", "(*strings.Builder).WriteRune", "(*strings.Builder).WriteString",
-		"(net/http.Header).Set", "bytes.FieldsFunc", "bytes.Join", "bytes.Map", "bytes.Repeat", "bytes.Replace", "bytes.ReplaceAll",
+		"(net/http.Header).Set", "bytes.FieldsFunc", "bytes.Join", "bytes.Repeat", "bytes.Replace", "bytes.ReplaceAll",
 		"encoding/hex.EncodeToString", "encoding/json.Marshal", "encoding/json.MarshalIndent", "encoding/json.Unmarshal", "fmt.Fprint",
 		"fmt.Fprintf", "fmt.Fprintln", "fmt.Print", "fmt.Printf", "fmt.Println", "fmt.Sprint", "fmt.Sprintf", "fmt.Sprintln", "io.MultiReader",
 		"io.WriteString", "log.Fatal", "log.Fatalf", "log.Fatalln", "log.Print", "log.Printf", "log.Println", "maps.Clone", "maps.Copy",
@@ -119,8 +126,7 @@ var shippedClasses = map[string][]string{
 		"path.Ext", "path.IsAbs", "path.Split", "path/filepath.Base", "path/filepath.Ext", "path/filepath.Split", "slices.BinarySearch",
 		"slices.Clip", "slices.Compact", "slices.Contains", "slices.ContainsFunc", "slices.Delete", "slices.DeleteFunc", "slices.Equal",
 		"slices.Index", "slices.IndexFunc", "slices.Max", "slices.Min", "slices.Reverse", "slices.Sort", "sort.Find", "sort.Ints",
-		"sort.IntsAreSorted", "sort.Search", "sort.SearchInts", "sort.Strings", "strconv.Atoi", "strconv.ParseBool", "strconv.ParseInt",
-		"strconv.ParseUint", "strings.Contains", "strings.ContainsFunc", "strings.Count", "strings.Cut", "strings.EqualFold",
+		"sort.IntsAreSorted", "sort.Search", "sort.SearchInts", "sort.Strings", "strings.Contains", "strings.ContainsFunc", "strings.Count", "strings.Cut", "strings.EqualFold",
 		"strings.HasPrefix", "strings.HasSuffix", "strings.Index", "strings.IndexByte", "strings.IndexFunc", "strings.LastIndex",
 		"strings.LastIndexByte", "strings.LastIndexFunc", "strings.TrimFunc", "strings.TrimLeft", "strings.TrimLeftFunc", "strings.TrimPrefix",
 		"strings.TrimRight", "strings.TrimRightFunc", "strings.TrimSpace", "strings.TrimSuffix", "time.Date", "time.Now", "time.Since",

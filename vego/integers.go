@@ -90,7 +90,7 @@ func (v *fnVerifier) refuseTooLarge(pos token.Pos, t types.Type) {
 			types.TypeString(t, types.RelativeTo(v.pass.Pkg)), size, v.maxAlloc()))
 	}
 	if decl != nil && size.Cmp(decl.arrayBound()) > 0 {
-		v.unsupported(pos, fmt.Sprintf("%s is %s bytes, more than the declared memory allows a value to reserve (%s bytes, four times the %s declared, "+
+		v.unsupported(pos, fmt.Sprintf("%s is %s bytes, more than the declared memory allows a value to reserve (%s bytes, five times the %s declared, "+
 			"and a page), since it may be reserved and never written", types.TypeString(t, types.RelativeTo(v.pass.Pkg)), size, decl.arrayBound(), decl.written))
 	}
 }
@@ -108,17 +108,20 @@ func (v *fnVerifier) checkAlloc(st *state, guard []*logic.Term, count *logic.Ter
 
 // checkReserved requires what a make reserves by a number, count elements
 // of the given type that it does not write, to keep the bound on the array
-// of every slice under a declared memory: count * size <= R (class N of the
-// bound on every value, sizes.go). Without the declaration it asks nothing.
-func (v *fnVerifier) checkReserved(st *state, guard []*logic.Term, count *logic.Term, elem types.Type, pos token.Pos, what string) {
+// of every slice under a declared memory: count * size <= R and count an
+// int (class N of the bound on every value, sizes.go). R is below MaxAlloc,
+// so it implies what checkAlloc asks, which is not asked then (F22 of the
+// review of step 2c). It reports whether the declaration was in effect.
+func (v *fnVerifier) checkReserved(st *state, guard []*logic.Term, count *logic.Term, elem types.Type, pos token.Pos, what string) bool {
 	decl := v.sizesOf()
 	if decl == nil {
-		return
+		return false
 	}
 	bytes := logic.Mul(count, logic.IntLit(v.pass.TypesSizes.Sizeof(elem)))
-	v.checkDeclared(st, guard, logic.Le(bytes, logic.BigLit(decl.arrayBound())), pos,
-		"%s may reserve more than the declared memory allows a value to: at most %s bytes, four times the %s declared, and a page; "+
+	v.checkDeclared(st, guard, logic.And(logic.Le(bytes, logic.BigLit(decl.arrayBound())), v.typeFact(count, types.Typ[types.Int])), pos,
+		"%s may reserve more than the declared memory allows a value to: at most %s bytes, five times the %s declared, and a page; "+
 			"a size that a number gives is not bounded by what the machines hold, so bound it", what, decl.arrayBound(), decl.written)
+	return true
 }
 
 // checkFits requires the mathematical result of an operation to be a value of

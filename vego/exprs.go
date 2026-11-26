@@ -759,8 +759,9 @@ func (v *fnVerifier) makeSlice(e *ast.CallExpr, st *state, guard []*logic.Term) 
 	// review of F38): a variable whose array is larger than a declared
 	// memory allows would break the bound every read of it states.
 	v.uncaptured(func() {
-		v.checkAlloc(st, guard, capacity, elemType(t), e.Pos(), "the slice made")
-		v.checkReserved(st, guard, capacity, elemType(t), e.Pos(), "the slice made")
+		if !v.checkReserved(st, guard, capacity, elemType(t), e.Pos(), "the slice made") {
+			v.checkAlloc(st, guard, capacity, elemType(t), e.Pos(), "the slice made")
+		}
 	})
 	return v.allocSlice(st, elemType(t), nil, length, capacity)
 }

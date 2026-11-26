@@ -169,3 +169,14 @@ func GrowsBuilder(n int) (r string) {
 	r = b.String()
 	return r
 }
+
+// A Builder sized for the string it will hold: a string is at most the
+// memory (F20 of the review of step 2c).
+// @Ensures True
+func Sized(s string) (r string) {
+	var b strings.Builder
+	b.Grow(len(s))
+	b.WriteString(s)
+	r = b.String()
+	return r
+}

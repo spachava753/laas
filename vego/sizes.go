@@ -218,15 +218,15 @@ type sizesDecl struct {
 	line    int
 }
 
-// sizesSlack is what the bound on the array of a slice adds to four times
+// sizesSlack is what the bound on the array of a slice adds to five times
 // the memory: the page that growslice may round a new array up by.
 const sizesSlack = 1 << 16
 
 // arrayBound is R, the most bytes the array of a slice takes under the
-// declaration: 4 * M + 65536 (see Slices, The bound on every value under a
-// declared memory, in the ROADMAP).
+// declaration: 5 * M + 65536 (see Sizes under a declared memory, in the
+// ROADMAP).
 func (d *sizesDecl) arrayBound() *big.Int {
-	r := new(big.Int).Mul(d.memory, big.NewInt(4))
+	r := new(big.Int).Mul(d.memory, big.NewInt(5))
 	return r.Add(r, big.NewInt(sizesSlack))
 }
 

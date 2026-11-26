@@ -8183,7 +8183,7 @@ func Last(names []string) (r string) {
 ```
 
 ```text
-vego: the trusted contract of slices.Max (slices.yaml:247) cannot be used with S = []string,
+vego: the trusted contract of slices.Max (slices.yaml:255) cannot be used with S = []string,
 E = string: in its ensures "x[0:|x|) <= result": operator <= cannot be applied to string or slice
 values; a formula has no order of them; write a loop instead
 ```

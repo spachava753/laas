@@ -138,12 +138,12 @@ func TestSizesReport(t *testing.T) {
 	for _, want := range []string{
 		"Memory declared in sizes: 1\n  vego-trusted.yaml:2\n",
 		"claims:  the machines the program runs on never hold 256GB (256000000000 bytes) of its data at once, in memory and swap together, however it is stored",
-		"every string, and the entries of every map, take at most 256000000000 bytes, and the array of every slice at most 1024000065536 bytes\n",
+		"every string, and the entries of every map, take at most 256000000000 bytes, and the array of every slice at most 1280000065536 bytes\n",
 		"    leaves:  every size that a number gives, as the length of make, Grow, slices.Grow, and the count of Repeat, and every product of lengths, " +
 			"as strings.Join and Replace over a slice, to be proved; a Variant may not rest on it\n",
 		"    reason:  Our machines have 64 GB.\n",
 		"    obligations only it proved: none in example.com/386: it proves nothing on this platform, where one allocation is at most 4294967295 bytes, " +
-			"less than the 1024000065536 bytes it would bound an array by; 3 in example.com/amd64\n",
+			"less than the 1280000065536 bytes it would bound an array by; 3 in example.com/amd64\n",
 	} {
 		if !strings.Contains(report, want) {
 			t.Errorf("the report does not say %q:\n%s", want, report)

@@ -142,15 +142,15 @@ trusted:
       after Reset, which keeps the capacity, after Grow, and after reads,
       which move off. Under a declared memory (sizes) what it reserves and does not write is
       also bounded: the new capacity is below 2 * Len + 3 * n and a page, with
-      Len written, so it keeps the bound on arrays, 4 * Memory and a page,
-      when 3 * n <= 2 * Memory.
+      Len written, so it keeps the bound on arrays, 5 * Memory and a page,
+      when n <= Memory.
     requires:
       - "b != nil"
       - "0 <= n"
       - "3 * (|b| + n) + 65536 <= MaxAlloc"
       - "5 * (|b| + n) <= MaxInt"
     declared:
-      - "3 * n <= 2 * Memory"
+      - "n <= Memory"
     modifies: [b]
     ensures:
       - "|b'| = |b|"

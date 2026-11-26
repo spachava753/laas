@@ -121,8 +121,8 @@ trusted:
       also bounded: append(s[:cap(s)], make(S, k)...) copies cap(s)
       elements, which are written, and adds k <= n that may stay fresh
       pages, so the new capacity is at most 2 * (cap(s) + k) * elemsize(s)
-      and a page, which keeps the bound on arrays, 4 * Memory and a page,
-      when n * elemsize(s) <= Memory.
+      and a page, which keeps the bound on arrays, 5 * Memory and a page,
+      when n * elemsize(s) <= Memory (3/2 of it would do).
     asserts: {S: [], E: []}
     requires:
       - "n >= 0"

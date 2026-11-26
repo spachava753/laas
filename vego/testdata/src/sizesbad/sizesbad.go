@@ -14,7 +14,7 @@ import (
 // @Requires n >= 0
 // @Ensures True
 func Made(n int) (r []byte) {
-	r = make([]byte, n) // want `vego: the slice made may be more than can be allocated` `vego: the slice made may reserve more than the declared memory allows a value to`
+	r = make([]byte, n) // want `vego: the slice made may reserve more than the declared memory allows a value to`
 	return r
 }
 
@@ -59,7 +59,7 @@ func ExtendedParens(s []byte, n int) (r []byte) {
 // @Requires 0 <= k And k <= 1000000
 // @Ensures True
 func Scaled(s string, k int) (r []byte) {
-	r = make([]byte, len(s)*k) // want `vego: multiplication may overflow int` `vego: the slice made may be more than can be allocated` `vego: the slice made may reserve more than the declared memory allows a value to`
+	r = make([]byte, len(s)*k) // want `vego: multiplication may overflow int` `vego: the slice made may reserve more than the declared memory allows a value to`
 	return r
 }
 
@@ -136,7 +136,7 @@ func CallsShort(s string) (r string) {
 // @Requires 0 <= n And n <= MaxAlloc
 // @Ensures True
 func Reserves(n int) (r []int64) {
-	r = make([]int64, n) // want `vego: the slice made may be more than can be allocated` `vego: the slice made may reserve more than the declared memory allows a value to`
+	r = make([]int64, n) // want `vego: the slice made may reserve more than the declared memory allows a value to`
 	return r
 }
 
@@ -190,7 +190,7 @@ func HandsBig(p []byte) (r []byte) {
 // @Requires 0 <= n And n <= 70368744177664
 // @Ensures True
 func MadeBelowMaxAlloc(n int) (r []byte) {
-	r = make([]byte, n) // want `vego: the slice made may reserve more than the declared memory allows a value to: at most 1024000065536 bytes`
+	r = make([]byte, n) // want `vego: the slice made may reserve more than the declared memory allows a value to: at most 1280000065536 bytes`
 	return r
 }
 
@@ -213,7 +213,7 @@ func ExtendedSmall(s []byte, n int) (r []byte) {
 // @Ensures True
 func GrowsBuilder(n int) (r string) {
 	var b strings.Builder
-	b.Grow(n) // want `vego: precondition of Grow may not hold under the declared memory: 3 \* n <= 2 \* Memory`
+	b.Grow(n) // want `vego: precondition of Grow may not hold under the declared memory: n <= Memory`
 	r = b.String()
 	return r
 }
@@ -248,4 +248,16 @@ var grown = slices.Grow([]byte(nil), 1<<45) // want `vego: precondition of Grow 
 // @Ensures r >= 0
 func Grown() (r int) {
 	return cap(grown)
+}
+
+// Two lengths may be the same string twice, so their sum is not bounded
+// by the memory (F20 of the review of step 2c); bound it, or grow by each.
+// @Ensures True
+func GrowsForTwo(a, b string) (r string) {
+	var w strings.Builder
+	w.Grow(len(a) + len(b)) // want `vego: precondition of Grow may not hold under the declared memory: n <= Memory`
+	w.WriteString(a)
+	w.WriteString(b)
+	r = w.String()
+	return r
 }
