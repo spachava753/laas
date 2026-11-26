@@ -1478,6 +1478,7 @@ footprints	(*footprints.Repo).Put	9	6586	0
 footprints	(*footprints.Users).config	2	474	0
 footprints	(*footprints.Users).lookup	2	572	0
 footprints	(*footprints.boundedTally).Write	13	17450	0
+footprints	(*footprints.crashCounter).Write	11	8561	0
 footprints	(*footprints.tally).Write	17	17965	0
 footprints	(*log.Logger).Printf	1	6882	0
 footprints	(*log.Logger).Println	1	5728	0
@@ -1629,6 +1630,7 @@ footprints	footprints.QOwners.Record	4	3654	0
 footprints	footprints.RangeStores	14	62854	0
 footprints	footprints.RangedPeek	15	65217	6
 footprints	footprints.ReadAfter	11	17777	0
+footprints	footprints.ReadAfterWriter	14	44409	1
 footprints	footprints.ReadThenWrite	13	41261	0
 footprints	footprints.RecordAll	13	914359	5
 footprints	footprints.RecordAllThrough	10	462513	1
@@ -1696,6 +1698,8 @@ footprints	footprints.boxIn	1	3617	0
 footprints	footprints.countDown	8	2320	0
 footprints	footprints.countDownFrom	8	3350	0
 footprints	footprints.countValid	8	73844	0
+footprints	footprints.crashEmit	7	12414	0
+footprints	footprints.crashShort	1	2343	0
 footprints	footprints.current	1	997	0
 footprints	footprints.fill	8	4325	0
 footprints	footprints.first	7	1824	0
