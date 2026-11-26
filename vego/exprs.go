@@ -17,7 +17,7 @@ func (v *fnVerifier) variable(id *ast.Ident, st *state, guard []*logic.Term) val
 	variable, _ := v.info.ObjectOf(id).(*types.Var)
 	if held := st.vals[variable]; held != nil && v.boxed[variable] {
 		return v.readAt(st, guard, v.unit.start(), id.Name, id.Pos(), func(sink *state, mem memory) value {
-			return v.pointedIn(sink, mem, variable.Type(), held)
+			return v.pointedIn(sink, mem, storedAs(variable.Type()), held)
 		})
 	}
 	if val := v.current(st, variable); val != nil {
@@ -312,9 +312,13 @@ func (v *fnVerifier) newObject(st *state, t types.Type, val value) value {
 // whose address is taken has one of its own, see findBoxed.
 func (v *fnVerifier) addressOf(e ast.Expr, st *state, guard []*logic.Term) value {
 	_, isStruct := v.info.TypeOf(e).Underlying().(*types.Struct)
+	single := singleValue(v.info.TypeOf(e))
+	_, named := ast.Unparen(e).(*ast.Ident)
 	switch lv := v.place(e); {
-	case !isStruct:
-		v.unsupported(e.Pos(), fmt.Sprintf("taking the address of %s is not supported: it is a %s, and only pointers to structs are supported",
+	case single && (lv.box == nil || !named):
+		v.unsupported(e.Pos(), interiorRefusal("taking the address of "+types.ExprString(e), v.info.TypeOf(e)))
+	case !isStruct && !single:
+		v.unsupported(e.Pos(), fmt.Sprintf("taking the address of %s is not supported: it is a %s, and only pointers to structs, numbers, booleans, and strings are supported",
 			types.ExprString(e), v.info.TypeOf(e)))
 	case lv.kind != placeMem:
 		v.unsupported(e.Pos(), fmt.Sprintf("taking the address of %s is not supported", types.ExprString(e)))
@@ -703,15 +707,15 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) v
 		return value{result}
 	case builtin("new"):
 		t := v.info.TypeOf(e.Args[0])
-		if _, isStruct := t.Underlying().(*types.Struct); !isStruct {
-			v.unsupported(e.Pos(), fmt.Sprintf("new(%s) is not supported; only structs can be pointed to", t))
+		if _, isStruct := t.Underlying().(*types.Struct); !isStruct && !singleValue(t) {
+			v.unsupported(e.Pos(), fmt.Sprintf("new(%s) is not supported; only structs, numbers, booleans, and strings can be pointed to", t))
 		}
 		// new takes a type, or a value to start from.
 		initial := zeroValue(t)
 		if !v.info.Types[e.Args[0]].IsType() {
 			initial = v.settled(st, guard, v.eval(e.Args[0], st, guard), t)
 		}
-		return v.newObject(st, t, initial)
+		return v.newObject(st, storedAs(t), initial)
 	case builtin("make"):
 		return v.makeSlice(e, st, guard)
 	case builtin("append"):

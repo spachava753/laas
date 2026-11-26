@@ -194,7 +194,7 @@ func PointerAsNumber(c *cell) (result int) {
 }
 
 // @Requires p != nil
-func PointerToNumber(p *int) (result int) { // want `vego: cannot verify PointerToNumber: parameter p has unsupported type \*int`
+func PointerToNumber(p *int) (result int) {
 	return *p
 }
 

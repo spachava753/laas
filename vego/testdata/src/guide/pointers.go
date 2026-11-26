@@ -1,0 +1,71 @@
+package guide
+
+// The programs of the section on pointers to numbers, booleans, and
+// strings.
+
+// Increment increments what p points to.
+//
+// @Requires p != nil And *p < 1000
+// @Modifies p
+// @Ensures *p' = *p + 1
+func Increment(p *int) {
+	*p = *p + 1
+}
+
+// @Ensures r = 6
+func IncrementLocal() (r int) {
+	x := 5
+	Increment(&x)
+	return x
+}
+
+// @Requires p != nil And q != nil
+// @Modifies p, q
+// @Ensures *p' = *q And *q' = *p
+func SwapInts(p, q *int) {
+	*p, *q = *q, *p
+}
+
+// Options has a limit that may be absent.
+type Options struct {
+	Limit *int
+}
+
+// @Ensures o.Limit != nil -> n = *o.Limit
+// @Ensures o.Limit = nil -> n = d
+func LimitOr(o Options, d int) (n int) {
+	if o.Limit != nil {
+		n = *o.Limit
+	} else {
+		n = d
+	}
+	return n
+}
+
+// Clicks counts clicks.
+type Clicks int
+
+// @Requires t != nil And *t < 100
+// @Modifies t
+// @Ensures *t' = *t + 1
+func (t *Clicks) Add() {
+	*t++
+}
+
+// @Ensures r = 2
+func CountTwice() (r Clicks) {
+	var t Clicks
+	t.Add()
+	t.Add()
+	return t
+}
+
+// Span holds two numbers.
+type Span struct{ lo, hi int }
+
+// @Ensures True
+func AddressOfField() (r int) {
+	var b Span
+	Increment(&b.lo) // want `vego: cannot verify AddressOfField: taking the address of b\.lo is not supported yet: it is a value of type int inside a struct, a slice, an array, or a package-level variable, and a pointer to a number, a boolean, or a string can point only to a value of its own, a local variable or what new makes; copy the value into a local variable and take its address`
+	return b.lo
+}

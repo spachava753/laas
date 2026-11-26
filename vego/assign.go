@@ -90,7 +90,9 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 			v.unsupported(e.Pos(), fmt.Sprintf("%s is not a local variable", e.Name))
 		}
 		if v.boxed[variable] {
-			lv.kind, lv.box, lv.typ, lv.cells = placeMem, variable, variable.Type(), v.cellsOf(variable.Type())
+			// A variable of a single value lives in its box: its cells,
+			// under its own type.
+			lv.kind, lv.box, lv.typ, lv.cells = placeMem, variable, variable.Type(), v.cellsOf(storedAs(variable.Type()))
 			break
 		}
 		lv.kind, lv.local, lv.typ = placeLocal, variable, variable.Type()

@@ -1,0 +1,282 @@
+// Package ptrvalsbad has pointers to single values whose contracts are
+// false, and pointers vego does not support.
+package ptrvalsbad
+
+// Inc increments what p points to.
+//
+// @Requires p != nil And *p < 1000
+// @Modifies p
+// @Ensures *p' = *p + 1
+func Inc(p *int) {
+	*p = *p + 1
+}
+
+// StaleRead claims the value x had before it was assigned.
+//
+// @Ensures r = 5
+func StaleRead() (r int) {
+	x := 5
+	p := &x
+	x = 2
+	return *p // want `vego: postcondition may not hold: r = 5`
+}
+
+// Unlisted writes what p points to without listing p.
+//
+// @Requires p != nil
+// @Ensures True
+func Unlisted(p *int) {
+	*p = 1 // want `vego: \*p is assigned, which Unlisted may not modify; list it in a // @Modifies clause, as p`
+}
+
+// KeepsOther claims that q is unchanged, which fails when p = q.
+//
+// @Requires p != nil And q != nil And *p < 1000
+// @Modifies p
+// @Ensures *q' = *q
+func KeepsOther(p, q *int) {
+	Inc(p)
+} // want `vego: postcondition may not hold: \*q' = \*q`
+
+// KeepsApart claims the same of a q that is not p, which holds.
+//
+// @Requires p != nil And q != nil And p != q And *p < 1000
+// @Modifies p
+// @Ensures *q' = *q
+func KeepsApart(p, q *int) {
+	Inc(p)
+}
+
+// SwapWrong claims that p keeps its value.
+//
+// @Requires p != nil And q != nil
+// @Modifies p, q
+// @Ensures *p' = *p
+func SwapWrong(p, q *int) {
+	*p, *q = *q, *p
+} // want `vego: postcondition may not hold: \*p' = \*p`
+
+// Config has a limit that may be absent.
+type Config struct {
+	Limit *int
+}
+
+// NoCheck reads the limit without checking it.
+//
+// @Ensures True
+func NoCheck(c Config) (n int) {
+	return *c.Limit // want `vego: pointer may be nil`
+}
+
+// MyInt has the memory of int.
+type MyInt int
+
+// Converted writes x through a *int converted from its *MyInt, and claims
+// the old value.
+//
+// @Ensures r = 1
+func Converted() (r MyInt) {
+	x := MyInt(1)
+	q := (*int)(&x)
+	*q = 5
+	return x // want `vego: postcondition may not hold: r = 1`
+}
+
+// Escapes returns the address of a local and claims its value.
+//
+// @Ensures p != nil And *p = 2
+func Escapes() (p *int) {
+	x := 1
+	return &x // want `vego: postcondition may not hold: \*p = 2`
+}
+
+// S has a number as a field.
+type S struct {
+	f int
+}
+
+// FieldAddress takes the address of a field.
+//
+// @Ensures True
+func FieldAddress() (r int) {
+	var s S
+	Inc(&s.f) // want `vego: cannot verify FieldAddress: taking the address of s\.f is not supported yet: it is a value of type int inside a struct, a slice, an array, or a package-level variable, and a pointer to a number, a boolean, or a string can point only to a value of its own, a local variable or what new makes; copy the value into a local variable and take its address`
+	return s.f
+}
+
+// ElementAddress takes the address of an element of a slice.
+//
+// @Requires |xs| > 0 And xs[0] < 1000
+// @Modifies xs
+// @Ensures True
+func ElementAddress(xs []int) {
+	Inc(&xs[0]) // want `vego: cannot verify ElementAddress: taking the address of xs\[0\] is not supported yet: it is a value of type int inside a struct, a slice, an array, or a package-level variable, and a pointer to a number, a boolean, or a string can point only to a value of its own, a local variable or what new makes; copy the value into a local variable and take its address`
+}
+
+// ArrayAddress takes the address of an element of an array.
+//
+// @Ensures True
+func ArrayAddress() (r int) {
+	var a [2]int
+	Inc(&a[0]) // want `vego: cannot verify ArrayAddress: taking the address of a\[0\] is not supported yet: it is a value of type int inside a struct, a slice, an array, or a package-level variable, and a pointer to a number, a boolean, or a string can point only to a value of its own, a local variable or what new makes; copy the value into a local variable and take its address`
+	return a[0]
+}
+
+// G is a package-level number.
+var G int
+
+// GlobalAddress takes the address of a package-level variable.
+//
+// @Ensures True
+func GlobalAddress() {
+	Inc(&G) // want `vego: cannot verify GlobalAddress: G is a package-level variable, which a verified function cannot assign yet`
+}
+
+// Counter counts.
+type Counter int
+
+// Bump increments the counter.
+//
+// @Requires c != nil And *c < 100
+// @Modifies c
+// @Ensures *c' = *c + 1
+func (c *Counter) Bump() {
+	*c++
+}
+
+// Stats holds a counter in a field and one embedded.
+type Stats struct {
+	Hits Counter
+	Counter
+}
+
+// FieldMethod calls a pointer method on a field.
+//
+// @Requires s != nil And s.Hits < 100
+// @Modifies s
+// @Ensures True
+func FieldMethod(s *Stats) {
+	s.Hits.Bump() // want `vego: cannot verify FieldMethod: calling Bump takes the address of s\.Hits, which is not supported yet: it is a value of type ptrvalsbad\.Counter inside a struct, a slice, an array, or a package-level variable, and a pointer to a number, a boolean, or a string can point only to a value of its own, a local variable or what new makes; copy the value into a local variable and take its address`
+}
+
+// PromotedMethod calls a pointer method promoted from an embedded counter.
+//
+// @Requires s != nil And s.Counter < 100
+// @Modifies s
+// @Ensures True
+func PromotedMethod(s *Stats) {
+	s.Bump() // want `vego: cannot verify PromotedMethod: calling Bump takes the address of a field of s, which is not supported yet: it is a value of type ptrvalsbad\.Counter inside a struct, a slice, an array, or a package-level variable, and a pointer to a number, a boolean, or a string can point only to a value of its own, a local variable or what new makes; copy the value into a local variable and take its address`
+}
+
+// ElementMethod calls a pointer method on an element of a slice.
+//
+// @Requires |cs| > 0 And cs[0] < 100
+// @Modifies cs
+// @Ensures True
+func ElementMethod(cs []Counter) {
+	cs[0].Bump() // want `vego: cannot verify ElementMethod: calling Bump takes the address of cs\[0\], which is not supported yet: it is a value of type ptrvalsbad\.Counter inside a struct, a slice, an array, or a package-level variable, and a pointer to a number, a boolean, or a string can point only to a value of its own, a local variable or what new makes; copy the value into a local variable and take its address`
+}
+
+// NotAPointer dereferences a number in a formula.
+//
+// @Ensures *n = 1 // want `vego: in Ensures annotation: n has type int, and \* follows only a pointer`
+func NotAPointer(n int) {
+}
+
+// StructWhole dereferences a pointer to a struct in a formula.
+//
+// @Requires s != nil
+// @Ensures *s = *s // want `vego: in Ensures annotation: s points to a struct, which a formula cannot name as a whole after \*; name its fields`
+func StructWhole(s *S) {
+}
+
+// Twice dereferences twice in a formula.
+//
+// @Requires p != nil
+// @Ensures **p = 1 // want `vego: in Ensures annotation: p has type int, and \* follows only a pointer`
+func Twice(p *int) {
+}
+
+// ModifiesDeref names what p points to with *.
+//
+// @Requires p != nil
+// @Modifies *p // want `vego: syntax error in Modifies annotation: Modifies names what a pointer points to by the pointer: write p, not \*p`
+// @Ensures True
+func ModifiesDeref(p *int) {
+	*p = 1
+}
+
+// TimesPointer multiplies by a pointer.
+//
+// @Requires p != nil
+// @Ensures 2 *p = 2 // want `vego: in Ensures annotation: expected an integer but p has type pointer`
+func TimesPointer(p *int) {
+}
+
+// TimesDeref multiplies by what p points to.
+//
+// @Requires p != nil And *p = 1
+// @Ensures 2 * *p = 2
+func TimesDeref(p *int) {
+}
+
+// WithinSlice asks whether a pointer to a number lies in a slice.
+//
+// @Requires p != nil
+// @Ensures within(p, xs) // want `vego: in Ensures annotation: within\(p, xs\): p points to a value of type int, which lies only in a value of its own, a variable or what new made, and in no slice or struct; within of two such pointers says that they are equal`
+func WithinSlice(p *int, xs []int) {
+}
+
+// WithinStruct asks whether a pointer to a number lies in a struct.
+//
+// @Requires p != nil And s != nil
+// @Ensures within(p, s) // want `vego: in Ensures annotation: within\(p, s\): p points to a value of type int, which lies only in a value of its own, a variable or what new made, and in no slice or struct; within of two such pointers says that they are equal`
+func WithinStruct(p *int, s *S) {
+}
+
+// DeferredResultWrong claims the value the return assigned.
+//
+// @Ensures r = 1
+func DeferredResultWrong() (r int) {
+	p := &r
+	defer func() { *p = *p + 1 }()
+	return 1 // want `vego: postcondition may not hold: r = 1`
+}
+
+// CapturedWrong claims the value before the literal wrote it.
+//
+// @Ensures r = 1
+func CapturedWrong() (r int) {
+	x := 1
+	p := &x
+	func() { x = 4 }()
+	return *p // want `vego: postcondition may not hold: r = 1`
+}
+
+// Owner owns the counter its field points to.
+//
+// @Owns c
+type Owner struct {
+	c *Counter
+}
+
+// useOwner writes what p points to and claims that what o owns is
+// unchanged.
+//
+// @Requires o != nil And o.c != nil And p != nil
+// @Modifies o, p
+// @Ensures o.c' = o.c And *o.c' = *o.c
+func useOwner(o *Owner, p *int) {
+	*p = 7
+	o.c = o.c
+}
+
+// HandOwned hands useOwner what o owns, as a *int: the box twin of the
+// storage fix (A5 of the design review).
+//
+// @Requires o != nil And o.c != nil
+// @Modifies o
+// @Ensures True
+func HandOwned(o *Owner) {
+	useOwner(o, (*int)(o.c)) // want `vego: \(\*int\)\(o\.c\) is memory that o owns, and useOwner is handed what reaches a Owner, which can own it; useOwner assumes that nothing it is handed is what an owner it is handed owns: copy it, or pass it alone`
+}

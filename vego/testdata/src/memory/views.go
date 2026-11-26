@@ -467,12 +467,13 @@ func RangeAddress(ps []Point) {
 	}
 }
 
-// AddressOfInt takes the address of something that is not a struct.
+// AddressOfInt takes the address of a number, which then lives in a box
+// of its own (F37).
 //
 // @Ensures result = 1
 func AddressOfInt() (result int) {
 	x := 1
-	p := &x // want `vego: cannot verify AddressOfInt: p has unsupported type \*int`
+	p := &x
 	return *p
 }
 

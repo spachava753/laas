@@ -1119,6 +1119,19 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 	// s := v would (F9 of the design review of F32).
 	root := v.addressRoot(sel.X)
 	fixed := root != nil && !v.isAssigned(root) && !v.isBoxedGlobal(root)
+	// A pointer method of a single value takes the address of the variable
+	// that holds it, which lives in a box; any other place of a single value
+	// is inside a struct, a slice, an array, or a package-level variable,
+	// and a pointer to it would be an interior pointer (A4 of the design
+	// review of F37).
+	if wantPointer && len(path) == 1 && singleValue(t) {
+		if id, ok := ast.Unparen(sel.X).(*ast.Ident); ok {
+			if variable, ok := v.info.ObjectOf(id).(*types.Var); ok && v.boxed[variable] && st.vals[variable] != nil {
+				return st.vals[variable]
+			}
+		}
+		v.unsupported(call.Pos(), interiorRefusal(fmt.Sprintf("calling %s takes the address of %s, which", sel.Sel.Name, types.ExprString(sel.X)), t))
+	}
 	if _, isStruct := t.Underlying().(*types.Struct); isStruct && !fixed && v.place(sel.X).kind == placeMem {
 		// The struct is followed by its position, and only the embedded
 		// pointers on the way are read.
@@ -1142,6 +1155,9 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 			})
 			v.checkNil(st, guard, where[0], sel.Sel.Pos())
 			t = object
+		}
+		if wantPointer && singleValue(t) {
+			v.unsupported(call.Pos(), interiorRefusal(fmt.Sprintf("calling %s takes the address of a field of %s, which", sel.Sel.Name, types.ExprString(sel.X)), t))
 		}
 		if wantPointer {
 			return where
@@ -1184,6 +1200,8 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 	switch {
 	case wantPointer == havePointer:
 		return cur
+	case wantPointer && where != nil && singleValue(t):
+		v.unsupported(call.Pos(), interiorRefusal(fmt.Sprintf("calling %s takes the address of a field of %s, which", sel.Sel.Name, types.ExprString(sel.X)), t))
 	case wantPointer && where != nil:
 		return where
 	case wantPointer:

@@ -558,10 +558,11 @@ func findLooped(body *ast.BlockStmt) map[*ast.DeferStmt]bool {
 // a write to the variable is seen through the pointer.
 func (v *fnVerifier) findBoxed(body *ast.BlockStmt) map[*types.Var]bool {
 	boxed := map[*types.Var]bool{}
+	targets := v.placeTargets(body)
 	ast.Inspect(body, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.UnaryExpr:
-			if root := v.localRoot(n.X); n.Op == token.AND && root != nil {
+			if root := v.localRoot(n.X); n.Op == token.AND && root != nil && !(targets[n] && singleValue(root.Type())) {
 				boxed[root] = true
 			}
 		case *ast.SliceExpr:
@@ -592,7 +593,10 @@ func (v *fnVerifier) findBoxed(body *ast.BlockStmt) map[*types.Var]bool {
 				}
 				t = object.Field(index).Type()
 			}
-			if _, isStruct := t.Underlying().(*types.Struct); !isStruct {
+			// A method of a single value takes the address of a variable
+			// that holds one directly; one reached through a field is an
+			// interior pointer, refused at the call (receiver).
+			if _, isStruct := t.Underlying().(*types.Struct); !isStruct && !(singleValue(t) && len(path) == 1) {
 				break
 			}
 			if root := v.localRoot(sel.X); root != nil {
@@ -607,6 +611,9 @@ func (v *fnVerifier) findBoxed(body *ast.BlockStmt) map[*types.Var]bool {
 // localRoot returns the local variable of a modelled struct type that an
 // expression is, or is a field of, without a pointer in between.
 func (v *fnVerifier) localRoot(e ast.Expr) *types.Var {
+	// A variable of a single value lives in memory only when its own
+	// address is taken; &s.f of such a field is refused where it is taken.
+	outer := ast.Unparen(e)
 	for {
 		switch x := ast.Unparen(e).(type) {
 		case *ast.Ident:
@@ -615,7 +622,7 @@ func (v *fnVerifier) localRoot(e ast.Expr) *types.Var {
 				return nil
 			}
 			_, isStruct := variable.Type().Underlying().(*types.Struct)
-			if _, modelled := layoutOf(variable.Type()); !(isStruct || isArray(variable.Type())) || !modelled {
+			if _, modelled := layoutOf(variable.Type()); !(isStruct || isArray(variable.Type()) || singleValue(variable.Type()) && ast.Unparen(e) == outer) || !modelled {
 				return nil
 			}
 			return variable
@@ -645,7 +652,7 @@ func (v *fnVerifier) localRoot(e ast.Expr) *types.Var {
 func (v *fnVerifier) bind(st *state, variable *types.Var, val value) {
 	checkGrowth(val)
 	if v.boxed[variable] {
-		val = v.newObject(st, variable.Type(), val)
+		val = v.newObject(st, storedAs(variable.Type()), val)
 	}
 	st.vals[variable] = val
 }
@@ -654,7 +661,7 @@ func (v *fnVerifier) bind(st *state, variable *types.Var, val value) {
 func (v *fnVerifier) current(st *state, variable *types.Var) value {
 	val := st.vals[variable]
 	if val != nil && v.boxed[variable] {
-		return v.pointedIn(st, st.mem, variable.Type(), val)
+		return v.pointedIn(st, st.mem, storedAs(variable.Type()), val)
 	}
 	return val
 }

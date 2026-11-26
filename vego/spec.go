@@ -288,7 +288,7 @@ func (e *specEnv) root(name string) (val value, t types.Type, isResult bool, con
 				if e.v.boxed[variable] {
 					// The variable lives in memory and holds a pointer to
 					// its value.
-					val = e.v.fetch(e.sink, e.now, e.v.cellsOf(variable.Type()), val[0], val[1])
+					val = e.v.fetch(e.sink, e.now, e.v.cellsOf(storedAs(variable.Type())), val[0], val[1])
 				}
 				return val, variable.Type(), false, nil, nil
 			}
@@ -1654,6 +1654,16 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		// reaches nothing, and so lies within anything; a nil pointer
 		// points nowhere, and so lies within nothing.
 		outer := found[1].val
+		// A pointer to a number, a boolean, or a string points to a box,
+		// which lies in no slice and no struct (ptrvalues.go).
+		if object, isPointer := pointee(found[0].typ); isPointer {
+			if _, boxed := isBox(object); boxed && !types.Identical(found[0].typ.Underlying(), found[1].typ.Underlying()) {
+				spelled := spell(paths[0].Root, paths[0].Steps)
+				return nil, fmt.Errorf("within(%s, %s): %s points to a value of type %s, which lies only in a value of its own, a variable or what new made, and in no slice or struct; "+
+					"within of two such pointers says that they are equal", spelled, spell(paths[1].Root, paths[1].Steps), spelled,
+					types.TypeString(found[0].typ.Underlying().(*types.Pointer).Elem(), types.RelativeTo(e.v.pass.Pkg)))
+			}
+		}
 		firstStart, firstEnd := e.v.extent(first, found[0].typ)
 		outerStart, outerEnd := e.v.extent(outer, found[1].typ)
 		inside := logic.And(logic.Eq(first[0], outer[0]), logic.Le(outerStart, firstStart), logic.Le(firstEnd, outerEnd))
@@ -1729,6 +1739,8 @@ func freshSince(before *logic.Term, found reached) *logic.Term {
 func spell(name string, steps []logic.Step) string {
 	for _, step := range steps {
 		switch {
+		case step.Deref:
+			name = "*" + name
 		case step.Assert != nil:
 			name += ".(" + step.Assert.String() + ")"
 		case step.Field != "":
@@ -1759,6 +1771,21 @@ func plan(t types.Type, steps []logic.Step, from *types.Package) ([]hop, types.T
 	var hops []hop
 	spelled := ""
 	for _, step := range steps {
+		if step.Deref {
+			// *p reads the one field of the box p points to (ptrvalues.go).
+			pointer, isPointer := t.Underlying().(*types.Pointer)
+			switch {
+			case !isPointer:
+				return nil, nil, fmt.Errorf("%s has type %s, and * follows only a pointer", spelled, t)
+			case isStructType(pointer.Elem()):
+				return nil, nil, fmt.Errorf("%s points to a struct, which a formula cannot name as a whole after *; name its fields", spelled)
+			case !singleValue(pointer.Elem()):
+				return nil, nil, fmt.Errorf("%s has type %s, and * follows only a pointer to a number, a boolean, or a string", spelled, t)
+			}
+			hops = append(hops, hop{from: t, field: 0})
+			t = pointer.Elem()
+			continue
+		}
 		if step.Assert != nil {
 			target, resolved := step.Assert.Resolved.(types.Type)
 			switch {

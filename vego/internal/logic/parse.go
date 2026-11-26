@@ -31,6 +31,7 @@ const (
 	NAddr             // &Kids[0]: the address of a struct reached through memory
 	NAssert           // Kids[0].(Type): what an error holds when it holds a Type
 	NConvert          // Type(Kids[0]) for a qualified Type, as hex.InvalidByteError(c)
+	NDeref            // *Kids[0]: what a pointer to a number, a boolean, or a string points to
 )
 
 // TypeName is a type named in a formula: a defined type, qualified by the
@@ -128,6 +129,8 @@ func (n *Node) String() string {
 		return n.Big.String()
 	case NAddr:
 		return "&" + kid(0)
+	case NDeref:
+		return "*" + kid(0)
 	case NBool:
 		return map[int64]string{0: "False", 1: "True"}[n.Val]
 	case NIdent:
@@ -324,6 +327,12 @@ func ParseTargets(src string) ([]*Node, error) {
 	var targets []*Node
 	_, err := parse(src, func(p *parser) *Node {
 		for {
+			if start := p.peek().pos; p.accept("*") {
+				// What a pointer points to is named by the pointer, as
+				// the struct a pointer points to is.
+				pointer := p.postfix()
+				panic(&SyntaxError{start, fmt.Sprintf("Modifies names what a pointer points to by the pointer: write %s, not *%s", pointer, pointer)})
+			}
 			target := p.postfix()
 			// behind(r) names the footprint of the receiver r of a method
 			// of an interface with states, beside r, which names its states
@@ -634,6 +643,10 @@ func (p *parser) unary() *Node {
 	if p.accept("&") {
 		kid := p.postfix()
 		return &Node{Kind: NAddr, Kids: []*Node{kid}, Start: start, End: kid.End}
+	}
+	if p.accept("*") {
+		kid := p.unary()
+		return &Node{Kind: NDeref, Kids: []*Node{kid}, Start: start, End: kid.End}
 	}
 	return p.postfix()
 }

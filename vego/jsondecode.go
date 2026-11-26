@@ -115,7 +115,9 @@ func (v *fnVerifier) decodeTargetOf(call *ast.CallExpr, fn *funcInfo) (ast.Expr,
 		return into, data, decodeTarget{why: "only the address of a variable, a field, or an element is supported; decode into a variable"}
 	}
 	if object, isPointer := pointee(t); isPointer {
-		if _, isStruct := object.Underlying().(*types.Struct); isStruct {
+		// The box a pointer to a single value points to is a struct of no
+		// exported field, which encoding/json would not write.
+		if _, boxed := isBox(object); !boxed && isStructType(object) {
 			return into, data, decodeTarget{t: object, pointer: into}
 		}
 	}

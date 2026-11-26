@@ -184,11 +184,11 @@ func ReadTable() (r int) {
 	return table[1] // want `cannot verify ReadTable: table is assigned at refused.go:\d+; package-level arrays that are changed are not supported yet`
 }
 
-// No slice of *int can be read either, so the message offers none.
+// A slice of *int can be read since F37, so the message offers one.
 //
 // @Ensures True
 func Pointers() (r int) {
-	var ps [2]*int // want `cannot verify Pointers: ps has unsupported type \[2\]\*int; \[2\]\*int is an array of \*int, and only arrays of numbers and booleans are supported yet$`
+	var ps [2]*int // want `cannot verify Pointers: ps has unsupported type \[2\]\*int; \[2\]\*int is an array of \*int, and only arrays of numbers and booleans are supported yet; use a slice of \*int instead$`
 	return len(ps)
 }
 

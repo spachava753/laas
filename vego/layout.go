@@ -2,6 +2,7 @@ package vego
 
 import (
 	"fmt"
+	"go/token"
 	"go/types"
 	"slices"
 	"sync"
@@ -123,15 +124,80 @@ func isError(t types.Type) bool {
 	return types.Identical(t, types.Universe.Lookup("error").Type())
 }
 
-// pointee returns the struct type a pointer refers to. Pointers to anything
-// else, and to a struct that is not modelled, are not modelled.
+// pointee returns the struct type a pointer refers to. A pointer to a
+// number, a boolean, or a string points to the box of its type (see boxOf),
+// which pointee returns. Pointers to anything else, and to a struct that is
+// not modelled, are not modelled.
 func pointee(t types.Type) (types.Type, bool) {
 	pointer, ok := t.Underlying().(*types.Pointer)
 	if !ok {
 		return nil, false
 	}
+	if singleValue(pointer.Elem()) {
+		return boxOf(pointer.Elem()), true
+	}
 	_, ok = pointer.Elem().Underlying().(*types.Struct)
 	return pointer.Elem(), ok && !holdsArray(pointer.Elem())
+}
+
+// singleValue reports whether a type is a number, a boolean, or a string:
+// a single value that a pointer may point to (F37, step 2).
+func singleValue(t types.Type) bool {
+	u, ok := t.Underlying().(*types.Basic)
+	if !ok {
+		return false
+	}
+	info := u.Info()
+	return info&(types.IsInteger|types.IsFloat|types.IsBoolean|types.IsString) != 0 && info&types.IsUntyped == 0 &&
+		u.Kind() != types.Uintptr && u.Kind() != types.UnsafePointer
+}
+
+// boxes holds the box of each type of single value, for the whole process:
+// a struct of one field of that type, declared in a package of its own so
+// that no type of a program is identical to it. A pointer to a single value
+// points to its box, which is an allocation of one cell, as a struct a
+// pointer points to is; so every rule of pointers to structs is the rule of
+// these pointers (frames, nil checks, Modifies, fresh, havoc, origins,
+// ownership). The box is keyed by the untagged underlying type, since Go
+// converts *MyInt to *int and the memory is the same; one box for a type in
+// every package and every verifier keeps one region for it (F1 of the
+// design review of F37).
+var boxes = struct {
+	sync.Mutex
+	known typeutil.Map
+	pkg   *types.Package
+}{pkg: types.NewPackage("vego/box", "box")}
+
+// boxOf returns the box of a type of single value.
+func boxOf(t types.Type) types.Type {
+	u := untagged(t.Underlying())
+	boxes.Lock()
+	defer boxes.Unlock()
+	if box, ok := boxes.known.At(u).(types.Type); ok {
+		return box
+	}
+	box := types.NewStruct([]*types.Var{types.NewField(token.NoPos, boxes.pkg, "v", u, false)}, nil)
+	boxes.known.Set(u, box)
+	return box
+}
+
+// isBox reports whether a type is the box of a single value, and returns
+// the type of what it holds.
+func isBox(t types.Type) (types.Type, bool) {
+	s, ok := t.(*types.Struct)
+	if !ok || s.NumFields() != 1 || s.Field(0).Pkg() != boxes.pkg {
+		return nil, false
+	}
+	return s.Field(0).Type(), true
+}
+
+// storedAs returns the type whose cells hold a variable of type t that
+// lives in memory: the box of a single value, or the type itself.
+func storedAs(t types.Type) types.Type {
+	if singleValue(t) {
+		return boxOf(t)
+	}
+	return t
 }
 
 // elemType returns the element type of a slice type.

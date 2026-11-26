@@ -47,6 +47,9 @@ type Step struct {
 	// As, as the last step, is whether errors.As finds a value of the
 	// type in the error, as in as(err, *ParseError).
 	As *TypeName
+	// Deref reads what a pointer to a number, a boolean, or a string
+	// points to, as in *p.
+	Deref bool
 }
 
 // NotSlice is what an Env returns for a path with a last step Nil that does
@@ -309,7 +312,7 @@ func (s *scope) term(n *Node) *Term {
 		return Bytes(n.Name)
 	case NBool:
 		return BoolLit(n.Val == 1)
-	case NIdent, NField, NIndex, NAssert:
+	case NIdent, NField, NIndex, NAssert, NDeref:
 		return s.access(n, Now)
 	case NConvert:
 		return s.conversion(*n.Type, n.Kids[0])
@@ -382,6 +385,9 @@ func (s *scope) path(n *Node) (root *Node, steps []Step, primed bool) {
 	case NAssert:
 		root, steps, primed = s.path(n.Kids[0])
 		return root, append(steps, Step{Assert: n.Type}), primed
+	case NDeref:
+		root, steps, primed = s.path(n.Kids[0])
+		return root, append(steps, Step{Deref: true}), primed
 	}
 	return n, nil, n.Kind == NIdent && n.Primed
 }
@@ -414,7 +420,7 @@ func (s *scope) pathOf(n *Node) (root string, steps []Step, when When, ok bool) 
 	if n.Kind == NCall && n.Name == "old" && len(n.Kids) == 1 {
 		n, when = n.Kids[0], Old
 	}
-	if n.Kind != NIdent && n.Kind != NField && n.Kind != NIndex && n.Kind != NAssert {
+	if n.Kind != NIdent && n.Kind != NField && n.Kind != NIndex && n.Kind != NAssert && n.Kind != NDeref {
 		return "", nil, Now, false
 	}
 	start, steps, primed := s.path(n)
@@ -460,6 +466,9 @@ func (s *scope) access(n *Node, when When) *Term {
 		for _, step := range steps {
 			if step.Assert != nil {
 				fail("%s.(%s) takes an error reached from a variable", root, step.Assert)
+			}
+			if step.Deref {
+				fail("* takes a pointer reached from a variable, as in *p or *c.limit")
 			}
 			if step.Field != "" {
 				fail("%s has no field %s", root, step.Field)

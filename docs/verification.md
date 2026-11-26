@@ -191,7 +191,7 @@ Inequality is written `!=`, as in Go.
 
 Numbers in formulas are mathematical integers. They do not overflow, so `x + 1` is always one more than `x`, whatever the type of `x`. `/` and `%` round as they do in Go. The limits of the Go integer types have names: `MaxInt`, `MinInt`, `MaxInt8` to `MaxInt64`, `MinInt8` to `MinInt64`, and `MaxUint` to `MaxUint64`. `MaxAlloc` is the largest number of bytes in one allocation on the platform. No string is longer than `MaxAlloc`.
 
-`|A|` is the length of a slice or string, or the number of keys in a map. `A[i]` is an element. Fields are written with a dot, including through pointers: `c.count`, `s.items[i]`, `|s.items|`.
+`|A|` is the length of a slice or string, or the number of keys in a map. `A[i]` is an element. Fields are written with a dot, including through pointers: `c.count`, `s.items[i]`, `|s.items|`. What a pointer to a number, a boolean, or a string points to is written `*p`, and on return `*p'`.
 
 Formulas can also use strings and `nil`: `role = "admin"`, `p != nil`, `err = nil`. Two pointers can be compared with each other, as in `a != b`. Two errors can be compared too, as in `err = ErrEmpty`, and `is(err, ErrEmpty)` says what `errors.Is` reports. See [Saying which error a function returns](#saying-which-error-a-function-returns).
 
@@ -3454,7 +3454,7 @@ What a `Modifies` entry covers depends on the type at the end of its path.
 
 | The path ends at | Example | The entry covers |
 | --- | --- | --- |
-| a pointer | `Modifies c` | the fields of the struct it points to |
+| a pointer | `Modifies c`, `Modifies p` | the fields of the struct it points to, or the number, boolean, or string it points to |
 | a number, boolean, string, or struct | `Modifies c.n`, `Modifies ps[0]` | that field or element |
 | a slice | `Modifies A`, `Modifies s.items` | the elements, up to the capacity |
 | a map | `Modifies m` | the map |
@@ -3465,6 +3465,118 @@ The first, third, fourth, and fifth rows apply wherever the path ends. A path th
 To assign a field that holds a slice, pointer, map, or interface value, list the struct that contains it. A method that assigns `s.n` and writes `s.items[i]` needs `Modifies s.n, s.items`. A method that assigns `s.items` needs `Modifies s`.
 
 A struct can have a field of a type that `vego` does not support, such as a channel. Verified code cannot read or assign that field, but it is still part of the struct. Assigning the whole struct writes that field too. For a pointer `h` to such a struct, `*h = H{}` needs `Modifies h`, and entries for the other fields are not enough. A struct with a field that is an array of elements larger than a byte is the exception. It is not supported at all (see [Arrays in structs](#arrays-in-structs)).
+
+### Pointers to numbers, booleans, and strings
+
+A pointer can point to a number, a boolean, or a string. `new(T)` makes one, and so does `&x` of a local variable or a parameter. In a formula, `*p` is what `p` points to, and `*p'` is what it points to on return:
+
+```go
+// Increment increments what p points to.
+//
+// @Requires p != nil And *p < 1000
+// @Modifies p
+// @Ensures *p' = *p + 1
+func Increment(p *int) {
+	*p = *p + 1
+}
+
+// @Ensures r = 6
+func IncrementLocal() (r int) {
+	x := 5
+	Increment(&x)
+	return x
+}
+```
+
+`Modifies p` covers what `p` points to, as it covers the struct that a pointer to a struct points to. `Modifies *p` is reported, with the advice to write `Modifies p`. Inside a body, `old(*p)` is what `p` pointed to on entry.
+
+Two pointers can point to the same value. A contract must hold when they are equal, or require that they are not. `SwapInts` verifies, because its contract is also true when `p` and `q` are equal:
+
+```go
+// @Requires p != nil And q != nil
+// @Modifies p, q
+// @Ensures *p' = *q And *q' = *p
+func SwapInts(p, q *int) {
+	*p, *q = *q, *p
+}
+```
+
+A field can hold such a pointer. It is nil, or it points to a value:
+
+```go
+// Options has a limit that may be absent.
+type Options struct {
+	Limit *int
+}
+
+// @Ensures o.Limit != nil -> n = *o.Limit
+// @Ensures o.Limit = nil -> n = d
+func LimitOr(o Options, d int) (n int) {
+	if o.Limit != nil {
+		n = *o.Limit
+	} else {
+		n = d
+	}
+	return n
+}
+```
+
+A method with a pointer receiver on a named number type can be called on a local variable:
+
+```go
+// Clicks counts clicks.
+type Clicks int
+
+// @Requires t != nil And *t < 100
+// @Modifies t
+// @Ensures *t' = *t + 1
+func (t *Clicks) Add() {
+	*t++
+}
+
+// @Ensures r = 2
+func CountTwice() (r Clicks) {
+	var t Clicks
+	t.Add()
+	t.Add()
+	return t
+}
+```
+
+A pointer to a number, a boolean, or a string can point only to a value of its own: a variable whose address is taken, or what `new` made. Taking the address of anything else is reported:
+
+- a field, as in `&s.f`;
+- an element of a slice or an array, as in `&xs[i]` and `&a[i]`;
+- a package-level variable, as in `&g`;
+- a field or an element on which a pointer method is called, also through an embedded field.
+
+```go
+// Span holds two numbers.
+type Span struct{ lo, hi int }
+
+// @Ensures True
+func AddressOfField() (r int) {
+	var b Span
+	Increment(&b.lo)
+	return b.lo
+}
+```
+
+```text
+vego: cannot verify AddressOfField: taking the address of b.lo is not supported yet: it is a value
+of type int inside a struct, a slice, an array, or a package-level variable, and a pointer to a
+number, a boolean, or a string can point only to a value of its own, a local variable or what new
+makes; copy the value into a local variable and take its address
+```
+
+Copy the value into a local variable, pass the address of the variable, and store the result back.
+
+These are not supported:
+
+- pointers to slices, maps, pointers, interface values, functions, and arrays;
+- formatting such a pointer, which `fmt` prints as an address; `%d` of `*p` formats the value;
+- such a pointer as a field of a value that `encoding/json` encodes or decodes, and decoding into one other than `&x` of a variable;
+- `within(p, xs)` and `within(p, s)` for such a pointer `p`, since it lies in no slice and in no struct.
 
 ### Types declared inside a function
 
@@ -3523,7 +3635,7 @@ In an `Ensures`, `fresh(x)` means that the memory `x` refers to on return was al
 
 For two pointers to structs, `within(p, l)` means that `p` points to `l`'s struct itself or to a field of it. That struct or field has `p`'s struct type, or a type with the same fields, tags ignored. The field may be held directly or in a struct that `l`'s struct holds, but not behind a pointer. So `@Modifies l` covers a write through `p` when the `Requires` says `within(p, l)`. When `p` points to a struct whose size is not zero and `l`'s struct has no such place, `within(p, l)` is an error.
 
-`&x`, `&p.field`, and `&s[i]` are supported when the result points to a struct. Methods with pointer receivers can be called on variables, fields, and elements. Pointers to other types, such as `*int`, are not supported.
+`&x`, `&p.field`, and `&s[i]` are supported when the result points to a struct. Methods with pointer receivers can be called on variables, fields, and elements. For pointers to numbers, booleans, and strings, see [Pointers to numbers, booleans, and strings](#pointers-to-numbers-booleans-and-strings).
 
 ### The address of a field in a formula
 
@@ -5223,7 +5335,7 @@ func spend() {
 
 All three functions verify. `Modifies quota` covers the struct, and `Modifies quota.used` one field of it, as for what a pointer parameter points to. A pointer parameter of type `*Quota` may point to `quota`, so `vego` considers both cases. A function that writes `p.limit` for a parameter `p` may write `quota.limit`.
 
-`var mu sync.Mutex`, `var buf bytes.Buffer`, and `var b strings.Builder` are struct variables too, and their methods take their address. A variable of another type whose address is taken, as `&n` of an `int`, cannot be read, since pointers to anything but a struct are not supported yet.
+`var mu sync.Mutex`, `var buf bytes.Buffer`, and `var b strings.Builder` are struct variables too, and their methods take their address. A package-level variable of another type whose address is taken, as `&n` of an `int`, is not supported yet, since a pointer to a number, a boolean, or a string can point only to a local variable or to what `new` made (see [Pointers to numbers, booleans, and strings](#pointers-to-numbers-booleans-and-strings)).
 
 #### When the address stays in place
 
@@ -5745,7 +5857,7 @@ Some code that uses package-level variables still cannot be verified:
 - An error variable that is changed.
 - `log.Default()`, which has no shipped contract, a logger in an exported variable or in a variable of another package, and a logger used in other ways than with `Printf`, `Print`, and `Println`.
 - `template.Must`, since `text/template` has no shipped contracts.
-- `flag` variables. `flag.Int` returns an `*int`, and pointers to anything but a struct are not supported. `flag.StringVar(&s, ...)` takes the address of `s`.
+- `flag` variables. `flag.Int` and `flag.String` have no shipped contracts: they panic when the name is already defined, and what they return changes only in `flag.Parse`, which has no shipped contract either. `flag.StringVar(&s, ...)` takes the address of `s`, which is refused for a package-level variable.
 - A variable of a type that holds code other than an interface type, a named function type with a contract, or `*log.Logger`.
 
 A build that sets a string variable with `-ldflags "-X path.name=value"` gives it a value that `vego` does not see. A proof that relies on the value of such a variable, typically a version, does not hold for that build. See [What a proof assumes](#what-a-proof-assumes).
@@ -9662,6 +9774,7 @@ This table lists the most common messages.
 | `syntax error in Requires annotation: && is not a spelling of the formula language; write And`, and the same for `\|\|`, `!`, `==`, and `ℤ` | The formula uses a spelling of Go, or `ℤ` for the integers. | Write `And`, `Or`, `~`, `=`, or `Z`. |
 | `F calls G, which may end the process; add // @Exits to the doc comment of F ...` | `G` has `@Exits`, or is `os.Exit` or `log.Fatal`, and `F` does not say that it may end the process. | Add `// @Exits` to `F`, or return an error instead. See [Functions that end the process](#functions-that-end-the-process). |
 | `F has an Exits annotation, but nothing it calls may end the process` | The `@Exits` of `F` is not needed. | Remove it. |
+| `cannot verify F: taking the address of s.f is not supported yet: it is a value of type int inside a struct, a slice, an array, or a package-level variable, ...` | A pointer to a number, a boolean, or a string would point into a struct, a slice, an array, or a package-level variable. | Copy the value into a local variable and take the address of the variable. See [Pointers to numbers, booleans, and strings](#pointers-to-numbers-booleans-and-strings). |
 | `unknown annotation "W"` | The word after `// @` is not a keyword. | Correct the keyword. If another tool reads the comment, declare the word with `-vego.other-tags`. |
 | `Ensures annotation is not attached to a function` | The clause is not in the doc comment of a function. | Move it into the doc comment. |
 | `x is assigned, which F may not modify; list it in a // @Modifies clause`, with `, as p.f` when a path from a parameter reaches it | No `Modifies` entry covers memory of this kind. The path stops before a field that your package cannot name, such as an unexported field of `os.File`. | Add it to `Modifies`, by the path the message names. |
@@ -9822,10 +9935,11 @@ This table lists the most common messages.
 | `cannot verify F: json.NewEncoder keeps w in the encoder it returns; ...` | An encoder or decoder is kept in a variable. | Write the call as one expression. |
 ## What is not supported
 
-`vego` supports functions and methods over these types: the integer types, `bool`, `string`, `error`, the float types, arrays of numbers and booleans, structs, pointers to structs, slices, maps with integer, string, or boolean keys, function types, and interface types. In the body it supports assignments, `if`, `switch`, `for` and `range` loops with `break` and `continue`, `return`, `defer`, calls to named functions and methods, function literals that are called or deferred where they are written or bound to a variable that is only called, function values of named function types with a contract (see [Function values](#function-values)), calls through interface values of methods with a contract (see [Interfaces](#interfaces)), functions handed to a trusted function that calls them while it runs (see [Functions that a trusted function calls](#functions-that-a-trusted-function-calls)), and recursion. The built-ins `len`, `cap`, `min`, `max`, `new`, `make`, `append`, and `delete` are supported, and so are composite literals, slicing, and the arithmetic, comparison, shift, and bitwise operators.
+`vego` supports functions and methods over these types: the integer types, `bool`, `string`, `error`, the float types, arrays of numbers and booleans, structs, pointers to structs, to numbers, to booleans, and to strings, slices, maps with integer, string, or boolean keys, function types, and interface types. In the body it supports assignments, `if`, `switch`, `for` and `range` loops with `break` and `continue`, `return`, `defer`, calls to named functions and methods, function literals that are called or deferred where they are written or bound to a variable that is only called, function values of named function types with a contract (see [Function values](#function-values)), calls through interface values of methods with a contract (see [Interfaces](#interfaces)), functions handed to a trusted function that calls them while it runs (see [Functions that a trusted function calls](#functions-that-a-trusted-function-calls)), and recursion. The built-ins `len`, `cap`, `min`, `max`, `new`, `make`, `append`, and `delete` are supported, and so are composite literals, slicing, and the arithmetic, comparison, shift, and bitwise operators.
 
 A function that uses any of the following is reported as `cannot verify`:
 
+- pointers to slices, maps, pointers, interface values, functions, and arrays; a pointer to a number, a boolean, or a string that would point into a struct, a slice, an array, or a package-level variable; formatting such a pointer, and such a pointer in a value that `encoding/json` encodes or decodes (see [Pointers to numbers, booleans, and strings](#pointers-to-numbers-booleans-and-strings));
 - a call that may end the process in a function literal used as a value, in a function handed to a trusted function, or in a deferred call, and a function value made of a function that may end the process (see [Functions that end the process](#functions-that-end-the-process));
 - calls of a method of an interface that has no contract, in source or in the trust file, and converting a value to an interface with such a method (see [Interfaces](#interfaces)); of the standard library, only `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, and `(context.Context).Err` have shipped contracts (see [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages));
 - an entry in the trust file for a type of the module of the analysed package, or one with `runs`, `keeps`, or `calls`;
@@ -9914,6 +10028,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - Code of another package that is not verified runs code of the verified package only as `vego` follows it, which [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods) describes: during a call that the verified package makes, it runs only what that call hands it, through the arguments and the receiver. Code that it kept from an earlier call, a value it stored, or code that it runs on another goroutine or at another time, does not call back into a verified function while that function runs, so that the call never ends. A cycle that stays in the package, or that goes through what a call hands to another package, is found and reported.
 - For a parameter listed under `runs` or `keeps`, the function calls through an interface value or a function value nothing that the parameter holds, or that a call of what the parameter holds returns, but the methods of the interfaces and the function types that the parameter's type reaches and those of the types listed under `asserts`, and it uses no reflection to call what the parameter holds (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). Verified code answers for the methods that the parameter's type has, each checked where the value is converted. The author of the entry answers for the rest. An entry such as that of `use(p Pinger)` with `runs: [p]` and no `asserts`, for a function that asserts `p` to an interface with `Bump` and calls it, is false, and a proof that relies on it is worthless. For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For a parameter whose footprint the contract lists in `Modifies`, they pass no other argument that reaches memory in that footprint without going through an interface value: `Log` relies on the `Lines` that `t` points to not being memory that the methods of `r` write. The same holds for a package-level variable of an interface type that the contract lists in `Modifies` by itself: they pass no argument that reaches memory in the footprint of the value the variable holds when the call begins, as `printLines` relies on its lines not being memory that the writer in `logOut` writes. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one whose methods change the states of the other, as one that wraps it does, unless one of them is nil. For an interface parameter with states and a pointer parameter whose type has states, of which the contract lists one, they do not pass an interface value that holds the pointer. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method. For a parameter whose type owns memory (see [Structs that own memory](#structs-that-own-memory)), they pass a struct whose owned memory is reached by nothing else they pass: not by the other arguments, not by the struct's other fields, and not by what its other owned fields refer to. Memory that a method returns from what its struct owns, which its contract shows with `within(result, s)`, is not stored by code that is not verified, and is not passed to a verified function together with the struct it came from or with anything that reaches that struct. The same holds of what code that is not verified takes out of an error that a verified function returns, by a type assertion or reflection, when the error came from a call made on what a struct it was handed owns, as the error of `fmt.Fprint(r.out, ...)` may hold what `r.out` holds: no contract can say that an error lies within a struct.
+- A pointer to a number, a boolean, or a string that code which is not verified hands to verified code points to a value of its own: a variable whose address was taken, or what `new` made. It does not point to a field of a struct, an element of a slice or an array, or a package-level variable that the verified function can reach in another way: through another argument, a package-level variable, or memory that these reach. This holds of every way such a pointer arrives: a parameter or a receiver, a field of memory that existed on entry, an element of a `[]*T` or a value of a `map[K]*T`, what an interface value holds, what a trusted function returns or writes under its `modifies`, an argument that a trusted function passes to a function under `calls`, and a package-level variable of type `*T`. A caller that is not verified and passes `&s.f` and `s` to `func F(p *int, s *S)` breaks this. Passing `&s.f` alone to `func Increment(p *int)` does not, since `Increment` reaches nothing else of `s`. Verified code cannot make such a pointer: `vego` refuses `&s.f`, `&xs[i]`, `&a[i]`, and `&g` for them.
 - When the server calls a verified handler, the writer it passes writes none of the memory that the request reaches without going through an interface value, except the field `Trailer` of the `Request` and the map it refers to, which the server fills while it reads the body, also when a write to the writer drains a body the handler left unread. Verified code cannot read or write that field. Code that is not verified does not make that map reachable from anything else it hands a verified function, as `req.Trailer = req.Header` in a middleware would. Code that is not verified uses a `ResponseWriter`, and hands one to verified code as that type or as any other interface, only while the `ServeHTTP` call that received it runs, and does not hand one, or a value that holds one at any depth, to a verified function that keeps that parameter.
 - The body of every request that reaches verified code from code that is not verified makes progress: a `Read` of it with a buffer that is not empty returns bytes or an error. The server's bodies do. Verified code cannot store into the field `Body` of a request. A middleware that is not verified and replaces the body with a reader that can return no bytes and no error for ever breaks this, and so does a test or a caller that builds a request over such a reader, as `httptest.NewRequest` can. `json.NewDecoder(io.LimitReader(req.Body, n)).Decode(&x)` in a verified function it calls may then never return.
 - The body of an `http.Response` that reaches verified code from code that is not verified writes nothing that the response reaches without going through an interface value, except the field `Trailer` of the response and the map it refers to, which reading the body fills. Verified code cannot read or write that field, and does not store into `Body` but a value it makes there. Code that is not verified does not make that map reachable from anything else it hands a verified function, as `resp.Trailer = resp.Header` would.
@@ -9991,6 +10106,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | <code>&#124;A&#124;</code> | length of a slice, an array, or a string, or number of keys in a map |
 | <code>&#124;b&#124;</code> | for a `strings.Builder` or a `bytes.Buffer`, or a pointer to one: what `b.Len()` returns, the bytes not yet read |
 | `A[i]`, `m[k]`, `p.f` | element, map value, field |
+| `*p`, `*p'`, `old(*p)` | what a pointer to a number, a boolean, or a string points to, at the call, on return, and on entry |
 | `a = b` | for two arrays of numbers or booleans: the same elements; refused for arrays of floats |
 | `A[lo:hi) <= x` | the comparison holds for every element from `lo` up to `hi` |
 | `Forall k in [a, b) : P`, `Exists k in [a, b] : P` | quantifiers over an interval |

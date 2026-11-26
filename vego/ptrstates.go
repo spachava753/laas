@@ -259,6 +259,12 @@ func (pv *pkgVerifier) pointerStatesWhy(t types.Type) string {
 	if !isPointer {
 		return ""
 	}
+	if _, boxed := isBox(object); boxed {
+		// The states of what a pointer points to are kept by the struct
+		// type it points to, and a pointer to a single value points to the
+		// box of its underlying type, which no method's receiver names.
+		return "it points to a number, a boolean, or a string, and the states of what a pointer points to are supported only for a pointer to a struct"
+	}
 	if pv.pass.TypesSizes.Sizeof(object) == 0 {
 		return "it points to a value of size zero, and two such pointers may or may not be one, so nothing tells their states apart"
 	}
