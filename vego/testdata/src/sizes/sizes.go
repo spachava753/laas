@@ -7,8 +7,10 @@ package sizes
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -179,4 +181,39 @@ func Sized(s string) (r string) {
 	b.WriteString(s)
 	r = b.String()
 	return r
+}
+
+// Task is encoded as JSON.
+type Task struct {
+	ID   int      `json:"id"`
+	Text string   `json:"text"`
+	Tags []string `json:"tags"`
+}
+
+// Encoding grows its output step by step from what exists, so under the
+// declared memory it fits whatever the total (step 3 of F38).
+// @Ensures True
+func Encoded(tasks []Task) (r []byte, err error) {
+	r, err = json.Marshal(tasks)
+	return r, err
+}
+
+// @Ensures True
+func Indented(tasks []Task) (r []byte, err error) {
+	r, err = json.MarshalIndent(tasks, "", "  ")
+	return r, err
+}
+
+// @Ensures True
+func Counted(counts map[string]int) (r []byte, err error) {
+	r, err = json.Marshal(counts)
+	return r, err
+}
+
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func Sent(w io.Writer, t Task) (err error) {
+	err = json.NewEncoder(w).Encode(t)
+	return err
 }

@@ -5,8 +5,10 @@ package nosizes
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -150,3 +152,38 @@ func Doubles(s []byte) (r []byte) {
 var reserved = make([]byte, 1<<49) // want `vego: the slice made may be more than can be allocated`
 
 var grown = slices.Grow([]byte(nil), 1<<48) // want `vego: precondition of Grow may not hold: 2 \* \(\|s\| \+ n\) \* elemsize\(s\) \+ 65536 <= MaxAlloc`
+
+// Task is encoded as JSON.
+type Task struct {
+	ID   int      `json:"id"`
+	Text string   `json:"text"`
+	Tags []string `json:"tags"`
+}
+
+// Encoding grows its output step by step from what exists, so under the
+// declared memory it fits whatever the total (step 3 of F38).
+// @Ensures True
+func Encoded(tasks []Task) (r []byte, err error) {
+	r, err = json.Marshal(tasks) // want `vego: what Marshal builds from tasks may be more than can be allocated`
+	return r, err
+}
+
+// @Ensures True
+func Indented(tasks []Task) (r []byte, err error) {
+	r, err = json.MarshalIndent(tasks, "", "  ") // want `vego: what MarshalIndent builds from tasks may be more than can be allocated`
+	return r, err
+}
+
+// @Ensures True
+func Counted(counts map[string]int) (r []byte, err error) {
+	r, err = json.Marshal(counts) // want `vego: what Marshal builds from counts may be more than can be allocated`
+	return r, err
+}
+
+// @Requires w != nil
+// @Modifies w
+// @Ensures True
+func Sent(w io.Writer, t Task) (err error) {
+	err = json.NewEncoder(w).Encode(t) // want `vego: what Encode builds from t may be more than can be allocated`
+	return err
+}

@@ -101,6 +101,7 @@ type jsonHarnessInput struct {
 	Seed    uint64
 	Samples int
 	Cases   []jsonHarnessCase
+	Allocs  bool
 }
 
 type jsonHarnessCase struct {
@@ -126,6 +127,15 @@ type jsonHarnessOutput struct {
 		Outs  []int64
 		Maxes map[string]int64
 	}
+	Allocs []jsonAlloc
+}
+
+// jsonAlloc is the largest single allocation of one encoding call, with
+// the length of what it wrote and the largest value the encoded value
+// holds, in bytes.
+type jsonAlloc struct {
+	Type, Call                  string
+	Largest, Out, Held, Entries int64
 }
 
 // jsonIndents are the lengths of the prefixes and indents the helper runs
@@ -307,8 +317,33 @@ func TestJSONEntries(t *testing.T) {
 	cases := jsonCases(walks)
 	called := map[string]bool{}
 	var outs []jsonHarnessOutput
+	// The factor is seen to be needed: some call allocated more than once
+	// what exists. The term for the entries of a map is the reading's
+	// (v2 sorts the members of a map with keys that are not strings in a
+	// slice of 80 bytes each), which no sample here reached.
+	sharper := false
 	for _, b := range jsonBuilds() {
-		out := runJSONHelper(t, jsonHelper(t, b), jsonHarnessInput{Seed: 29, Samples: 300, Cases: cases})
+		helper := jsonHelper(t, b)
+		// Under a declared memory an encoding call is accepted with no
+		// bound on what it builds, on the reading that each allocation it
+		// makes is at most three times what exists, the output or one
+		// value held, and a page (F8 of the review of F38).
+		for _, a := range runJSONHelper(t, helper, jsonHarnessInput{Seed: 31, Samples: 2, Cases: cases, Allocs: true}).Allocs {
+			exists := max(a.Out, a.Held)
+			// What an encoding call may allocate at once, read from the
+			// four builds of encoding/json (see Sizes under a declared
+			// memory in the ROADMAP): three times what it writes or the
+			// largest value it is handed holds, 81 bytes for each entry
+			// of a map whose keys it sorts (v2's members of 80 bytes and
+			// the key and the value of each), and 2^20 for the stacks of
+			// its states, which grow with the depth of the value.
+			if a.Largest > 3*exists+81*a.Entries+1<<20 {
+				t.Errorf("%s: %s of a %s allocated %d bytes at once, more than three times the %d bytes it wrote or the value holds, "+
+					"81 bytes for each of the %d entries of its largest map, and 2^20", b.name, a.Call, a.Type, a.Largest, exists, a.Entries)
+			}
+			sharper = sharper || a.Largest > exists+81*a.Entries+1<<20
+		}
+		out := runJSONHelper(t, helper, jsonHarnessInput{Seed: 29, Samples: 300, Cases: cases})
 		outs = append(outs, out)
 		for _, failure := range out.Failures {
 			t.Errorf("%s: %s", out.Build, failure)
@@ -330,6 +365,9 @@ func TestJSONEntries(t *testing.T) {
 				t.Errorf("%s: an entry of encoding/json returned an error of type %s, whose methods were not read", out.Build, name)
 			}
 		}
+	}
+	if !sharper {
+		t.Errorf("no encoding call allocated more than once what it wrote or the value holds: the factor of three is not seen to be needed, nor the measure to work")
 	}
 	for _, name := range jsonMethods {
 		if !called[name] {

@@ -25,11 +25,13 @@ import (
 	"unsafe"
 )
 
-// Input is what the test hands over.
+// Input is what the test hands over. With Allocs set the program only
+// measures the largest single allocation of each encoding call (allocs).
 type Input struct {
 	Seed    uint64
 	Samples int
 	Cases   []Case
+	Allocs  bool
 }
 
 // Case is one type with the lengths vego bounds for it.
@@ -72,6 +74,16 @@ type Output struct {
 	// the entries returned, and DecodeErrors those Unmarshal returned.
 	Errors       []string
 	DecodeErrors []string
+	// Allocs holds, with Input.Allocs, what each encoding call allocated.
+	Allocs []Alloc
+}
+
+// Alloc is the largest single allocation that one call of Marshal,
+// MarshalIndent, or Encode made, with the length of what it wrote and the
+// largest string, slice, or map's entries in bytes that the value holds.
+type Alloc struct {
+	Type, Call                  string
+	Largest, Out, Held, Entries int64
 }
 
 var out = Output{}
@@ -98,6 +110,13 @@ func main() {
 	}
 	out.Build = build()
 	rng := rand.New(rand.NewPCG(in.Seed, 29))
+	if in.Allocs {
+		allocs(rng, in)
+		if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
+			panic(err)
+		}
+		return
+	}
 	errTypes, decodeErrTypes := map[string]bool{}, map[string]bool{}
 	for _, c := range in.Cases {
 		t, ok := registry[c.Type]
@@ -914,4 +933,238 @@ func calledMethods() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// --- allocations ---
+
+// allocs measures, for samples of each type, the largest single allocation
+// that Marshal, MarshalIndent, and Encode make while they run (F8 of the
+// review of F38): every request of the encoder is to be at most a small
+// multiple of what exists, the output so far or one value the encoded value
+// holds. Half the samples have their strings and byte slices made one long
+// value shared by every place that holds one, so that the output is far
+// longer than anything the value holds.
+func allocs(rng *rand.Rand, in Input) {
+	runtime.MemProfileRate = 1
+	shared := strings.Repeat("a<\x00é\"", 40000)
+	for _, c := range in.Cases {
+		t := registry[c.Type]
+		for i := range in.Samples {
+			v := reflect.New(t).Elem()
+			worst = rng.IntN(2) == 0
+			fill(rng, v, 0)
+			if i%2 == 1 {
+				lengthen(v, shared, map[uintptr]bool{})
+			}
+			held := heldBytes(v, map[uintptr]bool{})
+			entries := mostEntries(v, map[uintptr]bool{})
+			for _, call := range []string{"Marshal", "MarshalIndent", "Encode"} {
+				var n int64
+				var failed bool
+				largest := largestAllocation(func() {
+					var b []byte
+					var err error
+					switch call {
+					case "Marshal":
+						b, err = json.Marshal(v.Interface())
+					case "MarshalIndent":
+						b, err = json.MarshalIndent(v.Interface(), "", "  ")
+					default:
+						w := &counter{}
+						err = json.NewEncoder(w).Encode(v.Interface())
+						n = w.n
+					}
+					if call != "Encode" {
+						n = int64(len(b))
+					}
+					failed = err != nil
+				})
+				if !failed {
+					out.Allocs = append(out.Allocs, Alloc{Type: c.Type, Call: call, Largest: largest, Out: n, Held: held, Entries: entries})
+				}
+			}
+		}
+	}
+}
+
+// counter is a writer that counts what it is handed and keeps nothing.
+type counter struct{ n int64 }
+
+func (c *counter) Write(p []byte) (int, error) { c.n += int64(len(p)); return len(p), nil }
+
+// largestAllocation returns the size of the largest single object that f
+// allocated. The memory profile keeps one record for each stack and size
+// of object, and is complete only after a few collections.
+func largestAllocation(f func()) int64 {
+	type key struct {
+		stack [32]uintptr
+		size  int64
+	}
+	snapshot := func() map[key]int64 {
+		for range 3 {
+			runtime.GC()
+		}
+		n, _ := runtime.MemProfile(nil, true)
+		records := make([]runtime.MemProfileRecord, n+100)
+		n, _ = runtime.MemProfile(records, true)
+		seen := map[key]int64{}
+		for _, r := range records[:n] {
+			if r.AllocObjects > 0 && !measuring(r.Stack()) {
+				seen[key{r.Stack0, r.AllocBytes / r.AllocObjects}] = r.AllocObjects
+			}
+		}
+		return seen
+	}
+	before := snapshot()
+	f()
+	after := snapshot()
+	var largest int64
+	for k, objects := range after {
+		if objects > before[k] && k.size > largest {
+			largest = k.size
+		}
+	}
+	return largest
+}
+
+// measuring reports whether a stack is that of what largestAllocation
+// allocates itself to read the profile, which f does not.
+func measuring(stack []uintptr) bool {
+	frames := runtime.CallersFrames(stack)
+	for {
+		frame, more := frames.Next()
+		// The innermost frame of this program decides: the encoder runs
+		// in the closure that allocs hands over.
+		if strings.HasPrefix(frame.Function, "main.") {
+			return strings.HasPrefix(frame.Function, "main.largestAllocation")
+		}
+		if !more {
+			return false
+		}
+	}
+}
+
+// lengthen makes every string and byte slice that v holds one shared long
+// value.
+func lengthen(v reflect.Value, long string, seen map[uintptr]bool) {
+	switch v.Kind() {
+	case reflect.String:
+		if v.CanSet() && v.Type() != numberType {
+			v.SetString(long)
+		}
+	case reflect.Slice:
+		if v.Type().Elem().Kind() == reflect.Uint8 && v.CanSet() && v.Type() != rawType {
+			v.SetBytes([]byte(long[:len(long)/2]))
+			return
+		}
+		for i := range v.Len() {
+			lengthen(v.Index(i), long, seen)
+		}
+	case reflect.Array:
+		for i := range v.Len() {
+			lengthen(v.Index(i), long, seen)
+		}
+	case reflect.Pointer:
+		if !v.IsNil() && !seen[v.Pointer()] {
+			seen[v.Pointer()] = true
+			lengthen(v.Elem(), long, seen)
+		}
+	case reflect.Struct:
+		for i := range v.NumField() {
+			if v.Type().Field(i).IsExported() {
+				lengthen(v.Field(i), long, seen)
+			}
+		}
+	case reflect.Map:
+		// The values of a map cannot be set in place; its keys stay. A
+		// map of a key type with many values gets many entries, so that
+		// what sorting its keys allocates shows.
+		if !v.CanSet() {
+			return
+		}
+		key := v.Type().Key()
+		m := reflect.MakeMap(v.Type())
+		for i := range 5000 {
+			k := reflect.New(key).Elem()
+			switch key.Kind() {
+			case reflect.String:
+				k.SetString(fmt.Sprintf("k%d", i))
+			case reflect.Int16, reflect.Int32, reflect.Int64, reflect.Int:
+				k.SetInt(int64(i))
+			case reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uint:
+				k.SetUint(uint64(i))
+			default:
+				return
+			}
+			m.SetMapIndex(k, reflect.New(v.Type().Elem()).Elem())
+		}
+		v.Set(m)
+	}
+}
+
+// mostEntries returns the most entries of a map that v holds.
+func mostEntries(v reflect.Value, seen map[uintptr]bool) int64 {
+	var most int64
+	note := func(n int64) { most = max(most, n) }
+	switch v.Kind() {
+	case reflect.Slice, reflect.Array:
+		for i := range v.Len() {
+			note(mostEntries(v.Index(i), seen))
+		}
+	case reflect.Pointer, reflect.Interface:
+		if !v.IsNil() && (v.Kind() == reflect.Interface || !seen[v.Pointer()]) {
+			if v.Kind() == reflect.Pointer {
+				seen[v.Pointer()] = true
+			}
+			note(mostEntries(v.Elem(), seen))
+		}
+	case reflect.Struct:
+		for i := range v.NumField() {
+			note(mostEntries(v.Field(i), seen))
+		}
+	case reflect.Map:
+		note(int64(v.Len()))
+		for it := v.MapRange(); it.Next(); {
+			note(mostEntries(it.Value(), seen))
+		}
+	}
+	return most
+}
+
+// heldBytes returns the largest string, slice array, or map's entries, in
+// bytes, that v holds.
+func heldBytes(v reflect.Value, seen map[uintptr]bool) int64 {
+	var most int64
+	note := func(n int64) { most = max(most, n) }
+	switch v.Kind() {
+	case reflect.String:
+		note(int64(v.Len()))
+	case reflect.Slice:
+		note(int64(v.Cap()) * int64(v.Type().Elem().Size()))
+		for i := range v.Len() {
+			note(heldBytes(v.Index(i), seen))
+		}
+	case reflect.Array:
+		for i := range v.Len() {
+			note(heldBytes(v.Index(i), seen))
+		}
+	case reflect.Pointer, reflect.Interface:
+		if !v.IsNil() && (v.Kind() == reflect.Interface || !seen[v.Pointer()]) {
+			if v.Kind() == reflect.Pointer {
+				seen[v.Pointer()] = true
+			}
+			note(heldBytes(v.Elem(), seen))
+		}
+	case reflect.Struct:
+		for i := range v.NumField() {
+			note(heldBytes(v.Field(i), seen))
+		}
+	case reflect.Map:
+		note(int64(v.Len()) * int64(v.Type().Key().Size()+v.Type().Elem().Size()))
+		for it := v.MapRange(); it.Next(); {
+			note(heldBytes(it.Key(), seen))
+			note(heldBytes(it.Value(), seen))
+		}
+	}
+	return most
 }

@@ -898,6 +898,25 @@ func (v *fnVerifier) checkEncodedAlloc(st *state, guard []*logic.Term, call *ast
 		}, false)
 		return term
 	}
+	// Under a declared memory encoding grows its output step by step, and
+	// each allocation it makes is at most three times what exists, the
+	// output so far or one value that what it encodes holds, 81 bytes for
+	// each entry of a map whose keys it sorts, and 2^20 for the stacks of
+	// its states (read in the four builds, and held by TestJSONEntries
+	// through jsonAllocBound; see Sizes under a declared memory in the
+	// ROADMAP). Every array that exists is within R and a map has at most
+	// M entries, so what it builds can be allocated whatever its total,
+	// of which nothing is known then, when 3 * R + 81 * M + 2^20 fits.
+	if decl := v.sizesOf(); decl != nil {
+		request := new(big.Int).Mul(decl.arrayBound(), big.NewInt(3))
+		request.Add(request, new(big.Int).Mul(decl.memory, big.NewInt(81)))
+		if request.Add(request, big.NewInt(1<<20)).Cmp(v.maxAlloc()) <= 0 {
+			if v.sizedProved != nil {
+				v.sizedProved.Add(1)
+			}
+			return nil
+		}
+	}
 	v.report(call.Pos(), "what %s builds from %s may be more than can be allocated%s", fn.obj.Name(), types.ExprString(arg),
 		v.encodeHint(walk, arg, indented, found))
 	return nil

@@ -1,0 +1,8 @@
+version: 1
+
+# The corpus of F38: a memory too large for encoding/json's reading to
+# cover, against which JSON is held to its bound as without a declaration.
+sizes:
+  memory: 4TB
+  reason: >-
+    A test: the machines of this corpus hold up to 4 TB of its data.
