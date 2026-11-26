@@ -214,8 +214,8 @@ func (f *trustFile) addSizes(key, value *yaml.Node) {
 		f.problem(key.Line, "sizes may be declared only in the trust file of a project")
 		return
 	}
-	const shape = "sizes must be a mapping with a memory, the most memory, RAM and swap together, of the machines the program runs on, " +
-		"as in 256GB, and a reason, which says why the program never runs on a machine with more"
+	const shape = "sizes must be a mapping with a memory, the most of the program's data that the machines it runs on can hold at once, " +
+		"in memory and swap together, however it is stored, as in 256GB, and a reason, which says why they never hold more"
 	if value.Kind != yaml.MappingNode {
 		f.problem(value.Line, shape)
 		return
@@ -339,6 +339,8 @@ func sizesReport(uses []SizesUse, relative func(string) string) string {
 		fmt.Fprintf(&b, "    claims:  the machines the program runs on never hold %s (%s bytes) of its data at once, in memory and swap together, "+
 			"however it is stored; a run that would hold more runs out of memory, which no proof covers; so every string, and the entries "+
 			"of every map, take at most %s bytes, and the array of every slice at most %s bytes\n", first.Memory, first.Bytes, first.Bytes, first.Bound)
+		b.WriteString("    leaves:  every size that a number gives, as the length of make, Grow, slices.Grow, and the count of Repeat, " +
+			"and every product of lengths, as strings.Join and Replace over a slice, to be proved; a Variant may not rest on it\n")
 		fmt.Fprintf(&b, "    reason:  %s\n", first.Reason)
 		var counts []string
 		for _, use := range listed {
