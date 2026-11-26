@@ -294,6 +294,9 @@ type fnVerifier struct {
 	// inInitialiser is set while an initialiser of a package-level
 	// variable is run as code (initcalls.go).
 	inInitialiser bool
+	// exitReached is set once a call that may end the process has been
+	// made in the function's own frame; see verify.
+	exitReached bool
 	// epochBy names the call whose targets are being forgotten, and
 	// stateNote ends the message of a check that fails while it is set;
 	// see stateHint.
@@ -734,6 +737,12 @@ func (v *fnVerifier) verify() {
 	} else {
 		v.tieFailures()
 	}
+	// An Exits annotation that no call of the body needs is reported, as
+	// Modifies is checked, so that it cannot stay once the exit is gone.
+	if c := fn.exitsClause; c != nil && !v.exitReached && !fn.failed {
+		v.report(c.pos, "%s has an Exits annotation, but nothing it calls may end the process; remove it, "+
+			"since an Exits annotation must say exactly whether the function may end the process", fn.obj.Name())
+	}
 	needed := map[int]bool{}
 	for i, t := range v.frame {
 		needed[t.mod] = needed[t.mod] || v.used[i]
@@ -1000,6 +1009,11 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 			defer v.begin()()
 			v.call(call, st, nil)
 		})
+		// After a call that never returns nothing runs: the process has
+		// ended (exits.go).
+		if callee := v.pkgVerifier.calleeAt(call); callee != nil && v.literalOf(call) == nil && neverReturns(v.contractOf(callee)) {
+			return
+		}
 	case *ast.AssignStmt:
 		v.assign(s, st, k)
 		return
@@ -1071,6 +1085,8 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 		v.unsupported(s.Pos(), "deferring json.NewDecoder(io.LimitReader(r, n)).Decode(&x) is not supported: what it returns would be lost, and what it decodes into is checked where it is called")
 	case v.pkgVerifier.encoderInPlace(s.Call) != nil:
 		v.unsupported(s.Pos(), "deferring json.NewEncoder(w).Encode(v) is not supported: what it returns would be lost, and what it encodes is checked where it is called")
+	case lit != nil && v.exitingCallIn(lit.Body) != nil:
+		v.unsupported(v.exitingCallIn(lit.Body).Pos(), "deferring a function literal that may end the process is not supported yet")
 	case lit != nil:
 		// A literal is run at each return like any deferred call, with the
 		// arguments it is given here; the variables it captures are read
@@ -1104,6 +1120,9 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 	fn, cut := v.contractFor(s.Call, callee, st, nil)
 	if cut {
 		return
+	}
+	if mayExit(fn) {
+		v.unsupported(s.Pos(), fmt.Sprintf("deferring a call of %s, which may end the process, is not supported yet", v.calleeName(callee)))
 	}
 	if fn.calls.len() > 0 {
 		v.unsupported(s.Pos(), fmt.Sprintf("deferring a call of %s, which calls a function it is given, is not supported yet", callee.Name()))

@@ -1,6 +1,23 @@
 version: 1
 
 trusted:
+  os.Exit:
+    reason: >-
+      Documented: "Exit causes the current program to exit with the given
+      status code. Conventionally, code zero indicates success, non-zero an
+      error. The program terminates immediately; deferred functions are not
+      run." In the source of Go 1.27.3 and 1.26.6 it tells the runtime
+      (runtime_beforeExit, which lets the race detector fail the program and
+      writes coverage data) and calls syscall.Exit, which does not return.
+      For code 0 in a binary that go test builds and runs with
+      -test.paniconexit0 it panics instead (testlog.PanicOnExit0); a proof
+      assumes that it is not run there, as the guide says under What a
+      proof assumes.
+    exits: true
+    modifies: []
+    ensures:
+      - "False"
+
   os.Remove:
     reason: >-
       Documented to remove the named file or empty directory, and to return

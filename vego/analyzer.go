@@ -408,6 +408,8 @@ type funcInfo struct {
 	requires    []*clause
 	ensures     []*clause
 	measure     *clause
+	exits       bool      // the function may end the process; see exits.go
+	exitsClause *clause   // the Exits annotation, when there is one
 	body        []*clause // Invariant, Variant, and Assert clauses in source order
 	params      []*types.Var
 	results     []*types.Var
@@ -533,10 +535,13 @@ func (f *funcInfo) writtenIn() *types.Package {
 }
 
 func (f *funcInfo) annotated() bool {
-	return len(f.requires)+len(f.ensures)+len(f.body)+len(f.modifies) > 0 || f.measure != nil
+	return len(f.requires)+len(f.ensures)+len(f.body)+len(f.modifies) > 0 || f.measure != nil || f.exitsClause != nil
 }
 
 type pkgVerifier struct {
+	// mainRef is where package main refers to its function main; see
+	// findMainReference.
+	mainRef token.Pos
 	// typeSwitches holds each type switch by its guard; see switchVars.
 	typeSwitches map[ast.Node]*ast.TypeSwitchStmt
 	// discarded holds each type assertion and call with several results
@@ -881,7 +886,7 @@ var (
 	clauseKinds = map[string]bool{
 		"Requires": true, "Ensures": true, "Invariant": true, "Variant": true,
 		"Predicate": true, "Assert": true, "Modifies": true, "State": true, "Receiver": true, "Snapshot": true, "Vouches": true,
-		"Visited": true, "Owns": true,
+		"Visited": true, "Owns": true, "Exits": true,
 	}
 	// retiredKinds are keywords that earlier versions read, with what to
 	// write now.
@@ -1299,6 +1304,7 @@ func (pv *pkgVerifier) collect() {
 		}
 	}()
 	pv.importOwns()
+	pv.findMainReference()
 	pv.ownsSource, pv.ownsOrder = nil, nil
 	defer pv.checkOwnsDeclared()
 	var predicates []*logic.PredDecl
@@ -1324,7 +1330,7 @@ func (pv *pkgVerifier) collect() {
 				}
 				if c.kind == "" {
 					pv.report(c.pos, "unknown annotation %q; an annotation starts with one of "+
-						"Requires, Ensures, Modifies, Invariant, Owns, Variant, Visited, Assert, Snapshot, Predicate, State, Receiver, Vouches. "+
+						"Requires, Ensures, Modifies, Exits, Invariant, Owns, Variant, Visited, Assert, Snapshot, Predicate, State, Receiver, Vouches. "+
 						"If another tool reads this comment, declare the word with -vego.other-tags", c.text)
 					continue
 				}
@@ -1341,6 +1347,12 @@ func (pv *pkgVerifier) collect() {
 					if fn := pv.funcs[pv.info.Defs[fd.Name].(*types.Func)]; fn != nil {
 						fn.broken = true
 					}
+					continue
+				}
+				if c.kind == "Exits" {
+					// It belongs to a function declaration, and only there;
+					// place says so of any other place.
+					pv.place(file, group, c)
 					continue
 				}
 				if method, defined, ok := pv.methodDocumented(file, group); ok {
@@ -1785,6 +1797,8 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 	}
 	switch c.kind {
 	case "Modifies":
+	case "Exits":
+		pv.placeExits(fn, c)
 	case "Vouches":
 		pv.report(c.pos, "%s", misplacedVouches)
 		fn.broken = true

@@ -1,0 +1,12 @@
+version: 1
+
+# An entry of a method of an interface may not claim that the method ends
+# the process: a call of it is made where no call is written, by fmt, by
+# errors, and through conversions (F5 of the design review of F37).
+trusted:
+  (fmt.Stringer).String:
+    reason: Every Stringer of this project ends the process.
+    exits: true
+    modifies: []
+    ensures:
+      - "False"

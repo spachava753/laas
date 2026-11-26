@@ -118,6 +118,7 @@ An annotation is a comment line of the form `// @Keyword ...`. Each keyword is a
 | Keyword | Where it goes |
 | --- | --- |
 | `Requires`, `Ensures`, `Modifies` | the doc comment of a function |
+| `Exits` | the doc comment of a function (see [Functions that end the process](#functions-that-end-the-process)) |
 | `Variant` | the doc comment of a recursive function, or directly above a `for` loop |
 | `Invariant` | directly above a loop |
 | `Visited` | directly above a `range` over a map (see [Loops over a map](#loops-over-a-map)) |
@@ -150,8 +151,8 @@ Any other word after `// @` is also an error. `vego` cannot tell a wrong keyword
 
 ```text
 vego: unknown annotation "Post"; an annotation starts with one of Requires, Ensures, Modifies,
-Invariant, Variant, Visited, Assert, Snapshot, Predicate, State, Receiver, Vouches. If another tool
-reads this comment, declare the word with -vego.other-tags
+Exits, Invariant, Owns, Variant, Visited, Assert, Snapshot, Predicate, State, Receiver, Vouches. If
+another tool reads this comment, declare the word with -vego.other-tags
 ```
 
 If your code has comments such as `// @Summary` for another tool, list those words once:
@@ -750,6 +751,109 @@ vego: ClearFirst may modify xs, which ClearAll may not modify; list it in a
 Everything described in [Slices](#slices) about slices that share memory applies to such a slice. Two slice parameters of one element type must not overlap, so `Pair(xs, xs...)` for a `func Pair(a []int, rest ...int)` is reported as `the slices passed to Pair as a and rest may overlap`.
 
 A function type with a contract and a method of an interface can be variadic too, and so can a function literal. Calls through such values, and values made of variadic functions, work as for any other type. A value of an `...any` parameter carries code, so a call through a function value or an interface value that passes one is refused, as described in [Function values from code that is not verified](#function-values-from-code-that-is-not-verified).
+
+### Functions that end the process
+
+`os.Exit` ends the process. It does not return to its caller, and it runs no deferred call. `log.Fatal`, `log.Fatalf`, and `log.Fatalln` print as `log.Print`, `log.Printf`, and `log.Println` do, and then call `os.Exit(1)`. These four have shipped contracts.
+
+A function that may call one of them says so with `// @Exits` in its doc comment:
+
+```go
+// MustSucceed ends the process when err is not nil.
+//
+// @Exits
+// @Ensures err = nil
+func MustSucceed(err error) {
+	if err != nil {
+		log.Fatal("failed")
+	}
+}
+```
+
+The `Ensures` clauses of such a function hold when it returns. `MustSucceed` returns only when `err` is nil, so after a call a caller knows that `err` is nil.
+
+A function that never returns has `@Ensures False` beside `@Exits`. After a call of it, nothing is checked, because nothing after the call runs:
+
+```go
+// Usage prints how to call the program and ends it.
+//
+// @Exits
+// @Ensures False
+func Usage() {
+	log.Print("usage: tool name")
+	os.Exit(2)
+}
+
+// FirstArg returns the first argument after the program's name.
+//
+// @Exits
+// @Ensures |args| >= 2 And name = args[1]
+func FirstArg(args []string) (name string) {
+	if len(args) < 2 {
+		Usage()
+	}
+	return args[1]
+}
+```
+
+`FirstArg` reads `args[1]` without an index error. The path on which `len(args) < 2` ends at the call of `Usage`.
+
+`@Exits` passes from a function to its callers. A function that calls a function with `@Exits`, or one of the four above, needs `@Exits` itself:
+
+```text
+vego: Fails calls log.Fatal, which may end the process; add // @Exits to the doc comment of Fails
+if it may end the process, or call something that returns
+```
+
+`main` and `init` need no `@Exits`, because only the runtime calls them:
+
+```go
+// @Ensures True
+func main() {
+	if len(os.Args) < 2 {
+		usage()
+	}
+	if os.Args[1] == "" {
+		log.Fatal("the name is empty")
+	}
+}
+```
+
+A `main` that its own package calls or uses as a value is treated like any other function: it needs `@Exits` if it may end the process.
+
+`@Exits` must be needed. A function with `@Exits` that calls nothing that may end the process is reported:
+
+```text
+vego: NoExit has an Exits annotation, but nothing it calls may end the process; remove it, since
+an Exits annotation must say exactly whether the function may end the process
+```
+
+On a path that ends the process, `vego` checks nothing after the call: no deferred call, no `Ensures` clause, and no loop invariant or variant. None of them runs on that path.
+
+Some places cannot end the process, because the code around them assumes that every call returns. Each of these is reported:
+
+- `@Exits` on a method. `fmt`, `errors`, and conversions to interfaces call methods where no call is written.
+- A function value made of a function that may end the process, and a function literal used as a value that calls one.
+- A function that may end the process handed to a trusted function, such as the function given to `slices.ContainsFunc` or to `sort.Search`.
+- A deferred call that may end the process, also of a function literal.
+- `@Exits` followed by a condition, as in `// @Exits n > 0`. Only the form with nothing after the keyword is supported.
+
+A function literal called where it is written, or bound to a variable that is only called, is part of the function around it. An exit inside it counts as an exit of that function.
+
+A trusted contract says that its function may end the process with `exits: true`. With `ensures: ["False"]`, it says that the function never returns:
+
+```yaml
+  example.com/app/internal/run.Abort:
+    reason: Calls os.Exit(3); reviewed 2026-11-26.
+    exits: true
+    modifies: []
+    ensures:
+      - "False"
+```
+
+`exits` is allowed only in the entry of a function, not of a method or of a type. `ensures: ["False"]` without `exits` is reported as a contract that contradicts itself.
+
+`log.Panic`, `log.Panicf`, and `log.Panicln` have no shipped contracts. They panic, so deferred calls run and a caller can recover. `flag.Parse` has no shipped contract either. It may end the process on a bad flag, and it runs `flag.Usage`, which code that is not verified may set.
 
 ## Function literals
 
@@ -6629,7 +6733,7 @@ Give it a trusted contract with `formats` instead. `vego` then checks each value
 
 ### Functions that do not return
 
-`log.Fatal`, `log.Fatalf`, `log.Fatalln`, `log.Panic`, `log.Panicf`, and `log.Panicln` have no shipped contracts. A trusted contract claims that its function returns, and these do not. A call of one is reported as `cannot verify`, with the message that it has no contract.
+`log.Fatal`, `log.Fatalf`, and `log.Fatalln` end the process after they print. A function that calls one needs `@Exits`, as described in [Functions that end the process](#functions-that-end-the-process). `log.Panic`, `log.Panicf`, and `log.Panicln` have no shipped contracts. A call of one is reported as `cannot verify`, with the message that it has no contract.
 
 ## Writing a response
 
@@ -9554,6 +9658,8 @@ This table lists the most common messages.
 | `a comment directly after an annotation is not read as part of it` | An ordinary comment follows an annotation in the same comment group. | Start the line with `// @` to continue the annotation, or put an empty `//` line before the comment. |
 | `this comment has an @ and a character that ends a line on the screen but not for Go`, or `this file has annotations and a carriage return that does not end a line` | The comment contains a character such as U+2028, or a carriage return without a newline. An editor may show what follows it as a separate line, but `vego` reads it as part of the same line. | Remove the character. |
 | `syntax error in Requires annotation: && is not a spelling of the formula language; write And`, and the same for `\|\|`, `!`, `==`, and `ℤ` | The formula uses a spelling of Go, or `ℤ` for the integers. | Write `And`, `Or`, `~`, `=`, or `Z`. |
+| `F calls G, which may end the process; add // @Exits to the doc comment of F ...` | `G` has `@Exits`, or is `os.Exit` or `log.Fatal`, and `F` does not say that it may end the process. | Add `// @Exits` to `F`, or return an error instead. See [Functions that end the process](#functions-that-end-the-process). |
+| `F has an Exits annotation, but nothing it calls may end the process` | The `@Exits` of `F` is not needed. | Remove it. |
 | `unknown annotation "W"` | The word after `// @` is not a keyword. | Correct the keyword. If another tool reads the comment, declare the word with `-vego.other-tags`. |
 | `Ensures annotation is not attached to a function` | The clause is not in the doc comment of a function. | Move it into the doc comment. |
 | `x is assigned, which F may not modify; list it in a // @Modifies clause`, with `, as p.f` when a path from a parameter reaches it | No `Modifies` entry covers memory of this kind. The path stops before a field that your package cannot name, such as an unexported field of `os.File`. | Add it to `Modifies`, by the path the message names. |
@@ -9718,6 +9824,7 @@ This table lists the most common messages.
 
 A function that uses any of the following is reported as `cannot verify`:
 
+- a call that may end the process in a function literal used as a value, in a function handed to a trusted function, or in a deferred call, and a function value made of a function that may end the process (see [Functions that end the process](#functions-that-end-the-process));
 - calls of a method of an interface that has no contract, in source or in the trust file, and converting a value to an interface with such a method (see [Interfaces](#interfaces)); of the standard library, only `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, and `(context.Context).Err` have shipped contracts (see [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages));
 - an entry in the trust file for a type of the module of the analysed package, or one with `runs`, `keeps`, or `calls`;
 - calling a method of `bytes.Buffer` or `strings.Builder` that has no shipped contract, such as `Read`, `Next`, `ReadFrom`, `WriteTo`, or `Cap`, and converting either to `io.Writer`, since its `Write` needs a bound that the contract of `(io.Writer).Write` does not give; passing one to `fmt.Fprintf`, `fmt.Fprint`, or `fmt.Fprintln` is supported (see [Building text in a buffer](#building-text-in-a-buffer) and [Formatting into a buffer](#formatting-into-a-buffer));
@@ -9800,7 +9907,7 @@ Floating-point values are supported but opaque. They can be passed around and us
 
 A proof by `vego` depends on the following assumptions. Each concerns something `vego` cannot see.
 
-- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and holds no value that can hold code anywhere it was not held when the call began, unless `keeps` lists the parameter. For a parameter listed under `keeps`, it runs the code during the call only if `runs` lists the parameter too, holds it when it returns only in memory that the results and parameters listed there reach, and has started or registered nothing that runs it later: no goroutine, timer, finalizer or cleanup, callback given to another package, or package-level variable. For a parameter listed under `stores`, the function stores into the memory that its `modifies` lists under that parameter only memory it made during the call. For a parameter listed under `prints`, the function formats as the function that `prints` names does, calls the `Write` of that parameter once with exactly what that function returns, calls nothing else of it, and returns what `Write` returned. For a parameter listed under `encodes`, the function encodes the value as package `encoding/json` does. It runs no method of the value but those of `time.Time`, `json.RawMessage`, and `json.Number` that `encoding/json` runs, only while the call lasts and on the goroutine that called it, and it allocates within the bound `vego` proves at the call. It keeps nothing of the value, with one exception. Built without `GOEXPERIMENT=jsonv2`, it returns for a NaN or an infinity a `*json.UnsupportedValueError` whose field `Value` is a `reflect.Value` of that float in the memory of the value, which reflection could set. No proof depends on it. No formula reads a float, and verified code cannot take the value out of such an error: a type assertion, a case of a type switch, and `errors.As` are refused for a type that holds a `reflect.Value`. For a parameter listed under `decodes`, the function decodes into the value as `encoding/json` does. It writes only the exported fields that `encoding/json` writes, runs no method of the value but those of `time.Time`, `json.RawMessage`, and `json.Number`, keeps nothing of what it is handed, and allocates within the bound `vego` proves at the call. When every slice, map, and pointer in what it decodes into is `nil`, which `vego` requires at each call, everything it stores there is memory it made during the call. `(*json.Encoder).Encode`, called on the encoder that `json.NewEncoder(w)` makes in the same expression, encodes its argument as `Marshal` does. When that fails, it returns the error of `Marshal` and calls nothing of `w`. Otherwise it calls `w.Write` once, with exactly what `Marshal` returns followed by a newline, calls nothing else of `w`, and returns the error that `Write` returned. `(*json.Decoder).Decode`, called on the decoder that `json.NewDecoder(io.LimitReader(r, n))` makes in the same expression, calls nothing of `r` but its `Read`. It calls `Read` any number of times, each time with a buffer that is not empty, only while `Decode` lasts and on the goroutine that called it, and reads at most `n` bytes in all. It decodes the first value it reads as `Unmarshal` does, and leaves what follows that value unread in `r` or drops it with the decoder. Nothing holds the decoder after the expression, and nothing it starts keeps `r`. For a parameter listed under `runs` or `keeps`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them, and, for a value of a type that has every method of `io.Writer`, `io.Reader`, `io.StringWriter`, or another interface each of whose methods has an entry, every value whose methods of those interfaces that its dynamic type implements meet their entries too. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write, and the entries of `io.Writer`, `io.Reader`, `io.StringWriter`, and every other interface each of whose methods has an entry, that what they hold implements. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter. Where such a value runs what the function keeps, as the reader that `io.TeeReader` returns runs the reader and the writer it is given, it meets its contract whenever what the function keeps meets theirs. A function whose entry says `isolated: true`, or whose trust file says `isolated` at its top, runs no code but what the call hands it through its arguments and receiver, and reaches no code through memory that another call set, also not through any function it calls. `log.Printf` is not isolated, since it writes to the output that `log.SetOutput` set. A function whose entry says `initialiserOnly: true` meets its contract when it returns. Where it fails it panics, and the initialiser of a package-level variable is the only place `vego` allows a call of it.
+- Trusted contracts are true. This applies to the shipped contracts and to your own. A trusted function returns without panicking when its `requires` clauses hold. With `exits: true` it may instead end the process as `os.Exit` does, without running deferred calls. It writes nothing a caller can see outside its `modifies` list, which includes package-level variables and the memory they refer to, and changes no state of an interface value outside it, also of one that it type-asserts from another interface or an `any`. It does not keep the pointers and slices it receives. For a parameter listed under `runs`, it runs the code the parameter carries only before it returns and only on the goroutine that called it, and holds no value that can hold code anywhere it was not held when the call began, unless `keeps` lists the parameter. For a parameter listed under `keeps`, it runs the code during the call only if `runs` lists the parameter too, holds it when it returns only in memory that the results and parameters listed there reach, and has started or registered nothing that runs it later: no goroutine, timer, finalizer or cleanup, callback given to another package, or package-level variable. For a parameter listed under `stores`, the function stores into the memory that its `modifies` lists under that parameter only memory it made during the call. For a parameter listed under `prints`, the function formats as the function that `prints` names does, calls the `Write` of that parameter once with exactly what that function returns, calls nothing else of it, and returns what `Write` returned. For a parameter listed under `encodes`, the function encodes the value as package `encoding/json` does. It runs no method of the value but those of `time.Time`, `json.RawMessage`, and `json.Number` that `encoding/json` runs, only while the call lasts and on the goroutine that called it, and it allocates within the bound `vego` proves at the call. It keeps nothing of the value, with one exception. Built without `GOEXPERIMENT=jsonv2`, it returns for a NaN or an infinity a `*json.UnsupportedValueError` whose field `Value` is a `reflect.Value` of that float in the memory of the value, which reflection could set. No proof depends on it. No formula reads a float, and verified code cannot take the value out of such an error: a type assertion, a case of a type switch, and `errors.As` are refused for a type that holds a `reflect.Value`. For a parameter listed under `decodes`, the function decodes into the value as `encoding/json` does. It writes only the exported fields that `encoding/json` writes, runs no method of the value but those of `time.Time`, `json.RawMessage`, and `json.Number`, keeps nothing of what it is handed, and allocates within the bound `vego` proves at the call. When every slice, map, and pointer in what it decodes into is `nil`, which `vego` requires at each call, everything it stores there is memory it made during the call. `(*json.Encoder).Encode`, called on the encoder that `json.NewEncoder(w)` makes in the same expression, encodes its argument as `Marshal` does. When that fails, it returns the error of `Marshal` and calls nothing of `w`. Otherwise it calls `w.Write` once, with exactly what `Marshal` returns followed by a newline, calls nothing else of `w`, and returns the error that `Write` returned. `(*json.Decoder).Decode`, called on the decoder that `json.NewDecoder(io.LimitReader(r, n))` makes in the same expression, calls nothing of `r` but its `Read`. It calls `Read` any number of times, each time with a buffer that is not empty, only while `Decode` lasts and on the goroutine that called it, and reads at most `n` bytes in all. It decodes the first value it reads as `Unmarshal` does, and leaves what follows that value unread in `r` or drops it with the decoder. Nothing holds the decoder after the expression, and nothing it starts keeps `r`. For a parameter listed under `runs` or `keeps`, all of this holds whatever value is passed. For a function value of a type with a contract, it holds for every value that meets the contract, and the function calls the value only with arguments that meet the `Requires` of its type. For an interface value whose methods all have contracts, it holds for every value whose methods meet them, and, for a value of a type that has every method of `io.Writer`, `io.Reader`, `io.StringWriter`, or another interface each of whose methods has an entry, every value whose methods of those interfaces that its dynamic type implements meet their entries too. For an interface value with a method that has a contract, the function calls such a method only with arguments that meet its `Requires`. For any other code, which includes every method of an interface value with a method that has no contract, it holds whatever code runs. For the parameters listed under `formats`, it does nothing with the values but format them as package `fmt` does, using the listed string only as the format, runs no method of them but those `fmt` runs, only while the call lasts and on the goroutine that called it, keeps none of them, and builds from them at most 4096 bytes more than `fmt` prints for them, apart from what a logger adds from its own settings. For a parameter with a contract under `calls`, it calls the function only with arguments that meet its `requires`, and the contract holds for every function that meets them, returns, and writes nothing its `modifies` covers. With `deterministic: true`, or an application such as `f(i)`, it needs to hold only for a function that returns the same result whenever it is called with the same argument, and `f(i)` is that result. For a result listed under `vouches`, the errors it returns meet the conditions in [Errors that a trusted function returns](#errors-that-a-trusted-function-returns), and the function values and interface values it returns meet the contracts of their types, including what those contracts say they write, and the entries of `io.Writer`, `io.Reader`, `io.StringWriter`, and every other interface each of whose methods has an entry, that what they hold implements. For a parameter listed under `vouches`, so do the function values and interface values that the function writes into, or leaves in, the memory its `modifies` covers under that parameter. Where such a value runs what the function keeps, as the reader that `io.TeeReader` returns runs the reader and the writer it is given, it meets its contract whenever what the function keeps meets theirs. A function whose entry says `isolated: true`, or whose trust file says `isolated` at its top, runs no code but what the call hands it through its arguments and receiver, and reaches no code through memory that another call set, also not through any function it calls. `log.Printf` is not isolated, since it writes to the output that `log.SetOutput` set. A function whose entry says `initialiserOnly: true` meets its contract when it returns. Where it fails it panics, and the initialiser of a package-level variable is the only place `vego` allows a call of it.
 - The methods of `bytes.Buffer`, `strings.Builder`, `bufio.Writer`, `bufio.Reader`, `bufio.Scanner`, and `log.Logger` that have shipped entries write nothing that verified code can see other than the struct and the memory that the value owns, as [Writing through a buffer](#writing-through-a-buffer) lists it. After a call, the value owns only what it owned before the call and memory that the call made. The read position of a `bytes.Buffer` never passes the end of what was written to it. Every method of `bytes.Buffer` keeps it so, and `|b|` is the number of bytes between the two.
 - Code of another package that is not verified runs code of the verified package only as `vego` follows it, which [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods) describes: during a call that the verified package makes, it runs only what that call hands it, through the arguments and the receiver. Code that it kept from an earlier call, a value it stored, or code that it runs on another goroutine or at another time, does not call back into a verified function while that function runs, so that the call never ends. A cycle that stays in the package, or that goes through what a call hands to another package, is found and reported.
 - For a parameter listed under `runs` or `keeps`, the function calls through an interface value or a function value nothing that the parameter holds, or that a call of what the parameter holds returns, but the methods of the interfaces and the function types that the parameter's type reaches and those of the types listed under `asserts`, and it uses no reflection to call what the parameter holds (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). Verified code answers for the methods that the parameter's type has, each checked where the value is converted. The author of the entry answers for the rest. An entry such as that of `use(p Pinger)` with `runs: [p]` and no `asserts`, for a function that asserts `p` to an interface with `Bump` and calls it, is false, and a proof that relies on it is worthless. For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
@@ -9830,6 +9937,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - A write to standard output or standard error returns. Code that is not verified may set `os.Stdout` and `os.Stderr` to any `*os.File`. A pipe that nobody reads breaks this, and so does a pipe whose reader has closed it, which ends the program with `SIGPIPE`.
 - A call that opens, reads, or writes a file returns. This covers `os.Open`, `os.Create`, `os.WriteFile`, `os.MkdirAll`, `os.Getwd`, and `Read`, `Write`, and `Close` of an `*os.File`, also one that code that is not verified passes in. Opening a FIFO waits for its other end, reading a FIFO, a pipe, or a terminal waits for data, writing a pipe that nobody reads waits, and a file system that does not answer, such as a network mount that is gone, waits for ever. A write to standard output or standard error through a broken pipe ends the program, as above.
 - The output of the standard logger writes nothing that verified code can see, and returns. Code that is not verified sets that output with `log.SetOutput`, or with `slog.SetDefault` to a `slog.Handler`. A program that sets it to a writer or a handler of its own makes this claim about that code. A writer or a handler that logs through the standard logger again never returns, because the logger holds a lock while it writes. The same goes for a writer made by verified code whose `Write` calls something that logs.
+- A function that may call `os.Exit(0)` is not run by a binary that `go test` built and runs with `-test.paniconexit0`, which `go test` passes by default. In such a binary `os.Exit(0)` panics instead of ending the process, and deferred calls then run. `os.Exit` with any other code, and `log.Fatal`, `log.Fatalf`, and `log.Fatalln`, which call `os.Exit(1)`, end the process there too.
 - The machine has enough memory and stack.
 - The key and the value of every entry of a map take memory of their own in the heap, as Go's runtime keeps them, and the heap spans at most `MaxAlloc` bytes. `vego` uses this to bound the number of keys of a map by the size of a key and a value, as described in [How many keys a map can have](#how-many-keys-a-map-can-have). The Go specification does not say how a map is stored; the runtime of the Go releases that `laas` is tested with stores it this way, for keys and values of size zero and for large ones kept behind a pointer. Entries of different maps take memory of their own too, though `vego` bounds one map at a time.
 - What formatting builds from parts whose length the logic has no term for is not longer than can be allocated. Those parts are:
@@ -9851,6 +9959,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | Annotation | Where | Meaning |
 | --- | --- | --- |
 | `Requires P` | doc comment of a function, of a named function type, or of a method in a named interface type | `P` must be true when the function, a value of the type, or the method is called. |
+| `Exits` | doc comment of a function | The function may end the process without returning, as `os.Exit` does. A caller needs it too, unless the caller is `main` or `init`. |
 | `Ensures P` | doc comment of a function, of a named function type, or of a method in a named interface type | `P` is true when the function, a value of the type, or the method returns. |
 | `Modifies a, b.f` | doc comment of a function, of a named function type, or of a method in a named interface type | The memory the function, a value of the type, or the method may write that a caller can see. |
 | `Variant e` | doc comment of a recursive function | `e` is never negative and is smaller at each recursive call. |

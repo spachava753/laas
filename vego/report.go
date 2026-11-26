@@ -56,6 +56,10 @@ func TrustReport(usages []*Usage, dir string) string {
 			if len(use.Runs) > 0 {
 				fmt.Fprintf(&b, "    runs code held by: %s\n", strings.Join(use.Runs, ", "))
 			}
+			if use.Exits {
+				fmt.Fprintf(&b, "    exits: a claim that the function may end the process as os.Exit does, without returning and without running deferred calls; "+
+					"nothing after such a call is checked\n")
+			}
 			if use.Isolated {
 				fmt.Fprintf(&b, "    isolated: a claim that it runs no code but what the call hands it through its arguments and receiver, and reaches no code "+
 					"through memory that another call set, also not through any function it calls\n")

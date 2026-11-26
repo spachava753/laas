@@ -62,7 +62,7 @@ func LogfVerified(format string, args ...any) {
 // @Ensures True
 func Fails(err error) {
 	if err != nil {
-		log.Fatal("failed") // want `vego:\ cannot\ verify\ Fails:\ it\ calls\ Fatal,\ which\ has\ no\ contract`
+		log.Fatal("failed") // want `vego: Fails calls log\.Fatal, which may end the process; add // @Exits to the doc comment of Fails if it may end the process, or call something that returns`
 	}
 }
 

@@ -135,6 +135,7 @@ var mainCorpus = []string{
 	"lib", "client", "memory", "shapes", "badshapes", "invariants", "mapping", "badpred", "usesbadpred", "early", "settled", "gen", "earlytype", "earlyrange", "earlybox", "earlyloop", "earlycarrier", "earlypanic", "guide", "wrapped", "unread", "usesunread", "twovariants", "usestwovariants", "lonecr", "errorsid", "errorsvars", "errorsvarsclient", "vouched", "vouchedclient", "vouchedcapture", "earlyalias", "earlyaliasok", "sentinellib", "sentinelclient", "usesearly", "sentinelfar", "sentinelfarther", "closures", "funcvalues", "funcvalueslib", "funcvaluesclient", "funcvaluesunread", "funcvaluesinit", "funcvaluesinitdefer", "funcvaluesinitok", "funcvaluesinitmethod", "funcvaluesoldloop", "funcvaluesinitlit", "callbacks", "callbacksinit", "interfaces", "interfaceslib", "interfacesunread", "interfacesinitok", "interfacesinithand", "interfacesinitcall", "foreign", "stdtypes", "locks", "lockspred", "lockslib", "locksclient", "layers", "ifacestate", "footprints", "buffers", "distinct", "ensuresentry", "manywrites", "slowresp", "slowhttp", "deepfacts",
 	"globals", "globalslib", "globalsclient", "globalsembed", "globalsearly", "unsafelib", "unsafeuse", "keeps", "keepslib", "plog", "buffered", "iowrap", "globalsleak", "globalsleakclient", "trialfaults", "smalls", "vouchsrc", "vouchsrcclient", "vouchsrcbad", "stdentries", "originpath", "originpathclient", "generics", "genericslib", "deletes", "cycles/...", "owns", "ownslib", "ownstore", "ownserver", "frames", "guidestore", "handlers", "ghost", "jsonenc", "jsondec",
 	"chainstats", "chainhandler", "chainapp", "chainreport", "chainclash", "assignedlib", "assignedclient", "globalsvalues", "trustedwrites", "trustedwritesclient", "reachlib", "reachclient", "guidestats", "guidehandler", "dynlib", "dynhook", "dyniface", "varinv", "varinvbad", "letoutq", "letoutp", "letoutmain", "exportedp", "exportedmain", "exportedp2", "exportedmain2", "closedq", "isolatedq", "isolatedg", "lockgroup", "lockgroupbad", "lockgrouprw", "mustcompile", "initvalues", "loggervar", "hiddenlookq", "hiddenlook", "typeonlylib", "typeonlyclient", "keepsvars", "guidelocks", "initcallslib", "initcallsclient", "initcalls", "readerbad", "pathstore", "madehere", "varcodelib", "varcode", "boxed", "boxedlib", "boxedclient", "closed", "typederrors", "typederrorsclient", "typederrorsbad", "typedowns", "runsclaims", "typederrorspos", "ptrstates", "ptrlib", "dynheld", "dynifaces", "dyneq", "optional", "optionalio", "arrays", "arraystructs", "copies", "tables", "tablesclient",
+	"exits", "exitsmain", "exitsbad", "exitslib", "exitsref", "exitsrefok", "guidemain",
 }
 
 func TestAnalyzer(t *testing.T) {
@@ -249,6 +250,12 @@ func TestAnalyzer(t *testing.T) {
 			runCorpus(t, newAnalyzer(), root)
 		})
 	}
+	// A module whose entry of a method of an interface claims that it ends
+	// the process (F5 of the design review of F37).
+	t.Run("refuses exits in an entry of a method", func(t *testing.T) {
+		parallel(t)
+		runCorpus(t, newAnalyzer(), "exitsentry")
+	})
 	// A module with entries of its own for methods of sync's mutexes.
 	t.Run("reads states in project entries", func(t *testing.T) {
 		parallel(t)

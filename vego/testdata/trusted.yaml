@@ -2578,6 +2578,41 @@ trusted:
       - 'n < 0 -> holds(result, *"typederrors".PE) And result.(*"typederrors".PE).Line = n'
     modifies: []
 
+  exitslib.Stop:
+    reason: It calls os.Exit(1).
+    exits: true
+    modifies: []
+    ensures:
+      - "False"
+
+  exitslib.MayStop:
+    reason: It calls os.Exit(1) for a negative n and returns n otherwise.
+    exits: true
+    modifies: []
+    ensures:
+      - "result = n And n >= 0"
+
+  exitslib.Both:
+    reason: A contradiction beside False.
+    exits: true
+    modifies: []
+    ensures:
+      - "False"
+      - "result = 1"
+
+  exitslib.FalseOnly:
+    reason: False without exits.
+    modifies: []
+    ensures:
+      - "False"
+
+  (*exitslib.T).Halt:
+    reason: It calls os.Exit(1).
+    exits: true
+    modifies: []
+    ensures:
+      - "False"
+
 # States of interfaces of another module, and contracts that speak of them.
 state:
   optionalwc.WC:

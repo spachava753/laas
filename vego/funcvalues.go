@@ -1585,6 +1585,10 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 		return
 	}
 	fn = view.fn
+	if mayExit(fn) {
+		v.unsupported(e.Pos(), fmt.Sprintf("it uses %s as %s, and %s may end the process; a call of %s is assumed to return, "+
+			"since a function type or a method of an interface cannot have an Exits annotation yet", v.calleeName(callee), as, v.calleeName(callee), holder))
+	}
 	// An entry of an interface method that lists no keeps claims that no
 	// implementation keeps what it is handed, as io.Writer and io.Reader
 	// document of p; a verified implementation must not, by its summary

@@ -64,6 +64,9 @@ func (pv *pkgVerifier) typeEntry(key string, obj *types.Func, methodOf *types.Fu
 		}
 		fn.defect("%s is declared in the module of this package; write its contract in the doc comment where it is declared", what)
 	}
+	if entry.exits {
+		fn.defect("%s", exitsOnlyFunctions)
+	}
 	if text := entry.receiver.text; text != "" {
 		switch {
 		case methodOf == nil:

@@ -164,6 +164,9 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 			results = v.nothingKnown(callee, st)
 			break
 		}
+		if mayExit(fn) {
+			v.checkExitAllowed(call.Pos(), v.calleeName(callee))
+		}
 		if writer, write := v.printedInto(call, fn); writer != nil {
 			// A buffer or a Writer formatted into: the Sprint function and
 			// the writer's own Write; see prints.go.
@@ -1034,7 +1037,9 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	// follows from them either.
 	claimDefs := v.claimDefs
 	v.claimDefs = nil
-	dead := (fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil) || v.quickly(st, involved, logic.False())
+	// A contract that says its function never returns contradicts every
+	// state after the call, which is what it claims (exits.go).
+	dead := (fn.trust == nil && fn.valueOf == nil && fn.methodOf == nil) || neverReturns(fn) || v.quickly(st, involved, logic.False())
 	for i, promise := range promised {
 		st.assume(logic.Implies(logic.And(guard...), promise))
 		// Where the promise says valid(x) with no condition around it,

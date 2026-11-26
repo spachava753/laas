@@ -756,6 +756,10 @@ func (v *fnVerifier) handOver(fn *funcInfo, param *types.Var, arg ast.Expr, st *
 		v.cut(st, guard)
 	}
 	c = view.fn
+	if mayExit(c) {
+		v.unsupported(arg.Pos(), fmt.Sprintf("it hands %s, which may end the process, to %s; a function handed to a trusted function may not end the process, "+
+			"since the contract of what calls it assumes that each call returns", v.calleeName(callee), fn.obj.Name()))
+	}
 	if c.trust != nil && !view.cut {
 		v.noteUse(c, arg.Pos())
 	}

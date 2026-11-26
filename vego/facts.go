@@ -18,6 +18,9 @@ type contractFact struct {
 	// Modifies lists what the function may write, as its Modifies clauses
 	// spell it.
 	Modifies []string
+	// Exits is set when the function may end the process without
+	// returning, as its Exits annotation says; see exits.go.
+	Exits bool
 	// Excused is set when the function may fail unpredictably; see
 	// reportAlwaysFailing.
 	Excused bool
@@ -241,6 +244,7 @@ func (pv *pkgVerifier) contractFactOf(fn *funcInfo, at token.Pos) *contractFact 
 	if fn.receiver != nil {
 		fact.Receiver = fn.receiver.Name()
 	}
+	fact.Exits = fn.exits
 	for i := range fn.results {
 		if fn.vouches[i] {
 			fact.Vouches = append(fact.Vouches, spelledResult(fn, i))
@@ -292,6 +296,7 @@ func (pv *pkgVerifier) contractFromFact(obj *types.Func, pkg *types.Package, fac
 		return list
 	}
 	fn.requires, fn.ensures = clauses("Requires", fact.Requires), clauses("Ensures", fact.Ensures)
+	fn.exits = fact.Exits
 	for _, name := range fact.Vouches {
 		index, isResult := fn.resultNames[name]
 		if !isResult {

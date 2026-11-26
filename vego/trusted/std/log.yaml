@@ -52,6 +52,43 @@ trusted:
       - "fresh(result, out)"
       - "ready(result)"
 
+  log.Fatal:
+    reason: >-
+      Documented: "Fatal is equivalent to Print followed by a call to
+      os.Exit(1)." In the source of Go 1.27.3 and 1.26.6 it calls std.output,
+      as Print does, and then os.Exit(1), which does not return and runs no
+      deferred function. See log.Printf for what is claimed of the standard
+      logger's output.
+    formats: [v]
+    exits: true
+    modifies: []
+    ensures:
+      - "False"
+
+  log.Fatalf:
+    reason: >-
+      Documented: "Fatalf is equivalent to Printf followed by a call to
+      os.Exit(1)." In the source of Go 1.27.3 and 1.26.6 it calls std.output,
+      as Printf does, and then os.Exit(1). See log.Printf for what is claimed
+      of the standard logger's output.
+    formats: [format, v]
+    exits: true
+    modifies: []
+    ensures:
+      - "False"
+
+  log.Fatalln:
+    reason: >-
+      Documented: "Fatalln is equivalent to Println followed by a call to
+      os.Exit(1)." In the source of Go 1.27.3 and 1.26.6 it calls std.output,
+      as Println does, and then os.Exit(1). See log.Printf for what is
+      claimed of the standard logger's output.
+    formats: [v]
+    exits: true
+    modifies: []
+    ensures:
+      - "False"
+
   log.Printf:
     reason: >-
       Documented to call Output to print to the standard logger, with the

@@ -56,6 +56,11 @@ type trustEntry struct {
 	// it calls (F11 of the review of the design of F32). A call of it that
 	// is handed no code reaches no code of the calling package.
 	isolated bool
+	// exits is the claim that the function may end the process as os.Exit
+	// does, without returning and without running a deferred call; with
+	// an ensures that is the single clause False, that it never returns.
+	// See exits.go.
+	exits    bool
 	requires []trustFormula
 	ensures  []trustFormula
 	modifies []trustFormula
@@ -368,6 +373,12 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 				continue
 			}
 			entry.isolated = true
+		case "exits":
+			if value.Kind != yaml.ScalarNode || value.Value != "true" {
+				f.problem(value.Line, "exits of %s must be true, or left out", entry.key)
+				continue
+			}
+			entry.exits = true
 		case "initialiserOnly":
 			if value.Kind != yaml.ScalarNode || value.Value != "true" {
 				f.problem(value.Line, "initialiserOnly of %s must be true, or left out", entry.key)
@@ -381,7 +392,7 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			}
 			entry.receiver = trustFormula{text: value.Value, line: value.Line, col: value.Column}
 		default:
-			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, receiver, requires, ensures, modifies, stores, runs, keeps, asserts, vouches, formats, encodes, decodes, prints, calls, isolated, or initialiserOnly",
+			f.problem(field.Line, "unknown field %q in the entry for %s; expected reason, receiver, requires, ensures, modifies, exits, stores, runs, keeps, asserts, vouches, formats, encodes, decodes, prints, calls, isolated, or initialiserOnly",
 				field.Value, entry.key)
 		}
 	}
@@ -557,8 +568,11 @@ type EntryUse struct {
 	// holds what supports a claim its file makes of the whole package.
 	Isolated       bool
 	IsolatedReason string
-	File    string
-	Line    int
+	// Exits is set when the entry claims that the function may end the
+	// process (trustEntry.exits).
+	Exits bool
+	File  string
+	Line  int
 	// Unpredictable is set when the function returns an error and its
 	// contract never says that it succeeds.
 	Unpredictable bool
@@ -892,6 +906,13 @@ func (pv *pkgVerifier) trustedContract(callee *types.Func) *funcInfo {
 	if entry.receiver.text != "" {
 		fn.defect("it names a receiver, which only an entry for a method of an interface can do")
 	}
+	// What exits claims: that the function may end the process.
+	switch {
+	case entry.exits && fn.obj.Type().(*types.Signature).Recv() != nil:
+		fn.defect("%s", exitsOnlyFunctions)
+	case entry.exits:
+		fn.exits = true
+	}
 	// The parameters whose code the function is said to run. Listing one
 	// that can hold no code would be a claim about nothing.
 	for _, item := range entry.runs {
@@ -1083,6 +1104,15 @@ func (pv *pkgVerifier) checkTrusted(fn *funcInfo) {
 						"may speak only of values", cb.param.Name(), cb.param.Name())
 				}
 			}
+		}
+		// The one contradiction an entry may state is that its function
+		// never returns, which exits says how: by ending the process. Its
+		// requires may still not contradict each other.
+		if neverReturns(fn) {
+			if v.quickly(entry, nil, logic.False()) {
+				fn.typeDefect("it contradicts itself, so anything could be proved from it")
+			}
+			return
 		}
 		_, outcome, _ := v.contractInstance(entry)
 		if pv.contradictory(outcome) {
@@ -1336,7 +1366,7 @@ func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 		}
 		pv.usage.Entries = append(pv.usage.Entries, &EntryUse{
 			Key: entry.key, Reason: entry.reason, Shipped: entry.file.shipped, Isolated: entry.isIsolated(), IsolatedReason: entry.file.isolatedReason,
-			File: entry.file.path, Line: entry.line, Runs: runs, Keeps: keepsDescribed(entry), Asserts: assertsDescribed(entry), Vouches: vouches, Formats: formats, Encodes: encodes, Decodes: decodes, Callbacks: callbacks,
+			Exits: entry.exits, File: entry.file.path, Line: entry.line, Runs: runs, Keeps: keepsDescribed(entry), Asserts: assertsDescribed(entry), Vouches: vouches, Formats: formats, Encodes: encodes, Decodes: decodes, Callbacks: callbacks,
 			Every: every, Relied: []string{pv.pass.Pkg.Path()}, Fingerprint: entry.fingerprint(), States: states,
 		})
 		index = len(pv.usage.Entries) - 1
