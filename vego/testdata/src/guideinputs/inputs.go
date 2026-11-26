@@ -214,3 +214,17 @@ func WordsOfOnes() (n int) {
 	n, _ = Words(ones{}) // want `precondition of Words may not hold: ends\(r\)`
 	return n
 }
+
+// CopyWhole reads all of src and writes it to dst.
+//
+// @Requires dst != nil And src != nil And ends(src)
+// @Modifies dst, src
+// @Ensures True
+func CopyWhole(dst io.Writer, src io.Reader) (err error) {
+	data, err := io.ReadAll(src)
+	if err != nil {
+		return err
+	}
+	_, err = dst.Write(data)
+	return err
+}

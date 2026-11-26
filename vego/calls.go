@@ -256,7 +256,7 @@ func copyRemedy(why string) string {
 	return why + "; an entry claims that its function returns, so none ships; under the declaration that inputs end, read a reader it covers " +
 		"with io.ReadAll and write what that returns, or copy with a loop that calls Read until it returns an error and writes what each Read returned, " +
 		"under // @Variant unread(r); without the declaration, copy with such a loop that calls Read at most a number of times you choose; " +
-		"the guide shows both under Copying from a reader to a writer"
+		"the guide shows the first two under Copying from a reader that ends and the last under Copying from a reader to a writer"
 }
 
 // contractFor returns the contract a call is checked against, after making
