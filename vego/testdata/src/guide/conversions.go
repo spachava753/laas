@@ -72,6 +72,6 @@ func FormatToBuffer() {
 // @Ensures True
 func BufferAsWriter() {
 	var b bytes.Buffer
-	var w io.Writer = &b // want `vego: cannot verify BufferAsWriter: converting a value of type \*bytes.Buffer to io.Writer is not supported: its Write may panic when the buffer is too large to grow, and the contract of \(io.Writer\).Write has no bound for it; declare the memory of the machines the program runs on under sizes in vego-trusted.yaml, under which a buffer converts, or pass the Buffer itself to fmt.Fprintf, Fprint, or Fprintln, which then calls its own Write, or write what you format with its own WriteString, as in b.WriteString\(fmt.Sprintf\(...\)\)`
+	var w io.Writer = &b // want `vego: cannot verify BufferAsWriter: converting a value of type \*bytes.Buffer to io.Writer is not supported: its Write may panic when the buffer is too large to grow, and the contract of \(io.Writer\).Write has no bound for it; pass the Buffer itself to fmt.Fprintf, Fprint, or Fprintln, which then calls its own Write, or write what you format with its own WriteString, as in b.WriteString\(fmt.Sprintf\(...\)\)`
 	fmt.Fprintf(w, "%d items", 3)
 }

@@ -375,10 +375,10 @@ buffers	buffers.GrowsNegative	9	11240	0
 buffers	buffers.HolderNB	12	29690	0
 buffers	buffers.Items	15	65490	0
 buffers	buffers.ItemsBuffer	14	78991	0
-buffers	buffers.ItemsBufferUnbounded	14	68819	0
+buffers	buffers.ItemsBufferUnbounded	16	77313	0
 buffers	buffers.ItemsUnlisted	10	33596	0
 buffers	buffers.Join	31	230497	0
-buffers	buffers.JoinUnbounded	21	94178	0
+buffers	buffers.JoinUnbounded	23	103579	0
 buffers	buffers.LengthOfInt	1	111	0
 buffers	buffers.Line	18	73047	0
 buffers	buffers.LineUnlisted	7	12399	0
@@ -403,7 +403,7 @@ buffers	buffers.Promoted	8	25227	0
 buffers	buffers.PromotedListedInner	11	34370	0
 buffers	buffers.ReadsFrom	2	2179	0
 buffers	buffers.Record	18	78810	0
-buffers	buffers.RecordUnbounded	11	29957	0
+buffers	buffers.RecordUnbounded	13	34812	0
 buffers	buffers.ResetEmpties	17	56674	0
 buffers	buffers.Resets	24	104144	0
 buffers	buffers.Results	29	95963	0
@@ -967,7 +967,7 @@ defects	defects.InvariantNotPreserved	9	3888	0
 defects	defects.MinWrong	2	585	0
 defects	defects.ModSign	4	1384	0
 defects	defects.NegativeIndex	3	1411	0
-defects	defects.NegativeMake	8	813	0
+defects	defects.NegativeMake	9	1028	0
 defects	defects.NoVariant	5	1488	0
 defects	defects.NonlinearGap	4	1487	0
 defects	defects.RangeClaimsTooMuch	6	3805	0
@@ -1855,9 +1855,9 @@ formatting	fmt.Sprintln	1	3498	0
 formatting	formatting.BoundedAsSuggested	4	21171	0
 formatting	formatting.DeferredInts	15	16721	0
 formatting	formatting.DeferredIntsWrong	14	7012	0
-formatting	formatting.DeferredPointer	11	24494	0
+formatting	formatting.DeferredPointer	13	27638	0
 formatting	formatting.DeferredPointerBounded	9	21653	0
-formatting	formatting.DeferredUnbounded	6	10263	0
+formatting	formatting.DeferredUnbounded	8	11182	0
 formatting	formatting.Formats	14	279889	4
 formatting	formatting.FormatsAny	1	497	0
 formatting	formatting.FormatsMap	1	138	0
@@ -1867,15 +1867,15 @@ formatting	formatting.FormatsSpread	1	521	0
 formatting	formatting.FormatsStringer	1	111	0
 formatting	formatting.FormatsUnknownError	1	46	0
 formatting	formatting.Formatted	4	15145	0
-formatting	formatting.FormattedUnbounded	6	15721	0
+formatting	formatting.FormattedUnbounded	7	16354	0
 formatting	formatting.Found	3	2069	0
 formatting	formatting.Greets	26	67071	0
 formatting	formatting.Joins	15	60428	4
-formatting	formatting.JoinsAnything	6	40762	1
+formatting	formatting.JoinsAnything	8	47219	1
 formatting	formatting.JoinsWrong	7	50101	1
 formatting	formatting.Logf	1	3565	0
 formatting	formatting.LoggerPrintsAsSuggested	11	36315	0
-formatting	formatting.LoggerPrintsLong	13	39485	0
+formatting	formatting.LoggerPrintsLong	15	43048	0
 formatting	formatting.Logs	27	193942	4
 formatting	formatting.LogsNil	11	34419	0
 formatting	formatting.LogsToNew	15	82502	0
@@ -1888,11 +1888,11 @@ formatting	formatting.MakesShow	1	46	0
 formatting	formatting.MakesShowNamed	1	46	0
 formatting	formatting.Prints	23	357865	4
 formatting	formatting.QuotedAsSuggested	4	15672	0
-formatting	formatting.QuotedHalf	6	17350	0
-formatting	formatting.Reassigned	6	11986	0
+formatting	formatting.QuotedHalf	8	18647	0
+formatting	formatting.Reassigned	8	13329	0
 formatting	formatting.Relogs	7	60145	0
 formatting	formatting.RelogsChecked	7	25962	0
-formatting	formatting.RelogsError	8	27129	0
+formatting	formatting.RelogsError	10	28706	0
 formatting	formatting.Shout	3	1766	0
 formatting	formatting.Show	3	2076	0
 formatting	formatting.ShowsAnyKelvin	5	8745	0
@@ -1909,7 +1909,7 @@ formatting	formatting.ShowsServer	5	11414	0
 formatting	formatting.ShowsTally	2	1021	0
 formatting	formatting.Sink	3	4012	0
 formatting	formatting.Speak	4	10289	0
-formatting	formatting.Unbounded	7	22530	0
+formatting	formatting.Unbounded	9	24291	0
 formatting	formatting.UsesFill	8	19126	0
 formatting	formatting.UsesHanding	1	46	0
 formatting	formatting.UsesLogf	4	35257	0
@@ -1919,10 +1919,10 @@ formatting	formatting.UsesSinking	4	8143	0
 formatting	formatting.UsesTwoValues	1	46	0
 formatting	formatting.Wraps	11	8692	0
 formatting	formatting.WrapsKelvin	12	4125	0
-formatting	formatting.WrapsUnbounded	10	3948	0
+formatting	formatting.WrapsUnbounded	12	4990	0
 formatting	formatting.Writes	32	86143	0
 formatting	formatting.WritesNil	8	14503	0
-formatting	formatting.WrittenField	11	19286	0
+formatting	formatting.WrittenField	13	22259	0
 formatting	formatting.fill	1	5078	0
 formatting	formatting.handing	1	2741	0
 formatting	formatting.logAny	1	667	0
@@ -2243,7 +2243,7 @@ generics	generics.GrowBytes	6	14196	0
 generics	generics.GrowEmpty	6	4831	0
 generics	generics.GrowEmptyUnbounded	6	4650	0
 generics	generics.GrowWide	7	14761	0
-generics	generics.GrowWideTooFar	6	14455	0
+generics	generics.GrowWideTooFar	7	15366	0
 generics	generics.HandsGeneric	1	521	0
 generics	generics.HandsGenericInferred	1	521	0
 generics	generics.HoldsIt	1	182	0
@@ -2849,7 +2849,7 @@ guide	guide.FromReader	45	496911	10
 guide	guide.Gauge	1	1194	0
 guide	guide.Get	3	2025	0
 guide	guide.GetTask	58	1049298	12
-guide	guide.Greet	7	22078	0
+guide	guide.Greet	9	23689	0
 guide	guide.Group	13	21609	0
 guide	guide.Guarded	19	22281	0
 guide	guide.Half	3	1455	0
@@ -2873,16 +2873,16 @@ guide	guide.IncAndRead	8	6101	0
 guide	guide.Increment	9	6762	0
 guide	guide.IncrementLocal	5	1553	0
 guide	guide.Index	9	11236	0
-guide	guide.Invalid	8	2719	0
+guide	guide.Invalid	10	3530	0
 guide	guide.InvalidShort	11	7349	0
 guide	guide.Inventory	60	327394	0
 guide	guide.IsAdmin	2	3907	0
 guide	guide.IsBadDigit	2	1663	0
 guide	guide.IsEmpty	1	46	0
 guide	guide.JSONOnly	37	359623	8
-guide	guide.JSONUnbounded	30	316552	8
+guide	guide.JSONUnbounded	32	320523	8
 guide	guide.Join	5	5717	0
-guide	guide.JoinUnbounded	11	55806	0
+guide	guide.JoinUnbounded	13	64484	0
 guide	guide.JoinWithCommas	31	230497	0
 guide	guide.Jot	7	5013	0
 guide	guide.KeysOf	17	148962	2
@@ -2904,7 +2904,7 @@ guide	guide.LineOf	2	629	0
 guide	guide.LineOfType	2	1882	0
 guide	guide.LinesTotal	15	27473	0
 guide	guide.Load	43	2097415	2
-guide	guide.LoadAll	17	455488	2
+guide	guide.LoadAll	19	456555	2
 guide	guide.LoadCache	2	895	0
 guide	guide.LoadLine	20	27846	0
 guide	guide.LoadRows	32	485074	2
@@ -3120,7 +3120,7 @@ guide	guide.TwiceOf	1	46	0
 guide	guide.TwoConversions	1	241	0
 guide	guide.TwoKeys	2	4437	0
 guide	guide.TwoLines	15	35327	0
-guide	guide.TwoTexts	17	47932	0
+guide	guide.TwoTexts	19	54053	0
 guide	guide.Tx.Begin	5	11323	0
 guide	guide.Tx.Commit	5	10924	0
 guide	guide.Unlisted	13	201346	6
@@ -3330,7 +3330,7 @@ handlers	handlers.DrainOwn	13	22850	0
 handlers	handlers.Drained	0	0	0
 handlers	handlers.Drainer.Close	3	255	0
 handlers	handlers.Drainer.Write	3	7629	0
-handlers	handlers.Echo	10	10571	0
+handlers	handlers.Echo	12	11991	0
 handlers	handlers.EchoShort	10	11071	0
 handlers	handlers.Exact.Get	3	776	0
 handlers	handlers.ExactAsNatural	5	3352	0
@@ -3353,7 +3353,7 @@ handlers	handlers.JSONOnly	37	359623	8
 handlers	handlers.KeepConverted	15	25275	0
 handlers	handlers.Literal	0	0	0
 handlers	handlers.LocalCopy	3	1658	0
-handlers	handlers.Long	5	1889	0
+handlers	handlers.Long	7	2656	0
 handlers	handlers.Loose.Write	4	6714	0
 handlers	handlers.LooseAsWriter	1	514	0
 handlers	handlers.MakeEmpty	11	14308	0
@@ -3386,9 +3386,9 @@ handlers	handlers.StatusOf	12	16527	0
 handlers	handlers.StoreBody	0	0	0
 handlers	handlers.Tagged	53	997226	18
 handlers	handlers.ThroughUnlisted	14	30728	0
-handlers	handlers.Twice	14	23298	0
-handlers	handlers.Unbounded	9	149202	4
-handlers	handlers.UnboundedMediaType	21	143537	6
+handlers	handlers.Twice	16	26534	0
+handlers	handlers.Unbounded	11	157988	4
+handlers	handlers.UnboundedMediaType	23	147508	6
 handlers	handlers.Unknown	2	877	0
 handlers	handlers.Unlisted	13	146690	8
 handlers	handlers.Unnamed	22	4404483	7
@@ -3551,7 +3551,7 @@ initvalues	initvalues.the initialiser of _	15	5058	0
 initvalues	initvalues.the initialiser of sets	5	3526	0
 initvalues	initvalues.the initialiser of setter	5	3526	0
 integers	integers.Accumulate	7	60457	0
-integers	integers.Allocate	8	918	0
+integers	integers.Allocate	9	1156	0
 integers	integers.AndNotAfterAnd	2	3144	0
 integers	integers.AndNotAllLeft	2	196	0
 integers	integers.AndNotAllRight	2	184	0
@@ -3572,11 +3572,11 @@ integers	integers.CountdownOffByOne	7	1185	0
 integers	integers.Difference	7	1500	0
 integers	integers.Fib	17	8024923	2
 integers	integers.Flatten	7	14129	0
-integers	integers.GrowsUnbounded	11	5539	0
+integers	integers.GrowsUnbounded	13	6708	0
 integers	integers.Half	3	465	0
 integers	integers.HalfDown	4	2224	0
 integers	integers.HalfWrong	3	1437	0
-integers	integers.Huge	8	372	0
+integers	integers.Huge	9	461	0
 integers	integers.Increment	4	650	0
 integers	integers.IncrementUnbounded	4	504	0
 integers	integers.Inverse	3	297	0
@@ -3596,7 +3596,7 @@ integers	integers.OrAgain	2	3134	0
 integers	integers.OrAllLeft	2	176	0
 integers	integers.OrAllRight	2	176	0
 integers	integers.OrSelf	2	166	0
-integers	integers.Oversize	9	743	0
+integers	integers.Oversize	10	896	0
 integers	integers.Pack	9	5975	0
 integers	integers.Pack4	19	67920	0
 integers	integers.PackWrong	9	6372	0
@@ -4014,7 +4014,7 @@ jsondec	jsondec.Same	22	980586	8
 jsondec	jsondec.SwapBody	0	0	0
 jsondec	jsondec.Twice	39	346052	3
 jsondec	jsondec.TwiceFresh	66	469936	23
-jsondec	jsondec.Unbounded	16	59199	0
+jsondec	jsondec.Unbounded	18	63136	0
 jsondec	jsondec.Unchanged	13	75764	4
 jsondec	jsondec.UnlistedReader	40	341670	8
 jsondec	jsondec.Value	1	1703	0
@@ -4475,7 +4475,7 @@ mapping	mapping.AfterTrusted	5	11119	0
 mapping	mapping.AllSmall	6	14467	0
 mapping	mapping.AllSmallWrong	3	6217	0
 mapping	mapping.AllTasks	18	38608	0
-mapping	mapping.AllTasksUnbounded	12	59570	0
+mapping	mapping.AllTasksUnbounded	14	69763	0
 mapping	mapping.AlreadyVisited	6	10128	0
 mapping	mapping.AlwaysFailsAfterReadyBytes	10	14694	0
 mapping	mapping.AppendEntry	15	73969	0
@@ -4607,7 +4607,7 @@ mapping	mapping.TwoMapsApart	6	5442	0
 mapping	mapping.TwoMapsOneKeyEach	12	25455	0
 mapping	mapping.TwoMapsTwo	11	21522	0
 mapping	mapping.Uses	12	15329	0
-mapping	mapping.Widen	7	2344	0
+mapping	mapping.Widen	9	3562	0
 mapping	mapping.Widened	15	84410	0
 mapping	mapping.WidenedOneLess	13	912161	1
 mapping	mapping.WritesAnother	4	8756	0
@@ -4712,7 +4712,7 @@ memory	memory.FromOnly	10	6811	0
 memory	memory.FromOnlyWrong	4	3161	0
 memory	memory.Grabs	1	241	0
 memory	memory.Grid	6	7243	0
-memory	memory.GrowFull	11	4485	0
+memory	memory.GrowFull	13	5748	0
 memory	memory.GrowNothings	25	19082	0
 memory	memory.GrowPoints	27	37887	0
 memory	memory.GuardedAddress	5	2605	0
@@ -4838,7 +4838,7 @@ memory	memory.SwapPoints	16	18564	0
 memory	memory.TagsShare	7	856	0
 memory	memory.TagsShareWrong	7	1044	0
 memory	memory.Tail	8	2297	0
-memory	memory.TooManyNothings	13	1477	0
+memory	memory.TooManyNothings	14	1806	0
 memory	memory.TooMuch	5	4142	0
 memory	memory.Twice	14	9491	0
 memory	memory.Undeclared	4	848	0
@@ -5831,7 +5831,7 @@ settled	settled.Ok	3	153	0
 settled	settled.the initialiser of Count	0	0	0
 settled	settled.the initialiser of ErrWrapped	1	69	0
 settled	settled.the initialiser of ErrY	0	0	0
-settled	settled.the initialiser of Joined	6	104760	4
+settled	settled.the initialiser of Joined	7	112756	4
 settled	settled.the initialiser of Name	0	0	0
 settled	settled.the initialiser of Names	0	0	0
 settled	settled.the initialiser of Out	11	76371	2
@@ -6045,7 +6045,7 @@ stdentries	stdentries.FirstWord	7	36362	4
 stdentries	stdentries.Flag	10	85924	0
 stdentries	stdentries.Groups	5	30455	0
 stdentries	stdentries.GrowNil	8	16711	0
-stdentries	stdentries.GrowTooFar	6	14277	0
+stdentries	stdentries.GrowTooFar	7	15040	0
 stdentries	stdentries.GrowWrite	17	26873	0
 stdentries	stdentries.GrowWriteListed	20	32312	0
 stdentries	stdentries.HasDot	4	8022	0
@@ -6063,7 +6063,7 @@ stdentries	stdentries.InsertPast	12	6889	0
 stdentries	stdentries.IsHidden	6	10338	0
 stdentries	stdentries.ItemID	6	164858	2
 stdentries	stdentries.ItemIDOfAny	6	164924	2
-stdentries	stdentries.JoinAll	6	57977	2
+stdentries	stdentries.JoinAll	7	63497	2
 stdentries	stdentries.KeyValue	6	26237	0
 stdentries	stdentries.Kind	8	19610	0
 stdentries	stdentries.Label	9	21932	0
@@ -6106,7 +6106,7 @@ stdentries	stdentries.Same	4	9421	0
 stdentries	stdentries.SameBytes	5	21587	0
 stdentries	stdentries.SameSlice	4	12346	0
 stdentries	stdentries.Save	56	121643	0
-stdentries	stdentries.SaveAnywhere	12	16650	0
+stdentries	stdentries.SaveAnywhere	14	17639	0
 stdentries	stdentries.Search	5	22582	0
 stdentries	stdentries.SearchStrings	1	901	0
 stdentries	stdentries.SearchUnsorted	4	14900	0
@@ -6120,7 +6120,7 @@ stdentries	stdentries.SortKeys	11	37718	0
 stdentries	stdentries.SortNames	7	41181	1
 stdentries	stdentries.SortRanks	7	10374	0
 stdentries	stdentries.Stuck	15	29973	0
-stdentries	stdentries.Tabs	5	10400	0
+stdentries	stdentries.Tabs	7	11493	0
 stdentries	stdentries.Trimmed	10	24014	0
 stdentries	stdentries.TrimmedQuietly	8	13516	0
 stdentries	stdentries.Unfound	4	18616	0
@@ -6381,7 +6381,7 @@ trust	trust.FirstSuccessWins	38	27762	0
 trust	trust.Flushes	1	831	0
 trust	trust.FlushesDeclared	5	4148	0
 trust	trust.ForwardsThroughLoops	54	45960	0
-trust	trust.HugeRepeat	6	3379	0
+trust	trust.HugeRepeat	7	4043	0
 trust	trust.IgnoresFailure	14	17831	0
 trust	trust.IgnoresRange	15	28063	0
 trust	trust.ImpossibleLiteral	13	39198	0
@@ -6407,7 +6407,7 @@ trust	trust.Port	9	12356	0
 trust	trust.PortExactly	10	5262	0
 trust	trust.PossibleLiteral	13	23306	0
 trust	trust.ReadsTrustedSlice	6	6680	0
-trust	trust.RepeatBeyondMemory	6	1473	0
+trust	trust.RepeatBeyondMemory	7	1850	0
 trust	trust.ReportsBothWays	28	13996	0
 trust	trust.Roll	8	1608	0
 trust	trust.RollZero	3	137	0
@@ -6857,7 +6857,7 @@ values	values.TupleDeclared	1	182	0
 values	values.TupleToError	1	46	0
 values	values.TwoLinks	6	7732	0
 values	values.TwoMapsDeep	28	690103	0
-values	values.Unbounded	4	3604	0
+values	values.Unbounded	6	5189	0
 values	values.Unchecked	3	2894	0
 values	values.UnreachableSource	10	5755	0
 values	values.UnreliableSentinel	1	46	0
@@ -7008,7 +7008,7 @@ variadic	variadic.HoldMixed	1	368	0
 variadic	variadic.Joined	6	33572	4
 variadic	variadic.LiteralInPlace	2	66	0
 variadic	variadic.Logger	3	5377	0
-variadic	variadic.LongTail	11	16648	0
+variadic	variadic.LongTail	13	19537	0
 variadic	variadic.MakeCounter	3	178	0
 variadic	variadic.MakeCounterLiteral	3	153	0
 variadic	variadic.MakeCounterWrong	3	714	0

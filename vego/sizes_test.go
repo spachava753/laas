@@ -1,9 +1,11 @@
 package vego
 
 import (
+	"go/types"
 	"testing"
 
 	"github.com/spachava753/laas/vego/internal/logic"
+	"golang.org/x/tools/go/analysis"
 )
 
 // TestRewriteMarked checks where a marked bound is replaced: an atom
@@ -169,6 +171,32 @@ func TestEntryClasses(t *testing.T) {
 	for key := range class {
 		if !seen[key] {
 			t.Errorf("shippedClasses lists %s, which has no shipped entry", key)
+		}
+	}
+}
+
+// TestDeclareOffer checks that a message offers to declare a memory only
+// where that would take effect, and says that a declared one does not
+// where it proves nothing (F28 of the review of step 3b).
+func TestDeclareOffer(t *testing.T) {
+	parallel(t)
+	declared := parseTrustFile("/work/vego-trusted.yaml", []byte("version: 1\nsizes:\n  memory: 256GB\n  reason: r\n"), false)
+	offer := func(goarch string, file *trustFile) string {
+		v := &fnVerifier{pkgVerifier: &pkgVerifier{pass: &analysis.Pass{Pkg: types.NewPackage("example.com/p", "p"), TypesSizes: types.SizesFor("gc", goarch)}, projectTrust: file}}
+		return v.declareOffer("under which it converts")
+	}
+	for _, c := range []struct {
+		goarch string
+		file   *trustFile
+		want   string
+	}{
+		{"amd64", nil, "; or, if the machines the program runs on never hold 256GB of its data at once, declare that under sizes in vego-trusted.yaml, under which it converts"},
+		{"amd64", declared, ""},
+		{"386", nil, ""},
+		{"386", declared, "; the memory declared under sizes proves nothing on this platform, where one allocation is at most 4294967295 bytes, less than the 1280000065536 bytes it would bound an array by"},
+	} {
+		if got := offer(c.goarch, c.file); got != c.want {
+			t.Errorf("on %s with a declaration %v: %q, want %q", c.goarch, c.file != nil, got, c.want)
 		}
 	}
 }

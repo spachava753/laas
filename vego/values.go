@@ -328,7 +328,7 @@ func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term
 			room := new(big.Int).Sub(v.maxAlloc(), big.NewInt(1<<16))
 			room.Rsh(room, 1).Sub(room, big.NewInt(fmtSlack))
 			v.report(call.Pos(), "precondition of errors.New may not hold: 2 * (|text| + 4096) + 65536 <= MaxAlloc, so that the text of the error can be printed; "+
-				"it holds when |%s| <= %s%s", types.ExprString(call.Args[0]), room, limitNote(result))
+				"it holds when |%s| <= %s%s%s", types.ExprString(call.Args[0]), room, v.sizeNote(st, guard, goal), limitNote(result))
 		}
 		// A goal that only the declared memory proved is not assumed.
 		if !declared {

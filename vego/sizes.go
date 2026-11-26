@@ -520,9 +520,72 @@ func (v *fnVerifier) checkSized(st *state, guard []*logic.Term, goal *logic.Term
 		result, declared := v.sizedAttempt(st, guard, conjunct, pos)
 		done()
 		if !declared {
-			v.answered(st, guard, conjunct, result, true, pos, format, args...)
+			note := ""
+			if result != solver.Proved {
+				note = v.sizeNote(st, guard, conjunct)
+			}
+			v.answered(st, guard, conjunct, result, true, pos, format+"%s", append(slices.Clip(args), note)...)
 		}
 	}
+}
+
+// exampleMemory is the memory that the hint of a size goal names, the
+// guide's example; a hint is given only where declaring it would prove the
+// goal (D5 of the design of F38).
+var exampleMemory = &sizesDecl{memory: big.NewInt(256_000_000_000), written: "256GB"}
+
+// sizeNote is what the report of a size goal that was not proved adds
+// about a declared memory. Under one, that it does not cover the goal:
+// what is asked depends on a number, a product of lengths, or a bound the
+// declaration does not give. Without one, a hint to declare the memory,
+// only where the second try with exampleMemory proves the goal on
+// hypotheses that it does not contradict, so that it never points at a
+// declaration that would not help (F9 of the design review). It asks one
+// or two problems more, only after a failed size goal. None while a
+// Variant's guard is on.
+func (v *fnVerifier) sizeNote(st *state, guard []*logic.Term, goal *logic.Term) string {
+	if v.unmarked != nil {
+		return ""
+	}
+	if v.sizesOf() != nil {
+		return "; the declared memory does not cover this: what it asks for depends on a number, a product of lengths, or a bound that the memory declared does not give"
+	}
+	if !v.wouldDeclare() {
+		return v.idleNote()
+	}
+	hyps := append(v.replacedHyps(st.hyps, exampleMemory), guard...)
+	if v.solver().Prove(hyps, goal, v.options(0, obligation)) != solver.Proved || v.proves(hyps, logic.False(), quickEffort) {
+		return ""
+	}
+	return v.declareOffer("which proves this")
+}
+
+// wouldDeclare reports whether a hint to declare a memory could help: the
+// project declares none, and on the platform the bound of the guide's
+// example is below what one allocation can be (F28 of the review of 3b).
+func (v *fnVerifier) wouldDeclare() bool {
+	return (v.projectTrust == nil || v.projectTrust.sizes == nil) && exampleMemory.arrayBound().Cmp(v.maxAlloc()) < 0
+}
+
+// idleNote says, for a project that declares a memory that proves nothing
+// on the platform, that it does not, as the trust report says; otherwise
+// it is empty.
+func (v *fnVerifier) idleNote() string {
+	if v.projectTrust == nil || v.projectTrust.sizes == nil || v.sizesOf() != nil {
+		return ""
+	}
+	return fmt.Sprintf("; the memory declared under sizes proves nothing on this platform, where one allocation is at most %s bytes, less than the %s bytes it would bound an array by",
+		v.maxAlloc(), v.projectTrust.sizes.arrayBound())
+}
+
+// declareOffer is the clause of a message that offers to declare a memory
+// for what it allows, where that would take effect, or says that the one
+// declared does not take effect; or is empty.
+func (v *fnVerifier) declareOffer(allows string) string {
+	if v.wouldDeclare() {
+		return "; or, if the machines the program runs on never hold 256GB of its data at once, declare that under sizes in " + TrustFileName + ", " + allows
+	}
+	return v.idleNote()
 }
 
 // checkDeclared asks a goal that only a declared memory makes, a bound on

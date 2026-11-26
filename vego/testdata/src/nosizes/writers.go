@@ -19,7 +19,7 @@ func emit(w io.Writer, s string) (err error) {
 // @Ensures True
 func Emitted(s string) (r string, err error) {
 	var b bytes.Buffer
-	err = emit(&b, s) // want `vego: cannot verify Emitted: converting a value of type \*bytes.Buffer to io.Writer is not supported: its Write may panic when the buffer is too large to grow, and the contract of \(io.Writer\).Write has no bound for it; declare the memory of the machines the program runs on under sizes in vego-trusted.yaml, under which a buffer converts`
+	err = emit(&b, s) // want `vego: cannot verify Emitted: converting a value of type \*bytes.Buffer to io.Writer is not supported: its Write may panic when the buffer is too large to grow, and the contract of \(io.Writer\).Write has no bound for it; pass the Buffer itself to fmt.Fprintf, Fprint, or Fprintln, which then calls its own Write, or write what you format with its own WriteString, as in b.WriteString\(fmt.Sprintf\(...\)\); or, if the machines the program runs on never hold 256GB of its data at once, declare that under sizes in vego-trusted.yaml, under which a buffer converts`
 	r = b.String()
 	return r, err
 }

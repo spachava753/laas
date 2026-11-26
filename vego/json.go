@@ -813,6 +813,9 @@ func (v *fnVerifier) checkEncodable(call *ast.CallExpr, fn *funcInfo) {
 		why = walk.mapValueReason()
 	}
 	if why != "" {
+		if walk != nil && why == walk.mapValueReason() {
+			why += v.declareOffer("under which such a map is encoded")
+		}
 		v.unsupported(arg.Pos(), fmt.Sprintf("%s encodes %s, and %s", fn.obj.Name(), types.ExprString(arg), why))
 	}
 }
@@ -942,8 +945,8 @@ func (v *fnVerifier) checkEncodedAlloc(st *state, guard []*logic.Term, call *ast
 		}
 		return nil
 	}
-	v.report(call.Pos(), "what %s builds from %s may be more than can be allocated%s", fn.obj.Name(), types.ExprString(arg),
-		v.encodeHint(walk, arg, indented, found))
+	v.report(call.Pos(), "what %s builds from %s may be more than can be allocated%s%s", fn.obj.Name(), types.ExprString(arg),
+		v.encodeHint(walk, arg, indented, found), v.declareOffer("under which encoding fits whatever it builds"))
 	return nil
 }
 

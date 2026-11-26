@@ -433,7 +433,8 @@ func (v *fnVerifier) checkFormatAlloc(st *state, guard []*logic.Term, call *ast.
 	result, declared := v.sizedAttempt(st, guard, goal, call.Pos())
 	done()
 	if result != solver.Proved {
-		v.report(call.Pos(), "what %s builds from what it formats may be more than can be allocated%s%s", who, v.formatHint(st, guard, size, slack, format, formatVal), limitNote(result))
+		v.report(call.Pos(), "what %s builds from what it formats may be more than can be allocated%s%s%s", who, v.formatHint(st, guard, size, slack, format, formatVal),
+			v.sizeNote(st, guard, goal), limitNote(result))
 	}
 	// A goal that only the declared memory proved is not assumed.
 	if !declared {

@@ -120,7 +120,8 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 			// grow, and what refuses the conversion is what it owns, below.
 			if why := growsUnbounded(from); why != "" && v.sizesOf() == nil {
 				shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
-				v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported: %s", shown(from), shown(want), why))
+				v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported: %s%s", shown(from), shown(want), why,
+					v.declareOffer("under which a buffer converts")))
 			}
 			object, isPointer := pointee(from)
 			if !isPointer {
@@ -909,9 +910,8 @@ func growsUnbounded(t types.Type) string {
 	switch named.Obj().Pkg().Path() + "." + named.Obj().Name() {
 	case "bytes.Buffer", "strings.Builder":
 		return fmt.Sprintf("its Write may panic when the buffer is too large to grow, and the contract of (io.Writer).Write has no bound for it; "+
-			"declare the memory of the machines the program runs on under sizes in %s, under which a buffer converts, or "+
 			"pass the %s itself to fmt.Fprintf, Fprint, or Fprintln, which then calls its own Write, or write what you format with its own WriteString, "+
-			"as in b.WriteString(fmt.Sprintf(...))", TrustFileName, named.Obj().Name())
+			"as in b.WriteString(fmt.Sprintf(...))", named.Obj().Name())
 	}
 	return ""
 }
