@@ -844,19 +844,21 @@ func collectOwners(t types.Type, owners, seen map[types.Type]bool) {
 }
 
 // ownerHolding returns an owner among owners whose parts a value of type
-// t can be or hold directly: a slice of an owned slice's type or a pointer
-// to its elements, an owned map's type, a pointer of an owned pointer's
-// type; a struct value by its fields.
+// t can be or hold directly: a slice or a map that can be an owned slice
+// or map, a pointer that can point to the elements of an owned slice, a
+// pointer that can be an owned pointer; a struct value by its fields. Go
+// converts between types whose memory is the same, so what decides is the
+// memory and not the type (see sameStorage).
 func ownerHolding(owners map[types.Type]bool, t types.Type) types.Type {
 	for owner := range owners {
 		u := owner.Underlying().(*types.Struct)
 		for _, index := range sourceOwnedFields(owner) {
 			ft := u.Field(index).Type()
 			switch {
-			case types.Identical(ft, t):
+			case sameStorage(ft, t):
 				return owner
 			case isSlice(ft):
-				if object, isPointer := pointee(t); isPointer && types.Identical(object, elemType(ft)) {
+				if object, isPointer := pointee(t); isPointer && sameRegions(object, elemType(ft)) {
 					return owner
 				}
 			}
@@ -872,6 +874,35 @@ func ownerHolding(owners map[types.Type]bool, t types.Type) types.Type {
 		}
 	}
 	return nil
+}
+
+// sameStorage reports whether a value of type a and one of type b can be
+// the same pointer, slice, or map: Go converts *A to *B when A and B have
+// the same underlying type, tags ignored, and a named slice or map type to
+// its underlying type and back, and the converted value refers to the same
+// memory. Such types share their regions (typeKey of the untagged
+// underlying type), so a question of separation asked by type must ask by
+// this, or it takes a converted value for memory of its own.
+func sameStorage(a, b types.Type) bool {
+	if types.Identical(a, b) {
+		return true
+	}
+	objectA, pointerA := pointee(a)
+	objectB, pointerB := pointee(b)
+	if pointerA || pointerB {
+		return pointerA && pointerB && sameRegions(objectA, objectB)
+	}
+	switch a.Underlying().(type) {
+	case *types.Slice, *types.Map:
+		return types.IdenticalIgnoreTags(a.Underlying(), b.Underlying())
+	}
+	return false
+}
+
+// sameRegions reports whether values of two types lie in the same regions
+// of memory: their underlying types are identical, tags ignored.
+func sameRegions(a, b types.Type) bool {
+	return types.IdenticalIgnoreTags(a.Underlying(), b.Underlying())
 }
 
 // rawMember reads a field of the struct a pointer points to in some

@@ -4251,6 +4251,8 @@ func AppendOwn(p *Pile) {
 vego: p.items is memory that p owns, and Append is handed what reaches a Pile, which can own it; Append assumes that nothing it is handed is what an owner it is handed owns: copy it, or pass it alone
 ```
 
+A value of another type can refer to the same memory, because Go converts between such types. A `[]int` can be the array of a field of a named type `S []int`, and a `*B` can be the struct of a `*A` when `B` is declared as `type B A`. `vego` decides by the memory and not by the type, so `use(h, (*B)(h.p))` and `useS(p, []int(p.items))` are refused in the same way.
+
 ### A struct that owns its writer
 
 A struct that owns an interface value keeps its other fields across a call through that value:
