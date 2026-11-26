@@ -177,7 +177,7 @@ Settled on 2026-11-16, after trying whether formulas could be Go expressions par
   | A loop over a slice whose index is not named, so the length of what it builds cannot be stated without a rewrite | memory's createEntities, createRelations | 2 |
   | `fresh` of what each element of a slice holds, which `loadGraph` cannot state of `Entities[i].Observations` | memory's addObservations, deleteObservations | 2 |
   | `strings.Join` over a slice, a product the declaration does not cover (behind `rd != nil` of stdin, which needs a test in the function) | digraph's digraph | 1 |
-| A breadth-first loop whose measure, what is left to visit, no formula counts | digraph's somepath | 1 |
+  | A breadth-first loop whose measure, what is left to visit, no formula counts | digraph's somepath | 1 |
   | A loop over a map that calls a function adding keys to a map the function made (Maps, what memory held on entry) | digraph's transpose | 1 |
   | Under the declaration, a reservation by lengths of a larger element type: `make([]kbItem, 0, len(graph.Entities) + len(graph.Relations))` | memory's saveGraph | 1 |
   | A generic function of the project (item 10) | evalresults' sortedKeys | 1 |
