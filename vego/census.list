@@ -1,0 +1,41 @@
+# The corpora of the census of vego (F41), for vego/census.sh. Columns: name,
+# directory, the module path the census looks at, and the package patterns.
+# The modules of the cache are listed at the versions the run used.
+#
+# Parsers and formats.
+toml @cache/github.com/!burnt!sushi/toml@v1.6.0 github.com/BurntSushi/toml
+go-toml @cache/github.com/pelletier/go-toml@v1.9.5 github.com/pelletier/go-toml
+hcl @cache/github.com/hashicorp/hcl@v1.0.0 github.com/hashicorp/hcl
+go-version @cache/github.com/hashicorp/go-version@v1.8.0 github.com/hashicorp/go-version
+semver @cache/github.com/!masterminds/semver/v3@v3.5.0 github.com/Masterminds/semver/v3
+jsonparser @cache/github.com/buger/jsonparser@v1.6.1 github.com/buger/jsonparser
+shlex @cache/github.com/google/shlex@v0.0.0-20191202100458-e7afc7fbc510 github.com/google/shlex
+go-shlex @cache/github.com/anmitsu/go-shlex@v0.0.0-20200514113438-38f4b401e2be github.com/anmitsu/go-shlex
+ssh_config @cache/github.com/kevinburke/ssh_config@v1.6.0 github.com/kevinburke/ssh_config
+properties @cache/github.com/magiconair/properties@v1.8.6 github.com/magiconair/properties
+# Libraries.
+humanize @cache/github.com/dustin/go-humanize@v1.0.1 github.com/dustin/go-humanize
+uuid @cache/github.com/google/uuid@v1.6.0 github.com/google/uuid
+color @cache/github.com/fatih/color@v1.18.0 github.com/fatih/color
+logrus @cache/github.com/sirupsen/logrus@v1.9.3 github.com/sirupsen/logrus
+mapstructure @cache/github.com/mitchellh/mapstructure@v1.5.0 github.com/mitchellh/mapstructure
+backoff @cache/github.com/jpillora/backoff@v1.0.0 github.com/jpillora/backoff
+go-diff @cache/github.com/sergi/go-diff@v1.4.0 github.com/sergi/go-diff
+gods @cache/github.com/emirpasic/gods@v1.18.1 github.com/emirpasic/gods
+golang-lru @cache/github.com/hashicorp/golang-lru/v2@v2.0.7 github.com/hashicorp/golang-lru/v2
+text @cache/github.com/kr/text@v0.2.0 github.com/kr/text
+structtag @cache/github.com/fatih/structtag@v1.2.0 github.com/fatih/structtag
+# Web, clients, and services.
+websocket @cache/github.com/gorilla/websocket@v1.5.3 github.com/gorilla/websocket
+mysql @cache/github.com/go-sql-driver/mysql@v1.9.3 github.com/go-sql-driver/mysql
+gliderssh @cache/github.com/gliderlabs/ssh@v0.3.8 github.com/gliderlabs/ssh
+mcp-go-sdk @cache/github.com/modelcontextprotocol/go-sdk@v1.8.0 github.com/modelcontextprotocol/go-sdk
+kin-openapi @cache/github.com/getkin/kin-openapi@v0.142.0 github.com/getkin/kin-openapi
+jwt @cache/github.com/golang-jwt/jwt/v5@v5.3.1 github.com/golang-jwt/jwt/v5
+go-oidc @cache/github.com/coreos/go-oidc/v3@v3.21.0 github.com/coreos/go-oidc/v3
+pgx @cache/github.com/jackc/pgx/v5@v5.7.5 github.com/jackc/pgx/v5
+# Command-line tools.
+errcheck @cache/github.com/kisielk/errcheck@v1.9.0 github.com/kisielk/errcheck
+gocyclo @cache/github.com/fzipp/gocyclo@v0.6.0 github.com/fzipp/gocyclo
+ineffassign @cache/github.com/gordonklaus/ineffassign@v0.2.0 github.com/gordonklaus/ineffassign
+gomodifytags @cache/github.com/fatih/gomodifytags@v1.17.1-0.20250423142747-f3939df9aa3c github.com/fatih/gomodifytags

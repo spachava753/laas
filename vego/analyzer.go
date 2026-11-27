@@ -157,7 +157,7 @@ var testCache string
 // it only reports that nothing was verified.
 func newAnalyzer() *analysis.Analyzer {
 	effort, audit, trustPath, otherTags, z3Path, printCost, cacheDir, ahead := 0, false, "", "", "", false, "", true
-	censusOut, censusScope := "", ""
+	censusOut, censusScope, censusOnly := "", "", ""
 	analyzer := &analysis.Analyzer{
 		Name: "vego",
 		Doc: `verifies functions against their // @ specifications
@@ -230,6 +230,12 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		"census-scope",
 		"",
 		"the module path whose packages -vego.census looks at, or std for the standard library",
+	)
+	analyzer.Flags.StringVar(
+		&censusOnly,
+		"census-only",
+		"",
+		"look only at the packages of the census scope whose path this regular expression matches, as a group of the standard library",
 	)
 	analyzer.ResultType = reflect.TypeFor[*Usage]()
 	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact), new(sentinelsFact), new(sentinelWritesFact), new(sentinelRelianceFact), new(stateFact), new(ownsFact), new(fixedFact), new(coversFact), new(writesFact), new(initialisersFact)}
@@ -304,7 +310,11 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			// Every package of a census run is analysed offline, those the
 			// census does not look at too, since a dependency checks the
 			// entries of its types (F2 of the design review of F41).
-			return pv.runCensus(censusOut, censusScope, trustPath, censusPackage(pass, censusScope))
+			only, err := regexp.Compile(censusOnly)
+			if err != nil {
+				return nil, fmt.Errorf("-vego.census-only: %v", err)
+			}
+			return pv.runCensus(censusOut, censusScope, trustPath, censusPackage(pass, censusScope) && only.MatchString(pass.Pkg.Path()))
 		}
 		if refuseCache {
 			pv.usage = &Usage{}

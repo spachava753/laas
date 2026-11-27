@@ -10560,6 +10560,36 @@ A sort function gets this report if its contract only says that the output is so
 
 ## Adopting it
 
+### Finding what stops vego in a module
+
+Before you annotate a package, you can ask `vego` what in it falls outside the subset of Go it supports. A census looks at every function with a body as if it carried `// @Ensures True`, proves nothing, and records each refusal it meets:
+
+```sh
+laas -vego -test=false -vego.census=census.jsonl -vego.census-scope=example.com/stats ./...
+```
+
+`-vego.census-scope` names the module whose packages are looked at. Use `std` for the standard library. `-vego.census-only=regexp` narrows that to the packages whose path matches. A census starts no Z3 and prints no diagnostics. It appends one JSON line per function to the file:
+
+```json
+{"module":"example.com/stats","package":"example.com/stats/stats","function":"Load",
+ "pos":"example.com/stats/stats/stats.go:21","statements":4,"unseen":0,"attempts":3,"ms":0,
+ "events":[{"class":"no-entry:std","detail":"os.Stat","pos":"example.com/stats/stats/stats.go:22:15",
+  "message":"it calls Stat, which has no contract; ...","kind":"cause"},
+  {"class":"iface-method:no-contract","detail":"(io/fs.FileInfo).Name", ... ,"kind":"cause"}]}
+```
+
+Each event of kind `cause` is a refusal that the ordinary run reports as `cannot verify`, or as a report about Go it does not support. The first cause of a function is the refusal the ordinary run gives it. After a refusal the census goes on with what was refused taken as unknown, so a line lists every cause of its function and not only the first. Its `class` names the kind of Go, as `channel:use` or `address-of:field`. The other kinds of events are not causes:
+
+- `assumed` is a call of a function, an interface method, or a function type of the module that has no contract. The census takes it with the weakest contract: it modifies nothing and promises nothing.
+- `annotate` is something an annotation of yours would settle, as a `Calls` annotation for a call of a parameter of a function type.
+- `declared` is something only a declaration of the trust file lets through, as `inputs`.
+- `proof` is a refusal that the ordinary run makes only when a proof fails. A census proves nothing, so it makes these wherever they are reached.
+- `stop` means the census stopped in the function, as for a generic function. `unseen` counts the statements that were not looked at for any reason.
+
+A function with no cause and no unseen statement is not verified. It met no refusal on the weakest contract, and the obligations its body has, such as bounds and overflow, were not checked. A census reads the trust file as verification does, and a trust file with a problem ends it with an error.
+
+`go run ./cmd/vegocensus summary name=census.jsonl` in this repository prints tables of the classes by the functions each stops, and the order in which fixing classes would let the most functions through. `vego/census.sh` runs a census over a list of modules.
+
 ### In an existing package
 
 A verified function can only call functions that have contracts. Start with functions that call nothing and work upwards.
@@ -11218,5 +11248,8 @@ Results are referred to by the names in the function's signature.
 | `-vego.trusted=path` | use this trust file instead of the one next to `go.mod` |
 | `-vego.other-tags=A,B` | words that another tool reads after `// @`; any other unknown word there is an error |
 | `-vego.trust` | print the trust report |
+| `-vego.census=file` | instead of verifying, look at every function of the module with the weakest contract, prove nothing, and write what stops each to the file; see [Finding what stops vego in a module](#finding-what-stops-vego-in-a-module) |
+| `-vego.census-scope=module` | the module a census looks at, or `std` |
+| `-vego.census-only=regexp` | look only at the packages of the census scope whose path matches |
 | `-test=false` | leave out test files |
 | `-exclude-packages=regexp` | skip packages whose import path matches |

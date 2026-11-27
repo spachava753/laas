@@ -42,6 +42,7 @@
 # The check that repeated runs of laas print the same; see the script.
 !/vego/repeat.sh
 !/vego/census.sh
+!/vego/census.list
 
 # Design notes and guides.
 !/vego/ROADMAP.md
