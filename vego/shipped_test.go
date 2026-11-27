@@ -2130,6 +2130,10 @@ func checkShipped(t *testing.T, files bool, run func(key string) bool) {
 				if !ok {
 					t.Fatalf("package %s has no function %s", path, name)
 				}
+				if sortSliceViews[key] {
+					// Read through the typed view; see sortslice.go.
+					callee = newSliceView(callee)
+				}
 				if isGeneric(callee) {
 					checkGenericEntry(t, pv, key, callee)
 					return

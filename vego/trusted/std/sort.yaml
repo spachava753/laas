@@ -74,3 +74,55 @@ trusted:
     ensures:
       - "Forall i in [0, |x|) : Exists j in [0, |x|) : x'[i] = x[j]"
       - "Forall j in [0, |x|) : Exists i in [0, |x|) : x'[i] = x[j]"
+
+  sort.Slice:
+    reason: >-
+      "Slice sorts the slice x given the provided less function. It panics if
+      x is not a slice. The sort is not guaranteed to be stable: equal
+      elements may be reversed from their original order." Read through the
+      typed view [S ~[]E, E any](x S, less func(i, j int) bool), at the
+      static type of the argument, which is a slice, since x is that
+      argument as an any. Read from the source of Go 1.26.6 and 1.27.3,
+      which is the same (slice.go, zsortfunc.go, internal/reflectlite's
+      swapper.go): it swaps elements of x with reflectlite.Swapper, which
+      reserves the scratch space of one element, and calls less(i, j) with
+      indices of x only, on the calling goroutine, while the call lasts,
+      keeping it nowhere; pdqsort_func only swaps, in loops bounded by the
+      indices whatever less answers, and its recursion is bounded by its
+      limit. So it returns for any less, and x holds afterwards the
+      elements it held, as many times. Not said: the order, which a formula
+      cannot state of every element type nor of a less that is no ordering;
+      and at a type argument whose values a formula cannot compare, a
+      struct, anything of the elements.
+    asserts: {S: [], E: []}
+    runs: [less]
+    calls:
+      less(i, j):
+        requires: ["0 <= i < |x|", "0 <= j < |x|"]
+    modifies: [x]
+    compares:
+      - "Forall i in [0, |x'|) : Exists j in [0, |x|) : x'[i] = x[j]"
+      - "Forall j in [0, |x|) : Exists i in [0, |x'|) : x'[i] = x[j]"
+
+  sort.SliceStable:
+    reason: >-
+      "SliceStable sorts the slice x using the provided less function,
+      keeping equal elements in their original order. It panics if x is not
+      a slice." Read through the typed view of sort.Slice. Read from the
+      source of Go 1.26.6 and 1.27.3, which is the same: stable_func sorts
+      blocks by insertion and merges them with symMerge_func and
+      rotate_func, which only swap elements of x through Swapper, in loops
+      bounded by indices of x whatever less answers and a recursion that
+      halves the stretch it merges; it calls less(i, j) with indices of x
+      only, on the calling goroutine, while the call lasts, and keeps it
+      nowhere. So it returns for any less, and x holds afterwards the
+      elements it held, as many times. Not said: the order, as for Slice.
+    asserts: {S: [], E: []}
+    runs: [less]
+    calls:
+      less(i, j):
+        requires: ["0 <= i < |x|", "0 <= j < |x|"]
+    modifies: [x]
+    compares:
+      - "Forall i in [0, |x'|) : Exists j in [0, |x|) : x'[i] = x[j]"
+      - "Forall j in [0, |x|) : Exists i in [0, |x'|) : x'[i] = x[j]"

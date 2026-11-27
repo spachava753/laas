@@ -443,6 +443,9 @@ func genericOfEntry(entry *trustEntry, from *types.Package) *types.Func {
 		return nil
 	}
 	f, ok := from.Scope().Lookup(name).(*types.Func)
+	if ok && sortSliceViews[f.FullName()] {
+		return newSliceView(f)
+	}
 	if !ok || f.Type().(*types.Signature).TypeParams() == nil {
 		return nil
 	}

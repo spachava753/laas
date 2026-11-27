@@ -3,6 +3,7 @@ package guide
 import (
 	"cmp"
 	"slices"
+	"sort"
 )
 
 // HasRole reports whether role is one of roles.
@@ -170,3 +171,24 @@ func OldestFirst(ms []*Member) {
 func AgesKept(ms []Member) {
 	slices.SortFunc(ms, func(a, b Member) int { return cmp.Compare(a.Age, b.Age) })
 } // want `vego: postcondition may not hold: Forall i in \[0, \|ms\|\) : ms'\[i\].Age >= 0`
+
+// OldestFirstByIndex sorts members that are not nil with sort.Slice.
+//
+// @Requires Forall i in [0, |ms|) : ms[i] != nil
+// @Modifies ms
+// @Ensures Forall i in [0, |ms|) : ms'[i] != nil
+func OldestFirstByIndex(ms []*Member) {
+	sort.Slice(ms, func(i, j int) bool {
+		if ms[i] == nil || ms[j] == nil {
+			return false
+		}
+		return ms[i].Age > ms[j].Age
+	})
+}
+
+// SortAny sorts what an any holds.
+//
+// @Ensures True
+func SortAny(v any) {
+	sort.Slice(v, func(i, j int) bool { return false }) // want `vego: cannot verify SortAny: it calls sort.Slice with v of type any, which is not a slice; sort.Slice panics unless it is handed a slice, and vego knows what it sorts only from the static type of the argument, so pass the slice itself, or call slices.SortFunc`
+}

@@ -606,6 +606,9 @@ type pkgVerifier struct {
 	// its function object; see generics.go.
 	instances  map[*types.Func][]*instance
 	instanceOf map[*types.Func]*instance
+	// sliceViews holds the typed views of sort.Slice and sort.SliceStable;
+	// see sortslice.go.
+	sliceViews map[*types.Func]*types.Func
 	// encoderInners holds the calls json.NewEncoder(w) that are the
 	// receiver of an Encode written in the same expression; see json.go.
 	encoderInners map[*ast.CallExpr]bool

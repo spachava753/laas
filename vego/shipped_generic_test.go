@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"reflect"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -169,6 +170,22 @@ func sliceCmpCall[S ~[]E, E any](gen func(*rand.Rand) S, call func(S, func(a, b 
 		before := snapshot(s)
 		call(s, cmp)
 		return sample{before: []any{before[0], cmp}, after: []any{s, cmp}, calls: calls}
+	}
+}
+
+// sliceLessCall calls sort.Slice or sort.SliceStable, through the view its
+// entry is written against, with a less that answers at random and records
+// the indices it is given.
+func sliceLessCall[S ~[]E, E any](gen func(*rand.Rand) S, call func(S, func(i, j int) bool)) func(*rand.Rand) sample {
+	return func(rng *rand.Rand) sample {
+		s, calls := gen(rng), map[string][][]any{}
+		less := func(i, j int) bool {
+			calls["less"] = append(calls["less"], []any{i, j})
+			return rng.Intn(2) == 0
+		}
+		before := snapshot(s)
+		call(s, less)
+		return sample{before: []any{before[0], less}, after: []any{s, less}, calls: calls}
 	}
 }
 
@@ -498,6 +515,10 @@ func anyHarness[S ~[]E, E any](key string, gen func(*rand.Rand) S, elem func(*ra
 		return sliceCmpCall(gen, func(s S, cmp func(a, b E) int) { slices.SortFunc(s, cmp) })
 	case "slices.SortStableFunc":
 		return sliceCmpCall(gen, func(s S, cmp func(a, b E) int) { slices.SortStableFunc(s, cmp) })
+	case "sort.Slice":
+		return sliceLessCall(gen, func(s S, less func(i, j int) bool) { sort.Slice(s, less) })
+	case "sort.SliceStable":
+		return sliceLessCall(gen, func(s S, less func(i, j int) bool) { sort.SliceStable(s, less) })
 	case "slices.Clone":
 		return sliceCall(gen, func(s S) []any { return one(slices.Clone(s)) })
 	case "slices.Clip":
@@ -762,5 +783,35 @@ func givenSliceOf(t *testing.T, fn *funcInfo, call sample, eval *evaluator) func
 		}
 		t.Fatalf("the harness cannot tell %v of %s", last, name)
 		return nil, nil
+	}
+}
+
+// TestComparesPrimed checks that an ensures under compares is held to what
+// the entry modifies as any other ensures is (F26 of the review of step 3
+// of F40): one that describes elements of a slice after the call while its
+// modifies lists nothing is a defect, at an element type with cells.
+func TestComparesPrimed(t *testing.T) {
+	for _, c := range []struct {
+		modifies string
+		defect   bool
+	}{{"[]", true}, {"[s]", false}} {
+		pv, imports := shippedVerifier(t)
+		pkg, err := imports.Import("slices")
+		if err != nil {
+			t.Fatal(err)
+		}
+		generic := pkg.Scope().Lookup("Reverse").(*types.Func)
+		pv.projectTrust = parseTrustFile("vego/trusted/std/test.yaml", []byte("version: 1\ntrusted:\n  slices.Reverse:\n    reason: r\n"+
+			"    asserts: {S: [], E: []}\n    modifies: "+c.modifies+"\n    compares:\n      - \"Forall i in [0, |s'|) : s'[i] = s[i]\"\n"), true)
+		targs := []types.Type{types.NewSlice(types.Typ[types.Int]), types.Typ[types.Int]}
+		sig, err := types.Instantiate(nil, generic.Type(), targs, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fn := pv.trustedContract(pv.instantiate(generic, targs, sig.(*types.Signature)))
+		found := slices.ContainsFunc(fn.defects, func(d string) bool { return strings.Contains(d, "drop the prime") })
+		if found != c.defect {
+			t.Errorf("with modifies %s, a defect that the compares clause describes s after the call is %v, want %v; defects %q", c.modifies, found, c.defect, fn.defects)
+		}
 	}
 }

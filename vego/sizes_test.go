@@ -84,7 +84,7 @@ var shippedClasses = map[string][]string{
 	"C": {
 		"(*bufio.Scanner).Scan", "(*regexp.Regexp).Match", "(*regexp.Regexp).MatchString", "bufio.NewReader", "bufio.NewScanner",
 		"bufio.NewWriter", "crypto/md5.Sum", "crypto/sha256.Sum256", "io.LimitReader", "io.MultiWriter", "io.NopCloser", "io.TeeReader",
-		"log.New", "net/http.NewServeMux", "os.Create", "os.Open",
+		"log.New", "net/http.NewServeMux", "os.Create", "os.Open", "sort.Slice", "sort.SliceStable",
 	},
 	"O": {
 		"bytes.Map", "(embed.FS).ReadDir",

@@ -123,6 +123,15 @@ func (v *fnVerifier) evalPassed(a passedArg, st *state, guard []*logic.Term) val
 		if _, ok := layoutOf(t); !ok {
 			v.unsupported(a.expr.Pos(), fmt.Sprintf("arguments of type %s are not supported", t))
 		}
+		// Go converts the slice that sort.Slice is handed to any, and the
+		// view takes it as the slice it is; see sortslice.go.
+		for _, view := range v.pkgVerifier.sliceViews {
+			if view.Type().(*types.Signature).Params().At(0) == a.param.Origin() {
+				inner := ast.Unparen(a.expr)
+				v.converting[inner]++
+				defer func() { v.converting[inner]-- }()
+			}
+		}
 		return v.evalAs(a.expr, t, st, guard)
 	}
 	if len(a.pack) == 0 {

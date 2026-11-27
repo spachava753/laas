@@ -72,6 +72,9 @@ func (pv *pkgVerifier) calleeAt(call *ast.CallExpr) *types.Func {
 		return nil
 	}
 	sig := callee.Type().(*types.Signature)
+	if view := pv.sortSliceAt(call, callee); view != nil {
+		return view
+	}
 	if sig.TypeParams() == nil || sig.Recv() != nil {
 		return callee
 	}

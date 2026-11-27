@@ -8386,6 +8386,7 @@ A shipped contract states only what the documentation of its function promises, 
 
 - `strings.Index`, `strings.LastIndex`, `strings.Cut`, `strings.Contains`, and their `bytes` forms do not say that the instance they find is the first or the last, or that `-1` or `false` means that there is none. `strings.IndexByte` and `strings.LastIndexByte` say both of a byte.
 - `sort.Strings` does not say that the strings are in order. It says that each element after the call is one of those before it, and that each one before is still there, but not how many times.
+- `slices.SortFunc`, `slices.SortStableFunc`, `sort.Slice`, and `sort.SliceStable` do not say that the elements are in order. See [Sorting a slice of structs](#sorting-a-slice-of-structs).
 - The predicates of `unicode` say what they report for ASCII, and nothing of other characters.
 - `strconv.Unquote` does not bound the length of its result. `strconv.Quote` bounds its result by `10 * |s| + 2`.
 - The functions of `math` say only that they return.
@@ -8406,7 +8407,7 @@ Some functions of the standard library have no shipped contract, because no true
 - `regexp.MustCompile` panics on a pattern that does not compile. Call `regexp.Compile` and handle its error.
 - `Add` and `Values` of `http.Header`. `Add` appends to the slice of a key, which may write the array of a slice that the header already holds, and `Values` returns such a slice.
 - The cookie functions of `net/http`, `http.Redirect`, and the methods of a request that read its body, such as `FormValue`.
-- `slices.SortFunc` and `slices.BinarySearchFunc` require that the comparison function is a strict weak ordering, which a contract cannot require of a function it is handed. See [Sorting a slice of structs](#sorting-a-slice-of-structs).
+- `slices.BinarySearchFunc` means something only when the slice is in the order of its comparison function, which a contract cannot say. See [Sorting a slice of structs](#sorting-a-slice-of-structs).
 - `maps.Keys`, `maps.Values`, and the other functions that return iterators need a range over a function.
 
 ### Isolated functions
@@ -8641,7 +8642,7 @@ The functions that allocate, `Clone`, `Grow`, and `Insert`, require that what th
 
 `slices.SortFunc` and `slices.SortStableFunc` have shipped contracts. They sort with any comparison function, also one that is no ordering, since the comparison is a function they call (see [Functions that a trusted function calls](#functions-that-a-trusted-function-calls)). Their contracts claim no order. They write only the slice, and the comparison may not write it.
 
-After the call, of a slice of numbers, booleans, strings, or pointers, `vego` knows that each element is one that was there before, and that each element that was there is there still. So a slice of pointers that are not nil stays one:
+After the call, `vego` knows that each element is one that was there before, and that each element that was there is there still. It knows this when the elements are integers, booleans, strings, pointers, slices, or maps. It does not know it of pointers to values of size zero, such as `*struct{}`. Of a slice of floats or of structs, it knows only the number of elements, since a formula cannot compare two of them. So a slice of pointers that are not nil stays one:
 
 ```go
 // @Requires Forall i in [0, |ms|) : ms[i] != nil
@@ -8672,6 +8673,37 @@ func AgesKept(ms []Member) {
 
 ```text
 vego: postcondition may not hold: Forall i in [0, |ms|) : ms'[i].Age >= 0
+```
+
+`sort.Slice` and `sort.SliceStable` have shipped contracts that claim the same as those of `slices.SortFunc` and `slices.SortStableFunc`. Their `less` function is handed two indices of the slice, each at least 0 and less than its length, so it can index the slice it sorts:
+
+```go
+// @Requires Forall i in [0, |ms|) : ms[i] != nil
+// @Modifies ms
+// @Ensures Forall i in [0, |ms|) : ms'[i] != nil
+func OldestFirstByIndex(ms []*Member) {
+	sort.Slice(ms, func(i, j int) bool {
+		if ms[i] == nil || ms[j] == nil {
+			return false
+		}
+		return ms[i].Age > ms[j].Age
+	})
+}
+```
+
+`sort.Slice` takes the slice as an `any` and panics when it is handed anything else. `vego` reads a call at the static type of the argument, so that type must be a slice type:
+
+```go
+// @Ensures True
+func SortAny(v any) {
+	sort.Slice(v, func(i, j int) bool { return false })
+}
+```
+
+```text
+vego: cannot verify SortAny: it calls sort.Slice with v of type any, which is not a slice; sort.Slice
+panics unless it is handed a slice, and vego knows what it sorts only from the static type of the
+argument, so pass the slice itself, or call slices.SortFunc
 ```
 
 `slices.BinarySearchFunc` has no shipped contract. Its result means something only when the slice is in the order of its comparison function, and a contract cannot yet say that.
@@ -10837,6 +10869,7 @@ This table lists the most common messages.
 | `cannot verify F: json.NewDecoder(r).Decode reads from r without a limit, ...` | The decoder could read without end. | Write `json.NewDecoder(io.LimitReader(r, n)).Decode(&x)`. See [Decoding the body of a request](#decoding-the-body-of-a-request). |
 | `the decoder calls r.Read until it returns bytes or an error, and the contract of Read allows it to return neither, ...` | The decoder may call `Read` without end. | Decode from a reader whose `Read` returns bytes or an error, or read into a buffer and call `Unmarshal`. |
 | `cannot verify F: json.NewEncoder keeps w in the encoder it returns; ...` | An encoder or decoder is kept in a variable. | Write the call as one expression. |
+| `cannot verify F: it calls sort.Slice with v of type any, which is not a slice; ...` | The first argument of `sort.Slice` or `sort.SliceStable` does not have a slice type, so `vego` cannot tell what is sorted. | Pass the slice itself, or call `slices.SortFunc`. |
 ## What is not supported
 
 `vego` supports functions and methods over these types: the integer types, `bool`, `string`, `error`, the float types, arrays of numbers and booleans, structs, pointers to structs, to numbers, to booleans, and to strings, slices, maps with integer, string, or boolean keys, function types, and interface types. In the body it supports assignments, `if`, `switch` with `fallthrough`, `for` and `range` loops with `break` and `continue`, also with a label, `return`, `defer`, calls to named functions and methods, function literals that are called or deferred where they are written or bound to a variable that is only called, function values of named function types with a contract (see [Function values](#function-values)), calls through interface values of methods with a contract (see [Interfaces](#interfaces)), functions handed to a trusted function that calls them while it runs (see [Functions that a trusted function calls](#functions-that-a-trusted-function-calls)), and recursion. The built-ins `len`, `cap`, `min`, `max`, `new`, `make`, `append`, and `delete` are supported, and so are composite literals, slicing, and the arithmetic, comparison, shift, and bitwise operators.
@@ -10898,6 +10931,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - copying or assigning a value that holds a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once`, or a value that owns memory, as a `strings.Builder`, a `bytes.Buffer`, or a struct that declares `@Owns`; parameters, results, and receivers of such a type, a method with a value receiver of such a type, `append` to a slice of them, and `range` variables and loop variables of such a type (see [Values that hold a mutex cannot be copied or overwritten](#values-that-hold-a-mutex-cannot-be-copied-or-overwritten)); pass a pointer;
 - `recover`;
 - generic functions and types of your own package with annotations, a call of a generic function without a trusted contract, a generic function used as a value, methods of generic types, and type arguments that can hold code, that are not modelled, or that hold a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once` (see [Generic functions of other packages](#generic-functions-of-other-packages));
+- a call of `sort.Slice` or `sort.SliceStable` whose first argument does not have a slice type, such as an `any`, `nil`, or a pointer to an array (see [Sorting a slice of structs](#sorting-a-slice-of-structs));
 - goroutines, channels, and `select`;
 - arrays of anything but numbers and booleans, structs that contain an array of elements larger than a byte, and the other uses of arrays listed in [What arrays do not support yet](#what-arrays-do-not-support-yet);
 - pointers to anything other than a struct;

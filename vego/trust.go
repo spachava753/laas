@@ -1280,12 +1280,6 @@ func (v *fnVerifier) primedPaths(fn *funcInfo) {
 // A path it cannot follow is left to the checks that read the clause. With
 // state set, the path is the argument of that state, which is read too.
 func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, changed map[string][]*types.Var, state string) {
-	// An ensures under compares, shipped and held by its harness, reads
-	// elements that at some type arguments have no cells at all, values of
-	// size zero, whose comparison it is dropped for.
-	if c.compares {
-		return
-	}
 	// *p reads the box p points to, where the rest of the path leads
 	// (F19 of the review of step 2 of F37).
 	whole, derefs := path, 0
@@ -1418,7 +1412,10 @@ func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, chan
 	for i, c := range read {
 		reached = reached || slices.ContainsFunc(changed[c.key], func(whose *types.Var) bool { return !own[i] || whose == nil || whose == param })
 	}
-	if !reached {
+	// An ensures under compares may read elements that at some type
+	// arguments have no cells at all, values of size zero, which nothing
+	// can change; at every other type it is checked as any other.
+	if !reached && !(c.compares && len(read) == 0) {
 		fn.typeDefect("its ensures %q describes %s after the call, but nothing its modifies lists is memory that %s reads, so the call cannot have changed it; "+
 			"drop the prime or list what the function writes", c.text, c.text[whole.Start:whole.End], c.text[whole.Start:whole.End])
 	}

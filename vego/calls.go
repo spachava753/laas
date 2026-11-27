@@ -296,6 +296,9 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func, st *sta
 	if made := v.pkgVerifier.instanceOf[callee]; made != nil {
 		v.checkGenericCallee(call, callee, made)
 	}
+	if why := v.pkgVerifier.sortSliceRefusal(call, callee); why != "" {
+		v.unsupported(call.Pos(), why)
+	}
 	// Nothing may be called on trust that is not written down: the callee
 	// is either verified against its annotations or has a trusted contract.
 	fn := v.contractOf(callee)
