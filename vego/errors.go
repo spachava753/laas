@@ -1095,7 +1095,13 @@ func (v *fnVerifier) unsampled(t *logic.Term) []*logic.Term {
 // the nil error, a sentinel, or another package-level variable that keeps
 // its value, which are the same for every input.
 func (v *fnVerifier) isInput(t *logic.Term) bool {
-	return t == logic.NilErr() || isFixedTerm(t) || isDynTable(t) || v.inputs[t.Name] || strings.HasPrefix(t.Name, entryRegion) || strings.HasPrefix(t.Name, sampleName)
+	// Where the storage of an assigned package-level variable lies, and
+	// that of a struct variable whose address is taken, is the same in
+	// every state, as an input is: a call produces none of it (found with
+	// F40, where the always-fails check took it for what a call produced
+	// and found no input of any function that names such a variable).
+	return t == logic.NilErr() || isFixedTerm(t) || isDynTable(t) || v.inputs[t.Name] || strings.HasPrefix(t.Name, entryRegion) || strings.HasPrefix(t.Name, sampleName) ||
+		t.Op == logic.OpConst && t.Sort == logic.Ref && (strings.HasPrefix(t.Name, "varref ") || strings.HasPrefix(t.Name, boxName))
 }
 
 // canReach reports whether there is evidence that execution can arrive at
@@ -1861,13 +1867,18 @@ func (v *fnVerifier) someInput(terms []*logic.Term, search func(input *witness) 
 		}, 0)
 	}
 	// An assigned variable is an input that callers choose by calling the
-	// functions that set it: a sample gives its storage a value.
+	// functions that set it: a sample gives its storage an allocation of
+	// its own, which exists, as a struct variable whose address is taken
+	// gets below, and a value.
 	for _, key := range slices.Sorted(maps.Keys(v.assignedMet)) {
 		variable := v.assignedMet[key]
-		cells, ref := v.globalCells(variable), globalRef(variable)
-		if !slices.ContainsFunc(cells, func(c cell) bool { return b.mentioned[entryRegion+c.key] }) {
+		cells, name := v.globalCells(variable), globalRef(variable).Name
+		if !b.mentioned[name] && !slices.ContainsFunc(cells, func(c cell) bool { return b.mentioned[entryRegion+c.key] }) {
 			continue
 		}
+		b.refs++
+		ref := logic.RefLit(b.refs)
+		b.slots = append(b.slots, slot{func(s *witness) { s.consts[name] = ref }})
 		b.add(variable.Type(), binding{
 			set:  func(s *witness, i int, term *logic.Term) { s.storeAt(cells[i], ref, term) },
 			name: func(i int) string { return entryRegion + cells[i].key },

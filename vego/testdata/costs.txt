@@ -2387,7 +2387,7 @@ globals	globals.Assigns	2	237	0
 globals	globals.Beside	11	67624	0
 globals	globals.Bounded	4	969	0
 globals	globals.Buf	4	1772	0
-globals	globals.Busy	10	7622	0
+globals	globals.Busy	10	7393	0
 globals	globals.Byte	3	545	0
 globals	globals.CallsHit	2	744	0
 globals	globals.Captured	4	1439	0
@@ -2455,6 +2455,8 @@ globals	globals.RegisterUnlisted	3	1175	0
 globals	globals.RemoveLimit	2	287	0
 globals	globals.Requests	1	46	0
 globals	globals.ResetStats	6	3970	0
+globals	globals.Retry	9	6862	0
+globals	globals.RetryMaybe	10	11423	0
 globals	globals.Runes	8	4296	0
 globals	globals.RunesAsBytes	2	1564	0
 globals	globals.Scaler	1	111	0
