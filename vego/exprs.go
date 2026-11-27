@@ -843,6 +843,15 @@ func (v *fnVerifier) conversion(e *ast.CallExpr, st *state, guard []*logic.Term)
 	bytes := func(t types.Type) bool {
 		return isSlice(t) && types.Identical(elemType(t).Underlying(), types.Typ[types.Uint8])
 	}
+	if why := retypedHeld(from, to); why != "" {
+		// A pointer converted between two named interface types or two
+		// named function types of one underlying type would give what it
+		// points to the contract of the other type, past every check of a
+		// conversion of the value, at this store and at every later one
+		// (F20 of the review of step 2 of F42).
+		v.unsupported(e.Pos(), withDetail(rPointerTo, to.String()), fmt.Sprintf("converting %s from %s to %s is not supported: %s; convert the value it points to instead",
+			types.ExprString(e.Args[0]), types.TypeString(from, types.RelativeTo(v.pass.Pkg)), types.TypeString(to, types.RelativeTo(v.pass.Pkg)), why))
+	}
 	switch {
 	case v.isNil(e.Args[0]):
 		return v.evalAs(e.Args[0], to, st, guard)
@@ -952,4 +961,23 @@ func (v *fnVerifier) interiorAddress(e ast.Expr, st *state, guard []*logic.Term)
 	// The scan of the package found no address taken of the field, so it
 	// lies in a region of its struct, where no pointer can point.
 	panic(fmt.Sprintf("vego: internal error: the address of %s is taken, which lies in region %s and not in the place region of its type", types.ExprString(e), c.key))
+}
+
+// retypedHeld says why converting a pointer from one type to another would
+// change the type of an interface value or a function value it points to,
+// or returns "": the pointees are interface types or function types that
+// are not identical, whose contracts may differ.
+func retypedHeld(from, to types.Type) string {
+	a, okA := from.Underlying().(*types.Pointer)
+	b, okB := to.Underlying().(*types.Pointer)
+	if !okA || !okB || types.Identical(a.Elem(), b.Elem()) {
+		return ""
+	}
+	switch a.Elem().Underlying().(type) {
+	case *types.Interface:
+		return "the interface value it points to would be read and written under the contracts of another interface type"
+	case *types.Signature:
+		return "the function value it points to would be called under the contract of another function type"
+	}
+	return ""
 }

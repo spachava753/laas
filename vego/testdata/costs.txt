@@ -807,6 +807,17 @@ closures	closures.closeKnown	7	4451	0
 closures	closures.the initialiser of ErrBase	0	0	0
 closures	closures.the initialiser of ErrClosed	0	0	0
 compress/flate	(*sync.Once).Do	1	1788	0
+convptr	(convptr.T).M	2	61	0
+convptr	(convptr.T2).M	2	61	0
+convptr	convptr.A.M	3	404	0
+convptr	convptr.B.M	3	404	0
+convptr	convptr.Conv	2	98	0
+convptr	convptr.ConvFunc	2	111	0
+convptr	convptr.F	3	618	0
+convptr	convptr.G	3	618	0
+convptr	convptr.Unnamed	2	98	0
+convptr	convptr.Weaker	2	98	0
+convptr	convptr.one	2	141	0
 copies	(*copies.decoder).Refill	10	25657	0
 copies	copies.AThenB	8	38075	0
 copies	copies.BThenA	8	38093	0

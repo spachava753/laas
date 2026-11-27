@@ -4118,7 +4118,7 @@ func CollectTwo() (r []string) {
 
 The last `Ensures` says that the slice is new, or lies in the array it had. Without it, the second call is reported, since the first may have left `xs` holding memory that `CollectTwo` did not make. `Modifies *p` of a pointer to a number, a boolean, or a string is reported with the advice to write `Modifies p`.
 
-A method with a pointer receiver of a named slice type, as `func (t *Tags) Add(s string)`, works the same way, and so does an out-parameter of type `**T` or `*error`. Taking the address of an owned field is not supported (see [Structs that own memory](#structs-that-own-memory)), since a store through the pointer would escape the checks of a store into the field.
+Converting a pointer between two interface types or two function types, as `(*B)(&a)` for interfaces `A` and `B` with the same methods, is not supported, since the value it points to would then be used under the contracts of the other type. Convert the value instead. A method with a pointer receiver of a named slice type, as `func (t *Tags) Add(s string)`, works the same way, and so does an out-parameter of type `**T` or `*error`. Taking the address of an owned field is not supported (see [Structs that own memory](#structs-that-own-memory)), since a store through the pointer would escape the checks of a store into the field.
 
 ### Types declared inside a function
 
