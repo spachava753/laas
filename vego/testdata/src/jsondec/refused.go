@@ -43,7 +43,7 @@ func Anys(data []byte) (err error) {
 // @Requires |data| <= 1000
 // @Ensures True
 func Value(data []byte, r Req) (err error) {
-	return json.Unmarshal(data, r) // want `cannot verify Value: Unmarshal decodes into r, and r is of type Req; decode into &x for a variable x, or into a pointer to a struct`
+	return json.Unmarshal(data, r) // want `cannot verify Value: Unmarshal decodes into r, and r is of type Req; decode into &x for a variable or a field x, or into a pointer to a struct`
 }
 
 // Unchanged relies on a failed decode writing nothing; it may write the

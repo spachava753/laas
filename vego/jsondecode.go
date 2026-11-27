@@ -121,7 +121,7 @@ func (v *fnVerifier) decodeTargetOf(call *ast.CallExpr, fn *funcInfo) (ast.Expr,
 			return into, data, decodeTarget{t: object, pointer: into}
 		}
 	}
-	return into, data, decodeTarget{why: fmt.Sprintf("%s is of type %s; decode into &x for a variable x, or into a pointer to a struct",
+	return into, data, decodeTarget{why: fmt.Sprintf("%s is of type %s; decode into &x for a variable or a field x, or into a pointer to a struct",
 		types.ExprString(into), types.TypeString(t, types.RelativeTo(v.pass.Pkg)))}
 }
 
