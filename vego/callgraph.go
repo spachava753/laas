@@ -841,11 +841,25 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 	}
 	var operands []ast.Expr
 	paramOf := map[ast.Expr]*types.Var{}
+	// handedType is the type of what an operand hands the call: its own,
+	// or, for the receiver of a method promoted from an embedded field,
+	// the type of the method's receiver, since the call is given that
+	// field and nothing else of the value it is selected on.
+	handedType := map[ast.Expr]types.Type{}
 	if sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok && withReceiver {
 		if selection := pv.info.Selections[sel]; selection != nil && selection.Kind() == types.MethodVal {
 			operands = append(operands, sel.X)
 			paramOf[sel.X] = sig.Recv()
+			if len(selection.Index()) > 1 {
+				handedType[sel.X] = sig.Recv().Type()
+			}
 		}
+	}
+	typeOfOperand := func(arg ast.Expr) types.Type {
+		if t := handedType[arg]; t != nil {
+			return t
+		}
+		return pv.info.TypeOf(arg)
 	}
 	// What the entry claims the function finds on what it is given; a
 	// claim that cannot be read is no claim.
@@ -914,7 +928,7 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 				unresolved(call, fmt.Sprintf("hands %s to %s", types.ExprString(arg), text), "", []*callNode{to})
 			}
 		default:
-			t := pv.info.TypeOf(arg)
+			t := typeOfOperand(arg)
 			targets := pv.codeTargets(t, map[types.Type]bool{})
 			why := fmt.Sprintf("%s holds an interface value or a function value, which may hold a value of any type of the package or any function it lets out, "+
 				"and code of another package may call that, or an exported method of it, by a type assertion or reflection", types.ExprString(arg))
@@ -935,7 +949,7 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 				// one here, has that type as its dynamic type: what the
 				// other package can find on it by assertion or reflection
 				// are the methods of that type and of the types it holds.
-				targets = append(targets, pv.concreteMethods(pv.info.TypeOf(arg), map[types.Type]bool{})...)
+				targets = append(targets, pv.concreteMethods(t, map[types.Type]bool{})...)
 			}
 			// What can be done: an entry that says what the code finds on
 			// the parameter, where an entry can be written.

@@ -916,6 +916,12 @@ cycles/e7	cycles/e7.Store.Read	3	804	0
 cycles/hole	(*cycles/hole.T).Read	5	1427	0
 cycles/hole	cycles/hole.F	5	2256	0
 cycles/hole	cycles/hole.Store.Read	3	804	0
+cycles/promoted	(*bufio.Reader).ReadByte	9	68389	0
+cycles/promoted	(*sync.Mutex).Lock	1	1652	0
+cycles/promoted	(*sync.Mutex).Unlock	1	1611	0
+cycles/promoted	cycles/promoted.First	12	40158	0
+cycles/promoted	cycles/promoted.Pull	14	18608	0
+cycles/promoted	io.Reader.Read	3	7449	0
 cycles/r1	cycles/r1.F	4	2012	0
 cycles/r1	cycles/r1.Store.Read	3	804	0
 cycles/r10	cycles/r10.F	1	46	0
