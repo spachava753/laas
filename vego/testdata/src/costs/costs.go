@@ -23,12 +23,16 @@ func Product(a, b, c, d int) (r int) {
 // P holds a number.
 type P struct{ x int }
 
-// Set writes through a pointer.
+// Set writes through a pointer it is given, and through one to a struct it
+// makes, which its Modifies entry might cover, so that whether the write is
+// to memory made since entry is asked.
 //
 // @Requires p != nil
 // @Modifies p.x
 // @Ensures p.x' = 1
 func Set(p *P) {
+	q := &P{}
+	q.x = 2
 	p.x = 1
 }
 

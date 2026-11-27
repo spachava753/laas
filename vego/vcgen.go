@@ -100,7 +100,18 @@ type fnVerifier struct {
 	// noteStruct.
 	readBase    *structValue
 	structsSeen []structValue
-	repeats     map[string]bool
+	// storeBases holds, for each write of a cell of a place region made
+	// through a struct value, that value's type and the cell's offset in
+	// it, and nextBase is the one the write under way records; skips holds
+	// the chains of place regions with the stores R6 drops for a read, by
+	// the chain and the read; see skipApart.
+	storeBases map[*logic.Term]storeBase
+	nextBase   *storeBase
+	skips      map[skipKey]*logic.Term
+	// writeBase is the struct type the write that checkWriteOr checks is
+	// made through, or nil; see cannotCover.
+	writeBase types.Type
+	repeats   map[string]bool
 	// convertedAt holds, by the constant of an interface value, where a
 	// value with a structural footprint was converted to it; see
 	// conversion.

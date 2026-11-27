@@ -3273,7 +3273,7 @@ laas -vego -vego.cost ./...
 For `Load` from [The errors of Read and Write](#the-errors-of-read-and-write), in a file `foreign.go` that declares it at line 56, it prints:
 
 ```text
-foreign.go:56:6: vego cost of Load: 43 problems, 2097415 resource units, 159709 bytes, 1.70 s
+foreign.go:56:6: vego cost of Load: 42 problems, 2096235 resource units, 158097 bytes, 1.62 s
 	foreign.go:56:6: 2 questions of the always-fails check stopped at a limit
 ```
 
@@ -3310,7 +3310,7 @@ A proof obligation that stops at a limit draws a message with the note. So does 
 A frame that stops at its limit draws no message. `vego` then proves the invariant as it would without the frame. When that proof stops at its limit too, the function counts a frame and a proof obligation at the same place. For `DropThenAnswer` in [What keeps it between boundaries](#what-keeps-it-between-boundaries), in a file `kept.go`, it prints:
 
 ```text
-kept.go:153:6: vego cost of DropThenAnswer: 21 problems, 6871676 resource units, 1107447 bytes, 1.89 s
+kept.go:153:6: vego cost of DropThenAnswer: 20 problems, 6830467 resource units, 1072916 bytes, 1.96 s
 	kept.go:155:2: 2 contradiction checks stopped at a limit
 	kept.go:155:2: 1 question that names what a frame lost stopped at a limit
 	kept.go:156:1: 1 proof obligation stopped at a limit

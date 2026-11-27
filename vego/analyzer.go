@@ -238,7 +238,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		"look only at the packages of the census scope whose path this regular expression matches, as a group of the standard library",
 	)
 	analyzer.ResultType = reflect.TypeFor[*Usage]()
-	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact), new(sentinelsFact), new(sentinelWritesFact), new(sentinelRelianceFact), new(stateFact), new(ownsFact), new(fixedFact), new(coversFact), new(writesFact), new(initialisersFact)}
+	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact), new(sentinelsFact), new(sentinelWritesFact), new(sentinelRelianceFact), new(stateFact), new(ownsFact), new(fixedFact), new(coversFact), new(writesFact), new(initialisersFact), new(addressedFact)}
 	analyzer.Run = func(pass *analysis.Pass) (result any, err error) {
 		foreignTags, err := parseOtherTags(otherTags)
 		if err != nil {
@@ -302,6 +302,13 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 				printCost:       printCost,
 			}
 		}
+		// Which fields of the package's structs a pointer can point to is
+		// decided before anything is verified, once for every pass, so that
+		// every verifier of the package and every package that imports it
+		// sees one decision (addressed.go).
+		addressed := scanAddressed(pass)
+		pass.ExportPackageFact(addressed)
+		addressedOf.Store(pass.Pkg, addressed)
 		pv := verifier(pass)
 		if censusOut != "" || censusScope != "" {
 			if censusOut == "" || censusScope == "" {

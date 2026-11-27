@@ -523,7 +523,7 @@ func FromOnly(s *Segment) {
 // @Modifies s.From
 func FromOnlyWrong(s *Segment) {
 	p := &s.To
-	p.X = 1 // want `vego: p\.X is assigned, which FromOnlyWrong may not modify: nothing its // @Modifies clauses list is known to cover it; a clause covers what its path referred to when FromOnlyWrong was called`
+	p.X = 1 // want `vego: p\.X is assigned, which FromOnlyWrong may not modify; list it in a // @Modifies clause, as s\.To\.X`
 }
 
 // BumpEach changes each element through a pointer to it.

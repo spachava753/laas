@@ -322,7 +322,7 @@ func hopsPointer(t types.Type, path []int) bool {
 // own and returns the pointer to it.
 func (v *fnVerifier) newObject(st *state, t types.Type, val value) value {
 	ref := v.alloc(st, v.pass.TypesSizes.Sizeof(t) > 0)
-	v.put(st, v.cellsOf(t), ref, logic.IntLit(0), val)
+	v.putIn(st, structOrNil(t), v.cellsOf(t), ref, logic.IntLit(0), val)
 	v.noteBorn(st, ref, rowKeys(v.cellsOf(t)))
 	v.newPointerStates(st, t, value{ref, logic.IntLit(0)})
 	return value{ref, logic.IntLit(0)}

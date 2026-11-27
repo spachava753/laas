@@ -62,7 +62,7 @@ func TestCostFlag(t *testing.T) {
 		wantKinds := map[string][len(questionNames)]int{
 			"costs.Add":     {3, 0, 1, 0, 0},
 			"costs.Product": {7, 0, 1, 0, 0},
-			"costs.Set":     {3, 0, 1, 2, 0},
+			"costs.Set":     {5, 0, 1, 1, 0},
 			"costs.Read":    {0, 21, 3, 0, 2},
 			"costs.read":    {0, 6, 2, 0, 0},
 		}
@@ -73,19 +73,19 @@ func TestCostFlag(t *testing.T) {
 		}
 		lines := strings.Split(strings.TrimRight(out.String(), "\n"), "\n")
 		want := []string{
-			`^/.*costs\.go:36:6: vego cost of the trusted contract of costs\.read: 8 problems, \d+ resource units, \d+ bytes, \d+\.\d\d s$`,
-			`^\t/.*costs\.go:36:6: 4 questions of the always-fails check stopped at a limit$`,
+			`^/.*costs\.go:40:6: vego cost of the trusted contract of costs\.read: 8 problems, \d+ resource units, \d+ bytes, \d+\.\d\d s$`,
+			`^\t/.*costs\.go:40:6: 4 questions of the always-fails check stopped at a limit$`,
 			// The check of the entry and its first attempt both stop at
 			// the limit of 600 units.
-			`^\t/.*costs\.go:36:6: 2 contradiction checks stopped at a limit$`,
+			`^\t/.*costs\.go:40:6: 2 contradiction checks stopped at a limit$`,
 			`^/.*costs\.go:9:6: vego cost of Add: 4 problems, \d+ resource units, \d+ bytes, \d+\.\d\d s$`,
 			`^/.*costs\.go:17:6: vego cost of Product: 8 problems, \d+ resource units, \d+ bytes, \d+\.\d\d s$`,
 			`^\t/.*costs\.go:19:9: 2 proof obligations stopped at a limit$`,
 			`^\t/.*costs\.go:20:11: 2 proof obligations stopped at a limit$`,
-			`^/.*costs\.go:31:6: vego cost of Set: 6 problems, \d+ resource units, \d+ bytes, \d+\.\d\d s$`,
-			`^/.*costs\.go:41:6: vego cost of Read: 26 problems, \d+ resource units, \d+ bytes, \d+\.\d\d s$`,
-			`^\t/.*costs\.go:41:6: 8 questions of the always-fails check stopped at a limit$`,
-			`^\t/.*costs\.go:42:2: 4 questions of the always-fails check stopped at a limit$`,
+			`^/.*costs\.go:33:6: vego cost of Set: 7 problems, \d+ resource units, \d+ bytes, \d+\.\d\d s$`,
+			`^/.*costs\.go:45:6: vego cost of Read: 26 problems, \d+ resource units, \d+ bytes, \d+\.\d\d s$`,
+			`^\t/.*costs\.go:45:6: 8 questions of the always-fails check stopped at a limit$`,
+			`^\t/.*costs\.go:46:2: 4 questions of the always-fails check stopped at a limit$`,
 		}
 		if len(lines) != len(want) {
 			t.Fatalf("-vego.cost printed\n%s\nwant %d lines", out.String(), len(want))

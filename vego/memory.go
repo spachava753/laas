@@ -536,7 +536,8 @@ func (v *fnVerifier) fetchIn(sink *state, mem memory, cells []cell, ref, at *log
 			continue
 		}
 		position := c.start(at)
-		val[i] = logic.Select(logic.Select(v.tableAt(sink, mem, c.key, logic.SeqOf(logic.SeqOf(c.sort)), ref, position), ref), position)
+		region := v.skipApart(v.tableAt(sink, mem, c.key, logic.SeqOf(logic.SeqOf(c.sort)), ref, position), base, c)
+		val[i] = logic.Select(logic.Select(region, ref), position)
 	}
 	return val
 }
@@ -544,14 +545,101 @@ func (v *fnVerifier) fetchIn(sink *state, mem memory, cells []cell, ref, at *log
 // put writes the leaves with the given cells of a value stored at a position
 // of an allocation.
 func (v *fnVerifier) put(st *state, cells []cell, ref, at *logic.Term, val value) {
+	v.putIn(st, nil, cells, ref, at, val)
+}
+
+// putIn is put for cells of a struct value of type base at ref and at, when
+// base is not nil: each write of a cell of a place region records the type
+// and the cell's offset in it, for R6 (skipApart). Only a write whose cells
+// are counted from the start of a struct value of that type may give one.
+func (v *fnVerifier) putIn(st *state, base types.Type, cells []cell, ref, at *logic.Term, val value) {
 	checkGrowth(val)
 	for i, c := range cells {
 		if c.isRun() {
 			v.writeRun(st, c, ref, at, val[i])
 			continue
 		}
+		if base != nil && isPlaceKey(c.key) {
+			v.nextBase = &storeBase{t: base, off: c.off}
+		}
 		v.writeAt(st, c.key, c.sort, ref, c.start(at), val[i])
+		v.nextBase = nil
 	}
+}
+
+// storeBase is the struct value a write of a cell was made through: its
+// type and the cell's offset in it.
+type storeBase struct {
+	t   types.Type
+	off int64
+}
+
+// skipKey names a chain as one read through a struct value sees it.
+type skipKey struct {
+	chain *logic.Term
+	key   string
+	off   int64
+}
+
+// skipApart is R6. A read of a cell of a place region through a struct
+// value q of type A at offset off sees the region's chain without the
+// stores made through a struct value p of type B where
+//
+//   - S1 separates A and B (typesApart): the two values do not overlap; or
+//   - B is A and the store's cell lies at another offset: by the fact of
+//     F26 p and q are one value, whose cells at two offsets differ, or at
+//     least the size of A apart, so that each cell lies inside its own.
+//
+// Either way the cell written is not the cell read, so the read over the
+// store equals the read under it. The store's reference is not nil, since
+// the write's own nil obligation is proved or reported, and on every
+// execution that reaches it a nil p would have panicked there; the read's
+// is not nil for the same reason. S1 and F26 are facts about types, true of
+// every state Go makes without unsafe, so no fact that is only assumed of a
+// path enters. Layers are never dropped: a layer keeps a cell only when its
+// allocation is below the layer's bound and the cell lies outside its
+// targets, and its targets need not be what was written (F8 of the design
+// review). A write through a pointer to a single value records no base and
+// is never dropped, nor is an element of an array (a run).
+func (v *fnVerifier) skipApart(chain *logic.Term, base types.Type, c cell) *logic.Term {
+	if base == nil || c.isRun() || !isPlaceKey(c.key) || len(v.storeBases) == 0 {
+		return chain
+	}
+	name := skipKey{chain: chain, key: typeKey(base), off: c.off}
+	if known, ok := v.skips[name]; ok {
+		return known
+	}
+	readKey := typeKey(base)
+	var kept []*logic.Term
+	dropped := false
+	at := chain
+	for at.Op == logic.OpWrite {
+		if b, ok := v.storeBases[at]; ok && (v.typesApart(b.t, base) || typeKey(b.t) == readKey && b.off != c.off && v.pass.TypesSizes.Sizeof(base) > 0) {
+			dropped = true
+		} else {
+			kept = append(kept, at)
+		}
+		at = at.Args[0]
+	}
+	result := chain
+	if dropped {
+		result = at
+		for i := len(kept) - 1; i >= 0; i-- {
+			w := kept[i]
+			result = logic.Write(result, w.Args[1], w.Args[2], w.Args[3])
+			if b, ok := v.storeBases[w]; ok && v.frameNames == nil {
+				v.storeBases[result] = b
+			}
+		}
+	}
+	// A frame changes no table of the verifier (asFrame).
+	if v.frameNames == nil {
+		if v.skips == nil {
+			v.skips = map[skipKey]*logic.Term{}
+		}
+		v.skips[name] = result
+	}
+	return result
 }
 
 // writeRun writes an array into the run of cells it lies in: position
@@ -706,6 +794,12 @@ func (v *fnVerifier) writeAt(st *state, key string, sort logic.Sort, ref, at, wr
 	table := logic.SeqOf(logic.SeqOf(sort))
 	ref, at, written = v.apart(st, ref, table), v.apart(st, at, table), v.apart(st, written, table)
 	st.mem[key] = logic.Write(st.mem.region(key, table), ref, at, written)
+	if v.nextBase != nil {
+		if v.storeBases == nil {
+			v.storeBases = map[*logic.Term]storeBase{}
+		}
+		v.storeBases[st.mem[key]] = *v.nextBase
+	}
 }
 
 // apart returns a term that stands for t and holds no region of the given
@@ -1182,7 +1276,7 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 			continue
 		}
 		if slices.ContainsFunc(covers[i], func(c stretch) bool {
-			return slices.ContainsFunc(w.parts, func(part stretch) bool { return part.key == c.key })
+			return slices.ContainsFunc(w.parts, func(part stretch) bool { return part.key == c.key && !v.cannotCover(t, c, w, part) })
 		}) {
 			candidates = append(candidates, i)
 		}
@@ -1362,10 +1456,71 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 	defer v.asking(modifiesCheck)()
 	// Whether the write is to memory made since entry matters only for a
 	// clause not yet known to be needed.
-	if !slices.ContainsFunc(candidates, func(i int) bool { return !v.used[i] }) || v.quickly(st, guard, created) {
+	// A write through a parameter's reference on entry is to memory that
+	// existed then, which a question would answer only with a model.
+	existed := v.existedOnEntry(w.ref)
+	if !slices.ContainsFunc(candidates, func(i int) bool { return !v.used[i] }) || !existed && v.quickly(st, guard, created) {
 		return
 	}
-	v.markNeeded(candidates, func(mod int) bool { return v.quickly(st, guard, allowed(mod)) })
+	v.markNeeded(candidates, func(mod int) bool {
+		// Without the clause no target is left that could cover the
+		// write, and the memory existed on entry: the write is not
+		// allowed without it, which is known without asking.
+		if existed && !slices.ContainsFunc(candidates, func(i int) bool { return v.frame[i].mod != mod }) {
+			return false
+		}
+		return v.quickly(st, guard, allowed(mod))
+	})
+}
+
+// existedOnEntry reports whether a reference is what a parameter held on
+// entry, which is below the bound of entry or nil; a write through it
+// follows its nil check, so it is to memory that existed on entry.
+func (v *fnVerifier) existedOnEntry(ref *logic.Term) bool {
+	for _, param := range v.fn.params {
+		if val := v.entry[param]; len(val) > 0 && (val[0] == ref || val[0].String() == ref.String()) {
+			return true
+		}
+	}
+	return false
+}
+
+// cannotCover reports whether a stretch of a Modifies target is known by
+// its terms not to cover a part of a write, so that the target is no
+// candidate for it:
+//
+//   - both are one position, in one allocation by the same term, at one
+//     term plus two different constants: two different positions, as two
+//     fields of one struct value, or one field of two struct values that
+//     lie in a third one at two offsets, are; or
+//   - the target lies in a struct value and the write is made through one
+//     of a type that S1 separates from it (typesApart), whose cells lie
+//     outside it.
+//
+// Leaving out a target that cannot cover the write makes no write allowed
+// that was not, and it keeps the message from saying that a listed clause
+// might cover it.
+func (v *fnVerifier) cannotCover(t target, c stretch, w written, part stretch) bool {
+	if c.one && part.one && t.ref != nil && (w.ref == t.ref || w.ref.String() == t.ref.String()) {
+		b1, k1 := splitOffset(c.lo)
+		b2, k2 := splitOffset(part.lo)
+		if k1 != k2 && (b1 == b2 || b1.String() == b2.String()) {
+			return true
+		}
+	}
+	return v.writeBase != nil && t.base != nil && v.typesApart(t.base.t, v.writeBase)
+}
+
+// splitOffset returns a term as a base and a constant added to it.
+func splitOffset(t *logic.Term) (*logic.Term, int64) {
+	if t.Op == logic.OpAdd && len(t.Args) == 2 && t.Args[1].Op == logic.OpIntLit && t.Args[1].Big == nil {
+		b, k := splitOffset(t.Args[0])
+		return b, k + t.Args[1].Val
+	}
+	if t.Op == logic.OpIntLit && t.Big == nil {
+		return logic.IntLit(0), t.Val
+	}
+	return t, 0
 }
 
 // markNeeded records which clauses among the targets that may cover a
@@ -1671,15 +1826,34 @@ func (v *fnVerifier) noteStruct(sink *state, s structValue) {
 	if sink == nil || !v.holdsRepeated(s.t) {
 		return
 	}
+	// A struct read under a quantifier, at a position that names its
+	// variable, is paired with what was seen before by what gathers the
+	// quantifier's facts, and is not remembered: a fact about it stated
+	// on the path would name the variable out of its scope (F42; it was
+	// reached once two fields of one type shared a region).
+	bound := hasBound(s.ref) || hasBound(s.at)
+	if sink = v.boundFacts(sink, bound); sink == nil {
+		return
+	}
 	for _, other := range v.structsSeen {
 		v.statePairs(sink, s, other, false)
 	}
 	// A frame is a question of its own and changes no table of the
 	// verifier; a struct it reads is paired with those seen before it,
 	// and later reads are not paired with it.
-	if v.frameNames == nil {
+	if v.frameNames == nil && !bound {
 		v.structsSeen = append(v.structsSeen, s)
 	}
+}
+
+// boundFacts returns where a fact about a read goes: the state itself, or,
+// when the fact names a quantifier's variable and the state is not what
+// gathers the quantifier's facts, that gatherer, which may be nil.
+func (v *fnVerifier) boundFacts(sink *state, bound bool) *state {
+	if !bound || sink.collecting {
+		return sink
+	}
+	return v.boundSink
 }
 
 // holdsRepeated reports whether a value of type t holds, at any depth, a
@@ -1758,9 +1932,13 @@ func (v *fnVerifier) distinctStructs(sink *state, known *layer, key string, ref,
 	if v.readBase == nil {
 		return
 	}
+	if sink = v.boundFacts(sink, hasBound(v.readBase.ref) || hasBound(v.readBase.at)); sink == nil {
+		return
+	}
 	for _, t := range known.targets {
 		if t.base != nil {
 			v.statePairs(sink, *v.readBase, *t.base, false)
+			v.typesApartFact(sink, *v.readBase, *t.base)
 		}
 	}
 	if hasFootprintTarget(known.targets) {
@@ -1768,6 +1946,54 @@ func (v *fnVerifier) distinctStructs(sink *state, known *layer, key string, ref,
 			v.statePairs(sink, *v.readBase, converted, true)
 		}
 	}
+}
+
+// typesApartFact states S1 of two struct values whose types it separates
+// (typesApart): they do not overlap. It is stated of the struct a read
+// reads a cell of and the struct a layer it meets wrote, where the layer
+// keeps the cell only if it lies outside what was written.
+func (v *fnVerifier) typesApartFact(sink *state, x, y structValue) {
+	if !v.typesApart(x.t, y.t) {
+		return
+	}
+	size := func(t types.Type) *logic.Term { return logic.IntLit(v.pass.TypesSizes.Sizeof(t)) }
+	fact := logic.Or(logic.Eq(x.ref, logic.RefLit(0)), logic.Eq(y.ref, logic.RefLit(0)), logic.Ne(x.ref, y.ref),
+		logic.Le(logic.Add(x.at, size(x.t)), y.at), logic.Le(logic.Add(y.at, size(y.t)), x.at))
+	if note := "apart|" + fact.String(); !sink.noted[note] {
+		sink.noted[note] = true
+		sink.assume(fact)
+	}
+}
+
+// typesApart reports whether S1 separates struct values of two types: in
+// every state Go makes without unsafe, two values of them do not overlap.
+// That holds when the types differ by typeKey (the untagged underlying
+// type, which conversion between struct types keeps), neither holds the
+// other at any depth through its fields, and both have a size. A box holds
+// a single value that may be a field of any struct with an addressable
+// field of its type, so a box is apart from nothing.
+func (v *fnVerifier) typesApart(a, b types.Type) bool {
+	if _, box := isBox(a.Underlying()); box {
+		return false
+	}
+	if _, box := isBox(b.Underlying()); box {
+		return false
+	}
+	wa, wb := v.structsWithin(a), v.structsWithin(b)
+	if len(wa) == 0 || len(wb) == 0 || wa[0].key == wb[0].key {
+		return false
+	}
+	for _, x := range wa {
+		if x.key == wb[0].key {
+			return false
+		}
+	}
+	for _, y := range wb {
+		if y.key == wa[0].key {
+			return false
+		}
+	}
+	return true
 }
 
 // heldPointer says whether a reference is read from what an interface

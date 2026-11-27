@@ -2,6 +2,7 @@ package vego
 
 import (
 	"fmt"
+	"strings"
 	"go/token"
 	"go/types"
 	"slices"
@@ -523,7 +524,13 @@ func (pv *pkgVerifier) cellsOf(t types.Type) []cell {
 	if !isStruct {
 		cells := make([]cell, len(leaves))
 		for i, lf := range leaves {
-			cells[i] = cell{key: "elem " + typeKey(t) + lf.path, sort: lf.sort}
+			key := "elem " + typeKey(t) + lf.path
+			if singleValue(t) {
+				// An element of a []MyInt is an int that &xs[i] can point
+				// to as a *MyInt and convert to an *int.
+				key = "elem " + typeKey(untagged(t.Underlying()))
+			}
+			cells[i] = cell{key: key, sort: lf.sort}
 		}
 		return cells
 	}
@@ -554,8 +561,23 @@ func (pv *pkgVerifier) cellsOf(t types.Type) []cell {
 			}
 			continue
 		}
+		key := typeKey(u) + "." + field.Name()
+		// A single value that a pointer can point to lies in the region of
+		// its type, with every box (addressed.go): an exported field, an
+		// embedded one whose type has a pointer method, and one its
+		// package's decision covers.
+		_, box := isBox(u)
+		addressable := box || field.Exported() || field.Pkg() == nil || field.Embedded() && hasPointerMethod(field.Type())
+		if !addressable {
+			// A package without a decision makes every field addressable.
+			fact := pv.addressedFactOf(field.Pkg())
+			addressable = fact == nil || fact.All || slices.Contains(fact.Names, field.Name())
+		}
+		if singleValue(field.Type()) && addressable {
+			key = "place " + typeKey(untagged(field.Type().Underlying()))
+		}
 		for _, lf := range inner {
-			cells = append(cells, cell{key: typeKey(u) + "." + field.Name() + lf.path, sort: lf.sort, off: offsets[i]})
+			cells = append(cells, cell{key: key + lf.path, sort: lf.sort, off: offsets[i]})
 		}
 	}
 	// A state lies at the start of its struct, in a region that only
@@ -566,6 +588,17 @@ func (pv *pkgVerifier) cellsOf(t types.Type) []cell {
 	}
 	return cells
 }
+
+// A place region, "place " and the typeKey of an untagged underlying type,
+// holds the single values of the type that are not elements of arrays and
+// that a pointer can point to: the addressable fields (addressed.go) of
+// every struct type, and every box, each at its byte address in its
+// allocation. It is keyed as the box is, since Go converts *MyInt to *int.
+// The elements of arrays of the type lie in "elem " and the same key, at
+// the floor of their byte address over their size.
+
+// isPlaceKey reports whether a region is a place region.
+func isPlaceKey(key string) bool { return strings.HasPrefix(key, "place ") }
 
 // span returns how many positions a stored value of the type takes: its
 // size in bytes for a struct, whose fields have positions of their own, and

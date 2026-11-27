@@ -242,10 +242,25 @@ func (v *fnVerifier) lvalue(e ast.Expr, st *state, guard []*logic.Term) lvalue {
 // noteHolder notes the struct an assignment target in memory lies in, for
 // the fact between struct values of one type (noteStruct).
 func (v *fnVerifier) noteHolder(st *state, lv lvalue) {
+	if holder := v.holderOf(lv); holder != nil {
+		v.noteStruct(st, structValue{t: holder, ref: lv.ref, at: lv.at})
+	}
+}
+
+// holderOf returns the struct type of the value an assignment target in
+// memory lies in, whose start lv.at is and from which lv.cells count, or
+// nil: the struct a pointer points to, an element of a slice of structs,
+// or a struct variable that lives in memory. The box of a single value is
+// a struct too, and is returned.
+func (v *fnVerifier) holderOf(lv lvalue) types.Type {
 	var holder types.Type
 	switch {
+	case lv.global != nil:
+		// The storage of an assigned package-level variable lies in
+		// regions of its own.
+		return nil
 	case lv.box != nil:
-		holder = lv.box.Type()
+		holder = storedAs(lv.box.Type())
 	case lv.boxGlobal != nil:
 		holder = lv.boxGlobal.Type()
 	case lv.pointer != nil:
@@ -253,9 +268,18 @@ func (v *fnVerifier) noteHolder(st *state, lv lvalue) {
 	case lv.slice != nil:
 		holder = elemType(v.info.TypeOf(lv.slice))
 	}
-	if holder != nil && isStructType(holder) {
-		v.noteStruct(st, structValue{t: holder, ref: lv.ref, at: lv.at})
+	if holder == nil || !isStructType(holder) {
+		return nil
 	}
+	return holder
+}
+
+// structOrNil returns a type when it is a struct type, and nil otherwise.
+func structOrNil(t types.Type) types.Type {
+	if isStructType(t) {
+		return t
+	}
+	return nil
 }
 
 // bounds returns the positions the cells of a place cover, counted like the
@@ -368,12 +392,14 @@ func (v *fnVerifier) store(lv lvalue, val value, st *state) {
 		// this code may write it too.
 		w := written{ref: lv.ref, parts: stretchesOf(lv.cells, lv.at)}
 		if lv.box == nil {
+			v.writeBase = v.holderOf(lv)
 			v.checkWriteOr(st, nil, w, lv.pos, lv.text+" is assigned", "", v.notListable(lv.expr, lv.pos))
+			v.writeBase = nil
 		} else {
 			v.checkNotForbidden(st, nil, w, lv.pos, lv.text+" is assigned")
 		}
 		v.noteHolder(st, lv)
-		v.put(st, lv.cells, lv.ref, lv.at, val)
+		v.putIn(st, v.holderOf(lv), lv.cells, lv.ref, lv.at, val)
 	case placeMap:
 		v.mapStore(st, lv.mapType, lv.ref, lv.at, val, true, lv.pos, lv.text+" is assigned")
 	}
@@ -687,7 +713,7 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 			}
 		}
 		for j, element := range added {
-			v.put(next, cells, ref, logic.Add(at, logic.IntLit(int64(j)*step)), element)
+			v.putIn(next, structOrNil(elem), cells, ref, logic.Add(at, logic.IntLit(int64(j)*step)), element)
 		}
 		if v.unit.events == start {
 			// Nothing orders the write after the targets. A call there may
@@ -782,7 +808,7 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 			next.storeRow(key, sorts[key], moved, row)
 		}
 		for j, element := range added {
-			v.put(next, cells, moved, logic.Mul(logic.Add(length, logic.IntLit(int64(j))), logic.IntLit(step)), element)
+			v.putIn(next, structOrNil(elem), cells, moved, logic.Mul(logic.Add(length, logic.IntLit(int64(j))), logic.IntLit(step)), element)
 		}
 		result := value{moved, logic.IntLit(0), grown, v.fresh("cap", logic.Int)}
 		next.assume(v.wellFormed(result, t, next.brk))
