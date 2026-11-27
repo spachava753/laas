@@ -1190,8 +1190,10 @@ func (v *fnVerifier) censusStmt(s ast.Stmt, st *state, c ctrl, k func(*state), r
 // inside it is walked once with every way out of it ending the path, and
 // the path goes on unless the statement leaves the block.
 func (v *fnVerifier) censusStub(s ast.Stmt, st *state, c ctrl, k func(*state)) {
-	v.evaluate(st, func() { v.censusStmtOperands(s, st) })
+	// The variables it declares get their values first, so that a
+	// condition that reads one, as ok in if v, ok := x.(T); ok, has one.
 	v.censusForget(s, st)
+	v.evaluate(st, func() { v.censusStmtOperands(s, st) })
 	end := func(*state) {}
 	walk := func(list []ast.Stmt, from, to token.Pos) {
 		if n := len(list); n > 0 {
@@ -1253,10 +1255,15 @@ func (v *fnVerifier) censusOperands(e ast.Expr, st *state) {
 	var operands []ast.Expr
 	switch e := ast.Unparen(e).(type) {
 	case *ast.CallExpr:
-		if sel, ok := ast.Unparen(e.Fun).(*ast.SelectorExpr); ok {
-			operands = append(operands, sel.X)
-		} else if _, isLit := ast.Unparen(e.Fun).(*ast.FuncLit); !isLit {
-			operands = append(operands, e.Fun)
+		// What is called is not a value of the call: a function, a method
+		// of a receiver, or a variable that holds a literal the walk calls
+		// in place. Only what it is made of is looked at.
+		switch fun := ast.Unparen(e.Fun).(type) {
+		case *ast.SelectorExpr:
+			operands = append(operands, fun.X)
+		case *ast.Ident, *ast.FuncLit:
+		default:
+			v.censusOperands(fun, st)
 		}
 		operands = append(operands, e.Args...)
 	case *ast.SelectorExpr:
@@ -1314,7 +1321,11 @@ func (v *fnVerifier) censusDropped(e ast.Expr, st *state) {
 			return
 		}
 	}
-	if _, ok := layoutOf(tv.Type); !ok {
+	// A value of a function type is made where it is converted to the
+	// type it is given, which is not here: a function or method named has
+	// nothing inside it to look at, and anything else is looked at by what
+	// it is made of.
+	if _, ok := layoutOf(tv.Type); !ok || isFunc(tv.Type) {
 		v.censusOperands(e, st)
 		return
 	}

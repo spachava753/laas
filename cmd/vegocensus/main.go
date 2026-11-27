@@ -36,6 +36,7 @@ import (
 	"go/types"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -325,6 +326,7 @@ func report(w io.Writer, title string, fns []*fn, weights map[*fn]float64) {
 		}
 	}
 	callees(w, fns, weights)
+	proofs(w, fns, weights)
 	stops(w, fns)
 }
 
@@ -481,6 +483,54 @@ func greedy(w io.Writer, fns []*fn, weights map[*fn]float64, groups bool, withou
 	fmt.Fprintln(w)
 }
 
+// proofs writes the classes of refusals made only when a proof fails,
+// which the counts of causes and the greedy orders leave out: for each, the
+// functions it is met in, those it is the only thing in, and the top
+// details.
+func proofs(w io.Writer, fns []*fn, weights map[*fn]float64) {
+	type row struct {
+		met, only float64
+		details   map[string]float64
+	}
+	rows := map[string]*row{}
+	for _, f := range fns {
+		wt := weight(weights, f)
+		for class := range f.proof {
+			r := rows[class]
+			if r == nil {
+				r = &row{details: map[string]float64{}}
+				rows[class] = r
+			}
+			r.met += wt
+			if len(f.causes) == 0 && len(f.proof) == 1 && !f.partial {
+				r.only += wt
+			}
+		}
+		for _, e := range f.line.Events {
+			if e.Kind == "proof" && e.Detail != "" {
+				rows[e.Class].details[e.Detail] += wt
+			}
+		}
+	}
+	if len(rows) == 0 {
+		return
+	}
+	n := func(x float64) string { return number(weights, x) }
+	fmt.Fprintf(w, "### Refusals made only when a proof fails\n\nA census proves nothing, so it makes these wherever they are reached; the prover would often prove what they ask.\n\n"+
+		"| class | functions met in | the only thing met | top details |\n| --- | --- | --- | --- |\n")
+	for _, class := range slices.Sorted(maps.Keys(rows)) {
+		r := rows[class]
+		details := slices.Sorted(maps.Keys(r.details))
+		sort.SliceStable(details, func(i, j int) bool { return r.details[details[i]] > r.details[details[j]] })
+		var top []string
+		for _, d := range details[:min(len(details), 3)] {
+			top = append(top, fmt.Sprintf("`%s` (%s)", d, n(r.details[d])))
+		}
+		fmt.Fprintf(w, "| `%s` | %s | %s | %s |\n", class, n(r.met), n(r.only), strings.Join(top, "; "))
+	}
+	fmt.Fprintln(w)
+}
+
 // projectWrites reports whether a class is one the project lifts by
 // writing an entry for another module: no-entry:other, and the classes of
 // interfaces, types, and function types of other modules.
@@ -626,7 +676,10 @@ func notLoaded(args []string, w io.Writer) error {
 	dir := flags.String("dir", "", "the directory of the module")
 	have := flags.String("have", "", "the census file of the module")
 	skip := new(*regexp.Regexp)
-	flags.Func("skip", "leave out the packages whose path matches this expression", func(text string) (err error) {
+	flags.Func("skip", "leave out the packages whose path matches this expression; empty leaves out none", func(text string) (err error) {
+		if text == "" {
+			return nil
+		}
 		*skip, err = regexp.Compile(text)
 		return err
 	})

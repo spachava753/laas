@@ -13,7 +13,11 @@
 # which declares only the memory and the inputs of the guide.
 #
 # Each run is one laas process in a scope of 12G with 4G of swap, bounded
-# at 600 seconds, with GOMAXPROCS=4. OUTDIR/NAME.jsonl gets the census and
+# at CENSUS_TIMEOUT seconds (600 by default), or at N for a line whose
+# patterns start with timeout=N, with GOMAXPROCS=4. In DIR,
+# @cache/ stands for the module cache, @goroot for GOROOT/src, and @here for
+# this repository. For the standard library, run from GOROOT/src is not
+# needed: DIR may be any module, as an empty one, with std patterns. OUTDIR/NAME.jsonl gets the census and
 # OUTDIR/NAME.log what laas printed; a run that failed or timed out is
 # listed in OUTDIR/failed.txt, and the functions that left no line, as of a
 # package that did not load or whose analysis failed, are added by
@@ -51,9 +55,28 @@ notloaded() {
 rm -f "$out/std-all.jsonl"
 grep -v '^#' "$list" | while read -r name dir scope patterns; do
 	[ -n "$name" ] || continue
+	# A line may set its own bound, as timeout=3600, before its patterns.
+	bound=${CENSUS_TIMEOUT:-600}
+	case $patterns in
+	timeout=*)
+		bound=${patterns%% *}
+		bound=${bound#timeout=}
+		patterns=${patterns#timeout=$bound}
+		;;
+	esac
 	patterns=${patterns:-./...}
+	# @cache/ stands for the module cache, @goroot for GOROOT/src, and
+	# @here for the directory of this repository.
+	case $dir in
+	@cache/*) dir=$cache/${dir#@cache/} ;;
+	@goroot) dir=$(go env GOROOT)/src ;;
+	@here) dir=$(cd "$(dirname "$0")/.." && pwd) ;;
+	esac
+	# Only a copy may have its go.mod and go.sum completed.
+	goflags=-buildvcs=false
 	case $dir in
 	"$cache"/*)
+		goflags="-mod=mod -buildvcs=false"
 		rm -rf "$out/src/$name"
 		cp -r "$dir" "$out/src/$name"
 		chmod -R u+w "$out/src/$name"
@@ -65,13 +88,13 @@ grep -v '^#' "$list" | while read -r name dir scope patterns; do
 	rm -f "$out/$name.jsonl"
 	start=$(date +%s)
 	(cd "$dir" && systemd-run --user --scope --quiet -p MemoryMax=12G -p MemorySwapMax=4G -- \
-		env GOMAXPROCS=4 GOFLAGS="-mod=mod -buildvcs=false" GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOWORK=off \
-		timeout 600 "$laas" -vego -test=false -vego.census="$out/$name.jsonl" -vego.census-scope="$scope" $trusted $patterns) \
+		env GOMAXPROCS=4 GOFLAGS="$goflags" GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOWORK=off \
+		timeout "$bound" "$laas" -vego -test=false -vego.census="$out/$name.jsonl" -vego.census-scope="$scope" $trusted $patterns) \
 		> "$out/$name.log" 2>&1
 	status=$?
-	echo "$name: exit $status, $(($(date +%s) - start)) s" >> "$out/times.txt"
+	echo "$name: exit $status, $(($(date +%s) - start)) s, bound $bound s" >> "$out/times.txt"
 	if [ $status -ne 0 ]; then
-		echo "$name: exit $status: $(grep -m1 -v '^$' "$out/$name.log")" >> "$out/failed.txt"
+		echo "$name: exit $status (bound $bound s; 124 is the bound): $(grep -m1 -v '^$' "$out/$name.log")" >> "$out/failed.txt"
 	fi
 	if [ "$scope" = std ]; then
 		cat "$out/$name.jsonl" >> "$out/std-all.jsonl" 2>/dev/null

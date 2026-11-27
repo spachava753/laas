@@ -439,9 +439,9 @@ func (v *fnVerifier) madeInterface(e ast.Expr, held value, from, want types.Type
 				unseen = true
 				continue
 			} else if why != "" {
-				v.unsupported(e.Pos(), v.ownerClass(typePackage(from), rConvNoContract, rConvNoContractOther, method.FullName()), fmt.Sprintf("converting a %s to %s is not supported: its method %s has no contract, and %s", from, want, methodTitle(method), why))
+				v.unsupported(e.Pos(), v.ownerClass(method.Pkg(), rConvNoContract, rConvNoContractOther, method.FullName()), fmt.Sprintf("converting a %s to %s is not supported: its method %s has no contract, and %s", from, want, methodTitle(method), why))
 			}
-			v.unsupported(e.Pos(), v.ownerClass(typePackage(from), rConvNoContract, rConvNoContractOther, method.FullName()), fmt.Sprintf("converting a %s to %s is not supported: its method %s has no contract, so nothing would say "+
+			v.unsupported(e.Pos(), v.ownerClass(method.Pkg(), rConvNoContract, rConvNoContractOther, method.FullName()), fmt.Sprintf("converting a %s to %s is not supported: its method %s has no contract, so nothing would say "+
 				"what code that calls it may rely on%s", from, want, methodTitle(method), v.entryHint(method.Pkg(), method.Pos(), method.FullName())))
 		}
 		v.usable(e.Pos(), T, methodTitle(method), st, guard, false)
