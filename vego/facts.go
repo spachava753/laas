@@ -67,6 +67,9 @@ type contractFact struct {
 	// analysis of ownership (ownSummary). Nil when it has none.
 	OwnKeeps   []bool
 	OwnResults []OwnResultFact
+	// Calls holds the Calls annotations of the function, which give its
+	// function parameters contracts; see sourcecalls.go.
+	Calls []string
 }
 
 // OwnResultFact is ownResultFact as it travels.
@@ -244,6 +247,9 @@ func (pv *pkgVerifier) contractFactOf(fn *funcInfo, at token.Pos) *contractFact 
 	if fn.receiver != nil {
 		fact.Receiver = fn.receiver.Name()
 	}
+	for _, c := range fn.callsClauses {
+		fact.Calls = append(fact.Calls, capture(c))
+	}
 	fact.Exits = fn.exits
 	for i := range fn.results {
 		if fn.vouches[i] {
@@ -313,6 +319,10 @@ func (pv *pkgVerifier) contractFromFact(obj *types.Func, pkg *types.Package, fac
 		}
 		fn.modifies = append(fn.modifies, newModTargets(targets, &clause{kind: "Modifies", text: text, pos: obj.Pos(), res: resolver})...)
 	}
+	for _, text := range fact.Calls {
+		fn.callsClauses = append(fn.callsClauses, &clause{kind: "Calls", text: text, pos: obj.Pos(), res: resolver})
+	}
+	pv.readSourceCalls(fn)
 	return fn
 }
 
