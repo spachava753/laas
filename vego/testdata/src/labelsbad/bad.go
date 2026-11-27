@@ -106,7 +106,7 @@ outer:
 //
 // @Ensures True
 func OnSwitch(n int) (r int) {
-	// @Invariant r = 0 // want `vego: Invariant annotation must be directly above a for loop`
+	// @Invariant r = 0 // want `vego: an Invariant annotation must be directly above a for loop, or above a statement that makes one call handing a function literal`
 sw:
 	switch n {
 	case 0:

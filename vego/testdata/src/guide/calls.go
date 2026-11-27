@@ -46,3 +46,30 @@ func Rescale(scores []int) {
 func Keep(f func()) (g func()) {
 	return f // want `vego: cannot verify Keep: the Calls annotation of Keep gives f a contract that holds only while Keep calls it, and here it is used other than by calling it: stored, returned, compared, or handed on; a function that travels needs a named function type with a contract`
 }
+
+// Passed counts the scores of 50 or more, bounded by the number of scores.
+//
+// @Requires Forall i in [0, |scores|) : 0 <= scores[i] <= 100
+// @Ensures 0 <= passed <= |scores|
+func Passed(scores []int) (passed int) {
+	// @Invariant 0 <= passed <= |scores|
+	eachScore(scores, func(s int) {
+		if s >= 50 && passed < len(scores) {
+			passed++
+		}
+	})
+	return passed
+}
+
+// Lowered keeps a variable that a run makes negative.
+//
+// @Requires Forall i in [0, |scores|) : 0 <= scores[i] <= 100
+// @Ensures True
+func Lowered(scores []int) (r int) {
+	lowest := 0
+	// @Invariant lowest >= 0 // want `vego: invariant may not be kept by the function literal run by eachScore: lowest >= 0`
+	eachScore(scores, func(s int) {
+		lowest = s - 50
+	})
+	return lowest
+}

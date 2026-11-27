@@ -396,6 +396,17 @@ func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types
 		}
 	}
 	name := types.ExprString(call.Fun)
+	// The invariant of the runs holds at the call and after what the callee
+	// writes between two runs; see handinv.go. One that is not proved there
+	// gives the runs no summary, which would rest on it.
+	invariants := v.handInvariants[call]
+	invariantsFailed := false
+	if invariants != nil {
+		before := v.reports
+		v.invariantHolds(invariants, atCall.clone(), "invariant may not hold where "+name+" is called")
+		v.keptBetweenRuns(invariants, atCall, written, eff, name)
+		invariantsFailed = v.reports > before
+	}
 	var summaries []*logic.Term
 	applied := map[*types.Var]*logic.Term{}
 	runsMade := map[string]bool{}
@@ -422,6 +433,7 @@ func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types
 			v.havoc(head, t, nil)
 		}
 		head = v.forget(head, eff)
+		v.assumeInvariant(invariants, head)
 		start := len(head.hyps)
 		given := make([]value, len(cb.params))
 		for i, p := range cb.params {
@@ -452,6 +464,9 @@ func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types
 			}
 		}
 		v.forbidden = v.forbidden[:len(v.forbidden)-pushed]
+		// The state the run leaves is the join of its returns, after its
+		// own deferred calls.
+		v.invariantHolds(invariants, head, "invariant may not be kept by "+what+" run by "+name)
 		// The facts of the run are taken once, and both the proof that the
 		// run returns the same result for the same argument and the summary
 		// are made from them.
@@ -464,7 +479,7 @@ func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types
 		// assuming it, which may be false of every run, so what the run
 		// gives the caller would rest on it: its summary is left out, which
 		// only weakens what the caller knows. The run's report stands.
-		if !cb.deterministic || v.reports > reportsBefore {
+		if !cb.deterministic || v.reports > reportsBefore || invariantsFailed {
 			continue
 		}
 		v.checkRunNames(run, callMark)
@@ -476,6 +491,7 @@ func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types
 		summaries = append(summaries, v.summary(run, applied[param]))
 	}
 	*st = *v.forget(st, eff)
+	v.assumeInvariant(invariants, st)
 	// A summary is true in every state that meets the facts at the call,
 	// so it cannot make a state contradictory that was not. If it does,
 	// the summary is wrong, and anything would follow from it; that must

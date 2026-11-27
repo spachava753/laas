@@ -65,7 +65,7 @@ func Floats(x float64) (y float64) {
 }
 
 func MisplacedInvariant(x int) (result int) {
-	// @Invariant x > 0 // want `vego:\ Invariant\ annotation\ must\ be\ directly\ above\ a\ for\ loop`
+	// @Invariant x > 0 // want `vego: an Invariant annotation must be directly above a for loop, or above a statement that makes one call handing a function literal`
 	return x
 }
 

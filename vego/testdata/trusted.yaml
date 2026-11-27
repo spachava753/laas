@@ -1089,6 +1089,13 @@ trusted:
     requires: ["old(n) > 0"]
     modifies: []
 
+  runinv.clobber:
+    reason: Test helper that may set every element of x to -1 between the runs of f.
+    runs: [f]
+    calls:
+      f(): {}
+    modifies: [x]
+
   callbacks.eachOf:
     reason: Test helper that calls f with each position of xs that holds a positive number.
     runs: [f]

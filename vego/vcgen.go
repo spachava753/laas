@@ -149,6 +149,10 @@ type fnVerifier struct {
 	// callbacks.go.
 	forbidden []forbidden
 	handing   map[*types.Var]*handOver
+	// handInvariants holds, for a call that hands functions to parameters
+	// with a contract under calls or Calls, the invariant of their runs
+	// written above the statement that makes it; see handInvariantCall.
+	handInvariants map[*ast.CallExpr][]*clause
 	// closureOuts holds what the call of a recursive closure being applied
 	// hands back for the variables it assigns; see callClosure.
 	closureOuts map[*types.Var]value
@@ -1016,6 +1020,21 @@ func (v *fnVerifier) seq(list []ast.Stmt, from, to token.Pos, st *state, c ctrl,
 				loop = first.Stmt
 			}
 		}
+	}
+	if loop == nil && len(spec.invariants) > 0 && len(list) > 0 {
+		// Above any other statement, an invariant belongs to the runs of
+		// the functions that the one call of the statement hands over.
+		if call, why := v.handInvariantCall(list[0]); why != "" {
+			for _, clause := range spec.invariants {
+				v.report(clause.pos, "%s", why)
+			}
+		} else {
+			if v.handInvariants == nil {
+				v.handInvariants = map[*ast.CallExpr][]*clause{}
+			}
+			v.handInvariants[call] = spec.invariants
+		}
+		spec.invariants = nil
 	}
 	if loop == nil {
 		for _, clause := range append(slices.Clip(spec.invariants), spec.variant) {

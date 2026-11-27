@@ -1434,6 +1434,53 @@ These are reported as `cannot verify` too:
 - making a function with a `Calls` annotation into a function value;
 - a `Calls` annotation on a parameter whose type has a name, which carries a contract of its own, or that is not a function.
 
+#### What the runs of a literal keep
+
+After the call, `vego` forgets what the runs of a literal assign, as it forgets what the body of a loop assigns. To keep a fact about such a variable, write an invariant of the runs directly above the statement that makes the call:
+
+```go
+// @Requires Forall i in [0, |scores|) : 0 <= scores[i] <= 100
+// @Ensures 0 <= passed <= |scores|
+func Passed(scores []int) (passed int) {
+	// @Invariant 0 <= passed <= |scores|
+	eachScore(scores, func(s int) {
+		if s >= 50 && passed < len(scores) {
+			passed++
+		}
+	})
+	return passed
+}
+```
+
+`vego` proves the invariant in three places:
+
+- where the call is made;
+- after what the called function may write between two runs, from any state where the invariant holds;
+- at the end of every run, which starts from a state where the invariant holds.
+
+After the call, the invariant holds. The same works for a trusted function with a contract under `calls`. One invariant covers the runs of every literal that the call hands over, and every run must keep all of it. The call is the one in the statement's own expressions, such as the condition of an `if`, the tag of a `switch`, or a `return`. A call inside a literal of the statement gets its own invariant above its own statement. An invariant above a `for` is the loop's. An invariant above a statement that makes no such call, or several, is reported, and so is one above a call that hands only functions or method values.
+
+The test `passed < len(scores)` is needed because nothing says how many times `eachScore` calls `f`. It may call it more often than `scores` has elements. So a plain `total += s` in the literal cannot be proved free of overflow, whatever the invariant says. Bound the variable in the literal, as `Passed` does.
+
+An invariant that a run does not keep is reported:
+
+```go
+// @Requires Forall i in [0, |scores|) : 0 <= scores[i] <= 100
+// @Ensures True
+func Lowered(scores []int) (r int) {
+	lowest := 0
+	// @Invariant lowest >= 0
+	eachScore(scores, func(s int) {
+		lowest = s - 50
+	})
+	return lowest
+}
+```
+
+```text
+vego: invariant may not be kept by the function literal run by eachScore: lowest >= 0
+```
+
 ### Writing a contract on a function type
 
 The contract of a function type names the parameters and results of its signature. A function type with a contract must name its results, as a verified function does. Parameters that the contract does not mention may stay unnamed. `Requires`, `Ensures`, and `Modifies` are the only annotations a function type can have.
@@ -10861,6 +10908,7 @@ This table lists the most common messages.
 | `cannot verify F: json.NewDecoder(r).Decode reads from r without a limit, ...` | The decoder could read without end. | Write `json.NewDecoder(io.LimitReader(r, n)).Decode(&x)`. See [Decoding the body of a request](#decoding-the-body-of-a-request). |
 | `the decoder calls r.Read until it returns bytes or an error, and the contract of Read allows it to return neither, ...` | The decoder may call `Read` without end. | Decode from a reader whose `Read` returns bytes or an error, or read into a buffer and call `Unmarshal`. |
 | `cannot verify F: json.NewEncoder keeps w in the encoder it returns; ...` | An encoder or decoder is kept in a variable. | Write the call as one expression. |
+| `invariant may not hold where F is called: P`, `invariant may not hold after F writes what it may write between two runs: P`, `invariant may not be kept by the function literal run by F: P` | An invariant of the runs of a literal handed to `F` is not proved at the call, after what `F` writes between runs, or at the end of a run. | Bound the variables in the literal, or state only what `F` cannot change. See [What the runs of a literal keep](#what-the-runs-of-a-literal-keep). |
 | `cannot verify F: it calls sort.Slice with v of type any, which is not a slice; ...` | The first argument of `sort.Slice` or `sort.SliceStable` does not have a slice type, so `vego` cannot tell what is sorted. | Pass the slice itself, or call `slices.SortFunc`. |
 ## What is not supported
 
@@ -10923,6 +10971,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - copying or assigning a value that holds a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once`, or a value that owns memory, as a `strings.Builder`, a `bytes.Buffer`, or a struct that declares `@Owns`; parameters, results, and receivers of such a type, a method with a value receiver of such a type, `append` to a slice of them, and `range` variables and loop variables of such a type (see [Values that hold a mutex cannot be copied or overwritten](#values-that-hold-a-mutex-cannot-be-copied-or-overwritten)); pass a pointer;
 - `recover`;
 - generic functions and types of your own package with annotations, a call of a generic function without a trusted contract, a generic function used as a value, methods of generic types, and type arguments that can hold code, that are not modelled, or that hold a `sync.Mutex`, a `sync.RWMutex`, or a `sync.Once` (see [Generic functions of other packages](#generic-functions-of-other-packages));
+- a bound on how many times a function handed to a parameter under `calls` or `Calls` is called, so a sum or a count in a literal must be bounded in the literal (see [What the runs of a literal keep](#what-the-runs-of-a-literal-keep));
 - a call of `sort.Slice` or `sort.SliceStable` whose first argument does not have a slice type, such as an `any`, `nil`, or a pointer to an array (see [Sorting a slice of structs](#sorting-a-slice-of-structs));
 - goroutines, channels, and `select`;
 - arrays of anything but numbers and booleans, structs that contain an array of elements larger than a byte, and the other uses of arrays listed in [What arrays do not support yet](#what-arrays-do-not-support-yet);
@@ -11035,6 +11084,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 | `Modifies a, b.f` | doc comment of a function, of a named function type, or of a method in a named interface type | The memory the function, a value of the type, or the method may write that a caller can see. |
 | `Variant e` | doc comment of a recursive function | `e` is never negative and is smaller at each recursive call. |
 | `Invariant P` | directly above a loop | `P` is true each time the loop tests its condition. |
+| `Invariant P` | directly above a statement that makes a call handing a function literal to a parameter under `calls` or `Calls` | `P` is true at the call, at the start and the end of every run of the literal, and after the call. |
 | `Variant e` | directly above a `for` loop | `e` is never negative and decreases on each iteration. |
 | `Assert P` | in a function body | `P` must be true at this point and can be used afterwards. |
 | `Snapshot n = e` | in a function body | `n` is the value `e` has at this point, in the annotations that follow in the block. |
