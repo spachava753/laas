@@ -77,3 +77,17 @@ func OverwriteLo(p *int, b *Span) {
 	b.lo = 1
 	*p = 2
 } // want `vego: postcondition may not hold: b\.lo' = 1`
+
+// @Requires p != nil And b != nil And apart(p, b)
+// @Modifies p, b
+// @Ensures b.lo' = 1
+func KeepHi(p *int, b *Span) {
+	b.lo = 1
+	*p = 2
+}
+
+// @Ensures True
+func KeepHiSame() {
+	var b Span
+	KeepHi(&b.lo, &b) // want `vego: precondition of KeepHi may not hold: apart\(p, b\)`
+}

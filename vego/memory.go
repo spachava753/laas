@@ -964,6 +964,10 @@ type stretch struct {
 	// entry is set for one entry of a map, which lo and hi are nil for: the
 	// number of its key.
 	entry *logic.Term
+	// when, if set, is the condition under which a write writes the
+	// stretch: one of the two cells of a box written through a pointer
+	// whose #arr is not known (F42).
+	when *logic.Term
 }
 
 // written describes a write for the check against the frame: the allocation
@@ -990,8 +994,24 @@ func (t target) stretches() []stretch {
 // field of two structs that lie side by side, stay two stretches, since
 // what lies between them is not part of the value.
 func stretchesOf(cells []cell, at *logic.Term) []stretch {
+	var guards []*logic.Term
+	for _, c := range cells {
+		if c.either != nil && c.arr != nil {
+			guards = append(guards, logic.Not(c.arr), c.arr)
+		} else {
+			guards = append(guards, nil)
+			if c.either != nil {
+				guards = append(guards, nil)
+			}
+		}
+	}
 	cells = bothCells(cells)
 	parts := make([]stretch, len(cells))
+	defer func() {
+		for i := range parts {
+			parts[i].when = guards[i]
+		}
+	}()
 	for i, c := range cells {
 		parts[i] = stretch{key: c.key, lo: c.start(at), hi: c.end(at), one: !c.isRun()}
 	}
@@ -1390,6 +1410,11 @@ func (v *fnVerifier) checkWriteOr(st *state, guard []*logic.Term, w written, pos
 			covered := logic.Or(by...)
 			if len(premises) > 0 {
 				covered = logic.Implies(logic.And(premises...), covered)
+			}
+			if part.when != nil {
+				// One of the two cells of a box, written only when the
+				// pointer points into its region.
+				covered = logic.Implies(part.when, covered)
 			}
 			if ranged {
 				inside := logic.And(logic.Le(part.lo, position), logic.Lt(position, part.hi))

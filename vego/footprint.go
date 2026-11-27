@@ -1465,7 +1465,18 @@ func (v *fnVerifier) withinOwned(sink *state, x, y reached) *logic.Term {
 			options = append(options, v.withinRow(x, part.ref, y.mem))
 		case part.row, part.mapType != nil:
 		default:
-			options = append(options, logic.And(logic.Not(isNilRef(x.val)), logic.Eq(x.val[0], part.ref), logic.Le(part.lo, lo), logic.Le(hi, part.hi)))
+			inside := logic.And(logic.Not(isNilRef(x.val)), logic.Eq(x.val[0], part.ref), logic.Le(part.lo, lo), logic.Le(hi, part.hi))
+			if isSinglePointer(x.typ) {
+				// A pointer to a single value lies in the elements of an
+				// owned slice when it points to an element, and in an owned
+				// struct when it points to a place (F42).
+				if part.elem != nil {
+					inside = logic.And(inside, x.val[2])
+				} else {
+					inside = logic.And(inside, logic.Not(x.val[2]))
+				}
+			}
+			options = append(options, inside)
 		}
 	}
 	return logic.Or(options...)

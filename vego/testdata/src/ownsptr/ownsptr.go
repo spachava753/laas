@@ -30,12 +30,20 @@ func SetOwn(s *Stack) {
 	s.Set(&s.items[0]) // want `vego: &s\.items\[0\] is memory that s owns, and Set is handed what reaches a Stack, which can own it`
 }
 
-// Top returns a pointer into what s owns.
+// Top returns a pointer into what s owns, and says so.
+//
+// @Requires s != nil And |s.items| > 0
+// @Ensures within(r, s)
+func (s *Stack) Top() (r *int) {
+	return &s.items[0]
+}
+
+// TopUnsaid returns a pointer into what s owns without saying so.
 //
 // @Requires s != nil And |s.items| > 0
 // @Ensures True
-func (s *Stack) Top() (r *int) {
-	return &s.items[0] // want `vego: Top returns memory that s owns; say so with within\(r, s\) in an Ensures, or return a copy`
+func (s *Stack) TopUnsaid() (r *int) {
+	return &s.items[0] // want `vego: TopUnsaid returns memory that s owns; say so with within\(r, s\) in an Ensures, or return a copy`
 }
 
 // Holder keeps a pointer.

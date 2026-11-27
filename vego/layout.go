@@ -664,6 +664,11 @@ func isPlaceKey(key string) bool { return strings.HasPrefix(key, "place ") }
 // size in bytes for a struct, whose fields have positions of their own, and
 // one for anything else.
 func (pv *pkgVerifier) span(t types.Type) int64 {
+	// A box is one cell, named by its first position, whether the pointer
+	// to it counts bytes, at a place, or elements, in an array (F42).
+	if _, box := isBox(t); box {
+		return 1
+	}
 	if _, isStruct := t.Underlying().(*types.Struct); isStruct {
 		return pv.pass.TypesSizes.Sizeof(t)
 	}

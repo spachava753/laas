@@ -4070,6 +4070,20 @@ func OverwriteLo(p *int, b *Span) {
 vego: postcondition may not hold: b.lo' = 1
 ```
 
+`apart(p, b)` in the `Requires` says that `p` does not point into the struct that `b` points to, and then the postcondition is proved. A caller must show it, as it shows every `Requires`, so `KeepHi(&b.lo, &b)` is reported as `precondition of KeepHi may not hold: apart(p, b)`:
+
+```go
+// @Requires p != nil And b != nil And apart(p, b)
+// @Modifies p, b
+// @Ensures b.lo' = 1
+func KeepHi(p *int, b *Span) {
+	b.lo = 1
+	*p = 2
+}
+```
+
+`apart(p, xs)` says the same of the elements of a slice, and `apart(p, q)` of two such pointers. `within(p, s)` says that `p` points to a field of the struct that `s` points to, and `within(p, xs)` that it points to an element of `xs`. A write through `p` is then covered by `Modifies s` or `Modifies xs`.
+
 A field that no code takes the address of is not one a pointer can point to. Such a field is unexported, its package takes no address of a field of its name, and it is not an embedded field whose type has a method with a pointer receiver. A package that imports `unsafe`, or that has assembly or cgo files, makes every field of its structs one that a pointer can point to. So does a package that uses reflection to get an `unsafe.Pointer`. `vego` reads the package's own test files for this too.
 
 These are not supported:
@@ -4077,7 +4091,6 @@ These are not supported:
 - pointers to slices, maps, pointers, interface values, functions, and arrays;
 - formatting such a pointer, which `fmt` prints as an address; `%d` of `*p` formats the value;
 - such a pointer as a field of a value that `encoding/json` encodes or decodes, and decoding into one other than `&x` of a variable;
-- `within(p, xs)` and `within(p, s)` for such a pointer `p`, since it lies in no slice and in no struct.
 
 ### Types declared inside a function
 
@@ -11226,6 +11239,8 @@ Results are referred to by the names in the function's signature.
 | `fresh(x, w)` | the same, except that what `x` refers to may also lie in the footprint of `w`, an interface value whose methods write behind it; more than one such value may follow, and `w` may be a variadic parameter of such values, read where a call writes each one out |
 | `within(a, b)` | `a` lies inside the memory of `b`; each is a pointer or a slice, and a slice includes its capacity; for an interface value `b`, `a` (also a map) lies in its footprint, and for a value that owns memory, in its struct or in what it owns |
 | `apart(a, b)` | the slices `a` and `b`, of one element type, share no memory up to their capacities; an array field stands for the slice of the whole array |
+| `apart(p, x)` | the pointer `p` to a number, a boolean, or a string is nil, or does not point into what `x` refers to: the struct that a pointer `x` points to, the elements of a slice `x` up to its capacity, or the value that another such pointer `x` points to |
+| `within(p, x)` | the pointer `p` to a number, a boolean, or a string is not nil and points to a field of the struct that `x` points to, to an element of an array that struct holds, to an element of the slice `x` within its capacity, or into what `x` owns |
 
 ### Order of evaluation
 

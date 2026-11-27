@@ -162,7 +162,7 @@ type Names struct {
 func Mixed(p *Names) {
 }
 
-// @Requires p != nil And apart(p, p.n) // want `in Requires annotation: apart\(p, ...\): p is not a slice; apart says that two slices share no memory`
+// @Requires p != nil And apart(p, p.n) // want `in Requires annotation: apart\(p, p\.n\): apart says that two slices share no memory, or that a pointer to a number, a boolean, or a string does not point into a struct, a slice, or where another one points; of two pointers to structs it is not supported yet`
 // @Ensures True
 func NotSlices(p *Names) {
 }

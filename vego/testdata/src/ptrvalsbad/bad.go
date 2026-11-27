@@ -226,19 +226,21 @@ func TimesPointer(p *int) {
 func TimesDeref(p *int) {
 }
 
-// WithinSlice asks whether a pointer to a number lies in a slice.
+// WithinSlice claims that a pointer to a number lies in a slice, which is
+// stated since F42 and not proved here.
 //
 // @Requires p != nil
-// @Ensures within(p, xs) // want `vego: in Ensures annotation: within\(p, xs\): p points to a value of type int, which lies only in a value of its own, a variable or what new made, and in no slice or struct; within of two such pointers says that they are equal`
+// @Ensures within(p, xs)
 func WithinSlice(p *int, xs []int) {
-}
+} // want `vego: postcondition may not hold: within\(p, xs\)`
 
-// WithinStruct asks whether a pointer to a number lies in a struct.
+// WithinStruct claims that a pointer to a number lies in a struct, which is
+// stated since F42 and not proved here.
 //
 // @Requires p != nil And s != nil
-// @Ensures within(p, s) // want `vego: in Ensures annotation: within\(p, s\): p points to a value of type int, which lies only in a value of its own, a variable or what new made, and in no slice or struct; within of two such pointers says that they are equal`
+// @Ensures within(p, s)
 func WithinStruct(p *int, s *S) {
-}
+} // want `vego: postcondition may not hold: within\(p, s\)`
 
 // DeferredResultWrong claims the value the return assigned.
 //

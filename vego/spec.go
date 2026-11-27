@@ -1617,8 +1617,13 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 			// A map lies within a footprint, which holds it whole; whether
 			// the second path is one is checked once it is read.
 			continue
+		case name == "apart" && found[i].constant == nil && isPointer:
+			// A pointer to a number, a boolean, or a string against a
+			// pointer to a struct, a slice, or another such pointer (F42);
+			// a pair without one is refused below.
 		case name == "apart" && (found[i].constant != nil || !isSlice(found[i].typ)):
-			return nil, fmt.Errorf("apart(%s, ...): %s is not a slice; apart says that two slices share no memory", spelled, spelled)
+			return nil, fmt.Errorf("apart(%s, ...): %s is not a slice or a pointer to a number, a boolean, or a string; apart says that two slices share no memory, "+
+				"or that such a pointer does not point into a struct, a slice, or where another one points", spelled, spelled)
 		case name == "apart":
 		case name == "fresh" && found[i].constant == nil && isIface(found[i].typ):
 			// The states of an interface value lie at its home, which
@@ -1674,6 +1679,14 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		found = append(found[:1], ys...)
 	}
 	first := found[0].val
+	if name == "apart" && (isSinglePointer(found[0].typ) || isSinglePointer(found[1].typ)) {
+		return e.v.singleApart(found[0], found[1], spell(paths[0].Root, paths[0].Steps), spell(paths[1].Root, paths[1].Steps))
+	}
+	if name == "apart" && (!isSlice(found[0].typ) || !isSlice(found[1].typ)) {
+		return nil, fmt.Errorf("apart(%s, %s): apart says that two slices share no memory, or that a pointer to a number, a boolean, or a string does not point "+
+			"into a struct, a slice, or where another one points; of two pointers to structs it is not supported yet",
+			spell(paths[0].Root, paths[0].Steps), spell(paths[1].Root, paths[1].Steps))
+	}
 	if name == "apart" {
 		// What two slices may reach, up to their capacities, does not
 		// meet: the assumption made of slice parameters, by the same term.
@@ -1708,6 +1721,9 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		// A pointer to a number, a boolean, or a string points to a box,
 		// which lies in no slice and no struct, and in which nothing lies
 		// but what points to it (ptrvalues.go, F20).
+		if isSinglePointer(found[0].typ) && !isSinglePointer(found[1].typ) {
+			return e.v.singleWithin(e.sink, found[0], found[1], spell(paths[0].Root, paths[0].Steps), spell(paths[1].Root, paths[1].Steps))
+		}
 		if object, isPointer := pointee(found[1].typ); isPointer && !types.Identical(found[0].typ.Underlying(), found[1].typ.Underlying()) {
 			if _, boxed := isBox(object); boxed {
 				spelled := spell(paths[1].Root, paths[1].Steps)
@@ -1719,8 +1735,8 @@ func (e *specEnv) Relation(name string, paths []logic.Path) (*logic.Term, error)
 		if object, isPointer := pointee(found[0].typ); isPointer {
 			if _, boxed := isBox(object); boxed && !types.Identical(found[0].typ.Underlying(), found[1].typ.Underlying()) {
 				spelled := spell(paths[0].Root, paths[0].Steps)
-				return nil, fmt.Errorf("within(%s, %s): %s points to a value of type %s, which lies only in a value of its own, a variable or what new made, and in no slice or struct; "+
-					"within of two such pointers says that they are equal", spelled, spell(paths[1].Root, paths[1].Steps), spelled,
+				return nil, fmt.Errorf("within(%s, %s): %s points to a value of type %s, which lies within a struct or a slice and not within another such pointer; "+
+					"within of two such pointers would say that they are equal", spelled, spell(paths[1].Root, paths[1].Steps), spelled,
 					types.TypeString(found[0].typ.Underlying().(*types.Pointer).Elem(), types.RelativeTo(e.v.pass.Pkg)))
 			}
 		}
@@ -2542,4 +2558,103 @@ func (e *specEnv) valid(path logic.Path) (*logic.Term, error) {
 		*e.validFound = append(*e.validFound, validFound{steps: steps, mem: found.mem, terms: clauses})
 	}
 	return logic.And(conjuncts...), nil
+}
+
+// isSinglePointer reports whether a type is a pointer to a number, a
+// boolean, or a string.
+func isSinglePointer(t types.Type) bool {
+	object, isPointer := pointee(t)
+	if !isPointer {
+		return false
+	}
+	_, boxed := isBox(object)
+	return boxed
+}
+
+// singleIn states that a pointer to a single value points into what y
+// refers to: a struct a pointer points to, the capacity of a slice, or the
+// place another such pointer points to. It points to a field of the struct
+// when it points to a place at the position of a field of its type at any
+// depth, and to an element of an array the struct holds when it points to
+// an element within the run of such an array; it points into the slice
+// when it points to an element within its capacity. A place is no element
+// of an array, and in step 1 of F42 an element of an array of a type wider
+// than a byte lies in no struct.
+func (v *fnVerifier) singleIn(p, y reached, ps, ys string) (*logic.Term, error) {
+	held, _ := isBox(mustPointee(p.typ))
+	pv := p.val
+	notNil := logic.Not(logic.Eq(pv[0], logic.RefLit(0)))
+	same := logic.Eq(pv[0], y.val[0])
+	switch {
+	case isSinglePointer(y.typ):
+		other, _ := isBox(mustPointee(y.typ))
+		if typeKey(untagged(held.Underlying())) != typeKey(untagged(other.Underlying())) {
+			return nil, fmt.Errorf("%s and %s point to values of two types, which are never one value, so there is nothing to state", ps, ys)
+		}
+		return logic.And(notNil, same, logic.Eq(pv[1], y.val[1]), logic.Eq(pv[2], y.val[2])), nil
+	case isSlice(y.typ):
+		elem := elemType(y.typ)
+		if typeKey(untagged(held.Underlying())) != typeKey(untagged(elem.Underlying())) {
+			return nil, fmt.Errorf("%s points to a %s and %s is a slice of %s, which never share memory, so there is nothing to state",
+				ps, types.TypeString(held, types.RelativeTo(v.pass.Pkg)), ys, types.TypeString(elem, types.RelativeTo(v.pass.Pkg)))
+		}
+		lo, hi := v.extent(y.val, y.typ)
+		return logic.And(notNil, pv[2], same, logic.Le(lo, pv[1]), logic.Lt(pv[1], hi)), nil
+	}
+	object, _ := pointee(y.typ)
+	var places, elements []*logic.Term
+	for _, c := range v.cellsOf(object) {
+		switch {
+		case c.isRun() && typeKey(untagged(held.Underlying())) == strings.TrimPrefix(c.key, "elem "):
+			elements = append(elements, logic.And(logic.Le(c.start(y.val[1]), pv[1]), logic.Lt(pv[1], c.end(y.val[1]))))
+		case !c.isRun() && c.key == "place "+typeKey(untagged(held.Underlying())):
+			places = append(places, logic.Eq(pv[1], c.start(y.val[1])))
+		}
+	}
+	if len(places) == 0 && len(elements) == 0 {
+		return nil, fmt.Errorf("no field of %s that a pointer can point to has the type %s, at any depth, so %s cannot point into %s",
+			types.TypeString(object, types.RelativeTo(v.pass.Pkg)), types.TypeString(held, types.RelativeTo(v.pass.Pkg)), ps, ys)
+	}
+	at := logic.Or(logic.And(logic.Not(pv[2]), logic.Or(places...)), logic.And(pv[2], logic.Or(elements...)))
+	return logic.And(notNil, same, at), nil
+}
+
+// singleWithin is within(p, y) for a pointer p to a single value: p points
+// into y, or into what y owns when y is an owner.
+func (v *fnVerifier) singleWithin(sink *state, p, y reached, ps, ys string) (*logic.Term, error) {
+	owner := false
+	if object, isPointer := pointee(y.typ); isPointer {
+		owner = len(sourceOwnedFields(object)) > 0
+	}
+	in, err := v.singleIn(p, y, ps, ys)
+	switch {
+	case err != nil && !owner:
+		return nil, fmt.Errorf("within(%s, %s): %v", ps, ys, err)
+	case err != nil:
+		in = logic.False()
+	}
+	return logic.Or(in, v.withinOwned(sink, p, y)), nil
+}
+
+// singleApart is apart(x, y) when one of them is a pointer to a single
+// value: that pointer, which is nil or does not point into what the other
+// refers to (singleIn), or into where the other points.
+func (v *fnVerifier) singleApart(x, y reached, xs, ys string) (*logic.Term, error) {
+	if !isSinglePointer(x.typ) {
+		x, y, xs, ys = y, x, ys, xs
+	}
+	in, err := v.singleIn(x, y, xs, ys)
+	if err != nil {
+		return nil, fmt.Errorf("apart(%s, %s): %v", xs, ys, err)
+	}
+	if isSinglePointer(y.typ) || isSlice(y.typ) {
+		return logic.Not(in), nil
+	}
+	return logic.Or(logic.Eq(y.val[0], logic.RefLit(0)), logic.Not(in)), nil
+}
+
+// mustPointee returns what a pointer type points to.
+func mustPointee(t types.Type) types.Type {
+	object, _ := pointee(t)
+	return object
 }
