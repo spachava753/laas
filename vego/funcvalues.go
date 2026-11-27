@@ -1287,6 +1287,10 @@ func (pv *pkgVerifier) findValueCallers() {
 					if variable, ok := pv.info.Uses[fun].(*types.Var); ok && trusted != nil && trusted.calls.get(variable) != nil {
 						return true
 					}
+					// So does a verified one under Calls (sourcecalls.go).
+					if variable, ok := pv.info.Uses[fun].(*types.Var); ok && fn.calls.len() > 0 && fn.calls.get(variable) != nil {
+						return true
+					}
 				}
 				if method, _ := throughValue(pv.info, n); method != nil {
 					because("calls through the interface value " + types.ExprString(ast.Unparen(n.Fun).(*ast.SelectorExpr).X))
@@ -1684,7 +1688,7 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 		v.unsupported(e.Pos(), fmt.Sprintf("%s encodes what it is given as encoding/json does, and cannot be used as %s: "+
 			"what it is given is checked at each call written out, and a value is called with what nobody checks. Call %s directly", callee.Name(), as, callee.Name()))
 	}
-	if fn.trust != nil && fn.calls.len() > 0 {
+	if fn.calls.len() > 0 {
 		v.unsupported(e.Pos(), fmt.Sprintf("%s calls a function it is given, and cannot be used as %s: "+
 			"what it would be given would come from code nobody has seen", callee.Name(), as))
 	}

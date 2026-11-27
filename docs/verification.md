@@ -151,8 +151,8 @@ Any other word after `// @` is also an error. `vego` cannot tell a wrong keyword
 
 ```text
 vego: unknown annotation "Post"; an annotation starts with one of Requires, Ensures, Modifies,
-Exits, Invariant, Owns, Variant, Visited, Assert, Snapshot, Predicate, State, Receiver, Vouches. If
-another tool reads this comment, declare the word with -vego.other-tags
+Calls, Exits, Invariant, Owns, Variant, Visited, Assert, Snapshot, Predicate, State, Receiver,
+Vouches. If another tool reads this comment, declare the word with -vego.other-tags
 ```
 
 If your code has comments such as `// @Summary` for another tool, list those words once:
@@ -1351,7 +1351,88 @@ vego: cannot verify TwiceOf: f has type func(int) int, which has no contract; de
 function type with a contract and use it here
 ```
 
-Declare a named type such as `Mapper` and use it for the parameter. A contract can only be written on a named type. A function type of another module gets its contract from an entry in the trust file, as `context.CancelFunc` does from a shipped one. See [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages).
+Declare a named type such as `Mapper` and use it for the parameter. A function type of another module gets its contract from an entry in the trust file, as `context.CancelFunc` does from a shipped one. See [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages). A parameter that the function only calls can keep its type without a name and get a contract from a `Calls` annotation. See [A function parameter that is only called](#a-function-parameter-that-is-only-called).
+
+### A function parameter that is only called
+
+A function that takes a function and calls it while it runs, as `each` and `filter` do, can give the parameter a contract with a `Calls` annotation in its doc comment:
+
+```go
+// @Calls f(s) When 0 <= s <= 100
+// @Requires Forall i in [0, |scores|) : 0 <= scores[i] <= 100
+// @Ensures True
+func eachScore(scores []int, f func(int)) {
+	for _, s := range scores {
+		f(s)
+	}
+}
+
+// @Requires Forall i in [0, |scores|) : 0 <= scores[i] <= 100
+// @Ensures |buckets| = 11
+func Histogram(scores []int) (buckets []int) {
+	buckets = make([]int, 11)
+	eachScore(scores, func(s int) {
+		if buckets[s/10] < 1000000 {
+			buckets[s/10]++
+		}
+	})
+	return buckets
+}
+```
+
+`@Calls f(s)` names the parameter and gives names to the parameters of its type. The formula after `When` is what holds whenever `eachScore` calls `f`. It may name the parameters of `f` and those of `eachScore`, and it is read in the state at that call. `old` has no meaning there. A `Calls` annotation without `When` gives `f` no condition, and several for one parameter add up.
+
+Inside `eachScore`, `f` may only be called. `vego` proves the `When` at each call. After the call, `vego` knows nothing of memory except what `eachScore` may write by its `Modifies` and what its other parameters refer to directly:
+
+- the array of a slice, up to its capacity and beyond;
+- the struct a pointer points to;
+- the entries of a map.
+
+So `eachScore` reads `scores[i]` after each call and still knows that it is in range. What `f` returns is a value of its type, and an error it returns may be any error.
+
+A caller hands over a literal, a function, a method value, or a value of a named function type with a contract, as it does to a trusted function under `calls` (see [Functions that a trusted function calls](#functions-that-a-trusted-function-calls)). A literal is verified where it is handed over, as part of the caller. It may read and assign the caller's variables and write the caller's memory, as `Histogram` writes `buckets`. What the runs write is forgotten after the call, as a loop forgets what its body writes. A run may not write what the function's `Modifies` covers or what its other arguments refer to directly:
+
+```go
+// @Requires |scores| > 0 And Forall i in [0, |scores|) : 0 <= scores[i] <= 100
+// @Modifies scores
+// @Ensures True
+func Rescale(scores []int) {
+	eachScore(scores, func(s int) {
+		scores[0] = s
+	})
+}
+```
+
+```text
+vego: scores[0] is assigned, which may be what an argument of eachScore refers to directly; a function eachScore calls
+under Calls may not write the array of a slice, what a pointer points to, or a map that eachScore is handed beside it,
+in the function literal run by eachScore at calls.go:37:20
+```
+
+A contract under `Calls` holds only while the function calls the parameter. A parameter that is stored, returned, compared, or handed on is reported:
+
+```go
+// @Calls f()
+// @Ensures True
+func Keep(f func()) (g func()) {
+	return f
+}
+```
+
+```text
+vego: cannot verify Keep: the Calls annotation of Keep gives f a contract that holds only while Keep calls it, and
+here it is used other than by calling it: stored, returned, compared, or handed on; a function that travels needs a
+named function type with a contract
+```
+
+A function that is returned or stored, such as an option `func(*Config)` kept in a slice or a counter that a function returns, still needs a named function type with a contract. That contract travels with the value into results, fields, and slices.
+
+These are reported as `cannot verify` too:
+
+- handing a parameter under `Calls` a value of a function type, or a trusted function, when the parameter is called with an error, an `any`, a function value, or an interface value with a method that has no contract, since such code may run code the argument carries;
+- calling such a parameter from a recursive closure, or handing it on to another function;
+- making a function with a `Calls` annotation into a function value;
+- a `Calls` annotation on a parameter whose type has a name, which carries a contract of its own, or that is not a function.
 
 ### Writing a contract on a function type
 
@@ -10768,7 +10849,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - a state-changing method of an interface with states whose implementation writes what the value holds, unless its contract lists `behind(r)` (see [Making a value of an interface with a state](#making-a-value-of-an-interface-with-a-state)), and a method whose contract speaks of a state of the receiver before the call, for a value of your own;
 - interface types written in place that embed a named interface, generic interface types, and interfaces that embed `error`;
 - calls of methods promoted from an embedded interface field, method expressions such as `I.M`, and method values of interface methods;
-- calls of function values whose type has no contract, and making a function value of such a type from a function, a method, or a literal (see [A function type without a contract](#a-function-type-without-a-contract));
+- calls of function values whose type has no contract, and making a function value of such a type from a function, a method, or a literal (see [A function type without a contract](#a-function-type-without-a-contract)), unless the value is a parameter that a `Calls` annotation gives a contract and that is only called (see [A function parameter that is only called](#a-function-parameter-that-is-only-called));
 - converting a function value to another function type, and method expressions such as `T.M`;
 - a function literal used as a value that assigns a variable it captures (see [Function literals as values](#function-literals-as-values));
 - a recursive closure in any form but `var v T` followed by one assignment `v = func...`, used other than by calling it, called before it is assigned, deferred, called from a literal used as a value, capturing a variable whose address is taken, in a cycle with another function, or ending the process (see [What a recursive closure may not do](#what-a-recursive-closure-may-not-do));
@@ -10818,6 +10899,7 @@ A proof by `vego` depends on the following assumptions. Each concerns something 
 - The methods of `bytes.Buffer`, `strings.Builder`, `bufio.Writer`, `bufio.Reader`, `bufio.Scanner`, and `log.Logger` that have shipped entries write nothing that verified code can see other than the struct and the memory that the value owns, as [Writing through a buffer](#writing-through-a-buffer) lists it. After a call, the value owns only what it owned before the call and memory that the call made. The read position of a `bytes.Buffer` never passes the end of what was written to it. Every method of `bytes.Buffer` keeps it so, and `|b|` is the number of bytes between the two.
 - Code of another package that is not verified runs code of the verified package only as `vego` follows it, which [Cycles through function values and interface methods](#cycles-through-function-values-and-interface-methods) describes: during a call that the verified package makes, it runs only what that call hands it, through the arguments and the receiver. Code that it kept from an earlier call, a value it stored, or code that it runs on another goroutine or at another time, does not call back into a verified function while that function runs, so that the call never ends. A cycle that stays in the package, or that goes through what a call hands to another package, is found and reported.
 - For a parameter listed under `runs` or `keeps`, the function calls through an interface value or a function value nothing that the parameter holds, or that a call of what the parameter holds returns, but the methods of the interfaces and the function types that the parameter's type reaches and those of the types listed under `asserts`, and it uses no reflection to call what the parameter holds (see [What a function finds on what it is handed](#what-a-function-finds-on-what-it-is-handed)). Verified code answers for the methods that the parameter's type has, each checked where the value is converted. The author of the entry answers for the rest. The rest includes a method that a type of another module declares and that verified code converted to an interface whose method of that name has no contract, as `*mcp.TextContent` to `mcp.Content`: when the function runs such a method, what the method writes is within the function's `modifies`, and what it calls, through an interface value, a function value, or reflection, is within this claim (see [Values of another module's types](#values-of-another-modules-types)). An entry such as that of `use(p Pinger)` with `runs: [p]` and no `asserts`, for a function that asserts `p` to an interface with `Bump` and calls it, is false, and a proof that relies on it is worthless. For a type parameter of a generic function, the function runs no method of a value of the type parameter's type, or of a pointer to one, or of anything such a value holds, directly or through what it calls, `fmt` and `reflect` included, neither while the call lasts nor later through anything it returns, keeps, or registers (see [Writing an entry for a generic function](#writing-an-entry-for-a-generic-function)). Each shipped entry of a generic function makes this claim, read from the source of its package.
+- An unverified caller of a function with a `Calls` annotation hands the parameter a function that is not nil, that returns without panicking and without ending the process when it is called with arguments that meet the `When`, and that writes nothing the function's `Modifies` lists, as it was when the function was called, nothing in the array of a slice argument up to its capacity, nothing of what a pointer argument points to, and no entry of a map argument. The code of that function reaches the verified package only as the bullet on code of another package says.
 - Unverified callers respect the contract. They satisfy the `Requires` clauses, pass structs whose invariants hold, and do not pass overlapping slices for two slice parameters of the same element type. For a parameter whose footprint the contract lists in `Modifies`, they pass no other argument that reaches memory in that footprint without going through an interface value: `Log` relies on the `Lines` that `t` points to not being memory that the methods of `r` write. The same holds for a package-level variable of an interface type that the contract lists in `Modifies` by itself: they pass no argument that reaches memory in the footprint of the value the variable holds when the call begins, as `printLines` relies on its lines not being memory that the writer in `logOut` writes. For two interface parameters with states of which the contract lists one in `Modifies`, they do not pass one value twice, two values that hold one value, or a value and one whose methods change the states of the other, as one that wraps it does, unless one of them is nil. For an interface parameter with states and a pointer parameter whose type has states, of which the contract lists one, they do not pass an interface value that holds the pointer. Beside a reader that the contract requires to end, they pass no writer that writes what the reader reads: not the same value, and not another value over the same file or buffer. They call a function value that verified code made only with arguments that meet the `Requires` of its type, and a method of an interface value that verified code made only with arguments that meet the `Requires` of the method. For a parameter whose type owns memory (see [Structs that own memory](#structs-that-own-memory)), they pass a struct whose owned memory is reached by nothing else they pass: not by the other arguments, not by the struct's other fields, and not by what its other owned fields refer to. Memory that a method returns from what its struct owns, which its contract shows with `within(result, s)`, is not stored by code that is not verified, and is not passed to a verified function together with the struct it came from or with anything that reaches that struct. The same holds of what code that is not verified takes out of an error that a verified function returns, by a type assertion or reflection, when the error came from a call made on what a struct it was handed owns, as the error of `fmt.Fprint(r.out, ...)` may hold what `r.out` holds: no contract can say that an error lies within a struct.
 - A pointer to a number, a boolean, or a string that code which is not verified hands to verified code points to a value of its own: a variable whose address was taken, or what `new` made. It does not point to a field of a struct, an element of a slice or an array, or a package-level variable that the verified function can reach in another way: through another argument, a package-level variable, or memory that these reach. This holds of every way such a pointer arrives: a parameter or a receiver, a field of memory that existed on entry, an element of a `[]*T` or a value of a `map[K]*T`, what an interface value holds, what a trusted function returns or writes under its `modifies`, an argument that a trusted function passes to a function under `calls`, and a package-level variable of type `*T`. A caller that is not verified and passes `&s.f` and `s` to `func F(p *int, s *S)` breaks this. Passing `&s.f` alone to `func Increment(p *int)` does not, since `Increment` reaches nothing else of `s`. Verified code cannot make such a pointer: `vego` refuses `&s.f`, `&xs[i]`, `&a[i]`, and `&g` for them.
 - When the server calls a verified handler, the writer it passes writes none of the memory that the request reaches without going through an interface value, except the field `Trailer` of the `Request` and the map it refers to, which the server fills while it reads the body, also when a write to the writer drains a body the handler left unread. Verified code cannot read or write that field. Code that is not verified does not make that map reachable from anything else it hands a verified function, as `req.Trailer = req.Header` in a middleware would. Code that is not verified uses a `ResponseWriter`, and hands one to verified code as that type or as any other interface, only while the `ServeHTTP` call that received it runs, and does not hand one, or a value that holds one at any depth, to a verified function that keeps that parameter.

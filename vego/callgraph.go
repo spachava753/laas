@@ -673,6 +673,32 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 				return true
 			}
 			if callee := pv.staticCalleeAt(n); callee != nil {
+				// What a function under Calls is handed runs during the
+				// call: a literal is walked as part of the body, a function
+				// of the package is named, and anything else, a value from
+				// outside or a function the graph does not walk, is called
+				// with what the types of the parameter's parameters can
+				// hold (F3 of the design review of F40).
+				if own := pv.sourceCallsOf(callee); own != nil && callee.Pkg() == pv.pass.Pkg {
+					sig := callee.Type().(*types.Signature)
+					for _, b := range bindArgsLoose(pv.info, n, sig) {
+						cb := own.calls.get(b.param)
+						if cb == nil {
+							continue
+						}
+						handed, isLit := pv.handedFunc(b.expr)
+						if isLit || handed != nil && g.byObj[handed.Origin()] != nil {
+							continue
+						}
+						why := fmt.Sprintf("%s is handed %s, which it calls under Calls", callee.Name(), types.ExprString(b.expr))
+						if handed == nil {
+							unresolved(n, text, why, pv.valuesMatching(cb.sig))
+						}
+						for param := range cb.sig.Params().Variables() {
+							unresolved(n, text, why, pv.codeTargets(param.Type(), map[types.Type]bool{}))
+						}
+					}
+				}
 				if callee.Pkg() != pv.pass.Pkg {
 					node.out = node.out || !pv.isolatedCall(n, callee)
 					// What a call of a function of another package may run of
@@ -694,6 +720,14 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 				// calls, and that is followed where it is handed over.
 				if variable, ok := pv.info.Uses[fun].(*types.Var); ok && trusted && pv.callsParam(node.fn, variable) {
 					return true
+				}
+				// So does a verified one under Calls (F3 of the design
+				// review of F40), where it is handed over.
+				if variable, ok := pv.info.Uses[fun].(*types.Var); ok && node.fn != nil && node.fn.calls.len() > 0 {
+					if cb := node.fn.calls.get(variable); cb != nil && cb.source {
+						node.out = true
+						return true
+					}
 				}
 			}
 			node.out = true
@@ -927,12 +961,21 @@ func (pv *pkgVerifier) handedAsWritten(call *ast.CallExpr) []ast.Expr {
 	if callee == nil {
 		return nil
 	}
+	sig := callee.Type().(*types.Signature)
+	bound, _ := bindArgs(pv.info, call, paramsOf(sig), sig.Variadic())
+	if own := pv.sourceCallsOf(callee); own != nil {
+		var handed []ast.Expr
+		for _, b := range bound {
+			if cb := own.calls.get(b.param); !b.packed && cb != nil {
+				handed = append(handed, b.expr)
+			}
+		}
+		return handed
+	}
 	entry := pv.entryFor(pv.originOf(callee).FullName())
 	if entry == nil || len(entry.calls) == 0 {
 		return nil
 	}
-	sig := callee.Type().(*types.Signature)
-	bound, _ := bindArgs(pv.info, call, paramsOf(sig), sig.Variadic())
 	var handed []ast.Expr
 	for _, b := range bound {
 		if !b.packed && slices.ContainsFunc(entry.calls, func(c trustCall) bool { return c.name == b.param.Name() }) {

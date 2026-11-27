@@ -97,6 +97,9 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	if lit := v.literalOf(call); lit != nil {
 		return v.callLiteral(call, lit, st, guard)
 	}
+	if cb := v.sourceCallback(call); cb != nil {
+		return v.callSourceParam(call, cb, st, guard)
+	}
 	if isBuiltin(v.info, call, "recover") {
 		v.unsupported(call.Pos(), recoverRefused)
 	}

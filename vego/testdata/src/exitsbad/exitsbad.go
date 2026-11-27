@@ -77,7 +77,7 @@ type OnType struct{}
 
 // Misspelt writes Exit.
 //
-// @Exit // want `vego: unknown annotation "Exit"; an annotation starts with one of Requires, Ensures, Modifies, Exits, Invariant, Owns, Variant, Visited, Assert, Snapshot, Predicate, State, Receiver, Vouches\. If another tool reads this comment, declare the word with -vego\.other-tags`
+// @Exit // want `vego: unknown annotation "Exit"; an annotation starts with one of Requires, Ensures, Modifies, Calls, Exits, Invariant, Owns, Variant, Visited, Assert, Snapshot, Predicate, State, Receiver, Vouches\. If another tool reads this comment, declare the word with -vego\.other-tags`
 // @Ensures True
 func Misspelt() {
 }

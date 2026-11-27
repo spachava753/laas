@@ -86,12 +86,13 @@ type epoch struct {
 // when memory is in none.
 func (m memory) inEpoch(key string, sort logic.Sort) *logic.Term {
 	// No row holds a cell of the storage of an assigned package-level
-	// variable (V1), so an epoch keeps it.
-	if key == footprintRegion || isVarRegion(key) {
+	// variable (V1), so an epoch keeps it, but one of a call under Calls,
+	// which may write anything it does not keep.
+	if key == footprintRegion {
 		return nil
 	}
 	e, ok := m[epochKey]
-	if !ok {
+	if !ok || isVarRegion(key) && !strings.HasPrefix(e.Name, allEpoch) {
 		return nil
 	}
 	return logic.Const(epochMark+e.Name+" "+key, sort)
@@ -359,6 +360,18 @@ func hasFootprintTarget(targets []target) bool {
 // the design review: a method declared on an interface without states
 // changes none of them). It returns with it the facts of rowAt.
 func (v *fnVerifier) outsideFootprint(t target, key string, ref, position *logic.Term) (*logic.Term, []*logic.Term) {
+	if t.except != nil {
+		// What a call under Calls writes is every cell but what it keeps;
+		// of what a reader yields it keeps nothing.
+		kept := v.keptBy(t.except, key, ref, position)
+		if key == unreadRegion {
+			kept = logic.False()
+		}
+		if t.skipped != nil {
+			kept = logic.Or(kept, t.skipped)
+		}
+		return kept, nil
+	}
 	cell, facts := v.rowAt(t.rows, t.ref, ref, position)
 	conditions := []*logic.Term{logic.Not(cell)}
 	// A nil interface value has no footprint: none of its methods can run.

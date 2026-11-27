@@ -523,6 +523,9 @@ type funcInfo struct {
 	// closure is set for the contract of a recursive local closure; see
 	// closures.go.
 	closure *recClosure
+	// callsClauses holds the Calls annotations of a verified function,
+	// which give its function parameters contracts; see sourcecalls.go.
+	callsClauses []*clause
 }
 
 // spelling returns the contract whose clauses a function's annotations
@@ -918,7 +921,7 @@ var (
 	clauseKinds = map[string]bool{
 		"Requires": true, "Ensures": true, "Invariant": true, "Variant": true,
 		"Predicate": true, "Assert": true, "Modifies": true, "State": true, "Receiver": true, "Snapshot": true, "Vouches": true,
-		"Visited": true, "Owns": true, "Exits": true,
+		"Visited": true, "Owns": true, "Exits": true, "Calls": true,
 	}
 	// retiredKinds are keywords that earlier versions read, with what to
 	// write now.
@@ -1364,7 +1367,7 @@ func (pv *pkgVerifier) collect() {
 				}
 				if c.kind == "" {
 					pv.report(c.pos, "unknown annotation %q; an annotation starts with one of "+
-						"Requires, Ensures, Modifies, Exits, Invariant, Owns, Variant, Visited, Assert, Snapshot, Predicate, State, Receiver, Vouches. "+
+						"Requires, Ensures, Modifies, Calls, Exits, Invariant, Owns, Variant, Visited, Assert, Snapshot, Predicate, State, Receiver, Vouches. "+
 						"If another tool reads this comment, declare the word with -vego.other-tags", c.text)
 					continue
 				}
@@ -1435,6 +1438,10 @@ func (pv *pkgVerifier) collect() {
 					pv.predicateTexts = append(pv.predicateTexts, c.text)
 					continue
 				}
+				if c.kind == "Calls" {
+					// Read once the parameters are known; see sourcecalls.go.
+					continue
+				}
 				if c.kind == "Modifies" {
 					targets, err := logic.ParseTargets(c.text)
 					switch {
@@ -1470,6 +1477,9 @@ func (pv *pkgVerifier) collect() {
 		}
 	}
 	pv.finishClosures()
+	for _, fn := range pv.order {
+		pv.readSourceCalls(fn)
+	}
 	for _, defineErr := range pv.res.Define(predicates) {
 		pv.report(predicateClauses[defineErr.Decl].pos, "%v", defineErr.Err)
 		// A predicate that could not be defined stands for nothing, so no
@@ -1841,6 +1851,8 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 	}
 	switch c.kind {
 	case "Modifies":
+	case "Calls":
+		fn.callsClauses = append(fn.callsClauses, c)
 	case "Exits":
 		pv.placeExits(fn, c)
 	case "Vouches":

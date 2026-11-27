@@ -50,6 +50,9 @@ type callback struct {
 	// does too.
 	applied       bool
 	deterministic bool
+	// source is set for a contract under Calls of a verified function,
+	// whose body is verified against it; see sourcecalls.go.
+	source bool
 }
 
 // callWords are the names that a formula reads as something else when
@@ -255,6 +258,10 @@ func (v *fnVerifier) callRequires(cb *callback, given []value, args map[*types.V
 type forbidden struct {
 	targets []target
 	by      string
+	// direct is set for the allocations that the other arguments of a
+	// function with Calls refer to directly, which its runs may not write
+	// either; see sourcecalls.go.
+	direct bool
 }
 
 // callHanding verifies a call of a trusted function that is handed a
@@ -393,6 +400,11 @@ func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types
 		// of values of the call only.
 		premise := slices.Clip(head.hyps[start:])
 		v.forbidden = append(v.forbidden, forbidden{targets: written, by: name})
+		pushed := 1
+		if cb.source {
+			v.forbidden = append(v.forbidden, forbidden{targets: v.directTargets(fn, args), by: name, direct: true})
+			pushed++
+		}
 		var results []value
 		what := "the function literal"
 		if h.lit != nil {
@@ -404,7 +416,7 @@ func (v *fnVerifier) runHanded(call *ast.CallExpr, fn *funcInfo, args map[*types
 				what = "the function value " + what
 			}
 		}
-		v.forbidden = v.forbidden[:len(v.forbidden)-1]
+		v.forbidden = v.forbidden[:len(v.forbidden)-pushed]
 		// The facts of the run are taken once, and both the proof that the
 		// run returns the same result for the same argument and the summary
 		// are made from them.
@@ -629,7 +641,11 @@ func (v *fnVerifier) checkNotForbidden(st *state, guard []*logic.Term, w written
 			apart = append(apart, outside(w, t))
 		}
 		goal := logic.And(apart...)
-		if result := v.attempt(st, guard, goal); result != solver.Proved {
+		if result := v.attempt(st, guard, goal); result != solver.Proved && f.direct {
+			v.report(pos, "%s, which may be what an argument of %s refers to directly; a function %s calls under Calls may not write "+
+				"the array of a slice, what a pointer points to, or a map that %s is handed beside it%s", what, f.by, f.by, f.by, limitNote(result))
+			st.assume(logic.Implies(logic.And(guard...), goal))
+		} else if result != solver.Proved {
 			v.report(pos, "%s, which %s may write itself while it runs the function it is handed; "+
 				"a function it is handed may not write what it may write%s", what, f.by, limitNote(result))
 			st.assume(logic.Implies(logic.And(guard...), goal))
@@ -665,6 +681,9 @@ func (pv *pkgVerifier) handedArgs(call *ast.CallExpr) []ast.Expr {
 		return nil
 	}
 	fn := pv.trustedContract(callee.Origin())
+	if own := pv.sourceCallsOf(callee); own != nil {
+		fn = own
+	}
 	if fn == nil || fn.calls.len() == 0 {
 		return nil
 	}
@@ -729,7 +748,24 @@ func (v *fnVerifier) handOver(fn *funcInfo, param *types.Var, arg ast.Expr, st *
 	if method != nil {
 		callee = method
 	}
+	// What a function with Calls hands f, code that nobody has seen may run
+	// when f is a value from outside, or trusted (F4 of the design review
+	// of F40); whose origin it has is not known where f is handed over.
+	carriesCode := func(what string) {
+		cb := fn.calls.get(param)
+		if cb == nil || !cb.source {
+			return
+		}
+		for variable := range cb.sig.Params().Variables() {
+			if holdsCode(variable.Type(), map[types.Type]bool{}) {
+				v.unsupported(arg.Pos(), fmt.Sprintf("%s is handed to %s as %s, which %s calls with a value of type %s, and %s may run code that it carries that nobody has seen; "+
+					"hand over a function literal, or a function or method of this package that is verified", types.ExprString(arg), fn.obj.Name(), param.Name(),
+					fn.obj.Name(), types.TypeString(variable.Type(), types.RelativeTo(v.pass.Pkg)), what))
+			}
+		}
+	}
 	if callee == nil {
+		carriesCode("a function value from code that is not verified")
 		T := v.valueContract(v.info.TypeOf(arg))
 		if T == nil {
 			v.unsupported(arg.Pos(), fmt.Sprintf("%s is passed to %s as %s, which %s calls, and its type %s has no contract; "+
@@ -749,6 +785,9 @@ func (v *fnVerifier) handOver(fn *funcInfo, param *types.Var, arg ast.Expr, st *
 	if c == nil {
 		v.unsupported(arg.Pos(), fmt.Sprintf("it hands %s to %s, and %s has no contract; annotate %s with // @ annotations so that it is verified, "+
 			"%s", callee.Name(), fn.obj.Name(), callee.Name(), callee.Name(), v.addEntryAdvice(callee.FullName())))
+	}
+	if c.trust != nil || c.imported != nil && !c.imported.Verified {
+		carriesCode("a trusted function")
 	}
 	view := v.viewOf(c)
 	v.reportUnusable(arg.Pos(), view, v.calleeName(callee))

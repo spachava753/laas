@@ -714,6 +714,7 @@ func (v *fnVerifier) verify() {
 	if fn.closure != nil {
 		v.checkClosure()
 	}
+	v.checkSourceCallsUses()
 	for _, rc := range v.pkgVerifier.closures {
 		if rc.outer == fn.decl && rc.refused != "" {
 			v.unsupported(rc.refusedAt, rc.refused)

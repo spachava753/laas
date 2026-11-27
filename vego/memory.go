@@ -219,6 +219,9 @@ type target struct {
 	fp      bool
 	rows    *logic.Term
 	skipped *logic.Term
+	// except is set, beside fp, for what a call of a parameter under Calls
+	// writes: every cell but those it keeps; see sourcecalls.go.
+	except *exceptCalls
 	// skey is, for the footprint of an interface value, the key of the
 	// value's states, whose row the footprint's epoch keeps; and, for an
 	// entry that covers both, the row of states that targets spreads into

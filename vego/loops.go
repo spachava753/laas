@@ -32,6 +32,9 @@ type site struct {
 	// holds when it points to an owner.
 	row bool
 	fp  bool
+	// except is set, beside fp, for a call of a parameter under Calls,
+	// which may write every cell but what it keeps; see sourcecalls.go.
+	except bool
 	// pointer is set, beside row, when the row is that of the states of
 	// what the pointer root holds points to, at lo from it (A5 of S0b of
 	// F34).
@@ -269,6 +272,10 @@ func (v *fnVerifier) effects(nodes ...ast.Node) *effects {
 // callSites adds what a call inside a loop may write, according to the
 // Modifies clauses of the function called.
 func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
+	if v.sourceCallback(call) != nil {
+		eff.sites = append(eff.sites, site{fp: true, except: true})
+		return
+	}
 	callee := v.pkgVerifier.calleeAt(call)
 	method, value := throughValue(v.info, call)
 	var fn *funcInfo
@@ -570,8 +577,16 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 	// not yet in memory, which an epoch covers; see footprint.go.
 	var footprints []target
 	preciseFootprints := true
+	everything := false
 	for _, at := range eff.sites {
 		if !at.fp {
+			continue
+		}
+		if at.except {
+			// A call of a parameter under Calls, which may write every
+			// cell but what it keeps, the variables of packages too.
+			footprints = append(footprints, target{fp: true, except: v.callsExcept()})
+			everything = true
 			continue
 		}
 		val := st.vals[at.root]
@@ -629,7 +644,7 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 	}
 	if writesFootprints {
 		for key, region := range st.mem {
-			if key == epochKey || key == footprintRegion || isVarRegion(key) {
+			if key == epochKey || key == footprintRegion || isVarRegion(key) && !everything {
 				continue
 			}
 			if regions[key] == nil {
@@ -653,6 +668,10 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 		known := &layer{prev: st.mem.region(key, sort), bound: st.brk, targets: written.targets, flat: written.flat, key: key}
 		if !written.precise {
 			known.bound, known.targets = v.entryBrk, v.frameReaching(key)
+			// A call under Calls writes beyond the frame.
+			if everything {
+				known.targets = append(known.targets, target{fp: true, except: v.callsExcept()})
+			}
 		}
 		forgotten := v.fresh("mem'"+key, sort)
 		v.layers[forgotten.Name] = known
@@ -677,10 +696,17 @@ func (v *fnVerifier) forget(st *state, eff *effects) *state {
 		// Every region not yet in memory starts from the epoch, and the
 		// footprints grow only by what the loop creates.
 		e := v.fresh("epoch", logic.Int)
+		if everything {
+			e = v.fresh(allEpoch, logic.Int)
+		}
 		if preciseFootprints {
 			v.epochs[e.Name] = &epoch{before: st.mem, bound: st.brk, targets: footprints}
 		} else {
-			v.epochs[e.Name] = &epoch{before: st.mem, bound: v.entryBrk, targets: v.frameReaching("")}
+			targets := v.frameReaching("")
+			if everything {
+				targets = append(targets, target{fp: true, except: v.callsExcept()})
+			}
+			v.epochs[e.Name] = &epoch{before: st.mem, bound: v.entryBrk, targets: targets}
 		}
 		head.mem[epochKey] = e
 		grown := v.grow(head, st.brk, nil)
