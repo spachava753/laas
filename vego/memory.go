@@ -1158,7 +1158,7 @@ func (v *fnVerifier) parameterPath(st *state, guard []*logic.Term, w written) st
 	part := w.parts[0]
 	// A package-level variable that lives in a box of its own (kind 3).
 	if w.ref.Op == logic.OpConst && strings.HasPrefix(w.ref.Name, boxName) {
-		if variable := v.boxedMet[strings.TrimPrefix(w.ref.Name, boxName)]; variable != nil && singleValue(variable.Type()) {
+		if variable := v.boxedMet[strings.TrimPrefix(w.ref.Name, boxName)]; variable != nil && boxable(variable.Type()) {
 			return ", as " + v.spelling(variable)
 		}
 	}

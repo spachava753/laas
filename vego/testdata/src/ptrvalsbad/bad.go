@@ -206,7 +206,7 @@ func Twice(p *int) {
 // ModifiesDeref names what p points to with *.
 //
 // @Requires p != nil
-// @Modifies *p // want `vego: syntax error in Modifies annotation: Modifies names what a pointer points to by the pointer: write p, not \*p`
+// @Modifies *p // want `vego: in Modifies annotation: Modifies names what a pointer points to by the pointer: write p, not \*p`
 // @Ensures True
 func ModifiesDeref(p *int) {
 	*p = 1

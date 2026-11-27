@@ -147,8 +147,9 @@ func Boxed(n int) (r int) {
 	return total
 }
 
-// AddrSlice takes the address of a slice and reads through it: one cause
-// in one class (F18 of the review).
+// AddrSlice takes the address of a slice and reads through it, which was
+// one cause in one class (F18 of the review) and stops nothing since F42,
+// step 2.
 func AddrSlice(xs []int) int {
 	p := &xs
 	return len(*p)

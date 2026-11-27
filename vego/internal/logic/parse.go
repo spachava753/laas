@@ -330,13 +330,17 @@ func ParseTargets(src string) ([]*Node, error) {
 	var targets []*Node
 	_, err := parse(src, func(p *parser) *Node {
 		for {
+			var target *Node
 			if start := p.peek().pos; p.accept("*") {
-				// What a pointer points to is named by the pointer, as
-				// the struct a pointer points to is.
-				pointer := p.postfix()
-				panic(&SyntaxError{start, fmt.Sprintf("Modifies names what a pointer points to by the pointer: write %s, not *%s", pointer, pointer)})
+				// *p names what the slice, the map, or the pointer that p
+				// points to refers to; of a pointer to a number, a
+				// boolean, or a string the checker refuses it, since p
+				// names what p points to (F42).
+				kid := p.postfix()
+				target = &Node{Kind: NDeref, Kids: []*Node{kid}, Start: start, End: kid.End}
+			} else {
+				target = p.postfix()
 			}
-			target := p.postfix()
 			// behind(r) names the footprint of the receiver r of a method
 			// of an interface with states, beside r, which names its states
 			// there (F28).
@@ -359,7 +363,7 @@ func ParseTargets(src string) ([]*Node, error) {
 				continue
 			}
 			for n := target; ; n = n.Kids[0] {
-				if (n.Kind != NIdent && n.Kind != NField && n.Kind != NIndex) || n.Primed {
+				if (n.Kind != NIdent && n.Kind != NField && n.Kind != NIndex && !(n.Kind == NDeref && n == target)) || n.Primed {
 					panic(&SyntaxError{target.Start, "a Modifies clause lists what is reached from the parameters, as in \"A, s.items, cs[0]\""})
 				}
 				if n.Kind == NIdent {

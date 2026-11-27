@@ -622,7 +622,7 @@ func (v *fnVerifier) findBoxed(body *ast.BlockStmt) map[*types.Var]bool {
 	ast.Inspect(body, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.UnaryExpr:
-			if root := v.localRoot(n.X); n.Op == token.AND && root != nil && !(targets[n] && singleValue(root.Type())) {
+			if root := v.localRoot(n.X); n.Op == token.AND && root != nil && !(targets[n] && boxable(root.Type())) {
 				boxed[root] = true
 			}
 		case *ast.SliceExpr:
@@ -656,7 +656,9 @@ func (v *fnVerifier) findBoxed(body *ast.BlockStmt) map[*types.Var]bool {
 			// A method of a single value takes the address of a variable
 			// that holds one directly; one reached through a field is an
 			// interior pointer, refused at the call (receiver).
-			if _, isStruct := t.Underlying().(*types.Struct); !isStruct && !(singleValue(t) && len(path) == 1) {
+			// A pointer is passed as it is: only a value has its address
+			// taken by a method with a pointer receiver.
+			if _, isStruct := t.Underlying().(*types.Struct); !isStruct && !(boxable(t) && !isPointerType(t) && len(path) == 1) {
 				break
 			}
 			if root := v.localRoot(sel.X); root != nil {
@@ -682,7 +684,7 @@ func (v *fnVerifier) localRoot(e ast.Expr) *types.Var {
 				return nil
 			}
 			_, isStruct := variable.Type().Underlying().(*types.Struct)
-			if _, modelled := layoutOf(variable.Type()); !(isStruct || isArray(variable.Type()) || singleValue(variable.Type()) && ast.Unparen(e) == outer) || !modelled {
+			if _, modelled := layoutOf(variable.Type()); !(isStruct || isArray(variable.Type()) || boxable(variable.Type()) && ast.Unparen(e) == outer) || !modelled {
 				return nil
 			}
 			return variable

@@ -1858,8 +1858,8 @@ func plan(t types.Type, steps []logic.Step, from *types.Package) ([]hop, types.T
 				return nil, nil, fmt.Errorf("%s has type %s, and * follows only a pointer", spelled, t)
 			case isStructType(pointer.Elem()):
 				return nil, nil, fmt.Errorf("%s points to a struct, which a formula cannot name as a whole after *; name its fields", spelled)
-			case !singleValue(pointer.Elem()):
-				return nil, nil, fmt.Errorf("%s has type %s, and * follows only a pointer to a number, a boolean, or a string", spelled, t)
+			case !boxable(pointer.Elem()):
+				return nil, nil, fmt.Errorf("%s has type %s, and * follows only a pointer to a number, a boolean, a string, a slice, a map, a pointer, an interface value, an error, or a function", spelled, t)
 			}
 			hops = append(hops, hop{from: t, field: 0})
 			t = pointer.Elem()
@@ -2050,6 +2050,7 @@ type modTarget struct {
 type modStep struct {
 	field string
 	index *logic.Node
+	deref bool
 }
 
 // newModTargets turns the parsed list of a Modifies clause into targets.
@@ -2073,8 +2074,11 @@ func newModTargets(nodes []*logic.Node, c *clause) []*modTarget {
 				break
 			}
 			step := modStep{field: n.Name}
-			if n.Kind == logic.NIndex {
+			switch n.Kind {
+			case logic.NIndex:
 				step = modStep{index: n.Kids[1]}
+			case logic.NDeref:
+				step = modStep{deref: true}
 			}
 			target.steps = append([]modStep{step}, target.steps...)
 		}
@@ -2189,7 +2193,7 @@ func (v *fnVerifier) walkTarget(fn *funcInfo, m *modTarget, param *types.Var, ro
 	args map[*types.Var]value, sink *state, mem memory) (shape, target, error) {
 	steps := make([]logic.Step, len(m.steps))
 	for i, step := range m.steps {
-		steps[i] = logic.Step{Field: step.field}
+		steps[i] = logic.Step{Field: step.field, Deref: step.deref}
 		if step.index == nil {
 			continue
 		}
@@ -2219,6 +2223,12 @@ func (v *fnVerifier) walkTarget(fn *funcInfo, m *modTarget, param *types.Var, ro
 	hops, final, err := plan(rootType, steps, fn.writtenIn())
 	if err != nil {
 		return shape{}, target{}, fmt.Errorf("%s%v", m.name, err)
+	}
+	if len(m.steps) > 0 && m.steps[len(m.steps)-1].deref && !holdsMemory(final) {
+		// What a pointer to a number, a boolean, or a string points to is
+		// named by the pointer.
+		inner := strings.TrimPrefix(m.text, "*")
+		return shape{}, target{}, fmt.Errorf("Modifies names what a pointer points to by the pointer: write %s, not *%s", inner, inner)
 	}
 	// Follow the hops, keeping track of where the value lies. first is set
 	// while the allocation is still the one the parameter points into.
@@ -2570,8 +2580,8 @@ func isSinglePointer(t types.Type) bool {
 	if !isPointer {
 		return false
 	}
-	_, boxed := isBox(object)
-	return boxed
+	held, boxed := isBox(object)
+	return boxed && singleValue(held)
 }
 
 // singleIn states that a pointer to a single value points into what y

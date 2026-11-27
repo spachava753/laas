@@ -72,7 +72,7 @@ func (pv *pkgVerifier) boxedWhy(variable *types.Var) string {
 		return fmt.Sprintf("%s %s; package-level arrays that are changed or sliced are not supported yet", spelled, pv.addressAt(variable))
 	case holdsArrayValue(t):
 		return fmt.Sprintf("%s %s; package-level structs that hold an array and whose address is taken are not supported yet", spelled, pv.addressAt(variable))
-	case !isStructType(t) && !singleValue(t):
+	case !isStructType(t) && !boxable(t):
 		return fmt.Sprintf("%s %s; only a package-level variable of a struct type, a number, a boolean, or a string may have its address taken, since pointers to anything "+
 			"else are not supported yet", spelled, pv.addressAt(variable))
 	}
@@ -132,7 +132,7 @@ func (v *fnVerifier) noteBoxed(st *state, variable *types.Var) {
 // boxedPointer is the pointer to a kind-3 variable, noted on the path.
 func (v *fnVerifier) boxedPointer(st *state, variable *types.Var) value {
 	v.noteBoxed(st, variable)
-	if singleValue(variable.Type()) {
+	if boxable(variable.Type()) {
 		// A number, a boolean, or a string lives in a box of its own
 		// (F42), which is no element of an array.
 		return value{boxRef(variable), logic.IntLit(0), logic.False()}

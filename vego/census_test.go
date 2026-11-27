@@ -313,7 +313,10 @@ func Generic[T any](x T, p *T) {}
 	}
 	want := map[string]refusal{
 		"pUintptr": rTypeUintptr, "pComplex": rTypeComplex, "pUnsafe": rTypeUnsafe, "pChan": rChannel,
-		"pPtrSlice": rPointerTo, "pPtrMap": rPointerTo, "pPtrPtr": rPointerTo, "pPtrArray": rPointerToArray, "pPtrIface": rPointerTo, "pPtrFunc": rPointerTo,
+		// A pointer to a slice, a map, an interface value, or a function
+		// has a layout since F42, step 2; **S does not, since S holds an
+		// array.
+		"pPtrPtr": rPointerTo, "pPtrArray": rPointerToArray,
 		"pArrayStrings": rTypeArray, "pArrayStruct": rTypeArrayStruct, "pPtrArrayStruct": rTypeArrayStruct,
 		"pMapKey": rTypeMapKey, "pMapStruct": rTypeMapKey, "pIface": rTypeIface, "pErrorIface": rTypeIface,
 		"pMapFloat": rTypeMapKey, "pMapArray": rTypeMapKey, "pMapIface": rTypeMapKey,
@@ -509,7 +512,7 @@ func TestCensus(t *testing.T) {
 		"census/stops.Hidden":               {causes: "no-entry:std", assumed: "assumed:module"},
 		"census/stops.HiddenDecl":           {causes: "no-entry:std", assumed: "assumed:module"},
 		"census/stops.Boxed":                {causes: "closure:recursive", assumed: "assumed:closure"},
-		"census/stops.AddrSlice":            {causes: "pointer:to-non-struct"},
+		"census/stops.AddrSlice":            {},
 		"census/through.Closure":            {},
 		"census/stops.Exists":               {causes: "no-entry:std"},
 		"census/stops.g":                    {},

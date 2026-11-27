@@ -91,3 +91,20 @@ func KeepHiSame() {
 	var b Span
 	KeepHi(&b.lo, &b) // want `vego: precondition of KeepHi may not hold: apart\(p, b\)`
 }
+
+// @Requires out != nil And |*out| < 1000
+// @Modifies out, *out
+// @Ensures |*out'| = |*out| + 1 And (*out')[|*out|] = s
+// @Ensures Forall i in [0, |*out|) : (*out')[i] = (*out)[i]
+// @Ensures fresh(*out) Or within(*out', *out)
+func AppendTo(out *[]string, s string) {
+	*out = append(*out, s)
+}
+
+// @Ensures |r| = 2 And r[0] = "a" And r[1] = "b"
+func CollectTwo() (r []string) {
+	var xs []string
+	AppendTo(&xs, "a")
+	AppendTo(&xs, "b")
+	return xs
+}

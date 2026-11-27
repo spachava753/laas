@@ -1265,7 +1265,7 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 	// is inside a struct, a slice, an array, or a package-level variable,
 	// and a pointer to it would be an interior pointer (A4 of the design
 	// review of F37).
-	if wantPointer && len(path) == 1 && singleValue(t) {
+	if wantPointer && len(path) == 1 && boxable(t) && !isPointerType(t) {
 		if id, ok := ast.Unparen(sel.X).(*ast.Ident); ok {
 			if variable, ok := v.info.ObjectOf(id).(*types.Var); ok && v.boxed[variable] && st.vals[variable] != nil {
 				return st.vals[variable]
@@ -1302,7 +1302,7 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 			v.checkNil(st, guard, where[0], sel.Sel.Pos())
 			t = object
 		}
-		if wantPointer && singleValue(t) {
+		if wantPointer && boxable(t) && !isPointerType(t) {
 			// The embedded field the method is promoted from, which is
 			// addressable since its type has a pointer method (F42).
 			return value{where[0], where[1], logic.False()}
@@ -1348,7 +1348,7 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 	switch {
 	case wantPointer == havePointer:
 		return cur
-	case wantPointer && where != nil && singleValue(t):
+	case wantPointer && where != nil && boxable(t) && !isPointerType(t):
 		// An embedded field of the struct a pointer points to, which is
 		// addressable since its type has a pointer method (F42).
 		return value{where[0], where[1], logic.False()}

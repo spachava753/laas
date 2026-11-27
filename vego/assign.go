@@ -102,6 +102,11 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 			v.unsupported(e.Pos(), typeClass(v.info.TypeOf(e.X)), fmt.Sprintf("pointers of type %s are not supported", v.info.TypeOf(e.X)))
 		}
 		lv.kind, lv.pointer, lv.typ, lv.cells = placeMem, e.X, object, v.cellsOf(object)
+		if isBoxType(object) {
+			// What a box holds has the type the pointer points to, which a
+			// value assigned to it is converted to (an interface value).
+			lv.typ = v.info.TypeOf(e)
+		}
 	case *ast.IndexExpr:
 		t := v.info.TypeOf(e.X)
 		if isArray(t) {

@@ -134,15 +134,48 @@ func isError(t types.Type) bool {
 // which pointee returns. Pointers to anything else, and to a struct that is
 // not modelled, are not modelled.
 func pointee(t types.Type) (types.Type, bool) {
+	return pointeeAt(t, 0)
+}
+
+// pointeeAt is pointee for a pointer reached through depth pointers, which
+// ends a type such as type P *P, whose chain of pointers has no end.
+func pointeeAt(t types.Type, depth int) (types.Type, bool) {
 	pointer, ok := t.Underlying().(*types.Pointer)
-	if !ok {
+	if !ok || depth > 8 {
 		return nil, false
 	}
-	if singleValue(pointer.Elem()) {
+	if boxableAt(pointer.Elem(), depth+1) {
 		return boxOf(pointer.Elem()), true
 	}
 	_, ok = pointer.Elem().Underlying().(*types.Struct)
 	return pointer.Elem(), ok && !holdsArray(pointer.Elem())
+}
+
+// boxable reports whether a pointer to a value of the type points to the
+// box of its type (F37, step 2, and F42, step 2): a number, a boolean, or
+// a string; a slice of anything but arrays; a map, a pointer, an interface
+// value, an error, or a function value that is modelled. A struct is not:
+// a pointer to one points to the struct itself.
+func boxable(t types.Type) bool { return boxableAt(t, 0) }
+
+func boxableAt(t types.Type, depth int) bool {
+	if singleValue(t) {
+		return true
+	}
+	switch u := t.Underlying().(type) {
+	case *types.Slice:
+		return !isArray(u.Elem())
+	case *types.Map:
+		return mapKeyed(t)
+	case *types.Pointer:
+		_, ok := pointeeAt(t, depth)
+		return ok
+	case *types.Interface:
+		return isError(t) || isIface(t)
+	case *types.Signature:
+		return isFunc(t)
+	}
+	return false
 }
 
 // singleValue reports whether a type is a number, a boolean, or a string:
@@ -176,6 +209,10 @@ var boxes = struct {
 // boxOf returns the box of a type of single value.
 func boxOf(t types.Type) types.Type {
 	u := untagged(t.Underlying())
+	if isError(t) {
+		// The underlying type of error is an interface that is no error.
+		u = types.Universe.Lookup("error").Type()
+	}
 	boxes.Lock()
 	defer boxes.Unlock()
 	if box, ok := boxes.known.At(u).(types.Type); ok {
@@ -216,7 +253,7 @@ func (pv *pkgVerifier) valueSize(t types.Type) int64 {
 // storedAs returns the type whose cells hold a variable of type t that
 // lives in memory: the box of a single value, or the type itself.
 func storedAs(t types.Type) types.Type {
-	if singleValue(t) {
+	if boxable(t) {
 		return boxOf(t)
 	}
 	return t
@@ -257,7 +294,7 @@ func layoutOf(t types.Type) ([]leaf, bool) {
 			return one(logic.Ref)
 		}
 	case *types.Pointer:
-		if _, ok := pointee(t); ok && singleValue(u.Elem()) {
+		if _, ok := pointee(t); ok && boxable(u.Elem()) {
 			return []leaf{{"#ptr", logic.Ref, t, partPtr}, {"#at", logic.Int, t, partAt}, {"#arr", logic.Bool, t, partArr}}, true
 		}
 		if _, ok := pointee(t); ok {
@@ -521,7 +558,7 @@ type cell struct {
 // pointer's #arr is false, of its elem region when it is true, and the
 // cell with both, to be chosen by #arr, when it is not known.
 func resolveCells(cells []cell, ptr value) []cell {
-	if len(cells) != 1 || cells[0].either == nil {
+	if !isBoxCells(cells) {
 		return cells
 	}
 	if len(ptr) < 3 {
@@ -533,24 +570,35 @@ func resolveCells(cells []cell, ptr value) []cell {
 	return resolveBox(cells, ptr[2])
 }
 
-// resolveBox resolves the cell of a box for a pointer whose #arr is arr.
+// isBoxCells reports whether cells are those of a box: each has the cell
+// of the elem region beside it.
+func isBoxCells(cells []cell) bool {
+	return len(cells) > 0 && !slices.ContainsFunc(cells, func(c cell) bool { return c.either == nil })
+}
+
+// resolveBox resolves the cells of a box, one for each leaf of what it
+// holds, for a pointer whose #arr is arr.
 func resolveBox(cells []cell, arr *logic.Term) []cell {
-	c := cells[0]
-	switch arr.Op {
-	case logic.OpTrue:
-		return []cell{*c.either}
-	case logic.OpFalse:
-		c.either = nil
-		return []cell{c}
+	out := make([]cell, len(cells))
+	for i, c := range cells {
+		switch arr.Op {
+		case logic.OpTrue:
+			out[i] = *c.either
+		case logic.OpFalse:
+			c.either = nil
+			out[i] = c
+		default:
+			c.arr = arr
+			out[i] = c
+		}
 	}
-	c.arr = arr
-	return []cell{c}
+	return out
 }
 
 // ownPlace is resolveCells for a box at a place of its own: a variable
 // whose address is taken, or what new made.
 func ownPlace(cells []cell) []cell {
-	if len(cells) != 1 || cells[0].either == nil {
+	if !isBoxCells(cells) {
 		return cells
 	}
 	return resolveBox(cells, logic.False())
@@ -598,10 +646,10 @@ func (pv *pkgVerifier) cellsOf(t types.Type) []cell {
 		cells := make([]cell, len(leaves))
 		for i, lf := range leaves {
 			key := "elem " + typeKey(t) + lf.path
-			if singleValue(t) {
+			if boxable(t) {
 				// An element of a []MyInt is an int that &xs[i] can point
 				// to as a *MyInt and convert to an *int.
-				key = "elem " + typeKey(untagged(t.Underlying()))
+				key = "elem " + typeKey(untagged(t.Underlying())) + lf.path
 			}
 			cells[i] = cell{key: key, sort: lf.sort}
 		}
@@ -646,13 +694,13 @@ func (pv *pkgVerifier) cellsOf(t types.Type) []cell {
 			fact := pv.addressedFactOf(field.Pkg())
 			addressable = fact == nil || fact.All || slices.Contains(fact.Names, field.Name())
 		}
-		if singleValue(field.Type()) && addressable {
+		if boxable(field.Type()) && addressable {
 			key = "place " + typeKey(untagged(field.Type().Underlying()))
 		}
 		for _, lf := range inner {
 			c := cell{key: key + lf.path, sort: lf.sort, off: offsets[i]}
 			if box {
-				c.either = &cell{key: "elem " + typeKey(untagged(field.Type().Underlying())), sort: lf.sort}
+				c.either = &cell{key: "elem " + typeKey(untagged(field.Type().Underlying())) + lf.path, sort: lf.sort}
 			}
 			cells = append(cells, c)
 		}
@@ -818,4 +866,10 @@ func (pv *pkgVerifier) wellFormed(val value, t types.Type, brk *logic.Term) *log
 		}
 	}
 	return logic.And(facts...)
+}
+
+// isPointerType reports whether a type is a pointer type.
+func isPointerType(t types.Type) bool {
+	_, ok := t.Underlying().(*types.Pointer)
+	return ok
 }

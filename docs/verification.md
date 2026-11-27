@@ -3944,7 +3944,8 @@ What a `Modifies` entry covers depends on the type at the end of its path.
 
 | The path ends at | Example | The entry covers |
 | --- | --- | --- |
-| a pointer | `Modifies c`, `Modifies p` | the fields of the struct it points to, or the number, boolean, or string it points to |
+| a pointer | `Modifies c`, `Modifies p` | the fields of the struct it points to, or the number, boolean, string, slice, map, pointer, or interface value it points to |
+| `*` of a pointer to a slice, a map, or a pointer | `Modifies *out` | what that slice, map, or pointer refers to |
 | a number, boolean, string, or struct | `Modifies c.n`, `Modifies ps[0]` | that field or element |
 | a slice | `Modifies A`, `Modifies s.items` | the elements, up to the capacity |
 | a map | `Modifies m` | the map |
@@ -4088,9 +4089,36 @@ A field that no code takes the address of is not one a pointer can point to. Suc
 
 These are not supported:
 
-- pointers to slices, maps, pointers, interface values, functions, and arrays;
+- pointers to arrays (see [Pointers to slices, maps, pointers, and interface values](#pointers-to-slices-maps-pointers-and-interface-values) for the other kinds);
 - formatting such a pointer, which `fmt` prints as an address; `%d` of `*p` formats the value;
 - such a pointer as a field of a value that `encoding/json` encodes or decodes, and decoding into one other than `&x` of a variable;
+
+### Pointers to slices, maps, pointers, and interface values
+
+A pointer can also point to a slice, a map, a pointer, an interface value, an error, or a function value: a variable whose address is taken, a field, an element, or what `new` made. `*p` in a formula is what `p` points to, as for a number. `Modifies p` covers what `p` points to: the slice, the map, or the pointer itself. `Modifies *p` covers what that refers to: the elements of the slice up to its capacity, the map's keys and values, or what the pointer points to. A function that appends to the slice that `out` points to lists both:
+
+```go
+// @Requires out != nil And |*out| < 1000
+// @Modifies out, *out
+// @Ensures |*out'| = |*out| + 1 And (*out')[|*out|] = s
+// @Ensures Forall i in [0, |*out|) : (*out')[i] = (*out)[i]
+// @Ensures fresh(*out) Or within(*out', *out)
+func AppendTo(out *[]string, s string) {
+	*out = append(*out, s)
+}
+
+// @Ensures |r| = 2 And r[0] = "a" And r[1] = "b"
+func CollectTwo() (r []string) {
+	var xs []string
+	AppendTo(&xs, "a")
+	AppendTo(&xs, "b")
+	return xs
+}
+```
+
+The last `Ensures` says that the slice is new, or lies in the array it had. Without it, the second call is reported, since the first may have left `xs` holding memory that `CollectTwo` did not make. `Modifies *p` of a pointer to a number, a boolean, or a string is reported with the advice to write `Modifies p`.
+
+A method with a pointer receiver of a named slice type, as `func (t *Tags) Add(s string)`, works the same way, and so does an out-parameter of type `**T` or `*error`. Taking the address of an owned field is not supported (see [Structs that own memory](#structs-that-own-memory)), since a store through the pointer would escape the checks of a store into the field.
 
 ### Types declared inside a function
 
@@ -10967,7 +10995,7 @@ This table lists the most common messages.
 
 A function that uses any of the following is reported as `cannot verify`:
 
-- pointers to slices, maps, pointers, interface values, functions, and arrays; a pointer to a number, a boolean, or a string that would point to a package-level variable of another package; formatting such a pointer, and such a pointer in a value that `encoding/json` encodes or decodes (see [Pointers to numbers, booleans, and strings](#pointers-to-numbers-booleans-and-strings));
+- pointers to arrays; a pointer to a number, a boolean, or a string that would point to a package-level variable of another package; formatting such a pointer, and such a pointer in a value that `encoding/json` encodes or decodes (see [Pointers to numbers, booleans, and strings](#pointers-to-numbers-booleans-and-strings));
 - a call that may end the process in a function literal used as a value, in a function handed to a trusted function, or in a deferred call, and a function value made of a function that may end the process (see [Functions that end the process](#functions-that-end-the-process));
 - calls of a method of an interface that has no contract, in source or in the trust file, and converting a value to an interface with such a method, unless the method is declared by the value's own type of another module, which is not generic, holds no function value, error, or interface value whose methods all have contracts, and is converted to an interface without states (see [Interfaces](#interfaces) and [Values of another module's types](#values-of-another-modules-types)), and a call of a trusted function whose entry writes such a value; of the standard library, only `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, and `(context.Context).Err` have shipped contracts (see [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages));
 - an entry in the trust file for a type of the module of the analysed package, or one with `runs`, `keeps`, or `calls`;

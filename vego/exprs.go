@@ -341,7 +341,7 @@ func (v *fnVerifier) newObject(st *state, t types.Type, val value) value {
 // whose address is taken has one of its own, see findBoxed.
 func (v *fnVerifier) addressOf(e ast.Expr, st *state, guard []*logic.Term) value {
 	_, isStruct := v.info.TypeOf(e).Underlying().(*types.Struct)
-	single := singleValue(v.info.TypeOf(e))
+	single := boxable(v.info.TypeOf(e))
 	_, named := ast.Unparen(e).(*ast.Ident)
 	switch lv := v.place(e); {
 	case single && named && lv.boxGlobal != nil:
@@ -759,8 +759,8 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) v
 		return value{result}
 	case builtin("new"):
 		t := v.info.TypeOf(e.Args[0])
-		if _, isStruct := t.Underlying().(*types.Struct); !isStruct && !singleValue(t) {
-			v.unsupported(e.Pos(), pointerClass(t), fmt.Sprintf("new(%s) is not supported; only structs, numbers, booleans, and strings can be pointed to", t))
+		if _, isStruct := t.Underlying().(*types.Struct); !isStruct && !boxable(t) {
+			v.unsupported(e.Pos(), pointerClass(t), fmt.Sprintf("new(%s) is not supported; only structs, numbers, booleans, strings, slices, maps, pointers, interface values, errors, and functions can be pointed to", t))
 		}
 		// new takes a type, or a value to start from.
 		initial := zeroValue(t)
@@ -922,18 +922,27 @@ func (v *fnVerifier) copiedBytes(st *state, text *logic.Term, to types.Type) val
 // its byte address, and the pointer's #arr is false; an element lies in the
 // elem region at its position, and #arr is true.
 func (v *fnVerifier) interiorAddress(e ast.Expr, st *state, guard []*logic.Term) value {
+	if lv := v.place(e); lv.owned != nil {
+		// A pointer to an owned field could replace what the owner owns
+		// past the checks every store into an owned field gets (owns.go).
+		v.unsupported(e.Pos(), v.addressClass(e), fmt.Sprintf("taking the address of %s is not supported: it is an owned field, and what a pointer to it "+
+			"stores would escape the checks of a store into an owned field; assign the field itself", types.ExprString(e)))
+	}
 	lv := v.lvalue(e, st, guard)
 	if lv.element != nil {
 		// An element of an array in memory: the position of the run's
 		// first element and the index.
 		return value{lv.ref, logic.Add(lv.cells[0].start(lv.at), lv.elementIndex), logic.True()}
 	}
-	if len(lv.cells) != 1 {
-		panic("vego: internal error: a single value has " + fmt.Sprint(len(lv.cells)) + " cells")
-	}
 	// A field of a struct that is an element of a slice is a field: the
-	// region of the cell decides, not the path to it.
+	// region of the cell decides, not the path to it. The cells of a value
+	// of several leaves, as a slice, all lie in one kind of region.
 	c := lv.cells[0]
+	for _, other := range lv.cells[1:] {
+		if strings.HasPrefix(other.key, "elem ") != strings.HasPrefix(c.key, "elem ") || isPlaceKey(other.key) != isPlaceKey(c.key) || other.off != c.off {
+			panic(fmt.Sprintf("vego: internal error: the leaves of %s lie in regions %s and %s", types.ExprString(e), c.key, other.key))
+		}
+	}
 	switch {
 	case strings.HasPrefix(c.key, "elem "):
 		return value{lv.ref, c.start(lv.at), logic.True()}
