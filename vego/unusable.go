@@ -37,7 +37,9 @@ type contractView struct {
 	// of is the contract as written, and fn what a use relies on.
 	of, fn   *funcInfo
 	problems []string
-	cut      bool
+	// class is what a use counts the problems as; see census.go.
+	class refusal
+	cut   bool
 	// partial is set for a contract of a type or an interface method of
 	// which only a call may use the clauses that can be read.
 	partial bool
@@ -60,10 +62,12 @@ func (pv *pkgVerifier) viewOf(fn *funcInfo) *contractView {
 		pv.views = map[*funcInfo]*contractView{}
 	}
 	pv.views[fn] = view
+	view.class = fn.refusedAs
 	if (fn.valueOf != nil || fn.methodOf != nil) && signatureHoldsArray(fn.obj.Type().(*types.Signature)) {
 		// Every call and every value of such a type would pass arrays
 		// through code no verified caller sees, which is not built.
 		view.problems = []string{"its signature takes or returns an array, and function types and methods of interfaces whose signatures hold arrays are not supported yet"}
+		view.class = rTypeArray
 		view.cut = true
 		view.fn = blank(fn)
 		return view
@@ -267,14 +271,14 @@ func (v *fnVerifier) reportUnusable(pos token.Pos, view *contractView, title str
 	for _, problem := range view.problems {
 		if entry := fn.trust; entry != nil && entry.file != nil {
 			if at := v.pkgVerifier.typeArgsNamed(fn.obj); at != "" {
-				v.report(pos, rContractUnusable, "the trusted contract of %s (%s:%d) cannot be used with %s: %s%s", entry.key, filepath.Base(entry.file.path), entry.line,
+				v.report(pos, rGenericTypeArgs, "the trusted contract of %s (%s:%d) cannot be used with %s: %s%s", entry.key, filepath.Base(entry.file.path), entry.line,
 					at, problem, v.pkgVerifier.insteadOf(fn, entry, problem))
 				continue
 			}
-			v.report(pos, rContractUnusable, "the trusted contract of %s (%s:%d) cannot be used: %s", entry.key, filepath.Base(entry.file.path), entry.line, problem)
+			v.report(pos, unusableClass(view), "the trusted contract of %s (%s:%d) cannot be used: %s", entry.key, filepath.Base(entry.file.path), entry.line, problem)
 			continue
 		}
-		v.report(pos, rContractUnusable, "the contract of %s cannot be used: %s", title, problem)
+		v.report(pos, unusableClass(view), "the contract of %s cannot be used: %s", title, problem)
 	}
 }
 

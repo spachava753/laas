@@ -333,7 +333,7 @@ func (v *fnVerifier) addressOf(e ast.Expr, st *state, guard []*logic.Term) value
 	case single && (lv.box == nil || !named):
 		v.unsupported(e.Pos(), v.addressClass(e), interiorRefusal("taking the address of "+types.ExprString(e), v.info.TypeOf(e)))
 	case !isStruct && !single:
-		v.unsupported(e.Pos(), withDetail(rAddrOther, v.info.TypeOf(e).String()), fmt.Sprintf("taking the address of %s is not supported: it is a %s, and only pointers to structs, numbers, booleans, and strings are supported",
+		v.unsupported(e.Pos(), pointerClass(v.info.TypeOf(e)), fmt.Sprintf("taking the address of %s is not supported: it is a %s, and only pointers to structs, numbers, booleans, and strings are supported",
 			types.ExprString(e), v.info.TypeOf(e)))
 	case lv.kind != placeMem:
 		v.unsupported(e.Pos(), v.addressClass(e), fmt.Sprintf("taking the address of %s is not supported", types.ExprString(e)))
@@ -367,11 +367,10 @@ func (v *fnVerifier) unary(e *ast.UnaryExpr, st *state, guard []*logic.Term) val
 	case token.XOR:
 		return value{v.complement(operand, v.info.TypeOf(e), e.Pos())}
 	}
-	class := withDetail(rOpOther, e.Op.String())
 	if e.Op == token.ARROW {
-		class = rChannel
+		v.unsupported(e.Pos(), rChannel, fmt.Sprintf("operator %s is not supported", e.Op))
 	}
-	v.unsupported(e.Pos(), class, fmt.Sprintf("operator %s is not supported", e.Op))
+	v.unsupported(e.Pos(), withDetail(rOpOther, e.Op.String()), fmt.Sprintf("operator %s is not supported", e.Op))
 	return nil
 }
 
@@ -573,7 +572,7 @@ func (v *fnVerifier) fields(cur value, t types.Type, path []int, st *state, guar
 		if !viaPointer {
 			next, fieldType, ok := v.member(st, st.mem, cur, t, index)
 			if !ok {
-				v.unsupported(pos, typeClass(fieldType), fmt.Sprintf("this field has type %s, which is not supported", fieldType))
+				v.unsupported(pos, fieldClass(fieldType), fmt.Sprintf("this field has type %s, which is not supported", fieldType))
 			}
 			cur, t = next, fieldType
 			continue
@@ -581,7 +580,7 @@ func (v *fnVerifier) fields(cur value, t types.Type, path []int, st *state, guar
 		v.checkNil(st, guard, cur[0], pos)
 		field := object.Underlying().(*types.Struct).Field(index).Type()
 		if _, _, ok := fieldLeaves(object, index); !ok {
-			v.unsupported(pos, typeClass(field), fmt.Sprintf("this field has type %s, which is not supported", field))
+			v.unsupported(pos, fieldClass(field), fmt.Sprintf("this field has type %s, which is not supported", field))
 		}
 		pointer := cur
 		cur = v.readAt(st, guard, start, what, pos, func(sink *state, mem memory) value {
@@ -614,7 +613,7 @@ func (v *fnVerifier) literal(e *ast.CompositeLit, t types.Type, st *state, guard
 			}
 			lo, _, ok := fieldLeaves(t, index)
 			if !ok {
-				v.unsupported(element.Pos(), typeClass(u.Field(index).Type()), fmt.Sprintf("field %s has unsupported type %s", u.Field(index).Name(), u.Field(index).Type()))
+				v.unsupported(element.Pos(), fieldClass(u.Field(index).Type()), fmt.Sprintf("field %s has unsupported type %s", u.Field(index).Name(), u.Field(index).Type()))
 			}
 			before := st.brk
 			field := v.settled(st, guard, v.evalAs(initial, u.Field(index).Type(), st, guard), u.Field(index).Type())
@@ -727,7 +726,7 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) v
 	case builtin("new"):
 		t := v.info.TypeOf(e.Args[0])
 		if _, isStruct := t.Underlying().(*types.Struct); !isStruct && !singleValue(t) {
-			v.unsupported(e.Pos(), withDetail(rAddrOther, t.String()), fmt.Sprintf("new(%s) is not supported; only structs, numbers, booleans, and strings can be pointed to", t))
+			v.unsupported(e.Pos(), pointerClass(t), fmt.Sprintf("new(%s) is not supported; only structs, numbers, booleans, and strings can be pointed to", t))
 		}
 		// new takes a type, or a value to start from.
 		initial := zeroValue(t)
@@ -760,7 +759,7 @@ func (v *fnVerifier) makeSlice(e *ast.CallExpr, st *state, guard []*logic.Term) 
 		return v.newMap(st, t)
 	}
 	if !isSlice(t) || len(e.Args) < 2 {
-		v.unsupported(e.Pos(), withDetail(rBuiltin, "make"), "make is only supported for slices with a length")
+		v.unsupported(e.Pos(), makeClass(t), "make is only supported for slices with a length")
 	}
 	if _, ok := elemLayout(elemType(t)); !ok {
 		v.unsupported(e.Pos(), elemClass(elemType(t)), fmt.Sprintf("slices of %s are not supported", elemType(t)))

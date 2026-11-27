@@ -22,7 +22,7 @@ import (
 // classifiers are the functions whose result a place that refuses may hand
 // unsupported as its class, besides a constant and withDetail of one.
 var classifiers = map[string]bool{
-	"typeClass": true, "elemClass": true, "mapClass": true, "stmtClass": true, "rangeClass": true,
+	"typeClass": true, "elemClass": true, "mapClass": true, "stmtClass": true, "rangeClass": true, "unusableClass": true, "fieldClass": true, "pointerClass": true, "makeClass": true,
 	"addressClass": true, "callClass": true, "varClass": true, "funcValueClass": true,
 }
 
@@ -81,14 +81,52 @@ func TestRefusalClasses(t *testing.T) {
 			}
 		}
 	}
+	// funcs holds the functions and literals of the files, innermost last,
+	// with whether each has a parameter named class.
+	type scope struct {
+		from, to token.Pos
+		class    bool
+	}
+	var funcs []scope
+	for _, file := range parsed {
+		ast.Inspect(file, func(n ast.Node) bool {
+			var ft *ast.FuncType
+			switch n := n.(type) {
+			case *ast.FuncDecl:
+				ft = n.Type
+			case *ast.FuncLit:
+				ft = n.Type
+			}
+			if ft != nil {
+				has := false
+				for _, field := range ft.Params.List {
+					for _, name := range field.Names {
+						has = has || name.Name == "class"
+					}
+				}
+				funcs = append(funcs, scope{n.Pos(), n.End(), has})
+			}
+			return true
+		})
+	}
+	// passedOn reports whether the class at a position is a parameter of
+	// the innermost function around it, which refuses on behalf of its
+	// caller and is held to it where that calls it.
+	passedOn := func(at token.Pos) bool {
+		inner := scope{}
+		for _, f := range funcs {
+			if f.from <= at && at < f.to && f.from >= inner.from {
+				inner = f
+			}
+		}
+		return inner.class
+	}
 	// check reports a class argument that is none of the accepted forms.
 	var check func(e ast.Expr, at token.Pos)
 	check = func(e ast.Expr, at token.Pos) {
 		switch e := e.(type) {
 		case *ast.Ident:
-			if e.Name == "class" {
-				// A function that refuses on behalf of its caller, which
-				// names the class.
+			if e.Name == "class" && passedOn(at) {
 				return
 			}
 			if !declared[e.Name] {
@@ -138,10 +176,14 @@ func TestRefusalClasses(t *testing.T) {
 				switch fun := n.Fun.(type) {
 				case *ast.SelectorExpr:
 					name = fun.Sel.Name
+					// The ownership walk's refusals, reported later.
+					if x, ok := fun.X.(*ast.Ident); ok && x.Name == "fl" && name == "refuse" {
+						name = "report"
+					}
 				case *ast.Ident:
 					name = fun.Name
 				}
-				if name == "report" {
+				if name == "report" || name == "fault" {
 					reports++
 					if len(n.Args) < 3 {
 						t.Errorf("%s: report takes a position, a class, and a message", fset.Position(n.Pos()))
@@ -270,7 +312,7 @@ func Generic[T any](x T, p *T) {}
 	}
 	want := map[string]refusal{
 		"pUintptr": rTypeUintptr, "pComplex": rTypeComplex, "pUnsafe": rTypeUnsafe, "pChan": rChannel,
-		"pPtrSlice": rPointerTo, "pPtrMap": rPointerTo, "pPtrPtr": rPointerTo, "pPtrArray": rPointerTo, "pPtrIface": rPointerTo, "pPtrFunc": rPointerTo,
+		"pPtrSlice": rPointerTo, "pPtrMap": rPointerTo, "pPtrPtr": rPointerTo, "pPtrArray": rPointerToArray, "pPtrIface": rPointerTo, "pPtrFunc": rPointerTo,
 		"pArrayStrings": rTypeArray, "pArrayStruct": rTypeArrayStruct, "pPtrArrayStruct": rTypeArrayStruct,
 		"pMapKey": rTypeMapKey, "pMapStruct": rTypeMapKey, "pIface": rTypeIface, "pErrorIface": rTypeIface,
 		"pMapFloat": rTypeMapKey, "pMapArray": rTypeMapKey, "pMapIface": rTypeMapKey,
@@ -289,6 +331,11 @@ func Generic[T any](x T, p *T) {}
 	}
 	generic := pkg.Scope().Lookup("Generic").Type().(*types.Signature)
 	for param := range generic.Params().Variables() {
+		// layoutOf gives a type parameter itself the layout of an
+		// interface value; a pointer to one has none.
+		if _, ok := layoutOf(param.Type()); ok {
+			continue
+		}
 		if got := typeClass(param.Type()).class(); got != string(rGenericTypeParam) {
 			t.Errorf("typeClass(%s) = %s, want %s", param.Type(), got, rGenericTypeParam)
 		}
@@ -444,6 +491,8 @@ func TestCensus(t *testing.T) {
 		"census/stops.EncodeThenChannel":   {causes: "channel:use"},
 		"census/stops.Twice":               {causes: "channel:use"},
 		"census/stops.UnusableThenChannel": {causes: "channel:use contract:unusable"},
+		"census/stops.Wrap":                {causes: "scoped:kept"},
+		"census/stops.Feed":                {causes: "channel:use"},
 		"census/stops.Broken":              {causes: "annotation:broken", partial: true, stopped: true},
 		"census/first.Address":             {causes: "address-of:field"},
 		"census/first.Stat":                {causes: "no-entry:std"},

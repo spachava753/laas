@@ -99,7 +99,7 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 	case *ast.StarExpr:
 		object, ok := pointee(v.info.TypeOf(e.X))
 		if !ok {
-			v.unsupported(e.Pos(), typeClass(v.info.TypeOf(e)), fmt.Sprintf("pointers of type %s are not supported", v.info.TypeOf(e.X)))
+			v.unsupported(e.Pos(), typeClass(v.info.TypeOf(e.X)), fmt.Sprintf("pointers of type %s are not supported", v.info.TypeOf(e.X)))
 		}
 		lv.kind, lv.pointer, lv.typ, lv.cells = placeMem, e.X, object, v.cellsOf(object)
 	case *ast.IndexExpr:
@@ -178,7 +178,7 @@ func (v *fnVerifier) fieldPlace(e *ast.SelectorExpr) lvalue {
 		field := lv.typ.Underlying().(*types.Struct).Field(index)
 		lo, hi, ok := fieldLeaves(lv.typ, index)
 		if !ok {
-			v.unsupported(e.Pos(), typeClass(field.Type()), fmt.Sprintf("field %s has unsupported type %s", field.Name(), field.Type()))
+			v.unsupported(e.Pos(), fieldClass(field.Type()), fmt.Sprintf("field %s has unsupported type %s", field.Name(), field.Type()))
 		}
 		lv.owned = nil
 		if ownedFieldAt(lv.typ, index) {

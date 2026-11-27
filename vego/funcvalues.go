@@ -158,8 +158,11 @@ func (pv *pkgVerifier) checkValueContract(fn *funcInfo) {
 	}
 	entry := fn.trust != nil
 	misreading := false
-	fault := func(at token.Pos, format string, args ...any) {
+	fault := func(at token.Pos, class refusal, format string, args ...any) {
 		fn.broken = true
+		if class != rAnnotationFault && fn.refusedAs == "" {
+			fn.refusedAs = class
+		}
 		// A contract refused for anything but a clause that cannot be read
 		// is used nowhere; see viewOf.
 		fn.faulted = fn.faulted || !misreading
@@ -167,26 +170,26 @@ func (pv *pkgVerifier) checkValueContract(fn *funcInfo) {
 			fn.defect(format, args...)
 			return
 		}
-		pv.report(at, rAnnotationFault, format, args...)
+		pv.report(at, class, format, args...)
 	}
 	// A Vouches annotation adds to a contract; alone, it would be the
 	// whole contract without anyone having written one.
 	if !entry && len(fn.vouchClauses) > 0 && len(fn.requires) == 0 && len(fn.ensures) == 0 && len(fn.modifies) == 0 {
-		fault(fn.vouchClauses[0].pos, "%s has a Vouches annotation and no other clause; a Vouches annotation adds to a contract, so write one, as in // @Ensures True", title)
+		fault(fn.vouchClauses[0].pos, rAnnotationFault, "%s has a Vouches annotation and no other clause; a Vouches annotation adds to a contract, so write one, as in // @Ensures True", title)
 	}
 	// An entry names unnamed results as a trusted contract does.
 	for _, result := range fn.results {
 		if !entry && (result.Name() == "" || result.Name() == "_") {
-			fault(at, "%s has a contract, so each of its results needs a name, as in %s", title, example)
+			fault(at, rAnnotationFault, "%s has a contract, so each of its results needs a name, as in %s", title, example)
 			break
 		}
 	}
 	for _, variable := range slices.Concat(fn.params, fn.results) {
 		if _, ok := layoutOf(variable.Type()); !ok {
-			fault(at, "%s has a contract, and its %s has type %s, which is not supported", title, describe(variable), variable.Type())
+			fault(at, typeClass(variable.Type()), "%s has a contract, and its %s has type %s, which is not supported", title, describe(variable), variable.Type())
 		}
 		if variable.Name() != "" && fn.ambiguous(variable.Name(), false) {
-			fault(at, "%s names %s, which means something else in annotations; rename it", title, variable.Name())
+			fault(at, rAnnotationFault, "%s names %s, which means something else in annotations; rename it", title, variable.Name())
 		}
 	}
 	if fn.broken {
@@ -197,10 +200,10 @@ func (pv *pkgVerifier) checkValueContract(fn *funcInfo) {
 			misreading = true
 			defer func() { misreading = false }()
 			if entry {
-				fault(c.pos, "in its %s %q: %v", c.kind, c.text, err)
+				fault(c.pos, rAnnotationFault, "in its %s %q: %v", c.kind, c.text, err)
 				return
 			}
-			fault(c.pos, "in %s annotation: %v", c.kind, err)
+			fault(c.pos, rAnnotationFault, "in %s annotation: %v", c.kind, err)
 		}
 		state := v.enter()
 		// A census uses the contract as if every check of whether it can
@@ -218,13 +221,13 @@ func (pv *pkgVerifier) checkValueContract(fn *funcInfo) {
 			return
 		}
 		if v.quickly(state, nil, logic.False()) {
-			fault(at, "nothing can satisfy the Requires clauses of %s together with what the types of its parameters guarantee, "+
+			fault(at, rAnnotationFault, "nothing can satisfy the Requires clauses of %s together with what the types of its parameters guarantee, "+
 				"so no value of the type could be called", title)
 			return
 		}
 		v.primedPaths(fn)
 		for _, refused := range v.entryOnly(state) {
-			fault(refused.clause.pos, "%s", refused.message(title))
+			fault(refused.clause.pos, rAnnotationFault, "%s", refused.message(title))
 		}
 		if !entry {
 			for _, defect := range fn.defects {
@@ -232,11 +235,11 @@ func (pv *pkgVerifier) checkValueContract(fn *funcInfo) {
 			}
 		}
 		if _, post, _ := v.contractInstance(state); pv.contradictory(post) {
-			fault(at, "the contract of %s contradicts itself, so a call of a value of the type would prove anything", title)
+			fault(at, rAnnotationFault, "the contract of %s contradicts itself, so a call of a value of the type would prove anything", title)
 			return
 		}
 		if !v.canBeMet(state) {
-			fault(at, "the Ensures clauses of %s are not proved to be satisfiable for every call that its Requires allow, "+
+			fault(at, rAnnotationFault, "the Ensures clauses of %s are not proved to be satisfiable for every call that its Requires allow, "+
 				"by results and a change of what Modifies lists; a value of the type is taken to meet them, so a call of one could prove something false. "+
 				"State in the Requires when some result exists, or weaken the Ensures", title)
 		}
@@ -824,7 +827,7 @@ func (pv *pkgVerifier) valueContract(t types.Type) *funcInfo {
 	// A census takes a function type of the module that has no contract
 	// with the weakest one.
 	if named, ok := types.Unalias(t).(*types.Named); fn == nil && ok && isFunc(t) && pv.census != nil {
-		if name := named.Origin().Obj(); name.Pkg() != nil && pv.inScope(name.Pkg().Path()) {
+		if name := named.Origin().Obj(); name.Pkg() != nil && pv.inScope(name.Pkg()) {
 			return pv.assumedType(name)
 		}
 	}
@@ -2080,7 +2083,7 @@ func (v *fnVerifier) stratified(lit *ast.FuncLit) {
 		inPlace[inner] = true
 	}
 	refuse := func(pos token.Pos, what string) {
-		v.unsupported(pos, rLitRecursion, fmt.Sprintf("the function literal used as a value %s, and code that a function value runs cannot do that yet: "+
+		v.unsupported(pos, rFuncCallsValues, fmt.Sprintf("the function literal used as a value %s, and code that a function value runs cannot do that yet: "+
 			"no contract of a function type has a variant, so nothing would prove that such calls end. "+
 			"Make the value in code that is not verified, or keep that call out of the literal", what))
 	}

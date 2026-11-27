@@ -49,7 +49,7 @@ func (pv *pkgVerifier) placeExits(fn *funcInfo, c *clause) {
 		pv.report(c.pos, rAnnotationUnsupported, "an Exits annotation takes nothing after the keyword: the form with a condition, as in // @Exits %s, is not supported yet", strings.TrimSpace(c.text))
 		fn.broken = true
 	case fn.obj.Type().(*types.Signature).Recv() != nil:
-		pv.report(c.pos, rAnnotationFault, "%s", exitsOnMethod)
+		pv.report(c.pos, rAnnotationUnsupported, "%s", exitsOnMethod)
 		fn.broken = true
 	case fn.exitsClause != nil:
 		pv.report(c.pos, rAnnotationFault, "function %s already has an Exits annotation", fn.obj.Name())

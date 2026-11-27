@@ -1277,7 +1277,7 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 				continue
 			}
 			if _, _, ok := fieldLeaves(t, index); !ok {
-				v.unsupported(sel.Sel.Pos(), typeClass(field), fmt.Sprintf("this field has type %s, which is not supported", field))
+				v.unsupported(sel.Sel.Pos(), fieldClass(field), fmt.Sprintf("this field has type %s, which is not supported", field))
 			}
 			from, at := types.NewPointer(t), where
 			where = v.readAt(st, guard, start, what, sel.Sel.Pos(), func(sink *state, mem memory) value {
@@ -1309,7 +1309,7 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 		}
 		fieldType := object.Underlying().(*types.Struct).Field(index).Type()
 		if _, _, ok := fieldLeaves(object, index); !ok {
-			v.unsupported(sel.Sel.Pos(), typeClass(fieldType), fmt.Sprintf("this field has type %s, which is not supported", fieldType))
+			v.unsupported(sel.Sel.Pos(), fieldClass(fieldType), fmt.Sprintf("this field has type %s, which is not supported", fieldType))
 		}
 		from, pointer := t, cur
 		var next value

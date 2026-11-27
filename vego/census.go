@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/token"
 	"go/types"
 	"os"
@@ -35,6 +36,14 @@ func (r refusal) class() string {
 	return class
 }
 
+// check panics for a class that is not one of refusalClasses, which
+// TestRefusalClasses holds every place that refuses to.
+func (r refusal) check() {
+	if refusalClasses[refusal(r.class())] == "" {
+		panic(fmt.Sprintf("vego: internal error: %q is not a class of refusalClasses", r))
+	}
+}
+
 // withDetail adds a detail to a class.
 func withDetail(class refusal, detail string) refusal {
 	return refusal(string(class) + "|" + detail)
@@ -58,6 +67,7 @@ const (
 	rTypeArrayElem         refusal = "type:array-elem"
 	rTypeMapKey            refusal = "type:map-key"
 	rPointerTo             refusal = "pointer:to-non-struct"
+	rPointerToArray        refusal = "pointer:to-array"
 	rChannel               refusal = "channel:use"
 	rGoroutine             refusal = "goroutine:go"
 	rSelect                refusal = "select:statement"
@@ -99,7 +109,6 @@ const (
 	rDynAs                 refusal = "dyntype:errors-as"
 	rLitValue              refusal = "func-literal:value"
 	rLitCaptures           refusal = "func-literal:captures"
-	rLitRecursion          refusal = "func-literal:recursion"
 	rLitSignature          refusal = "func-literal:signature"
 	rClosure               refusal = "closure:recursive"
 	rFuncNoContract        refusal = "func-value:no-contract"
@@ -193,6 +202,10 @@ const (
 	rLimitAttempts    refusal = "limit:attempts"
 	rAnnotationBroken refusal = "annotation:broken"
 	rAnnotateCalls    refusal = "annotate:calls"
+	rOwnsKept         refusal = "owns:kept"
+	rOwnsSelf         refusal = "owns:self"
+	rOwnsReturned     refusal = "owns:returned"
+	rScopedKept       refusal = "scoped:kept"
 
 	// What a report is when it is not a refusal: an obligation that was not
 	// proved, which a user meets by annotating or changing the code, and a
@@ -219,7 +232,8 @@ var refusalClasses = map[refusal]string{
 	rTypeArrayStruct:       "a struct that holds an array of elements larger than a byte, or a pointer to one (Structs and pointers, What F36 left)",
 	rTypeArrayElem:         "a slice, map, or channel whose elements are arrays (Structs and pointers, What F36 left)",
 	rTypeMapKey:            "a map whose keys are not numbers, strings, or booleans, as pointers or structs (Maps, Not built yet)",
-	rPointerTo:             "a pointer to a slice, a map, a pointer, an interface value, a function, or an array (item 7)",
+	rPointerTo:             "a pointer to a slice, a map, a pointer, an interface value, or a function, the address of one, or new of one (item 7)",
+	rPointerToArray:        "a pointer to an array, the address of one, or new of one (Structs and pointers, What F36 left)",
 	rChannel:               "a channel: a value of a channel type, a send, a receive, or a range over one (item 11)",
 	rGoroutine:             "a go statement (item 11)",
 	rSelect:                "a select statement (item 6 and item 11)",
@@ -233,7 +247,7 @@ var refusalClasses = map[refusal]string{
 	rAddrField:             "&s.f of a number, a boolean, or a string, or a pointer method called on such a field (item 7, interior pointers)",
 	rAddrElement:           "&xs[i] or &a[i] of a number, a boolean, or a string, or a pointer method called on such an element (item 7, interior pointers)",
 	rAddrGlobal:            "&g of a package-level variable, or a pointer method called on one (item 7, interior pointers)",
-	rAddrOther:             "the address of anything else that is not a struct or a single value, or new of such a type (item 7)",
+	rAddrOther:             "the address of a value that is not where a pointer can point, not in another class (item 7)",
 	rIfaceNoContract:       "a call through an interface whose method has no contract, of the standard library or of another module (Interfaces)",
 	rIfaceForm:             "a call through an interface in a form not supported: a method expression, an embedded interface field, an interface not modelled (Interfaces)",
 	rConvOptional:          "a conversion between interfaces with the methods of an optional interface of another module (Dynamic types, Part 3)",
@@ -261,7 +275,6 @@ var refusalClasses = map[refusal]string{
 	rDynAs:                 "errors.As in a form not supported (Dynamic types)",
 	rLitValue:              "a function literal used as a value whose type has no contract (Function literals, Function values)",
 	rLitCaptures:           "a function literal used as a value that assigns or calls what the function around it holds (Function literals)",
-	rLitRecursion:          "a function literal used as a value that calls through values or recursion with no variant (Function values)",
 	rLitSignature:          "a function literal whose parameters or results have no model, or a literal used in a way not supported (Function literals)",
 	rClosure:               "a recursive closure in a form not supported (Function literals)",
 	rFuncNoContract:        "a call through a value of a function type that has no contract, of the standard library, of another module, or unnamed (Function values)",
@@ -269,7 +282,7 @@ var refusalClasses = map[refusal]string{
 	rFuncMethodExpr:        "a method expression T.M used as a value (Function values)",
 	rFuncMadeFrom:          "a function value made from something other than a literal, a function, or a method value (Function values)",
 	rFuncTrusted:           "a trusted function used as a value of a function type (Function values)",
-	rFuncCallsValues:       "a function used as a value that calls through function or interface values (Function values)",
+	rFuncCallsValues:       "a value that calls a value: a function or a function literal used as a value that calls through function or interface values, or with recursion and no variant (Function values)",
 	rHandUnknownCode:       "a value that may carry code nobody has seen handed to a trusted function (Callbacks handed to trusted functions)",
 	rHandNoContract:        "a function with no contract handed to a trusted function that calls it (Callbacks handed to trusted functions)",
 	rHandEntry:             "a function handed to a trusted function whose entry lists it under runs or keeps without a contract (Callbacks handed to trusted functions)",
@@ -349,6 +362,10 @@ var refusalClasses = map[refusal]string{
 	rDeclaredInputs:        "a shipped entry that only the declaration that inputs end makes usable; not a cause",
 	rInternal:              "a panic of the verifier that is no refusal; the census stops the function there (The prover)",
 	rLimitAttempts:         "more refusals in one function than the census follows; it stops the function there (The prover)",
+	rOwnsKept:              "memory an owner owns kept elsewhere: stored, held by a method value or a literal, or handed to what may keep it (Ownership in source)",
+	rOwnsSelf:              "an owner that may come to own itself (Ownership in source)",
+	rOwnsReturned:          "memory an owner owns returned where no contract can place it (Ownership in source)",
+	rScopedKept:            "a value scoped to a call, as an http.ResponseWriter or a *http.Request, kept where a later call could use it (Footprints, The writer of a handler)",
 	rAnnotateCalls:         "a call of a parameter of an unnamed function type, which a Calls annotation on the function gives a contract; not a cause",
 	rAnnotationBroken:      "a function whose annotations cannot be read, which is not looked at (The annotation language)",
 	rObligation:            "an obligation that was not proved; not a cause",
@@ -368,6 +385,9 @@ var proofClasses = map[refusal]bool{
 // with the type as its detail. It follows layoutOf case by case, to the
 // case that has no layout; TestTypeClass holds the two together.
 func typeClass(t types.Type) refusal {
+	if _, ok := layoutOf(t); ok {
+		panic(fmt.Sprintf("vego: internal error: a refusal is classed by the type %s, which has a layout", t))
+	}
 	r := typeClassOf(t)
 	if t == nil {
 		return r
@@ -402,10 +422,10 @@ func typeClassOf(t types.Type) refusal {
 	case *types.Interface:
 		return rTypeIface
 	case *types.Pointer:
+		if isArray(u.Elem()) {
+			return rPointerToArray
+		}
 		if holdsArray(u.Elem()) {
-			if isArray(u.Elem()) {
-				return rPointerTo
-			}
 			return rTypeArrayStruct
 		}
 		if _, isTP := types.Unalias(u.Elem()).(*types.TypeParam); isTP {
@@ -424,6 +444,37 @@ func typeClassOf(t types.Type) refusal {
 		return rChannel
 	}
 	return rTypeOther
+}
+
+// fieldClass is typeClass for the type of a field, where an array of
+// elements larger than a byte is not modelled (fieldLayout).
+func fieldClass(t types.Type) refusal {
+	if isArray(t) {
+		return withDetail(rTypeArrayStruct, t.String())
+	}
+	return typeClass(t)
+}
+
+// pointerClass returns the class of the address of, or new of, a value of
+// a type that a pointer cannot point to.
+func pointerClass(t types.Type) refusal {
+	if isArray(t) {
+		return withDetail(rPointerToArray, t.String())
+	}
+	return withDetail(rPointerTo, t.String())
+}
+
+// makeClass returns the class of a make that is not of a slice with a
+// length.
+func makeClass(t types.Type) refusal {
+	_, isChan := t.Underlying().(*types.Chan)
+	switch {
+	case isChan:
+		return withDetail(rChannel, t.String())
+	case isMap(t):
+		return mapClass(t)
+	}
+	return withDetail(rBuiltin, "make")
 }
 
 // elemClass is typeClass for the elements of a slice or a map, where an
@@ -502,16 +553,26 @@ func (v *fnVerifier) addressClass(e ast.Expr) refusal {
 func (v *fnVerifier) callClass(callee *types.Func) refusal {
 	name := callee.FullName()
 	switch {
-	case callee.Pkg() != nil && v.pkgVerifier.inScope(callee.Pkg().Path()) && isGeneric(callee):
+	case callee.Pkg() != nil && v.pkgVerifier.inScope(callee.Pkg()) && isGeneric(callee):
 		// A generic function of the project waits for generic functions
 		// to be verified, not for an entry.
 		return withDetail(rGenericCalled, name)
-	case callee.Pkg() != nil && v.pkgVerifier.inScope(callee.Pkg().Path()):
+	case callee.Pkg() != nil && v.pkgVerifier.inScope(callee.Pkg()):
 		return withDetail(rNoEntryModule, name)
-	case callee.Pkg() == nil || stdPackage(callee.Pkg().Path()):
+	case callee.Pkg() == nil || v.pkgVerifier.stdPackage(callee.Pkg()):
 		return withDetail(rNoEntryStd, name)
 	}
 	return withDetail(rNoEntryOther, name)
+}
+
+// unusableClass returns the class of a use of a contract that cannot be
+// used: that of the Go it was refused for where it is declared, or else
+// contract:unusable.
+func unusableClass(view *contractView) refusal {
+	if view.class != "" {
+		return view.class
+	}
+	return rContractUnusable
 }
 
 // stmtClass returns the class of a statement of a kind that is not
@@ -542,21 +603,42 @@ func rangeClass(t types.Type) refusal {
 
 // inScope reports whether a package is one of the module a census looks
 // at. Outside a census no package is.
-func (pv *pkgVerifier) inScope(path string) bool {
+func (pv *pkgVerifier) inScope(pkg *types.Package) bool {
 	switch {
-	case pv.census == nil || !pv.census.looked:
+	case pv.census == nil || !pv.census.looked || pkg == nil:
 		return false
 	case pv.census.scope == "std":
-		return stdPackage(path)
+		return pv.stdPackage(pkg)
 	}
-	return path == pv.census.scope || strings.HasPrefix(path, pv.census.scope+"/")
+	return pkg.Path() == pv.census.scope || strings.HasPrefix(pkg.Path(), pv.census.scope+"/")
 }
 
-// stdPackage reports whether a package path is one of the standard
-// library's: its first element has no dot.
-func stdPackage(path string) bool {
-	first, _, _ := strings.Cut(path, "/")
-	return !strings.Contains(first, ".") && path != "main"
+// stdPackage reports whether a package is one of the standard library's:
+// its files are under the source of GOROOT. A path without a dot is no
+// test of it, since a GOPATH package or a module may have one (F14 of the
+// review of F41).
+func (pv *pkgVerifier) stdPackage(pkg *types.Package) bool {
+	if known, ok := stdPackages.Load(pkg.Path()); ok {
+		return known.(bool)
+	}
+	std := false
+	for _, name := range pkg.Scope().Names() {
+		if file := pv.pass.Fset.Position(pkg.Scope().Lookup(name).Pos()).Filename; file != "" {
+			std = inGoroot(file)
+			break
+		}
+	}
+	stdPackages.Store(pkg.Path(), std)
+	return std
+}
+
+// stdPackages holds, by path, whether each package met is of the standard
+// library.
+var stdPackages sync.Map
+
+// inGoroot reports whether a file lies in the source of GOROOT.
+func inGoroot(file string) bool {
+	return strings.HasPrefix(file, filepath.Join(build.Default.GOROOT, "src")+string(filepath.Separator))
 }
 
 // The census mode. A census looks at every function with a body of the
@@ -649,7 +731,7 @@ func censusPackage(pass *analysis.Pass, scope string) bool {
 	path := pass.Pkg.Path()
 	switch {
 	case scope == "std":
-		return (pass.Module == nil || pass.Module.Path == "") && stdPackage(path)
+		return len(pass.Files) > 0 && inGoroot(pass.Fset.Position(pass.Files[0].Pos()).Filename)
 	case pass.Module != nil && pass.Module.Path != "":
 		return pass.Module.Path == scope
 	}

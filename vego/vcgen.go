@@ -870,6 +870,7 @@ func (v *fnVerifier) checkEntry(st *state) {
 }
 
 func (v *fnVerifier) unsupported(pos token.Pos, class refusal, msg string) {
+	class.check()
 	v.censusRefused()
 	panic(unsupported{pos, msg, class})
 }

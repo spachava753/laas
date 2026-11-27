@@ -355,7 +355,7 @@ func changed(a, b memory) bool {
 // where they fail, nothing changes.
 func (v *fnVerifier) inline(lit *ast.FuncLit, args []value, st *state, guard []*logic.Term, site inlineSite) []value {
 	if v.inlining[lit] {
-		v.unsupported(site.pos, rLitRecursion, "the function literal calls itself, which cannot be verified where it is written")
+		v.unsupported(site.pos, rClosure, "the function literal calls itself, which cannot be verified where it is written")
 	}
 	v.inlining[lit] = true
 	defer delete(v.inlining, lit)

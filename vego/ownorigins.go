@@ -191,8 +191,9 @@ func (f *ownFact) join(g ownFact) bool {
 
 // ownRefusal is an operation the analysis refuses.
 type ownRefusal struct {
-	pos token.Pos
-	msg string
+	pos   token.Pos
+	class refusal
+	msg   string
 }
 
 // ownResult is what the summary says of a result.
@@ -221,7 +222,7 @@ type ownFlow struct {
 	litAssign map[*types.Var]bool
 }
 
-func (fl *ownFlow) refuse(pos token.Pos, format string, args ...any) {
+func (fl *ownFlow) refuse(pos token.Pos, class refusal, format string, args ...any) {
 	if !fl.emitting {
 		return
 	}
@@ -231,7 +232,7 @@ func (fl *ownFlow) refuse(pos token.Pos, format string, args ...any) {
 		return
 	}
 	fl.reported[key] = true
-	fl.refusals = append(fl.refusals, ownRefusal{pos: pos, msg: msg})
+	fl.refusals = append(fl.refusals, ownRefusal{pos: pos, class: class, msg: msg})
 }
 
 // ownsAnything reports whether the analysis has anything to decide in a
@@ -481,7 +482,7 @@ func (v *fnVerifier) ownStoreMemory(fl *ownFlow, at ast.Expr, kind ownKind, f *o
 		if at != nil {
 			spelled = types.ExprString(at)
 		}
-		fl.refuse(pos, "%s is memory that %s owns, %s; it may be read and written here, but not kept elsewhere: copy it, or do not declare the field owned",
+		fl.refuse(pos, rOwnsKept, "%s is memory that %s owns, %s; it may be read and written here, but not kept elsewhere: copy it, or do not declare the field owned",
 			spelled, v.rootName(root), where)
 		break
 	}
@@ -541,13 +542,13 @@ func (v *fnVerifier) ownStoreOwned(fl *ownFlow, target *ast.SelectorExpr, rhs as
 	// its own struct (the reviewer's program of step 4).
 	for tag := range kind.tags {
 		if base.tags[tag] || root.tag == tag {
-			fl.refuse(target.Pos(), "%s may come to hold %s itself, whose footprint would then lie in what it owns; an owner cannot own itself",
+			fl.refuse(target.Pos(), rOwnsSelf, "%s may come to hold %s itself, whose footprint would then lie in what it owns; an owner cannot own itself",
 				types.ExprString(target), types.ExprString(rhs))
 		}
 	}
 	for p := range kind.params {
 		if base.params[p] || root.param == p {
-			fl.refuse(target.Pos(), "%s may come to hold %s itself, whose footprint would then lie in what it owns; an owner cannot own itself",
+			fl.refuse(target.Pos(), rOwnsSelf, "%s may come to hold %s itself, whose footprint would then lie in what it owns; an owner cannot own itself",
 				types.ExprString(target), types.ExprString(rhs))
 		}
 	}
@@ -729,7 +730,7 @@ func (v *fnVerifier) refuseScoped(fl *ownFlow, pos token.Pos, kind ownKind, wher
 	if len(spelled) > 0 && spelled[0] != "" && spelled[0] != what {
 		what = spelled[0] + ", which holds " + kind.scoped + ","
 	}
-	fl.refuse(pos, "%s is or holds a %s.%s, which must not be used after the call that received it returns, and here it is %s, where a later call could use it; "+
+	fl.refuse(pos, rScopedKept, "%s is or holds a %s.%s, which must not be used after the call that received it returns, and here it is %s, where a later call could use it; "+
 		"pass it on only to calls that keep nothing of it", what, kind.decl.pkg, kind.decl.typ, where)
 }
 
@@ -766,7 +767,7 @@ func (v *fnVerifier) ownKindOfAny(fl *ownFlow, e ast.Expr, f *ownFact) ownKind {
 				base = v.ownAddress(fl, x.X, f)
 			}
 			if len(v.ownResolve(base, f).inside) > 0 {
-				fl.refuse(x.Pos(), "the method value %s holds memory that an owner owns, and a method value may keep it; call the method instead", types.ExprString(x))
+				fl.refuse(x.Pos(), rOwnsKept, "the method value %s holds memory that an owner owns, and a method value may keep it; call the method instead", types.ExprString(x))
 			}
 			// A method value of a scoped value holds it.
 			return ownKind{unknown: "it is a method value", scoped: base.scoped, decl: base.decl}
@@ -942,7 +943,7 @@ func (v *fnVerifier) ownCaptured(fl *ownFlow, lit *ast.FuncLit, f *ownFact) {
 			kind.scoped, kind.decl = variable.Name(), d
 		}
 		for root := range kind.inside {
-			fl.refuse(lit.Pos(), "the function literal at %s captures %s, which is memory that %s owns; read what the literal needs before it "+
+			fl.refuse(lit.Pos(), rOwnsKept, "the function literal at %s captures %s, which is memory that %s owns; read what the literal needs before it "+
 				"and pass that in, or do not declare the field owned", v.placeOf(lit.Pos()), variable.Name(), v.rootName(root))
 			break
 		}
@@ -1363,7 +1364,7 @@ func (v *fnVerifier) ownResults(fl *ownFlow, e ast.Expr, count int, f *ownFact) 
 		kind := kinds[i]
 		if c.keeps(op.param) {
 			for root := range kind.inside {
-				fl.refuse(op.expr.Pos(), "what is handed to %s as %s is memory that %s owns, and %s; copy it, or do not declare the field owned",
+				fl.refuse(op.expr.Pos(), rOwnsKept, "what is handed to %s as %s is memory that %s owns, and %s; copy it, or do not declare the field owned",
 					c.name, v.paramName(op.param), v.rootName(root), c.why)
 				break
 			}
@@ -1389,7 +1390,7 @@ func (v *fnVerifier) ownResults(fl *ownFlow, e ast.Expr, count int, f *ownFact) 
 		if c.trusted && len(kind.inside) > 0 {
 			for r := range len(c.fn.results) {
 				if v.ownDeeper(c.fn.results[r].Type(), v.info.TypeOf(op.expr)) {
-					fl.refuse(op.expr.Pos(), "what is handed to %s as %s is memory that %s owns, and what %s returns may hold parts of it that "+
+					fl.refuse(op.expr.Pos(), rOwnsKept, "what is handed to %s as %s is memory that %s owns, and what %s returns may hold parts of it that "+
 						"its entry does not place; copy the memory first, as with bytes.Clone or slices.Clone", c.name, v.paramName(op.param),
 						v.rootName(v.rootOf(kind)), c.name)
 					break
@@ -1573,11 +1574,11 @@ func (v *fnVerifier) ownReturn(fl *ownFlow, ret *ast.ReturnStmt, f *ownFact) {
 					// can only be a copy (F33 of the review of step 3a).
 					rt := v.fn.results[i].Type()
 					if _, isPointer := pointee(rt); isPointer || isSlice(rt) || isMap(rt) || isIface(rt) {
-						fl.refuse(pos, "%s returns memory that %s owns; say so with within(%s, %s) in an Ensures, or return a copy",
+						fl.refuse(pos, rOwnsReturned, "%s returns memory that %s owns; say so with within(%s, %s) in an Ensures, or return a copy",
 							v.fn.obj.Name(), root.param.Name(), spelledResult(v.fn, i), root.param.Name())
 					} else {
 						held := types.TypeString(rt, types.RelativeTo(v.pass.Pkg))
-						fl.refuse(pos, "%s returns memory that %s owns, held in %s %s, which no contract can place within %s; return a copy",
+						fl.refuse(pos, rOwnsReturned, "%s returns memory that %s owns, held in %s %s, which no contract can place within %s; return a copy",
 							v.fn.obj.Name(), root.param.Name(), article(held), held, root.param.Name())
 					}
 				}
@@ -1593,13 +1594,13 @@ func (v *fnVerifier) ownReturn(fl *ownFlow, ret *ast.ReturnStmt, f *ownFact) {
 					}
 				}
 				if s := f.status[root.tag]; s.state != tagNew || other || len(fl.deferred) > 0 {
-					fl.refuse(pos, "%s returns memory that %s owns, which something else may refer to; return a copy, or return the owner",
+					fl.refuse(pos, rOwnsReturned, "%s returns memory that %s owns, which something else may refer to; return a copy, or return the owner",
 						v.fn.obj.Name(), v.rootName(root))
 					fresh = false
 				}
 			default:
 				fresh = false
-				fl.refuse(pos, "%s returns memory that an owner owns; return a copy", v.fn.obj.Name())
+				fl.refuse(pos, rOwnsReturned, "%s returns memory that an owner owns; return a copy", v.fn.obj.Name())
 			}
 		}
 		if len(kind.params) > 0 || kind.unknown != "" {
@@ -1738,7 +1739,7 @@ func (v *fnVerifier) reportOwnOrigins() {
 		return
 	}
 	for _, r := range fl.refusals {
-		v.report(r.pos, rObligation, "%s", strings.TrimSpace(r.msg))
+		v.report(r.pos, r.class, "%s", strings.TrimSpace(r.msg))
 	}
 }
 

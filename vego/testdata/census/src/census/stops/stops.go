@@ -4,6 +4,7 @@ package stops
 import (
 	"encoding/json"
 	"io"
+	"net/http"
 	"os"
 	"sort"
 )
@@ -88,4 +89,24 @@ func UnusableThenChannel(name string, xs []int) []int {
 	ch := make(chan int)
 	_ = ch
 	return xs
+}
+
+type recorder struct{ w http.ResponseWriter }
+
+// Wrap keeps the writer of a handler, which the ownership walk refuses
+// with a report (F11 of the review).
+func Wrap(w http.ResponseWriter) *recorder {
+	return &recorder{w: w}
+}
+
+// Sink has a contract and takes a channel, which refuses it where it is
+// declared.
+//
+// @Ensures True
+type Sink func(ch chan int)
+
+// Feed calls a value of Sink: the use counts as the channel that refused
+// it (F12 of the review).
+func Feed(s Sink) {
+	s(nil)
 }

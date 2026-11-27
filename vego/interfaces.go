@@ -720,7 +720,7 @@ func (pv *pkgVerifier) methodContract(method *types.Func) *funcInfo {
 	fn := pv.foundMethodContract(method)
 	// A census takes a method of an interface of the module that has no
 	// contract with the weakest one.
-	if fn == nil && pv.census != nil && method.Pkg() != nil && pv.inScope(method.Pkg().Path()) {
+	if fn == nil && pv.census != nil && method.Pkg() != nil && pv.inScope(method.Pkg()) {
 		return pv.assumedMethod(method)
 	}
 	return fn

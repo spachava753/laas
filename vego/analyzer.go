@@ -559,6 +559,9 @@ type funcInfo struct {
 	// inputsOnly is set for a shipped entry that only the declaration that
 	// inputs end makes usable, which a census counts where it is used.
 	inputsOnly bool
+	// refusedAs is the class of the Go a contract was refused for where
+	// it is declared, which its uses are counted as; see census.go.
+	refusedAs refusal
 }
 
 // spelling returns the contract whose clauses a function's annotations
@@ -922,6 +925,7 @@ type pkgVerifier struct {
 // The class says what the census counts it as: an obligation not proved, a
 // fault of an annotation, or a refusal of the Go it stands at.
 func (pv *pkgVerifier) report(pos token.Pos, class refusal, format string, args ...any) {
+	class.check()
 	if pv.capturing != nil {
 		// What a census captures decides whether code it checks refuses,
 		// which no obligation it cannot prove does.
@@ -1850,7 +1854,7 @@ func (pv *pkgVerifier) contractOf(callee *types.Func) *funcInfo {
 	if trusted := pv.trustedContract(callee); trusted != nil || pv.census == nil {
 		return trusted
 	}
-	if callee.Pkg() != nil && pv.inScope(callee.Pkg().Path()) && !isGeneric(callee) {
+	if callee.Pkg() != nil && pv.inScope(callee.Pkg()) && !isGeneric(callee) {
 		return pv.assumedContract(callee)
 	}
 	return nil
