@@ -6053,7 +6053,8 @@ sourcecalls	sourcecalls.HandsNil	1	2721	0
 sourcecalls	sourcecalls.Nested	5	26635	0
 sourcecalls	sourcecalls.NilReceiver	5	7787	0
 sourcecalls	sourcecalls.NonEmpty	3	835	0
-sourcecalls	sourcecalls.Peek2	8	13660	0
+sourcecalls	sourcecalls.Peek2	8	14887	0
+sourcecalls	sourcecalls.PeekPointer	8	13545	0
 sourcecalls	sourcecalls.SelfAppend	17	874696	1
 sourcecalls	sourcecalls.SetStride	6	3984	0
 sourcecalls	sourcecalls.Stored	0	0	0

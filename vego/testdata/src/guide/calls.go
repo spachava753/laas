@@ -35,7 +35,7 @@ func Histogram(scores []int) (buckets []int) {
 // @Ensures True
 func Rescale(scores []int) {
 	eachScore(scores, func(s int) {
-		scores[0] = s // want `vego: scores\[0\] is assigned, which may be what an argument of eachScore refers to directly; a function eachScore calls under Calls may not write the array of a slice, what a pointer points to, or a map that eachScore is handed beside it, in the function literal run by eachScore at calls.go:37:20`
+		scores[0] = s // want `vego: scores\[0\] is assigned, which may be what an argument of eachScore refers to directly; a function eachScore calls under Calls may not write the elements of a slice from its first to its capacity, the struct a pointer points to, or a map that eachScore is handed beside it, in the function literal run by eachScore at calls.go:37:20`
 	})
 }
 

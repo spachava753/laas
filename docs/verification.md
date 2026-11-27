@@ -1405,8 +1405,8 @@ func Rescale(scores []int) {
 
 ```text
 vego: scores[0] is assigned, which may be what an argument of eachScore refers to directly; a function eachScore calls
-under Calls may not write the array of a slice, what a pointer points to, or a map that eachScore is handed beside it,
-in the function literal run by eachScore at calls.go:37:20
+under Calls may not write the elements of a slice from its first to its capacity, the struct a pointer points to, or a
+map that eachScore is handed beside it, in the function literal run by eachScore at calls.go:37:20
 ```
 
 A contract under `Calls` holds only while the function calls the parameter. A parameter that is stored, returned, compared, or handed on is reported:

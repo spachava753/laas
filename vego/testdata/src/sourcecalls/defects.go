@@ -328,10 +328,22 @@ type cells struct{ items []cell }
 // lies at its start (F23 of the review of step 2).
 //
 // @Calls f()
-// @Requires p != nil And |p.items| = 4 And |xs| = 1
+// @Requires p != nil And |p.items| = 4 And |xs| = 1 And cap(xs) = 1 And &xs[0] = &p.items[0]
 // @Ensures same
 func Peek2(xs []cell, p *cells, f func()) (same bool) {
 	a := p.items[3].n
 	f()
 	return a == p.items[3].n // want `postcondition may not hold: same`
+}
+
+// PeekPointer keeps across f an element of the array a pointer argument
+// points into, beside the one it points to (F23).
+//
+// @Calls f()
+// @Requires p != nil And |p.items| = 4 And q != nil And &p.items[1] = q
+// @Ensures same
+func PeekPointer(q *cell, p *cells, f func()) (same bool) {
+	a := p.items[0].n
+	f()
+	return a == p.items[0].n // want `postcondition may not hold: same`
 }

@@ -643,7 +643,7 @@ func (v *fnVerifier) checkNotForbidden(st *state, guard []*logic.Term, w written
 		goal := logic.And(apart...)
 		if result := v.attempt(st, guard, goal); result != solver.Proved && f.direct {
 			v.report(pos, "%s, which may be what an argument of %s refers to directly; a function %s calls under Calls may not write "+
-				"the array of a slice, what a pointer points to, or a map that %s is handed beside it%s", what, f.by, f.by, f.by, limitNote(result))
+				"the elements of a slice from its first to its capacity, the struct a pointer points to, or a map that %s is handed beside it%s", what, f.by, f.by, f.by, limitNote(result))
 			st.assume(logic.Implies(logic.And(guard...), goal))
 		} else if result != solver.Proved {
 			v.report(pos, "%s, which %s may write itself while it runs the function it is handed; "+
