@@ -1659,10 +1659,22 @@ func (pv *pkgVerifier) ownSummaryOf(fn *funcInfo) *ownSummary {
 				pv.ownSummaries[f.obj] = s
 			}
 		}
-		for changed := true; changed; {
+		// The summaries of a package that calls itself in a cycle can go
+		// round without settling, since what a result is made of does not
+		// only grow as its callees' do. After as many rounds as settle any
+		// package that settles, each summary is joined with the one before
+		// it, toward what a caller must assume more of, which ends: the
+		// lattice is finite and a join only goes down it. A join keeps
+		// more parameters and results that are not fresh, unknown, or from
+		// or inside more parameters, which no caller can be harmed by.
+		widen := 4*len(local) + 16
+		for changed, round := true, 0; changed; round++ {
 			changed = false
 			for _, f := range local {
 				next, was := pv.ownSummarize(f), pv.ownSummaries[f.obj]
+				if round >= widen {
+					next = joinSummaries(was, next)
+				}
 				same := next != nil && was != nil && slices.Equal(next.keeps, was.keeps) &&
 					slices.EqualFunc(next.results, was.results, func(a, b ownResultFact) bool {
 						return a.fresh == b.fresh && a.unknown == b.unknown && slices.Equal(a.from, b.from) && slices.Equal(a.inside, b.inside)
@@ -1734,6 +1746,31 @@ func (pv *pkgVerifier) ownSummarize(fn *funcInfo) (summary *ownSummary) {
 		summary.results[i] = out
 	}
 	return summary
+}
+
+// joinSummaries returns the summary that says of a function what both say
+// it may do: it keeps what either keeps, and a result is fresh only if both
+// say so, unknown if either does, and from or inside what either names. A
+// nil summary, of a body that refused, says nothing and is kept.
+func joinSummaries(a, b *ownSummary) *ownSummary {
+	if a == nil || b == nil {
+		return nil
+	}
+	out := &ownSummary{keeps: slices.Clone(a.keeps)}
+	for i := range out.keeps {
+		out.keeps[i] = out.keeps[i] || i < len(b.keeps) && b.keeps[i]
+	}
+	for i, r := range a.results {
+		if i >= len(b.results) {
+			out.results = append(out.results, r)
+			continue
+		}
+		s := b.results[i]
+		from := slices.Compact(slices.Sorted(slices.Values(slices.Concat(r.from, s.from))))
+		inside := slices.Compact(slices.Sorted(slices.Values(slices.Concat(r.inside, s.inside))))
+		out.results = append(out.results, ownResultFact{fresh: r.fresh && s.fresh, unknown: r.unknown || s.unknown, from: from, inside: inside})
+	}
+	return out
 }
 
 // reportOwnOrigins reports what the analysis refuses in the function being
