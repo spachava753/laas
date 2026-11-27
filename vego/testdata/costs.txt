@@ -4910,6 +4910,9 @@ memory	memory.zero	9	19643	0
 mime	(*sync.Mutex).Lock	1	1652	0
 mime	(*sync.Mutex).Unlock	1	1611	0
 mime	(*sync.Once).Do	1	1800	0
+multiarg	multiarg.Must	1	111	0
+multiarg	multiarg.New	1	46	0
+multiarg	multiarg.pair	6	8271	0
 mustcompile	(*regexp.Regexp).MatchString	1	6576	0
 mustcompile	mustcompile.compileHere	1	368	0
 mustcompile	mustcompile.init	2	1384	0

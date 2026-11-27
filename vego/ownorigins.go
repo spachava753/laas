@@ -1111,7 +1111,12 @@ func (v *fnVerifier) ownCalleeOf(call *ast.CallExpr) *ownCallee {
 		return &ownCallee{fn: fn, name: name, keeps: keepAll, results: unknown, why: "nothing says what it keeps"}
 	}
 	return &ownCallee{fn: fn, name: name, params: fn.params, verified: true,
-		keeps: func(param *types.Var) bool { return summary.keeps[slices.Index(fn.params, param)] },
+		keeps: func(param *types.Var) bool {
+			// An operand with no parameter, as of g(f()), which bindArgs
+			// cannot bind, counts as kept.
+			i := slices.Index(fn.params, param)
+			return i < 0 || summary.keeps[i]
+		},
 		results: func(i int) ownResult {
 			if i >= len(summary.results) {
 				return ownResult{unknown: true}
