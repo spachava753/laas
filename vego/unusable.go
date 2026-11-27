@@ -173,7 +173,7 @@ func (pv *pkgVerifier) viewOf(fn *funcInfo) *contractView {
 func signatureHoldsArray(sig *types.Signature) bool {
 	for _, tuple := range []*types.Tuple{sig.Params(), sig.Results()} {
 		for variable := range tuple.Variables() {
-			if holdsArrayValue(variable.Type()) {
+			if holdsArrayValue(variable.Type()) || holdsArrayPointer(variable.Type()) {
 				return true
 			}
 		}

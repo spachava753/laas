@@ -198,6 +198,15 @@ func (v *fnVerifier) classifyLiterals() {
 		if !ok {
 			return true
 		}
+		// A literal does not capture a pointer to an array (arrayPointer).
+		ast.Inspect(lit.Body, func(m ast.Node) bool {
+			if id, ok := m.(*ast.Ident); ok {
+				if variable, ok := v.info.Uses[id].(*types.Var); ok && holdsArrayPointer(variable.Type()) && !(lit.Pos() <= variable.Pos() && variable.Pos() < lit.End()) {
+					v.unsupported(id.Pos(), withDetail(rPointerToArray, variable.Type().String()), arrayPointerRefusal(id.Name+", which a function literal captures,", variable.Type()))
+				}
+			}
+			return true
+		})
 		sig := v.info.TypeOf(lit).(*types.Signature)
 		for _, tuple := range []*types.Tuple{sig.Params(), sig.Results()} {
 			for variable := range tuple.Variables() {

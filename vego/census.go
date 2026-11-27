@@ -469,6 +469,9 @@ func typeClassOf(t types.Type) refusal {
 // fieldClass is typeClass for the type of a field, where an array of
 // anything but numbers and booleans is not modelled (fieldLayout).
 func fieldClass(t types.Type) refusal {
+	if _, ok := arrayPointer(t); ok {
+		return withDetail(rPointerToArray, t.String())
+	}
 	if isArray(t) {
 		return withDetail(rTypeArrayStruct, t.String())
 	}
@@ -500,6 +503,9 @@ func makeClass(t types.Type) refusal {
 // elemClass is typeClass for the elements of a slice or a map, where an
 // array is not modelled either (elemLayout).
 func elemClass(t types.Type) refusal {
+	if _, ok := arrayPointer(t); ok {
+		return withDetail(rPointerToArray, t.String())
+	}
 	if isArray(t) {
 		return withDetail(rTypeArrayElem, t.String())
 	}

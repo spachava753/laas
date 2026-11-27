@@ -1130,6 +1130,26 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 				v.bind(st, element, value{current})
 			}
 		}
+	case sliceLike(ranged) && !isSlice(ranged):
+		// Over a pointer to an array, as over the array, without a copy:
+		// N iterations, nil or not, and each value read where its
+		// iteration begins, which panics for a nil one.
+		array, _ := arrayPointer(ranged)
+		header := v.eval(s.X, st, nil)
+		if element != nil && array.Len() > 0 {
+			v.checkNil(st, nil, header[0], s.X.Pos())
+		}
+		v.closeUnit(st)
+		shape.limit = logic.IntLit(array.Len())
+		shape.bind = func(st *state, counter *logic.Term) {
+			if key != nil {
+				v.bind(st, key, value{counter})
+			}
+			if element != nil {
+				current, _ := v.element(st, st.mem, header, ranged, counter)
+				v.bind(st, element, current)
+			}
+		}
 	case isSlice(ranged):
 		if _, ok := elemLayout(elemType(ranged)); !ok && element != nil {
 			v.unsupported(s.X.Pos(), elemClass(elemType(ranged)), fmt.Sprintf("slices of %s are not supported", elemType(ranged)))

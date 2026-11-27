@@ -74,6 +74,9 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 			return lv
 		}
 		variable, ok := v.info.ObjectOf(e).(*types.Var)
+		if ok && variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope() && holdsArrayPointer(variable.Type()) {
+			v.unsupported(e.Pos(), withDetail(rPointerToArray, variable.Type().String()), arrayPointerRefusal(e.Name, variable.Type()))
+		}
 		switch {
 		case ok && variable.Pkg() == v.pass.Pkg && v.isBoxedGlobal(variable):
 			// A struct variable whose address is taken, at its allocation.
@@ -98,6 +101,15 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 		}
 		lv.kind, lv.local, lv.typ = placeLocal, variable, variable.Type()
 	case *ast.StarExpr:
+		if array, ok := arrayPointer(v.info.TypeOf(e.X)); ok {
+			// The array a pointer to one points to, written whole: the run
+			// of its elements from the pointer's position, which counts
+			// elements already, so the run starts there (arrayPointer).
+			run := v.cellsOf(array)[0]
+			run.unit = 1
+			lv.kind, lv.slice, lv.typ, lv.cells = placeMem, e.X, array, []cell{run}
+			break
+		}
 		object, ok := pointee(v.info.TypeOf(e.X))
 		if !ok {
 			v.unsupported(e.Pos(), typeClass(v.info.TypeOf(e.X)), fmt.Sprintf("pointers of type %s are not supported", v.info.TypeOf(e.X)))
@@ -123,7 +135,7 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 			lv.kind, lv.slice, lv.index, lv.mapType, lv.typ = placeMap, e.X, e.Index, t, elem
 			break
 		}
-		if !isSlice(t) {
+		if !sliceLike(t) {
 			v.unsupported(e.Pos(), rAssignTarget, fmt.Sprintf("only elements of slices can be assigned, not those of a %s", t))
 		}
 		if isArray(elemType(t)) {
@@ -230,8 +242,17 @@ func (v *fnVerifier) lvalue(e ast.Expr, st *state, guard []*logic.Term) lvalue {
 		v.checkNil(st, guard, pointer[0], lv.pos)
 		lv.ref, lv.at = pointer[0], pointer[1]
 		lv.cells = resolveCells(lv.cells, pointer)
+	case lv.kind == placeMem && lv.slice != nil && lv.index == nil:
+		// What a pointer to an array points to, whole.
+		header := v.eval(lv.slice, st, guard)
+		v.checkNil(st, guard, header[0], lv.pos)
+		lv.ref, lv.at = header[0], header[1]
 	case lv.kind == placeMem:
 		header, index := v.eval(lv.slice, st, guard), v.expr(lv.index, st, guard)
+		if _, ok := arrayPointer(v.info.TypeOf(lv.slice)); ok {
+			// Go dereferences a pointer to an array to index it.
+			v.checkNil(st, guard, header[0], lv.pos)
+		}
 		v.checkIndex(st, guard, header[2], index, lv.pos)
 		// A slice that has an element has an array.
 		st.assume(logic.Implies(logic.And(guard...), logic.Not(logic.Eq(header[0], logic.RefLit(0)))))

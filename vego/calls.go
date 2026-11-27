@@ -94,6 +94,18 @@ func (v *fnVerifier) binary(op token.Token, x, y *logic.Term, t types.Type, pos 
 // clauses list is forgotten, and its postcondition is assumed. The callee's
 // body is never inspected, so an unannotated callee tells the caller nothing.
 func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []value {
+	// A pointer to an array stays in the function that holds it: no call
+	// takes or returns one (arrayPointer).
+	if sig, ok := v.info.TypeOf(call.Fun).Underlying().(*types.Signature); ok {
+		for _, tuple := range []*types.Tuple{sig.Params(), sig.Results()} {
+			for variable := range tuple.Variables() {
+				if holdsArrayPointer(variable.Type()) {
+					v.unsupported(call.Pos(), withDetail(rPointerToArray, variable.Type().String()),
+						arrayPointerRefusal("a parameter or a result of "+types.ExprString(call.Fun), variable.Type()))
+				}
+			}
+		}
+	}
 	if lit := v.literalOf(call); lit != nil {
 		return v.callLiteral(call, lit, st, guard)
 	}

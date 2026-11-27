@@ -3747,6 +3747,43 @@ vego: cannot verify First: parameter n has unsupported type *guide.names; guide.
 
 Use a slice instead.
 
+### Pointers to arrays
+
+A local variable can hold a pointer to an array of numbers or booleans. It can be made with `&a` of a local array, `&s.f` of an array field of a struct, `new([N]T)`, or a conversion `(*[N]T)(s)` of a slice. It can be used by `p[i]`, `*p`, `p[lo:hi]`, `len(p)`, `cap(p)`, `range p`, and comparisons. A write through it is a write of the array it points to:
+
+```go
+type block struct {
+	n    int
+	word [4]uint32
+}
+
+// @Requires b != nil
+// @Modifies b.word
+// @Ensures b.word'[2] = 7 And b.word'[1] = b.word[1] And b.n' = b.n
+func (b *block) setWord() {
+	p := &b.word
+	p[2] = 7
+}
+```
+
+Go reads a nil pointer to an array in three ways. `len(p)` and `cap(p)` are the length of the array, and `range p` without a value runs that many times. Every other use of a nil one panics, and `vego` reports it as `pointer may be nil`. A conversion `(*[N]T)(s)` panics when `s` is shorter than N, which is reported as `the conversion may panic`.
+
+A pointer to an array is supported in local variables only. As a parameter, a result, a field, an element, or a value in an interface, or in a variable that a function literal captures, it is refused:
+
+```go
+// @Requires p != nil
+// @Ensures True
+func clearWords(p *[4]uint32) {
+	*p = [4]uint32{}
+}
+```
+
+```text
+vego: cannot verify clearWords: parameter p has type *[4]uint32, a pointer to an array, and pointers to arrays are supported only in local variables yet; pass or keep a slice of the array, as in p[:]
+```
+
+Pass a slice of the array instead. A formula cannot name what a pointer to an array points to: name the array or a slice of it.
+
 ### What arrays do not support yet
 
 An array of anything but numbers and booleans is not supported:
@@ -3765,7 +3802,7 @@ vego: cannot verify Names: names has unsupported type [2]string; [2]string is an
 
 These are not supported yet either, each with a message that names it:
 
-- a pointer to an array, as in `p := &buf`; slice the array instead;
+- a pointer to an array anywhere but in a local variable (see [Pointers to arrays](#pointers-to-arrays));
 - reading or writing an element of a slice of arrays, as in `xs[0][0]` of a `[][4]byte`; holding such a slice, its length, and slicing it are supported;
 - an array or a value that holds one in an interface value or an error, an assertion or a type switch to such a type, and `errors.As` with such a target;
 - a function type or a method of an interface whose parameters or results hold an array;
@@ -4108,7 +4145,7 @@ A field that no code takes the address of is not one a pointer can point to. Suc
 
 These are not supported:
 
-- pointers to arrays (see [Pointers to slices, maps, pointers, and interface values](#pointers-to-slices-maps-pointers-and-interface-values) for the other kinds);
+- pointers to arrays anywhere but in a local variable (see [Pointers to arrays](#pointers-to-arrays), and [Pointers to slices, maps, pointers, and interface values](#pointers-to-slices-maps-pointers-and-interface-values) for the other kinds);
 - formatting such a pointer, which `fmt` prints as an address; `%d` of `*p` formats the value;
 - such a pointer as a field of a value that `encoding/json` encodes or decodes, and decoding into one other than `&x` of a variable;
 
@@ -11091,7 +11128,7 @@ This table lists the most common messages.
 
 A function that uses any of the following is reported as `cannot verify`:
 
-- pointers to arrays; a pointer to a number, a boolean, or a string that would point to a package-level variable of another package; formatting such a pointer, and such a pointer in a value that `encoding/json` encodes or decodes (see [Pointers to numbers, booleans, and strings](#pointers-to-numbers-booleans-and-strings));
+- pointers to arrays anywhere but in a local variable; a pointer to a number, a boolean, or a string that would point to a package-level variable of another package; formatting such a pointer, and such a pointer in a value that `encoding/json` encodes or decodes (see [Pointers to numbers, booleans, and strings](#pointers-to-numbers-booleans-and-strings));
 - a call that may end the process in a function literal used as a value, in a function handed to a trusted function, or in a deferred call, and a function value made of a function that may end the process (see [Functions that end the process](#functions-that-end-the-process));
 - calls of a method of an interface that has no contract, in source or in the trust file, and converting a value to an interface with such a method, unless the method is declared by the value's own type of another module, which is not generic, holds no function value, error, or interface value whose methods all have contracts, and is converted to an interface without states (see [Interfaces](#interfaces) and [Values of another module's types](#values-of-another-modules-types)), and a call of a trusted function whose entry writes such a value; of the standard library, only `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, and `(context.Context).Err` have shipped contracts (see [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages));
 - an entry in the trust file for a type of the module of the analysed package, or one with `runs`, `keeps`, or `calls`;

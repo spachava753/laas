@@ -280,7 +280,7 @@ var (
 	pPtrSlice *[]int
 	pPtrMap *map[string]int
 	pPtrPtr **S
-	pPtrArray *[4]int
+	pPtrArray *[4]string
 	pPtrIface *error
 	pPtrFunc *func()
 	pArrayStrings [3]string

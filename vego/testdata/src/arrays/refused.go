@@ -138,10 +138,13 @@ func MapValue(m map[string][4]byte) (r byte) {
 	return m["x"][0] // want `cannot verify MapValue: .*map\[string\]\[4\]byte`
 }
 
+// Pointer takes the address of a local array, which a local variable can
+// hold since step 3a of F42 (arrayptrs/).
+//
 // @Ensures True
 func Pointer() (r int) {
 	var buf [4]int
-	p := &buf // want `cannot verify Pointer: p has unsupported type \*\[4\]int; \*\[4\]int points to an array, and pointers to arrays are not supported yet; use a slice of the array, as in a\[:\]`
+	p := &buf
 	return p[0]
 }
 

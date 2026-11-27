@@ -79,6 +79,8 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		return value{held}
 	case types.IsInterface(from):
 		v.unsupported(e.Pos(), withDetail(rConvIfaceType, from.String()), fmt.Sprintf("converting a %s to %s is not supported", from, want))
+	case holdsArrayPointer(from):
+		v.unsupported(e.Pos(), withDetail(rPointerToArray, from.String()), arrayPointerRefusal("the value converted to "+v.shown(want), from))
 	case holdsArrayValue(from):
 		v.unsupported(e.Pos(), rConvIfaceArray, fmt.Sprintf("converting a %s to %s is not supported: an interface value or an error cannot hold an array yet", v.shown(from), v.shown(want)))
 	}

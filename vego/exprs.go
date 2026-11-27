@@ -28,6 +28,9 @@ func (v *fnVerifier) variable(id *ast.Ident, st *state, guard []*logic.Term) val
 		return val
 	}
 	if variable != nil && variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope() {
+		if holdsArrayPointer(variable.Type()) {
+			v.unsupported(id.Pos(), withDetail(rPointerToArray, variable.Type().String()), arrayPointerRefusal(id.Name, variable.Type()))
+		}
 		if variable.Pkg() == v.pass.Pkg && v.isBoxedGlobal(variable) {
 			// A struct variable whose address is taken, at its allocation.
 			pointer := v.boxedPointer(st, variable)
@@ -120,6 +123,17 @@ func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 	case *ast.Ident:
 		return v.variable(e, st, guard)
 	case *ast.StarExpr:
+		if array, ok := arrayPointer(v.info.TypeOf(e.X)); ok {
+			// The array a pointer to one points to, read whole.
+			start := v.unit.start()
+			header := v.eval(e.X, st, guard)
+			v.checkNil(st, guard, header[0], e.Pos())
+			slice := types.NewSlice(array.Elem())
+			return v.readAt(st, guard, start, types.ExprString(e), e.Pos(), func(sink *state, mem memory) value {
+				elements, _ := v.view(sink, mem, header, slice)
+				return value{logic.Subseq(elements, logic.IntLit(0), logic.IntLit(array.Len()))}
+			})
+		}
 		object, ok := pointee(v.info.TypeOf(e.X))
 		if !ok {
 			break
@@ -289,7 +303,7 @@ func (v *fnVerifier) inMemory(e ast.Expr) bool {
 		_, ok := pointee(v.info.TypeOf(e.X))
 		return ok
 	case *ast.IndexExpr:
-		return isSlice(v.info.TypeOf(e.X))
+		return sliceLike(v.info.TypeOf(e.X))
 	case *ast.SelectorExpr:
 		selection := v.info.Selections[e]
 		if selection == nil || selection.Kind() != types.FieldVal {
@@ -340,6 +354,16 @@ func (v *fnVerifier) newObject(st *state, t types.Type, val value) value {
 // pointer it yields points into the allocation x is part of; a variable
 // whose address is taken has one of its own, see findBoxed.
 func (v *fnVerifier) addressOf(e ast.Expr, st *state, guard []*logic.Term) value {
+	if numberArray(v.info.TypeOf(e)) {
+		// A pointer to an array is the slice of the whole array
+		// (arrayPointer), of one that lies in memory: a local variable
+		// whose address is taken, or a field of a struct in memory.
+		if !v.memArray(e) {
+			v.unsupported(e.Pos(), pointerClass(v.info.TypeOf(e)), fmt.Sprintf("taking the address of %s is not supported: it is an array that does not lie in memory, "+
+				"such as a package-level array or an element of a slice of arrays", types.ExprString(e)))
+		}
+		return v.arrayHeader(e, st, guard)
+	}
 	_, isStruct := v.info.TypeOf(e).Underlying().(*types.Struct)
 	single := boxable(v.info.TypeOf(e))
 	_, named := ast.Unparen(e).(*ast.Ident)
@@ -425,7 +449,7 @@ func (v *fnVerifier) binaryExpr(e *ast.BinaryExpr, st *state, guard []*logic.Ter
 		switch {
 		case isError(t):
 			isNil = logic.IsNil(val[0])
-		case isPointer, isSlice(t), isMap(t), holdsCodeRef(t):
+		case isPointer, sliceLike(t), isMap(t), holdsCodeRef(t):
 			isNil = isNilRef(val)
 		default:
 			v.unsupported(e.Pos(), withDetail(rOpNil, t.String()), fmt.Sprintf("comparing a %s with nil is not supported", t))
@@ -440,6 +464,19 @@ func (v *fnVerifier) binaryExpr(e *ast.BinaryExpr, st *state, guard []*logic.Ter
 	}
 	if (isError(v.info.TypeOf(e.X)) || isError(v.info.TypeOf(e.Y))) && (e.Op == token.EQL || e.Op == token.NEQ) {
 		return v.compareErrors(e.X, e.Y, e.Op, st, guard, e.Pos())
+	}
+	if array, ok := arrayPointer(v.info.TypeOf(e.X)); ok && (e.Op == token.EQL || e.Op == token.NEQ) {
+		if array.Len() == 0 {
+			v.unsupported(e.Pos(), rOpPointer, "pointers to values of size zero may or may not be equal, so comparing them is not supported")
+		}
+		// Two pointers to arrays are equal when both are nil, or when they
+		// point to the same first element of the same allocation.
+		a, b := v.eval(e.X, st, guard), v.eval(e.Y, st, guard)
+		same := logic.And(logic.Eq(a[0], b[0]), logic.Or(logic.Eq(a[0], logic.RefLit(0)), logic.Eq(a[1], b[1])))
+		if e.Op == token.NEQ {
+			return logic.Not(same)
+		}
+		return same
 	}
 	if object, isPointer := pointee(v.info.TypeOf(e.X)); isPointer {
 		if v.pass.TypesSizes.Sizeof(object) == 0 {
@@ -524,9 +561,13 @@ func (v *fnVerifier) indexExpr(e *ast.IndexExpr, st *state, guard []*logic.Term)
 		element := logic.Select(array, index)
 		st.assume(logic.Implies(logic.And(guard...), v.typeFact(element, v.info.TypeOf(e))))
 		return value{element}
-	case isSlice(t):
+	case sliceLike(t):
 		start := v.unit.start()
 		header, index := v.eval(e.X, st, guard), v.expr(e.Index, st, guard)
+		if _, ok := arrayPointer(t); ok {
+			// Go dereferences a pointer to an array to index it.
+			v.checkNil(st, guard, header[0], e.Pos())
+		}
 		v.checkIndex(st, guard, header[2], index, e.Pos())
 		if _, ok := elemLayout(elemType(t)); !ok {
 			break
@@ -555,6 +596,11 @@ func (v *fnVerifier) sliceExpr(e *ast.SliceExpr, st *state, guard []*logic.Term)
 		// memory (findBoxed); the slice is one of its run of cells.
 		header = v.arrayHeader(e.X, st, guard)
 		t = types.NewSlice(t.Underlying().(*types.Array).Elem())
+	case sliceLike(t) && !isSlice(t):
+		// Go dereferences a pointer to an array to slice it.
+		header = v.eval(e.X, st, guard)
+		v.checkNil(st, guard, header[0], e.Pos())
+		t = types.NewSlice(elemType(t))
 	case !isSlice(t):
 		v.unsupported(e.Pos(), withDetail(rIndex, t.String()), fmt.Sprintf("slicing a %s is not supported", t))
 	default:
@@ -759,6 +805,12 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) v
 		return value{result}
 	case builtin("new"):
 		t := v.info.TypeOf(e.Args[0])
+		if array, ok := t.Underlying().(*types.Array); ok && numberArray(t) && v.info.Types[e.Args[0]].IsType() {
+			// A new array of zeros, held as the slice of all of it
+			// (arrayPointer).
+			n := logic.IntLit(array.Len())
+			return v.allocSlice(st, array.Elem(), nil, n, n)
+		}
 		if _, isStruct := t.Underlying().(*types.Struct); !isStruct && !boxable(t) {
 			v.unsupported(e.Pos(), pointerClass(t), fmt.Sprintf("new(%s) is not supported; only structs, numbers, booleans, strings, slices, maps, pointers, interface values, errors, and functions can be pointed to", t))
 		}
@@ -862,6 +914,16 @@ func (v *fnVerifier) conversion(e *ast.CallExpr, st *state, guard []*logic.Term)
 			text, _ := v.view(sink, mem, header, from)
 			return value{text}
 		})
+	case isSlice(from) && func() bool { _, ok := arrayPointer(to); return ok }():
+		// (*[N]T)(s) points to the first N elements of s, and panics when
+		// s has fewer; it is nil for a nil s, which only N = 0 allows. It
+		// is held as the slice of those N elements (arrayPointer).
+		header := v.eval(e.Args[0], st, guard)
+		array, _ := arrayPointer(to)
+		n := logic.IntLit(array.Len())
+		v.check(st, guard, logic.Le(n, header[2]), e.Pos(), "the conversion may panic: %s may be shorter than %s", types.ExprString(e.Args[0]), types.TypeString(array, types.RelativeTo(v.pass.Pkg)))
+		isNil := logic.Eq(header[0], logic.RefLit(0))
+		return value{header[0], logic.Ite(isNil, logic.IntLit(0), header[1]), logic.Ite(isNil, logic.IntLit(0), n), logic.Ite(isNil, logic.IntLit(0), n)}
 	case isSlice(from) && isArray(to):
 		// [N]T(s) copies the first N elements of s, and panics when s
 		// has fewer.

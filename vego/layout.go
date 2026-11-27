@@ -257,7 +257,62 @@ func storedAs(t types.Type) types.Type {
 
 // elemType returns the element type of a slice type.
 func elemType(t types.Type) types.Type {
+	if array, ok := arrayPointer(t); ok {
+		return array.Elem()
+	}
 	return t.Underlying().(*types.Slice).Elem()
+}
+
+// arrayPointer reports whether a type is a pointer to an array of numbers
+// or booleans, and returns the array type (F42, step 3a). Such a pointer is
+// held as the slice of the whole array it points to: the array's
+// reference, the position of its first element, and its length as length
+// and capacity, all four zero for nil. Every walk of what a value refers to
+// takes it for that slice, which refers to the same elements; Go reads it
+// otherwise in three ways, which the operations on it follow and not the
+// slice's: len and cap of a nil pointer are N, range over one without its
+// values runs N times, and every other use of a nil one panics. It is
+// supported in local variables only (arrayPointerWhy).
+func arrayPointer(t types.Type) (*types.Array, bool) {
+	if t == nil {
+		return nil, false
+	}
+	pointer, ok := t.Underlying().(*types.Pointer)
+	if !ok {
+		return nil, false
+	}
+	array, ok := pointer.Elem().Underlying().(*types.Array)
+	return array, ok && numberArray(array)
+}
+
+// sliceLike reports whether a value of the type is held as a slice: a
+// slice, or a pointer to an array (arrayPointer).
+func sliceLike(t types.Type) bool {
+	_, ok := arrayPointer(t)
+	return ok || isSlice(t)
+}
+
+// holdsArrayPointer reports whether a value of the type is or holds a
+// pointer to an array, by value through structs.
+func holdsArrayPointer(t types.Type) bool {
+	if _, ok := arrayPointer(t); ok {
+		return true
+	}
+	if u, ok := t.Underlying().(*types.Struct); ok {
+		for field := range u.Fields() {
+			if holdsArrayPointer(field.Type()) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// arrayPointerRefusal is the message for a pointer to an array where it is
+// not supported: anywhere but in a local variable.
+func arrayPointerRefusal(what string, t types.Type) string {
+	return fmt.Sprintf("%s has type %s, a pointer to an array, and pointers to arrays are supported only in local variables yet; "+
+		"pass or keep a slice of the array, as in p[:]", what, t)
 }
 
 // layoutOf lists the leaves of a type, and reports whether the type is
@@ -290,6 +345,13 @@ func layoutOf(t types.Type) ([]leaf, bool) {
 			return one(logic.Ref)
 		}
 	case *types.Pointer:
+		if _, ok := arrayPointer(t); ok {
+			// The slice of the whole array (arrayPointer).
+			return []leaf{
+				{"#ref", logic.Ref, t, partRef}, {"#off", logic.Int, t, partOff},
+				{"#len", logic.Int, t, partLen}, {"#cap", logic.Int, t, partCap},
+			}, true
+		}
 		if _, ok := pointee(t); ok && boxable(u.Elem()) {
 			return []leaf{{"#ptr", logic.Ref, t, partPtr}, {"#at", logic.Int, t, partAt}, {"#arr", logic.Bool, t, partArr}}, true
 		}
@@ -379,7 +441,7 @@ func arrayLen(t types.Type) int64 { return t.Underlying().(*types.Array).Len() }
 // would lie in a region of its own, while a slice of the element reaches
 // the same bytes through the region of the array's elements.
 func elemLayout(t types.Type) ([]leaf, bool) {
-	if isArray(t) {
+	if _, ok := arrayPointer(t); ok || isArray(t) {
 		return nil, false
 	}
 	return layoutOf(t)
@@ -389,7 +451,7 @@ func elemLayout(t types.Type) ([]leaf, bool) {
 // modelled when its elements are numbers or booleans (numberArray), and
 // not otherwise.
 func fieldLayout(t types.Type) ([]leaf, bool) {
-	if isArray(t) && !numberArray(t) {
+	if _, ok := arrayPointer(t); ok || isArray(t) && !numberArray(t) {
 		return nil, false
 	}
 	return layoutOf(t)
@@ -871,6 +933,12 @@ func (pv *pkgVerifier) wellFormed(val value, t types.Type, brk *logic.Term) *log
 			// A slice without an array is nil, and Go gives a nil slice no
 			// length and no capacity: without unsafe nothing else makes one.
 			nilEmpty := logic.Implies(logic.Eq(ref, logic.RefLit(0)), logic.Eq(capacity, zero))
+			if array, ok := arrayPointer(lf.typ); ok {
+				// The slice of the whole array a pointer points to, or of
+				// nothing for nil (arrayPointer).
+				n := logic.IntLit(array.Len())
+				facts = append(facts, logic.Implies(logic.Ne(ref, logic.RefLit(0)), logic.And(logic.Eq(length, n), logic.Eq(capacity, n))))
+			}
 			facts = append(facts, exists(ref), nilEmpty, logic.Le(zero, off), logic.Le(zero, length), logic.Le(length, capacity),
 				logic.Le(end, pv.marks().arrayEnd), pv.typeFact(capacity, types.Typ[types.Int]))
 		case lf.part == partPtr:

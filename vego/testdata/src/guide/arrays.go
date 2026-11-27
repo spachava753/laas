@@ -164,3 +164,22 @@ var reverse = [256]byte{
 func DigitValue(c byte) (r byte) {
 	return reverse[c]
 }
+
+type block struct {
+	n    int
+	word [4]uint32
+}
+
+// @Requires b != nil
+// @Modifies b.word
+// @Ensures b.word'[2] = 7 And b.word'[1] = b.word[1] And b.n' = b.n
+func (b *block) setWord() {
+	p := &b.word
+	p[2] = 7
+}
+
+// @Requires p != nil
+// @Ensures True
+func clearWords(p *[4]uint32) { // want `cannot verify clearWords: parameter p has type \*\[4\]uint32, a pointer to an array, and pointers to arrays are supported only in local variables yet; pass or keep a slice of the array, as in p\[:\]`
+	*p = [4]uint32{}
+}
