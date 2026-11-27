@@ -50,6 +50,9 @@ type contractFact struct {
 	// CallsValues is set when running the function may make a call through
 	// a function value, itself or in what it calls; see mayCallValues.
 	CallsValues bool
+	// ReadsHeldCode is set when running the function may read a
+	// package-level variable whose type can hold code; see heldcode.go.
+	ReadsHeldCode bool
 	// Census is set for the weakest contract a census gave a function
 	// without annotations, which an importing census counts as assumed.
 	Census bool
@@ -104,6 +107,7 @@ func (f *predicatesFact) String() string { return fmt.Sprintf("predicates(%d)", 
 // exportContracts publishes the contracts of the exported functions that
 // were verified, and the package's predicates.
 func (pv *pkgVerifier) exportContracts(excused map[*funcInfo]bool) {
+	pv.exportHeldCode()
 	if len(pv.predicateTexts) > 0 || pv.predicatesBroken {
 		pv.pass.ExportPackageFact(&predicatesFact{Decls: pv.predicateTexts, Broken: pv.predicatesBroken})
 	}
@@ -137,6 +141,7 @@ func (pv *pkgVerifier) publishedContract(fn *funcInfo, excused, verified bool) *
 	fact := pv.contractFactOf(fn, fn.decl.Pos())
 	fact.Excused, fact.Verified, fact.KnownErrors = excused, verified, pv.knownReturns[fn]
 	fact.CallsValues = pv.mayCallValues(fn.obj)
+	fact.ReadsHeldCode = pv.readsHeldCode(fn.obj)
 	summary := pv.memSummary(fn.obj)
 	fact.DerivedResults, fact.DerivedStores = summary.results, summary.stores
 	if own := pv.ownSummaryOf(fn); own != nil {

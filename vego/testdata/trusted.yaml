@@ -3,6 +3,13 @@
 version: 1
 
 trusted:
+  # F43, F2 of the review of the design: a trusted function of the
+  # package that hands what it is given to slices.SortFunc.
+  cycles/held/sort.Sort:
+    reason: Sorts xs with c.
+    requires: ["c != nil"]
+    modifies: [xs]
+    runs: [c]
   # F40, F22 of the review of step 2: a function that writes one entry of a
   # map and runs what it is handed.
   sourcecalls.setWith:

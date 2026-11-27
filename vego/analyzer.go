@@ -238,7 +238,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 		"look only at the packages of the census scope whose path this regular expression matches, as a group of the standard library",
 	)
 	analyzer.ResultType = reflect.TypeFor[*Usage]()
-	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact), new(sentinelsFact), new(sentinelWritesFact), new(sentinelRelianceFact), new(stateFact), new(ownsFact), new(fixedFact), new(coversFact), new(writesFact), new(initialisersFact), new(addressedFact)}
+	analyzer.FactTypes = []analysis.Fact{new(contractFact), new(predicatesFact), new(usageFact), new(invariantFact), new(sentinelsFact), new(sentinelWritesFact), new(sentinelRelianceFact), new(stateFact), new(ownsFact), new(fixedFact), new(coversFact), new(writesFact), new(initialisersFact), new(addressedFact), new(heldCodeFact)}
 	analyzer.Run = func(pass *analysis.Pass) (result any, err error) {
 		foreignTags, err := parseOtherTags(otherTags)
 		if err != nil {
@@ -911,6 +911,9 @@ type pkgVerifier struct {
 	ssaProg *ssa.Program
 	// graph is the call graph of the package; see callgraph.go.
 	graph *callGraph
+	// readsHeld, heldMethods, and heldFuncs are what heldcode.go finds.
+	readsHeld              map[*callNode]bool
+	heldMethods, heldFuncs map[string]bool
 	// views holds what a use of each contract may rely on; see viewOf.
 	views map[*funcInfo]*contractView
 	// caseTails holds the annotations that follow the last statement of a

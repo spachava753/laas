@@ -978,6 +978,7 @@ func (pv *pkgVerifier) runCensus(out, scope, trustPath string, looked bool) (any
 			pv.pass.ExportObjectFact(fn.obj, fact)
 		}
 	}
+	pv.exportHeldCode()
 	return pv.usage, nil
 }
 

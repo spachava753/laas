@@ -71,7 +71,7 @@ type Notify func()
 func HitNotify(f Notify) {
 	mu.Lock()
 	defer mu.Unlock()
-	f() // want `vego: invariant of mu, hits may not hold before the call to f, which may assume it: ~held\(mu\)`
+	f() // want `vego: invariant of mu, hits may not hold before the call to f, which may assume it: ~held\(mu\)` `this call may not end: HitNotify calls f\(\) at lock.go:\d+:\d+, which may run HitTick, HitTick calls notify at lock.go:\d+:\d+, notify calls letoutq.Tick\(0\) at lock.go:\d+:\d+, which may run HitNotify; Tick reads`
 }
 
 // LeaveLocked returns with the lock held.
@@ -118,7 +118,7 @@ func NoteUnder(w io.Writer) {
 // code that is not verified kept there, as Hit.
 //
 // @Ensures True
-func notify() { letoutq.Tick(0) }
+func notify() { letoutq.Tick(0) } // want `this call may not end: notify calls letoutq.Tick\(0\) at lock.go:\d+:\d+, which may run HitTick, HitTick calls notify at lock.go:\d+:\d+; Tick reads`
 
 // HitTick calls notify under the lock.
 //
@@ -127,6 +127,6 @@ func notify() { letoutq.Tick(0) }
 func HitTick() {
 	mu.Lock()
 	defer mu.Unlock()
-	notify() // want `vego: invariant of mu, hits may not hold before the call to notify, which may assume it: ~held\(mu\)`
+	notify() // want `vego: invariant of mu, hits may not hold before the call to notify, which may assume it: ~held\(mu\)` `this call may not end: HitTick calls notify at lock.go:\d+:\d+, notify calls letoutq.Tick\(0\) at lock.go:\d+:\d+, which may run HitTick; Tick reads`
 }
 

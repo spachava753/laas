@@ -69,6 +69,10 @@ type callNode struct {
 	// what F33 says a call out of the package reaches (F10 of the review
 	// of the design of F32).
 	out bool
+	// heldImpl is set when the body calls through a value that may be an
+	// implementation of another package that runs code it holds; see
+	// heldcode.go.
+	heldImpl bool
 }
 
 // callEdge is a call or a use of a function in a body.
@@ -623,6 +627,12 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 				for _, to := range pv.valuesMatching(signatureOf(pv.info.TypeOf(n.X))) {
 					edge(to, n.Pos(), "range over "+types.ExprString(n.X), false)
 				}
+				if pv.heldFuncMeets(signatureOf(pv.info.TypeOf(n.X))) {
+					node.heldImpl = true
+					for _, to := range pv.anythingTargets() {
+						edge(to, n.Pos(), "range over "+types.ExprString(n.X), false)
+					}
+				}
 			}
 		case *ast.CallExpr:
 			text := types.ExprString(n)
@@ -705,6 +715,12 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 					}
 				}
 				if callee.Pkg() != pv.pass.Pkg {
+					// A verified function of another package that may read
+					// code kept in a package-level variable may run any code
+					// of the package that another call left there.
+					if fact := (&contractFact{}); pv.pass.ImportObjectFact(pv.originOf(callee).Origin(), fact) && fact.ReadsHeldCode {
+						unresolved(n, text, heldWhy(fmt.Sprintf("%s reads a package-level variable that can hold code", callee.Name())), pv.anythingTargets())
+					}
 					node.out = node.out || !pv.isolatedCall(n, callee)
 					// What a call of a function of another package may run of
 					// the code its arguments and receiver hold.
@@ -739,9 +755,17 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 			pv.valueCallArguments(n, text, unresolved)
 			if method, _ := throughValue(pv.info, n); method != nil {
 				unresolved(n, text, "", pv.methodsMatching(method.Name(), withoutRecv(method.Type().(*types.Signature))))
+				if pv.heldMethodMeets(method) {
+					node.heldImpl = true
+					unresolved(n, text, heldWhy(fmt.Sprintf("a method %s of a type of a package this one imports may be what %s runs", method.Name(), text)), pv.anythingTargets())
+				}
 				break
 			}
 			unresolved(n, text, "", pv.valuesMatching(signatureOf(pv.info.TypeOf(n.Fun))))
+			if pv.heldFuncMeets(signatureOf(pv.info.TypeOf(n.Fun))) {
+				node.heldImpl = true
+				unresolved(n, text, heldWhy(fmt.Sprintf("a function of a package this one imports may be what %s calls", text)), pv.anythingTargets())
+			}
 		}
 		return true
 	})
@@ -889,7 +913,14 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 		switch {
 		case handed[inner]:
 			// A handed literal is part of the body, and a handed function
-			// is named, which is an edge.
+			// is named, which is an edge. Any other value is called during
+			// the call as a call through it is (F2 of the review of the
+			// design of F43): a verified caller checks the run where it
+			// hands the value over, but the body of a trusted function of
+			// the package, which nobody verifies, is walked only here.
+			if named, method := pv.valueFormOf(inner); named == nil && method == nil && asLit(inner) == nil {
+				unresolved(call, fmt.Sprintf("hands %s to %s", types.ExprString(arg), text), "", pv.valuesMatching(signatureOf(pv.info.TypeOf(inner))))
+			}
 		case pv.knownAtCall(arg):
 			// An error of known origin holds a type of the standard
 			// library, and nothing of this package.
