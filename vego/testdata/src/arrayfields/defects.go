@@ -159,3 +159,42 @@ func ConvertedRun() {
 func WritesWithin(s *Shorts, p *int16) {
 	*p = 3
 } // want `vego: postcondition may not hold: s\.C'\[0\] = 5`
+
+// H is a number with a method that writes it.
+type H int16
+
+// Reset sets h to zero.
+//
+// @Requires h != nil
+// @Modifies h
+// @Ensures *h' = 0
+func (h *H) Reset() {
+	*h = 0
+}
+
+// Resetter resets what it holds.
+type Resetter interface {
+	// @Receiver r
+	// @Modifies r
+	// @Ensures True
+	Reset()
+}
+
+// Hs puts the place B at 2 and the element C[0] at the floor 4/2 = 2.
+type Hs struct {
+	A, B H
+	C    [4]H
+}
+
+// ConvertedElementKept converts a pointer to an element of a run, calls
+// through it, and claims the element kept, which is false. Z3 refutes it
+// only past the default limit (F22 of the review of step 3a; ROADMAP, The
+// prover), so the note may stand.
+//
+// @Requires s != nil And s.C[0] = 5
+// @Modifies s
+// @Ensures s.C'[0] = 5
+func ConvertedElementKept(s *Hs) {
+	var r Resetter = &s.C[0]
+	r.Reset()
+} // want `vego: postcondition may not hold: s\.C'\[0\] = 5`

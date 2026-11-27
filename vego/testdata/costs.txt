@@ -65,6 +65,7 @@ appendloops	appendloops.WithCall	38	167166	0
 appendloops	appendloops.WithCallSaid	43	202896	0
 appendloops	appendloops.logs	6	4391	0
 arrayfields	(*arrayfields.Counter).Hit	6	1004	0
+arrayfields	(*arrayfields.H).Reset	4	2310	0
 arrayfields	(*arrayfields.Lexer).Backup	15	24173	0
 arrayfields	(*arrayfields.Lexer).Push	30	34950	0
 arrayfields	(*arrayfields.Reader).Copy	5	7816	0
@@ -79,6 +80,7 @@ arrayfields	arrayfields.Bad	11	5829	0
 arrayfields	arrayfields.Bump	6	6383	0
 arrayfields	arrayfields.CallerKeeps	9	12710	0
 arrayfields	arrayfields.CallerWrong	8	3223438	1
+arrayfields	arrayfields.ConvertedElementKept	14	4034384	1
 arrayfields	arrayfields.ConvertedRun	13	19413	0
 arrayfields	arrayfields.ElementChangedPlace	9	8768	0
 arrayfields	arrayfields.ElementKeepsPlace	10	8501	0
@@ -96,6 +98,7 @@ arrayfields	arrayfields.NextChanged	7	7541	0
 arrayfields	arrayfields.PlaceChangedElement	9	9460	0
 arrayfields	arrayfields.PlaceKeepsElement	10	5647	0
 arrayfields	arrayfields.PtrWrong	8	12583	0
+arrayfields	arrayfields.Resetter.Reset	4	1915	0
 arrayfields	arrayfields.SecondHalfZero	10	15250	1
 arrayfields	arrayfields.SecondWithin	13	2423	0
 arrayfields	arrayfields.SetItem	9	9289	0

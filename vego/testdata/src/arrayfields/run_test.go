@@ -68,3 +68,12 @@ func TestWritesWithin(t *testing.T) {
 		t.Error("WritesWithin: the element kept its value")
 	}
 }
+
+// ConvertedElementKept's claim is false.
+func TestConvertedElementKept(t *testing.T) {
+	s := &Hs{C: [4]H{5}}
+	ConvertedElementKept(s)
+	if s.C[0] == 5 {
+		t.Error("ConvertedElementKept: the element kept its value")
+	}
+}
