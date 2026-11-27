@@ -44,6 +44,7 @@
 !/vego/repeat.sh
 !/vego/census.sh
 !/vego/census.list
+!/vego/census-summary.md
 
 # Design notes and guides.
 !/vego/ROADMAP.md

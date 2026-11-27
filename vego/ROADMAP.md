@@ -10,9 +10,204 @@ Not a target: numerical, scientific, graphics, and machine-learning code, where 
 
 Design choices should be judged against the first group. A feature that only helps the second can wait.
 
+## What stops vego on real code: the census (F41)
+
+Measured on 2026-11-27 by the census of F41 (see The census under By area): every function with a body of four corpora was looked at as if it carried `// @Ensures True`, nothing was proved, and every refusal it met was recorded by its class, past the first. A function that gets through met no refusal on the weakest contract; it is not verified, and the obligations of its body (bounds, nil, overflow, sizes) were not judged. The census ran as a project that declares `sizes` (256 GB) and `inputs` (1 TB), the trial under its own trust file. Each later feature reruns it (`vego/census.sh` with `vego/census.list`, then `go run ./cmd/vegocensus summary`) to show what it bought; the whole summary of this run, with every greedy order per corpus and per module, is `vego/census-summary.md`.
+
+The corpora, at laas 8df7903 (std at 7a4f7d2, which lets a census of std use the shipped entries of its own interfaces; the other corpora do not meet the difference):
+
+- **laas without its vego package**: 2,019 functions; 387 looked at, of which 170 get through. The vego package is 1,692 functions, of which 60 were looked at before the run was stopped and 1,632 are counted not looked at: its functions are long and meet many refusals, and each attempt walks the function again, so it takes about 14 s a function, about 6 hours in all (what would make it linear is under The census, what it does not see yet). It is left out of the weighted merged ranking (ruled by the orchestrator): the verifier's own code is unlike the code the tool is for.
+- **The trial** at 7746bd0, with its own annotations and trust file, without findings/: 154 functions, 126 get through (the trial's own measure proves 97 of 152).
+- **The standard library** of go1.27.3, `go list std` without cmd, runtime, internal, vendor, syscall, and unsafe, in 7 groups (170 packages): 10,825 functions, 4,743 get through (43.8%), 270 not looked at in full (3,129 statements), 802 of generated files left out. text/template (116 functions) is counted not looked at: its `(*state).evalCall` reaches 4 GB in 13 s in the verifier's notes of facts (see The census, what it does not see yet). The groups took 34 to 1,042 s each, 45 minutes in all.
+- **33 modules of the module cache** (vego/census.list, with their versions; eight that do not load offline are replaced and listed there): parsers (BurntSushi/toml, pelletier/go-toml, hashicorp/hcl, go-version, Masterminds/semver, jsonparser, two shlex, ssh_config, magiconair/properties, regexp2, jsonpointer), libraries (go-humanize, google/uuid, mapstructure, backoff, sergi/go-diff, gods, golang-lru, structtag, go-cmp, go-colorful, go-udiff, jsonschema-go), web, clients, services, and SDKs (gorilla/websocket, go-sql-driver/mysql, the MCP go-sdk, golang-jwt, go-oidc, httpsnoop, coder/acp-go-sdk), and commands (errcheck, gocyclo): 5,015 functions, 2,160 get through (43.1%), 181 not looked at in full, 4,853 of generated files left out, httpsnoop's 4,641 among them. No module failed or reached its bound; the run took 8 minutes, the largest mcp-go-sdk at 129 s.
+- **All four**: 18,013 functions, 7,199 get through (40.0%); weighting each module equally and leaving laas out, 46.6%.
+
+How to read the tables: each cell is the functions a class (or group) stops and the functions it stops alone, the only class of a function looked at in full, which is what fixing that class lets through by itself. A census of std takes every callee of std with the weakest contract, so std has no `no-entry` cause; in the modules, callees of the module are taken so, and are counted as assumed (2,743 of 5,015 functions assume one). The column "all, each module equal" gives each module one unit, std counting as one module.
+
+### By group
+
+| group | laas without vego | trial | std | modules | all | all, each module equal |
+| --- | --- | --- | --- | --- | --- | --- |
+| `recursion` | 94 / 21 | 3 / 3 | 3153 / 1508 | 1256 / 600 | 4506 / 2132 | 6.8 / 2.9 |
+| `type` | 30 / 5 | 0 / 0 | 1260 / 454 | 201 / 75 | 1491 / 534 | 0.9 / 0.3 |
+| `func-value` | 19 / 1 | 1 / 0 | 1024 / 254 | 390 / 102 | 1434 / 357 | 1.7 / 0.5 |
+| `no-entry` | 129 / 44 | 9 / 1 | 0 / 0 | 851 / 259 | 989 / 304 | 7.8 / 2.8 |
+| `convert` | 14 / 2 | 4 / 3 | 689 / 86 | 242 / 77 | 949 / 168 | 1.5 / 0.5 |
+| `global` | 15 / 1 | 4 / 0 | 710 / 193 | 212 / 46 | 941 / 240 | 1.5 / 0.3 |
+| `generic` | 24 / 1 | 3 / 0 | 441 / 87 | 290 / 42 | 758 / 130 | 1.8 / 0.2 |
+| `pointer` | 3 / 1 | 1 / 1 | 495 / 164 | 101 / 29 | 600 / 195 | 0.6 / 0.2 |
+| `error` | 24 / 4 | 7 / 1 | 299 / 54 | 254 / 28 | 584 / 87 | 1.4 / 0.2 |
+| `dyntype` | 11 / 0 | 0 / 0 | 459 / 82 | 80 / 6 | 550 / 88 | 0.5 / 0.0 |
+| `assign` | 25 / 1 | 0 / 0 | 355 / 90 | 129 / 30 | 509 / 121 | 0.7 / 0.1 |
+| `expr` | 26 / 0 | 0 / 0 | 263 / 14 | 56 / 10 | 345 / 24 | 0.5 / 0.1 |
+| `format` | 11 / 1 | 1 / 0 | 114 / 46 | 200 / 67 | 326 / 114 | 1.6 / 0.5 |
+| `channel` | 10 / 0 | 0 / 0 | 146 / 21 | 114 / 14 | 270 / 35 | 0.5 / 0.1 |
+| `iface-method` | 19 / 1 | 8 / 6 | 7 / 2 | 204 / 29 | 238 / 38 | 1.7 / 0.2 |
+| `handover` | 12 / 0 | 2 / 0 | 107 / 17 | 100 / 17 | 221 / 34 | 0.4 / 0.1 |
+| `address-of` | 0 / 0 | 0 / 0 | 200 / 55 | 20 / 9 | 220 / 64 | 0.5 / 0.0 |
+| `call` | 5 / 0 | 1 / 0 | 146 / 41 | 65 / 38 | 217 / 79 | 0.5 / 0.3 |
+| `stmt` | 7 / 0 | 0 / 0 | 90 / 9 | 49 / 8 | 146 / 17 | 0.2 / 0.0 |
+| `json` | 6 / 2 | 4 / 1 | 12 / 1 | 107 / 39 | 129 / 43 | 0.6 / 0.2 |
+| `scoped` | 0 / 0 | 1 / 0 | 61 / 5 | 59 / 1 | 121 / 6 | 0.4 / 0.0 |
+| `select` | 5 / 0 | 0 / 0 | 62 / 3 | 47 / 0 | 114 / 3 | 0.2 / 0.0 |
+| `goroutine` | 2 / 0 | 0 / 0 | 51 / 4 | 37 / 1 | 90 / 5 | 0.2 / 0.0 |
+| `limit` | 0 / 0 | 0 / 0 | 57 / 0 | 15 / 0 | 72 / 0 | 0.1 / 0.0 |
+| `append` | 11 / 0 | 1 / 0 | 39 / 15 | 20 / 6 | 71 / 21 | 0.1 / 0.0 |
+| `copy` | 1 / 0 | 0 / 0 | 35 / 8 | 26 / 16 | 62 / 24 | 0.3 / 0.2 |
+| `func-literal` | 2 / 0 | 0 / 0 | 31 / 6 | 29 / 1 | 62 / 7 | 0.3 / 0.0 |
+| `contract` | 4 / 0 | 0 / 0 | 42 / 7 | 2 / 0 | 48 / 7 | 0.0 / 0.0 |
+| `recover` | 5 / 1 | 0 / 0 | 35 / 10 | 8 / 0 | 48 / 11 | 0.0 / 0.0 |
+| `operator` | 0 / 0 | 0 / 0 | 19 / 0 | 7 / 0 | 26 / 0 | 0.0 / 0.0 |
+
+### By class (the 40 that stop the most functions)
+
+| class | laas without vego | trial | std | modules | all | all, each module equal |
+| --- | --- | --- | --- | --- | --- | --- |
+| `recursion:through-call` | 63 / 9 | 0 / 0 | 2354 / 909 | 900 / 411 | 3317 / 1329 | 4.9 / 1.7 |
+| `func-value:calls-values` | 1 / 0 | 0 / 0 | 753 / 179 | 250 / 73 | 1004 / 252 | 0.9 / 0.3 |
+| `recursion:through-method` | 28 / 10 | 3 / 3 | 794 / 330 | 163 / 27 | 988 / 370 | 0.7 / 0.2 |
+| `no-entry:std` | 129 / 42 | 9 / 1 | 0 / 0 | 828 / 252 | 966 / 295 | 7.7 / 2.7 |
+| `global:read` | 15 / 1 | 3 / 0 | 681 / 170 | 197 / 39 | 896 / 210 | 1.4 / 0.2 |
+| `recursion:through-value` | 18 / 0 | 0 / 0 | 411 / 108 | 268 / 119 | 697 / 227 | 1.6 / 0.7 |
+| `type:array-in-struct` | 2 / 0 | 0 / 0 | 594 / 295 | 101 / 50 | 697 / 345 | 0.4 / 0.2 |
+| `func-value:no-contract` | 18 / 1 | 1 / 0 | 337 / 60 | 158 / 22 | 514 / 83 | 0.8 / 0.1 |
+| `assign:target` | 24 / 0 | 0 / 0 | 331 / 73 | 110 / 23 | 465 / 96 | 0.6 / 0.1 |
+| `error:unknown-origin` | 24 / 4 | 7 / 1 | 184 / 36 | 221 / 19 | 436 / 60 | 1.2 / 0.2 |
+| `dyntype:assert` | 8 / 0 | 0 / 0 | 357 / 49 | 61 / 5 | 426 / 54 | 0.3 / 0.0 |
+| `pointer:to-non-struct` | 3 / 1 | 1 / 1 | 319 / 110 | 96 / 26 | 419 / 138 | 0.5 / 0.2 |
+| `type:uintptr` | 0 / 0 | 0 / 0 | 388 / 74 | 10 / 1 | 398 / 75 | 0.1 / 0.0 |
+| `convert:to-error` | 6 / 0 | 0 / 0 | 263 / 43 | 63 / 18 | 332 / 61 | 0.3 / 0.1 |
+| `generic:declared` | 1 / 0 | 1 / 0 | 163 / 0 | 150 / 0 | 315 / 0 | 1.2 / 0.0 |
+| `expr:index` | 26 / 0 | 0 / 0 | 210 / 3 | 36 / 4 | 272 / 7 | 0.4 / 0.1 |
+| `channel:use` | 10 / 0 | 0 / 0 | 146 / 21 | 114 / 14 | 270 / 35 | 0.5 / 0.1 |
+| `format:runs-code` | 10 / 1 | 1 / 0 | 74 / 23 | 181 / 58 | 266 / 82 | 1.4 / 0.3 |
+| `generic:called` | 3 / 0 | 1 / 0 | 164 / 45 | 96 / 31 | 264 / 76 | 0.3 / 0.2 |
+| `iface-method:no-contract` | 19 / 1 | 8 / 6 | 0 / 0 | 198 / 28 | 225 / 35 | 1.7 / 0.2 |
+| `convert:value` | 3 / 2 | 0 / 0 | 170 / 5 | 47 / 27 | 220 / 34 | 0.6 / 0.3 |
+| `handover:unknown-code` | 12 / 0 | 1 / 0 | 105 / 17 | 96 / 17 | 214 / 34 | 0.4 / 0.1 |
+| `convert:iface-no-contract` | 2 / 0 | 0 / 0 | 127 / 13 | 82 / 29 | 211 / 42 | 0.2 / 0.1 |
+| `type:map-key` | 25 / 2 | 0 / 0 | 116 / 11 | 66 / 14 | 207 / 27 | 0.3 / 0.0 |
+| `type:unsafe-pointer` | 0 / 0 | 0 / 0 | 195 / 12 | 7 / 1 | 202 / 13 | 0.1 / 0.0 |
+| `pointer:to-array` | 0 / 0 | 0 / 0 | 179 / 54 | 5 / 3 | 184 / 57 | 0.1 / 0.0 |
+| `error:sentinel` | 0 / 0 | 0 / 0 | 135 / 16 | 42 / 9 | 177 / 25 | 0.2 / 0.1 |
+| `dyntype:switch` | 0 / 0 | 0 / 0 | 142 / 31 | 24 / 0 | 166 / 31 | 0.2 / 0.0 |
+| `call:builtin` | 3 / 0 | 0 / 0 | 134 / 39 | 24 / 5 | 161 / 44 | 0.1 / 0.0 |
+| `recursion:through-format` | 0 / 0 | 0 / 0 | 70 / 26 | 63 / 14 | 133 / 40 | 0.2 / 0.1 |
+| `select:statement` | 5 / 0 | 0 / 0 | 62 / 3 | 47 / 0 | 114 / 3 | 0.2 / 0.0 |
+| `address-of:field` | 0 / 0 | 0 / 0 | 95 / 47 | 12 / 8 | 107 / 55 | 0.4 / 0.0 |
+| `type:array` | 2 / 2 | 0 / 0 | 86 / 14 | 13 / 7 | 101 / 23 | 0.1 / 0.0 |
+| `generic:method-call` | 6 / 0 | 0 / 0 | 60 / 22 | 27 / 1 | 93 / 23 | 0.0 / 0.0 |
+| `goroutine:go` | 2 / 0 | 0 / 0 | 51 / 4 | 37 / 1 | 90 / 5 | 0.2 / 0.0 |
+| `scoped:kept` | 0 / 0 | 1 / 0 | 31 / 1 | 57 / 1 | 89 / 2 | 0.4 / 0.0 |
+| `address-of:global` | 0 / 0 | 0 / 0 | 80 / 0 | 6 / 0 | 86 / 0 | 0.0 / 0.0 |
+| `assign:multi-value` | 4 / 0 | 0 / 0 | 48 / 12 | 31 / 7 | 83 / 19 | 0.1 / 0.0 |
+| `convert:iface-array` | 2 / 0 | 3 / 3 | 69 / 19 | 9 / 0 | 83 / 22 | 0.1 / 0.0 |
+| `global:assign` | 0 / 0 | 0 / 0 | 63 / 8 | 15 / 1 | 78 / 9 | 0.1 / 0.0 |
+
+The proof classes, made only when a proof fails, are kept out of these counts (summary, "Refusals made only when a proof fails"): error:compare-unproved is met in 42 functions, format:length-unknown in 3, global:unreliable in 2, handover:apart-unproved in 1. The stops (`limit:*`) are 72 functions: limit:paths 46, limit:facts 8, and limit:attempts 3 are bounds of the census, and 15 functions stopped for limit:internal, panics of the verifier listed in the summary (11 in compress/flate, crypto/tls's `(*permanentError).Unwrap`, `os.Getwd`, mcp's `(*streamableServerConn).Write`, acp's example main). generic:declared (315) stops a function before its body.
+
+### Greedy order, merged
+
+Each step fixes the class or group that lets the most more functions through, with those before it fixed; a function not looked at in full is never let through. The cell is the class and the functions that get through in all after it; with nothing fixed, 7,199 get through (7,209 with what the project writes for other modules left out), and 16.3 of 35 modules weighted equally. The orders of each corpus are in the summary; that of the modules alone begins recursion:through-call, no-entry:std, recursion:through-value, func-value:calls-values, format:runs-code, iface-method:no-contract, global:read, type:array-in-struct, error:unknown-origin, recursion:through-method, and that of std recursion:through-call, recursion:through-method, func-value:calls-values, type:array-in-struct, global:read, recursion:through-value, pointer:to-non-struct, func-value:no-contract, dyntype:assert, type:uintptr.
+
+| step | classes | classes, without -other | groups | groups, without -other | classes, each module equal |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `recursion:through-call` 8528 | `recursion:through-call` 8542 | `recursion` 9331 | `recursion` 9345 | `no-entry:std` 19.1 |
+| 2 | `recursion:through-method` 8963 | `recursion:through-method` 8977 | `type` 9965 | `type` 9985 | `recursion:through-call` 21.3 |
+| 3 | `func-value:calls-values` 9373 | `func-value:calls-values` 9388 | `func-value` 10659 | `func-value` 10682 | `recursion:through-value` 22.2 |
+| 4 | `type:array-in-struct` 9780 | `type:array-in-struct` 9795 | `convert` 11174 | `convert` 11198 | `global:read` 22.8 |
+| 5 | `no-entry:std` 10144 | `no-entry:std` 10162 | `global` 11617 | `global` 11645 | `iface-method:no-contract` 23.5 |
+| 6 | `global:read` 10485 | `global:read` 10505 | `no-entry` 12105 | `no-entry` 12125 | `format:runs-code` 24.2 |
+| 7 | `recursion:through-value` 10833 | `recursion:through-value` 10853 | `pointer` 12435 | `pointer` 12459 | `error:unknown-origin` 24.8 |
+| 8 | `pointer:to-non-struct` 11037 | `pointer:to-non-struct` 11058 | `error` 12750 | `error` 12776 | `func-value:calls-values` 25.2 |
+| 9 | `func-value:no-contract` 11237 | `func-value:no-contract` 11258 | `dyntype` 13049 | `dyntype` 13077 | `convert:value` 25.7 |
+| 10 | `dyntype:assert` 11404 | `error:unknown-origin` 11436 | `generic` 13362 | `generic` 13395 | `address-of:field` 26.1 |
+| 11 | `error:unknown-origin` 11577 | `dyntype:assert` 11610 | `assign` 13680 | `assign` 13723 | `recursion:through-method` 26.5 |
+| 12 | `assign:target` 11744 | `assign:target` 11778 | `expr` 13947 | `expr` 13993 | `func-value:no-contract` 26.8 |
+| 13 | `type:uintptr` 11895 | `type:uintptr` 11929 | `format` 14191 | `format` 14240 | `type:array-in-struct` 27.1 |
+| 14 | `convert:to-error` 12077 | `convert:to-error` 12112 | `address-of` 14386 | `address-of` 14435 | `scoped:kept` 27.3 |
+| 15 | `generic:called` 12240 | `generic:called` 12277 | `iface-method` 14581 | `iface-method` 14628 | `pointer:to-non-struct` 27.6 |
+| 16 | `convert:iface-no-contract` 12396 | `convert:iface-no-contract` 12433 | `call` 14766 | `call` 14814 | `assign:target` 27.8 |
+| 17 | `format:runs-code` 12547 | `format:runs-code` 12587 | `handover` 14923 | `handover` 14973 | `generic:called` 28.0 |
+| 18 | `iface-method:no-contract` 12686 | `iface-method:no-contract` 12730 | `json` 15044 | `json` 15095 | `format:slice-pack` 28.2 |
+| 19 | `error:sentinel` 12806 | `handover:unknown-code` 12853 | `channel` 15131 | `channel` 15183 | `call:multi-value-args` 28.5 |
+| 20 | `handover:unknown-code` 12931 | `error:sentinel` 12978 | `stmt` 15237 | `scoped` 15272 | `convert:iface-no-contract` 28.7 |
+
+### The fifty callees without an entry that stop the most functions
+
+All of the merged count is the modules' and the trial's and laas's: a census of std assumes its own callees. A callee here stops a function alone when it is the function's only cause.
+
+| callee | class | functions stopped | stopped alone |
+| --- | --- | --- | --- |
+| `reflect.ValueOf` | `no-entry:std` | 89 | 0 |
+| `(reflect.Value).Type` | `no-entry:std` | 85 | 0 |
+| `(reflect.Value).Kind` | `no-entry:std` | 69 | 1 |
+| `(reflect.Value).Interface` | `no-entry:std` | 59 | 0 |
+| `(reflect.Value).Elem` | `no-entry:std` | 45 | 0 |
+| `(reflect.Value).Len` | `no-entry:std` | 44 | 0 |
+| `context.Background` | `no-entry:std` | 43 | 0 |
+| `(reflect.Value).IsNil` | `no-entry:std` | 42 | 0 |
+| `(reflect.Value).Set` | `no-entry:std` | 41 | 1 |
+| `(reflect.Value).IsValid` | `no-entry:std` | 36 | 1 |
+| `(reflect.Value).Index` | `no-entry:std` | 30 | 0 |
+| `flag.Parse` | `no-entry:std` | 30 | 1 |
+| `net/url.Parse` | `no-entry:std` | 25 | 6 |
+| `reflect.Indirect` | `no-entry:std` | 25 | 0 |
+| `reflect.New` | `no-entry:std` | 24 | 0 |
+| `reflect.TypeOf` | `no-entry:std` | 24 | 3 |
+| `(reflect.Value).String` | `no-entry:std` | 23 | 0 |
+| `(*go/types.object).Type` | `no-entry:std` | 20 | 0 |
+| `(reflect.Value).Bool` | `no-entry:std` | 20 | 0 |
+| `(*sync/atomic.Bool).Load` | `no-entry:std` | 19 | 1 |
+| `(*go/types.object).Name` | `no-entry:std` | 16 | 0 |
+| `(*encoding/base64.Encoding).EncodeToString` | `no-entry:std` | 14 | 3 |
+| `(*log/slog.Logger).Error` | `no-entry:std` | 14 | 0 |
+| `(*net/http.Request).Context` | `no-entry:std` | 14 | 0 |
+| `(*net/url.URL).String` | `no-entry:std` | 14 | 0 |
+| `(reflect.Value).Int` | `no-entry:std` | 14 | 0 |
+| `(reflect.Value).MapIndex` | `no-entry:std` | 14 | 0 |
+| `context.WithValue` | `no-entry:std` | 14 | 2 |
+| `errors.Join` | `no-entry:std` | 14 | 2 |
+| `(reflect.Value).Field` | `no-entry:std` | 13 | 0 |
+| `os.Stat` | `no-entry:std` | 13 | 0 |
+| `strconv.ParseFloat` | `no-entry:std` | 13 | 4 |
+| `(*bytes.Reader).Read` | `no-entry:std` | 12 | 0 |
+| `(*strings.Replacer).Replace` | `no-entry:std` | 12 | 1 |
+| `(reflect.Value).Float` | `no-entry:std` | 12 | 0 |
+| `bytes.NewReader` | `no-entry:std` | 12 | 0 |
+| `strings.ContainsRune` | `no-entry:std` | 12 | 9 |
+| `(*log/slog.Logger).Info` | `no-entry:std` | 11 | 1 |
+| `(*net/http.Client).Do` | `no-entry:std` | 11 | 0 |
+| `(reflect.Value).FieldByIndex` | `no-entry:std` | 11 | 0 |
+| `context.WithTimeout` | `no-entry:std` | 11 | 0 |
+| `flag.Args` | `no-entry:std` | 11 | 0 |
+| `unicode.ToLower` | `no-entry:std` | 11 | 11 |
+| `(*sync.Cond).Broadcast` | `no-entry:std` | 10 | 1 |
+| `(reflect.Value).MapKeys` | `no-entry:std` | 10 | 0 |
+| `(reflect.Value).Uint` | `no-entry:std` | 10 | 0 |
+| `net/http.ListenAndServe` | `no-entry:std` | 10 | 0 |
+| `net/http.NewRequestWithContext` | `no-entry:std` | 10 | 0 |
+| `os/exec.CommandContext` | `no-entry:std` | 10 | 0 |
+| `strconv.FormatFloat` | `no-entry:std` | 10 | 3 |
+
+### The ten classes that stop the most functions
+
+- **recursion:through-call** (3,317 functions, 1,329 alone; first in every merged order). A cycle of calls that the call graph closes through a call of another package handed something that may hold code of the package, as an interface value or a value whose type has methods: `context.WithDeadline` (context/context.go:627) reaches `c.err.Load()` of a `sync/atomic.Value`; toml's `DecodeFile` (decode.go:46) reaches `reflect.ValueOf(v)` in `(*Decoder).Decode`; go-shlex's `Split` (shlex.go:80) reaches `ReadRune` of a `*bufio.Reader` it holds. The details, merged: `(*sync.Pool).Put` 175 (92 alone), `(*sync.Pool).Get` 164, `reflect.ValueOf` 128, and in the modules `(*strings.Replacer).Replace`, `(*sync/atomic.Value).Load`, and `io.ReadFull`. Most of these callees run no code of what they are handed; an entry that says so (no `runs` and no `keeps` of code for that parameter) closes the edge, as the call graph reads an entry today (Callbacks handed to trusted functions; Function values). In std, where the callees are std's own, it is the call graph's reading of a function of another package of the module, which would follow what the census now publishes of it. Where the callee does run what it is handed (`fmt`, `sort`), it is recursion:through-format and item 12.
+- **func-value:calls-values** (1,004, 252 alone). A function or a literal used as a value whose body calls through a function value or an interface value: bytes' `FieldsSeq` (bytes/iter.go:96), an iterator literal that calls `yield`; go-shlex's `NewLexer` (shlex.go:65), which makes a value whose method `IsWord` the interface's conversion checks; mysql's `RegisterDial` (driver.go:74), a literal that calls the `dial` it captures. This is "A value that calls a value", listed under Function values as a feature of its own since F40: a measure across values, which the contract of a function type has no form for. Iterators (item 10) are a large part of it in std.
+- **recursion:through-method** (988, 370 alone). A cycle through a call of an interface method whose implementations include the function: context's `(*cancelCtx).String` (context/context.go:544) calls `contextName`, which calls `String` of what it holds; mysql's `(*mysqlConn).close` (connection.go:169) reaches `conn.Close()` of a `net.Conn`; go-cmp's `PushStep` (report.go:24) calls `ps.Values()` of a `PathStep`. Decorators and wrappers, `(io.Writer).Write` 118, `(io.Closer).Close` 69, `(io.Reader).Read` 65. Item 12: a termination argument across values, such as a depth at which values are made, which the immutability of a wrapped field would give.
+- **no-entry:std** (966, 295 alone; first in the modules' weighted order). Calls of the standard library without a shipped entry: toml's `unifyAnything` (decode.go:529) calls `(reflect.Value).Set`; semver's `NewConstraint` (constraints.go:63) calls `(*regexp.Regexp).FindAllString`; go-shlex's `IsWord` (shlex.go:31) calls `unicode.IsNumber`. Of the fifty callees above, reflect is half the count, and reflect is not planned (an entry for it would have to describe the values it reaches); after it come `context.Background` (43), `flag.Parse` (30), `net/url.Parse` (25), `(*sync/atomic.Bool).Load`, base64, slog, and `(*net/http.Request).Context`. Each is an entry to write and test (Trusted contracts for unproved code, Shipped entries of F19, with what was left out), and an entry for one function lets through few functions alone: the most are `unicode.ToLower` (11, all alone), `strings.ContainsRune` (9 of 12), and `net/url.Parse` (6 of 25). What an entry buys shows in the greedy order: a function stopped by no-entry:std usually meets another class too.
+- **global:read** (896, 210 alone). A package-level variable read that is not known to keep its value: bzip2's `updateCRC` (compress/bzip2/bzip2.go:497) reads `crctab`, a table its package assigns once, in `init`; toml's `typeIsTable` (type_toml.go:20) reads `tomlHash`, which is not known to have its value yet, since a function value is called while the package is initialised; semver's `check` (constraints.go:269) reads `constraintOps`, a map of functions. Item 3 lists what is left: tables assigned in `init`, variables that hold code (here maps of functions), and the order of initialisation.
+- **recursion:through-value** (697, 227 alone). A cycle through a call of a function value: flag's `(funcValue).Set` (flag/flag.go:337) calls `f`, whose values include its own method; toml's `nextPos` (parse.go:135) reaches the lexer's `lx.state`, a state function; go-udiff's `DiffStrings` (lcs/export.go:10) reaches `algo(g)`. Details `f` 90, `fn` 82, `cb` 62 (jsonparser's ArrayEach). The call graph takes a call through a value to reach every function of the package used as a value of its type; one that follows values, or a contract on the type that the values are checked against, as a Calls annotation for a parameter (built, F40), closes it (Function values, Not built yet).
+- **type:array-in-struct** (697, 345 alone; fourth in the merged order by functions). A struct that holds an array of elements larger than a byte: bzip2's `NewReader` (compress/bzip2/bzip2.go:47) makes a `reader` with `c [256]uint`; toml's `lex` (lex.go:91) returns a `*lexer` with `prevWidths [4]int`; gods' AVL `(*Tree).Put` (avltree.go:55) passes a `*Node` with `Children [2]*Node`. text/template/parse's `*Tree` (136) and regexp/syntax's `*Regexp` (46) are the largest details. It is what F36 left (Structs and pointers, What F36 left, F1): arrays inside structs whose elements are not one byte, which need a region per field of the array.
+- **func-value:no-contract** (514, 83 alone). A call through, or a use as, a value of a function type with no contract that is not a parameter of the function: flag's `commandLineUsage` (flag/flag.go:1217) calls `Usage`, a package-level `func()`; regexp2's `getCharSetFromCategoryString` (charclass.go:91) returns a literal as a `func() *CharSet`; jwt's `start` (cmd/jwt/main.go:72) calls `flag.Usage`. `func()` alone is 68; json/v2's `marshaler` and `unmarshaler` types follow. Contracts at the place a type is used, for what is not a parameter, and `flag.Usage` with item 3 and item 11 (Function values, Not built yet; Package-level variables, Not built yet).
+- **assign:target** (465, 96 alone). An assignment to a target the verifier does not take: crypto/hpke's `(*Sender).Seal` (hpke.go:176) increments `s.seqNum` through an embedded pointer; gods' hashset `(*Set).Add` (hashset.go:40) assigns `set.items[item]` of a `map[interface{}]struct{}`, a map whose keys are not modelled, which this class counts with the form of the target and should count as type:map-key (see The census, what it does not see yet); mysql's `CheckNamedValue` (connection.go:676) assigns `nv.Value, err` from a call. Item 6 (the rest that was item 6 before the trial).
+- **error:unknown-origin** (436, 60 alone). An error whose origin is not known, formatted (283), its `Error` called (105), or handed to `errors.Is` (46): compress/flate's `(*ReadError).Error` (inflate.go:53) calls `e.Err.Error()` of the error it wraps; acp-go-sdk's `toReqErr` (errors.go:78) asks `errors.Is(err, context.Canceled)` of an error it is handed; httpsnoop's code generator `WriteFile` (codegen/main.go:363) formats the `err` its own `g.Format()` returned, which is the error of `go/format.Source`, for which no entry vouches. An error a parameter brings or a callee without an entry returns has no known origin; entries that vouch for their errors, and `Vouches` on the errors of the project's types, give one (Errors; Trusted contracts for unproved code). Since F35 a callee of the module is what it is in its own package.
+
+What the ranking says, read with the orders: three classes about cycles of calls (through a call of another package, a method, a value) let through more functions than anything else, and they rest on the call graph, not on a kind of value: entries for what the callees of another package run, and a measure across values (item 12, and A value that calls a value), are what the first steps of every order ask. no-entry:std is the first class of the modules weighted equally and second in theirs by functions, and it is a long tail: the fifty callees above stop at most 89 functions each and almost none alone. type:array-in-struct and global:read are each one well-defined feature with hundreds of functions behind them, many alone. Linked structures, the trial's largest cause (15 of 55), are not a class here: in real code they meet these classes first.
+
 ## Go that stops a function from being verified
 
-Each of these makes vego report the function that uses it as `cannot verify`, or keeps a true contract from being proved. They are listed in the order they are meant to be built. Since the trial on real code (F16, 2026-11-20; see Before it is called ready) the order rests on what blocked the trial's 152 functions, and each entry carries its numbers there: functions blocked, of which the entry was the first message, and of which it was the only blocker, with the packages and the Target kinds (parser, data structure, command, service) it appeared in. A count of 0 alone means removing the entry completes nothing by itself. `/home/spachava/dev/vego-trial/measure.sh` reruns the trial and prints the functions proved per package, and the functions that changed against the trial's classification; it is the measure of progress after each feature.
+Each of these makes vego report the function that uses it as `cannot verify`, or keeps a true contract from being proved. They are listed in the order they are meant to be built. Since the census of F41 (2026-11-27, the section above), the order of the next features is chosen from its ranking over the standard library and 33 modules, which measures every refusal of every function; the trial's numbers below stay as what each item met there. Since the trial on real code (F16, 2026-11-20; see Before it is called ready) the order rests on what blocked the trial's 152 functions, and each entry carries its numbers there: functions blocked, of which the entry was the first message, and of which it was the only blocker, with the packages and the Target kinds (parser, data structure, command, service) it appeared in. A count of 0 alone means removing the entry completes nothing by itself. `/home/spachava/dev/vego-trial/measure.sh` reruns the trial and prints the functions proved per package, and the functions that changed against the trial's classification; it is the measure of progress after each feature.
 
 The origin of errors decided along the path, placed before the first of them by the orchestrator after F19, is built (F20, 2026-11-20; see Errors, Origin is decided along the path): `err` can be reused for a call whose errors nothing vouches for after it is wrapped, as `guide/files.go` WriteReport shows. The trial rerun gave 60 of 152, as before, with every diagnostic of the trial the same at 9c39fbb and after: no function of the trial met the rule over every assignment once the shipped entries were in, and memory.loadGraph is stopped by `json.Unmarshal` (see Before it is called ready, After the origin of errors along the path).
 
@@ -1924,6 +2119,36 @@ Not built yet:
 - **The Body of an `http.Response`**: known to end where a trusted call vouches for it, unknown after a store of another reader, as a state is. Today read it through `io.LimitReader` with a bounded loop.
 - **`io.MultiReader`** (it yields the sum of what it holds, beyond the amount of one reader) and decompressors (what they yield is not bounded by what they read).
 - **Readers verified code makes**, which end by proof: `strings.Reader`, `bytes.Reader`, a `bytes.Buffer` that nothing writes while it is read.
+
+### The census (F41)
+
+Built as F41 (2026-11-27), at the user's request for the work that unlocks the most code, wide and deep, which the trial's 152 functions could not rank. It builds no verification. Design agreed with the reviewer over seven rounds (F1 to F35) and ruled by the orchestrator (annotated functions keep their annotations; the greedy orders; per module and weighted; the proof classes apart; the declarations; the threshold for findings before the run). The ranking it gave is the section "What stops vego on real code" at the top of the planning part.
+
+Decisions:
+
+- **The mode**: `-vego.census=FILE` with `-vego.census-scope=MODULE` (or `std`), and `-vego.census-only=REGEXP` to narrow it to some packages of the scope. With the flags set, every package of the run is analysed offline: the solver is `solver.Offline()`, which proves a goal that is the literal True and nothing else and finds no set of facts contradictory (F9: a cut path goes on vacuously), and no Z3 is started; the packages of the scope that `-vego.census-only` matches are looked at, and the others give only the facts their importers read. Nothing is reported; a report is recorded by its class. Without the flags every problem and diagnostic is the base's: the reviewer compared the main corpus (3,099 lines) and the trial (161 lines) byte for byte at each step.
+- **Classes at every place that refuses** (step 1, F3, F7, F11 to F14, F17, F24, F28): `unsupported(pos, class, msg)` at all 282 sites and `report(pos, class, ...)` at all 188 report sites, each report an obligation (`report:obligation`), a fault of an annotation (`report:annotation`), or a refusal of a class; the ownership walk's refusals and the faults of checkValueContract carry classes too. A class is `group:kind`, a key of `refusalClasses` with a line that names in parentheses the roadmap item that lifts it, or the result of a classifier (`typeClass` follows `layoutOf` arm by arm, `callClass` and `ownerClass` by the module of the callee or of what has no contract, `edgeClass` by the kind of edge a cycle cannot be followed through, `addressClass`, `exprClass`, `fieldClass`, `pointerClass`, `makeClass`, `mapClass`, `stmtClass`, `rangeClass`, `unusableClass`). `TestRefusalClasses` parses every file and fails for a site whose class is none of these or a parameter `class`, for a class unused or undescribed, and for a class marked "made only when a proof fails" that is not in `proofClasses`; `unsupported` and `report` panic for a class outside the table. The standard library is told by its files lying under GOROOT/src, not by a path without a dot (F14). A class whose detail names another module's interface, type, or function type without an entry ends in `-other`, as `no-entry:other` (F17): the project writes those entries.
+- **The weakest contract**: every function of the scope with a body and no annotations gets `Ensures True` before the closures are kept (F16), and a function with annotations keeps its own (ruled). A callee, an interface method, a named function type, or the variable of a refused recursive closure of the module without a contract is taken with the weakest contract (it modifies nothing and promises nothing), each recorded as an event `assumed:*`, not a cause; the cache of those contracts is keyed by kind (F29, which a statement calling an interface method had mixed, giving a conversion a contract of the wrong shape). A value of an unnamed function type handed to an assumed callee is `assumed:calls`, and a call of such a parameter of the function `annotate:calls`, since a Calls annotation settles it (F4). A census publishes the contract facts of the functions it looks at, with their errors, calls through values, and summaries, marked `Census`, so that a callee in another package of the module is what it is in its own (F35); not for a function with an entry, whose entry callers use.
+- **What a census does not ask** (F2): whether a contract can be used, the checks of `checkValueContract`, `checkTrusted`'s entryOnly and contradiction, the invariants' contradiction, `readsReadFrame`, and the function's own `checkEntry`; the contract is used as if each passed, and `pv.checkingContract` makes the solver panic if one asks anyway. Seven classes are made only when a proof fails (`proofClasses`: global:unreliable, append:call-in-target, format:length-unknown, error:compare-unproved, json:read-frame-unproved, handover:apart-unproved, owns:store-unproved); a census makes them wherever they are reached, and the summary lists them apart and leaves them out of the counts and orders. Initialisers count as not verifying only for a refusal, never for an obligation.
+- **The declarations** (ruled): a census runs as a project that declares `sizes: {memory: 256GB}` and `inputs: {bytes: 1TB}`, through a trust file the driver writes, unless the project has its own (the trial); what only a declaration lets through is an event `declared:*`. A trust file with a problem ends the census with an error that names it (F20).
+- **Going on past a refusal** (F1): never after a panic. A function is looked at in attempts, each a fresh verifier; a census-owned stack holds what is executing (statements as seq dispatches them, expressions with a layout as eval enters them, conversions as evalAs enters them, the named checks of verify, the end of the body), copied where a refusal is made; the attempt that refused stubs the innermost entry not yet stubbed (F34), and the next attempt walks again from the start. A stubbed expression evaluates its operands, as Go binds them, and is a value of its type about which nothing is known (F15, F23); a stubbed conversion is a value of the type converted to (F34); a stubbed statement gives its declared and assigned variables values first, then evaluates its expressions, walks each body directly inside it once, and goes on unless it leaves the block. Literal bodies no attempt entered are walked after, from the function's entry state, under the weakest contract of their signature; a recursive closure that its function refuses is walked so, with its calls `assumed:closure` (F16). An unsupported parameter, receiver, or result type is recorded and skipped without a panic, in the ordinary words (F22).
+- **Honesty**: a function's statements that no attempt entered are counted (`unseen`), leaving out those after a terminating statement of their list, by the spec's definition or a call of a function that never returns (F10); a function with any, or with a stop, is not looked at in full and is never counted as getting through, stopped alone, or let through (F5). Stops, kind `stop`: `generic:declared`, `annotation:broken` (F6), `limit:paths` (4,000 branches in one attempt, 16,000 or 200,000 statements over all of them, F32), `limit:facts` (20,000 facts in a state, or 300 errors of known tree or 100,000 pairs of trees and targets of errors.Is in one attempt, F32), `limit:attempts` (100), `limit:formula`, and `limit:internal`, any other panic, with the first frames of its stack. A function of a generated file (`ast.IsGenerated`) is not looked at and is counted apart (`skip:generated`). The driver adds `package:not-loaded` for every function with a body that left no line (F19, F25).
+- **The summary** (`cmd/vegocensus`, TestSummary and TestNotLoaded): a function gets through when it has no cause and was looked at in full; a class stops it alone when the set of its cause classes, without assumed, declared, annotate, and proof, is that class; the greedy order takes, step by step, the class (or group) that lets the most functions through with those before it fixed, ties by name, and is given also with what the project writes for other modules (`no-entry:other` and the classes ending in `-other`) left out; the per-module table, and the reports with each module weighted equally (ruled).
+- **What it found in the verifier**, fixed with it: `laas` panicked on every package of a run that held `return Must(pair())` with annotations (F21, ownorigins.go, index -1 for an operand without a parameter; `multiarg` in the corpus); the iteration of ownership summaries did not settle on a package whose every function is summarised, as hcl's json parser with `@Ensures True` everywhere, which hung for ever (widened after 4n+16 rounds by a join toward what callers assume, which ends; TestJoinSummaries and TestWidenedSummaries; a run that settles is unchanged).
+- **Cost** (measured at the end): cold `go test -count=1 ./vego/...` from extracts of 405dacc and 7a4f7d2, alternating in one 12G scope, while the F42 pair's tests ran beside, at a load of 7 to 10: base 216, 211, 202 s against 243, 203, 236 s, a mean of 210 against 227 s. The tests the feature adds take about 10 s of it (TestCensus about 5 s, TestGuideCensusLine 1 s, and multiarg in the main corpus); the rest is the load of the other thread. A census starts no Z3: the modules' run took 8 minutes for 33 modules, std 45 minutes, the trial 4 s.
+- **Programs**: `vego/testdata/census` (its own GOPATH root, so that the main corpus and its cost table are untouched) holds through, stops, idioms, cycles, message, gen, first (whose first causes TestCensus compares with the ordinary run's refusals), xa and xb (F35), and censusother; `vego/testdata/censusmod` is the guide's example, whose line TestGuideCensusLine holds to the guide. The reviewer compared the census function by function with the ordinary run on whole modules with `@Ensures True` written everywhere: go-humanize 36 of 36, uuid 71 of 71, go-version 53 of 53, semver 60 of 60, golang-jwt 114 of 119 (the five explained), and the trial 148 of 154 (the six explained).
+
+What the census does not see yet, each under the orchestrator's threshold (none changes the order of the first ten of a greedy order or the count that gets through by a hundredth), with its size:
+- **Fifteen panics of the verifier**, `limit:internal`, 15 of the 18,013 functions of the run, listed in vego/census-summary.md with their frames: in the modules, mcp's `(*streamableServerConn).Write` ("slice bounds out of range [:-1]" in a deferred leave of rangeStmt while a limit:paths refusal unwinds; a refusal after a range over a map does not crash the ordinary run, so it is the census's) and acp-go-sdk's `example/gemini.main` (in loop); in std, eleven in compress/flate (an interface conversion of a pointer type in `hopsPointer` and in `checkNotWritten`), crypto/tls's `(*permanentError).Unwrap` (a conversion to error that the list of conversions does not have), and `os.Getwd` (in loop).
+- **The cost of attempts**: each attempt walks the function again from the start, so a function with R refusals costs R + 1 walks, each of up to 4,000 branches. On laas's vego package it is about 14 s a function, and that package was not looked at in the run. What would make it linear: a walk that restarts from a state saved before the statement that refused, or one that collects every stub in one walk by refusing without a panic where the site allows it.
+- **Notes of facts keyed by the printed term**: text/template's `(*state).evalCall` reaches 4 GB in 13 s, half of it strings of printed terms (the notes of `noted`, keyed by `Term.String()`, which prints a shared term as a tree). A fault of the verifier that the census reaches, the fix a key that does not print; text/template (116 functions) is counted not looked at.
+- **assign:target counts a map that is not modelled** where a target is an element of one (assign.go, "only elements of slices can be assigned, not those of a map[...]"), as gods' hashset `Add`: it should be type:map-key. Under the threshold; assign:target is ninth by functions and twelfth in the merged order.
+- **Error trees are kept per verifier, not per path** (a fault of the verifier that F32 found): every error of known tree made on any path is instantiated against every target of errors.Is met on any path, so a function of many paths that makes many errors grows with the square of its paths; websocket's `(*proxy_socks5).connect` took 10 GB. The fix is trees and targets in the state; it changes the problems of ordinary runs, so it waits for a feature of its own with its measurement; the census bounds it (limit:facts).
+- **A program that does not settle without the widening** (F33): two of the parser's shape settle. The reading from hcl's flips: one tag stands for every new result of a call ("One tag for the call, shared by every new result (F20)"), so storing one result makes the error beside it not new, and a fresh callee result makes the caller's error unknown where a known one does not, which is not monotone.
+- **A generated function publishes no facts**, so a caller of it in another package meets what F35 fixed for others.
+- **A function named as a value inside a stub** is left out (F23 (c)): a refusal its parameter's type would give is not looked at.
+- **The census walks paths that a failed contract of a callee makes dead for the ordinary run**, as in the trial's summarizeJob, where `readJSON` with `Ensures True` and no Modifies makes the block after it infeasible; it sees more there, which is not a fault.
+- **A census does not see** what a refusal hides that no stub reaches: what a function under a fatal stop does after it (`generic:declared` 150 functions of the modules), and the obligations of every body (bounds, nil, overflow, sizes), which it does not judge.
 
 ## Later
 
