@@ -100,7 +100,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		for _, tuple := range []*types.Tuple{sig.Params(), sig.Results()} {
 			for variable := range tuple.Variables() {
 				if holdsArrayPointer(variable.Type()) {
-					v.unsupported(call.Pos(), withDetail(rPointerToArray, variable.Type().String()),
+					v.unsupported(call.Pos(), arrayRefusal(rPointerToArray, variable.Type()),
 						arrayPointerRefusal("a parameter or a result of "+types.ExprString(call.Fun), variable.Type()))
 				}
 			}

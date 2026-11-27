@@ -412,7 +412,80 @@ func typeClass(t types.Type) refusal {
 	if t == nil {
 		return r
 	}
+	if arrayClasses[r] {
+		return arrayRefusal(r, t)
+	}
 	return withDetail(r, t.String())
+}
+
+// arrayClasses are the classes of arrays, whose detail names what the
+// array holds (arrayRefusal), so that the census counts each kind apart
+// (the split the orchestrator asked for before 3b and 3c of F42).
+var arrayClasses = map[refusal]bool{rTypeArray: true, rTypeArrayStruct: true, rTypeArrayElem: true, rPointerToArray: true, rConvIfaceArray: true}
+
+// arrayRefusal is a refusal of an array class with its detail: what the
+// first array the type holds is made of, and the type.
+func arrayRefusal(class refusal, t types.Type) refusal {
+	if kind := arrayKind(t, map[types.Type]bool{}); kind != "" {
+		return withDetail(class, kind+": "+t.String())
+	}
+	return withDetail(class, t.String())
+}
+
+// arrayKind names what the first array a value of the type holds, at any
+// depth through pointers, slices, maps, and fields, is made of: numbers
+// (and booleans), zero-size elements, strings, structs, arrays, or
+// references (pointers, slices, maps, interface values, functions,
+// channels) of at most 8 elements or of more; "" when it holds none.
+func arrayKind(t types.Type, seen map[types.Type]bool) string {
+	if t == nil || seen[t] {
+		return ""
+	}
+	seen[t] = true
+	switch u := t.Underlying().(type) {
+	case *types.Array:
+		elem := u.Elem()
+		switch eu := elem.Underlying().(type) {
+		case *types.Basic:
+			switch {
+			case eu.Info()&types.IsString != 0:
+				return "strings"
+			case zeroSized(elem):
+				return "zero-size"
+			}
+			return "numbers"
+		case *types.Struct:
+			if zeroSized(elem) {
+				return "zero-size"
+			}
+			return "structs"
+		case *types.Array:
+			if zeroSized(elem) {
+				return "zero-size"
+			}
+			return "arrays"
+		}
+		if u.Len() <= 8 {
+			return "references, N <= 8"
+		}
+		return "references, N > 8"
+	case *types.Pointer:
+		return arrayKind(u.Elem(), seen)
+	case *types.Slice:
+		return arrayKind(u.Elem(), seen)
+	case *types.Map:
+		if kind := arrayKind(u.Key(), seen); kind != "" {
+			return kind
+		}
+		return arrayKind(u.Elem(), seen)
+	case *types.Struct:
+		for field := range u.Fields() {
+			if kind := arrayKind(field.Type(), seen); kind != "" {
+				return kind
+			}
+		}
+	}
+	return ""
 }
 
 // typeClassOf is typeClass without the detail. It takes the arms of
@@ -470,10 +543,10 @@ func typeClassOf(t types.Type) refusal {
 // anything but numbers and booleans is not modelled (fieldLayout).
 func fieldClass(t types.Type) refusal {
 	if _, ok := arrayPointer(t); ok {
-		return withDetail(rPointerToArray, t.String())
+		return arrayRefusal(rPointerToArray, t)
 	}
 	if isArray(t) {
-		return withDetail(rTypeArrayStruct, t.String())
+		return arrayRefusal(rTypeArrayStruct, t)
 	}
 	return typeClass(t)
 }
@@ -482,7 +555,7 @@ func fieldClass(t types.Type) refusal {
 // a type that a pointer cannot point to.
 func pointerClass(t types.Type) refusal {
 	if isArray(t) {
-		return withDetail(rPointerToArray, t.String())
+		return arrayRefusal(rPointerToArray, t)
 	}
 	return withDetail(rPointerTo, t.String())
 }
@@ -504,10 +577,10 @@ func makeClass(t types.Type) refusal {
 // array is not modelled either (elemLayout).
 func elemClass(t types.Type) refusal {
 	if _, ok := arrayPointer(t); ok {
-		return withDetail(rPointerToArray, t.String())
+		return arrayRefusal(rPointerToArray, t)
 	}
 	if isArray(t) {
-		return withDetail(rTypeArrayElem, t.String())
+		return arrayRefusal(rTypeArrayElem, t)
 	}
 	return typeClass(t)
 }

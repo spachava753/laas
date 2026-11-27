@@ -1,0 +1,4 @@
+# The trial, for the census of vego (F41), with its own annotations and
+# trust file and without its findings package. @trial is the directory of
+# its checkout, which census-all.sh takes from TRIAL.
+trial @trial vegotrial -exclude-packages=findings ./...

@@ -65,11 +65,14 @@ grep -v '^#' "$list" | while read -r name dir scope patterns; do
 		;;
 	esac
 	patterns=${patterns:-./...}
-	# @cache/ stands for the module cache, @goroot for GOROOT/src, and
-	# @here for the directory of this repository.
+	# @cache/ stands for the module cache, @goroot for GOROOT/src, @here
+	# for the directory of this repository, and @stdmod and @trial for the
+	# directories CENSUS_STDMOD and CENSUS_TRIAL name (census-all.sh).
 	case $dir in
 	@cache/*) dir=$cache/${dir#@cache/} ;;
 	@goroot) dir=$(go env GOROOT)/src ;;
+	@stdmod) dir=${CENSUS_STDMOD:?set CENSUS_STDMOD to an empty module, as census-all.sh does} ;;
+	@trial) dir=${CENSUS_TRIAL:?set CENSUS_TRIAL to the directory of the trial, as census-all.sh does} ;;
 	@here) dir=$(cd "$(dirname "$0")/.." && pwd) ;;
 	esac
 	# Only a copy may have its go.mod and go.sum completed.

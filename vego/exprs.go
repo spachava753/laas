@@ -29,7 +29,7 @@ func (v *fnVerifier) variable(id *ast.Ident, st *state, guard []*logic.Term) val
 	}
 	if variable != nil && variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope() {
 		if holdsArrayPointer(variable.Type()) {
-			v.unsupported(id.Pos(), withDetail(rPointerToArray, variable.Type().String()), arrayPointerRefusal(id.Name, variable.Type()))
+			v.unsupported(id.Pos(), arrayRefusal(rPointerToArray, variable.Type()), arrayPointerRefusal(id.Name, variable.Type()))
 		}
 		if variable.Pkg() == v.pass.Pkg && v.isBoxedGlobal(variable) {
 			// A struct variable whose address is taken, at its allocation.

@@ -1,0 +1,5 @@
+# laas without its vego package, for the census of vego (F41). The vego
+# package takes about 14 s a function, six hours in all; F41 counted it as
+# not looked at, and census-all.sh does the same (its functions come back
+# as package:not-loaded).
+laas @here github.com/spachava753/laas ./cmd/... ./funcdoc/... ./inlinehelper/... ./teststructure/... ./evals/... ./vego/internal/...

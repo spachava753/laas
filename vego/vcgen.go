@@ -474,7 +474,7 @@ func (v *fnVerifier) enter() *state {
 	st.assume(logic.Le(logic.IntLit(1), st.brk))
 	for i, param := range fn.params {
 		if holdsArrayPointer(param.Type()) {
-			v.unsupported(param.Pos(), withDetail(rPointerToArray, param.Type().String()), arrayPointerRefusal("parameter "+param.Name(), param.Type()))
+			v.unsupported(param.Pos(), arrayRefusal(rPointerToArray, param.Type()), arrayPointerRefusal("parameter "+param.Name(), param.Type()))
 		}
 		leaves, ok := layoutOf(param.Type())
 		if !ok && v.lenient {
@@ -556,7 +556,7 @@ func (v *fnVerifier) enter() *state {
 	}
 	for _, result := range fn.results {
 		if holdsArrayPointer(result.Type()) {
-			v.unsupported(fn.obj.Pos(), withDetail(rPointerToArray, result.Type().String()), arrayPointerRefusal("result "+result.Name(), result.Type()))
+			v.unsupported(fn.obj.Pos(), arrayRefusal(rPointerToArray, result.Type()), arrayPointerRefusal("result "+result.Name(), result.Type()))
 		}
 		_, ok := layoutOf(result.Type())
 		if !ok && v.lenient {

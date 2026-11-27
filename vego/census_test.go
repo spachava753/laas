@@ -148,7 +148,7 @@ func TestRefusalClasses(t *testing.T) {
 			case *ast.SelectorExpr:
 				name = fun.Sel.Name
 			}
-			if name == "withDetail" {
+			if name == "withDetail" || name == "arrayRefusal" {
 				check(e.Args[0], at)
 				return
 			}
@@ -329,7 +329,12 @@ func Generic[T any](x T, p *T) {}
 			t.Errorf("%s: %s has a layout", name, typ)
 			continue
 		}
-		if got := typeClass(typ); got != withDetail(class, typ.String()) {
+		wantDetail := withDetail(class, typ.String())
+		if arrayClasses[class] {
+			// The detail of an array class names what the array holds.
+			wantDetail = arrayRefusal(class, typ)
+		}
+		if got := typeClass(typ); got != wantDetail {
 			t.Errorf("%s: typeClass(%s) = %q, want %s with the type as detail", name, typ, got, class)
 		}
 	}
@@ -673,4 +678,28 @@ func TestGuideCensusLine(t *testing.T) {
 		return
 	}
 	t.Fatal("the census wrote no line for Load")
+}
+
+// TestArrayKind: the detail of an array class names what the first array
+// a type holds is made of, which the census counts apart.
+func TestArrayKind(t *testing.T) {
+	pkg := types.NewPackage("example.com/kinds", "kinds")
+	field := func(name string, typ types.Type) *types.Var {
+		return types.NewField(token.NoPos, pkg, name, typ, false)
+	}
+	for typ, want := range map[types.Type]string{
+		types.NewArray(types.Typ[types.String], 2):                                                 "strings",
+		types.NewArray(types.NewStruct(nil, nil), 2):                                               "zero-size",
+		types.NewArray(types.NewStruct([]*types.Var{field("X", types.Typ[types.Int])}, nil), 2):    "structs",
+		types.NewArray(types.NewArray(types.Typ[types.Int], 2), 2):                                 "arrays",
+		types.NewArray(types.NewPointer(types.Typ[types.Int]), 8):                                  "references, N <= 8",
+		types.NewArray(types.NewSlice(types.Typ[types.Int]), 9):                                    "references, N > 8",
+		types.NewPointer(types.NewArray(types.Typ[types.Int], 4)):                                  "numbers",
+		types.NewStruct([]*types.Var{field("A", types.NewArray(types.Typ[types.String], 4))}, nil): "strings",
+		types.NewSlice(types.Typ[types.Int]):                                                       "",
+	} {
+		if got := arrayKind(typ, map[types.Type]bool{}); got != want {
+			t.Errorf("arrayKind(%s) = %q, want %q", typ, got, want)
+		}
+	}
 }

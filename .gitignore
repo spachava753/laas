@@ -44,6 +44,10 @@
 !/vego/repeat.sh
 !/vego/census.sh
 !/vego/census.list
+!/vego/census-laas.list
+!/vego/census-trial.list
+!/vego/census-std.list
+!/vego/census-all.sh
 !/vego/census-summary.md
 
 # Design notes and guides.

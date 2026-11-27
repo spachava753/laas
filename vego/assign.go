@@ -75,7 +75,7 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 		}
 		variable, ok := v.info.ObjectOf(e).(*types.Var)
 		if ok && variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope() && holdsArrayPointer(variable.Type()) {
-			v.unsupported(e.Pos(), withDetail(rPointerToArray, variable.Type().String()), arrayPointerRefusal(e.Name, variable.Type()))
+			v.unsupported(e.Pos(), arrayRefusal(rPointerToArray, variable.Type()), arrayPointerRefusal(e.Name, variable.Type()))
 		}
 		switch {
 		case ok && variable.Pkg() == v.pass.Pkg && v.isBoxedGlobal(variable):
@@ -139,7 +139,7 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 			v.unsupported(e.Pos(), rAssignTarget, fmt.Sprintf("only elements of slices can be assigned, not those of a %s", t))
 		}
 		if isArray(elemType(t)) {
-			v.unsupported(e.Pos(), withDetail(rTypeArrayElem, t.String()), fmt.Sprintf("assigning an element of a %s is not supported: slices of arrays are not supported yet", t))
+			v.unsupported(e.Pos(), arrayRefusal(rTypeArrayElem, t), fmt.Sprintf("assigning an element of a %s is not supported: slices of arrays are not supported yet", t))
 		}
 		lv.kind, lv.slice, lv.index, lv.typ, lv.cells = placeMem, e.X, e.Index, elemType(t), v.cellsOf(elemType(t))
 	case *ast.SelectorExpr:

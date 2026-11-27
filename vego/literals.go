@@ -202,7 +202,7 @@ func (v *fnVerifier) classifyLiterals() {
 		ast.Inspect(lit.Body, func(m ast.Node) bool {
 			if id, ok := m.(*ast.Ident); ok {
 				if variable, ok := v.info.Uses[id].(*types.Var); ok && holdsArrayPointer(variable.Type()) && !(lit.Pos() <= variable.Pos() && variable.Pos() < lit.End()) {
-					v.unsupported(id.Pos(), withDetail(rPointerToArray, variable.Type().String()), arrayPointerRefusal(id.Name+", which a function literal captures,", variable.Type()))
+					v.unsupported(id.Pos(), arrayRefusal(rPointerToArray, variable.Type()), arrayPointerRefusal(id.Name+", which a function literal captures,", variable.Type()))
 				}
 			}
 			return true
