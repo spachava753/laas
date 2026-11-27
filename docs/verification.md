@@ -4168,7 +4168,7 @@ In an `Ensures`, `fresh(x)` means that the memory `x` refers to on return was al
 
 `fresh` says only when the memory was allocated. It does not say that nothing else refers to the memory: two fresh slices may share one array, and a fresh pointer may have been stored where the caller can reach it. A proof that needs such a fact needs a clause that states it, such as `apart(a, b)` or `p != q`.
 
-`within(a, b)` means that `a` lies inside the memory of `b`. Each argument of `fresh` and `within` is a pointer or a slice, and `fresh` also takes a map or an interface value. With interface values whose methods write behind them, `fresh` takes more than one argument and `within` takes such a value second, as described in [New values and values made over a writer](#new-values-and-values-made-over-a-writer). A slice includes its whole capacity. These edge cases apply:
+`within(a, b)` means that `a` lies inside the memory of `b`. Each argument of `fresh` and `within` is a pointer or a slice, and `fresh` also takes a map or an interface value. With interface values whose methods write behind them, `fresh` takes more than one argument and `within` takes such a value second, as described in [New values and values made over a writer](#new-values-and-values-made-over-a-writer). Inside a body, an argument of `within` and `apart` can be `old(x)`, which is `x` as it was when the function was entered (see [Appending in a loop to a slice in memory](#appending-in-a-loop-to-a-slice-in-memory)). A slice includes its whole capacity. These edge cases apply:
 
 - A slice with zero capacity has no memory, so it is `fresh` and is `within` anything.
 - A nil interface value holds nothing, so it is `fresh`.
@@ -4376,6 +4376,83 @@ func CopyAppend(A []int) (out []int) {
 	return out
 }
 ```
+
+### Appending in a loop to a slice in memory
+
+A loop can also append to a field reached through a pointer, or to the slice that a pointer to a slice points to:
+
+```go
+// Samples holds values.
+type Samples struct {
+	Values []int
+	n      int
+}
+
+// Collect appends n values to j.Values.
+//
+// @Requires j != nil And 0 <= n < 1000 And |j.Values| < 1000
+// @Modifies j, j.Values
+// @Ensures |j.Values'| = |j.Values| + n
+func Collect(j *Samples, n int) {
+	// @Invariant |j.Values| = |old(j.Values)| + i
+	for i := range n {
+		j.Values = append(j.Values, i)
+	}
+}
+```
+
+The `append` may write into the spare capacity of the array that `j.Values` had when `Collect` was called. `Modifies j.Values` covers that array. At the head of the loop, `vego` knows that `j.Values` is still in that array, at the same offset and with the same capacity, or that it is in an array the loop allocated. `vego` adds this invariant itself and proves it at the end of each iteration. It adds it only when nothing in the loop but its appends can write the slice:
+
+- The pointer, here `j`, is a local variable or a parameter that is declared before the loop. The loop does not assign it, and the function does not take its address.
+- The slice is a field of the struct that the pointer points to, or a field of a struct held in such a field. It can also be what a pointer to a slice points to.
+- The loop assigns nothing else of the slice's type, and no struct or array that holds such a slice, as `*j = Samples{}` would.
+- Every call in the loop is a conversion, a built-in function other than `delete` and `clear`, or a function whose contract has no `Modifies` and that calls no function or method value it is passed.
+- The loop has no function literal, `defer`, or `go` statement.
+
+A loop that does not meet these conditions forgets where the slice is, and the `append` is reported. Here a call writes `j.n`:
+
+```go
+// tick counts a value.
+//
+// @Requires j != nil And j.n < 1000000
+// @Modifies j.n
+// @Ensures j.n' = j.n + 1
+func tick(j *Samples) {
+	j.n++
+}
+
+// CollectCounted appends n values and counts them.
+//
+// @Requires j != nil And 0 <= n < 1000 And |j.Values| < 1000 And j.n < 1000
+// @Modifies j, j.Values
+// @Ensures |j.Values'| = |j.Values| + n
+func CollectCounted(j *Samples, n int) {
+	// @Invariant |j.Values| = |old(j.Values)| + i And j.n = old(j.n) + i
+	for i := range n {
+		j.Values = append(j.Values, i)
+		tick(j)
+	}
+}
+```
+
+```text
+vego: append may write into the capacity of j.Values, which CollectCounted may not modify: nothing its
+// @Modifies clauses list is known to cover it; a clause covers what its path referred to when
+CollectCounted was called
+```
+
+State the invariant yourself. In a body, `old(x)` is `x` as it was when the function was entered, so `within(j.Values, old(j.Values))` says that the slice lies in the array it had then:
+
+```go
+	// @Invariant |j.Values| = |old(j.Values)| + i And j.n = old(j.n) + i
+	// @Invariant fresh(j.Values) Or within(j.Values, old(j.Values))
+	for i := range n {
+		j.Values = append(j.Values, i)
+		tick(j)
+	}
+```
+
+With the second invariant, the function verifies. `vego` proves the invariant at the end of each iteration, so it is reported when a call or an assignment in the loop may move the slice somewhere else.
 
 ### Where a modifying call can appear
 

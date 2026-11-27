@@ -618,11 +618,15 @@ func (s *scope) call(n *Node) *Term {
 		var paths []Path
 		for _, kid := range n.Kids {
 			// valid(old(x)) is what a boundary assumed of x as it was on
-			// entry, inside a body.
-			if n.Name == "valid" && kid.Kind == NCall && kid.Name == "old" && len(kid.Kids) == 1 {
+			// entry, inside a body, and within(x, old(y)) and apart(x,
+			// old(y)) say where x lies against y as it was on entry (F42).
+			if (n.Name == "valid" || n.Name == "within" || n.Name == "apart") && kid.Kind == NCall && kid.Name == "old" && len(kid.Kids) == 1 {
 				root, steps, primed := s.path(kid.Kids[0])
 				if _, bound := s.bound[root.Name]; root.Kind != NIdent || bound || primed {
-					fail("valid takes a struct or a pointer to one, a parameter or something reached from one, as in valid(ts), valid(ts.store), or valid(old(ts))")
+					if n.Name == "valid" {
+						fail("valid takes a struct or a pointer to one, a parameter or something reached from one, as in valid(ts), valid(ts.store), or valid(old(ts))")
+					}
+					fail("old in %s takes a parameter or something reached from one, as in %s(s.items, old(s.items))", n.Name, n.Name)
 				}
 				paths = append(paths, Path{root.Name, steps, Old})
 				continue
@@ -631,6 +635,12 @@ func (s *scope) call(n *Node) *Term {
 			if _, bound := s.bound[root.Name]; root.Kind != NIdent || bound || (primed && n.Name != "within" && n.Name != "apart" && n.Name != "valid") {
 				if n.Name == "valid" {
 					fail("valid takes a struct or a pointer to one, a parameter or something reached from one, as in valid(ts), valid(ts.store), or valid(old(ts))")
+				}
+				switch n.Name {
+				case "within":
+					fail("within takes paths from parameters, as in within(s.items', s.items), within(p, s.items), or within(s.items, old(s.items))")
+				case "apart":
+					fail("apart takes paths from parameters, as in apart(A, B) or apart(A, old(B))")
 				}
 				fail("%s takes a parameter or something reached from one, as in %s(A) or %s(s.items)", n.Name, n.Name, n.Name)
 			}

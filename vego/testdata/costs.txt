@@ -42,6 +42,28 @@ apartptr	apartptr.KeepOther	8	5013	0
 apartptr	apartptr.KeepSame	6	1054	0
 apartptr	apartptr.Two	10	11612	0
 apartptr	apartptr.TwoSame	6	512	0
+appendloops	appendloops.Cleared	29	170590	0
+appendloops	appendloops.ClearedIn	23	46401	0
+appendloops	appendloops.Doubles	35	226578	0
+appendloops	appendloops.Each	22	200703	0
+appendloops	appendloops.Fill	33	216372	0
+appendloops	appendloops.FillField	35	153193	0
+appendloops	appendloops.InContract	4	1123	0
+appendloops	appendloops.Kept	5	6862	0
+appendloops	appendloops.Lost	5	4355	0
+appendloops	appendloops.MadeHere	32	97970	0
+appendloops	appendloops.Moved	38	312214	0
+appendloops	appendloops.OfLocal	5	1568	0
+appendloops	appendloops.Overwrites	36	184248	0
+appendloops	appendloops.Replaced	11	3798	0
+appendloops	appendloops.Reset	49	205353	0
+appendloops	appendloops.Rows	49	286720	0
+appendloops	appendloops.Shared	84	1398402	2
+appendloops	appendloops.Skips	41	180425	0
+appendloops	appendloops.Spare	28	13633	0
+appendloops	appendloops.WithCall	38	167166	0
+appendloops	appendloops.WithCallSaid	43	202896	0
+appendloops	appendloops.logs	6	4391	0
 arrays	(*arrays.holder).Fix	5	1700	0
 arrays	(arrays.ArrayError).Error	1	293	0
 arrays	arrays.AppendElement	1	521	0
@@ -2699,7 +2721,7 @@ guide	(*guide.Lock).Release	4	2265	0
 guide	(*guide.Meter).Ping	1	182	0
 guide	(*guide.Odometer).Write	19	16907	0
 guide	(*guide.Odometer).WriteString	19	15431	0
-guide	(*guide.Pile).Append	28	178791	0
+guide	(*guide.Pile).Append	30	219200	0
 guide	(*guide.Pile).Items	4	1801	0
 guide	(*guide.Pile).Push	20	44607	0
 guide	(*guide.Registry).Put	12	12635	0
@@ -2836,6 +2858,9 @@ guide	guide.CloseOpenFile	21	91304	0
 guide	guide.CloseQuietTwice	16	18623	0
 guide	guide.CloseTwice	16	18780	0
 guide	guide.Coin	8	4665	0
+guide	guide.Collect	20	79943	0
+guide	guide.CollectCounted	25	97828	0
+guide	guide.CollectSaid	30	130333	0
 guide	guide.CollectTwo	14	101876	0
 guide	guide.CommitTwice	13	11920	0
 guide	guide.Configure	6	15988	0
@@ -3316,6 +3341,7 @@ guide	guide.the initialiser of routes	0	0	0
 guide	guide.the initialiser of sizes	0	0	0
 guide	guide.the initialiser of tagsSeen	0	0	0
 guide	guide.the initialiser of word	2	22554	0
+guide	guide.tick	6	4391	0
 guide	guide.use	1	667	0
 guide	guide.value	3	869	0
 guide	guide.warn	5	11761	0
@@ -5401,7 +5427,7 @@ owns	(*owns.Stack).Items	4	1801	0
 owns	(*owns.Stack).ItemsUnsaid	3	989	0
 owns	(*owns.Stack).Pop	20	34134	0
 owns	(*owns.Stack).Push	20	44607	0
-owns	(*owns.Stack).PushAll	28	178791	0
+owns	(*owns.Stack).PushAll	30	219200	0
 owns	(*owns.Stack).Reserve	13	115140	2
 owns	(*owns.Stack).Reset	14	11744	0
 owns	(*owns.Tally).Add	14	24835	0
@@ -5449,7 +5475,7 @@ owns	owns.CopyList	0	0	0
 owns	owns.CutNeeded	11	33455	0
 owns	owns.DeferredResult	2	474	0
 owns	owns.Fields	13	121905	2
-owns	owns.Fill	33	170154	0
+owns	owns.Fill	35	211464	0
 owns	owns.FillInner	35	675896	0
 owns	owns.Filled	8	6730	0
 owns	owns.Fine	1	755	0

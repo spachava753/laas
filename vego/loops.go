@@ -61,6 +61,9 @@ type effects struct {
 	// deletes holds every call of delete the loop may run, in its body or
 	// in a literal it calls.
 	deletes []*ast.CallExpr
+	// places holds the slices in memory that the loop only appends to,
+	// which keep their arrays or get new ones (appendloops.go).
+	places []appendedPlace
 }
 
 // localVar returns the local variable an expression names, if it is one.
@@ -791,6 +794,16 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 		shape.bind(entry, logic.IntLit(0))
 	}
 	checkInvariants(entry, "loop invariant may not hold on entry")
+	// The slices in memory the loop only appends to, as they are where the
+	// loop is entered (appendloops.go).
+	var places []appendedPlace
+	var entered []value
+	if shape.effects != nil {
+		places = shape.effects.places
+		for _, place := range places {
+			entered = append(entered, v.readPlace(st, place))
+		}
+	}
 
 	head := v.forget(st, shape.effects)
 	forgotten := v.forgotten
@@ -802,6 +815,11 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 	}
 	for _, c := range spec.invariants {
 		v.assumeKeeping(head, c, v.bodyEnv(head, at), "the head of the loop at "+v.placeOf(shape.pos))
+	}
+	// Each such slice is in the array it had on entry or in one made since,
+	// which every back edge proves below.
+	for i, place := range places {
+		head.assume(v.keptInArray(v.readPlace(head, place), entered[i], v.info.TypeOf(place.expr), st.brk))
 	}
 	// A frame may preserve them from here (framedLoop): the head is kept
 	// as it is once they are assumed, which every path of the body
@@ -872,6 +890,11 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 			}
 		}
 		checkInvariants(end, "loop invariant may not be preserved")
+		for i, place := range places {
+			v.check(end, nil, v.keptInArray(v.readPlace(end, place), entered[i], v.info.TypeOf(place.expr), st.brk), shape.pos,
+				"internal error of vego: the appends to %s in this loop may not keep it in its array or in a new one, which nothing else in the loop should write; "+
+					"report the program", types.ExprString(place.expr))
+		}
 		if beforeLeft != nil {
 			after, _ := v.readKeysLeft(spec.variant, v.bodyEnv(end, at))
 			v.checkVariant(end, nil, v.keysLeftDecreases(spec.variant, beforeLeft, after, end), shape.pos,
@@ -950,6 +973,7 @@ func (v *fnVerifier) forStmt(s *ast.ForStmt, spec *loopSpec, renewed []*types.Va
 	for _, variable := range renewed {
 		shape.effects.whole[variable] = true
 	}
+	shape.effects.places = v.appendedPlaces(shape.effects, s.Pos(), s.Cond, s.Body, s.Post)
 	shape.cond = func(st *state) *logic.Term {
 		if s.Cond == nil {
 			return logic.True()
@@ -969,6 +993,7 @@ func (v *fnVerifier) forStmt(s *ast.ForStmt, spec *loopSpec, renewed []*types.Va
 func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k func(*state)) {
 	shape := loopShape{pos: s.Pos(), body: s.Body, spec: spec}
 	shape.effects = v.effects(s.Body)
+	shape.effects.places = v.appendedPlaces(shape.effects, s.Pos(), s.Body)
 	if s.Tok == token.ASSIGN {
 		v.unsupported(s.Pos(), rRangeForm, "range loops must declare their variables with :=")
 	}
