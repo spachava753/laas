@@ -334,6 +334,14 @@ boxframe	(*boxframe.Hits).Reset	4	2310	0
 boxframe	boxframe.Keeps	7	6052	0
 boxframe	boxframe.Next	14	26368	0
 boxframe	boxframe.Resetter.Reset	4	1915	0
+boxloops	boxloops.CountCall	15	27795	0
+boxloops	boxloops.CountCallRight	15	27711	0
+boxloops	boxloops.CountWrong	17	29264	0
+boxloops	boxloops.Imprecise	22	37726	0
+boxloops	boxloops.ImpreciseRight	22	42909	0
+boxloops	boxloops.KeepB	17	24971	0
+boxloops	boxloops.KeepCall	20	47419	0
+boxloops	boxloops.inc	7	6878	0
 buffered	(*bufio.Reader).ReadByte	9	68389	0
 buffered	(*bufio.Scanner).Err	5	17321	0
 buffered	(*bufio.Scanner).Scan	1	5236	0
