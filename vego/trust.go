@@ -801,7 +801,7 @@ func (pv *pkgVerifier) loadTrust(explicit string) {
 	}
 	if pv.projectTrust == nil {
 		if explicit != "" {
-			pv.report(pv.pass.Files[0].Pos(), "cannot read the trust file %s", explicit)
+			pv.report(pv.pass.Files[0].Pos(), rAnnotationFault, "cannot read the trust file %s", explicit)
 		}
 		return
 	}
@@ -809,13 +809,13 @@ func (pv *pkgVerifier) loadTrust(explicit string) {
 	pv.usage.ProjectKeys = map[string][]string{path: keys}
 	pv.noteSizes(path)
 	for _, problem := range pv.projectTrust.problems {
-		pv.report(pv.trustPos(pv.projectTrust, problem.line, 1), "%s", problem.msg)
+		pv.report(pv.trustPos(pv.projectTrust, problem.line, 1), rAnnotationFault, "%s", problem.msg)
 	}
 	// Whether or not this package looks the key up, shipped entries it
 	// uses may rest on it (F11 of the review of S0 of F35).
 	for _, key := range keys {
 		if why := projectReplaces(pv.projectTrust.entries[key]); why != "" {
-			pv.report(pv.trustPos(pv.projectTrust, pv.projectTrust.entries[key].line, 1), "%s", why)
+			pv.report(pv.trustPos(pv.projectTrust, pv.projectTrust.entries[key].line, 1), rAnnotationFault, "%s", why)
 		}
 	}
 	visible := map[string]*types.Package{}
@@ -841,12 +841,12 @@ func (pv *pkgVerifier) loadTrust(explicit string) {
 		}
 		if isType, problem := pv.typeKeyProblem(visible[pkg], key, name); isType {
 			if problem != "" {
-				pv.report(pv.trustPos(pv.projectTrust, entry.line, 1), "%s", problem)
+				pv.report(pv.trustPos(pv.projectTrust, entry.line, 1), rAnnotationFault, "%s", problem)
 			}
 			continue
 		}
 		if !declares(visible[pkg], name) {
-			pv.report(pv.trustPos(pv.projectTrust, entry.line, 1),
+			pv.report(pv.trustPos(pv.projectTrust, entry.line, 1), rAnnotationFault,
 				"the trusted contract names %s, but package %s has no such function", key, pkg)
 		}
 	}
@@ -860,11 +860,11 @@ func (pv *pkgVerifier) loadTrust(explicit string) {
 		}
 		owner, ok := visible[pkg].Scope().Lookup(name).(*types.TypeName)
 		if !ok {
-			pv.report(pv.trustPos(pv.projectTrust, line, 1), "the trust file declares states of %s, but package %s has no such type", key, pkg)
+			pv.report(pv.trustPos(pv.projectTrust, line, 1), rAnnotationFault, "the trust file declares states of %s, but package %s has no such type", key, pkg)
 			continue
 		}
 		if problem := pv.fileStateProblem(owner, key); problem != "" {
-			pv.report(pv.trustPos(pv.projectTrust, line, 1), "the trust file declares states of %s, which %s", key, problem)
+			pv.report(pv.trustPos(pv.projectTrust, line, 1), rAnnotationFault, "the trust file declares states of %s, which %s", key, problem)
 		}
 	}
 }
@@ -1459,7 +1459,7 @@ func (pv *pkgVerifier) noteUse(fn *funcInfo, at token.Pos) {
 	// The project's file may hold an entry that would take the place of
 	// this one, or say more, among what could not be read.
 	if problem := pv.trustProblem(); problem != "" {
-		pv.report(at, "%s, so the contract used here for %s may not be the one the file means to give it: fix the file first", problem, entry.key)
+		pv.report(at, rAnnotationFault, "%s, so the contract used here for %s may not be the one the file means to give it: fix the file first", problem, entry.key)
 	}
 	index := slices.IndexFunc(pv.usage.Entries, func(use *EntryUse) bool {
 		return use.Key == entry.key && use.File == entry.file.path

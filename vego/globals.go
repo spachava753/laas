@@ -919,13 +919,13 @@ func (v *fnVerifier) packageVariable(variable *types.Var, pos token.Pos, st *sta
 	if isError(variable.Type()) {
 		sentinel, why := v.sentinelTerm(st, variable)
 		if why != "" {
-			v.unsupported(pos, why)
+			v.unsupported(pos, rErrSentinel, why)
 		}
 		return value{sentinel}
 	}
 	val, why := v.fixedValue(st, variable)
 	if why != "" {
-		v.unsupported(pos, why)
+		v.unsupported(pos, rGlobalRead, why)
 	}
 	return val
 }
@@ -1380,7 +1380,7 @@ func (v *fnVerifier) checkDeclaredRequires(st *state) {
 			if !onlyVariables || !named || v.proves(v.knownFacts(), t, 0) {
 				continue
 			}
-			v.report(c.pos, "the Requires clause %s reads only package-level variables, and their declarations do not show that it holds; "+
+			v.report(c.pos, rAnnotationFault, "the Requires clause %s reads only package-level variables, and their declarations do not show that it holds; "+
 				"test the value in the body instead", conjunct)
 		}
 	}
@@ -1400,10 +1400,10 @@ func (v *fnVerifier) refuseWriteThroughAs(e ast.Expr, text string) {
 		// covers like any other, as is what a fixed variable of the
 		// package refers to.
 	case root != nil && inMemory:
-		v.unsupported(e.Pos(), fmt.Sprintf("%s writes memory that the package-level variable %s refers to, which a Modifies clause cannot name yet",
+		v.unsupported(e.Pos(), rGlobalAssign, fmt.Sprintf("%s writes memory that the package-level variable %s refers to, which a Modifies clause cannot name yet",
 			text, v.spelling(root)))
 	case root != nil:
-		v.unsupported(e.Pos(), fmt.Sprintf("%s is part of the package-level variable %s, which a verified function cannot assign yet", text, v.spelling(root)))
+		v.unsupported(e.Pos(), rGlobalAssign, fmt.Sprintf("%s is part of the package-level variable %s, which a verified function cannot assign yet", text, v.spelling(root)))
 	}
 }
 

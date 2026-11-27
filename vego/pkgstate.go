@@ -663,7 +663,7 @@ func (v *fnVerifier) checkTrustedWrites(call *ast.CallExpr, fn *funcInfo, writte
 		if variable.Pkg() == fn.obj.Pkg() {
 			entry = variable.Name()
 		}
-		v.report(call.Pos(), "the trusted contract of %s does not list %s, which its body writes at %s; an entry lists what its function changes, "+
+		v.report(call.Pos(), rAnnotationFault, "the trusted contract of %s does not list %s, which its body writes at %s; an entry lists what its function changes, "+
 			"as in modifies: [%s]", fn.obj.Name(), v.spelling(variable), fact.Keys[key], entry)
 	}
 }

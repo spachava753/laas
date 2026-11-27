@@ -381,7 +381,7 @@ func (pv *pkgVerifier) isTypeParamName(f *types.Func, name string) bool {
 func (v *fnVerifier) checkTypeArgs(at ast.Node, callee *types.Func, entry *trustEntry) {
 	if made := v.pkgVerifier.instanceOf[callee]; made != nil {
 		if problem := v.pkgVerifier.typeArgProblem(made, entry); problem != "" {
-			v.unsupported(at.Pos(), problem)
+			v.unsupported(at.Pos(), rGenericTypeArgs, problem)
 		}
 	}
 }
@@ -433,16 +433,16 @@ func (v *fnVerifier) checkGenericCallee(call *ast.CallExpr, callee *types.Func, 
 	name := v.calleeName(origin)
 	if origin.Pkg() == v.pass.Pkg {
 		if own := v.pkgVerifier.funcs[origin]; own != nil && own.annotated() {
-			v.unsupported(call.Pos(), fmt.Sprintf("it calls %s, a generic function with annotations; generic functions cannot be verified yet", name))
+			v.unsupported(call.Pos(), rGenericCalled, fmt.Sprintf("it calls %s, a generic function with annotations; generic functions cannot be verified yet", name))
 		}
 
 	}
 	entry := v.pkgVerifier.entryFor(origin.FullName())
 	if why := noEntryCan[origin.FullName()]; entry == nil && why != "" {
-		v.unsupported(call.Pos(), fmt.Sprintf("it calls %s, which is not supported yet: %s", name, why))
+		v.unsupported(call.Pos(), withDetail(rEntryImpossible, name), fmt.Sprintf("it calls %s, which is not supported yet: %s", name, why))
 	}
 	if entry == nil {
-		v.unsupported(call.Pos(), fmt.Sprintf("it calls %s, a generic function, which has no trusted contract; generic functions cannot be verified yet, "+
+		v.unsupported(call.Pos(), v.callClass(origin), fmt.Sprintf("it calls %s, a generic function, which has no trusted contract; generic functions cannot be verified yet, "+
 			"so a call of one needs a trusted contract: %s", name, strings.TrimPrefix(v.addEntryAdvice(origin.FullName()), "or ")))
 	}
 	v.checkTypeArgs(call, callee, entry)

@@ -143,7 +143,7 @@ func (v *fnVerifier) checkDecodable(call *ast.CallExpr, fn *funcInfo) {
 		_, target.why = keptFields(target.t, v.pass.Pkg)
 	}
 	if target.why != "" {
-		v.unsupported(at, fmt.Sprintf("%s decodes into %s, and %s", fn.obj.Name(), types.ExprString(into), target.why))
+		v.unsupported(at, rJSONDecode, fmt.Sprintf("%s decodes into %s, and %s", fn.obj.Name(), types.ExprString(into), target.why))
 	}
 }
 
@@ -583,7 +583,7 @@ func (v *fnVerifier) callDecoder(call, limit *ast.CallExpr, st *state, guard []*
 	decode := typeutil.StaticCallee(v.info, call)
 	fn := v.contractOf(decode)
 	if fn == nil || fn.decoded == nil {
-		v.unsupported(call.Pos(), "json.NewDecoder(io.LimitReader(r, n)).Decode(&x) needs the entry of (*encoding/json.Decoder).Decode that comes with vego, which lists decodes")
+		v.unsupported(call.Pos(), rJSON, "json.NewDecoder(io.LimitReader(r, n)).Decode(&x) needs the entry of (*encoding/json.Decoder).Decode that comes with vego, which lists decodes")
 	}
 	fn = v.usable(call.Pos(), fn, decode.Name(), st, guard, true)
 	v.noteUse(fn, call.Pos())
@@ -653,7 +653,7 @@ func (v *fnVerifier) callDecoder(call, limit *ast.CallExpr, st *state, guard []*
 		var c string
 		v.quietly(func() { c = v.readsReadFrame(read, readArgs, st) })
 		if c != "" {
-			v.unsupported(call.Pos(), fmt.Sprintf("the decoder calls %s.Read as many times as it needs, and %q in the contract of Read reads memory that Read modifies, "+
+			v.unsupported(call.Pos(), rJSONDecodeUnproved, fmt.Sprintf("the decoder calls %s.Read as many times as it needs, and %q in the contract of Read reads memory that Read modifies, "+
 				"which each call may change; give Read a contract that says nothing of what it modifies of the reader, or read the body into a buffer and decode it with json.Unmarshal",
 				types.ExprString(r), c))
 		}

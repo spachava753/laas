@@ -558,7 +558,7 @@ func (v *fnVerifier) reachApart(ref, position *logic.Term) *logic.Term {
 // nothing is known, so what is proved of it holds of every cell.
 func (v *fnVerifier) checkFootprintWrite(st *state, guard []*logic.Term, t target, pos token.Pos, what, remedy, unlisted string) {
 	if len(v.forbidden) > 0 {
-		v.unsupported(pos, what+", and a function handed to a trusted function cannot write the footprint of an interface value yet")
+		v.unsupported(pos, rHandFootprint, what+", and a function handed to a trusted function cannot write the footprint of an interface value yet")
 	}
 	// A footprint the frame lists covers the cells in its row, and a
 	// stretch it lists the cells in the stretch: every position of an
@@ -619,23 +619,23 @@ func (v *fnVerifier) checkFootprintWrite(st *state, guard []*logic.Term, t targe
 		}
 		switch {
 		case remedy != "":
-			v.report(pos, "%s, which %s may not modify; %s%s", what, v.fn.obj.Name(), remedy, limitNote(result))
+			v.report(pos, rObligation, "%s, which %s may not modify; %s%s", what, v.fn.obj.Name(), remedy, limitNote(result))
 		case listed == 0 && v.fn.spelling().receiver != nil && v.hasStates(v.fn.spelling().receiver.Type()) && !listsBehind(v.fn.spelling()) &&
 			slices.ContainsFunc(v.fn.spelling().modifies, func(m *modTarget) bool { return m.name == v.fn.spelling().receiver.Name() }):
 			// A method of an interface with states that lists its receiver
 			// changes its states only (D2; F18 of the review of step 5).
 			r := v.fn.spelling().receiver.Name()
-			v.report(pos, "%s, which %s may not modify; the contract of %s lists %s, which on an interface with states covers its states only; "+
+			v.report(pos, rObligation, "%s, which %s may not modify; the contract of %s lists %s, which on an interface with states covers its states only; "+
 				"list behind(%s) too to let the method write behind its receiver%s", what, v.fn.obj.Name(), v.fn.obj.Name(), r, r, limitNote(result))
 		case listed == 0 && (v.fn.spelling().valueOf != nil || v.fn.spelling().methodOf != nil):
-			v.report(pos, "%s, which %s may not modify; the contract of %s does not list it, so code that writes it cannot be used there%s",
+			v.report(pos, rObligation, "%s, which %s may not modify; the contract of %s does not list it, so code that writes it cannot be used there%s",
 				what, v.fn.obj.Name(), v.fn.obj.Name(), limitNote(result))
 		case listed == 0 && unlisted != "":
-			v.report(pos, "%s, which %s may not modify; %s%s", what, v.fn.obj.Name(), unlisted, limitNote(result))
+			v.report(pos, rObligation, "%s, which %s may not modify; %s%s", what, v.fn.obj.Name(), unlisted, limitNote(result))
 		case listed == 0:
-			v.report(pos, "%s, which %s may not modify; list it in a // @Modifies clause%s", what, v.fn.obj.Name(), limitNote(result))
+			v.report(pos, rObligation, "%s, which %s may not modify; list it in a // @Modifies clause%s", what, v.fn.obj.Name(), limitNote(result))
 		default:
-			v.report(pos, "%s, which %s may not modify: no footprint its // @Modifies clauses list is known to hold it; "+
+			v.report(pos, rObligation, "%s, which %s may not modify: no footprint its // @Modifies clauses list is known to hold it; "+
 				"a clause covers what its path referred to when %s was called%s", what, v.fn.obj.Name(), v.fn.obj.Name(), limitNote(result))
 		}
 		return

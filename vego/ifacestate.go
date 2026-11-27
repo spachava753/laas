@@ -349,15 +349,15 @@ func (pv *pkgVerifier) addState(name *types.TypeName, c *clause) {
 		if name != nil {
 			what = name.Name()
 		}
-		pv.report(c.pos, "a state can be declared only on a defined interface type that declares a method of its own; %s %s", what, problem)
+		pv.report(c.pos, rAnnotationFault, "a state can be declared only on a defined interface type that declares a method of its own; %s %s", what, problem)
 		return
 	}
 	if !token.IsIdentifier(text) || slices.Contains(reservedStateNames, text) {
-		pv.report(c.pos, "%q cannot name a state: write one identifier that the formula language does not use, as in // @State closed", text)
+		pv.report(c.pos, rAnnotationFault, "%q cannot name a state: write one identifier that the formula language does not use, as in // @State closed", text)
 		return
 	}
 	if slices.ContainsFunc(pv.ownStates[name], func(s ifaceState) bool { return s.name == text }) {
-		pv.report(c.pos, "%s already has the state %s", name.Name(), text)
+		pv.report(c.pos, rAnnotationFault, "%s already has the state %s", name.Name(), text)
 		return
 	}
 	pv.ownStates[name] = append(pv.ownStates[name], ifaceState{owner: name, name: text,
@@ -429,7 +429,7 @@ func placesWithin(fn *funcInfo) bool {
 func (pv *pkgVerifier) checkReceivers() {
 	for method, fn := range pv.ifaceMethods {
 		if fn.receiver != nil && !pv.hasStates(fn.receiver.Type()) && !writesBehind(fn) && !placesWithin(fn) {
-			pv.report(method.Pos(), "%s names its receiver %s, but %s has no states and the contract does not list %s in Modifies; "+
+			pv.report(method.Pos(), rAnnotationFault, "%s names its receiver %s, but %s has no states and the contract does not list %s in Modifies; "+
 				"a contract names its receiver to speak of its states, to say that the method writes behind it, or to place a result within it; "+
 				"remove the Receiver annotation, list %s in a // @Modifies clause, or declare a state with @State",
 				methodTitle(method), fn.receiver.Name(), declaringInterface(method).Name(), fn.receiver.Name(), fn.receiver.Name())
@@ -444,7 +444,7 @@ func (pv *pkgVerifier) checkReceivers() {
 		seen := map[string]ifaceState{}
 		for _, s := range pv.ifaceStatesOf(obj.Type()) {
 			if first, twice := seen[s.name]; twice {
-				pv.report(obj.Pos(), "%s has two states named %s, %s and %s; a formula %s(x) could not tell them apart, so rename one",
+				pv.report(obj.Pos(), rAnnotationFault, "%s has two states named %s, %s and %s; a formula %s(x) could not tell them apart, so rename one",
 					obj.Name(), s.name, first.title(), s.title(), s.name)
 				continue
 			}

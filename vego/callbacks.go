@@ -615,7 +615,7 @@ func (v *fnVerifier) sameEachRun(run ranOnce, pos token.Pos, what, by string) bo
 		}
 	}
 	if result := v.attempt(twice, nil, logic.And(same...)); result != solver.Proved {
-		v.report(pos, "%s run by %s is not proved to return the same result whenever it is called with the same argument, "+
+		v.report(pos, rObligation, "%s run by %s is not proved to return the same result whenever it is called with the same argument, "+
 			"which the trusted contract of %s relies on%s", what, by, by, limitNote(result))
 		return false
 	}
@@ -693,11 +693,11 @@ func (v *fnVerifier) checkNotForbidden(st *state, guard []*logic.Term, w written
 		}
 		goal := logic.And(apart...)
 		if result := v.attempt(st, guard, goal); result != solver.Proved && f.direct {
-			v.report(pos, "%s, which may be what an argument of %s refers to directly; a function %s calls under Calls may not write "+
+			v.report(pos, rObligation, "%s, which may be what an argument of %s refers to directly; a function %s calls under Calls may not write "+
 				"the elements of a slice from its first to its capacity, the struct a pointer points to, or a map that %s is handed beside it%s", what, f.by, f.by, f.by, limitNote(result))
 			st.assume(logic.Implies(logic.And(guard...), goal))
 		} else if result != solver.Proved {
-			v.report(pos, "%s, which %s may write itself while it runs the function it is handed; "+
+			v.report(pos, rObligation, "%s, which %s may write itself while it runs the function it is handed; "+
 				"a function it is handed may not write what it may write%s", what, f.by, limitNote(result))
 			st.assume(logic.Implies(logic.And(guard...), goal))
 		}
@@ -809,7 +809,7 @@ func (v *fnVerifier) handOver(fn *funcInfo, param *types.Var, arg ast.Expr, st *
 		}
 		for variable := range cb.sig.Params().Variables() {
 			if holdsCode(variable.Type(), map[types.Type]bool{}) {
-				v.unsupported(arg.Pos(), fmt.Sprintf("%s is handed to %s as %s, which %s calls with a value of type %s, and %s may run code that it carries that nobody has seen; "+
+				v.unsupported(arg.Pos(), rHandUnknownCode, fmt.Sprintf("%s is handed to %s as %s, which %s calls with a value of type %s, and %s may run code that it carries that nobody has seen; "+
 					"hand over a function literal, or a function or method of this package that is verified", types.ExprString(arg), fn.obj.Name(), param.Name(),
 					fn.obj.Name(), types.TypeString(variable.Type(), types.RelativeTo(v.pass.Pkg)), what))
 			}
@@ -819,7 +819,7 @@ func (v *fnVerifier) handOver(fn *funcInfo, param *types.Var, arg ast.Expr, st *
 		carriesCode("a function value from code that is not verified")
 		T := v.valueContract(v.info.TypeOf(arg))
 		if T == nil {
-			v.unsupported(arg.Pos(), fmt.Sprintf("%s is passed to %s as %s, which %s calls, and its type %s has no contract; "+
+			v.unsupported(arg.Pos(), rHandUnknownCode, fmt.Sprintf("%s is passed to %s as %s, which %s calls, and its type %s has no contract; "+
 				"hand over a function literal, a function, a method value, or a value of a named function type with a contract",
 				types.ExprString(arg), fn.obj.Name(), param.Name(), fn.obj.Name(), v.info.TypeOf(arg)))
 		}
@@ -830,11 +830,11 @@ func (v *fnVerifier) handOver(fn *funcInfo, param *types.Var, arg ast.Expr, st *
 	}
 	sig := callee.Type().(*types.Signature)
 	if sig.TypeParams() != nil || sig.RecvTypeParams() != nil {
-		v.unsupported(arg.Pos(), "generic functions cannot be handed over yet")
+		v.unsupported(arg.Pos(), rGenericHanded, "generic functions cannot be handed over yet")
 	}
 	c := v.contractOf(callee)
 	if c == nil {
-		v.unsupported(arg.Pos(), fmt.Sprintf("it hands %s to %s, and %s has no contract; annotate %s with // @ annotations so that it is verified, "+
+		v.unsupported(arg.Pos(), withDetail(rHandNoContract, callee.FullName()), fmt.Sprintf("it hands %s to %s, and %s has no contract; annotate %s with // @ annotations so that it is verified, "+
 			"%s", callee.Name(), fn.obj.Name(), callee.Name(), callee.Name(), v.addEntryAdvice(callee.FullName())))
 	}
 	if c.trust != nil || c.imported != nil && !c.imported.Verified {
@@ -847,7 +847,7 @@ func (v *fnVerifier) handOver(fn *funcInfo, param *types.Var, arg ast.Expr, st *
 	}
 	c = view.fn
 	if mayExit(c) {
-		v.unsupported(arg.Pos(), fmt.Sprintf("it hands %s, which may end the process, to %s; a function handed to a trusted function may not end the process, "+
+		v.unsupported(arg.Pos(), rExitContext, fmt.Sprintf("it hands %s, which may end the process, to %s; a function handed to a trusted function may not end the process, "+
 			"since the contract of what calls it assumes that each call returns", v.calleeName(callee), fn.obj.Name()))
 	}
 	if c.trust != nil && !view.cut {

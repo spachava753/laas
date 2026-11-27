@@ -1738,7 +1738,7 @@ func (v *fnVerifier) reportOwnOrigins() {
 		return
 	}
 	for _, r := range fl.refusals {
-		v.report(r.pos, "%s", strings.TrimSpace(r.msg))
+		v.report(r.pos, rObligation, "%s", strings.TrimSpace(r.msg))
 	}
 }
 

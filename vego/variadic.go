@@ -79,7 +79,7 @@ func paramsOf(sig *types.Signature) []*types.Var {
 func (v *fnVerifier) bindCall(call *ast.CallExpr, sig *types.Signature) []passedArg {
 	bound, ok := bindArgs(v.info, call, paramsOf(sig), sig.Variadic())
 	if !ok {
-		v.unsupported(call.Pos(), "a call with several results as the arguments of another call is not supported yet")
+		v.unsupported(call.Pos(), rCallMultiArgs, "a call with several results as the arguments of another call is not supported yet")
 	}
 	return bound
 }
@@ -90,7 +90,7 @@ func (v *fnVerifier) bindCall(call *ast.CallExpr, sig *types.Signature) []passed
 func (v *fnVerifier) bindParams(call *ast.CallExpr, fn *funcInfo) []passedArg {
 	bound, ok := bindArgs(v.info, call, fn.params, fn.obj.Type().(*types.Signature).Variadic())
 	if !ok {
-		v.unsupported(call.Pos(), "a call with several results as the arguments of another call is not supported yet")
+		v.unsupported(call.Pos(), rCallMultiArgs, "a call with several results as the arguments of another call is not supported yet")
 	}
 	return bound
 }
@@ -121,7 +121,7 @@ func (v *fnVerifier) evalPassed(a passedArg, st *state, guard []*logic.Term) val
 	t := a.param.Type()
 	if !a.packed {
 		if _, ok := layoutOf(t); !ok {
-			v.unsupported(a.expr.Pos(), fmt.Sprintf("arguments of type %s are not supported", t))
+			v.unsupported(a.expr.Pos(), typeClass(t), fmt.Sprintf("arguments of type %s are not supported", t))
 		}
 		// Go converts the slice that sort.Slice is handed to any, and the
 		// view takes it as the slice it is; see sortslice.go.
@@ -139,7 +139,7 @@ func (v *fnVerifier) evalPassed(a passedArg, st *state, guard []*logic.Term) val
 	}
 	elem := elemType(t)
 	if _, ok := elemLayout(elem); !ok {
-		v.unsupported(a.pack[0].Pos(), fmt.Sprintf("arguments of type %s are not supported", elem))
+		v.unsupported(a.pack[0].Pos(), elemClass(elem), fmt.Sprintf("arguments of type %s are not supported", elem))
 	}
 	elements := make([]value, len(a.pack))
 	for i, e := range a.pack {

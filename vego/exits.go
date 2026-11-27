@@ -46,13 +46,13 @@ const (
 func (pv *pkgVerifier) placeExits(fn *funcInfo, c *clause) {
 	switch {
 	case strings.TrimSpace(c.text) != "":
-		pv.report(c.pos, "an Exits annotation takes nothing after the keyword: the form with a condition, as in // @Exits %s, is not supported yet", strings.TrimSpace(c.text))
+		pv.report(c.pos, rAnnotationUnsupported, "an Exits annotation takes nothing after the keyword: the form with a condition, as in // @Exits %s, is not supported yet", strings.TrimSpace(c.text))
 		fn.broken = true
 	case fn.obj.Type().(*types.Signature).Recv() != nil:
-		pv.report(c.pos, "%s", exitsOnMethod)
+		pv.report(c.pos, rAnnotationFault, "%s", exitsOnMethod)
 		fn.broken = true
 	case fn.exitsClause != nil:
-		pv.report(c.pos, "function %s already has an Exits annotation", fn.obj.Name())
+		pv.report(c.pos, rAnnotationFault, "function %s already has an Exits annotation", fn.obj.Name())
 		fn.broken = true
 	default:
 		fn.exits, fn.exitsClause = true, c
@@ -116,21 +116,21 @@ func mayExit(fn *funcInfo) bool {
 func (v *fnVerifier) checkExitAllowed(pos token.Pos, callee string) {
 	switch {
 	case len(v.forbidden) > 0:
-		v.unsupported(pos, fmt.Sprintf("it calls %s, which may end the process, in a function handed to %s; a function handed to a trusted function "+
+		v.unsupported(pos, rExitContext, fmt.Sprintf("it calls %s, which may end the process, in a function handed to %s; a function handed to a trusted function "+
 			"may not end the process, since the contract of what calls it assumes that each call returns", callee, v.forbidden[len(v.forbidden)-1].by))
 	case v.fn.spelled != nil:
-		v.unsupported(pos, fmt.Sprintf("it calls %s, which may end the process, in a function literal used as a value of type %s; "+
+		v.unsupported(pos, rExitContext, fmt.Sprintf("it calls %s, which may end the process, in a function literal used as a value of type %s; "+
 			"a call of a function value is assumed to return, since a function type cannot have an Exits annotation yet", callee, v.fn.spelled.obj.Name()))
 	case v.fn.closure != nil:
-		v.unsupported(pos, fmt.Sprintf("it calls %s, which may end the process, in %s; a recursive closure may not end the process yet, "+
+		v.unsupported(pos, rExitContext, fmt.Sprintf("it calls %s, which may end the process, in %s; a recursive closure may not end the process yet, "+
 			"since its calls are taken to return", callee, closureName(v.fn.closure.variable)))
 	case v.deferring > 0:
-		v.unsupported(pos, fmt.Sprintf("it calls %s, which may end the process, in a deferred call; a deferred call that may end the process "+
+		v.unsupported(pos, rExitContext, fmt.Sprintf("it calls %s, which may end the process, in a deferred call; a deferred call that may end the process "+
 			"is not supported yet", callee))
 	case v.inInitialiser:
 		return
 	case v.fn.decl == nil:
-		v.unsupported(pos, fmt.Sprintf("it calls %s, which may end the process, where that cannot be said", callee))
+		v.unsupported(pos, rExitContext, fmt.Sprintf("it calls %s, which may end the process, where that cannot be said", callee))
 	}
 	v.exitReached = true
 	// init, and a main that its package does not refer to, need no Exits:
@@ -140,15 +140,15 @@ func (v *fnVerifier) checkExitAllowed(pos token.Pos, callee string) {
 		return
 	}
 	if entry {
-		v.report(pos, "main calls %s, which may end the process, and main is referred to at %s; a main that its package calls or uses as a value "+
+		v.report(pos, rObligation, "main calls %s, which may end the process, and main is referred to at %s; a main that its package calls or uses as a value "+
 			"says so with // @Exits in its doc comment, as any function does", callee, v.placeOf(v.pkgVerifier.mainReference()))
 		return
 	}
 	if v.fn.obj.Type().(*types.Signature).Recv() != nil {
-		v.report(pos, "%s calls %s, which may end the process, and a method cannot end the process yet; return an error, "+
+		v.report(pos, rExitContext, "%s calls %s, which may end the process, and a method cannot end the process yet; return an error, "+
 			"or end the process in a function that calls %s", v.fn.obj.Name(), callee, v.fn.obj.Name())
 		return
 	}
-	v.report(pos, "%s calls %s, which may end the process; add // @Exits to the doc comment of %s if it may end the process, "+
+	v.report(pos, rObligation, "%s calls %s, which may end the process; add // @Exits to the doc comment of %s if it may end the process, "+
 		"or call something that returns", v.fn.obj.Name(), callee, v.fn.obj.Name())
 }

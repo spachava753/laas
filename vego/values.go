@@ -239,7 +239,7 @@ func (v *fnVerifier) constant(value constant.Value, sort logic.Sort, e ast.Expr,
 		st.assume(logic.Eq(logic.Len(long), logic.IntLit(int64(len(text)))))
 		return long
 	}
-	v.unsupported(e.Pos(), "this constant is not supported")
+	v.unsupported(e.Pos(), rConstant, "this constant is not supported")
 	return nil
 }
 
@@ -258,7 +258,7 @@ func (v *fnVerifier) opaque(op token.Token, operand *logic.Term) *logic.Term {
 // shares nothing that could be written, so it is simply a shorter sequence.
 func (v *fnVerifier) substring(e *ast.SliceExpr, st *state, guard []*logic.Term) *logic.Term {
 	if e.Slice3 {
-		v.unsupported(e.Pos(), "a string cannot be sliced with a capacity")
+		v.unsupported(e.Pos(), rConstant, "a string cannot be sliced with a capacity")
 	}
 	whole := v.expr(e.X, st, guard)
 	// The length is named, so that the substring holds the string once.
@@ -327,7 +327,7 @@ func (v *fnVerifier) newError(call *ast.CallExpr, st *state, guard []*logic.Term
 		if result != solver.Proved {
 			room := new(big.Int).Sub(v.maxAlloc(), big.NewInt(1<<16))
 			room.Rsh(room, 1).Sub(room, big.NewInt(fmtSlack))
-			v.report(call.Pos(), "precondition of errors.New may not hold: 2 * (|text| + 4096) + 65536 <= MaxAlloc, so that the text of the error can be printed; "+
+			v.report(call.Pos(), rObligation, "precondition of errors.New may not hold: 2 * (|text| + 4096) + 65536 <= MaxAlloc, so that the text of the error can be printed; "+
 				"it holds when |%s| <= %s%s%s", types.ExprString(call.Args[0]), room, v.sizeNote(st, guard, goal), limitNote(result))
 		}
 		// A goal that only the declared memory proved is not assumed.

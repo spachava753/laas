@@ -75,7 +75,7 @@ func (pv *pkgVerifier) varDocumented(file *ast.File, group *ast.CommentGroup) (*
 func (pv *pkgVerifier) addVarInvariant(gen *ast.GenDecl, spec *ast.ValueSpec, vars []*types.Var, c *clause) {
 	if c.kind != "Invariant" {
 		pv.unread = true
-		pv.report(c.pos, "%s annotations do not belong on a variable; a var declaration can only have Invariant annotations", c.kind)
+		pv.report(c.pos, rAnnotationFault, "%s annotations do not belong on a variable; a var declaration can only have Invariant annotations", c.kind)
 		return
 	}
 	var group *varGroup
@@ -97,7 +97,7 @@ func (pv *pkgVerifier) addVarInvariant(gen *ast.GenDecl, spec *ast.ValueSpec, va
 	}
 	node, err := logic.ParseFormula(c.text)
 	if err != nil {
-		pv.report(c.pos, "syntax error in Invariant annotation: %v", err)
+		pv.report(c.pos, rAnnotationFault, "syntax error in Invariant annotation: %v", err)
 		group.refused = "an Invariant annotation could not be read"
 		return
 	}
@@ -125,7 +125,7 @@ func (pv *pkgVerifier) checkVarGroups() {
 		}
 		refuse := func(format string, args ...any) {
 			g.refused = fmt.Sprintf(format, args...)
-			pv.report(g.clauses[0].pos, "the invariant of %s cannot be relied on: %s", pv.groupName(g), g.refused)
+			pv.report(g.clauses[0].pos, rAnnotationFault, "the invariant of %s cannot be relied on: %s", pv.groupName(g), g.refused)
 		}
 		for _, variable := range g.vars {
 			switch {
@@ -666,7 +666,7 @@ func (pv *pkgVerifier) checkGroupsInitialised() {
 				_, written := pv.writtenInBuild()[errorKey(variable)]
 				if !slices.Contains(g.vars, variable) && (pv.reassigned[variable] || written || pv.isAssigned(variable)) {
 					g.refused = fmt.Sprintf("it names %s, which is not a variable of its group and which the build changes; declare %s in the same var declaration", v.spelling(variable), v.spelling(variable))
-					pv.report(g.clauses[0].pos, "the invariant of %s cannot be relied on: %s", pv.groupName(g), g.refused)
+					pv.report(g.clauses[0].pos, rAnnotationFault, "the invariant of %s cannot be relied on: %s", pv.groupName(g), g.refused)
 					break
 				}
 			}
@@ -1024,7 +1024,7 @@ func (pv *pkgVerifier) checkValueInitialisers() {
 			for _, variable := range init.Lhs {
 				if variable != nil && pv.readable(variable) {
 					check(variable, func(v *fnVerifier) bool {
-						v.unsupported(init.Rhs.Pos(), variable.Name()+" is given one result of a call with several, and a variable of an interface type or of a function type with a contract "+
+						v.unsupported(init.Rhs.Pos(), rGlobalInit, variable.Name()+" is given one result of a call with several, and a variable of an interface type or of a function type with a contract "+
 							"must be given a value of its own, which is checked where it is made")
 						return false
 					})
@@ -1042,7 +1042,7 @@ func (pv *pkgVerifier) checkValueInitialisers() {
 			// no position may be in this initialiser.
 			for _, at := range pv.findConversions().inInit {
 				if !at.IsValid() || init.Rhs.Pos() <= at && at < init.Rhs.End() {
-					v.unsupported(init.Rhs.Pos(), "Go converts a value to an interface type in the initialiser of "+variable.Name()+
+					v.unsupported(init.Rhs.Pos(), rConvUnplaced, "Go converts a value to an interface type in the initialiser of "+variable.Name()+
 						", and which expression it converts could not be told, so the conversion cannot be checked; give the value a variable of its own type first")
 					return false
 				}

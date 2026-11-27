@@ -43,7 +43,7 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		// on every branch of a conversion between interfaces (F17 of the
 		// review of S1).
 		if why := v.optionalSourceWhy(from, want); why != "" {
-			v.unsupported(e.Pos(), fmt.Sprintf("converting %s, %s %s, to %s is not supported: %s", types.ExprString(e), article(v.shown(from)), v.shown(from), v.shown(want), why))
+			v.unsupported(e.Pos(), rConvOptional, fmt.Sprintf("converting %s, %s %s, to %s is not supported: %s", types.ExprString(e), article(v.shown(from)), v.shown(from), v.shown(want), why))
 		}
 		if v.oShaped(want) {
 			v.proveOTyped(e, from, want, st, guard)
@@ -66,7 +66,7 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		return v.eval(e, st, guard)
 	case isError(from):
 		if want.Underlying().(*types.Interface).NumMethods() > 0 {
-			v.unsupported(e.Pos(), fmt.Sprintf("converting an error to %s is not supported; only any can hold an error", want))
+			v.unsupported(e.Pos(), rConvErrToIface, fmt.Sprintf("converting an error to %s is not supported; only any can hold an error", want))
 		}
 		// The nil error becomes the nil interface, and any other error an
 		// interface value that is not nil.
@@ -77,14 +77,14 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		v.recordConversion(st, ifaceConversion{ref: held, err: err})
 		return value{held}
 	case types.IsInterface(from):
-		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported", from, want))
+		v.unsupported(e.Pos(), withDetail(rConvIfaceType, from.String()), fmt.Sprintf("converting a %s to %s is not supported", from, want))
 	case holdsArrayValue(from):
-		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: an interface value or an error cannot hold an array yet", v.shown(from), v.shown(want)))
+		v.unsupported(e.Pos(), rConvIfaceArray, fmt.Sprintf("converting a %s to %s is not supported: an interface value or an error cannot hold an array yet", v.shown(from), v.shown(want)))
 	case pointsToArray(from):
 		// The footprint of a converted value is the stretch of its struct
 		// in every region, which the run of an array in it would need to
 		// be told apart in (F36).
-		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported yet: what it points to holds an array, and the footprint of such a value is not modelled", v.shown(from), v.shown(want)))
+		v.unsupported(e.Pos(), rConvIfaceArray, fmt.Sprintf("converting a %s to %s is not supported yet: what it points to holds an array, and the footprint of such a value is not modelled", v.shown(from), v.shown(want)))
 	}
 	// An interface without methods can hold anything. Nothing can be done
 	// with what it holds but pass it on. Each method of any other
@@ -117,13 +117,13 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 		if behind != nil {
 			if why := wrapsKept(from); why != "" {
 				shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
-				v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s", shown(from), shown(want), why))
+				v.unsupported(e.Pos(), rConvWrapsWriter, fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s", shown(from), shown(want), why))
 			}
 			// Under the declared memory a buffer's Write cannot fail to
 			// grow, and what refuses the conversion is what it owns, below.
 			if why := growsUnbounded(from); why != "" && v.sizesOf() == nil {
 				shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
-				v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported: %s%s", shown(from), shown(want), why,
+				v.unsupported(e.Pos(), rConvBuffer, fmt.Sprintf("converting a value of type %s to %s is not supported: %s%s", shown(from), shown(want), why,
 					v.declareOffer("under which a buffer converts")))
 			}
 			object, isPointer := pointee(from)
@@ -132,7 +132,7 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 			}
 			if through := ownsIfaceThrough(object, "", map[types.Type]bool{}); through != "" {
 				shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
-				v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s owns an interface value through %s, "+
+				v.unsupported(e.Pos(), rConvOwns, fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s owns an interface value through %s, "+
 					"and what that value writes is not yet placed in the footprint of the conversion; own the interface value in %s itself, "+
 					"or call the methods of %s on the pointer", shown(from), shown(want), shown(from), through, shown(object), shown(from)))
 			}
@@ -153,7 +153,7 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 				if object, isPointer := pointee(from); isPointer && len(sourceOwnedFields(object)) > 0 {
 					how = "as its // @Owns declaration says"
 				}
-				v.unsupported(e.Pos(), fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s owns memory, %s, "+
+				v.unsupported(e.Pos(), rConvOwns, fmt.Sprintf("converting a value of type %s to %s is not supported yet: %s owns memory, %s, "+
 					"and what that memory grows to is not part of the footprint fixed at the conversion; "+
 					"call the methods of %s on the pointer instead", shown(from), shown(want), shown(from), how, shown(from)))
 			}
@@ -332,14 +332,14 @@ func (v *fnVerifier) checkStateChangers(e ast.Expr, from, want types.Type) bool 
 	pointerKeyed := isPointer && v.pointerReceiverChanger(from)
 	if pointerKeyed {
 		if why := v.pointerStatesWhy(from); why != "" {
-			v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: %s", shown(from), shown(want), why))
+			v.unsupported(e.Pos(), rConvStates, fmt.Sprintf("converting a %s to %s is not supported: %s", shown(from), shown(want), why))
 		}
 		return true
 	}
 	for _, c := range changers {
 		if c.fn != nil && c.fn.trust != nil {
 			title := methodOf(c.recv.Type(), c.concrete, v.pass.Pkg)
-			v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: %s changes the states of %s and is trusted, so the states are about what it acts on, "+
+			v.unsupported(e.Pos(), rConvStates, fmt.Sprintf("converting a %s to %s is not supported: %s changes the states of %s and is trusted, so the states are about what it acts on, "+
 				"which every copy of the value shares, and a copy cannot start with states of its own; convert a pointer to the value, whose states are its own",
 				shown(from), shown(want), title, methodTitle(c.method)))
 		}
@@ -436,9 +436,9 @@ func (v *fnVerifier) madeInterface(e ast.Expr, held value, from, want types.Type
 				unseen = true
 				continue
 			} else if why != "" {
-				v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: its method %s has no contract, and %s", from, want, methodTitle(method), why))
+				v.unsupported(e.Pos(), withDetail(rConvNoContract, method.FullName()), fmt.Sprintf("converting a %s to %s is not supported: its method %s has no contract, and %s", from, want, methodTitle(method), why))
 			}
-			v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: its method %s has no contract, so nothing would say "+
+			v.unsupported(e.Pos(), withDetail(rConvNoContract, method.FullName()), fmt.Sprintf("converting a %s to %s is not supported: its method %s has no contract, so nothing would say "+
 				"what code that calls it may rely on%s", from, want, methodTitle(method), v.entryHint(method.Pkg(), method.Pos(), method.FullName())))
 		}
 		v.usable(e.Pos(), T, methodTitle(method), st, guard, false)
@@ -450,7 +450,7 @@ func (v *fnVerifier) madeInterface(e ast.Expr, held value, from, want types.Type
 	// at any depth, as holdsCallable decides it, so what verified code
 	// stores into the value after the conversion is covered too.
 	if where := callablePath(v.pkgVerifier, from, v.shown(from), map[types.Type]bool{}); unseen && where != "" {
-		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to %s is not supported: %s has no contract, and its implementation is code of another module "+
+		v.unsupported(e.Pos(), rConvForeignImpl, fmt.Sprintf("converting a %s to %s is not supported: %s has no contract, and its implementation is code of another module "+
 			"that could run what the value holds, under no claim; %s, which can be code that verified code made",
 			v.shown(from), v.shown(want), v.unseenTitle(from, want), where))
 	}
@@ -509,7 +509,7 @@ func (v *fnVerifier) unseenMethod(from, want types.Type, method *types.Func) (ok
 func (v *fnVerifier) madeMethod(e ast.Expr, held value, from, want types.Type, method *types.Func, more string, st *state, guard []*logic.Term) {
 	concrete, why := concreteMethod(from, method.Pkg(), method.Name(), v.pass.Pkg)
 	if why != "" {
-		v.unsupported(e.Pos(), why)
+		v.unsupported(e.Pos(), rConvNoContract, why)
 	}
 	recv := concrete.Type().(*types.Signature).Recv().Type()
 	_, fromPointer := from.Underlying().(*types.Pointer)
@@ -662,16 +662,16 @@ func (pv *pkgVerifier) addMethodContract(method *types.Func, defined bool, c *cl
 	switch {
 	case method == nil:
 		pv.unread = true
-		pv.report(c.pos, "a contract cannot be written on an embedded interface; write it on the methods where they are declared")
+		pv.report(c.pos, rAnnotationFault, "a contract cannot be written on an embedded interface; write it on the methods where they are declared")
 		return
 	case !defined:
 		pv.unread = true
-		pv.report(c.pos, "a contract can only be declared on a method of a defined interface type at package level without type parameters, "+
+		pv.report(c.pos, rAnnotationFault, "a contract can only be declared on a method of a defined interface type at package level without type parameters, "+
 			"not on an interface literal or an alias: two interface literals with the same methods are the same type, and a value would carry either contract")
 		return
 	case c.kind != "Requires" && c.kind != "Ensures" && c.kind != "Modifies" && c.kind != "Receiver" && c.kind != "Vouches":
 		pv.unread = true
-		pv.report(c.pos, "%s annotations do not belong on a method of an interface; it can only have Receiver, Requires, Ensures, Modifies, and Vouches annotations", c.kind)
+		pv.report(c.pos, rAnnotationFault, "%s annotations do not belong on a method of an interface; it can only have Receiver, Requires, Ensures, Modifies, and Vouches annotations", c.kind)
 		return
 	}
 	fn := pv.ifaceMethods[method]
@@ -682,7 +682,7 @@ func (pv *pkgVerifier) addMethodContract(method *types.Func, defined bool, c *cl
 	}
 	if c.kind == "Receiver" {
 		if problem := fn.setReceiver(strings.TrimSpace(c.text), method); problem != "" {
-			pv.report(c.pos, "in Receiver annotation: %s", problem)
+			pv.report(c.pos, rAnnotationFault, "in Receiver annotation: %s", problem)
 			fn.broken = true
 		}
 		return
@@ -778,7 +778,7 @@ func (pv *pkgVerifier) checkDroppedContracts() {
 				seen[iface] = true
 				for method := range iface.ExplicitMethods() {
 					if have := kept[method.Name()]; have != nil && have != method && pv.methodContract(method) != nil {
-						pv.report(node.Pos(), "the contract of %s is not part of this interface: it has %s from %s, "+
+						pv.report(node.Pos(), rAnnotationFault, "the contract of %s is not part of this interface: it has %s from %s, "+
 							"and Go keeps one declaration of a method; declare the method once, with its contract",
 							methodTitle(method), method.Name(), methodTitle(have))
 					}
@@ -817,19 +817,19 @@ func (v *fnVerifier) usableMethodContract(call *ast.CallExpr, callee *types.Func
 	}
 	switch {
 	case selection == nil || selection.Kind() != types.MethodVal:
-		v.unsupported(call.Pos(), "a method expression, as in I.M(x), cannot be called yet; call the method on the value, as in x.M()")
+		v.unsupported(call.Pos(), rIfaceForm, "a method expression, as in I.M(x), cannot be called yet; call the method on the value, as in x.M()")
 	case len(selection.Index()) > 1:
-		v.unsupported(call.Pos(), fmt.Sprintf("%s is a method of an interface value that %s holds in an embedded field; "+
+		v.unsupported(call.Pos(), rIfaceForm, fmt.Sprintf("%s is a method of an interface value that %s holds in an embedded field; "+
 			"calling it through %s is not supported yet; call it on the field", callee.Name(), types.ExprString(sel.X), types.ExprString(sel.X)))
 	case !isIface(selection.Recv()):
 		// The type of the value decides, and not the interface that
 		// declares the method: an interface literal that embeds it is not
 		// modelled.
-		v.unsupported(call.Pos(), fmt.Sprintf("calling %s, a method of %s, is not supported yet%s", callee.Name(), selection.Recv(), unsupportedHint(selection.Recv())))
+		v.unsupported(call.Pos(), typeClass(selection.Recv()), fmt.Sprintf("calling %s, a method of %s, is not supported yet%s", callee.Name(), selection.Recv(), unsupportedHint(selection.Recv())))
 	}
 	fn := v.methodContract(callee)
 	if fn == nil {
-		v.unsupported(call.Pos(), fmt.Sprintf("%s calls %s, which has no contract; a method of an interface gets one in its doc comment "+
+		v.unsupported(call.Pos(), withDetail(rIfaceNoContract, callee.FullName()), fmt.Sprintf("%s calls %s, which has no contract; a method of an interface gets one in its doc comment "+
 			"where the interface is declared, with // @ annotations%s", types.ExprString(call.Fun), methodTitle(callee), v.entryHint(callee.Pkg(), callee.Pos(), callee.FullName())))
 	}
 	fn = v.usable(call.Pos(), fn, methodTitle(callee), st, guard, true)
@@ -1028,7 +1028,7 @@ func isErrorText(info *types.Info, call *ast.CallExpr) bool {
 func (v *fnVerifier) errorText(call *ast.CallExpr, st *state, guard []*logic.Term) []value {
 	sel := ast.Unparen(call.Fun).(*ast.SelectorExpr)
 	if !v.knownError(v.bodyOrigins(), sel.X, -1) {
-		v.unsupported(call.Pos(), fmt.Sprintf("calling Error on %s would run the methods of an error whose origin is not known; "+
+		v.unsupported(call.Pos(), withDetail(rErrUnknown, "Error called"), fmt.Sprintf("calling Error on %s would run the methods of an error whose origin is not known; "+
 			"only an error made by errors.New or fmt.Errorf, here or in a verified function, one that a contract vouches for, or one that holds a value of a type whose errors have a known origin, "+
 			"can be asked for its text%s", types.ExprString(sel.X), v.originWhy(sel.X)))
 	}
@@ -1065,7 +1065,7 @@ func (v *fnVerifier) convertByContract(e ast.Expr, verb string, from, want types
 	}
 	for _, s := range v.ifaceStatesOf(want) {
 		if !have[s.title()] {
-			v.unsupported(e.Pos(), fmt.Sprintf("%s %s, %s %s, to %s is not supported: %s has the state %s, which %s does not declare, "+
+			v.unsupported(e.Pos(), rConvStates, fmt.Sprintf("%s %s, %s %s, to %s is not supported: %s has the state %s, which %s does not declare, "+
 				"so nothing says what it is of the value", verb, types.ExprString(e), article(shown(from)), shown(from), shown(want), shown(want), s.name, shown(from)))
 		}
 	}
@@ -1083,7 +1083,7 @@ func (v *fnVerifier) convertByContract(e ast.Expr, verb string, from, want types
 			continue
 		}
 		if source == nil {
-			v.unsupported(e.Pos(), fmt.Sprintf("%s %s, %s %s, to %s is not supported: %s has no method %s", verb, types.ExprString(e), article(shown(from)), shown(from), shown(want), shown(from), method.Name()))
+			v.unsupported(e.Pos(), rConvByContract, fmt.Sprintf("%s %s, %s %s, to %s is not supported: %s has no method %s", verb, types.ExprString(e), article(shown(from)), shown(from), shown(want), shown(from), method.Name()))
 		}
 		TA, TB := v.methodContract(source), v.methodContract(method)
 		if TA == nil || TB == nil {
@@ -1091,11 +1091,11 @@ func (v *fnVerifier) convertByContract(e ast.Expr, verb string, from, want types
 			if TB == nil {
 				missing = method
 			}
-			v.unsupported(e.Pos(), fmt.Sprintf("%s %s, %s %s, to %s is not supported: %s has no contract, so nothing says that %s meets %s",
+			v.unsupported(e.Pos(), rConvByContract, fmt.Sprintf("%s %s, %s %s, to %s is not supported: %s has no contract, so nothing says that %s meets %s",
 				verb, types.ExprString(e), article(shown(from)), shown(from), shown(want), methodTitle(missing), methodTitle(source), methodTitle(method)))
 		}
 		if why := v.claimsNoLess(TA, TB, source, method); why != "" {
-			v.unsupported(e.Pos(), fmt.Sprintf("%s %s, %s %s, to %s is not supported: %s", verb, types.ExprString(e), article(shown(from)), shown(from), shown(want), why))
+			v.unsupported(e.Pos(), rConvByContract, fmt.Sprintf("%s %s, %s %s, to %s is not supported: %s", verb, types.ExprString(e), article(shown(from)), shown(from), shown(want), why))
 		}
 		v.impliesMethod(e, TA, TB, source, method, st, guard)
 	}
@@ -1197,7 +1197,7 @@ func (v *fnVerifier) impliesMethod(e ast.Expr, TA, TB *funcInfo, a, b *types.Fun
 	args := map[*types.Var]value{}
 	switch {
 	case TA.receiver != nil && TB.receiver == nil:
-		v.unsupported(e.Pos(), fmt.Sprintf("converting %s to the interface of %s is not supported: the contract of %s names its receiver, and that of %s does not, "+
+		v.unsupported(e.Pos(), rConvByContract, fmt.Sprintf("converting %s to the interface of %s is not supported: the contract of %s names its receiver, and that of %s does not, "+
 			"so nothing would say what %s does to the value", types.ExprString(e), methodTitle(b), methodTitle(a), methodTitle(b), methodTitle(a)))
 	case TA.receiver != nil:
 		args[TA.receiver] = sv.entry[TB.receiver]

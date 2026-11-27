@@ -190,7 +190,7 @@ func (v *fnVerifier) classifyLiterals() {
 	bound, refused := literalUses(v.info, body)
 	if len(refused) > 0 {
 		first := slices.Min(slices.Collect(maps.Keys(refused)))
-		v.unsupported(first, refused[first])
+		v.unsupported(first, rLitSignature, refused[first])
 	}
 	v.boundLits = bound
 	ast.Inspect(body, func(n ast.Node) bool {
@@ -202,7 +202,7 @@ func (v *fnVerifier) classifyLiterals() {
 		for _, tuple := range []*types.Tuple{sig.Params(), sig.Results()} {
 			for variable := range tuple.Variables() {
 				if _, modelled := layoutOf(variable.Type()); !modelled {
-					v.unsupported(lit.Pos(), fmt.Sprintf("this function literal takes or returns a %s, which is not supported", variable.Type()))
+					v.unsupported(lit.Pos(), typeClass(variable.Type()), fmt.Sprintf("this function literal takes or returns a %s, which is not supported", variable.Type()))
 				}
 			}
 		}
@@ -355,7 +355,7 @@ func changed(a, b memory) bool {
 // where they fail, nothing changes.
 func (v *fnVerifier) inline(lit *ast.FuncLit, args []value, st *state, guard []*logic.Term, site inlineSite) []value {
 	if v.inlining[lit] {
-		v.unsupported(site.pos, "the function literal calls itself, which cannot be verified where it is written")
+		v.unsupported(site.pos, rLitRecursion, "the function literal calls itself, which cannot be verified where it is written")
 	}
 	v.inlining[lit] = true
 	defer delete(v.inlining, lit)
@@ -673,7 +673,7 @@ func (v *fnVerifier) joinedAt(now *logic.Term, joined *joinedRegion, ref *logic.
 // report emits a diagnostic. One found while the body of a literal is
 // executed says through which calls it was reached, since the body is
 // verified at each of them.
-func (v *fnVerifier) report(pos token.Pos, format string, args ...any) {
+func (v *fnVerifier) report(pos token.Pos, class refusal, format string, args ...any) {
 	if v.frameNames != nil {
 		panic(frameAbort{})
 	}
@@ -684,5 +684,5 @@ func (v *fnVerifier) report(pos token.Pos, format string, args ...any) {
 		}
 		format, args = format+"%s", append(slices.Clip(args), ", "+strings.Join(through, ", "))
 	}
-	v.pkgVerifier.report(pos, format, args...)
+	v.pkgVerifier.report(pos, class, format, args...)
 }

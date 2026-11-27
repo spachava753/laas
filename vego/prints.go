@@ -221,7 +221,7 @@ func (v *fnVerifier) printedArgs(call *ast.CallExpr, fn *funcInfo, st *state, gu
 func (v *fnVerifier) applyPrinted(call *ast.CallExpr, fn *funcInfo, writer ast.Expr, write *funcInfo, args map[*types.Var]value, formatted *logic.Term, st *state, guard []*logic.Term) []value {
 	as := v.contractOf(fn.printsAs)
 	if as == nil {
-		v.unsupported(call.Pos(), "the function that the prints of "+fn.trust.key+" names has no contract")
+		v.unsupported(call.Pos(), rFormatPrints, "the function that the prints of "+fn.trust.key+" names has no contract")
 	}
 	sig := fn.obj.Type().(*types.Signature)
 	bound := v.bindCall(call, sig)
@@ -266,7 +266,7 @@ func (v *fnVerifier) applyPrinted(call *ast.CallExpr, fn *funcInfo, writer ast.E
 			}
 		})
 		if v.attempt(st, guard, logic.And(needs...)) != solver.Proved {
-			v.report(call.Pos(), "%s writes to %s text whose length is not known: it formats the text of an error, what a String or Error method returns, "+
+			v.report(call.Pos(), rFormatLength, "%s writes to %s text whose length is not known: it formats the text of an error, what a String or Error method returns, "+
 				"or strings or slices inside an element of a slice, whose lengths are not counted, and the Write of %s needs a bound on what it is given; "+
 				"format only values whose length the bound counts",
 				fn.obj.Name(), types.ExprString(writer), types.TypeString(v.info.TypeOf(writer), types.RelativeTo(v.pass.Pkg)))

@@ -234,7 +234,7 @@ func (v *fnVerifier) checkFormattable(arg ast.Expr, who string, errorf bool) *fm
 		// Formatting an error runs its methods, which known origin of
 		// either kind makes harmless.
 		if !v.knownError(v.bodyOrigins(), arg, -1) {
-			v.unsupported(arg.Pos(), fmt.Sprintf("formatting %s would run the methods of an error whose origin is not known; "+
+			v.unsupported(arg.Pos(), withDetail(rErrUnknown, "formatted"), fmt.Sprintf("formatting %s would run the methods of an error whose origin is not known; "+
 				"only an error made by errors.New or fmt.Errorf, here or in a verified function, one that a contract vouches for, or one that holds a value of a type whose errors have a known origin, "+
 				"can be formatted%s", types.ExprString(arg), v.originWhy(arg)))
 		}
@@ -242,7 +242,7 @@ func (v *fnVerifier) checkFormattable(arg ast.Expr, who string, errorf bool) *fm
 	}
 	run, why := formatMethod(t)
 	if why != "" {
-		v.unsupported(arg.Pos(), fmt.Sprintf("%s formats %s, a value of type %s, and that may run code nobody has checked: %s; "+
+		v.unsupported(arg.Pos(), rFormatCode, fmt.Sprintf("%s formats %s, a value of type %s, and that may run code nobody has checked: %s; "+
 			"only numbers, booleans, strings, and slices and structs of them, pointers to such structs, errors of known origin, "+
 			"and values whose String or Error method has a contract that modifies nothing can be formatted",
 			who, types.ExprString(arg), t, why))
@@ -255,12 +255,12 @@ func (v *fnVerifier) checkFormattable(arg ast.Expr, who string, errorf bool) *fm
 		// %w would keep it in the tree of the new error, whose methods
 		// would then not be the standard library's, unless they are those
 		// of a type whose errors have a known origin (S4 of F33).
-		v.unsupported(arg.Pos(), fmt.Sprintf("fmt.Errorf formats %s, a value of type %s, which is an error that %%w would wrap; "+
+		v.unsupported(arg.Pos(), withDetail(rErrUnknown, "wrapped"), fmt.Sprintf("fmt.Errorf formats %s, a value of type %s, which is an error that %%w would wrap; "+
 			"only an error of known origin can be wrapped, and errors of this type have none: %s", types.ExprString(arg), t, why))
 	}
 	fn := v.contractOf(run.method)
 	if fn == nil {
-		v.unsupported(arg.Pos(), fmt.Sprintf("%s formats %s, and fmt would call %s, which has no contract; annotate %s with // @ annotations "+
+		v.unsupported(arg.Pos(), rFormatCode, fmt.Sprintf("%s formats %s, and fmt would call %s, which has no contract; annotate %s with // @ annotations "+
 			"so that it is verified, %s",
 			who, types.ExprString(arg), run.method.FullName(), name, v.addEntryAdvice(run.method.FullName())))
 	}
@@ -272,7 +272,7 @@ func (v *fnVerifier) checkFormattable(arg ast.Expr, who string, errorf bool) *fm
 		return run
 	}
 	if len(fn.modifies) > 0 {
-		v.unsupported(arg.Pos(), fmt.Sprintf("%s formats %s, and fmt may call %s any number of times, which modifies memory; "+
+		v.unsupported(arg.Pos(), rFormatCode, fmt.Sprintf("%s formats %s, and fmt may call %s any number of times, which modifies memory; "+
 			"only a String or Error method that modifies nothing can be run by formatting", who, types.ExprString(arg), run.method.FullName()))
 	}
 	if fn.trust != nil {
@@ -352,7 +352,7 @@ func (v *fnVerifier) formattedArgs(call *ast.CallExpr, fn *funcInfo) []ast.Expr 
 		switch {
 		case passed.param != fn.formatted:
 		case passed.spread:
-			v.unsupported(passed.expr.Pos(), fmt.Sprintf("%s formats what the slice %s holds, which can be anything; "+
+			v.unsupported(passed.expr.Pos(), rFormatPack, fmt.Sprintf("%s formats what the slice %s holds, which can be anything; "+
 				"list the values in the call instead, so that each is checked", fn.obj.Name(), types.ExprString(passed.expr)))
 		case passed.packed:
 			args = append(args, passed.pack...)
@@ -433,7 +433,7 @@ func (v *fnVerifier) checkFormatAlloc(st *state, guard []*logic.Term, call *ast.
 	result, declared := v.sizedAttempt(st, guard, goal, call.Pos())
 	done()
 	if result != solver.Proved {
-		v.report(call.Pos(), "what %s builds from what it formats may be more than can be allocated%s%s%s", who, v.formatHint(st, guard, size, slack, format, formatVal),
+		v.report(call.Pos(), rObligation, "what %s builds from what it formats may be more than can be allocated%s%s%s", who, v.formatHint(st, guard, size, slack, format, formatVal),
 			v.sizeNote(st, guard, goal), limitNote(result))
 	}
 	// A goal that only the declared memory proved is not assumed.

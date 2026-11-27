@@ -23,6 +23,8 @@ type (
 	unsupported struct {
 		pos token.Pos
 		msg string
+		// class is what the census counts the refusal as; see census.go.
+		class refusal
 	}
 	abort struct{}
 )
@@ -404,13 +406,13 @@ func (pv *pkgVerifier) run(fn *funcInfo, task func(v *fnVerifier)) {
 		switch r := recover().(type) {
 		case nil, abort:
 		case unsupported:
-			pv.report(r.pos, "cannot verify %s: %s", fn.obj.Name(), r.msg)
+			pv.report(r.pos, r.class, "cannot verify %s: %s", fn.obj.Name(), r.msg)
 		case logic.TooLarge:
 			at := fn.obj.Pos()
 			if fn.decl != nil {
 				at = fn.decl.Name.Pos()
 			}
-			pv.report(at, "cannot verify %s: a formula built to verify it has grown beyond %d nodes, "+
+			pv.report(at, rFormulaLimit, "cannot verify %s: a formula built to verify it has grown beyond %d nodes, "+
 				"which is the limit; split the function, or the expressions in it, into smaller ones", fn.obj.Name(), logic.MaxSize)
 		default:
 			panic(r)
@@ -470,7 +472,7 @@ func (v *fnVerifier) enter() *state {
 					what = "the receiver, which has no name,"
 				}
 			}
-			v.unsupported(param.Pos(), fmt.Sprintf("%s has unsupported type %s%s", what, param.Type(), unsupportedHint(param.Type())))
+			v.unsupported(param.Pos(), typeClass(param.Type()), fmt.Sprintf("%s has unsupported type %s%s", what, param.Type(), unsupportedHint(param.Type())))
 		}
 		v.refuseTooLarge(param.Pos(), param.Type())
 		// Every parameter is its own unknown, including blank ones, which
@@ -535,7 +537,7 @@ func (v *fnVerifier) enter() *state {
 			continue
 		}
 		if !ok {
-			v.unsupported(fn.obj.Pos(), fmt.Sprintf("result type %s is not supported%s", result.Type(), unsupportedHint(result.Type())))
+			v.unsupported(fn.obj.Pos(), typeClass(result.Type()), fmt.Sprintf("result type %s is not supported%s", result.Type(), unsupportedHint(result.Type())))
 		}
 		v.refuseTooLarge(result.Pos(), result.Type())
 		st.vals[result] = zeroValue(result.Type())
@@ -709,11 +711,11 @@ func (v *fnVerifier) current(st *state, variable *types.Var) value {
 func (v *fnVerifier) verify() {
 	fn := v.fn
 	if fn.decl.Body == nil {
-		v.unsupported(fn.decl.Pos(), "the function has no body")
+		v.unsupported(fn.decl.Pos(), rNoBody, "the function has no body")
 	}
 	sig := fn.obj.Type().(*types.Signature)
 	if sig.TypeParams() != nil || sig.RecvTypeParams() != nil {
-		v.unsupported(fn.decl.Pos(), "generic functions are not supported yet")
+		v.unsupported(fn.decl.Pos(), rGenericDeclared, "generic functions are not supported yet")
 	}
 	if fn.closure != nil {
 		v.checkClosure()
@@ -721,7 +723,7 @@ func (v *fnVerifier) verify() {
 	v.checkSourceCallsUses()
 	for _, rc := range v.pkgVerifier.closures {
 		if rc.outer == fn.decl && rc.refused != "" {
-			v.unsupported(rc.refusedAt, rc.refused)
+			v.unsupported(rc.refusedAt, rClosure, rc.refused)
 		}
 	}
 	v.checkCopies(fn.decl)
@@ -732,7 +734,7 @@ func (v *fnVerifier) verify() {
 			variable, isVar := v.info.Defs[id].(*types.Var)
 			local := !slices.Contains(fn.params, variable) && !slices.Contains(fn.results, variable)
 			if isVar && !variable.IsField() && fn.ambiguous(id.Name, local) {
-				v.unsupported(id.Pos(), fmt.Sprintf("the variable %s has a name that means something else in annotations; rename it", id.Name))
+				v.unsupported(id.Pos(), rAmbiguousName, fmt.Sprintf("the variable %s has a name that means something else in annotations; rename it", id.Name))
 			}
 		}
 		return true
@@ -744,7 +746,7 @@ func (v *fnVerifier) verify() {
 	v.boxed = v.findBoxed(fn.decl.Body)
 	for _, rc := range v.pkgVerifier.closures {
 		if variable := capturesBoxed(rc, v.boxed); rc.outer == fn.decl && variable != nil {
-			v.unsupported(rc.lit.Pos(), fmt.Sprintf("%s captures %s, whose address is taken in %s, by & or by a method with a pointer receiver or "+
+			v.unsupported(rc.lit.Pos(), rClosure, fmt.Sprintf("%s captures %s, whose address is taken in %s, by & or by a method with a pointer receiver or "+
 				"by slicing it, so that it lives in memory; a recursive closure cannot capture such a variable yet", closureName(rc.variable), variable.Name(), fn.obj.Name()))
 		}
 	}
@@ -762,9 +764,9 @@ func (v *fnVerifier) verify() {
 	// the function provable.
 	if v.quickly(st, nil, logic.False()) {
 		if why := v.lockContradiction(fn); why != "" {
-			v.report(fn.decl.Name.Pos(), "%s", why)
+			v.report(fn.decl.Name.Pos(), rAnnotationFault, "%s", why)
 		} else {
-			v.report(fn.decl.Name.Pos(), "nothing can satisfy the Requires clauses of %s together with what the types of its parameters guarantee, "+
+			v.report(fn.decl.Name.Pos(), rAnnotationFault, "nothing can satisfy the Requires clauses of %s together with what the types of its parameters guarantee, "+
 				"so verifying it would prove nothing", fn.obj.Name())
 		}
 	} else {
@@ -772,7 +774,7 @@ func (v *fnVerifier) verify() {
 		v.checkHiddenRequires(st)
 	}
 	for _, refused := range v.entryOnly(st) {
-		v.report(refused.clause.pos, "%s", refused.message(fn.obj.Name()))
+		v.report(refused.clause.pos, rAnnotationFault, "%s", refused.message(fn.obj.Name()))
 	}
 	if left, ok := v.readKeysLeft(fn.measure, &specEnv{v: v, sink: st, fn: fn, args: v.entry, now: memory{}}); ok {
 		// A count of keys is never negative.
@@ -789,7 +791,7 @@ func (v *fnVerifier) verify() {
 	// A conversion to an interface type of a value without an expression
 	// of its own was not checked anywhere.
 	if unplaced := v.findConversions().unplaced[fn.decl]; len(unplaced) > 0 {
-		v.unsupported(unplaced[0], "Go converts a value to an interface type here, and which expression it converts could not be told, "+
+		v.unsupported(unplaced[0], rConvUnplaced, "Go converts a value to an interface type here, and which expression it converts could not be told, "+
 			"as for one result of a call with several, so the conversion cannot be checked; assign the value to a variable of its own type first")
 	}
 	// Which calls decide the failures only says whether the function is
@@ -804,7 +806,7 @@ func (v *fnVerifier) verify() {
 	// An Exits annotation that no call of the body needs is reported, as
 	// Modifies is checked, so that it cannot stay once the exit is gone.
 	if c := fn.exitsClause; c != nil && !v.exitReached && !fn.failed {
-		v.report(c.pos, "%s has an Exits annotation, but nothing it calls may end the process; remove it, "+
+		v.report(c.pos, rObligation, "%s has an Exits annotation, but nothing it calls may end the process; remove it, "+
 			"since an Exits annotation must say exactly whether the function may end the process", fn.obj.Name())
 	}
 	needed := map[int]bool{}
@@ -818,14 +820,14 @@ func (v *fnVerifier) verify() {
 		// several targets, and is needed when one of them is.
 		if !needed[t.mod] && !fn.failed && !reported[t.mod] && (fn.closure == nil || !fn.closure.outputMods[t.mod]) {
 			reported[t.mod] = true
-			v.report(t.clause.pos, "Modifies lists %s, but %s never needs to modify it; "+
+			v.report(t.clause.pos, rObligation, "Modifies lists %s, but %s never needs to modify it; "+
 				"a Modifies clause must list exactly what the function may write", t.text, fn.obj.Name())
 		}
 	}
 }
 
-func (v *fnVerifier) unsupported(pos token.Pos, msg string) {
-	panic(unsupported{pos, msg})
+func (v *fnVerifier) unsupported(pos token.Pos, class refusal, msg string) {
+	panic(unsupported{pos, msg, class})
 }
 
 // misread handles an annotation that cannot be resolved: it is reported at
@@ -835,13 +837,13 @@ func (v *fnVerifier) misread(c *clause, err error) {
 		v.misreadAs(c, err)
 		panic(abort{})
 	}
-	v.report(c.pos, "in %s annotation: %v", c.kind, err)
+	v.report(c.pos, rAnnotationFault, "in %s annotation: %v", c.kind, err)
 	// An annotation of another declaration, read here, is reported at it,
 	// which may be a report its own verification makes too. The function
 	// being verified stops here, so it gets a report of its own.
 	if !v.ownClause(c) {
 		at := v.pass.Fset.Position(c.pos)
-		panic(unsupported{pos: v.askAt, msg: fmt.Sprintf("an annotation that it relies on here cannot be read: the %s annotation at %s:%d:%d (%v)",
+		panic(unsupported{pos: v.askAt, class: rUnreadable, msg: fmt.Sprintf("an annotation that it relies on here cannot be read: the %s annotation at %s:%d:%d (%v)",
 			c.kind, filepath.Base(at.Filename), at.Line, at.Column, err)})
 	}
 	panic(abort{})
@@ -951,7 +953,7 @@ func (v *fnVerifier) answered(st *state, guard []*logic.Term, conjunct *logic.Te
 			lost += v.explainFrame(f)
 		}
 		lost += v.memoryNote(st, guard, conjunct)
-		v.report(pos, "%s%s%s", fmt.Sprintf(format, args...), lost, limitNote(result))
+		v.report(pos, rObligation, "%s%s%s", fmt.Sprintf(format, args...), lost, limitNote(result))
 	}
 	if assume {
 		st.assume(logic.Implies(logic.And(guard...), conjunct))
@@ -1002,7 +1004,7 @@ func (v *fnVerifier) seq(list []ast.Stmt, from, to token.Pos, st *state, c ctrl,
 			spec.visited = clause
 		default:
 			if spec.variant != nil {
-				v.report(clause.pos, "loop already has a Variant; give it exactly one")
+				v.report(clause.pos, rAnnotationFault, "loop already has a Variant; give it exactly one")
 				continue
 			}
 			spec.variant = clause
@@ -1026,7 +1028,7 @@ func (v *fnVerifier) seq(list []ast.Stmt, from, to token.Pos, st *state, c ctrl,
 		// the functions that the one call of the statement hands over.
 		if call, why := v.handInvariantCall(list[0]); why != "" {
 			for _, clause := range spec.invariants {
-				v.report(clause.pos, "%s", why)
+				v.report(clause.pos, rAnnotationFault, "%s", why)
 			}
 		} else {
 			if v.handInvariants == nil {
@@ -1039,7 +1041,7 @@ func (v *fnVerifier) seq(list []ast.Stmt, from, to token.Pos, st *state, c ctrl,
 	if loop == nil {
 		for _, clause := range append(slices.Clip(spec.invariants), spec.variant) {
 			if clause != nil {
-				v.report(clause.pos, "%s annotation must be directly above a for loop", clause.kind)
+				v.report(clause.pos, rAnnotationFault, "%s annotation must be directly above a for loop", clause.kind)
 			}
 		}
 	}
@@ -1078,7 +1080,7 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 	case *ast.ExprStmt:
 		call, ok := ast.Unparen(s.X).(*ast.CallExpr)
 		if !ok {
-			v.unsupported(s.Pos(), "this expression statement is not supported")
+			v.unsupported(s.Pos(), rStmtExpr, "this expression statement is not supported")
 		}
 		if isBuiltin(v.info, call, "panic") {
 			v.check(st, nil, logic.False(), s.Pos(), "panic may be reachable")
@@ -1151,14 +1153,14 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 		case s.Tok == token.FALLTHROUGH:
 			// switchStmt runs the next clause in its place; one that it
 			// did not take is not a fallthrough Go allows.
-			v.unsupported(s.Pos(), "fallthrough is supported only as the last statement of a clause of an expression switch")
+			v.unsupported(s.Pos(), rFallthrough, "fallthrough is supported only as the last statement of a clause of an expression switch")
 		default:
-			v.unsupported(s.Pos(), "goto is not supported")
+			v.unsupported(s.Pos(), rGoto, "goto is not supported")
 		}
 		return
 	case *ast.DeferStmt:
 		if v.sourceCallback(s.Call) != nil {
-			v.unsupported(s.Pos(), fmt.Sprintf("a deferred call of %s, a parameter that a Calls annotation of %s gives a contract, is not supported yet; "+
+			v.unsupported(s.Pos(), rCallsAnnotation, fmt.Sprintf("a deferred call of %s, a parameter that a Calls annotation of %s gives a contract, is not supported yet; "+
 				"call it, or defer a function literal that calls it", types.ExprString(s.Call.Fun), v.fn.obj.Name()))
 		}
 		v.deferStmt(s, st)
@@ -1167,7 +1169,7 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 		return
 	default:
 		kind := strings.TrimSuffix(strings.TrimPrefix(fmt.Sprintf("%T", s), "*ast."), "Stmt")
-		v.unsupported(s.Pos(), strings.ToLower(kind)+" statements are not supported yet")
+		v.unsupported(s.Pos(), stmtClass(s), strings.ToLower(kind)+" statements are not supported yet")
 	}
 	k(st)
 }
@@ -1183,11 +1185,11 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 	method, viaValue := throughValue(v.info, s.Call)
 	switch {
 	case v.looped[s]:
-		v.unsupported(s.Pos(), "defer inside a loop is not supported: how many calls it puts off is not known")
+		v.unsupported(s.Pos(), rDeferLoop, "defer inside a loop is not supported: how many calls it puts off is not known")
 	case func() bool { made, _, _ := v.pkgVerifier.decoderInPlace(s.Call); return made != nil }():
-		v.unsupported(s.Pos(), "deferring json.NewDecoder(io.LimitReader(r, n)).Decode(&x) is not supported: what it returns would be lost, and what it decodes into is checked where it is called")
+		v.unsupported(s.Pos(), rJSON, "deferring json.NewDecoder(io.LimitReader(r, n)).Decode(&x) is not supported: what it returns would be lost, and what it decodes into is checked where it is called")
 	case v.pkgVerifier.encoderInPlace(s.Call) != nil:
-		v.unsupported(s.Pos(), "deferring json.NewEncoder(w).Encode(v) is not supported: what it returns would be lost, and what it encodes is checked where it is called")
+		v.unsupported(s.Pos(), rJSON, "deferring json.NewEncoder(w).Encode(v) is not supported: what it returns would be lost, and what it encodes is checked where it is called")
 	case lit != nil:
 		// A literal is run at each return like any deferred call, with the
 		// arguments it is given here; the variables it captures are read
@@ -1201,7 +1203,7 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 		st.deferred = append(slices.Clip(st.deferred), deferredCall{call: s.Call, lit: lit, litArgs: args})
 		return
 	case isBuiltin(v.info, s.Call, "recover"):
-		v.unsupported(s.Pos(), recoverRefused)
+		v.unsupported(s.Pos(), rRecover, recoverRefused)
 	case viaValue:
 		v.deferValue(s, st)
 		return
@@ -1209,32 +1211,32 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 		v.deferMethod(s, method, st)
 		return
 	case callee == nil:
-		v.unsupported(s.Pos(), "only a call of a named function or method, of a function literal, or of a function value can be deferred; "+
+		v.unsupported(s.Pos(), rDeferForm, "only a call of a named function or method, of a function literal, or of a function value can be deferred; "+
 			"built-in functions are not supported here")
 	case errorConstructor(callee):
-		v.unsupported(s.Pos(), "deferring a call that only makes an error is not supported")
+		v.unsupported(s.Pos(), rDeferForm, "deferring a call that only makes an error is not supported")
 	case isErrorsIs(callee):
-		v.unsupported(s.Pos(), "deferring errors.Is is not supported: its result would be lost")
+		v.unsupported(s.Pos(), rDeferForm, "deferring errors.Is is not supported: its result would be lost")
 	case isAsCall(callee):
-		v.unsupported(s.Pos(), "deferring errors.As is not supported: what it finds would be stored after the function's checks")
+		v.unsupported(s.Pos(), rDeferForm, "deferring errors.As is not supported: what it finds would be stored after the function's checks")
 	}
 	fn, cut := v.contractFor(s.Call, callee, st, nil)
 	if cut {
 		return
 	}
 	if mayExit(fn) {
-		v.unsupported(s.Pos(), fmt.Sprintf("deferring a call of %s, which may end the process, is not supported yet", v.calleeName(callee)))
+		v.unsupported(s.Pos(), rExitContext, fmt.Sprintf("deferring a call of %s, which may end the process, is not supported yet", v.calleeName(callee)))
 	}
 	if fn.calls.len() > 0 {
-		v.unsupported(s.Pos(), fmt.Sprintf("deferring a call of %s, which calls a function it is given, is not supported yet", callee.Name()))
+		v.unsupported(s.Pos(), rDeferForm, fmt.Sprintf("deferring a call of %s, which calls a function it is given, is not supported yet", callee.Name()))
 	}
 	if fn.decoded != nil {
-		v.unsupported(s.Pos(), fmt.Sprintf("deferring a call of %s is not supported: what it returns would be lost, and what it decodes into is checked where it is called", callee.Name()))
+		v.unsupported(s.Pos(), rJSON, fmt.Sprintf("deferring a call of %s is not supported: what it returns would be lost, and what it decodes into is checked where it is called", callee.Name()))
 	}
 	if fn.encoded != nil {
 		// What it returns would be lost, and what it encodes is checked
 		// where it is called.
-		v.unsupported(s.Pos(), fmt.Sprintf("deferring a call of %s is not supported: what it returns would be lost, and what it encodes is checked where it is called", callee.Name()))
+		v.unsupported(s.Pos(), rJSON, fmt.Sprintf("deferring a call of %s is not supported: what it returns would be lost, and what it encodes is checked where it is called", callee.Name()))
 	}
 	// The deferred call itself runs later, so nothing here comes before it.
 	var args map[*types.Var]value
@@ -1260,7 +1262,7 @@ func (v *fnVerifier) deferStmt(s *ast.DeferStmt, st *state) {
 func (v *fnVerifier) branch(pos token.Pos) {
 	v.branches++
 	if v.branches > maxBranches {
-		v.unsupported(pos, "the function has too many paths to explore")
+		v.unsupported(pos, rPaths, "the function has too many paths to explore")
 	}
 }
 
@@ -1280,7 +1282,7 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 	}
 	var tag *logic.Term
 	if s.Tag != nil && isArray(v.info.TypeOf(s.Tag)) {
-		v.unsupported(s.Tag.Pos(), fmt.Sprintf("a switch on an array of type %s is not supported yet; compare the array with == in an if", v.info.TypeOf(s.Tag)))
+		v.unsupported(s.Tag.Pos(), rSwitchArray, fmt.Sprintf("a switch on an array of type %s is not supported yet; compare the array with == in an if", v.info.TypeOf(s.Tag)))
 	}
 	if s.Tag != nil {
 		// Where the tag or a case is an interface and the other is not,
@@ -1293,14 +1295,14 @@ func (v *fnVerifier) switchStmt(s *ast.SwitchStmt, st *state, c ctrl, k func(*st
 				case v.isNil(e) || types.IsInterface(tagType) == types.IsInterface(caseType):
 				case isError(caseType) && !isError(tagType):
 					// Go would convert the tag for this case alone.
-					v.unsupported(e.Pos(), fmt.Sprintf("a switch on a value of type %s with a case that is an error is not supported; "+
+					v.unsupported(e.Pos(), rSwitchIface, fmt.Sprintf("a switch on a value of type %s with a case that is an error is not supported; "+
 						"convert the tag to error, as in switch error(x)", tagType))
 				case isError(tagType) || isError(caseType):
 					v.bothErrors(s.Tag, e, e.Pos())
 				case isIface(caseType):
 					// A concrete tag is compared as one value of its type.
 					if layout, ok := layoutOf(types.Default(tagType)); ok && len(layout) != 1 {
-						v.unsupported(e.Pos(), fmt.Sprintf("a switch on a value of type %s with a case that is an interface value is not supported; compare them with == instead", tagType))
+						v.unsupported(e.Pos(), rSwitchIface, fmt.Sprintf("a switch on a value of type %s with a case that is an interface value is not supported; compare them with == instead", tagType))
 					}
 					v.checkEqSide(tagType, e.Pos())
 				default:

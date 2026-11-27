@@ -219,7 +219,7 @@ func (v *fnVerifier) errorsIs(call *ast.CallExpr, st *state, guard []*logic.Term
 	// target, and errors.Is a function of the two errors. What it finds is
 	// known only of a made error, from noteTree.
 	if !v.knownError(v.bodyOrigins(), err, -1) {
-		v.unsupported(err.Pos(), fmt.Sprintf("errors.Is would run the Is and Unwrap methods of %s, an error whose origin is not known; "+
+		v.unsupported(err.Pos(), withDetail(rErrUnknown, "errors.Is"), fmt.Sprintf("errors.Is would run the Is and Unwrap methods of %s, an error whose origin is not known; "+
 			"only an error made by errors.New or fmt.Errorf, here or in a verified function, one that a contract vouches for, or one that holds a value of a type whose errors have a known origin, "+
 			"can be its first argument%s",
 			types.ExprString(err), v.originWhy(err)))

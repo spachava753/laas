@@ -85,7 +85,7 @@ func (v *fnVerifier) startMapRange(st *state, t types.Type, ref *logic.Term, at 
 	probe.assume(logic.Forall(i, logic.Implies(logic.And(logic.Le(logic.IntLit(0), i), logic.Lt(i, r.n0)),
 		logic.And(logic.Select(r.has0, key), logic.Eq(logic.Select(r.pos, key), i)))))
 	if v.quickly(probe, nil, logic.False()) && !v.quickly(st, nil, logic.False()) {
-		v.report(at, "what is known here says that %s has a number of keys other than |%s|, which no map can; "+
+		v.report(at, rObligation, "what is known here says that %s has a number of keys other than |%s|, which no map can; "+
 			"check the clauses that say which keys it has", what, what)
 	}
 	return r
@@ -240,7 +240,7 @@ func (pv *pkgVerifier) checkVisited(fn *funcInfo) {
 		}
 		name := c.node.Name
 		fail := func(format string, args ...any) {
-			pv.report(c.pos, "Visited %s: "+format, append([]any{name}, args...)...)
+			pv.report(c.pos, rAnnotationFault, "Visited %s: "+format, append([]any{name}, args...)...)
 			fn.broken = true
 		}
 		stmt := pv.statementAfter(fn, c)
@@ -317,17 +317,17 @@ func (pv *pkgVerifier) checkVisited(fn *funcInfo) {
 			switch {
 			case !inside(other.pos) && !ofLoop:
 				if names && gap <= other.pos && other.pos < loop.Pos() {
-					pv.report(other.pos, "%s annotation names %s, the keys that the loop below has visited, which have no value above the loop; "+
+					pv.report(other.pos, rAnnotationFault, "%s annotation names %s, the keys that the loop below has visited, which have no value above the loop; "+
 						"name it in the loop's Invariant or inside the loop", other.kind, name)
 					fn.broken = true
 				}
 				continue
 			case bound:
-				pv.report(other.pos, "%s annotation binds %s, which is the name of the Visited annotation at %s; name the bound variable otherwise",
+				pv.report(other.pos, rAnnotationFault, "%s annotation binds %s, which is the name of the Visited annotation at %s; name the bound variable otherwise",
 					other.kind, name, pv.pass.Fset.Position(c.pos))
 				fn.broken = true
 			case names && pv.inOtherLiteral(fn, loop.Pos(), other.pos):
-				pv.report(other.pos, "%s annotation names %s, the keys that the loop at %s has visited, from inside a function literal; "+
+				pv.report(other.pos, rAnnotationFault, "%s annotation names %s, the keys that the loop at %s has visited, from inside a function literal; "+
 					"a literal can name only what it declares or the function's own variables", other.kind, name, pv.pass.Fset.Position(loop.Pos()))
 				fn.broken = true
 			}

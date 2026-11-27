@@ -101,7 +101,7 @@ func (v *fnVerifier) pow2(k *logic.Term, bits uint, st *state) *logic.Term {
 func (v *fnVerifier) shift(op token.Token, x, k *logic.Term, t types.Type, pos token.Pos, st *state, guard []*logic.Term) *logic.Term {
 	least, greatest, ok := v.intRange(t)
 	if !ok {
-		v.unsupported(pos, fmt.Sprintf("operator %s is not supported for %s", op, t))
+		v.unsupported(pos, withDetail(rOpBits, op.String()), fmt.Sprintf("operator %s is not supported for %s", op, t))
 	}
 	zero := logic.IntLit(0)
 	v.check(st, guard, logic.Le(zero, k), pos, "shift count may be negative")
@@ -234,7 +234,7 @@ func (v *fnVerifier) bitAnd(x, y *logic.Term, bits uint, st *state) *logic.Term 
 func (v *fnVerifier) bitwise(op token.Token, x, y *logic.Term, t types.Type, pos token.Pos, st *state) *logic.Term {
 	_, greatest, ok := v.intRange(t)
 	if !ok {
-		v.unsupported(pos, fmt.Sprintf("operator %s is not supported for %s", op, t))
+		v.unsupported(pos, withDetail(rOpBits, op.String()), fmt.Sprintf("operator %s is not supported for %s", op, t))
 	}
 	and := v.bitAnd(x, y, uint(greatest.BitLen())+1, st)
 	result := and
@@ -287,7 +287,7 @@ func (v *fnVerifier) bitwise(op token.Token, x, y *logic.Term, t types.Type, pos
 func (v *fnVerifier) complement(x *logic.Term, t types.Type, pos token.Pos) *logic.Term {
 	least, greatest, ok := v.intRange(t)
 	if !ok {
-		v.unsupported(pos, fmt.Sprintf("operator ^ is not supported for %s", t))
+		v.unsupported(pos, withDetail(rOpBits, "^"), fmt.Sprintf("operator ^ is not supported for %s", t))
 	}
 	if least.Sign() == 0 {
 		return logic.Sub(logic.BigLit(greatest), x)

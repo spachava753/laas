@@ -85,7 +85,7 @@ func (pv *pkgVerifier) checkSnapshots(fn *funcInfo) {
 		name, end := c.snapshot, pv.snapshotScope(fn, c)
 		within := func(pos token.Pos) bool { return c.pos < pos && pos < end }
 		fail := func(format string, args ...any) {
-			pv.report(c.pos, "Snapshot %s: "+format, append([]any{name}, args...)...)
+			pv.report(c.pos, rAnnotationFault, "Snapshot %s: "+format, append([]any{name}, args...)...)
 			fn.broken = true
 		}
 		if _, limit := pv.namedLimit(name); limit || slices.Contains(reservedStateNames, name) || name == "Z" {
@@ -128,11 +128,11 @@ func (pv *pkgVerifier) checkSnapshots(fn *funcInfo) {
 			})
 			switch {
 			case bound:
-				pv.report(other.pos, "%s annotation binds %s, which is the name of the snapshot at %s; name the bound variable otherwise",
+				pv.report(other.pos, rAnnotationFault, "%s annotation binds %s, which is the name of the snapshot at %s; name the bound variable otherwise",
 					other.kind, name, pv.pass.Fset.Position(c.pos))
 				fn.broken = true
 			case names && pv.inOtherLiteral(fn, c.pos, other.pos):
-				pv.report(other.pos, "%s annotation names the snapshot %s, which was taken outside the function literal it stands in; "+
+				pv.report(other.pos, rAnnotationFault, "%s annotation names the snapshot %s, which was taken outside the function literal it stands in; "+
 					"take the snapshot inside the literal", other.kind, name)
 				fn.broken = true
 			}
@@ -169,7 +169,7 @@ func (pv *pkgVerifier) checkSnapshotOrder(fn *funcInfo) {
 			case c.kind == "Invariant" || c.kind == "Variant":
 				loopAnnotation = true
 			case c.kind == "Snapshot" && loopAnnotation:
-				pv.report(c.pos, "Snapshot %s stands below an Invariant or Variant of the loop; put it above the annotations of the loop", c.snapshot)
+				pv.report(c.pos, rAnnotationFault, "Snapshot %s stands below an Invariant or Variant of the loop; put it above the annotations of the loop", c.snapshot)
 				fn.broken = true
 			}
 		}

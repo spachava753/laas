@@ -315,13 +315,13 @@ func capturesValue(layout []leaf) bool {
 func (v *fnVerifier) typedError(e ast.Expr, from types.Type, val value, st *state, guard []*logic.Term) *logic.Term {
 	layout, _ := layoutOf(from)
 	if _, ok := layoutOf(from); ok && holdsArrayValue(from) {
-		v.unsupported(e.Pos(), fmt.Sprintf("converting %s %s to an error is not supported: %s", article(v.shown(from)), v.shown(from), heldReason(from)))
+		v.unsupported(e.Pos(), rConvToError, fmt.Sprintf("converting %s %s to an error is not supported: %s", article(v.shown(from)), v.shown(from), heldReason(from)))
 	}
 	if why := heldReason(from); why != "" {
-		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to an error is not supported: %s", from, why))
+		v.unsupported(e.Pos(), rConvToError, fmt.Sprintf("converting a %s to an error is not supported: %s", from, why))
 	}
 	if pointsToArray(from) {
-		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to an error is not supported yet: what it points to holds an array", from))
+		v.unsupported(e.Pos(), rConvIfaceArray, fmt.Sprintf("converting a %s to an error is not supported yet: what it points to holds an array", from))
 	}
 	v.checkedMethods(e, from, val, st, guard)
 	leaves := v.goLeaves(st, layout, val)
@@ -556,7 +556,7 @@ func (v *fnVerifier) checkedMethods(e ast.Expr, from types.Type, val value, st *
 	shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
 	code := "code that is not verified may run any method of an error at any time"
 	refuse := func(why, remedy string) {
-		v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to an error is not supported: %s; %s, so %s", shown(from), why, code, remedy))
+		v.unsupported(e.Pos(), rConvToError, fmt.Sprintf("converting a %s to an error is not supported: %s; %s, so %s", shown(from), why, code, remedy))
 	}
 	if set, _ := v.invariantsOf(from); set != nil {
 		refuse(fmt.Sprintf("%s has an invariant, which a method run at any time could not assume", shown(from)),
@@ -771,17 +771,17 @@ func (v *fnVerifier) assertion(e *ast.TypeAssertExpr, st *state, guard []*logic.
 	}
 	tag, named := typeTag(target)
 	if !named {
-		v.unsupported(e.Pos(), fmt.Sprintf("asserting %s to %s is not supported: it is declared inside a function, and nothing tells it apart from another type there", operand, shown(target)))
+		v.unsupported(e.Pos(), rDynLocalType, fmt.Sprintf("asserting %s to %s is not supported: it is declared inside a function, and nothing tells it apart from another type there", operand, shown(target)))
 	}
 	layout, _ := layoutOf(target)
 	if why := heldReason(target); why != "" {
-		v.unsupported(e.Pos(), fmt.Sprintf("asserting %s to %s is not supported: %s", operand, shown(target), why))
+		v.unsupported(e.Pos(), rDynAssert, fmt.Sprintf("asserting %s to %s is not supported: %s", operand, shown(target), why))
 	}
 	if why := reflectHeld(v.pass.Pkg, target, "", map[types.Type]bool{}); why != "" {
-		v.unsupported(e.Pos(), fmt.Sprintf("asserting %s to %s is not supported: %s", operand, shown(target), why))
+		v.unsupported(e.Pos(), rDynAssert, fmt.Sprintf("asserting %s to %s is not supported: %s", operand, shown(target), why))
 	}
 	if why := v.contractedReason(target); why != "" && !(commaOk && v.discarded[e]) {
-		v.unsupported(e.Pos(), fmt.Sprintf("asserting %s to %s is not supported: %s", operand, shown(target), why))
+		v.unsupported(e.Pos(), rDynAssert, fmt.Sprintf("asserting %s to %s is not supported: %s", operand, shown(target), why))
 	}
 	x := v.expr(e.X, st, guard)
 	if !isError(from) {
@@ -1056,16 +1056,16 @@ func (v *fnVerifier) typeSwitch(s *ast.TypeSwitchStmt, st *state, c ctrl, k func
 			default:
 				tag, named := typeTag(t)
 				if !named {
-					v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch is not supported: it is declared inside a function, and nothing tells it apart from another type there", shown(t)))
+					v.unsupported(e.Pos(), rDynLocalType, fmt.Sprintf("a case of %s in a type switch is not supported: it is declared inside a function, and nothing tells it apart from another type there", shown(t)))
 				}
 				if why := heldReason(t); why != "" {
-					v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch is not supported: %s", shown(t), why))
+					v.unsupported(e.Pos(), rDynSwitch, fmt.Sprintf("a case of %s in a type switch is not supported: %s", shown(t), why))
 				}
 				if why := reflectHeld(v.pass.Pkg, t, "", map[types.Type]bool{}); why != "" {
-					v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch is not supported: %s", shown(t), why))
+					v.unsupported(e.Pos(), rDynSwitch, fmt.Sprintf("a case of %s in a type switch is not supported: %s", shown(t), why))
 				}
 				if why := v.contractedReason(t); why != "" && len(clause.List) == 1 && implicit != nil && usesObject(clause, v.info, implicit) {
-					v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch is not supported: %s", shown(t), why))
+					v.unsupported(e.Pos(), rDynSwitch, fmt.Sprintf("a case of %s in a type switch is not supported: %s", shown(t), why))
 				}
 				if !onError {
 					v.meetHeldType(st, t)

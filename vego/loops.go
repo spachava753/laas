@@ -942,7 +942,7 @@ func (v *fnVerifier) forStmt(s *ast.ForStmt, spec *loopSpec, renewed []*types.Va
 		return
 	}
 	if spec.variant == nil {
-		v.report(s.Pos(), "loop needs a // @Variant annotation to prove that it terminates")
+		v.report(s.Pos(), rObligation, "loop needs a // @Variant annotation to prove that it terminates")
 	}
 	shape := loopShape{pos: s.Pos(), body: s.Body, post: s.Post, spec: spec, always: s.Cond == nil, renewed: renewed}
 	// What the condition writes is forgotten at the head too.
@@ -970,7 +970,7 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 	shape := loopShape{pos: s.Pos(), body: s.Body, spec: spec}
 	shape.effects = v.effects(s.Body)
 	if s.Tok == token.ASSIGN {
-		v.unsupported(s.Pos(), "range loops must declare their variables with :=")
+		v.unsupported(s.Pos(), rRangeForm, "range loops must declare their variables with :=")
 	}
 	variable := func(e ast.Expr) *types.Var {
 		if id, ok := e.(*ast.Ident); ok && id.Name != "_" {
@@ -980,7 +980,7 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 	}
 	key, element := variable(s.Key), variable(s.Value)
 	if (v.boxed[key] || v.boxed[element]) && !v.freshEachIteration(s.Pos()) {
-		v.unsupported(s.Pos(), "before Go 1.22 the iterations of a range loop share their variables, "+
+		v.unsupported(s.Pos(), rRangeForm, "before Go 1.22 the iterations of a range loop share their variables, "+
 			"which is not supported when the address of one is taken")
 	}
 	ranged := v.info.TypeOf(s.X)
@@ -1099,7 +1099,7 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 		}
 	case isSlice(ranged):
 		if _, ok := elemLayout(elemType(ranged)); !ok && element != nil {
-			v.unsupported(s.X.Pos(), fmt.Sprintf("slices of %s are not supported", elemType(ranged)))
+			v.unsupported(s.X.Pos(), elemClass(elemType(ranged)), fmt.Sprintf("slices of %s are not supported", elemType(ranged)))
 		}
 		header := v.eval(s.X, st, nil)
 		v.closeUnit(st)
@@ -1113,12 +1113,12 @@ func (v *fnVerifier) rangeStmt(s *ast.RangeStmt, spec *loopSpec, st *state, k fu
 			}
 			current, ok := v.element(st, st.mem, header, ranged, counter)
 			if !ok {
-				v.unsupported(s.X.Pos(), fmt.Sprintf("slices of %s are not supported", elemType(ranged)))
+				v.unsupported(s.X.Pos(), elemClass(elemType(ranged)), fmt.Sprintf("slices of %s are not supported", elemType(ranged)))
 			}
 			v.bind(st, element, current)
 		}
 	default:
-		v.unsupported(s.X.Pos(), fmt.Sprintf("range over %s is not supported", ranged))
+		v.unsupported(s.X.Pos(), rangeClass(ranged), fmt.Sprintf("range over %s is not supported", ranged))
 	}
 	v.loop(shape, st, k)
 }

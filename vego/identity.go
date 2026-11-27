@@ -541,7 +541,7 @@ func (v *fnVerifier) compareErrors(x, y ast.Expr, op token.Token, st *state, gua
 func (v *fnVerifier) bothErrors(x, y ast.Expr, pos token.Pos) {
 	for _, side := range []ast.Expr{x, y} {
 		if t := v.info.TypeOf(side); !v.isNil(side) && !isError(t) && !v.convertsToError(t) {
-			v.unsupported(pos, fmt.Sprintf("comparing an error with a value of type %s is not supported", t))
+			v.unsupported(pos, rErrCompare, fmt.Sprintf("comparing an error with a value of type %s is not supported", t))
 		}
 	}
 }
@@ -584,7 +584,7 @@ func (v *fnVerifier) errorOperand(e ast.Expr, st *state, guard []*logic.Term) *l
 func (v *fnVerifier) errorsEqual(x, y ast.Expr, a, b *logic.Term, pos token.Pos, st *state, guard []*logic.Term) *logic.Term {
 	v.bothErrors(x, y, pos)
 	if !v.comparableError(x) && !v.comparableError(y) && !v.holdsIdentityEq(st, guard, a, pos) && !v.holdsIdentityEq(st, guard, b, pos) {
-		v.unsupported(pos, "comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, "+
+		v.unsupported(pos, rErrCompareUnproved, "comparing two errors can panic when both hold the same uncomparable type; one of them must be nil, "+
 			"an error made by errors.New or fmt.Errorf or vouched for by a trusted contract, a package-level error variable that holds such an error or a pointer, "+
 			"integer, string, or boolean, or an array or struct of these, or an error converted here from a value of such a type; a pointer to a value of size zero does not count, "+
 			"since two of them may or may not be equal")
@@ -657,18 +657,18 @@ func (pv *pkgVerifier) reportSentinelWrites() {
 		}
 		if strings.HasSuffix(write.Key, closedKey) {
 			if write.pos.IsValid() {
-				pv.report(write.pos, "the address of %s is let out here, but proofs in %s rely on %s", write.Name, which, relied)
+				pv.report(write.pos, rObligation, "the address of %s is let out here, but proofs in %s rely on %s", write.Name, which, relied)
 				continue
 			}
-			pv.report(pv.pass.Files[0].Package, "the address of %s is let out at %s in package %s, which this package is built with, but proofs in %s rely on %s",
+			pv.report(pv.pass.Files[0].Package, rObligation, "the address of %s is let out at %s in package %s, which this package is built with, but proofs in %s rely on %s",
 				write.Name, write.At, write.Package, which, relied)
 			continue
 		}
 		if write.pos.IsValid() {
-			pv.report(write.pos, "%s may be changed here, but proofs in %s rely on %s", write.Name, which, relied)
+			pv.report(write.pos, rObligation, "%s may be changed here, but proofs in %s rely on %s", write.Name, which, relied)
 			continue
 		}
-		pv.report(pv.pass.Files[0].Package, "%s is changed at %s in package %s, which this package is built with, but proofs in %s rely on %s",
+		pv.report(pv.pass.Files[0].Package, rObligation, "%s is changed at %s in package %s, which this package is built with, but proofs in %s rely on %s",
 			write.Name, write.At, write.Package, which, relied)
 	}
 }

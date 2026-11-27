@@ -1030,24 +1030,24 @@ func (v *fnVerifier) checkReachedApart(st *state, guard []*logic.Term, call *ast
 			lead := fmt.Sprintf("the footprint of what is passed to %s as %s.%s may hold memory that the arguments reach, and %s relies on it not doing so",
 				name, shown, field, name)
 			if passedExpr[param] == nil || !v.ownFieldFootprint(body) {
-				v.report(call.Pos(), "%s: %s.%s is not a field of a parameter whose %s %s's own Modifies lists as %s.%s, so nothing places it",
+				v.report(call.Pos(), rHandApart, "%s: %s.%s is not a field of a parameter whose %s %s's own Modifies lists as %s.%s, so nothing places it",
 					lead, shown, field, field, v.fn.obj.Name(), shown, field)
 				continue
 			}
 			fact, placed := v.memFactAt(call)
 			if !placed {
-				v.unsupported(call.Pos(), lead+"; a caller of a function value or a method of an interface value does not show it")
+				v.unsupported(call.Pos(), rHandApart, lead+"; a caller of a function value or a method of an interface value does not show it")
 			}
 			for _, other := range fn.params {
 				if args[other] == nil || !holdsMemory(other.Type()) {
 					continue
 				}
 				if expr := passedExpr[other]; expr == nil {
-					v.report(call.Pos(), "%s: what is passed as %s is not written as one expression", lead, passed[other])
+					v.report(call.Pos(), rHandApart, "%s: what is passed as %s is not written as one expression", lead, passed[other])
 				} else if why := v.memOrigin(expr, fact); why != "" {
-					v.report(call.Pos(), "%s: %s", lead, why)
+					v.report(call.Pos(), rHandApart, "%s: %s", lead, why)
 				} else if fact.polluted != "" {
-					v.report(call.Pos(), "%s: %s", lead, fact.polluted)
+					v.report(call.Pos(), rHandApart, "%s: %s", lead, fact.polluted)
 				}
 			}
 			continue
@@ -1064,7 +1064,7 @@ func (v *fnVerifier) checkReachedApart(st *state, guard []*logic.Term, call *ast
 				name, passed[param], passed[other], name)
 			fact, placed := v.memFactAt(call)
 			if !placed {
-				v.unsupported(call.Pos(), lead+"; a caller of a function value or a method of an interface value does not show it")
+				v.unsupported(call.Pos(), rHandApart, lead+"; a caller of a function value or a method of an interface value does not show it")
 			}
 			// A pointer converted here: its footprint is the struct it
 			// points to, and only what can refer to a value of its type
@@ -1076,12 +1076,12 @@ func (v *fnVerifier) checkReachedApart(st *state, guard []*logic.Term, call *ast
 				owners := map[types.Type]bool{}
 				collectOwners(types.NewPointer(object), owners, map[types.Type]bool{})
 				if part := ownerHolding(owners, other.Type()); part != nil {
-					v.report(call.Pos(), "%s: the footprint of %s is the struct that %s points to and what it owns, which a value of type %s can be part of",
+					v.report(call.Pos(), rHandApart, "%s: the footprint of %s is the struct that %s points to and what it owns, which a value of type %s can be part of",
 						lead, passed[param], given, types.TypeString(other.Type(), types.RelativeTo(v.pass.Pkg)))
 					continue
 				}
 				if typeReaches(other.Type(), object, map[string]bool{}) {
-					v.report(call.Pos(), "%s: the footprint of %s is the struct that %s points to, which a value of type %s can refer to",
+					v.report(call.Pos(), rHandApart, "%s: the footprint of %s is the struct that %s points to, which a value of type %s can refer to",
 						lead, passed[param], given, types.TypeString(other.Type(), types.RelativeTo(v.pass.Pkg)))
 				}
 				continue
@@ -1096,16 +1096,16 @@ func (v *fnVerifier) checkReachedApart(st *state, guard []*logic.Term, call *ast
 			}
 			if !ownerPlaced && !v.placedFootprint(passedExpr[param], 0) {
 				if why != "" {
-					v.report(call.Pos(), "%s: %s", lead, why)
+					v.report(call.Pos(), rHandApart, "%s: %s", lead, why)
 					continue
 				}
 				if t.part && t.sourcePart {
-					v.report(call.Pos(), "%s: %s is not a parameter whose footprint %s's own Modifies lists, a value made from such parameters by a call "+
+					v.report(call.Pos(), rHandApart, "%s: %s is not a parameter whose footprint %s's own Modifies lists, a value made from such parameters by a call "+
 						"whose contract says so with fresh(result, w), or an owner made here or returned new by a call, so nothing places it",
 						lead, passed[param], v.fn.obj.Name())
 					continue
 				}
-				v.report(call.Pos(), "%s: %s is not a parameter whose footprint %s's own Modifies lists, or a value made from such parameters by a call "+
+				v.report(call.Pos(), rHandApart, "%s: %s is not a parameter whose footprint %s's own Modifies lists, or a value made from such parameters by a call "+
 					"whose contract says so with fresh(result, w), so nothing places it", lead, passed[param], v.fn.obj.Name())
 				continue
 			}
@@ -1114,16 +1114,16 @@ func (v *fnVerifier) checkReachedApart(st *state, guard []*logic.Term, call *ast
 				// since the row of a new owner's interface value is reached
 				// only through it.
 				if why := v.insideOperand(call, passedExpr[other]); why != "" {
-					v.report(call.Pos(), "%s: %s", lead, why)
+					v.report(call.Pos(), rHandApart, "%s: %s", lead, why)
 					continue
 				}
 			}
 			if expr := passedExpr[other]; expr == nil {
-				v.report(call.Pos(), "%s: what is passed as %s is not written as one expression", lead, passed[other])
+				v.report(call.Pos(), rHandApart, "%s: what is passed as %s is not written as one expression", lead, passed[other])
 			} else if why := v.memOrigin(expr, fact); why != "" {
-				v.report(call.Pos(), "%s: %s", lead, why)
+				v.report(call.Pos(), rHandApart, "%s: %s", lead, why)
 			} else if fact.polluted != "" {
-				v.report(call.Pos(), "%s: %s", lead, fact.polluted)
+				v.report(call.Pos(), rHandApart, "%s: %s", lead, fact.polluted)
 			}
 		}
 	}
@@ -1147,28 +1147,28 @@ func (v *fnVerifier) checkVariableApart(st *state, guard []*logic.Term, call *as
 		lead := fmt.Sprintf("the footprint of what %s holds may hold memory that what is passed to %s as %s reaches, and %s relies on it not doing so",
 			spelled, name, passed[other], name)
 		if own < 0 && v.lit != nil {
-			v.report(call.Pos(), "%s: a function literal places no footprint", lead)
+			v.report(call.Pos(), rHandApart, "%s: a function literal places no footprint", lead)
 			continue
 		}
 		if own < 0 {
-			v.report(call.Pos(), "%s: %s's own Modifies does not list %s by itself, so nothing places that footprint", lead, v.fn.obj.Name(), spelled)
+			v.report(call.Pos(), rHandApart, "%s: %s's own Modifies does not list %s by itself, so nothing places that footprint", lead, v.fn.obj.Name(), spelled)
 			continue
 		}
 		if !v.prove(st, guard, logic.Eq(t.ref, v.frame[own].ref)) {
-			v.report(call.Pos(), "%s: %s may hold here a value other than the one it held when %s was entered, whose footprint %s's own Modifies places",
+			v.report(call.Pos(), rHandApartUnproved, "%s: %s may hold here a value other than the one it held when %s was entered, whose footprint %s's own Modifies places",
 				lead, spelled, v.fn.obj.Name(), v.fn.obj.Name())
 			continue
 		}
 		fact, placed := v.memFactAt(call)
 		if !placed {
-			v.unsupported(call.Pos(), lead+"; a caller of a function value or a method of an interface value does not show it")
+			v.unsupported(call.Pos(), rHandApart, lead+"; a caller of a function value or a method of an interface value does not show it")
 		}
 		if expr := passedExpr[other]; expr == nil {
-			v.report(call.Pos(), "%s: what is passed as %s is not written as one expression", lead, passed[other])
+			v.report(call.Pos(), rHandApart, "%s: what is passed as %s is not written as one expression", lead, passed[other])
 		} else if why := v.memOrigin(expr, fact); why != "" {
-			v.report(call.Pos(), "%s: %s", lead, why)
+			v.report(call.Pos(), rHandApart, "%s: %s", lead, why)
 		} else if fact.polluted != "" {
-			v.report(call.Pos(), "%s: %s", lead, fact.polluted)
+			v.report(call.Pos(), rHandApart, "%s: %s", lead, fact.polluted)
 		}
 	}
 }

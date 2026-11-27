@@ -318,7 +318,7 @@ func (v *fnVerifier) havocEntry(st *state, t target, skipped *logic.Term, guarde
 func (v *fnVerifier) deleteKey(call *ast.CallExpr, st *state) {
 	t := v.info.TypeOf(call.Args[0])
 	if !isMap(t) || !mapModelled(t) {
-		v.unsupported(call.Pos(), fmt.Sprintf("delete on a %s is not supported", t))
+		v.unsupported(call.Pos(), mapClass(t), fmt.Sprintf("delete on a %s is not supported", t))
 	}
 	var ref, key *logic.Term
 	v.evaluate(st, func() {
@@ -335,7 +335,7 @@ func (v *fnVerifier) deleteKey(call *ast.CallExpr, st *state) {
 // literal; any other two must be proved to differ.
 func (v *fnVerifier) mapLiteral(e *ast.CompositeLit, t types.Type, st *state, guard []*logic.Term) value {
 	if !mapModelled(t) {
-		v.unsupported(e.Pos(), fmt.Sprintf("maps of type %s are not supported", t))
+		v.unsupported(e.Pos(), mapClass(t), fmt.Sprintf("maps of type %s are not supported", t))
 	}
 	m := v.newMap(st, t)
 	keyType, elem := mapParts(t)

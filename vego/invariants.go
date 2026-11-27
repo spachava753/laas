@@ -71,11 +71,11 @@ func (pv *pkgVerifier) addInvariant(name *types.TypeName, c *clause) {
 		// The clause is read by nobody; it may have been meant for the
 		// function below the type.
 		pv.unread = true
-		pv.report(c.pos, "%s annotations do not belong on a type; a type can only have Invariant and Owns annotations", c.kind)
+		pv.report(c.pos, rAnnotationFault, "%s annotations do not belong on a type; a type can only have Invariant and Owns annotations", c.kind)
 		return
 	case !isStruct || !isNamed || named.TypeParams() != nil:
 		pv.unread = true
-		pv.report(c.pos, "an Invariant can only be declared on a struct type without type parameters")
+		pv.report(c.pos, rAnnotationFault, "an Invariant can only be declared on a struct type without type parameters")
 		return
 	}
 	set := pv.invariants[name]
@@ -85,7 +85,7 @@ func (pv *pkgVerifier) addInvariant(name *types.TypeName, c *clause) {
 	}
 	node, err := logic.ParseFormula(c.text)
 	if err != nil {
-		pv.report(c.pos, "syntax error in Invariant annotation: %v", err)
+		pv.report(c.pos, rAnnotationFault, "syntax error in Invariant annotation: %v", err)
 		set.broken = true
 		return
 	}
@@ -175,14 +175,14 @@ func (pv *pkgVerifier) checkInvariantsDeclared() {
 		pv.run(&funcInfo{obj: types.NewFunc(name.Pos(), pv.pass.Pkg, name.Name(), types.NewSignatureType(nil, nil, nil, nil, nil, false))}, func(v *fnVerifier) {
 			v.misreadAs = func(c *clause, err error) {
 				set.broken = true
-				pv.report(c.pos, "in %s annotation: %v", c.kind, err)
+				pv.report(c.pos, rAnnotationFault, "in %s annotation: %v", c.kind, err)
 			}
 			st := &state{vals: map[*types.Var]value{}, mem: memory{}, brk: logic.Const("brk", logic.Ref), noted: map[string]bool{}}
 			self := v.unknown("self", name.Type(), st)
 			v.assumeInvariants(st, nil, st.mem, self, name.Type(), "")
 			if pv.contradictory(st.hyps) {
 				set.broken = true
-				pv.report(set.clauses[0].pos, "the invariants of %s contradict each other, so no value of the type could exist", name.Name())
+				pv.report(set.clauses[0].pos, rAnnotationFault, "the invariants of %s contradict each other, so no value of the type could exist", name.Name())
 			}
 		})
 	}
@@ -215,7 +215,7 @@ func (v *fnVerifier) unusableInvariants(set *invariantSet, pos token.Pos) {
 	if set.name.Pkg() != v.pass.Pkg {
 		why = "the annotations of package " + set.name.Pkg().Path() + " could not all be read"
 	}
-	v.report(pos, "the invariants of %s cannot be used: %s, so they are neither assumed nor proved here", set.name.Name(), why)
+	v.report(pos, rAnnotationFault, "the invariants of %s cannot be used: %s, so they are neither assumed nor proved here", set.name.Name(), why)
 }
 
 // invariantStep is one struct whose invariants a value's invariants

@@ -448,12 +448,12 @@ func (pv *pkgVerifier) reportTwoEntries(total *Usage) {
 			a, b = b, a
 		}
 		if owner, isState := strings.CutPrefix(use.Key, "states of "); isState {
-			pv.report(pv.pass.Files[0].Package, "the trust files of this build declare the states of %s differently, at %s and at %s; "+
+			pv.report(pv.pass.Files[0].Package, rAnnotationFault, "the trust files of this build declare the states of %s differently, at %s and at %s; "+
 				"a value whose states one proof changed can reach a proof that reads them otherwise. Make the declarations the same, "+
 				"or run laas with -vego.trusted naming one file", owner, a, b)
 			continue
 		}
-		pv.report(pv.pass.Files[0].Package, "the trust files of this build give %s two contracts, at %s and at %s; a value that verified code checked "+
+		pv.report(pv.pass.Files[0].Package, rAnnotationFault, "the trust files of this build give %s two contracts, at %s and at %s; a value that verified code checked "+
 			"against one can reach verified code that relies on the other. Make the entries the same, or run laas with -vego.trusted naming one file",
 			use.Key, a, b)
 	}
@@ -479,7 +479,7 @@ func (pv *pkgVerifier) reportTwoEntries(total *Usage) {
 				continue
 			}
 			reported["optional "+a.Package+" "+b.Package] = true
-			pv.report(pv.pass.Files[0].Package, "the trust files of this build give entries to different interfaces, against which values are checked where they are converted: %s; "+
+			pv.report(pv.pass.Files[0].Package, rAnnotationFault, "the trust files of this build give entries to different interfaces, against which values are checked where they are converted: %s; "+
 				"a value that verified code checked against fewer can reach verified code that asserts it to one of the others. Make the entries the same, "+
 				"or run laas with -vego.trusted naming one file", strings.Join(differ, "; "))
 		}
@@ -501,7 +501,7 @@ func (pv *pkgVerifier) reportTwoEntries(total *Usage) {
 			if missing.Own {
 				remedy = "the type is declared in its module, so declare the states with @State in its doc comment and remove the declaration"
 			}
-			pv.report(pv.pass.Files[0].Package, "the trust files of this build declare states of %s at %s:%d, and the proofs of package %s were made with none; "+
+			pv.report(pv.pass.Files[0].Package, rAnnotationFault, "the trust files of this build declare states of %s at %s:%d, and the proofs of package %s were made with none; "+
 				"a value whose states one proof changed can reach a proof that reads them otherwise: %s", owner, use.File, use.Line, missing.Package, remedy)
 			continue
 		}
@@ -509,7 +509,7 @@ func (pv *pkgVerifier) reportTwoEntries(total *Usage) {
 		if missing.Own {
 			remedy = "the type is declared in its module, so write the contract in source where the type is declared and remove the entry"
 		}
-		pv.report(pv.pass.Files[0].Package, "the trust files of this build give %s a contract at %s:%d, and the proofs of package %s were made with none; "+
+		pv.report(pv.pass.Files[0].Package, rAnnotationFault, "the trust files of this build give %s a contract at %s:%d, and the proofs of package %s were made with none; "+
 			"what they let through can reach verified code that relies on the entry: %s", missing.Key, use.File, use.Line, missing.Package, remedy)
 	}
 }

@@ -181,7 +181,7 @@ func (v *fnVerifier) readGlobal(variable *types.Var, pos token.Pos, st *state, g
 	// A read relies on the value the initialiser gave, unless something
 	// assigned it since, which a read cannot tell (F42).
 	if why := v.initialiserWhy(variable); why != "" {
-		v.unsupported(pos, v.spelling(variable)+" cannot be relied on: "+why)
+		v.unsupported(pos, rGlobalUnreliable, v.spelling(variable)+" cannot be relied on: "+why)
 	}
 	v.noteGlobal(st, variable)
 	cells, ref := v.globalCells(variable), globalRef(variable)
@@ -416,7 +416,7 @@ func (v *fnVerifier) checkHiddenRequires(st *state) {
 			if hidden == nil {
 				continue
 			}
-			v.report(c.pos, "the Requires clause %s reads %s, a package-level variable that is not exported, and code of another package can call %s, "+
+			v.report(c.pos, rAnnotationFault, "the Requires clause %s reads %s, a package-level variable that is not exported, and code of another package can call %s, "+
 				"where no caller can name the condition or see it fail; test the value in the body instead", conjunct, hidden.Name(), v.fn.obj.Name())
 		}
 	}
@@ -633,7 +633,7 @@ func (v *fnVerifier) reachedTargets(call *ast.CallExpr, fn *funcInfo, sink *stat
 		if err != nil {
 			// What the call may write cannot be named, so it cannot be
 			// forgotten: the call is not followed (F20).
-			v.unsupported(call.Pos(), fmt.Sprintf("code that the call may run writes %s, which cannot be followed: %v", v.spelling(variable), err))
+			v.unsupported(call.Pos(), rGlobalFollowed, fmt.Sprintf("code that the call may run writes %s, which cannot be followed: %v", v.spelling(variable), err))
 		}
 		add(form, t)
 	}
@@ -644,7 +644,7 @@ func (v *fnVerifier) reachedTargets(call *ast.CallExpr, fn *funcInfo, sink *stat
 		m := &modTarget{text: pkg.Name(), pkgPath: pkg.Path()}
 		form, t, err := v.stateTarget(v.fn, m, pkg, sink, mem)
 		if err != nil {
-			v.unsupported(call.Pos(), fmt.Sprintf("code that the call may run changes the state of package %s, which cannot be followed: %v", pkg.Path(), err))
+			v.unsupported(call.Pos(), rGlobalFollowed, fmt.Sprintf("code that the call may run changes the state of package %s, which cannot be followed: %v", pkg.Path(), err))
 		}
 		// A state with no variable that verified code can write changes
 		// nothing a proof reads.

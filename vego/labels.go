@@ -82,7 +82,7 @@ func (v *fnVerifier) jump(s *ast.BranchStmt, st *state) {
 		}
 	}
 	if to == nil {
-		v.unsupported(s.Pos(), fmt.Sprintf("%s %s is not supported: the label names a select statement or a statement that is not supported", s.Tok, s.Label.Name))
+		v.unsupported(s.Pos(), rSelect, fmt.Sprintf("%s %s is not supported: the label names a select statement or a statement that is not supported", s.Tok, s.Label.Name))
 	}
 	saved := v.ranges
 	v.ranges = target.ranges

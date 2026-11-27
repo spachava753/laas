@@ -183,25 +183,25 @@ func (v *fnVerifier) asTarget(call *ast.CallExpr, t types.Type, who string, take
 	shown := types.TypeString(t, types.RelativeTo(v.pass.Pkg))
 	switch {
 	case types.IsInterface(t):
-		v.unsupported(call.Pos(), fmt.Sprintf("%s with a target of the interface type %s is not supported yet: only a concrete type that implements error can be the target", who, shown))
+		v.unsupported(call.Pos(), rDynAs, fmt.Sprintf("%s with a target of the interface type %s is not supported yet: only a concrete type that implements error can be the target", who, shown))
 	case !types.Implements(t, errorType):
-		v.unsupported(call.Pos(), fmt.Sprintf("%s panics here: the target has type %s, which is not an interface and does not implement error", who, shown))
+		v.unsupported(call.Pos(), rDynAs, fmt.Sprintf("%s panics here: the target has type %s, which is not an interface and does not implement error", who, shown))
 	}
 	if _, ok := holdsState(t); ok {
-		v.unsupported(call.Pos(), fmt.Sprintf("%s copies the value it finds, a value of type %s; hold a pointer to it in the error instead",
+		v.unsupported(call.Pos(), rDynAs, fmt.Sprintf("%s copies the value it finds, a value of type %s; hold a pointer to it in the error instead",
 			who, holding(t, types.RelativeTo(v.pass.Pkg))))
 	}
 	if _, named := canonicalName(t); !named {
-		v.unsupported(call.Pos(), fmt.Sprintf("%s with a target of %s is not supported: it is declared inside a function, and nothing tells it apart from another type there", who, shown))
+		v.unsupported(call.Pos(), rDynLocalType, fmt.Sprintf("%s with a target of %s is not supported: it is declared inside a function, and nothing tells it apart from another type there", who, shown))
 	}
 	if why := heldReason(t); why != "" {
-		v.unsupported(call.Pos(), fmt.Sprintf("%s with a target of %s is not supported: %s", who, shown, why))
+		v.unsupported(call.Pos(), rDynAs, fmt.Sprintf("%s with a target of %s is not supported: %s", who, shown, why))
 	}
 	if why := reflectHeld(v.pass.Pkg, t, "", map[types.Type]bool{}); why != "" {
-		v.unsupported(call.Pos(), fmt.Sprintf("%s with a target of %s is not supported: %s", who, shown, why))
+		v.unsupported(call.Pos(), rDynAs, fmt.Sprintf("%s with a target of %s is not supported: %s", who, shown, why))
 	}
 	if why := v.contractedReason(t); why != "" && taken {
-		v.unsupported(call.Pos(), fmt.Sprintf("%s with a target of %s is not supported: %s", who, shown, why))
+		v.unsupported(call.Pos(), rDynAs, fmt.Sprintf("%s with a target of %s is not supported: %s", who, shown, why))
 	}
 }
 
@@ -224,7 +224,7 @@ func (v *fnVerifier) errorsAs(call *ast.CallExpr, kind asKind, st *state, guard 
 			variable, isVar = v.info.ObjectOf(id.(*ast.Ident)).(*types.Var)
 		}
 		if !isVar || variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope() {
-			v.unsupported(call.Pos(), "errors.As is supported only as errors.As(err, &v) for a local variable v")
+			v.unsupported(call.Pos(), rDynAs, "errors.As is supported only as errors.As(err, &v) for a local variable v")
 		}
 		target, into = variable.Type(), id
 	} else {
@@ -236,7 +236,7 @@ func (v *fnVerifier) errorsAs(call *ast.CallExpr, kind asKind, st *state, guard 
 	v.asTarget(call, target, who, kind == asAssignable || !v.discarded[call])
 	err := call.Args[0]
 	if !v.knownError(v.bodyOrigins(), err, -1) {
-		v.unsupported(err.Pos(), fmt.Sprintf("%s would run the As and Unwrap methods of %s, an error whose origin is not known; "+
+		v.unsupported(err.Pos(), withDetail(rErrUnknown, "errors.As"), fmt.Sprintf("%s would run the As and Unwrap methods of %s, an error whose origin is not known; "+
 			"only an error made by errors.New or fmt.Errorf, here or in a verified function, one that a contract vouches for, or one that holds a value of a type whose errors have a known origin, "+
 			"can be its first argument%s", who, types.ExprString(err), v.originWhy(err)))
 	}

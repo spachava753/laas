@@ -86,11 +86,11 @@ func (v *fnVerifier) refuseTooLarge(pos token.Pos, t types.Type) {
 	}
 	size := big.NewInt(v.pass.TypesSizes.Sizeof(t))
 	if size.Cmp(v.maxAlloc()) > 0 {
-		v.unsupported(pos, fmt.Sprintf("%s is %s bytes, more than one allocation can be (MaxAlloc, %s bytes), so no program can make it",
+		v.unsupported(pos, rSizeTooLarge, fmt.Sprintf("%s is %s bytes, more than one allocation can be (MaxAlloc, %s bytes), so no program can make it",
 			types.TypeString(t, types.RelativeTo(v.pass.Pkg)), size, v.maxAlloc()))
 	}
 	if decl != nil && size.Cmp(decl.arrayBound()) > 0 {
-		v.unsupported(pos, fmt.Sprintf("%s is %s bytes, more than the declared memory allows a value to reserve (%s bytes, five times the %s declared, "+
+		v.unsupported(pos, rSizeTooLarge, fmt.Sprintf("%s is %s bytes, more than the declared memory allows a value to reserve (%s bytes, five times the %s declared, "+
 			"and a page), since it may be reserved and never written", types.TypeString(t, types.RelativeTo(v.pass.Pkg)), size, decl.arrayBound(), decl.written))
 	}
 }

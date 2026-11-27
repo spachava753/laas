@@ -335,7 +335,7 @@ func (v *fnVerifier) checkHidden(body ast.Node) {
 					break
 				}
 				if d := hiddenOf(object, index); d != nil {
-					v.unsupported(n.Sel.Pos(), hiddenReason(d, u.Field(index).Name()))
+					v.unsupported(n.Sel.Pos(), rScopedHidden, hiddenReason(d, u.Field(index).Name()))
 				}
 				t = u.Field(index).Type()
 			}
@@ -356,7 +356,7 @@ func (v *fnVerifier) checkHidden(body ast.Node) {
 					}
 				}
 				if d := hiddenOf(t, index); d != nil {
-					v.unsupported(element.Pos(), hiddenReason(d, u.Field(index).Name()))
+					v.unsupported(element.Pos(), rScopedHidden, hiddenReason(d, u.Field(index).Name()))
 				}
 			}
 		}
@@ -498,23 +498,23 @@ func (v *fnVerifier) checkNotWritten(body ast.Node) {
 				}
 				if sel, ok := ast.Unparen(lhs).(*ast.SelectorExpr); ok {
 					if d := fieldOf(sel, progressOf); d != nil {
-						v.unsupported(lhs.Pos(), fmt.Sprintf("%s is stored into, and the progresses declaration of %s.%s in the shipped files says that what it holds is "+
+						v.unsupported(lhs.Pos(), rScopedWritten, fmt.Sprintf("%s is stored into, and the progresses declaration of %s.%s in the shipped files says that what it holds is "+
 							"a reader that the server made, whose Read makes progress; keep the request's own body", types.ExprString(lhs), d.pkg, d.typ))
 					}
 					if d := field(sel); d != nil && (rhs == nil || !v.newAtStore(rhs)) {
-						v.unsupported(lhs.Pos(), fmt.Sprintf("%s is stored into, and %s; store a value made here, as in %s = &myBody{...}, whose methods write only what it makes",
+						v.unsupported(lhs.Pos(), rScopedWritten, fmt.Sprintf("%s is stored into, and %s; store a value made here, as in %s = &myBody{...}, whose methods write only what it makes",
 							types.ExprString(lhs), notWrittenReason(d), types.ExprString(lhs)))
 					}
 				}
 				if d := holdsNotWritten(v.info.TypeOf(lhs)); d != nil && !local(lhs) {
-					v.unsupported(lhs.Pos(), fmt.Sprintf("a %s.%s is stored into memory at %s, and %s; copy it into a local variable instead",
+					v.unsupported(lhs.Pos(), rScopedWritten, fmt.Sprintf("a %s.%s is stored into memory at %s, and %s; copy it into a local variable instead",
 						d.pkg, d.typ, types.ExprString(lhs), notWrittenReason(d)))
 				}
 			}
 		case *ast.CallExpr:
 			if isBuiltin(v.info, n, "append") && len(n.Args) > 1 {
 				if d := holdsNotWritten(elemType(v.info.TypeOf(n.Args[0]))); d != nil {
-					v.unsupported(n.Pos(), fmt.Sprintf("a %s.%s is appended to %s, which may store it into memory that exists, and %s; keep the values in a slice made here",
+					v.unsupported(n.Pos(), rScopedWritten, fmt.Sprintf("a %s.%s is appended to %s, which may store it into memory that exists, and %s; keep the values in a slice made here",
 						d.pkg, d.typ, types.ExprString(n.Args[0]), notWrittenReason(d)))
 				}
 			}
@@ -536,12 +536,12 @@ func (v *fnVerifier) checkNotWritten(body ast.Node) {
 					}
 				}
 				if d := progressOf(t, index); d != nil && !v.isNil(value) {
-					v.unsupported(element.Pos(), fmt.Sprintf("the field %s of the %s.%s made at %s is set, and the progresses declaration of %s.%s in the shipped files says "+
+					v.unsupported(element.Pos(), rScopedWritten, fmt.Sprintf("the field %s of the %s.%s made at %s is set, and the progresses declaration of %s.%s in the shipped files says "+
 						"that what it holds is a reader that the server made, whose Read makes progress; a request verified code makes has no body",
 						u.Field(index).Name(), d.pkg, d.typ, v.placeOf(n.Pos()), d.pkg, d.typ))
 				}
 				if d := notWrittenOf(t, index); d != nil && !v.newAtStore(value) && !v.isNil(value) {
-					v.unsupported(element.Pos(), fmt.Sprintf("the field %s of the %s.%s made at %s is set, and %s; set it to a value made here, as &myBody{...}, whose methods write only what it makes",
+					v.unsupported(element.Pos(), rScopedWritten, fmt.Sprintf("the field %s of the %s.%s made at %s is set, and %s; set it to a value made here, as &myBody{...}, whose methods write only what it makes",
 						u.Field(index).Name(), d.pkg, d.typ, v.placeOf(n.Pos()), notWrittenReason(d)))
 				}
 			}

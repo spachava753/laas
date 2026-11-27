@@ -247,7 +247,7 @@ func (v *fnVerifier) proveOTyped(e ast.Expr, s types.Type, covered types.Type, s
 		}
 		TA, TB := v.methodContract(source), v.methodContract(method)
 		if why := v.claimsNoLess(TA, TB, source, method); why != "" {
-			v.unsupported(e.Pos(), fmt.Sprintf("%s, %s %s, is taken to have the methods of %s, which is not supported: %s",
+			v.unsupported(e.Pos(), rConvOptional, fmt.Sprintf("%s, %s %s, is taken to have the methods of %s, which is not supported: %s",
 				types.ExprString(e), article(v.shown(s)), v.shown(s), v.shown(x.Type()), why))
 		}
 		v.impliesMethod(e, TA, TB, source, method, st, guard)
@@ -407,12 +407,12 @@ func (v *fnVerifier) checkOptional(e ast.Expr, held value, from, want types.Type
 		reason := fmt.Sprintf("%s implements %s, whose method %s has an entry that %s relies on of every value it finds it on, and a value converted to %s may be handed to it",
 			shown(from), xShown, c.method.Name(), v.optionalFinder(c.x), shown(want))
 		if why != "" {
-			v.unsupported(e.Pos(), fmt.Sprintf("converting %s %s to %s is not supported: %s; %s %s; rename the method, or give %s a method %s of its own that meets the entry",
+			v.unsupported(e.Pos(), rConvOptional, fmt.Sprintf("converting %s %s to %s is not supported: %s; %s %s; rename the method, or give %s a method %s of its own that meets the entry",
 				article(shown(from)), shown(from), shown(want), reason, shown(from), why, shown(from), c.method.Name()))
 		}
 		if v.contractOf(concrete) == nil {
 			recv := concrete.Type().(*types.Signature).Recv().Type()
-			v.unsupported(e.Pos(), fmt.Sprintf("converting %s %s to %s is not supported: %s; %s has no contract; annotate it with // @ annotations that meet the entry of %s, or rename it",
+			v.unsupported(e.Pos(), rConvOptional, fmt.Sprintf("converting %s %s to %s is not supported: %s; %s has no contract; annotate it with // @ annotations that meet the entry of %s, or rename it",
 				article(shown(from)), shown(from), shown(want), reason, methodOf(recv, concrete, v.pass.Pkg), c.method.FullName()))
 		}
 		// A method of a type of another module that passed once in the

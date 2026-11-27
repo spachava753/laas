@@ -239,7 +239,7 @@ func (pv *pkgVerifier) finishClosures() {
 		outer := outerOf[rc.outer]
 		if outer == nil || !outer.annotated() {
 			if fn := rc.fn; len(fn.requires)+len(fn.ensures)+len(fn.modifies) > 0 || fn.measure != nil {
-				pv.report(rc.assign.Pos(), "%s has a contract, but %s around it is not verified, so nothing reads it; annotate %s",
+				pv.report(rc.assign.Pos(), rAnnotationFault, "%s has a contract, but %s around it is not verified, so nothing reads it; annotate %s",
 					closureName(rc.variable), rc.outer.Name.Name, rc.outer.Name.Name)
 			}
 			continue
@@ -549,7 +549,7 @@ func (v *fnVerifier) checkClosure() {
 	}
 	for _, variable := range rc.outputs {
 		if !rc.listed[variable] {
-			v.report(rc.assigned[variable], "%s is assigned, which %s may not modify; list it in a // @Modifies clause above %s = func...",
+			v.report(rc.assigned[variable], rObligation, "%s is assigned, which %s may not modify; list it in a // @Modifies clause above %s = func...",
 				variable.Name(), closureName(rc.variable), rc.variable.Name())
 		}
 	}
@@ -606,15 +606,15 @@ func (pv *pkgVerifier) placeInClosure(rc *recClosure, c *clause) *funcInfo {
 	case "Modifies":
 	case "Variant":
 		if fn.measure != nil {
-			pv.report(c.pos, "%s already has a Variant", closureName(rc.variable))
+			pv.report(c.pos, rAnnotationFault, "%s already has a Variant", closureName(rc.variable))
 			fn.broken = true
 		}
 		fn.measure = c
 	case "Exits":
-		pv.report(c.pos, "an Exits annotation cannot stand above a recursive closure: a recursive closure may not end the process")
+		pv.report(c.pos, rAnnotationUnsupported, "an Exits annotation cannot stand above a recursive closure: a recursive closure may not end the process")
 		fn.broken = true
 	default:
-		pv.report(c.pos, "%s annotation stands in the contract of %s, directly above its assignment, where only Requires, Modifies, Variant, and Ensures "+
+		pv.report(c.pos, rAnnotationFault, "%s annotation stands in the contract of %s, directly above its assignment, where only Requires, Modifies, Variant, and Ensures "+
 			"belong; put it between statements", c.kind, closureName(rc.variable))
 		fn.broken = true
 	}

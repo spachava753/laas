@@ -37,12 +37,12 @@ func (pv *pkgVerifier) readSourceCalls(fn *funcInfo) {
 		return
 	}
 	// A contract of another package is reported where it is used.
-	report := func(pos token.Pos, format string, args ...any) {
+	report := func(pos token.Pos, class refusal, format string, args ...any) {
 		if fn.imported != nil {
 			fn.defect(format, args...)
 			return
 		}
-		pv.report(pos, format, args...)
+		pv.report(pos, class, format, args...)
 		fn.broken = true
 	}
 	byName := map[string][]*clause{}
@@ -51,32 +51,32 @@ func (pv *pkgVerifier) readSourceCalls(fn *funcInfo) {
 		head, when, _ := strings.Cut(c.text, " When ")
 		name, params, ok := parseCallsHead(strings.TrimSpace(head))
 		if !ok {
-			report(c.pos, "a Calls annotation names a function parameter and its parameters, as in // @Calls f(x) When 0 <= x, and %q does not", c.text)
+			report(c.pos, rAnnotationFault, "a Calls annotation names a function parameter and its parameters, as in // @Calls f(x) When 0 <= x, and %q does not", c.text)
 			continue
 		}
 		param := fn.paramNames[name]
 		switch {
 		case param == nil:
-			report(c.pos, "a Calls annotation names %s, which is not a parameter of %s", name, fn.obj.Name())
+			report(c.pos, rAnnotationFault, "a Calls annotation names %s, which is not a parameter of %s", name, fn.obj.Name())
 			continue
 		case !isFunc(param.Type()) || types.Unalias(param.Type()) != param.Type().Underlying():
 			why := "is not a function type"
 			if isFunc(param.Type()) {
 				why = "has a name; a named function type carries a contract of its own, in its doc comment"
 			}
-			report(c.pos, "a Calls annotation gives %s a contract, and its type %s %s", name, param.Type(), why)
+			report(c.pos, rAnnotationFault, "a Calls annotation gives %s a contract, and its type %s %s", name, param.Type(), why)
 			continue
 		}
 		sig := param.Type().(*types.Signature)
 		if len(params) != sig.Params().Len() {
-			report(c.pos, "a Calls annotation names %d parameters for %s, whose type %s has %d", len(params), name, param.Type(), sig.Params().Len())
+			report(c.pos, rAnnotationFault, "a Calls annotation names %d parameters for %s, whose type %s has %d", len(params), name, param.Type(), sig.Params().Len())
 			continue
 		}
 		key := name + "(" + strings.Join(params, ", ") + ")"
 		if prior := byName[name]; len(prior) > 0 {
 			priorHead, _, _ := strings.Cut(prior[0].text, " When ")
 			if priorName, priorParams, _ := parseCallsHead(strings.TrimSpace(priorHead)); priorName+"("+strings.Join(priorParams, ", ")+")" != key {
-				report(c.pos, "the Calls annotations of %s name the parameters of %s in two ways; name them the same in each", fn.obj.Name(), name)
+				report(c.pos, rAnnotationFault, "the Calls annotations of %s name the parameters of %s in two ways; name them the same in each", fn.obj.Name(), name)
 				continue
 			}
 		}
@@ -87,7 +87,7 @@ func (pv *pkgVerifier) readSourceCalls(fn *funcInfo) {
 		if when != "" {
 			node, err := logic.ParseFormula(when)
 			if err != nil {
-				report(c.pos, "syntax error in the When of a Calls annotation: %v", err)
+				report(c.pos, rAnnotationFault, "syntax error in the When of a Calls annotation: %v", err)
 				continue
 			}
 			c.node = node
@@ -107,7 +107,7 @@ func (pv *pkgVerifier) readSourceCalls(fn *funcInfo) {
 		}
 		for i, pname := range params {
 			if fn.paramNames[pname] != nil {
-				report(clauses[0].pos, "a Calls annotation names a parameter of %s %s, which is a parameter of %s already; rename it", name, pname, fn.obj.Name())
+				report(clauses[0].pos, rAnnotationFault, "a Calls annotation names a parameter of %s %s, which is a parameter of %s already; rename it", name, pname, fn.obj.Name())
 				return
 			}
 			named := types.NewVar(clauses[0].pos, fn.obj.Pkg(), pname, sig.Params().At(i).Type())
@@ -118,13 +118,13 @@ func (pv *pkgVerifier) readSourceCalls(fn *funcInfo) {
 		cb.fn.params = append(cb.fn.params, fn.params...)
 		for variable := range sig.Params().Variables() {
 			if _, modelled := layoutOf(variable.Type()); !modelled {
-				report(clauses[0].pos, "a Calls annotation gives %s a contract, and its type %s takes a %s, which is not supported", name, param.Type(), variable.Type())
+				report(clauses[0].pos, rAnnotationUnsupported, "a Calls annotation gives %s a contract, and its type %s takes a %s, which is not supported", name, param.Type(), variable.Type())
 				return
 			}
 		}
 		for variable := range sig.Results().Variables() {
 			if _, modelled := layoutOf(variable.Type()); !modelled {
-				report(clauses[0].pos, "a Calls annotation gives %s a contract, and its type %s returns a %s, which is not supported", name, param.Type(), variable.Type())
+				report(clauses[0].pos, rAnnotationUnsupported, "a Calls annotation gives %s a contract, and its type %s returns a %s, which is not supported", name, param.Type(), variable.Type())
 				return
 			}
 		}
@@ -133,7 +133,7 @@ func (pv *pkgVerifier) readSourceCalls(fn *funcInfo) {
 				continue
 			}
 			if other := oldOfOther(c.node, cb.fn, cb.params); other != "" {
-				report(c.pos, "the When of a Calls annotation uses old(%s), which has no meaning there: in a When, old names only a parameter of %s, "+
+				report(c.pos, rAnnotationFault, "the When of a Calls annotation uses old(%s), which has no meaning there: in a When, old names only a parameter of %s, "+
 					"read as it was when %s was called", other, fn.obj.Name(), fn.obj.Name())
 				return
 			}
@@ -461,7 +461,7 @@ func (v *fnVerifier) checkSourceCallsUses() {
 		if call, isCall := parent.(*ast.CallExpr); isCall && ast.Unparen(call.Fun) == id {
 			return true
 		}
-		v.unsupported(id.Pos(), "the Calls annotation of "+v.fn.obj.Name()+" gives "+id.Name+" a contract that holds only while "+v.fn.obj.Name()+
+		v.unsupported(id.Pos(), rCallsAnnotation, "the Calls annotation of "+v.fn.obj.Name()+" gives "+id.Name+" a contract that holds only while "+v.fn.obj.Name()+
 			" calls it, and here it is used other than by calling it: stored, returned, compared, or handed on; a function that travels needs a named function type with a contract")
 		return true
 	})

@@ -290,7 +290,7 @@ it also reports postconditions weak enough for a degenerate implementation.`,
 			// draws no report.
 			for _, fn := range pv.order {
 				if fn.annotated() {
-					pv.report(fn.decl.Name.Pos(), "verification does not run under go vet, whose cache would keep "+
+					pv.report(fn.decl.Name.Pos(), rAnnotationFault, "verification does not run under go vet, whose cache would keep "+
 						"proofs after the trusted contracts they rest on have changed; run laas directly")
 					break
 				}
@@ -885,7 +885,9 @@ type pkgVerifier struct {
 
 // report emits a diagnostic once per position and message. Symbolic execution
 // visits a statement once per path, so the same failure can be found often.
-func (pv *pkgVerifier) report(pos token.Pos, format string, args ...any) {
+// The class says what the census counts it as: an obligation not proved, a
+// fault of an annotation, or a refusal of the Go it stands at.
+func (pv *pkgVerifier) report(pos token.Pos, class refusal, format string, args ...any) {
 	if pv.capturing != nil {
 		at := pv.pass.Fset.Position(pos)
 		*pv.capturing = append(*pv.capturing, fmt.Sprintf("%s:%d:%d\x00%s", filepath.Base(at.Filename), at.Line, at.Column, fmt.Sprintf(format, args...)))
@@ -1240,12 +1242,12 @@ func (pv *pkgVerifier) checkCarriageReturns(file *ast.File) {
 	content, err := pv.pass.ReadFile(position.Name())
 	if err != nil {
 		// What cannot be read again cannot be vouched for.
-		pv.report(file.Pos(), "cannot read %s to look for line ends that are not shown as such: %v", position.Name(), err)
+		pv.report(file.Pos(), rAnnotationFault, "cannot read %s to look for line ends that are not shown as such: %v", position.Name(), err)
 		return
 	}
 	for i, b := range content {
 		if b == '\r' && (i+1 == len(content) || content[i+1] != '\n') && i < position.Size() {
-			pv.report(position.Pos(i), "this file has annotations and a carriage return that does not end a line; "+
+			pv.report(position.Pos(i), rAnnotationFault, "this file has annotations and a carriage return that does not end a line; "+
 				"remove it, so that what is read is what is seen")
 			return
 		}
@@ -1369,24 +1371,24 @@ func (pv *pkgVerifier) collect() {
 					pv.unread = true
 				}
 				if c.misplaced != "" {
-					pv.report(c.pos, "%s", c.misplaced)
+					pv.report(c.pos, rAnnotationFault, "%s", c.misplaced)
 					continue
 				}
 				if c.kind == "" {
-					pv.report(c.pos, "unknown annotation %q; an annotation starts with one of "+
+					pv.report(c.pos, rAnnotationFault, "unknown annotation %q; an annotation starts with one of "+
 						"Requires, Ensures, Modifies, Calls, Exits, Invariant, Owns, Variant, Visited, Assert, Snapshot, Predicate, State, Receiver, Vouches. "+
 						"If another tool reads this comment, declare the word with -vego.other-tags", c.text)
 					continue
 				}
 				if plannedKinds[c.kind] {
-					pv.report(c.pos, "%s annotations are not supported yet", c.kind)
+					pv.report(c.pos, rAnnotationUnsupported, "%s annotations are not supported yet", c.kind)
 					continue
 				}
 				if fd := enclosingFunc(file, c.pos); fd != nil && fd.Body != nil && localTypeAt(fd.Body, c.pos, c.kind == "Assert" || c.kind == "Snapshot") {
 					// It may have been meant as the contract of anything
 					// in the type; nothing reads it.
 					pv.unread = true
-					pv.report(c.pos, "%s annotation stands on a type declared inside %s; a type declared inside a function cannot have annotations, "+
+					pv.report(c.pos, rAnnotationUnsupported, "%s annotation stands on a type declared inside %s; a type declared inside a function cannot have annotations, "+
 						"so declare it at package level to give it an invariant or a contract", c.kind, fd.Name.Name)
 					if fn := pv.funcs[pv.info.Defs[fd.Name].(*types.Func)]; fn != nil {
 						fn.broken = true
@@ -1418,13 +1420,13 @@ func (pv *pkgVerifier) collect() {
 				}
 				switch c.kind {
 				case "State":
-					pv.report(c.pos, "a State annotation belongs in the doc comment of a defined interface type, as in // @State closed")
+					pv.report(c.pos, rAnnotationFault, "a State annotation belongs in the doc comment of a defined interface type, as in // @State closed")
 					continue
 				case "Owns":
-					pv.report(c.pos, "an Owns annotation belongs in the doc comment of a struct type, where it names the fields whose memory a value of the type owns, as in // @Owns items")
+					pv.report(c.pos, rAnnotationFault, "an Owns annotation belongs in the doc comment of a struct type, where it names the fields whose memory a value of the type owns, as in // @Owns items")
 					continue
 				case "Receiver":
-					pv.report(c.pos, "a Receiver annotation belongs in the doc comment of a method in an interface type, "+
+					pv.report(c.pos, rAnnotationFault, "a Receiver annotation belongs in the doc comment of a method in an interface type, "+
 						"where it names the receiver for the contract of the method, as in // @Receiver c")
 					continue
 				}
@@ -1436,7 +1438,7 @@ func (pv *pkgVerifier) collect() {
 				if c.kind == "Predicate" {
 					decl, err := logic.ParsePredicate(c.text)
 					if err != nil {
-						pv.report(c.pos, "syntax error in Predicate annotation: %v", err)
+						pv.report(c.pos, rAnnotationFault, "syntax error in Predicate annotation: %v", err)
 						pv.predicatesBroken = true
 						continue
 					}
@@ -1453,7 +1455,7 @@ func (pv *pkgVerifier) collect() {
 					targets, err := logic.ParseTargets(c.text)
 					switch {
 					case err != nil:
-						pv.report(c.pos, "syntax error in Modifies annotation: %v", err)
+						pv.report(c.pos, rAnnotationFault, "syntax error in Modifies annotation: %v", err)
 						if owner != nil {
 							owner.broken = true
 						}
@@ -1473,7 +1475,7 @@ func (pv *pkgVerifier) collect() {
 					node, err = logic.ParseFormula(c.text)
 				}
 				if err != nil {
-					pv.report(c.pos, "syntax error in %s annotation: %v", c.kind, err)
+					pv.report(c.pos, rAnnotationFault, "syntax error in %s annotation: %v", c.kind, err)
 					if owner != nil {
 						owner.broken = true
 					}
@@ -1488,7 +1490,7 @@ func (pv *pkgVerifier) collect() {
 		pv.readSourceCalls(fn)
 	}
 	for _, defineErr := range pv.res.Define(predicates) {
-		pv.report(predicateClauses[defineErr.Decl].pos, "%v", defineErr.Err)
+		pv.report(predicateClauses[defineErr.Decl].pos, rAnnotationFault, "%v", defineErr.Err)
 		// A predicate that could not be defined stands for nothing, so no
 		// proof of this package that may have used it counts.
 		pv.predicatesBroken = true
@@ -1516,7 +1518,7 @@ func (pv *pkgVerifier) collect() {
 		}
 		for _, result := range fn.results {
 			if result.Name() == "" || result.Name() == "_" {
-				pv.report(fn.decl.Name.Pos(), "%s has annotations, so each of its results needs a name, as in %s",
+				pv.report(fn.decl.Name.Pos(), rAnnotationFault, "%s has annotations, so each of its results needs a name, as in %s",
 					fn.obj.Name(), pv.namedSignature(fn))
 				fn.broken = true
 				break
@@ -1525,7 +1527,7 @@ func (pv *pkgVerifier) collect() {
 	}
 	for _, fn := range pv.order {
 		if fn.annotated() && pv.entryFor(fn.obj.FullName()) != nil && !isIfaceMethod(fn.obj) {
-			pv.report(fn.decl.Name.Pos(), "%s has annotations and a trusted contract; "+
+			pv.report(fn.decl.Name.Pos(), rAnnotationFault, "%s has annotations and a trusted contract; "+
 				"a function is either verified or trusted, not both", fn.obj.Name())
 		}
 	}
@@ -1819,7 +1821,7 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 		if rc, misplaced := pv.closureAt(c.pos); rc != nil {
 			return pv.placeInClosure(rc, c)
 		} else if misplaced != nil && c.kind != "Assert" && c.kind != "Snapshot" {
-			pv.report(c.pos, "%s annotation stands above the declaration of %s; the contract of a recursive closure stands directly above its assignment %s = func...",
+			pv.report(c.pos, rAnnotationFault, "%s annotation stands above the declaration of %s; the contract of a recursive closure stands directly above its assignment %s = func...",
 				c.kind, misplaced.variable.Name(), misplaced.variable.Name())
 			fn.broken = true
 			return fn
@@ -1829,10 +1831,10 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 			fn.body = append(fn.body, c)
 		case "Predicate":
 		case "Vouches":
-			pv.report(c.pos, "%s", misplacedVouches)
+			pv.report(c.pos, rAnnotationFault, "%s", misplacedVouches)
 			fn.broken = true
 		default:
-			pv.report(c.pos, "%s annotation stands inside %s; put it in the doc comment of the function, or, for the contract of a recursive closure, "+
+			pv.report(c.pos, rAnnotationFault, "%s annotation stands inside %s; put it in the doc comment of the function, or, for the contract of a recursive closure, "+
 				"directly above its assignment v = func..., after var v func(...)", c.kind, fn.obj.Name())
 			fn.broken = true
 		}
@@ -1847,12 +1849,12 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 		fn = pv.funcs[pv.info.Defs[next.Name].(*types.Func)]
 	case c.kind == "Invariant" || c.kind == "Assert" || c.kind == "Snapshot" || c.kind == "Visited":
 		pv.unread = true
-		pv.report(c.pos, "%s annotation is not attached to anything; "+
+		pv.report(c.pos, rAnnotationFault, "%s annotation is not attached to anything; "+
 			"it stands inside a function body, or, for an Invariant, in the doc comment of a struct type", c.kind)
 		return nil
 	default:
 		pv.unread = true
-		pv.report(c.pos, "%s annotation is not attached to a function; "+
+		pv.report(c.pos, rAnnotationFault, "%s annotation is not attached to a function; "+
 			"put it in the comment directly above the function", c.kind)
 		return nil
 	}
@@ -1863,7 +1865,7 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 	case "Exits":
 		pv.placeExits(fn, c)
 	case "Vouches":
-		pv.report(c.pos, "%s", misplacedVouches)
+		pv.report(c.pos, rAnnotationFault, "%s", misplacedVouches)
 		fn.broken = true
 	case "Requires":
 		fn.requires = append(fn.requires, c)
@@ -1873,12 +1875,12 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 		if fn.measure != nil {
 			// One of the two is dropped, so the function is not what its
 			// author wrote.
-			pv.report(c.pos, "function %s already has a Variant", fn.obj.Name())
+			pv.report(c.pos, rAnnotationFault, "function %s already has a Variant", fn.obj.Name())
 			fn.broken = true
 		}
 		fn.measure = c
 	default:
-		pv.report(c.pos, "%s annotations belong inside a function body", c.kind)
+		pv.report(c.pos, rAnnotationFault, "%s annotations belong inside a function body", c.kind)
 		fn.broken = true
 	}
 	return fn
@@ -1959,7 +1961,7 @@ func (pv *pkgVerifier) checkPlacement(fn *funcInfo) {
 			between = c.pos > n.Colon
 		}
 		if !between {
-			pv.report(c.pos, "%s annotation must stand between statements, on a line of its own", c.kind)
+			pv.report(c.pos, rAnnotationFault, "%s annotation must stand between statements, on a line of its own", c.kind)
 			fn.broken = true
 		}
 	}

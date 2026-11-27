@@ -107,7 +107,7 @@ func (v *fnVerifier) audit() {
 			satisfied = satisfied && v.prove(st, nil, v.formula(c, c.node, env))
 		}
 		if satisfied {
-			v.report(fn.decl.Name.Pos(), "specification of %s has a hole [%s]: it also accepts an implementation that %s",
+			v.report(fn.decl.Name.Pos(), rObligation, "specification of %s has a hole [%s]: it also accepts an implementation that %s",
 				fn.obj.Name(), candidate.tag, candidate.what)
 		}
 	}

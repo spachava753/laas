@@ -85,9 +85,9 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 			lv.leaves = mustLayout(variable.Type())
 			return lv
 		case ok && packageVariableOf(variable, "") != nil:
-			v.unsupported(e.Pos(), fmt.Sprintf("%s is a package-level variable, which a verified function cannot assign yet", e.Name))
+			v.unsupported(e.Pos(), rGlobalAssign, fmt.Sprintf("%s is a package-level variable, which a verified function cannot assign yet", e.Name))
 		case !ok || variable.Pkg() != v.pass.Pkg:
-			v.unsupported(e.Pos(), fmt.Sprintf("%s is not a local variable", e.Name))
+			v.unsupported(e.Pos(), rAssignTarget, fmt.Sprintf("%s is not a local variable", e.Name))
 		}
 		if v.boxed[variable] {
 			// A variable of a single value lives in its box: its cells,
@@ -99,7 +99,7 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 	case *ast.StarExpr:
 		object, ok := pointee(v.info.TypeOf(e.X))
 		if !ok {
-			v.unsupported(e.Pos(), fmt.Sprintf("pointers of type %s are not supported", v.info.TypeOf(e.X)))
+			v.unsupported(e.Pos(), typeClass(v.info.TypeOf(e)), fmt.Sprintf("pointers of type %s are not supported", v.info.TypeOf(e.X)))
 		}
 		lv.kind, lv.pointer, lv.typ, lv.cells = placeMem, e.X, object, v.cellsOf(object)
 	case *ast.IndexExpr:
@@ -107,7 +107,7 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 		if isArray(t) {
 			lv = v.place(e.X)
 			if lv.element != nil || !(lv.kind == placeLocal || lv.kind == placeMem) || lv.global != nil || lv.boxGlobal != nil {
-				v.unsupported(e.Pos(), fmt.Sprintf("only elements of arrays that local variables hold or that lie in a struct can be assigned, not those of %s", types.ExprString(e.X)))
+				v.unsupported(e.Pos(), rAssignTarget, fmt.Sprintf("only elements of arrays that local variables hold or that lie in a struct can be assigned, not those of %s", types.ExprString(e.X)))
 			}
 			lv.pos, lv.text, lv.element, lv.typ = e.Pos(), types.ExprString(e), e.Index, t.Underlying().(*types.Array).Elem()
 			break
@@ -118,20 +118,20 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 			break
 		}
 		if !isSlice(t) {
-			v.unsupported(e.Pos(), fmt.Sprintf("only elements of slices can be assigned, not those of a %s", t))
+			v.unsupported(e.Pos(), rAssignTarget, fmt.Sprintf("only elements of slices can be assigned, not those of a %s", t))
 		}
 		if isArray(elemType(t)) {
-			v.unsupported(e.Pos(), fmt.Sprintf("assigning an element of a %s is not supported: slices of arrays are not supported yet", t))
+			v.unsupported(e.Pos(), withDetail(rTypeArrayElem, t.String()), fmt.Sprintf("assigning an element of a %s is not supported: slices of arrays are not supported yet", t))
 		}
 		lv.kind, lv.slice, lv.index, lv.typ, lv.cells = placeMem, e.X, e.Index, elemType(t), v.cellsOf(elemType(t))
 	case *ast.SelectorExpr:
 		lv = v.fieldPlace(e)
 	default:
-		v.unsupported(e.Pos(), "only variables, fields, and slice elements can be assigned")
+		v.unsupported(e.Pos(), rAssignTarget, "only variables, fields, and slice elements can be assigned")
 	}
 	var ok bool
 	if lv.leaves, ok = layoutOf(lv.typ); !ok {
-		v.unsupported(lv.pos, fmt.Sprintf("%s has unsupported type %s%s", lv.text, lv.typ, unsupportedHint(lv.typ)))
+		v.unsupported(lv.pos, typeClass(lv.typ), fmt.Sprintf("%s has unsupported type %s%s", lv.text, lv.typ, unsupportedHint(lv.typ)))
 	}
 	v.refuseTooLarge(lv.pos, lv.typ)
 	return lv
@@ -142,7 +142,7 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 func (v *fnVerifier) fieldPlace(e *ast.SelectorExpr) lvalue {
 	selection := v.info.Selections[e]
 	if variable, ok := v.info.Uses[e.Sel].(*types.Var); ok && selection == nil && variable.Pkg() != v.pass.Pkg && !v.dataType(variable.Type(), map[types.Type]bool{}) {
-		v.unsupported(e.Pos(), fmt.Sprintf("%s is a variable of package %s that holds code, and code of this package stored there would be run by that package "+
+		v.unsupported(e.Pos(), rGlobalType, fmt.Sprintf("%s is a variable of package %s that holds code, and code of this package stored there would be run by that package "+
 			"at times no contract describes; keeping code to run later is not supported yet", types.ExprString(e), variable.Pkg().Path()))
 	}
 	if variable, ok := v.info.Uses[e.Sel].(*types.Var); ok && selection == nil && v.isAssigned(variable) {
@@ -152,14 +152,14 @@ func (v *fnVerifier) fieldPlace(e *ast.SelectorExpr) lvalue {
 		return lv
 	}
 	if variable, ok := v.info.Uses[e.Sel].(*types.Var); ok && selection == nil && v.isBoxedGlobal(variable) {
-		v.unsupported(e.Pos(), v.foreignBoxedWhy(variable))
+		v.unsupported(e.Pos(), rGlobalAssign, v.foreignBoxedWhy(variable))
 	}
 	if variable, ok := v.info.Uses[e.Sel].(*types.Var); ok && selection == nil && variable.Pkg() != nil && variable.Parent() == variable.Pkg().Scope() {
-		v.unsupported(e.Pos(), fmt.Sprintf("%s is a package-level variable of package %s, and assigning one is not supported yet",
+		v.unsupported(e.Pos(), rGlobalAssign, fmt.Sprintf("%s is a package-level variable of package %s, and assigning one is not supported yet",
 			types.ExprString(e), variable.Pkg().Path()))
 	}
 	if selection == nil || selection.Kind() != types.FieldVal {
-		v.unsupported(e.Pos(), "only variables, fields, and slice elements can be assigned")
+		v.unsupported(e.Pos(), rAssignTarget, "only variables, fields, and slice elements can be assigned")
 	}
 	var lv lvalue
 	if object, viaPointer := pointee(v.info.TypeOf(e.X)); viaPointer {
@@ -169,16 +169,16 @@ func (v *fnVerifier) fieldPlace(e *ast.SelectorExpr) lvalue {
 	}
 	lv.pos, lv.text = e.Pos(), types.ExprString(e)
 	if lv.kind == placeMap {
-		v.unsupported(e.Pos(), "a field of a map value cannot be assigned; assign the whole value")
+		v.unsupported(e.Pos(), rAssignTarget, "a field of a map value cannot be assigned; assign the whole value")
 	}
 	for _, index := range selection.Index() {
 		if _, viaPointer := pointee(lv.typ); viaPointer {
-			v.unsupported(e.Pos(), "assigning through an embedded pointer is not supported; name the pointer")
+			v.unsupported(e.Pos(), rAssignTarget, "assigning through an embedded pointer is not supported; name the pointer")
 		}
 		field := lv.typ.Underlying().(*types.Struct).Field(index)
 		lo, hi, ok := fieldLeaves(lv.typ, index)
 		if !ok {
-			v.unsupported(e.Pos(), fmt.Sprintf("field %s has unsupported type %s", field.Name(), field.Type()))
+			v.unsupported(e.Pos(), typeClass(field.Type()), fmt.Sprintf("field %s has unsupported type %s", field.Name(), field.Type()))
 		}
 		lv.owned = nil
 		if ownedFieldAt(lv.typ, index) {
@@ -214,7 +214,7 @@ func (v *fnVerifier) lvalue(e ast.Expr, st *state, guard []*logic.Term) lvalue {
 		}
 		held := st.vals[lv.box]
 		if held == nil {
-			v.unsupported(lv.pos, fmt.Sprintf("%s is used before it is declared", lv.box.Name()))
+			v.unsupported(lv.pos, rAssignInPlace, fmt.Sprintf("%s is used before it is declared", lv.box.Name()))
 		}
 		lv.ref, lv.at = held[0], held[1]
 	case lv.kind == placeMem && lv.pointer != nil:
@@ -280,7 +280,7 @@ func (v *fnVerifier) loadRecorded(lv lvalue, st *state, guard []*logic.Term, sta
 	case placeLocal:
 		whole := st.vals[lv.local]
 		if whole == nil {
-			v.unsupported(lv.pos, "this operand cannot be read and updated in place")
+			v.unsupported(lv.pos, rAssignInPlace, "this operand cannot be read and updated in place")
 		}
 		if lv.element != nil {
 			array := whole[lv.lo]
@@ -300,7 +300,7 @@ func (v *fnVerifier) loadRecorded(lv lvalue, st *state, guard []*logic.Term, sta
 			return v.loadIn(lv, sink, mem)
 		})
 	}
-	v.unsupported(lv.pos, "this operand cannot be read and updated in place")
+	v.unsupported(lv.pos, rAssignInPlace, "this operand cannot be read and updated in place")
 	return nil
 }
 
@@ -325,7 +325,7 @@ func (v *fnVerifier) loadIn(lv lvalue, sink *state, mem memory) value {
 func (v *fnVerifier) store(lv lvalue, val value, st *state) {
 	checkGrowth(val)
 	if lv.kind != placeBlank && len(val) != len(lv.leaves) {
-		v.unsupported(lv.pos, fmt.Sprintf("a value of this type cannot be assigned to %s", lv.text))
+		v.unsupported(lv.pos, rAssignInPlace, fmt.Sprintf("a value of this type cannot be assigned to %s", lv.text))
 	}
 	if lv.kind == placeMem && lv.element != nil {
 		// An element of an array in memory: in a variable whose address
@@ -411,13 +411,13 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
 		current := v.loadRecorded(targets[0], st, nil, 0)
 		operand := v.expr(s.Rhs[0], st, nil)
 		if _, single := sortOf(targets[0].typ); !single {
-			v.unsupported(s.Pos(), fmt.Sprintf("operator %s is not supported here", s.Tok))
+			v.unsupported(s.Pos(), withDetail(rAssignMulti, s.Tok.String()), fmt.Sprintf("operator %s is not supported here", s.Tok))
 		}
 		values = []value{{v.binary(op, current[0], operand, v.info.TypeOf(s.Lhs[0]), s.TokPos, st, nil)}}
 	case len(s.Rhs) == 1 && len(s.Lhs) == 1 && v.isCopy(s.Rhs[0]):
 		// Nothing orders the write of copy after a call in the target.
 		if len(v.unit.calls) > 0 {
-			v.unsupported(s.Pos(), "copy is supported as the whole right-hand side of an assignment only when its target calls nothing; "+
+			v.unsupported(s.Pos(), rCopyTarget, "copy is supported as the whole right-hand side of an assignment only when its target calls nothing; "+
 				"assign to a local variable first")
 		}
 		values = []value{v.copyInto(ast.Unparen(s.Rhs[0]).(*ast.CallExpr), st)}
@@ -437,7 +437,7 @@ func (v *fnVerifier) assign(s *ast.AssignStmt, st *state, k func(*state)) {
 		// As for the results of a call, the value must have the type of
 		// what it is assigned to.
 		if want := wanted(targets)[0]; want != nil && !types.Identical(want, elem) {
-			v.unsupported(s.Pos(), fmt.Sprintf("converting a %s to a %s is not supported here; assign the value to a variable of its own type first", elem, want))
+			v.unsupported(s.Pos(), rConvMultiValue, fmt.Sprintf("converting a %s to a %s is not supported here; assign the value to a variable of its own type first", elem, want))
 		}
 		start := v.unit.events
 		ref, key := v.expr(read.X, st, nil), v.evalAs(read.Index, keyType, st, nil)[0]
@@ -516,18 +516,18 @@ func (v *fnVerifier) callResults(e ast.Expr, st *state, wants []types.Type) []va
 		values := v.assertion(assert, st, nil, true)
 		for i, want := range wants[:min(len(wants), 2)] {
 			if have := []types.Type{v.info.TypeOf(assert.Type), types.Typ[types.Bool]}[i]; want != nil && !types.Identical(have, want) {
-				v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to a %s is not supported here; assign the value to a variable of its own type first", have, want))
+				v.unsupported(e.Pos(), rConvMultiValue, fmt.Sprintf("converting a %s to a %s is not supported here; assign the value to a variable of its own type first", have, want))
 			}
 		}
 		return values
 	}
 	if !ok {
-		v.unsupported(e.Pos(), "multi-value expressions other than function calls are not supported")
+		v.unsupported(e.Pos(), rAssignMulti, "multi-value expressions other than function calls are not supported")
 	}
 	if tuple, isTuple := v.info.TypeOf(call).(*types.Tuple); isTuple {
 		for i := range min(tuple.Len(), len(wants)) {
 			if have := tuple.At(i).Type(); wants[i] != nil && !types.Identical(have, wants[i]) {
-				v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to a %s is not supported here; assign the result to a variable of its own type first", have, wants[i]))
+				v.unsupported(e.Pos(), rConvMultiValue, fmt.Sprintf("converting a %s to a %s is not supported here; assign the result to a variable of its own type first", have, wants[i]))
 			}
 		}
 	}
@@ -560,7 +560,7 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 	t := v.info.TypeOf(call)
 	elem := elemType(t)
 	if _, ok := elemLayout(elem); !ok {
-		v.unsupported(call.Pos(), fmt.Sprintf("slices of %s are not supported", elem))
+		v.unsupported(call.Pos(), elemClass(elem), fmt.Sprintf("slices of %s are not supported", elem))
 	}
 	spread := call.Ellipsis.IsValid()
 	// The append runs after its operands. Since it is not ordered like a
@@ -697,7 +697,7 @@ func (v *fnVerifier) appendTo(call *ast.CallExpr, st *state, k func(*state, valu
 			// the write.
 			for _, made := range v.unit.calls {
 				if !made.pure {
-					v.unsupported(made.pos, fmt.Sprintf("%s is called in the target of this assignment, and Go may call it before or after "+
+					v.unsupported(made.pos, rAppendCallTarget, fmt.Sprintf("%s is called in the target of this assignment, and Go may call it before or after "+
 						"append writes into the array of %s; assign the result of %s to a variable in a statement of its own first",
 						made.name, types.ExprString(call.Args[0]), made.name))
 				}
@@ -806,7 +806,7 @@ func (v *fnVerifier) copyInto(call *ast.CallExpr, st *state) value {
 	dstType, srcType := v.info.TypeOf(call.Args[0]), v.info.TypeOf(call.Args[1])
 	elem := elemType(dstType)
 	if _, plain := plainElem(elem); !plain {
-		v.unsupported(call.Pos(), fmt.Sprintf("copy of a slice of %s is not supported yet; copy is supported for slices of numbers and booleans, "+
+		v.unsupported(call.Pos(), rCopyElements, fmt.Sprintf("copy of a slice of %s is not supported yet; copy is supported for slices of numbers and booleans, "+
 			"and from a string into a []byte; write the copy as a loop that assigns each element", elem))
 	}
 	defer v.begin()()

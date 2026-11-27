@@ -423,7 +423,7 @@ func (pv *pkgVerifier) reportTwoMemories(total *Usage) {
 			if a.Bytes == b.Bytes {
 				continue
 			}
-			pv.report(pv.pass.Files[0].Package, "the verified packages of this build declare different memories under sizes: %s, and %s; "+
+			pv.report(pv.pass.Files[0].Package, rAnnotationFault, "the verified packages of this build declare different memories under sizes: %s, and %s; "+
 				"a reservation that the proofs of one checked against its bound can break what the proofs of the other assume of every value. "+
 				"Declare the same memory in both trust files, or none in either, or run laas with -vego.trusted naming one file", said(a), said(b))
 			return
@@ -508,7 +508,7 @@ func (v *fnVerifier) sizedAttempt(st *state, guard []*logic.Term, goal *logic.Te
 		v.sizedProved.Add(1)
 	}
 	if v.proves(hyps, logic.False(), quickEffort) {
-		v.report(pos, "what is known here contradicts the declared memory: a string, the entries of a map, or the array of a slice here would be larger than "+
+		v.report(pos, rObligation, "what is known here contradicts the declared memory: a string, the entries of a map, or the array of a slice here would be larger than "+
 			"the declaration allows (%s bytes for a string or the entries of a map, %s for the array of a slice), so the declaration proves nothing here; "+
 			"bound what is passed here, or declare more memory", decl.memory, decl.arrayBound())
 	}

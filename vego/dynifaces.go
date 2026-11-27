@@ -278,12 +278,12 @@ func (v *fnVerifier) assertIface(e *ast.TypeAssertExpr, st *state, guard []*logi
 		operand = "an interface value"
 	}
 	if why := ifaceTargetWhy(target); why != "" {
-		v.unsupported(e.Pos(), fmt.Sprintf("asserting %s to %s is not supported: %s", operand, shown(target), why))
+		v.unsupported(e.Pos(), rDynAssert, fmt.Sprintf("asserting %s to %s is not supported: %s", operand, shown(target), why))
 	}
 	used := !(commaOk && v.discarded[e])
 	if used {
 		if why := v.usedIfaceWhy(from, target, types.ExprString(e), shown); why != "" {
-			v.unsupported(e.Pos(), fmt.Sprintf("using the value of %s is not supported: %s", types.ExprString(e), why))
+			v.unsupported(e.Pos(), rDynAssert, fmt.Sprintf("using the value of %s is not supported: %s", types.ExprString(e), why))
 		}
 	}
 	x := v.expr(e.X, st, guard)
@@ -327,7 +327,7 @@ func (v *fnVerifier) meetErrorTags(st *state) {
 func (v *fnVerifier) ifaceCase(e ast.Expr, x *logic.Term, from, t types.Type, st *state) *logic.Term {
 	shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
 	if why := ifaceTargetWhy(t); why != "" {
-		v.unsupported(e.Pos(), fmt.Sprintf("a case of %s in a type switch is not supported: %s", shown(t), why))
+		v.unsupported(e.Pos(), rDynSwitch, fmt.Sprintf("a case of %s in a type switch is not supported: %s", shown(t), why))
 	}
 	if isError(from) {
 		v.meetErrorTags(st)
@@ -341,7 +341,7 @@ func (v *fnVerifier) ifaceCaseVar(e, operand ast.Expr, x *logic.Term, from, t ty
 	shown := func(t types.Type) string { return types.TypeString(t, types.RelativeTo(v.pass.Pkg)) }
 	what := fmt.Sprintf("%s.(%s)", types.ExprString(operand), shown(t))
 	if why := v.usedIfaceWhy(from, t, what, shown); why != "" {
-		v.unsupported(e.Pos(), fmt.Sprintf("using the variable of the case %s of the type switch is not supported: %s", shown(t), why))
+		v.unsupported(e.Pos(), rDynSwitch, fmt.Sprintf("using the variable of the case %s of the type switch is not supported: %s", shown(t), why))
 	}
 	return v.assertedIface(operand, x, from, t, holds, st, nil)
 }

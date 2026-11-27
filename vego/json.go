@@ -816,7 +816,7 @@ func (v *fnVerifier) checkEncodable(call *ast.CallExpr, fn *funcInfo) {
 		if walk != nil && why == walk.mapValueReason() {
 			why += v.declareOffer("under which such a map is encoded")
 		}
-		v.unsupported(arg.Pos(), fmt.Sprintf("%s encodes %s, and %s", fn.obj.Name(), types.ExprString(arg), why))
+		v.unsupported(arg.Pos(), rJSONEncode, fmt.Sprintf("%s encodes %s, and %s", fn.obj.Name(), types.ExprString(arg), why))
 	}
 }
 
@@ -945,7 +945,7 @@ func (v *fnVerifier) checkEncodedAlloc(st *state, guard []*logic.Term, call *ast
 		}
 		return nil
 	}
-	v.report(call.Pos(), "what %s builds from %s may be more than can be allocated%s%s", fn.obj.Name(), types.ExprString(arg),
+	v.report(call.Pos(), rObligation, "what %s builds from %s may be more than can be allocated%s%s", fn.obj.Name(), types.ExprString(arg),
 		v.encodeHint(walk, arg, indented, found), v.declareOffer("under which encoding fits whatever it builds"))
 	return nil
 }
@@ -1163,12 +1163,12 @@ func (v *fnVerifier) routeMethod(call *ast.CallExpr, e ast.Expr, name, maker str
 	if isIface(t) {
 		selection := types.NewMethodSet(t).Lookup(nil, name)
 		if selection == nil {
-			v.unsupported(e.Pos(), fmt.Sprintf("%s has no method %s", types.ExprString(e), name))
+			v.unsupported(e.Pos(), rJSONEncode, fmt.Sprintf("%s has no method %s", types.ExprString(e), name))
 		}
 		method := selection.Obj().(*types.Func)
 		fn := v.methodContract(method)
 		if fn == nil {
-			v.unsupported(e.Pos(), fmt.Sprintf("%s calls %s.%s, which has no contract", maker, types.ExprString(e), name))
+			v.unsupported(e.Pos(), rJSONEncode, fmt.Sprintf("%s calls %s.%s, which has no contract", maker, types.ExprString(e), name))
 		}
 		fn = v.usable(call.Pos(), fn, types.ExprString(e)+"."+name, st, guard, true)
 		v.ifaceStatesOf(t)
@@ -1176,11 +1176,11 @@ func (v *fnVerifier) routeMethod(call *ast.CallExpr, e ast.Expr, name, maker str
 	}
 	concrete, why := concreteMethod(t, nil, name, v.pass.Pkg)
 	if why != "" {
-		v.unsupported(e.Pos(), why)
+		v.unsupported(e.Pos(), rJSONEncode, why)
 	}
 	fn := v.contractOf(concrete)
 	if fn == nil {
-		v.unsupported(e.Pos(), fmt.Sprintf("%s calls %s.%s, which has no contract", maker, types.ExprString(e), name))
+		v.unsupported(e.Pos(), rJSONEncode, fmt.Sprintf("%s calls %s.%s, which has no contract", maker, types.ExprString(e), name))
 	}
 	fn = v.usable(call.Pos(), fn, types.ExprString(e)+"."+name, st, guard, true)
 	_, fromPointer := t.Underlying().(*types.Pointer)
@@ -1275,7 +1275,7 @@ func (v *fnVerifier) callEncoder(call *ast.CallExpr, w ast.Expr, st *state, guar
 	encode := typeutil.StaticCallee(v.info, call)
 	fn := v.contractOf(encode)
 	if fn == nil || fn.encoded == nil {
-		v.unsupported(call.Pos(), "json.NewEncoder(w).Encode(v) needs the entry of (*encoding/json.Encoder).Encode that comes with vego, which lists encodes")
+		v.unsupported(call.Pos(), rJSON, "json.NewEncoder(w).Encode(v) needs the entry of (*encoding/json.Encoder).Encode that comes with vego, which lists encodes")
 	}
 	fn = v.usable(call.Pos(), fn, encode.Name(), st, guard, true)
 	v.noteUse(fn, call.Pos())
@@ -1330,7 +1330,7 @@ func (v *fnVerifier) callEncoder(call *ast.CallExpr, w ast.Expr, st *state, guar
 			v.cut(st, guard)
 			return v.nothingKnown(encode, st)
 		}
-		v.report(call.Pos(), "precondition of %s.Write may not hold where json.NewEncoder(%s).Encode writes what it encodes; bound the lengths of what it encodes more tightly",
+		v.report(call.Pos(), rObligation, "precondition of %s.Write may not hold where json.NewEncoder(%s).Encode writes what it encodes; bound the lengths of what it encodes more tightly",
 			types.ExprString(w), types.ExprString(w))
 		v.cut(st, guard)
 		return v.nothingKnown(encode, st)

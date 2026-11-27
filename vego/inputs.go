@@ -140,7 +140,7 @@ func (pv *pkgVerifier) reportTwoInputs(total *Usage) {
 			if a.Bytes == b.Bytes {
 				continue
 			}
-			pv.report(pv.pass.Files[0].Package, "the verified packages of this build declare different inputs: %s, and %s; "+
+			pv.report(pv.pass.Files[0].Package, rAnnotationFault, "the verified packages of this build declare different inputs: %s, and %s; "+
 				"a reader that the proofs of one take to end, or to yield at most its amount, can reach the proofs of the other. "+
 				"Declare the same inputs in both trust files, or none in either, or run laas with -vego.trusted naming one file", said(a), said(b))
 			return

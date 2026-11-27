@@ -42,15 +42,15 @@ func (pv *pkgVerifier) addTypeContract(name *types.TypeName, c *clause) {
 	switch {
 	case c.kind != "Requires" && c.kind != "Ensures" && c.kind != "Modifies" && c.kind != "Vouches":
 		pv.unread = true
-		pv.report(c.pos, "%s annotations do not belong on a function type; a function type can only have Requires, Ensures, Modifies, and Vouches annotations", c.kind)
+		pv.report(c.pos, rAnnotationFault, "%s annotations do not belong on a function type; a function type can only have Requires, Ensures, Modifies, and Vouches annotations", c.kind)
 		return
 	case !isNamed || name.IsAlias():
 		pv.unread = true
-		pv.report(c.pos, "a contract can only be declared on a defined function type, not on an alias")
+		pv.report(c.pos, rAnnotationFault, "a contract can only be declared on a defined function type, not on an alias")
 		return
 	case named.TypeParams() != nil:
 		pv.unread = true
-		pv.report(c.pos, "a contract on a function type with type parameters is not supported yet")
+		pv.report(c.pos, rAnnotationUnsupported, "a contract on a function type with type parameters is not supported yet")
 		return
 	}
 	fn := pv.funcTypes[name]
@@ -73,7 +73,7 @@ func (pv *pkgVerifier) addValueClause(fn *funcInfo, c *clause) {
 	if c.kind == "Modifies" {
 		targets, err := logic.ParseTargets(c.text)
 		if err != nil {
-			pv.report(c.pos, "syntax error in Modifies annotation: %v", err)
+			pv.report(c.pos, rAnnotationFault, "syntax error in Modifies annotation: %v", err)
 			fn.broken = true
 			return
 		}
@@ -82,7 +82,7 @@ func (pv *pkgVerifier) addValueClause(fn *funcInfo, c *clause) {
 	}
 	node, err := logic.ParseFormula(c.text)
 	if err != nil {
-		pv.report(c.pos, "syntax error in %s annotation: %v", c.kind, err)
+		pv.report(c.pos, rAnnotationFault, "syntax error in %s annotation: %v", c.kind, err)
 		fn.broken = true
 		return
 	}
@@ -101,7 +101,7 @@ func (pv *pkgVerifier) addValueClause(fn *funcInfo, c *clause) {
 func (pv *pkgVerifier) addVouches(fn *funcInfo, c *clause) {
 	fn.vouchClauses = append(fn.vouchClauses, c)
 	fail := func(format string, args ...any) {
-		pv.report(c.pos, "in Vouches annotation: "+format, args...)
+		pv.report(c.pos, rAnnotationFault, "in Vouches annotation: "+format, args...)
 		fn.broken = true
 	}
 	for item := range strings.SplitSeq(c.text, ",") {
@@ -167,7 +167,7 @@ func (pv *pkgVerifier) checkValueContract(fn *funcInfo) {
 			fn.defect(format, args...)
 			return
 		}
-		pv.report(at, format, args...)
+		pv.report(at, rAnnotationFault, format, args...)
 	}
 	// A Vouches annotation adds to a contract; alone, it would be the
 	// whole contract without anyone having written one.
@@ -214,7 +214,7 @@ func (pv *pkgVerifier) checkValueContract(fn *funcInfo) {
 		}
 		if !entry {
 			for _, defect := range fn.defects {
-				pv.report(at, "the contract of %s cannot be used: %s", title, defect)
+				pv.report(at, rContractUnusable, "the contract of %s cannot be used: %s", title, defect)
 			}
 		}
 		if _, post, _ := v.contractInstance(state); pv.contradictory(post) {
@@ -847,7 +847,7 @@ func (v *fnVerifier) usableValueContract(fun ast.Expr, st *state, guard []*logic
 	t := v.info.TypeOf(fun)
 	fn := v.valueContract(t)
 	if fn == nil {
-		v.unsupported(fun.Pos(), fmt.Sprintf("%s has type %s, which has no contract; "+
+		v.unsupported(fun.Pos(), v.funcValueClass(t), fmt.Sprintf("%s has type %s, which has no contract; "+
 			"declare a named function type with a contract and use it here%s", types.ExprString(fun), t, v.funcTypeHint(t)))
 	}
 	return v.usable(fun.Pos(), fn, fn.obj.Name(), st, guard, true)
@@ -930,12 +930,12 @@ func (v *fnVerifier) checkHandedToValue(call *ast.CallExpr, fn *funcInfo, callee
 			if v.knownError(v.bodyOrigins(), arg, -1) {
 				continue
 			}
-			v.unsupported(arg.Pos(), fmt.Sprintf("%s is passed to %s and is an error whose origin is not known%s; "+
+			v.unsupported(arg.Pos(), withDetail(rErrUnknown, "handed to a value"), fmt.Sprintf("%s is passed to %s and is an error whose origin is not known%s; "+
 				"the value may come from code that is not verified, which could run code through it that nobody has seen",
 				types.ExprString(arg), callee, v.originWhy(arg)))
 		}
 		if what := v.foreignCode(t, map[types.Type]bool{}); what != "" {
-			v.unsupported(arg.Pos(), fmt.Sprintf("%s is passed to %s and is a value of type %s, which can hold %s; "+
+			v.unsupported(arg.Pos(), rHandUnknownCode, fmt.Sprintf("%s is passed to %s and is a value of type %s, which can hold %s; "+
 				"the value may come from code that is not verified, which could run code through it that nobody has seen",
 				types.ExprString(arg), callee, t, what))
 		}
@@ -1485,7 +1485,7 @@ func (v *fnVerifier) functionValue(e ast.Expr, want types.Type, st *state, guard
 	_, isLiteral := inner.(*ast.FuncLit)
 	if named == nil && method == nil && !isLiteral {
 		if !types.Identical(v.info.TypeOf(e), want) {
-			v.unsupported(e.Pos(), fmt.Sprintf("converting %s to %s is not supported: a value of a function type is made only from "+
+			v.unsupported(e.Pos(), rFuncMadeFrom, fmt.Sprintf("converting %s to %s is not supported: a value of a function type is made only from "+
 				"a function literal, a function, or a method value written there, from nil, or from a value of the same type",
 				types.ExprString(e), want))
 		}
@@ -1497,7 +1497,7 @@ func (v *fnVerifier) functionValue(e ast.Expr, want types.Type, st *state, guard
 		if isLiteral {
 			what = "the function literal"
 		}
-		v.unsupported(e.Pos(), fmt.Sprintf("%s is used as a value of type %s, which has no contract; "+
+		v.unsupported(e.Pos(), v.funcValueClass(want), fmt.Sprintf("%s is used as a value of type %s, which has no contract; "+
 			"declare a named function type with a contract and use it here%s", what, want, v.funcTypeHint(want)))
 	}
 	T = v.usable(e.Pos(), T, T.obj.Name(), st, guard, false)
@@ -1541,7 +1541,7 @@ func (v *fnVerifier) valueForm(e ast.Expr) (named, method *types.Func) {
 			case types.MethodVal:
 				method, _ = selection.Obj().(*types.Func)
 			case types.MethodExpr:
-				v.unsupported(e.Pos(), "a method expression, as in T.M, cannot be used as a value yet; use a method value, as in x.M, or a function literal")
+				v.unsupported(e.Pos(), rFuncMethodExpr, "a method expression, as in T.M, cannot be used as a value yet; use a method value, as in x.M, or a function literal")
 			}
 			break
 		}
@@ -1577,11 +1577,11 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 	receive func(sv *fnVerifier, entry *state, carry *transport) value, st *state, guard []*logic.Term) {
 	sig := callee.Type().(*types.Signature)
 	if sig.TypeParams() != nil || sig.RecvTypeParams() != nil {
-		v.unsupported(e.Pos(), fmt.Sprintf("generic functions cannot be used as %s yet", as))
+		v.unsupported(e.Pos(), rGenericHanded, fmt.Sprintf("generic functions cannot be used as %s yet", as))
 	}
 	fn := v.contractOf(callee)
 	if fn == nil {
-		v.unsupported(e.Pos(), fmt.Sprintf("it uses %s as %s, and %s has no contract; annotate %s with // @ annotations so that it is verified, "+
+		v.unsupported(e.Pos(), v.callClass(callee), fmt.Sprintf("it uses %s as %s, and %s has no contract; annotate %s with // @ annotations so that it is verified, "+
 			"%s", callee.Name(), as, callee.Name(), callee.Name(), v.addEntryAdvice(callee.FullName())))
 	}
 	// A contract that cannot be read is reported here, and the check runs
@@ -1593,7 +1593,7 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 	}
 	fn = view.fn
 	if mayExit(fn) {
-		v.unsupported(e.Pos(), fmt.Sprintf("it uses %s as %s, and %s may end the process; a call of %s is assumed to return, "+
+		v.unsupported(e.Pos(), rExitContext, fmt.Sprintf("it uses %s as %s, and %s may end the process; a call of %s is assumed to return, "+
 			"since a function type or a method of an interface cannot have an Exits annotation yet", v.calleeName(callee), as, v.calleeName(callee), holder))
 	}
 	// An entry of an interface method that lists no keeps claims that no
@@ -1613,7 +1613,7 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 					if recv := sig.Recv(); recv != nil {
 						name = "(" + types.TypeString(recv.Type(), types.RelativeTo(v.pass.Pkg)) + ")." + name
 					}
-					v.report(e.Pos(), "%s keeps %s, which an implementation of %s may not, since its entry lists no keeps; copy what it needs of %s",
+					v.report(e.Pos(), rFuncTrusted, "%s keeps %s, which an implementation of %s may not, since its entry lists no keeps; copy what it needs of %s",
 						name, sig.Params().At(i).Name(), as, sig.Params().At(i).Name())
 				}
 			}
@@ -1626,7 +1626,7 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 	// that calls it again. With this rule a call through a value made by
 	// verified code runs code that makes no such call.
 	if v.pkgVerifier.mayCallValues(callee) {
-		v.unsupported(e.Pos(), fmt.Sprintf("%s may call through a function value or an interface value, and code that %s runs cannot do that yet: "+
+		v.unsupported(e.Pos(), rFuncCallsValues, fmt.Sprintf("%s may call through a function value or an interface value, and code that %s runs cannot do that yet: "+
 			"no contract of a function type or of a method of an interface has a variant, so nothing would prove that such calls end; %s %s. "+
 			"Make the value in code that is not verified, or keep that call out of what %s runs",
 			callee.Name(), holder, callee.Name(), v.pkgVerifier.whyValues(callee), callee.Name()))
@@ -1636,7 +1636,7 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 	// makes must return only errors of known origin there.
 	for i := range T.results {
 		if T.vouches[i] && !v.returnsKnownErrors(callee) && !(fn.trust != nil && fn.vouches[i]) {
-			v.report(e.Pos(), "%s may return an error whose origin is not known in %s, and %s vouches for the errors there; "+
+			v.report(e.Pos(), rObligation, "%s may return an error whose origin is not known in %s, and %s vouches for the errors there; "+
 				"return only errors made by errors.New or fmt.Errorf, or vouched for, %s", callee.Name(), spelledResult(T, i), vouchingContract(T), site.text)
 		}
 	}
@@ -1677,19 +1677,19 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 		call.Args = append(call.Args, &ast.Ident{NamePos: e.Pos(), Name: T.params[i].Name()})
 	}
 	if fn.trust != nil && fn.keeps.len() > 0 {
-		v.unsupported(e.Pos(), fmt.Sprintf("%s keeps code it is given, and cannot be used as %s: "+
+		v.unsupported(e.Pos(), rFuncTrusted, fmt.Sprintf("%s keeps code it is given, and cannot be used as %s: "+
 			"what it would be given would come from whoever calls the value, and a value of a type has no place to say what it keeps", callee.Name(), as))
 	}
 	if fn.trust != nil && fn.decoded != nil {
-		v.unsupported(e.Pos(), fmt.Sprintf("%s decodes into what it is given as encoding/json does, and cannot be used as %s: "+
+		v.unsupported(e.Pos(), rFuncTrusted, fmt.Sprintf("%s decodes into what it is given as encoding/json does, and cannot be used as %s: "+
 			"what it is given is checked at each call written out, and a value is called with what nobody checks. Call %s directly", callee.Name(), as, callee.Name()))
 	}
 	if fn.trust != nil && fn.encoded != nil {
-		v.unsupported(e.Pos(), fmt.Sprintf("%s encodes what it is given as encoding/json does, and cannot be used as %s: "+
+		v.unsupported(e.Pos(), rFuncTrusted, fmt.Sprintf("%s encodes what it is given as encoding/json does, and cannot be used as %s: "+
 			"what it is given is checked at each call written out, and a value is called with what nobody checks. Call %s directly", callee.Name(), as, callee.Name()))
 	}
 	if fn.calls.len() > 0 {
-		v.unsupported(e.Pos(), fmt.Sprintf("%s calls a function it is given, and cannot be used as %s: "+
+		v.unsupported(e.Pos(), rFuncTrusted, fmt.Sprintf("%s calls a function it is given, and cannot be used as %s: "+
 			"what it would be given would come from code nobody has seen", callee.Name(), as))
 	}
 	if fn.trust != nil {
@@ -1699,7 +1699,7 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 		// method whose entry lists it under runs may call through what it
 		// holds, and is refused above.
 		if recv := sig.Recv(); recv != nil && !fn.runs.get(fn.params[0]) && holdsCode(recv.Type(), map[types.Type]bool{}) {
-			v.unsupported(e.Pos(), fmt.Sprintf("%s is used as %s, which hands its receiver to %s at each call; %s is trusted, and its receiver "+
+			v.unsupported(e.Pos(), rFuncTrusted, fmt.Sprintf("%s is used as %s, which hands its receiver to %s at each call; %s is trusted, and its receiver "+
 				"is a value of type %s, which is or holds %s, so %s could run code through it that nobody has seen. "+
 				"If its contract holds whatever that code does, list %s under runs in the contract",
 				types.ExprString(e), as, fn.obj.Name(), fn.obj.Name(), recv.Type(), heldCode(recv.Type(), map[types.Type]bool{}), fn.obj.Name(), fn.params[0].Name()))
@@ -1714,11 +1714,11 @@ func (v *fnVerifier) madeAs(e, fun ast.Expr, T *funcInfo, callee *types.Func, as
 			// call written out, and a value is called with what nobody
 			// checks.
 			if param == fn.formatted {
-				v.unsupported(e.Pos(), fmt.Sprintf("%s is used as %s, which passes what it is called with to %s as %s; %s formats %s, "+
+				v.unsupported(e.Pos(), rFuncTrusted, fmt.Sprintf("%s is used as %s, which passes what it is called with to %s as %s; %s formats %s, "+
 					"and what a value is called with cannot be checked as it is at a call written out. Call %s directly",
 					types.ExprString(e), as, fn.obj.Name(), param.Name(), fn.obj.Name(), param.Name(), fn.obj.Name()))
 			}
-			v.unsupported(e.Pos(), fmt.Sprintf("%s is used as %s, which passes what it is called with to %s as %s; "+
+			v.unsupported(e.Pos(), rFuncTrusted, fmt.Sprintf("%s is used as %s, which passes what it is called with to %s as %s; "+
 				"%s is trusted, and that can hold code nobody has seen. If its contract holds whatever that code does, "+
 				"list %s under runs in the contract", types.ExprString(e), as, fn.obj.Name(), param.Name(), fn.obj.Name(), param.Name()))
 		}
@@ -1885,7 +1885,7 @@ func (v *fnVerifier) madeLiteral(lit *ast.FuncLit, T *funcInfo, st *state, guard
 	site := v.site(lit.Pos(), "in the function literal used as a value of type %s at %s", T.obj.Name(), v.placeOf(lit.Pos()))
 	for i := range T.results {
 		if T.vouches[i] && !v.returnsKnown(v.bodyOrigins(), lit.Body, fn.results) {
-			v.report(lit.Pos(), "the function literal may return an error whose origin is not known in %s, and %s vouches for the errors there; "+
+			v.report(lit.Pos(), rObligation, "the function literal may return an error whose origin is not known in %s, and %s vouches for the errors there; "+
 				"return only errors made by errors.New or fmt.Errorf, or vouched for, %s", spelledResult(T, i), vouchingContract(T), site.text)
 			break
 		}
@@ -1932,7 +1932,7 @@ func (v *fnVerifier) capturedBy(lit *ast.FuncLit) []*types.Var {
 		switch n := n.(type) {
 		case *ast.Ident:
 			if called, ok := v.info.Uses[n].(*types.Func); ok && v.pkgVerifier.closureOf[called] != nil {
-				v.unsupported(n.Pos(), fmt.Sprintf("a function literal used as a value cannot call %s, a recursive closure "+
+				v.unsupported(n.Pos(), rLitCaptures, fmt.Sprintf("a function literal used as a value cannot call %s, a recursive closure "+
 					"of the function around it, which may assign that function's variables", n.Name))
 			}
 			variable, _ := v.info.Uses[n].(*types.Var)
@@ -1941,7 +1941,7 @@ func (v *fnVerifier) capturedBy(lit *ast.FuncLit) []*types.Var {
 			}
 			seen[variable] = true
 			if v.boundLits[variable] != nil {
-				v.unsupported(n.Pos(), fmt.Sprintf("a function literal used as a value cannot use %s, which holds a function literal "+
+				v.unsupported(n.Pos(), rLitCaptures, fmt.Sprintf("a function literal used as a value cannot use %s, which holds a function literal "+
 					"of the function around it", n.Name))
 			}
 			captured = append(captured, variable)
@@ -1956,7 +1956,7 @@ func (v *fnVerifier) capturedBy(lit *ast.FuncLit) []*types.Var {
 		}
 		for _, target := range targets {
 			if variable := v.assignedLocal(target); outside(variable) && !v.boxed[variable] {
-				v.unsupported(target.Pos(), fmt.Sprintf("a function literal used as a value cannot assign %s, a variable of the function "+
+				v.unsupported(target.Pos(), rLitCaptures, fmt.Sprintf("a function literal used as a value cannot assign %s, a variable of the function "+
 					"around it: it may run when that function has moved on, and no call of it could tell that function what it did", variable.Name()))
 			}
 		}
@@ -2051,7 +2051,7 @@ func (v *fnVerifier) stratified(lit *ast.FuncLit) {
 		inPlace[inner] = true
 	}
 	refuse := func(pos token.Pos, what string) {
-		v.unsupported(pos, fmt.Sprintf("the function literal used as a value %s, and code that a function value runs cannot do that yet: "+
+		v.unsupported(pos, rLitRecursion, fmt.Sprintf("the function literal used as a value %s, and code that a function value runs cannot do that yet: "+
 			"no contract of a function type has a variant, so nothing would prove that such calls end. "+
 			"Make the value in code that is not verified, or keep that call out of the literal", what))
 	}

@@ -99,7 +99,7 @@ var skipCopyWalk = false
 func (v *fnVerifier) checkCopies(decl *ast.FuncDecl) {
 	if !skipCopyWalk {
 		if pos, msg := copyWalk(v.info, v.pass.Pkg, decl, v.findConversions()); msg != "" {
-			v.unsupported(pos, msg)
+			v.unsupported(pos, rCopyValue, msg)
 		}
 	}
 	// A struct whose states trusted methods change is never copied: the
@@ -113,11 +113,11 @@ func (v *fnVerifier) checkCopies(decl *ast.FuncDecl) {
 		if !types.Identical(inner, found[0].typ) {
 			what += ", which holds " + article(shown(inner)) + " " + shown(inner)
 		}
-		v.unsupported(found[0].pos, fmt.Sprintf("Go copies a value of type %s, here (%s); the states of %s %s are changed by trusted methods and are about what it refers to, "+
+		v.unsupported(found[0].pos, rCopyValue, fmt.Sprintf("Go copies a value of type %s, here (%s); the states of %s %s are changed by trusted methods and are about what it refers to, "+
 			"which a copy would share, so %s %s is never copied; hold it by pointer", what, v.copySource(decl, found[0]), article(shown(inner)), shown(inner), article(shown(inner)), shown(inner)))
 	}
 	if found := v.findCopies()[decl]; len(found) > 0 {
-		v.unsupported(found[0].pos, fmt.Sprintf("Go copies a value of type %s, here (%s), and no rule of vego accounts for the copy; %s; "+
+		v.unsupported(found[0].pos, rCopyValue, fmt.Sprintf("Go copies a value of type %s, here (%s), and no rule of vego accounts for the copy; %s; "+
 			"hold the value by pointer", holding(found[0].typ, types.RelativeTo(v.pass.Pkg)), found[0].what, copyReasonFor(found[0].typ)))
 	}
 }

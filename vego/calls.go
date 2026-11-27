@@ -21,7 +21,7 @@ func (v *fnVerifier) binary(op token.Token, x, y *logic.Term, t types.Type, pos 
 	case x.Sort == logic.Err:
 		// Two interface values holding the same uncomparable dynamic type,
 		// such as a slice type with an Error method, panic when compared.
-		v.unsupported(pos, "comparing two errors can panic when they hold an uncomparable type; "+
+		v.unsupported(pos, rErrCompare, "comparing two errors can panic when they hold an uncomparable type; "+
 			"compare with nil")
 	case x.Sort == logic.Float || x.Sort == logic.FloatSeq:
 		// Floats, and arrays of them, compare by value, and a NaN is
@@ -32,7 +32,7 @@ func (v *fnVerifier) binary(op token.Token, x, y *logic.Term, t types.Type, pos 
 	case x.Sort == logic.Ref && op == token.NEQ:
 		return logic.Ne(x, y)
 	case x.Sort == logic.Ref || x.Sort == logic.Bool && op != token.EQL && op != token.NEQ:
-		v.unsupported(pos, fmt.Sprintf("operator %s is not supported here", op))
+		v.unsupported(pos, withDetail(rOpOther, op.String()), fmt.Sprintf("operator %s is not supported here", op))
 	case x.Sort.IsSeq() && op == token.ADD:
 		joined := logic.Concat(x, y)
 		v.checkAlloc(st, guard, logic.Len(joined), types.Typ[types.Uint8], pos, "the joined string")
@@ -85,7 +85,7 @@ func (v *fnVerifier) binary(op token.Token, x, y *logic.Term, t types.Type, pos 
 	case token.GEQ:
 		return logic.Le(y, x)
 	}
-	v.unsupported(pos, fmt.Sprintf("operator %s is not supported", op))
+	v.unsupported(pos, withDetail(rOpOther, op.String()), fmt.Sprintf("operator %s is not supported", op))
 	return nil
 }
 
@@ -106,13 +106,13 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		if id, ok := ast.Unparen(call.Fun).(*ast.Ident); ok {
 			outer := v.pkgVerifier.funcs[v.info.Defs[rc.outer.Name].(*types.Func)]
 			if variable, ok := v.info.Uses[id].(*types.Var); ok && outer != nil && outer.calls.len() > 0 && outer.calls.get(variable) != nil {
-				v.unsupported(call.Pos(), fmt.Sprintf("%s calls %s, a parameter that a Calls annotation of %s gives a contract, which a recursive closure "+
+				v.unsupported(call.Pos(), rClosure, fmt.Sprintf("%s calls %s, a parameter that a Calls annotation of %s gives a contract, which a recursive closure "+
 					"cannot call yet; call it in %s", closureName(rc.variable), id.Name, rc.outer.Name.Name, rc.outer.Name.Name))
 			}
 		}
 	}
 	if isBuiltin(v.info, call, "recover") {
-		v.unsupported(call.Pos(), recoverRefused)
+		v.unsupported(call.Pos(), rRecover, recoverRefused)
 	}
 	// json.NewEncoder(w).Encode(v) in one expression; see json.go.
 	if w := v.pkgVerifier.encoderInPlace(call); w != nil {
@@ -123,7 +123,7 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	if made, limit, limited := v.pkgVerifier.decoderInPlace(call); limited {
 		return v.callDecoder(call, limit, st, guard)
 	} else if made != nil {
-		v.unsupported(call.Pos(), "json.NewDecoder(r).Decode reads from r without a limit, until the first value is whole, however long it is; "+
+		v.unsupported(call.Pos(), rJSON, "json.NewDecoder(r).Decode reads from r without a limit, until the first value is whole, however long it is; "+
 			"write json.NewDecoder(io.LimitReader(r, n)).Decode(&x), with n the most it may read")
 	}
 	method, viaValue := throughValue(v.info, call)
@@ -139,16 +139,16 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 		if builtin.Name() == "copy" {
 			advice = " here; copy is supported as a statement, as the whole right-hand side of an assignment, or as a returned value"
 		}
-		v.unsupported(call.Pos(), fmt.Sprintf("the built-in function %s is not supported yet%s", builtin.Name(), advice))
+		v.unsupported(call.Pos(), withDetail(rBuiltin, builtin.Name()), fmt.Sprintf("the built-in function %s is not supported yet%s", builtin.Name(), advice))
 	}
 	if callee == nil {
-		v.unsupported(call.Pos(), "only calls to named functions and methods are supported")
+		v.unsupported(call.Pos(), rCallForm, "only calls to named functions and methods are supported")
 	}
 	if why := jsonEncoderUse(callee); why != "" {
-		v.unsupported(call.Pos(), why)
+		v.unsupported(call.Pos(), rJSON, why)
 	}
 	if why := jsonDecoderUse(callee); why != "" {
-		v.unsupported(call.Pos(), why)
+		v.unsupported(call.Pos(), rJSON, why)
 	}
 	// The receiver and the arguments are evaluated before the call, which
 	// is an event in the order Go fixes; see order.go.
@@ -287,17 +287,17 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func, st *sta
 	sig := callee.Type().(*types.Signature)
 	switch {
 	case sig.Recv() != nil && (sig.RecvTypeParams() != nil || genericReceiver(sig.Recv().Type())):
-		v.unsupported(call.Pos(), "calls of methods of generic types are not supported yet")
+		v.unsupported(call.Pos(), rGenericMethod, "calls of methods of generic types are not supported yet")
 	case sig.TypeParams() != nil:
-		v.unsupported(call.Pos(), "calls to generic functions are not supported yet")
+		v.unsupported(call.Pos(), rGenericCalled, "calls to generic functions are not supported yet")
 	case sig.Recv() != nil && types.IsInterface(sig.Recv().Type()):
-		v.unsupported(call.Pos(), "calls through an interface are not supported yet")
+		v.unsupported(call.Pos(), rIfaceForm, "calls through an interface are not supported yet")
 	}
 	if made := v.pkgVerifier.instanceOf[callee]; made != nil {
 		v.checkGenericCallee(call, callee, made)
 	}
 	if why := v.pkgVerifier.sortSliceRefusal(call, callee); why != "" {
-		v.unsupported(call.Pos(), why)
+		v.unsupported(call.Pos(), rSortSlice, why)
 	}
 	// Nothing may be called on trust that is not written down: the callee
 	// is either verified against its annotations or has a trusted contract.
@@ -305,17 +305,17 @@ func (v *fnVerifier) contractFor(call *ast.CallExpr, callee *types.Func, st *sta
 	if fn == nil && sig.Recv() != nil && growingMethods[callee.Name()] && growsUnbounded(sig.Recv().Type()) != "" {
 		// A contract a user might add would be false; say what to write
 		// instead.
-		v.unsupported(call.Pos(), fmt.Sprintf("it calls %s, which has no shipped entry: it reads through the io.Reader it is handed, which it "+
+		v.unsupported(call.Pos(), withDetail(rEntryImpossible, callee.FullName()), fmt.Sprintf("it calls %s, which has no shipped entry: it reads through the io.Reader it is handed, which it "+
 			"type-asserts, and grows the buffer by what that reader returns; read with Read in a loop and write what it returns with Write",
 			v.calleeName(callee)))
 	}
 	if why := noEntryCan[callee.FullName()]; fn == nil && why != "" {
 		// A contract a user might add could not be true; say why, and
 		// what to write instead.
-		v.unsupported(call.Pos(), fmt.Sprintf("it calls %s, which is not supported yet: %s", v.calleeName(callee), why))
+		v.unsupported(call.Pos(), withDetail(rEntryImpossible, callee.FullName()), fmt.Sprintf("it calls %s, which is not supported yet: %s", v.calleeName(callee), why))
 	}
 	if fn == nil {
-		v.unsupported(call.Pos(), fmt.Sprintf(
+		v.unsupported(call.Pos(), v.callClass(callee), fmt.Sprintf(
 			"it calls %s, which has no contract; annotate %s with // @ annotations so that it is verified, "+
 				"%s", callee.Name(), callee.Name(), v.addEntryAdvice(callee.FullName())))
 	}
@@ -395,10 +395,10 @@ func (v *fnVerifier) checkNotHandable(call *ast.CallExpr, fn *funcInfo) {
 		if !fn.runs.get(param) {
 			// What a function keeps runs after the call, which a contract
 			// under calls cannot describe.
-			v.unsupported(arg.Pos(), fmt.Sprintf("%s is handed to %s as %s, which its trusted contract lists under keeps, and whose type %s has no contract; "+
+			v.unsupported(arg.Pos(), rHandEntry, fmt.Sprintf("%s is handed to %s as %s, which its trusted contract lists under keeps, and whose type %s has no contract; "+
 				"declare a named function type with a contract and pass a value of it", what, fn.obj.Name(), param.Name(), param.Type()))
 		}
-		v.unsupported(arg.Pos(), fmt.Sprintf("%s is handed to %s as %s, which its trusted contract lists under runs with no contract under calls; "+
+		v.unsupported(arg.Pos(), rHandEntry, fmt.Sprintf("%s is handed to %s as %s, which its trusted contract lists under runs with no contract under calls; "+
 			"give %s a contract under calls in the entry for %s", what, fn.obj.Name(), param.Name(), param.Name(), fn.trust.key))
 	}
 }
@@ -428,7 +428,7 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 		// argument; only a call on a value is supported.
 		selector, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
 		if selection := v.info.Selections[selector]; !ok || selection == nil || selection.Kind() != types.MethodVal {
-			v.unsupported(call.Pos(), "this method call is not supported")
+			v.unsupported(call.Pos(), rCallForm, "this method call is not supported")
 		}
 		handed = append(handed, passed{sig.Recv(), selector.X, sig.Recv().Type()})
 	}
@@ -464,7 +464,7 @@ func (v *fnVerifier) checkHandedOver(call *ast.CallExpr, fn *funcInfo) {
 		if !isError(t) {
 			what = fmt.Sprintf("a value of type %s, which is or holds %s", t, heldCode(t, map[types.Type]bool{}))
 		}
-		v.unsupported(arg.Pos(), fmt.Sprintf("%s is passed to %s, which is trusted, and is %s; "+
+		v.unsupported(arg.Pos(), rHandUnknownCode, fmt.Sprintf("%s is passed to %s, which is trusted, and is %s; "+
 			"%s could run code through it that nobody has seen. If its contract holds whatever that code does, "+
 			"list %s under runs in the contract if %s runs it only while the call lasts, or under keeps, with where it keeps it, "+
 			"if it keeps it in a result or a parameter for later calls", types.ExprString(arg), fn.obj.Name(), what, fn.obj.Name(), param.Name(), fn.obj.Name()))
@@ -644,7 +644,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 	}
 	// An entry that holds only in an initialiser is refused anywhere else.
 	if fn.trust != nil && fn.trust.initialiserOnly && !v.inInitialiser {
-		v.unsupported(call.Pos(), initialiserOnlyWhy(callee))
+		v.unsupported(call.Pos(), rCallInitOnly, initialiserOnlyWhy(callee))
 	}
 	for _, pair := range overlapping(fn) {
 		v.check(st, guard, v.separate(args[pair[0]], args[pair[1]], pair[0].Type()), call.Pos(),
@@ -817,14 +817,14 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 				if t.param != nil {
 					what = passed[t.param]
 				}
-				v.unsupported(call.Pos(), fmt.Sprintf("%s may modify %s, a %s, which owns memory, and only a contract that comes with vego or a verified function "+
+				v.unsupported(call.Pos(), rOwnsUntrusted, fmt.Sprintf("%s may modify %s, a %s, which owns memory, and only a contract that comes with vego or a verified function "+
 					"says how what such a value owns may change", name, what, types.TypeString(t.ownerType, types.RelativeTo(v.pass.Pkg))))
 			}
 		}
 		// Nor what such a value that it returns owns (owns.go).
 		for result := range sig.Results().Variables() {
 			if owner := reachesSourceOwner(result.Type(), map[types.Type]bool{}); owner != nil {
-				v.unsupported(call.Pos(), fmt.Sprintf("%s returns a %s, which holds a %s, which owns memory, and only a contract that comes with vego or a verified function "+
+				v.unsupported(call.Pos(), rOwnsUntrusted, fmt.Sprintf("%s returns a %s, which holds a %s, which owns memory, and only a contract that comes with vego or a verified function "+
 					"says what such a value owns; verify %s", name, types.TypeString(result.Type(), types.RelativeTo(v.pass.Pkg)),
 					types.TypeString(owner, types.RelativeTo(v.pass.Pkg)), name))
 			}
@@ -1185,7 +1185,7 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		case fn.methodOf != nil:
 			what = "contract of " + methodTitle(fn.methodOf)
 		}
-		v.report(call.Pos(), "the %s cannot be true of this call: what it promises contradicts what is known here", what)
+		v.report(call.Pos(), rObligation, "the %s cannot be true of this call: what it promises contradicts what is known here", what)
 	}
 	// A verified function has proved the invariants of what it hands back.
 	// A trusted one has proved nothing, so nothing is assumed of it, and
@@ -1226,10 +1226,10 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 	sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
 	selection := v.info.Selections[sel]
 	if !ok || selection == nil || selection.Kind() != types.MethodVal {
-		v.unsupported(call.Pos(), "this method call is not supported")
+		v.unsupported(call.Pos(), rCallForm, "this method call is not supported")
 	}
 	if _, ok := layoutOf(recv.Type()); !ok {
-		v.unsupported(call.Pos(), fmt.Sprintf("receivers of type %s are not supported", recv.Type()))
+		v.unsupported(call.Pos(), typeClass(recv.Type()), fmt.Sprintf("receivers of type %s are not supported", recv.Type()))
 	}
 	// The operand is followed through the embedded structs the method is
 	// promoted from. where is the position of the current struct while it
@@ -1257,7 +1257,7 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 				return st.vals[variable]
 			}
 		}
-		v.unsupported(call.Pos(), interiorRefusal(fmt.Sprintf("calling %s takes the address of %s, which", sel.Sel.Name, types.ExprString(sel.X)), t))
+		v.unsupported(call.Pos(), v.addressClass(sel.X), interiorRefusal(fmt.Sprintf("calling %s takes the address of %s, which", sel.Sel.Name, types.ExprString(sel.X)), t))
 	}
 	if _, isStruct := t.Underlying().(*types.Struct); isStruct && !fixed && v.place(sel.X).kind == placeMem {
 		// The struct is followed by its position, and only the embedded
@@ -1273,7 +1273,7 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 				continue
 			}
 			if _, _, ok := fieldLeaves(t, index); !ok {
-				v.unsupported(sel.Sel.Pos(), fmt.Sprintf("this field has type %s, which is not supported", field))
+				v.unsupported(sel.Sel.Pos(), typeClass(field), fmt.Sprintf("this field has type %s, which is not supported", field))
 			}
 			from, at := types.NewPointer(t), where
 			where = v.readAt(st, guard, start, what, sel.Sel.Pos(), func(sink *state, mem memory) value {
@@ -1284,7 +1284,7 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 			t = object
 		}
 		if wantPointer && singleValue(t) {
-			v.unsupported(call.Pos(), interiorRefusal(fmt.Sprintf("calling %s takes the address of a field of %s, which", sel.Sel.Name, types.ExprString(sel.X)), t))
+			v.unsupported(call.Pos(), v.addressClass(sel.X), interiorRefusal(fmt.Sprintf("calling %s takes the address of a field of %s, which", sel.Sel.Name, types.ExprString(sel.X)), t))
 		}
 		if wantPointer {
 			return where
@@ -1305,7 +1305,7 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 		}
 		fieldType := object.Underlying().(*types.Struct).Field(index).Type()
 		if _, _, ok := fieldLeaves(object, index); !ok {
-			v.unsupported(sel.Sel.Pos(), fmt.Sprintf("this field has type %s, which is not supported", fieldType))
+			v.unsupported(sel.Sel.Pos(), typeClass(fieldType), fmt.Sprintf("this field has type %s, which is not supported", fieldType))
 		}
 		from, pointer := t, cur
 		var next value
@@ -1328,11 +1328,11 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 	case wantPointer == havePointer:
 		return cur
 	case wantPointer && where != nil && singleValue(t):
-		v.unsupported(call.Pos(), interiorRefusal(fmt.Sprintf("calling %s takes the address of a field of %s, which", sel.Sel.Name, types.ExprString(sel.X)), t))
+		v.unsupported(call.Pos(), v.addressClass(sel.X), interiorRefusal(fmt.Sprintf("calling %s takes the address of a field of %s, which", sel.Sel.Name, types.ExprString(sel.X)), t))
 	case wantPointer && where != nil:
 		return where
 	case wantPointer:
-		v.unsupported(call.Pos(), fmt.Sprintf(
+		v.unsupported(call.Pos(), v.addressClass(sel.X), fmt.Sprintf(
 			"calling %s takes the address of %s, which is not supported", sel.Sel.Name, types.ExprString(sel.X)))
 	}
 	v.checkNil(st, guard, cur[0], sel.Pos())
@@ -1759,7 +1759,7 @@ func (v *fnVerifier) checkRecursion(callee *funcInfo, pre *specEnv, st *state, g
 		if v.pkgVerifier.instanceOf[callee.obj] != nil {
 			remedy = fmt.Sprintf("%s is generic and cannot be verified yet, so break the cycle", callee.obj.Name())
 		}
-		v.report(call.Pos(), "%s is trusted and calls back into %s, so that this call ends cannot be proved; %s; the cycle: %s",
+		v.report(call.Pos(), rRecursionTrusted, "%s is trusted and calls back into %s, so that this call ends cannot be proved; %s; the cycle: %s",
 			callee.obj.Name(), v.fn.obj.Name(), remedy, v.describeCycle(shown))
 		return
 	}
@@ -1772,12 +1772,12 @@ func (v *fnVerifier) checkRecursion(callee *funcInfo, pre *specEnv, st *state, g
 				if !ok {
 					advice = "Hand that code a value whose type holds no interface value and no function value, or keep what it may reach from calling back"
 				}
-				v.report(call.Pos(), "this call may not end: %s; %s, so a cycle goes through code of another package, and no Variant can be checked across it; %s",
+				v.report(call.Pos(), rRecursionPackages, "this call may not end: %s; %s, so a cycle goes through code of another package, and no Variant can be checked across it; %s",
 					v.describeCycle(through), why, advice)
 				return
 			}
 		}
-		v.report(call.Pos(), "this call may not end: %s; a cycle that goes through a call with no static callee, of an interface method or "+
+		v.report(call.Pos(), rRecursionDynamic, "this call may not end: %s; a cycle that goes through a call with no static callee, of an interface method or "+
 			"a function value, or through code of another package, cannot be shown to end, since no Variant can be checked across such a call. "+
 			"Break the cycle", v.describeCycle(through))
 	}
@@ -1787,7 +1787,7 @@ func (v *fnVerifier) checkRecursion(callee *funcInfo, pre *specEnv, st *state, g
 	shown := "; the cycle: " + v.describeCycle(direct)
 	// A recursive closure recurses only through itself (D7).
 	if (v.fn.closure != nil || callee.closure != nil) && (v.fn.closure != callee.closure || len(direct.steps) > 1) {
-		v.unsupported(call.Pos(), "this call is part of a cycle of calls that goes through a recursive closure and another function, "+
+		v.unsupported(call.Pos(), rClosure, "this call is part of a cycle of calls that goes through a recursive closure and another function, "+
 			"which is not supported yet: a recursive closure may call itself, but no cycle may lead back to it through other functions"+shown)
 	}
 	for _, fn := range []*funcInfo{v.fn, callee} {
@@ -1796,13 +1796,13 @@ func (v *fnVerifier) checkRecursion(callee *funcInfo, pre *specEnv, st *state, g
 			if fn.closure != nil {
 				place = "above the assignment " + fn.closure.variable.Name() + " = func..."
 			}
-			v.report(call.Pos(), "recursive call needs a // @Variant annotation %s to prove termination%s", place, shown)
+			v.report(call.Pos(), rObligation, "recursive call needs a // @Variant annotation %s to prove termination%s", place, shown)
 			return
 		}
 	}
 	after, isLeft := v.readKeysLeft(callee.measure, pre)
 	if isLeft != (v.measureLeft != nil) {
-		v.unsupported(call.Pos(), "the Variants of the functions of this cycle have two forms, |A \\ S| and a number, which cannot be compared; "+
+		v.unsupported(call.Pos(), rClosure, "the Variants of the functions of this cycle have two forms, |A \\ S| and a number, which cannot be compared; "+
 			"give them one form")
 	}
 	if isLeft {

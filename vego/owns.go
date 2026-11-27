@@ -173,7 +173,7 @@ func (pv *pkgVerifier) addOwns(name *types.TypeName, c *clause) {
 	u, isStruct := name.Type().Underlying().(*types.Struct)
 	named, isNamed := name.Type().(*types.Named)
 	if !isStruct || !isNamed || named.TypeParams() != nil {
-		pv.report(c.pos, "an Owns can only be declared on a struct type without type parameters")
+		pv.report(c.pos, rAnnotationFault, "an Owns can only be declared on a struct type without type parameters")
 		return
 	}
 	if pv.ownsSource == nil {
@@ -188,24 +188,24 @@ func (pv *pkgVerifier) addOwns(name *types.TypeName, c *clause) {
 	for _, part := range strings.Split(c.text, ",") {
 		field := strings.TrimSpace(part)
 		if !token.IsIdentifier(field) {
-			pv.report(c.pos, "an Owns annotation lists fields of the struct, separated by commas, as in // @Owns items, m")
+			pv.report(c.pos, rAnnotationFault, "an Owns annotation lists fields of the struct, separated by commas, as in // @Owns items, m")
 			decl.broken = true
 			return
 		}
 		index := slices.IndexFunc(slices.Collect(u.Fields()), func(f *types.Var) bool { return f.Name() == field })
 		switch {
 		case index < 0:
-			pv.report(c.pos, "%s has no field %s to own", name.Name(), field)
+			pv.report(c.pos, rAnnotationFault, "%s has no field %s to own", name.Name(), field)
 			decl.broken = true
 			continue
 		case slices.Contains(decl.fields, field):
-			pv.report(c.pos, "%s is owned twice", field)
+			pv.report(c.pos, rAnnotationFault, "%s is owned twice", field)
 			decl.broken = true
 			continue
 		}
 		f := u.Field(index)
 		if f.Exported() {
-			pv.report(c.pos, "%s cannot be owned: it is exported, and a field can be owned only when it is unexported, "+
+			pv.report(c.pos, rAnnotationFault, "%s cannot be owned: it is exported, and a field can be owned only when it is unexported, "+
 				"so that only package %s can change what it refers to; unexport it, or leave it unowned", field, pv.pass.Pkg.Name())
 			decl.broken = true
 			continue
@@ -223,7 +223,7 @@ func (pv *pkgVerifier) addOwns(name *types.TypeName, c *clause) {
 			if strings.ContainsRune("aeiou", rune(held[0])) {
 				article = "an"
 			}
-			pv.report(c.pos, "%s cannot be owned: it holds %s %s, and a field can be owned when it holds a pointer to a struct, a slice, a map, or an interface value",
+			pv.report(c.pos, rAnnotationFault, "%s cannot be owned: it holds %s %s, and a field can be owned when it holds a pointer to a struct, a slice, a map, or an interface value",
 				field, article, held)
 			decl.broken = true
 			continue
@@ -243,7 +243,7 @@ func (pv *pkgVerifier) checkOwnsDeclared() {
 			continue
 		}
 		if chain := pv.ownsItself(name); chain != "" {
-			pv.report(decl.pos, "%s", chain)
+			pv.report(decl.pos, rAnnotationFault, "%s", chain)
 			decl.broken = true
 		}
 	}
@@ -529,14 +529,14 @@ func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur va
 	old := !v.quickly(st, guard, logic.Or(ownedNothing(val, t), newSinceEntry))
 	switch {
 	case flowMade && call != nil && !promisesFresh(call.fn, 0):
-		v.report(pos, "what is stored into %s comes from the call of %s, which returns memory nothing else refers to, but its contract does not say "+
+		v.report(pos, rObligation, "what is stored into %s comes from the call of %s, which returns memory nothing else refers to, but its contract does not say "+
 			"fresh(result), so it may be memory that existed; say so in the contract of %s%s", field, call.name, call.name, limitNote(result))
 	case call != nil && !call.keepsNot:
 		what := "a function whose contract does not say that it keeps nothing of what it is handed"
 		if call.fn != nil && call.fn.trust == nil && call.fn.valueOf == nil && call.fn.methodOf == nil {
 			what = "a verified function"
 		}
-		v.report(pos, "what is stored into %s comes from the call of %s, %s; storing the result of such a call into an owned field "+
+		v.report(pos, rOwnsStoreUnproved, "what is stored into %s comes from the call of %s, %s; storing the result of such a call into an owned field "+
 			"is not supported yet%s", field, call.name, what, limitNote(result))
 	case old:
 		undeclare := ", or do not declare the field owned"
@@ -546,10 +546,10 @@ func (v *fnVerifier) checkOwnedStore(st *state, guard []*logic.Term, val, cur va
 			undeclare = fmt.Sprintf(". %s owns %s because it has the fields of %s, which declares // @Owns %s; to store it as it is, give %s a field of its own, or use %s",
 				shown, owned, known.name.Name(), owned, shown, known.name.Name())
 		}
-		v.report(pos, "%s may come to refer to memory that existed when %s was called and that it did not own; an owned field may refer only "+
+		v.report(pos, rObligation, "%s may come to refer to memory that existed when %s was called and that it did not own; an owned field may refer only "+
 			"to memory made since, or to part of what it referred to then; %s%s%s", field, v.fn.obj.Name(), copied, undeclare, limitNote(result))
 	default:
-		v.report(pos, "what is stored into %s is new memory that something else may refer to%s; make it where it is stored, as in %s, "+
+		v.report(pos, rObligation, "what is stored into %s is new memory that something else may refer to%s; make it where it is stored, as in %s, "+
 			"or copy it there%s", field, fl.why[key], example(making), limitNote(result))
 	}
 }
@@ -815,7 +815,7 @@ func (v *fnVerifier) checkOwnArguments(call *ast.CallExpr, name string) {
 			what = "memory that " + v.rootName(root) + " owns"
 			break
 		}
-		v.report(op.expr.Pos(), "%s is %s, and %s is handed what reaches a %s, which can own it; %s assumes that nothing it is handed is what "+
+		v.report(op.expr.Pos(), rObligation, "%s is %s, and %s is handed what reaches a %s, which can own it; %s assumes that nothing it is handed is what "+
 			"an owner it is handed owns: copy it, or pass it alone", types.ExprString(op.expr), what, name,
 			types.TypeString(owner, types.RelativeTo(v.pass.Pkg)), name)
 	}

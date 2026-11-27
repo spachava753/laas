@@ -39,7 +39,7 @@ func (v *fnVerifier) variable(id *ast.Ident, st *state, guard []*logic.Term) val
 		}
 		return v.packageVariable(variable, id.Pos(), st)
 	}
-	v.unsupported(id.Pos(), id.Name+" is not a local variable of a supported type")
+	v.unsupported(id.Pos(), v.varClass(variable), id.Name+" is not a local variable of a supported type")
 	return nil
 }
 
@@ -77,7 +77,7 @@ func (v *fnVerifier) checkNil(st *state, guard []*logic.Term, ref *logic.Term, p
 func (v *fnVerifier) expr(e ast.Expr, st *state, guard []*logic.Term) *logic.Term {
 	val := v.eval(e, st, guard)
 	if _, single := sortOf(v.info.TypeOf(e)); !single {
-		v.unsupported(e.Pos(), fmt.Sprintf("a value of type %s cannot be used here", v.info.TypeOf(e)))
+		v.unsupported(e.Pos(), rExprValueShape, fmt.Sprintf("a value of type %s cannot be used here", v.info.TypeOf(e)))
 	}
 	return val[0]
 }
@@ -96,10 +96,10 @@ func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 	}
 	t := v.info.TypeOf(e)
 	if call, ok := ast.Unparen(e).(*ast.CallExpr); ok && isBuiltin(v.info, call, "recover") {
-		v.unsupported(e.Pos(), recoverRefused)
+		v.unsupported(e.Pos(), rRecover, recoverRefused)
 	}
 	if _, ok := layoutOf(t); !ok {
-		v.unsupported(e.Pos(), fmt.Sprintf("expressions of type %s are not supported", t))
+		v.unsupported(e.Pos(), typeClass(t), fmt.Sprintf("expressions of type %s are not supported", t))
 	}
 	v.refuseTooLarge(e.Pos(), t)
 	if tv := v.info.Types[e]; tv.Value != nil {
@@ -147,7 +147,7 @@ func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 		// must then not be nil.
 		selection := v.info.Selections[e]
 		if selection == nil || selection.Kind() != types.FieldVal {
-			v.unsupported(e.Pos(), "only fields can be selected; method values are not supported")
+			v.unsupported(e.Pos(), rFuncMethodValue, "only fields can be selected; method values are not supported")
 		}
 		// A field of a struct that lies in memory is read on its own, as
 		// Go reads it, and not as part of the whole struct. So is a field
@@ -177,10 +177,10 @@ func (v *fnVerifier) eval(e ast.Expr, st *state, guard []*logic.Term) value {
 	case *ast.TypeAssertExpr:
 		return v.assertion(e, st, guard, false)[0]
 	case *ast.FuncLit:
-		v.unsupported(e.Pos(), "a function literal is supported only where it is called or deferred, as the value that declares "+
+		v.unsupported(e.Pos(), rLitValue, "a function literal is supported only where it is called or deferred, as the value that declares "+
 			"a new variable which is only ever called, or where it is given a function type with a contract")
 	}
-	v.unsupported(e.Pos(), "this expression is not supported")
+	v.unsupported(e.Pos(), withDetail(rExprOther, fmt.Sprintf("%T", e)), "this expression is not supported")
 	return nil
 }
 
@@ -194,7 +194,7 @@ func (v *fnVerifier) evalAs(e ast.Expr, want types.Type, st *state, guard []*log
 		return v.interfaceValue(e, want, st, guard)
 	}
 	if types.IsInterface(want) && !isError(want) && !isIface(want) {
-		v.unsupported(e.Pos(), fmt.Sprintf("values of type %s are not supported%s", want, unsupportedHint(want)))
+		v.unsupported(e.Pos(), typeClass(want), fmt.Sprintf("values of type %s are not supported%s", want, unsupportedHint(want)))
 	}
 	if !v.isNil(e) {
 		// A value of a concrete type converted to an error is an error
@@ -207,7 +207,7 @@ func (v *fnVerifier) evalAs(e ast.Expr, want types.Type, st *state, guard []*log
 	}
 	_, isPointer := pointee(want)
 	if !isError(want) && !isSlice(want) && !isPointer && !isMap(want) && !holdsCodeRef(want) {
-		v.unsupported(e.Pos(), fmt.Sprintf("nil of type %s is not supported", want))
+		v.unsupported(e.Pos(), withDetail(rOpNil, want.String()), fmt.Sprintf("nil of type %s is not supported", want))
 	}
 	return zeroValue(want)
 }
@@ -324,12 +324,12 @@ func (v *fnVerifier) addressOf(e ast.Expr, st *state, guard []*logic.Term) value
 	_, named := ast.Unparen(e).(*ast.Ident)
 	switch lv := v.place(e); {
 	case single && (lv.box == nil || !named):
-		v.unsupported(e.Pos(), interiorRefusal("taking the address of "+types.ExprString(e), v.info.TypeOf(e)))
+		v.unsupported(e.Pos(), v.addressClass(e), interiorRefusal("taking the address of "+types.ExprString(e), v.info.TypeOf(e)))
 	case !isStruct && !single:
-		v.unsupported(e.Pos(), fmt.Sprintf("taking the address of %s is not supported: it is a %s, and only pointers to structs, numbers, booleans, and strings are supported",
+		v.unsupported(e.Pos(), withDetail(rAddrOther, v.info.TypeOf(e).String()), fmt.Sprintf("taking the address of %s is not supported: it is a %s, and only pointers to structs, numbers, booleans, and strings are supported",
 			types.ExprString(e), v.info.TypeOf(e)))
 	case lv.kind != placeMem:
-		v.unsupported(e.Pos(), fmt.Sprintf("taking the address of %s is not supported", types.ExprString(e)))
+		v.unsupported(e.Pos(), v.addressClass(e), fmt.Sprintf("taking the address of %s is not supported", types.ExprString(e)))
 	}
 	lv := v.lvalue(e, st, guard)
 	return value{lv.ref, logic.Add(lv.at, logic.IntLit(lv.offset))}
@@ -360,7 +360,11 @@ func (v *fnVerifier) unary(e *ast.UnaryExpr, st *state, guard []*logic.Term) val
 	case token.XOR:
 		return value{v.complement(operand, v.info.TypeOf(e), e.Pos())}
 	}
-	v.unsupported(e.Pos(), fmt.Sprintf("operator %s is not supported", e.Op))
+	class := withDetail(rOpOther, e.Op.String())
+	if e.Op == token.ARROW {
+		class = rChannel
+	}
+	v.unsupported(e.Pos(), class, fmt.Sprintf("operator %s is not supported", e.Op))
 	return nil
 }
 
@@ -390,7 +394,7 @@ func (v *fnVerifier) binaryExpr(e *ast.BinaryExpr, st *state, guard []*logic.Ter
 		case isPointer, isSlice(t), isMap(t), holdsCodeRef(t):
 			isNil = isNilRef(val)
 		default:
-			v.unsupported(e.Pos(), fmt.Sprintf("comparing a %s with nil is not supported", t))
+			v.unsupported(e.Pos(), withDetail(rOpNil, t.String()), fmt.Sprintf("comparing a %s with nil is not supported", t))
 		}
 		if e.Op == token.NEQ {
 			return logic.Not(isNil)
@@ -405,7 +409,7 @@ func (v *fnVerifier) binaryExpr(e *ast.BinaryExpr, st *state, guard []*logic.Ter
 	}
 	if object, isPointer := pointee(v.info.TypeOf(e.X)); isPointer {
 		if v.pass.TypesSizes.Sizeof(object) == 0 {
-			v.unsupported(e.Pos(), "pointers to values of size zero may or may not be equal, so comparing them is not supported")
+			v.unsupported(e.Pos(), rOpPointer, "pointers to values of size zero may or may not be equal, so comparing them is not supported")
 		}
 		// Two pointers are equal when both are nil, or when they point to
 		// the same position of the same allocation.
@@ -417,7 +421,7 @@ func (v *fnVerifier) binaryExpr(e *ast.BinaryExpr, st *state, guard []*logic.Ter
 		case token.NEQ:
 			return logic.Not(same)
 		}
-		v.unsupported(e.Pos(), fmt.Sprintf("operator %s is not supported for pointers", e.Op))
+		v.unsupported(e.Pos(), rOpPointer, fmt.Sprintf("operator %s is not supported for pointers", e.Op))
 	}
 	if e.Op == token.LAND || e.Op == token.LOR {
 		// Go decides after the left operand whether to evaluate the right
@@ -492,7 +496,7 @@ func (v *fnVerifier) indexExpr(e *ast.IndexExpr, st *state, guard []*logic.Term)
 			return element
 		})
 	}
-	v.unsupported(e.X.Pos(), fmt.Sprintf("indexing a %s is not supported", t))
+	v.unsupported(e.X.Pos(), withDetail(rIndex, t.String()), fmt.Sprintf("indexing a %s is not supported", t))
 	return nil
 }
 
@@ -512,7 +516,7 @@ func (v *fnVerifier) sliceExpr(e *ast.SliceExpr, st *state, guard []*logic.Term)
 		header = v.arrayHeader(e.X, st, guard)
 		t = types.NewSlice(t.Underlying().(*types.Array).Elem())
 	case !isSlice(t):
-		v.unsupported(e.Pos(), fmt.Sprintf("slicing a %s is not supported", t))
+		v.unsupported(e.Pos(), withDetail(rIndex, t.String()), fmt.Sprintf("slicing a %s is not supported", t))
 	default:
 		header = v.eval(e.X, st, guard)
 	}
@@ -562,7 +566,7 @@ func (v *fnVerifier) fields(cur value, t types.Type, path []int, st *state, guar
 		if !viaPointer {
 			next, fieldType, ok := v.member(st, st.mem, cur, t, index)
 			if !ok {
-				v.unsupported(pos, fmt.Sprintf("this field has type %s, which is not supported", fieldType))
+				v.unsupported(pos, typeClass(fieldType), fmt.Sprintf("this field has type %s, which is not supported", fieldType))
 			}
 			cur, t = next, fieldType
 			continue
@@ -570,7 +574,7 @@ func (v *fnVerifier) fields(cur value, t types.Type, path []int, st *state, guar
 		v.checkNil(st, guard, cur[0], pos)
 		field := object.Underlying().(*types.Struct).Field(index).Type()
 		if _, _, ok := fieldLeaves(object, index); !ok {
-			v.unsupported(pos, fmt.Sprintf("this field has type %s, which is not supported", field))
+			v.unsupported(pos, typeClass(field), fmt.Sprintf("this field has type %s, which is not supported", field))
 		}
 		pointer := cur
 		cur = v.readAt(st, guard, start, what, pos, func(sink *state, mem memory) value {
@@ -603,7 +607,7 @@ func (v *fnVerifier) literal(e *ast.CompositeLit, t types.Type, st *state, guard
 			}
 			lo, _, ok := fieldLeaves(t, index)
 			if !ok {
-				v.unsupported(element.Pos(), fmt.Sprintf("field %s has unsupported type %s", u.Field(index).Name(), u.Field(index).Type()))
+				v.unsupported(element.Pos(), typeClass(u.Field(index).Type()), fmt.Sprintf("field %s has unsupported type %s", u.Field(index).Name(), u.Field(index).Type()))
 			}
 			before := st.brk
 			field := v.settled(st, guard, v.evalAs(initial, u.Field(index).Type(), st, guard), u.Field(index).Type())
@@ -628,7 +632,7 @@ func (v *fnVerifier) literal(e *ast.CompositeLit, t types.Type, st *state, guard
 			if pair, keyed := element.(*ast.KeyValueExpr); keyed {
 				key, exact := constant.Int64Val(v.info.Types[pair.Key].Value)
 				if !exact {
-					v.unsupported(pair.Key.Pos(), "this index of an array literal is not supported")
+					v.unsupported(pair.Key.Pos(), rLiteral, "this index of an array literal is not supported")
 				}
 				next, initial = key, pair.Value
 			}
@@ -639,19 +643,19 @@ func (v *fnVerifier) literal(e *ast.CompositeLit, t types.Type, st *state, guard
 		return value{array}
 	case *types.Slice:
 		if _, ok := elemLayout(u.Elem()); !ok {
-			v.unsupported(e.Pos(), fmt.Sprintf("slices of %s are not supported", u.Elem()))
+			v.unsupported(e.Pos(), elemClass(u.Elem()), fmt.Sprintf("slices of %s are not supported", u.Elem()))
 		}
 		var elements []value
 		for _, element := range e.Elts {
 			if _, keyed := element.(*ast.KeyValueExpr); keyed {
-				v.unsupported(element.Pos(), "keyed slice literals are not supported")
+				v.unsupported(element.Pos(), rLiteral, "keyed slice literals are not supported")
 			}
 			elements = append(elements, v.settled(st, guard, v.evalAs(element, u.Elem(), st, guard), u.Elem()))
 		}
 		length := logic.IntLit(int64(len(e.Elts)))
 		return v.allocSlice(st, u.Elem(), elements, length, length)
 	}
-	v.unsupported(e.Pos(), fmt.Sprintf("literals of type %s are not supported", t))
+	v.unsupported(e.Pos(), withDetail(rLiteral, t.String()), fmt.Sprintf("literals of type %s are not supported", t))
 	return nil
 }
 
@@ -668,7 +672,7 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) v
 				return value{v.mapLen(sink, mem, v.info.TypeOf(e.Args[0]), operand[0])}
 			})
 		case isMap(v.info.TypeOf(e.Args[0])):
-			v.unsupported(e.Pos(), "cap of a map is not supported")
+			v.unsupported(e.Pos(), withDetail(rIndex, "cap of a map"), "cap of a map is not supported")
 		case isString(v.info.TypeOf(e.Args[0])):
 			return value{logic.Len(operand[0])}
 		case isArray(v.info.TypeOf(e.Args[0])):
@@ -716,7 +720,7 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) v
 	case builtin("new"):
 		t := v.info.TypeOf(e.Args[0])
 		if _, isStruct := t.Underlying().(*types.Struct); !isStruct && !singleValue(t) {
-			v.unsupported(e.Pos(), fmt.Sprintf("new(%s) is not supported; only structs, numbers, booleans, and strings can be pointed to", t))
+			v.unsupported(e.Pos(), withDetail(rAddrOther, t.String()), fmt.Sprintf("new(%s) is not supported; only structs, numbers, booleans, and strings can be pointed to", t))
 		}
 		// new takes a type, or a value to start from.
 		initial := zeroValue(t)
@@ -727,13 +731,13 @@ func (v *fnVerifier) callExpr(e *ast.CallExpr, st *state, guard []*logic.Term) v
 	case builtin("make"):
 		return v.makeSlice(e, st, guard)
 	case builtin("append"):
-		v.unsupported(e.Pos(), "append is only supported as the whole right-hand side of an assignment or as the returned value")
+		v.unsupported(e.Pos(), rAppendExpr, "append is only supported as the whole right-hand side of an assignment or as the returned value")
 	case v.info.Types[e.Fun].IsType():
 		return v.conversion(e, st, guard)
 	}
 	results := v.call(e, st, guard)
 	if len(results) != 1 || results[0] == nil {
-		v.unsupported(e.Pos(), "this call does not produce a single supported value")
+		v.unsupported(e.Pos(), rExprValueShape, "this call does not produce a single supported value")
 	}
 	return results[0]
 }
@@ -749,10 +753,10 @@ func (v *fnVerifier) makeSlice(e *ast.CallExpr, st *state, guard []*logic.Term) 
 		return v.newMap(st, t)
 	}
 	if !isSlice(t) || len(e.Args) < 2 {
-		v.unsupported(e.Pos(), "make is only supported for slices with a length")
+		v.unsupported(e.Pos(), withDetail(rBuiltin, "make"), "make is only supported for slices with a length")
 	}
 	if _, ok := elemLayout(elemType(t)); !ok {
-		v.unsupported(e.Pos(), fmt.Sprintf("slices of %s are not supported", elemType(t)))
+		v.unsupported(e.Pos(), elemClass(elemType(t)), fmt.Sprintf("slices of %s are not supported", elemType(t)))
 	}
 	length := v.expr(e.Args[1], st, guard)
 	capacity := length
@@ -851,7 +855,7 @@ func (v *fnVerifier) conversion(e *ast.CallExpr, st *state, guard []*logic.Term)
 	if sameValue(from, to) {
 		return val
 	}
-	v.unsupported(e.Pos(), fmt.Sprintf("converting a %s to a %s is not supported", from, to))
+	v.unsupported(e.Pos(), withDetail(rConvValue, from.String()+" to "+to.String()), fmt.Sprintf("converting a %s to a %s is not supported", from, to))
 	return nil
 }
 

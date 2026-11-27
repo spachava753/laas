@@ -806,7 +806,7 @@ func (pv *pkgVerifier) reportAlwaysFailing() map[*funcInfo]bool {
 			if none {
 				why, advice = "it requires success for no input", "where the condition is about the inputs"
 			}
-			pv.report(fn.decl.Name.Pos(), "the contract of %s may also be met by a function that always returns an error: %s; "+
+			pv.report(fn.decl.Name.Pos(), rObligation, "the contract of %s may also be met by a function that always returns an error: %s; "+
 				"state when it succeeds with a clause such as \"condition -> err = nil\", %s", fn.obj.Name(), why, advice)
 		}
 	}

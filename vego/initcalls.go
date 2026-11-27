@@ -69,14 +69,14 @@ func (pv *pkgVerifier) runInitialiser(init *types.Initializer) {
 				}
 			}
 			if contract != nil && len(contract.requires) > 0 {
-				pv.report(call.Pos(), "%s is called in a function literal in the initialiser of a package-level variable, where its Requires is not checked; "+
+				pv.report(call.Pos(), rObligation, "%s is called in a function literal in the initialiser of a package-level variable, where its Requires is not checked; "+
 					"call it from a function with a contract of its own", name)
 			}
 			if callee == nil || isGeneric(callee) {
 				return true
 			}
 			if entry := pv.entryFor(pv.originOf(callee).FullName()); entry != nil && entry.initialiserOnly {
-				pv.report(call.Pos(), "%s", initialiserOnlyWhy(callee))
+				pv.report(call.Pos(), rCallInitOnly, "%s", initialiserOnlyWhy(callee))
 			}
 			return true
 		})
