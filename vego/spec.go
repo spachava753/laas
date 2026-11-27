@@ -27,8 +27,11 @@ type specEnv struct {
 	// not be mentioned. given and givenPost replace what a parameter denotes,
 	// plain and primed, by a ready-made term, and givenResults what a result
 	// denotes.
-	fn           *funcInfo
-	args         map[*types.Var]value
+	fn   *funcInfo
+	args map[*types.Var]value
+	// outs holds, for the contract of a recursive closure read on return,
+	// the values of the captured variables it assigns, which x' names.
+	outs         map[*types.Var]value
 	results      []value
 	given        map[*types.Var]*logic.Term
 	givenPost    map[*types.Var]*logic.Term
@@ -625,6 +628,24 @@ func (e *specEnv) locateAt(name string, steps []logic.Step, when logic.When, thr
 				return reached{}, fmt.Errorf("%s.%s is a constant and has no fields or elements, and cannot be primed or put in old()", name, steps[0].Field)
 			}
 			return reached{constant: constant}, nil
+		}
+	}
+	if when == logic.Primed && e.fn != nil && e.fn.closure != nil {
+		if variable := e.fn.paramNames[name]; variable != nil && slices.Contains(e.fn.closure.outputs, variable) {
+			if e.outs == nil || e.post == nil {
+				return reached{}, fmt.Errorf("%s' describes the value on return and is only allowed in Ensures", name)
+			}
+			hops, final, err := plan(variable.Type(), steps, e.writtenIn())
+			if err != nil {
+				return reached{}, fmt.Errorf("%s%v", name, err)
+			}
+			val := e.outs[variable]
+			cur, ground := e.v.follow(e.sink, e.post, val, hops)
+			found := reached{val: cur, typ: final, mem: e.post, hops: len(hops), start: val, path: hops, sink: e.sink}
+			if !ground {
+				found.sink = e.v.boundSink
+			}
+			return found, nil
 		}
 	}
 	val, t, isResult, constant, err := e.root(name)

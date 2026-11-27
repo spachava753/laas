@@ -520,6 +520,9 @@ type funcInfo struct {
 	// parameters and results mean what they mean where the contract was
 	// written, in the package that declares the type or in a trust file.
 	spelled *funcInfo
+	// closure is set for the contract of a recursive local closure; see
+	// closures.go.
+	closure *recClosure
 }
 
 // spelling returns the contract whose clauses a function's annotations
@@ -549,10 +552,19 @@ func (f *funcInfo) writtenIn() *types.Package {
 }
 
 func (f *funcInfo) annotated() bool {
-	return len(f.requires)+len(f.ensures)+len(f.body)+len(f.modifies) > 0 || f.measure != nil || f.exitsClause != nil
+	// A recursive closure in a verified function is verified, with an empty
+	// contract when nothing is written above it.
+	return f.closure != nil || len(f.requires)+len(f.ensures)+len(f.body)+len(f.modifies) > 0 || f.measure != nil || f.exitsClause != nil
 }
 
 type pkgVerifier struct {
+	// closures are the recursive local closures of the package, and the
+	// maps find one by its function object, its assignment, and its
+	// variable; see closures.go.
+	closures       []*recClosure
+	closureOf      map[*types.Func]*recClosure
+	closureAssigns map[*ast.AssignStmt]*recClosure
+	closureVars    map[*types.Var]*recClosure
 	// sizedProved counts the obligations that only the declared memory
 	// proved (sizes.go).
 	sizedProved *atomic.Int64
@@ -1333,8 +1345,10 @@ func (pv *pkgVerifier) collect() {
 		for _, decl := range file.Decls {
 			if fd, ok := decl.(*ast.FuncDecl); ok {
 				pv.addFunc(fd)
+				pv.findClosures(fd)
 			}
 		}
+		pv.prepareClosures()
 		pv.checkCarriageReturns(file)
 		for _, group := range file.Comments {
 			for _, c := range extractClauses(group, pv.otherTags) {
@@ -1455,6 +1469,7 @@ func (pv *pkgVerifier) collect() {
 			}
 		}
 	}
+	pv.finishClosures()
 	for _, defineErr := range pv.res.Define(predicates) {
 		pv.report(predicateClauses[defineErr.Decl].pos, "%v", defineErr.Err)
 		// A predicate that could not be defined stands for nothing, so no
@@ -1784,6 +1799,14 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 			break
 		}
 		fn := pv.funcs[pv.info.Defs[fd.Name].(*types.Func)]
+		if rc, misplaced := pv.closureAt(c.pos); rc != nil {
+			return pv.placeInClosure(rc, c)
+		} else if misplaced != nil && c.kind != "Assert" && c.kind != "Snapshot" {
+			pv.report(c.pos, "%s annotation stands above the declaration of %s; the contract of a recursive closure stands directly above its assignment %s = func...",
+				c.kind, misplaced.variable.Name(), misplaced.variable.Name())
+			fn.broken = true
+			return fn
+		}
 		switch c.kind {
 		case "Invariant", "Variant", "Assert", "Snapshot", "Visited":
 			fn.body = append(fn.body, c)
@@ -1792,7 +1815,8 @@ func (pv *pkgVerifier) place(file *ast.File, group *ast.CommentGroup, c *clause)
 			pv.report(c.pos, "%s", misplacedVouches)
 			fn.broken = true
 		default:
-			pv.report(c.pos, "%s annotation stands inside %s; put it in the doc comment of the function", c.kind, fn.obj.Name())
+			pv.report(c.pos, "%s annotation stands inside %s; put it in the doc comment of the function, or, for the contract of a recursive closure, "+
+				"directly above its assignment v = func..., after var v func(...)", c.kind, fn.obj.Name())
 			fn.broken = true
 		}
 		return fn

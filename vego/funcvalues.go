@@ -1927,6 +1927,10 @@ func (v *fnVerifier) capturedBy(lit *ast.FuncLit) []*types.Var {
 		var targets []ast.Expr
 		switch n := n.(type) {
 		case *ast.Ident:
+			if called, ok := v.info.Uses[n].(*types.Func); ok && v.pkgVerifier.closureOf[called] != nil {
+				v.unsupported(n.Pos(), fmt.Sprintf("a function literal used as a value cannot call %s, a recursive closure "+
+					"of the function around it, which may assign that function's variables", n.Name))
+			}
 			variable, _ := v.info.Uses[n].(*types.Var)
 			if !outside(variable) || seen[variable] {
 				break

@@ -109,6 +109,11 @@ func (v *fnVerifier) mapValue(sink *state, mem memory, t types.Type, ref, key *l
 		val[i] = logic.Select(v.row(sink, mem, mapOwner(t)+"#val"+lf.path, lf.sort, ref), mapKey(key))
 	}
 	v.noteMap(sink, mem, t, ref, key)
+	cells := make([]entryCell, len(leaves))
+	for i, lf := range leaves {
+		cells[i] = entryCell{key: mapOwner(t) + "#val" + lf.path, sort: lf.sort, pos: mapKey(key)}
+	}
+	v.noteEntryRefs(mem, cells, ref, elem)
 	switch {
 	case !hasBound(key) && (sink == nil || !sink.collecting):
 		v.noteTyped(sink, val, elem)

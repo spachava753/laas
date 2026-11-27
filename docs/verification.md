@@ -767,6 +767,8 @@ At the recursive call, `vego` uses the contract of `Steps` with `n-1` as the arg
 
 A message about a missing `Variant` names the cycle, as in `recursive call needs a // @Variant annotation in the doc comment of F to prove termination; the cycle: F calls G at f.go:12:9, G calls F at f.go:20:9`.
 
+A search that marks in a map the keys of another map that it has seen can be measured by `|A \ S|`, the number of keys of `A` that are not keys of `S`. See [Measuring a search](#measuring-a-search).
+
 ### Cycles through function values and interface methods
 
 A call through an interface value or a function value has no callee that `vego` can name, so it cannot check a `Variant` across it. A cycle of calls that goes through such a call is reported at every call of the cycle in a verified function. Here `Pull` calls `s.Next()`, and a `*Retry` held in `s` calls `Pull` again:
@@ -1068,7 +1070,7 @@ A trusted contract says that its function may end the process with `exits: true`
 - where it is deferred, as in `defer func() { ... }()`;
 - as the value that declares a new local variable, which the function then only calls.
 
-A literal written where it is handed to a trusted function that calls it while it runs, such as `sort.Search`, is verified there too. See [Functions that a trusted function calls](#functions-that-a-trusted-function-calls).
+A literal written where it is handed to a trusted function that calls it while it runs, such as `sort.Search`, is verified there too. See [Functions that a trusted function calls](#functions-that-a-trusted-function-calls). A literal assigned to a variable that it calls itself is a recursive closure, verified against a contract of its own. See [Recursive closures](#recursive-closures).
 
 ```go
 // @Requires |A| = 3
@@ -1147,6 +1149,121 @@ func ReadAndBump(x int) (result int) {
 ```text
 vego: x may be read before or after the call to bump, which may change it, and Go does not
 fix the order; split the statement so that the order is the one you mean, as in x0 := x before it
+```
+
+### Recursive closures
+
+A literal that calls itself, as a depth-first search does, is written in Go as a variable declared first and then assigned the literal. `vego` verifies such a closure once, against a contract written directly above the assignment:
+
+```go
+type Nodes map[string]bool
+type Graph map[string]Nodes
+
+// @Ensures result != nil And fresh(result)
+func (g Graph) Reachable(roots Nodes) (result Nodes) {
+	seen := make(Nodes)
+	var visit func(node string)
+	// @Requires seen != nil And Forall k in g : g[k] != seen
+	// @Requires Forall k in seen : seen[k]
+	// @Modifies seen
+	// @Variant |g \ seen|
+	// @Ensures Forall k in seen : has(seen', k)
+	// @Ensures Forall k in seen' : seen'[k]
+	visit = func(node string) {
+		if !seen[node] {
+			seen[node] = true
+			// @Invariant has(seen, node) And Forall k in old(seen) : has(seen, k)
+			// @Invariant Forall k in seen : seen[k]
+			for e := range g[node] {
+				visit(e)
+			}
+		}
+	}
+	// @Invariant Forall k in seen : seen[k]
+	for root := range roots {
+		visit(root)
+	}
+	return seen
+}
+```
+
+The contract of a closure stands directly above its assignment and holds `Requires`, `Modifies`, `Variant`, and `Ensures` clauses. Without them the contract is empty. Every call of `visit` is checked against this contract, as a call of a function is, both the calls of the function around it and the closure's calls of itself. The closure's results must be named, as those of a verified function are.
+
+The contract names the variables of the function that the closure uses, which are called its captured variables. A captured variable in a `Requires` is its value at the call, and in an `Ensures` the value at the call unprimed and the value on return primed. The closure is verified with nothing known of where it is made: each captured variable is a value of its type that only its `Requires` constrains. So `Reachable` states that `seen` is not nil, and each call proves it.
+
+A closure that assigns a captured variable must list it in `Modifies`, as `CountedDown` lists `total`:
+
+```go
+// @Requires 0 <= n <= 1000
+// @Ensures total = n
+func CountedDown(n int) (total int) {
+	var count func(k int)
+	// @Requires 0 <= k And 0 <= total And total + k <= 1000
+	// @Modifies total
+	// @Variant k
+	// @Ensures total' = total + k
+	count = func(k int) {
+		if k > 0 {
+			total++
+			count(k - 1)
+		}
+	}
+	count(n)
+	return total
+}
+```
+
+After a call, the function knows of the new value what the `Ensures` says. A loop that calls the closure forgets what its `Modifies` lists, as for any call. A closure that assigns a variable its `Modifies` does not list is reported:
+
+```text
+vego: calls is assigned, which the closure visit may not modify; list it in a // @Modifies clause above visit = func...
+```
+
+A `Modifies` entry of a captured slice, map, or pointer also covers what it refers to, as an entry of a parameter does.
+
+#### Measuring a search
+
+`|A \ S|` is the number of keys of the map `A` that are not keys of the map `S`. It can only be the whole of a `Variant`, of a closure, a function, or a loop. It measures a search that marks in `S` the keys of `A` it has seen. It decreases from one point to a later one when these three hold:
+
+- `A` has no key it did not have before;
+- every key of `A` that `S` had, `S` still has;
+- some key that `A` had and `S` did not have is now in `S`, or no longer in `A`.
+
+In `Reachable` that key is `node`. `node` is a key of `g`, since `g[node]` has the key `e`. It was not in `seen` when the call began, and it is in `seen` at the recursive call.
+
+`Reachable` needs two more clauses because of what Go allows:
+
+- `Forall k in seen : seen[k]` is needed because `!seen[node]` holds as well for a key whose value is `false`, which marking it does not add to the keys.
+- `Forall k in g : g[k] != seen` is needed because the recursive call writes `seen` while the loop ranges over `g[node]`. A loop that changes the map it ranges over is refused (see [Changing the map a loop ranges over](#changing-the-map-a-loop-ranges-over)). `Reachable` proves it because `seen` is a map made after it was called, and `g` holds only maps that existed then.
+
+#### What a recursive closure may not do
+
+`vego` recognises a recursive closure only in this form: `var v T` with no value, of a function type without a name, followed in the same block by the one assignment `v = func...`. Every other use of `v` must call it, inside the literal or after the assignment. These are reported as `cannot verify`:
+
+- assigning `v` again, taking its address, or using it other than by calling it, as in copying, passing, or returning it;
+- calling it before the assignment, which covers two closures that call each other;
+- deferring a call of it, or running it on a goroutine;
+- calling it from a literal used as a value;
+- declaring it inside another recursive closure, or inside a literal that is used as a value or handed to a function;
+- capturing a variable whose address is taken anywhere in the function, by `&`, by a method with a pointer receiver, or by slicing an array;
+- a cycle of calls through the closure and another function;
+- a call in the closure that may end the process.
+
+```go
+// @Ensures True
+func Copied() {
+	var visit func(k int)
+	// @Ensures True
+	visit = func(k int) {}
+	other := visit
+	other(1)
+}
+```
+
+```text
+vego: cannot verify Copied: visit holds a recursive closure and is used here other than by calling it; a recursive
+closure may only be called, so it cannot be copied, passed, returned, stored, or compared; to use a function as a
+value, declare a named function type with a contract
 ```
 
 ### Literals that cannot be verified
@@ -3048,7 +3165,7 @@ A proof obligation that stops at a limit draws a message with the note. So does 
 A frame that stops at its limit draws no message. `vego` then proves the invariant as it would without the frame. When that proof stops at its limit too, the function counts a frame and a proof obligation at the same place. For `DropThenAnswer` in [What keeps it between boundaries](#what-keeps-it-between-boundaries), in a file `kept.go`, it prints:
 
 ```text
-kept.go:153:6: vego cost of DropThenAnswer: 21 problems, 6871655 resource units, 1107347 bytes, 1.89 s
+kept.go:153:6: vego cost of DropThenAnswer: 21 problems, 6871676 resource units, 1107447 bytes, 1.89 s
 	kept.go:155:2: 2 contradiction checks stopped at a limit
 	kept.go:155:2: 1 question that names what a frame lost stopped at a limit
 	kept.go:156:1: 1 proof obligation stopped at a limit
@@ -10637,6 +10754,7 @@ A function that uses any of the following is reported as `cannot verify`:
 - calls of function values whose type has no contract, and making a function value of such a type from a function, a method, or a literal (see [A function type without a contract](#a-function-type-without-a-contract));
 - converting a function value to another function type, and method expressions such as `T.M`;
 - a function literal used as a value that assigns a variable it captures (see [Function literals as values](#function-literals-as-values));
+- a recursive closure in any form but `var v T` followed by one assignment `v = func...`, used other than by calling it, called before it is assigned, deferred, called from a literal used as a value, capturing a variable whose address is taken, in a cycle with another function, or ending the process (see [What a recursive closure may not do](#what-a-recursive-closure-may-not-do));
 - code that a function value or an interface value made by verified code runs and that calls through a function value or an interface value (see [Function values that call function values](#function-values-that-call-function-values) and [Interface values that call interface values](#interface-values-that-call-interface-values));
 - a contract on a function type whose `Ensures` only a change of the elements of a slice or a map, of an entry of a map, or memory that the call creates, can meet;
 - maps whose keys are pointers, structs, floats, or interface values, and arrays as keys;

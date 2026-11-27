@@ -14,24 +14,25 @@ type NodeKind int
 
 // Syntactic forms of the annotation language.
 const (
-	NInt     NodeKind = iota
-	NBool             // Val is 1 for True
-	NIdent            // Name, Primed
-	NCall             // Name(Kids...)
-	NIndex            // Kids[0][Kids[1]]
-	NRange            // Kids[0][Kids[1]:Kids[2]) or, when Closed, Kids[0][Kids[1]:Kids[2]]
-	NLen              // |Kids[0]|
-	NUnary            // Op is "-" or "~"
-	NBinary           // Op is an arithmetic or logical connective
-	NCompare          // Kids[0] Ops[0] Kids[1] Ops[1] Kids[2] ...
-	NQuant            // Op is "Forall" or "Exists"; Kids is [body] over Z, [lo, hi, body] over an interval, or [map, body] over the keys of a map
-	NNil              // nil: the nil error or the nil pointer
-	NField            // Kids[0].Name, possibly Primed
-	NStr              // a string literal; Name holds its value
-	NAddr             // &Kids[0]: the address of a struct reached through memory
-	NAssert           // Kids[0].(Type): what an error holds when it holds a Type
-	NConvert          // Type(Kids[0]) for a qualified Type, as hex.InvalidByteError(c)
-	NDeref            // *Kids[0]: what a pointer to a number, a boolean, or a string points to
+	NInt      NodeKind = iota
+	NBool              // Val is 1 for True
+	NIdent             // Name, Primed
+	NCall              // Name(Kids...)
+	NIndex             // Kids[0][Kids[1]]
+	NRange             // Kids[0][Kids[1]:Kids[2]) or, when Closed, Kids[0][Kids[1]:Kids[2]]
+	NLen               // |Kids[0]|
+	NUnary             // Op is "-" or "~"
+	NBinary            // Op is an arithmetic or logical connective
+	NCompare           // Kids[0] Ops[0] Kids[1] Ops[1] Kids[2] ...
+	NQuant             // Op is "Forall" or "Exists"; Kids is [body] over Z, [lo, hi, body] over an interval, or [map, body] over the keys of a map
+	NNil               // nil: the nil error or the nil pointer
+	NField             // Kids[0].Name, possibly Primed
+	NStr               // a string literal; Name holds its value
+	NAddr              // &Kids[0]: the address of a struct reached through memory
+	NAssert            // Kids[0].(Type): what an error holds when it holds a Type
+	NConvert           // Type(Kids[0]) for a qualified Type, as hex.InvalidByteError(c)
+	NDeref             // *Kids[0]: what a pointer to a number, a boolean, or a string points to
+	NKeysLeft          // |Kids[0] \ Kids[1]|: the number of keys of one map that are not keys of another, only as a whole Variant
 )
 
 // TypeName is a type named in a formula: a defined type, qualified by the
@@ -156,6 +157,8 @@ func (n *Node) String() string {
 		return kid(0) + "[" + n.Kids[1].String() + ":" + n.Kids[2].String() + closing
 	case NLen:
 		return "|" + n.Kids[0].String() + "|"
+	case NKeysLeft:
+		return "|" + n.Kids[0].String() + " \\ " + n.Kids[1].String() + "|"
 	case NUnary:
 		return n.Op + kid(0)
 	case NBinary:
@@ -202,7 +205,7 @@ func (e *SyntaxError) Error() string { return e.Msg }
 
 var operators = []string{
 	"<->", "::=", "->", "<=", ">=", "!=", "==", "&&", "||",
-	"=", "<", ">", "+", "-", "*", "/", "%", "~", "!", "(", ")", "[", "]", ",", ":", "|", "'", ".", "&",
+	"=", "<", ">", "+", "-", "*", "/", "%", "~", "!", "(", ")", "[", "]", ",", ":", "|", "'", ".", "&", "\\",
 }
 
 // goSpellings are the operators of Go that the formula language spells
@@ -787,6 +790,9 @@ func (p *parser) primary() *Node {
 		return inner
 	case p.accept("|"):
 		n.Kind, n.Kids = NLen, []*Node{p.arith()}
+		if p.accept("\\") {
+			n.Kind, n.Kids = NKeysLeft, append(n.Kids, p.arith())
+		}
 		p.expect("|")
 	default:
 		found := tok.text

@@ -329,7 +329,17 @@ func (v *fnVerifier) callSites(call *ast.CallExpr, eff *effects) {
 		}
 		return
 	}
+	// A recursive closure assigns the captured variables it assigns, and
+	// is handed each captured variable as it is.
+	if rc := fn.closure; rc != nil {
+		for _, variable := range rc.outputs {
+			eff.whole[variable] = true
+		}
+	}
 	argument := func(param *types.Var) ast.Expr {
+		if rc := fn.closure; rc != nil && rc.args[param] != nil {
+			return rc.args[param]
+		}
 		if param == sig.Recv() || (param != nil && param == fn.receiver) {
 			sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
 			if selection := v.info.Selections[sel]; ok && selection != nil && len(selection.Index()) == 1 {
@@ -785,8 +795,13 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 	// and the body together: a condition that writes memory could otherwise
 	// undo what the body did.
 	var before *logic.Term
+	var beforeLeft *keysLeft
 	if spec.variant != nil {
-		before = v.intTerm(spec.variant, v.bodyEnv(head, at))
+		if left, ok := v.readKeysLeft(spec.variant, v.bodyEnv(head, at)); ok {
+			beforeLeft = left
+		} else {
+			before = v.intTerm(spec.variant, v.bodyEnv(head, at))
+		}
 	}
 	// The condition is evaluated once more than the body runs: the loop is
 	// left in the state after that last evaluation.
@@ -831,6 +846,11 @@ func (v *fnVerifier) loop(shape loopShape, st *state, k func(*state)) {
 			}
 		}
 		checkInvariants(end, "loop invariant may not be preserved")
+		if beforeLeft != nil {
+			after, _ := v.readKeysLeft(spec.variant, v.bodyEnv(end, at))
+			v.checkVariant(end, nil, v.keysLeftDecreases(spec.variant, beforeLeft, after, end), shape.pos,
+				"loop variant may not decrease: %s", spec.variant.text)
+		}
 		if before != nil {
 			v.checkVariant(end, nil, logic.Lt(v.intTerm(spec.variant, v.bodyEnv(end, at)), before), shape.pos,
 				"loop variant may not decrease: %s", spec.variant.text)

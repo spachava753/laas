@@ -184,6 +184,10 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 			results = v.callHanding(call, fn, st, guard, operands)
 			break
 		}
+		if fn.closure != nil {
+			results = v.callClosure(call, callee, fn, st, guard, operands)
+			break
+		}
 		args := v.arguments(call, callee, st, guard)
 		u.reach(operands)
 		formatted := v.checkFormattedAlloc(st, guard, call, fn, args, v.held)
@@ -1062,6 +1066,26 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 		}
 	}
 	post := &specEnv{v: v, sink: st, fn: fn, args: args, results: results, now: before, post: st.mem, before: existed, applied: applied, packed: map[*types.Var]int{}}
+	if fn.closure != nil {
+		// What a recursive closure hands back for the variables it
+		// assigns; where the call did not run, they are as they were.
+		post.outs = map[*types.Var]value{}
+		for _, variable := range fn.closure.outputs {
+			if args[variable] == nil {
+				continue
+			}
+			out := v.unknown(variable.Name(), variable.Type(), st)
+			if len(guard) > 0 {
+				same := make([]*logic.Term, len(out))
+				for i := range out {
+					same[i] = logic.Eq(out[i], args[variable][i])
+				}
+				st.assume(logic.Implies(logic.Not(logic.And(guard...)), logic.And(same...)))
+			}
+			post.outs[variable] = out
+		}
+		v.closureOuts = post.outs
+	}
 	for _, b := range bound {
 		if b.packed {
 			post.packed[b.param] = len(b.pack)
@@ -1734,11 +1758,30 @@ func (v *fnVerifier) checkRecursion(callee *funcInfo, pre *specEnv, st *state, g
 		return
 	}
 	shown := "; the cycle: " + v.describeCycle(direct)
+	// A recursive closure recurses only through itself (D7).
+	if (v.fn.closure != nil || callee.closure != nil) && (v.fn.closure != callee.closure || len(direct.steps) > 1) {
+		v.unsupported(call.Pos(), "this call is part of a cycle of calls that goes through a recursive closure and another function, "+
+			"which is not supported yet: a recursive closure may call itself, but no cycle may lead back to it through other functions"+shown)
+	}
 	for _, fn := range []*funcInfo{v.fn, callee} {
 		if fn.measure == nil {
-			v.report(call.Pos(), "recursive call needs a // @Variant annotation in the doc comment of %s to prove termination%s", fn.obj.Name(), shown)
+			place := "in the doc comment of " + fn.obj.Name()
+			if fn.closure != nil {
+				place = "above the assignment " + fn.closure.variable.Name() + " = func..."
+			}
+			v.report(call.Pos(), "recursive call needs a // @Variant annotation %s to prove termination%s", place, shown)
 			return
 		}
+	}
+	after, isLeft := v.readKeysLeft(callee.measure, pre)
+	if isLeft != (v.measureLeft != nil) {
+		v.unsupported(call.Pos(), "the Variants of the functions of this cycle have two forms, |A \\ S| and a number, which cannot be compared; "+
+			"give them one form")
+	}
+	if isLeft {
+		v.checkVariant(st, guard, v.keysLeftDecreases(callee.measure, v.measureLeft, after, st), call.Pos(),
+			"variant may not decrease in recursive call: %s", callee.measure.text)
+		return
 	}
 	measure := v.intTerm(callee.measure, pre)
 	v.checkVariant(st, guard, logic.Lt(measure, v.measure), call.Pos(),

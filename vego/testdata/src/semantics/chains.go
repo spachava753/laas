@@ -1774,3 +1774,140 @@ func CopyBuiltinChain(a, b []int) {
 	copy(b, a)
 	copy(a, b)
 }
+
+// ClosureChain calls a recursive closure that assigns a variable of the
+// function thirty times: each call hands back a new value of it.
+//
+// @Ensures r = 30
+func ClosureChain() (r int) {
+	c := 0
+	var inc func()
+	// @Requires 0 <= c <= 100
+	// @Modifies c
+	// @Ensures c' = c + 1
+	inc = func() {
+		c++
+	}
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	inc()
+	return c
+}
+
+// EntryRefChain reads thirty references held in memory on entry, each told
+// to lie below the entry bound.
+//
+// @Ensures True
+func EntryRefChain(g map[int]map[int]bool) {
+	seen := make(map[int]bool)
+	// @Assert g[0] != seen
+	// @Assert g[1] != seen
+	// @Assert g[2] != seen
+	// @Assert g[3] != seen
+	// @Assert g[4] != seen
+	// @Assert g[5] != seen
+	// @Assert g[6] != seen
+	// @Assert g[7] != seen
+	// @Assert g[8] != seen
+	// @Assert g[9] != seen
+	// @Assert g[10] != seen
+	// @Assert g[11] != seen
+	// @Assert g[12] != seen
+	// @Assert g[13] != seen
+	// @Assert g[14] != seen
+	// @Assert g[15] != seen
+	// @Assert g[16] != seen
+	// @Assert g[17] != seen
+	// @Assert g[18] != seen
+	// @Assert g[19] != seen
+	// @Assert g[20] != seen
+	// @Assert g[21] != seen
+	// @Assert g[22] != seen
+	// @Assert g[23] != seen
+	// @Assert g[24] != seen
+	// @Assert g[25] != seen
+	// @Assert g[26] != seen
+	// @Assert g[27] != seen
+	// @Assert g[28] != seen
+	// @Assert g[29] != seen
+	_ = seen
+}
+
+// KeysLeftChain is measured by |a \ s| at each of thirty recursive calls
+// of a closure, which follow one another.
+//
+// @Requires s != nil And Forall j in s : s[j]
+// @Modifies s
+// @Ensures True
+func KeysLeftChain(a map[int]bool, s map[int]bool) {
+	var mark func(k int)
+	// @Requires s != nil And Forall j in s : s[j]
+	// @Requires 0 <= k <= 1000
+	// @Modifies s
+	// @Variant |a \ s|
+	// @Ensures Forall j in s : has(s', j)
+	// @Ensures Forall j in s' : s'[j]
+	mark = func(k int) {
+		if k <= 1000-30 && a[k] && !s[k] {
+			s[k] = true
+			mark(k + 1)
+			mark(k + 2)
+			mark(k + 3)
+			mark(k + 4)
+			mark(k + 5)
+			mark(k + 6)
+			mark(k + 7)
+			mark(k + 8)
+			mark(k + 9)
+			mark(k + 10)
+			mark(k + 11)
+			mark(k + 12)
+			mark(k + 13)
+			mark(k + 14)
+			mark(k + 15)
+			mark(k + 16)
+			mark(k + 17)
+			mark(k + 18)
+			mark(k + 19)
+			mark(k + 20)
+			mark(k + 21)
+			mark(k + 22)
+			mark(k + 23)
+			mark(k + 24)
+			mark(k + 25)
+			mark(k + 26)
+			mark(k + 27)
+			mark(k + 28)
+			mark(k + 29)
+			mark(k + 30)
+		}
+	}
+	mark(0)
+}

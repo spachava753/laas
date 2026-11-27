@@ -936,6 +936,13 @@ func (v *fnVerifier) checkClauseFramed(c *clause, env logic.Env, st *state, guar
 		text := strings.Join(strings.Fields(c.text[node.Start:node.End]), " ")
 		var found []validFound
 		var goal *logic.Term
+		// What memory held on entry refers to, at the reads of the goal,
+		// is a premise of each of its conjuncts (noteEntryRefs).
+		savedEntry, premises := v.entryGoal, &[]*logic.Term{}
+		v.entryGoal, v.entryNoted = nil, map[string]bool{}
+		if comparesRefs(node) {
+			v.entryGoal = premises
+		}
 		if spec != nil && isValidCall(node) {
 			saved := spec.validFound
 			spec.validFound = &found
@@ -944,6 +951,8 @@ func (v *fnVerifier) checkClauseFramed(c *clause, env logic.Env, st *state, guar
 		} else {
 			goal = v.formula(c, node, env)
 		}
+		v.entryGoal = savedEntry
+		entryFacts := logic.And(*premises...)
 		done := v.at(pos)
 		v.lastFrame, v.lastSplit = nil, nil
 		held := framed != nil && framed(node, goal)
@@ -973,6 +982,11 @@ func (v *fnVerifier) checkClauseFramed(c *clause, env logic.Env, st *state, guar
 					// The split asked at the full limit stands for the
 					// conjunct's own proof, whose goal implies it.
 					v.answered(st, guard, conjunct, *split, true, pos, "%s: %s", what, text)
+				} else if len(*premises) > 0 {
+					// The premises are true in every state, so the conjunct
+					// is assumed as it is once proved.
+					v.checkOnly(st, guard, logic.Implies(entryFacts, conjunct), false, pos, "%s: %s", what, text)
+					st.assume(logic.Implies(logic.And(guard...), conjunct))
 				} else {
 					v.check(st, guard, conjunct, pos, "%s: %s", what, text)
 				}
@@ -1435,4 +1449,21 @@ func (v *fnVerifier) untouchedRow(known *layer, home *logic.Term) (*logic.Term, 
 		}
 	}
 	return logic.And(outside...), facts
+}
+
+// comparesRefs reports whether a formula can tell references apart: it
+// compares with = or != or asks fresh, apart, or within. Only then is what
+// memory held on entry refers to worth stating as its premise; any other
+// formula reads references only to follow them.
+func comparesRefs(n *logic.Node) bool {
+	found := false
+	n.Walk(func(n *logic.Node) {
+		switch {
+		case n.Kind == logic.NCompare && (slices.Contains(n.Ops, "=") || slices.Contains(n.Ops, "!=")):
+			found = true
+		case n.Kind == logic.NCall && (n.Name == "fresh" || n.Name == "apart" || n.Name == "within"):
+			found = true
+		}
+	})
+	return found
 }

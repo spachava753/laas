@@ -93,7 +93,10 @@ func (pv *pkgVerifier) findConversions() *conversions {
 // ssaProgram returns the package built in go/ssa, built once.
 func (pv *pkgVerifier) ssaProgram() *ssa.Program {
 	if pv.ssaProg == nil {
-		pv.ssaProg = buildSSA(pv.pass.Fset, pv.pass.Pkg, pv.pass.Files, pv.info)
+		// From the type information as the compiler gave it: a copy in
+		// which calls of recursive closures resolve to functions of their
+		// own (closures.go) is not one go/ssa can build.
+		pv.ssaProg = buildSSA(pv.pass.Fset, pv.pass.Pkg, pv.pass.Files, pv.pass.TypesInfo)
 	}
 	return pv.ssaProg
 }

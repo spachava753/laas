@@ -154,8 +154,12 @@ func (pv *pkgVerifier) buildGraph() {
 			g.byObj[fn.obj] = &callNode{fn: fn}
 		}
 	}
-	// The literals that are part of the function around them.
+	// The literals that are part of the function around them. A recursive
+	// closure is a node of its own, in order above, and no value.
 	inPlace := map[*ast.FuncLit]bool{}
+	for _, rc := range pv.closures {
+		inPlace[rc.lit] = true
+	}
 	for _, file := range pv.pass.Files {
 		ast.Inspect(file, func(n ast.Node) bool {
 			switch n := n.(type) {
@@ -599,6 +603,9 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 	ast.Inspect(body, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.FuncLit:
+			if slices.ContainsFunc(pv.closures, func(rc *recClosure) bool { return rc.lit == n && (node.fn == nil || node.fn.closure != rc) }) {
+				return false
+			}
 			return g.lits[n] == nil
 		case *ast.Ident:
 			if named, ok := pv.info.Uses[n].(*types.Func); ok {

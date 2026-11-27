@@ -149,6 +149,9 @@ type fnVerifier struct {
 	// callbacks.go.
 	forbidden []forbidden
 	handing   map[*types.Var]*handOver
+	// closureOuts holds what the call of a recursive closure being applied
+	// hands back for the variables it assigns; see callClosure.
+	closureOuts map[*types.Var]value
 	// layers holds, by the name of the constant that stands for a forgotten
 	// region, what is still known of the region.
 	layers map[string]*layer
@@ -190,6 +193,14 @@ type fnVerifier struct {
 	names    map[string]int
 	branches int
 	measure  *logic.Term
+	// measureLeft is the Variant of the function read on entry when it is
+	// of the form |A \ S|, which is no term; see keysLeft.
+	measureLeft *keysLeft
+	// entryGoal, while checkClause reads a goal, gathers what memory held
+	// on entry refers to at its reads, its premises, once each by its text
+	// in entryNoted; see noteEntryRefs.
+	entryGoal  *[]*logic.Term
+	entryNoted map[string]bool
 	// originBody, when set, is the body of the declared function whose
 	// origins of errors a function value made in it is judged by; see
 	// bodyOrigins.
@@ -700,6 +711,14 @@ func (v *fnVerifier) verify() {
 	if sig.TypeParams() != nil || sig.RecvTypeParams() != nil {
 		v.unsupported(fn.decl.Pos(), "generic functions are not supported yet")
 	}
+	if fn.closure != nil {
+		v.checkClosure()
+	}
+	for _, rc := range v.pkgVerifier.closures {
+		if rc.outer == fn.decl && rc.refused != "" {
+			v.unsupported(rc.refusedAt, rc.refused)
+		}
+	}
 	v.checkCopies(fn.decl)
 	// A variable whose name means something else in annotations would be
 	// read as that other thing, silently.
@@ -744,7 +763,10 @@ func (v *fnVerifier) verify() {
 	for _, refused := range v.entryOnly(st) {
 		v.report(refused.clause.pos, "%s", refused.message(fn.obj.Name()))
 	}
-	if fn.measure != nil {
+	if left, ok := v.readKeysLeft(fn.measure, &specEnv{v: v, sink: st, fn: fn, args: v.entry, now: memory{}}); ok {
+		// A count of keys is never negative.
+		v.measureLeft = left
+	} else if fn.measure != nil {
 		v.measure = v.intTerm(fn.measure, &specEnv{v: v, sink: st, fn: fn, args: v.entry, now: memory{}})
 		v.checkVariant(st, nil, logic.Le(logic.IntLit(0), v.measure), fn.decl.Name.Pos(),
 			"variant of the function may be negative: %s", fn.measure.text)
@@ -783,7 +805,7 @@ func (v *fnVerifier) verify() {
 		// After a failure the state may hold a false assumption, under
 		// which nothing is needed. A clause that names an owner gives
 		// several targets, and is needed when one of them is.
-		if !needed[t.mod] && !fn.failed && !reported[t.mod] {
+		if !needed[t.mod] && !fn.failed && !reported[t.mod] && (fn.closure == nil || !fn.closure.outputMods[t.mod]) {
 			reported[t.mod] = true
 			v.report(t.clause.pos, "Modifies lists %s, but %s never needs to modify it; "+
 				"a Modifies clause must list exactly what the function may write", t.text, fn.obj.Name())
@@ -1055,6 +1077,11 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 			return
 		}
 	case *ast.AssignStmt:
+		if v.pkgVerifier.closureAssigns[s] != nil {
+			// The closure is verified on its own; its variable holds no
+			// value, since every use of it is a call.
+			break
+		}
 		v.assign(s, st, k)
 		return
 	case *ast.IncDecStmt:

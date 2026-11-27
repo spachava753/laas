@@ -320,6 +320,8 @@ func (s *scope) term(n *Node) *Term {
 		return s.call(n)
 	case NLen:
 		return s.length(n.Kids[0])
+	case NKeysLeft:
+		panic(resolveError{fmt.Errorf("%s is a measure of a search and stands only as the whole of a Variant, as in // @Variant |g \\ seen|", n.String())})
 	case NUnary:
 		if n.Op == "-" {
 			return Neg(s.expect(n.Kids[0], Int))

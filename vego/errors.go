@@ -896,7 +896,7 @@ func (v *fnVerifier) contractInstance(entry *state) (pre, post, failures []*logi
 			st.assume(typed)
 		}
 	}
-	env := &specEnv{v: v, sink: st, fn: fn, args: v.entry, results: results, now: memory{}, post: st.mem, before: entry.brk}
+	env := &specEnv{v: v, sink: st, fn: fn, args: v.entry, outs: v.unknownOuts(fn, st), results: results, now: memory{}, post: st.mem, before: entry.brk}
 	for _, c := range fn.ensures {
 		// A clause about a result that has no value in the logic says
 		// nothing here.

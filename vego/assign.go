@@ -956,7 +956,7 @@ func (v *fnVerifier) atReturn(st *state, results []value, pos token.Pos) {
 	if len(none) > 0 && !v.quickly(st, nil, logic.Not(logic.And(none...))) {
 		v.successes = append(v.successes, outcome)
 	}
-	env := &specEnv{v: v, sink: st, fn: v.fn, args: v.entry, results: results, now: memory{}, post: st.mem, before: v.entryBrk}
+	env := &specEnv{v: v, sink: st, fn: v.fn, args: v.entry, outs: v.closureOutputs(st), results: results, now: memory{}, post: st.mem, before: v.entryBrk}
 	if v.chooseStates != nil {
 		v.chosenEnsures(st, results, pos)
 	} else {
@@ -1040,7 +1040,7 @@ func (v *fnVerifier) chosenEnsures(st *state, results []value, pos token.Pos) {
 		}
 		mem := maps.Clone(st.mem)
 		mem[stateRegion] = logic.Store(st.mem.region(stateRegion, logic.SeqOf(logic.BoolSeq)), at, row)
-		env := &specEnv{v: v, sink: st, fn: v.fn, args: v.entry, results: results, now: memory{}, post: mem, before: v.entryBrk}
+		env := &specEnv{v: v, sink: st, fn: v.fn, args: v.entry, outs: v.closureOutputs(st), results: results, now: memory{}, post: mem, before: v.entryBrk}
 		var all []*logic.Term
 		for _, c := range v.fn.ensures {
 			if c.inputs {

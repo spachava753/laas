@@ -600,6 +600,7 @@ func (v *fnVerifier) member(sink *state, mem memory, cur value, t types.Type, in
 	}
 	result := v.fetchIn(sink, mem, v.cellsOf(object)[lo:hi], cur[0], cur[1], object)
 	v.noteTyped(sink, result, field.Type())
+	v.noteEntryRefs(mem, entryCells(v.cellsOf(object)[lo:hi], cur[1]), cur[0], field.Type())
 	v.noteReached(sink, v.cellsOf(object)[lo:hi], cur[0], cur[1], field.Type(), object)
 	return result, field.Type(), true
 }
@@ -630,6 +631,9 @@ func (v *fnVerifier) element(sink *state, mem memory, header value, t types.Type
 	if notes != nil {
 		v.noteTyped(notes, result, elem)
 		v.noteReached(notes, v.cellsOf(elem), header[0], v.elementAt(header, t, index), elem, t)
+	}
+	if ok {
+		v.noteEntryRefs(mem, entryCells(v.cellsOf(elem), v.elementAt(header, t, index)), header[0], elem)
 	}
 	return result, ok
 }
@@ -1781,3 +1785,115 @@ func heldPointer(t *logic.Term) string {
 	}
 	return ""
 }
+
+// noteEntryRefs states what memory held on entry refers to: a value read at
+// an allocation below the entry bound, from regions whose contents are all
+// still those of entry, refers only to allocations below the entry bound.
+// It is true of every cell of those regions, whatever was read there, so
+// under a quantifier it is stated quantified over the variables it names.
+// It is stated only of the reads of a goal that checkClause proves, as a
+// premise of that goal, so no other problem changes. See the decision
+// under Maps in the ROADMAP.
+func (v *fnVerifier) noteEntryRefs(mem memory, cells []entryCell, ref *logic.Term, t types.Type) {
+	if v.entryGoal == nil || v.entryBrk == nil || !holdsMemory(t) || ref.Op == logic.OpConst && v.readOnlyRefs[ref.Name] != "" {
+		return
+	}
+	leaves, _ := layoutOf(t)
+	if len(leaves) != len(cells) {
+		return
+	}
+	var below []*logic.Term
+	for i, lf := range leaves {
+		if !(lf.part == partRef || lf.part == partPtr || lf.part == partValue && lf.sort == logic.Ref && !isIface(lf.typ) && !holdsCodeRef(lf.typ)) {
+			continue
+		}
+		c := cells[i]
+		table := logic.SeqOf(logic.SeqOf(c.sort))
+		// The fact is of the region on entry; it tells the read something
+		// only where its region is that region under writes elsewhere and
+		// what loops forgot elsewhere.
+		if !v.overEntry(mem.region(c.key, table), c.key) {
+			continue
+		}
+		onEntry := logic.Select(logic.Select(logic.Const(entryRegion+c.key, table), ref), c.pos)
+		below = append(below, logic.Lt(onEntry, v.entryBrk))
+	}
+	if len(below) == 0 {
+		return
+	}
+	fact := logic.Implies(logic.Lt(ref, v.entryBrk), logic.And(below...))
+	for _, b := range slices.Backward(freeBound(fact)) {
+		fact = logic.Forall(b, fact)
+	}
+	if note := fact.String(); !v.entryNoted[note] {
+		v.entryNoted[note] = true
+		*v.entryGoal = append(*v.entryGoal, fact)
+	}
+}
+
+// entryCell is a leaf of a value read from memory: its region, the sort
+// of what the region holds, and the position in the row of the reference.
+type entryCell struct {
+	key  string
+	sort logic.Sort
+	pos  *logic.Term
+}
+
+// overEntry reports whether a region is the region on entry under writes,
+// and under layers of what loops and calls forgot.
+func (v *fnVerifier) overEntry(region *logic.Term, key string) bool {
+	for {
+		for region.Op == logic.OpStore || region.Op == logic.OpWrite || region.Op == logic.OpSpliceAt {
+			region = region.Args[0]
+		}
+		if region.Op != logic.OpConst {
+			return false
+		}
+		if region.Name == entryRegion+key {
+			return true
+		}
+		known := v.layers[region.Name]
+		if known == nil {
+			return false
+		}
+		region = known.prev
+	}
+}
+
+// entryCells gives the leaves of a value stored at a position of an
+// allocation, for noteEntryRefs.
+func entryCells(cells []cell, at *logic.Term) []entryCell {
+	out := make([]entryCell, len(cells))
+	for i, c := range cells {
+		out[i] = entryCell{key: c.key, sort: c.sort, pos: c.start(at)}
+	}
+	return out
+}
+
+// freeBound returns the bound variables a term mentions that it does not
+// bind itself, each once, in the order met.
+func freeBound(t *logic.Term) []*logic.Term {
+	var found []*logic.Term
+	seen := map[string]bool{}
+	var walk func(t *logic.Term, inside map[string]bool)
+	walk = func(t *logic.Term, inside map[string]bool) {
+		if t.Op == logic.OpBound && !inside[t.Name] && !seen[t.Name] {
+			seen[t.Name] = true
+			found = append(found, t)
+		}
+		if (t.Op == logic.OpForall || t.Op == logic.OpExists) && len(t.Args) > 0 && t.Args[0].Op == logic.OpBound {
+			inner := maps.Clone(inside)
+			inner[t.Args[0].Name] = true
+			for _, arg := range t.Args[1:] {
+				walk(arg, inner)
+			}
+			return
+		}
+		for _, arg := range t.Args {
+			walk(arg, inside)
+		}
+	}
+	walk(t, map[string]bool{})
+	return found
+}
+

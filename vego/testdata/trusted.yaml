@@ -3,6 +3,13 @@
 version: 1
 
 trusted:
+  # F40, step 1b: a function that returns new memory holding a reference to
+  # more new memory, whose regions the call does not list; what memory held
+  # on entry refers to says nothing of it.
+  recclosures.makeChain:
+    reason: Returns a new holder whose next is another new holder.
+    modifies: []
+    ensures: ["p != nil", "fresh(p)", "p.next != nil", "fresh(p.next)"]
   # F39, part A: functions of unseensdk, which run methods of the SDK that
   # nobody verified. Each entry answers for what the methods it runs do.
   unseensdk.Send:

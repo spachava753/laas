@@ -236,7 +236,11 @@ func (pv *pkgVerifier) unreadClauses(fn *funcInfo) []unreadClause {
 	}
 	if fn.measure != nil {
 		c := fn.measure
-		attempt(func() { v.intTerm(c, pre) })
+		attempt(func() {
+			if _, left := v.readKeysLeft(c, pre); !left {
+				v.intTerm(c, pre)
+			}
+		})
 	}
 	for _, m := range fn.modifies {
 		if _, _, err := v.locateTarget(fn, m, v.entry, st, memory{}); err != nil {
@@ -249,7 +253,7 @@ func (pv *pkgVerifier) unreadClauses(fn *funcInfo) []unreadClause {
 			results[i] = v.unknown("out", result.Type(), st)
 		}
 	}
-	post := &specEnv{v: v, sink: st, fn: fn, args: v.entry, results: results, now: memory{}, post: st.mem, before: st.brk}
+	post := &specEnv{v: v, sink: st, fn: fn, args: v.entry, outs: v.unknownOuts(fn, st), results: results, now: memory{}, post: st.mem, before: st.brk}
 	for _, c := range fn.ensures {
 		attempt(func() { v.calleeFormula(c, post) })
 	}

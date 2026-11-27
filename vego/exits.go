@@ -121,6 +121,9 @@ func (v *fnVerifier) checkExitAllowed(pos token.Pos, callee string) {
 	case v.fn.spelled != nil:
 		v.unsupported(pos, fmt.Sprintf("it calls %s, which may end the process, in a function literal used as a value of type %s; "+
 			"a call of a function value is assumed to return, since a function type cannot have an Exits annotation yet", callee, v.fn.spelled.obj.Name()))
+	case v.fn.closure != nil:
+		v.unsupported(pos, fmt.Sprintf("it calls %s, which may end the process, in %s; a recursive closure may not end the process yet, "+
+			"since its calls are taken to return", callee, closureName(v.fn.closure.variable)))
 	case v.deferring > 0:
 		v.unsupported(pos, fmt.Sprintf("it calls %s, which may end the process, in a deferred call; a deferred call that may end the process "+
 			"is not supported yet", callee))
