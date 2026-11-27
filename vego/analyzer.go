@@ -1532,10 +1532,13 @@ func (pv *pkgVerifier) collect() {
 			}
 		}
 	}
-	pv.finishClosures()
+	// The weakest contract of a census comes before the closures are
+	// kept, which they are only in a function that is verified (F16 of
+	// the review of F41).
 	if pv.census != nil && pv.census.looked {
 		pv.synthesize()
 	}
+	pv.finishClosures()
 	for _, fn := range pv.order {
 		pv.readSourceCalls(fn)
 	}

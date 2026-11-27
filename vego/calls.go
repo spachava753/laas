@@ -198,6 +198,16 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 			results = v.callHanding(call, fn, st, guard, operands)
 			break
 		}
+		if fn.closure != nil && v.census != nil && (fn.closure.refused != "" || capturesBoxed(fn.closure, v.boxed) != nil) {
+			// A census goes on past the refusal of a closure: its calls
+			// are taken with the weakest contract, and its body is walked
+			// as a literal no attempt entered.
+			v.census.note(v.pkgVerifier, call.Pos(), withDetail(rAssumedClosure, fn.closure.variable.Name()), "")
+			v.arguments(call, callee, st, guard)
+			u.reach(operands)
+			results = v.nothingKnown(callee, st)
+			break
+		}
 		if fn.closure != nil {
 			results = v.callClosure(call, callee, fn, st, guard, operands)
 			break

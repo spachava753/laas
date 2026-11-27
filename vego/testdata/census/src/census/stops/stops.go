@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 )
 
 // Channel makes a channel and receives from it.
@@ -109,4 +110,44 @@ type Sink func(ch chan int)
 // it (F12 of the review).
 func Feed(s Sink) {
 	s(nil)
+}
+
+type counter struct{ n int }
+
+func itoa(p *int) string { return "" }
+
+// Hidden refuses at the call of strings.Trim and inside its argument; a
+// stub of the call still looks at the argument (F15 of the review).
+func Hidden(t *counter) string {
+	return strings.Trim(itoa(&t.n), " ")
+}
+
+// HiddenDecl is Hidden in a statement that declares.
+func HiddenDecl(t *counter) bool {
+	_, err := os.Stat(itoa(&t.n))
+	return err == nil
+}
+
+// Boxed has a recursive closure that captures a variable whose address is
+// taken (F16 of the review).
+func Boxed(n int) (r int) {
+	total := 0
+	p := &total
+	_ = p
+	var walk func(k int)
+	walk = func(k int) {
+		if k > 0 {
+			total += k
+			walk(k - 1)
+		}
+	}
+	walk(n)
+	return total
+}
+
+// AddrSlice takes the address of a slice and reads through it: one cause
+// in one class (F18 of the review).
+func AddrSlice(xs []int) int {
+	p := &xs
+	return len(*p)
 }

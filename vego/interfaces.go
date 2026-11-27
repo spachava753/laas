@@ -439,9 +439,9 @@ func (v *fnVerifier) madeInterface(e ast.Expr, held value, from, want types.Type
 				unseen = true
 				continue
 			} else if why != "" {
-				v.unsupported(e.Pos(), withDetail(rConvNoContract, method.FullName()), fmt.Sprintf("converting a %s to %s is not supported: its method %s has no contract, and %s", from, want, methodTitle(method), why))
+				v.unsupported(e.Pos(), v.ownerClass(typePackage(from), rConvNoContract, rConvNoContractOther, method.FullName()), fmt.Sprintf("converting a %s to %s is not supported: its method %s has no contract, and %s", from, want, methodTitle(method), why))
 			}
-			v.unsupported(e.Pos(), withDetail(rConvNoContract, method.FullName()), fmt.Sprintf("converting a %s to %s is not supported: its method %s has no contract, so nothing would say "+
+			v.unsupported(e.Pos(), v.ownerClass(typePackage(from), rConvNoContract, rConvNoContractOther, method.FullName()), fmt.Sprintf("converting a %s to %s is not supported: its method %s has no contract, so nothing would say "+
 				"what code that calls it may rely on%s", from, want, methodTitle(method), v.entryHint(method.Pkg(), method.Pos(), method.FullName())))
 		}
 		v.usable(e.Pos(), T, methodTitle(method), st, guard, false)
@@ -512,7 +512,7 @@ func (v *fnVerifier) unseenMethod(from, want types.Type, method *types.Func) (ok
 func (v *fnVerifier) madeMethod(e ast.Expr, held value, from, want types.Type, method *types.Func, more string, st *state, guard []*logic.Term) {
 	concrete, why := concreteMethod(from, method.Pkg(), method.Name(), v.pass.Pkg)
 	if why != "" {
-		v.unsupported(e.Pos(), rConvNoContract, why)
+		v.unsupported(e.Pos(), v.ownerClass(typePackage(from), rConvNoContract, rConvNoContractOther, method.FullName()), why)
 	}
 	recv := concrete.Type().(*types.Signature).Recv().Type()
 	_, fromPointer := from.Underlying().(*types.Pointer)
@@ -844,7 +844,7 @@ func (v *fnVerifier) usableMethodContract(call *ast.CallExpr, callee *types.Func
 	fn := v.methodContract(callee)
 	v.noteAssumed(call.Pos(), fn, rAssumedMethod, callee.FullName())
 	if fn == nil {
-		v.unsupported(call.Pos(), withDetail(rIfaceNoContract, callee.FullName()), fmt.Sprintf("%s calls %s, which has no contract; a method of an interface gets one in its doc comment "+
+		v.unsupported(call.Pos(), v.ownerClass(callee.Pkg(), rIfaceNoContract, rIfaceNoContractOther, callee.FullName()), fmt.Sprintf("%s calls %s, which has no contract; a method of an interface gets one in its doc comment "+
 			"where the interface is declared, with // @ annotations%s", types.ExprString(call.Fun), methodTitle(callee), v.entryHint(callee.Pkg(), callee.Pos(), callee.FullName())))
 	}
 	fn = v.usable(call.Pos(), fn, methodTitle(callee), st, guard, true)

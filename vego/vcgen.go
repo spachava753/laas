@@ -465,12 +465,6 @@ func (v *fnVerifier) enter() *state {
 		if !ok && v.lenient {
 			continue
 		}
-		if !ok && v.census != nil {
-			// A census goes on without the parameter; a use of it refuses
-			// with the class of its type.
-			v.censusRefuse(param.Pos(), typeClass(param.Type()), fmt.Sprintf("%s has unsupported type %s%s", param.Name(), param.Type(), unsupportedHint(param.Type())))
-			continue
-		}
 		if !ok {
 			// A receiver or a parameter without a name is still named in
 			// the message, which would otherwise read "parameter  has".
@@ -480,6 +474,11 @@ func (v *fnVerifier) enter() *state {
 				if fn.obj != nil && fn.obj.Type().(*types.Signature).Recv() == param {
 					what = "the receiver, which has no name,"
 				}
+			}
+			// A census goes on without the parameter; a use of it refuses
+			// with the class of its type.
+			if v.censusRefuse(param.Pos(), typeClass(param.Type()), fmt.Sprintf("%s has unsupported type %s%s", what, param.Type(), unsupportedHint(param.Type()))) {
+				continue
 			}
 			v.unsupported(param.Pos(), typeClass(param.Type()), fmt.Sprintf("%s has unsupported type %s%s", what, param.Type(), unsupportedHint(param.Type())))
 		}
@@ -545,8 +544,7 @@ func (v *fnVerifier) enter() *state {
 		if !ok && v.lenient {
 			continue
 		}
-		if !ok && v.census != nil {
-			v.censusRefuse(fn.obj.Pos(), typeClass(result.Type()), fmt.Sprintf("result type %s is not supported%s", result.Type(), unsupportedHint(result.Type())))
+		if !ok && v.censusRefuse(fn.obj.Pos(), typeClass(result.Type()), fmt.Sprintf("result type %s is not supported%s", result.Type(), unsupportedHint(result.Type()))) {
 			continue
 		}
 		if !ok {

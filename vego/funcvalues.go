@@ -877,6 +877,15 @@ func (v *fnVerifier) usableValueContract(fun ast.Expr, st *state, guard []*logic
 	t := v.info.TypeOf(fun)
 	fn := v.valueContract(t)
 	v.noteAssumed(fun.Pos(), fn, rAssumedType, t.String())
+	// In the body of a recursive closure that the function around it
+	// refused, a census walks the body as a literal, and a call of the
+	// closure is taken with the weakest contract.
+	if id, ok := ast.Unparen(fun).(*ast.Ident); ok && fn == nil && v.census != nil {
+		if variable, ok := v.info.Uses[id].(*types.Var); ok && v.pkgVerifier.closureVars[variable] != nil {
+			fn = v.pkgVerifier.assumedClosure(variable)
+			v.census.note(v.pkgVerifier, fun.Pos(), withDetail(rAssumedClosure, variable.Name()), "")
+		}
+	}
 	if fn == nil {
 		v.unsupported(fun.Pos(), v.funcValueClass(fun, t), fmt.Sprintf("%s has type %s, which has no contract; "+
 			"declare a named function type with a contract and use it here%s", types.ExprString(fun), t, v.funcTypeHint(t)))

@@ -7,15 +7,18 @@ import (
 	"go/build"
 	"go/token"
 	"go/types"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 	"github.com/spachava753/laas/vego/internal/solver"
 	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/types/typeutil"
 )
 
 // A census (-vego.census) looks at every function of a module as if it
@@ -93,6 +96,9 @@ const (
 	rConvOwns              refusal = "convert:iface-owns"
 	rConvStates            refusal = "convert:iface-states"
 	rConvNoContract        refusal = "convert:iface-no-contract"
+	rConvNoContractOther   refusal = "convert:iface-no-contract-other"
+	rIfaceNoContractOther  refusal = "iface-method:no-contract-other"
+	rFuncNoContractOther   refusal = "func-value:no-contract-other"
 	rConvForeignImpl       refusal = "convert:iface-foreign-impl"
 	rConvByContract        refusal = "convert:iface-by-contract"
 	rConvToError           refusal = "convert:to-error"
@@ -196,6 +202,7 @@ const (
 	rAssumedMethod    refusal = "assumed:module-method"
 	rAssumedType      refusal = "assumed:module-type"
 	rAssumedCalls     refusal = "assumed:calls"
+	rAssumedClosure   refusal = "assumed:closure"
 	rDeclaredSizes    refusal = "declared:sizes"
 	rDeclaredInputs   refusal = "declared:inputs"
 	rInternal         refusal = "limit:internal"
@@ -248,7 +255,8 @@ var refusalClasses = map[refusal]string{
 	rAddrElement:           "&xs[i] or &a[i] of a number, a boolean, or a string, or a pointer method called on such an element (item 7, interior pointers)",
 	rAddrGlobal:            "&g of a package-level variable, or a pointer method called on one (item 7, interior pointers)",
 	rAddrOther:             "the address of a value that is not where a pointer can point, not in another class (item 7)",
-	rIfaceNoContract:       "a call through an interface whose method has no contract, of the standard library or of another module (Interfaces)",
+	rIfaceNoContract:       "a call through an interface of the standard library whose method has no contract (Interfaces, second part: entries ship)",
+	rIfaceNoContractOther:  "a call through an interface of another module whose method has no entry, which the project writes (Interfaces, second part)",
 	rIfaceForm:             "a call through an interface in a form not supported: a method expression, an embedded interface field, an interface not modelled (Interfaces)",
 	rConvOptional:          "a conversion between interfaces with the methods of an optional interface of another module (Dynamic types, Part 3)",
 	rConvErrToIface:        "an error converted to an interface other than any (Dynamic types, Not built yet)",
@@ -258,7 +266,8 @@ var refusalClasses = map[refusal]string{
 	rConvBuffer:            "a *bytes.Buffer or *strings.Builder converted to an io.Writer without a declared memory (Sizes under a declared memory)",
 	rConvOwns:              "a value that owns memory or an interface value converted to an interface whose methods write behind it (Footprints)",
 	rConvStates:            "a value converted to an interface with states that its methods change (State that a value owns)",
-	rConvNoContract:        "a value converted to an interface while a method of its type has no contract, of the standard library or of another module (Interfaces)",
+	rConvNoContract:        "a value of a type of the standard library converted to an interface while a method of the type has no contract (Interfaces)",
+	rConvNoContractOther:   "a value of a type of another module converted to an interface while a method of the type has no entry, which the project writes (Interfaces, second part)",
 	rConvForeignImpl:       "a value converted to an interface whose implementation is code of another module that could run what it holds (Interfaces, second part)",
 	rConvByContract:        "a conversion checked against the contract of the interface that fails a condition of that check (Interfaces)",
 	rConvToError:           "a value of the project converted to error that the model of errors cannot hold (Dynamic types and typed errors)",
@@ -277,7 +286,8 @@ var refusalClasses = map[refusal]string{
 	rLitCaptures:           "a function literal used as a value that assigns or calls what the function around it holds (Function literals)",
 	rLitSignature:          "a function literal whose parameters or results have no model, or a literal used in a way not supported (Function literals)",
 	rClosure:               "a recursive closure in a form not supported (Function literals)",
-	rFuncNoContract:        "a call through a value of a function type that has no contract, of the standard library, of another module, or unnamed (Function values)",
+	rFuncNoContract:        "a call through, or a use as, a value of a function type of the standard library, or unnamed, that has no contract (Function values)",
+	rFuncNoContractOther:   "a call through, or a use as, a value of a named function type of another module that has no entry, which the project writes (Interfaces and function types of other modules)",
 	rFuncMethodValue:       "a method value x.M used as a value (Function values)",
 	rFuncMethodExpr:        "a method expression T.M used as a value (Function values)",
 	rFuncMadeFrom:          "a function value made from something other than a literal, a function, or a method value (Function values)",
@@ -357,6 +367,7 @@ var refusalClasses = map[refusal]string{
 	rAssumedModule:         "a call of a function of the module with no contract, taken with the weakest contract; not a cause",
 	rAssumedMethod:         "a call of a method of an interface of the module with no contract, taken with the weakest contract; not a cause",
 	rAssumedType:           "a call of a value of a function type of the module with no contract, taken with the weakest contract; not a cause",
+	rAssumedClosure:        "a call of a recursive closure that the function around it refuses, in its body, which the census walks as a literal with the weakest contract for the call; not a cause",
 	rAssumedCalls:          "a value of an unnamed function type handed to a function of the module taken with the weakest contract, which a Calls annotation on it might give a contract; not a cause",
 	rDeclaredSizes:         "what only the declared memory of the trust file lets through, as a buffer converted to an io.Writer; not a cause",
 	rDeclaredInputs:        "a shipped entry that only the declaration that inputs end makes usable; not a cause",
@@ -516,6 +527,9 @@ func (v *fnVerifier) varClass(variable *types.Var) refusal {
 // function of an unnamed function type is one a Calls annotation on the
 // function gives a contract, which is the project's to write.
 func (v *fnVerifier) funcValueClass(fun ast.Expr, t types.Type) refusal {
+	if named, ok := types.Unalias(t).(*types.Named); ok {
+		return v.ownerClass(named.Obj().Pkg(), rFuncNoContract, rFuncNoContractOther, t.String())
+	}
 	if id, ok := ast.Unparen(fun).(*ast.Ident); ok && fun != nil {
 		if variable, ok := v.info.Uses[id].(*types.Var); ok && slices.Contains(v.fn.params, variable) {
 			if _, named := types.Unalias(t).(*types.Named); !named {
@@ -573,6 +587,55 @@ func unusableClass(view *contractView) refusal {
 		return view.class
 	}
 	return rContractUnusable
+}
+
+// exprClass returns the class of an expression of a kind not supported:
+// that of the type of its operand when the operand's type has no layout,
+// as for *p of a p that points to a slice (F18 of the review of F41).
+func (v *fnVerifier) exprClass(e ast.Expr) refusal {
+	var operand ast.Expr
+	switch e := ast.Unparen(e).(type) {
+	case *ast.StarExpr:
+		operand = e.X
+	case *ast.UnaryExpr:
+		operand = e.X
+	case *ast.SelectorExpr:
+		operand = e.X
+	case *ast.IndexExpr:
+		operand = e.X
+	case *ast.SliceExpr:
+		operand = e.X
+	}
+	if operand != nil {
+		if t := v.info.TypeOf(operand); t != nil {
+			if _, ok := layoutOf(t); !ok {
+				return typeClass(t)
+			}
+		}
+	}
+	return withDetail(rExprOther, fmt.Sprintf("%T", e))
+}
+
+// ownerClass returns the class of what has no contract by the package that
+// declares it: one of another module is the project's to give an entry,
+// as no-entry:other is (F17 of the review of F41).
+func (v *fnVerifier) ownerClass(pkg *types.Package, std, other refusal, detail string) refusal {
+	if pkg != nil && !v.pkgVerifier.stdPackage(pkg) && !v.pkgVerifier.inScope(pkg) {
+		return withDetail(other, detail)
+	}
+	return withDetail(std, detail)
+}
+
+// typePackage returns the package that declares a named type, or what a
+// pointer points to, or nil.
+func typePackage(t types.Type) *types.Package {
+	if p, ok := t.Underlying().(*types.Pointer); ok {
+		t = p.Elem()
+	}
+	if named, ok := types.Unalias(t).(*types.Named); ok {
+		return named.Obj().Pkg()
+	}
+	return nil
 }
 
 // stmtClass returns the class of a statement of a kind that is not
@@ -687,6 +750,9 @@ type censusFunc struct {
 	seen    map[ast.Stmt]bool
 	stubs   map[any]bool
 	stopped bool
+	// attempts counts the attempts, and took is the time they took.
+	attempts int
+	took     time.Duration
 	// stack holds what the attempt is executing: statements, expressions,
 	// and the named checks of verify; at is its copy where the last
 	// refusal was made.
@@ -773,6 +839,26 @@ func (pv *pkgVerifier) runCensus(out, scope, trustPath string, looked bool) (any
 	pv.census.ensures = &clause{kind: "Ensures", text: "True", node: node}
 	pv.z3 = solver.Offline()
 	pv.loadTrust(trustPath)
+	// A census reports nothing, so a trust file with a problem, which the
+	// ordinary run reports at the file and at each use, ends it (F20 of
+	// the review of F41).
+	if trustPath != "" && pv.projectTrust == nil {
+		return nil, fmt.Errorf("the census cannot read the trust file %s", trustPath)
+	}
+	if f := pv.projectTrust; f != nil {
+		var problems []string
+		for _, problem := range f.problems {
+			problems = append(problems, fmt.Sprintf("%s:%d: %s", f.path, problem.line, problem.msg))
+		}
+		for _, key := range slices.Sorted(maps.Keys(f.entries)) {
+			if why := projectReplaces(f.entries[key]); why != "" {
+				problems = append(problems, fmt.Sprintf("%s:%d: %s", f.path, f.entries[key].line, why))
+			}
+		}
+		if len(problems) > 0 {
+			return nil, fmt.Errorf("the trust file of the census has problems, so what the census found would rest on a file other than the one meant: %s", strings.Join(problems, "; "))
+		}
+	}
 	pv.collect()
 	pv.noteMemory()
 	pv.noteInputs()
@@ -793,10 +879,20 @@ func (pv *pkgVerifier) runCensus(out, scope, trustPath string, looked bool) (any
 	if !looked {
 		return pv.usage, nil
 	}
+	// A function's line is written once the closures inside it, which
+	// follow it in the order, are looked at too, so that a run that does
+	// not finish keeps what it found.
+	written := 0
 	for _, fn := range pv.order {
+		if fn.closure == nil {
+			if err := pv.writeCensus(pv.census.records[written:]); err != nil {
+				return nil, err
+			}
+			written = len(pv.census.records)
+		}
 		pv.censusLook(fn)
 	}
-	if err := pv.writeCensus(); err != nil {
+	if err := pv.writeCensus(pv.census.records[written:]); err != nil {
 		return nil, err
 	}
 	return pv.usage, nil
@@ -869,6 +965,19 @@ func (pv *pkgVerifier) assumedType(name *types.TypeName) *funcInfo {
 	return fn
 }
 
+// assumedClosure returns the weakest contract of the type of a variable
+// that holds a recursive closure.
+func (pv *pkgVerifier) assumedClosure(variable *types.Var) *funcInfo {
+	if fn := pv.census.assumed[variable]; fn != nil {
+		return fn
+	}
+	fn := newFuncInfo(types.NewFunc(variable.Pos(), variable.Pkg(), variable.Name(), variable.Type().Underlying().(*types.Signature)))
+	fn.ensures = []*clause{pv.census.ensures}
+	fn.censusMade = true
+	pv.census.assumed[variable] = fn
+	return fn
+}
+
 // noteAssumed records, at a use, that a contract is the weakest one the
 // census made.
 func (v *fnVerifier) noteAssumed(pos token.Pos, fn *funcInfo, class refusal, what string) {
@@ -880,9 +989,14 @@ func (v *fnVerifier) noteAssumed(pos token.Pos, fn *funcInfo, class refusal, wha
 // censusLook looks at one function, and at the recursive closures inside
 // it into the same record.
 func (pv *pkgVerifier) censusLook(fn *funcInfo) {
-	if fn.closure != nil {
-		cf := pv.census.byDecl[fn.closure.outer]
+	if rc := fn.closure; rc != nil {
+		cf := pv.census.byDecl[rc.outer]
 		if cf == nil || cf.stopped {
+			return
+		}
+		// A closure the function around it refuses is not verified as one;
+		// its body is walked as a literal no attempt entered.
+		if outer := pv.funcs[pv.info.Defs[rc.outer.Name].(*types.Func)]; rc.refused != "" || capturesBoxed(rc, pv.newVerifier(outer).findBoxed(rc.outer.Body)) != nil {
 			return
 		}
 		pv.censusAttempts(cf, fn, (*fnVerifier).verify)
@@ -931,7 +1045,10 @@ func (pv *pkgVerifier) censusLiterals(cf *censusFunc, fn *funcInfo) {
 // censusAttempts runs a task of the census in attempts until one ends
 // without a refusal that a stub can help.
 func (pv *pkgVerifier) censusAttempts(cf *censusFunc, fn *funcInfo, task func(*fnVerifier)) {
+	start := time.Now()
+	defer func() { cf.took += time.Since(start) }()
 	for attempt := 0; !cf.stopped; attempt++ {
+		cf.attempts++
 		if attempt == censusMaxAttempts {
 			cf.note(pv, fn.obj.Pos(), rLimitAttempts, fmt.Sprintf("more than %d refusals", censusMaxAttempts))
 			cf.stopped = true
@@ -1017,6 +1134,9 @@ func (v *fnVerifier) censusEval(e ast.Expr, st *state) (val value, done func()) 
 		return nil, func() {}
 	}
 	if v.census.stubs[e] {
+		// What the expression is made of is still looked at, so that a
+		// refusal inside it is found (F15 of the review of F41).
+		v.censusOperands(e, st)
 		return v.unknown("census", t, st), nil
 	}
 	depth := v.census.push(e)
@@ -1070,6 +1190,7 @@ func (v *fnVerifier) censusStmt(s ast.Stmt, st *state, c ctrl, k func(*state), r
 // inside it is walked once with every way out of it ending the path, and
 // the path goes on unless the statement leaves the block.
 func (v *fnVerifier) censusStub(s ast.Stmt, st *state, c ctrl, k func(*state)) {
+	v.evaluate(st, func() { v.censusStmtOperands(s, st) })
 	v.censusForget(s, st)
 	end := func(*state) {}
 	walk := func(list []ast.Stmt, from, to token.Pos) {
@@ -1121,6 +1242,171 @@ func (v *fnVerifier) censusStub(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 	bodies(s)
 	if !leaves(s) {
 		k(st)
+	}
+}
+
+// censusOperands evaluates, and drops, each operand of a stubbed
+// expression: the receiver and the arguments of a call, and the operands
+// of any other expression. Each is an eval of its own, which an attempt
+// can stub in turn.
+func (v *fnVerifier) censusOperands(e ast.Expr, st *state) {
+	var operands []ast.Expr
+	switch e := ast.Unparen(e).(type) {
+	case *ast.CallExpr:
+		if sel, ok := ast.Unparen(e.Fun).(*ast.SelectorExpr); ok {
+			operands = append(operands, sel.X)
+		} else if _, isLit := ast.Unparen(e.Fun).(*ast.FuncLit); !isLit {
+			operands = append(operands, e.Fun)
+		}
+		operands = append(operands, e.Args...)
+	case *ast.SelectorExpr:
+		operands = []ast.Expr{e.X}
+	case *ast.IndexExpr:
+		operands = []ast.Expr{e.X, e.Index}
+	case *ast.SliceExpr:
+		operands = []ast.Expr{e.X, e.Low, e.High, e.Max}
+	case *ast.StarExpr:
+		operands = []ast.Expr{e.X}
+	case *ast.UnaryExpr:
+		operands = []ast.Expr{e.X}
+	case *ast.BinaryExpr:
+		operands = []ast.Expr{e.X, e.Y}
+	case *ast.TypeAssertExpr:
+		operands = []ast.Expr{e.X}
+	case *ast.KeyValueExpr:
+		operands = []ast.Expr{e.Key, e.Value}
+	case *ast.CompositeLit:
+		operands = e.Elts
+	}
+	for _, operand := range operands {
+		v.censusDropped(operand, st)
+	}
+}
+
+// censusDropped evaluates an expression whose value is dropped: a value
+// with a layout by eval, and anything else by its operands. A function
+// literal is left to be walked as one no attempt entered.
+func (v *fnVerifier) censusDropped(e ast.Expr, st *state) {
+	if e == nil {
+		return
+	}
+	if kv, ok := e.(*ast.KeyValueExpr); ok {
+		// The key of a struct literal is a field name.
+		if _, isID := kv.Key.(*ast.Ident); !isID || v.info.Types[kv.Key].IsValue() {
+			v.censusDropped(kv.Key, st)
+		}
+		v.censusDropped(kv.Value, st)
+		return
+	}
+	if _, isLit := ast.Unparen(e).(*ast.FuncLit); isLit {
+		return
+	}
+	tv, ok := v.info.Types[e]
+	if !ok || !tv.IsValue() || tv.Value != nil {
+		return
+	}
+	inner := ast.Unparen(e)
+	if call, ok := inner.(*ast.CallExpr); ok {
+		if _, builtin := typeutil.Callee(v.info, call).(*types.Builtin); builtin {
+			// append, copy, and the like are refused out of place; what
+			// they are given is what is looked at.
+			v.censusOperands(e, st)
+			return
+		}
+	}
+	if _, ok := layoutOf(tv.Type); !ok {
+		v.censusOperands(e, st)
+		return
+	}
+	// An expression Go converts to an interface type is evaluated with the
+	// conversion, as where it stands.
+	if targets := v.findConversions().converted[inner]; len(targets) > 0 {
+		v.evalAs(e, targets[0], st, nil)
+		return
+	}
+	v.eval(e, st, nil)
+}
+
+// censusStmtOperands evaluates, and drops, the expressions of a stubbed
+// statement, and those of its init and post statements: right-hand sides
+// and what the targets are made of, conditions, the range expression, the
+// tag and the cases, the call of go and defer, and a sent value.
+func (v *fnVerifier) censusStmtOperands(s ast.Stmt, st *state) {
+	if s == nil {
+		return
+	}
+	target := func(e ast.Expr) {
+		if _, isID := ast.Unparen(e).(*ast.Ident); !isID {
+			v.censusOperands(e, st)
+		}
+	}
+	switch s := s.(type) {
+	case *ast.LabeledStmt:
+		v.censusStmtOperands(s.Stmt, st)
+	case *ast.ExprStmt:
+		v.censusDropped(s.X, st)
+	case *ast.AssignStmt:
+		for _, lhs := range s.Lhs {
+			target(lhs)
+		}
+		for _, rhs := range s.Rhs {
+			v.censusDropped(rhs, st)
+		}
+	case *ast.IncDecStmt:
+		target(s.X)
+	case *ast.SendStmt:
+		v.censusDropped(s.Chan, st)
+		v.censusDropped(s.Value, st)
+	case *ast.GoStmt:
+		v.censusDropped(s.Call, st)
+	case *ast.DeferStmt:
+		v.censusDropped(s.Call, st)
+	case *ast.ReturnStmt:
+		for _, r := range s.Results {
+			v.censusDropped(r, st)
+		}
+	case *ast.DeclStmt:
+		if gen, ok := s.Decl.(*ast.GenDecl); ok {
+			for _, spec := range gen.Specs {
+				if vs, ok := spec.(*ast.ValueSpec); ok {
+					for _, value := range vs.Values {
+						v.censusDropped(value, st)
+					}
+				}
+			}
+		}
+	case *ast.IfStmt:
+		v.censusStmtOperands(s.Init, st)
+		v.censusDropped(s.Cond, st)
+		if next, ok := s.Else.(*ast.IfStmt); ok {
+			v.censusStmtOperands(next, st)
+		}
+	case *ast.ForStmt:
+		v.censusStmtOperands(s.Init, st)
+		v.censusDropped(s.Cond, st)
+		v.censusStmtOperands(s.Post, st)
+	case *ast.RangeStmt:
+		v.censusDropped(s.X, st)
+	case *ast.SwitchStmt:
+		v.censusStmtOperands(s.Init, st)
+		v.censusDropped(s.Tag, st)
+		for _, clause := range s.Body.List {
+			for _, e := range clause.(*ast.CaseClause).List {
+				v.censusDropped(e, st)
+			}
+		}
+	case *ast.TypeSwitchStmt:
+		v.censusStmtOperands(s.Init, st)
+		switch a := s.Assign.(type) {
+		case *ast.ExprStmt:
+			v.censusDropped(a.X.(*ast.TypeAssertExpr).X, st)
+		case *ast.AssignStmt:
+			v.censusDropped(a.Rhs[0].(*ast.TypeAssertExpr).X, st)
+		}
+	case *ast.SelectStmt:
+		for _, clause := range s.Body.List {
+			v.censusStmtOperands(clause.(*ast.CommClause).Comm, st)
+		}
 	}
 }
 
@@ -1205,8 +1491,9 @@ func (v *fnVerifier) censusLiteral(lit *ast.FuncLit, st *state) {
 		variable, ok := v.info.Uses[id].(*types.Var)
 		if ok && !variable.IsField() && variable.Pkg() == v.pass.Pkg && variable.Parent() != v.pass.Pkg.Scope() &&
 			(variable.Pos() < lit.Pos() || variable.Pos() >= lit.End()) && entry.vals[variable] == nil {
+			// One that lives in memory gets a box of its own.
 			if _, ok := layoutOf(variable.Type()); ok {
-				entry.vals[variable] = sv.unknown(variable.Name(), variable.Type(), entry)
+				sv.bind(entry, variable, sv.unknown(variable.Name(), variable.Type(), entry))
 			}
 		}
 		return true
@@ -1245,20 +1532,25 @@ type censusLine struct {
 	Unseen     int           `json:"unseen"`
 	UnseenAt   []string      `json:"unseen_at,omitempty"`
 	Stopped    bool          `json:"stopped,omitempty"`
+	Attempts   int           `json:"attempts"`
+	Millis     int64         `json:"ms"`
 	Events     []censusEvent `json:"events,omitempty"`
 }
 
 // censusOut serialises the writes of the packages of one process.
 var censusOut sync.Mutex
 
-// writeCensus appends the lines of the package to the census file.
-func (pv *pkgVerifier) writeCensus() error {
+// writeCensus appends the lines of functions to the census file.
+func (pv *pkgVerifier) writeCensus(records []*censusFunc) error {
+	if len(records) == 0 {
+		return nil
+	}
 	module := "std"
 	if pv.pass.Module != nil {
 		module = pv.pass.Module.Path
 	}
 	var text []byte
-	for _, cf := range pv.census.records {
+	for _, cf := range records {
 		statements, unseen := 0, 0
 		var unseenAt []string
 		// A statement after one that never goes on, in the same list, is
@@ -1303,7 +1595,7 @@ func (pv *pkgVerifier) writeCensus() error {
 		}
 		line := censusLine{Module: module, Package: pv.pass.Pkg.Path(), Function: name,
 			Pos:        fmt.Sprintf("%s/%s:%d", pv.pass.Pkg.Path(), filepath.Base(at.Filename), at.Line),
-			Statements: statements, Unseen: unseen, UnseenAt: unseenAt, Stopped: cf.stopped, Events: cf.events}
+			Statements: statements, Unseen: unseen, UnseenAt: unseenAt, Stopped: cf.stopped, Attempts: cf.attempts, Millis: cf.took.Milliseconds(), Events: cf.events}
 		b, err := json.Marshal(line)
 		if err != nil {
 			return err

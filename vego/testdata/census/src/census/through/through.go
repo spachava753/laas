@@ -104,3 +104,16 @@ type record struct {
 func Encode(w io.Writer, r record) error {
 	return json.NewEncoder(w).Encode(r)
 }
+
+// Closure has a recursive closure, which the census looks at as one (F16
+// of the review).
+func Closure(n int) (r int) {
+	var walk func(k int) (s int)
+	walk = func(k int) (s int) {
+		if k <= 0 {
+			return 0
+		}
+		return k + walk(k-1)
+	}
+	return walk(n)
+}

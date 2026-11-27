@@ -3,6 +3,7 @@ package vego
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/importer"
 	"go/parser"
@@ -23,7 +24,7 @@ import (
 // unsupported as its class, besides a constant and withDetail of one.
 var classifiers = map[string]bool{
 	"typeClass": true, "elemClass": true, "mapClass": true, "stmtClass": true, "rangeClass": true, "unusableClass": true, "fieldClass": true, "pointerClass": true, "makeClass": true,
-	"addressClass": true, "callClass": true, "varClass": true, "funcValueClass": true,
+	"addressClass": true, "callClass": true, "varClass": true, "exprClass": true, "ownerClass": true, "funcValueClass": true,
 }
 
 // TestRefusalClasses holds every place in the verifier that refuses to a
@@ -384,6 +385,16 @@ func Generic[T any](x T, p *T) {}
 // given flags, and returns the diagnostics.
 func censusCorpus(t *testing.T, flags map[string]string, patterns ...string) []string {
 	t.Helper()
+	diagnostics, failed := censusTrial(t, flags, patterns...)
+	for _, err := range failed {
+		t.Fatal(err)
+	}
+	return diagnostics
+}
+
+// censusTrial is censusCorpus, which returns what failed.
+func censusTrial(t *testing.T, flags map[string]string, patterns ...string) (diagnostics []string, failed []error) {
+	t.Helper()
 	root, err := filepath.Abs(filepath.Join("testdata", "census"))
 	if err != nil {
 		t.Fatal(err)
@@ -410,21 +421,22 @@ func censusCorpus(t *testing.T, flags map[string]string, patterns ...string) []s
 	if err != nil {
 		t.Fatal(err)
 	}
-	var diagnostics []string
+	// The first package that fails says why; those that import it fail
+	// for it.
 	for action := range graph.All() {
 		if action.Err != nil && !strings.Contains(action.Err.Error(), "failed prerequisites") {
-			t.Logf("%s: %v", action, action.Err)
+			failed = append(failed, fmt.Errorf("analysis of %s failed: %v", action.Package.PkgPath, action.Err))
 		}
 	}
 	for _, action := range graph.Roots {
-		if action.Err != nil {
-			t.Fatalf("analysis of %s failed: %v", action.Package.PkgPath, action.Err)
+		if action.Err != nil && len(failed) == 0 {
+			failed = append(failed, fmt.Errorf("analysis of %s failed: %v", action.Package.PkgPath, action.Err))
 		}
 		for _, d := range action.Diagnostics {
 			diagnostics = append(diagnostics, d.Message)
 		}
 	}
-	return diagnostics
+	return diagnostics, failed
 }
 
 // TestCensus runs the census on testdata/census and holds each function to
@@ -493,6 +505,12 @@ func TestCensus(t *testing.T) {
 		"census/stops.UnusableThenChannel": {causes: "channel:use contract:unusable"},
 		"census/stops.Wrap":                {causes: "scoped:kept"},
 		"census/stops.Feed":                {causes: "channel:use"},
+		"census/stops.itoa":                {},
+		"census/stops.Hidden":              {causes: "address-of:field no-entry:std", assumed: "assumed:module"},
+		"census/stops.HiddenDecl":          {causes: "address-of:field no-entry:std", assumed: "assumed:module"},
+		"census/stops.Boxed":               {causes: "closure:recursive", assumed: "assumed:closure"},
+		"census/stops.AddrSlice":           {causes: "pointer:to-non-struct"},
+		"census/through.Closure":           {},
 		"census/stops.Broken":              {causes: "annotation:broken", partial: true, stopped: true},
 		"census/first.Address":             {causes: "address-of:field"},
 		"census/first.Stat":                {causes: "no-entry:std"},
@@ -536,5 +554,15 @@ func TestCensus(t *testing.T) {
 	}
 	if compared != 4 {
 		t.Errorf("%d functions of census/first were compared with the ordinary run, not 4", compared)
+	}
+	// A trust file with a problem ends the census with an error that names
+	// it (F20 of the review).
+	bad := filepath.Join(t.TempDir(), "vego-trusted.yaml")
+	if err := os.WriteFile(bad, []byte("sizes:\n  memory: 256GB\n  reason: a reason\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, failed := censusTrial(t, map[string]string{"census": filepath.Join(t.TempDir(), "bad.jsonl"), "census-scope": "census", "trusted": bad, "cache": ""}, "census/through")
+	if len(failed) == 0 || !strings.Contains(failed[0].Error(), bad) || !strings.Contains(failed[0].Error(), "version") {
+		t.Errorf("a census under a trust file without its version gave %v", failed)
 	}
 }
