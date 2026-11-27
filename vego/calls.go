@@ -1786,12 +1786,12 @@ func (v *fnVerifier) checkRecursion(callee *funcInfo, pre *specEnv, st *state, g
 				if !ok {
 					advice = "Hand that code a value whose type holds no interface value and no function value, or keep what it may reach from calling back"
 				}
-				v.report(call.Pos(), rRecursionPackages, "this call may not end: %s; %s, so a cycle goes through code of another package, and no Variant can be checked across it; %s",
+				v.report(call.Pos(), recursionClass(through), "this call may not end: %s; %s, so a cycle goes through code of another package, and no Variant can be checked across it; %s",
 					v.describeCycle(through), why, advice)
 				return
 			}
 		}
-		v.report(call.Pos(), rRecursionDynamic, "this call may not end: %s; a cycle that goes through a call with no static callee, of an interface method or "+
+		v.report(call.Pos(), recursionClass(through), "this call may not end: %s; a cycle that goes through a call with no static callee, of an interface method or "+
 			"a function value, or through code of another package, cannot be shown to end, since no Variant can be checked across such a call. "+
 			"Break the cycle", v.describeCycle(through))
 	}

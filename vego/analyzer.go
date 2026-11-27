@@ -1867,7 +1867,8 @@ func (pv *pkgVerifier) contractOf(callee *types.Func) *funcInfo {
 	if trusted := pv.trustedContract(callee); trusted != nil || pv.census == nil {
 		return trusted
 	}
-	if callee.Pkg() != nil && pv.inScope(callee.Pkg()) && !isGeneric(callee) {
+	// A method of an interface is assumed by methodContract.
+	if callee.Pkg() != nil && pv.inScope(callee.Pkg()) && !isGeneric(callee) && !isIfaceMethod(callee) {
 		return pv.assumedContract(callee)
 	}
 	return nil

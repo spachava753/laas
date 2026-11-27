@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -185,8 +186,10 @@ const (
 	rNoBody                refusal = "function:no-body"
 	rFormulaLimit          refusal = "limit:formula"
 	rRecursionTrusted      refusal = "recursion:through-trusted"
-	rRecursionPackages     refusal = "recursion:across-packages"
-	rRecursionDynamic      refusal = "recursion:dynamic"
+	rRecursionCall         refusal = "recursion:through-call"
+	rRecursionValue        refusal = "recursion:through-value"
+	rRecursionMethod       refusal = "recursion:through-method"
+	rRecursionFormat       refusal = "recursion:through-format"
 	rContractUnusable      refusal = "contract:unusable"
 	rFormatLength          refusal = "format:length-unknown"
 	rAnnotationUnsupported refusal = "annotation:unsupported"
@@ -355,8 +358,10 @@ var refusalClasses = map[refusal]string{
 	rNoBody:                "a function without a body (Trusted contracts for unproved code)",
 	rFormulaLimit:          "a formula built for the function grows beyond the limit of its size; the census stops the function there (The prover)",
 	rRecursionTrusted:      "a cycle of calls through a trusted function that calls back (Callbacks handed to trusted functions)",
-	rRecursionPackages:     "a cycle of calls through code of another package, across which no Variant can be checked (Trusted contracts for unproved code)",
-	rRecursionDynamic:      "a cycle of calls through an interface method or a function value, as a walk of a tree of interface values (item 12)",
+	rRecursionCall:         "a cycle of calls that goes through a call of a function of another package handed what may hold code of the package, as reflect.ValueOf or io.ReadFull; an entry that says what it runs lifts it (Function values, what the call graph reads of a call of another package)",
+	rRecursionValue:        "a cycle of calls that goes through a call of a function value, or a range over one, which the call graph does not follow to the values it may hold (Function values, Not built yet)",
+	rRecursionMethod:       "a cycle of calls that goes through a call of an interface method, which the call graph does not follow to the implementations (item 12, interface values that call interface values)",
+	rRecursionFormat:       "a cycle of calls that goes through formatting, which may run the String or Error method of what it formats (Variadic calls and formatting)",
 	rContractUnusable:      "a contract or trusted entry that cannot be used at the call (Trusted contracts for unproved code)",
 	rFormatLength:          "formatting into a writer text whose length the writer's Write needs bounded and is not counted (Variadic calls and formatting); made only when a proof fails",
 	rAnnotationUnsupported: "an annotation of a form that is not supported yet (The annotation language)",
@@ -638,6 +643,48 @@ func typePackage(t types.Type) *types.Package {
 	return nil
 }
 
+// edgeClass returns the class of an edge of the call graph that it cannot
+// follow, by the call that makes it: formatting, a call through a value, a
+// call of an interface method, or a call of a function of another package
+// that may run code it is handed, with what is called as the detail (F28
+// of the review of F41).
+func (pv *pkgVerifier) edgeClass(call *ast.CallExpr, text string) refusal {
+	callee := pv.staticCalleeAt(call)
+	if sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok {
+		if s := pv.info.Selections[sel]; s != nil && s.Kind() == types.MethodVal && types.IsInterface(s.Recv()) {
+			callee = s.Obj().(*types.Func)
+		}
+	}
+	switch {
+	case strings.HasPrefix(text, "formats with "):
+		name := types.ExprString(call.Fun)
+		if callee != nil {
+			name = callee.FullName()
+		}
+		return withDetail(rRecursionFormat, name)
+	case callee == nil:
+		return withDetail(rRecursionValue, types.ExprString(call.Fun))
+	case isIfaceMethod(callee):
+		return withDetail(rRecursionMethod, callee.FullName())
+	}
+	return withDetail(rRecursionCall, callee.FullName())
+}
+
+// recursionClass returns the class of a cycle of calls that no Variant can
+// be checked across: that of its first edge the call graph cannot follow.
+func recursionClass(c *cycle) refusal {
+	for _, step := range c.steps {
+		if !step.resolved {
+			if step.class != "" {
+				return step.class
+			}
+			// A range over a function value.
+			return withDetail(rRecursionValue, step.text)
+		}
+	}
+	return rRecursionValue
+}
+
 // stmtClass returns the class of a statement of a kind that is not
 // supported.
 func stmtClass(s ast.Stmt) refusal {
@@ -735,10 +782,18 @@ type censusRun struct {
 	// assumed holds the weakest contracts made for what of the module
 	// has none, and assumedParams the parameters of an unnamed function
 	// type of those contracts.
-	assumed       map[types.Object]*funcInfo
+	assumed       map[assumedKey]*funcInfo
 	assumedParams map[*types.Var]bool
 	// ensures is the clause of the weakest contract.
 	ensures *clause
+}
+
+// assumedKey names a weakest contract: of a function or a method called as
+// one, of a method of an interface, of a function type, or of the type of a
+// closure's variable; one object may be asked for as more than one.
+type assumedKey struct {
+	obj  types.Object
+	kind string
 }
 
 // censusFunc is what the census found in one function declaration,
@@ -830,7 +885,7 @@ func (cf *censusFunc) push(x any) int {
 
 // runCensus is the run of the analyzer on a package of a census.
 func (pv *pkgVerifier) runCensus(out, scope, trustPath string, looked bool) (any, error) {
-	pv.census = &censusRun{out: out, scope: scope, looked: looked, byDecl: map[*ast.FuncDecl]*censusFunc{}, assumed: map[types.Object]*funcInfo{},
+	pv.census = &censusRun{out: out, scope: scope, looked: looked, byDecl: map[*ast.FuncDecl]*censusFunc{}, assumed: map[assumedKey]*funcInfo{},
 		assumedParams: map[*types.Var]bool{}}
 	node, err := logic.ParseFormula("True")
 	if err != nil {
@@ -925,35 +980,38 @@ func (pv *pkgVerifier) noteAssumedParams(fn *funcInfo) {
 // assumedContract returns the weakest contract of a function of the module
 // that has none.
 func (pv *pkgVerifier) assumedContract(callee *types.Func) *funcInfo {
-	if fn := pv.census.assumed[callee]; fn != nil {
+	key := assumedKey{callee, "func"}
+	if fn := pv.census.assumed[key]; fn != nil {
 		return fn
 	}
 	fn := newFuncInfo(callee)
 	fn.ensures = []*clause{pv.census.ensures}
 	fn.censusMade = true
 	pv.noteAssumedParams(fn)
-	pv.census.assumed[callee] = fn
+	pv.census.assumed[key] = fn
 	return fn
 }
 
 // assumedMethod returns the weakest contract of a method of an interface
 // of the module that has none.
 func (pv *pkgVerifier) assumedMethod(method *types.Func) *funcInfo {
-	if fn := pv.census.assumed[method]; fn != nil {
+	key := assumedKey{method, "method"}
+	if fn := pv.census.assumed[key]; fn != nil {
 		return fn
 	}
 	fn := newFuncInfo(withoutReceiver(method))
 	fn.ensures = []*clause{pv.census.ensures}
 	fn.methodOf = method
 	fn.censusMade = true
-	pv.census.assumed[method] = fn
+	pv.census.assumed[key] = fn
 	return fn
 }
 
 // assumedType returns the weakest contract of a function type of the
 // module that has none.
 func (pv *pkgVerifier) assumedType(name *types.TypeName) *funcInfo {
-	if fn := pv.census.assumed[name]; fn != nil {
+	key := assumedKey{name, "type"}
+	if fn := pv.census.assumed[key]; fn != nil {
 		return fn
 	}
 	sig := name.Type().Underlying().(*types.Signature)
@@ -961,20 +1019,21 @@ func (pv *pkgVerifier) assumedType(name *types.TypeName) *funcInfo {
 	fn.ensures = []*clause{pv.census.ensures}
 	fn.valueOf = name
 	fn.censusMade = true
-	pv.census.assumed[name] = fn
+	pv.census.assumed[key] = fn
 	return fn
 }
 
 // assumedClosure returns the weakest contract of the type of a variable
 // that holds a recursive closure.
 func (pv *pkgVerifier) assumedClosure(variable *types.Var) *funcInfo {
-	if fn := pv.census.assumed[variable]; fn != nil {
+	key := assumedKey{variable, "closure"}
+	if fn := pv.census.assumed[key]; fn != nil {
 		return fn
 	}
 	fn := newFuncInfo(types.NewFunc(variable.Pos(), variable.Pkg(), variable.Name(), variable.Type().Underlying().(*types.Signature)))
 	fn.ensures = []*clause{pv.census.ensures}
 	fn.censusMade = true
-	pv.census.assumed[variable] = fn
+	pv.census.assumed[key] = fn
 	return fn
 }
 
@@ -1099,12 +1158,29 @@ func (pv *pkgVerifier) censusAttempt(cf *censusFunc, fn *funcInfo, task func(*fn
 			cf.note(pv, fn.obj.Pos(), rUnreadable, "an annotation it relies on cannot be read")
 			cf.stopped = true
 		default:
-			cf.note(pv, fn.obj.Pos(), rInternal, fmt.Sprint(r))
+			cf.note(pv, fn.obj.Pos(), rInternal, fmt.Sprintf("%v; at %s", r, panicFrames()))
 			cf.stopped = true
 		}
 	}()
 	task(v)
 	return true
+}
+
+// panicFrames returns the first functions of vego on the stack of a panic
+// being recovered, for the message of a limit:internal event.
+func panicFrames() string {
+	var frames []string
+	for _, line := range strings.Split(string(debug.Stack()), "\n") {
+		const prefix = "github.com/spachava753/laas/vego."
+		if strings.HasPrefix(line, prefix) && !strings.Contains(line, "panicFrames") && !strings.Contains(line, "censusAttempt") {
+			name, _, _ := strings.Cut(strings.TrimPrefix(line, prefix), "(0x")
+			frames = append(frames, strings.TrimSuffix(name, "("))
+			if len(frames) == 8 {
+				break
+			}
+		}
+	}
+	return strings.Join(frames, " < ")
 }
 
 // censusRefused is called where a refusal is made, before it panics: the

@@ -24,7 +24,7 @@ import (
 // unsupported as its class, besides a constant and withDetail of one.
 var classifiers = map[string]bool{
 	"typeClass": true, "elemClass": true, "mapClass": true, "stmtClass": true, "rangeClass": true, "unusableClass": true, "fieldClass": true, "pointerClass": true, "makeClass": true,
-	"addressClass": true, "callClass": true, "varClass": true, "exprClass": true, "ownerClass": true, "funcValueClass": true,
+	"addressClass": true, "callClass": true, "varClass": true, "exprClass": true, "ownerClass": true, "recursionClass": true, "edgeClass": true, "funcValueClass": true,
 }
 
 // TestRefusalClasses holds every place in the verifier that refuses to a
@@ -481,52 +481,62 @@ func TestCensus(t *testing.T) {
 		partial, stopped          bool
 	}
 	wants := map[string]want{
-		"census/through.add":               {},
-		"census/through.Sum":               {assumed: "assumed:module"},
-		"census/through.Index":             {},
-		"census/through.Each":              {annotate: "annotate:calls"},
-		"census/through.Total":             {assumed: "assumed:calls assumed:module"},
-		"census/through.(*file).Next":      {},
-		"census/through.Drain":             {assumed: "assumed:module-method"},
-		"census/through.Open":              {},
-		"census/through.Unreachable":       {},
-		"census/through.AfterExit":         {},
-		"census/through.Forever":           {},
-		"census/through.Exit":              {},
-		"census/through.Encode":            {},
-		"census/stops.Channel":             {causes: "channel:use"},
-		"census/stops.Address":             {causes: "address-of:element address-of:field"},
-		"census/stops.Stat":                {causes: "no-entry:std"},
-		"census/stops.Goroutine":           {causes: "channel:use goroutine:go"},
-		"census/stops.Generic":             {causes: "generic:declared", partial: true, stopped: true},
-		"census/stops.HandedThenExit":      {causes: "channel:use"},
-		"census/stops.EncodeThenChannel":   {causes: "channel:use"},
-		"census/stops.Twice":               {causes: "channel:use"},
-		"census/stops.UnusableThenChannel": {causes: "channel:use contract:unusable"},
-		"census/stops.Wrap":                {causes: "scoped:kept"},
-		"census/stops.Feed":                {causes: "channel:use"},
-		"census/stops.itoa":                {},
-		"census/stops.Hidden":              {causes: "address-of:field no-entry:std", assumed: "assumed:module"},
-		"census/stops.HiddenDecl":          {causes: "address-of:field no-entry:std", assumed: "assumed:module"},
-		"census/stops.Boxed":               {causes: "closure:recursive", assumed: "assumed:closure"},
-		"census/stops.AddrSlice":           {causes: "pointer:to-non-struct"},
-		"census/through.Closure":           {},
-		"census/stops.Exists":              {causes: "no-entry:std"},
-		"census/stops.g":                   {},
-		"census/stops.Switch":              {causes: "channel:use", assumed: "assumed:module"},
-		"census/stops.Loop":                {causes: "channel:use", assumed: "assumed:module"},
-		"census/stops.twoResults":          {},
-		"census/stops.mustOf":              {},
-		"census/stops.MustPair":            {causes: "call:multi-value-args", assumed: "assumed:module"},
-		"census/stops.Map":                 {causes: "generic:declared", partial: true, stopped: true},
-		"census/stops.double":              {},
-		"census/stops.Doubles":             {causes: "generic:called"},
-		"census/stops.Upper":               {causes: "no-entry:other"},
-		"census/stops.Broken":              {causes: "annotation:broken", partial: true, stopped: true},
-		"census/first.Address":             {causes: "address-of:field"},
-		"census/first.Stat":                {causes: "no-entry:std"},
-		"census/first.Channel":             {causes: "channel:use"},
-		"census/first.Mixed":               {causes: "channel:use goroutine:go"},
+		"census/through.add":                {},
+		"census/through.Sum":                {assumed: "assumed:module"},
+		"census/through.Index":              {},
+		"census/through.Each":               {annotate: "annotate:calls"},
+		"census/through.Total":              {assumed: "assumed:calls assumed:module"},
+		"census/through.(*file).Next":       {},
+		"census/through.Drain":              {assumed: "assumed:module-method"},
+		"census/through.Open":               {},
+		"census/through.Unreachable":        {},
+		"census/through.AfterExit":          {},
+		"census/through.Forever":            {},
+		"census/through.Exit":               {},
+		"census/through.Encode":             {},
+		"census/stops.Channel":              {causes: "channel:use"},
+		"census/stops.Address":              {causes: "address-of:element address-of:field"},
+		"census/stops.Stat":                 {causes: "no-entry:std"},
+		"census/stops.Goroutine":            {causes: "channel:use goroutine:go"},
+		"census/stops.Generic":              {causes: "generic:declared", partial: true, stopped: true},
+		"census/stops.HandedThenExit":       {causes: "channel:use"},
+		"census/stops.EncodeThenChannel":    {causes: "channel:use"},
+		"census/stops.Twice":                {causes: "channel:use"},
+		"census/stops.UnusableThenChannel":  {causes: "channel:use contract:unusable"},
+		"census/stops.Wrap":                 {causes: "scoped:kept"},
+		"census/stops.Feed":                 {causes: "channel:use"},
+		"census/stops.itoa":                 {},
+		"census/stops.Hidden":               {causes: "address-of:field no-entry:std", assumed: "assumed:module"},
+		"census/stops.HiddenDecl":           {causes: "address-of:field no-entry:std", assumed: "assumed:module"},
+		"census/stops.Boxed":                {causes: "closure:recursive", assumed: "assumed:closure"},
+		"census/stops.AddrSlice":            {causes: "pointer:to-non-struct"},
+		"census/through.Closure":            {},
+		"census/stops.Exists":               {causes: "no-entry:std"},
+		"census/stops.g":                    {},
+		"census/stops.Switch":               {causes: "channel:use", assumed: "assumed:module"},
+		"census/stops.Loop":                 {causes: "channel:use", assumed: "assumed:module"},
+		"census/stops.twoResults":           {},
+		"census/stops.mustOf":               {},
+		"census/stops.MustPair":             {causes: "call:multi-value-args", assumed: "assumed:module"},
+		"census/stops.Map":                  {causes: "generic:declared", partial: true, stopped: true},
+		"census/stops.double":               {},
+		"census/stops.Doubles":              {causes: "generic:called"},
+		"census/stops.Upper":                {causes: "no-entry:other"},
+		"census/through.(*Request).marshal": {},
+		"census/through.Send":               {assumed: "assumed:module-method"},
+		"census/through.Make":               {},
+		"census/stops.(*Rec).Visit":         {causes: "recursion:through-call", assumed: "assumed:module"},
+		"census/stops.Inspect":              {causes: "no-entry:std"},
+		"census/stops.(*Item).Each":         {annotate: "annotate:calls"},
+		"census/stops.Show":                 {causes: "recursion:through-value", assumed: "assumed:calls assumed:module"},
+		"census/stops.(*List).Size":         {causes: "recursion:through-method", assumed: "assumed:module-method"},
+		"census/stops.errorf":               {causes: "format:slice-pack"},
+		"census/stops.(*Tree).String":       {causes: "recursion:through-format", assumed: "assumed:module"},
+		"census/stops.Broken":               {causes: "annotation:broken", partial: true, stopped: true},
+		"census/first.Address":              {causes: "address-of:field"},
+		"census/first.Stat":                 {causes: "no-entry:std"},
+		"census/first.Channel":              {causes: "channel:use"},
+		"census/first.Mixed":                {causes: "channel:use goroutine:go"},
 	}
 	for name, w := range wants {
 		line, ok := lines[name]
@@ -538,6 +548,20 @@ func TestCensus(t *testing.T) {
 			annotate: strings.Join(kinds(line, "annotate"), " "), partial: line.Unseen > 0, stopped: line.Stopped}
 		if got != w {
 			t.Errorf("%s: got %+v, want %+v (events %+v, unseen at %v)", name, got, w, line.Events, line.UnseenAt)
+		}
+	}
+	// A cycle names the edge the call graph cannot follow (F28 of the
+	// review).
+	for name, detail := range map[string]string{
+		"census/stops.(*Rec).Visit": "reflect.ValueOf", "census/stops.Show": "cb",
+		"census/stops.(*List).Size": "(census/stops.Sizer).Size", "census/stops.(*Tree).String": "fmt.Sprintf",
+	} {
+		found := false
+		for _, e := range lines[name].Events {
+			found = found || strings.HasPrefix(e.Class, "recursion:") && e.Detail == detail
+		}
+		if !found {
+			t.Errorf("%s: no recursion event with the detail %s in %+v", name, detail, lines[name].Events)
 		}
 	}
 	if len(lines) != len(wants) {
@@ -576,4 +600,64 @@ func TestCensus(t *testing.T) {
 	if len(failed) == 0 || !strings.Contains(failed[0].Error(), bad) || !strings.Contains(failed[0].Error(), "version") {
 		t.Errorf("a census under a trust file without its version gave %v", failed)
 	}
+}
+
+// TestGuideCensusLine runs the census of the example of the guide, a module of
+// its own, and holds the line it writes for Load to the one the guide
+// shows, but for the time it took.
+func TestGuideCensusLine(t *testing.T) {
+	parallel(t)
+	dir, err := filepath.Abs(filepath.Join("testdata", "censusmod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "census.jsonl")
+	analyzer := newAnalyzer()
+	for name, value := range map[string]string{"census": out, "census-scope": "example.com/stats", "z3": "/nonexistent/z3", "cache": ""} {
+		if err := analyzer.Flags.Set(name, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	loaded, err := packages.Load(&packages.Config{Mode: packages.LoadAllSyntax | packages.NeedModule, Dir: dir,
+		Env: append(os.Environ(), "GOFLAGS=-mod=mod", "GOPROXY=off", "GOWORK=off")}, "./...")
+	if err != nil || packages.PrintErrors(loaded) > 0 {
+		t.Fatalf("load: %v", err)
+	}
+	graph, err := checker.Analyze([]*analysis.Analyzer{analyzer}, loaded, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range graph.Roots {
+		if action.Err != nil {
+			t.Fatal(action.Err)
+		}
+	}
+	text, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guide, err := os.ReadFile(filepath.Join("..", "docs", "verification.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range strings.Split(strings.TrimSpace(string(text)), "\n") {
+		var line censusLine
+		if err := json.Unmarshal([]byte(l), &line); err != nil {
+			t.Fatal(err)
+		}
+		if line.Function != "Load" {
+			continue
+		}
+		line.Millis = 0
+		b, err := json.Marshal(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		shown := strings.Replace(string(b), `,"ms":0`, "", 1)
+		if !strings.Contains(string(guide), shown) {
+			t.Errorf("the guide does not show the line of Load as the census writes it, but for ms:\n%s", shown)
+		}
+		return
+	}
+	t.Fatal("the census wrote no line for Load")
 }

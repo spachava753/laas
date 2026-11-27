@@ -10568,17 +10568,13 @@ Before you annotate a package, you can ask `vego` what in it falls outside the s
 laas -vego -test=false -vego.census=census.jsonl -vego.census-scope=example.com/stats ./...
 ```
 
-`-vego.census-scope` names the module whose packages are looked at. Use `std` for the standard library. `-vego.census-only=regexp` narrows that to the packages whose path matches. A census starts no Z3 and prints no diagnostics. It appends one JSON line per function to the file:
+`-vego.census-scope` names the module whose packages are looked at. Use `std` for the standard library. `-vego.census-only=regexp` narrows that to the packages whose path matches. A census starts no Z3 and prints no diagnostics. It appends one JSON line per function to the file. This is the line of a function `Load` that calls `os.Stat` and the method `Name` of the `fs.FileInfo` it returns, from the module in `vego/testdata/censusmod`. The field `ms`, the time it took, is left out:
 
 ```json
-{"module":"example.com/stats","package":"example.com/stats/stats","function":"Load",
- "pos":"example.com/stats/stats/stats.go:21","statements":4,"unseen":0,"attempts":3,"ms":0,
- "events":[{"class":"no-entry:std","detail":"os.Stat","pos":"example.com/stats/stats/stats.go:22:15",
-  "message":"it calls Stat, which has no contract; ...","kind":"cause"},
-  {"class":"iface-method:no-contract","detail":"(io/fs.FileInfo).Name", ... ,"kind":"cause"}]}
+{"module":"example.com/stats","package":"example.com/stats/stats","function":"Load","pos":"example.com/stats/stats/stats.go:22","statements":4,"unseen":0,"attempts":3,"events":[{"class":"no-entry:std","detail":"os.Stat","pos":"example.com/stats/stats/stats.go:23:15","message":"it calls Stat, which has no contract; annotate Stat with // @ annotations so that it is verified, or add a trusted contract for os.Stat to vego-trusted.yaml","kind":"cause"},{"class":"iface-method:no-contract","detail":"(io/fs.FileInfo).Name","pos":"example.com/stats/stats/stats.go:27:27","message":"info.Name calls FileInfo.Name, which has no contract; a method of an interface gets one in its doc comment where the interface is declared, with // @ annotations; for a type of another module, give it an entry (io/fs.FileInfo).Name in vego-trusted.yaml","kind":"cause"}]}
 ```
 
-Each event of kind `cause` is a refusal that the ordinary run reports as `cannot verify`, or as a report about Go it does not support. The first cause of a function is the refusal the ordinary run gives it. After a refusal the census goes on with what was refused taken as unknown, so a line lists every cause of its function and not only the first. Its `class` names the kind of Go, as `channel:use` or `address-of:field`. The other kinds of events are not causes:
+Each event of kind `cause` is a refusal that the ordinary run reports as `cannot verify`, or as a report about Go it does not support. When every function of the module carries at least `// @Ensures True`, the first cause of a function is the refusal the ordinary run gives it, except for the events of kind `proof` below. A function of the module that has no contract is taken with the weakest one, where the ordinary run refuses the call. After a refusal the census goes on with what was refused taken as unknown, so a line lists every cause of its function and not only the first. Its `class` names the kind of Go, as `channel:use` or `address-of:field`. The other kinds of events are not causes:
 
 - `assumed` is a call of a function, an interface method, or a function type of the module that has no contract. The census takes it with the weakest contract: it modifies nothing and promises nothing.
 - `annotate` is something an annotation of yours would settle, as a `Calls` annotation for a call of a parameter of a function type.

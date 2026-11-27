@@ -80,6 +80,9 @@ type callEdge struct {
 	// why says, for an edge into code of another package that only the
 	// types allow, what lets that code reach the target.
 	why string
+	// class is, for an edge the graph cannot follow, the kind of call it
+	// is, with what it calls, for the census; see edgeClass.
+	class refusal
 }
 
 // callGraph holds the call graph of a package.
@@ -593,10 +596,12 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 		return e
 	}
 	unresolved := func(call *ast.CallExpr, text, why string, targets []*callNode) {
+		class := pv.edgeClass(call, text)
 		for _, to := range targets {
 			e := edge(to, call.Pos(), text, false)
-			e.why = why
+			e.why, e.class = why, class
 			node.edges[len(node.edges)-1].why = why
+			node.edges[len(node.edges)-1].class = class
 			g.sites[call] = append(g.sites[call], e)
 		}
 	}
