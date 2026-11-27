@@ -5,14 +5,15 @@ package first
 
 import (
 	"os"
+	"runtime"
 	"strings"
 )
 
 type pair struct{ a, b int }
 
 // @Ensures True
-func Address(p *pair) (n int) {
-	q := &p.a
+func Address() (n int) {
+	q := &runtime.MemProfileRate
 	return *q
 }
 

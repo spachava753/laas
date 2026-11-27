@@ -17,22 +17,22 @@ import (
 // a formula, *p reads the box's field (a Deref step of a path), so *p',
 // old(*p), and Modifies p mean what they mean of a field of a struct.
 //
-// Verified code makes no other pointer to a single value: &s.f of a field,
-// &xs[i] of an element of a slice, &a[i] of an array, &g of a package-level
-// variable, and a pointer method called on a field or an element are
-// refused. Such a value lies in the region of its struct and field, or of
-// the elements of its slice, and a pointer that might point into one of
-// those would need regions keyed by type alone. What code that is not
-// verified hands to verified code is assumed to point to a value of its own
-// ("What a proof assumes").
+// Since F42 such a pointer may also point to a field, an element of a
+// slice or an array, or a package-level variable of the package: a field
+// that a pointer can point to lies in the place region of its type with
+// the boxes, and an element in its elem region, and the pointer's #arr says
+// which (layout.go, addressed.go). Nothing is assumed of where a pointer
+// from code that is not verified points.
 
-// interiorRefusal says why the address of a single value that is not a
-// variable of its own cannot be taken, by taking, which says how: "taking
-// the address of x", or "calling Inc takes the address of x, which".
+// interiorRefusal says why the address of a single value cannot be taken,
+// by taking, which says how: "taking the address of x", or "calling Inc
+// takes the address of x, which". What is left refused is a place that Go
+// can address and vego does not model as memory: a package-level variable
+// of another package, or one that a directive or assembly names.
 func interiorRefusal(taking string, t types.Type) string {
-	return fmt.Sprintf("%s is not supported yet: it is a value of type %s inside a struct, a slice, an array, or a package-level variable, "+
-		"and a pointer to a number, a boolean, or a string can point only to a value of its own, a local variable or what new makes; "+
-		"copy the value into a local variable and take its address", taking, t)
+	return fmt.Sprintf("%s is not supported yet: it is a value of type %s that does not lie in memory vego models; "+
+		"a pointer to a number, a boolean, or a string can point to a local variable, what new makes, a field or an element in memory, "+
+		"or a package-level variable of this package whose address is taken; copy the value into a local variable and take its address", taking, t)
 }
 
 // placeTargets returns the &x of a body that errors.As, errors.AsType, or a

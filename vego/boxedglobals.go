@@ -72,9 +72,9 @@ func (pv *pkgVerifier) boxedWhy(variable *types.Var) string {
 		return fmt.Sprintf("%s %s; package-level arrays that are changed or sliced are not supported yet", spelled, pv.addressAt(variable))
 	case holdsArrayValue(t):
 		return fmt.Sprintf("%s %s; package-level structs that hold an array and whose address is taken are not supported yet", spelled, pv.addressAt(variable))
-	case !isStructType(t):
-		return fmt.Sprintf("%s %s; only a package-level variable of a struct type may have its address taken, since pointers to anything "+
-			"but a struct are not supported yet", spelled, pv.addressAt(variable))
+	case !isStructType(t) && !singleValue(t):
+		return fmt.Sprintf("%s %s; only a package-level variable of a struct type, a number, a boolean, or a string may have its address taken, since pointers to anything "+
+			"else are not supported yet", spelled, pv.addressAt(variable))
 	}
 	if _, ok := layoutOf(t); !ok {
 		return fmt.Sprintf("%s has type %s, which is not supported%s", spelled, t, unsupportedHint(t))
@@ -132,6 +132,11 @@ func (v *fnVerifier) noteBoxed(st *state, variable *types.Var) {
 // boxedPointer is the pointer to a kind-3 variable, noted on the path.
 func (v *fnVerifier) boxedPointer(st *state, variable *types.Var) value {
 	v.noteBoxed(st, variable)
+	if singleValue(variable.Type()) {
+		// A number, a boolean, or a string lives in a box of its own
+		// (F42), which is no element of an array.
+		return value{boxRef(variable), logic.IntLit(0), logic.False()}
+	}
 	return value{boxRef(variable), logic.IntLit(0)}
 }
 
@@ -167,10 +172,11 @@ func (e *specEnv) locateBoxed(variable *types.Var, steps []logic.Step, when logi
 	// the variable; a frame that asks after an annotation notes nothing
 	// (F20 of the review of step 4).
 	var base types.Type
+	stored := storedAs(variable.Type())
 	if e.v.frameNames == nil {
-		base = variable.Type()
+		base = stored
 	}
-	val := e.v.fetchIn(e.sink, mem, e.v.cellsOf(variable.Type()), pointer[0], pointer[1], base)
+	val := e.v.fetchIn(e.sink, mem, ownPlace(e.v.cellsOf(stored)), pointer[0], pointer[1], base)
 	e.v.noteTyped(e.sink, val, variable.Type())
 	cur, ground := e.v.follow(e.sink, mem, val, hops)
 	found := reached{val: cur, typ: final, mem: mem, hops: len(hops)}
@@ -184,8 +190,8 @@ func (e *specEnv) locateBoxed(variable *types.Var, steps []logic.Step, when logi
 // variable: the struct at its allocation, with its states and what it owns,
 // or the part a path names, as for the struct a pointer parameter points to.
 func (v *fnVerifier) boxedTarget(fn *funcInfo, m *modTarget, variable *types.Var, args map[*types.Var]value, sink *state, mem memory) (shape, target, error) {
-	t := variable.Type()
-	root := located{typ: t, cells: v.cellsOf(t)}
+	t := storedAs(variable.Type())
+	root := located{typ: t, cells: ownPlace(v.cellsOf(t))}
 	if mem != nil {
 		pointer := v.boxedPointer(sink, variable)
 		root.ref, root.at = pointer[0], pointer[1]

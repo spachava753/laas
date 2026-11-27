@@ -280,12 +280,34 @@ func (t target) regions(visit func(key string, sort logic.Sort)) {
 		return
 	}
 	seen := map[string]bool{}
-	for _, c := range t.cells {
+	for _, c := range bothCells(t.cells) {
 		if !seen[c.key] {
 			seen[c.key] = true
 			visit(c.key, c.sort)
 		}
 	}
+}
+
+// bothCells returns cells with the elem cell of each box cell beside it: a
+// target that holds the cell of a box covers it in both regions, which in
+// step 1 of F42 no allocation holds at one position, so that covering both
+// keeps nothing that either could change (F5 of the design review).
+func bothCells(cells []cell) []cell {
+	if !slices.ContainsFunc(cells, func(c cell) bool { return c.either != nil }) {
+		return cells
+	}
+	var out []cell
+	for _, c := range cells {
+		if c.either != nil {
+			e := *c.either
+			e.off = c.off
+			c.either, c.arr = nil, nil
+			out = append(out, c, e)
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 // reaches reports whether the target reaches into every one of the regions.
@@ -469,7 +491,7 @@ func (v *fnVerifier) unchanged(sink *state, now *logic.Term, known *layer, ref, 
 			// the position of each of its cells in this region, and each
 			// position of the run of an array, as havoc writes them, and
 			// nothing between them.
-			for _, c := range t.cells {
+			for _, c := range bothCells(t.cells) {
 				if c.key != known.key {
 					continue
 				}
@@ -538,6 +560,16 @@ func (v *fnVerifier) fetchIn(sink *state, mem memory, cells []cell, ref, at *log
 		position := c.start(at)
 		region := v.skipApart(v.tableAt(sink, mem, c.key, logic.SeqOf(logic.SeqOf(c.sort)), ref, position), base, c)
 		val[i] = logic.Select(logic.Select(region, ref), position)
+		if c.either != nil {
+			// The cell of a box through a pointer whose #arr is not known:
+			// the element at the position when it is set, and the place
+			// cell when it is not (R1).
+			if c.arr == nil {
+				panic("vego: internal error: the cell of a box is read for no pointer")
+			}
+			elem := logic.Select(logic.Select(v.tableAt(sink, mem, c.either.key, logic.SeqOf(logic.SeqOf(c.sort)), ref, position), ref), position)
+			val[i] = logic.Ite(c.arr, elem, val[i])
+		}
 	}
 	return val
 }
@@ -559,11 +591,36 @@ func (v *fnVerifier) putIn(st *state, base types.Type, cells []cell, ref, at *lo
 			v.writeRun(st, c, ref, at, val[i])
 			continue
 		}
+		if c.either != nil {
+			v.writeEither(st, c, ref, at, val[i])
+			continue
+		}
 		if base != nil && isPlaceKey(c.key) {
 			v.nextBase = &storeBase{t: base, off: c.off}
 		}
 		v.writeAt(st, c.key, c.sort, ref, c.start(at), val[i])
 		v.nextBase = nil
+	}
+}
+
+// writeEither writes the cell of a box through a pointer whose #arr is not
+// known (R2): each of the two regions gets, at the position, the value
+// under the condition that the pointer points into it, and keeps what it
+// held otherwise. The value is named once, so that it is not put into the
+// term twice.
+func (v *fnVerifier) writeEither(st *state, c cell, ref, at, written *logic.Term) {
+	if c.arr == nil {
+		panic("vego: internal error: the cell of a box is written for no pointer")
+	}
+	table := logic.SeqOf(logic.SeqOf(c.sort))
+	written = v.named(st, "written", written)
+	position := c.start(at)
+	for _, side := range []struct {
+		key  string
+		when *logic.Term
+	}{{c.key, logic.Not(c.arr)}, {c.either.key, c.arr}} {
+		old := logic.Select(logic.Select(st.mem.region(side.key, table), ref), position)
+		v.writeAt(st, side.key, c.sort, ref, position, logic.Ite(side.when, written, old))
 	}
 }
 
@@ -689,10 +746,11 @@ func (v *fnVerifier) member(sink *state, mem memory, cur value, t types.Type, in
 	if !viaPointer {
 		return cur[lo:hi], field.Type(), true
 	}
-	result := v.fetchIn(sink, mem, v.cellsOf(object)[lo:hi], cur[0], cur[1], object)
+	cells := resolveCells(v.cellsOf(object)[lo:hi], cur)
+	result := v.fetchIn(sink, mem, cells, cur[0], cur[1], object)
 	v.noteTyped(sink, result, field.Type())
-	v.noteEntryRefs(mem, entryCells(v.cellsOf(object)[lo:hi], cur[1]), cur[0], field.Type())
-	v.noteReached(sink, v.cellsOf(object)[lo:hi], cur[0], cur[1], field.Type(), object)
+	v.noteEntryRefs(mem, entryCells(cells, cur[1]), cur[0], field.Type())
+	v.noteReached(sink, cells, cur[0], cur[1], field.Type(), object)
 	return result, field.Type(), true
 }
 
@@ -932,6 +990,7 @@ func (t target) stretches() []stretch {
 // field of two structs that lie side by side, stay two stretches, since
 // what lies between them is not part of the value.
 func stretchesOf(cells []cell, at *logic.Term) []stretch {
+	cells = bothCells(cells)
 	parts := make([]stretch, len(cells))
 	for i, c := range cells {
 		parts[i] = stretch{key: c.key, lo: c.start(at), hi: c.end(at), one: !c.isRun()}
@@ -1061,6 +1120,12 @@ func (v *fnVerifier) parameterPath(st *state, guard []*logic.Term, w written) st
 		return ""
 	}
 	part := w.parts[0]
+	// A package-level variable that lives in a box of its own (kind 3).
+	if w.ref.Op == logic.OpConst && strings.HasPrefix(w.ref.Name, boxName) {
+		if variable := v.boxedMet[strings.TrimPrefix(w.ref.Name, boxName)]; variable != nil && singleValue(variable.Type()) {
+			return ", as " + v.spelling(variable)
+		}
+	}
 	for _, param := range v.fn.params {
 		entry := v.entry[param]
 		if entry == nil || param.Name() == "" || param.Name() == "_" {
@@ -1638,10 +1703,11 @@ func (v *fnVerifier) havoc(st *state, t target, guard []*logic.Term) {
 			v.noteStruct(st, *t.base)
 		}
 		// What the types guarantee of the new values is noted where they
-		// are read.
-		before := v.fetch(nil, st.mem, t.cells, t.ref, t.lo)
-		unknown := make(value, len(t.cells))
-		for i, c := range t.cells {
+		// are read. The cell of a box is written in both its regions.
+		cells := bothCells(t.cells)
+		before := v.fetch(nil, st.mem, cells, t.ref, t.lo)
+		unknown := make(value, len(cells))
+		for i, c := range cells {
 			// The run of an array is one leaf, a sequence, which put
 			// splices over the run.
 			sort := c.sort
@@ -1653,7 +1719,7 @@ func (v *fnVerifier) havoc(st *state, t target, guard []*logic.Term) {
 				st.assume(logic.Implies(skipped, v.same(unknown[i], before[i])))
 			}
 		}
-		v.put(st, t.cells, t.ref, t.lo, unknown)
+		v.put(st, cells, t.ref, t.lo, unknown)
 	default:
 		t.regions(func(key string, sort logic.Sort) {
 			before := logic.Select(st.mem.region(key, logic.SeqOf(logic.SeqOf(sort))), t.ref)

@@ -298,7 +298,12 @@ func (v *fnVerifier) canBeMet(entry *state) bool {
 		if object, isPointer := pointee(covered); isPointer {
 			covered = object
 		}
-		v.put(st, t.cells, t.ref, t.lo, v.unknown("out", covered, st))
+		// The cell of a box gets an unknown value in both its regions.
+		cells, out := bothCells(t.cells), v.unknown("out", covered, st)
+		if len(cells) != len(out) {
+			out = append(out, v.unknown("out", covered, st)...)
+		}
+		v.put(st, cells, t.ref, t.lo, out)
 		// The states of what a pointer of a type with states points to,
 		// which the entry covers with the struct, get values that Z3
 		// chooses too (S0b of F34).

@@ -95,41 +95,45 @@ type S struct {
 	f int
 }
 
-// FieldAddress takes the address of a field.
+// FieldAddress takes the address of a field, which verifies since F42.
 //
 // @Ensures True
 func FieldAddress() (r int) {
 	var s S
-	Inc(&s.f) // want `vego: cannot verify FieldAddress: taking the address of s\.f is not supported yet: it is a value of type int inside a struct, a slice, an array, or a package-level variable, and a pointer to a number, a boolean, or a string can point only to a value of its own, a local variable or what new makes; copy the value into a local variable and take its address`
+	Inc(&s.f)
 	return s.f
 }
 
-// ElementAddress takes the address of an element of a slice.
+// ElementAddress takes the address of an element of a slice, which
+// verifies since F42.
 //
 // @Requires |xs| > 0 And xs[0] < 1000
 // @Modifies xs
 // @Ensures True
 func ElementAddress(xs []int) {
-	Inc(&xs[0]) // want `vego: cannot verify ElementAddress: taking the address of xs\[0\] is not supported yet: it is a value of type int inside a struct, a slice, an array, or a package-level variable, and a pointer to a number, a boolean, or a string can point only to a value of its own, a local variable or what new makes; copy the value into a local variable and take its address`
+	Inc(&xs[0])
 }
 
-// ArrayAddress takes the address of an element of an array.
+// ArrayAddress takes the address of an element of an array, which verifies
+// since F42.
 //
 // @Ensures True
 func ArrayAddress() (r int) {
 	var a [2]int
-	Inc(&a[0]) // want `vego: cannot verify ArrayAddress: taking the address of a\[0\] is not supported yet: it is a value of type int inside a struct, a slice, an array, or a package-level variable, and a pointer to a number, a boolean, or a string can point only to a value of its own, a local variable or what new makes; copy the value into a local variable and take its address`
+	Inc(&a[0])
 	return a[0]
 }
 
 // G is a package-level number.
 var G int
 
-// GlobalAddress takes the address of a package-level variable.
+// GlobalAddress takes the address of a package-level variable, which lives
+// in a box of its own since F42, and lists nothing and requires nothing of
+// it.
 //
 // @Ensures True
 func GlobalAddress() {
-	Inc(&G) // want `vego: cannot verify GlobalAddress: G is a package-level variable, which a verified function cannot assign yet`
+	Inc(&G) // want `vego: precondition of Inc may not hold: \*p < 1000` `vego: Inc may modify p, which GlobalAddress may not modify; list it in a // @Modifies clause, as G`
 }
 
 // Counter counts.
@@ -150,31 +154,33 @@ type Stats struct {
 	Counter
 }
 
-// FieldMethod calls a pointer method on a field.
+// FieldMethod calls a pointer method on a field, which verifies since F42.
 //
 // @Requires s != nil And s.Hits < 100
 // @Modifies s
 // @Ensures True
 func FieldMethod(s *Stats) {
-	s.Hits.Bump() // want `vego: cannot verify FieldMethod: calling Bump takes the address of s\.Hits, which is not supported yet: it is a value of type ptrvalsbad\.Counter inside a struct, a slice, an array, or a package-level variable, and a pointer to a number, a boolean, or a string can point only to a value of its own, a local variable or what new makes; copy the value into a local variable and take its address`
+	s.Hits.Bump()
 }
 
-// PromotedMethod calls a pointer method promoted from an embedded counter.
+// PromotedMethod calls a pointer method promoted from an embedded counter,
+// which verifies since F42.
 //
 // @Requires s != nil And s.Counter < 100
 // @Modifies s
 // @Ensures True
 func PromotedMethod(s *Stats) {
-	s.Bump() // want `vego: cannot verify PromotedMethod: calling Bump takes the address of a field of s, which is not supported yet: it is a value of type ptrvalsbad\.Counter inside a struct, a slice, an array, or a package-level variable, and a pointer to a number, a boolean, or a string can point only to a value of its own, a local variable or what new makes; copy the value into a local variable and take its address`
+	s.Bump()
 }
 
-// ElementMethod calls a pointer method on an element of a slice.
+// ElementMethod calls a pointer method on an element of a slice, which
+// verifies since F42.
 //
 // @Requires |cs| > 0 And cs[0] < 100
 // @Modifies cs
 // @Ensures True
 func ElementMethod(cs []Counter) {
-	cs[0].Bump() // want `vego: cannot verify ElementMethod: calling Bump takes the address of cs\[0\], which is not supported yet: it is a value of type ptrvalsbad\.Counter inside a struct, a slice, an array, or a package-level variable, and a pointer to a number, a boolean, or a string can point only to a value of its own, a local variable or what new makes; copy the value into a local variable and take its address`
+	cs[0].Bump()
 }
 
 // NotAPointer dereferences a number in a formula.

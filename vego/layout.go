@@ -35,6 +35,10 @@ const (
 	// of the array. It is not a single value, so nothing that takes a
 	// sequence leaf for a string takes it for one.
 	partArray
+	// partArr says of a pointer to a number, a boolean, or a string
+	// whether it points to an element of an array, in the elem region of
+	// its type, or not, in its place region (F42).
+	partArr
 )
 
 // leaf is one indivisible component of a Go value. A number, a boolean, a
@@ -236,6 +240,9 @@ func layoutOf(t types.Type) ([]leaf, bool) {
 			return one(logic.Ref)
 		}
 	case *types.Pointer:
+		if _, ok := pointee(t); ok && singleValue(u.Elem()) {
+			return []leaf{{"#ptr", logic.Ref, t, partPtr}, {"#at", logic.Int, t, partAt}, {"#arr", logic.Bool, t, partArr}}, true
+		}
 		if _, ok := pointee(t); ok {
 			return []leaf{{"#ptr", logic.Ref, t, partPtr}, {"#at", logic.Int, t, partAt}}, true
 		}
@@ -481,6 +488,55 @@ type cell struct {
 	off  int64
 	run  int64
 	unit int64
+	// either is set for the cell of a box: the cell it is when the pointer
+	// to the box points to an element of an array, in the elem region of
+	// its type, at the same position. arr is that pointer's #arr once the
+	// cell is resolved for it (resolveCells); a cell with either and no
+	// arr is unresolved, which a read or a write of it must not meet. A
+	// target may cover both, which is the cell of a place region and of
+	// an elem region at one position, of which no allocation holds both.
+	either *cell
+	arr    *logic.Term
+}
+
+// resolveCells returns the cells of what a pointer points to for the
+// pointer's value: for a box, the cell of its place region when the
+// pointer's #arr is false, of its elem region when it is true, and the
+// cell with both, to be chosen by #arr, when it is not known.
+func resolveCells(cells []cell, ptr value) []cell {
+	if len(cells) != 1 || cells[0].either == nil {
+		return cells
+	}
+	if len(ptr) < 3 {
+		// The place of a variable that lives in its box, which is no
+		// element of an array. Every value of a pointer type has #arr, and
+		// only &xs[i] and &a[i] make one that is true.
+		return resolveBox(cells, logic.False())
+	}
+	return resolveBox(cells, ptr[2])
+}
+
+// resolveBox resolves the cell of a box for a pointer whose #arr is arr.
+func resolveBox(cells []cell, arr *logic.Term) []cell {
+	c := cells[0]
+	switch arr.Op {
+	case logic.OpTrue:
+		return []cell{*c.either}
+	case logic.OpFalse:
+		c.either = nil
+		return []cell{c}
+	}
+	c.arr = arr
+	return []cell{c}
+}
+
+// ownPlace is resolveCells for a box at a place of its own: a variable
+// whose address is taken, or what new made.
+func ownPlace(cells []cell) []cell {
+	if len(cells) != 1 || cells[0].either == nil {
+		return cells
+	}
+	return resolveBox(cells, logic.False())
 }
 
 // start returns the position of a cell of a value stored at position at:
@@ -577,7 +633,11 @@ func (pv *pkgVerifier) cellsOf(t types.Type) []cell {
 			key = "place " + typeKey(untagged(field.Type().Underlying()))
 		}
 		for _, lf := range inner {
-			cells = append(cells, cell{key: key + lf.path, sort: lf.sort, off: offsets[i]})
+			c := cell{key: key + lf.path, sort: lf.sort, off: offsets[i]}
+			if box {
+				c.either = &cell{key: "elem " + typeKey(untagged(field.Type().Underlying())), sort: lf.sort}
+			}
+			cells = append(cells, c)
 		}
 	}
 	// A state lies at the start of its struct, in a region that only

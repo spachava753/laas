@@ -1271,6 +1271,11 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 				return st.vals[variable]
 			}
 		}
+		// A field in memory, an element of a slice, or an element of an
+		// array in memory: the method gets an interior pointer (F42).
+		if lv := v.place(sel.X); lv.kind == placeMem && lv.global == nil && lv.boxGlobal == nil {
+			return v.interiorAddress(sel.X, st, guard)
+		}
 		v.unsupported(call.Pos(), v.addressClass(sel.X), interiorRefusal(fmt.Sprintf("calling %s takes the address of %s, which", sel.Sel.Name, types.ExprString(sel.X)), t))
 	}
 	if _, isStruct := t.Underlying().(*types.Struct); isStruct && !fixed && v.place(sel.X).kind == placeMem {
@@ -1298,7 +1303,9 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 			t = object
 		}
 		if wantPointer && singleValue(t) {
-			v.unsupported(call.Pos(), v.addressClass(sel.X), interiorRefusal(fmt.Sprintf("calling %s takes the address of a field of %s, which", sel.Sel.Name, types.ExprString(sel.X)), t))
+			// The embedded field the method is promoted from, which is
+			// addressable since its type has a pointer method (F42).
+			return value{where[0], where[1], logic.False()}
 		}
 		if wantPointer {
 			return where
@@ -1342,7 +1349,9 @@ func (v *fnVerifier) receiver(call *ast.CallExpr, recv *types.Var, st *state, gu
 	case wantPointer == havePointer:
 		return cur
 	case wantPointer && where != nil && singleValue(t):
-		v.unsupported(call.Pos(), v.addressClass(sel.X), interiorRefusal(fmt.Sprintf("calling %s takes the address of a field of %s, which", sel.Sel.Name, types.ExprString(sel.X)), t))
+		// An embedded field of the struct a pointer points to, which is
+		// addressable since its type has a pointer method (F42).
+		return value{where[0], where[1], logic.False()}
 	case wantPointer && where != nil:
 		return where
 	case wantPointer:
@@ -1378,7 +1387,7 @@ func (v *fnVerifier) contentFacts(mem memory, val value, t types.Type, brk *logi
 		if !isPointer || !follow {
 			break
 		}
-		target := v.fetch(nil, mem, v.cellsOf(object), val[0], val[1])
+		target := v.fetch(nil, mem, resolveCells(v.cellsOf(object), val), val[0], val[1])
 		return logic.And(v.wellFormed(target, object, brk), v.contentFacts(mem, target, object, brk, false))
 	case *types.Struct:
 		var facts []*logic.Term

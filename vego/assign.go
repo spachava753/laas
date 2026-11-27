@@ -76,7 +76,7 @@ func (v *fnVerifier) place(e ast.Expr) lvalue {
 		switch {
 		case ok && variable.Pkg() == v.pass.Pkg && v.isBoxedGlobal(variable):
 			// A struct variable whose address is taken, at its allocation.
-			lv.kind, lv.boxGlobal, lv.typ, lv.cells = placeMem, variable, variable.Type(), v.cellsOf(variable.Type())
+			lv.kind, lv.boxGlobal, lv.typ, lv.cells = placeMem, variable, variable.Type(), ownPlace(v.cellsOf(storedAs(variable.Type())))
 			lv.leaves = mustLayout(variable.Type())
 			return lv
 		case ok && v.isAssigned(variable):
@@ -206,6 +206,7 @@ func (v *fnVerifier) lvalue(e ast.Expr, st *state, guard []*logic.Term) lvalue {
 	case lv.boxGlobal != nil:
 		pointer := v.boxedPointer(st, lv.boxGlobal)
 		lv.ref, lv.at = pointer[0], pointer[1]
+		lv.cells = ownPlace(lv.cells)
 	case lv.box != nil:
 		// A variable that an assignment creates has no place yet.
 		if id, ok := ast.Unparen(e).(*ast.Ident); ok && v.info.Defs[id] != nil {
@@ -217,10 +218,12 @@ func (v *fnVerifier) lvalue(e ast.Expr, st *state, guard []*logic.Term) lvalue {
 			v.unsupported(lv.pos, rAssignInPlace, fmt.Sprintf("%s is used before it is declared", lv.box.Name()))
 		}
 		lv.ref, lv.at = held[0], held[1]
+		lv.cells = ownPlace(lv.cells)
 	case lv.kind == placeMem && lv.pointer != nil:
 		pointer := v.eval(lv.pointer, st, guard)
 		v.checkNil(st, guard, pointer[0], lv.pos)
 		lv.ref, lv.at = pointer[0], pointer[1]
+		lv.cells = resolveCells(lv.cells, pointer)
 	case lv.kind == placeMem:
 		header, index := v.eval(lv.slice, st, guard), v.expr(lv.index, st, guard)
 		v.checkIndex(st, guard, header[2], index, lv.pos)

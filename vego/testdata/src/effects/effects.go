@@ -174,8 +174,8 @@ func HiddenRangeWrite() (result int) {
 // @Requires |a| > 0
 // @Ensures True
 func viaPointer(a []int) {
-	p := &a[0] // want `vego: cannot verify viaPointer: taking the address of a\[0\] is not supported yet: it is a value of type int inside a struct, a slice, an array, or a package-level variable, and a pointer to a number, a boolean, or a string can point only to a value of its own, a local variable or what new makes; copy the value into a local variable and take its address`
-	*p = 1
+	p := &a[0]
+	*p = 1 // want `vego: \*p is assigned, which viaPointer may not modify; list it in a // @Modifies clause, as a`
 }
 
 // @Requires |a| > 0

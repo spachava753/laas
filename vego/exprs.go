@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"go/types"
 	"slices"
+	"strings"
 
 	"github.com/spachava753/laas/vego/internal/logic"
 )
@@ -31,7 +32,7 @@ func (v *fnVerifier) variable(id *ast.Ident, st *state, guard []*logic.Term) val
 			// A struct variable whose address is taken, at its allocation.
 			pointer := v.boxedPointer(st, variable)
 			return v.readAt(st, guard, v.unit.start(), id.Name, id.Pos(), func(sink *state, mem memory) value {
-				return v.pointedIn(sink, mem, variable.Type(), pointer)
+				return v.pointedIn(sink, mem, storedAs(variable.Type()), pointer)
 			})
 		}
 		if v.isAssigned(variable) {
@@ -269,9 +270,10 @@ func (v *fnVerifier) pointedIn(sink *state, mem memory, t types.Type, pointer va
 	if isStructType(t) {
 		base = t
 	}
-	val := v.fetchIn(sink, mem, v.cellsOf(t), pointer[0], pointer[1], base)
+	cells := resolveCells(v.cellsOf(t), pointer)
+	val := v.fetchIn(sink, mem, cells, pointer[0], pointer[1], base)
 	v.noteTyped(sink, val, t)
-	v.noteReached(sink, v.cellsOf(t), pointer[0], pointer[1], t, t)
+	v.noteReached(sink, cells, pointer[0], pointer[1], t, t)
 	return val
 }
 
@@ -322,9 +324,14 @@ func hopsPointer(t types.Type, path []int) bool {
 // own and returns the pointer to it.
 func (v *fnVerifier) newObject(st *state, t types.Type, val value) value {
 	ref := v.alloc(st, v.pass.TypesSizes.Sizeof(t) > 0)
-	v.putIn(st, structOrNil(t), v.cellsOf(t), ref, logic.IntLit(0), val)
-	v.noteBorn(st, ref, rowKeys(v.cellsOf(t)))
+	cells := ownPlace(v.cellsOf(t))
+	v.putIn(st, structOrNil(t), cells, ref, logic.IntLit(0), val)
+	v.noteBorn(st, ref, rowKeys(cells))
 	v.newPointerStates(st, t, value{ref, logic.IntLit(0)})
+	if _, box := isBox(t); box {
+		// A box is a place of its own, not an element of an array.
+		return value{ref, logic.IntLit(0), logic.False()}
+	}
 	return value{ref, logic.IntLit(0)}
 }
 
@@ -337,7 +344,17 @@ func (v *fnVerifier) addressOf(e ast.Expr, st *state, guard []*logic.Term) value
 	single := singleValue(v.info.TypeOf(e))
 	_, named := ast.Unparen(e).(*ast.Ident)
 	switch lv := v.place(e); {
-	case single && (lv.box == nil || !named):
+	case single && named && lv.boxGlobal != nil:
+		// A package-level variable whose address is taken lives in a box
+		// of its own (kind 3, F42).
+		return v.boxedPointer(st, lv.boxGlobal)
+	case single && named && lv.box == nil:
+		v.unsupported(e.Pos(), v.addressClass(e), interiorRefusal("taking the address of "+types.ExprString(e), v.info.TypeOf(e)))
+	case single && lv.kind == placeMem && !named && lv.global == nil && lv.boxGlobal == nil:
+		// A field, an element of a slice, or an element of an array in
+		// memory: an interior pointer (F42).
+		return v.interiorAddress(e, st, guard)
+	case single && !named:
 		v.unsupported(e.Pos(), v.addressClass(e), interiorRefusal("taking the address of "+types.ExprString(e), v.info.TypeOf(e)))
 	case !isStruct && !single:
 		v.unsupported(e.Pos(), pointerClass(v.info.TypeOf(e)), fmt.Sprintf("taking the address of %s is not supported: it is a %s, and only pointers to structs, numbers, booleans, and strings are supported",
@@ -346,6 +363,10 @@ func (v *fnVerifier) addressOf(e ast.Expr, st *state, guard []*logic.Term) value
 		v.unsupported(e.Pos(), v.addressClass(e), fmt.Sprintf("taking the address of %s is not supported", types.ExprString(e)))
 	}
 	lv := v.lvalue(e, st, guard)
+	if single {
+		// A variable whose address is taken lives in a box of its own.
+		return value{lv.ref, logic.Add(lv.at, logic.IntLit(lv.offset)), logic.False()}
+	}
 	return value{lv.ref, logic.Add(lv.at, logic.IntLit(lv.offset))}
 }
 
@@ -426,8 +447,14 @@ func (v *fnVerifier) binaryExpr(e *ast.BinaryExpr, st *state, guard []*logic.Ter
 		}
 		// Two pointers are equal when both are nil, or when they point to
 		// the same position of the same allocation.
+		// Two pointers to single values are also in one region: an
+		// element of an array and a place are two locations (R3).
 		a, b := v.eval(e.X, st, guard), v.eval(e.Y, st, guard)
-		same := logic.And(logic.Eq(a[0], b[0]), logic.Or(logic.Eq(a[0], logic.RefLit(0)), logic.Eq(a[1], b[1])))
+		at := logic.Eq(a[1], b[1])
+		if len(a) == 3 && len(b) == 3 {
+			at = logic.And(at, logic.Eq(a[2], b[2]))
+		}
+		same := logic.And(logic.Eq(a[0], b[0]), logic.Or(logic.Eq(a[0], logic.RefLit(0)), at))
 		switch e.Op {
 		case token.EQL:
 			return same
@@ -886,4 +913,34 @@ func (v *fnVerifier) copiedBytes(st *state, text *logic.Term, to types.Type) val
 	v.noteBorn(st, copied[0], rowKeys([]cell{only}))
 	st.assume(v.wellFormed(copied, to, st.brk))
 	return copied
+}
+
+
+// interiorAddress evaluates &x for a number, a boolean, or a string that is
+// a field of a struct in memory, an element of a slice, or an element of an
+// array in memory (F42). A field lies in the place region of its type, at
+// its byte address, and the pointer's #arr is false; an element lies in the
+// elem region at its position, and #arr is true.
+func (v *fnVerifier) interiorAddress(e ast.Expr, st *state, guard []*logic.Term) value {
+	lv := v.lvalue(e, st, guard)
+	if lv.element != nil {
+		// An element of an array in memory: the position of the run's
+		// first element and the index.
+		return value{lv.ref, logic.Add(lv.cells[0].start(lv.at), lv.elementIndex), logic.True()}
+	}
+	if len(lv.cells) != 1 {
+		panic("vego: internal error: a single value has " + fmt.Sprint(len(lv.cells)) + " cells")
+	}
+	// A field of a struct that is an element of a slice is a field: the
+	// region of the cell decides, not the path to it.
+	c := lv.cells[0]
+	switch {
+	case strings.HasPrefix(c.key, "elem "):
+		return value{lv.ref, c.start(lv.at), logic.True()}
+	case isPlaceKey(c.key):
+		return value{lv.ref, c.start(lv.at), logic.False()}
+	}
+	// The scan of the package found no address taken of the field, so it
+	// lies in a region of its struct, where no pointer can point.
+	panic(fmt.Sprintf("vego: internal error: the address of %s is taken, which lies in region %s and not in the place region of its type", types.ExprString(e), c.key))
 }

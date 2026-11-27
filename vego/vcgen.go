@@ -672,7 +672,7 @@ func (v *fnVerifier) findBoxed(body *ast.BlockStmt) map[*types.Var]bool {
 // expression is, or is a field of, without a pointer in between.
 func (v *fnVerifier) localRoot(e ast.Expr) *types.Var {
 	// A variable of a single value lives in memory only when its own
-	// address is taken; &s.f of such a field is refused where it is taken.
+	// address is taken.
 	outer := ast.Unparen(e)
 	for {
 		switch x := ast.Unparen(e).(type) {
@@ -698,6 +698,13 @@ func (v *fnVerifier) localRoot(e ast.Expr) *types.Var {
 					return nil
 				}
 				t = object.Field(index).Type()
+			}
+			e = x.X
+		case *ast.IndexExpr:
+			// &a[i] of an array that a variable holds puts the array in
+			// memory, as slicing it does.
+			if !isArray(v.info.TypeOf(x.X)) {
+				return nil
 			}
 			e = x.X
 		default:

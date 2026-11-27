@@ -422,7 +422,7 @@ func (v *fnVerifier) returned(st *state, results []value, pos token.Pos) {
 		switch {
 		case results[i] == nil:
 		case v.boxed[result] && held != nil:
-			v.put(st, v.cellsOf(storedAs(result.Type())), held[0], held[1], results[i])
+			v.put(st, ownPlace(v.cellsOf(storedAs(result.Type()))), held[0], held[1], results[i])
 		case !v.boxed[result]:
 			st.vals[result] = results[i]
 		}

@@ -310,7 +310,7 @@ func (e *specEnv) root(name string) (val value, t types.Type, isResult bool, con
 				if e.v.boxed[variable] {
 					// The variable lives in memory and holds a pointer to
 					// its value.
-					val = e.v.fetch(e.sink, e.now, e.v.cellsOf(storedAs(variable.Type())), val[0], val[1])
+					val = e.v.fetch(e.sink, e.now, ownPlace(e.v.cellsOf(storedAs(variable.Type()))), val[0], val[1])
 				}
 				return val, variable.Type(), false, nil, nil
 			}
@@ -2389,6 +2389,11 @@ func (v *fnVerifier) walkTarget(fn *funcInfo, m *modTarget, param *types.Var, ro
 		t.single = true
 	}
 	t.cells, t.elem, t.mapType = form.cells, form.elem, form.mapType
+	if isPointer && !symbolic {
+		// What a pointer to a single value points to is a place or an
+		// element of an array, as its #arr says.
+		t.cells = resolveCells(t.cells, cur.val)
+	}
 	if form.direct && len(m.steps) == 0 {
 		t.param = param
 	}

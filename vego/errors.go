@@ -1883,7 +1883,7 @@ func (v *fnVerifier) someInput(terms []*logic.Term, search func(input *witness) 
 	// value.
 	for _, key := range slices.Sorted(maps.Keys(v.boxedMet)) {
 		variable := v.boxedMet[key]
-		cells, name := v.cellsOf(variable.Type()), boxRef(variable).Name
+		cells, name := ownPlace(v.cellsOf(storedAs(variable.Type()))), boxRef(variable).Name
 		if !b.mentioned[name] && !slices.ContainsFunc(cells, func(c cell) bool { return b.mentioned[entryRegion+c.key] }) {
 			continue
 		}

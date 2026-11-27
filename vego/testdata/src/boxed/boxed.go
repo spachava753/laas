@@ -173,11 +173,12 @@ var n int
 // takeN takes the address of an int.
 func takeN() *int { return &n }
 
-// readN reads it.
+// readN reads it, which verifies since F42: a number whose address is taken
+// lives in a box of its own, as a struct variable does.
 //
 // @Ensures True
 func readN() (r int) {
-	return n // want `vego: cannot verify readN: n has its address taken at boxed\.go:\d+; only a package-level variable of a struct type may have its address taken, since pointers to anything but a struct are not supported yet`
+	return n
 }
 
 // Stamp is a struct with value methods.

@@ -19,7 +19,8 @@ func Channel() int {
 
 type pair struct{ a, b int }
 
-// Address takes the address of a field, and then of an element.
+// Address takes the address of a field, and then of an element, which
+// stops nothing since F42.
 func Address(p *pair, xs []int) int {
 	q := &p.a
 	r := &xs[0]
@@ -116,8 +117,9 @@ type counter struct{ n int }
 
 func itoa(p *int) string { return "" }
 
-// Hidden refuses at the call of strings.Trim and inside its argument; a
-// stub of the call still looks at the argument (F15 of the review).
+// Hidden refuses at the call of strings.Trim; a stub of the call still
+// looks at the argument (F15 of the review), whose &t.n stops nothing since
+// F42.
 func Hidden(t *counter) string {
 	return strings.Trim(itoa(&t.n), " ")
 }

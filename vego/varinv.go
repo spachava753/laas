@@ -650,7 +650,7 @@ func (pv *pkgVerifier) checkGroupsInitialised() {
 				}
 				if v.isBoxedGlobal(variable) {
 					pointer := v.boxedPointer(st, variable)
-					v.put(st, v.cellsOf(variable.Type()), pointer[0], pointer[1], val)
+					v.put(st, ownPlace(v.cellsOf(storedAs(variable.Type()))), pointer[0], pointer[1], val)
 					continue
 				}
 				v.noteGlobal(st, variable)

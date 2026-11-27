@@ -63,9 +63,17 @@ func CountTwice() (r Clicks) {
 // Span holds two numbers.
 type Span struct{ lo, hi int }
 
-// @Ensures True
-func AddressOfField() (r int) {
+// @Ensures r = 1 And s = 0
+func AddressOfField() (r, s int) {
 	var b Span
-	Increment(&b.lo) // want `vego: cannot verify AddressOfField: taking the address of b\.lo is not supported yet: it is a value of type int inside a struct, a slice, an array, or a package-level variable, and a pointer to a number, a boolean, or a string can point only to a value of its own, a local variable or what new makes; copy the value into a local variable and take its address`
-	return b.lo
+	Increment(&b.lo)
+	return b.lo, b.hi
 }
+
+// @Requires p != nil And b != nil
+// @Modifies p, b
+// @Ensures b.lo' = 1
+func OverwriteLo(p *int, b *Span) {
+	b.lo = 1
+	*p = 2
+} // want `vego: postcondition may not hold: b\.lo' = 1`

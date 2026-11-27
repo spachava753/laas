@@ -764,7 +764,12 @@ func (v *fnVerifier) partApartFromParams(st *state, t target, owner *types.Var) 
 				continue
 			}
 			inPart := logic.And(logic.Eq(val[0], t.ref), logic.Le(t.lo, val[1]), logic.Lt(val[1], t.hi))
-			if t.base != nil && !types.Identical(untagged(object.Underlying()), untagged(t.base.t.Underlying())) && t.elem == nil {
+			// A pointer to a single value may point to a field of the part
+			// of its type, which E refuses at every call (mayLieIn), so it
+			// is assumed outside whatever the part's type (F3 of the design
+			// review of F42).
+			_, boxed := isBox(object)
+			if t.base != nil && !boxed && !types.Identical(untagged(object.Underlying()), untagged(t.base.t.Underlying())) && t.elem == nil {
 				continue
 			}
 			fact = logic.Or(logic.Eq(val[0], zero), logic.Eq(t.ref, zero), logic.Not(inPart))
@@ -867,6 +872,14 @@ func ownerHolding(owners map[types.Type]bool, t types.Type) types.Type {
 			if object, isPointer := pointee(t); isPointer && isSlice(ft) && holdsInline(elemType(ft), object, map[string]bool{}) {
 				return owner
 			}
+			// A pointer to a single value may point into what the field
+			// refers to, by memory and not by type (F3 of the design
+			// review of F42).
+			if object, isPointer := pointee(t); isPointer {
+				if _, boxed := isBox(object); boxed && mayLieIn(ft, t) {
+					return owner
+				}
+			}
 		}
 	}
 	if u, isStruct := t.Underlying().(*types.Struct); isStruct {
@@ -926,6 +939,12 @@ func mayLieIn(ft, t types.Type) bool {
 	case memory == nil:
 		return false
 	case isPointer:
+		// A pointer to a single value may point to a field or an element
+		// of its type at any depth, not only to a box (F3 of the design
+		// review of F42).
+		if held, boxed := isBox(object); boxed {
+			return holdsInline(memory, held, map[string]bool{})
+		}
 		return holdsInline(memory, object, map[string]bool{})
 	case isSlice(t):
 		return holdsArrayInline(memory, elemType(t), map[string]bool{})
@@ -945,13 +964,19 @@ func (v *fnVerifier) rawMember(mem memory, ptr value, t types.Type, index int) (
 		return nil, field.Type(), false
 	}
 	var out value
-	for _, c := range v.cellsOf(object)[lo:hi] {
+	for _, c := range resolveCells(v.cellsOf(object)[lo:hi], ptr) {
 		region := mem.region(c.key, logic.SeqOf(logic.SeqOf(c.sort)))
 		if c.isRun() {
 			out = append(out, logic.Subseq(logic.Select(region, ptr[0]), c.start(ptr[1]), c.end(ptr[1])))
 			continue
 		}
-		out = append(out, logic.Select(logic.Select(region, ptr[0]), logic.Add(ptr[1], logic.IntLit(c.off))))
+		read := logic.Select(logic.Select(region, ptr[0]), logic.Add(ptr[1], logic.IntLit(c.off)))
+		if c.either != nil {
+			// The cell of a box through a pointer whose #arr is not known.
+			elem := mem.region(c.either.key, logic.SeqOf(logic.SeqOf(c.sort)))
+			read = logic.Ite(c.arr, logic.Select(logic.Select(elem, ptr[0]), logic.Add(ptr[1], logic.IntLit(c.off))), read)
+		}
+		out = append(out, read)
 	}
 	return out, field.Type(), true
 }
