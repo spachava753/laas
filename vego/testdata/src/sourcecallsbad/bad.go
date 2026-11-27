@@ -31,3 +31,28 @@ func InBody(f func()) {
 	// @Calls f() // want `Calls annotation stands inside InBody`
 	f()
 }
+
+// Deferred defers a call of a parameter under Calls (F24).
+//
+// @Calls f()
+// @Ensures True
+func Deferred(f func()) {
+	defer f() // want `cannot verify Deferred: a deferred call of f, a parameter that a Calls annotation of Deferred gives a contract, is not supported yet`
+}
+
+// FromClosure calls a parameter under Calls from a recursive closure (F24).
+//
+// @Calls f()
+// @Ensures True
+func FromClosure(f func()) {
+	var down func(k int)
+	// @Requires k >= 0
+	// @Variant k
+	down = func(k int) {
+		if k > 0 {
+			f() // want `cannot verify the closure down: the closure down calls f, a parameter that a Calls annotation of FromClosure gives a contract, which a recursive closure cannot call yet`
+			down(k - 1)
+		}
+	}
+	down(2)
+}

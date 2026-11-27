@@ -100,6 +100,17 @@ func (v *fnVerifier) call(call *ast.CallExpr, st *state, guard []*logic.Term) []
 	if cb := v.sourceCallback(call); cb != nil {
 		return v.callSourceParam(call, cb, st, guard)
 	}
+	if rc := v.fn.closure; rc != nil {
+		// A parameter under Calls of the function around a recursive
+		// closure is one the closure captures, with no contract of its own.
+		if id, ok := ast.Unparen(call.Fun).(*ast.Ident); ok {
+			outer := v.pkgVerifier.funcs[v.info.Defs[rc.outer.Name].(*types.Func)]
+			if variable, ok := v.info.Uses[id].(*types.Var); ok && outer != nil && outer.calls.len() > 0 && outer.calls.get(variable) != nil {
+				v.unsupported(call.Pos(), fmt.Sprintf("%s calls %s, a parameter that a Calls annotation of %s gives a contract, which a recursive closure "+
+					"cannot call yet; call it in %s", closureName(rc.variable), id.Name, rc.outer.Name.Name, rc.outer.Name.Name))
+			}
+		}
+	}
 	if isBuiltin(v.info, call, "recover") {
 		v.unsupported(call.Pos(), recoverRefused)
 	}

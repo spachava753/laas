@@ -284,3 +284,54 @@ func Cycle(xs []int, s step) {
 func Back(x int) {
 	Cycle([]int{x}, Back) // want `cannot verify Back: Back may call through a function value or an interface value`
 }
+
+// setWith is trusted; see testdata/trusted.yaml.
+func setWith(m map[int]int, k, v int, f func()) {
+	m[k] = v
+	f()
+}
+
+var shared map[int]int
+
+// SetShared makes shared an assigned variable.
+func SetShared(m map[int]int) { shared = m }
+
+// entryWritten hands setWith, which writes one entry of a map it made, a
+// literal that calls f, which may write that map: the entry is no cell
+// that f keeps (F22 of the review of step 2).
+//
+// @Calls f()
+// @Modifies shared
+// @Ensures True
+func entryWritten(f func()) {
+	m := make(map[int]int)
+	shared = m
+	setWith(m, 1, 7, func() { f() }) // want `f may write what setWith may write itself`
+}
+
+// entryKept is entryWritten with the map in what the function may write,
+// which f may not write.
+//
+// @Calls f()
+// @Requires m != nil
+// @Modifies m
+// @Ensures True
+func entryKept(m map[int]int, f func()) {
+	setWith(m, 1, 7, func() { f() })
+}
+
+type cell struct{ n int }
+type cells struct{ items []cell }
+
+// Peek2 keeps across f what a pointer argument reaches through a field: the
+// array of another slice, which f may write, even when the slice argument
+// lies at its start (F23 of the review of step 2).
+//
+// @Calls f()
+// @Requires p != nil And |p.items| = 4 And |xs| = 1
+// @Ensures same
+func Peek2(xs []cell, p *cells, f func()) (same bool) {
+	a := p.items[3].n
+	f()
+	return a == p.items[3].n // want `postcondition may not hold: same`
+}

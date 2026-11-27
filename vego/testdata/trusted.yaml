@@ -3,6 +3,16 @@
 version: 1
 
 trusted:
+  # F40, F22 of the review of step 2: a function that writes one entry of a
+  # map and runs what it is handed.
+  sourcecalls.setWith:
+    reason: Sets m[k] to v, then calls f once.
+    requires: ["m != nil"]
+    runs: [f]
+    calls:
+      f(): {}
+    modifies: ["m[k]"]
+    ensures: ["has(m', k) And m'[k] = v"]
   # F40, step 1b: a function that returns new memory holding a reference to
   # more new memory, whose regions the call does not list; what memory held
   # on entry refers to says nothing of it.

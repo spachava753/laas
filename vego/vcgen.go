@@ -1138,6 +1138,10 @@ func (v *fnVerifier) stmt(s ast.Stmt, st *state, c ctrl, k func(*state)) {
 		}
 		return
 	case *ast.DeferStmt:
+		if v.sourceCallback(s.Call) != nil {
+			v.unsupported(s.Pos(), fmt.Sprintf("a deferred call of %s, a parameter that a Calls annotation of %s gives a contract, is not supported yet; "+
+				"call it, or defer a function literal that calls it", types.ExprString(s.Call.Fun), v.fn.obj.Name()))
+		}
 		v.deferStmt(s, st)
 	case *ast.TypeSwitchStmt:
 		v.typeSwitch(s, st, c, k)

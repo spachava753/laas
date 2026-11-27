@@ -194,12 +194,13 @@ type exceptCalls struct {
 	kept []target
 }
 
-// directTargets returns, as targets, the allocations that the parameters
-// of a function other than those under calls refer to directly, in the
-// values given: the whole array of a slice, up to its capacity and beyond,
-// the struct a pointer points to, and a map, each in the regions of its
-// type. One function computes it for the caller's check of each run and
-// for what the function keeps across a call (F1 of the design review).
+// directTargets returns, as targets, what the parameters of a function
+// other than those under calls refer to directly, in the values given: the
+// elements of a slice from its first to its capacity, the struct a pointer
+// points to, and a map, each in the regions of its type, as "What a proof
+// assumes" says it (F23 of the review of step 2). One function computes it
+// for the caller's check of each run and for what the function keeps
+// across a call (F1 of the design review).
 func (v *fnVerifier) directTargets(fn *funcInfo, args map[*types.Var]value) []target {
 	var direct []target
 	for _, param := range fn.params {
@@ -211,14 +212,16 @@ func (v *fnVerifier) directTargets(fn *funcInfo, args map[*types.Var]value) []ta
 		switch {
 		case isSlice(t):
 			if cells := v.cellsOf(elemType(t)); len(cells) > 0 {
-				direct = append(direct, target{cells: cells, elem: elemType(t), ref: val[0]})
+				elem := elemType(t)
+				direct = append(direct, target{cells: cells, elem: elem, ref: val[0], lo: val[1],
+					hi: logic.Add(val[1], logic.Mul(val[3], logic.IntLit(v.span(elem))))})
 			}
 		case isMap(t):
 			direct = append(direct, target{mapType: t, ref: val[0]})
 		default:
 			if object, isPointer := pointee(t); isPointer && isStructType(object) {
 				if cells := v.cellsOf(object); len(cells) > 0 {
-					direct = append(direct, target{cells: cells, ref: val[0]})
+					direct = append(direct, target{cells: cells, ref: val[0], lo: val[1], single: true})
 				}
 			}
 		}
@@ -282,11 +285,20 @@ func (v *fnVerifier) callSourceParam(call *ast.CallExpr, cb *callback, st *state
 	}
 	v.startCallsEpoch(st, except, guard)
 	existed := st.brk
+	// The run may write the footprint of any value outside what the call
+	// keeps, which grows only by memory the call makes, as a loop's does
+	// (F5 of the review of step 2).
+	var notRun *logic.Term
+	if len(guard) > 0 {
+		notRun = logic.Not(logic.And(guard...))
+	}
+	grown := v.grow(st, existed, notRun)
 	st.brk = v.fresh("brk", logic.Ref)
 	st.assume(logic.Le(existed, st.brk))
 	if len(guard) > 0 {
 		st.assume(logic.Implies(logic.Not(logic.And(guard...)), logic.Eq(st.brk, existed)))
 	}
+	grown.after = st.brk
 	mark, known := len(v.made), len(st.hyps)
 	results := make([]value, cb.sig.Results().Len())
 	for i := range results {
@@ -325,6 +337,16 @@ func (v *fnVerifier) callsExcept() *exceptCalls {
 // coveredBy states that every cell of a target is one a call of a
 // parameter under Calls keeps.
 func (v *fnVerifier) coveredBy(e *exceptCalls, t target) *logic.Term {
+	switch {
+	case t.except != nil || t.fp || t.row:
+		// A target whose cells untouchedBy cannot bound, a footprint, a row
+		// of states, or what a call under Calls writes, is not shown to be
+		// kept (F22 of the review of step 2).
+		return logic.False()
+	case t.key != nil:
+		// One entry of a map lies in the whole map.
+		t.key = nil
+	}
 	var cells []*logic.Term
 	t.regions(func(key string, _ logic.Sort) {
 		k := v.bound("k")
