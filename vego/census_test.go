@@ -541,6 +541,7 @@ func TestCensus(t *testing.T) {
 		"census/xb.IsEmpty":                 {assumed: "assumed:module"},
 		"census/xb.Make":                    {},
 		"census/xb.(*server).handle":        {assumed: "assumed:module"},
+		"census/through.Generated":          {partial: true, stopped: true},
 		"census/stops.Broken":               {causes: "annotation:broken", partial: true, stopped: true},
 		"census/first.Address":              {causes: "address-of:field"},
 		"census/first.Stat":                 {causes: "no-entry:std"},

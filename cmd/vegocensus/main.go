@@ -209,6 +209,7 @@ func summary(args []string, w io.Writer) error {
 	}
 	var corpora []string
 	byCorpus := map[string][]*fn{}
+	generated := map[string]int{}
 	for _, arg := range flags.Args() {
 		name, path, ok := strings.Cut(arg, "=")
 		if !ok {
@@ -222,6 +223,11 @@ func summary(args []string, w io.Writer) error {
 			corpora = append(corpora, name)
 		}
 		for _, l := range lines {
+			// A function of a generated file is counted apart.
+			if slices.ContainsFunc(l.Events, func(e event) bool { return e.Kind == "skip" }) {
+				generated[name]++
+				continue
+			}
 			byCorpus[name] = append(byCorpus[name], analyse(name, l))
 		}
 	}
@@ -238,6 +244,9 @@ func summary(args []string, w io.Writer) error {
 		fns := byCorpus[name]
 		all = append(all, fns...)
 		report(w, "Corpus "+name, fns, nil)
+		if generated[name] > 0 {
+			fmt.Fprintf(w, "Functions of generated files, left out of every count above: %d.\n\n", generated[name])
+		}
 		modules := map[string][]*fn{}
 		for _, f := range fns {
 			modules[f.module] = append(modules[f.module], f)
@@ -334,9 +343,9 @@ func report(w io.Writer, title string, fns []*fn, weights map[*fn]float64) {
 // alone, first, and in functions not looked at in full.
 func classTable(w io.Writer, fns []*fn, weights map[*fn]float64, groups bool) {
 	type row struct {
-		key                          string
+		key                         string
 		stopped, alone, first, part float64
-		details                      map[string][2]float64
+		details                     map[string][2]float64
 	}
 	rows := map[string]*row{}
 	get := func(key string) *row {

@@ -212,6 +212,7 @@ const (
 	rLimitAttempts    refusal = "limit:attempts"
 	rFacts            refusal = "limit:facts"
 	rAnnotationBroken refusal = "annotation:broken"
+	rGenerated        refusal = "skip:generated"
 	rAnnotateCalls    refusal = "annotate:calls"
 	rOwnsKept         refusal = "owns:kept"
 	rOwnsSelf         refusal = "owns:self"
@@ -385,6 +386,7 @@ var refusalClasses = map[refusal]string{
 	rOwnsReturned:          "memory an owner owns returned where no contract can place it (Ownership in source)",
 	rScopedKept:            "a value scoped to a call, as an http.ResponseWriter or a *http.Request, kept where a later call could use it (Footprints, The writer of a handler)",
 	rAnnotateCalls:         "a call of a parameter of an unnamed function type, which a Calls annotation on the function gives a contract; not a cause",
+	rGenerated:             "a function of a generated file, which the census counts apart and does not look at; not a cause",
 	rAnnotationBroken:      "a function whose annotations cannot be read, which is not looked at (The annotation language)",
 	rObligation:            "an obligation that was not proved; not a cause",
 	rAnnotationFault:       "a fault of an annotation or of a trust file; not a cause",
@@ -852,6 +854,8 @@ func censusKind(class refusal) string {
 		return group
 	case group == "limit":
 		return "stop"
+	case group == "skip":
+		return "skip"
 	case proofClasses[class]:
 		return "proof"
 	}
@@ -1095,6 +1099,16 @@ func (pv *pkgVerifier) censusLook(fn *funcInfo) {
 		cf.note(pv, fn.decl.Name.Pos(), rAnnotationBroken, "its annotations cannot be read")
 		cf.stopped = true
 		return
+	}
+	// Code a tool wrote is not what a project writes, and one generated
+	// file can hold more functions than the rest of its module; its
+	// functions are counted apart, not looked at.
+	for _, file := range pv.pass.Files {
+		if file.Pos() <= fn.decl.Pos() && fn.decl.End() <= file.End() && ast.IsGenerated(file) {
+			cf.note(pv, fn.decl.Name.Pos(), rGenerated, "the file is generated")
+			cf.stopped = true
+			return
+		}
 	}
 	pv.censusAttempts(cf, fn, (*fnVerifier).verify)
 	pv.censusLiterals(cf, fn)

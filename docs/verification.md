@@ -10581,6 +10581,7 @@ Each event of kind `cause` is a refusal of the kind that the ordinary run report
 - `declared` is something only a declaration of the trust file lets through, as `inputs`.
 - `proof` is a refusal that the ordinary run makes only when a proof fails. A census proves nothing, so it makes these wherever they are reached.
 - `stop` means the census stopped in the function, as for a generic function. `unseen` counts the statements that were not looked at for any reason.
+- `skip` is a function of a generated file, one that says `// Code generated ... DO NOT EDIT.`, which the census does not look at.
 
 A function with no cause and no unseen statement is not verified. It met no refusal on the weakest contract, and the obligations its body has, such as bounds and overflow, were not checked. A census reads the trust file as verification does, and a trust file with a problem ends it with an error.
 

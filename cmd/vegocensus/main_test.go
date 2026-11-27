@@ -25,6 +25,7 @@ func TestSummary(t *testing.T) {
 		{Module: "a", Package: "a", Function: "Proof", Events: []event{{Class: "append:call-in-target", Kind: "proof"}}},
 		{Module: "b", Package: "b", Function: "Other", Events: []event{cause("no-entry:other", "x.F")}},
 		{Module: "b", Package: "b", Function: "OtherChan", Events: []event{cause("no-entry:other", "x.F"), cause("channel:use", "")}},
+		{Module: "b", Package: "b", Function: "Generated", Stopped: true, Events: []event{{Class: "skip:generated", Kind: "skip"}}},
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "c.jsonl")
@@ -59,6 +60,8 @@ func TestSummary(t *testing.T) {
 		"| 4 | `no-entry:std` | 1 | 8 |",
 		// Without no-entry:other, Other gets through from the start.
 		"Get through with nothing fixed: 4.",
+		// A function of a generated file is counted apart.
+		"Functions of generated files, left out of every count above: 1.",
 		// The proof classes are listed apart: Proof meets one and nothing
 		// else.
 		"| `append:call-in-target` | 1 | 1 |  |",
