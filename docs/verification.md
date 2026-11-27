@@ -7966,7 +7966,7 @@ To indent, call `MarshalIndent` and write what it returns.
 
 ### Decoding a value
 
-Decode into `&x` for a variable `x`, or into a pointer to a struct. Bound the length of the data:
+Decode into `&x` for a variable `x` or a field `x`, or into a pointer to a struct. Bound the length of the data:
 
 ```go
 // @Requires |data| <= 1000000
@@ -8017,7 +8017,17 @@ array, keeps a map's entries, and decodes through a pointer it finds; decode int
 pointers are nil, as var x T declares it
 ```
 
-Declare a new variable with `var x T`, decode into it, and copy what you need.
+Declare a new variable with `var x T`, decode into it, and copy what you need. To decode into one field, set the field to `nil` first and decode into its address:
+
+```go
+// @Requires p != nil And |data| <= 100000
+// @Modifies p
+// @Ensures True
+func RefillTags(data []byte, p *Memo) (err error) {
+	p.Tags = nil
+	return json.Unmarshal(data, &p.Tags)
+}
+```
 
 ### What is known after decoding
 

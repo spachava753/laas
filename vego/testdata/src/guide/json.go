@@ -182,6 +182,17 @@ func RefillMemo(data []byte, p *Memo) (err error) {
 	return json.Unmarshal(data, p) // want `Unmarshal may decode into memory that p\.Tags refers to, which the caller may hold: it appends into a slice's array, keeps a map's entries, and decodes through a pointer it finds; decode into a value w`
 }
 
+// RefillTags decodes into one field of a memo, which it sets to nil first,
+// so that the decoder makes every slice it stores.
+//
+// @Requires p != nil And |data| <= 100000
+// @Modifies p
+// @Ensures True
+func RefillTags(data []byte, p *Memo) (err error) {
+	p.Tags = nil
+	return json.Unmarshal(data, &p.Tags)
+}
+
 // CreateRow decodes the body of a request, at most 1 MB of it.
 //
 // @Requires w != nil And req != nil And req.Body != nil

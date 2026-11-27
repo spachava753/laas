@@ -2866,7 +2866,7 @@ guide	encoding/hex.EncodeToString	1	3368	0
 guide	encoding/json.Decode	18	5529153	3
 guide	encoding/json.Marshal	3	17316	0
 guide	encoding/json.MarshalIndent	3	22551	0
-guide	encoding/json.Unmarshal	29	3879116	2
+guide	encoding/json.Unmarshal	31	3900359	2
 guide	fmt.Fprint	5	11289	0
 guide	fmt.Fprintf	5	14186	0
 guide	fmt.Fprintln	5	11289	0
@@ -3203,6 +3203,7 @@ guide	guide.Refill	10	18136	0
 guide	guide.RefillFirst	13	25888	0
 guide	guide.RefillMemo	19	140172	4
 guide	guide.RefillOrdered	13	26350	0
+guide	guide.RefillTags	33	129551	0
 guide	guide.Remove	17	21769	0
 guide	guide.RemoveIfPresent	52	92589	0
 guide	guide.Repair	1	46	0
@@ -4348,6 +4349,11 @@ jsonenc	net/http.Error	1	2155	0
 jsonenc	net/http.ResponseWriter.Header	4	16082	2
 jsonenc	net/http.ResponseWriter.Write	5	18168	0
 jsonenc	net/http.ResponseWriter.WriteHeader	3	2185	0
+jsontargets	encoding/json.Unmarshal	22	1104260	1
+jsontargets	jsontargets.IntoField	33	127541	0
+jsontargets	jsontargets.IntoHeld	17	75684	0
+jsontargets	jsontargets.IntoMap	38	1076752	1
+jsontargets	jsontargets.IntoSlice	25	84443	0
 keeps	(*keeps.Server).serve	6	7936	0
 keeps	(*keepslib.Box).Fill	1	4823	0
 keeps	(*keepslib.Registry).Add	1	1623	0
