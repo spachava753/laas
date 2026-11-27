@@ -130,7 +130,7 @@ var shippedClasses = map[string][]string{
 		"math/rand.Intn", "net/http.StatusText", "os.Exit", "os.IsExist", "os.IsNotExist", "os.IsPermission", "os.IsTimeout", "path.Base",
 		"path.Ext", "path.IsAbs", "path.Split", "path/filepath.Base", "path/filepath.Ext", "path/filepath.Split", "slices.BinarySearch",
 		"slices.Clip", "slices.Compact", "slices.Contains", "slices.ContainsFunc", "slices.Delete", "slices.DeleteFunc", "slices.Equal",
-		"slices.Index", "slices.IndexFunc", "slices.Max", "slices.Min", "slices.Reverse", "slices.Sort", "sort.Find", "sort.Ints",
+		"slices.Index", "slices.IndexFunc", "slices.Max", "slices.Min", "slices.Reverse", "slices.Sort", "slices.SortFunc", "slices.SortStableFunc", "sort.Find", "sort.Ints",
 		"sort.IntsAreSorted", "sort.Search", "sort.SearchInts", "sort.Strings", "strings.Contains", "strings.ContainsFunc", "strings.Count", "strings.Cut", "strings.EqualFold",
 		"strings.HasPrefix", "strings.HasSuffix", "strings.Index", "strings.IndexByte", "strings.IndexFunc", "strings.LastIndex",
 		"strings.LastIndexByte", "strings.LastIndexFunc", "strings.TrimFunc", "strings.TrimLeft", "strings.TrimLeftFunc", "strings.TrimPrefix",

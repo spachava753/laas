@@ -2727,6 +2727,7 @@ guide	guide.AddTag	15	1178755	0
 guide	guide.AddressOfField	1	46	0
 guide	guide.AddsKeys	9	14962	0
 guide	guide.AgeOf	5	26764	0
+guide	guide.AgesKept	9	1426178	1
 guide	guide.Announce	12	187453	2
 guide	guide.AppendIntoArray	12	1966	0
 guide	guide.AppendOwn	9	14273	0
@@ -2969,6 +2970,7 @@ guide	guide.Now	4	1049	0
 guide	guide.Offset	6	2033	0
 guide	guide.Oldest	5	12394	0
 guide	guide.OldestAfterSort	9	49442	0
+guide	guide.OldestFirst	11	50832	0
 guide	guide.OneNaN	5	1446	0
 guide	guide.OneNaNEqual	5	2142	0
 guide	guide.OneNaNUnequal	5	2134	0
@@ -3291,6 +3293,7 @@ guide	slices.Grow	1	5356	0
 guide	slices.IndexFunc	1	7530	0
 guide	slices.Max	1	3860	0
 guide	slices.Sort	1	5294	0
+guide	slices.SortFunc	2	16657	0
 guide	sort.Search	1	2237	0
 guide	strconv.Atoi	3	18026	0
 guide	strings.FieldsFunc	1	4706	0
@@ -6021,6 +6024,20 @@ smalls	smalls.TwoQuotes	2	3284	0
 smalls	smalls.Widen	2	707	0
 smalls	smalls.WithError	1	497	0
 smalls	smalls.grow	14	8600	0
+sorts	cmp.Compare	1	482	0
+sorts	slices.SortFunc	3	21168	0
+sorts	slices.SortStableFunc	1	7025	0
+sorts	sorts.Bounded	9	37547	0
+sorts	sorts.ByDue	11	50834	0
+sorts	sorts.FirstDue	12	50999	0
+sorts	sorts.Inconsistent	7	23979	0
+sorts	sorts.Structs	9	1426178	1
+sorts	sorts.Unguarded	11	44187	0
+sorts	sorts.Writes	12	234346	2
+sorts	sorts.WritesByClosure	11	232224	2
+sorts	sorts.sortKept	8	14000	0
+sorts	sorts.sortThen	12	28027	2
+sorts	sorts.the closure reset	6	2536	0
 sourcecalls	(*sourcecalls.counter).add	9	6533	0
 sourcecalls	(*sourcecalls.pile).push	17	26780	0
 sourcecalls	(sourcecalls.value).at	1	247	0

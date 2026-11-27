@@ -156,6 +156,22 @@ func sliceFuncCall[S ~[]E, E any](gen func(*rand.Rand) S, name string, call func
 	}
 }
 
+// sliceCmpCall calls a function that sorts a slice by a comparison, with
+// one that answers at random, so that it is no ordering at all, and records
+// what it is given.
+func sliceCmpCall[S ~[]E, E any](gen func(*rand.Rand) S, call func(S, func(a, b E) int)) func(*rand.Rand) sample {
+	return func(rng *rand.Rand) sample {
+		s, calls := gen(rng), map[string][][]any{}
+		cmp := func(a, b E) int {
+			calls["cmp"] = append(calls["cmp"], []any{a, b})
+			return rng.Intn(3) - 1
+		}
+		before := snapshot(s)
+		call(s, cmp)
+		return sample{before: []any{before[0], cmp}, after: []any{s, cmp}, calls: calls}
+	}
+}
+
 func gen[E any](elem func(*rand.Rand) E) func(*rand.Rand) []E {
 	return func(rng *rand.Rand) []E { return randomSliceOf(rng, elem) }
 }
@@ -478,6 +494,10 @@ func anyHarness[S ~[]E, E any](key string, gen func(*rand.Rand) S, elem func(*ra
 		return sliceFuncCall(gen, "f", func(s S, f func(E) bool) []any { return one(slices.IndexFunc(s, f)) })
 	case "slices.DeleteFunc":
 		return sliceFuncCall(gen, "del", func(s S, f func(E) bool) []any { return one(slices.DeleteFunc(s, f)) })
+	case "slices.SortFunc":
+		return sliceCmpCall(gen, func(s S, cmp func(a, b E) int) { slices.SortFunc(s, cmp) })
+	case "slices.SortStableFunc":
+		return sliceCmpCall(gen, func(s S, cmp func(a, b E) int) { slices.SortStableFunc(s, cmp) })
 	case "slices.Clone":
 		return sliceCall(gen, func(s S) []any { return one(slices.Clone(s)) })
 	case "slices.Clip":

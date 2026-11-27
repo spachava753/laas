@@ -413,6 +413,10 @@ type clause struct {
 	// under the declaration that inputs end (inputs.go): it is assumed at
 	// a call and never proved of a value verified code makes.
 	inputs bool
+	// compares is set for an ensures of a shipped generic entry that holds
+	// where a formula can compare the values it compares, and says nothing
+	// at an instantiation where it cannot (calleeFormula).
+	compares bool
 }
 
 // funcInfo is a function declaration together with its bound annotations.

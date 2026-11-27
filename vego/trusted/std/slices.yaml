@@ -232,6 +232,53 @@ trusted:
     asserts: {S: [], E: []}
     modifies: [x]
 
+  slices.SortFunc:
+    reason: >-
+      "SortFunc sorts the slice x in ascending order as determined by the cmp
+      function. This sort is not guaranteed to be stable. cmp(a, b) should
+      return a negative number when a < b, a positive number when a > b and
+      zero when a == b or a and b are incomparable in the sense of a strict
+      weak ordering." Read from the source of Go 1.26.6 and 1.27.3, which is
+      the same (sort.go, zsortanyfunc.go): pdqsortCmpFunc only swaps elements
+      of x, every loop of it and of its helpers is bounded by indices of x
+      whatever cmp answers, and its recursion is bounded by its limit, after
+      which it sorts by heap; it calls cmp with two elements of x, on the
+      calling goroutine, while the call lasts, and keeps it nowhere. So it
+      returns for any cmp, one that is no ordering included, and x holds
+      afterwards the elements it held, as many times. Not said: the order,
+      which a formula cannot state of every element type nor of a cmp that
+      is no ordering; and, at a type argument whose values a formula cannot
+      compare, a struct, anything of the elements.
+    asserts: {S: [], E: []}
+    runs: [cmp]
+    calls:
+      cmp(a, b): {}
+    modifies: [x]
+    compares:
+      - "Forall i in [0, |x'|) : Exists j in [0, |x|) : x'[i] = x[j]"
+      - "Forall j in [0, |x|) : Exists i in [0, |x'|) : x'[i] = x[j]"
+
+  slices.SortStableFunc:
+    reason: >-
+      "SortStableFunc sorts the slice x while keeping the original order of
+      equal elements, using cmp to compare elements in the same way as
+      SortFunc." Read from the source of Go 1.26.6 and 1.27.3, which is the
+      same (zsortanyfunc.go): stableCmpFunc sorts blocks by insertion and
+      merges them with symMergeCmpFunc and rotateCmpFunc, which only swap
+      elements of x, in loops bounded by indices of x whatever cmp answers,
+      and a recursion that halves the stretch it merges; it calls cmp with
+      two elements of x, on the calling goroutine, while the call lasts, and
+      keeps it nowhere. So it returns for any cmp, and x holds afterwards the
+      elements it held, as many times. Not said: the order, as for SortFunc.
+    asserts: {S: [], E: []}
+    runs: [cmp]
+    calls:
+      cmp(a, b): {}
+    modifies: [x]
+    compares:
+      - "Forall i in [0, |x'|) : Exists j in [0, |x|) : x'[i] = x[j]"
+      - "Forall j in [0, |x|) : Exists i in [0, |x'|) : x'[i] = x[j]"
+
   slices.BinarySearch:
     reason: >-
       "BinarySearch searches for target in a sorted slice and returns the

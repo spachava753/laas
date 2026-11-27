@@ -627,6 +627,12 @@ func (v *fnVerifier) apply(call *ast.CallExpr, fn *funcInfo, args map[*types.Var
 			passedExpr[b.param] = b.expr
 		}
 	}
+	// A recursive closure is handed each variable it captures as it is.
+	if rc := fn.closure; rc != nil {
+		for variable, id := range rc.args {
+			passed[variable], passedExpr[variable] = variable.Name(), id
+		}
+	}
 	// A call through a function value or an interface value is named as
 	// it is written.
 	name := callee.Name()
@@ -1713,6 +1719,10 @@ func (v *fnVerifier) calleeFormula(c *clause, env *specEnv) *logic.Term {
 	t, err := v.resolverOf(c).Formula(c.node, env)
 	switch {
 	case errors.Is(err, errNoValue):
+		return logic.True()
+	case c.compares && (errors.Is(err, errIncomparable) || errors.As(err, new(*logic.IncomparableError))):
+		// An ensures that holds where its values can be compared says
+		// nothing at this instantiation.
 		return logic.True()
 	case err != nil:
 		v.misread(c, err)

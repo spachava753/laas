@@ -8639,7 +8639,42 @@ The functions that allocate, `Clone`, `Grow`, and `Insert`, require that what th
 
 #### Sorting a slice of structs
 
-`slices.SortFunc` and `slices.BinarySearchFunc` have no shipped contract. Their documentation requires that the comparison function is a strict weak ordering, and a contract cannot yet require that of a function it is handed.
+`slices.SortFunc` and `slices.SortStableFunc` have shipped contracts. They sort with any comparison function, also one that is no ordering, since the comparison is a function they call (see [Functions that a trusted function calls](#functions-that-a-trusted-function-calls)). Their contracts claim no order. They write only the slice, and the comparison may not write it.
+
+After the call, of a slice of numbers, booleans, strings, or pointers, `vego` knows that each element is one that was there before, and that each element that was there is there still. So a slice of pointers that are not nil stays one:
+
+```go
+// @Requires Forall i in [0, |ms|) : ms[i] != nil
+// @Modifies ms
+// @Ensures Forall i in [0, |ms|) : ms'[i] != nil
+func OldestFirst(ms []*Member) {
+	slices.SortFunc(ms, func(a, b *Member) int {
+		if a == nil || b == nil {
+			return 0
+		}
+		return cmp.Compare(b.Age, a.Age)
+	})
+}
+```
+
+The comparison knows only the types of what it is handed, so it tests its pointers for nil before it follows them.
+
+Of a slice of structs, `vego` knows nothing of the elements after the call but their number, since a formula cannot compare two structs:
+
+```go
+// @Requires Forall i in [0, |ms|) : ms[i].Age >= 0
+// @Modifies ms
+// @Ensures Forall i in [0, |ms|) : ms'[i].Age >= 0
+func AgesKept(ms []Member) {
+	slices.SortFunc(ms, func(a, b Member) int { return cmp.Compare(a.Age, b.Age) })
+}
+```
+
+```text
+vego: postcondition may not hold: Forall i in [0, |ms|) : ms'[i].Age >= 0
+```
+
+`slices.BinarySearchFunc` has no shipped contract. Its result means something only when the slice is in the order of its comparison function, and a contract cannot yet say that.
 
 When the verified code needs the values of one field in order, copy them out and sort them with `slices.Sort`:
 
@@ -8693,7 +8728,7 @@ func YoungestFirst(ms []Member) (r int) {
       - "Forall i in [0, |ms|) : Forall j in [i, |ms|) : ms'[i].Age <= ms'[j].Age"
 ```
 
-The entry claims that after the call the members are in ascending order of age, and that the call writes only `ms`. That claim is about your own code. Its comparison compares two integers with `cmp.Compare`, which is an order, so the documentation of `slices.SortFunc` promises the result. A contract for `slices.SortFunc` itself would have to hold for every comparison function a caller could hand it, and for one that is not an order the documentation promises nothing.
+The entry claims that after the call the members are in ascending order of age, and that the call writes only `ms`. That claim is about your own code. Its comparison compares two integers with `cmp.Compare`, which is an order, so the documentation of `slices.SortFunc` promises the result. The shipped contract of `slices.SortFunc` holds for every comparison function a caller could hand it, and for one that is not an order the documentation promises nothing, so it claims no order.
 
 #### Writing an entry for a generic function
 

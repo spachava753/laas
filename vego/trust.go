@@ -73,6 +73,9 @@ type trustEntry struct {
 	// formulas that may name Memory, the bytes declared; only the shipped
 	// files have it, for the functions that reserve by a number (sizes.go).
 	declared []trustFormula
+	// compares holds ensures that hold where a formula can compare the
+	// values of the type arguments they compare, in the shipped files only.
+	compares []trustFormula
 	ensures  []trustFormula
 	modifies []trustFormula
 	// runs names the parameters whose code the function may run: methods
@@ -368,6 +371,12 @@ func (f *trustFile) addEntry(name, body *yaml.Node) {
 			}
 		case "ensures":
 			entry.ensures = formulas("ensures", value)
+		case "compares":
+			if !f.shipped {
+				f.problem(field.Line, "compares of %s may be written only in the shipped files of vego", entry.key)
+				continue
+			}
+			entry.compares = formulas("compares", value)
 		case "inputs":
 			if !f.shipped {
 				f.problem(field.Line, "inputs of %s may be written only in the shipped files of vego", entry.key)
@@ -928,6 +937,10 @@ func (pv *pkgVerifier) readEntry(fn *funcInfo, entry *trustEntry) {
 		return list
 	}
 	fn.requires, fn.ensures = clauses("requires", entry.requires), clauses("ensures", entry.ensures)
+	for _, c := range clauses("ensures", entry.compares) {
+		c.compares = true
+		fn.ensures = append(fn.ensures, c)
+	}
 	// What the entry ensures of readers that end holds only under the
 	// declaration, and only there is it read at all.
 	if pv.inputsOf() != nil {
@@ -1267,6 +1280,12 @@ func (v *fnVerifier) primedPaths(fn *funcInfo) {
 // A path it cannot follow is left to the checks that read the clause. With
 // state set, the path is the argument of that state, which is read too.
 func (v *fnVerifier) checkPrimed(fn *funcInfo, c *clause, path *logic.Node, changed map[string][]*types.Var, state string) {
+	// An ensures under compares, shipped and held by its harness, reads
+	// elements that at some type arguments have no cells at all, values of
+	// size zero, whose comparison it is dropped for.
+	if c.compares {
+		return
+	}
 	// *p reads the box p points to, where the rest of the path leads
 	// (F19 of the review of step 2 of F37).
 	whole, derefs := path, 0

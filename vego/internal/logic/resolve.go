@@ -261,6 +261,17 @@ func failSort(format string, args ...any) {
 	panic(resolveError{&SortError{fmt.Sprintf(format, args...)}})
 }
 
+// IncomparableError is a SortError for values that a formula cannot
+// compare by their nature, floats and pointers to values of size zero,
+// which an entry of a generic function may meet at some type arguments.
+type IncomparableError struct{ SortError }
+
+func (e *IncomparableError) Unwrap() error { return &e.SortError }
+
+func failIncomparable(format string, args ...any) {
+	panic(resolveError{&IncomparableError{SortError{fmt.Sprintf(format, args...)}}})
+}
+
 // kindOf names what a term of a formula stands for, as a message should
 // call it. A reference is a pointer, a function value, an interface value,
 // or, when it is none of these, a map: those are the only references a path
@@ -970,6 +981,10 @@ func (s *scope) relation(op string, a, b *Term) *Term {
 	case a.Sort == Bool && equality:
 		result = Iff(a, b)
 	case a.Sort == Ref && equality && Incomparable(a, b) != "":
+		if a.Op == OpPair && b.Op == OpPair {
+			// Two pointers, one of them to a value of size zero.
+			failIncomparable("%s", Incomparable(a, b))
+		}
 		failSort("%s", Incomparable(a, b))
 	case a.Sort == Ref && equality:
 		result = RefEq(a, b)
@@ -986,7 +1001,7 @@ func (s *scope) relation(op string, a, b *Term) *Term {
 		}
 		failSort("operator %s cannot be applied to %s %s", op, article, kind)
 	case a.Sort == Float:
-		failSort("operator %s cannot be applied to float values; a formula can say nothing of a float", op)
+		failIncomparable("operator %s cannot be applied to float values; a formula can say nothing of a float", op)
 	case a.Sort.IsSeq():
 		failSort("operator %s cannot be applied to string or slice values; a formula has no order of them", op)
 	case a.Sort != Int:

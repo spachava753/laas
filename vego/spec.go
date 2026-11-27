@@ -277,6 +277,17 @@ func (e *specEnv) Applies(name string) bool {
 
 var errNoValue = errors.New("value of unsupported type")
 
+// errIncomparable is what a formula that compares values of a type
+// argument meets at an instantiation where a formula cannot compare them,
+// a struct; an ensures that an entry lists under compares is dropped there
+// and nowhere else (calleeFormula).
+var errIncomparable = errors.New("values that a formula cannot compare")
+
+// incomparable is an error of reading a formula that is errIncomparable.
+type incomparable struct{ error }
+
+func (incomparable) Is(target error) bool { return target == errIncomparable }
+
 // root resolves the name a path starts from. It returns either a value and
 // its type or, for a constant, a finished term.
 func (e *specEnv) root(name string) (val value, t types.Type, isResult bool, constant *logic.Term, err error) {
@@ -905,8 +916,8 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 		return nil, fmt.Errorf("%s is a slice of %s; index it and name a field", spell(name, steps), elemType(found.typ))
 	}
 	if generic := e.genericAt(name, steps); generic != nil {
-		return nil, fmt.Errorf("a value of type %s, which is %s here, is a struct, and a formula cannot compare a struct or use it as a whole",
-			generic.Obj().Name(), types.TypeString(found.typ, types.RelativeTo(e.v.pass.Pkg)))
+		return nil, incomparable{fmt.Errorf("a value of type %s, which is %s here, is a struct, and a formula cannot compare a struct or use it as a whole",
+			generic.Obj().Name(), types.TypeString(found.typ, types.RelativeTo(e.v.pass.Pkg)))}
 	}
 	return nil, fmt.Errorf("%s is a %s; name one of its fields", spell(name, steps), found.typ)
 }

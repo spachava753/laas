@@ -147,3 +147,26 @@ func OldestAfterSort(ms []Member) (r int) {
 	SortByAge(ms)
 	return ms[0].Age // want `postcondition may not hold: Forall i in \[0, \|ms\|\) : r >= ms'\[i\].Age`
 }
+
+// OldestFirst sorts pointers to members, which stay not nil.
+//
+// @Requires Forall i in [0, |ms|) : ms[i] != nil
+// @Modifies ms
+// @Ensures Forall i in [0, |ms|) : ms'[i] != nil
+func OldestFirst(ms []*Member) {
+	slices.SortFunc(ms, func(a, b *Member) int {
+		if a == nil || b == nil {
+			return 0
+		}
+		return cmp.Compare(b.Age, a.Age)
+	})
+}
+
+// AgesKept sorts members, of whose elements nothing is known after.
+//
+// @Requires Forall i in [0, |ms|) : ms[i].Age >= 0
+// @Modifies ms
+// @Ensures Forall i in [0, |ms|) : ms'[i].Age >= 0
+func AgesKept(ms []Member) {
+	slices.SortFunc(ms, func(a, b Member) int { return cmp.Compare(a.Age, b.Age) })
+} // want `vego: postcondition may not hold: Forall i in \[0, \|ms\|\) : ms'\[i\].Age >= 0`
