@@ -209,9 +209,15 @@ var boxes = struct {
 // boxOf returns the box of a type of single value.
 func boxOf(t types.Type) types.Type {
 	u := untagged(t.Underlying())
-	if isError(t) {
-		// The underlying type of error is an interface that is no error.
-		u = types.Universe.Lookup("error").Type()
+	switch t.Underlying().(type) {
+	case *types.Interface, *types.Signature:
+		// An interface value and a function value are modelled by their
+		// named types, whose contracts and states they carry, and the
+		// underlying type of error is an interface that is no error. The
+		// regions of the box are still those of the underlying type
+		// (cellsOf), so a pointer converted between two such named types
+		// sees one memory.
+		u = types.Unalias(t)
 	}
 	boxes.Lock()
 	defer boxes.Unlock()

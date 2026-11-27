@@ -2224,7 +2224,7 @@ func (v *fnVerifier) walkTarget(fn *funcInfo, m *modTarget, param *types.Var, ro
 	if err != nil {
 		return shape{}, target{}, fmt.Errorf("%s%v", m.name, err)
 	}
-	if len(m.steps) > 0 && m.steps[len(m.steps)-1].deref && !holdsMemory(final) {
+	if len(m.steps) > 0 && m.steps[len(m.steps)-1].deref && !holdsMemory(final) && !isIface(final) {
 		// What a pointer to a number, a boolean, or a string points to is
 		// named by the pointer.
 		inner := strings.TrimPrefix(m.text, "*")

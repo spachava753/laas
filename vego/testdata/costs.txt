@@ -5620,6 +5620,15 @@ ptrbase	ptrbase.Reset	4	655	0
 ptrglobalclient	ptrglobalclient.Use	1	46	0
 ptrgloballib	ptrgloballib.F	4	1072	0
 ptrgloballib	ptrgloballib.Reset	5	2925	0
+ptrifaces	(*ptrifaces.Counter).Bump	4	1027	0
+ptrifaces	io.Writer.Write	5	18168	0
+ptrifaces	ptrifaces.Bumper.Bump	4	1915	0
+ptrifaces	ptrifaces.Check	1	1459	0
+ptrifaces	ptrifaces.KeepsCounter	11	26918	0
+ptrifaces	ptrifaces.KeepsOther	11	30624	0
+ptrifaces	ptrifaces.KeepsOtherApart	14	35748	0
+ptrifaces	ptrifaces.Write	8	18071	0
+ptrifaces	ptrifaces.bumpVia	8	9217	0
 ptrkinds	ptrkinds.Count	17	28117	0
 ptrkinds	ptrkinds.CountElem	11	8428	0
 ptrkinds	ptrkinds.CountField	10	5981	0

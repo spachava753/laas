@@ -3945,7 +3945,7 @@ What a `Modifies` entry covers depends on the type at the end of its path.
 | The path ends at | Example | The entry covers |
 | --- | --- | --- |
 | a pointer | `Modifies c`, `Modifies p` | the fields of the struct it points to, or the number, boolean, string, slice, map, pointer, or interface value it points to |
-| `*` of a pointer to a slice, a map, or a pointer | `Modifies *out` | what that slice, map, or pointer refers to |
+| `*` of a pointer to a slice, a map, a pointer, or an interface value | `Modifies *out`, `Modifies *pw` | what that slice, map, or pointer refers to, or the footprint and the states of what the interface value holds |
 | a number, boolean, string, or struct | `Modifies c.n`, `Modifies ps[0]` | that field or element |
 | a slice | `Modifies A`, `Modifies s.items` | the elements, up to the capacity |
 | a map | `Modifies m` | the map |
