@@ -356,10 +356,17 @@ func formulaLeaves(t types.Type, v *logic.Term) (value, bool) {
 		if at == nil {
 			return nil, false
 		}
-		return value{v.Args[0], logic.Ite(logic.Eq(v.Args[0], logic.RefLit(0)), logic.IntLit(0), at)}, true
+		pointer := value{v.Args[0], logic.Ite(logic.Eq(v.Args[0], logic.RefLit(0)), logic.IntLit(0), at)}
+		if len(v.Args) == 3 {
+			pointer = append(pointer, v.Args[2])
+		}
+		return pointer, true
 	}
 	if v.Sort == logic.Ref && v.Op == logic.OpIntLit && v.Val == 0 {
 		// nil of a pointer type.
+		if isSinglePointer(t) {
+			return value{v, logic.IntLit(0), logic.False()}, true
+		}
 		return value{v, logic.IntLit(0)}, true
 	}
 	if _, single := sortOf(t); single {

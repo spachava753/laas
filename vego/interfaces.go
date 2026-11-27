@@ -258,7 +258,10 @@ func (v *fnVerifier) interfaceValue(e ast.Expr, want types.Type, st *state, guar
 					v.convertedOwnerTypes = append(v.convertedOwnerTypes, from)
 				}
 			}
-			if object, isPointer := pointee(from); isPointer && isStructType(object) {
+			// A box is no struct value of its byte size: it may be an
+			// element of an array, one position (F13 of the review of
+			// step 1 of F42).
+			if object, isPointer := pointee(from); isPointer && isStructType(object) && !isBoxType(object) {
 				v.convertedStructs = append(v.convertedStructs, structValue{t: object, ref: converted[0], at: converted[1]})
 			}
 			text := types.ExprString(ast.Unparen(e))

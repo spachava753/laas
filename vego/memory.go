@@ -495,11 +495,27 @@ func (v *fnVerifier) unchanged(sink *state, now *logic.Term, known *layer, ref, 
 				if c.key != known.key {
 					continue
 				}
+				// The cell of a box through a pointer whose #arr is known
+				// changes only in the region it points into.
+				var when *logic.Term
+				for _, o := range t.cells {
+					if o.either != nil && o.arr != nil && o.off == c.off {
+						if c.key == o.key {
+							when = logic.Not(o.arr)
+						} else if c.key == o.either.key {
+							when = o.arr
+						}
+					}
+				}
 				lo, hi := c.start(t.lo), c.end(t.lo)
 				if !c.isRun() {
 					hi = logic.Add(lo, logic.IntLit(1))
 				}
-				untouched = append(untouched, logic.Not(logic.And(logic.Eq(ref, t.ref), logic.Le(lo, index), logic.Lt(index, hi))))
+				touched := []*logic.Term{logic.Eq(ref, t.ref), logic.Le(lo, index), logic.Lt(index, hi)}
+				if when != nil {
+					touched = append(touched, when)
+				}
+				untouched = append(untouched, logic.Not(logic.And(touched...)))
 			}
 		default:
 			untouched = append(untouched, logic.Not(logic.And(logic.Eq(ref, t.ref), logic.Le(t.lo, index), logic.Lt(index, t.hi))))
@@ -1728,8 +1744,13 @@ func (v *fnVerifier) havoc(st *state, t target, guard []*logic.Term) {
 			v.noteStruct(st, *t.base)
 		}
 		// What the types guarantee of the new values is noted where they
-		// are read. The cell of a box is written in both its regions.
-		cells := bothCells(t.cells)
+		// are read. The cell of a box through a pointer whose #arr is not
+		// known is written in each region under its condition (putIn), and
+		// one that is not resolved in both.
+		cells := t.cells
+		if slices.ContainsFunc(cells, func(c cell) bool { return c.either != nil && c.arr == nil }) {
+			cells = bothCells(cells)
+		}
 		before := v.fetch(nil, st.mem, cells, t.ref, t.lo)
 		unknown := make(value, len(cells))
 		for i, c := range cells {
@@ -1889,6 +1910,11 @@ func (pv *pkgVerifier) structsWithin(t types.Type) []structAt {
 // The stretch of a conversion's footprint compares positions in every
 // region, so there every type needs it.
 func (v *fnVerifier) statePairs(sink *state, x, y structValue, all bool) {
+	// No fact of byte layout holds of a box, which may be one element of
+	// an array (F13 of the review of step 1 of F42).
+	if isBoxType(x.t) || isBoxType(y.t) {
+		return
+	}
 	for _, a := range v.structsWithin(x.t) {
 		if !all && !v.repeats[a.key] {
 			continue
@@ -1989,7 +2015,7 @@ func (v *fnVerifier) holdsRepeated(t types.Type) bool {
 // region can be, not about the row, which keeps its definition.
 func (v *fnVerifier) leafOnly(sink *state, s structValue, key string, ref, position *logic.Term) {
 	size := v.pass.TypesSizes.Sizeof(s.t)
-	if size == 0 {
+	if size == 0 || isBoxType(s.t) {
 		return
 	}
 	options := []*logic.Term{logic.Ne(ref, s.ref), logic.Lt(position, s.at), logic.Le(logic.Add(s.at, logic.IntLit(size)), position)}

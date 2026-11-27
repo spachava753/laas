@@ -119,3 +119,46 @@ func IntoWrong(p *int, s *S) {
 func Element(p *int, xs []int) {
 	*p = 4
 }
+
+// Item holds a number that a pointer can point to.
+type Item struct {
+	N int
+}
+
+// Both writes a field of the first element and what p points to, which
+// does not point into xs.
+//
+// @Requires p != nil And |xs| > 0 And apart(p, xs)
+// @Modifies p, xs
+// @Ensures xs'[0].N = 1
+func Both(p *int, xs []Item) {
+	xs[0].N = 1
+	*p = 2
+}
+
+// BothSame hands Both a pointer to a field of an element of xs.
+//
+// @Requires |xs| > 0
+// @Modifies xs
+// @Ensures True
+func BothSame(xs []Item) {
+	Both(&xs[0].N, xs) // want `vego: precondition of Both may not hold: apart\(p, xs\)`
+}
+
+// IntoItem writes through a pointer within xs, which Modifies xs covers.
+//
+// @Requires within(p, xs)
+// @Modifies xs
+// @Ensures True
+func IntoItem(p *int, xs []Item) {
+	*p = 5
+}
+
+// IntoItemField hands IntoItem a pointer to a field of an element.
+//
+// @Requires |xs| > 0
+// @Modifies xs
+// @Ensures True
+func IntoItemField(xs []Item) {
+	IntoItem(&xs[0].N, xs)
+}

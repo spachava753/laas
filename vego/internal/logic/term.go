@@ -318,6 +318,11 @@ func Pair(ref, at *Term) *Term {
 	return node(OpPair, Ref, ref, at)
 }
 
+// PairIn returns a pointer to a number, a boolean, or a string: an
+// allocation, a position, and whether the position is that of an element
+// of an array (#arr), which two such pointers must share to be equal.
+func PairIn(ref, at, arr *Term) *Term { return node(OpPair, Ref, ref, at, arr) }
+
 // FuncVal stands for a function value in a formula, which can only be
 // compared with nil: ref is zero exactly when the value is nil.
 func FuncVal(ref *Term) *Term { return node(OpFuncVal, Ref, ref) }
@@ -355,8 +360,10 @@ func Incomparable(a, b *Term) string {
 			return ""
 		}
 		return "a pointer can only be compared with a pointer or with nil"
-	case len(a.Args) != 2 || len(b.Args) != 2:
+	case len(a.Args) == 1 || len(b.Args) == 1:
 		return "pointers to values of size zero may or may not be equal, so they can only be compared with nil"
+	case len(a.Args) != len(b.Args):
+		return "a pointer to a number, a boolean, or a string can only be compared with another one or with nil"
 	}
 	return ""
 }
@@ -372,6 +379,10 @@ func RefEq(a, b *Term) *Term {
 		b = b.Args[0]
 	}
 	switch {
+	case a.Op == OpPair && b.Op == OpPair && len(a.Args) == 3 && len(b.Args) == 3:
+		// Pointers to single values point to one location when they also
+		// point into one region (R3 of F42).
+		return And(Eq(a.Args[0], b.Args[0]), Or(Eq(a.Args[0], RefLit(0)), And(Eq(a.Args[1], b.Args[1]), Iff(a.Args[2], b.Args[2]))))
 	case a.Op == OpPair && b.Op == OpPair:
 		return And(Eq(a.Args[0], b.Args[0]), Or(Eq(a.Args[0], RefLit(0)), Eq(a.Args[1], b.Args[1])))
 	case a.Op == OpPair:

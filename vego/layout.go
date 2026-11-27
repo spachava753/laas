@@ -196,6 +196,23 @@ func isBox(t types.Type) (types.Type, bool) {
 	return s.Field(0).Type(), true
 }
 
+// isBoxType reports whether a type is the box of a single value.
+func isBoxType(t types.Type) bool {
+	_, box := isBox(t.Underlying())
+	return box
+}
+
+// valueSize returns how many positions a value of the type that a pointer
+// points to covers in the stretch of the pointer's target: a struct's size
+// in bytes, and one for a box, whose one cell is counted in bytes at a
+// place and in elements in an array (F13 of the review of step 1 of F42).
+func (pv *pkgVerifier) valueSize(t types.Type) int64 {
+	if isBoxType(t) {
+		return 1
+	}
+	return pv.pass.TypesSizes.Sizeof(t)
+}
+
 // storedAs returns the type whose cells hold a variable of type t that
 // lives in memory: the box of a single value, or the type itself.
 func storedAs(t types.Type) types.Type {

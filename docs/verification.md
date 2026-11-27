@@ -4082,7 +4082,7 @@ func KeepHi(p *int, b *Span) {
 }
 ```
 
-`apart(p, xs)` says the same of the elements of a slice, and `apart(p, q)` of two such pointers. `within(p, s)` says that `p` points to a field of the struct that `s` points to, and `within(p, xs)` that it points to an element of `xs`. A write through `p` is then covered by `Modifies s` or `Modifies xs`.
+`apart(p, xs)` says the same of the array of a slice up to its capacity, its elements and the fields of its elements, and `apart(p, q)` of two such pointers. `within(p, s)` says that `p` points to a field of the struct that `s` points to, and `within(p, xs)` that it points to an element of `xs`. A write through `p` is then covered by `Modifies s` or `Modifies xs`.
 
 A field that no code takes the address of is not one a pointer can point to. Such a field is unexported, its package takes no address of a field of its name, and it is not an embedded field whose type has a method with a pointer receiver. A package that imports `unsafe`, or that has assembly or cgo files, makes every field of its structs one that a pointer can point to. So does a package that uses reflection to get an `unsafe.Pointer`. `vego` reads the package's own test files for this too.
 
@@ -5870,7 +5870,7 @@ func spend() {
 
 All three functions verify. `Modifies quota` covers the struct, and `Modifies quota.used` one field of it, as for what a pointer parameter points to. A pointer parameter of type `*Quota` may point to `quota`, so `vego` considers both cases. A function that writes `p.limit` for a parameter `p` may write `quota.limit`.
 
-`var mu sync.Mutex`, `var buf bytes.Buffer`, and `var b strings.Builder` are struct variables too, and their methods take their address. A package-level variable of another type whose address is taken, as `&n` of an `int`, is not supported yet, since a pointer to a number, a boolean, or a string can point only to a local variable or to what `new` made (see [Pointers to numbers, booleans, and strings](#pointers-to-numbers-booleans-and-strings)).
+`var mu sync.Mutex`, `var buf bytes.Buffer`, and `var b strings.Builder` are struct variables too, and their methods take their address. A package-level number, boolean, or string whose address is taken, as `&n` of an `int`, lives in memory in the same way (see [Pointers to numbers, booleans, and strings](#pointers-to-numbers-booleans-and-strings)). A package-level variable of another type whose address is taken, such as a slice, is not supported yet.
 
 #### When the address stays in place
 
@@ -10967,7 +10967,7 @@ This table lists the most common messages.
 
 A function that uses any of the following is reported as `cannot verify`:
 
-- pointers to slices, maps, pointers, interface values, functions, and arrays; a pointer to a number, a boolean, or a string that would point into a struct, a slice, an array, or a package-level variable; formatting such a pointer, and such a pointer in a value that `encoding/json` encodes or decodes (see [Pointers to numbers, booleans, and strings](#pointers-to-numbers-booleans-and-strings));
+- pointers to slices, maps, pointers, interface values, functions, and arrays; a pointer to a number, a boolean, or a string that would point to a package-level variable of another package; formatting such a pointer, and such a pointer in a value that `encoding/json` encodes or decodes (see [Pointers to numbers, booleans, and strings](#pointers-to-numbers-booleans-and-strings));
 - a call that may end the process in a function literal used as a value, in a function handed to a trusted function, or in a deferred call, and a function value made of a function that may end the process (see [Functions that end the process](#functions-that-end-the-process));
 - calls of a method of an interface that has no contract, in source or in the trust file, and converting a value to an interface with such a method, unless the method is declared by the value's own type of another module, which is not generic, holds no function value, error, or interface value whose methods all have contracts, and is converted to an interface without states (see [Interfaces](#interfaces) and [Values of another module's types](#values-of-another-modules-types)), and a call of a trusted function whose entry writes such a value; of the standard library, only `(io.Writer).Write`, `(io.Reader).Read`, `(io.Closer).Close`, and `(context.Context).Err` have shipped contracts (see [Interfaces and function types of other packages](#interfaces-and-function-types-of-other-packages));
 - an entry in the trust file for a type of the module of the analysed package, or one with `runs`, `keeps`, or `calls`;
@@ -11239,8 +11239,8 @@ Results are referred to by the names in the function's signature.
 | `fresh(x, w)` | the same, except that what `x` refers to may also lie in the footprint of `w`, an interface value whose methods write behind it; more than one such value may follow, and `w` may be a variadic parameter of such values, read where a call writes each one out |
 | `within(a, b)` | `a` lies inside the memory of `b`; each is a pointer or a slice, and a slice includes its capacity; for an interface value `b`, `a` (also a map) lies in its footprint, and for a value that owns memory, in its struct or in what it owns |
 | `apart(a, b)` | the slices `a` and `b`, of one element type, share no memory up to their capacities; an array field stands for the slice of the whole array |
-| `apart(p, x)` | the pointer `p` to a number, a boolean, or a string is nil, or does not point into what `x` refers to: the struct that a pointer `x` points to, the elements of a slice `x` up to its capacity, or the value that another such pointer `x` points to |
-| `within(p, x)` | the pointer `p` to a number, a boolean, or a string is not nil and points to a field of the struct that `x` points to, to an element of an array that struct holds, to an element of the slice `x` within its capacity, or into what `x` owns |
+| `apart(p, x)` | the pointer `p` to a number, a boolean, or a string is nil, or does not point into what `x` refers to: the struct that a pointer `x` points to, the array of a slice `x` up to its capacity, with the fields of its elements, or the value that another such pointer `x` points to |
+| `within(p, x)` | the pointer `p` to a number, a boolean, or a string is not nil and points to a field of the struct that `x` points to, to an element of an array that struct holds, to an element of the slice `x`, or a field of one, within its capacity, or into what `x` owns |
 
 ### Order of evaluation
 

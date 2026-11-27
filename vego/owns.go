@@ -1036,7 +1036,7 @@ func (v *fnVerifier) valueFootprintAt(sink *state, mem memory, val value, ft typ
 		return logic.And(logic.Not(isNilRef(val)), logic.Or(inRow, logic.Eq(alloc, skey(val[0])))), facts
 	}
 	inner, _ := pointee(ft)
-	size := v.pass.TypesSizes.Sizeof(inner)
+	size := v.valueSize(inner)
 	inStruct := logic.And(logic.Eq(alloc, val[0]), logic.Le(val[1], pos), logic.Lt(pos, logic.Add(val[1], logic.IntLit(size))))
 	owned, facts := v.ownerFootprintAt(sink, mem, val, ft, alloc, pos, seen)
 	return logic.And(logic.Not(isNilRef(val)), logic.Or(inStruct, owned)), facts

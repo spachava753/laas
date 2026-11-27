@@ -920,6 +920,9 @@ func (e *specEnv) Path(name string, steps []logic.Step, when logic.When) (*logic
 		if e.v.pass.TypesSizes.Sizeof(object) == 0 {
 			return logic.Pair(found.val[0], nil), nil
 		}
+		if len(found.val) == 3 {
+			return logic.PairIn(found.val[0], found.val[1], found.val[2]), nil
+		}
 		return logic.Pair(found.val[0], found.val[1]), nil
 	}
 	if isSlice(found.typ) {
@@ -2297,7 +2300,7 @@ func (v *fnVerifier) walkTarget(fn *funcInfo, m *modTarget, param *types.Var, ro
 	object, isPointer := pointee(final)
 	switch {
 	case isPointer:
-		form.cells, form.direct, form.hi = v.cellsOf(object), len(hops) == 0, v.pass.TypesSizes.Sizeof(object)
+		form.cells, form.direct, form.hi = v.cellsOf(object), len(hops) == 0, v.valueSize(object)
 		if !symbolic {
 			t.ref, t.lo, t.hi = cur.val[0], cur.val[1], logic.Add(cur.val[1], logic.IntLit(form.hi))
 			t.base = &structValue{t: object, ref: t.ref, at: t.lo}
@@ -2594,12 +2597,39 @@ func (v *fnVerifier) singleIn(p, y reached, ps, ys string) (*logic.Term, error) 
 		return logic.And(notNil, same, logic.Eq(pv[1], y.val[1]), logic.Eq(pv[2], y.val[2])), nil
 	case isSlice(y.typ):
 		elem := elemType(y.typ)
-		if typeKey(untagged(held.Underlying())) != typeKey(untagged(elem.Underlying())) {
-			return nil, fmt.Errorf("%s points to a %s and %s is a slice of %s, which never share memory, so there is nothing to state",
-				ps, types.TypeString(held, types.RelativeTo(v.pass.Pkg)), ys, types.TypeString(elem, types.RelativeTo(v.pass.Pkg)))
-		}
 		lo, hi := v.extent(y.val, y.typ)
-		return logic.And(notNil, pv[2], same, logic.Le(lo, pv[1]), logic.Lt(pv[1], hi)), nil
+		inside := logic.And(notNil, same, logic.Le(lo, pv[1]), logic.Lt(pv[1], hi))
+		if typeKey(untagged(held.Underlying())) == typeKey(untagged(elem.Underlying())) {
+			// An element of the slice.
+			return logic.And(inside, pv[2]), nil
+		}
+		// A field of an element, which lies at a place, or an element of a
+		// byte array an element holds, at its byte position: in the slice's
+		// array, inside its stretch of bytes (F14 of the review of step 1
+		// of F42). In step 1 an element of an array of a wider type lies
+		// in no struct.
+		place, run := false, false
+		if isStructType(elem) {
+			for _, c := range v.cellsOf(elem) {
+				switch {
+				case c.isRun() && typeKey(untagged(held.Underlying())) == strings.TrimPrefix(c.key, "elem "):
+					run = true
+				case !c.isRun() && c.key == "place "+typeKey(untagged(held.Underlying())):
+					place = true
+				}
+			}
+		}
+		switch {
+		case place && run:
+			return inside, nil
+		case place:
+			return logic.And(inside, logic.Not(pv[2])), nil
+		case run:
+			return logic.And(inside, pv[2]), nil
+		}
+		return nil, fmt.Errorf("%s points to a %s and %s is a slice of %s, of which no element holds a %s that a pointer can point to, so there is nothing to state",
+			ps, types.TypeString(held, types.RelativeTo(v.pass.Pkg)), ys, types.TypeString(elem, types.RelativeTo(v.pass.Pkg)),
+			types.TypeString(held, types.RelativeTo(v.pass.Pkg)))
 	}
 	object, _ := pointee(y.typ)
 	var places, elements []*logic.Term

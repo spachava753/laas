@@ -1911,3 +1911,84 @@ func KeysLeftChain(a map[int]bool, s map[int]bool) {
 	}
 	mark(0)
 }
+
+// WritePointerChain adds one 30 times through a pointer to a number whose
+// region is not known: each write reads both regions the pointer may point
+// into and writes each under its condition (R2 of F42), so a write that put
+// the value it read into the term twice would double it at each step.
+//
+// @Requires p != nil And 0 <= *p <= 1000
+// @Modifies p
+// @Ensures *p' = *p + 30
+func WritePointerChain(p *int) {
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+	*p = *p + 1
+}
+
+// ReadPointerChain reads 30 times through a pointer to a number whose
+// region is not known, each read a choice between the two regions it may
+// point into (R1 of F42).
+//
+// @Requires p != nil And 0 <= *p <= 1000
+// @Ensures r = 30 * *p
+func ReadPointerChain(p *int) (r int) {
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	r = r + *p
+	return r
+}

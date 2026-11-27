@@ -329,6 +329,10 @@ func (f *framer) exactly(now, then *logic.Term) *logic.Term {
 		}
 		var parts []*logic.Term
 		for i := range now.Args {
+			if now.Args[i].Sort == logic.Bool {
+				parts = append(parts, logic.Iff(now.Args[i], then.Args[i]))
+				continue
+			}
 			parts = append(parts, logic.Eq(now.Args[i], then.Args[i]))
 		}
 		return logic.And(parts...)

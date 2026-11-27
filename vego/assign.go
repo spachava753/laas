@@ -253,8 +253,7 @@ func (v *fnVerifier) noteHolder(st *state, lv lvalue) {
 // holderOf returns the struct type of the value an assignment target in
 // memory lies in, whose start lv.at is and from which lv.cells count, or
 // nil: the struct a pointer points to, an element of a slice of structs,
-// or a struct variable that lives in memory. The box of a single value is
-// a struct too, and is returned.
+// or a struct variable that lives in memory. A box is none of these.
 func (v *fnVerifier) holderOf(lv lvalue) types.Type {
 	var holder types.Type
 	switch {
@@ -271,7 +270,9 @@ func (v *fnVerifier) holderOf(lv lvalue) types.Type {
 	case lv.slice != nil:
 		holder = elemType(v.info.TypeOf(lv.slice))
 	}
-	if holder == nil || !isStructType(holder) {
+	if holder == nil || !isStructType(holder) || isBoxType(holder) {
+		// A box is no struct value of its byte size (F13 of the review of
+		// step 1 of F42): a write through it records no base.
 		return nil
 	}
 	return holder
