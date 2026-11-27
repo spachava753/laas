@@ -57,7 +57,9 @@ func (pv *pkgVerifier) typeEntry(key string, obj *types.Func, methodOf *types.Fu
 	fn.trust, fn.methodOf, fn.valueOf = entry, methodOf, valueOf
 	nameUnnamed(fn, entry)
 	pv.typeEntries[key] = fn
-	if pv.inAnalysedModule(pkg, declared) {
+	// A census of the standard library looks at the module the shipped
+	// files are of, whose entries callers use.
+	if pv.inAnalysedModule(pkg, declared) && !(pv.census != nil && entry.file != nil && entry.file.shipped) {
 		what := "the method " + key
 		if valueOf != nil {
 			what = "the function type " + key

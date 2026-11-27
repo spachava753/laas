@@ -1730,8 +1730,10 @@ func (pv *pkgVerifier) writeCensus(records []*censusFunc) error {
 	if len(records) == 0 {
 		return nil
 	}
+	// The standard library comes with no module, or one with an empty
+	// path.
 	module := "std"
-	if pv.pass.Module != nil {
+	if pv.pass.Module != nil && pv.pass.Module.Path != "" {
 		module = pv.pass.Module.Path
 	}
 	var text []byte
