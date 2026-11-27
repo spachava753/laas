@@ -10,7 +10,7 @@ import "cycles/held/hookb"
 //
 // @Variant 1
 // @Ensures True
-func h() (n int) { return X() } // want `this call may not end: h calls X at a.go:\d+:\d+, X calls hookb.Fire\(1\) at a.go:\d+:\d+, which may run h; Fire reads a package-level variable that can hold code`
+func h() (n int) { return X() } // want `this call may not end: h calls X at a.go:\d+:\d+, X calls hookb\.Fire\(1\) at a.go:\d+:\d+, which may run h`
 
 // Setup registers h; it is not verified.
 func Setup() {
@@ -22,5 +22,5 @@ func Setup() {
 // @Variant 0
 // @Ensures True
 func X() (n int) {
-	return hookb.Fire(1) // want `this call may not end: X calls hookb.Fire\(1\) at a.go:\d+:\d+, which may run X; Fire reads a package-level variable that can hold code`
+	return hookb.Fire(1) // want `this call may not end: X calls hookb\.Fire\(1\) at a.go:\d+:\d+, which may run X`
 }

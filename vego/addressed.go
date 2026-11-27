@@ -63,6 +63,26 @@ func (f *addressedFact) String() string {
 // passes of this process made it or read it from facts.
 var addressedOf sync.Map
 
+// hasForeignCode reports whether a package holds code that is not Go:
+// assembly, C or another language that cgo builds, or an object file, or
+// imports C. Such code can name any symbol of the program.
+func hasForeignCode(pass *analysis.Pass) bool {
+	for _, name := range pass.OtherFiles {
+		switch filepath.Ext(name) {
+		case ".s", ".S", ".c", ".h", ".cc", ".cpp", ".cxx", ".m", ".f", ".F", ".for", ".f90", ".syso":
+			return true
+		}
+	}
+	for _, file := range pass.Files {
+		for _, spec := range file.Imports {
+			if spec.Path.Value == `"C"` {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // scanAddressed reads the files of a package for what makes a field of its
 // structs addressable.
 func scanAddressed(pass *analysis.Pass) *addressedFact {
@@ -73,11 +93,8 @@ func scanAddressed(pass *analysis.Pass) *addressedFact {
 			all = true
 		}
 	}
-	for _, name := range pass.OtherFiles {
-		switch filepath.Ext(name) {
-		case ".s", ".S", ".c", ".h", ".cc", ".cpp", ".cxx", ".m", ".f", ".F", ".for", ".f90", ".syso":
-			all = true
-		}
+	if hasForeignCode(pass) {
+		all = true
 	}
 	for _, tv := range pass.TypesInfo.Types {
 		if tv.Type != nil && types.Identical(tv.Type, types.Typ[types.UnsafePointer]) {
@@ -92,11 +109,6 @@ func scanAddressed(pass *analysis.Pass) *addressedFact {
 		}
 	}
 	for _, file := range pass.Files {
-		for _, spec := range file.Imports {
-			if spec.Path.Value == `"C"` {
-				all = true
-			}
-		}
 		ast.Inspect(file, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.UnaryExpr:

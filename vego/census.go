@@ -947,6 +947,11 @@ func (pv *pkgVerifier) runCensus(out, scope, trustPath string, looked bool) (any
 	pv.exportStates()
 	pv.pass.ExportPackageFact(&usageFact{Usage: *pv.usage})
 	if !looked {
+		// A census publishes what the functions of every package of its
+		// scope run, so that a callee there is what its body is.
+		if censusPackage(pv.pass, scope) {
+			pv.exportRuns()
+		}
 		return pv.usage, nil
 	}
 	// A function's line is written once the closures inside it, which
@@ -978,7 +983,7 @@ func (pv *pkgVerifier) runCensus(out, scope, trustPath string, looked bool) (any
 			pv.pass.ExportObjectFact(fn.obj, fact)
 		}
 	}
-	pv.exportHeldCode()
+	pv.exportRuns()
 	return pv.usage, nil
 }
 

@@ -20,6 +20,6 @@ func Use(c *twoc.Counter) (n int) {
 // @Requires g != nil
 // @Ensures n >= 0 Or n < 0
 func Reads(g twoownlib.Gauge) (n int) {
-	twoownlib.Keeps(g) // want `this call may not end: Reads hands g to twoownlib\.Keeps\(g\) at twod\.go:\d+:\d+, which may run Reads`
+	twoownlib.Keeps(g)
 	return g.Read()
 }

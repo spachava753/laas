@@ -151,7 +151,7 @@ func WrapsLib(x int) (err error) {
 //
 // @Ensures True
 func WrapsRelay(e error) (err error) {
-	if err := lib.Relay(e); err != nil { // want `this\ call\ may\ not\ end:\ WrapsRelay\ hands\ e\ to\ lib\.Relay\(e\)\ at\ client\.go:\d+:\d+,\ which\ may\ run\ WrapsRelay`
+	if err := lib.Relay(e); err != nil {
 		return fmt.Errorf("lib: %w", err) // want `cannot verify WrapsRelay: formatting err would run the methods of an error whose origin is not known`
 	}
 	return nil

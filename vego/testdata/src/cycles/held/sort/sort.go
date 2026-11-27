@@ -42,5 +42,5 @@ func G(a, b T) (n int) {
 // @Variant 1
 // @Ensures True
 func CmpBack(a, b T) (r int) {
-	return G(a, b) // want `this call may not end: CmpBack calls G at sort.go:\d+:\d+, G calls Sort at sort.go:\d+:\d+, Sort hands c to slices.SortFunc\(xs, c\) at sort.go:\d+:\d+, which may run CmpBack`
+	return G(a, b) // want `this call may not end: CmpBack calls G at sort.go:\d+:\d+, G calls Sort at sort.go:\d+:\d+, Sort hands c to slices\.SortFunc\(xs, c\) at sort.go:\d+:\d+, which may run CmpBack`
 }

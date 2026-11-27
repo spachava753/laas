@@ -14,7 +14,7 @@ type PT struct{}
 // @Ensures True
 func (PT) N() {
 	if Made != nil {
-		X(Made) // want `this call may not end: PT.N calls X at p.go:\d+:\d+, X hands i to visq.F\(i\) at p.go:\d+:\d+, which may run PT.N`
+		X(Made) // want `this call may not end: PT\.N calls X at p.go:\d+:\d+, X hands i to visq\.F\(i\) at p.go:\d+:\d+, which may run PT\.N`
 	}
 }
 
@@ -27,5 +27,5 @@ func Setup() { Made = visr.Wrap(PT{}) }
 // @Requires i != nil
 // @Ensures True
 func X(i visq.I) {
-	visq.F(i) // want `this call may not end: X hands i to visq.F\(i\) at p.go:\d+:\d+, which may run X`
+	visq.F(i) // want `this call may not end: X hands i to visq\.F\(i\) at p.go:\d+:\d+, which may run PT\.N, PT\.N calls X at p.go:\d+:\d+`
 }

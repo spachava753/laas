@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -69,10 +70,6 @@ type callNode struct {
 	// what F33 says a call out of the package reaches (F10 of the review
 	// of the design of F32).
 	out bool
-	// heldImpl is set when the body calls through a value that may be an
-	// implementation of another package that runs code it holds; see
-	// heldcode.go.
-	heldImpl bool
 }
 
 // callEdge is a call or a use of a function in a body.
@@ -100,6 +97,11 @@ type callGraph struct {
 	ifaceValues []*types.Func
 	// sites holds the unresolved edges each call adds.
 	sites map[*ast.CallExpr][]callEdge
+	// outs holds what each node's own body runs of code from outside the
+	// package, and summaries what each node runs with what it reaches;
+	// see runs.go.
+	outs      map[*callNode]*runsSet
+	summaries map[*callNode]*runsSet
 }
 
 // valueEscape is a function of the package used as a value of a type.
@@ -494,7 +496,26 @@ func (pv *pkgVerifier) codeTargets(t types.Type, seen map[types.Type]bool) []*ca
 // unsafe.Pointer, with its exported methods, or a function value of any
 // type.
 func (pv *pkgVerifier) anythingTargets() []*callNode {
-	return append(pv.exportedMethods(), pv.valuesMatching(nil)...)
+	return append(append(pv.exportedMethods(), pv.valuesMatching(nil)...), pv.cgoExported()...)
+}
+
+// cgoExported returns the functions of the package that a //export
+// directive gives to C, which C may call by their symbol.
+func (pv *pkgVerifier) cgoExported() []*callNode {
+	var found []*callNode
+	for _, fn := range pv.order {
+		node := pv.graph.byObj[fn.obj]
+		if node == nil || fn.decl.Doc == nil {
+			continue
+		}
+		for _, c := range fn.decl.Doc.List {
+			if strings.HasPrefix(c.Text, "//export ") {
+				found = append(found, node)
+				break
+			}
+		}
+	}
+	return found
 }
 
 // concreteMethods returns the methods with exported names declared on a
@@ -609,8 +630,23 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 			g.sites[call] = append(g.sites[call], e)
 		}
 	}
+	pv.walking = node
+	defer func() { pv.walking = nil }()
+	out := g.outOf(node)
+	verifiedNode := pv.nodeVerified(node)
+	calledFun := map[ast.Expr]bool{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		if call, ok := n.(*ast.CallExpr); ok {
+			calledFun[ast.Unparen(call.Fun)] = true
+		}
+		return true
+	})
 	ast.Inspect(body, func(n ast.Node) bool {
 		switch n := n.(type) {
+		case *ast.SelectorExpr:
+			if !calledFun[n] {
+				pv.methodValueTaken(n, out, unresolved)
+			}
 		case *ast.FuncLit:
 			if slices.ContainsFunc(pv.closures, func(rc *recClosure) bool { return rc.lit == n && (node.fn == nil || node.fn.closure != rc) }) {
 				return false
@@ -624,12 +660,19 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 			}
 		case *ast.RangeStmt:
 			if rangesByCalling(pv.info.TypeOf(n.X)) {
-				for _, to := range pv.valuesMatching(signatureOf(pv.info.TypeOf(n.X))) {
+				sig := signatureOf(pv.info.TypeOf(n.X))
+				out.addFunc(sig)
+				for _, to := range pv.valuesMatching(sig) {
 					edge(to, n.Pos(), "range over "+types.ExprString(n.X), false)
 				}
-				if pv.heldFuncMeets(signatureOf(pv.info.TypeOf(n.X))) {
-					node.heldImpl = true
-					for _, to := range pv.anythingTargets() {
+				if ak := pv.visibleAmbient(); !ak.empty() {
+					for _, to := range pv.targetsOf(ak) {
+						edge(to, n.Pos(), "range over "+types.ExprString(n.X), false)
+					}
+				}
+				if impls := pv.implsOf("", keyOfFunc(sig)); impls != nil {
+					out.join(impls)
+					for _, to := range pv.targetsOf(pv.closed(impls)) {
 						edge(to, n.Pos(), "range over "+types.ExprString(n.X), false)
 					}
 				}
@@ -648,10 +691,10 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 			// json.NewEncoder(w).Encode(v) in one expression calls w.Write
 			// and nothing else of w; what it encodes runs nothing of the
 			// package (json.go). The NewEncoder inside it is part of it.
-			if pv.isEncoderInner(n) {
+			if verifiedNode && pv.isEncoderInner(n) {
 				break
 			}
-			if w := pv.encoderInPlace(n); w != nil {
+			if w := pv.encoderInPlace(n); w != nil && verifiedNode {
 				node.out = true
 				encode := pv.staticCalleeAt(n)
 				pv.handedCode(n, encode.Type().(*types.Signature), pv.entryFor(encode.FullName()), encode.Pkg(), false, false, encode.FullName(), false, text, unresolved)
@@ -671,7 +714,7 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 			// json.NewDecoder(io.LimitReader(r, n)).Decode(v) calls r.Read
 			// and nothing else of r; what it decodes into runs nothing of
 			// the package (jsondecode.go).
-			if _, limit, limited := pv.decoderInPlace(n); limited {
+			if _, limit, limited := pv.decoderInPlace(n); limited && verifiedNode {
 				node.out = true
 				decode := pv.staticCalleeAt(n)
 				pv.handedCode(n, decode.Type().(*types.Signature), pv.entryFor(decode.FullName()), decode.Pkg(), false, false, decode.FullName(), false, text, unresolved)
@@ -714,13 +757,24 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 						}
 					}
 				}
+				if callee.Pkg() == pv.pass.Pkg && g.byObj[callee.Origin()] == nil && !isIfaceMethod(callee) {
+					pv.outWithoutBody(n, callee, out)
+				}
+				if verifiedNode && callee.Pkg() != pv.pass.Pkg && pv.resultHeld(callee) {
+					// What the call returns may be code that the callee kept
+					// from an earlier call, which verified code of this
+					// package may run (F9 of the review of step 0 of F43). In
+					// code that is not verified, running what code that is not
+					// verified kept is what "What a proof assumes" assumes
+					// away.
+					out.ambient = true
+				}
+				if callee.Pkg() != pv.pass.Pkg && (callee.Pkg().Path() == "C" || strings.HasPrefix(callee.Name(), "_Cfunc_")) {
+					// C may call any function of the program that cgo
+					// exports, whatever it is handed.
+					out.top, out.ambient = true, true
+				}
 				if callee.Pkg() != pv.pass.Pkg {
-					// A verified function of another package that may read
-					// code kept in a package-level variable may run any code
-					// of the package that another call left there.
-					if fact := (&contractFact{}); pv.pass.ImportObjectFact(pv.originOf(callee).Origin(), fact) && fact.ReadsHeldCode {
-						unresolved(n, text, heldWhy(fmt.Sprintf("%s reads a package-level variable that can hold code", callee.Name())), pv.anythingTargets())
-					}
 					node.out = node.out || !pv.isolatedCall(n, callee)
 					// What a call of a function of another package may run of
 					// the code its arguments and receiver hold.
@@ -740,12 +794,14 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 				// A trusted function calls what its caller hands it under
 				// calls, and that is followed where it is handed over.
 				if variable, ok := pv.info.Uses[fun].(*types.Var); ok && trusted && pv.callsParam(node.fn, variable) {
+					out.addFunc(signatureOf(variable.Type()))
 					return true
 				}
 				// So does a verified one under Calls (F3 of the design
 				// review of F40), where it is handed over.
 				if variable, ok := pv.info.Uses[fun].(*types.Var); ok && node.fn != nil && node.fn.calls.len() > 0 {
 					if cb := node.fn.calls.get(variable); cb != nil && cb.source {
+						out.addFunc(signatureOf(variable.Type()))
 						node.out = true
 						return true
 					}
@@ -754,18 +810,21 @@ func (pv *pkgVerifier) walkBody(node *callNode, body *ast.BlockStmt) {
 			node.out = true
 			pv.valueCallArguments(n, text, unresolved)
 			if method, _ := throughValue(pv.info, n); method != nil {
+				out.addMethod(method)
 				unresolved(n, text, "", pv.methodsMatching(method.Name(), withoutRecv(method.Type().(*types.Signature))))
-				if pv.heldMethodMeets(method) {
-					node.heldImpl = true
-					unresolved(n, text, heldWhy(fmt.Sprintf("a method %s of a type of a package this one imports may be what %s runs", method.Name(), text)), pv.anythingTargets())
+				key := ""
+				if method.Exported() {
+					key = method.Name() + "|" + canonSig(withoutRecv(method.Type().(*types.Signature)))
 				}
+				pv.implsAt(n, node, out, key, "", text, fmt.Sprintf("a method %s of a type of a package this one imports may be what %s runs", method.Name(), text), unresolved)
+				pv.ambientAt(n, text, unresolved)
 				break
 			}
-			unresolved(n, text, "", pv.valuesMatching(signatureOf(pv.info.TypeOf(n.Fun))))
-			if pv.heldFuncMeets(signatureOf(pv.info.TypeOf(n.Fun))) {
-				node.heldImpl = true
-				unresolved(n, text, heldWhy(fmt.Sprintf("a function of a package this one imports may be what %s calls", text)), pv.anythingTargets())
-			}
+			sig := signatureOf(pv.info.TypeOf(n.Fun))
+			out.addFunc(sig)
+			unresolved(n, text, "", pv.valuesMatching(sig))
+			pv.implsAt(n, node, out, "", keyOfFunc(sig), text, fmt.Sprintf("a function of a package this one imports may be what %s calls", text), unresolved)
+			pv.ambientAt(n, text, unresolved)
 		}
 		return true
 	})
@@ -808,6 +867,14 @@ func (pv *pkgVerifier) valueCallArguments(call *ast.CallExpr, text string, unres
 // nothing of the kind.
 func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entry *trustEntry, from *types.Package, errorf, withReceiver bool,
 	who string, inSource bool, text string, unresolved func(*ast.CallExpr, string, string, []*callNode)) {
+	// The node of this package that makes the call, and what it runs of
+	// code from outside the package (runs.go).
+	node := pv.walking
+	verifiedNode := pv.nodeVerified(node)
+	var out *runsSet
+	if node != nil {
+		out = g(pv).outOf(node)
+	}
 	handed := map[ast.Expr]bool{}
 	for _, arg := range pv.handedAsWritten(call) {
 		handed[ast.Unparen(arg)] = true
@@ -822,6 +889,9 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 		for i, t := range made.targs {
 			if claimed[params.At(i)] {
 				continue
+			}
+			if out != nil && holdsCode(t, map[types.Type]bool{}) {
+				out.top = true
 			}
 			if targets := pv.concreteMethods(t, map[types.Type]bool{}); len(targets) > 0 {
 				unresolved(call, fmt.Sprintf("%s with %s = %s", text, params.At(i).Obj().Name(), types.TypeString(t, types.RelativeTo(pv.pass.Pkg))),
@@ -885,6 +955,32 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 		}
 		return pv.info.TypeOf(arg)
 	}
+	// What the callee's body may run, when its package computed it.
+	var sum, reach *runsSet
+	if withReceiver && entry == nil {
+		sum = pv.importedRuns(pv.staticCalleeAt(call))
+	}
+	unintersected := false
+	if sum != nil {
+		if out != nil {
+			out.join(sum)
+		}
+		reach = pv.closed(sum)
+		// The rule is (A'): the keys are intersected with the strict
+		// reading of each operand unless the summary is ambient.
+		// VEGO_F43_RULE=A takes them whatever the operands hold, for the
+		// measure of F43 only (TEMPORARY).
+		if os.Getenv("VEGO_F43_RULE") == "A" || sum.ambient {
+			// What the callee runs through values is taken whatever the
+			// call hands it: code it reads from memory that the call did
+			// not hand it may be code of this package too.
+			unintersected = true
+			unresolved(call, text, fmt.Sprintf("%s may run %s, and code of the package may be what it runs", who, reach.describe()), pv.targetsOf(reach))
+		}
+		if sum.top && sum.ambient {
+			unresolved(call, text, fmt.Sprintf("%s hands code it reads from package-level variables to code that cannot be followed", who), pv.anythingTargets())
+		}
+	}
 	// What the entry claims the function finds on what it is given; a
 	// claim that cannot be read is no claim.
 	claim, _ := pv.assertsClaim(entry, sig, from)
@@ -907,6 +1003,27 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 		passedAs[b.expr] = t
 	}
 	operands = append(operands, call.Args...)
+	// A callee may enter code that cannot be followed, which may call a
+	// function of a package this one imports that runs code no call hands
+	// it (F14 of the review of step 1 of F43): through what it is handed,
+	// when it may run it, or through code it reaches from memory no call
+	// hands it, when its summary says so. A trusted callee itself does
+	// not: its contract includes that it does not call back into its caller
+	// by way of another package. But what it runs of what it is handed may
+	// be such code.
+	handsCode := false
+	for _, arg := range operands {
+		handsCode = handsCode || !pv.knownAtCall(arg) && holdsCode(typeOfOperand(arg), map[types.Type]bool{})
+	}
+	ambient := withReceiver && (entry == nil && (handsCode && (sum == nil || !sum.empty()) || sum != nil && sum.ambient) || entry != nil && handsCode && (len(entry.runs) > 0 || len(entry.keeps) > 0 || len(entry.calls) > 0 || len(entry.formats) > 0 || len(entry.encodes) > 0 || len(entry.decodes) > 0))
+	// The edges of what the call runs come first, so that a cycle names
+	// the most precise reason; those of what code that cannot be followed
+	// may call come after the operands.
+	defer func() {
+		if ambient {
+			pv.ambientAt(call, text, unresolved)
+		}
+	}()
 	for _, arg := range operands {
 		inner := ast.Unparen(arg)
 		named, method := pv.valueFormOf(inner)
@@ -920,13 +1037,22 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 			// the package, which nobody verifies, is walked only here.
 			if named, method := pv.valueFormOf(inner); named == nil && method == nil && asLit(inner) == nil {
 				unresolved(call, fmt.Sprintf("hands %s to %s", types.ExprString(arg), text), "", pv.valuesMatching(signatureOf(pv.info.TypeOf(inner))))
+				if out != nil {
+					out.addFunc(signatureOf(pv.info.TypeOf(inner)))
+				}
 			}
 		case pv.knownAtCall(arg):
 			// An error of known origin holds a type of the standard
 			// library, and nothing of this package.
-		case encodedArgs[arg]:
-			// It hands nothing of the package that can run.
+		case encodedArgs[arg] && verifiedNode:
+			// It hands nothing of the package that can run: the walk of
+			// encoding/json refuses in a verified function every type whose
+			// methods encoding/json would call. A body that is not verified
+			// was not walked, so there it is read as any argument is.
 		case formattedArgs[arg]:
+			if out != nil && holdsCode(pv.info.TypeOf(arg), map[types.Type]bool{}) {
+				out.format = true
+			}
 			// Formatting runs the methods String, Error, Format, and
 			// GoString of the value and of what it holds through exported
 			// fields, elements, and pointers, which fmt reaches by
@@ -947,6 +1073,13 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 			unresolved(call, fmt.Sprintf("hands the function literal to %s", text), "", []*callNode{g(pv).lits[asLit(inner)]})
 		case claim != nil && paramOf[arg] != nil && claimFor(claim, paramOf[arg]) != nil:
 			// The entry claims what the function finds on it.
+			if out != nil && holdsCode(typeOfOperand(arg), map[types.Type]bool{}) {
+				seen := map[types.Type]bool{}
+				out.addClaimed(paramOf[arg].Type(), seen)
+				for _, t := range claimFor(claim, paramOf[arg]) {
+					out.addClaimed(t, seen)
+				}
+			}
 			unresolved(call, fmt.Sprintf("hands %s to %s", types.ExprString(arg), text), "",
 				pv.claimedTargets(paramOf[arg], claimFor(claim, paramOf[arg])))
 		case named != nil || method != nil:
@@ -958,8 +1091,15 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 			if to := g(pv).byObj[target.Origin()]; to != nil {
 				unresolved(call, fmt.Sprintf("hands %s to %s", types.ExprString(arg), text), "", []*callNode{to})
 			}
+		case unintersected && !sum.top:
+			// The edges of what the callee runs are added above.
 		default:
 			t := typeOfOperand(arg)
+			if sum == nil && out != nil && holdsCode(t, map[types.Type]bool{}) {
+				// Code that cannot be followed may run anything it is
+				// handed.
+				out.top = true
+			}
 			targets := pv.codeTargets(t, map[types.Type]bool{})
 			why := fmt.Sprintf("%s holds an interface value or a function value, which may hold a value of any type of the package or any function it lets out, "+
 				"and code of another package may call that, or an exported method of it, by a type assertion or reflection", types.ExprString(arg))
@@ -981,6 +1121,15 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 				// other package can find on it by assertion or reflection
 				// are the methods of that type and of the types it holds.
 				targets = append(targets, pv.concreteMethods(t, map[types.Type]bool{})...)
+			}
+			if sum != nil && !sum.top && !unintersected {
+				// (A'): what the callee's body may run of what it is handed.
+				keep := map[*callNode]bool{}
+				for _, n := range pv.targetsOf(reach) {
+					keep[n] = true
+				}
+				targets = slices.DeleteFunc(targets, func(n *callNode) bool { return !keep[n] })
+				why += fmt.Sprintf("; %s may run %s", who, reach.describe())
 			}
 			// What can be done: an entry that says what the code finds on
 			// the parameter, where an entry can be written.

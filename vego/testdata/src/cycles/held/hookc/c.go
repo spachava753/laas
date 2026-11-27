@@ -6,4 +6,4 @@ package hookc
 import "cycles/held/hookb"
 
 // @Ensures True
-func G() (n int) { return hookb.Fire(2) } // want `this call may not end: G calls hookb.Fire\(2\) at c.go:\d+:\d+, which may run G; Fire reads a package-level variable that can hold code`
+func G() (n int) { return hookb.Fire(2) } // want `this call may not end: G calls hookb\.Fire\(2\) at c.go:\d+:\d+, which may run G`

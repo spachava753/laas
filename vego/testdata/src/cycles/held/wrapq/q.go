@@ -8,4 +8,4 @@ import "cycles/held/wrapr"
 
 // @Requires x != nil
 // @Ensures True
-func F(x wrapr.I) { x.M() } // want `this call may not end: F calls x.M\(\) at q.go:\d+:\d+, which may run F; a method M of a type of a package this one imports may be what x.M\(\) runs`
+func F(x wrapr.I) { x.M() }

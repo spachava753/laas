@@ -16,7 +16,7 @@ type PT struct{}
 // @Ensures True
 func (PT) N() {
 	if Made != nil {
-		X(Made) // want `this call may not end: PT.N calls X at p.go:\d+:\d+, X calls wrapq.F\(i\) at p.go:\d+:\d+, which may run PT.N`
+		X(Made) // want `this call may not end: PT\.N calls X at p.go:\d+:\d+, X hands i to wrapq\.F\(i\) at p.go:\d+:\d+, which may run PT\.N`
 	}
 }
 
@@ -32,13 +32,13 @@ func SetupY() { Made = wrapr.Wrap(QT{}) }
 // @Requires i != nil
 // @Ensures True
 func X(i wrapr.I) {
-	wrapq.F(i) // want `the contract of cycles/held/wrapq.F cannot be used: its verification failed`
+	wrapq.F(i) // want `this call may not end: X hands i to wrapq\.F\(i\) at p.go:\d+:\d+, which may run PT\.N, PT\.N calls X at p.go:\d+:\d+`
 }
 
 // @Requires i != nil
 // @Ensures True
 func Y(i wrapr.I) {
-	i.M() // want `this call may not end: Y calls i.M\(\) at p.go:\d+:\d+, which may run Y; a method M of a type of a package this one imports may be what i.M\(\) runs` `cannot verify Y: code that the call may run writes Made`
+	i.M() // want `this call may not end: Y calls i\.M\(\) at p.go:\d+:\d+, which may run QT\.N, QT\.N calls Y at p.go:\d+:\d+`
 }
 
 // QT calls back into Y.
@@ -47,6 +47,6 @@ type QT struct{}
 // @Ensures True
 func (QT) N() {
 	if Made != nil {
-		Y(Made) // want `this call may not end: QT.N calls Y at p.go:\d+:\d+, Y calls i.M\(\) at p.go:\d+:\d+, which may run QT.N`
+		Y(Made) // want `this call may not end: QT\.N calls Y at p.go:\d+:\d+, Y calls i\.M\(\) at p.go:\d+:\d+, which may run QT\.N`
 	}
 }

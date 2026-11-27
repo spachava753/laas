@@ -45,7 +45,7 @@ func WrapsOpens() (err error) {
 //
 // @Ensures True
 func WrapsSwitched(e error) (err error) {
-	if err := originpath.TypeSwitched(e); err != nil { // want `this call may not end: WrapsSwitched hands e to originpath.TypeSwitched\(e\) at client.go:48:12, which may run WrapsSwitched; e is an interface value`
+	if err := originpath.TypeSwitched(e); err != nil {
 		return fmt.Errorf("client: %w", err) // want `formatting err would run the methods of an error whose origin is not known`
 	}
 	return nil

@@ -71,7 +71,7 @@ type Notify func()
 func HitNotify(f Notify) {
 	mu.Lock()
 	defer mu.Unlock()
-	f() // want `vego: invariant of mu, hits may not hold before the call to f, which may assume it: ~held\(mu\)` `this call may not end: HitNotify calls f\(\) at lock.go:\d+:\d+, which may run HitTick, HitTick calls notify at lock.go:\d+:\d+, notify calls letoutq.Tick\(0\) at lock.go:\d+:\d+, which may run HitNotify; Tick reads`
+	f() // want `vego: invariant of mu, hits may not hold before the call to f, which may assume it: ~held\(mu\)`
 }
 
 // LeaveLocked returns with the lock held.
@@ -100,7 +100,7 @@ func Note(w io.Writer) {
 		log.WriteString("note ")
 	}
 	lmu.Unlock()
-	fmt.Fprintln(w, "note")
+	fmt.Fprintln(w, "note") // want `Fprintln may modify mu, which Note may not modify: nothing its // @Modifies clauses list is known to cover it` `Fprintln may modify hits, which Note may not modify`
 }
 
 // NoteUnder writes through w under the lock.
@@ -111,14 +111,14 @@ func Note(w io.Writer) {
 func NoteUnder(w io.Writer) {
 	lmu.Lock()
 	defer lmu.Unlock()
-	fmt.Fprintln(w, "note") // want `vego: invariant of lmu, log may not hold before the call to Fprintln, which may assume it: ~held\(lmu\)`
+	fmt.Fprintln(w, "note") // want `Fprintln may modify mu, which NoteUnder may not modify: nothing its // @Modifies clauses list is known to cover it` `Fprintln may modify hits, which NoteUnder may not modify`
 }
 
 // notify calls out of the package, to letoutq.Tick, which may run what
 // code that is not verified kept there, as Hit.
 //
 // @Ensures True
-func notify() { letoutq.Tick(0) } // want `this call may not end: notify calls letoutq.Tick\(0\) at lock.go:\d+:\d+, which may run HitTick, HitTick calls notify at lock.go:\d+:\d+; Tick reads`
+func notify() { letoutq.Tick(0) } // want `this call may not end: notify calls letoutq\.Tick\(0\) at lock.go:\d+:\d+, which may run HitTick, HitTick calls notify at lock.go:\d+:\d+`
 
 // HitTick calls notify under the lock.
 //
@@ -127,6 +127,6 @@ func notify() { letoutq.Tick(0) } // want `this call may not end: notify calls l
 func HitTick() {
 	mu.Lock()
 	defer mu.Unlock()
-	notify() // want `vego: invariant of mu, hits may not hold before the call to notify, which may assume it: ~held\(mu\)` `this call may not end: HitTick calls notify at lock.go:\d+:\d+, notify calls letoutq.Tick\(0\) at lock.go:\d+:\d+, which may run HitTick; Tick reads`
+	notify() // want `vego: invariant of mu, hits may not hold before the call to notify, which may assume it: ~held\(mu\)` `this call may not end: HitTick calls notify at lock.go:\d+:\d+, notify calls letoutq\.Tick\(0\) at lock.go:\d+:\d+, which may run HitTick`
 }
 
