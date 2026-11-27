@@ -5625,11 +5625,14 @@ readerbad	readerbad.stash	6	20080	0
 readerbad	readerbad.stashClip	10	102286	2
 readerbad	readerbad.the initialiser of items	0	0	0
 readerbad	slices.Clip	1	4777	0
+recclosures	(*recclosures.Counter).Inc	8	6180	0
 recclosures	(recclosures.graph).Endless	7	233360	2
 recclosures	(recclosures.graph).ReachableFrom	12	256178	2
 recclosures	os.Exit	1	111	0
 recclosures	recclosures.Appended	6	684	0
 recclosures	recclosures.Between	15	1548	0
+recclosures	recclosures.ByMethod	0	0	0
+recclosures	recclosures.BySlice	0	0	0
 recclosures	recclosures.CappedAppend	19	5869	0
 recclosures	recclosures.Count	5	421	0
 recclosures	recclosures.Empty	1	46	0
@@ -5644,6 +5647,7 @@ recclosures	recclosures.NewIsNoneOfOne	2	1979	0
 recclosures	recclosures.OnPath	3	201	0
 recclosures	recclosures.Ranged	3	9477	0
 recclosures	recclosures.Rotate	10	21927	4
+recclosures	recclosures.RunThenAssert	5	5796	0
 recclosures	recclosures.Stay	3	3255	0
 recclosures	recclosures.Stored	7	4785	0
 recclosures	recclosures.StoredField	7	2729	0
@@ -5655,7 +5659,7 @@ recclosures	recclosures.makeChain	1	1226	0
 recclosures	recclosures.needAll	1	1519	0
 recclosures	recclosures.needOne	1	1865	0
 recclosures	recclosures.the closure add	15	8629	0
-recclosures	recclosures.the closure bump	3	593	0
+recclosures	recclosures.the closure bump	6	1176	0
 recclosures	recclosures.the closure div	3	468	0
 recclosures	recclosures.the closure down	31	10397	0
 recclosures	recclosures.the closure f	19	5981	0

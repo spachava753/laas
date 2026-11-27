@@ -737,6 +737,12 @@ func (v *fnVerifier) verify() {
 	// frame repeats it.
 	v.looped = findLooped(fn.decl.Body)
 	v.boxed = v.findBoxed(fn.decl.Body)
+	for _, rc := range v.pkgVerifier.closures {
+		if variable := capturesBoxed(rc, v.boxed); rc.outer == fn.decl && variable != nil {
+			v.unsupported(rc.lit.Pos(), fmt.Sprintf("%s captures %s, whose address is taken in %s, by & or by a method with a pointer receiver or "+
+				"by slicing it, so that it lives in memory; a recursive closure cannot capture such a variable yet", closureName(rc.variable), variable.Name(), fn.obj.Name()))
+		}
+	}
 	v.classifyLiterals()
 	v.checkHidden(fn.decl.Body)
 	v.checkNotWritten(fn.decl.Body)

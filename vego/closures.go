@@ -535,12 +535,9 @@ func (v *fnVerifier) checkClosure() {
 		panic(abort{})
 	}
 	outer := v.pkgVerifier.funcs[v.info.Defs[rc.outer.Name].(*types.Func)]
-	boxed := v.pkgVerifier.newVerifier(outer).findBoxed(rc.outer.Body)
-	for _, variable := range rc.captured {
-		if boxed[variable] {
-			v.unsupported(rc.lit.Pos(), fmt.Sprintf("%s captures %s, whose address is taken in %s, by & or by a method with a pointer receiver or "+
-				"by slicing it, so that it lives in memory; a recursive closure cannot capture such a variable yet", closureName(rc.variable), variable.Name(), rc.outer.Name.Name))
-		}
+	if capturesBoxed(rc, v.pkgVerifier.newVerifier(outer).findBoxed(rc.outer.Body)) != nil {
+		// The function around it reports why.
+		panic(abort{})
 	}
 	for _, variable := range rc.outputs {
 		if !rc.listed[variable] {
@@ -747,4 +744,15 @@ func (v *fnVerifier) keysLeftDecreases(c *clause, before, after *keysLeft, st *s
 		return logic.And(has(before, before.a), logic.Not(has(before, before.s)), logic.Or(logic.Not(has(after, after.a)), has(after, after.s)))
 	})
 	return logic.And(unchanged, kept, visited)
+}
+
+// capturesBoxed returns a variable that a closure captures and that lives
+// in memory in the function around it, by boxed, or nil.
+func capturesBoxed(rc *recClosure, boxed map[*types.Var]bool) *types.Var {
+	for _, variable := range rc.captured {
+		if boxed[variable] {
+			return variable
+		}
+	}
+	return nil
 }

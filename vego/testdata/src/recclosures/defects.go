@@ -1,6 +1,9 @@
 package recclosures
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
 // Endless never marks what it visits, so on a cycle it never ends.
 //
@@ -218,4 +221,65 @@ func Stay(a, s map[int]bool, k int) {
 		stay(k) // want `variant may not decrease in recursive call: \|a \\ s\|`
 	}
 	stay(k)
+}
+
+// Counter has a method with a pointer receiver.
+type Counter struct{ n int }
+
+// @Requires c != nil And c.n < 100
+// @Modifies c
+// @Ensures True
+func (c *Counter) Inc() { c.n++ }
+
+// ByMethod captures a variable whose method with a pointer receiver takes
+// its address (F7).
+//
+// @Ensures True
+func ByMethod() {
+	var c Counter
+	var f func()
+	// @Ensures True
+	f = func() { // want `cannot verify ByMethod: the closure f captures c, whose address is taken in ByMethod`
+		if c.n < 100 {
+			c.Inc()
+		}
+	}
+	f()
+}
+
+// BySlice captures an array that the function slices (F7).
+//
+// @Ensures True
+func BySlice() {
+	var a [4]byte
+	s := a[:]
+	var f func()
+	// @Ensures True
+	f = func() { // want `cannot verify BySlice: the closure f captures a, whose address is taken in BySlice`
+		_ = a[0]
+	}
+	f()
+	_ = s
+}
+
+// RunThenAssert relies on a variable after a run of a trusted function
+// calls the closure that assigns it (F8).
+//
+// @Ensures True
+func RunThenAssert(line string) {
+	n := 0
+	var bump func()
+	// @Requires n < 1000000
+	// @Modifies n
+	bump = func() {
+		n++
+	}
+	_ = strings.IndexFunc(line, func(r rune) bool {
+		if n < 1000000 {
+			bump()
+		}
+		return false
+	})
+	// @Assert n = 0 // want `assertion may not hold: n = 0`
+	_ = n
 }
