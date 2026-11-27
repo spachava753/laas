@@ -984,6 +984,21 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 	// What the entry claims the function finds on what it is given; a
 	// claim that cannot be read is no claim.
 	claim, _ := pv.assertsClaim(entry, sig, from)
+	// A generic function whose entry claims under asserts that it runs
+	// nothing of a value of a type parameter claims it of a parameter whose
+	// type is built of such type parameters only, as s of slices.Index,
+	// whose type S is a slice of E: what the parameter holds is values of
+	// those types (F43, step 2).
+	byTypeParams := map[*types.Var]bool{}
+	if made := pv.instanceOf[pv.staticCalleeAt(call)]; made != nil && entry != nil {
+		claimedTP := typeParamClaims(entry, made.origin)
+		originParams := made.origin.Type().(*types.Signature).Params()
+		for i := range min(originParams.Len(), sig.Params().Len()) {
+			if onlyTypeParams(originParams.At(i).Type(), claimedTP) {
+				byTypeParams[sig.Params().At(i)] = true
+			}
+		}
+	}
 	formattedArgs, encodedArgs := map[ast.Expr]bool{}, map[ast.Expr]bool{}
 	// What an argument is passed as: a value converted to an interface
 	// type is one that code of the other package may assert to anything.
@@ -1041,6 +1056,9 @@ func (pv *pkgVerifier) handedCode(call *ast.CallExpr, sig *types.Signature, entr
 					out.addFunc(signatureOf(pv.info.TypeOf(inner)))
 				}
 			}
+		case paramOf[arg] != nil && byTypeParams[paramOf[arg]]:
+			// The entry claims that it runs nothing of what the parameter
+			// holds.
 		case pv.knownAtCall(arg):
 			// An error of known origin holds a type of the standard
 			// library, and nothing of this package.

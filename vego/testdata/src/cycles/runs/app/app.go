@@ -149,14 +149,15 @@ func (U) Read(p []byte) (int, error) {
 // @Ensures True
 func UseVal(x lib.Valuer) { uses.Val(x) } // want `this call may not end: UseVal hands x to uses.Val\(x\) at app.go:\d+:\d+, which may run U.Read, U.Read calls UseVal`
 
-// W calls back into UseGen; it is not verified.
+// W calls back into UseGen; it is not verified. uses.Gen runs nothing of
+// it, so there is no cycle.
 type W struct{}
 
 func (W) Back() { UseGen(libg.Generic{V: W{}}) }
 
 // @Requires x != nil
 // @Ensures True
-func UseGen(x libg.Genner) { uses.Gen(x) } // want `this call may not end: UseGen hands x to uses.Gen\(x\) at app.go:\d+:\d+, which may run`
+func UseGen(x libg.Genner) { uses.Gen(x) }
 
 // pred calls back into UseIndex; it is not verified.
 func pred(r rune) bool { return UseIndex(pred) > 0 }

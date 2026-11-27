@@ -572,3 +572,22 @@ func (b *byParam[V]) len() int { return len(b.m) }
 
 // all ranges over the parameters and what is said of each.
 func (b *byParam[V]) all() iter.Seq2[*types.Var, V] { return maps.All(b.m) }
+
+// onlyTypeParams reports whether a type is built of claimed type parameters
+// and of types that hold no code: a value of it holds code only in values
+// of those type parameters.
+func onlyTypeParams(t types.Type, claimed map[*types.TypeParam]bool) bool {
+	switch u := types.Unalias(t).(type) {
+	case *types.TypeParam:
+		return claimed[u]
+	case *types.Pointer:
+		return onlyTypeParams(u.Elem(), claimed)
+	case *types.Slice:
+		return onlyTypeParams(u.Elem(), claimed)
+	case *types.Array:
+		return onlyTypeParams(u.Elem(), claimed)
+	case *types.Map:
+		return onlyTypeParams(u.Key(), claimed) && onlyTypeParams(u.Elem(), claimed)
+	}
+	return !mentionsTypeParam(t, map[types.Type]bool{}) && !holdsCode(t, map[types.Type]bool{})
+}
